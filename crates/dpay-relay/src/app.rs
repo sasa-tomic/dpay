@@ -64,9 +64,40 @@ impl AppState {
 /// `main` wraps it with a listener.
 pub fn app(state: AppState) -> Router {
     Router::new()
+        .route("/", get(merchant_page))
+        .route("/jsqr.js", get(jsqr_js))
+        .route("/qrcode.js", get(qrcode_js))
         .route("/pay", post(pay))
         .route("/health", get(health))
         .with_state(state)
+}
+
+/// `GET /` — the merchant terminal (webcam QR scan + paste fallback, submits to `/pay`).
+/// Self-contained + same-origin, so no CORS and no external assets needed for the demo.
+async fn merchant_page() -> Response {
+    (
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        include_str!("../assets/merchant.html"),
+    )
+        .into_response()
+}
+
+/// `GET /jsqr.js` — the vendored QR decoder the terminal loads (offline; no CDN).
+async fn jsqr_js() -> Response {
+    (
+        [(header::CONTENT_TYPE, "application/javascript; charset=utf-8")],
+        include_str!("../assets/jsQR.js"),
+    )
+        .into_response()
+}
+
+/// `GET /qrcode.js` — the vendored QR *encoder* (for the merchant's request QR; offline, no CDN).
+async fn qrcode_js() -> Response {
+    (
+        [(header::CONTENT_TYPE, "application/javascript; charset=utf-8")],
+        include_str!("../assets/qrcode.js"),
+    )
+        .into_response()
 }
 
 // ---- request / response bodies ----
@@ -81,6 +112,9 @@ struct PayRequest {
 #[derive(Serialize)]
 struct PayOk {
     receipt: Receipt,
+    /// True when this nonce was already settled and the receipt came from the idempotency cache —
+    /// lets the terminal say "already paid, not charged twice" instead of a second "Paid ✓".
+    replayed: bool,
 }
 
 #[derive(Serialize)]
@@ -124,7 +158,7 @@ async fn pay(State(state): State<AppState>, headers: HeaderMap, body: axum::body
     // 2. Idempotency: if we've already settled this nonce, replay the cached receipt verbatim.
     //    Never touch the ledger again.
     if let Some(cached) = state.idempotency.lock().unwrap().get(&nonce).cloned() {
-        return (StatusCode::OK, Json(PayOk { receipt: cached })).into_response();
+        return (StatusCode::OK, Json(PayOk { receipt: cached, replayed: true })).into_response();
     }
 
     // 3. Settle, retrying transient failures with small backoff. (Idempotency at the ledger — the
@@ -144,7 +178,7 @@ async fn pay(State(state): State<AppState>, headers: HeaderMap, body: axum::body
     {
         let mut idem = state.idempotency.lock().unwrap();
         let stored = idem.entry(nonce).or_insert_with(|| receipt.clone()).clone();
-        return (StatusCode::OK, Json(PayOk { receipt: stored })).into_response();
+        return (StatusCode::OK, Json(PayOk { receipt: stored, replayed: false })).into_response();
     }
 }
 

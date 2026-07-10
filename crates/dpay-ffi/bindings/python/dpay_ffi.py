@@ -462,7 +462,11 @@ def _uniffi_check_contract_api_version(lib):
 def _uniffi_check_api_checksums(lib):
     if lib.uniffi_dpay_ffi_checksum_func_decode_qr() != 5970:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_decode_request() != 64181:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_encode_qr() != 18593:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_encode_request() != 60186:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_generate_keypair() != 36207:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -583,11 +587,24 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_decode_qr.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_decode_qr.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_decode_request.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_decode_request.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_func_encode_qr.argtypes = (
     _UniffiRustBuffer,
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_encode_qr.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_encode_request.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.c_uint64,
+    _UniffiRustBuffer,
+    ctypes.c_uint64,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_encode_request.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_func_generate_keypair.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
@@ -888,9 +905,15 @@ _UniffiLib.ffi_dpay_ffi_rust_future_complete_void.restype = None
 _UniffiLib.uniffi_dpay_ffi_checksum_func_decode_qr.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_decode_qr.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_decode_request.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_decode_request.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_encode_qr.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_encode_qr.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_encode_request.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_encode_request.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_generate_keypair.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_generate_keypair.restype = ctypes.c_uint16
@@ -1050,6 +1073,62 @@ class _UniffiConverterTypeKeyPair(_UniffiConverterRustBuffer):
     def write(value, buf):
         _UniffiConverterBytes.write(value.secret, buf)
         _UniffiConverterBytes.write(value.public, buf)
+
+
+class PaymentRequestData:
+    """
+    The merchant's request, as scanned by the payer. Mirrors [`dpay_core::PaymentRequest`]: who to
+    pay, how much (minor units), the single-use `nonce` (the merchant's request_id → ledger nonce),
+    and an `expiry` (unix seconds).
+    """
+
+    to: "bytes"
+    amount: "int"
+    nonce: "bytes"
+    expiry: "int"
+    def __init__(self, *, to: "bytes", amount: "int", nonce: "bytes", expiry: "int"):
+        self.to = to
+        self.amount = amount
+        self.nonce = nonce
+        self.expiry = expiry
+
+    def __str__(self):
+        return "PaymentRequestData(to={}, amount={}, nonce={}, expiry={})".format(self.to, self.amount, self.nonce, self.expiry)
+
+    def __eq__(self, other):
+        if self.to != other.to:
+            return False
+        if self.amount != other.amount:
+            return False
+        if self.nonce != other.nonce:
+            return False
+        if self.expiry != other.expiry:
+            return False
+        return True
+
+class _UniffiConverterTypePaymentRequestData(_UniffiConverterRustBuffer):
+    @staticmethod
+    def read(buf):
+        return PaymentRequestData(
+            to=_UniffiConverterBytes.read(buf),
+            amount=_UniffiConverterUInt64.read(buf),
+            nonce=_UniffiConverterBytes.read(buf),
+            expiry=_UniffiConverterUInt64.read(buf),
+        )
+
+    @staticmethod
+    def check_lower(value):
+        _UniffiConverterBytes.check_lower(value.to)
+        _UniffiConverterUInt64.check_lower(value.amount)
+        _UniffiConverterBytes.check_lower(value.nonce)
+        _UniffiConverterUInt64.check_lower(value.expiry)
+
+    @staticmethod
+    def write(value, buf):
+        _UniffiConverterBytes.write(value.to, buf)
+        _UniffiConverterUInt64.write(value.amount, buf)
+        _UniffiConverterBytes.write(value.nonce, buf)
+        _UniffiConverterUInt64.write(value.expiry, buf)
 
 
 # DpayError
@@ -1217,6 +1296,18 @@ def decode_qr(payload: "str") -> "bytes":
         _UniffiConverterString.lower(payload)))
 
 
+def decode_request(qr: "str") -> "PaymentRequestData":
+    """
+    Payer side: decode a scanned merchant request QR into its fields, so the app can show
+    "Pay $X to <merchant>" for the payer to approve before signing.
+    """
+
+    _UniffiConverterString.check_lower(qr)
+    
+    return _UniffiConverterTypePaymentRequestData.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_decode_request,
+        _UniffiConverterString.lower(qr)))
+
+
 def encode_qr(wire: "bytes") -> "str":
     """
     Encode a wire blob to the compact base64url string carried by the payer's QR.
@@ -1226,6 +1317,27 @@ def encode_qr(wire: "bytes") -> "str":
     
     return _UniffiConverterString.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_encode_qr,
         _UniffiConverterBytes.lower(wire)))
+
+
+def encode_request(to: "bytes",amount: "int",nonce: "bytes",expiry: "int") -> "str":
+    """
+    Merchant side: encode the request the payer will scan. `nonce` is the merchant's single-use
+    request_id (it becomes the ledger nonce, so the payment can't be replayed or double-charged).
+    """
+
+    _UniffiConverterBytes.check_lower(to)
+    
+    _UniffiConverterUInt64.check_lower(amount)
+    
+    _UniffiConverterBytes.check_lower(nonce)
+    
+    _UniffiConverterUInt64.check_lower(expiry)
+    
+    return _UniffiConverterString.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_encode_request,
+        _UniffiConverterBytes.lower(to),
+        _UniffiConverterUInt64.lower(amount),
+        _UniffiConverterBytes.lower(nonce),
+        _UniffiConverterUInt64.lower(expiry)))
 
 
 def generate_keypair() -> "KeyPair":
@@ -1312,8 +1424,11 @@ __all__ = [
     "InternalError",
     "DpayError",
     "KeyPair",
+    "PaymentRequestData",
     "decode_qr",
+    "decode_request",
     "encode_qr",
+    "encode_request",
     "generate_keypair",
     "sign_authorization",
     "validate",

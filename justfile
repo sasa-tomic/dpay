@@ -70,3 +70,7 @@ ondevice:
 # build + run the React Native app on the emulator/device; assert it signed via dpay-core
 app:
     bash scripts/rn-run.sh
+
+# live demo: dfx replica + canister + relay + merchant terminal (Ctrl-C to stop). Open the printed URL.
+demo:
+    bash scripts/demo.sh

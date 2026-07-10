@@ -138,10 +138,12 @@ async fn duplicate_nonce_is_idempotent_and_credits_once() {
     let (s1, b1) = call(&state, pay_json(&sa.encode())).await;
     assert_eq!(s1, StatusCode::OK);
 
-    // Second submission of the SAME nonce: 200, byte-identical receipt, no double settle.
+    // Second submission of the SAME nonce: 200, identical receipt, flagged as a replay, no re-settle.
     let (s2, b2) = call(&state, pay_json(&sa.encode())).await;
     assert_eq!(s2, StatusCode::OK);
-    assert_eq!(b1, b2, "duplicate must return identical receipt");
+    assert_eq!(b1["receipt"], b2["receipt"], "duplicate must return identical receipt");
+    assert_eq!(b1["replayed"], serde_json::json!(false), "first settle is not a replay");
+    assert_eq!(b2["replayed"], serde_json::json!(true), "duplicate is flagged as a replay");
 
     // Merchant credited exactly once; payer debited exactly once.
     assert_eq!(led.balance_of(&pubkey(&merchant)), 400, "credited once only");

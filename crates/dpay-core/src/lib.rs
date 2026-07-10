@@ -179,6 +179,66 @@ impl SignedAuthorization {
     }
 }
 
+/// 32 (to) + 8 (amount) + 16 (nonce) + 8 (expiry).
+pub const REQUEST_LEN: usize = PUBKEY_LEN + 8 + NONCE_LEN + 8;
+
+/// The **request** the merchant shows the payer, carried by the merchant's QR. Unsigned: it names
+/// who to pay (`to`), how much (`amount`), a single-use `nonce` (the merchant's `request_id`, which
+/// becomes the ledger nonce), and an `expiry`. The payer scans this, reviews it, and signs an
+/// [`Authorization`] that copies these fields verbatim — so the amount + payee are chosen by the
+/// merchant and then *bound* by the payer's signature. There is no `from` (the payer supplies their
+/// own) and no signature here.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct PaymentRequest {
+    pub to: [u8; PUBKEY_LEN],
+    pub amount: u64,
+    pub nonce: [u8; NONCE_LEN],
+    pub expiry: u64,
+}
+
+impl PaymentRequest {
+    /// Raw 64-byte form: `to(32) | amount_le(8) | nonce(16) | expiry_le(8)`. Field order frozen.
+    pub fn to_bytes(&self) -> [u8; REQUEST_LEN] {
+        let mut b = [0u8; REQUEST_LEN];
+        b[0..32].copy_from_slice(&self.to);
+        b[32..40].copy_from_slice(&self.amount.to_le_bytes());
+        b[40..56].copy_from_slice(&self.nonce);
+        b[56..64].copy_from_slice(&self.expiry.to_le_bytes());
+        b
+    }
+
+    /// Parse the raw 64-byte form. Rejects a wrong length.
+    pub fn from_bytes(raw: &[u8]) -> Result<Self, CodecError> {
+        if raw.len() != REQUEST_LEN {
+            return Err(CodecError::Length);
+        }
+        Ok(PaymentRequest {
+            to: raw[0..32].try_into().unwrap(),
+            amount: u64::from_le_bytes(raw[32..40].try_into().unwrap()),
+            nonce: raw[40..56].try_into().unwrap(),
+            expiry: u64::from_le_bytes(raw[56..64].try_into().unwrap()),
+        })
+    }
+
+    /// Encode to the compact base64url string the merchant's QR carries.
+    pub fn encode(&self) -> String {
+        URL_SAFE_NO_PAD.encode(self.to_bytes())
+    }
+
+    /// Decode from the scanned merchant QR string.
+    pub fn decode(s: &str) -> Result<Self, CodecError> {
+        let raw = URL_SAFE_NO_PAD.decode(s.as_bytes()).map_err(|_| CodecError::Base64)?;
+        Self::from_bytes(&raw)
+    }
+
+    /// Turn a scanned request into the payer's [`Authorization`] — the payer supplies `from`, every
+    /// other field is copied from the merchant's request (so consent is bound to exactly what was
+    /// requested).
+    pub fn to_authorization(&self, from: [u8; PUBKEY_LEN]) -> Authorization {
+        Authorization { from, to: self.to, amount: self.amount, nonce: self.nonce, expiry: self.expiry }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests (keygen needs `rng`): run with `cargo nextest run -p dpay-core --features rng`
 // ---------------------------------------------------------------------------
@@ -220,6 +280,24 @@ mod tests {
             let back = SignedAuthorization::decode(&wire).unwrap();
             prop_assert_eq!(back, se);
             prop_assert!(back.verify());
+        }
+
+        #[test]
+        fn request_codec_roundtrip_and_binds(
+            amount in 1u64.., expiry in 1u64.., nonce in any::<[u8;16]>(),
+            to in any::<[u8;32]>(), from in any::<[u8;32]>(),
+        ) {
+            let req = PaymentRequest { to, amount, nonce, expiry };
+            let s = req.encode();
+            prop_assert_eq!(s.len(), 86); // 64 bytes -> 86 base64url chars (no pad)
+            prop_assert_eq!(PaymentRequest::decode(&s).unwrap(), req);
+            // What the payer signs copies the merchant's request verbatim (only `from` is the payer's).
+            let auth = req.to_authorization(from);
+            prop_assert_eq!(auth.to, to);
+            prop_assert_eq!(auth.amount, amount);
+            prop_assert_eq!(auth.nonce, nonce);
+            prop_assert_eq!(auth.expiry, expiry);
+            prop_assert_eq!(auth.from, from);
         }
 
         #[test]

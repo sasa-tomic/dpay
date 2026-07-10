@@ -74,6 +74,22 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         }
     }
 
+    /** Payer side: decode a scanned merchant request QR into {toHex, amount, nonceHex, expiry}. */
+    @ReactMethod
+    fun decodeRequest(qr: String, promise: Promise) {
+        try {
+            val r = uniffi.dpay_ffi.decodeRequest(qr)
+            val out = Arguments.createMap()
+            out.putString("toHex", hex(r.to))
+            out.putDouble("amount", r.amount.toDouble())
+            out.putString("nonceHex", hex(r.nonce))
+            out.putDouble("expiry", r.expiry.toDouble())
+            promise.resolve(out)
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
     /** Compact base64url QR string carried to the merchant. */
     @ReactMethod
     fun encodeQr(wireHex: String, promise: Promise) {

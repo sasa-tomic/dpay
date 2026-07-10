@@ -12,7 +12,7 @@
 
 use dpay_core::{
     generate_keypair as core_generate_keypair, sign, validate as core_validate, Authorization,
-    CodecError, PayError, SignedAuthorization, NONCE_LEN, PUBKEY_LEN,
+    CodecError, PayError, PaymentRequest, SignedAuthorization, NONCE_LEN, PUBKEY_LEN,
 };
 use ed25519_dalek::SigningKey;
 
@@ -117,6 +117,44 @@ pub fn sign_authorization(
     let signed = SignedAuthorization::new(&sk, auth);
     debug_assert_eq!(sign(&sk, &auth).to_bytes(), signed.sig);
     Ok(signed.to_wire().to_vec())
+}
+
+/// The merchant's request, as scanned by the payer. Mirrors [`dpay_core::PaymentRequest`]: who to
+/// pay, how much (minor units), the single-use `nonce` (the merchant's request_id → ledger nonce),
+/// and an `expiry` (unix seconds).
+#[derive(uniffi::Record, Clone)]
+pub struct PaymentRequestData {
+    pub to: Vec<u8>,
+    pub amount: u64,
+    pub nonce: Vec<u8>,
+    pub expiry: u64,
+}
+
+/// Merchant side: encode the request the payer will scan. `nonce` is the merchant's single-use
+/// request_id (it becomes the ledger nonce, so the payment can't be replayed or double-charged).
+#[uniffi::export]
+pub fn encode_request(
+    to: &[u8],
+    amount: u64,
+    nonce: &[u8],
+    expiry: u64,
+) -> Result<String, DpayError> {
+    let to = fixed_pubkey(to)?;
+    let nonce = fixed_nonce(nonce)?;
+    Ok(PaymentRequest { to, amount, nonce, expiry }.encode())
+}
+
+/// Payer side: decode a scanned merchant request QR into its fields, so the app can show
+/// "Pay $X to <merchant>" for the payer to approve before signing.
+#[uniffi::export]
+pub fn decode_request(qr: String) -> Result<PaymentRequestData, DpayError> {
+    let req = PaymentRequest::decode(&qr)?;
+    Ok(PaymentRequestData {
+        to: req.to.to_vec(),
+        amount: req.amount,
+        nonce: req.nonce.to_vec(),
+        expiry: req.expiry,
+    })
 }
 
 /// Encode a wire blob to the compact base64url string carried by the payer's QR.

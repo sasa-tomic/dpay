@@ -723,6 +723,10 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is 
 // rather `InterfaceTooLargeException`, caused by too many methods 
@@ -740,7 +744,11 @@ internal interface IntegrityCheckingUniffiLib : Library {
     // Integrity check functions only
     fun uniffi_dpay_ffi_checksum_func_decode_qr(
 ): Short
+fun uniffi_dpay_ffi_checksum_func_decode_request(
+): Short
 fun uniffi_dpay_ffi_checksum_func_encode_qr(
+): Short
+fun uniffi_dpay_ffi_checksum_func_encode_request(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_generate_keypair(
 ): Short
@@ -797,7 +805,11 @@ internal interface UniffiLib : Library {
     // FFI functions
     fun uniffi_dpay_ffi_fn_func_decode_qr(`payload`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_decode_request(`qr`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_encode_qr(`wire`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_encode_request(`to`: RustBuffer.ByValue,`amount`: Long,`nonce`: RustBuffer.ByValue,`expiry`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_generate_keypair(uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -936,7 +948,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_dpay_ffi_checksum_func_decode_qr() != 5970.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_dpay_ffi_checksum_func_decode_request() != 64181.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_dpay_ffi_checksum_func_encode_qr() != 18593.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_encode_request() != 60186.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_generate_keypair() != 36207.toShort()) {
@@ -1199,6 +1217,51 @@ public object FfiConverterTypeKeyPair: FfiConverterRustBuffer<KeyPair> {
 
 
 
+/**
+ * The merchant's request, as scanned by the payer. Mirrors [`dpay_core::PaymentRequest`]: who to
+ * pay, how much (minor units), the single-use `nonce` (the merchant's request_id → ledger nonce),
+ * and an `expiry` (unix seconds).
+ */
+data class PaymentRequestData (
+    var `to`: kotlin.ByteArray, 
+    var `amount`: kotlin.ULong, 
+    var `nonce`: kotlin.ByteArray, 
+    var `expiry`: kotlin.ULong
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypePaymentRequestData: FfiConverterRustBuffer<PaymentRequestData> {
+    override fun read(buf: ByteBuffer): PaymentRequestData {
+        return PaymentRequestData(
+            FfiConverterByteArray.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterByteArray.read(buf),
+            FfiConverterULong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: PaymentRequestData) = (
+            FfiConverterByteArray.allocationSize(value.`to`) +
+            FfiConverterULong.allocationSize(value.`amount`) +
+            FfiConverterByteArray.allocationSize(value.`nonce`) +
+            FfiConverterULong.allocationSize(value.`expiry`)
+    )
+
+    override fun write(value: PaymentRequestData, buf: ByteBuffer) {
+            FfiConverterByteArray.write(value.`to`, buf)
+            FfiConverterULong.write(value.`amount`, buf)
+            FfiConverterByteArray.write(value.`nonce`, buf)
+            FfiConverterULong.write(value.`expiry`, buf)
+    }
+}
+
+
+
 
 
 /**
@@ -1374,6 +1437,20 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
     
 
         /**
+         * Payer side: decode a scanned merchant request QR into its fields, so the app can show
+         * "Pay $X to <merchant>" for the payer to approve before signing.
+         */
+    @Throws(DpayException::class) fun `decodeRequest`(`qr`: kotlin.String): PaymentRequestData {
+            return FfiConverterTypePaymentRequestData.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_decode_request(
+        FfiConverterString.lower(`qr`),_status)
+}
+    )
+    }
+    
+
+        /**
          * Encode a wire blob to the compact base64url string carried by the payer's QR.
          */
     @Throws(DpayException::class) fun `encodeQr`(`wire`: kotlin.ByteArray): kotlin.String {
@@ -1381,6 +1458,20 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
     uniffiRustCallWithError(DpayException) { _status ->
     UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_encode_qr(
         FfiConverterByteArray.lower(`wire`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Merchant side: encode the request the payer will scan. `nonce` is the merchant's single-use
+         * request_id (it becomes the ledger nonce, so the payment can't be replayed or double-charged).
+         */
+    @Throws(DpayException::class) fun `encodeRequest`(`to`: kotlin.ByteArray, `amount`: kotlin.ULong, `nonce`: kotlin.ByteArray, `expiry`: kotlin.ULong): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_encode_request(
+        FfiConverterByteArray.lower(`to`),FfiConverterULong.lower(`amount`),FfiConverterByteArray.lower(`nonce`),FfiConverterULong.lower(`expiry`),_status)
 }
     )
     }

@@ -16,7 +16,22 @@ export PATH="$ANDROID_HOME/platform-tools:$PATH"
 APP_ID=com.dpay
 SHOTS="$ROOT/app/shots"; mkdir -p "$SHOTS"
 
-echo "== require a booted device =="
+echo "== select target device =="
+# adb honours $ANDROID_SERIAL for every command; pick the single device, or require a choice.
+if [ -z "${ANDROID_SERIAL:-}" ]; then
+  mapfile -t DEVS < <(adb devices | awk 'NR>1 && $2=="device"{print $1}')
+  if [ "${#DEVS[@]}" -eq 0 ]; then
+    echo "FAIL: no device/emulator connected"; exit 1
+  elif [ "${#DEVS[@]}" -eq 1 ]; then
+    export ANDROID_SERIAL="${DEVS[0]}"
+  else
+    echo "Multiple devices: ${DEVS[*]}"
+    echo "Pick one, e.g.:  ANDROID_SERIAL=${DEVS[0]} just app"
+    exit 1
+  fi
+fi
+export ANDROID_SERIAL
+echo "   target: $ANDROID_SERIAL"
 adb wait-for-device
 [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1" ] || { echo "FAIL: device not booted"; exit 1; }
 
@@ -64,9 +79,7 @@ tap_text() {
 shot() { adb exec-out screencap -p > "$SHOTS/$1"; echo "   shot: app/shots/$1"; }
 
 echo "== screenshots =="
-sleep 2; shot 01-pay-home.png
-tap_text 'Simulate scan' && sleep 1 && shot 02-review.png || echo "   (skip review shot)"
-tap_text 'Approve' && sleep 2 && shot 03-paid.png || echo "   (skip paid shot)"
+sleep 3; shot 01-pay-scan.png   # the scanner screen (points at the merchant's request QR)
 
 echo
 echo "== RN app PASSED: running on-device app signed via dpay-core (self-check green) =="
