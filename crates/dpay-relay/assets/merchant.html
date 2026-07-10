@@ -5,53 +5,61 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>dpay · Merchant terminal</title>
 <style>
-  :root { --brand:#4f46e5; --ink:#0b0b0f; --sub:#6b7280; --ok:#16a34a; --bad:#dc2626; --line:#e5e7eb; --field:#f3f4f6; }
+  :root { --brand:#4f46e5; --ink:#0b0b0f; --sub:#6b7280; --ok:#16a34a; --bad:#dc2626; --warn:#b45309; --line:#e5e7eb; --field:#f3f4f6; }
   * { box-sizing: border-box; }
   body { margin:0; font-family: system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; color:var(--ink); background:#fafafa; }
-  header { padding:18px 28px; border-bottom:1px solid var(--line); display:flex; align-items:baseline; gap:14px; }
-  .brand { font-size:24px; font-weight:800; color:var(--brand); }
-  .role { color:var(--sub); font-size:14px; }
+  header { padding:16px 28px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:12px; }
+  .brand { font-size:22px; font-weight:800; color:var(--brand); }
+  .who { display:flex; flex-direction:column; }
+  .who .name { font-weight:700; font-size:15px; }
+  .who .id { font-family:ui-monospace,monospace; font-size:11px; color:var(--sub); }
   .dot { margin-left:auto; font-size:13px; color:var(--sub); }
   .dot b { display:inline-block; width:9px; height:9px; border-radius:50%; background:#9ca3af; vertical-align:middle; margin-right:6px; }
   .dot.ok b { background:var(--ok); } .dot.down b { background:var(--bad); }
-  main { max-width:960px; margin:0 auto; padding:24px; display:grid; grid-template-columns:1fr 1fr; gap:20px; }
-  @media (max-width:760px){ main { grid-template-columns:1fr; } }
-  .card { background:#fff; border:1px solid var(--line); border-radius:18px; padding:24px; }
-  .card h2 { margin:0 0 4px; font-size:15px; color:var(--sub); font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
-  .step { color:var(--sub); font-size:13px; margin-bottom:16px; }
-  .amountRow { display:flex; align-items:center; background:var(--field); border-radius:14px; padding:0 16px; height:70px; }
-  .amountRow span { font-size:32px; font-weight:800; }
-  .amountRow input { border:0; background:transparent; font-size:32px; font-weight:800; width:100%; margin-left:6px; outline:none; color:var(--ink); }
-  button { font:inherit; font-weight:600; border:0; border-radius:12px; padding:14px 22px; cursor:pointer; }
-  .primary { background:var(--brand); color:#fff; font-size:16px; width:100%; margin-top:14px; }
+  main { max-width:1040px; margin:0 auto; padding:22px; display:grid; grid-template-columns:1fr 1fr 300px; gap:18px; align-items:start; }
+  @media (max-width:900px){ main { grid-template-columns:1fr; } }
+  .card { background:#fff; border:1px solid var(--line); border-radius:18px; padding:22px; }
+  .card h2 { margin:0 0 4px; font-size:14px; color:var(--sub); font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+  .step { color:var(--sub); font-size:13px; margin-bottom:14px; }
+  .amountRow { display:flex; align-items:center; background:var(--field); border-radius:14px; padding:0 16px; height:66px; }
+  .amountRow span { font-size:30px; font-weight:800; }
+  .amountRow input { border:0; background:transparent; font-size:30px; font-weight:800; width:100%; margin-left:6px; outline:none; color:var(--ink); }
+  button { font:inherit; font-weight:600; border:0; border-radius:12px; padding:13px 20px; cursor:pointer; }
+  .primary { background:var(--brand); color:#fff; font-size:16px; width:100%; margin-top:12px; }
   .ghost { background:var(--field); color:var(--ink); }
-  .row { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin-top:14px; }
-  .reqLabel { text-align:center; color:var(--sub); font-size:14px; margin:18px 0 10px; }
+  .row { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin-top:12px; }
+  .reqLabel { text-align:center; color:var(--sub); font-size:13px; margin:16px 0 8px; }
   .qrbox { display:flex; justify-content:center; }
-  .qrbox svg { width:260px; height:260px; }
-  .big { text-align:center; font-size:30px; font-weight:800; margin-top:10px; }
+  .qrbox svg { width:230px; height:230px; }
+  .big { text-align:center; font-size:28px; font-weight:800; margin-top:8px; }
+  .pid { text-align:center; font-family:ui-monospace,monospace; font-size:11px; color:var(--sub); margin-top:4px; }
   .camLabel { color:var(--sub); font-size:13px; margin-bottom:8px; text-align:center; }
-  video { width:100%; max-width:360px; border-radius:14px; background:#111827; aspect-ratio:1/1; object-fit:cover; display:block; margin:0 auto; }
+  video { width:100%; max-width:320px; border-radius:14px; background:#111827; aspect-ratio:1/1; object-fit:cover; display:block; margin:0 auto; }
   canvas { display:none; }
-  textarea { width:100%; height:64px; border:1px solid var(--line); border-radius:12px; padding:10px; font-family:ui-monospace,monospace; font-size:12px; margin-top:12px; }
-  .result { margin-top:18px; text-align:center; }
-  .paid { color:var(--ok); font-size:34px; font-weight:800; }
-  .sub  { color:var(--sub); font-size:15px; margin-top:6px; }
-  .refused { color:var(--bad); font-size:26px; font-weight:800; }
-  .replayed { color:#b45309; font-size:24px; font-weight:800; }
-  .mono { font-family:ui-monospace,monospace; font-size:12px; color:var(--sub); margin-top:8px; word-break:break-all; }
+  textarea { width:100%; height:56px; border:1px solid var(--line); border-radius:12px; padding:9px; font-family:ui-monospace,monospace; font-size:11px; margin-top:10px; }
+  .result { margin-top:16px; text-align:center; min-height:24px; }
+  .paid { color:var(--ok); font-size:30px; font-weight:800; }
+  .sub  { color:var(--sub); font-size:14px; margin-top:6px; }
+  .refused { color:var(--bad); font-size:22px; font-weight:800; }
+  .warnmsg { color:var(--warn); font-size:16px; font-weight:700; }
+  .mono { font-family:ui-monospace,monospace; font-size:11px; color:var(--sub); margin-top:6px; word-break:break-all; }
   .muted { opacity:.45; pointer-events:none; }
-  .hint { color:var(--sub); font-size:13px; margin-top:10px; text-align:center; }
+  /* recent list */
+  .txns { list-style:none; margin:8px 0 0; padding:0; }
+  .txns li { display:flex; justify-content:space-between; align-items:baseline; padding:9px 0; border-bottom:1px solid var(--line); }
+  .txns .amt { font-weight:700; color:var(--ok); }
+  .txns .meta { font-size:11px; color:var(--sub); font-family:ui-monospace,monospace; }
+  .empty { color:var(--sub); font-size:13px; padding:8px 0; }
 </style>
 </head>
 <body>
 <header>
   <span class="brand">dpay</span>
-  <span class="role">Merchant terminal · Café Demo</span>
+  <span class="who"><span class="name">Café Demo</span><span class="id" id="merchId"></span></span>
   <span class="dot" id="dot"><b></b><span id="dotText">checking…</span></span>
 </header>
 <main>
-  <!-- STEP 1: the merchant sets the amount and shows a request QR -->
+  <!-- STEP 1: set the amount, show a request QR -->
   <div class="card" id="chargeCard">
     <h2>1 · Charge</h2>
     <div class="step">Enter what the customer owes, then show them the QR.</div>
@@ -61,6 +69,7 @@
       <div class="reqLabel">Show this to the payer’s phone</div>
       <div class="qrbox" id="reqQr"></div>
       <div class="big" id="reqAmt"></div>
+      <div class="pid" id="reqPid"></div>
       <div class="row"><button class="ghost" id="newBtn">New charge</button></div>
     </div>
   </div>
@@ -80,6 +89,12 @@
     <div class="row"><button class="ghost" id="pasteBtn">Submit pasted code</button></div>
     <div class="result" id="result"></div>
   </div>
+
+  <!-- Recent payments -->
+  <div class="card">
+    <h2>Recent</h2>
+    <ul class="txns" id="txns"><li class="empty">No payments yet.</li></ul>
+  </div>
 </main>
 
 <script src="/jsqr.js"></script>
@@ -87,11 +102,11 @@
 <script>
 const $ = id => document.getElementById(id);
 const usd = c => '$' + Math.floor(c/100) + '.' + String(c%100).padStart(2,'0');
-// Café Demo's account (== account_b the canister is deployed with, and the phone's MERCHANT key).
 const MERCHANT_HEX = '8139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394';
-let stream=null, scanning=false, lastCode=null, busy=false, currentNonce=null;
+$('merchId').textContent = MERCHANT_HEX.slice(0,10) + '…';
+let stream=null, scanning=false, lastCode=null, busy=false, currentNonce=null, pollTimer=null, settled=false;
+const txns=[];
 
-// ---- health ----
 async function health(){
   try { const r=await fetch('/health'); const j=await r.json(); const ok=r.ok&&j.status==='ok';
     $('dot').className='dot '+(ok?'ok':'down'); $('dotText').textContent=ok?'ledger online':'ledger down';
@@ -99,76 +114,101 @@ async function health(){
 }
 setInterval(health,3000); health();
 
-// ---- request encoding (must match dpay_core::PaymentRequest: to|amount_le|nonce|expiry_le) ----
+// --- request encoding (matches dpay_core::PaymentRequest: to|amount_le|nonce|expiry_le) ---
 function hexToBytes(hex,buf,off){ for(let i=0;i<hex.length/2;i++) buf[off+i]=parseInt(hex.substr(i*2,2),16); }
+function bytesToHex(b){ return [...b].map(x=>x.toString(16).padStart(2,'0')).join(''); }
 function writeU64LE(buf,off,n){ for(let i=0;i<8;i++){ buf[off+i]=n&0xff; n=Math.floor(n/256); } }
 function b64url(bytes){ let s=''; for(const b of bytes) s+=String.fromCharCode(b); return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
-function randNonceHex(){ const a=new Uint8Array(16); crypto.getRandomValues(a); return [...a].map(b=>b.toString(16).padStart(2,'0')).join(''); }
+function b64urlDecode(s){ s=s.replace(/-/g,'+').replace(/_/g,'/'); while(s.length%4)s+='='; const bin=atob(s); const b=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++)b[i]=bin.charCodeAt(i); return b; }
+function randNonceHex(){ const a=new Uint8Array(16); crypto.getRandomValues(a); return bytesToHex(a); }
 function encodeRequest(toHex, cents, nonceHex, expiry){
   const b=new Uint8Array(64);
   hexToBytes(toHex,b,0); writeU64LE(b,32,cents); hexToBytes(nonceHex,b,40); writeU64LE(b,56,expiry);
   return b64url(b);
 }
+// The signed wire is from(32)|to(32)|amount(8)|nonce(16)@72|expiry(8)|sig(64)|from_pub(32) = 192 bytes.
+function nonceOfSigned(qr){ try { const w=b64urlDecode(qr.trim()); return w.length===192 ? bytesToHex(w.slice(72,88)) : null; } catch { return null; } }
 function toCents(s){ const n=Math.round(parseFloat(s||'0')*100); return Number.isFinite(n)&&n>0?n:0; }
 
-// ---- STEP 1: create the request QR ----
 function createRequest(){
   const cents=toCents($('amt').value);
   if(!cents) return;
   currentNonce=randNonceHex();
-  const expiry=Math.floor(Date.now()/1000)+600;           // 10-minute window
+  const expiry=Math.floor(Date.now()/1000)+600;
   const reqStr=encodeRequest(MERCHANT_HEX, cents, currentNonce, expiry);
   const qr=qrcode(0,'M'); qr.addData(reqStr); qr.make();
   $('reqQr').innerHTML=qr.createSvgTag({cellSize:6, margin:2});
   $('reqAmt').textContent=usd(cents);
+  $('reqPid').textContent='request '+currentNonce.slice(0,12)+'…';
   $('reqArea').style.display='block';
-  $('collectCard').classList.remove('muted');            // enable step 2
-  $('result').innerHTML='';
-  startScan().catch(()=>{});                             // auto-start the scanner
+  $('collectCard').classList.remove('muted');
+  $('result').innerHTML='<div class="sub">waiting for the payer…</div>';
+  lastCode=null; settled=false;
+  startScan().catch(()=>{});          // offline fallback: merchant scans the payer's QR
+  startPoll();                        // online path: payer paid directly → detect it on-chain
 }
-function newCharge(){
-  stopScan(); currentNonce=null;
-  $('reqArea').style.display='none';
-  $('collectCard').classList.add('muted');
-  $('result').innerHTML='';
+function newCharge(){ stopScan(); clearInterval(pollTimer); currentNonce=null; settled=false; $('reqArea').style.display='none'; $('collectCard').classList.add('muted'); $('result').innerHTML=''; }
+
+// Poll the ledger for this request's completion (the payer may have paid directly while online).
+function startPoll(){
+  clearInterval(pollTimer);
+  pollTimer=setInterval(async ()=>{
+    if(settled || !currentNonce) return;
+    try { const r=await fetch('/receipt/'+currentNonce); if(r.ok){ const j=await r.json(); handleSettled(j.receipt); } } catch {}
+  }, 1200);
+}
+function handleSettled(rc){
+  if(settled) return; settled=true;
+  stopScan(); clearInterval(pollTimer);
+  $('result').innerHTML=`<div class="paid">Paid ✓ ${usd(rc.amount)}</div>`
+    +`<div class="sub">payer balance now ${usd(rc.new_from_balance)}</div>`
+    +`<div class="mono">from ${rc.from.slice(0,16)}… · request ${rc.nonce.slice(0,12)}…</div>`;
+  txns.push({amount:rc.amount, from:rc.from, time:new Date().toLocaleTimeString()});
+  renderTxns();
 }
 $('createBtn').onclick=createRequest;
 $('newBtn').onclick=newCharge;
 
-// ---- STEP 2: scan the payer's signed QR + submit ----
+function renderTxns(){
+  const ul=$('txns');
+  if(!txns.length){ ul.innerHTML='<li class="empty">No payments yet.</li>'; return; }
+  ul.innerHTML=txns.slice().reverse().map(t=>
+    `<li><span class="amt">${usd(t.amount)}</span><span class="meta">${t.from.slice(0,8)}… · ${t.time}</span></li>`).join('');
+}
+
 async function submit(qr){
-  if(busy) return; busy=true;
+  if(busy || !currentNonce) return;
+  // Bind Collect to the CURRENT request: only accept the signed QR the payer produced for it.
+  const n=nonceOfSigned(qr);
+  if(n===null){ $('result').innerHTML='<div class="warnmsg">That’s not a payment QR.</div>'; return; }
+  if(n!==currentNonce){
+    $('result').innerHTML='<div class="warnmsg">That’s for a different request</div><div class="sub">Ask the payer to scan the current QR.</div>';
+    return;
+  }
+  busy=true;
   const res=$('result'); res.innerHTML='<div class="sub">settling…</div>';
   try{
     const r=await fetch('/pay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({qr})});
     const j=await r.json();
     if(r.ok){
-      const rc=j.receipt;
-      if(j.replayed){
-        res.innerHTML=`<div class="replayed">↩ Already paid</div><div class="sub">${usd(rc.amount)} — not charged twice</div>`;
-      }else{
-        res.innerHTML=`<div class="paid">Paid ✓ ${usd(rc.amount)}</div>`
-          +`<div class="sub">payer balance now ${usd(rc.new_from_balance)}</div>`
-          +`<div class="mono">from ${rc.from.slice(0,16)}… · nonce ${rc.nonce.slice(0,12)}…</div>`;
-      }
+      if(settled){ res.innerHTML=`<div class="warnmsg">↩ Already paid</div><div class="sub">${usd(j.receipt.amount)} — not charged twice</div>`; }
+      else handleSettled(j.receipt);
     }else{
       res.innerHTML=`<div class="refused">Refused</div><div class="sub">${j.error||'rejected'}</div>`;
     }
   }catch(e){ res.innerHTML=`<div class="refused">Error</div><div class="sub">${e}</div>`; }
   finally{ busy=false; }
 }
+
 async function startScan(){
   if($('collectCard').classList.contains('muted')) return;
   try{ stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}}); }
   catch(e){ $('result').innerHTML=`<div class="sub">camera unavailable (${e.name}). Use the paste box.</div>`; return; }
   const v=$('video'); v.srcObject=stream; await v.play();
   $('startBtn').style.display='none'; $('stopBtn').style.display='inline-block';
-  scanning=true; lastCode=null; tick();
+  scanning=true; tick();
 }
-function stopScan(){
-  scanning=false; if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
-  $('startBtn').style.display='inline-block'; $('stopBtn').style.display='none';
-}
+function stopScan(){ scanning=false; if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; } $('startBtn').style.display='inline-block'; $('stopBtn').style.display='none'; }
 function tick(){
   if(!scanning) return;
   const v=$('video'), c=$('canvas');
@@ -177,7 +217,7 @@ function tick(){
     const ctx=c.getContext('2d'); ctx.drawImage(v,0,0,c.width,c.height);
     const img=ctx.getImageData(0,0,c.width,c.height);
     const code=jsQR(img.data,img.width,img.height,{inversionAttempts:'dontInvert'});
-    if(code&&code.data&&code.data!==lastCode){ lastCode=code.data; stopScan(); submit(code.data); }
+    if(code&&code.data&&code.data!==lastCode){ lastCode=code.data; submit(code.data); }
   }
   requestAnimationFrame(tick);
 }

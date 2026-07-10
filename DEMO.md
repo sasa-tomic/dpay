@@ -49,30 +49,33 @@ Plug in an Android phone (USB debugging on) or use the emulator, then:
 just app
 ```
 
-The dpay app installs and opens as **“You,” pre-funded with $100.00**. Turn on **airplane mode** to
-prove the next step is fully offline.
+The dpay app installs and opens as **“You,” with a live $100.00 balance** read from the ledger.
+`just app` bakes the **Tailscale** URL of this laptop into the app (a real phone reaches the laptop
+over your tailnet); it's shown at the bottom of the app under **ledger** and is editable. The green
+dot next to the balance means the wallet can see the ledger.
 
-### 3. The flow — two scans (~30 seconds)
+### 3. The flow (~15 seconds when online)
 
 1. **Laptop (1 · Charge):** enter the amount → **Create request** → a **request QR** appears
    (it encodes *who to pay, how much, and a single-use request id*).
-2. **Phone:** **Scan to pay** → point at the laptop's request QR → the phone shows
-   **“Pay $X to Café Demo”** → **Approve**. It signs offline, in the Rust core, and shows a
-   **signed QR**.
-3. **Laptop (2 · Collect):** the camera scans the phone's signed QR → **Paid ✓**, the payer's
-   balance drops. (Either camera fussy? Each side has a **paste** box — same result.)
+2. **Phone:** point the camera at the request QR → **“Pay $X to Café Demo”** → **Approve**.
+   - **Online (normal):** the phone submits straight to the ledger; the laptop shows **Paid ✓**
+     within ~1s (it polls the chain), and the phone's balance drops. No second scan.
+   - **Offline / flaky link:** after 5s the phone shows a **signed QR**; the laptop's **2 · Collect**
+     camera scans it (or use the **Share auth code** button → paste box).
+3. Both **Recent** lists (phone + laptop) show the payment.
 4. **Settle the same request again** → **“Already paid — not charged twice.”** The merchant's
    request id *is* the ledger nonce, so a replay can never double-charge.
 
-Why two scans: the amount and payee are chosen by the **merchant** (scan 1) and then **bound by the
-payer's signature** (scan 2) — neither side can alter them, and the payer approves the exact amount
-before signing. (A payer typing the amount would be neither.)
+Amount + payee are chosen by the **merchant** (the request) and **bound by the payer's signature**,
+so neither side can alter them and the payer approves the exact amount before signing.
 
 ### Why this is the clean setup
-- The merchant is a laptop page + the relay — reliable, and big enough for a room to see; the phone
-  is the airplane-mode star.
-- It settles on a **real** local replica, not a mock — the merchant balance actually moves on-chain.
-- Both phones/screens have a **paste fallback**, so a fussy camera never derails the demo.
+- The merchant is a laptop page + the relay — reliable, and big enough for a room to see.
+- It settles on a **real** local replica, not a mock — balances actually move on-chain, and the
+  phone shows its **live** balance.
+- Online is a one-tap direct pay; the QR "dance" is the automatic offline fallback. A fussy camera
+  never derails it (paste / share on both sides).
 
 ---
 

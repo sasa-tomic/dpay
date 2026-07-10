@@ -107,6 +107,10 @@ impl Ledger for AgentLedger {
         }
     }
 
+    async fn balance(&self, pubkey: [u8; PUBKEY_LEN]) -> Result<u64, LedgerError> {
+        self.balance_of(&pubkey).await
+    }
+
     async fn healthy(&self) -> bool {
         // Liveness = the replica answers the management canister's read-only `status`. Cheap, and
         // proves the gateway + replica are actually reachable (not just that a socket is open).

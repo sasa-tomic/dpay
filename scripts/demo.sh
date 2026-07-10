@@ -43,7 +43,8 @@ for _ in $(seq 1 30); do
   curl -fsS "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && break || sleep 0.3
 done
 
-LAN_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+TSIP="$(tailscale ip -4 2>/dev/null | head -1)"
+if [ -n "$TSIP" ]; then TS_URL="http://$TSIP:$PORT"; else TS_URL="http://<this-laptop-tailscale-ip>:$PORT"; fi
 cat <<EOF
 
   ┌──────────────────────────────────────────────────────────────────────┐
@@ -51,21 +52,19 @@ cat <<EOF
   └──────────────────────────────────────────────────────────────────────┘
 
   MERCHANT (this laptop)
-    Open  ▶  http://localhost:$PORT/
-    (use *localhost* on the laptop running this — browsers only allow the
-     webcam on localhost/https. ${LAN_IP:+LAN: http://$LAN_IP:$PORT/ — paste-only, no camera})
+    Open  ▶  http://localhost:$PORT/     (localhost is required for the webcam)
 
-  PAYER (the phone)
-    In another terminal:  just app
-    The dpay app opens as "You" pre-funded with \$100.00. Airplane mode is fine —
-    the phone only scans a QR and signs; it never touches the network.
+  PAYER (the phone)   —  just app  installs it (ledger URL baked to Tailscale)
+    The wallet opens as "You" with \$100.00. It reaches the ledger over Tailscale
+    at $TS_URL — set that in the app's "ledger" field if needed.
 
-  DEMO — two scans (about 30 seconds)
+  DEMO
     1. Laptop: enter the amount → "Create request" → a request QR appears.
-    2. Phone: "Scan to pay" → point at the laptop's QR → review "Pay \$X to Café Demo"
-       → Approve. The phone signs offline and shows a signed QR.
-    3. Laptop (step 2 · Collect): the camera scans the phone's QR → Paid ✓, balance drops.
-    4. Try to settle the same request twice → "Already paid — not charged twice".
+    2. Phone: scan it → review "Pay \$X to Café Demo" → Approve.
+         • ONLINE  → the phone pays directly; the laptop shows Paid ✓ within ~1s.
+         • OFFLINE / flaky → after 5s the phone shows a QR; the laptop scans it.
+    3. Balance drops on the phone; the payment appears in both "Recent" lists.
+    4. Settle the same request twice → "Already paid — not charged twice".
 
   Canister $CID on a local replica.  Ctrl-C to shut it all down.
 

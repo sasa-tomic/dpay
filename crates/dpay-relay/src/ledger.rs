@@ -76,6 +76,9 @@ pub trait Ledger: Send + Sync {
     /// Settle a 192-byte signed authorization (the payer's QR, decoded to wire bytes).
     async fn pay(&self, wire: Vec<u8>) -> Result<Receipt, LedgerError>;
 
+    /// Read an account's balance (minor units). Lets a wallet show its live balance when online.
+    async fn balance(&self, pubkey: [u8; PUBKEY_LEN]) -> Result<u64, LedgerError>;
+
     /// Liveness for the merchant's pre-flight green dot.
     async fn healthy(&self) -> bool;
 }
@@ -183,6 +186,10 @@ impl Ledger for FakeLedger {
         })
     }
 
+    async fn balance(&self, pubkey: [u8; PUBKEY_LEN]) -> Result<u64, LedgerError> {
+        Ok(self.balance_of(&pubkey))
+    }
+
     async fn healthy(&self) -> bool {
         // In-memory ledger is healthy iff its mutex isn't poisoned.
         self.state.lock().is_ok()
@@ -227,6 +234,10 @@ impl<L: Ledger> Ledger for FlakyLedger<L> {
             return Err(LedgerError::Transient("flaky: injected transient".into()));
         }
         self.inner.pay(wire).await
+    }
+
+    async fn balance(&self, pubkey: [u8; PUBKEY_LEN]) -> Result<u64, LedgerError> {
+        self.inner.balance(pubkey).await
     }
 
     async fn healthy(&self) -> bool {

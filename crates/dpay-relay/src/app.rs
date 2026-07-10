@@ -17,14 +17,14 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
-use dpay_core::{SignedAuthorization, NONCE_LEN};
+use dpay_core::{SignedAuthorization, NONCE_LEN, PUBKEY_LEN};
 
 use crate::ledger::{Ledger, LedgerError, Receipt};
 
@@ -68,8 +68,41 @@ pub fn app(state: AppState) -> Router {
         .route("/jsqr.js", get(jsqr_js))
         .route("/qrcode.js", get(qrcode_js))
         .route("/pay", post(pay))
+        .route("/balance/{hex}", get(balance))
+        .route("/receipt/{nonce}", get(receipt))
         .route("/health", get(health))
         .with_state(state)
+}
+
+/// `GET /receipt/{nonce}` → `200 {receipt, replayed}` if that request_id (nonce) has settled, else
+/// `404`. Lets the merchant terminal poll for an on-chain completion when the payer paid directly
+/// (online), instead of scanning the payer's QR.
+async fn receipt(State(state): State<AppState>, Path(nonce_hex): Path<String>) -> Response {
+    let bytes = match hex::decode(nonce_hex.trim()) {
+        Ok(b) if b.len() == NONCE_LEN => b,
+        _ => return err(StatusCode::BAD_REQUEST, "nonce must be 16 bytes hex"),
+    };
+    let mut nonce = [0u8; NONCE_LEN];
+    nonce.copy_from_slice(&bytes);
+    match state.idempotency.lock().unwrap().get(&nonce).cloned() {
+        Some(rc) => (StatusCode::OK, Json(PayOk { receipt: rc, replayed: true })).into_response(),
+        None => err(StatusCode::NOT_FOUND, "not settled"),
+    }
+}
+
+/// `GET /balance/{hex}` → `{"balance": <minor units>}` for a 32-byte pubkey (hex). Lets the payer's
+/// wallet show its live balance when it can reach the relay.
+async fn balance(State(state): State<AppState>, Path(hex_pk): Path<String>) -> Response {
+    let bytes = match hex::decode(hex_pk.trim()) {
+        Ok(b) if b.len() == PUBKEY_LEN => b,
+        _ => return err(StatusCode::BAD_REQUEST, "pubkey must be 32 bytes hex"),
+    };
+    let mut pk = [0u8; PUBKEY_LEN];
+    pk.copy_from_slice(&bytes);
+    match state.ledger.balance(pk).await {
+        Ok(bal) => (StatusCode::OK, Json(BalanceBody { balance: bal })).into_response(),
+        Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
+    }
 }
 
 /// `GET /` — the merchant terminal (webcam QR scan + paste fallback, submits to `/pay`).
@@ -125,6 +158,11 @@ struct ErrorBody {
 #[derive(Serialize)]
 struct HealthBody {
     status: &'static str,
+}
+
+#[derive(Serialize)]
+struct BalanceBody {
+    balance: u64,
 }
 
 fn err(status: StatusCode, msg: impl Into<String>) -> Response {
