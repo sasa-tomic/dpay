@@ -24,7 +24,8 @@ RELAY_BIN="$ROOT/.dev/target-relay/debug/dpay-relay"
 echo "== start local replica + deploy canister =="
 killall -q dpay-relay 2>/dev/null || true   # clear a stale relay from a previous run (frees the port)
 dfx stop >/dev/null 2>&1 || true
-dfx start --clean --background >/tmp/dfx-demo.log 2>&1
+dfx killall || true
+dfx start --clean --background
 dfx deploy dpay_canister --argument-file dfx/args/init.arg >/tmp/dfx-deploy-demo.log 2>&1
 CID="$(dfx canister id dpay_canister)"
 
