@@ -74,6 +74,18 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         }
     }
 
+    /** Receiver side: encode a payment request {to, amount, nonce, expiry} to a base64url string. */
+    @ReactMethod
+    fun encodeRequest(toHex: String, amount: Double, nonceHex: String, expiry: Double, promise: Promise) {
+        try {
+            promise.resolve(
+                uniffi.dpay_ffi.encodeRequest(unhex(toHex), amount.toLong().toULong(), unhex(nonceHex), expiry.toLong().toULong()),
+            )
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
     /** Payer side: decode a scanned merchant request QR into {toHex, amount, nonceHex, expiry}. */
     @ReactMethod
     fun decodeRequest(qr: String, promise: Promise) {

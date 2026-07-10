@@ -11,7 +11,7 @@
 //! what `dpay-canister-tests` does with `encode_one(&wire)`.
 
 use async_trait::async_trait;
-use candid::{decode_one, encode_one, CandidType, Principal};
+use candid::{decode_one, encode_args, encode_one, CandidType, Principal};
 use ic_agent::Agent;
 use serde::Deserialize;
 
@@ -109,6 +109,21 @@ impl Ledger for AgentLedger {
 
     async fn balance(&self, pubkey: [u8; PUBKEY_LEN]) -> Result<u64, LedgerError> {
         self.balance_of(&pubkey).await
+    }
+
+    async fn mint(&self, to: [u8; PUBKEY_LEN], amount: u64) -> Result<u64, LedgerError> {
+        // canister `mint(blob, nat64) -> nat64` (update). Two positional args.
+        let arg = encode_args((to.to_vec(), amount))
+            .map_err(|e| LedgerError::Transient(format!("encode mint args: {e}")))?;
+        let reply = self
+            .agent
+            .update(&self.canister_id, "mint")
+            .with_arg(arg)
+            .call_and_wait()
+            .await
+            .map_err(|e| LedgerError::Transient(format!("mint update: {e}")))?;
+        decode_one::<u64>(&reply)
+            .map_err(|e| LedgerError::Transient(format!("decode mint reply: {e}")))
     }
 
     async fn healthy(&self) -> bool {

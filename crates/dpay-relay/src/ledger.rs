@@ -79,6 +79,10 @@ pub trait Ledger: Send + Sync {
     /// Read an account's balance (minor units). Lets a wallet show its live balance when online.
     async fn balance(&self, pubkey: [u8; PUBKEY_LEN]) -> Result<u64, LedgerError>;
 
+    /// Demo faucet: credit `to` with `amount`, returning the new balance. Funds a freshly-generated
+    /// on-device account (stand-in for a real on-ramp).
+    async fn mint(&self, to: [u8; PUBKEY_LEN], amount: u64) -> Result<u64, LedgerError>;
+
     /// Liveness for the merchant's pre-flight green dot.
     async fn healthy(&self) -> bool;
 }
@@ -190,6 +194,13 @@ impl Ledger for FakeLedger {
         Ok(self.balance_of(&pubkey))
     }
 
+    async fn mint(&self, to: [u8; PUBKEY_LEN], amount: u64) -> Result<u64, LedgerError> {
+        let mut s = self.state.lock().unwrap();
+        let bal = s.balances.entry(to).or_insert(0);
+        *bal = bal.saturating_add(amount);
+        Ok(*bal)
+    }
+
     async fn healthy(&self) -> bool {
         // In-memory ledger is healthy iff its mutex isn't poisoned.
         self.state.lock().is_ok()
@@ -238,6 +249,10 @@ impl<L: Ledger> Ledger for FlakyLedger<L> {
 
     async fn balance(&self, pubkey: [u8; PUBKEY_LEN]) -> Result<u64, LedgerError> {
         self.inner.balance(pubkey).await
+    }
+
+    async fn mint(&self, to: [u8; PUBKEY_LEN], amount: u64) -> Result<u64, LedgerError> {
+        self.inner.mint(to, amount).await
     }
 
     async fn healthy(&self) -> bool {

@@ -15,6 +15,11 @@ type PayReceipt = record {
 type Result = variant { Ok : PayReceipt; Err : text };
 service : (InitArg) -> {
   balance_of : (blob) -> (nat64) query;
+  // Demo faucet: credit `to` with `amount` (minor units) and return the new balance. Lets a phone
+  // fund a freshly-generated on-device account. Unauthenticated on purpose — this is the demo's
+  // stand-in for a real fiat/ckUSDC on-ramp, which is out of scope; a production ledger would gate
+  // minting behind the issuer.
+  mint : (blob, nat64) -> (nat64);
   // Settle an offline-signed authorization. `signed` is the 192-byte wire form.
   pay : (blob) -> (Result);
   per_tx_cap : () -> (nat64) query;

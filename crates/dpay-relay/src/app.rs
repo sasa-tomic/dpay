@@ -68,10 +68,27 @@ pub fn app(state: AppState) -> Router {
         .route("/jsqr.js", get(jsqr_js))
         .route("/qrcode.js", get(qrcode_js))
         .route("/pay", post(pay))
+        .route("/faucet", post(faucet))
         .route("/balance/{hex}", get(balance))
         .route("/receipt/{nonce}", get(receipt))
         .route("/health", get(health))
         .with_state(state)
+}
+
+/// `POST /faucet` JSON `{account: <hex>, amount?}` → `{balance}`. Demo on-ramp: funds a phone's
+/// freshly-generated account so it can pay. Defaults to $100.00 when `amount` is omitted.
+async fn faucet(State(state): State<AppState>, Json(req): Json<FaucetRequest>) -> Response {
+    let bytes = match hex::decode(req.account.trim()) {
+        Ok(b) if b.len() == PUBKEY_LEN => b,
+        _ => return err(StatusCode::BAD_REQUEST, "account must be 32 bytes hex"),
+    };
+    let mut pk = [0u8; PUBKEY_LEN];
+    pk.copy_from_slice(&bytes);
+    let amount = req.amount.unwrap_or(10_000);
+    match state.ledger.mint(pk, amount).await {
+        Ok(bal) => (StatusCode::OK, Json(BalanceBody { balance: bal })).into_response(),
+        Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
+    }
 }
 
 /// `GET /receipt/{nonce}` → `200 {receipt, replayed}` if that request_id (nonce) has settled, else
@@ -140,6 +157,12 @@ async fn qrcode_js() -> Response {
 #[derive(Deserialize)]
 struct PayRequest {
     qr: String,
+}
+
+#[derive(Deserialize)]
+struct FaucetRequest {
+    account: String,
+    amount: Option<u64>,
 }
 
 #[derive(Serialize)]

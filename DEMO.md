@@ -79,12 +79,25 @@ so neither side can alter them and the payer approves the exact amount before si
 
 ---
 
-## Demo B — two phones (payer + seller)
+## Demo B — two phones, peer-to-peer (Alice ⇄ Bob)
 
-The same app, two phones: one in **Pay** mode (airplane), one in **Receive** mode (online, with the
-camera). The seller phone scans the payer’s QR and submits to the relay. More authentic to real
-life, but the seller screen is small and the camera hop is on a phone (fussier). *(Seller-side
-camera + submit is the follow-up build — see the repo notes.)*
+The same app on both phones, each with its **own generated key + username** and **Pay / Receive**
+modes. Either can pay the other.
+
+1. **Both phones:** `just app` → on first launch, enter a username (say **Alice** on one, **Bob** on
+   the other) → **Create & fund wallet**. Each generates a key on-device and gets **$100** from the
+   demo faucet. (`just demo` must be up so the faucet + ledger are reachable over Tailscale.)
+2. **Bob** taps **Receive** → enters an amount → shows a **request QR** (carries Bob's account + name).
+3. **Alice** taps **Pay** → scans Bob's QR → **"Pay $X to Bob"** → **Approve**.
+   - Online → Alice pays directly; **Bob's screen flips to "Received $X from Alice"** within ~1s, both
+     balances move, and it lands in both **Recent** lists.
+   - Bob offline / flaky → Alice shows a signed QR; Bob taps **"Payer offline? Scan their QR"** and
+     scans it to submit.
+4. Swap roles — Bob can now pay Alice back from what he received.
+
+Identity is a real on-device key + faucet funding (no shared demo accounts). The username rides in
+the QR as **unsigned display metadata**; the account is the source of truth. *(Out of scope, as
+always: a real fiat/ckUSDC on-ramp instead of the faucet.)*
 
 ---
 

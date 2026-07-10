@@ -109,4 +109,19 @@ fn per_tx_cap() -> u64 {
     LEDGER.with(|l| l.borrow().per_tx_cap)
 }
 
+/// Demo faucet: credit `to` with `amount` (minor units) and return the new balance. Lets a phone
+/// fund a freshly-generated on-device account. Unauthenticated on purpose — this is the demo's
+/// stand-in for a real fiat/ckUSDC on-ramp, which is out of scope; a production ledger would gate
+/// minting behind the issuer.
+#[update]
+fn mint(to: Vec<u8>, amount: u64) -> u64 {
+    let pk = to_pubkey(&to).expect("account must be 32 bytes");
+    LEDGER.with(|l| {
+        let mut l = l.borrow_mut();
+        let bal = l.balances.entry(pk).or_insert(0);
+        *bal = bal.saturating_add(amount);
+        *bal
+    })
+}
+
 ic_cdk::export_candid!();
