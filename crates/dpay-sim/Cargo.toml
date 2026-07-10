@@ -1,0 +1,16 @@
+[package]
+name = "dpay-sim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Narrated end-to-end demo: offline sign -> canister settlement -> Paid. Self-checking."
+
+[[bin]]
+name = "dpay-sim"
+path = "src/main.rs"
+
+[dependencies]
+dpay-core = { path = "../dpay-core", features = ["rng"] }
+pocket-ic = { workspace = true }
+candid = { workspace = true }
+serde = { version = "1", features = ["derive"] }

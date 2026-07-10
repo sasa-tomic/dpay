@@ -1,0 +1,52 @@
+[package]
+name = "dpay-relay"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "dpay relay: submits the payer's offline-signed authorization to the ledger; idempotent, retrying, health-checked. The only online dependency in the PoC."
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "dpay-relay"
+path = "src/main.rs"
+
+[features]
+# The real ic-agent settlement path (talks to a live local IC replica). OFF by default so the
+# fast in-memory inner loop (`cargo nextest run -p dpay-relay`) stays offline and quick — and
+# never even compiles the heavy ic-agent / pocket-ic trees. The justfile's `test-live` recipe
+# enables it: `cargo nextest run -p dpay-relay --features agent`.
+#
+# `pocket-ic` (test infra) and `candid` are optional *regular* deps rather than dev-deps on
+# purpose: dev-deps compile unconditionally, which would tax the no-feature inner loop; gating
+# them behind `agent` keeps that loop lean while still making them available to the feature-gated
+# `tests/live.rs` integration test.
+agent = ["dep:ic-agent", "dep:candid", "dep:pocket-ic", "dpay-core/rng"]
+
+[dependencies]
+dpay-core = { path = "../dpay-core" }
+axum = "0.8.9"
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "net", "signal", "time"] }
+tower = "0.5.3"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+async-trait = "0.1.89"
+thiserror = "2.0.18"
+hex = "0.4.3"
+base64 = "0.22.1"
+
+# --- `agent` feature only ---
+# ic-agent 0.48.1 is the current crates.io release (2026-07-07); it depends on candid ^0.10.10,
+# compatible with the workspace pin (=0.10.22). reqwest (rustls by default — no system OpenSSL) is
+# a mandatory dep of ic-agent, so default features suffice for talking to a local replica.
+# pocket-ic drives the live local IC (HTTP gateway) in tests/live.rs.
+ic-agent = { version = "=0.48.1", optional = true }
+candid = { workspace = true, optional = true }
+pocket-ic = { workspace = true, optional = true }
+
+[dev-dependencies]
+dpay-core = { path = "../dpay-core", features = ["rng"] }
+ed25519-dalek = { workspace = true }
+tower = { version = "0.5.3", features = ["util"] }
+http-body-util = "0.1.3"

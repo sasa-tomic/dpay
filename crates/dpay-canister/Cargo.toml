@@ -1,0 +1,15 @@
+[package]
+name = "dpay-canister"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "dpay demo ledger canister (ICP). Verifies offline-signed authorizations and settles atomically."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ic-cdk = { workspace = true }
+candid = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+dpay-core = { path = "../dpay-core" }

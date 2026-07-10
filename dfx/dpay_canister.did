@@ -1,0 +1,21 @@
+type InitArg = record {
+  account_a : blob;
+  account_b : blob;
+  balance_a : nat64;
+  balance_b : nat64;
+  per_tx_cap : nat64;
+};
+type PayReceipt = record {
+  to : blob;
+  from : blob;
+  nonce : blob;
+  amount : nat64;
+  new_from_balance : nat64;
+};
+type Result = variant { Ok : PayReceipt; Err : text };
+service : (InitArg) -> {
+  balance_of : (blob) -> (nat64) query;
+  // Settle an offline-signed authorization. `signed` is the 192-byte wire form.
+  pay : (blob) -> (Result);
+  per_tx_cap : () -> (nat64) query;
+}

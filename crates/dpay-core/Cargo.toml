@@ -1,0 +1,21 @@
+[package]
+name = "dpay-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Money/protocol core for dpay: offline-signed authorizations, shared by canister, relay, app, and tests."
+
+[dependencies]
+# Ed25519 sign/verify. Default features include std (fine on wasm32) + zeroize; no RNG unless `rng`.
+ed25519-dalek = { workspace = true }
+base64 = { workspace = true }
+# RNG path (keypair generation) is NATIVE-ONLY: never enabled on the wasm/canister build,
+# so getrandom never enters the wasm dependency tree.
+rand_core = { workspace = true, optional = true }
+
+[features]
+default = []
+rng = ["dep:rand_core", "ed25519-dalek/rand_core"]
+
+[dev-dependencies]
+proptest = { workspace = true }

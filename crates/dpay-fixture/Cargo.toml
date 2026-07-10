@@ -1,0 +1,15 @@
+[package]
+name = "dpay-fixture"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Emits deterministic dfx candid argument files (ledger init + one offline-signed payment) so the real dfx-deploy smoke test submits the exact wire the phone signs."
+
+[[bin]]
+name = "dpay-fixture"
+path = "src/main.rs"
+
+[dependencies]
+# The SAME core the canister/relay/app/sim link — the fixture packages its output, never reimplements it.
+dpay-core = { path = "../dpay-core" }
+ed25519-dalek = { workspace = true }

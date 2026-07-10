@@ -1,0 +1,32 @@
+[package]
+name = "dpay-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "UniFFI binding for dpay-core: exposes the exact offline-signing / verify / validate logic to the phone app's languages (Kotlin on Android, Python for the sandbox gate). The code Claude tests is the code that signs on the phone."
+
+# cdylib -> the native shared object the generated Kotlin/Python bindings dlopen.
+# lib    -> lets the `uniffi-bindgen` bin (and any Rust consumer) link the crate.
+[lib]
+name = "dpay_ffi"
+crate-type = ["cdylib", "lib"]
+
+# In-crate bindings generator. `cargo run --bin uniffi-bindgen -- generate ...`
+# drives the pinned uniffi codegen so the CLI version always matches the runtime.
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+[dependencies]
+# The SAME core that the canister, relay, and sim link. `rng` for on-device keypair generation.
+dpay-core = { path = "../dpay-core", features = ["rng"] }
+# Pinned exact: the bindgen CLI, the proc-macros, and the runtime scaffolding must all agree.
+uniffi = { version = "=0.29.5" }
+# Ed25519 key reconstruction from the on-device seed (host build; same version the core links).
+ed25519-dalek = { workspace = true }
+# 1:1 error mapping across the FFI boundary (Display impls for the uniffi::Error enum).
+thiserror = "2.0.18"
+
+[features]
+# Pulls in clap/camino + uniffi_bindgen so the `uniffi-bindgen` bin can generate bindings.
+cli = ["uniffi/cli"]

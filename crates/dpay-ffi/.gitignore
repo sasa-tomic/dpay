@@ -1,0 +1,5 @@
+# Runtime artifacts copied/created by verify.sh next to the generated Python binding.
+# The generated *.py / *.kt binding sources are kept (they are the FFI artifact); the
+# compiled cdylib and bytecode caches are not.
+bindings/python/*.so
+bindings/**/__pycache__/
