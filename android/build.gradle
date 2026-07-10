@@ -1,0 +1,10 @@
+// dpay Android module — the device-fidelity gate.
+//
+// Its whole job is to run the *exact* compiled dpay-core (via the UniFFI Kotlin binding + the
+// NDK-built libdpay_ffi.so) on a real Android runtime and assert the offline-pay protocol behaves
+// identically to the headless sandbox. That closes the last gap the dev-loop plan left open: the
+// phone signs with the same bytes Claude tests.
+plugins {
+    id 'com.android.application' version '8.7.3' apply false
+    id 'org.jetbrains.kotlin.android' version '1.9.25' apply false
+}

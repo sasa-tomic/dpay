@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "canisters": {
+    "dpay_canister": {
+      "type": "custom",
+      "candid": "dfx/dpay_canister.did",
+      "wasm": "target/wasm32-unknown-unknown/release/dpay_canister.wasm",
+      "build": [],
+      "gzip": false,
+      "metadata": [
+        { "name": "candid:service", "visibility": "public" }
+      ]
+    }
+  },
+  "defaults": {
+    "build": { "packtool": "", "args": "" }
+  },
+  "networks": {
+    "local": {
+      "bind": "127.0.0.1:4943",
+      "type": "ephemeral",
+      "replica": { "subnet_type": "application" }
+    }
+  }
+}

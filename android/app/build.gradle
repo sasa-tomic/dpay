@@ -1,0 +1,46 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'org.dpay.ffitest'
+    compileSdk 35
+    ndkVersion '27.3.13750724'
+
+    defaultConfig {
+        applicationId 'org.dpay.ffitest'
+        minSdk 24
+        targetSdk 35
+        versionCode 1
+        versionName '0.1'
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+        // Emulator here is x86_64; a real phone is arm64-v8a. Ship both.
+        ndk { abiFilters 'x86_64', 'arm64-v8a' }
+    }
+
+    // Single source of truth: consume the UniFFI Kotlin binding straight from the ffi crate,
+    // and the NDK-built .so from its jniLibs tree — no copies to drift.
+    sourceSets {
+        main.java.srcDirs += '../../crates/dpay-ffi/bindings/kotlin'
+    }
+
+    buildFeatures {
+        buildConfig false
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = '17' }
+}
+
+dependencies {
+    // UniFFI's Kotlin runtime is JNA; the @aar variant bundles libjnidispatch.so per ABI.
+    implementation 'net.java.dev.jna:jna:5.14.0@aar'
+
+    androidTestImplementation 'androidx.test.ext:junit:1.1.5'
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'androidx.test:core:1.6.1'
+}

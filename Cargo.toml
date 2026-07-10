@@ -1,0 +1,36 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/dpay-core",
+    "crates/dpay-canister",
+    "crates/dpay-canister-tests",
+    "crates/dpay-relay",
+    "crates/dpay-sim",
+    "crates/dpay-ffi",
+    "crates/dpay-fixture",
+]
+# Canister (cdylib) only builds for wasm; keep it out of the default native build/test set.
+default-members = [
+    "crates/dpay-core",
+    "crates/dpay-canister-tests",
+    "crates/dpay-relay",
+    "crates/dpay-sim",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+ed25519-dalek = "2.2.0"
+base64 = "0.22.1"
+rand_core = { version = "0.6.4", features = ["getrandom"] }
+proptest = "1.9.0"
+ic-cdk = "=0.19.0"
+candid = "=0.10.22"
+pocket-ic = "=14.0.0"
+
+# Small, fast debug builds keep the inner loop quick; canister ships via --release separately.
+[profile.dev]
+opt-level = 1
