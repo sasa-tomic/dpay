@@ -60,10 +60,11 @@ Claude and all subagents treat `third_party/` as the canonical local source cach
 ## What's built (all green offline via `just`; inner loop ~7s)
 
 - **dpay-core** — signing/verify/validate/QR codec, proptests incl. conservation-of-funds + tamper; compiles to wasm with `getrandom` gated out.
+  - `nfc` module — pure, panic-free ISO 7816-4/ISO-DEP **transport framing** for the *same* bytes QR carries (request + 192-byte wire): APDU codec, chunking/reassembly, and `CardSession` (payer/HCE) ↔ `ReaderConductor` (merchant) state machines (custom AID, `other` category → no Google Wallet clash; re-tap safe; explicit approve/decline). 22 proptests/unit tests incl. a full card↔reader simulation over random payloads/chunk sizes + a real signed wire that survives transit and still `verify()`s, all failure paths typed. Transport-only; the radio hop stays a physical device gate.
 - **dpay-canister** — ic-cdk ledger; PocketIC tests (happy/nonce/expiry/cap/insufficient).
 - **dpay-relay** — axum; idempotency/retries/`/health`/safe-mode over a `Ledger` trait. `FakeLedger` (inner loop) + `AgentLedger` (feature `agent`: real `ic-agent` → live PocketIC HTTP gateway, verified end-to-end).
 - **dpay-sim** — narrated, self-checking end-to-end demo (offline sign → canister → Paid ✓ → double-spend refused → expired refused).
-- **dpay-ffi** — UniFFI wrapper; a Python roundtrip proves the app calls the *exact* compiled core; Kotlin binding emitted for Android.
+- **dpay-ffi** — UniFFI wrapper; a Python roundtrip proves the app calls the *exact* compiled core; Kotlin binding emitted for Android. Now also exports the NFC objects (`FfiCardSession`/`FfiReaderConductor`, `NfcStep`, `nfc_request_bytes`/`nfc_decode_request`) so the Kotlin HCE service/reader are thin loops over the real core; the Python gate drives an end-to-end card↔reader tap (single-frame + 1-byte-fragmented).
 - **ui/** — react-native-web Pay/Receive screens, headless-chromium screenshots + golden visual-regression.
 
 **Device gate — now built and runnable in-sandbox** (this environment has `/dev/kvm`, the Android SDK/NDK, an x86_64 emulator, and `dfx`; see [[sandbox-can-run-device-gate]]):

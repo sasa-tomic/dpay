@@ -470,11 +470,37 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_generate_keypair() != 36207:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_nfc_decode_request() != 23641:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_nfc_default_max_chunk() != 39928:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_nfc_request_bytes() != 61291:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_sign_authorization() != 38734:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_validate() != 15932:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_verify_wire() != 29445:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_method_fficardsession_awaiting_decision() != 40082:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_method_fficardsession_decline() != 61902:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_method_fficardsession_process() != 33759:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_method_fficardsession_provide_wire() != 51089:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_method_fficardsession_request() != 31957:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_handle_response() != 18693:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_next_command() != 63770:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_wire() != 8289:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_constructor_fficardsession_new() != 58439:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_constructor_ffireaderconductor_new() != 15463:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
 
 # A ctypes library to expose the extern-C FFI definitions.
@@ -582,6 +608,80 @@ class _UniffiForeignFutureStructVoid(ctypes.Structure):
     ]
 _UNIFFI_FOREIGN_FUTURE_COMPLETE_VOID = ctypes.CFUNCTYPE(None,ctypes.c_uint64,_UniffiForeignFutureStructVoid,
 )
+_UniffiLib.uniffi_dpay_ffi_fn_clone_fficardsession.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_clone_fficardsession.restype = ctypes.c_void_p
+_UniffiLib.uniffi_dpay_ffi_fn_free_fficardsession.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_free_fficardsession.restype = None
+_UniffiLib.uniffi_dpay_ffi_fn_constructor_fficardsession_new.argtypes = (
+    ctypes.c_uint32,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_constructor_fficardsession_new.restype = ctypes.c_void_p
+_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_awaiting_decision.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_awaiting_decision.restype = ctypes.c_int8
+_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_decline.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_decline.restype = None
+_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_process.argtypes = (
+    ctypes.c_void_p,
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_process.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_provide_wire.argtypes = (
+    ctypes.c_void_p,
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_provide_wire.restype = None
+_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_request.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_request.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_clone_ffireaderconductor.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_clone_ffireaderconductor.restype = ctypes.c_void_p
+_UniffiLib.uniffi_dpay_ffi_fn_free_ffireaderconductor.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_free_ffireaderconductor.restype = None
+_UniffiLib.uniffi_dpay_ffi_fn_constructor_ffireaderconductor_new.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.c_uint32,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_constructor_ffireaderconductor_new.restype = ctypes.c_void_p
+_UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_handle_response.argtypes = (
+    ctypes.c_void_p,
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_handle_response.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_next_command.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_next_command.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_wire.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_wire.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_func_decode_qr.argtypes = (
     _UniffiRustBuffer,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -609,6 +709,23 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_generate_keypair.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_generate_keypair.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_decode_request.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_decode_request.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_default_max_chunk.argtypes = (
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_default_max_chunk.restype = ctypes.c_uint32
+_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_request_bytes.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.c_uint64,
+    _UniffiRustBuffer,
+    ctypes.c_uint64,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_request_bytes.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_func_sign_authorization.argtypes = (
     _UniffiRustBuffer,
     _UniffiRustBuffer,
@@ -917,6 +1034,15 @@ _UniffiLib.uniffi_dpay_ffi_checksum_func_encode_request.restype = ctypes.c_uint1
 _UniffiLib.uniffi_dpay_ffi_checksum_func_generate_keypair.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_generate_keypair.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_decode_request.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_decode_request.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_default_max_chunk.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_default_max_chunk.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_request_bytes.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_request_bytes.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_sign_authorization.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_sign_authorization.restype = ctypes.c_uint16
@@ -926,6 +1052,36 @@ _UniffiLib.uniffi_dpay_ffi_checksum_func_validate.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_verify_wire.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_verify_wire.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_awaiting_decision.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_awaiting_decision.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_decline.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_decline.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_process.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_process.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_provide_wire.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_provide_wire.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_request.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_request.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_handle_response.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_handle_response.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_next_command.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_next_command.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_wire.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_wire.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_constructor_fficardsession_new.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_constructor_fficardsession_new.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_constructor_ffireaderconductor_new.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_constructor_ffireaderconductor_new.restype = ctypes.c_uint16
 _UniffiLib.ffi_dpay_ffi_uniffi_contract_version.argtypes = (
 )
 _UniffiLib.ffi_dpay_ffi_uniffi_contract_version.restype = ctypes.c_uint32
@@ -935,6 +1091,19 @@ _uniffi_check_contract_api_version(_UniffiLib)
 
 # Public interface members begin here.
 
+
+class _UniffiConverterUInt32(_UniffiConverterPrimitiveInt):
+    CLASS_NAME = "u32"
+    VALUE_MIN = 0
+    VALUE_MAX = 2**32
+
+    @staticmethod
+    def read(buf):
+        return buf.read_u32()
+
+    @staticmethod
+    def write(value, buf):
+        buf.write_u32(value)
 
 class _UniffiConverterUInt64(_UniffiConverterPrimitiveInt):
     CLASS_NAME = "u64"
@@ -1021,6 +1190,10 @@ class _UniffiConverterBytes(_UniffiConverterRustBuffer):
     def write(value, buf):
         buf.write_i32(len(value))
         buf.write(value)
+
+
+
+
 
 
 class KeyPair:
@@ -1195,6 +1368,27 @@ class DpayError:  # type: ignore
         def __repr__(self):
             return "DpayError.PubkeyMismatch({})".format(str(self))
     _UniffiTempDpayError.PubkeyMismatch = PubkeyMismatch # type: ignore
+    class NfcWrongState(_UniffiTempDpayError):
+        def __init__(self):
+            pass
+
+        def __repr__(self):
+            return "DpayError.NfcWrongState({})".format(str(self))
+    _UniffiTempDpayError.NfcWrongState = NfcWrongState # type: ignore
+    class NfcNotDpay(_UniffiTempDpayError):
+        def __init__(self):
+            pass
+
+        def __repr__(self):
+            return "DpayError.NfcNotDpay({})".format(str(self))
+    _UniffiTempDpayError.NfcNotDpay = NfcNotDpay # type: ignore
+    class NfcProtocol(_UniffiTempDpayError):
+        def __init__(self):
+            pass
+
+        def __repr__(self):
+            return "DpayError.NfcProtocol({})".format(str(self))
+    _UniffiTempDpayError.NfcProtocol = NfcProtocol # type: ignore
 
 DpayError = _UniffiTempDpayError # type: ignore
 del _UniffiTempDpayError
@@ -1222,6 +1416,15 @@ class _UniffiConverterTypeDpayError(_UniffiConverterRustBuffer):
         if variant == 6:
             return DpayError.PubkeyMismatch(
             )
+        if variant == 7:
+            return DpayError.NfcWrongState(
+            )
+        if variant == 8:
+            return DpayError.NfcNotDpay(
+            )
+        if variant == 9:
+            return DpayError.NfcProtocol(
+            )
         raise InternalError("Raw enum value doesn't match any cases")
 
     @staticmethod
@@ -1238,6 +1441,12 @@ class _UniffiConverterTypeDpayError(_UniffiConverterRustBuffer):
             return
         if isinstance(value, DpayError.PubkeyMismatch):
             return
+        if isinstance(value, DpayError.NfcWrongState):
+            return
+        if isinstance(value, DpayError.NfcNotDpay):
+            return
+        if isinstance(value, DpayError.NfcProtocol):
+            return
 
     @staticmethod
     def write(value, buf):
@@ -1253,6 +1462,88 @@ class _UniffiConverterTypeDpayError(_UniffiConverterRustBuffer):
             buf.write_i32(5)
         if isinstance(value, DpayError.PubkeyMismatch):
             buf.write_i32(6)
+        if isinstance(value, DpayError.NfcWrongState):
+            buf.write_i32(7)
+        if isinstance(value, DpayError.NfcNotDpay):
+            buf.write_i32(8)
+        if isinstance(value, DpayError.NfcProtocol):
+            buf.write_i32(9)
+
+
+
+
+
+class NfcStep(enum.Enum):
+    """
+    What the merchant reader should do after feeding a card response — a flat enum (no associated
+    data) so it maps cleanly to every target language. When `Done`, pull the wire via
+    [`FfiReaderConductor::wire`].
+    """
+
+    CONTINUE = 0
+    """
+    Send the next command from `next_command`.
+    """
+
+    
+    PENDING = 1
+    """
+    The payer is still deciding — keep polling / re-tap (`next_command` re-SELECTs).
+    """
+
+    
+    DONE = 2
+    """
+    The signed wire is ready; fetch it with `wire()`, then verify + submit.
+    """
+
+    
+    DECLINED = 3
+    """
+    The payer declined; abandon the sale.
+    """
+
+    
+
+
+class _UniffiConverterTypeNfcStep(_UniffiConverterRustBuffer):
+    @staticmethod
+    def read(buf):
+        variant = buf.read_i32()
+        if variant == 1:
+            return NfcStep.CONTINUE
+        if variant == 2:
+            return NfcStep.PENDING
+        if variant == 3:
+            return NfcStep.DONE
+        if variant == 4:
+            return NfcStep.DECLINED
+        raise InternalError("Raw enum value doesn't match any cases")
+
+    @staticmethod
+    def check_lower(value):
+        if value == NfcStep.CONTINUE:
+            return
+        if value == NfcStep.PENDING:
+            return
+        if value == NfcStep.DONE:
+            return
+        if value == NfcStep.DECLINED:
+            return
+        raise ValueError(value)
+
+    @staticmethod
+    def write(value, buf):
+        if value == NfcStep.CONTINUE:
+            buf.write_i32(1)
+        if value == NfcStep.PENDING:
+            buf.write_i32(2)
+        if value == NfcStep.DONE:
+            buf.write_i32(3)
+        if value == NfcStep.DECLINED:
+            buf.write_i32(4)
+
+
 
 
 
@@ -1281,7 +1572,348 @@ class _UniffiConverterOptionalString(_UniffiConverterRustBuffer):
         else:
             raise InternalError("Unexpected flag byte for optional type")
 
+
+
+class _UniffiConverterOptionalBytes(_UniffiConverterRustBuffer):
+    @classmethod
+    def check_lower(cls, value):
+        if value is not None:
+            _UniffiConverterBytes.check_lower(value)
+
+    @classmethod
+    def write(cls, value, buf):
+        if value is None:
+            buf.write_u8(0)
+            return
+
+        buf.write_u8(1)
+        _UniffiConverterBytes.write(value, buf)
+
+    @classmethod
+    def read(cls, buf):
+        flag = buf.read_u8()
+        if flag == 0:
+            return None
+        elif flag == 1:
+            return _UniffiConverterBytes.read(buf)
+        else:
+            raise InternalError("Unexpected flag byte for optional type")
+
 # objects.
+class FfiCardSessionProtocol(typing.Protocol):
+    """
+    The **payer** side (Android HCE `HostApduService`). Hold one per tap; feed it each command APDU
+    and return the bytes it produces. Then read [`request`](Self::request), show "Pay $X to …", and
+    call [`provide_wire`](Self::provide_wire) (approve) or [`decline`](Self::decline).
+    """
+
+    def awaiting_decision(self, ):
+        """
+        True exactly when the app must approve or decline (a request is held, no decision yet).
+        """
+
+        raise NotImplementedError
+    def decline(self, ):
+        """
+        Decline: the payer rejected the payment. Every subsequent pull returns DECLINED.
+        """
+
+        raise NotImplementedError
+    def process(self, command: "bytes"):
+        """
+        Process one command APDU; returns the response APDU bytes. Total function — never throws.
+        """
+
+        raise NotImplementedError
+    def provide_wire(self, wire: "bytes"):
+        """
+        Approve: supply the offline-signed 192-byte wire to serve. Errors (`NfcWrongState`) unless a
+        request is held and no decision has been made; the wire is validated as it is framed.
+        """
+
+        raise NotImplementedError
+    def request(self, ):
+        """
+        The full received request bytes, once collected (decode with [`decode_request`] shifted — see
+        [`nfc_decode_request`]), or `None` while still collecting.
+        """
+
+        raise NotImplementedError
+# FfiCardSession is a Rust-only trait - it's a wrapper around a Rust implementation.
+class FfiCardSession():
+    """
+    The **payer** side (Android HCE `HostApduService`). Hold one per tap; feed it each command APDU
+    and return the bytes it produces. Then read [`request`](Self::request), show "Pay $X to …", and
+    call [`provide_wire`](Self::provide_wire) (approve) or [`decline`](Self::decline).
+    """
+
+    _pointer: ctypes.c_void_p
+    def __init__(self, max_chunk: "int"):
+        """
+        `max_chunk` is the max dpay-payload bytes per APDU frame; pass
+        [`nfc_default_max_chunk`]'s value in production.
+        """
+
+        _UniffiConverterUInt32.check_lower(max_chunk)
+        
+        self._pointer = _uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_constructor_fficardsession_new,
+        _UniffiConverterUInt32.lower(max_chunk))
+
+    def __del__(self):
+        # In case of partial initialization of instances.
+        pointer = getattr(self, "_pointer", None)
+        if pointer is not None:
+            _uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_free_fficardsession, pointer)
+
+    def _uniffi_clone_pointer(self):
+        return _uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_clone_fficardsession, self._pointer)
+
+    # Used by alternative constructors or any methods which return this type.
+    @classmethod
+    def _make_instance_(cls, pointer):
+        # Lightly yucky way to bypass the usual __init__ logic
+        # and just create a new instance with the required pointer.
+        inst = cls.__new__(cls)
+        inst._pointer = pointer
+        return inst
+
+
+    def awaiting_decision(self, ) -> "bool":
+        """
+        True exactly when the app must approve or decline (a request is held, no decision yet).
+        """
+
+        return _UniffiConverterBool.lift(
+            _uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_awaiting_decision,self._uniffi_clone_pointer(),)
+        )
+
+
+
+
+
+    def decline(self, ) -> None:
+        """
+        Decline: the payer rejected the payment. Every subsequent pull returns DECLINED.
+        """
+
+        _uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_decline,self._uniffi_clone_pointer(),)
+
+
+
+
+
+
+    def process(self, command: "bytes") -> "bytes":
+        """
+        Process one command APDU; returns the response APDU bytes. Total function — never throws.
+        """
+
+        _UniffiConverterBytes.check_lower(command)
+        
+        return _UniffiConverterBytes.lift(
+            _uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_process,self._uniffi_clone_pointer(),
+        _UniffiConverterBytes.lower(command))
+        )
+
+
+
+
+
+    def provide_wire(self, wire: "bytes") -> None:
+        """
+        Approve: supply the offline-signed 192-byte wire to serve. Errors (`NfcWrongState`) unless a
+        request is held and no decision has been made; the wire is validated as it is framed.
+        """
+
+        _UniffiConverterBytes.check_lower(wire)
+        
+        _uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_provide_wire,self._uniffi_clone_pointer(),
+        _UniffiConverterBytes.lower(wire))
+
+
+
+
+
+
+    def request(self, ) -> "typing.Optional[bytes]":
+        """
+        The full received request bytes, once collected (decode with [`decode_request`] shifted — see
+        [`nfc_decode_request`]), or `None` while still collecting.
+        """
+
+        return _UniffiConverterOptionalBytes.lift(
+            _uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_request,self._uniffi_clone_pointer(),)
+        )
+
+
+
+
+
+
+class _UniffiConverterTypeFfiCardSession:
+
+    @staticmethod
+    def lift(value: int):
+        return FfiCardSession._make_instance_(value)
+
+    @staticmethod
+    def check_lower(value: FfiCardSession):
+        if not isinstance(value, FfiCardSession):
+            raise TypeError("Expected FfiCardSession instance, {} found".format(type(value).__name__))
+
+    @staticmethod
+    def lower(value: FfiCardSessionProtocol):
+        if not isinstance(value, FfiCardSession):
+            raise TypeError("Expected FfiCardSession instance, {} found".format(type(value).__name__))
+        return value._uniffi_clone_pointer()
+
+    @classmethod
+    def read(cls, buf: _UniffiRustBuffer):
+        ptr = buf.read_u64()
+        if ptr == 0:
+            raise InternalError("Raw pointer value was null")
+        return cls.lift(ptr)
+
+    @classmethod
+    def write(cls, value: FfiCardSessionProtocol, buf: _UniffiRustBuffer):
+        buf.write_u64(cls.lower(value))
+class FfiReaderConductorProtocol(typing.Protocol):
+    """
+    The **merchant** side (NFC reader). Loop: `while let Some(cmd) = c.next_command() { step =
+    c.handle_response(transceive(cmd)); ... }`; on `Done`, read [`wire`](Self::wire), verify, submit.
+    """
+
+    def handle_response(self, response: "bytes"):
+        """
+        Feed the response to the last command; advance the state machine. On `Done` the wire is
+        captured (fetch via [`wire`](Self::wire)). Errors on a malformed/unexpected response.
+        """
+
+        raise NotImplementedError
+    def next_command(self, ):
+        """
+        The next command APDU to transceive, or `None` once the exchange is terminal.
+        """
+
+        raise NotImplementedError
+    def wire(self, ):
+        """
+        The reassembled 192-byte wire once the exchange reached `Done`, else `None`.
+        """
+
+        raise NotImplementedError
+# FfiReaderConductor is a Rust-only trait - it's a wrapper around a Rust implementation.
+class FfiReaderConductor():
+    """
+    The **merchant** side (NFC reader). Loop: `while let Some(cmd) = c.next_command() { step =
+    c.handle_response(transceive(cmd)); ... }`; on `Done`, read [`wire`](Self::wire), verify, submit.
+    """
+
+    _pointer: ctypes.c_void_p
+    def __init__(self, request: "bytes",max_chunk: "int"):
+        """
+        `request` is the merchant's 64-byte [`PaymentRequest`] wire (see [`nfc_request_bytes`]).
+        Errors (`NfcProtocol`) if the request can't be framed.
+        """
+
+        _UniffiConverterBytes.check_lower(request)
+        
+        _UniffiConverterUInt32.check_lower(max_chunk)
+        
+        self._pointer = _uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_constructor_ffireaderconductor_new,
+        _UniffiConverterBytes.lower(request),
+        _UniffiConverterUInt32.lower(max_chunk))
+
+    def __del__(self):
+        # In case of partial initialization of instances.
+        pointer = getattr(self, "_pointer", None)
+        if pointer is not None:
+            _uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_free_ffireaderconductor, pointer)
+
+    def _uniffi_clone_pointer(self):
+        return _uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_clone_ffireaderconductor, self._pointer)
+
+    # Used by alternative constructors or any methods which return this type.
+    @classmethod
+    def _make_instance_(cls, pointer):
+        # Lightly yucky way to bypass the usual __init__ logic
+        # and just create a new instance with the required pointer.
+        inst = cls.__new__(cls)
+        inst._pointer = pointer
+        return inst
+
+
+    def handle_response(self, response: "bytes") -> "NfcStep":
+        """
+        Feed the response to the last command; advance the state machine. On `Done` the wire is
+        captured (fetch via [`wire`](Self::wire)). Errors on a malformed/unexpected response.
+        """
+
+        _UniffiConverterBytes.check_lower(response)
+        
+        return _UniffiConverterTypeNfcStep.lift(
+            _uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_handle_response,self._uniffi_clone_pointer(),
+        _UniffiConverterBytes.lower(response))
+        )
+
+
+
+
+
+    def next_command(self, ) -> "typing.Optional[bytes]":
+        """
+        The next command APDU to transceive, or `None` once the exchange is terminal.
+        """
+
+        return _UniffiConverterOptionalBytes.lift(
+            _uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_next_command,self._uniffi_clone_pointer(),)
+        )
+
+
+
+
+
+    def wire(self, ) -> "typing.Optional[bytes]":
+        """
+        The reassembled 192-byte wire once the exchange reached `Done`, else `None`.
+        """
+
+        return _UniffiConverterOptionalBytes.lift(
+            _uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_wire,self._uniffi_clone_pointer(),)
+        )
+
+
+
+
+
+
+class _UniffiConverterTypeFfiReaderConductor:
+
+    @staticmethod
+    def lift(value: int):
+        return FfiReaderConductor._make_instance_(value)
+
+    @staticmethod
+    def check_lower(value: FfiReaderConductor):
+        if not isinstance(value, FfiReaderConductor):
+            raise TypeError("Expected FfiReaderConductor instance, {} found".format(type(value).__name__))
+
+    @staticmethod
+    def lower(value: FfiReaderConductorProtocol):
+        if not isinstance(value, FfiReaderConductor):
+            raise TypeError("Expected FfiReaderConductor instance, {} found".format(type(value).__name__))
+        return value._uniffi_clone_pointer()
+
+    @classmethod
+    def read(cls, buf: _UniffiRustBuffer):
+        ptr = buf.read_u64()
+        if ptr == 0:
+            raise InternalError("Raw pointer value was null")
+        return cls.lift(ptr)
+
+    @classmethod
+    def write(cls, value: FfiReaderConductorProtocol, buf: _UniffiRustBuffer):
+        buf.write_u64(cls.lower(value))
 
 # Async support
 
@@ -1346,6 +1978,47 @@ def generate_keypair() -> "KeyPair":
     """
 
     return _UniffiConverterTypeKeyPair.lift(_uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_func_generate_keypair,))
+
+
+def nfc_decode_request(bytes: "bytes") -> "PaymentRequestData":
+    """
+    Payer side: decode the request bytes the card reassembled back into its fields, to show
+    "Pay $X to <merchant>" before approving. Length-guarded (`NfcProtocol` on a bad length).
+    """
+
+    _UniffiConverterBytes.check_lower(bytes)
+    
+    return _UniffiConverterTypePaymentRequestData.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_decode_request,
+        _UniffiConverterBytes.lower(bytes)))
+
+
+def nfc_default_max_chunk() -> "int":
+    """
+    The recommended per-frame max payload (bytes) — pass to the session/conductor constructors.
+    """
+
+    return _UniffiConverterUInt32.lift(_uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_default_max_chunk,))
+
+
+def nfc_request_bytes(to: "bytes",amount: "int",nonce: "bytes",expiry: "int") -> "bytes":
+    """
+    Merchant side: the raw 64-byte request wire the reader will push over NFC (the same bytes the
+    request QR base64-encodes). Mirrors [`encode_request`] but returns the bytes NFC transports.
+    """
+
+    _UniffiConverterBytes.check_lower(to)
+    
+    _UniffiConverterUInt64.check_lower(amount)
+    
+    _UniffiConverterBytes.check_lower(nonce)
+    
+    _UniffiConverterUInt64.check_lower(expiry)
+    
+    return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_request_bytes,
+        _UniffiConverterBytes.lower(to),
+        _UniffiConverterUInt64.lower(amount),
+        _UniffiConverterBytes.lower(nonce),
+        _UniffiConverterUInt64.lower(expiry)))
 
 
 def sign_authorization(secret: "bytes",to: "bytes",amount: "int",nonce: "bytes",expiry: "int") -> "bytes":
@@ -1423,6 +2096,7 @@ def verify_wire(wire: "bytes") -> "bool":
 __all__ = [
     "InternalError",
     "DpayError",
+    "NfcStep",
     "KeyPair",
     "PaymentRequestData",
     "decode_qr",
@@ -1430,8 +2104,13 @@ __all__ = [
     "encode_qr",
     "encode_request",
     "generate_keypair",
+    "nfc_decode_request",
+    "nfc_default_max_chunk",
+    "nfc_request_bytes",
     "sign_authorization",
     "validate",
     "verify_wire",
+    "FfiCardSession",
+    "FfiReaderConductor",
 ]
 

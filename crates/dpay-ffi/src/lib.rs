@@ -47,6 +47,30 @@ pub enum DpayError {
     BadWireLength,
     #[error("the authorization's `from` disagrees with the carried public key")]
     PubkeyMismatch,
+    // --- NFC transport (see `dpay_core::nfc`) ---
+    #[error("nfc: a command/call was issued in a state that doesn't allow it")]
+    NfcWrongState,
+    #[error("nfc: the tapped card is not a dpay card")]
+    NfcNotDpay,
+    #[error("nfc: framing or protocol violation (malformed/oversized/out-of-sequence)")]
+    NfcProtocol,
+}
+
+impl From<dpay_core::nfc::NfcError> for DpayError {
+    fn from(e: dpay_core::nfc::NfcError) -> Self {
+        use dpay_core::nfc::NfcError as N;
+        match e {
+            N::WrongState => DpayError::NfcWrongState,
+            N::NotDpay => DpayError::NfcNotDpay,
+            // Every framing / APDU / status / version fault is a protocol violation from the app's
+            // point of view: abort this tap and (for the merchant) re-tap or fall back to QR.
+            N::Apdu(_)
+            | N::Frame(_)
+            | N::UnsupportedVersion(_)
+            | N::UnexpectedStatus(_)
+            | N::ShortGreeting => DpayError::NfcProtocol,
+        }
+    }
 }
 
 impl From<CodecError> for DpayError {
@@ -208,4 +232,159 @@ pub fn validate(
         Ok(()) => None,
         Err(e) => Some(pay_error_str(e)),
     }
+}
+
+// =============================================================================================
+// NFC transport (ISO 7816-4 / HCE) — stateful wrappers over `dpay_core::nfc`.
+//
+// These expose the *exact* compiled framing state machines to the app's languages, so the Android
+// HCE service (payer) and NFC reader (merchant) are thin loops over the same code Claude tests. The
+// core is pure and single-threaded per session; UniFFI requires exported objects be `Send + Sync`,
+// so each wraps its session in a `Mutex`. The core never panics, so the lock is never poisoned —
+// but we recover from poison anyway rather than propagate a panic across the FFI.
+// =============================================================================================
+
+use dpay_core::nfc::{self, CardSession, ReaderConductor, ReaderStep};
+use std::sync::{Arc, Mutex, MutexGuard};
+
+/// What the merchant reader should do after feeding a card response — a flat enum (no associated
+/// data) so it maps cleanly to every target language. When `Done`, pull the wire via
+/// [`FfiReaderConductor::wire`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug, uniffi::Enum)]
+pub enum NfcStep {
+    /// Send the next command from `next_command`.
+    Continue,
+    /// The payer is still deciding — keep polling / re-tap (`next_command` re-SELECTs).
+    Pending,
+    /// The signed wire is ready; fetch it with `wire()`, then verify + submit.
+    Done,
+    /// The payer declined; abandon the sale.
+    Declined,
+}
+
+/// Lock helper that tolerates a poisoned mutex (can only happen if a panic ever unwound while the
+/// lock was held; the pure core never does, so this is belt-and-suspenders).
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// The **payer** side (Android HCE `HostApduService`). Hold one per tap; feed it each command APDU
+/// and return the bytes it produces. Then read [`request`](Self::request), show "Pay $X to …", and
+/// call [`provide_wire`](Self::provide_wire) (approve) or [`decline`](Self::decline).
+#[derive(uniffi::Object)]
+pub struct FfiCardSession {
+    inner: Mutex<CardSession>,
+}
+
+#[uniffi::export]
+impl FfiCardSession {
+    /// `max_chunk` is the max dpay-payload bytes per APDU frame; pass
+    /// [`nfc_default_max_chunk`]'s value in production.
+    #[uniffi::constructor]
+    pub fn new(max_chunk: u32) -> Arc<Self> {
+        Arc::new(FfiCardSession { inner: Mutex::new(CardSession::new(max_chunk as usize)) })
+    }
+
+    /// Process one command APDU; returns the response APDU bytes. Total function — never throws.
+    pub fn process(&self, command: Vec<u8>) -> Vec<u8> {
+        lock(&self.inner).process(&command)
+    }
+
+    /// The full received request bytes, once collected (decode with [`decode_request`] shifted — see
+    /// [`nfc_decode_request`]), or `None` while still collecting.
+    pub fn request(&self) -> Option<Vec<u8>> {
+        lock(&self.inner).request().map(|r| r.to_vec())
+    }
+
+    /// True exactly when the app must approve or decline (a request is held, no decision yet).
+    pub fn awaiting_decision(&self) -> bool {
+        lock(&self.inner).awaiting_decision()
+    }
+
+    /// Approve: supply the offline-signed 192-byte wire to serve. Errors (`NfcWrongState`) unless a
+    /// request is held and no decision has been made; the wire is validated as it is framed.
+    pub fn provide_wire(&self, wire: Vec<u8>) -> Result<(), DpayError> {
+        Ok(lock(&self.inner).provide_wire(&wire)?)
+    }
+
+    /// Decline: the payer rejected the payment. Every subsequent pull returns DECLINED.
+    pub fn decline(&self) -> Result<(), DpayError> {
+        Ok(lock(&self.inner).decline()?)
+    }
+}
+
+/// The **merchant** side (NFC reader). Loop: `while let Some(cmd) = c.next_command() { step =
+/// c.handle_response(transceive(cmd)); ... }`; on `Done`, read [`wire`](Self::wire), verify, submit.
+#[derive(uniffi::Object)]
+pub struct FfiReaderConductor {
+    inner: Mutex<ReaderConductor>,
+    wire: Mutex<Option<Vec<u8>>>,
+}
+
+#[uniffi::export]
+impl FfiReaderConductor {
+    /// `request` is the merchant's 64-byte [`PaymentRequest`] wire (see [`nfc_request_bytes`]).
+    /// Errors (`NfcProtocol`) if the request can't be framed.
+    #[uniffi::constructor]
+    pub fn new(request: Vec<u8>, max_chunk: u32) -> Result<Arc<Self>, DpayError> {
+        let inner = ReaderConductor::new(&request, max_chunk as usize)?;
+        Ok(Arc::new(FfiReaderConductor { inner: Mutex::new(inner), wire: Mutex::new(None) }))
+    }
+
+    /// The next command APDU to transceive, or `None` once the exchange is terminal.
+    pub fn next_command(&self) -> Option<Vec<u8>> {
+        lock(&self.inner).next_command()
+    }
+
+    /// Feed the response to the last command; advance the state machine. On `Done` the wire is
+    /// captured (fetch via [`wire`](Self::wire)). Errors on a malformed/unexpected response.
+    pub fn handle_response(&self, response: Vec<u8>) -> Result<NfcStep, DpayError> {
+        match lock(&self.inner).handle_response(&response)? {
+            ReaderStep::Continue => Ok(NfcStep::Continue),
+            ReaderStep::Pending => Ok(NfcStep::Pending),
+            ReaderStep::Declined => Ok(NfcStep::Declined),
+            ReaderStep::Done(w) => {
+                *lock(&self.wire) = Some(w);
+                Ok(NfcStep::Done)
+            }
+        }
+    }
+
+    /// The reassembled 192-byte wire once the exchange reached `Done`, else `None`.
+    pub fn wire(&self) -> Option<Vec<u8>> {
+        lock(&self.wire).clone()
+    }
+}
+
+/// The recommended per-frame max payload (bytes) — pass to the session/conductor constructors.
+#[uniffi::export]
+pub fn nfc_default_max_chunk() -> u32 {
+    nfc::DEFAULT_MAX_CHUNK as u32
+}
+
+/// Merchant side: the raw 64-byte request wire the reader will push over NFC (the same bytes the
+/// request QR base64-encodes). Mirrors [`encode_request`] but returns the bytes NFC transports.
+#[uniffi::export]
+pub fn nfc_request_bytes(
+    to: &[u8],
+    amount: u64,
+    nonce: &[u8],
+    expiry: u64,
+) -> Result<Vec<u8>, DpayError> {
+    let to = fixed_pubkey(to)?;
+    let nonce = fixed_nonce(nonce)?;
+    Ok(PaymentRequest { to, amount, nonce, expiry }.to_bytes().to_vec())
+}
+
+/// Payer side: decode the request bytes the card reassembled back into its fields, to show
+/// "Pay $X to <merchant>" before approving. Length-guarded (`NfcProtocol` on a bad length).
+#[uniffi::export]
+pub fn nfc_decode_request(bytes: &[u8]) -> Result<PaymentRequestData, DpayError> {
+    let req = nfc::request_from_transport(bytes)?;
+    Ok(PaymentRequestData {
+        to: req.to.to_vec(),
+        amount: req.amount,
+        nonce: req.nonce.to_vec(),
+        expiry: req.expiry,
+    })
 }

@@ -107,5 +107,66 @@ except d.DpayError.PubkeyMismatch:
     check(True, "from/from_pub mismatch -> DpayError.PubkeyMismatch")
 
 
+# 6) NFC transport: drive the whole HCE card <-> reader exchange through the real core ---------
+# Every APDU below is built, parsed, framed, and reassembled by the *same* compiled dpay-core the
+# canister links — so a green run proves the phone's NFC path signs & settles the real ledger code.
+MAX_CHUNK = d.nfc_default_max_chunk()
+check(MAX_CHUNK == 240, "nfc_default_max_chunk() == 240")
+
+req_nonce = bytes(range(16, 32))                       # the merchant's request_id -> ledger nonce
+req_bytes = d.nfc_request_bytes(to_kp.public, amount, req_nonce, expiry)
+check(len(req_bytes) == 64, "nfc_request_bytes -> 64-byte request wire")
+nfc_wire = d.sign_authorization(kp.secret, to_kp.public, amount, req_nonce, expiry)
+
+
+def run_nfc(max_chunk, approve=True):
+    """Loop the merchant reader against the payer's HCE card entirely in memory, returning the wire
+    the reader reassembled (or None if the payer declined). Bounded so a stuck machine can't hang."""
+    card = d.FfiCardSession(max_chunk)
+    reader = d.FfiReaderConductor(req_bytes, max_chunk)
+    for _ in range(5000):
+        cmd = reader.next_command()
+        if cmd is None:
+            raise AssertionError("reader ran out of commands before finishing")
+        resp = card.process(cmd)
+        if card.awaiting_decision():
+            seen = d.nfc_decode_request(card.request())   # payer reviews "Pay $X to <merchant>"
+            assert seen.amount == amount and seen.nonce == req_nonce
+            (card.provide_wire(nfc_wire) if approve else card.decline())
+        step = reader.handle_response(resp)
+        if step == d.NfcStep.DONE:
+            return reader.wire()
+        if step == d.NfcStep.DECLINED:
+            return None
+    raise AssertionError("NFC exchange did not terminate")
+
+
+# Production single-frame path and the heavily-fragmented (1 byte/frame) path both deliver the
+# exact signed wire — and it still verifies under the same crypto the canister enforces.
+for mc in (MAX_CHUNK, 1):
+    got = run_nfc(mc)
+    check(got == nfc_wire, f"NFC exchange delivers byte-identical wire (chunk={mc})")
+    check(d.verify_wire(got) is True, f"reassembled wire still verifies (chunk={mc})")
+
+# The decline path surfaces as Declined — never a hang, never a bogus wire.
+check(run_nfc(MAX_CHUNK, approve=False) is None, "NFC decline -> reader sees Declined")
+
+# A non-dpay tap (SELECT answered 'application not found') is a typed error, not silent acceptance.
+try:
+    r = d.FfiReaderConductor(req_bytes, MAX_CHUNK)
+    r.next_command()                                   # the SELECT
+    r.handle_response(bytes([0x6a, 0x82]))             # SW 6A82: not found
+    raise AssertionError("FAILED: NotDpay should have raised")
+except d.DpayError.NfcNotDpay:
+    check(True, "non-dpay SELECT response -> DpayError.NfcNotDpay")
+
+# provide_wire out of turn is a typed state error, not a silent no-op.
+try:
+    d.FfiCardSession(MAX_CHUNK).provide_wire(nfc_wire)
+    raise AssertionError("FAILED: provide_wire before a request should have raised")
+except d.DpayError.NfcWrongState:
+    check(True, "provide_wire with no request -> DpayError.NfcWrongState")
+
+
 print(f"\nALL {passed} FFI CHECKS PASSED — Python called the real dpay-core across UniFFI.")
 sys.exit(0)

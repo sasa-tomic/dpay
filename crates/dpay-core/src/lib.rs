@@ -12,6 +12,11 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 
+/// NFC (ISO 7816-4 / ISO-DEP) transport framing — an alternative carrier for the *same* bytes the
+/// QR path moves (the request and the signed wire). Pure, panic-free, and headless-testable; the
+/// Android HCE service / reader are thin loops over [`nfc::CardSession`] / [`nfc::ReaderConductor`].
+pub mod nfc;
+
 pub const PUBKEY_LEN: usize = 32;
 pub const SIG_LEN: usize = 64;
 pub const NONCE_LEN: usize = 16;
