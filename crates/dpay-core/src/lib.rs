@@ -244,6 +244,54 @@ impl PaymentRequest {
     }
 }
 
+/// nonce(16) | status(1).
+pub const RECEIPT_LEN: usize = NONCE_LEN + 1;
+/// The ledger settled the payment.
+pub const RECEIPT_SETTLED: u8 = 0;
+/// The ledger refused the payment (insufficient funds, expired, over cap, nonce reused, bad sig).
+pub const RECEIPT_REJECTED: u8 = 1;
+/// The merchant could not reach the ledger (network/timeout) — outcome unknown, not settled.
+pub const RECEIPT_UNREACHABLE: u8 = 2;
+
+/// The settlement outcome the (online) merchant hands back to the (offline) payer so the payer's
+/// phone learns whether the payment actually went through — carried over the same NFC tap (or, one
+/// day, a receipt QR). It names the `nonce` it answers (so the payer can match it to the exact
+/// payment they signed) and a `status`.
+///
+/// **PoC trust model:** the receipt is *unsigned*. The payer's signature already binds the amount,
+/// payee, and single-use nonce, so a merchant can neither overcharge nor double-charge; the only
+/// thing an unsigned receipt can't stop is a merchant lying about the outcome, and the incentives
+/// don't favour that (claiming "paid" when it wasn't only costs the merchant). A canister-signed
+/// receipt (the payer verifying the ledger's key) is the production hardening.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Receipt {
+    pub nonce: [u8; NONCE_LEN],
+    pub status: u8,
+}
+
+impl Receipt {
+    /// Raw form: `nonce(16) | status(1)`. Field order frozen.
+    pub fn to_bytes(&self) -> [u8; RECEIPT_LEN] {
+        let mut b = [0u8; RECEIPT_LEN];
+        b[0..NONCE_LEN].copy_from_slice(&self.nonce);
+        b[NONCE_LEN] = self.status;
+        b
+    }
+
+    /// Parse the raw form. Rejects a wrong length.
+    pub fn from_bytes(raw: &[u8]) -> Result<Self, CodecError> {
+        if raw.len() != RECEIPT_LEN {
+            return Err(CodecError::Length);
+        }
+        Ok(Receipt { nonce: raw[0..NONCE_LEN].try_into().unwrap(), status: raw[NONCE_LEN] })
+    }
+
+    /// True when the ledger settled the payment.
+    pub fn settled(&self) -> bool {
+        self.status == RECEIPT_SETTLED
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests (keygen needs `rng`): run with `cargo nextest run -p dpay-core --features rng`
 // ---------------------------------------------------------------------------

@@ -257,6 +257,8 @@ pub enum NfcPhase {
     Linking,
     Exchanging,
     AwaitingApproval,
+    /// The wire was transferred; the merchant is settling online and the payer awaits the receipt.
+    Settling,
     Complete,
     Declined,
 }
@@ -268,6 +270,7 @@ impl From<SessionPhase> for NfcPhase {
             SessionPhase::Linking => NfcPhase::Linking,
             SessionPhase::Exchanging => NfcPhase::Exchanging,
             SessionPhase::AwaitingApproval => NfcPhase::AwaitingApproval,
+            SessionPhase::Settling => NfcPhase::Settling,
             SessionPhase::Complete => NfcPhase::Complete,
             SessionPhase::Declined => NfcPhase::Declined,
         }
@@ -283,8 +286,11 @@ pub enum NfcStep {
     Continue,
     /// The payer is still deciding — keep polling / re-tap (`next_command` re-SELECTs).
     Pending,
-    /// The signed wire is ready; fetch it with `wire()`, then verify + submit.
+    /// The signed wire is ready; fetch it with `wire()`, then verify + submit online. Afterwards
+    /// call `provideReceipt` to hand the outcome back to the payer over the same tap.
     Done,
+    /// The settlement receipt was delivered to the payer — the tap is fully complete.
+    Confirmed,
     /// The payer declined; abandon the sale.
     Declined,
 }
@@ -333,9 +339,21 @@ impl FfiCardSession {
         lock(&self.inner).phase().into()
     }
 
-    /// True once the merchant has pulled the entire signed wire ("Sent ✓").
+    /// True once the merchant has pulled the entire signed wire (the wire has left the phone).
     pub fn is_complete(&self) -> bool {
         lock(&self.inner).is_complete()
+    }
+
+    /// The merchant's settlement receipt bytes once it arrives over the tap (decode with
+    /// [`nfc_decode_receipt`]) — how the *offline* payer learns whether the payment settled. `None`
+    /// until it arrives.
+    pub fn receipt(&self) -> Option<Vec<u8>> {
+        lock(&self.inner).receipt().map(|r| r.to_vec())
+    }
+
+    /// True once the receipt has arrived (the tap is fully complete).
+    pub fn is_confirmed(&self) -> bool {
+        lock(&self.inner).is_confirmed()
     }
 
     /// Approve: supply the offline-signed 192-byte wire to serve. Errors (`NfcWrongState`) unless a
@@ -386,6 +404,7 @@ impl FfiReaderConductor {
             ReaderStep::Continue => Ok(NfcStep::Continue),
             ReaderStep::Pending => Ok(NfcStep::Pending),
             ReaderStep::Declined => Ok(NfcStep::Declined),
+            ReaderStep::Confirmed => Ok(NfcStep::Confirmed),
             ReaderStep::Done(w) => {
                 *lock(&self.wire) = Some(w);
                 Ok(NfcStep::Done)
@@ -396,6 +415,13 @@ impl FfiReaderConductor {
     /// The reassembled 192-byte wire once the exchange reached `Done`, else `None`.
     pub fn wire(&self) -> Option<Vec<u8>> {
         lock(&self.wire).clone()
+    }
+
+    /// After `Done` and settling online, hand back the settlement receipt (build it with
+    /// [`nfc_receipt_bytes`]) so the offline payer learns the outcome. Then resume the loop:
+    /// `next_command` yields the receipt push, ending in a `Confirmed` step.
+    pub fn provide_receipt(&self, receipt: Vec<u8>) -> Result<(), DpayError> {
+        Ok(lock(&self.inner).provide_receipt(&receipt)?)
     }
 }
 
@@ -430,4 +456,46 @@ pub fn nfc_decode_request(bytes: &[u8]) -> Result<PaymentRequestData, DpayError>
         nonce: req.nonce.to_vec(),
         expiry: req.expiry,
     })
+}
+
+/// A settlement receipt as fields. `status`: 0 = settled, 1 = the ledger rejected it, 2 = the
+/// merchant couldn't reach the ledger (see [`nfc_receipt_codes`]); `settled` == (status == 0).
+#[derive(uniffi::Record, Clone)]
+pub struct ReceiptData {
+    pub nonce: Vec<u8>,
+    pub status: u8,
+    pub settled: bool,
+}
+
+/// The receipt status codes from the core, so callers don't hard-code them.
+#[derive(uniffi::Record, Clone)]
+pub struct ReceiptCodes {
+    pub settled: u8,
+    pub rejected: u8,
+    pub unreachable: u8,
+}
+
+#[uniffi::export]
+pub fn nfc_receipt_codes() -> ReceiptCodes {
+    ReceiptCodes {
+        settled: dpay_core::RECEIPT_SETTLED,
+        rejected: dpay_core::RECEIPT_REJECTED,
+        unreachable: dpay_core::RECEIPT_UNREACHABLE,
+    }
+}
+
+/// Merchant side: build the settlement receipt to hand back to the payer over the tap after settling
+/// online. `nonce` is the payment's nonce (so the payer can match it); `status` per [`nfc_receipt_codes`].
+#[uniffi::export]
+pub fn nfc_receipt_bytes(nonce: &[u8], status: u8) -> Result<Vec<u8>, DpayError> {
+    let nonce = fixed_nonce(nonce)?;
+    Ok(dpay_core::Receipt { nonce, status }.to_bytes().to_vec())
+}
+
+/// Payer side: decode the receipt the card received, so the offline payer shows the outcome and can
+/// confirm it matches the payment they signed (by nonce). Length-guarded.
+#[uniffi::export]
+pub fn nfc_decode_receipt(bytes: &[u8]) -> Result<ReceiptData, DpayError> {
+    let r = nfc::receipt_from_transport(bytes)?;
+    Ok(ReceiptData { nonce: r.nonce.to_vec(), status: r.status, settled: r.settled() })
 }

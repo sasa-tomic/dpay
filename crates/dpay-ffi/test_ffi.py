@@ -188,8 +188,42 @@ card.provide_wire(nfc_wire)                                           # payer ap
 check(card.phase() == d.NfcPhase.EXCHANGING, "card -> Exchanging while serving the wire")
 
 step = reader.handle_response(card.process(reader.next_command()))   # pull the wire (1 frame)
-check(card.phase() == d.NfcPhase.COMPLETE and card.is_complete(), "card -> Complete after last frame")
-check(step == d.NfcStep.DONE and reader.phase() == d.NfcPhase.COMPLETE, "reader -> Complete / Done")
+check(step == d.NfcStep.DONE, "reader -> Done (has the wire)")
+check(card.is_complete() and not card.is_confirmed(), "card: wire sent but not yet confirmed")
+check(card.phase() == d.NfcPhase.SETTLING, "card -> Settling (awaiting the receipt)")
+check(reader.phase() == d.NfcPhase.SETTLING, "reader -> Settling (about to submit online)")
+check(reader.next_command() is None, "reader waits for the merchant to settle online")
+
+
+# 8) Receipt-return: the (online) merchant hands the settlement outcome back to the offline payer ---
+codes = d.nfc_receipt_codes()
+check(codes.settled == 0, "receipt code: settled == 0")
+receipt = d.nfc_receipt_bytes(req_nonce, codes.settled)          # merchant settled → build receipt
+reader.provide_receipt(receipt)
+rstep = reader.handle_response(card.process(reader.next_command()))  # push receipt (1 frame)
+check(rstep == d.NfcStep.CONFIRMED, "reader -> Confirmed after delivering the receipt")
+check(card.is_confirmed() and card.phase() == d.NfcPhase.COMPLETE, "card -> Confirmed / Complete")
+
+# The offline payer decodes the outcome and matches it to the payment it signed (by nonce).
+got = d.nfc_decode_receipt(card.receipt())
+check(got.settled is True, "payer sees: settled")
+check(got.nonce == req_nonce, "receipt nonce matches the signed payment")
+
+# A rejected settlement is carried back just as faithfully.
+c2 = d.FfiCardSession(MAX_CHUNK)
+r2 = d.FfiReaderConductor(req_bytes, MAX_CHUNK)
+while True:
+    cmd = r2.next_command()
+    if cmd is None:
+        r2.provide_receipt(d.nfc_receipt_bytes(req_nonce, codes.rejected))
+        continue
+    resp = c2.process(cmd)
+    if c2.awaiting_decision():
+        c2.provide_wire(nfc_wire)
+    s = r2.handle_response(resp)
+    if s == d.NfcStep.CONFIRMED:
+        break
+check(d.nfc_decode_receipt(c2.receipt()).settled is False, "payer sees: rejected (settled == False)")
 
 
 print(f"\nALL {passed} FFI CHECKS PASSED — Python called the real dpay-core across UniFFI.")

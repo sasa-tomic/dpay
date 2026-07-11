@@ -764,6 +764,18 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is 
 // rather `InterfaceTooLargeException`, caused by too many methods 
@@ -789,9 +801,15 @@ fun uniffi_dpay_ffi_checksum_func_encode_request(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_generate_keypair(
 ): Short
+fun uniffi_dpay_ffi_checksum_func_nfc_decode_receipt(
+): Short
 fun uniffi_dpay_ffi_checksum_func_nfc_decode_request(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_nfc_default_max_chunk(
+): Short
+fun uniffi_dpay_ffi_checksum_func_nfc_receipt_bytes(
+): Short
+fun uniffi_dpay_ffi_checksum_func_nfc_receipt_codes(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_nfc_request_bytes(
 ): Short
@@ -807,11 +825,15 @@ fun uniffi_dpay_ffi_checksum_method_fficardsession_decline(
 ): Short
 fun uniffi_dpay_ffi_checksum_method_fficardsession_is_complete(
 ): Short
+fun uniffi_dpay_ffi_checksum_method_fficardsession_is_confirmed(
+): Short
 fun uniffi_dpay_ffi_checksum_method_fficardsession_phase(
 ): Short
 fun uniffi_dpay_ffi_checksum_method_fficardsession_process(
 ): Short
 fun uniffi_dpay_ffi_checksum_method_fficardsession_provide_wire(
+): Short
+fun uniffi_dpay_ffi_checksum_method_fficardsession_receipt(
 ): Short
 fun uniffi_dpay_ffi_checksum_method_fficardsession_request(
 ): Short
@@ -820,6 +842,8 @@ fun uniffi_dpay_ffi_checksum_method_ffireaderconductor_handle_response(
 fun uniffi_dpay_ffi_checksum_method_ffireaderconductor_next_command(
 ): Short
 fun uniffi_dpay_ffi_checksum_method_ffireaderconductor_phase(
+): Short
+fun uniffi_dpay_ffi_checksum_method_ffireaderconductor_provide_receipt(
 ): Short
 fun uniffi_dpay_ffi_checksum_method_ffireaderconductor_wire(
 ): Short
@@ -888,12 +912,16 @@ fun uniffi_dpay_ffi_fn_method_fficardsession_decline(`ptr`: Pointer,uniffi_out_e
 ): Unit
 fun uniffi_dpay_ffi_fn_method_fficardsession_is_complete(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
+fun uniffi_dpay_ffi_fn_method_fficardsession_is_confirmed(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
 fun uniffi_dpay_ffi_fn_method_fficardsession_phase(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_method_fficardsession_process(`ptr`: Pointer,`command`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_method_fficardsession_provide_wire(`ptr`: Pointer,`wire`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+fun uniffi_dpay_ffi_fn_method_fficardsession_receipt(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_method_fficardsession_request(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_clone_ffireaderconductor(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
@@ -908,6 +936,8 @@ fun uniffi_dpay_ffi_fn_method_ffireaderconductor_next_command(`ptr`: Pointer,uni
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_method_ffireaderconductor_phase(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_method_ffireaderconductor_provide_receipt(`ptr`: Pointer,`receipt`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 fun uniffi_dpay_ffi_fn_method_ffireaderconductor_wire(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_decode_qr(`payload`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -920,10 +950,16 @@ fun uniffi_dpay_ffi_fn_func_encode_request(`to`: RustBuffer.ByValue,`amount`: Lo
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_generate_keypair(uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_nfc_decode_receipt(`bytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_nfc_decode_request(`bytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_nfc_default_max_chunk(uniffi_out_err: UniffiRustCallStatus, 
 ): Int
+fun uniffi_dpay_ffi_fn_func_nfc_receipt_bytes(`nonce`: RustBuffer.ByValue,`status`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_nfc_receipt_codes(uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_nfc_request_bytes(`to`: RustBuffer.ByValue,`amount`: Long,`nonce`: RustBuffer.ByValue,`expiry`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_sign_authorization(`secret`: RustBuffer.ByValue,`to`: RustBuffer.ByValue,`amount`: Long,`nonce`: RustBuffer.ByValue,`expiry`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1073,10 +1109,19 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_dpay_ffi_checksum_func_generate_keypair() != 36207.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_dpay_ffi_checksum_func_nfc_decode_receipt() != 25249.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_dpay_ffi_checksum_func_nfc_decode_request() != 23641.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_nfc_default_max_chunk() != 39928.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_nfc_receipt_bytes() != 22674.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_nfc_receipt_codes() != 63617.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_nfc_request_bytes() != 61291.toShort()) {
@@ -1097,7 +1142,10 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_dpay_ffi_checksum_method_fficardsession_decline() != 61902.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_dpay_ffi_checksum_method_fficardsession_is_complete() != 59776.toShort()) {
+    if (lib.uniffi_dpay_ffi_checksum_method_fficardsession_is_complete() != 56233.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_method_fficardsession_is_confirmed() != 18987.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_method_fficardsession_phase() != 35411.toShort()) {
@@ -1107,6 +1155,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_method_fficardsession_provide_wire() != 51089.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_method_fficardsession_receipt() != 54809.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_method_fficardsession_request() != 31957.toShort()) {
@@ -1119,6 +1170,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_phase() != 45891.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_provide_receipt() != 18499.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_wire() != 8289.toShort()) {
@@ -1271,6 +1325,29 @@ private class JavaLangRefCleanable(
     val cleanable: java.lang.ref.Cleaner.Cleanable
 ) : UniffiCleaner.Cleanable {
     override fun clean() = cleanable.clean()
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterUByte: FfiConverter<UByte, Byte> {
+    override fun lift(value: Byte): UByte {
+        return value.toUByte()
+    }
+
+    override fun read(buf: ByteBuffer): UByte {
+        return lift(buf.get())
+    }
+
+    override fun lower(value: UByte): Byte {
+        return value.toByte()
+    }
+
+    override fun allocationSize(value: UByte) = 1UL
+
+    override fun write(value: UByte, buf: ByteBuffer) {
+        buf.put(value.toByte())
+    }
 }
 
 /**
@@ -1535,9 +1612,14 @@ public interface FfiCardSessionInterface {
     fun `decline`()
     
     /**
-     * True once the merchant has pulled the entire signed wire ("Sent ✓").
+     * True once the merchant has pulled the entire signed wire (the wire has left the phone).
      */
     fun `isComplete`(): kotlin.Boolean
+    
+    /**
+     * True once the receipt has arrived (the tap is fully complete).
+     */
+    fun `isConfirmed`(): kotlin.Boolean
     
     /**
      * Lifecycle phase for the payer-side status UI.
@@ -1554,6 +1636,13 @@ public interface FfiCardSessionInterface {
      * request is held and no decision has been made; the wire is validated as it is framed.
      */
     fun `provideWire`(`wire`: kotlin.ByteArray)
+    
+    /**
+     * The merchant's settlement receipt bytes once it arrives over the tap (decode with
+     * [`nfc_decode_receipt`]) — how the *offline* payer learns whether the payment settled. `None`
+     * until it arrives.
+     */
+    fun `receipt`(): kotlin.ByteArray?
     
     /**
      * The full received request bytes, once collected (decode with [`decode_request`] shifted — see
@@ -1694,12 +1783,27 @@ open class FfiCardSession: Disposable, AutoCloseable, FfiCardSessionInterface
 
     
     /**
-     * True once the merchant has pulled the entire signed wire ("Sent ✓").
+     * True once the merchant has pulled the entire signed wire (the wire has left the phone).
      */override fun `isComplete`(): kotlin.Boolean {
             return FfiConverterBoolean.lift(
     callWithPointer {
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_method_fficardsession_is_complete(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * True once the receipt has arrived (the tap is fully complete).
+     */override fun `isConfirmed`(): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_method_fficardsession_is_confirmed(
         it, _status)
 }
     }
@@ -1751,6 +1855,23 @@ open class FfiCardSession: Disposable, AutoCloseable, FfiCardSessionInterface
 }
     }
     
+    
+
+    
+    /**
+     * The merchant's settlement receipt bytes once it arrives over the tap (decode with
+     * [`nfc_decode_receipt`]) — how the *offline* payer learns whether the payment settled. `None`
+     * until it arrives.
+     */override fun `receipt`(): kotlin.ByteArray? {
+            return FfiConverterOptionalByteArray.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_method_fficardsession_receipt(
+        it, _status)
+}
+    }
+    )
+    }
     
 
     
@@ -1928,6 +2049,13 @@ public interface FfiReaderConductorInterface {
     fun `phase`(): NfcPhase
     
     /**
+     * After `Done` and settling online, hand back the settlement receipt (build it with
+     * [`nfc_receipt_bytes`]) so the offline payer learns the outcome. Then resume the loop:
+     * `next_command` yields the receipt push, ending in a `Confirmed` step.
+     */
+    fun `provideReceipt`(`receipt`: kotlin.ByteArray)
+    
+    /**
      * The reassembled 192-byte wire once the exchange reached `Done`, else `None`.
      */
     fun `wire`(): kotlin.ByteArray?
@@ -2082,6 +2210,23 @@ open class FfiReaderConductor: Disposable, AutoCloseable, FfiReaderConductorInte
 
     
     /**
+     * After `Done` and settling online, hand back the settlement receipt (build it with
+     * [`nfc_receipt_bytes`]) so the offline payer learns the outcome. Then resume the loop:
+     * `next_command` yields the receipt push, ending in a `Confirmed` step.
+     */
+    @Throws(DpayException::class)override fun `provideReceipt`(`receipt`: kotlin.ByteArray)
+        = 
+    callWithPointer {
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_method_ffireaderconductor_provide_receipt(
+        it, FfiConverterByteArray.lower(`receipt`),_status)
+}
+    }
+    
+    
+
+    
+    /**
      * The reassembled 192-byte wire once the exchange reached `Done`, else `None`.
      */override fun `wire`(): kotlin.ByteArray? {
             return FfiConverterOptionalByteArray.lift(
@@ -2218,6 +2363,85 @@ public object FfiConverterTypePaymentRequestData: FfiConverterRustBuffer<Payment
             FfiConverterULong.write(value.`amount`, buf)
             FfiConverterByteArray.write(value.`nonce`, buf)
             FfiConverterULong.write(value.`expiry`, buf)
+    }
+}
+
+
+
+/**
+ * The receipt status codes from the core, so callers don't hard-code them.
+ */
+data class ReceiptCodes (
+    var `settled`: kotlin.UByte, 
+    var `rejected`: kotlin.UByte, 
+    var `unreachable`: kotlin.UByte
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeReceiptCodes: FfiConverterRustBuffer<ReceiptCodes> {
+    override fun read(buf: ByteBuffer): ReceiptCodes {
+        return ReceiptCodes(
+            FfiConverterUByte.read(buf),
+            FfiConverterUByte.read(buf),
+            FfiConverterUByte.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ReceiptCodes) = (
+            FfiConverterUByte.allocationSize(value.`settled`) +
+            FfiConverterUByte.allocationSize(value.`rejected`) +
+            FfiConverterUByte.allocationSize(value.`unreachable`)
+    )
+
+    override fun write(value: ReceiptCodes, buf: ByteBuffer) {
+            FfiConverterUByte.write(value.`settled`, buf)
+            FfiConverterUByte.write(value.`rejected`, buf)
+            FfiConverterUByte.write(value.`unreachable`, buf)
+    }
+}
+
+
+
+/**
+ * A settlement receipt as fields. `status`: 0 = settled, 1 = the ledger rejected it, 2 = the
+ * merchant couldn't reach the ledger (see [`nfc_receipt_codes`]); `settled` == (status == 0).
+ */
+data class ReceiptData (
+    var `nonce`: kotlin.ByteArray, 
+    var `status`: kotlin.UByte, 
+    var `settled`: kotlin.Boolean
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeReceiptData: FfiConverterRustBuffer<ReceiptData> {
+    override fun read(buf: ByteBuffer): ReceiptData {
+        return ReceiptData(
+            FfiConverterByteArray.read(buf),
+            FfiConverterUByte.read(buf),
+            FfiConverterBoolean.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ReceiptData) = (
+            FfiConverterByteArray.allocationSize(value.`nonce`) +
+            FfiConverterUByte.allocationSize(value.`status`) +
+            FfiConverterBoolean.allocationSize(value.`settled`)
+    )
+
+    override fun write(value: ReceiptData, buf: ByteBuffer) {
+            FfiConverterByteArray.write(value.`nonce`, buf)
+            FfiConverterUByte.write(value.`status`, buf)
+            FfiConverterBoolean.write(value.`settled`, buf)
     }
 }
 
@@ -2413,6 +2637,10 @@ enum class NfcPhase {
     LINKING,
     EXCHANGING,
     AWAITING_APPROVAL,
+    /**
+     * The wire was transferred; the merchant is settling online and the payer awaits the receipt.
+     */
+    SETTLING,
     COMPLETE,
     DECLINED;
     companion object
@@ -2457,9 +2685,14 @@ enum class NfcStep {
      */
     PENDING,
     /**
-     * The signed wire is ready; fetch it with `wire()`, then verify + submit.
+     * The signed wire is ready; fetch it with `wire()`, then verify + submit online. Afterwards
+     * call `provideReceipt` to hand the outcome back to the payer over the same tap.
      */
     DONE,
+    /**
+     * The settlement receipt was delivered to the payer — the tap is fully complete.
+     */
+    CONFIRMED,
     /**
      * The payer declined; abandon the sale.
      */
@@ -2617,6 +2850,20 @@ public object FfiConverterOptionalByteArray: FfiConverterRustBuffer<kotlin.ByteA
     
 
         /**
+         * Payer side: decode the receipt the card received, so the offline payer shows the outcome and can
+         * confirm it matches the payment they signed (by nonce). Length-guarded.
+         */
+    @Throws(DpayException::class) fun `nfcDecodeReceipt`(`bytes`: kotlin.ByteArray): ReceiptData {
+            return FfiConverterTypeReceiptData.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_nfc_decode_receipt(
+        FfiConverterByteArray.lower(`bytes`),_status)
+}
+    )
+    }
+    
+
+        /**
          * Payer side: decode the request bytes the card reassembled back into its fields, to show
          * "Pay $X to <merchant>" before approving. Length-guarded (`NfcProtocol` on a bad length).
          */
@@ -2636,6 +2883,29 @@ public object FfiConverterOptionalByteArray: FfiConverterRustBuffer<kotlin.ByteA
             return FfiConverterUInt.lift(
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_nfc_default_max_chunk(
+        _status)
+}
+    )
+    }
+    
+
+        /**
+         * Merchant side: build the settlement receipt to hand back to the payer over the tap after settling
+         * online. `nonce` is the payment's nonce (so the payer can match it); `status` per [`nfc_receipt_codes`].
+         */
+    @Throws(DpayException::class) fun `nfcReceiptBytes`(`nonce`: kotlin.ByteArray, `status`: kotlin.UByte): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_nfc_receipt_bytes(
+        FfiConverterByteArray.lower(`nonce`),FfiConverterUByte.lower(`status`),_status)
+}
+    )
+    }
+    
+ fun `nfcReceiptCodes`(): ReceiptCodes {
+            return FfiConverterTypeReceiptCodes.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_nfc_receipt_codes(
         _status)
 }
     )

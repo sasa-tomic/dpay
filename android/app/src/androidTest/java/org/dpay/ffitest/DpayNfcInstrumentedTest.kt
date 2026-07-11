@@ -1,6 +1,7 @@
 package org.dpay.ffitest
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -13,8 +14,11 @@ import uniffi.dpay_ffi.FfiReaderConductor
 import uniffi.dpay_ffi.NfcPhase
 import uniffi.dpay_ffi.NfcStep
 import uniffi.dpay_ffi.generateKeypair
+import uniffi.dpay_ffi.nfcDecodeReceipt
 import uniffi.dpay_ffi.nfcDecodeRequest
 import uniffi.dpay_ffi.nfcDefaultMaxChunk
+import uniffi.dpay_ffi.nfcReceiptBytes
+import uniffi.dpay_ffi.nfcReceiptCodes
 import uniffi.dpay_ffi.nfcRequestBytes
 import uniffi.dpay_ffi.signAuthorization
 import uniffi.dpay_ffi.verifyWire
@@ -89,6 +93,55 @@ class DpayNfcInstrumentedTest {
         assertNull(drive(nfcDefaultMaxChunk(), approve = false))
     }
 
+    /**
+     * The complete round trip on-device: request → offline-signed auth → the merchant "settles" →
+     * the settlement receipt returns to the (offline) payer, who ends up Confirmed and can read the
+     * outcome. This is the full flow the app performs over one tap.
+     */
+    @Test
+    fun receiptReturnsToPayerOnDevice() {
+        val payer = generateKeypair()
+        val merchant = generateKeypair()
+        val request = nfcRequestBytes(merchant.`public`, amount, nonce, expiry)
+        val mc = nfcDefaultMaxChunk()
+        val card = FfiCardSession(mc)
+        val reader = FfiReaderConductor(request, mc)
+
+        var approved = false
+        var delivered: ByteArray? = null
+        var receipted = false
+        repeat(5_000) {
+            val cmd = reader.nextCommand()
+            if (cmd == null) {
+                // Reader is at Done, waiting for the merchant to settle online, then send the receipt.
+                assertNotNull(delivered)
+                assertFalse(receipted)
+                reader.provideReceipt(nfcReceiptBytes(nonce, nfcReceiptCodes().settled))
+                receipted = true
+                return@repeat
+            }
+            val resp = card.process(cmd)
+            if (card.awaitingDecision() && !approved) {
+                card.provideWire(signAuthorization(payer.secret, merchant.`public`, amount, nonce, expiry))
+                approved = true
+            }
+            when (reader.handleResponse(resp)) {
+                NfcStep.DONE -> delivered = reader.wire()
+                NfcStep.CONFIRMED -> {
+                    // Payer is confirmed and can read the outcome it never had to go online for.
+                    assertTrue(card.isConfirmed())
+                    assertEquals(NfcPhase.COMPLETE, card.phase())
+                    val got = nfcDecodeReceipt(card.receipt()!!)
+                    assertTrue("payer sees the payment settled", got.settled)
+                    assertArrayEquals("receipt nonce matches the signed payment", nonce, got.nonce)
+                    return
+                }
+                else -> {}
+            }
+        }
+        error("receipt round trip did not terminate")
+    }
+
     /** The lifecycle phases the UI status view renders are produced by the real machine on-device. */
     @Test
     fun phaseSequenceOnDevice() {
@@ -113,7 +166,16 @@ class DpayNfcInstrumentedTest {
 
         val step = reader.handleResponse(card.process(reader.nextCommand()!!)) // pull the wire
         assertEquals(NfcStep.DONE, step)
-        assertTrue(card.isComplete())
+        assertTrue(card.isComplete()) // the wire left the phone…
+        assertFalse(card.isConfirmed()) // …but the outcome isn't known until the receipt
+        assertEquals(NfcPhase.SETTLING, card.phase())
+        assertEquals(NfcPhase.SETTLING, reader.phase())
+
+        // Merchant settles online, then hands the receipt back → both sides Complete.
+        reader.provideReceipt(nfcReceiptBytes(n, nfcReceiptCodes().settled))
+        val done = reader.handleResponse(card.process(reader.nextCommand()!!))
+        assertEquals(NfcStep.CONFIRMED, done)
+        assertTrue(card.isConfirmed())
         assertEquals(NfcPhase.COMPLETE, card.phase())
         assertEquals(NfcPhase.COMPLETE, reader.phase())
     }

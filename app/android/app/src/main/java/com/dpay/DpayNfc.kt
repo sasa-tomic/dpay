@@ -9,13 +9,17 @@ import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.WritableMap
 import com.facebook.react.modules.core.DeviceEventManagerModule.RCTDeviceEventEmitter
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.TimeUnit
 import uniffi.dpay_ffi.DpayException
 import uniffi.dpay_ffi.FfiCardSession
 import uniffi.dpay_ffi.FfiReaderConductor
 import uniffi.dpay_ffi.NfcPhase
 import uniffi.dpay_ffi.NfcStep
+import uniffi.dpay_ffi.nfcDecodeReceipt
 import uniffi.dpay_ffi.nfcDecodeRequest
 import uniffi.dpay_ffi.nfcDefaultMaxChunk
+import uniffi.dpay_ffi.nfcReceiptBytes
 
 /**
  * Rendezvous between the app's JS layer and the two NFC roles' state machines from the shared core:
@@ -39,6 +43,11 @@ object DpayNfc {
     private var card: FfiCardSession? = null
     private var reader: FfiReaderConductor? = null
     private var requestSent = false
+    private var receiptSent = false
+    // Merchant side: the payment nonce (to stamp the receipt) and a 1-slot rendezvous the reader
+    // thread waits on while JS settles online, then delivers the status code (see `confirmReceipt`).
+    private var readerNonce: ByteArray? = null
+    private var receiptSignal: ArrayBlockingQueue<Int>? = null
 
     // dpay "not ready" warning SW (mirrors dpay_core::nfc Sw::NOT_READY) — returned when a reader
     // taps but no payer session is armed.
@@ -80,6 +89,7 @@ object DpayNfc {
         NfcPhase.LINKING -> "linking"
         NfcPhase.EXCHANGING -> "exchanging"
         NfcPhase.AWAITING_APPROVAL -> "awaitingApproval"
+        NfcPhase.SETTLING -> "settling"
         NfcPhase.COMPLETE -> "success"
         NfcPhase.DECLINED -> "declined"
     }
@@ -99,12 +109,14 @@ object DpayNfc {
     fun armCard() {
         card = FfiCardSession(maxChunk)
         requestSent = false
+        receiptSent = false
         phaseEvent("card", "listening")
     }
 
     fun disarmCard() {
         card = null
         requestSent = false
+        receiptSent = false
     }
 
     /** Called by [DpayHostApduService] for every command APDU. Total function — never throws. */
@@ -117,11 +129,32 @@ object DpayNfc {
                 requestSent = true
                 emitRequest(c.request())
             }
+            // The merchant's receipt has arrived — the offline payer now learns the outcome.
+            if (c.isConfirmed() && !receiptSent) {
+                receiptSent = true
+                emitReceipt(c.receipt())
+            }
             phaseEvent("card", uiPhase(c.phase()))
             resp
         } catch (e: Throwable) {
             // The core never panics, but never let an exception escape into the NFC stack.
             SW_WRONG_LENGTH
+        }
+    }
+
+    private fun emitReceipt(receiptBytes: ByteArray?) {
+        val bytes = receiptBytes ?: return
+        try {
+            val r = nfcDecodeReceipt(bytes)
+            val m = Arguments.createMap()
+            m.putString("type", "receipt")
+            m.putString("role", "card")
+            m.putBoolean("settled", r.settled)
+            m.putInt("status", r.status.toInt())
+            m.putString("nonceHex", hex(r.nonce))
+            emit(m)
+        } catch (e: Throwable) {
+            errorEvent("card", "Received a malformed receipt")
         }
     }
 
@@ -176,6 +209,9 @@ object DpayNfc {
             }
         }
         reader = FfiReaderConductor(request, maxChunk)
+        // The nonce lives at request bytes [40, 56): to(32) | amount(8) | nonce(16) | expiry(8).
+        readerNonce = if (request.size >= 56) request.copyOfRange(40, 56) else null
+        receiptSignal = ArrayBlockingQueue(1)
         phaseEvent("reader", "listening")
         // NFC-A / ISO-DEP, and skip the NDEF check (HCE cards are not NDEF tags).
         adapter!!.enableReaderMode(
@@ -186,12 +222,20 @@ object DpayNfc {
         )
     }
 
+    /** JS calls this after settling online with the outcome code (see the core receipt codes:
+     *  0 settled, 1 rejected, 2 unreachable). It wakes the reader thread to push the receipt. */
+    fun confirmReceipt(status: Int) {
+        receiptSignal?.offer(status)
+    }
+
     fun stopReader(activity: Activity) {
         try {
             NfcAdapter.getDefaultAdapter(activity)?.disableReaderMode(activity)
         } catch (_: Throwable) {
         }
         reader = null
+        readerNonce = null
+        receiptSignal = null
     }
 
     /**
@@ -207,10 +251,25 @@ object DpayNfc {
         }
         try {
             isoDep.connect()
-            isoDep.timeout = 3000
+            isoDep.timeout = 5000
             phaseEvent("reader", "linking")
+            var wireInHand = false
             while (true) {
-                val cmd = r.nextCommand() ?: break
+                val cmd = r.nextCommand()
+                if (cmd == null) {
+                    // The reader is at Done, waiting for the merchant to settle online and confirm.
+                    if (!wireInHand) break
+                    phaseEvent("reader", "settling")
+                    // Block (holding the field) until JS finishes the online submit and confirms.
+                    val status = receiptSignal?.poll(15, TimeUnit.SECONDS)
+                    if (status == null) {
+                        errorEvent("reader", "Confirmation timed out — hold the phones together")
+                        break
+                    }
+                    val nonce = readerNonce ?: ByteArray(16)
+                    r.provideReceipt(nfcReceiptBytes(nonce, status.toUByte()))
+                    continue // resume the loop to push the receipt back to the payer
+                }
                 val resp = isoDep.transceive(cmd)
                 when (r.handleResponse(resp)) {
                     NfcStep.CONTINUE -> phaseEvent("reader", uiPhase(r.phase()))
@@ -220,7 +279,12 @@ object DpayNfc {
                         Thread.sleep(120)
                     }
                     NfcStep.DONE -> {
+                        // The signed wire is in hand → hand it to JS to submit online; keep the field.
+                        wireInHand = true
                         emitDone(r.wire())
+                    }
+                    NfcStep.CONFIRMED -> {
+                        emitConfirmed()
                         break
                     }
                     NfcStep.DECLINED -> {
@@ -252,6 +316,14 @@ object DpayNfc {
         m.putString("type", "done")
         m.putString("role", "reader")
         m.putString("wireHex", hex(wire))
+        emit(m)
+    }
+
+    /** The receipt was delivered to the payer — the tap is fully complete on the merchant side. */
+    private fun emitConfirmed() {
+        val m = Arguments.createMap()
+        m.putString("type", "confirmed")
+        m.putString("role", "reader")
         emit(m)
     }
 }

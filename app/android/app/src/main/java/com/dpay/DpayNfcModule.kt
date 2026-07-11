@@ -89,6 +89,14 @@ class DpayNfcModule(reactContext: ReactApplicationContext) :
         try { DpayNfc.startReader(act, unhex(requestHex)); promise.resolve(null) } catch (e: Throwable) { promise.reject("dpay_nfc", e) }
     }
 
+    /** After settling online, hand the outcome back to the payer over the same tap. `status`:
+     *  0 = settled, 1 = ledger rejected, 2 = ledger unreachable. */
+    @ReactMethod
+    fun confirmReceipt(status: Double, promise: Promise) {
+        DpayNfc.confirmReceipt(status.toInt())
+        promise.resolve(null)
+    }
+
     @ReactMethod
     fun stopReader(promise: Promise) {
         currentActivity?.let { DpayNfc.stopReader(it) }

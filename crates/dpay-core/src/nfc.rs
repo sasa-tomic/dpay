@@ -37,7 +37,7 @@
 //! so the OS never routes a POS tap to dpay nor a dpay tap to Wallet. Routing is by AID, and this one
 //! is dpay's alone.
 
-use crate::{PaymentRequest, SignedAuthorization, REQUEST_LEN, WIRE_LEN};
+use crate::{PaymentRequest, Receipt, SignedAuthorization, RECEIPT_LEN, REQUEST_LEN, WIRE_LEN};
 
 // ===========================================================================
 // Shared constants
@@ -449,6 +449,7 @@ const CLA_PROP: u8 = 0x80;
 const INS_SELECT: u8 = 0xA4;
 const INS_PUT_REQUEST: u8 = 0xC2; // reader → card: one request frame
 const INS_GET_WIRE: u8 = 0xC4; // reader → card: pull one wire frame
+const INS_PUT_RECEIPT: u8 = 0xC6; // reader → card: the settlement outcome (after the merchant settles)
 
 // SELECT-by-name parameters (P1=0x04 "select by DF name", P2=0x00 "first or only occurrence").
 const P1_SELECT_BY_NAME: u8 = 0x04;
@@ -530,7 +531,10 @@ pub enum SessionPhase {
     Exchanging,
     /// The payer is holding the request, deciding whether to approve.
     AwaitingApproval,
-    /// The signed wire was fully transferred.
+    /// The signed wire was transferred; the merchant is settling online and the payer awaits the
+    /// receipt (both sides are here between the wire leaving and the outcome coming back).
+    Settling,
+    /// The exchange finished — the payer has the merchant's receipt (settled or not).
     Complete,
     /// The payer declined.
     Declined,
@@ -558,8 +562,10 @@ enum CardState {
     Serving,
     /// The payer declined; every pull returns `DECLINED`.
     Declined,
-    /// The wire was fully served.
+    /// The wire was fully served; the merchant is settling online (payer awaits the receipt).
     Done,
+    /// The merchant's settlement receipt arrived — the payer knows the outcome.
+    Confirmed,
 }
 
 /// The payer-side (HCE card) half of the exchange. Drop-in for Android's
@@ -578,6 +584,8 @@ pub struct CardSession {
     request: Vec<u8>,
     wire_frames: Vec<Vec<u8>>,
     send_idx: usize,
+    receipt_reasm: Reassembler,
+    receipt: Vec<u8>,
 }
 
 impl CardSession {
@@ -591,6 +599,8 @@ impl CardSession {
             request: Vec::new(),
             wire_frames: Vec::new(),
             send_idx: 0,
+            receipt_reasm: Reassembler::new(),
+            receipt: Vec::new(),
         }
     }
 
@@ -598,7 +608,9 @@ impl CardSession {
     /// SELECT that restarts collection). This is what the app decodes to show the payer.
     pub fn request(&self) -> Option<&[u8]> {
         match self.state {
-            CardState::RequestReady | CardState::Serving | CardState::Done => Some(&self.request),
+            CardState::RequestReady | CardState::Serving | CardState::Done | CardState::Confirmed => {
+                Some(&self.request)
+            }
             _ => None,
         }
     }
@@ -615,14 +627,28 @@ impl CardSession {
             CardState::Collecting => SessionPhase::Linking,
             CardState::RequestReady => SessionPhase::AwaitingApproval,
             CardState::Serving => SessionPhase::Exchanging,
-            CardState::Done => SessionPhase::Complete,
+            CardState::Done => SessionPhase::Settling,
+            CardState::Confirmed => SessionPhase::Complete,
             CardState::Declined => SessionPhase::Declined,
         }
     }
 
-    /// True once the merchant has pulled the entire signed wire (payer UI shows "Sent ✓").
+    /// True once the merchant has pulled the entire signed wire (the wire left the phone). The final
+    /// outcome is not known until [`receipt`](Self::receipt) arrives.
     pub fn is_complete(&self) -> bool {
-        self.state == CardState::Done
+        matches!(self.state, CardState::Done | CardState::Confirmed)
+    }
+
+    /// The merchant's settlement receipt bytes, once it has arrived (decode with
+    /// [`crate::Receipt::from_bytes`]). `None` until then. This is how the *offline* payer learns
+    /// whether the payment settled.
+    pub fn receipt(&self) -> Option<&[u8]> {
+        if self.state == CardState::Confirmed { Some(&self.receipt) } else { None }
+    }
+
+    /// True once the receipt has arrived (the tap is fully complete).
+    pub fn is_confirmed(&self) -> bool {
+        self.state == CardState::Confirmed
     }
 
     /// Approve: supply the offline-signed wire to serve to the reader. Must be called in the
@@ -672,6 +698,7 @@ impl CardSession {
             (CLA_ISO, INS_SELECT) => self.on_select(&cmd),
             (CLA_PROP, INS_PUT_REQUEST) => self.on_put_request(&cmd),
             (CLA_PROP, INS_GET_WIRE) => self.on_get_wire(),
+            (CLA_PROP, INS_PUT_RECEIPT) => self.on_put_receipt(&cmd),
             (CLA_PROP, _) => ResponseApdu::status(Sw::INS_NOT_SUPPORTED),
             _ => ResponseApdu::status(Sw::CLA_NOT_SUPPORTED),
         };
@@ -689,7 +716,7 @@ impl CardSession {
             // Sticky decline: refuse selection so a re-tapping reader gets the DECLINED verdict
             // instead of silently restarting collection.
             CardState::Declined => return ResponseApdu::status(Sw::DECLINED),
-            CardState::Serving | CardState::Done => {
+            CardState::Serving | CardState::Done | CardState::Confirmed => {
                 self.send_idx = 0;
                 self.state = CardState::Serving;
             }
@@ -756,7 +783,28 @@ impl CardSession {
                 }
             }
             // Fully served already; a stray pull after completion is benign — nothing more to send.
-            CardState::Done => ResponseApdu::status(Sw::OK),
+            CardState::Done | CardState::Confirmed => ResponseApdu::status(Sw::OK),
+        }
+    }
+
+    /// Accept the merchant's settlement receipt (sent after it settles online, over the same tap).
+    /// Valid only once the wire has been fully served (state `Done`); otherwise it's out of sequence.
+    fn on_put_receipt(&mut self, cmd: &CommandApdu) -> ResponseApdu {
+        if self.state != CardState::Done {
+            return ResponseApdu::status(Sw::NOT_READY);
+        }
+        let frame = match frame::Frame::parse(&cmd.data) {
+            Ok(f) => f,
+            Err(_) => return ResponseApdu::status(Sw::BAD_DATA),
+        };
+        match self.receipt_reasm.accept(&frame) {
+            Ok(Some(payload)) => {
+                self.receipt = payload;
+                self.state = CardState::Confirmed;
+                ResponseApdu::status(Sw::OK)
+            }
+            Ok(None) => ResponseApdu::status(Sw::OK),
+            Err(_) => ResponseApdu::status(Sw::BAD_DATA),
         }
     }
 }
@@ -773,8 +821,12 @@ enum ReaderState {
     Pushing,
     /// Pulling wire frames.
     Pulling,
-    /// Finished — the wire is available via the returned step.
+    /// The wire is in hand; the merchant settles online, then calls `provide_receipt`.
     Done,
+    /// Pushing the settlement receipt back to the payer.
+    PushingReceipt,
+    /// The receipt was delivered — the payer has been told the outcome.
+    Confirmed,
     /// The payer declined.
     Declined,
 }
@@ -787,8 +839,11 @@ pub enum ReaderStep {
     /// The card is holding the request but the payer hasn't decided yet. The caller should keep
     /// polling (a held field) or wait and re-tap; `next_command` re-SELECTs so a re-tap resumes.
     Pending,
-    /// The full signed wire — verify it and submit to the relay/canister.
+    /// The full signed wire — verify it and submit to the relay/canister. The merchant then settles
+    /// online and calls [`ReaderConductor::provide_receipt`] to hand the outcome back to the payer.
     Done(Vec<u8>),
+    /// The settlement receipt was delivered to the payer — the tap is fully complete.
+    Confirmed,
     /// The payer declined; abandon the sale.
     Declined,
 }
@@ -801,6 +856,9 @@ pub struct ReaderConductor {
     req_frames: Vec<Vec<u8>>,
     push_idx: usize,
     reasm: Reassembler,
+    max_chunk: usize,
+    receipt_frames: Vec<Vec<u8>>,
+    receipt_idx: usize,
 }
 
 impl ReaderConductor {
@@ -813,6 +871,9 @@ impl ReaderConductor {
             req_frames,
             push_idx: 0,
             reasm: Reassembler::new(),
+            max_chunk: max_chunk.max(1),
+            receipt_frames: Vec::new(),
+            receipt_idx: 0,
         })
     }
 
@@ -823,13 +884,29 @@ impl ReaderConductor {
         match self.state {
             ReaderState::NeedSelect => SessionPhase::Linking,
             ReaderState::Pushing | ReaderState::Pulling => SessionPhase::Exchanging,
-            ReaderState::Done => SessionPhase::Complete,
+            ReaderState::Done | ReaderState::PushingReceipt => SessionPhase::Settling,
+            ReaderState::Confirmed => SessionPhase::Complete,
             ReaderState::Declined => SessionPhase::Declined,
         }
     }
 
-    /// The next command APDU to transceive, or `None` once the exchange is terminal
-    /// (`Done`/`Declined`).
+    /// After a [`ReaderStep::Done`], the merchant settles online and then calls this with the
+    /// settlement `receipt` bytes ([`crate::Receipt::to_bytes`]) to hand the outcome back to the
+    /// payer over the same tap. Resume the transceive loop afterwards. Valid only in the `Done`
+    /// state; errors if the receipt can't be framed.
+    pub fn provide_receipt(&mut self, receipt: &[u8]) -> Result<(), NfcError> {
+        if self.state != ReaderState::Done {
+            return Err(NfcError::WrongState);
+        }
+        self.receipt_frames = frame::fragment(receipt, self.max_chunk)?;
+        self.receipt_idx = 0;
+        self.state = ReaderState::PushingReceipt;
+        Ok(())
+    }
+
+    /// The next command APDU to transceive, or `None` when the caller must act: at `Done` (settle
+    /// online, then [`provide_receipt`](Self::provide_receipt)) or when the exchange is terminal
+    /// (`Confirmed`/`Declined`).
     pub fn next_command(&self) -> Option<Vec<u8>> {
         match self.state {
             ReaderState::NeedSelect => Some(build_select()),
@@ -847,7 +924,18 @@ impl ReaderConductor {
             ReaderState::Pulling => {
                 Some(CommandApdu::expecting(CLA_PROP, INS_GET_WIRE, 0, 0, 256).encode())
             }
-            ReaderState::Done | ReaderState::Declined => None,
+            ReaderState::PushingReceipt => Some(
+                CommandApdu::with_data(
+                    CLA_PROP,
+                    INS_PUT_RECEIPT,
+                    0,
+                    0,
+                    self.receipt_frames[self.receipt_idx].clone(),
+                    None,
+                )
+                .encode(),
+            ),
+            ReaderState::Done | ReaderState::Confirmed | ReaderState::Declined => None,
         }
     }
 
@@ -859,8 +947,24 @@ impl ReaderConductor {
             ReaderState::NeedSelect => self.after_select(&resp),
             ReaderState::Pushing => self.after_push(&resp),
             ReaderState::Pulling => self.after_pull(&resp),
-            // Terminal: no further responses are expected.
-            ReaderState::Done | ReaderState::Declined => Err(NfcError::WrongState),
+            ReaderState::PushingReceipt => self.after_receipt_push(&resp),
+            // Terminal, or waiting for the app to settle + provide_receipt: no response expected.
+            ReaderState::Done | ReaderState::Confirmed | ReaderState::Declined => {
+                Err(NfcError::WrongState)
+            }
+        }
+    }
+
+    fn after_receipt_push(&mut self, resp: &ResponseApdu) -> Result<ReaderStep, NfcError> {
+        if !resp.sw.is_ok() {
+            return Err(NfcError::UnexpectedStatus(resp.sw.0));
+        }
+        self.receipt_idx += 1;
+        if self.receipt_idx == self.receipt_frames.len() {
+            self.state = ReaderState::Confirmed;
+            Ok(ReaderStep::Confirmed)
+        } else {
+            Ok(ReaderStep::Continue)
         }
     }
 
@@ -971,6 +1075,15 @@ pub fn request_from_transport(bytes: &[u8]) -> Result<PaymentRequest, NfcError> 
     PaymentRequest::from_bytes(bytes).map_err(|_| NfcError::Frame(FrameError::ShortPayload))
 }
 
+/// Decode the settlement receipt bytes the payer's card received back into a [`Receipt`], with a
+/// length guard, so the (offline) payer can show the outcome and match the nonce.
+pub fn receipt_from_transport(bytes: &[u8]) -> Result<Receipt, NfcError> {
+    if bytes.len() != RECEIPT_LEN {
+        return Err(NfcError::Frame(FrameError::ShortPayload));
+    }
+    Receipt::from_bytes(bytes).map_err(|_| NfcError::Frame(FrameError::ShortPayload))
+}
+
 // ===========================================================================
 // Tests — all headless, offline, deterministic. Run via `just test-core`
 // (`cargo nextest run -p dpay-core --features rng`). The `rng`-gated tests build a real
@@ -981,6 +1094,7 @@ mod tests {
     use super::apdu::{ApduError, CommandApdu, ResponseApdu, Sw};
     use super::frame::{self, Frame, FrameError, Reassembler, FLAG_LAST};
     use super::*;
+    use crate::{RECEIPT_REJECTED, RECEIPT_SETTLED, RECEIPT_UNREACHABLE};
     use proptest::prelude::*;
 
     // ---- APDU layer -------------------------------------------------------
@@ -1181,12 +1295,47 @@ mod tests {
             match reader.handle_response(&resp)? {
                 ReaderStep::Continue => {}
                 ReaderStep::Pending => pending_seen += 1,
-                step @ (ReaderStep::Done(_) | ReaderStep::Declined) => {
+                step @ (ReaderStep::Done(_) | ReaderStep::Declined | ReaderStep::Confirmed) => {
                     return Ok(Driven { step, card_request, pending_seen });
                 }
             }
         }
         Err(NfcError::WrongState) // exceeded the loop bound → would-be hang, surfaced as a failure
+    }
+
+    /// The full tap including the receipt-return: run to `Done`, hand the reader a receipt (as the
+    /// merchant would after settling online), then pump the loop until the payer's card is
+    /// `Confirmed`. Returns the wire the merchant reassembled and the receipt the card received.
+    fn drive_full(request: &[u8], wire: &[u8], receipt: &[u8], max_chunk: usize) -> (Vec<u8>, Vec<u8>) {
+        let mut card = CardSession::new(max_chunk);
+        let mut reader = ReaderConductor::new(request, max_chunk).unwrap();
+        let mut approved = false;
+        let mut delivered: Option<Vec<u8>> = None;
+        let mut receipted = false;
+
+        for _ in 0..(MAX_FRAMES * 16 + 256) {
+            let Some(cmd) = reader.next_command() else {
+                // The reader is at `Done` waiting for the merchant to settle + provide the receipt.
+                assert!(delivered.is_some() && !receipted, "unexpected terminal");
+                reader.provide_receipt(receipt).unwrap();
+                receipted = true;
+                continue;
+            };
+            let resp = card.process(&cmd);
+            if card.awaiting_decision() && !approved {
+                card.provide_wire(wire).unwrap();
+                approved = true;
+            }
+            match reader.handle_response(&resp).unwrap() {
+                ReaderStep::Done(w) => delivered = Some(w),
+                ReaderStep::Confirmed => {
+                    assert!(card.is_confirmed(), "card must be confirmed once the reader is");
+                    return (delivered.unwrap(), card.receipt().unwrap().to_vec());
+                }
+                _ => {}
+            }
+        }
+        panic!("full exchange did not terminate");
     }
 
     fn sample_request() -> Vec<u8> {
@@ -1347,12 +1496,65 @@ mod tests {
         card.provide_wire(&wire).unwrap();
         assert_eq!(card.phase(), SessionPhase::Exchanging);
 
-        // Pull the wire → both sides complete.
+        // Pull the wire → the wire has left the payer, but the outcome isn't known yet (Settling).
         let framed = card.process(&reader.next_command().unwrap());
-        assert_eq!(card.phase(), SessionPhase::Complete);
-        assert!(card.is_complete());
+        assert_eq!(card.phase(), SessionPhase::Settling);
+        assert!(card.is_complete()); // the wire is out…
+        assert!(!card.is_confirmed()); // …but not yet confirmed
         assert!(matches!(reader.handle_response(&framed).unwrap(), ReaderStep::Done(_)));
+        assert_eq!(reader.phase(), SessionPhase::Settling);
+        assert!(reader.next_command().is_none(), "reader waits for the merchant to settle online");
+
+        // Merchant settles online, then hands the receipt back over the same tap.
+        let receipt = Receipt { nonce: [9u8; 16], status: RECEIPT_SETTLED }.to_bytes();
+        reader.provide_receipt(&receipt).unwrap();
+        let rframe = card.process(&reader.next_command().unwrap());
+        assert_eq!(card.phase(), SessionPhase::Complete);
+        assert!(card.is_confirmed());
+        assert_eq!(card.receipt().unwrap(), receipt);
+        assert!(matches!(reader.handle_response(&rframe).unwrap(), ReaderStep::Confirmed));
         assert_eq!(reader.phase(), SessionPhase::Complete);
+
+        // The payer decodes the outcome.
+        let decoded = receipt_from_transport(card.receipt().unwrap()).unwrap();
+        assert!(decoded.settled());
+        assert_eq!(decoded.nonce, [9u8; 16]);
+    }
+
+    #[test]
+    fn receipt_returns_to_the_payer() {
+        let req = sample_request(); // nonce = [9; 16]
+        let wire = vec![0xABu8; WIRE_LEN];
+        for status in [RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE] {
+            let receipt = Receipt { nonce: [9u8; 16], status }.to_bytes().to_vec();
+            // Single-frame and byte-fragmented (tiny chunk splits even the 17-byte receipt).
+            for mc in [DEFAULT_MAX_CHUNK, 3] {
+                let (delivered, got) = drive_full(&req, &wire, &receipt, mc);
+                assert_eq!(delivered, wire, "status={status} chunk={mc}");
+                assert_eq!(got, receipt, "status={status} chunk={mc}");
+                let r = receipt_from_transport(&got).unwrap();
+                assert_eq!(r.status, status);
+                assert_eq!(r.settled(), status == RECEIPT_SETTLED);
+            }
+        }
+    }
+
+    #[test]
+    fn provide_receipt_wrong_state_is_typed_error() {
+        // Before the wire is served, there's nothing to receipt.
+        let mut reader = ReaderConductor::new(&sample_request(), DEFAULT_MAX_CHUNK).unwrap();
+        let receipt = Receipt { nonce: [9u8; 16], status: RECEIPT_SETTLED }.to_bytes();
+        assert_eq!(reader.provide_receipt(&receipt), Err(NfcError::WrongState));
+        // On the card, a receipt before the wire is served is out of sequence (NOT_READY).
+        let mut card = CardSession::new(DEFAULT_MAX_CHUNK);
+        card.process(&build_select());
+        let frame = frame::fragment(&receipt, DEFAULT_MAX_CHUNK).unwrap();
+        let resp = ResponseApdu::parse(
+            &card.process(&CommandApdu::with_data(0x80, 0xC6, 0, 0, frame[0].clone(), None).encode()),
+        )
+        .unwrap();
+        assert_eq!(resp.sw, Sw::NOT_READY);
+        assert!(card.receipt().is_none());
     }
 
     #[test]

@@ -32,17 +32,26 @@ type DpayNfcApi = {
   buildRequest(toHex: string, amount: number, nonceHex: string, expiry: number): Promise<string>;
   startReader(requestHex: string): Promise<void>;
   stopReader(): Promise<void>;
+  // Merchant: after settling online, hand the outcome back to the payer (0 settled, 1 rejected, 2 unreachable).
+  confirmReceipt(status: number): Promise<void>;
   addListener(eventName: string): void;
   removeListeners(count: number): void;
 };
+
+// Receipt status codes (mirror dpay_core RECEIPT_*).
+const RECEIPT_SETTLED = 0;
+const RECEIPT_REJECTED = 1;
+const RECEIPT_UNREACHABLE = 2;
 
 type NfcEvent =
   | {type: 'phase'; role: 'card' | 'reader'; phase: NfcPhaseName}
   | {type: 'request'; role: 'card'; toHex: string; amount: number; nonceHex: string; expiry: number}
   | {type: 'done'; role: 'reader'; wireHex: string}
+  | {type: 'receipt'; role: 'card'; settled: boolean; status: number; nonceHex: string}
+  | {type: 'confirmed'; role: 'reader'}
   | {type: 'error'; role: 'card' | 'reader'; reason: string};
 
-type NfcPhaseName = 'listening' | 'linking' | 'exchanging' | 'awaitingApproval' | 'success' | 'declined';
+type NfcPhaseName = 'listening' | 'linking' | 'exchanging' | 'awaitingApproval' | 'settling' | 'success' | 'declined';
 
 type Req = {toHex: string; amount: number; nonceHex: string; expiry: number};
 type Identity = {secretHex: string; publicHex: string; username: string};
@@ -302,6 +311,7 @@ const NFC_UI: Record<string, {tone: string; glyph?: string; spin?: boolean; titl
   linking: {tone: C.brand, spin: true, title: 'Connecting…', sub: 'Linking the two phones'},
   exchanging: {tone: C.brand, spin: true, title: 'Communicating…', sub: 'Keep the phones together'},
   awaitingApproval: {tone: C.brand, spin: true, title: 'Waiting for approval…', sub: 'Confirm on the other phone'},
+  settling: {tone: C.brand, spin: true, title: 'Confirming…', sub: 'Keep the phones together while the merchant settles'},
   success: {tone: C.ok, glyph: '✓', title: 'Done ✓', sub: ''},
   declined: {tone: C.sub, glyph: '✕', title: 'Declined', sub: 'The payment was declined'},
   error: {tone: C.bad, glyph: '!', title: 'Tap failed', sub: 'Move the phones together and try again'},
@@ -314,62 +324,81 @@ const NFC_UI: Record<string, {tone: string; glyph?: string; spin?: boolean; titl
  * the relay on the merchant side. The radio hop itself is a physical-device gate; this is the app
  * wiring over it.
  */
-function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onClose}: {
+function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onOfflinePaid, onClose}: {
   role: 'card' | 'reader';
   identity: Identity;
   relayUrl: string;
   requestHex?: string;
   reqInfo?: {amount: number; nonce: string; who: string};
   onSettled?: (t: Txn) => void;
+  onOfflinePaid?: (amount: number) => void;
   onClose: () => void;
 }) {
   const [phase, setPhase] = useState<NfcPhaseName | 'error'>('listening');
   const [reason, setReason] = useState<string | null>(null);
   const [review, setReview] = useState<{toHex: string; amount: number; nonceHex: string; expiry: number} | null>(null);
   const [busy, setBusy] = useState(false);
-  const sentRef = useRef<{amount: number; who: string} | null>(null);
-  const settledRef = useRef(false);
+  const sentRef = useRef<{amount: number; who: string; nonce: string} | null>(null);
+  const finalized = useRef(false);
+  const recordedRef = useRef(false);
+
+  const finalize = useCallback((p: NfcPhaseName | 'error', r?: string) => {
+    finalized.current = true;
+    if (r) setReason(r);
+    setPhase(p);
+  }, []);
 
   const record = useCallback((amount: number, who: string, dir: 'out' | 'in', nonce: string) => {
-    if (settledRef.current || !onSettled) return;
-    settledRef.current = true;
+    if (recordedRef.current || !onSettled) return;
+    recordedRef.current = true;
     onSettled({nonce, amount, who, time: clock(), dir});
   }, [onSettled]);
 
-  // Merchant side: push the reassembled wire to the ledger.
+  // Merchant side: push the reassembled wire to the ledger, then hand the outcome back to the payer.
   const submitWire = useCallback(async (wireHex: string) => {
+    let status = RECEIPT_UNREACHABLE;
     try {
       const code = await DpayCore.encodeQr(wireHex);
       const r = await fetch(`${base(relayUrl)}/pay`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({qr: code})});
       const j = await r.json().catch(() => ({} as any));
       if (r.ok) {
+        status = RECEIPT_SETTLED;
         if (reqInfo) record(reqInfo.amount, reqInfo.who, 'in', reqInfo.nonce);
-        setPhase('success');
-      } else { setReason(typeof j.error === 'string' ? j.error : 'rejected'); setPhase('error'); }
-    } catch (e: any) { setReason(String(e?.message ?? e)); setPhase('error'); }
-  }, [relayUrl, reqInfo, record]);
+        finalize('success');
+      } else { status = RECEIPT_REJECTED; finalize('error', typeof j.error === 'string' ? j.error : 'rejected'); }
+    } catch (e: any) { status = RECEIPT_UNREACHABLE; finalize('error', String(e?.message ?? e)); }
+    // Send the receipt back over the same tap so the offline payer learns the outcome (best-effort).
+    try { await DpayNfc.confirmReceipt(status); } catch {}
+  }, [relayUrl, reqInfo, record, finalize]);
 
   useEffect(() => {
     const emitter = new NativeEventEmitter(DpayNfc as any);
     const sub = emitter.addListener('DpayNfcEvent', (e: NfcEvent) => {
       if (e.role !== role) return;
-      if (e.type === 'error') { setReason(e.reason); setPhase('error'); }
-      else if (e.type === 'request') setReview({toHex: e.toHex, amount: e.amount, nonceHex: e.nonceHex, expiry: e.expiry});
+      if (e.type === 'error') { finalize('error', e.reason); return; }
+      if (finalized.current) return; // terminal reached; ignore late phase/confirmed events
+      if (e.type === 'request') setReview({toHex: e.toHex, amount: e.amount, nonceHex: e.nonceHex, expiry: e.expiry});
       else if (e.type === 'done') submitWire(e.wireHex);
-      else if (e.type === 'phase') {
-        setPhase(e.phase);
-        // Payer's card reports Complete once the merchant has pulled the wire → record the send.
-        if (e.phase === 'success' && role === 'card' && sentRef.current) record(sentRef.current.amount, sentRef.current.who, 'out', reqInfo?.nonce ?? '');
-      }
+      else if (e.type === 'receipt') {
+        // Payer's definitive outcome, learned offline over the tap.
+        if (e.settled) {
+          const s = sentRef.current;
+          if (s) { record(s.amount, s.who, 'out', s.nonce); onOfflinePaid?.(s.amount); }
+          finalize('success');
+        } else {
+          finalize('declined', 'The ledger declined the payment');
+        }
+      } else if (e.type === 'phase') setPhase(e.phase);
+      // 'confirmed' (reader): the receipt reached the payer; the merchant already finalized on submit.
     });
-    if (role === 'card') DpayNfc.armCard().catch((e: any) => { setReason(String(e?.message ?? e)); setPhase('error'); });
-    else if (requestHex) DpayNfc.startReader(requestHex).catch((e: any) => { setReason(String(e?.message ?? e)); setPhase('error'); });
+    if (role === 'card') DpayNfc.armCard().catch((e: any) => finalize('error', String(e?.message ?? e)));
+    else if (requestHex) DpayNfc.startReader(requestHex).catch((e: any) => finalize('error', String(e?.message ?? e)));
     return () => {
       sub.remove();
       if (role === 'card') DpayNfc.disarmCard().catch(() => {});
       else DpayNfc.stopReader().catch(() => {});
     };
-  }, [role, requestHex, submitWire, record, reqInfo]);
+  }, [role, requestHex, submitWire, record, finalize, onOfflinePaid]);
 
   async function approve() {
     if (!review) return;
@@ -377,10 +406,10 @@ function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onClo
     try {
       const wireHex = await DpayCore.signAuthorization(identity.secretHex, review.toHex, review.amount, review.nonceHex, review.expiry);
       if (!(await DpayCore.verifyWire(wireHex))) throw new Error('local verify failed');
-      sentRef.current = {amount: review.amount, who: short(review.toHex)};
+      sentRef.current = {amount: review.amount, who: short(review.toHex), nonce: review.nonceHex};
       await DpayNfc.approveCard(wireHex);
       setReview(null);
-    } catch (e: any) { setReason(String(e?.message ?? e)); setPhase('error'); } finally { setBusy(false); }
+    } catch (e: any) { finalize('error', String(e?.message ?? e)); } finally { setBusy(false); }
   }
 
   async function decline() { try { await DpayNfc.declineCard(); } catch {} setReview(null); onClose(); }
@@ -400,9 +429,11 @@ function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onClo
 
   const m = NFC_UI[phase] ?? NFC_UI.listening;
   const terminal = phase === 'success' || phase === 'declined' || phase === 'error';
-  const title = phase === 'success' ? (role === 'card' ? 'Sent ✓' : `Paid ✓ ${reqInfo ? usd(reqInfo.amount) : ''}`) : m.title;
+  const amt = role === 'card' ? sentRef.current?.amount : reqInfo?.amount;
+  const title = phase === 'success' ? `Paid ✓ ${amt != null ? usd(amt) : ''}`.trim() : m.title;
   const sub = phase === 'error' && reason ? reason
-    : phase === 'success' ? (role === 'card' ? 'The authorization was sent' : 'The payment settled')
+    : phase === 'declined' && reason ? reason
+    : phase === 'success' ? 'The payment settled'
     : m.sub;
   return (
     <View style={S.center}>
@@ -476,7 +507,7 @@ function PayMode({identity, online, relayUrl, onSettled, onOfflinePaid}: {identi
   function reset() { setReq(null); setQr(null); setPaid(null); setManual(''); setErr(null); setPhase('scan'); }
 
   if (tapping) {
-    return <NfcTap role="card" identity={identity} relayUrl={relayUrl} onSettled={onSettled} onClose={() => setTapping(false)} />;
+    return <NfcTap role="card" identity={identity} relayUrl={relayUrl} onSettled={onSettled} onOfflinePaid={onOfflinePaid} onClose={() => setTapping(false)} />;
   }
 
   if (phase === 'paid' && paid) {
