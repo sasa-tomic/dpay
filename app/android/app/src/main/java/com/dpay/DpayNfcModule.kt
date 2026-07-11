@@ -90,10 +90,13 @@ class DpayNfcModule(reactContext: ReactApplicationContext) :
     }
 
     /** After settling online, hand the outcome back to the payer over the same tap. `status`:
-     *  0 = settled, 1 = ledger rejected, 2 = ledger unreachable. */
+     *  0 = settled, 1 = ledger rejected, 2 = ledger unreachable. `nonceHex` is the authoritative
+     *  payment nonce (32 hex chars) the ledger settled, so the payer can match it to what it signed;
+     *  an empty/short value falls back to the request nonce natively. */
     @ReactMethod
-    fun confirmReceipt(status: Double, promise: Promise) {
-        DpayNfc.confirmReceipt(status.toInt())
+    fun confirmReceipt(status: Double, nonceHex: String, promise: Promise) {
+        val nonce = if (nonceHex.length == 32) unhex(nonceHex) else ByteArray(0)
+        DpayNfc.confirmReceipt(status.toInt(), nonce)
         promise.resolve(null)
     }
 

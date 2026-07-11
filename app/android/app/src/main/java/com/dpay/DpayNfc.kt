@@ -44,10 +44,18 @@ object DpayNfc {
     private var reader: FfiReaderConductor? = null
     private var requestSent = false
     private var receiptSent = false
-    // Merchant side: the payment nonce (to stamp the receipt) and a 1-slot rendezvous the reader
-    // thread waits on while JS settles online, then delivers the status code (see `confirmReceipt`).
+    // Merchant side: the request nonce (a fallback for stamping the receipt) and a 1-slot rendezvous
+    // the reader thread waits on while JS settles online, then delivers the fully-built receipt bytes
+    // (see `confirmReceipt`). `pendingReceipt` caches the built receipt so a fast JS confirm that
+    // races ahead of the reader thread is not lost.
     private var readerNonce: ByteArray? = null
-    private var receiptSignal: ArrayBlockingQueue<Int>? = null
+    private var receiptSignal: ArrayBlockingQueue<ByteArray>? = null
+    @Volatile private var pendingReceipt: ByteArray? = null
+
+    // How long the reader holds the field waiting for JS to settle + confirm. Comfortably covers the
+    // common fast settle; a timeout is NOT a merchant failure (JS owns the merchant's outcome and the
+    // payer falls back to its own "couldn't confirm"), so on timeout we stop delivering *quietly*.
+    private const val RECEIPT_CONFIRM_WAIT_SECS = 12L
 
     // dpay "not ready" warning SW (mirrors dpay_core::nfc Sw::NOT_READY) — returned when a reader
     // taps but no payer session is armed.
@@ -212,6 +220,7 @@ object DpayNfc {
         // The nonce lives at request bytes [40, 56): to(32) | amount(8) | nonce(16) | expiry(8).
         readerNonce = if (request.size >= 56) request.copyOfRange(40, 56) else null
         receiptSignal = ArrayBlockingQueue(1)
+        pendingReceipt = null
         phaseEvent("reader", "listening")
         // NFC-A / ISO-DEP, and skip the NDEF check (HCE cards are not NDEF tags).
         adapter!!.enableReaderMode(
@@ -223,9 +232,17 @@ object DpayNfc {
     }
 
     /** JS calls this after settling online with the outcome code (see the core receipt codes:
-     *  0 settled, 1 rejected, 2 unreachable). It wakes the reader thread to push the receipt. */
-    fun confirmReceipt(status: Int) {
-        receiptSignal?.offer(status)
+     *  0 settled, 1 rejected, 2 unreachable) and the authoritative payment nonce (32 hex chars, or
+     *  empty to fall back to the request nonce). Builds the receipt and wakes the reader thread. */
+    fun confirmReceipt(status: Int, nonce: ByteArray) {
+        val stampNonce = if (nonce.size == 16) nonce else (readerNonce ?: ByteArray(16))
+        val receipt = try {
+            nfcReceiptBytes(stampNonce, status.toUByte())
+        } catch (_: Throwable) {
+            return // a bad status/nonce can't be a receipt; the payer will time out to "pending"
+        }
+        pendingReceipt = receipt
+        receiptSignal?.offer(receipt)
     }
 
     fun stopReader(activity: Activity) {
@@ -236,6 +253,7 @@ object DpayNfc {
         reader = null
         readerNonce = null
         receiptSignal = null
+        pendingReceipt = null
     }
 
     /**
@@ -260,14 +278,14 @@ object DpayNfc {
                     // The reader is at Done, waiting for the merchant to settle online and confirm.
                     if (!wireInHand) break
                     phaseEvent("reader", "settling")
-                    // Block (holding the field) until JS finishes the online submit and confirms.
-                    val status = receiptSignal?.poll(15, TimeUnit.SECONDS)
-                    if (status == null) {
-                        errorEvent("reader", "Confirmation timed out — hold the phones together")
-                        break
-                    }
-                    val nonce = readerNonce ?: ByteArray(16)
-                    r.provideReceipt(nfcReceiptBytes(nonce, status.toUByte()))
+                    // Deliver the receipt if JS already settled (fast path), else hold the field a
+                    // bounded time for it. A timeout is NOT a merchant error: JS has already decided
+                    // and reported the merchant's outcome, and the offline payer independently falls
+                    // back to "couldn't confirm". So on timeout we simply stop delivering — quietly,
+                    // never a false "Tap failed".
+                    val receipt = pendingReceipt ?: receiptSignal?.poll(RECEIPT_CONFIRM_WAIT_SECS, TimeUnit.SECONDS)
+                    if (receipt == null) break
+                    r.provideReceipt(receipt)
                     continue // resume the loop to push the receipt back to the payer
                 }
                 val resp = isoDep.transceive(cmd)

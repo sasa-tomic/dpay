@@ -10,7 +10,7 @@
  * request QR is `<base64url request>|<username>`: the request is the signed, money-critical payload;
  * the username is unsigned display metadata (the account is the source of truth).
  */
-import React, {useCallback, useEffect, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   SafeAreaView, ScrollView, StatusBar, View, Text, Pressable, TextInput, StyleSheet, NativeModules,
   Share, AppState, ActivityIndicator, NativeEventEmitter,
@@ -19,6 +19,10 @@ import QRCode from 'react-native-qrcode-svg';
 import {Camera, useCameraDevice, useCameraPermission, useCodeScanner} from 'react-native-vision-camera';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {RELAY_DEFAULT} from './relayConfig';
+import {
+  classifyPayHttp, receiptCodeFor, decidePayerReceipt, rejectionMessage, isNonceReused,
+  type SettleOutcome,
+} from './payments';
 
 const {DpayCore, DpayNfc} = NativeModules as {DpayCore: DpayCoreApi; DpayNfc: DpayNfcApi};
 
@@ -32,16 +36,13 @@ type DpayNfcApi = {
   buildRequest(toHex: string, amount: number, nonceHex: string, expiry: number): Promise<string>;
   startReader(requestHex: string): Promise<void>;
   stopReader(): Promise<void>;
-  // Merchant: after settling online, hand the outcome back to the payer (0 settled, 1 rejected, 2 unreachable).
-  confirmReceipt(status: number): Promise<void>;
+  // Merchant: after settling online, hand the outcome back to the payer. `status` is the receipt
+  // code (0 settled, 1 rejected, 2 unreachable); `nonceHex` is the authoritative payment nonce so
+  // the payer can confirm the receipt answers the exact payment it signed.
+  confirmReceipt(status: number, nonceHex: string): Promise<void>;
   addListener(eventName: string): void;
   removeListeners(count: number): void;
 };
-
-// Receipt status codes (mirror dpay_core RECEIPT_*).
-const RECEIPT_SETTLED = 0;
-const RECEIPT_REJECTED = 1;
-const RECEIPT_UNREACHABLE = 2;
 
 type NfcEvent =
   | {type: 'phase'; role: 'card' | 'reader'; phase: NfcPhaseName}
@@ -51,7 +52,7 @@ type NfcEvent =
   | {type: 'confirmed'; role: 'reader'}
   | {type: 'error'; role: 'card' | 'reader'; reason: string};
 
-type NfcPhaseName = 'listening' | 'linking' | 'exchanging' | 'awaitingApproval' | 'settling' | 'success' | 'declined';
+type NfcPhaseName = 'listening' | 'linking' | 'exchanging' | 'awaitingApproval' | 'settling' | 'success' | 'declined' | 'pending';
 
 type Req = {toHex: string; amount: number; nonceHex: string; expiry: number};
 type Identity = {secretHex: string; publicHex: string; username: string};
@@ -73,6 +74,15 @@ type NfcStatus = 'ready' | 'off' | 'unsupported' | 'unknown';
 const C = {bg: '#ffffff', ink: '#0b0b0f', sub: '#6b7280', brand: '#4f46e5', brandInk: '#ffffff', ok: '#16a34a', bad: '#dc2626', warn: '#b45309', line: '#e5e7eb', field: '#f3f4f6'};
 const EXPIRY_WINDOW = 600; // request valid 10 min
 const DIRECT_PAY_TIMEOUT_MS = 5000;
+// Merchant NFC settlement: bound the /pay call, then reconcile the ambiguous case via the
+// idempotent /receipt/:nonce so a settled payment is never reported as failed.
+const NFC_PAY_TIMEOUT_MS = 8000;
+const RECONCILE_ATTEMPTS = 4;
+const RECONCILE_INTERVAL_MS = 1200;
+// Payer NFC: how long to wait for the merchant's receipt before falling back to a truthful
+// "couldn't confirm" (never a false success or a false failure). Must exceed the merchant's worst
+// case (pay timeout + reconciliation) so a slow-but-successful settle still delivers its receipt.
+const RECEIPT_WAIT_MS = 20000;
 const STORAGE_KEY = 'dpay.identity.v1';
 
 const usd = (c: number) => `$${Math.floor(c / 100)}.${String(c % 100).padStart(2, '0')}`;
@@ -228,8 +238,8 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
 
       <ScrollView contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
         {mode === 'pay'
-          ? <PayMode identity={identity} online={online} relayUrl={relayUrl} onSettled={record} onOfflinePaid={markOfflinePaid} />
-          : <ReceiveMode identity={identity} relayUrl={relayUrl} onReceived={record} />}
+          ? <PayMode identity={identity} online={online} relayUrl={relayUrl} nfcReady={nfc === 'ready'} onSettled={record} onOfflinePaid={markOfflinePaid} />
+          : <ReceiveMode identity={identity} relayUrl={relayUrl} nfcReady={nfc === 'ready'} onReceived={record} />}
         {history.length > 0 ? (
           <View style={S.histCard}>
             <Text style={S.histTitle}>Recent</Text>
@@ -310,21 +320,24 @@ const NFC_UI: Record<string, {tone: string; glyph?: string; spin?: boolean; titl
   listening: {tone: C.brand, glyph: '⌁', title: 'Hold near the other phone', sub: 'dpay is listening for a tap'},
   linking: {tone: C.brand, spin: true, title: 'Connecting…', sub: 'Linking the two phones'},
   exchanging: {tone: C.brand, spin: true, title: 'Communicating…', sub: 'Keep the phones together'},
-  awaitingApproval: {tone: C.brand, spin: true, title: 'Waiting for approval…', sub: 'Confirm on the other phone'},
+  awaitingApproval: {tone: C.brand, spin: true, title: 'Authorizing…', sub: 'Signing on the payer’s phone'},
   settling: {tone: C.brand, spin: true, title: 'Confirming…', sub: 'Keep the phones together while the merchant settles'},
   success: {tone: C.ok, glyph: '✓', title: 'Done ✓', sub: ''},
   declined: {tone: C.sub, glyph: '✕', title: 'Declined', sub: 'The payment was declined'},
+  // Genuinely-unknown outcome (couldn't reach the ledger / no receipt in time). Truthful, distinct
+  // from both success and failure — the balance reconciles when back online.
+  pending: {tone: C.warn, glyph: '?', title: 'Not confirmed', sub: 'Couldn’t reach the ledger'},
   error: {tone: C.bad, glyph: '!', title: 'Tap failed', sub: 'Move the phones together and try again'},
 };
 
 /**
  * Drives one NFC tap through the native glue (DpayNfc): Pay mode arms the HCE card (payer is tapped),
- * Receive mode runs the reader (merchant reads the tap). It renders the live phase the core emits, a
- * review prompt when a request arrives (payer signs on Approve), and submits the reassembled wire to
- * the relay on the merchant side. The radio hop itself is a physical-device gate; this is the app
- * wiring over it.
+ * Receive mode runs the reader (merchant reads the tap). The **tap itself is the consent** — when a
+ * request arrives the payer's phone signs and serves it immediately (contactless tap-to-pay, no
+ * extra Approve button). It renders the live phase the core emits and, on the merchant side, submits
+ * the reassembled wire and hands the receipt back. The radio hop is a physical-device gate.
  */
-function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onOfflinePaid, onClose}: {
+function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onOfflinePaid, onActive, onClose}: {
   role: 'card' | 'reader';
   identity: Identity;
   relayUrl: string;
@@ -332,21 +345,42 @@ function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onOff
   reqInfo?: {amount: number; nonce: string; who: string};
   onSettled?: (t: Txn) => void;
   onOfflinePaid?: (amount: number) => void;
+  onActive?: () => void; // fired the moment a real tap starts (so the parent can hide the QR/scanner)
   onClose: () => void;
 }) {
   const [phase, setPhase] = useState<NfcPhaseName | 'error'>('listening');
   const [reason, setReason] = useState<string | null>(null);
-  const [review, setReview] = useState<{toHex: string; amount: number; nonceHex: string; expiry: number} | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [payAmount, setPayAmount] = useState<number | null>(null);
   const sentRef = useRef<{amount: number; who: string; nonce: string} | null>(null);
   const finalized = useRef(false);
   const recordedRef = useRef(false);
+  const activeRef = useRef(false);
+  // Set once the authorization is in flight to settlement (merchant: the wire is submitting; payer:
+  // the wire has left the phone). After this point the ledger outcome is decided elsewhere (the
+  // /pay result, or the receipt / its timeout), so a *transport* error — e.g. the phones parting
+  // during the receipt hand-back — must NOT be shown as a payment failure. This is the guard that
+  // stops a settled payment from being reported as "Tap failed".
+  const committed = useRef(false);
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Keep onActive in a ref so markActive has a stable identity (the effect must not re-subscribe /
+  // re-arm on every parent render just because an inline callback changed).
+  const onActiveRef = useRef(onActive);
+  onActiveRef.current = onActive;
+  const markActive = useCallback(() => {
+    if (!activeRef.current) { activeRef.current = true; onActiveRef.current?.(); }
+  }, []);
+
+  const clearSettleTimer = useCallback(() => {
+    if (settleTimer.current) { clearTimeout(settleTimer.current); settleTimer.current = null; }
+  }, []);
 
   const finalize = useCallback((p: NfcPhaseName | 'error', r?: string) => {
+    if (finalized.current) return; // first terminal wins; never overwrite a decided outcome
     finalized.current = true;
-    if (r) setReason(r);
+    clearSettleTimer();
+    setReason(r ?? null);
     setPhase(p);
-  }, []);
+  }, [clearSettleTimer]);
 
   const record = useCallback((amount: number, who: string, dir: 'out' | 'in', nonce: string) => {
     if (recordedRef.current || !onSettled) return;
@@ -354,86 +388,156 @@ function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onOff
     onSettled({nonce, amount, who, time: clock(), dir});
   }, [onSettled]);
 
-  // Merchant side: push the reassembled wire to the ledger, then hand the outcome back to the payer.
-  const submitWire = useCallback(async (wireHex: string) => {
-    let status = RECEIPT_UNREACHABLE;
+  // POST /pay once, bounded by a timeout. Returns the (ok,status) + parsed body, or a null result
+  // when fetch threw (network/timeout/abort) — which the caller treats as UNKNOWN, not failure.
+  const postPay = useCallback(async (code: string) => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), NFC_PAY_TIMEOUT_MS);
     try {
-      const code = await DpayCore.encodeQr(wireHex);
-      const r = await fetch(`${base(relayUrl)}/pay`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({qr: code})});
-      const j = await r.json().catch(() => ({} as any));
-      if (r.ok) {
-        status = RECEIPT_SETTLED;
-        if (reqInfo) record(reqInfo.amount, reqInfo.who, 'in', reqInfo.nonce);
-        finalize('success');
-      } else { status = RECEIPT_REJECTED; finalize('error', typeof j.error === 'string' ? j.error : 'rejected'); }
-    } catch (e: any) { status = RECEIPT_UNREACHABLE; finalize('error', String(e?.message ?? e)); }
-    // Send the receipt back over the same tap so the offline payer learns the outcome (best-effort).
-    try { await DpayNfc.confirmReceipt(status); } catch {}
-  }, [relayUrl, reqInfo, record, finalize]);
+      const r = await fetch(`${base(relayUrl)}/pay`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({qr: code}), signal: ctrl.signal});
+      const body = await r.json().catch(() => ({} as any));
+      return {res: {ok: r.ok, status: r.status}, body};
+    } catch {
+      return {res: null as {ok: boolean; status: number} | null, body: {} as any};
+    } finally { clearTimeout(t); }
+  }, [relayUrl]);
+
+  // Reconcile an ambiguous outcome via the idempotent GET /receipt/:nonce. Returns the settled
+  // receipt (or null if not settled after a few polls). Safe by construction: the nonce is
+  // single-use, so this can never cause a second charge — it only *reads* whether it landed.
+  const reconcile = useCallback(async (nonceHex: string) => {
+    for (let i = 0; i < RECONCILE_ATTEMPTS; i++) {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 3000);
+      try {
+        const r = await fetch(`${base(relayUrl)}/receipt/${nonceHex}`, {signal: ctrl.signal});
+        if (r.ok) { const j = await r.json().catch(() => ({} as any)); clearTimeout(t); return j.receipt ?? {}; }
+      } catch { /* keep polling */ } finally { clearTimeout(t); }
+      await new Promise(res => setTimeout(res, RECONCILE_INTERVAL_MS));
+    }
+    return null;
+  }, [relayUrl]);
+
+  // Merchant side: submit the reassembled wire, decide the authoritative outcome, then hand it back
+  // to the payer over the same tap. The ledger is the source of truth; an ambiguous transport/HTTP
+  // result is reconciled by nonce before we ever call a payment failed.
+  const submitWire = useCallback(async (wireHex: string) => {
+    const nonceHex = reqInfo?.nonce ?? null;
+    const code = await DpayCore.encodeQr(wireHex).catch(() => null);
+    if (!code) { finalize('error', 'Could not encode the authorization'); return; } // pre-settlement
+
+    const {res, body} = await postPay(code);
+    let outcome: SettleOutcome = classifyPayHttp(res);
+    let settledNonceHex: string | null = nonceHex;
+
+    if (outcome === 'settled') {
+      settledNonceHex = body?.receipt?.nonce ?? nonceHex;
+    } else if (outcome === 'rejected') {
+      // "Nonce reused" is not a real refusal — it means this exact payment already settled.
+      // Reconcile to the real receipt instead of showing a scary (and false) decline.
+      if (isNonceReused(body?.error) && nonceHex) {
+        const rec = await reconcile(nonceHex);
+        if (rec) { outcome = 'settled'; settledNonceHex = rec.nonce ?? nonceHex; }
+      }
+    } else if (nonceHex) {
+      // UNKNOWN (network drop / timeout / 5xx): the ledger MAY have committed. Reconcile before
+      // deciding — this is the fix for "settled but reported as failed".
+      const rec = await reconcile(nonceHex);
+      if (rec) { outcome = 'settled'; settledNonceHex = rec.nonce ?? nonceHex; }
+    }
+
+    if (outcome === 'settled') {
+      if (reqInfo) record(reqInfo.amount, reqInfo.who, 'in', reqInfo.nonce);
+      finalize('success');
+    } else if (outcome === 'rejected') {
+      finalize('declined', rejectionMessage(typeof body?.error === 'string' ? body.error : null));
+    } else {
+      // Genuinely unknown even after reconciliation — truthful, never a fake success or failure.
+      finalize('pending', 'Couldn’t confirm with the ledger — check the balance');
+    }
+    // Best-effort: hand the outcome back to the payer, stamped with the authoritative nonce.
+    try { await DpayNfc.confirmReceipt(receiptCodeFor(outcome), settledNonceHex ?? nonceHex ?? ''); } catch {}
+  }, [relayUrl, reqInfo, record, finalize, postPay, reconcile]);
+
+  // Payer side: the tap is the consent — sign the incoming request and serve it right away.
+  const autoSign = useCallback(async (req: {toHex: string; amount: number; nonceHex: string; expiry: number}) => {
+    try {
+      const wireHex = await DpayCore.signAuthorization(identity.secretHex, req.toHex, req.amount, req.nonceHex, req.expiry);
+      if (!(await DpayCore.verifyWire(wireHex))) throw new Error('local verify failed');
+      sentRef.current = {amount: req.amount, who: short(req.toHex), nonce: req.nonceHex};
+      setPayAmount(req.amount);
+      await DpayNfc.approveCard(wireHex);
+    } catch (e: any) { finalize('error', String(e?.message ?? e)); }
+  }, [identity, finalize]);
 
   useEffect(() => {
     const emitter = new NativeEventEmitter(DpayNfc as any);
     const sub = emitter.addListener('DpayNfcEvent', (e: NfcEvent) => {
       if (e.role !== role) return;
-      if (e.type === 'error') { finalize('error', e.reason); return; }
+      if (e.type === 'error') {
+        markActive();
+        // Once the payment is in flight to settlement, a transport error says nothing about whether
+        // the ledger settled — the outcome is owned by submitWire / the receipt path. Don't let it
+        // overwrite a decided (or about-to-be-decided) outcome with a false failure.
+        if (finalized.current || committed.current) return;
+        finalize('error', e.reason);
+        return;
+      }
       if (finalized.current) return; // terminal reached; ignore late phase/confirmed events
-      if (e.type === 'request') setReview({toHex: e.toHex, amount: e.amount, nonceHex: e.nonceHex, expiry: e.expiry});
-      else if (e.type === 'done') submitWire(e.wireHex);
+      if (e.type === 'request') { markActive(); setPhase('exchanging'); autoSign({toHex: e.toHex, amount: e.amount, nonceHex: e.nonceHex, expiry: e.expiry}); }
+      else if (e.type === 'done') { markActive(); committed.current = true; submitWire(e.wireHex); }
       else if (e.type === 'receipt') {
-        // Payer's definitive outcome, learned offline over the tap.
-        if (e.settled) {
+        // The payer's outcome, learned offline over the tap — believed only if it answers the exact
+        // payment we signed (nonce match). UNREACHABLE ⇒ pending (unknown), never a false decline.
+        const outcome = decidePayerReceipt({status: e.status, nonceHex: e.nonceHex}, sentRef.current?.nonce ?? '');
+        if (outcome === 'ignore') return; // a receipt for some other payment — keep waiting
+        if (outcome === 'success') {
           const s = sentRef.current;
           if (s) { record(s.amount, s.who, 'out', s.nonce); onOfflinePaid?.(s.amount); }
           finalize('success');
-        } else {
+        } else if (outcome === 'declined') {
           finalize('declined', 'The ledger declined the payment');
+        } else {
+          finalize('pending', 'Couldn’t confirm — check your balance when back online');
         }
-      } else if (e.type === 'phase') setPhase(e.phase);
+      } else if (e.type === 'phase') {
+        if (e.phase !== 'listening') markActive();
+        // The payer's wire has left the phone: from here the outcome depends on the receipt. Arm a
+        // timeout so we never spin on "Confirming…" forever if the receipt never arrives.
+        if (role === 'card' && e.phase === 'settling') {
+          committed.current = true;
+          if (!settleTimer.current) {
+            settleTimer.current = setTimeout(() => {
+              finalize('pending', 'Couldn’t confirm — check your balance when back online');
+            }, RECEIPT_WAIT_MS);
+          }
+        }
+        setPhase(e.phase);
+      }
       // 'confirmed' (reader): the receipt reached the payer; the merchant already finalized on submit.
     });
     if (role === 'card') DpayNfc.armCard().catch((e: any) => finalize('error', String(e?.message ?? e)));
     else if (requestHex) DpayNfc.startReader(requestHex).catch((e: any) => finalize('error', String(e?.message ?? e)));
     return () => {
+      clearSettleTimer();
       sub.remove();
       if (role === 'card') DpayNfc.disarmCard().catch(() => {});
       else DpayNfc.stopReader().catch(() => {});
     };
-  }, [role, requestHex, submitWire, record, finalize, onOfflinePaid]);
+  }, [role, requestHex, submitWire, autoSign, finalize, markActive, clearSettleTimer, onOfflinePaid, record]);
 
-  async function approve() {
-    if (!review) return;
-    setBusy(true);
-    try {
-      const wireHex = await DpayCore.signAuthorization(identity.secretHex, review.toHex, review.amount, review.nonceHex, review.expiry);
-      if (!(await DpayCore.verifyWire(wireHex))) throw new Error('local verify failed');
-      sentRef.current = {amount: review.amount, who: short(review.toHex), nonce: review.nonceHex};
-      await DpayNfc.approveCard(wireHex);
-      setReview(null);
-    } catch (e: any) { finalize('error', String(e?.message ?? e)); } finally { setBusy(false); }
-  }
-
-  async function decline() { try { await DpayNfc.declineCard(); } catch {} setReview(null); onClose(); }
-
-  // Payer reviews the incoming request before signing.
-  if (role === 'card' && review && phase !== 'error') {
-    return (
-      <View style={S.center}>
-        <Text style={S.label}>Review payment · NFC</Text>
-        <Text style={S.reviewAmount}>{`Pay ${usd(review.amount)}`}</Text>
-        <Text style={S.reviewTo}>{`to ${short(review.toHex)}`}</Text>
-        <Pressable style={[S.primary, busy && S.dim]} disabled={busy} onPress={approve}><Text style={S.primaryText}>{busy ? 'Signing…' : 'Approve'}</Text></Pressable>
-        <Pressable style={S.linkBtn} onPress={decline}><Text style={S.linkTextMuted}>Decline</Text></Pressable>
-      </View>
-    );
-  }
+  // While merely armed/listening (no tap yet) render nothing, so the parent's QR/scanner shows and
+  // the phone can be tapped OR scanned with no mode switch.
+  if (phase === 'listening' && !activeRef.current) return null;
 
   const m = NFC_UI[phase] ?? NFC_UI.listening;
-  const terminal = phase === 'success' || phase === 'declined' || phase === 'error';
-  const amt = role === 'card' ? sentRef.current?.amount : reqInfo?.amount;
+  const terminal = phase === 'success' || phase === 'declined' || phase === 'error' || phase === 'pending';
+  const amt = role === 'card' ? payAmount : reqInfo?.amount;
+  const active = phase === 'exchanging' || phase === 'settling' || phase === 'awaitingApproval';
   const title = phase === 'success' ? `Paid ✓ ${amt != null ? usd(amt) : ''}`.trim() : m.title;
-  const sub = phase === 'error' && reason ? reason
-    : phase === 'declined' && reason ? reason
+  const sub = (phase === 'error' || phase === 'declined' || phase === 'pending') && reason ? reason
     : phase === 'success' ? 'The payment settled'
+    : active && amt != null ? `${role === 'card' ? 'Paying' : 'Collecting'} ${usd(amt)}`
     : m.sub;
   return (
     <View style={S.center}>
@@ -447,15 +551,19 @@ function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onOff
   );
 }
 
-function PayMode({identity, online, relayUrl, onSettled, onOfflinePaid}: {identity: Identity; online: boolean; relayUrl: string; onSettled: (t: Txn) => void; onOfflinePaid: (amount: number) => void}) {
+function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOfflinePaid}: {identity: Identity; online: boolean; relayUrl: string; nfcReady: boolean; onSettled: (t: Txn) => void; onOfflinePaid: (amount: number) => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid'>('scan');
   const [req, setReq] = useState<(Req & {name: string}) | null>(null);
   const [qr, setQr] = useState<{code: string; amount: number; who: string; nonce: string} | null>(null);
-  const [paid, setPaid] = useState<{amount: number; who: string; already: boolean} | null>(null);
+  // `pending` = handed to the merchant offline but NOT confirmed by the ledger (we can't claim it
+  // settled). `already` = the ledger reported this nonce was already settled (idempotent replay).
+  const [paid, setPaid] = useState<{amount: number; who: string; already: boolean; pending?: boolean} | null>(null);
   const [manual, setManual] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [tapping, setTapping] = useState(false);
+  // A tap arriving on the always-armed card takes over the scan screen; nfcKey re-arms after each.
+  const [nfcActive, setNfcActive] = useState(false);
+  const [nfcKey, setNfcKey] = useState(0);
 
   async function onRequestString(raw: string) {
     try {
@@ -491,13 +599,27 @@ function PayMode({identity, online, relayUrl, onSettled, onOfflinePaid}: {identi
       const nonce = req.nonceHex;
       if (online) {
         const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), DIRECT_PAY_TIMEOUT_MS);
+        let res: {ok: boolean; status: number} | null = null;
+        let j: any = {};
         try {
           const r = await fetch(`${base(relayUrl)}/pay`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({qr: code}), signal: ctrl.signal});
-          clearTimeout(timer);
-          const j = await r.json().catch(() => ({} as any));
-          if (r.ok) { if (!j.replayed) onSettled({nonce, amount: req.amount, who, time: clock(), dir: 'out'}); setPaid({amount: req.amount, who, already: !!j.replayed}); setPhase('paid'); return; }
-          if (typeof j.error === 'string' && j.error.includes('NonceReused')) { setPaid({amount: req.amount, who, already: true}); setPhase('paid'); return; }
-        } catch {} finally { clearTimeout(timer); }
+          res = {ok: r.ok, status: r.status};
+          j = await r.json().catch(() => ({} as any));
+        } catch { res = null; /* network/timeout → unknown, fall back to the QR hand-off below */ } finally { clearTimeout(timer); }
+        const outcome = classifyPayHttp(res);
+        if (outcome === 'settled') {
+          if (!j.replayed) onSettled({nonce, amount: req.amount, who, time: clock(), dir: 'out'});
+          setPaid({amount: req.amount, who, already: !!j.replayed}); setPhase('paid'); return;
+        }
+        if (outcome === 'rejected') {
+          // A definitive refusal: show WHY (e.g. "Not enough balance") rather than silently
+          // dropping to the QR screen, which reads as if the payment is fine. NonceReused is the
+          // exception — it means this exact payment already settled.
+          if (isNonceReused(j?.error)) { setPaid({amount: req.amount, who, already: true}); setPhase('paid'); return; }
+          setErr(rejectionMessage(typeof j?.error === 'string' ? j.error : null)); return;
+        }
+        // outcome === 'unknown': couldn't reach the ledger cleanly. Fall through to the offline QR
+        // hand-off (the merchant can still scan it) — the /receipt poll reconciles if it settles.
       }
       setQr({code, amount: req.amount, who, nonce});
       setPhase('qr');
@@ -506,16 +628,18 @@ function PayMode({identity, online, relayUrl, onSettled, onOfflinePaid}: {identi
 
   function reset() { setReq(null); setQr(null); setPaid(null); setManual(''); setErr(null); setPhase('scan'); }
 
-  if (tapping) {
-    return <NfcTap role="card" identity={identity} relayUrl={relayUrl} onSettled={onSettled} onOfflinePaid={onOfflinePaid} onClose={() => setTapping(false)} />;
-  }
-
   if (phase === 'paid' && paid) {
+    const warn = paid.already || paid.pending;
+    const glyph = paid.pending ? '⋯' : paid.already ? '↩' : '✓';
+    const headline = paid.pending ? `Sent ${usd(paid.amount)}` : paid.already ? 'Already paid' : `Paid ✓ ${usd(paid.amount)}`;
+    const sub = paid.pending ? `to ${paid.who} · awaiting the merchant’s confirmation`
+      : paid.already ? `${usd(paid.amount)} to ${paid.who} · not charged again`
+      : `to ${paid.who}`;
     return (
       <View style={S.center}>
-        <View style={[S.check, paid.already && S.checkAlready]}><Text style={S.checkMark}>{paid.already ? '↩' : '✓'}</Text></View>
-        <Text style={[S.paidText, paid.already && S.alreadyText]}>{paid.already ? 'Already paid' : `Paid ✓ ${usd(paid.amount)}`}</Text>
-        <Text style={S.paidSub}>{paid.already ? `${usd(paid.amount)} to ${paid.who} · not charged again` : `to ${paid.who}`}</Text>
+        <View style={[S.check, warn && S.checkAlready]}><Text style={S.checkMark}>{glyph}</Text></View>
+        <Text style={[S.paidText, warn && S.alreadyText]}>{headline}</Text>
+        <Text style={S.paidSub}>{sub}</Text>
         <Pressable testID="btn-new" style={S.linkBtn} onPress={reset}><Text style={S.linkText}>New payment</Text></Pressable>
       </View>
     );
@@ -530,10 +654,13 @@ function PayMode({identity, online, relayUrl, onSettled, onOfflinePaid}: {identi
         <Text style={S.badgeOk}>signed on this device ✓</Text>
         {online ? <Text style={S.qrHint}>Waiting for {qr.who} to scan…</Text> : (
           <>
-            <Text style={S.qrHint}>Offline — did {qr.who} confirm the payment?</Text>
+            <Text style={S.qrHint}>Offline — {qr.who} settles this when they submit it. You’ll see it on your balance once you’re back online.</Text>
             <View style={S.confirmRow}>
-              <Pressable testID="btn-paid" style={S.paidBtn} onPress={() => { onSettled({nonce: qr.nonce, amount: qr.amount, who: qr.who, time: clock(), dir: 'out'}); onOfflinePaid(qr.amount); setPaid({amount: qr.amount, who: qr.who, already: false}); setPhase('paid'); }}><Text style={S.paidBtnText}>Mark as paid</Text></Pressable>
-              <Pressable testID="btn-notpaid" style={S.notPaidBtn} onPress={reset}><Text style={S.notPaidText}>Not paid</Text></Pressable>
+              {/* Offline we CANNOT know the ledger settled it, so this is an honest "handed off",
+                  not "Paid ✓". It optimistically reduces the local balance; the real balance
+                  reconciles on the next online poll. It does NOT fabricate a settled history entry. */}
+              <Pressable testID="btn-paid" style={S.paidBtn} onPress={() => { onOfflinePaid(qr.amount); setPaid({amount: qr.amount, who: qr.who, already: false, pending: true}); setPhase('paid'); }}><Text style={S.paidBtnText}>Handed to {qr.who}</Text></Pressable>
+              <Pressable testID="btn-notpaid" style={S.notPaidBtn} onPress={reset}><Text style={S.notPaidText}>Cancel</Text></Pressable>
             </View>
           </>
         )}
@@ -550,41 +677,65 @@ function PayMode({identity, online, relayUrl, onSettled, onOfflinePaid}: {identi
         <Text style={S.reviewTo}>{`to ${req.name || short(req.toHex)}`}</Text>
         <Text style={S.reviewReq}>{`request ${req.nonceHex.slice(0, 12)}…`}</Text>
         <Pressable testID="btn-approve" style={[S.primary, busy && S.dim]} disabled={busy} onPress={approve}><Text style={S.primaryText}>{busy ? 'Signing…' : 'Approve'}</Text></Pressable>
+        {err ? <Text testID="review-err" style={S.err}>{err}</Text> : null}
         <Pressable style={S.linkBtn} onPress={reset}><Text style={S.linkTextMuted}>Cancel</Text></Pressable>
       </View>
     );
   }
 
+  // Scan screen: the card is armed in the background (if NFC is ready) AND the QR scanner is live at
+  // the same time — the payer taps the merchant's phone OR scans its QR, with no button in between.
   return (
     <View style={S.center}>
-      <Text style={S.label}>Scan a request to pay</Text>
-      <QrScanner onScan={onRequestString} />
-      <Text style={S.dim2}>Point at the payee's request QR</Text>
-      {err ? <Text style={S.err}>{err}</Text> : null}
-      <View style={S.manualRow}>
-        <TextInput testID="manual-input" style={S.manualInput} value={manual} onChangeText={setManual} placeholder="…or paste the request code" autoCapitalize="none" autoCorrect={false} />
-        <Pressable testID="btn-manual" style={S.smallBtn} onPress={() => manual.trim() && onRequestString(manual)}><Text style={S.smallBtnText}>Use</Text></Pressable>
-      </View>
-      {DpayNfc ? <Pressable testID="btn-tap-pay" style={S.nfcTapBtn} onPress={() => setTapping(true)}><Text style={S.nfcTapBtnText}>Tap to pay (NFC)</Text></Pressable> : null}
+      {nfcReady && DpayNfc ? (
+        <NfcTap
+          key={nfcKey} role="card" identity={identity} relayUrl={relayUrl}
+          onSettled={onSettled} onOfflinePaid={onOfflinePaid}
+          onActive={() => setNfcActive(true)}
+          onClose={() => { setNfcActive(false); setNfcKey(k => k + 1); }}
+        />
+      ) : null}
+      {!nfcActive ? (
+        <>
+          <Text style={S.label}>{nfcReady ? 'Tap or scan to pay' : 'Scan a request to pay'}</Text>
+          <QrScanner onScan={onRequestString} />
+          <Text style={S.dim2}>{nfcReady ? "Tap the merchant's phone, or point at its request QR" : "Point at the payee's request QR"}</Text>
+          {err ? <Text style={S.err}>{err}</Text> : null}
+          <View style={S.manualRow}>
+            <TextInput testID="manual-input" style={S.manualInput} value={manual} onChangeText={setManual} placeholder="…or paste the request code" autoCapitalize="none" autoCorrect={false} />
+            <Pressable testID="btn-manual" style={S.smallBtn} onPress={() => manual.trim() && onRequestString(manual)}><Text style={S.smallBtnText}>Use</Text></Pressable>
+          </View>
+        </>
+      ) : null}
     </View>
   );
 }
 
-function ReceiveMode({identity, relayUrl, onReceived}: {identity: Identity; relayUrl: string; onReceived: (t: Txn) => void}) {
+function ReceiveMode({identity, relayUrl, nfcReady, onReceived}: {identity: Identity; relayUrl: string; nfcReady: boolean; onReceived: (t: Txn) => void}) {
   const [amount, setAmount] = useState('25.00');
-  const [reqQr, setReqQr] = useState<{value: string; cents: number; nonce: string} | null>(null);
+  const [reqQr, setReqQr] = useState<{value: string; cents: number; nonce: string; nfcHex: string | null} | null>(null);
   const [result, setResult] = useState<{amount: number; from: string} | null>(null);
   const [scanning, setScanning] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [tapReq, setTapReq] = useState<{hex: string; cents: number; nonce: string} | null>(null);
+  const [nfcActive, setNfcActive] = useState(false);
+  const [nfcKey, setNfcKey] = useState(0);
+  // Stable across renders (NfcTap's effect depends on it) — only changes when the request does.
+  const readerReqInfo = useMemo(
+    () => (reqQr ? {amount: reqQr.cents, nonce: reqQr.nonce, who: 'payer'} : undefined),
+    [reqQr],
+  );
 
   async function makeRequest() {
     const cents = toCents(amount);
     if (!cents) return;
     try {
       const nonce = randNonceHex();
-      const reqB64 = await DpayCore.encodeRequest(identity.publicHex, cents, nonce, nowSecs() + EXPIRY_WINDOW);
-      setReqQr({value: `${reqB64}|${identity.username}`, cents, nonce});
+      const expiry = nowSecs() + EXPIRY_WINDOW;
+      const reqB64 = await DpayCore.encodeRequest(identity.publicHex, cents, nonce, expiry);
+      // Build the NFC request too so reader mode can start alongside the QR (best-effort).
+      let nfcHex: string | null = null;
+      if (nfcReady && DpayNfc) { try { nfcHex = await DpayNfc.buildRequest(identity.publicHex, cents, nonce, expiry); } catch {} }
+      setReqQr({value: `${reqB64}|${identity.username}`, cents, nonce, nfcHex});
       setResult(null); setErr(null);
     } catch (e: any) { setErr(String(e?.message ?? e)); }
   }
@@ -614,30 +765,11 @@ function ReceiveMode({identity, relayUrl, onReceived}: {identity: Identity; rela
     } catch (e: any) { setErr(String(e?.message ?? e)); }
   }
 
-  function reset() { setReqQr(null); setResult(null); setScanning(false); setErr(null); setTapReq(null); }
+  function reset() { setReqQr(null); setResult(null); setScanning(false); setErr(null); setNfcActive(false); setNfcKey(k => k + 1); }
 
-  // Build the request wire and enter reader mode to collect the payer's tap.
-  async function collectByTap() {
-    const cents = toCents(amount);
-    if (!cents) return;
-    try {
-      const nonce = reqQr?.nonce ?? randNonceHex();
-      const hex = await DpayNfc.buildRequest(identity.publicHex, cents, nonce, nowSecs() + EXPIRY_WINDOW);
-      setTapReq({hex, cents, nonce}); setErr(null);
-    } catch (e: any) { setErr(String(e?.message ?? e)); }
-  }
-
-  if (tapReq) {
-    return (
-      <NfcTap
-        role="reader" identity={identity} relayUrl={relayUrl} requestHex={tapReq.hex}
-        reqInfo={{amount: tapReq.cents, nonce: tapReq.nonce, who: 'payer'}}
-        onSettled={onReceived} onClose={() => setTapReq(null)}
-      />
-    );
-  }
-
-  if (result) {
+  // While an NFC tap is mid-flow, let it own the screen (so the receipt gets back to the payer)
+  // rather than the settlement poll swapping in the "Received" view underneath it.
+  if (result && !nfcActive) {
     return (
       <View style={S.center}>
         <View style={S.check}><Text style={S.checkMark}>✓</Text></View>
@@ -651,18 +783,30 @@ function ReceiveMode({identity, relayUrl, onReceived}: {identity: Identity; rela
   if (reqQr) {
     return (
       <View style={S.center}>
-        <Text style={S.label}>Show this to the payer</Text>
-        <View style={S.qrCard}><QRCode value={reqQr.value} size={220} ecl="M" /></View>
-        <Text style={S.amountBig}>{usd(reqQr.cents)}</Text>
-        <Text style={S.qrHint}>Waiting for payment…</Text>
-        {scanning ? (
-          <><QrScanner onScan={onSignedQr} /><Text style={S.dim2}>Scan the payer's signed QR</Text></>
-        ) : (
-          <Pressable style={S.linkBtn} onPress={() => setScanning(true)}><Text style={S.linkText}>Payer offline? Scan their QR</Text></Pressable>
-        )}
-        {DpayNfc ? <Pressable testID="btn-tap-collect" style={S.nfcTapBtn} onPress={collectByTap}><Text style={S.nfcTapBtnText}>Tap to collect (NFC)</Text></Pressable> : null}
-        {err ? <Text style={S.err}>{err}</Text> : null}
-        <Pressable style={S.linkBtn} onPress={reset}><Text style={S.linkTextMuted}>New request</Text></Pressable>
+        {/* Reader mode runs in the background while the QR is shown: the payer taps OR scans. */}
+        {reqQr.nfcHex && nfcReady && DpayNfc ? (
+          <NfcTap
+            key={nfcKey} role="reader" identity={identity} relayUrl={relayUrl} requestHex={reqQr.nfcHex}
+            reqInfo={readerReqInfo}
+            onSettled={onReceived} onActive={() => setNfcActive(true)}
+            onClose={() => { setNfcActive(false); reset(); }}
+          />
+        ) : null}
+        {!nfcActive ? (
+          <>
+            <Text style={S.label}>Show this to the payer{reqQr.nfcHex ? ' · or let them tap' : ''}</Text>
+            <View style={S.qrCard}><QRCode value={reqQr.value} size={220} ecl="M" /></View>
+            <Text style={S.amountBig}>{usd(reqQr.cents)}</Text>
+            <Text style={S.qrHint}>Waiting for payment…</Text>
+            {scanning ? (
+              <><QrScanner onScan={onSignedQr} /><Text style={S.dim2}>Scan the payer's signed QR</Text></>
+            ) : (
+              <Pressable style={S.linkBtn} onPress={() => setScanning(true)}><Text style={S.linkText}>Payer offline? Scan their QR</Text></Pressable>
+            )}
+            {err ? <Text style={S.err}>{err}</Text> : null}
+            <Pressable style={S.linkBtn} onPress={reset}><Text style={S.linkTextMuted}>New request</Text></Pressable>
+          </>
+        ) : null}
       </View>
     );
   }
@@ -689,8 +833,6 @@ const S = StyleSheet.create({
   who: {fontSize: 12, color: C.sub, marginTop: 2},
   nfcPill: {flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6, alignSelf: 'flex-start', backgroundColor: C.field, borderRadius: 12, paddingHorizontal: 9, height: 22},
   nfcLabel: {fontSize: 12, fontWeight: '600', color: C.sub},
-  nfcTapBtn: {marginTop: 18, borderWidth: 1.5, borderColor: C.brand, borderRadius: 14, height: 48, paddingHorizontal: 22, alignItems: 'center', justifyContent: 'center'},
-  nfcTapBtnText: {color: C.brand, fontSize: 16, fontWeight: '700'},
   nfcBadge: {width: 108, height: 108, borderRadius: 54, borderWidth: 4, alignItems: 'center', justifyContent: 'center', marginBottom: 26},
   nfcGlyph: {fontSize: 54, fontWeight: '700', lineHeight: 62},
   nfcTitle: {fontSize: 24, fontWeight: '800', color: C.ink, textAlign: 'center'},

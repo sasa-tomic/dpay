@@ -80,6 +80,16 @@ fn pay_wire(wire: &[u8]) -> Request<Body> {
         .unwrap()
 }
 
+/// GET /receipt/{nonce_hex} — the idempotent reconciliation lookup the merchant app falls back to
+/// when a /pay response is lost, so a settled payment is never reported as failed.
+fn get_receipt(nonce: [u8; 16]) -> Request<Body> {
+    Request::builder()
+        .method("GET")
+        .uri(format!("/receipt/{}", hex::encode(nonce)))
+        .body(Body::empty())
+        .unwrap()
+}
+
 async fn call(state: &AppState, req: Request<Body>) -> (StatusCode, Value) {
     let resp = app(state.clone()).oneshot(req).await.unwrap();
     let status = resp.status();
@@ -148,6 +158,34 @@ async fn duplicate_nonce_is_idempotent_and_credits_once() {
     // Merchant credited exactly once; payer debited exactly once.
     assert_eq!(led.balance_of(&pubkey(&merchant)), 400, "credited once only");
     assert_eq!(led.balance_of(&pubkey(&payer)), BAL_A - 400, "debited once only");
+}
+
+/// Reconciliation contract the merchant app depends on: once a payment settles, its nonce is
+/// retrievable via GET /receipt/{nonce} with the identical receipt — so a merchant whose /pay
+/// response was lost (network drop after commit) can confirm it settled instead of reporting a
+/// false failure. Also proves an unsettled nonce is a clean 404 (not settled), never a false 200.
+#[tokio::test]
+async fn settled_receipt_is_retrievable_by_nonce_for_reconciliation() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let nonce = [42u8; 16];
+
+    // Before settlement: the merchant's reconciliation lookup must say "not settled" (404), so an
+    // in-flight-but-not-yet-committed payment is never mistaken for a completed one.
+    let (pre, _b) = call(&state, get_receipt(nonce)).await;
+    assert_eq!(pre, StatusCode::NOT_FOUND);
+
+    // Settle.
+    let sa = signed(&payer, pubkey(&merchant), 250, nonce, FUTURE);
+    let (s1, b1) = call(&state, pay_json(&sa.encode())).await;
+    assert_eq!(s1, StatusCode::OK);
+
+    // Now the same nonce reconciles to the identical receipt, flagged as a replay (already settled).
+    let (s2, b2) = call(&state, get_receipt(nonce)).await;
+    assert_eq!(s2, StatusCode::OK, "settled nonce must be retrievable: {b2}");
+    assert_eq!(b2["receipt"], b1["receipt"], "reconciled receipt is identical to the settle receipt");
+    assert_eq!(b2["replayed"], serde_json::json!(true));
 }
 
 #[tokio::test]
