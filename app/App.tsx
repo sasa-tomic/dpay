@@ -13,14 +13,36 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   SafeAreaView, ScrollView, StatusBar, View, Text, Pressable, TextInput, StyleSheet, NativeModules,
-  Share, AppState, ActivityIndicator,
+  Share, AppState, ActivityIndicator, NativeEventEmitter,
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import {Camera, useCameraDevice, useCameraPermission, useCodeScanner} from 'react-native-vision-camera';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {RELAY_DEFAULT} from './relayConfig';
 
-const {DpayCore} = NativeModules as {DpayCore: DpayCoreApi};
+const {DpayCore, DpayNfc} = NativeModules as {DpayCore: DpayCoreApi; DpayNfc: DpayNfcApi};
+
+// NFC tap transport (see android/com/dpay/DpayNfc*). Pay mode = HCE card (payer is tapped);
+// Receive mode = reader (merchant reads the tap). Lifecycle arrives as `DpayNfcEvent`s.
+type DpayNfcApi = {
+  armCard(): Promise<void>;
+  disarmCard(): Promise<void>;
+  approveCard(wireHex: string): Promise<void>;
+  declineCard(): Promise<void>;
+  buildRequest(toHex: string, amount: number, nonceHex: string, expiry: number): Promise<string>;
+  startReader(requestHex: string): Promise<void>;
+  stopReader(): Promise<void>;
+  addListener(eventName: string): void;
+  removeListeners(count: number): void;
+};
+
+type NfcEvent =
+  | {type: 'phase'; role: 'card' | 'reader'; phase: NfcPhaseName}
+  | {type: 'request'; role: 'card'; toHex: string; amount: number; nonceHex: string; expiry: number}
+  | {type: 'done'; role: 'reader'; wireHex: string}
+  | {type: 'error'; role: 'card' | 'reader'; reason: string};
+
+type NfcPhaseName = 'listening' | 'linking' | 'exchanging' | 'awaitingApproval' | 'success' | 'declined';
 
 type Req = {toHex: string; amount: number; nonceHex: string; expiry: number};
 type Identity = {secretHex: string; publicHex: string; username: string};
@@ -274,6 +296,126 @@ function QrScanner({onScan}: {onScan: (v: string) => void}) {
   );
 }
 
+// Phase → status-view presentation (mirrors ui/src/NfcSession.jsx). `spin` renders a spinner.
+const NFC_UI: Record<string, {tone: string; glyph?: string; spin?: boolean; title: string; sub: string}> = {
+  listening: {tone: C.brand, glyph: '⌁', title: 'Hold near the other phone', sub: 'dpay is listening for a tap'},
+  linking: {tone: C.brand, spin: true, title: 'Connecting…', sub: 'Linking the two phones'},
+  exchanging: {tone: C.brand, spin: true, title: 'Communicating…', sub: 'Keep the phones together'},
+  awaitingApproval: {tone: C.brand, spin: true, title: 'Waiting for approval…', sub: 'Confirm on the other phone'},
+  success: {tone: C.ok, glyph: '✓', title: 'Done ✓', sub: ''},
+  declined: {tone: C.sub, glyph: '✕', title: 'Declined', sub: 'The payment was declined'},
+  error: {tone: C.bad, glyph: '!', title: 'Tap failed', sub: 'Move the phones together and try again'},
+};
+
+/**
+ * Drives one NFC tap through the native glue (DpayNfc): Pay mode arms the HCE card (payer is tapped),
+ * Receive mode runs the reader (merchant reads the tap). It renders the live phase the core emits, a
+ * review prompt when a request arrives (payer signs on Approve), and submits the reassembled wire to
+ * the relay on the merchant side. The radio hop itself is a physical-device gate; this is the app
+ * wiring over it.
+ */
+function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onClose}: {
+  role: 'card' | 'reader';
+  identity: Identity;
+  relayUrl: string;
+  requestHex?: string;
+  reqInfo?: {amount: number; nonce: string; who: string};
+  onSettled?: (t: Txn) => void;
+  onClose: () => void;
+}) {
+  const [phase, setPhase] = useState<NfcPhaseName | 'error'>('listening');
+  const [reason, setReason] = useState<string | null>(null);
+  const [review, setReview] = useState<{toHex: string; amount: number; nonceHex: string; expiry: number} | null>(null);
+  const [busy, setBusy] = useState(false);
+  const sentRef = useRef<{amount: number; who: string} | null>(null);
+  const settledRef = useRef(false);
+
+  const record = useCallback((amount: number, who: string, dir: 'out' | 'in', nonce: string) => {
+    if (settledRef.current || !onSettled) return;
+    settledRef.current = true;
+    onSettled({nonce, amount, who, time: clock(), dir});
+  }, [onSettled]);
+
+  // Merchant side: push the reassembled wire to the ledger.
+  const submitWire = useCallback(async (wireHex: string) => {
+    try {
+      const code = await DpayCore.encodeQr(wireHex);
+      const r = await fetch(`${base(relayUrl)}/pay`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({qr: code})});
+      const j = await r.json().catch(() => ({} as any));
+      if (r.ok) {
+        if (reqInfo) record(reqInfo.amount, reqInfo.who, 'in', reqInfo.nonce);
+        setPhase('success');
+      } else { setReason(typeof j.error === 'string' ? j.error : 'rejected'); setPhase('error'); }
+    } catch (e: any) { setReason(String(e?.message ?? e)); setPhase('error'); }
+  }, [relayUrl, reqInfo, record]);
+
+  useEffect(() => {
+    const emitter = new NativeEventEmitter(DpayNfc as any);
+    const sub = emitter.addListener('DpayNfcEvent', (e: NfcEvent) => {
+      if (e.role !== role) return;
+      if (e.type === 'error') { setReason(e.reason); setPhase('error'); }
+      else if (e.type === 'request') setReview({toHex: e.toHex, amount: e.amount, nonceHex: e.nonceHex, expiry: e.expiry});
+      else if (e.type === 'done') submitWire(e.wireHex);
+      else if (e.type === 'phase') {
+        setPhase(e.phase);
+        // Payer's card reports Complete once the merchant has pulled the wire → record the send.
+        if (e.phase === 'success' && role === 'card' && sentRef.current) record(sentRef.current.amount, sentRef.current.who, 'out', reqInfo?.nonce ?? '');
+      }
+    });
+    if (role === 'card') DpayNfc.armCard().catch((e: any) => { setReason(String(e?.message ?? e)); setPhase('error'); });
+    else if (requestHex) DpayNfc.startReader(requestHex).catch((e: any) => { setReason(String(e?.message ?? e)); setPhase('error'); });
+    return () => {
+      sub.remove();
+      if (role === 'card') DpayNfc.disarmCard().catch(() => {});
+      else DpayNfc.stopReader().catch(() => {});
+    };
+  }, [role, requestHex, submitWire, record, reqInfo]);
+
+  async function approve() {
+    if (!review) return;
+    setBusy(true);
+    try {
+      const wireHex = await DpayCore.signAuthorization(identity.secretHex, review.toHex, review.amount, review.nonceHex, review.expiry);
+      if (!(await DpayCore.verifyWire(wireHex))) throw new Error('local verify failed');
+      sentRef.current = {amount: review.amount, who: short(review.toHex)};
+      await DpayNfc.approveCard(wireHex);
+      setReview(null);
+    } catch (e: any) { setReason(String(e?.message ?? e)); setPhase('error'); } finally { setBusy(false); }
+  }
+
+  async function decline() { try { await DpayNfc.declineCard(); } catch {} setReview(null); onClose(); }
+
+  // Payer reviews the incoming request before signing.
+  if (role === 'card' && review && phase !== 'error') {
+    return (
+      <View style={S.center}>
+        <Text style={S.label}>Review payment · NFC</Text>
+        <Text style={S.reviewAmount}>{`Pay ${usd(review.amount)}`}</Text>
+        <Text style={S.reviewTo}>{`to ${short(review.toHex)}`}</Text>
+        <Pressable style={[S.primary, busy && S.dim]} disabled={busy} onPress={approve}><Text style={S.primaryText}>{busy ? 'Signing…' : 'Approve'}</Text></Pressable>
+        <Pressable style={S.linkBtn} onPress={decline}><Text style={S.linkTextMuted}>Decline</Text></Pressable>
+      </View>
+    );
+  }
+
+  const m = NFC_UI[phase] ?? NFC_UI.listening;
+  const terminal = phase === 'success' || phase === 'declined' || phase === 'error';
+  const title = phase === 'success' ? (role === 'card' ? 'Sent ✓' : `Paid ✓ ${reqInfo ? usd(reqInfo.amount) : ''}`) : m.title;
+  const sub = phase === 'error' && reason ? reason
+    : phase === 'success' ? (role === 'card' ? 'The authorization was sent' : 'The payment settled')
+    : m.sub;
+  return (
+    <View style={S.center}>
+      <View style={[S.nfcBadge, {borderColor: m.tone}]}>
+        {m.spin ? <ActivityIndicator size="large" color={m.tone} /> : <Text style={[S.nfcGlyph, {color: m.tone}]}>{m.glyph}</Text>}
+      </View>
+      <Text style={S.nfcTitle}>{title}</Text>
+      {sub ? <Text style={S.nfcSub}>{sub}</Text> : null}
+      <Pressable style={S.linkBtn} onPress={onClose}><Text style={S.linkText}>{terminal ? 'Done' : 'Cancel'}</Text></Pressable>
+    </View>
+  );
+}
+
 function PayMode({identity, online, relayUrl, onSettled, onOfflinePaid}: {identity: Identity; online: boolean; relayUrl: string; onSettled: (t: Txn) => void; onOfflinePaid: (amount: number) => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid'>('scan');
   const [req, setReq] = useState<(Req & {name: string}) | null>(null);
@@ -282,6 +424,7 @@ function PayMode({identity, online, relayUrl, onSettled, onOfflinePaid}: {identi
   const [manual, setManual] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [tapping, setTapping] = useState(false);
 
   async function onRequestString(raw: string) {
     try {
@@ -331,6 +474,10 @@ function PayMode({identity, online, relayUrl, onSettled, onOfflinePaid}: {identi
   }
 
   function reset() { setReq(null); setQr(null); setPaid(null); setManual(''); setErr(null); setPhase('scan'); }
+
+  if (tapping) {
+    return <NfcTap role="card" identity={identity} relayUrl={relayUrl} onSettled={onSettled} onClose={() => setTapping(false)} />;
+  }
 
   if (phase === 'paid' && paid) {
     return (
@@ -387,6 +534,7 @@ function PayMode({identity, online, relayUrl, onSettled, onOfflinePaid}: {identi
         <TextInput testID="manual-input" style={S.manualInput} value={manual} onChangeText={setManual} placeholder="…or paste the request code" autoCapitalize="none" autoCorrect={false} />
         <Pressable testID="btn-manual" style={S.smallBtn} onPress={() => manual.trim() && onRequestString(manual)}><Text style={S.smallBtnText}>Use</Text></Pressable>
       </View>
+      {DpayNfc ? <Pressable testID="btn-tap-pay" style={S.nfcTapBtn} onPress={() => setTapping(true)}><Text style={S.nfcTapBtnText}>Tap to pay (NFC)</Text></Pressable> : null}
     </View>
   );
 }
@@ -397,6 +545,7 @@ function ReceiveMode({identity, relayUrl, onReceived}: {identity: Identity; rela
   const [result, setResult] = useState<{amount: number; from: string} | null>(null);
   const [scanning, setScanning] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [tapReq, setTapReq] = useState<{hex: string; cents: number; nonce: string} | null>(null);
 
   async function makeRequest() {
     const cents = toCents(amount);
@@ -434,7 +583,28 @@ function ReceiveMode({identity, relayUrl, onReceived}: {identity: Identity; rela
     } catch (e: any) { setErr(String(e?.message ?? e)); }
   }
 
-  function reset() { setReqQr(null); setResult(null); setScanning(false); setErr(null); }
+  function reset() { setReqQr(null); setResult(null); setScanning(false); setErr(null); setTapReq(null); }
+
+  // Build the request wire and enter reader mode to collect the payer's tap.
+  async function collectByTap() {
+    const cents = toCents(amount);
+    if (!cents) return;
+    try {
+      const nonce = reqQr?.nonce ?? randNonceHex();
+      const hex = await DpayNfc.buildRequest(identity.publicHex, cents, nonce, nowSecs() + EXPIRY_WINDOW);
+      setTapReq({hex, cents, nonce}); setErr(null);
+    } catch (e: any) { setErr(String(e?.message ?? e)); }
+  }
+
+  if (tapReq) {
+    return (
+      <NfcTap
+        role="reader" identity={identity} relayUrl={relayUrl} requestHex={tapReq.hex}
+        reqInfo={{amount: tapReq.cents, nonce: tapReq.nonce, who: 'payer'}}
+        onSettled={onReceived} onClose={() => setTapReq(null)}
+      />
+    );
+  }
 
   if (result) {
     return (
@@ -459,6 +629,7 @@ function ReceiveMode({identity, relayUrl, onReceived}: {identity: Identity; rela
         ) : (
           <Pressable style={S.linkBtn} onPress={() => setScanning(true)}><Text style={S.linkText}>Payer offline? Scan their QR</Text></Pressable>
         )}
+        {DpayNfc ? <Pressable testID="btn-tap-collect" style={S.nfcTapBtn} onPress={collectByTap}><Text style={S.nfcTapBtnText}>Tap to collect (NFC)</Text></Pressable> : null}
         {err ? <Text style={S.err}>{err}</Text> : null}
         <Pressable style={S.linkBtn} onPress={reset}><Text style={S.linkTextMuted}>New request</Text></Pressable>
       </View>
@@ -487,6 +658,12 @@ const S = StyleSheet.create({
   who: {fontSize: 12, color: C.sub, marginTop: 2},
   nfcPill: {flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6, alignSelf: 'flex-start', backgroundColor: C.field, borderRadius: 12, paddingHorizontal: 9, height: 22},
   nfcLabel: {fontSize: 12, fontWeight: '600', color: C.sub},
+  nfcTapBtn: {marginTop: 18, borderWidth: 1.5, borderColor: C.brand, borderRadius: 14, height: 48, paddingHorizontal: 22, alignItems: 'center', justifyContent: 'center'},
+  nfcTapBtnText: {color: C.brand, fontSize: 16, fontWeight: '700'},
+  nfcBadge: {width: 108, height: 108, borderRadius: 54, borderWidth: 4, alignItems: 'center', justifyContent: 'center', marginBottom: 26},
+  nfcGlyph: {fontSize: 54, fontWeight: '700', lineHeight: 62},
+  nfcTitle: {fontSize: 24, fontWeight: '800', color: C.ink, textAlign: 'center'},
+  nfcSub: {fontSize: 15, color: C.sub, marginTop: 10, textAlign: 'center', paddingHorizontal: 20},
   balBox: {alignItems: 'flex-end'},
   balLabelRow: {flexDirection: 'row', alignItems: 'center', gap: 5},
   dot: {width: 8, height: 8, borderRadius: 4},

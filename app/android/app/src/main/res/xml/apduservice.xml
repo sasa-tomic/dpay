@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  dpay HCE AID registration. The AID F0 64 70 61 79 01 is proprietary (0xF0 prefix) + "dpay" + a
+  version byte — nothing else registers it, so routing is dpay's alone. Category "other" (NOT
+  "payment") means dpay never competes for the tap-to-pay default slot Google Wallet owns, and never
+  intercepts a real POS tap. requireDeviceUnlock=false: the payer reviews + approves in-app (screen
+  on), so no separate unlock gate is needed.
+-->
+<host-apdu-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/dpay_nfc_desc"
+    android:requireDeviceUnlock="false">
+    <aid-group
+        android:description="@string/dpay_nfc_aid_group"
+        android:category="other">
+        <aid-filter android:name="F06470617901" />
+    </aid-group>
+</host-apdu-service>

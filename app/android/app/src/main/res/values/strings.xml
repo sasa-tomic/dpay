@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">dpay</string>
+    <string name="dpay_nfc_desc">dpay tap-to-pay</string>
+    <string name="dpay_nfc_aid_group">dpay offline payment</string>
 </resources>
