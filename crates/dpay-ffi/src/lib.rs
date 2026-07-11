@@ -244,8 +244,35 @@ pub fn validate(
 // but we recover from poison anyway rather than propagate a panic across the FFI.
 // =============================================================================================
 
-use dpay_core::nfc::{self, CardSession, ReaderConductor, ReaderStep};
+use dpay_core::nfc::{self, CardSession, ReaderConductor, ReaderStep, SessionPhase};
 use std::sync::{Arc, Mutex, MutexGuard};
+
+/// Lifecycle phase of a tap, for a live UI status indicator. Mirrors [`dpay_core::nfc::SessionPhase`]
+/// (lifecycle only — failures surface as thrown `DpayError`s / a platform tag-loss, never as a
+/// phase). The app renders a spinner on `Linking`/`Exchanging`, a review prompt on
+/// `AwaitingApproval`, and a terminal mark on `Complete` / `Declined`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, uniffi::Enum)]
+pub enum NfcPhase {
+    Idle,
+    Linking,
+    Exchanging,
+    AwaitingApproval,
+    Complete,
+    Declined,
+}
+
+impl From<SessionPhase> for NfcPhase {
+    fn from(p: SessionPhase) -> Self {
+        match p {
+            SessionPhase::Idle => NfcPhase::Idle,
+            SessionPhase::Linking => NfcPhase::Linking,
+            SessionPhase::Exchanging => NfcPhase::Exchanging,
+            SessionPhase::AwaitingApproval => NfcPhase::AwaitingApproval,
+            SessionPhase::Complete => NfcPhase::Complete,
+            SessionPhase::Declined => NfcPhase::Declined,
+        }
+    }
+}
 
 /// What the merchant reader should do after feeding a card response — a flat enum (no associated
 /// data) so it maps cleanly to every target language. When `Done`, pull the wire via
@@ -301,6 +328,16 @@ impl FfiCardSession {
         lock(&self.inner).awaiting_decision()
     }
 
+    /// Lifecycle phase for the payer-side status UI.
+    pub fn phase(&self) -> NfcPhase {
+        lock(&self.inner).phase().into()
+    }
+
+    /// True once the merchant has pulled the entire signed wire ("Sent ✓").
+    pub fn is_complete(&self) -> bool {
+        lock(&self.inner).is_complete()
+    }
+
     /// Approve: supply the offline-signed 192-byte wire to serve. Errors (`NfcWrongState`) unless a
     /// request is held and no decision has been made; the wire is validated as it is framed.
     pub fn provide_wire(&self, wire: Vec<u8>) -> Result<(), DpayError> {
@@ -334,6 +371,12 @@ impl FfiReaderConductor {
     /// The next command APDU to transceive, or `None` once the exchange is terminal.
     pub fn next_command(&self) -> Option<Vec<u8>> {
         lock(&self.inner).next_command()
+    }
+
+    /// Lifecycle phase for the merchant-side status UI. (`AwaitingApproval` is surfaced via a
+    /// `Pending` step from `handle_response`, not this accessor — see `NfcStep`.)
+    pub fn phase(&self) -> NfcPhase {
+        lock(&self.inner).phase().into()
     }
 
     /// Feed the response to the last command; advance the state machine. On `Done` the wire is

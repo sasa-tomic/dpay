@@ -168,5 +168,29 @@ except d.DpayError.NfcWrongState:
     check(True, "provide_wire with no request -> DpayError.NfcWrongState")
 
 
+# 7) NFC lifecycle phase: the live status the UI renders, read straight from the core machine -----
+# The app maps these to a spinner (Linking/Exchanging), a review prompt (AwaitingApproval), and a
+# terminal ✓/declined mark (Complete/Declined). Here we step one exchange and assert each transition.
+card = d.FfiCardSession(MAX_CHUNK)
+reader = d.FfiReaderConductor(req_bytes, MAX_CHUNK)
+check(card.phase() == d.NfcPhase.IDLE, "card phase starts Idle")
+check(reader.phase() == d.NfcPhase.LINKING, "reader phase starts Linking")
+
+reader.handle_response(card.process(reader.next_command()))          # SELECT handshake
+check(reader.phase() == d.NfcPhase.EXCHANGING, "reader -> Exchanging after SELECT")
+
+ack = card.process(reader.next_command())                            # push the request
+check(card.phase() == d.NfcPhase.AWAITING_APPROVAL, "card -> AwaitingApproval holding the request")
+check(card.is_complete() is False, "card not complete before serving")
+reader.handle_response(ack)
+
+card.provide_wire(nfc_wire)                                           # payer approves
+check(card.phase() == d.NfcPhase.EXCHANGING, "card -> Exchanging while serving the wire")
+
+step = reader.handle_response(card.process(reader.next_command()))   # pull the wire (1 frame)
+check(card.phase() == d.NfcPhase.COMPLETE and card.is_complete(), "card -> Complete after last frame")
+check(step == d.NfcStep.DONE and reader.phase() == d.NfcPhase.COMPLETE, "reader -> Complete / Done")
+
+
 print(f"\nALL {passed} FFI CHECKS PASSED — Python called the real dpay-core across UniFFI.")
 sys.exit(0)

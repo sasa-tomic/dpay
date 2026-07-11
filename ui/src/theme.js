@@ -7,6 +7,8 @@ export const C = {
   brand: '#4f46e5',
   brandInk: '#ffffff',
   ok: '#16a34a',
+  warn: '#b45309',
+  bad: '#dc2626',
   line: '#e5e7eb',
   field: '#f3f4f6',
   qrBox: '#111827',

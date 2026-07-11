@@ -1,5 +1,6 @@
 package com.dpay
 
+import android.nfc.NfcAdapter
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -148,6 +149,28 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
             )
         } catch (e: Throwable) {
             promise.reject("dpay_core", e)
+        }
+    }
+
+    /**
+     * Report the device NFC radio state for the UI status chip: "ready" (adapter present + enabled),
+     * "off" (present but disabled in system settings), or "unsupported" (no NFC hardware). This is
+     * the *radio* status only — the tap-to-pay HCE transport (see `dpay_core::nfc`) is a separate,
+     * physical-device-gated feature; QR always works regardless of this value. A probe failure
+     * resolves "unknown" (the chip then hides) rather than rejecting.
+     */
+    @ReactMethod
+    fun nfcStatus(promise: Promise) {
+        try {
+            val adapter = NfcAdapter.getDefaultAdapter(reactApplicationContext)
+            val status = when {
+                adapter == null -> "unsupported"
+                adapter.isEnabled -> "ready"
+                else -> "off"
+            }
+            promise.resolve(status)
+        } catch (e: Throwable) {
+            promise.resolve("unknown")
         }
     }
 }

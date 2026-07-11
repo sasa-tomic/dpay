@@ -2,18 +2,22 @@ import { useState } from 'react';
 import { View, Text, TextInput, Pressable } from 'react-native';
 import { C, FONT } from './theme.js';
 import QrBox from './QrBox.jsx';
+import NfcChip from './NfcChip.jsx';
 
 // Merchant side of the two-scan flow:
 //   enter a $ amount -> Request -> show a request-QR for the payer to scan.
-export default function ReceiveScreen() {
+export default function ReceiveScreen({ nfc }) {
   const [amount, setAmount] = useState('5.00');
   const [requested, setRequested] = useState(false);
 
   return (
     <View style={S.screen}>
       <View style={S.header}>
-        <Text style={S.brand}>dpay</Text>
-        <Text style={S.role}>Receive</Text>
+        <View>
+          <Text style={S.brand}>dpay</Text>
+          <Text style={S.role}>Receive</Text>
+        </View>
+        <NfcChip status={nfc} />
       </View>
 
       <View style={S.body}>
@@ -57,6 +61,9 @@ const S = {
     paddingBottom: 20,
     borderBottomWidth: 1,
     borderBottomColor: C.line,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
   },
   brand: { fontFamily: FONT, fontSize: 26, fontWeight: '700', color: C.brand },
   role: { fontFamily: FONT, fontSize: 15, color: C.sub, marginTop: 2 },

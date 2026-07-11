@@ -758,6 +758,12 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is 
 // rather `InterfaceTooLargeException`, caused by too many methods 
@@ -799,6 +805,10 @@ fun uniffi_dpay_ffi_checksum_method_fficardsession_awaiting_decision(
 ): Short
 fun uniffi_dpay_ffi_checksum_method_fficardsession_decline(
 ): Short
+fun uniffi_dpay_ffi_checksum_method_fficardsession_is_complete(
+): Short
+fun uniffi_dpay_ffi_checksum_method_fficardsession_phase(
+): Short
 fun uniffi_dpay_ffi_checksum_method_fficardsession_process(
 ): Short
 fun uniffi_dpay_ffi_checksum_method_fficardsession_provide_wire(
@@ -808,6 +818,8 @@ fun uniffi_dpay_ffi_checksum_method_fficardsession_request(
 fun uniffi_dpay_ffi_checksum_method_ffireaderconductor_handle_response(
 ): Short
 fun uniffi_dpay_ffi_checksum_method_ffireaderconductor_next_command(
+): Short
+fun uniffi_dpay_ffi_checksum_method_ffireaderconductor_phase(
 ): Short
 fun uniffi_dpay_ffi_checksum_method_ffireaderconductor_wire(
 ): Short
@@ -874,6 +886,10 @@ fun uniffi_dpay_ffi_fn_method_fficardsession_awaiting_decision(`ptr`: Pointer,un
 ): Byte
 fun uniffi_dpay_ffi_fn_method_fficardsession_decline(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+fun uniffi_dpay_ffi_fn_method_fficardsession_is_complete(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
+fun uniffi_dpay_ffi_fn_method_fficardsession_phase(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_method_fficardsession_process(`ptr`: Pointer,`command`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_method_fficardsession_provide_wire(`ptr`: Pointer,`wire`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -889,6 +905,8 @@ fun uniffi_dpay_ffi_fn_constructor_ffireaderconductor_new(`request`: RustBuffer.
 fun uniffi_dpay_ffi_fn_method_ffireaderconductor_handle_response(`ptr`: Pointer,`response`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_method_ffireaderconductor_next_command(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_method_ffireaderconductor_phase(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_method_ffireaderconductor_wire(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1079,6 +1097,12 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_dpay_ffi_checksum_method_fficardsession_decline() != 61902.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_dpay_ffi_checksum_method_fficardsession_is_complete() != 59776.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_method_fficardsession_phase() != 35411.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_dpay_ffi_checksum_method_fficardsession_process() != 33759.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1092,6 +1116,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_next_command() != 63770.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_phase() != 45891.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_wire() != 8289.toShort()) {
@@ -1508,6 +1535,16 @@ public interface FfiCardSessionInterface {
     fun `decline`()
     
     /**
+     * True once the merchant has pulled the entire signed wire ("Sent ✓").
+     */
+    fun `isComplete`(): kotlin.Boolean
+    
+    /**
+     * Lifecycle phase for the payer-side status UI.
+     */
+    fun `phase`(): NfcPhase
+    
+    /**
      * Process one command APDU; returns the response APDU bytes. Total function — never throws.
      */
     fun `process`(`command`: kotlin.ByteArray): kotlin.ByteArray
@@ -1653,6 +1690,36 @@ open class FfiCardSession: Disposable, AutoCloseable, FfiCardSessionInterface
 }
     }
     
+    
+
+    
+    /**
+     * True once the merchant has pulled the entire signed wire ("Sent ✓").
+     */override fun `isComplete`(): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_method_fficardsession_is_complete(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Lifecycle phase for the payer-side status UI.
+     */override fun `phase`(): NfcPhase {
+            return FfiConverterTypeNfcPhase.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_method_fficardsession_phase(
+        it, _status)
+}
+    }
+    )
+    }
     
 
     
@@ -1855,6 +1922,12 @@ public interface FfiReaderConductorInterface {
     fun `nextCommand`(): kotlin.ByteArray?
     
     /**
+     * Lifecycle phase for the merchant-side status UI. (`AwaitingApproval` is surfaced via a
+     * `Pending` step from `handle_response`, not this accessor — see `NfcStep`.)
+     */
+    fun `phase`(): NfcPhase
+    
+    /**
      * The reassembled 192-byte wire once the exchange reached `Done`, else `None`.
      */
     fun `wire`(): kotlin.ByteArray?
@@ -1984,6 +2057,22 @@ open class FfiReaderConductor: Disposable, AutoCloseable, FfiReaderConductorInte
     callWithPointer {
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_method_ffireaderconductor_next_command(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Lifecycle phase for the merchant-side status UI. (`AwaitingApproval` is surfaced via a
+     * `Pending` step from `handle_response`, not this accessor — see `NfcStep`.)
+     */override fun `phase`(): NfcPhase {
+            return FfiConverterTypeNfcPhase.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_method_ffireaderconductor_phase(
         it, _status)
 }
     }
@@ -2308,6 +2397,46 @@ public object FfiConverterTypeDpayError : FfiConverterRustBuffer<DpayException> 
     }
 
 }
+
+
+
+/**
+ * Lifecycle phase of a tap, for a live UI status indicator. Mirrors [`dpay_core::nfc::SessionPhase`]
+ * (lifecycle only — failures surface as thrown `DpayError`s / a platform tag-loss, never as a
+ * phase). The app renders a spinner on `Linking`/`Exchanging`, a review prompt on
+ * `AwaitingApproval`, and a terminal mark on `Complete` / `Declined`.
+ */
+
+enum class NfcPhase {
+    
+    IDLE,
+    LINKING,
+    EXCHANGING,
+    AWAITING_APPROVAL,
+    COMPLETE,
+    DECLINED;
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeNfcPhase: FfiConverterRustBuffer<NfcPhase> {
+    override fun read(buf: ByteBuffer) = try {
+        NfcPhase.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: NfcPhase) = 4UL
+
+    override fun write(value: NfcPhase, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
 
 
 

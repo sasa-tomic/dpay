@@ -131,7 +131,41 @@ async function main() {
     await shot(page, '04-paid');
     await page.close();
 
-    console.log('[shoot] all 4 screenshots captured');
+    // 05 - NFC off: the status chip reflects a disabled NFC radio (QR still works).
+    page = await newPage(browser);
+    await page.goto(`${BASE}/?screen=receive&nfc=off`, { waitUntil: 'networkidle0' });
+    await waitReady(page);
+    await page.waitForSelector('[data-testid=nfc-off]', { timeout: 10000 });
+    await shot(page, '05-nfc-off');
+    await page.close();
+
+    // 06 - NFC unsupported: phone has no NFC hardware -> "No NFC".
+    page = await newPage(browser);
+    await page.goto(`${BASE}/?screen=pay&nfc=unsupported`, { waitUntil: 'networkidle0' });
+    await waitReady(page);
+    await page.waitForSelector('[data-testid=nfc-unsupported]', { timeout: 10000 });
+    await shot(page, '06-nfc-unsupported');
+    await page.close();
+
+    // 07-12 - live NFC-tap session status, one screenshot per lifecycle phase (+ the error state).
+    const SESSIONS = [
+      ['07-nfc-listening', 'listening', ''],
+      ['08-nfc-exchanging', 'exchanging', ''],
+      ['09-nfc-approval', 'awaitingApproval', ''],
+      ['10-nfc-success', 'success', ''],
+      ['11-nfc-declined', 'declined', ''],
+      ['12-nfc-error', 'error', '&reason=' + encodeURIComponent('Phones moved apart — try again')],
+    ];
+    for (const [name, phase, extra] of SESSIONS) {
+      page = await newPage(browser);
+      await page.goto(`${BASE}/?screen=nfc&phase=${phase}${extra}`, { waitUntil: 'networkidle0' });
+      await waitReady(page);
+      await page.waitForSelector(`[data-testid=nfc-session-${phase}]`, { timeout: 10000 });
+      await shot(page, name);
+      await page.close();
+    }
+
+    console.log('[shoot] all 12 screenshots captured');
   } finally {
     await browser.close();
   }

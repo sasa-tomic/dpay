@@ -32,7 +32,12 @@ type DpayCoreApi = {
   decodeRequest(qr: string): Promise<Req>;
   encodeQr(wireHex: string): Promise<string>;
   verifyWire(wireHex: string): Promise<boolean>;
+  // Device NFC radio state for the status chip: 'ready' | 'off' | 'unsupported' | 'unknown'.
+  // Optional so an app built before the native method exists degrades to 'unknown' (chip hidden).
+  nfcStatus?(): Promise<string>;
 };
+
+type NfcStatus = 'ready' | 'off' | 'unsupported' | 'unknown';
 
 const C = {bg: '#ffffff', ink: '#0b0b0f', sub: '#6b7280', brand: '#4f46e5', brandInk: '#ffffff', ok: '#16a34a', bad: '#dc2626', warn: '#b45309', line: '#e5e7eb', field: '#f3f4f6'};
 const EXPIRY_WINDOW = 600; // request valid 10 min
@@ -132,6 +137,23 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
   const [online, setOnline] = useState(false);
   const [offlineSpent, setOfflineSpent] = useState(0);
   const [history, setHistory] = useState<Txn[]>([]);
+  const [nfc, setNfc] = useState<NfcStatus>('unknown');
+
+  // Read the device NFC radio state once (re-checked when the app returns to the foreground, since
+  // the user may toggle NFC in system settings). Purely informational for the status chip; failure
+  // or a missing native method leaves it 'unknown' and the chip hidden.
+  useEffect(() => {
+    let alive = true;
+    const read = async () => {
+      try {
+        const s = (await DpayCore.nfcStatus?.()) as NfcStatus | undefined;
+        if (alive) setNfc(s ?? 'unknown');
+      } catch { if (alive) setNfc('unknown'); }
+    };
+    read();
+    const sub = AppState.addEventListener('change', x => { if (x === 'active') read(); });
+    return () => { alive = false; sub.remove(); };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -160,6 +182,7 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
         <View>
           <Text style={S.brand}>dpay</Text>
           <Text style={S.who}>{identity.username} · {short(identity.publicHex)}</Text>
+          <NfcPill status={nfc} />
         </View>
         <View style={S.balBox}>
           <View style={S.balLabelRow}><View style={[S.dot, {backgroundColor: online ? C.ok : '#9ca3af'}]} /><Text style={S.balLabel}>{online ? 'balance' : 'offline'}</Text></View>
@@ -204,6 +227,27 @@ function Tab({label, active, onPress}: {label: string; active: boolean; onPress:
     <Pressable onPress={onPress} style={[S.tab, active && S.tabActive]} testID={`tab-${label.toLowerCase()}`}>
       <Text style={[S.tabText, active && S.tabTextActive]}>{label}</Text>
     </Pressable>
+  );
+}
+
+// Truthful NFC radio-status chip. Reports the device adapter state only (on / off / absent) — the
+// tap-to-pay HCE transport is a separate, device-gated feature and QR always works. 'unknown'
+// (probe failed or the native method is absent) renders nothing rather than a misleading claim.
+const NFC_PILL: Record<NfcStatus, {dot: string; label: string} | null> = {
+  ready: {dot: C.ok, label: 'NFC on'},
+  off: {dot: C.warn, label: 'NFC off'},
+  unsupported: {dot: '#9ca3af', label: 'No NFC'},
+  unknown: null,
+};
+
+function NfcPill({status}: {status: NfcStatus}) {
+  const s = NFC_PILL[status];
+  if (!s) return null;
+  return (
+    <View style={S.nfcPill} testID={`nfc-${status}`}>
+      <View style={[S.dot, {backgroundColor: s.dot}]} />
+      <Text style={S.nfcLabel}>{s.label}</Text>
+    </View>
   );
 }
 
@@ -441,6 +485,8 @@ const S = StyleSheet.create({
   header: {paddingTop: 20, paddingHorizontal: 22, paddingBottom: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', borderBottomWidth: 1, borderBottomColor: C.line},
   brand: {fontSize: 26, fontWeight: '800', color: C.brand},
   who: {fontSize: 12, color: C.sub, marginTop: 2},
+  nfcPill: {flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6, alignSelf: 'flex-start', backgroundColor: C.field, borderRadius: 12, paddingHorizontal: 9, height: 22},
+  nfcLabel: {fontSize: 12, fontWeight: '600', color: C.sub},
   balBox: {alignItems: 'flex-end'},
   balLabelRow: {flexDirection: 'row', alignItems: 'center', gap: 5},
   dot: {width: 8, height: 8, borderRadius: 4},

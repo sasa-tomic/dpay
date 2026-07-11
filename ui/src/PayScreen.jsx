@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { View, Text, Pressable } from 'react-native';
 import { C, FONT } from './theme.js';
+import NfcChip from './NfcChip.jsx';
 
 // Payer side of the two-scan flow. `scan` is the parsed request payload injected
 // by the camera SEAM in App (window.__DPAY_TEST_SCAN / ?scan=). There is no real
 // camera on web by design.
 //   waiting -> (scan injected) review "Pay $X to <merchant>" -> Approve -> "Paid ✓ $X"
-export default function PayScreen({ scan }) {
+export default function PayScreen({ scan, nfc }) {
   const [paid, setPaid] = useState(false);
 
   const amount = scan && scan.amount ? String(scan.amount) : null;
@@ -15,8 +16,11 @@ export default function PayScreen({ scan }) {
   return (
     <View style={S.screen}>
       <View style={S.header}>
-        <Text style={S.brand}>dpay</Text>
-        <Text style={S.role}>Pay</Text>
+        <View>
+          <Text style={S.brand}>dpay</Text>
+          <Text style={S.role}>Pay</Text>
+        </View>
+        <NfcChip status={nfc} />
       </View>
 
       <View style={S.body}>
@@ -61,6 +65,9 @@ const S = {
     paddingBottom: 20,
     borderBottomWidth: 1,
     borderBottomColor: C.line,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
   },
   brand: { fontFamily: FONT, fontSize: 26, fontWeight: '700', color: C.brand },
   role: { fontFamily: FONT, fontSize: 15, color: C.sub, marginTop: 2 },

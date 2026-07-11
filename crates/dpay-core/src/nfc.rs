@@ -511,6 +511,31 @@ impl From<FrameError> for NfcError {
     }
 }
 
+/// The lifecycle phase of one tap, for a live UI status indicator. Both roles report it (see
+/// [`CardSession::phase`] / [`ReaderConductor::phase`]); the app renders a spinner while
+/// `Linking`/`Exchanging`, a review prompt on `AwaitingApproval`, and a terminal ✓ / declined mark
+/// on `Complete` / `Declined`.
+///
+/// This is the *lifecycle* only. Failures are **not** a phase here — they surface as typed errors
+/// from the session APIs (protocol) or as a platform `TagLostException` (radio) — and the app maps
+/// those to its own error state. Keeping errors out of the phase means this enum can never
+/// misreport a failed tap as a benign state.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SessionPhase {
+    /// No exchange in progress yet (waiting for a tap).
+    Idle,
+    /// SELECT handshake — the two phones are establishing the dpay channel.
+    Linking,
+    /// Transferring frames (the request in, or the signed wire out).
+    Exchanging,
+    /// The payer is holding the request, deciding whether to approve.
+    AwaitingApproval,
+    /// The signed wire was fully transferred.
+    Complete,
+    /// The payer declined.
+    Declined,
+}
+
 /// Build the SELECT-by-AID command the reader sends first.
 pub fn build_select() -> Vec<u8> {
     CommandApdu::with_data(CLA_ISO, INS_SELECT, P1_SELECT_BY_NAME, P2_FIRST, AID.to_vec(), Some(256))
@@ -583,6 +608,23 @@ impl CardSession {
         self.state == CardState::RequestReady
     }
 
+    /// Lifecycle phase for the payer-side UI status indicator.
+    pub fn phase(&self) -> SessionPhase {
+        match self.state {
+            CardState::AwaitingSelect => SessionPhase::Idle,
+            CardState::Collecting => SessionPhase::Linking,
+            CardState::RequestReady => SessionPhase::AwaitingApproval,
+            CardState::Serving => SessionPhase::Exchanging,
+            CardState::Done => SessionPhase::Complete,
+            CardState::Declined => SessionPhase::Declined,
+        }
+    }
+
+    /// True once the merchant has pulled the entire signed wire (payer UI shows "Sent ✓").
+    pub fn is_complete(&self) -> bool {
+        self.state == CardState::Done
+    }
+
     /// Approve: supply the offline-signed wire to serve to the reader. Must be called in the
     /// `RequestReady` state (there is a held request and no decision yet); otherwise `WrongState`.
     /// The wire is validated by fragmenting it — an empty or over-large wire is a typed error.
@@ -608,7 +650,9 @@ impl CardSession {
         }
     }
 
-    fn phase(&self) -> CardPhase {
+    /// The on-the-wire phase byte reported in the SELECT greeting (distinct from the UI-facing
+    /// [`SessionPhase`] returned by [`phase`](Self::phase)).
+    fn wire_phase(&self) -> CardPhase {
         match self.state {
             CardState::RequestReady => CardPhase::HasRequest,
             CardState::Serving | CardState::Done => CardPhase::Serving,
@@ -656,7 +700,7 @@ impl CardSession {
                 self.state = CardState::Collecting;
             }
         }
-        ResponseApdu::new(vec![PROTO_VERSION, self.phase().byte()], Sw::OK)
+        ResponseApdu::new(vec![PROTO_VERSION, self.wire_phase().byte()], Sw::OK)
     }
 
     fn on_put_request(&mut self, cmd: &CommandApdu) -> ResponseApdu {
@@ -770,6 +814,18 @@ impl ReaderConductor {
             push_idx: 0,
             reasm: Reassembler::new(),
         })
+    }
+
+    /// Lifecycle phase for the merchant-side UI status indicator. Note the reader cannot itself see
+    /// `AwaitingApproval` as a *state* (after a NOT_READY it re-selects); the app derives that from
+    /// a [`ReaderStep::Pending`] return instead. The other phases map directly.
+    pub fn phase(&self) -> SessionPhase {
+        match self.state {
+            ReaderState::NeedSelect => SessionPhase::Linking,
+            ReaderState::Pushing | ReaderState::Pulling => SessionPhase::Exchanging,
+            ReaderState::Done => SessionPhase::Complete,
+            ReaderState::Declined => SessionPhase::Declined,
+        }
     }
 
     /// The next command APDU to transceive, or `None` once the exchange is terminal
@@ -1261,6 +1317,53 @@ mod tests {
         // Now pulling should start again at frame 0.
         let again = ResponseApdu::parse(&card.process(&get)).unwrap();
         assert_eq!(again.data, f0.data, "re-tap must resume from the first frame");
+    }
+
+    #[test]
+    fn phase_tracks_the_exchange() {
+        let req = sample_request();
+        let wire = vec![0xABu8; WIRE_LEN];
+        let mut card = CardSession::new(DEFAULT_MAX_CHUNK);
+        let mut reader = ReaderConductor::new(&req, DEFAULT_MAX_CHUNK).unwrap();
+
+        // Nothing has happened yet.
+        assert_eq!(card.phase(), SessionPhase::Idle);
+        assert_eq!(reader.phase(), SessionPhase::Linking);
+
+        // SELECT handshake.
+        let greet = card.process(&reader.next_command().unwrap());
+        assert_eq!(card.phase(), SessionPhase::Linking);
+        reader.handle_response(&greet).unwrap();
+        assert_eq!(reader.phase(), SessionPhase::Exchanging);
+
+        // Push the request → the card now holds it and awaits the payer's decision.
+        let ack = card.process(&reader.next_command().unwrap());
+        assert_eq!(card.phase(), SessionPhase::AwaitingApproval);
+        assert!(!card.is_complete());
+        reader.handle_response(&ack).unwrap();
+        assert_eq!(reader.phase(), SessionPhase::Exchanging);
+
+        // Approve → the card is serving the signed wire.
+        card.provide_wire(&wire).unwrap();
+        assert_eq!(card.phase(), SessionPhase::Exchanging);
+
+        // Pull the wire → both sides complete.
+        let framed = card.process(&reader.next_command().unwrap());
+        assert_eq!(card.phase(), SessionPhase::Complete);
+        assert!(card.is_complete());
+        assert!(matches!(reader.handle_response(&framed).unwrap(), ReaderStep::Done(_)));
+        assert_eq!(reader.phase(), SessionPhase::Complete);
+    }
+
+    #[test]
+    fn phase_reports_decline() {
+        let mut card = CardSession::new(DEFAULT_MAX_CHUNK);
+        card.process(&build_select());
+        let reqf = frame::fragment(&sample_request(), DEFAULT_MAX_CHUNK).unwrap();
+        card.process(&CommandApdu::with_data(0x80, 0xC2, 0, 0, reqf[0].clone(), None).encode());
+        assert_eq!(card.phase(), SessionPhase::AwaitingApproval);
+        card.decline().unwrap();
+        assert_eq!(card.phase(), SessionPhase::Declined);
     }
 
     /// A malformed request frame mid-push is rejected (BAD_DATA), not silently accepted.

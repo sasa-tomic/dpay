@@ -3,6 +3,11 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- NFC: permission is needed to read the adapter state for the status chip (and, later, for the
+         tap-to-pay HCE transport). `required=false` keeps the app installable on NFC-less phones,
+         which fall back to QR. -->
+    <uses-permission android:name="android.permission.NFC" />
+    <uses-feature android:name="android.hardware.nfc" android:required="false" />
 
     <application
       android:name=".MainApplication"

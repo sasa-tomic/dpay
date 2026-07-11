@@ -486,6 +486,10 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_method_fficardsession_decline() != 61902:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_method_fficardsession_is_complete() != 59776:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_method_fficardsession_phase() != 35411:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_method_fficardsession_process() != 33759:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_method_fficardsession_provide_wire() != 51089:
@@ -495,6 +499,8 @@ def _uniffi_check_api_checksums(lib):
     if lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_handle_response() != 18693:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_next_command() != 63770:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_phase() != 45891:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_wire() != 8289:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -633,6 +639,16 @@ _UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_decline.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_decline.restype = None
+_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_is_complete.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_is_complete.restype = ctypes.c_int8
+_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_phase.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_phase.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_process.argtypes = (
     ctypes.c_void_p,
     _UniffiRustBuffer,
@@ -677,6 +693,11 @@ _UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_next_command.argtypes = 
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_next_command.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_phase.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_phase.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_wire.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -1058,6 +1079,12 @@ _UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_awaiting_decision.rest
 _UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_decline.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_decline.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_is_complete.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_is_complete.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_phase.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_phase.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_process.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_process.restype = ctypes.c_uint16
@@ -1073,6 +1100,9 @@ _UniffiLib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_handle_response.re
 _UniffiLib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_next_command.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_next_command.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_phase.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_phase.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_wire.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_wire.restype = ctypes.c_uint16
@@ -1473,6 +1503,83 @@ class _UniffiConverterTypeDpayError(_UniffiConverterRustBuffer):
 
 
 
+class NfcPhase(enum.Enum):
+    """
+    Lifecycle phase of a tap, for a live UI status indicator. Mirrors [`dpay_core::nfc::SessionPhase`]
+    (lifecycle only — failures surface as thrown `DpayError`s / a platform tag-loss, never as a
+    phase). The app renders a spinner on `Linking`/`Exchanging`, a review prompt on
+    `AwaitingApproval`, and a terminal mark on `Complete` / `Declined`.
+    """
+
+    IDLE = 0
+    
+    LINKING = 1
+    
+    EXCHANGING = 2
+    
+    AWAITING_APPROVAL = 3
+    
+    COMPLETE = 4
+    
+    DECLINED = 5
+    
+
+
+class _UniffiConverterTypeNfcPhase(_UniffiConverterRustBuffer):
+    @staticmethod
+    def read(buf):
+        variant = buf.read_i32()
+        if variant == 1:
+            return NfcPhase.IDLE
+        if variant == 2:
+            return NfcPhase.LINKING
+        if variant == 3:
+            return NfcPhase.EXCHANGING
+        if variant == 4:
+            return NfcPhase.AWAITING_APPROVAL
+        if variant == 5:
+            return NfcPhase.COMPLETE
+        if variant == 6:
+            return NfcPhase.DECLINED
+        raise InternalError("Raw enum value doesn't match any cases")
+
+    @staticmethod
+    def check_lower(value):
+        if value == NfcPhase.IDLE:
+            return
+        if value == NfcPhase.LINKING:
+            return
+        if value == NfcPhase.EXCHANGING:
+            return
+        if value == NfcPhase.AWAITING_APPROVAL:
+            return
+        if value == NfcPhase.COMPLETE:
+            return
+        if value == NfcPhase.DECLINED:
+            return
+        raise ValueError(value)
+
+    @staticmethod
+    def write(value, buf):
+        if value == NfcPhase.IDLE:
+            buf.write_i32(1)
+        if value == NfcPhase.LINKING:
+            buf.write_i32(2)
+        if value == NfcPhase.EXCHANGING:
+            buf.write_i32(3)
+        if value == NfcPhase.AWAITING_APPROVAL:
+            buf.write_i32(4)
+        if value == NfcPhase.COMPLETE:
+            buf.write_i32(5)
+        if value == NfcPhase.DECLINED:
+            buf.write_i32(6)
+
+
+
+
+
+
+
 class NfcStep(enum.Enum):
     """
     What the merchant reader should do after feeding a card response — a flat enum (no associated
@@ -1619,6 +1726,18 @@ class FfiCardSessionProtocol(typing.Protocol):
         """
 
         raise NotImplementedError
+    def is_complete(self, ):
+        """
+        True once the merchant has pulled the entire signed wire ("Sent ✓").
+        """
+
+        raise NotImplementedError
+    def phase(self, ):
+        """
+        Lifecycle phase for the payer-side status UI.
+        """
+
+        raise NotImplementedError
     def process(self, command: "bytes"):
         """
         Process one command APDU; returns the response APDU bytes. Total function — never throws.
@@ -1698,6 +1817,32 @@ class FfiCardSession():
 
         _uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_decline,self._uniffi_clone_pointer(),)
 
+
+
+
+
+
+    def is_complete(self, ) -> "bool":
+        """
+        True once the merchant has pulled the entire signed wire ("Sent ✓").
+        """
+
+        return _UniffiConverterBool.lift(
+            _uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_is_complete,self._uniffi_clone_pointer(),)
+        )
+
+
+
+
+
+    def phase(self, ) -> "NfcPhase":
+        """
+        Lifecycle phase for the payer-side status UI.
+        """
+
+        return _UniffiConverterTypeNfcPhase.lift(
+            _uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_phase,self._uniffi_clone_pointer(),)
+        )
 
 
 
@@ -1796,6 +1941,13 @@ class FfiReaderConductorProtocol(typing.Protocol):
         """
 
         raise NotImplementedError
+    def phase(self, ):
+        """
+        Lifecycle phase for the merchant-side status UI. (`AwaitingApproval` is surfaced via a
+        `Pending` step from `handle_response`, not this accessor — see `NfcStep`.)
+        """
+
+        raise NotImplementedError
     def wire(self, ):
         """
         The reassembled 192-byte wire once the exchange reached `Done`, else `None`.
@@ -1867,6 +2019,20 @@ class FfiReaderConductor():
 
         return _UniffiConverterOptionalBytes.lift(
             _uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_next_command,self._uniffi_clone_pointer(),)
+        )
+
+
+
+
+
+    def phase(self, ) -> "NfcPhase":
+        """
+        Lifecycle phase for the merchant-side status UI. (`AwaitingApproval` is surfaced via a
+        `Pending` step from `handle_response`, not this accessor — see `NfcStep`.)
+        """
+
+        return _UniffiConverterTypeNfcPhase.lift(
+            _uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_phase,self._uniffi_clone_pointer(),)
         )
 
 
@@ -2096,6 +2262,7 @@ def verify_wire(wire: "bytes") -> "bool":
 __all__ = [
     "InternalError",
     "DpayError",
+    "NfcPhase",
     "NfcStep",
     "KeyPair",
     "PaymentRequestData",
