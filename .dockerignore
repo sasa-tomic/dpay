@@ -1,0 +1,39 @@
+# Docker build context excludes. The relay image only needs the Rust workspace sources
+# (Cargo.toml, Cargo.lock, crates/); everything below is either huge, generated, or irrelevant,
+# and keeping it out makes the build context small and the build hermetic.
+
+# Rust / build outputs
+/target
+**/target
+/.dev
+
+# Local source & crate caches (see CLAUDE.md third_party/ + vendor/)
+/third_party
+/vendor
+
+# Node / JS
+**/node_modules
+
+# Android build outputs & artifacts
+/android
+app/android/app/build
+app/android/build
+app/android/.gradle
+**/*.apk
+
+# UI / screenshots / generated shots
+app/shots
+ui/shots
+ui/dist
+
+# dfx local replica state + generated args
+/.dfx
+/dfx/args
+
+# VCS / editor / misc
+/.git
+.gitignore
+**/.DS_Store
+
+# Deploy stack itself doesn't need to be in the image build context
+/deploy

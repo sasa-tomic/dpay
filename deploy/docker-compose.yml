@@ -1,0 +1,51 @@
+# dpay public-demo stack: the relay (a service on a port) behind Caddy (public FQDN + TLS).
+#
+#   cp .env.example .env      # then edit DPAY_FQDN etc.
+#   docker compose up -d --build
+#
+# Local test:  DPAY_FQDN=localhost (default) → https://localhost proxies to the relay.
+# Real deploy: set DPAY_FQDN to your domain; Caddy gets a Let's Encrypt cert automatically.
+name: dpay
+
+services:
+  relay:
+    build:
+      context: ..                 # repo root — the relay is a workspace member (needs dpay-core)
+      dockerfile: deploy/Dockerfile
+    image: dpay-relay:latest
+    restart: unless-stopped
+    environment:
+      DPAY_RELAY_ADDR: 0.0.0.0:8787
+      DPAY_PER_TX_CAP: ${DPAY_PER_TX_CAP:-100000}
+    expose:
+      - "8787"                    # reachable to Caddy on the compose network, not published to host
+    # Uncomment to hit the relay directly (bypassing Caddy), bound to loopback only:
+    # ports:
+    #   - "127.0.0.1:8787:8787"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8787/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      relay:
+        condition: service_healthy
+    environment:
+      DPAY_FQDN: ${DPAY_FQDN:-localhost}
+      DPAY_RELAY_UPSTREAM: ${DPAY_RELAY_UPSTREAM:-relay:8787}
+    ports:
+      - "${CADDY_HTTP_PORT:-80}:80"
+      - "${CADDY_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data           # issued certs — persist so restarts don't re-hit Let's Encrypt
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:
