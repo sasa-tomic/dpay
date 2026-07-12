@@ -362,6 +362,10 @@ function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onOff
   // stops a settled payment from being reported as "Tap failed".
   const committed = useRef(false);
   const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // False once the tap view is torn down (user hit Cancel/Done). An in-flight submit/sign promise
+  // that resolves after that must not touch state — it would warn and, worse, could flip a screen
+  // the user already left.
+  const aliveRef = useRef(true);
   // Keep onActive in a ref so markActive has a stable identity (the effect must not re-subscribe /
   // re-arm on every parent render just because an inline callback changed).
   const onActiveRef = useRef(onActive);
@@ -375,7 +379,7 @@ function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onOff
   }, []);
 
   const finalize = useCallback((p: NfcPhaseName | 'error', r?: string) => {
-    if (finalized.current) return; // first terminal wins; never overwrite a decided outcome
+    if (finalized.current || !aliveRef.current) return; // first terminal wins; ignore after teardown
     finalized.current = true;
     clearSettleTimer();
     setReason(r ?? null);
@@ -519,6 +523,7 @@ function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onOff
     if (role === 'card') DpayNfc.armCard().catch((e: any) => finalize('error', String(e?.message ?? e)));
     else if (requestHex) DpayNfc.startReader(requestHex).catch((e: any) => finalize('error', String(e?.message ?? e)));
     return () => {
+      aliveRef.current = false;
       clearSettleTimer();
       sub.remove();
       if (role === 'card') DpayNfc.disarmCard().catch(() => {});
@@ -534,7 +539,9 @@ function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onOff
   const terminal = phase === 'success' || phase === 'declined' || phase === 'error' || phase === 'pending';
   const amt = role === 'card' ? payAmount : reqInfo?.amount;
   const active = phase === 'exchanging' || phase === 'settling' || phase === 'awaitingApproval';
-  const title = phase === 'success' ? `Paid ✓ ${amt != null ? usd(amt) : ''}`.trim() : m.title;
+  const title = phase === 'success'
+    ? `${role === 'card' ? 'Paid' : 'Received'} ✓ ${amt != null ? usd(amt) : ''}`.trim()
+    : m.title;
   const sub = (phase === 'error' || phase === 'declined' || phase === 'pending') && reason ? reason
     : phase === 'success' ? 'The payment settled'
     : active && amt != null ? `${role === 'card' ? 'Paying' : 'Collecting'} ${usd(amt)}`
@@ -757,12 +764,17 @@ function ReceiveMode({identity, relayUrl, nfcReady, onReceived}: {identity: Iden
 
   async function onSignedQr(raw: string) {
     setScanning(false);
+    setErr(null);
     try {
       const r = await fetch(`${base(relayUrl)}/pay`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({qr: raw.trim()})});
-      const j = await r.json();
-      if (!r.ok) { setErr(j.error || 'rejected'); }
-      // settlement (fresh or replayed) is picked up by the /receipt poll → result
-    } catch (e: any) { setErr(String(e?.message ?? e)); }
+      const j = await r.json().catch(() => ({} as any));
+      // Only a definitive rejection is worth an error. A settled or ambiguous (network) result is
+      // surfaced by the /receipt poll (which sets `result`), so we never flash a false failure on a
+      // payment that actually went through.
+      if (classifyPayHttp({ok: r.ok, status: r.status}) === 'rejected' && !isNonceReused(j?.error)) {
+        setErr(rejectionMessage(typeof j?.error === 'string' ? j.error : null));
+      }
+    } catch { /* network/timeout — the /receipt poll reconciles; don't show a false error */ }
   }
 
   function reset() { setReqQr(null); setResult(null); setScanning(false); setErr(null); setNfcActive(false); setNfcKey(k => k + 1); }
