@@ -80,6 +80,18 @@ fn pay_wire(wire: &[u8]) -> Request<Body> {
         .unwrap()
 }
 
+/// POST /faucet — the demo on-ramp, which mints. Gated by `AppState::set_faucet_enabled`.
+fn faucet_json(account_hex: &str, amount: u64) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri("/faucet")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(format!(
+            "{{\"account\":\"{account_hex}\",\"amount\":{amount}}}"
+        )))
+        .unwrap()
+}
+
 /// GET /receipt/{nonce_hex} — the idempotent reconciliation lookup the merchant app falls back to
 /// when a /pay response is lost, so a settled payment is never reported as failed.
 fn get_receipt(nonce: [u8; 16]) -> Request<Body> {
@@ -284,6 +296,39 @@ async fn health_ok() {
     let (status, body) = call(&state, req).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["status"], "ok");
+}
+
+/// The faucet MINTS, and the canister's `mint` is unauthenticated — so on any real ledger the relay
+/// disables it. Disabled means the route is *gone* (404) and, crucially, no money is created.
+#[tokio::test]
+async fn faucet_disabled_mints_nothing() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    state.set_faucet_enabled(false);
+
+    let (status, body) = call(&state, faucet_json(&hex::encode(pubkey(&merchant)), 999)).await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(
+        led.balance_of(&pubkey(&merchant)),
+        BAL_B,
+        "a disabled faucet must not create funds"
+    );
+}
+
+/// …and enabled (the demo default) it still works, so the demo on-ramp is unaffected.
+#[tokio::test]
+async fn faucet_enabled_mints() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+
+    let (status, body) = call(&state, faucet_json(&hex::encode(pubkey(&merchant)), 999)).await;
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["balance"], BAL_B + 999);
+    assert_eq!(led.balance_of(&pubkey(&merchant)), BAL_B + 999);
 }
 
 #[tokio::test]

@@ -1,33 +1,22 @@
 # syntax=docker/dockerfile:1
 #
-# dpay-relay container — the merchant's submit-and-confirm service, the demo's only online piece.
-# Build context is the repo root (see docker-compose.yml `build.context: ..`) because the relay is
-# a workspace member that path-depends on dpay-core.
+# dpay-relay container — the merchant's submit-and-confirm service, dpay's only online piece.
 #
-# Default build = in-memory FakeLedger (pre-funded demo accounts, no canister needed) — fully
-# self-contained so the whole flow runs "anywhere" with nothing else to stand up. The real-canister
-# path lives behind the crate's `agent` feature; not compiled here (it drags in ic-agent/pocket-ic).
+# Runtime-only image: the binary is built on the host by `deploy/build.sh` (with `--features agent`,
+# so it can settle on a real canister) and copied in from `deploy/dist/`. The build context is this
+# directory, not the repo root — nothing but the binary goes into the image.
+#
+# The binary is dynamically linked against the *host's* glibc, so RUNTIME_BASE must ship a glibc at
+# least as new. build.sh picks a matching base automatically and then proves it by running the
+# binary inside the image; don't build this Dockerfile by hand unless you know the pairing is right.
+#
+# The image is configuration-free: which ledger it settles on (a real canister on a real IC network,
+# or the in-memory demo one) is entirely env — see crates/dpay-relay/src/main.rs.
 
-##############################  builder  ##############################
-FROM rust:1-bookworm AS builder
-WORKDIR /src
+ARG RUNTIME_BASE=debian:bookworm-slim
+FROM ${RUNTIME_BASE} AS runtime
 
-# Only the pieces cargo needs to build the relay. The other member manifests must be present for
-# workspace resolution, but `-p dpay-relay` compiles just the relay + dpay-core + their deps.
-COPY Cargo.toml Cargo.lock ./
-COPY crates ./crates
-
-# Cache the registry and target dir across builds (BuildKit). The release binary is produced inside
-# the cache mount, so copy it out to a real path within the same RUN before the mount detaches.
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/src/target \
-    cargo build --release --locked -p dpay-relay \
- && cp target/release/dpay-relay /usr/local/bin/dpay-relay
-
-##############################  runtime  ##############################
-FROM debian:bookworm-slim AS runtime
-
-# curl for the container HEALTHCHECK; ca-certificates for TLS if the agent path is ever enabled.
+# curl for the container HEALTHCHECK; ca-certificates so TLS to a real boundary node validates.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
@@ -35,12 +24,12 @@ RUN apt-get update \
 # Run unprivileged.
 RUN useradd --system --no-create-home --uid 10001 dpay
 
-COPY --from=builder /usr/local/bin/dpay-relay /usr/local/bin/dpay-relay
+COPY dist/dpay-relay /usr/local/bin/dpay-relay
 
-# Bind on all interfaces inside the container so Caddy (or a phone on the LAN) can reach it.
+# Bind on all interfaces *inside the container* so the proxy (or a phone on the LAN) can reach it.
 # Everything the relay serves (merchant page, jsQR/qrcode assets) is compiled in — no asset files.
-ENV DPAY_RELAY_ADDR=0.0.0.0:8787 \
-    DPAY_PER_TX_CAP=100000
+# Deliberately NO default ledger config: an unconfigured container exits rather than guess.
+ENV DPAY_RELAY_ADDR=0.0.0.0:8787
 
 EXPOSE 8787
 USER dpay

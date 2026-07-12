@@ -1,51 +1,94 @@
-# dpay public-demo stack: the relay (a service on a port) behind Caddy (public FQDN + TLS).
+# dpay relay stack: the relay (dpay's only online piece) behind a Cloudflare Tunnel.
 #
-#   cp .env.example .env      # then edit DPAY_FQDN etc.
-#   docker compose up -d --build
+#   just image                # build the image (host-built binary → slim runtime)
+#   cp .env.example .env      # set DPAY_CANISTER_ID (+ DPAY_IC_URL for a non-mainnet target)
+#   # one-time: create the named tunnel, drop cloudflared/credentials.json, edit cloudflared/config.yml
+#   docker compose up -d      # relay + cloudflared  (see README.md)
 #
-# Local test:  DPAY_FQDN=localhost (default) → https://localhost proxies to the relay.
-# Real deploy: set DPAY_FQDN to your domain; Caddy gets a Let's Encrypt cert automatically.
+# cloudflared dials OUT to Cloudflare's edge, so nothing here publishes a host port: TLS terminates at
+# the edge and the tunnel reaches the relay by service name over the compose network. The public
+# hostname lives in cloudflared/config.yml, not here.
+#
+# The image is configuration-free; *this file* decides which ledger the relay settles on. Nothing
+# below is environment-specific — the same compose file runs against a local dfx replica, a testnet,
+# or mainnet. Only .env (and the tunnel's ingress) changes.
 name: dpay
 
 services:
   relay:
     build:
-      context: ..                 # repo root — the relay is a workspace member (needs dpay-core)
-      dockerfile: deploy/Dockerfile
-    image: dpay-relay:latest
+      context: .                  # just the binary in ./dist — see Dockerfile
+      dockerfile: Dockerfile
+      args:
+        RUNTIME_BASE: ${DPAY_RUNTIME_BASE:-debian:bookworm-slim}
+    image: ${DPAY_IMAGE:-dpay-relay:latest}
     restart: unless-stopped
     environment:
       DPAY_RELAY_ADDR: 0.0.0.0:8787
+
+      # --- which ledger, on which network ---------------------------------------------------
+      # `ic` = a real canister via ic-agent. `memory` = the in-memory demo ledger (no canister).
+      DPAY_LEDGER: ${DPAY_LEDGER:-ic}
+      # The canister the relay settles on. Required when DPAY_LEDGER=ic — the relay exits if unset
+      # rather than fall back to a pretend ledger.
+      DPAY_CANISTER_ID: ${DPAY_CANISTER_ID:-}
+      # Mainnet: https://icp-api.io  ·  local dfx replica on the host: http://host.docker.internal:4943
+      DPAY_IC_URL: ${DPAY_IC_URL:-https://icp-api.io}
+      # Root key: MUST be true for a local replica (it has its own), MUST be false on mainnet (where
+      # fetching it means trusting whatever key the endpoint returns). The relay refuses the unsafe
+      # combination at startup. Unset → true only for a loopback URL.
+      DPAY_IC_FETCH_ROOT_KEY: ${DPAY_IC_FETCH_ROOT_KEY:-}
+
+      # POST /faucet mints. Off by default on a real ledger; only ever turn it on against a
+      # throwaway replica.
+      DPAY_ENABLE_FAUCET: ${DPAY_ENABLE_FAUCET:-false}
+
+      # In-memory ledger only (on `ic`, the canister enforces its own cap).
       DPAY_PER_TX_CAP: ${DPAY_PER_TX_CAP:-100000}
+
+    # Lets DPAY_IC_URL point at a dfx replica running on the host (http://host.docker.internal:4943)
+    # — the pre-mainnet rehearsal: the real container, the real agent path, a replica you own.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
     expose:
-      - "8787"                    # reachable to Caddy on the compose network, not published to host
-    # Uncomment to hit the relay directly (bypassing Caddy), bound to loopback only:
+      - "8787"                    # reachable to cloudflared on the compose network, not published to host
+    # Uncomment to hit the relay directly (bypassing the tunnel), bound to loopback only — e.g. the
+    # local-replica rehearsal in README.md, or a relay-only bring-up (`docker compose up -d relay`):
     # ports:
     #   - "127.0.0.1:8787:8787"
+
+    # The relay holds no secrets and writes nothing to disk: its only state is an idempotency cache
+    # in memory (see README). So it can run with a read-only root fs and no capabilities at all.
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
     healthcheck:
+      # /health consults the ledger (agent status), so this is red when the canister is unreachable,
+      # not merely when the socket is closed.
       test: ["CMD", "curl", "-fsS", "http://localhost:8787/health"]
       interval: 10s
       timeout: 3s
       retries: 5
       start_period: 5s
 
-  caddy:
-    image: caddy:2-alpine
+  # The tunnel. cloudflared dials out to Cloudflare's edge and forwards the public hostname to the
+  # relay over the compose network — no inbound host ports, TLS terminates at the edge. The named
+  # tunnel's ingress + credentials live in ./cloudflared: config.yml is committed (the versioned
+  # ingress), credentials.json is operator-supplied and gitignored. See README.md for the one-time
+  # `cloudflared tunnel create` / `route dns` setup.
+  cloudflared:
+    image: ${DPAY_CLOUDFLARED_IMAGE:-cloudflare/cloudflared:2026.7.1}
     restart: unless-stopped
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
     depends_on:
       relay:
-        condition: service_healthy
-    environment:
-      DPAY_FQDN: ${DPAY_FQDN:-localhost}
-      DPAY_RELAY_UPSTREAM: ${DPAY_RELAY_UPSTREAM:-relay:8787}
-    ports:
-      - "${CADDY_HTTP_PORT:-80}:80"
-      - "${CADDY_HTTPS_PORT:-443}:443"
+        condition: service_healthy   # tunnel comes up only once the relay can settle (see /health)
+    security_opt:
+      - no-new-privileges:true
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data           # issued certs — persist so restarts don't re-hit Let's Encrypt
-      - caddy_config:/config
-
-volumes:
-  caddy_data:
-  caddy_config:
+      - ./cloudflared/config.yml:/etc/cloudflared/config.yml:ro
+      - ./cloudflared/credentials.json:/etc/cloudflared/credentials.json:ro

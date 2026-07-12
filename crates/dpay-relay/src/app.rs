@@ -40,6 +40,11 @@ pub struct AppState {
     idempotency: Arc<Mutex<HashMap<[u8; NONCE_LEN], Receipt>>>,
     /// Seam for the demo's degraded fallback. Wiring only for now.
     pub safe_mode: Arc<Mutex<bool>>,
+    /// Whether `POST /faucet` (which *mints*) is served. Defaults to `true` — harmless against the
+    /// in-memory demo ledger this crate is normally exercised with. The binary turns it **off**
+    /// whenever it settles on a real ledger unless `DPAY_ENABLE_FAUCET` says otherwise: against a
+    /// canister with an open `mint`, an exposed faucet is an open money printer.
+    faucet_enabled: Arc<Mutex<bool>>,
 }
 
 impl AppState {
@@ -48,6 +53,7 @@ impl AppState {
             ledger,
             idempotency: Arc::new(Mutex::new(HashMap::new())),
             safe_mode: Arc::new(Mutex::new(false)),
+            faucet_enabled: Arc::new(Mutex::new(true)),
         }
     }
 
@@ -57,6 +63,14 @@ impl AppState {
 
     pub fn safe_mode(&self) -> bool {
         *self.safe_mode.lock().unwrap()
+    }
+
+    pub fn set_faucet_enabled(&self, on: bool) {
+        *self.faucet_enabled.lock().unwrap() = on;
+    }
+
+    pub fn faucet_enabled(&self) -> bool {
+        *self.faucet_enabled.lock().unwrap()
     }
 }
 
@@ -77,7 +91,13 @@ pub fn app(state: AppState) -> Router {
 
 /// `POST /faucet` JSON `{account: <hex>, amount?}` → `{balance}`. Demo on-ramp: funds a phone's
 /// freshly-generated account so it can pay. Defaults to $100.00 when `amount` is omitted.
+///
+/// **Mints.** Served only when [`AppState::faucet_enabled`]; otherwise `404`, as if the route did
+/// not exist. The relay binary disables it by default on the real-ledger path.
 async fn faucet(State(state): State<AppState>, Json(req): Json<FaucetRequest>) -> Response {
+    if !state.faucet_enabled() {
+        return err(StatusCode::NOT_FOUND, "faucet disabled");
+    }
     let bytes = match hex::decode(req.account.trim()) {
         Ok(b) if b.len() == PUBKEY_LEN => b,
         _ => return err(StatusCode::BAD_REQUEST, "account must be 32 bytes hex"),

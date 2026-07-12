@@ -1,75 +1,154 @@
-# dpay public-demo deploy
+# dpay relay — container + Cloudflare Tunnel
 
-Runs the **relay** (dpay's only online piece) as a container behind **Caddy**, which serves a
-configurable public FQDN and terminates TLS. Deploy anywhere Docker runs — a VPS (Hetzner), a home
-box behind a Cloudflare Tunnel, whatever. Same files run locally for testing.
+Runs the **relay** (dpay's only online piece) as a container, exposed to the public internet through a
+**Cloudflare Tunnel**. `cloudflared` dials *out* to Cloudflare's edge, so the host publishes **no
+inbound ports**; TLS terminates at the edge and the tunnel reaches the relay by service name over the
+compose network. DNS, DDoS protection, and WAF are handled by Cloudflare. Deploy anywhere Docker runs.
 
 ```
-relay (dpay-relay :8787)  ──  Caddy (:443, DPAY_FQDN, auto-TLS)  ──  Internet
-        FakeLedger                reverse_proxy
+relay.dpay.example  ──proxied CNAME──▶  <tunnel-uuid>.cfargotunnel.com
+   ▼  Cloudflare edge         (TLS, DDoS, WAF)
+   ▼  cloudflared container    (tunnel run — config.yml + credentials.json)   ← outbound-only, no host ports
+   ▼  relay :8787              (plain HTTP on the compose network)
+   ▼  ic-agent ──TLS──▶        a canister on a real IC network  (DPAY_LEDGER=ic)
+                               or the in-memory demo ledger      (DPAY_LEDGER=memory)
 ```
 
-## Quick start (local)
+**The image is configuration-free.** Which ledger, which network, which canister — all env, all in
+`.env`. The public hostname is in `cloudflared/config.yml`. The same image runs the offline demo, a
+rehearsal against a local `dfx` replica, and mainnet.
+
+## One-time tunnel setup
+
+A **named** tunnel: the ingress rules are versioned in `cloudflared/config.yml`; only the per-deployment
+secret (`cloudflared/credentials.json`) stays out of git. Done once, on the host (needs the
+`cloudflared` CLI — or do the equivalent in the Cloudflare Zero Trust dashboard):
 
 ```sh
+cloudflared tunnel login                                    # browser auth → ~/.cloudflared/cert.pem
+cloudflared tunnel create dpay-relay                        # → <UUID>.json, prints the tunnel UUID
+cp ~/.cloudflared/<UUID>.json deploy/cloudflared/credentials.json
+# edit deploy/cloudflared/config.yml: set  tunnel: <UUID>  and  hostname: <your hostname>
+cloudflared tunnel route dns dpay-relay relay.dpay.example  # creates the proxied CNAME
+```
+
+`cloudflared tunnel ingress validate deploy/cloudflared/config.yml` checks the ingress file. The UUID
+and hostname are not secrets (committing them is fine); `credentials.json` is the only sensitive file.
+
+## Build + run
+
+```sh
+just image                    # host-built binary (--features agent) → slim runtime image; verified
 cd deploy
-docker compose up -d --build          # DPAY_FQDN defaults to localhost
-curl -sk https://localhost/health     # {"status":"ok"}   (-k: Caddy's local self-signed cert)
+cp .env.example .env          # set DPAY_CANISTER_ID (mainnet is the default DPAY_IC_URL)
+docker compose up -d          # relay + cloudflared
+curl -sS https://relay.dpay.example/health     # {"status":"ok"}
+docker compose logs cloudflared | grep -i "Registered tunnel connection"   # tunnel is up
 ```
 
-Open `https://localhost/` for the merchant terminal. Point the phone app's relay URL
-(`app/relayConfig.ts`, or the in-app Settings field) at your `https://<DPAY_FQDN>`.
+`just up` does the build + up in one step (and refuses to start if the tunnel creds/placeholders
+aren't set); `just compose-down` stops it. `docker compose logs -f` follows both services.
 
-## Real deploy
-
-```sh
-cp .env.example .env        # set DPAY_FQDN=relay.dpay.example
-docker compose up -d --build
-```
-
-Caddy auto-provisions a Let's Encrypt cert for `DPAY_FQDN` on first request — the box must have
-ports **80 and 443** publicly reachable so the ACME challenge succeeds. Issued certs live in the
-`caddy_data` volume, so restarts don't re-hit Let's Encrypt.
-
-Behind a Cloudflare Tunnel instead of a public IP? Point `cloudflared` at `https://caddy` (or skip
-Caddy's TLS and terminate at Cloudflare) — the relay itself doesn't care.
+Nothing is published to the host — the relay is reachable only to cloudflared over the compose network,
+and cloudflared only reaches out. To hit the relay directly (e.g. a relay-only bring-up with
+`docker compose up -d relay`, or the local-replica rehearsal), uncomment the loopback `ports` mapping
+in `docker-compose.yml`.
 
 ## Configuration (`.env`)
 
 | Var | Default | Meaning |
 |-----|---------|---------|
-| `DPAY_FQDN` | `localhost` | Public hostname Caddy serves + gets a TLS cert for |
-| `DPAY_RELAY_UPSTREAM` | `relay:8787` | Where Caddy forwards (the relay service:port) |
-| `DPAY_PER_TX_CAP` | `100000` | Per-transaction cap, minor units ($1000.00) |
-| `CADDY_HTTP_PORT` / `CADDY_HTTPS_PORT` | `80` / `443` | Host ports Caddy publishes |
+| `DPAY_LEDGER` | `ic` | `ic` = real canister via ic-agent · `memory` = in-memory demo ledger |
+| `DPAY_CANISTER_ID` | — | **Required on `ic`.** The canister to settle on |
+| `DPAY_IC_URL` | `https://icp-api.io` | Mainnet, or `http://host.docker.internal:4943` for a `dfx` replica on the host |
+| `DPAY_IC_FETCH_ROOT_KEY` | auto | `true` for a local replica, `false` on mainnet — see below |
+| `DPAY_ENABLE_FAUCET` | `false` | Serve `POST /faucet`, which **mints** |
+| `DPAY_PER_TX_CAP` | `100000` | Per-tx cap, minor units. `memory` only (on `ic` the canister enforces its own) |
+| `DPAY_CLOUDFLARED_IMAGE` | `cloudflare/cloudflared:2026.7.1` | Pinned tunnel image; override only if needed |
 
-The relay is published only to Caddy over the compose network, not to the host. To hit it directly
-(bypassing Caddy) uncomment the loopback `ports` mapping in `docker-compose.yml`.
+The public hostname is **not** an `.env` var — it lives in `cloudflared/config.yml`.
+
+### Three things that are money-critical, not ops trivia
+
+**1. The root key is the trust root.** `ic-agent` verifies every reply against the network's root
+key. A local replica has its own random one, so it must be *fetched* — but fetching it from a
+network you don't own means trusting whatever key that endpoint hands back, which throws away the
+verification that makes a receipt mean anything: a hostile boundary node could forge "Paid ✓" for a
+payment that never settled. So: `true` locally, `false` on mainnet. Leave it blank and the relay
+infers it from the URL (`true` only for loopback); it **refuses to start** on `fetch=true` +
+mainnet.
+
+**2. It never degrades to a pretend ledger.** If `DPAY_LEDGER=ic` and the canister is unreachable
+(or `DPAY_CANISTER_ID` is unset), the relay **exits** instead of coming up on the in-memory ledger
+and issuing receipts for payments that never settled. With `restart: unless-stopped` that is a
+visible crash loop — which is the correct failure mode. `/health` is likewise red when the canister
+is unreachable, not merely when the socket is open. (cloudflared `depends_on` the relay being
+*healthy*, so the tunnel doesn't even come up until the relay can actually settle.)
+
+**3. The faucet mints.** `POST /faucet` calls the canister's `mint`, which is **unauthenticated** in
+the current canister. Exposed on a real ledger that is an open money printer, so it is off unless
+`DPAY_ENABLE_FAUCET=true`. Turn it on only against a throwaway replica. (Gating `mint` on the
+canister side — issuer-only — is still to do; the relay flag does not fix the canister. It's an
+accepted gap for the current demo phase — there is no real money on the canister — and a hard gate
+before the pilot.)
+
+## Rehearse against a local replica before mainnet
+
+The pre-mainnet gate: the real container, the real ic-agent path, a replica you own — no Cloudflare
+account needed (bring up the relay alone and hit it on loopback). One catch: a container reaches a
+host replica through `host.docker.internal`, so the replica must listen **beyond loopback** — start
+it with `--host 0.0.0.0:4943`, not dfx's default `127.0.0.1` (otherwise the relay can't reach it and
+— correctly — refuses to start).
+
+```sh
+# 1. a persistent replica bound so the container can reach it, with the canister installed:
+dfx start --clean --host 0.0.0.0:4943 --background
+cargo build -p dpay-canister --target wasm32-unknown-unknown --release
+cargo run -q -p dpay-fixture                     # deterministic init args → dfx/args/
+dfx deploy dpay_canister --argument-file dfx/args/init.arg
+CID=$(dfx canister id dpay_canister)
+
+# 2. point the relay at it; bring up the relay alone (uncomment the loopback `ports` in compose):
+cd deploy && cat > .env <<EOF
+DPAY_LEDGER=ic
+DPAY_CANISTER_ID=$CID
+DPAY_IC_URL=http://host.docker.internal:4943
+DPAY_IC_FETCH_ROOT_KEY=true
+DPAY_ENABLE_FAUCET=true
+EOF
+docker compose up -d relay && curl -sS http://127.0.0.1:8787/health   # {"status":"ok"}
+```
+
+`host.docker.internal` resolves via the `extra_hosts` mapping in the compose file.
+
+For mainnet, deploy the canister first with `just deploy-ic` (needs a cycles-funded `dfx` identity),
+set `DPAY_CANISTER_ID` to the printed id, complete the tunnel setup above, then `just up`.
+
+## Why the binary is built on the host
+
+The toolchain, cargo cache and vendored crates already live in-project, so `deploy/build.sh` reuses
+the warm cache (seconds) instead of recompiling `ic-agent` inside Docker on every image build. The
+cost is glibc coupling: the binary links against the build host's glibc, so the runtime base must
+ship one at least as new. `build.sh` picks a base that satisfies the host, then **runs the binary
+inside the finished image** to prove the pairing — a mismatch fails at build time, loudly, not as a
+crash-looping container on a VPS. Override with `DPAY_RUNTIME_BASE` if you need to.
+
+If you'd rather cut the coupling entirely, build a static `x86_64-unknown-linux-musl` binary and use
+a `scratch`/`distroless` base — same Dockerfile shape, one more toolchain target.
 
 ## Is the relay stateless?
 
 **Effectively yes — treat it as stateless.** Its only in-process state is an idempotency cache
 (receipts keyed by payment nonce) and an inert `safe_mode` flag; neither is persisted. The durable
-source of truth — balances and single-use nonces — lives in the **ledger** (the ICP canister on the
-real settlement path; an in-memory `FakeLedger` in this default image). The canister independently
-refuses a replayed nonce, so a relay restart can never cause a double-charge.
+source of truth — balances and single-use nonces — lives in the **ledger** (the canister). The
+canister independently refuses a replayed nonce, so a relay restart can never cause a double-charge.
+It runs with a read-only root filesystem and no capabilities.
 
 Consequences:
 
-- **Restart freely.** No volume is needed for the relay; nothing is lost that matters to money.
+- **Restart freely.** No volume; nothing is lost that matters to money.
 - **Run a single replica.** The idempotency cache is per-process. With >1 replica (or right after a
   restart) a *repeat* submit of an already-settled payment misses the local cache and reaches the
-  ledger, which rejects the replayed nonce as an *error* rather than replaying the cached `200 {…,
-  "replayed": true}`. Fine for a demo; for horizontal scaling, back idempotency with a shared store
-  (e.g. the canister's `/receipt` lookup, or Redis).
-
-## Default image = self-contained (FakeLedger)
-
-The image builds `dpay-relay` with default features: an in-memory ledger pre-funded with the demo
-accounts (payer at $5000.00). No canister, replica, or network dependency — the full offline-sign →
-submit → "Paid ✓" flow works with just this container. Fund a fresh phone account via
-`POST /faucet {"account":"<32-byte-hex>"}`.
-
-The real-canister settlement path is behind the crate's `agent` cargo feature (not compiled into
-this image; it pulls in `ic-agent`/`pocket-ic`). To ship it, add `--features agent` to the build and
-set `DPAY_CANISTER_ID` / `DPAY_IC_URL` — see `crates/dpay-relay/src/main.rs`.
+  ledger, which rejects the replayed nonce as an *error* rather than replaying the cached
+  `200 {…, "replayed": true}`. Fine for a demo; for horizontal scaling, back idempotency with a
+  shared store (e.g. a `/receipt` lookup against the canister, or Redis).

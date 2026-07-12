@@ -51,6 +51,10 @@ ffi:
 deploy:
     bash scripts/dfx-deploy.sh
 
+# deploy the canister to ICP MAINNET (needs a cycles-funded dfx identity) and print its canister id
+deploy-ic:
+    bash scripts/dfx-deploy-ic.sh
+
 # the native Rust inner loop — core + canister + relay
 check: test-core test-canister test-relay
     @echo "rust inner loop green"
@@ -74,3 +78,81 @@ app:
 # live demo: dfx replica + canister + relay + merchant terminal (Ctrl-C to stop). Open the printed URL.
 demo:
     bash scripts/demo.sh
+
+# build the relay container image (host-built binary --features agent -> slim runtime; verified)
+image:
+    bash deploy/build.sh
+
+# bring the relay + cloudflared tunnel up with docker compose (reads deploy/.env; see deploy/README.md)
+up: image
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd deploy
+    # Fail fast on the two one-time tunnel setup steps rather than crash-loop cloudflared later.
+    if [ ! -f cloudflared/credentials.json ]; then
+      echo "missing deploy/cloudflared/credentials.json — run the one-time tunnel setup first (deploy/README.md)." >&2
+      exit 1
+    fi
+    if grep -Eq '<TUNNEL_UUID>|relay\.dpay\.example' cloudflared/config.yml; then
+      echo "deploy/cloudflared/config.yml still has placeholders — set 'tunnel:' and 'hostname:' (deploy/README.md)." >&2
+      exit 1
+    fi
+    docker compose up -d && docker compose ps
+
+# tear the compose stack down
+compose-down:
+    cd deploy && docker compose down
+
+alias down := stop
+
+# stop every local dev background process: relay, dfx replica, PocketIC server, Android emulator, Metro, Gradle daemon
+stop:
+    #!/usr/bin/env bash
+    # Best-effort + idempotent: each step is guarded and never fails the recipe, so it's safe to
+    # run anytime to get back to a clean slate (nothing of ours left listening or holding /dev/kvm).
+    set -uo pipefail
+    export PATH="$HOME/.local/share/dfx/bin:$HOME/Android/Sdk/platform-tools:$PATH"
+    echo "stopping dpay dev background processes…"
+
+    # relay (LAN settle service) — `just demo` or a manual `cargo run -p dpay-relay`. Frees port 8787.
+    if pkill -f 'dpay-relay' 2>/dev/null; then echo "  ✓ relay stopped"; else echo "  · relay: none"; fi
+
+    # dfx local replica and everything it manages (replica, canister_sandbox, icx-proxy, pocket-ic).
+    if command -v dfx >/dev/null 2>&1; then
+      dfx stop >/dev/null 2>&1 || true
+      dfx killall >/dev/null 2>&1 || true
+      echo "  ✓ dfx replica stopped"
+    else
+      echo "  · dfx: not found (skipped)"
+    fi
+
+    # A PocketIC server left over from canister/relay tests (the in-project server binary).
+    if pkill -f 'bin/pocket-ic' 2>/dev/null; then echo "  ✓ PocketIC server stopped"; else echo "  · PocketIC: none"; fi
+
+    # Metro / React Native packager on port 8081, if one was started (`npm start`).
+    if pkill -f 'react-native/cli.js start' 2>/dev/null || pkill -f 'node .*metro' 2>/dev/null; then
+      echo "  ✓ Metro bundler stopped"
+    else
+      echo "  · Metro: none"
+    fi
+
+    # Android emulator(s): power each off cleanly via adb, then stop the adb daemon. A wedged
+    # emulator that ignores `emu kill` is caught by the AVD-scoped qemu fallback.
+    if command -v adb >/dev/null 2>&1; then
+      mapfile -t EMUS < <(adb devices 2>/dev/null | awk '/^emulator-[0-9]+[[:space:]]/{print $1}')
+      for e in "${EMUS[@]:-}"; do
+        [ -n "$e" ] && adb -s "$e" emu kill >/dev/null 2>&1 && echo "  ✓ emulator $e killed"
+      done
+      pkill -f 'qemu-system-.*-avd' 2>/dev/null || true
+      adb kill-server >/dev/null 2>&1 || true
+      [ "${#EMUS[@]}" -eq 0 ] && echo "  · emulator: none"
+    else
+      echo "  · adb: not found (skipped)"
+    fi
+
+    # Long-lived Gradle daemon from `just app` / `just ondevice`.
+    if [ -x app/android/gradlew ]; then
+      (cd app/android && ./gradlew --stop >/dev/null 2>&1) && echo "  ✓ Gradle daemon stopped" || echo "  · Gradle: none"
+    fi
+
+    echo "done."

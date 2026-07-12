@@ -38,20 +38,43 @@ pub struct AgentLedger {
 
 impl AgentLedger {
     /// Connect to a **local, non-mainnet** replica at `url` (e.g. PocketIC's HTTP gateway) and
-    /// target `canister_id`.
-    ///
-    /// Calls [`Agent::fetch_root_key`], which is REQUIRED off mainnet: the agent otherwise verifies
-    /// replies against the hard-coded mainnet key and every call fails. (Never call this against
-    /// mainnet — it would trust whatever key the endpoint hands back.)
+    /// target `canister_id`. Shorthand for [`connect_with`](Self::connect_with) with
+    /// `fetch_root_key = true`.
     pub async fn connect(url: &str, canister_id: Principal) -> Result<Self, LedgerError> {
+        Self::connect_with(url, canister_id, true).await
+    }
+
+    /// Connect to the replica at `url` and target `canister_id`.
+    ///
+    /// `fetch_root_key` is the **trust root of every reply the relay believes**, so it is an
+    /// explicit argument rather than a default:
+    ///
+    /// * **Local replica / PocketIC → `true` (required).** Each local replica has its own random
+    ///   root key; without fetching it the agent verifies replies against the hard-coded mainnet
+    ///   key and every call fails.
+    /// * **Mainnet (or any replica you don't own) → `false` (required).** [`Agent::fetch_root_key`]
+    ///   trusts whatever key the endpoint hands back, which throws away the reply-verification that
+    ///   makes a receipt worth anything: a MITM (or a hostile boundary node) could hand us its own
+    ///   key and forge "Paid ✓" for a payment that never settled. Off mainnet this is fine because
+    ///   we own the replica; on mainnet it is not, so the caller must say so out loud.
+    ///
+    /// The relay binary derives this from `DPAY_IC_FETCH_ROOT_KEY` and refuses the unsafe
+    /// combination (fetch + a known mainnet endpoint) at startup.
+    pub async fn connect_with(
+        url: &str,
+        canister_id: Principal,
+        fetch_root_key: bool,
+    ) -> Result<Self, LedgerError> {
         let agent = Agent::builder()
             .with_url(url)
             .build()
             .map_err(|e| LedgerError::Transient(format!("agent build: {e}")))?;
-        agent
-            .fetch_root_key()
-            .await
-            .map_err(|e| LedgerError::Transient(format!("fetch_root_key: {e}")))?;
+        if fetch_root_key {
+            agent
+                .fetch_root_key()
+                .await
+                .map_err(|e| LedgerError::Transient(format!("fetch_root_key: {e}")))?;
+        }
         Ok(AgentLedger { agent, canister_id })
     }
 

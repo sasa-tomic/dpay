@@ -34,7 +34,11 @@ cleanup() { [ -n "$RELAY_PID" ] && kill "$RELAY_PID" 2>/dev/null || true; dfx st
 trap cleanup EXIT INT TERM
 
 echo "== start relay + merchant terminal (settling on canister $CID) =="
-DPAY_CANISTER_ID="$CID" DPAY_IC_URL="http://127.0.0.1:4943" DPAY_RELAY_ADDR="0.0.0.0:$PORT" \
+# DPAY_ENABLE_FAUCET: the demo funds a freshly-generated phone account via POST /faucet, which
+# mints. It's off by default on the real-ledger path (an exposed faucet is an open money printer);
+# this is a throwaway local replica, so turn it on explicitly.
+DPAY_LEDGER=ic DPAY_CANISTER_ID="$CID" DPAY_IC_URL="http://127.0.0.1:4943" \
+  DPAY_IC_FETCH_ROOT_KEY=true DPAY_ENABLE_FAUCET=true DPAY_RELAY_ADDR="0.0.0.0:$PORT" \
   "$RELAY_BIN" &
 RELAY_PID=$!
 
