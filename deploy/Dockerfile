@@ -13,7 +13,7 @@
 # The image is configuration-free: which ledger it settles on (a real canister on a real IC network,
 # or the in-memory demo one) is entirely env — see crates/dpay-relay/src/main.rs.
 
-ARG RUNTIME_BASE=debian:bookworm-slim
+ARG RUNTIME_BASE=ubuntu:24.04
 FROM ${RUNTIME_BASE} AS runtime
 
 # curl for the container HEALTHCHECK; ca-certificates so TLS to a real boundary node validates.

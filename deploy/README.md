@@ -8,46 +8,42 @@ compose network. DNS, DDoS protection, and WAF are handled by Cloudflare. Deploy
 ```
 relay.dpay.example  ──proxied CNAME──▶  <tunnel-uuid>.cfargotunnel.com
    ▼  Cloudflare edge         (TLS, DDoS, WAF)
-   ▼  cloudflared container    (tunnel run — config.yml + credentials.json)   ← outbound-only, no host ports
+   ▼  cloudflared container    (remotely managed tunnel + token)   ← outbound-only, no host ports
    ▼  relay :8787              (plain HTTP on the compose network)
    ▼  ic-agent ──TLS──▶        a canister on a real IC network  (DPAY_LEDGER=ic)
                                or the in-memory demo ledger      (DPAY_LEDGER=memory)
 ```
 
 **The image is configuration-free.** Which ledger, which network, which canister — all env, all in
-`.env`. The public hostname is in `cloudflared/config.yml`. The same image runs the offline demo, a
+`.env`. The public hostname is configured in Cloudflare Zero Trust. The same image runs the offline demo, a
 rehearsal against a local `dfx` replica, and mainnet.
 
 ## One-time tunnel setup
 
-A **named** tunnel: the ingress rules are versioned in `cloudflared/config.yml`; only the per-deployment
-secret (`cloudflared/credentials.json`) stays out of git. Done once, on the host (needs the
-`cloudflared` CLI — or do the equivalent in the Cloudflare Zero Trust dashboard):
+A remotely managed tunnel uses the token Cloudflare provides. In **Cloudflare Zero Trust**, open
+**Networks → Connectors → Cloudflare Tunnels**, create a tunnel named `dpay-relay`, then:
 
-```sh
-cloudflared tunnel login                                    # browser auth → ~/.cloudflared/cert.pem
-cloudflared tunnel create dpay-relay                        # → <UUID>.json, prints the tunnel UUID
-cp ~/.cloudflared/<UUID>.json deploy/cloudflared/credentials.json
-# edit deploy/cloudflared/config.yml: set  tunnel: <UUID>  and  hostname: <your hostname>
-cloudflared tunnel route dns dpay-relay relay.dpay.example  # creates the proxied CNAME
-```
+1. Copy only the token from the displayed install command (`--token eyJ...`) into
+   `deploy/.env` as `CF_TUNNEL_TOKEN=eyJ...`. The token is a secret; the tunnel UUID is not the token.
+2. Under the tunnel's **Public Hostnames**, add your hostname (for example `relay.dpay.example`).
+3. Set its service type to **HTTP** and URL to `relay:8787`, then save it.
 
-`cloudflared tunnel ingress validate deploy/cloudflared/config.yml` checks the ingress file. The UUID
-and hostname are not secrets (committing them is fine); `credentials.json` is the only sensitive file.
+Cloudflare creates the DNS route when the public hostname is saved. No local `cloudflared` login,
+credentials JSON, or tunnel UUID is needed by Compose.
 
 ## Build + run
 
 ```sh
 just image                    # host-built binary (--features agent) → slim runtime image; verified
 cd deploy
-cp .env.example .env          # set DPAY_CANISTER_ID (mainnet is the default DPAY_IC_URL)
+cp .env.example .env          # set DPAY_CANISTER_ID and CF_TUNNEL_TOKEN
 docker compose up -d          # relay + cloudflared
 curl -sS https://relay.dpay.example/health     # {"status":"ok"}
 docker compose logs cloudflared | grep -i "Registered tunnel connection"   # tunnel is up
 ```
 
-`just up` does the build + up in one step (and refuses to start if the tunnel creds/placeholders
-aren't set); `just compose-down` stops it. `docker compose logs -f` follows both services.
+`just up` does the build + up in one step (and refuses to start if the tunnel token is not set);
+`just compose-down` stops it. `docker compose logs -f` follows both services.
 
 Nothing is published to the host — the relay is reachable only to cloudflared over the compose network,
 and cloudflared only reaches out. To hit the relay directly (e.g. a relay-only bring-up with
@@ -64,9 +60,10 @@ in `docker-compose.yml`.
 | `DPAY_IC_FETCH_ROOT_KEY` | auto | `true` for a local replica, `false` on mainnet — see below |
 | `DPAY_ENABLE_FAUCET` | `false` | Serve `POST /faucet`, which **mints** |
 | `DPAY_PER_TX_CAP` | `100000` | Per-tx cap, minor units. `memory` only (on `ic` the canister enforces its own) |
+| `CF_TUNNEL_TOKEN` | — | **Required.** Secret token copied from the Cloudflare tunnel install command |
 | `DPAY_CLOUDFLARED_IMAGE` | `cloudflare/cloudflared:2026.7.1` | Pinned tunnel image; override only if needed |
 
-The public hostname is **not** an `.env` var — it lives in `cloudflared/config.yml`.
+The public hostname is configured on the tunnel in Cloudflare Zero Trust, not in `.env`.
 
 ### Three things that are money-critical, not ops trivia
 

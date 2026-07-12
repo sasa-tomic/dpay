@@ -24,9 +24,6 @@ diff
 **/android/**/build
 /app/android/local.properties
 
-# Cloudflare Tunnel credentials (operator-supplied per deployment; never commit). config.yml IS tracked.
-/deploy/cloudflared/credentials.json
-
 # misc
 *.log
 .DS_Store

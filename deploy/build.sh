@@ -47,6 +47,8 @@ if [ -n "${DPAY_RUNTIME_BASE:-}" ]; then
   BASE="$DPAY_RUNTIME_BASE"
 elif [ "$(newest "$HOST_GLIBC" 2.36)" = "2.36" ]; then
   BASE="debian:bookworm-slim"      # glibc 2.36
+elif [ "$(newest "$HOST_GLIBC" 2.39)" = "2.38" ]; then
+  BASE="ubuntu:24.04"              # glibc 2.39
 elif [ "$(newest "$HOST_GLIBC" 2.39)" = "2.39" ]; then
   BASE="ubuntu:24.04"              # glibc 2.39
 else

@@ -88,13 +88,9 @@ up: image
     #!/usr/bin/env bash
     set -euo pipefail
     cd deploy
-    # Fail fast on the two one-time tunnel setup steps rather than crash-loop cloudflared later.
-    if [ ! -f cloudflared/credentials.json ]; then
-      echo "missing deploy/cloudflared/credentials.json — run the one-time tunnel setup first (deploy/README.md)." >&2
-      exit 1
-    fi
-    if grep -Eq '<TUNNEL_UUID>|relay\.dpay\.example' cloudflared/config.yml; then
-      echo "deploy/cloudflared/config.yml still has placeholders — set 'tunnel:' and 'hostname:' (deploy/README.md)." >&2
+    # Fail before Compose interpolation if the remotely managed tunnel token is absent.
+    if ! grep -Eq '^CF_TUNNEL_TOKEN=.+$' .env 2>/dev/null; then
+      echo "missing CF_TUNNEL_TOKEN in deploy/.env — copy it from the Cloudflare tunnel install command (deploy/README.md)." >&2
       exit 1
     fi
     docker compose up -d && docker compose ps
