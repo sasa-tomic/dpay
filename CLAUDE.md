@@ -53,6 +53,36 @@ Full plan and rationale: `dev-loop-plan.md`.
 
 The signature binds the **exact amount + payee + request**, so consent is unambiguous and the merchant-issued `request_id` doubles as the ledger nonce (single-use → no double-charge). Short `expiry` (~2 min) kills stale replays. Rejected: single-scan payer-presented pre-auth (merchant fills the amount) — faster but weaker consent. Deferred: a signed receipt QR back to the payer for offline confirmation.
 
+## Non-negotiable: dpay never holds, swaps, or can move user funds
+
+Hard requirement, **not a preference**. Reject any design that violates it — restructure instead. This is what keeps dpay an *interface*, not a money transmitter / VASP / CASP, and it is why custody, KYC, and licensing stay out of scope.
+
+- **No custody.** The user's key lives on their device. dpay (the company, the relay, any operator) must never hold a user seed, an omnibus account, or funds it can move.
+- **No swaps.** dpay does not exchange one asset for another on a user's behalf, and does not quote, route, or take price risk. Ever.
+- **No exchange API keys.** dpay must never hold a user's CEX/DEX credentials and must never initiate a trade or withdrawal on a user's account. Holding withdrawal-capable credentials *is* control, and control *is* custody — same liability, plus a credential honeypot. If a third party must move funds, the **user** authorizes it directly with that third party.
+- **The canister cannot move funds without a user signature.** No admin transfer, no pause-and-seize, no privileged path. And the controller must not be a company key — blackhole it or hand it to an NNS/SNS-governed controller, or the "we can't touch your funds" claim is a promise rather than a property. Treat "who controls the canister" as a money-critical design question, not ops trivia.
+
+## Funding (on/off-ramp) — the shape, when we get there
+
+Out of scope for the PoC; recorded so no one designs around it wrong. The user always ends up holding a chain-key asset at **their own principal**; dpay is a screen, not a counterparty.
+
+- **Supported asset** → show the user a **native deposit address on that chain** (real BTC/ETH/SOL address). ICP Chain Fusion's ck-minters derive these per-principal via threshold signatures — no bridge, no custodian, and dpay is not in the flow. `ckBTC`'s `get_btc_address(owner, subaccount)` is the model. (ckSOL / per-user Solana deposit addresses: **verify current status before promising it** — the building blocks, t-Ed25519 + the SOL RPC canister, are shipped; a per-principal minter is less certain.) Withdrawal is the mirror: the minter burns and sends to the user's native address.
+- **Unsupported asset** → hand off to an **embedded licensed third-party provider** (Onramper/Changelly/Transak-class aggregator) with dpay's deposit address pre-filled as the destination. The provider is the counterparty of record and carries the licensing; dpay supplies an address and shows a status. This is what MetaMask / Phantom / Trust do, and it buys ~the same one-tap UX with none of the liability. A static "go here, then send to X" instruction page is the zero-integration fallback and is equally clean.
+- **The user never sees "supported vs unsupported."** One "Add money" screen: pick what you have. Under the hood it's *direct* or *via partner (est. fee + time)*. Same on the way out.
+
+## Monetization — direction
+
+**Full doc: `monetization.md`. Read it before touching anything fee-, handle-, or merchant-account-related.** Summary of what's decided:
+
+- **We monetize the payment rail we built; never movement of funds we don't control.** No cut on swaps, ever. The payer never pays.
+- **The free tier is a *mode*, not a dollar amount.** P2P free forever; **merchant mode ~0.5% from dollar one**. (The earlier "$200/mo received free" volume allowance is **superseded** — a mode-based tier deletes the sybil surface instead of tolerating it. A small seller taking payments as a *person* pays nothing; that's the growth engine, and it's fine.)
+- **Merchant features are chosen by one test: does the feature lose its value if the merchant splits into five accounts?** Only features that fail-on-split belong in merchant mode — that's what *replaces* sybil resistance. The four: durable merchant handle shown at approval (**never KYC** — claimed handle, not verified identity), multi-device staff terminals, refunds keyed to the original payment, consolidated settlement reports. We're selling *being a business on dpay*, not a feature checklist.
+- **Fee collection needs no protocol change.** Payer signs `{from, to, amount, nonce, expiry}` exactly as today; the canister credits merchant `amount - fee` and dpay `fee` per a public fee schedule in canister state. **Do not add a `fee` field to `Authorization`** — it would bind a value the offline payer can't know and wreck the offline path. The offline flow stays untouched.
+- **The canister controller is load-bearing.** Whoever can upgrade the canister can set `fee = 100%`, so the revenue model and "we can't touch your funds" are the *same* question: blackhole or SNS/NNS-govern the controller, and make the fee schedule a **governed parameter, not a hardcoded constant**.
+- **Open:** keep the relay bypassable/self-hostable (a chokepoint attracts MiCA's "transfer services on behalf of clients" test far more than a convenience does). Settle before the pilot.
+
+None of this is in the PoC.
+
 ## Local dev cache & offline (`third_party/`)
 
 Claude and all subagents treat `third_party/` as the canonical local source cache — **look there first; clone any missing repo there (shallow) instead of re-fetching from the network.** Crates are vendored to `vendor/` (`cargo vendor`); the PocketIC **server** binary lives at `third_party/bin/pocket-ic` (v14.0.0) and is referenced via `POCKET_IC_BIN`. The Rust + Node toolchains and a vendored headless browser (`chrome-headless-shell`, because the sandbox's `/usr/bin/chromium-browser` is a non-functional snap stub) install under `.dev/` (kept in-project because the sandbox recycles `$HOME`, so this keeps iteration fast across sessions). `.dev/`, `third_party/`, `vendor/`, and `target/` are gitignored. Inner-loop builds/tests run fully offline against these.
@@ -82,6 +112,7 @@ Remaining for real-hardware fidelity only: run on two physical arm64 phones for 
 
 - **In:** Android app (Pay + Receive), on-device key, QR generate/scan, offline signing, relay, canister ledger, two pre-funded demo accounts, single `$` unit, the airplane-mode flow.
 - **Out (deferred):** iOS, login/KYC, fiat on/off-ramp, funding flow, secure-element hardening, contacts/P2P discovery, multi-merchant, real onboarding. Software keys are fine for the demo.
+- **Out (permanently, by design — not "later"):** custody of user funds, swaps/conversion, holding user exchange credentials, taking price risk. See the non-custodial non-negotiable above.
 
 ## Preferences
 
