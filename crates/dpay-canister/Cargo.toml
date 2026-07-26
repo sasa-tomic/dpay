@@ -10,6 +10,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 ic-cdk = { workspace = true }
+ic-stable-structures = { workspace = true }
 candid = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 dpay-core = { path = "../dpay-core" }
