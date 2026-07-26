@@ -51,9 +51,14 @@ ffi:
 deploy:
     bash scripts/dfx-deploy.sh
 
-# deploy the canister to ICP MAINNET (needs a cycles-funded dfx identity) and print its canister id
+# deploy/upgrade the canister to ICP MAINNET as DPAY_DFX_IDENTITY (becomes controller); writes
+# DPAY_CANISTER_ID into deploy/.env. Redeploy defaults to upgrade (state preserved). See deploy/README.md
 deploy-ic:
     bash scripts/dfx-deploy-ic.sh
+
+# operator hook: mint (credit) minor units to an account (controller-only). `just mint <64-hex-account> <cents>`
+mint account amount:
+    bash scripts/mint.sh {{account}} {{amount}}
 
 # the native Rust inner loop — core + canister + relay
 check: test-core test-canister test-relay
@@ -83,6 +88,15 @@ demo:
 image:
     bash deploy/build.sh
 
+# provision the Cloudflare Tunnel headlessly (creates tunnel + DNS, writes CF_TUNNEL_TOKEN to deploy/.env)
+# needs CF_API_TOKEN + DPAY_PUBLIC_HOSTNAME in the environment; see deploy/README.md
+tunnel-provision:
+    bash deploy/tunnel-provision.sh
+
+# tear down the Cloudflare Tunnel + DNS this project created (inverse of tunnel-provision)
+tunnel-destroy:
+    bash deploy/tunnel-destroy.sh
+
 # bring the relay + cloudflared tunnel up with docker compose (reads deploy/.env; see deploy/README.md)
 up: image
     #!/usr/bin/env bash
@@ -90,10 +104,12 @@ up: image
     cd deploy
     # Fail before Compose interpolation if the remotely managed tunnel token is absent.
     if ! grep -Eq '^CF_TUNNEL_TOKEN=.+$' .env 2>/dev/null; then
-      echo "missing CF_TUNNEL_TOKEN in deploy/.env — copy it from the Cloudflare tunnel install command (deploy/README.md)." >&2
+      echo "missing CF_TUNNEL_TOKEN in deploy/.env — run 'just tunnel-provision' (headless), or copy the token from the Cloudflare dashboard (deploy/README.md)." >&2
       exit 1
     fi
     docker compose up -d && docker compose ps
+    sleep 1
+    curl -sS https://dpay.kalaj.org/health
 
 # tear the compose stack down
 compose-down:

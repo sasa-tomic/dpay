@@ -20,8 +20,37 @@ rehearsal against a local `dfx` replica, and mainnet.
 
 ## One-time tunnel setup
 
-A remotely managed tunnel uses the token Cloudflare provides. In **Cloudflare Zero Trust**, open
-**Networks → Connectors → Cloudflare Tunnels**, create a tunnel named `dpay-relay`, then:
+The tunnel is *remotely managed*: its config lives in Cloudflare and `cloudflared` runs it with a
+token. All Compose needs is that token in `deploy/.env` as `CF_TUNNEL_TOKEN`. Get it either way below.
+
+### Automated — one command, no dashboard
+
+`deploy/tunnel-provision.sh` (`just tunnel-provision`) does the whole manual setup below headlessly:
+it creates the tunnel, points its ingress at `relay:8787`, publishes the proxied DNS record, and
+writes `CF_TUNNEL_TOKEN` into `deploy/.env`. It needs a **scoped API token** (create at *My Profile →
+API Tokens* — **not** the Global API Key) with exactly two permissions:
+
+- **Account · Cloudflare Tunnel · Edit**
+- **Zone · DNS · Edit**
+
+```sh
+export CF_API_TOKEN=<the scoped token>          # provisioning-time secret — never written to .env
+export DPAY_PUBLIC_HOSTNAME=relay.dpay.example  # the hostname to serve; its zone must be on this account
+just tunnel-provision
+```
+
+The zone is detected from the hostname; set `CF_ACCOUNT_ID` only if the token spans more than one
+account, and `DPAY_TUNNEL_NAME` to override the default `dpay-relay`. It is create-only — if the
+tunnel already exists it stops rather than clobber it. `just tunnel-destroy` (same two env vars)
+removes the tunnel + DNS record, so the redo loop is `tunnel-destroy` → `tunnel-provision`.
+
+Not `wrangler`: wrangler manages Workers/Pages, not Tunnels. This drives the Cloudflare tunnel REST
+API directly (`curl` + `jq`), which is why it can hand you the exact `CF_TUNNEL_TOKEN` Compose wants.
+
+### Manual — Cloudflare Zero Trust dashboard
+
+In **Cloudflare Zero Trust**, open **Networks → Connectors → Cloudflare Tunnels**, create a tunnel
+named `dpay-relay`, then:
 
 1. Copy only the token from the displayed install command (`--token eyJ...`) into
    `deploy/.env` as `CF_TUNNEL_TOKEN=eyJ...`. The token is a secret; the tunnel UUID is not the token.
@@ -118,8 +147,24 @@ docker compose up -d relay && curl -sS http://127.0.0.1:8787/health   # {"status
 
 `host.docker.internal` resolves via the `extra_hosts` mapping in the compose file.
 
-For mainnet, deploy the canister first with `just deploy-ic` (needs a cycles-funded `dfx` identity),
-set `DPAY_CANISTER_ID` to the printed id, complete the tunnel setup above, then `just up`.
+For mainnet, deploy the canister first, then bring up the relay:
+
+```sh
+icp-cli new-identity dpay                        # once — this identity BECOMES the canister controller
+echo 'DPAY_DFX_IDENTITY=dpay' >> deploy/.env      # (a cycles-funded identity; see below)
+just deploy-ic                                    # builds + deploys as `dpay`, writes DPAY_CANISTER_ID to .env
+just tunnel-provision                             # publishes the tunnel (or set CF_TUNNEL_TOKEN by hand)
+just up
+```
+
+`just deploy-ic` requires `DPAY_DFX_IDENTITY` — the identity that deploys **becomes the canister
+controller** (upgrade authority), so it is explicit, not "whatever identity is active." It writes the
+resulting `DPAY_CANISTER_ID` back into `deploy/.env` for you. Re-running it is a **redeploy**: because
+this demo canister has **no stable memory**, it makes you choose `DPAY_DEPLOY_MODE=reinstall` (wipe +
+re-fund) or `=upgrade` (push code, lose all balances) rather than silently wiping state. Two hard gates
+before a pilot: give the controller to NNS/SNS governance (or blackhole it), and add stable storage so
+upgrades preserve balances. The relay needs **no** identity — it settles anonymously; the payer's
+Ed25519 signature is the authority (the caller principal is irrelevant to `pay`).
 
 ## Why the binary is built on the host
 

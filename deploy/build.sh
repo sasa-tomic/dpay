@@ -40,7 +40,10 @@ install -m 0755 "$BIN" deploy/dist/dpay-relay
 # --- pick a runtime base whose glibc is at least the host's -----------------------------------
 # The binary can't require a newer glibc than the one it was built against, so the host's version is
 # a safe upper bound (and needs no binutils to read out of the ELF).
-HOST_GLIBC="$(ldd --version | head -1 | grep -oE '[0-9]+\.[0-9]+' | tail -1)"
+# awk (not `head -1`): `head` closes the pipe after line 1, which races `ldd` into a SIGPIPE that
+# `set -o pipefail` turns into a spurious build abort. awk reads to EOF, so ldd never gets SIGPIPE.
+# ldd's first line ends with the bare version ("ldd (Ubuntu GLIBC 2.39-0ubuntu8.7) 2.39") → $NF.
+HOST_GLIBC="$(ldd --version | awk 'NR==1{print $NF}')"
 newest() { printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1; }
 
 if [ -n "${DPAY_RUNTIME_BASE:-}" ]; then

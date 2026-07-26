@@ -23,6 +23,8 @@ cargo build -p "$CRATE" --target wasm32-unknown-unknown --release
 
 echo "== refresh candid from the wasm =="
 mkdir -p dfx
+# Guard: without this tool the redirect below truncates the committed candid file to empty.
+command -v candid-extractor >/dev/null 2>&1 || { echo "candid-extractor not found — cargo install candid-extractor" >&2; exit 1; }
 candid-extractor "target/wasm32-unknown-unknown/release/${CANISTER}.wasm" > dfx/dpay_canister.did
 
 echo "== generate deterministic candid args (offline-signed payment) =="
@@ -63,6 +65,6 @@ PA1=$(dfx canister call "$CANISTER" balance_of --argument-file dfx/args/payer.ar
 MB1=$(dfx canister call "$CANISTER" balance_of --argument-file dfx/args/merchant.arg | nat)
 echo "== closing balances: payer=$PA1 (expect $PAYER_AFTER)  merchant=$MB1 (expect $MERCHANT_AFTER) =="
 
-[ "$PA1" = "$PAYER_AFTER" ] && [ "$MB1" = "$MERCHANT_AFTER" ] || { echo "FAIL: balances wrong"; exit 1; }
+if ! { [ "$PA1" = "$PAYER_AFTER" ] && [ "$MB1" = "$MERCHANT_AFTER" ]; }; then echo "FAIL: balances wrong"; exit 1; fi
 echo
 echo "== PASS: real dfx deploy settled the offline-signed payment; replay refused. =="
