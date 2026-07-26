@@ -4,6 +4,7 @@
 //! - `GET /` — the marketing landing page (with a download CTA when an APK is configured).
 //! - `GET /download/dpay.apk` — the Android build, when one is configured; else `404`.
 //! - `GET /merchant` — the merchant terminal web page, driven by the merchant phone.
+//! - `GET /shots/{name}` — the real app screenshots embedded in the landing page.
 //! - `POST /api/v1/pay` — hands the payer's signed-authorization QR to the ledger and returns a
 //!   receipt. Two properties matter for the demo and are enforced here (not in the ledger):
 //!   * **Idempotency** — keyed by the authorization nonce (the merchant's `request_id`). A repeat
@@ -104,6 +105,7 @@ pub fn app(state: AppState) -> Router {
         .route("/merchant", get(merchant_page))
         .route("/jsqr.js", get(jsqr_js))
         .route("/qrcode.js", get(qrcode_js))
+        .route("/shots/{name}", get(screenshot))
         .nest("/api/v1", api)
         .with_state(state)
 }
@@ -222,6 +224,18 @@ async fn jsqr_js() -> Response {
         include_str!("../assets/jsQR.js"),
     )
         .into_response()
+}
+
+/// `GET /shots/{name}` — the real app screenshots the landing page shows (offline; no CDN).
+/// Only the three known names resolve; anything else is a clean `404`.
+async fn screenshot(Path(name): Path<String>) -> Response {
+    let bytes: &'static [u8] = match name.as_str() {
+        "request.png" => include_bytes!("../assets/shot-request.png"),
+        "approve.png" => include_bytes!("../assets/shot-approve.png"),
+        "paid.png" => include_bytes!("../assets/shot-paid.png"),
+        _ => return err(StatusCode::NOT_FOUND, "no such screenshot"),
+    };
+    ([(header::CONTENT_TYPE, "image/png")], bytes).into_response()
 }
 
 /// `GET /qrcode.js` — the vendored QR *encoder* (for the merchant's request QR; offline, no CDN).

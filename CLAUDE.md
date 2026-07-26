@@ -25,6 +25,18 @@ Full plan and rationale: `dev-loop-plan.md`.
 | **dpay** | Consumer wallet with Venmo/Alipay-style UX that settles in digital dollars on the Internet Computer. Signature feature: the payer authorizes a payment **fully offline**; the online merchant submits it and gets a final confirmation in seconds. Borderless, no bank account needed. |
 | **PoC demo** | Smallest build that proves the offline-pay / online-confirm flow for investors — Android RN app, Node relay, ICP canister ledger, two phones, ~60s airplane-mode demo. Everything else deferred. |
 
+## Positioning (main pitch)
+
+**Full doc: `positioning.md`. This is the primary go-to-market story — lead with it.** Summary:
+
+- **Who:** travelers/tourists abroad on no or poor connectivity — foreign SIM, roaming off, or dead signal inside airports, malls, hotels, stadiums, metros.
+- **What:** tap-to-pay (NFC) or scan-to-pay (QR) a local merchant; **your** phone never needs a connection.
+- **Why it fits perfectly:** dpay lets the **payer** be offline, and the tourist *is* the payer. The design's one asymmetry (someone must be online) is satisfied for free — it's the merchant, who has wifi. The generic "both offline" weakness becomes the selling point.
+- **Currencies — multi-*rail*, never a swap.** The merchant's request names the settlement asset; the payer pays that **exact** asset; the canister settles it. dpay never converts one asset to another (no-swap non-negotiable). If the payer lacks the merchant's asset, a **licensed third party** converts at the edge — user authorizes it directly, dpay stays a screen. **USDC is the tourist lingua franca** (no conversion at all). UI shows `$`/`€`/`CHF`, never the token name.
+- **Assets (Jul 2026):** live on IC = ckUSDC (launch rail), ckBTC, ckETH, native ICP. Near-term = EUR via EURC (verify ckEURC). Roadmap/nascent = SOL (no ckSOL yet) and CHF (no ckCHF; thin issuance). "Pay with BTC" = **ckBTC on the IC** (native L1 can't be tap-instant; IC finalizes in ~1–2s).
+- **Edge vs Apple Pay/Visa abroad:** their payer must be online *and* they add cross-border FX/interchange; dpay's payer is offline and same-asset settlement has no card-network FX toll.
+- **Scope:** PoC stays single-`$`/ckUSDC; multi-currency + tourist framing are the pitch/roadmap on top, not PoC work. Nothing here weakens the non-custodial / no-swap non-negotiables.
+
 ## Terms
 
 | Term | Meaning |

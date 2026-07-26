@@ -433,6 +433,41 @@ async fn landing_page_with_apk_shows_download_button() {
     assert!(!html.contains("{{DOWNLOAD}}"), "placeholder must be substituted");
 }
 
+/// The landing page embeds the three real app screenshots (served from `/shots/…`), so a QR-bearing
+/// screen appears where the old faux barcode used to be.
+#[tokio::test]
+async fn landing_page_embeds_app_screenshots() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+
+    let (status, _headers, bytes) = call_raw(&state, get_req("/")).await;
+    assert_eq!(status, StatusCode::OK);
+    let html = String::from_utf8(bytes).unwrap();
+    for shot in ["/shots/request.png", "/shots/approve.png", "/shots/paid.png"] {
+        assert!(html.contains(shot), "landing page must reference {shot}");
+    }
+}
+
+/// Each known screenshot name serves a real PNG; an unknown name is a clean 404, never a 200 with
+/// an empty body.
+#[tokio::test]
+async fn screenshots_served_as_png_and_unknown_is_404() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+
+    for name in ["request.png", "approve.png", "paid.png"] {
+        let (status, headers, bytes) = call_raw(&state, get_req(&format!("/shots/{name}"))).await;
+        assert_eq!(status, StatusCode::OK, "{name} must serve");
+        assert_eq!(headers.get(header::CONTENT_TYPE).unwrap(), "image/png");
+        assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"), "{name} must be a PNG");
+    }
+
+    let (status, _h, _b) = call_raw(&state, get_req("/shots/nope.png")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "unknown screenshot must 404");
+}
+
 /// The merchant terminal moved off `/` to `/merchant`; `/` is now the landing page.
 #[tokio::test]
 async fn merchant_terminal_served_at_merchant_not_root() {
