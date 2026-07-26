@@ -4,7 +4,7 @@
 //!   cargo build -p dpay-canister --target wasm32-unknown-unknown --release
 //! and have `POCKET_IC_BIN` set to the vendored server binary (third_party/bin/pocket-ic).
 
-use candid::{decode_one, encode_one, CandidType, Principal};
+use candid::{decode_one, encode_args, encode_one, CandidType, Principal};
 use dpay_core::{generate_keypair, Authorization, SignedAuthorization};
 use ed25519_dalek::SigningKey;
 use pocket_ic::{PocketIc, Time};
@@ -141,4 +141,84 @@ fn insufficient_balance_is_rejected() {
     assert!(res.is_err(), "insufficient balance must be rejected: {res:?}");
     assert_eq!(balance(&pic, can, payer), 10_000);
     assert_eq!(balance(&pic, can, merch), 0);
+}
+
+#[test]
+fn upgrade_preserves_balances_and_nonces() {
+    let (pic, can, sk, payer, merch) = setup();
+    let expiry = T0_SECS + 120;
+    let nonce = [11u8; 16];
+    // Move funds and consume a nonce.
+    pay(&pic, can, signed(&sk, payer, merch, 3_000, nonce, expiry)).expect("pay should succeed");
+    assert_eq!(balance(&pic, can, payer), 7_000);
+    assert_eq!(balance(&pic, can, merch), 3_000);
+
+    // Upgrade with the same wasm (post_upgrade takes no args). PocketIC always performs the upgrade,
+    // so pre_upgrade/post_upgrade actually run.
+    pic.upgrade_canister(can, wasm_bytes(), encode_one(&()).unwrap(), None)
+        .expect("upgrade should succeed");
+
+    // Stable memory carried the state across: balances are intact (a no-stable-memory canister would
+    // read back 0 here), and the spent nonce is still spent → a post-upgrade replay is refused.
+    assert_eq!(balance(&pic, can, payer), 7_000);
+    assert_eq!(balance(&pic, can, merch), 3_000);
+    let replay = pay(&pic, can, signed(&sk, payer, merch, 3_000, nonce, expiry));
+    assert!(replay.is_err(), "nonce must stay spent across upgrade: {replay:?}");
+    assert_eq!(balance(&pic, can, payer), 7_000);
+}
+
+/// Like [`setup`], but transfers control to a specific `operator` principal (removing anonymous as a
+/// controller) so `mint` authorization can be exercised as controller vs. not.
+fn setup_minter(operator: Principal) -> (PocketIc, Principal, [u8; 32]) {
+    let pic = PocketIc::new();
+    pic.set_time(Time::from_nanos_since_unix_epoch(T0_NANOS));
+    let acct = generate_keypair().verifying_key().to_bytes();
+    let other = generate_keypair().verifying_key().to_bytes();
+    let can = pic.create_canister();
+    pic.add_cycles(can, 2_000_000_000_000);
+    let init = InitArg {
+        account_a: acct.to_vec(),
+        balance_a: 0,
+        account_b: other.to_vec(),
+        balance_b: 0,
+        per_tx_cap: CAP,
+    };
+    pic.install_canister(can, wasm_bytes(), encode_one(&init).unwrap(), None);
+    pic.set_controllers(can, Some(Principal::anonymous()), vec![operator])
+        .expect("set_controllers should succeed (anonymous is the current controller)");
+    (pic, can, acct)
+}
+
+fn mint(
+    pic: &PocketIc,
+    can: Principal,
+    sender: Principal,
+    to: [u8; 32],
+    amount: u64,
+) -> Result<u64, String> {
+    match pic.update_call(can, sender, "mint", encode_args((to.to_vec(), amount)).unwrap()) {
+        Ok(reply) => Ok(decode_one::<u64>(&reply).unwrap()),
+        Err(e) => Err(format!("{e:?}")),
+    }
+}
+
+#[test]
+fn mint_only_by_controller() {
+    let operator = Principal::from_slice(&[7u8; 29]);
+    let (pic, can, acct) = setup_minter(operator);
+
+    // The controller can mint.
+    assert_eq!(mint(&pic, can, operator, acct, 5_000).expect("controller mint ok"), 5_000);
+    assert_eq!(balance(&pic, can, acct), 5_000);
+
+    // A non-controller cannot — nor can the anonymous principal the relay uses.
+    let stranger = Principal::from_slice(&[8u8; 29]);
+    assert!(mint(&pic, can, stranger, acct, 1_000).is_err(), "stranger mint must be rejected");
+    assert!(
+        mint(&pic, can, Principal::anonymous(), acct, 1_000).is_err(),
+        "anonymous mint must be rejected"
+    );
+
+    // The rejected mints changed nothing.
+    assert_eq!(balance(&pic, can, acct), 5_000);
 }

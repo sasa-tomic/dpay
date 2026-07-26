@@ -15,12 +15,14 @@ type PayReceipt = record {
 type Result = variant { Ok : PayReceipt; Err : text };
 service : (InitArg) -> {
   balance_of : (blob) -> (nat64) query;
-  // Demo faucet: credit `to` with `amount` (minor units) and return the new balance. Lets a phone
-  // fund a freshly-generated on-device account. Unauthenticated on purpose — this is the demo's
-  // stand-in for a real fiat/ckUSDC on-ramp, which is out of scope; a production ledger would gate
-  // minting behind the issuer.
+  // Credit `to` with `amount` (minor units) and return the new balance — the demo's stand-in for a
+  // real fiat/ckUSDC on-ramp. **Controller-only**: any non-controller caller (including the anonymous
+  // principal the relay uses) is rejected. Gating on `is_controller` grants no new power — a
+  // controller can already upgrade the canister to do anything — while closing the "anyone can mint"
+  // hole. When funding moves to on-chain top-ups, this becomes issuer-gated (see FUNDING.md).
   mint : (blob, nat64) -> (nat64);
-  // Settle an offline-signed authorization. `signed` is the 192-byte wire form.
+  // Settle an offline-signed authorization. `signed` is the 192-byte wire form. Reads, validates, and
+  // commits within one (non-awaiting) message → atomic on the single-threaded canister.
   pay : (blob) -> (Result);
   per_tx_cap : () -> (nat64) query;
 }
