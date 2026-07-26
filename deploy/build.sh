@@ -37,6 +37,27 @@ BIN="$TARGET_DIR/release/dpay-relay"
 mkdir -p deploy/dist
 install -m 0755 "$BIN" deploy/dist/dpay-relay
 
+# --- stage the newest release APK for the landing page (optional) -------------------------------
+# The relay serves an Android APK at GET /download/dpay.apk when DPAY_APK_PATH points at a file; the
+# Dockerfile bakes deploy/dist/dpay.apk in via `COPY dist/dpay.ap[k]`. Stage the newest release APK
+# here so the image can serve it. `find -printf | sort -nr | sed -n '1s///p'` reads its input to EOF
+# (unlike `head -1` / `sort | sed -n 1p`, which close the pipe early and SIGPIPE the producer under
+# `set -o pipefail`, aborting the build). Guard on the dir existing too: it doesn't exist until an
+# Android release build has run, and `find` on a missing path exits non-zero — which pipefail would
+# likewise turn into an abort. A missing APK is fine — the page falls back to "coming soon".
+apk=""
+apk_dir="app/android/app/build/outputs/apk/release"
+if [ -d "$apk_dir" ]; then
+  apk="$(find "$apk_dir" -maxdepth 1 -name '*.apk' -printf '%T@ %p\n' | sort -nr | sed -n '1s/^[^ ]* //p')"
+fi
+if [ -n "$apk" ]; then
+  install -m 0644 "$apk" deploy/dist/dpay.apk
+  echo "== staged release APK $(basename "$apk") → deploy/dist/dpay.apk =="
+else
+  rm -f deploy/dist/dpay.apk
+  echo "== no release APK found — landing page will show 'coming soon' =="
+fi
+
 # --- pick a runtime base whose glibc is at least the host's -----------------------------------
 # The binary can't require a newer glibc than the one it was built against, so the host's version is
 # a safe upper bound (and needs no binutils to read out of the ELF).

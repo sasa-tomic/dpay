@@ -26,6 +26,14 @@ RUN useradd --system --no-create-home --uid 10001 dpay
 
 COPY dist/dpay-relay /usr/local/bin/dpay-relay
 
+# Optional Android APK served by the landing page at `/` (download at GET /download/dpay.apk).
+# build.sh stages the newest release APK to dist/dpay.apk when one exists; `dpay.ap[k]` is a glob
+# that matches 0-or-1 files, so the COPY succeeds whether or not the APK is present (a bare
+# `COPY dist/dpay.apk` would fail the build when absent). The relay reads DPAY_APK_PATH once at
+# startup and treats a missing file as "no APK" → landing page shows "coming soon".
+COPY dist/dpay.ap[k] /srv/dpay.apk
+ENV DPAY_APK_PATH=/srv/dpay.apk
+
 # Bind on all interfaces *inside the container* so the proxy (or a phone on the LAN) can reach it.
 # Everything the relay serves (merchant page, jsQR/qrcode assets) is compiled in — no asset files.
 # Deliberately NO default ledger config: an unconfigured container exits rather than guess.
@@ -35,6 +43,6 @@ EXPOSE 8787
 USER dpay
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=5 \
-    CMD curl -fsS "http://localhost:8787/health" || exit 1
+    CMD curl -fsS "http://localhost:8787/api/v1/health" || exit 1
 
 ENTRYPOINT ["/usr/local/bin/dpay-relay"]

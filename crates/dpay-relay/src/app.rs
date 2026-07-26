@@ -1,14 +1,17 @@
 //! The relay's HTTP surface.
 //!
-//! Two routes, both driven by the merchant phone:
-//! - `POST /pay` — hands the payer's signed-authorization QR to the ledger and returns a receipt.
-//!   Two properties matter for the demo and are enforced here (not in the ledger):
+//! Public pages at the root, the JSON API under `/api/v1`:
+//! - `GET /` — the marketing landing page (with a download CTA when an APK is configured).
+//! - `GET /download/dpay.apk` — the Android build, when one is configured; else `404`.
+//! - `GET /merchant` — the merchant terminal web page, driven by the merchant phone.
+//! - `POST /api/v1/pay` — hands the payer's signed-authorization QR to the ledger and returns a
+//!   receipt. Two properties matter for the demo and are enforced here (not in the ledger):
 //!   * **Idempotency** — keyed by the authorization nonce (the merchant's `request_id`). A repeat
 //!     submission returns the *same cached receipt* and never settles twice. This makes the
 //!     merchant's "scan → submit" safe to mash / auto-retry.
 //!   * **Retries** — a `LedgerError::Transient` is retried a few times with small backoff;
 //!     a `Rejected` is final and becomes `422`.
-//! - `GET /health` — the merchant's pre-flight green dot; consults `ledger.healthy()`.
+//! - `GET /api/v1/health` — the merchant's pre-flight green dot; consults `ledger.healthy()`.
 //!
 //! `safe_mode` is a wired-but-inert flag: the seam the demo flips to fall back to a degraded path.
 
@@ -40,11 +43,14 @@ pub struct AppState {
     idempotency: Arc<Mutex<HashMap<[u8; NONCE_LEN], Receipt>>>,
     /// Seam for the demo's degraded fallback. Wiring only for now.
     pub safe_mode: Arc<Mutex<bool>>,
-    /// Whether `POST /faucet` (which *mints*) is served. Defaults to `true` — harmless against the
-    /// in-memory demo ledger this crate is normally exercised with. The binary turns it **off**
-    /// whenever it settles on a real ledger unless `DPAY_ENABLE_FAUCET` says otherwise: against a
-    /// canister with an open `mint`, an exposed faucet is an open money printer.
+    /// Whether `POST /api/v1/faucet` (which *mints*) is served. Defaults to `true` — harmless
+    /// against the in-memory demo ledger this crate is normally exercised with. The binary turns it
+    /// **off** whenever it settles on a real ledger unless `DPAY_ENABLE_FAUCET` says otherwise:
+    /// against a canister with an open `mint`, an exposed faucet is an open money printer.
     faucet_enabled: Arc<Mutex<bool>>,
+    /// The Android build served at `GET /download/dpay.apk`, when one is configured. `None` renders
+    /// a "coming soon" CTA on the landing page and answers the download route with `404`.
+    apk: Arc<Option<Vec<u8>>>,
 }
 
 impl AppState {
@@ -54,7 +60,15 @@ impl AppState {
             idempotency: Arc::new(Mutex::new(HashMap::new())),
             safe_mode: Arc::new(Mutex::new(false)),
             faucet_enabled: Arc::new(Mutex::new(true)),
+            apk: Arc::new(None),
         }
+    }
+
+    /// Attach the Android build to serve at `GET /download/dpay.apk` (and light up the landing
+    /// page's download CTA). `None` leaves it disabled.
+    pub fn with_apk(mut self, apk: Option<Vec<u8>>) -> Self {
+        self.apk = Arc::new(apk);
+        self
     }
 
     pub fn set_safe_mode(&self, on: bool) {
@@ -77,20 +91,25 @@ impl AppState {
 /// Build the router. No socket is bound here — tests drive it via `tower::ServiceExt::oneshot`,
 /// `main` wraps it with a listener.
 pub fn app(state: AppState) -> Router {
-    Router::new()
-        .route("/", get(merchant_page))
-        .route("/jsqr.js", get(jsqr_js))
-        .route("/qrcode.js", get(qrcode_js))
+    let api: Router<AppState> = Router::new()
         .route("/pay", post(pay))
         .route("/faucet", post(faucet))
         .route("/balance/{hex}", get(balance))
         .route("/receipt/{nonce}", get(receipt))
-        .route("/health", get(health))
+        .route("/health", get(health));
+
+    Router::new()
+        .route("/", get(landing_page))
+        .route("/download/dpay.apk", get(apk_download))
+        .route("/merchant", get(merchant_page))
+        .route("/jsqr.js", get(jsqr_js))
+        .route("/qrcode.js", get(qrcode_js))
+        .nest("/api/v1", api)
         .with_state(state)
 }
 
-/// `POST /faucet` JSON `{account: <hex>, amount?}` → `{balance}`. Demo on-ramp: funds a phone's
-/// freshly-generated account so it can pay. Defaults to $100.00 when `amount` is omitted.
+/// `POST /api/v1/faucet` JSON `{account: <hex>, amount?}` → `{balance}`. Demo on-ramp: funds a
+/// phone's freshly-generated account so it can pay. Defaults to $100.00 when `amount` is omitted.
 ///
 /// **Mints.** Served only when [`AppState::faucet_enabled`]; otherwise `404`, as if the route did
 /// not exist. The relay binary disables it by default on the real-ledger path.
@@ -111,8 +130,8 @@ async fn faucet(State(state): State<AppState>, Json(req): Json<FaucetRequest>) -
     }
 }
 
-/// `GET /receipt/{nonce}` → `200 {receipt, replayed}` if that request_id (nonce) has settled, else
-/// `404`. Lets the merchant terminal poll for an on-chain completion when the payer paid directly
+/// `GET /api/v1/receipt/{nonce}` → `200 {receipt, replayed}` if that request_id (nonce) has
+/// settled, else `404`. Lets the merchant terminal poll for an on-chain completion when the payer paid directly
 /// (online), instead of scanning the payer's QR.
 async fn receipt(State(state): State<AppState>, Path(nonce_hex): Path<String>) -> Response {
     let bytes = match hex::decode(nonce_hex.trim()) {
@@ -127,8 +146,8 @@ async fn receipt(State(state): State<AppState>, Path(nonce_hex): Path<String>) -
     }
 }
 
-/// `GET /balance/{hex}` → `{"balance": <minor units>}` for a 32-byte pubkey (hex). Lets the payer's
-/// wallet show its live balance when it can reach the relay.
+/// `GET /api/v1/balance/{hex}` → `{"balance": <minor units>}` for a 32-byte pubkey (hex). Lets the
+/// payer's wallet show its live balance when it can reach the relay.
 async fn balance(State(state): State<AppState>, Path(hex_pk): Path<String>) -> Response {
     let bytes = match hex::decode(hex_pk.trim()) {
         Ok(b) if b.len() == PUBKEY_LEN => b,
@@ -142,8 +161,52 @@ async fn balance(State(state): State<AppState>, Path(hex_pk): Path<String>) -> R
     }
 }
 
-/// `GET /` — the merchant terminal (webcam QR scan + paste fallback, submits to `/pay`).
-/// Self-contained + same-origin, so no CORS and no external assets needed for the demo.
+/// `GET /` — the marketing landing page. The `{{DOWNLOAD}}` placeholder becomes a live download CTA
+/// when an APK is configured (via [`AppState::with_apk`]), or a "coming soon" chip otherwise.
+async fn landing_page(State(state): State<AppState>) -> Response {
+    let download = match state.apk.as_ref() {
+        Some(bytes) => {
+            // Round to the nearest whole megabyte, floored at 1 so a small build never reads "0 MB".
+            let mb = ((bytes.len() + 524_288) / 1_048_576).max(1);
+            format!(
+                "<a class=\"btn\" href=\"/download/dpay.apk\" download>Download for Android\
+                 <span class=\"apk-meta\">APK · {mb} MB</span></a>"
+            )
+        }
+        None => "<span class=\"btn btn-disabled\">Android build coming soon</span>".to_string(),
+    };
+    (
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        include_str!("../assets/landing.html").replace("{{DOWNLOAD}}", &download),
+    )
+        .into_response()
+}
+
+/// `GET /download/dpay.apk` — the configured Android build as an APK attachment, or `404` when none
+/// is configured.
+async fn apk_download(State(state): State<AppState>) -> Response {
+    match state.apk.as_ref() {
+        Some(bytes) => (
+            StatusCode::OK,
+            [
+                (
+                    header::CONTENT_TYPE,
+                    "application/vnd.android.package-archive",
+                ),
+                (
+                    header::CONTENT_DISPOSITION,
+                    "attachment; filename=\"dpay.apk\"",
+                ),
+            ],
+            bytes.clone(),
+        )
+            .into_response(),
+        None => (StatusCode::NOT_FOUND, "no build available").into_response(),
+    }
+}
+
+/// `GET /merchant` — the merchant terminal (webcam QR scan + paste fallback, submits to
+/// `/api/v1/pay`). Self-contained + same-origin, so no CORS and no external assets needed.
 async fn merchant_page() -> Response {
     (
         [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
@@ -172,8 +235,8 @@ async fn qrcode_js() -> Response {
 
 // ---- request / response bodies ----
 
-/// `POST /pay` JSON body: the QR string. We also accept raw wire bytes (see `pay`), so this is
-/// only used on the JSON path.
+/// `POST /api/v1/pay` JSON body: the QR string. We also accept raw wire bytes (see `pay`), so this
+/// is only used on the JSON path.
 #[derive(Deserialize)]
 struct PayRequest {
     qr: String,
@@ -212,7 +275,7 @@ fn err(status: StatusCode, msg: impl Into<String>) -> Response {
     (status, Json(ErrorBody { error: msg.into() })).into_response()
 }
 
-/// `GET /health` → `200 {"status":"ok"}` when the ledger reports healthy, else `503`.
+/// `GET /api/v1/health` → `200 {"status":"ok"}` when the ledger reports healthy, else `503`.
 async fn health(State(state): State<AppState>) -> Response {
     if state.ledger.healthy().await {
         (StatusCode::OK, Json(HealthBody { status: "ok" })).into_response()
@@ -225,7 +288,7 @@ async fn health(State(state): State<AppState>) -> Response {
     }
 }
 
-/// `POST /pay`. Body is either JSON `{"qr":"<base64url>"}` or the raw 192-byte wire form
+/// `POST /api/v1/pay`. Body is either JSON `{"qr":"<base64url>"}` or the raw 192-byte wire form
 /// (any non-JSON content type). Returns `200 {"receipt":...}` or `422 {"error":"..."}`.
 async fn pay(State(state): State<AppState>, headers: HeaderMap, body: axum::body::Bytes) -> Response {
     // 1. Get the wire bytes from whichever encoding the merchant sent.

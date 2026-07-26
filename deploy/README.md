@@ -18,6 +18,10 @@ relay.dpay.example  ──proxied CNAME──▶  <tunnel-uuid>.cfargotunnel.com
 `.env`. The public hostname is configured in Cloudflare Zero Trust. The same image runs the offline demo, a
 rehearsal against a local `dfx` replica, and mainnet.
 
+**Public surface.** `/` serves the marketing landing page, `/merchant` the merchant terminal, the
+JSON API lives under `/api/v1/` (`/api/v1/health`, `/api/v1/pay`, `/api/v1/faucet`,
+`/api/v1/balance/{hex}`, `/api/v1/receipt/{nonce}`), and the Android app is at `/download/dpay.apk`.
+
 ## One-time tunnel setup
 
 The tunnel is *remotely managed*: its config lives in Cloudflare and `cloudflared` runs it with a
@@ -67,7 +71,7 @@ just image                    # host-built binary (--features agent) → slim ru
 cd deploy
 cp .env.example .env          # set DPAY_CANISTER_ID and CF_TUNNEL_TOKEN
 docker compose up -d          # relay + cloudflared
-curl -sS https://relay.dpay.example/health     # {"status":"ok"}
+curl -sS https://relay.dpay.example/api/v1/health   # {"status":"ok"}
 docker compose logs cloudflared | grep -i "Registered tunnel connection"   # tunnel is up
 ```
 
@@ -87,7 +91,7 @@ in `docker-compose.yml`.
 | `DPAY_CANISTER_ID` | — | **Required on `ic`.** The canister to settle on |
 | `DPAY_IC_URL` | `https://icp-api.io` | Mainnet, or `http://host.docker.internal:4943` for a `dfx` replica on the host |
 | `DPAY_IC_FETCH_ROOT_KEY` | auto | `true` for a local replica, `false` on mainnet — see below |
-| `DPAY_ENABLE_FAUCET` | `false` | Serve `POST /faucet`, which **mints** |
+| `DPAY_ENABLE_FAUCET` | `false` | Serve `POST /api/v1/faucet`, which **mints** |
 | `DPAY_PER_TX_CAP` | `100000` | Per-tx cap, minor units. `memory` only (on `ic` the canister enforces its own) |
 | `CF_TUNNEL_TOKEN` | — | **Required.** Secret token copied from the Cloudflare tunnel install command |
 | `DPAY_CLOUDFLARED_IMAGE` | `cloudflare/cloudflared:2026.7.1` | Pinned tunnel image; override only if needed |
@@ -107,11 +111,11 @@ mainnet.
 **2. It never degrades to a pretend ledger.** If `DPAY_LEDGER=ic` and the canister is unreachable
 (or `DPAY_CANISTER_ID` is unset), the relay **exits** instead of coming up on the in-memory ledger
 and issuing receipts for payments that never settled. With `restart: unless-stopped` that is a
-visible crash loop — which is the correct failure mode. `/health` is likewise red when the canister
-is unreachable, not merely when the socket is open. (cloudflared `depends_on` the relay being
+visible crash loop — which is the correct failure mode. `/api/v1/health` is likewise red when the
+canister is unreachable, not merely when the socket is open. (cloudflared `depends_on` the relay being
 *healthy*, so the tunnel doesn't even come up until the relay can actually settle.)
 
-**3. The faucet mints.** `POST /faucet` calls the canister's `mint`, which is **unauthenticated** in
+**3. The faucet mints.** `POST /api/v1/faucet` calls the canister's `mint`, which is **unauthenticated** in
 the current canister. Exposed on a real ledger that is an open money printer, so it is off unless
 `DPAY_ENABLE_FAUCET=true`. Turn it on only against a throwaway replica. (Gating `mint` on the
 canister side — issuer-only — is still to do; the relay flag does not fix the canister. It's an
@@ -142,7 +146,7 @@ DPAY_IC_URL=http://host.docker.internal:4943
 DPAY_IC_FETCH_ROOT_KEY=true
 DPAY_ENABLE_FAUCET=true
 EOF
-docker compose up -d relay && curl -sS http://127.0.0.1:8787/health   # {"status":"ok"}
+docker compose up -d relay && curl -sS http://127.0.0.1:8787/api/v1/health   # {"status":"ok"}
 ```
 
 `host.docker.internal` resolves via the `extra_hosts` mapping in the compose file.

@@ -148,7 +148,7 @@ function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: (id: Id
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(id));
       // Fund the new account from the demo faucet (best-effort — works when the ledger is reachable).
       try {
-        await fetch(`${base(relayUrl)}/faucet`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({account: id.publicHex})});
+        await fetch(`${base(relayUrl)}/api/v1/faucet`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({account: id.publicHex})});
       } catch { /* offline: created with $0, can be funded later */ }
       onCreated(id);
     } catch (e: any) { setErr(String(e?.message ?? e)); setBusy(false); }
@@ -202,7 +202,7 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 4000);
       try {
-        const r = await fetch(`${base(relayUrl)}/balance/${identity.publicHex}`, {signal: ctrl.signal});
+        const r = await fetch(`${base(relayUrl)}/api/v1/balance/${identity.publicHex}`, {signal: ctrl.signal});
         const j = await r.json();
         if (alive && r.ok && typeof j.balance === 'number') { setBalance(j.balance); setOnline(true); setOfflineSpent(0); }
         else if (alive) setOnline(false);
@@ -398,7 +398,7 @@ function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onOff
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), NFC_PAY_TIMEOUT_MS);
     try {
-      const r = await fetch(`${base(relayUrl)}/pay`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({qr: code}), signal: ctrl.signal});
+      const r = await fetch(`${base(relayUrl)}/api/v1/pay`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({qr: code}), signal: ctrl.signal});
       const body = await r.json().catch(() => ({} as any));
       return {res: {ok: r.ok, status: r.status}, body};
     } catch {
@@ -414,7 +414,7 @@ function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onOff
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 3000);
       try {
-        const r = await fetch(`${base(relayUrl)}/receipt/${nonceHex}`, {signal: ctrl.signal});
+        const r = await fetch(`${base(relayUrl)}/api/v1/receipt/${nonceHex}`, {signal: ctrl.signal});
         if (r.ok) { const j = await r.json().catch(() => ({} as any)); clearTimeout(t); return j.receipt ?? {}; }
       } catch { /* keep polling */ } finally { clearTimeout(t); }
       await new Promise(res => setTimeout(res, RECONCILE_INTERVAL_MS));
@@ -587,7 +587,7 @@ function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOfflinePaid
     const check = async () => {
       const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 4000);
       try {
-        const r = await fetch(`${base(relayUrl)}/receipt/${qr.nonce}`, {signal: ctrl.signal});
+        const r = await fetch(`${base(relayUrl)}/api/v1/receipt/${qr.nonce}`, {signal: ctrl.signal});
         if (alive && r.ok) { onSettled({nonce: qr.nonce, amount: qr.amount, who: qr.who, time: clock(), dir: 'out'}); setPaid({amount: qr.amount, who: qr.who, already: false}); setPhase('paid'); }
       } catch {} finally { clearTimeout(t); }
     };
@@ -609,7 +609,7 @@ function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOfflinePaid
         let res: {ok: boolean; status: number} | null = null;
         let j: any = {};
         try {
-          const r = await fetch(`${base(relayUrl)}/pay`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({qr: code}), signal: ctrl.signal});
+          const r = await fetch(`${base(relayUrl)}/api/v1/pay`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({qr: code}), signal: ctrl.signal});
           res = {ok: r.ok, status: r.status};
           j = await r.json().catch(() => ({} as any));
         } catch { res = null; /* network/timeout → unknown, fall back to the QR hand-off below */ } finally { clearTimeout(timer); }
@@ -754,7 +754,7 @@ function ReceiveMode({identity, relayUrl, nfcReady, onReceived}: {identity: Iden
     const check = async () => {
       const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 4000);
       try {
-        const r = await fetch(`${base(relayUrl)}/receipt/${reqQr.nonce}`, {signal: ctrl.signal});
+        const r = await fetch(`${base(relayUrl)}/api/v1/receipt/${reqQr.nonce}`, {signal: ctrl.signal});
         if (alive && r.ok) { const j = await r.json(); const from = j.receipt?.from ? short(j.receipt.from) : 'payer'; setResult({amount: reqQr.cents, from}); onReceived({nonce: reqQr.nonce, amount: reqQr.cents, who: from, time: clock(), dir: 'in'}); }
       } catch {} finally { clearTimeout(t); }
     };
@@ -766,7 +766,7 @@ function ReceiveMode({identity, relayUrl, nfcReady, onReceived}: {identity: Iden
     setScanning(false);
     setErr(null);
     try {
-      const r = await fetch(`${base(relayUrl)}/pay`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({qr: raw.trim()})});
+      const r = await fetch(`${base(relayUrl)}/api/v1/pay`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({qr: raw.trim()})});
       const j = await r.json().catch(() => ({} as any));
       // Only a definitive rejection is worth an error. A settled or ambiguous (network) result is
       // surfaced by the /receipt poll (which sets `result`), so we never flash a false failure on a

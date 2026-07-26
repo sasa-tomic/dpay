@@ -71,7 +71,7 @@ services:
     healthcheck:
       # /health consults the ledger (agent status), so this is red when the canister is unreachable,
       # not merely when the socket is closed.
-      test: ["CMD", "curl", "-fsS", "http://localhost:8787/health"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8787/api/v1/health"]
       interval: 10s
       timeout: 3s
       retries: 5

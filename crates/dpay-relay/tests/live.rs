@@ -6,7 +6,7 @@
 //! ships is the code we test: same wire format, same candid surface, same canister logic.
 //!
 //! Asserts:
-//!   1. a valid `POST /pay` settles → 200, and balances actually move (read back via a REAL
+//!   1. a valid `POST /api/v1/pay` settles → 200, and balances actually move (read back via a REAL
 //!      `balance_of` agent query, not any in-memory shortcut);
 //!   2. relay idempotency — a 2nd identical HTTP submit returns the byte-identical receipt and
 //!      does NOT double-settle;
@@ -82,11 +82,11 @@ fn signed(
     SignedAuthorization::new(sk, auth)
 }
 
-/// POST /pay with a raw wire-bytes body (the merchant's decoded signed-auth QR).
+/// POST /api/v1/pay with a raw wire-bytes body (the merchant's decoded signed-auth QR).
 fn pay_wire(wire: &[u8]) -> Request<Body> {
     Request::builder()
         .method("POST")
-        .uri("/pay")
+        .uri("/api/v1/pay")
         .header(header::CONTENT_TYPE, "application/octet-stream")
         .body(Body::from(wire.to_vec()))
         .unwrap()
@@ -149,7 +149,7 @@ fn live_settlement_end_to_end() {
         // Health goes through the real replica `status`.
         let health = Request::builder()
             .method("GET")
-            .uri("/health")
+            .uri("/api/v1/health")
             .body(Body::empty())
             .unwrap();
         let (hs, hb) = call(&state, health).await;
@@ -177,7 +177,11 @@ fn live_settlement_end_to_end() {
         // ---- (2) relay idempotency: same submission → identical receipt, no double-settle ----
         let (s2, b2) = call(&state, pay_wire(&sa.to_wire())).await;
         assert_eq!(s2, StatusCode::OK);
-        assert_eq!(b1, b2, "duplicate submit must replay the identical cached receipt");
+        // The whole bodies legitimately differ: the first settle carries `replayed: false`, the
+        // idempotent replay `replayed: true`. Idempotency is that the *receipt* is identical.
+        assert_eq!(b1["receipt"], b2["receipt"], "duplicate submit must replay the identical cached receipt");
+        assert_eq!(b1["replayed"], false, "first settle is a fresh charge, not a replay");
+        assert_eq!(b2["replayed"], true, "second identical submit must be flagged as replayed");
         // Balances unchanged after the replay.
         assert_eq!(ledger.balance_of(&payer_pk).await.unwrap(), INIT_A - 2_500);
         assert_eq!(ledger.balance_of(&merch_pk).await.unwrap(), INIT_B + 2_500);

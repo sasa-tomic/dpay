@@ -1,0 +1,576 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>dpay — pay abroad with no signal</title>
+<meta name="description" content="Tap or scan to pay a local shop abroad while your phone has no signal. It clears in dollars in about a second. No bank account, no roaming, no foreign-card fees. You hold your own key." />
+<meta name="color-scheme" content="dark" />
+<style>
+  :root{
+    --bg:#06070a;
+    --bg-2:#080a0e;
+    --panel:#0c0f14;
+    --panel-2:#0e1218;
+    --card:rgba(255,255,255,.022);
+    --ink:#f1f4f7;
+    --ink-2:#a6afba;
+    --ink-3:#69727d;
+    --ink-4:#464e58;
+    --accent:#3ee0ac;
+    --accent-2:#22b98a;
+    --accent-soft:rgba(62,224,172,.12);
+    --accent-line:rgba(62,224,172,.28);
+    --accent-ink:#03170f;
+    --warn:#f0c46a;
+    --line:rgba(255,255,255,.075);
+    --line-2:rgba(255,255,255,.045);
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --shadow:0 40px 90px -44px rgba(0,0,0,.92);
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+  body{
+    margin:0;
+    font-family:var(--sans);
+    color:var(--ink);
+    background:var(--bg);
+    line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+    overflow-x:hidden;
+  }
+  a{color:inherit}
+  /* film grain sits under everything; content lifts above it */
+  .grain{position:fixed;inset:0;width:100%;height:100%;opacity:.05;mix-blend-mode:overlay;pointer-events:none;z-index:0}
+  nav,header,main,footer{position:relative;z-index:1}
+  .wrap{max-width:1120px;margin:0 auto;padding:0 26px}
+
+  .kicker{
+    display:inline-flex;align-items:center;gap:11px;
+    font-family:var(--mono);font-size:.74rem;font-weight:600;
+    letter-spacing:.22em;text-transform:uppercase;color:var(--ink-3);
+  }
+  .kicker .idx{
+    color:var(--accent);font-weight:700;letter-spacing:.1em;
+    padding-right:11px;border-right:1px solid var(--line);
+  }
+
+  /* ---------- top bar ---------- */
+  nav{
+    display:flex;align-items:center;justify-content:space-between;
+    max-width:1120px;margin:0 auto;padding:24px 26px;
+  }
+  .word{font-size:1.3rem;font-weight:800;letter-spacing:-.03em}
+  .word b{color:var(--accent)}
+  .word .dot{color:var(--accent)}
+  .nav-right{display:flex;align-items:center;gap:8px}
+  .navlink{
+    color:var(--ink-2);text-decoration:none;font-size:.92rem;font-weight:600;letter-spacing:-.01em;
+    padding:9px 14px;border-radius:10px;
+    transition:color .16s ease,background .16s ease;
+  }
+  .navlink:hover{color:var(--ink);background:rgba(255,255,255,.045)}
+  .navlink.ghost{border:1px solid var(--line)}
+
+  /* ---------- hero ---------- */
+  .hero{position:relative;padding:52px 0 92px;overflow:hidden}
+  .hero::before{
+    content:"";position:absolute;inset:-320px -10% auto -10%;height:820px;z-index:0;pointer-events:none;
+    background:
+      radial-gradient(720px 460px at 18% 4%, rgba(62,224,172,.15), transparent 60%),
+      radial-gradient(560px 420px at 96% -6%, rgba(62,224,172,.06), transparent 58%);
+  }
+  .hero::after{
+    content:"";position:absolute;inset:0;z-index:0;pointer-events:none;opacity:.5;
+    -webkit-mask-image:radial-gradient(680px 520px at 20% 22%, #000, transparent 72%);
+            mask-image:radial-gradient(680px 520px at 20% 22%, #000, transparent 72%);
+    background-image:
+      linear-gradient(rgba(255,255,255,.028) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.028) 1px, transparent 1px);
+    background-size:52px 52px;
+  }
+  .hero-grid{
+    position:relative;z-index:1;
+    display:grid;grid-template-columns:1.08fr .92fr;gap:64px;align-items:center;
+  }
+  h1{
+    font-size:clamp(3rem,8.4vw,5.4rem);
+    line-height:.96;letter-spacing:-.045em;font-weight:820;
+    margin:22px 0 0;
+  }
+  h1 em{font-style:normal;color:var(--accent)}
+  .lede{
+    margin:26px 0 0;max-width:47ch;
+    font-size:clamp(1.04rem,1.5vw,1.18rem);color:var(--ink-2);line-height:1.62;
+  }
+  .lede b{color:var(--ink);font-weight:640}
+  .cta-row{display:flex;align-items:center;gap:22px;margin-top:38px;flex-wrap:wrap}
+  .primary{
+    display:inline-flex;align-items:center;gap:10px;
+    padding:15px 26px;border-radius:13px;
+    background:var(--accent);color:var(--accent-ink);
+    font-size:1.01rem;font-weight:720;letter-spacing:-.01em;text-decoration:none;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.35), 0 18px 40px -18px rgba(62,224,172,.85);
+    transition:transform .16s ease,box-shadow .16s ease,filter .16s ease;
+  }
+  .primary:hover{transform:translateY(-2px);filter:brightness(1.04);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.4), 0 26px 52px -20px rgba(62,224,172,.95)}
+  .primary:active{transform:translateY(0)}
+  .primary svg{width:17px;height:17px}
+  .textlink{
+    color:var(--ink);text-decoration:none;font-weight:620;font-size:.98rem;letter-spacing:-.01em;
+    border-bottom:1px solid var(--line);padding-bottom:2px;
+    transition:border-color .16s ease,color .16s ease;
+  }
+  .textlink:hover{color:var(--accent);border-color:var(--accent)}
+
+  .trust{margin-top:40px;display:flex;gap:8px 22px;flex-wrap:wrap;align-items:center}
+  .trust span{
+    display:inline-flex;align-items:center;gap:8px;
+    font-family:var(--mono);font-size:.72rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--ink-3);
+  }
+  .trust span::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--accent);opacity:.85}
+
+  /* ---------- hero visual: the payment pass ---------- */
+  .stage{position:relative;justify-self:center;width:100%;max-width:376px}
+  .pulse{position:absolute;top:-30px;right:-18px;width:150px;height:150px;pointer-events:none;z-index:0}
+  .pulse span{
+    position:absolute;inset:0;margin:auto;border-radius:50%;
+    border:1.5px solid var(--accent);opacity:0;
+    animation:ping 3.4s cubic-bezier(.2,.6,.3,1) infinite;
+  }
+  .pulse span:nth-child(2){animation-delay:1.13s}
+  .pulse span:nth-child(3){animation-delay:2.26s}
+  @keyframes ping{
+    0%{transform:scale(.28);opacity:.55}
+    70%{opacity:.12}
+    100%{transform:scale(1);opacity:0}
+  }
+
+  .pass{
+    position:relative;z-index:1;
+    border-radius:22px;padding:26px 26px 22px;
+    background:
+      radial-gradient(360px 200px at 84% -10%, rgba(62,224,172,.12), transparent 60%),
+      linear-gradient(168deg,#151a20,#0a0d11 76%);
+    border:1px solid var(--line);
+    box-shadow:var(--shadow), inset 0 1px 0 rgba(255,255,255,.06);
+    animation:rise .7s cubic-bezier(.2,.7,.2,1) both;
+  }
+  @keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+  .pass-head{display:flex;align-items:center;justify-content:space-between}
+  .pass-tag{
+    font-family:var(--mono);font-size:.66rem;font-weight:700;letter-spacing:.24em;text-transform:uppercase;
+    color:var(--ink-3);
+  }
+  .route{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:.72rem;font-weight:600;letter-spacing:.12em;color:var(--ink-2)}
+  .route svg{width:16px;height:16px;color:var(--accent);opacity:.9}
+  .chip{
+    margin-top:20px;display:inline-flex;align-items:center;gap:8px;
+    padding:6px 12px;border-radius:999px;
+    background:rgba(255,255,255,.04);border:1px solid var(--line);
+    font-size:.74rem;font-weight:650;letter-spacing:.01em;color:var(--ink-2);
+  }
+  .chip svg{width:14px;height:14px;color:var(--ink-2)}
+  .amt{margin-top:22px;font-weight:820;letter-spacing:-.045em;line-height:.92;font-size:4rem;color:var(--ink)}
+  .amt .cur{color:var(--ink-3);font-weight:700;font-size:2.1rem;vertical-align:.42em;margin-right:4px}
+  .amt .cents{color:var(--ink-3)}
+  .payee{margin-top:12px;color:var(--ink-2);font-size:.98rem}
+  .payee b{color:var(--ink);font-weight:650}
+
+  .perf{position:relative;height:1px;margin:24px -26px 22px;border-top:1px dashed var(--line)}
+  .perf::before,.perf::after{
+    content:"";position:absolute;top:-9px;width:18px;height:18px;border-radius:50%;background:var(--bg);
+  }
+  .perf::before{left:-9px}
+  .perf::after{right:-9px}
+
+  .meta{display:grid;grid-template-columns:1fr 1fr;gap:14px 18px;margin:0}
+  .meta div{display:flex;flex-direction:column;gap:3px}
+  .meta dt{font-family:var(--mono);font-size:.62rem;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-4)}
+  .meta dd{margin:0;font-family:var(--mono);font-size:.86rem;color:var(--ink-2)}
+  .meta .on{color:var(--accent)}
+
+  .barcode{height:38px;margin-top:22px;border-radius:4px;opacity:.5;
+    background:repeating-linear-gradient(90deg,
+      var(--ink) 0 2px, transparent 2px 5px,
+      var(--ink) 5px 6px, transparent 6px 10px,
+      var(--ink) 10px 13px, transparent 13px 15px,
+      var(--ink) 15px 16px, transparent 16px 21px)}
+
+  .paid{
+    position:absolute;right:20px;bottom:104px;z-index:2;
+    display:inline-flex;align-items:center;gap:10px;
+    padding:9px 14px 9px 10px;border-radius:13px;
+    background:rgba(9,17,14,.82);border:1px solid var(--accent-line);
+    backdrop-filter:blur(6px);
+    box-shadow:0 20px 44px -20px rgba(0,0,0,.9);
+    animation:stampin .5s .9s cubic-bezier(.2,1.5,.3,1) both;
+  }
+  @keyframes stampin{from{opacity:0;transform:scale(.8) rotate(-4deg)}to{opacity:1;transform:none}}
+  .stamp{
+    width:30px;height:30px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;
+    background:var(--accent);color:var(--accent-ink);
+  }
+  .stamp svg{width:17px;height:17px}
+  .stamp path{stroke-dasharray:26;stroke-dashoffset:0;animation:draw .5s 1.15s ease both}
+  @keyframes draw{from{stroke-dashoffset:26}to{stroke-dashoffset:0}}
+  .paid .lbl{font-weight:750;font-size:.98rem;letter-spacing:-.01em;line-height:1.05}
+  .paid .sub{font-family:var(--mono);font-size:.68rem;color:var(--ink-3);margin-top:2px}
+
+  /* ---------- section frame ---------- */
+  section{padding:74px 0;position:relative}
+  h2{font-size:clamp(1.9rem,3.7vw,2.7rem);line-height:1.06;letter-spacing:-.032em;font-weight:800;margin:16px 0 0;max-width:20ch}
+  .sec-sub{color:var(--ink-2);margin:16px 0 0;font-size:1.06rem;line-height:1.6;max-width:54ch}
+
+  /* ---------- how it works: directional flow ---------- */
+  .flow{display:grid;grid-template-columns:repeat(3,1fr);gap:34px;margin-top:52px;position:relative}
+  .step{position:relative}
+  .step:not(:first-child)::before{
+    content:"";position:absolute;left:-34px;top:26px;width:34px;height:1px;
+    background:linear-gradient(90deg,transparent,var(--accent-line));
+  }
+  .stepnum{
+    display:inline-flex;align-items:center;justify-content:center;
+    width:52px;height:52px;border-radius:15px;
+    font-family:var(--mono);font-size:1.14rem;font-weight:700;
+    color:var(--accent);background:var(--accent-soft);border:1px solid var(--accent-line);
+  }
+  .step h3{margin:22px 0 0;font-size:1.16rem;font-weight:700;letter-spacing:-.02em}
+  .step p{margin:11px 0 0;color:var(--ink-2);font-size:.98rem;line-height:1.62}
+  .step .k{color:var(--ink);font-weight:600}
+
+  /* ---------- differentiators: bento ---------- */
+  .bento{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:52px}
+  .tile{
+    position:relative;overflow:hidden;
+    padding:30px 28px;border-radius:20px;
+    background:var(--card);border:1px solid var(--line);
+    transition:border-color .2s ease,transform .2s ease,background .2s ease;
+  }
+  .tile:hover{border-color:var(--accent-line);transform:translateY(-3px);background:rgba(62,224,172,.03)}
+  .tile .ico{
+    width:46px;height:46px;border-radius:13px;display:flex;align-items:center;justify-content:center;
+    color:var(--accent);background:var(--accent-soft);border:1px solid var(--accent-line);
+  }
+  .tile .ico svg{width:23px;height:23px}
+  .tile h3{margin:20px 0 0;font-size:1.18rem;font-weight:700;letter-spacing:-.02em}
+  .tile p{margin:11px 0 0;color:var(--ink-2);font-size:.97rem;line-height:1.62}
+  .tile.big{grid-column:span 2;grid-row:span 2;display:flex;flex-direction:column}
+  .tile.big h3{font-size:1.56rem;margin-top:24px;letter-spacing:-.028em;line-height:1.12}
+  .tile.big p{font-size:1.06rem;max-width:44ch}
+  .tile.wide{grid-column:span 3;display:flex;gap:20px;align-items:flex-start;background:transparent}
+  .tile.wide .note{font-family:var(--mono);font-size:.68rem;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--warn);white-space:nowrap;padding-top:4px}
+  .tile.wide p{margin:0;color:var(--ink-2);font-size:1rem;max-width:none}
+  .tile.wide b{color:var(--ink);font-weight:640}
+  /* big-tile asymmetry diagram: the payer is offline, the shop is online */
+  .asym{margin-top:auto;padding-top:38px;display:flex;align-items:center;gap:12px}
+  .node{flex:1;border-radius:15px;padding:15px 14px;text-align:center;border:1px solid var(--line);background:rgba(255,255,255,.015)}
+  .node b{display:block;font-size:1rem;font-weight:700;letter-spacing:-.01em;color:var(--ink)}
+  .node small{font-family:var(--mono);font-size:.64rem;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-4);margin-top:3px;display:block}
+  .node.off small::before{content:"○ "}
+  .node.on{border-color:var(--accent-line);background:var(--accent-soft)}
+  .node.on small{color:var(--accent)}
+  .node.on small::before{content:"● "}
+  .link{position:relative;flex:none;width:74px;height:26px;display:flex;align-items:center;justify-content:center}
+  .link::before{content:"";position:absolute;left:2px;right:2px;top:50%;border-top:1px dashed var(--accent-line)}
+  .link .tap{position:relative;width:30px;height:26px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:#0b0e13}
+  .link svg{width:19px;height:19px;color:var(--accent)}
+  .zero{font-size:3.2rem;font-weight:820;letter-spacing:-.04em;color:var(--accent);line-height:1}
+
+  /* ---------- download ---------- */
+  .get{
+    margin:0 0 8px;border-radius:26px;padding:56px 48px;position:relative;overflow:hidden;
+    background:
+      radial-gradient(520px 320px at 82% -20%, rgba(62,224,172,.13), transparent 62%),
+      linear-gradient(180deg,var(--panel-2),#080a0e);
+    border:1px solid var(--line);
+  }
+  .get::before{content:"";position:absolute;top:0;left:36px;right:36px;height:1px;
+    background:repeating-linear-gradient(90deg,var(--line) 0 7px, transparent 7px 14px)}
+  .get-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:44px;align-items:center}
+  .get h2{margin-top:14px}
+  .get p{color:var(--ink-2);max-width:40ch;margin:16px 0 0;font-size:1.05rem;line-height:1.62}
+  .stores{display:flex;flex-wrap:wrap;gap:14px;margin-top:26px}
+
+  /* the injected APK button (primary, filled) + its disabled variant */
+  .btn,.play{
+    min-height:62px;min-width:224px;
+    display:inline-flex;align-items:center;justify-content:center;gap:3px;
+    padding:0 24px;border-radius:15px;text-decoration:none;cursor:pointer;
+    font-family:var(--sans);border:1px solid transparent;
+  }
+  .btn{
+    flex-direction:column;flex:1;
+    background:var(--accent);color:var(--accent-ink);
+    font-size:1.04rem;font-weight:730;letter-spacing:-.012em;line-height:1.14;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.34), 0 18px 40px -18px rgba(62,224,172,.8);
+    transition:transform .16s ease,filter .16s ease,box-shadow .16s ease;
+  }
+  .btn:hover{transform:translateY(-2px);filter:brightness(1.04);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.4), 0 26px 52px -20px rgba(62,224,172,.92)}
+  .btn:active{transform:translateY(0)}
+  .apk-meta{font-family:var(--mono);font-size:.66rem;font-weight:600;letter-spacing:.14em;text-transform:uppercase;opacity:.72}
+  /* disabled variant — declared after .btn so it wins */
+  .btn-disabled{
+    background:rgba(255,255,255,.035);color:var(--ink-2);
+    border:1px solid var(--line);box-shadow:none;cursor:default;font-weight:640;
+  }
+  .btn-disabled:hover{transform:none;filter:none;box-shadow:none}
+
+  /* the self-built "Google Play" badge — secondary, outlined, not yet available */
+  .play{
+    flex:1;gap:13px;position:relative;
+    background:rgba(255,255,255,.02);border:1px solid var(--line);color:var(--ink-2);
+    transition:border-color .16s ease,color .16s ease;
+  }
+  .play:hover{border-color:var(--accent-line);color:var(--ink)}
+  .play .tri{width:22px;height:22px;flex:none;color:var(--accent);opacity:.9}
+  .play .txt{display:flex;flex-direction:column;line-height:1.05;text-align:left}
+  .play .txt small{font-family:var(--mono);font-size:.6rem;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3)}
+  .play .txt strong{font-size:1.12rem;font-weight:700;letter-spacing:-.015em;color:var(--ink)}
+  .play .soon{
+    position:absolute;top:-9px;right:12px;
+    font-family:var(--mono);font-size:.58rem;font-weight:700;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--accent-ink);background:var(--accent);padding:2px 8px;border-radius:999px;
+  }
+
+  .merch-line{margin-top:22px;color:var(--ink-3);font-size:.94rem}
+  .merch-line a{color:var(--ink-2);font-weight:620;text-decoration:none;border-bottom:1px solid var(--line);padding-bottom:1px;transition:color .16s ease,border-color .16s ease}
+  .merch-line a:hover{color:var(--accent);border-color:var(--accent)}
+
+  .get-side{border-left:1px solid var(--line);padding-left:44px}
+  .get-side .row{display:flex;gap:14px;padding:16px 0;border-bottom:1px solid var(--line-2)}
+  .get-side .row:last-child{border-bottom:0}
+  .get-side .row svg{width:19px;height:19px;color:var(--accent);flex:none;margin-top:2px}
+  .get-side .row b{display:block;font-weight:640;font-size:.98rem;color:var(--ink)}
+  .get-side .row span{color:var(--ink-3);font-size:.9rem}
+
+  /* ---------- footer ---------- */
+  footer{border-top:1px solid var(--line);margin-top:40px;padding:40px 0 56px}
+  .foot{display:flex;align-items:flex-start;justify-content:space-between;gap:28px;flex-wrap:wrap}
+  .foot .word{font-size:1.1rem}
+  .foot p{margin:0;color:var(--ink-3);font-size:.86rem;max-width:52ch;line-height:1.6}
+  .foot a{color:var(--ink-2);text-decoration:none;border-bottom:1px solid var(--line)}
+  .foot a:hover{color:var(--accent);border-color:var(--accent)}
+
+  /* ---------- responsive ---------- */
+  @media (max-width:920px){
+    .hero-grid{grid-template-columns:1fr;gap:52px}
+    .stage{grid-row:1;max-width:340px}
+    .lede{max-width:none}
+    .flow{grid-template-columns:1fr;gap:0}
+    .step{padding-left:34px}
+    .step:not(:first-child)::before{display:none}
+    .step:not(:last-child){padding-bottom:34px}
+    .step::after{content:"";position:absolute;left:12px;top:56px;bottom:0;width:1px;background:linear-gradient(var(--accent-line),transparent)}
+    .step:last-child::after{display:none}
+    .stepnum{position:absolute;left:-14px;top:0;width:44px;height:44px}
+    .step h3{margin-top:10px}
+    .bento{grid-template-columns:1fr}
+    .tile.big,.tile.wide{grid-column:auto;grid-row:auto}
+    .tile.wide{flex-direction:column;gap:10px}
+    .get-grid{grid-template-columns:1fr;gap:32px}
+    .get-side{border-left:0;border-top:1px solid var(--line);padding-left:0;padding-top:12px}
+  }
+  @media (max-width:560px){
+    .wrap{padding:0 20px}
+    nav{padding:20px}
+    .hero{padding:32px 0 64px}
+    section{padding:56px 0}
+    .get{padding:38px 24px}
+    .stores{flex-direction:column}
+    .btn,.play{width:100%;flex:none}
+    .amt{font-size:3.4rem}
+    .stage{max-width:320px}
+  }
+
+  @media (prefers-reduced-motion:reduce){
+    html{scroll-behavior:auto}
+    *{animation:none!important;transition:none!important}
+  }
+</style>
+</head>
+<body>
+
+<svg class="grain" aria-hidden="true" preserveAspectRatio="none">
+  <filter id="g"><feTurbulence type="fractalNoise" baseFrequency="0.82" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter>
+  <rect width="100%" height="100%" filter="url(#g)"/>
+</svg>
+
+<nav>
+  <span class="word">d<b>pay</b></span>
+  <span class="nav-right">
+    <a class="navlink" href="#how">How it works</a>
+    <a class="navlink ghost" href="/merchant">Merchant terminal →</a>
+  </span>
+</nav>
+
+<header class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <span class="kicker"><span class="idx">01</span> Offline pay for travelers</span>
+      <h1>No signal.<br>Still <em>paid.</em></h1>
+      <p class="lede">Foreign SIM, roaming off, or zero bars three floors underground — none of it stops you. Tap the shop's reader or scan its code and <b>your phone signs the payment without ever touching a network.</b> The shop has wifi, so it clears in about a second. Settled in dollars.</p>
+      <div class="cta-row">
+        <a class="primary" href="#get">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12M6 11l6 6 6-6M5 20h14"/></svg>
+          Get the app
+        </a>
+        <a class="textlink" href="#how">See the handoff →</a>
+      </div>
+      <div class="trust">
+        <span>Settles in $</span>
+        <span>No bank account</span>
+        <span>Non-custodial</span>
+        <span>Android</span>
+      </div>
+    </div>
+
+    <div class="stage" aria-hidden="true">
+      <div class="pulse"><span></span><span></span><span></span></div>
+      <div class="pass">
+        <div class="pass-head">
+          <span class="pass-tag">Payment pass</span>
+          <span class="route">YOU
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15.5 13 11V4.6a1.5 1.5 0 0 0-3 0V11l-8 4.5v2l8-2.2V19l-2 1.5v1.2l3.5-1 3.5 1v-1.2L14 19v-3.7l7 2.2z"/></svg>
+            SHOP</span>
+        </div>
+        <span class="chip">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15.5 13 11V4.6a1.5 1.5 0 0 0-3 0V11l-8 4.5v2l8-2.2V19l-2 1.5v1.2l3.5-1 3.5 1v-1.2L14 19v-3.7l7 2.2z"/></svg>
+          Airplane mode
+        </span>
+        <div class="amt"><span class="cur">$</span>12<span class="cents">.00</span></div>
+        <div class="payee">to <b>Café Lisboa</b> · Alfama</div>
+        <div class="perf"></div>
+        <dl class="meta">
+          <div><dt>Payer</dt><dd>you · offline</dd></div>
+          <div><dt>Merchant</dt><dd class="on">online</dd></div>
+          <div><dt>Ref</dt><dd>7F3A·A19C</dd></div>
+          <div><dt>Expires</dt><dd>1:58</dd></div>
+        </dl>
+        <div class="barcode"></div>
+      </div>
+      <div class="paid">
+        <span class="stamp">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5 10 17.5 19.5 7"/></svg>
+        </span>
+        <span>
+          <div class="lbl">Paid</div>
+          <div class="sub">cleared in 1.9s</div>
+        </span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section id="how" class="wrap">
+    <span class="kicker"><span class="idx">02</span> The handoff</span>
+    <h2>One of you needs a signal. It isn't you.</h2>
+    <p class="sec-sub">Three moves, and only the shop ever touches the network. You stay dark the whole time.</p>
+    <div class="flow">
+      <div class="step">
+        <div class="stepnum">1</div>
+        <h3>The shop rings it up</h3>
+        <p>A code on their screen or a tap on their reader, for the <span class="k">exact amount</span>. $12, to that café. Nothing for you to type, nothing to convert.</p>
+      </div>
+      <div class="step">
+        <div class="stepnum">2</div>
+        <h3>You tap — offline</h3>
+        <p>Your phone signs it on the spot, no connection involved. The signature <span class="k">locks in that amount and that shop</span>, so it can't be replayed or nudged higher.</p>
+      </div>
+      <div class="step">
+        <div class="stepnum">3</div>
+        <h3>Cleared in a second or two</h3>
+        <p>The shop — the side with wifi — sends your signed payment on and <span class="k">watches it settle</span>. Dollars land before you've pocketed your phone.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap">
+    <span class="kicker"><span class="idx">03</span> The edge</span>
+    <h2>Built for the person holding a dead phone.</h2>
+    <p class="sec-sub">Every contactless payment you've made assumed you were online at the register. Abroad, that's the assumption that breaks first.</p>
+    <div class="bento">
+      <div class="tile big">
+        <div class="ico">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 8.5a7 7 0 0 1 0 7M10.5 6a11 11 0 0 1 0 12M14.5 4.2a15 15 0 0 1 0 15.6"/><path d="M4 4 20 20" opacity=".55"/></svg>
+        </div>
+        <h3>You're the offline one — by&nbsp;design.</h3>
+        <p>Cards and phone wallets put the payer online at the moment of tap. dpay flips the roles: the online side is the shop with wifi, and you get to be the one without a signal — because abroad, you always are.</p>
+        <div class="asym">
+          <div class="node off"><b>You</b><small>offline</small></div>
+          <div class="link"><span class="tap">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M6.5 8.5a7 7 0 0 1 0 7M10.5 6a11 11 0 0 1 0 12M14.5 4.2a15 15 0 0 1 0 15.6"/></svg>
+          </span></div>
+          <div class="node on"><b>The shop</b><small>online</small></div>
+        </div>
+      </div>
+      <div class="tile">
+        <div class="zero">$0</div>
+        <h3>No foreign-card FX toll</h3>
+        <p>You send dollars; the shop is paid the same dollars. Nothing routes through a card network to skim a cross-border spread. Same in, same out.</p>
+      </div>
+      <div class="tile">
+        <div class="ico">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15" r="1.4"/></svg>
+        </div>
+        <h3>The key never leaves your phone</h3>
+        <p>There's no company account in the middle. dpay can't move, hold, or freeze your money — not by policy, but because the design gives it no way to.</p>
+      </div>
+      <div class="tile wide">
+        <span class="note">Straight talk</span>
+        <p><b>“You don't need signal” isn't “nobody does.”</b> If the shop is offline too — a stall up a mountain — your signed payment waits with them and settles the moment they reconnect. You still get told when it clears.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="get" class="wrap">
+    <div class="get">
+      <div class="get-grid">
+        <div>
+          <span class="kicker"><span class="idx">04</span> Get it</span>
+          <h2>Load it before you fly.</h2>
+          <p>Install it, put dollars on at home, and it's ready the minute you land — bars or no bars. Android for now.</p>
+          <div class="stores">
+            {{DOWNLOAD}}
+            <span class="play" aria-disabled="true" title="Coming soon to Google Play">
+              <span class="soon">Soon</span>
+              <svg class="tri" viewBox="0 0 24 24" fill="currentColor"><path d="M5 3.5 20 12 5 20.5z"/></svg>
+              <span class="txt"><small>Get it on</small><strong>Google Play</strong></span>
+            </span>
+          </div>
+          <div class="merch-line">Running a shop? <a href="/merchant">Open the merchant terminal →</a></div>
+        </div>
+        <div class="get-side">
+          <div class="row">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>
+            <span><b>Works at zero bars</b>Tap or scan with the phone fully offline.</span>
+          </div>
+          <div class="row">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>
+            <span><b>Held in dollars</b>No token to learn, no exchange to open.</span>
+          </div>
+          <div class="row">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>
+            <span><b>Your key, your money</b>Non-custodial. We can't touch your funds.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <span class="word">d<b>pay</b><span class="dot">.</span></span>
+    <p>Tap or scan to pay a local shop while your phone stays offline. Clears in dollars in about a second. Non-custodial — your key never leaves your device. Running a business? <a href="/merchant">Merchant terminal →</a></p>
+  </div>
+</footer>
+
+</body>
+</html>

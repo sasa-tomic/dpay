@@ -1,6 +1,9 @@
 //! The relay binary — the merchant's submit-and-confirm service, and dpay's only online
-//! dependency. It also serves the **merchant terminal** web page (`GET /`) so the whole merchant
-//! side of the demo is one process: open the page on a laptop, scan the payer's QR, get "Paid ✓".
+//! dependency. It also serves the marketing **landing page** (`GET /`) and the **merchant
+//! terminal** web page (`GET /merchant`), so the whole merchant side of the demo is one process:
+//! open the terminal on a laptop, scan the payer's QR, get "Paid ✓". The JSON API lives under
+//! `/api/v1` (e.g. `POST /api/v1/pay`, `GET /api/v1/health`); an Android build, when configured via
+//! `DPAY_APK_PATH`, is served at `GET /download/dpay.apk`.
 //!
 //! Everything the relay needs is configured through the environment, so the *same* binary (and the
 //! same container image) runs the offline demo and a real deployment — only env differs.
@@ -23,8 +26,10 @@
 //!                           (each has its own key); MUST be false on mainnet, where it would mean
 //!                           trusting whatever key the endpoint returns. Default: true only when
 //!                           DPAY_IC_URL is a loopback/local address. See `AgentLedger::connect_with`.
-//!   DPAY_ENABLE_FAUCET      serve `POST /faucet`, which mints (default: true on `memory`, false on
-//!                           `ic` — an exposed faucet on a real ledger is an open money printer)
+//!   DPAY_ENABLE_FAUCET      serve `POST /api/v1/faucet`, which mints (default: true on `memory`,
+//!                           false on `ic` — an exposed faucet on a real ledger is an open money printer)
+//!   DPAY_APK_PATH           path to an Android build to serve at `GET /download/dpay.apk` and light
+//!                           up the landing page's download button. Unset → downloads disabled.
 
 use std::net::SocketAddr;
 use std::process;
@@ -55,10 +60,13 @@ async fn main() {
     });
 
     let ledger = build_ledger(&cfg).await;
-    let state = AppState::new(ledger);
+    let apk = load_apk();
+    let state = AppState::new(ledger).with_apk(apk);
     state.set_faucet_enabled(cfg.faucet);
     if cfg.faucet {
-        println!("! POST /faucet is ENABLED — it mints. Never expose this on a real deployment.");
+        println!(
+            "! POST /api/v1/faucet is ENABLED — it mints. Never expose this on a real deployment."
+        );
     }
 
     let listener = tokio::net::TcpListener::bind(cfg.addr)
@@ -68,12 +76,46 @@ async fn main() {
             process::exit(1);
         });
     let bound = listener.local_addr().unwrap_or(cfg.addr);
-    println!("dpay merchant terminal + relay:  http://{bound}/   (POST /pay, GET /health)");
+    println!(
+        "dpay relay:  landing http://{bound}/  ·  merchant http://{bound}/merchant  ·  \
+         API http://{bound}/api/v1  (POST /api/v1/pay, GET /api/v1/health)  ·  \
+         APK http://{bound}/download/dpay.apk"
+    );
 
     axum::serve(listener, app(state))
         .with_graceful_shutdown(shutdown_signal())
         .await
         .expect("relay server error");
+}
+
+/// Load the Android build to serve, if `DPAY_APK_PATH` names one. A set-but-unreadable path is a
+/// loud warning, not a hard stop: the relay still serves payments, just without a download link.
+fn load_apk() -> Option<Vec<u8>> {
+    match std::env::var("DPAY_APK_PATH") {
+        Ok(path) if !path.trim().is_empty() => {
+            let path = path.trim().to_string();
+            match std::fs::read(&path) {
+                Ok(bytes) => {
+                    println!(
+                        "serving APK from {path} ({} bytes) at /download/dpay.apk",
+                        bytes.len()
+                    );
+                    Some(bytes)
+                }
+                Err(e) => {
+                    eprintln!(
+                        "dpay-relay: warn: DPAY_APK_PATH={path:?} is set but unreadable ({e}); \
+                         APK downloads disabled"
+                    );
+                    None
+                }
+            }
+        }
+        _ => {
+            println!("no DPAY_APK_PATH set — APK downloads disabled (/download/dpay.apk → 404)");
+            None
+        }
+    }
 }
 
 // ---- configuration ----

@@ -109,7 +109,7 @@ up: image
     fi
     docker compose up -d && docker compose ps
     sleep 1
-    curl -sS https://dpay.kalaj.org/health
+    curl -sS https://dpay.kalaj.org/api/v1/health
 
 # tear the compose stack down
 compose-down:

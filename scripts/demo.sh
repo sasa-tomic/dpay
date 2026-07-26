@@ -44,7 +44,7 @@ RELAY_PID=$!
 
 # wait for the terminal to answer
 for _ in $(seq 1 30); do
-  curl -fsS "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && break || sleep 0.3
+  curl -fsS "http://127.0.0.1:$PORT/api/v1/health" >/dev/null 2>&1 && break || sleep 0.3
 done
 
 TSIP="$(tailscale ip -4 2>/dev/null | head -1)"
@@ -56,7 +56,7 @@ cat <<EOF
   └──────────────────────────────────────────────────────────────────────┘
 
   MERCHANT (this laptop)
-    Open  ▶  http://localhost:$PORT/     (localhost is required for the webcam)
+    Open  ▶  http://localhost:$PORT/merchant     (localhost is required for the webcam)
 
   PAYER (the phone)   —  just app  installs it (ledger URL baked to Tailscale)
     The wallet opens as "You" with \$100.00. It reaches the ledger over Tailscale

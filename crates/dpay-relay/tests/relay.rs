@@ -60,31 +60,31 @@ fn signed(sk: &SigningKey, to: [u8; 32], amount: u64, nonce: [u8; 16], expiry: u
     SignedAuthorization::new(sk, auth)
 }
 
-/// POST /pay with a JSON `{"qr": ...}` body.
+/// POST /api/v1/pay with a JSON `{"qr": ...}` body.
 fn pay_json(qr: &str) -> Request<Body> {
     Request::builder()
         .method("POST")
-        .uri("/pay")
+        .uri("/api/v1/pay")
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(format!("{{\"qr\":\"{qr}\"}}")))
         .unwrap()
 }
 
-/// POST /pay with a raw wire-bytes body.
+/// POST /api/v1/pay with a raw wire-bytes body.
 fn pay_wire(wire: &[u8]) -> Request<Body> {
     Request::builder()
         .method("POST")
-        .uri("/pay")
+        .uri("/api/v1/pay")
         .header(header::CONTENT_TYPE, "application/octet-stream")
         .body(Body::from(wire.to_vec()))
         .unwrap()
 }
 
-/// POST /faucet — the demo on-ramp, which mints. Gated by `AppState::set_faucet_enabled`.
+/// POST /api/v1/faucet — the demo on-ramp, which mints. Gated by `AppState::set_faucet_enabled`.
 fn faucet_json(account_hex: &str, amount: u64) -> Request<Body> {
     Request::builder()
         .method("POST")
-        .uri("/faucet")
+        .uri("/api/v1/faucet")
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(format!(
             "{{\"account\":\"{account_hex}\",\"amount\":{amount}}}"
@@ -92,12 +92,12 @@ fn faucet_json(account_hex: &str, amount: u64) -> Request<Body> {
         .unwrap()
 }
 
-/// GET /receipt/{nonce_hex} — the idempotent reconciliation lookup the merchant app falls back to
-/// when a /pay response is lost, so a settled payment is never reported as failed.
+/// GET /api/v1/receipt/{nonce_hex} — the idempotent reconciliation lookup the merchant app falls
+/// back to when a /api/v1/pay response is lost, so a settled payment is never reported as failed.
 fn get_receipt(nonce: [u8; 16]) -> Request<Body> {
     Request::builder()
         .method("GET")
-        .uri(format!("/receipt/{}", hex::encode(nonce)))
+        .uri(format!("/api/v1/receipt/{}", hex::encode(nonce)))
         .body(Body::empty())
         .unwrap()
 }
@@ -108,6 +108,20 @@ async fn call(state: &AppState, req: Request<Body>) -> (StatusCode, Value) {
     let bytes = resp.into_body().collect().await.unwrap().to_bytes();
     let json: Value = serde_json::from_slice(&bytes).unwrap();
     (status, json)
+}
+
+/// A bare GET request — for the non-JSON pages (landing, merchant, APK).
+fn get_req(uri: &str) -> Request<Body> {
+    Request::builder().method("GET").uri(uri).body(Body::empty()).unwrap()
+}
+
+/// Like `call`, but returns the raw status/headers/bytes (the pages aren't JSON).
+async fn call_raw(state: &AppState, req: Request<Body>) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
+    let resp = app(state.clone()).oneshot(req).await.unwrap();
+    let status = resp.status();
+    let headers = resp.headers().clone();
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes().to_vec();
+    (status, headers, bytes)
 }
 
 // --- tests ---------------------------------------------------------------
@@ -173,8 +187,8 @@ async fn duplicate_nonce_is_idempotent_and_credits_once() {
 }
 
 /// Reconciliation contract the merchant app depends on: once a payment settles, its nonce is
-/// retrievable via GET /receipt/{nonce} with the identical receipt — so a merchant whose /pay
-/// response was lost (network drop after commit) can confirm it settled instead of reporting a
+/// retrievable via GET /api/v1/receipt/{nonce} with the identical receipt — so a merchant whose
+/// /api/v1/pay response was lost (network drop after commit) can confirm it settled instead of reporting a
 /// false failure. Also proves an unsettled nonce is a clean 404 (not settled), never a false 200.
 #[tokio::test]
 async fn settled_receipt_is_retrievable_by_nonce_for_reconciliation() {
@@ -290,7 +304,7 @@ async fn health_ok() {
 
     let req = Request::builder()
         .method("GET")
-        .uri("/health")
+        .uri("/api/v1/health")
         .body(Body::empty())
         .unwrap();
     let (status, body) = call(&state, req).await;
@@ -374,4 +388,102 @@ async fn malformed_qr_rejected_422() {
     let (status, body) = call(&state, pay_json("not-valid-base64url!!!")).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert!(body["error"].as_str().unwrap().contains("qr"), "error={body}");
+}
+
+// --- landing page + APK download (the public root) -----------------------
+
+/// With no APK configured (the default), `GET /` serves the landing page with the placeholder
+/// resolved to the disabled "coming soon" chip — never the literal `{{DOWNLOAD}}` token, and no
+/// download link that would 404.
+#[tokio::test]
+async fn landing_page_without_apk_shows_coming_soon() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+
+    let (status, headers, bytes) = call_raw(&state, get_req("/")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers.get(header::CONTENT_TYPE).unwrap(), "text/html; charset=utf-8");
+    let html = String::from_utf8(bytes).unwrap();
+    // The exact injected disabled chip (the `.btn-disabled` CSS class always exists in the sheet,
+    // so match on the injected copy, which is unique to the None branch).
+    assert!(
+        html.contains("<span class=\"btn btn-disabled\">Android build coming soon</span>"),
+        "disabled CTA missing"
+    );
+    assert!(!html.contains("{{DOWNLOAD}}"), "placeholder must be substituted");
+    assert!(!html.contains("href=\"/download/dpay.apk\""), "no live download link without an APK");
+}
+
+/// With an APK configured, `GET /` swaps the placeholder for a live download button carrying the
+/// build's rounded size, and drops the disabled chip. A tiny build still reads "1 MB" (min floor).
+#[tokio::test]
+async fn landing_page_with_apk_shows_download_button() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let state = state.with_apk(Some(vec![0u8; 100])); // <0.5 MB → rounds to the 1 MB floor
+
+    let (status, _headers, bytes) = call_raw(&state, get_req("/")).await;
+    assert_eq!(status, StatusCode::OK);
+    let html = String::from_utf8(bytes).unwrap();
+    assert!(html.contains("href=\"/download/dpay.apk\""), "download link missing");
+    assert!(html.contains("APK · 1 MB"), "rounded size (min 1 MB) missing");
+    assert!(!html.contains("Android build coming soon"), "must not show the disabled chip");
+    assert!(!html.contains("{{DOWNLOAD}}"), "placeholder must be substituted");
+}
+
+/// The merchant terminal moved off `/` to `/merchant`; `/` is now the landing page.
+#[tokio::test]
+async fn merchant_terminal_served_at_merchant_not_root() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+
+    let (ms, mh, mbytes) = call_raw(&state, get_req("/merchant")).await;
+    assert_eq!(ms, StatusCode::OK);
+    assert_eq!(mh.get(header::CONTENT_TYPE).unwrap(), "text/html; charset=utf-8");
+    let merch = String::from_utf8(mbytes).unwrap();
+    // `id="merchId"` is unique to the merchant terminal (the landing page shares the words
+    // "Merchant terminal" in its nav link, so match on the terminal-only element instead).
+    assert!(merch.contains("id=\"merchId\""), "/merchant must serve the terminal");
+
+    // The root is the landing page, not the terminal.
+    let (_rs, _rh, rbytes) = call_raw(&state, get_req("/")).await;
+    let root = String::from_utf8(rbytes).unwrap();
+    assert!(!root.contains("id=\"merchId\""), "root must not be the merchant terminal");
+}
+
+/// Without a configured APK the download route is a clean 404 — not an empty 200.
+#[tokio::test]
+async fn apk_download_absent_is_404() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+
+    let (status, _headers, bytes) = call_raw(&state, get_req("/download/dpay.apk")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(String::from_utf8(bytes).unwrap(), "no build available");
+}
+
+/// With an APK configured the route serves the exact bytes as an APK attachment.
+#[tokio::test]
+async fn apk_download_serves_configured_bytes() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let apk = vec![0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02];
+    let state = state.with_apk(Some(apk.clone()));
+
+    let (status, headers, bytes) = call_raw(&state, get_req("/download/dpay.apk")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        headers.get(header::CONTENT_TYPE).unwrap(),
+        "application/vnd.android.package-archive"
+    );
+    assert_eq!(
+        headers.get(header::CONTENT_DISPOSITION).unwrap(),
+        "attachment; filename=\"dpay.apk\""
+    );
+    assert_eq!(bytes, apk, "served bytes must match the configured build verbatim");
 }
