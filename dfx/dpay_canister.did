@@ -13,6 +13,14 @@ type PayReceipt = record {
   new_from_balance : nat64;
 };
 type Result = variant { Ok : PayReceipt; Err : text };
+type TxnView = record {
+  to : blob;
+  from : blob;
+  nonce : blob;
+  amount : nat64;
+  currency : nat32;
+  timestamp : nat64;
+};
 service : (InitArg) -> {
   balance_of : (blob, nat32) -> (nat64) query;
   // Credit `to` with `amount` (minor units) of `currency` and return the new balance. **Open demo
@@ -26,4 +34,9 @@ service : (InitArg) -> {
   // (non-awaiting) message → atomic on the single-threaded canister.
   pay : (blob) -> (Result);
   per_tx_cap : () -> (nat64) query;
+  // List this account's settled transactions in `currency`, newest-first, up to `limit`. The
+  // (account, currency) block is one contiguous key range in stable memory; this is the durable
+  // history the wallet renders (the in-memory UI list is gone on restart; this is the source of
+  // truth). Survives upgrades. Read-only — records what already settled.
+  transactions_of : (blob, nat32, nat32) -> (vec TxnView) query;
 }

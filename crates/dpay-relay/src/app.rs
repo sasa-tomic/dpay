@@ -13,6 +13,8 @@
 //!   * **Retries** — a `LedgerError::Transient` is retried a few times with small backoff;
 //!     a `Rejected` is final and becomes `422`.
 //! - `GET /api/v1/health` — the merchant's pre-flight green dot; consults `ledger.healthy()`.
+//! - `GET /api/v1/transactions/{hex}?currency=N&limit=30` — the wallet's durable transaction list,
+//!   sourced from the ledger (newest-first); replaces the ephemeral in-memory UI list.
 //!
 //! `safe_mode` is a wired-but-inert flag: the seam the demo flips to fall back to a degraded path.
 
@@ -30,7 +32,7 @@ use serde::{Deserialize, Serialize};
 
 use dpay_core::{Currency, SignedAuthorization, DEMO_USD, NONCE_LEN, PUBKEY_LEN};
 
-use crate::ledger::{Ledger, LedgerError, Receipt};
+use crate::ledger::{Ledger, LedgerError, Receipt, TxnRecord};
 
 /// Retry policy for transient ledger errors (idempotency makes retries safe).
 const MAX_ATTEMPTS: u32 = 3;
@@ -106,6 +108,7 @@ pub fn app(state: AppState) -> Router {
         .route("/pay", post(pay))
         .route("/faucet", post(faucet))
         .route("/balance/{hex}", get(balance))
+        .route("/transactions/{hex}", get(transactions))
         .route("/receipt/{nonce}", get(receipt))
         .route("/health", get(health));
 
@@ -182,6 +185,28 @@ async fn balance(
     let currency = qs.currency.unwrap_or(DEMO_USD);
     match state.ledger.balance(pk, currency).await {
         Ok(bal) => (StatusCode::OK, Json(BalanceBody { balance: bal })).into_response(),
+        Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
+    }
+}
+
+/// `GET /api/v1/transactions/{hex}?currency=N&limit=30` → `{"transactions": [...]}` newest-first.
+/// Lets the wallet render a durable transaction list sourced from the ledger (the in-memory UI list
+/// is gone on restart; this is the source of truth). `limit` defaults to 30 and is capped at 100.
+async fn transactions(
+    State(state): State<AppState>,
+    Path(hex_pk): Path<String>,
+    Query(qs): Query<TransactionsQuery>,
+) -> Response {
+    let bytes = match hex::decode(hex_pk.trim()) {
+        Ok(b) if b.len() == PUBKEY_LEN => b,
+        _ => return err(StatusCode::BAD_REQUEST, "pubkey must be 32 bytes hex"),
+    };
+    let mut pk = [0u8; PUBKEY_LEN];
+    pk.copy_from_slice(&bytes);
+    let currency = qs.currency.unwrap_or(DEMO_USD);
+    let limit = qs.limit.unwrap_or(30).min(100);
+    match state.ledger.transactions_of(pk, currency, limit).await {
+        Ok(rows) => (StatusCode::OK, Json(TransactionsBody { transactions: rows })).into_response(),
         Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
     }
 }
@@ -301,6 +326,14 @@ struct BalanceQuery {
     currency: Option<Currency>,
 }
 
+/// `?currency=N&limit=30` for `GET /api/v1/transactions/{hex}`. Absent currency → `DEMO_USD`;
+/// absent limit → 30 (capped at 100 server-side).
+#[derive(Deserialize)]
+struct TransactionsQuery {
+    currency: Option<Currency>,
+    limit: Option<u32>,
+}
+
 #[derive(Serialize)]
 struct PayOk {
     receipt: Receipt,
@@ -322,6 +355,13 @@ struct HealthBody {
 #[derive(Serialize)]
 struct BalanceBody {
     balance: u64,
+}
+
+/// `GET /api/v1/transactions/{hex}` response body. Direction (in/out) is derived client-side by
+/// comparing the queried account's pubkey to each row's `from` (hex).
+#[derive(Serialize)]
+struct TransactionsBody {
+    transactions: Vec<TxnRecord>,
 }
 
 fn err(status: StatusCode, msg: impl Into<String>) -> Response {

@@ -41,15 +41,6 @@ impl BalanceKey {
         b[PUBKEY_LEN..].copy_from_slice(&currency.to_le_bytes());
         BalanceKey(b)
     }
-
-    /// Split back into (pubkey, currency). The currency is read as a little-endian `u32`.
-    #[allow(dead_code)]
-    fn parts(&self) -> ([u8; PUBKEY_LEN], Currency) {
-        let mut pk = [0u8; PUBKEY_LEN];
-        pk.copy_from_slice(&self.0[..PUBKEY_LEN]);
-        let currency = u32::from_le_bytes(self.0[PUBKEY_LEN..].try_into().unwrap());
-        (pk, currency)
-    }
 }
 
 impl Storable for BalanceKey {
@@ -80,6 +71,86 @@ impl Storable for Nonce {
     const BOUND: Bound = Bound::Bounded { max_size: NONCE_LEN as u32, is_fixed_size: true };
 }
 
+/// Index key for a settled transaction: `pubkey(32) | currency_le(4) | seq_be(8)` = 44 bytes.
+/// pubkey-major ordering keeps every (account, currency) block contiguous; `seq` is big-endian so a
+/// forward range walks oldest→newest (and reversing yields newest-first). One record is inserted
+/// under `from` AND under `to`, so an account's full history is a single contiguous key range.
+const SEQ_LEN: usize = 8;
+const TXN_KEY_LEN: usize = PUBKEY_LEN + CURRENCY_LEN + SEQ_LEN;
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct AccountTxnKey([u8; TXN_KEY_LEN]);
+
+impl AccountTxnKey {
+    fn new(pubkey: [u8; PUBKEY_LEN], currency: Currency, seq: u64) -> Self {
+        let mut b = [0u8; TXN_KEY_LEN];
+        b[..PUBKEY_LEN].copy_from_slice(&pubkey);
+        b[PUBKEY_LEN..PUBKEY_LEN + CURRENCY_LEN].copy_from_slice(&currency.to_le_bytes());
+        b[PUBKEY_LEN + CURRENCY_LEN..].copy_from_slice(&seq.to_be_bytes());
+        AccountTxnKey(b)
+    }
+}
+
+impl Storable for AccountTxnKey {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        Cow::Borrowed(&self.0)
+    }
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        let mut a = [0u8; TXN_KEY_LEN];
+        a.copy_from_slice(&bytes);
+        AccountTxnKey(a)
+    }
+    const BOUND: Bound = Bound::Bounded { max_size: TXN_KEY_LEN as u32, is_fixed_size: true };
+}
+
+/// One settled payment, recorded under each side's pubkey. 100 bytes fixed. Mirrors the wire
+/// fields the payer already signed (no fee, no new surfaces — read-only-after-settle).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct TxnRecord {
+    from: [u8; PUBKEY_LEN],
+    to: [u8; PUBKEY_LEN],
+    amount: u64,
+    nonce: [u8; NONCE_LEN],
+    currency: Currency,
+    timestamp: u64, // unix seconds the ledger settled it (`ic time / 1e9`)
+}
+
+const TXN_RECORD_LEN: usize = PUBKEY_LEN + PUBKEY_LEN + 8 + NONCE_LEN + 4 + 8; // = 100
+
+impl Storable for TxnRecord {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        let mut b = [0u8; TXN_RECORD_LEN];
+        b[..PUBKEY_LEN].copy_from_slice(&self.from);
+        b[PUBKEY_LEN..2 * PUBKEY_LEN].copy_from_slice(&self.to);
+        b[2 * PUBKEY_LEN..2 * PUBKEY_LEN + 8].copy_from_slice(&self.amount.to_le_bytes());
+        b[2 * PUBKEY_LEN + 8..2 * PUBKEY_LEN + 8 + NONCE_LEN].copy_from_slice(&self.nonce);
+        b[2 * PUBKEY_LEN + 8 + NONCE_LEN..2 * PUBKEY_LEN + 8 + NONCE_LEN + 4]
+            .copy_from_slice(&self.currency.to_le_bytes());
+        b[2 * PUBKEY_LEN + 8 + NONCE_LEN + 4..].copy_from_slice(&self.timestamp.to_le_bytes());
+        Cow::Owned(b.to_vec())
+    }
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        assert_eq!(bytes.len(), TXN_RECORD_LEN, "TxnRecord fixed-size invariant");
+        let b = &bytes[..];
+        let mut from = [0u8; PUBKEY_LEN];
+        from.copy_from_slice(&b[..PUBKEY_LEN]);
+        let mut to = [0u8; PUBKEY_LEN];
+        to.copy_from_slice(&b[PUBKEY_LEN..2 * PUBKEY_LEN]);
+        let amount = u64::from_le_bytes(b[2 * PUBKEY_LEN..2 * PUBKEY_LEN + 8].try_into().unwrap());
+        let mut nonce = [0u8; NONCE_LEN];
+        nonce.copy_from_slice(&b[2 * PUBKEY_LEN + 8..2 * PUBKEY_LEN + 8 + NONCE_LEN]);
+        let currency = u32::from_le_bytes(
+            b[2 * PUBKEY_LEN + 8 + NONCE_LEN..2 * PUBKEY_LEN + 8 + NONCE_LEN + 4]
+                .try_into()
+                .unwrap(),
+        );
+        let timestamp = u64::from_le_bytes(b[2 * PUBKEY_LEN + 8 + NONCE_LEN + 4..].try_into().unwrap());
+        TxnRecord { from, to, amount, nonce, currency, timestamp }
+    }
+    const BOUND: Bound =
+        Bound::Bounded { max_size: TXN_RECORD_LEN as u32, is_fixed_size: true };
+}
+
 thread_local! {
     static MEMORY: RefCell<MemoryManager<DefaultMemoryImpl>> =
         RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
@@ -97,6 +168,18 @@ thread_local! {
     static CAP: RefCell<StableCell<u64, Memory>> = RefCell::new(
         StableCell::init(MEMORY.with(|m| m.borrow().get(MemoryId::new(2))), 0).expect("init cap cell"),
     );
+
+    /// Monotonic counter assigning each settled transaction a global sequence number. Drives the
+    /// ordering key in ACCOUNT_TXNS (big-endian → chronological → reversed range = newest-first).
+    static TXN_SEQ: RefCell<StableCell<u64, Memory>> = RefCell::new(
+        StableCell::init(MEMORY.with(|m| m.borrow().get(MemoryId::new(3))), 0).expect("init txn seq cell"),
+    );
+
+    /// (account pubkey, currency, seq) -> [`TxnRecord`]. Each settled payment is inserted twice
+    /// (once under `from`, once under `to`) so an account's full history is a single contiguous key
+    /// range. Stable-backed → survives upgrades.
+    static ACCOUNT_TXNS: RefCell<StableBTreeMap<AccountTxnKey, TxnRecord, Memory>> =
+        RefCell::new(StableBTreeMap::init(MEMORY.with(|m| m.borrow().get(MemoryId::new(4)))));
 }
 
 /// Init argument: two demo accounts (32-byte Ed25519 pubkeys as `blob`), their opening balances,
@@ -117,6 +200,18 @@ struct PayReceipt {
     amount: u64,
     nonce: Vec<u8>,
     new_from_balance: u64,
+}
+
+/// Candid-facing transaction view (byte fields decode as blobs → `Vec<u8>`). Direction (in/out) is
+/// derived client-side by comparing the queried account's pubkey to `from`.
+#[derive(CandidType, Deserialize, Clone, Debug)]
+struct TxnView {
+    from: Vec<u8>,
+    to: Vec<u8>,
+    amount: u64,
+    nonce: Vec<u8>,
+    currency: u32,
+    timestamp: u64,
 }
 
 fn to_pubkey(v: &[u8]) -> Result<[u8; PUBKEY_LEN], String> {
@@ -170,6 +265,29 @@ fn pay(signed: Vec<u8>) -> Result<PayReceipt, String> {
         s.borrow_mut().insert(nonce, ());
     });
 
+    // Record the settled payment for BOTH sides so either account's history is one contiguous key
+    // range. A single global sequence (big-endian in the key) gives chronological ordering; the
+    // query reverses to newest-first. This is read-only-after-settle — it records what already
+    // happened; it never moves funds or gates settlement.
+    let seq = TXN_SEQ.with(|c| {
+        let v = *c.borrow().get();
+        c.borrow_mut().set(v + 1).expect("advance txn seq");
+        v
+    });
+    let rec = TxnRecord {
+        from: sa.auth.from,
+        to: sa.auth.to,
+        amount: sa.auth.amount,
+        nonce: sa.auth.nonce,
+        currency: sa.auth.currency,
+        timestamp: now_secs,
+    };
+    ACCOUNT_TXNS.with(|m| {
+        let mut m = m.borrow_mut();
+        m.insert(AccountTxnKey::new(sa.auth.from, sa.auth.currency, seq), rec);
+        m.insert(AccountTxnKey::new(sa.auth.to, sa.auth.currency, seq), rec);
+    });
+
     Ok(PayReceipt {
         from: sa.auth.from.to_vec(),
         to: sa.auth.to.to_vec(),
@@ -185,6 +303,41 @@ fn balance_of(pubkey: Vec<u8>, currency: Currency) -> u64 {
         Ok(pk) => BALANCES.with(|b| b.borrow().get(&BalanceKey::new(pk, currency)).unwrap_or(0)),
         Err(_) => 0,
     }
+}
+
+/// `transactions_of : (blob, nat32, nat32) -> (vec record {...}) query`. Returns this account's
+/// settled transactions in `currency`, newest-first, up to `limit`. The (account, currency) block
+/// is one contiguous key range (seq 0..=MAX). `StableBTreeMap::range` returns an `Iter` that also
+/// implements `DoubleEndedIterator`, so `.rev()` walks the B-tree from the high (newest) end in
+/// O(limit) rather than materializing the whole account — important because the wallet polls this
+/// every 5s; a collect-all-then-reverse would be O(total) per query. Lets a wallet render a durable
+/// history sourced from the ledger (the in-memory UI list is gone on restart; this is the source of
+/// truth).
+#[query]
+fn transactions_of(pubkey: Vec<u8>, currency: Currency, limit: u32) -> Vec<TxnView> {
+    let pk = match to_pubkey(&pubkey) {
+        Ok(p) => p,
+        Err(_) => return Vec::new(),
+    };
+    let start = AccountTxnKey::new(pk, currency, 0u64);
+    let end = AccountTxnKey::new(pk, currency, u64::MAX);
+    // Collect inside the borrow scope — the iterator borrows the map. `.rev()` yields newest→oldest
+    // without materializing the range (DoubleEndedIterator walks the B-tree from the high end), so a
+    // 5s-polled wallet history stays O(limit), not O(total account size).
+    ACCOUNT_TXNS.with(|m| {
+        m.borrow().range(start..=end)
+            .rev() // forward range is oldest→newest; rev() yields newest→oldest in O(limit)
+            .take(limit.max(1) as usize) // defensive lower bound
+            .map(|(_, r)| TxnView {
+                from: r.from.to_vec(),
+                to: r.to.to_vec(),
+                amount: r.amount,
+                nonce: r.nonce.to_vec(),
+                currency: r.currency,
+                timestamp: r.timestamp,
+            })
+            .collect()
+    })
 }
 
 #[query]

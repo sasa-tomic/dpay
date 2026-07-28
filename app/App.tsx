@@ -57,6 +57,8 @@ type NfcPhaseName = 'listening' | 'linking' | 'exchanging' | 'awaitingApproval' 
 type Req = {toHex: string; amount: number; nonceHex: string; expiry: number; currency: number};
 type Identity = {secretHex: string; publicHex: string; username: string};
 type Txn = {nonce: string; amount: number; who: string; time: string; dir: 'out' | 'in'};
+// One row of the relay's GET /api/v1/transactions/{hex} response (from/to are lowercase hex).
+type TransactionsRow = {from: string; to: string; amount: number; nonce: string; currency: number; timestamp: number};
 type DpayCoreApi = {
   generateKeypair(): Promise<{secretHex: string; publicHex: string}>;
   signAuthorization(secretHex: string, toHex: string, amount: number, nonceHex: string, expiry: number, currency: number): Promise<string>;
@@ -87,7 +89,9 @@ const STORAGE_KEY = 'dpay.identity.v1';
 
 const usd = (c: number) => `$${Math.floor(c / 100)}.${String(c % 100).padStart(2, '0')}`;
 const short = (h: string) => `${h.slice(0, 8)}…`;
-const clock = () => { const d = new Date(); return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`; };
+// Format a unix-seconds timestamp as HH:MM (24h, local) — the durable history rows are sourced from
+// the ledger (which settle on `ic time / 1e9`).
+const fmtTime = (ts: number) => { const d = new Date(ts * 1000); return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`; };
 const nowSecs = () => Math.floor(Date.now() / 1000);
 function randNonceHex(): string {
   let s = '';
@@ -219,7 +223,40 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
     return () => { alive = false; clearInterval(id); };
   }, [relayUrl, identity.publicHex]);
 
-  const record = useCallback((t: Txn) => setHistory(h => (h.some(x => x.nonce === t.nonce) ? h : [t, ...h].slice(0, 10))), []);
+  // Durable transaction history sourced from the ledger (the canister records every settled payment;
+  // the relay surfaces it at GET /api/v1/transactions/{hex}). This replaces the ephemeral in-memory
+  // list that was empty on every restart. Each row's direction (in/out) is derived by comparing the
+  // queried account to `from`.
+  const refreshHistory = useCallback(async () => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 4000);
+    try {
+      const r = await fetch(`${base(relayUrl)}/api/v1/transactions/${identity.publicHex}?currency=0&limit=20`, {signal: ctrl.signal});
+      const j = await r.json().catch(() => ({} as any));
+      if (r.ok && Array.isArray(j.transactions)) {
+        const me = identity.publicHex.toLowerCase();
+        setHistory((j.transactions as TransactionsRow[]).map((rec): Txn => {
+          const dir: 'out' | 'in' = rec.from.toLowerCase() === me ? 'out' : 'in';
+          const who = dir === 'out' ? short(rec.to) : short(rec.from);
+          return {nonce: rec.nonce, amount: rec.amount, who, time: fmtTime(rec.timestamp), dir};
+        }));
+      }
+    } catch { /* offline: keep the existing list */ } finally { clearTimeout(t); }
+  }, [relayUrl, identity.publicHex]);
+
+  // Fetch on mount and re-poll while online (the balance poll runs every 2.5s; history every 5s is
+  // plenty for a list that only changes when a payment settles). Clears on unmount.
+  useEffect(() => {
+    let alive = true;
+    const wrapped = () => { if (alive) refreshHistory(); };
+    wrapped();
+    const id = setInterval(wrapped, 5000);
+    return () => { alive = false; clearInterval(id); };
+  }, [refreshHistory]);
+
+  // Children signal that a payment activity happened; the ledger-sourced `refreshHistory` is the SOLE
+  // writer to `history` (fetched eagerly here — no optimistic in-memory state). Stable across renders.
+  const onActivity = useCallback(() => { refreshHistory(); }, [refreshHistory]);
   const markOfflinePaid = useCallback((amount: number) => setOfflineSpent(s => s + amount), []);
   const shownBalance = balance == null ? null : online ? balance : Math.max(0, balance - offlineSpent);
 
@@ -284,8 +321,8 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
 
       <ScrollView contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
         {mode === 'pay'
-          ? <PayMode identity={identity} online={online} relayUrl={relayUrl} nfcReady={nfc === 'ready'} onSettled={record} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance} />
-          : <ReceiveMode identity={identity} relayUrl={relayUrl} nfcReady={nfc === 'ready'} onReceived={record} />}
+          ? <PayMode identity={identity} online={online} relayUrl={relayUrl} nfcReady={nfc === 'ready'} onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance} />
+          : <ReceiveMode identity={identity} relayUrl={relayUrl} nfcReady={nfc === 'ready'} onReceived={onActivity} />}
         {history.length > 0 ? (
           <View style={S.histCard}>
             <Text style={S.histTitle}>Recent</Text>
@@ -389,7 +426,7 @@ function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onOff
   relayUrl: string;
   requestHex?: string;
   reqInfo?: {amount: number; nonce: string; who: string};
-  onSettled?: (t: Txn) => void;
+  onSettled?: () => void;
   onOfflinePaid?: (amount: number) => void;
   onActive?: () => void; // fired the moment a real tap starts (so the parent can hide the QR/scanner)
   onClose: () => void;
@@ -436,10 +473,10 @@ function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onOff
     setPhase(p);
   }, [clearSettleTimer]);
 
-  const record = useCallback((amount: number, who: string, dir: 'out' | 'in', nonce: string) => {
+  const record = useCallback(() => {
     if (recordedRef.current || !onSettled) return;
     recordedRef.current = true;
-    onSettled({nonce, amount, who, time: clock(), dir});
+    onSettled();
   }, [onSettled]);
 
   // POST /pay once, bounded by a timeout. Returns the (ok,status) + parsed body, or a null result
@@ -500,10 +537,10 @@ function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onOff
       if (rec) { outcome = 'settled'; settledNonceHex = rec.nonce ?? nonceHex; }
     }
 
-    if (outcome === 'settled') {
-      if (reqInfo) record(reqInfo.amount, reqInfo.who, 'in', reqInfo.nonce);
-      finalize('success');
-    } else if (outcome === 'rejected') {
+      if (outcome === 'settled') {
+        record();
+        finalize('success');
+      } else if (outcome === 'rejected') {
       finalize('declined', rejectionMessage(typeof body?.error === 'string' ? body.error : null));
     } else {
       // Genuinely unknown even after reconciliation — truthful, never a fake success or failure.
@@ -547,8 +584,7 @@ function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onOff
         if (outcome === 'ignore') return; // a receipt for some other payment — keep waiting
         if (outcome === 'success') {
           // Balance was already deducted when the wire left the phone — just record the txn.
-          const s = sentRef.current;
-          if (s) { record(s.amount, s.who, 'out', s.nonce); }
+          record();
           finalize('success');
         } else if (outcome === 'declined') {
           // The ledger refused — undo the optimistic deduction so the local balance is whole again.
@@ -617,7 +653,7 @@ function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onOff
   );
 }
 
-function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOfflinePaid, shownBalance}: {identity: Identity; online: boolean; relayUrl: string; nfcReady: boolean; onSettled: (t: Txn) => void; onOfflinePaid: (amount: number) => void; shownBalance: number | null}) {
+function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOfflinePaid, shownBalance}: {identity: Identity; online: boolean; relayUrl: string; nfcReady: boolean; onSettled: () => void; onOfflinePaid: (amount: number) => void; shownBalance: number | null}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid'>('scan');
   const [req, setReq] = useState<(Req & {name: string}) | null>(null);
   const [qr, setQr] = useState<{code: string; amount: number; who: string; nonce: string} | null>(null);
@@ -646,7 +682,7 @@ function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOfflinePaid
       const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 4000);
       try {
         const r = await fetch(`${base(relayUrl)}/api/v1/receipt/${qr.nonce}`, {signal: ctrl.signal});
-        if (alive && r.ok) { onSettled({nonce: qr.nonce, amount: qr.amount, who: qr.who, time: clock(), dir: 'out'}); setPaid({amount: qr.amount, who: qr.who, already: false}); setPhase('paid'); }
+        if (alive && r.ok) { onSettled(); setPaid({amount: qr.amount, who: qr.who, already: false}); setPhase('paid'); }
       } catch {} finally { clearTimeout(t); }
     };
     check(); const id = setInterval(check, 2500);
@@ -673,7 +709,7 @@ function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOfflinePaid
         } catch { res = null; /* network/timeout → unknown, fall back to the QR hand-off below */ } finally { clearTimeout(timer); }
         const outcome = classifyPayHttp(res);
         if (outcome === 'settled') {
-          if (!j.replayed) onSettled({nonce, amount: req.amount, who, time: clock(), dir: 'out'});
+          if (!j.replayed) onSettled();
           setPaid({amount: req.amount, who, already: !!j.replayed}); setPhase('paid'); return;
         }
         if (outcome === 'rejected') {
@@ -775,7 +811,7 @@ function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOfflinePaid
   );
 }
 
-function ReceiveMode({identity, relayUrl, nfcReady, onReceived}: {identity: Identity; relayUrl: string; nfcReady: boolean; onReceived: (t: Txn) => void}) {
+function ReceiveMode({identity, relayUrl, nfcReady, onReceived}: {identity: Identity; relayUrl: string; nfcReady: boolean; onReceived: () => void}) {
   const [amount, setAmount] = useState('25.00');
   const [reqQr, setReqQr] = useState<{value: string; cents: number; nonce: string; nfcHex: string | null} | null>(null);
   const [result, setResult] = useState<{amount: number; from: string} | null>(null);
@@ -812,7 +848,7 @@ function ReceiveMode({identity, relayUrl, nfcReady, onReceived}: {identity: Iden
       const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 4000);
       try {
         const r = await fetch(`${base(relayUrl)}/api/v1/receipt/${reqQr.nonce}`, {signal: ctrl.signal});
-        if (alive && r.ok) { const j = await r.json(); const from = j.receipt?.from ? short(j.receipt.from) : 'payer'; setResult({amount: reqQr.cents, from}); onReceived({nonce: reqQr.nonce, amount: reqQr.cents, who: from, time: clock(), dir: 'in'}); }
+        if (alive && r.ok) { const j = await r.json(); const from = j.receipt?.from ? short(j.receipt.from) : 'payer'; setResult({amount: reqQr.cents, from}); onReceived(); }
       } catch {} finally { clearTimeout(t); }
     };
     check(); const id = setInterval(check, 1500);

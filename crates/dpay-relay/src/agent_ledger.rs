@@ -7,6 +7,7 @@
 //!   - `pay        : (blob) -> (variant { Ok : PayReceipt; Err : text })`  [update]
 //!   - `balance_of : (blob, nat32) -> (nat64) query`
 //!   - `mint       : (blob, nat32, nat64) -> (nat64)`  [update]
+//!   - `transactions_of : (blob, nat32, nat32) -> (vec record {...}) query`
 //!
 //! The 196-byte signed authorization is candid-encoded as a single `blob` argument — identical to
 //! what `dpay-canister-tests` does with `encode_one(&wire)`. `balance` and `mint` pass `currency`
@@ -20,7 +21,7 @@ use serde::Deserialize;
 
 use dpay_core::{Currency, PUBKEY_LEN};
 
-use crate::ledger::{Ledger, LedgerError, Receipt};
+use crate::ledger::{Ledger, LedgerError, Receipt, TxnRecord};
 
 /// Candid mirror of the canister's `PayReceipt` (byte fields decode as `blob`s → `Vec<u8>`).
 #[derive(CandidType, Deserialize, Debug)]
@@ -30,6 +31,17 @@ struct PayReceipt {
     amount: u64,
     nonce: Vec<u8>,
     new_from_balance: u64,
+}
+
+/// Candid mirror of the canister's `TxnView` (one settled transaction row in the history list).
+#[derive(CandidType, Deserialize, Debug)]
+struct TxnView {
+    from: Vec<u8>,
+    to: Vec<u8>,
+    amount: u64,
+    nonce: Vec<u8>,
+    currency: u32,
+    timestamp: u64,
 }
 
 /// A [`Ledger`] backed by a real IC replica. Owns an [`Agent`] pointed at the replica/gateway URL
@@ -163,6 +175,39 @@ impl Ledger for AgentLedger {
             .map_err(|e| LedgerError::Transient(format!("mint update: {e}")))?;
         decode_one::<u64>(&reply)
             .map_err(|e| LedgerError::Transient(format!("decode mint reply: {e}")))
+    }
+
+    async fn transactions_of(
+        &self,
+        pubkey: [u8; PUBKEY_LEN],
+        currency: Currency,
+        limit: u32,
+    ) -> Result<Vec<TxnRecord>, LedgerError> {
+        // canister `transactions_of(blob, nat32, nat32) -> (vec record {...}) query`. Reads back the
+        // per-(account,currency) history newest-first and maps the candid blob fields to hex strings
+        // (matching `Receipt`).
+        let arg = encode_args((pubkey.to_vec(), currency, limit))
+            .map_err(|e| LedgerError::Transient(format!("encode transactions_of arg: {e}")))?;
+        let reply = self
+            .agent
+            .query(&self.canister_id, "transactions_of")
+            .with_arg(arg)
+            .call()
+            .await
+            .map_err(|e| LedgerError::Transient(format!("transactions_of query: {e}")))?;
+        let views: Vec<TxnView> = decode_one(&reply)
+            .map_err(|e| LedgerError::Transient(format!("decode transactions_of: {e}")))?;
+        Ok(views
+            .into_iter()
+            .map(|v| TxnRecord {
+                from: hex::encode(v.from),
+                to: hex::encode(v.to),
+                amount: v.amount,
+                nonce: hex::encode(v.nonce),
+                currency: v.currency,
+                timestamp: v.timestamp,
+            })
+            .collect())
     }
 
     async fn healthy(&self) -> bool {

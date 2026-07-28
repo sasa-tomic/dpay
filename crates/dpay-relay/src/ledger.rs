@@ -33,6 +33,19 @@ pub struct Receipt {
     pub new_from_balance: u64,
 }
 
+/// One settled transaction, as the wallet's history list shows it. Byte fields are hex (matches
+/// [`Receipt`]). `timestamp` is unix seconds. Direction (in/out) is derived by the caller comparing
+/// the queried account's pubkey to `from`. Mirrors the canister's `TxnView`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct TxnRecord {
+    pub from: String,
+    pub to: String,
+    pub amount: u64,
+    pub nonce: String,
+    pub currency: Currency,
+    pub timestamp: u64,
+}
+
 /// Settlement outcome. `Rejected` is a permanent policy failure (bad sig, expired, over cap,
 /// insufficient funds, reused nonce, malformed wire) — the relay must NOT retry it and surfaces
 /// it as `422`. `Transient` is an infrastructure hiccup (e.g. the agent/canister was briefly
@@ -93,6 +106,16 @@ pub trait Ledger: Send + Sync {
         amount: u64,
     ) -> Result<u64, LedgerError>;
 
+    /// List this account's settled transactions in `currency`, newest-first, up to `limit`. Lets a
+    /// wallet render a durable history sourced from the ledger (the in-memory UI list is gone on
+    /// restart; this is the source of truth).
+    async fn transactions_of(
+        &self,
+        pubkey: [u8; PUBKEY_LEN],
+        currency: Currency,
+        limit: u32,
+    ) -> Result<Vec<TxnRecord>, LedgerError>;
+
     /// Liveness for the merchant's pre-flight green dot.
     async fn healthy(&self) -> bool;
 }
@@ -106,6 +129,10 @@ struct FakeState {
     /// multiple currencies independently — they're different assets, not one pool.
     balances: HashMap<([u8; PUBKEY_LEN], Currency), u64>,
     spent: HashSet<[u8; NONCE_LEN]>,
+    /// Settled transactions, oldest-first (the order they were pushed). `transactions_of` reverses
+    /// to newest-first and filters by (currency, account). Mirrors the canister's ACCOUNT_TXNS so
+    /// the relay's inner loop is canister-faithful on history too.
+    txns: Vec<TxnRecord>,
 }
 
 /// In-memory ledger. Balances + spent-nonces behind one `Mutex` so the read-check-write is
@@ -158,6 +185,7 @@ impl FakeLedger {
             state: Mutex::new(FakeState {
                 balances,
                 spent: HashSet::new(),
+                txns: Vec::new(),
             }),
             per_tx_cap,
             clock,
@@ -201,6 +229,17 @@ impl Ledger for FakeLedger {
         s.balances.insert((from, currency), new_from);
         *s.balances.entry((sa.auth.to, currency)).or_insert(0) += sa.auth.amount;
         s.spent.insert(sa.auth.nonce);
+        // Record the settled payment so the wallet's history list is sourced from the ledger (not an
+        // ephemeral UI state). Matches the canister's per-(account,currency) index; FakeLedger keeps
+        // one flat list and filters on read.
+        s.txns.push(TxnRecord {
+            from: hex::encode(from),
+            to: hex::encode(sa.auth.to),
+            amount: sa.auth.amount,
+            nonce: hex::encode(sa.auth.nonce),
+            currency,
+            timestamp: now,
+        });
 
         Ok(Receipt {
             from: hex::encode(from),
@@ -225,6 +264,25 @@ impl Ledger for FakeLedger {
         let bal = s.balances.entry((to, currency)).or_insert(0);
         *bal = bal.saturating_add(amount);
         Ok(*bal)
+    }
+
+    async fn transactions_of(
+        &self,
+        pubkey: [u8; PUBKEY_LEN],
+        currency: Currency,
+        limit: u32,
+    ) -> Result<Vec<TxnRecord>, LedgerError> {
+        let s = self.state.lock().unwrap();
+        let pk_hex = hex::encode(pubkey);
+        // FakeState pushes oldest-first; filter to this (currency, account) and reverse to newest.
+        let mut rows: Vec<TxnRecord> = s
+            .txns
+            .iter()
+            .filter(|t| t.currency == currency && (t.from == pk_hex || t.to == pk_hex))
+            .cloned()
+            .collect();
+        rows.reverse();
+        Ok(rows.into_iter().take(limit.max(1) as usize).collect())
     }
 
     async fn healthy(&self) -> bool {
@@ -284,6 +342,15 @@ impl<L: Ledger> Ledger for FlakyLedger<L> {
         amount: u64,
     ) -> Result<u64, LedgerError> {
         self.inner.mint(to, currency, amount).await
+    }
+
+    async fn transactions_of(
+        &self,
+        pubkey: [u8; PUBKEY_LEN],
+        currency: Currency,
+        limit: u32,
+    ) -> Result<Vec<TxnRecord>, LedgerError> {
+        self.inner.transactions_of(pubkey, currency, limit).await
     }
 
     async fn healthy(&self) -> bool {

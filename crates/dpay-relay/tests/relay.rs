@@ -533,3 +533,58 @@ async fn apk_download_serves_configured_bytes() {
     );
     assert_eq!(bytes, apk, "served bytes must match the configured build verbatim");
 }
+
+// --- transaction history ---------------------------------------------------
+
+/// `GET /api/v1/transactions/{hex}` returns the wallet's durable transaction list, sourced from the
+/// ledger (not an ephemeral UI state). Settled payments appear newest-first with enough fields to
+/// derive direction (compare the queried account to `from`). Rejected payments don't appear.
+#[tokio::test]
+async fn transactions_endpoint_returns_history_newest_first() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+
+    // Two payer -> merchant payments, in sequence.
+    let sa1 = signed(&payer, pubkey(&merchant), 250, [1u8; 16], FUTURE);
+    let (s1, _b1) = call(&state, pay_json(&sa1.encode())).await;
+    assert_eq!(s1, StatusCode::OK);
+    let sa2 = signed(&payer, pubkey(&merchant), 100, [2u8; 16], FUTURE);
+    let (s2, _b2) = call(&state, pay_json(&sa2.encode())).await;
+    assert_eq!(s2, StatusCode::OK);
+
+    let payer_hex = hex::encode(pubkey(&payer));
+    let merch_hex = hex::encode(pubkey(&merchant));
+
+    // Payer's history: newest-first => the $1.00 outgoing, then the $2.50 outgoing. `from == payer`
+    // for both (outgoing); direction is derivable from the from/to fields.
+    let (status, body) = call(&state, get_req(&format!("/api/v1/transactions/{payer_hex}"))).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let rows = body["transactions"].as_array().unwrap();
+    assert_eq!(rows.len(), 2, "both payments recorded: {body}");
+    assert_eq!(rows[0]["amount"], 100, "newest first: {body}");
+    assert_eq!(rows[0]["from"], payer_hex);
+    assert_eq!(rows[0]["to"], merch_hex);
+    assert_eq!(rows[0]["nonce"], hex::encode([2u8; 16]));
+    assert_eq!(rows[0]["currency"], 0); // DEMO_USD
+    assert_eq!(rows[1]["amount"], 250);
+    assert_eq!(rows[1]["nonce"], hex::encode([1u8; 16]));
+
+    // Merchant sees the same two as incoming (from == payer).
+    let (m_status, m_body) = call(&state, get_req(&format!("/api/v1/transactions/{merch_hex}"))).await;
+    assert_eq!(m_status, StatusCode::OK, "{m_body}");
+    let m_rows = m_body["transactions"].as_array().unwrap();
+    assert_eq!(m_rows.len(), 2);
+    assert_eq!(m_rows[0]["from"], payer_hex, "incoming: from == payer");
+    assert_eq!(m_rows[0]["to"], merch_hex);
+
+    // limit is honored.
+    let (l_status, l_body) =
+        call(&state, get_req(&format!("/api/v1/transactions/{payer_hex}?limit=1"))).await;
+    assert_eq!(l_status, StatusCode::OK, "{l_body}");
+    assert_eq!(l_body["transactions"].as_array().unwrap().len(), 1);
+
+    // A bad pubkey (not 32 bytes hex) is a clean 400, not a 500.
+    let (bad_status, _bad_body) = call(&state, get_req("/api/v1/transactions/deadbeef")).await;
+    assert_eq!(bad_status, StatusCode::BAD_REQUEST);
+}

@@ -296,3 +296,78 @@ fn mint_open_to_anyone() {
     );
     assert_eq!(balance(&pic, can, acct), 6_000);
 }
+
+// --- transaction history ----------------------------------------------------
+
+#[derive(CandidType, Deserialize, Debug)]
+struct TxnView {
+    from: Vec<u8>,
+    to: Vec<u8>,
+    amount: u64,
+    nonce: Vec<u8>,
+    currency: u32,
+    timestamp: u64,
+}
+
+/// `transactions_of(blob, nat32, nat32)` query — the canister's per-(account,currency) history,
+/// newest-first. Returns the decoded view rows.
+fn txns_of(pic: &PocketIc, can: Principal, pk: [u8; 32], limit: u32) -> Vec<TxnView> {
+    let reply = pic
+        .query_call(
+            can,
+            Principal::anonymous(),
+            "transactions_of",
+            encode_args((pk.to_vec(), DEMO_USD, limit)).unwrap(),
+        )
+        .expect("transactions_of query rejected");
+    decode_one::<Vec<TxnView>>(&reply).unwrap()
+}
+
+/// Each settled payment is recorded in stable memory for BOTH sides (so either account's history is
+/// one contiguous key range), newest-first, and survives upgrades. A rejected payment is NOT
+/// recorded. This is the durable transaction list the wallet renders (the ephemeral in-memory list
+/// is gone on restart; the canister is the source of truth).
+#[test]
+fn transactions_are_recorded_and_queryable_newest_first() {
+    let (pic, can, sk, payer, merch) = setup();
+    let expiry = T0_SECS + 120;
+    // Two payer -> merchant payments in sequence. Using only the payer's key avoids the harness's
+    // merchant-has-no-secret problem while still proving both the `from` and `to` sides are indexed.
+    assert!(pay(&pic, can, signed(&sk, payer, merch, 2_500, [1u8; 16], expiry)).is_ok());
+    assert!(pay(&pic, can, signed(&sk, payer, merch, 1_000, [2u8; 16], expiry)).is_ok());
+
+    // Payer's history: newest-first => the $10.00 outgoing, then the $25.00 outgoing.
+    let payer_txns = txns_of(&pic, can, payer, 10);
+    assert_eq!(payer_txns.len(), 2);
+    assert_eq!(payer_txns[0].amount, 1_000); // newest
+    assert_eq!(payer_txns[0].from, payer.to_vec()); // outgoing: from == payer
+    assert_eq!(payer_txns[0].to, merch.to_vec());
+    assert_eq!(payer_txns[1].amount, 2_500); // older
+    assert_eq!(payer_txns[1].from, payer.to_vec());
+    assert_eq!(payer_txns[1].to, merch.to_vec());
+    // Timestamps are present (the T0 second, since pay uses ic time / 1e9).
+    assert!(payer_txns[0].timestamp >= T0_SECS);
+
+    // Merchant sees the same two payments as incoming (from == payer, to == merch), newest-first.
+    let merch_txns = txns_of(&pic, can, merch, 10);
+    assert_eq!(merch_txns.len(), 2);
+    assert_eq!(merch_txns[0].amount, 1_000);
+    assert_eq!(merch_txns[0].from, payer.to_vec()); // incoming: from == payer
+    assert_eq!(merch_txns[0].to, merch.to_vec());
+
+    // limit is honored: limit=1 returns only the newest.
+    assert_eq!(txns_of(&pic, can, payer, 1).len(), 1);
+
+    // A payment that is REJECTED (e.g. over cap) is NOT recorded.
+    let before = txns_of(&pic, can, payer, 10).len();
+    assert!(pay(&pic, can, signed(&sk, payer, merch, CAP + 1, [9u8; 16], expiry)).is_err());
+    assert_eq!(txns_of(&pic, can, payer, 10).len(), before);
+
+    // An unknown pubkey returns an empty list (no panic).
+    assert!(txns_of(&pic, can, [0u8; 32], 10).is_empty());
+
+    // Upgrade preserves history (stable memory) — the whole point of durable-on-restart.
+    pic.upgrade_canister(can, wasm_bytes(), encode_one(&()).unwrap(), None).unwrap();
+    assert_eq!(txns_of(&pic, can, payer, 10).len(), 2);
+    assert_eq!(txns_of(&pic, can, merch, 10).len(), 2);
+}
