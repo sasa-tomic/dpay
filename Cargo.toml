@@ -8,6 +8,12 @@ members = [
     "crates/dpay-sim",
     "crates/dpay-ffi",
     "crates/dpay-fixture",
+    # ICRC-ledger integration demo (see ICRC3_INTEGRATION.md). Isolated from the shipping canister
+    # so it never disturbs the inner loop or the mainnet build. The ledger itself is the REAL DFINITY
+    # `ic-icrc1-ledger`, built from source and cached in third_party/ic-icrc1-ledger/ (not a workspace
+    # crate); dpay-canister-icrc is the dpay variant that settles on it.
+    "crates/dpay-canister-icrc",
+    "crates/dpay-icrc-tests",
 ]
 # Canister (cdylib) only builds for wasm; keep it out of the default native build/test set.
 default-members = [
@@ -31,6 +37,10 @@ ic-cdk = "=0.19.0"
 ic-stable-structures = "=0.6.9"
 candid = "=0.10.22"
 pocket-ic = "=14.0.0"
+# Canonical ICRC-1/2/3 type definitions published by DFINITY. 0.1.12 is the newest version in the
+# offline crate cache (third_party/); the 0.2.x line would need network. Same types the real
+# ic-icrc-ledger uses, so callers are wire-compatible with the production ledger.
+icrc-ledger-types = "=0.1.12"
 
 # Small, fast debug builds keep the inner loop quick; canister ships via --release separately.
 [profile.dev]

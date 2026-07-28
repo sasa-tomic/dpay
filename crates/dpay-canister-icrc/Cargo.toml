@@ -1,0 +1,18 @@
+[package]
+name = "dpay-canister-icrc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "dpay ledger variant that holds NO balances: verifies the offline-signed auth, then settles on a separate ICRC ledger via cross-canister icrc1_transfer."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ic-cdk = { workspace = true }
+ic-stable-structures = { workspace = true }
+candid = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+dpay-core = { path = "../dpay-core" }
+icrc-ledger-types = { workspace = true }
+num-traits = "0.2"

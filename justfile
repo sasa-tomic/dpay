@@ -26,6 +26,16 @@ build-canister:
 test-canister: build-canister
     cargo nextest run -p dpay-canister-tests
 
+# --- ICRC-ledger integration demo (see ICRC3_INTEGRATION.md) -----------------
+# dpay-canister-icrc settles on the REAL DFINITY ic-icrc1-ledger (pre-built from dfinity/ic source,
+# cached in third_party/ic-icrc1-ledger/). This recipe builds the dpay variant and runs the PocketIC
+# proof that an offline-signed auth moves funds on the real ledger. Fully offline.
+build-canister-icrc:
+    cargo build -p dpay-canister-icrc --target wasm32-unknown-unknown --release
+
+icrc-demo: build-canister-icrc
+    cargo nextest run -p dpay-icrc-tests
+
 # relay tests (native, in-memory FakeLedger — no network)
 test-relay:
     cargo nextest run -p dpay-relay
