@@ -262,11 +262,11 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
         <View style={S.balBox}>
           <View style={S.balLabelRow}>
             <View style={[S.dot, {backgroundColor: online ? C.ok : '#9ca3af'}]} />
-            <Text style={S.balLabel}>{online ? 'balance' : 'offline'}</Text>
+            <Text style={S.balLabel}>{online ? 'balance' : '~ approx.'}</Text>
             <View style={S.demoPill}><Text style={S.demoPillText}>DEMO</Text></View>
           </View>
           <View style={S.balAmtRow}>
-            <Text testID="balance" style={S.balAmt}>{shownBalance == null ? '—' : usd(shownBalance)}</Text>
+            <Text testID="balance" style={S.balAmt}>{shownBalance == null ? '—' : `${online ? '' : '~'}${usd(shownBalance)}`}</Text>
             <Pressable testID="btn-topup" style={[S.topUpBtn, topUpBusy && S.dim]} disabled={topUpBusy} onPress={topUp}>
               {topUpBusy
                 ? <ActivityIndicator size="small" color={C.brand} />
@@ -284,7 +284,7 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
 
       <ScrollView contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
         {mode === 'pay'
-          ? <PayMode identity={identity} online={online} relayUrl={relayUrl} nfcReady={nfc === 'ready'} onSettled={record} onOfflinePaid={markOfflinePaid} />
+          ? <PayMode identity={identity} online={online} relayUrl={relayUrl} nfcReady={nfc === 'ready'} onSettled={record} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance} />
           : <ReceiveMode identity={identity} relayUrl={relayUrl} nfcReady={nfc === 'ready'} onReceived={record} />}
         {history.length > 0 ? (
           <View style={S.histCard}>
@@ -407,6 +407,10 @@ function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onOff
   // during the receipt hand-back — must NOT be shown as a payment failure. This is the guard that
   // stops a settled payment from being reported as "Tap failed".
   const committed = useRef(false);
+  // True once we've optimistically deducted the payment from the local balance (when the wire
+  // leaves the phone). Prevents double-deduction if the receipt later arrives with success, and
+  // enables undo if the receipt says declined.
+  const deductedRef = useRef(false);
   const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // False once the tap view is torn down (user hit Cancel/Done). An in-flight submit/sign promise
   // that resolves after that must not touch state — it would warn and, worse, could flip a screen
@@ -542,10 +546,13 @@ function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onOff
         const outcome = decidePayerReceipt({status: e.status, nonceHex: e.nonceHex}, sentRef.current?.nonce ?? '');
         if (outcome === 'ignore') return; // a receipt for some other payment — keep waiting
         if (outcome === 'success') {
+          // Balance was already deducted when the wire left the phone — just record the txn.
           const s = sentRef.current;
-          if (s) { record(s.amount, s.who, 'out', s.nonce); onOfflinePaid?.(s.amount); }
+          if (s) { record(s.amount, s.who, 'out', s.nonce); }
           finalize('success');
         } else if (outcome === 'declined') {
+          // The ledger refused — undo the optimistic deduction so the local balance is whole again.
+          if (deductedRef.current && sentRef.current) { onOfflinePaid?.(-sentRef.current.amount); }
           finalize('declined', 'The ledger declined the payment');
         } else {
           finalize('pending', 'Couldn’t confirm — check your balance when back online');
@@ -556,6 +563,12 @@ function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onOff
         // timeout so we never spin on "Confirming…" forever if the receipt never arrives.
         if (role === 'card' && e.phase === 'settling') {
           committed.current = true;
+          // The wire has left the phone — optimistically deduct from the local balance. The real
+          // balance reconciles on the next online poll; if the receipt says declined we undo below.
+          if (!deductedRef.current && sentRef.current) {
+            deductedRef.current = true;
+            onOfflinePaid?.(sentRef.current.amount);
+          }
           if (!settleTimer.current) {
             settleTimer.current = setTimeout(() => {
               finalize('pending', 'Couldn’t confirm — check your balance when back online');
@@ -604,7 +617,7 @@ function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onOff
   );
 }
 
-function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOfflinePaid}: {identity: Identity; online: boolean; relayUrl: string; nfcReady: boolean; onSettled: (t: Txn) => void; onOfflinePaid: (amount: number) => void}) {
+function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOfflinePaid, shownBalance}: {identity: Identity; online: boolean; relayUrl: string; nfcReady: boolean; onSettled: (t: Txn) => void; onOfflinePaid: (amount: number) => void; shownBalance: number | null}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid'>('scan');
   const [req, setReq] = useState<(Req & {name: string}) | null>(null);
   const [qr, setQr] = useState<{code: string; amount: number; who: string; nonce: string} | null>(null);
@@ -728,6 +741,9 @@ function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOfflinePaid
         <Text testID="pay-amount" style={S.reviewAmount}>{`Pay ${usd(req.amount)}`}</Text>
         <Text style={S.reviewTo}>{`to ${req.name || short(req.toHex)}`}</Text>
         <Text style={S.reviewReq}>{`request ${req.nonceHex.slice(0, 12)}…`}</Text>
+        {!online && shownBalance != null && req.amount > shownBalance ? (
+          <Text testID="review-lowbal" style={S.warnNote}>Your local balance may not cover this — the merchant will verify.</Text>
+        ) : null}
         <Pressable testID="btn-approve" style={[S.primary, busy && S.dim]} disabled={busy} onPress={approve}><Text style={S.primaryText}>{busy ? 'Signing…' : 'Approve'}</Text></Pressable>
         {err ? <Text testID="review-err" style={S.err}>{err}</Text> : null}
         <Pressable style={S.linkBtn} onPress={reset}><Text style={S.linkTextMuted}>Cancel</Text></Pressable>
@@ -917,6 +933,7 @@ const S = StyleSheet.create({
   reviewAmount: {fontSize: 30, fontWeight: '800', color: C.ink, textAlign: 'center'},
   reviewTo: {fontSize: 17, color: C.ink, marginTop: 6, textAlign: 'center'},
   reviewReq: {fontSize: 12, color: C.sub, fontFamily: 'monospace', marginTop: 6, marginBottom: 24},
+  warnNote: {fontSize: 13, color: C.warn, textAlign: 'center', marginTop: -10, marginBottom: 18, paddingHorizontal: 8, lineHeight: 18},
   primary: {backgroundColor: C.brand, borderRadius: 14, height: 56, minWidth: 240, paddingHorizontal: 24, alignItems: 'center', justifyContent: 'center', marginTop: 12},
   primaryWide: {backgroundColor: C.brand, borderRadius: 14, height: 56, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center', marginTop: 20},
   primaryText: {color: C.brandInk, fontSize: 18, fontWeight: '600'},
