@@ -16,10 +16,10 @@ type Result = variant { Ok : PayReceipt; Err : text };
 type TxnView = record {
   to : blob;
   from : blob;
-  nonce : blob;
-  amount : nat64;
   currency : nat32;
+  nonce : blob;
   timestamp : nat64;
+  amount : nat64;
 };
 service : (InitArg) -> {
   balance_of : (blob, nat32) -> (nat64) query;
@@ -34,9 +34,13 @@ service : (InitArg) -> {
   // (non-awaiting) message → atomic on the single-threaded canister.
   pay : (blob) -> (Result);
   per_tx_cap : () -> (nat64) query;
-  // List this account's settled transactions in `currency`, newest-first, up to `limit`. The
-  // (account, currency) block is one contiguous key range in stable memory; this is the durable
-  // history the wallet renders (the in-memory UI list is gone on restart; this is the source of
-  // truth). Survives upgrades. Read-only — records what already settled.
+  // `transactions_of : (blob, nat32, nat32) -> (vec record {...}) query`. Returns this account's
+  // settled transactions in `currency`, newest-first, up to `limit`. The (account, currency) block
+  // is one contiguous key range (seq 0..=MAX). `StableBTreeMap::range` returns an `Iter` that also
+  // implements `DoubleEndedIterator`, so `.rev()` walks the B-tree from the high (newest) end in
+  // O(limit) rather than materializing the whole account — important because the wallet polls this
+  // every 5s; a collect-all-then-reverse would be O(total) per query. Lets a wallet render a durable
+  // history sourced from the ledger (the in-memory UI list is gone on restart; this is the source of
+  // truth).
   transactions_of : (blob, nat32, nat32) -> (vec TxnView) query;
 }
