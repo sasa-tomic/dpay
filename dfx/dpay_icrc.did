@@ -1,0 +1,51 @@
+// dpay-canister-icrc candid interface — settles on external ICRC ledgers, holds no balances.
+// Mirror of crates/dpay-canister-icrc/src/lib.rs public surface (maintained like dpay_canister.did).
+type Currency = nat32;
+
+type PayReceipt = record {
+  from : blob;
+  to : blob;
+  amount : nat64;
+  nonce : blob;
+  new_from_balance : nat64;
+};
+
+type TxnView = record {
+  from : blob;
+  to : blob;
+  amount : nat64;
+  nonce : blob;
+  currency : Currency;
+  timestamp : nat64;
+};
+
+type LedgerConfig = record {
+  currency : Currency;
+  "principal" : principal;
+  mintable : bool;
+};
+
+type InitArg = record {
+  ledgers : vec LedgerConfig;
+  per_tx_cap : nat64;
+  controller : opt principal;
+};
+
+service : (InitArg) -> {
+  // Settle an offline-signed payment on the ledger named by the wire's currency.
+  pay : (signed : blob) -> (variant { Ok : PayReceipt; Err : text });
+  // Ledger balance for a pubkey (update: ICRC queries can't be issued from a canister query).
+  balance_of : (pubkey : blob, currency : Currency) -> (nat64);
+  // Mint demo currency (transfer from the ledger minting account). Admin-gated.
+  mint : (to : blob, currency : Currency, amount : nat64) -> (variant { Ok : nat64; Err : text });
+  // Burn demo currency (transfer to the ledger minting account). Admin-gated.
+  burn : (from : blob, currency : Currency, amount : nat64) -> (variant { Ok : nat64; Err : text });
+  // Register/repoint a currency at a ledger. Admin-gated.
+  register_ledger : (currency : Currency, "principal" : principal, mintable : bool) -> (variant { Ok : null; Err : text });
+  // Rotate the governance principal for admin ops. Governed by the current controller.
+  set_controller : (new : opt principal) -> (variant { Ok : null; Err : text });
+  // Per-transaction cap (read at init).
+  per_tx_cap : () -> (nat64) query;
+  // Newest-first history for a (pubkey, currency) pair; O(limit).
+  transactions_of : (pubkey : blob, currency : Currency, limit : nat32) -> (vec TxnView) query;
+}

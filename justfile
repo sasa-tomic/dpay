@@ -36,6 +36,12 @@ build-canister-icrc:
 icrc-demo: build-canister-icrc
     cargo nextest run -p dpay-icrc-tests
 
+# real local dfx replica deploy of the ICRC integration (ledger + dpay variant), end-to-end with
+# the actual offline-signed wire. Needs the one-time-built ledger wasm in third_party/ (online
+# prereq; see ICRC3_INTEGRATION.md). Outer-loop gate — not part of the seconds inner loop.
+icrc-deploy:
+    bash scripts/dfx-deploy-icrc.sh
+
 # relay tests (native, in-memory FakeLedger — no network)
 test-relay:
     cargo nextest run -p dpay-relay

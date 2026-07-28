@@ -175,9 +175,14 @@ fn install_ledger(
         initial_balances,
         feature_flags: Some(FeatureFlags { icrc2: true, icrc152: false }),
         archive_options: ArchiveOptions {
+            // Cost-minimizing for a demo/pilot: a high trigger_threshold means the ledger only spawns
+            // an archive canister (which costs cycles to create + run) after 10M settled blocks — i.e.
+            // effectively never for any demo. Without archives the ledger's stable memory grows with
+            // every block, but at demo volumes that never matters. Production near real ledger-memory
+            // limits would lower this. See ICRC3_INTEGRATION.md "Run it / archive control".
             num_blocks_to_archive: 10_000,
             max_transactions_per_response: None,
-            trigger_threshold: 20_000,
+            trigger_threshold: 10_000_000,
             max_message_size_bytes: None,
             cycles_for_archive_creation: None,
             node_max_memory_size_bytes: None,

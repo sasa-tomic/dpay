@@ -58,11 +58,18 @@ The ledger is the same `ic-icrc1-ledger` that backs ckBTC and SNS tokens on main
 ## Run it
 
 ```sh
-just icrc-demo          # offline: builds the dpay canister + runs 8 PocketIC tests against two real ledgers
+just icrc-demo          # offline: builds the dpay canister + runs 14 PocketIC tests against two real ledgers
+just icrc-deploy        # spins up a real dfx replica: installs both canisters + proves mint/pay/replay end-to-end
 just build-canister-icrc   # build only the dpay variant wasm
 ```
 
+`icrc-demo` is the fast, deterministic test gate (PocketIC). `icrc-deploy` (`scripts/dfx-deploy-icrc.sh`) is the real-world deploy proof: it `dfx start`s a local replica, builds and installs both canisters, funds the payer via `mint`, reads the balance **directly off the ledger** (`icrc1_balance_of`), submits an offline-signed `pay`, asserts the replay is refused, and asserts the ledger-side balances moved (`payer = INIT_A − amount`, `merchant = amount`). Fully automated; `trap` tears the replica down on exit.
+
 The real ledger wasm is pre-built and cached at `third_party/ic-icrc1-ledger/ic-icrc1-ledger.wasm` (gitignored). The two dpay crates are workspace members but are **not** in `default-members`, so the shipping inner loop (`just verify`, `just test-canister`, etc.) is unaffected.
+
+### Controlling archive-canister spend (cost tuning)
+
+The ledger spawns **archive canisters** only once its local block log exceeds `archive_options.trigger_threshold`. The demo sets this to **10,000,000** blocks (in both the PocketIC tests and the dfx deploy) — so archives effectively never spawn during any demo or pilot (you'd need 10M settled transactions first). The optional **index canister is omitted** (`index_principal = null`): ICRC-3 (`icrc3_get_blocks`, served by the ledger itself) plus dpay's own local history make it unnecessary, and it would burn cycles. `cycles_for_archive_creation` is left null. The tradeoff: without archives the ledger's stable memory grows by one record per block, but at demo volumes that never matters; a production deployment approaching ledger-memory limits would lower the threshold.
 
 ## The ledger wasm: build-from-source (one-time, online)
 
