@@ -2,10 +2,10 @@
 //!
 //! This never reimplements money logic: it builds a real [`SignedAuthorization`] with the shared
 //! `dpay-core` and serialises it as candid text, so `dfx canister call pay` submits the *exact*
-//! 192-byte wire the phone would sign. Deterministic seeds make the deploy reproducible run-to-run,
+//! 196-byte wire the phone would sign. Deterministic seeds make the deploy reproducible run-to-run,
 //! and a far-future `expiry` keeps the fixture valid regardless of the replica's wall clock.
 
-use dpay_core::{Authorization, SignedAuthorization, PUBKEY_LEN};
+use dpay_core::{Authorization, DEMO_USD, SignedAuthorization, PUBKEY_LEN};
 use ed25519_dalek::SigningKey;
 use std::fs;
 use std::path::Path;
@@ -46,7 +46,7 @@ fn main() {
     let nonce = [42u8; 16];
     const EXPIRY: u64 = 4_102_444_800; // 2100-01-01Z — far future so a wall-clock deploy never expires it
 
-    let auth = Authorization { from: payer_pk, to: merchant_pk, amount: AMOUNT, nonce, expiry: EXPIRY };
+    let auth = Authorization { from: payer_pk, to: merchant_pk, amount: AMOUNT, nonce, expiry: EXPIRY, currency: DEMO_USD };
     let wire = SignedAuthorization::new(&payer, auth).to_wire();
 
     let out = Path::new("dfx/args");
@@ -60,8 +60,9 @@ fn main() {
     );
     fs::write(out.join("init.arg"), init).unwrap();
     fs::write(out.join("pay.arg"), format!("({})\n", blob(&wire))).unwrap();
-    fs::write(out.join("payer.arg"), format!("({})\n", blob(&payer_pk))).unwrap();
-    fs::write(out.join("merchant.arg"), format!("({})\n", blob(&merchant_pk))).unwrap();
+    // `balance_of : (blob, nat32) -> (nat64) query` — the second arg is the currency (DEMO_USD = 0).
+    fs::write(out.join("payer.arg"), format!("({}, {DEMO_USD} : nat32)\n", blob(&payer_pk))).unwrap();
+    fs::write(out.join("merchant.arg"), format!("({}, {DEMO_USD} : nat32)\n", blob(&merchant_pk))).unwrap();
 
     // Post-conditions the deploy script asserts against (avoids recomputing money in bash).
     let expect = format!(

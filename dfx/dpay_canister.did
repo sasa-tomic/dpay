@@ -14,15 +14,16 @@ type PayReceipt = record {
 };
 type Result = variant { Ok : PayReceipt; Err : text };
 service : (InitArg) -> {
-  balance_of : (blob) -> (nat64) query;
-  // Credit `to` with `amount` (minor units) and return the new balance — the demo's stand-in for a
-  // real fiat/ckUSDC on-ramp. **Controller-only**: any non-controller caller (including the anonymous
-  // principal the relay uses) is rejected. Gating on `is_controller` grants no new power — a
-  // controller can already upgrade the canister to do anything — while closing the "anyone can mint"
-  // hole. When funding moves to on-chain top-ups, this becomes issuer-gated (see FUNDING.md).
-  mint : (blob, nat64) -> (nat64);
-  // Settle an offline-signed authorization. `signed` is the 192-byte wire form. Reads, validates, and
-  // commits within one (non-awaiting) message → atomic on the single-threaded canister.
+  balance_of : (blob, nat32) -> (nat64) query;
+  // Credit `to` with `amount` (minor units) of `currency` and return the new balance. **Open demo
+  // faucet** — any caller may mint, including the anonymous principal the relay uses (so the relay
+  // needs no controller identity). The demo currency is worthless and this is the PoC stand-in for a
+  // real on-ramp; it will be replaced by an issuer-gated mint once funding moves on-chain (see
+  // FUNDING.md).
+  mint : (blob, nat32, nat64) -> (nat64);
+  // Settle an offline-signed authorization. `signed` is the wire form (carries the
+  // `currency` tag inside the authorization). Reads, validates, and commits within one
+  // (non-awaiting) message → atomic on the single-threaded canister.
   pay : (blob) -> (Result);
   per_tx_cap : () -> (nat64) query;
 }

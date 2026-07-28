@@ -460,13 +460,13 @@ def _uniffi_check_contract_api_version(lib):
         raise InternalError("UniFFI contract version mismatch: try cleaning and rebuilding your project")
 
 def _uniffi_check_api_checksums(lib):
-    if lib.uniffi_dpay_ffi_checksum_func_decode_qr() != 5970:
+    if lib.uniffi_dpay_ffi_checksum_func_decode_qr() != 30030:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_decode_request() != 64181:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_encode_qr() != 18593:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_dpay_ffi_checksum_func_encode_request() != 60186:
+    if lib.uniffi_dpay_ffi_checksum_func_encode_request() != 13058:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_generate_keypair() != 36207:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -480,9 +480,9 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_nfc_receipt_codes() != 63617:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_dpay_ffi_checksum_func_nfc_request_bytes() != 61291:
+    if lib.uniffi_dpay_ffi_checksum_func_nfc_request_bytes() != 42305:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_dpay_ffi_checksum_func_sign_authorization() != 38734:
+    if lib.uniffi_dpay_ffi_checksum_func_sign_authorization() != 47305:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_validate() != 15932:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -500,7 +500,7 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_method_fficardsession_process() != 33759:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_dpay_ffi_checksum_method_fficardsession_provide_wire() != 51089:
+    if lib.uniffi_dpay_ffi_checksum_method_fficardsession_provide_wire() != 24234:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_method_fficardsession_receipt() != 54809:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -514,11 +514,11 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_provide_receipt() != 18499:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_wire() != 8289:
+    if lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_wire() != 2291:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_constructor_fficardsession_new() != 58439:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_dpay_ffi_checksum_constructor_ffireaderconductor_new() != 15463:
+    if lib.uniffi_dpay_ffi_checksum_constructor_ffireaderconductor_new() != 15795:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
 
 # A ctypes library to expose the extern-C FFI definitions.
@@ -751,6 +751,7 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_encode_request.argtypes = (
     ctypes.c_uint64,
     _UniffiRustBuffer,
     ctypes.c_uint64,
+    ctypes.c_uint32,
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_encode_request.restype = _UniffiRustBuffer
@@ -787,6 +788,7 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_nfc_request_bytes.argtypes = (
     ctypes.c_uint64,
     _UniffiRustBuffer,
     ctypes.c_uint64,
+    ctypes.c_uint32,
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_nfc_request_bytes.restype = _UniffiRustBuffer
@@ -796,6 +798,7 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_sign_authorization.argtypes = (
     ctypes.c_uint64,
     _UniffiRustBuffer,
     ctypes.c_uint64,
+    ctypes.c_uint32,
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_sign_authorization.restype = _UniffiRustBuffer
@@ -1363,14 +1366,16 @@ class PaymentRequestData:
     amount: "int"
     nonce: "bytes"
     expiry: "int"
-    def __init__(self, *, to: "bytes", amount: "int", nonce: "bytes", expiry: "int"):
+    currency: "int"
+    def __init__(self, *, to: "bytes", amount: "int", nonce: "bytes", expiry: "int", currency: "int"):
         self.to = to
         self.amount = amount
         self.nonce = nonce
         self.expiry = expiry
+        self.currency = currency
 
     def __str__(self):
-        return "PaymentRequestData(to={}, amount={}, nonce={}, expiry={})".format(self.to, self.amount, self.nonce, self.expiry)
+        return "PaymentRequestData(to={}, amount={}, nonce={}, expiry={}, currency={})".format(self.to, self.amount, self.nonce, self.expiry, self.currency)
 
     def __eq__(self, other):
         if self.to != other.to:
@@ -1380,6 +1385,8 @@ class PaymentRequestData:
         if self.nonce != other.nonce:
             return False
         if self.expiry != other.expiry:
+            return False
+        if self.currency != other.currency:
             return False
         return True
 
@@ -1391,6 +1398,7 @@ class _UniffiConverterTypePaymentRequestData(_UniffiConverterRustBuffer):
             amount=_UniffiConverterUInt64.read(buf),
             nonce=_UniffiConverterBytes.read(buf),
             expiry=_UniffiConverterUInt64.read(buf),
+            currency=_UniffiConverterUInt32.read(buf),
         )
 
     @staticmethod
@@ -1399,6 +1407,7 @@ class _UniffiConverterTypePaymentRequestData(_UniffiConverterRustBuffer):
         _UniffiConverterUInt64.check_lower(value.amount)
         _UniffiConverterBytes.check_lower(value.nonce)
         _UniffiConverterUInt64.check_lower(value.expiry)
+        _UniffiConverterUInt32.check_lower(value.currency)
 
     @staticmethod
     def write(value, buf):
@@ -1406,6 +1415,7 @@ class _UniffiConverterTypePaymentRequestData(_UniffiConverterRustBuffer):
         _UniffiConverterUInt64.write(value.amount, buf)
         _UniffiConverterBytes.write(value.nonce, buf)
         _UniffiConverterUInt64.write(value.expiry, buf)
+        _UniffiConverterUInt32.write(value.currency, buf)
 
 
 class ReceiptCodes:
@@ -1946,7 +1956,7 @@ class FfiCardSessionProtocol(typing.Protocol):
         raise NotImplementedError
     def provide_wire(self, wire: "bytes"):
         """
-        Approve: supply the offline-signed 192-byte wire to serve. Errors (`NfcWrongState`) unless a
+        Approve: supply the offline-signed 196-byte wire to serve. Errors (`NfcWrongState`) unless a
         request is held and no decision has been made; the wire is validated as it is framed.
         """
 
@@ -2087,7 +2097,7 @@ class FfiCardSession():
 
     def provide_wire(self, wire: "bytes") -> None:
         """
-        Approve: supply the offline-signed 192-byte wire to serve. Errors (`NfcWrongState`) unless a
+        Approve: supply the offline-signed 196-byte wire to serve. Errors (`NfcWrongState`) unless a
         request is held and no decision has been made; the wire is validated as it is framed.
         """
 
@@ -2194,7 +2204,7 @@ class FfiReaderConductorProtocol(typing.Protocol):
         raise NotImplementedError
     def wire(self, ):
         """
-        The reassembled 192-byte wire once the exchange reached `Done`, else `None`.
+        The reassembled 196-byte wire once the exchange reached `Done`, else `None`.
         """
 
         raise NotImplementedError
@@ -2208,7 +2218,7 @@ class FfiReaderConductor():
     _pointer: ctypes.c_void_p
     def __init__(self, request: "bytes",max_chunk: "int"):
         """
-        `request` is the merchant's 64-byte [`PaymentRequest`] wire (see [`nfc_request_bytes`]).
+        `request` is the merchant's 68-byte [`PaymentRequest`] wire (see [`nfc_request_bytes`]).
         Errors (`NfcProtocol`) if the request can't be framed.
         """
 
@@ -2302,7 +2312,7 @@ class FfiReaderConductor():
 
     def wire(self, ) -> "typing.Optional[bytes]":
         """
-        The reassembled 192-byte wire once the exchange reached `Done`, else `None`.
+        The reassembled 196-byte wire once the exchange reached `Done`, else `None`.
         """
 
         return _UniffiConverterOptionalBytes.lift(
@@ -2346,7 +2356,7 @@ class _UniffiConverterTypeFfiReaderConductor:
 
 def decode_qr(payload: "str") -> "bytes":
     """
-    Decode a scanned QR string back to the 192-byte wire blob.
+    Decode a scanned QR string back to the 196-byte wire blob.
     """
 
     _UniffiConverterString.check_lower(payload)
@@ -2378,7 +2388,7 @@ def encode_qr(wire: "bytes") -> "str":
         _UniffiConverterBytes.lower(wire)))
 
 
-def encode_request(to: "bytes",amount: "int",nonce: "bytes",expiry: "int") -> "str":
+def encode_request(to: "bytes",amount: "int",nonce: "bytes",expiry: "int",currency: "int") -> "str":
     """
     Merchant side: encode the request the payer will scan. `nonce` is the merchant's single-use
     request_id (it becomes the ledger nonce, so the payment can't be replayed or double-charged).
@@ -2392,11 +2402,14 @@ def encode_request(to: "bytes",amount: "int",nonce: "bytes",expiry: "int") -> "s
     
     _UniffiConverterUInt64.check_lower(expiry)
     
+    _UniffiConverterUInt32.check_lower(currency)
+    
     return _UniffiConverterString.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_encode_request,
         _UniffiConverterBytes.lower(to),
         _UniffiConverterUInt64.lower(amount),
         _UniffiConverterBytes.lower(nonce),
-        _UniffiConverterUInt64.lower(expiry)))
+        _UniffiConverterUInt64.lower(expiry),
+        _UniffiConverterUInt32.lower(currency)))
 
 
 def generate_keypair() -> "KeyPair":
@@ -2458,9 +2471,9 @@ def nfc_receipt_codes() -> "ReceiptCodes":
     return _UniffiConverterTypeReceiptCodes.lift(_uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_receipt_codes,))
 
 
-def nfc_request_bytes(to: "bytes",amount: "int",nonce: "bytes",expiry: "int") -> "bytes":
+def nfc_request_bytes(to: "bytes",amount: "int",nonce: "bytes",expiry: "int",currency: "int") -> "bytes":
     """
-    Merchant side: the raw 64-byte request wire the reader will push over NFC (the same bytes the
+    Merchant side: the raw 68-byte request wire the reader will push over NFC (the same bytes the
     request QR base64-encodes). Mirrors [`encode_request`] but returns the bytes NFC transports.
     """
 
@@ -2472,19 +2485,25 @@ def nfc_request_bytes(to: "bytes",amount: "int",nonce: "bytes",expiry: "int") ->
     
     _UniffiConverterUInt64.check_lower(expiry)
     
+    _UniffiConverterUInt32.check_lower(currency)
+    
     return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_request_bytes,
         _UniffiConverterBytes.lower(to),
         _UniffiConverterUInt64.lower(amount),
         _UniffiConverterBytes.lower(nonce),
-        _UniffiConverterUInt64.lower(expiry)))
+        _UniffiConverterUInt64.lower(expiry),
+        _UniffiConverterUInt32.lower(currency)))
 
 
-def sign_authorization(secret: "bytes",to: "bytes",amount: "int",nonce: "bytes",expiry: "int") -> "bytes":
+def sign_authorization(secret: "bytes",to: "bytes",amount: "int",nonce: "bytes",expiry: "int",currency: "int") -> "bytes":
     """
-    Payer side: build `Authorization {from, to, amount, nonce, expiry}` and sign it **offline**,
-    returning the 192-byte wire blob (`signing_bytes | sig | from_pub`) — exactly what the relay
-    hands the canister. `from` is derived from the secret; a mismatched `from` arg is ignored in
-    favour of the key's own public bytes (consent is bound to the real signer).
+    Payer side: build `Authorization {from, to, amount, nonce, expiry, currency}` and sign it
+    **offline**, returning the 196-byte wire blob (`signing_bytes | sig | from_pub`) — exactly what
+    the relay hands the canister. `from` is derived from the secret; a mismatched `from` arg is
+    ignored in favour of the key's own public bytes (consent is bound to the real signer). `currency`
+    (`Currency` = `u32`) is the settlement asset the payer authorizes; `DEMO_USD = 0`. The currency
+    field is encoded as 4 little-endian bytes at the end of the signing region, so it is covered by
+    the Ed25519 signature.
     """
 
     _UniffiConverterBytes.check_lower(secret)
@@ -2497,12 +2516,15 @@ def sign_authorization(secret: "bytes",to: "bytes",amount: "int",nonce: "bytes",
     
     _UniffiConverterUInt64.check_lower(expiry)
     
+    _UniffiConverterUInt32.check_lower(currency)
+    
     return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_sign_authorization,
         _UniffiConverterBytes.lower(secret),
         _UniffiConverterBytes.lower(to),
         _UniffiConverterUInt64.lower(amount),
         _UniffiConverterBytes.lower(nonce),
-        _UniffiConverterUInt64.lower(expiry)))
+        _UniffiConverterUInt64.lower(expiry),
+        _UniffiConverterUInt32.lower(currency)))
 
 
 def validate(amount: "int",now: "int",expiry: "int",cap: "int",balance: "int",nonce_seen: "bool",sig_ok: "bool") -> "typing.Optional[str]":

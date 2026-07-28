@@ -12,7 +12,8 @@
 
 use dpay_core::{
     generate_keypair as core_generate_keypair, sign, validate as core_validate, Authorization,
-    CodecError, PayError, PaymentRequest, SignedAuthorization, NONCE_LEN, PUBKEY_LEN,
+    CodecError, Currency, DEMO_USD, PayError, PaymentRequest, SignedAuthorization, NONCE_LEN,
+    PUBKEY_LEN,
 };
 use ed25519_dalek::SigningKey;
 
@@ -120,10 +121,13 @@ pub fn generate_keypair() -> KeyPair {
     }
 }
 
-/// Payer side: build `Authorization {from, to, amount, nonce, expiry}` and sign it **offline**,
-/// returning the 192-byte wire blob (`signing_bytes | sig | from_pub`) — exactly what the relay
-/// hands the canister. `from` is derived from the secret; a mismatched `from` arg is ignored in
-/// favour of the key's own public bytes (consent is bound to the real signer).
+/// Payer side: build `Authorization {from, to, amount, nonce, expiry, currency}` and sign it
+/// **offline**, returning the 196-byte wire blob (`signing_bytes | sig | from_pub`) — exactly what
+/// the relay hands the canister. `from` is derived from the secret; a mismatched `from` arg is
+/// ignored in favour of the key's own public bytes (consent is bound to the real signer). `currency`
+/// (`Currency` = `u32`) is the settlement asset the payer authorizes; `DEMO_USD = 0`. The currency
+/// field is encoded as 4 little-endian bytes at the end of the signing region, so it is covered by
+/// the Ed25519 signature.
 #[uniffi::export]
 pub fn sign_authorization(
     secret: &[u8],
@@ -131,12 +135,13 @@ pub fn sign_authorization(
     amount: u64,
     nonce: &[u8],
     expiry: u64,
+    currency: Currency,
 ) -> Result<Vec<u8>, DpayError> {
     let sk = signing_key_from_seed(secret)?;
     let from = sk.verifying_key().to_bytes();
     let to = fixed_pubkey(to)?;
     let nonce = fixed_nonce(nonce)?;
-    let auth = Authorization { from, to, amount, nonce, expiry };
+    let auth = Authorization { from, to, amount, nonce, expiry, currency };
     // Build + sign via the core type so we exercise the identical signing path.
     let signed = SignedAuthorization::new(&sk, auth);
     debug_assert_eq!(sign(&sk, &auth).to_bytes(), signed.sig);
@@ -152,6 +157,7 @@ pub struct PaymentRequestData {
     pub amount: u64,
     pub nonce: Vec<u8>,
     pub expiry: u64,
+    pub currency: u32,
 }
 
 /// Merchant side: encode the request the payer will scan. `nonce` is the merchant's single-use
@@ -162,10 +168,11 @@ pub fn encode_request(
     amount: u64,
     nonce: &[u8],
     expiry: u64,
+    currency: Currency,
 ) -> Result<String, DpayError> {
     let to = fixed_pubkey(to)?;
     let nonce = fixed_nonce(nonce)?;
-    Ok(PaymentRequest { to, amount, nonce, expiry }.encode())
+    Ok(PaymentRequest { to, amount, nonce, expiry, currency }.encode())
 }
 
 /// Payer side: decode a scanned merchant request QR into its fields, so the app can show
@@ -178,6 +185,7 @@ pub fn decode_request(qr: String) -> Result<PaymentRequestData, DpayError> {
         amount: req.amount,
         nonce: req.nonce.to_vec(),
         expiry: req.expiry,
+        currency: req.currency,
     })
 }
 
@@ -189,7 +197,7 @@ pub fn encode_qr(wire: &[u8]) -> Result<String, DpayError> {
     Ok(signed.encode())
 }
 
-/// Decode a scanned QR string back to the 192-byte wire blob.
+/// Decode a scanned QR string back to the 196-byte wire blob.
 #[uniffi::export]
 pub fn decode_qr(payload: String) -> Result<Vec<u8>, DpayError> {
     let signed = SignedAuthorization::decode(&payload)?;
@@ -221,12 +229,14 @@ pub fn validate(
     sig_ok: bool,
 ) -> Option<String> {
     // `validate` only reads `auth.amount` and `auth.expiry`; the identity fields are irrelevant.
+    // (Currency is also unchecked — validate is currency-agnostic — but the struct needs the field.)
     let auth = Authorization {
         from: [0u8; PUBKEY_LEN],
         to: [0u8; PUBKEY_LEN],
         amount,
         nonce: [0u8; NONCE_LEN],
         expiry,
+        currency: DEMO_USD,
     };
     match core_validate(&auth, now, cap, balance, nonce_seen, sig_ok) {
         Ok(()) => None,
@@ -356,7 +366,7 @@ impl FfiCardSession {
         lock(&self.inner).is_confirmed()
     }
 
-    /// Approve: supply the offline-signed 192-byte wire to serve. Errors (`NfcWrongState`) unless a
+    /// Approve: supply the offline-signed 196-byte wire to serve. Errors (`NfcWrongState`) unless a
     /// request is held and no decision has been made; the wire is validated as it is framed.
     pub fn provide_wire(&self, wire: Vec<u8>) -> Result<(), DpayError> {
         Ok(lock(&self.inner).provide_wire(&wire)?)
@@ -378,7 +388,7 @@ pub struct FfiReaderConductor {
 
 #[uniffi::export]
 impl FfiReaderConductor {
-    /// `request` is the merchant's 64-byte [`PaymentRequest`] wire (see [`nfc_request_bytes`]).
+    /// `request` is the merchant's 68-byte [`PaymentRequest`] wire (see [`nfc_request_bytes`]).
     /// Errors (`NfcProtocol`) if the request can't be framed.
     #[uniffi::constructor]
     pub fn new(request: Vec<u8>, max_chunk: u32) -> Result<Arc<Self>, DpayError> {
@@ -412,7 +422,7 @@ impl FfiReaderConductor {
         }
     }
 
-    /// The reassembled 192-byte wire once the exchange reached `Done`, else `None`.
+    /// The reassembled 196-byte wire once the exchange reached `Done`, else `None`.
     pub fn wire(&self) -> Option<Vec<u8>> {
         lock(&self.wire).clone()
     }
@@ -431,7 +441,7 @@ pub fn nfc_default_max_chunk() -> u32 {
     nfc::DEFAULT_MAX_CHUNK as u32
 }
 
-/// Merchant side: the raw 64-byte request wire the reader will push over NFC (the same bytes the
+/// Merchant side: the raw 68-byte request wire the reader will push over NFC (the same bytes the
 /// request QR base64-encodes). Mirrors [`encode_request`] but returns the bytes NFC transports.
 #[uniffi::export]
 pub fn nfc_request_bytes(
@@ -439,10 +449,11 @@ pub fn nfc_request_bytes(
     amount: u64,
     nonce: &[u8],
     expiry: u64,
+    currency: Currency,
 ) -> Result<Vec<u8>, DpayError> {
     let to = fixed_pubkey(to)?;
     let nonce = fixed_nonce(nonce)?;
-    Ok(PaymentRequest { to, amount, nonce, expiry }.to_bytes().to_vec())
+    Ok(PaymentRequest { to, amount, nonce, expiry, currency }.to_bytes().to_vec())
 }
 
 /// Payer side: decode the request bytes the card reassembled back into its fields, to show
@@ -455,6 +466,7 @@ pub fn nfc_decode_request(bytes: &[u8]) -> Result<PaymentRequestData, DpayError>
         amount: req.amount,
         nonce: req.nonce.to_vec(),
         expiry: req.expiry,
+        currency: req.currency,
     })
 }
 

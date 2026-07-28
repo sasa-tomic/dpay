@@ -21,14 +21,14 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
-use dpay_core::{SignedAuthorization, NONCE_LEN, PUBKEY_LEN};
+use dpay_core::{Currency, SignedAuthorization, DEMO_USD, NONCE_LEN, PUBKEY_LEN};
 
 use crate::ledger::{Ledger, LedgerError, Receipt};
 
@@ -52,6 +52,9 @@ pub struct AppState {
     /// The Android build served at `GET /download/dpay.apk`, when one is configured. `None` renders
     /// a "coming soon" CTA on the landing page and answers the download route with `404`.
     apk: Arc<Option<Vec<u8>>>,
+    /// Content hash of the APK bytes, used as a `?v=` cache-buster on the download link so a new
+    /// build invalidates the CDN cache immediately without manual cache purges.
+    apk_version: String,
 }
 
 impl AppState {
@@ -62,12 +65,19 @@ impl AppState {
             safe_mode: Arc::new(Mutex::new(false)),
             faucet_enabled: Arc::new(Mutex::new(true)),
             apk: Arc::new(None),
+            apk_version: String::new(),
         }
     }
 
     /// Attach the Android build to serve at `GET /download/dpay.apk` (and light up the landing
     /// page's download CTA). `None` leaves it disabled.
     pub fn with_apk(mut self, apk: Option<Vec<u8>>) -> Self {
+        if let Some(ref bytes) = apk {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            bytes.hash(&mut h);
+            self.apk_version = format!("{:x}", h.finish());
+        }
         self.apk = Arc::new(apk);
         self
     }
@@ -110,8 +120,9 @@ pub fn app(state: AppState) -> Router {
         .with_state(state)
 }
 
-/// `POST /api/v1/faucet` JSON `{account: <hex>, amount?}` → `{balance}`. Demo on-ramp: funds a
-/// phone's freshly-generated account so it can pay. Defaults to $100.00 when `amount` is omitted.
+/// `POST /api/v1/faucet` JSON `{account: <hex>, currency?, amount?}` → `{balance}`. Demo on-ramp:
+/// funds a phone's freshly-generated account so it can pay. Defaults: `currency = DEMO_USD` (0),
+/// `amount = 10_000` ($100.00) when either is omitted.
 ///
 /// **Mints.** Served only when [`AppState::faucet_enabled`]; otherwise `404`, as if the route did
 /// not exist. The relay binary disables it by default on the real-ledger path.
@@ -125,8 +136,11 @@ async fn faucet(State(state): State<AppState>, Json(req): Json<FaucetRequest>) -
     };
     let mut pk = [0u8; PUBKEY_LEN];
     pk.copy_from_slice(&bytes);
+    // Currency defaults to DEMO_USD — the faucet's whole point is play money for the demo. A missing
+    // amount is the demo's $100.00 top-up.
+    let currency = req.currency.unwrap_or(DEMO_USD);
     let amount = req.amount.unwrap_or(10_000);
-    match state.ledger.mint(pk, amount).await {
+    match state.ledger.mint(pk, currency, amount).await {
         Ok(bal) => (StatusCode::OK, Json(BalanceBody { balance: bal })).into_response(),
         Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
     }
@@ -148,16 +162,25 @@ async fn receipt(State(state): State<AppState>, Path(nonce_hex): Path<String>) -
     }
 }
 
-/// `GET /api/v1/balance/{hex}` → `{"balance": <minor units>}` for a 32-byte pubkey (hex). Lets the
-/// payer's wallet show its live balance when it can reach the relay.
-async fn balance(State(state): State<AppState>, Path(hex_pk): Path<String>) -> Response {
+/// `GET /api/v1/balance/{hex}?currency=<u32>` → `{"balance": <minor units>}` for a 32-byte
+/// pubkey (hex). Lets the payer's wallet show its live balance when it can reach the relay.
+///
+/// `currency` is an optional query param defaulting to `DEMO_USD` (0) — the demo's only asset — so
+/// existing callers that don't name a currency keep working unchanged. A wallet holding multiple
+/// assets asks once per currency.
+async fn balance(
+    State(state): State<AppState>,
+    Path(hex_pk): Path<String>,
+    Query(qs): Query<BalanceQuery>,
+) -> Response {
     let bytes = match hex::decode(hex_pk.trim()) {
         Ok(b) if b.len() == PUBKEY_LEN => b,
         _ => return err(StatusCode::BAD_REQUEST, "pubkey must be 32 bytes hex"),
     };
     let mut pk = [0u8; PUBKEY_LEN];
     pk.copy_from_slice(&bytes);
-    match state.ledger.balance(pk).await {
+    let currency = qs.currency.unwrap_or(DEMO_USD);
+    match state.ledger.balance(pk, currency).await {
         Ok(bal) => (StatusCode::OK, Json(BalanceBody { balance: bal })).into_response(),
         Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
     }
@@ -170,8 +193,9 @@ async fn landing_page(State(state): State<AppState>) -> Response {
         Some(bytes) => {
             // Round to the nearest whole megabyte, floored at 1 so a small build never reads "0 MB".
             let mb = ((bytes.len() + 524_288) / 1_048_576).max(1);
+            let ver = &state.apk_version;
             format!(
-                "<a class=\"btn\" href=\"/download/dpay.apk\" download>Download for Android\
+                "<a class=\"btn\" href=\"/download/dpay.apk?v={ver}\" download>Download for Android\
                  <span class=\"apk-meta\">APK · {mb} MB</span></a>"
             )
         }
@@ -199,6 +223,7 @@ async fn apk_download(State(state): State<AppState>) -> Response {
                     header::CONTENT_DISPOSITION,
                     "attachment; filename=\"dpay.apk\"",
                 ),
+                (header::CACHE_CONTROL, "public, max-age=31536000, immutable"),
             ],
             bytes.clone(),
         )
@@ -226,13 +251,18 @@ async fn jsqr_js() -> Response {
         .into_response()
 }
 
-/// `GET /shots/{name}` — the real app screenshots the landing page shows (offline; no CDN).
-/// Only the three known names resolve; anything else is a clean `404`.
+/// `GET /shots/{name}` — the real app screenshots the landing page shows (offline; no CDN). The
+/// flow rails now step through real phone screens, so the NFC tap states and the post-scan review
+/// view are served alongside the original QR/Pay/Paid trio. Anything else is a clean `404`.
 async fn screenshot(Path(name): Path<String>) -> Response {
     let bytes: &'static [u8] = match name.as_str() {
         "request.png" => include_bytes!("../assets/shot-request.png"),
         "approve.png" => include_bytes!("../assets/shot-approve.png"),
         "paid.png" => include_bytes!("../assets/shot-paid.png"),
+        "nfc-listen.png" => include_bytes!("../assets/shot-nfc-listen.png"),
+        "nfc-exchange.png" => include_bytes!("../assets/shot-nfc-exchange.png"),
+        "nfc-paid.png" => include_bytes!("../assets/shot-nfc-paid.png"),
+        "scanned.png" => include_bytes!("../assets/shot-scanned.png"),
         _ => return err(StatusCode::NOT_FOUND, "no such screenshot"),
     };
     ([(header::CONTENT_TYPE, "image/png")], bytes).into_response()
@@ -259,7 +289,16 @@ struct PayRequest {
 #[derive(Deserialize)]
 struct FaucetRequest {
     account: String,
+    /// Settlement currency to mint. Defaults to `DEMO_USD` when absent (the demo's play money).
+    #[serde(default)]
+    currency: Option<Currency>,
     amount: Option<u64>,
+}
+
+/// `?currency=N` for `GET /api/v1/balance/{hex}`. Absent → `DEMO_USD`.
+#[derive(Deserialize)]
+struct BalanceQuery {
+    currency: Option<Currency>,
 }
 
 #[derive(Serialize)]
@@ -302,7 +341,7 @@ async fn health(State(state): State<AppState>) -> Response {
     }
 }
 
-/// `POST /api/v1/pay`. Body is either JSON `{"qr":"<base64url>"}` or the raw 192-byte wire form
+/// `POST /api/v1/pay`. Body is either JSON `{"qr":"<base64url>"}` or the raw 196-byte wire form
 /// (any non-JSON content type). Returns `200 {"receipt":...}` or `422 {"error":"..."}`.
 async fn pay(State(state): State<AppState>, headers: HeaderMap, body: axum::body::Bytes) -> Response {
     // 1. Get the wire bytes from whichever encoding the merchant sent.

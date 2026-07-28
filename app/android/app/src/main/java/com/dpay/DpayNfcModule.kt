@@ -54,7 +54,7 @@ class DpayNfcModule(reactContext: ReactApplicationContext) :
         DpayNfc.disarmCard(); promise.resolve(null)
     }
 
-    /** Approve: pass the offline-signed 192-byte wire (hex) for the card to serve. */
+    /** Approve: pass the offline-signed 196-byte wire (hex) for the card to serve. */
     @ReactMethod
     fun approveCard(wireHex: String, promise: Promise) {
         try { DpayNfc.approveCard(unhex(wireHex)); promise.resolve(null) } catch (e: Throwable) { promise.reject("dpay_nfc", e) }
@@ -68,13 +68,14 @@ class DpayNfcModule(reactContext: ReactApplicationContext) :
     // ---------------------------------------------------------------- merchant / reader (Receive)
     /** Build the raw request wire (hex) the reader pushes — mirrors the request QR's bytes. */
     @ReactMethod
-    fun buildRequest(toHex: String, amount: Double, nonceHex: String, expiry: Double, promise: Promise) {
+    fun buildRequest(toHex: String, amount: Double, nonceHex: String, expiry: Double, currency: Double, promise: Promise) {
         try {
             val bytes = uniffi.dpay_ffi.nfcRequestBytes(
                 unhex(toHex),
                 amount.toLong().toULong(),
                 unhex(nonceHex),
                 expiry.toLong().toULong(),
+                currency.toInt().toUInt(),
             )
             promise.resolve(hex(bytes))
         } catch (e: Throwable) {

@@ -17,7 +17,7 @@ use http_body_util::BodyExt;
 use serde_json::Value;
 use tower::ServiceExt; // oneshot
 
-use dpay_core::{Authorization, SignedAuthorization};
+use dpay_core::{Authorization, SignedAuthorization, DEMO_USD};
 use dpay_relay::{app, AppState, FakeLedger, FixedClock, FlakyLedger};
 use ed25519_dalek::SigningKey;
 
@@ -56,6 +56,7 @@ fn signed(sk: &SigningKey, to: [u8; 32], amount: u64, nonce: [u8; 16], expiry: u
         amount,
         nonce,
         expiry,
+        currency: DEMO_USD,
     };
     SignedAuthorization::new(sk, auth)
 }
@@ -144,8 +145,8 @@ async fn valid_pay_moves_funds() {
     assert_eq!(r["new_from_balance"], BAL_A - 250);
 
     // Balances actually moved on the ledger.
-    assert_eq!(led.balance_of(&pubkey(&payer)), BAL_A - 250);
-    assert_eq!(led.balance_of(&pubkey(&merchant)), BAL_B + 250);
+    assert_eq!(led.balance_of(&pubkey(&payer), DEMO_USD), BAL_A - 250);
+    assert_eq!(led.balance_of(&pubkey(&merchant), DEMO_USD), BAL_B + 250);
 }
 
 #[tokio::test]
@@ -159,7 +160,7 @@ async fn raw_wire_body_also_works() {
 
     assert_eq!(status, StatusCode::OK, "body={body}");
     assert_eq!(body["receipt"]["amount"], 100);
-    assert_eq!(led.balance_of(&pubkey(&merchant)), 100);
+    assert_eq!(led.balance_of(&pubkey(&merchant), DEMO_USD), 100);
 }
 
 #[tokio::test]
@@ -182,8 +183,8 @@ async fn duplicate_nonce_is_idempotent_and_credits_once() {
     assert_eq!(b2["replayed"], serde_json::json!(true), "duplicate is flagged as a replay");
 
     // Merchant credited exactly once; payer debited exactly once.
-    assert_eq!(led.balance_of(&pubkey(&merchant)), 400, "credited once only");
-    assert_eq!(led.balance_of(&pubkey(&payer)), BAL_A - 400, "debited once only");
+    assert_eq!(led.balance_of(&pubkey(&merchant), DEMO_USD), 400, "credited once only");
+    assert_eq!(led.balance_of(&pubkey(&payer), DEMO_USD), BAL_A - 400, "debited once only");
 }
 
 /// Reconciliation contract the merchant app depends on: once a payment settles, its nonce is
@@ -220,10 +221,11 @@ async fn bad_signature_rejected_422_no_state_change() {
     let merchant = keypair();
     let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
 
-    // Build a valid signed auth, then corrupt the signature bytes in the wire form.
+    // Build a valid signed auth, then corrupt the signature bytes in the wire form. The 196-byte
+    // wire is `signing(100) | sig(64) | from_pub(32)`, so byte[100] is the first signature byte.
     let sa = signed(&payer, pubkey(&merchant), 100, [3u8; 16], FUTURE);
     let mut wire = sa.to_wire();
-    wire[96] ^= 0xFF; // flip a byte inside the 64-byte signature
+    wire[100] ^= 0xFF; // flip a byte inside the 64-byte signature
 
     let (status, body) = call(&state, pay_wire(&wire)).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
@@ -233,8 +235,8 @@ async fn bad_signature_rejected_422_no_state_change() {
     );
 
     // Nothing moved.
-    assert_eq!(led.balance_of(&pubkey(&payer)), BAL_A);
-    assert_eq!(led.balance_of(&pubkey(&merchant)), BAL_B);
+    assert_eq!(led.balance_of(&pubkey(&payer), DEMO_USD), BAL_A);
+    assert_eq!(led.balance_of(&pubkey(&merchant), DEMO_USD), BAL_B);
 }
 
 #[tokio::test]
@@ -249,7 +251,7 @@ async fn expired_rejected_422() {
 
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert!(body["error"].as_str().unwrap().contains("Expired"), "error={body}");
-    assert_eq!(led.balance_of(&pubkey(&merchant)), BAL_B);
+    assert_eq!(led.balance_of(&pubkey(&merchant), DEMO_USD), BAL_B);
 }
 
 #[tokio::test]
@@ -264,8 +266,8 @@ async fn over_cap_rejected_422() {
 
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert!(body["error"].as_str().unwrap().contains("OverCap"), "error={body}");
-    assert_eq!(led.balance_of(&pubkey(&payer)), BAL_A);
-    assert_eq!(led.balance_of(&pubkey(&merchant)), BAL_B);
+    assert_eq!(led.balance_of(&pubkey(&payer), DEMO_USD), BAL_A);
+    assert_eq!(led.balance_of(&pubkey(&merchant), DEMO_USD), BAL_B);
 }
 
 #[tokio::test]
@@ -292,8 +294,8 @@ async fn insufficient_funds_rejected_422() {
         body["error"].as_str().unwrap().contains("InsufficientFunds"),
         "error={body}"
     );
-    assert_eq!(ledarc.balance_of(&pubkey(&payer)), 200);
-    assert_eq!(ledarc.balance_of(&pubkey(&merchant)), 0);
+    assert_eq!(ledarc.balance_of(&pubkey(&payer), DEMO_USD), 200);
+    assert_eq!(ledarc.balance_of(&pubkey(&merchant), DEMO_USD), 0);
 }
 
 #[tokio::test]
@@ -325,7 +327,7 @@ async fn faucet_disabled_mints_nothing() {
 
     assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
     assert_eq!(
-        led.balance_of(&pubkey(&merchant)),
+        led.balance_of(&pubkey(&merchant), DEMO_USD),
         BAL_B,
         "a disabled faucet must not create funds"
     );
@@ -342,7 +344,7 @@ async fn faucet_enabled_mints() {
 
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["balance"], BAL_B + 999);
-    assert_eq!(led.balance_of(&pubkey(&merchant)), BAL_B + 999);
+    assert_eq!(led.balance_of(&pubkey(&merchant), DEMO_USD), BAL_B + 999);
 }
 
 #[tokio::test]
@@ -427,7 +429,7 @@ async fn landing_page_with_apk_shows_download_button() {
     let (status, _headers, bytes) = call_raw(&state, get_req("/")).await;
     assert_eq!(status, StatusCode::OK);
     let html = String::from_utf8(bytes).unwrap();
-    assert!(html.contains("href=\"/download/dpay.apk\""), "download link missing");
+    assert!(html.contains("href=\"/download/dpay.apk?v="), "download link missing");
     assert!(html.contains("APK · 1 MB"), "rounded size (min 1 MB) missing");
     assert!(!html.contains("Android build coming soon"), "must not show the disabled chip");
     assert!(!html.contains("{{DOWNLOAD}}"), "placeholder must be substituted");
@@ -457,7 +459,16 @@ async fn screenshots_served_as_png_and_unknown_is_404() {
     let merchant = keypair();
     let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
 
-    for name in ["request.png", "approve.png", "paid.png"] {
+    let names = [
+        "request.png",
+        "approve.png",
+        "paid.png",
+        "nfc-listen.png",
+        "nfc-exchange.png",
+        "nfc-paid.png",
+        "scanned.png",
+    ];
+    for name in names {
         let (status, headers, bytes) = call_raw(&state, get_req(&format!("/shots/{name}"))).await;
         assert_eq!(status, StatusCode::OK, "{name} must serve");
         assert_eq!(headers.get(header::CONTENT_TYPE).unwrap(), "image/png");

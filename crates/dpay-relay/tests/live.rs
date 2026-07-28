@@ -41,7 +41,7 @@ use candid::{encode_one, CandidType, Principal};
 use pocket_ic::PocketIc;
 use serde::Deserialize;
 
-use dpay_core::{generate_keypair, Authorization, SignedAuthorization};
+use dpay_core::{generate_keypair, Authorization, SignedAuthorization, DEMO_USD};
 use dpay_relay::{app, AgentLedger, AppState, Ledger}; // Ledger: for AgentLedger::pay in scope
 use ed25519_dalek::SigningKey;
 
@@ -78,7 +78,7 @@ fn signed(
     nonce: [u8; 16],
     expiry: u64,
 ) -> SignedAuthorization {
-    let auth = Authorization { from, to, amount, nonce, expiry };
+    let auth = Authorization { from, to, amount, nonce, expiry, currency: DEMO_USD };
     SignedAuthorization::new(sk, auth)
 }
 
@@ -143,8 +143,8 @@ fn live_settlement_end_to_end() {
         let state = AppState::new(ledger.clone());
 
         // Sanity: opening balances read back through a REAL query.
-        assert_eq!(ledger.balance_of(&payer_pk).await.unwrap(), INIT_A);
-        assert_eq!(ledger.balance_of(&merch_pk).await.unwrap(), INIT_B);
+        assert_eq!(ledger.balance_of(&payer_pk, DEMO_USD).await.unwrap(), INIT_A);
+        assert_eq!(ledger.balance_of(&merch_pk, DEMO_USD).await.unwrap(), INIT_B);
 
         // Health goes through the real replica `status`.
         let health = Request::builder()
@@ -171,8 +171,8 @@ fn live_settlement_end_to_end() {
         assert_eq!(r["new_from_balance"], INIT_A - 2_500);
 
         // Read back through REAL balance_of queries — the funds actually moved on-chain.
-        assert_eq!(ledger.balance_of(&payer_pk).await.unwrap(), INIT_A - 2_500);
-        assert_eq!(ledger.balance_of(&merch_pk).await.unwrap(), INIT_B + 2_500);
+        assert_eq!(ledger.balance_of(&payer_pk, DEMO_USD).await.unwrap(), INIT_A - 2_500);
+        assert_eq!(ledger.balance_of(&merch_pk, DEMO_USD).await.unwrap(), INIT_B + 2_500);
 
         // ---- (2) relay idempotency: same submission → identical receipt, no double-settle ----
         let (s2, b2) = call(&state, pay_wire(&sa.to_wire())).await;
@@ -183,8 +183,8 @@ fn live_settlement_end_to_end() {
         assert_eq!(b1["replayed"], false, "first settle is a fresh charge, not a replay");
         assert_eq!(b2["replayed"], true, "second identical submit must be flagged as replayed");
         // Balances unchanged after the replay.
-        assert_eq!(ledger.balance_of(&payer_pk).await.unwrap(), INIT_A - 2_500);
-        assert_eq!(ledger.balance_of(&merch_pk).await.unwrap(), INIT_B + 2_500);
+        assert_eq!(ledger.balance_of(&payer_pk, DEMO_USD).await.unwrap(), INIT_A - 2_500);
+        assert_eq!(ledger.balance_of(&merch_pk, DEMO_USD).await.unwrap(), INIT_B + 2_500);
 
         // ---- (3) reused nonce must be rejected by the CANISTER (no double-spend at the ledger) ----
         // The relay's HTTP idempotency (proven in (2)) caches by nonce, so a 2nd submit never even
@@ -204,8 +204,8 @@ fn live_settlement_end_to_end() {
             other => panic!("expected a Rejected(NonceReused), got {other:?}"),
         }
         // Still exactly one settlement — no double-spend on the real ledger.
-        assert_eq!(ledger.balance_of(&payer_pk).await.unwrap(), INIT_A - 2_500);
-        assert_eq!(ledger.balance_of(&merch_pk).await.unwrap(), INIT_B + 2_500);
+        assert_eq!(ledger.balance_of(&payer_pk, DEMO_USD).await.unwrap(), INIT_A - 2_500);
+        assert_eq!(ledger.balance_of(&merch_pk, DEMO_USD).await.unwrap(), INIT_B + 2_500);
     });
 
     // Tear down the gateway + replica explicitly (also happens on drop).

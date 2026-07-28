@@ -20,10 +20,16 @@ pub mod nfc;
 pub const PUBKEY_LEN: usize = 32;
 pub const SIG_LEN: usize = 64;
 pub const NONCE_LEN: usize = 16;
-/// 32 (from) + 32 (to) + 8 (amount) + 16 (nonce) + 8 (expiry)
-pub const SIGNING_LEN: usize = 96;
-/// signing_bytes(96) + sig(64) + from_pub(32)
+/// 32 (from) + 32 (to) + 8 (amount) + 16 (nonce) + 8 (expiry) + 4 (currency)
+pub const SIGNING_LEN: usize = 100;
+/// signing_bytes(100) + sig(64) + from_pub(32)
 pub const WIRE_LEN: usize = SIGNING_LEN + SIG_LEN + PUBKEY_LEN;
+
+/// Currency tag. The merchant's request names the settlement asset; the payer copies it
+/// into their authorization. `DEMO_USD` is play money mintable via the faucet (open on
+/// mainnet for the demo). Future currencies (ckUSDC, ckBTC, …) get their own tag.
+pub type Currency = u32;
+pub const DEMO_USD: Currency = 0;
 
 /// An offline-built payment authorization. Amounts are integer minor units (cents); the UI
 /// only ever renders `$`.
@@ -34,11 +40,12 @@ pub struct Authorization {
     pub amount: u64,
     pub nonce: [u8; NONCE_LEN],
     pub expiry: u64,
+    pub currency: Currency,
 }
 
 impl Authorization {
-    /// Canonical, deterministic signed message: fixed 96-byte little-endian concat.
-    /// Field order is frozen forever: `from | to | amount_le | nonce | expiry_le`.
+    /// Canonical, deterministic signed message: fixed 100-byte little-endian concat.
+    /// Field order is frozen forever: `from | to | amount_le | nonce | expiry_le | currency_le`.
     pub fn signing_bytes(&self) -> [u8; SIGNING_LEN] {
         let mut b = [0u8; SIGNING_LEN];
         b[0..32].copy_from_slice(&self.from);
@@ -46,6 +53,7 @@ impl Authorization {
         b[64..72].copy_from_slice(&self.amount.to_le_bytes());
         b[72..88].copy_from_slice(&self.nonce);
         b[88..96].copy_from_slice(&self.expiry.to_le_bytes());
+        b[96..100].copy_from_slice(&self.currency.to_le_bytes());
         b
     }
 }
@@ -135,7 +143,7 @@ impl SignedAuthorization {
         SignedAuthorization { auth, sig, from_pub: auth.from }
     }
 
-    /// Raw 192-byte wire form: `signing_bytes(96) | sig(64) | from_pub(32)`.
+    /// Raw 196-byte wire form: `signing_bytes(100) | sig(64) | from_pub(32)`.
     /// This is what the relay hands the canister (a candid `blob`); the QR carries its base64url.
     pub fn to_wire(&self) -> [u8; WIRE_LEN] {
         let mut raw = [0u8; WIRE_LEN];
@@ -157,9 +165,10 @@ impl SignedAuthorization {
             amount: u64::from_le_bytes(raw[64..72].try_into().unwrap()),
             nonce: raw[72..88].try_into().unwrap(),
             expiry: u64::from_le_bytes(raw[88..96].try_into().unwrap()),
+            currency: u32::from_le_bytes(raw[96..100].try_into().unwrap()),
         };
-        let sig: [u8; SIG_LEN] = raw[96..160].try_into().unwrap();
-        let from_pub: [u8; PUBKEY_LEN] = raw[160..192].try_into().unwrap();
+        let sig: [u8; SIG_LEN] = raw[100..164].try_into().unwrap();
+        let from_pub: [u8; PUBKEY_LEN] = raw[164..196].try_into().unwrap();
         if auth.from != from_pub {
             return Err(CodecError::PubkeyMismatch);
         }
@@ -184,35 +193,37 @@ impl SignedAuthorization {
     }
 }
 
-/// 32 (to) + 8 (amount) + 16 (nonce) + 8 (expiry).
-pub const REQUEST_LEN: usize = PUBKEY_LEN + 8 + NONCE_LEN + 8;
+/// 32 (to) + 8 (amount) + 16 (nonce) + 8 (expiry) + 4 (currency).
+pub const REQUEST_LEN: usize = PUBKEY_LEN + 8 + NONCE_LEN + 8 + 4;
 
 /// The **request** the merchant shows the payer, carried by the merchant's QR. Unsigned: it names
 /// who to pay (`to`), how much (`amount`), a single-use `nonce` (the merchant's `request_id`, which
-/// becomes the ledger nonce), and an `expiry`. The payer scans this, reviews it, and signs an
-/// [`Authorization`] that copies these fields verbatim — so the amount + payee are chosen by the
-/// merchant and then *bound* by the payer's signature. There is no `from` (the payer supplies their
-/// own) and no signature here.
+/// becomes the ledger nonce), an `expiry`, and the settlement `currency`. The payer scans this,
+/// reviews it, and signs an [`Authorization`] that copies these fields verbatim — so the amount,
+/// payee, and currency are chosen by the merchant and then *bound* by the payer's signature. There
+/// is no `from` (the payer supplies their own) and no signature here.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct PaymentRequest {
     pub to: [u8; PUBKEY_LEN],
     pub amount: u64,
     pub nonce: [u8; NONCE_LEN],
     pub expiry: u64,
+    pub currency: Currency,
 }
 
 impl PaymentRequest {
-    /// Raw 64-byte form: `to(32) | amount_le(8) | nonce(16) | expiry_le(8)`. Field order frozen.
+    /// Raw 68-byte form: `to(32) | amount_le(8) | nonce(16) | expiry_le(8) | currency_le(4)`. Frozen.
     pub fn to_bytes(&self) -> [u8; REQUEST_LEN] {
         let mut b = [0u8; REQUEST_LEN];
         b[0..32].copy_from_slice(&self.to);
         b[32..40].copy_from_slice(&self.amount.to_le_bytes());
         b[40..56].copy_from_slice(&self.nonce);
         b[56..64].copy_from_slice(&self.expiry.to_le_bytes());
+        b[64..68].copy_from_slice(&self.currency.to_le_bytes());
         b
     }
 
-    /// Parse the raw 64-byte form. Rejects a wrong length.
+    /// Parse the raw 68-byte form. Rejects a wrong length.
     pub fn from_bytes(raw: &[u8]) -> Result<Self, CodecError> {
         if raw.len() != REQUEST_LEN {
             return Err(CodecError::Length);
@@ -222,6 +233,7 @@ impl PaymentRequest {
             amount: u64::from_le_bytes(raw[32..40].try_into().unwrap()),
             nonce: raw[40..56].try_into().unwrap(),
             expiry: u64::from_le_bytes(raw[56..64].try_into().unwrap()),
+            currency: u32::from_le_bytes(raw[64..68].try_into().unwrap()),
         })
     }
 
@@ -240,7 +252,7 @@ impl PaymentRequest {
     /// other field is copied from the merchant's request (so consent is bound to exactly what was
     /// requested).
     pub fn to_authorization(&self, from: [u8; PUBKEY_LEN]) -> Authorization {
-        Authorization { from, to: self.to, amount: self.amount, nonce: self.nonce, expiry: self.expiry }
+        Authorization { from, to: self.to, amount: self.amount, nonce: self.nonce, expiry: self.expiry, currency: self.currency }
     }
 }
 
@@ -308,13 +320,15 @@ mod tests {
             any::<u64>(),
             any::<[u8; 16]>(),
             any::<u64>(),
+            any::<u8>(),
         )
-            .prop_map(|(from, to, amount, nonce, expiry)| Authorization {
+            .prop_map(|(from, to, amount, nonce, expiry, currency)| Authorization {
                 from,
                 to,
                 amount,
                 nonce,
                 expiry,
+                currency: currency as u32,
             })
     }
 
@@ -323,13 +337,13 @@ mod tests {
         fn sign_verify_and_codec_roundtrip(amount in 1u64.., expiry in 1u64.., nonce in any::<[u8;16]>()) {
             let sk = generate_keypair();
             let from = sk.verifying_key().to_bytes();
-            let auth = Authorization { from, to: [7u8; 32], amount, nonce, expiry };
+            let auth = Authorization { from, to: [7u8; 32], amount, nonce, expiry, currency: DEMO_USD };
             let sig = sign(&sk, &auth);
             prop_assert!(verify(&from, &auth, &sig));
 
             let se = SignedAuthorization::new(&sk, auth);
             let wire = se.encode();
-            prop_assert_eq!(wire.len(), 256); // 192 bytes -> 256 base64url chars (no pad)
+            prop_assert_eq!(wire.len(), 262); // 196 bytes -> 262 base64url chars (no pad)
             let back = SignedAuthorization::decode(&wire).unwrap();
             prop_assert_eq!(back, se);
             prop_assert!(back.verify());
@@ -340,9 +354,9 @@ mod tests {
             amount in 1u64.., expiry in 1u64.., nonce in any::<[u8;16]>(),
             to in any::<[u8;32]>(), from in any::<[u8;32]>(),
         ) {
-            let req = PaymentRequest { to, amount, nonce, expiry };
+            let req = PaymentRequest { to, amount, nonce, expiry, currency: DEMO_USD };
             let s = req.encode();
-            prop_assert_eq!(s.len(), 86); // 64 bytes -> 86 base64url chars (no pad)
+            prop_assert_eq!(s.len(), 91); // 68 bytes -> 91 base64url chars (no pad)
             prop_assert_eq!(PaymentRequest::decode(&s).unwrap(), req);
             // What the payer signs copies the merchant's request verbatim (only `from` is the payer's).
             let auth = req.to_authorization(from);
@@ -351,13 +365,14 @@ mod tests {
             prop_assert_eq!(auth.nonce, nonce);
             prop_assert_eq!(auth.expiry, expiry);
             prop_assert_eq!(auth.from, from);
+            prop_assert_eq!(auth.currency, DEMO_USD);
         }
 
         #[test]
         fn tamper_breaks_verify(idx in 0usize..SIGNING_LEN, xor in 1u8..=255) {
             let sk = generate_keypair();
             let from = sk.verifying_key().to_bytes();
-            let auth = Authorization { from, to: [1u8; 32], amount: 100, nonce: [9u8; 16], expiry: 9999 };
+            let auth = Authorization { from, to: [1u8; 32], amount: 100, nonce: [9u8; 16], expiry: 9999, currency: DEMO_USD };
             let sig = sign(&sk, &auth);
             let mut bytes = auth.signing_bytes();
             bytes[idx] ^= xor;
@@ -367,6 +382,7 @@ mod tests {
                 amount: u64::from_le_bytes(bytes[64..72].try_into().unwrap()),
                 nonce: bytes[72..88].try_into().unwrap(),
                 expiry: u64::from_le_bytes(bytes[88..96].try_into().unwrap()),
+                currency: u32::from_le_bytes(bytes[96..100].try_into().unwrap()),
             };
             prop_assert!(!verify(&from, &tampered, &sig));
         }
@@ -382,7 +398,7 @@ mod tests {
         #[test]
         fn validate_rules(amount in any::<u64>(), cap in any::<u64>(), balance in any::<u64>(),
                           now in any::<u64>(), expiry in any::<u64>()) {
-            let a = Authorization { from: [0;32], to: [0;32], amount, nonce: [0;16], expiry };
+            let a = Authorization { from: [0;32], to: [0;32], amount, nonce: [0;16], expiry, currency: DEMO_USD };
             match validate(&a, now, cap, balance, false, true) {
                 Ok(()) => prop_assert!(amount > 0 && now < expiry && amount <= cap && amount <= balance),
                 Err(PayError::ZeroAmount)        => prop_assert_eq!(amount, 0),
@@ -422,7 +438,7 @@ mod tests {
 
             for (dir, amount, nonce) in ops {
                 let (sk, from, to) = if dir { (&ka, pa, pb) } else { (&kb, pb, pa) };
-                let auth = Authorization { from, to, amount, nonce, expiry: u64::MAX };
+                let auth = Authorization { from, to, amount, nonce, expiry: u64::MAX, currency: DEMO_USD };
                 let sig_ok = verify(&from, &auth, &sign(sk, &auth));
                 let from_bal = bal[&from];
                 let seen_nonce = seen.contains(&nonce);

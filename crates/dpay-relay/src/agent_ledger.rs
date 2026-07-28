@@ -4,18 +4,21 @@
 //!
 //! Behind the `agent` cargo feature (off by default) so the fast in-memory inner loop stays
 //! offline. The candid surface it drives is exactly the canister's:
-//!   - `pay      : (blob) -> (variant { Ok : PayReceipt; Err : text })`  [update]
-//!   - `balance_of : (blob) -> (nat64) query`
+//!   - `pay        : (blob) -> (variant { Ok : PayReceipt; Err : text })`  [update]
+//!   - `balance_of : (blob, nat32) -> (nat64) query`
+//!   - `mint       : (blob, nat32, nat64) -> (nat64)`  [update]
 //!
-//! The 192-byte signed authorization is candid-encoded as a single `blob` argument — identical to
-//! what `dpay-canister-tests` does with `encode_one(&wire)`.
+//! The 196-byte signed authorization is candid-encoded as a single `blob` argument — identical to
+//! what `dpay-canister-tests` does with `encode_one(&wire)`. `balance` and `mint` pass `currency`
+//! as a positional `nat32` next to the pubkey `blob`, matching the canister's multi-currency
+//! `(pubkey, currency) -> balance` shape.
 
 use async_trait::async_trait;
 use candid::{decode_one, encode_args, encode_one, CandidType, Principal};
 use ic_agent::Agent;
 use serde::Deserialize;
 
-use dpay_core::PUBKEY_LEN;
+use dpay_core::{Currency, PUBKEY_LEN};
 
 use crate::ledger::{Ledger, LedgerError, Receipt};
 
@@ -78,10 +81,16 @@ impl AgentLedger {
         Ok(AgentLedger { agent, canister_id })
     }
 
-    /// Read a balance via a real `balance_of` query. Test/demo introspection (mirrors
+    /// Read a balance via a real `balance_of(blob, nat32)` query. Test/demo introspection (mirrors
     /// [`crate::FakeLedger::balance_of`]); not part of the [`Ledger`] trait.
-    pub async fn balance_of(&self, pubkey: &[u8; PUBKEY_LEN]) -> Result<u64, LedgerError> {
-        let arg = encode_one(pubkey.to_vec())
+    pub async fn balance_of(
+        &self,
+        pubkey: &[u8; PUBKEY_LEN],
+        currency: Currency,
+    ) -> Result<u64, LedgerError> {
+        // Two positional args: the pubkey as a `blob`, the currency tag as a `nat32`. `currency`
+        // is `u32` (the `Currency` alias), so `encode_args` emits `nat32` automatically.
+        let arg = encode_args((pubkey.to_vec(), currency))
             .map_err(|e| LedgerError::Transient(format!("encode balance arg: {e}")))?;
         let reply = self
             .agent
@@ -98,7 +107,8 @@ impl AgentLedger {
 #[async_trait]
 impl Ledger for AgentLedger {
     async fn pay(&self, wire: Vec<u8>) -> Result<Receipt, LedgerError> {
-        // Candid-encode the 192-byte wire as a single `blob` arg (== canister's `pay(blob)`).
+        // Candid-encode the 196-byte wire as a single `blob` arg (== canister's `pay(blob)`). The
+        // currency is read out of the wire by the canister — same as FakeLedger.
         let arg = encode_one(&wire)
             .map_err(|e| LedgerError::Transient(format!("encode pay arg: {e}")))?;
 
@@ -130,13 +140,19 @@ impl Ledger for AgentLedger {
         }
     }
 
-    async fn balance(&self, pubkey: [u8; PUBKEY_LEN]) -> Result<u64, LedgerError> {
-        self.balance_of(&pubkey).await
+    async fn balance(&self, pubkey: [u8; PUBKEY_LEN], currency: Currency) -> Result<u64, LedgerError> {
+        self.balance_of(&pubkey, currency).await
     }
 
-    async fn mint(&self, to: [u8; PUBKEY_LEN], amount: u64) -> Result<u64, LedgerError> {
-        // canister `mint(blob, nat64) -> nat64` (update). Two positional args.
-        let arg = encode_args((to.to_vec(), amount))
+    async fn mint(
+        &self,
+        to: [u8; PUBKEY_LEN],
+        currency: Currency,
+        amount: u64,
+    ) -> Result<u64, LedgerError> {
+        // canister `mint(blob, nat32, nat64) -> nat64` (update). Three positional args: pubkey,
+        // currency (encoded as `nat32` since `Currency = u32`), amount.
+        let arg = encode_args((to.to_vec(), currency, amount))
             .map_err(|e| LedgerError::Transient(format!("encode mint args: {e}")))?;
         let reply = self
             .agent

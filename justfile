@@ -57,8 +57,8 @@ deploy-ic:
     bash scripts/dfx-deploy-ic.sh
 
 # operator hook: mint (credit) minor units to an account (controller-only). `just mint <64-hex-account> <cents>`
-mint account amount:
-    bash scripts/mint.sh {{account}} {{amount}}
+mint account amount currency='0':
+    bash scripts/mint.sh {{account}} {{amount}} {{currency}}
 
 # the native Rust inner loop — core + canister + relay
 check: test-core test-canister test-relay
@@ -79,6 +79,10 @@ ondevice:
 # build + run the React Native app on the emulator/device; assert it signed via dpay-core
 app:
     bash scripts/rn-run.sh
+
+# build a downloadable release APK (no device needed) + stage it to deploy/dist/dpay.apk for the relay
+apk:
+    bash scripts/build-apk.sh
 
 # live demo: dfx replica + canister + relay + merchant terminal (Ctrl-C to stop). Open the printed URL.
 demo:

@@ -3,7 +3,7 @@
 #
 # Unlike the PocketIC in-process tests, this stands up an actual local dfx replica, installs the
 # canister with init args, and drives it purely through `dfx canister call` — the same client path
-# a real deployment uses. It submits the *exact* 192-byte offline-signed wire the phone would sign
+# a real deployment uses. It submits the *exact* 196-byte offline-signed wire the phone would sign
 # (built by dpay-fixture via the shared dpay-core), proves funds move, and proves a replayed
 # payment is refused (nonce single-use). Self-asserting: exits non-zero on any mismatch.
 set -euo pipefail

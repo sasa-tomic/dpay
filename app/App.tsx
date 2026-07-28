@@ -33,7 +33,7 @@ type DpayNfcApi = {
   disarmCard(): Promise<void>;
   approveCard(wireHex: string): Promise<void>;
   declineCard(): Promise<void>;
-  buildRequest(toHex: string, amount: number, nonceHex: string, expiry: number): Promise<string>;
+  buildRequest(toHex: string, amount: number, nonceHex: string, expiry: number, currency: number): Promise<string>;
   startReader(requestHex: string): Promise<void>;
   stopReader(): Promise<void>;
   // Merchant: after settling online, hand the outcome back to the payer. `status` is the receipt
@@ -46,7 +46,7 @@ type DpayNfcApi = {
 
 type NfcEvent =
   | {type: 'phase'; role: 'card' | 'reader'; phase: NfcPhaseName}
-  | {type: 'request'; role: 'card'; toHex: string; amount: number; nonceHex: string; expiry: number}
+  | {type: 'request'; role: 'card'; toHex: string; amount: number; nonceHex: string; expiry: number; currency: number}
   | {type: 'done'; role: 'reader'; wireHex: string}
   | {type: 'receipt'; role: 'card'; settled: boolean; status: number; nonceHex: string}
   | {type: 'confirmed'; role: 'reader'}
@@ -54,13 +54,13 @@ type NfcEvent =
 
 type NfcPhaseName = 'listening' | 'linking' | 'exchanging' | 'awaitingApproval' | 'settling' | 'success' | 'declined' | 'pending';
 
-type Req = {toHex: string; amount: number; nonceHex: string; expiry: number};
+type Req = {toHex: string; amount: number; nonceHex: string; expiry: number; currency: number};
 type Identity = {secretHex: string; publicHex: string; username: string};
 type Txn = {nonce: string; amount: number; who: string; time: string; dir: 'out' | 'in'};
 type DpayCoreApi = {
   generateKeypair(): Promise<{secretHex: string; publicHex: string}>;
-  signAuthorization(secretHex: string, toHex: string, amount: number, nonceHex: string, expiry: number): Promise<string>;
-  encodeRequest(toHex: string, amount: number, nonceHex: string, expiry: number): Promise<string>;
+  signAuthorization(secretHex: string, toHex: string, amount: number, nonceHex: string, expiry: number, currency: number): Promise<string>;
+  encodeRequest(toHex: string, amount: number, nonceHex: string, expiry: number, currency: number): Promise<string>;
   decodeRequest(qr: string): Promise<Req>;
   encodeQr(wireHex: string): Promise<string>;
   verifyWire(wireHex: string): Promise<boolean>;
@@ -117,8 +117,8 @@ export default function App() {
     (async () => {
       try {
         const kp = await DpayCore.generateKeypair();
-        const wire = await DpayCore.signAuthorization(kp.secretHex, kp.publicHex, 1, randNonceHex(), 4102444800);
-        console.log(`DPAY_SELFCHECK ${(await DpayCore.verifyWire(wire)) && wire.length === 384 ? 'PASS' : 'FAIL'}`);
+        const wire = await DpayCore.signAuthorization(kp.secretHex, kp.publicHex, 1, randNonceHex(), 4102444800, 0);
+        console.log(`DPAY_SELFCHECK ${(await DpayCore.verifyWire(wire)) && wire.length === 392 ? 'PASS' : 'FAIL'}`);
       } catch (e: any) { console.log(`DPAY_SELFCHECK FAIL ${String(e?.message ?? e)}`); }
     })();
   }, []);
@@ -166,7 +166,7 @@ function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: (id: Id
         <Pressable testID="btn-create" style={[S.primary, busy && S.dim]} disabled={busy} onPress={create}>
           <Text style={S.primaryText}>{busy ? 'Creating…' : 'Create & fund wallet'}</Text>
         </Pressable>
-        <Text style={S.dim2}>Generates a key on this device and funds it with $100 to start.</Text>
+        <Text style={S.dim2}>Generates a key on this device and adds demo $100 to start.</Text>
       </View>
     </SafeAreaView>
   );
@@ -179,6 +179,13 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
   const [offlineSpent, setOfflineSpent] = useState(0);
   const [history, setHistory] = useState<Txn[]>([]);
   const [nfc, setNfc] = useState<NfcStatus>('unknown');
+  // Demo top-up: a single click adds $50 of demo currency via /api/v1/faucet. The button sits next
+  // to the balance so users find it without hunting. `topUpBusy` drives the spinner; `topUpErr`
+  // surfaces a one-line failure (offline / faucet disabled) without blocking the rest of the UI.
+  const [topUpBusy, setTopUpBusy] = useState(false);
+  const [topUpErr, setTopUpErr] = useState<string | null>(null);
+
+  const TOP_UP_CENTS = 5000; // $50.00 in minor units
 
   // Read the device NFC radio state once (re-checked when the app returns to the foreground, since
   // the user may toggle NFC in system settings). Purely informational for the status chip; failure
@@ -216,6 +223,33 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
   const markOfflinePaid = useCallback((amount: number) => setOfflineSpent(s => s + amount), []);
   const shownBalance = balance == null ? null : online ? balance : Math.max(0, balance - offlineSpent);
 
+  // Demo top-up: POST /api/v1/faucet {account, amount}. Uses the response balance directly for an
+  // immediate refresh (no waiting on the 2.5s poll). Errors are surfaced inline under the button.
+  const topUp = useCallback(async () => {
+    if (topUpBusy) return;
+    setTopUpBusy(true); setTopUpErr(null);
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 6000);
+    try {
+      const r = await fetch(`${base(relayUrl)}/api/v1/faucet`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({account: identity.publicHex, amount: TOP_UP_CENTS}),
+        signal: ctrl.signal,
+      });
+      const j = await r.json().catch(() => ({} as any));
+      if (r.ok && typeof j.balance === 'number') {
+        setBalance(j.balance); setOnline(true); setOfflineSpent(0);
+      } else {
+        setTopUpErr(r.ok ? 'Top-up failed' : 'Faucet unavailable');
+      }
+    } catch {
+      setTopUpErr('Offline — try again when connected');
+    } finally {
+      clearTimeout(t);
+      setTopUpBusy(false);
+    }
+  }, [topUpBusy, relayUrl, identity.publicHex]);
+
   return (
     <SafeAreaView style={S.root}>
       <StatusBar barStyle="dark-content" backgroundColor={C.bg} />
@@ -226,8 +260,20 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
           <NfcPill status={nfc} />
         </View>
         <View style={S.balBox}>
-          <View style={S.balLabelRow}><View style={[S.dot, {backgroundColor: online ? C.ok : '#9ca3af'}]} /><Text style={S.balLabel}>{online ? 'balance' : 'offline'}</Text></View>
-          <Text testID="balance" style={S.balAmt}>{shownBalance == null ? '—' : usd(shownBalance)}</Text>
+          <View style={S.balLabelRow}>
+            <View style={[S.dot, {backgroundColor: online ? C.ok : '#9ca3af'}]} />
+            <Text style={S.balLabel}>{online ? 'balance' : 'offline'}</Text>
+            <View style={S.demoPill}><Text style={S.demoPillText}>DEMO</Text></View>
+          </View>
+          <View style={S.balAmtRow}>
+            <Text testID="balance" style={S.balAmt}>{shownBalance == null ? '—' : usd(shownBalance)}</Text>
+            <Pressable testID="btn-topup" style={[S.topUpBtn, topUpBusy && S.dim]} disabled={topUpBusy} onPress={topUp}>
+              {topUpBusy
+                ? <ActivityIndicator size="small" color={C.brand} />
+                : <Text style={S.topUpText}>+ ${TOP_UP_CENTS / 100}</Text>}
+            </Pressable>
+          </View>
+          {topUpErr ? <Text style={S.topUpErr}>{topUpErr}</Text> : null}
         </View>
       </View>
 
@@ -464,9 +510,9 @@ function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onOff
   }, [relayUrl, reqInfo, record, finalize, postPay, reconcile]);
 
   // Payer side: the tap is the consent — sign the incoming request and serve it right away.
-  const autoSign = useCallback(async (req: {toHex: string; amount: number; nonceHex: string; expiry: number}) => {
+  const autoSign = useCallback(async (req: {toHex: string; amount: number; nonceHex: string; expiry: number; currency: number}) => {
     try {
-      const wireHex = await DpayCore.signAuthorization(identity.secretHex, req.toHex, req.amount, req.nonceHex, req.expiry);
+      const wireHex = await DpayCore.signAuthorization(identity.secretHex, req.toHex, req.amount, req.nonceHex, req.expiry, req.currency);
       if (!(await DpayCore.verifyWire(wireHex))) throw new Error('local verify failed');
       sentRef.current = {amount: req.amount, who: short(req.toHex), nonce: req.nonceHex};
       setPayAmount(req.amount);
@@ -488,7 +534,7 @@ function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onOff
         return;
       }
       if (finalized.current) return; // terminal reached; ignore late phase/confirmed events
-      if (e.type === 'request') { markActive(); setPhase('exchanging'); autoSign({toHex: e.toHex, amount: e.amount, nonceHex: e.nonceHex, expiry: e.expiry}); }
+      if (e.type === 'request') { markActive(); setPhase('exchanging'); autoSign({toHex: e.toHex, amount: e.amount, nonceHex: e.nonceHex, expiry: e.expiry, currency: e.currency}); }
       else if (e.type === 'done') { markActive(); committed.current = true; submitWire(e.wireHex); }
       else if (e.type === 'receipt') {
         // The payer's outcome, learned offline over the tap — believed only if it answers the exact
@@ -565,7 +611,6 @@ function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOfflinePaid
   // `pending` = handed to the merchant offline but NOT confirmed by the ledger (we can't claim it
   // settled). `already` = the ledger reported this nonce was already settled (idempotent replay).
   const [paid, setPaid] = useState<{amount: number; who: string; already: boolean; pending?: boolean} | null>(null);
-  const [manual, setManual] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   // A tap arriving on the always-armed card takes over the scan screen; nfcKey re-arms after each.
@@ -599,7 +644,7 @@ function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOfflinePaid
     if (!req) return;
     setBusy(true);
     try {
-      const wireHex = await DpayCore.signAuthorization(identity.secretHex, req.toHex, req.amount, req.nonceHex, req.expiry);
+      const wireHex = await DpayCore.signAuthorization(identity.secretHex, req.toHex, req.amount, req.nonceHex, req.expiry, req.currency);
       if (!(await DpayCore.verifyWire(wireHex))) throw new Error('local verify failed');
       const code = await DpayCore.encodeQr(wireHex);
       const who = req.name || short(req.toHex);
@@ -633,7 +678,7 @@ function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOfflinePaid
     } catch (e: any) { setErr(String(e?.message ?? e)); } finally { setBusy(false); }
   }
 
-  function reset() { setReq(null); setQr(null); setPaid(null); setManual(''); setErr(null); setPhase('scan'); }
+  function reset() { setReq(null); setQr(null); setPaid(null); setErr(null); setPhase('scan'); }
 
   if (phase === 'paid' && paid) {
     const warn = paid.already || paid.pending;
@@ -708,10 +753,6 @@ function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOfflinePaid
           <QrScanner onScan={onRequestString} />
           <Text style={S.dim2}>{nfcReady ? "Tap the merchant's phone, or point at its request QR" : "Point at the payee's request QR"}</Text>
           {err ? <Text style={S.err}>{err}</Text> : null}
-          <View style={S.manualRow}>
-            <TextInput testID="manual-input" style={S.manualInput} value={manual} onChangeText={setManual} placeholder="…or paste the request code" autoCapitalize="none" autoCorrect={false} />
-            <Pressable testID="btn-manual" style={S.smallBtn} onPress={() => manual.trim() && onRequestString(manual)}><Text style={S.smallBtnText}>Use</Text></Pressable>
-          </View>
         </>
       ) : null}
     </View>
@@ -738,10 +779,10 @@ function ReceiveMode({identity, relayUrl, nfcReady, onReceived}: {identity: Iden
     try {
       const nonce = randNonceHex();
       const expiry = nowSecs() + EXPIRY_WINDOW;
-      const reqB64 = await DpayCore.encodeRequest(identity.publicHex, cents, nonce, expiry);
+      const reqB64 = await DpayCore.encodeRequest(identity.publicHex, cents, nonce, expiry, 0);
       // Build the NFC request too so reader mode can start alongside the QR (best-effort).
       let nfcHex: string | null = null;
-      if (nfcReady && DpayNfc) { try { nfcHex = await DpayNfc.buildRequest(identity.publicHex, cents, nonce, expiry); } catch {} }
+      if (nfcReady && DpayNfc) { try { nfcHex = await DpayNfc.buildRequest(identity.publicHex, cents, nonce, expiry, 0); } catch {} }
       setReqQr({value: `${reqB64}|${identity.username}`, cents, nonce, nfcHex});
       setResult(null); setErr(null);
     } catch (e: any) { setErr(String(e?.message ?? e)); }
@@ -851,6 +892,12 @@ const S = StyleSheet.create({
   nfcSub: {fontSize: 15, color: C.sub, marginTop: 10, textAlign: 'center', paddingHorizontal: 20},
   balBox: {alignItems: 'flex-end'},
   balLabelRow: {flexDirection: 'row', alignItems: 'center', gap: 5},
+  demoPill: {backgroundColor: '#fef3c7', borderRadius: 5, paddingHorizontal: 5, paddingVertical: 1, marginLeft: 2},
+  demoPillText: {fontSize: 9, fontWeight: '800', color: C.warn, letterSpacing: 0.5},
+  balAmtRow: {flexDirection: 'row', alignItems: 'center', gap: 8},
+  topUpBtn: {borderWidth: 1, borderColor: C.brand, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5},
+  topUpText: {fontSize: 13, fontWeight: '700', color: C.brand},
+  topUpErr: {fontSize: 10, color: C.bad, marginTop: 3, textAlign: 'right'},
   dot: {width: 8, height: 8, borderRadius: 4},
   balLabel: {fontSize: 12, color: C.sub},
   balAmt: {fontSize: 26, fontWeight: '800', color: C.ink},
@@ -896,8 +943,6 @@ const S = StyleSheet.create({
   linkTextMuted: {color: C.sub, fontWeight: '600', fontSize: 15},
   smallBtn: {backgroundColor: C.brand, borderRadius: 10, paddingHorizontal: 16, height: 44, alignItems: 'center', justifyContent: 'center'},
   smallBtnText: {color: C.brandInk, fontWeight: '600'},
-  manualRow: {flexDirection: 'row', alignItems: 'center', marginTop: 18, alignSelf: 'stretch', gap: 8},
-  manualInput: {flex: 1, backgroundColor: C.field, borderRadius: 10, paddingHorizontal: 12, height: 44, fontSize: 12, color: C.ink},
   histCard: {marginTop: 28, borderTopWidth: 1, borderTopColor: C.line, paddingTop: 14},
   histTitle: {fontSize: 13, fontWeight: '700', color: C.sub, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6},
   histRow: {flexDirection: 'row', alignItems: 'baseline', paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: C.line},

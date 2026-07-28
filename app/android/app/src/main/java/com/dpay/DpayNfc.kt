@@ -183,6 +183,7 @@ object DpayNfc {
             m.putDouble("amount", r.amount.toDouble())
             m.putString("nonceHex", hex(r.nonce))
             m.putDouble("expiry", r.expiry.toDouble())
+            m.putInt("currency", r.currency.toInt())
             emit(m)
         } catch (e: Throwable) {
             errorEvent("card", "Received a malformed request")

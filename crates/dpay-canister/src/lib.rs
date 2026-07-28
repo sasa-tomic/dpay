@@ -20,25 +20,48 @@ use serde::Deserialize;
 use std::borrow::Cow;
 use std::cell::RefCell;
 
-use dpay_core::{validate, SignedAuthorization, NONCE_LEN, PUBKEY_LEN};
+use dpay_core::{validate, SignedAuthorization, Currency, DEMO_USD, NONCE_LEN, PUBKEY_LEN};
 
 type Memory = VirtualMemory<DefaultMemoryImpl>;
 
-/// Stable-map key for a 32-byte account pubkey. Fixed size, and its byte order equals the derived
-/// `Ord`, so map iteration order is well-defined.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct PubKey([u8; PUBKEY_LEN]);
+/// Stable-map key for a per-currency balance entry: a 32-byte account pubkey followed by the 4
+/// little-endian bytes of a [`Currency`] (`u32`) tag. Fixed size; byte order equals the derived
+/// `Ord` (pubkey-major, then currency), so map iteration order is well-defined. One row per
+/// (account, currency) pair — funds in different currencies never commingle.
+const CURRENCY_LEN: usize = core::mem::size_of::<Currency>();
+const BALANCE_KEY_LEN: usize = PUBKEY_LEN + CURRENCY_LEN;
 
-impl Storable for PubKey {
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct BalanceKey([u8; BALANCE_KEY_LEN]);
+
+impl BalanceKey {
+    fn new(pubkey: [u8; PUBKEY_LEN], currency: Currency) -> Self {
+        let mut b = [0u8; BALANCE_KEY_LEN];
+        b[..PUBKEY_LEN].copy_from_slice(&pubkey);
+        b[PUBKEY_LEN..].copy_from_slice(&currency.to_le_bytes());
+        BalanceKey(b)
+    }
+
+    /// Split back into (pubkey, currency). The currency is read as a little-endian `u32`.
+    #[allow(dead_code)]
+    fn parts(&self) -> ([u8; PUBKEY_LEN], Currency) {
+        let mut pk = [0u8; PUBKEY_LEN];
+        pk.copy_from_slice(&self.0[..PUBKEY_LEN]);
+        let currency = u32::from_le_bytes(self.0[PUBKEY_LEN..].try_into().unwrap());
+        (pk, currency)
+    }
+}
+
+impl Storable for BalanceKey {
     fn to_bytes(&self) -> Cow<'_, [u8]> {
         Cow::Borrowed(&self.0)
     }
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        let mut a = [0u8; PUBKEY_LEN];
+        let mut a = [0u8; BALANCE_KEY_LEN];
         a.copy_from_slice(&bytes);
-        PubKey(a)
+        BalanceKey(a)
     }
-    const BOUND: Bound = Bound::Bounded { max_size: PUBKEY_LEN as u32, is_fixed_size: true };
+    const BOUND: Bound = Bound::Bounded { max_size: BALANCE_KEY_LEN as u32, is_fixed_size: true };
 }
 
 /// Stable-map key for a 16-byte nonce.
@@ -61,8 +84,9 @@ thread_local! {
     static MEMORY: RefCell<MemoryManager<DefaultMemoryImpl>> =
         RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
 
-    /// account pubkey -> balance (minor units).
-    static BALANCES: RefCell<StableBTreeMap<PubKey, u64, Memory>> =
+    /// (account pubkey, currency) -> balance (minor units). Per-currency segregation means a
+    /// payment in currency X can never debit or credit currency Y.
+    static BALANCES: RefCell<StableBTreeMap<BalanceKey, u64, Memory>> =
         RefCell::new(StableBTreeMap::init(MEMORY.with(|m| m.borrow().get(MemoryId::new(0)))));
 
     /// spent nonces (single-use). Value is `()` — the map is used as a set.
@@ -103,16 +127,19 @@ fn to_pubkey(v: &[u8]) -> Result<[u8; PUBKEY_LEN], String> {
 fn init(arg: InitArg) {
     let a = to_pubkey(&arg.account_a).expect("account_a must be 32 bytes");
     let b = to_pubkey(&arg.account_b).expect("account_b must be 32 bytes");
+    // Demo accounts open in DEMO_USD (the play-money faucet currency). Multi-currency funding is
+    // per-account/per-currency via `mint`.
     BALANCES.with(|m| {
         let mut m = m.borrow_mut();
-        m.insert(PubKey(a), arg.balance_a);
-        m.insert(PubKey(b), arg.balance_b);
+        m.insert(BalanceKey::new(a, DEMO_USD), arg.balance_a);
+        m.insert(BalanceKey::new(b, DEMO_USD), arg.balance_b);
     });
     CAP.with(|c| c.borrow_mut().set(arg.per_tx_cap).expect("set cap"));
 }
 
-/// Settle an offline-signed authorization. `signed` is the 192-byte wire form. Reads, validates, and
-/// commits within one (non-awaiting) message → atomic on the single-threaded canister.
+/// Settle an offline-signed authorization. `signed` is the wire form (carries the
+/// `currency` tag inside the authorization). Reads, validates, and commits within one
+/// (non-awaiting) message → atomic on the single-threaded canister.
 #[update]
 fn pay(signed: Vec<u8>) -> Result<PayReceipt, String> {
     let sa = SignedAuthorization::from_wire(&signed).map_err(|e| format!("decode: {e:?}"))?;
@@ -120,10 +147,13 @@ fn pay(signed: Vec<u8>) -> Result<PayReceipt, String> {
     // dpay-core works in unix seconds; IC time is nanoseconds.
     let now_secs = ic_cdk::api::time() / 1_000_000_000;
 
-    let from = PubKey(sa.auth.from);
+    // The currency the payer signed is the currency we debit/credit — the merchant's request names
+    // it, the payer binds it, and the ledger moves funds only within that currency's column.
+    let from_key = BalanceKey::new(sa.auth.from, sa.auth.currency);
+    let to_key = BalanceKey::new(sa.auth.to, sa.auth.currency);
     let nonce = Nonce(sa.auth.nonce);
 
-    let balance = BALANCES.with(|b| b.borrow().get(&from).unwrap_or(0));
+    let balance = BALANCES.with(|b| b.borrow().get(&from_key).unwrap_or(0));
     let nonce_seen = SPENT.with(|s| s.borrow().contains_key(&nonce));
     let cap = CAP.with(|c| *c.borrow().get());
 
@@ -132,10 +162,9 @@ fn pay(signed: Vec<u8>) -> Result<PayReceipt, String> {
     let new_from = balance - sa.auth.amount;
     BALANCES.with(|b| {
         let mut b = b.borrow_mut();
-        b.insert(from, new_from);
-        let to = PubKey(sa.auth.to);
-        let to_bal = b.get(&to).unwrap_or(0) + sa.auth.amount;
-        b.insert(to, to_bal);
+        b.insert(from_key, new_from);
+        let to_bal = b.get(&to_key).unwrap_or(0) + sa.auth.amount;
+        b.insert(to_key, to_bal);
     });
     SPENT.with(|s| {
         s.borrow_mut().insert(nonce, ());
@@ -151,9 +180,9 @@ fn pay(signed: Vec<u8>) -> Result<PayReceipt, String> {
 }
 
 #[query]
-fn balance_of(pubkey: Vec<u8>) -> u64 {
+fn balance_of(pubkey: Vec<u8>, currency: Currency) -> u64 {
     match to_pubkey(&pubkey) {
-        Ok(pk) => BALANCES.with(|b| b.borrow().get(&PubKey(pk)).unwrap_or(0)),
+        Ok(pk) => BALANCES.with(|b| b.borrow().get(&BalanceKey::new(pk, currency)).unwrap_or(0)),
         Err(_) => 0,
     }
 }
@@ -163,24 +192,19 @@ fn per_tx_cap() -> u64 {
     CAP.with(|c| *c.borrow().get())
 }
 
-/// Credit `to` with `amount` (minor units) and return the new balance — the demo's stand-in for a
-/// real fiat/ckUSDC on-ramp. **Controller-only**: any non-controller caller (including the anonymous
-/// principal the relay uses) is rejected. Gating on `is_controller` grants no new power — a
-/// controller can already upgrade the canister to do anything — while closing the "anyone can mint"
-/// hole. When funding moves to on-chain top-ups, this becomes issuer-gated (see FUNDING.md).
+/// Credit `to` with `amount` (minor units) of `currency` and return the new balance. **Open demo
+/// faucet** — any caller may mint, including the anonymous principal the relay uses (so the relay
+/// needs no controller identity). The demo currency is worthless and this is the PoC stand-in for a
+/// real on-ramp; it will be replaced by an issuer-gated mint once funding moves on-chain (see
+/// FUNDING.md).
 #[update]
-fn mint(to: Vec<u8>, amount: u64) -> u64 {
-    let caller = ic_cdk::api::msg_caller();
-    if !ic_cdk::api::is_controller(&caller) {
-        ic_cdk::trap(format!(
-            "unauthorized: only a canister controller may mint (caller {caller})"
-        ));
-    }
-    let pk = PubKey(to_pubkey(&to).expect("account must be 32 bytes"));
+fn mint(to: Vec<u8>, currency: Currency, amount: u64) -> u64 {
+    let pk = to_pubkey(&to).expect("account must be 32 bytes");
+    let key = BalanceKey::new(pk, currency);
     BALANCES.with(|b| {
         let mut b = b.borrow_mut();
-        let new = b.get(&pk).unwrap_or(0).saturating_add(amount);
-        b.insert(pk, new);
+        let new = b.get(&key).unwrap_or(0).saturating_add(amount);
+        b.insert(key, new);
         new
     })
 }

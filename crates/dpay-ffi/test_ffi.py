@@ -10,12 +10,12 @@ import sys
 import dpay_ffi as d
 
 # ---------------------------------------------------------------------------------------------
-# Wire layout (must match dpay_core::SignedAuthorization::to_wire): 192 bytes total.
-#   [0..96)   signing_bytes = from(32) | to(32) | amount_le(8) | nonce(16) | expiry_le(8)
-#   [96..160) signature(64)
-#   [160..192) from_pub(32)
-SIG_OFF, SIG_END = 96, 160
-WIRE_LEN = 192
+# Wire layout (must match dpay_core::SignedAuthorization::to_wire): 196 bytes total.
+#   [0..100)   signing_bytes = from(32) | to(32) | amount_le(8) | nonce(16) | expiry_le(8) | currency_le(4)
+#   [100..164) signature(64)
+#   [164..196) from_pub(32)
+SIG_OFF, SIG_END = 100, 164
+WIRE_LEN = 196
 
 passed = 0
 def check(cond, label):
@@ -36,7 +36,7 @@ amount = 1499                          # $14.99 in minor units
 nonce = bytes(range(16))              # stands in for the merchant's request_id
 expiry = 2_000_000_000                 # far-future unix seconds
 
-wire = d.sign_authorization(kp.secret, to_kp.public, amount, nonce, expiry)
+wire = d.sign_authorization(kp.secret, to_kp.public, amount, nonce, expiry, 0)
 check(len(wire) == WIRE_LEN, f"sign_authorization -> {WIRE_LEN}-byte wire blob")
 check(wire[0:32] == kp.public, "wire `from` == signer public key (consent bound to signer)")
 check(wire[SIG_END:WIRE_LEN] == kp.public, "wire carries payer pubkey for directory-free verify")
@@ -44,7 +44,7 @@ check(wire[SIG_END:WIRE_LEN] == kp.public, "wire carries payer pubkey for direct
 
 # 2) Wire <-> base64url QR string round-trips exactly ------------------------------------------
 qr = d.encode_qr(wire)
-check(isinstance(qr, str) and len(qr) == 256, "encode_qr -> 256-char base64url (no pad)")
+check(isinstance(qr, str) and len(qr) == 262, "encode_qr -> 262-char base64url (no pad)")
 import base64
 check(base64.urlsafe_b64decode(qr + "==") == wire, "QR string is real base64url of the wire")
 back = d.decode_qr(qr)
@@ -86,7 +86,7 @@ check(d.validate(amount, NOW, GOOD_EXPIRY, 10_000, 50_000, False, False) == "bad
 
 # 5) Cross-language error mapping: malformed inputs raise typed DpayError -----------------------
 try:
-    d.sign_authorization(b"\x00" * 31, to_kp.public, amount, nonce, expiry)
+    d.sign_authorization(b"\x00" * 31, to_kp.public, amount, nonce, expiry, 0)
     raise AssertionError("FAILED: short secret should have raised")
 except d.DpayError.BadSecretLength:
     check(True, "short secret -> DpayError.BadSecretLength")
@@ -99,7 +99,7 @@ except d.DpayError.BadBase64:
 
 # A wire whose `from` disagrees with `from_pub` is rejected at parse time (not silently verified).
 mismatch = bytearray(wire)
-mismatch[160] ^= 0x01                 # perturb from_pub only
+mismatch[164] ^= 0x01                 # perturb from_pub only (first byte of from_pub region)
 try:
     d.verify_wire(bytes(mismatch))
     raise AssertionError("FAILED: pubkey mismatch should have raised")
@@ -114,9 +114,9 @@ MAX_CHUNK = d.nfc_default_max_chunk()
 check(MAX_CHUNK == 240, "nfc_default_max_chunk() == 240")
 
 req_nonce = bytes(range(16, 32))                       # the merchant's request_id -> ledger nonce
-req_bytes = d.nfc_request_bytes(to_kp.public, amount, req_nonce, expiry)
-check(len(req_bytes) == 64, "nfc_request_bytes -> 64-byte request wire")
-nfc_wire = d.sign_authorization(kp.secret, to_kp.public, amount, req_nonce, expiry)
+req_bytes = d.nfc_request_bytes(to_kp.public, amount, req_nonce, expiry, 0)
+check(len(req_bytes) == 68, "nfc_request_bytes -> 68-byte request wire")
+nfc_wire = d.sign_authorization(kp.secret, to_kp.public, amount, req_nonce, expiry, 0)
 
 
 def run_nfc(max_chunk, approve=True):

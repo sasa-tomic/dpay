@@ -18,7 +18,9 @@ use async_trait::async_trait;
 use serde::Serialize;
 use thiserror::Error;
 
-use dpay_core::{validate, PayError, SignedAuthorization, CodecError, NONCE_LEN, PUBKEY_LEN};
+use dpay_core::{
+    validate, CodecError, Currency, PayError, SignedAuthorization, DEMO_USD, NONCE_LEN, PUBKEY_LEN,
+};
 
 /// What the merchant sees on success. Byte fields are hex so the JSON is a plain string map.
 /// Mirrors the canister's `PayReceipt` (which returns the same fields as candid `blob`s).
@@ -73,15 +75,23 @@ impl Clock for FixedClock {
 /// The settlement seam. `async_trait` keeps it dyn-compatible so `Arc<dyn Ledger>` works.
 #[async_trait]
 pub trait Ledger: Send + Sync {
-    /// Settle a 192-byte signed authorization (the payer's QR, decoded to wire bytes).
+    /// Settle a 196-byte signed authorization (the payer's QR, decoded to wire bytes). The
+    /// settlement currency is read out of the wire — the payer copied the merchant's request
+    /// currency into their authorization — so `pay` itself takes no currency argument.
     async fn pay(&self, wire: Vec<u8>) -> Result<Receipt, LedgerError>;
 
-    /// Read an account's balance (minor units). Lets a wallet show its live balance when online.
-    async fn balance(&self, pubkey: [u8; PUBKEY_LEN]) -> Result<u64, LedgerError>;
+    /// Read an account's balance (minor units) of `currency`. Lets a wallet show its live balance
+    /// for the asset it actually holds when online.
+    async fn balance(&self, pubkey: [u8; PUBKEY_LEN], currency: Currency) -> Result<u64, LedgerError>;
 
-    /// Demo faucet: credit `to` with `amount`, returning the new balance. Funds a freshly-generated
-    /// on-device account (stand-in for a real on-ramp).
-    async fn mint(&self, to: [u8; PUBKEY_LEN], amount: u64) -> Result<u64, LedgerError>;
+    /// Demo faucet: credit `to` with `amount` of `currency`, returning the new balance. Funds a
+    /// freshly-generated on-device account (stand-in for a real on-ramp).
+    async fn mint(
+        &self,
+        to: [u8; PUBKEY_LEN],
+        currency: Currency,
+        amount: u64,
+    ) -> Result<u64, LedgerError>;
 
     /// Liveness for the merchant's pre-flight green dot.
     async fn healthy(&self) -> bool;
@@ -92,7 +102,9 @@ pub trait Ledger: Send + Sync {
 // ---------------------------------------------------------------------------
 
 struct FakeState {
-    balances: HashMap<[u8; PUBKEY_LEN], u64>,
+    /// Composite key `(pubkey, currency)` → balance in minor units. A single account may hold
+    /// multiple currencies independently — they're different assets, not one pool.
+    balances: HashMap<([u8; PUBKEY_LEN], Currency), u64>,
     spent: HashSet<[u8; NONCE_LEN]>,
 }
 
@@ -105,7 +117,8 @@ pub struct FakeLedger {
 }
 
 impl FakeLedger {
-    /// Pre-fund the two demo accounts and set the per-transaction cap. Uses the wall clock.
+    /// Pre-fund the two demo accounts in `DEMO_USD` and set the per-transaction cap. Uses the wall
+    /// clock.
     pub fn new(
         account_a: [u8; PUBKEY_LEN],
         balance_a: u64,
@@ -132,9 +145,15 @@ impl FakeLedger {
         per_tx_cap: u64,
         clock: Box<dyn Clock>,
     ) -> Self {
+        // Pre-funding is in DEMO_USD — the demo ledger's only asset. A real ledger's init would
+        // carry the currency alongside each balance; here there's just one.
         let mut balances = HashMap::new();
-        balances.insert(account_a, balance_a);
-        balances.insert(account_b, balance_b);
+        if balance_a > 0 {
+            balances.insert((account_a, DEMO_USD), balance_a);
+        }
+        if balance_b > 0 {
+            balances.insert((account_b, DEMO_USD), balance_b);
+        }
         FakeLedger {
             state: Mutex::new(FakeState {
                 balances,
@@ -146,9 +165,9 @@ impl FakeLedger {
     }
 
     /// Read a balance (test/demo introspection; not part of the trait).
-    pub fn balance_of(&self, pubkey: &[u8; PUBKEY_LEN]) -> u64 {
+    pub fn balance_of(&self, pubkey: &[u8; PUBKEY_LEN], currency: Currency) -> u64 {
         let s = self.state.lock().unwrap();
-        *s.balances.get(pubkey).unwrap_or(&0)
+        *s.balances.get(&(*pubkey, currency)).unwrap_or(&0)
     }
 }
 
@@ -166,19 +185,21 @@ impl Ledger for FakeLedger {
             .map_err(|e: CodecError| LedgerError::Rejected(format!("decode: {e:?}")))?;
         let sig_ok = sa.verify();
         let now = self.clock.now_secs();
+        let currency = sa.auth.currency;
 
         // Single critical section: read balance/nonce, validate, commit atomically — exactly the
-        // canister's `pay` body.
+        // canister's `pay` body. Lookups are keyed by (pubkey, currency) — debiting/crediting the
+        // asset the authorization actually names.
         let mut s = self.state.lock().unwrap();
         let from = sa.auth.from;
-        let balance = *s.balances.get(&from).unwrap_or(&0);
+        let balance = *s.balances.get(&(from, currency)).unwrap_or(&0);
         let nonce_seen = s.spent.contains(&sa.auth.nonce);
 
         validate(&sa.auth, now, self.per_tx_cap, balance, nonce_seen, sig_ok).map_err(rejected)?;
 
         let new_from = balance - sa.auth.amount;
-        s.balances.insert(from, new_from);
-        *s.balances.entry(sa.auth.to).or_insert(0) += sa.auth.amount;
+        s.balances.insert((from, currency), new_from);
+        *s.balances.entry((sa.auth.to, currency)).or_insert(0) += sa.auth.amount;
         s.spent.insert(sa.auth.nonce);
 
         Ok(Receipt {
@@ -190,13 +211,18 @@ impl Ledger for FakeLedger {
         })
     }
 
-    async fn balance(&self, pubkey: [u8; PUBKEY_LEN]) -> Result<u64, LedgerError> {
-        Ok(self.balance_of(&pubkey))
+    async fn balance(&self, pubkey: [u8; PUBKEY_LEN], currency: Currency) -> Result<u64, LedgerError> {
+        Ok(self.balance_of(&pubkey, currency))
     }
 
-    async fn mint(&self, to: [u8; PUBKEY_LEN], amount: u64) -> Result<u64, LedgerError> {
+    async fn mint(
+        &self,
+        to: [u8; PUBKEY_LEN],
+        currency: Currency,
+        amount: u64,
+    ) -> Result<u64, LedgerError> {
         let mut s = self.state.lock().unwrap();
-        let bal = s.balances.entry(to).or_insert(0);
+        let bal = s.balances.entry((to, currency)).or_insert(0);
         *bal = bal.saturating_add(amount);
         Ok(*bal)
     }
@@ -247,12 +273,17 @@ impl<L: Ledger> Ledger for FlakyLedger<L> {
         self.inner.pay(wire).await
     }
 
-    async fn balance(&self, pubkey: [u8; PUBKEY_LEN]) -> Result<u64, LedgerError> {
-        self.inner.balance(pubkey).await
+    async fn balance(&self, pubkey: [u8; PUBKEY_LEN], currency: Currency) -> Result<u64, LedgerError> {
+        self.inner.balance(pubkey, currency).await
     }
 
-    async fn mint(&self, to: [u8; PUBKEY_LEN], amount: u64) -> Result<u64, LedgerError> {
-        self.inner.mint(to, amount).await
+    async fn mint(
+        &self,
+        to: [u8; PUBKEY_LEN],
+        currency: Currency,
+        amount: u64,
+    ) -> Result<u64, LedgerError> {
+        self.inner.mint(to, currency, amount).await
     }
 
     async fn healthy(&self) -> bool {

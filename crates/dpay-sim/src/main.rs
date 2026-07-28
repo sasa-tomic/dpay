@@ -5,8 +5,8 @@
 //! Then it shows idempotency (a double-submit charges once) and rejects a stale authorization.
 //! It asserts every balance, so `just sim` doubles as an end-to-end test.
 
-use candid::{decode_one, encode_one, CandidType, Principal};
-use dpay_core::{generate_keypair, Authorization, SignedAuthorization};
+use candid::{decode_one, encode_args, encode_one, CandidType, Principal};
+use dpay_core::{generate_keypair, Authorization, DEMO_USD, SignedAuthorization};
 use pocket_ic::{PocketIc, Time};
 use serde::Deserialize;
 use std::time::Duration;
@@ -56,7 +56,7 @@ fn submit(pic: &PocketIc, can: Principal, wire: Vec<u8>) -> Result<PayReceipt, S
 
 fn balance(pic: &PocketIc, can: Principal, pk: [u8; 32]) -> u64 {
     let reply = pic
-        .query_call(can, Principal::anonymous(), "balance_of", encode_one(&pk.to_vec()).unwrap())
+        .query_call(can, Principal::anonymous(), "balance_of", encode_args((pk.to_vec(), DEMO_USD)).unwrap())
         .expect("balance_of rejected");
     decode_one::<u64>(&reply).unwrap()
 }
@@ -95,7 +95,7 @@ fn main() {
 
     println!("  {} merchant enters {} and shows a request QR", cyan("1."), bold(&usd(amount)));
     println!("  {} {} payer scans it, sees \"Pay {} to Café Demo\", approves", cyan("2."), bold("[airplane mode]"), usd(amount));
-    let sa = SignedAuthorization::new(&payer_sk, Authorization { from: payer, to: merchant, amount, nonce: request_id, expiry });
+    let sa = SignedAuthorization::new(&payer_sk, Authorization { from: payer, to: merchant, amount, nonce: request_id, expiry, currency: DEMO_USD });
     let qr = sa.encode();
     println!("     {}", dim(&format!("signed offline -> authorization QR ({} chars): {}…", qr.len(), &qr[..28])));
     println!("  {} merchant scans the signed QR and submits to the ledger", cyan("3."));
@@ -130,7 +130,7 @@ fn main() {
 
     // A stale authorization is refused.
     println!("  {} a stale (expired) authorization is presented", cyan("\u{23f1}"));
-    let stale = SignedAuthorization::new(&payer_sk, Authorization { from: payer, to: merchant, amount, nonce: [0x22u8; 16], expiry: T0_SECS + 30 });
+    let stale = SignedAuthorization::new(&payer_sk, Authorization { from: payer, to: merchant, amount, nonce: [0x22u8; 16], expiry: T0_SECS + 30, currency: DEMO_USD });
     pic.advance_time(Duration::from_secs(31));
     pic.tick();
     match submit(&pic, can, stale.to_wire().to_vec()) {

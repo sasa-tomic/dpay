@@ -114,20 +114,23 @@ async function health(){
 }
 setInterval(health,3000); health();
 
-// --- request encoding (matches dpay_core::PaymentRequest: to|amount_le|nonce|expiry_le) ---
+// --- request encoding (matches dpay_core::PaymentRequest: to|amount_le|nonce|expiry_le|currency_le) ---
 function hexToBytes(hex,buf,off){ for(let i=0;i<hex.length/2;i++) buf[off+i]=parseInt(hex.substr(i*2,2),16); }
 function bytesToHex(b){ return [...b].map(x=>x.toString(16).padStart(2,'0')).join(''); }
+function writeU32LE(buf,off,n){ for(let i=0;i<4;i++){ buf[off+i]=n&0xff; n=Math.floor(n/256); } }
 function writeU64LE(buf,off,n){ for(let i=0;i<8;i++){ buf[off+i]=n&0xff; n=Math.floor(n/256); } }
 function b64url(bytes){ let s=''; for(const b of bytes) s+=String.fromCharCode(b); return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
 function b64urlDecode(s){ s=s.replace(/-/g,'+').replace(/_/g,'/'); while(s.length%4)s+='='; const bin=atob(s); const b=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++)b[i]=bin.charCodeAt(i); return b; }
 function randNonceHex(){ const a=new Uint8Array(16); crypto.getRandomValues(a); return bytesToHex(a); }
-function encodeRequest(toHex, cents, nonceHex, expiry){
-  const b=new Uint8Array(64);
-  hexToBytes(toHex,b,0); writeU64LE(b,32,cents); hexToBytes(nonceHex,b,40); writeU64LE(b,56,expiry);
+const DEMO_USD = 0;
+function encodeRequest(toHex, cents, nonceHex, expiry, currency){
+  const c = currency===undefined ? DEMO_USD : currency;
+  const b=new Uint8Array(68);
+  hexToBytes(toHex,b,0); writeU64LE(b,32,cents); hexToBytes(nonceHex,b,40); writeU64LE(b,56,expiry); writeU32LE(b,64,c);
   return b64url(b);
 }
-// The signed wire is from(32)|to(32)|amount(8)|nonce(16)@72|expiry(8)|sig(64)|from_pub(32) = 192 bytes.
-function nonceOfSigned(qr){ try { const w=b64urlDecode(qr.trim()); return w.length===192 ? bytesToHex(w.slice(72,88)) : null; } catch { return null; } }
+// The signed wire is from(32)|to(32)|amount(8)|nonce(16)@72|expiry(8)|currency_le(4)|sig(64)|from_pub(32) = 196 bytes.
+function nonceOfSigned(qr){ try { const w=b64urlDecode(qr.trim()); return w.length===196 ? bytesToHex(w.slice(72,88)) : null; } catch { return null; } }
 function toCents(s){ const n=Math.round(parseFloat(s||'0')*100); return Number.isFinite(n)&&n>0?n:0; }
 
 function createRequest(){

@@ -1,7 +1,7 @@
 //! nfc — NFC (ISO 7816-4 / ISO-DEP) transport framing for dpay.
 //!
 //! This module is a **pure, panic-free byte codec**. It carries the *exact same bytes* the QR path
-//! already moves — the 64-byte [`PaymentRequest`](crate::PaymentRequest) and the 192-byte signed
+//! already moves — the 68-byte [`PaymentRequest`](crate::PaymentRequest) and the 196-byte signed
 //! wire ([`SignedAuthorization::to_wire`](crate::SignedAuthorization::to_wire)) — over the APDU
 //! exchange an Android **HCE** card (the offline payer) and an NFC **reader** (the online merchant)
 //! use. No crypto or policy lives here: the payer still signs with [`crate::sign`] and the merchant
@@ -54,7 +54,7 @@ pub const PROTO_VERSION: u8 = 1;
 
 /// Default max dpay-payload bytes per frame (excludes the 4-byte frame header and APDU overhead).
 /// Chosen conservatively so a frame + header + APDU framing stays under Android's smallest realistic
-/// `IsoDep` max-transceive length. Both live payloads (64 B request, 192 B wire) fit in one frame.
+/// `IsoDep` max-transceive length. Both live payloads (68 B request, 196 B wire) fit in one frame.
 pub const DEFAULT_MAX_CHUNK: usize = 240;
 
 /// Hard ceiling on a reassembled payload — the `total_len` header is a `u16`, and this also bounds
@@ -1339,7 +1339,7 @@ mod tests {
     }
 
     fn sample_request() -> Vec<u8> {
-        PaymentRequest { to: [7u8; 32], amount: 4200, nonce: [9u8; 16], expiry: 4102444800 }
+        PaymentRequest { to: [7u8; 32], amount: 4200, nonce: [9u8; 16], expiry: 4102444800, currency: crate::DEMO_USD }
             .to_bytes()
             .to_vec()
     }
@@ -1593,7 +1593,7 @@ mod signed_tests {
     fn real_signed_wire() -> (Vec<u8>, SignedAuthorization) {
         let sk = generate_keypair();
         let from = sk.verifying_key().to_bytes();
-        let auth = Authorization { from, to: [7u8; 32], amount: 4200, nonce: [1u8; 16], expiry: 4102444800 };
+        let auth = Authorization { from, to: [7u8; 32], amount: 4200, nonce: [1u8; 16], expiry: 4102444800, currency: crate::DEMO_USD };
         let se = SignedAuthorization::new(&sk, auth);
         (se.to_wire().to_vec(), se)
     }
@@ -1603,7 +1603,7 @@ mod signed_tests {
     #[test]
     fn signed_wire_survives_nfc_and_verifies() {
         let (wire, se) = real_signed_wire();
-        let req = PaymentRequest { to: se.auth.to, amount: se.auth.amount, nonce: se.auth.nonce, expiry: se.auth.expiry }
+        let req = PaymentRequest { to: se.auth.to, amount: se.auth.amount, nonce: se.auth.nonce, expiry: se.auth.expiry, currency: se.auth.currency }
             .to_bytes()
             .to_vec();
 

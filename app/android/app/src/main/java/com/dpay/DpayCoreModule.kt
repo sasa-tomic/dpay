@@ -51,7 +51,7 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         }
     }
 
-    /** Build + sign the authorization OFFLINE; returns the 192-byte wire as hex. */
+    /** Build + sign the authorization OFFLINE; returns the 196-byte wire as hex. */
     @ReactMethod
     fun signAuthorization(
         secretHex: String,
@@ -59,6 +59,7 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         amount: Double,
         nonceHex: String,
         expiry: Double,
+        currency: Double,
         promise: Promise,
     ) {
         try {
@@ -68,6 +69,7 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
                 amount.toLong().toULong(),
                 unhex(nonceHex),
                 expiry.toLong().toULong(),
+                currency.toInt().toUInt(),
             )
             promise.resolve(hex(wire))
         } catch (e: Throwable) {
@@ -75,19 +77,19 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         }
     }
 
-    /** Receiver side: encode a payment request {to, amount, nonce, expiry} to a base64url string. */
+    /** Receiver side: encode a payment request {to, amount, nonce, expiry, currency} to a base64url string. */
     @ReactMethod
-    fun encodeRequest(toHex: String, amount: Double, nonceHex: String, expiry: Double, promise: Promise) {
+    fun encodeRequest(toHex: String, amount: Double, nonceHex: String, expiry: Double, currency: Double, promise: Promise) {
         try {
             promise.resolve(
-                uniffi.dpay_ffi.encodeRequest(unhex(toHex), amount.toLong().toULong(), unhex(nonceHex), expiry.toLong().toULong()),
+                uniffi.dpay_ffi.encodeRequest(unhex(toHex), amount.toLong().toULong(), unhex(nonceHex), expiry.toLong().toULong(), currency.toInt().toUInt()),
             )
         } catch (e: Throwable) {
             promise.reject("dpay_core", e)
         }
     }
 
-    /** Payer side: decode a scanned merchant request QR into {toHex, amount, nonceHex, expiry}. */
+    /** Payer side: decode a scanned merchant request QR into {toHex, amount, nonceHex, expiry, currency}. */
     @ReactMethod
     fun decodeRequest(qr: String, promise: Promise) {
         try {
@@ -97,6 +99,7 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
             out.putDouble("amount", r.amount.toDouble())
             out.putString("nonceHex", hex(r.nonce))
             out.putDouble("expiry", r.expiry.toDouble())
+            out.putInt("currency", r.currency.toInt())
             promise.resolve(out)
         } catch (e: Throwable) {
             promise.reject("dpay_core", e)

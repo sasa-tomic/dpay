@@ -5,7 +5,7 @@
 //! and have `POCKET_IC_BIN` set to the vendored server binary (third_party/bin/pocket-ic).
 
 use candid::{decode_one, encode_args, encode_one, CandidType, Principal};
-use dpay_core::{generate_keypair, Authorization, SignedAuthorization};
+use dpay_core::{generate_keypair, Authorization, SignedAuthorization, Currency, DEMO_USD};
 use ed25519_dalek::SigningKey;
 use pocket_ic::{PocketIc, Time};
 use serde::Deserialize;
@@ -69,7 +69,7 @@ fn signed(
     nonce: [u8; 16],
     expiry: u64,
 ) -> Vec<u8> {
-    let auth = Authorization { from, to, amount, nonce, expiry };
+    let auth = Authorization { from, to, amount, nonce, expiry, currency: DEMO_USD };
     SignedAuthorization::new(sk, auth).to_wire().to_vec()
 }
 
@@ -81,8 +81,18 @@ fn pay(pic: &PocketIc, can: Principal, wire: Vec<u8>) -> Result<PayReceipt, Stri
 }
 
 fn balance(pic: &PocketIc, can: Principal, pk: [u8; 32]) -> u64 {
+    balance_cur(pic, can, pk, DEMO_USD)
+}
+
+/// Balance of `pk` in an arbitrary `currency` — used to prove per-currency segregation.
+fn balance_cur(pic: &PocketIc, can: Principal, pk: [u8; 32], currency: Currency) -> u64 {
     let reply = pic
-        .query_call(can, Principal::anonymous(), "balance_of", encode_one(&pk.to_vec()).unwrap())
+        .query_call(
+            can,
+            Principal::anonymous(),
+            "balance_of",
+            encode_args((pk.to_vec(), currency)).unwrap(),
+        )
         .expect("balance_of query rejected");
     decode_one::<u64>(&reply).unwrap()
 }
@@ -143,6 +153,55 @@ fn insufficient_balance_is_rejected() {
     assert_eq!(balance(&pic, can, merch), 0);
 }
 
+/// The headline property of the multi-currency ledger: funds in one currency can never be spent,
+/// debited, or credited as another. A balance in currency X is invisible to a payment in currency Y,
+/// and vice versa. This is the only test that exercises a non-DEMO_USD currency end-to-end.
+#[test]
+fn balances_are_isolated_per_currency() {
+    let (pic, can, sk, payer, merch) = setup();
+    let other: Currency = 1; // a non-DEMO currency
+
+    // Payer opens with INIT_A in DEMO_USD; both accounts are empty in `other`.
+    assert_eq!(balance_cur(&pic, can, payer, other), 0);
+    assert_eq!(balance_cur(&pic, can, merch, other), 0);
+
+    // Faucet-mint `other` to the payer. The DEMO_USD column must not move.
+    assert_eq!(
+        mint_cur(&pic, can, Principal::anonymous(), payer, other, 4_000).expect("mint other ok"),
+        4_000
+    );
+    assert_eq!(balance_cur(&pic, can, payer, other), 4_000);
+    assert_eq!(balance(&pic, can, payer), INIT_A);
+
+    // A payment *signed in `other`* draws only from the `other` column. Currency stays bound to
+    // what the payer signed — the canister never crosses the wires.
+    let expiry = T0_SECS + 120;
+    let auth = Authorization {
+        from: payer,
+        to: merch,
+        amount: 1_500,
+        nonce: [5u8; 16],
+        expiry,
+        currency: other,
+    };
+    let wire = SignedAuthorization::new(&sk, auth).to_wire().to_vec();
+    let r = pay(&pic, can, wire).expect("cross-currency-isolation pay should succeed");
+    assert_eq!(r.amount, 1_500);
+
+    // `other` moved 4000 -> 2500 (payer) / 1500 (merchant); DEMO_USD is untouched on both sides.
+    assert_eq!(balance_cur(&pic, can, payer, other), 2_500);
+    assert_eq!(balance_cur(&pic, can, merch, other), 1_500);
+    assert_eq!(balance(&pic, can, payer), INIT_A);
+    assert_eq!(balance(&pic, can, merch), 0);
+
+    // Conversely, the payer cannot spend DEMO_USD they don't have *in DEMO_USD*, even though they
+    // hold plenty of `other`. The cap check passed in DEMO_USD is on the DEMO_USD column only.
+    let res = pay(&pic, can, signed(&sk, payer, merch, INIT_A + 1, [6u8; 16], expiry));
+    assert!(res.is_err(), "must not draw from another currency's balance: {res:?}");
+    assert_eq!(balance(&pic, can, payer), INIT_A);
+    assert_eq!(balance_cur(&pic, can, payer, other), 2_500);
+}
+
 #[test]
 fn upgrade_preserves_balances_and_nonces() {
     let (pic, can, sk, payer, merch) = setup();
@@ -167,9 +226,8 @@ fn upgrade_preserves_balances_and_nonces() {
     assert_eq!(balance(&pic, can, payer), 7_000);
 }
 
-/// Like [`setup`], but transfers control to a specific `operator` principal (removing anonymous as a
-/// controller) so `mint` authorization can be exercised as controller vs. not.
-fn setup_minter(operator: Principal) -> (PocketIc, Principal, [u8; 32]) {
+/// Set up a fresh canister with two zero-balance accounts (no pre-funding) for faucet tests.
+fn setup_faucet() -> (PocketIc, Principal, [u8; 32]) {
     let pic = PocketIc::new();
     pic.set_time(Time::from_nanos_since_unix_epoch(T0_NANOS));
     let acct = generate_keypair().verifying_key().to_bytes();
@@ -184,8 +242,6 @@ fn setup_minter(operator: Principal) -> (PocketIc, Principal, [u8; 32]) {
         per_tx_cap: CAP,
     };
     pic.install_canister(can, wasm_bytes(), encode_one(&init).unwrap(), None);
-    pic.set_controllers(can, Some(Principal::anonymous()), vec![operator])
-        .expect("set_controllers should succeed (anonymous is the current controller)");
     (pic, can, acct)
 }
 
@@ -196,29 +252,47 @@ fn mint(
     to: [u8; 32],
     amount: u64,
 ) -> Result<u64, String> {
-    match pic.update_call(can, sender, "mint", encode_args((to.to_vec(), amount)).unwrap()) {
+    mint_cur(pic, can, sender, to, DEMO_USD, amount)
+}
+
+/// Mint in an arbitrary `currency` — used to prove per-currency segregation.
+fn mint_cur(
+    pic: &PocketIc,
+    can: Principal,
+    sender: Principal,
+    to: [u8; 32],
+    currency: Currency,
+    amount: u64,
+) -> Result<u64, String> {
+    match pic.update_call(
+        can,
+        sender,
+        "mint",
+        encode_args((to.to_vec(), currency, amount)).unwrap(),
+    ) {
         Ok(reply) => Ok(decode_one::<u64>(&reply).unwrap()),
         Err(e) => Err(format!("{e:?}")),
     }
 }
 
 #[test]
-fn mint_only_by_controller() {
-    let operator = Principal::from_slice(&[7u8; 29]);
-    let (pic, can, acct) = setup_minter(operator);
+fn mint_open_to_anyone() {
+    let (pic, can, acct) = setup_faucet();
 
-    // The controller can mint.
-    assert_eq!(mint(&pic, can, operator, acct, 5_000).expect("controller mint ok"), 5_000);
-    assert_eq!(balance(&pic, can, acct), 5_000);
-
-    // A non-controller cannot — nor can the anonymous principal the relay uses.
-    let stranger = Principal::from_slice(&[8u8; 29]);
-    assert!(mint(&pic, can, stranger, acct, 1_000).is_err(), "stranger mint must be rejected");
-    assert!(
-        mint(&pic, can, Principal::anonymous(), acct, 1_000).is_err(),
-        "anonymous mint must be rejected"
+    // The anonymous principal (what the relay uses) can mint — the faucet is open.
+    assert_eq!(
+        mint(&pic, can, Principal::anonymous(), acct, 5_000).expect("anonymous mint ok"),
+        5_000
     );
-
-    // The rejected mints changed nothing.
     assert_eq!(balance(&pic, can, acct), 5_000);
+
+    // Any other principal can mint too. The demo currency is worthless play money; this is the PoC
+    // stand-in for a real on-ramp (issuer-gated minting comes when funding moves on-chain, see
+    // FUNDING.md). Mints accumulate.
+    let stranger = Principal::from_slice(&[8u8; 29]);
+    assert_eq!(
+        mint(&pic, can, stranger, acct, 1_000).expect("stranger mint ok"),
+        6_000
+    );
+    assert_eq!(balance(&pic, can, acct), 6_000);
 }

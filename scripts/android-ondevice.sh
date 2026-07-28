@@ -11,7 +11,8 @@ ROOT="$PWD"
 
 export ANDROID_HOME="${ANDROID_HOME:-/home/sat/Android/Sdk}"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
-export JAVA_HOME="${JAVA_HOME:-$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")}"
+# Respect a valid JAVA_HOME; otherwise (unset, or an inherited-but-bogus value) ask the JVM itself.
+[ -x "${JAVA_HOME:-}/bin/javac" ] || export JAVA_HOME="$(java -XshowSettings:properties -version 2>&1 | sed -n 's/.*java\.home = //p')"
 export PATH="$ANDROID_HOME/platform-tools:$PATH"
 
 # Cached Gradle 8.9 distribution (matches AGP 8.7.3). Glob the hashed dir.
