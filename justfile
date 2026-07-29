@@ -42,6 +42,13 @@ icrc-demo: build-canister-icrc
 icrc-deploy:
     bash scripts/dfx-deploy-icrc.sh
 
+# MAINNET deploy of the dpay-icrc canister into the LIVE ic-icrc1-ledger on the IC `ic` network.
+# Spends REAL cycles + moves REAL state; self-asserting end-to-end (mint -> settle -> replay-refused
+# -> balance check) on mainnet. Read scripts/dfx-deploy-icrc-mainnet.sh before running. Resumable
+# via DPAY_ICRC_ID=<existing id>. See ICRC3_INTEGRATION.md.
+icrc-deploy-mainnet:
+    bash scripts/dfx-deploy-icrc-mainnet.sh
+
 # relay tests (native, in-memory FakeLedger — no network)
 test-relay:
     cargo nextest run -p dpay-relay
