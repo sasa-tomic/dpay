@@ -107,3 +107,52 @@ export function rejectionMessage(reason: string | null | undefined): string {
 export function isNonceReused(reason: string | null | undefined): boolean {
   return /nonce/i.test(reason || '');
 }
+
+// --- canister-signed receipt (R2 outcome attestation) ----------------------------------------
+// The ledger/canister signs a canonical encoding of the settled outcome; the app verifies that
+// signature (via DpayCore) before showing "Paid ✓" so the outcome rests on a canister/ledger-
+// authenticated signature, not merchant/relay honesty. This pure helper builds the EXACT bytes that
+// are signed — it MUST mirror `dpay_core::ReceiptClaim::signing_bytes` (FROZEN 108-byte LE layout):
+//   nonce(16) | from(32) | to(32) | amount_le(8) | currency_le(4) | block_index_le(8) | settle_ts_le(8)
+// Kept here (pure, unit-tested) so the web/e2e shim and any TS caller share one layout source; the
+// on-device path builds the same bytes inside the Rust core (dpay-ffi `verify_receipt_sig`).
+
+/** Decode a hex string (no 0x prefix) to bytes. Pure; returns [] on a malformed/odd-length string. */
+export function hexToBytes(hex: string): Uint8Array {
+  const h = (hex || '').toLowerCase().replace(/^0x/, '');
+  if (h.length % 2 !== 0) return new Uint8Array(0);
+  const out = new Uint8Array(h.length / 2);
+  for (let i = 0; i < out.length; i++) {
+    out[i] = parseInt(h.substr(i * 2, 2), 16);
+  }
+  return out;
+}
+
+/** Length of the canonical receipt claim (== dpay_core::RECEIPT_CLAIM_LEN). */
+export const RECEIPT_CLAIM_LEN = 16 + 32 + 32 + 8 + 4 + 8 + 8; // 108
+
+/** The canonical 108-byte little-endian encoding of a settled-payment outcome claim. */
+export function receiptClaimBytes(r: {
+  nonceHex: string;
+  fromHex: string;
+  toHex: string;
+  amount: number;
+  currency: number;
+  blockIndex: number;
+  settleTs: number;
+}): Uint8Array {
+  const nonce = hexToBytes(r.nonceHex);
+  const from = hexToBytes(r.fromHex);
+  const to = hexToBytes(r.toHex);
+  const b = new Uint8Array(RECEIPT_CLAIM_LEN);
+  const dv = new DataView(b.buffer);
+  let o = 0;
+  b.set(nonce, o); o += 16;
+  b.set(from, o); o += 32;
+  b.set(to, o); o += 32;
+  dv.setBigUint64(o, BigInt(r.amount), true); o += 8;
+  dv.setUint32(o, r.currency >>> 0, true); o += 4;
+  dv.setBigUint64(o, BigInt(r.blockIndex), true); o += 8;
+  dv.setBigUint64(o, BigInt(r.settleTs), true);
+  return b;
+}

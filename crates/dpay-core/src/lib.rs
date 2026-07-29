@@ -72,6 +72,72 @@ pub fn verify(from_pub: &[u8; PUBKEY_LEN], auth: &Authorization, sig: &Signature
     }
 }
 
+// --- canister-signed receipt (outcome attestation) --------------------------------------------
+// The payer's `Authorization` signature binds the TERMS (from/to/amount/nonce/currency). The
+// receipt signature binds the OUTCOME: the canister attests that this authorization settled on its
+// ledger at `block_index` at `settle_ts`. A merchant/relay cannot forge it (only the canister holds
+// the receipt Ed25519 secret), so the payer's "Paid ✓" rests on a canister-authenticated outcome,
+// not merchant/relay honesty. See CODEBASE_ANALYSIS risk 3.
+
+/// A canister-signed attestation of a SETTLED payment's outcome.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ReceiptClaim {
+    pub nonce: [u8; NONCE_LEN],
+    pub from: [u8; PUBKEY_LEN],
+    pub to: [u8; PUBKEY_LEN],
+    pub amount: u64,
+    pub currency: Currency,
+    /// The ICRC ledger block index where the transfer landed (outcome proof).
+    pub block_index: u64,
+    /// Unix seconds the canister recorded the settle.
+    pub settle_ts: u64,
+}
+
+/// Canonical receipt signing length: `nonce(16) | from(32) | to(32) | amount_le(8) | currency_le(4)
+/// | block_index_le(8) | settle_ts_le(8)` = 108 bytes. FROZEN layout — single-sourced here; the
+/// canister and the relay's FakeLedger both call [`ReceiptClaim::signing_bytes`], and the app
+/// mirrors this exact layout (the `receipt` section of `dfx/wire_layout.json`).
+pub const RECEIPT_CLAIM_LEN: usize = NONCE_LEN + PUBKEY_LEN + PUBKEY_LEN + 8 + 4 + 8 + 8;
+
+impl ReceiptClaim {
+    /// Canonical, deterministic 108-byte little-endian encoding of the outcome claim.
+    /// Field order is frozen: `nonce | from | to | amount_le | currency_le | block_index_le |
+    /// settle_ts_le`.
+    pub fn signing_bytes(&self) -> [u8; RECEIPT_CLAIM_LEN] {
+        let mut b = [0u8; RECEIPT_CLAIM_LEN];
+        let mut o = 0;
+        b[o..o + NONCE_LEN].copy_from_slice(&self.nonce);
+        o += NONCE_LEN;
+        b[o..o + PUBKEY_LEN].copy_from_slice(&self.from);
+        o += PUBKEY_LEN;
+        b[o..o + PUBKEY_LEN].copy_from_slice(&self.to);
+        o += PUBKEY_LEN;
+        b[o..o + 8].copy_from_slice(&self.amount.to_le_bytes());
+        o += 8;
+        b[o..o + 4].copy_from_slice(&self.currency.to_le_bytes());
+        o += 4;
+        b[o..o + 8].copy_from_slice(&self.block_index.to_le_bytes());
+        o += 8;
+        b[o..o + 8].copy_from_slice(&self.settle_ts.to_le_bytes());
+        b
+    }
+}
+
+/// Sign a receipt claim with a canister receipt `SigningKey` (the canister holds the secret half;
+/// the FakeLedger test boundary holds a stable test key). Returns the raw 64-byte signature.
+pub fn sign_receipt(key: &SigningKey, claim: &ReceiptClaim) -> Signature {
+    key.sign(&claim.signing_bytes())
+}
+
+/// Verify a canister receipt `sig` (raw 64 bytes) over `claim` under the canister's 32-byte receipt
+/// public key. `false` on any bad input (bad key/sig shape, or signature mismatch). Uses
+/// `verify_strict` (rejects weak / small-order keys), matching `verify`.
+pub fn verify_receipt(pubkey: &[u8; PUBKEY_LEN], claim: &ReceiptClaim, sig: &[u8; SIG_LEN]) -> bool {
+    let Ok(vk) = VerifyingKey::from_bytes(pubkey) else { return false };
+    let Ok(s) = Signature::from_slice(sig) else { return false };
+    vk.verify_strict(&claim.signing_bytes(), &s).is_ok()
+}
+
 /// Generate a fresh signing key. **Native only** (needs an OS CSPRNG).
 #[cfg(feature = "rng")]
 pub fn generate_keypair() -> SigningKey {
@@ -450,5 +516,49 @@ mod tests {
                 prop_assert_eq!(bal[&pa] + bal[&pb], total0);
             }
         }
+    }
+
+    #[test]
+    fn receipt_claim_sign_verify_and_tamper() {
+        let sk = generate_keypair();
+        let pk = sk.verifying_key().to_bytes();
+        let claim = ReceiptClaim {
+            nonce: [0x2a; 16],
+            from: [0x11; 32],
+            to: [0x22; 32],
+            amount: 2_500,
+            currency: DEMO_USD,
+            block_index: 7,
+            settle_ts: 1_800_000_120,
+        };
+        let sig = sign_receipt(&sk, &claim);
+        let sig_bytes = sig.to_bytes();
+
+        // Round-trip length + verifies under the right key.
+        assert_eq!(claim.signing_bytes().len(), RECEIPT_CLAIM_LEN);
+        assert_eq!(RECEIPT_CLAIM_LEN, 16 + 32 + 32 + 8 + 4 + 8 + 8);
+        assert!(verify_receipt(&pk, &claim, &sig_bytes));
+
+        // Wrong key fails.
+        let other = generate_keypair().verifying_key().to_bytes();
+        assert!(!verify_receipt(&other, &claim, &sig_bytes));
+
+        // Tampering ANY field breaks verification (outcome integrity — a lying merchant can't alter
+        // the amount/block/ts and keep a valid sig).
+        let mut tampered = claim;
+        tampered.amount = 2_501;
+        assert!(!verify_receipt(&pk, &tampered, &sig_bytes), "tampered amount must fail");
+        let mut t2 = claim;
+        t2.nonce[0] ^= 0xFF;
+        assert!(!verify_receipt(&pk, &t2, &sig_bytes), "tampered nonce must fail");
+        let mut t3 = claim;
+        t3.block_index = 999;
+        assert!(!verify_receipt(&pk, &t3, &sig_bytes), "tampered block_index must fail");
+        let mut t4 = claim;
+        t4.settle_ts += 1;
+        assert!(!verify_receipt(&pk, &t4, &sig_bytes), "tampered settle_ts must fail");
+
+        // A bad sig shape (all-zero) is rejected, not panicked.
+        assert!(!verify_receipt(&pk, &claim, &[0u8; SIG_LEN]));
     }
 }

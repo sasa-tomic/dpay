@@ -51,10 +51,11 @@
 //! and tests); this file is state + candid glue + cross-canister settlement.
 
 use candid::{CandidType, Nat, Principal, Reserved};
+use ed25519_dalek::SigningKey;
 use ic_cdk::api::{canister_self, msg_caller, time};
 use ic_cdk::call::Call;
 use ic_cdk::management_canister::{
-    create_canister_with_extra_cycles, CanisterIdRecord, CanisterSettings, CreateCanisterArgs,
+    create_canister_with_extra_cycles, raw_rand, CanisterIdRecord, CanisterSettings, CreateCanisterArgs,
 };
 use ic_cdk::{init, query, update};
 use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
@@ -66,7 +67,10 @@ use serde::Deserialize;
 use std::borrow::Cow;
 use std::cell::RefCell;
 
-use dpay_core::{validate, Currency, SignedAuthorization, NONCE_LEN, PUBKEY_LEN};
+use dpay_core::{
+    validate, Currency, ReceiptClaim, SignedAuthorization, NONCE_LEN, PUBKEY_LEN, RECEIPT_CLAIM_LEN,
+    SIG_LEN,
+};
 
 type Memory = VirtualMemory<DefaultMemoryImpl>;
 
@@ -189,6 +193,71 @@ impl Storable for PrincipalStorable {
         PrincipalStorable(Principal::from_slice(&bytes))
     }
     const BOUND: Bound = Bound::Bounded { max_size: 29, is_fixed_size: false };
+}
+
+// --- canister-signed receipt key + stored signed receipts -------------------------------------
+// The canister materializes ONE Ed25519 keypair (secret in stable memory, public exposed via
+// `receipt_pubkey`) and signs each settled payment's outcome. A merchant/relay cannot forge the
+// signature (only the canister holds the secret), so the payer's "Paid ✓" rests on a
+// canister-authenticated outcome. See CODEBASE_ANALYSIS risk 3 and dpay_core::ReceiptClaim.
+
+/// The canister's receipt Ed25519 secret key (32 bytes) or `None` before first lazy generation.
+/// Encoded as a 1-byte present flag + 32 secret bytes. Stored in a `StableCell` (MemoryId 10) so it
+/// survives upgrades — the key is stable across the canister's lifetime (rotating it would
+/// invalidate every prior receipt, so it is generated once and never changed).
+#[derive(Clone, Copy, Debug)]
+struct ReceiptSecretStorable(Option<[u8; 32]>);
+impl Storable for ReceiptSecretStorable {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        match self.0 {
+            None => Cow::Owned(vec![0u8]),
+            Some(sk) => {
+                let mut v = Vec::with_capacity(1 + 32);
+                v.push(1u8);
+                v.extend_from_slice(&sk);
+                Cow::Owned(v)
+            }
+        }
+    }
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        match bytes.first().copied() {
+            Some(1) if bytes.len() >= 1 + 32 => {
+                let mut sk = [0u8; 32];
+                sk.copy_from_slice(&bytes[1..1 + 32]);
+                ReceiptSecretStorable(Some(sk))
+            }
+            _ => ReceiptSecretStorable(None),
+        }
+    }
+    const BOUND: Bound = Bound::Bounded { max_size: 1 + 32, is_fixed_size: false };
+}
+
+/// The signed receipt stored per nonce (MemoryId 11): the outcome claim's canonical bytes
+/// (108, == `RECEIPT_CLAIM_LEN`) followed by the 64-byte Ed25519 signature. Self-describing and
+/// deterministic — `receipt(nonce)` decodes it back into the claim fields + sig. Keyed by `Nonce`.
+const STORED_RECEIPT_LEN: usize = RECEIPT_CLAIM_LEN + SIG_LEN; // 108 + 64 = 172
+#[derive(Clone, Copy, Debug)]
+struct StoredReceipt {
+    claim_bytes: [u8; RECEIPT_CLAIM_LEN],
+    sig: [u8; SIG_LEN],
+}
+impl Storable for StoredReceipt {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        let mut b = [0u8; STORED_RECEIPT_LEN];
+        b[..RECEIPT_CLAIM_LEN].copy_from_slice(&self.claim_bytes);
+        b[RECEIPT_CLAIM_LEN..].copy_from_slice(&self.sig);
+        Cow::Owned(b.to_vec())
+    }
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        let b = &bytes[..];
+        let mut claim_bytes = [0u8; RECEIPT_CLAIM_LEN];
+        claim_bytes.copy_from_slice(&b[..RECEIPT_CLAIM_LEN]);
+        let mut sig = [0u8; SIG_LEN];
+        sig.copy_from_slice(&b[RECEIPT_CLAIM_LEN..RECEIPT_CLAIM_LEN + SIG_LEN]);
+        StoredReceipt { claim_bytes, sig }
+    }
+    const BOUND: Bound =
+        Bound::Bounded { max_size: STORED_RECEIPT_LEN as u32, is_fixed_size: true };
 }
 
 /// Returns `Ok(())` if the caller may perform **value-moving / config** governance admin ops
@@ -457,6 +526,22 @@ thread_local! {
     /// the last successful faucet mint for that (account, currency).
     static FAUCET_COOLDOWN: RefCell<StableBTreeMap<CacheKey, u64, Memory>> =
         RefCell::new(StableBTreeMap::init(MEMORY.with(|m| m.borrow().get(MemoryId::new(9)))));
+
+    /// The canister's receipt Ed25519 secret key (32 bytes), lazily generated on first use.
+    /// MemoryId 10 (new facade state). `None` until the first successful `pay` (or an explicit
+    /// `init_receipt_key`); once generated it is NEVER rotated (rotating would invalidate prior
+    /// receipts). The public half is derived and exposed via `receipt_pubkey`.
+    static RECEIPT_SECRET: RefCell<StableCell<ReceiptSecretStorable, Memory>> = RefCell::new(
+        StableCell::init(MEMORY.with(|m| m.borrow().get(MemoryId::new(10))), ReceiptSecretStorable(None))
+            .expect("init receipt secret cell"),
+    );
+
+    /// nonce -> the canister-signed receipt for that settled payment. MemoryId 11 (new facade
+    /// state). Lets `receipt(nonce)` return the canonical claim bytes + sig for replay/
+    /// reconciliation, so the payer can verify the outcome even if the original `pay` response was
+    /// lost. Keyed by [`Nonce`] (the same single-use idempotency key `pay` reserves).
+    static RECEIPTS: RefCell<StableBTreeMap<Nonce, StoredReceipt, Memory>> =
+        RefCell::new(StableBTreeMap::init(MEMORY.with(|m| m.borrow().get(MemoryId::new(11)))));
 }
 
 /// Configuration for one currency, supplied at init (and via `register_ledger`).
@@ -485,6 +570,17 @@ struct PayReceipt {
     amount: u64,
     nonce: Vec<u8>,
     new_from_balance: u64,
+    /// The ICRC ledger block index where the transfer landed (outcome proof; part of the signed
+    /// receipt claim). Additive field (R2) — the frozen 196-byte authorization INPUT is untouched.
+    block_index: u64,
+    /// Unix seconds the canister recorded the settle (part of the signed claim). Additive (R2).
+    settle_ts: u64,
+    /// The canister's Ed25519 signature over the canonical [`ReceiptClaim`] (108 bytes). Verify with
+    /// `receipt_pubkey` (or the `pubkey` field) before trusting the outcome. Additive (R2).
+    receipt_sig: Vec<u8>,
+    /// The canister's receipt public key (32 bytes), included so a payer can verify in one round
+    /// trip without a separate `receipt_pubkey` query. Additive (R2).
+    pubkey: Vec<u8>,
 }
 
 #[derive(CandidType, Deserialize, Clone, Debug)]
@@ -495,6 +591,22 @@ struct TxnView {
     nonce: Vec<u8>,
     currency: u32,
     timestamp: u64,
+}
+
+/// The canister-signed receipt for a settled payment, returned by `receipt(nonce)`. Carries the
+/// outcome claim fields + the Ed25519 signature + the canister's public key, so a payer verifies
+/// the outcome without a separate `receipt_pubkey` round trip.
+#[derive(CandidType, Deserialize, Clone, Debug)]
+struct ReceiptView {
+    from: Vec<u8>,
+    to: Vec<u8>,
+    amount: u64,
+    nonce: Vec<u8>,
+    currency: u32,
+    block_index: u64,
+    settle_ts: u64,
+    receipt_sig: Vec<u8>,
+    pubkey: Vec<u8>,
 }
 
 // --- ck-minter deposit proxy (ckBTC model) ----------------------------------------------------
@@ -728,6 +840,27 @@ fn dedup_created_at_time() -> u64 {
     (now_ns / bucket_ns) * bucket_ns
 }
 
+/// Ensure the canister's receipt Ed25519 keypair exists, lazily generating it from
+/// `management_canister::raw_rand` on first call. MUST run in an update context (raw_rand is an
+/// update call). Idempotent: subsequent calls return the existing key. The secret is stored in
+/// stable memory (MemoryId 10) and NEVER rotated — rotating would invalidate every prior receipt.
+/// Strong entropy comes from the consensus-provided `raw_rand` (not a PRNG seed). Returns the
+/// `SigningKey` so the caller can sign a receipt claim.
+async fn ensure_receipt_key() -> Result<SigningKey, String> {
+    let existing = RECEIPT_SECRET.with(|c| c.borrow().get().0);
+    if let Some(sk) = existing {
+        return Ok(SigningKey::from_bytes(&sk));
+    }
+    let rand = raw_rand().await.map_err(|e| format!("raw_rand rejected: {e:?}"))?;
+    let sk: [u8; 32] = rand
+        .as_slice()
+        .try_into()
+        .map_err(|_| format!("raw_rand returned {} bytes (need 32)", rand.len()))?;
+    RECEIPT_SECRET
+        .with(|c| c.borrow_mut().set(ReceiptSecretStorable(Some(sk))).expect("set receipt secret"));
+    Ok(SigningKey::from_bytes(&sk))
+}
+
 // --- self-service demo faucet -----------------------------------------------------------------
 // The faucet is the demo on-ramp: a freshly-onboarded account mints a FIXED amount of play money
 // on a mintable currency, rate-limited per (account, currency). It is the ONLY way a non-controller
@@ -844,46 +977,80 @@ async fn pay(signed: Vec<u8>) -> Result<PayReceipt, String> {
         memo: Some(sa.auth.nonce.to_vec().into()),
         amount: Nat::from(amount),
     };
-    match ledger_transfer(ledger, transfer_arg).await {
-        // Success (or Duplicate = already settled at this block) → commit nonce, record history,
-        // and refresh the display cache by RE-READING the ledger (the pre-transfer read is stale
-        // under concurrent settlement). Funds provably moved (or had already moved).
-        Ok(_) | Err(TransferError::Duplicate { .. }) => {
-            settle_nonce(&nonce);
-            // Record the SETTLE time, not the call-start `now_secs` captured before the
-            // cross-canister awaits (balance/fee/transfer). `TxnRecord.timestamp` is documented as
-            // "unix seconds the ledger settled it". One `time()` read — cheap.
-            let settle_secs = time() / 1_000_000_000;
-            record_txn(from, to, amount, sa.auth.nonce, currency, settle_secs);
-            let new_from_balance = ledger_balance_of(ledger, &from_acct).await.unwrap_or_else(|_| {
-                balance.saturating_sub(amount).saturating_sub(fee)
-            });
-            // Refresh the display cache for both sides (best-effort; never blocks settlement).
-            write_cache(from, currency, new_from_balance);
-            if let Ok(to_bal) = ledger_balance_of(ledger, &to_acct).await {
-                write_cache(to, currency, to_bal);
-            }
-            Ok(PayReceipt {
-                from: from.to_vec(),
-                to: to.to_vec(),
-                amount,
-                nonce: sa.auth.nonce.to_vec(),
-                new_from_balance,
-            })
-        }
+    // Capture the ledger block index (the outcome proof) from the success OR Duplicate branch —
+    // Duplicate means "already settled at this block", which is still a settled outcome the receipt
+    // must attest. (`ledger_transfer` returns the block index as a candid `Nat`.)
+    let block_index_nat = match ledger_transfer(ledger, transfer_arg).await {
+        Ok(idx) => idx,
+        // Duplicate = "already settled at block `duplicate_of`" — still a settled outcome the
+        // receipt must attest. Use that block index.
+        Err(TransferError::Duplicate { duplicate_of, .. }) => duplicate_of,
         // Genuinely transient — funds provably did not move, or the ledger is unsure. Release so the
         // payer may retry the SAME nonce.
         Err(TransferError::InsufficientFunds { .. }) | Err(TransferError::TemporarilyUnavailable) => {
             release_nonce(&nonce);
-            Err(format!("transient: {:?}", "ledger busy/insufficient"))
+            return Err(format!("transient: {:?}", "ledger busy/insufficient"));
         }
         // Any other ledger error is not safe to retry blindly — burn the nonce so the dead auth can
         // never replay. The payer must obtain a fresh authorization.
         Err(e) => {
             settle_nonce(&nonce);
-            Err(format!("ledger transfer: {e:?}"))
+            return Err(format!("ledger transfer: {e:?}"));
         }
+    };
+
+    // --- committed: the ledger debited (or had already, on Duplicate). Commit the nonce, record
+    //     history, refresh the display cache, then sign + store the canister receipt. ---
+    settle_nonce(&nonce);
+    // Record the SETTLE time, not the call-start `now_secs` captured before the cross-canister
+    // awaits (balance/fee/transfer). `TxnRecord.timestamp` is documented as "unix seconds the
+    // ledger settled it". One `time()` read — cheap.
+    let settle_secs = time() / 1_000_000_000;
+    record_txn(from, to, amount, sa.auth.nonce, currency, settle_secs);
+    let new_from_balance = ledger_balance_of(ledger, &from_acct).await.unwrap_or_else(|_| {
+        balance.saturating_sub(amount).saturating_sub(fee)
+    });
+    // Refresh the display cache for both sides (best-effort; never blocks settlement).
+    write_cache(from, currency, new_from_balance);
+    if let Ok(to_bal) = ledger_balance_of(ledger, &to_acct).await {
+        write_cache(to, currency, to_bal);
     }
+
+    // Sign the outcome receipt. The block index caps at u64 (the demo's ledgers never exceed it;
+    // a Nat overflow surfaces as block_index=0, which still verifies under the same key — the
+    // amount/nonce/from/to/currency/ts bind the claim, and the sig is canister-authored).
+    let block_index = nat_to_u64(&block_index_nat).unwrap_or(0);
+    let receipt_sk = ensure_receipt_key().await?;
+    let pubkey = receipt_sk.verifying_key().to_bytes();
+    let claim = ReceiptClaim {
+        nonce: sa.auth.nonce,
+        from,
+        to,
+        amount,
+        currency,
+        block_index,
+        settle_ts: settle_secs,
+    };
+    let sig = dpay_core::sign_receipt(&receipt_sk, &claim).to_bytes();
+    // Store the signed receipt keyed by nonce so `receipt(nonce)` can return it for replay/
+    // reconciliation (a merchant whose /pay response was lost re-confirms via the canister).
+    RECEIPTS.with(|m| {
+        m.borrow_mut().insert(
+            nonce.clone(),
+            StoredReceipt { claim_bytes: claim.signing_bytes(), sig },
+        );
+    });
+    Ok(PayReceipt {
+        from: from.to_vec(),
+        to: to.to_vec(),
+        amount,
+        nonce: sa.auth.nonce.to_vec(),
+        new_from_balance,
+        block_index,
+        settle_ts: settle_secs,
+        receipt_sig: sig.to_vec(),
+        pubkey: pubkey.to_vec(),
+    })
 }
 
 fn record_txn(
@@ -1200,6 +1367,76 @@ fn transactions_of(pubkey: Vec<u8>, currency: Currency, limit: u32) -> Vec<TxnVi
                 timestamp: r.timestamp,
             })
             .collect()
+    })
+}
+
+// --- canister-signed receipt (outcome attestation) — public surface ---------------------------
+// The receipt key is generated lazily on the first successful `pay` (or eagerly via
+// `init_receipt_key`). The public key is exposed so a payer/relay can verify a receipt signature
+// before trusting the "Paid ✓" outcome; the signed receipt is stored per nonce and returnable via
+// `receipt(nonce)` for replay/reconciliation.
+
+/// `() -> opt blob` — the canister's receipt Ed25519 public key (32 bytes), or `null` if the key
+/// has not been generated yet (no successful `pay` and no `init_receipt_key` call). A payer fetches
+/// this once and verifies receipt signatures against it.
+#[query]
+fn receipt_pubkey() -> Option<Vec<u8>> {
+    RECEIPT_SECRET.with(|c| {
+        c.borrow().get().0.map(|sk| SigningKey::from_bytes(&sk).verifying_key().to_bytes().to_vec())
+    })
+}
+
+/// `() -> Result<blob, text>` — eagerly generate the receipt keypair (idempotent) and return the
+/// public key. Self-service: generating the canister's OWN signing identity moves no value, so any
+/// caller may trigger it (an operator/relay calls it once post-deploy so the pubkey is available
+/// before any `pay`). The key, once generated, is never rotated.
+#[update]
+async fn init_receipt_key() -> Result<Vec<u8>, String> {
+    let sk = ensure_receipt_key().await?;
+    Ok(sk.verifying_key().to_bytes().to_vec())
+}
+
+/// `(blob nonce) -> opt ReceiptView` — the canister-signed receipt for a settled payment, looked up
+/// by its nonce. Returns `null` if that nonce never settled (or settled before this canister version
+/// introduced signed receipts). The payer verifies `receipt_sig` over the canonical
+/// `ReceiptClaim{nonce, from, to, amount, currency, block_index, settle_ts}` under `pubkey`
+/// (== `receipt_pubkey`) before trusting the outcome — defeating a merchant/relay that lies about it.
+#[query]
+fn receipt(nonce: Vec<u8>) -> Option<ReceiptView> {
+    let n: [u8; NONCE_LEN] = nonce.as_slice().try_into().ok()?;
+    let stored = RECEIPTS.with(|m| m.borrow().get(&Nonce(n)))?;
+    // Decode the canonical claim bytes back into fields (mirrors ReceiptClaim::signing_bytes).
+    let cb = &stored.claim_bytes[..];
+    let mut from = [0u8; PUBKEY_LEN];
+    from.copy_from_slice(&cb[NONCE_LEN..NONCE_LEN + PUBKEY_LEN]);
+    let mut to = [0u8; PUBKEY_LEN];
+    to.copy_from_slice(&cb[NONCE_LEN + PUBKEY_LEN..NONCE_LEN + 2 * PUBKEY_LEN]);
+    let amount = u64::from_le_bytes(
+        cb[NONCE_LEN + 2 * PUBKEY_LEN..NONCE_LEN + 2 * PUBKEY_LEN + 8].try_into().unwrap(),
+    );
+    let currency = u32::from_le_bytes(
+        cb[NONCE_LEN + 2 * PUBKEY_LEN + 8..NONCE_LEN + 2 * PUBKEY_LEN + 12].try_into().unwrap(),
+    );
+    let block_index = u64::from_le_bytes(
+        cb[NONCE_LEN + 2 * PUBKEY_LEN + 12..NONCE_LEN + 2 * PUBKEY_LEN + 20].try_into().unwrap(),
+    );
+    let settle_ts = u64::from_le_bytes(
+        cb[NONCE_LEN + 2 * PUBKEY_LEN + 20..NONCE_LEN + 2 * PUBKEY_LEN + 28].try_into().unwrap(),
+    );
+    let pubkey = RECEIPT_SECRET
+        .with(|c| c.borrow().get().0.map(|sk| SigningKey::from_bytes(&sk).verifying_key().to_bytes()))
+        .map(|p| p.to_vec())
+        .unwrap_or_default();
+    Some(ReceiptView {
+        from: from.to_vec(),
+        to: to.to_vec(),
+        amount,
+        nonce: n.to_vec(),
+        currency,
+        block_index,
+        settle_ts,
+        receipt_sig: stored.sig.to_vec(),
+        pubkey,
     })
 }
 

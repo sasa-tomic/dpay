@@ -27,6 +27,26 @@ import {
 
 const {DpayCore, DpayNfc} = NativeModules as {DpayCore: DpayCoreApi; DpayNfc: DpayNfcApi};
 
+// R2: verify a settled receipt's canister/ledger Ed25519 signature before trusting the outcome.
+// Returns true only if `receipt_sig` verifies under `pubkey` over the canonical ReceiptClaim built
+// from the receipt's fields. A merchant/relay cannot forge this; an unverifiable receipt is treated
+// as UNKNOWN (honest, never a fake "Paid ✓"). The nonce match is enforced by the caller.
+async function verifyOutcomeReceipt(receipt: any): Promise<boolean> {
+  const sigHex = receipt?.receipt_sig;
+  const pubHex = receipt?.pubkey;
+  if (typeof sigHex !== 'string' || typeof pubHex !== 'string') return false;
+  try {
+    return await DpayCore.verifyReceiptSig(
+      String(receipt.nonce), String(receipt.from), String(receipt.to),
+      Number(receipt.amount), Number(receipt.currency),
+      Number(receipt.block_index), Number(receipt.settle_ts),
+      sigHex, pubHex,
+    );
+  } catch {
+    return false;
+  }
+}
+
 // NFC tap transport (see android/com/dpay/DpayNfc*). Pay mode = HCE card (payer is tapped);
 // Receive mode = reader (merchant reads the tap). Lifecycle arrives as `DpayNfcEvent`s.
 type DpayNfcApi = {
@@ -67,6 +87,13 @@ type DpayCoreApi = {
   decodeRequest(qr: string): Promise<Req>;
   encodeQr(wireHex: string): Promise<string>;
   verifyWire(wireHex: string): Promise<boolean>;
+  // Verify a canister/ledger-signed receipt signature (R2). Returns true iff `receiptSig` (hex) is a
+  // valid Ed25519 signature over the canonical ReceiptClaim built from the claim fields, under
+  // `pubkey` (hex). The app gates "Paid ✓" on this so the outcome is canister/ledger-authenticated.
+  verifyReceiptSig(
+    nonceHex: string, fromHex: string, toHex: string, amount: number, currency: number,
+    blockIndex: number, settleTs: number, receiptSigHex: string, pubkeyHex: string,
+  ): Promise<boolean>;
   // Device NFC radio state for the status chip: 'ready' | 'off' | 'unsupported' | 'unknown'.
   // Optional so an app built before the native method exists degrades to 'unknown' (chip hidden).
   nfcStatus?(): Promise<string>;
@@ -725,6 +752,8 @@ function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onOff
     return null;
   }, [relayUrl]);
 
+  // Verify a settled receipt's canister/ledger signature (R2) before trusting the outcome — see the
+  // module-level `verifyOutcomeReceipt`. The nonce match is enforced upstream (settledNonceHex).
   // Merchant side: submit the reassembled wire, decide the authoritative outcome, then hand it back
   // to the payer over the same tap. The ledger is the source of truth; an ambiguous transport/HTTP
   // result is reconciled by nonce before we ever call a payment failed.
@@ -736,26 +765,38 @@ function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onOff
     const {res, body} = await postPay(code);
     let outcome: SettleOutcome = classifyPayHttp(res);
     let settledNonceHex: string | null = nonceHex;
+    // The receipt object backing a 'settled' outcome (from the /pay body or the /receipt reconcile).
+    // R2: we verify its canister/ledger signature before finalizing success.
+    let settledReceipt: any = null;
 
     if (outcome === 'settled') {
       settledNonceHex = body?.receipt?.nonce ?? nonceHex;
+      settledReceipt = body?.receipt ?? null;
     } else if (outcome === 'rejected') {
       // "Nonce reused" is not a real refusal — it means this exact payment already settled.
       // Reconcile to the real receipt instead of showing a scary (and false) decline.
       if (isNonceReused(body?.error) && nonceHex) {
         const rec = await reconcile(nonceHex);
-        if (rec) { outcome = 'settled'; settledNonceHex = rec.nonce ?? nonceHex; }
+        if (rec) { outcome = 'settled'; settledNonceHex = rec.nonce ?? nonceHex; settledReceipt = rec; }
       }
     } else if (nonceHex) {
       // UNKNOWN (network drop / timeout / 5xx): the ledger MAY have committed. Reconcile before
       // deciding — this is the fix for "settled but reported as failed".
       const rec = await reconcile(nonceHex);
-      if (rec) { outcome = 'settled'; settledNonceHex = rec.nonce ?? nonceHex; }
+      if (rec) { outcome = 'settled'; settledNonceHex = rec.nonce ?? nonceHex; settledReceipt = rec; }
     }
 
       if (outcome === 'settled') {
-        record();
-        finalize('success');
+        // R2: trust the outcome only if the receipt's signature verifies under the canister/ledger
+        // pubkey. A merchant/relay cannot forge this; an unverifiable receipt is treated as unknown
+        // (pending), never a fake success.
+        const verified = settledReceipt ? await verifyOutcomeReceipt(settledReceipt) : false;
+        if (verified) {
+          record();
+          finalize('success');
+        } else {
+          finalize('pending', 'Couldn’t verify the payment — check the balance');
+        }
       } else if (outcome === 'rejected') {
       finalize('declined', rejectionMessage(typeof body?.error === 'string' ? body.error : null));
     } else {
@@ -893,12 +934,18 @@ function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOfflinePaid
   // Confirm an offline (QR-dance) settlement via the ledger, so it lands in Recent once, when settled.
   useEffect(() => {
     if (phase !== 'qr' || !qr) return;
-    let alive = true;
+     let alive = true;
     const check = async () => {
       const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 4000);
       try {
         const r = await fetch(`${base(relayUrl)}/api/v1/receipt/${qr.nonce}`, {signal: ctrl.signal});
-        if (alive && r.ok) { onSettled(); setPaid({amount: qr.amount, who: qr.who, already: false}); setPhase('paid'); }
+        // R2: only believe the reconciled receipt if its canister/ledger signature verifies.
+        if (alive && r.ok) {
+          const j = await r.json().catch(() => ({} as any));
+          if (await verifyOutcomeReceipt(j.receipt)) {
+            onSettled(); setPaid({amount: qr.amount, who: qr.who, already: false}); setPhase('paid');
+          }
+        }
       } catch {} finally { clearTimeout(t); }
     };
     check(); const id = setInterval(check, 2500);
@@ -925,8 +972,15 @@ function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOfflinePaid
         } catch { res = null; /* network/timeout → unknown, fall back to the QR hand-off below */ } finally { clearTimeout(timer); }
         const outcome = classifyPayHttp(res);
         if (outcome === 'settled') {
-          if (!j.replayed) onSettled();
-          setPaid({amount: req.amount, who, already: !!j.replayed}); setPhase('paid'); return;
+          // R2: trust the outcome only if the receipt's canister/ledger signature verifies. A
+          // replay (replayed:true) returns the SAME cached receipt, which verifies identically.
+          const verified = await verifyOutcomeReceipt(j.receipt);
+          if (verified) {
+            if (!j.replayed) onSettled();
+            setPaid({amount: req.amount, who, already: !!j.replayed}); setPhase('paid'); return;
+          }
+          // Settled at the HTTP layer but the receipt did not verify — honest, never a fake Paid.
+          setErr('Couldn’t verify the payment — check the balance'); return;
         }
         if (outcome === 'rejected') {
           // A definitive refusal: show WHY (e.g. "Not enough balance") rather than silently

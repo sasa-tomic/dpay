@@ -790,6 +790,7 @@ version = "0.1.0"
 dependencies = [
  "candid",
  "dpay-core",
+ "ed25519-dalek",
  "ic-cdk",
  "ic-stable-structures",
  "icrc-ledger-types",

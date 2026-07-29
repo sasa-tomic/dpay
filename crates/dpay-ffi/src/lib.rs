@@ -12,8 +12,8 @@
 
 use dpay_core::{
     generate_keypair as core_generate_keypair, sign, validate as core_validate, Authorization,
-    CodecError, Currency, DEMO_USD, PayError, PaymentRequest, SignedAuthorization, NONCE_LEN,
-    PUBKEY_LEN,
+    CodecError, Currency, DEMO_USD, PayError, PaymentRequest, ReceiptClaim, SignedAuthorization,
+    NONCE_LEN, PUBKEY_LEN, SIG_LEN,
 };
 use ed25519_dalek::SigningKey;
 
@@ -48,6 +48,8 @@ pub enum DpayError {
     BadWireLength,
     #[error("the authorization's `from` disagrees with the carried public key")]
     PubkeyMismatch,
+    #[error("{0}")]
+    BadInput(String),
     // --- NFC transport (see `dpay_core::nfc`) ---
     #[error("nfc: a command/call was issued in a state that doesn't allow it")]
     NfcWrongState,
@@ -210,6 +212,47 @@ pub fn decode_qr(payload: String) -> Result<Vec<u8>, DpayError> {
 pub fn verify_wire(wire: &[u8]) -> Result<bool, DpayError> {
     let signed = SignedAuthorization::from_wire(wire)?;
     Ok(signed.verify())
+}
+
+/// Verify a canister/ledger-signed receipt signature (R2 outcome attestation). Returns `true` iff
+/// `receipt_sig` (64 bytes) is a valid Ed25519 signature over the canonical `ReceiptClaim` built
+/// from the claim fields, under the 32-byte receipt `pubkey`. The app calls this before showing
+/// "Paid ✓" so the outcome rests on a canister/ledger-authenticated signature, not merchant/relay
+/// honesty. Mirrors `dpay_core::verify_receipt` (strict verify, rejects weak keys).
+#[uniffi::export]
+pub fn verify_receipt_sig(
+    nonce: &[u8],
+    from: &[u8],
+    to: &[u8],
+    amount: u64,
+    currency: u32,
+    block_index: u64,
+    settle_ts: u64,
+    receipt_sig: &[u8],
+    pubkey: &[u8],
+) -> Result<bool, DpayError> {
+    let n: [u8; NONCE_LEN] = nonce
+        .as_ref()
+        .try_into()
+        .map_err(|_| DpayError::BadInput("nonce must be 16 bytes".into()))?;
+    let f: [u8; PUBKEY_LEN] = from
+        .as_ref()
+        .try_into()
+        .map_err(|_| DpayError::BadInput("from must be 32 bytes".into()))?;
+    let t: [u8; PUBKEY_LEN] = to
+        .as_ref()
+        .try_into()
+        .map_err(|_| DpayError::BadInput("to must be 32 bytes".into()))?;
+    let pk: [u8; PUBKEY_LEN] = pubkey
+        .as_ref()
+        .try_into()
+        .map_err(|_| DpayError::BadInput("pubkey must be 32 bytes".into()))?;
+    let sg: [u8; SIG_LEN] = receipt_sig
+        .as_ref()
+        .try_into()
+        .map_err(|_| DpayError::BadInput("receipt_sig must be 64 bytes".into()))?;
+    let claim = ReceiptClaim { nonce: n, from: f, to: t, amount, currency, block_index, settle_ts };
+    Ok(dpay_core::verify_receipt(&pk, &claim, &sg))
 }
 
 /// Pure policy check, mirroring the canister's settlement gate. Returns `None` when the payment

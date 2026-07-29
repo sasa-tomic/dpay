@@ -19,13 +19,21 @@ use candid::{decode_one, encode_args, encode_one, CandidType, Nat, Principal};
 use ic_agent::Agent;
 use serde::Deserialize;
 
-use dpay_core::{Currency, PUBKEY_LEN};
+use dpay_core::{Currency, PUBKEY_LEN, SignedAuthorization};
 
 use crate::ledger::{
     DepositInfo, DepositRefresh, Ledger, LedgerError, MintedUtxo, PendingUtxo, Receipt, TxnRecord,
 };
 
+/// Read the settlement currency out of a 196-byte signed-authorization wire (the canister does the
+/// same; the relay surfaces it in the receipt so the app can rebuild the `ReceiptClaim`). Falls back
+/// to `DEMO_USD` on a malformed wire (which the canister would already have rejected).
+fn currency_of_wire(wire: &[u8]) -> Currency {
+    SignedAuthorization::from_wire(wire).map(|sa| sa.auth.currency).unwrap_or(dpay_core::DEMO_USD)
+}
+
 /// Candid mirror of the canister's `PayReceipt` (byte fields decode as `blob`s → `Vec<u8>`).
+/// `block_index`/`settle_ts`/`receipt_sig`/`pubkey` (R2) carry the canister-signed receipt.
 #[derive(CandidType, Deserialize, Debug)]
 struct PayReceipt {
     from: Vec<u8>,
@@ -33,6 +41,10 @@ struct PayReceipt {
     amount: u64,
     nonce: Vec<u8>,
     new_from_balance: u64,
+    block_index: u64,
+    settle_ts: u64,
+    receipt_sig: Vec<u8>,
+    pubkey: Vec<u8>,
 }
 
 /// Candid mirror of the canister's `TxnView` (one settled transaction row in the history list).
@@ -181,6 +193,14 @@ impl Ledger for AgentLedger {
                 amount: r.amount,
                 nonce: hex::encode(r.nonce),
                 new_from_balance: r.new_from_balance,
+                // The currency is read out of the wire by the canister; the relay re-decodes the
+                // wire to surface it in the receipt (the app needs it to rebuild the claim). Cheap
+                // pure decode, already done by the route — but the agent path decodes here.
+                currency: currency_of_wire(&wire),
+                block_index: r.block_index,
+                settle_ts: r.settle_ts,
+                receipt_sig: hex::encode(r.receipt_sig),
+                pubkey: hex::encode(r.pubkey),
             }),
             Err(msg) => Err(LedgerError::Rejected(msg)),
         }
@@ -188,6 +208,21 @@ impl Ledger for AgentLedger {
 
     async fn balance(&self, pubkey: [u8; PUBKEY_LEN], currency: Currency) -> Result<u64, LedgerError> {
         self.balance_of(&pubkey, currency).await
+    }
+
+    async fn receipt_pubkey(&self) -> Result<Vec<u8>, LedgerError> {
+        // facade `receipt_pubkey() -> opt blob` (query). `null` (key not yet generated) → empty vec
+        // (the relay treats an absent pubkey as "no receipts verifiable yet").
+        let reply = self
+            .agent
+            .query(&self.canister_id, "receipt_pubkey")
+            .with_arg(encode_args(()).map_err(|e| LedgerError::Transient(format!("encode pubkey: {e}")))?)
+            .call()
+            .await
+            .map_err(|e| LedgerError::Transient(format!("receipt_pubkey query: {e}")))?;
+        let pk: Option<Vec<u8>> = decode_one(&reply)
+            .map_err(|e| LedgerError::Transient(format!("decode receipt_pubkey: {e}")))?;
+        Ok(pk.unwrap_or_default())
     }
 
     async fn faucet(

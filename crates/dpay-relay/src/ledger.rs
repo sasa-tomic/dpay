@@ -15,15 +15,22 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
 use async_trait::async_trait;
+use ed25519_dalek::SigningKey;
 use serde::Serialize;
 use thiserror::Error;
 
 use dpay_core::{
-    validate, CodecError, Currency, PayError, SignedAuthorization, DEMO_USD, NONCE_LEN, PUBKEY_LEN,
+    sign_receipt, validate, CodecError, Currency, PayError, ReceiptClaim, SignedAuthorization,
+    DEMO_USD, NONCE_LEN, PUBKEY_LEN,
 };
 
 /// What the merchant sees on success. Byte fields are hex so the JSON is a plain string map.
 /// Mirrors the canister's `PayReceipt` (which returns the same fields as candid `blob`s).
+///
+/// `receipt_sig` + `pubkey` (R2) carry the canister's Ed25519 signature over the canonical
+/// `ReceiptClaim` and the canister's public key — the payer verifies `receipt_sig` over the claim
+/// built from `{nonce, from, to, amount, currency, block_index, settle_ts}` under `pubkey` before
+/// trusting the outcome. `block_index`/`settle_ts`/`currency` are the remaining claim fields.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Receipt {
     pub from: String,
@@ -31,6 +38,13 @@ pub struct Receipt {
     pub amount: u64,
     pub nonce: String,
     pub new_from_balance: u64,
+    pub currency: Currency,
+    pub block_index: u64,
+    pub settle_ts: u64,
+    /// Hex-encoded 64-byte Ed25519 signature over the canonical ReceiptClaim.
+    pub receipt_sig: String,
+    /// Hex-encoded 32-byte receipt public key (the signer's). Verify the sig under this.
+    pub pubkey: String,
 }
 
 /// One settled transaction, as the wallet's history list shows it. Byte fields are hex (matches
@@ -192,6 +206,12 @@ pub trait Ledger: Send + Sync {
     /// Static deposit instructions for `currency` (min confirmations, fee, min amount).
     async fn deposit_info(&self, currency: Currency) -> Result<DepositInfo, LedgerError>;
 
+    /// The receipt-signing public key (32 bytes) of the ledger/canister, so a payer can verify a
+    /// `Receipt`'s `receipt_sig` over its canonical `ReceiptClaim`. `FakeLedger` returns a stable
+    /// test key; `AgentLedger` queries the canister's `receipt_pubkey`. (A receipt also carries its
+    /// own `pubkey` field, so this is an optional cross-check / pre-fetch.)
+    async fn receipt_pubkey(&self) -> Result<Vec<u8>, LedgerError>;
+
     /// Seed a pending deposit for `pubkey`/`currency` (the test-helpers hook a browser e2e harness
     /// uses to simulate a confirmed ckBTC deposit landing). Mirrors `FakeLedger::register_deposit`:
     /// the next `deposit_status` drains it and credits the balance.
@@ -236,6 +256,10 @@ struct FakeState {
     /// minter's `update_balance` mint-after-confirmation. Lets the offline inner loop prove the
     /// deposit→mint→balance flow without a real ckBTC minter.
     pending_deposits: HashMap<([u8; PUBKEY_LEN], Currency), u64>,
+    /// Monotonic stand-in for the ICRC ledger block index (the FakeLedger has no real ledger), so
+    /// each settled pay gets a distinct `block_index` for its receipt claim — matching the real
+    /// canister's outcome-attestation shape.
+    next_block: u64,
 }
 
 /// In-memory ledger. Balances + spent-nonces behind one `Mutex` so the read-check-write is
@@ -244,6 +268,11 @@ pub struct FakeLedger {
     state: Mutex<FakeState>,
     per_tx_cap: u64,
     clock: Box<dyn Clock>,
+    /// Stable TEST-ONLY Ed25519 key the FakeLedger signs receipts with (the real canister generates
+    /// its own via `raw_rand`). A fixed seed keeps it deterministic across runs; its public half is
+    /// exposed via [`Ledger::receipt_pubkey`] and embedded in each receipt. Test code only — never
+    /// in the prod canister/relay image (FakeLedger itself is the offline demo ledger).
+    receipt_sk: SigningKey,
 }
 
 impl FakeLedger {
@@ -290,9 +319,13 @@ impl FakeLedger {
                 spent: HashSet::new(),
                 txns: Vec::new(),
                 pending_deposits: HashMap::new(),
+                next_block: 0,
             }),
             per_tx_cap,
             clock,
+            // Fixed test seed (documented test-only). The real canister's receipt key comes from
+            // `raw_rand`; this stable key lets the offline e2e verify a real signature end-to-end.
+            receipt_sk: SigningKey::from_bytes(&[0xf5; 32]),
         }
     }
 
@@ -352,6 +385,23 @@ impl Ledger for FakeLedger {
             currency,
             timestamp: now,
         });
+        // Assign a monotonic block index (stand-in for the ICRC ledger block) and sign the receipt
+        // claim with the FakeLedger's stable test key — the offline analogue of the canister's
+        // canister-signed outcome receipt. The app verifies `receipt_sig` under `pubkey` before
+        // showing "Paid ✓".
+        let block_index = s.next_block;
+        s.next_block += 1;
+        let claim = ReceiptClaim {
+            nonce: sa.auth.nonce,
+            from,
+            to: sa.auth.to,
+            amount: sa.auth.amount,
+            currency,
+            block_index,
+            settle_ts: now,
+        };
+        let sig = sign_receipt(&self.receipt_sk, &claim).to_bytes();
+        let pubkey = self.receipt_sk.verifying_key().to_bytes();
 
         Ok(Receipt {
             from: hex::encode(from),
@@ -359,11 +409,20 @@ impl Ledger for FakeLedger {
             amount: sa.auth.amount,
             nonce: hex::encode(sa.auth.nonce),
             new_from_balance: new_from,
+            currency,
+            block_index,
+            settle_ts: now,
+            receipt_sig: hex::encode(sig),
+            pubkey: hex::encode(pubkey),
         })
     }
 
     async fn balance(&self, pubkey: [u8; PUBKEY_LEN], currency: Currency) -> Result<u64, LedgerError> {
         Ok(self.balance_of(&pubkey, currency))
+    }
+
+    async fn receipt_pubkey(&self) -> Result<Vec<u8>, LedgerError> {
+        Ok(self.receipt_sk.verifying_key().to_bytes().to_vec())
     }
 
     async fn faucet(
@@ -555,5 +614,9 @@ impl<L: Ledger> Ledger for FlakyLedger<L> {
 
     async fn deposit_info(&self, currency: Currency) -> Result<DepositInfo, LedgerError> {
         self.inner.deposit_info(currency).await
+    }
+
+    async fn receipt_pubkey(&self) -> Result<Vec<u8>, LedgerError> {
+        self.inner.receipt_pubkey().await
     }
 }

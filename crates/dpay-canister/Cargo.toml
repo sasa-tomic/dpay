@@ -14,5 +14,10 @@ ic-stable-structures = { workspace = true }
 candid = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 dpay-core = { path = "../dpay-core" }
+# Ed25519 for the canister-signed receipt (outcome attestation). Default features (no rng): signing
+# with a key materialized from `raw_rand` needs no OS CSPRNG, so `getrandom` stays out of the wasm
+# tree (same discipline as dpay-core). Used ONLY for the receipt key — payment sig verification goes
+# through dpay-core's `verify` as before.
+ed25519-dalek = { workspace = true }
 icrc-ledger-types = { workspace = true }
 num-traits = "0.2"

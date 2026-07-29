@@ -278,6 +278,53 @@ async function verifyWire(wireHex: string): Promise<boolean> {
   }
 }
 
+/**
+ * Build the canonical 108-byte receipt claim (R2). Mirrors `dpay_core::ReceiptClaim::signing_bytes`
+ * EXACTLY: `nonce(16) | from(32) | to(32) | amount_le(8) | currency_le(4) | block_index_le(8) |
+ * settle_ts_le(8)`. This is the drift-detector: if it ever diverges from the Rust core, the FakeLedger
+ * (which signs with ed25519-dalek over the same layout) produces a sig this @noble verify rejects,
+ * and the e2e pay flows go RED. Field widths match `wire_layout.json`'s nonce/pubkey/amount/currency.
+ */
+function buildReceiptClaimBytes(
+  nonceHex: string, fromHex: string, toHex: string, amount: number, currency: number,
+  blockIndex: number, settleTs: number,
+): Uint8Array {
+  const nonce = hex(nonceHex);
+  const from = hex(fromHex);
+  const to = hex(toHex);
+  if (nonce.length !== L.nonce_len) throw new Error(`nonce length: ${nonce.length}`);
+  if (from.length !== L.pubkey_len) throw new Error(`from length: ${from.length}`);
+  if (to.length !== L.pubkey_len) throw new Error(`to length: ${to.length}`);
+  const buf = new Uint8Array(L.nonce_len + L.pubkey_len + L.pubkey_len + 8 + 4 + 8 + 8); // 108
+  let off = 0;
+  buf.set(nonce, off); off += L.nonce_len;
+  buf.set(from, off); off += L.pubkey_len;
+  buf.set(to, off); off += L.pubkey_len;
+  putU64Le(buf, off, amount); off += 8;
+  putU32Le(buf, off, currency); off += 4;
+  putU64Le(buf, off, blockIndex); off += 8;
+  putU64Le(buf, off, settleTs);
+  return buf;
+}
+
+async function verifyReceiptSig(
+  nonceHex: string, fromHex: string, toHex: string, amount: number, currency: number,
+  blockIndex: number, settleTs: number, receiptSigHex: string, pubkeyHex: string,
+): Promise<boolean> {
+  // Mirrors `dpay_core::verify_receipt` / the FFI `verify_receipt_sig`. Returns false on any bad
+  // input (never throws), so the app gates "Paid ✓" on a clean true.
+  try {
+    const sig = hex(receiptSigHex);
+    const pub = hex(pubkeyHex);
+    if (sig.length !== L.sig_len) return false;
+    if (pub.length !== L.pubkey_len) return false;
+    const claim = buildReceiptClaimBytes(nonceHex, fromHex, toHex, amount, currency, blockIndex, settleTs);
+    return await ed.verifyAsync(sig, claim, pub);
+  } catch {
+    return false;
+  }
+}
+
 /** Synchronous RNG-backed nonce, mirroring `randNonceHex()` in App.tsx. Uses the browser CSPRNG. */
 export function randNonceHex(): string {
   const buf = new Uint8Array(L.nonce_len);
@@ -321,6 +368,7 @@ export const DpayCore = {
   decodeRequest,
   encodeQr,
   verifyWire,
+  verifyReceiptSig,
   nfcStatus,
 };
 export type DpayCoreShim = typeof DpayCore;

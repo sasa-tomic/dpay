@@ -168,6 +168,59 @@ async fn raw_wire_body_also_works() {
     assert_eq!(led.balance_of(&pubkey(&merchant), DEMO_USD), 100);
 }
 
+/// R2: a settled pay returns a CANISTER/LEDGER-SIGNED receipt (FakeLedger signs with its stable test
+/// key) whose Ed25519 signature verifies under the receipt's embedded `pubkey` (== the ledger's
+/// `receipt_pubkey`). The app does exactly this before showing "Paid ✓". Tampering the amount breaks
+/// verification. Proves the receipt-verification wiring through the real axum router.
+#[tokio::test]
+async fn pay_returns_signed_receipt_that_verifies() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+
+    let sa = signed(&payer, pubkey(&merchant), 250, [3u8; 16], FUTURE);
+    let (status, body) = call(&state, pay_json(&sa.encode())).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let r = &body["receipt"];
+    assert_eq!(r["amount"], 250);
+
+    // The receipt carries the hex sig + pubkey + the claim fields (block_index/settle_ts/currency).
+    let sig_hex = r["receipt_sig"].as_str().expect("receipt_sig present");
+    let pub_hex = r["pubkey"].as_str().expect("pubkey present");
+    let sig = hex::decode(sig_hex).unwrap();
+    let pk = hex::decode(pub_hex).unwrap();
+    assert_eq!(sig.len(), 64, "64-byte Ed25519 sig");
+    assert_eq!(pk.len(), 32, "32-byte pubkey");
+
+    // The ledger's receipt_pubkey matches the pubkey embedded in the receipt (cross-check).
+    let ledger_pk = led.receipt_pubkey().await.unwrap();
+    assert_eq!(ledger_pk, pk);
+
+    // Verify the signature over the canonical ReceiptClaim built from the receipt's fields.
+    let mut pkb = [0u8; 32];
+    pkb.copy_from_slice(&pk);
+    let mut sgb = [0u8; 64];
+    sgb.copy_from_slice(&sig);
+    let claim = dpay_core::ReceiptClaim {
+        nonce: [3u8; 16],
+        from: pubkey(&payer),
+        to: pubkey(&merchant),
+        amount: 250,
+        currency: DEMO_USD,
+        block_index: r["block_index"].as_u64().unwrap(),
+        settle_ts: r["settle_ts"].as_u64().unwrap(),
+    };
+    assert!(
+        dpay_core::verify_receipt(&pkb, &claim, &sgb),
+        "FakeLedger receipt signature must verify under its pubkey"
+    );
+
+    // Tampering the amount (a lying merchant) breaks verification.
+    let mut tampered = claim;
+    tampered.amount = 251;
+    assert!(!dpay_core::verify_receipt(&pkb, &tampered, &sgb), "tampered amount must fail verify");
+}
+
 #[tokio::test]
 async fn duplicate_nonce_is_idempotent_and_credits_once() {
     let payer = keypair();
@@ -747,6 +800,9 @@ impl Ledger for DepositFailingLedger {
     }
     async fn deposit_info(&self, _c: Currency) -> Result<DepositInfo, LedgerError> {
         Err(LedgerError::Transient("injected deposit failure".into()))
+    }
+    async fn receipt_pubkey(&self) -> Result<Vec<u8>, LedgerError> {
+        self.inner.receipt_pubkey().await
     }
 }
 

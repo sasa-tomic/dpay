@@ -22,7 +22,10 @@
 //! ACCOUNT_TXNS history survive a facade upgrade.
 
 use candid::{decode_one, encode_args, encode_one, CandidType, Nat, Principal};
-use dpay_core::{generate_keypair, Authorization, Currency, SignedAuthorization, DEMO_USD};
+use dpay_core::{
+    generate_keypair, verify_receipt, Authorization, Currency, ReceiptClaim, SignedAuthorization,
+    DEMO_USD, PUBKEY_LEN, SIG_LEN,
+};
 use ed25519_dalek::SigningKey;
 use icrc_ledger_types::icrc1::account::Account;
 use icrc_ledger_types::icrc3::blocks::{GetBlocksRequest, GetBlocksResult};
@@ -118,6 +121,24 @@ struct PayReceipt {
     amount: u64,
     nonce: Vec<u8>,
     new_from_balance: u64,
+    block_index: u64,
+    settle_ts: u64,
+    receipt_sig: Vec<u8>,
+    pubkey: Vec<u8>,
+}
+
+/// Mirror of the canister's `ReceiptView` (the `receipt(nonce)` query return).
+#[derive(CandidType, Deserialize, Debug, PartialEq)]
+struct ReceiptView {
+    from: Vec<u8>,
+    to: Vec<u8>,
+    amount: u64,
+    nonce: Vec<u8>,
+    currency: u32,
+    block_index: u64,
+    settle_ts: u64,
+    receipt_sig: Vec<u8>,
+    pubkey: Vec<u8>,
 }
 
 #[derive(CandidType, Deserialize, Debug, PartialEq)]
@@ -464,6 +485,112 @@ fn replay_is_rejected_and_ledger_unchanged() {
     assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, merch), 1_000);
     // Only one transfer block ever landed on the ledger.
     assert_eq!(ledger_chain_len(&pic, ledger_dusd), 2); // mint + 1 transfer
+}
+
+/// R2 (CRITICAL): a successful `pay` yields a CANISTER-SIGNED receipt whose Ed25519 signature
+/// verifies under `receipt_pubkey()` (and the receipt's embedded `pubkey`); tampering any claim
+/// field (amount / nonce / block_index / settle_ts) breaks verification; a replay of the same nonce
+/// is rejected AND the stored receipt is returnable verbatim via `receipt(nonce)`. This is the
+/// outcome-attestation property: a merchant/relay cannot forge a "Paid ✓" — only the canister holds
+/// the receipt secret.
+#[test]
+fn pay_yields_canister_signed_verifiable_receipt() {
+    let (pic, _ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
+    mint(&pic, dpay, payer, DEMO_USD, INIT_A);
+    let expiry = T0_SECS + 120;
+    let nonce = [0x2a; 16];
+
+    // Before any pay, the receipt pubkey is not yet generated (lazy on first pay). `receipt` for an
+    // unsettled nonce returns null (never a fake signed receipt).
+    let reply = pic
+        .query_call(dpay, Principal::anonymous(), "receipt_pubkey", encode_args(()).unwrap())
+        .expect("receipt_pubkey query rejected");
+    assert_eq!(decode_one::<Option<Vec<u8>>>(&reply).unwrap(), None, "no pubkey before first pay");
+    let reply = pic
+        .query_call(
+            dpay,
+            Principal::anonymous(),
+            "receipt",
+            encode_args((nonce.to_vec(),)).unwrap(),
+        )
+        .expect("receipt query rejected");
+    assert!(decode_one::<Option<ReceiptView>>(&reply).unwrap().is_none(), "unsettled nonce => null");
+
+    // Settle: the receipt carries the canister signature + pubkey.
+    let r = pay(&pic, dpay, signed(&sk, payer, merch, 2_500, nonce, expiry, DEMO_USD))
+        .expect("pay should succeed");
+    assert_eq!(r.receipt_sig.len(), SIG_LEN, "64-byte Ed25519 sig");
+    assert_eq!(r.pubkey.len(), PUBKEY_LEN, "32-byte pubkey");
+    assert_eq!(r.block_index, 1, "block index of the transfer (mint was block 0)");
+
+    // The canister's receipt_pubkey query now returns the same key the receipt carries.
+    let reply = pic
+        .query_call(dpay, Principal::anonymous(), "receipt_pubkey", encode_args(()).unwrap())
+        .expect("receipt_pubkey query rejected");
+    let qpk = decode_one::<Option<Vec<u8>>>(&reply).unwrap().expect("pubkey after first pay");
+    assert_eq!(qpk, r.pubkey, "receipt pubkey matches receipt_pubkey query");
+
+    // The signature verifies over the canonical claim under the canister's pubkey.
+    let mut pk = [0u8; PUBKEY_LEN];
+    pk.copy_from_slice(&r.pubkey);
+    let mut sg = [0u8; SIG_LEN];
+    sg.copy_from_slice(&r.receipt_sig);
+    let claim = ReceiptClaim {
+        nonce,
+        from: payer,
+        to: merch,
+        amount: 2_500,
+        currency: DEMO_USD,
+        block_index: r.block_index,
+        settle_ts: r.settle_ts,
+    };
+    assert!(
+        verify_receipt(&pk, &claim, &sg),
+        "canister receipt signature must verify under receipt_pubkey"
+    );
+
+    // Tampering ANY outcome field breaks verification (a lying merchant cannot alter the receipt).
+    let mut tampered = claim;
+    tampered.amount = 2_501;
+    assert!(!verify_receipt(&pk, &tampered, &sg), "tampered amount must fail verify");
+    let mut t2 = claim;
+    t2.nonce[0] ^= 0xFF;
+    assert!(!verify_receipt(&pk, &t2, &sg), "tampered nonce must fail verify");
+    let mut t3 = claim;
+    t3.block_index = 999;
+    assert!(!verify_receipt(&pk, &t3, &sg), "tampered block_index must fail verify");
+
+    // A DIFFERENT key (not the canister's) does not verify the receipt.
+    let other = generate_keypair().verifying_key().to_bytes();
+    assert!(!verify_receipt(&other, &claim, &sg), "wrong key must fail verify");
+
+    // Replay of the same nonce is rejected (idempotency intact) ...
+    let dup = pay(&pic, dpay, signed(&sk, payer, merch, 2_500, nonce, expiry, DEMO_USD));
+    assert!(dup.is_err(), "nonce reuse must be rejected: {dup:?}");
+
+    // ... but the stored receipt is returnable verbatim via `receipt(nonce)` (reconciliation), and
+    // it carries the SAME signature + claim — proving the canister attests the settled outcome
+    // durably, not just in the original response.
+    let reply = pic
+        .query_call(
+            dpay,
+            Principal::anonymous(),
+            "receipt",
+            encode_args((nonce.to_vec(),)).unwrap(),
+        )
+        .expect("receipt query rejected");
+    let view = decode_one::<Option<ReceiptView>>(&reply)
+        .unwrap()
+        .expect("settled nonce => stored receipt");
+    assert_eq!(view.amount, 2_500);
+    assert_eq!(view.block_index, r.block_index);
+    assert_eq!(view.settle_ts, r.settle_ts);
+    assert_eq!(view.receipt_sig, r.receipt_sig, "stored receipt sig == pay-response sig");
+    assert_eq!(view.pubkey, r.pubkey);
+    // And the stored receipt verifies identically.
+    let mut sg2 = [0u8; SIG_LEN];
+    sg2.copy_from_slice(&view.receipt_sig);
+    assert!(verify_receipt(&pk, &claim, &sg2), "stored receipt verifies");
 }
 
 #[test]

@@ -156,6 +156,43 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
     }
 
     /**
+     * Verify a canister/ledger-signed receipt signature (R2 outcome attestation) before the app
+     * shows "Paid ✓". Mirrors `dpay_ffi::verify_receipt_sig` (strict Ed25519 verify over the
+     * canonical ReceiptClaim built inside the Rust core). Hex in, boolean out.
+     */
+    @ReactMethod
+    fun verifyReceiptSig(
+        nonceHex: String,
+        fromHex: String,
+        toHex: String,
+        amount: Double,
+        currency: Double,
+        blockIndex: Double,
+        settleTs: Double,
+        receiptSigHex: String,
+        pubkeyHex: String,
+        promise: Promise,
+    ) {
+        try {
+            promise.resolve(
+                uniffi.dpay_ffi.verifyReceiptSig(
+                    unhex(nonceHex),
+                    unhex(fromHex),
+                    unhex(toHex),
+                    amount.toLong().toULong(),
+                    currency.toLong().toUInt(),
+                    blockIndex.toLong().toULong(),
+                    settleTs.toLong().toULong(),
+                    unhex(receiptSigHex),
+                    unhex(pubkeyHex),
+                ),
+            )
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    /**
      * Report the device NFC radio state for the UI status chip: "ready" (adapter present + enabled),
      * "off" (present but disabled in system settings), or "unsupported" (no NFC hardware). This is
      * the *radio* status only — the tap-to-pay HCE transport (see `dpay_core::nfc`) is a separate,
