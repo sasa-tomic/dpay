@@ -11,7 +11,9 @@
 //! Money-critical logic lives in `dpay-core` (shared with the relay, app, and tests) — the canister
 //! is state + candid glue.
 
-use candid::CandidType;
+use candid::{CandidType, Principal};
+use ic_cdk::api::msg_caller;
+use ic_cdk::management_canister::{create_canister_with_extra_cycles, CanisterSettings, CreateCanisterArgs};
 use ic_cdk::{init, query, update};
 use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
 use ic_stable_structures::storable::Bound;
@@ -360,6 +362,51 @@ fn mint(to: Vec<u8>, currency: Currency, amount: u64) -> u64 {
         b.insert(key, new);
         new
     })
+}
+
+/// Principals permitted to spend THIS canister's cycles to provision new canisters. This is the
+/// dpay deploy identity (which holds no cycles wallet of its own, so the only cycles available live
+/// inside this canister). Rotate to an SNS/governance principal before any production use beyond
+/// this one-off ledger provisioning. Parsed from text at call time — the list is tiny.
+const ADMIN_CALLERS: &[&str] = &[
+    "hhwti-hb7f7-4ojco-uvazw-vcwr7-fqd6o-3oljb-aezpo-iheay-3gxmx-rqe", // dfx identity `dpay`
+    "fa3em-tedlx-wlrze-3q7nk-lx4l5-vomns-qdkcm-i6r5f-3pttd-xxwfu-jae", // historical deploy controller
+];
+
+fn require_admin() -> Result<(), String> {
+    let caller = msg_caller();
+    let ok = ADMIN_CALLERS
+        .iter()
+        .any(|t| Principal::from_text(t).map(|p| p == caller).unwrap_or(false));
+    if ok {
+        Ok(())
+    } else {
+        Err(format!("unauthorized admin caller: {caller}"))
+    }
+}
+
+/// Provision a fresh canister that carries `cycles` of THIS canister's cycle balance, with
+/// `controller` as its sole controller, and return its id. Gated to admin callers.
+///
+/// Used once to spin up the ICRC ledger using cycles held inside the dpay canister: the deploy
+/// identity has no cycles wallet, so the only way to spend the canister's cycles is for the
+/// canister's own code to attach them to a management-canister call. The dpay canister is NOT made a
+/// controller of the new canister — it spends the cycles and is done — so the non-custodial posture
+/// is preserved. (A canister's own code is the only way its cycles can leave it: the management
+/// canister has no withdraw/transfer operation.)
+#[update]
+async fn provision_ledger_canister(controller: Principal, cycles: u128) -> Result<Principal, String> {
+    require_admin()?;
+    let arg = CreateCanisterArgs {
+        settings: Some(CanisterSettings {
+            controllers: Some(vec![controller]),
+            ..Default::default()
+        }),
+    };
+    let result = create_canister_with_extra_cycles(&arg, cycles)
+        .await
+        .map_err(|e| format!("create_canister rejected: {e:?}"))?;
+    Ok(result.canister_id)
 }
 
 ic_cdk::export_candid!();

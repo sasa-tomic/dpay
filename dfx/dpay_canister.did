@@ -13,6 +13,7 @@ type PayReceipt = record {
   new_from_balance : nat64;
 };
 type Result = variant { Ok : PayReceipt; Err : text };
+type Result_1 = variant { Ok : principal; Err : text };
 type TxnView = record {
   to : blob;
   from : blob;
@@ -34,6 +35,16 @@ service : (InitArg) -> {
   // (non-awaiting) message → atomic on the single-threaded canister.
   pay : (blob) -> (Result);
   per_tx_cap : () -> (nat64) query;
+  // Provision a fresh canister that carries `cycles` of THIS canister's cycle balance, with
+  // `controller` as its sole controller, and return its id. Gated to admin callers.
+  // 
+  // Used once to spin up the ICRC ledger using cycles held inside the dpay canister: the deploy
+  // identity has no cycles wallet, so the only way to spend the canister's cycles is for the
+  // canister's own code to attach them to a management-canister call. The dpay canister is NOT made a
+  // controller of the new canister — it spends the cycles and is done — so the non-custodial posture
+  // is preserved. (A canister's own code is the only way its cycles can leave it: the management
+  // canister has no withdraw/transfer operation.)
+  provision_ledger_canister : (principal, nat) -> (Result_1);
   // `transactions_of : (blob, nat32, nat32) -> (vec record {...}) query`. Returns this account's
   // settled transactions in `currency`, newest-first, up to `limit`. The (account, currency) block
   // is one contiguous key range (seq 0..=MAX). `StableBTreeMap::range` returns an `Iter` that also
