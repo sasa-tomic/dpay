@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- dpay identity (matches the marketing site: dark field + mint accent) -->
+    <color name="bg">#06070A</color>
+    <color name="panel">#0C0F14</color>
+    <color name="ink">#F1F4F7</color>
+    <color name="accent">#3EE0AC</color>
+    <color name="accent_ink">#03170F</color>
+    <color name="white">#FFFFFF</color>
+    <color name="black">#0B0B0F</color>
+</resources>
