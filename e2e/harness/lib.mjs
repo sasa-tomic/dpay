@@ -72,49 +72,65 @@ export async function ensureWireLayout() {
  * distinct random keys + nonces). This preserves the real isolation — fresh identity per test, no
  * cross-test state pollution — while cutting the ~2.5s relay+web+browser spawn cost that a
  * per-test process would charge 15×. Torn down once at the end of the run by `stopSession()`.
+ *
+ * Concurrency-safe under PARALLEL test execution (run.mjs runs tests in a bounded pool): the
+ * in-flight build is memoized as a Promise, so the first caller builds the session while every other
+ * concurrent `setup()` AWAITS the same build — no double-spawn race. The returned session is then
+ * immutable for the rest of the run (only the per-test contexts are created/destroyed).
  */
 let _session = null;
+let _sessionPromise = null;
 
 async function getSession(opts = {}) {
   if (_session) return _session;
-  await ensureWireLayout();
-  const mode = resolveMode();
-  let relayBaseURL = '';
-  const stops = [];
+  // Memoize the BUILD as a promise so concurrent callers (parallel test pool) await the SAME build
+  // instead of racing to spawn a second relay/web/browser.
+  if (!_sessionPromise) {
+    _sessionPromise = (async () => {
+      await ensureWireLayout();
+      const mode = resolveMode();
+      let relayBaseURL = '';
+      const stops = [];
 
-  try {
-    if (mode === 'live') {
-      const base = process.env.DPAY_E2E_BASE;
-      if (!base) throw new Error('DPAY_E2E_MODE=live requires DPAY_E2E_BASE=<url> (e.g. https://dpay.kalaj.org)');
-      relayBaseURL = base;
-      console.log(`[lib] live mode — pointing app at ${relayBaseURL} (throttle + throwaway identity)`);
-    } else if (!opts.noRelay) {
-      const relay = await startRelay();
-      relayBaseURL = relay.baseURL;
-      stops.push(relay.stop);
-      console.log(`[lib] local relay up at ${relayBaseURL} (shared across tests)`);
-    }
+      try {
+        if (mode === 'live') {
+          const base = process.env.DPAY_E2E_BASE;
+          if (!base) throw new Error('DPAY_E2E_MODE=live requires DPAY_E2E_BASE=<url> (e.g. https://dpay.kalaj.org)');
+          relayBaseURL = base;
+          console.log(`[lib] live mode — pointing app at ${relayBaseURL} (throttle + throwaway identity)`);
+        } else if (!opts.noRelay) {
+          const relay = await startRelay();
+          relayBaseURL = relay.baseURL;
+          stops.push(relay.stop);
+          console.log(`[lib] local relay up at ${relayBaseURL} (shared across tests)`);
+        }
 
-    let webBaseURL = '';
-    if (!opts.noWeb) {
-      await buildWeb({ force: opts.rebuildWeb });
-      const web = await serveWeb();
-      webBaseURL = web.baseURL;
-      stops.push(web.stop);
-      console.log(`[lib] web app served at ${webBaseURL} (shared across tests)`);
-    }
+        let webBaseURL = '';
+        if (!opts.noWeb) {
+          await buildWeb({ force: opts.rebuildWeb });
+          const web = await serveWeb();
+          webBaseURL = web.baseURL;
+          stops.push(web.stop);
+          console.log(`[lib] web app served at ${webBaseURL} (shared across tests)`);
+        }
 
-    const { browser, stop: stopBrowser } = await Driver.launchBrowser();
-    stops.push(stopBrowser);
-    console.log('[lib] headless browser launched (shared across tests; fresh context per test)');
+        const { browser, stop: stopBrowser } = await Driver.launchBrowser();
+        stops.push(stopBrowser);
+        console.log('[lib] headless browser launched (shared across tests; fresh context per test)');
 
-    const stop = async () => { for (const s of stops.slice().reverse()) { try { await s(); } catch {} } };
-    _session = { mode, relayBaseURL, webBaseURL, browser, stop };
-    return _session;
-  } catch (e) {
-    for (const s of stops.slice().reverse()) { try { await s(); } catch {} }
-    throw e;
+        const stop = async () => { for (const s of stops.slice().reverse()) { try { await s(); } catch {} } };
+        return { mode, relayBaseURL, webBaseURL, browser, stop };
+      } catch (e) {
+        for (const s of stops.slice().reverse()) { try { await s(); } catch {} }
+        throw e;
+      }
+    })();
+    // If the build fails, clear the promise so a later retry can attempt it again (don't cache a
+    // rejection forever — a transient relay/web failure should be retryable on the next run).
+    _sessionPromise.catch(() => { _sessionPromise = null; });
   }
+  _session = await _sessionPromise;
+  return _session;
 }
 
 /** Tear down the shared session (relay + web + browser). Called once at the end of the run. */
@@ -122,6 +138,7 @@ export async function stopSession() {
   if (!_session) return;
   const s = _session;
   _session = null;
+  _sessionPromise = null;
   try { await s.stop(); } catch {}
 }
 
