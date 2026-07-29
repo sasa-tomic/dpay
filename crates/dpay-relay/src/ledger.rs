@@ -184,6 +184,28 @@ pub trait Ledger: Send + Sync {
     /// Static deposit instructions for `currency` (min confirmations, fee, min amount).
     async fn deposit_info(&self, currency: Currency) -> Result<DepositInfo, LedgerError>;
 
+    /// Seed a pending deposit for `pubkey`/`currency` (the test-helpers hook a browser e2e harness
+    /// uses to simulate a confirmed ckBTC deposit landing). Mirrors `FakeLedger::register_deposit`:
+    /// the next `deposit_status` drains it and credits the balance.
+    ///
+    /// **Test-only.** Feature-gated behind `test-helpers` so the method — and the HTTP route that
+    /// calls it (`POST /api/v1/test/deposit/seed`) — do not compile into the prod image. Only
+    /// [`FakeLedger`] implements this for real; the default returns a permanent `Rejected` so any
+    /// other ledger (e.g. the real `AgentLedger`) refuses rather than silently no-ops. The route is
+    /// only ever wired against a `FakeLedger` in the local e2e harness.
+    #[cfg(feature = "test-helpers")]
+    async fn seed_deposit(
+        &self,
+        pubkey: [u8; PUBKEY_LEN],
+        currency: Currency,
+        amount: u64,
+    ) -> Result<(), LedgerError> {
+        // Deliberately consume the args so unused-variable lints stay clean on impls that take the
+        // default (every real impl overrides this).
+        let _ = (pubkey, currency, amount);
+        Err(LedgerError::Rejected("seed_deposit not supported on this ledger".into()))
+    }
+
     /// Liveness for the merchant's pre-flight green dot.
     async fn healthy(&self) -> bool;
 }
@@ -419,6 +441,20 @@ impl Ledger for FakeLedger {
             deposit_fee: 0,
             deposit_min_amount: Some(0),
         })
+    }
+
+    /// Test-only deposit seed (feature-gated; see [`Ledger::seed_deposit`]). Delegates to the
+    /// existing `register_deposit` hook so the e2e harness's `POST /api/v1/test/deposit/seed`
+    /// exercises the *exact* pending→credited path a real refresh would, through the real router.
+    #[cfg(feature = "test-helpers")]
+    async fn seed_deposit(
+        &self,
+        pubkey: [u8; PUBKEY_LEN],
+        currency: Currency,
+        amount: u64,
+    ) -> Result<(), LedgerError> {
+        self.register_deposit(pubkey, currency, amount);
+        Ok(())
     }
 }
 

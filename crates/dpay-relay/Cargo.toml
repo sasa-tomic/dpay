@@ -24,6 +24,14 @@ path = "src/main.rs"
 # `tests/live.rs` integration test.
 agent = ["dep:ic-agent", "dep:candid", "dep:pocket-ic", "dep:icrc-ledger-types", "dep:num-traits", "dpay-core/rng"]
 
+# Test-only HTTP surface for the e2e harness: adds `POST /api/v1/test/deposit/seed` so a browser
+# harness can simulate a confirmed ckBTC deposit landing on the FakeLedger (mirrors
+# `FakeLedger::register_deposit` — drain-on-next-refresh). OFF by default and **MUST NOT** be
+# enabled in the prod image (`just image` never passes it): the route + the trait method it calls
+# are both `#[cfg(feature = "test-helpers")]`, so they do not compile into the prod binary. The
+# local e2e harness builds the relay with `--features test-helpers`.
+test-helpers = []
+
 [dependencies]
 dpay-core = { path = "../dpay-core" }
 axum = "0.8.9"

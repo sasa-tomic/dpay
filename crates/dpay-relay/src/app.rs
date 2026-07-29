@@ -124,6 +124,13 @@ pub fn app(state: AppState) -> Router {
         .route("/deposit/info", get(deposit_info))
         .route("/health", get(health));
 
+    // Test-only deposit-seed route (feature-gated so it CANNOT compile into the prod image). The
+    // local e2e harness builds the relay with `--features test-helpers` and POSTs here to simulate
+    // a confirmed ckBTC deposit landing; the prod image (`just image`) never enables the feature,
+    // so the route is absent and unreachable.
+    #[cfg(feature = "test-helpers")]
+    let api = api.route("/test/deposit/seed", post(test_deposit_seed));
+
     Router::new()
         .route("/", get(landing_page))
         .route("/download/dpay.apk", get(apk_download))
@@ -294,6 +301,35 @@ async fn deposit_info(State(state): State<AppState>, Query(qs): Query<BalanceQue
             deposit_min_amount: i.deposit_min_amount,
         }))
             .into_response(),
+        Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
+    }
+}
+
+/// `POST /api/v1/test/deposit/seed` (feature `test-helpers` ONLY — never in the prod image).
+///
+/// JSON `{account: <hex>, currency?: N, amount: U64}` → seeds a pending deposit on the FakeLedger
+/// (mirrors `register_deposit` — drain-on-next-`deposit_status`). Lets a browser e2e harness
+/// simulate a confirmed ckBTC deposit landing and then assert the credited path through the REAL
+/// relay + REAL FakeLedger settlement. Path/account parsing mirrors `balance`/`faucet`; any ledger
+/// error → `503` (like the other deposit routes — no `422` path, deposit plan §0). Returns `200
+/// {"seeded": true}` on success.
+#[cfg(feature = "test-helpers")]
+async fn test_deposit_seed(
+    State(state): State<AppState>,
+    Json(req): Json<DepositSeedRequest>,
+) -> Response {
+    let bytes = match hex::decode(req.account.trim()) {
+        Ok(b) if b.len() == PUBKEY_LEN => b,
+        _ => return err(StatusCode::BAD_REQUEST, "account must be 32 bytes hex"),
+    };
+    let mut pk = [0u8; PUBKEY_LEN];
+    pk.copy_from_slice(&bytes);
+    let currency = req.currency.unwrap_or(DEMO_USD);
+    match state.ledger.seed_deposit(pk, currency, req.amount).await {
+        Ok(()) => (StatusCode::OK, Json(DepositSeedBody { seeded: true })).into_response(),
+        // Mirror the deposit routes: any LedgerError → 503. seed_deposit on FakeLedger is infallible
+        // in practice, but the default trait impl returns Rejected — surface it honestly rather than
+        // swallowing.
         Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
     }
 }
@@ -473,6 +509,24 @@ struct DepositInfoBody {
     min_confirmations: u32,
     deposit_fee: u64,
     deposit_min_amount: Option<u64>,
+}
+
+/// `POST /api/v1/test/deposit/seed` request body (feature `test-helpers` ONLY). `currency` defaults
+/// to `DEMO_USD` when absent, matching `balance`/`faucet`.
+#[cfg(feature = "test-helpers")]
+#[derive(Deserialize)]
+struct DepositSeedRequest {
+    account: String,
+    #[serde(default)]
+    currency: Option<Currency>,
+    amount: u64,
+}
+
+/// `POST /api/v1/test/deposit/seed` response body.
+#[cfg(feature = "test-helpers")]
+#[derive(Serialize)]
+struct DepositSeedBody {
+    seeded: bool,
 }
 
 fn err(status: StatusCode, msg: impl Into<String>) -> Response {
