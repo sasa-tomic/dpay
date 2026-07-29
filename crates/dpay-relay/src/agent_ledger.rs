@@ -6,7 +6,7 @@
 //! offline. The candid surface it drives is exactly the facade canister's:
 //!   - `pay        : (blob) -> (variant { Ok : PayReceipt; Err : text })`  [update]
 //!   - `balance_of : (blob, nat32) -> (nat64) query`                       [query; display cache]
-//!   - `mint       : (blob, nat32, nat64) -> (variant { Ok : nat64; Err : text })`  [update]
+//!   - `faucet     : (blob, nat32) -> (variant { Ok : nat64; Err : text })`  [update; self-service, fixed amount, rate-limited]
 //!   - `transactions_of : (blob, nat32, nat32) -> (vec record {...}) query`
 //!
 //! The 196-byte signed authorization is candid-encoded as a single `blob` argument — identical to
@@ -190,27 +190,30 @@ impl Ledger for AgentLedger {
         self.balance_of(&pubkey, currency).await
     }
 
-    async fn mint(
+    async fn faucet(
         &self,
         to: [u8; PUBKEY_LEN],
         currency: Currency,
-        amount: u64,
+        // The real canister's `faucet` mints a FIXED constants-sourced amount and ignores this; it
+        // is kept in the trait signature so the permissive FakeLedger (demo) can honor it.
+        _amount: u64,
     ) -> Result<u64, LedgerError> {
-        // facade `mint(blob, nat32, nat64) -> Result<nat64, text>` (update). The facade gates minting
-        // behind its governance controller (and settles on the ledger), so it returns a candid
-        // variant rather than a bare nat64: a `Rejected` maps to a permanent policy failure. Three
-        // positional args: pubkey, currency (encoded as `nat32` since `Currency = u32`), amount.
-        let arg = encode_args((to.to_vec(), currency, amount))
-            .map_err(|e| LedgerError::Transient(format!("encode mint args: {e}")))?;
+        // facade `faucet(blob, nat32) -> Result<nat64, text>` (update) — the self-service demo
+        // on-ramp. No admin gate (the privileged `mint` is controller-only); the canister mints its
+        // fixed amount and rate-limits per (account, currency). A canister-level `Err(text)` is a
+        // permanent policy rejection ("not mintable", "faucet cooldown") → `Rejected` (422); a
+        // transport/replica failure is `Transient` (503, retried).
+        let arg = encode_args((to.to_vec(), currency))
+            .map_err(|e| LedgerError::Transient(format!("encode faucet args: {e}")))?;
         let reply = self
             .agent
-            .update(&self.canister_id, "mint")
+            .update(&self.canister_id, "faucet")
             .with_arg(arg)
             .call_and_wait()
             .await
-            .map_err(|e| LedgerError::Transient(format!("mint update: {e}")))?;
+            .map_err(|e| LedgerError::Transient(format!("faucet update: {e}")))?;
         let result: Result<u64, String> = decode_one(&reply)
-            .map_err(|e| LedgerError::Transient(format!("decode mint reply: {e}")))?;
+            .map_err(|e| LedgerError::Transient(format!("decode faucet reply: {e}")))?;
         result.map_err(LedgerError::Rejected)
     }
 

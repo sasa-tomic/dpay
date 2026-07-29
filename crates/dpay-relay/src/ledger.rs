@@ -141,9 +141,17 @@ pub trait Ledger: Send + Sync {
     /// for the asset it actually holds when online.
     async fn balance(&self, pubkey: [u8; PUBKEY_LEN], currency: Currency) -> Result<u64, LedgerError>;
 
-    /// Demo faucet: credit `to` with `amount` of `currency`, returning the new balance. Funds a
-    /// freshly-generated on-device account (stand-in for a real on-ramp).
-    async fn mint(
+    /// Self-service demo faucet: credit `to` with `amount` of `currency`, returning the new balance.
+    /// Funds a freshly-generated on-device account (the demo on-ramp).
+    ///
+    /// **Two faithful models.** [`FakeLedger`] (the offline demo ledger) credits the REQUESTED
+    /// `amount` and applies no cooldown — it is play money, and the e2e flow exercises a repeatable
+    /// top-up. [`AgentLedger`](crate::AgentLedger) (the real canister) IGNORES `amount` and calls the
+    /// canister's `faucet(account, currency)`, which mints a FIXED constants-sourced amount and is
+    /// rate-limited per (account, currency) — a client cannot print unbounded funds or pick an
+    /// amount. The relay's `/faucet` route passes `amount` through; the canister overrides it. The
+    /// canister's rate-limiting + fixed-amount are proven on PocketIC (see `dpay-canister-tests`).
+    async fn faucet(
         &self,
         to: [u8; PUBKEY_LEN],
         currency: Currency,
@@ -358,12 +366,15 @@ impl Ledger for FakeLedger {
         Ok(self.balance_of(&pubkey, currency))
     }
 
-    async fn mint(
+    async fn faucet(
         &self,
         to: [u8; PUBKEY_LEN],
         currency: Currency,
         amount: u64,
     ) -> Result<u64, LedgerError> {
+        // FakeLedger is the permissive DEMO model: credit the requested amount, no cooldown (play
+        // money; the e2e flow exercises a repeatable top-up). The real canister's faucet mints a
+        // FIXED amount and rate-limits — proven on PocketIC, not modeled here.
         let mut s = self.state.lock().unwrap();
         let bal = s.balances.entry((to, currency)).or_insert(0);
         *bal = bal.saturating_add(amount);
@@ -502,13 +513,13 @@ impl<L: Ledger> Ledger for FlakyLedger<L> {
         self.inner.balance(pubkey, currency).await
     }
 
-    async fn mint(
+    async fn faucet(
         &self,
         to: [u8; PUBKEY_LEN],
         currency: Currency,
         amount: u64,
     ) -> Result<u64, LedgerError> {
-        self.inner.mint(to, currency, amount).await
+        self.inner.faucet(to, currency, amount).await
     }
 
     async fn transactions_of(

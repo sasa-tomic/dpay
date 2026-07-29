@@ -721,8 +721,8 @@ impl Ledger for DepositFailingLedger {
     async fn balance(&self, pk: [u8; 32], c: Currency) -> Result<u64, LedgerError> {
         self.inner.balance(pk, c).await
     }
-    async fn mint(&self, to: [u8; 32], c: Currency, a: u64) -> Result<u64, LedgerError> {
-        self.inner.mint(to, c, a).await
+    async fn faucet(&self, to: [u8; 32], c: Currency, a: u64) -> Result<u64, LedgerError> {
+        self.inner.faucet(to, c, a).await
     }
     async fn transactions_of(
         &self,

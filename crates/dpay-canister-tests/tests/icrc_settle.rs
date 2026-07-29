@@ -35,6 +35,10 @@ const T0_NANOS: u64 = T0_SECS * 1_000_000_000;
 const CAP: u64 = 100_000; // per-tx cap: $1,000.00
 const INIT_A: u64 = 10_000; // payer opens with $100.00
 
+/// Mirror of the canister's `FAUCET_AMOUNT` ($100.00). The faucet always mints exactly this; the
+/// test asserts the fixed amount so a drift in either direction is caught.
+const FAUCET_AMOUNT: u64 = 10_000;
+
 /// A second currency standing in for a real ck token (ckBTC/ckETH/ckUSDT). Registered with the
 /// facade as NOT mintable, and pre-funded via the ledger's own `initial_balances`.
 const CKX: Currency = 1;
@@ -251,7 +255,11 @@ fn setup_with(
 }
 
 fn setup() -> (PocketIc, Principal, Principal, Principal, SigningKey, [u8; 32], [u8; 32]) {
-    setup_with(None)
+    // Seed a controller (the stable management-canister principal) so the controller-only `mint`
+    // helper below can fund accounts. The default demo deployment ships with controller=null, but
+    // the settlement tests need precise balances via the privileged mint, so they run locked. The
+    // open-mode behavior (mint/register denied, faucet works) is covered by dedicated tests below.
+    setup_with(Some(pic_admin()))
 }
 
 fn signed(
@@ -319,12 +327,14 @@ fn ledger_chain_len(pic: &PocketIc, ledger: Principal) -> u64 {
 
 /// Fund a user on a MINTABLE currency through the facade (transfers from the ledger's minting
 /// account, which it owns). Returns the facade's `mint` return value — which per the `Ledger` trait
-/// contract is the NEW BALANCE (not the ledger block index).
+/// contract is the NEW BALANCE (not the ledger block index). Called as the seeded controller
+/// (`pic_admin`): the privileged `mint` is controller-only (R1), so a test funds accounts by acting
+/// as the controller, exactly as an operator would in production.
 fn mint(pic: &PocketIc, dpay: Principal, to: [u8; 32], currency: Currency, amount: u64) -> u64 {
     let reply = pic
         .update_call(
             dpay,
-            Principal::anonymous(),
+            pic_admin(),
             "mint",
             encode_args((to.to_vec(), currency, amount)).unwrap(),
         )
@@ -337,7 +347,7 @@ fn mint_err(pic: &PocketIc, dpay: Principal, to: [u8; 32], currency: Currency, a
     let reply = pic
         .update_call(
             dpay,
-            Principal::anonymous(),
+            pic_admin(),
             "mint",
             encode_args((to.to_vec(), currency, amount)).unwrap(),
         )
@@ -351,12 +361,33 @@ fn burn(pic: &PocketIc, dpay: Principal, from: [u8; 32], currency: Currency, amo
     let reply = pic
         .update_call(
             dpay,
-            Principal::anonymous(),
+            pic_admin(),
             "burn",
             encode_args((from.to_vec(), currency, amount)).unwrap(),
         )
         .expect("burn update rejected");
     decode_one::<Result<u64, String>>(&reply).unwrap().expect("burn ok");
+}
+
+/// Self-service faucet: mints the FIXED `FAUCET_AMOUNT` ($100.00) to `to` on `currency`, called by
+/// `caller` (default anonymous — the faucet has no admin gate). Returns the facade's reported
+/// post-faucet balance.
+fn faucet(
+    pic: &PocketIc,
+    dpay: Principal,
+    to: [u8; 32],
+    currency: Currency,
+    caller: Principal,
+) -> Result<u64, String> {
+    let reply = pic
+        .update_call(
+            dpay,
+            caller,
+            "faucet",
+            encode_args((to.to_vec(), currency)).unwrap(),
+        )
+        .expect("faucet update rejected");
+    decode_one::<Result<u64, String>>(&reply).unwrap()
 }
 
 fn transactions_of(
@@ -629,7 +660,8 @@ fn non_zero_fee_settles_with_fee_deducted() {
     let dpay_init = DpayInitArg {
         ledgers: vec![LedgerConfig { currency: FEE_CUR, principal: ledger, mintable: true }],
         per_tx_cap: CAP,
-        controller: None,
+        // Seed a controller so the privileged `mint` helper (called as pic_admin) can fund the payer.
+        controller: Some(pic_admin()),
     };
     pic.install_canister(dpay, dpay_wasm(), encode_one(&dpay_init).unwrap(), None);
 
@@ -717,22 +749,137 @@ fn transactions_of_records_mint_pay_burn() {
     assert_eq!(merch_txns[0].amount, 2_500);
 }
 
-/// MED: a controller set at init can be rotated via set_controller (governed), and locking down
-/// (open -> governed) is possible. Once locked, only the controller may rotate.
+/// R1 (CRITICAL): with NO controller set (the demo default), the privileged admin ops
+/// `mint`/`register_ledger`/`register_minter` are REJECTED for every caller — the open-admin default
+/// is closed. The self-service `faucet` still works (mints the fixed amount). Open mode still allows
+/// the one-time lockdown (`set_controller`), after which the controller can `mint`. This is the
+/// money-safety flip: an unconfigured deployment cannot have its currency repointed or its demo
+/// currency printed by any caller; the demo on-ramp is the rate-limited `faucet`.
 #[test]
-fn controller_rotation_locks_down_open_mode() {
+fn open_mode_denies_admin_but_faucet_and_lockdown_work() {
+    let admin = pic_admin();
+    // controller = None (open/demo mode).
+    let (pic, ledger_dusd, _ledger_ckx, dpay, _sk, payer, _merch) = setup_with(None);
+
+    // Privileged mint is DENIED for an anonymous caller (and for every caller — there is no
+    // controller to be). Nothing is created.
+    let err = mint_err(&pic, dpay, payer, DEMO_USD, INIT_A);
+    assert!(
+        err.contains("no controller set") || err.contains("admin ops disabled"),
+        "open-mode mint must be denied: {err}"
+    );
+    assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, payer), 0);
+
+    // register_ledger / register_minter are likewise denied (no anonymous repoint of a currency).
+    let reply = pic
+        .update_call(
+            dpay,
+            Principal::anonymous(),
+            "register_ledger",
+            encode_args((2u32, ledger_dusd, true)).unwrap(),
+        )
+        .expect("register_ledger update rejected");
+    assert!(
+        decode_one::<Result<(), String>>(&reply).unwrap().is_err(),
+        "open-mode register_ledger must be denied"
+    );
+    let reply = pic
+        .update_call(
+            dpay,
+            Principal::anonymous(),
+            "register_minter",
+            encode_args((2u32, admin)).unwrap(),
+        )
+        .expect("register_minter update rejected");
+    assert!(
+        decode_one::<Result<(), String>>(&reply).unwrap().is_err(),
+        "open-mode register_minter must be denied"
+    );
+
+    // But the self-service FAUCET works for anyone — the demo on-ramp — minting the fixed amount.
+    let bal = faucet(&pic, dpay, payer, DEMO_USD, Principal::anonymous())
+        .expect("faucet must work in open mode");
+    assert_eq!(bal, FAUCET_AMOUNT, "faucet mints exactly FAUCET_AMOUNT");
+    assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, payer), FAUCET_AMOUNT);
+
+    // Open mode still allows the one-time lockdown: set_controller seeds the first controller.
+    let reply = pic
+        .update_call(
+            dpay,
+            Principal::anonymous(),
+            "set_controller",
+            encode_args((Some(admin),)).unwrap(),
+        )
+        .expect("set_controller update rejected");
+    assert!(
+        decode_one::<Result<(), String>>(&reply).unwrap().is_ok(),
+        "open mode: one-time lockdown (set_controller) must succeed"
+    );
+
+    // Now locked: the controller can mint again (privileged path), anon still cannot.
+    assert_eq!(
+        mint(&pic, dpay, payer, DEMO_USD, 1u64),
+        FAUCET_AMOUNT + 1,
+        "controller mint ok after lockdown"
+    );
+    let reply = pic
+        .update_call(
+            dpay,
+            Principal::anonymous(),
+            "mint",
+            encode_args((payer.to_vec(), DEMO_USD, 1u64)).unwrap(),
+        )
+        .expect("mint update rejected");
+    assert!(
+        decode_one::<Result<u64, String>>(&reply).unwrap().is_err(),
+        "locked: anon mint refused"
+    );
+}
+
+/// R1: a controller seeded at init enables the privileged admin ops for that principal only, and
+/// rotation is two-step (only the current controller rotates). This is the production model: seed a
+/// governed principal at `init`, then rotate via the controller.
+#[test]
+fn controller_rotation_is_two_step() {
     let admin = pic_admin();
     let next_gov = Principal::self_authenticating(&[7u8; 29]);
+    let (pic, ledger_dusd, _ledger_ckx, dpay, _sk, payer, _merch) = setup_with(Some(admin));
 
-    // Open mode (no controller): admin ops are open to anyone.
-    let (pic, ledger_dusd, _ledger_ckx, dpay, _sk, payer, _merch) = setup();
-    mint(&pic, dpay, payer, DEMO_USD, INIT_A); // open mode: anonymous mint succeeds
-
-    // Lock down by setting a controller (open mode lets any caller do this once).
+    // Seeded controller can mint; anon cannot.
+    assert_eq!(mint(&pic, dpay, payer, DEMO_USD, INIT_A), INIT_A);
     let reply = pic
-        .update_call(dpay, Principal::anonymous(), "set_controller", encode_args((Some(admin),)).unwrap())
+        .update_call(
+            dpay,
+            Principal::anonymous(),
+            "mint",
+            encode_args((payer.to_vec(), DEMO_USD, 1u64)).unwrap(),
+        )
+        .expect("mint update rejected");
+    assert!(
+        decode_one::<Result<u64, String>>(&reply).unwrap().is_err(),
+        "non-controller mint refused"
+    );
+
+    // Non-controller cannot rotate; the controller can rotate to a new principal.
+    let reply = pic
+        .update_call(
+            dpay,
+            Principal::anonymous(),
+            "set_controller",
+            encode_args((Some(next_gov),)).unwrap(),
+        )
         .expect("set_controller update rejected");
-    assert!(decode_one::<Result<(), String>>(&reply).unwrap().is_ok(), "open mode: lock-down succeeds");
+    assert!(
+        decode_one::<Result<(), String>>(&reply).unwrap().is_err(),
+        "non-controller rotation refused"
+    );
+    let reply = pic
+        .update_call(dpay, admin, "set_controller", encode_args((Some(next_gov),)).unwrap())
+        .expect("set_controller update rejected");
+    assert!(
+        decode_one::<Result<(), String>>(&reply).unwrap().is_ok(),
+        "controller rotation succeeds"
+    );
 
     let mint_ok = |caller: Principal| -> bool {
         let reply = pic
@@ -740,22 +887,56 @@ fn controller_rotation_locks_down_open_mode() {
             .expect("mint update rejected");
         decode_one::<Result<u64, String>>(&reply).unwrap().is_ok()
     };
-    assert!(!mint_ok(Principal::anonymous()), "locked: anon mint refused");
-    assert!(mint_ok(admin), "controller mint ok");
-    assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, payer), INIT_A + 1);
-
-    // Non-controller cannot rotate; the controller can rotate to a new principal.
-    let reply = pic
-        .update_call(dpay, Principal::anonymous(), "set_controller", encode_args((Some(next_gov),)).unwrap())
-        .expect("set_controller update rejected");
-    assert!(decode_one::<Result<(), String>>(&reply).unwrap().is_err(), "non-controller rotation refused");
-    let reply = pic
-        .update_call(dpay, admin, "set_controller", encode_args((Some(next_gov),)).unwrap())
-        .expect("set_controller update rejected");
-    assert!(decode_one::<Result<(), String>>(&reply).unwrap().is_ok(), "controller rotation succeeds");
-
     assert!(!mint_ok(admin), "old controller now refused");
     assert!(mint_ok(next_gov), "new controller mint ok");
+    // Ledger reflects only the successful controller mints: the initial INIT_A fund + the single
+    // post-rotation mint_ok(next_gov) of 1 (the anon + old-controller mint_ok calls were refused).
+    assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, payer), INIT_A + 1);
+}
+
+/// R1: the self-service faucet mints the FIXED amount and is RATE-LIMITED per (account, currency).
+/// A second immediate call is rejected; after the cooldown window elapses, it mints again. Proves
+/// the faucet cannot be drained by repeated calls (the rate-limit is the bound on the self-service
+/// surface, complementing the fixed-amount-per-call bound).
+#[test]
+fn faucet_mints_fixed_amount_and_rate_limits() {
+    let (pic, ledger_dusd, _ledger_ckx, dpay, _sk, payer, _merch) = setup();
+
+    // First faucet: mints exactly FAUCET_AMOUNT.
+    let bal = faucet(&pic, dpay, payer, DEMO_USD, Principal::anonymous())
+        .expect("first faucet ok");
+    assert_eq!(bal, FAUCET_AMOUNT);
+    assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, payer), FAUCET_AMOUNT);
+
+    // Second immediate faucet: rejected by the cooldown (no second debit).
+    let err = faucet(&pic, dpay, payer, DEMO_USD, Principal::anonymous())
+        .expect_err("second faucet must be rate-limited");
+    assert!(err.contains("cooldown"), "expected cooldown error: {err}");
+    assert_eq!(
+        ledger_balance(&pic, ledger_dusd, dpay, payer),
+        FAUCET_AMOUNT,
+        "rate-limited faucet must not mint again"
+    );
+
+    // A DIFFERENT account is not rate-limited by the first account's faucet (per-account key).
+    let other = generate_keypair().verifying_key().to_bytes();
+    let bal2 = faucet(&pic, dpay, other, DEMO_USD, Principal::anonymous())
+        .expect("faucet for a different account ok");
+    assert_eq!(bal2, FAUCET_AMOUNT);
+    assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, other), FAUCET_AMOUNT);
+
+    // Advance time past the cooldown window (1 hour); the same account can faucet again.
+    pic.advance_time(Duration::from_secs(60 * 60 + 1));
+    pic.tick();
+    let bal3 = faucet(&pic, dpay, payer, DEMO_USD, Principal::anonymous())
+        .expect("faucet ok after cooldown");
+    assert_eq!(bal3, FAUCET_AMOUNT * 2);
+    assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, payer), FAUCET_AMOUNT * 2);
+
+    // The faucet refuses a non-mintable currency (it is demo-only).
+    let err = faucet(&pic, dpay, payer, CKX, Principal::anonymous())
+        .expect_err("faucet on a non-mintable currency must be refused");
+    assert!(err.contains("not mintable"), "wrong faucet error: {err}");
 }
 
 /// LOW (L5): register_ledger is gated by the controller. An anonymous repoint must be refused when a

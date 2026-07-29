@@ -316,24 +316,23 @@ fn setup_deposit() -> (PocketIc, Principal, Principal, Principal, SigningKey, [u
         None,
     );
 
+    // Seed a controller at init: `register_minter` is a privileged admin op (controller-only since
+    // R1), so the facade must be locked with a controller for the test to register the mock minter.
+    // The stable management-canister principal stands in for the governed operator.
+    let admin = Principal::management_canister();
     let dpay_init = DpayInitArg {
         ledgers: vec![LedgerConfig { currency: CKBTC, principal: ckbtc, mintable: false }],
         per_tx_cap: CAP,
-        controller: None,
+        controller: Some(admin),
     };
     pic.install_canister(dpay, dpay_wasm(), encode_one(&dpay_init).unwrap(), None);
 
     let reply = pic
-        .update_call(
-            dpay,
-            Principal::anonymous(),
-            "register_minter",
-            encode_args((CKBTC, mock)).unwrap(),
-        )
+        .update_call(dpay, admin, "register_minter", encode_args((CKBTC, mock)).unwrap())
         .expect("register_minter update_call rejected");
     decode_one::<Result<(), String>>(&reply)
         .unwrap()
-        .expect("register_minter should succeed in open mode");
+        .expect("register_minter should succeed for the controller");
 
     (pic, ckbtc, dpay, mock, payer_sk, payer)
 }

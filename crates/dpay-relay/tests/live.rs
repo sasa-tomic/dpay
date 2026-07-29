@@ -210,22 +210,23 @@ fn live_settlement_end_to_end() {
     pic.install_canister(dpay, facade_wasm(), encode_one(&dpay_init).unwrap(), None);
     let canister_id: Principal = dpay;
 
-    // Fund the payer through the facade mint (open controller → anonymous caller allowed). The
-    // facade settles the mint on the ledger and refreshes the display cache. The facade's `mint`
-    // returns the NEW BALANCE per the `Ledger` trait contract (not the ledger block index) — a fresh
-    // account minted INIT_A therefore reports INIT_A.
+    // Fund the payer through the self-service FAUCET. Since R1 the privileged `mint` is
+    // controller-only (denied with controller=null); the faucet is the demo on-ramp and mints a
+    // FIXED amount (FAUCET_AMOUNT, == INIT_A here) — the relay's `/faucet` route calls it. The
+    // facade settles the mint on the ledger and refreshes the display cache; it returns the NEW
+    // BALANCE per the `Ledger::faucet` contract.
     let mint_reply = pic
         .update_call(
             dpay,
             Principal::anonymous(),
-            "mint",
-            encode_args((payer_pk.to_vec(), DEMO_USD, INIT_A)).unwrap(),
+            "faucet",
+            encode_args((payer_pk.to_vec(), DEMO_USD)).unwrap(),
         )
-        .expect("mint update rejected");
+        .expect("faucet update rejected");
     let mint_ret = decode_one::<Result<u64, String>>(&mint_reply)
         .unwrap()
-        .expect("mint must succeed");
-    assert_eq!(mint_ret, INIT_A, "facade mint must return the post-mint balance, not the block index");
+        .expect("faucet must succeed");
+    assert_eq!(mint_ret, INIT_A, "facade faucet must return the post-mint balance");
 
     // --- 3. Everything from here is async: AgentLedger (ic-agent) + the relay's axum app. ---
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -246,15 +247,15 @@ fn live_settlement_end_to_end() {
         assert_eq!(ledger.balance_of(&payer_pk, DEMO_USD).await.unwrap(), INIT_A);
         assert_eq!(ledger.balance_of(&merch_pk, DEMO_USD).await.unwrap(), 0);
 
-        // AgentLedger::mint must return the NEW BALANCE per the `Ledger` trait contract (not the
-        // ledger block index) — the faucet surfaces this return directly as `{balance}`. Mint to a
-        // fresh account so the expected post-mint balance is unambiguous (0 + amount = amount).
+        // AgentLedger::faucet proxies the canister's self-service faucet and returns the NEW BALANCE
+        // (surfaced by the relay as `{balance}`). The canister mints its FIXED amount (== INIT_A) and
+        // ignores the requested amount; a fresh account therefore reports INIT_A.
         let fresh_pk = generate_keypair().verifying_key().to_bytes();
         let mint_bal = ledger
-            .mint(fresh_pk, DEMO_USD, INIT_A)
+            .faucet(fresh_pk, DEMO_USD, INIT_A)
             .await
-            .expect("AgentLedger::mint must succeed");
-        assert_eq!(mint_bal, INIT_A, "AgentLedger::mint must return the post-mint balance");
+            .expect("AgentLedger::faucet must succeed");
+        assert_eq!(mint_bal, INIT_A, "AgentLedger::faucet must return the post-mint balance");
         assert_eq!(ledger.balance_of(&fresh_pk, DEMO_USD).await.unwrap(), INIT_A);
 
         // Health goes through the real replica `status`.

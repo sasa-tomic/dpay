@@ -191,15 +191,40 @@ impl Storable for PrincipalStorable {
     const BOUND: Bound = Bound::Bounded { max_size: 29, is_fixed_size: false };
 }
 
-/// Returns `Ok(())` if the caller may perform governance admin ops (mint/burn/register_ledger/
-/// set_controller). With no controller set (the demo default) every caller is allowed; with a
-/// controller set, only that principal is.
+/// Returns `Ok(())` if the caller may perform **value-moving / config** governance admin ops
+/// (`mint`/`burn`/`register_ledger`/`register_minter`/`reconcile`). With **no controller set** the
+/// call is REJECTED — the open-admin default is closed, so a deployment that forgets to seed a
+/// governed controller cannot have its currency repointed or its demo currency printed by any
+/// caller. With a controller set, only that principal is admitted.
+///
+/// This is the money-safety flip: the demo's self-service on-ramp is the separate [`faucet`]
+/// method (fixed amount, rate-limited, no admin gate); the privileged `mint`/`burn`/`register_*`
+/// path is closed until an operator seeds a governed controller at init (see `InitArg::controller`
+/// and `set_controller`). `set_controller` is intentionally NOT gated here — it has its own
+/// bootstrap+rotation semantics (see [`require_controller_rotation`]).
 fn require_admin() -> Result<(), String> {
     let admin = CONTROLLER.with(|c| c.borrow().get().0);
     match admin {
-        None => Ok(()),
+        None => Err("admin ops disabled: no controller set (seed one at init or via set_controller)"
+            .to_string()),
         Some(a) if msg_caller() == a => Ok(()),
         Some(_) => Err("unauthorized: admin ops require the controller principal".to_string()),
+    }
+}
+
+/// Gate for `set_controller` — the ONE admin op that must remain callable to establish the first
+/// controller. Semantics:
+/// - **No controller set (open/demo):** any caller may set the first controller — the one-time
+///   lockdown path for a deployment that did not seed one at init. (Open mode is demo-only; against
+///   an adversary, seed a governed controller at `init` instead — see CODEBASE_ANALYSIS.)
+/// - **Controller set (locked):** only the current controller may rotate to a new principal
+///   (two-step rotation; a locked canister can only be rotated by its controller).
+fn require_controller_rotation() -> Result<(), String> {
+    let cur = CONTROLLER.with(|c| c.borrow().get().0);
+    match cur {
+        None => Ok(()), // open mode: allow the one-time lockdown
+        Some(c) if msg_caller() == c => Ok(()), // locked: two-step rotation by the controller
+        Some(_) => Err("unauthorized: set_controller requires the current controller".to_string()),
     }
 }
 
@@ -425,6 +450,13 @@ thread_local! {
     /// only if it is a ck currency (ckBTC/ckETH/...); absence => the facade exposes no deposit path.
     static MINTERS: RefCell<StableBTreeMap<Currency, PrincipalStorable, Memory>> =
         RefCell::new(StableBTreeMap::init(MEMORY.with(|m| m.borrow().get(MemoryId::new(8)))));
+
+    /// `(currency, pubkey)` -> last-faucet unix-secs. MemoryId 9 (new facade state). Backs the
+    /// self-service [`faucet`] rate-limit: one mint per account per currency per cooldown window.
+    /// Reuses [`CacheKey`] (`currency_le(4) | pubkey(32)`); the value is the wall-clock seconds of
+    /// the last successful faucet mint for that (account, currency).
+    static FAUCET_COOLDOWN: RefCell<StableBTreeMap<CacheKey, u64, Memory>> =
+        RefCell::new(StableBTreeMap::init(MEMORY.with(|m| m.borrow().get(MemoryId::new(9)))));
 }
 
 /// Configuration for one currency, supplied at init (and via `register_ledger`).
@@ -696,6 +728,23 @@ fn dedup_created_at_time() -> u64 {
     (now_ns / bucket_ns) * bucket_ns
 }
 
+// --- self-service demo faucet -----------------------------------------------------------------
+// The faucet is the demo on-ramp: a freshly-onboarded account mints a FIXED amount of play money
+// on a mintable currency, rate-limited per (account, currency). It is the ONLY way a non-controller
+// creates demo currency — the privileged `mint`/`burn` are controller-only (see `require_admin`).
+// Both constants are single-sourced here; the relay/app reference the faucet by method name, never
+// by re-declaring the amount (a client cannot request a different amount — the faucet always mints
+// `FAUCET_AMOUNT`).
+
+/// Fixed amount the faucet mints per call, in minor units (cents) = **$100.00**. The self-service
+/// surface cannot print more than this in one call regardless of what a client asks.
+const FAUCET_AMOUNT: u64 = 10_000;
+
+/// Per-(account, currency) faucet cooldown in seconds. One faucet mint per account per currency per
+/// window — guards the self-service path against a single account draining the demo minting account
+/// by repeated calls. Generous for a demo; make it a governed parameter before any pilot.
+const FAUCET_COOLDOWN_SECS: u64 = 60 * 60; // 1 hour
+
 /// Settle an offline-signed authorization. Same candid signature as the pre-facade canister's `pay`;
 /// balances are moved on the ICRC ledger named by the payment's currency, not here.
 #[update]
@@ -903,6 +952,63 @@ async fn mint(to: Vec<u8>, currency: Currency, amount: u64) -> Result<u64, Strin
     Ok(new_balance)
 }
 
+/// `(blob account, nat32 currency) -> Result<nat64, text>` — the self-service demo on-ramp. Mints
+/// a FIXED [`FAUCET_AMOUNT`] ($100.00) of a mintable currency to `account`, rate-limited per
+/// (account, currency) via [`FAUCET_COOLDOWN`] (one mint per [`FAUCET_COOLDOWN_SECS`] window). No
+/// admin gate — this is the path the relay's `/faucet` route calls so a freshly-onboarded wallet can
+/// fund itself without the controller. The privileged [`mint`] (arbitrary amount) stays
+/// controller-only; the faucet always mints the fixed constant, so a client cannot print unbounded
+/// funds. Refreshes the display cache from the authoritative ledger post-mint and returns the new
+/// balance (matching the `Ledger::faucet` contract the relay surfaces as `{balance}`).
+#[update]
+async fn faucet(account: Vec<u8>, currency: Currency) -> Result<u64, String> {
+    let pk = to_pubkey(&account)?;
+    let (ledger, mintable) = ledger_for(currency)?;
+    if !mintable {
+        return Err(format!("currency {currency} is not mintable (faucet is demo-only)"));
+    }
+    // Rate-limit: one faucet per (account, currency) per cooldown window. Synchronous read+write
+    // under the stable map (no await in the check) so two concurrent faucet calls for the same
+    // account cannot both pass — the second observes the first's just-written timestamp.
+    let key = CacheKey::new(pk, currency);
+    let now_secs = time() / 1_000_000_000;
+    FAUCET_COOLDOWN.with(|m| {
+        let mut m = m.borrow_mut();
+        if let Some(last) = m.get(&key) {
+            let ready_at = last.saturating_add(FAUCET_COOLDOWN_SECS);
+            if now_secs < ready_at {
+                let secs = ready_at - now_secs;
+                let unit = if secs >= 3600 { "h" } else if secs >= 60 { "min" } else { "s" };
+                let v = if secs >= 3600 { secs / 3600 } else if secs >= 60 { secs / 60 } else { secs };
+                return Err(format!("faucet cooldown: try again in ~{v} {unit}"));
+            }
+        }
+        m.insert(key, now_secs);
+        Ok(())
+    })?;
+    // Mint the fixed amount from the ledger's minting account (which this canister owns), identical
+    // to `mint`'s transfer but with the fixed amount and no caller gate.
+    let arg = TransferArg {
+        from_subaccount: None, // the minting account's default subaccount
+        to: account_of(&pk),
+        amount: Nat::from(FAUCET_AMOUNT),
+        fee: None, // mints carry no fee
+        created_at_time: Some(time()),
+        memo: None,
+    };
+    ledger_transfer(ledger, arg)
+        .await
+        .map_err(|e| format!("faucet transfer: {e:?}"))?;
+    record_txn(MINT_ACCOUNT, pk, FAUCET_AMOUNT, [0u8; NONCE_LEN], currency, now_secs);
+    // Re-read the authoritative post-faucet balance: refresh the display cache AND return it (the
+    // `Ledger::faucet` contract returns the NEW BALANCE, surfaced by the relay as `{balance}`).
+    let new_balance = ledger_balance_of(ledger, &account_of(&pk))
+        .await
+        .map_err(|e| format!("faucet settled but post-mint balance read failed: {e}"))?;
+    write_cache(pk, currency, new_balance);
+    Ok(new_balance)
+}
+
 /// `burn(blob, nat32, nat64) -> Result<nat64, text>` — destroy a MINTABLE (demo) currency by
 /// transferring it back to the ledger's minting account (the ICRC convention). Only demo currencies
 /// can be burned. Refreshes the display cache post-settle. Same controller gating as `mint`. Returns
@@ -1048,14 +1154,17 @@ async fn deposit_info(currency: Currency) -> Result<DepositInfo, String> {
     })
 }
 
-/// Rotate the governance principal for `mint`/`burn`/`register_ledger`/`set_controller`. Governed by
-/// the current controller: in open-demo mode (no controller set) any caller may set one — which is
-/// how a fresh deployment is locked down; once a controller is set, only it can rotate. (This gates
+/// Rotate (or, from open/demo mode, set the first) governance principal for `mint`/`burn`/
+/// `register_ledger`/`register_minter`/`reconcile`/`set_controller`. Governed by
+/// [`require_controller_rotation`]: in open-demo mode (no controller set) any caller may set the
+/// first controller — the one-time lockdown path; once a controller is set, only it can rotate
+/// (two-step rotation). The PRODUCTION path is to seed a governed principal at `init`
+/// (`InitArg::controller`) so the canister never runs in open mode against an adversary. (This gates
 /// admin *methods* only. The IC-level canister controller — who can `install_code`/upgrade — is a
-/// separate concern set via `dfx`/NNS/SNS.)
+/// separate concern set via `dfx`/NNS/SNS; see docs/GOVERNANCE.md.)
 #[update]
 fn set_controller(new: Option<Principal>) -> Result<(), String> {
-    require_admin()?;
+    require_controller_rotation()?;
     CONTROLLER
         .with(|c| c.borrow_mut().set(ControllerStorable(new)).expect("set controller"));
     Ok(())
