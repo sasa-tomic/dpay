@@ -158,12 +158,25 @@ export class Driver {
     }
   }
 
-  /** Type a string into the input matched by `testID`. Clears it first. */
+  /** Type a string into the input matched by `testID`. Clears it first via native `select()` so the
+   *  typed text REPLACES the current value (reliable for RN-web controlled inputs, including the
+   *  pre-filled decimal amount field — triple-click + Backspace was racy and left partial values). */
   async type(testID, text, opts = {}) {
     const el = await this.findByTestID(testID, opts);
-    await el.click({ clickCount: 3 }); // select all
-    await el.press('Backspace');
+    await el.focus();
+    // Select all current text so the subsequent keystrokes replace it (standard browser behavior).
+    await el.evaluate((node) => {
+      if (typeof node.select === 'function') node.select();
+      else if (typeof node.setSelectionRange === 'function') node.setSelectionRange(0, (node.value ?? '').length);
+    });
     if (text) await el.type(text, { delay: 5 });
+  }
+
+  /** Read the `.value` of the input matched by `testID` (readText reads textContent, which is empty
+   *  for `<input>`/TextInput). Use this to verify what a controlled input actually holds. */
+  async readInputValue(testID, opts = {}) {
+    const el = await this.findByTestID(testID, opts);
+    return await el.evaluate((node) => (node.value ?? '').toString());
   }
 
   /**
@@ -200,9 +213,11 @@ export class Driver {
     return path;
   }
 
-  /** Evaluate a JS function in the page (escape-hatch for flows that need a custom check). */
-  async eval(fn) {
-    return this.page.evaluate(fn);
+  /** Evaluate a JS function in the page (escape-hatch for flows that need a custom check or an
+   *  injected value). Forwards extra args to `page.evaluate(fn, ...args)` — e.g.
+   *  `driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), requestQR)` injects `requestQR` into the seam. */
+  async eval(fn, ...args) {
+    return this.page.evaluate(fn, ...args);
   }
 
   /** Press a keyboard key (e.g. 'Escape', 'Enter') via a real DOM event. Powers the keyboard-shortcut
