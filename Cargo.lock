@@ -792,17 +792,6 @@ dependencies = [
  "dpay-core",
  "ic-cdk",
  "ic-stable-structures",
- "serde",
-]
-
-[[package]]
-name = "dpay-canister-icrc"
-version = "0.1.0"
-dependencies = [
- "candid",
- "dpay-core",
- "ic-cdk",
- "ic-stable-structures",
  "icrc-ledger-types",
  "num-traits",
  "serde",
@@ -815,6 +804,8 @@ dependencies = [
  "candid",
  "dpay-core",
  "ed25519-dalek",
+ "icrc-ledger-types",
+ "num-traits",
  "pocket-ic",
  "serde",
 ]
@@ -848,19 +839,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dpay-icrc-tests"
-version = "0.1.0"
-dependencies = [
- "candid",
- "dpay-core",
- "ed25519-dalek",
- "icrc-ledger-types",
- "num-traits",
- "pocket-ic",
- "serde",
-]
-
-[[package]]
 name = "dpay-relay"
 version = "0.1.0"
 dependencies = [
@@ -873,6 +851,8 @@ dependencies = [
  "hex",
  "http-body-util",
  "ic-agent",
+ "icrc-ledger-types",
+ "num-traits",
  "pocket-ic",
  "serde",
  "serde_json",

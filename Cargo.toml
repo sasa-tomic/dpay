@@ -8,12 +8,6 @@ members = [
     "crates/dpay-sim",
     "crates/dpay-ffi",
     "crates/dpay-fixture",
-    # ICRC-ledger integration demo (see ICRC3_INTEGRATION.md). Isolated from the shipping canister
-    # so it never disturbs the inner loop or the mainnet build. The ledger itself is the REAL DFINITY
-    # `ic-icrc1-ledger`, built from source and cached in third_party/ic-icrc1-ledger/ (not a workspace
-    # crate); dpay-canister-icrc is the dpay variant that settles on it.
-    "crates/dpay-canister-icrc",
-    "crates/dpay-icrc-tests",
 ]
 # Canister (cdylib) only builds for wasm; keep it out of the default native build/test set.
 default-members = [

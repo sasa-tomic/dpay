@@ -3,10 +3,10 @@
 //! (idempotency / retries / health), so the axum app is unchanged — only the seam is swapped.
 //!
 //! Behind the `agent` cargo feature (off by default) so the fast in-memory inner loop stays
-//! offline. The candid surface it drives is exactly the canister's:
+//! offline. The candid surface it drives is exactly the facade canister's:
 //!   - `pay        : (blob) -> (variant { Ok : PayReceipt; Err : text })`  [update]
-//!   - `balance_of : (blob, nat32) -> (nat64) query`
-//!   - `mint       : (blob, nat32, nat64) -> (nat64)`  [update]
+//!   - `balance_of : (blob, nat32) -> (nat64) query`                       [query; display cache]
+//!   - `mint       : (blob, nat32, nat64) -> (variant { Ok : nat64; Err : text })`  [update]
 //!   - `transactions_of : (blob, nat32, nat32) -> (vec record {...}) query`
 //!
 //! The 196-byte signed authorization is candid-encoded as a single `blob` argument — identical to
@@ -162,8 +162,10 @@ impl Ledger for AgentLedger {
         currency: Currency,
         amount: u64,
     ) -> Result<u64, LedgerError> {
-        // canister `mint(blob, nat32, nat64) -> nat64` (update). Three positional args: pubkey,
-        // currency (encoded as `nat32` since `Currency = u32`), amount.
+        // facade `mint(blob, nat32, nat64) -> Result<nat64, text>` (update). The facade gates minting
+        // behind its governance controller (and settles on the ledger), so it returns a candid
+        // variant rather than a bare nat64: a `Rejected` maps to a permanent policy failure. Three
+        // positional args: pubkey, currency (encoded as `nat32` since `Currency = u32`), amount.
         let arg = encode_args((to.to_vec(), currency, amount))
             .map_err(|e| LedgerError::Transient(format!("encode mint args: {e}")))?;
         let reply = self
@@ -173,8 +175,9 @@ impl Ledger for AgentLedger {
             .call_and_wait()
             .await
             .map_err(|e| LedgerError::Transient(format!("mint update: {e}")))?;
-        decode_one::<u64>(&reply)
-            .map_err(|e| LedgerError::Transient(format!("decode mint reply: {e}")))
+        let result: Result<u64, String> = decode_one(&reply)
+            .map_err(|e| LedgerError::Transient(format!("decode mint reply: {e}")))?;
+        result.map_err(LedgerError::Rejected)
     }
 
     async fn transactions_of(

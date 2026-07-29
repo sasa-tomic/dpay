@@ -1,9 +1,12 @@
 type InitArg = record {
-  account_a : blob;
-  account_b : blob;
-  balance_a : nat64;
-  balance_b : nat64;
+  controller : opt principal;
+  ledgers : vec LedgerConfig;
   per_tx_cap : nat64;
+};
+type LedgerConfig = record {
+  "principal" : principal;
+  mintable : bool;
+  currency : nat32;
 };
 type PayReceipt = record {
   to : blob;
@@ -12,8 +15,11 @@ type PayReceipt = record {
   amount : nat64;
   new_from_balance : nat64;
 };
-type Result = variant { Ok : PayReceipt; Err : text };
-type Result_1 = variant { Ok : principal; Err : text };
+type Result = variant { Ok : nat64; Err : text };
+type Result_1 = variant { Ok : PayReceipt; Err : text };
+type Result_2 = variant { Ok : principal; Err : text };
+type Result_3 = variant { Ok; Err : text };
+type Result_4 = variant { Ok : nat; Err : text };
 type TxnView = record {
   to : blob;
   from : blob;
@@ -23,35 +29,55 @@ type TxnView = record {
   amount : nat64;
 };
 service : (InitArg) -> {
+  // `balance_of(blob, nat32) -> nat64` — now a **query** returning the display-only cache. The cache
+  // is refreshed after every settle; if stale (someone transferred directly on the ledger), callers
+  // get the last known value. Settlement never reads this — it reads the ledger directly.
   balance_of : (blob, nat32) -> (nat64) query;
-  // Credit `to` with `amount` (minor units) of `currency` and return the new balance. **Open demo
-  // faucet** — any caller may mint, including the anonymous principal the relay uses (so the relay
-  // needs no controller identity). The demo currency is worthless and this is the PoC stand-in for a
-  // real on-ramp; it will be replaced by an issuer-gated mint once funding moves on-chain (see
-  // FUNDING.md).
-  mint : (blob, nat32, nat64) -> (nat64);
-  // Settle an offline-signed authorization. `signed` is the wire form (carries the
-  // `currency` tag inside the authorization). Reads, validates, and commits within one
-  // (non-awaiting) message → atomic on the single-threaded canister.
-  pay : (blob) -> (Result);
+  // `burn(blob, nat32, nat64) -> Result<nat64, text>` — destroy a MINTABLE (demo) currency by
+  // transferring it back to the ledger's minting account (the ICRC convention). Only demo currencies
+  // can be burned. Refreshes the display cache post-settle. Same controller gating as `mint`. Returns
+  // the ledger transfer's block index (unlike `mint`, which returns the new balance): `burn` is
+  // facade-internal with no relay consumer, so no contract pins its return to a balance.
+  burn : (blob, nat32, nat64) -> (Result);
+  // `mint(blob, nat32, nat64) -> Result<nat64, text>` — fund a user on a MINTABLE (demo) currency by
+  // transferring from the ledger's minting account (which this canister owns). Real ck currencies are
+  // not mintable. Refreshes the display cache from the authoritative ledger post-settle. Gated to the
+  // controller in production (open only when `controller` is unset, i.e. the demo).
+  mint : (blob, nat32, nat64) -> (Result);
+  // Settle an offline-signed authorization. Same candid signature as the pre-facade canister's `pay`;
+  // balances are moved on the ICRC ledger named by the payment's currency, not here.
+  pay : (blob) -> (Result_1);
   per_tx_cap : () -> (nat64) query;
   // Provision a fresh canister that carries `cycles` of THIS canister's cycle balance, with
-  // `controller` as its sole controller, and return its id. Gated to admin callers.
-  // 
-  // Used once to spin up the ICRC ledger using cycles held inside the dpay canister: the deploy
-  // identity has no cycles wallet, so the only way to spend the canister's cycles is for the
-  // canister's own code to attach them to a management-canister call. The dpay canister is NOT made a
-  // controller of the new canister — it spends the cycles and is done — so the non-custodial posture
-  // is preserved. (A canister's own code is the only way its cycles can leave it: the management
-  // canister has no withdraw/transfer operation.)
-  provision_ledger_canister : (principal, nat) -> (Result_1);
-  // `transactions_of : (blob, nat32, nat32) -> (vec record {...}) query`. Returns this account's
-  // settled transactions in `currency`, newest-first, up to `limit`. The (account, currency) block
-  // is one contiguous key range (seq 0..=MAX). `StableBTreeMap::range` returns an `Iter` that also
-  // implements `DoubleEndedIterator`, so `.rev()` walks the B-tree from the high (newest) end in
-  // O(limit) rather than materializing the whole account — important because the wallet polls this
-  // every 5s; a collect-all-then-reverse would be O(total) per query. Lets a wallet render a durable
-  // history sourced from the ledger (the in-memory UI list is gone on restart; this is the source of
-  // truth).
+  // `controller` as its sole controller, and return its id. Gated to operator callers (the fixed
+  // ADMIN_CALLERS allowlist). Used to spin up ICRC ledgers using cycles held inside this canister:
+  // the deploy identity has no cycles wallet, so the only way to spend the canister's cycles is for
+  // its own code to attach them to a management-canister call. This canister is NOT made a controller
+  // of the new canister — it spends the cycles and is done — so the non-custodial posture is intact.
+  provision_ledger_canister : (principal, nat) -> (Result_2);
+  // Register or replace the ledger for a currency at runtime. Gated to the controller in production
+  // (open only when `controller` is unset, i.e. the demo).
+  register_ledger : (nat32, principal, bool) -> (Result_3);
+  // Rotate the governance principal for `mint`/`burn`/`register_ledger`/`set_controller`. Governed by
+  // the current controller: in open-demo mode (no controller set) any caller may set one — which is
+  // how a fresh deployment is locked down; once a controller is set, only it can rotate. (This gates
+  // admin *methods* only. The IC-level canister controller — who can `install_code`/upgrade — is a
+  // separate concern set via `dfx`/NNS/SNS.)
+  set_controller : (opt principal) -> (Result_3);
+  // Newest-first history for a (pubkey, currency) pair. O(limit): the underlying `range` iterator is
+  // double-ended, so `.rev().take(limit)` walks from the newest end and stops early — it does NOT
+  // materialize the whole history. `limit == 0` returns no rows.
   transactions_of : (blob, nat32, nat32) -> (vec TxnView) query;
+  // Transfer up to `amount` cycles from THIS canister's balance to `to` via the management canister's
+  // `deposit_cycles`. Gated to operator callers — the SAME `require_operator` gate
+  // (`ADMIN_CALLERS` allowlist) that `provision_ledger_canister` uses — NOT the governance
+  // `require_admin` controller gate: rebalancing cycles between this canister and canisters it
+  // provisions is an ops/owner cycles action. Used to reclaim cycles from a retiring canister (e.g.
+  // before a mainnet upgrade) and to top up / rebalance cycles on canisters this one provisions.
+  // 
+  // The amount is bounded by the current balance (`amount.min(bal)`), so this never overdraws and
+  // never traps. A request at/above the LIQUID cycle balance returns `Err` (the management canister is
+  // the authority on liquid cycles — no CDK API exposes liquid balance) — retry with a smaller amount.
+  // Returns the amount actually transferred so the caller can confirm.
+  transfer_cycles : (principal, nat) -> (Result_4);
 }

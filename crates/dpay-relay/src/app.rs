@@ -145,7 +145,13 @@ async fn faucet(State(state): State<AppState>, Json(req): Json<FaucetRequest>) -
     let amount = req.amount.unwrap_or(10_000);
     match state.ledger.mint(pk, currency, amount).await {
         Ok(bal) => (StatusCode::OK, Json(BalanceBody { balance: bal })).into_response(),
-        Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
+        // Mirror `pay`: a permanent/`Rejected` error (e.g. "not mintable", "unauthorized" — a policy
+        // failure, not a transient infra hiccup) is `422`; only a genuine `Transient` is `503`. The
+        // relay must not signal "try again" for a rejection that will never succeed.
+        Err(LedgerError::Rejected(msg)) => err(StatusCode::UNPROCESSABLE_ENTITY, msg),
+        Err(LedgerError::Transient(msg)) => {
+            err(StatusCode::SERVICE_UNAVAILABLE, format!("ledger unavailable: {msg}"))
+        }
     }
 }
 

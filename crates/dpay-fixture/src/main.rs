@@ -52,11 +52,13 @@ fn main() {
     let out = Path::new("dfx/args");
     fs::create_dir_all(out).expect("mkdir dfx/args");
 
-    // Candid record field order mirrors the canister's InitArg for readability (candid matches by name).
+    // Facade InitArg: no ledgers registered at init (the operator registers each ledger at runtime
+    // via `register_ledger`, since a ledger id is only known after it is created). cap + open
+    // controller (the demo default; production sets a governed controller). On an UPGRADE this arg is
+    // type-checked against the .did but ignored at runtime (no post_upgrade) — stable structures
+    // carry SPENT/ACCOUNT_TXNS/CAP across by MemoryId. Candid matches record fields by name.
     let init = format!(
-        "(record {{ account_a = {}; balance_a = {BAL_A} : nat64; account_b = {}; balance_b = {BAL_B} : nat64; per_tx_cap = {CAP} : nat64 }})\n",
-        blob(&payer_pk),
-        blob(&merchant_pk),
+        "(record {{ ledgers = vec {{}}; per_tx_cap = {CAP} : nat64; controller = null }})\n",
     );
     fs::write(out.join("init.arg"), init).unwrap();
     fs::write(out.join("pay.arg"), format!("({})\n", blob(&wire))).unwrap();

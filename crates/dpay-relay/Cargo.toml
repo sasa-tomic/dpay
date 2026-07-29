@@ -22,7 +22,7 @@ path = "src/main.rs"
 # purpose: dev-deps compile unconditionally, which would tax the no-feature inner loop; gating
 # them behind `agent` keeps that loop lean while still making them available to the feature-gated
 # `tests/live.rs` integration test.
-agent = ["dep:ic-agent", "dep:candid", "dep:pocket-ic", "dpay-core/rng"]
+agent = ["dep:ic-agent", "dep:candid", "dep:pocket-ic", "dep:icrc-ledger-types", "dep:num-traits", "dpay-core/rng"]
 
 [dependencies]
 dpay-core = { path = "../dpay-core" }
@@ -44,6 +44,10 @@ base64 = "0.22.1"
 ic-agent = { version = "=0.48.1", optional = true }
 candid = { workspace = true, optional = true }
 pocket-ic = { workspace = true, optional = true }
+# icrc-ledger-types + num-traits: only needed by the `agent`-feature live test, which installs a real
+# ICRC ledger + the facade canister end-to-end (mirrors dpay-canister-tests).
+icrc-ledger-types = { workspace = true, optional = true }
+num-traits = { version = "0.2", optional = true }
 
 [dev-dependencies]
 dpay-core = { path = "../dpay-core", features = ["rng"] }

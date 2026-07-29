@@ -1,4 +1,5 @@
-//! Deterministic signing fixture for the ICRC-ledger dfx deploy (`scripts/dfx-deploy-icrc.sh`).
+//! Deterministic signing fixture for the facade's dfx deploys (`scripts/dfx-deploy-icrc.sh` local
+//! and `scripts/dfx-deploy-icrc-mainnet.sh` on mainnet).
 //!
 //! Prints shell-evaluable `KEY=value` lines: the payer/merchant Ed25519 pubkeys (hex) and the
 //! exact 196-byte offline-signed wire the phone would produce. Deterministic seeds (matching

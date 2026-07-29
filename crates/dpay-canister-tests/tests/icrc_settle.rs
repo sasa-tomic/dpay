@@ -1,23 +1,27 @@
-//! PocketIC proof of the dpay <-> ICRC-ledger integration (offline, deterministic, seconds).
+//! PocketIC proof that the dpay **facade** canister settles on real external ICRC ledgers
+//! (offline, deterministic, seconds).
 //!
-//! Builds one wasm (see `just icrc-demo`):
-//!   DPAY_CANISTER_ICRC_WASM = dpay-canister-icrc   (verifies the offline sig, settles on the ledger)
+//! Builds one wasm (see `just test-canister`):
+//!   DPAY_CANISTER_WASM = dpay-canister   (the facade: verifies the offline sig, routes to a ledger)
 //!
-//! The ledger is the REAL DFINITY `ic-icrc1-ledger` (built from dfinity/ic source, cached in
-//! `third_party/ic-icrc1-ledger/`). dpay holds NO balances: every `pay()` does a cross-canister
-//! `icrc1_transfer` on the real ICRC-1/3 ledger named by the payment's currency.
+//! The ledgers are the REAL DFINITY `ic-icrc1-ledger` (built from dfinity/ic source, cached in
+//! `third_party/ic-icrc1-ledger/`). The facade holds NO balances: every `pay()` does a cross-canister
+//! `icrc1_transfer` on the real ICRC-1/3 ledger named by the payment's currency, and `balance_of`
+//! reads a display-only cache that is refreshed after every settle.
 //!
 //! TWO ledgers are installed, proving the multi-currency design:
-//!   - DUSD (currency 0, `mintable`): minting account owned by the dpay canister — dpay mints/burns.
+//!   - DUSD (currency 0, `mintable`): minting account owned by the facade — dpay mints/burns.
 //!   - CKX  (currency 1, NOT mintable): a stand-in for a real ckBTC/ckETH ledger. The payer is
 //!     pre-funded via the ledger's `initial_balances` (simulating an external deposit); dpay can
 //!     move those funds but cannot mint them.
 //!
-//! Proves: offline-sign settles on the right ledger; replay/expiry/over-cap/insufficient rejected;
-//! currencies cannot cross (a DUSD balance cannot settle a CKX payment); demo currency mints/burns;
-//! non-mintable currency cannot be minted.
+//! Proves: offline-sign settles on the right ledger (read balances DIRECTLY off the ledger via
+//! `icrc1_balance_of`); replay/expiry/over-cap/insufficient rejected; currencies cannot cross (a
+//! DUSD balance cannot settle a CKX payment); demo currency mints/burns; non-mintable currency
+//! cannot be minted; the cache-backed `balance_of` query reflects settles; and SPENT nonces +
+//! ACCOUNT_TXNS history survive a facade upgrade.
 
-use candid::{decode_one, encode_args, encode_one, Nat, Principal};
+use candid::{decode_one, encode_args, encode_one, CandidType, Nat, Principal};
 use dpay_core::{generate_keypair, Authorization, Currency, SignedAuthorization, DEMO_USD};
 use ed25519_dalek::SigningKey;
 use icrc_ledger_types::icrc1::account::Account;
@@ -31,16 +35,14 @@ const T0_NANOS: u64 = T0_SECS * 1_000_000_000;
 const CAP: u64 = 100_000; // per-tx cap: $1,000.00
 const INIT_A: u64 = 10_000; // payer opens with $100.00
 
-/// A second currency standing in for a real ck token (ckBTC/ckETH/ckUSDT). Registered with the dpay
-/// canister as NOT mintable, and pre-funded via the ledger's own `initial_balances`.
+/// A second currency standing in for a real ck token (ckBTC/ckETH/ckUSDT). Registered with the
+/// facade as NOT mintable, and pre-funded via the ledger's own `initial_balances`.
 const CKX: Currency = 1;
 
 // --- real ic-icrc1-ledger init payload (mirrors third_party/ic-icrc1-ledger/ledger.did) --------
-// Field types must match the ledger's InitArgs exactly so the ledger's `candid::decode` accepts
-// the init bytes (candid checks structural subtyping against the canister's own types).
 
 #[allow(dead_code)] // arms exist only so the candid variant type matches the ledger's MetadataValue
-#[derive(candid::CandidType, serde::Serialize)]
+#[derive(CandidType, serde::Serialize)]
 enum MetadataValue {
     Nat(Nat),
     Int(candid::Int),
@@ -48,13 +50,13 @@ enum MetadataValue {
     Blob(Vec<u8>),
 }
 
-#[derive(candid::CandidType, serde::Serialize)]
+#[derive(CandidType, serde::Serialize)]
 struct FeatureFlags {
     icrc2: bool,
     icrc152: bool,
 }
 
-#[derive(candid::CandidType, serde::Serialize)]
+#[derive(CandidType, serde::Serialize)]
 struct ArchiveOptions {
     num_blocks_to_archive: u64,
     max_transactions_per_response: Option<u64>,
@@ -66,7 +68,7 @@ struct ArchiveOptions {
     more_controller_ids: Option<Vec<Principal>>,
 }
 
-#[derive(candid::CandidType, serde::Serialize)]
+#[derive(CandidType, serde::Serialize)]
 struct LedgerInitArgs {
     minting_account: Account,
     fee_collector_account: Option<Account>,
@@ -82,29 +84,30 @@ struct LedgerInitArgs {
     index_principal: Option<Principal>,
 }
 
-// Single-arm variant: `variant { Init: LedgerInitArgs }` is a valid candid subtype of the ledger's
-// `variant { Init: InitArgs; Upgrade: opt UpgradeArgs }` (a source variant is a subtype when every
-// one of its arms exists in the target), so the ledger decodes the Init payload correctly.
-#[derive(candid::CandidType, serde::Serialize)]
+// Single-arm variant: a valid candid subtype of the ledger's
+// `variant { Init: InitArgs; Upgrade: opt UpgradeArgs }`.
+#[derive(CandidType, serde::Serialize)]
 enum LedgerArg {
     Init(LedgerInitArgs),
 }
 
-#[derive(candid::CandidType, serde::Serialize)]
+// --- facade init payload -----------------------------------------------------------------------
+
+#[derive(CandidType, serde::Serialize)]
 struct LedgerConfig {
     currency: Currency,
     principal: Principal,
     mintable: bool,
 }
 
-#[derive(candid::CandidType, serde::Serialize)]
+#[derive(CandidType, serde::Serialize)]
 struct DpayInitArg {
     ledgers: Vec<LedgerConfig>,
     per_tx_cap: u64,
     controller: Option<Principal>,
 }
 
-#[derive(candid::CandidType, Deserialize, Debug)]
+#[derive(CandidType, Deserialize, Debug)]
 struct PayReceipt {
     from: Vec<u8>,
     to: Vec<u8>,
@@ -113,7 +116,7 @@ struct PayReceipt {
     new_from_balance: u64,
 }
 
-#[derive(candid::CandidType, Deserialize, Debug, PartialEq)]
+#[derive(CandidType, Deserialize, Debug, PartialEq)]
 struct TxnView {
     from: Vec<u8>,
     to: Vec<u8>,
@@ -128,32 +131,34 @@ fn nat_to_u64(n: &Nat) -> u64 {
 }
 
 fn workspace_root() -> std::path::PathBuf {
-    // crates/dpay-icrc-tests -> workspace root
+    // crates/dpay-canister-tests -> workspace root
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// The REAL DFINITY ic-icrc1-ledger wasm, cached offline in third_party/ (built once from
-/// dfinity/ic source; see ICRC3_INTEGRATION.md). Override via DPAY_ICRC_LEDGER_WASM.
+/// The REAL DFINITY ic-icrc1-ledger wasm, cached offline in third_party/. Override via env.
 fn ledger_wasm() -> Vec<u8> {
     let path = std::env::var("DPAY_ICRC_LEDGER_WASM")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| {
             workspace_root().join("third_party/ic-icrc1-ledger/ic-icrc1-ledger.wasm")
         });
-    std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read ledger wasm at {}: {e}", path.display()))
+    std::fs::read(&path)
+        .unwrap_or_else(|e| panic!("cannot read ledger wasm at {}: {e}", path.display()))
 }
 
+/// The FACADE canister wasm (dpay-canister). Override via DPAY_CANISTER_WASM (set by the justfile).
 fn dpay_wasm() -> Vec<u8> {
-    let path = std::env::var("DPAY_CANISTER_ICRC_WASM")
+    let path = std::env::var("DPAY_CANISTER_WASM")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| {
-            workspace_root().join("target/wasm32-unknown-unknown/release/dpay_canister_icrc.wasm")
+            workspace_root().join("target/wasm32-unknown-unknown/release/dpay_canister.wasm")
         });
-    std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read dpay-icrc wasm at {}: {e}", path.display()))
+    std::fs::read(&path)
+        .unwrap_or_else(|e| panic!("cannot read facade wasm at {}: {e}", path.display()))
 }
 
-/// Install one real ICRC ledger with the given minting account, symbol, transfer fee, and
-/// (optional) pre-funded balances. Returns the new ledger principal.
+/// Install one real ICRC ledger with the given minting account, symbol, transfer fee, and optional
+/// pre-funded balances. Returns the new ledger principal.
 fn install_ledger(
     pic: &PocketIc,
     minting_account: Account,
@@ -175,19 +180,13 @@ fn install_ledger(
         initial_balances,
         feature_flags: Some(FeatureFlags { icrc2: true, icrc152: false }),
         archive_options: ArchiveOptions {
-            // Cost-minimizing for a demo/pilot: a high trigger_threshold means the ledger only spawns
-            // an archive canister (which costs cycles to create + run) after 10M settled blocks — i.e.
-            // effectively never for any demo. Without archives the ledger's stable memory grows with
-            // every block, but at demo volumes that never matters. Production near real ledger-memory
-            // limits would lower this. See ICRC3_INTEGRATION.md "Run it / archive control".
+            // Cost-minimizing for a demo/pilot: archives only spawn after 10M settled blocks.
             num_blocks_to_archive: 10_000,
             max_transactions_per_response: None,
             trigger_threshold: 10_000_000,
             max_message_size_bytes: None,
             cycles_for_archive_creation: None,
             node_max_memory_size_bytes: None,
-            // The archive controller is the dpay canister in this demo; production would be a
-            // governed archive canister. controller_id is required by the ledger init.
             controller_id: minting_account.owner,
             more_controller_ids: None,
         },
@@ -197,13 +196,10 @@ fn install_ledger(
     ledger
 }
 
-/// Two real ledgers + a dpay canister wired to both:
-///   - ledger_dusd (currency 0, mintable): minting account owned by dpay.
+/// Two real ledgers + the facade wired to both:
+///   - ledger_dusd (currency 0, mintable): minting account owned by the facade.
 ///   - ledger_ckx  (currency 1, NOT mintable): minting account owned by a separate reserved
-///     principal (the "ckX minter"); the payer is pre-funded via initial_balances to simulate an
-///     external deposit (dpay cannot mint ckX).
-/// The payer key is generated here (offline); its pubkey becomes the ICRC `subaccount` the dpay
-/// canister controls on each ledger.
+///     principal; the payer is pre-funded via initial_balances to simulate an external deposit.
 fn setup_with(
     controller: Option<Principal>,
 ) -> (PocketIc, Principal, Principal, Principal, SigningKey, [u8; 32], [u8; 32]) {
@@ -214,12 +210,12 @@ fn setup_with(
     let payer_pk = payer_sk.verifying_key().to_bytes();
     let merch_pk = generate_keypair().verifying_key().to_bytes();
 
-    // 1. Reserve the dpay canister id first — ledgers need it as the minting account owner and as
+    // 1. Reserve the facade canister id first — ledgers need it as the minting account owner and as
     //    the owner of pre-funded subaccounts.
     let dpay = pic.create_canister();
     pic.add_cycles(dpay, 2_000_000_000_000);
 
-    // 2. DUSD ledger: minting account owned by dpay (so dpay can mint/burn). No pre-fund.
+    // 2. DUSD ledger: minting account owned by the facade (so it can mint/burn). No pre-fund.
     let ledger_dusd = install_ledger(
         &pic,
         Account { owner: dpay, subaccount: None },
@@ -228,9 +224,8 @@ fn setup_with(
         vec![],
     );
 
-    // 3. CKX ledger: minting account owned by a SEPARATE reserved principal (the "ckX minter"), and
-    //    the payer pre-funded via initial_balances — i.e. ckX arrived externally, dpay did not mint
-    //    it. dpay can still MOVE it (it owns the subaccount), just not create it.
+    // 3. CKX ledger: minting account owned by a SEPARATE reserved principal, and the payer
+    //    pre-funded via initial_balances — i.e. ckX arrived externally, the facade did not mint it.
     let ckx_minter = pic.create_canister(); // reserved, never installed
     let payer_ckx_acct = Account { owner: dpay, subaccount: Some(payer_pk) };
     let ledger_ckx = install_ledger(
@@ -241,7 +236,7 @@ fn setup_with(
         vec![(payer_ckx_acct, Nat::from(INIT_A))],
     );
 
-    // 4. Install dpay wired to both ledgers: DUSD mintable, CKX not.
+    // 4. Install the facade wired to both ledgers: DUSD mintable, CKX not.
     let dpay_init = DpayInitArg {
         ledgers: vec![
             LedgerConfig { currency: DEMO_USD, principal: ledger_dusd, mintable: true },
@@ -279,21 +274,21 @@ fn pay(pic: &PocketIc, dpay: Principal, wire: Vec<u8>) -> Result<PayReceipt, Str
     decode_one::<Result<PayReceipt, String>>(&reply).unwrap()
 }
 
-/// Balance as the dpay canister reports it (proxies to the ledger; an update call).
+/// The facade's cached balance via its `balance_of` QUERY (display-only; refreshed post-settle).
 fn dpay_balance(pic: &PocketIc, dpay: Principal, pk: [u8; 32], currency: Currency) -> u64 {
     let reply = pic
-        .update_call(
+        .query_call(
             dpay,
             Principal::anonymous(),
             "balance_of",
             encode_args((pk.to_vec(), currency)).unwrap(),
         )
-        .expect("balance_of update rejected");
+        .expect("balance_of query rejected");
     decode_one::<u64>(&reply).unwrap()
 }
 
-/// Balance read DIRECTLY from an ICRC ledger — proves the funds really live there, under the dpay
-/// canister's principal with the pubkey as the subaccount.
+/// Balance read DIRECTLY from an ICRC ledger — proves the funds really live there, under the
+/// facade's principal with the pubkey as the subaccount.
 fn ledger_balance(pic: &PocketIc, ledger: Principal, dpay: Principal, pk: [u8; 32]) -> u64 {
     let acct = Account { owner: dpay, subaccount: Some(pk) };
     let reply = pic
@@ -322,9 +317,10 @@ fn ledger_chain_len(pic: &PocketIc, ledger: Principal) -> u64 {
     nat_to_u64(&res.log_length)
 }
 
-/// Fund a user on a MINTABLE currency through the dpay canister (it transfers from the ledger's
-/// minting account, which it owns). Asserts the mint succeeded; the balance is verified separately.
-fn mint(pic: &PocketIc, dpay: Principal, to: [u8; 32], currency: Currency, amount: u64) {
+/// Fund a user on a MINTABLE currency through the facade (transfers from the ledger's minting
+/// account, which it owns). Returns the facade's `mint` return value — which per the `Ledger` trait
+/// contract is the NEW BALANCE (not the ledger block index).
+fn mint(pic: &PocketIc, dpay: Principal, to: [u8; 32], currency: Currency, amount: u64) -> u64 {
     let reply = pic
         .update_call(
             dpay,
@@ -333,10 +329,10 @@ fn mint(pic: &PocketIc, dpay: Principal, to: [u8; 32], currency: Currency, amoun
             encode_args((to.to_vec(), currency, amount)).unwrap(),
         )
         .expect("mint update rejected");
-    decode_one::<Result<u64, String>>(&reply).unwrap().expect("mint ok");
+    decode_one::<Result<u64, String>>(&reply).unwrap().expect("mint ok")
 }
 
-/// Like `mint` but expects the canister to REFUSE (currency is not mintable). Returns the error.
+/// Like `mint` but expects the facade to REFUSE (currency not mintable / unauthorized). Returns err.
 fn mint_err(pic: &PocketIc, dpay: Principal, to: [u8; 32], currency: Currency, amount: u64) -> String {
     let reply = pic
         .update_call(
@@ -346,7 +342,9 @@ fn mint_err(pic: &PocketIc, dpay: Principal, to: [u8; 32], currency: Currency, a
             encode_args((to.to_vec(), currency, amount)).unwrap(),
         )
         .expect("mint update rejected");
-    decode_one::<Result<u64, String>>(&reply).unwrap().expect_err("mint should be refused")
+    decode_one::<Result<u64, String>>(&reply)
+        .unwrap()
+        .expect_err("mint should be refused")
 }
 
 fn burn(pic: &PocketIc, dpay: Principal, from: [u8; 32], currency: Currency, amount: u64) {
@@ -361,28 +359,55 @@ fn burn(pic: &PocketIc, dpay: Principal, from: [u8; 32], currency: Currency, amo
     decode_one::<Result<u64, String>>(&reply).unwrap().expect("burn ok");
 }
 
+fn transactions_of(
+    pic: &PocketIc,
+    dpay: Principal,
+    pk: [u8; 32],
+    currency: Currency,
+    limit: u32,
+) -> Vec<TxnView> {
+    let reply = pic
+        .query_call(
+            dpay,
+            Principal::anonymous(),
+            "transactions_of",
+            encode_args((pk.to_vec(), currency, limit)).unwrap(),
+        )
+        .expect("transactions_of query rejected");
+    decode_one(&reply).unwrap()
+}
+
+/// A stable principal to use as the governed controller in admin-gating tests. The management
+/// canister is a fixed, non-anonymous principal always available offline.
+fn pic_admin() -> Principal {
+    Principal::management_canister()
+}
+
 #[test]
 fn offline_sign_settles_on_demo_currency() {
     let (pic, ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
 
-    // Fund the payer through the dpay canister -> DUSD ledger mint.
-    mint(&pic, dpay, payer, DEMO_USD, INIT_A);
+    // Fund the payer through the facade -> DUSD ledger mint. The facade's `mint` returns the NEW
+    // BALANCE per the `Ledger` trait contract (not the ledger block index) — a fresh account minted
+    // INIT_A therefore reports INIT_A.
+    let minted = mint(&pic, dpay, payer, DEMO_USD, INIT_A);
+    assert_eq!(minted, INIT_A, "facade mint must return the post-mint balance");
 
     // The funds really live on the DUSD ledger under {owner: dpay, subaccount: payer}.
     assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, payer), INIT_A);
     assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, merch), 0);
 
-    // Offline-signed authorization, settled by the dpay canister on the DUSD ledger.
+    // Offline-signed authorization, settled by the facade on the DUSD ledger.
     let expiry = T0_SECS + 120;
     let r = pay(&pic, dpay, signed(&sk, payer, merch, 2_500, [1u8; 16], expiry, DEMO_USD))
         .expect("pay should succeed");
     assert_eq!(r.amount, 2_500);
     assert_eq!(r.new_from_balance, 7_500);
 
-    // The DUSD ledger reflects the move — read directly, not through dpay.
+    // The DUSD ledger reflects the move — read directly, not through the facade.
     assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, payer), 7_500);
     assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, merch), 2_500);
-    // And the dpay canister's proxied view agrees.
+    // And the facade's cached view agrees (cache refreshed post-settle).
     assert_eq!(dpay_balance(&pic, dpay, payer, DEMO_USD), 7_500);
     assert_eq!(dpay_balance(&pic, dpay, merch, DEMO_USD), 2_500);
 
@@ -414,15 +439,15 @@ fn replay_is_rejected_and_ledger_unchanged() {
 fn non_mintable_currency_settles_and_cannot_be_minted() {
     let (pic, _ledger_dusd, ledger_ckx, dpay, sk, payer, merch) = setup();
 
-    // ckX arrived externally (pre-funded via initial_balances), NOT via dpay mint.
+    // ckX arrived externally (pre-funded via initial_balances), NOT via facade mint.
     assert_eq!(ledger_balance(&pic, ledger_ckx, dpay, payer), INIT_A);
 
-    // dpay must refuse to mint ckX — it's a real ck currency, not play money.
+    // The facade must refuse to mint ckX — it's a real ck currency, not play money.
     let err = mint_err(&pic, dpay, merch, CKX, 5_000);
     assert!(err.contains("not mintable"), "wrong mint error: {err}");
     assert_eq!(ledger_balance(&pic, ledger_ckx, dpay, merch), 0); // nothing created
 
-    // But dpay CAN move the externally-funded ckX by settling an offline-signed payment.
+    // But the facade CAN move the externally-funded ckX by settling an offline-signed payment.
     let expiry = T0_SECS + 120;
     pay(&pic, dpay, signed(&sk, payer, merch, 3_000, [2u8; 16], expiry, CKX))
         .expect("ckX pay should settle");
@@ -463,6 +488,8 @@ fn burn_destroys_demo_currency() {
     // Burn half back to the minting account (ICRC convention: transfer to minting account = burn).
     burn(&pic, dpay, payer, DEMO_USD, 5_000);
     assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, payer), 5_000);
+    // Cache refreshed post-burn.
+    assert_eq!(dpay_balance(&pic, dpay, payer, DEMO_USD), 5_000);
 
     // Burning more than remains is refused.
     let reply = pic
@@ -515,10 +542,25 @@ fn expired_auth_is_rejected() {
 
 // --- regression tests for the adversarial review findings --------------------------------------
 
+/// LOW (I2): a payer cannot sign funds to the reserved mint/burn sentinel (`[0xFF;32]`). That
+/// subaccount is reserved for history rows and is not a valid Ed25519 pubkey. `pay` rejects it at
+/// the cheap pre-check, before any cross-canister call — so funds can't be pushed into the sentinel
+/// subaccount the history index uses as the mint/burn counterparty.
+#[test]
+fn pay_to_mint_sentinel_is_rejected() {
+    let (pic, ledger_dusd, _ledger_ckx, dpay, sk, payer, _merch) = setup();
+    mint(&pic, dpay, payer, DEMO_USD, INIT_A);
+
+    let expiry = T0_SECS + 120;
+    let res = pay(&pic, dpay, signed(&sk, payer, [0xFFu8; 32], 1_000, [13u8; 16], expiry, DEMO_USD));
+    assert!(res.is_err(), "pay to the mint sentinel must be rejected: {res:?}");
+    // The sender was not debited (no transfer landed).
+    assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, payer), INIT_A);
+}
+
 /// CRITICAL regression: two `pay()` calls sharing the same nonce but naming different payees must
-/// NOT both settle. The IC interleaves messages at `await` points; before the nonce-reserve fix,
-/// both observed the nonce as unused and both transferred (a proven double-spend). The fix reserves
-/// the nonce synchronously before any `await`, so the second concurrent `pay` is rejected. We force
+/// NOT both settle. The IC interleaves messages at `await` points; the synchronous nonce-reserve
+/// (before any await) makes the second concurrent `pay` observe the nonce as used. We force
 /// interleaving by submitting BOTH calls (non-blocking) then `tick()` to run a round.
 #[test]
 fn concurrent_pay_same_nonce_settles_once() {
@@ -532,8 +574,7 @@ fn concurrent_pay_same_nonce_settles_once() {
     let wire_a = signed(&sk, payer, merch, 2_500, nonce, expiry, DEMO_USD);
     let wire_b = signed(&sk, payer, merch2, 2_500, nonce, expiry, DEMO_USD);
 
-    // Submit both BEFORE ticking, so they are both in-flight when execution runs — this is what
-    // forces the await-point interleaving the real IC (and PocketIC) exhibit.
+    // Submit both BEFORE ticking, so they are both in-flight when execution runs.
     let id_a = pic
         .submit_call(dpay, Principal::anonymous(), "pay", encode_one(&wire_a).unwrap())
         .expect("submit pay A");
@@ -562,8 +603,7 @@ fn concurrent_pay_same_nonce_settles_once() {
 }
 
 /// HIGH: the fee branch. A ledger with a non-zero transfer_fee must deduct amount+fee from the
-/// sender and deliver `amount` to the recipient (the demo DUSD ledger has fee=0, so this path was
-/// previously untested). The receipt's `new_from_balance` must reflect amount+fee.
+/// sender and deliver `amount` to the recipient (the demo DUSD ledger has fee=0).
 #[test]
 fn non_zero_fee_settles_with_fee_deducted() {
     const FEE_CUR: Currency = 2;
@@ -616,12 +656,10 @@ fn non_zero_fee_settles_with_fee_deducted() {
 /// caller. With no controller (the demo default) they remain open.
 #[test]
 fn admin_ops_are_gated_by_controller() {
-    // The governed controller principal (a fixed, non-anonymous identity standing in for a
-    // governed caller). With it set at init, every other principal is refused on admin ops.
     let admin = pic_admin();
     let (pic, ledger_dusd, _ledger_ckx, dpay, _sk, payer, _merch) = setup_with(Some(admin));
 
-    // Anonymous caller (the default in `mint`) must be refused.
+    // Anonymous caller must be refused.
     let reply = pic
         .update_call(
             dpay,
@@ -648,8 +686,7 @@ fn admin_ops_are_gated_by_controller() {
     assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, payer), INIT_A);
 }
 
-/// MED: mint, pay, and burn all appear in `transactions_of`. Previously mint/burn were absent
-/// (they never called record_txn).
+/// MED: mint, pay, and burn all appear in `transactions_of`. Newest-first; O(limit) read.
 #[test]
 fn transactions_of_records_mint_pay_burn() {
     let (pic, _ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
@@ -680,25 +717,23 @@ fn transactions_of_records_mint_pay_burn() {
     assert_eq!(merch_txns[0].amount, 2_500);
 }
 
-/// MED: a controller set at init can be rotated via set_controller (governed), and locking the
-/// canister down (open -> governed) is possible. Once locked, only the controller may rotate.
+/// MED: a controller set at init can be rotated via set_controller (governed), and locking down
+/// (open -> governed) is possible. Once locked, only the controller may rotate.
 #[test]
 fn controller_rotation_locks_down_open_mode() {
     let admin = pic_admin();
-    // A second governed principal that the controller rotates to.
     let next_gov = Principal::self_authenticating(&[7u8; 29]);
 
     // Open mode (no controller): admin ops are open to anyone.
     let (pic, ledger_dusd, _ledger_ckx, dpay, _sk, payer, _merch) = setup();
     mint(&pic, dpay, payer, DEMO_USD, INIT_A); // open mode: anonymous mint succeeds
 
-    // Lock the canister down by setting a controller (open mode lets any caller do this once).
+    // Lock down by setting a controller (open mode lets any caller do this once).
     let reply = pic
         .update_call(dpay, Principal::anonymous(), "set_controller", encode_args((Some(admin),)).unwrap())
         .expect("set_controller update rejected");
     assert!(decode_one::<Result<(), String>>(&reply).unwrap().is_ok(), "open mode: lock-down succeeds");
 
-    // Locked: an anonymous admin op is now refused (this is the attack-prevention property).
     let mint_ok = |caller: Principal| -> bool {
         let reply = pic
             .update_call(dpay, caller, "mint", encode_args((payer.to_vec(), DEMO_USD, 1u64)).unwrap())
@@ -719,19 +754,18 @@ fn controller_rotation_locks_down_open_mode() {
         .expect("set_controller update rejected");
     assert!(decode_one::<Result<(), String>>(&reply).unwrap().is_ok(), "controller rotation succeeds");
 
-    // After rotation, the old controller loses access and the new one gains it.
     assert!(!mint_ok(admin), "old controller now refused");
     assert!(mint_ok(next_gov), "new controller mint ok");
 }
 
-/// LOW (L5): register_ledger — the most consequential admin op — is gated by the controller.
-/// An anonymous repoint (the attack scenario) must be refused when a controller is set.
+/// LOW (L5): register_ledger is gated by the controller. An anonymous repoint must be refused when a
+/// controller is set.
 #[test]
 fn register_ledger_is_gated_by_controller() {
     let admin = pic_admin();
     let (pic, ledger_dusd, _ledger_ckx, dpay, _sk, _payer, _merch) = setup_with(Some(admin));
 
-    // Anonymous repoint of a (new) currency at the ledger is refused.
+    // Anonymous repoint is refused.
     let reply = pic
         .update_call(
             dpay,
@@ -749,21 +783,111 @@ fn register_ledger_is_gated_by_controller() {
     assert!(decode_one::<Result<(), String>>(&reply).unwrap().is_ok(), "controller register ok");
 }
 
-fn transactions_of(pic: &PocketIc, dpay: Principal, pk: [u8; 32], currency: Currency, limit: u32) -> Vec<TxnView> {
-    let reply = pic
-        .query_call(
-            dpay,
-            Principal::anonymous(),
-            "transactions_of",
-            encode_args((pk.to_vec(), currency, limit)).unwrap(),
-        )
-        .expect("transactions_of query rejected");
-    decode_one(&reply).unwrap()
+/// NEW (upgrade safety): the facade upgrade preserves the SPENT nonce set + ACCOUNT_TXNS history in
+/// stable memory (same MemoryIds/types). Balances live on the (separate, untouched) ledger, so they
+/// are of course unchanged. After upgrade: a spent nonce is STILL spent (replay refused), and the
+/// recorded history is intact (and the display cache survives too).
+#[test]
+fn upgrade_preserves_nonces_and_history() {
+    let (pic, ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
+    mint(&pic, dpay, payer, DEMO_USD, INIT_A);
+    let expiry = T0_SECS + 120;
+    let nonce = [11u8; 16];
+    pay(&pic, dpay, signed(&sk, payer, merch, 3_000, nonce, expiry, DEMO_USD)).expect("pay ok");
+
+    // Sanity: history recorded, nonce spent.
+    assert_eq!(transactions_of(&pic, dpay, payer, DEMO_USD, 10).len(), 2); // mint + pay
+    assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, payer), 7_000);
+
+    // Upgrade the facade only (the ledger is untouched). post_upgrade is not defined, so stable
+    // structures carry SPENT + ACCOUNT_TXNS across by MemoryId.
+    pic.upgrade_canister(dpay, dpay_wasm(), encode_one(&()).unwrap(), None)
+        .expect("upgrade should succeed");
+
+    // History survived the upgrade.
+    assert_eq!(transactions_of(&pic, dpay, payer, DEMO_USD, 10).len(), 2);
+    // The nonce is STILL spent -> replay refused (this is the money-safety property).
+    let replay = pay(&pic, dpay, signed(&sk, payer, merch, 3_000, nonce, expiry, DEMO_USD));
+    assert!(replay.is_err(), "nonce must stay spent across upgrade: {replay:?}");
+    // Ledger balances unchanged (the ledger wasn't upgraded).
+    assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, payer), 7_000);
+    // The display cache survived the upgrade too (stable), so balance_of still reflects the settle.
+    assert_eq!(dpay_balance(&pic, dpay, payer, DEMO_USD), 7_000);
 }
 
-/// A stable principal to use as the governed controller in `admin_ops_are_gated_by_controller`.
-/// `Principal::management_canister()` is a fixed, non-anonymous principal that is always available
-/// offline — perfect for standing in for a governed caller in tests.
-fn pic_admin() -> Principal {
-    Principal::management_canister()
+/// Operator-gated `transfer_cycles` moves cycles from the facade's own balance to another canister
+/// via the management canister's `deposit_cycles`. It is gated by `require_operator` (the fixed
+/// `ADMIN_CALLERS` allowlist), the SAME gate `provision_ledger_canister` uses — NOT the governance
+/// `require_admin` controller gate — because rebalancing cycles between this canister and the
+/// canisters it provisions is an ops/owner cycles action. The amount is bounded by the facade's
+/// current balance and the bounded value is returned. This is the production ops path for reclaiming
+/// cycles from a retiring canister before a mainnet upgrade and for rebalancing onto provisioned
+/// canisters.
+#[test]
+fn transfer_cycles_rebalances_between_canisters() {
+    let (pic, _ledger_dusd, _ledger_ckx, dpay, _sk, _payer, _merch) = setup();
+
+    // `require_operator` checks `msg_caller()` against the fixed ADMIN_CALLERS allowlist. PocketIC
+    // does not sign calls, so any principal may be supplied as the sender — use the allowlisted dfx
+    // `dpay` operator identity.
+    let operator =
+        Principal::from_text("hhwti-hb7f7-4ojco-uvazw-vcwr7-fqd6o-3oljb-aezpo-iheay-3gxmx-rqe")
+            .expect("operator principal parses");
+
+    // A fresh target canister to receive cycles (created with a default starting balance).
+    let target = pic.create_canister();
+    let dpay_before = pic.cycle_balance(dpay);
+    let target_before = pic.cycle_balance(target);
+    assert!(dpay_before > 0, "facade must hold cycles to send");
+
+    // Send N cycles (well under the facade's balance, so `min` does not bind).
+    const N: u128 = 500_000_000_000; // 500B
+    let reply = pic
+        .update_call(dpay, operator, "transfer_cycles", encode_args((target, N)).unwrap())
+        .expect("transfer_cycles update_call rejected at IC level");
+    let res: Result<u128, String> = decode_one(&reply).unwrap();
+    let sent = res.expect("transfer_cycles should succeed for an operator caller");
+    assert_eq!(sent, N, "facade had ample cycles; the bounded amount is the full N");
+
+    let dpay_after = pic.cycle_balance(dpay);
+    let target_after = pic.cycle_balance(target);
+
+    // The target received the sent cycles (deposit_cycles delivers the attached amount).
+    assert!(
+        target_after >= target_before + sent,
+        "target must gain at least the sent amount: before={target_before} after={target_after} sent={sent}",
+    );
+    // The facade paid at least the sent amount (plus a modest call overhead).
+    assert!(
+        dpay_after <= dpay_before - sent,
+        "facade must have dropped by at least the sent amount: before={dpay_before} after={dpay_after} sent={sent}",
+    );
+    // Generous overhead tolerance (cross-canister calls burn a little) but bounded so a 2x/overflow
+    // bug would still show.
+    const OVERHEAD: u128 = 100_000_000_000; // 100B allowance for the deposit_cycles call
+    assert!(
+        dpay_before - dpay_after <= sent + OVERHEAD,
+        "facade overhead within tolerance: before={dpay_before} after={dpay_after} sent={sent}",
+    );
+
+    // A non-operator (anonymous) caller is refused by require_operator, and transfers nothing.
+    let reply = pic
+        .update_call(dpay, Principal::anonymous(), "transfer_cycles", encode_args((target, N)).unwrap())
+        .expect("transfer_cycles update_call rejected at IC level");
+    let res: Result<u128, String> = decode_one(&reply).unwrap();
+    assert!(res.is_err(), "non-operator transfer_cycles must be refused: {res:?}");
+    // The refused call transferred nothing: the facade did not drop by another `sent`, and the
+    // target gained nothing beyond what the successful call already delivered. (Executing the
+    // rejected call still burns a tiny amount of cycles for message handling — expected, not a
+    // transfer — so the facade is allowed to drift by a small execution cost, not by `sent`.)
+    let dpay_after_refused = pic.cycle_balance(dpay);
+    let target_after_refused = pic.cycle_balance(target);
+    assert!(
+        dpay_after - dpay_after_refused < sent,
+        "refused call must not transfer another {sent} cycles: dpay_after={dpay_after} now={dpay_after_refused}",
+    );
+    assert_eq!(
+        target_after_refused, target_after,
+        "refused call moved no cycles to the target",
+    );
 }
