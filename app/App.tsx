@@ -516,8 +516,8 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
 
       <View style={S.settings}>
         <Text style={S.settingsLabel}>ledger</Text>
-        <TextInput style={S.settingsInput} value={relayUrl} onChangeText={setRelayUrl} autoCapitalize="none" autoCorrect={false} placeholder="http://<ip>:8787" placeholderTextColor={C.sub2} />
-        <Pressable onPress={onReset}><Text style={S.resetLink}>reset</Text></Pressable>
+        <TextInput testID="settings-relay" style={S.settingsInput} value={relayUrl} onChangeText={setRelayUrl} autoCapitalize="none" autoCorrect={false} placeholder="http://<ip>:8787" placeholderTextColor={C.sub2} />
+        <Pressable testID="btn-reset" onPress={onReset}><Text style={S.resetLink}>reset</Text></Pressable>
       </View>
 
       {depositOpen ? (
@@ -823,7 +823,7 @@ function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onOff
     : active && amt != null ? `${role === 'card' ? 'Paying' : 'Collecting'} ${usd(amt)}`
     : m.sub;
   return (
-    <View style={S.center}>
+    <View style={S.center} testID="nfc-status">
       <View style={[S.nfcBadge, {borderColor: m.tone}]}>
         {m.spin ? <ActivityIndicator size="large" color={m.tone} /> : <Text style={[S.nfcGlyph, {color: m.tone}]}>{m.glyph}</Text>}
       </View>
@@ -1081,7 +1081,7 @@ function ReceiveMode({identity, relayUrl, nfcReady, onReceived}: {identity: Iden
         {!nfcActive ? (
           <>
             <Text style={S.label}>Show this to the payer{reqQr.nfcHex ? ' · or let them tap' : ''}</Text>
-            <View style={S.qrCard}><QRCode value={reqQr.value} size={220} ecl="M" /></View>
+            <View testID="request-qr" style={S.qrCard}><QRCode value={reqQr.value} size={220} ecl="M" /></View>
             <Text style={S.amountBig}>{usd(reqQr.cents)}</Text>
             <Text style={S.qrHint}>Waiting for payment…</Text>
             {scanning ? (

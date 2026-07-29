@@ -61,6 +61,13 @@ export default function QRCodeSvg({ value, size = 100, ecl = 'M', color = 'black
   const matrix = React.useMemo(() => genMatrix(value, ecl), [value, ecl]);
   const { cellSize, path } = React.useMemo(() => matrixToPath(matrix, size), [matrix, size]);
   const stroke = color;
+  // Test seam (Wave E flow 06): stash the EXACT value this QR encodes on a window global so an e2e
+  // test can decode the request QR's bytes and assert them field-for-field, without OCR'ing the SVG
+  // matrix. Mirrors the __DPAY_TEST_SCAN / __DPAY_TEST_CLIPBOARD convention (smallest boundary). The
+  // value is already encoded in the QR pixels; this just exposes it readably. No-op outside tests.
+  if (typeof window !== 'undefined') {
+    (window as any).__DPAY_QR_LAST = value;
+  }
   // A rounded cap joins adjacent cells into the QR's familiar solid blocks (matches upstream's
   // visual: cells render as a single connected path, not a dot grid).
   return (

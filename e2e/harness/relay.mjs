@@ -37,16 +37,15 @@ export async function pickFreePort() {
 }
 
 /**
- * Ensure the relay binary exists. Runs `cargo build -p dpay-relay --features test-helpers` if it's
- * missing or stale. Throws with the cargo exit code + stderr tail if the build fails — never silent.
+ * Ensure the relay binary is built WITH `--features test-helpers` (the deposit-seed route the e2e
+ * harness needs). Always invokes cargo build rather than skipping on an existing binary, because a
+ * plain `cargo build -p dpay-relay` (from `just check` / `just test-relay`) OVERWRITES the artifact
+ * WITHOUT the feature — a "binary exists" check can't distinguish the two, and a featureless binary
+ * returns 404 for `/test/deposit/seed`. Cargo's incremental cache makes an up-to-date build a
+ * ~0.3s no-op, so this is cheap and correct across `check`/`e2e` interleaving.
  */
 export async function ensureRelayBuilt(opts = {}) {
-  const fs = await import('node:fs/promises');
-  try {
-    await fs.access(RELAY_BIN);
-    return; // already built
-  } catch { /* not built yet */ }
-  console.log('[relay] building target/debug/dpay-relay --features test-helpers…');
+  console.log('[relay] ensuring target/debug/dpay-relay is built with --features test-helpers…');
   const code = await runCargo(['build', '-p', 'dpay-relay', '--features', 'test-helpers'], opts.timeoutMs ?? 300_000);
   if (code !== 0) throw new Error(`relay build failed (cargo exit ${code})`);
 }

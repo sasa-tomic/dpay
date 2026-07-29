@@ -33,12 +33,16 @@ export function resolveMode() {
 }
 
 /**
- * Ensure `dfx/wire_layout.json` exists (regenerate via dpay-fixture if missing/stale). The DpayCore
+ * Ensure `dfx/wire_layout.json` exists (regenerate via dpay-fixture ONLY if missing). The DpayCore
  * shim + the cross-validation test both read it. Single source of truth for the wire layout — never
  * hand-transcribed anywhere else.
+ *
+ * Regenerating every test run was wasteful (a ~1s `cargo run` per test); the JSON is committed and
+ * stable, so we only regenerate when it's actually absent. Force a regen with
+ * `DPAY_E2E_REGEN_LAYOUT=1` (e.g. after a wire-format change — then commit the new JSON).
  */
 export async function ensureWireLayout() {
-  if (existsSync(WIRE_LAYOUT) && process.env.DPAY_E2E_NO_REGEN_LAYOUT === '1') return;
+  if (existsSync(WIRE_LAYOUT) && process.env.DPAY_E2E_REGEN_LAYOUT !== '1') return;
   console.log('[lib] regenerating dfx/wire_layout.json via dpay-fixture…');
   const code = await new Promise((resolve, reject) => {
     const child = spawn('cargo', ['run', '-p', 'dpay-fixture', '--release', '--', 'wire-layout', WIRE_LAYOUT], {
@@ -139,4 +143,58 @@ export function assertIncludes(actual, substring, label) {
     const excerpt = actual.length > 400 ? actual.slice(0, 400) + '…' : actual;
     throw new Error(`[assert] ${label}: page text should include "${substring}".\n  body excerpt:\n${excerpt}`);
   }
+}
+
+// --- relay client helpers (used by the deposit/pay flows) -------------------------------------
+//
+// Every call has a timeout (AbortController) and surfaces a thrown Error on non-2xx — no silent
+// failures. These hit the REAL test relay the harness spawned (FakeLedger offline), proving the
+// credited/settled path end-to-end rather than mocking it.
+
+/** GET `/api/v1/balance/<hex>?currency=N` → the balance in minor units. */
+export async function getBalance(relayBaseURL, accountHex, currency = 0, timeoutMs = 4000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch(`${relayBaseURL}/api/v1/balance/${accountHex}?currency=${currency}`, { signal: ctrl.signal });
+    if (!r.ok) throw new Error(`balance ${r.status}`);
+    const j = await r.json();
+    if (typeof j.balance !== 'number') throw new Error(`balance: bad body ${JSON.stringify(j)}`);
+    return j.balance;
+  } finally { clearTimeout(t); }
+}
+
+/**
+ * POST `/api/v1/test/deposit/seed` (feature `test-helpers` ONLY — the harness builds the relay with
+ * `--features test-helpers`, the prod image never does). Seeds a pending deposit of `amount` minor
+ * units for `accountHex` in `currency`; the NEXT `/deposit/refresh` drains + credits it (mirrors a
+ * confirmed ckBTC mint). Used by flow 05 to prove the credited path through the real relay+FakeLedger.
+ */
+export async function seedDeposit(relayBaseURL, accountHex, currency, amount, timeoutMs = 4000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch(`${relayBaseURL}/api/v1/test/deposit/seed`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account: accountHex, currency, amount }), signal: ctrl.signal,
+    });
+    if (!r.ok) throw new Error(`seed ${r.status}: ${await r.text().catch(() => '')}`);
+    return r.json();
+  } finally { clearTimeout(t); }
+}
+
+/** POST `/api/v1/pay` with a `{qr}` body → `{ok, status, body}` (null `ok`/`status` on fetch throw). */
+export async function postPay(relayBaseURL, qrCode, timeoutMs = 6000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch(`${relayBaseURL}/api/v1/pay`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ qr: qrCode }), signal: ctrl.signal,
+    });
+    const body = await r.json().catch(() => ({}));
+    return { ok: r.ok, status: r.status, body };
+  } catch {
+    return { ok: null, status: null, body: {} };
+  } finally { clearTimeout(t); }
 }

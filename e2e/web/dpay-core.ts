@@ -302,9 +302,18 @@ export const __test = {
   hexToBytes,
 };
 
-// The shape App.tsx expects on `NativeModules.DpayCore` (see `DpayCoreApi` in App.tsx). The optional
-// `nfcStatus` is omitted — `shims.ts` returns 'unknown' so the NfcPill is hidden by default, which
-// matches a web build (no NFC adapter) and keeps NfcTap from mounting.
+// The shape App.tsx expects on `NativeModules.DpayCore` (see `DpayCoreApi` in App.tsx). `nfcStatus`
+// defaults to 'unknown' (so the NfcPill stays hidden and NfcTap never mounts — the right web
+// default), but a test can flip it to 'ready' via `window.__DPAY_TEST_NFC_STATUS` (Wave E flow 11)
+// so the NFC tap view arms and the `__DPAY_TEST_NFC_SESSION` seam can drive its phases.
+async function nfcStatus(): Promise<string> {
+  if (typeof window !== 'undefined') {
+    const v = (window as any).__DPAY_TEST_NFC_STATUS;
+    if (typeof v === 'string' && v.length > 0) return v;
+  }
+  return 'unknown';
+}
+
 export const DpayCore = {
   generateKeypair,
   signAuthorization,
@@ -312,5 +321,6 @@ export const DpayCore = {
   decodeRequest,
   encodeQr,
   verifyWire,
+  nfcStatus,
 };
 export type DpayCoreShim = typeof DpayCore;
