@@ -6,16 +6,24 @@
 // the FakeLedger drains + credits → the sheet flips to "Deposited ✓". The credit is then verified
 // DIRECTLY against the real relay's currency-1 balance for this wallet's account.
 //
-// IMPORTANT — asset segregation (documented deviation, by design): the wallet HEADER balance shows
-// `$` = DEMO_USD (currency 0); the deposit sheet operates on ckBTC (currency 1, DEPOSIT_CURRENCY).
-// Per the canister's per-currency segregation (a CODEBASE_ANALYSIS strength), a currency-1 deposit
-// credits the currency-1 balance — NOT the `$` header. So this test asserts the credited path on the
-// DEPOSIT ASSET: (a) the sheet shows "Deposited ✓" + the minted BTC amount, and (b) the relay's
-// currency-1 balance for this account grew by the seeded amount. The `$` header is a different asset
-// (DEMO_USD) and deliberately does not move — surfacing it would blur the non-custodial, no-swap line.
+// SEAMLESSNESS PROOF (the user's primary goal): after the sheet closes, the credited ckBTC must
+// remain VISIBLE in the wallet — the F1 fix surfaces currency 1 as a clearly-labeled "Bitcoin"
+// asset card (testID `asset-ckbtc`) on the same balance poll. So this test closes the sheet and
+// asserts `asset-ckbtc` is present + shows the minted BTC amount. A top-up that credits an INVISIBLE
+// balance is broken UX; this guards exactly that regression.
+//
+// IMPORTANT — asset segregation (documented, by design): the wallet HEADER balance shows `$` =
+// DEMO_USD (currency 0); the deposit + the visible asset card operate on ckBTC (currency 1,
+// DEPOSIT_CURRENCY). Per the canister's per-currency segregation (a CODEBASE_ANALYSIS strength), a
+// currency-1 deposit credits the currency-1 balance — NOT the `$` header. So this test asserts the
+// credited path on the DEPOSIT ASSET: (a) the sheet shows "Deposited ✓" + minted BTC, (b) the
+// relay's currency-1 balance grew, and (c) the wallet's `asset-ckbtc` card shows the minted BTC
+// after the sheet closes. The `$` header is a different asset (DEMO_USD) and deliberately does not
+// move — merging them would blur the non-custodial, no-swap line.
 //
 // Selector contract: `btn-deposit` (Add money), `deposit-address`, `btn-deposit-check` (manual
-// refresh), `deposit-status`. Seed route: POST /api/v1/test/deposit/seed {account, currency, amount}.
+// refresh), `deposit-status`, `btn-deposit-close`, `asset-ckbtc` (the wallet's visible ckBTC card).
+// Seed route: POST /api/v1/test/deposit/seed {account, currency, amount}.
 import { setup, assert, assertIncludes, seedDeposit, getBalance } from '../harness/lib.mjs';
 
 const ONBOARD_PLACEHOLDER = 'e.g. Alice';
@@ -43,6 +51,9 @@ export async function run() {
     const accountHex = identity?.publicHex;
     assert(typeof accountHex === 'string' && accountHex.length === 64, `wallet account must be a 32-byte hex pubkey, got "${accountHex}"`);
     console.log(`[05-deposit-credited] wallet account: ${accountHex.slice(0, 16)}…`);
+
+    // Before any top-up, the ckBTC asset card is NOT shown (balance 0 → card hidden by design).
+    assert(!await driver.isPresent('asset-ckbtc'), 'ckBTC asset card must be hidden when the balance is 0');
 
     // 2. Pre-credit: the ckBTC (currency 1) balance for this account is zero (only DEMO_USD funded).
     const before = await getBalance(relayBaseURL, accountHex, DEPOSIT_CURRENCY);
@@ -79,6 +90,19 @@ export async function run() {
     const after = await getBalance(relayBaseURL, accountHex, DEPOSIT_CURRENCY);
     assert(after === SEED_SATS, `credited ckBTC balance must equal the seed (${SEED_SATS}), got ${after}`);
     console.log(`[05-deposit-credited] ✓ ckBTC balance 0 → ${after} sats (credited through the REAL relay+FakeLedger)`);
+
+    // 7. SEAMLESSNESS: close the sheet and prove the credited ckBTC stays VISIBLE in the wallet. The
+    //    wallet's balance poll (every 2.5s) fetches currency 1 and renders the `asset-ckbtc` card
+    //    once non-zero. A top-up whose balance vanishes when the sheet closes is the bug this guards.
+    console.log('[05-deposit-credited] closing the deposit sheet — asserting the balance stays visible…');
+    await driver.click('btn-deposit-close', { timeoutMs: 5_000 });
+    await driver.waitGone('deposit-address', { timeoutMs: 4_000 });
+    // The next currency-1 poll lands within ≤2.5s; allow headroom for the render.
+    const assetEl = await driver.findByTestID('asset-ckbtc', { timeoutMs: 8_000 });
+    const assetTxt = await assetEl.evaluate((n) => (n.textContent ?? '').trim());
+    assertIncludes(assetTxt, '0.00050000 BTC', `the wallet's visible ckBTC card should show the minted BTC after the sheet closes. card text:\n${assetTxt}`);
+    assertIncludes(assetTxt, 'Bitcoin', 'the ckBTC card should be clearly labeled "Bitcoin" (the deposit asset)');
+    console.log(`[05-deposit-credited] ✓ ckBTC balance VISIBLE in the wallet post-close: "${assetTxt}"`);
 
     await driver.screenshot('05-deposit-credited');
 

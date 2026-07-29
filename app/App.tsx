@@ -346,6 +346,13 @@ function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: (id: Id
 function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity; relayUrl: string; setRelayUrl: (s: string) => void; onReset: () => void}) {
   const [mode, setMode] = useState<'pay' | 'receive'>('pay');
   const [balance, setBalance] = useState<number | null>(null);
+  // ckBTC (currency 1, DEPOSIT_CURRENCY) is a SEPARATE asset on a separate ledger. The primary
+  // wallet header shows `$` = DEMO_USD (currency 0) only — by CLAUDE.md's hard rule ("Money shown
+  // as `$`, never token name"). But a topped-up ckBTC balance must be VISIBLE (the seamless top-up
+  // goal: after the deposit sheet closes, the credited asset is still on screen). So we fetch
+  // currency 1 on the same poll and render it as a clearly-labeled, separate "Bitcoin" asset card
+  // (the deposit instructions already legitimately say "Bitcoin"/"BTC") — never merged into `$`.
+  const [ckBtcBalance, setCkBtcBalance] = useState<number | null>(null);
   const [online, setOnline] = useState(false);
   const [offlineSpent, setOfflineSpent] = useState(0);
   const [history, setHistory] = useState<Txn[]>([]);
@@ -383,12 +390,26 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
     const poll = async () => {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 4000);
+      // ckBTC (currency 1) fetch runs in PARALLEL + best-effort with its own AbortController, so a
+      // currency-1 hiccup can never flip the primary `$` balance offline or fail its poll. The two
+      // assets live on separate ledgers — fetching one must not affect the other's display.
+      const ctrlCk = new AbortController();
+      const tCk = setTimeout(() => ctrlCk.abort(), 4000);
+      const ckFetch = fetch(`${base(relayUrl)}/api/v1/balance/${identity.publicHex}?currency=${DEPOSIT_CURRENCY}`, {signal: ctrlCk.signal})
+        .then(r => r.ok ? r.json().catch(() => null) : null)
+        .then(j => (j && typeof j.balance === 'number') ? (j.balance as number) : null)
+        .catch(() => null)
+        .finally(() => clearTimeout(tCk));
       try {
         const r = await fetch(`${base(relayUrl)}/api/v1/balance/${identity.publicHex}`, {signal: ctrl.signal});
         const j = await r.json();
         if (alive && r.ok && typeof j.balance === 'number') { setBalance(j.balance); setOnline(true); setOfflineSpent(0); }
         else if (alive) setOnline(false);
       } catch { if (alive) setOnline(false); } finally { clearTimeout(t); }
+      // Settle the ckBTC balance after the primary poll resolves; null = keep the prior value
+      // (offline / transient), so the asset card never flaps on a single miss.
+      const ck = await ckFetch;
+      if (alive && ck != null) { setCkBtcBalance(ck); }
     };
     poll(); const id = setInterval(poll, 2500);
     return () => { alive = false; clearInterval(id); };
@@ -500,6 +521,20 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
         {mode === 'pay'
           ? <PayMode identity={identity} online={online} relayUrl={relayUrl} nfcReady={nfc === 'ready'} onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance} />
           : <ReceiveMode identity={identity} relayUrl={relayUrl} nfcReady={nfc === 'ready'} onReceived={onActivity} />}
+        {/* ckBTC asset card — a SEPARATE asset (currency 1), shown only when non-zero so a topped-up
+            wallet keeps its credited Bitcoin VISIBLE after the deposit sheet closes. Deliberately
+            distinct from the `$` header (DEMO_USD): different label, BTC units, its own card. This
+            is the asset affordance CLAUDE.md permits; the primary `$` balance stays clean. The
+            "Bitcoin" label matches the deposit instructions' network/asset name. */}
+        {ckBtcBalance != null && ckBtcBalance > 0 ? (
+          <View testID="asset-ckbtc" style={S.assetCard}>
+            <View style={S.assetRow}>
+              <Text style={S.assetLabel}>Bitcoin</Text>
+              <Text style={S.assetAmt}>{btc(ckBtcBalance)}</Text>
+            </View>
+            <Text style={S.assetSub}>your deposited Bitcoin · spendable where a merchant requests it</Text>
+          </View>
+        ) : null}
         {history.length > 0 ? (
           <View style={S.histCard}>
             <Text style={S.histTitle}>Recent</Text>
@@ -1373,6 +1408,14 @@ const S = StyleSheet.create({
   histWho: {flex: 1, fontSize: 15, color: C.ink},
   histAmt: {fontSize: 15, fontWeight: '700', marginRight: 12, fontFamily: 'monospace'},
   histTime: {fontSize: 12, color: C.sub2, fontFamily: 'monospace'},
+  // ckBTC asset card — a DISTINCT, clearly-labeled asset (not the `$` balance). Same card chrome as
+  // the deposit status block so it reads as a related-but-separate asset affordance. The brand-tinted
+  // left edge + "Bitcoin" label + BTC units make it unambiguously NOT the DEMO_USD `$` header.
+  assetCard: {marginTop: 28, alignSelf: 'stretch', backgroundColor: C.card, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: C.line2, borderLeftColor: C.brand, borderLeftWidth: 3},
+  assetRow: {flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between'},
+  assetLabel: {fontSize: 16, fontWeight: '700', color: C.ink},
+  assetAmt: {fontSize: 16, fontWeight: '700', color: C.brand, fontFamily: 'monospace'},
+  assetSub: {fontSize: 12, color: C.sub2, marginTop: 6},
   settings: {flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 22, paddingVertical: 8, borderTopWidth: 1, borderTopColor: C.line},
   settingsLabel: {fontSize: 12, fontWeight: '700', color: C.sub2, textTransform: 'uppercase', letterSpacing: 1, fontFamily: 'monospace'},
   settingsInput: {flex: 1, fontSize: 12, color: C.ink, fontFamily: 'monospace', paddingVertical: 4},

@@ -268,6 +268,16 @@ export class Driver {
     }
   }
 
+  /** Non-throwing existence check: returns true iff an element matching `testID` is currently in the
+   *  DOM (no wait, no throw). Use for "should be hidden" / "should be shown" guards that must not
+   *  block on a timeout. Distinct from `findByTestID` (which waits + throws). */
+  async isPresent(testID) {
+    return await this.page.evaluate(
+      (sel) => document.querySelector(sel) != null,
+      `[data-testid="${cssEscape(testID)}"]`,
+    );
+  }
+
   /** Wipe localStorage (forces the app's first-run identity flow on the next load). */
   async clearStorage() {
     await this.page.evaluate(() => { try { localStorage.clear(); } catch {} });
