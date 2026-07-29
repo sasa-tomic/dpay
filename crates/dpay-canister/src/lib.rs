@@ -692,6 +692,19 @@ struct MinterInfo {
     deposit_btc_min_amount: Option<u64>,
 }
 
+/// The single record argument the REAL ckBTC minter takes for `get_btc_address` / `update_balance` —
+/// verified against `dfx canister metadata mqygn-kiaaa-aaaar-qaadq-cai candid:service --network ic`:
+///   `(record { owner: opt principal; subaccount : opt blob })`.
+/// Each method takes exactly ONE record argument (NOT two positional args). Encoding it as a candid
+/// 2-tuple `(Option<Principal>, Option<Vec<u8>>)` via `with_args` sends TWO positional args, which the
+/// real minter rejects with `IC0503 ... Fail to decode argument 0 ... Subtyping error: Type mismatch`.
+/// A 1-tuple `(MinterAccount{..},)` is a single argument (one record), which decodes correctly.
+#[derive(CandidType, Deserialize)]
+struct MinterAccount {
+    owner: Option<Principal>,
+    subaccount: Option<Vec<u8>>,
+}
+
 #[init]
 fn init(arg: InitArg) {
     CAP.with(|c| c.borrow_mut().set(arg.per_tx_cap).expect("set cap"));
@@ -786,9 +799,11 @@ async fn ledger_transfer(ledger: Principal, arg: TransferArg) -> Result<Nat, Tra
 // `pay`/`balance_of` use. No new dependency surfaces: the facade stays non-custodial (it never holds
 // the deposited BTC; the minter does the chain-key work and credits the ledger directly).
 
-/// Minter `get_btc_address(opt principal, opt blob) -> text` — the user's native deposit address.
+/// Minter `get_btc_address(record { owner, subaccount }) -> text` — the user's native deposit
+/// address. The real ckBTC minter takes ONE record argument; the 1-tuple `(MinterAccount{..},)`
+/// encodes exactly one argument (a record), which decodes to `{ owner, subaccount }`.
 async fn minter_call_btc_address(minter: Principal, sub: Vec<u8>) -> Result<String, String> {
-    let arg = (Some(canister_self()), Some(sub));
+    let arg = (MinterAccount { owner: Some(canister_self()), subaccount: Some(sub) },);
     let response = Call::bounded_wait(minter, "get_btc_address")
         .with_args(&arg)
         .await
@@ -796,14 +811,16 @@ async fn minter_call_btc_address(minter: Principal, sub: Vec<u8>) -> Result<Stri
     response.candid::<String>().map_err(|e| format!("get_btc_address decode: {e:?}"))
 }
 
-/// Minter `update_balance` — the value-creating call that mints confirmed UTXOs. Reply is
-/// `Result<Vec<UtxoStatus>, UpdateBalanceError>`: `Ok` carries the statuses of UTXOs processed this
-/// call; `Err(NoNewUtxos{..})` is the normal "nothing new, here is what is still pending" response.
+/// Minter `update_balance` — the value-creating call that mints confirmed UTXOs. The real ckBTC
+/// minter takes ONE record argument; the 1-tuple `(MinterAccount{..},)` encodes exactly one argument.
+/// Reply is `Result<Vec<UtxoStatus>, UpdateBalanceError>`: `Ok` carries the statuses of UTXOs
+/// processed this call; `Err(NoNewUtxos{..})` is the normal "nothing new, here is what is still
+/// pending" response.
 async fn minter_call_update_balance(
     minter: Principal,
     sub: Vec<u8>,
 ) -> Result<Result<Vec<UtxoStatus>, UpdateBalanceError>, String> {
-    let arg = (Some(canister_self()), Some(sub));
+    let arg = (MinterAccount { owner: Some(canister_self()), subaccount: Some(sub) },);
     let response = Call::bounded_wait(minter, "update_balance")
         .with_args(&arg)
         .await

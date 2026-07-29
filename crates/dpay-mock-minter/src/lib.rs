@@ -83,6 +83,19 @@ struct MinterInfo {
     deposit_btc_min_amount: Option<u64>,
 }
 
+/// The single record argument the REAL ckBTC minter takes for `get_btc_address` / `update_balance` /
+/// `get_known_utxos` — verified against `dfx canister metadata mqygn-kiaaa-aaaar-qaadq-cai
+/// candid:service --network ic`:
+///   `(record { owner: opt principal; subaccount : opt blob })`.
+/// This mock's candid surface MUST match the real minter's exactly (single record arg, NOT two
+/// positional args) so a facade that diverges is caught by the PocketIC deposit test — the test that
+/// this mock makes honest.
+#[derive(CandidType, Deserialize)]
+struct AccountArg {
+    owner: Option<Principal>,
+    subaccount: Option<Vec<u8>>,
+}
+
 // --- init ---------------------------------------------------------------------------------------
 
 #[derive(CandidType, Deserialize)]
@@ -107,28 +120,28 @@ fn init(arg: InitArg) {
     LEDGER.with(|l| *l.borrow_mut() = arg.ledger);
 }
 
-/// Minter `get_btc_address(opt principal, opt blob) -> text`. Returns a deterministic fake address
-/// derived from `owner || subaccount` — clearly fake (`bc1qmock` prefix) but stable and distinct per
-/// distinct `(owner, subaccount)`. `owner` defaults to the caller; the facade passes `Some(facade)`.
+/// Minter `get_btc_address(record { owner: opt principal; subaccount: opt blob }) -> text`. The real
+/// ckBTC minter takes ONE record argument (verified via `dfx canister metadata … candid:service`);
+/// this mock mirrors that surface exactly. Returns a deterministic fake address derived from
+/// `owner || subaccount` — clearly fake (`bc1qmock` prefix) but stable and distinct per distinct
+/// `(owner, subaccount)`. `owner` defaults to the caller; the facade passes `Some(facade)`.
 #[update]
-fn get_btc_address(owner: Option<Principal>, subaccount: Option<Vec<u8>>) -> String {
-    let owner = owner.unwrap_or_else(msg_caller);
-    let sub = subaccount.unwrap_or_default();
+fn get_btc_address(arg: AccountArg) -> String {
+    let owner = arg.owner.unwrap_or_else(msg_caller);
+    let sub = arg.subaccount.unwrap_or_default();
     derive_btc_address(owner, &sub)
 }
 
-/// Minter `update_balance` — the value-creating call. For the pending deposit keyed by
-/// `(owner, subaccount)`, mints `amount` onto the ledger at `Account{owner, subaccount}` via
-/// `icrc1_transfer` from the minting account, returns `[Minted{…}]`, and clears the entry. No
-/// pending deposit → `Err(NoNewUtxos{…})`. `owner` defaults to the caller; the facade passes
-/// `Some(facade)`.
+/// Minter `update_balance(record { owner: opt principal; subaccount: opt blob })` — the
+/// value-creating call. The real ckBTC minter takes ONE record argument; this mock mirrors that
+/// surface exactly. For the pending deposit keyed by `(owner, subaccount)`, mints `amount` onto the
+/// ledger at `Account{owner, subaccount}` via `icrc1_transfer` from the minting account, returns
+/// `[Minted{…}]`, and clears the entry. No pending deposit → `Err(NoNewUtxos{…})`. `owner` defaults
+/// to the caller; the facade passes `Some(facade)`.
 #[update]
-async fn update_balance(
-    owner: Option<Principal>,
-    subaccount: Option<Vec<u8>>,
-) -> Result<Vec<UtxoStatus>, UpdateBalanceError> {
-    let owner = owner.unwrap_or_else(msg_caller);
-    let sub = subaccount.unwrap_or_default();
+async fn update_balance(arg: AccountArg) -> Result<Vec<UtxoStatus>, UpdateBalanceError> {
+    let owner = arg.owner.unwrap_or_else(msg_caller);
+    let sub = arg.subaccount.unwrap_or_default();
     // Read + copy out synchronously so no RefCell borrow is held across the `await` below.
     let amount = match PENDING.with(|p| p.borrow().get(&(owner, sub.clone())).copied()) {
         None => {
@@ -221,10 +234,11 @@ fn get_deposit_fee() -> u64 {
     0
 }
 
-/// Minter `get_known_utxos(opt principal, opt blob) -> vec Utxo`. The mock tracks no UTXO history,
-/// so this is always empty.
+/// Minter `get_known_utxos(record { owner: opt principal; subaccount: opt blob }) -> vec Utxo`. The
+/// real ckBTC minter takes ONE record argument; this mock mirrors that surface exactly. The mock
+/// tracks no UTXO history, so this is always empty.
 #[query]
-fn get_known_utxos(_owner: Option<Principal>, _subaccount: Option<Vec<u8>>) -> Vec<Utxo> {
+fn get_known_utxos(_arg: AccountArg) -> Vec<Utxo> {
     Vec::new()
 }
 

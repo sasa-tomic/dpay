@@ -99,6 +99,15 @@ struct MockMinterInit {
     ledger: Principal,
 }
 
+/// The single record argument the REAL ckBTC minter takes for `get_btc_address` / `update_balance` —
+/// `(record { owner: opt principal; subaccount: opt blob })`. Used by the honesty-guard test below to
+/// drive the mock minter directly with the real-minter's argument shape.
+#[derive(CandidType, serde::Serialize)]
+struct MinterAccountArg {
+    owner: Option<Principal>,
+    subaccount: Option<Vec<u8>>,
+}
+
 #[derive(CandidType, Deserialize, Debug)]
 struct PayReceipt {
     from: Vec<u8>,
@@ -397,4 +406,77 @@ fn deposited_funds_are_spendable_via_pay() {
 
     assert_eq!(ledger_balance(&pic, ckbtc, dpay, payer), DEPOSIT_AMOUNT - PAY_AMOUNT);
     assert_eq!(ledger_balance(&pic, ckbtc, dpay, merch), PAY_AMOUNT);
+}
+
+/// HONESTY GUARD — pins the mock minter's candid surface to the REAL ckBTC minter's contract.
+///
+/// The live bug this guards against: the facade once encoded the minter call as a candid 2-tuple
+/// `(opt principal, opt blob)` = TWO positional args, while the real ckBTC minter
+/// (`mqygn-kiaaa-aaaar-qaadq-cai`, verified via `dfx canister metadata … candid:service --network ic`)
+/// takes exactly ONE record argument `(record { owner: opt principal; subaccount: opt blob })`. The
+/// real minter (and now this mock) reject the two-positional-arg shape with
+/// `IC0503 ... Fail to decode argument 0 ... Subtyping error: Type mismatch`. That shipped green
+/// only because the OLD mock agreed with the broken facade on the wrong contract.
+///
+/// This test drives the mock DIRECTLY with both shapes: the single-record shape (the real minter's)
+/// succeeds, and the two-positional-arg shape (the divergent one) is rejected. Combined with
+/// `deposit_flow_mints_to_facade_subaccount` (which drives the facade THROUGH this mock), this is the
+/// regression net: if the facade OR the mock ever revert to the 2-tuple encoding, one of these two
+/// tests fails — exactly mirroring the live trap.
+#[test]
+fn mock_minter_enforces_real_minter_single_record_arg_contract() {
+    let pic = PocketIc::new();
+    let mock = pic.create_canister();
+    pic.add_cycles(mock, 2_000_000_000_000);
+    let ledger = install_ledger(
+        &pic,
+        Account { owner: mock, subaccount: None },
+        "ckBTC",
+        0,
+        vec![],
+    );
+    pic.install_canister(
+        mock,
+        mock_minter_wasm(),
+        encode_one(&MockMinterInit { ledger }).unwrap(),
+        None,
+    );
+
+    let sub = vec![1u8; 32];
+
+    // (1) ONE record argument — the REAL minter shape — succeeds and returns the mock address.
+    let reply = pic
+        .update_call(
+            mock,
+            Principal::anonymous(),
+            "get_btc_address",
+            encode_args((MinterAccountArg { owner: None, subaccount: Some(sub.clone()) },)).unwrap(),
+        )
+        .expect("single-record-arg get_btc_address should succeed against the honest mock");
+    let addr: String = decode_one(&reply).unwrap();
+    assert!(
+        addr.starts_with("bc1qmock"),
+        "single-record-arg call must return the mock's bc1qmock address: {addr}",
+    );
+
+    // (2) TWO positional args — the DIVERGENT shape that shipped the live IC0503 trap — is rejected.
+    //     The mock tries to decode arg0 (an opt principal) as the whole record {owner, subaccount}
+    //     and traps.
+    let divergent = pic.update_call(
+        mock,
+        Principal::anonymous(),
+        "get_btc_address",
+        encode_args((Some(Principal::anonymous()), Some(sub))).unwrap(),
+    );
+    assert!(
+        divergent.is_err(),
+        "a two-positional-arg call must be REJECTED by the honest mock (mirror of the live trap)",
+    );
+    let err = divergent.unwrap_err().to_string();
+    assert!(
+        err.contains("decode argument 0")
+            || err.contains("Type mismatch")
+            || err.contains("Subtyping"),
+        "expected the real-minter decode trap, got: {err}",
+    );
 }
