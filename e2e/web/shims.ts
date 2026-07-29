@@ -30,6 +30,28 @@ const shareNoop = () => Promise.resolve({ action: 'dismissedAction' } as
   { action: 'sharedAction' | 'dismissedAction' });
 (Share as any).share = shareNoop;
 
+// Clipboard seam (U4). The real app writes the deposit address via `navigator.clipboard.writeText`
+// on web. Wrap it so every write is ALSO captured into `window.__DPAY_TEST_CLIPBOARD` — this proves
+// (in the e2e test) that the copy button put the address on the real clipboard rather than the Share
+// noop above. The wrapper resolves even if headless chrome rejects the underlying write without a
+// gesture, so the app's "Copied ✓" path is deterministic; the seam value is the assertion target.
+if (typeof window !== 'undefined') {
+  (window as any).__DPAY_TEST_CLIPBOARD = '';
+  const nav = (window as any).navigator;
+  if (nav) {
+    const realClip = nav.clipboard && typeof nav.clipboard.writeText === 'function'
+      ? nav.clipboard.writeText.bind(nav.clipboard) : null;
+    const writeText = async (text: string) => {
+      (window as any).__DPAY_TEST_CLIPBOARD = String(text);
+      if (realClip) {
+        try { await realClip(text); } catch { /* headless may reject w/o gesture; seam captured it */ }
+      }
+    };
+    if (nav.clipboard) (nav.clipboard as any).writeText = writeText;
+    else nav.clipboard = { writeText };
+  }
+}
+
 // Install the NFC session seam (`window.__DPAY_TEST_NFC_SESSION`) for future NFC-flow waves. No-op
 // for the onboard flow (NfcPill stays hidden via DpayCore.nfcStatus? returning undefined → 'unknown').
 if (typeof window !== 'undefined') {

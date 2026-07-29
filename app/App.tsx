@@ -13,7 +13,7 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   SafeAreaView, ScrollView, StatusBar, View, Text, Pressable, TextInput, StyleSheet, NativeModules,
-  Share, AppState, ActivityIndicator, NativeEventEmitter,
+  Share, AppState, ActivityIndicator, NativeEventEmitter, Platform,
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import Svg, {Defs, RadialGradient, Stop, Rect, Path} from 'react-native-svg';
@@ -151,6 +151,93 @@ async function depositRefresh(relayUrl: string, accountHex: string, currency: nu
   if (!r.ok) throw new Error(`deposit/refresh ${r.status}`);
   return r.json();
 }
+
+// Deposit copy is single-sourced per chain. ckBTC deposits come in on the Bitcoin network as BTC;
+// surfaced ONLY in the deposit instructions (the deposit asset/network, never the wallet balance,
+// which always shows `$`). Honest ranges where the minter omits them.
+const DEPOSIT_NETWORK = 'Bitcoin';   // the native chain a ck-deposit lands on (BTC for ckBTC)
+const DEPOSIT_ASSET = 'BTC';         // the asset the user sends on that chain
+const BTC_BLOCK_MIN = 10;            // avg Bitcoin block time in minutes → est. time-to-credit
+
+/**
+ * Copy `text` to the system clipboard when available; otherwise fall back to the platform share
+ * sheet (`Share.share` on Android opens a sheet that includes "Copy"; web's `navigator.clipboard`
+ * is the real clipboard). Returns the path taken so the UI can say "Copied ✓" vs "Shared ✓".
+ * Every fallible op is caught + logged with context (no silent errors); a failure degrades to the
+ * Share fallback rather than throwing.
+ */
+async function copyToClipboard(text: string): Promise<'clipboard' | 'shared'> {
+  // Web: prefer the real clipboard API (works in react-native-web + the e2e browser harness).
+  if (Platform.OS === 'web') {
+    try {
+      const clip = (globalThis as {navigator?: {clipboard?: {writeText?: (t: string) => Promise<void>}}}).navigator?.clipboard;
+      if (clip && typeof clip.writeText === 'function') {
+        await clip.writeText(text);
+        return 'clipboard';
+      }
+    } catch (e) {
+      console.warn('[dpay] clipboard write failed, falling back to Share:', String(e));
+    }
+  }
+  // Native (or web without a clipboard API): Share sheet. On Android this reliably exposes "Copy".
+  try {
+    await Share.share({message: text});
+  } catch (e) {
+    // Even Share failing must not break the sheet — log with context and report the best outcome.
+    console.warn('[dpay] Share.share failed during copy:', String(e));
+  }
+  return 'shared';
+}
+
+/**
+ * Escape closes an open sheet/modal — the seed of the keyboard-shortcuts surface (plan flow 14).
+ * Web-only: attaches a real DOM `keydown` listener; on native there is no Escape key (Android uses
+ * the hardware Back button, handled separately), so this is a harmless no-op there. Uses `globalThis`
+ * + a structural key type so it typechecks without the DOM lib (RN's tsconfig ships no DOM types).
+ */
+function useEscapeToClose(onClose: () => void): void {
+  useEffect(() => {
+    if (Platform.OS !== 'web') {
+      return;
+    }
+    // The web global exposes addEventListener/removeEventListener + a KeyboardEvent carrying `.key`.
+    type HasKey = {key: string};
+    const g = globalThis as unknown as {
+      addEventListener?: (type: string, fn: (e: HasKey) => void) => void;
+      removeEventListener?: (type: string, fn: (e: HasKey) => void) => void;
+    };
+    if (typeof g.addEventListener !== 'function') {
+      return;
+    }
+    const onKey = (e: HasKey) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    g.addEventListener('keydown', onKey);
+    return () => { g.removeEventListener?.('keydown', onKey); };
+  }, [onClose]);
+}
+
+/**
+ * Web-only deep link: `?screen=deposit` auto-opens the deposit sheet on load (so the page is
+ * bookmarkable/shareable to top-up, and the e2e harness can deep-link straight in). Harmless on
+ * native — there's no URL bar, and Platform.OS !== 'web' short-circuits before reading location.
+ */
+function readDepositDeepLink(): boolean {
+  if (Platform.OS !== 'web') {
+    return false;
+  }
+  const w = globalThis as unknown as {location?: {search?: string}};
+  if (!w.location) {
+    return false;
+  }
+  try {
+    return new URLSearchParams(w.location.search ?? '').get('screen') === 'deposit';
+  } catch {
+    return false;
+  }
+}
 // ---------------------------------------------------------------------------------------------
 
 // The mint-green geometric "d" used by both the app icon and the in-app emblem. Bowl LEFT, ascender
@@ -269,8 +356,9 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
   const [topUpBusy, setTopUpBusy] = useState(false);
   const [topUpErr, setTopUpErr] = useState<string | null>(null);
   // ck-deposit sheet (ckBTC-style native-chain deposit). Opens over the wallet; closing tears down
-  // its address/refresh polling. Independent of the DEMO_USD faucet (btn-topup) above.
-  const [depositOpen, setDepositOpen] = useState(false);
+  // its address/refresh polling. Independent of the DEMO_USD faucet (btn-topup) above. On web it
+  // auto-opens when the page is loaded with `?screen=deposit` (bookmarkable top-up deep link).
+  const [depositOpen, setDepositOpen] = useState<boolean>(readDepositDeepLink);
 
   const TOP_UP_CENTS = 5000; // $50.00 in minor units
 
@@ -392,10 +480,11 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
                 ? <ActivityIndicator size="small" color={C.brand} />
                 : <Text style={S.topUpText}>+ ${TOP_UP_CENTS / 100}</Text>}
             </Pressable>
-            {/* ckBTC-style deposit (real chain-key top-up via a native deposit address). Sits beside
-                the DEMO_USD faucet so both funding paths are reachable from the balance header. */}
-            <Pressable testID="btn-deposit" style={S.depositBtn} onPress={() => setDepositOpen(true)}>
-              <Text style={S.depositBtnText}>ckBTC</Text>
+            {/* The PRIMARY funding affordance: a real chain-key deposit (ckBTC). Promoted from a
+                jargon "ckBTC" pill to a clear "Add money" button so topping up is the obvious next
+                action. The DEMO_USD faucet (btn-topup) stays secondary. Opens DepositSheet. */}
+            <Pressable testID="btn-deposit" style={S.addMoneyBtn} onPress={() => setDepositOpen(true)}>
+              <Text style={S.addMoneyBtnText}>＋ Add money</Text>
             </Pressable>
           </View>
           {topUpErr ? <Text style={S.topUpErr}>{topUpErr}</Text> : null}
@@ -1031,8 +1120,13 @@ function DepositSheet({identity, relayUrl, onClose}: {identity: Identity; relayU
   const [refresh, setRefresh] = useState<DepositRefresh | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<'clipboard' | 'shared' | null>(null);
   const [minted, setMinted] = useState(false);
+  // Manual "Check now": debounced + disabled while a refresh is in-flight (reuses the poll's fetch).
+  const [checkBusy, setCheckBusy] = useState(false);
+
+  // Escape closes the sheet (seed of the keyboard-shortcuts surface — plan flow 14).
+  useEscapeToClose(onClose);
 
   // Load deposit info + the deposit address once on open (same AbortController/timeout style as the
   // balance/pay calls). Address reveal is safe — sending to it only credits the user.
@@ -1059,39 +1153,61 @@ function DepositSheet({identity, relayUrl, onClose}: {identity: Identity; relayU
     return () => { alive = false; ctrl.abort(); };
   }, [relayUrl, identity.publicHex, currency]);
 
-  // Poll /deposit/refresh every 10s while open. minted_total > 0 => the deposit credited (the mint
-  // landed on the user's subaccount). Pending UTXOs surface confirmation progress. Cleans up on close.
-  useEffect(() => {
-    let alive = true;
-    const poll = async () => {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 6000);
-      try {
-        const r = await depositRefresh(relayUrl, identity.publicHex, currency, ctrl.signal);
-        if (!alive) return;
-        setRefresh(r);
-        if (r.minted_total > 0) setMinted(true);
-      } catch { /* offline: keep the last status; the next tick retries */ } finally { clearTimeout(t); }
-    };
-    poll(); const id = setInterval(poll, DEPOSIT_REFRESH_MS);
-    return () => { alive = false; clearInterval(id); };
+  // ONE refresh function reused by BOTH the 10s poll and the manual "Check now" button — single
+  // source of truth. minted_total > 0 => the deposit credited (mint landed on the user's subaccount).
+  // The manual path is debounced via `checkBusy`; the poll is already spaced, so it never sets it.
+  const refreshNow = useCallback(async (manual: boolean) => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 6000);
+    if (manual) {
+      setCheckBusy(true);
+    }
+    try {
+      const r = await depositRefresh(relayUrl, identity.publicHex, currency, ctrl.signal);
+      setRefresh(r);
+      if (r.minted_total > 0) {
+        setMinted(true);
+      }
+    } catch { /* offline: keep the last status; the next tick retries */ }
+    finally {
+      clearTimeout(t);
+      if (manual) {
+        setCheckBusy(false);
+      }
+    }
   }, [relayUrl, identity.publicHex, currency]);
 
-  // Copy via Share (no clipboard dependency is shipped). Matches the existing "Share auth code" path.
+  // Poll every DEPOSIT_REFRESH_MS while open; cleans up on close.
+  useEffect(() => {
+    let alive = true;
+    const poll = () => { if (alive) { refreshNow(false); } };
+    poll(); const id = setInterval(poll, DEPOSIT_REFRESH_MS);
+    return () => { alive = false; clearInterval(id); };
+  }, [refreshNow]);
+
+  // Real clipboard on web (navigator.clipboard) + Share fallback on native. Returns the path taken
+  // so the button label reflects what actually happened ("Copied ✓" vs "Shared ✓").
   const copy = useCallback(async () => {
     if (!address) return;
-    try { await Share.share({message: address}); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
+    const how = await copyToClipboard(address);
+    setCopied(how);
+    setTimeout(() => setCopied(null), 1500);
   }, [address]);
 
   const required = info?.min_confirmations ?? refresh?.required_confirmations ?? 0;
   const pending = refresh?.pending ?? [];
+  // The linear progress cue: best confirmation count among pending UTXOs vs the required count.
+  const maxConf = pending.reduce((m, p) => Math.max(m, p.confirmations), 0);
+  const estMin = required > 0 ? required * BTC_BLOCK_MIN : 0;
+  const feeTxt = info ? btc(info.deposit_fee) : null;
+  const minTxt = info?.deposit_min_amount != null ? btc(info.deposit_min_amount) : null;
 
   return (
     <View style={S.sheetOverlay}>
       <SafeAreaView style={S.sheet}>
         <StatusBar barStyle="light-content" backgroundColor={C.bg} />
         <View style={S.sheetHead}>
-          <Text style={S.sheetTitle}>Deposit ckBTC</Text>
+          <Text style={S.sheetTitle}>Add money</Text>
           <Pressable testID="btn-deposit-close" style={S.sheetClose} onPress={onClose}><Text style={S.sheetCloseX}>✕</Text></Pressable>
         </View>
 
@@ -1115,32 +1231,61 @@ function DepositSheet({identity, relayUrl, onClose}: {identity: Identity; relayU
             </View>
           ) : (
             <>
-              <Text style={S.sheetInstr}>
-                Send BTC to this address{required ? ` · ~${required} confirmations` : ''}
-                {info?.deposit_min_amount != null ? ` · min ${btc(info.deposit_min_amount)}` : ''}
-                {info && info.deposit_fee > 0 ? ` · fee ${btc(info.deposit_fee)}` : ''}.
-              </Text>
+              {/* Complete, scannable instructions: network + asset + est. time + fee + min + the
+                  one-line non-custody reassurance. All values come from `deposit_info` (never
+                  hardcoded); the network/asset are single-sourced constants. */}
+              <View testID="deposit-instructions" style={S.instrCard}>
+                <Text style={S.instrLine}>
+                  Send <Text style={S.instrAsset}>{DEPOSIT_ASSET}</Text> to your{' '}
+                  <Text style={S.instrAsset}>{DEPOSIT_NETWORK}</Text> address below.
+                </Text>
+                <Text style={S.instrMeta}>
+                  {required > 0 ? `~${required} confirmation${required === 1 ? '' : 's'}` : 'confirmations'}
+                  {estMin > 0 ? ` · typically ~${estMin} min` : ''}
+                </Text>
+                <Text style={S.instrMeta}>
+                  {`Network fee ${feeTxt ?? '—'}`}{minTxt != null ? ` · Min deposit ${minTxt}` : ''}
+                </Text>
+                <Text style={S.instrCustody}>
+                  dpay never holds your keys — funds mint 1:1 to your wallet on confirmation.
+                </Text>
+              </View>
 
               <View style={S.qrCard}><QRCode value={address} size={200} ecl="L" /></View>
 
               <Text testID="deposit-address" style={S.sheetAddr} selectable={true}>{address}</Text>
 
               <Pressable testID="btn-deposit-copy" style={[S.primaryWide, S.depositCopy]} onPress={copy}>
-                <Text style={S.primaryText}>{copied ? 'Shared ✓' : 'Copy address'}</Text>
+                <Text style={S.primaryText}>{copied === 'clipboard' ? 'Copied ✓' : copied === 'shared' ? 'Shared ✓' : 'Copy address'}</Text>
               </Pressable>
 
-              {pending.length > 0 ? (
-                <View style={S.depositStatus}>
-                  <Text style={S.depositStatusTitle}>Confirming</Text>
-                  {pending.map((p, i) => (
-                    <Text key={i} style={S.depositStatusRow}>
-                      {btc(p.value)} · {p.confirmations}/{required || '?'} confirmations
-                    </Text>
-                  ))}
-                </View>
-              ) : (
-                <Text style={S.dim2}>Waiting for a deposit · checking every 10s</Text>
-              )}
+              {/* ONE single linear progress cue (no dual zero-state): either "Waiting for your
+                  deposit" (no pending utxos yet) or "Confirming · k/N". The manual "Check now"
+                  button nudges the poll instead of relying solely on the 10s interval. The cue line
+                  is normal-case (readable); only the "STATUS" label is the small uppercase tag. */}
+              <View testID="deposit-status" style={S.depositStatus}>
+                <Text style={S.depositStatusTitle}>Status</Text>
+                <Text style={S.depositStatusMain}>
+                  {pending.length > 0 ? `Confirming · ${maxConf}/${required || '?'}` : 'Waiting for your deposit'}
+                </Text>
+                <Text style={S.depositStatusRow}>
+                  {pending.length > 0
+                    ? `${pending.map(p => btc(p.value)).join(', ')} · ${required || '?'} confirmation${required === 1 ? '' : 's'} needed`
+                    : `checking every ${DEPOSIT_REFRESH_MS / 1000}s`}
+                </Text>
+              </View>
+
+              <Pressable
+                testID="btn-deposit-check"
+                style={[S.checkBtn, checkBusy && S.dim]}
+                disabled={checkBusy}
+                onPress={() => refreshNow(true)}>
+                {checkBusy
+                  ? <ActivityIndicator size="small" color={C.brand} />
+                  : <Text style={S.checkBtnText}>Check now</Text>}
+              </Pressable>
+
+              {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
             </>
           )}
         </ScrollView>
@@ -1232,9 +1377,11 @@ const S = StyleSheet.create({
   settingsLabel: {fontSize: 12, fontWeight: '700', color: C.sub2, textTransform: 'uppercase', letterSpacing: 1, fontFamily: 'monospace'},
   settingsInput: {flex: 1, fontSize: 12, color: C.ink, fontFamily: 'monospace', paddingVertical: 4},
   resetLink: {fontSize: 12, color: C.bad, fontWeight: '600'},
-  // ckBTC deposit affordance in the balance header (filled brand, distinct from the outline faucet).
-  depositBtn: {backgroundColor: C.brand, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5},
-  depositBtnText: {fontSize: 13, fontWeight: '700', color: C.brandInk},
+  // The PRIMARY funding affordance in the balance header: a clear "Add money" brand button that
+  // opens the deposit sheet. Filled brand so it reads as primary; the DEMO_USD faucet (topUpBtn)
+  // is the secondary outline pill beside it.
+  addMoneyBtn: {backgroundColor: C.brand, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7, shadowColor: C.brand, shadowOpacity: 0.35, shadowRadius: 12, shadowOffset: {width: 0, height: 6}, elevation: 6},
+  addMoneyBtnText: {fontSize: 13, fontWeight: '800', color: C.brandInk},
   // Deposit sheet — a full-screen overlay above the wallet.
   sheetOverlay: {position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: C.bg, zIndex: 10},
   sheet: {flex: 1, backgroundColor: C.bg},
@@ -1243,10 +1390,19 @@ const S = StyleSheet.create({
   sheetClose: {width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: C.field},
   sheetCloseX: {fontSize: 16, fontWeight: '700', color: C.sub},
   sheetBody: {flexGrow: 1, paddingHorizontal: 22, paddingTop: 22, alignItems: 'center'},
-  sheetInstr: {fontSize: 14, color: C.sub, textAlign: 'center', lineHeight: 20, marginBottom: 18},
+  // Deposit instructions — a scannable card (network/asset + est. time + fee/min + non-custody line).
+  instrCard: {alignSelf: 'stretch', backgroundColor: C.card, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: C.line2, marginBottom: 18},
+  instrLine: {fontSize: 15, color: C.ink, textAlign: 'center', lineHeight: 21, marginBottom: 10},
+  instrAsset: {color: C.brand, fontWeight: '700'},
+  instrMeta: {fontSize: 13, color: C.sub, textAlign: 'center', fontFamily: 'monospace', paddingVertical: 2},
+  instrCustody: {fontSize: 12, color: C.sub2, textAlign: 'center', marginTop: 10, lineHeight: 17},
   sheetAddr: {fontSize: 13, color: C.ink, fontFamily: 'monospace', textAlign: 'center', marginTop: 4, marginBottom: 8, letterSpacing: 0.2},
   depositCopy: {alignSelf: 'stretch', marginTop: 12},
   depositStatus: {marginTop: 22, alignSelf: 'stretch', backgroundColor: C.card, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: C.line2},
-  depositStatusTitle: {fontSize: 12, fontWeight: '700', color: C.sub2, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 8, fontFamily: 'monospace'},
-  depositStatusRow: {fontSize: 14, color: C.ink, fontFamily: 'monospace', paddingVertical: 4},
+  depositStatusTitle: {fontSize: 12, fontWeight: '700', color: C.sub2, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 6, fontFamily: 'monospace'},
+  depositStatusMain: {fontSize: 16, fontWeight: '700', color: C.ink, marginBottom: 4},
+  depositStatusRow: {fontSize: 13, color: C.sub, fontFamily: 'monospace'},
+  // Manual "Check now" — secondary (outline brand), debounced + spinner while in-flight.
+  checkBtn: {marginTop: 16, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 24, borderWidth: 1, borderColor: C.brand, alignItems: 'center', justifyContent: 'center', height: 46},
+  checkBtnText: {color: C.brand, fontWeight: '700', fontSize: 15},
 });
