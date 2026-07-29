@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Local operator hook: mint (credit) minor units of a currency to an account on the dpay canister.
+# Local operator hook: mint (credit) minor units of a currency to an account via the facade.
 #
-# OPEN FAUCET. The canister's `mint : (blob, nat32, nat64) -> nat64` is unauthenticated — any caller
-# (including the anonymous principal the relay uses) can mint. This script runs as DPAY_DFX_IDENTITY
-# purely so it shares the same canister-id / network plumbing as deploy; it is NOT a controller gate.
-# This is the demo stand-in for the real funding path (on-chain top-up → issuer mint); see FUNDING.md.
+# The facade's `mint : (blob, nat32, nat64) -> Result<nat64, text>` settles on the registered ICRC
+# ledger (transferring from the ledger's minting account, which the facade owns). It is gated by the
+# facade's governance controller: open when no controller is set (demo default), or restricted to the
+# controller principal otherwise. The currency MUST already be registered (register_ledger) and
+# mintable. This script runs as DPAY_DFX_IDENTITY purely to share the canister-id / network plumbing.
 #
 #   just mint <account-hex> <amount-minor-units> [currency]
 # <account-hex> = 64 hex chars (the 32-byte Ed25519 account pubkey); <amount> = minor units (cents);

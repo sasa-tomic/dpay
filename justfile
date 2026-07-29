@@ -22,30 +22,16 @@ test-core:
 build-canister:
     cargo build -p dpay-canister --target wasm32-unknown-unknown --release
 
-# canister settlement tests on PocketIC (offline, deterministic)
+# canister settlement tests on PocketIC (offline, deterministic). The facade settles on the REAL
+# DFINITY ic-icrc1-ledger (cached in third_party/ic-icrc1-ledger/); multi-ledger proof incl. the
+# double-spend concurrency regression. Fully offline.
 test-canister: build-canister
     cargo nextest run -p dpay-canister-tests
 
-# --- ICRC-ledger integration demo (see ICRC3_INTEGRATION.md) -----------------
-# dpay-canister-icrc settles on the REAL DFINITY ic-icrc1-ledger (pre-built from dfinity/ic source,
-# cached in third_party/ic-icrc1-ledger/). This recipe builds the dpay variant and runs the PocketIC
-# proof that an offline-signed auth moves funds on the real ledger. Fully offline.
-build-canister-icrc:
-    cargo build -p dpay-canister-icrc --target wasm32-unknown-unknown --release
-
-icrc-demo: build-canister-icrc
-    cargo nextest run -p dpay-icrc-tests
-
-# real local dfx replica deploy of the ICRC integration (ledger + dpay variant), end-to-end with
-# the actual offline-signed wire. Needs the one-time-built ledger wasm in third_party/ (online
-# prereq; see ICRC3_INTEGRATION.md). Outer-loop gate — not part of the seconds inner loop.
-icrc-deploy:
-    bash scripts/dfx-deploy-icrc.sh
-
-# MAINNET deploy of the dpay-icrc canister into the LIVE ic-icrc1-ledger on the IC `ic` network.
-# Spends REAL cycles + moves REAL state; self-asserting end-to-end (mint -> settle -> replay-refused
-# -> balance check) on mainnet. Read scripts/dfx-deploy-icrc-mainnet.sh before running. Resumable
-# via DPAY_ICRC_ID=<existing id>. See ICRC3_INTEGRATION.md.
+# MAINNET deploy of the facade canister (ssqti) into the LIVE ic-icrc1-ledger on the IC `ic` network.
+# Spends REAL cycles + moves REAL state on mainnet; self-asserting end-to-end (register ledger ->
+# mint -> settle -> replay-refused -> balance check, reading balances DIRECTLY off the ledger). Read
+# scripts/dfx-deploy-icrc-mainnet.sh before running. See CODEBASE_ANALYSIS.md.
 icrc-deploy-mainnet:
     bash scripts/dfx-deploy-icrc-mainnet.sh
 
