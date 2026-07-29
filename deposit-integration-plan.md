@@ -350,7 +350,7 @@ outer-loop device gate (out of the offline inner loop).
   note now resolved by having a concrete deposit path.
 - **`FUNDING.md`:** replace the "shape recorded" placeholder with the implemented facade-proxy model
   + mainnet canister IDs (ckBTC minter `mqygn-kiaaa-aaaar-qaadq-cai`, ledger
-  `mxzaz-hyaaa-aaaar-qaada-cai`) + the KYC-allowlist governance step.
+  `mxzaz-hqaaa-aaaar-qaada-cai`) + the KYC-allowlist governance step.
 - **`dfx/dpay_canister.did`:** the hand-maintained candid (§1.5).
 
 ---
@@ -380,7 +380,7 @@ integration) + `just ui`; iterate to all-green. Update `CODEBASE_ANALYSIS.md` pe
 
 ## 7. Mainnet ckBTC canister IDs (for FUNDING.md / deploy)
 - ckBTC minter: `mqygn-kiaaa-aaaar-qaadq-cai`
-- ckBTC ledger: `mxzaz-hyaaa-aaaar-qaada-cai`
+- ckBTC ledger: `mxzaz-hqaaa-aaaar-qaada-cai`
 - ckETH minter: `sv3dd-oaaaa-aaaar-qacoq-cai` (follow-up)
 - ckETH ledger: `ss2fx-dyaaa-aaaar-qacoq-cai` (follow-up)
 - ckUSDC ledger: `xevnm-gaaaa-aaaar-qafnq-cai` (follow-up)

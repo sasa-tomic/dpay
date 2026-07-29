@@ -58,7 +58,7 @@ custodian, dpay not in the flow.
   confirmations — mints ckBTC to `Account{owner: facade, subaccount: pubkey}`, the same subaccount the
   wallet already reads as its balance (a confirmed deposit is automatically the next balance poll's
   number). No settlement/balance/history code changed to add it. Mainnet canister IDs: **minter
-  `mqygn-kiaaa-aaaar-qaadq-cai`**, **ledger `mxzaz-hyaaa-aaaar-qaada-cai`**
+  `mqygn-kiaaa-aaaar-qaadq-cai`**, **ledger `mxzaz-hqaaa-aaaar-qaada-cai`**
   (`docs.internetcomputer.org/references/chain-key-canister-ids/`). **Governance step (not code):** the
   facade principal must be **KYC-allowlisted** for ckBTC mainnet minting, or the minter refuses to mint.
   Withdrawal is the mirror (the minter burns ckBTC and sends to the user's native BTC address) — a
@@ -111,7 +111,7 @@ signature is the only authority, and dpay can't move funds.
 ## Open items to verify (rigor — do not build on assumptions)
 
 - ✅ **ckBTC:** resolved + implemented — minter `mqygn-kiaaa-aaaar-qaadq-cai`, ledger
-  `mxzaz-hyaaa-aaaar-qaada-cai`; facade-proxy deposit surface shipped (`deposit_address` /
+  `mxzaz-hqaaa-aaaar-qaada-cai`; facade-proxy deposit surface shipped (`deposit_address` /
   `refresh_deposit` / `deposit_info` + `register_minter`). The items below remain open.
 - **ckETH / ckERC20 (the ckUSDC launch rail):** the facade-proxy seam is reusable, but the ckETH
   minter exposes different methods (Ethereum-side deposit *helper contract* carrying the user's
