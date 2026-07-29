@@ -1,23 +1,43 @@
-// Relay spawner — builds (if needed) and runs the REAL `target/debug/dpay-relay` (FakeLedger,
-// offline) with `--features test-helpers` so the harness can drive the deposit-seed route too.
+// Relay spawner — builds (if missing) and runs the REAL dpay-relay (FakeLedger, offline) built WITH
+// `--features test-helpers` so the harness can drive the deposit-seed route too.
 //
 // The relay is the ONLY online dependency in the demo; in local mode we run it against the
 // in-memory FakeLedger so the whole suite stays offline + seconds-fast. In live mode (DPAY_E2E_MODE
 // =live) this spawner is NOT used — the harness points the app at $DPAY_E2E_BASE instead.
 //
+// --- Why a DEDICATED cargo target dir (the root fix for the "rebuild on every run" workaround) ---
+// The e2e relay MUST be built with `--features test-helpers` (the `/api/v1/test/deposit/seed` route),
+// but `just check` / `just test-relay` build the SAME crate WITHOUT the feature into the SHARED
+// `target/debug/dpay-relay`. Same output path → a plain `cargo build -p dpay-relay` CLOBBERS the
+// feature-bearing binary, and a "binary exists" probe cannot tell the two apart. The old harness
+// papered over this by ALWAYS rebuilding on every `just e2e` (~0.3s when warm, ~30s cold after a
+// `just check`). The TRUE fix: give the e2e relay its OWN cargo target dir (`.dev/target-e2e`,
+// gitignored) so nothing else ever writes the e2e binary — cargo's own fingerprinting within that
+// isolated dir is now authoritative, and a missing-binary probe is sufficient. The deps cache stays
+// shared (`.dev/cargo` as CARGO_HOME), so a cold build is no slower than before. A post-spawn
+// `/test/deposit/seed` reachability probe is a SAFETY NET (defense against a future regression),
+// NOT the primary mechanism — the isolated dir is.
+//
 // Hard rules honored:
 // - No silent errors: every step is wrapped + logged with port/exit-code/stderr on failure.
 // - Timeouts everywhere: cargo build has its own (caller passes a spawn timeout); ready-detect
 //   polls /api/v1/health for < READY_TIMEOUT_MS; the relay is SIGTERM'd cleanly on teardown.
-// - Idempotent: re-uses an existing build; picks a FREE port per run (no port collisions).
+// - Picks a FREE port per run (no port collisions).
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..', '..');
-const RELAY_BIN = join(REPO_ROOT, 'target', 'debug', 'dpay-relay');
+// Dedicated, isolated cargo target dir for the e2e relay (gitignored under `.dev/`). Nothing else
+// in the build graph writes here, so a featureless `cargo build -p dpay-relay` (from `just check`)
+// can NEVER clobber the e2e binary. This is the root-cause fix for the always-rebuild workaround.
+const E2E_TARGET_DIR = join(REPO_ROOT, '.dev', 'target-e2e');
+const RELAY_BIN = join(E2E_TARGET_DIR, 'debug', 'dpay-relay');
+// Reuse the shared in-project cargo home so the deps cache stays warm + fast across target dirs.
+const CARGO_HOME_DIR = join(REPO_ROOT, '.dev', 'cargo');
 
 export const READY_TIMEOUT_MS = 5_000;
 export const HEALTH_POLL_INTERVAL_MS = 100;
@@ -37,22 +57,39 @@ export async function pickFreePort() {
 }
 
 /**
- * Ensure the relay binary is built WITH `--features test-helpers` (the deposit-seed route the e2e
- * harness needs). Always invokes cargo build rather than skipping on an existing binary, because a
- * plain `cargo build -p dpay-relay` (from `just check` / `just test-relay`) OVERWRITES the artifact
- * WITHOUT the feature — a "binary exists" check can't distinguish the two, and a featureless binary
- * returns 404 for `/test/deposit/seed`. Cargo's incremental cache makes an up-to-date build a
- * ~0.3s no-op, so this is cheap and correct across `check`/`e2e` interleaving.
+ * Ensure the e2e relay binary exists, built WITH `--features test-helpers` into the ISOLATED e2e
+ * target dir. Builds ONLY IF the binary is missing — cargo's own fingerprinting inside
+ * `.dev/target-e2e` is authoritative (no other build writes there, so a stale/featureless clobber
+ * is impossible). `force=true` bypasses the existence check (used by the post-spawn safety net when
+ * a reachability probe unexpectedly fails).
  */
 export async function ensureRelayBuilt(opts = {}) {
-  console.log('[relay] ensuring target/debug/dpay-relay is built with --features test-helpers…');
+  if (!opts.force && existsSync(RELAY_BIN)) {
+    console.log(`[relay] using existing isolated binary ${RELAY_BIN}`);
+    return;
+  }
+  console.log(`[relay] building dpay-relay --features test-helpers into ${E2E_TARGET_DIR}…`);
   const code = await runCargo(['build', '-p', 'dpay-relay', '--features', 'test-helpers'], opts.timeoutMs ?? 300_000);
   if (code !== 0) throw new Error(`relay build failed (cargo exit ${code})`);
+  if (!existsSync(RELAY_BIN)) {
+    throw new Error(`relay build reported success but ${RELAY_BIN} is missing — did the package/bin name change?`);
+  }
+}
+
+function cargoEnv() {
+  // Pin both the target dir + the shared cargo home so the e2e build is fully isolated in its
+  // OUTPUT (E2E_TARGET_DIR) while sharing the dependency cache (CARGO_HOME). Inheriting process.env
+  // keeps PATH (cargo) + any justfile-exported vars intact.
+  return {
+    ...process.env,
+    CARGO_TARGET_DIR: E2E_TARGET_DIR,
+    CARGO_HOME: process.env.CARGO_HOME ?? CARGO_HOME_DIR,
+  };
 }
 
 function runCargo(args, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const child = spawn('cargo', args, { cwd: REPO_ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn('cargo', args, { cwd: REPO_ROOT, env: cargoEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
     let stderr = '';
     child.stdout.on('data', () => {}); // discard stdout (progress)
     child.stderr.on('data', (b) => { stderr += b.toString(); });
@@ -72,12 +109,87 @@ function runCargo(args, timeoutMs) {
 }
 
 /**
+ * Probe that the feature-gated `/api/v1/test/deposit/seed` route actually exists on the RUNNING
+ * relay. SAFETY NET for the isolated-target-dir root fix: with the isolated dir a featureless
+ * clobber is impossible, but this guard turns a silent future regression (route 404) into a loud
+ * error + one forced rebuild, instead of a confusing flow-05 failure.
+ *
+ * Stateless by design: POSTs a deliberately-invalid account (4 hex bytes, not 32) so the route
+ * returns `400 "account must be 32 bytes hex"` WITHOUT touching the ledger. A `404` means the route
+ * is absent → the binary lacks `test-helpers`. Returns true iff the route is present.
+ */
+async function probeSeedRoute(baseURL, timeoutMs = 3_000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch(`${baseURL}/api/v1/test/deposit/seed`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      // 4-byte hex → rejected at hex::decode length check BEFORE any ledger mutation. Stateless.
+      body: JSON.stringify({ account: 'deadbeef', currency: 0, amount: 0 }), signal: ctrl.signal,
+    });
+    // 400 (bad account) = route present + feature compiled in; 404 = route absent (featureless).
+    return r.status !== 404;
+  } catch {
+    return false; // treat a transport error as "probe inconclusive → caller may rebuild"
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/**
  * Spawn the relay on a free port. Returns `{ port, baseURL, stop }`. The relay binds
  * `DPAY_RELAY_ADDR=127.0.0.1:PORT` and settles on the in-memory FakeLedger (DPAY_LEDGER=memory),
  * with the faucet ENABLED so the onboarding flow's `/api/v1/faucet` POST funds the new account.
+ *
+ * After health, probes the feature-gated `/test/deposit/seed` route (SAFETY NET). If it 404s — which
+ * the isolated target dir makes impossible, but a future regression could — forces ONE rebuild into
+ * the isolated dir and respawns, then re-probes. A second 404 is a hard, loud error (never silent).
  */
 export async function startRelay(opts = {}) {
   await ensureRelayBuilt();
+  let attempt = 0;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    attempt++;
+    const { port, baseURL, stop, stdout, stderr } = await spawnOnce(opts);
+    try {
+      await waitForHealth(baseURL, opts.readyTimeoutMs ?? READY_TIMEOUT_MS);
+      // Safety-net probe: confirm the feature-gated route is live.
+      if (await probeSeedRoute(baseURL)) {
+        return { port, baseURL, stop };
+      }
+      // Route absent (404) — a featureless clobber SHOULD be impossible with the isolated dir, but
+      // rebuild once + respawn before giving up, so a transient/regressed build can't silently fail.
+      await stop();
+      if (attempt === 1) {
+        console.warn('[relay] /test/deposit/seed returned 404 (feature missing) — forcing a rebuild into the isolated dir…');
+        await ensureRelayBuilt({ force: true });
+        continue; // respawn + re-probe
+      }
+      throw new Error(
+        `/api/v1/test/deposit/seed still 404 after a forced rebuild — the relay binary lacks --features test-helpers.\n` +
+        `  binary: ${RELAY_BIN}\n` +
+        `  target dir: ${E2E_TARGET_DIR}`
+      );
+    } catch (e) {
+      await stop();
+      if (attempt === 1 && e.message && e.message.includes('health never returned')) {
+        // A transport failure during health: surface, but only retry once after a rebuild.
+        console.warn(`[relay] health probe failed (${e.message}); forcing a rebuild into the isolated dir…`);
+        await ensureRelayBuilt({ force: true });
+        continue;
+      }
+      throw new Error(
+        `relay did not become healthy/ready at ${baseURL}: ${e}\n` +
+        `  stdout tail:\n${stdout.split('\n').slice(-15).join('\n')}\n` +
+        `  stderr tail:\n${stderr.split('\n').slice(-15).join('\n')}`
+      );
+    }
+  }
+}
+
+/** One relay spawn: binds a free port, returns `{ port, baseURL, stop, stdout, stderr }`. */
+async function spawnOnce(opts = {}) {
   const port = opts.port ?? await pickFreePort();
   const addr = `127.0.0.1:${port}`;
   const baseURL = `http://${addr}`;
@@ -85,6 +197,10 @@ export async function startRelay(opts = {}) {
 
   const env = {
     ...process.env,
+    // Keep the isolated target/cargo env on the spawn too (harmless at runtime, but self-consistent
+    // and lets the binary's own tooling, if any, find the same paths).
+    CARGO_TARGET_DIR: E2E_TARGET_DIR,
+    CARGO_HOME: process.env.CARGO_HOME ?? CARGO_HOME_DIR,
     DPAY_RELAY_ADDR: addr,
     DPAY_LEDGER: 'memory',
     DPAY_ENABLE_FAUCET: 'true',
@@ -108,19 +224,7 @@ export async function startRelay(opts = {}) {
       setTimeout(() => { try { child.kill('SIGKILL'); } catch {} }, 2_000);
     });
   };
-
-  // Race: wait for either /api/v1/health=ok OR a premature child exit. The latter is a hard error.
-  try {
-    await waitForHealth(baseURL, opts.readyTimeoutMs ?? READY_TIMEOUT_MS);
-  } catch (e) {
-    await stop();
-    throw new Error(
-      `relay did not become healthy at ${baseURL} within ${opts.readyTimeoutMs ?? READY_TIMEOUT_MS}ms: ${e}\n` +
-      `  stdout tail:\n${stdout.split('\n').slice(-15).join('\n')}\n` +
-      `  stderr tail:\n${stderr.split('\n').slice(-15).join('\n')}`
-    );
-  }
-  return { port, baseURL, stop };
+  return { port, baseURL, stop, stdout, stderr };
 }
 
 /** Poll GET /api/v1/health until it returns 200 {status:"ok"}, or throw on timeout. */
