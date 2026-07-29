@@ -52,13 +52,10 @@ test-relay-test-helpers:
 wire-layout:
     cargo run -p dpay-fixture --release -- wire-layout dfx/wire_layout.json
 
-# headless UI: build screens, screenshot with system chromium, visual-diff (offline)
-ui:
-    cd ui && npm run ui
-
 # radical e2e: drive the REAL app (App.tsx via react-native-web) + REAL relay (FakeLedger) + REAL
-# browser (chrome-headless-shell), offline + seconds-fast. The inner-loop UI/flow gate. `--flow NAME`
-# runs one flow; default runs all under e2e/tests/. Add a flow = add `e2e/tests/NN-name.mjs`.
+# browser (chrome-headless-shell), offline + seconds-fast. The inner-loop UI/flow gate — it BOTH
+# drives every flow through the real app AND screenshots each state (shots land in e2e/shots/),
+# superseding the old parallel-component ui/ harness (removed). Add a flow = add `e2e/tests/NN-name.mjs`.
 e2e:
     cd e2e && npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps
     cd e2e && node run.mjs
@@ -98,8 +95,10 @@ mint account amount currency='0':
 check: test-core test-canister test-relay
     @echo "rust inner loop green"
 
-# everything: rust loop + headless UI + radical e2e (real app + real relay + real browser)
-verify: check ui e2e
+# everything: rust loop + radical e2e (real app + real relay + real browser). The e2e harness
+# superseded the old ui/ parallel-component golden-shot harness (drives the REAL App.tsx +
+# screenshots every flow state), so `ui` is gone and `verify` runs `check e2e`.
+verify: check e2e
     @echo "full inner loop green"
 
 # cross-compile dpay-ffi to Android .so for arm64-v8a + x86_64 (NDK)

@@ -1,7 +1,0 @@
-# UI harness build + run artifacts (golden/ is committed as the visual baseline)
-node_modules/
-dist/
-shots/
-diff/
-.browser/
-*.log
