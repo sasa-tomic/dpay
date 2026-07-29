@@ -2,7 +2,21 @@
 
 > This document answers: **how hard is it to stop storing balances inside `dpay-canister` and settle on a separate, standard ICRC ledger canister?** It records the verdict, the chosen integration shape, where the difficulty actually lives, and a runnable offline demo that proves it.
 >
-> Status: **demonstrated.** Two isolated crates (`dpay-canister-icrc`, `dpay-icrc-tests`) plus a pre-built copy of the **real DFINITY `ic-icrc1-ledger`** wasm (cached in `third_party/ic-icrc1-ledger/`) build and pass PocketIC tests fully offline (`just icrc-demo`). Nothing in the shipping canister, relay, app, or the in-flight multi-currency work is touched. dpay no longer ships or contains *any* ledger implementation — it settles on the real one.
+> **UPDATE — this integration is now the SHIPPING architecture (no longer a demo).** The isolated
+> `dpay-canister-icrc` / `dpay-icrc-tests` crates have been **retired**; their hardened logic was
+> folded into the canonical `dpay-canister` (the facade `ssqti`) and the canonical
+> `dpay-canister-tests`. The dpay canister IS now the facade described in "Shape A" below: it holds
+> no balances, routes each payment to a real ICRC ledger, keeps the offline-sig/nonce/expiry/cap
+> gate, and adds a display-only balance cache. See `CODEBASE_ANALYSIS.md` ("The canister is a
+> FACADE over external ICRC ledgers") for the current authoritative analysis. The recipes below are
+> superseded: the PocketIC proof is now `just test-canister` (multi-ledger, incl. the double-spend
+> regression), the local dfx deploy is `just deploy` (`scripts/dfx-deploy.sh`), and the mainnet
+> verify is `just icrc-deploy-mainnet` (`scripts/dfx-deploy-icrc-mainnet.sh`, targeting `ssqti`).
+> The rest of this document is retained as the historical design rationale for that integration.
+>
+> Historical status (pre-promotion): **demonstrated** via two isolated crates plus a pre-built copy
+> of the **real DFINITY `ic-icrc1-ledger`** wasm (cached in `third_party/ic-icrc1-ledger/`). dpay
+> no longer ships or contains *any* ledger implementation — it settles on the real one.
 
 ## Verdict: feasible, moderate difficulty, concentrated in the canister
 
