@@ -31,14 +31,10 @@ export class Driver {
   /** The base URL the app was loaded from (set by `navigate`). */
   baseURL = null;
 
-  constructor(browser, context, page) {
-    this.browser = browser;
-    this.context = context;
-    this.page = page;
-  }
-
-  /** Launch a fresh browser + context + page. Throws with an actionable message if no browser. */
-  static async create(opts = {}) {
+  /** Launch the headless browser once (shared across tests in a run). Returns `{browser, stop}` —
+   *  tests create their own fresh incognito CONTEXT from this browser via `create(browser)`, so each
+   *  gets an isolated localStorage/identity without paying the ~1.5s browser-launch cost per test. */
+  static async launchBrowser(opts = {}) {
     const exe = resolveExecutablePath();
     if (!exe) {
       throw new Error(
@@ -70,13 +66,13 @@ export class Driver {
       const msg = e instanceof Error ? e.message : String(e);
       throw new Error(`[driver] chromium failed to launch (${exe}):\n${msg}`);
     });
-    // Fresh incognito context per run → fresh localStorage → fresh identity each test.
-    const context = await browser.createBrowserContext();
-    const page = await context.newPage();
-    await page.setViewport({ ...VIEWPORT, width: opts.width ?? VIEWPORT.width, height: opts.height ?? VIEWPORT.height });
-    if (opts.timezone !== undefined) await page.emulateTimezone(opts.timezone);
-    await page.evaluateOnNewDocument(injectFreezeCss, FREEZE_CSS);
-    // Surface page errors + console errors so a swallowed exception in the app bubbles up.
+    const stop = async () => { try { await browser.close(); } catch {} };
+    return { browser, stop };
+  }
+
+  /** Attach page diagnostics (pageerror / console / requestfailed) so a swallowed exception in the
+   *  app bubbles up. Shared between `create()` paths so a fresh context gets the same surfacing. */
+  static attachPageListeners(page) {
     page.on('pageerror', (e) => console.error(`[driver] pageerror: ${e.message}`));
     page.on('console', (m) => {
       const t = m.type();
@@ -93,7 +89,35 @@ export class Driver {
       if (url.endsWith('/favicon.ico')) return;
       console.error(`[driver] requestfailed: ${url} — ${req.failure()?.errorText ?? 'unknown'}`);
     });
-    return new Driver(browser, context, page);
+  }
+
+  /**
+   * Create a Driver over a FRESH incognito context. Pass a shared `browser` (from `launchBrowser`)
+   * so the whole run shares one browser process while each test gets isolated localStorage/identity;
+   * omit it to launch+own a throwaway browser. `close()` closes only the context (and the browser if
+   * this Driver launched it), so a shared-browser Driver never tears down the session's browser.
+   */
+  static async create(browserOrOpts, opts = {}) {
+    const shared = browserOrOpts && typeof browserOrOpts.createBrowserContext === 'function' ? browserOrOpts : null;
+    const o = shared ? opts : (browserOrOpts && typeof browserOrOpts === 'object' ? browserOrOpts : {});
+    let browser, ownsBrowser;
+    if (shared) { browser = shared; ownsBrowser = false; }
+    else { const launched = await Driver.launchBrowser(o); browser = launched.browser; ownsBrowser = true; }
+    // Fresh incognito context per run → fresh localStorage → fresh identity each test.
+    const context = await browser.createBrowserContext();
+    const page = await context.newPage();
+    await page.setViewport({ ...VIEWPORT, width: o.width ?? VIEWPORT.width, height: o.height ?? VIEWPORT.height });
+    if (o.timezone !== undefined) await page.emulateTimezone(o.timezone);
+    await page.evaluateOnNewDocument(injectFreezeCss, FREEZE_CSS);
+    Driver.attachPageListeners(page);
+    return new Driver(browser, context, page, ownsBrowser);
+  }
+
+  constructor(browser, context, page, ownsBrowser = true) {
+    this.browser = browser;
+    this.context = context;
+    this.page = page;
+    this.ownsBrowser = ownsBrowser;
   }
 
   /** Navigate to `${base}${path}` (path includes the query, e.g. `?relay=...`). Times out at 8s.
@@ -249,10 +273,11 @@ export class Driver {
     await this.page.evaluate(() => { try { localStorage.clear(); } catch {} });
   }
 
-  /** Close the browser + context. Safe to call multiple times. */
+  /** Close the context (and the browser if this Driver owns it — a shared-browser Driver never
+   *  tears down the session's browser). Safe to call multiple times. */
   async close() {
     try { await this.context.close(); } catch {}
-    try { await this.browser.close(); } catch {}
+    if (this.ownsBrowser) { try { await this.browser.close(); } catch {} }
   }
 }
 

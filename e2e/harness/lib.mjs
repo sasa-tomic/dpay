@@ -66,12 +66,17 @@ export async function ensureWireLayout() {
 }
 
 /**
- * Top-level setup. Generates wire_layout.json, builds+serves the web app, spawns the relay (local
- * mode), and returns a ready-to-drive `Driver`. Idempotent within a run; safe to call once per test.
- *
- * @param {{noRelay?: boolean, noWeb?: boolean, rebuildWeb?: boolean}} [opts]
+ * Shared session: the relay + web server + browser PROCESS are spawned ONCE per run and reused
+ * across tests. Each `setup()` call still gets a FRESH incognito browser context (fresh localStorage
+ * → fresh identity) and the shared relay carries no cross-test account state (every test mints
+ * distinct random keys + nonces). This preserves the real isolation — fresh identity per test, no
+ * cross-test state pollution — while cutting the ~2.5s relay+web+browser spawn cost that a
+ * per-test process would charge 15×. Torn down once at the end of the run by `stopSession()`.
  */
-export async function setup(opts = {}) {
+let _session = null;
+
+async function getSession(opts = {}) {
+  if (_session) return _session;
   await ensureWireLayout();
   const mode = resolveMode();
   let relayBaseURL = '';
@@ -87,7 +92,7 @@ export async function setup(opts = {}) {
       const relay = await startRelay();
       relayBaseURL = relay.baseURL;
       stops.push(relay.stop);
-      console.log(`[lib] local relay up at ${relayBaseURL}`);
+      console.log(`[lib] local relay up at ${relayBaseURL} (shared across tests)`);
     }
 
     let webBaseURL = '';
@@ -96,29 +101,62 @@ export async function setup(opts = {}) {
       const web = await serveWeb();
       webBaseURL = web.baseURL;
       stops.push(web.stop);
-      console.log(`[lib] web app served at ${webBaseURL}`);
+      console.log(`[lib] web app served at ${webBaseURL} (shared across tests)`);
     }
 
-    const driver = await Driver.create();
-    stops.push(() => driver.close());
+    const { browser, stop: stopBrowser } = await Driver.launchBrowser();
+    stops.push(stopBrowser);
+    console.log('[lib] headless browser launched (shared across tests; fresh context per test)');
 
     const stop = async () => { for (const s of stops.slice().reverse()) { try { await s(); } catch {} } };
+    _session = { mode, relayBaseURL, webBaseURL, browser, stop };
+    return _session;
+  } catch (e) {
+    for (const s of stops.slice().reverse()) { try { await s(); } catch {} }
+    throw e;
+  }
+}
 
-    // In live mode, throttle: navigate is slow against mainnet, so allow more time. The app still
-    // generates an ephemeral key on first run (we clearStorage before navigate for idempotency).
+/** Tear down the shared session (relay + web + browser). Called once at the end of the run. */
+export async function stopSession() {
+  if (!_session) return;
+  const s = _session;
+  _session = null;
+  try { await s.stop(); } catch {}
+}
+
+/**
+ * Per-test setup. Returns a `Driver` over a FRESH incognito context (fresh localStorage → fresh
+ * identity) against the SHARED relay + web + browser. `env.stop()` closes only this test's context;
+ * call `stopSession()` once at the end of the run to tear the shared resources down.
+ *
+ * Isolation: fresh context = fresh identity, no shared cookies/storage. The shared relay's only
+ * cross-test global state is the spent-nonce set (random 16-byte nonces → collision-free) and the
+ * faucet (funds each test's own distinct account) — no account-state leakage between tests.
+ *
+ * @param {{noRelay?: boolean, noWeb?: boolean, rebuildWeb?: boolean}} [opts]
+ */
+export async function setup(opts = {}) {
+  const { mode, relayBaseURL, webBaseURL, browser } = await getSession(opts);
+
+  // Fresh incognito context per test → fresh localStorage → fresh identity (the isolation gate).
+  const driver = await Driver.create(browser);
+
+  const stop = async () => { try { await driver.close(); } catch {} };
+
+  try {
     if (!opts.noWeb) {
-      // about:blank first so localStorage.clear() has a same-origin context to operate on.
+      // about:blank first so localStorage.clear() has a same-origin context to operate on (a fresh
+      // context is already empty, but this is harmless and keeps the path identical for live mode).
       await driver.navigate('about:blank', '/');
       try { await driver.clearStorage(); } catch {}
       const navPath = `/?relay=${encodeURIComponent(relayBaseURL)}`;
       await driver.navigate(webBaseURL, navPath, { timeoutMs: mode === 'live' ? 20_000 : 8_000 });
       await driver.waitReady({ timeoutMs: mode === 'live' ? 20_000 : 10_000 });
     }
-
     return { mode, relayBaseURL, webBaseURL, driver, stop };
   } catch (e) {
-    // Best-effort cleanup on setup failure so a half-spawned relay/server doesn't leak.
-    for (const s of stops.slice().reverse()) { try { await s(); } catch {} }
+    try { await stop(); } catch {}
     throw e;
   }
 }

@@ -1,45 +1,25 @@
 // DpayNfc shim — the merchant/payer NFC tap transport (a Kotlin native module on device). Web has
-// no NFC radio; the app reads NFC state via DpayCore.nfcStatus (returns 'unknown' here, so the
-// NfcPill stays hidden and NfcTap never mounts in the wallet — exactly the right default for web).
+// no NFC radio; the app reads NFC state via DpayCore.nfcStatus (returns 'unknown' here by default,
+// so the NfcPill stays hidden and NfcTap never mounts — exactly the right web default). A test can
+// flip it to 'ready' via `window.__DPAY_TEST_NFC_STATUS` (see dpay-core.ts) so flow 11 can arm the
+// NFC tap view and drive its phases.
 //
-// The NFC flows themselves (Pay screen's NfcTap card, Receive screen's reader) are a LATER WAVE.
-// They are driven by a `window.__DPAY_TEST_NFC_SESSION` seam that emits `DpayNfcEvent`s through the
-// NativeEventEmitter. This file installs both halves of that seam:
-//   1. The DpayNfc native-module surface (armCard/disarmCard/startReader/stopReader/approveCard/
-//      declineCard/buildRequest/confirmReceipt) — all no-op Promises for now (NFC isn't reached on
-//      the onboard flow; later waves replace these with seam-driven fakes).
-//   2. A `__DPAY_TEST_NFC_SESSION(event)` hook + an EventEmitter the shims install globally, so a
-//      future NFC test can fire the same `DpayNfcEvent`s the real Kotlin module emits and the app's
-//      `emitter.addListener('DpayNfcEvent', ...)` receives them verbatim.
+// The NFC flows themselves (Pay screen's NfcTap card, Receive screen's reader) are driven by a
+// `window.__DPAY_TEST_NFC_SESSION(event)` seam that emits `DpayNfcEvent`s. CRITICAL wiring detail:
+// the app subscribes via `new NativeEventEmitter(DpayNfc).addListener('DpayNfcEvent', fn)`, and
+// react-native-web's NativeEventEmitter routes ALL events through a GLOBAL `RCTDeviceEventEmitter`
+// singleton (not the native module object). So the seam MUST dispatch via that same bus — emitting
+// through a NativeEventEmitter instance — or the app's listener never fires. (An earlier scaffold
+// used a private registry, which never reached the app; this wires the real bus.)
 //
 // Per the rules: the NFC radio hop is a physical-device gate; only the JS event plumbing is faked,
-// and the seam name (`__DPAY_TEST_NFC_SESSION`) matches the convention used by the parallel
-// ui/src/App.jsx so a single driver vocabulary covers both harnesses.
-
-// The NativeEventEmitter shim is a tiny pub/sub keyed by event name. Installed globally so a
-// DpayNfc native-module event dispatched via `dispatchDpayNfcEvent(...)` reaches every active
-// listener registered via `new NativeEventEmitter(DpayNfc).addListener('DpayNfcEvent', fn)`.
-type NfcListener = (event: unknown) => void;
-const nfcListeners = new Map<string, Set<NfcListener>>();
-
-function addNfcListener(event: string, fn: NfcListener): { remove: () => void } {
-  let set = nfcListeners.get(event);
-  if (!set) { set = new Set(); nfcListeners.set(event, set); }
-  set.add(fn);
-  return { remove: () => { set?.delete(fn); } };
-}
-
-function dispatchNfcEvent(event: string, payload: unknown): void {
-  const set = nfcListeners.get(event);
-  if (!set) return;
-  for (const fn of set) {
-    try { fn(payload); } catch { /* a bad listener must not break the others */ }
-  }
-}
+// and the seam name (`__DPAY_TEST_NFC_SESSION`) matches the convention so a single driver vocabulary
+// covers the harness.
+import { NativeEventEmitter } from 'react-native-web';
 
 // The DpayNfc "native module" — surface mirrors app/App.tsx's `DpayNfcApi` type. Methods that would
-// move real bytes over the radio are no-op resolves; later NFC-flow waves inject the corresponding
-// DpayNfcEvents through `dispatchNfcEvent('DpayNfcEvent', ...)` instead.
+// move real bytes over the radio are no-op resolves; the NFC-flow test injects the corresponding
+// DpayNfcEvents through `__DPAY_TEST_NFC_SESSION` instead (the real bus the app listens on).
 export const DpayNfc = {
   armCard: () => Promise.resolve(),
   disarmCard: () => Promise.resolve(),
@@ -55,17 +35,18 @@ export const DpayNfc = {
   removeListeners: (_count: number) => {},
 };
 
-// Install the NFC session seam + the global emitter. Idempotent — safe to call from shims.ts every
-// boot. The seam accepts either a single event object or an array (mirrors how the parallel
-// ui/src/App.jsx drives phases via __DPAY_TEST_NFC_SESSION).
+// One emitter bound to the DpayNfc module — emitting on it routes through RNW's global
+// RCTDeviceEventEmitter, which is the bus the app's `new NativeEventEmitter(DpayNfc)` listeners
+// are registered on. This is what makes a seam-dispatched event reach the real app.
+const nfcBus = new NativeEventEmitter(DpayNfc as any);
+
+// Install the NFC session seam. Idempotent — safe to call from shims.ts every boot. The seam accepts
+// either a single event object or an array, and emits each as a `DpayNfcEvent` on the real bus.
 export function installNfcSeam(globalScope: any) {
   globalScope.__DPAY_TEST_NFC_SESSION = (events: unknown) => {
     const list = Array.isArray(events) ? events : [events];
-    for (const e of list) dispatchNfcEvent('DpayNfcEvent', e);
+    for (const e of list) {
+      try { nfcBus.emit('DpayNfcEvent', e); } catch { /* a bad payload must not break the seam */ }
+    }
   };
-  // Exposed for future flows + tests; not used by the onboard flow.
-  globalScope.__DPAY_NFC_DISPATCH = dispatchNfcEvent;
-  globalScope.__DPAY_NFC_LISTENERS = nfcListeners;
 }
-
-export const __nfcEmitter = { addListener: addNfcListener };

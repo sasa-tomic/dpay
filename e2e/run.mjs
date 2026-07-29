@@ -8,6 +8,7 @@
 import { readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { stopSession } from './harness/lib.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TESTS_DIR = join(__dirname, 'tests');
@@ -48,6 +49,9 @@ async function main() {
       break; // fail fast — the first RED test surfaces a bug to fix, not bury
     }
   }
+
+  // Tear down the shared relay + web server + browser once the run is done (pass OR fail).
+  await stopSession();
 
   const elapsed = ((Date.now() - startedAt) / 1000).toFixed(2);
   if (failed) {
