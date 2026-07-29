@@ -20,6 +20,9 @@ type Result_1 = variant { Ok : PayReceipt; Err : text };
 type Result_2 = variant { Ok : principal; Err : text };
 type Result_3 = variant { Ok; Err : text };
 type Result_4 = variant { Ok : nat; Err : text };
+type Result_5 = variant { Ok : text; Err : text };
+type Result_6 = variant { Ok : DepositRefresh; Err : text };
+type Result_7 = variant { Ok : DepositInfo; Err : text };
 type TxnView = record {
   to : blob;
   from : blob;
@@ -27,6 +30,30 @@ type TxnView = record {
   nonce : blob;
   timestamp : nat64;
   amount : nat64;
+};
+// --- ck-minter deposit proxy (ckBTC model) ----------------------------------------------------
+// The facade proxies a chain-key minter; the mint lands on the currency's ICRC ledger at exactly the
+// account `pay`/`balance_of` use, so this surface changes nothing about settlement or balance. The
+// mirror types used to decode the real minter's replies stay internal to the canister (not exposed
+// here) — only the normalized surface shapes below are part of the public candid.
+type DepositInfo = record {
+  min_confirmations : nat32;
+  deposit_fee : nat64;
+  deposit_min_amount : opt nat64;
+};
+type MintedUtxo = record {
+  block_index : nat;
+  amount : nat64;
+};
+type PendingUtxo = record {
+  value : nat64;
+  confirmations : nat64;
+};
+type DepositRefresh = record {
+  minted : vec MintedUtxo;
+  minted_total : nat64;
+  pending : vec PendingUtxo;
+  required_confirmations : nat32;
 };
 service : (InitArg) -> {
   // `balance_of(blob, nat32) -> nat64` — now a **query** returning the display-only cache. The cache
@@ -39,6 +66,14 @@ service : (InitArg) -> {
   // the ledger transfer's block index (unlike `mint`, which returns the new balance): `burn` is
   // facade-internal with no relay consumer, so no contract pins its return to a balance.
   burn : (blob, nat32, nat64) -> (Result);
+  // `(blob pubkey, nat32 currency) -> Result<text, text>`. Proxies the minter's `get_btc_address` —
+  // the user's native deposit address for the currency. No auth: a deposit address is not secret
+  // (revealing it only lets someone send *to* the user), and minter methods are permissionless. Bad
+  // pubkey length is rejected up front.
+  deposit_address : (blob, nat32) -> (Result_5);
+  // `(nat32 currency) -> Result<DepositInfo, text>`. Combines the minter's `get_minter_info` and
+  // `get_deposit_fee` into the normalized deposit parameters the app renders as instructions.
+  deposit_info : (nat32) -> (Result_7);
   // `mint(blob, nat32, nat64) -> Result<nat64, text>` — fund a user on a MINTABLE (demo) currency by
   // transferring from the ledger's minting account (which this canister owns). Real ck currencies are
   // not mintable. Refreshes the display cache from the authoritative ledger post-settle. Gated to the
@@ -55,9 +90,19 @@ service : (InitArg) -> {
   // its own code to attach them to a management-canister call. This canister is NOT made a controller
   // of the new canister — it spends the cycles and is done — so the non-custodial posture is intact.
   provision_ledger_canister : (principal, nat) -> (Result_2);
+  // `(blob pubkey, nat32 currency) -> Result<DepositRefresh, text>`. Proxies the minter's
+  // `update_balance` — the value-creating call that mints confirmed UTXOs onto the currency's ledger
+  // at `Account{owner: canister_self(), subaccount: pubkey}`. No auth: idempotent and safe to call by
+  // anyone (a no-op when no confirmed UTXOs exist). `Ok` -> minted list + total; `NoNewUtxos` -> empty
+  // minted + pending; other minter errors surface as `Err`.
+  refresh_deposit : (blob, nat32) -> (Result_6);
   // Register or replace the ledger for a currency at runtime. Gated to the controller in production
   // (open only when `controller` is unset, i.e. the demo).
   register_ledger : (nat32, principal, bool) -> (Result_3);
+  // Register or replace the ck-minter principal for a currency at runtime. Same controller gating as
+  // `register_ledger`. A currency need not have a minter (only ck currencies do); absence means the
+  // facade exposes no deposit path for it.
+  register_minter : (nat32, principal) -> (Result_3);
   // Rotate the governance principal for `mint`/`burn`/`register_ledger`/`set_controller`. Governed by
   // the current controller: in open-demo mode (no controller set) any caller may set one — which is
   // how a fresh deployment is locked down; once a controller is set, only it can rotate. (This gates

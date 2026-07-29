@@ -21,7 +21,8 @@ pub mod agent_ledger;
 
 pub use app::{app, AppState};
 pub use ledger::{
-    Clock, FakeLedger, FixedClock, FlakyLedger, Ledger, LedgerError, Receipt, SystemClock, TxnRecord,
+    Clock, DepositInfo, DepositRefresh, FakeLedger, FixedClock, FlakyLedger, Ledger, LedgerError,
+    MintedUtxo, PendingUtxo, Receipt, SystemClock, TxnRecord,
 };
 
 #[cfg(feature = "agent")]

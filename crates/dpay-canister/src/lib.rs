@@ -50,7 +50,7 @@
 //! Money-critical logic (sig verify, validation) lives in `dpay-core` (shared with the relay, app,
 //! and tests); this file is state + candid glue + cross-canister settlement.
 
-use candid::{CandidType, Nat, Principal};
+use candid::{CandidType, Nat, Principal, Reserved};
 use ic_cdk::api::{canister_self, msg_caller, time};
 use ic_cdk::call::Call;
 use ic_cdk::management_canister::{
@@ -173,6 +173,22 @@ impl Storable for ControllerStorable {
         }
     }
     const BOUND: Bound = Bound::Bounded { max_size: 30, is_fixed_size: false };
+}
+
+/// A bare principal value: up to 29 principal bytes. Value type of `MINTERS` — a SEPARATE map from
+/// `LEDGERS`, so the existing `LedgerEntry` encoding (MemoryId 5) is untouched (no upgrade-layout
+/// churn). Mirrors `ControllerStorable`'s principal encoding but without a present-flag byte: the
+/// minter map's absence is expressed by map membership, not an in-row flag.
+#[derive(Clone, Copy, Debug)]
+struct PrincipalStorable(Principal);
+impl Storable for PrincipalStorable {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        Cow::Owned(self.0.as_slice().to_vec())
+    }
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        PrincipalStorable(Principal::from_slice(&bytes))
+    }
+    const BOUND: Bound = Bound::Bounded { max_size: 29, is_fixed_size: false };
 }
 
 /// Returns `Ok(())` if the caller may perform governance admin ops (mint/burn/register_ledger/
@@ -404,6 +420,11 @@ thread_local! {
     /// state). Backs the `balance_of` query; refreshed after every settle.
     static BAL_CACHE: RefCell<StableBTreeMap<CacheKey, CachedBalance, Memory>> =
         RefCell::new(StableBTreeMap::init(MEMORY.with(|m| m.borrow().get(MemoryId::new(7)))));
+
+    /// currency -> its ck-minter principal. MemoryId 8 (new facade state). A currency has a minter
+    /// only if it is a ck currency (ckBTC/ckETH/...); absence => the facade exposes no deposit path.
+    static MINTERS: RefCell<StableBTreeMap<Currency, PrincipalStorable, Memory>> =
+        RefCell::new(StableBTreeMap::init(MEMORY.with(|m| m.borrow().get(MemoryId::new(8)))));
 }
 
 /// Configuration for one currency, supplied at init (and via `register_ledger`).
@@ -444,6 +465,87 @@ struct TxnView {
     timestamp: u64,
 }
 
+// --- ck-minter deposit proxy (ckBTC model) ----------------------------------------------------
+// The facade proxies a chain-key minter (ckBTC today; ckETH shares the seam). The minter mints onto
+// the currency's ICRC ledger at `Account{owner: canister_self(), subaccount: pubkey}` — exactly the
+// account `pay`/`icrc1_balance_of`/`transactions_of` already operate on — so this surface is purely
+// informational + orchestration: it changes NOTHING about settlement, balance, or history.
+
+/// Normalized deposit parameters for a currency (minter `get_minter_info` + `get_deposit_fee`), which
+/// the app renders as the deposit instructions.
+#[derive(CandidType, Deserialize, Clone, Debug)]
+struct DepositInfo {
+    min_confirmations: u32,
+    deposit_fee: u64,                 // sats; from `get_deposit_fee`
+    deposit_min_amount: Option<u64>,  // from `get_minter_info`
+}
+
+/// One UTXO the minter minted in THIS `update_balance` call. `block_index` is the ICRC ledger block
+/// of the mint; `amount` is in sats.
+#[derive(CandidType, Deserialize, Clone, Debug)]
+struct MintedUtxo {
+    block_index: Nat,
+    amount: u64,
+}
+
+/// A UTXO the minter has seen but is still awaiting confirmations on (from `NoNewUtxos`).
+#[derive(CandidType, Deserialize, Clone, Debug)]
+struct PendingUtxo {
+    value: u64,
+    confirmations: u64,
+}
+
+/// Normalized result of a `refresh_deposit` (minter `update_balance`): what minted this call, what is
+/// still pending, and the confirmation threshold still required.
+#[derive(CandidType, Deserialize, Clone, Debug)]
+struct DepositRefresh {
+    minted: Vec<MintedUtxo>,
+    minted_total: u64,
+    pending: Vec<PendingUtxo>,
+    required_confirmations: u32,
+}
+
+// Mirror types for decoding the REAL ckBTC minter's candid replies. Internal only —
+// `export_candid!()` emits just types referenced by `#[update]`/`#[query]` signatures, so these stay
+// out of the public surface (like `LedgerEntry`/`CacheKey` already do). `candid::Reserved` absorbs
+// sub-records we don't surface (`utxo`, suspended lists); subtype decode tolerates any extra fields
+// the real minter may add, so a mainnet field-name divergence is a local edit here, not a break.
+#[derive(CandidType, Deserialize)]
+enum UtxoStatus {
+    Minted { block_index: Nat, minted_amount: Nat, utxo: Reserved },
+    Checked(Reserved),
+    ValueTooSmall(Reserved),
+    Tainted(Reserved),
+}
+
+#[derive(CandidType, Deserialize)]
+enum UpdateBalanceError {
+    NoNewUtxos {
+        current_confirmations: Option<u64>,
+        required_confirmations: u32,
+        pending_utxos: Option<Vec<PendingUtxoMirror>>,
+        suspended_utxos: Option<Reserved>,
+    },
+    AlreadyProcessing,
+    TemporarilyUnavailable(String),
+    GenericError { error_code: Option<Nat>, error_message: String },
+}
+
+#[derive(CandidType, Deserialize)]
+struct PendingUtxoMirror {
+    outpoint: Reserved,
+    value: Nat,
+    confirmations: Option<u64>,
+}
+
+#[derive(CandidType, Deserialize)]
+struct MinterInfo {
+    min_confirmations: u32,
+    retrieve_btc_min_amount: u64,
+    kyt_fee: u64,
+    deposit_btc_min_amount: Option<u64>,
+}
+
 #[init]
 fn init(arg: InitArg) {
     CAP.with(|c| c.borrow_mut().set(arg.per_tx_cap).expect("set cap"));
@@ -462,6 +564,13 @@ fn ledger_for(currency: Currency) -> Result<(Principal, bool), String> {
     LEDGERS.with(|m| m.borrow().get(&currency))
         .map(|e| (e.principal, e.mintable))
         .ok_or_else(|| format!("unknown currency {currency}"))
+}
+
+/// Resolve a currency to its ck-minter principal (only ck currencies have one). Absent -> Err.
+fn minter_for(currency: Currency) -> Result<Principal, String> {
+    MINTERS
+        .with(|m| m.borrow().get(&currency).map(|s| s.0))
+        .ok_or_else(|| format!("currency {currency} has no ck minter"))
 }
 
 /// The ICRC account this canister controls for a user pubkey: the canister is the `owner`, the
@@ -521,6 +630,57 @@ async fn ledger_transfer(ledger: Principal, arg: TransferArg) -> Result<Nat, Tra
             message: format!("icrc1_transfer decode: {e:?}"),
         }
     })?
+}
+
+// --- ck-minter cross-canister proxies ---------------------------------------------------------
+// Mirror the `ledger_*` helpers: `Call::bounded_wait(minter, "<method>").with_args(&arg).await` then
+// `response.candid::<T>()`. Minter methods are permissionless (GeneralAvailability on mainnet), so
+// these carry no caller gate; the facade passes `owner = Some(canister_self())`,
+// `subaccount = Some(pubkey)` — so the mint lands on the currency's ledger at exactly the account
+// `pay`/`balance_of` use. No new dependency surfaces: the facade stays non-custodial (it never holds
+// the deposited BTC; the minter does the chain-key work and credits the ledger directly).
+
+/// Minter `get_btc_address(opt principal, opt blob) -> text` — the user's native deposit address.
+async fn minter_call_btc_address(minter: Principal, sub: Vec<u8>) -> Result<String, String> {
+    let arg = (Some(canister_self()), Some(sub));
+    let response = Call::bounded_wait(minter, "get_btc_address")
+        .with_args(&arg)
+        .await
+        .map_err(|e| format!("get_btc_address rejected: {e:?}"))?;
+    response.candid::<String>().map_err(|e| format!("get_btc_address decode: {e:?}"))
+}
+
+/// Minter `update_balance` — the value-creating call that mints confirmed UTXOs. Reply is
+/// `Result<Vec<UtxoStatus>, UpdateBalanceError>`: `Ok` carries the statuses of UTXOs processed this
+/// call; `Err(NoNewUtxos{..})` is the normal "nothing new, here is what is still pending" response.
+async fn minter_call_update_balance(
+    minter: Principal,
+    sub: Vec<u8>,
+) -> Result<Result<Vec<UtxoStatus>, UpdateBalanceError>, String> {
+    let arg = (Some(canister_self()), Some(sub));
+    let response = Call::bounded_wait(minter, "update_balance")
+        .with_args(&arg)
+        .await
+        .map_err(|e| format!("update_balance rejected: {e:?}"))?;
+    response
+        .candid::<Result<Vec<UtxoStatus>, UpdateBalanceError>>()
+        .map_err(|e| format!("update_balance decode: {e:?}"))
+}
+
+/// Minter `get_minter_info() -> MinterInfo`.
+async fn minter_call_minter_info(minter: Principal) -> Result<MinterInfo, String> {
+    let response = Call::bounded_wait(minter, "get_minter_info")
+        .await
+        .map_err(|e| format!("get_minter_info rejected: {e:?}"))?;
+    response.candid::<MinterInfo>().map_err(|e| format!("get_minter_info decode: {e:?}"))
+}
+
+/// Minter `get_deposit_fee() -> nat64` — the per-mint fee in sats.
+async fn minter_call_deposit_fee(minter: Principal) -> Result<u64, String> {
+    let response = Call::bounded_wait(minter, "get_deposit_fee")
+        .await
+        .map_err(|e| format!("get_deposit_fee rejected: {e:?}"))?;
+    response.candid::<u64>().map_err(|e| format!("get_deposit_fee decode: {e:?}"))
 }
 
 /// `created_at_time` for a `pay` transfer, quantized to a coarse bucket. The ICRC ledger dedups
@@ -790,6 +950,102 @@ fn register_ledger(currency: Currency, principal: Principal, mintable: bool) -> 
         m.borrow_mut().insert(currency, LedgerEntry { principal, mintable });
     });
     Ok(())
+}
+
+/// Register or replace the ck-minter principal for a currency at runtime. Gated to the controller in
+/// production (open only when `controller` is unset, i.e. the demo). A currency need not have a minter
+/// (only ck currencies do); absence means the facade exposes no deposit path for it.
+#[update]
+fn register_minter(currency: Currency, minter: Principal) -> Result<(), String> {
+    require_admin()?;
+    MINTERS.with(|m| {
+        m.borrow_mut().insert(currency, PrincipalStorable(minter));
+    });
+    Ok(())
+}
+
+/// `(blob pubkey, nat32 currency) -> Result<text, text>`. Proxies the minter's `get_btc_address` —
+/// the user's native deposit address for the currency. No auth: a deposit address is not secret
+/// (revealing it only lets someone send *to* the user), and minter methods are permissionless. Bad
+/// pubkey length is rejected up front via `to_pubkey`.
+#[update]
+async fn deposit_address(pubkey: Vec<u8>, currency: Currency) -> Result<String, String> {
+    let _pk = to_pubkey(&pubkey)?; // validate length; the minter takes the subaccount as a blob
+    let minter = minter_for(currency)?;
+    minter_call_btc_address(minter, pubkey).await
+}
+
+/// `(blob pubkey, nat32 currency) -> Result<DepositRefresh, text>`. Proxies the minter's
+/// `update_balance` — the value-creating call that mints confirmed UTXOs onto the currency's ledger
+/// at `Account{owner: canister_self(), subaccount: pubkey}`. No auth: idempotent and safe to call by
+/// anyone (a no-op when no confirmed UTXOs exist). `Ok(statuses)` -> minted list + total, empty
+/// pending; `Err(NoNewUtxos{..})` -> empty minted + pending mapped from the error; the remaining
+/// minter errors surface as `Err(String)`.
+#[update]
+async fn refresh_deposit(pubkey: Vec<u8>, currency: Currency) -> Result<DepositRefresh, String> {
+    let _pk = to_pubkey(&pubkey)?;
+    let minter = minter_for(currency)?;
+    match minter_call_update_balance(minter, pubkey).await? {
+        Ok(statuses) => {
+            let mut minted = Vec::with_capacity(statuses.len());
+            let mut minted_total: u64 = 0;
+            for st in statuses {
+                if let UtxoStatus::Minted { block_index, minted_amount, .. } = st {
+                    let amount = nat_to_u64(&minted_amount)?;
+                    minted_total = minted_total.checked_add(amount).ok_or("minted_total overflow")?;
+                    minted.push(MintedUtxo { block_index, amount });
+                }
+                // Checked / ValueTooSmall / Tainted carry no mint this call; skip silently — the
+                // UTXO is reported again by a subsequent `update_balance` (or never, if tainted).
+            }
+            Ok(DepositRefresh {
+                minted,
+                minted_total,
+                pending: Vec::new(),
+                required_confirmations: 0,
+            })
+        }
+        Err(UpdateBalanceError::NoNewUtxos { required_confirmations, pending_utxos, .. }) => {
+            let pending = pending_utxos
+                .unwrap_or_default()
+                .into_iter()
+                .map(|p| -> Result<PendingUtxo, String> {
+                    let value = nat_to_u64(&p.value)?;
+                    Ok(PendingUtxo { value, confirmations: p.confirmations.unwrap_or(0) })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(DepositRefresh {
+                minted: Vec::new(),
+                minted_total: 0,
+                pending,
+                required_confirmations,
+            })
+        }
+        Err(UpdateBalanceError::AlreadyProcessing) => {
+            Err("update_balance already processing".to_string())
+        }
+        Err(UpdateBalanceError::TemporarilyUnavailable(m)) => {
+            Err(format!("update_balance temporarily unavailable: {m}"))
+        }
+        Err(UpdateBalanceError::GenericError { error_code, error_message }) => Err(format!(
+            "update_balance generic error{}: {error_message}",
+            error_code.map(|c| format!(" (code {c})")).unwrap_or_default()
+        )),
+    }
+}
+
+/// `(nat32 currency) -> Result<DepositInfo, text>`. Combines the minter's `get_minter_info` and
+/// `get_deposit_fee` into the normalized deposit parameters the app renders as instructions.
+#[update]
+async fn deposit_info(currency: Currency) -> Result<DepositInfo, String> {
+    let minter = minter_for(currency)?;
+    let info = minter_call_minter_info(minter).await?;
+    let deposit_fee = minter_call_deposit_fee(minter).await?;
+    Ok(DepositInfo {
+        min_confirmations: info.min_confirmations,
+        deposit_fee,
+        deposit_min_amount: info.deposit_btc_min_amount,
+    })
 }
 
 /// Rotate the governance principal for `mint`/`burn`/`register_ledger`/`set_controller`. Governed by

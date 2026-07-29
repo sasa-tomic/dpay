@@ -9,6 +9,7 @@ export RUSTUP_HOME := root / ".dev/rustup"
 export PATH := (root / ".dev/cargo/bin") + ":" + (root / ".dev/node/bin") + ":" + env_var('PATH')
 export POCKET_IC_BIN := root / "third_party/bin/pocket-ic"
 export DPAY_CANISTER_WASM := root / "target/wasm32-unknown-unknown/release/dpay_canister.wasm"
+export DPAY_MOCK_MINTER_WASM := root / "target/wasm32-unknown-unknown/release/dpay_mock_minter.wasm"
 
 # list recipes
 default:
@@ -22,10 +23,14 @@ test-core:
 build-canister:
     cargo build -p dpay-canister --target wasm32-unknown-unknown --release
 
+# build the test-only mock ckBTC minter to wasm (release) — never shipped to mainnet
+build-mock-minter:
+    cargo build -p dpay-mock-minter --target wasm32-unknown-unknown --release
+
 # canister settlement tests on PocketIC (offline, deterministic). The facade settles on the REAL
 # DFINITY ic-icrc1-ledger (cached in third_party/ic-icrc1-ledger/); multi-ledger proof incl. the
 # double-spend concurrency regression. Fully offline.
-test-canister: build-canister
+test-canister: build-canister build-mock-minter
     cargo nextest run -p dpay-canister-tests
 
 # MAINNET deploy of the facade canister (ssqti) into the LIVE ic-icrc1-ledger on the IC `ic` network.

@@ -15,13 +15,15 @@
 //! `(pubkey, currency) -> balance` shape.
 
 use async_trait::async_trait;
-use candid::{decode_one, encode_args, encode_one, CandidType, Principal};
+use candid::{decode_one, encode_args, encode_one, CandidType, Nat, Principal};
 use ic_agent::Agent;
 use serde::Deserialize;
 
 use dpay_core::{Currency, PUBKEY_LEN};
 
-use crate::ledger::{Ledger, LedgerError, Receipt, TxnRecord};
+use crate::ledger::{
+    DepositInfo, DepositRefresh, Ledger, LedgerError, MintedUtxo, PendingUtxo, Receipt, TxnRecord,
+};
 
 /// Candid mirror of the canister's `PayReceipt` (byte fields decode as `blob`s → `Vec<u8>`).
 #[derive(CandidType, Deserialize, Debug)]
@@ -42,6 +44,38 @@ struct TxnView {
     nonce: Vec<u8>,
     currency: u32,
     timestamp: u64,
+}
+
+// --- deposit-surface mirrors (§3.2 of the deposit-integration plan) --------------------------
+// The canister's `DepositRefresh`/`DepositInfo` carry the minter's `Nat` block indices, which the
+// candid wire format decodes as `candid::Nat`. These mirrors decode the wire faithfully, then the
+// trait impls normalize `Nat` → `String` (a `Nat`/`u128` doesn't round-trip cleanly in JSON).
+
+#[derive(CandidType, Deserialize, Debug)]
+struct MintedUtxoMirror {
+    block_index: Nat,
+    amount: u64,
+}
+
+#[derive(CandidType, Deserialize, Debug)]
+struct PendingUtxoMirror {
+    value: u64,
+    confirmations: u64,
+}
+
+#[derive(CandidType, Deserialize, Debug)]
+struct DepositRefreshMirror {
+    minted: Vec<MintedUtxoMirror>,
+    minted_total: u64,
+    pending: Vec<PendingUtxoMirror>,
+    required_confirmations: u32,
+}
+
+#[derive(CandidType, Deserialize, Debug)]
+struct DepositInfoMirror {
+    min_confirmations: u32,
+    deposit_fee: u64,
+    deposit_min_amount: Option<u64>,
 }
 
 /// A [`Ledger`] backed by a real IC replica. Owns an [`Agent`] pointed at the replica/gateway URL
@@ -217,5 +251,90 @@ impl Ledger for AgentLedger {
         // Liveness = the replica answers the management canister's read-only `status`. Cheap, and
         // proves the gateway + replica are actually reachable (not just that a socket is open).
         self.agent.status().await.is_ok()
+    }
+
+    async fn deposit_address(
+        &self,
+        pubkey: [u8; PUBKEY_LEN],
+        currency: Currency,
+    ) -> Result<String, LedgerError> {
+        // facade `deposit_address(blob, nat32) -> Result<text, text>` (update). Per the deposit
+        // plan's §0 error rule, *any* facade `Err(String)` maps to `Transient` — the deposit
+        // endpoints have no permanent-policy failure (no sig, no cap, no replay). The only "config"
+        // failure ("no minter for currency") is a deploy-time invariant that also surfaces as 503.
+        let arg = encode_args((pubkey.to_vec(), currency))
+            .map_err(|e| LedgerError::Transient(format!("encode deposit_address arg: {e}")))?;
+        let reply = self
+            .agent
+            .update(&self.canister_id, "deposit_address")
+            .with_arg(arg)
+            .call_and_wait()
+            .await
+            .map_err(|e| LedgerError::Transient(format!("deposit_address update: {e}")))?;
+        let result: Result<String, String> = decode_one(&reply)
+            .map_err(|e| LedgerError::Transient(format!("decode deposit_address reply: {e}")))?;
+        result.map_err(LedgerError::Transient)
+    }
+
+    async fn deposit_status(
+        &self,
+        pubkey: [u8; PUBKEY_LEN],
+        currency: Currency,
+    ) -> Result<DepositRefresh, LedgerError> {
+        // facade `refresh_deposit(blob, nat32) -> Result<DepositRefresh, text>` (update) → proxies
+        // the ck minter's `update_balance`. Decode the candid `Nat` block_index into a `String`
+        // (JSON-safe). Any `Err(String)` → `Transient` (§0).
+        let arg = encode_args((pubkey.to_vec(), currency))
+            .map_err(|e| LedgerError::Transient(format!("encode refresh_deposit arg: {e}")))?;
+        let reply = self
+            .agent
+            .update(&self.canister_id, "refresh_deposit")
+            .with_arg(arg)
+            .call_and_wait()
+            .await
+            .map_err(|e| LedgerError::Transient(format!("refresh_deposit update: {e}")))?;
+        let result: Result<DepositRefreshMirror, String> = decode_one(&reply)
+            .map_err(|e| LedgerError::Transient(format!("decode refresh_deposit reply: {e}")))?;
+        let m = result.map_err(LedgerError::Transient)?;
+        Ok(DepositRefresh {
+            minted: m
+                .minted
+                .into_iter()
+                .map(|u| MintedUtxo {
+                    block_index: u.block_index.to_string(),
+                    amount: u.amount,
+                })
+                .collect(),
+            minted_total: m.minted_total,
+            pending: m
+                .pending
+                .into_iter()
+                .map(|p| PendingUtxo { value: p.value, confirmations: p.confirmations })
+                .collect(),
+            required_confirmations: m.required_confirmations,
+        })
+    }
+
+    async fn deposit_info(&self, currency: Currency) -> Result<DepositInfo, LedgerError> {
+        // facade `deposit_info(nat32) -> Result<DepositInfo, text>` (update) → proxies the minter's
+        // `get_minter_info` + `get_deposit_fee`. All mirror fields are primitives, so this is a
+        // straight copy. Any `Err(String)` → `Transient` (§0).
+        let arg = encode_args((currency,))
+            .map_err(|e| LedgerError::Transient(format!("encode deposit_info arg: {e}")))?;
+        let reply = self
+            .agent
+            .update(&self.canister_id, "deposit_info")
+            .with_arg(arg)
+            .call_and_wait()
+            .await
+            .map_err(|e| LedgerError::Transient(format!("deposit_info update: {e}")))?;
+        let result: Result<DepositInfoMirror, String> = decode_one(&reply)
+            .map_err(|e| LedgerError::Transient(format!("decode deposit_info reply: {e}")))?;
+        let m = result.map_err(LedgerError::Transient)?;
+        Ok(DepositInfo {
+            min_confirmations: m.min_confirmations,
+            deposit_fee: m.deposit_fee,
+            deposit_min_amount: m.deposit_min_amount,
+        })
     }
 }

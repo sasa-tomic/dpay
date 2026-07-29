@@ -1,0 +1,270 @@
+//! Test-only mock of the ckBTC minter — for offline PocketIC deposit proofs.
+//!
+//! This is a **build/test artifact, never shipped to mainnet** (the real ckBTC minter is used there).
+//! It implements the ckBTC minter's deposit surface so the canister-tests can prove the full
+//! deposit → mint → balance flow end-to-end on a real `ic-icrc1-ledger`, with no network.
+//!
+//! The mock OWNS the ledger's minting account: the test installs the ICRC ledger with
+//! `minting_account.owner = mock_minter`, so the mock mints by calling `icrc1_transfer` with
+//! `from_subaccount: None` (the minting account's default subaccount). The mint lands at
+//! `Account{owner, subaccount}` — exactly where the facade's `pay`/`icrc1_balance_of` already
+//! operate, so the proof needs no facade change.
+//!
+//! The candid field LABELS here match the real ckBTC minter; the facade decodes the replies with
+//! `candid::Reserved` for sub-records it does not surface, so variant/field NAMES are load-bearing.
+//!
+//! Methods:
+//! - `get_btc_address` → deterministic fake `bc1qmock…` text derived from `hash(owner || subaccount)`.
+//! - `register_deposit` → test-only hook that seeds a pending deposit.
+//! - `update_balance` → drains the pending deposit: mints via `icrc1_transfer`, returns
+//!   `[Minted{block_index, minted_amount}]`, clears the entry. No pending → `Err(NoNewUtxos{…})`.
+//! - `get_minter_info` → `MinterInfo{min_confirmations:1, deposit_btc_min_amount:Some(0), …}`.
+//! - `get_deposit_fee` → `0`. `get_known_utxos` → `[]`.
+
+use candid::{CandidType, Nat, Principal};
+use ic_cdk::api::{msg_caller, time};
+use ic_cdk::call::Call;
+use ic_cdk::{init, query, update};
+use icrc_ledger_types::icrc1::account::Account;
+use icrc_ledger_types::icrc1::transfer::{TransferArg, TransferError};
+use serde::Deserialize;
+use std::cell::RefCell;
+use std::collections::BTreeMap;
+
+// --- candid types (field labels mirror the real ckBTC minter; the facade decodes these) --------
+// `utxo`/`suspended_utxos` are concrete here (we are the PRODUCER); the facade decodes them as
+// `candid::Reserved`, so their internal fields are never validated across the wire.
+
+#[derive(CandidType, Deserialize)]
+struct Utxo {
+    outpoint: OutPoint,
+    value: Nat,
+    confirmations: Option<Nat>,
+}
+#[derive(CandidType, Deserialize)]
+struct OutPoint {
+    txid: Vec<u8>,
+    vout: u32,
+}
+
+#[derive(CandidType, Deserialize)]
+enum UtxoStatus {
+    Minted { block_index: Nat, minted_amount: Nat, utxo: Utxo },
+    Checked(Utxo),
+    ValueTooSmall(Utxo),
+    Tainted(Utxo),
+}
+
+#[derive(CandidType, Deserialize)]
+struct PendingUtxo {
+    outpoint: OutPoint,
+    value: Nat,
+    confirmations: Option<Nat>,
+}
+
+#[derive(CandidType, Deserialize)]
+enum UpdateBalanceError {
+    NoNewUtxos {
+        current_confirmations: Option<u64>,
+        required_confirmations: u32,
+        pending_utxos: Option<Vec<PendingUtxo>>,
+        suspended_utxos: Option<Vec<PendingUtxo>>,
+    },
+    AlreadyProcessing,
+    TemporarilyUnavailable(String),
+    GenericError { error_code: Option<Nat>, error_message: String },
+}
+
+#[derive(CandidType, Deserialize)]
+struct MinterInfo {
+    min_confirmations: u32,
+    retrieve_btc_min_amount: u64,
+    kyt_fee: u64,
+    deposit_btc_min_amount: Option<u64>,
+}
+
+// --- init ---------------------------------------------------------------------------------------
+
+#[derive(CandidType, Deserialize)]
+struct InitArg {
+    ledger: Principal,
+}
+
+thread_local! {
+    /// The ICRC ledger this mock mints onto. The test installs the ledger with
+    /// `minting_account.owner = mock_minter`, so the mock is authorized to mint from that account's
+    /// default subaccount. Sentinel `management_canister` until overwritten by `init`.
+    static LEDGER: RefCell<Principal> = RefCell::new(Principal::management_canister());
+
+    /// Pending deposits keyed by `(owner, subaccount)`. `register_deposit` seeds an entry;
+    /// `update_balance` drains it (one mint) and removes it. `subaccount` is the 32-byte pubkey blob
+    /// the facade passes.
+    static PENDING: RefCell<BTreeMap<(Principal, Vec<u8>), u64>> = RefCell::new(BTreeMap::new());
+}
+
+#[init]
+fn init(arg: InitArg) {
+    LEDGER.with(|l| *l.borrow_mut() = arg.ledger);
+}
+
+/// Minter `get_btc_address(opt principal, opt blob) -> text`. Returns a deterministic fake address
+/// derived from `owner || subaccount` — clearly fake (`bc1qmock` prefix) but stable and distinct per
+/// distinct `(owner, subaccount)`. `owner` defaults to the caller; the facade passes `Some(facade)`.
+#[update]
+fn get_btc_address(owner: Option<Principal>, subaccount: Option<Vec<u8>>) -> String {
+    let owner = owner.unwrap_or_else(msg_caller);
+    let sub = subaccount.unwrap_or_default();
+    derive_btc_address(owner, &sub)
+}
+
+/// Minter `update_balance` — the value-creating call. For the pending deposit keyed by
+/// `(owner, subaccount)`, mints `amount` onto the ledger at `Account{owner, subaccount}` via
+/// `icrc1_transfer` from the minting account, returns `[Minted{…}]`, and clears the entry. No
+/// pending deposit → `Err(NoNewUtxos{…})`. `owner` defaults to the caller; the facade passes
+/// `Some(facade)`.
+#[update]
+async fn update_balance(
+    owner: Option<Principal>,
+    subaccount: Option<Vec<u8>>,
+) -> Result<Vec<UtxoStatus>, UpdateBalanceError> {
+    let owner = owner.unwrap_or_else(msg_caller);
+    let sub = subaccount.unwrap_or_default();
+    // Read + copy out synchronously so no RefCell borrow is held across the `await` below.
+    let amount = match PENDING.with(|p| p.borrow().get(&(owner, sub.clone())).copied()) {
+        None => {
+            return Err(UpdateBalanceError::NoNewUtxos {
+                current_confirmations: Some(0),
+                required_confirmations: 1,
+                pending_utxos: None,
+                suspended_utxos: None,
+            });
+        }
+        Some(a) => a,
+    };
+
+    let ledger = LEDGER.with(|l| *l.borrow());
+    // An ICRC subaccount is exactly 32 bytes; the facade always passes the 32-byte pubkey. The
+    // minter's candid surface is `(opt blob)`, so convert here rather than at the signature.
+    let sub_arr: [u8; 32] = sub.as_slice().try_into().map_err(|_| UpdateBalanceError::GenericError {
+        error_code: Some(Nat::from(400u64)),
+        error_message: "subaccount is not a valid 32-byte ICRC subaccount".to_string(),
+    })?;
+    let arg = TransferArg {
+        from_subaccount: None, // the mock owns the ledger's minting account (default subaccount)
+        to: Account { owner, subaccount: Some(sub_arr) },
+        amount: Nat::from(amount),
+        fee: None, // mints carry no fee
+        created_at_time: Some(time()),
+        memo: None,
+    };
+    let response = match Call::bounded_wait(ledger, "icrc1_transfer").with_arg(arg).await {
+        Ok(r) => r,
+        Err(e) => {
+            return Err(UpdateBalanceError::GenericError {
+                error_code: Some(Nat::from(503u64)),
+                error_message: format!("icrc1_transfer rejected: {e:?}"),
+            });
+        }
+    };
+    match response.candid::<Result<Nat, TransferError>>() {
+        Ok(Ok(block_index)) => {
+            // Deposit settled: drop the pending entry so a second `update_balance` is a no-op.
+            PENDING.with(|p| {
+                p.borrow_mut().remove(&(owner, sub.clone()));
+            });
+            let utxo = Utxo {
+                outpoint: OutPoint { txid: vec![0u8; 32], vout: 0 },
+                value: Nat::from(amount),
+                confirmations: Some(Nat::from(1u64)),
+            };
+            Ok(vec![UtxoStatus::Minted {
+                block_index,
+                minted_amount: Nat::from(amount),
+                utxo,
+            }])
+        }
+        Ok(Err(te)) => Err(UpdateBalanceError::GenericError {
+            error_code: Some(Nat::from(502u64)),
+            error_message: format!("icrc1_transfer error: {te:?}"),
+        }),
+        Err(e) => Err(UpdateBalanceError::GenericError {
+            error_code: Some(Nat::from(502u64)),
+            error_message: format!("icrc1_transfer decode: {e:?}"),
+        }),
+    }
+}
+
+/// Test-only hook: seed a pending deposit for `(owner, subaccount)` so the next `update_balance`
+/// mints `amount` onto the ledger.
+#[update]
+fn register_deposit(owner: Principal, subaccount: Vec<u8>, amount: u64) {
+    PENDING.with(|p| {
+        p.borrow_mut().insert((owner, subaccount), amount);
+    });
+}
+
+/// Minter `get_minter_info() -> MinterInfo`. Minimums that make the deposit flow trivially
+/// satisfiable offline: one confirmation, zero fee, zero minimum.
+#[query]
+fn get_minter_info() -> MinterInfo {
+    MinterInfo {
+        min_confirmations: 1,
+        retrieve_btc_min_amount: 0,
+        kyt_fee: 0,
+        deposit_btc_min_amount: Some(0),
+    }
+}
+
+/// Minter `get_deposit_fee() -> nat64`. Zero — the mock charges no mint fee.
+#[query]
+fn get_deposit_fee() -> u64 {
+    0
+}
+
+/// Minter `get_known_utxos(opt principal, opt blob) -> vec Utxo`. The mock tracks no UTXO history,
+/// so this is always empty.
+#[query]
+fn get_known_utxos(_owner: Option<Principal>, _subaccount: Option<Vec<u8>>) -> Vec<Utxo> {
+    Vec::new()
+}
+
+/// Deterministic fake Bitcoin deposit address derived from `owner || subaccount`. Clearly fake
+/// (`bc1qmock` prefix) but stable and distinct per distinct `(owner, subaccount)` — everything the
+/// deposit flow needs to prove offline. Uses std's fixed-key SipHash-1-3 (no external hashing dep);
+/// two passes yield 128 bits of material, of which the first 10 bytes (20 hex chars) form the body.
+fn derive_btc_address(owner: Principal, subaccount: &[u8]) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut material = Vec::with_capacity(owner.as_slice().len() + subaccount.len());
+    material.extend_from_slice(owner.as_slice());
+    material.extend_from_slice(subaccount);
+
+    let mut h1 = DefaultHasher::new();
+    material.hash(&mut h1);
+    let d1 = h1.finish();
+
+    let mut h2 = DefaultHasher::new();
+    d1.hash(&mut h2);
+    material.hash(&mut h2);
+    let d2 = h2.finish();
+
+    let mut bytes = [0u8; 16];
+    bytes[..8].copy_from_slice(&d1.to_be_bytes());
+    bytes[8..].copy_from_slice(&d2.to_be_bytes());
+    format!("bc1qmock{}", to_hex(&bytes[..10]))
+}
+
+/// Lowercase hex of a byte slice, without an external dependency (the workspace does not depend on
+/// the `hex` crate at the member level).
+fn to_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for &b in bytes {
+        s.push(HEX[(b >> 4) as usize] as char);
+        s.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    s
+}
+
+ic_cdk::export_candid!();

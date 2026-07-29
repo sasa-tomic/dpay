@@ -17,8 +17,13 @@ use http_body_util::BodyExt;
 use serde_json::Value;
 use tower::ServiceExt; // oneshot
 
-use dpay_core::{Authorization, SignedAuthorization, DEMO_USD};
-use dpay_relay::{app, AppState, FakeLedger, FixedClock, FlakyLedger};
+use async_trait::async_trait;
+
+use dpay_core::{Authorization, Currency, SignedAuthorization, DEMO_USD};
+use dpay_relay::{
+    app, AppState, DepositInfo, DepositRefresh, FakeLedger, FixedClock, FlakyLedger, Ledger,
+    LedgerError, Receipt, TxnRecord,
+};
 use ed25519_dalek::SigningKey;
 
 // A fixed "now" and an expiry comfortably ahead of it, so valid auths don't expire.
@@ -587,4 +592,191 @@ async fn transactions_endpoint_returns_history_newest_first() {
     // A bad pubkey (not 32 bytes hex) is a clean 400, not a 500.
     let (bad_status, _bad_body) = call(&state, get_req("/api/v1/transactions/deadbeef")).await;
     assert_eq!(bad_status, StatusCode::BAD_REQUEST);
+}
+
+// --- deposit surface (ckBTC-style top-up) ----------------------------------
+//
+// Covers the three new ledger methods + REST routes (deposit-integration plan §3).
+// The deposit endpoints map *any* `LedgerError` → 503 (no 422 — deposit plan §0).
+
+/// `deposit_address` is deterministic (same pubkey → same address, every call) and distinct per
+/// pubkey. The offline FakeLedger derives a recognizable `bc1qdpay` + first-8-pubkey-bytes address.
+#[tokio::test]
+async fn fake_deposit_address_is_deterministic_and_distinct_per_pubkey() {
+    let a = pubkey(&keypair());
+    let b = pubkey(&keypair());
+    let led = ledger(a, b);
+
+    // Deterministic: same pubkey → same address, every call.
+    let addr_a1 = led.deposit_address(a, DEMO_USD).await.unwrap();
+    let addr_a2 = led.deposit_address(a, DEMO_USD).await.unwrap();
+    assert_eq!(addr_a1, addr_a2, "must be stable across calls");
+    // Recognizable fake prefix + the first 8 pubkey bytes (hex) of `a`.
+    assert_eq!(addr_a1, format!("bc1qdpay{}", hex::encode(&a[..8])));
+
+    // Distinct per pubkey.
+    let addr_b = led.deposit_address(b, DEMO_USD).await.unwrap();
+    assert_ne!(addr_a1, addr_b, "different pubkeys get different addresses");
+}
+
+/// `deposit_status` drains a seeded pending deposit and credits the balance (mirroring the ck
+/// minter's mint-after-confirmation); a second call finds nothing pending → minted_total = 0 and no
+/// further credit. This is the offline proof of deposit → mint → balance.
+#[tokio::test]
+async fn deposit_status_credits_balance_and_drains_pending() {
+    let a = pubkey(&keypair());
+    let b = pubkey(&keypair());
+    let led = ledger(a, b);
+
+    // Seed a pending deposit of 5000 minor units for account `b`.
+    led.register_deposit(b, DEMO_USD, 5000);
+    assert_eq!(led.balance_of(&b, DEMO_USD), BAL_B, "no credit before refresh");
+
+    // First refresh: mints the pending deposit, credits the balance.
+    let r1 = led.deposit_status(b, DEMO_USD).await.unwrap();
+    assert_eq!(r1.minted_total, 5000);
+    assert_eq!(r1.minted.len(), 1);
+    assert_eq!(r1.minted[0].amount, 5000);
+    assert_eq!(r1.minted[0].block_index, "0");
+    assert!(r1.pending.is_empty(), "nothing pending after a full drain");
+    assert_eq!(r1.required_confirmations, 1);
+    assert_eq!(led.balance_of(&b, DEMO_USD), BAL_B + 5000, "credited after refresh");
+
+    // Second refresh: pending is drained → minted_total = 0, no double-credit.
+    let r2 = led.deposit_status(b, DEMO_USD).await.unwrap();
+    assert_eq!(r2.minted_total, 0, "pending drained: nothing more to mint");
+    assert!(r2.minted.is_empty());
+    assert_eq!(led.balance_of(&b, DEMO_USD), BAL_B + 5000, "no double-credit on re-refresh");
+}
+
+/// The three deposit REST routes return the correct JSON shapes via the axum router (driven with
+/// `tower::ServiceExt::oneshot`, matching the rest of this file). Mirrors how the wallet's "Add
+/// money" sheet will consume them.
+#[tokio::test]
+async fn deposit_routes_return_correct_shapes() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let merch_hex = hex::encode(pubkey(&merchant));
+
+    // GET /deposit/address/{hex} → {"address": "bc1qdpay..."}.
+    let (s_addr, b_addr) =
+        call(&state, get_req(&format!("/api/v1/deposit/address/{merch_hex}"))).await;
+    assert_eq!(s_addr, StatusCode::OK, "{b_addr}");
+    let expected_addr = format!("bc1qdpay{}", hex::encode(&pubkey(&merchant)[..8]));
+    assert_eq!(b_addr["address"], expected_addr);
+
+    // Seed a deposit so refresh has something to mint.
+    led.register_deposit(pubkey(&merchant), DEMO_USD, 1234);
+
+    // POST /deposit/refresh/{hex} → {minted_total, minted[], pending[], required_confirmations}.
+    let refresh_req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/v1/deposit/refresh/{merch_hex}"))
+        .body(Body::empty())
+        .unwrap();
+    let (s_r, b_r) = call(&state, refresh_req).await;
+    assert_eq!(s_r, StatusCode::OK, "{b_r}");
+    assert_eq!(b_r["minted_total"], 1234);
+    assert_eq!(b_r["minted"][0]["amount"], 1234);
+    assert_eq!(b_r["minted"][0]["block_index"], "0");
+    assert!(b_r["pending"].as_array().unwrap().is_empty());
+    assert_eq!(b_r["required_confirmations"], 1);
+    // The balance actually moved on the ledger.
+    assert_eq!(led.balance_of(&pubkey(&merchant), DEMO_USD), BAL_B + 1234);
+
+    // GET /deposit/info?currency=0 → static instructions.
+    let (s_i, b_i) = call(&state, get_req("/api/v1/deposit/info")).await;
+    assert_eq!(s_i, StatusCode::OK, "{b_i}");
+    assert_eq!(b_i["min_confirmations"], 1);
+    assert_eq!(b_i["deposit_fee"], 0);
+    assert_eq!(b_i["deposit_min_amount"], 0);
+
+    // A bad pubkey (not 32 bytes hex) on the address route is a clean 400, never a 500.
+    let (bad_status, _bad_body) = call(&state, get_req("/api/v1/deposit/address/deadbeef")).await;
+    assert_eq!(bad_status, StatusCode::BAD_REQUEST);
+    // And on the refresh route.
+    let bad_refresh = Request::builder()
+        .method("POST")
+        .uri("/api/v1/deposit/refresh/deadbeef")
+        .body(Body::empty())
+        .unwrap();
+    let (bad_refresh_status, _) = call(&state, bad_refresh).await;
+    assert_eq!(bad_refresh_status, StatusCode::BAD_REQUEST);
+}
+
+/// A ledger stub whose deposit methods always fail transiently. Proves the deposit routes map ANY
+/// `LedgerError` → 503 (deposit plan §0: there is no permanent-policy failure on the deposit
+/// surface, so no 422 path). Non-deposit methods delegate to an inner FakeLedger so the stub is a
+/// drop-in for `AppState`.
+struct DepositFailingLedger {
+    inner: Arc<FakeLedger>,
+}
+
+#[async_trait]
+impl Ledger for DepositFailingLedger {
+    async fn pay(&self, wire: Vec<u8>) -> Result<Receipt, LedgerError> {
+        self.inner.pay(wire).await
+    }
+    async fn balance(&self, pk: [u8; 32], c: Currency) -> Result<u64, LedgerError> {
+        self.inner.balance(pk, c).await
+    }
+    async fn mint(&self, to: [u8; 32], c: Currency, a: u64) -> Result<u64, LedgerError> {
+        self.inner.mint(to, c, a).await
+    }
+    async fn transactions_of(
+        &self,
+        pk: [u8; 32],
+        c: Currency,
+        l: u32,
+    ) -> Result<Vec<TxnRecord>, LedgerError> {
+        self.inner.transactions_of(pk, c, l).await
+    }
+    async fn healthy(&self) -> bool {
+        true
+    }
+    async fn deposit_address(&self, _pk: [u8; 32], _c: Currency) -> Result<String, LedgerError> {
+        Err(LedgerError::Transient("injected deposit failure".into()))
+    }
+    async fn deposit_status(
+        &self,
+        _pk: [u8; 32],
+        _c: Currency,
+    ) -> Result<DepositRefresh, LedgerError> {
+        Err(LedgerError::Transient("injected deposit failure".into()))
+    }
+    async fn deposit_info(&self, _c: Currency) -> Result<DepositInfo, LedgerError> {
+        Err(LedgerError::Transient("injected deposit failure".into()))
+    }
+}
+
+/// All three deposit routes surface a ledger `Transient` as `503` (never `422`), and crucially the
+/// failing path never credits a balance — the deposit endpoints are value-creating only on success.
+#[tokio::test]
+async fn deposit_routes_map_ledger_transient_to_503() {
+    let a = pubkey(&keypair());
+    let b = pubkey(&keypair());
+    let inner = Arc::new(ledger(a, b));
+    let state = AppState::new(Arc::new(DepositFailingLedger { inner: inner.clone() }));
+    let hex_b = hex::encode(b);
+
+    // GET /deposit/address/{hex} → 503.
+    let (s1, body1) = call(&state, get_req(&format!("/api/v1/deposit/address/{hex_b}"))).await;
+    assert_eq!(s1, StatusCode::SERVICE_UNAVAILABLE, "{body1}");
+
+    // POST /deposit/refresh/{hex} → 503.
+    let refresh_req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/v1/deposit/refresh/{hex_b}"))
+        .body(Body::empty())
+        .unwrap();
+    let (s2, body2) = call(&state, refresh_req).await;
+    assert_eq!(s2, StatusCode::SERVICE_UNAVAILABLE, "{body2}");
+
+    // GET /deposit/info → 503.
+    let (s3, body3) = call(&state, get_req("/api/v1/deposit/info")).await;
+    assert_eq!(s3, StatusCode::SERVICE_UNAVAILABLE, "{body3}");
+
+    // No deposit was credited — a failing refresh mints nothing.
+    assert_eq!(inner.balance_of(&b, DEMO_USD), BAL_B, "transient refresh must not mint");
 }

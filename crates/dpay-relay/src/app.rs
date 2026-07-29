@@ -15,6 +15,15 @@
 //! - `GET /api/v1/health` — the merchant's pre-flight green dot; consults `ledger.healthy()`.
 //! - `GET /api/v1/transactions/{hex}?currency=N&limit=30` — the wallet's durable transaction list,
 //!   sourced from the ledger (newest-first); replaces the ephemeral in-memory UI list.
+//! - `GET  /api/v1/deposit/address/{hex}?currency=N` — ckBTC-style deposit address for the wallet's
+//!   "Add money" sheet (proxies the facade → ck minter `get_btc_address`).
+//! - `POST /api/v1/deposit/refresh/{hex}?currency=N` — mint any now-confirmed UTXOs and report
+//!   what landed + what's still pending (proxies the facade → ck minter `update_balance`).
+//! - `GET  /api/v1/deposit/info?currency=N` — static deposit instructions (min confirmations, fee,
+//!   min amount) so the sheet can render before showing the address.
+//!
+//! The three deposit routes map **any** `LedgerError` to `503` — there is no `422` path, because the
+//! deposit proxy has no permanent-policy failure (no sig, no cap, no replay); see deposit plan §0.
 //!
 //! `safe_mode` is a wired-but-inert flag: the seam the demo flips to fall back to a degraded path.
 
@@ -32,7 +41,7 @@ use serde::{Deserialize, Serialize};
 
 use dpay_core::{Currency, SignedAuthorization, DEMO_USD, NONCE_LEN, PUBKEY_LEN};
 
-use crate::ledger::{Ledger, LedgerError, Receipt, TxnRecord};
+use crate::ledger::{Ledger, LedgerError, MintedUtxo, PendingUtxo, Receipt, TxnRecord};
 
 /// Retry policy for transient ledger errors (idempotency makes retries safe).
 const MAX_ATTEMPTS: u32 = 3;
@@ -110,6 +119,9 @@ pub fn app(state: AppState) -> Router {
         .route("/balance/{hex}", get(balance))
         .route("/transactions/{hex}", get(transactions))
         .route("/receipt/{nonce}", get(receipt))
+        .route("/deposit/address/{hex}", get(deposit_address))
+        .route("/deposit/refresh/{hex}", post(deposit_refresh))
+        .route("/deposit/info", get(deposit_info))
         .route("/health", get(health));
 
     Router::new()
@@ -213,6 +225,75 @@ async fn transactions(
     let limit = qs.limit.unwrap_or(30).min(100);
     match state.ledger.transactions_of(pk, currency, limit).await {
         Ok(rows) => (StatusCode::OK, Json(TransactionsBody { transactions: rows })).into_response(),
+        Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
+    }
+}
+
+/// `GET /api/v1/deposit/address/{hex}?currency=N` → `200 {"address": "..."}` for a 32-byte pubkey
+/// (hex). The ckBTC-style deposit address the user sends native BTC to (the facade proxies the ck
+/// minter's per-principal `get_btc_address`). `currency` defaults to `DEMO_USD` for the same reason
+/// `balance` does: callers that don't name one keep working. A ledger error → `503` (no `422`; the
+/// deposit surface has no permanent-policy failure — deposit plan §0).
+async fn deposit_address(
+    State(state): State<AppState>,
+    Path(hex_pk): Path<String>,
+    Query(qs): Query<BalanceQuery>,
+) -> Response {
+    let bytes = match hex::decode(hex_pk.trim()) {
+        Ok(b) if b.len() == PUBKEY_LEN => b,
+        _ => return err(StatusCode::BAD_REQUEST, "pubkey must be 32 bytes hex"),
+    };
+    let mut pk = [0u8; PUBKEY_LEN];
+    pk.copy_from_slice(&bytes);
+    let currency = qs.currency.unwrap_or(DEMO_USD);
+    match state.ledger.deposit_address(pk, currency).await {
+        Ok(addr) => (StatusCode::OK, Json(DepositAddressBody { address: addr })).into_response(),
+        Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
+    }
+}
+
+/// `POST /api/v1/deposit/refresh/{hex}?currency=N` → `200 {"minted":[...],"minted_total":N,
+/// "pending":[...],"required_confirmations":N}`. Mints any now-confirmed UTXOs for the account
+/// (proxies the facade → ck minter `update_balance`); the wallet polls this from the "Add money"
+/// sheet and re-reads its balance when `minted_total > 0`. Path/query parsing mirrors `balance`;
+/// any ledger error → `503` (deposit plan §0).
+async fn deposit_refresh(
+    State(state): State<AppState>,
+    Path(hex_pk): Path<String>,
+    Query(qs): Query<BalanceQuery>,
+) -> Response {
+    let bytes = match hex::decode(hex_pk.trim()) {
+        Ok(b) if b.len() == PUBKEY_LEN => b,
+        _ => return err(StatusCode::BAD_REQUEST, "pubkey must be 32 bytes hex"),
+    };
+    let mut pk = [0u8; PUBKEY_LEN];
+    pk.copy_from_slice(&bytes);
+    let currency = qs.currency.unwrap_or(DEMO_USD);
+    match state.ledger.deposit_status(pk, currency).await {
+        Ok(r) => (StatusCode::OK, Json(DepositRefreshBody {
+            minted: r.minted,
+            minted_total: r.minted_total,
+            pending: r.pending,
+            required_confirmations: r.required_confirmations,
+        }))
+            .into_response(),
+        Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
+    }
+}
+
+/// `GET /api/v1/deposit/info?currency=N` → `200 {"min_confirmations":N,"deposit_fee":N,
+/// "deposit_min_amount":N|null}`. Static deposit instructions for the wallet's "Add money" sheet
+/// (proxies the facade → ck minter `get_minter_info` + `get_deposit_fee`). Any ledger error → `503`
+/// (deposit plan §0).
+async fn deposit_info(State(state): State<AppState>, Query(qs): Query<BalanceQuery>) -> Response {
+    let currency = qs.currency.unwrap_or(DEMO_USD);
+    match state.ledger.deposit_info(currency).await {
+        Ok(i) => (StatusCode::OK, Json(DepositInfoBody {
+            min_confirmations: i.min_confirmations,
+            deposit_fee: i.deposit_fee,
+            deposit_min_amount: i.deposit_min_amount,
+        }))
+            .into_response(),
         Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
     }
 }
@@ -368,6 +449,30 @@ struct BalanceBody {
 #[derive(Serialize)]
 struct TransactionsBody {
     transactions: Vec<TxnRecord>,
+}
+
+/// `GET /api/v1/deposit/address/{hex}` response body — the native-chain deposit address.
+#[derive(Serialize)]
+struct DepositAddressBody {
+    address: String,
+}
+
+/// `POST /api/v1/deposit/refresh/{hex}` response body — mirrors [`crate::ledger::DepositRefresh`].
+/// `minted_total > 0` means ck-asset was just credited; the wallet then re-reads its balance.
+#[derive(Serialize)]
+struct DepositRefreshBody {
+    minted: Vec<MintedUtxo>,
+    minted_total: u64,
+    pending: Vec<PendingUtxo>,
+    required_confirmations: u32,
+}
+
+/// `GET /api/v1/deposit/info` response body — static deposit instructions.
+#[derive(Serialize)]
+struct DepositInfoBody {
+    min_confirmations: u32,
+    deposit_fee: u64,
+    deposit_min_amount: Option<u64>,
 }
 
 fn err(status: StatusCode, msg: impl Into<String>) -> Response {

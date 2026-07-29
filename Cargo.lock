@@ -839,6 +839,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "dpay-mock-minter"
+version = "0.1.0"
+dependencies = [
+ "candid",
+ "ic-cdk",
+ "icrc-ledger-types",
+ "num-traits",
+ "serde",
+]
+
+[[package]]
 name = "dpay-relay"
 version = "0.1.0"
 dependencies = [

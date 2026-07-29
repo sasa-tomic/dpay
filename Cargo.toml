@@ -8,6 +8,7 @@ members = [
     "crates/dpay-sim",
     "crates/dpay-ffi",
     "crates/dpay-fixture",
+    "crates/dpay-mock-minter",
 ]
 # Canister (cdylib) only builds for wasm; keep it out of the default native build/test set.
 default-members = [

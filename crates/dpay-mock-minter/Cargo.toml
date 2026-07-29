@@ -1,0 +1,16 @@
+[package]
+name = "dpay-mock-minter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Test-only mock of the ckBTC minter: derives a deposit address and mints onto a real ICRC ledger. For offline PocketIC proofs."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ic-cdk = { workspace = true }
+candid = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+icrc-ledger-types = { workspace = true }
+num-traits = "0.2"

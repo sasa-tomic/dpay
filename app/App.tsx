@@ -114,6 +114,45 @@ function parseRequestQR(raw: string): {reqB64: string; name: string} {
   return i < 0 ? {reqB64: t, name: ''} : {reqB64: t.slice(0, i), name: t.slice(i + 1)};
 }
 
+// --- ck-deposit (ckBTC-style top-up) --------------------------------------------------------
+// A deposit address on a ck minter's native chain (BTC for ckBTC). The facade proxies the minter; the
+// relay surfaces it at /api/v1/deposit/*. The mint lands on the user's subaccount, so the existing
+// balance/history polls reflect it once confirmed. DEMO_USD (faucet) stays currency 0; ckBTC = 1.
+const DEPOSIT_CURRENCY = 1;
+const DEPOSIT_REFRESH_MS = 10000; // poll /deposit/refresh while the sheet is open
+type DepositInfo = {min_confirmations: number; deposit_fee: number; deposit_min_amount: number | null};
+type MintedUtxo = {block_index: string; amount: number};
+type PendingUtxo = {value: number; confirmations: number};
+type DepositRefresh = {minted_total: number; minted: MintedUtxo[]; pending: PendingUtxo[]; required_confirmations: number};
+
+// Format satoshis as BTC (8 decimals), e.g. 12345 -> "0.00012345 BTC". Parallel to usd(cents).
+const btc = (sats: number) => {
+  const n = Math.max(0, Math.floor(sats));
+  const whole = Math.floor(n / 1e8);
+  const frac = String(n % 1e8).padStart(8, '0');
+  return `${whole}.${frac} BTC`;
+};
+
+// Relay deposit client — same fetch style as the inline balance/faucet/pay calls (AbortController
+// optional, errors thrown to the caller). Co-located here to match the existing pattern.
+async function depositInfo(relayUrl: string, currency: number, signal?: AbortSignal): Promise<DepositInfo> {
+  const r = await fetch(`${base(relayUrl)}/api/v1/deposit/info?currency=${currency}`, {signal});
+  if (!r.ok) throw new Error(`deposit/info ${r.status}`);
+  return r.json();
+}
+async function depositAddress(relayUrl: string, accountHex: string, currency: number, signal?: AbortSignal): Promise<string> {
+  const r = await fetch(`${base(relayUrl)}/api/v1/deposit/address/${accountHex}?currency=${currency}`, {signal});
+  if (!r.ok) throw new Error(`deposit/address ${r.status}`);
+  const j = await r.json();
+  return j.address as string;
+}
+async function depositRefresh(relayUrl: string, accountHex: string, currency: number, signal?: AbortSignal): Promise<DepositRefresh> {
+  const r = await fetch(`${base(relayUrl)}/api/v1/deposit/refresh/${accountHex}?currency=${currency}`, {method: 'POST', signal});
+  if (!r.ok) throw new Error(`deposit/refresh ${r.status}`);
+  return r.json();
+}
+// ---------------------------------------------------------------------------------------------
+
 // The mint-green geometric "d" used by both the app icon and the in-app emblem. Bowl LEFT, ascender
 // stem RIGHT (1024 viewBox, matches the adaptive-icon foreground).
 const D_PATH = 'M622 276a52 52 0 0 1 52 52v348a52 52 0 0 1-52 52 52 52 0 0 1-52-52V328a52 52 0 0 1 52-52zM508 396a176 176 0 1 0 .1 0zM508 498a74 74 0 1 1-.1 0z';
@@ -229,6 +268,9 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
   // surfaces a one-line failure (offline / faucet disabled) without blocking the rest of the UI.
   const [topUpBusy, setTopUpBusy] = useState(false);
   const [topUpErr, setTopUpErr] = useState<string | null>(null);
+  // ck-deposit sheet (ckBTC-style native-chain deposit). Opens over the wallet; closing tears down
+  // its address/refresh polling. Independent of the DEMO_USD faucet (btn-topup) above.
+  const [depositOpen, setDepositOpen] = useState(false);
 
   const TOP_UP_CENTS = 5000; // $50.00 in minor units
 
@@ -350,6 +392,11 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
                 ? <ActivityIndicator size="small" color={C.brand} />
                 : <Text style={S.topUpText}>+ ${TOP_UP_CENTS / 100}</Text>}
             </Pressable>
+            {/* ckBTC-style deposit (real chain-key top-up via a native deposit address). Sits beside
+                the DEMO_USD faucet so both funding paths are reachable from the balance header. */}
+            <Pressable testID="btn-deposit" style={S.depositBtn} onPress={() => setDepositOpen(true)}>
+              <Text style={S.depositBtnText}>ckBTC</Text>
+            </Pressable>
           </View>
           {topUpErr ? <Text style={S.topUpErr}>{topUpErr}</Text> : null}
         </View>
@@ -383,6 +430,10 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
         <TextInput style={S.settingsInput} value={relayUrl} onChangeText={setRelayUrl} autoCapitalize="none" autoCorrect={false} placeholder="http://<ip>:8787" placeholderTextColor={C.sub2} />
         <Pressable onPress={onReset}><Text style={S.resetLink}>reset</Text></Pressable>
       </View>
+
+      {depositOpen ? (
+        <DepositSheet identity={identity} relayUrl={relayUrl} onClose={() => setDepositOpen(false)} />
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -967,6 +1018,137 @@ function ReceiveMode({identity, relayUrl, nfcReady, onReceived}: {identity: Iden
   );
 }
 
+/**
+ * ckBTC-style deposit sheet. A native-chain deposit address (BTC for ckBTC) generated by the facade-
+ * proxied minter. Flow: instructions + address + QR → poll /deposit/refresh → "Deposited ✓" once the
+ * mint lands (minted_total > 0), after which the wallet's balance poll reflects the new ckBTC. The
+ * sheet is additive: it never touches the faucet (DEMO_USD) or the Pay/Receive/NFC flows.
+ */
+function DepositSheet({identity, relayUrl, onClose}: {identity: Identity; relayUrl: string; onClose: () => void}) {
+  const currency = DEPOSIT_CURRENCY;
+  const [info, setInfo] = useState<DepositInfo | null>(null);
+  const [address, setAddress] = useState<string | null>(null);
+  const [refresh, setRefresh] = useState<DepositRefresh | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [minted, setMinted] = useState(false);
+
+  // Load deposit info + the deposit address once on open (same AbortController/timeout style as the
+  // balance/pay calls). Address reveal is safe — sending to it only credits the user.
+  useEffect(() => {
+    let alive = true;
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 8000);
+    (async () => {
+      setLoading(true); setErr(null);
+      try {
+        const [i, a] = await Promise.all([
+          depositInfo(relayUrl, currency, ctrl.signal),
+          depositAddress(relayUrl, identity.publicHex, currency, ctrl.signal),
+        ]);
+        if (!alive) return;
+        setInfo(i); setAddress(a);
+      } catch {
+        if (alive) setErr('Could not reach the ledger for a deposit address');
+      } finally {
+        if (alive) setLoading(false);
+        clearTimeout(t);
+      }
+    })();
+    return () => { alive = false; ctrl.abort(); };
+  }, [relayUrl, identity.publicHex, currency]);
+
+  // Poll /deposit/refresh every 10s while open. minted_total > 0 => the deposit credited (the mint
+  // landed on the user's subaccount). Pending UTXOs surface confirmation progress. Cleans up on close.
+  useEffect(() => {
+    let alive = true;
+    const poll = async () => {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 6000);
+      try {
+        const r = await depositRefresh(relayUrl, identity.publicHex, currency, ctrl.signal);
+        if (!alive) return;
+        setRefresh(r);
+        if (r.minted_total > 0) setMinted(true);
+      } catch { /* offline: keep the last status; the next tick retries */ } finally { clearTimeout(t); }
+    };
+    poll(); const id = setInterval(poll, DEPOSIT_REFRESH_MS);
+    return () => { alive = false; clearInterval(id); };
+  }, [relayUrl, identity.publicHex, currency]);
+
+  // Copy via Share (no clipboard dependency is shipped). Matches the existing "Share auth code" path.
+  const copy = useCallback(async () => {
+    if (!address) return;
+    try { await Share.share({message: address}); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
+  }, [address]);
+
+  const required = info?.min_confirmations ?? refresh?.required_confirmations ?? 0;
+  const pending = refresh?.pending ?? [];
+
+  return (
+    <View style={S.sheetOverlay}>
+      <SafeAreaView style={S.sheet}>
+        <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+        <View style={S.sheetHead}>
+          <Text style={S.sheetTitle}>Deposit ckBTC</Text>
+          <Pressable testID="btn-deposit-close" style={S.sheetClose} onPress={onClose}><Text style={S.sheetCloseX}>✕</Text></Pressable>
+        </View>
+
+        <ScrollView contentContainerStyle={S.sheetBody} keyboardShouldPersistTaps="handled">
+          {loading ? (
+            <View style={S.centerAll}>
+              <ActivityIndicator color={C.brand} />
+              <Text style={S.dim2}>Fetching your deposit address…</Text>
+            </View>
+          ) : err || !address ? (
+            <View style={S.centerAll}>
+              <Text style={S.err}>{err ?? 'No deposit address available'}</Text>
+              <Text style={S.dim2}>Check the relay is reachable, then reopen the sheet.</Text>
+            </View>
+          ) : minted ? (
+            <View style={S.centerAll}>
+              <View style={S.check}><Text style={S.checkMark}>✓</Text></View>
+              <Text style={S.paidText}>Deposited ✓</Text>
+              <Text style={S.paidSub}>{btc(refresh?.minted_total ?? 0)} minted</Text>
+              <Text style={S.dim2}>Your balance updates automatically.</Text>
+            </View>
+          ) : (
+            <>
+              <Text style={S.sheetInstr}>
+                Send BTC to this address{required ? ` · ~${required} confirmations` : ''}
+                {info?.deposit_min_amount != null ? ` · min ${btc(info.deposit_min_amount)}` : ''}
+                {info && info.deposit_fee > 0 ? ` · fee ${btc(info.deposit_fee)}` : ''}.
+              </Text>
+
+              <View style={S.qrCard}><QRCode value={address} size={200} ecl="L" /></View>
+
+              <Text testID="deposit-address" style={S.sheetAddr} selectable={true}>{address}</Text>
+
+              <Pressable testID="btn-deposit-copy" style={[S.primaryWide, S.depositCopy]} onPress={copy}>
+                <Text style={S.primaryText}>{copied ? 'Shared ✓' : 'Copy address'}</Text>
+              </Pressable>
+
+              {pending.length > 0 ? (
+                <View style={S.depositStatus}>
+                  <Text style={S.depositStatusTitle}>Confirming</Text>
+                  {pending.map((p, i) => (
+                    <Text key={i} style={S.depositStatusRow}>
+                      {btc(p.value)} · {p.confirmations}/{required || '?'} confirmations
+                    </Text>
+                  ))}
+                </View>
+              ) : (
+                <Text style={S.dim2}>Waiting for a deposit · checking every 10s</Text>
+              )}
+            </>
+          )}
+        </ScrollView>
+      </SafeAreaView>
+    </View>
+  );
+}
+
 const S = StyleSheet.create({
   root: {flex: 1, backgroundColor: C.bg},
   centerAll: {alignItems: 'center', justifyContent: 'center'},
@@ -1050,4 +1232,21 @@ const S = StyleSheet.create({
   settingsLabel: {fontSize: 12, fontWeight: '700', color: C.sub2, textTransform: 'uppercase', letterSpacing: 1, fontFamily: 'monospace'},
   settingsInput: {flex: 1, fontSize: 12, color: C.ink, fontFamily: 'monospace', paddingVertical: 4},
   resetLink: {fontSize: 12, color: C.bad, fontWeight: '600'},
+  // ckBTC deposit affordance in the balance header (filled brand, distinct from the outline faucet).
+  depositBtn: {backgroundColor: C.brand, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5},
+  depositBtnText: {fontSize: 13, fontWeight: '700', color: C.brandInk},
+  // Deposit sheet — a full-screen overlay above the wallet.
+  sheetOverlay: {position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: C.bg, zIndex: 10},
+  sheet: {flex: 1, backgroundColor: C.bg},
+  sheetHead: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 20, paddingHorizontal: 22, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: C.line},
+  sheetTitle: {fontSize: 20, fontWeight: '800', color: C.ink},
+  sheetClose: {width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: C.field},
+  sheetCloseX: {fontSize: 16, fontWeight: '700', color: C.sub},
+  sheetBody: {flexGrow: 1, paddingHorizontal: 22, paddingTop: 22, alignItems: 'center'},
+  sheetInstr: {fontSize: 14, color: C.sub, textAlign: 'center', lineHeight: 20, marginBottom: 18},
+  sheetAddr: {fontSize: 13, color: C.ink, fontFamily: 'monospace', textAlign: 'center', marginTop: 4, marginBottom: 8, letterSpacing: 0.2},
+  depositCopy: {alignSelf: 'stretch', marginTop: 12},
+  depositStatus: {marginTop: 22, alignSelf: 'stretch', backgroundColor: C.card, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: C.line2},
+  depositStatusTitle: {fontSize: 12, fontWeight: '700', color: C.sub2, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 8, fontFamily: 'monospace'},
+  depositStatusRow: {fontSize: 14, color: C.ink, fontFamily: 'monospace', paddingVertical: 4},
 });

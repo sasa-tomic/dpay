@@ -46,6 +46,50 @@ pub struct TxnRecord {
     pub timestamp: u64,
 }
 
+// ---------------------------------------------------------------------------
+// Deposit surface (ckBTC-style top-up). These mirror the canister's deposit
+// types (§3.1 of the deposit-integration plan) but live here as serde structs
+// so the relay's HTTP layer speaks plain JSON. The agent impl (feature
+// `agent`) translates between these and the candid `Nat`-bearing mirrors.
+// ---------------------------------------------------------------------------
+
+/// One UTXO the minter has *already* minted in this refresh call. `block_index` is the ckBTC
+/// ledger's block index — a candid `nat` on the wire, so it is carried as a `String` (a `Nat` /
+/// `u128` doesn't round-trip cleanly in JSON). Mirrors the canister's `MintedUtxo`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct MintedUtxo {
+    pub block_index: String,
+    pub amount: u64,
+}
+
+/// One UTXO seen on-chain but not yet confirmed enough to mint. Mirrors the canister's `PendingUtxo`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct PendingUtxo {
+    pub value: u64,
+    pub confirmations: u64,
+}
+
+/// Result of a deposit refresh — what the wallet's "Add money" sheet polls. `minted_total > 0`
+/// means real ck-asset was just credited to the user's subaccount; the wallet then re-reads its
+/// balance. Mirrors the canister's `DepositRefresh`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct DepositRefresh {
+    pub minted: Vec<MintedUtxo>,
+    pub minted_total: u64,
+    pub pending: Vec<PendingUtxo>,
+    pub required_confirmations: u32,
+}
+
+/// Static instructions for a currency's deposit path (min confirmations, fee, min amount). Lets the
+/// wallet render "Send BTC here · ~N confirmations · min X sats" before showing the address. Mirrors
+/// the canister's `DepositInfo`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct DepositInfo {
+    pub min_confirmations: u32,
+    pub deposit_fee: u64,
+    pub deposit_min_amount: Option<u64>,
+}
+
 /// Settlement outcome. `Rejected` is a permanent policy failure (bad sig, expired, over cap,
 /// insufficient funds, reused nonce, malformed wire) — the relay must NOT retry it and surfaces
 /// it as `422`. `Transient` is an infrastructure hiccup (e.g. the agent/canister was briefly
@@ -116,6 +160,30 @@ pub trait Ledger: Send + Sync {
         limit: u32,
     ) -> Result<Vec<TxnRecord>, LedgerError>;
 
+    /// ckBTC-style deposit address for `pubkey`/`currency` — the native-chain address the user
+    /// sends to (the minter derives it per-principal via threshold signatures). Revealing it only
+    /// lets someone send *to* the user, so the facade proxy needs no payer auth. The relay just
+    /// hands it back.
+    async fn deposit_address(
+        &self,
+        pubkey: [u8; PUBKEY_LEN],
+        currency: Currency,
+    ) -> Result<String, LedgerError>;
+
+    /// Refresh the deposit for `pubkey`/`currency`: asks the facade (→ ck minter `update_balance`)
+    /// to mint any now-confirmed UTXOs. Value-creating but idempotent (a no-op when nothing is
+    /// confirmed). Returns what was minted + what's still pending. Per the deposit plan's §0 error
+    /// rule, the proxy endpoints have **no permanent-policy failure**, so impls surface only
+    /// [`LedgerError::Transient`].
+    async fn deposit_status(
+        &self,
+        pubkey: [u8; PUBKEY_LEN],
+        currency: Currency,
+    ) -> Result<DepositRefresh, LedgerError>;
+
+    /// Static deposit instructions for `currency` (min confirmations, fee, min amount).
+    async fn deposit_info(&self, currency: Currency) -> Result<DepositInfo, LedgerError>;
+
     /// Liveness for the merchant's pre-flight green dot.
     async fn healthy(&self) -> bool;
 }
@@ -133,6 +201,11 @@ struct FakeState {
     /// to newest-first and filters by (currency, account). Mirrors the canister's ACCOUNT_TXNS so
     /// the relay's inner loop is canister-faithful on history too.
     txns: Vec<TxnRecord>,
+    /// Test/demo seeding for the deposit path: a pending (unconfirmed) inbound UTXO per
+    /// `(pubkey, currency)`. `deposit_status` drains this and credits `balances`, mirroring the
+    /// minter's `update_balance` mint-after-confirmation. Lets the offline inner loop prove the
+    /// deposit→mint→balance flow without a real ckBTC minter.
+    pending_deposits: HashMap<([u8; PUBKEY_LEN], Currency), u64>,
 }
 
 /// In-memory ledger. Balances + spent-nonces behind one `Mutex` so the read-check-write is
@@ -186,6 +259,7 @@ impl FakeLedger {
                 balances,
                 spent: HashSet::new(),
                 txns: Vec::new(),
+                pending_deposits: HashMap::new(),
             }),
             per_tx_cap,
             clock,
@@ -196,6 +270,14 @@ impl FakeLedger {
     pub fn balance_of(&self, pubkey: &[u8; PUBKEY_LEN], currency: Currency) -> u64 {
         let s = self.state.lock().unwrap();
         *s.balances.get(&(*pubkey, currency)).unwrap_or(&0)
+    }
+
+    /// Seed a pending deposit for `pubkey`/`currency` (test/demo hook). The next `deposit_status`
+    /// call drains it and credits the balance, mirroring the ck minter minting after confirmations.
+    /// Multiple seeds for the same `(pubkey, currency)` accumulate.
+    pub fn register_deposit(&self, pubkey: [u8; PUBKEY_LEN], currency: Currency, amount: u64) {
+        let mut s = self.state.lock().unwrap();
+        *s.pending_deposits.entry((pubkey, currency)).or_insert(0) += amount;
     }
 }
 
@@ -289,6 +371,55 @@ impl Ledger for FakeLedger {
         // In-memory ledger is healthy iff its mutex isn't poisoned.
         self.state.lock().is_ok()
     }
+
+    async fn deposit_address(
+        &self,
+        pubkey: [u8; PUBKEY_LEN],
+        _currency: Currency,
+    ) -> Result<String, LedgerError> {
+        // Deterministic fake address: a recognizable `bc1qdpay` prefix + the first 8 pubkey bytes
+        // (hex). Distinct per pubkey, stable across calls — enough to drive the wallet's "show my
+        // deposit address" UI offline. Mirrors how a real minter derives per-principal addresses.
+        Ok(format!("bc1qdpay{}", hex::encode(&pubkey[..8])))
+    }
+
+    async fn deposit_status(
+        &self,
+        pubkey: [u8; PUBKEY_LEN],
+        currency: Currency,
+    ) -> Result<DepositRefresh, LedgerError> {
+        // Drain the pending deposit for this (pubkey, currency) and credit the balance — the
+        // offline analogue of the minter's `update_balance` minting confirmed UTXOs. A second call
+        // finds nothing pending and reports minted_total = 0.
+        let mut s = self.state.lock().unwrap();
+        if let Some(amount) = s.pending_deposits.remove(&(pubkey, currency)) {
+            let bal = s.balances.entry((pubkey, currency)).or_insert(0);
+            *bal = bal.saturating_add(amount);
+            Ok(DepositRefresh {
+                minted: vec![MintedUtxo { block_index: "0".to_string(), amount }],
+                minted_total: amount,
+                pending: vec![],
+                required_confirmations: 1,
+            })
+        } else {
+            Ok(DepositRefresh {
+                minted: vec![],
+                minted_total: 0,
+                pending: vec![],
+                required_confirmations: 1,
+            })
+        }
+    }
+
+    async fn deposit_info(&self, _currency: Currency) -> Result<DepositInfo, LedgerError> {
+        // Fake deposit params: 1 confirmation, no fee, no minimum — the most permissive config, so
+        // the offline loop's "Add money" sheet always renders instructions.
+        Ok(DepositInfo {
+            min_confirmations: 1,
+            deposit_fee: 0,
+            deposit_min_amount: Some(0),
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -355,5 +486,27 @@ impl<L: Ledger> Ledger for FlakyLedger<L> {
 
     async fn healthy(&self) -> bool {
         self.inner.healthy().await
+    }
+
+    async fn deposit_address(
+        &self,
+        pubkey: [u8; PUBKEY_LEN],
+        currency: Currency,
+    ) -> Result<String, LedgerError> {
+        // FlakyLedger only injects transients into `pay` (the retry path under test); the deposit
+        // surface is a clean passthrough, mirroring how balance/mint delegate.
+        self.inner.deposit_address(pubkey, currency).await
+    }
+
+    async fn deposit_status(
+        &self,
+        pubkey: [u8; PUBKEY_LEN],
+        currency: Currency,
+    ) -> Result<DepositRefresh, LedgerError> {
+        self.inner.deposit_status(pubkey, currency).await
+    }
+
+    async fn deposit_info(&self, currency: Currency) -> Result<DepositInfo, LedgerError> {
+        self.inner.deposit_info(currency).await
     }
 }
