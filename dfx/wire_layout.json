@@ -1,0 +1,67 @@
+{
+  "signing_len": 100,
+  "wire_len": 196,
+  "request_len": 68,
+  "sig_len": 64,
+  "pubkey_len": 32,
+  "nonce_len": 16,
+  "fields": {
+    "from": {
+      "offset": 0,
+      "len": 32,
+      "endian": null
+    },
+    "to": {
+      "offset": 32,
+      "len": 32,
+      "endian": null
+    },
+    "amount": {
+      "offset": 64,
+      "len": 8,
+      "endian": "le"
+    },
+    "nonce": {
+      "offset": 72,
+      "len": 16,
+      "endian": null
+    },
+    "expiry": {
+      "offset": 88,
+      "len": 8,
+      "endian": "le"
+    },
+    "currency": {
+      "offset": 96,
+      "len": 4,
+      "endian": "le"
+    }
+  },
+  "wire_fields": {
+    "signing": {
+      "offset": 0,
+      "len": 100
+    },
+    "sig": {
+      "offset": 100,
+      "len": 64
+    },
+    "from_pub": {
+      "offset": 164,
+      "len": 32
+    }
+  },
+  "golden": {
+    "secret_hex": "0303030303030303030303030303030303030303030303030303030303030303",
+    "public_hex": "ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d1",
+    "to_hex": "ca93ac1705187071d67b83c7ff0efe8108e8ec4530575d7726879333dbdabe7c",
+    "amount": 2500,
+    "nonce_hex": "2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a",
+    "expiry": 4102444800,
+    "currency": 0,
+    "signing_hex": "ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d1ca93ac1705187071d67b83c7ff0efe8108e8ec4530575d7726879333dbdabe7cc4090000000000002a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a005786f40000000000000000",
+    "sig_hex": "471c4a4abfff744ac75fbad381c6c82e98c85a45370a7a7e7fbcc6dee5b095ee1fc65ca4529b5a42d148d5d5a37b7dccc683ff26c03f0f65498e91cc9d11df0d",
+    "wire_hex": "ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d1ca93ac1705187071d67b83c7ff0efe8108e8ec4530575d7726879333dbdabe7cc4090000000000002a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a005786f40000000000000000471c4a4abfff744ac75fbad381c6c82e98c85a45370a7a7e7fbcc6dee5b095ee1fc65ca4529b5a42d148d5d5a37b7dccc683ff26c03f0f65498e91cc9d11df0ded4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d1",
+    "request_hex": "ca93ac1705187071d67b83c7ff0efe8108e8ec4530575d7726879333dbdabe7cc4090000000000002a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a005786f40000000000000000"
+  }
+}
