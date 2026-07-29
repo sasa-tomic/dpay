@@ -836,6 +836,9 @@ version = "0.1.0"
 dependencies = [
  "dpay-core",
  "ed25519-dalek",
+ "hex",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
