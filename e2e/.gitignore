@@ -1,0 +1,5 @@
+# e2e harness artifacts (build output, browser cache, screenshots)
+node_modules/
+dist/
+.browser/
+shots/

@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- iPhone-12-ish viewport so the RN styles (designed for a phone) render at the right scale.
+         The harness sets an exact viewport via CDP, but a sensible default keeps manual inspection
+         (via the `--serve` mode) looking right too. -->
+    <meta name="viewport" content="width=390, initial-scale=1, maximum-scale=1" />
+    <title>dpay</title>
+    <style>
+      html, body, #root { margin: 0; padding: 0; height: 100%; background: #06070a; }
+      /* react-native-web injects its own styles; nothing else needed here. */
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./entry.tsx"></script>
+  </body>
+</html>
