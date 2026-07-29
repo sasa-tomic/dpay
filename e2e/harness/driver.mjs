@@ -96,13 +96,17 @@ export class Driver {
     return new Driver(browser, context, page);
   }
 
-  /** Navigate to `${base}${path}` (path includes the query, e.g. `?relay=...`). Times out at 8s. */
+  /** Navigate to `${base}${path}` (path includes the query, e.g. `?relay=...`). Times out at 8s.
+   *  `opts.waitUntil` defaults to `networkidle0` (fine for first-run/empty pages); pass
+   *  `domcontentloaded` for a returning-user page that mounts the Wallet and starts continuous polls
+   *  (balance 2.5s / history 5s / deposit 10s) — networkidle0 may never settle there. */
   async navigate(base, path = '/', opts = {}) {
     this.baseURL = base;
     const url = `${base}${path}`;
     const timeoutMs = opts.timeoutMs ?? 8_000;
+    const waitUntil = opts.waitUntil ?? 'networkidle0';
     try {
-      await this.page.goto(url, { waitUntil: 'networkidle0', timeout: timeoutMs });
+      await this.page.goto(url, { waitUntil, timeout: timeoutMs });
     } catch (e) {
       throw new Error(`[driver] navigate ${url} failed within ${timeoutMs}ms: ${e instanceof Error ? e.message : e}`);
     }
@@ -199,6 +203,30 @@ export class Driver {
   /** Evaluate a JS function in the page (escape-hatch for flows that need a custom check). */
   async eval(fn) {
     return this.page.evaluate(fn);
+  }
+
+  /** Press a keyboard key (e.g. 'Escape', 'Enter') via a real DOM event. Powers the keyboard-shortcut
+   *  surface (Escape-to-close on sheets — plan flow 14). Throws with the key name on failure. */
+  async pressKey(key) {
+    try {
+      await this.page.keyboard.press(key);
+    } catch (e) {
+      throw new Error(`[driver] pressKey ${key} failed: ${e instanceof Error ? e.message : e}`);
+    }
+  }
+
+  /** Wait until NO element matches `testID` (e.g. a sheet closed and unmounted). */
+  async waitGone(testID, opts = {}) {
+    const timeoutMs = opts.timeoutMs ?? 3_000;
+    try {
+      await this.page.waitForFunction(
+        (sel) => !document.querySelector(sel),
+        { timeout: timeoutMs },
+        `[data-testid="${cssEscape(testID)}"]`,
+      );
+    } catch (e) {
+      throw new Error(`[driver] testID=${testID} still present after ${timeoutMs}ms: ${e instanceof Error ? e.message : e}`);
+    }
   }
 
   /** Wipe localStorage (forces the app's first-run identity flow on the next load). */
