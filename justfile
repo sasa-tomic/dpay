@@ -44,9 +44,29 @@ icrc-deploy-mainnet:
 test-relay:
     cargo nextest run -p dpay-relay
 
+# relay's test-helpers-gated tests (the deposit-seed route; OFF in the prod image — `just image` never enables it)
+test-relay-test-helpers:
+    cargo nextest run -p dpay-relay --features test-helpers
+
+# emit the wire-layout JSON (single source of truth for the JS ed25519 signing shim) from the real Rust core
+wire-layout:
+    cargo run -p dpay-fixture --release -- wire-layout dfx/wire_layout.json
+
 # headless UI: build screens, screenshot with system chromium, visual-diff (offline)
 ui:
     cd ui && npm run ui
+
+# radical e2e: drive the REAL app (App.tsx via react-native-web) + REAL relay (FakeLedger) + REAL
+# browser (chrome-headless-shell), offline + seconds-fast. The inner-loop UI/flow gate. `--flow NAME`
+# runs one flow; default runs all under e2e/tests/. Add a flow = add `e2e/tests/NN-name.mjs`.
+e2e:
+    cd e2e && npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps
+    cd e2e && node run.mjs
+
+# production gate: same harness drives the LIVE relay + canister at DPAY_E2E_BASE. Throwaway identities,
+# throttled, read-only-ish (never sends real BTC). Honest ceiling until KYC-allowlist lands (see plan §4.3).
+e2e-live:
+    cd e2e && DPAY_E2E_MODE=live DPAY_E2E_BASE=https://dpay.kalaj.org node run.mjs
 
 # narrated end-to-end demo: offline sign -> canister -> Paid (self-checking)
 sim: build-canister
@@ -78,8 +98,8 @@ mint account amount currency='0':
 check: test-core test-canister test-relay
     @echo "rust inner loop green"
 
-# everything: rust loop + headless UI
-verify: check ui
+# everything: rust loop + headless UI + radical e2e (real app + real relay + real browser)
+verify: check ui e2e
     @echo "full inner loop green"
 
 # cross-compile dpay-ffi to Android .so for arm64-v8a + x86_64 (NDK)
