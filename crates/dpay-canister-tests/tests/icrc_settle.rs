@@ -141,6 +141,14 @@ struct ReceiptView {
     pubkey: Vec<u8>,
 }
 
+/// Mirror of the canister's `ReconcileReport` (the `reconcile(currency)` return).
+#[derive(CandidType, Deserialize, Debug, PartialEq)]
+struct ReconcileReport {
+    currency: u32,
+    blocks_scanned: u64,
+    orphans_repaired: u64,
+}
+
 #[derive(CandidType, Deserialize, Debug, PartialEq)]
 struct TxnView {
     from: Vec<u8>,
@@ -409,6 +417,14 @@ fn faucet(
         )
         .expect("faucet update rejected");
     decode_one::<Result<u64, String>>(&reply).unwrap()
+}
+
+/// Admin-gated reconcile (controller-only), called by `caller`. Returns the facade's report.
+fn reconcile(pic: &PocketIc, dpay: Principal, currency: Currency, caller: Principal) -> Result<ReconcileReport, String> {
+    let reply = pic
+        .update_call(dpay, caller, "reconcile", encode_args((currency,)).unwrap())
+        .expect("reconcile update rejected");
+    decode_one::<Result<ReconcileReport, String>>(&reply).unwrap()
 }
 
 fn transactions_of(
@@ -1198,4 +1214,117 @@ fn transfer_cycles_rebalances_between_canisters() {
         target_after_refused, target_after,
         "refused call moved no cycles to the target",
     );
+}
+
+// --- R3: icrc3 reconcile (closes the cross-canister trap window) ------------------------------
+//
+// If `pay` traps between the ledger committing `Ok` and `settle_nonce` completing, the IC rolls
+// back THIS canister's message — including the SPENT nonce reservation — while the ledger's debit
+// does NOT roll back (separate canister). The post-trap state is: the ledger debited, but SPENT has
+// NO entry for the nonce → a blind retry would transfer AGAIN.
+//
+// We simulate that EXACT state with `reinstall_canister`: reinstalling the facade wipes its stable
+// state (SPENT empty) while the ledger (a separate canister) keeps its debit blocks. This faithfully
+// models the trap rollback (stable writes are transactional per-message, so a trap reverts them).
+
+/// R3 motivation: after the simulated trap (reinstall wiping SPENT), a blind retry of the SAME
+/// authorization debits AGAIN — the open trap window. This is the bug `reconcile` exists to close.
+#[test]
+fn trap_window_lets_a_retry_double_debit_without_reconcile() {
+    let (pic, ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
+    mint(&pic, dpay, payer, DEMO_USD, INIT_A);
+    let expiry = T0_SECS + 120;
+    let nonce = [0x31; 16];
+    const AMOUNT: u64 = 2_500;
+
+    // 1. A normal pay debits once.
+    pay(&pic, dpay, signed(&sk, payer, merch, AMOUNT, nonce, expiry, DEMO_USD)).expect("first pay ok");
+    assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, payer), INIT_A - AMOUNT);
+    assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, merch), AMOUNT);
+    assert_eq!(ledger_chain_len(&pic, ledger_dusd), 2); // mint + 1 transfer
+
+    // 2. Simulate the trap: reinstall the facade, wiping its SPENT set (the IC would have rolled
+    //    back the reservation). The ledger keeps the debit. Re-attach the SAME ledgers + controller.
+    let dpay_init = DpayInitArg {
+        ledgers: vec![
+            LedgerConfig { currency: DEMO_USD, principal: ledger_dusd, mintable: true },
+            LedgerConfig { currency: CKX, principal: _ledger_ckx, mintable: false },
+        ],
+        per_tx_cap: CAP,
+        controller: Some(pic_admin()),
+    };
+    pic.reinstall_canister(dpay, dpay_wasm(), encode_one(&dpay_init).unwrap(), None)
+        .expect("reinstall (simulate trap)");
+
+    // 3. THE BUG: a blind retry of the same authorization debits AGAIN. The existing quantized
+    //    `created_at_time` dedup catches a SAME-bucket retry (the documented mitigation), so to show
+    //    the residual window we advance past the 60s dedup bucket (but stay inside the auth's
+    //    expiry): the retry now uses a fresh bucket → the ledger does not dedup it → double debit.
+    //    (SPENT is empty after the reinstall, so nothing else blocks the retry.)
+    pic.advance_time(Duration::from_secs(61));
+    pic.tick();
+    let dup = pay(&pic, dpay, signed(&sk, payer, merch, AMOUNT, nonce, expiry, DEMO_USD));
+    assert!(dup.is_ok(), "post-trap cross-bucket retry must (wrongly) succeed without reconcile: {dup:?}");
+    assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, payer), INIT_A - 2 * AMOUNT, "double debit");
+    assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, merch), 2 * AMOUNT, "double credit");
+    assert_eq!(ledger_chain_len(&pic, ledger_dusd), 3, "a second transfer block landed");
+}
+
+/// R3 (CRITICAL): `reconcile` closes the trap window. After the simulated trap (reinstall), running
+/// `reconcile` walks the ledger's transaction log, finds the orphaned debit (memo = nonce, no SPENT
+/// entry), marks the nonce spent + records the txn — so a retry of the same authorization is now
+/// correctly treated as a DUPLICATE (rejected, no second debit). Idempotent on consistent state.
+#[test]
+fn reconcile_repairs_trap_orphan_and_blocks_double_debit() {
+    let (pic, ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
+    mint(&pic, dpay, payer, DEMO_USD, INIT_A);
+    let expiry = T0_SECS + 120;
+    let nonce = [0x32; 16];
+    const AMOUNT: u64 = 2_500;
+
+    // 1. A normal pay debits once.
+    pay(&pic, dpay, signed(&sk, payer, merch, AMOUNT, nonce, expiry, DEMO_USD)).expect("first pay ok");
+    assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, merch), AMOUNT);
+    let blocks_after_pay = ledger_chain_len(&pic, ledger_dusd);
+
+    // 2. Simulate the trap: reinstall wipes SPENT. The ledger keeps the debit.
+    let dpay_init = DpayInitArg {
+        ledgers: vec![
+            LedgerConfig { currency: DEMO_USD, principal: ledger_dusd, mintable: true },
+            LedgerConfig { currency: CKX, principal: _ledger_ckx, mintable: false },
+        ],
+        per_tx_cap: CAP,
+        controller: Some(pic_admin()),
+    };
+    pic.reinstall_canister(dpay, dpay_wasm(), encode_one(&dpay_init).unwrap(), None)
+        .expect("reinstall (simulate trap)");
+
+    // 3. Reconcile as the controller. It scans the ledger's recent transactions, finds the ONE
+    //    orphaned debit (the pay's transfer, memo = nonce, not in SPENT), and repairs it.
+    let report = reconcile(&pic, dpay, DEMO_USD, pic_admin()).expect("reconcile ok");
+    assert_eq!(report.currency, DEMO_USD);
+    assert!(report.blocks_scanned >= 1, "scanned the recent window: {report:?}");
+    assert_eq!(report.orphans_repaired, 1, "exactly the one trap-orphan repaired: {report:?}");
+
+    // The orphan is now recorded: the nonce is spent (history reflects it).
+    let txns = transactions_of(&pic, dpay, payer, DEMO_USD, 10);
+    assert_eq!(txns.len(), 1, "reconcile recorded the orphaned txn");
+    assert_eq!(txns[0].amount, AMOUNT);
+    assert_eq!(txns[0].nonce, nonce.to_vec());
+
+    // 4. A retry of the SAME authorization is now a DUPLICATE — rejected, no second debit. This is
+    //    the airtight close: post-trap, after reconcile, the trap window is shut.
+    let dup = pay(&pic, dpay, signed(&sk, payer, merch, AMOUNT, nonce, expiry, DEMO_USD));
+    assert!(dup.is_err(), "post-reconcile retry must be rejected as a duplicate: {dup:?}");
+    assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, payer), INIT_A - AMOUNT, "no second debit");
+    assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, merch), AMOUNT, "no second credit");
+    assert_eq!(ledger_chain_len(&pic, ledger_dusd), blocks_after_pay, "no new ledger block");
+
+    // 5. Idempotent: re-running reconcile on now-consistent state repairs nothing.
+    let again = reconcile(&pic, dpay, DEMO_USD, pic_admin()).expect("reconcile again ok");
+    assert_eq!(again.orphans_repaired, 0, "idempotent — consistent state repairs nothing");
+
+    // 6. Non-controller cannot run reconcile (admin-gated, like the other privileged ops).
+    let refused = reconcile(&pic, dpay, DEMO_USD, Principal::anonymous());
+    assert!(refused.is_err(), "non-controller reconcile must be refused: {refused:?}");
 }

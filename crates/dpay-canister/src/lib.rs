@@ -63,6 +63,8 @@ use ic_stable_structures::storable::Bound;
 use ic_stable_structures::{DefaultMemoryImpl, StableBTreeMap, StableCell, Storable};
 use icrc_ledger_types::icrc1::account::Account;
 use icrc_ledger_types::icrc1::transfer::{TransferArg, TransferError};
+use icrc_ledger_types::icrc3::blocks::GetBlocksRequest;
+use icrc_ledger_types::icrc3::transactions::{GetTransactionsResponse, Transaction};
 use serde::Deserialize;
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -1235,6 +1237,125 @@ fn register_minter(currency: Currency, minter: Principal) -> Result<(), String> 
         m.borrow_mut().insert(currency, PrincipalStorable(minter));
     });
     Ok(())
+}
+
+// --- icrc3 reconcile (closes the cross-canister trap window) ----------------------------------
+// If `pay` traps between the ledger committing `Ok` and `settle_nonce` completing, the IC rolls
+// back THIS canister's message — including the SPENT nonce reservation — while the ledger's debit
+// does NOT roll back (separate canister). A blind retry could then transfer again. The quantized
+// `created_at_time` dedup already mitigates this; `reconcile` is the airtight close: it walks the
+// ledger's transaction log, matches each facade-account debit to a recorded SPENT nonce, and repairs
+// the orphans (marks the nonce spent + records the txn) so a post-trap retry is correctly treated as
+// a duplicate. Admin-gated (controller-only, like the other privileged ops).
+
+/// Cap on how many recent ledger transactions a single `reconcile` scans (single-currency,
+/// recent-blocks scope). A long-lived ledger may have archived older blocks; this bounded scan covers
+/// the recent window where a trap could have left an orphan. Generalizing to a full archived-block
+/// walk + a heartbeat trigger is a documented follow-up (see CODEBASE_ANALYSIS risk 4).
+const RECONCILE_MAX_BLOCKS: u64 = 10_000;
+
+#[derive(CandidType, Deserialize, Clone, Debug)]
+struct ReconcileReport {
+    currency: Currency,
+    /// Ledger transactions examined (the recent window actually scanned).
+    blocks_scanned: u64,
+    /// Orphaned debits repaired (ledger moved funds, SPENT had no nonce → marked spent + recorded).
+    orphans_repaired: u64,
+}
+
+/// Cross-canister `get_transactions` (the typed ICRC ledger endpoint) → `(log_length, transactions)`.
+/// Uses the typed `Transaction` reply rather than hand-decoding generic ICRC-3 blocks: more robust
+/// against block-layout drift, and the cached `ic-icrc1-ledger` exposes it. Only the in-canister
+/// recent transactions are returned (archived ranges are not paged in this bounded version).
+async fn ledger_get_transactions(
+    ledger: Principal,
+    start: u64,
+    length: u64,
+) -> Result<(u64, Vec<Transaction>), String> {
+    let req = GetBlocksRequest { start: Nat::from(start), length: Nat::from(length) };
+    let response = Call::bounded_wait(ledger, "get_transactions")
+        .with_arg(req)
+        .await
+        .map_err(|e| format!("get_transactions rejected: {e:?}"))?;
+    let res: GetTransactionsResponse = response
+        .candid()
+        .map_err(|e| format!("get_transactions decode: {e:?}"))?;
+    let log_length = nat_to_u64(&res.log_length)?;
+    Ok((log_length, res.transactions))
+}
+
+/// `(nat32 currency) -> Result<ReconcileReport, text>` — walk the currency's recent ledger
+/// transactions and repair any facade-account debit whose nonce is missing from SPENT (the post-trap
+/// orphan state). Controller-only. Idempotent: re-running on already-consistent state repairs nothing.
+///
+/// Match rule: a `transfer` whose `from.owner == canister_self()`, `from.subaccount == Some(pk)`,
+/// and whose `memo` is a 16-byte nonce — exactly the shape `pay` produces. Mint/burn use the minting
+/// account (subaccount `None`) or carry no nonce memo, so they are not matched. Each repair inserts
+/// the nonce into SPENT (so a retry is a duplicate) and records the txn (so history reflects it).
+#[update]
+async fn reconcile(currency: Currency) -> Result<ReconcileReport, String> {
+    require_admin()?;
+    let (ledger, _mintable) = ledger_for(currency)?;
+    let self_id = canister_self();
+
+    let (log_length, txs) = ledger_get_transactions(ledger, 0, RECONCILE_MAX_BLOCKS).await?;
+    // `get_transactions` returns up to `length` from `start`; if the log is longer than the cap, the
+    // recent window is what we want (a trap's orphan is recent). Re-fetch the tail when the log
+    // exceeds the cap so we scan the NEWEST blocks, not the oldest.
+    let txs = if log_length > RECONCILE_MAX_BLOCKS {
+        let start = log_length - RECONCILE_MAX_BLOCKS;
+        ledger_get_transactions(ledger, start, RECONCILE_MAX_BLOCKS).await?.1
+    } else {
+        txs
+    };
+
+    let mut scanned: u64 = 0;
+    let mut repaired: u64 = 0;
+    for tx in txs {
+        scanned += 1;
+        let Some(t) = tx.transfer else { continue };
+        // Only debits from a user subaccount of THIS canister (a `pay`). Mints use subaccount None;
+        // the mint sentinel is rejected as a payee, so a real pay's `to` always has a subaccount.
+        if t.from.owner != self_id {
+            continue;
+        }
+        let Some(from_pk) = t.from.subaccount else { continue };
+        let Some(nonce) = memo_to_nonce(&t.memo) else { continue };
+        let nonce_key = Nonce(nonce);
+        let already_spent = SPENT.with(|s| s.borrow().contains_key(&nonce_key));
+        if already_spent {
+            continue;
+        }
+        // Orphaned debit (trap window): the ledger moved funds but the nonce reservation was rolled
+        // back. Repair: mark the nonce spent (a retry is now a duplicate) + record the txn (history).
+        let to_pk = t.to.subaccount.unwrap_or(MINT_ACCOUNT);
+        let amount = nat_to_u64(&t.amount).unwrap_or(0);
+        settle_nonce(&nonce_key);
+        record_txn(from_pk, to_pk, amount, nonce, currency, tx.timestamp);
+        // Best-effort: refresh the display cache for both sides from the authoritative ledger.
+        if let Ok(bal) = ledger_balance_of(ledger, &account_of(&from_pk)).await {
+            write_cache(from_pk, currency, bal);
+        }
+        if let Ok(bal) = ledger_balance_of(ledger, &account_of(&to_pk)).await {
+            write_cache(to_pk, currency, bal);
+        }
+        repaired += 1;
+    }
+    Ok(ReconcileReport { currency, blocks_scanned: scanned, orphans_repaired: repaired })
+}
+
+/// The facade sets `memo = nonce` (16 bytes) on every `pay` transfer. Extract it; anything else
+/// (None, wrong length) is not a pay debit → not a reconcile target.
+fn memo_to_nonce(memo: &Option<icrc_ledger_types::icrc1::transfer::Memo>) -> Option<[u8; NONCE_LEN]> {
+    let m = memo.as_ref()?;
+    let bytes = m.0.as_slice();
+    if bytes.len() == NONCE_LEN {
+        let mut n = [0u8; NONCE_LEN];
+        n.copy_from_slice(bytes);
+        Some(n)
+    } else {
+        None
+    }
 }
 
 /// `(blob pubkey, nat32 currency) -> Result<text, text>`. Proxies the minter's `get_btc_address` —
