@@ -344,9 +344,13 @@ function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: (id: Id
       const id: Identity = {secretHex: kp.secretHex, publicHex: kp.publicHex, username: name};
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(id));
       // Fund the new account from the demo faucet (best-effort — works when the ledger is reachable).
+      // Bounded by a 4s timeout so a hanging/dead relay can't stall onboarding (fail fast → $0, fund later).
       try {
-        await fetch(`${base(relayUrl)}/api/v1/faucet`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({account: id.publicHex})});
-      } catch { /* offline: created with $0, can be funded later */ }
+        const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 4000);
+        try {
+          await fetch(`${base(relayUrl)}/api/v1/faucet`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({account: id.publicHex}), signal: ctrl.signal});
+        } finally { clearTimeout(t); }
+      } catch { /* offline/timeout: created with $0, can be funded later */ }
       onCreated(id);
     } catch (e: any) { setErr(String(e?.message ?? e)); setBusy(false); }
   }
@@ -1129,7 +1133,11 @@ function ReceiveMode({identity, relayUrl, nfcReady, onReceived}: {identity: Iden
     setScanning(false);
     setErr(null);
     try {
-      const r = await fetch(`${base(relayUrl)}/api/v1/pay`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({qr: raw.trim()})});
+      const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), NFC_PAY_TIMEOUT_MS);
+      let r;
+      try {
+        r = await fetch(`${base(relayUrl)}/api/v1/pay`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({qr: raw.trim()}), signal: ctrl.signal});
+      } finally { clearTimeout(timer); }
       const j = await r.json().catch(() => ({} as any));
       // Only a definitive rejection is worth an error. A settled or ambiguous (network) result is
       // surfaced by the /receipt poll (which sets `result`), so we never flash a false failure on a
