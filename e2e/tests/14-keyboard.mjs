@@ -19,9 +19,10 @@ export async function run() {
     console.log('[14-keyboard] onboarding…');
     await onboardWallet(driver, 'e2e-keyboard');
 
-    // Open the deposit sheet via the Add money affordance.
-    console.log('[14-keyboard] opening the deposit sheet…');
+    // Open the deposit sheet via the Add money affordance (now via the asset picker — pick Bitcoin).
+    console.log('[14-keyboard] opening the deposit sheet (via asset picker)…');
     await driver.click('btn-deposit', { timeoutMs: 5_000 });
+    await driver.click('asset-picker-row-ckbtc', { timeoutMs: 5_000 });
     await driver.findByTestID('deposit-address', { timeoutMs: 10_000 });
 
     // The keyboard surface is documented in-UI: the "Press Esc to close" hint renders on web.

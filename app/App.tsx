@@ -24,6 +24,8 @@ import {
   classifyPayHttp, receiptCodeFor, decidePayerReceipt, rejectionMessage, isNonceReused,
   type SettleOutcome,
 } from './payments';
+import {encodeApprove, encodeDepositErc20, principalToBytes32} from './cketh';
+import {getEthereumProvider, connectWallet, sendTransaction} from './wallet';
 
 const {DpayCore, DpayNfc} = NativeModules as {DpayCore: DpayCoreApi; DpayNfc: DpayNfcApi};
 
@@ -201,6 +203,7 @@ const CATALOG_CACHE_KEY = 'dpay.currencies.v1';
 const BUNDLED_CATALOG: CurrencyDescriptor[] = [
   {currency: 0, ledger: '', mintable: true, minter: null, minter_family: null, symbol: '$', decimals: 2},
   {currency: 1, ledger: '', mintable: false, minter: 'mqygn-kiaaa-aaaar-qaadq-cai', minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8},
+  {currency: 2, ledger: 'xevnm-gaaaa-aaaar-qafnq-cai', mintable: false, minter: 'sv3dd-oaaaa-aaaar-qacoa-cai', minter_family: 'CkEthErc20', symbol: 'ckUSDC', decimals: 6},
 ];
 // Fetch the catalog from the relay, caching to AsyncStorage. Best-effort: on any failure (offline,
 // timeout, bad JSON) returns `prior` (the cache or bundled default) so the UI never blocks on it.
@@ -247,12 +250,24 @@ const FD_CKBTC: FamilyDisplay = {
   networkLabel: 'Bitcoin', nativeAsset: 'BTC', blockMin: 10,
   withdrawMinRaw: 50_000, amountDecimals: 8, addressPlaceholder: 'bc1q…',
 };
-const FAMILY_DISPLAY: Partial<Record<MinterFamily, FamilyDisplay>> = {CkBtcUtxo: FD_CKBTC};
+// ckERC-20 (ckUSDC etc.): the onramp is a wallet-connect contract-call flow (NOT a per-principal
+// address) — see CkErc20DepositSheet. These display fields still drive the asset card + amounts.
+const FD_CKETH_ERC20: FamilyDisplay = {
+  networkLabel: 'Ethereum', nativeAsset: 'USDC', blockMin: 1,
+  withdrawMinRaw: 0, amountDecimals: 6, addressPlaceholder: '0x…',
+};
+const FAMILY_DISPLAY: Partial<Record<MinterFamily, FamilyDisplay>> = {CkBtcUtxo: FD_CKBTC, CkEthErc20: FD_CKETH_ERC20};
 // Resolve a currency's family display from the catalog; falls back to the ckBTC config so the flows
 // always render (the catalog guarantees the CkBtcUtxo entry carries its family).
 function familyDisplay(catalog: CurrencyDescriptor[], currency: number): FamilyDisplay {
   const f = catalog.find(c => c.currency === currency)?.minter_family ?? null;
   return (f ? FAMILY_DISPLAY[f] : null) ?? FD_CKBTC;
+}
+// A stable ASCII key for an asset's testID (the catalog symbol may be a non-ASCII glyph like ₿).
+// ckBTC keeps 'ckbtc' to honour the existing e2e testID contract; other assets use their symbol.
+function assetTestKey(a: CurrencyDescriptor): string {
+  if (a.minter_family === 'CkBtcUtxo') return 'ckbtc';
+  return (a.symbol ?? familyDisplay([], a.currency).nativeAsset ?? 'asset').toLowerCase();
 }
 // Format raw smallest-units as a decimal amount + unit suffix (e.g. sats → "0.00012345 BTC").
 // Generalizes the old btc() so any family's amounts render from its config — no per-asset literals.
@@ -278,6 +293,17 @@ async function depositAddress(relayUrl: string, accountHex: string, currency: nu
 async function depositRefresh(relayUrl: string, accountHex: string, currency: number, signal?: AbortSignal): Promise<DepositRefresh> {
   const r = await fetch(`${base(relayUrl)}/api/v1/deposit/refresh/${accountHex}?currency=${currency}`, {method: 'POST', signal});
   if (!r.ok) throw new Error(`deposit/refresh ${r.status}`);
+  return r.json();
+}
+
+// ckERC-20 onramp params (helper contract, ERC-20 address, facade principal) for a CkEthErc20-family
+// currency. The app builds the user's two Ethereum transactions from these (cketh.ts); the user signs
+// in their own wallet (non-custodial). Errors throw with the status (503 = no ckERC-20 onramp for the
+// currency / relay unreachable).
+type CkErc20OnrampParams = {helper_address: string; erc20_address: string; facade_principal: string};
+async function ckerc20OnrampParams(relayUrl: string, currency: number, signal?: AbortSignal): Promise<CkErc20OnrampParams> {
+  const r = await fetch(`${base(relayUrl)}/api/v1/onramp/ckerc20?currency=${currency}`, {signal});
+  if (!r.ok) throw new Error(`onramp/ckerc20 ${r.status}`);
   return r.json();
 }
 
@@ -515,13 +541,12 @@ function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: (id: Id
 function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity; relayUrl: string; setRelayUrl: (s: string) => void; onReset: () => void}) {
   const [mode, setMode] = useState<'pay' | 'receive'>('pay');
   const [balance, setBalance] = useState<number | null>(null);
-        // ckBTC (currency id resolved from the catalog via `ckBtcCurrency`) is a SEPARATE asset on a separate ledger. The primary
-  // wallet header shows `$` = DEMO_USD (currency 0) only — by CLAUDE.md's hard rule ("Money shown
-  // as `$`, never token name"). But a topped-up ckBTC balance must be VISIBLE (the seamless top-up
-  // goal: after the deposit sheet closes, the credited asset is still on screen). So we fetch
-  // currency 1 on the same poll and render it as a clearly-labeled, separate "Bitcoin" asset card
-  // (the deposit instructions already legitimately say "Bitcoin"/"BTC") — never merged into `$`.
-  const [ckBtcBalance, setCkBtcBalance] = useState<number | null>(null);
+        // Non-primary (ramp) assets — each is a SEPARATE asset on a separate ledger, polled in
+        // parallel on the same cadence and rendered as its own clearly-labeled card (never merged into
+        // the `$` header, which is DEMO_USD only per CLAUDE.md's hard rule). Balances are keyed by the
+        // currency id resolved from the runtime catalog (so adding an asset = config-only). A null/0
+        // entry means "not yet funded" — ramp asset cards render only when their balance is non-zero.
+  const [assetBalances, setAssetBalances] = useState<Record<number, number>>({});
   const [online, setOnline] = useState(false);
   const [offlineSpent, setOfflineSpent] = useState(0);
   const [history, setHistory] = useState<Txn[]>([]);
@@ -532,14 +557,10 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
   const [topUpBusy, setTopUpBusy] = useState(false);
   const [topUpErr, setTopUpErr] = useState<string | null>(null);
   // ck-deposit sheet (ckBTC-style native-chain deposit). Opens over the wallet; closing tears down
-  // its address/refresh polling. Independent of the DEMO_USD faucet (btn-topup) above. On web it
-  // auto-opens when the page is loaded with `?screen=deposit` (bookmarkable top-up deep link).
-  const [depositOpen, setDepositOpen] = useState<boolean>(readDepositDeepLink);
-  // Withdraw sheet (ckBTC → native BTC out). Opens from the ckBTC asset card's "Withdraw" affordance
-  // (only shown when the ckBTC balance is non-zero). Independent state from the deposit sheet.
-  const [withdrawOpen, setWithdrawOpen] = useState<boolean>(false);
-  // Settings sheet — relay URL, demo faucet, reset (UX-V2/V3: moved off the main screen into its
-  // own overlay so the wallet surface is clean, and reset gets a confirmation dialog).
+  // Asset picker + per-currency deposit/withdraw sheets. `?screen=deposit` deep-links to the primary
+  // CkBtcUtxo ramp (bookmarkable). The header "Add money" button opens the picker when >1 onrampable
+  // asset exists, else goes straight to the ckBTC sheet.
+  const [pickerOpen, setPickerOpen] = useState<boolean>(false);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   // Currency catalog — the runtime source of truth for which assets exist + how to display/fund
   // them. Loaded from AsyncStorage cache then refreshed from GET /currencies on mount; the bundled
@@ -555,11 +576,16 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
     () => catalog.find(c => c.minter_family === 'CkBtcUtxo')?.currency ?? 1,
     [catalog],
   );
-  // The ckBTC asset's chain/rail display config (network label, native asset symbol, block time, min
-  // withdrawal, decimals) — resolved from the catalog's minter_family. Drives the deposit + withdraw
-  // sheets + the asset card so none of them hardcode chain-specific literals (single-sourced in
-  // FAMILY_DISPLAY). Falls back to FD_CKBTC before the catalog loads.
-  const ckBtcDisplay = familyDisplay(catalog, ckBtcCurrency);
+  // Which asset's deposit/withdraw sheet is open (null = closed). Set by the asset picker / asset
+  // cards. The sheet rendered is chosen by the currency's minter_family (DepositSheet vs
+  // CkErc20DepositSheet). The `?screen=deposit` deep link seeds the ckBTC ramp on mount.
+  const [depositCurrency, setDepositCurrency] = useState<number | null>(readDepositDeepLink() ? ckBtcCurrency : null);
+  const [withdrawCurrency, setWithdrawCurrency] = useState<number | null>(null);
+  // The catalog's onrampable (ramp) assets: non-primary currencies that carry a minter_family.
+  const rampAssets = useMemo(() => catalog.filter(c => c.minter_family), [catalog]);
+  // Stable comma-joined id list for the balance-poll effect deps (avoids re-running the poll on
+  // every catalog array identity change; only re-runs when the actual set of ramp currencies changes).
+  const rampCurrencyIds = useMemo(() => rampAssets.map(a => a.currency).join(','), [rampAssets]);
 
   // Read the device NFC radio state once (re-checked when the app returns to the foreground, since
   // the user may toggle NFC in system settings). Purely informational for the status chip; failure
@@ -601,30 +627,39 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
     const poll = async () => {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 4000);
-      // ckBTC (currency 1) fetch runs in PARALLEL + best-effort with its own AbortController, so a
-      // currency-1 hiccup can never flip the primary `$` balance offline or fail its poll. The two
-      // assets live on separate ledgers — fetching one must not affect the other's display.
-      const ctrlCk = new AbortController();
-      const tCk = setTimeout(() => ctrlCk.abort(), 4000);
-      const ckFetch = fetch(`${base(relayUrl)}/api/v1/balance/${identity.publicHex}?currency=${ckBtcCurrency}`, {signal: ctrlCk.signal})
-        .then(r => r.ok ? r.json().catch(() => null) : null)
-        .then(j => (j && typeof j.balance === 'number') ? (j.balance as number) : null)
-        .catch(() => null)
-        .finally(() => clearTimeout(tCk));
+      // Non-primary (ramp) asset balances run in PARALLEL + best-effort, each with its own
+      // AbortController, so a hiccup on one asset's ledger can never flip the primary `$` balance
+      // offline or fail its poll. The assets live on separate ledgers — fetching one must not affect
+      // another's display. A null result keeps the prior value (no flap on a single miss).
+      const rampFetches = rampAssets.map(a => {
+        const c = new AbortController();
+        const to = setTimeout(() => c.abort(), 4000);
+        return fetch(`${base(relayUrl)}/api/v1/balance/${identity.publicHex}?currency=${a.currency}`, {signal: c.signal})
+          .then(r => r.ok ? r.json().catch(() => null) : null)
+          .then(j => (j && typeof j.balance === 'number') ? (j.balance as number) : null)
+          .catch(() => null)
+          .finally(() => clearTimeout(to))
+          .then(b => ({currency: a.currency, balance: b}));
+      });
       try {
         const r = await fetch(`${base(relayUrl)}/api/v1/balance/${identity.publicHex}`, {signal: ctrl.signal});
         const j = await r.json();
         if (alive && r.ok && typeof j.balance === 'number') { setBalance(j.balance); setOnline(true); setOfflineSpent(0); }
         else if (alive) setOnline(false);
       } catch { if (alive) setOnline(false); } finally { clearTimeout(t); }
-      // Settle the ckBTC balance after the primary poll resolves; null = keep the prior value
-      // (offline / transient), so the asset card never flaps on a single miss.
-      const ck = await ckFetch;
-      if (alive && ck != null) { setCkBtcBalance(ck); }
+      // Settle the ramp balances after the primary poll resolves; merge keeping prior on null.
+      const results = await Promise.all(rampFetches);
+      if (alive) {
+        setAssetBalances(prev => {
+          const next = {...prev};
+          for (const {currency, balance} of results) if (balance != null) next[currency] = balance;
+          return next;
+        });
+      }
     };
     poll(); const id = setInterval(poll, POLL.balance);
     return () => { alive = false; clearInterval(id); };
-  }, [relayUrl, identity.publicHex, ckBtcCurrency]);
+  }, [relayUrl, identity.publicHex, rampCurrencyIds]);
 
   // Durable transaction history sourced from the ledger (the canister records every settled payment;
   // the relay surfaces it at GET /api/v1/transactions/{hex}). This replaces the ephemeral in-memory
@@ -720,7 +755,7 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
                 topped-up balance exists, and is absent for demo-$-only wallets that have nothing to cash
                 out. A 390px header can't hold the balance + two action buttons without overflow, so the
                 single "Add money" pill stays here and "Cash out" rides the asset card. */}
-            <Pressable testID="btn-deposit" style={S.addMoneyBtn} onPress={() => setDepositOpen(true)}>
+            <Pressable testID="btn-deposit" style={S.addMoneyBtn} onPress={() => rampAssets.length > 1 ? setPickerOpen(true) : setDepositCurrency(ckBtcCurrency)}>
               <Text style={S.addMoneyBtnText}>＋ Add money</Text>
             </Pressable>
           </View>
@@ -736,23 +771,37 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
         {mode === 'pay'
           ? <PayMode identity={identity} online={online} relayUrl={relayUrl} nfcReady={nfc === 'ready'} onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance} />
           : <ReceiveMode identity={identity} relayUrl={relayUrl} nfcReady={nfc === 'ready'} onReceived={onActivity} />}
-        {/* ckBTC asset card — a SEPARATE asset (currency 1), shown only when non-zero so a topped-up
-            wallet keeps its credited Bitcoin VISIBLE after the deposit sheet closes. Deliberately
-            distinct from the `$` header (DEMO_USD): the family's network label + native-asset units,
-            its own card. The "Cash out" affordance matches the header button (money OUT, non-custodial
-            on-device sig); shown only when there's a balance to cash out. */}
-        {ckBtcBalance != null && ckBtcBalance > 0 ? (
-          <View testID="asset-ckbtc" style={S.assetCard}>
-            <View style={S.assetRow}>
-              <Text style={S.assetLabel}>{ckBtcDisplay.networkLabel}</Text>
-              <Text style={S.assetAmt}>{fmtAsset(ckBtcBalance, ckBtcDisplay.amountDecimals, ckBtcDisplay.nativeAsset)}</Text>
+        {/* Ramp asset cards — each is a SEPARATE asset on a separate ledger (currency N>0), shown
+            only when non-zero so a topped-up wallet keeps its credited asset VISIBLE after the deposit
+            sheet closes, and an unfunded wallet isn't cluttered with empty cards (e2e 05 asserts
+            asset cards stay hidden at 0). Deliberately distinct from the `$` header (DEMO_USD): each
+            card shows the family's network label + native-asset units, resolved from the catalog via
+            FAMILY_DISPLAY. "Cash out" appears only for families with an offramp (CkBtcUtxo today). */}
+        {rampAssets.map(a => {
+          const bal = assetBalances[a.currency] ?? 0;
+          if (bal <= 0) return null;
+          const disp = familyDisplay(catalog, a.currency);
+          const testKey = assetTestKey(a);
+          return (
+            <View key={a.currency} testID={`asset-${testKey}`} style={S.assetCard}>
+              <View style={S.assetRow}>
+                <Text style={S.assetLabel}>{disp.networkLabel}</Text>
+                <Text style={S.assetAmt}>{fmtAsset(bal, disp.amountDecimals, disp.nativeAsset)}</Text>
+              </View>
+              <Text style={S.assetSub}>{`your deposited ${disp.networkLabel} · spendable where a merchant requests it`}</Text>
+              <View style={S.assetActions}>
+                <Pressable testID={`asset-add-${testKey}`} style={S.assetActionBtn} onPress={() => setDepositCurrency(a.currency)}>
+                  <Text style={S.assetActionText}>＋ Add</Text>
+                </Pressable>
+                {a.minter_family === 'CkBtcUtxo' ? (
+                  <Pressable testID="btn-withdraw" style={S.withdrawLink} onPress={() => setWithdrawCurrency(a.currency)}>
+                    <Text style={S.withdrawLinkText}>Cash out</Text>
+                  </Pressable>
+                ) : null}
+              </View>
             </View>
-            <Text style={S.assetSub}>{`your deposited ${ckBtcDisplay.networkLabel} · spendable where a merchant requests it`}</Text>
-            <Pressable testID="btn-withdraw" style={S.withdrawLink} onPress={() => setWithdrawOpen(true)}>
-              <Text style={S.withdrawLinkText}>Cash out</Text>
-            </Pressable>
-          </View>
-        ) : null}
+          );
+        })}
         {history.length > 0 ? (
           <View style={S.histCard}>
             <Text style={S.histTitle}>Recent</Text>
@@ -773,17 +822,27 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
         </Pressable>
       </View>
 
-      {depositOpen ? (
-        <DepositSheet identity={identity} relayUrl={relayUrl} currency={ckBtcCurrency} display={ckBtcDisplay} onClose={() => setDepositOpen(false)} />
+      {pickerOpen ? (
+        <AssetPickerSheet
+          rampAssets={rampAssets}
+          catalog={catalog}
+          onPick={(currency) => { setDepositCurrency(currency); setPickerOpen(false); }}
+          onClose={() => setPickerOpen(false)}
+        />
       ) : null}
-      {withdrawOpen ? (
+      {depositCurrency != null ? (
+        catalog.find(c => c.currency === depositCurrency)?.minter_family === 'CkEthErc20'
+          ? <CkErc20DepositSheet identity={identity} relayUrl={relayUrl} currency={depositCurrency} display={familyDisplay(catalog, depositCurrency)} onClose={() => setDepositCurrency(null)} />
+          : <DepositSheet identity={identity} relayUrl={relayUrl} currency={depositCurrency} display={familyDisplay(catalog, depositCurrency)} onClose={() => setDepositCurrency(null)} />
+      ) : null}
+      {withdrawCurrency != null ? (
         <WithdrawSheet
           identity={identity}
           relayUrl={relayUrl}
-          currency={ckBtcCurrency}
-          display={ckBtcDisplay}
-          ckBtcBalance={ckBtcBalance ?? 0}
-          onClose={() => setWithdrawOpen(false)}
+          currency={withdrawCurrency}
+          display={familyDisplay(catalog, withdrawCurrency)}
+          ckBtcBalance={assetBalances[withdrawCurrency] ?? 0}
+          onClose={() => setWithdrawCurrency(null)}
           onWithdrawn={onActivity}
         />
       ) : null}
@@ -1835,6 +1894,227 @@ function SettingsSheet({relayUrl, setRelayUrl, onTopUp, topUpBusy, topUpErr, onC
   );
 }
 
+// Asset picker — shown from the header "Add money" button when more than one onrampable asset exists.
+// A vertical list of the catalog's ramp assets (those carrying a minter_family); tapping a row opens
+// that asset's family-specific deposit sheet. The picker is the cohesive entry for MANY currencies:
+// every onrampable asset appears uniformly — there is no "supported"/"unsupported" split.
+function AssetPickerSheet({rampAssets, catalog, onPick, onClose}: {
+  rampAssets: CurrencyDescriptor[];
+  catalog: CurrencyDescriptor[];
+  onPick: (currency: number) => void;
+  onClose: () => void;
+}) {
+  useEscapeToClose(onClose);
+  return (
+    <View style={S.sheetOverlay}>
+      <SafeAreaView style={S.sheet}>
+        <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+        <View style={S.sheetHead}>
+          <Text style={S.sheetTitle}>Add money</Text>
+          <Pressable testID="btn-picker-close" style={S.sheetClose} onPress={onClose}><Text style={S.sheetCloseX}>✕</Text></Pressable>
+        </View>
+        <ScrollView contentContainerStyle={S.sheetBody} keyboardShouldPersistTaps="handled">
+          <Text style={S.dim2}>Choose an asset to add to your wallet.</Text>
+          {rampAssets.map(a => {
+            const disp = familyDisplay(catalog, a.currency);
+            const key = assetTestKey(a);
+            return (
+              <Pressable key={a.currency} testID={`asset-picker-row-${key}`} style={S.pickerRow} onPress={() => onPick(a.currency)}>
+                <Text style={S.pickerLabel}>{disp.networkLabel}</Text>
+                <Text style={S.pickerSub}>{`Send ${disp.nativeAsset} on ${disp.networkLabel}`}</Text>
+              </Pressable>
+            );
+          })}
+          {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
+        </ScrollView>
+      </SafeAreaView>
+    </View>
+  );
+}
+
+// ckERC20 (ckUSDC) direct onramp — a wallet-connect flow. The user connects their OWN Ethereum wallet
+// (MetaMask/Rabby; window.ethereum on web), dpay BUILDS the two transactions (approve the helper to
+// spend USDC, then depositErc20 into the helper with the facade principal + the user's pubkey as the
+// subaccount), and the wallet SIGNS + broadcasts. dpay never sees the ETH key — non-custodial. The
+// ckETH minter scrapes Ethereum logs on a ~3min heartbeat and mints ckUSDC to the user's subaccount
+// (~20min); dpay just polls the ckUSDC balance. The calldata is built by cketh.ts (byte-exact vs the
+// real helper-contract ABI; pinned by goldens).
+function CkErc20DepositSheet({identity, relayUrl, currency, display, onClose}: {
+  identity: Identity;
+  relayUrl: string;
+  currency: number;
+  display: FamilyDisplay;
+  onClose: () => void;
+}) {
+  // phase: 'connect' (no wallet yet) → 'enter' (wallet connected, enter amount) → 'sending' (txs
+  // submitted, waiting on the user's wallet to sign) → 'watching' (txs mined, waiting for the mint)
+  // → 'done' (balance grew).
+  const [phase, setPhase] = useState<'connect' | 'enter' | 'sending' | 'watching' | 'done'>('connect');
+  const [account, setAccount] = useState<string | null>(null);
+  const [amount, setAmount] = useState('');
+  const [err, setErr] = useState<string | null>(null);
+  const [params, setParams] = useState<CkErc20OnrampParams | null>(null);
+  const [startBal, setStartBal] = useState<number | null>(null);
+
+  useEscapeToClose(onClose);
+
+  // Load the onramp params (helper address, ERC-20 address, facade principal) once on open.
+  useEffect(() => {
+    let alive = true;
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 8000);
+    (async () => {
+      try {
+        const p = await ckerc20OnrampParams(relayUrl, currency, ctrl.signal);
+        if (alive) setParams(p);
+      } catch { if (alive) setErr('Could not reach the relay for onramp details.'); }
+      finally { if (alive) clearTimeout(t); }
+    })();
+    return () => { alive = false; ctrl.abort(); };
+  }, [relayUrl, currency]);
+
+  const connect = useCallback(async () => {
+    setErr(null);
+    const provider = getEthereumProvider();
+    if (!provider) { setErr('No Ethereum wallet found. Install MetaMask or Rabby in this browser.'); return; }
+    try {
+      const acct = await connectWallet(provider);
+      setAccount(acct);
+      // Snapshot the starting balance so the watching poll can detect the mint (a GROWTH from here).
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 4000);
+        const r = await fetch(`${base(relayUrl)}/api/v1/balance/${identity.publicHex}?currency=${currency}`, {signal: ctrl.signal});
+        const j = await r.json().catch(() => ({} as any));
+        if (typeof j.balance === 'number') setStartBal(j.balance);
+        clearTimeout(t);
+      } catch { /* best-effort snapshot; watching falls back to any-positive */ }
+      setPhase('enter');
+    } catch (e: any) {
+      setErr(String(e?.message ?? e) || 'Could not connect to your wallet.');
+    }
+  }, [relayUrl, currency, identity.publicHex]);
+
+  const submit = useCallback(async () => {
+    if (!account || !params) return;
+    const provider = getEthereumProvider();
+    if (!provider) { setErr('Wallet disconnected.'); return; }
+    // Parse the human amount into the smallest units (USDC = 6 decimals).
+    const units = Math.round((parseFloat(amount) || 0) * Math.pow(10, display.amountDecimals));
+    if (!(units > 0)) { setErr('Enter an amount greater than zero.'); return; }
+    const unitBig = BigInt(units);
+    const principalWord = principalToBytes32(params.facade_principal);
+    // The user's ckUSDC subaccount is their 32-byte Ed25519 pubkey (the same subaccount the balance
+    // poll + pay path read), so the mint lands at the account the wallet already shows.
+    const subaccount = identity.publicHex;
+    setErr(null);
+    setPhase('sending');
+    try {
+      // 1. approve(helper, amount) on the USDC ERC-20 contract.
+      const approveData = encodeApprove(params.helper_address, unitBig);
+      await sendTransaction(provider, account, {to: params.erc20_address, data: approveData});
+      // 2. depositErc20(usdc, amount, principal, subaccount) on the helper contract.
+      const depositData = encodeDepositErc20(params.erc20_address, unitBig, principalWord, subaccount);
+      await sendTransaction(provider, account, {to: params.helper_address, data: depositData});
+      setPhase('watching');
+    } catch (e: any) {
+      const msg = String(e?.message ?? e);
+      setErr(/reject|denied|user/i.test(msg) ? 'Transaction not signed.' : (msg || 'Transaction failed.'));
+      setPhase('enter');
+    }
+  }, [account, params, amount, display.amountDecimals, identity.publicHex]);
+
+  // Watching: poll the ckUSDC balance for the mint. The minter scrapes ETH logs on a ~3min heartbeat;
+  // credit typically lands within ~20min. Any growth from the snapshot (or a positive balance when no
+  // snapshot) means the mint landed.
+  useEffect(() => {
+    if (phase !== 'watching') return;
+    let alive = true;
+    const poll = async () => {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 4000);
+      try {
+        const r = await fetch(`${base(relayUrl)}/api/v1/balance/${identity.publicHex}?currency=${currency}`, {signal: ctrl.signal});
+        const j = await r.json().catch(() => ({} as any));
+        if (alive && r.ok && typeof j.balance === 'number') {
+          if (startBal == null ? j.balance > 0 : j.balance > startBal) setPhase('done');
+        }
+      } catch { /* keep watching */ } finally { clearTimeout(t); }
+    };
+    poll();
+    const id = setInterval(poll, POLL.deposit);
+    return () => { alive = false; clearInterval(id); };
+  }, [phase, relayUrl, identity.publicHex, currency, startBal]);
+
+  const fmt = (n: number) => fmtAsset(n, display.amountDecimals, display.nativeAsset);
+
+  return (
+    <View style={S.sheetOverlay}>
+      <SafeAreaView style={S.sheet}>
+        <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+        <View style={S.sheetHead}>
+          <Text style={S.sheetTitle}>{`Add ${display.networkLabel}`}</Text>
+          <Pressable testID="btn-ckerc20-close" style={S.sheetClose} onPress={onClose}><Text style={S.sheetCloseX}>✕</Text></Pressable>
+        </View>
+        <ScrollView contentContainerStyle={S.sheetBody} keyboardShouldPersistTaps="handled">
+          {/* Wrong-network warning — unmissable, above the flow. */}
+          <View testID="ckerc20-deposit" style={S.instrCard}>
+            <Text style={S.instrLine}>
+              Send only <Text style={S.instrAsset}>{display.nativeAsset}</Text> on{' '}
+              <Text style={S.instrAsset}>{display.networkLabel}</Text>. Other assets or chains sent
+              this way won't credit and may be lost.
+            </Text>
+            <Text style={S.instrCustody}>
+              dpay never holds your keys — your wallet signs, and ckUSDC mints 1:1 to your wallet on
+              confirmation (~20 min).
+            </Text>
+          </View>
+
+          {err ? <Text testID="ckerc20-status" style={S.err}>{err}</Text> : null}
+
+          {phase === 'connect' ? (
+            <Pressable testID="btn-connect-wallet" style={S.primaryWide} onPress={connect}>
+              <Text style={S.primaryText}>Connect wallet</Text>
+            </Pressable>
+          ) : phase === 'enter' || phase === 'sending' ? (
+            <>
+              <Text style={S.inputLabel}>{`Amount (${display.nativeAsset})`}</Text>
+              <TextInput
+                testID="ckerc20-amount"
+                style={S.amountInput}
+                keyboardType="decimal-pad"
+                placeholder={`0.00`}
+                value={amount}
+                onChangeText={setAmount}
+                editable={phase === 'enter'}
+                onSubmitEditing={phase === 'enter' ? submit : undefined}
+              />
+              {account ? <Text style={S.dim2}>{`From ${account.slice(0, 6)}…${account.slice(-4)}`}</Text> : null}
+              <Pressable testID="btn-approve" style={[S.primaryWide, phase === 'sending' && {opacity: 0.6}]} onPress={submit} disabled={phase === 'sending'}>
+                <Text style={S.primaryText}>{phase === 'sending' ? 'Confirm in your wallet…' : 'Approve & deposit'}</Text>
+              </Pressable>
+            </>
+          ) : phase === 'watching' ? (
+            <View style={S.centerAll}>
+              <ActivityIndicator color={C.brand} />
+              <Text testID="ckerc20-status" style={S.paidSub}>Transactions submitted ✓</Text>
+              <Text style={S.dim2}>Watching for your mint — the ckETH minter scrapes Ethereum every few minutes; credit typically lands within ~20 min.</Text>
+            </View>
+          ) : (
+            <View style={S.centerAll}>
+              <View style={S.check}><Text style={S.checkMark}>✓</Text></View>
+              <Text style={S.paidText}>Deposited ✓</Text>
+              <Text style={S.paidSub}>ckUSDC minted to your wallet.</Text>
+              <Text style={S.dim2}>Your balance updates automatically.</Text>
+            </View>
+          )}
+          {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
+        </ScrollView>
+      </SafeAreaView>
+    </View>
+  );
+}
+
 const S = StyleSheet.create({
   root: {flex: 1, backgroundColor: C.bg},
   centerAll: {alignItems: 'center', justifyContent: 'center'},
@@ -1920,6 +2200,12 @@ const S = StyleSheet.create({
   assetLabel: {fontSize: 16, fontWeight: '700', color: C.ink},
   assetAmt: {fontSize: 16, fontWeight: '700', color: C.brand, fontFamily: 'monospace'},
   assetSub: {fontSize: 12, color: C.sub2, marginTop: 6},
+  assetActions: {flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12},
+  assetActionBtn: {paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: C.line2},
+  assetActionText: {color: C.sub, fontWeight: '700', fontSize: 13},
+  pickerRow: {alignSelf: 'stretch', paddingVertical: 16, paddingHorizontal: 16, borderRadius: 12, backgroundColor: C.card, borderWidth: 1, borderColor: C.line2, marginTop: 10},
+  pickerLabel: {fontSize: 16, fontWeight: '700', color: C.ink},
+  pickerSub: {fontSize: 12, color: C.sub2, marginTop: 4},
   settingsBar: {paddingHorizontal: 22, paddingVertical: 10, borderTopWidth: 1, borderTopColor: C.line},
   settingsLinkBtn: {alignSelf: 'flex-start'},
   settingsLink: {fontSize: 14, color: C.sub, fontWeight: '600'},

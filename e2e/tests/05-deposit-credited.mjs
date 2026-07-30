@@ -52,9 +52,11 @@ export async function run() {
     const before = await getBalance(relayBaseURL, accountHex, DEPOSIT_CURRENCY);
     assert(before === 0, `pre-seed ckBTC balance must be 0, got ${before}`);
 
-    // 3. Open the deposit sheet via the "Add money" affordance.
-    console.log('[05-deposit-credited] opening the deposit sheet…');
+    // 3. Open the deposit sheet via the "Add money" affordance. With >1 ramp asset the button opens
+    //    the asset picker; pick Bitcoin (the CkBtcUtxo ramp) to reach the deposit sheet.
+    console.log('[05-deposit-credited] opening the deposit sheet (via asset picker)…');
     await driver.click('btn-deposit', { timeoutMs: 5_000 });
+    await driver.click('asset-picker-row-ckbtc', { timeoutMs: 5_000 });
     await driver.findByTestID('deposit-address', { timeoutMs: 10_000 });
 
     // 4. Seed a pending ckBTC deposit for THIS account via the test-helpers route. The balance is NOT

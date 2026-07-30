@@ -21,9 +21,11 @@ export async function run() {
     console.log('[04-deposit-copy] onboarding…');
     await onboardWallet(driver, 'e2e-copy');
 
-    // 2. Open the sheet via the promoted "Add money" affordance (U5).
-    console.log('[04-deposit-copy] clicking btn-deposit (Add money)…');
+    // 2. Open the sheet via the promoted "Add money" affordance. With >1 ramp asset in the catalog
+    //    the button opens the asset picker; pick Bitcoin (the CkBtcUtxo ramp) to reach the deposit sheet.
+    console.log('[04-deposit-copy] clicking btn-deposit (Add money) → asset picker…');
     await driver.click('btn-deposit', { timeoutMs: 5_000 });
+    await driver.click('asset-picker-row-ckbtc', { timeoutMs: 5_000 });
 
     // 3. Read the address before copying.
     await driver.findByTestID('deposit-address', { timeoutMs: 10_000 });
