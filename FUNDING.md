@@ -59,8 +59,10 @@ custodian, dpay not in the flow.
   wallet already reads as its balance (a confirmed deposit is automatically the next balance poll's
   number). No settlement/balance/history code changed to add it. Mainnet canister IDs: **minter
   `mqygn-kiaaa-aaaar-qaadq-cai`**, **ledger `mxzaz-hqaaa-aaaar-qaada-cai`**
-  (`docs.internetcomputer.org/references/chain-key-canister-ids/`). **Governance step (not code):** the
-  facade principal must be **KYC-allowlisted** for ckBTC mainnet minting, or the minter refuses to mint.
+  (`docs.internetcomputer.org/references/chain-key-canister-ids/`). **No KYC step:** the mainnet
+  ckBTC minter runs in GeneralAvailability mode with no KYC checker (`get_minter_info` confirms only
+  automatic KYT — Know-Your-Transaction — that screens tainted UTXOs, not principals); the facade
+  mints for any clean, confirmed deposit with no allowlist.
   Withdrawal is the mirror (the minter burns ckBTC and sends to the user's native BTC address) — a
   follow-up, not yet wired through the facade.
 - **ckUSDC (launch rail) — USDC on Ethereum → ckERC20.** Deposits go through the ckETH/ckERC20 minter

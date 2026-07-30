@@ -16,10 +16,12 @@
 - [ ] **Rotate `ADMIN_CALLERS`** off the fixed deploy identity to a governed principal.
       (`docs/GOVERNANCE.md` checklist.)
 
-### External blocker (HARD — not fixable in this repo)
+### Optional real-money check (not a blocker)
 
-- [ ] **KYC-allowlist the facade principal** `ssqti-wiaaa-aaaab-qhdia-cai` for ckBTC minting.
-      Until it lands, live `refresh_deposit` mints nothing (credited path proven offline only).
+- [ ] (Optional, costs real BTC) Send a small on-chain deposit to a facade deposit address, wait 4
+      confirmations, trigger `refresh_deposit`, confirm the live mint credits currency 1. The path is
+      open — ckBTC mainnet minting needs **no KYC** (minter is GeneralAvailability, no KYC checker;
+      verified via `get_minter_info`).
 
 ### Production / scale (medium — defer with the documented mitigation)
 

@@ -4,7 +4,7 @@
 
 Read **`CLAUDE.md`** first — it holds the project memory, the non-negotiables (autonomous + offline dev loop, shared Rust core, PocketIC, non-custodial/no-swap/no-exchange-creds), the positioning/monetization pointers, and the current build state. Treat its constraints as hard requirements, not preferences.
 
-Then read **`OPEN_ISSUES.md`** — the authoritative list of known blockers and documented follow-ups (KYC allowlist, chain-key receipts, governance hand-off, etc.). Check it before starting work so you don't re-derive what's already known or re-attempt something blocked on an external step.
+Then read **`OPEN_ISSUES.md`** — the authoritative list of known blockers and documented follow-ups (chain-key receipts, governance hand-off, reconcile generalization, etc.). Check it before starting work so you don't re-derive what's already known or re-attempt something blocked on an external step.
 
 ## Codebase analysis — read before working, keep current
 

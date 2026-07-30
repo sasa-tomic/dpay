@@ -350,7 +350,8 @@ outer-loop device gate (out of the offline inner loop).
   note now resolved by having a concrete deposit path.
 - **`FUNDING.md`:** replace the "shape recorded" placeholder with the implemented facade-proxy model
   + mainnet canister IDs (ckBTC minter `mqygn-kiaaa-aaaar-qaadq-cai`, ledger
-  `mxzaz-hqaaa-aaaar-qaada-cai`) + the KYC-allowlist governance step.
+  `mxzaz-hqaaa-aaaar-qaada-cai`). NOTE: ckBTC mainnet minting needs **no KYC** — the minter runs in
+  GeneralAvailability mode with no KYC checker (only automatic KYT screening of tainted UTXOs).
 - **`dfx/dpay_canister.did`:** the hand-maintained candid (§1.5).
 
 ---
@@ -385,4 +386,6 @@ integration) + `just ui`; iterate to all-green. Update `CODEBASE_ANALYSIS.md` pe
 - ckETH ledger: `ss2fx-dyaaa-aaaar-qacoq-cai` (follow-up)
 - ckUSDC ledger: `xevnm-gaaaa-aaaar-qafnq-cai` (follow-up)
 - Reference: `docs.internetcomputer.org/references/chain-key-canister-ids/`
-- Governance step (not code): the facade principal must be KYC-allowlisted for ckBTC mainnet minting.
+- ckBTC minting needs **no KYC/allowlist** on mainnet — the minter runs in GeneralAvailability mode
+  with no KYC checker (only automatic KYT that screens tainted UTXOs, not principals). Any clean,
+  confirmed deposit mints; the facade's own `get_btc_address`/`update_balance` calls were proven LIVE.
