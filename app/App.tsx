@@ -311,6 +311,17 @@ async function ckerc20OnrampParams(relayUrl: string, currency: number, signal?: 
 // sig is the non-custodial gate); the relay forwards to the facade's `withdraw`. Returns the burn
 // receipt (block_index). Errors throw with the status so the sheet can surface a decline vs offline.
 type WithdrawReceipt = {from: string; destination: string; amount: number; nonce: string; currency: number; block_index: number};
+
+// Saved last-used withdrawal destination, one per currency (Fork-B: NUTS-simple offramp — a returning
+// user re-cashes-out without re-pasting their external address). Best-effort AsyncStorage; never blocks.
+const withdrawAddrKey = (currency: number) => `dpay.withdraw.addr.${currency}`;
+async function loadSavedWithdrawAddr(currency: number): Promise<string | null> {
+  try { return await AsyncStorage.getItem(withdrawAddrKey(currency)); } catch { return null; }
+}
+async function saveWithdrawAddr(currency: number, addr: string): Promise<void> {
+  try { await AsyncStorage.setItem(withdrawAddrKey(currency), addr); } catch { /* best-effort */ }
+}
+
 async function withdrawFunds(relayUrl: string, accountHex: string, btcAddress: string, amountSats: number, nonceHex: string, expiry: number, currency: number, sigHex: string, signal?: AbortSignal): Promise<WithdrawReceipt> {
   const r = await fetch(`${base(relayUrl)}/api/v1/withdraw`, {
     method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -1688,8 +1699,16 @@ function WithdrawSheet({identity, relayUrl, currency, display, ckBtcBalance, onC
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
   const [err, setErr] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<{amount: number; btcAddress: string} | null>(null);
+  const [savedAddr, setSavedAddr] = useState<string | null>(null);
 
   useEscapeToClose(onClose);
+
+  // Load the last-used destination for this currency on open (Fork-B: tap-to-reuse, no re-paste).
+  useEffect(() => {
+    let alive = true;
+    loadSavedWithdrawAddr(currency).then(a => { if (alive && a) { setSavedAddr(a); } });
+    return () => { alive = false; };
+  }, [currency]);
 
   const sats = toSats(amountStr);
   const belowMin = sats > 0 && sats < display.withdrawMinRaw;
@@ -1712,6 +1731,7 @@ function WithdrawSheet({identity, relayUrl, currency, display, ckBtcBalance, onC
       const r = await withdrawFunds(relayUrl, identity.publicHex, address.trim(), sats, nonce, expiry, currency, sigHex, ctrl.signal);
       setReceipt({amount: r.amount, btcAddress: r.destination});
       setPhase('done');
+      void saveWithdrawAddr(currency, address.trim()); // remember for next cash-out (Fork-B)
       onWithdrawn(); // trigger a balance/history refresh
     } catch (e: any) {
       // A 422 policy error (bad sig / insufficient / below min / nonce) or a 503 transient / offline.
@@ -1755,6 +1775,11 @@ function WithdrawSheet({identity, relayUrl, currency, display, ckBtcBalance, onC
               <Text style={S.dim2}>{`Available: ${fmtAsset(ckBtcBalance, display.amountDecimals, display.nativeAsset)} · min ${fmtAsset(display.withdrawMinRaw, display.amountDecimals, display.nativeAsset)}`}</Text>
 
               <Text style={S.inputLabel}>{`${display.nativeAsset} address`}</Text>
+              {savedAddr && address.trim().length === 0 ? (
+                <Pressable testID="btn-withdraw-saved" style={S.savedAddrChip} onPress={() => setAddress(savedAddr)}>
+                  <Text style={S.savedAddrText}>{`Use last: ${savedAddr.length > 28 ? savedAddr.slice(0, 14) + '…' + savedAddr.slice(-12) : savedAddr}`}</Text>
+                </Pressable>
+              ) : null}
               <TextInput
                 testID="withdraw-address-input"
                 style={S.withdrawAddrInput}
@@ -2248,6 +2273,8 @@ const S = StyleSheet.create({
   // Withdraw sheet form fields.
   inputLabel: {fontSize: 13, fontWeight: '700', color: C.sub, alignSelf: 'flex-start', marginTop: 18, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8},
   withdrawAddrInput: {alignSelf: 'stretch', backgroundColor: C.field, borderRadius: 12, height: 56, paddingHorizontal: 16, fontSize: 15, color: C.ink, fontFamily: 'monospace', borderWidth: 1, borderColor: C.line2},
+  savedAddrChip: {alignSelf: 'flex-start', backgroundColor: C.line, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 8},
+  savedAddrText: {fontSize: 13, color: C.brand, fontFamily: 'monospace'},
   withdrawAmtInput: {alignSelf: 'stretch', backgroundColor: C.field, borderRadius: 12, height: 56, paddingHorizontal: 16, fontSize: 22, fontWeight: '700', color: C.ink, borderWidth: 1, borderColor: C.line2},
   reviewCard: {alignSelf: 'stretch', marginTop: 20, backgroundColor: C.card, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: C.line2},
   reviewLabel: {fontSize: 12, fontWeight: '700', color: C.sub2, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 8, fontFamily: 'monospace'},
