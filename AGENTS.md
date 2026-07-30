@@ -4,6 +4,8 @@
 
 Read **`CLAUDE.md`** first — it holds the project memory, the non-negotiables (autonomous + offline dev loop, shared Rust core, PocketIC, non-custodial/no-swap/no-exchange-creds), the positioning/monetization pointers, and the current build state. Treat its constraints as hard requirements, not preferences.
 
+Then read **`OPEN_ISSUES.md`** — the authoritative list of known blockers and documented follow-ups (KYC allowlist, chain-key receipts, governance hand-off, etc.). Check it before starting work so you don't re-derive what's already known or re-attempt something blocked on an external step.
+
 ## Codebase analysis — read before working, keep current
 
 **Read `CODEBASE_ANALYSIS.md` at the start of every coding session in this repo**, immediately after `CLAUDE.md`. It is the living structural analysis: architecture health, where the design earns its keep, and the risks to know before editing (canister controller, open `mint()`, unsigned receipt, etc.).
