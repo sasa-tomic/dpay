@@ -32,7 +32,7 @@ Full plan and rationale: `dev-loop-plan.md`.
 - **Who:** travelers/tourists abroad on no or poor connectivity — foreign SIM, roaming off, or dead signal inside airports, malls, hotels, stadiums, metros.
 - **What:** tap-to-pay (NFC) or scan-to-pay (QR) a local merchant; **your** phone never needs a connection.
 - **Why it fits perfectly:** dpay lets the **payer** be offline, and the tourist *is* the payer. The design's one asymmetry (someone must be online) is satisfied for free — it's the merchant, who has wifi. The generic "both offline" weakness becomes the selling point.
-- **Currencies — multi-*rail*, never a swap.** The merchant's request names the settlement asset; the payer pays that **exact** asset; the canister settles it. dpay never converts one asset to another (no-swap non-negotiable). If the payer lacks the merchant's asset, a **licensed third party** converts at the edge — user authorizes it directly, dpay stays a screen. **USDC is the tourist lingua franca** (no conversion at all). UI shows `$`/`€`/`CHF`, never the token name.
+- **Currencies — multi-*rail*, never a swap.** The merchant's request names the settlement asset; the payer pays that **exact** asset; the canister settles it. dpay never converts one asset to another (no-swap non-negotiable). If the payer lacks the merchant's asset, a **licensed third party** converts at the edge — user authorizes it directly, dpay stays a screen. **USDC is the tourist lingua franca** (no conversion at all). UI shows the **backing native currency symbol** when known (`$`, `€`, `CHF`, `₿`/BTC, `Ξ`/ETH, `◎`/SOL) and only falls back to the wrapper (`ck*`) symbol when the backing is unknown; raw internal ledger/token identifiers (e.g. `DEMO_USD`, `DUSD`, ledger canister ids) are never surfaced.
 - **Assets (Jul 2026):** live on IC = ckUSDC (launch rail), ckBTC, ckETH, native ICP. Near-term = EUR via EURC (verify ckEURC). Roadmap/nascent = SOL (no ckSOL yet) and CHF (no ckCHF; thin issuance). "Pay with BTC" = **ckBTC on the IC** (native L1 can't be tap-instant; IC finalizes in ~1–2s).
 - **Edge vs Apple Pay/Visa abroad:** their payer must be online *and* they add cross-border FX/interchange; dpay's payer is offline and same-asset settlement has no card-network FX toll.
 - **Scope:** PoC stays single-`$`/ckUSDC; multi-currency + tourist framing are the pitch/roadmap on top, not PoC work. Nothing here weakens the non-custodial / no-swap non-negotiables.
@@ -49,7 +49,7 @@ Full plan and rationale: `dev-loop-plan.md`.
 | offline payer | the phone that signs while in airplane mode |
 | online merchant | the phone that scans + submits and shows "Paid ✓" |
 | ckUSDC | chain-key USDC on ICP — the real stablecoin dpay would use off the internal demo ledger |
-| `$` | how money is shown in the UI; the underlying stablecoin/ledger is never surfaced |
+| backing symbol | the UI shows the asset's backing native currency symbol when known (`$`, `€`, `CHF`, BTC, ETH, SOL); falls back to the wrapper symbol (`ck*`) only when the backing is unknown. Raw ledger/token identifiers are never surfaced. |
 
 ## Architecture (PoC)
 
@@ -129,5 +129,5 @@ Remaining for real-hardware fidelity only: run on two physical arm64 phones for 
 ## Preferences
 
 - Be concise and direct; minimal formatting, no filler.
-- Money is always shown as `$`; never surface the stablecoin or ledger in the UI.
+- Money is shown using the asset's **backing native currency symbol** when known (`$`, `€`, `CHF`, BTC, ETH, SOL); fall back to the wrapper symbol (`ck*`) only when the backing is unknown. Never surface raw internal ledger/token identifiers.
 - Demo-critical: the relay must be rock solid (idempotency, retries, health check, safe-mode fallback).
