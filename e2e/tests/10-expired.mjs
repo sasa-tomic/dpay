@@ -8,10 +8,9 @@
 // stale request) and that the app surfaces a clear error rather than silently failing.
 //
 // Selector contract: `pay-amount`, `btn-approve`, `review-err`, `balance`.
-import { setup, assert, assertIncludes } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, onboardWallet } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
-const ONBOARD_PLACEHOLDER = 'e.g. Alice';
 const PAY_CENTS = 2500; // $25.00
 
 export async function run() {
@@ -23,10 +22,7 @@ export async function run() {
 
     const bob = await generateKeypair();
     console.log('[10-expired] onboarding A…');
-    await driver.typeByPlaceholder(ONBOARD_PLACEHOLDER, 'e2e-expired', { timeoutMs: 8_000 });
-    await driver.click('btn-create', { timeoutMs: 4_000 });
-    await driver.findByTestID('balance', { timeoutMs: 10_000 });
-    await driver.waitForText('$100.00', { timeoutMs: 12_000 });
+    await onboardWallet(driver, 'e2e-expired');
 
     // A request with an expiry 100s in the PAST — stale on arrival.
     const nonce = randNonceHex();

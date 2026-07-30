@@ -7,9 +7,7 @@
 // relay + REAL FakeLedger (mint), and that the button is repeatable (balance grows again).
 //
 // Selector contract: `btn-topup` (+$50 pill), `balance` (the wallet balance text).
-import { setup, assert } from '../harness/lib.mjs';
-
-const ONBOARD_PLACEHOLDER = 'e.g. Alice';
+import { setup, assert, onboardWallet } from '../harness/lib.mjs';
 
 export async function run() {
   const start = Date.now();
@@ -20,10 +18,7 @@ export async function run() {
 
     // 1. Onboard → wallet. The faucet funds $100.00 on create (verified in flow 01).
     console.log('[02-faucet] onboarding…');
-    await driver.typeByPlaceholder(ONBOARD_PLACEHOLDER, 'e2e-faucet', { timeoutMs: 8_000 });
-    await driver.click('btn-create', { timeoutMs: 4_000 });
-    await driver.findByTestID('balance', { timeoutMs: 10_000 });
-    await driver.waitForText('$100.00', { timeoutMs: 12_000 });
+    await onboardWallet(driver, 'e2e-faucet');
 
     // 2. The faucet button is present next to the balance.
     await driver.findByTestID('btn-topup', { timeoutMs: 4_000 });

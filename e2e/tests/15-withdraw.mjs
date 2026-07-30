@@ -14,9 +14,8 @@
 // `withdraw-address-input`, `withdraw-amount-input`, `btn-withdraw-confirm`, `withdraw-status`,
 // `btn-withdraw-close`. Asset segregation note (same as flow 05): ckBTC is currency 1, a SEPARATE
 // asset from the `$` DEMO_USD header — the withdraw debits currency 1, NOT the `$` balance.
-import { setup, assert, assertEq, seedDeposit, refreshDeposit, getBalance } from '../harness/lib.mjs';
+import { setup, assert, assertEq, seedDeposit, refreshDeposit, getBalance, onboardWallet, accountOf } from '../harness/lib.mjs';
 
-const ONBOARD_PLACEHOLDER = 'e.g. Alice';
 const DEPOSIT_CURRENCY = 1; // ckBTC — matches App.tsx DEPOSIT_CURRENCY
 const SEED_SATS = 100_000;   // 0.00100000 BTC
 const WITHDRAW_BTC = '0.00050000'; // 50_000 sats == retrieve_btc_min_amount
@@ -32,14 +31,8 @@ export async function run() {
 
     // 1. Onboard → wallet + capture this wallet's account.
     console.log('[15-withdraw] onboarding…');
-    await driver.typeByPlaceholder(ONBOARD_PLACEHOLDER, 'e2e-withdraw', { timeoutMs: 8_000 });
-    await driver.click('btn-create', { timeoutMs: 4_000 });
-    await driver.findByTestID('balance', { timeoutMs: 10_000 });
-    await driver.waitForText('$100.00', { timeoutMs: 12_000 });
-    const identity = await driver.eval(() => {
-      const v = localStorage.getItem('dpay.identity.v1');
-      return v ? JSON.parse(v) : null;
-    });
+    await onboardWallet(driver, 'e2e-withdraw');
+    const identity = await accountOf(driver);
     const accountHex = identity?.publicHex;
     assert(typeof accountHex === 'string' && accountHex.length === 64, `wallet account must be a 32-byte hex pubkey, got "${accountHex}"`);
     console.log(`[15-withdraw] wallet account: ${accountHex.slice(0, 16)}…`);

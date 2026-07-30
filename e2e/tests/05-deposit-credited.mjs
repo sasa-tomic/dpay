@@ -24,9 +24,8 @@
 // Selector contract: `btn-deposit` (Add money), `deposit-address`, `btn-deposit-check` (manual
 // refresh), `deposit-status`, `btn-deposit-close`, `asset-ckbtc` (the wallet's visible ckBTC card).
 // Seed route: POST /api/v1/test/deposit/seed {account, currency, amount}.
-import { setup, assert, assertIncludes, seedDeposit, getBalance } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, seedDeposit, getBalance, onboardWallet, accountOf } from '../harness/lib.mjs';
 
-const ONBOARD_PLACEHOLDER = 'e.g. Alice';
 const DEPOSIT_CURRENCY = 1; // ckBTC — matches App.tsx DEPOSIT_CURRENCY (the deposit asset)
 const SEED_SATS = 50_000;   // 0.00050000 BTC
 
@@ -40,14 +39,8 @@ export async function run() {
     // 1. Onboard → wallet, and capture THIS wallet's account (its pubkey hex) from localStorage. The
     //    deposit address + the seed target are both keyed off this account.
     console.log('[05-deposit-credited] onboarding…');
-    await driver.typeByPlaceholder(ONBOARD_PLACEHOLDER, 'e2e-deposit', { timeoutMs: 8_000 });
-    await driver.click('btn-create', { timeoutMs: 4_000 });
-    await driver.findByTestID('balance', { timeoutMs: 10_000 });
-    await driver.waitForText('$100.00', { timeoutMs: 12_000 });
-    const identity = await driver.eval(() => {
-      const v = localStorage.getItem('dpay.identity.v1');
-      return v ? JSON.parse(v) : null;
-    });
+    await onboardWallet(driver, 'e2e-deposit');
+    const identity = await accountOf(driver);
     const accountHex = identity?.publicHex;
     assert(typeof accountHex === 'string' && accountHex.length === 64, `wallet account must be a 32-byte hex pubkey, got "${accountHex}"`);
     console.log(`[05-deposit-credited] wallet account: ${accountHex.slice(0, 16)}…`);

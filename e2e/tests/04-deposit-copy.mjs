@@ -8,9 +8,7 @@
 // path, which is the regression surface.
 //
 // Selector contract: `btn-deposit` (Add money), `deposit-address`, `btn-deposit-copy`.
-import { setup, assertEq } from '../harness/lib.mjs';
-
-const ONBOARD_PLACEHOLDER = 'e.g. Alice';
+import { setup, assertEq, onboardWallet } from '../harness/lib.mjs';
 
 export async function run() {
   const start = Date.now();
@@ -21,10 +19,7 @@ export async function run() {
 
     // 1. Onboard → wallet.
     console.log('[04-deposit-copy] onboarding…');
-    await driver.typeByPlaceholder(ONBOARD_PLACEHOLDER, 'e2e-copy', { timeoutMs: 8_000 });
-    await driver.click('btn-create', { timeoutMs: 4_000 });
-    await driver.findByTestID('balance', { timeoutMs: 10_000 });
-    await driver.waitForText('$100.00', { timeoutMs: 12_000 });
+    await onboardWallet(driver, 'e2e-copy');
 
     // 2. Open the sheet via the promoted "Add money" affordance (U5).
     console.log('[04-deposit-copy] clicking btn-deposit (Add money)…');

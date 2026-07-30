@@ -7,9 +7,7 @@
 // CODEBASE_ANALYSIS.md alongside this test.
 //
 // Selector contract: `btn-deposit`, `deposit-address`, `btn-deposit-close`.
-import { setup, assert, assertIncludes } from '../harness/lib.mjs';
-
-const ONBOARD_PLACEHOLDER = 'e.g. Alice';
+import { setup, assert, assertIncludes, onboardWallet } from '../harness/lib.mjs';
 
 export async function run() {
   const start = Date.now();
@@ -19,10 +17,7 @@ export async function run() {
     const { driver } = env;
 
     console.log('[14-keyboard] onboarding…');
-    await driver.typeByPlaceholder(ONBOARD_PLACEHOLDER, 'e2e-keyboard', { timeoutMs: 8_000 });
-    await driver.click('btn-create', { timeoutMs: 4_000 });
-    await driver.findByTestID('balance', { timeoutMs: 10_000 });
-    await driver.waitForText('$100.00', { timeoutMs: 12_000 });
+    await onboardWallet(driver, 'e2e-keyboard');
 
     // Open the deposit sheet via the Add money affordance.
     console.log('[14-keyboard] opening the deposit sheet…');

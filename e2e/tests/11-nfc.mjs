@@ -17,9 +17,7 @@
 // radio hop itself stays a physical-device gate, exactly as designed.
 //
 // Selector contract: `nfc-ready` (the NFC-on pill), `nfc-status` (the NfcTap view once active).
-import { setup, assert } from '../harness/lib.mjs';
-
-const ONBOARD_PLACEHOLDER = 'e.g. Alice';
+import { setup, assert, onboardWallet } from '../harness/lib.mjs';
 
 export async function run() {
   const start = Date.now();
@@ -33,10 +31,7 @@ export async function run() {
     await driver.eval(() => { window.__DPAY_TEST_NFC_STATUS = 'ready'; });
 
     console.log('[11-nfc] onboarding (NFC forced ready)…');
-    await driver.typeByPlaceholder(ONBOARD_PLACEHOLDER, 'e2e-nfc', { timeoutMs: 8_000 });
-    await driver.click('btn-create', { timeoutMs: 4_000 });
-    await driver.findByTestID('balance', { timeoutMs: 10_000 });
-    await driver.waitForText('$100.00', { timeoutMs: 12_000 });
+    await onboardWallet(driver, 'e2e-nfc');
 
     // Waiting-for-tap: NFC ready → the Pay screen says "Tap or scan to pay" + the NFC-on pill shows.
     // (NfcTap renders nothing while merely listening — the QR scanner stays live alongside it.)

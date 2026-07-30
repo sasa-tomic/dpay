@@ -15,10 +15,9 @@
 // spent, atomic debit/credit). B needs no browser: its balance is read straight off the ledger.
 //
 // Selector contract: `tab-pay` (default), `pay-amount`, `btn-approve`, `btn-new`, `balance`.
-import { setup, assert, assertIncludes, getBalance } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, getBalance, onboardWallet } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
-const ONBOARD_PLACEHOLDER = 'e.g. Alice';
 const PAY_CENTS = 2500; // $25.00 (DEMO_USD = currency 0, the wallet asset)
 const MERCHANT_NAME = 'merchant';
 
@@ -38,10 +37,7 @@ export async function run() {
 
     // --- wallet A: onboarded in the browser (the payer, funded $100 by the faucet). -----------
     console.log('[07-scan-pay] onboarding wallet A (payer)…');
-    await driver.typeByPlaceholder(ONBOARD_PLACEHOLDER, 'e2e-alice', { timeoutMs: 8_000 });
-    await driver.click('btn-create', { timeoutMs: 4_000 });
-    await driver.findByTestID('balance', { timeoutMs: 10_000 });
-    await driver.waitForText('$100.00', { timeoutMs: 12_000 });
+    await onboardWallet(driver, 'e2e-alice');
 
     // --- B's request QR: to=B, amount=$25, fresh nonce, +10min expiry, currency 0 (DEMO_USD). -
     const nonce = randNonceHex();

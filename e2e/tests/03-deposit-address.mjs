@@ -10,9 +10,7 @@
 // Selector contract for Wave E1: `deposit-address` (the address text), `deposit-instructions`
 // (the instruction card), `deposit-status` (the single linear progress cue), `btn-deposit-check`
 // (manual refresh), `btn-deposit-copy` (copy), `btn-deposit-close` (Esc/X close).
-import { setup, assert, assertIncludes } from '../harness/lib.mjs';
-
-const ONBOARD_PLACEHOLDER = 'e.g. Alice';
+import { setup, assert, assertIncludes, onboardWallet } from '../harness/lib.mjs';
 
 export async function run() {
   const start = Date.now();
@@ -24,10 +22,7 @@ export async function run() {
     // 1. Onboard once so an identity is persisted to localStorage (the deep link only auto-opens the
     //    sheet for a RETURNING user — Onboarding never mounts the Wallet).
     console.log('[03-deposit-address] onboarding to seed an identity…');
-    await driver.typeByPlaceholder(ONBOARD_PLACEHOLDER, 'e2e-deposit', { timeoutMs: 8_000 });
-    await driver.click('btn-create', { timeoutMs: 4_000 });
-    await driver.findByTestID('balance', { timeoutMs: 10_000 });
-    await driver.waitForText('$100.00', { timeoutMs: 12_000 });
+    await onboardWallet(driver, 'e2e-deposit');
 
     // 2. Re-navigate with the deep link. The browser context retains localStorage, so the Wallet
     //    mounts directly and `?screen=deposit` auto-opens the sheet. `domcontentloaded` because the

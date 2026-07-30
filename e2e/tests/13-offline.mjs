@@ -9,9 +9,8 @@
 // driver (requestfailed) with context.
 //
 // Selector contract: `settings-relay`, `btn-topup`, `balance`.
-import { setup, assert, assertIncludes } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, onboardWallet } from '../harness/lib.mjs';
 
-const ONBOARD_PLACEHOLDER = 'e.g. Alice';
 const DEAD_RELAY = 'http://127.0.0.1:1'; // port 1: privileged, nothing listening → ECONNREFUSED
 
 export async function run() {
@@ -23,10 +22,7 @@ export async function run() {
 
     // Onboard against the GOOD relay (funds $100, proves the wallet works when online).
     console.log('[13-offline] onboarding (online)…');
-    await driver.typeByPlaceholder(ONBOARD_PLACEHOLDER, 'e2e-offline', { timeoutMs: 8_000 });
-    await driver.click('btn-create', { timeoutMs: 4_000 });
-    await driver.findByTestID('balance', { timeoutMs: 10_000 });
-    await driver.waitForText('$100.00', { timeoutMs: 12_000 });
+    await onboardWallet(driver, 'e2e-offline');
 
     // Retarget the app at a DEAD relay via the settings input. The balance poll now fails → the
     // header flips to the offline indicator ("~ approx."), but the wallet stays rendered.

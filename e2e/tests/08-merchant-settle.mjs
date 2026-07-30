@@ -12,10 +12,9 @@
 // payment settled through the ledger-sourced receipt poll, not a payer-presented claim.
 //
 // Selector contract: `tab-receive`, `amount-input`, `btn-request`, `request-qr`, `balance`.
-import { setup, assert, assertIncludes, getBalance, postPay } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, getBalance, postPay, onboardWallet, accountOf } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, decodeRequest, signAuthorizationCode } from '../harness/wire.mjs';
 
-const ONBOARD_PLACEHOLDER = 'e.g. Alice';
 const PAY_CENTS = 3000; // $30.00
 
 export async function run() {
@@ -37,11 +36,8 @@ export async function run() {
 
     // --- wallet B (merchant): onboarded in the browser. ---------------------------------------
     console.log('[08-merchant-settle] onboarding wallet B (merchant)…');
-    await driver.typeByPlaceholder(ONBOARD_PLACEHOLDER, 'e2e-merchant', { timeoutMs: 8_000 });
-    await driver.click('btn-create', { timeoutMs: 4_000 });
-    await driver.findByTestID('balance', { timeoutMs: 10_000 });
-    await driver.waitForText('$100.00', { timeoutMs: 12_000 });
-    const bob = await driver.eval(() => JSON.parse(localStorage.getItem('dpay.identity.v1') ?? 'null'));
+    await onboardWallet(driver, 'e2e-merchant');
+    const bob = await accountOf(driver);
     const bobHex = bob.publicHex;
 
     // --- B creates a $30 receive request; read the request QR the app rendered + decode it. ----

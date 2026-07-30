@@ -10,7 +10,7 @@
 // No silent missing fields: every piece of identity/repo info the app renders is verified present.
 //
 // Selector contract: `settings-relay`, `btn-reset`, `btn-create` (Onboarding returns after reset).
-import { setup, assert, assertIncludes, assertEq } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, assertEq, onboardWallet, accountOf } from '../harness/lib.mjs';
 
 const ONBOARD_PLACEHOLDER = 'e.g. Alice';
 const USERNAME = 'e2e-settings';
@@ -23,11 +23,8 @@ export async function run() {
     const { driver, relayBaseURL } = env;
 
     console.log('[12-settings] onboarding…');
-    await driver.typeByPlaceholder(ONBOARD_PLACEHOLDER, USERNAME, { timeoutMs: 8_000 });
-    await driver.click('btn-create', { timeoutMs: 4_000 });
-    await driver.findByTestID('balance', { timeoutMs: 10_000 });
-    await driver.waitForText('$100.00', { timeoutMs: 12_000 });
-    const id = await driver.eval(() => JSON.parse(localStorage.getItem('dpay.identity.v1') ?? 'null'));
+    await onboardWallet(driver, USERNAME);
+    const id = await accountOf(driver);
     const accountHex = id?.publicHex;
     assert(typeof accountHex === 'string' && accountHex.length === 64, 'onboarded identity must be present');
 

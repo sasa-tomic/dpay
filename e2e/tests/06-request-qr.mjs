@@ -13,10 +13,9 @@
 // exposes it readably so the test decodes the EXACT bytes a payer would scan — not an OCR guess).
 //
 // Selector contract: `tab-receive`, `amount-input`, `btn-request`, `request-qr`.
-import { setup, assert, assertEq } from '../harness/lib.mjs';
+import { setup, assert, assertEq, onboardWallet, accountOf } from '../harness/lib.mjs';
 import { decodeRequest, REQUEST_LEN } from '../harness/wire.mjs';
 
-const ONBOARD_PLACEHOLDER = 'e.g. Alice';
 const EXPIRY_WINDOW_SLACK = 700; // EXPIRY_WINDOW=600 in App.tsx + a few seconds of test latency
 
 export async function run() {
@@ -28,11 +27,8 @@ export async function run() {
 
     // 1. Onboard → wallet; capture this wallet's account (pubkey hex) to verify the request's `to`.
     console.log('[06-request-qr] onboarding…');
-    await driver.typeByPlaceholder(ONBOARD_PLACEHOLDER, 'e2e-bob', { timeoutMs: 8_000 });
-    await driver.click('btn-create', { timeoutMs: 4_000 });
-    await driver.findByTestID('balance', { timeoutMs: 10_000 });
-    await driver.waitForText('$100.00', { timeoutMs: 12_000 });
-    const identity = await driver.eval(() => JSON.parse(localStorage.getItem('dpay.identity.v1') ?? 'null'));
+    await onboardWallet(driver, 'e2e-bob');
+    const identity = await accountOf(driver);
     const accountHex = identity?.publicHex;
     assert(typeof accountHex === 'string' && accountHex.length === 64, `wallet account must be 32-byte hex, got "${accountHex}"`);
 

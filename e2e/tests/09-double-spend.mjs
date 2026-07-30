@@ -17,10 +17,9 @@
 // The app surfaces this as "Already paid, not charged again". The no-double-debit is the assertion.)
 //
 // Selector contract: `pay-amount`, `btn-approve`, `balance`.
-import { setup, assert, getBalance, postPay } from '../harness/lib.mjs';
+import { setup, assert, getBalance, postPay, onboardWallet } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
-const ONBOARD_PLACEHOLDER = 'e.g. Alice';
 const PAY_CENTS = 2500; // $25.00
 
 /** Install a fetch recorder that captures every POST /api/v1/pay body into window.__DPAY_PAY_CODES,
@@ -54,10 +53,7 @@ export async function run() {
 
     // 1. Onboard A; install the recorder BEFORE the pay so it captures the app's signed code.
     console.log('[09-double-spend] onboarding A + installing /pay recorder…');
-    await driver.typeByPlaceholder(ONBOARD_PLACEHOLDER, 'e2e-replay', { timeoutMs: 8_000 });
-    await driver.click('btn-create', { timeoutMs: 4_000 });
-    await driver.findByTestID('balance', { timeoutMs: 10_000 });
-    await driver.waitForText('$100.00', { timeoutMs: 12_000 });
+    await onboardWallet(driver, 'e2e-replay');
     await installPayRecorder(driver);
 
     // 2. A real app-driven pay: scan B's request → approve → the app signs + POSTs (captured).
