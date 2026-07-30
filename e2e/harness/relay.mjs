@@ -57,18 +57,27 @@ export async function pickFreePort() {
 }
 
 /**
- * Ensure the e2e relay binary exists, built WITH `--features test-helpers` into the ISOLATED e2e
- * target dir. Builds ONLY IF the binary is missing — cargo's own fingerprinting inside
- * `.dev/target-e2e` is authoritative (no other build writes there, so a stale/featureless clobber
- * is impossible). `force=true` bypasses the existence check (used by the post-spawn safety net when
- * a reachability probe unexpectedly fails).
+ * Ensure the e2e relay binary is CURRENT, built WITH `--features test-helpers` into the ISOLATED e2e
+ * target dir. ALWAYS invokes `cargo build` and lets cargo's own fingerprinting decide: a warm no-op
+ * is ~0.3s, and any source/dependency change (R1/R2/..., Cargo.toml, Cargo.lock) triggers a real
+ * recompile. The isolated target dir (E2E_TARGET_DIR) means no other build clobbers the binary, so
+ * cargo's fingerprinting is AUTHORITATIVE here.
+ *
+ * WHY always-invoke (not build-if-missing): an earlier version short-circuited on `existsSync`, which
+ * skipped cargo whenever the binary existed. That served a STALE binary after a relay source edit —
+ * e.g. a pre-receipt-signing (pre-R2) relay kept running after R2 landed, so /pay returned an
+ * unsigned receipt and the app's R2 verification failed (flow 07/09 timed out waiting for "Paid").
+ * Letting cargo run every time is the true fix: the 0.3s warm cost is negligible vs the ~13s suite,
+ * and a source edit is guaranteed to produce a fresh binary. `force=true` (the 404 safety net) cleans
+ * the relay crate first so the rebuild is a genuine recompile, not a cargo no-op.
  */
 export async function ensureRelayBuilt(opts = {}) {
-  if (!opts.force && existsSync(RELAY_BIN)) {
-    console.log(`[relay] using existing isolated binary ${RELAY_BIN}`);
-    return;
+  if (opts.force) {
+    console.log('[relay] force: cleaning the dpay-relay crate before rebuild…');
+    const cc = await runCargo(['clean', '-p', 'dpay-relay'], 60_000);
+    if (cc !== 0) console.warn(`[relay] cargo clean -p dpay-relay exited ${cc} (continuing)`);
   }
-  console.log(`[relay] building dpay-relay --features test-helpers into ${E2E_TARGET_DIR}…`);
+  console.log(`[relay] cargo build dpay-relay --features test-helpers into ${E2E_TARGET_DIR} (cargo fingerprints)…`);
   const code = await runCargo(['build', '-p', 'dpay-relay', '--features', 'test-helpers'], opts.timeoutMs ?? 300_000);
   if (code !== 0) throw new Error(`relay build failed (cargo exit ${code})`);
   if (!existsSync(RELAY_BIN)) {
