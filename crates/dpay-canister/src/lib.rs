@@ -236,6 +236,129 @@ impl Storable for PrincipalStorable {
     const BOUND: Bound = Bound::Bounded { max_size: 29, is_fixed_size: false };
 }
 
+// --- currency catalog: family + display metadata ----------------------------------------------
+// The wallet's runtime source of truth for which assets exist and how to display/fund them. A
+// `currencies()` query joins LEDGERS + MINTERS + CURRENCY_META so the app never hardcodes a currency
+// id (closes issue #7). Because `#[query]` cannot make cross-canister calls, display metadata
+// (symbol/decimals) is STORED here (registered via `register_currency_meta`) rather than fetched
+// live from each ledger on every call.
+
+/// The proxy family a ck currency's minter belongs to — drives per-family ramp dispatch in the
+/// relay/app. Stored as a single byte in `CURRENCY_META`. `None` for non-ck currencies (DEMO_USD).
+#[derive(CandidType, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MinterFamily {
+    /// ckBTC/ckDOGE: `get_btc_address` + `update_balance` + `retrieve_btc_with_approval` (single-ledger).
+    CkBtcUtxo = 0,
+    /// ckETH/ckUSDC: helper-contract deposit (no IC mint trigger) + `withdraw_erc20` (dual-ledger, ckETH gas).
+    CkEthErc20 = 1,
+    /// ckSOL: `get_deposit_address` + `process_deposit` + threshold-Ed25519 `withdraw`.
+    CkSol = 2,
+}
+
+impl MinterFamily {
+    fn from_byte(b: u8) -> Option<Self> {
+        match b {
+            0 => Some(MinterFamily::CkBtcUtxo),
+            1 => Some(MinterFamily::CkEthErc20),
+            2 => Some(MinterFamily::CkSol),
+            _ => None,
+        }
+    }
+}
+
+/// One entry of the `currencies()` catalog. The wallet reads currency ids + display metadata from
+/// here at runtime instead of hardcoding `DEPOSIT_CURRENCY` (issue #7). `minter` is `Some` only for
+/// ck currencies with a registered ramp; `minter_family`/`symbol`/`decimals` are `None` when not
+/// registered (app falls back to a wrapper symbol / best-effort formatting).
+#[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct CurrencyDescriptor {
+    pub currency: Currency,
+    pub ledger: Principal,
+    /// `true` for the demo currency whose ledger this canister mints/burns.
+    pub mintable: bool,
+    /// The ck-minter principal — `Some` only when a deposit/withdraw ramp exists for this currency.
+    pub minter: Option<Principal>,
+    /// The minter's proxy family — present when a family was registered (typically with the minter).
+    pub minter_family: Option<MinterFamily>,
+    /// Display symbol, e.g. "$"/"₿"/"Ξ". Registered via `register_currency_meta`; `None` = unknown.
+    pub symbol: Option<String>,
+    /// Smallest-unit decimal count (USD=2, BTC=8, ETH=18, USDC=6). `None` = app guesses.
+    pub decimals: Option<u8>,
+}
+
+/// Display + family metadata for a currency, stored in `CURRENCY_META` (MemoryId 13). Encoded as:
+/// symbol-flag(1) + [len(1) + ≤16 bytes] + decimals-flag(1) + [decimals(1)] + family-flag(1) +
+/// [family(1)]. Compact; the only repeated registration surface is `register_currency_meta`.
+const CURRENCY_META_MAX: usize = 1 + (1 + 16) + 1 + 1 + 1 + 1;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CurrencyMetaStorable {
+    symbol: Option<String>,
+    decimals: Option<u8>,
+    minter_family: Option<MinterFamily>,
+}
+
+impl Storable for CurrencyMetaStorable {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        let mut v = Vec::with_capacity(CURRENCY_META_MAX);
+        match &self.symbol {
+            Some(s) => {
+                let bytes = s.as_bytes();
+                let n = bytes.len().min(16) as u8;
+                v.push(1u8);
+                v.push(n);
+                v.extend_from_slice(&bytes[..n as usize]);
+            }
+            None => v.push(0u8),
+        }
+        match self.decimals {
+            Some(d) => {
+                v.push(1u8);
+                v.push(d);
+            }
+            None => v.push(0u8),
+        }
+        match self.minter_family {
+            Some(f) => {
+                v.push(1u8);
+                v.push(f as u8);
+            }
+            None => v.push(0u8),
+        }
+        Cow::Owned(v)
+    }
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        let b = bytes.as_ref();
+        let len = b.len();
+        // symbol: flag + [len + bytes]
+        let (symbol, rest_start) = match b.first() {
+            Some(&1u8) => {
+                let n = b.get(1).copied().unwrap_or(0) as usize;
+                let end = (2 + n).min(len);
+                (Some(String::from_utf8_lossy(&b[2..end]).to_string()), end)
+            }
+            _ => (None, 1.min(len)),
+        };
+        let rest = &b[rest_start..];
+        // decimals: flag + [byte]
+        let (decimals, rest2_start) = match rest.first() {
+            Some(&1u8) => (rest.get(1).copied(), 2.min(rest.len())),
+            _ => (None, 1.min(rest.len())),
+        };
+        let rest2 = &rest[rest2_start..];
+        // minter_family: flag + [byte]
+        let minter_family = match rest2.first() {
+            Some(&1u8) => rest2.get(1).copied().and_then(MinterFamily::from_byte),
+            _ => None,
+        };
+        CurrencyMetaStorable { symbol, decimals, minter_family }
+    }
+    const BOUND: Bound = Bound::Bounded {
+        max_size: CURRENCY_META_MAX as u32,
+        is_fixed_size: false,
+    };
+}
+
 // --- canister-signed receipt key + stored signed receipts -------------------------------------
 // The canister materializes ONE Ed25519 keypair (secret in stable memory, public exposed via
 // `receipt_pubkey`) and signs each settled payment's outcome. A merchant/relay cannot forge the
@@ -591,6 +714,13 @@ thread_local! {
     /// commit. See [`reserve_withdraw_nonce`].
     static WITHDRAW_NONCES: RefCell<StableBTreeMap<Nonce, (), Memory>> =
         RefCell::new(StableBTreeMap::init(MEMORY.with(|m| m.borrow().get(MemoryId::new(12)))));
+
+    /// currency -> display/family metadata (symbol, decimals, minter_family). MemoryId 13 (new
+    /// facade state). Backs the `currencies()` catalog; registered via `register_currency_meta`.
+    /// Separate from `MINTERS` (minter principal) and `LEDGERS` (ledger principal) so existing
+    /// encodings are untouched (no upgrade-layout churn).
+    static CURRENCY_META: RefCell<StableBTreeMap<Currency, CurrencyMetaStorable, Memory>> =
+        RefCell::new(StableBTreeMap::init(MEMORY.with(|m| m.borrow().get(MemoryId::new(13)))));
 }
 
 /// Configuration for one currency, supplied at init (and via `register_ledger`).
@@ -1434,6 +1564,56 @@ fn register_minter(currency: Currency, minter: Principal) -> Result<(), String> 
         m.borrow_mut().insert(currency, PrincipalStorable(minter));
     });
     Ok(())
+}
+
+/// Register or replace display/family metadata for a currency. Gated to the controller in
+/// production. Each field is optional — register only what you know; `None` fields keep the wallet
+/// in a best-effort fallback. This is what `currencies()` joins in, so the wallet renders asset
+/// cards without hardcoding currency ids or symbols (closes issue #7).
+#[update]
+fn register_currency_meta(
+    currency: Currency,
+    symbol: Option<String>,
+    decimals: Option<u8>,
+    minter_family: Option<MinterFamily>,
+) -> Result<(), String> {
+    require_admin()?;
+    CURRENCY_META.with(|m| {
+        m.borrow_mut().insert(
+            currency,
+            CurrencyMetaStorable { symbol, decimals, minter_family },
+        );
+    });
+    Ok(())
+}
+
+/// Catalog of every registered currency + its ledger/minter/display metadata — the wallet's runtime
+/// source of truth. The app fetches this once (cached) instead of hardcoding `DEPOSIT_CURRENCY`
+/// (issue #7). Joins LEDGERS (id + principal + mintable) with MINTERS (ramp principal) and
+/// CURRENCY_META (family + display). A currency appears if it has a ledger; the rest are `None` when
+/// not registered. Unauthenticated (catalog only — no balances); sorted by currency id.
+#[query]
+fn currencies() -> Vec<CurrencyDescriptor> {
+    let entries: Vec<(Currency, LedgerEntry)> =
+        LEDGERS.with(|m| m.borrow().iter().map(|(c, e)| (c, e)).collect());
+    let mut out: Vec<CurrencyDescriptor> = entries
+        .into_iter()
+        .map(|(currency, entry)| {
+            let minter = MINTERS.with(|m| m.borrow().get(&currency).map(|s| s.0));
+            let meta = CURRENCY_META.with(|m| m.borrow().get(&currency));
+            CurrencyDescriptor {
+                currency,
+                ledger: entry.principal,
+                mintable: entry.mintable,
+                minter,
+                minter_family: meta.as_ref().and_then(|x| x.minter_family),
+                symbol: meta.as_ref().and_then(|x| x.symbol.clone()),
+                decimals: meta.as_ref().and_then(|x| x.decimals),
+            }
+        })
+        .collect();
+    out.sort_by_key(|d| d.currency);
+    out
 }
 
 // --- icrc3 reconcile (closes the cross-canister trap window) ----------------------------------

@@ -1,3 +1,12 @@
+type CurrencyDescriptor = record {
+  decimals : opt nat8;
+  minter_family : opt MinterFamily;
+  minter : opt principal;
+  mintable : bool;
+  ledger : principal;
+  currency : nat32;
+  symbol : opt text;
+};
 type DepositInfo = record {
   deposit_min_amount : opt nat64;
   min_confirmations : nat32;
@@ -20,6 +29,7 @@ type LedgerConfig = record {
   currency : nat32;
 };
 type MintedUtxo = record { block_index : nat; amount : nat64 };
+type MinterFamily = variant { CkEthErc20; CkBtcUtxo; CkSol };
 type PayReceipt = record {
   to : blob;
   block_index : nat64;
@@ -95,6 +105,12 @@ service : (InitArg) -> {
   // the ledger transfer's block index (unlike `mint`, which returns the new balance): `burn` is
   // facade-internal with no relay consumer, so no contract pins its return to a balance.
   burn : (blob, nat32, nat64) -> (Result);
+  // Catalog of every registered currency + its ledger/minter/display metadata — the wallet's runtime
+  // source of truth. The app fetches this once (cached) instead of hardcoding `DEPOSIT_CURRENCY`
+  // (issue #7). Joins LEDGERS (id + principal + mintable) with MINTERS (ramp principal) and
+  // CURRENCY_META (family + display). A currency appears if it has a ledger; the rest are `None` when
+  // not registered. Unauthenticated (catalog only — no balances); sorted by currency id.
+  currencies : () -> (vec CurrencyDescriptor) query;
   // `(blob pubkey, nat32 currency) -> Result<text, text>`. Proxies the minter's `get_btc_address` —
   // the user's native deposit address for the currency. No auth: a deposit address is not secret
   // (revealing it only lets someone send *to* the user), and minter methods are permissionless. Bad
@@ -159,6 +175,13 @@ service : (InitArg) -> {
   // pending; `Err(NoNewUtxos{..})` -> empty minted + pending mapped from the error; the remaining
   // minter errors surface as `Err(String)`.
   refresh_deposit : (blob, nat32) -> (Result_7);
+  // Register or replace display/family metadata for a currency. Gated to the controller in
+  // production. Each field is optional — register only what you know; `None` fields keep the wallet
+  // in a best-effort fallback. This is what `currencies()` joins in, so the wallet renders asset
+  // cards without hardcoding currency ids or symbols (closes issue #7).
+  register_currency_meta : (nat32, opt text, opt nat8, opt MinterFamily) -> (
+      Result_8,
+    );
   // Register or replace the ledger for a currency at runtime. Gated to the controller in production
   // (open only when `controller` is unset, i.e. the demo).
   register_ledger : (nat32, principal, bool) -> (Result_8);
