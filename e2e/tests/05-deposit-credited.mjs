@@ -73,11 +73,11 @@ export async function run() {
     const notYet = await getBalance(relayBaseURL, accountHex, DEPOSIT_CURRENCY);
     assert(notYet === 0, `seed must NOT credit the balance before a refresh, got ${notYet}`);
 
-    // 5. Trigger the refresh via the sheet's manual "Check now" button (the app's OWN code path —
-    //    POST /api/v1/deposit/refresh/{hex}?currency=1). The FakeLedger drains the pending deposit
-    //    and credits currency 1; minted_total > 0 flips the sheet to "Deposited ✓".
-    console.log('[05-deposit-credited] clicking btn-deposit-check (refresh)…');
-    await driver.click('btn-deposit-check', { timeoutMs: 5_000 });
+    // 5. The deposit sheet's own auto-poll (refreshNow, the app's real code path) drains the seeded
+    //    pending deposit and credits currency 1; minted_total > 0 flips the sheet to "Deposited ✓".
+    //    (The manual "Check now" button calls the same refreshNow — under the fast-poll harness the
+    //    auto-poll credits within ~150ms, so the manual nudge is racy and redundant here.)
+    console.log('[05-deposit-credited] waiting for the auto-poll to credit the deposit…');
     const credited = await driver.waitForText('Deposited', { timeoutMs: 8_000 });
     const body = await driver.bodyText();
     assert(credited, `deposit sheet should show "Deposited ✓" after the refresh. body excerpt:\n${body.slice(0, 600)}`);

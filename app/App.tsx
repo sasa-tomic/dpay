@@ -150,7 +150,20 @@ function parseRequestQR(raw: string): {reqB64: string; name: string} {
 // relay surfaces it at /api/v1/deposit/*. The mint lands on the user's subaccount, so the existing
 // balance/history polls reflect it once confirmed. DEMO_USD (faucet) stays currency 0; ckBTC = 1.
 const DEPOSIT_CURRENCY = 1;
-const DEPOSIT_REFRESH_MS = 10000; // poll /deposit/refresh while the sheet is open
+// Poll intervals — read once at module load. The e2e harness injects a shortened override via
+// `window.__DPAY_TEST_POLL` (driver.mjs evaluateOnNewDocument, before the bundle evaluates) so the
+// suite isn't paced by production cadence. In a shipped build that global is never set → every `??`
+// falls through to the prod default, so this is prod-safe (RN sets no such global).
+const POLL = (() => {
+  const t = (globalThis as unknown as {__DPAY_TEST_POLL?: Record<string, number>}).__DPAY_TEST_POLL;
+  return {
+    balance:    t?.balance    ?? 2500,
+    history:    t?.history    ?? 5000,
+    deposit:    t?.deposit    ?? 10000,
+    receiptPay: t?.receiptPay ?? 2500,
+    receiptRcv: t?.receiptRcv ?? 1500,
+  };
+})();
 // Min withdrawal in sats — mirrors the live ckBTC minter's `retrieve_btc_min_amount` (50_000), the
 // canister's RETRIEVE_BTC_MIN_AMOUNT, and the relay's. Single-sourced value; the sheet pre-checks so
 // the user never signs a below-min authorization the facade would reject.
@@ -478,7 +491,7 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
       const ck = await ckFetch;
       if (alive && ck != null) { setCkBtcBalance(ck); }
     };
-    poll(); const id = setInterval(poll, 2500);
+    poll(); const id = setInterval(poll, POLL.balance);
     return () => { alive = false; clearInterval(id); };
   }, [relayUrl, identity.publicHex]);
 
@@ -509,7 +522,7 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
     let alive = true;
     const wrapped = () => { if (alive) refreshHistory(); };
     wrapped();
-    const id = setInterval(wrapped, 5000);
+    const id = setInterval(wrapped, POLL.history);
     return () => { alive = false; clearInterval(id); };
   }, [refreshHistory]);
 
@@ -1002,7 +1015,7 @@ function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOfflinePaid
         }
       } catch {} finally { clearTimeout(t); }
     };
-    check(); const id = setInterval(check, 2500);
+    check(); const id = setInterval(check, POLL.receiptPay);
     return () => { alive = false; clearInterval(id); };
   }, [phase, qr, relayUrl, onSettled]);
 
@@ -1175,7 +1188,7 @@ function ReceiveMode({identity, relayUrl, nfcReady, onReceived}: {identity: Iden
         if (alive && r.ok) { const j = await r.json(); const from = j.receipt?.from ? short(j.receipt.from) : 'payer'; setResult({amount: reqQr.cents, from}); onReceived(); }
       } catch {} finally { clearTimeout(t); }
     };
-    check(); const id = setInterval(check, 1500);
+    check(); const id = setInterval(check, POLL.receiptRcv);
     return () => { alive = false; clearInterval(id); };
   }, [reqQr, result, relayUrl, onReceived]);
 
@@ -1324,11 +1337,11 @@ function DepositSheet({identity, relayUrl, onClose}: {identity: Identity; relayU
     }
   }, [relayUrl, identity.publicHex, currency]);
 
-  // Poll every DEPOSIT_REFRESH_MS while open; cleans up on close.
+  // Poll every POLL.deposit while open; cleans up on close.
   useEffect(() => {
     let alive = true;
     const poll = () => { if (alive) { refreshNow(false); } };
-    poll(); const id = setInterval(poll, DEPOSIT_REFRESH_MS);
+    poll(); const id = setInterval(poll, POLL.deposit);
     return () => { alive = false; clearInterval(id); };
   }, [refreshNow]);
 
@@ -1418,7 +1431,7 @@ function DepositSheet({identity, relayUrl, onClose}: {identity: Identity; relayU
                 <Text style={S.depositStatusRow}>
                   {pending.length > 0
                     ? `${pending.map(p => btc(p.value)).join(', ')} · ${required || '?'} confirmation${required === 1 ? '' : 's'} needed`
-                    : `checking every ${DEPOSIT_REFRESH_MS / 1000}s`}
+                    : `checking every ${POLL.deposit / 1000}s`}
                 </Text>
               </View>
 

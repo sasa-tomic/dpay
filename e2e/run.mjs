@@ -31,9 +31,10 @@ import { stopSession } from './harness/lib.mjs';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TESTS_DIR = join(__dirname, 'tests');
 
-// Default concurrency: 6. The host has ample cores; each parallel test is one chrome context + the
-// shared relay. Tunable via env; `DPAY_E2E_CONCURRENCY=1` runs sequentially (debugging).
-const DEFAULT_CONCURRENCY = 6;
+// Default concurrency: 10. The host has 16 cores; each parallel test is one chrome context + the
+// shared relay. 10 leaves headroom for the relay/web/V8 and is the measured sweet spot (16 tests in
+// ~10s). Tunable via env; `DPAY_E2E_CONCURRENCY=1` runs sequentially (debugging).
+const DEFAULT_CONCURRENCY = 10;
 
 function resolveConcurrency() {
   const raw = parseInt(process.env.DPAY_E2E_CONCURRENCY ?? String(DEFAULT_CONCURRENCY), 10);
@@ -142,8 +143,8 @@ async function main() {
     process.exit(1);
   }
   console.log(`\n[run] ${passed}/${total} GREEN in ${elapsed}s`);
-  if (parseFloat(elapsed) > 30) {
-    console.warn(`[run] ⚠️  suite slipped past the 30s target (took ${elapsed}s) — flag this`);
+  if (parseFloat(elapsed) > 15) {
+    console.warn(`[run] ⚠️  suite slipped past the 15s target (took ${elapsed}s) — flag this`);
   }
 }
 

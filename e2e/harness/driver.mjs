@@ -109,6 +109,7 @@ export class Driver {
     await page.setViewport({ ...VIEWPORT, width: o.width ?? VIEWPORT.width, height: o.height ?? VIEWPORT.height });
     if (o.timezone !== undefined) await page.emulateTimezone(o.timezone);
     await page.evaluateOnNewDocument(injectFreezeCss, FREEZE_CSS);
+    await page.evaluateOnNewDocument(injectTestGlobals);
     Driver.attachPageListeners(page);
     return new Driver(browser, context, page, ownsBrowser);
   }
@@ -171,14 +172,23 @@ export class Driver {
     }
   }
 
-  /** Click the element matched by `testID`. Scrolls into view first; logs testID on failure. */
+  /** Click the element matched by `testID`. Scrolls into view first. Retries on element-detachment
+   *  (React re-renders under fast polls can unmount a node between find and click). */
   async click(testID, opts = {}) {
-    const el = await this.findByTestID(testID, opts);
-    await el.scrollIntoView();
-    try {
-      await el.click();
-    } catch (e) {
-      throw new Error(`[driver] click testID=${testID} failed: ${e instanceof Error ? e.message : e}`);
+    const attempts = opts.retries ?? 3;
+    for (let i = 1; i <= attempts; i++) {
+      const el = await this.findByTestID(testID, opts);
+      try {
+        await el.scrollIntoView();
+        await el.click();
+        return;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        const detached = msg.includes('detached') || msg.includes('not attached') || msg.includes('Node not found');
+        if (!detached || i === attempts) {
+          throw new Error(`[driver] click testID=${testID} failed: ${msg}`);
+        }
+      }
     }
   }
 
@@ -309,4 +319,15 @@ function injectFreezeCss(css) {
     return true;
   };
   if (!inject()) document.addEventListener('DOMContentLoaded', inject, { once: true });
+}
+
+/**
+ * Inject the fast-poll override so the suite isn't paced by production cadence. App.tsx reads
+ * `globalThis.__DPAY_TEST_POLL` at MODULE-LOAD time (the POLL const IIFE), and evaluateOnNewDocument
+ * runs before any bundle script → the shortened intervals take effect. Prod never sets this global.
+ */
+function injectTestGlobals() {
+  globalThis.__DPAY_TEST_POLL = {
+    balance: 150, history: 150, deposit: 150, receiptPay: 150, receiptRcv: 150,
+  };
 }
