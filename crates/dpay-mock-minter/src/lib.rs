@@ -22,11 +22,12 @@
 //! - `get_deposit_fee` → `0`. `get_known_utxos` → `[]`.
 
 use candid::{CandidType, Nat, Principal};
-use ic_cdk::api::{msg_caller, time};
+use ic_cdk::api::{canister_self, msg_caller, time};
 use ic_cdk::call::Call;
 use ic_cdk::{init, query, update};
 use icrc_ledger_types::icrc1::account::Account;
 use icrc_ledger_types::icrc1::transfer::{TransferArg, TransferError};
+use icrc_ledger_types::icrc2::transfer_from::{TransferFromArgs, TransferFromError};
 use serde::Deserialize;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -81,6 +82,42 @@ struct MinterInfo {
     retrieve_btc_min_amount: u64,
     kyt_fee: u64,
     deposit_btc_min_amount: Option<u64>,
+}
+
+/// `RetrieveBtcWithApprovalArgs` — the EXACT argument record the REAL ckBTC minter's
+/// `retrieve_btc_with_approval` takes, verified against `dfx canister metadata
+/// mqygn-kiaaa-aaaar-qaadq-cai candid:service --network ic`:
+///   `record { address : text; amount : nat64; from_subaccount : opt blob }`.
+/// The mock's candid surface MUST match the real minter's exactly (single record arg, NOT positional
+/// args) so a facade that diverges is caught by the PocketIC withdraw test — the test that this mock
+/// makes honest (the mirror-the-real-counterparty lesson; see CODEBASE_ANALYSIS).
+#[derive(CandidType, Deserialize)]
+struct RetrieveBtcWithApprovalArgs {
+    address: String,
+    amount: u64,
+    from_subaccount: Option<Vec<u8>>,
+}
+
+/// `RetrieveBtcOk` — the real minter's success record: `record { block_index : nat64 }` (the burn
+/// transaction index on the ckBTC ledger). The facade surfaces this to the app as the withdrawal's
+/// outcome proof.
+#[derive(CandidType, Deserialize)]
+struct RetrieveBtcOk {
+    block_index: Nat,
+}
+
+/// `RetrieveBtcWithApprovalError` — the real minter's error variant for `retrieve_btc_with_approval`.
+/// Field labels + variant names mirror the real minter's candid exactly (verified via `dfx canister
+/// metadata … candid:service --network ic`), so the facade's decode is wire-compatible with mainnet.
+#[derive(CandidType, Deserialize)]
+enum RetrieveBtcWithApprovalError {
+    MalformedAddress(String),
+    AlreadyProcessing,
+    AmountTooLow(u64),
+    InsufficientFunds { balance: Nat },
+    InsufficientAllowance { allowance: Nat },
+    TemporarilyUnavailable(String),
+    GenericError { error_message: String, error_code: Nat },
 }
 
 /// The single record argument the REAL ckBTC minter takes for `get_btc_address` / `update_balance` /
@@ -216,15 +253,116 @@ fn register_deposit(owner: Principal, subaccount: Vec<u8>, amount: u64) {
     });
 }
 
-/// Minter `get_minter_info() -> MinterInfo`. Minimums that make the deposit flow trivially
-/// satisfiable offline: one confirmation, zero fee, zero minimum.
+/// Minter `get_minter_info() -> MinterInfo`. Mirrors the LIVE ckBTC minter's `MinterInfo`
+/// (`get_minter_info` on `mqygn-kiaaa-aaaar-qaadq-cai` returns `min_confirmations`, `kyt_fee`,
+/// `deposit_btc_min_amount`, AND `retrieve_btc_min_amount = 50000`). The mock keeps `retrieve_btc_min_amount`
+/// at the SAME 50_000 sats so the withdraw path is faithful: a below-min withdrawal is rejected by the
+/// minter with `AmountTooLow` exactly as on mainnet (and the facade mirrors the same floor locally).
 #[query]
 fn get_minter_info() -> MinterInfo {
     MinterInfo {
         min_confirmations: 1,
-        retrieve_btc_min_amount: 0,
+        retrieve_btc_min_amount: 50_000,
         kyt_fee: 0,
         deposit_btc_min_amount: Some(0),
+    }
+}
+
+/// The minimal withdrawal amount this mock will honor, in sats. Mirrors the LIVE ckBTC minter's
+/// `retrieve_btc_min_amount` (50_000), so the mock's `AmountTooLow` behavior matches mainnet exactly.
+/// Single-sourced here so the facade's local pre-check + the mock's enforcement can't drift.
+const RETRIEVE_BTC_MIN_AMOUNT: u64 = 50_000;
+
+/// Minter `retrieve_btc_with_approval(RetrieveBtcWithApprovalArgs) -> Result<RetrieveBtcOk,
+/// RetrieveBtcWithApprovalError>` — the value-creating call that burns ckBTC and (on mainnet) sends
+/// native BTC to `address`. The real ckBTC minter takes exactly ONE record argument (verified via
+/// `dfx canister metadata … candid:service --network ic`); this mock mirrors that surface exactly.
+///
+/// Settlement: the caller (the facade) has already called `icrc2_approve` granting THIS minter an
+/// allowance over `Account{owner: caller, subaccount: from_subaccount}`. The mock consumes it via
+/// `icrc2_transfer_from`, pulling `amount` ckBTC from that subaccount to the mock's own default
+/// account (the burn sink — on mainnet the minter then burns it; the net ledger effect, a debit of
+/// `amount` + fee from the user's subaccount, is identical). This is the SAME mechanism the real
+/// minter uses, so the facade's approve→retrieve wiring is proven end-to-end offline.
+///
+/// Errors mirror the real minter's `RetrieveBtcWithApprovalError` variants: `MalformedAddress` (empty
+/// address — a stand-in for the real minter's full BTC-address parse), `AmountTooLow`
+/// (`amount < RETRIEVE_BTC_MIN_AMOUNT`), `InsufficientAllowance`/`InsufficientFunds` (mapped from the
+/// ledger's `transfer_from` errors), and `GenericError` for transport/decode failures.
+#[update]
+async fn retrieve_btc_with_approval(
+    args: RetrieveBtcWithApprovalArgs,
+) -> Result<RetrieveBtcOk, RetrieveBtcWithApprovalError> {
+    // Minimal address validation: the real minter parses a full BTC address; the mock only rejects
+    // the clearly-invalid empty case (enough to exercise the MalformedAddress path offline).
+    if args.address.trim().is_empty() {
+        return Err(RetrieveBtcWithApprovalError::MalformedAddress(
+            "address is empty".to_string(),
+        ));
+    }
+    if args.amount < RETRIEVE_BTC_MIN_AMOUNT {
+        return Err(RetrieveBtcWithApprovalError::AmountTooLow(RETRIEVE_BTC_MIN_AMOUNT));
+    }
+    // The facade always passes a 32-byte subaccount (the user pubkey). Coerce to a fixed ICRC
+    // subaccount; a wrong length is a generic (permanent) error.
+    let sub_vec = args.from_subaccount.unwrap_or_default();
+    let sub_arr: [u8; 32] = sub_vec.as_slice().try_into().map_err(|_| {
+        RetrieveBtcWithApprovalError::GenericError {
+            error_message: "from_subaccount is not a valid 32-byte ICRC subaccount".to_string(),
+            error_code: Nat::from(400u64),
+        }
+    })?;
+    let caller = msg_caller();
+    let ledger = LEDGER.with(|l| *l.borrow());
+    // The minter pulls ckBTC from the user's subaccount (via the allowance the facade set) and BURNS
+    // it — the faithful ckBTC retrieve semantics. On mainnet the ckBTC minter IS the ckBTC ledger's
+    // minting-account owner, so a transfer to its default account burns (removes from supply); the
+    // mock is installed the same way (`minting_account.owner = mock`). The net ledger effect — a
+    // debit of `amount` from `Account{facade, subaccount}` and a matching reduction in total supply —
+    // is identical to mainnet, which is what the facade's wiring proof needs.
+    let self_id = canister_self();
+    let arg = TransferFromArgs {
+        spender_subaccount: None, // the mock is the spender (its default subaccount)
+        from: Account { owner: caller, subaccount: Some(sub_arr) },
+        to: Account { owner: self_id, subaccount: None }, // minting account → burn
+        amount: Nat::from(args.amount),
+        fee: None,
+        memo: None,
+        created_at_time: Some(time()),
+    };
+    let response = match Call::bounded_wait(ledger, "icrc2_transfer_from")
+        .with_arg(arg)
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            return Err(RetrieveBtcWithApprovalError::GenericError {
+                error_message: format!("icrc2_transfer_from rejected: {e:?}"),
+                error_code: Nat::from(503u64),
+            });
+        }
+    };
+    match response.candid::<Result<Nat, TransferFromError>>() {
+        Ok(Ok(block_index)) => Ok(RetrieveBtcOk { block_index }),
+        Ok(Err(TransferFromError::InsufficientAllowance { allowance })) => {
+            Err(RetrieveBtcWithApprovalError::InsufficientAllowance { allowance })
+        }
+        Ok(Err(TransferFromError::InsufficientFunds { balance })) => {
+            Err(RetrieveBtcWithApprovalError::InsufficientFunds { balance })
+        }
+        Ok(Err(TransferFromError::TemporarilyUnavailable)) => {
+            Err(RetrieveBtcWithApprovalError::TemporarilyUnavailable(
+                "ledger temporarily unavailable".to_string(),
+            ))
+        }
+        Ok(Err(e)) => Err(RetrieveBtcWithApprovalError::GenericError {
+            error_message: format!("icrc2_transfer_from error: {e}"),
+            error_code: Nat::from(502u64),
+        }),
+        Err(e) => Err(RetrieveBtcWithApprovalError::GenericError {
+            error_message: format!("icrc2_transfer_from decode: {e:?}"),
+            error_code: Nat::from(502u64),
+        }),
     }
 }
 

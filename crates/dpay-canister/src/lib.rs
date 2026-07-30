@@ -51,7 +51,7 @@
 //! and tests); this file is state + candid glue + cross-canister settlement.
 
 use candid::{CandidType, Nat, Principal, Reserved};
-use ed25519_dalek::SigningKey;
+use ed25519_dalek::{Signature, SigningKey};
 use ic_cdk::api::{canister_self, msg_caller, time};
 use ic_cdk::call::Call;
 use ic_cdk::management_canister::{
@@ -63,6 +63,7 @@ use ic_stable_structures::storable::Bound;
 use ic_stable_structures::{DefaultMemoryImpl, StableBTreeMap, StableCell, Storable};
 use icrc_ledger_types::icrc1::account::Account;
 use icrc_ledger_types::icrc1::transfer::{TransferArg, TransferError};
+use icrc_ledger_types::icrc2::approve::{ApproveArgs, ApproveError};
 use icrc_ledger_types::icrc3::blocks::GetBlocksRequest;
 use icrc_ledger_types::icrc3::transactions::{GetTransactionsResponse, Transaction};
 use serde::Deserialize;
@@ -70,8 +71,8 @@ use std::borrow::Cow;
 use std::cell::RefCell;
 
 use dpay_core::{
-    validate, Currency, ReceiptClaim, SignedAuthorization, NONCE_LEN, PUBKEY_LEN, RECEIPT_CLAIM_LEN,
-    SIG_LEN,
+    validate, Currency, ReceiptClaim, SignedAuthorization, WithdrawAuth, NONCE_LEN, PUBKEY_LEN,
+    RECEIPT_CLAIM_LEN, SIG_LEN,
 };
 
 type Memory = VirtualMemory<DefaultMemoryImpl>;
@@ -123,6 +124,44 @@ fn settle_nonce(nonce: &Nonce) {
 /// not move (transient/pre-transfer failures).
 fn release_nonce(nonce: &Nonce) {
     SPENT.with(|s| {
+        s.borrow_mut().remove(nonce);
+    });
+}
+
+// --- withdraw-nonce set: nonce -> () -----------------------------------------------------------
+// A SEPARATE spent-nonce map for the WITHDRAWAL path (`retrieve_btc`). Kept distinct from `SPENT`
+// (pay nonces) so a withdraw idempotency key can never collide with / block a pay nonce (both are
+// random 128-bit, so collisions are negligible in practice — the separation is for cleanliness and
+// independent auditability). Same reserve/release/settle semantics as `SPENT`: reserve
+// synchronously (no await) before any cross-canister call; release on a transient/pre-transfer
+// failure so the same authorization may retry; settle (no-op, the entry is already present) once the
+// burn commits so the dead/settled authorization can never replay.
+
+/// Reserve `nonce` for a withdrawal. Returns `false` if already present (replay or concurrent
+/// withdraw reserved it first). Synchronous — no `await` — so two concurrent withdraws cannot both
+/// succeed (the concurrency barrier, identical to [`reserve_nonce`]).
+fn reserve_withdraw_nonce(nonce: &Nonce) -> bool {
+    WITHDRAW_NONCES.with(|s| {
+        let mut s = s.borrow_mut();
+        if s.contains_key(nonce) {
+            false
+        } else {
+            s.insert(nonce.clone(), ());
+            true
+        }
+    })
+}
+
+/// Mark `nonce` as settled (the burn committed). No-op with set semantics (mirrors [`settle_nonce`]).
+fn settle_withdraw_nonce(nonce: &Nonce) {
+    WITHDRAW_NONCES.with(|s| {
+        s.borrow_mut().insert(nonce.clone(), ());
+    });
+}
+
+/// Release a withdraw reservation so the same authorization may retry (transient/pre-burn failure).
+fn release_withdraw_nonce(nonce: &Nonce) {
+    WITHDRAW_NONCES.with(|s| {
         s.borrow_mut().remove(nonce);
     });
 }
@@ -544,6 +583,14 @@ thread_local! {
     /// lost. Keyed by [`Nonce`] (the same single-use idempotency key `pay` reserves).
     static RECEIPTS: RefCell<StableBTreeMap<Nonce, StoredReceipt, Memory>> =
         RefCell::new(StableBTreeMap::init(MEMORY.with(|m| m.borrow().get(MemoryId::new(11)))));
+
+    /// Withdrawal-nonce set. MemoryId 12 (new facade state). A SEPARATE map from `SPENT` (pay
+    /// nonces): tracks single-use withdrawal idempotency keys so a signed [`WithdrawAuth`] can be
+    /// submitted at most once (a replay would otherwise burn ckBTC twice). Same set semantics as
+    /// `SPENT`: reserve before any cross-canister call, release on transient failure, settle on
+    /// commit. See [`reserve_withdraw_nonce`].
+    static WITHDRAW_NONCES: RefCell<StableBTreeMap<Nonce, (), Memory>> =
+        RefCell::new(StableBTreeMap::init(MEMORY.with(|m| m.borrow().get(MemoryId::new(12)))));
 }
 
 /// Configuration for one currency, supplied at init (and via `register_ledger`).
@@ -705,6 +752,78 @@ struct MinterAccount {
     subaccount: Option<Vec<u8>>,
 }
 
+// --- ck-minter retrieve proxy (ckBTC → BTC withdrawal) ----------------------------------------
+// Mirror types for decoding the REAL ckBTC minter's `retrieve_btc_with_approval` candid reply,
+// verified against `dfx canister metadata mqygn-kiaaa-aaaar-qaadq-cai candid:service --network ic`:
+//   `retrieve_btc_with_approval : (RetrieveBtcWithApprovalArgs) ->
+//       (variant { Ok : RetrieveBtcOk; Err : RetrieveBtcWithApprovalError })`
+// where `RetrieveBtcWithApprovalArgs = record { address : text; amount : nat64; from_subaccount :
+// opt blob }` and `RetrieveBtcOk = record { block_index : nat64 }`. Field/variant labels mirror the
+// real minter exactly so the decode is wire-compatible with mainnet. Internal only — kept out of the
+// public candid surface (like `LedgerEntry`/`CacheKey`).
+
+/// Minimal withdrawal amount the facade rejects locally, in sats. Mirrors the LIVE ckBTC minter's
+/// `retrieve_btc_min_amount` (= 50_000, returned by `get_minter_info` on `mqygn-kiaaa-aaaar-qaadq-cai`
+// and confirmed in OPEN_ISSUES.md). The minter enforces it too (returns `AmountTooLow`); the facade
+// rejects early to save cycles and give a clean error. Single-sourced here so the canister's local
+// floor and the docs can't drift.
+const RETRIEVE_BTC_MIN_AMOUNT: u64 = 50_000;
+
+#[derive(CandidType, Deserialize)]
+struct RetrieveBtcWithApprovalArgs {
+    address: String,
+    amount: u64,
+    from_subaccount: Option<Vec<u8>>,
+}
+
+#[derive(CandidType, Deserialize)]
+struct RetrieveBtcOk {
+    block_index: Nat,
+}
+
+#[derive(CandidType, Deserialize, Debug)]
+enum RetrieveBtcWithApprovalError {
+    MalformedAddress(String),
+    AlreadyProcessing,
+    AmountTooLow(u64),
+    InsufficientFunds { balance: Nat },
+    InsufficientAllowance { allowance: Nat },
+    TemporarilyUnavailable(String),
+    GenericError { error_message: String, error_code: Nat },
+}
+
+/// The candid argument the facade's `withdraw` takes: the user's signed authorization fields +
+/// the Ed25519 signature over the canonical [`dpay_core::WithdrawAuth`] signing bytes. The facade
+/// rebuilds the [`dpay_core::WithdrawAuth`] from these fields, recomputes the signing bytes (single
+/// source of truth in `dpay-core`), and verifies the signature under `from_pubkey` BEFORE moving any
+/// funds — the non-custodial gate.
+#[derive(CandidType, Deserialize)]
+struct WithdrawRequest {
+    from_pubkey: Vec<u8>,
+    btc_address: String,
+    amount: u64,
+    nonce: Vec<u8>,
+    expiry: u64,
+    currency: Currency,
+    sig: Vec<u8>,
+}
+
+/// The facade's withdrawal receipt, returned on a successful burn. Mirrors the relay's
+/// [`crate::WithdrawReceipt`] surface. `block_index` is the ckBTC ledger's burn transaction index
+/// (from the minter's `RetrieveBtcOk`); `amount`/`btc_address` echo the authorization so the app can
+/// render "Withdrew X BTC to bc1…". (No canister-signed receipt for withdraw — the pay receipt (R2)
+/// is the outcome-attestation surface; the withdraw outcome is the on-ledger burn + the minter's BTC
+// send, reconciled via the ckBTC ledger / `retrieve_btc_status`, not a facade signature.)
+#[derive(CandidType, Deserialize, Clone, Debug)]
+struct WithdrawReceipt {
+    from: Vec<u8>,
+    btc_address: String,
+    amount: u64,
+    nonce: Vec<u8>,
+    currency: Currency,
+    block_index: u64,
+}
+
 #[init]
 fn init(arg: InitArg) {
     CAP.with(|c| c.borrow_mut().set(arg.per_tx_cap).expect("set cap"));
@@ -844,6 +963,67 @@ async fn minter_call_deposit_fee(minter: Principal) -> Result<u64, String> {
         .await
         .map_err(|e| format!("get_deposit_fee rejected: {e:?}"))?;
     response.candid::<u64>().map_err(|e| format!("get_deposit_fee decode: {e:?}"))
+}
+
+/// Minter `retrieve_btc_with_approval(RetrieveBtcWithApprovalArgs) -> Result<RetrieveBtcOk,
+/// RetrieveBtcWithApprovalError>` — the value-creating call that burns ckBTC and sends native BTC to
+/// `address`. The real ckBTC minter takes ONE record argument (verified via `dfx canister metadata
+/// … candid:service --network ic`); encoded here as a 1-tuple `(args,)` so `with_args` emits exactly
+/// one argument (the record). The facade passes `from_subaccount = Some(pubkey)`, so the minter pulls
+/// `amount` ckBTC from `Account{owner: canister_self(), subaccount: pubkey}` via `icrc2_transfer_from`
+/// (consuming the allowance the facade just set via [`icrc2_approve`]).
+async fn minter_call_retrieve_btc(
+    minter: Principal,
+    args: RetrieveBtcWithApprovalArgs,
+) -> Result<Result<RetrieveBtcOk, RetrieveBtcWithApprovalError>, String> {
+    let arg = (args,);
+    let response = Call::bounded_wait(minter, "retrieve_btc_with_approval")
+        .with_args(&arg)
+        .await
+        .map_err(|e| format!("retrieve_btc_with_approval rejected: {e:?}"))?;
+    response
+        .candid::<Result<RetrieveBtcOk, RetrieveBtcWithApprovalError>>()
+        .map_err(|e| format!("retrieve_btc_with_approval decode: {e:?}"))
+}
+
+/// Cross-canister `icrc2_approve` — grants `spender` an allowance of `amount` from
+/// `from_subaccount` on the ckBTC ledger. The facade is the owner of `Account{owner: canister_self(),
+/// subaccount: pubkey}`, so it may approve the minter to pull (via `transfer_from`) the withdrawal
+/// amount. This is the ckBTC withdrawal primitive: approve the minter, then call
+/// `retrieve_btc_with_approval` which consumes the allowance. The approval is for EXACTLY the
+/// withdrawal amount (bounded blast radius — see the front-running note on `withdraw`).
+async fn icrc2_approve(
+    ledger: Principal,
+    from_subaccount: [u8; PUBKEY_LEN],
+    spender: Account,
+    amount: u64,
+) -> Result<Nat, ApproveError> {
+    let arg = ApproveArgs {
+        from_subaccount: Some(from_subaccount),
+        spender,
+        amount: Nat::from(amount),
+        expected_allowance: None,
+        expires_at: None,
+        fee: None,
+        memo: None,
+        created_at_time: Some(time()),
+    };
+    let response = match Call::bounded_wait(ledger, "icrc2_approve")
+        .with_arg(arg)
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            return Err(ApproveError::GenericError {
+                error_code: Nat::from(503u64),
+                message: format!("icrc2_approve rejected: {e:?}"),
+            });
+        }
+    };
+    response.candid::<Result<Nat, ApproveError>>().map_err(|e| ApproveError::GenericError {
+        error_code: Nat::from(502u64),
+        message: format!("icrc2_approve decode: {e:?}"),
+    })?
 }
 
 /// `created_at_time` for a `pay` transfer, quantized to a coarse bucket. The ICRC ledger dedups
@@ -1456,6 +1636,182 @@ async fn deposit_info(currency: Currency) -> Result<DepositInfo, String> {
         min_confirmations: info.min_confirmations,
         deposit_fee,
         deposit_min_amount: info.deposit_btc_min_amount,
+    })
+}
+
+// --- ck-minter withdrawal proxy (ckBTC → native BTC out) --------------------------------------
+// The mirror of the deposit proxy: where `refresh_deposit` mints IN confirmed BTC, `withdraw` burns
+// OUT ckBTC to a native BTC address. The facade is the OWNER of the ckBTC held at
+// `Account{owner: canister_self(), subaccount: pubkey}`, so on a VERIFIED USER SIGNATURE it (1)
+// `icrc2_approve`s the minter to pull `amount` from that subaccount, then (2) calls the minter's
+// `retrieve_btc_with_approval`, which consumes the allowance via `icrc2_transfer_from` and sends BTC
+// to the user's address. Non-custodial: the facade moves nothing without a verified Ed25519
+// signature over the canonical [`WithdrawAuth`] bytes (single source of truth in `dpay-core`).
+//
+// FRONT-RUNNING NOTE (documented residual risk, same as every `retrieve_btc_with_approval` caller):
+// the approval + retrieve are two cross-canister calls with an `await` between them. In principle a
+// separate caller could invoke the minter's `retrieve_btc_with_approval` with the same subaccount +
+// an attacker address between the facade's approve and retrieve, consuming the allowance. The blast
+// radius is bounded to the EXACT authorized `amount` (the approval is for that amount, single-use),
+// so only one withdrawal's worth of ckBTC could be misdirected — never the user's whole balance. This
+// is inherent to the ckBTC withdrawal design (the minter has no signature-binding-the-destination
+// path); the reference NNS minter clients accept the same residual. See CODEBASE_ANALYSIS.
+
+/// `(WithdrawRequest) -> Result<WithdrawReceipt, text>` — withdraw ckBTC to a native BTC address on a
+/// verified user signature. The request carries the [`WithdrawAuth`] fields + the user's Ed25519
+/// signature over the canonical signing bytes; the facade verifies the signature under `from_pubkey`
+/// (== the debit subaccount) before moving any funds.
+///
+/// Idempotency / replay safety mirrors `pay`: the withdraw nonce is reserved synchronously before any
+/// cross-canister call (the concurrency barrier — two concurrent withdraws with the same nonce
+/// cannot both succeed), released on a transient/pre-burn failure (the same auth may retry), and
+/// settled once the burn commits (the auth can never replay → no double-burn).
+#[update]
+async fn withdraw(req: WithdrawRequest) -> Result<WithdrawReceipt, String> {
+    // 1. Parse + length-validate the fields (cheap, before any signature/ledger work).
+    let from = to_pubkey(&req.from_pubkey)?;
+    let nonce_bytes: [u8; NONCE_LEN] = req
+        .nonce
+        .as_slice()
+        .try_into()
+        .map_err(|_| "bad nonce length".to_string())?;
+    let sig_arr: [u8; SIG_LEN] = req
+        .sig
+        .as_slice()
+        .try_into()
+        .map_err(|_| "bad sig length".to_string())?;
+    let sig = Signature::from_bytes(&sig_arr);
+
+    // 2. NON-CUSTODIAL GATE: rebuild the WithdrawAuth + verify the signature BEFORE reserving the
+    //    nonce or any cross-canister call. `from_pubkey` is both the verify key AND the debit
+    //    subaccount, so a signature under any other key moves no funds. Checked before the nonce
+    //    reserve so an attacker can't block a nonce by submitting a garbled blob.
+    let auth = WithdrawAuth {
+        from_pubkey: from,
+        btc_address: req.btc_address.clone(),
+        amount: req.amount,
+        nonce: nonce_bytes,
+        expiry: req.expiry,
+        currency: req.currency,
+    };
+    if !auth.verify(&from, &sig) {
+        return Err("bad signature".to_string());
+    }
+
+    let now_secs = time() / 1_000_000_000;
+    // 3. Cheap local rejects (DoS hygiene before cross-canister calls cost cycles).
+    if req.amount == 0 {
+        return Err("zero amount".to_string());
+    }
+    if req.expiry < now_secs {
+        return Err("expired".to_string());
+    }
+    if req.amount < RETRIEVE_BTC_MIN_AMOUNT {
+        return Err(format!(
+            "amount below retrieve_btc_min_amount ({RETRIEVE_BTC_MIN_AMOUNT})"
+        ));
+    }
+
+    let (ledger, _mintable) = ledger_for(req.currency)?;
+    let minter = minter_for(req.currency)?;
+    let from_acct = account_of(&from);
+
+    // 4. Reserve the withdraw nonce synchronously (no await) — the concurrency barrier.
+    let wnonce = Nonce(nonce_bytes);
+    if !reserve_withdraw_nonce(&wnonce) {
+        return Err("nonce already used".to_string());
+    }
+
+    // Everything below may `await`; on any pre-burn failure we RELEASE the reservation so the user
+    // may retry the SAME authorization (funds provably did not move).
+    // MONEY-SAFETY: read the AUTHORITATIVE ledger balance — never the display cache.
+    let balance = match ledger_balance_of(ledger, &from_acct).await {
+        Ok(b) => b,
+        Err(e) => {
+            release_withdraw_nonce(&wnonce);
+            return Err(e);
+        }
+    };
+    if req.amount > balance {
+        release_withdraw_nonce(&wnonce);
+        return Err(format!(
+            "{:?}",
+            TransferError::InsufficientFunds { balance: Nat::from(balance) }
+        ));
+    }
+
+    // 5. icrc2_approve: grant the minter an allowance of EXACTLY `amount` over the user's subaccount.
+    //    Any approve failure → release (no burn happened); the user may retry the same authorization.
+    let spender = Account { owner: minter, subaccount: None };
+    if let Err(e) = icrc2_approve(ledger, from, spender, req.amount).await {
+        release_withdraw_nonce(&wnonce);
+        return Err(format!("icrc2_approve: {e}"));
+    }
+
+    // 6. retrieve_btc_with_approval: the minter consumes the allowance (transfer_from) and sends BTC
+    //    to `btc_address`. Error classification (mirrors `pay`'s reserve/release/settle):
+    //      Ok → SETTLE the nonce (burn committed; the auth can never replay → no double-burn);
+    //      transient (TemporarilyUnavailable / AlreadyProcessing / InsufficientFunds /
+    //      InsufficientAllowance / a transport failure) → RELEASE (retryable; funds did not move);
+    //      permanent (MalformedAddress / AmountTooLow / GenericError) → SETTLE (dead auth; the user
+    //      must sign a fresh authorization).
+    let retrieve_args = RetrieveBtcWithApprovalArgs {
+        address: req.btc_address.clone(),
+        amount: req.amount,
+        from_subaccount: Some(from.to_vec()),
+    };
+    let block_index_nat = match minter_call_retrieve_btc(minter, retrieve_args).await {
+        Ok(Ok(ok)) => {
+            settle_withdraw_nonce(&wnonce);
+            ok.block_index
+        }
+        Ok(Err(RetrieveBtcWithApprovalError::TemporarilyUnavailable(m))) => {
+            release_withdraw_nonce(&wnonce);
+            return Err(format!("retrieve_btc transient: {m}"));
+        }
+        Ok(Err(RetrieveBtcWithApprovalError::AlreadyProcessing)) => {
+            release_withdraw_nonce(&wnonce);
+            return Err("retrieve_btc already processing".to_string());
+        }
+        Ok(Err(RetrieveBtcWithApprovalError::InsufficientFunds { balance })) => {
+            release_withdraw_nonce(&wnonce);
+            return Err(format!("retrieve_btc insufficient funds: balance {balance}"));
+        }
+        Ok(Err(RetrieveBtcWithApprovalError::InsufficientAllowance { allowance })) => {
+            release_withdraw_nonce(&wnonce);
+            return Err(format!("retrieve_btc insufficient allowance: {allowance}"));
+        }
+        Ok(Err(e)) => {
+            // MalformedAddress / AmountTooLow / GenericError — permanent; burn the nonce so the dead
+            // auth can never replay. The user must sign a fresh authorization.
+            settle_withdraw_nonce(&wnonce);
+            return Err(format!("retrieve_btc: {e:?}"));
+        }
+        Err(transport) => {
+            // A transport/decode failure between approve and the minter's reply. Funds may or may not
+            // have moved — release is the retryable choice (matches `pay`'s transient handling); the
+            // single-use nonce keeps a successful-but-unreported burn from being driven twice by a
+            // DIFFERENT auth, and the user's same-auth retry reconciles via the ckBTC ledger.
+            release_withdraw_nonce(&wnonce);
+            return Err(transport);
+        }
+    };
+
+    // 7. Committed: the burn landed (or had already, via the minter). Record the withdraw in history
+    //    (counterparty = the MINT_ACCOUNT sentinel, like `burn`) + refresh the display cache from the
+    //    authoritative ledger.
+    let settle_secs = time() / 1_000_000_000;
+    record_txn(from, MINT_ACCOUNT, req.amount, nonce_bytes, req.currency, settle_secs);
+    if let Ok(bal) = ledger_balance_of(ledger, &from_acct).await {
+        write_cache(from, req.currency, bal);
+    }
+    Ok(WithdrawReceipt {
+        from: from.to_vec(),
+        btc_address: req.btc_address,
+        amount: req.amount,
+        nonce: nonce_bytes.to_vec(),
+        currency: req.currency,
+        block_index: nat_to_u64(&block_index_nat).unwrap_or(0),
     })
 }
 
