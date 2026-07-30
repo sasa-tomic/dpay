@@ -831,6 +831,12 @@ impl Ledger for DepositFailingLedger {
     ) -> Result<Vec<dpay_relay::CurrencyDescriptor>, LedgerError> {
         self.inner.currencies().await
     }
+    async fn ckerc20_onramp_params(
+        &self,
+        currency: u32,
+    ) -> Result<dpay_relay::CkErc20OnrampParams, LedgerError> {
+        self.inner.ckerc20_onramp_params(currency).await
+    }
     async fn receipt_pubkey(&self) -> Result<Vec<u8>, LedgerError> {
         self.inner.receipt_pubkey().await
     }
@@ -871,8 +877,8 @@ async fn deposit_routes_map_ledger_transient_to_503() {
 //
 // Covers GET /api/v1/currencies — the wallet's runtime asset catalog (closes issue #7). The
 // FakeLedger reports a demo deployment: DEMO_USD (currency 0, $, mintable, no ramp) + a ckBTC-shaped
-// currency (1, ₿, with a CkBtcUtxo ramp). The wallet reads this once on load instead of hardcoding
-// DEPOSIT_CURRENCY.
+// currency (1, ₿, CkBtcUtxo ramp) + ckUSDC (2, ckUSDC, CkEthErc20 onramp). The wallet reads this once
+// on load instead of hardcoding DEPOSIT_CURRENCY.
 
 /// `GET /api/v1/currencies` returns `200 {"currencies": [...]}` with every registered currency's
 /// ledger/minter/display metadata. Mirrors how the wallet consumes the catalog on load.
@@ -886,7 +892,7 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(status, StatusCode::OK, "{body}");
 
     let rows = body["currencies"].as_array().expect("currencies array");
-    assert_eq!(rows.len(), 2, "demo catalog = DEMO_USD + ckBTC: {body}");
+    assert_eq!(rows.len(), 3, "demo catalog = DEMO_USD + ckBTC + ckUSDC: {body}");
 
     // DEMO_USD (currency 0): the mintable $ faucet asset, no ramp.
     let dusd = rows
@@ -911,6 +917,48 @@ async fn currencies_route_returns_demo_catalog() {
     // The variant serializes as the plain PascalCase tag (matches the candid label + wallet contract).
     assert_eq!(ckbtc["minter_family"], "CkBtcUtxo");
     assert!(!ckbtc["minter"].as_str().unwrap().is_empty(), "ramp minter principal text present");
+
+    // ckUSDC (currency 2): the ckERC-20 onramp asset — CkEthErc20 family, ckUSDC, 6 decimals.
+    let ckusdc = rows
+        .iter()
+        .find(|r| r["currency"] == 2)
+        .expect("ckUSDC currency present");
+    assert_eq!(ckusdc["mintable"], false);
+    assert_eq!(ckusdc["symbol"], "ckUSDC");
+    assert_eq!(ckusdc["decimals"], 6);
+    assert_eq!(ckusdc["minter_family"], "CkEthErc20");
+    assert!(!ckusdc["minter"].as_str().unwrap().is_empty(), "ramp minter principal text present");
+}
+
+// --- ckERC-20 onramp surface (ckUSDC; M2) -------------------------------------
+//
+// Covers GET /api/v1/onramp/ckerc20 — surfaces the runtime parameters (helper contract, ERC-20
+// address, facade principal) the app needs to build the user's two Ethereum transactions for a
+// ckERC-20 onramp. ckUSDC is a ckERC-20 token handled by the ckETH minter; it has NO per-principal IC
+// address and NO user-callable mint (the user signs both ETH txs in their own wallet). Only the
+// CkEthErc20-family currencies have an onramp; a non-ckERC-20 currency → 503.
+
+/// `GET /api/v1/onramp/ckerc20?currency=2` (ckUSDC) → `200` with the verified mainnet onramp
+/// constants. `?currency=0` (DEMO_USD, not a ckERC-20 currency) → `503` (no onramp configured).
+#[tokio::test]
+async fn ckerc20_onramp_returns_params_for_ckusdc() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+
+    // currency 2 (ckUSDC) → 200 with the verified mainnet onramp constants.
+    let (status, body) = call(&state, get_req("/api/v1/onramp/ckerc20?currency=2")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["helper_address"], "0x18901044688D3756C35Ed2b36D93e6a5B8e00E68");
+    assert_eq!(body["erc20_address"], "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
+    assert!(
+        !body["facade_principal"].as_str().unwrap().is_empty(),
+        "facade principal present: {body}"
+    );
+
+    // currency 0 (DEMO_USD) → 503: DEMO_USD has no ckERC-20 onramp configured.
+    let (status0, _body0) = call(&state, get_req("/api/v1/onramp/ckerc20?currency=0")).await;
+    assert_eq!(status0, StatusCode::SERVICE_UNAVAILABLE);
 }
 
 // --- withdrawal surface (ckBTC → native BTC out; W2) -----------------------------------------

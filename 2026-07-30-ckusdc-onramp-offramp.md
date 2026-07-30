@@ -373,3 +373,58 @@ gas deferred per Fork C) → **V** verify + update OPEN_ISSUES/CODEBASE_ANALYSIS
 
 Orchestrate via subagent swarms; TDD (RED then GREEN); commit each unit; no backward-compat/dead-code;
 constants single-sourced; all I/O has timeouts; no silent errors.
+
+---
+
+## §9 — M2 C-MOCK calldata spec (VERIFIED 2026-07-31, mainnet + authoritative source)
+
+All values below are **byte-exact pinned** and reproduced by `/home/sat/projects/dpay` throwaway `node`
+script (js-sha3 keccak, cross-checked). The helper address + min-withdrawal + ERC-20 addrs are READ AT
+RUNTIME via `get_minter_info` in production (never hardcoded); the **selectors, ABI encoding, and
+principal→bytes32 algorithm are CONSTANTS** (ABI is fixed at deploy).
+
+### 9a. Live params (from `get_minter_info` on `sv3dd-oaaaa-aaaar-qacoa-cai`)
+- helper `deposit_with_subaccount_helper_contract_address` = `0x18901044688D3756C35Ed2b36D93e6a5B8e00E68`
+- USDC ERC-20 = `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` ; ckUSDC ledger `xevnm-gaaaa-aaaar-qafnq-cai` (6 dec, fee 10_000)
+- ckETH ledger (gas) `ss2fx-dyaaa-aaaar-qacoq-cai` ; minter ETH addr `0xb25eA1D493B49a1DeD42aC5B1208cC618f9A9B80`
+- `minimum_withdrawal_amount` = 5_000_000_000_000_000 (minter-wide gas floor)
+
+### 9b. ABI (from `DepositHelperWithSubaccount.sol` `contract CkDeposit`)
+```
+depositErc20(address erc20Address, uint256 amount, bytes32 principal, bytes32 subaccount)
+  // calls erc20.safeTransferFrom(msg.sender, minterAddress, amount) — so user MUST approve(helper, amount) on the ERC-20 first
+  // emits ReceivedEthOrErc20(erc20Addr indexed, owner indexed, amount, principal indexed, bytes32 subaccount)
+event ReceivedEthOrErc20(address indexed erc20ContractAddress, address indexed owner, uint256 amount, bytes32 indexed principal, bytes32 subaccount)
+```
+NOTE: first arg is the **ERC-20 contract address**, NOT a "token_id" (corrects the §1 investigation framing).
+
+### 9c. Selectors (keccak256, cross-checked: `approve(address,uint256)`=`0x095ea7b3` ✓)
+- `depositErc20(address,uint256,bytes32,bytes32)` = **`0xdb9751af`**
+- `approve(address,uint256)` = `0x095ea7b3`
+
+### 9d. principal→bytes32 algorithm (verbatim `templates/principal_to_bytes.js`)
+1. strip `-` from principal text → base32-decode → raw bytes (includes 4-byte CRC32 prefix)
+2. `raw.slice(4)` strips the CRC32 → principal bytes (≤29)
+3. length-prefix into 32 bytes: `[1-byte N=len][N principal-bytes][31-N zero pad]`
+Golden vectors (5/5 reproduced):
+- `k2t6j-...-6ae` → `0x1db56bf994b37ae8e79f5ce000be1727a6060ae4eef24736b7cc999c3c020000`
+- `opspt-...-vqe` → `0x1dca62f9ef706b80db8a5293779a08cbe067e69206ac4eee9d27931d2b020000`
+- `ezu3d-...-rae` → `0x1d882d15b09f8e81e29606305f5fefc5eff3e2309620a3557ecae39d62020000`
+- `47gy6-...-sae` → `0x1d5ad0eae83b042ac243598bde6c4eea3e5dff125e2e2057476a3010e4020000`
+- `2chl6-4hpzw-vqaaa-aaaaa-c` → `0x09efcdab00000000000100000000000000000000000000000000000000000000`
+
+### 9e. Full calldata golden (depositErc20, 100 USDC, k2t6j principal, default subacct) — 132 bytes
+```
+0xdb9751af
+  000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48   (USDC addr, left-pad)
+  0000000000000000000000000000000000000000000000000000000005f5e100   (100_000000)
+  1db56bf994b37ae8e79f5ce000be1727a6060ae4eef24736b7cc999c3c020000   (principal bytes32)
+  0000000000000000000000000000000000000000000000000000000000000000   (subacct default)
+```
+approve calldata (helper, 100 USDC): `0x095ea7b3` + addr32(0x1890…00E68) + u256(100_000000).
+
+### 9f. C-CONF scope (offline-testable to ≥9/10)
+The TS calldata builder (`principalToBytes32` + `encodeDepositErc20` + `encodeApprove`) is fully
+testable offline against the §9d/§9e goldens — no network needed. The only outer-loop gate is the actual
+ETH radio hop (wallet signs + tx mined + minter scrapes). Minter helper addr/min MUST be fetched at
+runtime from `get_minter_info` (the canister relay surfaces them), never bundled.

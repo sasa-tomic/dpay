@@ -21,9 +21,9 @@ pub mod agent_ledger;
 
 pub use app::{app, AppState};
 pub use ledger::{
-    Clock, CurrencyDescriptor, DepositInfo, DepositRefresh, FakeLedger, FixedClock, FlakyLedger,
-    Ledger, LedgerError, MinterFamily, MintedUtxo, PendingUtxo, Receipt, SystemClock, TxnRecord,
-    WithdrawReceipt, WithdrawRequest,
+    Clock, CkErc20OnrampParams, CurrencyDescriptor, DepositInfo, DepositRefresh, FakeLedger, FixedClock,
+    FlakyLedger, Ledger, LedgerError, MinterFamily, MintedUtxo, PendingUtxo, Receipt, SystemClock,
+    TxnRecord, WithdrawReceipt, WithdrawRequest,
 };
 
 #[cfg(feature = "agent")]

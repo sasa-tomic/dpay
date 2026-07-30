@@ -22,8 +22,9 @@ use serde::Deserialize;
 use dpay_core::{Currency, PUBKEY_LEN, SignedAuthorization};
 
 use crate::ledger::{
-    CurrencyDescriptor, DepositInfo, DepositRefresh, Ledger, LedgerError, MinterFamily, MintedUtxo,
-    PendingUtxo, Receipt, TxnRecord, WithdrawReceipt, WithdrawRequest,
+    CKERC20_HELPER_ADDRESS, CKUSDC_ERC20_ADDRESS, CkErc20OnrampParams, CurrencyDescriptor, DepositInfo,
+    DepositRefresh, Ledger, LedgerError, MinterFamily, MintedUtxo, PendingUtxo, Receipt, TxnRecord,
+    WithdrawReceipt, WithdrawRequest,
 };
 
 /// Read the settlement currency out of a 196-byte signed-authorization wire (the canister does the
@@ -456,6 +457,23 @@ impl Ledger for AgentLedger {
                 decimals: d.decimals,
             })
             .collect())
+    }
+
+    async fn ckerc20_onramp_params(&self, currency: Currency) -> Result<CkErc20OnrampParams, LedgerError> {
+        // TODO(M2): fetch from facade/minter at runtime once the canister surfaces ckERC20 onramp
+        // config. The verified mainnet constants are correct for ckUSDC today; the runtime-fetch is a
+        // documented follow-up (the canister ckERC20 ramp dispatch is not built yet). `facade_principal`
+        // is the canister this AgentLedger is already pointed at (the depositErc20 `principal` arg);
+        // the helper + ERC-20 addresses are the verified mainnet values single-sourced in ledger.rs.
+        if currency == 2 {
+            Ok(CkErc20OnrampParams {
+                helper_address: CKERC20_HELPER_ADDRESS.to_string(),
+                erc20_address: CKUSDC_ERC20_ADDRESS.to_string(),
+                facade_principal: self.canister_id.to_text(),
+            })
+        } else {
+            Err(LedgerError::Transient("no ckERC-20 onramp for currency".into()))
+        }
     }
 
     async fn withdraw(&self, req: WithdrawRequest) -> Result<WithdrawReceipt, LedgerError> {

@@ -129,6 +129,7 @@ pub fn app(state: AppState) -> Router {
         .route("/deposit/refresh/{hex}", post(deposit_refresh))
         .route("/deposit/info", get(deposit_info))
         .route("/currencies", get(currencies))
+        .route("/onramp/ckerc20", get(ckerc20_onramp))
         .route("/health", get(health))
         .route("/version", get(version));
 
@@ -354,6 +355,34 @@ async fn currencies(State(state): State<AppState>) -> Response {
     }
 }
 
+/// `GET /api/v1/onramp/ckerc20?currency=N` → `200 {"helper_address","erc20_address",
+/// "facade_principal"}`. Surfaces the runtime parameters the app needs to build the user's two
+/// Ethereum transactions (approve + depositErc20) for a ckERC-20 onramp. Only meaningful for
+/// CkEthErc20-family currencies (e.g. ckUSDC = currency 2); a non-ckERC-20 currency is a `Transient`
+/// (no onramp configured) → 503. Error mapping mirrors `withdraw`/`faucet`: Rejected → 422,
+/// Transient → 503.
+async fn ckerc20_onramp(
+    State(state): State<AppState>,
+    Query(qs): Query<CkErc20Query>,
+) -> Response {
+    let currency = qs.currency.unwrap_or(DEMO_USD);
+    match state.ledger.ckerc20_onramp_params(currency).await {
+        Ok(p) => (
+            StatusCode::OK,
+            Json(CkErc20OnrampBody {
+                helper_address: p.helper_address,
+                erc20_address: p.erc20_address,
+                facade_principal: p.facade_principal,
+            }),
+        )
+            .into_response(),
+        Err(LedgerError::Rejected(msg)) => err(StatusCode::UNPROCESSABLE_ENTITY, msg),
+        Err(LedgerError::Transient(msg)) => {
+            err(StatusCode::SERVICE_UNAVAILABLE, format!("ledger unavailable: {msg}"))
+        }
+    }
+}
+
 /// `POST /api/v1/test/deposit/seed` (feature `test-helpers` ONLY — never in the prod image).
 ///
 /// JSON `{account: <hex>, currency?: N, amount: U64}` → seeds a pending deposit on the FakeLedger
@@ -506,6 +535,13 @@ struct TransactionsQuery {
     limit: Option<u32>,
 }
 
+/// `?currency=N` for `GET /api/v1/onramp/ckerc20`. Absent → `DEMO_USD` (which has no ckERC-20
+/// onramp → 503); a caller must name the ckERC-20 currency it wants (e.g. ckUSDC = 2).
+#[derive(Deserialize)]
+struct CkErc20Query {
+    currency: Option<Currency>,
+}
+
 #[derive(Serialize)]
 struct PayOk {
     receipt: Receipt,
@@ -573,6 +609,15 @@ struct DepositInfoBody {
 #[derive(Serialize)]
 struct CurrenciesBody {
     currencies: Vec<CurrencyDescriptor>,
+}
+
+/// `GET /api/v1/onramp/ckerc20` response body — the ckERC-20 onramp params the app needs to build
+/// the user's two Ethereum transactions (approve + depositErc20).
+#[derive(Serialize)]
+struct CkErc20OnrampBody {
+    helper_address: String,
+    erc20_address: String,
+    facade_principal: String,
 }
 
 /// `POST /api/v1/withdraw` response body — the withdrawal receipt (echoes the authorization + the

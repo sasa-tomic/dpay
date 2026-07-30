@@ -36,6 +36,16 @@ const RETRIEVE_BTC_MIN_AMOUNT: u64 = 50_000;
 /// FakeLedger mirrors that reject so the two can't diverge (W3 audit).
 const MINT_ACCOUNT: [u8; PUBKEY_LEN] = [0xFF; PUBKEY_LEN];
 
+/// Verified mainnet constants for the ckUSDC onramp (ckERC-20 family). ckUSDC has NO per-principal
+/// IC deposit address and NO user-callable mint — the user performs two Ethereum transactions from
+/// their own wallet (approve + depositErc20); the relay only surfaces these so the app can build the
+/// calldata (see OPEN_ISSUES.md O6 + `app/cketh.ts`). In production these are read at runtime from the
+/// ckETH minter's `get_minter_info`; the constants below are the authoritative mainnet values
+/// (verified 2026-07-31 — do not re-derive). Single-sourced here so the FakeLedger + AgentLedger
+/// impls can't drift from the verified addresses.
+pub(crate) const CKERC20_HELPER_ADDRESS: &str = "0x18901044688D3756C35Ed2b36D93e6a5B8e00E68";
+pub(crate) const CKUSDC_ERC20_ADDRESS: &str = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
+
 /// What the merchant sees on success. Byte fields are hex so the JSON is a plain string map.
 /// Mirrors the canister's `PayReceipt` (which returns the same fields as candid `blob`s).
 ///
@@ -189,6 +199,18 @@ pub struct CurrencyDescriptor {
     pub decimals: Option<u8>,
 }
 
+/// Onramp parameters for a ckERC-20 currency (ckUSDC etc.). The app builds the user's two Ethereum
+/// transactions (approve + depositErc20) from these; the user signs in their own wallet (non-custodial).
+/// `facade_principal` is the canister id encoded as the depositErc20 `principal` arg; the user's pubkey
+/// is the subaccount. In production these come from the ckETH minter's `get_minter_info`; the offline
+/// FakeLedger returns the verified mainnet constants.
+#[derive(Serialize)]
+pub struct CkErc20OnrampParams {
+    pub helper_address: String,     // the CkDeposit helper contract (0x…)
+    pub erc20_address: String,      // the token's ERC-20 contract (0x…) — per-token
+    pub facade_principal: String,   // the facade canister principal (text) — the depositErc20 `principal` arg
+}
+
 /// Settlement outcome. `Rejected` is a permanent policy failure (bad sig, expired, over cap,
 /// insufficient funds, reused nonce, malformed wire) — the relay must NOT retry it and surfaces
 /// it as `422`. `Transient` is an infrastructure hiccup (e.g. the agent/canister was briefly
@@ -296,6 +318,11 @@ pub trait Ledger: Send + Sync {
     /// canister's LEDGERS + MINTERS + CURRENCY_META. Unauthenticated (catalog only — no balances).
     /// Impl errors are `Transient` (an unreachable canister); there is no permanent-policy failure.
     async fn currencies(&self) -> Result<Vec<CurrencyDescriptor>, LedgerError>;
+
+    /// ckERC-20 onramp parameters (helper contract, ERC-20 address, facade principal) for the given
+    /// currency. Only meaningful for CkEthErc20-family currencies. Returns Transient(503) if the
+    /// currency has no ckERC-20 onramp configured.
+    async fn ckerc20_onramp_params(&self, currency: Currency) -> Result<CkErc20OnrampParams, LedgerError>;
 
     /// Withdraw ckBTC to a native BTC address on a VERIFIED user signature. The request carries the
     /// [`WithdrawAuth`] fields + the Ed25519 signature (hex); the ledger verifies the signature under
@@ -458,12 +485,14 @@ impl FakeLedger {
 }
 
 /// The catalog the offline FakeLedger reports — mirrors a demo deployment: DEMO_USD (currency 0,
-/// mintable, the `$` faucet asset) + ckBTC (currency 1, the deposit/withdraw ramp asset). The
-/// principal text values are the canonical management/anon/minter stand-ins the demo uses (`aaaaa-aa`
-/// = the mgmt canister, `2vxsx-fae` = the anonymous principal, `mqygn-kiaaa-aaaar-qaadq-cai` = the
-/// live ckBTC minter); the wallet only reads `currency`/`symbol`/`decimals`/`minter_family` for
-/// display. Hardcoded as TEXT (not built via `candid::Principal`) because `candid` is feature-gated
-/// to `agent` and `ledger.rs` ships in the lean offline build.
+/// mintable, the `$` faucet asset) + ckBTC (currency 1, the CkBtcUtxo deposit/withdraw ramp asset) +
+/// ckUSDC (currency 2, the CkEthErc20 onramp asset). The principal text values are the canonical
+/// management/anon/minter stand-ins the demo uses (`aaaaa-aa` = the mgmt canister, `2vxsx-fae` = the
+/// anonymous principal, `mqygn-kiaaa-aaaar-qaadq-cai` = the live ckBTC minter, `sv3dd-…` = the live
+/// ckETH minter, `xevnm-…` = the live ckUSDC ledger); the wallet only reads
+/// `currency`/`symbol`/`decimals`/`minter_family` for display. Hardcoded as TEXT (not built via
+/// `candid::Principal`) because `candid` is feature-gated to `agent` and `ledger.rs` ships in the lean
+/// offline build.
 fn fake_catalog() -> Vec<CurrencyDescriptor> {
     vec![
         CurrencyDescriptor {
@@ -483,6 +512,15 @@ fn fake_catalog() -> Vec<CurrencyDescriptor> {
             minter_family: Some(MinterFamily::CkBtcUtxo),
             symbol: Some("₿".into()),
             decimals: Some(8),
+        },
+        CurrencyDescriptor {
+            currency: 2, // ckUSDC (ckERC-20 onramp currency)
+            ledger: "xevnm-gaaaa-aaaar-qafnq-cai".to_string(), // ckUSDC ledger principal text
+            mintable: false,
+            minter: Some("sv3dd-oaaaa-aaaar-qacoa-cai".to_string()), // ckETH minter
+            minter_family: Some(MinterFamily::CkEthErc20),
+            symbol: Some("ckUSDC".to_string()),
+            decimals: Some(6),
         },
     ]
 }
@@ -669,6 +707,21 @@ impl Ledger for FakeLedger {
 
     async fn currencies(&self) -> Result<Vec<CurrencyDescriptor>, LedgerError> {
         Ok(fake_catalog())
+    }
+
+    async fn ckerc20_onramp_params(&self, currency: Currency) -> Result<CkErc20OnrampParams, LedgerError> {
+        if currency == 2 {
+            Ok(CkErc20OnrampParams {
+                helper_address: CKERC20_HELPER_ADDRESS.to_string(),
+                erc20_address: CKUSDC_ERC20_ADDRESS.to_string(),
+                // demo placeholder; offline mode never broadcasts — the calldata encoding is
+                // shape-correct regardless of the value, and the mock window.ethereum in e2e never
+                // submits. In production this is the facade canister principal.
+                facade_principal: "aaaaa-aa".to_string(),
+            })
+        } else {
+            Err(LedgerError::Transient("no ckERC-20 onramp for currency".into()))
+        }
     }
 
     /// Withdraw ckBTC to a native BTC address. Mirrors the canister's `withdraw` settlement EXACTLY
@@ -873,6 +926,12 @@ impl<L: Ledger> Ledger for FlakyLedger<L> {
         // Clean passthrough: FlakyLedger only injects transients into `pay` (the retry path under
         // test); the catalog surface delegates unchanged, mirroring deposit/balance delegation.
         self.inner.currencies().await
+    }
+
+    async fn ckerc20_onramp_params(&self, currency: Currency) -> Result<CkErc20OnrampParams, LedgerError> {
+        // Clean passthrough: FlakyLedger only injects transients into `pay` (the retry path under
+        // test); the ckERC-20 onramp surface delegates unchanged, mirroring catalog/deposit delegation.
+        self.inner.ckerc20_onramp_params(currency).await
     }
 
     async fn withdraw(&self, req: WithdrawRequest) -> Result<WithdrawReceipt, LedgerError> {

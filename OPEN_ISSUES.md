@@ -195,13 +195,34 @@ The following previously-open risks are now **CLOSED** (see `CODEBASE_ANALYSIS.m
   single-use) PLUS a wider dual-approve window; PLUS a partial-failure state (`CkErc20LedgerError` after
   `CkEthLedgerError` → minter schedules a reimbursement, not atomic fail). Inherent to the ckETH minter;
   document as a new residual.
-- **O5 (medium) | UX/config | single-sourcing | `DEPOSIT_CURRENCY=1` (issue #7) breaks worse under
-  multi-currency.** *Fix:* new canister `currencies() -> Vec<CurrencyDescriptor>` + relay
-  `GET /api/v1/currencies` + app runtime catalog (closes #7; makes "add a currency = config-only").
-- **O6 (low) | verification | live ckUSDC params unverified** — confirm `get_minter_info`
-  (helper address, `minimum_withdrawal_amount`, `supported_ckerc20_tokens`), ckUSDC ledger
-  (`icrc1_decimals`=6, fee, symbol), the principal→bytes32 `depositErc20` encoding, and whether any
-  pending-deposit IC query exists (plan §6 Q7–Q12). Do these before hardcoding/encoding anything.
+- **O5 (medium) | UX/config | single-sourcing** — ✅ **CLOSED by M0** (commits 849ad59/66703af/736746d).
+  Canister `currencies()` + relay `GET /api/v1/currencies` + app runtime catalog shipped; `DEPOSIT_CURRENCY`
+  deleted; adding a currency is config-only.
+- **O6 (low) | verification | live ckUSDC params** — ✅ **VERIFIED 2026-07-31** via mainnet query
+  (`dfx canister --network ic call sv3dd-oaaaa-aaaar-qacoa-cai get_minter_info`) + authoritative source
+  (`dfinity/ic` `DepositHelperWithSubaccount.sol`, `templates/principal_to_bytes.js`, `tests/principal_to_bytes_test.js`).
+  Findings (all to be READ AT RUNTIME via `get_minter_info`, never hardcoded):
+  - `deposit_with_subaccount_helper_contract_address` = `0x18901044688D3756C35Ed2b36D93e6a5B8e00E68` ✓
+  - `minimum_withdrawal_amount` = `5_000_000_000_000_000` (5e15 wei; minter-wide gas floor, shared by ckETH+ckERC20)
+  - ckUSDC in `supported_ckerc20_tokens`: ERC-20 `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48`, ledger
+    `xevnm-gaaaa-aaaar-qafnq-cai`, symbol `ckUSDC` ✓. **11 ckERC20 tokens live**: ckUSDC, ckUSDT, ckEURC,
+    ckWBTC, ckLINK, ckUNI, ckWSTETH, ckPEPE, ckOCT, ckSHIB, ckXAUT.
+  - ckUSDC ledger: `icrc1_symbol`="ckUSDC", `icrc1_decimals`=6, `icrc1_fee`=10_000 (0.01 USDC),
+    `icrc1_name`="ckUSDC" ✓.
+  - `minter_address`=`0xb25eA1D493B49a1DeD42aC5B1208cC618f9A9B80`, `cketh_ledger_id`=`ss2fx-dyaaa-aaaar-qacoq-cai`,
+    `evm_rpc_id`=`7hfb6-caaaa-aaaar-qadga-cai`.
+  - **`depositErc20` ABI (LIVE helper `CkDeposit`):** `depositErc20(address erc20Address, uint256 amount,
+    bytes32 principal, bytes32 subaccount)` — **first arg is the ERC-20 contract address, NOT a token_id**
+    (corrects the investigation's "token_id" framing). Emits `ReceivedEthOrErc20(erc20Addr indexed, owner
+    indexed, amount, principal indexed, bytes32 subaccount)`; calls `erc20.safeTransferFrom(msg.sender,
+    minterAddress, amount)` so user must `approve(helper, amount)` on the ERC-20 first.
+  - **principal→bytes32 encoding (authoritative):** base32-decode (incl 4-byte CRC32 prefix) → `slice(4)`
+    strips CRC → length-prefix into 32 bytes: `[1-byte N=len][N principal-bytes][31-N zero pad]`. Golden
+    vectors: `k2t6j-...-6ae`→`0x1db56bf994b37ae8e79f5ce000be1727a6060ae4eef24736b7cc999c3c020000`;
+    `opspt-...-vqe`→`0x1dca62f9ef706b80db8a5293779a08cbe067e69206ac4eee9d27931d2b020000`;
+    `2chl6-4hpzw-vqaaa-aaaaa-c`→`0x09efcdab00000000000100000000000000000000000000000000000000000000`.
+  - **No pending-deposit IC query exists** — `get_minter_info` has no per-account pending field; minting is
+    heartbeat-scraped (~3min). The ONLY onramp signal is the ckUSDC ledger balance growing. (Answers Q3.)
 - **🚩 Founder decisions (plan §6 Q1–Q6,14):** direct-vs-partner sequencing at launch; partner aggregator
   choice + mode; KYC-surfacing posture; ckUSDC chains at launch (Ethereum only?); ramp fees = partner's
   only (zero dpay cut); keep the demo faucet once real ckUSDC exists; wrong-network recourse messaging.
