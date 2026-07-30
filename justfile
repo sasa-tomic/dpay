@@ -93,6 +93,12 @@ deploy-ic:
 verify-deploy:
     bash scripts/verify-deploy.sh
 
+# OBJECTIVE deploy-fidelity gate for the RELAY: curls the live `/api/v1/version` and compares its
+# baked git commit to `git rev-parse HEAD`. MATCH = current; BEHIND-N / MISMATCH = stale image →
+# `just image && just up`. No dfx needed (a plain curl). Override the target via DPAY_RELAY_URL.
+verify-relay:
+    bash scripts/verify-relay-version.sh
+
 # operator hook: mint (credit) minor units to an account (controller-only). `just mint <64-hex-account> <cents>`
 mint account amount currency='0':
     bash scripts/mint.sh {{account}} {{amount}} {{currency}}

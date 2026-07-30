@@ -372,6 +372,31 @@ async fn health_ok() {
     assert_eq!(body["status"], "ok");
 }
 
+/// `GET /api/v1/version` reports the relay's name + pkg version + the git commit baked by `build.rs`.
+/// The commit is the deploy-fidelity primitive (verify-relay-version.sh compares it to HEAD); this
+/// test pins the route's shape + that the commit is present (non-empty), so a future change that
+/// drops the build.rs wiring surfaces here.
+#[tokio::test]
+async fn version_route_reports_baked_commit() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+
+    let (status, body) = call(&state, get_req("/api/v1/version")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["name"], "dpay-relay");
+    // The pkg version is a non-empty string (CARGO_PKG_VERSION); don't pin the exact number so a
+    // bump doesn't break this test, just assert it's present.
+    assert!(body["version"].as_str().unwrap_or("").len() > 0, "version present: {body}");
+    let commit = body["commit"].as_str().expect("commit present");
+    // The baked commit is either a 40-char SHA (a git checkout) or the "unknown" fallback (no git).
+    // In the test build (run from the repo) it MUST be a real SHA — proves build.rs wired through.
+    assert!(
+        commit.len() == 40 && commit.chars().all(|c| c.is_ascii_hexdigit()),
+        "commit must be a 40-char SHA when built in a git checkout, got {commit:?}"
+    );
+}
+
 /// The faucet MINTS, and the canister's `mint` is unauthenticated — so on any real ledger the relay
 /// disables it. Disabled means the route is *gone* (404) and, crucially, no money is created.
 #[tokio::test]

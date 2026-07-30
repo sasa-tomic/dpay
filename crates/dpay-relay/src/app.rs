@@ -123,7 +123,8 @@ pub fn app(state: AppState) -> Router {
         .route("/deposit/address/{hex}", get(deposit_address))
         .route("/deposit/refresh/{hex}", post(deposit_refresh))
         .route("/deposit/info", get(deposit_info))
-        .route("/health", get(health));
+        .route("/health", get(health))
+        .route("/version", get(version));
 
     // Test-only deposit-seed route (feature-gated so it CANNOT compile into the prod image). The
     // local e2e harness builds the relay with `--features test-helpers` and POSTs here to simulate
@@ -506,6 +507,15 @@ struct HealthBody {
     status: &'static str,
 }
 
+/// `GET /api/v1/version` response — the running image's source identity. `commit` is the git SHA
+/// baked by `build.rs` (deploy-fidelity).
+#[derive(Serialize)]
+struct VersionBody {
+    name: &'static str,
+    version: &'static str,
+    commit: &'static str,
+}
+
 #[derive(Serialize)]
 struct BalanceBody {
     balance: u64,
@@ -582,6 +592,20 @@ async fn health(State(state): State<AppState>) -> Response {
         )
             .into_response()
     }
+}
+
+/// `GET /api/v1/version` → `200 {"name":"dpay-relay","version":"<pkg>","commit":"<sha>"}`. The commit
+/// is baked at compile time by `build.rs` (`DPAY_BUILD_COMMIT`), so the live endpoint reports EXACTLY
+/// which source the running image was built from — the deploy-fidelity primitive
+/// (`scripts/verify-relay-version.sh` compares it to `git rev-parse HEAD`). Feature-unconditional: the
+/// prod image carries it too (no `agent` requirement). No state, no I/O — cheap + always reachable.
+async fn version() -> Response {
+    (StatusCode::OK, Json(VersionBody {
+        name: "dpay-relay",
+        version: env!("CARGO_PKG_VERSION"),
+        commit: env!("DPAY_BUILD_COMMIT"),
+    }))
+        .into_response()
 }
 
 /// `POST /api/v1/pay`. Body is either JSON `{"qr":"<base64url>"}` or the raw 196-byte wire form
