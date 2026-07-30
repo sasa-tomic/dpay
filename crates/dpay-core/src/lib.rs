@@ -138,6 +138,86 @@ pub fn verify_receipt(pubkey: &[u8; PUBKEY_LEN], claim: &ReceiptClaim, sig: &[u8
     vk.verify_strict(&claim.signing_bytes(), &s).is_ok()
 }
 
+// --- withdrawal authorization (ckBTC → native BTC out) ----------------------------------------
+// The mirror of [`Authorization`] for the WITHDRAWAL direction: the user authorizes the facade to
+// move a ck currency OUT of their subaccount to a native BTC address. Same non-custodial discipline
+// as `pay` — the facade moves NOTHING without a verified user Ed25519 signature over these exact
+// bytes. The signature binds destination address + amount + nonce + expiry + currency, so a replay
+// is impossible (the nonce is single-use, tracked in the facade's `WITHDRAW_NONCES`) and the
+// destination/amount can't be swapped after signing. `from_pubkey` is both the verify key AND the
+// ICRC `subaccount` the ckBTC is debited from (the facade owns `Account{owner: facade,
+// subaccount: from_pubkey}`), so a signature under any other key moves no funds.
+
+/// A user-signed authorization to withdraw `amount` of `currency` (a ck currency) to `btc_address`.
+/// `amount` is integer satoshis (the ckBTC ledger's native unit); `expiry`/`now` are unix seconds.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct WithdrawAuth {
+    /// The signer's Ed25519 public key — also the ICRC subaccount the ckBTC is debited from.
+    pub from_pubkey: [u8; PUBKEY_LEN],
+    /// The native BTC destination address (e.g. `bc1q…`). Bound by the signature.
+    pub btc_address: String,
+    /// Satoshis to withdraw.
+    pub amount: u64,
+    /// Single-use idempotency key (the facade tracks these per-withdraw in `WITHDRAW_NONCES`).
+    pub nonce: [u8; NONCE_LEN],
+    /// Unix seconds after which the authorization is stale.
+    pub expiry: u64,
+    /// Which ck currency to withdraw (resolves to a ledger + minter on the facade).
+    pub currency: Currency,
+}
+
+/// Fixed-width prefix of a withdrawal signing buffer: `from_pubkey(32) | amount_le(8) |
+/// nonce(16) | expiry_le(8) | currency_le(4)` = 68 bytes. The variable-length `btc_address`
+/// follows as a u32-LE length prefix + the raw UTF-8 bytes, so the layout is unambiguous to decode
+/// without a frozen total length. All widths reference the core consts by name.
+pub const WITHDRAW_FIXED_LEN: usize = PUBKEY_LEN + 8 + NONCE_LEN + 8 + 4;
+/// Width of the address length prefix (u32 LE) appended after the fixed prefix.
+pub const WITHDRAW_ADDR_LEN_BYTES: usize = 4;
+
+impl WithdrawAuth {
+    /// Canonical, deterministic signing message. FROZEN field order:
+    /// `from_pubkey | amount_le | nonce | expiry_le | currency_le | addr_len_le(4) | addr_utf8`.
+    /// Fixed-width fields are placed first (stable offsets, mirroring [`Authorization`] and
+    /// [`ReceiptClaim`]); the variable-length `btc_address` is last, prefixed by its u32 LE byte
+    /// length so decoding is unambiguous. Returns a `Vec` (the address is variable length, so unlike
+    /// `Authorization::signing_bytes` there is no single fixed-size array).
+    pub fn signing_bytes(&self) -> Vec<u8> {
+        let addr = self.btc_address.as_bytes();
+        let mut b = Vec::with_capacity(WITHDRAW_FIXED_LEN + WITHDRAW_ADDR_LEN_BYTES + addr.len());
+        b.extend_from_slice(&self.from_pubkey);
+        b.extend_from_slice(&self.amount.to_le_bytes());
+        b.extend_from_slice(&self.nonce);
+        b.extend_from_slice(&self.expiry.to_le_bytes());
+        b.extend_from_slice(&self.currency.to_le_bytes());
+        // Length-prefix the address (u32 LE) so the layout is self-delimiting; bounds the address at
+        // 4 GiB (a BTC address is ≤90 chars), far beyond any real input.
+        let len = u32::try_from(addr.len()).expect("btc_address length fits u32");
+        b.extend_from_slice(&len.to_le_bytes());
+        b.extend_from_slice(addr);
+        b
+    }
+
+    /// Verify a withdrawal `sig` under `from_pubkey` over this authorization. `false` on any bad
+    /// input (weak/small-order key, or signature mismatch). Uses `verify_strict`, matching [`verify`]
+    /// and [`verify_receipt`].
+    pub fn verify(&self, from_pubkey: &[u8; PUBKEY_LEN], sig: &Signature) -> bool {
+        if from_pubkey != &self.from_pubkey {
+            return false;
+        }
+        match VerifyingKey::from_bytes(from_pubkey) {
+            Ok(vk) => vk.verify_strict(&self.signing_bytes(), sig).is_ok(),
+            Err(_) => false,
+        }
+    }
+}
+
+/// Sign a withdrawal authorization (works offline; deterministic, no RNG). Single source of truth
+/// for the signing input — the app calls this via the FFI, the canister/relay rebuild the same
+/// `signing_bytes()` to verify.
+pub fn sign_withdraw(key: &SigningKey, auth: &WithdrawAuth) -> Signature {
+    key.sign(&auth.signing_bytes())
+}
+
 /// Generate a fresh signing key. **Native only** (needs an OS CSPRNG).
 #[cfg(feature = "rng")]
 pub fn generate_keypair() -> SigningKey {
@@ -558,7 +638,69 @@ mod tests {
         t4.settle_ts += 1;
         assert!(!verify_receipt(&pk, &t4, &sig_bytes), "tampered settle_ts must fail");
 
+    // A bad sig shape (all-zero) is rejected, not panicked.
+    assert!(!verify_receipt(&pk, &claim, &[0u8; SIG_LEN]));
+    }
+
+    #[test]
+    fn withdraw_auth_sign_verify_and_tamper() {
+        let sk = generate_keypair();
+        let pk = sk.verifying_key().to_bytes();
+        let auth = WithdrawAuth {
+            from_pubkey: pk,
+            btc_address: "bc1qexampledestinationaddress".to_string(),
+            amount: 50_000,
+            nonce: [0x2a; NONCE_LEN],
+            expiry: 1_800_000_120,
+            currency: DEMO_USD,
+        };
+        let sig = sign_withdraw(&sk, &auth);
+        let sig_bytes = sig.to_bytes();
+
+        // Verifies under the right key.
+        assert!(auth.verify(&pk, &sig), "valid sig must verify");
+        // signing_bytes has the documented fixed prefix + a length-prefixed address suffix.
+        let sb = auth.signing_bytes();
+        assert_eq!(
+            sb.len(),
+            WITHDRAW_FIXED_LEN + WITHDRAW_ADDR_LEN_BYTES + auth.btc_address.len(),
+            "signing_bytes length = fixed prefix + 4-byte len + address"
+        );
+        assert_eq!(WITHDRAW_FIXED_LEN, PUBKEY_LEN + 8 + NONCE_LEN + 8 + 4);
+
+        // Wrong key fails.
+        let other = generate_keypair().verifying_key().to_bytes();
+        assert!(!auth.verify(&other, &sig), "wrong key must fail");
+
+        // A `from_pubkey` that disagrees with the auth's `from_pubkey` fails fast (no funds move).
+        let mut mismatched = auth.clone();
+        mismatched.from_pubkey = other;
+        assert!(!mismatched.verify(&pk, &sig_bytes.into()), "from_pubkey mismatch must fail");
+
+        // Tampering ANY field breaks verification (destination/amount/nonce/expiry/currency bound).
+        let mut t_addr = auth.clone();
+        t_addr.btc_address.push('x');
+        assert!(!t_addr.verify(&pk, &sig), "tampered btc_address must fail");
+        let mut t_amt = auth.clone();
+        t_amt.amount = 50_001;
+        assert!(!t_amt.verify(&pk, &sig), "tampered amount must fail");
+        let mut t_nonce = auth.clone();
+        t_nonce.nonce[0] ^= 0xFF;
+        assert!(!t_nonce.verify(&pk, &sig), "tampered nonce must fail");
+        let mut t_exp = auth.clone();
+        t_exp.expiry += 1;
+        assert!(!t_exp.verify(&pk, &sig), "tampered expiry must fail");
+        let mut t_cur = auth.clone();
+        t_cur.currency += 1;
+        assert!(!t_cur.verify(&pk, &sig), "tampered currency must fail");
+
+        // An empty address still has a valid (zero-length) length prefix — verifiable, not a panic.
+        let empty = WithdrawAuth { btc_address: String::new(), ..auth.clone() };
+        let empty_sig = sign_withdraw(&sk, &empty);
+        assert!(empty.verify(&pk, &empty_sig), "empty address is a valid signing input");
+        assert_eq!(empty.signing_bytes().len(), WITHDRAW_FIXED_LEN + WITHDRAW_ADDR_LEN_BYTES);
+
         // A bad sig shape (all-zero) is rejected, not panicked.
-        assert!(!verify_receipt(&pk, &claim, &[0u8; SIG_LEN]));
+        assert!(!auth.verify(&pk, &Signature::from_bytes(&[0u8; SIG_LEN])), "zero sig must fail");
     }
 }
