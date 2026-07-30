@@ -153,8 +153,9 @@ function parseRequestQR(raw: string): {reqB64: string; name: string} {
 // --- ck-deposit (ckBTC-style top-up) --------------------------------------------------------
 // A deposit address on a ck minter's native chain (BTC for ckBTC). The facade proxies the minter; the
 // relay surfaces it at /api/v1/deposit/*. The mint lands on the user's subaccount, so the existing
-// balance/history polls reflect it once confirmed. DEMO_USD (faucet) stays currency 0; ckBTC = 1.
-const DEPOSIT_CURRENCY = 1;
+// balance/history polls reflect it once confirmed. DEMO_USD (faucet) stays currency 0; the ckBTC
+// currency id is resolved from the runtime catalog (see BUNDLED_CATALOG / fetchCurrencies) — no
+// hardcoded literal, so adding a currency needs no app redeploy (issue #7).
 // Poll intervals — read once at module load. The e2e harness injects a shortened override via
 // `window.__DPAY_TEST_POLL` (driver.mjs evaluateOnNewDocument, before the bundle evaluates) so the
 // suite isn't paced by production cadence. In a shipped build that global is never set → every `??`
@@ -179,6 +180,60 @@ type DepositInfo = {min_confirmations: number; deposit_fee: number; deposit_min_
 type MintedUtxo = {block_index: string; amount: number};
 type PendingUtxo = {value: number; confirmations: number};
 type DepositRefresh = {minted_total: number; minted: MintedUtxo[]; pending: PendingUtxo[]; required_confirmations: number};
+
+// --- currency catalog (M0) -------------------------------------------------------------------
+// The wallet's runtime source of truth for which assets exist + how to display/fund them. Fetched
+// from GET /api/v1/currencies (the canister's currencies() catalog), cached in AsyncStorage, with a
+// bundled default fallback so the UI renders on a cold/offline first load. Closes issue #7: the
+// ckBTC currency id is RESOLVED from the catalog (the CkBtcUtxo entry) instead of the old hardcoded
+// `DEPOSIT_CURRENCY = 1`, so adding a currency is canister-config-only (no app redeploy).
+type MinterFamily = 'CkBtcUtxo' | 'CkEthErc20' | 'CkSol';
+type CurrencyDescriptor = {
+  currency: number;          // the Currency u32 — read from the catalog, NEVER hardcoded
+  ledger: string;            // ICRC ledger principal as text
+  mintable: boolean;         // true for the demo currency the facade mints/burns
+  minter: string | null;     // ramp (ck minter) principal as text, or null (no deposit/withdraw path)
+  minter_family: MinterFamily | null;
+  symbol: string | null;     // display symbol ("$", "₿", "Ξ")
+  decimals: number | null;   // smallest-unit decimal count (USD=2, BTC=8)
+};
+const CATALOG_CACHE_KEY = 'dpay.currencies.v1';
+// Bundled fallback so a cold/offline first load still renders. Overwritten by the live catalog on
+// the first successful fetch. Mirrors the canister's demo deployment (DEMO_USD + ckBTC). The ledger
+// principals are empty here (the wallet reads currency/symbol/decimals/minter_family for display;
+// the relay resolves ledgers server-side from the query's currency id).
+const BUNDLED_CATALOG: CurrencyDescriptor[] = [
+  {currency: 0, ledger: '', mintable: true, minter: null, minter_family: null, symbol: '$', decimals: 2},
+  {currency: 1, ledger: '', mintable: false, minter: 'mqygn-kiaaa-aaaar-qaadq-cai', minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8},
+];
+// Fetch the catalog from the relay, caching to AsyncStorage. Best-effort: on any failure (offline,
+// timeout, bad JSON) returns `prior` (the cache or bundled default) so the UI never blocks on it.
+// Timeout-bound like every other fetch.
+async function fetchCurrencies(relayUrl: string, prior: CurrencyDescriptor[]): Promise<CurrencyDescriptor[]> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 4000);
+  try {
+    const r = await fetch(`${base(relayUrl)}/api/v1/currencies`, {signal: ctrl.signal});
+    if (!r.ok) return prior;
+    const j = await r.json();
+    const list: unknown = j?.currencies;
+    if (!Array.isArray(list) || list.length === 0) return prior;
+    const clean: CurrencyDescriptor[] = list
+      .filter((c: any): c is Record<string, unknown> => !!c && typeof c.currency === 'number')
+      .map((c: any) => ({
+        currency: c.currency as number,
+        ledger: typeof c.ledger === 'string' ? c.ledger : '',
+        mintable: !!c.mintable,
+        minter: typeof c.minter === 'string' ? c.minter : null,
+        minter_family: (typeof c.minter_family === 'string' ? c.minter_family : null) as MinterFamily | null,
+        symbol: typeof c.symbol === 'string' ? c.symbol : null,
+        decimals: typeof c.decimals === 'number' ? c.decimals : null,
+      }));
+    if (clean.length === 0) return prior;
+    AsyncStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify(clean)).catch(() => {});
+    return clean;
+  } catch { return prior; } finally { clearTimeout(t); }
+}
 
 // Format satoshis as BTC (8 decimals), e.g. 12345 -> "0.00012345 BTC". Parallel to usd(cents).
 const btc = (sats: number) => {
@@ -448,7 +503,7 @@ function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: (id: Id
 function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity; relayUrl: string; setRelayUrl: (s: string) => void; onReset: () => void}) {
   const [mode, setMode] = useState<'pay' | 'receive'>('pay');
   const [balance, setBalance] = useState<number | null>(null);
-  // ckBTC (currency 1, DEPOSIT_CURRENCY) is a SEPARATE asset on a separate ledger. The primary
+        // ckBTC (currency id resolved from the catalog via `ckBtcCurrency`) is a SEPARATE asset on a separate ledger. The primary
   // wallet header shows `$` = DEMO_USD (currency 0) only — by CLAUDE.md's hard rule ("Money shown
   // as `$`, never token name"). But a topped-up ckBTC balance must be VISIBLE (the seamless top-up
   // goal: after the deposit sheet closes, the credited asset is still on screen). So we fetch
@@ -474,8 +529,20 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
   // Settings sheet — relay URL, demo faucet, reset (UX-V2/V3: moved off the main screen into its
   // own overlay so the wallet surface is clean, and reset gets a confirmation dialog).
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+  // Currency catalog — the runtime source of truth for which assets exist + how to display/fund
+  // them. Loaded from AsyncStorage cache then refreshed from GET /currencies on mount; the bundled
+  // default covers a cold first load. The ckBTC currency id (and any future asset's) is RESOLVED
+  // from this, never hardcoded (issue #7).
+  const [catalog, setCatalog] = useState<CurrencyDescriptor[]>(BUNDLED_CATALOG);
 
   const TOP_UP_CENTS = 10_000; // mirrors the canister's fixed FAUCET_AMOUNT ($100.00)
+
+  // ckBTC currency id, resolved from the catalog (find the CkBtcUtxo-family entry). Falls back to
+  // 1 only before the catalog loads (the bundled default already carries currency 1 as CkBtcUtxo).
+  const ckBtcCurrency = useMemo(
+    () => catalog.find(c => c.minter_family === 'CkBtcUtxo')?.currency ?? 1,
+    [catalog],
+  );
 
   // Read the device NFC radio state once (re-checked when the app returns to the foreground, since
   // the user may toggle NFC in system settings). Purely informational for the status chip; failure
@@ -493,6 +560,25 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
     return () => { alive = false; sub.remove(); };
   }, []);
 
+  // Load the currency catalog: AsyncStorage cache first (instant), then refresh from the relay.
+  // Re-runs when the relay URL changes (a relay switch may expose a different asset set).
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      let prior = BUNDLED_CATALOG;
+      try {
+        const cached = await AsyncStorage.getItem(CATALOG_CACHE_KEY);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length) { prior = parsed as CurrencyDescriptor[]; if (alive) setCatalog(prior); }
+        }
+      } catch { /* cache miss is fine — the bundled default + live fetch cover it */ }
+      const fresh = await fetchCurrencies(relayUrl, prior);
+      if (alive && fresh !== prior) setCatalog(fresh);
+    })();
+    return () => { alive = false; };
+  }, [relayUrl]);
+
   useEffect(() => {
     let alive = true;
     const poll = async () => {
@@ -503,7 +589,7 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
       // assets live on separate ledgers — fetching one must not affect the other's display.
       const ctrlCk = new AbortController();
       const tCk = setTimeout(() => ctrlCk.abort(), 4000);
-      const ckFetch = fetch(`${base(relayUrl)}/api/v1/balance/${identity.publicHex}?currency=${DEPOSIT_CURRENCY}`, {signal: ctrlCk.signal})
+      const ckFetch = fetch(`${base(relayUrl)}/api/v1/balance/${identity.publicHex}?currency=${ckBtcCurrency}`, {signal: ctrlCk.signal})
         .then(r => r.ok ? r.json().catch(() => null) : null)
         .then(j => (j && typeof j.balance === 'number') ? (j.balance as number) : null)
         .catch(() => null)
@@ -521,7 +607,7 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
     };
     poll(); const id = setInterval(poll, POLL.balance);
     return () => { alive = false; clearInterval(id); };
-  }, [relayUrl, identity.publicHex]);
+  }, [relayUrl, identity.publicHex, ckBtcCurrency]);
 
   // Durable transaction history sourced from the ledger (the canister records every settled payment;
   // the relay surfaces it at GET /api/v1/transactions/{hex}). This replaces the ephemeral in-memory
@@ -670,12 +756,13 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
       </View>
 
       {depositOpen ? (
-        <DepositSheet identity={identity} relayUrl={relayUrl} onClose={() => setDepositOpen(false)} />
+        <DepositSheet identity={identity} relayUrl={relayUrl} currency={ckBtcCurrency} onClose={() => setDepositOpen(false)} />
       ) : null}
       {withdrawOpen ? (
         <WithdrawSheet
           identity={identity}
           relayUrl={relayUrl}
+          currency={ckBtcCurrency}
           ckBtcBalance={ckBtcBalance ?? 0}
           onClose={() => setWithdrawOpen(false)}
           onWithdrawn={onActivity}
@@ -1322,8 +1409,7 @@ function ReceiveMode({identity, relayUrl, nfcReady, onReceived}: {identity: Iden
  * mint lands (minted_total > 0), after which the wallet's balance poll reflects the new ckBTC. The
  * sheet is additive: it never touches the faucet (DEMO_USD) or the Pay/Receive/NFC flows.
  */
-function DepositSheet({identity, relayUrl, onClose}: {identity: Identity; relayUrl: string; onClose: () => void}) {
-  const currency = DEPOSIT_CURRENCY;
+function DepositSheet({identity, relayUrl, currency, onClose}: {identity: Identity; relayUrl: string; currency: number; onClose: () => void}) {
   const [info, setInfo] = useState<DepositInfo | null>(null);
   const [address, setAddress] = useState<string | null>(null);
   const [refresh, setRefresh] = useState<DepositRefresh | null>(null);
@@ -1518,8 +1604,7 @@ function DepositSheet({identity, relayUrl, onClose}: {identity: Identity; relayU
  * funds. Amounts are shown in BTC (the backing currency symbol — never the wrapper/raw ledger id).
  * Escape closes the sheet (web), matching DepositSheet.
  */
-function WithdrawSheet({identity, relayUrl, ckBtcBalance, onClose, onWithdrawn}: {identity: Identity; relayUrl: string; ckBtcBalance: number; onClose: () => void; onWithdrawn: () => void}) {
-  const currency = DEPOSIT_CURRENCY;
+function WithdrawSheet({identity, relayUrl, currency, ckBtcBalance, onClose, onWithdrawn}: {identity: Identity; relayUrl: string; currency: number; ckBtcBalance: number; onClose: () => void; onWithdrawn: () => void}) {
   const [address, setAddress] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
