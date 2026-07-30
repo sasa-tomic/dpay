@@ -50,6 +50,7 @@ type ReconcileReport = record {
 };
 type Result = variant { Ok : nat64; Err : text };
 type Result_1 = variant { Ok : text; Err : text };
+type Result_10 = variant { Ok : WithdrawReceipt; Err : text };
 type Result_2 = variant { Ok : DepositInfo; Err : text };
 type Result_3 = variant { Ok : blob; Err : text };
 type Result_4 = variant { Ok : PayReceipt; Err : text };
@@ -65,6 +66,23 @@ type TxnView = record {
   nonce : blob;
   timestamp : nat64;
   amount : nat64;
+};
+type WithdrawReceipt = record {
+  block_index : nat64;
+  from : blob;
+  currency : nat32;
+  nonce : blob;
+  amount : nat64;
+  btc_address : text;
+};
+type WithdrawRequest = record {
+  sig : blob;
+  currency : nat32;
+  nonce : blob;
+  from_pubkey : blob;
+  expiry : nat64;
+  amount : nat64;
+  btc_address : text;
 };
 service : (InitArg) -> {
   // `balance_of(blob, nat32) -> nat64` — now a **query** returning the display-only cache. The cache
@@ -173,4 +191,14 @@ service : (InitArg) -> {
   // the authority on liquid cycles — no CDK API exposes liquid balance) — retry with a smaller amount.
   // Returns the amount actually transferred so the caller can confirm.
   transfer_cycles : (principal, nat) -> (Result_9);
+  // `(WithdrawRequest) -> Result<WithdrawReceipt, text>` — withdraw ckBTC to a native BTC address on a
+  // verified user signature. The request carries the [`WithdrawAuth`] fields + the user's Ed25519
+  // signature over the canonical signing bytes; the facade verifies the signature under `from_pubkey`
+  // (== the debit subaccount) before moving any funds.
+  // 
+  // Idempotency / replay safety mirrors `pay`: the withdraw nonce is reserved synchronously before any
+  // cross-canister call (the concurrency barrier — two concurrent withdraws with the same nonce
+  // cannot both succeed), released on a transient/pre-burn failure (the same auth may retry), and
+  // settled once the burn commits (the auth can never replay → no double-burn).
+  withdraw : (WithdrawRequest) -> (Result_10);
 }
