@@ -809,7 +809,7 @@ function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onOff
     }
     // Best-effort: hand the outcome back to the payer, stamped with the authoritative nonce.
     try { await DpayNfc.confirmReceipt(receiptCodeFor(outcome), settledNonceHex ?? nonceHex ?? ''); } catch {}
-  }, [relayUrl, reqInfo, record, finalize, postPay, reconcile]);
+  }, [reqInfo, record, finalize, postPay, reconcile]); // relayUrl is captured transitively via postPay/reconcile (both depend on it)
 
   // Payer side: the tap is the consent — sign the incoming request and serve it right away.
   const autoSign = useCallback(async (req: {toHex: string; amount: number; nonceHex: string; expiry: number; currency: number}) => {
