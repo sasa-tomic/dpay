@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import { createConnection } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -14,16 +14,65 @@ const E2E_DIR = join(__dirname, '..');
 const DIST = join(E2E_DIR, 'dist');
 const INDEX_HTML = join(DIST, 'index.html');
 
+// --- dist cache invalidation (root fix for the stale-build wart) ---
+// The OLD cache gate was a bare `existsSync(INDEX_HTML)`: it never noticed a source edit, so a dev
+// changing app/App.tsx (or a shim) got a STALE build across runs. The TRUE fix: track the newest
+// mtime across every file that feeds the vite build and rebuild when any is newer than the built
+// dist/index.html. Warm runs stay fast (a no-op stat check, no rebuild, when nothing changed).
+const REPO_ROOT = join(E2E_DIR, '..');
+const APP_DIR = join(REPO_ROOT, 'app');
+const WEB_DIR = join(__dirname, 'web');
+// The real app's top-level sources the vite build pulls in (the rest of app/ — node_modules,
+// android/, ios/, __tests__, __mocks__ — is not a build input).
+const APP_SOURCE_FILES = ['App.tsx', 'payments.ts', 'relayConfig.ts'].map((f) => join(APP_DIR, f));
+
+/**
+ * Newest mtime (ms) across every SOURCE that feeds the vite build: the real app sources
+ * (app/App.tsx + payments.ts + relayConfig.ts), the e2e/web shims/entry/html (walked so a newly
+ * added shim is picked up automatically), and the vite config itself. Missing files are skipped
+ * (a deleted shim is not a build input). This is the SOURCE-change gate; vite's own incremental
+ * cache still handles dependency changes.
+ */
+function newestSourceMtimeMs() {
+  let newest = 0;
+  const touch = (p) => {
+    try {
+      const m = statSync(p).mtimeMs;
+      if (m > newest) newest = m;
+    } catch {} // missing → not a build input
+  };
+  for (const f of APP_SOURCE_FILES) touch(f);
+  try {
+    for (const name of readdirSync(WEB_DIR)) {
+      if (/\.(ts|tsx|html|js)$/.test(name)) touch(join(WEB_DIR, name));
+    }
+  } catch {}
+  touch(join(E2E_DIR, 'vite.config.js'));
+  return newest;
+}
+
 export const BUILD_TIMEOUT_MS = 90_000;
 export const SERVE_READY_TIMEOUT_MS = 5_000;
 
-/** Build the web bundle via vite. No-op if `dist/index.html` exists AND `force=false` (cached). */
+/**
+ * Build the web bundle via vite. Cache gate (when `force` is false):
+ *   - no dist/index.html        → build (cold);
+ *   - a source newer than dist  → build (stale: a source edit landed since the last build);
+ *   - otherwise                 → reuse the existing dist (warm, no rebuild — fast).
+ * `force=true` always rebuilds. The mtime check is what makes a dev edit to app/App.tsx (or a
+ * shim) reliably invalidate the cache instead of serving yesterday's build.
+ */
 export async function buildWeb(opts = {}) {
   if (!opts.force && existsSync(INDEX_HTML)) {
-    console.log('[web] using existing dist/index.html (cached; pass force=true to rebuild)');
-    return;
+    const distMtime = statSync(INDEX_HTML).mtimeMs;
+    if (newestSourceMtimeMs() <= distMtime) {
+      console.log('[web] using existing dist/index.html (cached; no source newer than dist)');
+      return;
+    }
+    console.log('[web] a source is newer than dist/index.html — rebuilding (vite)…');
+  } else {
+    console.log('[web] building (vite)…');
   }
-  console.log('[web] building (vite)…');
   const code = await runVite(['build'], opts.timeoutMs ?? BUILD_TIMEOUT_MS);
   if (code !== 0) throw new Error(`vite build failed (exit ${code})`);
   if (!existsSync(INDEX_HTML)) throw new Error('vite build produced no dist/index.html');
