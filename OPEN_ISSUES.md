@@ -88,3 +88,120 @@ The following previously-open risks are now **CLOSED** (see `CODEBASE_ANALYSIS.m
 - ✅ **Withdrawal one-way valve** → closed (W2): the facade can now move ckBTC OUT to a native BTC address on a verified user Ed25519 signature (`withdraw` → `icrc2_approve` → minter `retrieve_btc_with_approval`; new `WithdrawAuth` wire type in dpay-core, `WITHDRAW_NONCES` MemoryId 12). Proven offline on PocketIC + the real app/relay/e2e (flow 15). Live real-money withdrawal is a documented follow-up (issue 8), not a blocker.
 - ✅ **FakeLedger-vs-canister audit** → closed (W3): `FakeLedger.pay` now mirrors the canister's self-transfer + pay-to-mint-sentinel rejects (the two divergences found; both fixed + pinned by tests). The fee divergence is a documented accepted simplification (FakeLedger is the fee-less demo ledger).
 - ✅ **Relay deploy-fidelity** → closed (W4): `build.rs` bakes the git commit; `GET /api/v1/version` exposes it; `just verify-relay` compares the live commit to HEAD (MATCH / BEHIND-N / MISMATCH). Feature-unconditional (in the prod image). The residual front-running risk of approve→retrieve is documented (issue 9 / risk 8) — inherent to ckBTC, not a dpay gap.
+
+## UX review findings (2026-07-30)
+
+> From a NO-MOCK UX review: the REAL web app (`app/App.tsx`, react-native-web) driven through
+> chrome-cli against the REAL canister (facade + ic-icrc1-ledger on a local dfx/PocketIC replica) via
+> the relay's `AgentLedger` (`--features agent`). Every money path (onboard/faucet, two-wallet
+> Pay→settle→Receive, history, offline, reset) ran against the real ledger — only the camera scan is
+> shimmed (the sanctioned smallest-boundary seam; decode/sign/verify/settle are all real). Screenshots
+> in `e2e/shots/` + this session's `/tmp/ux/`. The e2e harness uses `FakeLedger`, which **masks** two
+> of the divergences below (N1/N2) — those are invisible to `just e2e`.
+
+### CONFIRMED already-known seed items (from `2026-07-30-ux-e2e-radical.md`)
+- **UX-V2 CONFIRMED** — a `LEDGER` settings bar (the `settings-relay` TextInput seeded with the relay
+  URL, e.g. `http://127.0.0.1:8787`) + a bare red `reset` link sit on the MAIN wallet screen. Dev-facing.
+- **UX-V3 CONFIRMED** — `reset` wipes the on-device identity with **NO confirmation**: one tap →
+  `AsyncStorage.removeItem` → straight back to onboarding (verified: identity gone, onboarding shown,
+  no dialog). A user loses access to the funds at that pubkey irreversibly.
+- **UX-V4 CONFIRMED** — header is crowded: `$balance` + `+$50` outline pill + filled `＋ Add money` all
+  share one right-aligned row; the `Add money` right edge lands at 389/390 px (viewport-kissing).
+- **UX-V5 CONFIRMED** — only `Escape` is wired (`useEscapeToClose`, sheets only); no global shortcuts
+  (no Enter-to-submit on onboarding/amount, no T/A/R action keys), and the only on-UI hint is
+  "Press Esc to close" inside the deposit/withdraw sheets.
+- **UX-V1 REJECTED** — the `＋ Add money` button text is **NOT truncated** at standard balances
+  (`scrollWidth == clientWidth == 111`; full "＋ Add money" renders). The original "+ Add mo" claim is
+  not reproducible. Reframed as the edge-kissing/glow-clip issue N9 (P3).
+
+### NEW findings
+- **N1 (high) | functional | wallet header | The `+$50` faucet top-up button is BROKEN against the real
+  canister for ~1 hour after onboarding.** Onboarding consumes the canister faucet's once-per-hour
+  slot (`FAUCET_COOLDOWN_SECS = 3600`); the `+$50` button calls `/api/v1/faucet` again and the canister
+  rejects it (`"faucet cooldown: try again in ~58 min"` → 422). The app then shows "Faucet unavailable"
+  and the balance is unchanged. Reproduced live. The e2e harness (`FakeLedger`) has **no rate limit**,
+  so flow 02-faucet passes while the real path fails — a false-confidence divergence.
+  *Fix:* surface the cooldown (the canister already returns the retry time) and either disable the
+  button while cooling down, or make the demo top-up a separate non-rate-limited path. Reconcile
+  FakeLedger's faucet with the canister's (rate-limit + fixed-amount) so e2e catches this.
+- **N2 (medium) | functional | wallet header | The `+$50` button would mint `$100`, not `$50`, even when
+  it works.** The canister `faucet(blob, nat32)` has **no amount parameter** and mints the fixed
+  `FAUCET_AMOUNT` ($100); `AgentLedger::faucet` takes `_amount` and discards it. `FakeLedger` honors the
+  requested 5000 ($50). So the button's label is wrong against the real ledger.
+  *Fix:* either let the canister faucet honor a capped requested amount, or relabel the button to the
+  fixed amount and stop sending `amount`.
+- **N3 (high) | functional/deploy | canister | `register_ledger` is DENIED in open-demo mode
+  (`controller == null`)**, returning `"admin ops disabled: no controller set"`. This **breaks the
+  documented `scripts/dfx-deploy.sh`**, which installs the facade with `ledgers = vec {}` then relies on
+  an open `register_ledger` call. It also contradicts `CODEBASE_ANALYSIS.md` and the `.did` comment
+  ("open only when controller is unset, i.e. the demo") — R1 actually locks down ALL admin ops when the
+  controller is null. Verified live (register_ledger → Err until a controller was set via `set_controller`).
+  *Fix:* either seed the ledger at `init` (correct for `dfx-deploy.sh`), or fix `dfx-deploy.sh`/docs to
+  set a controller first. Correct the `.did` + `CODEBASE_ANALYSIS.md` comments.
+- **N4 (medium) | visual | history + receipt | The faucet mint surfaces as a transaction `from ffffffff…`
+  (the raw `MINT_ACCOUNT` 0xFF sentinel).** Internal protocol data leaks to end users as a
+  counterparty. *Fix:* label mint/burn rows as "Faucet"/"Demo funds" (or hide them) instead of the hex
+  sentinel.
+- **N5 (medium) | flow | wallet header | "Faucet unavailable" discards the helpful reason.** The canister
+  returns `"faucet cooldown: try again in ~58 min"`; the app maps any non-OK to the generic "Faucet
+  unavailable" (App.tsx `topUp`). The user gets no clue why or when to retry. *Fix:* surface the relay's
+  error body (or parse "cooldown … ~N min").
+- **N6 (medium) | flow/a11y | pay/receive success + history | Counterparties are shown as raw truncated
+  hex pubkeys** ("from d082b3af…", "to d7011269…"). The request QR carries the username, but the
+  *receipt* only carries the from-pubkey, so the merchant never learns the payer's name (Alice saw
+  "Received $25.00 from d082b3af…" for Bob). *Fix:* carry the payer's username in the signed payload or
+  the receipt so the merchant/recipient sees a name; fall back to a friendly truncated handle.
+- **N7 (low) | flow | deposit sheet | The deposit error misleads.** With no ck-minter registered for
+  currency 1, the sheet shows "Could not reach the ledger for a deposit address / Check the relay is
+  reachable, then reopen the sheet" — but the real cause is "currency 1 has no ck minter" (a deploy
+  invariant), not relay reachability. *Fix:* distinguish 503-transient from "no minter" and message it.
+- **N8 (low) | flow | onboarding | Empty username defaults to "me".** A generic placeholder identity;
+  the plan already flagged "username default" as a harness/UX gap. The username `TextInput` also has no
+  `testID` (only a placeholder), so it is harder to target for a11y/harness. *Fix:* require a name or
+  pick a less generic default; add a testID.
+- **N9 (low) | visual | wallet header | The `＋ Add money` button's drop shadow/glow is clipped at the
+  viewport right edge** (right edge 389/390 px; `shadowRadius: 12` overflows). Reads as cramped.
+  *Fix:* give the header row right padding / move `Add money` out of the balance row.
+- **N10 (low) | flow | pay screen | No manual "paste request" fallback.** The payer can ONLY acquire a
+  request via the camera (or NFC). On web/desktop (and when a camera is absent/unreliable) there is no
+  paste-a-request-string path, so Pay is unreachable without a working camera. *Fix:* add a "Paste
+  request" affordance (the decode path already accepts a string).
+
+## Onramp/offramp + multi-currency findings (2026-07-30)
+
+> From two orchestrated investigation subagents. Full plan + citations: `2026-07-30-ckusdc-onramp-offramp.md`.
+> **Linchpin:** ckUSDC is NOT a ckBTC-style chain-key token — it is a ckERC-20 handled by the **ckETH
+> minter** (`sv3dd-oaaaa-aaaar-qacoa-cai`) via an Ethereum helper-contract deposit + heartbeat log
+> scraping. The existing ckBTC deposit/withdraw proxy does NOT generalize. There are ≥3 ck-minter
+> families (UTXO-minter=ckBTC; ckETH/ckERC20=ckUSDC; ckSOL). The ICRC ledger layer (balance/pay/history)
+> already works for ckUSDC with a `register_ledger` call — only the *ramp* is ckBTC-shaped.
+
+- **O1 (high) | architecture | canister/relay/app | The deposit+withdraw ramp is hard-wired to the
+  ckBTC minter family.** `MINTERS` carries a minter principal but no family/shape info; the deposit
+  proxy calls ckBTC-only methods (`get_btc_address`/`update_balance`); the withdraw proxy is single-ledger
+  `retrieve_btc_with_approval`. ckUSDC needs a **parallel ckERC20-family surface**: onramp is
+  informational (static Ethereum helper contract + encoded principal, no minter mint call); offramp is
+  dual-ledger (`withdraw_erc20` with ckETH-gas + ckUSDC-amount approves). *Fix:* add `minter_family` to
+  the minter registry + per-family ramp dispatch (see plan §2, §4 waves M2/M3).
+- **O2 (high) | architecture | core wire | `WithdrawAuth` binds a BTC-address field** (`dpay-core`,
+  FROZEN). Generalizing the signed withdrawal to a chain-agnostic destination + currency + ckETH gas
+  subaccount is a core wire-shape change (additive vs versioned — decide). Must keep the on-device-signature
+  non-custodial gate.
+- **O3 (high) | dependency | ckUSDC offramp | The user MUST hold ckETH to pay Ethereum gas** for a
+  ckUSDC withdrawal (`withdraw_erc20` burns ckETH for gas). Funding dependency to surface in the UI;
+  arguably needs a ckETH onramp of its own.
+- **O4 (medium) | risk | ckERC20 offramp front-running (extends #9/risk 8)** — `withdraw_erc20` is
+  dual-approve-then-retrieve across `await`s, same bounded blast radius (exact authorized amount,
+  single-use) PLUS a wider dual-approve window; PLUS a partial-failure state (`CkErc20LedgerError` after
+  `CkEthLedgerError` → minter schedules a reimbursement, not atomic fail). Inherent to the ckETH minter;
+  document as a new residual.
+- **O5 (medium) | UX/config | single-sourcing | `DEPOSIT_CURRENCY=1` (issue #7) breaks worse under
+  multi-currency.** *Fix:* new canister `currencies() -> Vec<CurrencyDescriptor>` + relay
+  `GET /api/v1/currencies` + app runtime catalog (closes #7; makes "add a currency = config-only").
+- **O6 (low) | verification | live ckUSDC params unverified** — confirm `get_minter_info`
+  (helper address, `minimum_withdrawal_amount`, `supported_ckerc20_tokens`), ckUSDC ledger
+  (`icrc1_decimals`=6, fee, symbol), the principal→bytes32 `depositErc20` encoding, and whether any
+  pending-deposit IC query exists (plan §6 Q7–Q12). Do these before hardcoding/encoding anything.
+- **🚩 Founder decisions (plan §6 Q1–Q6,14):** direct-vs-partner sequencing at launch; partner aggregator
+  choice + mode; KYC-surfacing posture; ckUSDC chains at launch (Ethereum only?); ramp fees = partner's
+  only (zero dpay cut); keep the demo faucet once real ckUSDC exists; wrong-network recourse messaging.
