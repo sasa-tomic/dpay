@@ -87,6 +87,12 @@ deploy:
 deploy-ic:
     bash scripts/dfx-deploy-ic.sh
 
+# OBJECTIVE deploy-fidelity gate: asserts the canister code RUNNING on mainnet is byte-identical to
+# the code built from the current source (compares the dfx-built artifact's sha256 to the live module
+# hash). Catches a stale WASM shipping while `just check` is green. Exit 1 = stale → `just deploy-ic`.
+verify-deploy:
+    bash scripts/verify-deploy.sh
+
 # operator hook: mint (credit) minor units to an account (controller-only). `just mint <64-hex-account> <cents>`
 mint account amount currency='0':
     bash scripts/mint.sh {{account}} {{amount}} {{currency}}
