@@ -1,0 +1,98 @@
+// Flow 15 — Withdraw ckBTC to a native BTC address (W2) end-to-end through the REAL app + relay.
+//
+// Proves the WITHDRAWAL path (the one-way valve's other direction): the wallet's ckBTC asset card
+// exposes a "Withdraw" affordance; opening it signs a WithdrawAuth ON-DEVICE (the DpayCore shim —
+// byte-exact vs the Rust core, proven in 00-cross-val) and submits to POST /api/v1/withdraw; the
+// FakeLedger verifies the signature and debits ckBTC from the subaccount. The credited balance is
+// verified DIRECTLY against the real relay's currency-1 balance before + after.
+//
+// Parallel-safe + isolated: a FRESH incognito context (distinct random pubkey) seeded with its own
+// ckBTC; the withdraw nonce is app-generated (random 16 bytes, collision-free). Follows flow 05's
+// pattern (seed → refresh → assert balance).
+//
+// Selector contract: `asset-ckbtc` (the card with the Withdraw affordance), `btn-withdraw`,
+// `withdraw-address-input`, `withdraw-amount-input`, `btn-withdraw-confirm`, `withdraw-status`,
+// `btn-withdraw-close`. Asset segregation note (same as flow 05): ckBTC is currency 1, a SEPARATE
+// asset from the `$` DEMO_USD header — the withdraw debits currency 1, NOT the `$` balance.
+import { setup, assert, assertEq, seedDeposit, refreshDeposit, getBalance } from '../harness/lib.mjs';
+
+const ONBOARD_PLACEHOLDER = 'e.g. Alice';
+const DEPOSIT_CURRENCY = 1; // ckBTC — matches App.tsx DEPOSIT_CURRENCY
+const SEED_SATS = 100_000;   // 0.00100000 BTC
+const WITHDRAW_BTC = '0.00050000'; // 50_000 sats == retrieve_btc_min_amount
+const WITHDRAW_SATS = 50_000;
+const WITHDRAW_ADDR = 'bc1qtestwithdrawaldestination';
+
+export async function run() {
+  const start = Date.now();
+  console.log('[15-withdraw] setup (relay + web + browser)…');
+  const env = await setup();
+  try {
+    const { driver, relayBaseURL } = env;
+
+    // 1. Onboard → wallet + capture this wallet's account.
+    console.log('[15-withdraw] onboarding…');
+    await driver.typeByPlaceholder(ONBOARD_PLACEHOLDER, 'e2e-withdraw', { timeoutMs: 8_000 });
+    await driver.click('btn-create', { timeoutMs: 4_000 });
+    await driver.findByTestID('balance', { timeoutMs: 10_000 });
+    await driver.waitForText('$100.00', { timeoutMs: 12_000 });
+    const identity = await driver.eval(() => {
+      const v = localStorage.getItem('dpay.identity.v1');
+      return v ? JSON.parse(v) : null;
+    });
+    const accountHex = identity?.publicHex;
+    assert(typeof accountHex === 'string' && accountHex.length === 64, `wallet account must be a 32-byte hex pubkey, got "${accountHex}"`);
+    console.log(`[15-withdraw] wallet account: ${accountHex.slice(0, 16)}…`);
+
+    // 2. Seed + credit ckBTC (currency 1) WITHOUT opening the deposit sheet: seed via the
+    //    test-helpers route, then drain+credit via /deposit/refresh. The wallet's own 2.5s balance
+    //    poll then picks up the credited currency-1 balance and renders the asset card.
+    console.log(`[15-withdraw] seeding + crediting ${SEED_SATS} sats ckBTC…`);
+    await seedDeposit(relayBaseURL, accountHex, DEPOSIT_CURRENCY, SEED_SATS);
+    await refreshDeposit(relayBaseURL, accountHex, DEPOSIT_CURRENCY);
+    const before = await getBalance(relayBaseURL, accountHex, DEPOSIT_CURRENCY);
+    assertEq(before, SEED_SATS, 'pre-withdraw ckBTC balance');
+
+    // 3. Wait for the wallet's ckBTC asset card to appear (its balance poll credited currency 1).
+    console.log('[15-withdraw] waiting for the ckBTC asset card…');
+    await driver.findByTestID('asset-ckbtc', { timeoutMs: 8_000 });
+
+    // 4. Open the Withdraw sheet via the asset card's "Withdraw" affordance.
+    console.log('[15-withdraw] opening the withdraw sheet…');
+    await driver.click('btn-withdraw', { timeoutMs: 5_000 });
+    await driver.findByTestID('withdraw-address-input', { timeoutMs: 5_000 });
+
+    // 5. Enter the BTC destination + amount (in BTC, >= the 0.0005 min), then confirm.
+    await driver.type('withdraw-address-input', WITHDRAW_ADDR, { timeoutMs: 4_000 });
+    await driver.type('withdraw-amount-input', WITHDRAW_BTC, { timeoutMs: 4_000 });
+    // The review card appears once a valid amount is entered — proves the app parsed the BTC amount.
+    await driver.findByTestID('withdraw-review-amount', { timeoutMs: 4_000 });
+    const reviewTxt = await driver.readText('withdraw-review-amount');
+    assert(reviewTxt.includes('0.00050000 BTC'), `review should show the BTC amount, got: "${reviewTxt}"`);
+
+    console.log('[15-withdraw] confirming (signs on-device + submits to /api/v1/withdraw)…');
+    await driver.click('btn-withdraw-confirm', { timeoutMs: 5_000 });
+
+    // 6. Assert "Withdrawn ✓" — the app signed, submitted, the FakeLedger verified + debited.
+    const ok = await driver.waitForText('Withdrawn', { timeoutMs: 10_000 });
+    const body = await driver.bodyText();
+    assert(ok, `withdraw sheet should show "Withdrawn ✓". body excerpt:\n${body.slice(0, 600)}`);
+
+    // 7. The credited path proven directly on the real ledger: the currency-1 balance dropped by the
+    //    withdrawn amount. (The `$` header is currency 0 — a separate asset; deliberately unmoved.)
+    const after = await getBalance(relayBaseURL, accountHex, DEPOSIT_CURRENCY);
+    assertEq(after, SEED_SATS - WITHDRAW_SATS, 'post-withdraw ckBTC balance (debited)');
+    console.log(`[15-withdraw] ✓ ckBTC balance ${SEED_SATS} → ${after} sats (debited through the REAL app+relay+FakeLedger)`);
+
+    await driver.screenshot('15-withdraw');
+
+    const elapsed = ((Date.now() - start) / 1000).toFixed(2);
+    console.log(`[15-withdraw] GREEN in ${elapsed}s`);
+  } finally {
+    await env.stop();
+  }
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  run().catch(async (e) => { console.error(`\n[15-withdraw] RED: ${e.stack || e.message || e}\n`); process.exit(1); });
+}

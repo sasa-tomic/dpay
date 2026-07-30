@@ -164,7 +164,33 @@ export async function run() {
   assertEq(dCurrency, g.currency, 'decoded request.currency');
   console.log('[00-cross-val] ✓ request QR round-trips byte-exact');
 
-  console.log('[00-cross-val] ALL CHECKS GREEN — local pay flows will settle on the real FakeLedger');
+  // --- (6) withdraw shim byte-exactness: re-signing the golden WithdrawAuth produces the golden
+  //   sig (mirrors `dpay_core::WithdrawAuth::signing_bytes`). If the shim's `buildWithdrawSigningBytes`
+  //   diverges from the Rust core, the FakeLedger/canister verify rejects the sig and the e2e
+  //   withdraw flow (15-withdraw) goes RED. The withdraw layout is variable-length (address last).
+  const wg = layout.withdraw.golden;
+  const W = layout.withdraw;
+  const wAddr = Buffer.from(wg.btc_address, 'utf8');
+  const wSigning = Buffer.alloc(W.fixed_len + W.addr_len_bytes + wAddr.length);
+  wSigning.set(hex(wg.public_hex), W.fields.from_pubkey.offset);
+  putU64Le(wSigning, W.fields.amount.offset, wg.amount);
+  wSigning.set(hex(wg.nonce_hex), W.fields.nonce.offset);
+  putU64Le(wSigning, W.fields.expiry.offset, wg.expiry);
+  putU32Le(wSigning, W.fields.currency.offset, wg.currency);
+  putU32Le(wSigning, W.fields.address_len.offset, wAddr.length);
+  wSigning.set(wAddr, W.fields.address_len.offset + W.addr_len_bytes);
+  assertEq(bytesToHex(new Uint8Array(wSigning)), wg.signing_hex, 'withdraw signing buffer (golden layout vs shim builder)');
+  const wSig = await ed.signAsync(new Uint8Array(wSigning), hex(wg.secret_hex));
+  if (bytesToHex(wSig) !== wg.sig_hex) {
+    throw new Error(
+      `[00-cross-val] WITHDRAW SIG MISMATCH — the JS shim's withdraw sig differs from the Rust core's.\n` +
+      `  rust : ${wg.sig_hex}\n  js   : ${bytesToHex(wSig)}\n` +
+      `  Local withdraw flows will NOT settle (FakeLedger/canister verify fails).`
+    );
+  }
+  console.log('[00-cross-val] ✓ withdraw sig matches Rust core byte-for-byte');
+
+  console.log('[00-cross-val] ALL CHECKS GREEN — local pay + withdraw flows will settle on the real FakeLedger');
 }
 
 // Allow `node tests/00-cross-val.mjs` to run standalone (the orchestrator imports `run`).

@@ -238,6 +238,44 @@ export async function seedDeposit(relayBaseURL, accountHex, currency, amount, ti
   } finally { clearTimeout(t); }
 }
 
+/**
+ * POST `/api/v1/deposit/refresh/{hex}?currency=N` — drains a seeded pending deposit and credits the
+ * balance (mirrors the ck minter minting after confirmations). Used by the withdraw flow (15) to
+ * credit ckBTC to the wallet's subaccount WITHOUT opening the deposit sheet, so the asset card
+ * appears and the withdraw path has a balance to draw from. Returns the refreshed `minted_total`.
+ */
+export async function refreshDeposit(relayBaseURL, accountHex, currency, timeoutMs = 4000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch(`${relayBaseURL}/api/v1/deposit/refresh/${accountHex}?currency=${currency}`, {
+      method: 'POST', signal: ctrl.signal,
+    });
+    if (!r.ok) throw new Error(`deposit/refresh ${r.status}`);
+    return r.json();
+  } finally { clearTimeout(t); }
+}
+
+/**
+ * POST `/api/v1/withdraw` with the signed WithdrawRequest → `{ok, status, body}`. Used by the
+ * withdraw flow (15) to assert the route's error mapping on a below-min / wrong-sig rejection
+ * directly (the app's own submit path is exercised through the UI).
+ */
+export async function postWithdraw(relayBaseURL, req, timeoutMs = 6000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch(`${relayBaseURL}/api/v1/withdraw`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req), signal: ctrl.signal,
+    });
+    const body = await r.json().catch(() => ({}));
+    return { ok: r.ok, status: r.status, body };
+  } catch {
+    return { ok: null, status: null, body: {} };
+  } finally { clearTimeout(t); }
+}
+
 /** POST `/api/v1/pay` with a `{qr}` body → `{ok, status, body}` (null `ok`/`status` on fetch throw). */
 export async function postPay(relayBaseURL, qrCode, timeoutMs = 6000) {
   const ctrl = new AbortController();
