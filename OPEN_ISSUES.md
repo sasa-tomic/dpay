@@ -64,11 +64,13 @@
 - **Current mitigation.** PoC scope is single-`$`/DEMO_USD by design; the multi-currency framing is the pitch/roadmap layer. No protocol limitation is being hidden.
 - **Next step.** Add a multi-currency picker to the merchant request generation when the demo moves past single-currency.
 
-### 7. (low) App↔canister config coupling
+### 7. (low) App↔canister config coupling ✅ CLOSED (M0)
 
-- **What/why.** `DEPOSIT_CURRENCY=1` is single-sourced in the app display layer and must match the canister's registered ckBTC currency id. They are aligned today; a future canister re-registration under a different currency id would silently desync the wallet's deposit card.
-- **Current mitigation.** Treated as a deploy-config invariant (documented).
-- **Next step.** Consider surfacing the canister's registered currencies so the wallet reads the currency id rather than hardcoding it.
+- ✅ **RESOLVED** by the `currencies()` catalog (commits 849ad59/66703af/736746d): the app now fetches +
+  AsyncStorage-caches currency ids/display metadata at runtime (`GET /api/v1/currencies`) and keys ramp
+  assets off `minter_family` instead of a hardcoded `DEPOSIT_CURRENCY=1`. Adding a currency is
+  canister-config-only (`register_ledger`/`register_minter`/`register_currency_meta` — no app redeploy).
+  Verified live: mainnet `GET /api/v1/currencies` returns all 3 (DEMO_USD, ckBTC/CkBtcUtxo, ckUSDC/CkEthErc20).
 
 ## Resolved this session (changelog)
 
@@ -91,6 +93,15 @@ The following previously-open risks are now **CLOSED** (see `CODEBASE_ANALYSIS.m
 
 ## UX review findings (2026-07-30)
 
+> **Status (F-wave, commit bb315ba):** N2/N4/N5/N7/N8/N9/N10 + UX-V2/V3 are **FIXED** (SettingsSheet
+> with reset-confirm; faucet moved off header + label/amount corrected + real cooldown surfaced; mint
+> sentinel labeled "Demo funds"/"Withdrawal"; deposit error distinguishes no-minter vs transient;
+> onboarding testID + Enter-to-create; header right-padding; paste-request affordance). N3 deploy
+> blocker fixed (`scripts/dfx-deploy.sh` sets controller before `register_ledger`). **Deferred:** N1
+> (FakeLedger has no rate-limit — accepted simplification; real cooldown is surfaced in the UI); N6
+> (counterparties are raw hex — needs the username carried in the signed payload, overlaps with a core
+> wire change); UX-V5 full single-key shortcuts (only Enter-to-create shipped; polish).
+>
 > From a NO-MOCK UX review: the REAL web app (`app/App.tsx`, react-native-web) driven through
 > chrome-cli against the REAL canister (facade + ic-icrc1-ledger on a local dfx/PocketIC replica) via
 > the relay's `AgentLedger` (`--features agent`). Every money path (onboard/faucet, two-wallet
@@ -177,24 +188,30 @@ The following previously-open risks are now **CLOSED** (see `CODEBASE_ANALYSIS.m
 > already works for ckUSDC with a `register_ledger` call — only the *ramp* is ckBTC-shaped.
 
 - **O1 (high) | architecture | canister/relay/app | The deposit+withdraw ramp is hard-wired to the
-  ckBTC minter family.** `MINTERS` carries a minter principal but no family/shape info; the deposit
-  proxy calls ckBTC-only methods (`get_btc_address`/`update_balance`); the withdraw proxy is single-ledger
-  `retrieve_btc_with_approval`. ckUSDC needs a **parallel ckERC20-family surface**: onramp is
-  informational (static Ethereum helper contract + encoded principal, no minter mint call); offramp is
-  dual-ledger (`withdraw_erc20` with ckETH-gas + ckUSDC-amount approves). *Fix:* add `minter_family` to
-  the minter registry + per-family ramp dispatch (see plan §2, §4 waves M2/M3).
-- **O2 (high) | architecture | core wire | `WithdrawAuth` binds a BTC-address field** (`dpay-core`,
-  FROZEN). Generalizing the signed withdrawal to a chain-agnostic destination + currency + ckETH gas
-  subaccount is a core wire-shape change (additive vs versioned — decide). Must keep the on-device-signature
-  non-custodial gate.
-- **O3 (high) | dependency | ckUSDC offramp | The user MUST hold ckETH to pay Ethereum gas** for a
-  ckUSDC withdrawal (`withdraw_erc20` burns ckETH for gas). Funding dependency to surface in the UI;
-  arguably needs a ckETH onramp of its own.
-- **O4 (medium) | risk | ckERC20 offramp front-running (extends #9/risk 8)** — `withdraw_erc20` is
-  dual-approve-then-retrieve across `await`s, same bounded blast radius (exact authorized amount,
-  single-use) PLUS a wider dual-approve window; PLUS a partial-failure state (`CkErc20LedgerError` after
-  `CkEthLedgerError` → minter schedules a reimbursement, not atomic fail). Inherent to the ckETH minter;
-  document as a new residual.
+  ckBTC minter family.** ✅ **RESOLVED for onramp (M0+M2)** — `MinterFamily` is now the per-family
+  dispatch key (canister `currencies()` + `register_currency_meta`, M0); the ckUSDC onramp is built
+  CLIENT-SIDE (no canister ramp dispatch needed — the onramp bypasses the canister: the user does 2 ETH
+  txs, the mint lands at `Account{owner:facade, subaccount:pubkey}`, dpay just polls the ledger balance).
+  Shipped: `app/cketh.ts` byte-exact calldata builder, `app/wallet.ts` EIP-1193 seam, `CkErc20DepositSheet`
+  wallet-connect flow (connect→approve→deposit→watch), relay `GET /api/v1/onramp/ckerc20`, ckUSDC registered
+  on mainnet. The ckERC20 **offramp** (canister `withdraw_erc20` dual-ledger dispatch) is NOT built —
+  deferred per Fork-C (no ckETH gas source; offramp via third-party, never dpay). So the onramp is
+  multi-family; the direct offramp remains ckBTC-only.
+- **O2 (high) | architecture | core wire | `WithdrawAuth` binds a BTC-address field** ✅ **RESOLVED (M3,
+  commit 4a98c89)** — renamed `WithdrawAuth.btc_address` → `destination` across 14 files. **Wire-safe**:
+  `signing_bytes()` was already chain-agnostic (the address is a u32-length-prefixed UTF-8 string — the
+  field NAME never touched the bytes). Proven: the regenerated `wire_layout.json` withdraw.golden
+  `signing_hex`/`sig_hex` are byte-identical before/after. The signed-withdrawal now reads as chain-agnostic
+  without a FROZEN-wire version bump.
+- **O3 (high) | dependency | ckUSDC offramp | The user MUST hold ckETH to pay Ethereum gas** 🟡 **DEFERRED
+  (Fork-C)** — the ckERC20 direct offramp (`withdraw_erc20`, dual-ledger approve) is NOT built. Per the
+  locked founder decision, gas is provided via a THIRD-PARTY (user authorizes a 3rd-party ckUSDC→ckETH
+  conversion directly; dpay is a screen only — preserves no-swap). The ckUSDC asset card has NO cash-out
+  button (honest deferral); ckBTC cash-out works (with saved-address reuse, M3).
+- **O4 (medium) | risk | ckERC20 offramp front-running (extends #9/risk 8)** 🟡 **DEFERRED** — applies
+  only when the ckERC20 offramp lands (see O3). The dual-approve + partial-failure (`CkErc20LedgerError`
+  after `CkEthLedgerError` → reimbursement) residual is documented; inherent to the ckETH minter, not
+  dpay-specific.
 - **O5 (medium) | UX/config | single-sourcing** — ✅ **CLOSED by M0** (commits 849ad59/66703af/736746d).
   Canister `currencies()` + relay `GET /api/v1/currencies` + app runtime catalog shipped; `DEPOSIT_CURRENCY`
   deleted; adding a currency is config-only.
