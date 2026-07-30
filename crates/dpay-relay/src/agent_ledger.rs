@@ -23,6 +23,7 @@ use dpay_core::{Currency, PUBKEY_LEN, SignedAuthorization};
 
 use crate::ledger::{
     DepositInfo, DepositRefresh, Ledger, LedgerError, MintedUtxo, PendingUtxo, Receipt, TxnRecord,
+    WithdrawReceipt, WithdrawRequest,
 };
 
 /// Read the settlement currency out of a 196-byte signed-authorization wire (the canister does the
@@ -88,6 +89,32 @@ struct DepositInfoMirror {
     min_confirmations: u32,
     deposit_fee: u64,
     deposit_min_amount: Option<u64>,
+}
+
+/// Candid mirror of the canister's `WithdrawRequest` (the W2 withdrawal endpoint). Byte fields are
+/// `blob`s on the wire; the relay's JSON `WithdrawRequest` carries them as hex, so the trait impl
+/// decodes hex → bytes here. Field labels match the canister's struct exactly.
+#[derive(CandidType, serde::Serialize)]
+struct WithdrawRequestMirror {
+    from_pubkey: Vec<u8>,
+    btc_address: String,
+    amount: u64,
+    nonce: Vec<u8>,
+    expiry: u64,
+    currency: Currency,
+    sig: Vec<u8>,
+}
+
+/// Candid mirror of the canister's `WithdrawReceipt` (the burn outcome). `block_index` is the ckBTC
+/// ledger's burn transaction index.
+#[derive(CandidType, Deserialize, Debug)]
+struct WithdrawReceiptMirror {
+    from: Vec<u8>,
+    btc_address: String,
+    amount: u64,
+    nonce: Vec<u8>,
+    currency: Currency,
+    block_index: u64,
 }
 
 /// A [`Ledger`] backed by a real IC replica. Owns an [`Agent`] pointed at the replica/gateway URL
@@ -374,5 +401,50 @@ impl Ledger for AgentLedger {
             deposit_fee: m.deposit_fee,
             deposit_min_amount: m.deposit_min_amount,
         })
+    }
+
+    async fn withdraw(&self, req: WithdrawRequest) -> Result<WithdrawReceipt, LedgerError> {
+        // facade `withdraw(WithdrawRequest) -> Result<WithdrawReceipt, text>` (update). Decode the
+        // JSON request's hex fields → candid `blob`s, matching the canister's struct. A transport /
+        // replica failure is `Transient` (503, retried); a canister-level `Err(String)` is a
+        // permanent policy rejection (bad sig / expired / below min / insufficient / nonce reused) →
+        // `Rejected` (422), mirroring `pay`'s error mapping.
+        let from = hex::decode(&req.from)
+            .map_err(|e| LedgerError::Rejected(format!("bad from hex: {e}")))?;
+        let nonce = hex::decode(&req.nonce)
+            .map_err(|e| LedgerError::Rejected(format!("bad nonce hex: {e}")))?;
+        let sig = hex::decode(&req.sig)
+            .map_err(|e| LedgerError::Rejected(format!("bad sig hex: {e}")))?;
+        let mirror = WithdrawRequestMirror {
+            from_pubkey: from,
+            btc_address: req.btc_address,
+            amount: req.amount,
+            nonce,
+            expiry: req.expiry,
+            currency: req.currency,
+            sig,
+        };
+        let arg = encode_one(&mirror)
+            .map_err(|e| LedgerError::Transient(format!("encode withdraw arg: {e}")))?;
+        let reply = self
+            .agent
+            .update(&self.canister_id, "withdraw")
+            .with_arg(arg)
+            .call_and_wait()
+            .await
+            .map_err(|e| LedgerError::Transient(format!("withdraw update: {e}")))?;
+        let result: Result<WithdrawReceiptMirror, String> = decode_one(&reply)
+            .map_err(|e| LedgerError::Transient(format!("decode withdraw reply: {e}")))?;
+        match result {
+            Ok(m) => Ok(WithdrawReceipt {
+                from: hex::encode(m.from),
+                btc_address: m.btc_address,
+                amount: m.amount,
+                nonce: hex::encode(m.nonce),
+                currency: m.currency,
+                block_index: m.block_index,
+            }),
+            Err(msg) => Err(LedgerError::Rejected(msg)),
+        }
     }
 }

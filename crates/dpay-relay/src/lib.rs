@@ -22,7 +22,7 @@ pub mod agent_ledger;
 pub use app::{app, AppState};
 pub use ledger::{
     Clock, DepositInfo, DepositRefresh, FakeLedger, FixedClock, FlakyLedger, Ledger, LedgerError,
-    MintedUtxo, PendingUtxo, Receipt, SystemClock, TxnRecord,
+    MintedUtxo, PendingUtxo, Receipt, SystemClock, TxnRecord, WithdrawReceipt, WithdrawRequest,
 };
 
 #[cfg(feature = "agent")]

@@ -836,3 +836,245 @@ async fn deposit_routes_map_ledger_transient_to_503() {
     // No deposit was credited — a failing refresh mints nothing.
     assert_eq!(inner.balance_of(&b, DEMO_USD), BAL_B, "transient refresh must not mint");
 }
+
+// --- withdrawal surface (ckBTC → native BTC out; W2) -----------------------------------------
+//
+// Covers the new Ledger::withdraw trait method + the POST /api/v1/withdraw route. The FakeLedger
+// simulates the burn as a direct debit (mirrors the canister's net ledger effect), and its
+// accept/reject matches the canister's `withdraw` gate (sig / expiry / min / funds / nonce).
+
+use dpay_core::WithdrawAuth;
+use dpay_relay::WithdrawRequest;
+
+/// A second currency standing in for ckBTC (the withdraw asset). Matches the canister test's CKX/CKBTC
+/// tag — distinct from DEMO_USD so the withdraw debit lands on a separate (account, currency) key.
+const CKBTC: Currency = 1;
+/// Mirrors the live minter's `retrieve_btc_min_amount` + the relay/canister `RETRIEVE_BTC_MIN_AMOUNT`.
+const MIN_WITHDRAW: u64 = 50_000;
+
+/// Build a signed WithdrawRequest (hex fields) from a signing key. The signature is over the canonical
+/// `WithdrawAuth::signing_bytes()` (single source of truth in dpay-core), so the FakeLedger's verify
+/// accepts it exactly like the canister.
+fn withdraw_req(
+    sk: &SigningKey,
+    btc_address: &str,
+    amount: u64,
+    nonce: [u8; 16],
+    expiry: u64,
+    currency: Currency,
+) -> WithdrawRequest {
+    let from = pubkey(sk);
+    let auth = WithdrawAuth {
+        from_pubkey: from,
+        btc_address: btc_address.to_string(),
+        amount,
+        nonce,
+        expiry,
+        currency,
+    };
+    let sig = dpay_core::sign_withdraw(sk, &auth).to_bytes();
+    WithdrawRequest {
+        from: hex::encode(from),
+        btc_address: btc_address.to_string(),
+        amount,
+        nonce: hex::encode(nonce),
+        expiry,
+        currency,
+        sig: hex::encode(sig),
+    }
+}
+
+/// POST /api/v1/withdraw with a JSON body.
+fn withdraw_json(req: &WithdrawRequest) -> Request<Body> {
+    let body = serde_json::json!({
+        "from": req.from,
+        "btc_address": req.btc_address,
+        "amount": req.amount,
+        "nonce": req.nonce,
+        "expiry": req.expiry,
+        "currency": req.currency,
+        "sig": req.sig,
+    });
+    Request::builder()
+        .method("POST")
+        .uri("/api/v1/withdraw")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap()
+}
+
+/// Pre-fund an account with ckBTC directly on the FakeLedger (the deposit path's net effect), so a
+/// withdraw test starts with a known balance. Uses the public `register_deposit`+`deposit_status`
+/// path to credit through the real seam.
+async fn fund_ckbtc(state: &AppState, led: &FakeLedger, pk: [u8; 32], amount: u64) {
+    led.register_deposit(pk, CKBTC, amount);
+    let _ = state.ledger.deposit_status(pk, CKBTC).await.expect("deposit_status credits");
+    assert_eq!(led.balance_of(&pk, CKBTC), amount, "pre-fund credited");
+}
+
+/// A verified withdrawal debits ckBTC from the user's subaccount and returns the burn block index.
+#[tokio::test]
+async fn withdraw_debits_ckbtc_from_subaccount() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    const FUND: u64 = 100_000;
+    fund_ckbtc(&state, &led, pubkey(&payer), FUND).await;
+
+    let req = withdraw_req(&payer, "bc1qdestination", MIN_WITHDRAW, [1u8; 16], FUTURE, CKBTC);
+    let r = state.ledger.withdraw(req).await.expect("withdraw ok");
+    assert_eq!(r.amount, MIN_WITHDRAW);
+    assert_eq!(r.btc_address, "bc1qdestination");
+    assert_eq!(r.currency, CKBTC);
+    // Debited by the withdrawn amount.
+    assert_eq!(led.balance_of(&pubkey(&payer), CKBTC), FUND - MIN_WITHDRAW);
+}
+
+/// The POST /api/v1/withdraw route returns 200 + the receipt JSON on success.
+#[tokio::test]
+async fn withdraw_route_returns_receipt_on_success() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    fund_ckbtc(&state, &led, pubkey(&payer), 100_000).await;
+
+    let req = withdraw_req(&payer, "bc1qroute", MIN_WITHDRAW, [2u8; 16], FUTURE, CKBTC);
+    let (status, body) = call(&state, withdraw_json(&req)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["receipt"]["amount"], MIN_WITHDRAW);
+    assert_eq!(body["receipt"]["btc_address"], "bc1qroute");
+    assert_eq!(led.balance_of(&pubkey(&payer), CKBTC), 100_000 - MIN_WITHDRAW);
+}
+
+/// A replay with the SAME nonce is rejected (422) — no double-burn. Mirrors the canister.
+#[tokio::test]
+async fn withdraw_double_withdraw_same_nonce_rejected() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    fund_ckbtc(&state, &led, pubkey(&payer), 200_000).await;
+
+    let req = withdraw_req(&payer, "bc1qfirst", MIN_WITHDRAW, [3u8; 16], FUTURE, CKBTC);
+    let (s1, _b1) = call(&state, withdraw_json(&req)).await;
+    assert_eq!(s1, StatusCode::OK);
+    assert_eq!(led.balance_of(&pubkey(&payer), CKBTC), 200_000 - MIN_WITHDRAW);
+
+    // Same nonce again → 422, no second debit.
+    let (s2, b2) = call(&state, withdraw_json(&req)).await;
+    assert_eq!(s2, StatusCode::UNPROCESSABLE_ENTITY, "{b2}");
+    assert!(b2["error"].as_str().unwrap().contains("nonce"), "error={b2}");
+    assert_eq!(led.balance_of(&pubkey(&payer), CKBTC), 200_000 - MIN_WITHDRAW);
+}
+
+/// A wrong signature is rejected (422) and moves no funds.
+#[tokio::test]
+async fn withdraw_wrong_sig_rejected_no_funds_move() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    fund_ckbtc(&state, &led, pubkey(&payer), 100_000).await;
+
+    // Sign with a DIFFERENT key but present from = payer — verify under payer fails.
+    let other = keypair();
+    let auth = WithdrawAuth {
+        from_pubkey: pubkey(&payer),
+        btc_address: "bc1qattacker".to_string(),
+        amount: MIN_WITHDRAW,
+        nonce: [4u8; 16],
+        expiry: FUTURE,
+        currency: CKBTC,
+    };
+    let wrong_sig = dpay_core::sign_withdraw(&other, &auth).to_bytes();
+    let req = WithdrawRequest {
+        from: hex::encode(pubkey(&payer)),
+        btc_address: "bc1qattacker".to_string(),
+        amount: MIN_WITHDRAW,
+        nonce: hex::encode([4u8; 16]),
+        expiry: FUTURE,
+        currency: CKBTC,
+        sig: hex::encode(wrong_sig),
+    };
+    let (status, body) = call(&state, withdraw_json(&req)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("signature"), "error={body}");
+    assert_eq!(led.balance_of(&pubkey(&payer), CKBTC), 100_000, "no debit on a bad sig");
+}
+
+/// A below-min withdrawal is rejected (422) and moves no funds. Mirrors the canister's local floor.
+#[tokio::test]
+async fn withdraw_below_min_rejected() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    fund_ckbtc(&state, &led, pubkey(&payer), 100_000).await;
+
+    let req = withdraw_req(&payer, "bc1qtoosmall", MIN_WITHDRAW - 1, [5u8; 16], FUTURE, CKBTC);
+    let (status, body) = call(&state, withdraw_json(&req)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("retrieve_btc_min_amount"), "error={body}");
+    assert_eq!(led.balance_of(&pubkey(&payer), CKBTC), 100_000, "no debit on a below-min withdraw");
+}
+
+/// Insufficient funds is rejected (422) and the nonce is RELEASED (a later deposit + same-auth retry
+/// can succeed within the expiry window — mirrors the canister's release-on-pre-burn-failure).
+#[tokio::test]
+async fn withdraw_insufficient_funds_releases_nonce_for_retry() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    fund_ckbtc(&state, &led, pubkey(&payer), 30_000).await; // < MIN_WITHDRAW (50_000)
+
+    let req = withdraw_req(&payer, "bc1qnotenough", MIN_WITHDRAW, [6u8; 16], FUTURE, CKBTC);
+    let (status, body) = call(&state, withdraw_json(&req)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("InsufficientFunds"), "error={body}");
+    assert_eq!(led.balance_of(&pubkey(&payer), CKBTC), 30_000, "no debit");
+
+    // Now top up to 100_000 and retry the SAME nonce — it must succeed (nonce was released, not
+    // burned). register_deposit + deposit_status credit through the real seam.
+    led.register_deposit(pubkey(&payer), CKBTC, 70_000);
+    let _ = state.ledger.deposit_status(pubkey(&payer), CKBTC).await.expect("deposit_status credits");
+    assert_eq!(led.balance_of(&pubkey(&payer), CKBTC), 100_000, "topped up to 100_000");
+
+    let (status2, body2) = call(&state, withdraw_json(&req)).await;
+    assert_eq!(status2, StatusCode::OK, "same-nonce retry must succeed after funding: {body2}");
+    assert_eq!(led.balance_of(&pubkey(&payer), CKBTC), 100_000 - MIN_WITHDRAW);
+}
+
+// --- W3 audit: FakeLedger.pay must mirror the canister's hard rejects -------------------------
+//
+// The canister's `pay` rejects a self-transfer (`from == to`) and a payment to the mint sentinel
+// (`to == [0xFF;32]`) before reserving the nonce. The FakeLedger MUST reject the same (the
+// mock-mirrors-real-counterparty lesson: a divergence where the FakeLedger accepts what the canister
+// rejects would let a bug ship green). These tests pin the FakeLedger to the canister's behavior.
+
+#[tokio::test]
+async fn w3_fakeledger_rejects_self_transfer_like_canister() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+
+    // from == to == payer. The canister rejects this ("self transfer"); the FakeLedger must too.
+    let sa = signed(&payer, pubkey(&payer), 100, [7u8; 16], FUTURE);
+    let (status, body) = call(&state, pay_json(&sa.encode())).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("self transfer"), "error={body}");
+    // Nothing moved + the nonce was NOT burned (no state change).
+    assert_eq!(led.balance_of(&pubkey(&payer), DEMO_USD), BAL_A);
+}
+
+#[tokio::test]
+async fn w3_fakeledger_rejects_pay_to_mint_sentinel_like_canister() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+
+    // to == [0xFF;32] (the mint sentinel). The canister rejects this; the FakeLedger must too.
+    let sa = signed(&payer, [0xFF; 32], 100, [8u8; 16], FUTURE);
+    let (status, body) = call(&state, pay_json(&sa.encode())).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("mint sentinel"), "error={body}");
+    assert_eq!(led.balance_of(&pubkey(&payer), DEMO_USD), BAL_A);
+    // The sentinel subaccount was NOT credited (the canister would have rejected before any move).
+    assert_eq!(led.balance_of(&[0xFF; 32], DEMO_USD), 0);
+}

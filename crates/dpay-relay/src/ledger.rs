@@ -15,14 +15,26 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
 use async_trait::async_trait;
-use ed25519_dalek::SigningKey;
-use serde::Serialize;
+use ed25519_dalek::{Signature, SigningKey};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use dpay_core::{
     sign_receipt, validate, CodecError, Currency, PayError, ReceiptClaim, SignedAuthorization,
-    DEMO_USD, NONCE_LEN, PUBKEY_LEN,
+    WithdrawAuth, DEMO_USD, NONCE_LEN, PUBKEY_LEN,
 };
+
+/// The minimal withdrawal amount the facade honors, in sats. Mirrors the LIVE ckBTC minter's
+/// `retrieve_btc_min_amount` (= 50_000, returned by `get_minter_info` on `mqygn-kiaaa-aaaar-qaadq-cai`
+/// and confirmed in OPEN_ISSUES.md) and the canister's `RETRIEVE_BTC_MIN_AMOUNT`. Single-sourced here
+/// so the relay's local pre-check + the FakeLedger simulation can't drift from the real floor.
+const RETRIEVE_BTC_MIN_AMOUNT: u64 = 50_000;
+
+/// Sentinel "account" the canister reserves for mint/burn history rows (`[0xFF; 32]`). A real
+/// Ed25519 pubkey is a valid curve point, so this all-ones value can never be a user's pubkey
+/// (`verify_strict` rejects it). The canister rejects a `pay` that names it as the payee; the
+/// FakeLedger mirrors that reject so the two can't diverge (W3 audit).
+const MINT_ACCOUNT: [u8; PUBKEY_LEN] = [0xFF; PUBKEY_LEN];
 
 /// What the merchant sees on success. Byte fields are hex so the JSON is a plain string map.
 /// Mirrors the canister's `PayReceipt` (which returns the same fields as candid `blob`s).
@@ -102,6 +114,40 @@ pub struct DepositInfo {
     pub min_confirmations: u32,
     pub deposit_fee: u64,
     pub deposit_min_amount: Option<u64>,
+}
+
+// ---------------------------------------------------------------------------
+// Withdrawal surface (ckBTC → native BTC out). These mirror the canister's
+// `WithdrawRequest` / `WithdrawReceipt` (§W2) but live here as serde structs so the relay's HTTP
+// layer speaks plain JSON (byte fields are hex, matching [`Receipt`]). The agent impl (feature
+// `agent`) translates these to/from the canister's candid `blob` fields.
+// ---------------------------------------------------------------------------
+
+/// Request body for `POST /api/v1/withdraw`: the user's signed withdrawal authorization. `from` is
+/// the hex Ed25519 pubkey (the debit subaccount), `nonce`/`sig` are hex (16/64 bytes), `amount` is
+/// satoshis. The facade verifies `sig` over the canonical [`WithdrawAuth`] signing bytes under
+/// `from` before moving any funds (non-custodial).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WithdrawRequest {
+    pub from: String,
+    pub btc_address: String,
+    pub amount: u64,
+    pub nonce: String,
+    pub expiry: u64,
+    pub currency: Currency,
+    pub sig: String,
+}
+
+/// Settlement receipt for a successful withdrawal: echoes the authorization + the ckBTC ledger's burn
+/// block index. Mirrors the canister's `WithdrawReceipt`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct WithdrawReceipt {
+    pub from: String,
+    pub btc_address: String,
+    pub amount: u64,
+    pub nonce: String,
+    pub currency: Currency,
+    pub block_index: u64,
 }
 
 /// Settlement outcome. `Rejected` is a permanent policy failure (bad sig, expired, over cap,
@@ -206,6 +252,23 @@ pub trait Ledger: Send + Sync {
     /// Static deposit instructions for `currency` (min confirmations, fee, min amount).
     async fn deposit_info(&self, currency: Currency) -> Result<DepositInfo, LedgerError>;
 
+    /// Withdraw ckBTC to a native BTC address on a VERIFIED user signature. The request carries the
+    /// [`WithdrawAuth`] fields + the Ed25519 signature (hex); the ledger verifies the signature under
+    /// `from` (== the debit subaccount) before moving any funds. On success the ckBTC is debited from
+    /// `Account{facade, subaccount: from}` and the burn block index is returned.
+    ///
+    /// Error mapping mirrors the deposit surface's §0 rule for *transient* failures (a transport /
+    /// minter-unavailable hiccup → `Transient` → HTTP 503), but a **permanent policy failure** (bad
+    /// signature, expired, below min, insufficient funds, nonce reused) is `Rejected` → HTTP 422 — the
+    /// relay must not signal "retry" for a rejection that will never succeed.
+    ///
+    /// The default returns a permanent `Rejected` so ledgers that don't support withdrawal (e.g.
+    /// narrow test stubs) refuse cleanly rather than silently no-op. [`FakeLedger`] and
+    /// [`AgentLedger`](crate::AgentLedger) override it.
+    async fn withdraw(&self, _req: WithdrawRequest) -> Result<WithdrawReceipt, LedgerError> {
+        Err(LedgerError::Rejected("withdraw not supported on this ledger".into()))
+    }
+
     /// The receipt-signing public key (32 bytes) of the ledger/canister, so a payer can verify a
     /// `Receipt`'s `receipt_sig` over its canonical `ReceiptClaim`. `FakeLedger` returns a stable
     /// test key; `AgentLedger` queries the canister's `receipt_pubkey`. (A receipt also carries its
@@ -247,6 +310,10 @@ struct FakeState {
     /// multiple currencies independently — they're different assets, not one pool.
     balances: HashMap<([u8; PUBKEY_LEN], Currency), u64>,
     spent: HashSet<[u8; NONCE_LEN]>,
+    /// Single-use withdrawal idempotency keys (mirror of the canister's `WITHDRAW_NONCES`, kept
+    /// SEPARATE from `spent` so a withdraw nonce can't collide with/block a pay nonce). A signed
+    /// [`WithdrawAuth`] may be submitted at most once; a replay is `Rejected` (NonceReused).
+    withdraw_nonces: HashSet<[u8; NONCE_LEN]>,
     /// Settled transactions, oldest-first (the order they were pushed). `transactions_of` reverses
     /// to newest-first and filters by (currency, account). Mirrors the canister's ACCOUNT_TXNS so
     /// the relay's inner loop is canister-faithful on history too.
@@ -317,6 +384,7 @@ impl FakeLedger {
             state: Mutex::new(FakeState {
                 balances,
                 spent: HashSet::new(),
+                withdraw_nonces: HashSet::new(),
                 txns: Vec::new(),
                 pending_deposits: HashMap::new(),
                 next_block: 0,
@@ -359,6 +427,17 @@ impl Ledger for FakeLedger {
         let sig_ok = sa.verify();
         let now = self.clock.now_secs();
         let currency = sa.auth.currency;
+
+        // Cheap local rejects that mirror the canister's `pay` body EXACTLY (W3 audit: the FakeLedger
+        // must not accept a payment the real canister rejects). The canister rejects a self-transfer
+        // (`from == to`) and a payment to the mint sentinel (`to == [0xFF;32]`) before reserving the
+        // nonce; the FakeLedger does the same so the two can't diverge.
+        if sa.auth.from == sa.auth.to {
+            return Err(LedgerError::Rejected("self transfer".to_string()));
+        }
+        if sa.auth.to == MINT_ACCOUNT {
+            return Err(LedgerError::Rejected("pay to mint sentinel".to_string()));
+        }
 
         // Single critical section: read balance/nonce, validate, commit atomically — exactly the
         // canister's `pay` body. Lookups are keyed by (pubkey, currency) — debiting/crediting the
@@ -513,6 +592,101 @@ impl Ledger for FakeLedger {
         })
     }
 
+    /// Withdraw ckBTC to a native BTC address. Mirrors the canister's `withdraw` settlement EXACTLY
+    /// (W3 audit: the FakeLedger's accept/reject must match the real canister). Single critical
+    /// section under the `FakeState` mutex (the canister is single-threaded; same guarantee). There
+    /// is no real minter here, so the "burn" is modeled as a direct debit of `amount` from the user's
+    /// subaccount (the net ledger effect of retrieve_btc_with_approval). The signed WithdrawAuth is
+    /// verified under `from` (== the debit subaccount) before any state change — non-custodial.
+    async fn withdraw(&self, req: WithdrawRequest) -> Result<WithdrawReceipt, LedgerError> {
+        // Decode hex fields outside the lock (pure; a bad shape is a permanent reject).
+        let from = hex::decode(&req.from)
+            .map_err(|e| LedgerError::Rejected(format!("bad from hex: {e}")))
+            .and_then(|b| {
+                <[u8; PUBKEY_LEN]>::try_from(b.as_slice())
+                    .map_err(|_| LedgerError::Rejected("from must be 32 bytes".into()))
+            })?;
+        let nonce = hex::decode(&req.nonce)
+            .map_err(|e| LedgerError::Rejected(format!("bad nonce hex: {e}")))
+            .and_then(|b| {
+                <[u8; NONCE_LEN]>::try_from(b.as_slice())
+                    .map_err(|_| LedgerError::Rejected("nonce must be 16 bytes".into()))
+            })?;
+        let sig_arr = hex::decode(&req.sig)
+            .map_err(|e| LedgerError::Rejected(format!("bad sig hex: {e}")))
+            .and_then(|b| {
+                <[u8; 64]>::try_from(b.as_slice())
+                    .map_err(|_| LedgerError::Rejected("sig must be 64 bytes".into()))
+            })?;
+        let sig = Signature::from_bytes(&sig_arr);
+
+        // NON-CUSTODIAL GATE: rebuild the WithdrawAuth + verify the signature under `from` BEFORE
+        // reserving the nonce or touching the balance. `from` is both the verify key AND the debit
+        // subaccount, so a signature under any other key moves no funds. (Mirrors the canister, which
+        // checks the sig before the nonce reserve.)
+        let auth = WithdrawAuth {
+            from_pubkey: from,
+            btc_address: req.btc_address.clone(),
+            amount: req.amount,
+            nonce,
+            expiry: req.expiry,
+            currency: req.currency,
+        };
+        if !auth.verify(&from, &sig) {
+            return Err(LedgerError::Rejected("bad signature".to_string()));
+        }
+
+        let now = self.clock.now_secs();
+        // Cheap local rejects (mirror the canister's pre-burn checks).
+        if req.amount == 0 {
+            return Err(LedgerError::Rejected("zero amount".to_string()));
+        }
+        if req.expiry < now {
+            return Err(LedgerError::Rejected("expired".to_string()));
+        }
+        if req.amount < RETRIEVE_BTC_MIN_AMOUNT {
+            return Err(LedgerError::Rejected(format!(
+                "amount below retrieve_btc_min_amount ({RETRIEVE_BTC_MIN_AMOUNT})"
+            )));
+        }
+
+        // Single critical section: reserve the withdraw nonce, check funds, commit the burn atomically.
+        let mut s = self.state.lock().unwrap();
+        if !s.withdraw_nonces.insert(nonce) {
+            return Err(LedgerError::Rejected("nonce already used".to_string()));
+        }
+        let balance = *s.balances.get(&(from, req.currency)).unwrap_or(&0);
+        if req.amount > balance {
+            // Insufficient funds: the canister RELEASES the nonce (retryable pre-burn failure); mirror
+            // that here so a later deposit + same-auth retry can succeed within the expiry window.
+            s.withdraw_nonces.remove(&nonce);
+            return Err(LedgerError::Rejected(format!("InsufficientFunds: balance {balance}")));
+        }
+        // Commit the burn: debit the user's subaccount. (No fee model — the FakeLedger is the fee-less
+        // demo ledger; the real canister + ledger enforce the ckBTC transfer fee authoritatively.)
+        let new_balance = balance - req.amount;
+        s.balances.insert((from, req.currency), new_balance);
+        // Record the withdrawal as a history row (counterparty = MINT_ACCOUNT sentinel, like `burn`).
+        let block_index = s.next_block;
+        s.next_block += 1;
+        s.txns.push(TxnRecord {
+            from: hex::encode(from),
+            to: hex::encode(MINT_ACCOUNT),
+            amount: req.amount,
+            nonce: hex::encode(nonce),
+            currency: req.currency,
+            timestamp: now,
+        });
+        Ok(WithdrawReceipt {
+            from: hex::encode(from),
+            btc_address: req.btc_address,
+            amount: req.amount,
+            nonce: hex::encode(nonce),
+            currency: req.currency,
+            block_index,
+        })
+    }
+
     /// Test-only deposit seed (feature-gated; see [`Ledger::seed_deposit`]). Delegates to the
     /// existing `register_deposit` hook so the e2e harness's `POST /api/v1/test/deposit/seed`
     /// exercises the *exact* pending→credited path a real refresh would, through the real router.
@@ -614,6 +788,12 @@ impl<L: Ledger> Ledger for FlakyLedger<L> {
 
     async fn deposit_info(&self, currency: Currency) -> Result<DepositInfo, LedgerError> {
         self.inner.deposit_info(currency).await
+    }
+
+    async fn withdraw(&self, req: WithdrawRequest) -> Result<WithdrawReceipt, LedgerError> {
+        // Clean passthrough: FlakyLedger only injects transients into `pay` (the retry path under
+        // test); the withdrawal surface delegates unchanged, mirroring balance/faucet/deposit.
+        self.inner.withdraw(req).await
     }
 
     async fn receipt_pubkey(&self) -> Result<Vec<u8>, LedgerError> {

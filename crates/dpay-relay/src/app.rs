@@ -41,7 +41,7 @@ use serde::{Deserialize, Serialize};
 
 use dpay_core::{Currency, SignedAuthorization, DEMO_USD, NONCE_LEN, PUBKEY_LEN};
 
-use crate::ledger::{Ledger, LedgerError, MintedUtxo, PendingUtxo, Receipt, TxnRecord};
+use crate::ledger::{Ledger, LedgerError, MintedUtxo, PendingUtxo, Receipt, TxnRecord, WithdrawReceipt};
 
 /// Retry policy for transient ledger errors (idempotency makes retries safe).
 const MAX_ATTEMPTS: u32 = 3;
@@ -115,6 +115,7 @@ impl AppState {
 pub fn app(state: AppState) -> Router {
     let api: Router<AppState> = Router::new()
         .route("/pay", post(pay))
+        .route("/withdraw", post(withdraw))
         .route("/faucet", post(faucet))
         .route("/balance/{hex}", get(balance))
         .route("/transactions/{hex}", get(transactions))
@@ -142,7 +143,37 @@ pub fn app(state: AppState) -> Router {
         .with_state(state)
 }
 
-/// `POST /api/v1/faucet` JSON `{account: <hex>, currency?, amount?}` → `{balance}`. Demo on-ramp:
+/// `POST /api/v1/withdraw` JSON `{from, btc_address, amount, nonce, expiry, currency, sig}` (the
+/// user's signed [`WithdrawRequest`]) → `200 {receipt}` on success. Error mapping mirrors `pay`:
+/// a permanent policy failure (`Rejected` — bad sig / expired / below min / insufficient / nonce
+/// reused / malformed) is `422`; only a genuine `Transient` (the facade/minter unreachable) is `503`.
+/// Every fallible step surfaces status + body; nothing is swallowed.
+async fn withdraw(
+    State(state): State<AppState>,
+    Json(req): Json<crate::ledger::WithdrawRequest>,
+) -> Response {
+    match state.ledger.withdraw(req).await {
+        Ok(r) => (StatusCode::OK, Json(WithdrawReceiptBody { receipt: r })).into_response(),
+        Err(LedgerError::Rejected(msg)) => {
+            // A policy rejection is final — the relay must not signal "retry" (the wallet surfaces it
+            // as a decline, not a transient blip).
+            tracing_deposit_error("withdraw rejected", &msg);
+            err(StatusCode::UNPROCESSABLE_ENTITY, msg)
+        }
+        Err(LedgerError::Transient(msg)) => {
+            tracing_deposit_error("withdraw transient", &msg);
+            err(StatusCode::SERVICE_UNAVAILABLE, format!("ledger unavailable: {msg}"))
+        }
+    }
+}
+
+/// Log a withdrawal/deposit-path error with its context (no silent errors — plan §0). Kept tiny so
+/// every fallible I/O site reads the same shape.
+fn tracing_deposit_error(kind: &str, msg: &str) {
+    eprintln!("dpay-relay: {kind}: {msg}");
+}
+
+/// `GET /api/v1/faucet` JSON `{account: <hex>, currency?, amount?}` → `{balance}`. Demo on-ramp:
 /// funds a phone's freshly-generated account so it can pay. Defaults: `currency = DEMO_USD` (0),
 /// `amount = 10_000` ($100.00) when either is omitted.
 ///
@@ -509,6 +540,13 @@ struct DepositInfoBody {
     min_confirmations: u32,
     deposit_fee: u64,
     deposit_min_amount: Option<u64>,
+}
+
+/// `POST /api/v1/withdraw` response body — the withdrawal receipt (echoes the authorization + the
+/// burn block index). Mirrors the canister's `WithdrawReceipt` (via the ledger seam).
+#[derive(Serialize)]
+struct WithdrawReceiptBody {
+    receipt: WithdrawReceipt,
 }
 
 /// `POST /api/v1/test/deposit/seed` request body (feature `test-helpers` ONLY). `currency` defaults
