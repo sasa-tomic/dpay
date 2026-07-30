@@ -85,6 +85,12 @@ echo "== install the facade (no ledgers at init; cap from dpay-fixture; open con
 dfx build "$CANISTER" >/dev/null
 dfx canister install "$CANISTER" --argument-file dfx/args/init.arg
 
+echo "== set the deploy identity as controller (open→locked; enables register_ledger/mint) =="
+# init.arg seeds controller=null (open-demo mode). set_controller is the ONE admin op callable in
+# open mode (require_controller_rotation: None→any caller). After this, register_ledger/mint work.
+MY_PID=$(dfx identity get-principal)
+dfx canister call "$CANISTER" set_controller "(opt principal \"$MY_PID\")"
+
 echo "== register the DUSD ledger in the facade (currency 0 = DEMO_USD, mintable) =="
 # register_ledger : (nat32, principal, bool) — POSITIONAL args, so the principal is a bare typed
 # literal `principal "..."` (no field name; the reserved-word quoting only applies to record labels).
