@@ -22,8 +22,8 @@ use serde::Deserialize;
 use dpay_core::{Currency, PUBKEY_LEN, SignedAuthorization};
 
 use crate::ledger::{
-    DepositInfo, DepositRefresh, Ledger, LedgerError, MintedUtxo, PendingUtxo, Receipt, TxnRecord,
-    WithdrawReceipt, WithdrawRequest,
+    CurrencyDescriptor, DepositInfo, DepositRefresh, Ledger, LedgerError, MinterFamily, MintedUtxo,
+    PendingUtxo, Receipt, TxnRecord, WithdrawReceipt, WithdrawRequest,
 };
 
 /// Read the settlement currency out of a 196-byte signed-authorization wire (the canister does the
@@ -115,6 +115,30 @@ struct WithdrawReceiptMirror {
     nonce: Vec<u8>,
     currency: Currency,
     block_index: u64,
+}
+
+/// Candid mirror of the canister's `MinterFamily` variant (M0 catalog). The variant labels match the
+/// relay's serde [`MinterFamily`] verbatim; the trait impl maps each candid variant to the relay's
+/// text-JSON enum.
+#[derive(CandidType, Deserialize, Debug)]
+enum MinterFamilyMirror {
+    CkBtcUtxo,
+    CkEthErc20,
+    CkSol,
+}
+
+/// Candid mirror of the canister's `CurrencyDescriptor` (M0 catalog). Principals decode as
+/// `candid::Principal`; the trait impl round-trips each through `.to_text()` into the relay's
+/// JSON-shaped [`CurrencyDescriptor`].
+#[derive(CandidType, Deserialize, Debug)]
+struct CurrencyDescriptorMirror {
+    currency: u32,
+    ledger: Principal,
+    mintable: bool,
+    minter: Option<Principal>,
+    minter_family: Option<MinterFamilyMirror>,
+    symbol: Option<String>,
+    decimals: Option<u8>,
 }
 
 /// A [`Ledger`] backed by a real IC replica. Owns an [`Agent`] pointed at the replica/gateway URL
@@ -401,6 +425,37 @@ impl Ledger for AgentLedger {
             deposit_fee: m.deposit_fee,
             deposit_min_amount: m.deposit_min_amount,
         })
+    }
+
+    async fn currencies(&self) -> Result<Vec<CurrencyDescriptor>, LedgerError> {
+        // facade `currencies() -> vec CurrencyDescriptor` (query). Translate candid mirrors -> the
+        // relay's text-principal serde structs. Errors are `Transient` (canister unreachable); there
+        // is no permanent-policy failure on the catalog surface.
+        let reply = self
+            .agent
+            .query(&self.canister_id, "currencies")
+            .with_arg(encode_args(()).map_err(|e| LedgerError::Transient(format!("encode currencies: {e}")))?)
+            .call()
+            .await
+            .map_err(|e| LedgerError::Transient(format!("currencies query: {e}")))?;
+        let list: Vec<CurrencyDescriptorMirror> =
+            decode_one(&reply).map_err(|e| LedgerError::Transient(format!("decode currencies: {e}")))?;
+        Ok(list
+            .into_iter()
+            .map(|d| CurrencyDescriptor {
+                currency: d.currency,
+                ledger: d.ledger.to_text(),
+                mintable: d.mintable,
+                minter: d.minter.map(|p| p.to_text()),
+                minter_family: d.minter_family.map(|f| match f {
+                    MinterFamilyMirror::CkBtcUtxo => MinterFamily::CkBtcUtxo,
+                    MinterFamilyMirror::CkEthErc20 => MinterFamily::CkEthErc20,
+                    MinterFamilyMirror::CkSol => MinterFamily::CkSol,
+                }),
+                symbol: d.symbol,
+                decimals: d.decimals,
+            })
+            .collect())
     }
 
     async fn withdraw(&self, req: WithdrawRequest) -> Result<WithdrawReceipt, LedgerError> {

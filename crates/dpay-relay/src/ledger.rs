@@ -150,6 +150,45 @@ pub struct WithdrawReceipt {
     pub block_index: u64,
 }
 
+// ---------------------------------------------------------------------------
+// Catalog surface (M0). The canister now exposes `currencies() -> vec
+// CurrencyDescriptor` (query) — the wallet's runtime source of truth for which
+// assets exist and how to display/fund them, closing the hardcoded-
+// `DEPOSIT_CURRENCY` coupling (issue #7). These serde structs are the relay's
+// JSON shape: principals are TEXT (the candid `principal` is round-tripped
+// through `.to_text()` by the agent impl so the HTTP layer stays plain JSON),
+// and `MinterFamily` is the plain PascalCase variant tag (matches the candid
+// variant label and the JSON string the wallet reads). The agent impl (feature
+// `agent`) translates between these and its candid mirrors.
+// ---------------------------------------------------------------------------
+
+/// The proxy family a ck currency's minter belongs to — drives per-family ramp dispatch in the
+/// wallet. Mirrors the canister's `MinterFamily` candid variant; serialized as the plain variant
+/// name (e.g. `"CkBtcUtxo"`), matching both the candid label and the wallet's JSON contract.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub enum MinterFamily {
+    CkBtcUtxo,
+    CkEthErc20,
+    CkSol,
+}
+
+/// One currency the wallet can hold/fund — the runtime catalog entry. Mirrors the canister's
+/// `CurrencyDescriptor`. `minter` is `Some` only for ck currencies with a registered ramp;
+/// `minter_family`/`symbol`/`decimals` are `None` when unregistered (the wallet falls back).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct CurrencyDescriptor {
+    pub currency: Currency,
+    /// Principal of the currency's ICRC ledger, as canonical TEXT (hex/canonical) — keeps the
+    /// relay's JSON clean and matches how the app consumes it.
+    pub ledger: String,
+    pub mintable: bool,
+    /// Ramp (ck minter) principal as text, when a minter is registered for this currency.
+    pub minter: Option<String>,
+    pub minter_family: Option<MinterFamily>,
+    pub symbol: Option<String>,
+    pub decimals: Option<u8>,
+}
+
 /// Settlement outcome. `Rejected` is a permanent policy failure (bad sig, expired, over cap,
 /// insufficient funds, reused nonce, malformed wire) — the relay must NOT retry it and surfaces
 /// it as `422`. `Transient` is an infrastructure hiccup (e.g. the agent/canister was briefly
@@ -251,6 +290,12 @@ pub trait Ledger: Send + Sync {
 
     /// Static deposit instructions for `currency` (min confirmations, fee, min amount).
     async fn deposit_info(&self, currency: Currency) -> Result<DepositInfo, LedgerError>;
+
+    /// The full currency catalog — the wallet's runtime source of truth for which assets exist and
+    /// how to display/fund them (closes the hardcoded-`DEPOSIT_CURRENCY` coupling). Joins the
+    /// canister's LEDGERS + MINTERS + CURRENCY_META. Unauthenticated (catalog only — no balances).
+    /// Impl errors are `Transient` (an unreachable canister); there is no permanent-policy failure.
+    async fn currencies(&self) -> Result<Vec<CurrencyDescriptor>, LedgerError>;
 
     /// Withdraw ckBTC to a native BTC address on a VERIFIED user signature. The request carries the
     /// [`WithdrawAuth`] fields + the Ed25519 signature (hex); the ledger verifies the signature under
@@ -410,6 +455,36 @@ impl FakeLedger {
         let mut s = self.state.lock().unwrap();
         *s.pending_deposits.entry((pubkey, currency)).or_insert(0) += amount;
     }
+}
+
+/// The catalog the offline FakeLedger reports — mirrors a demo deployment: DEMO_USD (currency 0,
+/// mintable, the `$` faucet asset) + ckBTC (currency 1, the deposit/withdraw ramp asset). The
+/// principal text values are the canonical management/anon/minter stand-ins the demo uses (`aaaaa-aa`
+/// = the mgmt canister, `2vxsx-fae` = the anonymous principal, `mqygn-kiaaa-aaaar-qaadq-cai` = the
+/// live ckBTC minter); the wallet only reads `currency`/`symbol`/`decimals`/`minter_family` for
+/// display. Hardcoded as TEXT (not built via `candid::Principal`) because `candid` is feature-gated
+/// to `agent` and `ledger.rs` ships in the lean offline build.
+fn fake_catalog() -> Vec<CurrencyDescriptor> {
+    vec![
+        CurrencyDescriptor {
+            currency: DEMO_USD,
+            ledger: "aaaaa-aa".to_string(), // management canister text
+            mintable: true,
+            minter: None,
+            minter_family: None,
+            symbol: Some("$".into()),
+            decimals: Some(2),
+        },
+        CurrencyDescriptor {
+            currency: 1, // ckBTC-shaped deposit currency
+            ledger: "2vxsx-fae".to_string(), // anonymous principal text
+            mintable: false,
+            minter: Some("mqygn-kiaaa-aaaar-qaadq-cai".to_string()),
+            minter_family: Some(MinterFamily::CkBtcUtxo),
+            symbol: Some("₿".into()),
+            decimals: Some(8),
+        },
+    ]
 }
 
 /// Map a `dpay_core::PayError` (or codec failure) to the relay's rejection string. All of these
@@ -590,6 +665,10 @@ impl Ledger for FakeLedger {
             deposit_fee: 0,
             deposit_min_amount: Some(0),
         })
+    }
+
+    async fn currencies(&self) -> Result<Vec<CurrencyDescriptor>, LedgerError> {
+        Ok(fake_catalog())
     }
 
     /// Withdraw ckBTC to a native BTC address. Mirrors the canister's `withdraw` settlement EXACTLY
@@ -788,6 +867,12 @@ impl<L: Ledger> Ledger for FlakyLedger<L> {
 
     async fn deposit_info(&self, currency: Currency) -> Result<DepositInfo, LedgerError> {
         self.inner.deposit_info(currency).await
+    }
+
+    async fn currencies(&self) -> Result<Vec<CurrencyDescriptor>, LedgerError> {
+        // Clean passthrough: FlakyLedger only injects transients into `pay` (the retry path under
+        // test); the catalog surface delegates unchanged, mirroring deposit/balance delegation.
+        self.inner.currencies().await
     }
 
     async fn withdraw(&self, req: WithdrawRequest) -> Result<WithdrawReceipt, LedgerError> {

@@ -826,6 +826,11 @@ impl Ledger for DepositFailingLedger {
     async fn deposit_info(&self, _c: Currency) -> Result<DepositInfo, LedgerError> {
         Err(LedgerError::Transient("injected deposit failure".into()))
     }
+    async fn currencies(
+        &self,
+    ) -> Result<Vec<dpay_relay::CurrencyDescriptor>, LedgerError> {
+        self.inner.currencies().await
+    }
     async fn receipt_pubkey(&self) -> Result<Vec<u8>, LedgerError> {
         self.inner.receipt_pubkey().await
     }
@@ -860,6 +865,52 @@ async fn deposit_routes_map_ledger_transient_to_503() {
 
     // No deposit was credited — a failing refresh mints nothing.
     assert_eq!(inner.balance_of(&b, DEMO_USD), BAL_B, "transient refresh must not mint");
+}
+
+// --- currency catalog (M0) ---------------------------------------------------
+//
+// Covers GET /api/v1/currencies — the wallet's runtime asset catalog (closes issue #7). The
+// FakeLedger reports a demo deployment: DEMO_USD (currency 0, $, mintable, no ramp) + a ckBTC-shaped
+// currency (1, ₿, with a CkBtcUtxo ramp). The wallet reads this once on load instead of hardcoding
+// DEPOSIT_CURRENCY.
+
+/// `GET /api/v1/currencies` returns `200 {"currencies": [...]}` with every registered currency's
+/// ledger/minter/display metadata. Mirrors how the wallet consumes the catalog on load.
+#[tokio::test]
+async fn currencies_route_returns_demo_catalog() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+
+    let (status, body) = call(&state, get_req("/api/v1/currencies")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let rows = body["currencies"].as_array().expect("currencies array");
+    assert_eq!(rows.len(), 2, "demo catalog = DEMO_USD + ckBTC: {body}");
+
+    // DEMO_USD (currency 0): the mintable $ faucet asset, no ramp.
+    let dusd = rows
+        .iter()
+        .find(|r| r["currency"] == 0)
+        .expect("DEMO_USD present");
+    assert_eq!(dusd["mintable"], true);
+    assert_eq!(dusd["symbol"], "$");
+    assert_eq!(dusd["decimals"], 2);
+    assert_eq!(dusd["minter"], serde_json::Value::Null);
+    assert_eq!(dusd["minter_family"], serde_json::Value::Null);
+    assert!(!dusd["ledger"].as_str().unwrap().is_empty(), "ledger principal text present");
+
+    // ckBTC-shaped (currency 1): the deposit/withdraw ramp asset — CkBtcUtxo family, ₿, 8 decimals.
+    let ckbtc = rows
+        .iter()
+        .find(|r| r["currency"] == 1)
+        .expect("ckBTC-shaped currency present");
+    assert_eq!(ckbtc["mintable"], false);
+    assert_eq!(ckbtc["symbol"], "₿");
+    assert_eq!(ckbtc["decimals"], 8);
+    // The variant serializes as the plain PascalCase tag (matches the candid label + wallet contract).
+    assert_eq!(ckbtc["minter_family"], "CkBtcUtxo");
+    assert!(!ckbtc["minter"].as_str().unwrap().is_empty(), "ramp minter principal text present");
 }
 
 // --- withdrawal surface (ckBTC → native BTC out; W2) -----------------------------------------

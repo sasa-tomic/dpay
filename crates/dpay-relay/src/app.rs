@@ -21,6 +21,8 @@
 //!   what landed + what's still pending (proxies the facade → ck minter `update_balance`).
 //! - `GET  /api/v1/deposit/info?currency=N` — static deposit instructions (min confirmations, fee,
 //!   min amount) so the sheet can render before showing the address.
+//! - `GET  /api/v1/currencies` — the wallet's runtime asset catalog (closes issue #7): every
+//!   registered currency with its ledger/minter/display metadata; read once on wallet load.
 //!
 //! The three deposit routes map **any** `LedgerError` to `503` — there is no `422` path, because the
 //! deposit proxy has no permanent-policy failure (no sig, no cap, no replay); see deposit plan §0.
@@ -41,7 +43,10 @@ use serde::{Deserialize, Serialize};
 
 use dpay_core::{Currency, SignedAuthorization, DEMO_USD, NONCE_LEN, PUBKEY_LEN};
 
-use crate::ledger::{Ledger, LedgerError, MintedUtxo, PendingUtxo, Receipt, TxnRecord, WithdrawReceipt};
+use crate::ledger::{
+    CurrencyDescriptor, Ledger, LedgerError, MintedUtxo, PendingUtxo, Receipt, TxnRecord,
+    WithdrawReceipt,
+};
 
 /// Retry policy for transient ledger errors (idempotency makes retries safe).
 const MAX_ATTEMPTS: u32 = 3;
@@ -123,6 +128,7 @@ pub fn app(state: AppState) -> Router {
         .route("/deposit/address/{hex}", get(deposit_address))
         .route("/deposit/refresh/{hex}", post(deposit_refresh))
         .route("/deposit/info", get(deposit_info))
+        .route("/currencies", get(currencies))
         .route("/health", get(health))
         .route("/version", get(version));
 
@@ -333,6 +339,17 @@ async fn deposit_info(State(state): State<AppState>, Query(qs): Query<BalanceQue
             deposit_min_amount: i.deposit_min_amount,
         }))
             .into_response(),
+        Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
+    }
+}
+
+/// `GET /api/v1/currencies` → `200 {"currencies": [...]}`. The wallet's runtime asset catalog
+/// (closes issue #7): read once on wallet load and cached. No query params; unauthenticated (catalog
+/// only — no balances). Mirrors the deposit routes' error mapping: any ledger error is `503` (there
+/// is no permanent-policy failure on this surface).
+async fn currencies(State(state): State<AppState>) -> Response {
+    match state.ledger.currencies().await {
+        Ok(list) => (StatusCode::OK, Json(CurrenciesBody { currencies: list })).into_response(),
         Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
     }
 }
@@ -550,6 +567,12 @@ struct DepositInfoBody {
     min_confirmations: u32,
     deposit_fee: u64,
     deposit_min_amount: Option<u64>,
+}
+
+/// `GET /api/v1/currencies` response body — the wallet's runtime asset catalog (closes issue #7).
+#[derive(Serialize)]
+struct CurrenciesBody {
+    currencies: Vec<CurrencyDescriptor>,
 }
 
 /// `POST /api/v1/withdraw` response body — the withdrawal receipt (echoes the authorization + the
