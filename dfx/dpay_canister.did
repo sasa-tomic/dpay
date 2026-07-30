@@ -1,3 +1,14 @@
+type DepositInfo = record {
+  deposit_min_amount : opt nat64;
+  min_confirmations : nat32;
+  deposit_fee : nat64;
+};
+type DepositRefresh = record {
+  pending : vec PendingUtxo;
+  minted : vec MintedUtxo;
+  required_confirmations : nat32;
+  minted_total : nat64;
+};
 type InitArg = record {
   controller : opt principal;
   ledgers : vec LedgerConfig;
@@ -8,21 +19,45 @@ type LedgerConfig = record {
   mintable : bool;
   currency : nat32;
 };
+type MintedUtxo = record { block_index : nat; amount : nat64 };
 type PayReceipt = record {
   to : blob;
+  block_index : nat64;
   from : blob;
+  receipt_sig : blob;
+  pubkey : blob;
   nonce : blob;
   amount : nat64;
   new_from_balance : nat64;
+  settle_ts : nat64;
+};
+type PendingUtxo = record { confirmations : nat64; value : nat64 };
+type ReceiptView = record {
+  to : blob;
+  block_index : nat64;
+  from : blob;
+  receipt_sig : blob;
+  pubkey : blob;
+  currency : nat32;
+  nonce : blob;
+  amount : nat64;
+  settle_ts : nat64;
+};
+type ReconcileReport = record {
+  blocks_scanned : nat64;
+  currency : nat32;
+  orphans_repaired : nat64;
 };
 type Result = variant { Ok : nat64; Err : text };
-type Result_1 = variant { Ok : PayReceipt; Err : text };
-type Result_2 = variant { Ok : principal; Err : text };
-type Result_3 = variant { Ok; Err : text };
-type Result_4 = variant { Ok : nat; Err : text };
-type Result_5 = variant { Ok : text; Err : text };
-type Result_6 = variant { Ok : DepositRefresh; Err : text };
-type Result_7 = variant { Ok : DepositInfo; Err : text };
+type Result_1 = variant { Ok : text; Err : text };
+type Result_2 = variant { Ok : DepositInfo; Err : text };
+type Result_3 = variant { Ok : blob; Err : text };
+type Result_4 = variant { Ok : PayReceipt; Err : text };
+type Result_5 = variant { Ok : principal; Err : text };
+type Result_6 = variant { Ok : ReconcileReport; Err : text };
+type Result_7 = variant { Ok : DepositRefresh; Err : text };
+type Result_8 = variant { Ok; Err : text };
+type Result_9 = variant { Ok : nat; Err : text };
 type TxnView = record {
   to : blob;
   from : blob;
@@ -30,30 +65,6 @@ type TxnView = record {
   nonce : blob;
   timestamp : nat64;
   amount : nat64;
-};
-// --- ck-minter deposit proxy (ckBTC model) ----------------------------------------------------
-// The facade proxies a chain-key minter; the mint lands on the currency's ICRC ledger at exactly the
-// account `pay`/`balance_of` use, so this surface changes nothing about settlement or balance. The
-// mirror types used to decode the real minter's replies stay internal to the canister (not exposed
-// here) — only the normalized surface shapes below are part of the public candid.
-type DepositInfo = record {
-  min_confirmations : nat32;
-  deposit_fee : nat64;
-  deposit_min_amount : opt nat64;
-};
-type MintedUtxo = record {
-  block_index : nat;
-  amount : nat64;
-};
-type PendingUtxo = record {
-  value : nat64;
-  confirmations : nat64;
-};
-type DepositRefresh = record {
-  minted : vec MintedUtxo;
-  minted_total : nat64;
-  pending : vec PendingUtxo;
-  required_confirmations : nat32;
 };
 service : (InitArg) -> {
   // `balance_of(blob, nat32) -> nat64` — now a **query** returning the display-only cache. The cache
@@ -69,11 +80,25 @@ service : (InitArg) -> {
   // `(blob pubkey, nat32 currency) -> Result<text, text>`. Proxies the minter's `get_btc_address` —
   // the user's native deposit address for the currency. No auth: a deposit address is not secret
   // (revealing it only lets someone send *to* the user), and minter methods are permissionless. Bad
-  // pubkey length is rejected up front.
-  deposit_address : (blob, nat32) -> (Result_5);
+  // pubkey length is rejected up front via `to_pubkey`.
+  deposit_address : (blob, nat32) -> (Result_1);
   // `(nat32 currency) -> Result<DepositInfo, text>`. Combines the minter's `get_minter_info` and
   // `get_deposit_fee` into the normalized deposit parameters the app renders as instructions.
-  deposit_info : (nat32) -> (Result_7);
+  deposit_info : (nat32) -> (Result_2);
+  // `(blob account, nat32 currency) -> Result<nat64, text>` — the self-service demo on-ramp. Mints
+  // a FIXED [`FAUCET_AMOUNT`] ($100.00) of a mintable currency to `account`, rate-limited per
+  // (account, currency) via [`FAUCET_COOLDOWN`] (one mint per [`FAUCET_COOLDOWN_SECS`] window). No
+  // admin gate — this is the path the relay's `/faucet` route calls so a freshly-onboarded wallet can
+  // fund itself without the controller. The privileged [`mint`] (arbitrary amount) stays
+  // controller-only; the faucet always mints the fixed constant, so a client cannot print unbounded
+  // funds. Refreshes the display cache from the authoritative ledger post-mint and returns the new
+  // balance (matching the `Ledger::faucet` contract the relay surfaces as `{balance}`).
+  faucet : (blob, nat32) -> (Result);
+  // `() -> Result<blob, text>` — eagerly generate the receipt keypair (idempotent) and return the
+  // public key. Self-service: generating the canister's OWN signing identity moves no value, so any
+  // caller may trigger it (an operator/relay calls it once post-deploy so the pubkey is available
+  // before any `pay`). The key, once generated, is never rotated.
+  init_receipt_key : () -> (Result_3);
   // `mint(blob, nat32, nat64) -> Result<nat64, text>` — fund a user on a MINTABLE (demo) currency by
   // transferring from the ledger's minting account (which this canister owns). Real ck currencies are
   // not mintable. Refreshes the display cache from the authoritative ledger post-settle. Gated to the
@@ -81,7 +106,7 @@ service : (InitArg) -> {
   mint : (blob, nat32, nat64) -> (Result);
   // Settle an offline-signed authorization. Same candid signature as the pre-facade canister's `pay`;
   // balances are moved on the ICRC ledger named by the payment's currency, not here.
-  pay : (blob) -> (Result_1);
+  pay : (blob) -> (Result_4);
   per_tx_cap : () -> (nat64) query;
   // Provision a fresh canister that carries `cycles` of THIS canister's cycle balance, with
   // `controller` as its sole controller, and return its id. Gated to operator callers (the fixed
@@ -89,26 +114,49 @@ service : (InitArg) -> {
   // the deploy identity has no cycles wallet, so the only way to spend the canister's cycles is for
   // its own code to attach them to a management-canister call. This canister is NOT made a controller
   // of the new canister — it spends the cycles and is done — so the non-custodial posture is intact.
-  provision_ledger_canister : (principal, nat) -> (Result_2);
+  provision_ledger_canister : (principal, nat) -> (Result_5);
+  // `(blob nonce) -> opt ReceiptView` — the canister-signed receipt for a settled payment, looked up
+  // by its nonce. Returns `null` if that nonce never settled (or settled before this canister version
+  // introduced signed receipts). The payer verifies `receipt_sig` over the canonical
+  // `ReceiptClaim{nonce, from, to, amount, currency, block_index, settle_ts}` under `pubkey`
+  // (== `receipt_pubkey`) before trusting the outcome — defeating a merchant/relay that lies about it.
+  receipt : (blob) -> (opt ReceiptView) query;
+  // `() -> opt blob` — the canister's receipt Ed25519 public key (32 bytes), or `null` if the key
+  // has not been generated yet (no successful `pay` and no `init_receipt_key` call). A payer fetches
+  // this once and verifies receipt signatures against it.
+  receipt_pubkey : () -> (opt blob) query;
+  // `(nat32 currency) -> Result<ReconcileReport, text>` — walk the currency's recent ledger
+  // transactions and repair any facade-account debit whose nonce is missing from SPENT (the post-trap
+  // orphan state). Controller-only. Idempotent: re-running on already-consistent state repairs nothing.
+  // 
+  // Match rule: a `transfer` whose `from.owner == canister_self()`, `from.subaccount == Some(pk)`,
+  // and whose `memo` is a 16-byte nonce — exactly the shape `pay` produces. Mint/burn use the minting
+  // account (subaccount `None`) or carry no nonce memo, so they are not matched. Each repair inserts
+  // the nonce into SPENT (so a retry is a duplicate) and records the txn (so history reflects it).
+  reconcile : (nat32) -> (Result_6);
   // `(blob pubkey, nat32 currency) -> Result<DepositRefresh, text>`. Proxies the minter's
   // `update_balance` — the value-creating call that mints confirmed UTXOs onto the currency's ledger
   // at `Account{owner: canister_self(), subaccount: pubkey}`. No auth: idempotent and safe to call by
-  // anyone (a no-op when no confirmed UTXOs exist). `Ok` -> minted list + total; `NoNewUtxos` -> empty
-  // minted + pending; other minter errors surface as `Err`.
-  refresh_deposit : (blob, nat32) -> (Result_6);
+  // anyone (a no-op when no confirmed UTXOs exist). `Ok(statuses)` -> minted list + total, empty
+  // pending; `Err(NoNewUtxos{..})` -> empty minted + pending mapped from the error; the remaining
+  // minter errors surface as `Err(String)`.
+  refresh_deposit : (blob, nat32) -> (Result_7);
   // Register or replace the ledger for a currency at runtime. Gated to the controller in production
   // (open only when `controller` is unset, i.e. the demo).
-  register_ledger : (nat32, principal, bool) -> (Result_3);
-  // Register or replace the ck-minter principal for a currency at runtime. Same controller gating as
-  // `register_ledger`. A currency need not have a minter (only ck currencies do); absence means the
-  // facade exposes no deposit path for it.
-  register_minter : (nat32, principal) -> (Result_3);
-  // Rotate the governance principal for `mint`/`burn`/`register_ledger`/`set_controller`. Governed by
-  // the current controller: in open-demo mode (no controller set) any caller may set one — which is
-  // how a fresh deployment is locked down; once a controller is set, only it can rotate. (This gates
+  register_ledger : (nat32, principal, bool) -> (Result_8);
+  // Register or replace the ck-minter principal for a currency at runtime. Gated to the controller in
+  // production (open only when `controller` is unset, i.e. the demo). A currency need not have a minter
+  // (only ck currencies do); absence means the facade exposes no deposit path for it.
+  register_minter : (nat32, principal) -> (Result_8);
+  // Rotate (or, from open/demo mode, set the first) governance principal for `mint`/`burn`/
+  // `register_ledger`/`register_minter`/`reconcile`/`set_controller`. Governed by
+  // [`require_controller_rotation`]: in open-demo mode (no controller set) any caller may set the
+  // first controller — the one-time lockdown path; once a controller is set, only it can rotate
+  // (two-step rotation). The PRODUCTION path is to seed a governed principal at `init`
+  // (`InitArg::controller`) so the canister never runs in open mode against an adversary. (This gates
   // admin *methods* only. The IC-level canister controller — who can `install_code`/upgrade — is a
-  // separate concern set via `dfx`/NNS/SNS.)
-  set_controller : (opt principal) -> (Result_3);
+  // separate concern set via `dfx`/NNS/SNS; see docs/GOVERNANCE.md.)
+  set_controller : (opt principal) -> (Result_8);
   // Newest-first history for a (pubkey, currency) pair. O(limit): the underlying `range` iterator is
   // double-ended, so `.rev().take(limit)` walks from the newest end and stops early — it does NOT
   // materialize the whole history. `limit == 0` returns no rows.
@@ -124,5 +172,5 @@ service : (InitArg) -> {
   // never traps. A request at/above the LIQUID cycle balance returns `Err` (the management canister is
   // the authority on liquid cycles — no CDK API exposes liquid balance) — retry with a smaller amount.
   // Returns the amount actually transferred so the caller can confirm.
-  transfer_cycles : (principal, nat) -> (Result_4);
+  transfer_cycles : (principal, nat) -> (Result_9);
 }
