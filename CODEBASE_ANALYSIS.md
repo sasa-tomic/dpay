@@ -2,7 +2,7 @@
 
 > **Living document.** This is a structural analysis of the dpay codebase — architecture health, where the design earns its keep, and risks to flag before a coding session. It is maintained alongside the code: when a change materially affects anything stated here (a risk resolved, a new surface added, an invariant changed), update this file in the same change.
 >
-> Last reviewed: see `git log` for this file. Scope: everything under the workspace (`dpay-core`, `dpay-canister`, `dpay-canister-tests`, `dpay-mock-minter` [test-only], `dpay-relay`, `dpay-ffi`, `dpay-sim`, `dpay-fixture`, `ui/`, `app/`).
+> Last reviewed: see `git log` for this file. Scope: everything under the workspace (`dpay-core`, `dpay-canister`, `dpay-canister-tests`, `dpay-mock-minter` [test-only], `dpay-relay`, `dpay-ffi`, `dpay-sim`, `dpay-fixture`, `e2e/`, `app/`). (The old `ui/` parallel-component harness is deleted — `e2e/` now drives the real app.)
 
 ## Architecture health: strong
 
