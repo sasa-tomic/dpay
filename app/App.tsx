@@ -170,10 +170,6 @@ const POLL = (() => {
     receiptRcv: t?.receiptRcv ?? 1500,
   };
 })();
-// Min withdrawal in sats — mirrors the live ckBTC minter's `retrieve_btc_min_amount` (50_000), the
-// canister's RETRIEVE_BTC_MIN_AMOUNT, and the relay's. Single-sourced value; the sheet pre-checks so
-// the user never signs a below-min authorization the facade would reject.
-const WITHDRAW_MIN_SATS = 50_000;
 const WITHDRAW_TIMEOUT_MS = 8000; // bound the /withdraw POST (every new fetch has a timeout)
 const WITHDRAW_EXPIRY_WINDOW = 600; // the signed WithdrawAuth is valid 10 min
 type DepositInfo = {min_confirmations: number; deposit_fee: number; deposit_min_amount: number | null};
@@ -235,13 +231,36 @@ async function fetchCurrencies(relayUrl: string, prior: CurrencyDescriptor[]): P
   } catch { return prior; } finally { clearTimeout(t); }
 }
 
-// Format satoshis as BTC (8 decimals), e.g. 12345 -> "0.00012345 BTC". Parallel to usd(cents).
-const btc = (sats: number) => {
-  const n = Math.max(0, Math.floor(sats));
-  const whole = Math.floor(n / 1e8);
-  const frac = String(n % 1e8).padStart(8, '0');
-  return `${whole}.${frac} BTC`;
+// Per-minter-family display + rail config. Single-sources the old per-asset literals
+// (DEPOSIT_NETWORK/DEPOSIT_ASSET/BTC_BLOCK_MIN/WITHDRAW_MIN_SATS): every asset of a given family
+// shares the same native chain, so the chain/rail metadata lives HERE keyed by minter_family, not
+// per-currency and not hardcoded inside the sheets. Adding a new family (e.g. CkEthErc20) = one entry.
+type FamilyDisplay = {
+  networkLabel: string;       // chain name shown in instructions + the asset card label ('Bitcoin')
+  nativeAsset: string;        // the asset the user sends on that chain; also the amount-unit suffix ('BTC')
+  blockMin: number;           // avg native-chain block time (min) → est. time-to-credit
+  withdrawMinRaw: number;     // raw smallest-unit floor for offramp (mirrors the minter's min)
+  amountDecimals: number;     // decimal count for amount formatting (BTC=8)
+  addressPlaceholder: string; // native-chain address placeholder ('bc1q…')
 };
+const FD_CKBTC: FamilyDisplay = {
+  networkLabel: 'Bitcoin', nativeAsset: 'BTC', blockMin: 10,
+  withdrawMinRaw: 50_000, amountDecimals: 8, addressPlaceholder: 'bc1q…',
+};
+const FAMILY_DISPLAY: Partial<Record<MinterFamily, FamilyDisplay>> = {CkBtcUtxo: FD_CKBTC};
+// Resolve a currency's family display from the catalog; falls back to the ckBTC config so the flows
+// always render (the catalog guarantees the CkBtcUtxo entry carries its family).
+function familyDisplay(catalog: CurrencyDescriptor[], currency: number): FamilyDisplay {
+  const f = catalog.find(c => c.currency === currency)?.minter_family ?? null;
+  return (f ? FAMILY_DISPLAY[f] : null) ?? FD_CKBTC;
+}
+// Format raw smallest-units as a decimal amount + unit suffix (e.g. sats → "0.00012345 BTC").
+// Generalizes the old btc() so any family's amounts render from its config — no per-asset literals.
+function fmtAsset(raw: number, decimals: number, unit: string): string {
+  const n = Math.max(0, Math.floor(raw));
+  const div = 10 ** decimals;
+  return `${Math.floor(n / div)}.${String(n % div).padStart(decimals, '0')} ${unit}`;
+}
 
 // Relay deposit client — same fetch style as the inline balance/faucet/pay calls (AbortController
 // optional, errors thrown to the caller). Co-located here to match the existing pattern.
@@ -284,13 +303,6 @@ async function withdrawFunds(relayUrl: string, accountHex: string, btcAddress: s
 // Parse a user-entered BTC amount (decimal string) into integer satoshis. Mirrors `toCents` for `$`.
 // NaN/negative → 0; the sheet gates the review on > 0 + >= the min withdrawal floor.
 function toSats(s: string): number { const n = Math.round(parseFloat(s || '0') * 1e8); return Number.isFinite(n) && n > 0 ? n : 0; }
-
-// Deposit copy is single-sourced per chain. ckBTC deposits come in on the Bitcoin network as BTC;
-// surfaced ONLY in the deposit instructions (the deposit asset/network, never the wallet balance,
-// which always shows `$`). Honest ranges where the minter omits them.
-const DEPOSIT_NETWORK = 'Bitcoin';   // the native chain a ck-deposit lands on (BTC for ckBTC)
-const DEPOSIT_ASSET = 'BTC';         // the asset the user sends on that chain
-const BTC_BLOCK_MIN = 10;            // avg Bitcoin block time in minutes → est. time-to-credit
 
 /**
  * Copy `text` to the system clipboard when available; otherwise fall back to the platform share
@@ -543,6 +555,11 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
     () => catalog.find(c => c.minter_family === 'CkBtcUtxo')?.currency ?? 1,
     [catalog],
   );
+  // The ckBTC asset's chain/rail display config (network label, native asset symbol, block time, min
+  // withdrawal, decimals) — resolved from the catalog's minter_family. Drives the deposit + withdraw
+  // sheets + the asset card so none of them hardcode chain-specific literals (single-sourced in
+  // FAMILY_DISPLAY). Falls back to FD_CKBTC before the catalog loads.
+  const ckBtcDisplay = familyDisplay(catalog, ckBtcCurrency);
 
   // Read the device NFC radio state once (re-checked when the app returns to the foreground, since
   // the user may toggle NFC in system settings). Purely informational for the status chip; failure
@@ -697,9 +714,12 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
           </View>
           <View style={S.balAmtRow}>
             <Text testID="balance" style={S.balAmt}>{shownBalance == null ? '—' : `${online ? '' : '~'}${usd(shownBalance)}`}</Text>
-            {/* The PRIMARY funding affordance: a real chain-key deposit (ckBTC). Promoted from a
-                jargon "ckBTC" pill to a clear "Add money" button so topping up is the obvious next
-                action. Opens DepositSheet. The demo faucet ($100 play money) moved to Settings. */}
+            {/* The PRIMARY onramp affordance: a real chain-key deposit. Opens the deposit flow for the
+                catalog-resolved CkBtcUtxo asset. The offramp ("Cash out") lives on the asset card — it's
+                contextual (only meaningful when you hold a cashable asset), so it appears exactly when a
+                topped-up balance exists, and is absent for demo-$-only wallets that have nothing to cash
+                out. A 390px header can't hold the balance + two action buttons without overflow, so the
+                single "Add money" pill stays here and "Cash out" rides the asset card. */}
             <Pressable testID="btn-deposit" style={S.addMoneyBtn} onPress={() => setDepositOpen(true)}>
               <Text style={S.addMoneyBtnText}>＋ Add money</Text>
             </Pressable>
@@ -718,20 +738,18 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
           : <ReceiveMode identity={identity} relayUrl={relayUrl} nfcReady={nfc === 'ready'} onReceived={onActivity} />}
         {/* ckBTC asset card — a SEPARATE asset (currency 1), shown only when non-zero so a topped-up
             wallet keeps its credited Bitcoin VISIBLE after the deposit sheet closes. Deliberately
-            distinct from the `$` header (DEMO_USD): different label, BTC units, its own card. This
-            is the asset affordance CLAUDE.md permits; the primary `$` balance stays clean. The
-            "Bitcoin" label matches the deposit instructions' network/asset name. */}
+            distinct from the `$` header (DEMO_USD): the family's network label + native-asset units,
+            its own card. The "Cash out" affordance matches the header button (money OUT, non-custodial
+            on-device sig); shown only when there's a balance to cash out. */}
         {ckBtcBalance != null && ckBtcBalance > 0 ? (
           <View testID="asset-ckbtc" style={S.assetCard}>
             <View style={S.assetRow}>
-              <Text style={S.assetLabel}>Bitcoin</Text>
-              <Text style={S.assetAmt}>{btc(ckBtcBalance)}</Text>
+              <Text style={S.assetLabel}>{ckBtcDisplay.networkLabel}</Text>
+              <Text style={S.assetAmt}>{fmtAsset(ckBtcBalance, ckBtcDisplay.amountDecimals, ckBtcDisplay.nativeAsset)}</Text>
             </View>
-            <Text style={S.assetSub}>your deposited Bitcoin · spendable where a merchant requests it</Text>
-            {/* Withdraw affordance: moves ckBTC OUT to a native BTC address on a verified on-device
-                signature (non-custodial). Shown only when there's a ckBTC balance to withdraw. */}
+            <Text style={S.assetSub}>{`your deposited ${ckBtcDisplay.networkLabel} · spendable where a merchant requests it`}</Text>
             <Pressable testID="btn-withdraw" style={S.withdrawLink} onPress={() => setWithdrawOpen(true)}>
-              <Text style={S.withdrawLinkText}>Withdraw</Text>
+              <Text style={S.withdrawLinkText}>Cash out</Text>
             </Pressable>
           </View>
         ) : null}
@@ -756,13 +774,14 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
       </View>
 
       {depositOpen ? (
-        <DepositSheet identity={identity} relayUrl={relayUrl} currency={ckBtcCurrency} onClose={() => setDepositOpen(false)} />
+        <DepositSheet identity={identity} relayUrl={relayUrl} currency={ckBtcCurrency} display={ckBtcDisplay} onClose={() => setDepositOpen(false)} />
       ) : null}
       {withdrawOpen ? (
         <WithdrawSheet
           identity={identity}
           relayUrl={relayUrl}
           currency={ckBtcCurrency}
+          display={ckBtcDisplay}
           ckBtcBalance={ckBtcBalance ?? 0}
           onClose={() => setWithdrawOpen(false)}
           onWithdrawn={onActivity}
@@ -1409,7 +1428,7 @@ function ReceiveMode({identity, relayUrl, nfcReady, onReceived}: {identity: Iden
  * mint lands (minted_total > 0), after which the wallet's balance poll reflects the new ckBTC. The
  * sheet is additive: it never touches the faucet (DEMO_USD) or the Pay/Receive/NFC flows.
  */
-function DepositSheet({identity, relayUrl, currency, onClose}: {identity: Identity; relayUrl: string; currency: number; onClose: () => void}) {
+function DepositSheet({identity, relayUrl, currency, display, onClose}: {identity: Identity; relayUrl: string; currency: number; display: FamilyDisplay; onClose: () => void}) {
   const [info, setInfo] = useState<DepositInfo | null>(null);
   const [address, setAddress] = useState<string | null>(null);
   const [refresh, setRefresh] = useState<DepositRefresh | null>(null);
@@ -1501,16 +1520,16 @@ function DepositSheet({identity, relayUrl, currency, onClose}: {identity: Identi
   const pending = refresh?.pending ?? [];
   // The linear progress cue: best confirmation count among pending UTXOs vs the required count.
   const maxConf = pending.reduce((m, p) => Math.max(m, p.confirmations), 0);
-  const estMin = required > 0 ? required * BTC_BLOCK_MIN : 0;
-  const feeTxt = info ? btc(info.deposit_fee) : null;
-  const minTxt = info?.deposit_min_amount != null ? btc(info.deposit_min_amount) : null;
+  const estMin = required > 0 ? required * display.blockMin : 0;
+  const feeTxt = info ? fmtAsset(info.deposit_fee, display.amountDecimals, display.nativeAsset) : null;
+  const minTxt = info?.deposit_min_amount != null ? fmtAsset(info.deposit_min_amount, display.amountDecimals, display.nativeAsset) : null;
 
   return (
     <View style={S.sheetOverlay}>
       <SafeAreaView style={S.sheet}>
         <StatusBar barStyle="light-content" backgroundColor={C.bg} />
         <View style={S.sheetHead}>
-          <Text style={S.sheetTitle}>Add money</Text>
+          <Text style={S.sheetTitle}>{`Add ${display.networkLabel}`}</Text>
           <Pressable testID="btn-deposit-close" style={S.sheetClose} onPress={onClose}><Text style={S.sheetCloseX}>✕</Text></Pressable>
         </View>
 
@@ -1529,18 +1548,18 @@ function DepositSheet({identity, relayUrl, currency, onClose}: {identity: Identi
             <View style={S.centerAll}>
               <View style={S.check}><Text style={S.checkMark}>✓</Text></View>
               <Text style={S.paidText}>Deposited ✓</Text>
-              <Text style={S.paidSub}>{btc(refresh?.minted_total ?? 0)} minted</Text>
+              <Text style={S.paidSub}>{fmtAsset(refresh?.minted_total ?? 0, display.amountDecimals, display.nativeAsset)} minted</Text>
               <Text style={S.dim2}>Your balance updates automatically.</Text>
             </View>
           ) : (
             <>
               {/* Complete, scannable instructions: network + asset + est. time + fee + min + the
                   one-line non-custody reassurance. All values come from `deposit_info` (never
-                  hardcoded); the network/asset are single-sourced constants. */}
+                  hardcoded); the network/asset are the family's config (FAMILY_DISPLAY). */}
               <View testID="deposit-instructions" style={S.instrCard}>
                 <Text style={S.instrLine}>
-                  Send <Text style={S.instrAsset}>{DEPOSIT_ASSET}</Text> to your{' '}
-                  <Text style={S.instrAsset}>{DEPOSIT_NETWORK}</Text> address below.
+                  Send <Text style={S.instrAsset}>{display.nativeAsset}</Text> to your{' '}
+                  <Text style={S.instrAsset}>{display.networkLabel}</Text> address below.
                 </Text>
                 <Text style={S.instrMeta}>
                   {required > 0 ? `~${required} confirmation${required === 1 ? '' : 's'}` : 'confirmations'}
@@ -1573,7 +1592,7 @@ function DepositSheet({identity, relayUrl, currency, onClose}: {identity: Identi
                 </Text>
                 <Text style={S.depositStatusRow}>
                   {pending.length > 0
-                    ? `${pending.map(p => btc(p.value)).join(', ')} · ${required || '?'} confirmation${required === 1 ? '' : 's'} needed`
+                    ? `${pending.map(p => fmtAsset(p.value, display.amountDecimals, display.nativeAsset)).join(', ')} · ${required || '?'} confirmation${required === 1 ? '' : 's'} needed`
                     : `checking every ${POLL.deposit / 1000}s`}
                 </Text>
               </View>
@@ -1604,7 +1623,7 @@ function DepositSheet({identity, relayUrl, currency, onClose}: {identity: Identi
  * funds. Amounts are shown in BTC (the backing currency symbol — never the wrapper/raw ledger id).
  * Escape closes the sheet (web), matching DepositSheet.
  */
-function WithdrawSheet({identity, relayUrl, currency, ckBtcBalance, onClose, onWithdrawn}: {identity: Identity; relayUrl: string; currency: number; ckBtcBalance: number; onClose: () => void; onWithdrawn: () => void}) {
+function WithdrawSheet({identity, relayUrl, currency, display, ckBtcBalance, onClose, onWithdrawn}: {identity: Identity; relayUrl: string; currency: number; display: FamilyDisplay; ckBtcBalance: number; onClose: () => void; onWithdrawn: () => void}) {
   const [address, setAddress] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
@@ -1614,7 +1633,7 @@ function WithdrawSheet({identity, relayUrl, currency, ckBtcBalance, onClose, onW
   useEscapeToClose(onClose);
 
   const sats = toSats(amountStr);
-  const belowMin = sats > 0 && sats < WITHDRAW_MIN_SATS;
+  const belowMin = sats > 0 && sats < display.withdrawMinRaw;
   const overBalance = sats > ckBtcBalance;
   const canReview = address.trim().length > 0 && sats > 0 && !belowMin && !overBalance;
 
@@ -1652,7 +1671,7 @@ function WithdrawSheet({identity, relayUrl, currency, ckBtcBalance, onClose, onW
       <SafeAreaView style={S.sheet}>
         <StatusBar barStyle="light-content" backgroundColor={C.bg} />
         <View style={S.sheetHead}>
-          <Text style={S.sheetTitle}>Withdraw</Text>
+          <Text style={S.sheetTitle}>{`Cash out ${display.networkLabel}`}</Text>
           <Pressable testID="btn-withdraw-close" style={S.sheetClose} onPress={onClose}><Text style={S.sheetCloseX}>✕</Text></Pressable>
         </View>
 
@@ -1661,7 +1680,7 @@ function WithdrawSheet({identity, relayUrl, currency, ckBtcBalance, onClose, onW
             <View style={S.centerAll}>
               <View style={S.check}><Text style={S.checkMark}>✓</Text></View>
               <Text testID="withdraw-status" style={S.paidText}>Withdrawn ✓</Text>
-              <Text style={S.paidSub}>{btc(receipt.amount)}</Text>
+              <Text style={S.paidSub}>{fmtAsset(receipt.amount, display.amountDecimals, display.nativeAsset)}</Text>
               <Text style={S.dim2}>sent to {receipt.btcAddress}</Text>
               <Text style={S.dim2}>Your balance updates automatically.</Text>
               <Pressable testID="btn-withdraw-done" style={S.linkBtn} onPress={onClose}><Text style={S.linkText}>Done</Text></Pressable>
@@ -1669,26 +1688,26 @@ function WithdrawSheet({identity, relayUrl, currency, ckBtcBalance, onClose, onW
           ) : phase === 'submitting' ? (
             <View style={S.centerAll}>
               <ActivityIndicator color={C.brand} />
-              <Text style={S.dim2}>Withdrawing {btc(sats)}…</Text>
+              <Text style={S.dim2}>{`Withdrawing ${fmtAsset(sats, display.amountDecimals, display.nativeAsset)}…`}</Text>
             </View>
           ) : (
             <>
-              <Text style={S.label}>Send your Bitcoin to a native BTC address</Text>
-              <Text style={S.dim2}>Available: {btc(ckBtcBalance)} · min {btc(WITHDRAW_MIN_SATS)}</Text>
+              <Text style={S.label}>{`Send your ${display.networkLabel} to a native ${display.nativeAsset} address`}</Text>
+              <Text style={S.dim2}>{`Available: ${fmtAsset(ckBtcBalance, display.amountDecimals, display.nativeAsset)} · min ${fmtAsset(display.withdrawMinRaw, display.amountDecimals, display.nativeAsset)}`}</Text>
 
-              <Text style={S.inputLabel}>BTC address</Text>
+              <Text style={S.inputLabel}>{`${display.nativeAsset} address`}</Text>
               <TextInput
                 testID="withdraw-address-input"
                 style={S.withdrawAddrInput}
                 value={address}
                 onChangeText={setAddress}
-                placeholder="bc1q…"
+                placeholder={display.addressPlaceholder}
                 placeholderTextColor={C.sub2}
                 autoCapitalize="none"
                 autoCorrect={false}
               />
 
-              <Text style={S.inputLabel}>Amount (BTC)</Text>
+              <Text style={S.inputLabel}>{`Amount (${display.nativeAsset})`}</Text>
               <TextInput
                 testID="withdraw-amount-input"
                 style={S.withdrawAmtInput}
@@ -1699,13 +1718,13 @@ function WithdrawSheet({identity, relayUrl, currency, ckBtcBalance, onClose, onW
                 placeholderTextColor={C.sub2}
               />
 
-              {belowMin ? <Text style={S.warnNote}>Below the {btc(WITHDRAW_MIN_SATS)} minimum withdrawal.</Text> : null}
-              {overBalance ? <Text style={S.warnNote}>More than your available {btc(ckBtcBalance)}.</Text> : null}
+              {belowMin ? <Text style={S.warnNote}>{`Below the ${fmtAsset(display.withdrawMinRaw, display.amountDecimals, display.nativeAsset)} minimum withdrawal.`}</Text> : null}
+              {overBalance ? <Text style={S.warnNote}>{`More than your available ${fmtAsset(ckBtcBalance, display.amountDecimals, display.nativeAsset)}.`}</Text> : null}
 
               {(phase === 'form' || phase === 'error') && sats > 0 ? (
                 <View testID="withdraw-review" style={S.reviewCard}>
                   <Text style={S.reviewLabel}>Review withdrawal</Text>
-                  <Text testID="withdraw-review-amount" style={S.reviewAmount}>{`Withdraw ${btc(sats)}`}</Text>
+                  <Text testID="withdraw-review-amount" style={S.reviewAmount}>{`Withdraw ${fmtAsset(sats, display.amountDecimals, display.nativeAsset)}`}</Text>
                   <Text style={S.reviewTo}>{`to ${address.trim() || '—'}`}</Text>
                 </View>
               ) : null}
@@ -1717,7 +1736,7 @@ function WithdrawSheet({identity, relayUrl, currency, ckBtcBalance, onClose, onW
                 style={[S.primaryWide, !canReview && S.dim]}
                 disabled={!canReview}
                 onPress={confirm}>
-                <Text style={S.primaryText}>{sats > 0 ? `Withdraw ${btc(sats)}` : 'Enter an amount'}</Text>
+                <Text style={S.primaryText}>{sats > 0 ? `Withdraw ${fmtAsset(sats, display.amountDecimals, display.nativeAsset)}` : 'Enter an amount'}</Text>
               </Pressable>
 
               {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
