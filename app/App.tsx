@@ -87,6 +87,10 @@ type DpayCoreApi = {
   decodeRequest(qr: string): Promise<Req>;
   encodeQr(wireHex: string): Promise<string>;
   verifyWire(wireHex: string): Promise<boolean>;
+  // Sign a withdrawal authorization (ckBTC → native BTC out). Returns the 64-byte Ed25519 sig as hex
+  // over the canonical WithdrawAuth signing bytes. The facade verifies this under from_pubkey (== the
+  // debit subaccount) before moving funds — the non-custodial withdrawal gate.
+  signWithdrawal(secretHex: string, btcAddress: string, amount: number, nonceHex: string, expiry: number, currency: number): Promise<string>;
   // Verify a canister/ledger-signed receipt signature (R2). Returns true iff `receiptSig` (hex) is a
   // valid Ed25519 signature over the canonical ReceiptClaim built from the claim fields, under
   // `pubkey` (hex). The app gates "Paid ✓" on this so the outcome is canister/ledger-authenticated.
@@ -147,6 +151,12 @@ function parseRequestQR(raw: string): {reqB64: string; name: string} {
 // balance/history polls reflect it once confirmed. DEMO_USD (faucet) stays currency 0; ckBTC = 1.
 const DEPOSIT_CURRENCY = 1;
 const DEPOSIT_REFRESH_MS = 10000; // poll /deposit/refresh while the sheet is open
+// Min withdrawal in sats — mirrors the live ckBTC minter's `retrieve_btc_min_amount` (50_000), the
+// canister's RETRIEVE_BTC_MIN_AMOUNT, and the relay's. Single-sourced value; the sheet pre-checks so
+// the user never signs a below-min authorization the facade would reject.
+const WITHDRAW_MIN_SATS = 50_000;
+const WITHDRAW_TIMEOUT_MS = 8000; // bound the /withdraw POST (every new fetch has a timeout)
+const WITHDRAW_EXPIRY_WINDOW = 600; // the signed WithdrawAuth is valid 10 min
 type DepositInfo = {min_confirmations: number; deposit_fee: number; deposit_min_amount: number | null};
 type MintedUtxo = {block_index: string; amount: number};
 type PendingUtxo = {value: number; confirmations: number};
@@ -178,6 +188,29 @@ async function depositRefresh(relayUrl: string, accountHex: string, currency: nu
   if (!r.ok) throw new Error(`deposit/refresh ${r.status}`);
   return r.json();
 }
+
+// Withdraw a ckBTC balance to a native BTC address. The app signs the WithdrawAuth on-device (the
+// sig is the non-custodial gate); the relay forwards to the facade's `withdraw`. Returns the burn
+// receipt (block_index). Errors throw with the status so the sheet can surface a decline vs offline.
+type WithdrawReceipt = {from: string; btc_address: string; amount: number; nonce: string; currency: number; block_index: number};
+async function withdrawFunds(relayUrl: string, accountHex: string, btcAddress: string, amountSats: number, nonceHex: string, expiry: number, currency: number, sigHex: string, signal?: AbortSignal): Promise<WithdrawReceipt> {
+  const r = await fetch(`${base(relayUrl)}/api/v1/withdraw`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({from: accountHex, btc_address: btcAddress, amount: amountSats, nonce: nonceHex, expiry, currency, sig: sigHex}),
+    signal,
+  });
+  const j = await r.json().catch(() => ({} as any));
+  if (r.ok && j?.receipt) {
+    return j.receipt as WithdrawReceipt;
+  }
+  // A 422 carries a policy error (bad sig / expired / below min / insufficient / nonce reused); a
+  // 503 is a transient ledger hiccup. Surface the body's error string so the sheet can show WHY.
+  throw new Error(typeof j?.error === 'string' ? j.error : `withdraw ${r.status}`);
+}
+
+// Parse a user-entered BTC amount (decimal string) into integer satoshis. Mirrors `toCents` for `$`.
+// NaN/negative → 0; the sheet gates the review on > 0 + >= the min withdrawal floor.
+function toSats(s: string): number { const n = Math.round(parseFloat(s || '0') * 1e8); return Number.isFinite(n) && n > 0 ? n : 0; }
 
 // Deposit copy is single-sourced per chain. ckBTC deposits come in on the Bitcoin network as BTC;
 // surfaced ONLY in the deposit instructions (the deposit asset/network, never the wallet balance,
@@ -397,6 +430,9 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
   // its address/refresh polling. Independent of the DEMO_USD faucet (btn-topup) above. On web it
   // auto-opens when the page is loaded with `?screen=deposit` (bookmarkable top-up deep link).
   const [depositOpen, setDepositOpen] = useState<boolean>(readDepositDeepLink);
+  // Withdraw sheet (ckBTC → native BTC out). Opens from the ckBTC asset card's "Withdraw" affordance
+  // (only shown when the ckBTC balance is non-zero). Independent state from the deposit sheet.
+  const [withdrawOpen, setWithdrawOpen] = useState<boolean>(false);
 
   const TOP_UP_CENTS = 5000; // $50.00 in minor units
 
@@ -564,6 +600,11 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
               <Text style={S.assetAmt}>{btc(ckBtcBalance)}</Text>
             </View>
             <Text style={S.assetSub}>your deposited Bitcoin · spendable where a merchant requests it</Text>
+            {/* Withdraw affordance: moves ckBTC OUT to a native BTC address on a verified on-device
+                signature (non-custodial). Shown only when there's a ckBTC balance to withdraw. */}
+            <Pressable testID="btn-withdraw" style={S.withdrawLink} onPress={() => setWithdrawOpen(true)}>
+              <Text style={S.withdrawLinkText}>Withdraw</Text>
+            </Pressable>
           </View>
         ) : null}
         {history.length > 0 ? (
@@ -588,6 +629,15 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
 
       {depositOpen ? (
         <DepositSheet identity={identity} relayUrl={relayUrl} onClose={() => setDepositOpen(false)} />
+      ) : null}
+      {withdrawOpen ? (
+        <WithdrawSheet
+          identity={identity}
+          relayUrl={relayUrl}
+          ckBtcBalance={ckBtcBalance ?? 0}
+          onClose={() => setWithdrawOpen(false)}
+          onWithdrawn={onActivity}
+        />
       ) : null}
     </SafeAreaView>
   );
@@ -1391,6 +1441,139 @@ function DepositSheet({identity, relayUrl, onClose}: {identity: Identity; relayU
   );
 }
 
+/**
+ * Withdraw ckBTC to a native BTC address. The user enters a BTC address + amount, reviews
+ * "Withdraw X BTC to bc1…", then the app signs the WithdrawAuth ON-DEVICE (the non-custodial gate)
+ * and submits to the relay's POST /api/v1/withdraw. The facade verifies the signature before moving
+ * funds. Amounts are shown in BTC (the backing currency symbol — never the wrapper/raw ledger id).
+ * Escape closes the sheet (web), matching DepositSheet.
+ */
+function WithdrawSheet({identity, relayUrl, ckBtcBalance, onClose, onWithdrawn}: {identity: Identity; relayUrl: string; ckBtcBalance: number; onClose: () => void; onWithdrawn: () => void}) {
+  const currency = DEPOSIT_CURRENCY;
+  const [address, setAddress] = useState('');
+  const [amountStr, setAmountStr] = useState('');
+  const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
+  const [err, setErr] = useState<string | null>(null);
+  const [receipt, setReceipt] = useState<{amount: number; btcAddress: string} | null>(null);
+
+  useEscapeToClose(onClose);
+
+  const sats = toSats(amountStr);
+  const belowMin = sats > 0 && sats < WITHDRAW_MIN_SATS;
+  const overBalance = sats > ckBtcBalance;
+  const canReview = address.trim().length > 0 && sats > 0 && !belowMin && !overBalance;
+
+  async function confirm() {
+    if (!canReview) {
+      return;
+    }
+    setPhase('submitting');
+    setErr(null);
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), WITHDRAW_TIMEOUT_MS);
+    try {
+      const nonce = randNonceHex();
+      const expiry = nowSecs() + WITHDRAW_EXPIRY_WINDOW;
+      // Sign the WithdrawAuth on-device (non-custodial gate). The facade verifies this exact sig.
+      const sigHex = await DpayCore.signWithdrawal(identity.secretHex, address.trim(), sats, nonce, expiry, currency);
+      const r = await withdrawFunds(relayUrl, identity.publicHex, address.trim(), sats, nonce, expiry, currency, sigHex, ctrl.signal);
+      setReceipt({amount: r.amount, btcAddress: r.btc_address});
+      setPhase('done');
+      onWithdrawn(); // trigger a balance/history refresh
+    } catch (e: any) {
+      // A 422 policy error (bad sig / insufficient / below min / nonce) or a 503 transient / offline.
+      // Surface the reason; the user can correct + retry from the form.
+      setErr(String(e?.message ?? e));
+      setPhase('error');
+    } finally {
+      clearTimeout(t);
+    }
+  }
+
+  function reset() { setAddress(''); setAmountStr(''); setErr(null); setReceipt(null); setPhase('form'); }
+
+  return (
+    <View style={S.sheetOverlay}>
+      <SafeAreaView style={S.sheet}>
+        <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+        <View style={S.sheetHead}>
+          <Text style={S.sheetTitle}>Withdraw</Text>
+          <Pressable testID="btn-withdraw-close" style={S.sheetClose} onPress={onClose}><Text style={S.sheetCloseX}>✕</Text></Pressable>
+        </View>
+
+        <ScrollView contentContainerStyle={S.sheetBody} keyboardShouldPersistTaps="handled">
+          {phase === 'done' && receipt ? (
+            <View style={S.centerAll}>
+              <View style={S.check}><Text style={S.checkMark}>✓</Text></View>
+              <Text testID="withdraw-status" style={S.paidText}>Withdrawn ✓</Text>
+              <Text style={S.paidSub}>{btc(receipt.amount)}</Text>
+              <Text style={S.dim2}>sent to {receipt.btcAddress}</Text>
+              <Text style={S.dim2}>Your balance updates automatically.</Text>
+              <Pressable testID="btn-withdraw-done" style={S.linkBtn} onPress={onClose}><Text style={S.linkText}>Done</Text></Pressable>
+            </View>
+          ) : phase === 'submitting' ? (
+            <View style={S.centerAll}>
+              <ActivityIndicator color={C.brand} />
+              <Text style={S.dim2}>Withdrawing {btc(sats)}…</Text>
+            </View>
+          ) : (
+            <>
+              <Text style={S.label}>Send your Bitcoin to a native BTC address</Text>
+              <Text style={S.dim2}>Available: {btc(ckBtcBalance)} · min {btc(WITHDRAW_MIN_SATS)}</Text>
+
+              <Text style={S.inputLabel}>BTC address</Text>
+              <TextInput
+                testID="withdraw-address-input"
+                style={S.withdrawAddrInput}
+                value={address}
+                onChangeText={setAddress}
+                placeholder="bc1q…"
+                placeholderTextColor={C.sub2}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+
+              <Text style={S.inputLabel}>Amount (BTC)</Text>
+              <TextInput
+                testID="withdraw-amount-input"
+                style={S.withdrawAmtInput}
+                value={amountStr}
+                onChangeText={setAmountStr}
+                keyboardType="decimal-pad"
+                placeholder="0.00050000"
+                placeholderTextColor={C.sub2}
+              />
+
+              {belowMin ? <Text style={S.warnNote}>Below the {btc(WITHDRAW_MIN_SATS)} minimum withdrawal.</Text> : null}
+              {overBalance ? <Text style={S.warnNote}>More than your available {btc(ckBtcBalance)}.</Text> : null}
+
+              {(phase === 'form' || phase === 'error') && sats > 0 ? (
+                <View testID="withdraw-review" style={S.reviewCard}>
+                  <Text style={S.reviewLabel}>Review withdrawal</Text>
+                  <Text testID="withdraw-review-amount" style={S.reviewAmount}>{`Withdraw ${btc(sats)}`}</Text>
+                  <Text style={S.reviewTo}>{`to ${address.trim() || '—'}`}</Text>
+                </View>
+              ) : null}
+
+              {err ? <Text testID="withdraw-err" style={S.err}>{err}</Text> : null}
+
+              <Pressable
+                testID="btn-withdraw-confirm"
+                style={[S.primaryWide, !canReview && S.dim]}
+                disabled={!canReview}
+                onPress={confirm}>
+                <Text style={S.primaryText}>{sats > 0 ? `Withdraw ${btc(sats)}` : 'Enter an amount'}</Text>
+              </Pressable>
+
+              {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
+            </>
+          )}
+        </ScrollView>
+      </SafeAreaView>
+    </View>
+  );
+}
+
 const S = StyleSheet.create({
   root: {flex: 1, backgroundColor: C.bg},
   centerAll: {alignItems: 'center', justifyContent: 'center'},
@@ -1510,4 +1693,14 @@ const S = StyleSheet.create({
   // Manual "Check now" — secondary (outline brand), debounced + spinner while in-flight.
   checkBtn: {marginTop: 16, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 24, borderWidth: 1, borderColor: C.brand, alignItems: 'center', justifyContent: 'center', height: 46},
   checkBtnText: {color: C.brand, fontWeight: '700', fontSize: 15},
+  // Withdraw affordance on the ckBTC asset card — a small brand link, distinct from the deposit
+  // "Add money" flow (money OUT, not IN). Sits below the balance line.
+  withdrawLink: {marginTop: 10, alignSelf: 'flex-start', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: C.brand},
+  withdrawLinkText: {color: C.brand, fontWeight: '700', fontSize: 13},
+  // Withdraw sheet form fields.
+  inputLabel: {fontSize: 13, fontWeight: '700', color: C.sub, alignSelf: 'flex-start', marginTop: 18, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8},
+  withdrawAddrInput: {alignSelf: 'stretch', backgroundColor: C.field, borderRadius: 12, height: 56, paddingHorizontal: 16, fontSize: 15, color: C.ink, fontFamily: 'monospace', borderWidth: 1, borderColor: C.line2},
+  withdrawAmtInput: {alignSelf: 'stretch', backgroundColor: C.field, borderRadius: 12, height: 56, paddingHorizontal: 16, fontSize: 22, fontWeight: '700', color: C.ink, borderWidth: 1, borderColor: C.line2},
+  reviewCard: {alignSelf: 'stretch', marginTop: 20, backgroundColor: C.card, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: C.line2},
+  reviewLabel: {fontSize: 12, fontWeight: '700', color: C.sub2, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 8, fontFamily: 'monospace'},
 });

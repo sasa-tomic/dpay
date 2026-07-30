@@ -13,7 +13,7 @@
 use dpay_core::{
     generate_keypair as core_generate_keypair, sign, validate as core_validate, Authorization,
     CodecError, Currency, DEMO_USD, PayError, PaymentRequest, ReceiptClaim, SignedAuthorization,
-    NONCE_LEN, PUBKEY_LEN, SIG_LEN,
+    WithdrawAuth, NONCE_LEN, PUBKEY_LEN, SIG_LEN,
 };
 use ed25519_dalek::SigningKey;
 
@@ -212,6 +212,28 @@ pub fn decode_qr(payload: String) -> Result<Vec<u8>, DpayError> {
 pub fn verify_wire(wire: &[u8]) -> Result<bool, DpayError> {
     let signed = SignedAuthorization::from_wire(wire)?;
     Ok(signed.verify())
+}
+
+/// Payer side: build a `WithdrawAuth {from_pubkey, btc_address, amount, nonce, expiry, currency}` and
+/// sign it **offline**, returning the 64-byte Ed25519 signature. This is the non-custodial withdrawal
+/// gate: the facade verifies this signature under `from_pubkey` (== the ckBTC debit subaccount)
+/// before moving any funds. `from_pubkey` is derived from the secret; a mismatched arg is ignored in
+/// favour of the key's own public bytes. The canonical signing bytes come from `dpay_core` (single
+/// source of truth), so this is the exact signature the canister/relay verify.
+#[uniffi::export]
+pub fn sign_withdrawal(
+    secret: &[u8],
+    btc_address: String,
+    amount: u64,
+    nonce: &[u8],
+    expiry: u64,
+    currency: Currency,
+) -> Result<Vec<u8>, DpayError> {
+    let sk = signing_key_from_seed(secret)?;
+    let from = sk.verifying_key().to_bytes();
+    let nonce = fixed_nonce(nonce)?;
+    let auth = WithdrawAuth { from_pubkey: from, btc_address, amount, nonce, expiry, currency };
+    Ok(dpay_core::sign_withdraw(&sk, &auth).to_bytes().to_vec())
 }
 
 /// Verify a canister/ledger-signed receipt signature (R2 outcome attestation). Returns `true` iff

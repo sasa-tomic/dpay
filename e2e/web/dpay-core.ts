@@ -78,6 +78,19 @@ type Layout = {
     expiry: number; currency: number; signing_hex: string; sig_hex: string; wire_hex: string;
     request_hex: string;
   };
+  // Withdrawal (ckBTC→BTC) signing layout — variable-length (the btc_address is last). The fixed
+  // prefix uses the SAME field widths as `fields` but a DIFFERENT order, so it gets its own section.
+  withdraw: {
+    fixed_len: number; addr_len_bytes: number;
+    fields: {
+      from_pubkey: FieldSpec; amount: FieldSpec; nonce: FieldSpec; expiry: FieldSpec;
+      currency: FieldSpec; address_len: FieldSpec;
+    };
+    golden: {
+      secret_hex: string; public_hex: string; btc_address: string; amount: number;
+      nonce_hex: string; expiry: number; currency: number; signing_hex: string; sig_hex: string;
+    };
+  };
 };
 
 const L = layout as unknown as Layout;
@@ -211,6 +224,35 @@ function buildRequestBytes(toHex: string, amount: number, nonceHex: string, expi
   return buf;
 }
 
+/**
+ * Build the canonical withdraw signing bytes (mirrors `dpay_core::WithdrawAuth::signing_bytes`
+ * EXACTLY): `from_pubkey(32) | amount_le(8) | nonce(16) | expiry_le(8) | currency_le(4) |
+ * addr_len_le(4) | addr_utf8`. Variable-length, so unlike `buildSigningBytes` this returns a
+ * right-sized buffer. Every offset/length is read from `wire_layout.json`'s `withdraw` section —
+ * never hand-transcribed. This is the drift-detector: if it ever diverges from the Rust core, the
+ * FakeLedger/canister verify rejects the sig and the e2e withdraw flow goes RED.
+ */
+function buildWithdrawSigningBytes(
+  fromHex: string, btcAddress: string, amount: number, nonceHex: string, expiry: number, currency: number,
+): Uint8Array {
+  const W = L.withdraw;
+  const from = hex(fromHex);
+  const nonce = hex(nonceHex);
+  if (from.length !== L.pubkey_len) throw new Error(`from length: ${from.length}`);
+  if (nonce.length !== L.nonce_len) throw new Error(`nonce length: ${nonce.length}`);
+  const addr = new TextEncoder().encode(btcAddress);
+  const buf = new Uint8Array(W.fixed_len + W.addr_len_bytes + addr.length);
+  buf.set(from, W.fields.from_pubkey.offset);
+  putU64Le(buf, W.fields.amount.offset, amount);
+  buf.set(nonce, W.fields.nonce.offset);
+  putU64Le(buf, W.fields.expiry.offset, expiry);
+  putU32Le(buf, W.fields.currency.offset, currency);
+  // u32 LE address length (well under 2^32 for any real BTC address).
+  putU32Le(buf, W.fields.address_len.offset, addr.length);
+  buf.set(addr, W.fields.address_len.offset + W.addr_len_bytes);
+  return buf;
+}
+
 // --- the public DpayCore surface (mirrors app/App.tsx's DpayCoreApi type) ---------------------
 
 async function generateKeypair(): Promise<{ secretHex: string; publicHex: string }> {
@@ -279,6 +321,23 @@ async function verifyWire(wireHex: string): Promise<boolean> {
 }
 
 /**
+ * Sign a withdrawal authorization (mirrors the FFI `sign_withdrawal`). Returns the 64-byte Ed25519
+ * signature as hex over the canonical `WithdrawAuth::signing_bytes()` (built via
+ * `buildWithdrawSigningBytes`, reading `wire_layout.json`'s `withdraw` section — single source of
+ * truth). The app hands `{from, btc_address, amount, nonce, expiry, currency, sig}` to
+ * `POST /api/v1/withdraw`; the FakeLedger/canister verify this exact signature before moving funds.
+ */
+async function signWithdrawal(
+  secretHex: string, btcAddress: string, amount: number, nonceHex: string, expiry: number, currency: number,
+): Promise<string> {
+  const secret = hex(secretHex);
+  const pub = await ed.getPublicKeyAsync(secret);
+  const signing = buildWithdrawSigningBytes(bytesToHex(pub), btcAddress, amount, nonceHex, expiry, currency);
+  const sig = await ed.signAsync(signing, secret);
+  return bytesToHex(sig);
+}
+
+/**
  * Build the canonical 108-byte receipt claim (R2). Mirrors `dpay_core::ReceiptClaim::signing_bytes`
  * EXACTLY: `nonce(16) | from(32) | to(32) | amount_le(8) | currency_le(4) | block_index_le(8) |
  * settle_ts_le(8)`. This is the drift-detector: if it ever diverges from the Rust core, the FakeLedger
@@ -342,6 +401,7 @@ export function randNonceHex(): string {
 export const __test = {
   layout: L,
   buildSigningBytes,
+  buildWithdrawSigningBytes,
   buildWire,
   buildRequestBytes,
   parseWire,
@@ -364,6 +424,7 @@ async function nfcStatus(): Promise<string> {
 export const DpayCore = {
   generateKeypair,
   signAuthorization,
+  signWithdrawal,
   encodeRequest,
   decodeRequest,
   encodeQr,

@@ -16,8 +16,8 @@
 //!   reproducible. Idempotent: overwrites `OUT.json` (default `dfx/wire_layout.json`).
 
 use dpay_core::{
-    Authorization, PaymentRequest, SignedAuthorization, DEMO_USD, NONCE_LEN, PUBKEY_LEN, REQUEST_LEN,
-    SIG_LEN, SIGNING_LEN, WIRE_LEN,
+    Authorization, PaymentRequest, SignedAuthorization, WithdrawAuth, DEMO_USD, NONCE_LEN,
+    PUBKEY_LEN, REQUEST_LEN, SIG_LEN, SIGNING_LEN, WIRE_LEN,
 };
 use ed25519_dalek::SigningKey;
 use serde::Serialize;
@@ -69,6 +69,68 @@ const CURRENCY_LEN: usize = 4;
 const WIRE_SIGNING_OFF: usize = 0;
 const WIRE_SIG_OFF: usize = SIGNING_LEN;
 const WIRE_FROM_PUB_OFF: usize = SIGNING_LEN + SIG_LEN;
+
+// ===========================================================================
+// withdrawal-layout offsets — single source of truth for the JS signing shim.
+// ===========================================================================
+//
+// `WithdrawAuth::signing_bytes` is variable-length (the btc_address is last), so it does NOT share
+// the frozen fixed-size layout of `Authorization`. Its FIXED prefix is
+//   `from_pubkey(32) | amount_le(8) | nonce(16) | expiry_le(8) | currency_le(4)` = 68 bytes,
+// followed by `addr_len_le(4) | addr_utf8`. Offsets below are computed from the core consts.
+
+/// `from_pubkey` offset within the withdraw signing buffer.
+const W_FROM_OFF: usize = 0;
+const W_AMOUNT_OFF: usize = PUBKEY_LEN;
+const W_NONCE_OFF: usize = PUBKEY_LEN + 8;
+const W_EXPIRY_OFF: usize = PUBKEY_LEN + 8 + NONCE_LEN;
+const W_CURRENCY_OFF: usize = PUBKEY_LEN + 16 + NONCE_LEN;
+const W_ADDR_LEN_OFF: usize = PUBKEY_LEN + 8 + NONCE_LEN + 8 + 4;
+/// Fixed-prefix length of the withdraw signing buffer (before the variable address suffix).
+const W_FIXED_LEN: usize = PUBKEY_LEN + 8 + NONCE_LEN + 8 + 4;
+/// Width of the address-length prefix (u32 LE) appended after the fixed prefix.
+const W_ADDR_LEN_BYTES: usize = 4;
+
+/// One withdraw-signing-buffer field (offset + len + endian), mirroring [`FieldSpec`].
+#[derive(Serialize)]
+struct WithdrawFieldSpec {
+    offset: usize,
+    len: usize,
+    endian: Option<&'static str>,
+}
+
+#[derive(Serialize)]
+struct WithdrawFields {
+    from_pubkey: WithdrawFieldSpec,
+    amount: WithdrawFieldSpec,
+    nonce: WithdrawFieldSpec,
+    expiry: WithdrawFieldSpec,
+    currency: WithdrawFieldSpec,
+    address_len: WithdrawFieldSpec,
+}
+
+/// The golden signed withdrawal bytes. Every `*_hex` is derived from the real `dpay_core`
+/// `WithdrawAuth` (never hardcoded) so the JS cross-validation is a true Rust↔JS byte comparison.
+#[derive(Serialize)]
+struct GoldenWithdraw {
+    secret_hex: String,
+    public_hex: String,
+    btc_address: String,
+    amount: u64,
+    nonce_hex: String,
+    expiry: u64,
+    currency: u32,
+    signing_hex: String,
+    sig_hex: String,
+}
+
+#[derive(Serialize)]
+struct WithdrawLayout {
+    fixed_len: usize,
+    addr_len_bytes: usize,
+    fields: WithdrawFields,
+    golden: GoldenWithdraw,
+}
 
 /// One signing-buffer field. `endian` is `null` for raw byte arrays (from/to/nonce) and `"le"` for
 /// the little-endian integer fields (amount/expiry/currency).
@@ -131,6 +193,9 @@ struct WireLayout {
     fields: Fields,
     wire_fields: WireFields,
     golden: Golden,
+    /// The withdrawal (ckBTC→BTC) signing layout + golden signed bytes. Variable-length (the
+    /// btc_address is last), so it has its own section distinct from the fixed `fields`/`golden`.
+    withdraw: WithdrawLayout,
 }
 
 /// Build the wire-layout description. Pure (no I/O) so the unit test can call it directly and
@@ -193,6 +258,57 @@ fn wire_layout() -> WireLayout {
             sig_hex: hex(&sig),
             wire_hex: hex(&wire),
             request_hex: hex(&request),
+        },
+        withdraw: withdraw_layout(),
+    }
+}
+
+/// Build the withdrawal-layout description + golden signed bytes. Pure (no I/O) so the unit test can
+/// assert the golden withdraw bytes round-trip through the documented offsets. Uses the SAME golden
+/// signing key (`key(3)`) as the pay golden so the cross-validation keys match.
+fn withdraw_layout() -> WithdrawLayout {
+    let secret = key(3);
+    let public: [u8; PUBKEY_LEN] = secret.verifying_key().to_bytes();
+    // A realistic-shaped BTC address (the bytes are what's signed; the value just needs to be stable
+    // + non-trivial so the length-prefix + UTF-8 handling is exercised).
+    let btc_address = "bc1qdpaygoldenwithdrawaladdress".to_string();
+    const W_AMOUNT: u64 = 50_000; // exactly retrieve_btc_min_amount
+    let w_nonce = [42u8; NONCE_LEN];
+    const W_EXPIRY: u64 = 4_102_444_800;
+    let w_currency = DEMO_USD;
+
+    let auth = WithdrawAuth {
+        from_pubkey: public,
+        btc_address: btc_address.clone(),
+        amount: W_AMOUNT,
+        nonce: w_nonce,
+        expiry: W_EXPIRY,
+        currency: w_currency,
+    };
+    let signing = auth.signing_bytes();
+    let sig = dpay_core::sign_withdraw(&secret, &auth).to_bytes();
+
+    WithdrawLayout {
+        fixed_len: W_FIXED_LEN,
+        addr_len_bytes: W_ADDR_LEN_BYTES,
+        fields: WithdrawFields {
+            from_pubkey: WithdrawFieldSpec { offset: W_FROM_OFF, len: PUBKEY_LEN, endian: None },
+            amount: WithdrawFieldSpec { offset: W_AMOUNT_OFF, len: 8, endian: Some("le") },
+            nonce: WithdrawFieldSpec { offset: W_NONCE_OFF, len: NONCE_LEN, endian: None },
+            expiry: WithdrawFieldSpec { offset: W_EXPIRY_OFF, len: 8, endian: Some("le") },
+            currency: WithdrawFieldSpec { offset: W_CURRENCY_OFF, len: 4, endian: Some("le") },
+            address_len: WithdrawFieldSpec { offset: W_ADDR_LEN_OFF, len: W_ADDR_LEN_BYTES, endian: Some("le") },
+        },
+        golden: GoldenWithdraw {
+            secret_hex: hex(&secret.to_bytes()),
+            public_hex: hex(&public),
+            btc_address,
+            amount: W_AMOUNT,
+            nonce_hex: hex(&w_nonce),
+            expiry: W_EXPIRY,
+            currency: w_currency,
+            signing_hex: hex(&signing),
+            sig_hex: hex(&sig),
         },
     }
 }
@@ -401,5 +517,57 @@ mod tests {
         assert_eq!(layout.wire_fields.sig.offset, WIRE_SIG_OFF);
         assert_eq!(layout.wire_fields.from_pub.offset, WIRE_FROM_PUB_OFF);
         assert_eq!(layout.wire_fields.signing.len + layout.wire_fields.sig.len + layout.wire_fields.from_pub.len, WIRE_LEN);
+    }
+
+    /// The golden withdrawal signing bytes must round-trip through the EMITTED withdraw offsets, and
+    /// the golden signature must verify under the golden key. Catches drift between this emitter's
+    /// documented withdraw layout and `WithdrawAuth::signing_bytes()` (which the JS shim mirrors).
+    #[test]
+    fn golden_withdraw_layout_round_trips_through_real_signing_bytes() {
+        let layout = wire_layout();
+        let w = &layout.withdraw;
+        let g = &w.golden;
+
+        let signing = hex::decode(&g.signing_hex).expect("withdraw signing_hex decodes");
+        // Length = fixed prefix + 4-byte addr len + the address bytes.
+        let addr_bytes = g.btc_address.as_bytes();
+        assert_eq!(
+            signing.len(),
+            w.fixed_len + w.addr_len_bytes + addr_bytes.len(),
+            "withdraw signing_hex length = fixed prefix + addr_len bytes + address"
+        );
+        assert_eq!(w.fixed_len, W_FIXED_LEN);
+        assert_eq!(w.addr_len_bytes, W_ADDR_LEN_BYTES);
+
+        // Reconstruct the WithdrawAuth purely from the EMITTED offsets and assert it reproduces the
+        // exact signing bytes (proves the offsets are faithful to WithdrawAuth::signing_bytes()).
+        let from: [u8; PUBKEY_LEN] = signing[w.fields.from_pubkey.offset..][..PUBKEY_LEN].try_into().unwrap();
+        let amount = u64::from_le_bytes(signing[w.fields.amount.offset..][..8].try_into().unwrap());
+        let nonce: [u8; NONCE_LEN] = signing[w.fields.nonce.offset..][..NONCE_LEN].try_into().unwrap();
+        let expiry = u64::from_le_bytes(signing[w.fields.expiry.offset..][..8].try_into().unwrap());
+        let currency = u32::from_le_bytes(signing[w.fields.currency.offset..][..4].try_into().unwrap());
+        let addr_len = u32::from_le_bytes(
+            signing[w.fields.address_len.offset..][..W_ADDR_LEN_BYTES].try_into().unwrap(),
+        ) as usize;
+        let addr_start = w.fields.address_len.offset + W_ADDR_LEN_BYTES;
+        let btc_address = std::str::from_utf8(&signing[addr_start..addr_start + addr_len])
+            .unwrap()
+            .to_string();
+
+        assert_eq!(from, hex::decode(&g.public_hex).unwrap()[..]);
+        assert_eq!(amount, g.amount);
+        assert_eq!(nonce, hex::decode(&g.nonce_hex).unwrap()[..]);
+        assert_eq!(expiry, g.expiry);
+        assert_eq!(currency, g.currency);
+        assert_eq!(btc_address, g.btc_address);
+
+        let auth = WithdrawAuth { from_pubkey: from, btc_address: btc_address.clone(), amount, nonce, expiry, currency };
+        assert_eq!(auth.signing_bytes(), signing[..], "emitted offsets must reproduce signing_bytes()");
+
+        // The golden sig verifies over the reconstructed bytes under the golden key.
+        let sig_bytes = hex::decode(&g.sig_hex).unwrap();
+        assert_eq!(sig_bytes.len(), SIG_LEN);
+        let sig = ed25519_dalek::Signature::from_bytes(&sig_bytes[..].try_into().unwrap());
+        assert!(auth.verify(&from, &sig), "golden withdraw signature must verify");
     }
 }
