@@ -981,7 +981,7 @@ const MIN_WITHDRAW: u64 = 50_000;
 /// accepts it exactly like the canister.
 fn withdraw_req(
     sk: &SigningKey,
-    btc_address: &str,
+    destination: &str,
     amount: u64,
     nonce: [u8; 16],
     expiry: u64,
@@ -990,7 +990,7 @@ fn withdraw_req(
     let from = pubkey(sk);
     let auth = WithdrawAuth {
         from_pubkey: from,
-        btc_address: btc_address.to_string(),
+        destination: destination.to_string(),
         amount,
         nonce,
         expiry,
@@ -999,7 +999,7 @@ fn withdraw_req(
     let sig = dpay_core::sign_withdraw(sk, &auth).to_bytes();
     WithdrawRequest {
         from: hex::encode(from),
-        btc_address: btc_address.to_string(),
+        destination: destination.to_string(),
         amount,
         nonce: hex::encode(nonce),
         expiry,
@@ -1012,7 +1012,7 @@ fn withdraw_req(
 fn withdraw_json(req: &WithdrawRequest) -> Request<Body> {
     let body = serde_json::json!({
         "from": req.from,
-        "btc_address": req.btc_address,
+        "destination": req.destination,
         "amount": req.amount,
         "nonce": req.nonce,
         "expiry": req.expiry,
@@ -1048,7 +1048,7 @@ async fn withdraw_debits_ckbtc_from_subaccount() {
     let req = withdraw_req(&payer, "bc1qdestination", MIN_WITHDRAW, [1u8; 16], FUTURE, CKBTC);
     let r = state.ledger.withdraw(req).await.expect("withdraw ok");
     assert_eq!(r.amount, MIN_WITHDRAW);
-    assert_eq!(r.btc_address, "bc1qdestination");
+    assert_eq!(r.destination, "bc1qdestination");
     assert_eq!(r.currency, CKBTC);
     // Debited by the withdrawn amount.
     assert_eq!(led.balance_of(&pubkey(&payer), CKBTC), FUND - MIN_WITHDRAW);
@@ -1066,7 +1066,7 @@ async fn withdraw_route_returns_receipt_on_success() {
     let (status, body) = call(&state, withdraw_json(&req)).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["receipt"]["amount"], MIN_WITHDRAW);
-    assert_eq!(body["receipt"]["btc_address"], "bc1qroute");
+    assert_eq!(body["receipt"]["destination"], "bc1qroute");
     assert_eq!(led.balance_of(&pubkey(&payer), CKBTC), 100_000 - MIN_WITHDRAW);
 }
 
@@ -1102,7 +1102,7 @@ async fn withdraw_wrong_sig_rejected_no_funds_move() {
     let other = keypair();
     let auth = WithdrawAuth {
         from_pubkey: pubkey(&payer),
-        btc_address: "bc1qattacker".to_string(),
+        destination: "bc1qattacker".to_string(),
         amount: MIN_WITHDRAW,
         nonce: [4u8; 16],
         expiry: FUTURE,
@@ -1111,7 +1111,7 @@ async fn withdraw_wrong_sig_rejected_no_funds_move() {
     let wrong_sig = dpay_core::sign_withdraw(&other, &auth).to_bytes();
     let req = WithdrawRequest {
         from: hex::encode(pubkey(&payer)),
-        btc_address: "bc1qattacker".to_string(),
+        destination: "bc1qattacker".to_string(),
         amount: MIN_WITHDRAW,
         nonce: hex::encode([4u8; 16]),
         expiry: FUTURE,

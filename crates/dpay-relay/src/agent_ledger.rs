@@ -98,7 +98,7 @@ struct DepositInfoMirror {
 #[derive(CandidType, serde::Serialize)]
 struct WithdrawRequestMirror {
     from_pubkey: Vec<u8>,
-    btc_address: String,
+    destination: String,
     amount: u64,
     nonce: Vec<u8>,
     expiry: u64,
@@ -111,7 +111,7 @@ struct WithdrawRequestMirror {
 #[derive(CandidType, Deserialize, Debug)]
 struct WithdrawReceiptMirror {
     from: Vec<u8>,
-    btc_address: String,
+    destination: String,
     amount: u64,
     nonce: Vec<u8>,
     currency: Currency,
@@ -490,7 +490,7 @@ impl Ledger for AgentLedger {
             .map_err(|e| LedgerError::Rejected(format!("bad sig hex: {e}")))?;
         let mirror = WithdrawRequestMirror {
             from_pubkey: from,
-            btc_address: req.btc_address,
+            destination: req.destination,
             amount: req.amount,
             nonce,
             expiry: req.expiry,
@@ -511,7 +511,7 @@ impl Ledger for AgentLedger {
         match result {
             Ok(m) => Ok(WithdrawReceipt {
                 from: hex::encode(m.from),
-                btc_address: m.btc_address,
+                destination: m.destination,
                 amount: m.amount,
                 nonce: hex::encode(m.nonce),
                 currency: m.currency,

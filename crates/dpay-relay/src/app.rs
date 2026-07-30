@@ -151,7 +151,7 @@ pub fn app(state: AppState) -> Router {
         .with_state(state)
 }
 
-/// `POST /api/v1/withdraw` JSON `{from, btc_address, amount, nonce, expiry, currency, sig}` (the
+/// `POST /api/v1/withdraw` JSON `{from, destination, amount, nonce, expiry, currency, sig}` (the
 /// user's signed [`WithdrawRequest`]) → `200 {receipt}` on success. Error mapping mirrors `pay`:
 /// a permanent policy failure (`Rejected` — bad sig / expired / below min / insufficient / nonce
 /// reused / malformed) is `422`; only a genuine `Transient` (the facade/minter unreachable) is `503`.

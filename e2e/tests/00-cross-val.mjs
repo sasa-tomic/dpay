@@ -170,7 +170,7 @@ export async function run() {
   //   withdraw flow (15-withdraw) goes RED. The withdraw layout is variable-length (address last).
   const wg = layout.withdraw.golden;
   const W = layout.withdraw;
-  const wAddr = Buffer.from(wg.btc_address, 'utf8');
+  const wAddr = Buffer.from(wg.destination, 'utf8');
   const wSigning = Buffer.alloc(W.fixed_len + W.addr_len_bytes + wAddr.length);
   wSigning.set(hex(wg.public_hex), W.fields.from_pubkey.offset);
   putU64Le(wSigning, W.fields.amount.offset, wg.amount);

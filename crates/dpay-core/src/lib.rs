@@ -148,14 +148,14 @@ pub fn verify_receipt(pubkey: &[u8; PUBKEY_LEN], claim: &ReceiptClaim, sig: &[u8
 // ICRC `subaccount` the ckBTC is debited from (the facade owns `Account{owner: facade,
 // subaccount: from_pubkey}`), so a signature under any other key moves no funds.
 
-/// A user-signed authorization to withdraw `amount` of `currency` (a ck currency) to `btc_address`.
+/// A user-signed authorization to withdraw `amount` of `currency` (a ck currency) to `destination`.
 /// `amount` is integer satoshis (the ckBTC ledger's native unit); `expiry`/`now` are unix seconds.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct WithdrawAuth {
     /// The signer's Ed25519 public key — also the ICRC subaccount the ckBTC is debited from.
     pub from_pubkey: [u8; PUBKEY_LEN],
-    /// The native BTC destination address (e.g. `bc1q…`). Bound by the signature.
-    pub btc_address: String,
+    /// The native destination address (e.g. a BTC `bc1q…`). Bound by the signature.
+    pub destination: String,
     /// Satoshis to withdraw.
     pub amount: u64,
     /// Single-use idempotency key (the facade tracks these per-withdraw in `WITHDRAW_NONCES`).
@@ -167,7 +167,7 @@ pub struct WithdrawAuth {
 }
 
 /// Fixed-width prefix of a withdrawal signing buffer: `from_pubkey(32) | amount_le(8) |
-/// nonce(16) | expiry_le(8) | currency_le(4)` = 68 bytes. The variable-length `btc_address`
+/// nonce(16) | expiry_le(8) | currency_le(4)` = 68 bytes. The variable-length `destination`
 /// follows as a u32-LE length prefix + the raw UTF-8 bytes, so the layout is unambiguous to decode
 /// without a frozen total length. All widths reference the core consts by name.
 pub const WITHDRAW_FIXED_LEN: usize = PUBKEY_LEN + 8 + NONCE_LEN + 8 + 4;
@@ -178,11 +178,11 @@ impl WithdrawAuth {
     /// Canonical, deterministic signing message. FROZEN field order:
     /// `from_pubkey | amount_le | nonce | expiry_le | currency_le | addr_len_le(4) | addr_utf8`.
     /// Fixed-width fields are placed first (stable offsets, mirroring [`Authorization`] and
-    /// [`ReceiptClaim`]); the variable-length `btc_address` is last, prefixed by its u32 LE byte
+    /// [`ReceiptClaim`]); the variable-length `destination` is last, prefixed by its u32 LE byte
     /// length so decoding is unambiguous. Returns a `Vec` (the address is variable length, so unlike
     /// `Authorization::signing_bytes` there is no single fixed-size array).
     pub fn signing_bytes(&self) -> Vec<u8> {
-        let addr = self.btc_address.as_bytes();
+        let addr = self.destination.as_bytes();
         let mut b = Vec::with_capacity(WITHDRAW_FIXED_LEN + WITHDRAW_ADDR_LEN_BYTES + addr.len());
         b.extend_from_slice(&self.from_pubkey);
         b.extend_from_slice(&self.amount.to_le_bytes());
@@ -191,7 +191,7 @@ impl WithdrawAuth {
         b.extend_from_slice(&self.currency.to_le_bytes());
         // Length-prefix the address (u32 LE) so the layout is self-delimiting; bounds the address at
         // 4 GiB (a BTC address is ≤90 chars), far beyond any real input.
-        let len = u32::try_from(addr.len()).expect("btc_address length fits u32");
+        let len = u32::try_from(addr.len()).expect("destination length fits u32");
         b.extend_from_slice(&len.to_le_bytes());
         b.extend_from_slice(addr);
         b
@@ -648,7 +648,7 @@ mod tests {
         let pk = sk.verifying_key().to_bytes();
         let auth = WithdrawAuth {
             from_pubkey: pk,
-            btc_address: "bc1qexampledestinationaddress".to_string(),
+            destination: "bc1qexampledestinationaddress".to_string(),
             amount: 50_000,
             nonce: [0x2a; NONCE_LEN],
             expiry: 1_800_000_120,
@@ -663,7 +663,7 @@ mod tests {
         let sb = auth.signing_bytes();
         assert_eq!(
             sb.len(),
-            WITHDRAW_FIXED_LEN + WITHDRAW_ADDR_LEN_BYTES + auth.btc_address.len(),
+            WITHDRAW_FIXED_LEN + WITHDRAW_ADDR_LEN_BYTES + auth.destination.len(),
             "signing_bytes length = fixed prefix + 4-byte len + address"
         );
         assert_eq!(WITHDRAW_FIXED_LEN, PUBKEY_LEN + 8 + NONCE_LEN + 8 + 4);
@@ -679,8 +679,8 @@ mod tests {
 
         // Tampering ANY field breaks verification (destination/amount/nonce/expiry/currency bound).
         let mut t_addr = auth.clone();
-        t_addr.btc_address.push('x');
-        assert!(!t_addr.verify(&pk, &sig), "tampered btc_address must fail");
+        t_addr.destination.push('x');
+        assert!(!t_addr.verify(&pk, &sig), "tampered destination must fail");
         let mut t_amt = auth.clone();
         t_amt.amount = 50_001;
         assert!(!t_amt.verify(&pk, &sig), "tampered amount must fail");
@@ -695,7 +695,7 @@ mod tests {
         assert!(!t_cur.verify(&pk, &sig), "tampered currency must fail");
 
         // An empty address still has a valid (zero-length) length prefix — verifiable, not a panic.
-        let empty = WithdrawAuth { btc_address: String::new(), ..auth.clone() };
+        let empty = WithdrawAuth { destination: String::new(), ..auth.clone() };
         let empty_sig = sign_withdraw(&sk, &empty);
         assert!(empty.verify(&pk, &empty_sig), "empty address is a valid signing input");
         assert_eq!(empty.signing_bytes().len(), WITHDRAW_FIXED_LEN + WITHDRAW_ADDR_LEN_BYTES);

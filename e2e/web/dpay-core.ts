@@ -78,7 +78,7 @@ type Layout = {
     expiry: number; currency: number; signing_hex: string; sig_hex: string; wire_hex: string;
     request_hex: string;
   };
-  // Withdrawal (ckBTC→BTC) signing layout — variable-length (the btc_address is last). The fixed
+  // Withdrawal (ckBTC→BTC) signing layout — variable-length (the destination is last). The fixed
   // prefix uses the SAME field widths as `fields` but a DIFFERENT order, so it gets its own section.
   withdraw: {
     fixed_len: number; addr_len_bytes: number;
@@ -87,7 +87,7 @@ type Layout = {
       currency: FieldSpec; address_len: FieldSpec;
     };
     golden: {
-      secret_hex: string; public_hex: string; btc_address: string; amount: number;
+      secret_hex: string; public_hex: string; destination: string; amount: number;
       nonce_hex: string; expiry: number; currency: number; signing_hex: string; sig_hex: string;
     };
   };
@@ -324,7 +324,7 @@ async function verifyWire(wireHex: string): Promise<boolean> {
  * Sign a withdrawal authorization (mirrors the FFI `sign_withdrawal`). Returns the 64-byte Ed25519
  * signature as hex over the canonical `WithdrawAuth::signing_bytes()` (built via
  * `buildWithdrawSigningBytes`, reading `wire_layout.json`'s `withdraw` section — single source of
- * truth). The app hands `{from, btc_address, amount, nonce, expiry, currency, sig}` to
+ * truth). The app hands `{from, destination, amount, nonce, expiry, currency, sig}` to
  * `POST /api/v1/withdraw`; the FakeLedger/canister verify this exact signature before moving funds.
  */
 async function signWithdrawal(

@@ -310,11 +310,11 @@ async function ckerc20OnrampParams(relayUrl: string, currency: number, signal?: 
 // Withdraw a ckBTC balance to a native BTC address. The app signs the WithdrawAuth on-device (the
 // sig is the non-custodial gate); the relay forwards to the facade's `withdraw`. Returns the burn
 // receipt (block_index). Errors throw with the status so the sheet can surface a decline vs offline.
-type WithdrawReceipt = {from: string; btc_address: string; amount: number; nonce: string; currency: number; block_index: number};
+type WithdrawReceipt = {from: string; destination: string; amount: number; nonce: string; currency: number; block_index: number};
 async function withdrawFunds(relayUrl: string, accountHex: string, btcAddress: string, amountSats: number, nonceHex: string, expiry: number, currency: number, sigHex: string, signal?: AbortSignal): Promise<WithdrawReceipt> {
   const r = await fetch(`${base(relayUrl)}/api/v1/withdraw`, {
     method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({from: accountHex, btc_address: btcAddress, amount: amountSats, nonce: nonceHex, expiry, currency, sig: sigHex}),
+    body: JSON.stringify({from: accountHex, destination: btcAddress, amount: amountSats, nonce: nonceHex, expiry, currency, sig: sigHex}),
     signal,
   });
   const j = await r.json().catch(() => ({} as any));
@@ -1710,7 +1710,7 @@ function WithdrawSheet({identity, relayUrl, currency, display, ckBtcBalance, onC
       // Sign the WithdrawAuth on-device (non-custodial gate). The facade verifies this exact sig.
       const sigHex = await DpayCore.signWithdrawal(identity.secretHex, address.trim(), sats, nonce, expiry, currency);
       const r = await withdrawFunds(relayUrl, identity.publicHex, address.trim(), sats, nonce, expiry, currency, sigHex, ctrl.signal);
-      setReceipt({amount: r.amount, btcAddress: r.btc_address});
+      setReceipt({amount: r.amount, btcAddress: r.destination});
       setPhase('done');
       onWithdrawn(); // trigger a balance/history refresh
     } catch (e: any) {

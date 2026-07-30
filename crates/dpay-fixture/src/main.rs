@@ -74,7 +74,7 @@ const WIRE_FROM_PUB_OFF: usize = SIGNING_LEN + SIG_LEN;
 // withdrawal-layout offsets — single source of truth for the JS signing shim.
 // ===========================================================================
 //
-// `WithdrawAuth::signing_bytes` is variable-length (the btc_address is last), so it does NOT share
+// `WithdrawAuth::signing_bytes` is variable-length (the destination is last), so it does NOT share
 // the frozen fixed-size layout of `Authorization`. Its FIXED prefix is
 //   `from_pubkey(32) | amount_le(8) | nonce(16) | expiry_le(8) | currency_le(4)` = 68 bytes,
 // followed by `addr_len_le(4) | addr_utf8`. Offsets below are computed from the core consts.
@@ -115,7 +115,7 @@ struct WithdrawFields {
 struct GoldenWithdraw {
     secret_hex: String,
     public_hex: String,
-    btc_address: String,
+    destination: String,
     amount: u64,
     nonce_hex: String,
     expiry: u64,
@@ -194,7 +194,7 @@ struct WireLayout {
     wire_fields: WireFields,
     golden: Golden,
     /// The withdrawal (ckBTC→BTC) signing layout + golden signed bytes. Variable-length (the
-    /// btc_address is last), so it has its own section distinct from the fixed `fields`/`golden`.
+    /// destination is last), so it has its own section distinct from the fixed `fields`/`golden`.
     withdraw: WithdrawLayout,
 }
 
@@ -271,7 +271,7 @@ fn withdraw_layout() -> WithdrawLayout {
     let public: [u8; PUBKEY_LEN] = secret.verifying_key().to_bytes();
     // A realistic-shaped BTC address (the bytes are what's signed; the value just needs to be stable
     // + non-trivial so the length-prefix + UTF-8 handling is exercised).
-    let btc_address = "bc1qdpaygoldenwithdrawaladdress".to_string();
+    let destination = "bc1qdpaygoldenwithdrawaladdress".to_string();
     const W_AMOUNT: u64 = 50_000; // exactly retrieve_btc_min_amount
     let w_nonce = [42u8; NONCE_LEN];
     const W_EXPIRY: u64 = 4_102_444_800;
@@ -279,7 +279,7 @@ fn withdraw_layout() -> WithdrawLayout {
 
     let auth = WithdrawAuth {
         from_pubkey: public,
-        btc_address: btc_address.clone(),
+        destination: destination.clone(),
         amount: W_AMOUNT,
         nonce: w_nonce,
         expiry: W_EXPIRY,
@@ -302,7 +302,7 @@ fn withdraw_layout() -> WithdrawLayout {
         golden: GoldenWithdraw {
             secret_hex: hex(&secret.to_bytes()),
             public_hex: hex(&public),
-            btc_address,
+            destination,
             amount: W_AMOUNT,
             nonce_hex: hex(&w_nonce),
             expiry: W_EXPIRY,
@@ -530,7 +530,7 @@ mod tests {
 
         let signing = hex::decode(&g.signing_hex).expect("withdraw signing_hex decodes");
         // Length = fixed prefix + 4-byte addr len + the address bytes.
-        let addr_bytes = g.btc_address.as_bytes();
+        let addr_bytes = g.destination.as_bytes();
         assert_eq!(
             signing.len(),
             w.fixed_len + w.addr_len_bytes + addr_bytes.len(),
@@ -550,7 +550,7 @@ mod tests {
             signing[w.fields.address_len.offset..][..W_ADDR_LEN_BYTES].try_into().unwrap(),
         ) as usize;
         let addr_start = w.fields.address_len.offset + W_ADDR_LEN_BYTES;
-        let btc_address = std::str::from_utf8(&signing[addr_start..addr_start + addr_len])
+        let destination = std::str::from_utf8(&signing[addr_start..addr_start + addr_len])
             .unwrap()
             .to_string();
 
@@ -559,9 +559,9 @@ mod tests {
         assert_eq!(nonce, hex::decode(&g.nonce_hex).unwrap()[..]);
         assert_eq!(expiry, g.expiry);
         assert_eq!(currency, g.currency);
-        assert_eq!(btc_address, g.btc_address);
+        assert_eq!(destination, g.destination);
 
-        let auth = WithdrawAuth { from_pubkey: from, btc_address: btc_address.clone(), amount, nonce, expiry, currency };
+        let auth = WithdrawAuth { from_pubkey: from, destination: destination.clone(), amount, nonce, expiry, currency };
         assert_eq!(auth.signing_bytes(), signing[..], "emitted offsets must reproduce signing_bytes()");
 
         // The golden sig verifies over the reconstructed bytes under the golden key.

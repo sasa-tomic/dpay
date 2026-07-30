@@ -140,7 +140,7 @@ pub struct DepositInfo {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WithdrawRequest {
     pub from: String,
-    pub btc_address: String,
+    pub destination: String,
     pub amount: u64,
     pub nonce: String,
     pub expiry: u64,
@@ -153,7 +153,7 @@ pub struct WithdrawRequest {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct WithdrawReceipt {
     pub from: String,
-    pub btc_address: String,
+    pub destination: String,
     pub amount: u64,
     pub nonce: String,
     pub currency: Currency,
@@ -758,7 +758,7 @@ impl Ledger for FakeLedger {
         // checks the sig before the nonce reserve.)
         let auth = WithdrawAuth {
             from_pubkey: from,
-            btc_address: req.btc_address.clone(),
+            destination: req.destination.clone(),
             amount: req.amount,
             nonce,
             expiry: req.expiry,
@@ -811,7 +811,7 @@ impl Ledger for FakeLedger {
         });
         Ok(WithdrawReceipt {
             from: hex::encode(from),
-            btc_address: req.btc_address,
+            destination: req.destination,
             amount: req.amount,
             nonce: hex::encode(nonce),
             currency: req.currency,

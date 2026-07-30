@@ -214,7 +214,7 @@ pub fn verify_wire(wire: &[u8]) -> Result<bool, DpayError> {
     Ok(signed.verify())
 }
 
-/// Payer side: build a `WithdrawAuth {from_pubkey, btc_address, amount, nonce, expiry, currency}` and
+/// Payer side: build a `WithdrawAuth {from_pubkey, destination, amount, nonce, expiry, currency}` and
 /// sign it **offline**, returning the 64-byte Ed25519 signature. This is the non-custodial withdrawal
 /// gate: the facade verifies this signature under `from_pubkey` (== the ckBTC debit subaccount)
 /// before moving any funds. `from_pubkey` is derived from the secret; a mismatched arg is ignored in
@@ -232,7 +232,7 @@ pub fn sign_withdrawal(
     let sk = signing_key_from_seed(secret)?;
     let from = sk.verifying_key().to_bytes();
     let nonce = fixed_nonce(nonce)?;
-    let auth = WithdrawAuth { from_pubkey: from, btc_address, amount, nonce, expiry, currency };
+    let auth = WithdrawAuth { from_pubkey: from, destination: btc_address, amount, nonce, expiry, currency };
     Ok(dpay_core::sign_withdraw(&sk, &auth).to_bytes().to_vec())
 }
 

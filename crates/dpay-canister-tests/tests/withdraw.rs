@@ -105,7 +105,7 @@ struct MockMinterInit {
 #[derive(CandidType, serde::Serialize)]
 struct WithdrawRequest {
     from_pubkey: Vec<u8>,
-    btc_address: String,
+    destination: String,
     amount: u64,
     nonce: Vec<u8>,
     expiry: u64,
@@ -116,7 +116,7 @@ struct WithdrawRequest {
 #[derive(CandidType, Deserialize, Debug)]
 struct WithdrawReceipt {
     from: Vec<u8>,
-    btc_address: String,
+    destination: String,
     amount: u64,
     nonce: Vec<u8>,
     currency: Currency,
@@ -218,7 +218,7 @@ fn ledger_balance(pic: &PocketIc, ledger: Principal, dpay: Principal, pk: [u8; 3
 fn withdraw_request(
     sk: &SigningKey,
     from: [u8; 32],
-    btc_address: &str,
+    destination: &str,
     amount: u64,
     nonce: [u8; 16],
     expiry: u64,
@@ -226,7 +226,7 @@ fn withdraw_request(
 ) -> WithdrawRequest {
     let auth = WithdrawAuth {
         from_pubkey: from,
-        btc_address: btc_address.to_string(),
+        destination: destination.to_string(),
         amount,
         nonce,
         expiry,
@@ -235,7 +235,7 @@ fn withdraw_request(
     let sig = sign_withdraw(sk, &auth).to_bytes();
     WithdrawRequest {
         from_pubkey: from.to_vec(),
-        btc_address: btc_address.to_string(),
+        destination: destination.to_string(),
         amount,
         nonce: nonce.to_vec(),
         expiry,
@@ -347,7 +347,7 @@ fn withdraw_debits_ckbtc_from_subaccount() {
     );
     let receipt = withdraw(&pic, dpay, req).expect("withdraw should succeed");
     assert_eq!(receipt.amount, WITHDRAW);
-    assert_eq!(receipt.btc_address, "bc1qwithdrawaldestination");
+    assert_eq!(receipt.destination, "bc1qwithdrawaldestination");
     assert_eq!(receipt.currency, CKBTC);
 
     // The ckBTC was debited from the user's subaccount (read DIRECTLY off the ledger).
@@ -418,7 +418,7 @@ fn wrong_sig_rejected_no_funds_move() {
     let other_sk = generate_keypair();
     let auth = WithdrawAuth {
         from_pubkey: payer,
-        btc_address: "bc1qattacker".to_string(),
+        destination: "bc1qattacker".to_string(),
         amount: 50_000,
         nonce: [3u8; 16],
         expiry: T0_SECS + 120,
@@ -427,7 +427,7 @@ fn wrong_sig_rejected_no_funds_move() {
     let wrong_sig = sign_withdraw(&other_sk, &auth).to_bytes();
     let req = WithdrawRequest {
         from_pubkey: payer.to_vec(),
-        btc_address: "bc1qattacker".to_string(),
+        destination: "bc1qattacker".to_string(),
         amount: 50_000,
         nonce: vec![3u8; 16],
         expiry: T0_SECS + 120,

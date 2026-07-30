@@ -930,7 +930,7 @@ enum RetrieveBtcWithApprovalError {
 #[derive(CandidType, Deserialize)]
 struct WithdrawRequest {
     from_pubkey: Vec<u8>,
-    btc_address: String,
+    destination: String,
     amount: u64,
     nonce: Vec<u8>,
     expiry: u64,
@@ -940,14 +940,14 @@ struct WithdrawRequest {
 
 /// The facade's withdrawal receipt, returned on a successful burn. Mirrors the relay's
 /// [`crate::WithdrawReceipt`] surface. `block_index` is the ckBTC ledger's burn transaction index
-/// (from the minter's `RetrieveBtcOk`); `amount`/`btc_address` echo the authorization so the app can
+/// (from the minter's `RetrieveBtcOk`); `amount`/`destination` echo the authorization so the app can
 /// render "Withdrew X BTC to bc1…". (No canister-signed receipt for withdraw — the pay receipt (R2)
 /// is the outcome-attestation surface; the withdraw outcome is the on-ledger burn + the minter's BTC
 // send, reconciled via the ckBTC ledger / `retrieve_btc_status`, not a facade signature.)
 #[derive(CandidType, Deserialize, Clone, Debug)]
 struct WithdrawReceipt {
     from: Vec<u8>,
-    btc_address: String,
+    destination: String,
     amount: u64,
     nonce: Vec<u8>,
     currency: Currency,
@@ -1868,7 +1868,7 @@ async fn withdraw(req: WithdrawRequest) -> Result<WithdrawReceipt, String> {
     //    reserve so an attacker can't block a nonce by submitting a garbled blob.
     let auth = WithdrawAuth {
         from_pubkey: from,
-        btc_address: req.btc_address.clone(),
+        destination: req.destination.clone(),
         amount: req.amount,
         nonce: nonce_bytes,
         expiry: req.expiry,
@@ -1929,14 +1929,14 @@ async fn withdraw(req: WithdrawRequest) -> Result<WithdrawReceipt, String> {
     }
 
     // 6. retrieve_btc_with_approval: the minter consumes the allowance (transfer_from) and sends BTC
-    //    to `btc_address`. Error classification (mirrors `pay`'s reserve/release/settle):
+    //    to `destination`. Error classification (mirrors `pay`'s reserve/release/settle):
     //      Ok → SETTLE the nonce (burn committed; the auth can never replay → no double-burn);
     //      transient (TemporarilyUnavailable / AlreadyProcessing / InsufficientFunds /
     //      InsufficientAllowance / a transport failure) → RELEASE (retryable; funds did not move);
     //      permanent (MalformedAddress / AmountTooLow / GenericError) → SETTLE (dead auth; the user
     //      must sign a fresh authorization).
     let retrieve_args = RetrieveBtcWithApprovalArgs {
-        address: req.btc_address.clone(),
+        address: req.destination.clone(),
         amount: req.amount,
         from_subaccount: Some(from.to_vec()),
     };
@@ -1987,7 +1987,7 @@ async fn withdraw(req: WithdrawRequest) -> Result<WithdrawReceipt, String> {
     }
     Ok(WithdrawReceipt {
         from: from.to_vec(),
-        btc_address: req.btc_address,
+        destination: req.destination,
         amount: req.amount,
         nonce: nonce_bytes.to_vec(),
         currency: req.currency,

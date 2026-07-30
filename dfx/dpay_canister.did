@@ -78,21 +78,21 @@ type TxnView = record {
   amount : nat64;
 };
 type WithdrawReceipt = record {
+  destination : text;
   block_index : nat64;
   from : blob;
   currency : nat32;
   nonce : blob;
   amount : nat64;
-  btc_address : text;
 };
 type WithdrawRequest = record {
   sig : blob;
+  destination : text;
   currency : nat32;
   nonce : blob;
   from_pubkey : blob;
   expiry : nat64;
   amount : nat64;
-  btc_address : text;
 };
 service : (InitArg) -> {
   // `balance_of(blob, nat32) -> nat64` — now a **query** returning the display-only cache. The cache
