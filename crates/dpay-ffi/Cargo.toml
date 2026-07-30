@@ -16,6 +16,10 @@ crate-type = ["cdylib", "lib"]
 [[bin]]
 name = "uniffi-bindgen"
 path = "src/bin/uniffi-bindgen.rs"
+# Only build the generator when its deps (clap/camino/uniffi_bindgen) are pulled in via `cli`;
+# a bare `cargo build -p dpay-ffi` then builds just the cdylib+lib (the bin calls uniffi::uniffi_bindgen_main,
+# which the `uniffi` crate only exposes under its own `cli` feature).
+required-features = ["cli"]
 
 [dependencies]
 # The SAME core that the canister, relay, and sim link. `rng` for on-device keypair generation.

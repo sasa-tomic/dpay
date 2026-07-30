@@ -40,9 +40,21 @@ echo "== default relay baked into APK: $RELAY_URL =="
 
 echo "== cross-compile dpay-ffi (.so per ABI) + sync into the app =="
 bash scripts/ndk-build-ffi.sh
-mkdir -p app/android/app/src/main/jniLibs app/android/app/src/main/java/uniffi/dpay_ffi
+mkdir -p app/android/app/src/main/jniLibs
 cp -r android/app/src/main/jniLibs/* app/android/app/src/main/jniLibs/
-cp crates/dpay-ffi/bindings/kotlin/uniffi/dpay_ffi/dpay_ffi.kt app/android/app/src/main/java/uniffi/dpay_ffi/dpay_ffi.kt
+
+echo "== generate fresh Kotlin binding from the host cdylib (never ships a stale binding) =="
+# The .kt must match the FFI source the .so was built from. Build the host cdylib + the in-crate
+# bindgen (same pinned uniffi) and generate straight into the app's java tree. UniFFI's interface
+# checksum is target-independent, so a binding generated from the host .so loads the cross-compiled
+# .so (same source) without checksum mismatch — exactly what crates/dpay-ffi/verify.sh relies on.
+export CARGO_HOME="$ROOT/.dev/cargo" RUSTUP_HOME="$ROOT/.dev/rustup"
+export PATH="$ROOT/.dev/cargo/bin:$PATH"
+cargo build -p dpay-ffi --features cli
+JAVA_PKG="app/android/app/src/main/java"
+rm -rf "$JAVA_PKG/uniffi"
+target/debug/uniffi-bindgen generate --library target/debug/libdpay_ffi.so --language kotlin --out-dir "$JAVA_PKG" --no-format
+test -f "$JAVA_PKG/uniffi/dpay_ffi/dpay_ffi.kt" || { echo "FAIL: Kotlin binding not generated"; exit 1; }
 
 echo "== assemble release APK ($ABIS) =="
 cd app/android

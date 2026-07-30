@@ -776,6 +776,10 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is 
 // rather `InterfaceTooLargeException`, caused by too many methods 
@@ -815,7 +819,11 @@ fun uniffi_dpay_ffi_checksum_func_nfc_request_bytes(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_sign_authorization(
 ): Short
+fun uniffi_dpay_ffi_checksum_func_sign_withdrawal(
+): Short
 fun uniffi_dpay_ffi_checksum_func_validate(
+): Short
+fun uniffi_dpay_ffi_checksum_func_verify_receipt_sig(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_verify_wire(
 ): Short
@@ -964,8 +972,12 @@ fun uniffi_dpay_ffi_fn_func_nfc_request_bytes(`to`: RustBuffer.ByValue,`amount`:
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_sign_authorization(`secret`: RustBuffer.ByValue,`to`: RustBuffer.ByValue,`amount`: Long,`nonce`: RustBuffer.ByValue,`expiry`: Long,`currency`: Int,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_sign_withdrawal(`secret`: RustBuffer.ByValue,`btcAddress`: RustBuffer.ByValue,`amount`: Long,`nonce`: RustBuffer.ByValue,`expiry`: Long,`currency`: Int,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_validate(`amount`: Long,`now`: Long,`expiry`: Long,`cap`: Long,`balance`: Long,`nonceSeen`: Byte,`sigOk`: Byte,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_verify_receipt_sig(`nonce`: RustBuffer.ByValue,`from`: RustBuffer.ByValue,`to`: RustBuffer.ByValue,`amount`: Long,`currency`: Int,`blockIndex`: Long,`settleTs`: Long,`receiptSig`: RustBuffer.ByValue,`pubkey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
 fun uniffi_dpay_ffi_fn_func_verify_wire(`wire`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
 fun ffi_dpay_ffi_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1130,7 +1142,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_dpay_ffi_checksum_func_sign_authorization() != 47305.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_dpay_ffi_checksum_func_sign_withdrawal() != 61533.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_dpay_ffi_checksum_func_validate() != 15932.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_verify_receipt_sig() != 38282.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_verify_wire() != 29445.toShort()) {
@@ -2495,6 +2513,14 @@ sealed class DpayException: kotlin.Exception() {
             get() = ""
     }
     
+    class BadInput(
+        
+        val v1: kotlin.String
+        ) : DpayException() {
+        override val message
+            get() = "v1=${ v1 }"
+    }
+    
     class NfcWrongState(
         ) : DpayException() {
         override val message
@@ -2535,9 +2561,12 @@ public object FfiConverterTypeDpayError : FfiConverterRustBuffer<DpayException> 
             4 -> DpayException.BadBase64()
             5 -> DpayException.BadWireLength()
             6 -> DpayException.PubkeyMismatch()
-            7 -> DpayException.NfcWrongState()
-            8 -> DpayException.NfcNotDpay()
-            9 -> DpayException.NfcProtocol()
+            7 -> DpayException.BadInput(
+                FfiConverterString.read(buf),
+                )
+            8 -> DpayException.NfcWrongState()
+            9 -> DpayException.NfcNotDpay()
+            10 -> DpayException.NfcProtocol()
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
     }
@@ -2567,6 +2596,11 @@ public object FfiConverterTypeDpayError : FfiConverterRustBuffer<DpayException> 
             is DpayException.PubkeyMismatch -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
+            )
+            is DpayException.BadInput -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.v1)
             )
             is DpayException.NfcWrongState -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
@@ -2609,16 +2643,21 @@ public object FfiConverterTypeDpayError : FfiConverterRustBuffer<DpayException> 
                 buf.putInt(6)
                 Unit
             }
-            is DpayException.NfcWrongState -> {
+            is DpayException.BadInput -> {
                 buf.putInt(7)
+                FfiConverterString.write(value.v1, buf)
                 Unit
             }
-            is DpayException.NfcNotDpay -> {
+            is DpayException.NfcWrongState -> {
                 buf.putInt(8)
                 Unit
             }
-            is DpayException.NfcProtocol -> {
+            is DpayException.NfcNotDpay -> {
                 buf.putInt(9)
+                Unit
+            }
+            is DpayException.NfcProtocol -> {
+                buf.putInt(10)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
@@ -2950,6 +2989,24 @@ public object FfiConverterOptionalByteArray: FfiConverterRustBuffer<kotlin.ByteA
     
 
         /**
+         * Payer side: build a `WithdrawAuth {from_pubkey, btc_address, amount, nonce, expiry, currency}` and
+         * sign it **offline**, returning the 64-byte Ed25519 signature. This is the non-custodial withdrawal
+         * gate: the facade verifies this signature under `from_pubkey` (== the ckBTC debit subaccount)
+         * before moving any funds. `from_pubkey` is derived from the secret; a mismatched arg is ignored in
+         * favour of the key's own public bytes. The canonical signing bytes come from `dpay_core` (single
+         * source of truth), so this is the exact signature the canister/relay verify.
+         */
+    @Throws(DpayException::class) fun `signWithdrawal`(`secret`: kotlin.ByteArray, `btcAddress`: kotlin.String, `amount`: kotlin.ULong, `nonce`: kotlin.ByteArray, `expiry`: kotlin.ULong, `currency`: kotlin.UInt): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_sign_withdrawal(
+        FfiConverterByteArray.lower(`secret`),FfiConverterString.lower(`btcAddress`),FfiConverterULong.lower(`amount`),FfiConverterByteArray.lower(`nonce`),FfiConverterULong.lower(`expiry`),FfiConverterUInt.lower(`currency`),_status)
+}
+    )
+    }
+    
+
+        /**
          * Pure policy check, mirroring the canister's settlement gate. Returns `None` when the payment
          * is acceptable, or `Some(reason)` (e.g. `"expired"`, `"over_cap"`) when it must be rejected.
          *
@@ -2961,6 +3018,23 @@ public object FfiConverterOptionalByteArray: FfiConverterRustBuffer<kotlin.ByteA
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_validate(
         FfiConverterULong.lower(`amount`),FfiConverterULong.lower(`now`),FfiConverterULong.lower(`expiry`),FfiConverterULong.lower(`cap`),FfiConverterULong.lower(`balance`),FfiConverterBoolean.lower(`nonceSeen`),FfiConverterBoolean.lower(`sigOk`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Verify a canister/ledger-signed receipt signature (R2 outcome attestation). Returns `true` iff
+         * `receipt_sig` (64 bytes) is a valid Ed25519 signature over the canonical `ReceiptClaim` built
+         * from the claim fields, under the 32-byte receipt `pubkey`. The app calls this before showing
+         * "Paid ✓" so the outcome rests on a canister/ledger-authenticated signature, not merchant/relay
+         * honesty. Mirrors `dpay_core::verify_receipt` (strict verify, rejects weak keys).
+         */
+    @Throws(DpayException::class) fun `verifyReceiptSig`(`nonce`: kotlin.ByteArray, `from`: kotlin.ByteArray, `to`: kotlin.ByteArray, `amount`: kotlin.ULong, `currency`: kotlin.UInt, `blockIndex`: kotlin.ULong, `settleTs`: kotlin.ULong, `receiptSig`: kotlin.ByteArray, `pubkey`: kotlin.ByteArray): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_verify_receipt_sig(
+        FfiConverterByteArray.lower(`nonce`),FfiConverterByteArray.lower(`from`),FfiConverterByteArray.lower(`to`),FfiConverterULong.lower(`amount`),FfiConverterUInt.lower(`currency`),FfiConverterULong.lower(`blockIndex`),FfiConverterULong.lower(`settleTs`),FfiConverterByteArray.lower(`receiptSig`),FfiConverterByteArray.lower(`pubkey`),_status)
 }
     )
     }
