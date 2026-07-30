@@ -128,6 +128,11 @@ const STORAGE_KEY = 'dpay.identity.v1';
 
 const usd = (c: number) => `$${Math.floor(c / 100)}.${String(c % 100).padStart(2, '0')}`;
 const short = (h: string) => `${h.slice(0, 8)}…`;
+// The MINT_ACCOUNT sentinel — 32 bytes of 0xFF, hex-encoded as 64 `f`s. The canister records faucet
+// mints and withdrawals with this as the counterparty; we detect it and render a friendly label
+// instead of leaking raw protocol data ("from ffffffff…") to end users (N4).
+const MINT_HEX = 'ff'.repeat(32);
+const isMintSentinel = (h: string) => h.toLowerCase() === MINT_HEX;
 // Format a unix-seconds timestamp as HH:MM (24h, local) — the durable history rows are sourced from
 // the ledger (which settle on `ic time / 1e9`).
 const fmtTime = (ts: number) => { const d = new Date(ts * 1000); return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`; };
@@ -293,6 +298,26 @@ function useEscapeToClose(onClose: () => void): void {
 }
 
 /**
+ * Read text from the system clipboard when available (for the Pay "paste request" fallback — N10).
+ * Web uses navigator.clipboard.readText; native would use @react-native-clipboard/clipboard (not
+ * bundled, so the Share path is the fallback). Returns null on any failure (permission denied, no
+ * clipboard API, empty clipboard).
+ */
+async function readFromClipboard(): Promise<string | null> {
+  if (Platform.OS === 'web') {
+    try {
+      const clip = (globalThis as {navigator?: {clipboard?: {readText?: () => Promise<string>}}}).navigator?.clipboard;
+      if (clip && typeof clip.readText === 'function') {
+        return await clip.readText();
+      }
+    } catch (e) {
+      console.warn('[dpay] clipboard read failed:', String(e));
+    }
+  }
+  return null;
+}
+
+/**
  * Web-only deep link: `?screen=deposit` auto-opens the deposit sheet on load (so the page is
  * bookmarkable/shareable to top-up, and the e2e harness can deep-link straight in). Harmless on
  * native — there's no URL bar, and Platform.OS !== 'web' short-circuits before reading location.
@@ -409,7 +434,7 @@ function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: (id: Id
         <Wordmark style={S.wordmarkBig} />
         <Text style={S.onboardSub}>Tap or scan to pay — online or offline.</Text>
         <Text style={S.label}>Choose a username</Text>
-        <TextInput style={S.usernameInput} value={username} onChangeText={setUsername} placeholder="e.g. Alice" placeholderTextColor={C.sub2} autoCapitalize="words" autoCorrect={false} />
+        <TextInput testID="username-input" style={S.usernameInput} value={username} onChangeText={setUsername} placeholder="e.g. Alice" placeholderTextColor={C.sub2} autoCapitalize="words" autoCorrect={false} onSubmitEditing={busy ? undefined : create} />
         {err ? <Text style={S.err}>{err}</Text> : null}
         <Pressable testID="btn-create" style={[S.primary, busy && S.dim]} disabled={busy} onPress={create}>
           <Text style={S.primaryText}>{busy ? 'Creating…' : 'Create & fund wallet'}</Text>
@@ -446,8 +471,11 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
   // Withdraw sheet (ckBTC → native BTC out). Opens from the ckBTC asset card's "Withdraw" affordance
   // (only shown when the ckBTC balance is non-zero). Independent state from the deposit sheet.
   const [withdrawOpen, setWithdrawOpen] = useState<boolean>(false);
+  // Settings sheet — relay URL, demo faucet, reset (UX-V2/V3: moved off the main screen into its
+  // own overlay so the wallet surface is clean, and reset gets a confirmation dialog).
+  const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
 
-  const TOP_UP_CENTS = 5000; // $50.00 in minor units
+  const TOP_UP_CENTS = 10_000; // mirrors the canister's fixed FAUCET_AMOUNT ($100.00)
 
   // Read the device NFC radio state once (re-checked when the app returns to the foreground, since
   // the user may toggle NFC in system settings). Purely informational for the status chip; failure
@@ -509,7 +537,10 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
         const me = identity.publicHex.toLowerCase();
         setHistory((j.transactions as TransactionsRow[]).map((rec): Txn => {
           const dir: 'out' | 'in' = rec.from.toLowerCase() === me ? 'out' : 'in';
-          const who = dir === 'out' ? short(rec.to) : short(rec.from);
+          const counterparty = dir === 'out' ? rec.to.toLowerCase() : rec.from.toLowerCase();
+          const who = isMintSentinel(counterparty)
+            ? (dir === 'in' ? 'Demo funds' : 'Withdrawal')
+            : short(dir === 'out' ? rec.to : rec.from);
           return {nonce: rec.nonce, amount: rec.amount, who, time: fmtTime(rec.timestamp), dir};
         }));
       }
@@ -549,7 +580,11 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
       if (r.ok && typeof j.balance === 'number') {
         setBalance(j.balance); setOnline(true); setOfflineSpent(0);
       } else {
-        setTopUpErr(r.ok ? 'Top-up failed' : 'Faucet unavailable');
+        // N5: surface the relay/canister's real reason (e.g. "faucet cooldown: try again in ~58 min")
+        // rather than a generic "Faucet unavailable". The canister returns the retry time; showing it
+        // tells the user WHEN to retry instead of leaving them guessing.
+        const reason = typeof j?.error === 'string' && j.error.length > 0 ? j.error : null;
+        setTopUpErr(reason ?? (r.ok ? 'Top-up failed' : 'Faucet unavailable'));
       }
     } catch {
       setTopUpErr('Offline — try again when connected');
@@ -576,19 +611,13 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
           </View>
           <View style={S.balAmtRow}>
             <Text testID="balance" style={S.balAmt}>{shownBalance == null ? '—' : `${online ? '' : '~'}${usd(shownBalance)}`}</Text>
-            <Pressable testID="btn-topup" style={[S.topUpBtn, topUpBusy && S.dim]} disabled={topUpBusy} onPress={topUp}>
-              {topUpBusy
-                ? <ActivityIndicator size="small" color={C.brand} />
-                : <Text style={S.topUpText}>+ ${TOP_UP_CENTS / 100}</Text>}
-            </Pressable>
             {/* The PRIMARY funding affordance: a real chain-key deposit (ckBTC). Promoted from a
                 jargon "ckBTC" pill to a clear "Add money" button so topping up is the obvious next
-                action. The DEMO_USD faucet (btn-topup) stays secondary. Opens DepositSheet. */}
+                action. Opens DepositSheet. The demo faucet ($100 play money) moved to Settings. */}
             <Pressable testID="btn-deposit" style={S.addMoneyBtn} onPress={() => setDepositOpen(true)}>
               <Text style={S.addMoneyBtnText}>＋ Add money</Text>
             </Pressable>
           </View>
-          {topUpErr ? <Text style={S.topUpErr}>{topUpErr}</Text> : null}
         </View>
       </View>
 
@@ -634,10 +663,10 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
         ) : null}
       </ScrollView>
 
-      <View style={S.settings}>
-        <Text style={S.settingsLabel}>ledger</Text>
-        <TextInput testID="settings-relay" style={S.settingsInput} value={relayUrl} onChangeText={setRelayUrl} autoCapitalize="none" autoCorrect={false} placeholder="http://<ip>:8787" placeholderTextColor={C.sub2} />
-        <Pressable testID="btn-reset" onPress={onReset}><Text style={S.resetLink}>reset</Text></Pressable>
+      <View style={S.settingsBar}>
+        <Pressable testID="btn-settings" style={S.settingsLinkBtn} onPress={() => setSettingsOpen(true)}>
+          <Text style={S.settingsLink}>⚙ Settings</Text>
+        </Pressable>
       </View>
 
       {depositOpen ? (
@@ -650,6 +679,17 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
           ckBtcBalance={ckBtcBalance ?? 0}
           onClose={() => setWithdrawOpen(false)}
           onWithdrawn={onActivity}
+        />
+      ) : null}
+      {settingsOpen ? (
+        <SettingsSheet
+          relayUrl={relayUrl}
+          setRelayUrl={setRelayUrl}
+          onTopUp={topUp}
+          topUpBusy={topUpBusy}
+          topUpErr={topUpErr}
+          onClose={() => setSettingsOpen(false)}
+          onReset={onReset}
         />
       ) : null}
     </SafeAreaView>
@@ -1141,6 +1181,15 @@ function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOfflinePaid
           <Text style={S.label}>{nfcReady ? 'Tap or scan to pay' : 'Scan a request to pay'}</Text>
           <QrScanner onScan={onRequestString} />
           <Text style={S.dim2}>{nfcReady ? "Tap the merchant's phone, or point at its request QR" : "Point at the payee's request QR"}</Text>
+          {/* N10: paste-request fallback — on web/desktop where there's no camera or NFC, the user can
+              paste a request string they copied or received via another channel. The decode path
+              accepts a raw string identical to what the scanner produces. */}
+          <Pressable testID="btn-paste" style={S.linkBtn} onPress={async () => {
+            const text = await readFromClipboard();
+            if (text && text.trim()) onRequestString(text.trim());
+          }}>
+            <Text style={S.linkText}>Paste request</Text>
+          </Pressable>
           {err ? <Text style={S.err}>{err}</Text> : null}
         </>
       ) : null}
@@ -1303,8 +1352,16 @@ function DepositSheet({identity, relayUrl, onClose}: {identity: Identity; relayU
         ]);
         if (!alive) return;
         setInfo(i); setAddress(a);
-      } catch {
-        if (alive) setErr('Could not reach the ledger for a deposit address');
+      } catch (e: any) {
+        // N7: distinguish "no minter" (503 — the asset has no ck-minter configured) from a transient
+        // network/relay error. The relay returns 503 when no minter is registered for this currency;
+        // the deposit fetch functions throw with the status in the message. A missing status means a
+        // network error (relay unreachable).
+        const msg = String(e?.message ?? e);
+        const isNoMinter = /503/.test(msg);
+        if (alive) setErr(isNoMinter
+          ? 'Direct deposit for this asset isn\'t available yet.'
+          : 'Could not reach the ledger for a deposit address');
       } finally {
         if (alive) setLoading(false);
         clearTimeout(t);
@@ -1380,7 +1437,7 @@ function DepositSheet({identity, relayUrl, onClose}: {identity: Identity; relayU
           ) : err || !address ? (
             <View style={S.centerAll}>
               <Text style={S.err}>{err ?? 'No deposit address available'}</Text>
-              <Text style={S.dim2}>Check the relay is reachable, then reopen the sheet.</Text>
+              <Text style={S.dim2}>{err?.includes("isn't available") ? 'This asset may not have a deposit minter configured yet.' : 'Check the relay is reachable, then reopen the sheet.'}</Text>
             </View>
           ) : minted ? (
             <View style={S.centerAll}>
@@ -1587,6 +1644,93 @@ function WithdrawSheet({identity, relayUrl, ckBtcBalance, onClose, onWithdrawn}:
   );
 }
 
+/**
+ * Settings sheet — relay URL, demo faucet, reset. Moved off the main wallet screen (UX-V2: the
+ * relay URL + bare red reset were dev chrome on a consumer surface) into its own overlay. Reset now
+ * requires a confirmation dialog (UX-V3: one-tap identity wipe was dangerous). The demo faucet lives
+ * here too (founder decision: keep it, label it clearly, surface the cooldown).
+ */
+function SettingsSheet({relayUrl, setRelayUrl, onTopUp, topUpBusy, topUpErr, onClose, onReset}: {
+  relayUrl: string;
+  setRelayUrl: (s: string) => void;
+  onTopUp: () => void;
+  topUpBusy: boolean;
+  topUpErr: string | null;
+  onClose: () => void;
+  onReset: () => void;
+}) {
+  useEscapeToClose(onClose);
+  const [confirmReset, setConfirmReset] = useState(false);
+
+  return (
+    <View style={S.sheetOverlay}>
+      <SafeAreaView style={S.sheet}>
+        <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+        <View style={S.sheetHead}>
+          <Text style={S.sheetTitle}>Settings</Text>
+          <Pressable testID="btn-settings-close" style={S.sheetClose} onPress={onClose}><Text style={S.sheetCloseX}>✕</Text></Pressable>
+        </View>
+
+        <ScrollView contentContainerStyle={S.sheetBody} keyboardShouldPersistTaps="handled">
+          {/* Relay URL */}
+          <View style={S.settingsSection}>
+            <Text style={S.inputLabel}>Relay URL</Text>
+            <TextInput
+              testID="settings-relay"
+              style={S.relayInput}
+              value={relayUrl}
+              onChangeText={setRelayUrl}
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholder="http://<ip>:8787"
+              placeholderTextColor={C.sub2}
+            />
+            <Text style={S.dim2}>The server your wallet talks to. Change this to point at a different network.</Text>
+          </View>
+
+          {/* Demo faucet */}
+          <View style={S.settingsSection}>
+            <Text style={S.inputLabel}>Demo funds</Text>
+            <Text style={S.dim2}>Add play money for testing. Limited to once per hour on the real network.</Text>
+            <Pressable
+              testID="btn-topup"
+              style={[S.primaryWide, topUpBusy && S.dim]}
+              disabled={topUpBusy}
+              onPress={onTopUp}>
+              {topUpBusy
+                ? <ActivityIndicator size="small" color={C.brandInk} />
+                : <Text style={S.primaryText}>Add demo money</Text>}
+            </Pressable>
+            {topUpErr ? <Text testID="topup-err" style={S.topUpErr}>{topUpErr}</Text> : null}
+          </View>
+
+          {/* Reset */}
+          <View style={S.settingsSection}>
+            <Text style={S.inputLabel}>Reset</Text>
+            {confirmReset ? (
+              <View style={S.resetConfirmBox}>
+                <Text style={S.warnNote}>This erases your wallet identity from this device. Funds at this address become irrecoverable. This cannot be undone.</Text>
+                <Pressable testID="btn-reset-confirm" style={[S.primaryWide, {backgroundColor: C.bad, marginTop: 16}]} onPress={onReset}>
+                  <Text style={S.primaryText}>Yes, reset everything</Text>
+                </Pressable>
+                <Pressable testID="btn-reset-cancel" style={S.linkBtn} onPress={() => setConfirmReset(false)}>
+                  <Text style={S.linkTextMuted}>Cancel</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <Pressable testID="btn-reset" style={S.linkBtn} onPress={() => setConfirmReset(true)}>
+                <Text style={S.resetLink}>Reset wallet</Text>
+              </Pressable>
+            )}
+          </View>
+
+          {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
+        </ScrollView>
+      </SafeAreaView>
+    </View>
+  );
+}
+
 const S = StyleSheet.create({
   root: {flex: 1, backgroundColor: C.bg},
   centerAll: {alignItems: 'center', justifyContent: 'center'},
@@ -1597,7 +1741,7 @@ const S = StyleSheet.create({
   brandBig: {fontSize: 44, fontWeight: '800', color: C.brand, textAlign: 'center'},
   onboardSub: {fontSize: 15, color: C.sub, textAlign: 'center', marginTop: 8, marginBottom: 40, paddingHorizontal: 12, lineHeight: 22},
   usernameInput: {backgroundColor: C.field, borderRadius: 14, height: 60, paddingHorizontal: 18, fontSize: 20, color: C.ink, marginBottom: 8, borderWidth: 1, borderColor: C.line2, alignSelf: 'stretch'},
-  header: {paddingTop: 20, paddingHorizontal: 22, paddingBottom: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', borderBottomWidth: 1, borderBottomColor: C.line},
+  header: {paddingTop: 20, paddingLeft: 22, paddingRight: 30, paddingBottom: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', borderBottomWidth: 1, borderBottomColor: C.line},
   brand: {fontSize: 24},
   who: {fontSize: 12, color: C.sub, marginTop: 2},
   nfcPill: {flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6, alignSelf: 'flex-start', backgroundColor: C.field, borderRadius: 12, paddingHorizontal: 9, height: 22},
@@ -1611,9 +1755,7 @@ const S = StyleSheet.create({
   demoPill: {backgroundColor: 'rgba(62,224,172,0.12)', borderRadius: 5, paddingHorizontal: 5, paddingVertical: 1, marginLeft: 2},
   demoPillText: {fontSize: 9, fontWeight: '800', color: C.brand, letterSpacing: 0.5},
   balAmtRow: {flexDirection: 'row', alignItems: 'center', gap: 8},
-  topUpBtn: {borderWidth: 1, borderColor: C.brand, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5},
-  topUpText: {fontSize: 13, fontWeight: '700', color: C.brand},
-  topUpErr: {fontSize: 10, color: C.bad, marginTop: 3, textAlign: 'right'},
+  topUpErr: {fontSize: 13, color: C.bad, marginTop: 8, textAlign: 'center'},
   dot: {width: 8, height: 8, borderRadius: 4},
   balLabel: {fontSize: 12, color: C.sub},
   balAmt: {fontSize: 26, fontWeight: '800', color: C.ink},
@@ -1674,10 +1816,13 @@ const S = StyleSheet.create({
   assetLabel: {fontSize: 16, fontWeight: '700', color: C.ink},
   assetAmt: {fontSize: 16, fontWeight: '700', color: C.brand, fontFamily: 'monospace'},
   assetSub: {fontSize: 12, color: C.sub2, marginTop: 6},
-  settings: {flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 22, paddingVertical: 8, borderTopWidth: 1, borderTopColor: C.line},
-  settingsLabel: {fontSize: 12, fontWeight: '700', color: C.sub2, textTransform: 'uppercase', letterSpacing: 1, fontFamily: 'monospace'},
-  settingsInput: {flex: 1, fontSize: 12, color: C.ink, fontFamily: 'monospace', paddingVertical: 4},
-  resetLink: {fontSize: 12, color: C.bad, fontWeight: '600'},
+  settingsBar: {paddingHorizontal: 22, paddingVertical: 10, borderTopWidth: 1, borderTopColor: C.line},
+  settingsLinkBtn: {alignSelf: 'flex-start'},
+  settingsLink: {fontSize: 14, color: C.sub, fontWeight: '600'},
+  settingsSection: {alignSelf: 'stretch', marginBottom: 28},
+  relayInput: {alignSelf: 'stretch', backgroundColor: C.field, borderRadius: 12, height: 50, paddingHorizontal: 16, fontSize: 14, color: C.ink, fontFamily: 'monospace', borderWidth: 1, borderColor: C.line2},
+  resetConfirmBox: {alignSelf: 'stretch', backgroundColor: 'rgba(248,113,113,0.06)', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: 'rgba(248,113,113,0.2)'},
+  resetLink: {fontSize: 15, color: C.bad, fontWeight: '600'},
   // The PRIMARY funding affordance in the balance header: a clear "Add money" brand button that
   // opens the deposit sheet. Filled brand so it reads as primary; the DEMO_USD faucet (topUpBtn)
   // is the secondary outline pill beside it.
