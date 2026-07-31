@@ -376,17 +376,31 @@ async function copyToClipboard(text: string): Promise<'clipboard' | 'shared'> {
 }
 
 /**
- * Escape closes an open sheet/modal — the seed of the keyboard-shortcuts surface (plan flow 14).
- * Web-only: attaches a real DOM `keydown` listener; on native there is no Escape key (Android uses
- * the hardware Back button, handled separately), so this is a harmless no-op there. Uses `globalThis`
- * + a structural key type so it typechecks without the DOM lib (RN's tsconfig ships no DOM types).
+ * Web-only keyboard-shortcut surface — the single source of truth for keyboard wiring. Attaches ONE
+ * real DOM `keydown` listener (web only; native has no physical keyboard, and Android uses the
+ * hardware Back button which is handled separately) and dispatches `e.key` (lower-cased) to the
+ * matching handler in `handlers`.
+ *
+ *   - `ignoreIfInputFocused`: when set, a key pressed while an INPUT/TEXTAREA is focused is ignored
+ *     (so typing into the amount/address/username fields never trips a shortcut). Escape is exempt
+ *     — it should close a sheet even with a field focused (universal dialog-dismiss behaviour).
+ *   - `enabled`: when false the listener is not attached at all (e.g. the wallet main-view actions
+ *     are suspended while any sheet/overlay covers the screen).
+ *
+ * Plan flow 14 / UX-V5: `useEscapeToClose` delegates here with `{escape: onClose}`; the wallet's
+ * P/R/T/A actions pass both options. Uses `globalThis` + a structural key type so it typechecks
+ * without the DOM lib (RN's tsconfig ships no DOM types). `handlers`/`opts` are caller-inline
+ * closures (recreated each render) so the effect re-subscribes per render — one cheap add/remove,
+ * matching the prior `useEscapeToClose` behaviour.
  */
-function useEscapeToClose(onClose: () => void): void {
+function useHotkeys(handlers: Record<string, () => void>, opts?: {ignoreIfInputFocused?: boolean; enabled?: boolean}): void {
   useEffect(() => {
     if (Platform.OS !== 'web') {
       return;
     }
-    // The web global exposes addEventListener/removeEventListener + a KeyboardEvent carrying `.key`.
+    if (opts?.enabled === false) {
+      return;
+    }
     type HasKey = {key: string};
     const g = globalThis as unknown as {
       addEventListener?: (type: string, fn: (e: HasKey) => void) => void;
@@ -395,14 +409,31 @@ function useEscapeToClose(onClose: () => void): void {
     if (typeof g.addEventListener !== 'function') {
       return;
     }
+    const doc = globalThis as unknown as {document?: {activeElement?: {tagName?: string}}};
     const onKey = (e: HasKey) => {
-      if (e.key === 'Escape') {
-        onClose();
+      if (opts?.ignoreIfInputFocused) {
+        const tag = doc.document?.activeElement?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA') {
+          return;
+        }
+      }
+      const fn = handlers[(e.key ?? '').toLowerCase()];
+      if (fn) {
+        fn();
       }
     };
     g.addEventListener('keydown', onKey);
     return () => { g.removeEventListener?.('keydown', onKey); };
-  }, [onClose]);
+  }, [handlers, opts]);
+}
+
+/**
+ * Escape closes an open sheet/modal — the seed keyboard affordance (plan flow 14). Thin wrapper over
+ * `useHotkeys`; deliberately carries NO input guard so Escape dismisses a sheet even when a field is
+ * focused (the universal dialog-dismiss behaviour).
+ */
+function useEscapeToClose(onClose: () => void): void {
+  useHotkeys({escape: onClose});
 }
 
 /**
@@ -769,6 +800,29 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
     }
   }, [topUpBusy, relayUrl, identity.publicHex]);
 
+  // The "Add money" entry (header button + the `A` shortcut share ONE handler — single source of
+  // truth): open the asset picker when >1 onrampable asset exists, else go straight to the ckBTC
+  // deposit sheet.
+  const addMoney = useCallback(() => {
+    if (rampAssets.length > 1) {
+      setPickerOpen(true);
+    } else {
+      setDepositCurrency(ckBtcCurrency);
+    }
+  }, [rampAssets.length, ckBtcCurrency]);
+
+  // Web keyboard shortcuts (plan 1b / UX-V5): the first letters of the main actions —
+  // P=Pay, R=Receive, T=Top-up (demo money), A=Add money. Active ONLY on the wallet main view with
+  // no text input focused and no sheet/overlay open (Esc is handled per-sheet by useEscapeToClose).
+  // Native (no physical keyboard) is a no-op; the matching on-UI hints are also web-only.
+  const anySheetOpen = pickerOpen || depositCurrency != null || withdrawCurrency != null || settingsOpen;
+  useHotkeys({
+    p: () => setMode('pay'),
+    r: () => setMode('receive'),
+    t: topUp,
+    a: addMoney,
+  }, {ignoreIfInputFocused: true, enabled: !anySheetOpen});
+
   return (
     <SafeAreaView style={S.root}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
@@ -783,6 +837,9 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
             <View style={[S.dot, {backgroundColor: online ? C.ok : C.sub2}]} />
             <Text style={S.balLabel}>{online ? 'balance' : '~ approx.'}</Text>
             <View style={S.demoPill}><Text style={S.demoPillText}>DEMO</Text></View>
+            {/* T = add demo money (the faucet). The hint rides the DEMO pill since that's what T
+                tops up; on touch this badge is hidden (no keyboard on the phone). */}
+            <HotkeyHint k="T" />
           </View>
           <View style={S.balAmtRow}>
             <Text testID="balance" style={S.balAmt}>{shownBalance == null ? '—' : `${online ? '' : '~'}${usd(shownBalance)}`}</Text>
@@ -792,16 +849,17 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
                 topped-up balance exists, and is absent for demo-$-only wallets that have nothing to cash
                 out. A 390px header can't hold the balance + two action buttons without overflow, so the
                 single "Add money" pill stays here and "Cash out" rides the asset card. */}
-            <Pressable testID="btn-deposit" style={S.addMoneyBtn} onPress={() => rampAssets.length > 1 ? setPickerOpen(true) : setDepositCurrency(ckBtcCurrency)}>
+            <Pressable testID="btn-deposit" style={S.addMoneyBtn} onPress={addMoney}>
               <Text style={S.addMoneyBtnText}>＋ Add money</Text>
+              <HotkeyHint k="A" tone="onBrand" />
             </Pressable>
           </View>
         </View>
       </View>
 
       <View style={S.tabs}>
-        <Tab label="Pay" active={mode === 'pay'} onPress={() => setMode('pay')} />
-        <Tab label="Receive" active={mode === 'receive'} onPress={() => setMode('receive')} />
+        <Tab label="Pay" active={mode === 'pay'} onPress={() => setMode('pay')} hotkey="P" />
+        <Tab label="Receive" active={mode === 'receive'} onPress={() => setMode('receive')} hotkey="R" />
       </View>
 
       <ScrollView contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
@@ -898,11 +956,32 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
   );
 }
 
-function Tab({label, active, onPress}: {label: string; active: boolean; onPress: () => void}) {
+function Tab({label, active, onPress, hotkey}: {label: string; active: boolean; onPress: () => void; hotkey?: string}) {
   return (
     <Pressable onPress={onPress} style={[S.tab, active && S.tabActive]} testID={`tab-${label.toLowerCase()}`}>
       <Text style={[S.tabText, active && S.tabTextActive]}>{label}</Text>
+      {hotkey ? <HotkeyHint k={hotkey} tone={active ? 'onBrand' : 'muted'} /> : null}
     </Pressable>
+  );
+}
+
+/**
+ * Tiny keyboard-key badge shown next to a shortcut target (web only — native has no keyboard, so the
+ * hints would be noise there). Always-visible-but-subtle: a small rounded square with the key's
+ * letter in the palette's muted tone (`C.sub2`) so it reads as a hint, not chrome. `tone='onBrand'`
+ * flips to a dark-on-brand variant for badges that sit on the green brand background (active tab,
+ * the Add-money button). The pattern (a letter in a box) stays recognisable across targets, so a
+ * user who learns one shortcut infers the rest.
+ */
+function HotkeyHint({k, tone = 'muted'}: {k: string; tone?: 'muted' | 'onBrand'}) {
+  if (Platform.OS !== 'web') {
+    return null;
+  }
+  const onBrand = tone === 'onBrand';
+  return (
+    <View style={[S.kbdHint, onBrand && S.kbdHintOnBrand]}>
+      <Text style={[S.kbdHintText, onBrand && S.kbdHintTextOnBrand]}>{k}</Text>
+    </View>
   );
 }
 
@@ -2195,7 +2274,7 @@ const S = StyleSheet.create({
   balLabel: {fontSize: 12, color: C.sub},
   balAmt: {fontSize: 26, fontWeight: '800', color: C.ink},
   tabs: {flexDirection: 'row', paddingHorizontal: 22, gap: 10, marginTop: 10},
-  tab: {paddingVertical: 8, paddingHorizontal: 20, borderRadius: 999, backgroundColor: C.field},
+  tab: {flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 8, paddingHorizontal: 20, borderRadius: 999, backgroundColor: C.field},
   tabActive: {backgroundColor: C.brand},
   tabText: {color: C.sub, fontWeight: '600'},
   tabTextActive: {color: C.brandInk},
@@ -2267,8 +2346,16 @@ const S = StyleSheet.create({
   // The PRIMARY funding affordance in the balance header: a clear "Add money" brand button that
   // opens the deposit sheet. Filled brand so it reads as primary; the DEMO_USD faucet (topUpBtn)
   // is the secondary outline pill beside it.
-  addMoneyBtn: {backgroundColor: C.brand, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7, shadowColor: C.brand, shadowOpacity: 0.35, shadowRadius: 12, shadowOffset: {width: 0, height: 6}, elevation: 6},
+  addMoneyBtn: {flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.brand, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7, shadowColor: C.brand, shadowOpacity: 0.35, shadowRadius: 12, shadowOffset: {width: 0, height: 6}, elevation: 6},
   addMoneyBtnText: {fontSize: 13, fontWeight: '800', color: C.brandInk},
+  // Keyboard-shortcut hint badge (web only — rendered by HotkeyHint). A small rounded "key" square;
+  // the muted tone sits on the dark header/tabs, the onBrand variant sits on the green brand
+  // background (active tab, Add-money button). Subtle by design: muted tone + monospace letter so it
+  // reads as a hint, not as primary chrome.
+  kbdHint: {minWidth: 16, height: 16, paddingHorizontal: 4, borderRadius: 4, borderWidth: 1, borderColor: C.line, alignItems: 'center', justifyContent: 'center'},
+  kbdHintText: {fontSize: 10, fontWeight: '700', color: C.sub2, fontFamily: 'monospace'},
+  kbdHintOnBrand: {borderColor: 'rgba(3,23,15,0.35)', backgroundColor: 'rgba(3,23,15,0.10)'},
+  kbdHintTextOnBrand: {color: C.brandInk},
   // Deposit sheet — a full-screen overlay above the wallet.
   sheetOverlay: {position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: C.bg, zIndex: 10},
   sheet: {flex: 1, backgroundColor: C.bg},

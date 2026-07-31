@@ -1,12 +1,16 @@
-// Flow 14 — Keyboard surface: Escape closes the open sheet (documented in-UI + asserted).
+// Flow 14 — Keyboard surface: full single-key shortcuts (UX-V5) + Escape closes the open sheet.
 //
-// The keyboard-shortcuts surface's seed (plan flow 14) is Escape-to-close on a sheet, built in
-// Wave U (useEscapeToClose). This flow asserts it as a standalone: the deposit sheet's "Press Esc to
-// close" hint is visible (the surface is documented in-UI), and pressing Escape actually closes the
-// sheet. The broader keyboard surface (single-key primary actions) is documented in
-// CODEBASE_ANALYSIS.md alongside this test.
+// The wallet is fully keyboard-driveable on web (desktop power-user feature; on mobile the NFC/tap
+// is the input, so the shortcuts + hints are web-only). The first letters map to the main actions:
+//   P → Pay tab · R → Receive tab · T → Top-up (demo money) · A → Add money (asset picker / deposit)
+// Esc closes whatever sheet/overlay is open (the seed affordance, built in Wave U / useEscapeToClose,
+// now shared with the wallet shortcuts via one `useHotkeys` source of truth).
 //
-// Selector contract: `btn-deposit`, `deposit-address`, `btn-deposit-close`.
+// Guards: shortcuts fire ONLY on the wallet main view, with no text input focused and no sheet open.
+// Typing into the amount field must NOT trip a shortcut (activeElement INPUT/TEXTAREA guard).
+//
+// Selector contract: `btn-paste` (Pay affordance), `btn-request` (Receive affordance), `balance`,
+// `asset-picker-row-ckbtc` (picker open), `deposit-address` (deposit sheet), `amount-input`.
 import { setup, assert, assertIncludes, onboardWallet } from '../harness/lib.mjs';
 
 export async function run() {
@@ -18,8 +22,54 @@ export async function run() {
 
     console.log('[14-keyboard] onboarding…');
     await onboardWallet(driver, 'e2e-keyboard');
+    // Onboard lands on the wallet in Pay mode (the default). Demo balance is $100.00.
 
-    // Open the deposit sheet via the Add money affordance (now via the asset picker — pick Bitcoin).
+    // --- P / R : single-key tab switching -------------------------------------------
+    console.log('[14-keyboard] pressing R (→ Receive)…');
+    await driver.pressKey('r');
+    await driver.findByTestID('btn-request', { timeoutMs: 3_000 });
+    assert(!(await driver.isPresent('btn-paste')), 'R should hide the Pay affordance (btn-paste)');
+    console.log('[14-keyboard] ✓ R activated the Receive tab');
+
+    console.log('[14-keyboard] pressing P (→ Pay)…');
+    await driver.pressKey('p');
+    await driver.findByTestID('btn-paste', { timeoutMs: 3_000 });
+    assert(!(await driver.isPresent('btn-request')), 'P should hide the Receive affordance (btn-request)');
+    console.log('[14-keyboard] ✓ P activated the Pay tab');
+
+    // --- T : single-key top-up (demo money) -----------------------------------------
+    console.log('[14-keyboard] pressing T (→ top-up +$100 demo money)…');
+    await driver.pressKey('t');
+    const topped = await driver.waitForText('$200.00', { timeoutMs: 6_000 });
+    assert(topped, 'T should add demo money (balance $100.00 → $200.00)');
+    console.log('[14-keyboard] ✓ T triggered the top-up');
+
+    // --- A : single-key add-money (asset picker) + Esc closes the picker -------------
+    console.log('[14-keyboard] pressing A (→ open the Add-money picker)…');
+    await driver.pressKey('a');
+    await driver.findByTestID('asset-picker-row-ckbtc', { timeoutMs: 3_000 });
+    console.log('[14-keyboard] ✓ A opened the asset picker');
+
+    console.log('[14-keyboard] pressing Escape (close the picker)…');
+    await driver.pressKey('Escape');
+    await driver.waitGone('asset-picker-row-ckbtc', { timeoutMs: 3_000 });
+    console.log('[14-keyboard] ✓ Escape closed the picker');
+
+    // --- Input guard: shortcuts must NOT fire while typing in a field ----------------
+    console.log('[14-keyboard] input-guard: typing in amount-input must not trip shortcuts…');
+    await driver.pressKey('r');                 // → Receive (amount-input is the focused-typeable field)
+    await driver.findByTestID('amount-input', { timeoutMs: 3_000 });
+    await driver.click('amount-input');          // focus the field (activeElement = INPUT)
+    await driver.pressKey('p');                   // must NOT switch tabs while an input is focused
+    assert(!(await driver.isPresent('btn-paste')), 'P must not activate while typing in an input');
+    console.log('[14-keyboard] ✓ P correctly ignored while an input was focused');
+    // Once the field loses focus, the shortcut works again.
+    await driver.eval(() => { (document.activeElement)?.blur?.(); });
+    await driver.pressKey('p');
+    await driver.findByTestID('btn-paste', { timeoutMs: 3_000 });
+    console.log('[14-keyboard] ✓ P activated again after the input lost focus');
+
+    // --- Esc closes a sheet (the seed affordance) + the in-UI hint renders -----------
     console.log('[14-keyboard] opening the deposit sheet (via asset picker)…');
     await driver.click('btn-deposit', { timeoutMs: 5_000 });
     await driver.click('asset-picker-row-ckbtc', { timeoutMs: 5_000 });
@@ -30,8 +80,7 @@ export async function run() {
     assertIncludes(body, 'Press Esc to close', 'the deposit sheet should document the Esc shortcut in-UI');
     console.log('[14-keyboard] ✓ "Press Esc to close" hint is visible');
 
-    // Escape closes the open sheet (the seed keyboard affordance).
-    console.log('[14-keyboard] pressing Escape…');
+    console.log('[14-keyboard] pressing Escape (close the deposit sheet)…');
     await driver.pressKey('Escape');
     await driver.waitGone('deposit-address', { timeoutMs: 3_000 });
     console.log('[14-keyboard] ✓ Escape closed the deposit sheet');

@@ -100,7 +100,10 @@ The following previously-open risks are now **CLOSED** (see `CODEBASE_ANALYSIS.m
 > blocker fixed (`scripts/dfx-deploy.sh` sets controller before `register_ledger`). **Deferred:** N1
 > (FakeLedger has no rate-limit — accepted simplification; real cooldown is surfaced in the UI); N6
 > (counterparties are raw hex — needs the username carried in the signed payload, overlaps with a core
-> wire change); UX-V5 full single-key shortcuts (only Enter-to-create shipped; polish).
+> wire change); UX-V5 full single-key shortcuts (only Enter-to-create shipped; polish). ✅ **UX-V5
+> FIXED (1b):** full keyboard surface shipped — `useHotkeys` (single source of truth; `useEscapeToClose`
+> delegates to it) wires P=Pay / R=Receive / T=Top-up / A=Add money on the Wallet main view (input +
+> sheet-open guarded; web-only), with always-visible-but-subtle on-UI hint badges on each target.
 >
 > From a NO-MOCK UX review: the REAL web app (`app/App.tsx`, react-native-web) driven through
 > chrome-cli against the REAL canister (facade + ic-icrc1-ledger on a local dfx/PocketIC replica) via
@@ -118,9 +121,10 @@ The following previously-open risks are now **CLOSED** (see `CODEBASE_ANALYSIS.m
   no dialog). A user loses access to the funds at that pubkey irreversibly.
 - **UX-V4 CONFIRMED** — header is crowded: `$balance` + `+$50` outline pill + filled `＋ Add money` all
   share one right-aligned row; the `Add money` right edge lands at 389/390 px (viewport-kissing).
-- **UX-V5 CONFIRMED** — only `Escape` is wired (`useEscapeToClose`, sheets only); no global shortcuts
-  (no Enter-to-submit on onboarding/amount, no T/A/R action keys), and the only on-UI hint is
-  "Press Esc to close" inside the deposit/withdraw sheets.
+- **UX-V5 CONFIRMED → ✅ FIXED (1b)** — only `Escape` was wired (`useEscapeToClose`, sheets only); no
+  global shortcuts (no Enter-to-submit on onboarding/amount, no T/A/R action keys), and the only
+  on-UI hint was "Press Esc to close" inside the deposit/withdraw sheets. **Now resolved:** the
+  wallet is fully keyboard-driveable (P/R/T/A + Esc) via `useHotkeys`, with on-UI hint badges.
 - **UX-V1 REJECTED** — the `＋ Add money` button text is **NOT truncated** at standard balances
   (`scrollWidth == clientWidth == 111`; full "＋ Add money" renders). The original "+ Add mo" claim is
   not reproducible. Reframed as the edge-kissing/glow-clip issue N9 (P3).
