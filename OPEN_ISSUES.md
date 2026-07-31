@@ -247,3 +247,41 @@ The following previously-open risks are now **CLOSED** (see `CODEBASE_ANALYSIS.m
 - **🚩 Founder decisions (plan §6 Q1–Q6,14):** direct-vs-partner sequencing at launch; partner aggregator
   choice + mode; KYC-surfacing posture; ckUSDC chains at launch (Ethereum only?); ramp fees = partner's
   only (zero dpay cut); keep the demo faucet once real ckUSDC exists; wrong-network recourse messaging.
+
+## UX audit (2026-07-31) — 23 issues, all resolved or mitigated
+
+> Source: `UX_AUDIT_FINDINGS.md` (code-review + zai-vision visual audit). All 23 issues addressed;
+> independent verifier confirmed 21 fully resolved + 2 mitigated. Visual re-audit (zai-vision on live
+> screenshots) confirmed no regressions. Suite now 25/25 GREEN.
+
+**Critical (3) — RESOLVED:**
+- ✅ C1: Approve button disabled on expired request (error moved above button; greyed out).
+- ✅ C2: Approve button disabled on insufficient balance (online gate; warning above button).
+- ✅ C3: Deposit fee/min shows "—" instead of "0.00000000" when zero (FakeLedger returns 0).
+
+**High (5) — RESOLVED:**
+- ✅ H1: ckUSDC labeled by its symbol ("ckUSDC"), not the chain ("Ethereum"). `displayName()` in catalog.ts.
+- ✅ H2: Transaction history fans out per catalog currency (was hardcoded currency=0).
+- 🟡 H3: Counterparties show `short(pubkey)` (8 hex chars), not a 64-char dump. Full fix = N6 (username in
+  signed payload — FROZEN wire change). Mitigated: short form is honest + distinguishable.
+- ✅ H4: Header shows username only (hex removed; testID `header-who`).
+- ✅ H5: Deposit errors use plain language (transient vs no-minter, no "relay" jargon).
+
+**Medium (9) — RESOLVED:**
+- ✅ M1: ARIA roles/labels on all interactive Pressables (accessibilityRole + accessibilityLabel + state).
+- ✅ M2: All touch targets ≥ 44pt (minHeight:44 on interactive style keys).
+- ✅ M3: Keyboard hint badges redesigned (24×24 bordered box, 14px text — visible + legible).
+- ✅ M4: "Press Esc to close" gated behind `Platform.OS === 'web'` in all sheets.
+- ✅ M5: Responsive at desktop width (maxWidth:480 + screenFrame centering).
+- ✅ M6: Empty username defaults to 'me' (was "Name"); testID added.
+- ✅ M7: Onboarding subtext is user-benefit ("Creates your wallet and adds $100 in demo funds").
+- ✅ M8: ckUSDC deposit sheet shows ETH gas-fee warning.
+- ✅ M9: ckUSDC processing state simplified (single "Waiting for confirmation — ~20min", no jargon).
+
+**Low (6) — RESOLVED:**
+- ✅ L1: Add-money shadow no longer clipped (shadowRadius 12→8).
+- ✅ L2: "Paste request" styled as a bordered button (minHeight:44, brand wash).
+- ✅ L3: Withdraw success has a Copy-destination button + selectable address.
+- ✅ L4: "Payer paid offline? Scan their signed code to settle." (was ambiguous).
+- ✅ L5: Raw hex request nonce removed from review screen.
+- ✅ L6: Payment confirmation shows recipient name ("to Bob"), not "merchant". (Receive-side name = H3/N6.)
