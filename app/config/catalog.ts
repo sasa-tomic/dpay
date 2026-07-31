@@ -1,0 +1,93 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import {base} from '../lib/format';
+
+// --- currency catalog (M0) -------------------------------------------------------------------
+// The wallet's runtime source of truth for which assets exist + how to display/fund them. Fetched
+// from GET /api/v1/currencies (the canister's currencies() catalog), cached in AsyncStorage, with a
+// bundled default fallback so the UI renders on a cold/offline first load. Closes issue #7: the
+// ckBTC currency id is RESOLVED from the catalog (the CkBtcUtxo entry) instead of the old hardcoded
+// `DEPOSIT_CURRENCY = 1`, so adding a currency is canister-config-only (no app redeploy).
+export type MinterFamily = 'CkBtcUtxo' | 'CkEthErc20' | 'CkSol';
+export type CurrencyDescriptor = {
+  currency: number;          // the Currency u32 — read from the catalog, NEVER hardcoded
+  ledger: string;            // ICRC ledger principal as text
+  mintable: boolean;         // true for the demo currency the facade mints/burns
+  minter: string | null;     // ramp (ck minter) principal as text, or null (no deposit/withdraw path)
+  minter_family: MinterFamily | null;
+  symbol: string | null;     // display symbol ("$", "₿", "Ξ")
+  decimals: number | null;   // smallest-unit decimal count (USD=2, BTC=8)
+};
+export const CATALOG_CACHE_KEY = 'dpay.currencies.v1';
+// Bundled fallback so a cold/offline first load still renders. Overwritten by the live catalog on
+// the first successful fetch. Mirrors the canister's demo deployment (DEMO_USD + ckBTC). The ledger
+// principals are empty here (the wallet reads currency/symbol/decimals/minter_family for display;
+// the relay resolves ledgers server-side from the query's currency id).
+export const BUNDLED_CATALOG: CurrencyDescriptor[] = [
+  {currency: 0, ledger: '', mintable: true, minter: null, minter_family: null, symbol: '$', decimals: 2},
+  {currency: 1, ledger: '', mintable: false, minter: 'mqygn-kiaaa-aaaar-qaadq-cai', minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8},
+  {currency: 2, ledger: 'xevnm-gaaaa-aaaar-qafnq-cai', mintable: false, minter: 'sv3dd-oaaaa-aaaar-qacoa-cai', minter_family: 'CkEthErc20', symbol: 'ckUSDC', decimals: 6},
+];
+// Fetch the catalog from the relay, caching to AsyncStorage. Best-effort: on any failure (offline,
+// timeout, bad JSON) returns `prior` (the cache or bundled default) so the UI never blocks on it.
+// Timeout-bound like every other fetch.
+export async function fetchCurrencies(relayUrl: string, prior: CurrencyDescriptor[]): Promise<CurrencyDescriptor[]> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 4000);
+  try {
+    const r = await fetch(`${base(relayUrl)}/api/v1/currencies`, {signal: ctrl.signal});
+    if (!r.ok) return prior;
+    const j = await r.json();
+    const list: unknown = j?.currencies;
+    if (!Array.isArray(list) || list.length === 0) return prior;
+    const clean: CurrencyDescriptor[] = list
+      .filter((c: any): c is Record<string, unknown> => !!c && typeof c.currency === 'number')
+      .map((c: any) => ({
+        currency: c.currency as number,
+        ledger: typeof c.ledger === 'string' ? c.ledger : '',
+        mintable: !!c.mintable,
+        minter: typeof c.minter === 'string' ? c.minter : null,
+        minter_family: (typeof c.minter_family === 'string' ? c.minter_family : null) as MinterFamily | null,
+        symbol: typeof c.symbol === 'string' ? c.symbol : null,
+        decimals: typeof c.decimals === 'number' ? c.decimals : null,
+      }));
+    if (clean.length === 0) return prior;
+    AsyncStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify(clean)).catch(() => {});
+    return clean;
+  } catch { return prior; } finally { clearTimeout(t); }
+}
+
+// Per-minter-family display + rail config. Single-sources the old per-asset literals
+// (DEPOSIT_NETWORK/DEPOSIT_ASSET/BTC_BLOCK_MIN/WITHDRAW_MIN_SATS): every asset of a given family
+// shares the same native chain, so the chain/rail metadata lives HERE keyed by minter_family, not
+// per-currency and not hardcoded inside the sheets. Adding a new family (e.g. CkEthErc20) = one entry.
+export type FamilyDisplay = {
+  networkLabel: string;       // chain name shown in instructions + the asset card label ('Bitcoin')
+  nativeAsset: string;        // the asset the user sends on that chain; also the amount-unit suffix ('BTC')
+  blockMin: number;           // avg native-chain block time (min) → est. time-to-credit
+  withdrawMinRaw: number;     // raw smallest-unit floor for offramp (mirrors the minter's min)
+  amountDecimals: number;     // decimal count for amount formatting (BTC=8)
+  addressPlaceholder: string; // native-chain address placeholder ('bc1q…')
+};
+const FD_CKBTC: FamilyDisplay = {
+  networkLabel: 'Bitcoin', nativeAsset: 'BTC', blockMin: 10,
+  withdrawMinRaw: 50_000, amountDecimals: 8, addressPlaceholder: 'bc1q…',
+};
+// ckERC-20 (ckUSDC etc.): the onramp is a wallet-connect contract-call flow (NOT a per-principal
+// address) — see CkErc20DepositSheet. These display fields still drive the asset card + amounts.
+const FD_CKETH_ERC20: FamilyDisplay = {
+  networkLabel: 'Ethereum', nativeAsset: 'USDC', blockMin: 1,
+  withdrawMinRaw: 0, amountDecimals: 6, addressPlaceholder: '0x…',
+};
+const FAMILY_DISPLAY: Partial<Record<MinterFamily, FamilyDisplay>> = {CkBtcUtxo: FD_CKBTC, CkEthErc20: FD_CKETH_ERC20};
+// Resolve a currency's family display from the catalog; falls back to the ckBTC config so the flows
+// always render (the catalog guarantees the CkBtcUtxo entry carries its family).
+export function familyDisplay(catalog: CurrencyDescriptor[], currency: number): FamilyDisplay {
+  const f = catalog.find(c => c.currency === currency)?.minter_family ?? null;
+  return (f ? FAMILY_DISPLAY[f] : null) ?? FD_CKBTC;
+}
+// A stable ASCII key for an asset's testID (the catalog symbol may be a non-ASCII glyph like ₿).
+// ckBTC keeps 'ckbtc' to honour the existing e2e testID contract; other assets use their symbol.
+export function assetTestKey(a: CurrencyDescriptor): string {
+  if (a.minter_family === 'CkBtcUtxo') return 'ckbtc';
+  return (a.symbol ?? familyDisplay([], a.currency).nativeAsset ?? 'asset').toLowerCase();
+}
