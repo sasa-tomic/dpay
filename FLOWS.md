@@ -36,12 +36,13 @@ positive paths come first, then error/edge paths.
 
 | # | Flow | User journey | Verifies |
 |---|------|-------------|----------|
-| 06 | request-qr | Merchant enters amount → shows request QR | QR renders AND decodes to a valid 68-byte request. |
+| 06 | request-qr | Merchant enters amount → shows request QR | QR renders AND decodes to a valid 132-byte request (incl. to_name + memo). |
 | 07 | scan-pay | Payer scans request → reviews → approves | Two-wallet real ed25519 sign + relay settle → "Paid ✓", balance correct. Recipient name shown ("to Bob"). |
 | 08 | merchant-settle | Merchant side: sees incoming payment → settles | The recipient's "Received $X" confirmation. |
 | 09 | double-spend | Attacker replays a captured signed code | Replay refused (nonce single-use), no double debit. |
 | 10 | expired | Payer scans an already-expired request | Expiry refused, Approve button disabled, no leaked nonce. |
 | 19 | low-balance | Payer with insufficient funds scans a request | Offline: review-lowbal warning. Online: Approve disabled, "Not enough balance". |
+| 26 | names-memo | Alice pays Bob with memo "coffee" | Both wallets' history shows friendly names (from_name/to_name) + memo, no raw-hex counterparties. Proves N6/H3 closure via wire-format v2. |
 
 ## Offline hand-off (the signature feature)
 
@@ -89,10 +90,12 @@ positive paths come first, then error/edge paths.
 
 These flows are **not** covered and why:
 
-- **NFC radio round trip** (two phones, HCE↔reader, full wire transit over ISO-DEP) — physical-device gate; the web NFC shim's `approveCard(wireHex)` is a no-op, so driving the full round trip would inject the wire the test built itself (false confidence). Signing/settlement are already byte-exact in `00`; the phase plumbing is proven in `11`.
+- **NFC radio round trip** (two phones, HCE↔reader, full wire transit over ISO-DEP) — physical-device gate; the web NFC shim's `approveCard(wireHex)` is a no-op, so driving the full round trip would inject the wire the test built itself (false confidence). Signing/settlement are already byte-exact in `00`; the phase plumbing is proven in `11`. (The v2 wire is now 292 B → 2 ISO-DEP frames; the multi-frame chunking path is unit-tested in core, but the over-the-air round trip still needs two phones.)
 - **ckUSDC onramp final ETH hop** (wallet signs → tx mined → minter scrapes ~20min) — inherent outer-loop gate; offline e2e proves the calldata wiring + byte-exactness.
 - **ckBTC live deposit/withdrawal with real BTC** — requires real mainnet funds; offline path proven via FakeLedger seed (issues 1/8 in OPEN_ISSUES.md).
-- **Destination-address format validation** — no client-side format check exists anywhere (app, relay, or core); the only gate is non-empty + the Ed25519 signature. A user could paste a wrong-chain address and sign a withdrawal that the relay accepts but the minter rejects.
+
+> **Closed gap:** destination-address format validation is now covered (flow `18-withdraw-errors`
+> asserts a bad-addr UI warning + disabled confirm), so it no longer appears above.
 
 ## How to add a new flow
 

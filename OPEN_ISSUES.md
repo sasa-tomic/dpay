@@ -91,6 +91,20 @@ The following previously-open risks are now **CLOSED** (see `CODEBASE_ANALYSIS.m
 - ✅ **FakeLedger-vs-canister audit** → closed (W3): `FakeLedger.pay` now mirrors the canister's self-transfer + pay-to-mint-sentinel rejects (the two divergences found; both fixed + pinned by tests). The fee divergence is a documented accepted simplification (FakeLedger is the fee-less demo ledger).
 - ✅ **Relay deploy-fidelity** → closed (W4): `build.rs` bakes the git commit; `GET /api/v1/version` exposes it; `just verify-relay` compares the live commit to HEAD (MATCH / BEHIND-N / MISMATCH). Feature-unconditional (in the prod image). The residual front-running risk of approve→retrieve is documented (issue 9 / risk 8) — inherent to ckBTC, not a dpay gap.
 
+## Wire-format v2 (2026-07-31) — closed N6 + H3
+
+- ✅ **N6 (counterparties as raw hex) → RESOLVED**, and ✅ **H3 (history hex) → RESOLVED**, by wire-format v2
+  (commits b1c67fc…6bcc754). `from_name`/`to_name`/`memo` (32 B each, UTF-8 NUL-padded) were folded INTO the
+  signed `Authorization::signing_bytes` (SIGNING_LEN 100→**196**); `to_name`/`memo` also ride the
+  `PaymentRequest` (REQUEST_LEN 68→**132**); the wire is now WIRE_LEN=**292**. The signature binds the names
+  so a relay/merchant can't swap them post-sign; they thread through the canister `TxnRecord` (196 B fixed) +
+  relay `/history` so both wallets render friendly counterparties + memo instead of raw hex. The out-of-band
+  `|name` QR suffix is deleted (the name is now in the request bytes — single source of truth). N6 was
+  previously "deferred (core wire change)" and H3 "mitigated" via `short()` — that change has now shipped, so
+  both are fully RESOLVED (not just mitigated). `short()` stays only as the empty-name fallback. Mint-sentinel
+  history rows use empty names; the app special-cases `MINT_HEX`. `ReceiptClaim` (108 B) and `WithdrawAuth`
+  are unchanged. Proven end-to-end by e2e flow `26-names-memo` (suite now 26/26 GREEN).
+
 ## UX review findings (2026-07-30)
 
 > **Status (F-wave, commit bb315ba):** N2/N4/N5/N7/N8/N9/N10 + UX-V2/V3 are **FIXED** (SettingsSheet
@@ -98,9 +112,11 @@ The following previously-open risks are now **CLOSED** (see `CODEBASE_ANALYSIS.m
 > sentinel labeled "Demo funds"/"Withdrawal"; deposit error distinguishes no-minter vs transient;
 > onboarding testID + Enter-to-create; header right-padding; paste-request affordance). N3 deploy
 > blocker fixed (`scripts/dfx-deploy.sh` sets controller before `register_ledger`). **Deferred:** N1
-> (FakeLedger has no rate-limit — accepted simplification; real cooldown is surfaced in the UI); N6
+> (FakeLedger has no rate-limit — accepted simplification; real cooldown is surfaced in the UI); ~~N6
 > (counterparties are raw hex — needs the username carried in the signed payload, overlaps with a core
-> wire change); UX-V5 full single-key shortcuts (only Enter-to-create shipped; polish). ✅ **UX-V5
+> wire change)~~ ✅ **N6 RESOLVED 2026-07-31 (wire-format v2)** — names + memo now ride the signed
+> `Authorization` + canister `TxnRecord` + relay history (see N6/H3 below); UX-V5 full single-key
+> shortcuts (only Enter-to-create shipped; polish). ✅ **UX-V5
 > FIXED (1b):** full keyboard surface shipped — `useHotkeys` (single source of truth; `useEscapeToClose`
 > delegates to it) wires P=Pay / R=Receive / T=Top-up / A=Add money on the Wallet main view (input +
 > sheet-open guarded; web-only), with always-visible-but-subtle on-UI hint badges on each target.
@@ -162,10 +178,15 @@ The following previously-open risks are now **CLOSED** (see `CODEBASE_ANALYSIS.m
   unavailable" (App.tsx `topUp`). The user gets no clue why or when to retry. *Fix:* surface the relay's
   error body (or parse "cooldown … ~N min").
 - **N6 (medium) | flow/a11y | pay/receive success + history | Counterparties are shown as raw truncated
-  hex pubkeys** ("from d082b3af…", "to d7011269…"). The request QR carries the username, but the
-  *receipt* only carries the from-pubkey, so the merchant never learns the payer's name (Alice saw
-  "Received $25.00 from d082b3af…" for Bob). *Fix:* carry the payer's username in the signed payload or
-  the receipt so the merchant/recipient sees a name; fall back to a friendly truncated handle.
+  hex pubkeys** ("from d082b3af…", "to d7011269…"). The request QR carried the username out-of-band,
+  but the *signed payload* only carried the from-pubkey, so the merchant/recipient never learned the
+  payer's name (Alice saw "Received $25.00 from d082b3af…" for Bob). ✅ **RESOLVED (2026-07-31,
+  wire-format v2)** — `from_name`/`to_name`/`memo` (32 B each, UTF-8 NUL-padded) now live INSIDE the
+  signed `Authorization::signing_bytes`; `to_name`/`memo` ride the `PaymentRequest`. The signature
+  binds them (a relay/merchant cannot swap a name post-sign), and they thread through the canister
+  `TxnRecord` + relay history so both sides render friendly counterparties. The old out-of-band
+  `|name` QR suffix is deleted (name is now in the request bytes — single source of truth). Proven
+  end-to-end by flow `26-names-memo`.
 - **N7 (low) | flow | deposit sheet | The deposit error misleads.** With no ck-minter registered for
   currency 1, the sheet shows "Could not reach the ledger for a deposit address / Check the relay is
   reachable, then reopen the sheet" — but the real cause is "currency 1 has no ck minter" (a deploy
@@ -252,7 +273,7 @@ The following previously-open risks are now **CLOSED** (see `CODEBASE_ANALYSIS.m
 
 > Source: `UX_AUDIT_FINDINGS.md` (code-review + zai-vision visual audit). All 23 issues addressed;
 > independent verifier confirmed 21 fully resolved + 2 mitigated. Visual re-audit (zai-vision on live
-> screenshots) confirmed no regressions. Suite now 25/25 GREEN.
+> screenshots) confirmed no regressions. Suite now 26/26 GREEN.
 
 **Critical (3) — RESOLVED:**
 - ✅ C1: Approve button disabled on expired request (error moved above button; greyed out).
@@ -262,8 +283,12 @@ The following previously-open risks are now **CLOSED** (see `CODEBASE_ANALYSIS.m
 **High (5) — RESOLVED:**
 - ✅ H1: ckUSDC labeled by its symbol ("ckUSDC"), not the chain ("Ethereum"). `displayName()` in catalog.ts.
 - ✅ H2: Transaction history fans out per catalog currency (was hardcoded currency=0).
-- 🟡 H3: Counterparties show `short(pubkey)` (8 hex chars), not a 64-char dump. Full fix = N6 (username in
-  signed payload — FROZEN wire change). Mitigated: short form is honest + distinguishable.
+- ✅ H3: Counterparties show `short(pubkey)` (8 hex chars), not a 64-char dump. ✅ **NOW FULLY RESOLVED
+  (2026-07-31, wire-format v2)** — names (`from_name`/`to_name`) + `memo` are now in the signed
+  `Authorization::signing_bytes` and threaded through canister `TxnRecord` + relay history, so the app
+  renders friendly counterparties ("from Alice" / "to Bob") directly. `short()` remains only as the
+  fallback when a name is empty (e.g. a row whose counterparty never set one). Closes N6/H3 together;
+  proven by flow `26-names-memo`.
 - ✅ H4: Header shows username only (hex removed; testID `header-who`).
 - ✅ H5: Deposit errors use plain language (transient vs no-minter, no "relay" jargon).
 
