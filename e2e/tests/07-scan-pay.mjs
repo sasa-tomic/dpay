@@ -19,7 +19,7 @@ import { setup, assert, assertIncludes, getBalance, onboardWallet } from '../har
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
 const PAY_CENTS = 2500; // $25.00 (DEMO_USD = currency 0, the wallet asset)
-const MERCHANT_NAME = 'merchant';
+const MERCHANT_NAME = 'Bob';
 
 export async function run() {
   const start = Date.now();
@@ -62,7 +62,12 @@ export async function run() {
     await driver.click('btn-approve', { timeoutMs: 5_000 });
     const paid = await driver.waitForText('Paid', { timeoutMs: 10_000 });
     assert(paid, 'payer should reach the Paid screen after the relay settles');
-    console.log('[07-scan-pay] ✓ A reached "Paid ✓" — FakeLedger verified the sig + settled');
+    // L6: the Paid ✓ confirmation must show the ACTUAL recipient name (req.name), not a generic
+    // "merchant" label.
+    const paidBody = await driver.bodyText();
+    assertIncludes(paidBody, 'Bob', 'Paid ✓ confirmation should name the recipient (L6)');
+    assert(!/\bmerchant\b/i.test(paidBody), 'Paid ✓ confirmation must not use the generic "merchant" label (L6)');
+    console.log('[07-scan-pay] ✓ A reached "Paid ✓" to Bob (L6: real recipient name, not "merchant")');
 
     // --- A's `$` balance decreased by the amount (the 2.5s poll reconciles). ------------------
     const aliceDown = await driver.waitForText('$75.00', { timeoutMs: 10_000 });

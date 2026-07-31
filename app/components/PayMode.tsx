@@ -1,5 +1,5 @@
 import {useEffect, useState} from 'react';
-import {View, Text, Pressable, Share} from 'react-native';
+import {View, Text, Pressable, Share, type ViewStyle} from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import {C} from '../config/palette';
 import {S} from '../styles';
@@ -12,6 +12,11 @@ import {DpayCore, DpayNfc} from '../services/native';
 import {readFromClipboard} from '../hooks/clipboard';
 import {NfcTap} from './NfcTap';
 import {QrScanner} from './QrScanner';
+
+// L2: "Paste request" is the ONLY pay affordance without a camera/NFC, so it must read as a real
+// secondary button (adequate touch target + a visible affordance), not a bare 19px text link.
+// Inline (Group E owns styles.ts): outline brand on a subtle brand wash, 44pt-min touch target.
+const pasteBtnStyle: ViewStyle = {marginTop: 18, minHeight: 44, paddingVertical: 10, paddingHorizontal: 22, borderRadius: 12, borderWidth: 1, borderColor: C.brand, backgroundColor: 'rgba(62,224,172,0.08)', alignItems: 'center', justifyContent: 'center'};
 
 export function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOfflinePaid, shownBalance}: {identity: Identity; online: boolean; relayUrl: string; nfcReady: boolean; onSettled: () => void; onOfflinePaid: (amount: number) => void; shownBalance: number | null}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid'>('scan');
@@ -114,7 +119,7 @@ export function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOffl
         <View style={[S.check, warn && S.checkAlready]}><Text style={S.checkMark}>{glyph}</Text></View>
         <Text style={[S.paidText, warn && S.alreadyText]}>{headline}</Text>
         <Text style={S.paidSub}>{sub}</Text>
-        <Pressable testID="btn-new" style={S.linkBtn} onPress={reset}><Text style={S.linkText}>New payment</Text></Pressable>
+        <Pressable testID="btn-new" style={S.linkBtn} onPress={reset} accessibilityRole="button" accessibilityLabel="New payment" accessibilityState={{disabled: false}}><Text style={S.linkText}>New payment</Text></Pressable>
       </View>
     );
   }
@@ -133,29 +138,49 @@ export function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOffl
               {/* Offline we CANNOT know the ledger settled it, so this is an honest "handed off",
                   not "Paid ✓". It optimistically reduces the local balance; the real balance
                   reconciles on the next online poll. It does NOT fabricate a settled history entry. */}
-              <Pressable testID="btn-paid" style={S.paidBtn} onPress={() => { onOfflinePaid(qr.amount); setPaid({amount: qr.amount, who: qr.who, already: false, pending: true}); setPhase('paid'); }}><Text style={S.paidBtnText}>Handed to {qr.who}</Text></Pressable>
-              <Pressable testID="btn-notpaid" style={S.notPaidBtn} onPress={reset}><Text style={S.notPaidText}>Cancel</Text></Pressable>
+              <Pressable testID="btn-paid" style={S.paidBtn} onPress={() => { onOfflinePaid(qr.amount); setPaid({amount: qr.amount, who: qr.who, already: false, pending: true}); setPhase('paid'); }} accessibilityRole="button" accessibilityLabel={`Handed to ${qr.who}`} accessibilityState={{disabled: false}}><Text style={S.paidBtnText}>Handed to {qr.who}</Text></Pressable>
+              <Pressable testID="btn-notpaid" style={S.notPaidBtn} onPress={reset} accessibilityRole="button" accessibilityLabel="Cancel" accessibilityState={{disabled: false}}><Text style={S.notPaidText}>Cancel</Text></Pressable>
             </View>
           </>
         )}
-        <Pressable style={S.linkBtn} onPress={() => Share.share({message: qr.code})}><Text style={S.linkText}>Share auth code</Text></Pressable>
+        <Pressable style={S.linkBtn} onPress={() => Share.share({message: qr.code})} accessibilityRole="button" accessibilityLabel="Share auth code" accessibilityState={{disabled: false}}><Text style={S.linkText}>Share auth code</Text></Pressable>
       </View>
     );
   }
 
   if (phase === 'review' && req) {
+    // C2: when ONLINE and the known balance can't cover the amount, gate PRE-SUBMIT (no doomed
+    // /pay). Offline we can't be sure (the local balance may be stale), so we only WARN there and
+    // let the merchant's online verify be the real gate.
+    const insufficient = shownBalance != null && req.amount > shownBalance;
+    const blockApprove = online && insufficient;
+    // C1: any shown error (expired / insufficient relay-reject / verify-fail) also disables the
+    // button so a doomed payment can't be re-tapped.
+    const approveDisabled = busy || !!err || blockApprove;
     return (
       <View style={S.center}>
         <Text style={S.label}>Review payment</Text>
         <Text testID="pay-amount" style={S.reviewAmount}>{`Pay ${usd(req.amount)}`}</Text>
         <Text style={S.reviewTo}>{`to ${req.name || short(req.toHex)}`}</Text>
-        <Text style={S.reviewReq}>{`request ${req.nonceHex.slice(0, 12)}…`}</Text>
-        {!online && shownBalance != null && req.amount > shownBalance ? (
-          <Text testID="review-lowbal" style={S.warnNote}>Your local balance may not cover this — the merchant will verify.</Text>
+        {/* C1/C2 + L5: the warning + any error render ABOVE the button (not below) so they're seen
+            first; the raw request nonce is no longer surfaced (internal protocol data). */}
+        {insufficient ? (
+          <Text testID="review-lowbal" style={S.warnNote}>{blockApprove
+            ? 'Not enough balance to cover this payment.'
+            : 'Your local balance may not cover this — the merchant will verify.'}</Text>
         ) : null}
-        <Pressable testID="btn-approve" style={[S.primary, busy && S.dim]} disabled={busy} onPress={approve}><Text style={S.primaryText}>{busy ? 'Signing…' : 'Approve'}</Text></Pressable>
         {err ? <Text testID="review-err" style={S.err}>{err}</Text> : null}
-        <Pressable style={S.linkBtn} onPress={reset}><Text style={S.linkTextMuted}>Cancel</Text></Pressable>
+        <Pressable
+          testID="btn-approve"
+          style={[S.primary, approveDisabled && S.dim]}
+          disabled={approveDisabled}
+          accessibilityRole="button"
+          accessibilityLabel="Approve payment"
+          accessibilityState={{disabled: approveDisabled}}
+          onPress={approve}>
+          <Text style={S.primaryText}>{busy ? 'Signing…' : 'Approve'}</Text>
+        </Pressable>
+        <Pressable style={S.linkBtn} onPress={reset} accessibilityRole="button" accessibilityLabel="Cancel" accessibilityState={{disabled: false}}><Text style={S.linkTextMuted}>Cancel</Text></Pressable>
       </View>
     );
   }
@@ -180,10 +205,16 @@ export function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOffl
           {/* N10: paste-request fallback — on web/desktop where there's no camera or NFC, the user can
               paste a request string they copied or received via another channel. The decode path
               accepts a raw string identical to what the scanner produces. */}
-          <Pressable testID="btn-paste" style={S.linkBtn} onPress={async () => {
-            const text = await readFromClipboard();
-            if (text && text.trim()) onRequestString(text.trim());
-          }}>
+          <Pressable
+            testID="btn-paste"
+            style={pasteBtnStyle}
+            onPress={async () => {
+              const text = await readFromClipboard();
+              if (text && text.trim()) onRequestString(text.trim());
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Paste request"
+            accessibilityState={{disabled: false}}>
             <Text style={S.linkText}>Paste request</Text>
           </Pressable>
           {err ? <Text style={S.err}>{err}</Text> : null}

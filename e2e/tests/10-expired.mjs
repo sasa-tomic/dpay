@@ -11,7 +11,7 @@
 import { setup, assert, assertIncludes, onboardWallet } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
-const PAY_CENTS = 2500; // $25.00
+const PAY_CENTS = 2500; // $25.00 (DEMO_USD = currency 0)
 
 export async function run() {
   const start = Date.now();
@@ -45,7 +45,24 @@ export async function run() {
     // And it stays on the review screen with the error visible (review-err testID).
     const errText = await driver.readText('review-err').catch(() => '');
     assertIncludes((errText || body).toLowerCase(), 'expired', 'review-err should explain the expiry');
-    console.log('[10-expired] ✓ app shows "The request expired" (server-side policy, surfaced clearly)');
+    console.log('[10-expired] app shows "The request expired" (server-side policy, surfaced clearly)');
+
+    // L5: the raw request nonce ("request 9612e903fe03...") must NOT leak to the user-facing review
+    // screen - it is internal protocol data.
+    const bodyNow = await driver.bodyText();
+    assert(!/request [0-9a-f]{6,}/i.test(bodyNow),
+      `review screen must NOT leak the raw hex request nonce (L5). body excerpt:\n${bodyNow.slice(0, 500)}`);
+    console.log('[10-expired] no raw request nonce leaked on the review screen (L5)');
+
+    // C1: once the expiry error is shown, btn-approve MUST be disabled (greyed out) so the user
+    // cannot re-tap a doomed/expired payment. RNW surfaces Pressable `disabled` as `aria-disabled`.
+    const approveDisabled = await driver.eval(() => {
+      const el = document.querySelector('[data-testid="btn-approve"]');
+      if (!el) return null;
+      return el.getAttribute('aria-disabled') === 'true' || el.hasAttribute('disabled') || el.disabled === true;
+    });
+    assert(approveDisabled === true, 'btn-approve must be disabled once the expiry error shows (C1)');
+    console.log('[10-expired] btn-approve disabled while the error is shown (C1)');
 
     // The balance is UNCHANGED — the expired auth debited nothing.
     const unchanged = await driver.waitForText('$100.00', { timeoutMs: 6_000 });

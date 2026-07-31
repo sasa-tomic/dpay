@@ -41,6 +41,13 @@ export async function run() {
     // 3. The request QR renders (the `request-qr` container is the gate).
     await driver.findByTestID('request-qr', { timeoutMs: 5_000 });
 
+    // L4: the offline-payer affordance uses clear merchant-facing wording (not the ambiguous
+    // "Payer offline? Scan their QR").
+    const reqBody = await driver.bodyText();
+    assert(/payer paid offline/i.test(reqBody) && /scan their signed code/i.test(reqBody),
+      `request screen should show the clear offline-payer affordance (L4). body excerpt:\n${reqBody.slice(0, 400)}`);
+    console.log('[06-request-qr] ✓ offline-payer affordance wording is clear (L4)');
+
     // 4. Read the EXACT value the QR encodes via the shim seam, then decode the 68-byte request.
     const qrValue = await driver.eval(() => window.__DPAY_QR_LAST);
     assert(typeof qrValue === 'string' && qrValue.length > 0, `__DPAY_QR_LAST should hold the request QR value, got "${qrValue}"`);

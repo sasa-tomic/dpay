@@ -1,4 +1,4 @@
-// Flow 19 — Low-balance scenarios (folded: offline review warning + online "Not enough balance").
+// Flow 19 — Low-balance scenarios (folded: offline review warning + online pre-submit gate).
 //
 // Two distinct insufficient-balance behaviors, both driven through the REAL app + REAL relay:
 //   1. OFFLINE `review-lowbal` warning: when the payer is OFFLINE (online=false), the Pay review
@@ -6,16 +6,17 @@
 //      for an amount exceeding the local balance (testID `review-lowbal`). This is the truthful
 //      offline UX: the app can't check the ledger, so it warns instead of blocking. The merchant's
 //      online verify is the real gate.
-//   2. ONLINE "Not enough balance": when ONLINE, approving a payment that exceeds the ledger balance
-//      submits to /api/v1/pay, the FakeLedger rejects with `InsufficientFunds`, and the app surfaces
-//      "Not enough balance" in the review error (testID `review-err`) — NOT a crash, NOT a silent
-//      drop to the QR screen, NOT a fake success.
+//   2. ONLINE pre-submit gate (C2): when ONLINE and the known balance can't cover the amount, the
+//      review screen DISABLES btn-approve up front and shows a balance warning above it (testID
+//      `review-lowbal`) — no doomed /pay submission. (The relay's InsufficientFunds→"Not enough
+//      balance" surfacing stays unit-tested in payments.ts; the C1 "any error disables the button"
+//      pattern is proven in flow 10.)
 //
 // Folds both into ONE test (speed: one onboarding, an offline pass, then an online pass). The
 // offline pass uses the harness's guaranteed-dead relay port (ECONNREFUSED, the real failure mode)
 // to force online=false; the online pass restores the good relay.
 //
-// Selector contract: `pay-amount`, `review-lowbal`, `review-err`, `btn-approve`, `btn-settings`,
+// Selector contract: `pay-amount`, `review-lowbal`, `btn-approve`, `btn-settings`,
 // `settings-relay`, `btn-settings-close`.
 import { setup, assert, onboardWallet, pickFreePort } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
@@ -65,29 +66,34 @@ export async function run() {
       `review-lowbal should warn about coverage, got: "${lowbalTxt}"`);
     console.log(`[19-low-balance] ✓ offline review-lowbal shows: "${lowbalTxt}"`);
 
-    // --- 2. ONLINE "Not enough balance": restore the good relay, approve an over-balance pay. -----
+    // --- 2. ONLINE insufficient: client-side gate disables Approve + shows a warning (C2). --------
     // Restore the good relay URL; the balance poll reconnects → online=true again.
-    console.log('[19-low-balance] going back online + approving an over-balance pay…');
+    console.log('[19-low-balance] going back online to test the C2 pre-submit gate…');
     await driver.click('btn-settings', { timeoutMs: 4_000 });
     await driver.type('settings-relay', relayBaseURL, { timeoutMs: 4_000 });
     await driver.click('btn-settings-close', { timeoutMs: 4_000 });
-    // Wait for the header to drop the offline indicator (online=true) before approving.
+    // Wait for the header to drop the offline indicator (online=true) before scanning.
     await driver.waitForText('balance', { timeoutMs: 8_000 });
 
-    // Scan a fresh $200 request + Approve → the FakeLedger rejects InsufficientFunds (20000 > 10000).
+    // Scan a $200 request while ONLINE + $100 balance. We KNOW online the balance can't cover it,
+    // so the app now gates PRE-SUBMIT (no doomed /pay): it shows a balance warning above the button
+    // AND disables btn-approve. (The relay's InsufficientFunds→"Not enough balance" surfacing stays
+    // unit-tested in payments.ts; the C1 "any error disables the button" pattern is proven in 10.)
     const onlineReq = buildReq();
     await driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), onlineReq);
     await driver.findByTestID('pay-amount', { timeoutMs: 5_000 });
-    // While online, the low-balance warning must NOT show (the merchant will verify online).
-    assert(!(await driver.isPresent('review-lowbal')),
-      'review-lowbal must NOT show while online (the merchant verifies online)');
-    await driver.click('btn-approve', { timeoutMs: 5_000 });
-    // The app surfaces the relay's InsufficientFunds as "Not enough balance" in review-err.
-    await driver.findByTestID('review-err', { timeoutMs: 10_000 });
-    const errTxt = await driver.readText('review-err');
-    assert(/not enough balance/i.test(errTxt),
-      `review-err should say "Not enough balance", got: "${errTxt}"`);
-    console.log(`[19-low-balance] ✓ online over-balance pay surfaces: "${errTxt}" (no crash, no silent drop)`);
+    // The online insufficient-balance warning now shows (re-uses review-lowbal as the balance note).
+    await driver.findByTestID('review-lowbal', { timeoutMs: 5_000 });
+    const lowbalOnlineTxt = await driver.readText('review-lowbal');
+    assert(/balance/i.test(lowbalOnlineTxt), `review-lowbal should warn about balance, got: "${lowbalOnlineTxt}"`);
+    // C2: btn-approve must be DISABLED (online + insufficient) — no doomed submit.
+    const approveDisabled = await driver.eval(() => {
+      const el = document.querySelector('[data-testid="btn-approve"]');
+      if (!el) return null;
+      return el.getAttribute('aria-disabled') === 'true' || el.hasAttribute('disabled') || el.disabled === true;
+    });
+    assert(approveDisabled === true, 'btn-approve must be disabled when online + balance insufficient (C2)');
+    console.log(`[19-low-balance] ✓ online insufficient: gate shows "${lowbalOnlineTxt}" + btn-approve disabled (C2, no doomed submit)`);
 
     await driver.screenshot('19-low-balance');
 

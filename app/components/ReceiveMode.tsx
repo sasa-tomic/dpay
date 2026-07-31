@@ -84,7 +84,7 @@ export function ReceiveMode({identity, relayUrl, nfcReady, onReceived}: {identit
         <View style={S.check}><Text style={S.checkMark}>✓</Text></View>
         <Text style={S.paidText}>{`Received ${usd(result.amount)}`}</Text>
         <Text style={S.paidSub}>{`from ${result.from}`}</Text>
-        <Pressable style={S.linkBtn} onPress={reset}><Text style={S.linkText}>New request</Text></Pressable>
+        <Pressable style={S.linkBtn} onPress={reset} accessibilityRole="button" accessibilityLabel="New request" accessibilityState={{disabled: false}}><Text style={S.linkText}>New request</Text></Pressable>
       </View>
     );
   }
@@ -110,10 +110,10 @@ export function ReceiveMode({identity, relayUrl, nfcReady, onReceived}: {identit
             {scanning ? (
               <><QrScanner onScan={onSignedQr} /><Text style={S.dim2}>Scan the payer's signed QR</Text></>
             ) : (
-              <Pressable style={S.linkBtn} onPress={() => setScanning(true)}><Text style={S.linkText}>Payer offline? Scan their QR</Text></Pressable>
+              <Pressable style={S.linkBtn} onPress={() => setScanning(true)} accessibilityRole="button" accessibilityLabel="Payer paid offline, scan their signed code to settle" accessibilityState={{disabled: false}}><Text style={S.linkText}>Payer paid offline? Scan their signed code to settle.</Text></Pressable>
             )}
             {err ? <Text style={S.err}>{err}</Text> : null}
-            <Pressable style={S.linkBtn} onPress={reset}><Text style={S.linkTextMuted}>New request</Text></Pressable>
+            <Pressable style={S.linkBtn} onPress={reset} accessibilityRole="button" accessibilityLabel="New request" accessibilityState={{disabled: false}}><Text style={S.linkTextMuted}>New request</Text></Pressable>
           </>
         ) : null}
       </View>
@@ -124,7 +124,7 @@ export function ReceiveMode({identity, relayUrl, nfcReady, onReceived}: {identit
     <View style={S.center}>
       <Text style={S.label}>Amount to receive</Text>
       <View style={S.amountRow}><Text style={S.currency}>$</Text><TextInput testID="amount-input" style={S.amountInput} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={C.sub2} /></View>
-      <Pressable testID="btn-request" style={S.primaryWide} onPress={makeRequest}><Text style={S.primaryText}>Request</Text></Pressable>
+      <Pressable testID="btn-request" style={S.primaryWide} onPress={makeRequest} accessibilityRole="button" accessibilityLabel="Request" accessibilityState={{disabled: false}}><Text style={S.primaryText}>Request</Text></Pressable>
       {err ? <Text style={S.err}>{err}</Text> : null}
     </View>
   );
