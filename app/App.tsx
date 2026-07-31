@@ -56,6 +56,8 @@ import {loadSavedWithdrawAddr, saveWithdrawAddr} from './services/withdraw';
 import {Logo, Wordmark} from './components/Logo';
 import {HotkeyHint} from './components/HotkeyHint';
 import {NfcPill} from './components/NfcPill';
+import {Tab} from './components/Tab';
+import {QrScanner} from './components/QrScanner';
 
 
 
@@ -507,38 +509,6 @@ function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity;
   );
 }
 
-function Tab({label, active, onPress, hotkey}: {label: string; active: boolean; onPress: () => void; hotkey?: string}) {
-  return (
-    <Pressable onPress={onPress} style={[S.tab, active && S.tabActive]} testID={`tab-${label.toLowerCase()}`}>
-      <Text style={[S.tabText, active && S.tabTextActive]}>{label}</Text>
-      {hotkey ? <HotkeyHint k={hotkey} tone={active ? 'onBrand' : 'muted'} /> : null}
-    </Pressable>
-  );
-}
-
-
-/** Reusable camera scanner (permission + focus-aware). Fires onScan once per mount. */
-function QrScanner({onScan}: {onScan: (v: string) => void}) {
-  const {hasPermission, requestPermission} = useCameraPermission();
-  const device = useCameraDevice('back');
-  useEffect(() => { if (!hasPermission) requestPermission(); }, [hasPermission, requestPermission]);
-  const [appActive, setAppActive] = useState(AppState.currentState === 'active');
-  useEffect(() => { const s = AppState.addEventListener('change', x => setAppActive(x === 'active')); return () => s.remove(); }, []);
-  const fired = useRef(false);
-  const codeScanner = useCodeScanner({codeTypes: ['qr'], onCodeScanned: codes => { const v = codes[0]?.value; if (v && !fired.current) { fired.current = true; onScan(v); } }});
-  return (
-    <View style={S.camBox}>
-      {hasPermission && device ? (
-        <Camera style={StyleSheet.absoluteFill} device={device} isActive={appActive} codeScanner={codeScanner} />
-      ) : (
-        <View style={S.camPlaceholder}>
-          <Text style={S.dim2}>{hasPermission ? 'no camera' : 'camera permission needed'}</Text>
-          {!hasPermission ? <Pressable style={S.smallBtn} onPress={requestPermission}><Text style={S.smallBtnText}>Grant camera</Text></Pressable> : null}
-        </View>
-      )}
-    </View>
-  );
-}
 
 // Phase → status-view presentation (mirrors ui/src/NfcSession.jsx). `spin` renders a spinner.
 const NFC_UI: Record<string, {tone: string; glyph?: string; spin?: boolean; title: string; sub: string}> = {
