@@ -17,7 +17,7 @@ export function NfcPill({status}: {status: NfcStatus}) {
   const s = NFC_PILL[status];
   if (!s) return null;
   return (
-    <View style={S.nfcPill} testID={`nfc-${status}`}>
+    <View style={S.nfcPill} testID={`nfc-${status}`} accessibilityRole="text" accessibilityLabel={s.label}>
       <View style={[S.dot, {backgroundColor: s.dot}]} />
       <Text style={S.nfcLabel}>{s.label}</Text>
     </View>

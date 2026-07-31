@@ -19,7 +19,7 @@ export function QrScanner({onScan}: {onScan: (v: string) => void}) {
       ) : (
         <View style={S.camPlaceholder}>
           <Text style={S.dim2}>{hasPermission ? 'no camera' : 'camera permission needed'}</Text>
-          {!hasPermission ? <Pressable style={S.smallBtn} onPress={requestPermission}><Text style={S.smallBtnText}>Grant camera</Text></Pressable> : null}
+          {!hasPermission ? <Pressable style={S.smallBtn} onPress={requestPermission} accessibilityRole="button" accessibilityLabel="Grant camera permission" accessibilityState={{disabled: false}}><Text style={S.smallBtnText}>Grant camera</Text></Pressable> : null}
         </View>
       )}
     </View>

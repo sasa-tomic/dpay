@@ -28,7 +28,7 @@ export function SettingsSheet({relayUrl, setRelayUrl, onTopUp, topUpBusy, topUpE
         <StatusBar barStyle="light-content" backgroundColor={C.bg} />
         <View style={S.sheetHead}>
           <Text style={S.sheetTitle}>Settings</Text>
-          <Pressable testID="btn-settings-close" style={S.sheetClose} onPress={onClose}><Text style={S.sheetCloseX}>✕</Text></Pressable>
+          <Pressable testID="btn-settings-close" style={S.sheetClose} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close settings" accessibilityState={{disabled: false}}><Text style={S.sheetCloseX}>✕</Text></Pressable>
         </View>
 
         <ScrollView contentContainerStyle={S.sheetBody} keyboardShouldPersistTaps="handled">
@@ -56,7 +56,10 @@ export function SettingsSheet({relayUrl, setRelayUrl, onTopUp, topUpBusy, topUpE
               testID="btn-topup"
               style={[S.primaryWide, topUpBusy && S.dim]}
               disabled={topUpBusy}
-              onPress={onTopUp}>
+              onPress={onTopUp}
+              accessibilityRole="button"
+              accessibilityLabel="Add demo money"
+              accessibilityState={{disabled: topUpBusy}}>
               {topUpBusy
                 ? <ActivityIndicator size="small" color={C.brandInk} />
                 : <Text style={S.primaryText}>Add demo money</Text>}
@@ -70,15 +73,15 @@ export function SettingsSheet({relayUrl, setRelayUrl, onTopUp, topUpBusy, topUpE
             {confirmReset ? (
               <View style={S.resetConfirmBox}>
                 <Text style={S.warnNote}>This erases your wallet identity from this device. Funds at this address become irrecoverable. This cannot be undone.</Text>
-                <Pressable testID="btn-reset-confirm" style={[S.primaryWide, {backgroundColor: C.bad, marginTop: 16}]} onPress={onReset}>
+                <Pressable testID="btn-reset-confirm" style={[S.primaryWide, {backgroundColor: C.bad, marginTop: 16}]} onPress={onReset} accessibilityRole="button" accessibilityLabel="Yes, reset everything" accessibilityState={{disabled: false}}>
                   <Text style={S.primaryText}>Yes, reset everything</Text>
                 </Pressable>
-                <Pressable testID="btn-reset-cancel" style={S.linkBtn} onPress={() => setConfirmReset(false)}>
+                <Pressable testID="btn-reset-cancel" style={S.linkBtn} onPress={() => setConfirmReset(false)} accessibilityRole="button" accessibilityLabel="Cancel reset" accessibilityState={{disabled: false}}>
                   <Text style={S.linkTextMuted}>Cancel</Text>
                 </Pressable>
               </View>
             ) : (
-              <Pressable testID="btn-reset" style={S.linkBtn} onPress={() => setConfirmReset(true)}>
+              <Pressable testID="btn-reset" style={S.linkBtn} onPress={() => setConfirmReset(true)} accessibilityRole="button" accessibilityLabel="Reset wallet" accessibilityState={{disabled: false}}>
                 <Text style={S.resetLink}>Reset wallet</Text>
               </Pressable>
             )}

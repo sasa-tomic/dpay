@@ -2,7 +2,13 @@ import {StyleSheet} from 'react-native';
 import {C} from './config/palette';
 
 export const S = StyleSheet.create({
-  root: {flex: 1, backgroundColor: C.bg},
+  // The app column. `width:'100%'` keeps it full-bleed on phones (and the e2e 390px viewport);
+  // `maxWidth:480` caps it on desktop so a 1280px laptop shows an intentional centered phone-width
+  // column instead of a stretched sheet. Centered by the `screenFrame` wrapper in App.tsx.
+  root: {flex: 1, backgroundColor: C.bg, width: '100%', maxWidth: 480},
+  // Desktop frame: fills the whole viewport with the bg (honest black margins on wide screens) and
+  // centers the capped app column. At <=480px it is a no-op (the column is already full-width).
+  screenFrame: {flex: 1, backgroundColor: C.bg, alignItems: 'center'},
   centerAll: {alignItems: 'center', justifyContent: 'center'},
   onboard: {flex: 1, padding: 28, justifyContent: 'center', alignItems: 'center'},
   wordmark: {fontSize: 26, fontWeight: '800', letterSpacing: -0.8, color: C.ink},
@@ -30,7 +36,7 @@ export const S = StyleSheet.create({
   balLabel: {fontSize: 12, color: C.sub},
   balAmt: {fontSize: 26, fontWeight: '800', color: C.ink},
   tabs: {flexDirection: 'row', paddingHorizontal: 22, gap: 10, marginTop: 10},
-  tab: {flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 8, paddingHorizontal: 20, borderRadius: 999, backgroundColor: C.field},
+  tab: {flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 8, paddingHorizontal: 20, borderRadius: 999, backgroundColor: C.field, minHeight: 44},
   tabActive: {backgroundColor: C.brand},
   tabText: {color: C.sub, fontWeight: '600'},
   tabTextActive: {color: C.brandInk},
@@ -54,9 +60,9 @@ export const S = StyleSheet.create({
   badgeOk: {marginTop: 10, fontSize: 13, fontWeight: '600', color: C.brand, backgroundColor: 'rgba(62,224,172,0.12)', paddingVertical: 6, paddingHorizontal: 14, borderRadius: 999, overflow: 'hidden'},
   qrHint: {marginTop: 16, fontSize: 13, color: C.sub, textAlign: 'center'},
   confirmRow: {flexDirection: 'row', gap: 12, marginTop: 12},
-  paidBtn: {backgroundColor: C.ok, borderRadius: 12, paddingVertical: 13, paddingHorizontal: 24},
+  paidBtn: {backgroundColor: C.ok, borderRadius: 12, paddingVertical: 13, paddingHorizontal: 24, minHeight: 44, justifyContent: 'center', alignItems: 'center'},
   paidBtnText: {color: C.brandInk, fontWeight: '700', fontSize: 16},
-  notPaidBtn: {backgroundColor: C.field, borderRadius: 12, paddingVertical: 13, paddingHorizontal: 24},
+  notPaidBtn: {backgroundColor: C.field, borderRadius: 12, paddingVertical: 13, paddingHorizontal: 24, minHeight: 44, justifyContent: 'center', alignItems: 'center'},
   notPaidText: {color: C.sub, fontWeight: '600', fontSize: 16},
   check: {width: 92, height: 92, borderRadius: 46, backgroundColor: C.ok, alignItems: 'center', justifyContent: 'center', marginBottom: 18, shadowColor: C.ok, shadowOpacity: 0.4, shadowRadius: 18, shadowOffset: {width: 0, height: 8}, elevation: 8},
   checkAlready: {backgroundColor: C.warn, shadowColor: C.warn},
@@ -67,7 +73,7 @@ export const S = StyleSheet.create({
   amountRow: {flexDirection: 'row', alignItems: 'center', backgroundColor: C.field, borderRadius: 14, paddingHorizontal: 18, height: 76, alignSelf: 'stretch', borderWidth: 1, borderColor: C.line2},
   currency: {fontSize: 36, fontWeight: '700', color: C.ink},
   amountInput: {flex: 1, fontSize: 36, fontWeight: '700', color: C.ink, marginLeft: 6},
-  linkBtn: {marginTop: 18},
+  linkBtn: {marginTop: 18, minHeight: 44, justifyContent: 'center'},
   linkText: {color: C.brand, fontWeight: '600', fontSize: 16},
   linkTextMuted: {color: C.sub, fontWeight: '600', fontSize: 15},
   smallBtn: {backgroundColor: C.brand, borderRadius: 10, paddingHorizontal: 16, height: 44, alignItems: 'center', justifyContent: 'center', shadowColor: C.brand, shadowOpacity: 0.35, shadowRadius: 12, shadowOffset: {width: 0, height: 6}, elevation: 6},
@@ -87,13 +93,13 @@ export const S = StyleSheet.create({
   assetAmt: {fontSize: 16, fontWeight: '700', color: C.brand, fontFamily: 'monospace'},
   assetSub: {fontSize: 12, color: C.sub2, marginTop: 6},
   assetActions: {flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12},
-  assetActionBtn: {paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: C.line2},
+  assetActionBtn: {paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: C.line2, minHeight: 44, justifyContent: 'center', alignItems: 'center'},
   assetActionText: {color: C.sub, fontWeight: '700', fontSize: 13},
   pickerRow: {alignSelf: 'stretch', paddingVertical: 16, paddingHorizontal: 16, borderRadius: 12, backgroundColor: C.card, borderWidth: 1, borderColor: C.line2, marginTop: 10},
   pickerLabel: {fontSize: 16, fontWeight: '700', color: C.ink},
   pickerSub: {fontSize: 12, color: C.sub2, marginTop: 4},
   settingsBar: {paddingHorizontal: 22, paddingVertical: 10, borderTopWidth: 1, borderTopColor: C.line},
-  settingsLinkBtn: {alignSelf: 'flex-start'},
+  settingsLinkBtn: {alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center'},
   settingsLink: {fontSize: 14, color: C.sub, fontWeight: '600'},
   settingsSection: {alignSelf: 'stretch', marginBottom: 28},
   relayInput: {alignSelf: 'stretch', backgroundColor: C.field, borderRadius: 12, height: 50, paddingHorizontal: 16, fontSize: 14, color: C.ink, fontFamily: 'monospace', borderWidth: 1, borderColor: C.line2},
@@ -101,23 +107,27 @@ export const S = StyleSheet.create({
   resetLink: {fontSize: 15, color: C.bad, fontWeight: '600'},
   // The PRIMARY funding affordance in the balance header: a clear "Add money" brand button that
   // opens the deposit sheet. Filled brand so it reads as primary; the DEMO_USD faucet (topUpBtn)
-  // is the secondary outline pill beside it.
-  addMoneyBtn: {flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.brand, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7, shadowColor: C.brand, shadowOpacity: 0.35, shadowRadius: 12, shadowOffset: {width: 0, height: 6}, elevation: 6},
+  // is the secondary outline pill beside it. minHeight:44 meets the 44pt touch target; the shadow
+  // radius is kept tight (8) so the glow can't bleed past the header's right padding and read as
+  // clipped at the viewport edge (L1).
+  addMoneyBtn: {flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.brand, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7, minHeight: 44, shadowColor: C.brand, shadowOpacity: 0.35, shadowRadius: 8, shadowOffset: {width: 0, height: 6}, elevation: 6},
   addMoneyBtnText: {fontSize: 13, fontWeight: '800', color: C.brandInk},
-  // Keyboard-shortcut hint badge (web only — rendered by HotkeyHint). A small rounded "key" square;
-  // the muted tone sits on the dark header/tabs, the onBrand variant sits on the green brand
-  // background (active tab, Add-money button). Subtle by design: muted tone + monospace letter so it
-  // reads as a hint, not as primary chrome.
-  kbdHint: {minWidth: 16, height: 16, paddingHorizontal: 4, borderRadius: 4, borderWidth: 1, borderColor: C.line, alignItems: 'center', justifyContent: 'center'},
-  kbdHintText: {fontSize: 10, fontWeight: '700', color: C.sub2, fontFamily: 'monospace'},
-  kbdHintOnBrand: {borderColor: 'rgba(3,23,15,0.35)', backgroundColor: 'rgba(3,23,15,0.10)'},
+  // Keyboard-shortcut hint badge (web only — rendered by HotkeyHint). A visible "key cap": a
+  // rounded square with a real border + subtle background and a 14px monospace letter, so the
+  // shortcut it teaches is clearly legible (M3 — the prior 10px borderless badge was nearly
+  // invisible). `kbdHint` is the muted variant on the dark header/tabs (ink text on a faint white
+  // wash -> well above 3:1 contrast); `kbdHintOnBrand` flips to a dark-on-brand variant for badges
+  // that sit on the green brand background (active tab, Add-money button).
+  kbdHint: {minWidth: 24, height: 24, paddingHorizontal: 6, borderRadius: 6, borderWidth: 1, borderColor: C.sub2, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center'},
+  kbdHintText: {fontSize: 14, fontWeight: '700', color: C.ink, fontFamily: 'monospace'},
+  kbdHintOnBrand: {borderColor: 'rgba(3,23,15,0.45)', backgroundColor: 'rgba(3,23,15,0.18)'},
   kbdHintTextOnBrand: {color: C.brandInk},
   // Deposit sheet — a full-screen overlay above the wallet.
   sheetOverlay: {position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: C.bg, zIndex: 10},
   sheet: {flex: 1, backgroundColor: C.bg},
   sheetHead: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 20, paddingHorizontal: 22, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: C.line},
   sheetTitle: {fontSize: 20, fontWeight: '800', color: C.ink},
-  sheetClose: {width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: C.field},
+  sheetClose: {width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: C.field},
   sheetCloseX: {fontSize: 16, fontWeight: '700', color: C.sub},
   sheetBody: {flexGrow: 1, paddingHorizontal: 22, paddingTop: 22, alignItems: 'center'},
   // Deposit instructions — a scannable card (network/asset + est. time + fee/min + non-custody line).
@@ -137,12 +147,12 @@ export const S = StyleSheet.create({
   checkBtnText: {color: C.brand, fontWeight: '700', fontSize: 15},
   // Withdraw affordance on the ckBTC asset card — a small brand link, distinct from the deposit
   // "Add money" flow (money OUT, not IN). Sits below the balance line.
-  withdrawLink: {marginTop: 10, alignSelf: 'flex-start', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: C.brand},
+  withdrawLink: {marginTop: 10, alignSelf: 'flex-start', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: C.brand, minHeight: 44, justifyContent: 'center', alignItems: 'center'},
   withdrawLinkText: {color: C.brand, fontWeight: '700', fontSize: 13},
   // Withdraw sheet form fields.
   inputLabel: {fontSize: 13, fontWeight: '700', color: C.sub, alignSelf: 'flex-start', marginTop: 18, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8},
   withdrawAddrInput: {alignSelf: 'stretch', backgroundColor: C.field, borderRadius: 12, height: 56, paddingHorizontal: 16, fontSize: 15, color: C.ink, fontFamily: 'monospace', borderWidth: 1, borderColor: C.line2},
-  savedAddrChip: {alignSelf: 'flex-start', backgroundColor: C.line, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 8},
+  savedAddrChip: {alignSelf: 'flex-start', backgroundColor: C.line, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 8, minHeight: 44, justifyContent: 'center'},
   savedAddrText: {fontSize: 13, color: C.brand, fontFamily: 'monospace'},
   withdrawAmtInput: {alignSelf: 'stretch', backgroundColor: C.field, borderRadius: 12, height: 56, paddingHorizontal: 16, fontSize: 22, fontWeight: '700', color: C.ink, borderWidth: 1, borderColor: C.line2},
   reviewCard: {alignSelf: 'stretch', marginTop: 20, backgroundColor: C.card, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: C.line2},

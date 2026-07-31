@@ -16,7 +16,7 @@
  * lives under `./{config,lib,hooks,services,styles.ts,components}`. See `2026-07-31-app-split-plan.md`.
  */
 import {useCallback, useEffect, useState} from 'react';
-import {SafeAreaView, ActivityIndicator} from 'react-native';
+import {SafeAreaView, ActivityIndicator, View} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {RELAY_DEFAULT} from './relayConfig';
 import {C} from './config/palette';
@@ -73,11 +73,13 @@ export default function App() {
 
   const onReset = useCallback(async () => { await AsyncStorage.removeItem(STORAGE_KEY); setIdentity(null); }, []);
 
+  // M5: wrap every root in `screenFrame` so the capped (`maxWidth:480`) app column centers on a
+  // wide desktop viewport, with the bg filling the honest side margins. At <=480px it is inert.
   if (identity === undefined) {
-    return <SafeAreaView style={[S.root, S.centerAll]}><ActivityIndicator color={C.brand} /></SafeAreaView>;
+    return <View style={S.screenFrame}><SafeAreaView style={[S.root, S.centerAll]}><ActivityIndicator color={C.brand} /></SafeAreaView></View>;
   }
   if (identity === null) {
-    return <Onboarding relayUrl={relayUrl} onCreated={setIdentity} />;
+    return <View style={S.screenFrame}><Onboarding relayUrl={relayUrl} onCreated={setIdentity} /></View>;
   }
-  return <Wallet identity={identity} relayUrl={relayUrl} setRelayUrl={persistRelay} onReset={onReset} />;
+  return <View style={S.screenFrame}><Wallet identity={identity} relayUrl={relayUrl} setRelayUrl={persistRelay} onReset={onReset} /></View>;
 }

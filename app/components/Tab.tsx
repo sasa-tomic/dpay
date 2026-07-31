@@ -4,7 +4,13 @@ import {HotkeyHint} from './HotkeyHint';
 
 export function Tab({label, active, onPress, hotkey}: {label: string; active: boolean; onPress: () => void; hotkey?: string}) {
   return (
-    <Pressable onPress={onPress} style={[S.tab, active && S.tabActive]} testID={`tab-${label.toLowerCase()}`}>
+    <Pressable
+      onPress={onPress}
+      style={[S.tab, active && S.tabActive]}
+      testID={`tab-${label.toLowerCase()}`}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{disabled: false}}>
       <Text style={[S.tabText, active && S.tabTextActive]}>{label}</Text>
       {hotkey ? <HotkeyHint k={hotkey} tone={active ? 'onBrand' : 'muted'} /> : null}
     </Pressable>
