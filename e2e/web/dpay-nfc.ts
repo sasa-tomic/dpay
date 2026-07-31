@@ -25,7 +25,7 @@ export const DpayNfc = {
   disarmCard: () => Promise.resolve(),
   approveCard: (_wireHex: string) => Promise.resolve(),
   declineCard: () => Promise.resolve(),
-  buildRequest: async (_toHex: string, _amount: number, _nonceHex: string, _expiry: number, _currency: number) =>
+  buildRequest: async (_toHex: string, _amount: number, _nonceHex: string, _expiry: number, _currency: number, _toName: string, _memo: string) =>
     '', // empty hex string — Receive screen's `if (nfcHex)` guard skips reader-mode setup on web
   startReader: (_requestHex: string) => Promise.resolve(),
   stopReader: () => Promise.resolve(),

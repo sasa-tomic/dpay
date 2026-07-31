@@ -5,7 +5,7 @@ export type DpayNfcApi = {
   disarmCard(): Promise<void>;
   approveCard(wireHex: string): Promise<void>;
   declineCard(): Promise<void>;
-  buildRequest(toHex: string, amount: number, nonceHex: string, expiry: number, currency: number): Promise<string>;
+  buildRequest(toHex: string, amount: number, nonceHex: string, expiry: number, currency: number, toName: string, memo: string): Promise<string>;
   startReader(requestHex: string): Promise<void>;
   stopReader(): Promise<void>;
   // Merchant: after settling online, hand the outcome back to the payer. `status` is the receipt

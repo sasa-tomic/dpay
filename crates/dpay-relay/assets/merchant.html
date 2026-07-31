@@ -129,8 +129,8 @@ function encodeRequest(toHex, cents, nonceHex, expiry, currency){
   hexToBytes(toHex,b,0); writeU64LE(b,32,cents); hexToBytes(nonceHex,b,40); writeU64LE(b,56,expiry); writeU32LE(b,64,c);
   return b64url(b);
 }
-// The signed wire is from(32)|to(32)|amount(8)|nonce(16)@72|expiry(8)|currency_le(4)|sig(64)|from_pub(32) = 196 bytes.
-function nonceOfSigned(qr){ try { const w=b64urlDecode(qr.trim()); return w.length===196 ? bytesToHex(w.slice(72,88)) : null; } catch { return null; } }
+// The signed wire is from(32)|to(32)|amount(8)|nonce(16)@72|expiry(8)|currency_le(4)|from_name(32)|to_name(32)|memo(32)|sig(64)|from_pub(32) = 292 bytes (wire-format v2).
+function nonceOfSigned(qr){ try { const w=b64urlDecode(qr.trim()); return w.length===292 ? bytesToHex(w.slice(72,88)) : null; } catch { return null; } }
 function toCents(s){ const n=Math.round(parseFloat(s||'0')*100); return Number.isFinite(n)&&n>0?n:0; }
 
 function createRequest(){

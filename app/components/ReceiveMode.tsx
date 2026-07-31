@@ -41,11 +41,10 @@ export function ReceiveMode({identity, relayUrl, nfcReady, onReceived}: {identit
       // now live INSIDE the 132-byte request (wire-format v2) — the QR is plain base64url (no `|name`).
       const memoVal = memo.trim();
       const reqB64 = await DpayCore.encodeRequest(identity.publicHex, cents, nonce, expiry, 0, identity.username, memoVal);
-      // Build the NFC request too so reader mode can start alongside the QR (best-effort). The NFC
-      // request path doesn't carry names in this wave (the FFI/native NFC build surface is updated
-      // separately; the radio hop is a physical-device gate) — names ride the signed wire instead.
+      // Build the NFC request too so reader mode can start alongside the QR (best-effort). The
+      // merchant's username + memo ride as to_name/memo in the request bytes, same as the QR path.
       let nfcHex: string | null = null;
-      if (nfcReady && DpayNfc) { try { nfcHex = await DpayNfc.buildRequest(identity.publicHex, cents, nonce, expiry, 0); } catch {} }
+      if (nfcReady && DpayNfc) { try { nfcHex = await DpayNfc.buildRequest(identity.publicHex, cents, nonce, expiry, 0, identity.username, memoVal); } catch {} }
       setReqQr({value: reqB64, cents, nonce, nfcHex});
       setResult(null); setErr(null);
     } catch (e: any) { setErr(String(e?.message ?? e)); }
