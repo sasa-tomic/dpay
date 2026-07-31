@@ -9,68 +9,24 @@
  * Money/protocol calls go through DpayCore → UniFFI → libdpay_ffi.so (the shared dpay-core). The
  * request QR is `<base64url request>|<username>`: the request is the signed, money-critical payload;
  * the username is unsigned display metadata (the account is the source of truth).
+ *
+ * This is the app root: it loads the persisted identity + relay URL, runs the on-device self-check,
+ * and routes between Onboarding (no key yet) and Wallet (the container). Everything else — the
+ * palette, format helpers, constants, hooks, services, styles, and all presentational components —
+ * lives under `./{config,lib,hooks,services,styles.ts,components}`. See `2026-07-31-app-split-plan.md`.
  */
-import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {
-  SafeAreaView, ScrollView, StatusBar, View, Text, Pressable, TextInput, StyleSheet, NativeModules,
-  Share, AppState, ActivityIndicator, NativeEventEmitter, Platform,
-} from 'react-native';
-import QRCode from 'react-native-qrcode-svg';
-import Svg, {Defs, RadialGradient, Stop, Rect, Path} from 'react-native-svg';
-import {Camera, useCameraDevice, useCameraPermission, useCodeScanner} from 'react-native-vision-camera';
+import {useCallback, useEffect, useState} from 'react';
+import {SafeAreaView, ActivityIndicator} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {RELAY_DEFAULT} from './relayConfig';
-import {
-  classifyPayHttp, receiptCodeFor, decidePayerReceipt, rejectionMessage, isNonceReused,
-  type SettleOutcome,
-} from './payments';
-import {encodeApprove, encodeDepositErc20, principalToBytes32} from './cketh';
-import {getEthereumProvider, connectWallet, sendTransaction} from './wallet';
 import {C} from './config/palette';
-import type {
-  DpayNfcApi, NfcEvent, NfcPhaseName, Req, Identity, Txn, TransactionsRow, DpayCoreApi, NfcStatus,
-} from './lib/types';
-import {
-  usd, short, MINT_HEX, isMintSentinel, fmtTime, nowSecs, randNonceHex, toCents, toSats, base,
-  parseRequestQR, fmtAsset,
-} from './lib/format';
-import {
-  EXPIRY_WINDOW, DIRECT_PAY_TIMEOUT_MS, NFC_PAY_TIMEOUT_MS, RECONCILE_ATTEMPTS, RECONCILE_INTERVAL_MS,
-  RECEIPT_WAIT_MS, STORAGE_KEY, RELAY_STORAGE_KEY, POLL, WITHDRAW_TIMEOUT_MS, WITHDRAW_EXPIRY_WINDOW,
-} from './config/constants';
-import {
-  type MinterFamily, type CurrencyDescriptor, type FamilyDisplay, CATALOG_CACHE_KEY, BUNDLED_CATALOG,
-  fetchCurrencies, familyDisplay, assetTestKey,
-} from './config/catalog';
+import {STORAGE_KEY, RELAY_STORAGE_KEY} from './config/constants';
+import {randNonceHex} from './lib/format';
+import type {Identity} from './lib/types';
+import {DpayCore} from './services/native';
 import {S} from './styles';
-import {useHotkeys, useEscapeToClose} from './hooks/useHotkeys';
-import {copyToClipboard, readFromClipboard} from './hooks/clipboard';
-import {readDepositDeepLink} from './hooks/useDeepLink';
-import {DpayCore, DpayNfc} from './services/native';
-import {verifyOutcomeReceipt} from './services/receipt';
-import {
-  type DepositInfo, type DepositRefresh, type CkErc20OnrampParams, type WithdrawReceipt,
-  depositInfo, depositAddress, depositRefresh, ckerc20OnrampParams, withdrawFunds,
-} from './services/relay';
-import {loadSavedWithdrawAddr, saveWithdrawAddr} from './services/withdraw';
-import {Logo, Wordmark} from './components/Logo';
-import {HotkeyHint} from './components/HotkeyHint';
-import {NfcPill} from './components/NfcPill';
-import {Tab} from './components/Tab';
-import {QrScanner} from './components/QrScanner';
-import {NfcTap} from './components/NfcTap';
-import {PayMode} from './components/PayMode';
-import {ReceiveMode} from './components/ReceiveMode';
-import {SettingsSheet} from './components/SettingsSheet';
-import {AssetPickerSheet} from './components/AssetPickerSheet';
-import {DepositSheet} from './components/DepositSheet';
-import {WithdrawSheet} from './components/WithdrawSheet';
-import {CkErc20DepositSheet} from './components/CkErc20DepositSheet';
 import {Onboarding} from './components/Onboarding';
 import {Wallet} from './components/Wallet';
-
-
-
 
 export default function App() {
   const [identity, setIdentity] = useState<Identity | null | undefined>(undefined); // undefined = loading
