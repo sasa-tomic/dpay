@@ -17,6 +17,12 @@ import {useEscapeToClose} from '../hooks/useHotkeys';
  * mint lands (minted_total > 0), after which the wallet's balance poll reflects the new ckBTC. The
  * sheet is additive: it never touches the faucet (DEMO_USD) or the Pay/Receive/NFC flows.
  */
+// H5: plain-language deposit errors — no "relay" / "reopen the sheet" jargon. Two distinct cases the
+// user can actually act on: (1) transient — the address couldn't be loaded (network/timeout/relay
+// down); (2) no minter — the relay returns 503 or an empty address, meaning this asset has no deposit
+// minter configured yet. Detection keys off the status the relay client throws (503 = no minter).
+const TRANSIENT_DEPOSIT_ERR = "Couldn't load your deposit address. Check your connection and try again.";
+const NO_MINTER_DEPOSIT_ERR = "This asset isn't available for deposits yet.";
 export function DepositSheet({identity, relayUrl, currency, display, onClose}: {identity: Identity; relayUrl: string; currency: number; display: FamilyDisplay; onClose: () => void}) {
   const [info, setInfo] = useState<DepositInfo | null>(null);
   const [address, setAddress] = useState<string | null>(null);
@@ -45,17 +51,16 @@ export function DepositSheet({identity, relayUrl, currency, display, onClose}: {
           depositAddress(relayUrl, identity.publicHex, currency, ctrl.signal),
         ]);
         if (!alive) return;
+        // H5: fetch succeeded but no address returned → the asset has no deposit minter configured.
+        if (!a) { setErr(NO_MINTER_DEPOSIT_ERR); return; }
         setInfo(i); setAddress(a);
       } catch (e: any) {
-        // N7: distinguish "no minter" (503 — the asset has no ck-minter configured) from a transient
-        // network/relay error. The relay returns 503 when no minter is registered for this currency;
-        // the deposit fetch functions throw with the status in the message. A missing status means a
-        // network error (relay unreachable).
+        // H5: distinguish "no minter" (503 — the relay signals no ck-minter is registered for this
+        // currency) from a transient network/relay error (ECONNREFUSED, timeout, other status). The
+        // relay client throws with the status in the message; a missing status means a network error.
         const msg = String(e?.message ?? e);
         const isNoMinter = /503/.test(msg);
-        if (alive) setErr(isNoMinter
-          ? 'Direct deposit for this asset isn\'t available yet.'
-          : 'Could not reach the ledger for a deposit address');
+        if (alive) setErr(isNoMinter ? NO_MINTER_DEPOSIT_ERR : TRANSIENT_DEPOSIT_ERR);
       } finally {
         if (alive) setLoading(false);
         clearTimeout(t);
@@ -110,8 +115,12 @@ export function DepositSheet({identity, relayUrl, currency, display, onClose}: {
   // The linear progress cue: best confirmation count among pending UTXOs vs the required count.
   const maxConf = pending.reduce((m, p) => Math.max(m, p.confirmations), 0);
   const estMin = required > 0 ? required * display.blockMin : 0;
-  const feeTxt = info ? fmtAsset(info.deposit_fee, display.amountDecimals, display.nativeAsset) : null;
-  const minTxt = info?.deposit_min_amount != null ? fmtAsset(info.deposit_min_amount, display.amountDecimals, display.nativeAsset) : null;
+  // C3: never render a raw "0.00000000 BTC" — when a fee/min value is zero (the test minter /
+  // FakeLedger returns zeros; a future no-fee asset) show "—" for that part and format normally only
+  // when non-zero. The labels stay so the fields remain visible; only the bogus zero amount (8
+  // trailing zeros) is suppressed — a premium app never shows that to a user.
+  const feeVal = info && info.deposit_fee > 0 ? fmtAsset(info.deposit_fee, display.amountDecimals, display.nativeAsset) : '—';
+  const minVal = info && info.deposit_min_amount != null && info.deposit_min_amount > 0 ? fmtAsset(info.deposit_min_amount, display.amountDecimals, display.nativeAsset) : '—';
 
   return (
     <View style={S.sheetOverlay}>
@@ -119,7 +128,7 @@ export function DepositSheet({identity, relayUrl, currency, display, onClose}: {
         <StatusBar barStyle="light-content" backgroundColor={C.bg} />
         <View style={S.sheetHead}>
           <Text style={S.sheetTitle}>{`Add ${display.networkLabel}`}</Text>
-          <Pressable testID="btn-deposit-close" style={S.sheetClose} onPress={onClose}><Text style={S.sheetCloseX}>✕</Text></Pressable>
+          <Pressable testID="btn-deposit-close" accessibilityRole="button" accessibilityLabel="Close deposit sheet" style={S.sheetClose} onPress={onClose}><Text style={S.sheetCloseX}>✕</Text></Pressable>
         </View>
 
         <ScrollView contentContainerStyle={S.sheetBody} keyboardShouldPersistTaps="handled">
@@ -130,8 +139,9 @@ export function DepositSheet({identity, relayUrl, currency, display, onClose}: {
             </View>
           ) : err || !address ? (
             <View style={S.centerAll}>
-              <Text style={S.err}>{err ?? 'No deposit address available'}</Text>
-              <Text style={S.dim2}>{err?.includes("isn't available") ? 'This asset may not have a deposit minter configured yet.' : 'Check the relay is reachable, then reopen the sheet.'}</Text>
+              {/* H5: the message already carries its own plain-language guidance (retry hint for
+                  transient; "not available yet" for no-minter), so no secondary jargon line is shown. */}
+              <Text style={S.err}>{err ?? 'No deposit address available.'}</Text>
             </View>
           ) : minted ? (
             <View style={S.centerAll}>
@@ -154,9 +164,7 @@ export function DepositSheet({identity, relayUrl, currency, display, onClose}: {
                   {required > 0 ? `~${required} confirmation${required === 1 ? '' : 's'}` : 'confirmations'}
                   {estMin > 0 ? ` · typically ~${estMin} min` : ''}
                 </Text>
-                <Text style={S.instrMeta}>
-                  {`Network fee ${feeTxt ?? '—'}`}{minTxt != null ? ` · Min deposit ${minTxt}` : ''}
-                </Text>
+                <Text style={S.instrMeta}>{`Network fee ${feeVal} · Min deposit ${minVal}`}</Text>
                 <Text style={S.instrCustody}>
                   dpay never holds your keys — funds mint 1:1 to your wallet on confirmation.
                 </Text>
@@ -166,7 +174,12 @@ export function DepositSheet({identity, relayUrl, currency, display, onClose}: {
 
               <Text testID="deposit-address" style={S.sheetAddr} selectable={true}>{address}</Text>
 
-              <Pressable testID="btn-deposit-copy" style={[S.primaryWide, S.depositCopy]} onPress={copy}>
+              <Pressable
+                testID="btn-deposit-copy"
+                accessibilityRole="button"
+                accessibilityLabel={copied === 'clipboard' ? 'Address copied' : copied === 'shared' ? 'Address shared' : 'Copy deposit address'}
+                style={[S.primaryWide, S.depositCopy]}
+                onPress={copy}>
                 <Text style={S.primaryText}>{copied === 'clipboard' ? 'Copied ✓' : copied === 'shared' ? 'Shared ✓' : 'Copy address'}</Text>
               </Pressable>
 
@@ -188,6 +201,9 @@ export function DepositSheet({identity, relayUrl, currency, display, onClose}: {
 
               <Pressable
                 testID="btn-deposit-check"
+                accessibilityRole="button"
+                accessibilityLabel="Check deposit status now"
+                accessibilityState={{disabled: checkBusy}}
                 style={[S.checkBtn, checkBusy && S.dim]}
                 disabled={checkBusy}
                 onPress={() => refreshNow(true)}>

@@ -132,8 +132,10 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, onCl
       <SafeAreaView style={S.sheet}>
         <StatusBar barStyle="light-content" backgroundColor={C.bg} />
         <View style={S.sheetHead}>
-          <Text style={S.sheetTitle}>{`Add ${display.networkLabel}`}</Text>
-          <Pressable testID="btn-ckerc20-close" style={S.sheetClose} onPress={onClose}><Text style={S.sheetCloseX}>✕</Text></Pressable>
+          {/* H1: title is the ASSET (USDC), not the network (Ethereum) — networkLabel stays only in the
+              "Send only USDC on Ethereum" instruction below. */}
+          <Text style={S.sheetTitle}>{`Add ${display.nativeAsset}`}</Text>
+          <Pressable testID="btn-ckerc20-close" accessibilityRole="button" accessibilityLabel="Close deposit sheet" style={S.sheetClose} onPress={onClose}><Text style={S.sheetCloseX}>✕</Text></Pressable>
         </View>
         <ScrollView contentContainerStyle={S.sheetBody} keyboardShouldPersistTaps="handled">
           {/* Wrong-network warning — unmissable, above the flow. */}
@@ -147,12 +149,18 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, onCl
               dpay never holds your keys — your wallet signs, and ckUSDC mints 1:1 to your wallet on
               confirmation (~20 min).
             </Text>
+            {/* M8: gas warning — the onramp needs two Ethereum transactions (approve + deposit), so the
+                user must hold a little ETH for gas or both will fail. Inline style (amber) so it reads
+                as a note, not body copy. */}
+            <Text style={[S.instrCustody, {color: C.warn}]}>
+              You'll need a small amount of ETH for Ethereum network gas fees.
+            </Text>
           </View>
 
           {err ? <Text testID="ckerc20-status" style={S.err}>{err}</Text> : null}
 
           {phase === 'connect' ? (
-            <Pressable testID="btn-connect-wallet" style={S.primaryWide} onPress={connect}>
+            <Pressable testID="btn-connect-wallet" accessibilityRole="button" accessibilityLabel="Connect Ethereum wallet" style={S.primaryWide} onPress={connect}>
               <Text style={S.primaryText}>Connect wallet</Text>
             </Pressable>
           ) : phase === 'enter' || phase === 'sending' ? (
@@ -169,15 +177,22 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, onCl
                 onSubmitEditing={phase === 'enter' ? submit : undefined}
               />
               {account ? <Text style={S.dim2}>{`From ${account.slice(0, 6)}…${account.slice(-4)}`}</Text> : null}
-              <Pressable testID="btn-approve" style={[S.primaryWide, phase === 'sending' && {opacity: 0.6}]} onPress={submit} disabled={phase === 'sending'}>
+              <Pressable
+                testID="btn-approve"
+                accessibilityRole="button"
+                accessibilityLabel={phase === 'sending' ? 'Confirming in your wallet' : 'Approve and deposit'}
+                accessibilityState={{disabled: phase === 'sending'}}
+                style={[S.primaryWide, phase === 'sending' && {opacity: 0.6}]}
+                onPress={submit}
+                disabled={phase === 'sending'}>
                 <Text style={S.primaryText}>{phase === 'sending' ? 'Confirm in your wallet…' : 'Approve & deposit'}</Text>
               </Pressable>
             </>
           ) : phase === 'watching' ? (
             <View style={S.centerAll}>
               <ActivityIndicator color={C.brand} />
-              <Text testID="ckerc20-status" style={S.paidSub}>Transactions submitted ✓</Text>
-              <Text style={S.dim2}>Watching for your mint — the ckETH minter scrapes Ethereum every few minutes; credit typically lands within ~20 min.</Text>
+              {/* M9: one clear line — no "scrapes" jargon, no duplicate ~20min (confirmation + credit). */}
+              <Text testID="ckerc20-status" style={S.paidSub}>Waiting for confirmation — your ckUSDC will appear in about 20 minutes.</Text>
             </View>
           ) : (
             <View style={S.centerAll}>

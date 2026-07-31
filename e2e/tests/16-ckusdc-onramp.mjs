@@ -51,6 +51,15 @@ export async function run() {
     await driver.click('btn-deposit', { timeoutMs: 5_000 });
     await driver.click('asset-picker-row-ckusdc', { timeoutMs: 5_000 });
     await driver.findByTestID('ckerc20-deposit', { timeoutMs: 8_000 });
+    {
+      const body = await driver.bodyText();
+      // H1: the sheet title names the ASSET (USDC), not the network (Ethereum).
+      assertIncludes(body, 'Add USDC', 'CkErc20DepositSheet title should name the asset (USDC), not the network (H1)');
+      assert(!/Add Ethereum/.test(body), 'the sheet title must not read "Add Ethereum" (H1)');
+      // M8: a gas-fee warning must be present (the onramp needs ETH for the two Ethereum txs).
+      assertIncludes(body, 'ETH for Ethereum network gas', 'the sheet must warn about Ethereum gas fees (M8)');
+      console.log('[16-ckusdc-onramp] ✓ title is "Add USDC" (not Ethereum) + gas-fee note shown');
+    }
     console.log('[16-ckusdc-onramp] ✓ CkErc20DepositSheet opened with wrong-network warning');
 
     // Connect the (mock) wallet.
@@ -63,9 +72,14 @@ export async function run() {
     await driver.click('btn-approve', { timeoutMs: 5_000 });
 
     // The sheet transitions to "watching" once both txs are signed (calldata proven correct by the
-    // recorded calls). Wait for the watching status text.
-    await driver.waitForText('submitted', { timeoutMs: 8_000 });
-    console.log('[16-ckusdc-onramp] ✓ both transactions submitted');
+    // recorded calls). M9: the watching state is now ONE clear line — no "scrapes" jargon, no
+    // duplicate ~20min (confirmation + credit).
+    await driver.waitForText('Waiting for confirmation', { timeoutMs: 8_000 });
+    {
+      const body = await driver.bodyText();
+      assert(!/scrapes/.test(body), 'the watching state must not use the "scrapes" jargon (M9)');
+      console.log('[16-ckusdc-onramp] ✓ watching state uses a single plain confirmation line (no "scrapes")');
+    }
 
     // Assert the WIRING: exactly 2 sendTransaction calls with the right contract + selector.
     const calls = await driver.eval(() => window.__DPAY_TEST_ETH_CALLS);
