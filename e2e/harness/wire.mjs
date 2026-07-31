@@ -148,6 +148,30 @@ export async function generateKeypair() {
   return { secretHex: bytesToHex(secret), publicHex: bytesToHex(pub) };
 }
 
+/**
+ * Sign a WithdrawAuth and return the hex signature (mirrors dpay_core::sign_withdraw, byte-exact).
+ * Used by the withdraw-errors flow to drive the relay-level enforcement gate (below-min /
+ * insufficient / wrong-sig) DIRECTLY via POST /api/v1/withdraw — proving the relay rejects at the
+ * API level with the right 422 + error text, complementing the app's own UI guards. The signing
+ * layout is read from `wire_layout.json` (the withdraw section) so the offsets are never
+ * hand-transcribed. Returns the 64-byte sig as a hex string.
+ */
+export async function signWithdrawalHex(secretHex, fromHex, destination, amount, nonceHex, expiry, currency) {
+  const W = L.withdraw;
+  const addrBytes = Uint8Array.from(Buffer.from(destination, 'utf8'));
+  const buf = new Uint8Array(W.fixed_len + W.addr_len_bytes + addrBytes.length);
+  let off = 0;
+  buf.set(hexToBytes(fromHex), off); off += W.fields.from_pubkey.len;
+  putU64Le(buf, off, amount); off += W.fields.amount.len;
+  buf.set(hexToBytes(nonceHex), off); off += W.fields.nonce.len;
+  putU64Le(buf, off, expiry); off += W.fields.expiry.len;
+  putU32Le(buf, off, currency); off += W.fields.currency.len;
+  putU32Le(buf, off, addrBytes.length); off += W.addr_len_bytes;
+  buf.set(addrBytes, off);
+  const sig = await ed.signAsync(buf, hexToBytes(secretHex));
+  return bytesToHex(sig);
+}
+
 export const REQUEST_LEN = L.request_len;
 export const WIRE_LEN = L.wire_len;
 export const PUBKEY_LEN = L.pubkey_len;

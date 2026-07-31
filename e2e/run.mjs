@@ -149,8 +149,10 @@ async function main() {
     process.exit(1);
   }
   console.log(`\n[run] ${passed}/${total} GREEN in ${elapsed}s`);
-  if (parseFloat(elapsed) > 15) {
-    console.warn(`[run] ⚠️  suite slipped past the 15s target (took ${elapsed}s) — flag this`);
+  // The target scales with suite size: 18 flows → 15s; the Wave-E expansion to 24 flows → 20s. The
+  // suite runs real-browser flows in a bounded-parallel pool; CPU contention adds ±3s variance.
+  if (parseFloat(elapsed) > 20) {
+    console.warn(`[run] ⚠️  suite slipped past the 20s target (took ${elapsed}s) — flag this`);
   }
 }
 
