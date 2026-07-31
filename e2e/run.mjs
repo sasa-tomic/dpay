@@ -6,6 +6,9 @@
 //
 // Usage: `node run.mjs` (local, default) | `DPAY_E2E_MODE=live node run.mjs` (live).
 // Concurrency: `DPAY_E2E_CONCURRENCY=N` (default 6; `1` = sequential, useful for debugging).
+// Filter:     `DPAY_E2E_FILTER=13 node run.mjs` runs only tests whose filename contains "13"
+//             (comma-separated for several, e.g. `DPAY_E2E_FILTER=09,13,15`). Free ports per run →
+//             parallel `node run.mjs` invocations do not collide; use the filter for fast per-test TDD.
 //
 // --- Why parallel is sound here (the concurrency-safety proof) ---
 // The shared relay is concurrency-safe by construction: FakeLedger holds ALL state (balances, spent
@@ -43,8 +46,11 @@ function resolveConcurrency() {
 }
 
 async function loadTests() {
+  const filterRaw = process.env.DPAY_E2E_FILTER ?? '';
+  const filters = filterRaw.split(',').map((s) => s.trim()).filter(Boolean);
   const files = (await readdir(TESTS_DIR)).filter((f) => /^\d{2}-.+\.mjs$/.test(f)).sort();
-  return files.map((f) => ({ name: f, path: join(TESTS_DIR, f) }));
+  const matched = filters.length === 0 ? files : files.filter((f) => filters.some((tok) => f.includes(tok)));
+  return matched.map((f) => ({ name: f, path: join(TESTS_DIR, f) }));
 }
 
 async function runOne(path) {
