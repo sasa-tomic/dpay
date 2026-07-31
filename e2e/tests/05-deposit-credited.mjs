@@ -96,7 +96,7 @@ export async function run() {
     const assetEl = await driver.findByTestID('asset-ckbtc', { timeoutMs: 8_000 });
     const assetTxt = await assetEl.evaluate((n) => (n.textContent ?? '').trim());
     assertIncludes(assetTxt, '0.00050000 BTC', `the wallet's visible ckBTC card should show the minted BTC after the sheet closes. card text:\n${assetTxt}`);
-    assertIncludes(assetTxt, 'Bitcoin', 'the ckBTC card should be clearly labeled "Bitcoin" (the deposit asset)');
+    assertIncludes(assetTxt, 'ckBTC', 'the ckBTC card should be clearly labeled "ckBTC" (the deposited asset name, H1)');
     console.log(`[05-deposit-credited] ✓ ckBTC balance VISIBLE in the wallet post-close: "${assetTxt}"`);
 
     await driver.screenshot('05-deposit-credited');

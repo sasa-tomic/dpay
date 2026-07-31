@@ -5,7 +5,7 @@ import {C} from '../config/palette';
 import {S} from '../styles';
 import {STORAGE_KEY, POLL, TOP_UP_CENTS} from '../config/constants';
 import {
-  type CurrencyDescriptor, CATALOG_CACHE_KEY, BUNDLED_CATALOG, fetchCurrencies, familyDisplay, assetTestKey,
+  type CurrencyDescriptor, CATALOG_CACHE_KEY, BUNDLED_CATALOG, fetchCurrencies, familyDisplay, assetTestKey, displayName,
 } from '../config/catalog';
 import {usd, short, isMintSentinel, fmtTime, fmtAsset, base} from '../lib/format';
 import type {Identity, Txn, TransactionsRow, NfcStatus} from '../lib/types';
@@ -70,6 +70,10 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
   // Stable comma-joined id list for the balance-poll effect deps (avoids re-running the poll on
   // every catalog array identity change; only re-runs when the actual set of ramp currencies changes).
   const rampCurrencyIds = useMemo(() => rampAssets.map(a => a.currency).join(','), [rampAssets]);
+  // The full set of currency ids to fetch HISTORY for (H2): every catalog currency (DEMO_USD + every
+  // ramp asset), since transactions_of is per-currency and a hardcoded currency=0 hid non-USD
+  // payments. Stable signature for the history effect deps (mirrors rampCurrencyIds).
+  const catalogCurrencyIds = useMemo(() => catalog.map(c => c.currency).join(','), [catalog]);
 
   // Read the device NFC radio state once (re-checked when the app returns to the foreground, since
   // the user may toggle NFC in system settings). Purely informational for the status chip; failure
@@ -149,25 +153,53 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
   // the relay surfaces it at GET /api/v1/transactions/{hex}). This replaces the ephemeral in-memory
   // list that was empty on every restart. Each row's direction (in/out) is derived by comparing the
   // queried account to `from`.
+  //
+  // H2: history is fetched for EVERY catalog currency (not just currency=0). Each currency lives on
+  // a separate ledger, and `transactions_of` is per-currency, so a single hardcoded currency=0 hid
+  // every ckBTC/ckUSDC payment. We fan out one bounded fetch per currency, best-effort per currency
+  // (a transient failure on one must NOT blank the others — only the currencies that respond
+  // contribute), union the rows, dedup by nonce, and sort newest-first. If EVERY fetch fails
+  // (offline), the prior list is kept — mirroring the old single-fetch behavior so an outage never
+  // blanks the RECENT card.
   const refreshHistory = useCallback(async () => {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 4000);
-    try {
-      const r = await fetch(`${base(relayUrl)}/api/v1/transactions/${identity.publicHex}?currency=0&limit=20`, {signal: ctrl.signal});
-      const j = await r.json().catch(() => ({} as any));
-      if (r.ok && Array.isArray(j.transactions)) {
-        const me = identity.publicHex.toLowerCase();
-        setHistory((j.transactions as TransactionsRow[]).map((rec): Txn => {
-          const dir: 'out' | 'in' = rec.from.toLowerCase() === me ? 'out' : 'in';
-          const counterparty = dir === 'out' ? rec.to.toLowerCase() : rec.from.toLowerCase();
-          const who = isMintSentinel(counterparty)
-            ? (dir === 'in' ? 'Demo funds' : 'Withdrawal')
-            : short(dir === 'out' ? rec.to : rec.from);
-          return {nonce: rec.nonce, amount: rec.amount, who, time: fmtTime(rec.timestamp), dir};
-        }));
+    const currencies = catalog.map(c => c.currency);
+    let anySucceeded = false;
+    const perCurrency = await Promise.all(currencies.map(async (currency) => {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 4000);
+      try {
+        const r = await fetch(`${base(relayUrl)}/api/v1/transactions/${identity.publicHex}?currency=${currency}&limit=20`, {signal: ctrl.signal});
+        const j = await r.json().catch(() => null);
+        if (r.ok && j && Array.isArray(j.transactions)) { anySucceeded = true; return j.transactions as TransactionsRow[]; }
+        return [];
+      } catch { return []; } finally { clearTimeout(t); }
+    }));
+    if (!anySucceeded) return; // offline / all failed: keep the existing list
+    const me = identity.publicHex.toLowerCase();
+    // Dedup by nonce (a payment id is globally unique) across currencies, then sort the UNION
+    // newest-first by raw timestamp — each per-currency fetch is already newest-first within its own
+    // currency, but mixed currencies must interleave by time.
+    const seen = new Set<string>();
+    const all: TransactionsRow[] = [];
+    for (const rows of perCurrency) {
+      for (const rec of rows) {
+        if (seen.has(rec.nonce)) continue;
+        seen.add(rec.nonce);
+        all.push(rec);
       }
-    } catch { /* offline: keep the existing list */ } finally { clearTimeout(t); }
-  }, [relayUrl, identity.publicHex]);
+    }
+    all.sort((a, b) => b.timestamp - a.timestamp);
+    setHistory(all.map((rec): Txn => {
+      const dir: 'out' | 'in' = rec.from.toLowerCase() === me ? 'out' : 'in';
+      const counterparty = dir === 'out' ? rec.to.toLowerCase() : rec.from.toLowerCase();
+      // N6/H3: the username isn't in the signed wire (FROZEN core), so the counterparty is a pubkey.
+      // Show a friendly SHORT form (not the raw 64 chars); mint/burn rows get an honest label.
+      const who = isMintSentinel(counterparty)
+        ? (dir === 'in' ? 'Demo funds' : 'Withdrawal')
+        : short(dir === 'out' ? rec.to : rec.from);
+      return {nonce: rec.nonce, amount: rec.amount, who, time: fmtTime(rec.timestamp), dir};
+    }));
+  }, [relayUrl, identity.publicHex, catalogCurrencyIds]);
 
   // Fetch on mount and re-poll while online (the balance poll runs every 2.5s; history every 5s is
   // plenty for a list that only changes when a payment settles). Clears on unmount.
@@ -245,7 +277,10 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
       <View style={S.header}>
         <View>
           <Wordmark style={S.brand} />
-          <Text style={S.who}>{identity.username} · {short(identity.publicHex)}</Text>
+          {/* H4: the header shows ONLY the username. The hex pubkey was developer-facing protocol data
+              ("Alice · 1b8a5ee7…") that made the header read like a debug panel; it's removed from the
+              main display. The short hex is no longer appended anywhere in the header. */}
+          <Text style={S.who} testID="header-who">{identity.username}</Text>
           <NfcPill status={nfc} />
         </View>
         <View style={S.balBox}>
@@ -265,7 +300,13 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
                 topped-up balance exists, and is absent for demo-$-only wallets that have nothing to cash
                 out. A 390px header can't hold the balance + two action buttons without overflow, so the
                 single "Add money" pill stays here and "Cash out" rides the asset card. */}
-            <Pressable testID="btn-deposit" style={S.addMoneyBtn} onPress={addMoney}>
+            <Pressable
+              testID="btn-deposit"
+              style={S.addMoneyBtn}
+              onPress={addMoney}
+              accessibilityRole="button"
+              accessibilityLabel="Add money"
+            >
               <Text style={S.addMoneyBtnText}>＋ Add money</Text>
               <HotkeyHint k="A" tone="onBrand" />
             </Pressable>
@@ -293,19 +334,34 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
           if (bal <= 0) return null;
           const disp = familyDisplay(catalog, a.currency);
           const testKey = assetTestKey(a);
+          // H1: the card's primary label is the asset NAME (ckBTC/ckUSDC), not the chain. The chain
+          // (networkLabel) is descriptive context only; the subtitle names the deposited asset too.
+          const name = displayName(a);
           return (
             <View key={a.currency} testID={`asset-${testKey}`} style={S.assetCard}>
               <View style={S.assetRow}>
-                <Text style={S.assetLabel}>{disp.networkLabel}</Text>
+                <Text style={S.assetLabel}>{name}</Text>
                 <Text style={S.assetAmt}>{fmtAsset(bal, disp.amountDecimals, disp.nativeAsset)}</Text>
               </View>
-              <Text style={S.assetSub}>{`your deposited ${disp.networkLabel} · spendable where a merchant requests it`}</Text>
+              <Text style={S.assetSub}>{`your deposited ${name} · spendable where a merchant requests it`}</Text>
               <View style={S.assetActions}>
-                <Pressable testID={`asset-add-${testKey}`} style={S.assetActionBtn} onPress={() => setDepositCurrency(a.currency)}>
+                <Pressable
+                  testID={`asset-add-${testKey}`}
+                  style={S.assetActionBtn}
+                  onPress={() => setDepositCurrency(a.currency)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Add ${name}`}
+                >
                   <Text style={S.assetActionText}>＋ Add</Text>
                 </Pressable>
                 {a.minter_family === 'CkBtcUtxo' ? (
-                  <Pressable testID="btn-withdraw" style={S.withdrawLink} onPress={() => setWithdrawCurrency(a.currency)}>
+                  <Pressable
+                    testID="btn-withdraw"
+                    style={S.withdrawLink}
+                    onPress={() => setWithdrawCurrency(a.currency)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Cash out ${name}`}
+                  >
                     <Text style={S.withdrawLinkText}>Cash out</Text>
                   </Pressable>
                 ) : null}
@@ -328,7 +384,13 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
       </ScrollView>
 
       <View style={S.settingsBar}>
-        <Pressable testID="btn-settings" style={S.settingsLinkBtn} onPress={() => setSettingsOpen(true)}>
+        <Pressable
+          testID="btn-settings"
+          style={S.settingsLinkBtn}
+          onPress={() => setSettingsOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Settings"
+        >
           <Text style={S.settingsLink}>⚙ Settings</Text>
         </Pressable>
       </View>

@@ -27,11 +27,11 @@ export async function run() {
     const accountHex = id?.publicHex;
     assert(typeof accountHex === 'string' && accountHex.length === 64, 'onboarded identity must be present');
 
-    // 1. The header shows the username + the account's short pubkey (identity/account info).
-    const body = await driver.bodyText();
-    assertIncludes(body, USERNAME, 'header should show the onboarded username');
-    assertIncludes(body, accountHex.slice(0, 8), 'header should show the account short pubkey');
-    console.log(`[12-settings] ✓ header shows username + account ${accountHex.slice(0, 8)}…`);
+    // 1. The header shows ONLY the username (H4: the hex pubkey was removed from the main display).
+    const whoText = await driver.readText('header-who');
+    assertEq(whoText, USERNAME, 'header who line (H4: username only)');
+    assert(!whoText.includes(accountHex.slice(0, 8)), `header must NOT show the hex pubkey (H4), got "${whoText}"`);
+    console.log(`[12-settings] ✓ header shows username "${USERNAME}" only (no hex)`);
 
     // 2. Open the Settings sheet.
     console.log('[12-settings] opening Settings…');

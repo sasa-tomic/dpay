@@ -91,3 +91,18 @@ export function assetTestKey(a: CurrencyDescriptor): string {
   if (a.minter_family === 'CkBtcUtxo') return 'ckbtc';
   return (a.symbol ?? familyDisplay([], a.currency).nativeAsset ?? 'asset').toLowerCase();
 }
+// The primary ASSET NAME shown as the heading on the asset card + picker rows (H1). This is the
+// catalog `symbol` when it reads as a name, with CkBtcUtxo normalized to 'ckBTC': its catalog
+// `symbol` ('₿') is the amount-UNIT glyph, not an asset name. It is DISTINCT from `nativeAsset`
+// ('BTC'/'USDC' — the backing token, used in amounts + the "Send X on NETWORK" line) and from
+// `networkLabel` ('Bitcoin'/'Ethereum' — the chain, used ONLY in instruction lines). So a user
+// scanning for an asset sees its NAME (ckBTC/ckUSDC), not the chain it rides on — fixing H1, where
+// ckUSDC was labeled "Ethereum".
+export function displayName(a: CurrencyDescriptor): string {
+  if (a.minter_family === 'CkBtcUtxo') return 'ckBTC';
+  // ckERC-20 + future families: the catalog symbol IS the asset name (e.g. 'ckUSDC'). Fall back to
+  // the native asset only if the symbol is absent or a lone unit glyph.
+  const sym = a.symbol;
+  if (sym && sym.length >= 2) return sym;
+  return familyDisplay([], a.currency).nativeAsset;
+}
