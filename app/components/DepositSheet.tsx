@@ -127,7 +127,7 @@ export function DepositSheet({identity, relayUrl, currency, display, onClose}: {
       <SafeAreaView style={S.sheet}>
         <StatusBar barStyle="light-content" backgroundColor={C.bg} />
         <View style={S.sheetHead}>
-          <Text style={S.sheetTitle}>{`Add ${display.networkLabel}`}</Text>
+          <Text style={S.sheetTitle}>{`Add ${display.nativeAsset}`}</Text>
           <Pressable testID="btn-deposit-close" accessibilityRole="button" accessibilityLabel="Close deposit sheet" style={S.sheetClose} onPress={onClose}><Text style={S.sheetCloseX}>✕</Text></Pressable>
         </View>
 

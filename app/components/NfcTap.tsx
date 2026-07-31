@@ -278,7 +278,7 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled
       </View>
       <Text style={S.nfcTitle}>{title}</Text>
       {sub ? <Text style={S.nfcSub}>{sub}</Text> : null}
-      <Pressable style={S.linkBtn} onPress={onClose}><Text style={S.linkText}>{terminal ? 'Done' : 'Cancel'}</Text></Pressable>
+      <Pressable style={S.linkBtn} accessibilityRole="button" accessibilityLabel={terminal ? 'Done' : 'Cancel'} accessibilityState={{disabled: false}} onPress={onClose}><Text style={S.linkText}>{terminal ? 'Done' : 'Cancel'}</Text></Pressable>
     </View>
   );
 }
