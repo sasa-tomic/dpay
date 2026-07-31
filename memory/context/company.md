@@ -28,7 +28,7 @@ The relay is the only online dependency during the demo, so it must be rock soli
 - **Demo safe-mode:** local fallback runs the full visual flow if venue wifi dies.
 - **Logging + one-glance status page** for quick diagnosis.
 
-## Roadmap phases (see TASKS.md for dated items)
+## Roadmap phases (open issues live in `OPEN_ISSUES.md`)
 
 1. Week 1 — Ledger: canister + tests, deploy to testnet, relay skeleton.
 2. Week 2 — App core: keygen, two-mode UI, QR, offline sign, merchant submit, receipt.

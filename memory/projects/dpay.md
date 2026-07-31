@@ -44,4 +44,4 @@ The PoC proves the **experience**, not hardened security. With software keys, do
 ## Source docs
 
 - `pitch.md` — product/investor description.
-- `minimal-poc-plan.md` — the build plan seeded into `TASKS.md`.
+- `minimal-poc-plan.md` — the original build plan.
