@@ -12,8 +12,8 @@
 //
 // Selector contract: `asset-ckbtc` (the card with the Withdraw affordance), `btn-withdraw`,
 // `withdraw-address-input`, `withdraw-amount-input`, `btn-withdraw-confirm`, `withdraw-status`,
-// `btn-withdraw-close`. Asset segregation note (same as flow 05): ckBTC is currency 1, a SEPARATE
-// asset from the `$` DEMO_USD header — the withdraw debits currency 1, NOT the `$` balance.
+// `btn-copy-destination` (L3), `btn-withdraw-close`. Asset segregation note (same as flow 05): ckBTC
+// is currency 1, a SEPARATE asset from the `$` DEMO_USD header — the withdraw debits currency 1.
 import { setup, assert, assertEq, seedDeposit, refreshDeposit, getBalance, onboardWallet, accountOf } from '../harness/lib.mjs';
 
 const DEPOSIT_CURRENCY = 1; // ckBTC — matches App.tsx DEPOSIT_CURRENCY
@@ -78,6 +78,21 @@ export async function run() {
     console.log(`[15-withdraw] ✓ ckBTC balance ${SEED_SATS} → ${after} sats (debited through the REAL app+relay+FakeLedger)`);
 
     await driver.screenshot('15-withdraw');
+
+    // 8. L3 — the success screen exposes a Copy affordance for the destination address (previously a
+    //    raw, long, un-copyable string). Prove the button exists, reads the shown address, and that
+    //    clicking it writes the EXACT destination to the clipboard seam (real navigator.clipboard,
+    //    not the Share noop — same regression surface as flow 04-deposit-copy).
+    await driver.findByTestID('btn-copy-destination', { timeoutMs: 4_000 });
+    const dest = await driver.readText('withdraw-destination');
+    assertEq(dest, WITHDRAW_ADDR, 'destination address rendered on the success screen');
+    const clipBefore = await driver.eval(() => window.__DPAY_TEST_CLIPBOARD);
+    assertEq(clipBefore, '', 'clipboard seam empty before copy');
+    await driver.click('btn-copy-destination', { timeoutMs: 4_000 });
+    await driver.waitForText('Copied', { timeoutMs: 4_000 });
+    const clipAfter = await driver.eval(() => window.__DPAY_TEST_CLIPBOARD);
+    assertEq(clipAfter, WITHDRAW_ADDR, 'clipboard seam holds the destination after copy');
+    console.log(`[15-withdraw] ✓ Copy destination wrote "${WITHDRAW_ADDR}" to the clipboard`);
 
     const elapsed = ((Date.now() - start) / 1000).toFixed(2);
     console.log(`[15-withdraw] GREEN in ${elapsed}s`);

@@ -32,6 +32,11 @@ export async function run() {
     console.log('[01-onboard] onboarding screen — waiting for username input…');
     await driver.typeByPlaceholder(ONBOARD_PLACEHOLDER, ONBOARD_USERNAME, { timeoutMs: 8_000 });
 
+    // 1b. M7 — the create-button subtext uses user-benefit language (not the dev-facing
+    //     "Generates a key on this device…"). Asserts the new copy is present.
+    const onboardBody = await driver.bodyText();
+    assertIncludes(onboardBody, 'demo funds to get started', 'onboarding subtext is user-benefit language (M7)');
+
     // 2. Click btn-create. The button transitions to "Creating…" then the wallet mounts.
     console.log('[01-onboard] clicking btn-create…');
     await driver.click('btn-create', { timeoutMs: 4_000 });
@@ -68,7 +73,7 @@ export async function run() {
   }
 }
 
-// Allow `node tests/01-onboard.mjs` to run standalone.
+// Allow `node tests/01-onboard.mjs` run standalone.
 if (import.meta.url === `file://${process.argv[1]}`) {
   run().catch(async (e) => {
     console.error(`\n[01-onboard] RED: ${e.stack || e.message || e}\n`);

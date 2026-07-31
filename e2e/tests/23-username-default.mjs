@@ -2,14 +2,17 @@
 //
 // A quick positive path: the Onboarding screen defaults an empty username to 'me' (N8's documented
 // behavior — `const name = username.trim() || 'me'` in create()). This flow proves a user can onboard
-// WITHOUT typing a username and still get a working funded wallet: the wallet mounts, the header
-// shows the default 'me' identity, and the faucet funds $100. Kept SHORT — it's a fast gate.
+// WITHOUT typing a username and still get a working funded wallet: the wallet mounts and the faucet
+// funds $100. Kept SHORT — it's a fast gate.
 //
-// Pins the current behavior (default 'me') so a future change to require a username (the N8 fix)
-// fails THIS test loudly, forcing a conscious update rather than a silent behavior drift.
+// M6 proof: (1) the username input carries `testID="username-input"` (the pre-split audit reported it
+// missing); (2) the empty-username default resolves to 'me' — verified DIRECTLY against the stored
+// identity (`accountOf`), so the assertion is independent of how the header renders the name (the
+// header's hex-pubkey suffix is H4's domain, not M6's). Pins the 'me' default so a future change to
+// require a username fails THIS test loudly, forcing a conscious update rather than silent drift.
 //
-// Selector contract: `btn-create`, `balance`.
-import { setup, assert, assertIncludes } from '../harness/lib.mjs';
+// Selector contract: `username-input` (M6), `btn-create`, `balance`.
+import { setup, assert, assertEq, accountOf } from '../harness/lib.mjs';
 
 export async function run() {
   const start = Date.now();
@@ -20,6 +23,8 @@ export async function run() {
 
     // The onboarding screen renders (no identity yet). DO NOT type a username.
     console.log('[23-username-default] waiting for the onboarding screen (no username typed)…');
+    // M6 — the username input carries a testID (the pre-split audit reported it missing). Prove it.
+    await driver.findByTestID('username-input', { timeoutMs: 8_000 });
     await driver.typeByPlaceholder('e.g. Alice', '', { timeoutMs: 8_000 });
 
     // Click Create directly — the app defaults the empty name to 'me'.
@@ -32,8 +37,10 @@ export async function run() {
     const body = await driver.bodyText();
     assert(funded, `wallet should fund $100 with the default username. body excerpt:\n${body.slice(0, 500)}`);
 
-    // The header shows the default 'me' identity (username + short pubkey).
-    assertIncludes(body, 'me ·', 'the wallet header should show the default username "me"');
+    // M6 — the default 'me' username was persisted to the stored identity. Verified directly (not via
+    // the header text) so the assertion holds regardless of how the header renders the name (H4).
+    const identity = await accountOf(driver);
+    assertEq(identity?.username, 'me', 'the empty-username default should resolve to "me" in the stored identity');
     console.log('[23-username-default] ✓ onboarded with default "me" + funded $100.00');
 
     await driver.screenshot('23-username-default');

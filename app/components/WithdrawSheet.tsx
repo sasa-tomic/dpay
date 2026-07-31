@@ -1,4 +1,4 @@
-import {useEffect, useState} from 'react';
+import {useCallback, useEffect, useState} from 'react';
 import {View, Text, Pressable, TextInput, ScrollView, SafeAreaView, StatusBar, ActivityIndicator, Platform} from 'react-native';
 import {C} from '../config/palette';
 import {S} from '../styles';
@@ -10,6 +10,7 @@ import {withdrawFunds} from '../services/relay';
 import {loadSavedWithdrawAddr, saveWithdrawAddr} from '../services/withdraw';
 import {DpayCore} from '../services/native';
 import {useEscapeToClose} from '../hooks/useHotkeys';
+import {copyToClipboard} from '../hooks/clipboard';
 
 /**
  * Withdraw ckBTC to a native BTC address. The user enters a BTC address + amount, reviews
@@ -25,6 +26,7 @@ export function WithdrawSheet({identity, relayUrl, currency, display, ckBtcBalan
   const [err, setErr] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<{amount: number; btcAddress: string} | null>(null);
   const [savedAddr, setSavedAddr] = useState<string | null>(null);
+  const [copied, setCopied] = useState<'clipboard' | 'shared' | null>(null);
 
   useEscapeToClose(onClose);
 
@@ -68,7 +70,16 @@ export function WithdrawSheet({identity, relayUrl, currency, display, ckBtcBalan
     }
   }
 
-  function reset() { setAddress(''); setAmountStr(''); setErr(null); setReceipt(null); setPhase('form'); }
+  function reset() { setAddress(''); setAmountStr(''); setErr(null); setReceipt(null); setCopied(null); setPhase('form'); }
+
+  // L3 — copy the destination address on the success screen (otherwise it's a raw, long, un-copyable
+  // string). Mirrors the deposit copy button: real clipboard on web, Share sheet fallback on native.
+  const copyDest = useCallback(async () => {
+    if (!receipt?.btcAddress) return;
+    const how = await copyToClipboard(receipt.btcAddress);
+    setCopied(how);
+    setTimeout(() => setCopied(null), 1500);
+  }, [receipt]);
 
   return (
     <View style={S.sheetOverlay}>
@@ -76,7 +87,7 @@ export function WithdrawSheet({identity, relayUrl, currency, display, ckBtcBalan
         <StatusBar barStyle="light-content" backgroundColor={C.bg} />
         <View style={S.sheetHead}>
           <Text style={S.sheetTitle}>{`Cash out ${display.networkLabel}`}</Text>
-          <Pressable testID="btn-withdraw-close" style={S.sheetClose} onPress={onClose}><Text style={S.sheetCloseX}>✕</Text></Pressable>
+          <Pressable testID="btn-withdraw-close" style={S.sheetClose} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" accessibilityState={{disabled: false}}><Text style={S.sheetCloseX}>✕</Text></Pressable>
         </View>
 
         <ScrollView contentContainerStyle={S.sheetBody} keyboardShouldPersistTaps="handled">
@@ -85,9 +96,13 @@ export function WithdrawSheet({identity, relayUrl, currency, display, ckBtcBalan
               <View style={S.check}><Text style={S.checkMark}>✓</Text></View>
               <Text testID="withdraw-status" style={S.paidText}>Withdrawn ✓</Text>
               <Text style={S.paidSub}>{fmtAsset(receipt.amount, display.amountDecimals, display.nativeAsset)}</Text>
-              <Text style={S.dim2}>sent to {receipt.btcAddress}</Text>
+              <Text style={S.dim2}>sent to</Text>
+              <Text testID="withdraw-destination" selectable={true} style={S.sheetAddr}>{receipt.btcAddress}</Text>
+              <Pressable testID="btn-copy-destination" style={S.primaryWide} onPress={copyDest} accessibilityRole="button" accessibilityLabel="Copy destination address" accessibilityState={{disabled: false}}>
+                <Text style={S.primaryText}>{copied === 'clipboard' ? 'Copied ✓' : copied === 'shared' ? 'Shared ✓' : 'Copy address'}</Text>
+              </Pressable>
               <Text style={S.dim2}>Your balance updates automatically.</Text>
-              <Pressable testID="btn-withdraw-done" style={S.linkBtn} onPress={onClose}><Text style={S.linkText}>Done</Text></Pressable>
+              <Pressable testID="btn-withdraw-done" style={S.linkBtn} onPress={onClose} accessibilityRole="button" accessibilityLabel="Done" accessibilityState={{disabled: false}}><Text style={S.linkText}>Done</Text></Pressable>
             </View>
           ) : phase === 'submitting' ? (
             <View style={S.centerAll}>
@@ -101,7 +116,7 @@ export function WithdrawSheet({identity, relayUrl, currency, display, ckBtcBalan
 
               <Text style={S.inputLabel}>{`${display.nativeAsset} address`}</Text>
               {savedAddr && address.trim().length === 0 ? (
-                <Pressable testID="btn-withdraw-saved" style={S.savedAddrChip} onPress={() => setAddress(savedAddr)}>
+                <Pressable testID="btn-withdraw-saved" style={S.savedAddrChip} onPress={() => setAddress(savedAddr)} accessibilityRole="button" accessibilityLabel="Use last saved address" accessibilityState={{disabled: false}}>
                   <Text style={S.savedAddrText}>{`Use last: ${savedAddr.length > 28 ? savedAddr.slice(0, 14) + '…' + savedAddr.slice(-12) : savedAddr}`}</Text>
                 </Pressable>
               ) : null}
@@ -144,7 +159,10 @@ export function WithdrawSheet({identity, relayUrl, currency, display, ckBtcBalan
                 testID="btn-withdraw-confirm"
                 style={[S.primaryWide, !canReview && S.dim]}
                 disabled={!canReview}
-                onPress={confirm}>
+                onPress={confirm}
+                accessibilityRole="button"
+                accessibilityLabel="Confirm withdrawal"
+                accessibilityState={{disabled: !canReview}}>
                 <Text style={S.primaryText}>{sats > 0 ? `Withdraw ${fmtAsset(sats, display.amountDecimals, display.nativeAsset)}` : 'Enter an amount'}</Text>
               </Pressable>
 
