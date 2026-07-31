@@ -46,98 +46,14 @@ import {S} from './styles';
 import {useHotkeys, useEscapeToClose} from './hooks/useHotkeys';
 import {copyToClipboard, readFromClipboard} from './hooks/clipboard';
 import {readDepositDeepLink} from './hooks/useDeepLink';
+import {DpayCore, DpayNfc} from './services/native';
+import {verifyOutcomeReceipt} from './services/receipt';
+import {
+  type DepositInfo, type DepositRefresh, type CkErc20OnrampParams, type WithdrawReceipt,
+  depositInfo, depositAddress, depositRefresh, ckerc20OnrampParams, withdrawFunds,
+} from './services/relay';
+import {loadSavedWithdrawAddr, saveWithdrawAddr} from './services/withdraw';
 
-const {DpayCore, DpayNfc} = NativeModules as {DpayCore: DpayCoreApi; DpayNfc: DpayNfcApi};
-
-// R2: verify a settled receipt's canister/ledger Ed25519 signature before trusting the outcome.
-// Returns true only if `receipt_sig` verifies under `pubkey` over the canonical ReceiptClaim built
-// from the receipt's fields. A merchant/relay cannot forge this; an unverifiable receipt is treated
-// as UNKNOWN (honest, never a fake "Paid ✓"). The nonce match is enforced by the caller.
-async function verifyOutcomeReceipt(receipt: any): Promise<boolean> {
-  const sigHex = receipt?.receipt_sig;
-  const pubHex = receipt?.pubkey;
-  if (typeof sigHex !== 'string' || typeof pubHex !== 'string') return false;
-  try {
-    return await DpayCore.verifyReceiptSig(
-      String(receipt.nonce), String(receipt.from), String(receipt.to),
-      Number(receipt.amount), Number(receipt.currency),
-      Number(receipt.block_index), Number(receipt.settle_ts),
-      sigHex, pubHex,
-    );
-  } catch {
-    return false;
-  }
-}
-
-// --- ck-deposit (ckBTC-style top-up) --------------------------------------------------------
-type DepositInfo = {min_confirmations: number; deposit_fee: number; deposit_min_amount: number | null};
-type MintedUtxo = {block_index: string; amount: number};
-type PendingUtxo = {value: number; confirmations: number};
-type DepositRefresh = {minted_total: number; minted: MintedUtxo[]; pending: PendingUtxo[]; required_confirmations: number};
-
-// Relay deposit client — same fetch style as the inline balance/faucet/pay calls (AbortController
-// optional, errors thrown to the caller). Co-located here to match the existing pattern.
-async function depositInfo(relayUrl: string, currency: number, signal?: AbortSignal): Promise<DepositInfo> {
-  const r = await fetch(`${base(relayUrl)}/api/v1/deposit/info?currency=${currency}`, {signal});
-  if (!r.ok) throw new Error(`deposit/info ${r.status}`);
-  return r.json();
-}
-async function depositAddress(relayUrl: string, accountHex: string, currency: number, signal?: AbortSignal): Promise<string> {
-  const r = await fetch(`${base(relayUrl)}/api/v1/deposit/address/${accountHex}?currency=${currency}`, {signal});
-  if (!r.ok) throw new Error(`deposit/address ${r.status}`);
-  const j = await r.json();
-  return j.address as string;
-}
-async function depositRefresh(relayUrl: string, accountHex: string, currency: number, signal?: AbortSignal): Promise<DepositRefresh> {
-  const r = await fetch(`${base(relayUrl)}/api/v1/deposit/refresh/${accountHex}?currency=${currency}`, {method: 'POST', signal});
-  if (!r.ok) throw new Error(`deposit/refresh ${r.status}`);
-  return r.json();
-}
-
-// ckERC-20 onramp params (helper contract, ERC-20 address, facade principal) for a CkEthErc20-family
-// currency. The app builds the user's two Ethereum transactions from these (cketh.ts); the user signs
-// in their own wallet (non-custodial). Errors throw with the status (503 = no ckERC-20 onramp for the
-// currency / relay unreachable).
-type CkErc20OnrampParams = {helper_address: string; erc20_address: string; facade_principal: string};
-async function ckerc20OnrampParams(relayUrl: string, currency: number, signal?: AbortSignal): Promise<CkErc20OnrampParams> {
-  const r = await fetch(`${base(relayUrl)}/api/v1/onramp/ckerc20?currency=${currency}`, {signal});
-  if (!r.ok) throw new Error(`onramp/ckerc20 ${r.status}`);
-  return r.json();
-}
-
-// Withdraw a ckBTC balance to a native BTC address. The app signs the WithdrawAuth on-device (the
-// sig is the non-custodial gate); the relay forwards to the facade's `withdraw`. Returns the burn
-// receipt (block_index). Errors throw with the status so the sheet can surface a decline vs offline.
-type WithdrawReceipt = {from: string; destination: string; amount: number; nonce: string; currency: number; block_index: number};
-
-// Saved last-used withdrawal destination, one per currency (Fork-B: NUTS-simple offramp — a returning
-// user re-cashes-out without re-pasting their external address). Best-effort AsyncStorage; never blocks.
-const withdrawAddrKey = (currency: number) => `dpay.withdraw.addr.${currency}`;
-async function loadSavedWithdrawAddr(currency: number): Promise<string | null> {
-  try { return await AsyncStorage.getItem(withdrawAddrKey(currency)); } catch { return null; }
-}
-async function saveWithdrawAddr(currency: number, addr: string): Promise<void> {
-  try { await AsyncStorage.setItem(withdrawAddrKey(currency), addr); } catch { /* best-effort */ }
-}
-
-async function withdrawFunds(relayUrl: string, accountHex: string, btcAddress: string, amountSats: number, nonceHex: string, expiry: number, currency: number, sigHex: string, signal?: AbortSignal): Promise<WithdrawReceipt> {
-  const r = await fetch(`${base(relayUrl)}/api/v1/withdraw`, {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({from: accountHex, destination: btcAddress, amount: amountSats, nonce: nonceHex, expiry, currency, sig: sigHex}),
-    signal,
-  });
-  const j = await r.json().catch(() => ({} as any));
-  if (r.ok && j?.receipt) {
-    return j.receipt as WithdrawReceipt;
-  }
-  // A 422 carries a policy error (bad sig / expired / below min / insufficient / nonce reused); a
-  // 503 is a transient ledger hiccup. Surface the body's error string so the sheet can show WHY.
-  throw new Error(typeof j?.error === 'string' ? j.error : `withdraw ${r.status}`);
-}
-
-// Parse a user-entered BTC amount (decimal string) into integer satoshis. Mirrors `toCents` for `$`.
-// NaN/negative → 0; the sheet gates the review on > 0 + >= the min withdrawal floor.
-function toSats(s: string): number { const n = Math.round(parseFloat(s || '0') * 1e8); return Number.isFinite(n) && n > 0 ? n : 0; }
 
 
 // The mint-green geometric "d" used by both the app icon and the in-app emblem. Bowl LEFT, ascender
