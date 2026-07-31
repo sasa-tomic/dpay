@@ -16,8 +16,8 @@
 //!   reproducible. Idempotent: overwrites `OUT.json` (default `dfx/wire_layout.json`).
 
 use dpay_core::{
-    Authorization, PaymentRequest, SignedAuthorization, WithdrawAuth, DEMO_USD, NONCE_LEN,
-    PUBKEY_LEN, REQUEST_LEN, SIG_LEN, SIGNING_LEN, WIRE_LEN,
+    Authorization, PaymentRequest, ReceiptClaim, SignedAuthorization, WithdrawAuth, DEMO_USD,
+    NONCE_LEN, PUBKEY_LEN, RECEIPT_CLAIM_LEN, REQUEST_LEN, SIG_LEN, SIGNING_LEN, WIRE_LEN,
 };
 use ed25519_dalek::SigningKey;
 use serde::Serialize;
@@ -91,6 +91,26 @@ const W_FIXED_LEN: usize = PUBKEY_LEN + 8 + NONCE_LEN + 8 + 4;
 /// Width of the address-length prefix (u32 LE) appended after the fixed prefix.
 const W_ADDR_LEN_BYTES: usize = 4;
 
+// ===========================================================================
+// receipt-layout offsets — single source of truth for the JS verify shim.
+// ===========================================================================
+//
+// `ReceiptClaim::signing_bytes` is FIXED-length (unlike `WithdrawAuth`): the canonical 108-byte LE
+// concat `nonce(16) | from(32) | to(32) | amount_le(8) | currency_le(4) | block_index_le(8) |
+// settle_ts_le(8)`. Every offset below is computed from the core consts by name so a layout change
+// in the core propagates here; the total length is `RECEIPT_CLAIM_LEN` (imported from the core, the
+// single source of truth). The round-trip test binds these offsets to
+// `ReceiptClaim::signing_bytes()` so they cannot drift.
+
+/// `nonce` offset within the receipt signing buffer.
+const R_NONCE_OFF: usize = 0;
+const R_FROM_OFF: usize = NONCE_LEN;
+const R_TO_OFF: usize = NONCE_LEN + PUBKEY_LEN;
+const R_AMOUNT_OFF: usize = NONCE_LEN + 2 * PUBKEY_LEN;
+const R_CURRENCY_OFF: usize = NONCE_LEN + 2 * PUBKEY_LEN + 8;
+const R_BLOCK_INDEX_OFF: usize = NONCE_LEN + 2 * PUBKEY_LEN + 8 + 4;
+const R_SETTLE_TS_OFF: usize = NONCE_LEN + 2 * PUBKEY_LEN + 8 + 4 + 8;
+
 /// One withdraw-signing-buffer field (offset + len + endian), mirroring [`FieldSpec`].
 #[derive(Serialize)]
 struct WithdrawFieldSpec {
@@ -130,6 +150,54 @@ struct WithdrawLayout {
     addr_len_bytes: usize,
     fields: WithdrawFields,
     golden: GoldenWithdraw,
+}
+
+// ---------------------------------------------------------------------------
+// receipt-layout types (FIXED-length 108-byte claim; no variable address).
+// ---------------------------------------------------------------------------
+
+/// One receipt-signing-buffer field (offset + len + endian), mirroring [`WithdrawFieldSpec`].
+#[derive(Serialize)]
+struct ReceiptFieldSpec {
+    offset: usize,
+    len: usize,
+    endian: Option<&'static str>,
+}
+
+#[derive(Serialize)]
+struct ReceiptFields {
+    nonce: ReceiptFieldSpec,
+    from: ReceiptFieldSpec,
+    to: ReceiptFieldSpec,
+    amount: ReceiptFieldSpec,
+    currency: ReceiptFieldSpec,
+    block_index: ReceiptFieldSpec,
+    settle_ts: ReceiptFieldSpec,
+}
+
+/// The golden signed receipt bytes. Every `*_hex` is derived from the real `dpay_core` types
+/// (never hardcoded) so the JS cross-validation is a true Rust↔JS byte comparison. The receipt is
+/// signed by a CANISTER key (`secret_hex`/`public_hex`); `from`/`to` are the payment's two pubkeys.
+#[derive(Serialize)]
+struct GoldenReceipt {
+    secret_hex: String,
+    public_hex: String,
+    from_hex: String,
+    to_hex: String,
+    amount: u64,
+    nonce_hex: String,
+    currency: u32,
+    block_index: u64,
+    settle_ts: u64,
+    signing_hex: String,
+    sig_hex: String,
+}
+
+#[derive(Serialize)]
+struct ReceiptLayout {
+    fixed_len: usize,
+    fields: ReceiptFields,
+    golden: GoldenReceipt,
 }
 
 /// One signing-buffer field. `endian` is `null` for raw byte arrays (from/to/nonce) and `"le"` for
@@ -196,6 +264,10 @@ struct WireLayout {
     /// The withdrawal (ckBTC→BTC) signing layout + golden signed bytes. Variable-length (the
     /// destination is last), so it has its own section distinct from the fixed `fields`/`golden`.
     withdraw: WithdrawLayout,
+    /// The canister-signed receipt (`ReceiptClaim`) signing layout + golden signed bytes.
+    /// FIXED-length (108 bytes = `RECEIPT_CLAIM_LEN`), so — unlike `withdraw` — there is no
+    /// address-length prefix; the app's verify_receipt shim reads this section.
+    receipt: ReceiptLayout,
 }
 
 /// Build the wire-layout description. Pure (no I/O) so the unit test can call it directly and
@@ -260,6 +332,7 @@ fn wire_layout() -> WireLayout {
             request_hex: hex(&request),
         },
         withdraw: withdraw_layout(),
+        receipt: receipt_layout(),
     }
 }
 
@@ -307,6 +380,70 @@ fn withdraw_layout() -> WithdrawLayout {
             nonce_hex: hex(&w_nonce),
             expiry: W_EXPIRY,
             currency: w_currency,
+            signing_hex: hex(&signing),
+            sig_hex: hex(&sig),
+        },
+    }
+}
+
+/// Build the receipt-layout description + golden signed bytes. Pure (no I/O) so the unit test can
+/// assert the golden receipt bytes round-trip through the documented offsets. Uses the SAME golden
+/// signing key (`key(3)`) as the pay/withdraw goldens so the cross-validation keys align. The receipt
+/// is signed by the (canister) receipt key; `from`/`to` are the payment's two pubkeys — chosen here
+/// as `key(3).public`/`key(4).public` to reuse the pay golden's pubkey values for cross-reference.
+fn receipt_layout() -> ReceiptLayout {
+    // FIXED deterministic seeds — golden bytes must be stable run-to-run so the JS verify shim's
+    // cross-validation is reproducible. `key(3)` is the golden receipt signing key (the canister's
+    // receipt key stand-in), distinct from the dfx-args payer=1 / merchant=2.
+    let secret = key(3);
+    let public: [u8; PUBKEY_LEN] = secret.verifying_key().to_bytes();
+    // `from`/`to` reuse the pay golden's two pubkeys (key(3).public / key(4).public) so a reader can
+    // cross-reference the receipt against the payment it attests; the values are otherwise arbitrary.
+    let from: [u8; PUBKEY_LEN] = public;
+    let to: [u8; PUBKEY_LEN] = key(4).verifying_key().to_bytes();
+
+    // Golden receiptClaim values. `amount` = 1_234 cents = $12.34 (DEMO_USD is 2-decimal); the nonce
+    // mirrors the pay/withdraw golden ([42u8;16]); `block_index`/`settle_ts` are deterministic.
+    const R_AMOUNT: u64 = 1_234; // $12.34
+    let nonce = [42u8; NONCE_LEN];
+    let currency = DEMO_USD;
+    const R_BLOCK_INDEX: u64 = 7;
+    const R_SETTLE_TS: u64 = 1_700_000_000; // 2023-11-14T22:13:20Z — a stable, non-round timestamp
+
+    let claim = ReceiptClaim {
+        nonce,
+        from,
+        to,
+        amount: R_AMOUNT,
+        currency,
+        block_index: R_BLOCK_INDEX,
+        settle_ts: R_SETTLE_TS,
+    };
+    // The signing buffer + signature both come from the real core types.
+    let signing = claim.signing_bytes();
+    let sig = dpay_core::sign_receipt(&secret, &claim).to_bytes();
+
+    ReceiptLayout {
+        fixed_len: RECEIPT_CLAIM_LEN,
+        fields: ReceiptFields {
+            nonce: ReceiptFieldSpec { offset: R_NONCE_OFF, len: NONCE_LEN, endian: None },
+            from: ReceiptFieldSpec { offset: R_FROM_OFF, len: PUBKEY_LEN, endian: None },
+            to: ReceiptFieldSpec { offset: R_TO_OFF, len: PUBKEY_LEN, endian: None },
+            amount: ReceiptFieldSpec { offset: R_AMOUNT_OFF, len: 8, endian: Some("le") },
+            currency: ReceiptFieldSpec { offset: R_CURRENCY_OFF, len: 4, endian: Some("le") },
+            block_index: ReceiptFieldSpec { offset: R_BLOCK_INDEX_OFF, len: 8, endian: Some("le") },
+            settle_ts: ReceiptFieldSpec { offset: R_SETTLE_TS_OFF, len: 8, endian: Some("le") },
+        },
+        golden: GoldenReceipt {
+            secret_hex: hex(&secret.to_bytes()),
+            public_hex: hex(&public),
+            from_hex: hex(&from),
+            to_hex: hex(&to),
+            amount: R_AMOUNT,
+            nonce_hex: hex(&nonce),
+            currency,
+            block_index: R_BLOCK_INDEX,
+            settle_ts: R_SETTLE_TS,
             signing_hex: hex(&signing),
             sig_hex: hex(&sig),
         },
@@ -569,5 +706,58 @@ mod tests {
         assert_eq!(sig_bytes.len(), SIG_LEN);
         let sig = ed25519_dalek::Signature::from_bytes(&sig_bytes[..].try_into().unwrap());
         assert!(auth.verify(&from, &sig), "golden withdraw signature must verify");
+    }
+
+    /// The golden receipt signing bytes must round-trip through the EMITTED receipt offsets, and the
+    /// golden signature must verify under the golden receipt key. Catches drift between this emitter's
+    /// documented receipt layout and `ReceiptClaim::signing_bytes()` (which the JS verify_receipt shim
+    /// mirrors). The receipt layout is FIXED-length (108 bytes = `RECEIPT_CLAIM_LEN`).
+    #[test]
+    fn golden_receipt_layout_round_trips_through_real_signing_bytes() {
+        let layout = wire_layout();
+        let r = &layout.receipt;
+        let g = &r.golden;
+
+        let signing = hex::decode(&g.signing_hex).expect("receipt signing_hex decodes");
+        assert_eq!(signing.len(), RECEIPT_CLAIM_LEN, "receipt signing_hex length == RECEIPT_CLAIM_LEN");
+        assert_eq!(
+            r.fixed_len, RECEIPT_CLAIM_LEN,
+            "receipt.fixed_len == RECEIPT_CLAIM_LEN (single source of truth, imported from the core)"
+        );
+
+        // Reconstruct the ReceiptClaim purely from the EMITTED offsets and assert it reproduces the
+        // exact signing bytes (proves the offsets are faithful to ReceiptClaim::signing_bytes()).
+        let nonce: [u8; NONCE_LEN] = signing[r.fields.nonce.offset..][..NONCE_LEN].try_into().unwrap();
+        let from: [u8; PUBKEY_LEN] = signing[r.fields.from.offset..][..PUBKEY_LEN].try_into().unwrap();
+        let to: [u8; PUBKEY_LEN] = signing[r.fields.to.offset..][..PUBKEY_LEN].try_into().unwrap();
+        let amount = u64::from_le_bytes(signing[r.fields.amount.offset..][..8].try_into().unwrap());
+        let currency = u32::from_le_bytes(signing[r.fields.currency.offset..][..4].try_into().unwrap());
+        let block_index =
+            u64::from_le_bytes(signing[r.fields.block_index.offset..][..8].try_into().unwrap());
+        let settle_ts =
+            u64::from_le_bytes(signing[r.fields.settle_ts.offset..][..8].try_into().unwrap());
+
+        assert_eq!(nonce, hex::decode(&g.nonce_hex).unwrap()[..]);
+        assert_eq!(from, hex::decode(&g.from_hex).unwrap()[..]);
+        assert_eq!(to, hex::decode(&g.to_hex).unwrap()[..]);
+        assert_eq!(amount, g.amount);
+        assert_eq!(currency, g.currency);
+        assert_eq!(block_index, g.block_index);
+        assert_eq!(settle_ts, g.settle_ts);
+
+        let claim = ReceiptClaim { nonce, from, to, amount, currency, block_index, settle_ts };
+        assert_eq!(claim.signing_bytes(), signing[..], "emitted offsets must reproduce signing_bytes()");
+
+        // The golden sig verifies over the reconstructed bytes under the golden receipt public key
+        // (proves sig + pubkey + signing buffer are mutually consistent — `verify_receipt` uses
+        // `verify_strict`, matching the canister/app verify path).
+        let sig_bytes = hex::decode(&g.sig_hex).unwrap();
+        assert_eq!(sig_bytes.len(), SIG_LEN, "receipt sig_hex length == SIG_LEN");
+        let public: [u8; PUBKEY_LEN] = hex::decode(&g.public_hex).unwrap()[..].try_into().unwrap();
+        let sig_arr: [u8; SIG_LEN] = sig_bytes[..].try_into().unwrap();
+        assert!(
+            dpay_core::verify_receipt(&public, &claim, &sig_arr),
+            "golden receipt signature must verify under verify_receipt"
+        );
     }
 }

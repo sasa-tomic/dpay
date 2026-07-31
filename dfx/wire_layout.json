@@ -110,5 +110,58 @@
       "signing_hex": "ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d150c30000000000002a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a005786f400000000000000001f0000006263317164706179676f6c64656e7769746864726177616c61646472657373",
       "sig_hex": "5e322c617c6bc2dcda3fae24dc49998e1bd2043bf5a33d2d3893d52765511ed890244dfa2be168f7ce3da245cfcf86adbeb9360c336d7a4876e0be035c9ac803"
     }
+  },
+  "receipt": {
+    "fixed_len": 108,
+    "fields": {
+      "nonce": {
+        "offset": 0,
+        "len": 16,
+        "endian": null
+      },
+      "from": {
+        "offset": 16,
+        "len": 32,
+        "endian": null
+      },
+      "to": {
+        "offset": 48,
+        "len": 32,
+        "endian": null
+      },
+      "amount": {
+        "offset": 80,
+        "len": 8,
+        "endian": "le"
+      },
+      "currency": {
+        "offset": 88,
+        "len": 4,
+        "endian": "le"
+      },
+      "block_index": {
+        "offset": 92,
+        "len": 8,
+        "endian": "le"
+      },
+      "settle_ts": {
+        "offset": 100,
+        "len": 8,
+        "endian": "le"
+      }
+    },
+    "golden": {
+      "secret_hex": "0303030303030303030303030303030303030303030303030303030303030303",
+      "public_hex": "ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d1",
+      "from_hex": "ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d1",
+      "to_hex": "ca93ac1705187071d67b83c7ff0efe8108e8ec4530575d7726879333dbdabe7c",
+      "amount": 1234,
+      "nonce_hex": "2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a",
+      "currency": 0,
+      "block_index": 7,
+      "settle_ts": 1700000000,
+      "signing_hex": "2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2aed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d1ca93ac1705187071d67b83c7ff0efe8108e8ec4530575d7726879333dbdabe7cd20400000000000000000000070000000000000000f1536500000000",
+      "sig_hex": "4a5f64a09802001268c0045781ecfa296b98dcf7870cb244610a1fd8128a88fb1a7b74b3035f2e54292de4efc2fc58e5d4ca046a6a9d50179b4ad18eeb764f0c"
+    }
   }
 }

@@ -190,7 +190,44 @@ export async function run() {
   }
   console.log('[00-cross-val] ✓ withdraw sig matches Rust core byte-for-byte');
 
-  console.log('[00-cross-val] ALL CHECKS GREEN — local pay + withdraw flows will settle on the real FakeLedger');
+  // --- (7) receipt shim byte-exactness: re-signing the golden ReceiptClaim produces the golden
+  //   sig, and the sig verifies under the golden receipt public key (mirrors
+  //   `dpay_core::ReceiptClaim::signing_bytes` + `verify_receipt`). The receipt is signed by the
+  //   CANISTER receipt key (`public_hex`), NOT by the payment's `from` — so the verify key is the
+  //   golden `public_hex`, while `from_hex`/`to_hex` are the payment's two pubkeys baked into the
+  //   claim. FIXED-length 108 bytes (unlike the variable-length withdraw). If this diverges from the
+  //   Rust core, the app's verify_receipt before "Paid ✓" rejects a real canister receipt.
+  const rg = layout.receipt.golden;
+  const R = layout.receipt;
+  assertEq(R.fixed_len, 108, 'receipt.fixed_len == 108 (RECEIPT_CLAIM_LEN)');
+  const rSigning = Buffer.alloc(R.fixed_len);
+  rSigning.set(hex(rg.nonce_hex), R.fields.nonce.offset);
+  rSigning.set(hex(rg.from_hex), R.fields.from.offset);
+  rSigning.set(hex(rg.to_hex), R.fields.to.offset);
+  putU64Le(rSigning, R.fields.amount.offset, rg.amount);
+  putU32Le(rSigning, R.fields.currency.offset, rg.currency);
+  putU64Le(rSigning, R.fields.block_index.offset, rg.block_index);
+  putU64Le(rSigning, R.fields.settle_ts.offset, rg.settle_ts);
+  assertEq(bytesToHex(new Uint8Array(rSigning)), rg.signing_hex, 'receipt signing buffer (golden layout vs shim builder)');
+  const rSig = await ed.signAsync(new Uint8Array(rSigning), hex(rg.secret_hex));
+  if (bytesToHex(rSig) !== rg.sig_hex) {
+    throw new Error(
+      `[00-cross-val] RECEIPT SIG MISMATCH — the JS shim's receipt sig differs from the Rust core's.\n` +
+      `  rust : ${rg.sig_hex}\n  js   : ${bytesToHex(rSig)}\n` +
+      `  The app's verify_receipt would reject a real canister-signed receipt.`
+    );
+  }
+  // The golden receipt sig verifies under the golden receipt public key (mirrors verify_receipt's
+  // verify_strict over the claim's signing_bytes).
+  const rOk = await ed.verifyAsync(
+    hex(rg.sig_hex),
+    new Uint8Array(rSigning),
+    hex(rg.public_hex),
+  );
+  assert(rOk, 'verifyAsync(receipt golden sig, signing, receipt public_hex) must be true (mirrors verify_receipt)');
+  console.log('[00-cross-val] ✓ receipt sig matches Rust core byte-for-byte + verifies');
+
+  console.log('[00-cross-val] ALL CHECKS GREEN — local pay + withdraw + receipt flows byte-exact vs the Rust core');
 }
 
 // Allow `node tests/00-cross-val.mjs` to run standalone (the orchestrator imports `run`).
