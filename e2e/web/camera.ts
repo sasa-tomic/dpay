@@ -11,8 +11,11 @@
 // Per the rules: this is the ONLY camera-surface fake; everything downstream (decodeRequest,
 // signing, submit) is the real app's real logic.
 
-// Per-camera-scan polling. A single interval on the window; cleared when the consuming component
-// unmounts (its returned `codeScanner` carries the cleanup via a weak handle).
+import {useEffect, useRef} from 'react';
+
+// Per-camera-scan polling. A single global hook fans an injected payload out to every registered
+// listener. Listeners are added/removed by `useCodeScanner`'s effect (see below) so a mount/unmount
+// cycle is balanced — no listener outlives the <QrScanner> that registered it.
 const SCAN_HOOK = '__DPAY_TEST_SCAN';
 type ScanListener = (payload: string) => void;
 const listeners = new Set<ScanListener>();
@@ -51,24 +54,28 @@ export function useCameraPermission() {
 }
 
 export function useCodeScanner(opts: { codeTypes: string[]; onCodeScanned: (codes: { value?: string }[]) => void }) {
-  // Stable callback: the app calls useCodeScanner once per mount and hands the result to <Camera>.
-  // We register a listener that adapts the injected string into the {value} shape the app expects.
-  const listener: ScanListener = (payload: string) => {
-    try { opts.onCodeScanned?.([{value: payload}]); } catch { /* app-side error; swallow */ }
-  };
-  listeners.add(listener);
-  // React's rules-of-hooks require this to be idempotent; cleanup is best-effort via
-  // queueMicrotask (we can't return a destructor from a hook). Leaked listeners are bounded by the
-  // number of <QrScanner> mounts in a session (small), and each is GC'd when the page reloads.
-  if (typeof window !== 'undefined') {
-    queueMicrotask(() => {
-      // Re-install in case the page reloaded the global. Idempotent.
-      installGlobalHook();
-    });
-  }
+  // Keep the latest callbacks in a ref so the listener can be registered ONCE (in the effect below)
+  // and still invoke the current render's `onCodeScanned`. This avoids both the stale-closure trap
+  // (a listener forever calling the first render's callback) AND the per-render add churn (every
+  // render used to leak one listener — verified by `17-scan-cleanup`).
+  const cb = useRef(opts);
+  cb.current = opts;
+  useEffect(() => {
+    const listener: ScanListener = (payload: string) => {
+      try { cb.current.onCodeScanned?.([{value: payload}]); } catch { /* app-side error; swallow */ }
+    };
+    listeners.add(listener);
+    installGlobalHook(); // idempotent — re-installs if the page reloaded the global
+    // The cleanup contract: remove THIS listener when <QrScanner> unmounts. Without it every mount
+    // (and formerly every render) leaked a listener + its closure for the whole session.
+    return () => { listeners.delete(listener); };
+  }, []);
   // The shape <Camera codeScanner={...}> expects (kept opaque — Camera is inert here).
   return { codeScannerOptions: opts ?? { codeTypes: ['qr'] } };
 }
 
 // Allow tests / future flows to forcibly clear listeners (e.g. between scenarios).
 ;(window as any).__DPAY_TEST_SCAN_RESET = () => { listeners.clear(); };
+// Test observability: the live count of registered scan listeners. A mount/unmount cycle of
+// <QrScanner> must return to its prior count (cleanup contract) — `17-scan-cleanup` asserts this.
+;(window as any).__DPAY_TEST_SCAN_COUNT = () => listeners.size;

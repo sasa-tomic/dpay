@@ -19,7 +19,7 @@ export async function run() {
   console.log('[12-settings] setup (relay + web + browser)…');
   const env = await setup();
   try {
-    const { driver, relayBaseURL } = env;
+    const { driver, relayBaseURL, webBaseURL } = env;
 
     console.log('[12-settings] onboarding…');
     await onboardWallet(driver, USERNAME);
@@ -48,6 +48,18 @@ export async function run() {
     const after = await driver.readInputValue('settings-relay');
     assertEq(after, edited, 'settings-relay should reflect the edited URL');
     console.log(`[12-settings] ✓ relay input editable → ${after}`);
+
+    // 4b. The relay URL PERSISTS across reload (AsyncStorage, like identity) — NIT 1a-iv. Reload with
+    // NO ?relay= query so the only source of the URL is persisted state; the identity also persists,
+    // so we land back on the wallet (not onboarding). RED before the fix: the URL is component state
+    // only → lost on reload → the input falls back to the default.
+    console.log('[12-settings] reloading (no ?relay=) to verify the relay URL persists…');
+    await driver.navigate(webBaseURL, '/', { waitUntil: 'domcontentloaded', timeoutMs: 8_000 });
+    await driver.waitReady({ timeoutMs: 8_000 });
+    await driver.click('btn-settings', { timeoutMs: 6_000 });
+    const persistedRelay = await driver.readInputValue('settings-relay', { timeoutMs: 4_000 });
+    assertEq(persistedRelay, edited, 'settings-relay must persist across reload (AsyncStorage)');
+    console.log(`[12-settings] ✓ relay URL persisted across reload → ${persistedRelay}`);
 
     // 5. Reset shows a confirmation dialog (UX-V3: reset is no longer one-tap-dangerous).
     console.log('[12-settings] clicking btn-reset (opens confirmation)…');

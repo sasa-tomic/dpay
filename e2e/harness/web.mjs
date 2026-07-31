@@ -21,7 +21,10 @@ const INDEX_HTML = join(DIST, 'index.html');
 // dist/index.html. Warm runs stay fast (a no-op stat check, no rebuild, when nothing changed).
 const REPO_ROOT = join(E2E_DIR, '..');
 const APP_DIR = join(REPO_ROOT, 'app');
-const WEB_DIR = join(__dirname, 'web');
+// The shims live in `e2e/web/` (= E2E_DIR/web), NOT `e2e/harness/web`. Pointing at the harness dir
+// (the old value) made readdirSync throw → silently skipped → a shim edit NEVER invalidated the dist
+// cache (a stale-build false-confidence bug). This is the canonical path the vite build pulls in.
+const WEB_DIR = join(E2E_DIR, 'web');
 // The real app's top-level sources the vite build pulls in (the rest of app/ — node_modules,
 // android/, ios/, __tests__, __mocks__ — is not a build input).
 const APP_SOURCE_FILES = ['App.tsx', 'payments.ts', 'relayConfig.ts'].map((f) => join(APP_DIR, f));

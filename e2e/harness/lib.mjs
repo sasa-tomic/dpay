@@ -14,7 +14,12 @@ import { dirname, join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { Driver } from './driver.mjs';
 import { startRelay } from './relay.mjs';
-import { buildWeb, serveWeb } from './web.mjs';
+import { buildWeb, serveWeb, pickFreePort } from './web.mjs';
+
+// Re-exported so a test can grab a guaranteed-dead relay URL (a port the harness binds to :0 then
+// immediately closes — nothing listens, so a connect yields ECONNREFUSED, the REAL "relay
+// unreachable" failure mode — not Chrome's ERR_UNSAFE_PORT artifact). See `13-offline`.
+export { pickFreePort };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..', '..');

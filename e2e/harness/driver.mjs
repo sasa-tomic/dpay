@@ -293,6 +293,22 @@ export class Driver {
     await this.page.evaluate(() => { try { localStorage.clear(); } catch {} });
   }
 
+  /** Begin recording failed-request errorTexts (CDP `Network.requestFailed`). Returns a getter for
+   *  the captured list of `{url, errorText}` (favicon filtered). Use to prove a fetch failed for the
+   *  RIGHT reason — e.g. a dead-relay fetch must surface `ERR_CONNECTION_REFUSED`, NOT
+   *  `ERR_UNSAFE_PORT` (which Chrome blocks before even connecting — a different, artifact failure
+   *  mode that would let an offline test pass for the wrong reason). */
+  recordRequestFailures() {
+    const seen = [];
+    const handler = (req) => {
+      const url = req.url();
+      if (url.endsWith('/favicon.ico')) return;
+      seen.push({ url, errorText: req.failure()?.errorText ?? 'unknown' });
+    };
+    this.page.on('requestfailed', handler);
+    return () => seen;
+  }
+
   /** Close the context (and the browser if this Driver owns it — a shared-browser Driver never
    *  tears down the session's browser). Safe to call multiple times. */
   async close() {

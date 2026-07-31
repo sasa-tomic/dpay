@@ -127,6 +127,10 @@ const RECONCILE_INTERVAL_MS = 1200;
 // case (pay timeout + reconciliation) so a slow-but-successful settle still delivers its receipt.
 const RECEIPT_WAIT_MS = 20000;
 const STORAGE_KEY = 'dpay.identity.v1';
+// The user-chosen relay URL persists across reloads (AsyncStorage, like identity + the currency
+// catalog) so changing networks in Settings survives an app restart. Default is `relayConfig`'s
+// value when no persisted choice exists (the harness passes ?relay=; prod codegens the real URL).
+const RELAY_STORAGE_KEY = 'dpay.relay.v1';
 
 const usd = (c: number) => `$${Math.floor(c / 100)}.${String(c % 100).padStart(2, '0')}`;
 const short = (h: string) => `${h.slice(0, 8)}…`;
@@ -478,10 +482,32 @@ export default function App() {
   const [identity, setIdentity] = useState<Identity | null | undefined>(undefined); // undefined = loading
   const [relayUrl, setRelayUrl] = useState(RELAY_DEFAULT);
 
+  // Load identity + the persisted relay URL on mount. Both live in AsyncStorage; the relay URL
+  // defaults to `relayConfig`'s value (the ?relay= override in the harness, or the codegen'd prod
+  // URL) when no persisted choice exists yet.
   useEffect(() => {
-    AsyncStorage.getItem(STORAGE_KEY)
-      .then(v => setIdentity(v ? JSON.parse(v) : null))
-      .catch(() => setIdentity(null));
+    Promise.all([
+      AsyncStorage.getItem(STORAGE_KEY),
+      AsyncStorage.getItem(RELAY_STORAGE_KEY),
+    ])
+      .then(([idV, relayV]) => {
+        setIdentity(idV ? JSON.parse(idV) : null);
+        if (typeof relayV === 'string' && relayV.length > 0) setRelayUrl(relayV);
+      })
+      .catch((e: any) => {
+        // No silent errors: log with context, then fall back to a safe empty identity.
+        console.log(`[dpay] failed to load identity/relay: ${e?.message ?? e}`);
+        setIdentity(null);
+      });
+  }, []);
+
+  // Set the relay URL AND persist it (best-effort; a persist failure is logged, never swallowed).
+  // This is the single mutator SettingsSheet's input binds to, so every edit endures across reloads.
+  const persistRelay = useCallback((url: string) => {
+    setRelayUrl(url);
+    AsyncStorage.setItem(RELAY_STORAGE_KEY, url).catch((e: any) => {
+      console.log(`[dpay] failed to persist relay URL: ${e?.message ?? e}`);
+    });
   }, []);
 
   // On-device self-check → logcat (proves the running app calls dpay-core), independent of identity.
@@ -503,7 +529,7 @@ export default function App() {
   if (identity === null) {
     return <Onboarding relayUrl={relayUrl} onCreated={setIdentity} />;
   }
-  return <Wallet identity={identity} relayUrl={relayUrl} setRelayUrl={setRelayUrl} onReset={onReset} />;
+  return <Wallet identity={identity} relayUrl={relayUrl} setRelayUrl={persistRelay} onReset={onReset} />;
 }
 
 function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: (id: Identity) => void}) {

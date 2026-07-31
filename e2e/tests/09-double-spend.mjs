@@ -24,18 +24,33 @@ const PAY_CENTS = 2500; // $25.00
 
 /** Install a fetch recorder that captures every POST /api/v1/pay body into window.__DPAY_PAY_CODES,
  *  so the test can replay the EXACT signed authorization the app produced. Returns nothing; read
- *  `window.__DPAY_PAY_CODES` after a pay. */
+ *  `window.__DPAY_PAY_CODES` after a pay.
+ *
+ *  Scope (NIT 1a-iii): the interception is NARROWED to ONLY `POST /api/v1/pay` — every other fetch
+ *  (balance/history polls, etc.) passes through to the native fetch UNTOUCHED, so the wrapper can
+ *  never mask an unrelated failure. The wrapper also SELF-UNINSTALLS the instant it captures the one
+ *  signed code it needs (restoring the native `window.fetch`), so the global override exists ONLY
+ *  for that single capture — it does not linger for the rest of the test. */
 async function installPayRecorder(driver) {
   await driver.eval(() => {
     window.__DPAY_PAY_CODES = [];
     const orig = window.fetch;
+    window.__DPAY_ORIG_FETCH = orig; // test asserts restoration against this reference
     window.fetch = (url, opts) => {
-      try {
-        if (typeof url === 'string' && url.includes('/api/v1/pay') && opts && opts.method === 'POST' && typeof opts.body === 'string') {
+      // ONLY intercept a POST to /api/v1/pay; everything else is a transparent passthrough.
+      const isPayPost = typeof url === 'string' && url.includes('/api/v1/pay')
+        && opts && opts.method === 'POST' && typeof opts.body === 'string';
+      if (isPayPost) {
+        try {
           const parsed = JSON.parse(opts.body);
-          if (parsed && typeof parsed.qr === 'string') window.__DPAY_PAY_CODES.push(parsed.qr);
-        }
-      } catch { /* not a /pay JSON body — ignore */ }
+          if (parsed && typeof parsed.qr === 'string') {
+            window.__DPAY_PAY_CODES.push(parsed.qr);
+            // Captured the one signed auth we need → restore the native fetch IMMEDIATELY so the
+            // global override exists only for this single capture (no chance to mask later fetches).
+            window.fetch = orig;
+          }
+        } catch { /* not a /pay JSON body — ignore */ }
+      }
       return orig(url, opts);
     };
   });
@@ -71,6 +86,13 @@ export async function run() {
     assert(Array.isArray(codes) && codes.length === 1, `recorder must capture exactly one /pay code, got ${JSON.stringify(codes)}`);
     const signedCode = codes[0];
     console.log(`[09-double-spend] ✓ captured the app's signed authorization (${signedCode.length} chars)`);
+
+    // NIT 1a-iii: the recorder's window.fetch override must have SELF-UNINSTALLED after the capture,
+    // so the global fetch is the untouched native one for the rest of the test (no broad override
+    // lingering that could mask a later failure). RED with the old always-on global patch.
+    const restored = await driver.eval(() => window.fetch === window.__DPAY_ORIG_FETCH);
+    assert(restored === true, 'the /pay recorder must restore window.fetch after capture (no lingering global override)');
+    console.log('[09-double-spend] ✓ window.fetch restored after capture (narrow, transient interception)');
 
     // Baseline after the first settle: A down to $75, B at $25.
     await driver.waitForText('$75.00', { timeoutMs: 8_000 });
