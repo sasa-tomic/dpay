@@ -30,6 +30,14 @@ import {C} from './config/palette';
 import type {
   DpayNfcApi, NfcEvent, NfcPhaseName, Req, Identity, Txn, TransactionsRow, DpayCoreApi, NfcStatus,
 } from './lib/types';
+import {
+  usd, short, MINT_HEX, isMintSentinel, fmtTime, nowSecs, randNonceHex, toCents, toSats, base,
+  parseRequestQR, fmtAsset,
+} from './lib/format';
+import {
+  EXPIRY_WINDOW, DIRECT_PAY_TIMEOUT_MS, NFC_PAY_TIMEOUT_MS, RECONCILE_ATTEMPTS, RECONCILE_INTERVAL_MS,
+  RECEIPT_WAIT_MS, STORAGE_KEY, RELAY_STORAGE_KEY, POLL, WITHDRAW_TIMEOUT_MS, WITHDRAW_EXPIRY_WINDOW,
+} from './config/constants';
 
 const {DpayCore, DpayNfc} = NativeModules as {DpayCore: DpayCoreApi; DpayNfc: DpayNfcApi};
 
@@ -53,69 +61,7 @@ async function verifyOutcomeReceipt(receipt: any): Promise<boolean> {
   }
 }
 
-const EXPIRY_WINDOW = 600; // request valid 10 min
-const DIRECT_PAY_TIMEOUT_MS = 5000;
-// Merchant NFC settlement: bound the /pay call, then reconcile the ambiguous case via the
-// idempotent /receipt/:nonce so a settled payment is never reported as failed.
-const NFC_PAY_TIMEOUT_MS = 8000;
-const RECONCILE_ATTEMPTS = 4;
-const RECONCILE_INTERVAL_MS = 1200;
-// Payer NFC: how long to wait for the merchant's receipt before falling back to a truthful
-// "couldn't confirm" (never a false success or a false failure). Must exceed the merchant's worst
-// case (pay timeout + reconciliation) so a slow-but-successful settle still delivers its receipt.
-const RECEIPT_WAIT_MS = 20000;
-const STORAGE_KEY = 'dpay.identity.v1';
-// The user-chosen relay URL persists across reloads (AsyncStorage, like identity + the currency
-// catalog) so changing networks in Settings survives an app restart. Default is `relayConfig`'s
-// value when no persisted choice exists (the harness passes ?relay=; prod codegens the real URL).
-const RELAY_STORAGE_KEY = 'dpay.relay.v1';
-
-const usd = (c: number) => `$${Math.floor(c / 100)}.${String(c % 100).padStart(2, '0')}`;
-const short = (h: string) => `${h.slice(0, 8)}…`;
-// The MINT_ACCOUNT sentinel — 32 bytes of 0xFF, hex-encoded as 64 `f`s. The canister records faucet
-// mints and withdrawals with this as the counterparty; we detect it and render a friendly label
-// instead of leaking raw protocol data ("from ffffffff…") to end users (N4).
-const MINT_HEX = 'ff'.repeat(32);
-const isMintSentinel = (h: string) => h.toLowerCase() === MINT_HEX;
-// Format a unix-seconds timestamp as HH:MM (24h, local) — the durable history rows are sourced from
-// the ledger (which settle on `ic time / 1e9`).
-const fmtTime = (ts: number) => { const d = new Date(ts * 1000); return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`; };
-const nowSecs = () => Math.floor(Date.now() / 1000);
-function randNonceHex(): string {
-  let s = '';
-  for (let i = 0; i < 16; i++) s += Math.floor(Math.random() * 256).toString(16).padStart(2, '0');
-  return s;
-}
-function toCents(s: string): number { const n = Math.round(parseFloat(s || '0') * 100); return Number.isFinite(n) && n > 0 ? n : 0; }
-const base = (u: string) => u.replace(/\/$/, '');
-// request QR = "<base64url request>|<username>"; base64url has no '|', so split on the first one.
-function parseRequestQR(raw: string): {reqB64: string; name: string} {
-  const t = raw.trim(); const i = t.indexOf('|');
-  return i < 0 ? {reqB64: t, name: ''} : {reqB64: t.slice(0, i), name: t.slice(i + 1)};
-}
-
 // --- ck-deposit (ckBTC-style top-up) --------------------------------------------------------
-// A deposit address on a ck minter's native chain (BTC for ckBTC). The facade proxies the minter; the
-// relay surfaces it at /api/v1/deposit/*. The mint lands on the user's subaccount, so the existing
-// balance/history polls reflect it once confirmed. DEMO_USD (faucet) stays currency 0; the ckBTC
-// currency id is resolved from the runtime catalog (see BUNDLED_CATALOG / fetchCurrencies) — no
-// hardcoded literal, so adding a currency needs no app redeploy (issue #7).
-// Poll intervals — read once at module load. The e2e harness injects a shortened override via
-// `window.__DPAY_TEST_POLL` (driver.mjs evaluateOnNewDocument, before the bundle evaluates) so the
-// suite isn't paced by production cadence. In a shipped build that global is never set → every `??`
-// falls through to the prod default, so this is prod-safe (RN sets no such global).
-const POLL = (() => {
-  const t = (globalThis as unknown as {__DPAY_TEST_POLL?: Record<string, number>}).__DPAY_TEST_POLL;
-  return {
-    balance:    t?.balance    ?? 2500,
-    history:    t?.history    ?? 5000,
-    deposit:    t?.deposit    ?? 10000,
-    receiptPay: t?.receiptPay ?? 2500,
-    receiptRcv: t?.receiptRcv ?? 1500,
-  };
-})();
-const WITHDRAW_TIMEOUT_MS = 8000; // bound the /withdraw POST (every new fetch has a timeout)
-const WITHDRAW_EXPIRY_WINDOW = 600; // the signed WithdrawAuth is valid 10 min
 type DepositInfo = {min_confirmations: number; deposit_fee: number; deposit_min_amount: number | null};
 type MintedUtxo = {block_index: string; amount: number};
 type PendingUtxo = {value: number; confirmations: number};
