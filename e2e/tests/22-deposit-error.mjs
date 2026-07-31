@@ -20,7 +20,7 @@
 //
 // Selector contract: `btn-settings`, `settings-relay`, `btn-settings-close`, `btn-deposit`,
 // `asset-picker-row-ckbtc`, `deposit-status` (absent — no address fetched), `balance`.
-import { setup, assert, onboardWallet, pickFreePort } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, onboardWallet, pickFreePort } from '../harness/lib.mjs';
 
 export async function run() {
   const start = Date.now();
