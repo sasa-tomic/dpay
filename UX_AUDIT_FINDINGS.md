@@ -9,7 +9,7 @@
 
 > **STATUS (2026-07-31): ALL 23 ISSUES RESOLVED OR MITIGATED.** 21 fully resolved, 2 mitigated (H3 short-hex
 > until N6 wire change; M1 a11y fully closed in follow-up). Independent verifier confirmed. See `OPEN_ISSUES.md`
-> "UX audit (2026-07-31)" section for per-issue resolution detail. Suite 25/25 GREEN.
+> "UX audit (2026-07-31)" section for per-issue resolution detail. Suite 26/26 GREEN.
 
 ## Critical (breaks flow / shows wrong info)
 

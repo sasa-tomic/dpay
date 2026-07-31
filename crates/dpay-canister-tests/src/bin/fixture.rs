@@ -2,7 +2,7 @@
 //! and `scripts/dfx-deploy-icrc-mainnet.sh` on mainnet).
 //!
 //! Prints shell-evaluable `KEY=value` lines: the payer/merchant Ed25519 pubkeys (hex) and the
-//! exact 196-byte offline-signed wire the phone would produce. Deterministic seeds (matching
+//! exact 292-byte offline-signed wire the phone would produce. Deterministic seeds (matching
 //! `dpay-fixture`) keep the deploy reproducible run-to-run; a far-future expiry keeps the wire
 //! valid regardless of the replica's wall clock. Money logic is dpay-core's, never reimplemented.
 //!

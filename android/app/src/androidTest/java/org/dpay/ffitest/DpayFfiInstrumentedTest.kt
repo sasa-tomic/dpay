@@ -36,23 +36,30 @@ class DpayFfiInstrumentedTest {
     private val nonce = ByteArray(16) { 42 }
     private val expiry = 4_102_444_800UL
 
-    // Golden outputs from the host build of the same core (196-byte wire incl. 4-byte currency LE).
+    // Golden outputs from the host build of the same core. The wire is the frozen 292-byte layout
+    // (signing(196) | sig(64) | from_pub(32)); the three 32-byte name/memo fields are empty here
+    // (NUL-padded) since this test is about crypto fidelity, not display names — the signing region
+    // still grew 100→196 bytes, so the signature differs from the pre-name-layout golden.
     private val expectedWire = hex(
         "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c" +
             "0707070707070707070707070707070707070707070707070707070707070707" +
-            "c4090000000000002a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a005786f40000000000000000" +
-            "62bddd9d22bd3e1252b57b67c63c96bf2934507f0bb8b297c8f21cb00428b7c7" +
-            "744c42eeff92d196546fe236b03d7dea3601e87eb2665d78b64541641703c90d" +
-            "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c"
+            "c4090000000000002a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a005786f400000000" +
+            "0000000000000000000000000000000000000000000000000000000000000000" +
+            "0000000000000000000000000000000000000000000000000000000000000000" +
+            "0000000000000000000000000000000000000000000000000000000000000000" +
+            "00000000f17a9147baa176876a2d50a7d0eef9ed5ccefe5c8bc414b5c6cf6048" +
+            "4cd835a5ae89774fa947cc6ccbc82b6c9ad782ee59c825ea8f60821fdc9c2587" +
+            "791d10038a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801" +
+            "b40f6f5c"
     )
     private val expectedQr =
-        "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1wHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHB8QJAAAAAAAAKioqKioqKioqKioqKioqKgBXhvQAAAAAAAAAAGK93Z0ivT4SUrV7Z8Y8lr8pNFB_C7iyl8jyHLAEKLfHdExC7v-S0ZZUb-I2sD196jYB6H6yZl14tkVBZBcDyQ2KiOPddAnxlf1S2y08ul1yymcJvx2UEhvzdIgBtA9vXA"
+        "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1wHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHB8QJAAAAAAAAKioqKioqKioqKioqKioqKgBXhvQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPF6kUe6oXaHai1Qp9Du-e1czv5ci8QUtcbPYEhM2DWlrol3T6lHzGzLyCtsmteC7lnIJeqPYIIf3Jwlh3kdEAOKiOPddAnxlf1S2y08ul1yymcJvx2UEhvzdIgBtA9vXA"
 
     /** The phone signs offline and produces the identical wire + QR the sandbox does. */
     @Test
     fun deterministicSigningMatchesHostByteForByte() {
-        val wire = signAuthorization(secret, to, amount, nonce, expiry, 0u)
-        assertEquals("wire length", 196, wire.size)
+        val wire = signAuthorization(secret, to, amount, nonce, expiry, 0u, "", "", "")
+        assertEquals("wire length", 292, wire.size)
         assertArrayEquals("on-device wire must equal host wire", expectedWire, wire)
         assertEquals("on-device QR must equal host QR", expectedQr, encodeQr(wire))
         assertArrayEquals("QR decode roundtrip", wire, decodeQr(expectedQr))
@@ -66,7 +73,7 @@ class DpayFfiInstrumentedTest {
         val merchant = generateKeypair()
         assertEquals(32, payer.secret.size)
         assertEquals(32, payer.public.size)
-        val wire = signAuthorization(payer.secret, merchant.public, 999UL, nonce, expiry, 0u)
+        val wire = signAuthorization(payer.secret, merchant.public, 999UL, nonce, expiry, 0u, "", "", "")
         assertTrue(verifyWire(wire))
         assertArrayEquals(wire, decodeQr(encodeQr(wire)))
     }
@@ -89,9 +96,9 @@ class DpayFfiInstrumentedTest {
     /** Tamper detection: flipping any signature byte must fail verification on-device. */
     @Test
     fun tamperedSignatureFailsVerification() {
-        val wire = signAuthorization(secret, to, amount, nonce, expiry, 0u)
+        val wire = signAuthorization(secret, to, amount, nonce, expiry, 0u, "", "", "")
         val tampered = wire.copyOf()
-        tampered[100] = (tampered[100] + 1).toByte() // a byte inside the 64-byte signature
+        tampered[196] = (tampered[196] + 1).toByte() // first byte of the 64-byte signature (offset 196..260)
         assertFalse(verifyWire(tampered))
     }
 }

@@ -45,7 +45,7 @@ class DpayNfcInstrumentedTest {
     private fun drive(maxChunk: UInt, approve: Boolean): ByteArray? {
         val payer = generateKeypair()
         val merchant = generateKeypair()
-        val request = nfcRequestBytes(merchant.`public`, amount, nonce, expiry, 0u)
+        val request = nfcRequestBytes(merchant.`public`, amount, nonce, expiry, 0u, "Bob", "coffee")
 
         val card = FfiCardSession(maxChunk)
         val reader = FfiReaderConductor(request, maxChunk)
@@ -61,7 +61,7 @@ class DpayNfcInstrumentedTest {
                 val seen = nfcDecodeRequest(card.request()!!)
                 assertEquals(amount, seen.amount)
                 if (approve) {
-                    card.provideWire(signAuthorization(payer.secret, merchant.`public`, amount, nonce, expiry, 0u))
+                    card.provideWire(signAuthorization(payer.secret, merchant.`public`, amount, nonce, expiry, 0u, "Alice", "Bob", "coffee"))
                 } else {
                     card.decline()
                 }
@@ -82,7 +82,7 @@ class DpayNfcInstrumentedTest {
         for (mc in listOf(nfcDefaultMaxChunk(), 1u)) {
             val wire = drive(mc, approve = true)
             assertNotNull("chunk=$mc delivered a wire", wire)
-            assertEquals("196-byte wire", 196, wire!!.size)
+            assertEquals("292-byte wire", 292, wire!!.size)
             assertTrue("chunk=$mc: reassembled wire verifies on-device", verifyWire(wire))
         }
     }
@@ -102,7 +102,7 @@ class DpayNfcInstrumentedTest {
     fun receiptReturnsToPayerOnDevice() {
         val payer = generateKeypair()
         val merchant = generateKeypair()
-        val request = nfcRequestBytes(merchant.`public`, amount, nonce, expiry, 0u)
+        val request = nfcRequestBytes(merchant.`public`, amount, nonce, expiry, 0u, "Bob", "coffee")
         val mc = nfcDefaultMaxChunk()
         val card = FfiCardSession(mc)
         val reader = FfiReaderConductor(request, mc)
@@ -122,7 +122,7 @@ class DpayNfcInstrumentedTest {
             }
             val resp = card.process(cmd)
             if (card.awaitingDecision() && !approved) {
-                card.provideWire(signAuthorization(payer.secret, merchant.`public`, amount, nonce, expiry, 0u))
+                card.provideWire(signAuthorization(payer.secret, merchant.`public`, amount, nonce, expiry, 0u, "Alice", "Bob", "coffee"))
                 approved = true
             }
             when (reader.handleResponse(resp)) {
@@ -148,7 +148,7 @@ class DpayNfcInstrumentedTest {
         val merchant = generateKeypair()
         val payer = generateKeypair()
         val n = ByteArray(16) { 9 }
-        val request = nfcRequestBytes(merchant.`public`, 100UL, n, expiry, 0u)
+        val request = nfcRequestBytes(merchant.`public`, 100UL, n, expiry, 0u, "Bob", "")
         val mc = nfcDefaultMaxChunk()
         val card = FfiCardSession(mc)
         val reader = FfiReaderConductor(request, mc)
@@ -161,7 +161,7 @@ class DpayNfcInstrumentedTest {
         assertFalse(card.isComplete())
         reader.handleResponse(ack)
 
-        card.provideWire(signAuthorization(payer.secret, merchant.`public`, 100UL, n, expiry, 0u))
+        card.provideWire(signAuthorization(payer.secret, merchant.`public`, 100UL, n, expiry, 0u, "Alice", "Bob", ""))
         assertEquals(NfcPhase.EXCHANGING, card.phase())
 
         val step = reader.handleResponse(card.process(reader.nextCommand()!!)) // pull the wire

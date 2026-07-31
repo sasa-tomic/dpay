@@ -3,7 +3,7 @@
 #
 # Unlike the PocketIC in-process tests, this stands up an actual local dfx replica, installs the
 # REAL DFINITY ic-icrc1-ledger (cached in third_party/) + the dpay FACADE canister wired to it, and
-# drives the *exact* 196-byte offline-signed wire the phone would sign (built by dpay-fixture via
+# drives the *exact* 292-byte offline-signed wire the phone would sign (built by dpay-fixture via
 # the shared dpay-core) purely through `dfx canister call`. Proves funds move ON the ledger (read
 # back directly via icrc1_balance_of) and a replayed payment is refused (nonce single-use).
 # Self-asserting: exits non-zero on any mismatch.

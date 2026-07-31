@@ -9,7 +9,7 @@
 //!   - `faucet     : (blob, nat32) -> (variant { Ok : nat64; Err : text })`  [update; self-service, fixed amount, rate-limited]
 //!   - `transactions_of : (blob, nat32, nat32) -> (vec record {...}) query`
 //!
-//! The 196-byte signed authorization is candid-encoded as a single `blob` argument — identical to
+//! The 292-byte signed authorization wire is candid-encoded as a single `blob` argument — identical to
 //! what `dpay-canister-tests` does with `encode_one(&wire)`. `balance` and `mint` pass `currency`
 //! as a positional `nat32` next to the pubkey `blob`, matching the canister's multi-currency
 //! `(pubkey, currency) -> balance` shape.
@@ -27,7 +27,7 @@ use crate::ledger::{
     WithdrawReceipt, WithdrawRequest,
 };
 
-/// Read the settlement currency out of a 196-byte signed-authorization wire (the canister does the
+/// Read the settlement currency out of a 292-byte signed-authorization wire (the canister does the
 /// same; the relay surfaces it in the receipt so the app can rebuild the `ReceiptClaim`). Falls back
 /// to `DEMO_USD` on a malformed wire (which the canister would already have rejected).
 fn currency_of_wire(wire: &[u8]) -> Currency {
@@ -222,7 +222,7 @@ impl AgentLedger {
 #[async_trait]
 impl Ledger for AgentLedger {
     async fn pay(&self, wire: Vec<u8>) -> Result<Receipt, LedgerError> {
-        // Candid-encode the 196-byte wire as a single `blob` arg (== canister's `pay(blob)`). The
+        // Candid-encode the 292-byte wire as a single `blob` arg (== canister's `pay(blob)`). The
         // currency is read out of the wire by the canister — same as FakeLedger.
         let arg = encode_one(&wire)
             .map_err(|e| LedgerError::Transient(format!("encode pay arg: {e}")))?;

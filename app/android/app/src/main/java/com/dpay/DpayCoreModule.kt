@@ -51,7 +51,7 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         }
     }
 
-    /** Build + sign the authorization OFFLINE; returns the 196-byte wire as hex. */
+    /** Build + sign the authorization OFFLINE; returns the 292-byte wire as hex. */
     @ReactMethod
     fun signAuthorization(
         secretHex: String,
@@ -60,6 +60,9 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         nonceHex: String,
         expiry: Double,
         currency: Double,
+        fromName: String,
+        toName: String,
+        memo: String,
         promise: Promise,
     ) {
         try {
@@ -70,6 +73,9 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
                 unhex(nonceHex),
                 expiry.toLong().toULong(),
                 currency.toInt().toUInt(),
+                fromName,
+                toName,
+                memo,
             )
             promise.resolve(hex(wire))
         } catch (e: Throwable) {
@@ -77,12 +83,33 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         }
     }
 
-    /** Receiver side: encode a payment request {to, amount, nonce, expiry, currency} to a base64url string. */
+    /**
+     * Receiver side: encode a payment request {to, amount, nonce, expiry, currency, to_name, memo} to
+     * a base64url string. `toName` is the merchant's own display name and `memo` an optional note;
+     * both are copied verbatim by the payer into their signed authorization.
+     */
     @ReactMethod
-    fun encodeRequest(toHex: String, amount: Double, nonceHex: String, expiry: Double, currency: Double, promise: Promise) {
+    fun encodeRequest(
+        toHex: String,
+        amount: Double,
+        nonceHex: String,
+        expiry: Double,
+        currency: Double,
+        toName: String,
+        memo: String,
+        promise: Promise,
+    ) {
         try {
             promise.resolve(
-                uniffi.dpay_ffi.encodeRequest(unhex(toHex), amount.toLong().toULong(), unhex(nonceHex), expiry.toLong().toULong(), currency.toInt().toUInt()),
+                uniffi.dpay_ffi.encodeRequest(
+                    unhex(toHex),
+                    amount.toLong().toULong(),
+                    unhex(nonceHex),
+                    expiry.toLong().toULong(),
+                    currency.toInt().toUInt(),
+                    toName,
+                    memo,
+                ),
             )
         } catch (e: Throwable) {
             promise.reject("dpay_core", e)

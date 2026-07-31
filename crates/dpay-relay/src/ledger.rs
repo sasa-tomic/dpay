@@ -277,7 +277,7 @@ impl Clock for FixedClock {
 /// The settlement seam. `async_trait` keeps it dyn-compatible so `Arc<dyn Ledger>` works.
 #[async_trait]
 pub trait Ledger: Send + Sync {
-    /// Settle a 196-byte signed authorization (the payer's QR, decoded to wire bytes). The
+    /// Settle a 292-byte signed authorization (the payer's QR, decoded to wire bytes). The
     /// settlement currency is read out of the wire — the payer copied the merchant's request
     /// currency into their authorization — so `pay` itself takes no currency argument.
     async fn pay(&self, wire: Vec<u8>) -> Result<Receipt, LedgerError>;

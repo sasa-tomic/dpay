@@ -676,7 +676,7 @@ async fn version() -> Response {
         .into_response()
 }
 
-/// `POST /api/v1/pay`. Body is either JSON `{"qr":"<base64url>"}` or the raw 196-byte wire form
+/// `POST /api/v1/pay`. Body is either JSON `{"qr":"<base64url>"}` or the raw 292-byte wire form
 /// (any non-JSON content type). Returns `200 {"receipt":...}` or `422 {"error":"..."}`.
 async fn pay(State(state): State<AppState>, headers: HeaderMap, body: axum::body::Bytes) -> Response {
     // 1. Get the wire bytes from whichever encoding the merchant sent.

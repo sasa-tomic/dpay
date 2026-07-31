@@ -319,11 +319,12 @@ async fn bad_signature_rejected_422_no_state_change() {
     let merchant = keypair();
     let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
 
-    // Build a valid signed auth, then corrupt the signature bytes in the wire form. The 196-byte
-    // wire is `signing(100) | sig(64) | from_pub(32)`, so byte[100] is the first signature byte.
+    // Build a valid signed auth, then corrupt bytes in the wire form. The 292-byte wire is
+    // `signing(196) | sig(64) | from_pub(32)`; byte[100] falls inside the signing region (the
+    // from_name field), so flipping it breaks the signature the verifier recomputes.
     let sa = signed(&payer, pubkey(&merchant), 100, [3u8; 16], FUTURE);
     let mut wire = sa.to_wire();
-    wire[100] ^= 0xFF; // flip a byte inside the 64-byte signature
+    wire[100] ^= 0xFF; // flip a byte inside the signing region (breaks the recomputed signature)
 
     let (status, body) = call(&state, pay_wire(&wire)).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
