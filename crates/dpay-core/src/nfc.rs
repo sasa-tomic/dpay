@@ -1,7 +1,7 @@
 //! nfc — NFC (ISO 7816-4 / ISO-DEP) transport framing for dpay.
 //!
 //! This module is a **pure, panic-free byte codec**. It carries the *exact same bytes* the QR path
-//! already moves — the 68-byte [`PaymentRequest`](crate::PaymentRequest) and the 196-byte signed
+//! already moves — the 132-byte [`PaymentRequest`](crate::PaymentRequest) and the 292-byte signed
 //! wire ([`SignedAuthorization::to_wire`](crate::SignedAuthorization::to_wire)) — over the APDU
 //! exchange an Android **HCE** card (the offline payer) and an NFC **reader** (the online merchant)
 //! use. No crypto or policy lives here: the payer still signs with [`crate::sign`] and the merchant
@@ -25,9 +25,10 @@
 //! ## Wire layout (frozen)
 //!
 //! Payloads larger than one APDU are split into **frames** with a 4-byte header
-//! `seq(1) | flags(1) | total_len(2, big-endian)`. Today's two payloads each fit in a single frame,
-//! but the chunking path is built and tested now because retrofitting it later is where corruption
-//! creeps in (Android's `IsoDep` max-transceive length can be as low as ~253 bytes on some stacks).
+//! `seq(1) | flags(1) | total_len(2, big-endian)`. The request fits in a single frame; the signed
+//! wire now spans **two** frames (292 B > `DEFAULT_MAX_CHUNK` of 240), so the chunking path is
+//! exercised on every live wire — which is why it was built and tested up front (Android's `IsoDep`
+//! max-transceive length can be as low as ~253 bytes on some stacks).
 //!
 //! ## No collision with Google Wallet
 //!
@@ -54,7 +55,8 @@ pub const PROTO_VERSION: u8 = 1;
 
 /// Default max dpay-payload bytes per frame (excludes the 4-byte frame header and APDU overhead).
 /// Chosen conservatively so a frame + header + APDU framing stays under Android's smallest realistic
-/// `IsoDep` max-transceive length. Both live payloads (68 B request, 196 B wire) fit in one frame.
+/// `IsoDep` max-transceive length. The 132 B request fits in one frame; the 292 B signed wire spans
+/// two frames (240 + 52).
 pub const DEFAULT_MAX_CHUNK: usize = 240;
 
 /// Hard ceiling on a reassembled payload — the `total_len` header is a `u16`, and this also bounds
@@ -1339,7 +1341,7 @@ mod tests {
     }
 
     fn sample_request() -> Vec<u8> {
-        PaymentRequest { to: [7u8; 32], amount: 4200, nonce: [9u8; 16], expiry: 4102444800, currency: crate::DEMO_USD }
+        PaymentRequest { to: [7u8; 32], amount: 4200, nonce: [9u8; 16], expiry: 4102444800, currency: crate::DEMO_USD, to_name: [0u8; crate::NAME_LEN], memo: [0u8; crate::MEMO_LEN] }
             .to_bytes()
             .to_vec()
     }
@@ -1496,12 +1498,23 @@ mod tests {
         card.provide_wire(&wire).unwrap();
         assert_eq!(card.phase(), SessionPhase::Exchanging);
 
-        // Pull the wire → the wire has left the payer, but the outcome isn't known yet (Settling).
-        let framed = card.process(&reader.next_command().unwrap());
+        // Pull the wire (292 B at DEFAULT_MAX_CHUNK spans 2 frames). The card stays Serving
+        // (Exchanging) until the final frame leaves; only then does it flip to Done (Settling).
+        let mut delivered = None;
+        for _ in 0..WIRE_LEN.div_ceil(DEFAULT_MAX_CHUNK) {
+            assert_eq!(card.phase(), SessionPhase::Exchanging, "still serving wire frames");
+            let resp = card.process(&reader.next_command().unwrap());
+            match reader.handle_response(&resp).unwrap() {
+                ReaderStep::Continue => {}          // an intermediate frame
+                ReaderStep::Done(w) => delivered = Some(w), // the final frame
+                other => panic!("unexpected step {other:?}"),
+            }
+        }
+        // The last frame has left the payer → the wire is out, outcome unknown (Settling).
         assert_eq!(card.phase(), SessionPhase::Settling);
         assert!(card.is_complete()); // the wire is out…
         assert!(!card.is_confirmed()); // …but not yet confirmed
-        assert!(matches!(reader.handle_response(&framed).unwrap(), ReaderStep::Done(_)));
+        let _delivered = delivered.expect("wire delivered");
         assert_eq!(reader.phase(), SessionPhase::Settling);
         assert!(reader.next_command().is_none(), "reader waits for the merchant to settle online");
 
@@ -1593,7 +1606,7 @@ mod signed_tests {
     fn real_signed_wire() -> (Vec<u8>, SignedAuthorization) {
         let sk = generate_keypair();
         let from = sk.verifying_key().to_bytes();
-        let auth = Authorization { from, to: [7u8; 32], amount: 4200, nonce: [1u8; 16], expiry: 4102444800, currency: crate::DEMO_USD };
+        let auth = Authorization { from, to: [7u8; 32], amount: 4200, nonce: [1u8; 16], expiry: 4102444800, currency: crate::DEMO_USD, from_name: [0u8; crate::NAME_LEN], to_name: [0u8; crate::NAME_LEN], memo: [0u8; crate::MEMO_LEN] };
         let se = SignedAuthorization::new(&sk, auth);
         (se.to_wire().to_vec(), se)
     }
@@ -1603,11 +1616,13 @@ mod signed_tests {
     #[test]
     fn signed_wire_survives_nfc_and_verifies() {
         let (wire, se) = real_signed_wire();
-        let req = PaymentRequest { to: se.auth.to, amount: se.auth.amount, nonce: se.auth.nonce, expiry: se.auth.expiry, currency: se.auth.currency }
+        let req = PaymentRequest { to: se.auth.to, amount: se.auth.amount, nonce: se.auth.nonce, expiry: se.auth.expiry, currency: se.auth.currency, to_name: se.auth.to_name, memo: se.auth.memo }
             .to_bytes()
             .to_vec();
 
-        for max_chunk in [super::DEFAULT_MAX_CHUNK, 240, 64, 7, 1] {
+        // 292 B wire: at chunk=1 it would need 292 frames > MAX_FRAMES (256), so the smallest chunk
+        // exercised is 2 (146 frames) — still heavily fragmented, but within the frame ceiling.
+        for max_chunk in [super::DEFAULT_MAX_CHUNK, 240, 64, 7, 2] {
             let mut card = CardSession::new(max_chunk);
             let mut reader = ReaderConductor::new(&req, max_chunk).unwrap();
             let mut approved = false;
@@ -1640,16 +1655,78 @@ mod signed_tests {
     }
 
     /// If a single byte is corrupted in transit, the signature check catches it — framing integrity
-    /// is backstopped by the same crypto the canister enforces.
+    /// is backstopped by the same crypto the canister enforces. The flipped byte (offset 100) is now
+    /// the first byte of the `from_name` field, so this also proves names are integrity-protected.
     #[test]
     fn one_byte_corruption_fails_verification() {
         let (mut wire, _se) = real_signed_wire();
-        wire[100] ^= 0x01; // flip a bit somewhere in the signed region
+        wire[100] ^= 0x01; // flip a bit in from_name[0] (inside the signed region [0..196))
         match wire_from_transport(&wire) {
             // Either it no longer parses as a consistent wire, or it parses but fails verify.
             Ok(bad) => assert!(!bad.verify(), "corrupted wire must not verify"),
             Err(_) => {}
         }
+    }
+
+    /// The signed wire is the first live payload that does NOT fit in a single APDU-sized frame:
+    /// `WIRE_LEN` (292) > `DEFAULT_MAX_CHUNK` (240), so it fragments into exactly 2 frames (240 +
+    /// 52). Prove the chunking path round-trips the real 292-byte wire byte-identical, both at the
+    /// raw frame layer (fragment → reassemble) and through the full card⇆reader conductor.
+    #[test]
+    fn signed_wire_spans_two_frames_and_round_trips() {
+        let (wire, se) = real_signed_wire();
+
+        // Sanity: the wire really is 292 bytes and really needs 2 frames at the production chunk.
+        assert_eq!(wire.len(), WIRE_LEN);
+        assert!(WIRE_LEN > super::DEFAULT_MAX_CHUNK, "wire must exceed one frame");
+        let nframes = WIRE_LEN.div_ceil(super::DEFAULT_MAX_CHUNK);
+        assert_eq!(nframes, 2, "292 B / 240 B-per-frame = 2 frames");
+
+        // Frame layer: fragment → reassemble is byte-identical (covers the multi-frame chunking path
+        // with the exact production wire length, which the 1..=256 proptest range cannot reach).
+        let frames = super::frame::fragment(&wire, super::DEFAULT_MAX_CHUNK).unwrap();
+        assert_eq!(frames.len(), 2, "fragment emits exactly 2 frames");
+        let mut r = super::frame::Reassembler::new();
+        let mut reassembled = None;
+        for f in &frames {
+            reassembled = r.accept(&super::frame::Frame::parse(f).unwrap()).unwrap();
+        }
+        assert_eq!(reassembled.unwrap(), wire, "reassembled wire is byte-identical");
+
+        // Full conductor: the 2-frame wire moves card → reader at the production chunk size and what
+        // the reader reassembles verifies as the identical authorization.
+        let req = PaymentRequest {
+            to: se.auth.to, amount: se.auth.amount, nonce: se.auth.nonce,
+            expiry: se.auth.expiry, currency: se.auth.currency,
+            to_name: se.auth.to_name, memo: se.auth.memo,
+        }
+        .to_bytes()
+        .to_vec();
+        let mut card = CardSession::new(super::DEFAULT_MAX_CHUNK);
+        let mut reader = ReaderConductor::new(&req, super::DEFAULT_MAX_CHUNK).unwrap();
+        let mut approved = false;
+        let mut delivered = None;
+        for _ in 0..4000 {
+            let cmd = reader.next_command().expect("reader has a command");
+            let resp = card.process(&cmd);
+            if card.awaiting_decision() && !approved {
+                card.provide_wire(&wire).unwrap();
+                approved = true;
+            }
+            match reader.handle_response(&resp).unwrap() {
+                ReaderStep::Done(w) => {
+                    delivered = Some(w);
+                    break;
+                }
+                ReaderStep::Declined => panic!("unexpected decline"),
+                _ => {}
+            }
+        }
+        let delivered = delivered.expect("2-frame wire delivered");
+        assert_eq!(delivered, wire, "byte-identical through the conductor");
+        let recovered = wire_from_transport(&delivered).unwrap();
+        assert!(recovered.verify(), "signature verifies after the 2-frame transport");
+        assert_eq!(recovered, se);
     }
 
     /// A truncated transfer (wrong length) is rejected before the core parser sees it.

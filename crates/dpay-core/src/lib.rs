@@ -20,9 +20,17 @@ pub mod nfc;
 pub const PUBKEY_LEN: usize = 32;
 pub const SIG_LEN: usize = 64;
 pub const NONCE_LEN: usize = 16;
-/// 32 (from) + 32 (to) + 8 (amount) + 16 (nonce) + 8 (expiry) + 4 (currency)
-pub const SIGNING_LEN: usize = 100;
-/// signing_bytes(100) + sig(64) + from_pub(32)
+/// Fixed width of each display-name / memo field: UTF-8, trailing-NUL (0x00) padded, truncated to
+/// 32 bytes by the BUILDER (the app). The core just stores / signs / verifies the raw 32 bytes — it
+/// does no encoding or trimming. Single-sourced here so every layer agrees on the field width.
+pub const NAME_LEN: usize = 32;
+pub const MEMO_LEN: usize = 32;
+/// `from(32) | to(32) | amount_le(8) | nonce(16) | expiry_le(8) | currency_le(4) |
+/// from_name(32) | to_name(32) | memo(32)` = 196 bytes. FROZEN layout — single-sourced here; the
+/// canister, relay, app, and the JS shim all read this exact order.
+pub const SIGNING_LEN: usize =
+    PUBKEY_LEN + PUBKEY_LEN + 8 + NONCE_LEN + 8 + 4 + NAME_LEN + NAME_LEN + MEMO_LEN;
+/// signing_bytes(196) + sig(64) + from_pub(32) = 292.
 pub const WIRE_LEN: usize = SIGNING_LEN + SIG_LEN + PUBKEY_LEN;
 
 /// Currency tag. The merchant's request names the settlement asset; the payer copies it
@@ -32,7 +40,10 @@ pub type Currency = u32;
 pub const DEMO_USD: Currency = 0;
 
 /// An offline-built payment authorization. Amounts are integer minor units (cents); the UI
-/// only ever renders `$`.
+/// only ever renders `$`. `from_name`/`to_name`/`memo` are raw 32-byte buffers (UTF-8,
+/// trailing-NUL padded, truncated to 32 bytes by the builder) that ride inside the signed bytes so
+/// transaction history is self-describing on both sides (the payee sees the payer's name, not a raw
+/// pubkey).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Authorization {
     pub from: [u8; PUBKEY_LEN],
@@ -41,11 +52,20 @@ pub struct Authorization {
     pub nonce: [u8; NONCE_LEN],
     pub expiry: u64,
     pub currency: Currency,
+    /// The payer's own display name (bound by the signature).
+    pub from_name: [u8; NAME_LEN],
+    /// The payee's display name (was the unauthenticated `|name` QR suffix; now signed).
+    pub to_name: [u8; NAME_LEN],
+    /// An optional merchant-set memo (bound by the signature).
+    pub memo: [u8; MEMO_LEN],
 }
 
 impl Authorization {
-    /// Canonical, deterministic signed message: fixed 100-byte little-endian concat.
-    /// Field order is frozen forever: `from | to | amount_le | nonce | expiry_le | currency_le`.
+    /// Canonical, deterministic signed message: fixed 196-byte little-endian concat. Field order is
+    /// frozen forever:
+    /// `from | to | amount_le | nonce | expiry_le | currency_le | from_name | to_name | memo`.
+    /// The first six fields are little-endian integers / raw byte arrays as before; the three new
+    /// 32-byte fields are raw copies (the app NUL-pads/truncates them before signing).
     pub fn signing_bytes(&self) -> [u8; SIGNING_LEN] {
         let mut b = [0u8; SIGNING_LEN];
         b[0..32].copy_from_slice(&self.from);
@@ -54,6 +74,9 @@ impl Authorization {
         b[72..88].copy_from_slice(&self.nonce);
         b[88..96].copy_from_slice(&self.expiry.to_le_bytes());
         b[96..100].copy_from_slice(&self.currency.to_le_bytes());
+        b[100..132].copy_from_slice(&self.from_name);
+        b[132..164].copy_from_slice(&self.to_name);
+        b[164..196].copy_from_slice(&self.memo);
         b
     }
 }
@@ -289,7 +312,7 @@ impl SignedAuthorization {
         SignedAuthorization { auth, sig, from_pub: auth.from }
     }
 
-    /// Raw 196-byte wire form: `signing_bytes(100) | sig(64) | from_pub(32)`.
+    /// Raw 292-byte wire form: `signing_bytes(196) | sig(64) | from_pub(32)`.
     /// This is what the relay hands the canister (a candid `blob`); the QR carries its base64url.
     pub fn to_wire(&self) -> [u8; WIRE_LEN] {
         let mut raw = [0u8; WIRE_LEN];
@@ -312,9 +335,12 @@ impl SignedAuthorization {
             nonce: raw[72..88].try_into().unwrap(),
             expiry: u64::from_le_bytes(raw[88..96].try_into().unwrap()),
             currency: u32::from_le_bytes(raw[96..100].try_into().unwrap()),
+            from_name: raw[100..132].try_into().unwrap(),
+            to_name: raw[132..164].try_into().unwrap(),
+            memo: raw[164..196].try_into().unwrap(),
         };
-        let sig: [u8; SIG_LEN] = raw[100..164].try_into().unwrap();
-        let from_pub: [u8; PUBKEY_LEN] = raw[164..196].try_into().unwrap();
+        let sig: [u8; SIG_LEN] = raw[196..260].try_into().unwrap();
+        let from_pub: [u8; PUBKEY_LEN] = raw[260..292].try_into().unwrap();
         if auth.from != from_pub {
             return Err(CodecError::PubkeyMismatch);
         }
@@ -339,15 +365,17 @@ impl SignedAuthorization {
     }
 }
 
-/// 32 (to) + 8 (amount) + 16 (nonce) + 8 (expiry) + 4 (currency).
-pub const REQUEST_LEN: usize = PUBKEY_LEN + 8 + NONCE_LEN + 8 + 4;
+/// `to(32) | amount_le(8) | nonce(16) | expiry_le(8) | currency_le(4) | to_name(32) | memo(32)` = 132.
+pub const REQUEST_LEN: usize = PUBKEY_LEN + 8 + NONCE_LEN + 8 + 4 + NAME_LEN + MEMO_LEN;
 
 /// The **request** the merchant shows the payer, carried by the merchant's QR. Unsigned: it names
 /// who to pay (`to`), how much (`amount`), a single-use `nonce` (the merchant's `request_id`, which
-/// becomes the ledger nonce), an `expiry`, and the settlement `currency`. The payer scans this,
-/// reviews it, and signs an [`Authorization`] that copies these fields verbatim — so the amount,
-/// payee, and currency are chosen by the merchant and then *bound* by the payer's signature. There
-/// is no `from` (the payer supplies their own) and no signature here.
+/// becomes the ledger nonce), an `expiry`, the settlement `currency`, the payee's display name
+/// (`to_name`), and an optional `memo`. The payer scans this, reviews it, and signs an
+/// [`Authorization`] that copies these fields verbatim — so the amount, payee, currency, payee name,
+/// and memo are chosen by the merchant and then *bound* by the payer's signature. There is no `from`
+/// (the payer supplies their own) and no `from_name` (the payer supplies their own) and no signature
+/// here.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct PaymentRequest {
     pub to: [u8; PUBKEY_LEN],
@@ -355,10 +383,15 @@ pub struct PaymentRequest {
     pub nonce: [u8; NONCE_LEN],
     pub expiry: u64,
     pub currency: Currency,
+    /// The payee's display name (the merchant's own name). Copied verbatim into the authorization.
+    pub to_name: [u8; NAME_LEN],
+    /// An optional merchant-set memo. Copied verbatim into the authorization.
+    pub memo: [u8; MEMO_LEN],
 }
 
 impl PaymentRequest {
-    /// Raw 68-byte form: `to(32) | amount_le(8) | nonce(16) | expiry_le(8) | currency_le(4)`. Frozen.
+    /// Raw 132-byte form: `to(32) | amount_le(8) | nonce(16) | expiry_le(8) | currency_le(4) |
+    /// to_name(32) | memo(32)`. Frozen.
     pub fn to_bytes(&self) -> [u8; REQUEST_LEN] {
         let mut b = [0u8; REQUEST_LEN];
         b[0..32].copy_from_slice(&self.to);
@@ -366,10 +399,12 @@ impl PaymentRequest {
         b[40..56].copy_from_slice(&self.nonce);
         b[56..64].copy_from_slice(&self.expiry.to_le_bytes());
         b[64..68].copy_from_slice(&self.currency.to_le_bytes());
+        b[68..100].copy_from_slice(&self.to_name);
+        b[100..132].copy_from_slice(&self.memo);
         b
     }
 
-    /// Parse the raw 68-byte form. Rejects a wrong length.
+    /// Parse the raw 132-byte form. Rejects a wrong length.
     pub fn from_bytes(raw: &[u8]) -> Result<Self, CodecError> {
         if raw.len() != REQUEST_LEN {
             return Err(CodecError::Length);
@@ -380,6 +415,8 @@ impl PaymentRequest {
             nonce: raw[40..56].try_into().unwrap(),
             expiry: u64::from_le_bytes(raw[56..64].try_into().unwrap()),
             currency: u32::from_le_bytes(raw[64..68].try_into().unwrap()),
+            to_name: raw[68..100].try_into().unwrap(),
+            memo: raw[100..132].try_into().unwrap(),
         })
     }
 
@@ -394,11 +431,26 @@ impl PaymentRequest {
         Self::from_bytes(&raw)
     }
 
-    /// Turn a scanned request into the payer's [`Authorization`] — the payer supplies `from`, every
-    /// other field is copied from the merchant's request (so consent is bound to exactly what was
-    /// requested).
-    pub fn to_authorization(&self, from: [u8; PUBKEY_LEN]) -> Authorization {
-        Authorization { from, to: self.to, amount: self.amount, nonce: self.nonce, expiry: self.expiry, currency: self.currency }
+    /// Turn a scanned request into the payer's [`Authorization`] — the payer supplies `from` and
+    /// `from_name` (their own pubkey + display name); every other field, including `to_name` and
+    /// `memo`, is copied from the merchant's request (so consent is bound to exactly what was
+    /// requested, names and memo included).
+    pub fn to_authorization(
+        &self,
+        from: [u8; PUBKEY_LEN],
+        from_name: [u8; NAME_LEN],
+    ) -> Authorization {
+        Authorization {
+            from,
+            to: self.to,
+            amount: self.amount,
+            nonce: self.nonce,
+            expiry: self.expiry,
+            currency: self.currency,
+            from_name,
+            to_name: self.to_name,
+            memo: self.memo,
+        }
     }
 }
 
@@ -467,15 +519,32 @@ mod tests {
             any::<[u8; 16]>(),
             any::<u64>(),
             any::<u8>(),
+            any::<[u8; NAME_LEN]>(),
+            any::<[u8; NAME_LEN]>(),
+            any::<[u8; MEMO_LEN]>(),
         )
-            .prop_map(|(from, to, amount, nonce, expiry, currency)| Authorization {
-                from,
-                to,
-                amount,
-                nonce,
-                expiry,
-                currency: currency as u32,
+            .prop_map(|(from, to, amount, nonce, expiry, currency, from_name, to_name, memo)| {
+                Authorization {
+                    from,
+                    to,
+                    amount,
+                    nonce,
+                    expiry,
+                    currency: currency as u32,
+                    from_name,
+                    to_name,
+                    memo,
+                }
             })
+    }
+
+    /// Pad an ASCII name/memo to a fixed 32-byte NUL-padded buffer (mirrors what the app builder
+    /// does before constructing an `Authorization` / `PaymentRequest`).
+    fn pad32(s: &[u8]) -> [u8; NAME_LEN] {
+        let mut b = [0u8; NAME_LEN];
+        let n = s.len().min(NAME_LEN);
+        b[..n].copy_from_slice(&s[..n]);
+        b
     }
 
     proptest! {
@@ -483,13 +552,17 @@ mod tests {
         fn sign_verify_and_codec_roundtrip(amount in 1u64.., expiry in 1u64.., nonce in any::<[u8;16]>()) {
             let sk = generate_keypair();
             let from = sk.verifying_key().to_bytes();
-            let auth = Authorization { from, to: [7u8; 32], amount, nonce, expiry, currency: DEMO_USD };
+            let from_name = pad32(b"Alice");
+            let to_name = pad32(b"Bob");
+            let memo = pad32(b"dinner");
+            let auth = Authorization { from, to: [7u8; 32], amount, nonce, expiry, currency: DEMO_USD, from_name, to_name, memo };
             let sig = sign(&sk, &auth);
             prop_assert!(verify(&from, &auth, &sig));
 
             let se = SignedAuthorization::new(&sk, auth);
             let wire = se.encode();
-            prop_assert_eq!(wire.len(), 262); // 196 bytes -> 262 base64url chars (no pad)
+            // base64url no-pad of 292 bytes: 292 = 3*97 + 1 -> 97*4 + 2 = 390 chars.
+            prop_assert_eq!(wire.len(), 390);
             let back = SignedAuthorization::decode(&wire).unwrap();
             prop_assert_eq!(back, se);
             prop_assert!(back.verify());
@@ -500,25 +573,34 @@ mod tests {
             amount in 1u64.., expiry in 1u64.., nonce in any::<[u8;16]>(),
             to in any::<[u8;32]>(), from in any::<[u8;32]>(),
         ) {
-            let req = PaymentRequest { to, amount, nonce, expiry, currency: DEMO_USD };
+            let to_name = pad32(b"Bob");
+            let memo = pad32(b"coffee");
+            let req = PaymentRequest { to, amount, nonce, expiry, currency: DEMO_USD, to_name, memo };
             let s = req.encode();
-            prop_assert_eq!(s.len(), 91); // 68 bytes -> 91 base64url chars (no pad)
+            // base64url no-pad of 132 bytes: 132 = 3*44 + 0 -> 44*4 = 176 chars.
+            prop_assert_eq!(s.len(), 176);
             prop_assert_eq!(PaymentRequest::decode(&s).unwrap(), req);
-            // What the payer signs copies the merchant's request verbatim (only `from` is the payer's).
-            let auth = req.to_authorization(from);
+            // What the payer signs copies the merchant's request verbatim (only `from` + `from_name`
+            // are the payer's own).
+            let from_name = pad32(b"Alice");
+            let auth = req.to_authorization(from, from_name);
             prop_assert_eq!(auth.to, to);
             prop_assert_eq!(auth.amount, amount);
             prop_assert_eq!(auth.nonce, nonce);
             prop_assert_eq!(auth.expiry, expiry);
             prop_assert_eq!(auth.from, from);
             prop_assert_eq!(auth.currency, DEMO_USD);
+            // The merchant's to_name + memo are copied verbatim; the payer's from_name is supplied.
+            prop_assert_eq!(auth.to_name, to_name);
+            prop_assert_eq!(auth.memo, memo);
+            prop_assert_eq!(auth.from_name, from_name);
         }
 
         #[test]
         fn tamper_breaks_verify(idx in 0usize..SIGNING_LEN, xor in 1u8..=255) {
             let sk = generate_keypair();
             let from = sk.verifying_key().to_bytes();
-            let auth = Authorization { from, to: [1u8; 32], amount: 100, nonce: [9u8; 16], expiry: 9999, currency: DEMO_USD };
+            let auth = Authorization { from, to: [1u8; 32], amount: 100, nonce: [9u8; 16], expiry: 9999, currency: DEMO_USD, from_name: pad32(b"Alice"), to_name: pad32(b"Bob"), memo: pad32(b"dinner") };
             let sig = sign(&sk, &auth);
             let mut bytes = auth.signing_bytes();
             bytes[idx] ^= xor;
@@ -529,6 +611,33 @@ mod tests {
                 nonce: bytes[72..88].try_into().unwrap(),
                 expiry: u64::from_le_bytes(bytes[88..96].try_into().unwrap()),
                 currency: u32::from_le_bytes(bytes[96..100].try_into().unwrap()),
+                from_name: bytes[100..132].try_into().unwrap(),
+                to_name: bytes[132..164].try_into().unwrap(),
+                memo: bytes[164..196].try_into().unwrap(),
+            };
+            prop_assert!(!verify(&from, &tampered, &sig));
+        }
+
+        /// Names ride inside the signed region, so flipping any byte in the name fields [100..164)
+        /// breaks verification (proves `from_name`/`to_name` are bound by the signature).
+        #[test]
+        fn tampering_a_name_byte_breaks_verify(idx in 100usize..164, xor in 1u8..=255) {
+            let sk = generate_keypair();
+            let from = sk.verifying_key().to_bytes();
+            let auth = Authorization { from, to: [1u8; 32], amount: 100, nonce: [9u8; 16], expiry: 9999, currency: DEMO_USD, from_name: pad32(b"Alice"), to_name: pad32(b"Bob"), memo: pad32(b"dinner") };
+            let sig = sign(&sk, &auth);
+            let mut bytes = auth.signing_bytes();
+            bytes[idx] ^= xor;
+            let tampered = Authorization {
+                from: bytes[0..32].try_into().unwrap(),
+                to: bytes[32..64].try_into().unwrap(),
+                amount: u64::from_le_bytes(bytes[64..72].try_into().unwrap()),
+                nonce: bytes[72..88].try_into().unwrap(),
+                expiry: u64::from_le_bytes(bytes[88..96].try_into().unwrap()),
+                currency: u32::from_le_bytes(bytes[96..100].try_into().unwrap()),
+                from_name: bytes[100..132].try_into().unwrap(),
+                to_name: bytes[132..164].try_into().unwrap(),
+                memo: bytes[164..196].try_into().unwrap(),
             };
             prop_assert!(!verify(&from, &tampered, &sig));
         }
@@ -544,7 +653,7 @@ mod tests {
         #[test]
         fn validate_rules(amount in any::<u64>(), cap in any::<u64>(), balance in any::<u64>(),
                           now in any::<u64>(), expiry in any::<u64>()) {
-            let a = Authorization { from: [0;32], to: [0;32], amount, nonce: [0;16], expiry, currency: DEMO_USD };
+            let a = Authorization { from: [0;32], to: [0;32], amount, nonce: [0;16], expiry, currency: DEMO_USD, from_name: [0;NAME_LEN], to_name: [0;NAME_LEN], memo: [0;MEMO_LEN] };
             match validate(&a, now, cap, balance, false, true) {
                 Ok(()) => prop_assert!(amount > 0 && now < expiry && amount <= cap && amount <= balance),
                 Err(PayError::ZeroAmount)        => prop_assert_eq!(amount, 0),
@@ -584,7 +693,7 @@ mod tests {
 
             for (dir, amount, nonce) in ops {
                 let (sk, from, to) = if dir { (&ka, pa, pb) } else { (&kb, pb, pa) };
-                let auth = Authorization { from, to, amount, nonce, expiry: u64::MAX, currency: DEMO_USD };
+                let auth = Authorization { from, to, amount, nonce, expiry: u64::MAX, currency: DEMO_USD, from_name: [0;NAME_LEN], to_name: [0;NAME_LEN], memo: [0;MEMO_LEN] };
                 let sig_ok = verify(&from, &auth, &sign(sk, &auth));
                 let from_bal = bal[&from];
                 let seen_nonce = seen.contains(&nonce);

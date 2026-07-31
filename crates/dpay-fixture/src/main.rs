@@ -2,7 +2,7 @@
 //!
 //! This never reimplements money logic: it builds a real [`SignedAuthorization`] with the shared
 //! `dpay-core` and serialises it as candid text, so `dfx canister call pay` submits the *exact*
-//! 196-byte wire the phone would sign. Deterministic seeds make the deploy reproducible run-to-run,
+//! 292-byte wire the phone would sign. Deterministic seeds make the deploy reproducible run-to-run,
 //! and a far-future `expiry` keeps the fixture valid regardless of the replica's wall clock.
 //!
 //! ## Subcommands
@@ -17,7 +17,8 @@
 
 use dpay_core::{
     Authorization, PaymentRequest, ReceiptClaim, SignedAuthorization, WithdrawAuth, DEMO_USD,
-    NONCE_LEN, PUBKEY_LEN, RECEIPT_CLAIM_LEN, REQUEST_LEN, SIG_LEN, SIGNING_LEN, WIRE_LEN,
+    MEMO_LEN, NAME_LEN, NONCE_LEN, PUBKEY_LEN, RECEIPT_CLAIM_LEN, REQUEST_LEN, SIG_LEN,
+    SIGNING_LEN, WIRE_LEN,
 };
 use ed25519_dalek::SigningKey;
 use serde::Serialize;
@@ -43,6 +44,16 @@ fn key(seed: u8) -> SigningKey {
     SigningKey::from_bytes(&[seed; 32])
 }
 
+/// Pad ASCII to a fixed 32-byte NUL-padded buffer (UTF-8, trailing-0x00, truncate to 32). Mirrors
+/// what the app builder does before constructing an `Authorization` / `PaymentRequest`; the core
+/// just stores / signs / verifies these raw 32 bytes.
+fn pad32(s: &[u8]) -> [u8; NAME_LEN] {
+    let mut b = [0u8; NAME_LEN];
+    let n = s.len().min(NAME_LEN);
+    b[..n].copy_from_slice(&s[..n]);
+    b
+}
+
 // ===========================================================================
 // wire-layout emitter — single source of truth for the JS signing shim.
 // ===========================================================================
@@ -52,9 +63,10 @@ fn key(seed: u8) -> SigningKey {
 // reconstructs the golden `Authorization` from these offsets and asserts it round-trips, guarding
 // against drift between this emitter and `Authorization::signing_bytes()`.
 
-/// Field offset within the 100-byte signing buffer, computed from the frozen layout in
+/// Field offset within the 196-byte signing buffer, computed from the frozen layout in
 /// `dpay_core::Authorization::signing_bytes` (`from | to | amount_le | nonce | expiry_le |
-/// currency_le`). Expressed in terms of the core consts so a const rename surfaces here too.
+/// currency_le | from_name | to_name | memo`). Expressed in terms of the core consts so a layout
+/// change in the core propagates here.
 const FROM_OFF: usize = 0;
 const TO_OFF: usize = PUBKEY_LEN;
 const AMOUNT_OFF: usize = 2 * PUBKEY_LEN;
@@ -64,11 +76,35 @@ const CURRENCY_OFF: usize = 2 * PUBKEY_LEN + 16 + NONCE_LEN;
 const AMOUNT_LEN: usize = 8;
 const EXPIRY_LEN: usize = 8;
 const CURRENCY_LEN: usize = 4;
+// The three new 32-byte fields, expressed as the previous field's offset + its width (single source
+// of truth = the core consts by name).
+const FROM_NAME_OFF: usize = CURRENCY_OFF + CURRENCY_LEN;
+const TO_NAME_OFF: usize = FROM_NAME_OFF + NAME_LEN;
+const MEMO_OFF: usize = TO_NAME_OFF + NAME_LEN;
 
-/// Offsets within the 196-byte wire form (`signing_bytes | sig | from_pub`).
+/// Offsets within the 292-byte wire form (`signing_bytes | sig | from_pub`).
 const WIRE_SIGNING_OFF: usize = 0;
 const WIRE_SIG_OFF: usize = SIGNING_LEN;
 const WIRE_FROM_PUB_OFF: usize = SIGNING_LEN + SIG_LEN;
+
+// ===========================================================================
+// request-layout offsets — single source of truth for the JS request shim.
+// ===========================================================================
+//
+// `PaymentRequest::to_bytes` is the FIXED 132-byte layout
+//   `to(32) | amount_le(8) | nonce(16) | expiry_le(8) | currency_le(4) | to_name(32) | memo(32)`.
+// Every offset below is computed from the core consts by name so a layout change in the core
+// propagates here; the total length is `REQUEST_LEN` (imported from the core). The round-trip test
+// binds these offsets to `PaymentRequest::to_bytes()` so they cannot drift.
+
+/// `to` offset within the request byte buffer.
+const REQ_TO_OFF: usize = 0;
+const REQ_AMOUNT_OFF: usize = PUBKEY_LEN;
+const REQ_NONCE_OFF: usize = PUBKEY_LEN + 8;
+const REQ_EXPIRY_OFF: usize = PUBKEY_LEN + 8 + NONCE_LEN;
+const REQ_CURRENCY_OFF: usize = PUBKEY_LEN + 16 + NONCE_LEN;
+const REQ_TO_NAME_OFF: usize = PUBKEY_LEN + 16 + NONCE_LEN + 4;
+const REQ_MEMO_OFF: usize = PUBKEY_LEN + 16 + NONCE_LEN + 4 + NAME_LEN;
 
 // ===========================================================================
 // withdrawal-layout offsets — single source of truth for the JS signing shim.
@@ -231,10 +267,29 @@ struct Fields {
     nonce: FieldSpec,
     expiry: FieldSpec,
     currency: FieldSpec,
+    from_name: FieldSpec,
+    to_name: FieldSpec,
+    memo: FieldSpec,
+}
+
+/// The request byte-buffer field layout (`PaymentRequest::to_bytes`). Mirrors [`Fields`] but for
+/// the 132-byte request (which carries `to_name` + `memo`, not `from`/`from_name`).
+#[derive(Serialize)]
+struct RequestFields {
+    to: FieldSpec,
+    amount: FieldSpec,
+    nonce: FieldSpec,
+    expiry: FieldSpec,
+    currency: FieldSpec,
+    to_name: FieldSpec,
+    memo: FieldSpec,
 }
 
 /// The golden signed bytes. Every `*_hex` is derived from the real `dpay_core` types (never
-/// hardcoded) so the JS cross-validation is a true Rust↔JS byte comparison.
+/// hardcoded) so the JS cross-validation is a true Rust↔JS byte comparison. The `from_name_hex` /
+/// `to_name_hex` / `memo_hex` are the pay (signing) golden names; `request_to_name_hex` /
+/// `request_memo_hex` are the merchant request's `to_name` / `memo` (the request memo differs from
+/// the pay memo by design, so both are carried explicitly).
 #[derive(Serialize)]
 struct Golden {
     secret_hex: String,
@@ -248,6 +303,13 @@ struct Golden {
     sig_hex: String,
     wire_hex: String,
     request_hex: String,
+    /// Pay (signing) display names + memo — 32-byte NUL-padded UTF-8.
+    from_name_hex: String,
+    to_name_hex: String,
+    memo_hex: String,
+    /// Merchant request's display name + memo — 32-byte NUL-padded UTF-8.
+    request_to_name_hex: String,
+    request_memo_hex: String,
 }
 
 #[derive(Serialize)]
@@ -258,7 +320,10 @@ struct WireLayout {
     sig_len: usize,
     pubkey_len: usize,
     nonce_len: usize,
+    name_len: usize,
+    memo_len: usize,
     fields: Fields,
+    request_fields: RequestFields,
     wire_fields: WireFields,
     golden: Golden,
     /// The withdrawal (ckBTC→BTC) signing layout + golden signed bytes. Variable-length (the
@@ -287,16 +352,27 @@ fn wire_layout() -> WireLayout {
     const EXPIRY: u64 = 4_102_444_800; // 2100-01-01Z — far future, stable across runs
     let currency = DEMO_USD;
 
-    let auth = Authorization { from: public, to, amount: AMOUNT, nonce, expiry: EXPIRY, currency };
+    // Golden display names + memo (deterministic ASCII, NUL-padded to 32 bytes by pad32). These are
+    // the pay (signing) golden values: payer "Alice", payee "Bob", memo "dinner".
+    let from_name = pad32(b"Alice");
+    let to_name = pad32(b"Bob");
+    let memo = pad32(b"dinner");
+    // The merchant request carries the payee's own name + its own memo. to_name is the same "Bob"
+    // as the pay golden; the request memo is the distinct "coffee" (chosen different from the pay
+    // memo "dinner" so cross-validation can distinguish the two objects).
+    let req_to_name = pad32(b"Bob");
+    let req_memo = pad32(b"coffee");
+
+    let auth = Authorization { from: public, to, amount: AMOUNT, nonce, expiry: EXPIRY, currency, from_name, to_name, memo };
     // The signing buffer, signature, and full wire all come from the real core types.
     let signing = auth.signing_bytes();
     let sa = SignedAuthorization::new(&secret, auth);
     let sig = sa.sig;
     let wire = sa.to_wire();
 
-    // The request bytes for the same to/amount/nonce/expiry/currency (the merchant's QR), also
-    // from the real core type.
-    let request = PaymentRequest { to, amount: AMOUNT, nonce, expiry: EXPIRY, currency }.to_bytes();
+    // The request bytes for the same to/amount/nonce/expiry/currency (the merchant's QR) plus the
+    // merchant's to_name + memo, also from the real core type.
+    let request = PaymentRequest { to, amount: AMOUNT, nonce, expiry: EXPIRY, currency, to_name: req_to_name, memo: req_memo }.to_bytes();
 
     WireLayout {
         signing_len: SIGNING_LEN,
@@ -305,6 +381,8 @@ fn wire_layout() -> WireLayout {
         sig_len: SIG_LEN,
         pubkey_len: PUBKEY_LEN,
         nonce_len: NONCE_LEN,
+        name_len: NAME_LEN,
+        memo_len: MEMO_LEN,
         fields: Fields {
             from: FieldSpec { offset: FROM_OFF, len: PUBKEY_LEN, endian: None },
             to: FieldSpec { offset: TO_OFF, len: PUBKEY_LEN, endian: None },
@@ -312,6 +390,18 @@ fn wire_layout() -> WireLayout {
             nonce: FieldSpec { offset: NONCE_OFF, len: NONCE_LEN, endian: None },
             expiry: FieldSpec { offset: EXPIRY_OFF, len: EXPIRY_LEN, endian: Some("le") },
             currency: FieldSpec { offset: CURRENCY_OFF, len: CURRENCY_LEN, endian: Some("le") },
+            from_name: FieldSpec { offset: FROM_NAME_OFF, len: NAME_LEN, endian: None },
+            to_name: FieldSpec { offset: TO_NAME_OFF, len: NAME_LEN, endian: None },
+            memo: FieldSpec { offset: MEMO_OFF, len: MEMO_LEN, endian: None },
+        },
+        request_fields: RequestFields {
+            to: FieldSpec { offset: REQ_TO_OFF, len: PUBKEY_LEN, endian: None },
+            amount: FieldSpec { offset: REQ_AMOUNT_OFF, len: AMOUNT_LEN, endian: Some("le") },
+            nonce: FieldSpec { offset: REQ_NONCE_OFF, len: NONCE_LEN, endian: None },
+            expiry: FieldSpec { offset: REQ_EXPIRY_OFF, len: EXPIRY_LEN, endian: Some("le") },
+            currency: FieldSpec { offset: REQ_CURRENCY_OFF, len: CURRENCY_LEN, endian: Some("le") },
+            to_name: FieldSpec { offset: REQ_TO_NAME_OFF, len: NAME_LEN, endian: None },
+            memo: FieldSpec { offset: REQ_MEMO_OFF, len: MEMO_LEN, endian: None },
         },
         wire_fields: WireFields {
             signing: WireFieldSpec { offset: WIRE_SIGNING_OFF, len: SIGNING_LEN },
@@ -330,6 +420,11 @@ fn wire_layout() -> WireLayout {
             sig_hex: hex(&sig),
             wire_hex: hex(&wire),
             request_hex: hex(&request),
+            from_name_hex: hex(&from_name),
+            to_name_hex: hex(&to_name),
+            memo_hex: hex(&memo),
+            request_to_name_hex: hex(&req_to_name),
+            request_memo_hex: hex(&req_memo),
         },
         withdraw: withdraw_layout(),
         receipt: receipt_layout(),
@@ -489,7 +584,7 @@ fn emit_dfx_args() {
     let nonce = [42u8; 16];
     const EXPIRY: u64 = 4_102_444_800; // 2100-01-01Z — far future so a wall-clock deploy never expires it
 
-    let auth = Authorization { from: payer_pk, to: merchant_pk, amount: AMOUNT, nonce, expiry: EXPIRY, currency: DEMO_USD };
+    let auth = Authorization { from: payer_pk, to: merchant_pk, amount: AMOUNT, nonce, expiry: EXPIRY, currency: DEMO_USD, from_name: [0u8; NAME_LEN], to_name: [0u8; NAME_LEN], memo: [0u8; MEMO_LEN] };
     let wire = SignedAuthorization::new(&payer, auth).to_wire();
 
     let out = Path::new("dfx/args");
@@ -598,6 +693,12 @@ mod tests {
         let currency = u32::from_le_bytes(
             signing[layout.fields.currency.offset..][..CURRENCY_LEN].try_into().unwrap(),
         );
+        let from_name: [u8; NAME_LEN] = signing[layout.fields.from_name.offset..][..NAME_LEN]
+            .try_into().unwrap();
+        let to_name: [u8; NAME_LEN] = signing[layout.fields.to_name.offset..][..NAME_LEN]
+            .try_into().unwrap();
+        let memo: [u8; MEMO_LEN] = signing[layout.fields.memo.offset..][..MEMO_LEN]
+            .try_into().unwrap();
 
         // The reconstructed auth matches the golden scalars.
         let pub_bytes = hex::decode(&g.public_hex).unwrap();
@@ -606,16 +707,22 @@ mod tests {
         let pub_arr: [u8; PUBKEY_LEN] = pub_bytes[..].try_into().unwrap();
         let to_arr: [u8; PUBKEY_LEN] = to_bytes[..].try_into().unwrap();
         let nonce_arr: [u8; NONCE_LEN] = nonce_bytes[..].try_into().unwrap();
+        let from_name_bytes = hex::decode(&g.from_name_hex).unwrap();
+        let to_name_bytes = hex::decode(&g.to_name_hex).unwrap();
+        let memo_bytes = hex::decode(&g.memo_hex).unwrap();
         assert_eq!(from, pub_arr);
         assert_eq!(to, to_arr);
         assert_eq!(amount, g.amount);
         assert_eq!(nonce, nonce_arr);
         assert_eq!(expiry, g.expiry);
         assert_eq!(currency, g.currency);
+        assert_eq!(from_name[..], from_name_bytes[..], "from_name matches golden hex");
+        assert_eq!(to_name[..], to_name_bytes[..], "to_name matches golden hex");
+        assert_eq!(memo[..], memo_bytes[..], "memo matches golden hex");
 
         // And re-serializing it reproduces the exact same signing buffer (proves the offsets are
         // faithful to `Authorization::signing_bytes()`).
-        let auth = Authorization { from, to, amount, nonce, expiry, currency };
+        let auth = Authorization { from, to, amount, nonce, expiry, currency, from_name, to_name, memo };
         assert_eq!(auth.signing_bytes(), signing[..]);
 
         // The golden sig actually verifies over the reconstructed signing bytes under the golden
@@ -648,12 +755,39 @@ mod tests {
         assert_eq!(req.nonce, nonce);
         assert_eq!(req.expiry, expiry);
         assert_eq!(req.currency, currency);
+        // The merchant request's to_name + memo are carried at the request offsets and match the
+        // request golden hexes (the request memo "coffee" differs from the pay memo "dinner").
+        let req_to_name_bytes = hex::decode(&g.request_to_name_hex).unwrap();
+        let req_memo_bytes = hex::decode(&g.request_memo_hex).unwrap();
+        assert_eq!(req.to_name[..], req_to_name_bytes[..], "request to_name matches golden hex");
+        assert_eq!(req.memo[..], req_memo_bytes[..], "request memo matches golden hex");
+        // Re-slice the request buffer at the EMITTED request offsets to recover to_name/memo, proving
+        // the request_fields offsets are faithful to `PaymentRequest::to_bytes()`.
+        assert_eq!(
+            req_bytes[layout.request_fields.to_name.offset..][..NAME_LEN],
+            req_to_name_bytes[..],
+            "request to_name offset is faithful",
+        );
+        assert_eq!(
+            req_bytes[layout.request_fields.memo.offset..][..MEMO_LEN],
+            req_memo_bytes[..],
+            "request memo offset is faithful",
+        );
+        assert_eq!(layout.request_fields.to_name.offset, REQ_TO_NAME_OFF);
+        assert_eq!(layout.request_fields.memo.offset, REQ_MEMO_OFF);
 
         // Wire-field offsets are internally consistent with the segment lengths.
         assert_eq!(layout.wire_fields.signing.offset, WIRE_SIGNING_OFF);
         assert_eq!(layout.wire_fields.sig.offset, WIRE_SIG_OFF);
         assert_eq!(layout.wire_fields.from_pub.offset, WIRE_FROM_PUB_OFF);
         assert_eq!(layout.wire_fields.signing.len + layout.wire_fields.sig.len + layout.wire_fields.from_pub.len, WIRE_LEN);
+
+        // Pay (signing) name offsets are internally consistent with the field widths.
+        assert_eq!(layout.fields.from_name.offset, FROM_NAME_OFF);
+        assert_eq!(layout.fields.to_name.offset, TO_NAME_OFF);
+        assert_eq!(layout.fields.memo.offset, MEMO_OFF);
+        assert_eq!(layout.name_len, NAME_LEN);
+        assert_eq!(layout.memo_len, MEMO_LEN);
     }
 
     /// The golden withdrawal signing bytes must round-trip through the EMITTED withdraw offsets, and
