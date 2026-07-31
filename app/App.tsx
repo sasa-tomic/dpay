@@ -53,40 +53,12 @@ import {
   depositInfo, depositAddress, depositRefresh, ckerc20OnrampParams, withdrawFunds,
 } from './services/relay';
 import {loadSavedWithdrawAddr, saveWithdrawAddr} from './services/withdraw';
+import {Logo, Wordmark} from './components/Logo';
+import {HotkeyHint} from './components/HotkeyHint';
+import {NfcPill} from './components/NfcPill';
 
 
 
-// The mint-green geometric "d" used by both the app icon and the in-app emblem. Bowl LEFT, ascender
-// stem RIGHT (1024 viewBox, matches the adaptive-icon foreground).
-const D_PATH = 'M622 276a52 52 0 0 1 52 52v348a52 52 0 0 1-52 52 52 52 0 0 1-52-52V328a52 52 0 0 1 52-52zM508 396a176 176 0 1 0 .1 0zM508 498a74 74 0 1 1-.1 0z';
-
-function Logo({size = 96}: {size?: number}) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 1024 1024">
-      <Defs>
-        <RadialGradient id="dpbg" cx="0.5" cy="0.34" r="0.82">
-          <Stop offset="0" stopColor="#15191f" />
-          <Stop offset="1" stopColor="#0a0c11" />
-        </RadialGradient>
-        <RadialGradient id="dphalo" cx="0.5" cy="0.4" r="0.5">
-          <Stop offset="0" stopColor="#3ee0ac" stopOpacity="0.32" />
-          <Stop offset="1" stopColor="#3ee0ac" stopOpacity="0" />
-        </RadialGradient>
-      </Defs>
-      <Rect x="0" y="0" width="1024" height="1024" rx="228" fill="url(#dpbg)" />
-      <Rect x="0" y="0" width="1024" height="1024" rx="228" fill="url(#dphalo)" />
-      <Path d={D_PATH} fill="#3ee0ac" />
-    </Svg>
-  );
-}
-
-function Wordmark({style}: {style?: object}) {
-  return (
-    <Text style={[S.wordmark, style]}>
-      d<Text style={S.wordmarkPay}>pay</Text>
-    </Text>
-  );
-}
 
 export default function App() {
   const [identity, setIdentity] = useState<Identity | null | undefined>(undefined); // undefined = loading
@@ -544,46 +516,6 @@ function Tab({label, active, onPress, hotkey}: {label: string; active: boolean; 
   );
 }
 
-/**
- * Tiny keyboard-key badge shown next to a shortcut target (web only — native has no keyboard, so the
- * hints would be noise there). Always-visible-but-subtle: a small rounded square with the key's
- * letter in the palette's muted tone (`C.sub2`) so it reads as a hint, not chrome. `tone='onBrand'`
- * flips to a dark-on-brand variant for badges that sit on the green brand background (active tab,
- * the Add-money button). The pattern (a letter in a box) stays recognisable across targets, so a
- * user who learns one shortcut infers the rest.
- */
-function HotkeyHint({k, tone = 'muted'}: {k: string; tone?: 'muted' | 'onBrand'}) {
-  if (Platform.OS !== 'web') {
-    return null;
-  }
-  const onBrand = tone === 'onBrand';
-  return (
-    <View style={[S.kbdHint, onBrand && S.kbdHintOnBrand]}>
-      <Text style={[S.kbdHintText, onBrand && S.kbdHintTextOnBrand]}>{k}</Text>
-    </View>
-  );
-}
-
-// Truthful NFC radio-status chip. Reports the device adapter state only (on / off / absent) — the
-// tap-to-pay HCE transport is a separate, device-gated feature and QR always works. 'unknown'
-// (probe failed or the native method is absent) renders nothing rather than a misleading claim.
-const NFC_PILL: Record<NfcStatus, {dot: string; label: string} | null> = {
-  ready: {dot: C.ok, label: 'NFC on'},
-  off: {dot: C.warn, label: 'NFC off'},
-  unsupported: {dot: C.sub2, label: 'No NFC'},
-  unknown: null,
-};
-
-function NfcPill({status}: {status: NfcStatus}) {
-  const s = NFC_PILL[status];
-  if (!s) return null;
-  return (
-    <View style={S.nfcPill} testID={`nfc-${status}`}>
-      <View style={[S.dot, {backgroundColor: s.dot}]} />
-      <Text style={S.nfcLabel}>{s.label}</Text>
-    </View>
-  );
-}
 
 /** Reusable camera scanner (permission + focus-aware). Fires onScan once per mount. */
 function QrScanner({onScan}: {onScan: (v: string) => void}) {
