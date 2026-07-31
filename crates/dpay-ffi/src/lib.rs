@@ -12,10 +12,32 @@
 
 use dpay_core::{
     generate_keypair as core_generate_keypair, sign, validate as core_validate, Authorization,
-    CodecError, Currency, DEMO_USD, PayError, PaymentRequest, ReceiptClaim, SignedAuthorization,
-    WithdrawAuth, NONCE_LEN, PUBKEY_LEN, SIG_LEN,
+    CodecError, Currency, DEMO_USD, MEMO_LEN, NAME_LEN, PayError, PaymentRequest, ReceiptClaim,
+    SignedAuthorization, WithdrawAuth, NONCE_LEN, PUBKEY_LEN, SIG_LEN,
 };
 use ed25519_dalek::SigningKey;
+
+/// Encode a display-name / memo `&str` into the fixed-width wire field: UTF-8 bytes, truncated to
+/// `NAME_LEN` (== `MEMO_LEN` == 32), trailing-NUL (0x00) padded. This is the defined builder
+/// behavior (see `wire-names-memo.md` §"No silent errors"): the 32 B cap is enforced here, not in
+/// the core. A Rust `String` is always valid UTF-8, so no decode error is possible. Mirrors the
+/// web shim's `padName32` (`e2e/web/dpay-core.ts`) byte-for-byte — the two signing paths stay
+/// feature-equivalent (both carry names; neither signs a nameless payment).
+fn name_field(s: &str) -> [u8; NAME_LEN] {
+    let mut b = [0u8; NAME_LEN];
+    let bytes = s.as_bytes();
+    let n = bytes.len().min(NAME_LEN);
+    b[..n].copy_from_slice(&bytes[..n]);
+    b
+}
+
+/// Inverse of [`name_field`]: NUL-trim + lossy-UTF-8 decode a 32-byte field back to a `String`.
+/// Never throws (lossy → U+FFFD on a bad byte sequence), mirroring the web shim's `trimName32`. The
+/// app shows this string in "Pay $X to <to_name>" and history rows.
+fn decode_name_field(bytes: &[u8]) -> String {
+    let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+    String::from_utf8_lossy(&bytes[..end]).into_owned()
+}
 
 uniffi::setup_scaffolding!();
 
@@ -123,13 +145,21 @@ pub fn generate_keypair() -> KeyPair {
     }
 }
 
-/// Payer side: build `Authorization {from, to, amount, nonce, expiry, currency}` and sign it
-/// **offline**, returning the 196-byte wire blob (`signing_bytes | sig | from_pub`) — exactly what
-/// the relay hands the canister. `from` is derived from the secret; a mismatched `from` arg is
-/// ignored in favour of the key's own public bytes (consent is bound to the real signer). `currency`
-/// (`Currency` = `u32`) is the settlement asset the payer authorizes; `DEMO_USD = 0`. The currency
-/// field is encoded as 4 little-endian bytes at the end of the signing region, so it is covered by
-/// the Ed25519 signature.
+/// Payer side: build `Authorization {from, to, amount, nonce, expiry, currency, from_name,
+/// to_name, memo}` and sign it **offline**, returning the 292-byte wire blob (`signing_bytes |
+/// sig | from_pub`) — exactly what the relay hands the canister. `from` is derived from the secret;
+/// a mismatched `from` arg is ignored in favour of the key's own public bytes (consent is bound to
+/// the real signer). `currency` (`Currency` = `u32`) is the settlement asset the payer authorizes;
+/// `DEMO_USD = 0`. The currency field is encoded as 4 little-endian bytes inside the signing region,
+/// so it is covered by the Ed25519 signature.
+///
+/// `from_name` is the payer's own display name; `to_name` + `memo` are copied verbatim from the
+/// scanned merchant request (merchant-defined). All three ride inside the signed bytes (positions
+/// 100..196) so transaction history is self-describing on both sides — the payee sees the payer's
+/// name, not a raw pubkey. Each is UTF-8, NUL-padded, and truncated to 32 bytes by [`name_field`].
+/// The param order matches the web shim's `signAuthorization(secretHex, toHex, amount, nonceHex,
+/// expiry, currency, fromName, toName, memo)` so the app's unified `DpayCoreApi` type is
+/// interchangeable across the native and web signing paths.
 #[uniffi::export]
 pub fn sign_authorization(
     secret: &[u8],
@@ -138,12 +168,25 @@ pub fn sign_authorization(
     nonce: &[u8],
     expiry: u64,
     currency: Currency,
+    from_name: String,
+    to_name: String,
+    memo: String,
 ) -> Result<Vec<u8>, DpayError> {
     let sk = signing_key_from_seed(secret)?;
     let from = sk.verifying_key().to_bytes();
     let to = fixed_pubkey(to)?;
     let nonce = fixed_nonce(nonce)?;
-    let auth = Authorization { from, to, amount, nonce, expiry, currency };
+    let auth = Authorization {
+        from,
+        to,
+        amount,
+        nonce,
+        expiry,
+        currency,
+        from_name: name_field(&from_name),
+        to_name: name_field(&to_name),
+        memo: name_field(&memo),
+    };
     // Build + sign via the core type so we exercise the identical signing path.
     let signed = SignedAuthorization::new(&sk, auth);
     debug_assert_eq!(sign(&sk, &auth).to_bytes(), signed.sig);
@@ -152,7 +195,8 @@ pub fn sign_authorization(
 
 /// The merchant's request, as scanned by the payer. Mirrors [`dpay_core::PaymentRequest`]: who to
 /// pay, how much (minor units), the single-use `nonce` (the merchant's request_id → ledger nonce),
-/// and an `expiry` (unix seconds).
+/// an `expiry`, the payee's display name (`to_name`), and an optional `memo` — both decoded back
+/// from their 32-byte NUL-padded wire fields to `String` by [`decode_name_field`].
 #[derive(uniffi::Record, Clone)]
 pub struct PaymentRequestData {
     pub to: Vec<u8>,
@@ -160,10 +204,18 @@ pub struct PaymentRequestData {
     pub nonce: Vec<u8>,
     pub expiry: u64,
     pub currency: u32,
+    /// The payee's display name (NUL-trimmed, lossy-decoded from the 32-byte wire field).
+    pub to_name: String,
+    /// The merchant-set memo (NUL-trimmed, lossy-decoded from the 32-byte wire field).
+    pub memo: String,
 }
 
 /// Merchant side: encode the request the payer will scan. `nonce` is the merchant's single-use
 /// request_id (it becomes the ledger nonce, so the payment can't be replayed or double-charged).
+/// `to_name` is the merchant's own display name and `memo` is an optional merchant-set note; both
+/// are UTF-8 NUL-padded into the 132-byte request by [`name_field`] and copied verbatim by the payer
+/// into their authorization. Param order matches the web shim's `encodeRequest(toHex, amount,
+/// nonceHex, expiry, currency, toName, memo)`.
 #[uniffi::export]
 pub fn encode_request(
     to: &[u8],
@@ -171,14 +223,25 @@ pub fn encode_request(
     nonce: &[u8],
     expiry: u64,
     currency: Currency,
+    to_name: String,
+    memo: String,
 ) -> Result<String, DpayError> {
     let to = fixed_pubkey(to)?;
     let nonce = fixed_nonce(nonce)?;
-    Ok(PaymentRequest { to, amount, nonce, expiry, currency }.encode())
+    Ok(PaymentRequest {
+        to,
+        amount,
+        nonce,
+        expiry,
+        currency,
+        to_name: name_field(&to_name),
+        memo: name_field(&memo),
+    }
+    .encode())
 }
 
 /// Payer side: decode a scanned merchant request QR into its fields, so the app can show
-/// "Pay $X to <merchant>" for the payer to approve before signing.
+/// "Pay $X to <to_name>" (with the memo) for the payer to approve before signing.
 #[uniffi::export]
 pub fn decode_request(qr: String) -> Result<PaymentRequestData, DpayError> {
     let req = PaymentRequest::decode(&qr)?;
@@ -188,6 +251,8 @@ pub fn decode_request(qr: String) -> Result<PaymentRequestData, DpayError> {
         nonce: req.nonce.to_vec(),
         expiry: req.expiry,
         currency: req.currency,
+        to_name: decode_name_field(&req.to_name),
+        memo: decode_name_field(&req.memo),
     })
 }
 
@@ -199,7 +264,7 @@ pub fn encode_qr(wire: &[u8]) -> Result<String, DpayError> {
     Ok(signed.encode())
 }
 
-/// Decode a scanned QR string back to the 196-byte wire blob.
+/// Decode a scanned QR string back to the 292-byte wire blob.
 #[uniffi::export]
 pub fn decode_qr(payload: String) -> Result<Vec<u8>, DpayError> {
     let signed = SignedAuthorization::decode(&payload)?;
@@ -293,8 +358,10 @@ pub fn validate(
     nonce_seen: bool,
     sig_ok: bool,
 ) -> Option<String> {
-    // `validate` only reads `auth.amount` and `auth.expiry`; the identity fields are irrelevant.
-    // (Currency is also unchecked — validate is currency-agnostic — but the struct needs the field.)
+    // `validate` only reads `auth.amount` and `auth.expiry`; the identity and name fields are
+    // irrelevant. (Currency is also unchecked — validate is currency-agnostic — but the struct needs
+    // every field.) The name/memo fields are zeroed ([0u8; NAME_LEN] / [0u8; MEMO_LEN]) — they are
+    // never serialized by `validate`, which reads `auth.amount`/`auth.expiry` by field, not by wire.
     let auth = Authorization {
         from: [0u8; PUBKEY_LEN],
         to: [0u8; PUBKEY_LEN],
@@ -302,6 +369,9 @@ pub fn validate(
         nonce: [0u8; NONCE_LEN],
         expiry,
         currency: DEMO_USD,
+        from_name: [0u8; NAME_LEN],
+        to_name: [0u8; NAME_LEN],
+        memo: [0u8; MEMO_LEN],
     };
     match core_validate(&auth, now, cap, balance, nonce_seen, sig_ok) {
         Ok(()) => None,
@@ -431,7 +501,7 @@ impl FfiCardSession {
         lock(&self.inner).is_confirmed()
     }
 
-    /// Approve: supply the offline-signed 196-byte wire to serve. Errors (`NfcWrongState`) unless a
+    /// Approve: supply the offline-signed 292-byte wire to serve. Errors (`NfcWrongState`) unless a
     /// request is held and no decision has been made; the wire is validated as it is framed.
     pub fn provide_wire(&self, wire: Vec<u8>) -> Result<(), DpayError> {
         Ok(lock(&self.inner).provide_wire(&wire)?)
@@ -453,7 +523,7 @@ pub struct FfiReaderConductor {
 
 #[uniffi::export]
 impl FfiReaderConductor {
-    /// `request` is the merchant's 68-byte [`PaymentRequest`] wire (see [`nfc_request_bytes`]).
+    /// `request` is the merchant's 132-byte [`PaymentRequest`] wire (see [`nfc_request_bytes`]).
     /// Errors (`NfcProtocol`) if the request can't be framed.
     #[uniffi::constructor]
     pub fn new(request: Vec<u8>, max_chunk: u32) -> Result<Arc<Self>, DpayError> {
@@ -487,7 +557,7 @@ impl FfiReaderConductor {
         }
     }
 
-    /// The reassembled 196-byte wire once the exchange reached `Done`, else `None`.
+    /// The reassembled 292-byte wire once the exchange reached `Done`, else `None`.
     pub fn wire(&self) -> Option<Vec<u8>> {
         lock(&self.wire).clone()
     }
@@ -506,8 +576,10 @@ pub fn nfc_default_max_chunk() -> u32 {
     nfc::DEFAULT_MAX_CHUNK as u32
 }
 
-/// Merchant side: the raw 68-byte request wire the reader will push over NFC (the same bytes the
+/// Merchant side: the raw 132-byte request wire the reader will push over NFC (the same bytes the
 /// request QR base64-encodes). Mirrors [`encode_request`] but returns the bytes NFC transports.
+/// `to_name` + `memo` are threaded into the request so the payer (reviewing "Pay $X to <to_name>")
+/// and the signed authorization carry them — same param order as [`encode_request`] and the web shim.
 #[uniffi::export]
 pub fn nfc_request_bytes(
     to: &[u8],
@@ -515,14 +587,27 @@ pub fn nfc_request_bytes(
     nonce: &[u8],
     expiry: u64,
     currency: Currency,
+    to_name: String,
+    memo: String,
 ) -> Result<Vec<u8>, DpayError> {
     let to = fixed_pubkey(to)?;
     let nonce = fixed_nonce(nonce)?;
-    Ok(PaymentRequest { to, amount, nonce, expiry, currency }.to_bytes().to_vec())
+    Ok(PaymentRequest {
+        to,
+        amount,
+        nonce,
+        expiry,
+        currency,
+        to_name: name_field(&to_name),
+        memo: name_field(&memo),
+    }
+    .to_bytes()
+    .to_vec())
 }
 
 /// Payer side: decode the request bytes the card reassembled back into its fields, to show
-/// "Pay $X to <merchant>" before approving. Length-guarded (`NfcProtocol` on a bad length).
+/// "Pay $X to <to_name>" (with the memo) before approving. Length-guarded (`NfcProtocol` on a bad
+/// length). The names are NUL-trimmed + lossy-decoded by [`decode_name_field`].
 #[uniffi::export]
 pub fn nfc_decode_request(bytes: &[u8]) -> Result<PaymentRequestData, DpayError> {
     let req = nfc::request_from_transport(bytes)?;
@@ -532,6 +617,8 @@ pub fn nfc_decode_request(bytes: &[u8]) -> Result<PaymentRequestData, DpayError>
         nonce: req.nonce.to_vec(),
         expiry: req.expiry,
         currency: req.currency,
+        to_name: decode_name_field(&req.to_name),
+        memo: decode_name_field(&req.memo),
     })
 }
 
@@ -575,4 +662,210 @@ pub fn nfc_receipt_bytes(nonce: &[u8], status: u8) -> Result<Vec<u8>, DpayError>
 pub fn nfc_decode_receipt(bytes: &[u8]) -> Result<ReceiptData, DpayError> {
     let r = nfc::receipt_from_transport(bytes)?;
     Ok(ReceiptData { nonce: r.nonce.to_vec(), status: r.status, settled: r.settled() })
+}
+
+// =============================================================================================
+// Tests — prove the FFI signing path carries the display names + memo end-to-end and that the
+// produced wire decodes via the core codec with names intact (the two signing paths — native FFI
+// and web TS shim — must stay feature-equivalent; neither signs a nameless payment).
+// =============================================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dpay_core::{WIRE_LEN, REQUEST_LEN};
+
+    /// A deterministic signing key from a fixed seed (no RNG needed; stable golden).
+    fn test_key() -> SigningKey {
+        SigningKey::from_bytes(&[0x42; 32])
+    }
+
+    fn test_to() -> [u8; PUBKEY_LEN] {
+        [0xab; PUBKEY_LEN]
+    }
+
+    fn test_nonce() -> [u8; NONCE_LEN] {
+        let mut n = [0u8; NONCE_LEN];
+        for (i, b) in n.iter_mut().enumerate() {
+            *b = i as u8;
+        }
+        n
+    }
+
+    /// `name_field` NUL-pads short strings and truncates at NAME_LEN (32). Mirrors the web shim's
+    /// `padName32` so the two signing paths produce identical name bytes.
+    #[test]
+    fn name_field_pads_and_truncates() {
+        let short = name_field("Alice");
+        assert_eq!(&short[0..5], b"Alice");
+        assert_eq!(&short[5..], &[0u8; 27]); // trailing NUL-pad
+
+        let empty = name_field("");
+        assert_eq!(empty, [0u8; NAME_LEN]);
+
+        // Exactly 32 bytes: no NUL padding, no truncation.
+        let full = name_field(std::str::from_utf8(&[b'x'; 32]).unwrap());
+        assert_eq!(full, [b'x'; NAME_LEN]);
+
+        // Over 32 bytes: truncated to NAME_LEN (defined cap, not a silent error).
+        let over = name_field(std::str::from_utf8(&[b'y'; 40]).unwrap());
+        assert_eq!(over, [b'y'; NAME_LEN]);
+    }
+
+    /// `decode_name_field` is the inverse of `name_field` (NUL-trim + lossy UTF-8).
+    #[test]
+    fn decode_name_field_round_trips() {
+        assert_eq!(decode_name_field(&name_field("Alice")), "Alice");
+        assert_eq!(decode_name_field(&name_field("")), "");
+        assert_eq!(decode_name_field(&name_field("coffee")), "coffee");
+        // A field with no NUL terminator decodes in full.
+        let no_nul = [b'z'; NAME_LEN];
+        assert_eq!(decode_name_field(&no_nul), std::str::from_utf8(&[b'z'; NAME_LEN]).unwrap());
+    }
+
+    /// The FFI `sign_authorization` with real ASCII names produces a 292-byte wire whose signing
+    /// region carries the names NUL-padded, and which the core `SignedAuthorization::from_wire`
+    /// decodes with the names intact and a still-verifying signature. This is the native-path
+    /// analogue of `e2e/tests/00-cross-val.mjs` for the web shim — proving the two paths agree.
+    #[test]
+    fn sign_authorization_carries_names_round_trip() {
+        let sk = test_key();
+        let from = sk.verifying_key().to_bytes();
+        let wire = sign_authorization(
+            &sk.to_bytes(),
+            &test_to(),
+            1499,
+            &test_nonce(),
+            2_000_000_000,
+            0,
+            "Alice".to_string(),
+            "Bob".to_string(),
+            "coffee".to_string(),
+        )
+        .expect("sign_authorization with names succeeds");
+
+        // Wire length is the v2 292 bytes (single source of truth = core const).
+        assert_eq!(wire.len(), WIRE_LEN);
+
+        // The core codec decodes it — names intact, signature still valid.
+        let signed = SignedAuthorization::from_wire(&wire).expect("core decodes the FFI wire");
+        assert_eq!(signed.auth.from, from);
+        assert_eq!(signed.auth.to, test_to());
+        assert_eq!(signed.auth.amount, 1499);
+        assert_eq!(signed.auth.nonce, test_nonce());
+        assert_eq!(signed.from_pub, from); // sanity: the wire carries the payer's pubkey
+        assert!(signed.verify(), "signature still verifies after round-trip");
+
+        // Names ride inside the signed bytes, NUL-padded to 32.
+        assert_eq!(decode_name_field(&signed.auth.from_name), "Alice");
+        assert_eq!(decode_name_field(&signed.auth.to_name), "Bob");
+        assert_eq!(decode_name_field(&signed.auth.memo), "coffee");
+        // Raw bytes are NUL-padded (proof they are exactly 32 B, fixed-width).
+        assert_eq!(&signed.auth.from_name[0..5], b"Alice");
+        assert_eq!(signed.auth.from_name[5], 0);
+    }
+
+    /// Empty names are valid (all-zero name bytes) — the FFI never rejects a nameless payment, it
+    /// just signs the zero field. This is the floor case; real flows pass real names.
+    #[test]
+    fn sign_authorization_empty_names_round_trip() {
+        let sk = test_key();
+        let wire = sign_authorization(
+            &sk.to_bytes(),
+            &test_to(),
+            100,
+            &test_nonce(),
+            2_000_000_000,
+            0,
+            String::new(),
+            String::new(),
+            String::new(),
+        )
+        .expect("empty names sign OK");
+        let signed = SignedAuthorization::from_wire(&wire).unwrap();
+        assert_eq!(signed.auth.from_name, [0u8; NAME_LEN]);
+        assert_eq!(signed.auth.to_name, [0u8; NAME_LEN]);
+        assert_eq!(signed.auth.memo, [0u8; MEMO_LEN]);
+        assert!(signed.verify());
+    }
+
+    /// A name-field tamper (flip a byte inside `from_name` at offset 100..132) MUST break the
+    /// signature — the names are inside `signing_bytes`, so they are authenticated, not advisory.
+    #[test]
+    fn name_tamper_breaks_signature() {
+        let sk = test_key();
+        let wire = sign_authorization(
+            &sk.to_bytes(),
+            &test_to(),
+            1499,
+            &test_nonce(),
+            2_000_000_000,
+            0,
+            "Alice".to_string(),
+            "Bob".to_string(),
+            "coffee".to_string(),
+        )
+        .unwrap();
+        let mut tampered = wire.clone();
+        tampered[100] ^= 0x01; // first byte of from_name (offset 100 in the wire == signing region)
+        let signed = SignedAuthorization::from_wire(&tampered).unwrap();
+        assert!(!signed.verify(), "tampering from_name must invalidate the signature");
+    }
+
+    /// `encode_request` + `decode_request` round-trip the merchant request with `to_name` + `memo`.
+    /// The decoded `PaymentRequestData` carries the names back as `String`.
+    #[test]
+    fn encode_decode_request_carries_names() {
+        let qr = encode_request(
+            &test_to(),
+            1499,
+            &test_nonce(),
+            2_000_000_000,
+            0,
+            "Bob".to_string(),
+            "invoice-42".to_string(),
+        )
+        .expect("encode_request with names");
+        let data = decode_request(qr).expect("decode_request round-trips");
+        assert_eq!(data.to, test_to().to_vec());
+        assert_eq!(data.amount, 1499);
+        assert_eq!(data.nonce, test_nonce().to_vec());
+        assert_eq!(data.to_name, "Bob");
+        assert_eq!(data.memo, "invoice-42");
+    }
+
+    /// `nfc_request_bytes` produces the 132-byte request wire with names inside, and
+    /// `nfc_decode_request` recovers them — the NFC path carries names just like the QR path.
+    #[test]
+    fn nfc_request_bytes_carries_names() {
+        let bytes = nfc_request_bytes(
+            &test_to(),
+            1499,
+            &test_nonce(),
+            2_000_000_000,
+            0,
+            "Bob".to_string(),
+            "tap-memo".to_string(),
+        )
+        .expect("nfc_request_bytes with names");
+        assert_eq!(bytes.len(), REQUEST_LEN);
+        let data = nfc_decode_request(&bytes).expect("nfc_decode_request round-trips");
+        assert_eq!(data.amount, 1499);
+        assert_eq!(data.to_name, "Bob");
+        assert_eq!(data.memo, "tap-memo");
+    }
+
+    /// `validate` still works (its `Authorization` literal zero-fills the name fields, which
+    /// `validate` never reads — it only consults `amount` + `expiry`).
+    #[test]
+    fn validate_works_with_zeroed_name_literal() {
+        assert_eq!(
+            validate(1499, 1_700_000_000, 1_700_000_120, 10_000, 50_000, false, true),
+            None
+        );
+        assert_eq!(
+            validate(1499, 1_700_000_000, 1_699_999_999, 10_000, 50_000, false, true),
+            Some("expired".to_string())
+        );
+    }
 }

@@ -954,7 +954,7 @@ fun uniffi_dpay_ffi_fn_func_decode_request(`qr`: RustBuffer.ByValue,uniffi_out_e
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_encode_qr(`wire`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_encode_request(`to`: RustBuffer.ByValue,`amount`: Long,`nonce`: RustBuffer.ByValue,`expiry`: Long,`currency`: Int,uniffi_out_err: UniffiRustCallStatus, 
+fun uniffi_dpay_ffi_fn_func_encode_request(`to`: RustBuffer.ByValue,`amount`: Long,`nonce`: RustBuffer.ByValue,`expiry`: Long,`currency`: Int,`toName`: RustBuffer.ByValue,`memo`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_generate_keypair(uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -968,9 +968,9 @@ fun uniffi_dpay_ffi_fn_func_nfc_receipt_bytes(`nonce`: RustBuffer.ByValue,`statu
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_nfc_receipt_codes(uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_nfc_request_bytes(`to`: RustBuffer.ByValue,`amount`: Long,`nonce`: RustBuffer.ByValue,`expiry`: Long,`currency`: Int,uniffi_out_err: UniffiRustCallStatus, 
+fun uniffi_dpay_ffi_fn_func_nfc_request_bytes(`to`: RustBuffer.ByValue,`amount`: Long,`nonce`: RustBuffer.ByValue,`expiry`: Long,`currency`: Int,`toName`: RustBuffer.ByValue,`memo`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_sign_authorization(`secret`: RustBuffer.ByValue,`to`: RustBuffer.ByValue,`amount`: Long,`nonce`: RustBuffer.ByValue,`expiry`: Long,`currency`: Int,uniffi_out_err: UniffiRustCallStatus, 
+fun uniffi_dpay_ffi_fn_func_sign_authorization(`secret`: RustBuffer.ByValue,`to`: RustBuffer.ByValue,`amount`: Long,`nonce`: RustBuffer.ByValue,`expiry`: Long,`currency`: Int,`fromName`: RustBuffer.ByValue,`toName`: RustBuffer.ByValue,`memo`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_sign_withdrawal(`secret`: RustBuffer.ByValue,`btcAddress`: RustBuffer.ByValue,`amount`: Long,`nonce`: RustBuffer.ByValue,`expiry`: Long,`currency`: Int,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1106,16 +1106,16 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
-    if (lib.uniffi_dpay_ffi_checksum_func_decode_qr() != 30030.toShort()) {
+    if (lib.uniffi_dpay_ffi_checksum_func_decode_qr() != 50906.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_dpay_ffi_checksum_func_decode_request() != 64181.toShort()) {
+    if (lib.uniffi_dpay_ffi_checksum_func_decode_request() != 40068.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_encode_qr() != 18593.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_dpay_ffi_checksum_func_encode_request() != 13058.toShort()) {
+    if (lib.uniffi_dpay_ffi_checksum_func_encode_request() != 42219.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_generate_keypair() != 36207.toShort()) {
@@ -1124,7 +1124,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_dpay_ffi_checksum_func_nfc_decode_receipt() != 25249.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_dpay_ffi_checksum_func_nfc_decode_request() != 23641.toShort()) {
+    if (lib.uniffi_dpay_ffi_checksum_func_nfc_decode_request() != 42034.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_nfc_default_max_chunk() != 39928.toShort()) {
@@ -1136,13 +1136,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_dpay_ffi_checksum_func_nfc_receipt_codes() != 63617.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_dpay_ffi_checksum_func_nfc_request_bytes() != 42305.toShort()) {
+    if (lib.uniffi_dpay_ffi_checksum_func_nfc_request_bytes() != 53714.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_dpay_ffi_checksum_func_sign_authorization() != 47305.toShort()) {
+    if (lib.uniffi_dpay_ffi_checksum_func_sign_authorization() != 58578.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_dpay_ffi_checksum_func_sign_withdrawal() != 61533.toShort()) {
+    if (lib.uniffi_dpay_ffi_checksum_func_sign_withdrawal() != 9974.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_validate() != 15932.toShort()) {
@@ -1172,7 +1172,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_dpay_ffi_checksum_method_fficardsession_process() != 33759.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_dpay_ffi_checksum_method_fficardsession_provide_wire() != 24234.toShort()) {
+    if (lib.uniffi_dpay_ffi_checksum_method_fficardsession_provide_wire() != 26646.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_method_fficardsession_receipt() != 54809.toShort()) {
@@ -1193,13 +1193,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_provide_receipt() != 18499.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_wire() != 2291.toShort()) {
+    if (lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_wire() != 42538.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_constructor_fficardsession_new() != 58439.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_dpay_ffi_checksum_constructor_ffireaderconductor_new() != 15795.toShort()) {
+    if (lib.uniffi_dpay_ffi_checksum_constructor_ffireaderconductor_new() != 39139.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
 }
@@ -1650,7 +1650,7 @@ public interface FfiCardSessionInterface {
     fun `process`(`command`: kotlin.ByteArray): kotlin.ByteArray
     
     /**
-     * Approve: supply the offline-signed 196-byte wire to serve. Errors (`NfcWrongState`) unless a
+     * Approve: supply the offline-signed 292-byte wire to serve. Errors (`NfcWrongState`) unless a
      * request is held and no decision has been made; the wire is validated as it is framed.
      */
     fun `provideWire`(`wire`: kotlin.ByteArray)
@@ -1861,7 +1861,7 @@ open class FfiCardSession: Disposable, AutoCloseable, FfiCardSessionInterface
 
     
     /**
-     * Approve: supply the offline-signed 196-byte wire to serve. Errors (`NfcWrongState`) unless a
+     * Approve: supply the offline-signed 292-byte wire to serve. Errors (`NfcWrongState`) unless a
      * request is held and no decision has been made; the wire is validated as it is framed.
      */
     @Throws(DpayException::class)override fun `provideWire`(`wire`: kotlin.ByteArray)
@@ -2074,7 +2074,7 @@ public interface FfiReaderConductorInterface {
     fun `provideReceipt`(`receipt`: kotlin.ByteArray)
     
     /**
-     * The reassembled 196-byte wire once the exchange reached `Done`, else `None`.
+     * The reassembled 292-byte wire once the exchange reached `Done`, else `None`.
      */
     fun `wire`(): kotlin.ByteArray?
     
@@ -2104,7 +2104,7 @@ open class FfiReaderConductor: Disposable, AutoCloseable, FfiReaderConductorInte
         this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(pointer))
     }
     /**
-     * `request` is the merchant's 68-byte [`PaymentRequest`] wire (see [`nfc_request_bytes`]).
+     * `request` is the merchant's 132-byte [`PaymentRequest`] wire (see [`nfc_request_bytes`]).
      * Errors (`NfcProtocol`) if the request can't be framed.
      */
     constructor(`request`: kotlin.ByteArray, `maxChunk`: kotlin.UInt) :
@@ -2245,7 +2245,7 @@ open class FfiReaderConductor: Disposable, AutoCloseable, FfiReaderConductorInte
 
     
     /**
-     * The reassembled 196-byte wire once the exchange reached `Done`, else `None`.
+     * The reassembled 292-byte wire once the exchange reached `Done`, else `None`.
      */override fun `wire`(): kotlin.ByteArray? {
             return FfiConverterOptionalByteArray.lift(
     callWithPointer {
@@ -2344,14 +2344,23 @@ public object FfiConverterTypeKeyPair: FfiConverterRustBuffer<KeyPair> {
 /**
  * The merchant's request, as scanned by the payer. Mirrors [`dpay_core::PaymentRequest`]: who to
  * pay, how much (minor units), the single-use `nonce` (the merchant's request_id → ledger nonce),
- * and an `expiry` (unix seconds).
+ * an `expiry`, the payee's display name (`to_name`), and an optional `memo` — both decoded back
+ * from their 32-byte NUL-padded wire fields to `String` by [`decode_name_field`].
  */
 data class PaymentRequestData (
     var `to`: kotlin.ByteArray, 
     var `amount`: kotlin.ULong, 
     var `nonce`: kotlin.ByteArray, 
     var `expiry`: kotlin.ULong, 
-    var `currency`: kotlin.UInt
+    var `currency`: kotlin.UInt, 
+    /**
+     * The payee's display name (NUL-trimmed, lossy-decoded from the 32-byte wire field).
+     */
+    var `toName`: kotlin.String, 
+    /**
+     * The merchant-set memo (NUL-trimmed, lossy-decoded from the 32-byte wire field).
+     */
+    var `memo`: kotlin.String
 ) {
     
     companion object
@@ -2368,6 +2377,8 @@ public object FfiConverterTypePaymentRequestData: FfiConverterRustBuffer<Payment
             FfiConverterByteArray.read(buf),
             FfiConverterULong.read(buf),
             FfiConverterUInt.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
         )
     }
 
@@ -2376,7 +2387,9 @@ public object FfiConverterTypePaymentRequestData: FfiConverterRustBuffer<Payment
             FfiConverterULong.allocationSize(value.`amount`) +
             FfiConverterByteArray.allocationSize(value.`nonce`) +
             FfiConverterULong.allocationSize(value.`expiry`) +
-            FfiConverterUInt.allocationSize(value.`currency`)
+            FfiConverterUInt.allocationSize(value.`currency`) +
+            FfiConverterString.allocationSize(value.`toName`) +
+            FfiConverterString.allocationSize(value.`memo`)
     )
 
     override fun write(value: PaymentRequestData, buf: ByteBuffer) {
@@ -2385,6 +2398,8 @@ public object FfiConverterTypePaymentRequestData: FfiConverterRustBuffer<Payment
             FfiConverterByteArray.write(value.`nonce`, buf)
             FfiConverterULong.write(value.`expiry`, buf)
             FfiConverterUInt.write(value.`currency`, buf)
+            FfiConverterString.write(value.`toName`, buf)
+            FfiConverterString.write(value.`memo`, buf)
     }
 }
 
@@ -2827,7 +2842,7 @@ public object FfiConverterOptionalByteArray: FfiConverterRustBuffer<kotlin.ByteA
     }
 }
         /**
-         * Decode a scanned QR string back to the 196-byte wire blob.
+         * Decode a scanned QR string back to the 292-byte wire blob.
          */
     @Throws(DpayException::class) fun `decodeQr`(`payload`: kotlin.String): kotlin.ByteArray {
             return FfiConverterByteArray.lift(
@@ -2841,7 +2856,7 @@ public object FfiConverterOptionalByteArray: FfiConverterRustBuffer<kotlin.ByteA
 
         /**
          * Payer side: decode a scanned merchant request QR into its fields, so the app can show
-         * "Pay $X to <merchant>" for the payer to approve before signing.
+         * "Pay $X to <to_name>" (with the memo) for the payer to approve before signing.
          */
     @Throws(DpayException::class) fun `decodeRequest`(`qr`: kotlin.String): PaymentRequestData {
             return FfiConverterTypePaymentRequestData.lift(
@@ -2869,12 +2884,16 @@ public object FfiConverterOptionalByteArray: FfiConverterRustBuffer<kotlin.ByteA
         /**
          * Merchant side: encode the request the payer will scan. `nonce` is the merchant's single-use
          * request_id (it becomes the ledger nonce, so the payment can't be replayed or double-charged).
+         * `to_name` is the merchant's own display name and `memo` is an optional merchant-set note; both
+         * are UTF-8 NUL-padded into the 132-byte request by [`name_field`] and copied verbatim by the payer
+         * into their authorization. Param order matches the web shim's `encodeRequest(toHex, amount,
+         * nonceHex, expiry, currency, toName, memo)`.
          */
-    @Throws(DpayException::class) fun `encodeRequest`(`to`: kotlin.ByteArray, `amount`: kotlin.ULong, `nonce`: kotlin.ByteArray, `expiry`: kotlin.ULong, `currency`: kotlin.UInt): kotlin.String {
+    @Throws(DpayException::class) fun `encodeRequest`(`to`: kotlin.ByteArray, `amount`: kotlin.ULong, `nonce`: kotlin.ByteArray, `expiry`: kotlin.ULong, `currency`: kotlin.UInt, `toName`: kotlin.String, `memo`: kotlin.String): kotlin.String {
             return FfiConverterString.lift(
     uniffiRustCallWithError(DpayException) { _status ->
     UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_encode_request(
-        FfiConverterByteArray.lower(`to`),FfiConverterULong.lower(`amount`),FfiConverterByteArray.lower(`nonce`),FfiConverterULong.lower(`expiry`),FfiConverterUInt.lower(`currency`),_status)
+        FfiConverterByteArray.lower(`to`),FfiConverterULong.lower(`amount`),FfiConverterByteArray.lower(`nonce`),FfiConverterULong.lower(`expiry`),FfiConverterUInt.lower(`currency`),FfiConverterString.lower(`toName`),FfiConverterString.lower(`memo`),_status)
 }
     )
     }
@@ -2908,7 +2927,8 @@ public object FfiConverterOptionalByteArray: FfiConverterRustBuffer<kotlin.ByteA
 
         /**
          * Payer side: decode the request bytes the card reassembled back into its fields, to show
-         * "Pay $X to <merchant>" before approving. Length-guarded (`NfcProtocol` on a bad length).
+         * "Pay $X to <to_name>" (with the memo) before approving. Length-guarded (`NfcProtocol` on a bad
+         * length). The names are NUL-trimmed + lossy-decoded by [`decode_name_field`].
          */
     @Throws(DpayException::class) fun `nfcDecodeRequest`(`bytes`: kotlin.ByteArray): PaymentRequestData {
             return FfiConverterTypePaymentRequestData.lift(
@@ -2956,40 +2976,50 @@ public object FfiConverterOptionalByteArray: FfiConverterRustBuffer<kotlin.ByteA
     
 
         /**
-         * Merchant side: the raw 68-byte request wire the reader will push over NFC (the same bytes the
+         * Merchant side: the raw 132-byte request wire the reader will push over NFC (the same bytes the
          * request QR base64-encodes). Mirrors [`encode_request`] but returns the bytes NFC transports.
+         * `to_name` + `memo` are threaded into the request so the payer (reviewing "Pay $X to <to_name>")
+         * and the signed authorization carry them — same param order as [`encode_request`] and the web shim.
          */
-    @Throws(DpayException::class) fun `nfcRequestBytes`(`to`: kotlin.ByteArray, `amount`: kotlin.ULong, `nonce`: kotlin.ByteArray, `expiry`: kotlin.ULong, `currency`: kotlin.UInt): kotlin.ByteArray {
+    @Throws(DpayException::class) fun `nfcRequestBytes`(`to`: kotlin.ByteArray, `amount`: kotlin.ULong, `nonce`: kotlin.ByteArray, `expiry`: kotlin.ULong, `currency`: kotlin.UInt, `toName`: kotlin.String, `memo`: kotlin.String): kotlin.ByteArray {
             return FfiConverterByteArray.lift(
     uniffiRustCallWithError(DpayException) { _status ->
     UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_nfc_request_bytes(
-        FfiConverterByteArray.lower(`to`),FfiConverterULong.lower(`amount`),FfiConverterByteArray.lower(`nonce`),FfiConverterULong.lower(`expiry`),FfiConverterUInt.lower(`currency`),_status)
+        FfiConverterByteArray.lower(`to`),FfiConverterULong.lower(`amount`),FfiConverterByteArray.lower(`nonce`),FfiConverterULong.lower(`expiry`),FfiConverterUInt.lower(`currency`),FfiConverterString.lower(`toName`),FfiConverterString.lower(`memo`),_status)
 }
     )
     }
     
 
         /**
-         * Payer side: build `Authorization {from, to, amount, nonce, expiry, currency}` and sign it
-         * **offline**, returning the 196-byte wire blob (`signing_bytes | sig | from_pub`) — exactly what
-         * the relay hands the canister. `from` is derived from the secret; a mismatched `from` arg is
-         * ignored in favour of the key's own public bytes (consent is bound to the real signer). `currency`
-         * (`Currency` = `u32`) is the settlement asset the payer authorizes; `DEMO_USD = 0`. The currency
-         * field is encoded as 4 little-endian bytes at the end of the signing region, so it is covered by
-         * the Ed25519 signature.
+         * Payer side: build `Authorization {from, to, amount, nonce, expiry, currency, from_name,
+         * to_name, memo}` and sign it **offline**, returning the 292-byte wire blob (`signing_bytes |
+         * sig | from_pub`) — exactly what the relay hands the canister. `from` is derived from the secret;
+         * a mismatched `from` arg is ignored in favour of the key's own public bytes (consent is bound to
+         * the real signer). `currency` (`Currency` = `u32`) is the settlement asset the payer authorizes;
+         * `DEMO_USD = 0`. The currency field is encoded as 4 little-endian bytes inside the signing region,
+         * so it is covered by the Ed25519 signature.
+         *
+         * `from_name` is the payer's own display name; `to_name` + `memo` are copied verbatim from the
+         * scanned merchant request (merchant-defined). All three ride inside the signed bytes (positions
+         * 100..196) so transaction history is self-describing on both sides — the payee sees the payer's
+         * name, not a raw pubkey. Each is UTF-8, NUL-padded, and truncated to 32 bytes by [`name_field`].
+         * The param order matches the web shim's `signAuthorization(secretHex, toHex, amount, nonceHex,
+         * expiry, currency, fromName, toName, memo)` so the app's unified `DpayCoreApi` type is
+         * interchangeable across the native and web signing paths.
          */
-    @Throws(DpayException::class) fun `signAuthorization`(`secret`: kotlin.ByteArray, `to`: kotlin.ByteArray, `amount`: kotlin.ULong, `nonce`: kotlin.ByteArray, `expiry`: kotlin.ULong, `currency`: kotlin.UInt): kotlin.ByteArray {
+    @Throws(DpayException::class) fun `signAuthorization`(`secret`: kotlin.ByteArray, `to`: kotlin.ByteArray, `amount`: kotlin.ULong, `nonce`: kotlin.ByteArray, `expiry`: kotlin.ULong, `currency`: kotlin.UInt, `fromName`: kotlin.String, `toName`: kotlin.String, `memo`: kotlin.String): kotlin.ByteArray {
             return FfiConverterByteArray.lift(
     uniffiRustCallWithError(DpayException) { _status ->
     UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_sign_authorization(
-        FfiConverterByteArray.lower(`secret`),FfiConverterByteArray.lower(`to`),FfiConverterULong.lower(`amount`),FfiConverterByteArray.lower(`nonce`),FfiConverterULong.lower(`expiry`),FfiConverterUInt.lower(`currency`),_status)
+        FfiConverterByteArray.lower(`secret`),FfiConverterByteArray.lower(`to`),FfiConverterULong.lower(`amount`),FfiConverterByteArray.lower(`nonce`),FfiConverterULong.lower(`expiry`),FfiConverterUInt.lower(`currency`),FfiConverterString.lower(`fromName`),FfiConverterString.lower(`toName`),FfiConverterString.lower(`memo`),_status)
 }
     )
     }
     
 
         /**
-         * Payer side: build a `WithdrawAuth {from_pubkey, btc_address, amount, nonce, expiry, currency}` and
+         * Payer side: build a `WithdrawAuth {from_pubkey, destination, amount, nonce, expiry, currency}` and
          * sign it **offline**, returning the 64-byte Ed25519 signature. This is the non-custodial withdrawal
          * gate: the facade verifies this signature under `from_pubkey` (== the ckBTC debit subaccount)
          * before moving any funds. `from_pubkey` is derived from the secret; a mismatched arg is ignored in

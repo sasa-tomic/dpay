@@ -10,12 +10,16 @@ import sys
 import dpay_ffi as d
 
 # ---------------------------------------------------------------------------------------------
-# Wire layout (must match dpay_core::SignedAuthorization::to_wire): 196 bytes total.
-#   [0..100)   signing_bytes = from(32) | to(32) | amount_le(8) | nonce(16) | expiry_le(8) | currency_le(4)
-#   [100..164) signature(64)
-#   [164..196) from_pub(32)
-SIG_OFF, SIG_END = 100, 164
-WIRE_LEN = 196
+# Wire layout (must match dpay_core::SignedAuthorization::to_wire): 292 bytes total (wire-format v2).
+#   [0..196)   signing_bytes = from(32) | to(32) | amount_le(8) | nonce(16) | expiry_le(8) |
+#               currency_le(4) | from_name(32) | to_name(32) | memo(32)
+#   [196..260) signature(64)
+#   [260..292) from_pub(32)
+SIG_OFF, SIG_END = 196, 260
+FROM_PUB_OFF = 260
+WIRE_LEN = 292
+# Name/memo field offsets inside the signing region (UTF-8, NUL-padded, truncate to 32).
+FROM_NAME_OFF, TO_NAME_OFF, MEMO_OFF = 100, 132, 164
 
 passed = 0
 def check(cond, label):
@@ -35,16 +39,36 @@ to_kp = d.generate_keypair()          # the merchant / payee identity
 amount = 1499                          # $14.99 in minor units
 nonce = bytes(range(16))              # stands in for the merchant's request_id
 expiry = 2_000_000_000                 # far-future unix seconds
+# Display names + memo (wire-format v2): all three ride inside the signed bytes so history is
+# self-describing on both sides. `from_name` is the payer's own; `to_name` + `memo` come from the
+# scanned merchant request. Both signing paths (this native FFI + the web TS shim) carry them.
+FROM_NAME, TO_NAME, MEMO = "Alice", "Bob", "coffee"
 
-wire = d.sign_authorization(kp.secret, to_kp.public, amount, nonce, expiry, 0)
+wire = d.sign_authorization(kp.secret, to_kp.public, amount, nonce, expiry, 0,
+                            FROM_NAME, TO_NAME, MEMO)
 check(len(wire) == WIRE_LEN, f"sign_authorization -> {WIRE_LEN}-byte wire blob")
 check(wire[0:32] == kp.public, "wire `from` == signer public key (consent bound to signer)")
-check(wire[SIG_END:WIRE_LEN] == kp.public, "wire carries payer pubkey for directory-free verify")
+check(wire[FROM_PUB_OFF:WIRE_LEN] == kp.public, "wire carries payer pubkey for directory-free verify")
+
+# Names ride inside the signed region, NUL-padded to 32 bytes (positions 100..196). A byte-exact
+# check here is the native-path analogue of e2e cross-val for the web shim — both paths agree.
+check(wire[FROM_NAME_OFF:FROM_NAME_OFF + len(FROM_NAME)] == FROM_NAME.encode(),
+      "wire carries `from_name` (Alice) NUL-padded at offset 100")
+check(wire[TO_NAME_OFF:TO_NAME_OFF + len(TO_NAME)] == TO_NAME.encode(),
+      "wire carries `to_name` (Bob) NUL-padded at offset 132")
+check(wire[MEMO_OFF:MEMO_OFF + len(MEMO)] == MEMO.encode(),
+      "wire carries `memo` (coffee) NUL-padded at offset 164")
+check(wire[FROM_NAME_OFF + len(FROM_NAME)] == 0, "from_name is NUL-padded after the ASCII bytes")
+
+# A name-field tamper MUST invalidate the signature — names are authenticated, not advisory.
+name_tampered = bytearray(wire)
+name_tampered[FROM_NAME_OFF] ^= 0x01    # flip the first byte of from_name (inside signing_bytes)
+check(d.verify_wire(bytes(name_tampered)) is False, "verify_wire(from_name-tampered) == False")
 
 
 # 2) Wire <-> base64url QR string round-trips exactly ------------------------------------------
 qr = d.encode_qr(wire)
-check(isinstance(qr, str) and len(qr) == 262, "encode_qr -> 262-char base64url (no pad)")
+check(isinstance(qr, str) and len(qr) == 390, "encode_qr -> 390-char base64url (no pad; 292 B wire)")
 import base64
 check(base64.urlsafe_b64decode(qr + "==") == wire, "QR string is real base64url of the wire")
 back = d.decode_qr(qr)
@@ -86,10 +110,21 @@ check(d.validate(amount, NOW, GOOD_EXPIRY, 10_000, 50_000, False, False) == "bad
 
 # 5) Cross-language error mapping: malformed inputs raise typed DpayError -----------------------
 try:
-    d.sign_authorization(b"\x00" * 31, to_kp.public, amount, nonce, expiry, 0)
+    d.sign_authorization(b"\x00" * 31, to_kp.public, amount, nonce, expiry, 0,
+                         FROM_NAME, TO_NAME, MEMO)
     raise AssertionError("FAILED: short secret should have raised")
 except d.DpayError.BadSecretLength:
     check(True, "short secret -> DpayError.BadSecretLength")
+
+# 5b) Merchant request QR (encode_request / decode_request) carries to_name + memo --------------
+# The merchant's to_name + memo live inside the 132-byte request bytes; decoding recovers them as
+# strings (NUL-trimmed, lossy). This is the QR-path twin of the NFC request check in section 6.
+req_qr = d.encode_request(to_kp.public, amount, nonce, expiry, 0, TO_NAME, MEMO)
+decoded = d.decode_request(req_qr)
+check(decoded.amount == amount, "decode_request round-trips amount")
+check(decoded.nonce == nonce, "decode_request round-trips nonce")
+check(decoded.to_name == TO_NAME, "decode_request carries `to_name` (Bob)")
+check(decoded.memo == MEMO, "decode_request carries `memo` (coffee)")
 
 try:
     d.decode_qr("!!!not-base64!!!")
@@ -99,7 +134,7 @@ except d.DpayError.BadBase64:
 
 # A wire whose `from` disagrees with `from_pub` is rejected at parse time (not silently verified).
 mismatch = bytearray(wire)
-mismatch[164] ^= 0x01                 # perturb from_pub only (first byte of from_pub region)
+mismatch[FROM_PUB_OFF] ^= 0x01         # perturb from_pub only (first byte of the from_pub region)
 try:
     d.verify_wire(bytes(mismatch))
     raise AssertionError("FAILED: pubkey mismatch should have raised")
@@ -114,9 +149,16 @@ MAX_CHUNK = d.nfc_default_max_chunk()
 check(MAX_CHUNK == 240, "nfc_default_max_chunk() == 240")
 
 req_nonce = bytes(range(16, 32))                       # the merchant's request_id -> ledger nonce
-req_bytes = d.nfc_request_bytes(to_kp.public, amount, req_nonce, expiry, 0)
-check(len(req_bytes) == 68, "nfc_request_bytes -> 68-byte request wire")
-nfc_wire = d.sign_authorization(kp.secret, to_kp.public, amount, req_nonce, expiry, 0)
+REQ_TO_NAME, REQ_MEMO = "Bob", "tap-memo"              # merchant-defined; copied verbatim by the payer
+req_bytes = d.nfc_request_bytes(to_kp.public, amount, req_nonce, expiry, 0, REQ_TO_NAME, REQ_MEMO)
+check(len(req_bytes) == 132, "nfc_request_bytes -> 132-byte request wire (wire-format v2)")
+# The merchant's to_name + memo ride inside the 132-byte request (offsets 68 / 100), NUL-padded.
+check(req_bytes[68:68 + len(REQ_TO_NAME)] == REQ_TO_NAME.encode(),
+      "nfc_request_bytes carries `to_name` (Bob) at offset 68")
+check(req_bytes[100:100 + len(REQ_MEMO)] == REQ_MEMO.encode(),
+      "nfc_request_bytes carries `memo` (tap-memo) at offset 100")
+nfc_wire = d.sign_authorization(kp.secret, to_kp.public, amount, req_nonce, expiry, 0,
+                                FROM_NAME, TO_NAME, MEMO)
 
 
 def run_nfc(max_chunk, approve=True):
@@ -130,8 +172,9 @@ def run_nfc(max_chunk, approve=True):
             raise AssertionError("reader ran out of commands before finishing")
         resp = card.process(cmd)
         if card.awaiting_decision():
-            seen = d.nfc_decode_request(card.request())   # payer reviews "Pay $X to <merchant>"
+            seen = d.nfc_decode_request(card.request())   # payer reviews "Pay $X to <to_name>"
             assert seen.amount == amount and seen.nonce == req_nonce
+            assert seen.to_name == REQ_TO_NAME and seen.memo == REQ_MEMO  # names survived transport
             (card.provide_wire(nfc_wire) if approve else card.decline())
         step = reader.handle_response(resp)
         if step == d.NfcStep.DONE:
@@ -141,9 +184,12 @@ def run_nfc(max_chunk, approve=True):
     raise AssertionError("NFC exchange did not terminate")
 
 
-# Production single-frame path and the heavily-fragmented (1 byte/frame) path both deliver the
-# exact signed wire — and it still verifies under the same crypto the canister enforces.
-for mc in (MAX_CHUNK, 1):
+# Production single-frame path and the most-aggressive still-valid fragmentation both deliver the
+# exact signed wire — and it still verifies under the same crypto the canister enforces. The wire is
+# 292 B (wire-format v2); the NFC `seq` byte caps a payload at MAX_FRAMES=256 frames, so 1 byte/frame
+# (292 frames) is no longer representable. The smallest chunk that keeps the wire under the ceiling
+# is 2 (→ 146 frames), which still exercises heavy multi-frame fragmentation.
+for mc in (MAX_CHUNK, 2):
     got = run_nfc(mc)
     check(got == nfc_wire, f"NFC exchange delivers byte-identical wire (chunk={mc})")
     check(d.verify_wire(got) is True, f"reassembled wire still verifies (chunk={mc})")
@@ -187,11 +233,20 @@ reader.handle_response(ack)
 card.provide_wire(nfc_wire)                                           # payer approves
 check(card.phase() == d.NfcPhase.EXCHANGING, "card -> Exchanging while serving the wire")
 
-step = reader.handle_response(card.process(reader.next_command()))   # pull the wire (1 frame)
+# The 292-byte wire (wire-format v2) spans 2 frames at MAX_CHUNK=240 (292 > 240); pull frames until
+# the reader reassembles the whole wire. Each frame but the last is Continue; the last is Done.
+step = None
+for _ in range(100):
+    cmd = reader.next_command()
+    assert cmd is not None, "reader stalled before pulling the full wire"
+    step = reader.handle_response(card.process(cmd))
+    if step == d.NfcStep.DONE:
+        break
+    check(step == d.NfcStep.CONTINUE, "wire-pull frames are Continue until the last (Done)")
 check(step == d.NfcStep.DONE, "reader -> Done (has the wire)")
 check(card.is_complete() and not card.is_confirmed(), "card: wire sent but not yet confirmed")
 check(card.phase() == d.NfcPhase.SETTLING, "card -> Settling (awaiting the receipt)")
-check(reader.phase() == d.NfcPhase.SETTLING, "reader -> Settling (about to submit online)")
+check(reader.phase() == d.NfcPhase.SETTLING, "reader -> Settling (about to settle online)")
 check(reader.next_command() is None, "reader waits for the merchant to settle online")
 
 
