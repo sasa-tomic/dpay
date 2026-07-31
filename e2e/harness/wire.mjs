@@ -65,38 +65,59 @@ export function b64urlDecode(s) {
   return Uint8Array.from(bytes);
 }
 
-// --- the 68-byte request (merchant's QR): to(32)|amount_le(8)|nonce(16)|expiry_le(8)|currency_le(4)
-export function buildRequestBytes(toHex, amount, nonceHex, expiry, currency) {
-  const buf = new Uint8Array(L.request_len);
-  let off = 0;
-  buf.set(hexToBytes(toHex), off); off += L.fields.to.len;
-  putU64Le(buf, off, amount); off += L.fields.amount.len;
-  buf.set(hexToBytes(nonceHex), off); off += L.fields.nonce.len;
-  putU64Le(buf, off, expiry); off += L.fields.expiry.len;
-  putU32Le(buf, off, currency);
-  return buf;
+// --- display name + memo codec (NUL-padded UTF-8, truncate to 32 bytes) -----------------------
+// Mirrors `dpay_core::pad_name` + the canister's `display_field_to_string`. Empty = all zeros.
+const NAME_LEN = 32;
+export function padName32(s) {
+  const utf8 = Buffer.from(s, 'utf8');
+  const buf = Buffer.alloc(NAME_LEN);
+  utf8.subarray(0, NAME_LEN).copy(buf); // truncate; rest is zero-filled (NUL-pad)
+  return Uint8Array.from(buf);
 }
-/** The full merchant QR string the app scans: `<base64url request>|<username>` (see parseRequestQR). */
-export function buildRequestQR(toHex, amount, nonceHex, expiry, currency, username) {
-  return `${b64urlEncode(buildRequestBytes(toHex, amount, nonceHex, expiry, currency))}|${username}`;
+export function trimName32(bytes) {
+  let end = bytes.indexOf(0);
+  if (end < 0) end = bytes.length;
+  try { return Buffer.from(bytes.subarray(0, end)).toString('utf8'); } catch { return ''; }
 }
 
-/** Decode a 68-byte request (from base64url, with or without the `|name` suffix) into its fields. */
+// --- the 132-byte request (merchant's QR):
+//     to(32)|amount_le(8)|nonce(16)|expiry_le(8)|currency_le(4)|to_name(32)|memo(32)
+export function buildRequestBytes(toHex, amount, nonceHex, expiry, currency, toName = '', memo = '') {
+  const buf = new Uint8Array(L.request_len);
+  buf.set(hexToBytes(toHex), L.request_fields.to.offset);
+  putU64Le(buf, L.request_fields.amount.offset, amount);
+  buf.set(hexToBytes(nonceHex), L.request_fields.nonce.offset);
+  putU64Le(buf, L.request_fields.expiry.offset, expiry);
+  putU32Le(buf, L.request_fields.currency.offset, currency);
+  buf.set(padName32(toName), L.request_fields.to_name.offset);
+  buf.set(padName32(memo), L.request_fields.memo.offset);
+  return buf;
+}
+/** The full merchant QR string the app scans: plain base64url of the 132-byte request (the
+ *  `to_name` lives inside the bytes now — the old `|name` suffix is gone). */
+export function buildRequestQR(toHex, amount, nonceHex, expiry, currency, toName = '', memo = '') {
+  return b64urlEncode(buildRequestBytes(toHex, amount, nonceHex, expiry, currency, toName, memo));
+}
+
+/** Decode a 132-byte request (from base64url) into its fields, including to_name + memo. Tolerates
+ *  a stray `|name` suffix defensively, but no name is carried there anymore. */
 export function decodeRequest(b64OrQR) {
   const b64 = b64OrQR.includes('|') ? b64OrQR.slice(0, b64OrQR.indexOf('|')) : b64OrQR;
   const bytes = b64urlDecode(b64);
   if (bytes.length !== L.request_len) throw new Error(`request length: expected ${L.request_len}, got ${bytes.length}`);
-  let off = 0;
-  const toHex = bytesToHex(bytes.slice(off, off + L.fields.to.len)); off += L.fields.to.len;
-  const amount = readU64Le(bytes, off); off += L.fields.amount.len;
-  const nonceHex = bytesToHex(bytes.slice(off, off + L.fields.nonce.len)); off += L.fields.nonce.len;
-  const expiry = readU64Le(bytes, off); off += L.fields.expiry.len;
-  const currency = readU32Le(bytes, off);
-  return { toHex, amount, nonceHex, expiry, currency };
+  const toHex = bytesToHex(bytes.slice(L.request_fields.to.offset, L.request_fields.to.offset + L.request_fields.to.len));
+  const amount = readU64Le(bytes, L.request_fields.amount.offset);
+  const nonceHex = bytesToHex(bytes.slice(L.request_fields.nonce.offset, L.request_fields.nonce.offset + L.request_fields.nonce.len));
+  const expiry = readU64Le(bytes, L.request_fields.expiry.offset);
+  const currency = readU32Le(bytes, L.request_fields.currency.offset);
+  const toName = trimName32(bytes.slice(L.request_fields.to_name.offset, L.request_fields.to_name.offset + L.request_fields.to_name.len));
+  const memo = trimName32(bytes.slice(L.request_fields.memo.offset, L.request_fields.memo.offset + L.request_fields.memo.len));
+  return { toHex, amount, nonceHex, expiry, currency, toName, memo };
 }
 
-// --- the 100-byte signing buffer + 196-byte wire (mirrors dpay_core::Authorization::signing_bytes) --
-function buildSigningBytes(fromHex, toHex, amount, nonceHex, expiry, currency) {
+// --- the 196-byte signing buffer + 292-byte wire (mirrors dpay_core::Authorization::signing_bytes)
+//   from(32)|to(32)|amount_le(8)|nonce(16)|expiry_le(8)|currency_le(4)|from_name(32)|to_name(32)|memo(32)
+function buildSigningBytes(fromHex, toHex, amount, nonceHex, expiry, currency, fromName = '', toName = '', memo = '') {
   const buf = new Uint8Array(L.signing_len);
   buf.set(hexToBytes(fromHex), L.fields.from.offset);
   buf.set(hexToBytes(toHex), L.fields.to.offset);
@@ -104,6 +125,9 @@ function buildSigningBytes(fromHex, toHex, amount, nonceHex, expiry, currency) {
   buf.set(hexToBytes(nonceHex), L.fields.nonce.offset);
   putU64Le(buf, L.fields.expiry.offset, expiry);
   putU32Le(buf, L.fields.currency.offset, currency);
+  buf.set(padName32(fromName), L.fields.from_name.offset);
+  buf.set(padName32(toName), L.fields.to_name.offset);
+  buf.set(padName32(memo), L.fields.memo.offset);
   return buf;
 }
 function buildWire(signing, sig, fromPub) {
@@ -118,13 +142,14 @@ function buildWire(signing, sig, fromPub) {
  * Sign an authorization with `secretHex` and return the base64url wire code the relay's
  * `POST /api/v1/pay {qr}` expects (mirrors the app's signAuthorization → encodeQr pipeline). The
  * signature is byte-identical to what the on-device core / the JS shim produces (cross-validated in
- * test 00), so it settles on the real FakeLedger.
+ * test 00), so it settles on the real FakeLedger. `fromName` is the payer's name; `toName`/`memo`
+ * are copied from the merchant's request (defaults empty — keeps the unnamed path working).
  */
-export async function signAuthorizationCode(secretHex, toHex, amount, nonceHex, expiry, currency) {
+export async function signAuthorizationCode(secretHex, toHex, amount, nonceHex, expiry, currency, fromName = '', toName = '', memo = '') {
   const secret = hexToBytes(secretHex);
   const pub = await ed.getPublicKeyAsync(secret);
   const fromHex = bytesToHex(pub);
-  const signing = buildSigningBytes(fromHex, toHex, amount, nonceHex, expiry, currency);
+  const signing = buildSigningBytes(fromHex, toHex, amount, nonceHex, expiry, currency, fromName, toName, memo);
   const sig = await ed.signAsync(signing, secret);
   return b64urlEncode(buildWire(signing, sig, pub));
 }
@@ -173,6 +198,7 @@ export async function signWithdrawalHex(secretHex, fromHex, destination, amount,
 }
 
 export const REQUEST_LEN = L.request_len;
+export const SIGNING_LEN = L.signing_len;
 export const WIRE_LEN = L.wire_len;
 export const PUBKEY_LEN = L.pubkey_len;
 export const NONCE_LEN = L.nonce_len;

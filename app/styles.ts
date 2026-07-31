@@ -79,7 +79,9 @@ export const S = StyleSheet.create({
   histCard: {marginTop: 28, borderTopWidth: 1, borderTopColor: C.line, paddingTop: 14},
   histTitle: {fontSize: 12, fontWeight: '700', color: C.sub2, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 6, fontFamily: 'monospace'},
   histRow: {flexDirection: 'row', alignItems: 'baseline', paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: C.line2},
-  histWho: {flex: 1, fontSize: 15, color: C.ink},
+  histWhoCol: {flex: 1},
+  histWho: {fontSize: 15, color: C.ink},
+  histMemo: {fontSize: 12, color: C.sub2, marginTop: 2, fontStyle: 'italic'},
   histAmt: {fontSize: 15, fontWeight: '700', marginRight: 12, fontFamily: 'monospace'},
   histTime: {fontSize: 12, color: C.sub2, fontFamily: 'monospace'},
   // ckBTC asset card — a DISTINCT, clearly-labeled asset (not the `$` balance). Same card chrome as

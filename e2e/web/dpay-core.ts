@@ -67,16 +67,22 @@ type FieldSpec = { offset: number; len: number; endian: 'le' | null };
 type WireFieldSpec = { offset: number; len: number };
 type Layout = {
   signing_len: number; wire_len: number; request_len: number; sig_len: number;
-  pubkey_len: number; nonce_len: number;
+  pubkey_len: number; nonce_len: number; name_len: number; memo_len: number;
   fields: {
     from: FieldSpec; to: FieldSpec; amount: FieldSpec; nonce: FieldSpec;
     expiry: FieldSpec; currency: FieldSpec;
+    from_name: FieldSpec; to_name: FieldSpec; memo: FieldSpec;
+  };
+  request_fields: {
+    to: FieldSpec; amount: FieldSpec; nonce: FieldSpec; expiry: FieldSpec;
+    currency: FieldSpec; to_name: FieldSpec; memo: FieldSpec;
   };
   wire_fields: { signing: WireFieldSpec; sig: WireFieldSpec; from_pub: WireFieldSpec };
   golden: {
     secret_hex: string; public_hex: string; to_hex: string; amount: number; nonce_hex: string;
     expiry: number; currency: number; signing_hex: string; sig_hex: string; wire_hex: string;
-    request_hex: string;
+    request_hex: string; from_name_hex: string; to_name_hex: string; memo_hex: string;
+    request_to_name_hex: string; request_memo_hex: string;
   };
   // Withdrawal (ckBTC→BTC) signing layout — variable-length (the destination is last). The fixed
   // prefix uses the SAME field widths as `fields` but a DIFFERENT order, so it gets its own section.
@@ -101,12 +107,14 @@ function assertLayout() {
   const eq = (a: unknown, b: unknown, msg: string) => {
     if (a !== b) throw new Error(`DpayCore shim: wire_layout.json mismatch — ${msg} (got ${a}, expected ${b})`);
   };
-  eq(L.signing_len, 100, 'signing_len');
-  eq(L.wire_len, 196, 'wire_len');
-  eq(L.request_len, 68, 'request_len');
+  eq(L.signing_len, 196, 'signing_len');
+  eq(L.wire_len, 292, 'wire_len');
+  eq(L.request_len, 132, 'request_len');
   eq(L.sig_len, 64, 'sig_len');
   eq(L.pubkey_len, 32, 'pubkey_len');
   eq(L.nonce_len, 16, 'nonce_len');
+  eq(L.name_len, 32, 'name_len');
+  eq(L.memo_len, 32, 'memo_len');
   for (const [name, f] of Object.entries(L.fields)) {
     const ff = f as FieldSpec;
     if (ff.endian !== null && ff.endian !== 'le') {
@@ -115,6 +123,33 @@ function assertLayout() {
   }
 }
 assertLayout();
+
+// --- display name + memo codec (NUL-padded UTF-8, truncate to 32 bytes) -----------------------
+//
+// Mirrors `dpay_core::pad_name` / the canister's `display_field_to_string`. Fixed-width 32 B per
+// field: UTF-8 encode, truncate to 32 bytes, trailing-NUL (0x00) pad. Empty = all zeros. Decode is
+// lossy (TextDecoder fatal:false) + NUL-trimmed — NEVER throws (the "no silent errors" rule: a bad
+// byte sequence becomes U+FFFD, not an exception).
+const NAME_LEN = 32;
+
+/** UTF-8-encode `s`, truncate to 32 bytes, NUL-pad to a fixed 32-byte array. */
+function padName32(s: string): Uint8Array {
+  const utf8 = new TextEncoder().encode(s);
+  const buf = new Uint8Array(NAME_LEN);
+  buf.set(utf8.subarray(0, NAME_LEN)); // truncate; the rest is already zero (NUL-pad)
+  return buf;
+}
+
+/** Lossy-decode + NUL-trim a 32-byte name/memo field back to a string. Never throws. */
+function trimName32(bytes: Uint8Array): string {
+  let end = bytes.indexOf(0);
+  if (end < 0) end = bytes.length;
+  try {
+    return new TextDecoder('utf-8', { fatal: false }).decode(bytes.subarray(0, end));
+  } catch {
+    return '';
+  }
+}
 
 // --- low-level codec (operates only on the offsets/lengths/endian from the JSON) -------------
 
@@ -156,11 +191,12 @@ function readU32Le(buf: Uint8Array, offset: number): number {
 }
 
 /**
- * Build the 100-byte signing buffer from a fully-formed Authorization. Mirrors
+ * Build the 196-byte signing buffer from a fully-formed Authorization. Mirrors
  * `Authorization::signing_bytes()` field-for-field using ONLY the offsets from `wire_layout.json`.
- * `from` is the signer's pubkey (the app always signs with the identity it generated).
+ * `from` is the signer's pubkey (the app always signs with the identity it generated). The three
+ * 32-byte display fields (`from_name`/`to_name`/`memo`) are UTF-8 NUL-padded via `padName32`.
  */
-function buildSigningBytes(fromHex: string, toHex: string, amount: number, nonceHex: string, expiry: number, currency: number): Uint8Array {
+function buildSigningBytes(fromHex: string, toHex: string, amount: number, nonceHex: string, expiry: number, currency: number, fromName = '', toName = '', memo = ''): Uint8Array {
   const from = hex(fromHex);
   const to = hex(toHex);
   const nonce = hex(nonceHex);
@@ -174,10 +210,13 @@ function buildSigningBytes(fromHex: string, toHex: string, amount: number, nonce
   buf.set(nonce, L.fields.nonce.offset);
   putU64Le(buf, L.fields.expiry.offset, expiry);
   putU32Le(buf, L.fields.currency.offset, currency);
+  buf.set(padName32(fromName), L.fields.from_name.offset);
+  buf.set(padName32(toName), L.fields.to_name.offset);
+  buf.set(padName32(memo), L.fields.memo.offset);
   return buf;
 }
 
-/** Build the 196-byte wire (signing[0..100] | sig[100..164] | from_pub[164..196]). */
+/** Build the 292-byte wire (signing[0..196] | sig[196..260] | from_pub[260..292]). */
 function buildWire(signing: Uint8Array, sig: Uint8Array, fromPub: Uint8Array): Uint8Array {
   const wire = new Uint8Array(L.wire_len);
   wire.set(signing, L.wire_fields.signing.offset);
@@ -186,10 +225,10 @@ function buildWire(signing: Uint8Array, sig: Uint8Array, fromPub: Uint8Array): U
   return wire;
 }
 
-/** Parse the 196-byte wire back into its parts (mirrors `SignedAuthorization::from_wire`). */
+/** Parse the 292-byte wire back into its parts (mirrors `SignedAuthorization::from_wire`). */
 function parseWire(wireBytes: Uint8Array): {
   signing: Uint8Array; sig: Uint8Array; fromPub: Uint8Array;
-  auth: { fromHex: string; toHex: string; amount: number; nonceHex: string; expiry: number; currency: number };
+  auth: { fromHex: string; toHex: string; amount: number; nonceHex: string; expiry: number; currency: number; fromName: string; toName: string; memo: string };
 } {
   if (wireBytes.length !== L.wire_len) throw new Error('Length');
   const signing = wireBytes.slice(L.wire_fields.signing.offset, L.wire_fields.signing.offset + L.wire_fields.signing.len);
@@ -201,26 +240,29 @@ function parseWire(wireBytes: Uint8Array): {
   const nonceHex = bytesToHex(signing.slice(L.fields.nonce.offset, L.fields.nonce.offset + L.fields.nonce.len));
   const expiry = readU64Le(signing, L.fields.expiry.offset);
   const currency = readU32Le(signing, L.fields.currency.offset);
-  return { signing, sig, fromPub, auth: { fromHex, toHex, amount, nonceHex, expiry, currency } };
+  const fromName = trimName32(signing.slice(L.fields.from_name.offset, L.fields.from_name.offset + L.fields.from_name.len));
+  const toName = trimName32(signing.slice(L.fields.to_name.offset, L.fields.to_name.offset + L.fields.to_name.len));
+  const memo = trimName32(signing.slice(L.fields.memo.offset, L.fields.memo.offset + L.fields.memo.len));
+  return { signing, sig, fromPub, auth: { fromHex, toHex, amount, nonceHex, expiry, currency, fromName, toName, memo } };
 }
 
-/** Build the 68-byte request (merchant's QR) from the request fields. */
-function buildRequestBytes(toHex: string, amount: number, nonceHex: string, expiry: number, currency: number): Uint8Array {
+/** Build the 132-byte request (merchant's QR) from the request fields. The `to_name` + `memo` are
+ *  the merchant-defined display fields (NUL-padded UTF-8 via `padName32`). */
+function buildRequestBytes(toHex: string, amount: number, nonceHex: string, expiry: number, currency: number, toName = '', memo = ''): Uint8Array {
   const to = hex(toHex);
   const nonce = hex(nonceHex);
   if (to.length !== L.pubkey_len) throw new Error(`to length: ${to.length}`);
   if (nonce.length !== L.nonce_len) throw new Error(`nonce length: ${nonce.length}`);
-  // Request layout = to(32) | amount_le(8) | nonce(16) | expiry_le(8) | currency_le(4) — read directly
-  // from the JSON's `request_len` and the per-field lengths (the layout JSON does not enumerate
-  // request fields separately because they have the SAME widths as the signing buffer's
-  // to/amount/nonce/expiry/currency).
+  // Request layout = to(32) | amount_le(8) | nonce(16) | expiry_le(8) | currency_le(4) |
+  // to_name(32) | memo(32) — every offset/length read from `wire_layout.json`'s `request_fields`.
   const buf = new Uint8Array(L.request_len);
-  let off = 0;
-  buf.set(to, off); off += L.fields.to.len;
-  putU64Le(buf, off, amount); off += L.fields.amount.len;
-  buf.set(nonce, off); off += L.fields.nonce.len;
-  putU64Le(buf, off, expiry); off += L.fields.expiry.len;
-  putU32Le(buf, off, currency);
+  buf.set(to, L.request_fields.to.offset);
+  putU64Le(buf, L.request_fields.amount.offset, amount);
+  buf.set(nonce, L.request_fields.nonce.offset);
+  putU64Le(buf, L.request_fields.expiry.offset, expiry);
+  putU32Le(buf, L.request_fields.currency.offset, currency);
+  buf.set(padName32(toName), L.request_fields.to_name.offset);
+  buf.set(padName32(memo), L.request_fields.memo.offset);
   return buf;
 }
 
@@ -263,26 +305,27 @@ async function generateKeypair(): Promise<{ secretHex: string; publicHex: string
   return { secretHex: bytesToHex(secret), publicHex: bytesToHex(pub) };
 }
 
-async function signAuthorization(secretHex: string, toHex: string, amount: number, nonceHex: string, expiry: number, currency: number): Promise<string> {
+async function signAuthorization(secretHex: string, toHex: string, amount: number, nonceHex: string, expiry: number, currency: number, fromName = '', toName = '', memo = ''): Promise<string> {
   // Per the on-device contract: returns the wire as a hex string. The app then hands it to
-  // encodeQr() to make the QR the merchant scans / submits.
+  // encodeQr() to make the QR the merchant scans / submits. `fromName` is the payer's own display
+  // name; `toName` + `memo` are copied from the scanned request (merchant-defined).
   const secret = hex(secretHex);
   const pub = await ed.getPublicKeyAsync(secret);
-  const signing = buildSigningBytes(bytesToHex(pub), toHex, amount, nonceHex, expiry, currency);
+  const signing = buildSigningBytes(bytesToHex(pub), toHex, amount, nonceHex, expiry, currency, fromName, toName, memo);
   const sig = await ed.signAsync(signing, secret);
   const wire = buildWire(signing, sig, pub);
   return bytesToHex(wire);
 }
 
-async function encodeRequest(toHex: string, amount: number, nonceHex: string, expiry: number, currency: number): Promise<string> {
-  // Mirrors `PaymentRequest::encode` — base64url of the 68-byte request. The merchant QR is
-  // "<base64url request>|<username>" (see App.tsx parseRequestQR).
-  return base64url.encode(buildRequestBytes(toHex, amount, nonceHex, expiry, currency));
+async function encodeRequest(toHex: string, amount: number, nonceHex: string, expiry: number, currency: number, toName = '', memo = ''): Promise<string> {
+  // Mirrors `PaymentRequest::encode` — base64url of the 132-byte request. The merchant QR is now
+  // plain base64url (the `to_name` lives inside the bytes; the old `|name` suffix is gone).
+  return base64url.encode(buildRequestBytes(toHex, amount, nonceHex, expiry, currency, toName, memo));
 }
 
-async function decodeRequest(qr: string): Promise<{ toHex: string; amount: number; nonceHex: string; expiry: number; currency: number }> {
-  // Mirrors `PaymentRequest::decode`. Tolerates both the bare base64url and the "<b64>|<name>" form
-  // the merchant QR carries — App.tsx splits off the name before calling this, but be defensive.
+async function decodeRequest(qr: string): Promise<{ toHex: string; amount: number; nonceHex: string; expiry: number; currency: number; toName: string; memo: string }> {
+  // Mirrors `PaymentRequest::decode`. The QR is plain base64url now (the name lives in the bytes);
+  // tolerate a stray `|name` suffix defensively, but it carries no name anymore.
   const b64 = qr.includes('|') ? qr.slice(0, qr.indexOf('|')) : qr;
   let bytes: Uint8Array;
   try {
@@ -291,17 +334,18 @@ async function decodeRequest(qr: string): Promise<{ toHex: string; amount: numbe
     throw new Error('Base64');
   }
   if (bytes.length !== L.request_len) throw new Error('Length');
-  const toHex = bytesToHex(bytes.slice(0, L.fields.to.len));
-  let off = L.fields.to.len;
-  const amount = readU64Le(bytes, off); off += L.fields.amount.len;
-  const nonceHex = bytesToHex(bytes.slice(off, off + L.fields.nonce.len)); off += L.fields.nonce.len;
-  const expiry = readU64Le(bytes, off); off += L.fields.expiry.len;
-  const currency = readU32Le(bytes, off);
-  return { toHex, amount, nonceHex, expiry, currency };
+  const toHex = bytesToHex(bytes.slice(L.request_fields.to.offset, L.request_fields.to.offset + L.request_fields.to.len));
+  const amount = readU64Le(bytes, L.request_fields.amount.offset);
+  const nonceHex = bytesToHex(bytes.slice(L.request_fields.nonce.offset, L.request_fields.nonce.offset + L.request_fields.nonce.len));
+  const expiry = readU64Le(bytes, L.request_fields.expiry.offset);
+  const currency = readU32Le(bytes, L.request_fields.currency.offset);
+  const toName = trimName32(bytes.slice(L.request_fields.to_name.offset, L.request_fields.to_name.offset + L.request_fields.to_name.len));
+  const memo = trimName32(bytes.slice(L.request_fields.memo.offset, L.request_fields.memo.offset + L.request_fields.memo.len));
+  return { toHex, amount, nonceHex, expiry, currency, toName, memo };
 }
 
 async function encodeQr(wireHex: string): Promise<string> {
-  // Mirrors `SignedAuthorization::encode` — base64url of the 196-byte wire. The app's QR dance uses
+  // Mirrors `SignedAuthorization::encode` — base64url of the 292-byte wire. The app's QR dance uses
   // this exact encoding; the relay's `POST /api/v1/pay` decodes it back via `decode_body` (JSON path).
   return base64url.encode(hex(wireHex));
 }
@@ -405,6 +449,8 @@ export const __test = {
   buildWire,
   buildRequestBytes,
   parseWire,
+  padName32,
+  trimName32,
   bytesToHex,
   hexToBytes,
 };

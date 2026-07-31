@@ -46,7 +46,21 @@ function readU32Le(buf, offset) {
   let v = 0; for (let i = 3; i >= 0; i--) v = v * 0x100 + buf[offset + i]; return v;
 }
 
-function buildSigningBytes(fromHex, toHex, amount, nonceHex, expiry, currency) {
+// Display name + memo codec (NUL-padded UTF-8, truncate to 32 bytes) — mirrors `padName32`/`trimName32`.
+const NAME_LEN = 32;
+function padName32(s) {
+  const utf8 = Buffer.from(s, 'utf8');
+  const buf = Buffer.alloc(NAME_LEN);
+  utf8.subarray(0, NAME_LEN).copy(buf);
+  return buf;
+}
+function trimName32(bytes) {
+  let end = bytes.indexOf(0);
+  if (end < 0) end = bytes.length;
+  return Buffer.from(bytes.subarray(0, end)).toString('utf8');
+}
+
+function buildSigningBytes(fromHex, toHex, amount, nonceHex, expiry, currency, fromName = '', toName = '', memo = '') {
   const from = hex(fromHex), to = hex(toHex), nonce = hex(nonceHex);
   const buf = Buffer.alloc(layout.signing_len);
   buf.set(from, layout.fields.from.offset);
@@ -55,6 +69,9 @@ function buildSigningBytes(fromHex, toHex, amount, nonceHex, expiry, currency) {
   buf.set(nonce, layout.fields.nonce.offset);
   putU64Le(buf, layout.fields.expiry.offset, expiry);
   putU32Le(buf, layout.fields.currency.offset, currency);
+  buf.set(padName32(fromName), layout.fields.from_name.offset);
+  buf.set(padName32(toName), layout.fields.to_name.offset);
+  buf.set(padName32(memo), layout.fields.memo.offset);
   return new Uint8Array(buf);
 }
 function buildWire(signing, sig, fromPub) {
@@ -102,9 +119,30 @@ export async function run() {
   console.log('[00-cross-val] golden secret:', g.secret_hex.slice(0, 16) + '…');
   console.log('[00-cross-val] golden public:', g.public_hex);
 
-  // --- (1) re-sign the golden Authorization with @noble/ed25519 -----------------------------
-  const signing = buildSigningBytes(g.public_hex, g.to_hex, g.amount, g.nonce_hex, g.expiry, g.currency);
+  // Layout sanity: the new wire-format v2 (N6/H3) constants. Catches a stale wire_layout.json.
+  assertEq(layout.signing_len, 196, 'signing_len (wire-format v2: +from_name/to_name/memo)');
+  assertEq(layout.wire_len, 292, 'wire_len (196 signing + 64 sig + 32 from_pub)');
+  assertEq(layout.request_len, 132, 'request_len (wire-format v2: +to_name/memo)');
+
+  // --- (1) re-sign the golden Authorization with @noble/ed25519 --------------------------------
+  //   The golden carries from_name="Alice", to_name="Bob", memo="dinner" (NUL-padded in the JSON as
+  //   from_name_hex/to_name_hex/memo_hex). They MUST appear in the 196-byte signing buffer at offsets
+  //   100/132/164 — bound by the signature (a tamper breaks verify).
+  const signing = buildSigningBytes(g.public_hex, g.to_hex, g.amount, g.nonce_hex, g.expiry, g.currency, 'Alice', 'Bob', 'dinner');
   assertEq(bytesToHex(signing), g.signing_hex, 'signing buffer (golden layout vs shim builder)');
+
+  // The three 32-byte name/memo fields are present in the signed bytes at their offsets.
+  assertEq(bytesToHex(signing.slice(layout.fields.from_name.offset, layout.fields.from_name.offset + layout.fields.from_name.len)),
+    g.from_name_hex, 'signing.from_name == golden ("Alice" NUL-padded)');
+  assertEq(bytesToHex(signing.slice(layout.fields.to_name.offset, layout.fields.to_name.offset + layout.fields.to_name.len)),
+    g.to_name_hex, 'signing.to_name == golden ("Bob" NUL-padded)');
+  assertEq(bytesToHex(signing.slice(layout.fields.memo.offset, layout.fields.memo.offset + layout.fields.memo.len)),
+    g.memo_hex, 'signing.memo == golden ("dinner" NUL-padded)');
+  // The names round-trip through NUL-trim back to the readable strings.
+  assertEq(trimName32(signing.slice(layout.fields.from_name.offset, layout.fields.from_name.offset + layout.fields.from_name.len)), 'Alice', 'trimName32(from_name) == "Alice"');
+  assertEq(trimName32(signing.slice(layout.fields.to_name.offset, layout.fields.to_name.offset + layout.fields.to_name.len)), 'Bob', 'trimName32(to_name) == "Bob"');
+  assertEq(trimName32(signing.slice(layout.fields.memo.offset, layout.fields.memo.offset + layout.fields.memo.len)), 'dinner', 'trimName32(memo) == "dinner"');
+  console.log('[00-cross-val] ✓ from_name/to_name/memo present in signed bytes + round-trip');
 
   const sig = await ed.signAsync(signing, hex(g.secret_hex));
   const sigHex = bytesToHex(sig);
@@ -138,31 +176,40 @@ export async function run() {
   assertEq(fromPub, g.public_hex, 'wire.from_pub == golden.public_hex');
 
   // --- (5) request QR round-trip: encodeRequest → decodeRequest recovers the original fields --
-  //   (mirrors PaymentRequest::encode / decode; the merchant QR is "<b64>|<name>")
+  //   (mirrors PaymentRequest::encode / decode; the merchant QR is now PLAIN base64url — the
+  //   to_name lives in the 132-byte request bytes; the old `|name` suffix is gone).
   const reqBytes = Buffer.alloc(layout.request_len);
-  let off = 0;
-  reqBytes.set(hex(g.to_hex), off); off += layout.fields.to.len;
-  putU64Le(reqBytes, off, g.amount); off += layout.fields.amount.len;
-  reqBytes.set(hex(g.nonce_hex), off); off += layout.fields.nonce.len;
-  putU64Le(reqBytes, off, g.expiry); off += layout.fields.expiry.len;
-  putU32Le(reqBytes, off, g.currency);
+  reqBytes.set(hex(g.to_hex), layout.request_fields.to.offset);
+  putU64Le(reqBytes, layout.request_fields.amount.offset, g.amount);
+  reqBytes.set(hex(g.nonce_hex), layout.request_fields.nonce.offset);
+  putU64Le(reqBytes, layout.request_fields.expiry.offset, g.expiry);
+  putU32Le(reqBytes, layout.request_fields.currency.offset, g.currency);
+  // The golden request carries to_name="Bob" + memo="coffee" (request_to_name_hex / request_memo_hex).
+  reqBytes.set(padName32('Bob'), layout.request_fields.to_name.offset);
+  reqBytes.set(padName32('coffee'), layout.request_fields.memo.offset);
   const reqB64 = b64urlEncode(new Uint8Array(reqBytes));
-  const merchantQR = `${reqB64}|alice`;
-  const split = merchantQR.slice(0, merchantQR.indexOf('|'));
-  const decoded = b64urlDecode(split);
-  assertEq(decoded.length, layout.request_len, 'decoded request length');
-  const dTo = bytesToHex(decoded.slice(0, layout.fields.to.len));
-  let doff = layout.fields.to.len;
-  const dAmount = readU64Le(decoded, doff); doff += layout.fields.amount.len;
-  const dNonce = bytesToHex(decoded.slice(doff, doff + layout.fields.nonce.len)); doff += layout.fields.nonce.len;
-  const dExpiry = readU64Le(decoded, doff); doff += layout.fields.expiry.len;
-  const dCurrency = readU32Le(decoded, doff);
+  // Assert the rebuilt request bytes equal the golden request_hex (proves to_name/memo offsets).
+  assertEq(bytesToHex(new Uint8Array(reqBytes)), g.request_hex, 'request bytes (golden layout vs builder)');
+  // The QR is now plain base64url — NO `|name` suffix anymore.
+  assert(!reqB64.includes('|'), 'request QR must be plain base64url (no |name suffix)');
+
+  const decoded = b64urlDecode(reqB64);
+  assertEq(decoded.length, layout.request_len, 'decoded request length (132 bytes)');
+  const dTo = bytesToHex(decoded.slice(layout.request_fields.to.offset, layout.request_fields.to.offset + layout.request_fields.to.len));
+  const dAmount = readU64Le(decoded, layout.request_fields.amount.offset);
+  const dNonce = bytesToHex(decoded.slice(layout.request_fields.nonce.offset, layout.request_fields.nonce.offset + layout.request_fields.nonce.len));
+  const dExpiry = readU64Le(decoded, layout.request_fields.expiry.offset);
+  const dCurrency = readU32Le(decoded, layout.request_fields.currency.offset);
+  const dToName = trimName32(decoded.slice(layout.request_fields.to_name.offset, layout.request_fields.to_name.offset + layout.request_fields.to_name.len));
+  const dMemo = trimName32(decoded.slice(layout.request_fields.memo.offset, layout.request_fields.memo.offset + layout.request_fields.memo.len));
   assertEq(dTo, g.to_hex, 'decoded request.to');
   assertEq(dAmount, g.amount, 'decoded request.amount');
   assertEq(dNonce, g.nonce_hex, 'decoded request.nonce');
   assertEq(dExpiry, g.expiry, 'decoded request.expiry');
   assertEq(dCurrency, g.currency, 'decoded request.currency');
-  console.log('[00-cross-val] ✓ request QR round-trips byte-exact');
+  assertEq(dToName, 'Bob', 'decoded request.to_name == "Bob" (now in the bytes, not a suffix)');
+  assertEq(dMemo, 'coffee', 'decoded request.memo == "coffee"');
+  console.log('[00-cross-val] ✓ request QR round-trips byte-exact (to_name + memo in bytes)');
 
   // --- (6) withdraw shim byte-exactness: re-signing the golden WithdrawAuth produces the golden
   //   sig (mirrors `dpay_core::WithdrawAuth::signing_bytes`). If the shim's `buildWithdrawSigningBytes`

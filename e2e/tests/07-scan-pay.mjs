@@ -62,8 +62,8 @@ export async function run() {
     await driver.click('btn-approve', { timeoutMs: 5_000 });
     const paid = await driver.waitForText('Paid', { timeoutMs: 10_000 });
     assert(paid, 'payer should reach the Paid screen after the relay settles');
-    // L6: the Paid ✓ confirmation must show the ACTUAL recipient name (req.name), not a generic
-    // "merchant" label.
+    // L6: the Paid ✓ confirmation must show the ACTUAL recipient name (to_name from the request
+    // bytes), not a generic "merchant" label.
     const paidBody = await driver.bodyText();
     assertIncludes(paidBody, 'Bob', 'Paid ✓ confirmation should name the recipient (L6)');
     assert(!/\bmerchant\b/i.test(paidBody), 'Paid ✓ confirmation must not use the generic "merchant" label (L6)');
@@ -80,14 +80,14 @@ export async function run() {
     console.log(`[07-scan-pay] ✓ B credited: 0 → $${(bobAfter / 100).toFixed(2)}`);
 
     // --- A's Recent history lists the outgoing payment to B (refreshHistory fired on settle). --
-    // NB: the history card title is CSS-uppercased, so innerText renders "Recent" as "RECENT"; assert
-    // the recipient's short pubkey in the row instead (no text-transform — the meaningful proof that
-    // the settled payment landed in the ledger-sourced history).
+    // The to_name "Bob" now rides the signed wire + the relay's history rows, so the row shows
+    // "to Bob" (N6/H3) — NOT a raw hex pubkey. Assert the NAME appears and the full hex does not.
     const hasHistory = await driver.waitForText('RECENT', { timeoutMs: 8_000 });
     assert(hasHistory, 'the Recent card should render once the payment lands in history');
     const histBody = await driver.bodyText();
-    assertIncludes(histBody, bob.publicHex.slice(0, 8), 'history row should name the recipient (short pubkey)');
-    console.log('[07-scan-pay] ✓ A history shows the outgoing payment to B');
+    assertIncludes(histBody, MERCHANT_NAME, 'history row should name the recipient by display name (N6/H3)');
+    assert(!histBody.includes(bob.publicHex), 'history must NOT dump the raw 64-char recipient pubkey now that names ride the wire');
+    console.log('[07-scan-pay] ✓ A history shows the outgoing payment to Bob (by name)');
 
     await driver.screenshot('07-scan-pay');
 

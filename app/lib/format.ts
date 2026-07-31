@@ -16,11 +16,47 @@ export function randNonceHex(): string {
 }
 export function toCents(s: string): number { const n = Math.round(parseFloat(s || '0') * 100); return Number.isFinite(n) && n > 0 ? n : 0; }
 export const base = (u: string) => u.replace(/\/$/, '');
-// request QR = "<base64url request>|<username>"; base64url has no '|', so split on the first one.
-export function parseRequestQR(raw: string): {reqB64: string; name: string} {
-  const t = raw.trim(); const i = t.indexOf('|');
-  return i < 0 ? {reqB64: t, name: ''} : {reqB64: t.slice(0, i), name: t.slice(i + 1)};
+
+// Request QR = plain base64url of the 132-byte PaymentRequest (the payee's `to_name` + `memo` ride
+// INSIDE the bytes now — wire-format v2; the old `<b64>|<name>` suffix is GONE). Returns the trimmed
+// base64url string the app hands to DpayCore.decodeRequest. Defensively strips a stray `|…` suffix
+// (a stale QR) so decodeRequest never sees it — but no name is carried there anymore.
+export function parseRequestQR(raw: string): string {
+  const t = raw.trim();
+  const i = t.indexOf('|');
+  return i < 0 ? t : t.slice(0, i);
 }
+
+// Display name + memo codec — mirrors `dpay_core::pad_name` + the canister's lossy NUL-trim. Fixed
+// 32-byte fields: UTF-8, trailing-NUL padded, truncated to 32 bytes; empty = all zeros. These are
+// the hex-string variants (the byte-array equivalents live in the DpayCore shim + e2e harness; the
+// app itself passes plain name STRINGS to DpayCore, which packs the bytes). Used by the jest tests
+// + available wherever hex name/memo fields appear. Decode is lossy + NUL-trimmed, never throws.
+const NAME_LEN = 32;
+export function padName32(s: string): string {
+  let utf8 = '';
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c < 0x80) utf8 += String.fromCharCode(c);
+    else if (c < 0x800) { utf8 += String.fromCharCode(0xc0 | (c >> 6), 0x80 | (c & 0x3f)); }
+    else { utf8 += String.fromCharCode(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f)); }
+  }
+  const bytes: number[] = [];
+  for (let i = 0; i < utf8.length && bytes.length < NAME_LEN; i++) bytes.push(utf8.charCodeAt(i) & 0xff);
+  while (bytes.length < NAME_LEN) bytes.push(0);
+  return bytes.map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+export function trimName32(hexStr: string): string {
+  const clean = hexStr.replace(/[^0-9a-fA-F]/g, '');
+  const bytes: number[] = [];
+  for (let i = 0; i + 1 < clean.length && bytes.length < NAME_LEN; i += 2) bytes.push(parseInt(clean.slice(i, i + 2), 16));
+  let end = bytes.indexOf(0);
+  if (end < 0) end = bytes.length;
+  let out = '';
+  for (let i = 0; i < end; i++) out += String.fromCharCode(bytes[i]);
+  try { return decodeURIComponent(escape(out)); } catch { return out; }
+}
+
 // Format raw smallest-units as a decimal amount + unit suffix (e.g. sats → "0.00012345 BTC").
 // Generalizes the old btc() so any family's amounts render from its config — no per-asset literals.
 export function fmtAsset(raw: number, decimals: number, unit: string): string {

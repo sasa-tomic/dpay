@@ -1,14 +1,16 @@
-// Flow 06 — Request QR (receive): renders a QR AND decodes to a 68-byte request with verified fields.
+// Flow 06 — Request QR (receive): renders a QR AND decodes to a 132-byte request with verified fields.
 //
 // Drives the REAL app's ReceiveMode: enter an amount → click btn-request → the app builds a
-// PaymentRequest via DpayCore.encodeRequest (base64url of the 68-byte request) and renders it as a
-// QR carrying `<b64>|<username>`. This flow asserts (1) the QR renders, then (2) DECODES the request
+// PaymentRequest via DpayCore.encodeRequest (base64url of the 132-byte request) and renders it as a
+// QR carrying the base64url (the merchant's username rides as `to_name` INSIDE the bytes; the old
+// `|name` suffix is gone). This flow asserts (1) the QR renders, then (2) DECODES the request
 // bytes field-for-field against the wire layout (dfx/wire_layout.json) and verifies:
 //   - to        == this wallet's account (its pubkey hex) — the deposit destination
 //   - amount    == the entered amount in minor units (cents)
 //   - expiry    == a sane near-future unix-seconds value (now < expiry < now + EXPIRY_WINDOW)
 //   - currency  == 0 (DEMO_USD — the wallet's single `$` asset)
-//   - length    == 68 bytes (REQUEST_LEN)
+//   - to_name   == the merchant's username (now in the bytes)
+//   - length    == 132 bytes (REQUEST_LEN)
 // The QR value is read via the __DPAY_QR_LAST shim seam (the QR pixels already encode it; the seam
 // exposes it readably so the test decodes the EXACT bytes a payer would scan — not an OCR guess).
 //
@@ -48,10 +50,12 @@ export async function run() {
       `request screen should show the clear offline-payer affordance (L4). body excerpt:\n${reqBody.slice(0, 400)}`);
     console.log('[06-request-qr] ✓ offline-payer affordance wording is clear (L4)');
 
-    // 4. Read the EXACT value the QR encodes via the shim seam, then decode the 68-byte request.
+    // 4. Read the EXACT value the QR encodes via the shim seam, then decode the 132-byte request.
+    //    The QR is now PLAIN base64url (the merchant's `to_name` lives inside the bytes — wire-format
+    //    v2; the old `<b64>|<name>` suffix is GONE).
     const qrValue = await driver.eval(() => window.__DPAY_QR_LAST);
     assert(typeof qrValue === 'string' && qrValue.length > 0, `__DPAY_QR_LAST should hold the request QR value, got "${qrValue}"`);
-    assert(qrValue.includes('|e2e-bob'), `request QR should be "<b64>|e2e-bob", got "${qrValue}"`);
+    assert(!qrValue.includes('|'), `request QR must be plain base64url (no |name suffix), got "${qrValue}"`);
     const req = decodeRequest(qrValue);
     const now = Math.floor(Date.now() / 1000);
 
@@ -61,9 +65,12 @@ export async function run() {
     assert(req.expiry > now, `request.expiry must be in the future (got ${req.expiry}, now ${now})`);
     assert(req.expiry < now + EXPIRY_WINDOW_SLACK, `request.expiry must be within the ~10min window (got ${req.expiry}, now ${now})`);
     assertEq(req.currency, 0, 'request.currency == DEMO_USD (the wallet `$` asset)');
+    // The merchant's own username rides as `to_name` INSIDE the request bytes now.
+    assertEq(req.toName, 'e2e-bob', 'request.to_name == the merchant username (now in the bytes, not a suffix)');
+    assertEq(req.memo, '', 'request.memo == empty (no memo entered)');
     // decodeRequest already enforces length == REQUEST_LEN; assert explicitly for the contract.
-    assertEq(REQUEST_LEN, 68, 'REQUEST_LEN (the frozen request wire size)');
-    console.log(`[06-request-qr] ✓ decoded 68-byte request: to=${req.toHex.slice(0, 12)}… amount=${req.amount} expiry=+${req.expiry - now}s currency=${req.currency}`);
+    assertEq(REQUEST_LEN, 132, 'REQUEST_LEN (the frozen request wire size — 132 bytes with to_name + memo)');
+    console.log(`[06-request-qr] ✓ decoded 132-byte request: to=${req.toHex.slice(0, 12)}… amount=${req.amount} to_name=${req.toName} expiry=+${req.expiry - now}s currency=${req.currency}`);
 
     await driver.screenshot('06-request-qr');
 

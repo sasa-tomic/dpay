@@ -192,12 +192,17 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
     setHistory(all.map((rec): Txn => {
       const dir: 'out' | 'in' = rec.from.toLowerCase() === me ? 'out' : 'in';
       const counterparty = dir === 'out' ? rec.to.toLowerCase() : rec.from.toLowerCase();
-      // N6/H3: the username isn't in the signed wire (FROZEN core), so the counterparty is a pubkey.
-      // Show a friendly SHORT form (not the raw 64 chars); mint/burn rows get an honest label.
+      const fromName = rec.from_name ?? '';
+      const toName = rec.to_name ?? '';
+      const memo = rec.memo ?? '';
+      // N6/H3 RESOLVED: the counterparty's display name now rides the signed wire (from_name/to_name)
+      // and is returned per row by the relay. For an OUT row (I am `from`) the counterparty is `to`
+      // → show to_name; for an IN row the counterparty is `from` → show from_name. Fall back to the
+      // short hex ONLY when no name was signed (unnamed payment); the mint sentinel keeps its label.
       const who = isMintSentinel(counterparty)
         ? (dir === 'in' ? 'Demo funds' : 'Withdrawal')
-        : short(dir === 'out' ? rec.to : rec.from);
-      return {nonce: rec.nonce, amount: rec.amount, who, time: fmtTime(rec.timestamp), dir};
+        : (dir === 'out' ? (toName || short(rec.to)) : (fromName || short(rec.from)));
+      return {nonce: rec.nonce, amount: rec.amount, who, memo, time: fmtTime(rec.timestamp), dir};
     }));
   }, [relayUrl, identity.publicHex, catalogCurrencyIds]);
 
@@ -374,7 +379,10 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
             <Text style={S.histTitle}>Recent</Text>
             {history.map((t, i) => (
               <View key={i} style={S.histRow}>
-                <Text style={S.histWho}>{t.dir === 'out' ? `to ${t.who || '—'}` : `from ${t.who || '—'}`}</Text>
+                <View style={S.histWhoCol}>
+                  <Text style={S.histWho}>{t.dir === 'out' ? `to ${t.who || '—'}` : `from ${t.who || '—'}`}</Text>
+                  {t.memo ? <Text style={S.histMemo} testID={`hist-memo-${i}`}>{t.memo}</Text> : null}
+                </View>
                 <Text style={[S.histAmt, {color: t.dir === 'out' ? C.ink : C.ok}]}>{`${t.dir === 'out' ? '−' : '+'}${usd(t.amount)}`}</Text>
                 <Text style={S.histTime}>{t.time}</Text>
               </View>

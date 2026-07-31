@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useState} from 'react';
-import {View, Text, Pressable, TextInput} from 'react-native';
+import {View, Text, Pressable, TextInput, type TextStyle} from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import {C} from '../config/palette';
 import {S} from '../styles';
@@ -11,8 +11,14 @@ import {DpayCore, DpayNfc} from '../services/native';
 import {NfcTap} from './NfcTap';
 import {QrScanner} from './QrScanner';
 
+// The optional merchant memo input — a real secondary field (not a bare text link), mirroring the
+// paste-button affordance pattern (44pt-min touch target + a visible border). Inline (Group E owns
+// styles.ts as ONE block): outline sub color on a subtle wash, full-width, 44pt-min.
+const memoInputStyle: TextStyle = {marginTop: 14, minHeight: 44, width: '100%', maxWidth: 320, borderWidth: 1, borderColor: C.sub2, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink};
+
 export function ReceiveMode({identity, relayUrl, nfcReady, onReceived}: {identity: Identity; relayUrl: string; nfcReady: boolean; onReceived: () => void}) {
   const [amount, setAmount] = useState('25.00');
+  const [memo, setMemo] = useState('');
   const [reqQr, setReqQr] = useState<{value: string; cents: number; nonce: string; nfcHex: string | null} | null>(null);
   const [result, setResult] = useState<{amount: number; from: string} | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -31,11 +37,16 @@ export function ReceiveMode({identity, relayUrl, nfcReady, onReceived}: {identit
     try {
       const nonce = randNonceHex();
       const expiry = nowSecs() + EXPIRY_WINDOW;
-      const reqB64 = await DpayCore.encodeRequest(identity.publicHex, cents, nonce, expiry, 0);
-      // Build the NFC request too so reader mode can start alongside the QR (best-effort).
+      // The merchant's own username rides as `to_name`; the optional memo is attached verbatim. Both
+      // now live INSIDE the 132-byte request (wire-format v2) — the QR is plain base64url (no `|name`).
+      const memoVal = memo.trim();
+      const reqB64 = await DpayCore.encodeRequest(identity.publicHex, cents, nonce, expiry, 0, identity.username, memoVal);
+      // Build the NFC request too so reader mode can start alongside the QR (best-effort). The NFC
+      // request path doesn't carry names in this wave (the FFI/native NFC build surface is updated
+      // separately; the radio hop is a physical-device gate) — names ride the signed wire instead.
       let nfcHex: string | null = null;
       if (nfcReady && DpayNfc) { try { nfcHex = await DpayNfc.buildRequest(identity.publicHex, cents, nonce, expiry, 0); } catch {} }
-      setReqQr({value: `${reqB64}|${identity.username}`, cents, nonce, nfcHex});
+      setReqQr({value: reqB64, cents, nonce, nfcHex});
       setResult(null); setErr(null);
     } catch (e: any) { setErr(String(e?.message ?? e)); }
   }
@@ -74,7 +85,7 @@ export function ReceiveMode({identity, relayUrl, nfcReady, onReceived}: {identit
     } catch { /* network/timeout — the /receipt poll reconciles; don't show a false error */ }
   }
 
-  function reset() { setReqQr(null); setResult(null); setScanning(false); setErr(null); setNfcActive(false); setNfcKey(k => k + 1); }
+  function reset() { setReqQr(null); setResult(null); setScanning(false); setErr(null); setMemo(''); setNfcActive(false); setNfcKey(k => k + 1); }
 
   // While an NFC tap is mid-flow, let it own the screen (so the receipt gets back to the payer)
   // rather than the settlement poll swapping in the "Received" view underneath it.
@@ -124,6 +135,17 @@ export function ReceiveMode({identity, relayUrl, nfcReady, onReceived}: {identit
     <View style={S.center}>
       <Text style={S.label}>Amount to receive</Text>
       <View style={S.amountRow}><Text style={S.currency}>$</Text><TextInput testID="amount-input" style={S.amountInput} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={C.sub2} /></View>
+      <TextInput
+        testID="memo-input"
+        style={memoInputStyle}
+        value={memo}
+        onChangeText={setMemo}
+        placeholder="Add a note (optional)"
+        placeholderTextColor={C.sub2}
+        accessibilityLabel="Memo"
+        accessibilityHint="An optional note attached to this payment request"
+        maxLength={32}
+      />
       <Pressable testID="btn-request" style={S.primaryWide} onPress={makeRequest} accessibilityRole="button" accessibilityLabel="Request" accessibilityState={{disabled: false}}><Text style={S.primaryText}>Request</Text></Pressable>
       {err ? <Text style={S.err}>{err}</Text> : null}
     </View>

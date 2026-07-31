@@ -26,15 +26,19 @@ export type NfcEvent =
 
 export type NfcPhaseName = 'listening' | 'linking' | 'exchanging' | 'awaitingApproval' | 'settling' | 'success' | 'declined' | 'pending';
 
-export type Req = {toHex: string; amount: number; nonceHex: string; expiry: number; currency: number};
+export type Req = {toHex: string; amount: number; nonceHex: string; expiry: number; currency: number; toName: string; memo: string};
 export type Identity = {secretHex: string; publicHex: string; username: string};
-export type Txn = {nonce: string; amount: number; who: string; time: string; dir: 'out' | 'in'};
-// One row of the relay's GET /api/v1/transactions/{hex} response (from/to are lowercase hex).
-export type TransactionsRow = {from: string; to: string; amount: number; nonce: string; currency: number; timestamp: number};
+export type Txn = {nonce: string; amount: number; who: string; memo: string; time: string; dir: 'out' | 'in'};
+// One row of the relay's GET /api/v1/transactions/{hex} response (from/to are lowercase hex). The
+// relay returns from_name/to_name/memo as JSON STRINGS (NUL-trimmed, lossy; may be "").
+export type TransactionsRow = {from: string; to: string; amount: number; nonce: string; currency: number; timestamp: number; from_name: string; to_name: string; memo: string};
 export type DpayCoreApi = {
   generateKeypair(): Promise<{secretHex: string; publicHex: string}>;
-  signAuthorization(secretHex: string, toHex: string, amount: number, nonceHex: string, expiry: number, currency: number): Promise<string>;
-  encodeRequest(toHex: string, amount: number, nonceHex: string, expiry: number, currency: number): Promise<string>;
+  // `fromName` is the payer's own display name; `toName`/`memo` are copied from the scanned request
+  // (merchant-defined). All three default to '' (empty names = all-zero name bytes on the wire) so
+  // the NFC card path (which has no name in its request yet) keeps working unchanged.
+  signAuthorization(secretHex: string, toHex: string, amount: number, nonceHex: string, expiry: number, currency: number, fromName?: string, toName?: string, memo?: string): Promise<string>;
+  encodeRequest(toHex: string, amount: number, nonceHex: string, expiry: number, currency: number, toName?: string, memo?: string): Promise<string>;
   decodeRequest(qr: string): Promise<Req>;
   encodeQr(wireHex: string): Promise<string>;
   verifyWire(wireHex: string): Promise<boolean>;

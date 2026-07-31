@@ -20,7 +20,7 @@ const pasteBtnStyle: ViewStyle = {marginTop: 18, minHeight: 44, paddingVertical:
 
 export function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOfflinePaid, shownBalance}: {identity: Identity; online: boolean; relayUrl: string; nfcReady: boolean; onSettled: () => void; onOfflinePaid: (amount: number) => void; shownBalance: number | null}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid'>('scan');
-  const [req, setReq] = useState<(Req & {name: string}) | null>(null);
+  const [req, setReq] = useState<Req | null>(null);
   const [qr, setQr] = useState<{code: string; amount: number; who: string; nonce: string} | null>(null);
   // `pending` = handed to the merchant offline but NOT confirmed by the ledger (we can't claim it
   // settled). `already` = the ledger reported this nonce was already settled (idempotent replay).
@@ -33,9 +33,12 @@ export function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOffl
 
   async function onRequestString(raw: string) {
     try {
-      const {reqB64, name} = parseRequestQR(raw);
+      // The request QR is plain base64url now (the payee's `to_name` + `memo` live inside the 132-byte
+      // request — wire-format v2; the `|name` suffix is gone). parseRequestQR trims + strips a stray
+      // suffix defensively; decodeRequest extracts to_name + memo from the bytes.
+      const reqB64 = parseRequestQR(raw);
       const r = await DpayCore.decodeRequest(reqB64);
-      setReq({...r, name}); setErr(null); setPhase('review');
+      setReq(r); setErr(null); setPhase('review');
     } catch (e: any) { setErr(`bad request QR: ${String(e?.message ?? e)}`); }
   }
 
@@ -64,10 +67,13 @@ export function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOffl
     if (!req) return;
     setBusy(true);
     try {
-      const wireHex = await DpayCore.signAuthorization(identity.secretHex, req.toHex, req.amount, req.nonceHex, req.expiry, req.currency);
+      // The payer's own username rides as `from_name`; `to_name` + `memo` are copied verbatim from
+      // the scanned merchant request (so the signature binds exactly what was requested). The payee
+      // name no longer comes from a `|name` QR suffix — it's in the bytes (single source of truth).
+      const wireHex = await DpayCore.signAuthorization(identity.secretHex, req.toHex, req.amount, req.nonceHex, req.expiry, req.currency, identity.username, req.toName, req.memo);
       if (!(await DpayCore.verifyWire(wireHex))) throw new Error('local verify failed');
       const code = await DpayCore.encodeQr(wireHex);
-      const who = req.name || short(req.toHex);
+      const who = req.toName || short(req.toHex);
       const nonce = req.nonceHex;
       if (online) {
         const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), DIRECT_PAY_TIMEOUT_MS);
@@ -161,7 +167,10 @@ export function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOffl
       <View style={S.center}>
         <Text style={S.label}>Review payment</Text>
         <Text testID="pay-amount" style={S.reviewAmount}>{`Pay ${usd(req.amount)}`}</Text>
-        <Text style={S.reviewTo}>{`to ${req.name || short(req.toHex)}`}</Text>
+        <Text style={S.reviewTo}>{`to ${req.toName || short(req.toHex)}`}</Text>
+        {/* The merchant-set memo (if any) — shown as a small subtitle so the payer sees the note
+            attached to this request before approving. Empty memo renders nothing. */}
+        {req.memo ? <Text testID="review-memo" style={S.dim2}>{req.memo}</Text> : null}
         {/* C1/C2 + L5: the warning + any error render ABOVE the button (not below) so they're seen
             first; the raw request nonce is no longer surfaced (internal protocol data). */}
         {insufficient ? (
