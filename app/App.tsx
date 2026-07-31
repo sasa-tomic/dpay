@@ -43,6 +43,9 @@ import {
   fetchCurrencies, familyDisplay, assetTestKey,
 } from './config/catalog';
 import {S} from './styles';
+import {useHotkeys, useEscapeToClose} from './hooks/useHotkeys';
+import {copyToClipboard, readFromClipboard} from './hooks/clipboard';
+import {readDepositDeepLink} from './hooks/useDeepLink';
 
 const {DpayCore, DpayNfc} = NativeModules as {DpayCore: DpayCoreApi; DpayNfc: DpayNfcApi};
 
@@ -136,137 +139,6 @@ async function withdrawFunds(relayUrl: string, accountHex: string, btcAddress: s
 // NaN/negative → 0; the sheet gates the review on > 0 + >= the min withdrawal floor.
 function toSats(s: string): number { const n = Math.round(parseFloat(s || '0') * 1e8); return Number.isFinite(n) && n > 0 ? n : 0; }
 
-/**
- * Copy `text` to the system clipboard when available; otherwise fall back to the platform share
- * sheet (`Share.share` on Android opens a sheet that includes "Copy"; web's `navigator.clipboard`
- * is the real clipboard). Returns the path taken so the UI can say "Copied ✓" vs "Shared ✓".
- * Every fallible op is caught + logged with context (no silent errors); a failure degrades to the
- * Share fallback rather than throwing.
- */
-async function copyToClipboard(text: string): Promise<'clipboard' | 'shared'> {
-  // Web: prefer the real clipboard API (works in react-native-web + the e2e browser harness).
-  if (Platform.OS === 'web') {
-    try {
-      const clip = (globalThis as {navigator?: {clipboard?: {writeText?: (t: string) => Promise<void>}}}).navigator?.clipboard;
-      if (clip && typeof clip.writeText === 'function') {
-        await clip.writeText(text);
-        return 'clipboard';
-      }
-    } catch (e) {
-      console.warn('[dpay] clipboard write failed, falling back to Share:', String(e));
-    }
-  }
-  // Native (or web without a clipboard API): Share sheet. On Android this reliably exposes "Copy".
-  try {
-    await Share.share({message: text});
-  } catch (e) {
-    // Even Share failing must not break the sheet — log with context and report the best outcome.
-    console.warn('[dpay] Share.share failed during copy:', String(e));
-  }
-  return 'shared';
-}
-
-/**
- * Web-only keyboard-shortcut surface — the single source of truth for keyboard wiring. Attaches ONE
- * real DOM `keydown` listener (web only; native has no physical keyboard, and Android uses the
- * hardware Back button which is handled separately) and dispatches `e.key` (lower-cased) to the
- * matching handler in `handlers`.
- *
- *   - `ignoreIfInputFocused`: when set, a key pressed while an INPUT/TEXTAREA is focused is ignored
- *     (so typing into the amount/address/username fields never trips a shortcut). Escape is exempt
- *     — it should close a sheet even with a field focused (universal dialog-dismiss behaviour).
- *   - `enabled`: when false the listener is not attached at all (e.g. the wallet main-view actions
- *     are suspended while any sheet/overlay covers the screen).
- *
- * Plan flow 14 / UX-V5: `useEscapeToClose` delegates here with `{escape: onClose}`; the wallet's
- * P/R/T/A actions pass both options. Uses `globalThis` + a structural key type so it typechecks
- * without the DOM lib (RN's tsconfig ships no DOM types). `handlers`/`opts` are caller-inline
- * closures (recreated each render) so the effect re-subscribes per render — one cheap add/remove,
- * matching the prior `useEscapeToClose` behaviour.
- */
-function useHotkeys(handlers: Record<string, () => void>, opts?: {ignoreIfInputFocused?: boolean; enabled?: boolean}): void {
-  useEffect(() => {
-    if (Platform.OS !== 'web') {
-      return;
-    }
-    if (opts?.enabled === false) {
-      return;
-    }
-    type HasKey = {key: string};
-    const g = globalThis as unknown as {
-      addEventListener?: (type: string, fn: (e: HasKey) => void) => void;
-      removeEventListener?: (type: string, fn: (e: HasKey) => void) => void;
-    };
-    if (typeof g.addEventListener !== 'function') {
-      return;
-    }
-    const doc = globalThis as unknown as {document?: {activeElement?: {tagName?: string}}};
-    const onKey = (e: HasKey) => {
-      if (opts?.ignoreIfInputFocused) {
-        const tag = doc.document?.activeElement?.tagName;
-        if (tag === 'INPUT' || tag === 'TEXTAREA') {
-          return;
-        }
-      }
-      const fn = handlers[(e.key ?? '').toLowerCase()];
-      if (fn) {
-        fn();
-      }
-    };
-    g.addEventListener('keydown', onKey);
-    return () => { g.removeEventListener?.('keydown', onKey); };
-  }, [handlers, opts]);
-}
-
-/**
- * Escape closes an open sheet/modal — the seed keyboard affordance (plan flow 14). Thin wrapper over
- * `useHotkeys`; deliberately carries NO input guard so Escape dismisses a sheet even when a field is
- * focused (the universal dialog-dismiss behaviour).
- */
-function useEscapeToClose(onClose: () => void): void {
-  useHotkeys({escape: onClose});
-}
-
-/**
- * Read text from the system clipboard when available (for the Pay "paste request" fallback — N10).
- * Web uses navigator.clipboard.readText; native would use @react-native-clipboard/clipboard (not
- * bundled, so the Share path is the fallback). Returns null on any failure (permission denied, no
- * clipboard API, empty clipboard).
- */
-async function readFromClipboard(): Promise<string | null> {
-  if (Platform.OS === 'web') {
-    try {
-      const clip = (globalThis as {navigator?: {clipboard?: {readText?: () => Promise<string>}}}).navigator?.clipboard;
-      if (clip && typeof clip.readText === 'function') {
-        return await clip.readText();
-      }
-    } catch (e) {
-      console.warn('[dpay] clipboard read failed:', String(e));
-    }
-  }
-  return null;
-}
-
-/**
- * Web-only deep link: `?screen=deposit` auto-opens the deposit sheet on load (so the page is
- * bookmarkable/shareable to top-up, and the e2e harness can deep-link straight in). Harmless on
- * native — there's no URL bar, and Platform.OS !== 'web' short-circuits before reading location.
- */
-function readDepositDeepLink(): boolean {
-  if (Platform.OS !== 'web') {
-    return false;
-  }
-  const w = globalThis as unknown as {location?: {search?: string}};
-  if (!w.location) {
-    return false;
-  }
-  try {
-    return new URLSearchParams(w.location.search ?? '').get('screen') === 'deposit';
-  } catch {
-    return false;
-  }
-}
-// ---------------------------------------------------------------------------------------------
 
 // The mint-green geometric "d" used by both the app icon and the in-app emblem. Bowl LEFT, ascender
 // stem RIGHT (1024 viewBox, matches the adaptive-icon foreground).
