@@ -31,3 +31,6 @@ export const POLL = (() => {
 })();
 export const WITHDRAW_TIMEOUT_MS = 8000; // bound the /withdraw POST (every new fetch has a timeout)
 export const WITHDRAW_EXPIRY_WINDOW = 600; // the signed WithdrawAuth is valid 10 min
+// Mirrors the canister's fixed FAUCET_AMOUNT ($100.00 = 10_000 cents). The demo top-up POSTs this
+// amount to /api/v1/faucet; the real canister mints the fixed amount regardless of the request.
+export const TOP_UP_CENTS = 10_000;
