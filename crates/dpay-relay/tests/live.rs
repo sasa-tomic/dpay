@@ -137,7 +137,17 @@ fn signed(
     nonce: [u8; 16],
     expiry: u64,
 ) -> SignedAuthorization {
-    let auth = Authorization { from, to, amount, nonce, expiry, currency: DEMO_USD };
+    let auth = Authorization {
+        from,
+        to,
+        amount,
+        nonce,
+        expiry,
+        currency: DEMO_USD,
+        from_name: [0u8; 32],
+        to_name: [0u8; 32],
+        memo: [0u8; 32],
+    };
     SignedAuthorization::new(sk, auth)
 }
 

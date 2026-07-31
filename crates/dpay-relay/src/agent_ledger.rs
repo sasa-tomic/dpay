@@ -49,7 +49,9 @@ struct PayReceipt {
     pubkey: Vec<u8>,
 }
 
-/// Candid mirror of the canister's `TxnView` (one settled transaction row in the history list).
+/// Candid mirror of the canister's `TxnView` (one settled transaction row in the history list). The
+/// canister decodes its fixed 32-byte name/memo fields to candid `text` (NUL-trimmed), so these come
+/// back as `String`; the relay copies them straight through into the JSON-shaped [`TxnRecord`].
 #[derive(CandidType, Deserialize, Debug)]
 struct TxnView {
     from: Vec<u8>,
@@ -58,6 +60,9 @@ struct TxnView {
     nonce: Vec<u8>,
     currency: u32,
     timestamp: u64,
+    from_name: String,
+    to_name: String,
+    memo: String,
 }
 
 // --- deposit-surface mirrors (§3.2 of the deposit-integration plan) --------------------------
@@ -333,6 +338,11 @@ impl Ledger for AgentLedger {
                 nonce: hex::encode(v.nonce),
                 currency: v.currency,
                 timestamp: v.timestamp,
+                // The canister already NUL-trimmed the 32-byte fields to candid `text`; pass them
+                // through verbatim (names + memo ride from the signed wire into history — N6/H3).
+                from_name: v.from_name,
+                to_name: v.to_name,
+                memo: v.memo,
             })
             .collect())
     }

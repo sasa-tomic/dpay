@@ -62,6 +62,46 @@ fn signed(sk: &SigningKey, to: [u8; 32], amount: u64, nonce: [u8; 16], expiry: u
         nonce,
         expiry,
         currency: DEMO_USD,
+        // No display names / memo on the legacy test auths (empty buffers == empty strings in history).
+        from_name: [0u8; 32],
+        to_name: [0u8; 32],
+        memo: [0u8; 32],
+    };
+    SignedAuthorization::new(sk, auth)
+}
+
+/// Like [`signed`] but also sets the payer's `from_name`, the payee's `to_name`, and the `memo` on
+/// the authorization (NUL-padded to 32 bytes, mirroring what the app builder does before signing).
+/// Used to prove the names ride inside the signed wire through the relay into history (N6/H3).
+fn signed_named(
+    sk: &SigningKey,
+    to: [u8; 32],
+    amount: u64,
+    nonce: [u8; 16],
+    expiry: u64,
+    from_name: &str,
+    to_name: &str,
+    memo: &str,
+) -> SignedAuthorization {
+    let mut fn_buf = [0u8; 32];
+    let n = from_name.len().min(32);
+    fn_buf[..n].copy_from_slice(&from_name.as_bytes()[..n]);
+    let mut tn_buf = [0u8; 32];
+    let n = to_name.len().min(32);
+    tn_buf[..n].copy_from_slice(&to_name.as_bytes()[..n]);
+    let mut m_buf = [0u8; 32];
+    let n = memo.len().min(32);
+    m_buf[..n].copy_from_slice(&memo.as_bytes()[..n]);
+    let auth = Authorization {
+        from: pubkey(sk),
+        to,
+        amount,
+        nonce,
+        expiry,
+        currency: DEMO_USD,
+        from_name: fn_buf,
+        to_name: tn_buf,
+        memo: m_buf,
     };
     SignedAuthorization::new(sk, auth)
 }
@@ -670,6 +710,72 @@ async fn transactions_endpoint_returns_history_newest_first() {
     // A bad pubkey (not 32 bytes hex) is a clean 400, not a 500.
     let (bad_status, _bad_body) = call(&state, get_req("/api/v1/transactions/deadbeef")).await;
     assert_eq!(bad_status, StatusCode::BAD_REQUEST);
+}
+
+/// N6/H3: display names + memo ride inside the SIGNED wire into the relay's history, so the wallet
+/// renders friendly counterparties instead of raw pubkeys. Pays "Alice" → "Bob" with memo "coffee"
+/// through the real `/api/v1/pay` route, then asserts `/api/v1/transactions/{hex}` carries the
+/// decoded `from_name`/`to_name`/`memo` strings on BOTH sides (payer's outgoing + payee's incoming).
+/// Also proves a names-less legacy auth (`signed`) yields empty strings (no crash, no leaked bytes).
+#[tokio::test]
+async fn names_and_memo_flow_from_signed_wire_into_history() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+
+    // A named payment: Alice pays Bob with memo "coffee".
+    let sa_named = signed_named(
+        &payer,
+        pubkey(&merchant),
+        250,
+        [42u8; 16],
+        FUTURE,
+        "Alice",
+        "Bob",
+        "coffee",
+    );
+    let (status, body) = call(&state, pay_json(&sa_named.encode())).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // A legacy (names-less) payment right after, so the same history has a mixed row to disambiguate.
+    let sa_plain = signed(&payer, pubkey(&merchant), 100, [43u8; 16], FUTURE);
+    let (status, body) = call(&state, pay_json(&sa_plain.encode())).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let payer_hex = hex::encode(pubkey(&payer));
+    let merch_hex = hex::encode(pubkey(&merchant));
+
+    // Payer's outgoing history: newest-first => the names-less $1.00 row, then the named $2.50 row.
+    let (s, body) = call(&state, get_req(&format!("/api/v1/transactions/{payer_hex}"))).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let rows = body["transactions"].as_array().unwrap();
+    assert_eq!(rows.len(), 2, "{body}");
+
+    // Newest (names-less): empty strings, never null / never leaked buffer bytes.
+    assert_eq!(rows[0]["amount"], 100);
+    assert_eq!(rows[0]["from_name"], "");
+    assert_eq!(rows[0]["to_name"], "");
+    assert_eq!(rows[0]["memo"], "");
+
+    // Oldest (named): the signed names + memo decoded cleanly.
+    assert_eq!(rows[1]["amount"], 250);
+    assert_eq!(rows[1]["from_name"], "Alice", "payer's own from_name: {body}");
+    assert_eq!(rows[1]["to_name"], "Bob", "payer's counterparty to_name: {body}");
+    assert_eq!(rows[1]["memo"], "coffee", "memo: {body}");
+
+    // Payee's incoming history: the payer's name is the friendly counterparty (closes N6/H3 — the
+    // payee no longer sees a raw hex `from`).
+    let (s, body) = call(&state, get_req(&format!("/api/v1/transactions/{merch_hex}"))).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let rows = body["transactions"].as_array().unwrap();
+    assert_eq!(rows.len(), 2, "{body}");
+    let named = rows.iter().find(|r| r["amount"] == 250).expect("named row present");
+    assert_eq!(
+        named["from_name"], "Alice",
+        "payee sees payer's name, not a raw pubkey: {body}"
+    );
+    assert_eq!(named["to_name"], "Bob");
+    assert_eq!(named["memo"], "coffee");
 }
 
 // --- deposit surface (ckBTC-style top-up) ----------------------------------

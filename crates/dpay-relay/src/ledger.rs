@@ -20,8 +20,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use dpay_core::{
-    sign_receipt, validate, CodecError, Currency, PayError, ReceiptClaim, SignedAuthorization,
-    WithdrawAuth, DEMO_USD, NONCE_LEN, PUBKEY_LEN,
+    sign_receipt, validate, CodecError, Currency, MEMO_LEN, NAME_LEN, PayError, ReceiptClaim,
+    SignedAuthorization, WithdrawAuth, DEMO_USD, NONCE_LEN, PUBKEY_LEN,
 };
 
 /// The minimal withdrawal amount the facade honors, in sats. Mirrors the LIVE ckBTC minter's
@@ -35,6 +35,19 @@ const RETRIEVE_BTC_MIN_AMOUNT: u64 = 50_000;
 /// (`verify_strict` rejects it). The canister rejects a `pay` that names it as the payee; the
 /// FakeLedger mirrors that reject so the two can't diverge (W3 audit).
 const MINT_ACCOUNT: [u8; PUBKEY_LEN] = [0xFF; PUBKEY_LEN];
+
+/// Decode a fixed-width NUL-padded UTF-8 name/memo field (32 bytes on the wire, single-sourced as
+/// [`NAME_LEN`]/[`MEMO_LEN`] in core) into the display `String` the relay's JSON history carries.
+/// Trims trailing NULs (the builder's padding) and decodes lossily, so a malformed buffer is never a
+/// silent error or panic — the core stores/signs/verifies raw bytes; the relay only renders them.
+/// `NAME_LEN == MEMO_LEN`, so the same helper covers `from_name`/`to_name` and `memo`.
+const _: () = assert!(NAME_LEN == MEMO_LEN);
+fn display_field_to_string(buf: &[u8; NAME_LEN]) -> String {
+    // Trim trailing NULs (the builder's padding): take through the last non-zero byte. `[u8]` has no
+    // `trim_end_matches` (that's a `str` method), so find the boundary by hand, then decode lossily.
+    let end = buf.iter().rposition(|&b| b != 0).map_or(0, |i| i + 1);
+    String::from_utf8_lossy(&buf[..end]).into_owned()
+}
 
 /// Verified mainnet constants for the ckUSDC onramp (ckERC-20 family). ckUSDC has NO per-principal
 /// IC deposit address and NO user-callable mint — the user performs two Ethereum transactions from
@@ -69,9 +82,12 @@ pub struct Receipt {
     pub pubkey: String,
 }
 
-/// One settled transaction, as the wallet's history list shows it. Byte fields are hex (matches
-/// [`Receipt`]). `timestamp` is unix seconds. Direction (in/out) is derived by the caller comparing
-/// the queried account's pubkey to `from`. Mirrors the canister's `TxnView`.
+/// One settled transaction, as the wallet's history list shows it. `from`/`to`/`nonce` are hex
+/// (matches [`Receipt`]); `from_name`/`to_name`/`memo` are the UTF-8 display strings decoded
+/// (NUL-trimmed, lossy) from the signed authorization's 32-byte name/memo fields — so history is
+/// self-describing on both sides (the payee sees the payer's name, not a raw pubkey; closes N6/H3).
+/// `timestamp` is unix seconds. Direction (in/out) is derived by the caller comparing the queried
+/// account's pubkey to `from`. Mirrors the canister's `TxnView`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct TxnRecord {
     pub from: String,
@@ -80,6 +96,14 @@ pub struct TxnRecord {
     pub nonce: String,
     pub currency: Currency,
     pub timestamp: u64,
+    /// The payer's display name (decoded from the signed 32-byte `from_name` field). Empty string
+    /// for synthesized mint/burn sentinel rows (the app special-cases those).
+    pub from_name: String,
+    /// The payee's display name (decoded from the signed 32-byte `to_name` field). Empty string for
+    /// synthesized mint/burn sentinel rows.
+    pub to_name: String,
+    /// The merchant-set memo (decoded from the signed 32-byte `memo` field). Empty string when unset.
+    pub memo: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -576,6 +600,11 @@ impl Ledger for FakeLedger {
             nonce: hex::encode(sa.auth.nonce),
             currency,
             timestamp: now,
+            // Names + memo flow from the signed wire into history (N6/H3): the payee sees the
+            // payer's name, not a raw pubkey.
+            from_name: display_field_to_string(&sa.auth.from_name),
+            to_name: display_field_to_string(&sa.auth.to_name),
+            memo: display_field_to_string(&sa.auth.memo),
         });
         // Assign a monotonic block index (stand-in for the ICRC ledger block) and sign the receipt
         // claim with the FakeLedger's stable test key — the offline analogue of the canister's
@@ -808,6 +837,11 @@ impl Ledger for FakeLedger {
             nonce: hex::encode(nonce),
             currency: req.currency,
             timestamp: now,
+            // A synthesized burn row (counterparty = MINT_ACCOUNT sentinel): no signed names/memo
+            // apply, so the app's "mint/burn" special-case reads empty strings.
+            from_name: String::new(),
+            to_name: String::new(),
+            memo: String::new(),
         });
         Ok(WithdrawReceipt {
             from: hex::encode(from),
