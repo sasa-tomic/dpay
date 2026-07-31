@@ -71,7 +71,10 @@ type Result_8 = variant { Ok; Err : text };
 type Result_9 = variant { Ok : nat; Err : text };
 type TxnView = record {
   to : blob;
+  from_name : text;
+  to_name : text;
   from : blob;
+  memo : text;
   currency : nat32;
   nonce : blob;
   timestamp : nat64;

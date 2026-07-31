@@ -9,7 +9,7 @@
 //! The canister ids are NOT emitted here — they are only known after `dfx canister create`, so the
 //! deploy script builds the candid init args inline from this fixture's keys/wire + those ids.
 
-use dpay_core::{Authorization, SignedAuthorization, DEMO_USD, PUBKEY_LEN};
+use dpay_core::{Authorization, SignedAuthorization, DEMO_USD, MEMO_LEN, NAME_LEN, PUBKEY_LEN};
 use ed25519_dalek::SigningKey;
 
 /// Deterministic Ed25519 key from a single-byte seed pattern (matches dpay-fixture; demo only).
@@ -40,6 +40,9 @@ fn main() {
         nonce,
         expiry: EXPIRY,
         currency: DEMO_USD,
+        from_name: [0u8; NAME_LEN],
+        to_name: [0u8; NAME_LEN],
+        memo: [0u8; MEMO_LEN],
     };
     let wire = SignedAuthorization::new(&payer, auth).to_wire();
 

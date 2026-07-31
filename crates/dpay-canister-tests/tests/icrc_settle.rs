@@ -24,7 +24,7 @@
 use candid::{decode_one, encode_args, encode_one, CandidType, Nat, Principal};
 use dpay_core::{
     generate_keypair, verify_receipt, Authorization, Currency, ReceiptClaim, SignedAuthorization,
-    DEMO_USD, PUBKEY_LEN, SIG_LEN,
+    DEMO_USD, MEMO_LEN, NAME_LEN, PUBKEY_LEN, SIG_LEN,
 };
 use ed25519_dalek::SigningKey;
 use icrc_ledger_types::icrc1::account::Account;
@@ -157,6 +157,12 @@ struct TxnView {
     nonce: Vec<u8>,
     currency: u32,
     timestamp: u64,
+    /// Payer's display name (UTF-8 string; empty when unset, e.g. mint/burn/reconcile/withdraw rows).
+    from_name: String,
+    /// Payee's display name (UTF-8 string; empty when unset).
+    to_name: String,
+    /// Optional merchant-set memo (UTF-8 string; empty when unset).
+    memo: String,
 }
 
 fn nat_to_u64(n: &Nat) -> u64 {
@@ -300,7 +306,61 @@ fn signed(
     expiry: u64,
     currency: Currency,
 ) -> Vec<u8> {
-    let auth = Authorization { from, to, amount, nonce, expiry, currency };
+    // Default display names + memo to all-zero (empty) — the legacy callers don't assert names, so
+    // they keep working unchanged. The new `signed_named` helper covers the names round-trip test.
+    let auth = Authorization {
+        from,
+        to,
+        amount,
+        nonce,
+        expiry,
+        currency,
+        from_name: [0u8; NAME_LEN],
+        to_name: [0u8; NAME_LEN],
+        memo: [0u8; MEMO_LEN],
+    };
+    SignedAuthorization::new(sk, auth).to_wire().to_vec()
+}
+
+/// Pad an ASCII name/memo into a fixed NUL-padded buffer (mirrors what the app builder does before
+/// signing). Truncates to the field width.
+fn pad_name(s: &[u8]) -> [u8; NAME_LEN] {
+    let mut b = [0u8; NAME_LEN];
+    let n = s.len().min(NAME_LEN);
+    b[..n].copy_from_slice(&s[..n]);
+    b
+}
+
+/// Like [`signed`], but carries display names + a memo. Proves names ride inside the signed bytes and
+/// survive the full settle → history round-trip through stable memory.
+fn signed_named(
+    sk: &SigningKey,
+    from: [u8; 32],
+    to: [u8; 32],
+    amount: u64,
+    nonce: [u8; 16],
+    expiry: u64,
+    currency: Currency,
+    from_name: &[u8],
+    to_name: &[u8],
+    memo: &[u8],
+) -> Vec<u8> {
+    let auth = Authorization {
+        from,
+        to,
+        amount,
+        nonce,
+        expiry,
+        currency,
+        from_name: pad_name(from_name),
+        to_name: pad_name(to_name),
+        memo: {
+            let mut b = [0u8; MEMO_LEN];
+            let n = memo.len().min(MEMO_LEN);
+            b[..n].copy_from_slice(&memo[..n]);
+            b
+        },
+    };
     SignedAuthorization::new(sk, auth).to_wire().to_vec()
 }
 
@@ -890,6 +950,87 @@ fn transactions_of_records_mint_pay_burn() {
     let merch_txns = transactions_of(&pic, dpay, merch, DEMO_USD, 10);
     assert_eq!(merch_txns.len(), 1);
     assert_eq!(merch_txns[0].amount, 2_500);
+}
+
+/// N6/H3 (wire-format v2): display names + memo ride inside the SIGNED authorization, settle through
+/// the facade, and round-trip through stable memory into `transactions_of` as `String` — so the
+/// payee sees the payer's name, not a raw hex pubkey. Proves names are bound by the signature (a
+/// tamper would be rejected at `verify`) and persist in history on BOTH sides. Mint/burn rows (which
+/// use the MINT_ACCOUNT sentinel) carry empty names, so this also asserts the app's empty-string
+/// decoding for zero-padded fields.
+#[test]
+fn names_and_memo_round_trip_through_history() {
+    let (pic, _ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
+    mint(&pic, dpay, payer, DEMO_USD, INIT_A);
+
+    let expiry = T0_SECS + 120;
+    let nonce = [0x4eu8; 16];
+    // Alice pays Bob 3_000 with memo "dinner" — all three names ride inside the signed bytes.
+    pay(
+        &pic,
+        dpay,
+        signed_named(
+            &sk,
+            payer,
+            merch,
+            3_000,
+            nonce,
+            expiry,
+            DEMO_USD,
+            b"Alice",
+            b"Bob",
+            b"dinner",
+        ),
+    )
+    .expect("named pay should settle");
+
+    // The payer's history row carries the names verbatim (decoded from the NUL-padded signed field).
+    let payer_txns = transactions_of(&pic, dpay, payer, DEMO_USD, 10);
+    let pay_row = payer_txns
+        .iter()
+        .find(|t| t.nonce == nonce.to_vec())
+        .expect("named pay recorded on payer side");
+    assert_eq!(pay_row.from_name, "Alice", "from_name round-trips on the payer side");
+    assert_eq!(pay_row.to_name, "Bob", "to_name round-trips on the payer side");
+    assert_eq!(pay_row.memo, "dinner", "memo round-trips on the payer side");
+
+    // The merchant sees the SAME names (proves N6/H3 closure: no raw hex counterparty).
+    let merch_txns = transactions_of(&pic, dpay, merch, DEMO_USD, 10);
+    let merch_pay_row = merch_txns
+        .iter()
+        .find(|t| t.nonce == nonce.to_vec())
+        .expect("named pay recorded on merchant side");
+    assert_eq!(merch_pay_row.from_name, "Alice", "merchant sees the payer's name");
+    assert_eq!(merch_pay_row.to_name, "Bob");
+    assert_eq!(merch_pay_row.memo, "dinner");
+
+    // The mint row (counterparty = MINT_ACCOUNT sentinel) has EMPTY names — the sentinel has no
+    // display name, and the all-zero field decodes lossily to an empty string (never a panic).
+    let mint_row = payer_txns.iter().find(|t| t.from == [0xFFu8; 32]).expect("mint row present");
+    assert_eq!(mint_row.from_name, "", "mint row from_name is empty");
+    assert_eq!(mint_row.to_name, "", "mint row to_name is empty");
+    assert_eq!(mint_row.memo, "", "mint row memo is empty");
+
+    // Tampering a name byte in the signed authorization breaks the canister's signature check — the
+    // names are bound by the signature, not just carried. (Mirrors core's `tampering_a_name_byte`
+    // proptest at the settlement boundary.)
+    let mut tampered = signed_named(
+        &sk,
+        payer,
+        merch,
+        3_000,
+        [0x4fu8; 16],
+        expiry,
+        DEMO_USD,
+        b"Alice",
+        b"Bob",
+        b"dinner",
+    );
+    // Flip one byte in the to_name region of the signing bytes ([132..164) within the 196-byte
+    // signing prefix; the wire is signing(196) | sig(64) | from_pub(32)).
+    tampered[140] ^= 0xFF;
+    let res = pay(&pic, dpay, tampered);
+    assert!(res.is_err(), "a tampered name byte must fail signature verification: {res:?}");
 }
 
 /// R1 (CRITICAL): with NO controller set (the demo default), the privileged admin ops

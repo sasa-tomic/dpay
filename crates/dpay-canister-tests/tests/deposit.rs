@@ -20,7 +20,7 @@
 //! ckBTC is immediately spendable through the UNCHANGED `pay` path (deposit -> spend closed loop).
 
 use candid::{decode_one, encode_args, encode_one, CandidType, Nat, Principal};
-use dpay_core::{generate_keypair, Authorization, Currency, SignedAuthorization};
+use dpay_core::{generate_keypair, Authorization, Currency, SignedAuthorization, MEMO_LEN, NAME_LEN};
 use ed25519_dalek::SigningKey;
 use icrc_ledger_types::icrc1::account::Account;
 use pocket_ic::{PocketIc, Time};
@@ -241,7 +241,17 @@ fn signed(
     expiry: u64,
     currency: Currency,
 ) -> Vec<u8> {
-    let auth = Authorization { from, to, amount, nonce, expiry, currency };
+    let auth = Authorization {
+        from,
+        to,
+        amount,
+        nonce,
+        expiry,
+        currency,
+        from_name: [0u8; NAME_LEN],
+        to_name: [0u8; NAME_LEN],
+        memo: [0u8; MEMO_LEN],
+    };
     SignedAuthorization::new(sk, auth).to_wire().to_vec()
 }
 

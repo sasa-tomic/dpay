@@ -71,8 +71,8 @@ use std::borrow::Cow;
 use std::cell::RefCell;
 
 use dpay_core::{
-    validate, Currency, ReceiptClaim, SignedAuthorization, WithdrawAuth, NONCE_LEN, PUBKEY_LEN,
-    RECEIPT_CLAIM_LEN, SIG_LEN,
+    validate, Currency, ReceiptClaim, SignedAuthorization, WithdrawAuth, MEMO_LEN, NAME_LEN,
+    NONCE_LEN, PUBKEY_LEN, RECEIPT_CLAIM_LEN, SIG_LEN,
 };
 
 type Memory = VirtualMemory<DefaultMemoryImpl>;
@@ -589,8 +589,15 @@ impl Storable for AccountTxnKey {
     const BOUND: Bound = Bound::Bounded { max_size: TXN_KEY_LEN as u32, is_fixed_size: true };
 }
 
-/// One settled payment, recorded under each side's pubkey. 100 bytes fixed. Mirrors the wire fields
-/// the payer already signed (no fee, no new surfaces — read-only-after-settle).
+/// One settled payment, recorded under each side's pubkey. Fixed 196 bytes. Mirrors the wire fields
+/// the payer already signed (no fee, no new surfaces — read-only-after-settle). The `from_name` /
+/// `to_name` / `memo` fields were added on 2026-07-31 (wire-format v2): display names + an optional
+/// memo now ride inside the signed authorization, so the payee sees the payer's name (not a raw
+/// pubkey) in history. This is a GREENFIELD wire break — the pre-2026-07-31 100-byte layout is gone,
+/// there is no backward-compat path, and the previous "SAME type/layout as the pre-facade shipping
+/// canister" claim is stale. Layout (single-sourced from `dpay-core` consts by name):
+/// `from(32) | to(32) | amount_le(8) | nonce(16) | currency_le(4) | timestamp_le(8) | from_name(32)
+/// | to_name(32) | memo(32)`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct TxnRecord {
     from: [u8; PUBKEY_LEN],
@@ -599,8 +606,18 @@ struct TxnRecord {
     nonce: [u8; NONCE_LEN],
     currency: Currency,
     timestamp: u64, // unix seconds the ledger settled it (`ic time / 1e9`)
+    /// Payer's display name (UTF-8, trailing-NUL padded). From the signed authorization.
+    from_name: [u8; NAME_LEN],
+    /// Payee's display name (UTF-8, trailing-NUL padded). From the signed authorization.
+    to_name: [u8; NAME_LEN],
+    /// Optional merchant-set memo (UTF-8, trailing-NUL padded). From the signed authorization.
+    memo: [u8; MEMO_LEN],
 }
-const TXN_RECORD_LEN: usize = PUBKEY_LEN + PUBKEY_LEN + 8 + NONCE_LEN + 4 + 8; // 100
+/// `from(32) | to(32) | amount_le(8) | nonce(16) | currency_le(4) | timestamp_le(8) | from_name(32)
+/// | to_name(32) | memo(32)` = 196 bytes. Expressed as a sum of the core-sourced widths by name so a
+/// future width change propagates without magic numbers.
+const TXN_RECORD_LEN: usize =
+    PUBKEY_LEN + PUBKEY_LEN + 8 + NONCE_LEN + 4 + 8 + NAME_LEN + NAME_LEN + MEMO_LEN; // 196
 impl Storable for TxnRecord {
     fn to_bytes(&self) -> Cow<'_, [u8]> {
         let mut b = [0u8; TXN_RECORD_LEN];
@@ -610,7 +627,15 @@ impl Storable for TxnRecord {
         b[2 * PUBKEY_LEN + 8..2 * PUBKEY_LEN + 8 + NONCE_LEN].copy_from_slice(&self.nonce);
         b[2 * PUBKEY_LEN + 8 + NONCE_LEN..2 * PUBKEY_LEN + 8 + NONCE_LEN + 4]
             .copy_from_slice(&self.currency.to_le_bytes());
-        b[2 * PUBKEY_LEN + 8 + NONCE_LEN + 4..].copy_from_slice(&self.timestamp.to_le_bytes());
+        b[2 * PUBKEY_LEN + 8 + NONCE_LEN + 4..2 * PUBKEY_LEN + 8 + NONCE_LEN + 4 + 8]
+            .copy_from_slice(&self.timestamp.to_le_bytes());
+        // The three name/memo fields: raw 32-byte copies at the END (after timestamp). They are
+        // already NUL-padded fixed arrays (the app NUL-pads/truncates before signing), so a plain
+        // copy is the canonical, little-endian-independent encoding.
+        let off = 2 * PUBKEY_LEN + 8 + NONCE_LEN + 4 + 8;
+        b[off..off + NAME_LEN].copy_from_slice(&self.from_name);
+        b[off + NAME_LEN..off + 2 * NAME_LEN].copy_from_slice(&self.to_name);
+        b[off + 2 * NAME_LEN..off + 2 * NAME_LEN + MEMO_LEN].copy_from_slice(&self.memo);
         Cow::Owned(b.to_vec())
     }
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
@@ -628,9 +653,18 @@ impl Storable for TxnRecord {
                 .unwrap(),
         );
         let timestamp = u64::from_le_bytes(
-            b[2 * PUBKEY_LEN + 8 + NONCE_LEN + 4..].try_into().unwrap(),
+            b[2 * PUBKEY_LEN + 8 + NONCE_LEN + 4..2 * PUBKEY_LEN + 8 + NONCE_LEN + 4 + 8]
+                .try_into()
+                .unwrap(),
         );
-        TxnRecord { from, to, amount, nonce, currency, timestamp }
+        let off = 2 * PUBKEY_LEN + 8 + NONCE_LEN + 4 + 8;
+        let mut from_name = [0u8; NAME_LEN];
+        from_name.copy_from_slice(&b[off..off + NAME_LEN]);
+        let mut to_name = [0u8; NAME_LEN];
+        to_name.copy_from_slice(&b[off + NAME_LEN..off + 2 * NAME_LEN]);
+        let mut memo = [0u8; MEMO_LEN];
+        memo.copy_from_slice(&b[off + 2 * NAME_LEN..off + 2 * NAME_LEN + MEMO_LEN]);
+        TxnRecord { from, to, amount, nonce, currency, timestamp, from_name, to_name, memo }
     }
     const BOUND: Bound = Bound::Bounded { max_size: TXN_RECORD_LEN as u32, is_fixed_size: true };
 }
@@ -750,7 +784,10 @@ struct PayReceipt {
     nonce: Vec<u8>,
     new_from_balance: u64,
     /// The ICRC ledger block index where the transfer landed (outcome proof; part of the signed
-    /// receipt claim). Additive field (R2) — the frozen 196-byte authorization INPUT is untouched.
+    /// receipt claim). Additive field (R2) — these R2 outcome-attestation fields are outside the
+    /// payer's signed authorization (wire-format v2: the authorization INPUT is now 196 bytes and now
+    /// carries `from_name`/`to_name`/`memo`, added 2026-07-31; the R2 receipt fields remain a
+    /// canister-authored OUTCOME layer on top, untouched by the wire-format change).
     block_index: u64,
     /// Unix seconds the canister recorded the settle (part of the signed claim). Additive (R2).
     settle_ts: u64,
@@ -770,6 +807,22 @@ struct TxnView {
     nonce: Vec<u8>,
     currency: u32,
     timestamp: u64,
+    /// Payer's display name (decoded from the signed 32-byte NUL-padded field; empty if unset).
+    from_name: String,
+    /// Payee's display name (decoded from the signed 32-byte NUL-padded field; empty if unset).
+    to_name: String,
+    /// Optional merchant-set memo (decoded from the signed 32-byte NUL-padded field; empty if unset).
+    memo: String,
+}
+
+/// Decode a fixed 32-byte NUL-padded UTF-8 field (a display name or memo) into a Rust `String`,
+/// trimming trailing NULs. Never panics: arbitrary non-UTF8 bytes decode lossily (the builder is
+/// responsible for padding valid UTF-8, but history must never trap on a corrupt/foreign field).
+/// Empty (all-zero) → empty string. Generic over the array width so it serves both `NAME_LEN` and
+/// `MEMO_LEN` (both are 32 today).
+fn name_field_to_string<const N: usize>(b: &[u8; N]) -> String {
+    let bytes: Vec<u8> = b.iter().take_while(|&&c| c != 0).copied().collect();
+    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 /// The canister-signed receipt for a settled payment, returned by `receipt(nonce)`. Carries the
@@ -1335,7 +1388,17 @@ async fn pay(signed: Vec<u8>) -> Result<PayReceipt, String> {
     // awaits (balance/fee/transfer). `TxnRecord.timestamp` is documented as "unix seconds the
     // ledger settled it". One `time()` read — cheap.
     let settle_secs = time() / 1_000_000_000;
-    record_txn(from, to, amount, sa.auth.nonce, currency, settle_secs);
+    record_txn(
+        from,
+        to,
+        amount,
+        sa.auth.nonce,
+        currency,
+        settle_secs,
+        sa.auth.from_name,
+        sa.auth.to_name,
+        sa.auth.memo,
+    );
     let new_from_balance = ledger_balance_of(ledger, &from_acct).await.unwrap_or_else(|_| {
         balance.saturating_sub(amount).saturating_sub(fee)
     });
@@ -1389,13 +1452,16 @@ fn record_txn(
     nonce: [u8; NONCE_LEN],
     currency: Currency,
     timestamp: u64,
+    from_name: [u8; NAME_LEN],
+    to_name: [u8; NAME_LEN],
+    memo: [u8; MEMO_LEN],
 ) {
     let seq = TXN_SEQ.with(|c| {
         let v = *c.borrow().get();
         c.borrow_mut().set(v + 1).expect("advance txn seq");
         v
     });
-    let rec = TxnRecord { from, to, amount, nonce, currency, timestamp };
+    let rec = TxnRecord { from, to, amount, nonce, currency, timestamp, from_name, to_name, memo };
     ACCOUNT_TXNS.with(|m| {
         let mut m = m.borrow_mut();
         m.insert(AccountTxnKey::new(from, currency, seq), rec);
@@ -1437,7 +1503,17 @@ async fn mint(to: Vec<u8>, currency: Currency, amount: u64) -> Result<u64, Strin
     };
     let _block_index = ledger_transfer(ledger, arg).await.map_err(|e| format!("mint transfer: {e:?}"))?;
     let now_secs = time() / 1_000_000_000;
-    record_txn(MINT_ACCOUNT, pk, amount, [0u8; NONCE_LEN], currency, now_secs);
+    record_txn(
+        MINT_ACCOUNT,
+        pk,
+        amount,
+        [0u8; NONCE_LEN],
+        currency,
+        now_secs,
+        [0u8; NAME_LEN],
+        [0u8; NAME_LEN],
+        [0u8; MEMO_LEN],
+    );
     // Re-read the authoritative post-mint balance: refresh the display cache AND return it. The
     // `Ledger` trait contract is that `mint` returns the NEW BALANCE (FakeLedger honors this; the
     // relay faucet surfaces the return directly as `{balance}`), NOT the ledger's block index.
@@ -1495,7 +1571,17 @@ async fn faucet(account: Vec<u8>, currency: Currency) -> Result<u64, String> {
     ledger_transfer(ledger, arg)
         .await
         .map_err(|e| format!("faucet transfer: {e:?}"))?;
-    record_txn(MINT_ACCOUNT, pk, FAUCET_AMOUNT, [0u8; NONCE_LEN], currency, now_secs);
+    record_txn(
+        MINT_ACCOUNT,
+        pk,
+        FAUCET_AMOUNT,
+        [0u8; NONCE_LEN],
+        currency,
+        now_secs,
+        [0u8; NAME_LEN],
+        [0u8; NAME_LEN],
+        [0u8; MEMO_LEN],
+    );
     // Re-read the authoritative post-faucet balance: refresh the display cache AND return it (the
     // `Ledger::faucet` contract returns the NEW BALANCE, surfaced by the relay as `{balance}`).
     let new_balance = ledger_balance_of(ledger, &account_of(&pk))
@@ -1535,7 +1621,17 @@ async fn burn(from: Vec<u8>, currency: Currency, amount: u64) -> Result<u64, Str
     };
     let block_index = ledger_transfer(ledger, arg).await.map_err(|e| format!("burn transfer: {e:?}"))?;
     let now_secs = time() / 1_000_000_000;
-    record_txn(pk, MINT_ACCOUNT, amount, [0u8; NONCE_LEN], currency, now_secs);
+    record_txn(
+        pk,
+        MINT_ACCOUNT,
+        amount,
+        [0u8; NONCE_LEN],
+        currency,
+        now_secs,
+        [0u8; NAME_LEN],
+        [0u8; NAME_LEN],
+        [0u8; MEMO_LEN],
+    );
     // Refresh the display cache from the authoritative ledger.
     if let Ok(bal) = ledger_balance_of(ledger, &from_acct).await {
         write_cache(pk, currency, bal);
@@ -1708,7 +1804,20 @@ async fn reconcile(currency: Currency) -> Result<ReconcileReport, String> {
         let to_pk = t.to.subaccount.unwrap_or(MINT_ACCOUNT);
         let amount = nat_to_u64(&t.amount).unwrap_or(0);
         settle_nonce(&nonce_key);
-        record_txn(from_pk, to_pk, amount, nonce, currency, tx.timestamp);
+        // The on-ledger transfer log carries only the ICRC memo (= nonce), NOT the authorization's
+        // display names/memo — those live in the signed wire, which is gone post-trap. So a repaired
+        // orphan is recorded with empty names (a rare repair path; the names were never persisted).
+        record_txn(
+            from_pk,
+            to_pk,
+            amount,
+            nonce,
+            currency,
+            tx.timestamp,
+            [0u8; NAME_LEN],
+            [0u8; NAME_LEN],
+            [0u8; MEMO_LEN],
+        );
         // Best-effort: refresh the display cache for both sides from the authoritative ledger.
         if let Ok(bal) = ledger_balance_of(ledger, &account_of(&from_pk)).await {
             write_cache(from_pk, currency, bal);
@@ -1981,7 +2090,17 @@ async fn withdraw(req: WithdrawRequest) -> Result<WithdrawReceipt, String> {
     //    (counterparty = the MINT_ACCOUNT sentinel, like `burn`) + refresh the display cache from the
     //    authoritative ledger.
     let settle_secs = time() / 1_000_000_000;
-    record_txn(from, MINT_ACCOUNT, req.amount, nonce_bytes, req.currency, settle_secs);
+    record_txn(
+        from,
+        MINT_ACCOUNT,
+        req.amount,
+        nonce_bytes,
+        req.currency,
+        settle_secs,
+        [0u8; NAME_LEN],
+        [0u8; NAME_LEN],
+        [0u8; MEMO_LEN],
+    );
     if let Ok(bal) = ledger_balance_of(ledger, &from_acct).await {
         write_cache(from, req.currency, bal);
     }
@@ -2039,6 +2158,9 @@ fn transactions_of(pubkey: Vec<u8>, currency: Currency, limit: u32) -> Vec<TxnVi
                 nonce: r.nonce.to_vec(),
                 currency: r.currency,
                 timestamp: r.timestamp,
+                from_name: name_field_to_string(&r.from_name),
+                to_name: name_field_to_string(&r.to_name),
+                memo: name_field_to_string(&r.memo),
             })
             .collect()
     })
