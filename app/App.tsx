@@ -61,6 +61,8 @@ import {QrScanner} from './components/QrScanner';
 import {NfcTap} from './components/NfcTap';
 import {PayMode} from './components/PayMode';
 import {ReceiveMode} from './components/ReceiveMode';
+import {SettingsSheet} from './components/SettingsSheet';
+import {AssetPickerSheet} from './components/AssetPickerSheet';
 
 
 
@@ -847,131 +849,6 @@ function WithdrawSheet({identity, relayUrl, currency, display, ckBtcBalance, onC
               {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
             </>
           )}
-        </ScrollView>
-      </SafeAreaView>
-    </View>
-  );
-}
-
-/**
- * Settings sheet — relay URL, demo faucet, reset. Moved off the main wallet screen (UX-V2: the
- * relay URL + bare red reset were dev chrome on a consumer surface) into its own overlay. Reset now
- * requires a confirmation dialog (UX-V3: one-tap identity wipe was dangerous). The demo faucet lives
- * here too (founder decision: keep it, label it clearly, surface the cooldown).
- */
-function SettingsSheet({relayUrl, setRelayUrl, onTopUp, topUpBusy, topUpErr, onClose, onReset}: {
-  relayUrl: string;
-  setRelayUrl: (s: string) => void;
-  onTopUp: () => void;
-  topUpBusy: boolean;
-  topUpErr: string | null;
-  onClose: () => void;
-  onReset: () => void;
-}) {
-  useEscapeToClose(onClose);
-  const [confirmReset, setConfirmReset] = useState(false);
-
-  return (
-    <View style={S.sheetOverlay}>
-      <SafeAreaView style={S.sheet}>
-        <StatusBar barStyle="light-content" backgroundColor={C.bg} />
-        <View style={S.sheetHead}>
-          <Text style={S.sheetTitle}>Settings</Text>
-          <Pressable testID="btn-settings-close" style={S.sheetClose} onPress={onClose}><Text style={S.sheetCloseX}>✕</Text></Pressable>
-        </View>
-
-        <ScrollView contentContainerStyle={S.sheetBody} keyboardShouldPersistTaps="handled">
-          {/* Relay URL */}
-          <View style={S.settingsSection}>
-            <Text style={S.inputLabel}>Relay URL</Text>
-            <TextInput
-              testID="settings-relay"
-              style={S.relayInput}
-              value={relayUrl}
-              onChangeText={setRelayUrl}
-              autoCapitalize="none"
-              autoCorrect={false}
-              placeholder="http://<ip>:8787"
-              placeholderTextColor={C.sub2}
-            />
-            <Text style={S.dim2}>The server your wallet talks to. Change this to point at a different network.</Text>
-          </View>
-
-          {/* Demo faucet */}
-          <View style={S.settingsSection}>
-            <Text style={S.inputLabel}>Demo funds</Text>
-            <Text style={S.dim2}>Add play money for testing. Limited to once per hour on the real network.</Text>
-            <Pressable
-              testID="btn-topup"
-              style={[S.primaryWide, topUpBusy && S.dim]}
-              disabled={topUpBusy}
-              onPress={onTopUp}>
-              {topUpBusy
-                ? <ActivityIndicator size="small" color={C.brandInk} />
-                : <Text style={S.primaryText}>Add demo money</Text>}
-            </Pressable>
-            {topUpErr ? <Text testID="topup-err" style={S.topUpErr}>{topUpErr}</Text> : null}
-          </View>
-
-          {/* Reset */}
-          <View style={S.settingsSection}>
-            <Text style={S.inputLabel}>Reset</Text>
-            {confirmReset ? (
-              <View style={S.resetConfirmBox}>
-                <Text style={S.warnNote}>This erases your wallet identity from this device. Funds at this address become irrecoverable. This cannot be undone.</Text>
-                <Pressable testID="btn-reset-confirm" style={[S.primaryWide, {backgroundColor: C.bad, marginTop: 16}]} onPress={onReset}>
-                  <Text style={S.primaryText}>Yes, reset everything</Text>
-                </Pressable>
-                <Pressable testID="btn-reset-cancel" style={S.linkBtn} onPress={() => setConfirmReset(false)}>
-                  <Text style={S.linkTextMuted}>Cancel</Text>
-                </Pressable>
-              </View>
-            ) : (
-              <Pressable testID="btn-reset" style={S.linkBtn} onPress={() => setConfirmReset(true)}>
-                <Text style={S.resetLink}>Reset wallet</Text>
-              </Pressable>
-            )}
-          </View>
-
-          {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
-        </ScrollView>
-      </SafeAreaView>
-    </View>
-  );
-}
-
-// Asset picker — shown from the header "Add money" button when more than one onrampable asset exists.
-// A vertical list of the catalog's ramp assets (those carrying a minter_family); tapping a row opens
-// that asset's family-specific deposit sheet. The picker is the cohesive entry for MANY currencies:
-// every onrampable asset appears uniformly — there is no "supported"/"unsupported" split.
-function AssetPickerSheet({rampAssets, catalog, onPick, onClose}: {
-  rampAssets: CurrencyDescriptor[];
-  catalog: CurrencyDescriptor[];
-  onPick: (currency: number) => void;
-  onClose: () => void;
-}) {
-  useEscapeToClose(onClose);
-  return (
-    <View style={S.sheetOverlay}>
-      <SafeAreaView style={S.sheet}>
-        <StatusBar barStyle="light-content" backgroundColor={C.bg} />
-        <View style={S.sheetHead}>
-          <Text style={S.sheetTitle}>Add money</Text>
-          <Pressable testID="btn-picker-close" style={S.sheetClose} onPress={onClose}><Text style={S.sheetCloseX}>✕</Text></Pressable>
-        </View>
-        <ScrollView contentContainerStyle={S.sheetBody} keyboardShouldPersistTaps="handled">
-          <Text style={S.dim2}>Choose an asset to add to your wallet.</Text>
-          {rampAssets.map(a => {
-            const disp = familyDisplay(catalog, a.currency);
-            const key = assetTestKey(a);
-            return (
-              <Pressable key={a.currency} testID={`asset-picker-row-${key}`} style={S.pickerRow} onPress={() => onPick(a.currency)}>
-                <Text style={S.pickerLabel}>{disp.networkLabel}</Text>
-                <Text style={S.pickerSub}>{`Send ${disp.nativeAsset} on ${disp.networkLabel}`}</Text>
-              </Pressable>
-            );
-          })}
-          {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
         </ScrollView>
       </SafeAreaView>
     </View>
