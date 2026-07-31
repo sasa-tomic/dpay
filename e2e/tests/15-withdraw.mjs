@@ -20,7 +20,7 @@ const DEPOSIT_CURRENCY = 1; // ckBTC — matches App.tsx DEPOSIT_CURRENCY
 const SEED_SATS = 100_000;   // 0.00100000 BTC
 const WITHDRAW_BTC = '0.00050000'; // 50_000 sats == retrieve_btc_min_amount
 const WITHDRAW_SATS = 50_000;
-const WITHDRAW_ADDR = 'bc1qtestwithdrawaldestination';
+const WITHDRAW_ADDR = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
 
 export async function run() {
   const start = Date.now();

@@ -414,6 +414,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
           relayUrl={relayUrl}
           currency={withdrawCurrency}
           display={familyDisplay(catalog, withdrawCurrency)}
+          family={catalog.find(c => c.currency === withdrawCurrency)?.minter_family ?? 'CkBtcUtxo'}
           ckBtcBalance={assetBalances[withdrawCurrency] ?? 0}
           onClose={() => setWithdrawCurrency(null)}
           onWithdrawn={onActivity}

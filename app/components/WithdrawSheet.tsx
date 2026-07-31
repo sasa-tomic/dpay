@@ -5,7 +5,8 @@ import {S} from '../styles';
 import {WITHDRAW_TIMEOUT_MS, WITHDRAW_EXPIRY_WINDOW} from '../config/constants';
 import {fmtAsset, toSats, randNonceHex, nowSecs} from '../lib/format';
 import type {Identity} from '../lib/types';
-import type {FamilyDisplay} from '../config/catalog';
+import type {FamilyDisplay, MinterFamily} from '../config/catalog';
+import {isValidDestinationAddress} from '../config/catalog';
 import {withdrawFunds} from '../services/relay';
 import {loadSavedWithdrawAddr, saveWithdrawAddr} from '../services/withdraw';
 import {DpayCore} from '../services/native';
@@ -19,7 +20,7 @@ import {copyToClipboard} from '../hooks/clipboard';
  * funds. Amounts are shown in BTC (the backing currency symbol — never the wrapper/raw ledger id).
  * Escape closes the sheet (web), matching DepositSheet.
  */
-export function WithdrawSheet({identity, relayUrl, currency, display, ckBtcBalance, onClose, onWithdrawn}: {identity: Identity; relayUrl: string; currency: number; display: FamilyDisplay; ckBtcBalance: number; onClose: () => void; onWithdrawn: () => void}) {
+export function WithdrawSheet({identity, relayUrl, currency, display, family, ckBtcBalance, onClose, onWithdrawn}: {identity: Identity; relayUrl: string; currency: number; display: FamilyDisplay; family: MinterFamily; ckBtcBalance: number; onClose: () => void; onWithdrawn: () => void}) {
   const [address, setAddress] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
@@ -40,7 +41,9 @@ export function WithdrawSheet({identity, relayUrl, currency, display, ckBtcBalan
   const sats = toSats(amountStr);
   const belowMin = sats > 0 && sats < display.withdrawMinRaw;
   const overBalance = sats > ckBtcBalance;
-  const canReview = address.trim().length > 0 && sats > 0 && !belowMin && !overBalance;
+  const addrEntered = address.trim().length > 0;
+  const badAddr = addrEntered && !isValidDestinationAddress(family, address);
+  const canReview = addrEntered && !badAddr && sats > 0 && !belowMin && !overBalance;
 
   async function confirm() {
     if (!canReview) {
@@ -144,6 +147,7 @@ export function WithdrawSheet({identity, relayUrl, currency, display, ckBtcBalan
 
               {belowMin ? <Text style={S.warnNote}>{`Below the ${fmtAsset(display.withdrawMinRaw, display.amountDecimals, display.nativeAsset)} minimum withdrawal.`}</Text> : null}
               {overBalance ? <Text style={S.warnNote}>{`More than your available ${fmtAsset(ckBtcBalance, display.amountDecimals, display.nativeAsset)}.`}</Text> : null}
+              {badAddr ? <Text testID="withdraw-bad-addr" style={S.warnNote}>{`That doesn't look like a valid ${display.nativeAsset} address.`}</Text> : null}
 
               {(phase === 'form' || phase === 'error') && sats > 0 ? (
                 <View testID="withdraw-review" style={S.reviewCard}>

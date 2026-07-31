@@ -91,6 +91,22 @@ export function assetTestKey(a: CurrencyDescriptor): string {
   if (a.minter_family === 'CkBtcUtxo') return 'ckbtc';
   return (a.symbol ?? familyDisplay([], a.currency).nativeAsset ?? 'asset').toLowerCase();
 }
+// Validate a native-chain destination address against its minter family's format. Catches the most
+// common user error — pasting a wrong-chain address (e.g. an ETH 0x… into the BTC cash-out) — before
+// the user signs. Does NOT verify the checksum (the minter does that at settle time): this is a
+// prefix + charset + length sanity check, conservative (accepts valid-looking) not exhaustive.
+export function isValidDestinationAddress(family: MinterFamily, addr: string): boolean {
+  const a = addr.trim();
+  if (a.length < 26) return false;
+  if (family === 'CkBtcUtxo') {
+    return /^(bc1[02-9ac-hj-np-z]{6,87}|[13][a-km-zA-HJ-NP-Z1-9]{24,})$/i.test(a);
+  }
+  if (family === 'CkEthErc20') {
+    return /^0x[a-fA-F0-9]{40}$/.test(a);
+  }
+  return a.length > 0;
+}
+
 // The primary ASSET NAME shown as the heading on the asset card + picker rows (H1). This is the
 // catalog `symbol` when it reads as a name, with CkBtcUtxo normalized to 'ckBTC': its catalog
 // `symbol` ('₿') is the amount-UNIT glyph, not an asset name. It is DISTINCT from `nativeAsset`

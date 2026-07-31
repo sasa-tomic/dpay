@@ -19,16 +19,16 @@
 // Selector contract: `asset-ckbtc`, `btn-withdraw`, `withdraw-address-input`, `withdraw-amount-input`,
 // `btn-withdraw-confirm` (asserted disabled via the dim style / no review card).
 //
-// GAP (documented): the app performs NO destination address format validation (any non-empty string
-// passes the UI guard, and the relay accepts any UTF-8 destination — it is bound only by the sig).
-// There is no "invalid address" error to assert; this is an honest absence, not a missed test.
+// Also covers INVALID-ADDRESS validation (the documented gap, now closed): the app validates the
+// destination format family-aware — a wrong-chain address (ETH 0x… in the BTC cash-out) shows a
+// warning + disables the confirm button.
 import { setup, assert, assertEq, seedDeposit, refreshDeposit, getBalance, postWithdraw, onboardWallet, accountOf } from '../harness/lib.mjs';
 import { signWithdrawalHex, randNonceHex, generateKeypair } from '../harness/wire.mjs';
 
 const DEPOSIT_CURRENCY = 1; // ckBTC — matches the CkBtcUtxo catalog entry
 const SEED_SATS = 100_000;   // 0.00100000 BTC — enough to withdraw but small enough to over-draw
 const MIN_SATS = 50_000;     // retrieve_btc_min_amount (mirrors the live minter + the relay constant)
-const DEST = 'bc1qtestwithdrawaldestination';
+const DEST = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
 
 export async function run() {
   const start = Date.now();
@@ -70,6 +70,17 @@ export async function run() {
     assert(await isConfirmDisabled(driver),
       'the confirm button must be DISABLED for an over-balance amount (canReview=false)');
     console.log('[18-withdraw-errors] ✓ over-balance warning shows + confirm disabled');
+
+    // --- 2b. INVALID ADDRESS (UI guard): paste a wrong-chain address (ETH format in BTC cash-out). -
+    console.log('[18-withdraw-errors] invalid-address UI guard…');
+    await driver.type('withdraw-address-input', '0x1234567890abcdef1234567890abcdef12345678', { timeoutMs: 4_000 });
+    await driver.type('withdraw-amount-input', '0.00050000', { timeoutMs: 4_000 }); // valid amount
+    const bodyBad = await driver.bodyText();
+    assert(bodyBad.includes("That doesn't look like a valid BTC address."),
+      `bad-addr warning should show. body excerpt:\n${bodyBad.slice(0, 500)}`);
+    assert(await isConfirmDisabled(driver),
+      'confirm must be DISABLED for a wrong-chain address');
+    console.log('[18-withdraw-errors] ✓ invalid-address warning + confirm disabled');
 
     // Close the sheet so the relay-level checks below are a clean separate phase.
     await driver.click('btn-withdraw-close', { timeoutMs: 4_000 });
