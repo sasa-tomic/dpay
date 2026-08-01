@@ -13,10 +13,12 @@ import {
 } from '../payments';
 import {verifyOutcomeReceipt} from '../services/receipt';
 import {DpayCore, DpayNfc} from '../services/native';
+import {NfcIcon} from './NfcIcon';
 
-// Phase → status-view presentation (mirrors ui/src/NfcSession.jsx). `spin` renders a spinner.
-const NFC_UI: Record<string, {tone: string; glyph?: string; spin?: boolean; title: string; sub: string}> = {
-  listening: {tone: C.brand, glyph: '⌁', title: 'Hold near the other phone', sub: 'dpay is listening for a tap'},
+// Phase → status-view presentation (mirrors ui/src/NfcSession.jsx). `spin` renders a spinner; `icon`
+// renders the NFC contactless mark (the listening/"armed" state) in place of a text glyph.
+const NFC_UI: Record<string, {tone: string; glyph?: string; spin?: boolean; icon?: 'nfc'; title: string; sub: string}> = {
+  listening: {tone: C.brand, icon: 'nfc', title: 'Hold near the other phone', sub: 'dpay is listening for a tap'},
   linking: {tone: C.brand, spin: true, title: 'Connecting…', sub: 'Linking the two phones'},
   exchanging: {tone: C.brand, spin: true, title: 'Communicating…', sub: 'Keep the phones together'},
   awaitingApproval: {tone: C.brand, spin: true, title: 'Authorizing…', sub: 'Signing on the payer’s phone'},
@@ -274,7 +276,7 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled
   return (
     <View style={S.center} testID="nfc-status">
       <View style={[S.nfcBadge, {borderColor: m.tone}]}>
-        {m.spin ? <ActivityIndicator size="large" color={m.tone} /> : <Text style={[S.nfcGlyph, {color: m.tone}]}>{m.glyph}</Text>}
+        {m.icon === 'nfc' ? <NfcIcon color={m.tone} size={64} /> : m.spin ? <ActivityIndicator size="large" color={m.tone} /> : <Text style={[S.nfcGlyph, {color: m.tone}]}>{m.glyph}</Text>}
       </View>
       <Text style={S.nfcTitle}>{title}</Text>
       {sub ? <Text style={S.nfcSub}>{sub}</Text> : null}

@@ -1,6 +1,6 @@
 // DpayNfc shim — the merchant/payer NFC tap transport (a Kotlin native module on device). Web has
 // no NFC radio; the app reads NFC state via DpayCore.nfcStatus (returns 'unknown' here by default,
-// so the NfcPill stays hidden and NfcTap never mounts — exactly the right web default). A test can
+// so the Pay screen shows the NFC-unavailable row and NfcTap never mounts — exactly the right web default). A test can
 // flip it to 'ready' via `window.__DPAY_TEST_NFC_STATUS` (see dpay-core.ts) so flow 11 can arm the
 // NFC tap view and drive its phases.
 //

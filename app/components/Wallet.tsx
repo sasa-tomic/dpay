@@ -14,7 +14,6 @@ import {useHotkeys} from '../hooks/useHotkeys';
 import {readDepositDeepLink} from '../hooks/useDeepLink';
 import {Wordmark} from './Logo';
 import {HotkeyHint} from './HotkeyHint';
-import {NfcPill} from './NfcPill';
 import {Tab} from './Tab';
 import {PayMode} from './PayMode';
 import {ReceiveMode} from './ReceiveMode';
@@ -290,7 +289,6 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
                 ("Alice · 1b8a5ee7…") that made the header read like a debug panel; it's removed from the
                 main display. The short hex is no longer appended anywhere in the header. */}
             <Text style={S.who} testID="header-who">{identity.username}</Text>
-            <NfcPill status={nfc} />
           </View>
         </View>
         <Pressable

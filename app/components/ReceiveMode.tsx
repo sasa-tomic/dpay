@@ -11,6 +11,7 @@ import {classifyPayHttp, rejectionMessage, isNonceReused} from '../payments';
 import {DpayCore, DpayNfc} from '../services/native';
 import {NfcTap} from './NfcTap';
 import {QrScanner} from './QrScanner';
+import {NfcIcon} from './NfcIcon';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 
 // The optional merchant memo input — a real secondary field (not a bare text link), mirroring the
@@ -134,7 +135,10 @@ export function ReceiveMode({identity, relayUrl, nfcReady, onReceived, catalog}:
         ) : null}
         {!nfcActive ? (
           <>
-            <Text style={S.label}>Show this to the payer{reqQr.nfcHex ? ' · or let them tap' : ''}</Text>
+            <View style={S.nfcHintRow}>
+              {reqQr.nfcHex ? <NfcIcon color={C.brand} size={18} /> : null}
+              <Text style={S.nfcHintLabel}>Show this to the payer{reqQr.nfcHex ? ' · or let them tap' : ''}</Text>
+            </View>
             <View testID="request-qr" style={S.qrCard}><QRCode value={reqQr.value} size={244} ecl="M" /></View>
             <Text style={S.amountBig}>{fmtCurrencyAmount(catalog, reqQr.currency, reqQr.rawAmount)}</Text>
             <Text style={S.qrHint}>Waiting for payment…</Text>

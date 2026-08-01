@@ -228,12 +228,12 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
         <>
           {nfcReady ? (
             <View style={S.nfcStatusRow} testID="pay-scan">
-              <NfcIcon color={C.brand} />
+              <NfcIcon color={C.brand} size={34} />
               <Text style={S.nfcStatusLabel}>Tap or scan to pay</Text>
             </View>
           ) : (
             <View style={S.nfcStatusRow} testID="pay-scan">
-              <NfcIcon color={C.bad} />
+              <NfcIcon color={C.bad} size={34} off />
               <Pressable style={S.nfcInfoLink} onPress={() => setNfcInfoOpen(true)} accessibilityRole="button" accessibilityLabel="Why NFC is unavailable" accessibilityState={{disabled: false}}>
                 <Text style={S.nfcInfoLinkText}>NFC not available</Text>
                 <Text style={S.nfcInfoGlyph}>ⓘ</Text>

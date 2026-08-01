@@ -30,8 +30,6 @@ export const S = StyleSheet.create({
   headerSettingsIcon: {fontSize: 20, fontWeight: '600', color: C.sub},
   brand: {fontSize: 24},
   who: {fontSize: 12, color: C.sub, marginTop: 2},
-  nfcPill: {flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6, alignSelf: 'flex-start', backgroundColor: C.field, borderRadius: 12, paddingHorizontal: 9, height: 22},
-  nfcLabel: {fontSize: 12, fontWeight: '600', color: C.sub},
   nfcBadge: {width: 108, height: 108, borderRadius: 54, borderWidth: 4, borderColor: C.line, alignItems: 'center', justifyContent: 'center', marginBottom: 26},
   nfcGlyph: {fontSize: 54, fontWeight: '700', lineHeight: 62},
   nfcTitle: {fontSize: 24, fontWeight: '800', color: C.ink, textAlign: 'center'},
@@ -200,6 +198,9 @@ export const S = StyleSheet.create({
   // when tap-to-pay is ready, red with a tappable "NFC not available ⓘ" link + reason popup otherwise.
   nfcStatusRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 14},
   nfcStatusLabel: {fontSize: 18, fontWeight: '700', color: C.ink},
+  // Receive QR hint — a small NFC mark leading the "or let them tap" label when the reader is armed.
+  nfcHintRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 10},
+  nfcHintLabel: {fontSize: 15, color: C.sub, textAlign: 'center'},
   nfcInfoLink: {flexDirection: 'row', alignItems: 'center', gap: 5},
   nfcInfoLinkText: {fontSize: 18, fontWeight: '700', color: C.bad},
   nfcInfoGlyph: {fontSize: 15, color: C.sub2},

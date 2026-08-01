@@ -53,7 +53,8 @@ if (typeof window !== 'undefined') {
 }
 
 // Install the NFC session seam (`window.__DPAY_TEST_NFC_SESSION`) for future NFC-flow waves. No-op
-// for the onboard flow (NfcPill stays hidden via DpayCore.nfcStatus? returning undefined → 'unknown').
+// for the onboard flow (NFC status stays 'unknown' via DpayCore.nfcStatus? returning undefined, so
+// the Pay screen shows the NFC-unavailable row and NfcTap never mounts).
 if (typeof window !== 'undefined') {
   installNfcSeam(window);
 }

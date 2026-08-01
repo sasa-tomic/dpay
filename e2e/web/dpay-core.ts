@@ -456,7 +456,7 @@ export const __test = {
 };
 
 // The shape App.tsx expects on `NativeModules.DpayCore` (see `DpayCoreApi` in App.tsx). `nfcStatus`
-// defaults to 'unknown' (so the NfcPill stays hidden and NfcTap never mounts — the right web
+// defaults to 'unknown' (so the Pay screen shows the NFC-unavailable row and NfcTap never mounts — the right web
 // default), but a test can flip it to 'ready' via `window.__DPAY_TEST_NFC_STATUS` (Wave E flow 11)
 // so the NFC tap view arms and the `__DPAY_TEST_NFC_SESSION` seam can drive its phases.
 async function nfcStatus(): Promise<string> {
