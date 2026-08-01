@@ -1380,3 +1380,154 @@ async fn w3_fakeledger_rejects_pay_to_mint_sentinel_like_canister() {
     // The sentinel subaccount was NOT credited (the canister would have rejected before any move).
     assert_eq!(led.balance_of(&[0xFF; 32], DEMO_USD), 0);
 }
+
+// --- MC4 U3: durable receipt recovery (restart-safe /receipt + /pay Transient fallback) ----------
+//
+// The canister now stores a signed receipt per nonce (MC4 U1+U2 landed on the canister). These tests
+// prove the RELAY uses that durable source so a settled payment is recoverable even when the relay's
+// own process-local idempotency cache is gone (restart) or the settle reply was lost (Transient
+// exhaustion). The FakeLedger mirrors the canister's per-nonce receipt store; the relay falls back to
+// `Ledger::receipt(nonce)` on an idempotency-cache miss.
+
+/// `/receipt/{nonce}` is RESTART-SAFE: after a relay restart the process-local idempotency cache is
+/// gone, but a settled payment's receipt is still recoverable from the DURABLE ledger (the canister
+/// stores signed receipts per nonce; the FakeLedger mirrors that). So a fresh `AppState` over the SAME
+/// ledger must reconcile the nonce to the identical receipt — not 404. This is the durable-recovery
+/// contract that holds across relay restarts (the process cache is an optimization, not the source of
+/// truth).
+#[tokio::test]
+async fn u3_receipt_route_recovers_from_ledger_after_restart() {
+    let payer = keypair();
+    let merchant = keypair();
+    let led = ledger(pubkey(&payer), pubkey(&merchant));
+    let led_arc = Arc::new(led);
+    let nonce = [77u8; 16];
+
+    // Settle under the first AppState (populates both the process cache and the durable ledger store).
+    let state1 = AppState::new(led_arc.clone());
+    let sa = signed(&payer, pubkey(&merchant), 250, nonce, FUTURE);
+    let (s1, b1) = call(&state1, pay_json(&sa.encode())).await;
+    assert_eq!(s1, StatusCode::OK, "{b1}");
+
+    // Simulate a restart: a FRESH AppState over the SAME ledger (empty process-local idempotency
+    // cache). The receipt must be recoverable from the durable ledger, not the (now-gone) process
+    // cache — else this would be a 404 "not settled" false-negative.
+    let state2 = AppState::new(led_arc.clone());
+    let (s2, b2) = call(&state2, get_receipt(nonce)).await;
+    assert_eq!(s2, StatusCode::OK, "durable receipt must be recoverable after restart: {b2}");
+    assert_eq!(b2["receipt"], b1["receipt"], "recovered receipt identical to the settle receipt");
+    assert_eq!(b2["replayed"], serde_json::json!(true), "a recovery is always a replay");
+}
+
+/// A test-only ledger that simulates "canister settled but the reply was lost" — `pay` settles on
+/// the inner FakeLedger exactly ONCE (so the receipt is durably stored), then ALWAYS returns a
+/// `Transient` error so the relay's `settle_with_retry` exhausts its attempts. Models the real
+/// failure mode MC4 U3 fixes: the update trapped AFTER the ledger commit (canister settled, reply
+/// lost), and during the retry window the relay can't get a clean reply back. The inner's
+/// `receipt(nonce)` remains queryable, so the `/pay` Transient-exhausted branch recovers the settled
+/// receipt instead of returning a 503 false-negative.
+struct SettlesButLosesReply {
+    inner: Arc<FakeLedger>,
+    settled: std::sync::Mutex<bool>,
+}
+
+#[async_trait]
+impl Ledger for SettlesButLosesReply {
+    async fn pay(&self, wire: Vec<u8>) -> Result<Receipt, LedgerError> {
+        // Settle exactly once on the first call (the canister committed + recorded the receipt).
+        // Subsequent retries must NOT re-settle (the nonce is now spent → would NonceReused); they
+        // just "lose the reply" like the first call did.
+        let already = {
+            let mut g = self.settled.lock().unwrap();
+            let was = *g;
+            *g = true;
+            was
+        };
+        if !already {
+            let _ = self.inner.pay(wire).await?;
+        }
+        // …the reply is always "lost" (Transient) — the relay never sees the receipt from `pay()`.
+        Err(LedgerError::Transient("reply lost after settle".into()))
+    }
+    async fn receipt(&self, nonce: [u8; 16]) -> Result<Option<Receipt>, LedgerError> {
+        self.inner.receipt(nonce).await
+    }
+    async fn balance(&self, pk: [u8; 32], c: Currency) -> Result<u64, LedgerError> {
+        self.inner.balance(pk, c).await
+    }
+    async fn faucet(&self, to: [u8; 32], c: Currency, a: u64) -> Result<u64, LedgerError> {
+        self.inner.faucet(to, c, a).await
+    }
+    async fn transactions_of(
+        &self,
+        pk: [u8; 32],
+        c: Currency,
+        l: u32,
+    ) -> Result<Vec<TxnRecord>, LedgerError> {
+        self.inner.transactions_of(pk, c, l).await
+    }
+    async fn healthy(&self) -> bool {
+        true
+    }
+    async fn deposit_address(&self, pk: [u8; 32], c: Currency) -> Result<String, LedgerError> {
+        self.inner.deposit_address(pk, c).await
+    }
+    async fn deposit_status(
+        &self,
+        pk: [u8; 32],
+        c: Currency,
+    ) -> Result<DepositRefresh, LedgerError> {
+        self.inner.deposit_status(pk, c).await
+    }
+    async fn deposit_info(&self, c: Currency) -> Result<DepositInfo, LedgerError> {
+        self.inner.deposit_info(c).await
+    }
+    async fn currencies(
+        &self,
+    ) -> Result<Vec<dpay_relay::CurrencyDescriptor>, LedgerError> {
+        self.inner.currencies().await
+    }
+    async fn ckerc20_onramp_params(
+        &self,
+        currency: u32,
+    ) -> Result<dpay_relay::CkErc20OnrampParams, LedgerError> {
+        self.inner.ckerc20_onramp_params(currency).await
+    }
+    async fn receipt_pubkey(&self) -> Result<Vec<u8>, LedgerError> {
+        self.inner.receipt_pubkey().await
+    }
+}
+
+/// `/pay`'s Transient-exhausted branch recovers a settled-but-lost-reply payment: when
+/// `settle_with_retry` exhausts its retries (all Transient), the relay queries `Ledger::receipt(nonce)`
+/// BEFORE returning 503. If the canister actually settled (reply lost), the receipt is returned as a
+/// 200 `replayed: true` — never a false-negative 503 for a payment that landed.
+#[tokio::test]
+async fn u3_pay_transient_exhausted_recovers_settled_receipt() {
+    let payer = keypair();
+    let merchant = keypair();
+    let inner = Arc::new(ledger(pubkey(&payer), pubkey(&merchant)));
+    // Every `pay` settles on the inner ledger (once) but returns Transient → the relay's 3 attempts
+    // all fail, yet the receipt is durably stored and recoverable.
+    let state = AppState::new(Arc::new(SettlesButLosesReply {
+        inner: inner.clone(),
+        settled: std::sync::Mutex::new(false),
+    }));
+    let nonce = [88u8; 16];
+
+    let sa = signed(&payer, pubkey(&merchant), 300, nonce, FUTURE);
+    let (status, body) = call(&state, pay_json(&sa.encode())).await;
+
+    // The canister settled (the inner ledger committed); the reply was lost. The relay recovers the
+    // receipt via `Ledger::receipt(nonce)` instead of misreporting a 503.
+    assert_eq!(status, StatusCode::OK, "settled-but-lost-reply must recover, not 503: {body}");
+    assert_eq!(body["receipt"]["amount"], "300", "recovered the settled receipt");
+    assert_eq!(body["receipt"]["nonce"], hex::encode(nonce));
+    assert_eq!(body["replayed"], serde_json::json!(true), "a recovery is always a replay");
+    // The ledger actually settled (the inner committed despite the lost reply).
+    assert_eq!(
+        inner.balance_of(&pubkey(&merchant), DEMO_USD),
+        300,
+        "the inner ledger settled"
+    );
+}

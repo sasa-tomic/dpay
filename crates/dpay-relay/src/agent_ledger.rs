@@ -24,7 +24,7 @@ use candid::{decode_one, encode_args, encode_one, CandidType, Nat, Principal};
 use ic_agent::Agent;
 use serde::Deserialize;
 
-use dpay_core::{Currency, PUBKEY_LEN, SignedAuthorization};
+use dpay_core::{Currency, NONCE_LEN, PUBKEY_LEN, SignedAuthorization};
 
 use crate::ledger::{
     CKERC20_HELPER_ADDRESS, CKUSDC_ERC20_ADDRESS, CkErc20OnrampParams, CurrencyDescriptor, DepositInfo,
@@ -48,6 +48,23 @@ struct PayReceipt {
     amount: u64,
     nonce: Vec<u8>,
     new_from_balance: u64,
+    block_index: u64,
+    settle_ts: u64,
+    receipt_sig: Vec<u8>,
+    pubkey: Vec<u8>,
+}
+
+/// Candid mirror of the canister's `ReceiptView` (the `receipt(nonce)` query return). Same shape as
+/// `PayReceipt` MINUS `new_from_balance` (the durable receipt store records the outcome-attestation
+/// fields, not the post-settle display balance — that's recoverable via a separate `balance` query).
+/// `receipt_sig`/`pubkey` carry the canister-signed outcome so a payer verifies it under `pubkey`.
+#[derive(CandidType, Deserialize, Debug)]
+struct ReceiptView {
+    from: Vec<u8>,
+    to: Vec<u8>,
+    amount: u64,
+    nonce: Vec<u8>,
+    currency: u32,
     block_index: u64,
     settle_ts: u64,
     receipt_sig: Vec<u8>,
@@ -371,6 +388,41 @@ impl Ledger for AgentLedger {
         let pk: Option<Vec<u8>> = decode_one(&reply)
             .map_err(|e| LedgerError::Transient(format!("decode receipt_pubkey: {e}")))?;
         Ok(pk.unwrap_or_default())
+    }
+
+    /// Durable per-nonce receipt lookup via the facade's `receipt(blob) -> opt ReceiptView` query
+    /// (MC4 U3). The canister stores a signed receipt per nonce (MC4 U1+U2 ensure one exists for every
+    /// settled pay), so this returns `Some` for any nonce that settled — the durable source the relay
+    /// falls back to when its process-local idempotency cache can't answer (restart / lost reply).
+    ///
+    /// `new_from_balance` is NOT carried by `ReceiptView` (the durable store records the outcome
+    /// attestation, not the post-settle display balance); it surfaces as `0` on a recovered receipt.
+    /// The app re-reads the live balance separately, so this loses no information the payer needs.
+    async fn receipt(&self, nonce: [u8; NONCE_LEN]) -> Result<Option<Receipt>, LedgerError> {
+        let arg = encode_one(nonce.to_vec())
+            .map_err(|e| LedgerError::Transient(format!("encode receipt arg: {e}")))?;
+        let reply = self
+            .agent
+            .query(&self.canister_id, "receipt")
+            .with_arg(arg)
+            .call()
+            .await
+            .map_err(|e| LedgerError::Transient(format!("receipt query: {e}")))?;
+        let view: Option<ReceiptView> = decode_one(&reply)
+            .map_err(|e| LedgerError::Transient(format!("decode receipt: {e}")))?;
+        Ok(view.map(|v| Receipt {
+            from: hex::encode(v.from),
+            to: hex::encode(v.to),
+            amount: U64String(v.amount),
+            nonce: hex::encode(v.nonce),
+            // ReceiptView carries no post-settle balance; 0 is the honest "unknown on recovery" value.
+            new_from_balance: U64String(0),
+            currency: v.currency,
+            block_index: U64String(v.block_index),
+            settle_ts: v.settle_ts,
+            receipt_sig: hex::encode(v.receipt_sig),
+            pubkey: hex::encode(v.pubkey),
+        }))
     }
 
     async fn faucet(

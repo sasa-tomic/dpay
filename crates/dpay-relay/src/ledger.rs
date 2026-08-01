@@ -455,6 +455,23 @@ pub trait Ledger: Send + Sync {
     /// own `pubkey` field, so this is an optional cross-check / pre-fetch.)
     async fn receipt_pubkey(&self) -> Result<Vec<u8>, LedgerError>;
 
+    /// Durable receipt lookup by nonce — the canister's source of truth for "did this payment
+    /// settle, and what was the outcome?". Returns `Some(signed receipt)` if that nonce settled,
+    /// `None` if it never did (or settled before this ledger version recorded signed receipts).
+    ///
+    /// This is the **durable recovery seam** the relay uses when its own process-local idempotency
+    /// cache can't answer (after a restart, or when a settle reply was lost): `GET /receipt/{nonce}`
+    /// and the `/pay` Transient-exhausted branch both fall back to it so a settled payment is never
+    /// misreported as a 404/503 false-negative. The canister enforces a single-use nonce, so two
+    /// authorizations can never both settle under one nonce — the recovered receipt is authoritative.
+    ///
+    /// The default returns `Ok(None)` so ledgers that don't record receipts (e.g. narrow test stubs)
+    /// refuse cleanly rather than fabricate one. [`FakeLedger`] and
+    /// [`AgentLedger`](crate::AgentLedger) override it for real.
+    async fn receipt(&self, _nonce: [u8; NONCE_LEN]) -> Result<Option<Receipt>, LedgerError> {
+        Ok(None)
+    }
+
     /// Seed a pending deposit for `pubkey`/`currency` (the test-helpers hook a browser e2e harness
     /// uses to simulate a confirmed ckBTC deposit landing). Mirrors `FakeLedger::register_deposit`:
     /// the next `deposit_status` drains it and credits the balance.
@@ -507,6 +524,12 @@ struct FakeState {
     /// each settled pay gets a distinct `block_index` for its receipt claim — matching the real
     /// canister's outcome-attestation shape.
     next_block: u64,
+    /// Durable per-nonce receipt store — mirrors the canister's `RECEIPTS` stable map (MC4 U3).
+    /// Populated atomically inside `pay`'s critical section so a `receipt(nonce)` lookup returns the
+    /// signed outcome even after the relay's process-local idempotency cache is gone (restart). This
+    /// is the durable recovery source the relay falls back to; the process cache is only an
+    /// optimization. Keyed by the single-use nonce (the canister enforces one settle per nonce).
+    receipts: HashMap<[u8; NONCE_LEN], Receipt>,
 }
 
 /// In-memory ledger. Balances + spent-nonces behind one `Mutex` so the read-check-write is
@@ -568,6 +591,7 @@ impl FakeLedger {
                 txns: Vec::new(),
                 pending_deposits: HashMap::new(),
                 next_block: 0,
+                receipts: HashMap::new(),
             }),
             per_tx_cap,
             clock,
@@ -742,7 +766,7 @@ impl Ledger for FakeLedger {
         let sig = sign_receipt(&self.receipt_sk, &claim).to_bytes();
         let pubkey = self.receipt_sk.verifying_key().to_bytes();
 
-        Ok(Receipt {
+        let receipt = Receipt {
             from: hex::encode(from),
             to: hex::encode(sa.auth.to),
             amount: U64String(sa.auth.amount),
@@ -753,7 +777,13 @@ impl Ledger for FakeLedger {
             settle_ts: now,
             receipt_sig: hex::encode(sig),
             pubkey: hex::encode(pubkey),
-        })
+        };
+        // Durable store: mirror the canister's per-nonce `RECEIPTS` map so `receipt(nonce)` recovers
+        // the signed outcome after a relay restart (when the process-local idempotency cache is gone).
+        // Inserted inside the same critical section as the balance commit, so the receipt is observable
+        // iff the settle is (atomic, like the canister's post-commit store).
+        s.receipts.insert(sa.auth.nonce, receipt.clone());
+        Ok(receipt)
     }
 
     async fn balance(&self, pubkey: [u8; PUBKEY_LEN], currency: Currency) -> Result<u64, LedgerError> {
@@ -762,6 +792,14 @@ impl Ledger for FakeLedger {
 
     async fn receipt_pubkey(&self) -> Result<Vec<u8>, LedgerError> {
         Ok(self.receipt_sk.verifying_key().to_bytes().to_vec())
+    }
+
+    /// Durable per-nonce receipt lookup — mirrors the canister's `receipt(nonce)` query. Returns the
+    /// signed outcome for a settled nonce, or `None` if it never settled (the process-local
+    /// idempotency cache is an optimization; this is the source of truth the relay falls back to
+    /// after a restart).
+    async fn receipt(&self, nonce: [u8; NONCE_LEN]) -> Result<Option<Receipt>, LedgerError> {
+        Ok(self.state.lock().unwrap().receipts.get(&nonce).cloned())
     }
 
     async fn faucet(
@@ -1097,5 +1135,11 @@ impl<L: Ledger> Ledger for FlakyLedger<L> {
 
     async fn receipt_pubkey(&self) -> Result<Vec<u8>, LedgerError> {
         self.inner.receipt_pubkey().await
+    }
+
+    async fn receipt(&self, nonce: [u8; NONCE_LEN]) -> Result<Option<Receipt>, LedgerError> {
+        // Clean passthrough: FlakyLedger only injects transients into `pay` (the retry path under
+        // test); the durable receipt lookup delegates unchanged, mirroring receipt_pubkey.
+        self.inner.receipt(nonce).await
     }
 }

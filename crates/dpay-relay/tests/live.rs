@@ -375,6 +375,31 @@ fn live_settlement_end_to_end() {
         assert_eq!(ledger.balance_of(&payer_pk, DEMO_USD).await.unwrap(), INIT_A - 2_500);
         assert_eq!(ledger.balance_of(&merch_pk, DEMO_USD).await.unwrap(), 2_500);
 
+        // ---- MC4 U3: AgentLedger::receipt(nonce) recovers the signed receipt from the canister ----
+        // The canister stores a signed receipt per nonce (MC4 U1+U2); the relay's durable-recovery
+        // seam queries it via `receipt(blob) -> opt ReceiptView`. Round-trip the just-settled nonce
+        // and assert the recovered receipt matches the settle receipt on every outcome-attestation
+        // field (the ReceiptView carries no new_from_balance — that surfaces as 0 on recovery).
+        let recovered = ledger
+            .receipt(nonce)
+            .await
+            .expect("AgentLedger::receipt query")
+            .expect("receipt(nonce) must be Some for a settled nonce");
+        assert_eq!(recovered.from, hex::encode(payer_pk));
+        assert_eq!(recovered.to, hex::encode(merch_pk));
+        assert_eq!(recovered.amount, dpay_relay::U64String(2_500));
+        assert_eq!(recovered.nonce, hex::encode(nonce));
+        assert_eq!(recovered.currency, DEMO_USD);
+        assert_eq!(recovered.new_from_balance, dpay_relay::U64String(0)); // not in ReceiptView
+        assert!(!recovered.receipt_sig.is_empty(), "canister-signed sig present");
+        assert!(!recovered.pubkey.is_empty(), "canister receipt pubkey present");
+        // An unsettled nonce is a clean None (never a false Some).
+        let miss = ledger
+            .receipt([0xAAu8; 16])
+            .await
+            .expect("AgentLedger::receipt query for unsettled nonce");
+        assert!(miss.is_none(), "an unsettled nonce must return None");
+
         // ---- (2) relay idempotency: same submission → identical receipt, no double-settle ----
         let (s2, b2) = call(&state, pay_wire(&sa.to_wire())).await;
         assert_eq!(s2, StatusCode::OK);

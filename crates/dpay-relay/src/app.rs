@@ -216,6 +216,13 @@ async fn faucet(State(state): State<AppState>, Json(req): Json<FaucetRequest>) -
 /// `GET /api/v1/receipt/{nonce}` → `200 {receipt, replayed}` if that request_id (nonce) has
 /// settled, else `404`. Lets the merchant terminal poll for an on-chain completion when the payer paid directly
 /// (online), instead of scanning the payer's QR.
+///
+/// **Durable recovery (MC4 U3).** The process-local idempotency cache is checked first (the fast
+/// path), but on a miss the route falls back to `Ledger::receipt(nonce)` — the canister's durable
+/// per-nonce receipt store. This makes the route RESTART-SAFE: after a relay restart the process
+/// cache is gone, yet a settled payment's receipt is still recoverable from the ledger. The canister
+/// enforces a single-use nonce, so the recovered receipt is authoritative (two authorizations can
+/// never both settle under one nonce).
 async fn receipt(State(state): State<AppState>, Path(nonce_hex): Path<String>) -> Response {
     let bytes = match hex::decode(nonce_hex.trim()) {
         Ok(b) if b.len() == NONCE_LEN => b,
@@ -223,9 +230,17 @@ async fn receipt(State(state): State<AppState>, Path(nonce_hex): Path<String>) -
     };
     let mut nonce = [0u8; NONCE_LEN];
     nonce.copy_from_slice(&bytes);
-    match state.idempotency.lock().unwrap().get(&nonce).cloned() {
-        Some(rc) => (StatusCode::OK, Json(PayOk { receipt: rc, replayed: true })).into_response(),
-        None => err(StatusCode::NOT_FOUND, "not settled"),
+    // Fast path: the process-local idempotency cache (fresh settle this process).
+    if let Some(rc) = state.idempotency.lock().unwrap().get(&nonce).cloned() {
+        return (StatusCode::OK, Json(PayOk { receipt: rc, replayed: true })).into_response();
+    }
+    // Durable fallback: the ledger's per-nonce receipt store (survives a relay restart). The canister
+    // records a signed receipt for every settled pay, so a cache miss here does NOT mean "not
+    // settled" — it may just mean the process restarted. `replayed: true` flags a recovered receipt.
+    match state.ledger.receipt(nonce).await {
+        Ok(Some(rc)) => (StatusCode::OK, Json(PayOk { receipt: rc, replayed: true })).into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "not settled"),
+        Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("ledger unavailable: {e}")),
     }
 }
 
@@ -700,8 +715,27 @@ async fn pay(State(state): State<AppState>, headers: HeaderMap, body: axum::body
         Ok(r) => r,
         Err(LedgerError::Rejected(msg)) => return err(StatusCode::UNPROCESSABLE_ENTITY, msg),
         Err(LedgerError::Transient(msg)) => {
-            // Exhausted retries — report as unavailable, not a client error.
-            return err(StatusCode::SERVICE_UNAVAILABLE, format!("ledger unavailable: {msg}"));
+            // Exhausted retries. Before reporting 503, attempt a DURABLE recovery: a Transient can
+            // mean the update trapped AFTER the ledger commit (the canister settled but the reply was
+            // lost). MC4 U1+U2 guarantee the canister stored a signed receipt for that settle, so a
+            // `receipt(nonce)` lookup that returns `Some` proves it landed — recover it as a 200
+            // `replayed: true` instead of a false-negative 503. Only if the ledger has no receipt do
+            // we honestly report the payment as not-confirmed (503).
+            match state.ledger.receipt(nonce).await {
+                Ok(Some(rc)) => {
+                    // Recovered a settled-but-lost-reply payment. Cache it under the nonce so a
+                    // subsequent duplicate /pay or /receipt hits the fast path.
+                    state.idempotency.lock().unwrap().entry(nonce).or_insert_with(|| rc.clone());
+                    return (StatusCode::OK, Json(PayOk { receipt: rc, replayed: true }))
+                        .into_response();
+                }
+                Ok(None) => {
+                    return err(StatusCode::SERVICE_UNAVAILABLE, format!("ledger unavailable: {msg}"));
+                }
+                Err(_) => {
+                    return err(StatusCode::SERVICE_UNAVAILABLE, format!("ledger unavailable: {msg}"));
+                }
+            }
         }
     };
 
