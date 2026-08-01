@@ -166,8 +166,8 @@ struct TxnView {
 }
 
 /// Local mirror of the canister's `RampCapability` (candid wire type) — needed to encode
-/// `register_currency_meta` calls from these tests.
-#[derive(CandidType, serde::Serialize)]
+/// `register_currency_meta`/`register_currency` calls and decode `currencies()` replies.
+#[derive(CandidType, serde::Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 enum RampCapability {
     Direct,
     Partner,
@@ -176,7 +176,7 @@ enum RampCapability {
 
 /// Local mirror of the canister's `MinterFamily` (candid wire type) — the `None` variant is all the
 /// cap-only registrations need.
-#[derive(CandidType, serde::Serialize)]
+#[derive(CandidType, serde::Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 enum MinterFamily {
     CkBtcUtxo,
     CkEthErc20,
@@ -1701,5 +1701,274 @@ fn retire_preserves_transaction_history() {
     assert!(
         after.iter().any(|t| t.nonce == nonce.to_vec()),
         "the pre-retire pay row is still in history after retire"
+    );
+}
+
+// --- MC2 unit 4: atomic register_currency + cross-canister strict validation -------------------
+// RED-first proof that `register_currency` — the single atomic activation path — STRICTLY validates
+// `decimals`/`fee`/`wrapper_name` against the live ledger (F3, no exemptions incl. DEMO), rejects on
+// mismatch with NOTHING inserted (atomicity — the whole update rolls back), and on a matching
+// registration activates ledger+minter+meta in one shot. These tests need the REAL ic-icrc1-ledger
+// (the validation calls its `icrc1_decimals`/`icrc1_fee`/`icrc1_symbol` queries), so they live here
+// rather than in currencies.rs.
+
+/// Local mirror of the canister's `CurrencyRegistration` candid RECORD arg (MC2 U4). Mirrors
+/// `register_currency_meta`'s field set EXACTLY, plus `currency`/`ledger`/`mintable`/`minter`.
+/// `decimals`/`fee`/`wrapper_name` are non-optional (the strict-validation inputs); the rest stay
+/// optional. `CandidType + serde::Serialize` — used only to ENCODE the call args.
+#[derive(CandidType, serde::Serialize)]
+struct CurrencyRegistration {
+    currency: Currency,
+    ledger: Principal,
+    mintable: bool,
+    minter: Option<Principal>,
+    symbol: Option<String>,
+    decimals: u8,
+    minter_family: Option<MinterFamily>,
+    wrapper_name: String,
+    backing_symbol: Option<String>,
+    network: Option<String>,
+    display_decimals: Option<u8>,
+    fee: u64,
+    cap: Option<u64>,
+    chain_id: Option<u32>,
+    token_contract: Option<String>,
+    onramp: RampCapability,
+    offramp: RampCapability,
+}
+
+/// `register_currency(CurrencyRegistration) -> Result<(), text>` — the atomic activation path.
+fn register_currency(
+    pic: &PocketIc,
+    dpay: Principal,
+    caller: Principal,
+    reg: &CurrencyRegistration,
+) -> Result<(), String> {
+    let reply = pic
+        .update_call(dpay, caller, "register_currency", encode_one(reg).unwrap())
+        .expect("register_currency update_call rejected at IC level");
+    decode_one(&reply).unwrap()
+}
+
+/// Local mirror of `CurrencyDescriptor` (the `currencies()` return element) — needed to assert the
+/// happy-path registration populated all three registries in one shot.
+#[derive(CandidType, Deserialize, Debug, PartialEq)]
+struct CurrencyDescriptor {
+    currency: Currency,
+    ledger: Principal,
+    mintable: bool,
+    minter: Option<Principal>,
+    minter_family: Option<MinterFamily>,
+    symbol: Option<String>,
+    decimals: Option<u8>,
+    wrapper_name: Option<String>,
+    backing_symbol: Option<String>,
+    network: Option<String>,
+    display_decimals: Option<u8>,
+    fee: Option<u64>,
+    cap: Option<u64>,
+    chain_id: Option<u32>,
+    token_contract: Option<String>,
+    onramp: RampCapability,
+    offramp: RampCapability,
+}
+
+fn currencies_query(pic: &PocketIc, dpay: Principal) -> Vec<CurrencyDescriptor> {
+    let reply = pic
+        .query_call(dpay, Principal::anonymous(), "currencies", encode_args(()).unwrap())
+        .expect("currencies query rejected at IC level");
+    decode_one(&reply).unwrap()
+}
+
+/// Build a `CurrencyRegistration` whose validation fields match the given real ledger (installed via
+/// `install_ledger`, which sets decimals=2 and the given symbol/transfer_fee). Override individual
+/// fields to construct mismatch cases.
+fn registration_matching(
+    currency: Currency,
+    ledger: Principal,
+    symbol: &str,
+    fee: u64,
+) -> CurrencyRegistration {
+    CurrencyRegistration {
+        currency,
+        ledger,
+        mintable: false,
+        minter: None,
+        symbol: Some(symbol.into()),
+        decimals: 2, // install_ledger hardcodes decimals = Some(2)
+        minter_family: None,
+        wrapper_name: symbol.into(),
+        backing_symbol: None,
+        network: None,
+        display_decimals: None,
+        fee,
+        cap: None,
+        chain_id: None,
+        token_contract: None,
+        onramp: RampCapability::Unavailable,
+        offramp: RampCapability::Unavailable,
+    }
+}
+
+/// A fresh currency id used by the register_currency tests (distinct from setup's 0/1 so it never
+/// collides with the seeded ledgers).
+const U4: Currency = 9;
+
+/// MC2 U4 (ATOMICITY): a mismatched `decimals` (vs the real ledger's `icrc1_decimals`) is REJECTED,
+/// and NOTHING is inserted — LEDGERS/MINTERS/CURRENCY_META for that currency are all empty. The whole
+/// update rolls back (an `Err` return from an `#[update]` reverts all stable writes in the message).
+#[test]
+fn register_currency_decimals_mismatch_rejects_and_inserts_nothing() {
+    let (pic, _ledger_dusd, _ledger_ckx, dpay, _sk, _payer, _merch) = setup();
+    // Install a real ledger with decimals=2 (install_ledger's hardcoded value), symbol="ATMC", fee=0.
+    let ledger = install_ledger(
+        &pic,
+        Account { owner: dpay, subaccount: None },
+        "ATMC",
+        0,
+        vec![],
+    );
+    // Register claiming decimals=8 (MISMATCH) → must be rejected.
+    let mut reg = registration_matching(U4, ledger, "ATMC", 0);
+    reg.decimals = 8; // the live ledger reports 2
+    let err = register_currency(&pic, dpay, pic_admin(), &reg)
+        .expect_err("decimals mismatch must be rejected");
+    assert!(
+        err.contains("metadata mismatch") && err.contains("decimals"),
+        "error must report a decimals metadata mismatch, got: {err}"
+    );
+    // ATOMICITY: nothing was inserted. The currency does not appear in the catalog at all.
+    let cat = currencies_query(&pic, dpay);
+    assert!(
+        cat.iter().all(|d| d.currency != U4),
+        "atomicity: a rejected register_currency must insert NOTHING (LEDGERS empty)"
+    );
+}
+
+/// MC2 U4 (VALIDATION): a mismatched `fee` (vs the real ledger's `icrc1_fee`) is REJECTED.
+#[test]
+fn register_currency_fee_mismatch_is_rejected() {
+    let (pic, _ledger_dusd, _ledger_ckx, dpay, _sk, _payer, _merch) = setup();
+    // Real ledger with fee=0.
+    let ledger = install_ledger(
+        &pic,
+        Account { owner: dpay, subaccount: None },
+        "FEE0",
+        0,
+        vec![],
+    );
+    // Register claiming fee=1_000 (MISMATCH) → rejected.
+    let mut reg = registration_matching(U4, ledger, "FEE0", 1_000);
+    reg.fee = 1_000; // the live ledger reports 0
+    let err = register_currency(&pic, dpay, pic_admin(), &reg)
+        .expect_err("fee mismatch must be rejected");
+    assert!(
+        err.contains("metadata mismatch") && err.contains("fee"),
+        "error must report a fee metadata mismatch, got: {err}"
+    );
+}
+
+/// MC2 U4 (VALIDATION): a mismatched `wrapper_name` (vs the real ledger's `icrc1_symbol`) is
+/// REJECTED. Per F3 the DEMO currency is NOT exempt — its `wrapper_name` must equal the ledger's
+/// `icrc1_symbol`.
+#[test]
+fn register_currency_symbol_mismatch_is_rejected() {
+    let (pic, _ledger_dusd, _ledger_ckx, dpay, _sk, _payer, _merch) = setup();
+    // Real ledger with symbol="DUSD".
+    let ledger = install_ledger(
+        &pic,
+        Account { owner: dpay, subaccount: None },
+        "DUSD",
+        0,
+        vec![],
+    );
+    // Register claiming wrapper_name="WRONG" (MISMATCH) → rejected.
+    let mut reg = registration_matching(U4, ledger, "WRONG", 0);
+    reg.wrapper_name = "WRONG".into(); // the live ledger reports "DUSD"
+    let err = register_currency(&pic, dpay, pic_admin(), &reg)
+        .expect_err("symbol/wrapper_name mismatch must be rejected");
+    assert!(
+        err.contains("metadata mismatch") && err.contains("wrapper_name"),
+        "error must report a wrapper_name metadata mismatch, got: {err}"
+    );
+}
+
+/// MC2 U4 (HAPPY PATH): matching decimals/fee/symbol → Ok, and `currencies()` shows the currency
+/// FULLY populated — ledger + minter + meta all activated in ONE atomic update. Per F3 the DEMO
+/// currency's `wrapper_name` is the ledger's `icrc1_symbol` (e.g. "DUSD").
+#[test]
+fn register_currency_happy_path_activates_all_three_registries() {
+    let (pic, _ledger_dusd, _ledger_ckx, dpay, _sk, _payer, _merch) = setup();
+    // Real ledger with symbol="DUSD", decimals=2, fee=0 — a DEMO-shaped currency.
+    let ledger = install_ledger(
+        &pic,
+        Account { owner: dpay, subaccount: None },
+        "DUSD",
+        0,
+        vec![],
+    );
+    // A minter principal to register atomically with the ledger+meta.
+    let atom_minter = Principal::self_authenticating(&[0x42; 29]);
+    // Build a registration that MATCHES the live ledger's decimals(2)/fee(0)/symbol("DUSD"), with a
+    // full meta payload (so the happy-path assertion can check every meta field round-trips).
+    let mut reg = registration_matching(U4, ledger, "DUSD", 0);
+    reg.mintable = true;
+    reg.minter = Some(atom_minter);
+    reg.symbol = Some("$".into());
+    reg.minter_family = Some(MinterFamily::CkBtcUtxo);
+    reg.backing_symbol = Some("USD".into());
+    reg.network = Some("ICP".into());
+    reg.display_decimals = Some(2);
+    reg.cap = Some(100_000);
+    reg.chain_id = None;
+    reg.token_contract = None;
+    reg.onramp = RampCapability::Direct;
+    reg.offramp = RampCapability::Unavailable;
+
+    register_currency(&pic, dpay, pic_admin(), &reg).expect("matching registration must succeed");
+
+    // currencies() shows the currency FULLY populated — ledger + minter + meta in one shot.
+    let cat = currencies_query(&pic, dpay);
+    let u4 = cat
+        .iter()
+        .find(|d| d.currency == U4)
+        .expect("the atomically-registered currency appears in the catalog");
+    assert_eq!(u4.ledger, ledger, "ledger principal activated");
+    assert!(u4.mintable, "mintable flag activated");
+    assert_eq!(u4.minter, Some(atom_minter), "minter activated atomically");
+    assert_eq!(u4.minter_family, Some(MinterFamily::CkBtcUtxo));
+    assert_eq!(u4.symbol.as_deref(), Some("$"));
+    assert_eq!(u4.decimals, Some(2), "decimals validated + stored");
+    assert_eq!(u4.wrapper_name.as_deref(), Some("DUSD"), "wrapper_name validated + stored");
+    assert_eq!(u4.backing_symbol.as_deref(), Some("USD"));
+    assert_eq!(u4.network.as_deref(), Some("ICP"));
+    assert_eq!(u4.display_decimals, Some(2));
+    assert_eq!(u4.fee, Some(0), "fee validated + stored");
+    assert_eq!(u4.cap, Some(100_000));
+    assert_eq!(u4.onramp, RampCapability::Direct);
+    assert_eq!(u4.offramp, RampCapability::Unavailable);
+}
+
+/// MC2 U4 (IMMUTABILITY): a second `register_currency` for an already-existing id → Err. The first
+/// call (happy path) activates the currency; the second (even with identical args) is rejected
+/// because the id now exists in LEDGERS — register_currency activates a NEW currency, it does not
+/// re-register an existing one (unlike the piecemeal register_ledger which is same-value idempotent).
+#[test]
+fn register_currency_second_call_for_existing_id_is_rejected() {
+    let (pic, _ledger_dusd, _ledger_ckx, dpay, _sk, _payer, _merch) = setup();
+    let ledger = install_ledger(
+        &pic,
+        Account { owner: dpay, subaccount: None },
+        "DUP",
+        0,
+        vec![],
+    );
+    let reg = registration_matching(U4, ledger, "DUP", 0);
+    register_currency(&pic, dpay, pic_admin(), &reg).expect("first registration ok");
+    let err = register_currency(&pic, dpay, pic_admin(), &reg)
+        .expect_err("second registration for an existing id must be rejected");
+    assert!(
+        err.contains("already exists") || err.contains("immutable"),
+        "error must reject the duplicate activation, got: {err}"
     );
 }

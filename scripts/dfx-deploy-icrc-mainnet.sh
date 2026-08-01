@@ -79,6 +79,15 @@ dfx --identity dpay canister install icrc_ledger --network "$NETWORK" --mode rei
 } })"
 
 # --- step 3: register the ledger in the facade, then settle end-to-end ------------------------
+# WHY register_ledger + register_currency_meta (piecemeal) instead of register_currency (atomic)?
+# This script runs against the PERSISTENT mainnet canister and is designed to be RE-RUNNABLE: a
+# second invocation re-runs `register_ledger(0, DUSD, true)`, which under MC2 U2 is same-value
+# idempotent Ok. `register_currency` (MC2 U4) activates a NEW currency and REJECTS an already-existing
+# id (immutability) — so switching this line to register_currency would break the second run with
+# Err "currency 0 already exists". The piecemeal path remains the correct mainnet pattern for the
+# DEMO currency (already-registered); `register_currency` is the path for genuinely NEW currencies
+# (F4 — keep piecemeal for incremental corrections + already-seeded ids; F5 — switch to
+# register_currency for new activations). See CLAUDE.md / OPEN_ISSUES MC2 U4.
 echo "== register the DUSD ledger in the facade (currency 0 = DEMO_USD, mintable) =="
 # register_ledger : (nat32, principal, bool) — POSITIONAL args, so the principal is a bare typed
 # literal `principal "..."`. (The reserved-word quoting of `principal` applies only to record field

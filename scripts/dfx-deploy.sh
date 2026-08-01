@@ -91,20 +91,35 @@ echo "== set the deploy identity as controller (open→locked; enables register_
 MY_PID=$(dfx identity get-principal)
 dfx canister call "$CANISTER" set_controller "(opt principal \"$MY_PID\")"
 
-echo "== register the DUSD ledger in the facade (currency 0 = DEMO_USD, mintable) =="
-# register_ledger : (nat32, principal, bool) — POSITIONAL args, so the principal is a bare typed
-# literal `principal "..."` (no field name; the reserved-word quoting only applies to record labels).
-dfx canister call "$CANISTER" register_ledger "(0 : nat32, principal \"$LEDGER_ID\", true)"
-
-echo "== register the DEMO currency metadata (MC1 unit 5 + MC2 U1: onramp=Direct faucet, offramp=Unavailable, cap) =="
-# register_currency_meta : (nat32, opt text, opt nat8, opt MinterFamily, opt text, opt text, opt text,
-#   opt nat8, opt opt nat64, opt nat64, opt nat32, opt text, RampCapability, RampCapability) — the
-# DEMO currency is play money: Direct faucet onramp, Unavailable offramp (no cash-out).
-# MC2 U1: pay reads the per-currency cap (fail-closed — a cap-less currency rejects every non-zero
-# pay). Register an explicit DEMO cap = the global per_tx_cap default ($1,000.00 = 100_000 minor) so
-# DEMO pays keep working; ckBTC/ckUSDC caps are real-currency policy registered separately.
-dfx canister call "$CANISTER" register_currency_meta \
-  "(0 : nat32, opt \"\$\", opt (2 : nat8), null, null, null, null, null, null, opt (100_000 : nat64), null, null, variant { Direct }, variant { Unavailable })"
+echo "== register the DUSD currency atomically (MC2 U4: register_currency validates + activates ledger+meta in one shot) =="
+# register_currency : (CurrencyRegistration) -> Result<(), text> — a single atomic update that
+# STRICTLY validates decimals/fee/wrapper_name against the live ledger (F3 — no exemptions, incl.
+# DEMO) and inserts LEDGERS + CURRENCY_META in one message. The DUSD ledger was installed with
+# decimals=2, transfer_fee=0, token_symbol="DUSD", so the registration MUST carry those EXACT values
+# (wrapper_name = the ledger's icrc1_symbol). The local replica is started --clean each run, so this
+# is always a first-time activation (no immutability conflict). MC2 U1: the explicit DEMO cap keeps
+# pays working (pay reads the per-currency cap, fail-closed). DEMO onramp=Direct (faucet),
+# offramp=Unavailable (play money, no cash-out).
+dfx canister call "$CANISTER" register_currency \
+  "(record {
+     currency = 0 : nat32;
+     ledger = principal \"$LEDGER_ID\";
+     mintable = true;
+     minter = null;
+     symbol = opt \"\\$\";
+     decimals = 2 : nat8;
+     minter_family = null;
+     wrapper_name = \"DUSD\";
+     backing_symbol = null;
+     network = null;
+     display_decimals = null;
+     fee = 0 : nat64;
+     cap = opt (100_000 : nat64);
+     chain_id = null;
+     token_contract = null;
+     onramp = variant { Direct };
+     offramp = variant { Unavailable };
+   })"
 
 acct() { echo "record { owner = principal \"$CID\"; subaccount = opt $1 }"; }
 

@@ -27,7 +27,7 @@ struct DpayInitArg {
 }
 
 /// Local mirror of the canister's `MinterFamily` (decoded off the candid wire).
-#[derive(CandidType, Deserialize, Debug, PartialEq, Eq, Clone)]
+#[derive(CandidType, Deserialize, Serialize, Debug, PartialEq, Eq, Clone)]
 enum MinterFamily {
     CkBtcUtxo,
     CkEthErc20,
@@ -35,7 +35,7 @@ enum MinterFamily {
 }
 
 /// Local mirror of the canister's `RampCapability` (MC1 unit 5, decoded off the candid wire).
-#[derive(CandidType, Deserialize, Debug, PartialEq, Eq, Clone)]
+#[derive(CandidType, Deserialize, Serialize, Debug, PartialEq, Eq, Clone)]
 enum RampCapability {
     Direct,
     Partner,
@@ -724,4 +724,154 @@ fn retire_currency_is_idempotent() {
 
     let cat = currencies(&pic, dpay);
     assert!(cat.iter().all(|d| d.currency != FRESH), "still retired after idempotent re-retire");
+}
+
+// --- MC2 unit 4: atomic register_currency (admin gate + immutability + retired) -----------------
+// RED-first proof that `register_currency` — the single atomic activation path — is admin-gated,
+// refuses an already-existing currency id (immutability, reusing U2's intent), and refuses a retired
+// id (reusing U3's intent). The cross-canister strict-validation + atomicity + happy-path proofs
+// live in `icrc_settle.rs` (they need a real ic-icrc1-ledger); these three tests exercise only the
+// gates that fire BEFORE any cross-canister call, so no real ledger is needed here.
+
+/// Local mirror of the canister's `CurrencyRegistration` candid RECORD arg (MC2 U4). The field set
+/// mirrors `register_currency_meta`'s arg list EXACTLY (so the meta it inserts is identical), plus
+/// the activation fields `currency`/`ledger`/`mintable`/`minter`. `decimals`/`fee`/`wrapper_name` are
+/// non-optional (they are the strict-validation inputs checked against the live ledger); the
+/// remaining meta fields stay optional. Used to ENCODE the `register_currency` call args.
+#[derive(CandidType, Serialize)]
+struct CurrencyRegistration {
+    currency: Currency,
+    ledger: Principal,
+    mintable: bool,
+    minter: Option<Principal>,
+    symbol: Option<String>,
+    decimals: u8,
+    minter_family: Option<MinterFamily>,
+    wrapper_name: String,
+    backing_symbol: Option<String>,
+    network: Option<String>,
+    display_decimals: Option<u8>,
+    fee: u64,
+    cap: Option<u64>,
+    chain_id: Option<u32>,
+    token_contract: Option<String>,
+    onramp: RampCapability,
+    offramp: RampCapability,
+}
+
+/// `register_currency(CurrencyRegistration) -> Result<(), text>` — the atomic activation path.
+/// Called by `caller`; returns the canister's typed Result.
+#[allow(clippy::too_many_arguments)]
+fn register_currency(
+    pic: &PocketIc,
+    dpay: Principal,
+    caller: Principal,
+    reg: CurrencyRegistration,
+) -> Result<(), String> {
+    let reply = pic
+        .update_call(dpay, caller, "register_currency", encode_one(&reg).unwrap())
+        .expect("register_currency update_call rejected at IC level");
+    decode_one(&reply).unwrap()
+}
+
+/// Build a minimal valid-looking `CurrencyRegistration` for a fresh currency id. The validation
+/// fields are set to dummy values that would NOT pass strict validation against a real ledger — these
+/// tests never reach the validation step (they are rejected at the admin/immutability/retired gate
+/// first), so the dummy values are never checked.
+fn fresh_registration(currency: Currency) -> CurrencyRegistration {
+    CurrencyRegistration {
+        currency,
+        ledger: dummy_principal(7),
+        mintable: false,
+        minter: None,
+        symbol: None,
+        decimals: 2,
+        minter_family: None,
+        wrapper_name: "DUMMY".into(),
+        backing_symbol: None,
+        network: None,
+        display_decimals: None,
+        fee: 0,
+        cap: None,
+        chain_id: None,
+        token_contract: None,
+        onramp: RampCapability::Unavailable,
+        offramp: RampCapability::Unavailable,
+    }
+}
+
+#[test]
+fn register_currency_is_admin_gated() {
+    // A non-controller caller is rejected at `require_admin` BEFORE any cross-canister validation
+    // call (so no real ledger is needed for this test). Mirrors the gate on register_ledger/minter.
+    let pic = PocketIc::new();
+    let dpay = install_facade(
+        &pic,
+        Some(pic_admin()),
+        vec![LedgerConfig { currency: DEMO_USD, principal: Principal::anonymous(), mintable: true }],
+    );
+
+    let err = register_currency(&pic, dpay, Principal::anonymous(), fresh_registration(FRESH))
+        .expect_err("anonymous must not register_currency when a controller is set");
+    assert!(
+        err.contains("unauthorized") || err.contains("admin"),
+        "error must be an admin-gate rejection, got: {err}"
+    );
+
+    // The fresh currency was NOT inserted (the gate fired before any insert).
+    let cat = currencies(&pic, dpay);
+    assert!(cat.iter().all(|d| d.currency != FRESH), "rejected register_currency inserted nothing");
+}
+
+#[test]
+fn register_currency_rejects_existing_id() {
+    // register_currency activates a NEW currency — an id that already exists in LEDGERS is rejected
+    // (immutability, reusing U2's intent). The check fires BEFORE cross-canister validation, so no
+    // real ledger is needed. FRESH is seeded at init (it has a ledger row), so register_currency for
+    // it is rejected without ever calling the ledger.
+    let pic = PocketIc::new();
+    let dpay = install_facade(
+        &pic,
+        Some(pic_admin()),
+        vec![LedgerConfig { currency: FRESH, principal: dummy_principal(1), mintable: false }],
+    );
+
+    let err = register_currency(&pic, dpay, pic_admin(), fresh_registration(FRESH))
+        .expect_err("register_currency for an existing id must be rejected");
+    assert!(
+        err.contains("already exists") || err.contains("immutable"),
+        "error must call out the existing id, got: {err}"
+    );
+    assert!(
+        err.contains(&format!("currency {}", FRESH)),
+        "error must name the offending currency id, got: {err}"
+    );
+
+    // The original ledger row is UNCHANGED (the rejected call inserted nothing).
+    let cat = currencies(&pic, dpay);
+    let fresh = cat.iter().find(|d| d.currency == FRESH).unwrap();
+    assert_eq!(fresh.ledger, dummy_principal(1), "original ledger unchanged");
+}
+
+#[test]
+fn register_currency_rejects_retired_id() {
+    // A retired id is dead forever and can NEVER be re-registered (reusing U3's intent). The RETIRED
+    // guard fires BEFORE cross-canister validation, so no real ledger is needed. Retire FRESH (seeded
+    // at init), then register_currency for it → rejected with a retired/id-not-reusable message.
+    let pic = PocketIc::new();
+    let dpay = install_facade(
+        &pic,
+        Some(pic_admin()),
+        vec![LedgerConfig { currency: FRESH, principal: dummy_principal(1), mintable: false }],
+    );
+
+    retire_currency(&pic, dpay, pic_admin(), FRESH).expect("retire FRESH");
+
+    let err = register_currency(&pic, dpay, pic_admin(), fresh_registration(FRESH))
+        .expect_err("register_currency for a retired id must be rejected");
+    assert!(err.contains("retired"), "error must say retired, got: {err}");
+    assert!(
+        err.contains(&format!("currency {}", FRESH)),
+        "error must name the offending currency id, got: {err}"
+    );
 }

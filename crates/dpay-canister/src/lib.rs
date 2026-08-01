@@ -297,13 +297,14 @@ impl RampCapability {
 
 /// One entry of the `currencies()` catalog. The wallet reads currency ids + authoritative
 /// per-currency metadata from here at runtime instead of hardcoding `DEPOSIT_CURRENCY` (issue #7)
-/// or family-level assumptions (MC1 unit 5: every CkEthErc20 used to inherit USDC's facts). The
+/// or family-level token assumptions (MC1 unit 5: every CkEthErc20 used to inherit USDC's facts). The
 /// metadata fields are the single source of truth the relay passes through and the app caches.
 ///
 /// `onramp`/`offramp` are NON-optional (`RampCapability`): an unregistered currency defaults to
 /// `Unavailable` for both directions in `currencies()` — fail-closed, so the wallet never shows a
 /// fund/cash-out button for a ramp it cannot honour. All other new fields are `Option<...>` so a
 /// registration that predates MC1 unit 5 (or only sets what it knows) stays valid.
+
 #[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct CurrencyDescriptor {
     pub currency: Currency,
@@ -343,6 +344,39 @@ pub struct CurrencyDescriptor {
     pub onramp: RampCapability,
     /// Cash-out (off-ramp) capability. `Unavailable` ⇒ the wallet shows NO "Cash out" button
     /// (ckUSDC offramp is `Unavailable` per Fork-C — OPEN_ISSUES O3).
+    pub offramp: RampCapability,
+}
+
+/// Atomic currency-activation argument for [`register_currency`] (MC2 unit 4). A single candid
+/// RECORD carrying the identity fields (`currency`/`ledger`/`mintable`/`minter`) AND the full display
+/// metadata field set (mirroring [`register_currency_meta`]'s arg list EXACTLY, so the meta inserted
+/// is identical). `decimals`/`fee`/`wrapper_name` are NON-optional: they are the strict cross-canister
+/// validation inputs checked against the live ledger's `icrc1_decimals`/`icrc1_fee`/`icrc1_symbol`
+/// (F3 — no exemptions, including the DEMO currency; its `wrapper_name` MUST be the ledger's symbol,
+/// e.g. "DUSD"). The remaining meta fields stay `Option`/`RampCapability` exactly as in
+/// `register_currency_meta`.
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct CurrencyRegistration {
+    pub currency: Currency,
+    pub ledger: Principal,
+    pub mintable: bool,
+    /// Optional ck-minter principal (only ck currencies have one). Inserted into MINTERS atomically.
+    pub minter: Option<Principal>,
+    pub symbol: Option<String>,
+    /// REQUIRED — strictly validated against the ledger's `icrc1_decimals`.
+    pub decimals: u8,
+    pub minter_family: Option<MinterFamily>,
+    /// REQUIRED — strictly validated against the ledger's `icrc1_symbol` (the wrapper token name).
+    pub wrapper_name: String,
+    pub backing_symbol: Option<String>,
+    pub network: Option<String>,
+    pub display_decimals: Option<u8>,
+    /// REQUIRED — strictly validated against the ledger's `icrc1_fee`.
+    pub fee: u64,
+    pub cap: Option<u64>,
+    pub chain_id: Option<u32>,
+    pub token_contract: Option<String>,
+    pub onramp: RampCapability,
     pub offramp: RampCapability,
 }
 
@@ -2023,6 +2057,129 @@ fn register_currency_meta(
                 token_contract,
                 onramp: Some(onramp),
                 offramp: Some(offramp),
+            },
+        );
+    });
+    Ok(())
+}
+
+/// `(CurrencyRegistration) -> Result<(), text>` — the SINGLE ATOMIC currency-activation path (MC2
+/// unit 4). Activates a NEW currency id by inserting LEDGERS + (optionally) MINTERS + CURRENCY_META
+/// in ONE update message (all-or-nothing), AFTER strictly validating the identity metadata against
+/// the live ledger. Closes the MC2 "atomic validated activation" gap: the piecemeal
+/// `register_ledger`/`register_minter`/`register_currency_meta` path is three separate mutable writes
+/// with no validation, so an already-reviewed authorization/history could be reinterpreted under a
+/// re-targeted ledger or inconsistent metadata.
+///
+/// Steps (all in one update, so an `Err` at any step rolls back EVERY stable write in this message —
+/// nothing is partially inserted):
+/// (a) `require_admin` — controller-only in production (open only when `controller` is unset).
+/// (b) Immutability + retire guards (reuse U2/U3 intent, checked BEFORE any cross-canister call): a
+///     currency already in LEDGERS → Err (register_currency activates a NEW id; use retire + a new id
+///     to replace); a RETIRED id → Err ("id not reusable").
+/// (c) CROSS-CANISTER STRICT VALIDATION (F3 — no exemptions, including the DEMO currency): call the
+///     standard ICRC-1 nullary queries on `reg.ledger` and REJECT on any mismatch:
+///       - `icrc1_decimals() -> nat8` must equal `reg.decimals`
+///       - `icrc1_fee() -> nat` must equal `reg.fee`
+///       - `icrc1_symbol() -> text` must equal `reg.wrapper_name` (the DEMO currency's wrapper_name
+///         is the ledger's symbol, e.g. "DUSD")
+/// (d) ATOMIC INSERT: LEDGERS + (if `reg.minter` is `Some`) MINTERS + CURRENCY_META, all in the same
+///     update message.
+///
+/// The piecemeal `register_ledger`/`register_minter`/`register_currency_meta` methods REMAIN
+/// (deprecated for fresh activation, still useful for incremental display-meta corrections) and still
+/// enforce U2 immutability + U3 retire. Deploy scripts SHOULD use `register_currency` for the
+/// currencies they register (F5) — see `scripts/dfx-deploy*.sh`.
+#[update]
+async fn register_currency(reg: CurrencyRegistration) -> Result<(), String> {
+    // (a) Admin gate.
+    require_admin()?;
+    // (b) Immutability + retire guards (BEFORE any cross-canister call — cheap local rejects).
+    if is_retired(reg.currency) {
+        return Err(format!("currency {} is retired; id not reusable", reg.currency));
+    }
+    let already_exists = LEDGERS.with(|m| m.borrow().contains_key(&reg.currency));
+    if already_exists {
+        return Err(format!(
+            "currency {} already exists; use retire_currency + a new id to replace",
+            reg.currency
+        ));
+    }
+    // (c) Cross-canister strict validation. These are query calls on the target ledger but are legal
+    //     from an #[update] (which this is). Mirrors the `ledger_fee` helper's Call::bounded_wait
+    //     pattern. Any mismatch → Err and NOTHING is inserted (the IC's per-message transactional
+    //     model rolls back all stable writes in this message on a non-Ok return).
+    let ledger = reg.ledger;
+    let ledger_decimals: u8 = match Call::bounded_wait(ledger, "icrc1_decimals").await {
+        Ok(r) => match r.candid() {
+            Ok(v) => v,
+            Err(e) => return Err(format!("icrc1_decimals decode: {e:?}")),
+        },
+        Err(e) => return Err(format!("icrc1_decimals rejected: {e:?}")),
+    };
+    if ledger_decimals != reg.decimals {
+        return Err(format!(
+            "metadata mismatch: decimals: registration={} ledger={}",
+            reg.decimals, ledger_decimals
+        ));
+    }
+    let ledger_fee: u64 = match Call::bounded_wait(ledger, "icrc1_fee").await {
+        Ok(r) => match r.candid::<Nat>() {
+            Ok(n) => match nat_to_u64(&n) {
+                Ok(v) => v,
+                Err(e) => return Err(e),
+            },
+            Err(e) => return Err(format!("icrc1_fee decode: {e:?}")),
+        },
+        Err(e) => return Err(format!("icrc1_fee rejected: {e:?}")),
+    };
+    if ledger_fee != reg.fee {
+        return Err(format!(
+            "metadata mismatch: fee: registration={} ledger={}",
+            reg.fee, ledger_fee
+        ));
+    }
+    let ledger_symbol: String = match Call::bounded_wait(ledger, "icrc1_symbol").await {
+        Ok(r) => match r.candid() {
+            Ok(v) => v,
+            Err(e) => return Err(format!("icrc1_symbol decode: {e:?}")),
+        },
+        Err(e) => return Err(format!("icrc1_symbol rejected: {e:?}")),
+    };
+    if ledger_symbol != reg.wrapper_name {
+        return Err(format!(
+            "metadata mismatch: wrapper_name: registration=\"{}\" ledger=\"{}\"",
+            reg.wrapper_name, ledger_symbol
+        ));
+    }
+    // (d) Atomic insert — all three registries in the same update message. On the success path the
+    //     whole message commits together; there is no partial insert.
+    LEDGERS.with(|m| {
+        m.borrow_mut()
+            .insert(reg.currency, LedgerEntry { principal: reg.ledger, mintable: reg.mintable });
+    });
+    if let Some(minter) = reg.minter {
+        MINTERS.with(|m| {
+            m.borrow_mut().insert(reg.currency, PrincipalStorable(minter));
+        });
+    }
+    CURRENCY_META.with(|m| {
+        m.borrow_mut().insert(
+            reg.currency,
+            CurrencyMetaStorable {
+                symbol: reg.symbol,
+                decimals: Some(reg.decimals),
+                minter_family: reg.minter_family,
+                wrapper_name: Some(reg.wrapper_name),
+                backing_symbol: reg.backing_symbol,
+                network: reg.network,
+                display_decimals: reg.display_decimals,
+                fee: Some(reg.fee),
+                cap: reg.cap,
+                chain_id: reg.chain_id,
+                token_contract: reg.token_contract,
+                onramp: Some(reg.onramp),
+                offramp: Some(reg.offramp),
             },
         );
     });

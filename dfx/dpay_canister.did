@@ -17,6 +17,25 @@ type CurrencyDescriptor = record {
   token_contract : opt text;
   symbol : opt text;
 };
+type CurrencyRegistration = record {
+  cap : opt nat64;
+  fee : nat64;
+  onramp : RampCapability;
+  decimals : nat8;
+  wrapper_name : text;
+  backing_symbol : opt text;
+  minter_family : opt MinterFamily;
+  minter : opt principal;
+  network : opt text;
+  mintable : bool;
+  chain_id : opt nat32;
+  ledger : principal;
+  currency : nat32;
+  display_decimals : opt nat8;
+  offramp : RampCapability;
+  token_contract : opt text;
+  symbol : opt text;
+};
 type DepositInfo = record {
   deposit_min_amount : opt nat64;
   min_confirmations : nat32;
@@ -192,6 +211,34 @@ service : (InitArg) -> {
   // pending; `Err(NoNewUtxos{..})` -> empty minted + pending mapped from the error; the remaining
   // minter errors surface as `Err(String)`.
   refresh_deposit : (blob, nat32) -> (Result_7);
+  // `(CurrencyRegistration) -> Result<(), text>` — the SINGLE ATOMIC currency-activation path (MC2
+  // unit 4). Activates a NEW currency id by inserting LEDGERS + (optionally) MINTERS + CURRENCY_META
+  // in ONE update message (all-or-nothing), AFTER strictly validating the identity metadata against
+  // the live ledger. Closes the MC2 "atomic validated activation" gap: the piecemeal
+  // `register_ledger`/`register_minter`/`register_currency_meta` path is three separate mutable writes
+  // with no validation, so an already-reviewed authorization/history could be reinterpreted under a
+  // re-targeted ledger or inconsistent metadata.
+  // 
+  // Steps (all in one update, so an `Err` at any step rolls back EVERY stable write in this message —
+  // nothing is partially inserted):
+  // (a) `require_admin` — controller-only in production (open only when `controller` is unset).
+  // (b) Immutability + retire guards (reuse U2/U3 intent, checked BEFORE any cross-canister call): a
+  // currency already in LEDGERS → Err (register_currency activates a NEW id; use retire + a new id
+  // to replace); a RETIRED id → Err ("id not reusable").
+  // (c) CROSS-CANISTER STRICT VALIDATION (F3 — no exemptions, including the DEMO currency): call the
+  // standard ICRC-1 nullary queries on `reg.ledger` and REJECT on any mismatch:
+  // - `icrc1_decimals() -> nat8` must equal `reg.decimals`
+  // - `icrc1_fee() -> nat` must equal `reg.fee`
+  // - `icrc1_symbol() -> text` must equal `reg.wrapper_name` (the DEMO currency's wrapper_name
+  // is the ledger's symbol, e.g. "DUSD")
+  // (d) ATOMIC INSERT: LEDGERS + (if `reg.minter` is `Some`) MINTERS + CURRENCY_META, all in the same
+  // update message.
+  // 
+  // The piecemeal `register_ledger`/`register_minter`/`register_currency_meta` methods REMAIN
+  // (deprecated for fresh activation, still useful for incremental display-meta corrections) and still
+  // enforce U2 immutability + U3 retire. Deploy scripts SHOULD use `register_currency` for the
+  // currencies they register (F5) — see `scripts/dfx-deploy*.sh`.
+  register_currency : (CurrencyRegistration) -> (Result_8);
   // Register or replace display/family/authoritative metadata for a currency. Gated to the
   // controller in production. Each `Option` field is registered independently — register only what
   // you know; `None` fields keep the wallet in a best-effort fallback. `onramp`/`offramp` are
