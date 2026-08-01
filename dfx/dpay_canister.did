@@ -204,12 +204,35 @@ service : (InitArg) -> {
   // account (subaccount `None`) or carry no nonce memo, so they are not matched. Each repair inserts
   // the nonce into SPENT (so a retry is a duplicate) and records the txn (so history reflects it).
   reconcile : (nat32) -> (Result_6);
+  // `(blob pubkey, nat32 currency) -> Result<nat64, text>` — the AUTHORITATIVE on-demand balance
+  // refresh (MC3 U1). Reads the live ledger balance via `icrc1_balance_of` for
+  // `Account{owner: canister_self(), subaccount: pubkey}`, writes it to `BAL_CACHE` (so the fast
+  // `balance_of` query reflects it on subsequent reads), and returns it.
+  // 
+  // **No auth gate** — consistent with the unauthenticated `balance_of`/`deposit_address` surface:
+  // this is a read + a cache write that moves NO value; it only ever credits the named pubkey's
+  // true balance. Use this to surface credits that bypass the facade: asynchronous ckERC20 heartbeat
+  // mints and direct ICRC transfers land on the ledger WITHOUT invoking the facade, so `BAL_CACHE`
+  // stays stale until this is called. Settlement (`pay`) NEVER reads this — it reads the ledger
+  // directly (the money-safety invariant is unchanged).
+  // 
+  // Modeled EXACTLY on the post-mint authoritative read in `mint` (re-read + `write_cache`).
+  refresh_balance : (blob, nat32) -> (Result);
   // `(blob pubkey, nat32 currency) -> Result<DepositRefresh, text>`. Proxies the minter's
   // `update_balance` — the value-creating call that mints confirmed UTXOs onto the currency's ledger
   // at `Account{owner: canister_self(), subaccount: pubkey}`. No auth: idempotent and safe to call by
   // anyone (a no-op when no confirmed UTXOs exist). `Ok(statuses)` -> minted list + total, empty
   // pending; `Err(NoNewUtxos{..})` -> empty minted + pending mapped from the error; the remaining
   // minter errors surface as `Err(String)`.
+  // 
+  // After a successful minter call (both the `Ok(statuses)` and the `NoNewUtxos` branches), the
+  // display cache is refreshed from the authoritative ledger so a freshly-minted deposit is
+  // immediately visible via `balance_of` WITHOUT an extra `refresh_balance` call (MC3 U1). The
+  // `NoNewUtxos` branch is hit every 10s poll and catches coincident direct transfers / async mints
+  // for free (the ~1 extra `icrc1_balance_of` per 10s-poll-per-user is negligible). The cache refresh
+  // is deliberately NOT added to the AlreadyProcessing / TemporarilyUnavailable / GenericError
+  // branches — the minter call FAILED there and the cache state is unknown, so we do not paper over
+  // it with a speculative read.
   refresh_deposit : (blob, nat32) -> (Result_7);
   // `(CurrencyRegistration) -> Result<(), text>` — the SINGLE ATOMIC currency-activation path (MC2
   // unit 4). Activates a NEW currency id by inserting LEDGERS + (optionally) MINTERS + CURRENCY_META

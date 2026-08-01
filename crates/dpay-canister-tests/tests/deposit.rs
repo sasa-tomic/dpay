@@ -546,3 +546,151 @@ fn mock_minter_enforces_real_minter_single_record_arg_contract() {
         "expected the real-minter decode trap, got: {err}",
     );
 }
+
+// --- MC3 U1: authoritative refresh_balance + refresh_deposit cache refresh -------------------
+//
+// The reported bug: `refresh_deposit` mints ckBTC onto the ledger (the authoritative read passes)
+// but never refreshes `BAL_CACHE`, so the facade's `balance_of` query — the display path the app +
+// relay read — returns a stale 0 after a deposit. External credits (direct ICRC transfers, async
+// ckERC20 heartbeat mints) bypass the facade entirely, so the cache can stay stale indefinitely
+// even though the funds are spendable. U1 closes this with (a) an authoritative on-demand
+// `refresh_balance` and (b) an inline cache refresh inside `refresh_deposit`.
+
+/// The facade's cached balance via its `balance_of` QUERY (display-only). Mirrors the helper in
+/// `icrc_settle.rs` — this is the path the app/relay actually read, so the tests MUST assert it,
+/// not only the direct ledger balance.
+fn dpay_balance(pic: &PocketIc, dpay: Principal, pk: [u8; 32], currency: Currency) -> u64 {
+    let reply = pic
+        .query_call(
+            dpay,
+            Principal::anonymous(),
+            "balance_of",
+            encode_args((pk.to_vec(), currency)).unwrap(),
+        )
+        .expect("balance_of query rejected");
+    decode_one::<u64>(&reply).unwrap()
+}
+
+/// The new authoritative `refresh_balance` facade method (MC3 U1). Re-reads the ledger and refreshes
+/// `BAL_CACHE`. Returns the reported balance.
+fn refresh_balance(
+    pic: &PocketIc,
+    dpay: Principal,
+    pk: [u8; 32],
+    currency: Currency,
+) -> Result<u64, String> {
+    let reply = pic
+        .update_call(
+            dpay,
+            Principal::anonymous(),
+            "refresh_balance",
+            encode_args((pk.to_vec(), currency)).unwrap(),
+        )
+        .expect("refresh_balance update_call rejected");
+    decode_one::<Result<u64, String>>(&reply).unwrap()
+}
+
+/// A minimal `icrc1_transfer` argument shape. `fee`/`memo` are only ever `None` here, so the exact
+/// wrapper types (Subaccount / Memo records) do not matter — `None` serializes as `null`, which is
+/// candid-compatible with any `opt T`. Fields match the ICRC-1 TransferArg record names exactly.
+#[derive(CandidType, serde::Serialize)]
+struct DirectTransferArg {
+    from_subaccount: Option<Vec<u8>>,
+    to: Account,
+    amount: Nat,
+    fee: Option<Nat>,
+    memo: Option<Vec<u8>>,
+    created_at_time: Option<u64>,
+}
+
+/// Simulate an EXTERNAL credit that BYPASSES the facade — a direct `icrc1_transfer` on the ledger
+/// from the minting account (owned by the `mock` canister per `setup_deposit`) to
+/// `Account{owner: facade, subaccount: payer}`. This is the exact shape of a direct ICRC transfer
+/// or an asynchronous ckERC20 heartbeat mint: funds land on the ledger at the user's facade
+/// subaccount with the facade NEVER invoked, so `BAL_CACHE` stays stale (the bug being fixed).
+/// PocketIC lets the caller principal be spoofed, so we call AS the mock (the minting-account
+/// owner) — `from_subaccount: None` debits the minting account, which ICRC treats as a MINT.
+fn direct_credit(
+    pic: &PocketIc,
+    ledger: Principal,
+    mock: Principal,
+    facade: Principal,
+    pk: [u8; 32],
+    amount: u64,
+) {
+    let arg = DirectTransferArg {
+        from_subaccount: None, // minting account's default subaccount
+        to: Account { owner: facade, subaccount: Some(pk) },
+        amount: Nat::from(amount),
+        fee: None, // mints carry no fee (the ledger's transfer_fee is 0 here anyway)
+        memo: None,
+        created_at_time: Some(T0_NANOS),
+    };
+    let reply = pic
+        .update_call(ledger, mock, "icrc1_transfer", encode_one(&arg).unwrap())
+        .expect("direct icrc1_transfer update_call rejected");
+    decode_one::<Result<Nat, candid::Reserved>>(&reply)
+        .expect("direct icrc1_transfer reply decode")
+        .expect("direct credit transfer should succeed (minting account debited)");
+}
+
+/// PRIMARY REPORTED BUG — `refresh_deposit` mints onto the ledger but the facade CACHE query
+/// (`balance_of`, the display path the app/relay read) returns 0. MC3 verbatim requirement: "Tests
+/// must assert facade/relay balance, not only direct ledger balance." RED today (cache not
+/// refreshed after mint); GREEN after the inline cache refresh lands inside `refresh_deposit`.
+#[test]
+fn refresh_deposit_makes_minted_balance_visible_via_balance_of() {
+    let (pic, ckbtc, dpay, mock, _sk, payer) = setup_deposit();
+    const DEPOSIT_AMOUNT: u64 = 30_000;
+
+    // Seed a confirmed deposit, then refresh → the mock minter mints onto the ckBTC ledger.
+    register_deposit(&pic, mock, dpay, payer, DEPOSIT_AMOUNT);
+    let post = refresh_deposit(&pic, dpay, payer).expect("refresh mints the deposit");
+    assert_eq!(post.minted_total, DEPOSIT_AMOUNT);
+
+    // AUTHORITATIVE ledger balance grew (this already passes today — the mint lands correctly).
+    assert_eq!(ledger_balance(&pic, ckbtc, dpay, payer), DEPOSIT_AMOUNT);
+
+    // The facade CACHE query MUST also reflect the minted amount so the wallet shows the
+    // freshly-deposited funds WITHOUT an extra refresh call. FAILS today (returns 0); the fix is
+    // the inline cache refresh inside `refresh_deposit`.
+    assert_eq!(
+        dpay_balance(&pic, dpay, payer, CKBTC),
+        DEPOSIT_AMOUNT,
+        "balance_of (facade cache) must reflect the minted deposit after refresh_deposit",
+    );
+}
+
+/// Covers the new authoritative `refresh_balance` against a credit that bypassed the facade
+/// (direct ICRC transfer / async ckERC20 heartbeat mint). RED today: before the fix the cache is
+/// stale (`balance_of` returns 0) and there is no way to refresh it short of a pay/faucet/mint;
+/// after the fix, `refresh_balance` re-reads the ledger and refreshes the cache.
+#[test]
+fn refresh_balance_reflects_a_cache_bypassing_credit() {
+    let (pic, ckbtc, dpay, mock, _sk, payer) = setup_deposit();
+    const CREDIT: u64 = 25_000;
+
+    // External credit that bypasses the facade (direct ICRC mint to the payer's subaccount).
+    direct_credit(&pic, ckbtc, mock, dpay, payer, CREDIT);
+
+    // AUTHORITATIVE ledger balance grew (the funds really live on the ledger).
+    assert_eq!(ledger_balance(&pic, ckbtc, dpay, payer), CREDIT);
+
+    // The facade cache is STALE — `balance_of` returns 0 because the facade was never invoked.
+    assert_eq!(
+        dpay_balance(&pic, dpay, payer, CKBTC),
+        0,
+        "cache must be stale before refresh_balance (the bypass-credit bug)",
+    );
+
+    // Call the new authoritative refresh → it re-reads the ledger and refreshes the cache.
+    let reported = refresh_balance(&pic, dpay, payer, CKBTC).expect("refresh_balance ok");
+    assert_eq!(reported, CREDIT, "refresh_balance returns the authoritative ledger amount");
+
+    // A subsequent `balance_of` now reflects the credit (the cache was refreshed).
+    assert_eq!(
+        dpay_balance(&pic, dpay, payer, CKBTC),
+        CREDIT,
+        "balance_of (facade cache) must reflect the credit after refresh_balance",
+    );
+}

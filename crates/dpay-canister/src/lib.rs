@@ -1786,6 +1786,30 @@ fn balance_of(pubkey: Vec<u8>, currency: Currency) -> u64 {
     }
 }
 
+/// `(blob pubkey, nat32 currency) -> Result<nat64, text>` — the AUTHORITATIVE on-demand balance
+/// refresh (MC3 U1). Reads the live ledger balance via `icrc1_balance_of` for
+/// `Account{owner: canister_self(), subaccount: pubkey}`, writes it to `BAL_CACHE` (so the fast
+/// `balance_of` query reflects it on subsequent reads), and returns it.
+///
+/// **No auth gate** — consistent with the unauthenticated `balance_of`/`deposit_address` surface:
+/// this is a read + a cache write that moves NO value; it only ever credits the named pubkey's
+/// true balance. Use this to surface credits that bypass the facade: asynchronous ckERC20 heartbeat
+/// mints and direct ICRC transfers land on the ledger WITHOUT invoking the facade, so `BAL_CACHE`
+/// stays stale until this is called. Settlement (`pay`) NEVER reads this — it reads the ledger
+/// directly (the money-safety invariant is unchanged).
+///
+/// Modeled EXACTLY on the post-mint authoritative read in `mint` (re-read + `write_cache`).
+#[update]
+async fn refresh_balance(pubkey: Vec<u8>, currency: Currency) -> Result<u64, String> {
+    let pk = to_pubkey(&pubkey)?;
+    let (ledger, _) = ledger_for(currency)?;
+    let bal = ledger_balance_of(ledger, &account_of(&pk))
+        .await
+        .map_err(|e| format!("refresh_balance ledger read: {e}"))?;
+    write_cache(pk, currency, bal);
+    Ok(bal)
+}
+
 /// `mint(blob, nat32, nat64) -> Result<nat64, text>` — fund a user on a MINTABLE (demo) currency by
 /// transferring from the ledger's minting account (which this canister owns). Real ck currencies are
 /// not mintable. Refreshes the display cache from the authoritative ledger post-settle. Gated to the
@@ -2398,10 +2422,20 @@ async fn deposit_address(pubkey: Vec<u8>, currency: Currency) -> Result<String, 
 /// anyone (a no-op when no confirmed UTXOs exist). `Ok(statuses)` -> minted list + total, empty
 /// pending; `Err(NoNewUtxos{..})` -> empty minted + pending mapped from the error; the remaining
 /// minter errors surface as `Err(String)`.
+///
+/// After a successful minter call (both the `Ok(statuses)` and the `NoNewUtxos` branches), the
+/// display cache is refreshed from the authoritative ledger so a freshly-minted deposit is
+/// immediately visible via `balance_of` WITHOUT an extra `refresh_balance` call (MC3 U1). The
+/// `NoNewUtxos` branch is hit every 10s poll and catches coincident direct transfers / async mints
+/// for free (the ~1 extra `icrc1_balance_of` per 10s-poll-per-user is negligible). The cache refresh
+/// is deliberately NOT added to the AlreadyProcessing / TemporarilyUnavailable / GenericError
+/// branches — the minter call FAILED there and the cache state is unknown, so we do not paper over
+/// it with a speculative read.
 #[update]
 async fn refresh_deposit(pubkey: Vec<u8>, currency: Currency) -> Result<DepositRefresh, String> {
-    let _pk = to_pubkey(&pubkey)?;
+    let pk = to_pubkey(&pubkey)?;
     let minter = minter_for(currency)?;
+    let (ledger, _) = ledger_for(currency)?;
     match minter_call_update_balance(minter, pubkey).await? {
         Ok(statuses) => {
             let mut minted = Vec::with_capacity(statuses.len());
@@ -2414,6 +2448,12 @@ async fn refresh_deposit(pubkey: Vec<u8>, currency: Currency) -> Result<DepositR
                 }
                 // Checked / ValueTooSmall / Tainted carry no mint this call; skip silently — the
                 // UTXO is reported again by a subsequent `update_balance` (or never, if tainted).
+            }
+            // Inline cache refresh: a freshly-minted ckBTC deposit must be immediately visible via
+            // `balance_of` WITHOUT an extra refresh_balance call (MC3 U1). Modeled on `mint`'s
+            // post-mint authoritative re-read. Best-effort: a read failure does not undo the mint.
+            if let Ok(bal) = ledger_balance_of(ledger, &account_of(&pk)).await {
+                write_cache(pk, currency, bal);
             }
             Ok(DepositRefresh {
                 minted,
@@ -2431,6 +2471,12 @@ async fn refresh_deposit(pubkey: Vec<u8>, currency: Currency) -> Result<DepositR
                     Ok(PendingUtxo { value, confirmations: p.confirmations.unwrap_or(0) })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
+            // Inline cache refresh in the NoNewUtxos branch too: this branch is hit every 10s poll
+            // and catches coincident direct transfers / async mints for free. Consistent contract:
+            // "after refresh_deposit returns, the cache reflects the ledger" (MC3 U1).
+            if let Ok(bal) = ledger_balance_of(ledger, &account_of(&pk)).await {
+                write_cache(pk, currency, bal);
+            }
             Ok(DepositRefresh {
                 minted: Vec::new(),
                 minted_total: 0,
