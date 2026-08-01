@@ -13,7 +13,8 @@
 use dpay_core::{
     generate_keypair as core_generate_keypair, sign, validate as core_validate, Authorization,
     CodecError, Currency, DEMO_USD, MEMO_LEN, NAME_LEN, PayError, PaymentRequest, ReceiptClaim,
-    SignedAuthorization, WithdrawAuth, NONCE_LEN, PUBKEY_LEN, SIG_LEN,
+    SignedAuthorization, WithdrawAuth, NONCE_LEN, PUBKEY_LEN, REQUEST_LEN, SIG_LEN, SIGNING_LEN,
+    WIRE_LEN,
 };
 use ed25519_dalek::SigningKey;
 
@@ -143,6 +144,26 @@ pub fn generate_keypair() -> KeyPair {
         secret: sk.to_bytes().to_vec(),
         public: sk.verifying_key().to_bytes().to_vec(),
     }
+}
+
+/// The frozen wire-format byte lengths, single-sourced from `dpay_core`. The app derives its self-check
+/// expected hex length from [`wire_len`] so no magic literal can rot when the wire resizes. Exposed as
+/// `u64` because UniFFI has no `usize`; values are tiny (292/196/132) and stay well under 2^53 in JS.
+#[uniffi::export]
+pub fn wire_len() -> u64 {
+    WIRE_LEN as u64
+}
+
+/// The signed-region length (196 B): `from | to | amount | nonce | expiry | currency | names | memo`.
+#[uniffi::export]
+pub fn signing_len() -> u64 {
+    SIGNING_LEN as u64
+}
+
+/// The merchant request length (132 B): `to | amount | nonce | expiry | currency | to_name | memo`.
+#[uniffi::export]
+pub fn request_len() -> u64 {
+    REQUEST_LEN as u64
 }
 
 /// Payer side: build `Authorization {from, to, amount, nonce, expiry, currency, from_name,
@@ -673,7 +694,32 @@ pub fn nfc_decode_receipt(bytes: &[u8]) -> Result<ReceiptData, DpayError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dpay_core::{WIRE_LEN, REQUEST_LEN};
+    use dpay_core::{WIRE_LEN, REQUEST_LEN, SIGNING_LEN};
+
+    /// The exported length accessors must agree with the core consts (single source of truth), and a
+    /// signed authorization wire must be exactly `wire_len()` bytes. Guards the App.tsx self-check,
+    /// which derives its expected hex length from `wireLen()` — a resize that isn't mirrored here breaks
+    /// this test before it can rot the self-check.
+    #[test]
+    fn wire_len_accessors_match_core_and_signed_wire() {
+        assert_eq!(wire_len(), WIRE_LEN as u64);
+        assert_eq!(signing_len(), SIGNING_LEN as u64);
+        assert_eq!(request_len(), REQUEST_LEN as u64);
+        let sk = test_key();
+        let wire = sign_authorization(
+            &sk.to_bytes(),
+            &test_to(),
+            1499,
+            &test_nonce(),
+            2_000_000_000,
+            0,
+            "Alice".to_string(),
+            "Bob".to_string(),
+            "coffee".to_string(),
+        )
+        .expect("sign_authorization succeeds");
+        assert_eq!(wire.len(), wire_len() as usize);
+    }
 
     /// A deterministic signing key from a fixed seed (no RNG needed; stable golden).
     fn test_key() -> SigningKey {

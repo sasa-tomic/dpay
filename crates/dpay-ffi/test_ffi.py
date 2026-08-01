@@ -47,6 +47,12 @@ FROM_NAME, TO_NAME, MEMO = "Alice", "Bob", "coffee"
 wire = d.sign_authorization(kp.secret, to_kp.public, amount, nonce, expiry, 0,
                             FROM_NAME, TO_NAME, MEMO)
 check(len(wire) == WIRE_LEN, f"sign_authorization -> {WIRE_LEN}-byte wire blob")
+# The exported length accessors must agree with the real wire the core just produced (the App.tsx
+# self-check derives its expected hex length from `wireLen()` — a mismatch here would rot that check).
+check(d.wire_len() == WIRE_LEN, f"wire_len() == {WIRE_LEN} (matches the signed wire)")
+check(d.signing_len() == 196, "signing_len() == 196 (the 196-byte signed region)")
+check(d.request_len() == 132, "request_len() == 132 (the merchant request wire)")
+check(len(wire) == d.wire_len(), "signed wire length matches wire_len()")
 check(wire[0:32] == kp.public, "wire `from` == signer public key (consent bound to signer)")
 check(wire[FROM_PUB_OFF:WIRE_LEN] == kp.public, "wire carries payer pubkey for directory-free verify")
 

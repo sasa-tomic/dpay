@@ -305,6 +305,13 @@ async function generateKeypair(): Promise<{ secretHex: string; publicHex: string
   return { secretHex: bytesToHex(secret), publicHex: bytesToHex(pub) };
 }
 
+// Wire-format byte lengths, single-sourced from `wire_layout.json` (itself generated from the Rust
+// core consts — see `dfx/wire_layout.json`). The App.tsx self-check derives its expected hex length
+// from `wireLen()` so no magic literal rots on resize; the FFI is the source of truth on device.
+async function wireLen(): Promise<number> { return L.wire_len; }
+async function signingLen(): Promise<number> { return L.signing_len; }
+async function requestLen(): Promise<number> { return L.request_len; }
+
 async function signAuthorization(secretHex: string, toHex: string, amount: number, nonceHex: string, expiry: number, currency: number, fromName = '', toName = '', memo = ''): Promise<string> {
   // Per the on-device contract: returns the wire as a hex string. The app then hands it to
   // encodeQr() to make the QR the merchant scans / submits. `fromName` is the payer's own display
@@ -469,6 +476,9 @@ async function nfcStatus(): Promise<string> {
 
 export const DpayCore = {
   generateKeypair,
+  wireLen,
+  signingLen,
+  requestLen,
   signAuthorization,
   signWithdrawal,
   encodeRequest,

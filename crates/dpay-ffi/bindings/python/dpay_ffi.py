@@ -482,15 +482,21 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_nfc_request_bytes() != 53714:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_request_len() != 35464:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_sign_authorization() != 58578:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_sign_withdrawal() != 9974:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_signing_len() != 28339:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_validate() != 15932:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_verify_receipt_sig() != 38282:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_verify_wire() != 29445:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_wire_len() != 52015:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_method_fficardsession_awaiting_decision() != 40082:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -800,6 +806,10 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_nfc_request_bytes.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_nfc_request_bytes.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_request_len.argtypes = (
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_request_len.restype = ctypes.c_uint64
 _UniffiLib.uniffi_dpay_ffi_fn_func_sign_authorization.argtypes = (
     _UniffiRustBuffer,
     _UniffiRustBuffer,
@@ -823,6 +833,10 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_sign_withdrawal.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_sign_withdrawal.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_signing_len.argtypes = (
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_signing_len.restype = ctypes.c_uint64
 _UniffiLib.uniffi_dpay_ffi_fn_func_validate.argtypes = (
     ctypes.c_uint64,
     ctypes.c_uint64,
@@ -852,6 +866,10 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_verify_wire.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_verify_wire.restype = ctypes.c_int8
+_UniffiLib.uniffi_dpay_ffi_fn_func_wire_len.argtypes = (
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_wire_len.restype = ctypes.c_uint64
 _UniffiLib.ffi_dpay_ffi_rustbuffer_alloc.argtypes = (
     ctypes.c_uint64,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -1153,12 +1171,18 @@ _UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_receipt_codes.restype = ctypes.c_ui
 _UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_request_bytes.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_request_bytes.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_request_len.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_request_len.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_sign_authorization.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_sign_authorization.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_sign_withdrawal.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_sign_withdrawal.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_signing_len.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_signing_len.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_validate.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_validate.restype = ctypes.c_uint16
@@ -1168,6 +1192,9 @@ _UniffiLib.uniffi_dpay_ffi_checksum_func_verify_receipt_sig.restype = ctypes.c_u
 _UniffiLib.uniffi_dpay_ffi_checksum_func_verify_wire.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_verify_wire.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_wire_len.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_wire_len.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_awaiting_decision.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_awaiting_decision.restype = ctypes.c_uint16
@@ -2602,6 +2629,14 @@ def nfc_request_bytes(to: "bytes",amount: "int",nonce: "bytes",expiry: "int",cur
         _UniffiConverterString.lower(memo)))
 
 
+def request_len() -> "int":
+    """
+    The merchant request length (132 B): `to | amount | nonce | expiry | currency | to_name | memo`.
+    """
+
+    return _UniffiConverterUInt64.lift(_uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_func_request_len,))
+
+
 def sign_authorization(secret: "bytes",to: "bytes",amount: "int",nonce: "bytes",expiry: "int",currency: "int",from_name: "str",to_name: "str",memo: "str") -> "bytes":
     """
     Payer side: build `Authorization {from, to, amount, nonce, expiry, currency, from_name,
@@ -2680,6 +2715,14 @@ def sign_withdrawal(secret: "bytes",btc_address: "str",amount: "int",nonce: "byt
         _UniffiConverterBytes.lower(nonce),
         _UniffiConverterUInt64.lower(expiry),
         _UniffiConverterUInt32.lower(currency)))
+
+
+def signing_len() -> "int":
+    """
+    The signed-region length (196 B): `from | to | amount | nonce | expiry | currency | names | memo`.
+    """
+
+    return _UniffiConverterUInt64.lift(_uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_func_signing_len,))
 
 
 def validate(amount: "int",now: "int",expiry: "int",cap: "int",balance: "int",nonce_seen: "bool",sig_ok: "bool") -> "typing.Optional[str]":
@@ -2767,6 +2810,16 @@ def verify_wire(wire: "bytes") -> "bool":
         _UniffiConverterBytes.lower(wire)))
 
 
+def wire_len() -> "int":
+    """
+    The frozen wire-format byte lengths, single-sourced from `dpay_core`. The app derives its self-check
+    expected hex length from [`wire_len`] so no magic literal can rot when the wire resizes. Exposed as
+    `u64` because UniFFI has no `usize`; values are tiny (292/196/132) and stay well under 2^53 in JS.
+    """
+
+    return _UniffiConverterUInt64.lift(_uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_func_wire_len,))
+
+
 __all__ = [
     "InternalError",
     "DpayError",
@@ -2787,11 +2840,14 @@ __all__ = [
     "nfc_receipt_bytes",
     "nfc_receipt_codes",
     "nfc_request_bytes",
+    "request_len",
     "sign_authorization",
     "sign_withdrawal",
+    "signing_len",
     "validate",
     "verify_receipt_sig",
     "verify_wire",
+    "wire_len",
     "FfiCardSession",
     "FfiReaderConductor",
 ]

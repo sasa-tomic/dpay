@@ -51,6 +51,36 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         }
     }
 
+    /** Wire-format byte lengths from the core (single source of truth). Resolved as Double because
+     *  RN's bridge has no u64; values (292/196/132) are tiny. App.tsx derives its self-check expected
+     *  hex length from this so no magic literal can rot on a wire resize. */
+    @ReactMethod
+    fun wireLen(promise: Promise) {
+        try {
+            promise.resolve(uniffi.dpay_ffi.wireLen().toDouble())
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    @ReactMethod
+    fun signingLen(promise: Promise) {
+        try {
+            promise.resolve(uniffi.dpay_ffi.signingLen().toDouble())
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    @ReactMethod
+    fun requestLen(promise: Promise) {
+        try {
+            promise.resolve(uniffi.dpay_ffi.requestLen().toDouble())
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
     /** Build + sign the authorization OFFLINE; returns the 292-byte wire as hex. */
     @ReactMethod
     fun signAuthorization(
@@ -78,6 +108,37 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
                 memo,
             )
             promise.resolve(hex(wire))
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    /**
+     * Sign a withdrawal authorization (ckBTC → native BTC out) OFFLINE; returns the 64-byte Ed25519
+     * signature as hex. This is the non-custodial withdrawal gate: the facade verifies this signature
+     * under `from_pubkey` (== the ckBTC debit subaccount) before moving funds. Mirrors `signAuthorization`
+     * — the canonical signing bytes come from the shared core (single source of truth).
+     */
+    @ReactMethod
+    fun signWithdrawal(
+        secretHex: String,
+        btcAddress: String,
+        amount: Double,
+        nonceHex: String,
+        expiry: Double,
+        currency: Double,
+        promise: Promise,
+    ) {
+        try {
+            val sig = uniffi.dpay_ffi.signWithdrawal(
+                unhex(secretHex),
+                btcAddress,
+                amount.toLong().toULong(),
+                unhex(nonceHex),
+                expiry.toLong().toULong(),
+                currency.toInt().toUInt(),
+            )
+            promise.resolve(hex(sig))
         } catch (e: Throwable) {
             promise.reject("dpay_core", e)
         }

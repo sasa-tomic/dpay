@@ -34,14 +34,22 @@ export type Txn = {nonce: string; amount: number; who: string; memo: string; tim
 export type TransactionsRow = {from: string; to: string; amount: number; nonce: string; currency: number; timestamp: number; from_name: string; to_name: string; memo: string};
 export type DpayCoreApi = {
   generateKeypair(): Promise<{secretHex: string; publicHex: string}>;
+  // Wire-format byte lengths, single-sourced from the FFI (dpay_core consts). The App.tsx self-check
+  // derives the expected hex length from `wireLen()` so no magic literal can rot on a wire resize.
+  wireLen(): Promise<number>;
+  signingLen(): Promise<number>;
+  requestLen(): Promise<number>;
   // `fromName` is the payer's own display name; `toName`/`memo` are copied from the scanned request
-  // (merchant-defined). All three default to '' (empty names = all-zero name bytes on the wire) so
-  // the NFC card path (which has no name in its request yet) keeps working unchanged.
-  signAuthorization(secretHex: string, toHex: string, amount: number, nonceHex: string, expiry: number, currency: number, fromName?: string, toName?: string, memo?: string): Promise<string>;
-  encodeRequest(toHex: string, amount: number, nonceHex: string, expiry: number, currency: number, toName?: string, memo?: string): Promise<string>;
+  // (merchant-defined). All three are REQUIRED (empty = all-zero name bytes on the wire) so a call
+  // site that drops one is a compile error, not a silent native arity crash (device-bridge plan L1).
+  signAuthorization(secretHex: string, toHex: string, amount: number, nonceHex: string, expiry: number, currency: number, fromName: string, toName: string, memo: string): Promise<string>;
+  encodeRequest(toHex: string, amount: number, nonceHex: string, expiry: number, currency: number, toName: string, memo: string): Promise<string>;
   decodeRequest(qr: string): Promise<Req>;
   encodeQr(wireHex: string): Promise<string>;
   verifyWire(wireHex: string): Promise<boolean>;
+  // Policy gate mirroring the canister: resolves null when the payment is acceptable, else the reason
+  // string ('expired', 'over_cap', 'insufficient_funds', 'nonce_reused', 'bad_signature', 'zero_amount').
+  validate(amount: number, now: number, expiry: number, cap: number, balance: number, nonceSeen: boolean, sigOk: boolean): Promise<string | null>;
   // Sign a withdrawal authorization (ckBTC → native BTC out). Returns the 64-byte Ed25519 sig as hex
   // over the canonical WithdrawAuth signing bytes. The facade verifies this under from_pubkey (== the
   // debit subaccount) before moving funds — the non-custodial withdrawal gate.

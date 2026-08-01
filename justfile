@@ -103,8 +103,17 @@ verify-relay:
 mint account amount currency='0':
     bash scripts/mint.sh {{account}} {{amount}} {{currency}}
 
+# typecheck the RN app — catches bridge arity drift against the TS interfaces (tsc --noEmit, ~2s, no device)
+typecheck:
+    cd app && npm run typecheck
+
+# bridge parity: assert every TS DpayCoreApi/DpayNfcApi method has a matching-arity Kotlin @ReactMethod
+# (and vice-versa). Sub-second, no device — the static net that makes wire/arity drift fail the build.
+bridge-parity:
+    node scripts/bridge-parity.mjs
+
 # the native Rust inner loop — core + canister + relay
-check: test-core test-canister test-relay
+check: test-core test-canister test-relay typecheck bridge-parity
     @echo "rust inner loop green"
 
 # everything: rust loop + radical e2e (real app + real relay + real browser). The e2e harness
