@@ -22,6 +22,7 @@ import uniffi.dpay_ffi.nfcReceiptCodes
 import uniffi.dpay_ffi.nfcRequestBytes
 import uniffi.dpay_ffi.signAuthorization
 import uniffi.dpay_ffi.verifyWire
+import uniffi.dpay_ffi.wireLen
 
 /**
  * Runs the dpay NFC *transport state machines* on a real Android runtime — the exact
@@ -79,10 +80,16 @@ class DpayNfcInstrumentedTest {
     /** A real offline-signed wire survives the whole exchange — single-frame and byte-fragmented. */
     @Test
     fun signedWireSurvivesExchangeAndVerifies() {
-        for (mc in listOf(nfcDefaultMaxChunk(), 1u)) {
+        // The 292-byte wire at chunk=1 would need 292 frames > the NFC seq ceiling (MAX_FRAMES=256),
+        // so the transport refuses it with a typed error; the smallest representable chunk is 2
+        // (146 frames), which still exercises heavy multi-frame fragmentation. Mirrors the host
+        // Python (`for mc in (MAX_CHUNK, 2)`) and core Rust (`[.., 7, 2]`) chunk floors and their
+        // chunk=1 rejection pins.
+        val expectedWireLen = wireLen()
+        for (mc in listOf(nfcDefaultMaxChunk(), 2u)) {
             val wire = drive(mc, approve = true)
             assertNotNull("chunk=$mc delivered a wire", wire)
-            assertEquals("292-byte wire", 292, wire!!.size)
+            assertEquals("wire length matches the core WIRE_LEN", expectedWireLen.toInt(), wire!!.size)
             assertTrue("chunk=$mc: reassembled wire verifies on-device", verifyWire(wire))
         }
     }
@@ -164,8 +171,15 @@ class DpayNfcInstrumentedTest {
         card.provideWire(signAuthorization(payer.secret, merchant.`public`, 100UL, n, expiry, 0u, "Alice", "Bob", ""))
         assertEquals(NfcPhase.EXCHANGING, card.phase())
 
-        val step = reader.handleResponse(card.process(reader.nextCommand()!!)) // pull the wire
-        assertEquals(NfcStep.DONE, step)
+        // Pull the wire: the 292-byte wire spans 2 frames at the default chunk (292 > 240), so each
+        // frame but the last is CONTINUE and only the final frame yields DONE. This is the same loop
+        // the host Python (test_ffi.py wire-pull) and core Rust (`phase_tracks_the_exchange`) run,
+        // and what the production HCE service / reader-mode loop drive over the real radio.
+        var step = reader.handleResponse(card.process(reader.nextCommand()!!))
+        while (step != NfcStep.DONE) {
+            assertEquals(NfcStep.CONTINUE, step) // intermediate wire-pull frames are CONTINUE
+            step = reader.handleResponse(card.process(reader.nextCommand()!!))
+        }
         assertTrue(card.isComplete()) // the wire left the phone…
         assertFalse(card.isConfirmed()) // …but the outcome isn't known until the receipt
         assertEquals(NfcPhase.SETTLING, card.phase())

@@ -195,6 +195,17 @@ def run_nfc(max_chunk, approve=True):
 # 292 B (wire-format v2); the NFC `seq` byte caps a payload at MAX_FRAMES=256 frames, so 1 byte/frame
 # (292 frames) is no longer representable. The smallest chunk that keeps the wire under the ceiling
 # is 2 (→ 146 frames), which still exercises heavy multi-frame fragmentation.
+#
+# chunk=1 on the 292-byte wire is therefore an unrepresentable configuration: the transport must
+# refuse it with a typed error (NfcProtocol = Frame(TooManyFrames)) rather than silently truncate.
+# Pin that boundary here so a future wire resize or seq widening surfaces explicitly (mirrors the
+# core Rust `signed_wire_survives_nfc_and_verifies` mc=1 rejection assertion).
+try:
+    run_nfc(1)
+    raise AssertionError("FAILED: chunk=1 must be unrepresentable (292 frames > MAX_FRAMES=256)")
+except d.DpayError.NfcProtocol:
+    check(True, "chunk=1 on 292-byte wire -> DpayError.NfcProtocol (TooManyFrames; u8 seq ceiling)")
+
 for mc in (MAX_CHUNK, 2):
     got = run_nfc(mc)
     check(got == nfc_wire, f"NFC exchange delivers byte-identical wire (chunk={mc})")

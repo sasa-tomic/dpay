@@ -1620,8 +1620,23 @@ mod signed_tests {
             .to_bytes()
             .to_vec();
 
-        // 292 B wire: at chunk=1 it would need 292 frames > MAX_FRAMES (256), so the smallest chunk
-        // exercised is 2 (146 frames) — still heavily fragmented, but within the frame ceiling.
+        // The NFC frame `seq` is one byte, so a payload is capped at MAX_FRAMES (256) frames. The
+        // 292-byte wire at chunk=1 needs 292 frames (> 256) — an unrepresentable configuration the
+        // transport must refuse with a typed error rather than silently truncate. Pin that boundary
+        // against the real wire length (not just the generic `fragment_input_guards` MAX_FRAMES+1
+        // case), so a future wire resize or seq widening surfaces here explicitly.
+        assert_eq!(WIRE_LEN.div_ceil(1), 292);
+        assert!(
+            WIRE_LEN.div_ceil(1) > super::MAX_FRAMES,
+            "292-byte wire at chunk=1 must exceed the frame ceiling"
+        );
+        assert_eq!(
+            super::frame::fragment(&wire, 1),
+            Err(super::frame::FrameError::TooManyFrames),
+            "chunk=1 on the 292-byte wire is unrepresentable (u8 seq) -> typed rejection"
+        );
+
+        // Smallest representable chunk is 2 (146 frames, ≤ MAX_FRAMES) — still heavily fragmented.
         for max_chunk in [super::DEFAULT_MAX_CHUNK, 240, 64, 7, 2] {
             let mut card = CardSession::new(max_chunk);
             let mut reader = ReaderConductor::new(&req, max_chunk).unwrap();

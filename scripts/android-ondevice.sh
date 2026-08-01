@@ -15,9 +15,17 @@ export ANDROID_SDK_ROOT="$ANDROID_HOME"
 [ -x "${JAVA_HOME:-}/bin/javac" ] || export JAVA_HOME="$(java -XshowSettings:properties -version 2>&1 | sed -n 's/.*java\.home = //p')"
 export PATH="$ANDROID_HOME/platform-tools:$PATH"
 
-# Cached Gradle 8.9 distribution (matches AGP 8.7.3). Glob the hashed dir.
-GRADLE="$(ls -d "$HOME"/.gradle/wrapper/dists/gradle-8.9-bin/*/gradle-8.9/bin/gradle 2>/dev/null | head -1)"
-test -x "$GRADLE" || { echo "FAIL: cached gradle 8.9 not found"; exit 1; }
+# Newest cached Gradle distribution. AGP 8.7.3 (android/build.gradle) requires Gradle >= 8.9; the
+# wrapper dists cache both -bin and -all layouts under a hashed subdir, so find the gradle binary and
+# pick the highest version rather than hardcoding a single (easily stale) distribution.
+GRADLE="$(find "$HOME"/.gradle/wrapper/dists -type f -path '*/bin/gradle' 2>/dev/null \
+  | awk -F/ '{full=$0;v="";for(i=1;i<=NF;i++)if($i~/^gradle-[0-9]/){split($i,g,"-");v=g[2]} if(v!="")print v"\t"full}' \
+  | sort -Vr | head -1 | cut -f2-)"
+test -x "$GRADLE" || { echo "FAIL: no cached gradle found under ~/.gradle/wrapper/dists"; exit 1; }
+GV="$(printf '%s' "$GRADLE" | awk -F/ '{for(i=1;i<=NF;i++)if($i~/^gradle-[0-9]/){split($i,g,"-");print g[2];exit}}')"
+awk -v v="$GV" 'BEGIN{split(v,a,"."); exit !(a[1]>8 || (a[1]==8 && a[2]>=9))}' \
+  || { echo "FAIL: cached gradle $GV is < 8.9 (AGP 8.7.3 needs >= 8.9); run an android/ build once to cache a newer dist"; exit 1; }
+echo "   gradle: $GV ($GRADLE)"
 
 echo "== require a booted device =="
 adb wait-for-device
