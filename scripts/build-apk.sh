@@ -1,17 +1,15 @@
 #!/usr/bin/env bash
-# Build a self-contained, downloadable dpay release APK and stage it for the relay to serve.
+# Build signed dpay release APK/AAB artifacts and stage the APK for the relay to serve.
 #
 # Unlike scripts/rn-run.sh (which also installs, launches, and screenshots on a connected device),
-# this needs NO device: it just produces the signed APK the landing page hands out at
+# this needs NO device: it produces the Play bundle and the signed APK the landing page hands out at
 # GET /download/dpay.apk. It:
 #   1. cross-compiles dpay-ffi (the shared Rust core) for arm64-v8a + x86_64 (scripts/ndk-build-ffi.sh),
 #   2. syncs the .so + UniFFI Kotlin binding into the app (single source of truth — same core the tests run),
 #   3. bakes the default relay URL a fresh install talks to (the public relay by default),
-#   4. assembles a release APK for just the two ABIs we ship a native lib for, and
-#   5. stages it to deploy/dist/dpay.apk so `just image` / the running relay serves it.
-#
-# The APK is debug-signed (well-known 'android' keystore) — fine for a PoC sideload; a Play upload
-# would need an upload key, which is out of scope here.
+#   4. builds a release APK and Play AAB for just the two ABIs we ship a native lib for,
+#   5. verifies both artifacts are signed by app/play-signing/upload_cert.pem, and
+#   6. stages the APK to deploy/dist/dpay.apk so `just image` / the running relay serves it.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 ROOT="$PWD"
@@ -56,21 +54,46 @@ rm -rf "$JAVA_PKG/uniffi"
 target/debug/uniffi-bindgen generate --library target/debug/libdpay_ffi.so --language kotlin --out-dir "$JAVA_PKG" --no-format
 test -f "$JAVA_PKG/uniffi/dpay_ffi/dpay_ffi.kt" || { echo "FAIL: Kotlin binding not generated"; exit 1; }
 
-echo "== assemble release APK ($ABIS) =="
+echo "== build release APK + AAB ($ABIS) =="
 cd app/android
-./gradlew --console=plain :app:assembleRelease -PreactNativeArchitectures="$ABIS" "$@"
+./gradlew --console=plain :app:assembleRelease :app:bundleRelease -PreactNativeArchitectures="$ABIS" "$@"
 cd "$ROOT"
 
 APK="$(find app/android/app/build/outputs/apk/release -maxdepth 1 -name '*.apk' -printf '%T@ %p\n' | sort -nr | sed -n '1s/^[^ ]* //p')"
 [ -n "$APK" ] || { echo "FAIL: no APK produced"; exit 1; }
+AAB="$(find app/android/app/build/outputs/bundle/release -maxdepth 1 -name '*.aab' -printf '%T@ %p\n' | sort -nr | sed -n '1s/^[^ ]* //p')"
+[ -n "$AAB" ] || { echo "FAIL: no AAB produced"; exit 1; }
+
+UPLOAD_CERT="app/android/app/play-signing/upload_cert.pem"
+[ -f "$UPLOAD_CERT" ] || { echo "FAIL: public upload certificate missing: $UPLOAD_CERT"; exit 1; }
+APKSIGNER="$(find "$ANDROID_HOME/build-tools" -mindepth 2 -maxdepth 2 -type f -name apksigner -print | sort -V | tail -1)"
+[ -x "$APKSIGNER" ] || { echo "FAIL: apksigner not found under $ANDROID_HOME/build-tools"; exit 1; }
+
+EXPECTED_CERT_SHA256="$(openssl x509 -in "$UPLOAD_CERT" -outform DER | sha256sum | cut -d' ' -f1)"
+APK_VERIFY="$("$APKSIGNER" verify --print-certs "$APK")"
+APK_CERT_SHA256="$(printf '%s\n' "$APK_VERIFY" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
+[ "$APK_CERT_SHA256" = "$EXPECTED_CERT_SHA256" ] || {
+  echo "FAIL: APK signer $APK_CERT_SHA256 does not match upload certificate $EXPECTED_CERT_SHA256"
+  exit 1
+}
+
+"$JAVA_HOME/bin/jarsigner" -verify "$AAB" >/dev/null 2>&1 || { echo "FAIL: AAB signature verification failed"; exit 1; }
+AAB_CERT_SHA256="$("$JAVA_HOME/bin/keytool" -printcert -rfc -jarfile "$AAB" | openssl x509 -outform DER | sha256sum | cut -d' ' -f1)"
+[ "$AAB_CERT_SHA256" = "$EXPECTED_CERT_SHA256" ] || {
+  echo "FAIL: AAB signer $AAB_CERT_SHA256 does not match upload certificate $EXPECTED_CERT_SHA256"
+  exit 1
+}
 
 mkdir -p deploy/dist
 install -m 0644 "$APK" deploy/dist/dpay.apk
 echo
-echo "== APK ready =="
-echo "   source:  ${APK#$ROOT/}  ($(du -h "$APK" | cut -f1))"
+echo "== signed release artifacts ready =="
+echo "   APK:     ${APK#$ROOT/}  ($(du -h "$APK" | cut -f1))"
+echo "   APK sha: $(sha256sum "$APK" | cut -d' ' -f1)"
 echo "   staged:  deploy/dist/dpay.apk"
-echo "   sha256:  $(sha256sum deploy/dist/dpay.apk | cut -d' ' -f1)"
+echo "   AAB:     ${AAB#$ROOT/}  ($(du -h "$AAB" | cut -f1))"
+echo "   AAB sha: $(sha256sum "$AAB" | cut -d' ' -f1)"
+echo "   signer:  SHA-256 $EXPECTED_CERT_SHA256 (APK + AAB verified)"
 echo
 echo "   serve locally:  DPAY_APK_PATH=$ROOT/deploy/dist/dpay.apk cargo run -p dpay-relay"
 echo "   or bake into image:  just image  (Dockerfile COPYs dist/dpay.apk)"

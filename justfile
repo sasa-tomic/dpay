@@ -134,7 +134,7 @@ ondevice:
 app:
     bash scripts/rn-run.sh
 
-# build a downloadable release APK (no device needed) + stage it to deploy/dist/dpay.apk for the relay
+# build + verify signed release APK/AAB; stage the APK to deploy/dist/dpay.apk for the relay
 apk:
     bash scripts/build-apk.sh
 

@@ -72,6 +72,31 @@ def enableProguardInReleaseBuilds = false
  */
 def jscFlavor = 'org.webkit:android-jsc:+'
 
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = file(System.getenv("DPAY_KEYSTORE_PROPERTIES")
+        ?: "${System.getProperty('user.home')}/.config/dpay/android/keystore.properties")
+if (keystorePropertiesFile.isFile()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
+def releaseSigning = [
+        storeFile: System.getenv("DPAY_UPLOAD_STORE_FILE") ?: keystoreProperties.getProperty("storeFile"),
+        storePassword: System.getenv("DPAY_UPLOAD_STORE_PASSWORD") ?: keystoreProperties.getProperty("storePassword"),
+        keyAlias: System.getenv("DPAY_UPLOAD_KEY_ALIAS") ?: keystoreProperties.getProperty("keyAlias"),
+        keyPassword: System.getenv("DPAY_UPLOAD_KEY_PASSWORD") ?: keystoreProperties.getProperty("keyPassword"),
+]
+def hasReleaseSigning = releaseSigning.values().every { it != null && !it.toString().isBlank() }
+
+gradle.taskGraph.whenReady { graph ->
+    def releaseArtifactPrefixes = ["assembleRelease", "bundleRelease", "installRelease", "packageRelease", "publishRelease"]
+    def buildsReleaseArtifact = graph.allTasks.any { task ->
+        releaseArtifactPrefixes.any { task.name.startsWith(it) }
+    }
+    if (buildsReleaseArtifact && !hasReleaseSigning) {
+        throw new GradleException("Release signing is not configured. Set DPAY_KEYSTORE_PROPERTIES or the DPAY_UPLOAD_* environment variables.")
+    }
+}
+
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
@@ -92,15 +117,23 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        if (hasReleaseSigning) {
+            release {
+                storeFile file(releaseSigning.storeFile)
+                storePassword releaseSigning.storePassword
+                keyAlias releaseSigning.keyAlias
+                keyPassword releaseSigning.keyPassword
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }

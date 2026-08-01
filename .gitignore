@@ -26,6 +26,15 @@ diff
 **/android/**/build
 /app/android/local.properties
 
+# Android signing secrets. Public Play certificates live in app/android/app/play-signing/.
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pk8
+keystore.properties
+signing.properties
+
 # Secrets — deploy/.env carries the live Cloudflare API/tunnel token + canister id. Never commit any
 # file literally named `.env` (this does not match .env.example or app/ios/.xcode.env).
 .env
