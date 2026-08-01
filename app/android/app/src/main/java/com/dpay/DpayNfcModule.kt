@@ -4,6 +4,7 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
+import java.math.BigInteger
 
 /**
  * JS bridge for the NFC tap flow. It only starts/stops the two roles and relays the payer's
@@ -75,7 +76,7 @@ class DpayNfcModule(reactContext: ReactApplicationContext) :
     @ReactMethod
     fun buildRequest(
         toHex: String,
-        amount: Double,
+        amount: String,
         nonceHex: String,
         expiry: Double,
         currency: Double,
@@ -83,10 +84,17 @@ class DpayNfcModule(reactContext: ReactApplicationContext) :
         memo: String,
         promise: Promise,
     ) {
+        // MC1 units 2-4: `amount` is a raw-u64 decimal STRING. `BigInteger(amount).toLong().toULong()`
+        // is exact for the full u64 bit-pattern; a malformed value rejects the promise (never silent).
+        val amountU = try {
+            BigInteger(amount.trim()).toLong().toULong()
+        } catch (e: Throwable) {
+            promise.reject("dpay_nfc", "invalid amount: ${e.message}", e); return
+        }
         try {
             val bytes = uniffi.dpay_ffi.nfcRequestBytes(
                 unhex(toHex),
-                amount.toLong().toULong(),
+                amountU,
                 unhex(nonceHex),
                 expiry.toLong().toULong(),
                 currency.toInt().toUInt(),

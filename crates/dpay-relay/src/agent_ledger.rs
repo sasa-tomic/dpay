@@ -24,7 +24,7 @@ use dpay_core::{Currency, PUBKEY_LEN, SignedAuthorization};
 use crate::ledger::{
     CKERC20_HELPER_ADDRESS, CKUSDC_ERC20_ADDRESS, CkErc20OnrampParams, CurrencyDescriptor, DepositInfo,
     DepositRefresh, Ledger, LedgerError, MinterFamily, MintedUtxo, PendingUtxo, RampCapability,
-    Receipt, TxnRecord, WithdrawReceipt, WithdrawRequest,
+    Receipt, TxnRecord, U64String, WithdrawReceipt, WithdrawRequest,
 };
 
 /// Read the settlement currency out of a 292-byte signed-authorization wire (the canister does the
@@ -266,14 +266,14 @@ impl Ledger for AgentLedger {
             Ok(r) => Ok(Receipt {
                 from: hex::encode(r.from),
                 to: hex::encode(r.to),
-                amount: r.amount,
+                amount: U64String(r.amount),
                 nonce: hex::encode(r.nonce),
-                new_from_balance: r.new_from_balance,
+                new_from_balance: U64String(r.new_from_balance),
                 // The currency is read out of the wire by the canister; the relay re-decodes the
                 // wire to surface it in the receipt (the app needs it to rebuild the claim). Cheap
                 // pure decode, already done by the route — but the agent path decodes here.
                 currency: currency_of_wire(&wire),
-                block_index: r.block_index,
+                block_index: U64String(r.block_index),
                 settle_ts: r.settle_ts,
                 receipt_sig: hex::encode(r.receipt_sig),
                 pubkey: hex::encode(r.pubkey),
@@ -353,7 +353,7 @@ impl Ledger for AgentLedger {
             .map(|v| TxnRecord {
                 from: hex::encode(v.from),
                 to: hex::encode(v.to),
-                amount: v.amount,
+                amount: U64String(v.amount),
                 nonce: hex::encode(v.nonce),
                 currency: v.currency,
                 timestamp: v.timestamp,
@@ -421,14 +421,14 @@ impl Ledger for AgentLedger {
                 .into_iter()
                 .map(|u| MintedUtxo {
                     block_index: u.block_index.to_string(),
-                    amount: u.amount,
+                    amount: U64String(u.amount),
                 })
                 .collect(),
-            minted_total: m.minted_total,
+            minted_total: U64String(m.minted_total),
             pending: m
                 .pending
                 .into_iter()
-                .map(|p| PendingUtxo { value: p.value, confirmations: p.confirmations })
+                .map(|p| PendingUtxo { value: U64String(p.value), confirmations: p.confirmations })
                 .collect(),
             required_confirmations: m.required_confirmations,
         })
@@ -452,8 +452,8 @@ impl Ledger for AgentLedger {
         let m = result.map_err(LedgerError::Transient)?;
         Ok(DepositInfo {
             min_confirmations: m.min_confirmations,
-            deposit_fee: m.deposit_fee,
-            deposit_min_amount: m.deposit_min_amount,
+            deposit_fee: U64String(m.deposit_fee),
+            deposit_min_amount: m.deposit_min_amount.map(U64String),
         })
     }
 
@@ -488,8 +488,8 @@ impl Ledger for AgentLedger {
                 backing_symbol: d.backing_symbol,
                 network: d.network,
                 display_decimals: d.display_decimals,
-                fee: d.fee,
-                cap: d.cap,
+                fee: d.fee.map(U64String),
+                cap: d.cap.map(U64String),
                 chain_id: d.chain_id,
                 token_contract: d.token_contract,
                 onramp: match d.onramp {
@@ -538,7 +538,7 @@ impl Ledger for AgentLedger {
         let mirror = WithdrawRequestMirror {
             from_pubkey: from,
             destination: req.destination,
-            amount: req.amount,
+            amount: req.amount.0,
             nonce,
             expiry: req.expiry,
             currency: req.currency,
@@ -559,10 +559,10 @@ impl Ledger for AgentLedger {
             Ok(m) => Ok(WithdrawReceipt {
                 from: hex::encode(m.from),
                 destination: m.destination,
-                amount: m.amount,
+                amount: U64String(m.amount),
                 nonce: hex::encode(m.nonce),
                 currency: m.currency,
-                block_index: m.block_index,
+                block_index: U64String(m.block_index),
             }),
             Err(msg) => Err(LedgerError::Rejected(msg)),
         }

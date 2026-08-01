@@ -5,7 +5,7 @@ export type DpayNfcApi = {
   disarmCard(): Promise<void>;
   approveCard(wireHex: string): Promise<void>;
   declineCard(): Promise<void>;
-  buildRequest(toHex: string, amount: number, nonceHex: string, expiry: number, currency: number, toName: string, memo: string): Promise<string>;
+  buildRequest(toHex: string, amount: string, nonceHex: string, expiry: number, currency: number, toName: string, memo: string): Promise<string>;
   startReader(requestHex: string): Promise<void>;
   stopReader(): Promise<void>;
   // Merchant: after settling online, hand the outcome back to the payer. `status` is the receipt
@@ -18,7 +18,7 @@ export type DpayNfcApi = {
 
 export type NfcEvent =
   | {type: 'phase'; role: 'card' | 'reader'; phase: NfcPhaseName}
-  | {type: 'request'; role: 'card'; toHex: string; amount: number; nonceHex: string; expiry: number; currency: number}
+  | {type: 'request'; role: 'card'; toHex: string; amount: string; nonceHex: string; expiry: number; currency: number}
   | {type: 'done'; role: 'reader'; wireHex: string}
   | {type: 'receipt'; role: 'card'; settled: boolean; status: number; nonceHex: string}
   | {type: 'confirmed'; role: 'reader'}
@@ -26,12 +26,16 @@ export type NfcEvent =
 
 export type NfcPhaseName = 'listening' | 'linking' | 'exchanging' | 'awaitingApproval' | 'settling' | 'success' | 'declined' | 'pending';
 
-export type Req = {toHex: string; amount: number; nonceHex: string; expiry: number; currency: number; toName: string; memo: string};
+// MC1 units 2-4: every protocol-u64 amount travels as a decimal-digit STRING (never `number`) so the
+// full u64 range round-trips without precision loss above 2^53. `expiry`/`currency`/time fields stay
+// `number` (they are small bounded values, not money).
+export type Req = {toHex: string; amount: string; nonceHex: string; expiry: number; currency: number; toName: string; memo: string};
 export type Identity = {secretHex: string; publicHex: string; username: string};
-export type Txn = {nonce: string; amount: number; who: string; memo: string; time: string; dir: 'out' | 'in'; currency: number};
+export type Txn = {nonce: string; amount: string; who: string; memo: string; time: string; dir: 'out' | 'in'; currency: number};
 // One row of the relay's GET /api/v1/transactions/{hex} response (from/to are lowercase hex). The
-// relay returns from_name/to_name/memo as JSON STRINGS (NUL-trimmed, lossy; may be "").
-export type TransactionsRow = {from: string; to: string; amount: number; nonce: string; currency: number; timestamp: number; from_name: string; to_name: string; memo: string};
+// relay returns from_name/to_name/memo as JSON STRINGS (NUL-trimmed, lossy; may be ""). `amount` is
+// a decimal-digit string (MC1 units 2-4: protocol u64 amounts cross the JSON boundary as strings).
+export type TransactionsRow = {from: string; to: string; amount: string; nonce: string; currency: number; timestamp: number; from_name: string; to_name: string; memo: string};
 export type DpayCoreApi = {
   generateKeypair(): Promise<{secretHex: string; publicHex: string}>;
   // Wire-format byte lengths, single-sourced from the FFI (dpay_core consts). The App.tsx self-check
@@ -42,24 +46,30 @@ export type DpayCoreApi = {
   // `fromName` is the payer's own display name; `toName`/`memo` are copied from the scanned request
   // (merchant-defined). All three are REQUIRED (empty = all-zero name bytes on the wire) so a call
   // site that drops one is a compile error, not a silent native arity crash (device-bridge plan L1).
-  signAuthorization(secretHex: string, toHex: string, amount: number, nonceHex: string, expiry: number, currency: number, fromName: string, toName: string, memo: string): Promise<string>;
-  encodeRequest(toHex: string, amount: number, nonceHex: string, expiry: number, currency: number, toName: string, memo: string): Promise<string>;
+  // `amount` is a decimal-digit STRING (raw u64 units) — MC1 units 2-4: protocol u64 amounts never
+  // travel as `number` (lossy above 2^53). `expiry`/`currency` stay `number` (small bounded values).
+  signAuthorization(secretHex: string, toHex: string, amount: string, nonceHex: string, expiry: number, currency: number, fromName: string, toName: string, memo: string): Promise<string>;
+  encodeRequest(toHex: string, amount: string, nonceHex: string, expiry: number, currency: number, toName: string, memo: string): Promise<string>;
   decodeRequest(qr: string): Promise<Req>;
   encodeQr(wireHex: string): Promise<string>;
   verifyWire(wireHex: string): Promise<boolean>;
   // Policy gate mirroring the canister: resolves null when the payment is acceptable, else the reason
   // string ('expired', 'over_cap', 'insufficient_funds', 'nonce_reused', 'bad_signature', 'zero_amount').
-  validate(amount: number, now: number, expiry: number, cap: number, balance: number, nonceSeen: boolean, sigOk: boolean): Promise<string | null>;
+  // amount/cap/balance are decimal-digit STRINGS (raw u64); now/expiry stay `number` (time).
+  validate(amount: string, now: number, expiry: number, cap: string, balance: string, nonceSeen: boolean, sigOk: boolean): Promise<string | null>;
   // Sign a withdrawal authorization (ckBTC → native BTC out). Returns the 64-byte Ed25519 sig as hex
   // over the canonical WithdrawAuth signing bytes. The facade verifies this under from_pubkey (== the
-  // debit subaccount) before moving funds — the non-custodial withdrawal gate.
-  signWithdrawal(secretHex: string, btcAddress: string, amount: number, nonceHex: string, expiry: number, currency: number): Promise<string>;
+  // debit subaccount) before moving funds — the non-custodial withdrawal gate. `amount` is a raw-u64
+  // decimal string (MC1 units 2-4); `expiry`/`currency` stay `number`.
+  signWithdrawal(secretHex: string, btcAddress: string, amount: string, nonceHex: string, expiry: number, currency: number): Promise<string>;
   // Verify a canister/ledger-signed receipt signature (R2). Returns true iff `receiptSig` (hex) is a
   // valid Ed25519 signature over the canonical ReceiptClaim built from the claim fields, under
   // `pubkey` (hex). The app gates "Paid ✓" on this so the outcome is canister/ledger-authenticated.
+  // amount/blockIndex/settleTs are raw-u64 decimal strings (the claim carries them as u64 LE; exact
+  // transport closes the >2^53 loss surface). currency stays `number` (a small u32).
   verifyReceiptSig(
-    nonceHex: string, fromHex: string, toHex: string, amount: number, currency: number,
-    blockIndex: number, settleTs: number, receiptSigHex: string, pubkeyHex: string,
+    nonceHex: string, fromHex: string, toHex: string, amount: string, currency: number,
+    blockIndex: string, settleTs: string, receiptSigHex: string, pubkeyHex: string,
   ): Promise<boolean>;
   // Device NFC radio state for the status chip: 'ready' | 'off' | 'unsupported' | 'unknown'.
   // Optional so an app built before the native method exists degrades to 'unknown' (chip hidden).

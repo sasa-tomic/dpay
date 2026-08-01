@@ -180,7 +180,9 @@ object DpayNfc {
             m.putString("type", "request")
             m.putString("role", "card")
             m.putString("toHex", hex(r.to))
-            m.putDouble("amount", r.amount.toDouble())
+            // MC1 units 2-4: `amount` emitted as an UNSIGNED decimal STRING (the full u64 range,
+            // never a lossy Double). r.amount is ULong; toString() is unsigned decimal.
+            m.putString("amount", r.amount.toString())
             m.putString("nonceHex", hex(r.nonce))
             m.putDouble("expiry", r.expiry.toDouble())
             m.putInt("currency", r.currency.toInt())

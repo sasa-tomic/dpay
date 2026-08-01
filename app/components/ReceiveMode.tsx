@@ -28,10 +28,10 @@ export function ReceiveMode({identity, relayUrl, nfcReady, onReceived, catalog}:
   const [amount, setAmount] = useState('25.00');
   const [memo, setMemo] = useState('');
   // `rawAmount` (was `cents`) is the integer smallest-units the encoded request carries (2-decimal
-  // for DEMO, 8 for BTC, 6 for USDC). Renamed because the field was never truly cents for a
-  // non-USD currency; this is more honest.
-  const [reqQr, setReqQr] = useState<{value: string; rawAmount: number; currency: number; nonce: string; nfcHex: string | null} | null>(null);
-  const [result, setResult] = useState<{amount: number; currency: number; from: string} | null>(null);
+  // for DEMO, 8 for BTC, 6 for USDC) — now a raw-u64 decimal STRING (MC1 units 2-4). Renamed because
+  // the field was never truly cents for a non-USD currency; this is more honest.
+  const [reqQr, setReqQr] = useState<{value: string; rawAmount: string; currency: number; nonce: string; nfcHex: string | null} | null>(null);
+  const [result, setResult] = useState<{amount: string; currency: number; from: string} | null>(null);
   const [scanning, setScanning] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [nfcActive, setNfcActive] = useState(false);
@@ -55,7 +55,7 @@ export function ReceiveMode({identity, relayUrl, nfcReady, onReceived, catalog}:
 
   async function makeRequest() {
     const rawAmount = toUnits(amount, reqDecimals);
-    if (!rawAmount) return;
+    if (!rawAmount || rawAmount === '0') return;
     try {
       const nonce = randNonceHex();
       const expiry = nowSecs() + EXPIRY_WINDOW;

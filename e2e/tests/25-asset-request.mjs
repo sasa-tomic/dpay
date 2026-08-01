@@ -52,7 +52,7 @@ export async function run() {
 
     // The encoded request carries the runtime currency id (1 = ckBTC), not a hardcoded 0.
     assert(req.currency === 1, `request should encode currency 1 (ckBTC), got ${req.currency}`);
-    assert(req.amount === CKBTC_SATS, `request amount should be ${CKBTC_SATS} sats (0.00050000 BTC), got ${req.amount}`);
+    assert(req.amount === String(CKBTC_SATS), `request amount should be ${CKBTC_SATS} sats (0.00050000 BTC), got ${req.amount}`);
     console.log(`[25-asset-request] ✓ decoded: currency=${req.currency} amount=${req.amount} (= 0.00050000 BTC)`);
 
     // The amount-big readout renders the EXACT requested asset in its own units (MC5 locked-asset

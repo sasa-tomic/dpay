@@ -34,7 +34,7 @@ export async function run() {
     const bob = await generateKeypair();
     console.log(`[26-names-memo] wallet B "${PAYEE_NAME}" (payee): ${bob.publicHex.slice(0, 16)}…`);
     const bobBefore = await getBalance(relayBaseURL, bob.publicHex, 0);
-    assert(bobBefore === 0, `payee B must start at 0, got ${bobBefore}`);
+    assert(bobBefore === '0', `payee B must start at 0, got ${bobBefore}`);
 
     // --- wallet A "Alice" (payer): onboarded in the browser (funded ∂100 by the faucet). -----
     console.log(`[26-names-memo] onboarding wallet A "${PAYER_NAME}" (payer)…`);
@@ -89,7 +89,7 @@ export async function run() {
 
     // --- B was credited. ---------------------------------------------------------------------
     const bobAfter = await getBalance(relayBaseURL, bob.publicHex, 0);
-    assert(bobAfter === PAY_CENTS, `payee B balance after the settle: expected ${PAY_CENTS}, got ${bobAfter}`);
+    assert(bobAfter === String(PAY_CENTS), `payee B balance after the settle: expected ${PAY_CENTS}, got ${bobAfter}`);
 
     // --- B's ledger history (direct relay query): the PAYEE sees the PAYER's name. ------------
     // This is the core N6/H3 fix — before the wire change, the payee could only see the payer's raw

@@ -106,7 +106,9 @@ export async function run() {
 }
 
 function assertEqMoney(actual, expected, label) {
-  if (actual !== expected) throw new Error(`[assert] ${label}: expected ${expected}, got ${actual}`);
+  // MC1 units 2-4: compare raw-u64 amounts as decimal strings (BigInt-safe; `actual` is the relay's
+  // string form, `expected` may be a number literal in the test).
+  if (String(actual) !== String(expected)) throw new Error(`[assert] ${label}: expected ${expected}, got ${actual}`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

@@ -8,6 +8,7 @@ import {
   type CurrencyDescriptor, CATALOG_CACHE_KEY, BUNDLED_CATALOG, fetchCurrencies, familyDisplay, fmtCurrencyAmount,
 } from '../config/catalog';
 import {usd, short, isMintSentinel, fmtTime, base} from '../lib/format';
+import {cmpRaw} from '../lib/amount';
 import type {Identity, Txn, TransactionsRow, NfcStatus} from '../lib/types';
 import {DpayCore} from '../services/native';
 import {useHotkeys} from '../hooks/useHotkeys';
@@ -33,15 +34,16 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
   // Balances sheet. Pay/Receive still settle in whatever currency a request specifies (unchanged).
   const [currentCurrency, setCurrentCurrency] = useState(0);
   const [balancesOpen, setBalancesOpen] = useState(false);
-  const [balance, setBalance] = useState<number | null>(null);
+  const [balance, setBalance] = useState<string | null>(null);
         // Non-primary assets — each is a SEPARATE asset on a separate ledger, polled in parallel on
         // the same cadence and rendered as its own clearly-labeled card (never merged into the `$`
         // header, which is DEMO_USD only per CLAUDE.md's hard rule). Balances are keyed by the currency
-        // id resolved from the runtime catalog (so adding an asset = config-only). A 0 entry means "not
-        // yet funded"; the card still renders (muted) so the full asset rail is always visible.
-  const [assetBalances, setAssetBalances] = useState<Record<number, number>>({});
+        // id resolved from the runtime catalog (so adding an asset = config-only). A "0" entry means
+        // "not yet funded"; the card still renders (muted) so the full asset rail is always visible.
+        // MC1 units 2-4: balances are raw-u64 decimal STRINGS (never `number`).
+  const [assetBalances, setAssetBalances] = useState<Record<number, string>>({});
   const [online, setOnline] = useState(false);
-  const [offlineSpent, setOfflineSpent] = useState(0);
+  const [offlineSpent, setOfflineSpent] = useState('0');
   const [history, setHistory] = useState<Txn[]>([]);
   const [nfc, setNfc] = useState<NfcStatus>('unknown');
   // Demo top-up: a single click adds $50 of demo currency via /api/v1/faucet. The button sits next
@@ -128,7 +130,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
         const to = setTimeout(() => c.abort(), 4000);
         return fetch(`${base(relayUrl)}/api/v1/balance/${identity.publicHex}?currency=${a.currency}`, {signal: c.signal})
           .then(r => r.ok ? r.json().catch(() => null) : null)
-          .then(j => (j && typeof j.balance === 'number') ? (j.balance as number) : null)
+          .then(j => (j && typeof j.balance === 'string') ? (j.balance as string) : null)
           .catch(() => null)
           .finally(() => clearTimeout(to))
           .then(b => ({currency: a.currency, balance: b}));
@@ -136,7 +138,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
       try {
         const r = await fetch(`${base(relayUrl)}/api/v1/balance/${identity.publicHex}`, {signal: ctrl.signal});
         const j = await r.json();
-        if (alive && r.ok && typeof j.balance === 'number') { setBalance(j.balance); setOnline(true); setOfflineSpent(0); }
+        if (alive && r.ok && typeof j.balance === 'string') { setBalance(j.balance); setOnline(true); setOfflineSpent('0'); }
         else if (alive) setOnline(false);
       } catch { if (alive) setOnline(false); } finally { clearTimeout(t); }
       // Settle the asset balances after the primary poll resolves; merge keeping prior on null.
@@ -223,8 +225,13 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
   // Children signal that a payment activity happened; the ledger-sourced `refreshHistory` is the SOLE
   // writer to `history` (fetched eagerly here — no optimistic in-memory state). Stable across renders.
   const onActivity = useCallback(() => { refreshHistory(); }, [refreshHistory]);
-  const markOfflinePaid = useCallback((amount: number) => setOfflineSpent(s => s + amount), []);
-  const shownBalance = balance == null ? null : online ? balance : Math.max(0, balance - offlineSpent);
+  // MC1 units 2-4: the offline-deducted amount is a raw-u64 decimal STRING. `cmpRaw` (BigInt) guards
+  // the subtraction so the local balance never goes negative; never `+`/`-` on strings.
+  const markOfflinePaid = useCallback((amount: string) => setOfflineSpent(s => {
+    const next = BigInt(s) + BigInt(amount);
+    return (next < 0n ? 0n : next).toString();
+  }), []);
+  const shownBalance = balance == null ? null : online ? balance : (cmpRaw(balance, offlineSpent) >= 0 ? (BigInt(balance) - BigInt(offlineSpent)).toString() : '0');
 
   // Demo top-up: POST /api/v1/faucet {account, amount}. Uses the response balance directly for an
   // immediate refresh (no waiting on the 2.5s poll). Errors are surfaced inline under the button.
@@ -240,8 +247,8 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
         signal: ctrl.signal,
       });
       const j = await r.json().catch(() => ({} as any));
-      if (r.ok && typeof j.balance === 'number') {
-        setBalance(j.balance); setOnline(true); setOfflineSpent(0);
+      if (r.ok && typeof j.balance === 'string') {
+        setBalance(j.balance); setOnline(true); setOfflineSpent('0');
       } else {
         // N5: surface the relay/canister's real reason (e.g. "faucet cooldown: try again in ~58 min")
         // rather than a generic "Faucet unavailable". The canister returns the retry time; showing it
@@ -309,7 +316,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
                 in native units. */}
             <Text style={S.balAmt}>{currentCurrency === 0
               ? (shownBalance == null ? '—' : `${online ? '' : '~'}${usd(shownBalance)}`)
-              : fmtCurrencyAmount(catalog, currentCurrency, assetBalances[currentCurrency] ?? 0)}</Text>
+              : fmtCurrencyAmount(catalog, currentCurrency, assetBalances[currentCurrency] ?? '0')}</Text>
             <Text style={S.swapHint}>⇅</Text>
           </View>
         </Pressable>
@@ -370,7 +377,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
             currency={withdrawCurrency}
             display={wdDisplay}
             family={wdFamily}
-            ckBtcBalance={assetBalances[withdrawCurrency] ?? 0}
+            ckBtcBalance={assetBalances[withdrawCurrency] ?? '0'}
             onClose={() => setWithdrawCurrency(null)}
             onWithdrawn={onActivity}
           />

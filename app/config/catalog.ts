@@ -229,14 +229,17 @@ export function currencySymbol(catalog: CurrencyDescriptor[], currency: number):
 // Format a raw smallest-units amount for display in its OWN currency's units. Currency 0 (DEMO_USD)
 // renders as `∂`; any other currency renders via its catalog descriptor's decimals + the
 // per-currency backing symbol (MC1 unit 5: `descriptor.backing_symbol` instead of a family-level
-// nativeAsset assumption, so a future ckUSDT no longer renders "… USDC"). e.g. 50000 raw @
+// nativeAsset assumption, so a future ckUSDT no longer renders "… USDC"). e.g. "50000" raw @
 // currency 1 → "0.00050000 BTC". Used by ReceiveMode + PayMode so a ckBTC request/review reads
 // "0.00050000 BTC" (never a misleading dollar amount) — the merchant-selected asset is what the
 // payer sees + pays. Per CLAUDE.md, dpay never swaps, so the display NEVER converts across assets.
 // Decimals come from the catalog descriptor directly (display_decimals ?? decimals, NOT
 // `familyDisplay`, which would mis-render DEMO_USD's 2). MC1 unit 6 — FAIL-CLOSED: an unknown family
 // returns the explicit "Unsupported" sentinel instead of a wrong "… BTC" amount.
-export function fmtCurrencyAmount(catalog: CurrencyDescriptor[], currency: number, raw: number): string {
+//
+// MC1 units 2-4: `raw` is a raw-u64 decimal STRING (never `number`) — `fmtAsset` formats it via the
+// exact BigInt parser (no precision loss above 2^53).
+export function fmtCurrencyAmount(catalog: CurrencyDescriptor[], currency: number, raw: string): string {
   if (currency === 0) return usd(raw);
   const a = catalog.find(c => c.currency === currency);
   // The display unit is the per-currency backing symbol (authoritative); fall back to the family's

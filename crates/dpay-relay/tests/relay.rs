@@ -22,7 +22,7 @@ use async_trait::async_trait;
 use dpay_core::{Authorization, Currency, SignedAuthorization, DEMO_USD};
 use dpay_relay::{
     app, AppState, DepositInfo, DepositRefresh, FakeLedger, FixedClock, FlakyLedger, Ledger,
-    LedgerError, Receipt, TxnRecord,
+    LedgerError, Receipt, TxnRecord, U64String,
 };
 use ed25519_dalek::SigningKey;
 
@@ -183,11 +183,11 @@ async fn valid_pay_moves_funds() {
 
     assert_eq!(status, StatusCode::OK, "body={body}");
     let r = &body["receipt"];
-    assert_eq!(r["amount"], 250);
+    assert_eq!(r["amount"], "250");
     assert_eq!(r["from"], hex::encode(pubkey(&payer)));
     assert_eq!(r["to"], hex::encode(pubkey(&merchant)));
     assert_eq!(r["nonce"], hex::encode([1u8; 16]));
-    assert_eq!(r["new_from_balance"], BAL_A - 250);
+    assert_eq!(r["new_from_balance"], (BAL_A - 250).to_string());
 
     // Balances actually moved on the ledger.
     assert_eq!(led.balance_of(&pubkey(&payer), DEMO_USD), BAL_A - 250);
@@ -204,7 +204,7 @@ async fn raw_wire_body_also_works() {
     let (status, body) = call(&state, pay_wire(&sa.to_wire())).await;
 
     assert_eq!(status, StatusCode::OK, "body={body}");
-    assert_eq!(body["receipt"]["amount"], 100);
+    assert_eq!(body["receipt"]["amount"], "100");
     assert_eq!(led.balance_of(&pubkey(&merchant), DEMO_USD), 100);
 }
 
@@ -222,7 +222,7 @@ async fn pay_returns_signed_receipt_that_verifies() {
     let (status, body) = call(&state, pay_json(&sa.encode())).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let r = &body["receipt"];
-    assert_eq!(r["amount"], 250);
+    assert_eq!(r["amount"], "250");
 
     // The receipt carries the hex sig + pubkey + the claim fields (block_index/settle_ts/currency).
     let sig_hex = r["receipt_sig"].as_str().expect("receipt_sig present");
@@ -247,7 +247,7 @@ async fn pay_returns_signed_receipt_that_verifies() {
         to: pubkey(&merchant),
         amount: 250,
         currency: DEMO_USD,
-        block_index: r["block_index"].as_u64().unwrap(),
+        block_index: r["block_index"].as_str().unwrap().parse::<u64>().unwrap(),
         settle_ts: r["settle_ts"].as_u64().unwrap(),
     };
     assert!(
@@ -467,8 +467,58 @@ async fn faucet_enabled_mints() {
     let (status, body) = call(&state, faucet_json(&hex::encode(pubkey(&merchant)), 999)).await;
 
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["balance"], BAL_B + 999);
+    assert_eq!(body["balance"], (BAL_B + 999).to_string());
     assert_eq!(led.balance_of(&pubkey(&merchant), DEMO_USD), BAL_B + 999);
+}
+
+/// MC1 units 2-4: protocol `u64` amounts cross the JSON boundary as DECIMAL STRINGS (never raw JSON
+/// numbers), so the full u64 range round-trips without precision loss above 2^53 (the IEEE-754 loss
+/// zone the old `number`/`Double` path collapsed). A faucet credit of 2^53+1 — the canonical probe,
+/// `Number(9007199254740993) === 9007199254740992` is lossy via `number` — must return as the EXACT
+/// decimal string, and the (string-OR-number-accepting) deserializer must parse a quoted amount.
+#[tokio::test]
+async fn amounts_serialize_as_decimal_string_above_2p53() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    const BIG: u64 = 9_007_199_254_740_993; // 2^53 + 1 — lossy through JS `number`, exact as a string
+
+    // POST a QUOTED decimal amount — the new wire shape. The deserializer accepts both shapes, but
+    // the canonical form is a string; this asserts it parses + the response balance is the EXACT
+    // string back.
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/faucet")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(format!(
+            "{{\"account\":\"{}\",\"amount\":\"{}\"}}",
+            hex::encode(pubkey(&merchant)),
+            BIG,
+        )))
+        .unwrap();
+    let (status, body) = call(&state, req).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    // The balance serializes as a QUOTED decimal string (not a JSON number) — the MC1 units 2-4 shape.
+    assert!(body["balance"].is_string(), "balance must be a JSON string: {body}");
+    assert_eq!(body["balance"], BIG.to_string().as_str());
+    // The exact value round-trips on the ledger (FakeLedger honors the requested amount).
+    assert_eq!(led.balance_of(&pubkey(&merchant), DEMO_USD), BIG);
+
+    // The deserializer ALSO accepts a raw JSON number (smooth cutover for older callers). The
+    // response shape is unchanged (always a string).
+    let req_num = Request::builder()
+        .method("POST")
+        .uri("/api/v1/faucet")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(format!(
+            "{{\"account\":\"{}\",\"amount\":2500}}",
+            hex::encode(pubkey(&merchant)),
+        )))
+        .unwrap();
+    let (status2, body2) = call(&state, req_num).await;
+    assert_eq!(status2, StatusCode::OK, "{body2}");
+    assert_eq!(body2["balance"], (BIG + 2500).to_string().as_str());
+    assert_eq!(led.balance_of(&pubkey(&merchant), DEMO_USD), BIG + 2500);
 }
 
 #[tokio::test]
@@ -486,8 +536,8 @@ async fn transient_then_success_retries_to_200() {
     let (status, body) = call(&state, pay_json(&sa.encode())).await;
 
     assert_eq!(status, StatusCode::OK, "should have retried through transients: {body}");
-    assert_eq!(body["receipt"]["amount"], 300);
-    assert_eq!(body["receipt"]["new_from_balance"], BAL_A - 300);
+    assert_eq!(body["receipt"]["amount"], "300");
+    assert_eq!(body["receipt"]["new_from_balance"], (BAL_A - 300).to_string());
 }
 
 #[tokio::test]
@@ -686,12 +736,12 @@ async fn transactions_endpoint_returns_history_newest_first() {
     assert_eq!(status, StatusCode::OK, "{body}");
     let rows = body["transactions"].as_array().unwrap();
     assert_eq!(rows.len(), 2, "both payments recorded: {body}");
-    assert_eq!(rows[0]["amount"], 100, "newest first: {body}");
+    assert_eq!(rows[0]["amount"], "100", "newest first: {body}");
     assert_eq!(rows[0]["from"], payer_hex);
     assert_eq!(rows[0]["to"], merch_hex);
     assert_eq!(rows[0]["nonce"], hex::encode([2u8; 16]));
     assert_eq!(rows[0]["currency"], 0); // DEMO_USD
-    assert_eq!(rows[1]["amount"], 250);
+    assert_eq!(rows[1]["amount"], "250");
     assert_eq!(rows[1]["nonce"], hex::encode([1u8; 16]));
 
     // Merchant sees the same two as incoming (from == payer).
@@ -753,13 +803,13 @@ async fn names_and_memo_flow_from_signed_wire_into_history() {
     assert_eq!(rows.len(), 2, "{body}");
 
     // Newest (names-less): empty strings, never null / never leaked buffer bytes.
-    assert_eq!(rows[0]["amount"], 100);
+    assert_eq!(rows[0]["amount"], "100");
     assert_eq!(rows[0]["from_name"], "");
     assert_eq!(rows[0]["to_name"], "");
     assert_eq!(rows[0]["memo"], "");
 
     // Oldest (named): the signed names + memo decoded cleanly.
-    assert_eq!(rows[1]["amount"], 250);
+    assert_eq!(rows[1]["amount"], "250");
     assert_eq!(rows[1]["from_name"], "Alice", "payer's own from_name: {body}");
     assert_eq!(rows[1]["to_name"], "Bob", "payer's counterparty to_name: {body}");
     assert_eq!(rows[1]["memo"], "coffee", "memo: {body}");
@@ -770,7 +820,7 @@ async fn names_and_memo_flow_from_signed_wire_into_history() {
     assert_eq!(s, StatusCode::OK, "{body}");
     let rows = body["transactions"].as_array().unwrap();
     assert_eq!(rows.len(), 2, "{body}");
-    let named = rows.iter().find(|r| r["amount"] == 250).expect("named row present");
+    let named = rows.iter().find(|r| r["amount"] == "250").expect("named row present");
     assert_eq!(
         named["from_name"], "Alice",
         "payee sees payer's name, not a raw pubkey: {body}"
@@ -819,9 +869,9 @@ async fn deposit_status_credits_balance_and_drains_pending() {
 
     // First refresh: mints the pending deposit, credits the balance.
     let r1 = led.deposit_status(b, DEMO_USD).await.unwrap();
-    assert_eq!(r1.minted_total, 5000);
+    assert_eq!(r1.minted_total, U64String(5000));
     assert_eq!(r1.minted.len(), 1);
-    assert_eq!(r1.minted[0].amount, 5000);
+    assert_eq!(r1.minted[0].amount, U64String(5000));
     assert_eq!(r1.minted[0].block_index, "0");
     assert!(r1.pending.is_empty(), "nothing pending after a full drain");
     assert_eq!(r1.required_confirmations, 1);
@@ -829,7 +879,7 @@ async fn deposit_status_credits_balance_and_drains_pending() {
 
     // Second refresh: pending is drained → minted_total = 0, no double-credit.
     let r2 = led.deposit_status(b, DEMO_USD).await.unwrap();
-    assert_eq!(r2.minted_total, 0, "pending drained: nothing more to mint");
+    assert_eq!(r2.minted_total, U64String(0), "pending drained: nothing more to mint");
     assert!(r2.minted.is_empty());
     assert_eq!(led.balance_of(&b, DEMO_USD), BAL_B + 5000, "no double-credit on re-refresh");
 }
@@ -862,8 +912,8 @@ async fn deposit_routes_return_correct_shapes() {
         .unwrap();
     let (s_r, b_r) = call(&state, refresh_req).await;
     assert_eq!(s_r, StatusCode::OK, "{b_r}");
-    assert_eq!(b_r["minted_total"], 1234);
-    assert_eq!(b_r["minted"][0]["amount"], 1234);
+    assert_eq!(b_r["minted_total"], "1234");
+    assert_eq!(b_r["minted"][0]["amount"], "1234");
     assert_eq!(b_r["minted"][0]["block_index"], "0");
     assert!(b_r["pending"].as_array().unwrap().is_empty());
     assert_eq!(b_r["required_confirmations"], 1);
@@ -874,8 +924,8 @@ async fn deposit_routes_return_correct_shapes() {
     let (s_i, b_i) = call(&state, get_req("/api/v1/deposit/info")).await;
     assert_eq!(s_i, StatusCode::OK, "{b_i}");
     assert_eq!(b_i["min_confirmations"], 1);
-    assert_eq!(b_i["deposit_fee"], 0);
-    assert_eq!(b_i["deposit_min_amount"], 0);
+    assert_eq!(b_i["deposit_fee"], "0");
+    assert_eq!(b_i["deposit_min_amount"], "0");
 
     // A bad pubkey (not 32 bytes hex) on the address route is a clean 400, never a 500.
     let (bad_status, _bad_body) = call(&state, get_req("/api/v1/deposit/address/deadbeef")).await;
@@ -1050,7 +1100,7 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(ckusdc["backing_symbol"], "USDC");
     assert_eq!(ckusdc["network"], "Ethereum");
     assert_eq!(ckusdc["display_decimals"], 6);
-    assert_eq!(ckusdc["fee"], 10_000); // ckUSDC icrc1_fee (O6): 0.01 USDC
+    assert_eq!(ckusdc["fee"], "10000"); // ckUSDC icrc1_fee (O6): 0.01 USDC = 10000 raw
     assert_eq!(ckusdc["chain_id"], 1); // Ethereum mainnet
     assert_eq!(ckusdc["token_contract"], "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
     assert_eq!(ckusdc["onramp"], "Direct"); // ckETH helper-contract onramp (client-side)
@@ -1128,7 +1178,7 @@ fn withdraw_req(
     WithdrawRequest {
         from: hex::encode(from),
         destination: destination.to_string(),
-        amount,
+        amount: U64String(amount),
         nonce: hex::encode(nonce),
         expiry,
         currency,
@@ -1175,7 +1225,7 @@ async fn withdraw_debits_ckbtc_from_subaccount() {
 
     let req = withdraw_req(&payer, "bc1qdestination", MIN_WITHDRAW, [1u8; 16], FUTURE, CKBTC);
     let r = state.ledger.withdraw(req).await.expect("withdraw ok");
-    assert_eq!(r.amount, MIN_WITHDRAW);
+    assert_eq!(r.amount, U64String(MIN_WITHDRAW));
     assert_eq!(r.destination, "bc1qdestination");
     assert_eq!(r.currency, CKBTC);
     // Debited by the withdrawn amount.
@@ -1193,7 +1243,7 @@ async fn withdraw_route_returns_receipt_on_success() {
     let req = withdraw_req(&payer, "bc1qroute", MIN_WITHDRAW, [2u8; 16], FUTURE, CKBTC);
     let (status, body) = call(&state, withdraw_json(&req)).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["receipt"]["amount"], MIN_WITHDRAW);
+    assert_eq!(body["receipt"]["amount"], MIN_WITHDRAW.to_string().as_str());
     assert_eq!(body["receipt"]["destination"], "bc1qroute");
     assert_eq!(led.balance_of(&pubkey(&payer), CKBTC), 100_000 - MIN_WITHDRAW);
 }
@@ -1240,7 +1290,7 @@ async fn withdraw_wrong_sig_rejected_no_funds_move() {
     let req = WithdrawRequest {
         from: hex::encode(pubkey(&payer)),
         destination: "bc1qattacker".to_string(),
-        amount: MIN_WITHDRAW,
+        amount: U64String(MIN_WITHDRAW),
         nonce: hex::encode([4u8; 16]),
         expiry: FUTURE,
         currency: CKBTC,

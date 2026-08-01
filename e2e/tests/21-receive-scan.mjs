@@ -98,7 +98,7 @@ export async function run() {
     const bobUp = await driver.waitForText('∂125.00', { timeoutMs: 10_000 });
     assert(bobUp, 'merchant B balance should be ∂125.00 (∂100 + ∂25)');
     const bobLedger = await getBalance(relayBaseURL, bobHex, 0);
-    assert(bobLedger === 12_500, `B ledger balance must be 12500 cents, got ${bobLedger}`);
+    assert(bobLedger === '12500', `B ledger balance must be 12500 cents, got ${bobLedger}`);
     console.log('[21-receive-scan] ✓ B balance ∂100.00 → ∂125.00 (credited through the scan→submit path)');
 
     await driver.screenshot('21-receive-scan');

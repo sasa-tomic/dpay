@@ -2,6 +2,7 @@ import {View, Text, Pressable, ScrollView, SafeAreaView, StatusBar, ActivityIndi
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {type CurrencyDescriptor, familyDisplay, assetTestKey, displayName, fmtCurrencyAmount} from '../config/catalog';
+import {cmpRaw} from '../lib/amount';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 
 // Balances sheet — the wallet's asset hub. Reached by tapping the header balance (the main screen
@@ -13,8 +14,8 @@ import {useEscapeToClose} from '../hooks/useHotkeys';
 // WITHOUT changing the current currency. Rows stay independent — no cross-asset merge.
 export function BalancesSheet({catalog, assetBalances, primaryBalance, online, currentCurrency, onSelect, onTopUp, topUpBusy, topUpErr, onAdd, onWithdraw, onClose}: {
   catalog: CurrencyDescriptor[];
-  assetBalances: Record<number, number>;
-  primaryBalance: number | null;
+  assetBalances: Record<number, string>;
+  primaryBalance: string | null;
   online: boolean;
   currentCurrency: number;
   onSelect: (currency: number) => void;
@@ -48,10 +49,12 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
             const isPrimary = a.currency === 0;
             const key = isPrimary ? 'demo' : assetTestKey(a);
             const name = displayName(a);
-            const funded = !isPrimary && (assetBalances[a.currency] ?? 0) > 0;
+            const assetBal = assetBalances[a.currency] ?? '0';
+            // MC1 units 2-4: balance presence via `cmpRaw` (BigInt) — never `> 0` on a string.
+            const funded = !isPrimary && cmpRaw(assetBal, '0') > 0;
             const balanceText = isPrimary
               ? (primaryBalance == null ? '—' : `${online ? '' : '~'}${fmtCurrencyAmount(catalog, a.currency, primaryBalance)}`)
-              : fmtCurrencyAmount(catalog, a.currency, assetBalances[a.currency] ?? 0);
+              : fmtCurrencyAmount(catalog, a.currency, assetBal);
             const active = a.currency === currentCurrency;
             // MC1 unit 6 — FAIL-CLOSED: a ramp (Top Up / Cash out) exists ONLY for a KNOWN family
             // (CkBtcUtxo/CkEthErc20). familyDisplay returns null for an unknown family (e.g. CkSol) or

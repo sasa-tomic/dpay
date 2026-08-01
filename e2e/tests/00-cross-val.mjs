@@ -28,15 +28,18 @@ const WIRE_LAYOUT = join(__dirname, '..', '..', 'dfx', 'wire_layout.json');
 const layout = JSON.parse(readFileSync(WIRE_LAYOUT, 'utf8'));
 
 // --- replicate the shim's pure byte builders (mirror e2e/web/dpay-core.ts exactly) ------------
+// MC1 units 2-4: u64 read/write via BigInt (exact for the full u64 range; never `Math.floor`/
+// `& 0xff` which is lossy above 2^53). `readU64Le` returns an UNSIGNED decimal STRING. A small
+// JSON-number golden (2500) round-trips byte-identically to the old lossy path.
 function hex(h) { return Buffer.from(h, 'hex'); }
 function bytesToHex(b) { return Buffer.from(b).toString('hex'); }
 
 function putU64Le(buf, offset, val) {
-  let v = Math.floor(val);
-  for (let i = 0; i < 8; i++) { buf[offset + i] = v & 0xff; v = Math.floor(v / 0x100); }
+  let v = BigInt(val);
+  for (let i = 0; i < 8; i++) { buf[offset + i] = Number(v & 0xffn); v >>= 8n; }
 }
 function readU64Le(buf, offset) {
-  let v = 0; for (let i = 7; i >= 0; i--) v = v * 0x100 + buf[offset + i]; return v;
+  let v = 0n; for (let i = 7; i >= 0; i--) v = (v << 8n) | BigInt(buf[offset + i]); return v.toString();
 }
 function putU32Le(buf, offset, val) {
   let v = Math.floor(val);
@@ -203,9 +206,9 @@ export async function run() {
   const dToName = trimName32(decoded.slice(layout.request_fields.to_name.offset, layout.request_fields.to_name.offset + layout.request_fields.to_name.len));
   const dMemo = trimName32(decoded.slice(layout.request_fields.memo.offset, layout.request_fields.memo.offset + layout.request_fields.memo.len));
   assertEq(dTo, g.to_hex, 'decoded request.to');
-  assertEq(dAmount, g.amount, 'decoded request.amount');
+  assertEq(dAmount, String(g.amount), 'decoded request.amount');
   assertEq(dNonce, g.nonce_hex, 'decoded request.nonce');
-  assertEq(dExpiry, g.expiry, 'decoded request.expiry');
+  assertEq(dExpiry, String(g.expiry), 'decoded request.expiry');
   assertEq(dCurrency, g.currency, 'decoded request.currency');
   assertEq(dToName, 'Bob', 'decoded request.to_name == "Bob" (now in the bytes, not a suffix)');
   assertEq(dMemo, 'coffee', 'decoded request.memo == "coffee"');

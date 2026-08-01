@@ -18,15 +18,18 @@ const WIRE_LAYOUT = join(__dirname, '..', '..', 'dfx', 'wire_layout.json');
 const L = JSON.parse(readFileSync(WIRE_LAYOUT, 'utf8'));
 
 // --- low-level hex / int codec (operates only on the offsets/lengths from the JSON) ------------
+// MC1 units 2-4: u64 read/write via BigInt so the FULL u64 range is exact (never `Math.floor`/
+// `& 0xff`, which is lossy above 2^53). A small JSON-number golden (e.g. 2500) round-trips
+// byte-identically to the old lossy path. read returns an UNSIGNED decimal STRING (never `number`).
 function hexToBytes(h) { return Uint8Array.from(Buffer.from(h, 'hex')); }
 function bytesToHex(b) { return Buffer.from(b).toString('hex'); }
 
 function putU64Le(buf, offset, val) {
-  let v = Math.floor(val);
-  for (let i = 0; i < 8; i++) { buf[offset + i] = v & 0xff; v = Math.floor(v / 0x100); }
+  let v = BigInt(val);
+  for (let i = 0; i < 8; i++) { buf[offset + i] = Number(v & 0xffn); v >>= 8n; }
 }
 function readU64Le(buf, offset) {
-  let v = 0; for (let i = 7; i >= 0; i--) v = v * 0x100 + buf[offset + i]; return v;
+  let v = 0n; for (let i = 7; i >= 0; i--) v = (v << 8n) | BigInt(buf[offset + i]); return v.toString();
 }
 function putU32Le(buf, offset, val) {
   let v = Math.floor(val);

@@ -98,7 +98,7 @@ describe('receiptClaimBytes', () => {
     const fromHex = '11'.repeat(32);
     const toHex = '22'.repeat(32);
     const b = receiptClaimBytes({
-      nonceHex, fromHex, toHex, amount: 2500, currency: 0, blockIndex: 7, settleTs: 1800000120,
+      nonceHex, fromHex, toHex, amount: '2500', currency: 0, blockIndex: '7', settleTs: '1800000120',
     });
     expect(b.length).toBe(RECEIPT_CLAIM_LEN);
     expect(RECEIPT_CLAIM_LEN).toBe(108);

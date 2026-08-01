@@ -5,6 +5,7 @@ import {C} from '../config/palette';
 import {S} from '../styles';
 import {POLL} from '../config/constants';
 import {fmtAsset} from '../lib/format';
+import {cmpRaw} from '../lib/amount';
 import type {Identity} from '../lib/types';
 import type {FamilyDisplay} from '../config/catalog';
 import {type DepositInfo, type DepositRefresh, depositInfo, depositAddress, depositRefresh} from '../services/relay';
@@ -81,7 +82,8 @@ export function DepositSheet({identity, relayUrl, currency, display, onClose}: {
     try {
       const r = await depositRefresh(relayUrl, identity.publicHex, currency, ctrl.signal);
       setRefresh(r);
-      if (r.minted_total > 0) {
+      // MC1 units 2-4: `minted_total` is a raw-u64 decimal STRING; presence via `cmpRaw` (BigInt).
+      if (cmpRaw(r.minted_total, '0') > 0) {
         setMinted(true);
       }
     } catch { /* offline: keep the last status; the next tick retries */ }
@@ -118,9 +120,10 @@ export function DepositSheet({identity, relayUrl, currency, display, onClose}: {
   // C3: never render a raw "0.00000000 BTC" — when a fee/min value is zero (the test minter /
   // FakeLedger returns zeros; a future no-fee asset) show "—" for that part and format normally only
   // when non-zero. The labels stay so the fields remain visible; only the bogus zero amount (8
-  // trailing zeros) is suppressed — a premium app never shows that to a user.
-  const feeVal = info && info.deposit_fee > 0 ? fmtAsset(info.deposit_fee, display.amountDecimals, display.nativeAsset) : '—';
-  const minVal = info && info.deposit_min_amount != null && info.deposit_min_amount > 0 ? fmtAsset(info.deposit_min_amount, display.amountDecimals, display.nativeAsset) : '—';
+  // trailing zeros) is suppressed — a premium app never shows that to a user. MC1 units 2-4:
+  // fee/min are raw-u64 decimal STRINGS; zero-presence via `cmpRaw` (BigInt) — never `> 0`.
+  const feeVal = info && cmpRaw(info.deposit_fee, '0') > 0 ? fmtAsset(info.deposit_fee, display.amountDecimals, display.nativeAsset) : '—';
+  const minVal = info && info.deposit_min_amount != null && cmpRaw(info.deposit_min_amount, '0') > 0 ? fmtAsset(info.deposit_min_amount, display.amountDecimals, display.nativeAsset) : '—';
 
   return (
     <View style={S.sheetOverlay}>
@@ -147,7 +150,7 @@ export function DepositSheet({identity, relayUrl, currency, display, onClose}: {
             <View style={S.centerAll}>
               <View style={S.check}><Text style={S.checkMark}>✓</Text></View>
               <Text style={S.paidText}>Deposited ✓</Text>
-              <Text style={S.paidSub}>{fmtAsset(refresh?.minted_total ?? 0, display.amountDecimals, display.nativeAsset)} minted</Text>
+              <Text style={S.paidSub}>{fmtAsset(refresh?.minted_total ?? '0', display.amountDecimals, display.nativeAsset)} minted</Text>
               <Text style={S.dim2}>Your balance updates automatically.</Text>
             </View>
           ) : (

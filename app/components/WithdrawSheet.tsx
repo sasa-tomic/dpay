@@ -4,6 +4,7 @@ import {C} from '../config/palette';
 import {S} from '../styles';
 import {WITHDRAW_TIMEOUT_MS, WITHDRAW_EXPIRY_WINDOW} from '../config/constants';
 import {fmtAsset, toSats, randNonceHex, nowSecs} from '../lib/format';
+import {cmpRaw} from '../lib/amount';
 import type {Identity} from '../lib/types';
 import type {FamilyDisplay, MinterFamily} from '../config/catalog';
 import {isValidDestinationAddress} from '../config/catalog';
@@ -20,12 +21,12 @@ import {copyToClipboard} from '../hooks/clipboard';
  * funds. Amounts are shown in BTC (the backing currency symbol — never the wrapper/raw ledger id).
  * Escape closes the sheet (web), matching DepositSheet.
  */
-export function WithdrawSheet({identity, relayUrl, currency, display, family, ckBtcBalance, onClose, onWithdrawn}: {identity: Identity; relayUrl: string; currency: number; display: FamilyDisplay; family: MinterFamily; ckBtcBalance: number; onClose: () => void; onWithdrawn: () => void}) {
+export function WithdrawSheet({identity, relayUrl, currency, display, family, ckBtcBalance, onClose, onWithdrawn}: {identity: Identity; relayUrl: string; currency: number; display: FamilyDisplay; family: MinterFamily; ckBtcBalance: string; onClose: () => void; onWithdrawn: () => void}) {
   const [address, setAddress] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
   const [err, setErr] = useState<string | null>(null);
-  const [receipt, setReceipt] = useState<{amount: number; btcAddress: string} | null>(null);
+  const [receipt, setReceipt] = useState<{amount: string; btcAddress: string} | null>(null);
   const [savedAddr, setSavedAddr] = useState<string | null>(null);
   const [copied, setCopied] = useState<'clipboard' | 'shared' | null>(null);
 
@@ -39,11 +40,12 @@ export function WithdrawSheet({identity, relayUrl, currency, display, family, ck
   }, [currency]);
 
   const sats = toSats(amountStr);
-  const belowMin = sats > 0 && sats < display.withdrawMinRaw;
-  const overBalance = sats > ckBtcBalance;
+  // MC1 units 2-4: comparisons use `cmpRaw` (BigInt) — never `>` on strings (lexicographic trap).
+  const belowMin = sats !== '0' && cmpRaw(sats, String(display.withdrawMinRaw)) < 0;
+  const overBalance = cmpRaw(sats, ckBtcBalance) > 0;
   const addrEntered = address.trim().length > 0;
   const badAddr = addrEntered && !isValidDestinationAddress(family, address);
-  const canReview = addrEntered && !badAddr && sats > 0 && !belowMin && !overBalance;
+  const canReview = addrEntered && !badAddr && sats !== '0' && !belowMin && !overBalance;
 
   async function confirm() {
     if (!canReview) {
@@ -115,7 +117,7 @@ export function WithdrawSheet({identity, relayUrl, currency, display, family, ck
           ) : (
             <>
               <Text style={S.label}>{`Send your ${display.networkLabel} to a native ${display.nativeAsset} address`}</Text>
-              <Text style={S.dim2}>{`Available: ${fmtAsset(ckBtcBalance, display.amountDecimals, display.nativeAsset)} · min ${fmtAsset(display.withdrawMinRaw, display.amountDecimals, display.nativeAsset)}`}</Text>
+              <Text style={S.dim2}>{`Available: ${fmtAsset(ckBtcBalance, display.amountDecimals, display.nativeAsset)} · min ${fmtAsset(String(display.withdrawMinRaw), display.amountDecimals, display.nativeAsset)}`}</Text>
 
               <Text style={S.inputLabel}>{`${display.nativeAsset} address`}</Text>
               {savedAddr && address.trim().length === 0 ? (
@@ -145,11 +147,11 @@ export function WithdrawSheet({identity, relayUrl, currency, display, family, ck
                 placeholderTextColor={C.sub2}
               />
 
-              {belowMin ? <Text style={S.warnNote}>{`Below the ${fmtAsset(display.withdrawMinRaw, display.amountDecimals, display.nativeAsset)} minimum withdrawal.`}</Text> : null}
+              {belowMin ? <Text style={S.warnNote}>{`Below the ${fmtAsset(String(display.withdrawMinRaw), display.amountDecimals, display.nativeAsset)} minimum withdrawal.`}</Text> : null}
               {overBalance ? <Text style={S.warnNote}>{`More than your available ${fmtAsset(ckBtcBalance, display.amountDecimals, display.nativeAsset)}.`}</Text> : null}
               {badAddr ? <Text testID="withdraw-bad-addr" style={S.warnNote}>{`That doesn't look like a valid ${display.nativeAsset} address.`}</Text> : null}
 
-              {(phase === 'form' || phase === 'error') && sats > 0 ? (
+              {(phase === 'form' || phase === 'error') && sats !== '0' ? (
                 <View testID="withdraw-review" style={S.reviewCard}>
                   <Text style={S.reviewLabel}>Review withdrawal</Text>
                   <Text testID="withdraw-review-amount" style={S.reviewAmount}>{`Withdraw ${fmtAsset(sats, display.amountDecimals, display.nativeAsset)}`}</Text>
@@ -167,7 +169,7 @@ export function WithdrawSheet({identity, relayUrl, currency, display, family, ck
                 accessibilityRole="button"
                 accessibilityLabel="Confirm withdrawal"
                 accessibilityState={{disabled: !canReview}}>
-                <Text style={S.primaryText}>{sats > 0 ? `Withdraw ${fmtAsset(sats, display.amountDecimals, display.nativeAsset)}` : 'Enter an amount'}</Text>
+                <Text style={S.primaryText}>{sats !== '0' ? `Withdraw ${fmtAsset(sats, display.amountDecimals, display.nativeAsset)}` : 'Enter an amount'}</Text>
               </Pressable>
 
               {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}

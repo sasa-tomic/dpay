@@ -65,7 +65,7 @@ export default function App() {
     (async () => {
       try {
         const kp = await DpayCore.generateKeypair();
-        const wire = await DpayCore.signAuthorization(kp.secretHex, kp.publicHex, 1, randNonceHex(), 4102444800, 0, '', '', '');
+        const wire = await DpayCore.signAuthorization(kp.secretHex, kp.publicHex, '1', randNonceHex(), 4102444800, 0, '', '', '');
         // wire is the authorization as lowercase hex; its byte length is `wireLen()` from the FFI, so the
         // hex length is wireLen()*2. Deriving it from the core (not a literal) means a wire resize can't
         // silently rot the self-check. verifyWire guards the signature round-trip; both must hold.

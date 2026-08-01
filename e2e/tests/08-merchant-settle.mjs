@@ -49,7 +49,7 @@ export async function run() {
     const requestQR = await driver.eval(() => window.__DPAY_QR_LAST);
     const req = decodeRequest(requestQR);
     assertEqHex(req.toHex, bobHex, 'B request.to == B account');
-    assertEq(req.amount, PAY_CENTS, 'B request.amount == ∂30.00');
+    assertEq(req.amount, String(PAY_CENTS), 'B request.amount == ∂30.00');
     console.log(`[08-merchant-settle] B request nonce=${req.nonceHex.slice(0, 12)}…`);
 
     // --- A (online payer) signs an authorization for B's request and submits it directly. -----
@@ -71,7 +71,7 @@ export async function run() {
     const bobUp = await driver.waitForText('∂130.00', { timeoutMs: 10_000 });
     assert(bobUp, `merchant B balance should be ∂130.00 (∂100 + ∂30) after the settle`);
     const bobLedger = await getBalance(relayBaseURL, bobHex, 0);
-    assert(bobLedger === 13_000, `B ledger balance must be 13000 cents, got ${bobLedger}`);
+    assert(bobLedger === '13000', `B ledger balance must be 13000 cents, got ${bobLedger}`);
     console.log('[08-merchant-settle] ✓ B balance ∂100.00 → ∂130.00');
 
     // --- B's Recent history shows the INCOMING payment from A (recipient row). ----------------

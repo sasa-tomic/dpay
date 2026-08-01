@@ -23,7 +23,7 @@ pub use app::{app, AppState};
 pub use ledger::{
     Clock, CkErc20OnrampParams, CurrencyDescriptor, DepositInfo, DepositRefresh, FakeLedger, FixedClock,
     FlakyLedger, Ledger, LedgerError, MinterFamily, MintedUtxo, PendingUtxo, Receipt, SystemClock,
-    TxnRecord, WithdrawReceipt, WithdrawRequest,
+    TxnRecord, U64String, WithdrawReceipt, WithdrawRequest,
 };
 
 #[cfg(feature = "agent")]

@@ -33,7 +33,7 @@ export async function run() {
     console.log(`[07-scan-pay] wallet B (payee): ${bob.publicHex.slice(0, 16)}…`);
     // Pre-condition: B holds nothing yet.
     const bobBefore = await getBalance(relayBaseURL, bob.publicHex, 0);
-    assert(bobBefore === 0, `payee B must start at 0, got ${bobBefore}`);
+    assert(bobBefore === '0', `payee B must start at 0, got ${bobBefore}`);
 
     // --- wallet A: onboarded in the browser (the payer, funded ∂100 by the faucet). -----------
     console.log('[07-scan-pay] onboarding wallet A (payer)…');
@@ -77,7 +77,7 @@ export async function run() {
     // --- B was credited (read straight off the ledger — no second browser). -------------------
     const bobAfter = await getBalance(relayBaseURL, bob.publicHex, 0);
     assertEqMoney(bobAfter, PAY_CENTS, 'payee B balance after the settle');
-    console.log(`[07-scan-pay] ✓ B credited: 0 → $${(bobAfter / 100).toFixed(2)}`);
+    console.log(`[07-scan-pay] ✓ B credited: 0 → $${(Number(bobAfter) / 100).toFixed(2)}`);
 
     // --- A's Recent history lists the outgoing payment to B (refreshHistory fired on settle). --
     // The to_name "Bob" now rides the signed wire + the relay's history rows, so the row shows
@@ -100,8 +100,10 @@ export async function run() {
 }
 
 function assertEqMoney(actualMinor, expectedMinor, label) {
-  if (actualMinor !== expectedMinor) {
-    throw new Error(`[assert] ${label}: expected $${(expectedMinor / 100).toFixed(2)} (${expectedMinor}), got $${(actualMinor / 100).toFixed(2)} (${actualMinor})`);
+  // MC1 units 2-4: compare raw-u64 amounts as decimal strings (BigInt-safe; `actualMinor` is the
+  // relay's string form, `expectedMinor` may be a number literal in the test).
+  if (String(actualMinor) !== String(expectedMinor)) {
+    throw new Error(`[assert] ${label}: expected $${(expectedMinor / 100).toFixed(2)} (${expectedMinor}), got $${(Number(actualMinor) / 100).toFixed(2)} (${actualMinor})`);
   }
 }
 

@@ -61,7 +61,7 @@ export async function run() {
 
     // 5. Verify every field byte-exact against the wallet's account + the entered amount.
     assertEq(req.toHex, accountHex, 'request.to == this wallet account (the deposit destination)');
-    assertEq(req.amount, 4250, 'request.amount == entered 42.50 in minor units (cents)');
+    assertEq(req.amount, '4250', 'request.amount == entered 42.50 in minor units (cents)');
     assert(req.expiry > now, `request.expiry must be in the future (got ${req.expiry}, now ${now})`);
     assert(req.expiry < now + EXPIRY_WINDOW_SLACK, `request.expiry must be within the ~10min window (got ${req.expiry}, now ${now})`);
     assertEq(req.currency, 0, 'request.currency == DEMO_USD (the wallet `$` asset)');

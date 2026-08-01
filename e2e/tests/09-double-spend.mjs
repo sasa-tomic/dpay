@@ -98,7 +98,7 @@ export async function run() {
     await driver.waitForText('∂75.00', { timeoutMs: 8_000 });
     const aliceAfterFirst = await getBalance(relayBaseURL, (await driver.eval(() => JSON.parse(localStorage.getItem('dpay.identity.v1')).publicHex)), 0);
     const bobAfterFirst = await getBalance(relayBaseURL, bob.publicHex, 0);
-    assert(aliceAfterFirst === 7500 && bobAfterFirst === 2500,
+    assert(aliceAfterFirst === '7500' && bobAfterFirst === '2500',
       `post-first-pay balances wrong: A=${aliceAfterFirst} (want 7500), B=${bobAfterFirst} (want 2500)`);
 
     // 3. REPLAY the exact signed authorization the app produced.

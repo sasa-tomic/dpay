@@ -1,10 +1,11 @@
 import {base} from '../lib/format';
 
 // --- ck-deposit (ckBTC-style top-up) response shapes -----------------------------------------
-export type DepositInfo = {min_confirmations: number; deposit_fee: number; deposit_min_amount: number | null};
-export type MintedUtxo = {block_index: string; amount: number};
-export type PendingUtxo = {value: number; confirmations: number};
-export type DepositRefresh = {minted_total: number; minted: MintedUtxo[]; pending: PendingUtxo[]; required_confirmations: number};
+// MC1 units 2-4: protocol u64 amounts cross the JSON boundary as decimal-digit STRINGS.
+export type DepositInfo = {min_confirmations: number; deposit_fee: string; deposit_min_amount: string | null};
+export type MintedUtxo = {block_index: string; amount: string};
+export type PendingUtxo = {value: string; confirmations: number};
+export type DepositRefresh = {minted_total: string; minted: MintedUtxo[]; pending: PendingUtxo[]; required_confirmations: number};
 
 // Relay deposit client — same fetch style as the inline balance/faucet/pay calls (AbortController
 // optional, errors thrown to the caller). Co-located here to match the existing pattern.
@@ -39,9 +40,10 @@ export async function ckerc20OnrampParams(relayUrl: string, currency: number, si
 // Withdraw a ckBTC balance to a native BTC address. The app signs the WithdrawAuth on-device (the
 // sig is the non-custodial gate); the relay forwards to the facade's `withdraw`. Returns the burn
 // receipt (block_index). Errors throw with the status so the sheet can surface a decline vs offline.
-export type WithdrawReceipt = {from: string; destination: string; amount: number; nonce: string; currency: number; block_index: number};
+// MC1 units 2-4: amount/block_index cross the JSON boundary as decimal-digit STRINGS (raw u64).
+export type WithdrawReceipt = {from: string; destination: string; amount: string; nonce: string; currency: number; block_index: string};
 
-export async function withdrawFunds(relayUrl: string, accountHex: string, btcAddress: string, amountSats: number, nonceHex: string, expiry: number, currency: number, sigHex: string, signal?: AbortSignal): Promise<WithdrawReceipt> {
+export async function withdrawFunds(relayUrl: string, accountHex: string, btcAddress: string, amountSats: string, nonceHex: string, expiry: number, currency: number, sigHex: string, signal?: AbortSignal): Promise<WithdrawReceipt> {
   const r = await fetch(`${base(relayUrl)}/api/v1/withdraw`, {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({from: accountHex, destination: btcAddress, amount: amountSats, nonce: nonceHex, expiry, currency, sig: sigHex}),

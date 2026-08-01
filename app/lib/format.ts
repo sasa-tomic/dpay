@@ -2,7 +2,17 @@
 // 0) uses the '∂' prefix (partial-differential sign, chosen as a D-like glyph distinct from BTC's ₿);
 // '$' is reserved for USDC. Despite the historical name `usd`, this formats DEMO amounts only; other
 // currencies render via fmtAsset in their family unit.
-export const usd = (c: number) => `∂${Math.floor(c / 100)}.${String(c % 100).padStart(2, '0')}`;
+//
+// MC1 units 2-4: `c` is a raw-u64 decimal STRING (2-decimal DEMO cents), formatted via exact BigInt
+// math PADDED to 2 fractional places (the currency-style fixed-width display the wallet asserts —
+// `∂25.00`, never `∂25`). Never `Math.floor`/`parseFloat` (lossy above 2^53). The zero-trimming
+// primitive `formatUnitsToDecimal` is the parser's *inverse* (used for readable BTC like "8.4"); the
+// DEMO display stays fixed-width, so this is a separate UI concern (per amount.ts's module doc).
+import {parseDecimalToUnits} from './amount';
+export const usd = (c: string) => {
+  const n = BigInt(c);
+  return `∂${(n / 100n).toString()}.${(n % 100n).toString().padStart(2, '0')}`;
+};
 export const short = (h: string) => `${h.slice(0, 8)}…`;
 // The MINT_ACCOUNT sentinel — 32 bytes of 0xFF, hex-encoded as 64 `f`s. The canister records faucet
 // mints and withdrawals with this as the counterparty; we detect it and render a friendly label
@@ -18,7 +28,14 @@ export function randNonceHex(): string {
   for (let i = 0; i < 16; i++) s += Math.floor(Math.random() * 256).toString(16).padStart(2, '0');
   return s;
 }
-export function toCents(s: string): number { const n = Math.round(parseFloat(s || '0') * 100); return Number.isFinite(n) && n > 0 ? n : 0; }
+// Parse a user-entered DEMO amount (decimal string) into raw cents as a decimal-digit STRING. MC1
+// units 2-4: delegates to the exact BigInt parser (`parseDecimalToUnits`) — never `parseFloat`
+// (lossy above 2^53). Returns '0' on a rejection (empty/non-numeric/negative/overflow); the caller
+// gates the review on a non-zero result.
+export function toCents(s: string): string {
+  const r = parseDecimalToUnits(s, 2);
+  return r.ok && r.raw !== '0' ? r.raw : '0';
+}
 export const base = (u: string) => u.replace(/\/$/, '');
 
 // Request QR = plain base64url of the 132-byte PaymentRequest (the payee's `to_name` + `memo` ride
@@ -61,18 +78,30 @@ export function trimName32(hexStr: string): string {
   try { return decodeURIComponent(escape(out)); } catch { return out; }
 }
 
-// Format raw smallest-units as a decimal amount + unit suffix (e.g. sats → "0.00012345 BTC").
-// Generalizes the old btc() so any family's amounts render from its config — no per-asset literals.
-export function fmtAsset(raw: number, decimals: number, unit: string): string {
-  const n = Math.max(0, Math.floor(raw));
-  const div = 10 ** decimals;
-  return `${Math.floor(n / div)}.${String(n % div).padStart(decimals, '0')} ${unit}`;
+// Format raw smallest-units (a decimal-digit STRING) as a decimal amount + unit suffix (e.g.
+// "50000" sats → "0.00050000 BTC"). MC1 units 2-4: exact BigInt math PADDED to `decimals` places
+// (the fixed-width display the wallet asserts — "0.00050000 BTC", never "0.0005 BTC"). The
+// zero-trimming primitive `formatUnitsToDecimal` is the parser's inverse (readable high-precision
+// display); this formatter keeps the asset's full precision, so it is a separate UI concern (per
+// amount.ts's module doc). Never `Math.floor`/`parseFloat` (lossy above 2^53).
+export function fmtAsset(raw: string, decimals: number, unit: string): string {
+  const n = BigInt(raw);
+  const scale = 10n ** BigInt(decimals);
+  return `${(n / scale).toString()}.${(n % scale).toString().padStart(decimals, '0')} ${unit}`;
 }
-// Parse a user-entered BTC amount (decimal string) into integer satoshis. Mirrors `toCents` for `$`.
-// NaN/negative → 0; the sheet gates the review on > 0 + >= the min withdrawal floor.
-export function toSats(s: string): number { const n = Math.round(parseFloat(s || '0') * 1e8); return Number.isFinite(n) && n > 0 ? n : 0; }
+// Parse a user-entered BTC amount (decimal string) into integer satoshis as a decimal-digit STRING.
+// Mirrors `toCents` for `$`. MC1 units 2-4: delegates to the exact BigInt parser — NaN/negative →
+// '0'; the sheet gates the review on a non-zero + >= the min withdrawal floor via `cmpRaw`.
+export function toSats(s: string): string {
+  const r = parseDecimalToUnits(s, 8);
+  return r.ok && r.raw !== '0' ? r.raw : '0';
+}
 // Parse a user-entered amount (decimal string) into integer smallest-units at the given decimal
-// count. Generalizes `toCents` (decimals=2) + `toSats` (decimals=8) to arbitrary assets. Drives the
-// merchant's currency-aware request encoder (ReceiveMode encodes the runtime currency id's raw
-// units: 2 for DEMO, 8 for ckBTC, 6 for ckUSDC). NaN/negative → 0; the caller gates on > 0.
-export function toUnits(s: string, decimals: number): number { const n = Math.round(parseFloat(s || '0') * 10 ** decimals); return Number.isFinite(n) && n > 0 ? n : 0; }
+// count, as a decimal-digit STRING. Generalizes `toCents` (decimals=2) + `toSats` (decimals=8) to
+// arbitrary assets. Drives the merchant's currency-aware request encoder (ReceiveMode encodes the
+// runtime currency id's raw units: 2 for DEMO, 8 for ckBTC, 6 for ckUSDC). MC1 units 2-4: delegates
+// to the exact BigInt parser — a rejection → '0'; the caller gates on a non-zero result.
+export function toUnits(s: string, decimals: number): string {
+  const r = parseDecimalToUnits(s, decimals);
+  return r.ok && r.raw !== '0' ? r.raw : '0';
+}

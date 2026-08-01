@@ -60,7 +60,7 @@ export async function run() {
 
     // 2. Pre-credit: the BTC (currency 1) balance for this account is zero (only DEMO_USD funded).
     const before = await getBalance(relayBaseURL, accountHex, DEPOSIT_CURRENCY);
-    assert(before === 0, `pre-seed BTC balance must be 0, got ${before}`);
+    assert(before === '0', `pre-seed BTC balance must be 0, got ${before}`);
 
     // 3. Open the deposit sheet from the Balances BTC row's "Add" action (stacks on top of Balances).
     console.log('[05-deposit-credited] opening the deposit sheet (from the Balances BTC row)…');
@@ -74,7 +74,7 @@ export async function run() {
     const seeded = await seedDeposit(relayBaseURL, accountHex, DEPOSIT_CURRENCY, SEED_SATS);
     assert(seeded?.seeded === true, `seed must return {seeded:true}, got ${JSON.stringify(seeded)}`);
     const notYet = await getBalance(relayBaseURL, accountHex, DEPOSIT_CURRENCY);
-    assert(notYet === 0, `seed must NOT credit the balance before a refresh, got ${notYet}`);
+    assert(notYet === '0', `seed must NOT credit the balance before a refresh, got ${notYet}`);
 
     // 5. The deposit sheet's own auto-poll (refreshNow, the app's real code path) drains the seeded
     //    pending deposit and credits currency 1; minted_total > 0 flips the sheet to "Deposited ✓".
@@ -91,7 +91,7 @@ export async function run() {
     // 6. The credited path proven directly on the real ledger: the currency-1 balance grew by the
     //    seeded amount. (The `$` wallet header is currency 0 — a separate asset; see file header.)
     const after = await getBalance(relayBaseURL, accountHex, DEPOSIT_CURRENCY);
-    assert(after === SEED_SATS, `credited BTC balance must equal the seed (${SEED_SATS}), got ${after}`);
+    assert(after === String(SEED_SATS), `credited BTC balance must equal the seed (${SEED_SATS}), got ${after}`);
     console.log(`[05-deposit-credited] ✓ BTC balance 0 → ${after} sats (credited through the REAL relay+FakeLedger)`);
 
     // 7. SEAMLESSNESS: close the deposit sheet (returns to the Balances sheet still open underneath)

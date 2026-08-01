@@ -44,7 +44,7 @@ use serde::{Deserialize, Serialize};
 use dpay_core::{Currency, SignedAuthorization, DEMO_USD, NONCE_LEN, PUBKEY_LEN};
 
 use crate::ledger::{
-    CurrencyDescriptor, Ledger, LedgerError, MintedUtxo, PendingUtxo, Receipt, TxnRecord,
+    CurrencyDescriptor, Ledger, LedgerError, MintedUtxo, PendingUtxo, Receipt, TxnRecord, U64String,
     WithdrawReceipt,
 };
 
@@ -200,9 +200,9 @@ async fn faucet(State(state): State<AppState>, Json(req): Json<FaucetRequest>) -
     // Currency defaults to DEMO_USD — the faucet's whole point is play money for the demo. A missing
     // amount is the demo's $100.00 top-up.
     let currency = req.currency.unwrap_or(DEMO_USD);
-    let amount = req.amount.unwrap_or(10_000);
+    let amount = req.amount.map(|x| x.0).unwrap_or(10_000);
     match state.ledger.faucet(pk, currency, amount).await {
-        Ok(bal) => (StatusCode::OK, Json(BalanceBody { balance: bal })).into_response(),
+        Ok(bal) => (StatusCode::OK, Json(BalanceBody { balance: U64String(bal) })).into_response(),
         // Mirror `pay`: a permanent/`Rejected` error (e.g. "not mintable", "faucet cooldown" — a
         // policy failure, not a transient infra hiccup) is `422`; only a genuine `Transient` is
         // `503`. The relay must not signal "try again" for a rejection that will never succeed.
@@ -248,7 +248,7 @@ async fn balance(
     pk.copy_from_slice(&bytes);
     let currency = qs.currency.unwrap_or(DEMO_USD);
     match state.ledger.balance(pk, currency).await {
-        Ok(bal) => (StatusCode::OK, Json(BalanceBody { balance: bal })).into_response(),
+        Ok(bal) => (StatusCode::OK, Json(BalanceBody { balance: U64String(bal) })).into_response(),
         Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
     }
 }
@@ -403,7 +403,7 @@ async fn test_deposit_seed(
     let mut pk = [0u8; PUBKEY_LEN];
     pk.copy_from_slice(&bytes);
     let currency = req.currency.unwrap_or(DEMO_USD);
-    match state.ledger.seed_deposit(pk, currency, req.amount).await {
+    match state.ledger.seed_deposit(pk, currency, req.amount.0).await {
         Ok(()) => (StatusCode::OK, Json(DepositSeedBody { seeded: true })).into_response(),
         // Mirror the deposit routes: any LedgerError → 503. seed_deposit on FakeLedger is infallible
         // in practice, but the default trait impl returns Rejected — surface it honestly rather than
@@ -518,7 +518,7 @@ struct FaucetRequest {
     /// Settlement currency to mint. Defaults to `DEMO_USD` when absent (the demo's play money).
     #[serde(default)]
     currency: Option<Currency>,
-    amount: Option<u64>,
+    amount: Option<U64String>,
 }
 
 /// `?currency=N` for `GET /api/v1/balance/{hex}`. Absent → `DEMO_USD`.
@@ -571,7 +571,7 @@ struct VersionBody {
 
 #[derive(Serialize)]
 struct BalanceBody {
-    balance: u64,
+    balance: U64String,
 }
 
 /// `GET /api/v1/transactions/{hex}` response body. Direction (in/out) is derived client-side by
@@ -592,7 +592,7 @@ struct DepositAddressBody {
 #[derive(Serialize)]
 struct DepositRefreshBody {
     minted: Vec<MintedUtxo>,
-    minted_total: u64,
+    minted_total: U64String,
     pending: Vec<PendingUtxo>,
     required_confirmations: u32,
 }
@@ -601,8 +601,8 @@ struct DepositRefreshBody {
 #[derive(Serialize)]
 struct DepositInfoBody {
     min_confirmations: u32,
-    deposit_fee: u64,
-    deposit_min_amount: Option<u64>,
+    deposit_fee: U64String,
+    deposit_min_amount: Option<U64String>,
 }
 
 /// `GET /api/v1/currencies` response body — the wallet's runtime asset catalog (closes issue #7).
@@ -635,7 +635,7 @@ struct DepositSeedRequest {
     account: String,
     #[serde(default)]
     currency: Option<Currency>,
-    amount: u64,
+    amount: U64String,
 }
 
 /// `POST /api/v1/test/deposit/seed` response body.

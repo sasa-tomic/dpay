@@ -5,6 +5,7 @@ import {S} from '../styles';
 import {C} from '../config/palette';
 import {EXPIRY_WINDOW, DIRECT_PAY_TIMEOUT_MS, NFC_PAY_TIMEOUT_MS, POLL} from '../config/constants';
 import {usd, short, base, parseRequestQR, randNonceHex, nowSecs} from '../lib/format';
+import {cmpRaw} from '../lib/amount';
 import {type CurrencyDescriptor, fmtCurrencyAmount} from '../config/catalog';
 import type {Identity, Req, NfcStatus} from '../lib/types';
 import {classifyPayHttp, rejectionMessage, isNonceReused} from '../payments';
@@ -23,13 +24,13 @@ const NFC_REASON: Record<Exclude<NfcStatus, 'ready'>, string> = {
   unknown: "Couldn't check NFC status. Scan the QR code to pay.",
 };
 
-export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assetBalances}: {identity: Identity; online: boolean; relayUrl: string; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: number) => void; shownBalance: number | null; catalog: CurrencyDescriptor[]; assetBalances: Record<number, number>}) {
+export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assetBalances}: {identity: Identity; online: boolean; relayUrl: string; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assetBalances: Record<number, string>}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid'>('scan');
   const [req, setReq] = useState<Req | null>(null);
-  const [qr, setQr] = useState<{code: string; amount: number; currency: number; who: string; nonce: string} | null>(null);
+  const [qr, setQr] = useState<{code: string; amount: string; currency: number; who: string; nonce: string} | null>(null);
   // `pending` = handed to the merchant offline but NOT confirmed by the ledger (we can't claim it
   // settled). `already` = the ledger reported this nonce was already settled (idempotent replay).
-  const [paid, setPaid] = useState<{amount: number; currency: number; who: string; already: boolean; pending?: boolean} | null>(null);
+  const [paid, setPaid] = useState<{amount: string; currency: number; who: string; already: boolean; pending?: boolean} | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   // A tap arriving on the always-armed card takes over the scan screen; nfcKey re-arms after each.
@@ -173,8 +174,9 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
     const reqBalance = req.currency === 0 ? shownBalance : (assetBalances[req.currency] ?? null);
     // C2: when ONLINE and the known balance can't cover the amount, gate PRE-SUBMIT (no doomed
     // /pay). Offline we can't be sure (the local balance may be stale), so we only WARN there and
-    // let the merchant's online verify be the real gate.
-    const insufficient = reqBalance != null && req.amount > reqBalance;
+    // let the merchant's online verify be the real gate. MC1 units 2-4: `cmpRaw` (BigInt) — never a
+    // lexicographic string compare (which would wrongly rank "9" > "10").
+    const insufficient = reqBalance != null && cmpRaw(req.amount, reqBalance) > 0;
     const blockApprove = online && insufficient;
     // C1: any shown error (expired / insufficient relay-reject / verify-fail) also disables the
     // button so a doomed payment can't be re-tapped.

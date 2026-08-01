@@ -45,7 +45,7 @@ export async function run() {
     await seedDeposit(relayBaseURL, accountHex, DEPOSIT_CURRENCY, SEED_SATS);
     await refreshDeposit(relayBaseURL, accountHex, DEPOSIT_CURRENCY);
     const before = await getBalance(relayBaseURL, accountHex, DEPOSIT_CURRENCY);
-    assertEq(before, SEED_SATS, 'pre-withdraw ckBTC balance');
+    assertEq(before, String(SEED_SATS), 'pre-withdraw ckBTC balance');
 
     // 3. Open the Balances sheet; wait for the BTC row's Cash-out to appear (it renders once the
     //    balance poll credits currency 1 → funded). The asset row + withdraw affordance live here now.
@@ -77,7 +77,7 @@ export async function run() {
     // 7. The credited path proven directly on the real ledger: the currency-1 balance dropped by the
     //    withdrawn amount. (The `$` header is currency 0 — a separate asset; deliberately unmoved.)
     const after = await getBalance(relayBaseURL, accountHex, DEPOSIT_CURRENCY);
-    assertEq(after, SEED_SATS - WITHDRAW_SATS, 'post-withdraw ckBTC balance (debited)');
+    assertEq(after, String(SEED_SATS - WITHDRAW_SATS), 'post-withdraw ckBTC balance (debited)');
     console.log(`[15-withdraw] ✓ ckBTC balance ${SEED_SATS} → ${after} sats (debited through the REAL app+relay+FakeLedger)`);
 
     await driver.screenshot('15-withdraw');

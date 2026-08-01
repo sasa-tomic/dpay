@@ -11,6 +11,8 @@ import org.junit.runner.RunWith
 import uniffi.dpay_ffi.decodeQr
 import uniffi.dpay_ffi.encodeQr
 import uniffi.dpay_ffi.generateKeypair
+import uniffi.dpay_ffi.nfcDecodeRequest
+import uniffi.dpay_ffi.nfcRequestBytes
 import uniffi.dpay_ffi.signAuthorization
 import uniffi.dpay_ffi.validate
 import uniffi.dpay_ffi.verifyWire
@@ -100,5 +102,27 @@ class DpayFfiInstrumentedTest {
         val tampered = wire.copyOf()
         tampered[196] = (tampered[196] + 1).toByte() // first byte of the 64-byte signature (offset 196..260)
         assertFalse(verifyWire(tampered))
+    }
+
+    /**
+     * MC1 units 2-4: an amount > 2^53 (the IEEE-754 loss zone the old `number`/`Double` JS/Kotlin
+     * path collapsed) round-trips EXACTLY through the on-device core. Number(9007199254740993) ===
+     * 9007199254740992 (lossy); ULong carries the exact value. The @ReactMethod path marshals the
+     * amount as a decimal STRING (`BigInteger(amount).toLong().toULong()`), and the FFI core handles
+     * the full u64 range — this drives the real `.so` to prove the request encode→decode round-trip
+     * is byte-exact for 2^53+1, and the signed wire verifies. (The on-device self-check via `just
+     * app` separately exercises the String-signature `@ReactMethod` surface.)
+     */
+    @Test
+    fun bigAmountAbove2p53RoundTripsExactly() {
+        val big = "9007199254740993".toULong() // 2^53 + 1
+        // Request encode → decode round-trip carries the exact u64 (the FFI handles the full range).
+        val request = nfcRequestBytes(to, big, nonce, expiry, 0u, "", "")
+        val decoded = nfcDecodeRequest(request)
+        assertEquals("2^53+1 round-trips exactly through the on-device core (no number loss)", big, decoded.amount)
+        // Signing with the big amount produces a verifiable wire (the FROZEN wire bytes carry the
+        // amount as a u64 LE; the on-device core encodes the full range exactly).
+        val wire = signAuthorization(secret, to, big, nonce, expiry, 0u, "", "", "")
+        assertTrue("the >2^53 authorization verifies on-device", verifyWire(wire))
     }
 }

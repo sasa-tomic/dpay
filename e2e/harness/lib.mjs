@@ -248,7 +248,8 @@ export async function openBalances(driver, opts = {}) {
 // failures. These hit the REAL test relay the harness spawned (FakeLedger offline), proving the
 // credited/settled path end-to-end rather than mocking it.
 
-/** GET `/api/v1/balance/<hex>?currency=N` → the balance in minor units. */
+/** GET `/api/v1/balance/<hex>?currency=N` → the balance in minor units. MC1 units 2-4: the relay
+ *  serializes the balance as a DECIMAL STRING (raw u64), so the helper returns a string. */
 export async function getBalance(relayBaseURL, accountHex, currency = 0, timeoutMs = 4000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -256,7 +257,7 @@ export async function getBalance(relayBaseURL, accountHex, currency = 0, timeout
     const r = await fetch(`${relayBaseURL}/api/v1/balance/${accountHex}?currency=${currency}`, { signal: ctrl.signal });
     if (!r.ok) throw new Error(`balance ${r.status}`);
     const j = await r.json();
-    if (typeof j.balance !== 'number') throw new Error(`balance: bad body ${JSON.stringify(j)}`);
+    if (typeof j.balance !== 'string') throw new Error(`balance: bad body ${JSON.stringify(j)}`);
     return j.balance;
   } finally { clearTimeout(t); }
 }

@@ -120,26 +120,26 @@ describe('DEMO (currency 0) display never depended on the Bitcoin fallback', () 
     expect(currencySymbol(KNOWN_CATALOG, 0)).toBe('∂');
   });
   it('fmtCurrencyAmount(DEMO, 5000) === "∂50.00" (not BTC, not $)', () => {
-    expect(fmtCurrencyAmount(KNOWN_CATALOG, 0, 5000)).toBe('∂50.00');
+    expect(fmtCurrencyAmount(KNOWN_CATALOG, 0, '5000')).toBe('∂50.00');
   });
 });
 
 describe('fmtCurrencyAmount — explicit "Unsupported" sentinel for unknown families', () => {
   it('returns "Unsupported" for a CkSol amount (never "0.000001000 BTC")', () => {
-    const s = fmtCurrencyAmount(UNKNOWN_CATALOG, 99, 1000);
+    const s = fmtCurrencyAmount(UNKNOWN_CATALOG, 99, '1000');
     expect(s).toBe('Unsupported');
     expect(s).not.toMatch(/BTC/);
     expect(s).not.toMatch(/^\$/);
   });
   it('returns "Unsupported" even when a decimals value is present (family is the gate, not decimals)', () => {
     // CkSol carries decimals:9 in the catalog, but it's still an unknown FAMILY → fail closed.
-    expect(fmtCurrencyAmount(UNKNOWN_CATALOG, 99, 123456789)).toBe('Unsupported');
+    expect(fmtCurrencyAmount(UNKNOWN_CATALOG, 99, '123456789')).toBe('Unsupported');
   });
   it('formats ckBTC exactly (unchanged): 50000 sats → "0.00050000 BTC"', () => {
-    expect(fmtCurrencyAmount(KNOWN_CATALOG, 1, 50000)).toBe('0.00050000 BTC');
+    expect(fmtCurrencyAmount(KNOWN_CATALOG, 1, '50000')).toBe('0.00050000 BTC');
   });
   it('formats ckUSDC exactly (unchanged): 1000000 → "1.000000 USDC"', () => {
-    expect(fmtCurrencyAmount(KNOWN_CATALOG, 2, 1000000)).toBe('1.000000 USDC');
+    expect(fmtCurrencyAmount(KNOWN_CATALOG, 2, '1000000')).toBe('1.000000 USDC');
   });
 });
 
@@ -255,15 +255,15 @@ describe('displayName/currencySymbol — per-currency fields over family assumpt
   });
   it('fmtCurrencyAmount(ckUSDC) reads per-currency decimals + backing_symbol', () => {
     // 1000000 raw @ 6 decimals → "1.000000 USDC" (reads descriptor.backing_symbol + display_decimals)
-    expect(fmtCurrencyAmount([CKUSDC_DESC], 2, 1000000)).toBe('1.000000 USDC');
+    expect(fmtCurrencyAmount([CKUSDC_DESC], 2, '1000000')).toBe('1.000000 USDC');
   });
   it('fmtCurrencyAmount(ckBTC) reads per-currency decimals + backing_symbol', () => {
-    expect(fmtCurrencyAmount([CKBTC_DESC], 1, 50000)).toBe('0.00050000 BTC');
+    expect(fmtCurrencyAmount([CKBTC_DESC], 1, '50000')).toBe('0.00050000 BTC');
   });
   it('fmtCurrencyAmount renders a future ckERC20 in its OWN unit (not USDC)', () => {
     const ckusdt: CurrencyDescriptor = mk({currency: 5, minter_family: 'CkEthErc20', symbol: 'ckUSDT', decimals: 6, wrapper_name: 'ckUSDT', backing_symbol: 'USDT', network: 'Ethereum', display_decimals: 6});
-    expect(fmtCurrencyAmount([ckusdt], 5, 2000000)).toBe('2.000000 USDT');
-    expect(fmtCurrencyAmount([ckusdt], 5, 2000000)).not.toMatch(/USDC/);
+    expect(fmtCurrencyAmount([ckusdt], 5, '2000000')).toBe('2.000000 USDT');
+    expect(fmtCurrencyAmount([ckusdt], 5, '2000000')).not.toMatch(/USDC/);
   });
 });
 

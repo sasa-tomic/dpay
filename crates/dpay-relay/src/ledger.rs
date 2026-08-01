@@ -19,6 +19,54 @@ use ed25519_dalek::{Signature, SigningKey};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+/// A `u64` carried across the JSON boundary as a DECIMAL STRING (never a raw JSON number), so the
+/// full u64 range round-trips without precision loss above 2^53 (MC1 units 2-4 — exact amount
+/// transport). Serializes as a quoted decimal string (e.g. `"10000"`); deserializes accepting EITHER
+/// a quoted decimal string OR a raw JSON number, for a smooth cutover from any caller (including the
+/// relay's own fixtures and an older client) that still sends a number.
+///
+/// This is purely a marshalling concern — the FROZEN wire bytes carry `amount` as a fixed-offset
+/// little-endian u64 (unchanged); only the JSON/TS boundary representation moves from `number` to
+/// `string`. Internal Rust (the `Ledger` trait, the FakeLedger state) keeps using native `u64`; the
+/// `.0` extraction happens at the (de)serialization seam.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct U64String(pub u64);
+
+impl serde::Serialize for U64String {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(&self.0)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for U64String {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct U64StringVisitor;
+        impl<'de> serde::de::Visitor<'de> for U64StringVisitor {
+            type Value = U64String;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a decimal-string u64 or a non-negative JSON number")
+            }
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<U64String, E> {
+                v.trim()
+                    .parse::<u64>()
+                    .map(U64String)
+                    .map_err(|_| E::custom(format!("u64 decimal string expected, got {v:?}")))
+            }
+            fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<U64String, E> {
+                Ok(U64String(v))
+            }
+            fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<U64String, E> {
+                if v >= 0 {
+                    Ok(U64String(v as u64))
+                } else {
+                    Err(E::custom(format!("u64 must be non-negative, got {v}")))
+                }
+            }
+        }
+        deserializer.deserialize_any(U64StringVisitor)
+    }
+}
+
 use dpay_core::{
     sign_receipt, validate, CodecError, Currency, MEMO_LEN, NAME_LEN, PayError, ReceiptClaim,
     SignedAuthorization, WithdrawAuth, DEMO_USD, NONCE_LEN, PUBKEY_LEN,
@@ -70,11 +118,11 @@ pub(crate) const CKUSDC_ERC20_ADDRESS: &str = "0xA0b86991c6218b36c1d19D4a2e9Eb0c
 pub struct Receipt {
     pub from: String,
     pub to: String,
-    pub amount: u64,
+    pub amount: U64String,
     pub nonce: String,
-    pub new_from_balance: u64,
+    pub new_from_balance: U64String,
     pub currency: Currency,
-    pub block_index: u64,
+    pub block_index: U64String,
     pub settle_ts: u64,
     /// Hex-encoded 64-byte Ed25519 signature over the canonical ReceiptClaim.
     pub receipt_sig: String,
@@ -92,7 +140,7 @@ pub struct Receipt {
 pub struct TxnRecord {
     pub from: String,
     pub to: String,
-    pub amount: u64,
+    pub amount: U64String,
     pub nonce: String,
     pub currency: Currency,
     pub timestamp: u64,
@@ -119,13 +167,13 @@ pub struct TxnRecord {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct MintedUtxo {
     pub block_index: String,
-    pub amount: u64,
+    pub amount: U64String,
 }
 
 /// One UTXO seen on-chain but not yet confirmed enough to mint. Mirrors the canister's `PendingUtxo`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct PendingUtxo {
-    pub value: u64,
+    pub value: U64String,
     pub confirmations: u64,
 }
 
@@ -135,7 +183,7 @@ pub struct PendingUtxo {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct DepositRefresh {
     pub minted: Vec<MintedUtxo>,
-    pub minted_total: u64,
+    pub minted_total: U64String,
     pub pending: Vec<PendingUtxo>,
     pub required_confirmations: u32,
 }
@@ -146,8 +194,8 @@ pub struct DepositRefresh {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct DepositInfo {
     pub min_confirmations: u32,
-    pub deposit_fee: u64,
-    pub deposit_min_amount: Option<u64>,
+    pub deposit_fee: U64String,
+    pub deposit_min_amount: Option<U64String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -165,7 +213,7 @@ pub struct DepositInfo {
 pub struct WithdrawRequest {
     pub from: String,
     pub destination: String,
-    pub amount: u64,
+    pub amount: U64String,
     pub nonce: String,
     pub expiry: u64,
     pub currency: Currency,
@@ -178,10 +226,10 @@ pub struct WithdrawRequest {
 pub struct WithdrawReceipt {
     pub from: String,
     pub destination: String,
-    pub amount: u64,
+    pub amount: U64String,
     pub nonce: String,
     pub currency: Currency,
-    pub block_index: u64,
+    pub block_index: U64String,
 }
 
 // ---------------------------------------------------------------------------
@@ -245,9 +293,9 @@ pub struct CurrencyDescriptor {
     /// UI display precision; default = `decimals` (full precision) when unset. ≤ `decimals`.
     pub display_decimals: Option<u8>,
     /// ICRC ledger fee in RAW smallest units (registered statically; MC2 adds live validation).
-    pub fee: Option<u64>,
+    pub fee: Option<U64String>,
     /// Per-currency tx cap in RAW smallest units (registered; MC2 governs).
-    pub cap: Option<u64>,
+    pub cap: Option<U64String>,
     /// EVM chain id for ckERC20 (1=Ethereum mainnet). `None` for non-EVM families.
     pub chain_id: Option<u32>,
     /// ERC-20 contract address (0x…) for a ckERC20 token — per-token, replacing the old hardcoded
@@ -609,7 +657,7 @@ fn fake_catalog() -> Vec<CurrencyDescriptor> {
             backing_symbol: Some("USDC".into()),
             network: Some("Ethereum".into()),
             display_decimals: Some(6),
-            fee: Some(10_000), // ckUSDC ledger icrc1_fee (O6): 0.01 USDC = 10000 raw
+            fee: Some(U64String(10_000)), // ckUSDC ledger icrc1_fee (O6): 0.01 USDC = 10000 raw
             cap: None,
             chain_id: Some(1), // Ethereum mainnet
             token_contract: Some("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".into()), // ckUSDC ERC-20 (O6)
@@ -666,7 +714,7 @@ impl Ledger for FakeLedger {
         s.txns.push(TxnRecord {
             from: hex::encode(from),
             to: hex::encode(sa.auth.to),
-            amount: sa.auth.amount,
+            amount: U64String(sa.auth.amount),
             nonce: hex::encode(sa.auth.nonce),
             currency,
             timestamp: now,
@@ -697,11 +745,11 @@ impl Ledger for FakeLedger {
         Ok(Receipt {
             from: hex::encode(from),
             to: hex::encode(sa.auth.to),
-            amount: sa.auth.amount,
+            amount: U64String(sa.auth.amount),
             nonce: hex::encode(sa.auth.nonce),
-            new_from_balance: new_from,
+            new_from_balance: U64String(new_from),
             currency,
-            block_index,
+            block_index: U64String(block_index),
             settle_ts: now,
             receipt_sig: hex::encode(sig),
             pubkey: hex::encode(pubkey),
@@ -779,15 +827,15 @@ impl Ledger for FakeLedger {
             let bal = s.balances.entry((pubkey, currency)).or_insert(0);
             *bal = bal.saturating_add(amount);
             Ok(DepositRefresh {
-                minted: vec![MintedUtxo { block_index: "0".to_string(), amount }],
-                minted_total: amount,
+                minted: vec![MintedUtxo { block_index: "0".to_string(), amount: U64String(amount) }],
+                minted_total: U64String(amount),
                 pending: vec![],
                 required_confirmations: 1,
             })
         } else {
             Ok(DepositRefresh {
                 minted: vec![],
-                minted_total: 0,
+                minted_total: U64String(0),
                 pending: vec![],
                 required_confirmations: 1,
             })
@@ -799,8 +847,8 @@ impl Ledger for FakeLedger {
         // the offline loop's "Add money" sheet always renders instructions.
         Ok(DepositInfo {
             min_confirmations: 1,
-            deposit_fee: 0,
-            deposit_min_amount: Some(0),
+            deposit_fee: U64String(0),
+            deposit_min_amount: Some(U64String(0)),
         })
     }
 
@@ -830,6 +878,9 @@ impl Ledger for FakeLedger {
     /// subaccount (the net ledger effect of retrieve_btc_with_approval). The signed WithdrawAuth is
     /// verified under `from` (== the debit subaccount) before any state change — non-custodial.
     async fn withdraw(&self, req: WithdrawRequest) -> Result<WithdrawReceipt, LedgerError> {
+        // Extract the u64 once at the JSON boundary (amount crosses the wire as a decimal string;
+        // internal Rust arithmetic uses the native u64).
+        let amount = req.amount.0;
         // Decode hex fields outside the lock (pure; a bad shape is a permanent reject).
         let from = hex::decode(&req.from)
             .map_err(|e| LedgerError::Rejected(format!("bad from hex: {e}")))
@@ -858,10 +909,10 @@ impl Ledger for FakeLedger {
         let auth = WithdrawAuth {
             from_pubkey: from,
             destination: req.destination.clone(),
-            amount: req.amount,
             nonce,
             expiry: req.expiry,
             currency: req.currency,
+            amount,
         };
         if !auth.verify(&from, &sig) {
             return Err(LedgerError::Rejected("bad signature".to_string()));
@@ -869,13 +920,13 @@ impl Ledger for FakeLedger {
 
         let now = self.clock.now_secs();
         // Cheap local rejects (mirror the canister's pre-burn checks).
-        if req.amount == 0 {
+        if amount == 0 {
             return Err(LedgerError::Rejected("zero amount".to_string()));
         }
         if req.expiry < now {
             return Err(LedgerError::Rejected("expired".to_string()));
         }
-        if req.amount < RETRIEVE_BTC_MIN_AMOUNT {
+        if amount < RETRIEVE_BTC_MIN_AMOUNT {
             return Err(LedgerError::Rejected(format!(
                 "amount below retrieve_btc_min_amount ({RETRIEVE_BTC_MIN_AMOUNT})"
             )));
@@ -887,7 +938,7 @@ impl Ledger for FakeLedger {
             return Err(LedgerError::Rejected("nonce already used".to_string()));
         }
         let balance = *s.balances.get(&(from, req.currency)).unwrap_or(&0);
-        if req.amount > balance {
+        if amount > balance {
             // Insufficient funds: the canister RELEASES the nonce (retryable pre-burn failure); mirror
             // that here so a later deposit + same-auth retry can succeed within the expiry window.
             s.withdraw_nonces.remove(&nonce);
@@ -895,7 +946,7 @@ impl Ledger for FakeLedger {
         }
         // Commit the burn: debit the user's subaccount. (No fee model — the FakeLedger is the fee-less
         // demo ledger; the real canister + ledger enforce the ckBTC transfer fee authoritatively.)
-        let new_balance = balance - req.amount;
+        let new_balance = balance - amount;
         s.balances.insert((from, req.currency), new_balance);
         // Record the withdrawal as a history row (counterparty = MINT_ACCOUNT sentinel, like `burn`).
         let block_index = s.next_block;
@@ -903,7 +954,7 @@ impl Ledger for FakeLedger {
         s.txns.push(TxnRecord {
             from: hex::encode(from),
             to: hex::encode(MINT_ACCOUNT),
-            amount: req.amount,
+            amount: U64String(amount),
             nonce: hex::encode(nonce),
             currency: req.currency,
             timestamp: now,
@@ -916,10 +967,10 @@ impl Ledger for FakeLedger {
         Ok(WithdrawReceipt {
             from: hex::encode(from),
             destination: req.destination,
-            amount: req.amount,
+            amount: U64String(amount),
             nonce: hex::encode(nonce),
             currency: req.currency,
-            block_index,
+            block_index: U64String(block_index),
         })
     }
 

@@ -161,20 +161,22 @@ function hex(h: string): Uint8Array {
   return hexToBytes(h);
 }
 
-/** Write a little-endian u64 into `buf` at `offset`. */
-function putU64Le(buf: Uint8Array, offset: number, val: number): void {
-  // Bitwise on a Number works up to 2^53; for u64 amounts/expiry this is well under the safe range.
-  // (Per-tx cap is 100_000 cents; expiry is unix-secs; neither approaches 2^53.)
-  let v = Math.floor(val);
+/** Write a little-endian u64 into `buf` at `offset`. MC1 units 2-4: `val` is a string|number carried
+ *  as BigInt so the FULL u64 range is exact (never `Math.floor`/`& 0xff` which is lossy above 2^53).
+ *  A small JSON-number golden (e.g. 2500) round-trips byte-identically to the old lossy path. */
+function putU64Le(buf: Uint8Array, offset: number, val: string | number): void {
+  let v = BigInt(val);
   for (let i = 0; i < 8; i++) {
-    buf[offset + i] = v & 0xff;
-    v = Math.floor(v / 0x100);
+    buf[offset + i] = Number(v & 0xffn);
+    v >>= 8n;
   }
 }
-function readU64Le(buf: Uint8Array, offset: number): number {
-  let v = 0;
-  for (let i = 7; i >= 0; i--) v = v * 0x100 + buf[offset + i];
-  return v;
+/** Read a little-endian u64 from `buf` at `offset` as an UNSIGNED decimal STRING (MC1 units 2-4:
+ *  never a `number`, which is lossy above 2^53). */
+function readU64Le(buf: Uint8Array, offset: number): string {
+  let v = 0n;
+  for (let i = 7; i >= 0; i--) v = (v << 8n) | BigInt(buf[offset + i]);
+  return v.toString();
 }
 /** Write a little-endian u32. */
 function putU32Le(buf: Uint8Array, offset: number, val: number): void {
@@ -196,7 +198,7 @@ function readU32Le(buf: Uint8Array, offset: number): number {
  * `from` is the signer's pubkey (the app always signs with the identity it generated). The three
  * 32-byte display fields (`from_name`/`to_name`/`memo`) are UTF-8 NUL-padded via `padName32`.
  */
-function buildSigningBytes(fromHex: string, toHex: string, amount: number, nonceHex: string, expiry: number, currency: number, fromName = '', toName = '', memo = ''): Uint8Array {
+function buildSigningBytes(fromHex: string, toHex: string, amount: string | number, nonceHex: string, expiry: number, currency: number, fromName = '', toName = '', memo = ''): Uint8Array {
   const from = hex(fromHex);
   const to = hex(toHex);
   const nonce = hex(nonceHex);
@@ -228,7 +230,7 @@ function buildWire(signing: Uint8Array, sig: Uint8Array, fromPub: Uint8Array): U
 /** Parse the 292-byte wire back into its parts (mirrors `SignedAuthorization::from_wire`). */
 function parseWire(wireBytes: Uint8Array): {
   signing: Uint8Array; sig: Uint8Array; fromPub: Uint8Array;
-  auth: { fromHex: string; toHex: string; amount: number; nonceHex: string; expiry: number; currency: number; fromName: string; toName: string; memo: string };
+  auth: { fromHex: string; toHex: string; amount: string; nonceHex: string; expiry: number; currency: number; fromName: string; toName: string; memo: string };
 } {
   if (wireBytes.length !== L.wire_len) throw new Error('Length');
   const signing = wireBytes.slice(L.wire_fields.signing.offset, L.wire_fields.signing.offset + L.wire_fields.signing.len);
@@ -248,7 +250,7 @@ function parseWire(wireBytes: Uint8Array): {
 
 /** Build the 132-byte request (merchant's QR) from the request fields. The `to_name` + `memo` are
  *  the merchant-defined display fields (NUL-padded UTF-8 via `padName32`). */
-function buildRequestBytes(toHex: string, amount: number, nonceHex: string, expiry: number, currency: number, toName = '', memo = ''): Uint8Array {
+function buildRequestBytes(toHex: string, amount: string | number, nonceHex: string, expiry: number, currency: number, toName = '', memo = ''): Uint8Array {
   const to = hex(toHex);
   const nonce = hex(nonceHex);
   if (to.length !== L.pubkey_len) throw new Error(`to length: ${to.length}`);
@@ -275,7 +277,7 @@ function buildRequestBytes(toHex: string, amount: number, nonceHex: string, expi
  * FakeLedger/canister verify rejects the sig and the e2e withdraw flow goes RED.
  */
 function buildWithdrawSigningBytes(
-  fromHex: string, btcAddress: string, amount: number, nonceHex: string, expiry: number, currency: number,
+  fromHex: string, btcAddress: string, amount: string | number, nonceHex: string, expiry: number, currency: number,
 ): Uint8Array {
   const W = L.withdraw;
   const from = hex(fromHex);
@@ -312,7 +314,7 @@ async function wireLen(): Promise<number> { return L.wire_len; }
 async function signingLen(): Promise<number> { return L.signing_len; }
 async function requestLen(): Promise<number> { return L.request_len; }
 
-async function signAuthorization(secretHex: string, toHex: string, amount: number, nonceHex: string, expiry: number, currency: number, fromName = '', toName = '', memo = ''): Promise<string> {
+async function signAuthorization(secretHex: string, toHex: string, amount: string | number, nonceHex: string, expiry: number, currency: number, fromName = '', toName = '', memo = ''): Promise<string> {
   // Per the on-device contract: returns the wire as a hex string. The app then hands it to
   // encodeQr() to make the QR the merchant scans / submits. `fromName` is the payer's own display
   // name; `toName` + `memo` are copied from the scanned request (merchant-defined).
@@ -324,13 +326,13 @@ async function signAuthorization(secretHex: string, toHex: string, amount: numbe
   return bytesToHex(wire);
 }
 
-async function encodeRequest(toHex: string, amount: number, nonceHex: string, expiry: number, currency: number, toName = '', memo = ''): Promise<string> {
+async function encodeRequest(toHex: string, amount: string | number, nonceHex: string, expiry: number, currency: number, toName = '', memo = ''): Promise<string> {
   // Mirrors `PaymentRequest::encode` — base64url of the 132-byte request. The merchant QR is now
   // plain base64url (the `to_name` lives inside the bytes; the old `|name` suffix is gone).
   return base64url.encode(buildRequestBytes(toHex, amount, nonceHex, expiry, currency, toName, memo));
 }
 
-async function decodeRequest(qr: string): Promise<{ toHex: string; amount: number; nonceHex: string; expiry: number; currency: number; toName: string; memo: string }> {
+async function decodeRequest(qr: string): Promise<{ toHex: string; amount: string; nonceHex: string; expiry: number; currency: number; toName: string; memo: string }> {
   // Mirrors `PaymentRequest::decode`. The QR is plain base64url now (the name lives in the bytes);
   // tolerate a stray `|name` suffix defensively, but it carries no name anymore.
   const b64 = qr.includes('|') ? qr.slice(0, qr.indexOf('|')) : qr;
@@ -379,7 +381,7 @@ async function verifyWire(wireHex: string): Promise<boolean> {
  * `POST /api/v1/withdraw`; the FakeLedger/canister verify this exact signature before moving funds.
  */
 async function signWithdrawal(
-  secretHex: string, btcAddress: string, amount: number, nonceHex: string, expiry: number, currency: number,
+  secretHex: string, btcAddress: string, amount: string | number, nonceHex: string, expiry: number, currency: number,
 ): Promise<string> {
   const secret = hex(secretHex);
   const pub = await ed.getPublicKeyAsync(secret);
@@ -396,8 +398,8 @@ async function signWithdrawal(
  * and the e2e pay flows go RED. Field widths match `wire_layout.json`'s nonce/pubkey/amount/currency.
  */
 function buildReceiptClaimBytes(
-  nonceHex: string, fromHex: string, toHex: string, amount: number, currency: number,
-  blockIndex: number, settleTs: number,
+  nonceHex: string, fromHex: string, toHex: string, amount: string | number, currency: number,
+  blockIndex: string | number, settleTs: string | number,
 ): Uint8Array {
   const nonce = hex(nonceHex);
   const from = hex(fromHex);
@@ -418,8 +420,8 @@ function buildReceiptClaimBytes(
 }
 
 async function verifyReceiptSig(
-  nonceHex: string, fromHex: string, toHex: string, amount: number, currency: number,
-  blockIndex: number, settleTs: number, receiptSigHex: string, pubkeyHex: string,
+  nonceHex: string, fromHex: string, toHex: string, amount: string | number, currency: number,
+  blockIndex: string | number, settleTs: string | number, receiptSigHex: string, pubkeyHex: string,
 ): Promise<boolean> {
   // Mirrors `dpay_core::verify_receipt` / the FFI `verify_receipt_sig`. Returns false on any bad
   // input (never throws), so the app gates "Paid ✓" on a clean true.

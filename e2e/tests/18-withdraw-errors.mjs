@@ -44,7 +44,7 @@ export async function run() {
     const accountHex = identity.publicHex;
     await seedDeposit(relayBaseURL, accountHex, DEPOSIT_CURRENCY, SEED_SATS);
     await refreshDeposit(relayBaseURL, accountHex, DEPOSIT_CURRENCY);
-    assertEq(await getBalance(relayBaseURL, accountHex, DEPOSIT_CURRENCY), SEED_SATS, 'seeded ckBTC balance');
+    assertEq(await getBalance(relayBaseURL, accountHex, DEPOSIT_CURRENCY), String(SEED_SATS), 'seeded ckBTC balance');
     // Open Balances; wait for the BTC Cash-out (renders once the poll credits currency 1 → funded).
     await openBalances(driver);
     await driver.findByTestID('btn-withdraw', { timeoutMs: 8_000 });
@@ -134,7 +134,7 @@ export async function run() {
     }
 
     // Money-safety: none of the rejected withdraws moved any funds (balance unchanged).
-    assertEq(await getBalance(relayBaseURL, accountHex, DEPOSIT_CURRENCY), SEED_SATS,
+    assertEq(await getBalance(relayBaseURL, accountHex, DEPOSIT_CURRENCY), String(SEED_SATS),
       'ckBTC balance unchanged after all rejected withdraws (no funds moved)');
 
     await driver.screenshot('18-withdraw-errors');

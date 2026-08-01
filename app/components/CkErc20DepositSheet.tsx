@@ -3,7 +3,8 @@ import {View, Text, Pressable, TextInput, ScrollView, SafeAreaView, StatusBar, A
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {POLL} from '../config/constants';
-import {fmtAsset, base} from '../lib/format';
+import {base} from '../lib/format';
+import {parseDecimalToUnits, cmpRaw} from '../lib/amount';
 import type {Identity} from '../lib/types';
 import type {FamilyDisplay} from '../config/catalog';
 import {type CkErc20OnrampParams, ckerc20OnrampParams} from '../services/relay';
@@ -33,7 +34,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, onCl
   const [amount, setAmount] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [params, setParams] = useState<CkErc20OnrampParams | null>(null);
-  const [startBal, setStartBal] = useState<number | null>(null);
+  const [startBal, setStartBal] = useState<string | null>(null);
 
   useEscapeToClose(onClose);
 
@@ -65,7 +66,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, onCl
         const t = setTimeout(() => ctrl.abort(), 4000);
         const r = await fetch(`${base(relayUrl)}/api/v1/balance/${identity.publicHex}?currency=${currency}`, {signal: ctrl.signal});
         const j = await r.json().catch(() => ({} as any));
-        if (typeof j.balance === 'number') setStartBal(j.balance);
+        if (typeof j.balance === 'string') setStartBal(j.balance);
         clearTimeout(t);
       } catch { /* best-effort snapshot; watching falls back to any-positive */ }
       setPhase('enter');
@@ -78,10 +79,11 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, onCl
     if (!account || !params) return;
     const provider = getEthereumProvider();
     if (!provider) { setErr('Wallet disconnected.'); return; }
-    // Parse the human amount into the smallest units (USDC = 6 decimals).
-    const units = Math.round((parseFloat(amount) || 0) * Math.pow(10, display.amountDecimals));
-    if (!(units > 0)) { setErr('Enter an amount greater than zero.'); return; }
-    const unitBig = BigInt(units);
+    // Parse the human amount into the smallest units (USDC = 6 decimals). MC1 units 2-4: use the
+    // exact BigInt parser — `parseFloat`/`Math.pow` are lossy above 2^53.
+    const parsed = parseDecimalToUnits(amount, display.amountDecimals);
+    if (!parsed.ok || parsed.raw === '0') { setErr('Enter an amount greater than zero.'); return; }
+    const unitBig = BigInt(parsed.raw);
     const principalWord = principalToBytes32(params.facade_principal);
     // The user's ckUSDC subaccount is their 32-byte Ed25519 pubkey (the same subaccount the balance
     // poll + pay path read), so the mint lands at the account the wallet already shows.
@@ -115,8 +117,10 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, onCl
       try {
         const r = await fetch(`${base(relayUrl)}/api/v1/balance/${identity.publicHex}?currency=${currency}`, {signal: ctrl.signal});
         const j = await r.json().catch(() => ({} as any));
-        if (alive && r.ok && typeof j.balance === 'number') {
-          if (startBal == null ? j.balance > 0 : j.balance > startBal) setPhase('done');
+        if (alive && r.ok && typeof j.balance === 'string') {
+          // MC1 units 2-4: balance presence/growth via `cmpRaw` (BigInt) — never `>` on strings.
+          const grew = startBal == null ? j.balance !== '0' : cmpRaw(j.balance, startBal) > 0;
+          if (grew) setPhase('done');
         }
       } catch { /* keep watching */ } finally { clearTimeout(t); }
     };
@@ -124,8 +128,6 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, onCl
     const id = setInterval(poll, POLL.deposit);
     return () => { alive = false; clearInterval(id); };
   }, [phase, relayUrl, identity.publicHex, currency, startBal]);
-
-  const fmt = (n: number) => fmtAsset(n, display.amountDecimals, display.nativeAsset);
 
   return (
     <View style={S.sheetOverlay}>

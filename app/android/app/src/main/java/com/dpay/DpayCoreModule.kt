@@ -6,6 +6,7 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
+import java.math.BigInteger
 
 /**
  * React Native bridge to the shared money/protocol core.
@@ -14,7 +15,8 @@ import com.facebook.react.bridge.ReactMethod
  * loads the NDK-built `libdpay_ffi.so` — i.e. the *exact* compiled `dpay-core` the canister, relay,
  * sim, and Claude's headless tests use. No money logic is reimplemented in Kotlin or JS; this class
  * only marshals hex strings across the bridge. Bytes are passed as lowercase hex (RN's bridge has no
- * byte-array type); amounts/time are doubles (safe: values stay well under 2^53).
+ * byte-array type); **amounts are decimal-digit STRINGS** (MC1 units 2-4: raw u64 never travels as
+ * `Double`, which is lossy above 2^53). Time/currency stay `Double` (small bounded values).
  */
 class DpayCoreModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
@@ -36,6 +38,22 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         ByteArray(s.length / 2) {
             ((Character.digit(s[it * 2], 16) shl 4) + Character.digit(s[it * 2 + 1], 16)).toByte()
         }
+
+    /**
+     * Parse a raw-u64 decimal STRING (from the JS bridge) into a ULong for the UniFFI binding.
+     * MC1 units 2-4: `BigInteger(amount).toLong().toULong()` is EXACT for the full u64 bit-pattern
+     * — `toLong()` takes the low 64 bits (so values in `[2^63, 2^64)` wrap to a negative long), and
+     * `.toULong()` reinterprets those same bits unsigned. A malformed amount rejects the promise
+     * with a debuggable code+message (never silent).
+     */
+    private fun rawU64(amount: String, field: String, promise: Promise): ULong? {
+        return try {
+            BigInteger(amount.trim()).toLong().toULong()
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", "invalid $field: ${e.message}", e)
+            null
+        }
+    }
 
     /** Fresh on-device Ed25519 keypair (native CSPRNG, inside Rust). */
     @ReactMethod
@@ -86,7 +104,7 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
     fun signAuthorization(
         secretHex: String,
         toHex: String,
-        amount: Double,
+        amount: String,
         nonceHex: String,
         expiry: Double,
         currency: Double,
@@ -95,11 +113,14 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         memo: String,
         promise: Promise,
     ) {
+        // MC1 units 2-4: `amount` is a raw-u64 decimal STRING. `rawU64` is exact for the full u64
+        // bit-pattern and rejects the promise with a debuggable message on a malformed input.
+        val amountU = rawU64(amount, "amount", promise) ?: return
         try {
             val wire = uniffi.dpay_ffi.signAuthorization(
                 unhex(secretHex),
                 unhex(toHex),
-                amount.toLong().toULong(),
+                amountU,
                 unhex(nonceHex),
                 expiry.toLong().toULong(),
                 currency.toInt().toUInt(),
@@ -123,17 +144,18 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
     fun signWithdrawal(
         secretHex: String,
         btcAddress: String,
-        amount: Double,
+        amount: String,
         nonceHex: String,
         expiry: Double,
         currency: Double,
         promise: Promise,
     ) {
+        val amountU = rawU64(amount, "amount", promise) ?: return
         try {
             val sig = uniffi.dpay_ffi.signWithdrawal(
                 unhex(secretHex),
                 btcAddress,
-                amount.toLong().toULong(),
+                amountU,
                 unhex(nonceHex),
                 expiry.toLong().toULong(),
                 currency.toInt().toUInt(),
@@ -152,7 +174,7 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
     @ReactMethod
     fun encodeRequest(
         toHex: String,
-        amount: Double,
+        amount: String,
         nonceHex: String,
         expiry: Double,
         currency: Double,
@@ -160,11 +182,12 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         memo: String,
         promise: Promise,
     ) {
+        val amountU = rawU64(amount, "amount", promise) ?: return
         try {
             promise.resolve(
                 uniffi.dpay_ffi.encodeRequest(
                     unhex(toHex),
-                    amount.toLong().toULong(),
+                    amountU,
                     unhex(nonceHex),
                     expiry.toLong().toULong(),
                     currency.toInt().toUInt(),
@@ -177,14 +200,16 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         }
     }
 
-    /** Payer side: decode a scanned merchant request QR into {toHex, amount, nonceHex, expiry, currency}. */
+    /** Payer side: decode a scanned merchant request QR into {toHex, amount, nonceHex, expiry, currency}.
+     *  MC1 units 2-4: `amount` is emitted as an UNSIGNED decimal STRING (the full u64 range, never a
+     *  lossy Double). */
     @ReactMethod
     fun decodeRequest(qr: String, promise: Promise) {
         try {
             val r = uniffi.dpay_ffi.decodeRequest(qr)
             val out = Arguments.createMap()
             out.putString("toHex", hex(r.to))
-            out.putDouble("amount", r.amount.toDouble())
+            out.putString("amount", r.amount.toString())
             out.putString("nonceHex", hex(r.nonce))
             out.putDouble("expiry", r.expiry.toDouble())
             out.putInt("currency", r.currency.toInt())
@@ -214,26 +239,31 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         }
     }
 
-    /** Policy gate mirroring the canister; resolves null when acceptable, else the reason string. */
+    /** Policy gate mirroring the canister; resolves null when acceptable, else the reason string.
+     *  MC1 units 2-4: amount/cap/balance are raw-u64 decimal STRINGS (exact for the full range);
+     *  now/expiry stay Double (unix-seconds time, a small bounded value). */
     @ReactMethod
     fun validate(
-        amount: Double,
+        amount: String,
         now: Double,
         expiry: Double,
-        cap: Double,
-        balance: Double,
+        cap: String,
+        balance: String,
         nonceSeen: Boolean,
         sigOk: Boolean,
         promise: Promise,
     ) {
+        val amountU = rawU64(amount, "amount", promise) ?: return
+        val capU = rawU64(cap, "cap", promise) ?: return
+        val balanceU = rawU64(balance, "balance", promise) ?: return
         try {
             promise.resolve(
                 uniffi.dpay_ffi.validate(
-                    amount.toLong().toULong(),
+                    amountU,
                     now.toLong().toULong(),
                     expiry.toLong().toULong(),
-                    cap.toLong().toULong(),
-                    balance.toLong().toULong(),
+                    capU,
+                    balanceU,
                     nonceSeen,
                     sigOk,
                 ),
@@ -253,24 +283,29 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         nonceHex: String,
         fromHex: String,
         toHex: String,
-        amount: Double,
+        amount: String,
         currency: Double,
-        blockIndex: Double,
-        settleTs: Double,
+        blockIndex: String,
+        settleTs: String,
         receiptSigHex: String,
         pubkeyHex: String,
         promise: Promise,
     ) {
+        // MC1 units 2-4: amount/blockIndex/settleTs are raw-u64 decimal STRINGS (the claim carries
+        // them as u64 LE; exact transport closes the >2^53 loss surface). currency stays Double (u32).
+        val amountU = rawU64(amount, "amount", promise) ?: return
+        val blockIndexU = rawU64(blockIndex, "blockIndex", promise) ?: return
+        val settleTsU = rawU64(settleTs, "settleTs", promise) ?: return
         try {
             promise.resolve(
                 uniffi.dpay_ffi.verifyReceiptSig(
                     unhex(nonceHex),
                     unhex(fromHex),
                     unhex(toHex),
-                    amount.toLong().toULong(),
+                    amountU,
                     currency.toLong().toUInt(),
-                    blockIndex.toLong().toULong(),
-                    settleTs.toLong().toULong(),
+                    blockIndexU,
+                    settleTsU,
                     unhex(receiptSigHex),
                     unhex(pubkeyHex),
                 ),

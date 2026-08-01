@@ -136,10 +136,10 @@ export function receiptClaimBytes(r: {
   nonceHex: string;
   fromHex: string;
   toHex: string;
-  amount: number;
+  amount: string;
   currency: number;
-  blockIndex: number;
-  settleTs: number;
+  blockIndex: string;
+  settleTs: string;
 }): Uint8Array {
   const nonce = hexToBytes(r.nonceHex);
   const from = hexToBytes(r.fromHex);

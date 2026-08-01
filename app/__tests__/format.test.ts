@@ -109,7 +109,9 @@ describe('parseRequestQR', () => {
 });
 
 // Sanity: the existing format helpers are unaffected by the wire-format-v2 change.
-describe('format helpers (unchanged)', () => {
-  test('usd formats cents', () => { expect(usd(2500)).toBe('∂25.00'); });
+// MC1 units 2-4: usd/fmtAsset now take a raw-u64 decimal STRING (formatted via the exact BigInt
+// parser) — never a number.
+describe('format helpers (unchanged shape)', () => {
+  test('usd formats a raw-cent string', () => { expect(usd('2500')).toBe('∂25.00'); });
   test('short truncates hex', () => { expect(short('0123456789abcdef')).toBe('01234567…'); });
 });
