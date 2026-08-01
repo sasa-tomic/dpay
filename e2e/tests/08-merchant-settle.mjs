@@ -5,7 +5,7 @@
 // authorization for B's request and submits it directly via /api/v1/pay (A is the online payer). B's
 // app polls /api/v1/receipt/<nonce> and flips to "Received $X". Asserts the recipient-side state
 // EXPLICITLY:
-//   - B's app reaches "Received $30.00".
+//   - B's app reaches "Received Đ30.00".
 //   - B's `$` balance grew by the amount (currency 0).
 //   - B's Recent history shows the INCOMING payment from A (the recipient row, not the payer row).
 // This is the "merchant online-confirm" half of the two-phone flow: the recipient learns the
@@ -15,7 +15,7 @@
 import { setup, assert, assertIncludes, getBalance, postPay, onboardWallet, accountOf } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, decodeRequest, signAuthorizationCode } from '../harness/wire.mjs';
 
-const PAY_CENTS = 3000; // $30.00
+const PAY_CENTS = 3000; // Đ30.00
 
 export async function run() {
   const start = Date.now();
@@ -32,7 +32,7 @@ export async function run() {
       body: JSON.stringify({ account: alice.publicHex, amount: 10_000 }),
     });
     assert(fundA.ok, `payer A faucet funding must succeed, got ${fundA.status}`);
-    console.log(`[08-merchant-settle] wallet A (payer, funded $100): ${alice.publicHex.slice(0, 16)}…`);
+    console.log(`[08-merchant-settle] wallet A (payer, funded Đ100): ${alice.publicHex.slice(0, 16)}…`);
 
     // --- wallet B (merchant): onboarded in the browser. ---------------------------------------
     console.log('[08-merchant-settle] onboarding wallet B (merchant)…');
@@ -40,8 +40,8 @@ export async function run() {
     const bob = await accountOf(driver);
     const bobHex = bob.publicHex;
 
-    // --- B creates a $30 receive request; read the request QR the app rendered + decode it. ----
-    console.log('[08-merchant-settle] B requesting $30.00…');
+    // --- B creates a Đ30 receive request; read the request QR the app rendered + decode it. ----
+    console.log('[08-merchant-settle] B requesting Đ30.00…');
     await driver.click('tab-receive', { timeoutMs: 4_000 });
     await driver.type('amount-input', '30.00', { timeoutMs: 4_000 });
     await driver.click('btn-request', { timeoutMs: 4_000 });
@@ -49,7 +49,7 @@ export async function run() {
     const requestQR = await driver.eval(() => window.__DPAY_QR_LAST);
     const req = decodeRequest(requestQR);
     assertEqHex(req.toHex, bobHex, 'B request.to == B account');
-    assertEq(req.amount, PAY_CENTS, 'B request.amount == $30.00');
+    assertEq(req.amount, PAY_CENTS, 'B request.amount == Đ30.00');
     console.log(`[08-merchant-settle] B request nonce=${req.nonceHex.slice(0, 12)}…`);
 
     // --- A (online payer) signs an authorization for B's request and submits it directly. -----
@@ -62,19 +62,20 @@ export async function run() {
     assert(pay.body.replayed === false, 'first pay must not be a replay');
     console.log('[08-merchant-settle] ✓ A settled (FakeLedger verified + debited A, credited B)');
 
-    // --- B's app confirms receipt via its /receipt poll → "Received $30.00". -------------------
+    // --- B's app confirms receipt via its /receipt poll → "Received Đ30.00". -------------------
     const received = await driver.waitForText('Received', { timeoutMs: 10_000 });
     assert(received, 'merchant B should reach the "Received" screen via the receipt poll');
     console.log('[08-merchant-settle] ✓ B app shows "Received" (ledger-sourced confirmation)');
 
     // --- B's `$` balance grew by the amount. --------------------------------------------------
-    const bobUp = await driver.waitForText('$130.00', { timeoutMs: 10_000 });
-    assert(bobUp, `merchant B balance should be $130.00 ($100 + $30) after the settle`);
+    const bobUp = await driver.waitForText('Đ130.00', { timeoutMs: 10_000 });
+    assert(bobUp, `merchant B balance should be Đ130.00 (Đ100 + Đ30) after the settle`);
     const bobLedger = await getBalance(relayBaseURL, bobHex, 0);
     assert(bobLedger === 13_000, `B ledger balance must be 13000 cents, got ${bobLedger}`);
-    console.log('[08-merchant-settle] ✓ B balance $100.00 → $130.00');
+    console.log('[08-merchant-settle] ✓ B balance Đ100.00 → Đ130.00');
 
     // --- B's Recent history shows the INCOMING payment from A (recipient row). ----------------
+    await driver.click('tab-transactions', { timeoutMs: 4_000 });
     const hasHistory = await driver.waitForText('RECENT', { timeoutMs: 8_000 });
     assert(hasHistory, 'B history should render the incoming payment');
     const histBody = await driver.bodyText();

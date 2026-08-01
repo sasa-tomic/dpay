@@ -1,30 +1,24 @@
 import {useEffect, useState} from 'react';
-import {View, Text, Pressable, Share, type ViewStyle} from 'react-native';
+import {View, Text, Pressable, Share} from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
-import {C} from '../config/palette';
 import {S} from '../styles';
 import {EXPIRY_WINDOW, DIRECT_PAY_TIMEOUT_MS, NFC_PAY_TIMEOUT_MS, POLL} from '../config/constants';
-import {usd, short, base, parseRequestQR, toCents, randNonceHex, nowSecs} from '../lib/format';
+import {usd, short, base, parseRequestQR, randNonceHex, nowSecs} from '../lib/format';
+import {type CurrencyDescriptor, fmtCurrencyAmount} from '../config/catalog';
 import type {Identity, Req} from '../lib/types';
 import {classifyPayHttp, rejectionMessage, isNonceReused} from '../payments';
 import {verifyOutcomeReceipt} from '../services/receipt';
 import {DpayCore, DpayNfc} from '../services/native';
-import {readFromClipboard} from '../hooks/clipboard';
 import {NfcTap} from './NfcTap';
 import {QrScanner} from './QrScanner';
 
-// L2: "Paste request" is the ONLY pay affordance without a camera/NFC, so it must read as a real
-// secondary button (adequate touch target + a visible affordance), not a bare 19px text link.
-// Inline (Group E owns styles.ts): outline brand on a subtle brand wash, 44pt-min touch target.
-const pasteBtnStyle: ViewStyle = {marginTop: 18, minHeight: 44, paddingVertical: 10, paddingHorizontal: 22, borderRadius: 12, borderWidth: 1, borderColor: C.brand, backgroundColor: 'rgba(62,224,172,0.08)', alignItems: 'center', justifyContent: 'center'};
-
-export function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOfflinePaid, shownBalance}: {identity: Identity; online: boolean; relayUrl: string; nfcReady: boolean; onSettled: () => void; onOfflinePaid: (amount: number) => void; shownBalance: number | null}) {
+export function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOfflinePaid, shownBalance, catalog, assetBalances}: {identity: Identity; online: boolean; relayUrl: string; nfcReady: boolean; onSettled: () => void; onOfflinePaid: (amount: number) => void; shownBalance: number | null; catalog: CurrencyDescriptor[]; assetBalances: Record<number, number>}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid'>('scan');
   const [req, setReq] = useState<Req | null>(null);
-  const [qr, setQr] = useState<{code: string; amount: number; who: string; nonce: string} | null>(null);
+  const [qr, setQr] = useState<{code: string; amount: number; currency: number; who: string; nonce: string} | null>(null);
   // `pending` = handed to the merchant offline but NOT confirmed by the ledger (we can't claim it
   // settled). `already` = the ledger reported this nonce was already settled (idempotent replay).
-  const [paid, setPaid] = useState<{amount: number; who: string; already: boolean; pending?: boolean} | null>(null);
+  const [paid, setPaid] = useState<{amount: number; currency: number; who: string; already: boolean; pending?: boolean} | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   // A tap arriving on the always-armed card takes over the scan screen; nfcKey re-arms after each.
@@ -54,7 +48,7 @@ export function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOffl
         if (alive && r.ok) {
           const j = await r.json().catch(() => ({} as any));
           if (await verifyOutcomeReceipt(j.receipt)) {
-            onSettled(); setPaid({amount: qr.amount, who: qr.who, already: false}); setPhase('paid');
+            onSettled(); setPaid({amount: qr.amount, currency: qr.currency, who: qr.who, already: false}); setPhase('paid');
           }
         }
       } catch {} finally { clearTimeout(t); }
@@ -91,7 +85,7 @@ export function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOffl
           const verified = await verifyOutcomeReceipt(j.receipt);
           if (verified) {
             if (!j.replayed) onSettled();
-            setPaid({amount: req.amount, who, already: !!j.replayed}); setPhase('paid'); return;
+            setPaid({amount: req.amount, currency: req.currency, who, already: !!j.replayed}); setPhase('paid'); return;
           }
           // Settled at the HTTP layer but the receipt did not verify — honest, never a fake Paid.
           setErr('Couldn’t verify the payment — check the balance'); return;
@@ -100,13 +94,13 @@ export function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOffl
           // A definitive refusal: show WHY (e.g. "Not enough balance") rather than silently
           // dropping to the QR screen, which reads as if the payment is fine. NonceReused is the
           // exception — it means this exact payment already settled.
-          if (isNonceReused(j?.error)) { setPaid({amount: req.amount, who, already: true}); setPhase('paid'); return; }
+          if (isNonceReused(j?.error)) { setPaid({amount: req.amount, currency: req.currency, who, already: true}); setPhase('paid'); return; }
           setErr(rejectionMessage(typeof j?.error === 'string' ? j.error : null)); return;
         }
         // outcome === 'unknown': couldn't reach the ledger cleanly. Fall through to the offline QR
         // hand-off (the merchant can still scan it) — the /receipt poll reconciles if it settles.
       }
-      setQr({code, amount: req.amount, who, nonce});
+      setQr({code, amount: req.amount, currency: req.currency, who, nonce});
       setPhase('qr');
     } catch (e: any) { setErr(String(e?.message ?? e)); } finally { setBusy(false); }
   }
@@ -116,9 +110,10 @@ export function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOffl
   if (phase === 'paid' && paid) {
     const warn = paid.already || paid.pending;
     const glyph = paid.pending ? '⋯' : paid.already ? '↩' : '✓';
-    const headline = paid.pending ? `Sent ${usd(paid.amount)}` : paid.already ? 'Already paid' : `Paid ✓ ${usd(paid.amount)}`;
+    const amt = fmtCurrencyAmount(catalog, paid.currency, paid.amount);
+    const headline = paid.pending ? `Sent ${amt}` : paid.already ? 'Already paid' : `Paid ✓ ${amt}`;
     const sub = paid.pending ? `to ${paid.who} · awaiting the merchant’s confirmation`
-      : paid.already ? `${usd(paid.amount)} to ${paid.who} · not charged again`
+      : paid.already ? `${amt} to ${paid.who} · not charged again`
       : `to ${paid.who}`;
     return (
       <View style={S.center}>
@@ -134,8 +129,8 @@ export function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOffl
     return (
       <View style={S.center}>
         <Text style={S.label}>Show this to {qr.who}</Text>
-        <View style={S.qrCard}><QRCode value={qr.code} size={220} ecl="L" /></View>
-        <Text style={S.amountBig}>{`${usd(qr.amount)} to ${qr.who}`}</Text>
+        <View style={S.qrCard}><QRCode value={qr.code} size={244} ecl="L" /></View>
+        <Text style={S.amountBig}>{`${fmtCurrencyAmount(catalog, qr.currency, qr.amount)} to ${qr.who}`}</Text>
         <Text style={S.badgeOk}>signed on this device ✓</Text>
         {online ? <Text style={S.qrHint}>Waiting for {qr.who} to scan…</Text> : (
           <>
@@ -144,7 +139,7 @@ export function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOffl
               {/* Offline we CANNOT know the ledger settled it, so this is an honest "handed off",
                   not "Paid ✓". It optimistically reduces the local balance; the real balance
                   reconciles on the next online poll. It does NOT fabricate a settled history entry. */}
-              <Pressable testID="btn-paid" style={S.paidBtn} onPress={() => { onOfflinePaid(qr.amount); setPaid({amount: qr.amount, who: qr.who, already: false, pending: true}); setPhase('paid'); }} accessibilityRole="button" accessibilityLabel={`Handed to ${qr.who}`} accessibilityState={{disabled: false}}><Text style={S.paidBtnText}>Handed to {qr.who}</Text></Pressable>
+              <Pressable testID="btn-paid" style={S.paidBtn} onPress={() => { onOfflinePaid(qr.amount); setPaid({amount: qr.amount, currency: qr.currency, who: qr.who, already: false, pending: true}); setPhase('paid'); }} accessibilityRole="button" accessibilityLabel={`Handed to ${qr.who}`} accessibilityState={{disabled: false}}><Text style={S.paidBtnText}>Handed to {qr.who}</Text></Pressable>
               <Pressable testID="btn-notpaid" style={S.notPaidBtn} onPress={reset} accessibilityRole="button" accessibilityLabel="Cancel" accessibilityState={{disabled: false}}><Text style={S.notPaidText}>Cancel</Text></Pressable>
             </View>
           </>
@@ -155,10 +150,15 @@ export function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOffl
   }
 
   if (phase === 'review' && req) {
+    // MC5: locked-asset review — the payer sees + pays the EXACT asset the merchant requested (dpay
+    // never swaps). The balance check uses ONLY that asset's balance: currency 0 → shownBalance
+    // (DEMO_USD, tracked in the header), else assetBalances[req.currency] (the polled per-asset
+    // balance). An unknown balance (null) is treated as "don't block" (same as the old DEMO path).
+    const reqBalance = req.currency === 0 ? shownBalance : (assetBalances[req.currency] ?? null);
     // C2: when ONLINE and the known balance can't cover the amount, gate PRE-SUBMIT (no doomed
     // /pay). Offline we can't be sure (the local balance may be stale), so we only WARN there and
     // let the merchant's online verify be the real gate.
-    const insufficient = shownBalance != null && req.amount > shownBalance;
+    const insufficient = reqBalance != null && req.amount > reqBalance;
     const blockApprove = online && insufficient;
     // C1: any shown error (expired / insufficient relay-reject / verify-fail) also disables the
     // button so a doomed payment can't be re-tapped.
@@ -166,7 +166,7 @@ export function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOffl
     return (
       <View style={S.center}>
         <Text style={S.label}>Review payment</Text>
-        <Text testID="pay-amount" style={S.reviewAmount}>{`Pay ${usd(req.amount)}`}</Text>
+        <Text testID="pay-amount" style={S.reviewAmount}>{`Pay ${fmtCurrencyAmount(catalog, req.currency, req.amount)}`}</Text>
         <Text style={S.reviewTo}>{`to ${req.toName || short(req.toHex)}`}</Text>
         {/* The merchant-set memo (if any) — shown as a small subtitle so the payer sees the note
             attached to this request before approving. Empty memo renders nothing. */}
@@ -208,24 +208,9 @@ export function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOffl
       ) : null}
       {!nfcActive ? (
         <>
-          <Text style={S.label}>{nfcReady ? 'Tap or scan to pay' : 'Scan a request to pay'}</Text>
+          <Text style={S.label} testID="pay-scan">{nfcReady ? 'Tap or scan to pay' : 'Scan a request to pay'}</Text>
           <QrScanner onScan={onRequestString} />
           <Text style={S.dim2}>{nfcReady ? "Tap the merchant's phone, or point at its request QR" : "Point at the payee's request QR"}</Text>
-          {/* N10: paste-request fallback — on web/desktop where there's no camera or NFC, the user can
-              paste a request string they copied or received via another channel. The decode path
-              accepts a raw string identical to what the scanner produces. */}
-          <Pressable
-            testID="btn-paste"
-            style={pasteBtnStyle}
-            onPress={async () => {
-              const text = await readFromClipboard();
-              if (text && text.trim()) onRequestString(text.trim());
-            }}
-            accessibilityRole="button"
-            accessibilityLabel="Paste request"
-            accessibilityState={{disabled: false}}>
-            <Text style={S.linkText}>Paste request</Text>
-          </Pressable>
           {err ? <Text style={S.err}>{err}</Text> : null}
         </>
       ) : null}

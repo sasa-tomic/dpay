@@ -18,9 +18,10 @@
 // available for deposits yet." — covered by the unit path). Here we drive the transient
 // (ECONNREFUSED) variant through the REAL app + a REAL closed port.
 //
-// Selector contract: `btn-settings`, `settings-relay`, `btn-settings-close`, `btn-deposit`,
-// `asset-picker-row-ckbtc`, `deposit-status` (absent — no address fetched), `balance`.
-import { setup, assert, assertIncludes, onboardWallet, pickFreePort } from '../harness/lib.mjs';
+// Selector contract: `btn-settings`, `settings-relay`, `btn-settings-close`, `balance` (header →
+// Balances), `asset-add-ckbtc` (BTC row Add → deposit sheet), `deposit-status` (absent — no address
+// fetched).
+import { setup, assert, assertIncludes, onboardWallet, pickFreePort, openBalances } from '../harness/lib.mjs';
 
 export async function run() {
   const start = Date.now();
@@ -39,13 +40,14 @@ export async function run() {
     console.log(`[22-deposit-error] going offline (${DEAD_RELAY})…`);
     await driver.click('btn-settings', { timeoutMs: 4_000 });
     await driver.type('settings-relay', DEAD_RELAY, { timeoutMs: 4_000 });
+    await driver.click('btn-relay-apply', { timeoutMs: 4_000 });
     await driver.click('btn-settings-close', { timeoutMs: 4_000 });
 
-    // Open the deposit sheet via the asset picker (the catalog carries >1 onramp asset, so btn-deposit
-    // opens the picker). Pick ckBTC → the DepositSheet mounts against the dead relay.
-    console.log('[22-deposit-error] opening the deposit sheet against the dead relay…');
-    await driver.click('btn-deposit', { timeoutMs: 5_000 });
-    await driver.click('asset-picker-row-ckbtc', { timeoutMs: 5_000 });
+    // Open the deposit sheet from the Balances BTC row (the catalog carries >1 onramp asset, so the
+    // row's "Add" action opens the BTC deposit sheet). The DepositSheet mounts against the dead relay.
+    console.log('[22-deposit-error] opening Balances → BTC deposit against the dead relay…');
+    await openBalances(driver);
+    await driver.click('asset-add-ckbtc', { timeoutMs: 5_000 });
 
     // The sheet's fetch fails fast → the error state renders. H5: plain-language transient copy
     // (dead relay = ECONNREFUSED → transient). The fetch has an 8s AbortController ceiling, but

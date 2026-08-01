@@ -8,8 +8,15 @@
     <meta name="viewport" content="width=390, initial-scale=1, maximum-scale=1" />
     <title>dpay</title>
     <style>
+      /* `#root` must be a flex COLUMN of full viewport height: react-native-web's root component uses
+         `flex:1`, which only fills if its parent is a bounded flex container. A bare `display:block`
+         #root (even at height:100%) collapses the flex chain to content height — so short screens
+         (e.g. the Paid phase) left a dead zone of unfilled viewport below the app, while tall screens
+         (camera) only *looked* full because their content overflowed. `display:flex; flex-direction:
+         column` mirrors how a real RN device bounds the root to the screen, so the web mount renders
+         layout faithfully and e2e screenshots match device behavior. */
       html, body, #root { margin: 0; padding: 0; height: 100%; background: #06070a; }
-      /* react-native-web injects its own styles; nothing else needed here. */
+      #root { display: flex; flex-direction: column; }
     </style>
   </head>
   <body>

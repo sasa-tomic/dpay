@@ -24,7 +24,7 @@ Inner loop runs fully offline via `just` and completes in seconds (`just verify`
 
 ## E2e flow catalog
 
-**`FLOWS.md`** is the authoritative manifest of every tested user flow (26 flows, organized by journey). Read it to see what's covered and how to add a new flow. Run `just e2e` (all) or `DPAY_E2E_FILTER=NN node e2e/run.mjs` (one flow).
+**`FLOWS.md`** is the authoritative manifest of every tested user flow (28 flows, organized by journey). Read it to see what's covered and how to add a new flow. Run `just e2e` (all) or `DPAY_E2E_FILTER=NN node e2e/run.mjs` (one flow).
 
 ## Human expectations
 

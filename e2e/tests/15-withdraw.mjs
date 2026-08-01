@@ -10,11 +10,12 @@
 // ckBTC; the withdraw nonce is app-generated (random 16 bytes, collision-free). Follows flow 05's
 // pattern (seed → refresh → assert balance).
 //
-// Selector contract: `asset-ckbtc` (the card with the Withdraw affordance), `btn-withdraw`,
-// `withdraw-address-input`, `withdraw-amount-input`, `btn-withdraw-confirm`, `withdraw-status`,
-// `btn-copy-destination` (L3), `btn-withdraw-close`. Asset segregation note (same as flow 05): ckBTC
-// is currency 1, a SEPARATE asset from the `$` DEMO_USD header — the withdraw debits currency 1.
-import { setup, assert, assertEq, seedDeposit, refreshDeposit, getBalance, onboardWallet, accountOf } from '../harness/lib.mjs';
+// Selector contract: `balance` (header → Balances), `asset-ckbtc` (the BTC row in Balances),
+// `btn-withdraw` (the BTC row Cash-out, shown once funded), `withdraw-address-input`,
+// `withdraw-amount-input`, `btn-withdraw-confirm`, `withdraw-status`, `btn-copy-destination` (L3),
+// `btn-withdraw-close`. Asset segregation note (same as flow 05): ckBTC is currency 1, a SEPARATE
+// asset from the `$` DEMO_USD header — the withdraw debits currency 1.
+import { setup, assert, assertEq, seedDeposit, refreshDeposit, getBalance, onboardWallet, accountOf, openBalances } from '../harness/lib.mjs';
 
 const DEPOSIT_CURRENCY = 1; // ckBTC — matches App.tsx DEPOSIT_CURRENCY
 const SEED_SATS = 100_000;   // 0.00100000 BTC
@@ -46,9 +47,11 @@ export async function run() {
     const before = await getBalance(relayBaseURL, accountHex, DEPOSIT_CURRENCY);
     assertEq(before, SEED_SATS, 'pre-withdraw ckBTC balance');
 
-    // 3. Wait for the wallet's ckBTC asset card to appear (its balance poll credited currency 1).
-    console.log('[15-withdraw] waiting for the ckBTC asset card…');
-    await driver.findByTestID('asset-ckbtc', { timeoutMs: 8_000 });
+    // 3. Open the Balances sheet; wait for the BTC row's Cash-out to appear (it renders once the
+    //    balance poll credits currency 1 → funded). The asset row + withdraw affordance live here now.
+    console.log('[15-withdraw] opening Balances; waiting for the ckBTC Cash-out…');
+    await openBalances(driver);
+    await driver.findByTestID('btn-withdraw', { timeoutMs: 8_000 });
 
     // 4. Open the Withdraw sheet via the asset card's "Withdraw" affordance.
     console.log('[15-withdraw] opening the withdraw sheet…');

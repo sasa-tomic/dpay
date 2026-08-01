@@ -28,7 +28,7 @@ export type NfcPhaseName = 'listening' | 'linking' | 'exchanging' | 'awaitingApp
 
 export type Req = {toHex: string; amount: number; nonceHex: string; expiry: number; currency: number; toName: string; memo: string};
 export type Identity = {secretHex: string; publicHex: string; username: string};
-export type Txn = {nonce: string; amount: number; who: string; memo: string; time: string; dir: 'out' | 'in'};
+export type Txn = {nonce: string; amount: number; who: string; memo: string; time: string; dir: 'out' | 'in'; currency: number};
 // One row of the relay's GET /api/v1/transactions/{hex} response (from/to are lowercase hex). The
 // relay returns from_name/to_name/memo as JSON STRINGS (NUL-trimmed, lossy; may be "").
 export type TransactionsRow = {from: string; to: string; amount: number; nonce: string; currency: number; timestamp: number; from_name: string; to_name: string; memo: string};

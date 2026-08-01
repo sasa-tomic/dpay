@@ -1,7 +1,7 @@
 // Flow 20 — Offline QR payment round trip (the signature feature: payer offline → payee settles).
 //
 // Proves the OFFLINE handoff end-to-end through the REAL app + REAL relay:
-//   1. Payer A onboards online (good relay, $100), then goes OFFLINE (dead relay → online=false).
+//   1. Payer A onboards online (good relay, Đ100), then goes OFFLINE (dead relay → online=false).
 //   2. A scans the payee's request QR (via the camera seam), reviews, Approves → the app signs
 //      OFFLINE (the on-device key). The direct /pay fails (ECONNREFUSED), so the app falls through
 //      to the OFFLINE QR hand-off screen (phase='qr', `!online` branch).
@@ -25,7 +25,7 @@
 import { setup, assert, postPay, onboardWallet, pickFreePort } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR, decodeRequest } from '../harness/wire.mjs';
 
-const PAY_CENTS = 2500; // $25.00
+const PAY_CENTS = 2500; // Đ25.00
 
 export async function run() {
   const start = Date.now();
@@ -36,7 +36,7 @@ export async function run() {
 
     const bob = await generateKeypair(); // the payee (merchant)
 
-    // 1. Onboard A online ($100 funded).
+    // 1. Onboard A online (Đ100 funded).
     console.log('[20-offline-handoff] onboarding A (payer, online)…');
     await onboardWallet(driver, 'e2e-offline-pay');
 
@@ -46,6 +46,7 @@ export async function run() {
     console.log(`[20-offline-handoff] going offline (${DEAD_RELAY})…`);
     await driver.click('btn-settings', { timeoutMs: 4_000 });
     await driver.type('settings-relay', DEAD_RELAY, { timeoutMs: 4_000 });
+    await driver.click('btn-relay-apply', { timeoutMs: 4_000 });
     await driver.click('btn-settings-close', { timeoutMs: 4_000 });
     await driver.waitForText('approx.', { timeoutMs: 8_000 }); // offline indicator
 
@@ -95,11 +96,12 @@ export async function run() {
     await driver.click('btn-new', { timeoutMs: 4_000 }); // leave the pending screen first
     await driver.click('btn-settings', { timeoutMs: 4_000 });
     await driver.type('settings-relay', relayBaseURL, { timeoutMs: 4_000 });
+    await driver.click('btn-relay-apply', { timeoutMs: 4_000 });
     await driver.click('btn-settings-close', { timeoutMs: 4_000 });
-    // The reconnect reconciles: balance returns to the authoritative $75 ($100 − $25).
-    const reconnected = await driver.waitForText('$75.00', { timeoutMs: 12_000 });
-    assert(reconnected, 'A balance should reconcile to $75.00 ($100 − $25) once back online');
-    console.log('[20-offline-handoff] ✓ A reconciled online: balance $75.00 (the offline pay settled)');
+    // The reconnect reconciles: balance returns to the authoritative Đ75 (Đ100 − Đ25).
+    const reconnected = await driver.waitForText('Đ75.00', { timeoutMs: 12_000 });
+    assert(reconnected, 'A balance should reconcile to Đ75.00 (Đ100 − Đ25) once back online');
+    console.log('[20-offline-handoff] ✓ A reconciled online: balance Đ75.00 (the offline pay settled)');
 
     await driver.screenshot('20-offline-handoff');
 

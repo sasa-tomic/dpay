@@ -1,26 +1,30 @@
-import {useState} from 'react';
-import {View, Text, Pressable, TextInput, ScrollView, SafeAreaView, StatusBar, ActivityIndicator, Platform} from 'react-native';
+import {useEffect, useState} from 'react';
+import {View, Text, Pressable, TextInput, ScrollView, SafeAreaView, StatusBar, Platform} from 'react-native';
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 
 /**
- * Settings sheet — relay URL, demo faucet, reset. Moved off the main wallet screen (UX-V2: the
- * relay URL + bare red reset were dev chrome on a consumer surface) into its own overlay. Reset now
- * requires a confirmation dialog (UX-V3: one-tap identity wipe was dangerous). The demo faucet lives
- * here too (founder decision: keep it, label it clearly, surface the cooldown).
+ * Settings sheet — relay URL + reset (app configuration only). Moved off the main wallet screen
+ * (UX-V2: the relay URL + bare red reset were dev chrome on a consumer surface) into its own overlay.
+ * Reset requires a confirmation dialog (UX-V3: one-tap identity wipe was dangerous). The demo faucet
+ * used to live here too, but top-up is now consolidated in the Balances sheet (the wallet's single
+ * money hub) so demo funds have exactly ONE home — no duplication between Settings and the balances.
  */
-export function SettingsSheet({relayUrl, setRelayUrl, onTopUp, topUpBusy, topUpErr, onClose, onReset}: {
+export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset}: {
   relayUrl: string;
   setRelayUrl: (s: string) => void;
-  onTopUp: () => void;
-  topUpBusy: boolean;
-  topUpErr: string | null;
   onClose: () => void;
   onReset: () => void;
 }) {
   useEscapeToClose(onClose);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [draftRelay, setDraftRelay] = useState(relayUrl);
+  useEffect(() => setDraftRelay(relayUrl), [relayUrl]);
+
+  const relayClean = draftRelay.trim();
+  const relayDirty = relayClean.length > 0 && relayClean !== relayUrl.trim();
+  const applyRelay = () => { if (relayDirty) setRelayUrl(draftRelay); };
 
   return (
     <View style={S.sheetOverlay}>
@@ -31,42 +35,7 @@ export function SettingsSheet({relayUrl, setRelayUrl, onTopUp, topUpBusy, topUpE
           <Pressable testID="btn-settings-close" style={S.sheetClose} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close settings" accessibilityState={{disabled: false}}><Text style={S.sheetCloseX}>✕</Text></Pressable>
         </View>
 
-        <ScrollView contentContainerStyle={S.sheetBody} keyboardShouldPersistTaps="handled">
-          {/* Relay URL */}
-          <View style={S.settingsSection}>
-            <Text style={S.inputLabel}>Relay URL</Text>
-            <TextInput
-              testID="settings-relay"
-              style={S.relayInput}
-              value={relayUrl}
-              onChangeText={setRelayUrl}
-              autoCapitalize="none"
-              autoCorrect={false}
-              placeholder="http://<ip>:8787"
-              placeholderTextColor={C.sub2}
-            />
-            <Text style={S.dim2}>The server your wallet talks to. Change this to point at a different network.</Text>
-          </View>
-
-          {/* Demo faucet */}
-          <View style={S.settingsSection}>
-            <Text style={S.inputLabel}>Demo funds</Text>
-            <Text style={S.dim2}>Add play money for testing. Limited to once per hour on the real network.</Text>
-            <Pressable
-              testID="btn-topup"
-              style={[S.primaryWide, topUpBusy && S.dim]}
-              disabled={topUpBusy}
-              onPress={onTopUp}
-              accessibilityRole="button"
-              accessibilityLabel="Add demo money"
-              accessibilityState={{disabled: topUpBusy}}>
-              {topUpBusy
-                ? <ActivityIndicator size="small" color={C.brandInk} />
-                : <Text style={S.primaryText}>Add demo money</Text>}
-            </Pressable>
-            {topUpErr ? <Text testID="topup-err" style={S.topUpErr}>{topUpErr}</Text> : null}
-          </View>
-
+        <ScrollView contentContainerStyle={S.sheetCenter} keyboardShouldPersistTaps="handled">
           {/* Reset */}
           <View style={S.settingsSection}>
             <Text style={S.inputLabel}>Reset</Text>
@@ -85,6 +54,33 @@ export function SettingsSheet({relayUrl, setRelayUrl, onTopUp, topUpBusy, topUpE
                 <Text style={S.resetLink}>Reset wallet</Text>
               </Pressable>
             )}
+          </View>
+
+          {/* Advanced: Relay URL */}
+          <View style={S.settingsSection}>
+            <Text style={S.advancedLabel}>Advanced</Text>
+            <Text style={S.inputLabel}>Relay URL</Text>
+            <TextInput
+              testID="settings-relay"
+              style={S.relayInput}
+              value={draftRelay}
+              onChangeText={setDraftRelay}
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholder="http://<ip>:8787"
+              placeholderTextColor={C.sub2}
+            />
+            <Text style={S.dim2}>The server your wallet talks to. Changes apply when you tap Apply.</Text>
+            <Pressable
+              testID="btn-relay-apply"
+              style={[S.applyBtn, !relayDirty && S.applyBtnDisabled]}
+              disabled={!relayDirty}
+              onPress={applyRelay}
+              accessibilityRole="button"
+              accessibilityLabel="Apply relay URL"
+              accessibilityState={{disabled: !relayDirty}}>
+              <Text style={S.applyBtnText}>Apply</Text>
+            </Pressable>
           </View>
 
           {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}

@@ -46,7 +46,7 @@ export async function run() {
     // L4: the offline-payer affordance uses clear merchant-facing wording (not the ambiguous
     // "Payer offline? Scan their QR").
     const reqBody = await driver.bodyText();
-    assert(/payer paid offline/i.test(reqBody) && /scan their signed code/i.test(reqBody),
+    assert(/payer paid offline/i.test(reqBody) && /scan to settle/i.test(reqBody),
       `request screen should show the clear offline-payer affordance (L4). body excerpt:\n${reqBody.slice(0, 400)}`);
     console.log('[06-request-qr] ✓ offline-payer affordance wording is clear (L4)');
 

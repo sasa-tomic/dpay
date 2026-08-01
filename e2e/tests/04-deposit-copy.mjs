@@ -1,14 +1,16 @@
 // Flow 04 — Deposit copy: REAL clipboard, not the Share noop (U4).
 //
-// Opens the sheet via the "Add money" button (U5 — proves the promoted affordance opens the sheet),
-// clicks "Copy address", and asserts the test seam `window.__DPAY_TEST_CLIPBOARD` now holds the
-// EXACT deposit address. This proves the copy button uses `navigator.clipboard.writeText` (the real
-// clipboard on web) rather than the `Share.share` noop shimmed in shims.ts (which captures nothing).
-// On native the same code path falls back to the real Share sheet; the harness proves the clipboard
-// path, which is the regression surface.
+// Opens the BTC deposit sheet via the Balances sheet (the wallet's money hub) — tap the header
+// balance → Balances → the BTC row's "＋ Add" button → the deposit sheet, then click "Copy address"
+// and assert the test seam `window.__DPAY_TEST_CLIPBOARD` now holds the EXACT deposit address. This
+// proves the copy button uses `navigator.clipboard.writeText` (the real clipboard on web) rather than
+// the `Share.share` noop shimmed in shims.ts (which captures nothing). On native the same code path
+// falls back to the real Share sheet; the harness proves the clipboard path, which is the regression
+// surface.
 //
-// Selector contract: `btn-deposit` (Add money), `deposit-address`, `btn-deposit-copy`.
-import { setup, assertEq, onboardWallet } from '../harness/lib.mjs';
+// Selector contract: `balance` (header → Balances), `asset-add-ckbtc` (BTC row Add), `deposit-address`,
+// `btn-deposit-copy`.
+import { setup, assertEq, onboardWallet, openBalances } from '../harness/lib.mjs';
 
 export async function run() {
   const start = Date.now();
@@ -21,11 +23,10 @@ export async function run() {
     console.log('[04-deposit-copy] onboarding…');
     await onboardWallet(driver, 'e2e-copy');
 
-    // 2. Open the sheet via the promoted "Add money" affordance. With >1 ramp asset in the catalog
-    //    the button opens the asset picker; pick Bitcoin (the CkBtcUtxo ramp) to reach the deposit sheet.
-    console.log('[04-deposit-copy] clicking btn-deposit (Add money) → asset picker…');
-    await driver.click('btn-deposit', { timeoutMs: 5_000 });
-    await driver.click('asset-picker-row-ckbtc', { timeoutMs: 5_000 });
+    // 2. Open Balances → pick Bitcoin (the CkBtcUtxo ramp) via its "Add" action to reach the deposit sheet.
+    console.log('[04-deposit-copy] opening Balances → BTC deposit…');
+    await openBalances(driver);
+    await driver.click('asset-add-ckbtc', { timeoutMs: 5_000 });
 
     // 3. Read the address before copying.
     await driver.findByTestID('deposit-address', { timeoutMs: 10_000 });

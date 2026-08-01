@@ -5,9 +5,9 @@ import {C} from '../config/palette';
 import {S} from '../styles';
 import {STORAGE_KEY, POLL, TOP_UP_CENTS} from '../config/constants';
 import {
-  type CurrencyDescriptor, CATALOG_CACHE_KEY, BUNDLED_CATALOG, fetchCurrencies, familyDisplay, assetTestKey, displayName,
+  type CurrencyDescriptor, CATALOG_CACHE_KEY, BUNDLED_CATALOG, fetchCurrencies, familyDisplay, displayName, fmtCurrencyAmount,
 } from '../config/catalog';
-import {usd, short, isMintSentinel, fmtTime, fmtAsset, base} from '../lib/format';
+import {usd, short, isMintSentinel, fmtTime, base} from '../lib/format';
 import type {Identity, Txn, TransactionsRow, NfcStatus} from '../lib/types';
 import {DpayCore} from '../services/native';
 import {useHotkeys} from '../hooks/useHotkeys';
@@ -18,20 +18,28 @@ import {NfcPill} from './NfcPill';
 import {Tab} from './Tab';
 import {PayMode} from './PayMode';
 import {ReceiveMode} from './ReceiveMode';
+import {Ledger} from './Ledger';
 import {DepositSheet} from './DepositSheet';
 import {WithdrawSheet} from './WithdrawSheet';
 import {SettingsSheet} from './SettingsSheet';
-import {AssetPickerSheet} from './AssetPickerSheet';
 import {CkErc20DepositSheet} from './CkErc20DepositSheet';
+import {BalancesSheet} from './BalancesSheet';
 
 export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity; relayUrl: string; setRelayUrl: (s: string) => void; onReset: () => void}) {
-  const [mode, setMode] = useState<'pay' | 'receive'>('pay');
+  const [mode, setMode] = useState<'pay' | 'receive' | 'ledger'>('pay');
+  // The "current" currency — the one whose balance the header reflects. Tapping the header balance
+  // opens the Balances sheet, where tapping a currency row sets this. Currency 0 (DEMO) is the
+  // default. This replaces the old DEMO-only header (the founder's restructure): the main screen now
+  // shows a single selected currency's balance, and the full asset list + every top-up live in the
+  // Balances sheet. Pay/Receive still settle in whatever currency a request specifies (unchanged).
+  const [currentCurrency, setCurrentCurrency] = useState(0);
+  const [balancesOpen, setBalancesOpen] = useState(false);
   const [balance, setBalance] = useState<number | null>(null);
-        // Non-primary (ramp) assets — each is a SEPARATE asset on a separate ledger, polled in
-        // parallel on the same cadence and rendered as its own clearly-labeled card (never merged into
-        // the `$` header, which is DEMO_USD only per CLAUDE.md's hard rule). Balances are keyed by the
-        // currency id resolved from the runtime catalog (so adding an asset = config-only). A null/0
-        // entry means "not yet funded" — ramp asset cards render only when their balance is non-zero.
+        // Non-primary assets — each is a SEPARATE asset on a separate ledger, polled in parallel on
+        // the same cadence and rendered as its own clearly-labeled card (never merged into the `$`
+        // header, which is DEMO_USD only per CLAUDE.md's hard rule). Balances are keyed by the currency
+        // id resolved from the runtime catalog (so adding an asset = config-only). A 0 entry means "not
+        // yet funded"; the card still renders (muted) so the full asset rail is always visible.
   const [assetBalances, setAssetBalances] = useState<Record<number, number>>({});
   const [online, setOnline] = useState(false);
   const [offlineSpent, setOfflineSpent] = useState(0);
@@ -42,11 +50,6 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
   // surfaces a one-line failure (offline / faucet disabled) without blocking the rest of the UI.
   const [topUpBusy, setTopUpBusy] = useState(false);
   const [topUpErr, setTopUpErr] = useState<string | null>(null);
-  // ck-deposit sheet (ckBTC-style native-chain deposit). Opens over the wallet; closing tears down
-  // Asset picker + per-currency deposit/withdraw sheets. `?screen=deposit` deep-links to the primary
-  // CkBtcUtxo ramp (bookmarkable). The header "Add money" button opens the picker when >1 onrampable
-  // asset exists, else goes straight to the ckBTC sheet.
-  const [pickerOpen, setPickerOpen] = useState<boolean>(false);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   // Currency catalog — the runtime source of truth for which assets exist + how to display/fund
   // them. Loaded from AsyncStorage cache then refreshed from GET /currencies on mount; the bundled
@@ -60,19 +63,20 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
     () => catalog.find(c => c.minter_family === 'CkBtcUtxo')?.currency ?? 1,
     [catalog],
   );
-  // Which asset's deposit/withdraw sheet is open (null = closed). Set by the asset picker / asset
-  // cards. The sheet rendered is chosen by the currency's minter_family (DepositSheet vs
+  // Which asset's deposit/withdraw sheet is open (null = closed). Set from the Balances sheet's per-
+  // row actions. The sheet rendered is chosen by the currency's minter_family (DepositSheet vs
   // CkErc20DepositSheet). The `?screen=deposit` deep link seeds the ckBTC ramp on mount.
   const [depositCurrency, setDepositCurrency] = useState<number | null>(readDepositDeepLink() ? ckBtcCurrency : null);
   const [withdrawCurrency, setWithdrawCurrency] = useState<number | null>(null);
-  // The catalog's onrampable (ramp) assets: non-primary currencies that carry a minter_family.
-  const rampAssets = useMemo(() => catalog.filter(c => c.minter_family), [catalog]);
-  // Stable comma-joined id list for the balance-poll effect deps (avoids re-running the poll on
-  // every catalog array identity change; only re-runs when the actual set of ramp currencies changes).
-  const rampCurrencyIds = useMemo(() => rampAssets.map(a => a.currency).join(','), [rampAssets]);
+  // Every NON-primary catalog currency (the assets polled in parallel below + listed in the Balances
+  // sheet). The balance poll covers every id here (a no-minter ICRC asset still has a readable ledger
+  // principal; a failed read is swallowed so it never flaps the display). Each stays INDEPENDENT — no
+  // cross-asset merge.
+  const displayAssets = useMemo(() => catalog.filter(c => c.currency !== 0), [catalog]);
+  const displayCurrencyIds = useMemo(() => displayAssets.map(a => a.currency).join(','), [displayAssets]);
   // The full set of currency ids to fetch HISTORY for (H2): every catalog currency (DEMO_USD + every
-  // ramp asset), since transactions_of is per-currency and a hardcoded currency=0 hid non-USD
-  // payments. Stable signature for the history effect deps (mirrors rampCurrencyIds).
+  // non-primary asset), since transactions_of is per-currency and a hardcoded currency=0 hid non-USD
+  // payments. Stable signature for the history effect deps (mirrors displayCurrencyIds).
   const catalogCurrencyIds = useMemo(() => catalog.map(c => c.currency).join(','), [catalog]);
 
   // Read the device NFC radio state once (re-checked when the app returns to the foreground, since
@@ -115,11 +119,12 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
     const poll = async () => {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 4000);
-      // Non-primary (ramp) asset balances run in PARALLEL + best-effort, each with its own
-      // AbortController, so a hiccup on one asset's ledger can never flip the primary `$` balance
-      // offline or fail its poll. The assets live on separate ledgers — fetching one must not affect
-      // another's display. A null result keeps the prior value (no flap on a single miss).
-      const rampFetches = rampAssets.map(a => {
+      // Non-primary asset balances run in PARALLEL + best-effort, each with its own AbortController,
+      // so a hiccup on one asset's ledger can never flip the primary `$` balance offline or fail its
+      // poll. The assets live on separate ledgers — fetching one must not affect another's display. A
+      // null result keeps the prior value (no flap on a single miss). Covers EVERY non-primary catalog
+      // currency (ramp + no-minter ICRC), so an unfunded asset still reads its real zero balance.
+      const assetFetches = displayAssets.map(a => {
         const c = new AbortController();
         const to = setTimeout(() => c.abort(), 4000);
         return fetch(`${base(relayUrl)}/api/v1/balance/${identity.publicHex}?currency=${a.currency}`, {signal: c.signal})
@@ -135,8 +140,8 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
         if (alive && r.ok && typeof j.balance === 'number') { setBalance(j.balance); setOnline(true); setOfflineSpent(0); }
         else if (alive) setOnline(false);
       } catch { if (alive) setOnline(false); } finally { clearTimeout(t); }
-      // Settle the ramp balances after the primary poll resolves; merge keeping prior on null.
-      const results = await Promise.all(rampFetches);
+      // Settle the asset balances after the primary poll resolves; merge keeping prior on null.
+      const results = await Promise.all(assetFetches);
       if (alive) {
         setAssetBalances(prev => {
           const next = {...prev};
@@ -147,7 +152,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
     };
     poll(); const id = setInterval(poll, POLL.balance);
     return () => { alive = false; clearInterval(id); };
-  }, [relayUrl, identity.publicHex, rampCurrencyIds]);
+  }, [relayUrl, identity.publicHex, displayCurrencyIds]);
 
   // Durable transaction history sourced from the ledger (the canister records every settled payment;
   // the relay surfaces it at GET /api/v1/transactions/{hex}). This replaces the ephemeral in-memory
@@ -202,7 +207,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
       const who = isMintSentinel(counterparty)
         ? (dir === 'in' ? 'Demo funds' : 'Withdrawal')
         : (dir === 'out' ? (toName || short(rec.to)) : (fromName || short(rec.from)));
-      return {nonce: rec.nonce, amount: rec.amount, who, memo, time: fmtTime(rec.timestamp), dir};
+      return {nonce: rec.nonce, amount: rec.amount, who, memo, time: fmtTime(rec.timestamp), dir, currency: rec.currency};
     }));
   }, [relayUrl, identity.publicHex, catalogCurrencyIds]);
 
@@ -253,162 +258,96 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
     }
   }, [topUpBusy, relayUrl, identity.publicHex]);
 
-  // The "Add money" entry (header button + the `A` shortcut share ONE handler — single source of
-  // truth): open the asset picker when >1 onrampable asset exists, else go straight to the ckBTC
-  // deposit sheet.
-  const addMoney = useCallback(() => {
-    if (rampAssets.length > 1) {
-      setPickerOpen(true);
-    } else {
-      setDepositCurrency(ckBtcCurrency);
-    }
-  }, [rampAssets.length, ckBtcCurrency]);
-
   // Web keyboard shortcuts (plan 1b / UX-V5): the first letters of the main actions —
-  // P=Pay, R=Receive, T=Top-up (demo money), A=Add money. Active ONLY on the wallet main view with
-  // no text input focused and no sheet/overlay open (Esc is handled per-sheet by useEscapeToClose).
-  // Native (no physical keyboard) is a no-op; the matching on-UI hints are also web-only.
-  const anySheetOpen = pickerOpen || depositCurrency != null || withdrawCurrency != null || settingsOpen;
+  // P=Pay, R=Receive, T=Top-up (demo money), A=Balances (the asset hub). Active ONLY on the wallet
+  // main view with no text input focused and no sheet/overlay open (Esc is handled per-sheet by
+  // useEscapeToClose). Native (no physical keyboard) is a no-op; the on-UI hints are web-only too.
+  const anySheetOpen = balancesOpen || depositCurrency != null || withdrawCurrency != null || settingsOpen;
   useHotkeys({
     p: () => setMode('pay'),
     r: () => setMode('receive'),
     t: topUp,
-    a: addMoney,
+    a: () => setBalancesOpen(true),
   }, {ignoreIfInputFocused: true, enabled: !anySheetOpen});
 
   return (
     <SafeAreaView style={S.root}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
       <View style={S.header}>
-        <View>
-          <Wordmark style={S.brand} />
-          {/* H4: the header shows ONLY the username. The hex pubkey was developer-facing protocol data
-              ("Alice · 1b8a5ee7…") that made the header read like a debug panel; it's removed from the
-              main display. The short hex is no longer appended anywhere in the header. */}
-          <Text style={S.who} testID="header-who">{identity.username}</Text>
-          <NfcPill status={nfc} />
+        <View style={S.headerLeft}>
+          <Pressable
+            testID="btn-settings"
+            style={S.headerSettingsBtn}
+            onPress={() => setSettingsOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Settings"
+          >
+            <Text style={S.headerSettingsIcon}>⚙</Text>
+          </Pressable>
+          <View>
+            <Wordmark style={S.brand} />
+            {/* H4: the header shows ONLY the username. The hex pubkey was developer-facing protocol data
+                ("Alice · 1b8a5ee7…") that made the header read like a debug panel; it's removed from the
+                main display. The short hex is no longer appended anywhere in the header. */}
+            <Text style={S.who} testID="header-who">{identity.username}</Text>
+            <NfcPill status={nfc} />
+          </View>
         </View>
-        <View style={S.balBox}>
+        <Pressable
+          testID="balance"
+          style={S.balBox}
+          onPress={() => setBalancesOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Balances — switch currency or top up"
+        >
           <View style={S.balLabelRow}>
             <View style={[S.dot, {backgroundColor: online ? C.ok : C.sub2}]} />
             <Text style={S.balLabel}>{online ? 'balance' : '~ approx.'}</Text>
-            <View style={S.demoPill}><Text style={S.demoPillText}>DEMO</Text></View>
-            {/* T = add demo money (the faucet). The hint rides the DEMO pill since that's what T
-                tops up; on touch this badge is hidden (no keyboard on the phone). */}
-            <HotkeyHint k="T" />
+            {/* The current currency's NAME (DEMO/BTC/USDC). Tapping the balance opens the Balances
+                sheet to switch the current currency or top up. */}
+            <View style={S.demoPill}><Text style={S.demoPillText}>{displayName(catalog.find(c => c.currency === currentCurrency) ?? catalog[0])}</Text></View>
+            <HotkeyHint k="A" />
           </View>
           <View style={S.balAmtRow}>
-            <Text testID="balance" style={S.balAmt}>{shownBalance == null ? '—' : `${online ? '' : '~'}${usd(shownBalance)}`}</Text>
-            {/* The PRIMARY onramp affordance: a real chain-key deposit. Opens the deposit flow for the
-                catalog-resolved CkBtcUtxo asset. The offramp ("Cash out") lives on the asset card — it's
-                contextual (only meaningful when you hold a cashable asset), so it appears exactly when a
-                topped-up balance exists, and is absent for demo-$-only wallets that have nothing to cash
-                out. A 390px header can't hold the balance + two action buttons without overflow, so the
-                single "Add money" pill stays here and "Cash out" rides the asset card. */}
-            <Pressable
-              testID="btn-deposit"
-              style={S.addMoneyBtn}
-              onPress={addMoney}
-              accessibilityRole="button"
-              accessibilityLabel="Add money"
-            >
-              <Text style={S.addMoneyBtnText}>＋ Add money</Text>
-              <HotkeyHint k="A" tone="onBrand" />
-            </Pressable>
+            {/* The header shows ONLY the current currency's balance. DEMO (currency 0) keeps its
+                offline '~' approx + null '—' handling; an asset shows its polled balance formatted
+                in native units. */}
+            <Text style={S.balAmt}>{currentCurrency === 0
+              ? (shownBalance == null ? '—' : `${online ? '' : '~'}${usd(shownBalance)}`)
+              : fmtCurrencyAmount(catalog, currentCurrency, assetBalances[currentCurrency] ?? 0)}</Text>
+            <Text style={S.swapHint}>⇅</Text>
           </View>
-        </View>
+        </Pressable>
       </View>
 
       <View style={S.tabs}>
         <Tab label="Pay" active={mode === 'pay'} onPress={() => setMode('pay')} hotkey="P" />
         <Tab label="Receive" active={mode === 'receive'} onPress={() => setMode('receive')} hotkey="R" />
+        <Tab label="Transactions" active={mode === 'ledger'} onPress={() => setMode('ledger')} />
       </View>
 
-      <ScrollView contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
+      <ScrollView style={S.scroll} contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
         {mode === 'pay'
-          ? <PayMode identity={identity} online={online} relayUrl={relayUrl} nfcReady={nfc === 'ready'} onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance} />
-          : <ReceiveMode identity={identity} relayUrl={relayUrl} nfcReady={nfc === 'ready'} onReceived={onActivity} />}
-        {/* Ramp asset cards — each is a SEPARATE asset on a separate ledger (currency N>0), shown
-            only when non-zero so a topped-up wallet keeps its credited asset VISIBLE after the deposit
-            sheet closes, and an unfunded wallet isn't cluttered with empty cards (e2e 05 asserts
-            asset cards stay hidden at 0). Deliberately distinct from the `$` header (DEMO_USD): each
-            card shows the family's network label + native-asset units, resolved from the catalog via
-            FAMILY_DISPLAY. "Cash out" appears only for families with an offramp (CkBtcUtxo today). */}
-        {rampAssets.map(a => {
-          const bal = assetBalances[a.currency] ?? 0;
-          if (bal <= 0) return null;
-          const disp = familyDisplay(catalog, a.currency);
-          const testKey = assetTestKey(a);
-          // H1: the card's primary label is the asset NAME (ckBTC/ckUSDC), not the chain. The chain
-          // (networkLabel) is descriptive context only; the subtitle names the deposited asset too.
-          const name = displayName(a);
-          return (
-            <View key={a.currency} testID={`asset-${testKey}`} style={S.assetCard}>
-              <View style={S.assetRow}>
-                <Text style={S.assetLabel}>{name}</Text>
-                <Text style={S.assetAmt}>{fmtAsset(bal, disp.amountDecimals, disp.nativeAsset)}</Text>
-              </View>
-              <Text style={S.assetSub}>{`your deposited ${name} · spendable where a merchant requests it`}</Text>
-              <View style={S.assetActions}>
-                <Pressable
-                  testID={`asset-add-${testKey}`}
-                  style={S.assetActionBtn}
-                  onPress={() => setDepositCurrency(a.currency)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Add ${name}`}
-                >
-                  <Text style={S.assetActionText}>＋ Add</Text>
-                </Pressable>
-                {a.minter_family === 'CkBtcUtxo' ? (
-                  <Pressable
-                    testID="btn-withdraw"
-                    style={S.withdrawLink}
-                    onPress={() => setWithdrawCurrency(a.currency)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Cash out ${name}`}
-                  >
-                    <Text style={S.withdrawLinkText}>Cash out</Text>
-                  </Pressable>
-                ) : null}
-              </View>
-            </View>
-          );
-        })}
-        {history.length > 0 ? (
-          <View style={S.histCard}>
-            <Text style={S.histTitle}>Recent</Text>
-            {history.map((t, i) => (
-              <View key={i} style={S.histRow}>
-                <View style={S.histWhoCol}>
-                  <Text style={S.histWho}>{t.dir === 'out' ? `to ${t.who || '—'}` : `from ${t.who || '—'}`}</Text>
-                  {t.memo ? <Text style={S.histMemo} testID={`hist-memo-${i}`}>{t.memo}</Text> : null}
-                </View>
-                <Text style={[S.histAmt, {color: t.dir === 'out' ? C.ink : C.ok}]}>{`${t.dir === 'out' ? '−' : '+'}${usd(t.amount)}`}</Text>
-                <Text style={S.histTime}>{t.time}</Text>
-              </View>
-            ))}
-          </View>
-        ) : null}
+          ? <PayMode identity={identity} online={online} relayUrl={relayUrl} nfcReady={nfc === 'ready'} onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance} catalog={catalog} assetBalances={assetBalances} />
+          : mode === 'receive'
+          ? <ReceiveMode identity={identity} relayUrl={relayUrl} nfcReady={nfc === 'ready'} onReceived={onActivity} catalog={catalog} />
+          : <Ledger history={history} catalog={catalog} />}
       </ScrollView>
 
-      <View style={S.settingsBar}>
-        <Pressable
-          testID="btn-settings"
-          style={S.settingsLinkBtn}
-          onPress={() => setSettingsOpen(true)}
-          accessibilityRole="button"
-          accessibilityLabel="Settings"
-        >
-          <Text style={S.settingsLink}>⚙ Settings</Text>
-        </Pressable>
-      </View>
-
-      {pickerOpen ? (
-        <AssetPickerSheet
-          rampAssets={rampAssets}
+      {balancesOpen ? (
+        <BalancesSheet
           catalog={catalog}
-          onPick={(currency) => { setDepositCurrency(currency); setPickerOpen(false); }}
-          onClose={() => setPickerOpen(false)}
+          assetBalances={assetBalances}
+          primaryBalance={shownBalance}
+          online={online}
+          currentCurrency={currentCurrency}
+          onSelect={(currency) => { setCurrentCurrency(currency); setBalancesOpen(false); }}
+          onTopUp={topUp}
+          topUpBusy={topUpBusy}
+          topUpErr={topUpErr}
+          onAdd={(currency) => { setDepositCurrency(currency); setBalancesOpen(false); }}
+          onWithdraw={(currency) => { setWithdrawCurrency(currency); setBalancesOpen(false); }}
+          onClose={() => setBalancesOpen(false)}
         />
       ) : null}
       {depositCurrency != null ? (
@@ -432,9 +371,6 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
         <SettingsSheet
           relayUrl={relayUrl}
           setRelayUrl={setRelayUrl}
-          onTopUp={topUp}
-          topUpBusy={topUpBusy}
-          topUpErr={topUpErr}
           onClose={() => setSettingsOpen(false)}
           onReset={onReset}
         />

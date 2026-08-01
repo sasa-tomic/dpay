@@ -7,7 +7,7 @@
 // byte-exact vs Rust per test 00) + POSTs /api/v1/pay → the FakeLedger VERIFIES the ed25519 sig +
 // settles (debits A, credits B). Asserts:
 //   - A's review shows the exact amount + merchant name.
-//   - A reaches "Paid ✓ $25.00".
+//   - A reaches "Paid ✓ Đ25.00".
 //   - A's `$` balance decreased by the amount (currency 0 = DEMO_USD, the wallet asset).
 //   - B's balance (direct relay query, currency 0) increased by the amount — recipient credited.
 //   - A's Recent history lists the outgoing payment to B.
@@ -18,7 +18,7 @@
 import { setup, assert, assertIncludes, getBalance, onboardWallet } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
-const PAY_CENTS = 2500; // $25.00 (DEMO_USD = currency 0, the wallet asset)
+const PAY_CENTS = 2500; // Đ25.00 (DEMO_USD = currency 0, the wallet asset)
 const MERCHANT_NAME = 'Bob';
 
 export async function run() {
@@ -35,11 +35,11 @@ export async function run() {
     const bobBefore = await getBalance(relayBaseURL, bob.publicHex, 0);
     assert(bobBefore === 0, `payee B must start at 0, got ${bobBefore}`);
 
-    // --- wallet A: onboarded in the browser (the payer, funded $100 by the faucet). -----------
+    // --- wallet A: onboarded in the browser (the payer, funded Đ100 by the faucet). -----------
     console.log('[07-scan-pay] onboarding wallet A (payer)…');
     await onboardWallet(driver, 'e2e-alice');
 
-    // --- B's request QR: to=B, amount=$25, fresh nonce, +10min expiry, currency 0 (DEMO_USD). -
+    // --- B's request QR: to=B, amount=Đ25, fresh nonce, +10min expiry, currency 0 (DEMO_USD). -
     const nonce = randNonceHex();
     const expiry = Math.floor(Date.now() / 1000) + 600;
     const requestQR = buildRequestQR(bob.publicHex, PAY_CENTS, nonce, expiry, 0, MERCHANT_NAME);
@@ -52,7 +52,7 @@ export async function run() {
     // --- Review screen: exact amount + merchant name. -----------------------------------------
     await driver.findByTestID('pay-amount', { timeoutMs: 5_000 });
     const payAmt = await driver.readText('pay-amount');
-    assert(payAmt.includes('$25.00'), `review should show "Pay $25.00", got "${payAmt}"`);
+    assert(payAmt.includes('Đ25.00'), `review should show "Pay Đ25.00", got "${payAmt}"`);
     const reviewBody = await driver.bodyText();
     assertIncludes(reviewBody, MERCHANT_NAME, 'review should name the merchant');
     console.log(`[07-scan-pay] ✓ review: ${payAmt} to ${MERCHANT_NAME}`);
@@ -70,9 +70,9 @@ export async function run() {
     console.log('[07-scan-pay] ✓ A reached "Paid ✓" to Bob (L6: real recipient name, not "merchant")');
 
     // --- A's `$` balance decreased by the amount (the 2.5s poll reconciles). ------------------
-    const aliceDown = await driver.waitForText('$75.00', { timeoutMs: 10_000 });
-    assert(aliceDown, `payer A balance should be $75.00 ($100 − $25) after the settle`);
-    console.log('[07-scan-pay] ✓ A balance $100.00 → $75.00');
+    const aliceDown = await driver.waitForText('Đ75.00', { timeoutMs: 10_000 });
+    assert(aliceDown, `payer A balance should be Đ75.00 (Đ100 − Đ25) after the settle`);
+    console.log('[07-scan-pay] ✓ A balance Đ100.00 → Đ75.00');
 
     // --- B was credited (read straight off the ledger — no second browser). -------------------
     const bobAfter = await getBalance(relayBaseURL, bob.publicHex, 0);
@@ -82,6 +82,7 @@ export async function run() {
     // --- A's Recent history lists the outgoing payment to B (refreshHistory fired on settle). --
     // The to_name "Bob" now rides the signed wire + the relay's history rows, so the row shows
     // "to Bob" (N6/H3) — NOT a raw hex pubkey. Assert the NAME appears and the full hex does not.
+    await driver.click('tab-transactions', { timeoutMs: 4_000 });
     const hasHistory = await driver.waitForText('RECENT', { timeoutMs: 8_000 });
     assert(hasHistory, 'the Recent card should render once the payment lands in history');
     const histBody = await driver.bodyText();

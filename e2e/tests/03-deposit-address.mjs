@@ -57,12 +57,17 @@ export async function run() {
     }
     console.log('[03-deposit-address] ✓ instruction block complete (network/asset/time/fee/min/custody)');
 
-    // C3: the sheet must NEVER render a raw "0.00000000 BTC". The FakeLedger/test minter returns zero
-    // fee + zero min; the line now shows "—" for a zero value (instead of formatting zero to 8
-    // decimals, which read as a broken stub). Production's non-zero minter values format normally.
-    assert(!body.includes('0.00000000'),
-      'deposit instructions must never show a raw zero amount like "0.00000000" (C3)');
-    console.log('[03-deposit-address] ✓ no raw zero amounts (fee/min show "—" when zero)');
+    // C3: the INSTRUCTIONS block must NEVER render a raw "0.00000000". The FakeLedger/test minter
+    // returns zero fee + zero min; the line now shows "—" for a zero value (instead of formatting
+    // zero to 8 decimals, which read as a broken stub). Scoped to the deposit-instructions card: the
+    // wallet's always-visible zero-balance asset cards (MC5) correctly render "0.00000000 BTC" behind
+    // the sheet, so a body-wide check would false-trip on those. Production's non-zero values format
+    // normally.
+    const instrEl = await driver.findByTestID('deposit-instructions', { timeoutMs: 5_000 });
+    const instrTxt = await instrEl.evaluate((n) => (n.textContent ?? '').trim());
+    assert(!instrTxt.includes('0.00000000'),
+      `deposit instructions must never show a raw zero amount like "0.00000000" (C3). instructions text:\n${instrTxt}`);
+    console.log('[03-deposit-address] ✓ no raw zero amounts in instructions (fee/min show "—" when zero)');
 
     // 5. The single linear progress cue is present (U2): "Waiting for your deposit" (no pending utxos).
     assertIncludes(body, 'Waiting for your deposit', 'progress cue shows the waiting state');

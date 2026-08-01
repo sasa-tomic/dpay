@@ -2,21 +2,21 @@
 // history, header cleanup (username only, no hex), short history counterparties.
 //
 // This flow is the RED→GREEN gate for the four Group-A issues:
-//   - H1: ckUSDC was labeled "Ethereum" (the chain) instead of "ckUSDC" (the asset). The picker rows
+//   - H1: USDC was labeled "Ethereum" (the chain) instead of "USDC" (the asset). The picker rows
 //         + the wallet asset card must show the asset NAME (symbol) as the primary heading; the chain
 //         ('Ethereum'/'Bitcoin') appears ONLY in the "Send X on NETWORK" instruction line.
-//   - H2: history was hardcoded to currency=0, so ckBTC/ckUSDC payments never appeared. The wallet
+//   - H2: history was hardcoded to currency=0, so BTC/USDC payments never appeared. The wallet
 //         must now fetch history for EVERY catalog currency, union + dedup by nonce, newest-first.
-//         Proven by settling a currency-1 (ckBTC) payment and asserting it surfaces in RECENT — the
+//         Proven by settling a currency-1 (BTC) payment and asserting it surfaces in RECENT — the
 //         ONLY way the wallet learns of the payee is via the currency-1 ledger, so its appearance
 //         proves the multi-currency fetch.
 //   - H3: counterparties were raw 64-char hex. Now shortened (best-effort; the username isn't in the
 //         signed wire — N6/FROZEN core). Assert the FULL 64-char hex is absent and the short form is.
 //   - H4: the header appended the hex pubkey ("Alice · 1b8a5ee7…"). Now username only.
 //
-// Selector contract: `header-who` (username line, added by this change), `btn-deposit`,
-// `asset-picker-row-ckusdc` / `asset-picker-row-ckbtc`, `btn-picker-close`.
-import { setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, seedDeposit, refreshDeposit, postPay } from '../harness/lib.mjs';
+// Selector contract: `header-who` (username line), `balance` (header → Balances),
+// `asset-ckusdc` / `asset-ckbtc` (the currency rows in Balances), `btn-balances-close`.
+import { setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, seedDeposit, refreshDeposit, postPay, openBalances } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, signAuthorizationCode } from '../harness/wire.mjs';
 
 const CKBTC_CURRENCY = 1;   // the CkBtcUtxo catalog entry (resolved at runtime, not hardcoded in app)
@@ -44,23 +44,23 @@ export async function run() {
     assert(!whoText.includes(accountHex.slice(0, 8)), `header must NOT include the hex pubkey, got "${whoText}"`);
     console.log('[24-wallet-cleanup] ✓ header shows only the username (H4)');
 
-    // --- H1: picker rows are labeled by the asset NAME (symbol), not the chain. -------------------
-    // ckUSDC: primary heading "ckUSDC" (was "Ethereum"). The chain still appears in the instruction
-    // subtitle "Send USDC on Ethereum" — that's correct. ckBTC: primary heading "ckBTC" (was "Bitcoin").
-    await driver.click('btn-deposit', { timeoutMs: 5_000 });
-    const ckusdcRow = await driver.findByTestID('asset-picker-row-ckusdc', { timeoutMs: 5_000 });
+    // --- H1: Balances rows are labeled by the asset NAME (symbol), not the chain. ----------------
+    // USDC: primary heading "USDC" (was "Ethereum"). The chain still appears in the instruction
+    // subtitle "Send USDC on Ethereum" — that's correct. BTC: primary heading "BTC" (was "Bitcoin").
+    await openBalances(driver);
+    const ckusdcRow = await driver.findByTestID('asset-ckusdc', { timeoutMs: 5_000 });
     const ckusdcTxt = await ckusdcRow.evaluate((n) => (n.textContent ?? '').trim());
-    assertIncludes(ckusdcTxt, 'ckUSDC', 'ckUSDC picker row must be labeled "ckUSDC" (not "Ethereum")');
-    assert(ckusdcTxt.startsWith('ckUSDC'), `ckUSDC row primary heading should be "ckUSDC", got "${ckusdcTxt}"`);
-    const ckbtcRow = await driver.findByTestID('asset-picker-row-ckbtc', { timeoutMs: 3_000 });
+    assertIncludes(ckusdcTxt, 'USDC', 'USDC row must be labeled "USDC" (not "Ethereum")');
+    assert(ckusdcTxt.startsWith('USDC'), `USDC row primary heading should be "USDC", got "${ckusdcTxt}"`);
+    const ckbtcRow = await driver.findByTestID('asset-ckbtc', { timeoutMs: 3_000 });
     const ckbtcTxt = await ckbtcRow.evaluate((n) => (n.textContent ?? '').trim());
-    assertIncludes(ckbtcTxt, 'ckBTC', 'ckBTC picker row must be labeled "ckBTC"');
-    console.log(`[24-wallet-cleanup] ✓ picker rows name-first (H1): ckUSDC="${ckusdcTxt}" / ckBTC="${ckbtcTxt}"`);
-    await driver.click('btn-picker-close', { timeoutMs: 5_000 });
-    await driver.waitGone('asset-picker-row-ckusdc', { timeoutMs: 3_000 });
+    assertIncludes(ckbtcTxt, 'BTC', 'BTC row must be labeled "BTC"');
+    console.log(`[24-wallet-cleanup] ✓ Balances rows name-first (H1): USDC="${ckusdcTxt}" / BTC="${ckbtcTxt}"`);
+    await driver.click('btn-balances-close', { timeoutMs: 5_000 });
+    await driver.waitGone('asset-ckusdc', { timeoutMs: 3_000 });
 
-    // --- H2: multi-currency history. Seed ckBTC, pay in currency 1, assert it lands in RECENT. -----
-    // Seed + refresh a ckBTC (currency 1) deposit so A can spend it (deposit_status credits the
+    // --- H2: multi-currency history. Seed BTC, pay in currency 1, assert it lands in RECENT. -----
+    // Seed + refresh a BTC (currency 1) deposit so A can spend it (deposit_status credits the
     // balance; it does NOT itself create a history row — only a settled pay/withdraw does).
     await seedDeposit(relayBaseURL, accountHex, CKBTC_CURRENCY, SEED_SATS);
     await refreshDeposit(relayBaseURL, accountHex, CKBTC_CURRENCY);
@@ -73,10 +73,11 @@ export async function run() {
     const code = await signAuthorizationCode(identity.secretHex, bob.publicHex, PAY_SATS, nonce, expiry, CKBTC_CURRENCY);
     const pay = await postPay(relayBaseURL, code);
     assert(pay.ok === true && pay.status === 200, `currency-1 pay must settle (ok+200), got ${JSON.stringify(pay)}`);
-    console.log('[24-wallet-cleanup] ✓ currency-1 (ckBTC) payment settled');
+    console.log('[24-wallet-cleanup] ✓ currency-1 (BTC) payment settled');
 
     // The wallet's history poll (fast-poll seam) must now fetch currency 1 and surface the row. B
     // never transacted in currency 0, so B's appearance in RECENT PROVES the currency-1 fetch landed.
+    await driver.click('tab-transactions', { timeoutMs: 4_000 });
     const hasRecent = await driver.waitForText('RECENT', { timeoutMs: 8_000 });
     assert(hasRecent, 'RECENT card should render once the currency-1 payment lands in history');
     const sawShort = await driver.waitForText(bob.publicHex.slice(0, 8), { timeoutMs: 8_000 });

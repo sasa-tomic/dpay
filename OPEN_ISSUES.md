@@ -25,9 +25,9 @@ Work in this order:
 2. **MC2 — safe currency identity and policy (high).** Prevent a registered currency ID from being reassigned under an already-reviewed authorization, or bind a versioned immutable asset identity. Activate ledger+metadata+minter atomically and validate metadata against the ledger. Replace the one global raw-unit transaction cap with governed per-currency caps; the ledger fee remains outside the payer authorization.
 3. **MC3 — authoritative balances (high).** The wallet balance path must observe ckBTC refreshes, asynchronous ckERC20 mints, and direct ICRC transfers. `BAL_CACHE` may remain an optimization but cannot be the only display source without an explicit refresh/freshness contract. Tests must assert facade/relay balance, not only direct ledger balance.
 4. **MC4 — trusted receipts and durable reconciliation (high).** The app must verify receipts against an authenticated/pinned canister key, not the public key supplied inside the same untrusted receipt. Initialize signing before accepting payments, make post-transfer receipt recovery durable, and have relay ambiguous-outcome/restart handling query canister-backed receipt state bound to the authorization, currency, and nonce.
-5. **MC5 — asset-first wallet and transaction UX (high).** Show every enabled asset, including zero balances and no-ramp assets. Make the demo rail visibly separate. Add asset detail/actions; require merchant asset selection in Request; lock the payer review to that exact asset and matching balance; key offline deductions by currency; reject unknown assets before signing. No cross-asset portfolio total.
-6. **MC6 — dedicated Ledger and cleaner navigation (high).** Move transaction history out of the Pay/Receive scroll into a dedicated Ledger page. Preserve currency in the row model, format each row with its asset descriptor, retain successful per-asset history when another asset fails, and add an asset filter. Move Settings from the detached footer into an intuitive header/account/overflow control with a proper touch target; put relay configuration under an advanced section with an explicit Apply action.
-7. **MC7 — remove zombie primary actions (medium).** Remove the prominent `Paste request` button from the main Pay screen. Keep clipboard decode only as a subordinate scan fallback if no-camera/desktop/support usage justifies it; otherwise delete it and update flow coverage. The primary Pay entry remains tap or scan.
+5. **MC5 — asset-first wallet and transaction UX (high).** Show every enabled asset, including zero balances and no-ramp assets. Make the demo rail visibly separate. Add asset detail/actions; require merchant asset selection in Request; lock the payer review to that exact asset and matching balance; key offline deductions by currency; reject unknown assets before signing. No cross-asset portfolio total. **Status (2026-08-01): 🟡 PARTIALLY DONE.** Asset-first wallet (all assets always visible, demo rail separated by an ASSETS heading, fail-closed action buttons), merchant asset selection in Request (per-currency chips, runtime currency encoded), and locked-asset payer review (exact-unit display + per-asset balance gate, no payer asset switching) are done and proven by flows 25 + 27. **Remaining:** NFC asset disclosure/validation (→ MC8), currency-keyed offline deduction (the offline QR hand-off still debits the DEMO `offlineSpent` counter regardless of currency), unknown-asset rejection before signing, and a ckUSDC (6-decimal) end-to-end app flow.
+6. **MC6 — dedicated Ledger and cleaner navigation (high).** Move transaction history out of the Pay/Receive scroll into a dedicated Ledger page. Preserve currency in the row model, format each row with its asset descriptor, retain successful per-asset history when another asset fails, and add an asset filter. Move Settings from the detached footer into an intuitive header/account/overflow control with a proper touch target; put relay configuration under an advanced section with an explicit Apply action. **Status (2026-08-01): ✅ DONE.** History lives on a dedicated Ledger tab (`tab-ledger`) with per-row currency-correct units and an asset filter (chips appear when 2+ currencies are present); `Txn` carries `currency`; Settings moved from the detached footer to a header gear control; relay URL demoted to an Advanced section with an explicit Apply button. Proven by flows 07/08/24/26 (Ledger) + 12/13/19/20/22 (Apply).
+7. **MC7 — remove zombie primary actions (medium).** Remove the prominent `Paste request` button from the main Pay screen. Keep clipboard decode only as a subordinate scan fallback if no-camera/desktop/support usage justifies it; otherwise delete it and update flow coverage. The primary Pay entry remains tap or scan. **Status (2026-08-01): ✅ DONE (demoted).** Paste is now a muted ghost secondary control (`pasteSecondary`) instead of a prominent brand-green primary; `btn-paste` + flow 14 retained pending a founder decision on full deletion.
 8. **MC8 — native/NFC parity and honest ramps (high).** Repair Android bridge parity (`toName`, `memo`, full signing arguments, withdrawal signing, exact amounts). NFC must disclose and validate the requested asset. Make ckERC20 parameters token-specific, enforce chain ID, persist transaction state, wait for receipts/reverts, and provide an Android wallet/partner handoff. Do not advertise CkSol or unsupported cash-out paths.
 9. **MC9 — release gates and operations (high).** Add request→QR/NFC→settle→receipt→balance/history coverage for 2/6/8/18-decimal assets, FakeLedger/canister conformance, Android bridge tests, declarative atomic asset deployment, per-asset readiness/metrics, and real outer-loop ckBTC+ckUSDC runs before pilot. Make `DPAY_SELFCHECK FAIL` a failing gate and repair `dpay-sim`.
 
@@ -79,9 +79,9 @@ Milestone acceptance: a fresh install visibly exposes configured assets; a merch
 
 ### 6. (high) App does not expose functional multi-currency payments
 
-- **What/why.** `ReceiveMode` hardcodes currency 0, cents, and `$`. `PayMode` does copy `req.currency` into the signature, but displays every request with `usd()` and compares its raw amount against the DEMO_USD balance. NFC has the same display/balance problem. Offline optimistic spending carries amount but not currency. The protocol can route ckBTC, but the real app cannot safely request, review, validate, or present it end to end.
-- **Current mitigation.** The canister routes ledgers independently and rejects cross-currency funding, so the settlement kernel does not silently swap. The UI must not be treated as multi-currency until MC5/MC8 land.
-- **Next step.** Implement the asset-first request/pay design in MC5, including unknown-asset rejection and currency-keyed offline state. Add real app flows for currencies 1 and 2 rather than Node-side signing that bypasses the UI.
+- **What/why.** 🟡 **PARTIALLY RESOLVED (MC5 Slice 7a + 7b, 2026-08-01).** `ReceiveMode` no longer hardcodes currency 0 — it exposes a per-currency chip row (`request-asset-<key>`) and encodes the runtime-selected currency into the request via the new `toUnits(amount, decimals)` parser. `PayMode`'s review + Paid + QR hand-off paths format amounts with the new shared `fmtCurrencyAmount(catalog, currency, raw)` (no `usd()` for non-DEMO amounts), and the balance check uses ONLY the requested asset's balance (`assetBalances[req.currency]`), so a 50000-sat ckBTC request is no longer compared against the 10000-cent DEMO balance. Proven end-to-end by flows `25-asset-request` (currency 1 encoded + "0.00050000 BTC" readout, no `$`) and `27-asset-pay` (locked-asset review + per-asset balance gate + correct settlement on currency 1's ledger). **Still single-currency / open:** NFC (`NfcTap` still formats amounts as `$` on the card-auto-sign path; flow 11 injects phase events only), the offline `markOfflinePaid` reducer still adds to the DEMO `offlineSpent` counter regardless of currency (the offline QR hand-off path's deduction is wrong for non-DEMO currencies — a known partial), unknown-asset rejection before signing, and currency-keyed offline state (MC5 remainder). The protocol can route ckBTC; the app now safely requests, reviews, validates, and presents it ONLINE end to end.
+- **Current mitigation.** The canister routes ledgers independently and rejects cross-currency funding, so the settlement kernel does not silently swap. The ONLINE app payment path (request → scan → review → settle) is now multi-currency; the OFFLINE optimistic deduction path is still single-currency (documented partial).
+- **Next step.** Implement the MC5 remainder: NFC asset disclosure + currency-keyed offline state + unknown-asset rejection. Make `NfcTap` currency-aware (display + balance gate). Add the resulting Ledger row's exact-units assertion post-settle, and a ckUSDC (currency 2, 6-decimal) end-to-end app flow.
 
 ### 7. (high) Runtime catalog foundation exists, but config-only asset addition is not safe
 
@@ -132,7 +132,7 @@ The following previously-open risks are now **CLOSED** (see `CODEBASE_ANALYSIS.m
   previously "deferred (core wire change)" and H3 "mitigated" via `short()` — that change has now shipped, so
   both are fully RESOLVED (not just mitigated). `short()` stays only as the empty-name fallback. Mint-sentinel
   history rows use empty names; the app special-cases `MINT_HEX`. `ReceiptClaim` (108 B) and `WithdrawAuth`
-  are unchanged. Proven end-to-end by e2e flow `26-names-memo` (suite now 26/26 GREEN).
+  are unchanged. Proven end-to-end by e2e flow `26-names-memo` (suite now 28/28 GREEN).
 
 ## UX review findings (2026-07-30)
 
@@ -164,12 +164,18 @@ The following previously-open risks are now **CLOSED** (see `CODEBASE_ANALYSIS.m
 - **UX-V3 CONFIRMED** — `reset` wipes the on-device identity with **NO confirmation**: one tap →
   `AsyncStorage.removeItem` → straight back to onboarding (verified: identity gone, onboarding shown,
   no dialog). A user loses access to the funds at that pubkey irreversibly.
-- **UX-V4 CONFIRMED** — header is crowded: `$balance` + `+$50` outline pill + filled `＋ Add money` all
+- **UX-V4 CONFIRMED → ✅ RESOLVED (2026-08-01)** — the crowded header (`$balance` + `+$50` outline pill +
+  filled `＋ Add money` sharing one right-aligned row, Add-money edge viewport-kissing at 389/390 px) is gone.
+  The main-screen `Add money` button + asset rail are removed; the header now shows ONE current-currency
+  balance (tap → Balances sheet to switch currency / fund / cash out). Funding consolidated into the
+  Balances sheet. Also closes N9 (Add-money glow clip — the button no longer exists).
   share one right-aligned row; the `Add money` right edge lands at 389/390 px (viewport-kissing).
 - **UX-V5 CONFIRMED → ✅ FIXED (1b)** — only `Escape` was wired (`useEscapeToClose`, sheets only); no
   global shortcuts (no Enter-to-submit on onboarding/amount, no T/A/R action keys), and the only
   on-UI hint was "Press Esc to close" inside the deposit/withdraw sheets. **Now resolved:** the
   wallet is fully keyboard-driveable (P/R/T/A + Esc) via `useHotkeys`, with on-UI hint badges.
+  *(2026-08-01: **A** now opens the Balances sheet — the sole funding/balance surface — instead of the
+  old asset-picker/Add-money; see UX-V4.)*
 - **UX-V1 REJECTED** — the `＋ Add money` button text is **NOT truncated** at standard balances
   (`scrollWidth == clientWidth == 111`; full "＋ Add money" renders). The original "+ Add mo" claim is
   not reproducible. Reframed as the edge-kissing/glow-clip issue N9 (P3).
@@ -303,7 +309,7 @@ The following previously-open risks are now **CLOSED** (see `CODEBASE_ANALYSIS.m
 
 > Source: `UX_AUDIT_FINDINGS.md` (code-review + zai-vision visual audit). All 23 issues addressed;
 > independent verifier confirmed 21 fully resolved + 2 mitigated. Visual re-audit (zai-vision on live
-> screenshots) confirmed no regressions. Suite reached 26/26 GREEN. The 2026-08-01 installed-app review
+> screenshots) confirmed no regressions. Suite reached 28/28 GREEN. The 2026-08-01 installed-app review
 > supersedes this as the current product direction via MC5-MC7; in particular, making Paste request more
 > prominent is no longer desired, and inline history/settings placement must be redesigned.
 
@@ -339,6 +345,6 @@ The following previously-open risks are now **CLOSED** (see `CODEBASE_ANALYSIS.m
 - ✅ L1: Add-money shadow no longer clipped (shadowRadius 12→8).
 - ↩ L2: "Paste request" received a proper touch target in this wave, but MC7 now removes it from the primary Pay surface or demotes it to a subordinate scanner fallback.
 - ✅ L3: Withdraw success has a Copy-destination button + selectable address.
-- ✅ L4: "Payer paid offline? Scan their signed code to settle." (was ambiguous).
+- ✅ L4: "Payer paid offline? Scan to settle." (was ambiguous; shortened 2026-08-01 for simplicity).
 - ✅ L5: Raw hex request nonce removed from review screen.
 - ✅ L6: Payment confirmation shows recipient name ("to Bob"), not "merchant". (Receive-side name = H3/N6.)

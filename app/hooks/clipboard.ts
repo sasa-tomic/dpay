@@ -29,23 +29,3 @@ export async function copyToClipboard(text: string): Promise<'clipboard' | 'shar
   }
   return 'shared';
 }
-
-/**
- * Read text from the system clipboard when available (for the Pay "paste request" fallback — N10).
- * Web uses navigator.clipboard.readText; native would use @react-native-clipboard/clipboard (not
- * bundled, so the Share path is the fallback). Returns null on any failure (permission denied, no
- * clipboard API, empty clipboard).
- */
-export async function readFromClipboard(): Promise<string | null> {
-  if (Platform.OS === 'web') {
-    try {
-      const clip = (globalThis as {navigator?: {clipboard?: {readText?: () => Promise<string>}}}).navigator?.clipboard;
-      if (clip && typeof clip.readText === 'function') {
-        return await clip.readText();
-      }
-    } catch (e) {
-      console.warn('[dpay] clipboard read failed:', String(e));
-    }
-  }
-  return null;
-}

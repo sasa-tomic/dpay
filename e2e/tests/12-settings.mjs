@@ -45,6 +45,7 @@ export async function run() {
     // 4. Editing the relay input updates it (component state; the polls retarget to the new URL).
     const edited = 'http://127.0.0.1:9999';
     await driver.type('settings-relay', edited, { timeoutMs: 4_000 });
+    await driver.click('btn-relay-apply', { timeoutMs: 4_000 });
     const after = await driver.readInputValue('settings-relay');
     assertEq(after, edited, 'settings-relay should reflect the edited URL');
     console.log(`[12-settings] ✓ relay input editable → ${after}`);

@@ -1,0 +1,81 @@
+import {useState} from 'react';
+import {View, Text, Pressable} from 'react-native';
+import {S} from '../styles';
+import {C} from '../config/palette';
+import {usd, fmtAsset} from '../lib/format';
+import {familyDisplay, assetTestKey, displayName, type CurrencyDescriptor} from '../config/catalog';
+import type {Txn} from '../lib/types';
+
+// Filter-chip label for a currency. Currency 0 (DEMO_USD) has symbol '$' (length 1) so displayName
+// would fall through to a family default ("BTC"); label it "DEMO" to match the header pill instead.
+const chipLabel = (currency: number, catalog: CurrencyDescriptor[]): string => {
+  if (currency === 0) return 'DEMO';
+  const desc = catalog.find(c => c.currency === currency);
+  return desc ? displayName(desc) : 'asset';
+};
+
+// The transaction list, promoted from an inline card under Pay/Receive into its own tab. Renders the
+// SAME row structure the old histCard used (so the e2e `RECENT`/`hist-memo` anchors carry over), but
+// formats each amount in its OWN currency's units (currency 0 → `$`, else the family's native asset)
+// and exposes a per-currency filter chip row when >1 currency is present.
+export function Ledger({history, catalog}: {history: Txn[]; catalog: CurrencyDescriptor[]}) {
+  const [filter, setFilter] = useState<number | null>(null);
+  if (history.length === 0) {
+    return <Text style={S.ledgerEmpty}>No transactions yet</Text>;
+  }
+  // Unique currency ids actually present in history — drives whether the filter row renders (hidden
+  // for a single-currency wallet, where a filter would be noise).
+  const presentCurrencies = Array.from(new Set(history.map(t => t.currency)));
+  const showFilter = presentCurrencies.length > 1;
+  const rows = filter == null ? history : history.filter(t => t.currency === filter);
+  return (
+    <View style={S.ledgerWrap}>
+      <Text style={S.histTitle}>Recent</Text>
+      {showFilter ? (
+        <View style={S.filterRow}>
+          <Pressable
+            testID="ledger-filter-all"
+            style={[S.filterChip, filter == null && S.filterChipActive]}
+            onPress={() => setFilter(null)}
+            accessibilityRole="button"
+            accessibilityLabel="All assets"
+          >
+            <Text style={[S.filterChipText, filter == null && S.filterChipTextActive]}>All</Text>
+          </Pressable>
+          {presentCurrencies.map(currency => {
+            const desc = catalog.find(c => c.currency === currency);
+            if (!desc) return null;
+            const active = filter === currency;
+            const label = chipLabel(currency, catalog);
+            return (
+              <Pressable
+                key={currency}
+                testID={`ledger-filter-${assetTestKey(desc)}`}
+                style={[S.filterChip, active && S.filterChipActive]}
+                onPress={() => setFilter(currency)}
+                accessibilityRole="button"
+                accessibilityLabel={`Filter ${label}`}
+              >
+                <Text style={[S.filterChipText, active && S.filterChipTextActive]}>{label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
+      {rows.map((t, i) => {
+        const disp = familyDisplay(catalog, t.currency);
+        const amtTxt = t.currency === 0 ? usd(t.amount) : fmtAsset(t.amount, disp.amountDecimals, disp.nativeAsset);
+        return (
+          <View key={t.nonce} style={S.histRow}>
+            <View style={S.histWhoCol}>
+              <Text style={S.histWho}>{t.dir === 'out' ? `to ${t.who || '—'}` : `from ${t.who || '—'}`}</Text>
+              {t.memo ? <Text style={S.histMemo} testID={`hist-memo-${i}`}>{t.memo}</Text> : null}
+            </View>
+            <Text style={[S.histAmt, {color: t.dir === 'out' ? C.ink : C.ok}]}>{`${t.dir === 'out' ? '−' : '+'}${amtTxt}`}</Text>
+            <Text style={S.histTime}>{t.time}</Text>
+          </View>
+        );
+      })}
+    </View>
+  );
+}

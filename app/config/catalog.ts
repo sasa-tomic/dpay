@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {base} from '../lib/format';
+import {base, fmtAsset, usd} from '../lib/format';
 
 // --- currency catalog (M0) -------------------------------------------------------------------
 // The wallet's runtime source of truth for which assets exist + how to display/fund them. Fetched
@@ -107,18 +107,45 @@ export function isValidDestinationAddress(family: MinterFamily, addr: string): b
   return a.length > 0;
 }
 
-// The primary ASSET NAME shown as the heading on the asset card + picker rows (H1). This is the
-// catalog `symbol` when it reads as a name, with CkBtcUtxo normalized to 'ckBTC': its catalog
-// `symbol` ('₿') is the amount-UNIT glyph, not an asset name. It is DISTINCT from `nativeAsset`
-// ('BTC'/'USDC' — the backing token, used in amounts + the "Send X on NETWORK" line) and from
-// `networkLabel` ('Bitcoin'/'Ethereum' — the chain, used ONLY in instruction lines). So a user
-// scanning for an asset sees its NAME (ckBTC/ckUSDC), not the chain it rides on — fixing H1, where
-// ckUSDC was labeled "Ethereum".
+// The primary ASSET NAME shown as the heading on the asset card + picker rows (H1). Maps each
+// currency/family to its friendly NAME, independent of the raw catalog `symbol` (the on-chain
+// icrc1_symbol, which may be a unit glyph like '₿' or a 'ck'-prefixed token id like 'ckUSDC').
+// DISTINCT from `currencySymbol` (the amount-prefix glyph: Đ/₿/$) and from `nativeAsset` (the
+// backing token unit, used in raw-amount formatting + the "Send X on NETWORK" line). So a user
+// scanning for an asset sees its NAME (BTC/USDC/DEMO), not the chain it rides on.
 export function displayName(a: CurrencyDescriptor): string {
-  if (a.minter_family === 'CkBtcUtxo') return 'ckBTC';
-  // ckERC-20 + future families: the catalog symbol IS the asset name (e.g. 'ckUSDC'). Fall back to
-  // the native asset only if the symbol is absent or a lone unit glyph.
+  if (a.currency === 0) return 'DEMO';
+  if (a.minter_family === 'CkBtcUtxo') return 'BTC';
+  if (a.minter_family === 'CkEthErc20') return 'USDC';
+  // Future families: the catalog symbol when it reads as a name, else the native asset unit.
   const sym = a.symbol;
   if (sym && sym.length >= 2) return sym;
   return familyDisplay([], a.currency).nativeAsset;
+}
+
+// The amount-prefix glyph for a currency (shown before a typed amount in Receive + as the prefix of
+// a DEMO amount string). Family-driven so it is stable regardless of the raw catalog `symbol`:
+// DEMO→'Đ', BTC→'₿', USDC→'$'. ('$' was DEMO's old prefix; it moves to USDC now that DEMO uses Đ.)
+// Distinct from displayName (the NAME) and nativeAsset (the raw-amount unit suffix).
+export function currencySymbol(catalog: CurrencyDescriptor[], currency: number): string {
+  if (currency === 0) return 'Đ';
+  const a = catalog.find(c => c.currency === currency);
+  const fam = a?.minter_family ?? null;
+  if (fam === 'CkBtcUtxo') return '₿';
+  if (fam === 'CkEthErc20') return '$';
+  const sym = a?.symbol;
+  return sym && sym.length <= 2 ? sym : familyDisplay(catalog, currency).nativeAsset;
+}
+
+// Format a raw smallest-units amount for display in its OWN currency's units. Currency 0 (DEMO_USD)
+// renders as `$`; any other currency renders via its catalog descriptor's decimals + the family's
+// native asset unit (e.g. 50000 raw @ currency 1 → "0.00050000 BTC"). Used by ReceiveMode + PayMode
+// so a ckBTC request/review reads "0.00050000 BTC" (never a misleading dollar amount) — the
+// merchant-selected asset is what the payer sees + pays. Per CLAUDE.md, dpay never swaps, so the
+// display NEVER converts across assets. Decimals come from the catalog descriptor directly (NOT
+// `familyDisplay`, which falls back to ckBTC's 8 decimals and would mis-render DEMO_USD's 2).
+export function fmtCurrencyAmount(catalog: CurrencyDescriptor[], currency: number, raw: number): string {
+  if (currency === 0) return usd(raw);
+  const decimals = catalog.find(c => c.currency === currency)?.decimals ?? familyDisplay(catalog, currency).amountDecimals;
+  return fmtAsset(raw, decimals, familyDisplay(catalog, currency).nativeAsset);
 }

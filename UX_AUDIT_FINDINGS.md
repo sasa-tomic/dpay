@@ -9,7 +9,7 @@
 
 > **STATUS (2026-07-31): ALL 23 ISSUES RESOLVED OR MITIGATED.** 21 fully resolved, 2 mitigated (H3 short-hex
 > until N6 wire change; M1 a11y fully closed in follow-up). Independent verifier confirmed. See `OPEN_ISSUES.md`
-> "UX audit (2026-07-31)" section for per-issue resolution detail. Suite 26/26 GREEN.
+> "UX audit (2026-07-31)" section for per-issue resolution detail. Suite 28/28 GREEN.
 
 ## Critical (breaks flow / shows wrong info)
 
@@ -169,7 +169,7 @@
   "scan the payer's QR to pay them" or "the payer should scan your QR". The intended meaning (merchant scans the
   payer's signed QR) isn't clear from the wording alone.
   | evidence: `e2e/shots/06-request-qr.png` | location: `app/App.tsx` ReceiveMode |
-  *Fix:* rephrase: "Payer paid offline? Scan their signed code to settle."
+  *Fix:* rephrase + shorten: "Payer paid offline? Scan to settle."
 
 - **[L5] "request 9612e903fe03…" raw hex leaks in the review-payment screen.** The truncated request nonce is shown
   to the user below the amount. This is internal protocol data with no user value.

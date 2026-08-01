@@ -16,13 +16,14 @@
 //   - Wrong-sig: a sig under a DIFFERENT key → relay 422 "bad signature" (no UI guard; only the
 //     relay catches this since the app always signs correctly).
 //
-// Selector contract: `asset-ckbtc`, `btn-withdraw`, `withdraw-address-input`, `withdraw-amount-input`,
-// `btn-withdraw-confirm` (asserted disabled via the dim style / no review card).
+// Selector contract: `balance` (header → Balances), `asset-ckbtc` + `btn-withdraw` (the BTC row in
+// Balances), `withdraw-address-input`, `withdraw-amount-input`, `btn-withdraw-confirm` (asserted
+// disabled via the dim style / no review card).
 //
 // Also covers INVALID-ADDRESS validation (the documented gap, now closed): the app validates the
 // destination format family-aware — a wrong-chain address (ETH 0x… in the BTC cash-out) shows a
 // warning + disables the confirm button.
-import { setup, assert, assertEq, seedDeposit, refreshDeposit, getBalance, postWithdraw, onboardWallet, accountOf } from '../harness/lib.mjs';
+import { setup, assert, assertEq, seedDeposit, refreshDeposit, getBalance, postWithdraw, onboardWallet, accountOf, openBalances } from '../harness/lib.mjs';
 import { signWithdrawalHex, randNonceHex, generateKeypair } from '../harness/wire.mjs';
 
 const DEPOSIT_CURRENCY = 1; // ckBTC — matches the CkBtcUtxo catalog entry
@@ -44,7 +45,9 @@ export async function run() {
     await seedDeposit(relayBaseURL, accountHex, DEPOSIT_CURRENCY, SEED_SATS);
     await refreshDeposit(relayBaseURL, accountHex, DEPOSIT_CURRENCY);
     assertEq(await getBalance(relayBaseURL, accountHex, DEPOSIT_CURRENCY), SEED_SATS, 'seeded ckBTC balance');
-    await driver.findByTestID('asset-ckbtc', { timeoutMs: 8_000 });
+    // Open Balances; wait for the BTC Cash-out (renders once the poll credits currency 1 → funded).
+    await openBalances(driver);
+    await driver.findByTestID('btn-withdraw', { timeoutMs: 8_000 });
 
     // --- 1. BELOW-MINIMUM (UI guard): type an amount under the 50_000 floor. -----------------
     console.log('[18-withdraw-errors] below-min UI guard…');

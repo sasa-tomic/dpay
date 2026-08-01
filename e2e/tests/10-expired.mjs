@@ -11,7 +11,7 @@
 import { setup, assert, assertIncludes, onboardWallet } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
-const PAY_CENTS = 2500; // $25.00 (DEMO_USD = currency 0)
+const PAY_CENTS = 2500; // Đ25.00 (DEMO_USD = currency 0)
 
 export async function run() {
   const start = Date.now();
@@ -65,9 +65,9 @@ export async function run() {
     console.log('[10-expired] btn-approve disabled while the error is shown (C1)');
 
     // The balance is UNCHANGED — the expired auth debited nothing.
-    const unchanged = await driver.waitForText('$100.00', { timeoutMs: 6_000 });
-    assert(unchanged, 'balance must be unchanged after the expired refusal ($100.00)');
-    console.log('[10-expired] ✓ balance unchanged ($100.00) — no debit on an expired request');
+    const unchanged = await driver.waitForText('Đ100.00', { timeoutMs: 6_000 });
+    assert(unchanged, 'balance must be unchanged after the expired refusal (Đ100.00)');
+    console.log('[10-expired] ✓ balance unchanged (Đ100.00) — no debit on an expired request');
 
     await driver.screenshot('10-expired');
 

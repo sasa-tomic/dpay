@@ -25,16 +25,19 @@ const APP_DIR = join(REPO_ROOT, 'app');
 // (the old value) made readdirSync throw → silently skipped → a shim edit NEVER invalidated the dist
 // cache (a stale-build false-confidence bug). This is the canonical path the vite build pulls in.
 const WEB_DIR = join(E2E_DIR, 'web');
-// The real app's top-level sources the vite build pulls in (the rest of app/ — node_modules,
-// android/, ios/, __tests__, __mocks__ — is not a build input).
-const APP_SOURCE_FILES = ['App.tsx', 'payments.ts', 'relayConfig.ts'].map((f) => join(APP_DIR, f));
+// The vite build pulls in the ENTIRE app/ source tree (App.tsx imports config/, lib/, hooks/,
+// services/, styles.ts, components/*). Watching only a few top-level files let edits to
+// styles.ts / components/*.tsx silently run against a STALE dist (tests pass on old code). The fix:
+// walk app/ for every .ts/.tsx that is a real build input, skipping non-input dirs.
+const APP_SKIP_DIRS = new Set(['node_modules', 'android', 'ios', '__tests__', '__mocks__', '.e2e-dist']);
 
 /**
  * Newest mtime (ms) across every SOURCE that feeds the vite build: the real app sources
- * (app/App.tsx + payments.ts + relayConfig.ts), the e2e/web shims/entry/html (walked so a newly
- * added shim is picked up automatically), and the vite config itself. Missing files are skipped
- * (a deleted shim is not a build input). This is the SOURCE-change gate; vite's own incremental
- * cache still handles dependency changes.
+ * (walked so an edit anywhere in app/ — components, styles, config, lib, hooks, services —
+ * invalidates the cache), the e2e/web shims/entry/html (walked so a newly added shim is picked up
+ * automatically), and the vite config itself. Missing files are skipped (a deleted file is not a
+ * build input). This is the SOURCE-change gate; vite's own incremental cache still handles
+ * dependency changes.
  */
 function newestSourceMtimeMs() {
   let newest = 0;
@@ -44,7 +47,19 @@ function newestSourceMtimeMs() {
       if (m > newest) newest = m;
     } catch {} // missing → not a build input
   };
-  for (const f of APP_SOURCE_FILES) touch(f);
+  const walkApp = (dir) => {
+    let entries;
+    try { entries = readdirSync(dir); } catch { return; }
+    for (const name of entries) {
+      if (APP_SKIP_DIRS.has(name)) continue;
+      const p = join(dir, name);
+      let s;
+      try { s = statSync(p); } catch { continue; }
+      if (s.isDirectory()) walkApp(p);
+      else if (/\.(ts|tsx)$/.test(name)) touch(p);
+    }
+  };
+  walkApp(APP_DIR);
   try {
     for (const name of readdirSync(WEB_DIR)) {
       if (/\.(ts|tsx|html|js)$/.test(name)) touch(join(WEB_DIR, name));

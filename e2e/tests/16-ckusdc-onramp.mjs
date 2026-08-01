@@ -12,9 +12,9 @@
 // runtime params + the user's pubkey as the subaccount. The ETH radio hop (wallet signs + tx mined +
 // minter scrapes ~20min) is an inherent outer-loop gate, not offline-testable.
 //
-// Selector contract: `asset-picker-row-ckusdc`, `ckerc20-deposit`, `btn-connect-wallet`,
-// `ckerc20-amount`, `btn-approve`, `ckerc20-status`.
-import { setup, assert, assertIncludes, onboardWallet } from '../harness/lib.mjs';
+// Selector contract: `balance` (header → Balances), `asset-add-ckusdc` (USDC row Add),
+// `ckerc20-deposit`, `btn-connect-wallet`, `ckerc20-amount`, `btn-approve`, `ckerc20-status`.
+import { setup, assert, assertIncludes, onboardWallet, openBalances } from '../harness/lib.mjs';
 
 const USDC_ADDR = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
 const HELPER_ADDR = '0x18901044688D3756C35Ed2b36D93e6a5B8e00E68';
@@ -46,10 +46,10 @@ export async function run() {
 
     await onboardWallet(driver, 'e2e-ckusdc');
 
-    // Add money → asset picker → pick ckUSDC (the CkEthErc20 ramp).
-    console.log('[16-ckusdc-onramp] Add money → pick ckUSDC…');
-    await driver.click('btn-deposit', { timeoutMs: 5_000 });
-    await driver.click('asset-picker-row-ckusdc', { timeoutMs: 5_000 });
+    // Balances → USDC row "Add" (the CkEthErc20 ramp).
+    console.log('[16-ckusdc-onramp] Balances → pick USDC…');
+    await openBalances(driver);
+    await driver.click('asset-add-ckusdc', { timeoutMs: 5_000 });
     await driver.findByTestID('ckerc20-deposit', { timeoutMs: 8_000 });
     {
       const body = await driver.bodyText();

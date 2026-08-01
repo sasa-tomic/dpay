@@ -15,8 +15,9 @@
 // let this test pass for the WRONG reason. We assert the failure is a connection error, not an
 // unsafe-port block, to lock in the right reason.)
 //
-// Selector contract: `btn-settings`, `settings-relay`, `btn-topup`, `btn-settings-close`, `balance`.
-import { setup, assert, onboardWallet, pickFreePort } from '../harness/lib.mjs';
+// Selector contract: `btn-settings`, `settings-relay`, `btn-settings-close`, `balance` (header →
+// Balances), `btn-topup` (inside Balances), `btn-balances-close`.
+import { setup, assert, onboardWallet, pickFreePort, openBalances } from '../harness/lib.mjs';
 
 export async function run() {
   const start = Date.now();
@@ -34,18 +35,22 @@ export async function run() {
     console.log('[13-offline] onboarding (online)…');
     await onboardWallet(driver, 'e2e-offline');
 
-    // Open Settings, retarget the app at a DEAD relay via the settings input.
+    // Open Settings, retarget the app at a DEAD relay via the settings input, then close Settings.
     console.log('[13-offline] opening Settings to change the relay URL…');
     await driver.click('btn-settings', { timeoutMs: 4_000 });
     console.log(`[13-offline] pointing the app at a dead relay (${DEAD_RELAY})…`);
     await driver.type('settings-relay', DEAD_RELAY, { timeoutMs: 4_000 });
+    await driver.click('btn-relay-apply', { timeoutMs: 4_000 });
+    await driver.click('btn-settings-close', { timeoutMs: 4_000 });
 
     // Record the underlying request failures so we can prove the dead relay fails for the RIGHT
     // reason (ECONNREFUSED — a real connection refusal), not the ERR_UNSAFE_PORT artifact.
     const failures = driver.recordRequestFailures();
 
-    // Trigger a faucet top-up against the dead relay → the app catches the failure and surfaces a
-    // clear, honest offline message (NOT a false success, NOT a crash).
+    // Trigger a faucet top-up against the dead relay from the Balances sheet → the app catches the
+    // failure and surfaces a clear, honest offline message (NOT a false success, NOT a crash).
+    console.log('[13-offline] opening Balances to trigger the faucet against the dead relay…');
+    await openBalances(driver);
     console.log('[13-offline] clicking btn-topup against the dead relay…');
     await driver.click('btn-topup', { timeoutMs: 4_000 });
     const offlineMsg = await driver.waitForText('Offline', { timeoutMs: 10_000 });
@@ -65,10 +70,10 @@ export async function run() {
       `dead relay must NOT be an unsafe-port artifact (that's the wrong failure mode), got "${errText}"`);
     console.log(`[13-offline] ✓ dead relay failed for the right reason: ${errText}`);
 
-    // Close Settings — the balance poll has been failing underneath; the header should now show the
+    // Close Balances — the balance poll has been failing underneath; the header should now show the
     // offline indicator ("~ approx.").
-    console.log('[13-offline] closing Settings to verify the wallet surface…');
-    await driver.click('btn-settings-close', { timeoutMs: 4_000 });
+    console.log('[13-offline] closing Balances to verify the wallet surface…');
+    await driver.click('btn-balances-close', { timeoutMs: 4_000 });
     const approx = await driver.waitForText('approx.', { timeoutMs: 8_000 });
     assert(approx, 'the header should show the offline indicator ("~ approx.") once the relay is unreachable');
     console.log('[13-offline] ✓ header shows the offline indicator (graceful, no crash)');

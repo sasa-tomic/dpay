@@ -1,5 +1,7 @@
 # Multi-Currency Implementation Plan
 
+> **Superseded historical plan.** This document describes the first protocol plumbing and is no longer an implementation guide: currency is now `u32` (not `u8`), wire-format v2 is 292 bytes, the facade routes external ICRC ledgers, and the runtime catalog/ramp work has moved on substantially. The active, prioritized plan is `OPEN_ISSUES.md` under **Immediate next milestone: complete multi-currency wallet (MC1-MC9)**, with structural risks in `CODEBASE_ANALYSIS.md` and founder UX direction in `CLAUDE.md`. Do not implement the lengths, APIs, open-mint assumptions, or execution steps below.
+
 ## Goal
 
 Add a `currency: u8` concept throughout the stack. `DEMO_USD = 0` is play money mintable via a one-click faucet (open on mainnet for the investor demo). The merchant's request names the settlement currency; the payer copies it into their signed authorization — same as amount/payee/nonce/expiry. This is **greenfield**: wire formats can change freely, no backward compat.

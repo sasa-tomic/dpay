@@ -137,7 +137,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, onCl
           <Text style={S.sheetTitle}>{`Add ${display.nativeAsset}`}</Text>
           <Pressable testID="btn-ckerc20-close" accessibilityRole="button" accessibilityLabel="Close deposit sheet" style={S.sheetClose} onPress={onClose}><Text style={S.sheetCloseX}>✕</Text></Pressable>
         </View>
-        <ScrollView contentContainerStyle={S.sheetBody} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={S.sheetCenter} keyboardShouldPersistTaps="handled">
           {/* Wrong-network warning — unmissable, above the flow. */}
           <View testID="ckerc20-deposit" style={S.instrCard}>
             <Text style={S.instrLine}>

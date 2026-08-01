@@ -6,8 +6,10 @@ those non-negotiables first (`CLAUDE.md` → "dpay never holds, swaps, or can mo
 > **Status.** The **ckBTC deposit/top-up path is implemented** as a facade-proxy surface:
 > `dpay-canister` exposes `deposit_address` / `refresh_deposit` / `deposit_info` (+ admin
 > `register_minter`), the relay serves `/api/v1/deposit/*`, and the app renders a `DepositSheet`.
-> Everything below describes that **implemented** model for ckBTC and the not-yet-built production
-> shape for the other assets. Build contract: `deposit-integration-plan.md`; risk posture:
+> The browser app also has an initial ckUSDC helper-contract submission path, but chain enforcement,
+> receipt/revert tracking, durable pending state, Android handoff, and authoritative balance freshness
+> remain open. Everything below describes the intended production shape. Build contract:
+> `deposit-integration-plan.md`; risk posture:
 > `CODEBASE_ANALYSIS.md`.
 
 ## The one principle
@@ -21,7 +23,8 @@ is not a counterparty and holds no omnibus.
 **Where the mint lands (implemented).** The facade proxies the minter with
 `owner = canister_self()`, `subaccount = <the user's pubkey>`, so a confirmed mint credits the ICRC
 ledger at `Account{owner: facade, subaccount: pubkey}` — the *same* segregated subaccount
-`pay`/`balance_of` already read (not an omnibus, and not a free mint). The user's on-device key
+that `pay()` reads authoritatively and the display cache is intended to represent (not an omnibus,
+and not a free mint). The user's on-device key
 authorizes movement of *their* subaccount; dpay never holds a user seed and cannot move funds without
 the payer's signature. (A standalone wallet that held ck-assets at the *user's own principal* is the
 eventual shape; the implemented canister-routed model uses facade-owned subaccounts, consistent with
@@ -35,15 +38,14 @@ is *a real deposit happened*.
 
 | | Demo (now) | Production |
 |---|---|---|
-| Ledger | `dpay-canister` internal balances | the ck-asset's **ICRC-1 ledger** (ckBTC today; ckUSDC = launch rail, follow-up). The user's key maps to a segregated subaccount `Account{owner: facade, subaccount: pubkey}` — not a pooled balance |
-| Funding | operator runs `just mint <acct> <cents>` (controller-only) to simulate a confirmed deposit | ck-minter mints to the user's subaccount on a real external deposit (**ckBTC: implemented** via the facade deposit proxy; ckUSDC/ckETH: follow-up) |
-| Who mints | a canister **controller** (the operator), gated by `is_controller` | the **ck-minter**, gated by an on-chain deposit; dpay does not mint at all |
+| Ledger | A demo ICRC ledger routed through the facade | Each ck-asset's real **ICRC-1 ledger**. The user's key maps to a segregated subaccount `Account{owner: facade, subaccount: pubkey}` — not a pooled balance |
+| Funding | The fixed, rate-limited self-service faucet credits demo currency 0 | A ck-minter credits the user's subaccount after a real external deposit (**ckBTC proxy and initial browser ckUSDC submission are implemented; production gaps remain**) |
+| Who mints | The demo ledger's configured minting account via the faucet path | The **ck-minter**, gated by an on-chain deposit; dpay does not mint real assets |
 | dpay custody | none (demo funds are play money) | none (user's key, user's subaccount, user's ck-asset) |
 
-The controller-gated `mint` shipped today is explicitly the **stand-in** for "a deposit confirmed." It
-is retired (or kept only for local/testnet demos) once real funding lands. **An internal dpay balance
-backed by pooled ckUSDC would be an omnibus = custody = forbidden** — production reads the user's *own*
-ckUSDC balance; it does not keep a shadow ledger of user funds.
+The demo faucet is explicitly play money and must remain visibly separate from real assets. **An
+internal dpay balance backed by pooled ckUSDC would be an omnibus = custody = forbidden** — production
+reads the user's segregated ckUSDC ledger subaccount; it does not keep a shadow ledger of user funds.
 
 ## Supported chain-key asset → native per-principal deposit address
 
@@ -55,20 +57,23 @@ custodian, dpay not in the flow.
   `deposit_address` → `get_btc_address`, `refresh_deposit` → `update_balance`, `deposit_info` →
   `get_minter_info` + `get_deposit_fee`. The minter is called with `owner = canister_self()`,
   `subaccount = <user pubkey>`, so it derives a **per-user native BTC deposit address** and — after
-  confirmations — mints ckBTC to `Account{owner: facade, subaccount: pubkey}`, the same subaccount the
-  wallet already reads as its balance (a confirmed deposit is automatically the next balance poll's
-  number). No settlement/balance/history code changed to add it. Mainnet canister IDs: **minter
+  confirmations — mints ckBTC to `Account{owner: facade, subaccount: pubkey}`, the same authoritative
+  ledger subaccount that `pay()` reads. The current wallet display path instead reads facade `BAL_CACHE`,
+  which `refresh_deposit` does not refresh, so a confirmed deposit can be spendable before it is visible;
+  fixing that freshness contract is `OPEN_ISSUES.md` MC3. Mainnet canister IDs: **minter
   `mqygn-kiaaa-aaaar-qaadq-cai`**, **ledger `mxzaz-hqaaa-aaaar-qaada-cai`**
   (`docs.internetcomputer.org/references/chain-key-canister-ids/`). **No KYC step:** the mainnet
   ckBTC minter runs in GeneralAvailability mode with no KYC checker (`get_minter_info` confirms only
   automatic KYT — Know-Your-Transaction — that screens tainted UTXOs, not principals); the facade
   mints for any clean, confirmed deposit with no allowlist.
-  Withdrawal is the mirror (the minter burns ckBTC and sends to the user's native BTC address) — a
-  follow-up, not yet wired through the facade.
+  Withdrawal is the mirror (the minter burns ckBTC and sends to the user's native BTC address); the
+  facade/app path is implemented, while live real-money verification and robust uncertain-outcome
+  status handling remain open.
 - **ckUSDC (launch rail) — USDC on Ethereum → ckERC20.** Deposits go through the ckETH/ckERC20 minter
-  (a deposit **helper contract** on Ethereum carries the user's principal, or a per-principal deposit
-  address). **VERIFY before building:** the current ckUSDC minter canister id + exact deposit
-  mechanism, and confirm ckUSDC (not just ckETH) is wired end-to-end.
+  using a deposit **helper contract** on Ethereum that carries the user's principal/subaccount. The
+  live helper/token parameters and calldata are known, and an injected-browser-wallet submission path
+  exists. It is not launch-complete until MC3/MC8 add authoritative credited-balance observation,
+  chain-ID enforcement, receipt/revert handling, durable pending state, and an Android handoff.
 - **SOL / ckSOL:** the building blocks (threshold Ed25519 + the SOL RPC canister) are shipped, but a
   per-principal ckSOL minter is **not confirmed** — verify status before promising a SOL deposit
   address.
@@ -77,9 +82,9 @@ custodian, dpay not in the flow.
 1. dpay asks the facade (→ minter `get_btc_address`) for the user's deposit address → shows it + QR.
 2. Instructions screen: asset, network, address/QR, est. arrival time + network fee, and the honest
    line: *"This is your money at your address — we never hold it."*
-3. dpay polls the ck-asset ledger (`icrc1_balance_of` at the user's subaccount) and the facade's
-   `refresh_deposit` (→ minter `update_balance`), surfacing **pending → credited**. The credited
-   balance *is* the displayed amount.
+3. dpay refreshes the relevant minter where applicable and reads an authoritative or explicitly fresh
+   ck-asset ledger balance for the user's subaccount, surfacing **pending → credited**. The current
+   facade display cache does not yet satisfy this contract for every external credit path (MC3).
 
 ## Unsupported asset / fiat → embedded licensed on-ramp
 
@@ -98,8 +103,8 @@ One **"Add money"** screen: pick what you have. Under the hood it routes to *dir
 
 1. **Address:** call the right ck-minter get-address for the user's principal; render address + QR.
 2. **Instructions:** asset / network / address / est. time + fee / non-custody line.
-3. **Status:** poll `icrc1_balance_of(user_principal)` + minter `update_balance`; show pending →
-   credited.
+3. **Status:** refresh the relevant minter and read an authoritative/fresh ledger balance; show
+   pending → credited.
 4. **Withdraw (mirror):** user authorizes the minter to burn + send to their native address.
 5. **Fiat / unsupported:** embed the on-ramp with the address pre-filled.
 
@@ -115,10 +120,10 @@ signature is the only authority, and dpay can't move funds.
 - ✅ **ckBTC:** resolved + implemented — minter `mqygn-kiaaa-aaaar-qaadq-cai`, ledger
   `mxzaz-hqaaa-aaaar-qaada-cai`; facade-proxy deposit surface shipped (`deposit_address` /
   `refresh_deposit` / `deposit_info` + `register_minter`). The items below remain open.
-- **ckETH / ckERC20 (the ckUSDC launch rail):** the facade-proxy seam is reusable, but the ckETH
-  minter exposes different methods (Ethereum-side deposit *helper contract* carrying the user's
-  principal, vs. ckBTC's per-principal `get_btc_address`). Verify the exact mechanism and wire it as a
-  follow-up. ckEURC availability for the EUR rail.
+- **ckETH / ckERC20 (the ckUSDC launch rail):** the Ethereum helper-contract mechanism, live ckUSDC
+  parameters, and browser transaction submission are implemented. Remaining: chain/receipt safety,
+  durable pending state, Android wallet/partner handoff, authoritative credit observation, and
+  token-specific runtime adapters so ckEURC or another ckERC20 is not treated as USDC.
 - ckSOL / per-principal Solana deposit addresses: confirm a shipped minter, not just primitives.
 - Confirmation latency + fee ranges per asset (to set honest "arrives in ~N min, ~$X fee" copy).
 - Minimum deposit / dust thresholds each minter enforces.

@@ -1,4 +1,7 @@
-export const usd = (c: number) => `$${Math.floor(c / 100)}.${String(c % 100).padStart(2, '0')}`;
+// Formats an integer cent amount as the DEMO currency's amount string. The DEMO currency (currency
+// 0) uses the 'Đ' prefix (D-with-stroke); '$' is reserved for USDC. Despite the historical name
+// `usd`, this formats DEMO amounts only; other currencies render via fmtAsset in their family unit.
+export const usd = (c: number) => `Đ${Math.floor(c / 100)}.${String(c % 100).padStart(2, '0')}`;
 export const short = (h: string) => `${h.slice(0, 8)}…`;
 // The MINT_ACCOUNT sentinel — 32 bytes of 0xFF, hex-encoded as 64 `f`s. The canister records faucet
 // mints and withdrawals with this as the counterparty; we detect it and render a friendly label
@@ -67,3 +70,8 @@ export function fmtAsset(raw: number, decimals: number, unit: string): string {
 // Parse a user-entered BTC amount (decimal string) into integer satoshis. Mirrors `toCents` for `$`.
 // NaN/negative → 0; the sheet gates the review on > 0 + >= the min withdrawal floor.
 export function toSats(s: string): number { const n = Math.round(parseFloat(s || '0') * 1e8); return Number.isFinite(n) && n > 0 ? n : 0; }
+// Parse a user-entered amount (decimal string) into integer smallest-units at the given decimal
+// count. Generalizes `toCents` (decimals=2) + `toSats` (decimals=8) to arbitrary assets. Drives the
+// merchant's currency-aware request encoder (ReceiveMode encodes the runtime currency id's raw
+// units: 2 for DEMO, 8 for ckBTC, 6 for ckUSDC). NaN/negative → 0; the caller gates on > 0.
+export function toUnits(s: string, decimals: number): number { const n = Math.round(parseFloat(s || '0') * 10 ** decimals); return Number.isFinite(n) && n > 0 ? n : 0; }

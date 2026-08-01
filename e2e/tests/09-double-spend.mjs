@@ -20,7 +20,7 @@
 import { setup, assert, getBalance, postPay, onboardWallet } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
-const PAY_CENTS = 2500; // $25.00
+const PAY_CENTS = 2500; // Đ25.00
 
 /** Install a fetch recorder that captures every POST /api/v1/pay body into window.__DPAY_PAY_CODES,
  *  so the test can replay the EXACT signed authorization the app produced. Returns nothing; read
@@ -77,7 +77,7 @@ export async function run() {
     const requestQR = buildRequestQR(bob.publicHex, PAY_CENTS, nonce, expiry, 0, 'merchant');
     await driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), requestQR);
     await driver.findByTestID('pay-amount', { timeoutMs: 5_000 });
-    console.log('[09-double-spend] A paying $25.00 (capturing the signed authorization)…');
+    console.log('[09-double-spend] A paying Đ25.00 (capturing the signed authorization)…');
     await driver.click('btn-approve', { timeoutMs: 5_000 });
     const paid = await driver.waitForText('Paid', { timeoutMs: 10_000 });
     assert(paid, 'first pay must settle before we attempt the replay');
@@ -94,8 +94,8 @@ export async function run() {
     assert(restored === true, 'the /pay recorder must restore window.fetch after capture (no lingering global override)');
     console.log('[09-double-spend] ✓ window.fetch restored after capture (narrow, transient interception)');
 
-    // Baseline after the first settle: A down to $75, B at $25.
-    await driver.waitForText('$75.00', { timeoutMs: 8_000 });
+    // Baseline after the first settle: A down to Đ75, B at Đ25.
+    await driver.waitForText('Đ75.00', { timeoutMs: 8_000 });
     const aliceAfterFirst = await getBalance(relayBaseURL, (await driver.eval(() => JSON.parse(localStorage.getItem('dpay.identity.v1')).publicHex)), 0);
     const bobAfterFirst = await getBalance(relayBaseURL, bob.publicHex, 0);
     assert(aliceAfterFirst === 7500 && bobAfterFirst === 2500,

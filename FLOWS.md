@@ -42,14 +42,16 @@ positive paths come first, then error/edge paths.
 | 09 | double-spend | Attacker replays a captured signed code | Replay refused (nonce single-use), no double debit. |
 | 10 | expired | Payer scans an already-expired request | Expiry refused, Approve button disabled, no leaked nonce. |
 | 19 | low-balance | Payer with insufficient funds scans a request | Offline: review-lowbal warning. Online: Approve disabled, "Not enough balance". |
+| 25 | asset-request | Merchant selects ckBTC chip → types BTC amount → shows request QR | The encoded request carries the RUNTIME currency id 1 (not hardcoded 0) + 50000 sats; the readout shows "0.00050000 BTC", never a dollar amount. Proves the merchant-side of MC5 (asset selection; dpay never swaps). |
 | 26 | names-memo | Alice pays Bob with memo "coffee" | Both wallets' history shows friendly names (from_name/to_name) + memo, no raw-hex counterparties. Proves N6/H3 closure via wire-format v2. |
+| 27 | asset-pay | Payer scans a ckBTC request → reviews the locked asset → approves | Review shows "Pay 0.00050000 BTC" (not `$`); per-asset balance check uses ONLY ckBTC (60000 sats ≥ 50000), so the DEMO balance ($100) can't block it; settles on currency 1. Proves the payer-side of MC5 (locked-asset review + per-asset balance gate). |
 
 ## Offline hand-off (the signature feature)
 
 | # | Flow | User journey | Verifies |
 |---|------|-------------|----------|
 | 20 | offline-handoff | Payer signs offline → relay unreachable → shows signed QR → merchant settles later → payer reconnects | Full round trip: offline sign → QR hand-off → online settle → receipt reconciliation → "Paid ✓". |
-| 21 | receive-scan | Merchant: "Payer paid offline? Scan their signed code" → scans payer's signed QR | Receive-side scan path settles the offline payer's signed code. |
+| 21 | receive-scan | Merchant: "Payer paid offline? Scan to settle" → scans payer's signed QR | Receive-side scan path settles the offline payer's signed code. |
 
 ## Deposits (ckBTC + ckUSDC onramp)
 
@@ -82,7 +84,7 @@ positive paths come first, then error/edge paths.
 | 13 | offline | Relay goes down → user tries top-up | Graceful offline (ECONNREFUSED), no crash/blank, retry path. |
 | 14 | keyboard | User presses P/R/T/A/Esc keys | Single-key shortcuts switch tabs / top-up / add-money / close sheet. Input-guard + sheet-guard work. |
 | 17 | scan-cleanup | Switch Pay→Receive→Pay | QrScanner listeners teardown correctly (no leak across unmount/remount). |
-| 24 | wallet-cleanup | Multi-currency wallet view | Asset labels use symbol ("ckBTC"/"ckUSDC"), multi-currency history, header shows username only, counterparties are short hex. |
+| 24 | wallet-cleanup | Seeded non-dollar balances/history appear | Asset cards and rows are present and labels use known symbols. This flow does **not** prove correct non-dollar amount units, merchant selection, payer review, or matching-balance validation. |
 
 ---
 
@@ -90,6 +92,11 @@ positive paths come first, then error/edge paths.
 
 These flows are **not** covered and why:
 
+- **True multi-currency app payment** — flow 25 + flow 27 now cover the merchant's ckBTC request encoding and the payer's locked-asset review + per-asset balance check + correct settlement on currency 1 (the core of MC5 Slice 7a + 7b). **Still uncovered:** the resulting Ledger row's exact units post-settle (the row is rendered via `familyDisplay`'s native asset, but no flow asserts the row text after a multi-currency pay), and the round trip through ReceiveMode ckUSDC (currency 2, 6-decimal) end to end. Flow 24 seeds/settles outside the app payment UI and only proves presence.
+- **Exact 2/6/8/18-decimal amount transport** — JavaScript/Kotlin boundaries and formatting are not exercised beyond safe demo values; values around `2^53` and excess fractional input are uncovered.
+- **Non-dollar NFC consent** — flow 11 injects phase events only; it does not carry and sign a real nonzero-currency request or validate that asset's balance/display.
+- **Android React Native bridge parity** — instrumented tests mostly exercise UniFFI directly, not the `NativeModules` argument/return surface that currently drops wire-v2 fields.
+- **External-credit balance freshness** — deposit tests can assert direct ledger/FakeLedger credit while missing stale facade `BAL_CACHE` behavior.
 - **NFC radio round trip** (two phones, HCE↔reader, full wire transit over ISO-DEP) — physical-device gate; the web NFC shim's `approveCard(wireHex)` is a no-op, so driving the full round trip would inject the wire the test built itself (false confidence). Signing/settlement are already byte-exact in `00`; the phase plumbing is proven in `11`. (The v2 wire is now 292 B → 2 ISO-DEP frames; the multi-frame chunking path is unit-tested in core, but the over-the-air round trip still needs two phones.)
 - **ckUSDC onramp final ETH hop** (wallet signs → tx mined → minter scrapes ~20min) — inherent outer-loop gate; offline e2e proves the calldata wiring + byte-exactness.
 - **ckBTC live deposit/withdrawal with real BTC** — requires real mainnet funds; offline path proven via FakeLedger seed (issues 1/8 in OPEN_ISSUES.md).
