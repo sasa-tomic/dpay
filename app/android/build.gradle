@@ -15,6 +15,10 @@ buildscript {
         classpath("com.android.tools.build:gradle")
         classpath("com.facebook.react:react-native-gradle-plugin")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
+        // Keep the offline dev loop independent of publishing-only dependencies.
+        if (System.getenv("DPAY_PLAY_PUBLISH") == "1") {
+            classpath("com.github.triplet.gradle:play-publisher:3.13.0")
+        }
     }
 }
 

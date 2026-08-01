@@ -45,3 +45,48 @@ neither source is configured; there is no debug-key fallback.
 
 `app/android/app/debug.keystore` is only the React Native development key. It
 must not be used to sign a Play release.
+
+## Automated internal-track uploads
+
+`just play-upload` is the release command. It:
+
+1. runs the full offline `just verify` gate;
+2. builds the signed APK and AAB and verifies both against `upload_cert.pem`;
+3. keeps the APK at `deploy/dist/dpay.apk` for direct sideloading;
+4. copies the exact verified AAB to `.dev/releases/play-<versionCode>/`; and
+5. uploads that AAB to Google Play's `internal` track as a completed release.
+
+Gradle Play Publisher is loaded only for step 5, so ordinary Gradle commands
+and the offline inner loop do not resolve publishing-only dependencies.
+
+### One-time Google setup
+
+The Play Developer API cannot register a brand-new Play app. If no artifact has
+ever been uploaded for this application ID, run `just apk` and upload its
+printed AAB once through Play Console. Complete the app setup and enroll it in
+Play App Signing.
+
+Then:
+
+1. enable the Google Play Android Developer API in a Google Cloud project;
+2. create a service account and JSON key;
+3. invite that service-account email under Play Console **Users and
+   permissions**, grant access only to this app, and grant release access to
+   testing tracks (production access is not needed); and
+4. store the JSON outside Git:
+
+```sh
+mkdir -p ~/.config/dpay/android
+mv /path/to/downloaded-key.json ~/.config/dpay/android/play-service-account.json
+chmod 600 ~/.config/dpay/android/play-service-account.json
+```
+
+The command also accepts an alternate absolute path through
+`DPAY_PLAY_SERVICE_ACCOUNT_JSON`. CI may instead put the JSON contents directly
+in Gradle Play Publisher's standard `ANDROID_PUBLISHER_CREDENTIALS` variable.
+
+`just play-upload` defaults `versionCode` to the current Unix timestamp, which
+is increasing and remains below Android's limit until 2036. Set
+`DPAY_VERSION_CODE` explicitly to override it, or `DPAY_VERSION_NAME` to change
+the user-visible version name. Version conflicts fail rather than silently
+rewriting the already-verified bundle.

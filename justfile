@@ -138,6 +138,10 @@ app:
 apk:
     bash scripts/build-apk.sh
 
+# verify, build, certificate-check, and upload the signed AAB to Google Play internal testing
+play-upload:
+    bash scripts/play-upload.sh
+
 # live demo: dfx replica + canister + relay + merchant terminal (Ctrl-C to stop). Open the printed URL.
 demo:
     bash scripts/demo.sh
