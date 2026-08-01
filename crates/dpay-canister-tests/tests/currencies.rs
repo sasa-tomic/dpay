@@ -84,6 +84,14 @@ fn pic_admin() -> Principal {
     Principal::management_canister()
 }
 
+/// A valid, arbitrary principal built from raw bytes (no CRC text validation) — used as a distinct
+/// ledger/minter fixture in the immutability tests. `b` selects which fixture, so several distinct
+/// ones can be built. `from_slice` accepts any ≤29-byte slice (no checksum), so the value is always
+/// wire-valid over candid regardless of the chosen byte.
+fn dummy_principal(b: u8) -> Principal {
+    Principal::from_slice(&[b; 29])
+}
+
 fn install_facade(
     pic: &PocketIc,
     controller: Option<Principal>,
@@ -153,6 +161,25 @@ fn register_minter(
             encode_args((currency, minter)).unwrap(),
         )
         .expect("register_minter update_call rejected at IC level");
+    decode_one(&reply).unwrap()
+}
+
+fn register_ledger(
+    pic: &PocketIc,
+    dpay: Principal,
+    caller: Principal,
+    currency: Currency,
+    principal: Principal,
+    mintable: bool,
+) -> Result<(), String> {
+    let reply = pic
+        .update_call(
+            dpay,
+            caller,
+            "register_ledger",
+            encode_args((currency, principal, mintable)).unwrap(),
+        )
+        .expect("register_ledger update_call rejected at IC level");
     decode_one(&reply).unwrap()
 }
 
@@ -397,4 +424,172 @@ fn currencies_defaults_ramps_to_unavailable_when_no_meta_registered() {
     assert_eq!(lone.wrapper_name, None);
     assert_eq!(lone.backing_symbol, None);
     assert_eq!(lone.token_contract, None);
+}
+
+// --- MC2 unit 2: immutable currency identity (insert-only ledger + minter) --------------------
+// RED-first proof that a currency's ledger + minter principal is INSERT-ONLY once registered:
+// re-registering with a DIFFERENT principal (or mintable flag) is REJECTED, while re-registering
+// with the SAME value is a no-op idempotent Ok (keeps deploy scripts re-runnable). Display metadata
+// (`register_currency_meta`) deliberately stays UPDATABLE — see `register_currency_meta_replaces_in_place`.
+
+/// A currency id that is NOT seeded in any init ledgers below, so the first `register_ledger` call
+/// is always a fresh insert.
+const FRESH: Currency = 9;
+
+#[test]
+fn register_ledger_fresh_currency_inserts_and_shows_in_catalog() {
+    let pic = PocketIc::new();
+    let dpay = install_facade(
+        &pic,
+        Some(pic_admin()),
+        vec![LedgerConfig { currency: DEMO_USD, principal: Principal::anonymous(), mintable: true }],
+    );
+    let ledger_a = dummy_principal(1);
+    let ledger_b = dummy_principal(2);
+    assert_ne!(ledger_a, ledger_b, "test fixtures must be distinct");
+
+    // Fresh insert: Ok.
+    register_ledger(&pic, dpay, pic_admin(), FRESH, ledger_a, true).expect("fresh register_ledger ok");
+
+    let cat = currencies(&pic, dpay);
+    let fresh = cat.iter().find(|d| d.currency == FRESH).expect("fresh currency appears in catalog");
+    assert_eq!(fresh.ledger, ledger_a, "catalog reflects the inserted ledger principal");
+    assert!(fresh.mintable, "catalog reflects the inserted mintable flag");
+}
+
+#[test]
+fn register_ledger_rejects_reassignment_and_leaves_original_unchanged() {
+    let pic = PocketIc::new();
+    let dpay = install_facade(
+        &pic,
+        Some(pic_admin()),
+        vec![LedgerConfig { currency: DEMO_USD, principal: Principal::anonymous(), mintable: true }],
+    );
+    let ledger_a = dummy_principal(1);
+    let ledger_b = dummy_principal(2);
+    assert_ne!(ledger_a, ledger_b);
+
+    register_ledger(&pic, dpay, pic_admin(), FRESH, ledger_a, true).expect("seed register ok");
+
+    // Re-register with a DIFFERENT principal → REJECTED with a debuggable, currency-named message.
+    let err = register_ledger(&pic, dpay, pic_admin(), FRESH, ledger_b, true)
+        .expect_err("reassigning the ledger principal must be rejected");
+    assert!(
+        err.contains("immutable"),
+        "error must call out immutability, got: {err}"
+    );
+    assert!(
+        err.contains(&format!("currency {}", FRESH)),
+        "error must name the offending currency id, got: {err}"
+    );
+
+    // Re-register with the SAME principal but a DIFFERENT mintable flag → also REJECTED (mintable is
+    // part of the immutable identity — a demo↔real flip must not silently re-target a currency).
+    let err_mintable = register_ledger(&pic, dpay, pic_admin(), FRESH, ledger_a, false)
+        .expect_err("flipping the mintable flag must be rejected");
+    assert!(err_mintable.contains("immutable"), "mintable-flip error: {err_mintable}");
+
+    // The original ledger is UNCHANGED.
+    let cat = currencies(&pic, dpay);
+    let fresh = cat.iter().find(|d| d.currency == FRESH).unwrap();
+    assert_eq!(fresh.ledger, ledger_a, "ledger principal must be unchanged after a rejected reassign");
+    assert!(fresh.mintable, "mintable flag must be unchanged after a rejected reassign");
+}
+
+#[test]
+fn register_ledger_same_value_is_idempotent() {
+    let pic = PocketIc::new();
+    let dpay = install_facade(
+        &pic,
+        Some(pic_admin()),
+        vec![LedgerConfig { currency: DEMO_USD, principal: Principal::anonymous(), mintable: true }],
+    );
+    let ledger_a = dummy_principal(1);
+
+    register_ledger(&pic, dpay, pic_admin(), FRESH, ledger_a, true).expect("seed register ok");
+    // Re-register with the SAME principal + SAME mintable → Ok (no-op idempotent). Deploy scripts are
+    // re-runnable: a replay does not blow up on an already-registered currency.
+    register_ledger(&pic, dpay, pic_admin(), FRESH, ledger_a, true)
+        .expect("idempotent re-register must succeed");
+
+    let cat = currencies(&pic, dpay);
+    assert_eq!(
+        cat.iter().filter(|d| d.currency == FRESH).count(),
+        1,
+        "no duplicate entries after idempotent re-register"
+    );
+    let fresh = cat.iter().find(|d| d.currency == FRESH).unwrap();
+    assert_eq!(fresh.ledger, ledger_a);
+    assert!(fresh.mintable);
+}
+
+#[test]
+fn register_minter_fresh_currency_inserts_and_shows_in_catalog() {
+    let pic = PocketIc::new();
+    // Seed a ledger for FRESH so it appears in the catalog join (currencies() only lists currencies
+    // WITH a ledger); the minter is registered separately afterward.
+    let dpay = install_facade(
+        &pic,
+        Some(pic_admin()),
+        vec![LedgerConfig { currency: FRESH, principal: Principal::anonymous(), mintable: false }],
+    );
+    let minter_a = dummy_principal(3);
+    let minter_b = dummy_principal(4);
+    assert_ne!(minter_a, minter_b, "test fixtures must be distinct");
+
+    // Fresh insert: Ok.
+    register_minter(&pic, dpay, pic_admin(), FRESH, minter_a).expect("fresh register_minter ok");
+
+    let cat = currencies(&pic, dpay);
+    let fresh = cat.iter().find(|d| d.currency == FRESH).expect("fresh currency appears in catalog");
+    assert_eq!(fresh.minter, Some(minter_a), "catalog reflects the inserted minter principal");
+}
+
+#[test]
+fn register_minter_rejects_reassignment_and_leaves_original_unchanged() {
+    let pic = PocketIc::new();
+    let dpay = install_facade(
+        &pic,
+        Some(pic_admin()),
+        vec![LedgerConfig { currency: FRESH, principal: Principal::anonymous(), mintable: false }],
+    );
+    let minter_a = dummy_principal(3);
+    let minter_b = dummy_principal(4);
+    assert_ne!(minter_a, minter_b);
+
+    register_minter(&pic, dpay, pic_admin(), FRESH, minter_a).expect("seed register ok");
+
+    // Re-register with a DIFFERENT minter → REJECTED with a debuggable, currency-named message.
+    let err = register_minter(&pic, dpay, pic_admin(), FRESH, minter_b)
+        .expect_err("reassigning the minter principal must be rejected");
+    assert!(err.contains("immutable"), "error must call out immutability, got: {err}");
+    assert!(
+        err.contains(&format!("currency {}", FRESH)),
+        "error must name the offending currency id, got: {err}"
+    );
+
+    // The original minter is UNCHANGED.
+    let cat = currencies(&pic, dpay);
+    let fresh = cat.iter().find(|d| d.currency == FRESH).unwrap();
+    assert_eq!(fresh.minter, Some(minter_a), "minter principal must be unchanged after a rejected reassign");
+}
+
+#[test]
+fn register_minter_same_value_is_idempotent() {
+    let pic = PocketIc::new();
+    let dpay = install_facade(
+        &pic,
+        Some(pic_admin()),
+        vec![LedgerConfig { currency: FRESH, principal: Principal::anonymous(), mintable: false }],
+    );
+    let minter_a = dummy_principal(3);
+
+    register_minter(&pic, dpay, pic_admin(), FRESH, minter_a).expect("seed register ok");
+    // Re-register with the SAME minter → Ok (no-op idempotent). Deploy scripts are re-runnable.
+    register_minter(&pic, dpay, pic_admin(), FRESH, minter_a)
+        .expect("idempotent re-register must succeed");
+
+    let cat = currencies(&pic, dpay);
+    let fresh = cat.iter().find(|d| d.currency == FRESH).unwrap();
+    assert_eq!(fresh.minter, Some(minter_a));
 }

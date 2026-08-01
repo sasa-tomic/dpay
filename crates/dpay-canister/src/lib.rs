@@ -1866,27 +1866,64 @@ async fn burn(from: Vec<u8>, currency: Currency, amount: u64) -> Result<u64, Str
     Ok(nat_to_u64(&block_index)?)
 }
 
-/// Register or replace the ledger for a currency at runtime. Gated to the controller in production
-/// (open only when `controller` is unset, i.e. the demo).
+/// Register the ledger for a currency at runtime (INSERT-ONLY, MC2 unit 2). Gated to the controller
+/// in production (open only when `controller` is unset, i.e. the demo). Once a currency key exists its
+/// ledger principal + `mintable` flag are IMMUTABLE — a re-register with the SAME value is a no-op
+/// `Ok` (keeps deploy scripts idempotent / re-runnable), but a DIFFERENT principal or `mintable` flag
+/// is REJECTED with a currency-named message. This prevents re-targeting an already-reviewed currency
+/// at a fake ledger (or silently flipping a real currency to mintable demo money) under an existing
+/// authorization/history. To repoint a currency, retire it and register a new id. Display metadata
+/// (`register_currency_meta`) is deliberately NOT frozen here — symbol/decimals/cap are policy/display,
+/// not identity, and remain updatable.
 #[update]
 fn register_ledger(currency: Currency, principal: Principal, mintable: bool) -> Result<(), String> {
     require_admin()?;
     LEDGERS.with(|m| {
-        m.borrow_mut().insert(currency, LedgerEntry { principal, mintable });
-    });
-    Ok(())
+        let mut map = m.borrow_mut();
+        if let Some(existing) = map.get(&currency) {
+            // INSERT-ONLY identity: principal + mintable are part of the immutable identity. Same-value
+            // re-register is a no-op Ok (deploy scripts stay re-runnable).
+            if existing.principal == principal && existing.mintable == mintable {
+                Ok(())
+            } else {
+                Err(format!(
+                    "currency {} ledger is immutable; use retire_currency + a new id to repoint",
+                    currency
+                ))
+            }
+        } else {
+            map.insert(currency, LedgerEntry { principal, mintable });
+            Ok(())
+        }
+    })
 }
 
-/// Register or replace the ck-minter principal for a currency at runtime. Gated to the controller in
-/// production (open only when `controller` is unset, i.e. the demo). A currency need not have a minter
-/// (only ck currencies do); absence means the facade exposes no deposit path for it.
+/// Register the ck-minter principal for a currency at runtime (INSERT-ONLY, MC2 unit 2). Gated to the
+/// controller in production (open only when `controller` is unset, i.e. the demo). A currency need not
+/// have a minter (only ck currencies do); absence means the facade exposes no deposit path for it.
+/// Once set, the minter principal is IMMUTABLE — a re-register with the SAME principal is a no-op `Ok`
+/// (deploy scripts stay re-runnable), but a DIFFERENT principal is REJECTED with a currency-named
+/// message. To repoint a currency's minter, retire it and register a new id. (Mirrors `register_ledger`
+/// — both are identity, not display/policy.)
 #[update]
 fn register_minter(currency: Currency, minter: Principal) -> Result<(), String> {
     require_admin()?;
     MINTERS.with(|m| {
-        m.borrow_mut().insert(currency, PrincipalStorable(minter));
-    });
-    Ok(())
+        let mut map = m.borrow_mut();
+        if let Some(existing) = map.get(&currency) {
+            if existing.0 == minter {
+                Ok(())
+            } else {
+                Err(format!(
+                    "currency {} minter is immutable; use retire_currency + a new id to repoint",
+                    currency
+                ))
+            }
+        } else {
+            map.insert(currency, PrincipalStorable(minter));
+            Ok(())
+        }
+    })
 }
 
 /// Register or replace display/family/authoritative metadata for a currency. Gated to the
