@@ -165,6 +165,24 @@ struct TxnView {
     memo: String,
 }
 
+/// Local mirror of the canister's `RampCapability` (candid wire type) — needed to encode
+/// `register_currency_meta` calls from these tests.
+#[derive(CandidType, serde::Serialize)]
+enum RampCapability {
+    Direct,
+    Partner,
+    Unavailable,
+}
+
+/// Local mirror of the canister's `MinterFamily` (candid wire type) — the `None` variant is all the
+/// cap-only registrations need.
+#[derive(CandidType, serde::Serialize)]
+enum MinterFamily {
+    CkBtcUtxo,
+    CkEthErc20,
+    CkSol,
+}
+
 fn nat_to_u64(n: &Nat) -> u64 {
     num_traits::ToPrimitive::to_u64(&n.0).expect("nat fits in u64")
 }
@@ -285,6 +303,17 @@ fn setup_with(
         controller,
     };
     pic.install_canister(dpay, dpay_wasm(), encode_one(&dpay_init).unwrap(), None);
+
+    // MC2 U1: `pay` reads the per-currency cap (fail-closed — a cap-less currency rejects every
+    // non-zero pay). Register a cap for BOTH currencies the shared setup's pay tests exercise so they
+    // keep settling; use the global CAP value to preserve pre-MC2 behavior. (over_cap_is_rejected
+    // pays CAP+1 against DEMO_USD → still rejected since CAP+1 > CAP.) Skipped in open mode
+    // (controller=None): register_currency_meta is admin-gated and the only setup_with(None) caller
+    // (open_mode_denies_admin_but_faucet_and_lockdown_work) does not exercise pay.
+    if let Some(admin) = controller {
+        register_currency_meta_cap(&pic, dpay, admin, DEMO_USD, CAP);
+        register_currency_meta_cap(&pic, dpay, admin, CKX, CAP);
+    }
 
     (pic, ledger_dusd, ledger_ckx, dpay, payer_sk, payer_pk, merch_pk)
 }
@@ -456,6 +485,46 @@ fn burn(pic: &PocketIc, dpay: Principal, from: [u8; 32], currency: Currency, amo
         )
         .expect("burn update rejected");
     decode_one::<Result<u64, String>>(&reply).unwrap().expect("burn ok");
+}
+
+/// Register currency metadata with ONLY a per-tx `cap` (MC2 U1). All other fields are `None` /
+/// `Unavailable` — this is the minimal registration that makes `pay` work under fail-closed
+/// per-currency caps. Called as the seeded controller (`caller`); `register_currency_meta` replaces
+/// the record in place, so calling it again with a tighter cap overrides a prior value.
+fn register_currency_meta_cap(
+    pic: &PocketIc,
+    dpay: Principal,
+    caller: Principal,
+    currency: Currency,
+    cap: u64,
+) {
+    let reply = pic
+        .update_call(
+            dpay,
+            caller,
+            "register_currency_meta",
+            encode_args((
+                currency,
+                None::<String>,               // symbol
+                None::<u8>,                   // decimals
+                None::<MinterFamily>,         // minter_family
+                None::<String>,               // wrapper_name
+                None::<String>,               // backing_symbol
+                None::<String>,               // network
+                None::<u8>,                   // display_decimals
+                None::<u64>,                  // fee
+                Some(cap),                    // cap
+                None::<u32>,                  // chain_id
+                None::<String>,               // token_contract
+                RampCapability::Unavailable,  // onramp
+                RampCapability::Unavailable,  // offramp
+            ))
+            .unwrap(),
+        )
+        .expect("register_currency_meta update_call rejected");
+    decode_one::<Result<(), String>>(&reply)
+        .unwrap()
+        .expect("register_currency_meta should succeed for the controller");
 }
 
 /// Self-service faucet: mints the FIXED `FAUCET_AMOUNT` ($100.00) to `to` on `currency`, called by
@@ -750,6 +819,84 @@ fn over_cap_is_rejected() {
     assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, merch), 0);
 }
 
+/// MC2 U1 (TDD RED→GREEN) — `pay` reads the per-currency cap from CURRENCY_META, NOT the legacy
+/// global CAP. A currency whose registered per-currency cap is BELOW the global CAP must reject an
+/// amount that is ABOVE the per-currency cap but BELOW the global cap. Today (pre-fix) `pay` uses
+/// the global CAP → this pay settles → RED. After the fix → OverCap → GREEN.
+#[test]
+fn per_currency_cap_rejects_amount_above_registered_cap() {
+    const PER_CUR_CAP: u64 = 2_000; // BELOW the global CAP (100_000)
+    const PAY_AMOUNT: u64 = 3_000; // strictly between PER_CUR_CAP and the global CAP
+    let (pic, _ledger_dusd, ledger_ckx, dpay, sk, payer, merch) = setup();
+    // CKX (currency 1) is pre-funded with INIT_A on its ledger by setup. Override its cap (setup
+    // registered the global CAP) with a tighter per-currency cap.
+    register_currency_meta_cap(&pic, dpay, pic_admin(), CKX, PER_CUR_CAP);
+    let expiry = T0_SECS + 120;
+    let res = pay(&pic, dpay, signed(&sk, payer, merch, PAY_AMOUNT, [21u8; 16], expiry, CKX));
+    assert!(
+        res.is_err(),
+        "amount {PAY_AMOUNT} > per-currency cap {PER_CUR_CAP} must be rejected (global cap is {CAP}): {res:?}",
+    );
+    // No debit landed on the CKX ledger.
+    assert_eq!(ledger_balance(&pic, ledger_ckx, dpay, payer), INIT_A);
+}
+
+/// MC2 U1 — a pay strictly UNDER the per-currency cap still settles (GREEN before AND after the fix).
+#[test]
+fn per_currency_cap_allows_amount_under_registered_cap() {
+    const PER_CUR_CAP: u64 = 5_000;
+    const PAY_AMOUNT: u64 = 2_000; // < PER_CUR_CAP
+    let (pic, _ledger_dusd, ledger_ckx, dpay, sk, payer, merch) = setup();
+    register_currency_meta_cap(&pic, dpay, pic_admin(), CKX, PER_CUR_CAP);
+    let expiry = T0_SECS + 120;
+    let receipt = pay(&pic, dpay, signed(&sk, payer, merch, PAY_AMOUNT, [22u8; 16], expiry, CKX))
+        .expect("amount under the per-currency cap must settle");
+    assert_eq!(receipt.amount, PAY_AMOUNT);
+    assert_eq!(ledger_balance(&pic, ledger_ckx, dpay, payer), INIT_A - PAY_AMOUNT);
+}
+
+/// MC2 U1 (fail-closed) — a currency with NO cap registered rejects every non-zero pay. The cap
+/// fallback is 0, so any amount > 0 is over-cap. Proven on a throwaway currency id (with its own
+/// ledger but deliberately NO currency_meta). Today (pre-fix) this pays against the global CAP and
+/// settles → RED. After the fix → OverCap → GREEN.
+#[test]
+fn fail_closed_currency_with_no_cap_rejects_every_pay() {
+    const FRESH: Currency = 7;
+    const FUND: u64 = 10_000;
+    const PAY_AMOUNT: u64 = 1_000;
+    let pic = PocketIc::new();
+    pic.set_time(Time::from_nanos_since_unix_epoch(T0_NANOS));
+    let payer_sk = generate_keypair();
+    let payer = payer_sk.verifying_key().to_bytes();
+    let merch = generate_keypair().verifying_key().to_bytes();
+    let dpay = pic.create_canister();
+    pic.add_cycles(dpay, 2_000_000_000_000);
+    // A mintable ledger for the fresh currency; minting account owned by the facade.
+    let ledger = install_ledger(
+        &pic,
+        Account { owner: dpay, subaccount: None },
+        "FRESH",
+        0,
+        vec![],
+    );
+    let dpay_init = DpayInitArg {
+        ledgers: vec![LedgerConfig { currency: FRESH, principal: ledger, mintable: true }],
+        per_tx_cap: CAP,
+        controller: Some(pic_admin()),
+    };
+    pic.install_canister(dpay, dpay_wasm(), encode_one(&dpay_init).unwrap(), None);
+    // Deliberately NO register_currency_meta for FRESH → no cap → fail-closed.
+    mint(&pic, dpay, payer, FRESH, FUND);
+    assert_eq!(ledger_balance(&pic, ledger, dpay, payer), FUND);
+    let expiry = T0_SECS + 120;
+    let res = pay(&pic, dpay, signed(&payer_sk, payer, merch, PAY_AMOUNT, [23u8; 16], expiry, FRESH));
+    assert!(
+        res.is_err(),
+        "a cap-less currency must reject every non-zero pay (fail-closed): {res:?}",
+    );
+    assert_eq!(ledger_balance(&pic, ledger, dpay, payer), FUND);
+}
+
 #[test]
 fn insufficient_balance_is_rejected() {
     let (pic, ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
@@ -867,6 +1014,9 @@ fn non_zero_fee_settles_with_fee_deducted() {
         controller: Some(pic_admin()),
     };
     pic.install_canister(dpay, dpay_wasm(), encode_one(&dpay_init).unwrap(), None);
+
+    // MC2 U1: register a per-currency cap for FEE_CUR so its pays settle (fail-closed otherwise).
+    register_currency_meta_cap(&pic, dpay, pic_admin(), FEE_CUR, CAP);
 
     // Fund the payer (minting is fee-free).
     mint(&pic, dpay, payer, FEE_CUR, INIT_A);
@@ -1396,6 +1546,11 @@ fn trap_window_lets_a_retry_double_debit_without_reconcile() {
     };
     pic.reinstall_canister(dpay, dpay_wasm(), encode_one(&dpay_init).unwrap(), None)
         .expect("reinstall (simulate trap)");
+    // MC2 U1: reinstall wipes ALL stable state (a harsher simulation than a real trap, which only
+    // rolls back the in-flight message's writes). CURRENCY_META was written by a PRIOR committed
+    // register_currency_meta call, so it survives a real trap — re-register the DEMO cap here to
+    // faithfully model the post-trap state (cap intact, only SPENT wiped).
+    register_currency_meta_cap(&pic, dpay, pic_admin(), DEMO_USD, CAP);
 
     // 3. THE BUG: a blind retry of the same authorization debits AGAIN. The existing quantized
     //    `created_at_time` dedup catches a SAME-bucket retry (the documented mitigation), so to show
@@ -1439,6 +1594,10 @@ fn reconcile_repairs_trap_orphan_and_blocks_double_debit() {
     };
     pic.reinstall_canister(dpay, dpay_wasm(), encode_one(&dpay_init).unwrap(), None)
         .expect("reinstall (simulate trap)");
+    // MC2 U1: re-register the DEMO cap after the reinstall (CURRENCY_META survives a real trap; the
+    // reinstall is a harsher simulation). Ensures the post-reconcile retry is rejected as a DUPLICATE
+    // (nonce spent), NOT as over-cap (fail-closed) — preserving the test's intent.
+    register_currency_meta_cap(&pic, dpay, pic_admin(), DEMO_USD, CAP);
 
     // 3. Reconcile as the controller. It scans the ledger's recent transactions, finds the ONE
     //    orphaned debit (the pay's transfer, memo = nonce, not in SPENT), and repairs it.

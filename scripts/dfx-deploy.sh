@@ -96,12 +96,15 @@ echo "== register the DUSD ledger in the facade (currency 0 = DEMO_USD, mintable
 # literal `principal "..."` (no field name; the reserved-word quoting only applies to record labels).
 dfx canister call "$CANISTER" register_ledger "(0 : nat32, principal \"$LEDGER_ID\", true)"
 
-echo "== register the DEMO currency metadata (MC1 unit 5: onramp=Direct faucet, offramp=Unavailable) =="
+echo "== register the DEMO currency metadata (MC1 unit 5 + MC2 U1: onramp=Direct faucet, offramp=Unavailable, cap) =="
 # register_currency_meta : (nat32, opt text, opt nat8, opt MinterFamily, opt text, opt text, opt text,
 #   opt nat8, opt opt nat64, opt nat64, opt nat32, opt text, RampCapability, RampCapability) — the
 # DEMO currency is play money: Direct faucet onramp, Unavailable offramp (no cash-out).
+# MC2 U1: pay reads the per-currency cap (fail-closed — a cap-less currency rejects every non-zero
+# pay). Register an explicit DEMO cap = the global per_tx_cap default ($1,000.00 = 100_000 minor) so
+# DEMO pays keep working; ckBTC/ckUSDC caps are real-currency policy registered separately.
 dfx canister call "$CANISTER" register_currency_meta \
-  "(0 : nat32, opt \"\$\", opt (2 : nat8), null, null, null, null, null, null, null, null, null, variant { Direct }, variant { Unavailable })"
+  "(0 : nat32, opt \"\$\", opt (2 : nat8), null, null, null, null, null, null, opt (100_000 : nat64), null, null, variant { Direct }, variant { Unavailable })"
 
 acct() { echo "record { owner = principal \"$CID\"; subaccount = opt $1 }"; }
 

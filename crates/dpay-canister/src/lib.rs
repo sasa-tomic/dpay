@@ -1261,6 +1261,18 @@ fn minter_for(currency: Currency) -> Result<Principal, String> {
         .ok_or_else(|| format!("currency {currency} has no ck minter"))
 }
 
+/// The governed per-currency transaction cap (MC2 U1). Read from `CURRENCY_META` — the authoritative
+/// per-currency replacement for the single global `CAP`. `None` (no metadata registered, or the
+/// `cap` field unset) maps to a **fail-closed** `0` at the single call site in `pay`, so EVERY
+/// non-zero pay on a cap-less currency is rejected (`amount > 0` → OverCap). This forces an
+/// explicit per-currency cap to be registered before that currency is payable — matching the
+/// project's fail-closed discipline (same posture as MC1's unknown-family → null ramp). The legacy
+/// global `CAP` cell + `per_tx_cap()` query are retained as a deploy-script readout only; `pay` no
+/// longer consults them.
+fn currency_cap(currency: Currency) -> Option<u64> {
+    CURRENCY_META.with(|m| m.borrow().get(&currency).and_then(|meta| meta.cap))
+}
+
 /// The ICRC account this canister controls for a user pubkey: the canister is the `owner`, the
 /// 32-byte Ed25519 pubkey is the `subaccount`. Identical on every ledger.
 fn account_of(pk: &[u8; PUBKEY_LEN]) -> Account {
@@ -1522,7 +1534,11 @@ async fn pay(signed: Vec<u8>) -> Result<PayReceipt, String> {
     if sa.auth.expiry < now_secs {
         return Err("expired".to_string());
     }
-    let cap = CAP.with(|c| *c.borrow().get());
+    // MC2 U1: the per-currency cap (governed, fail-closed). `None` ⇒ 0 ⇒ every non-zero pay on a
+    // cap-less currency is rejected (OverCap). The SAME `cap` flows into both the early `amount >
+    // cap` check and `validate(...)` — one source. The legacy global `CAP` cell is no longer read
+    // here (kept only as the `per_tx_cap()` legacy readout).
+    let cap = currency_cap(currency).unwrap_or(0);
     if amount > cap {
         return Err("over cap".to_string());
     }

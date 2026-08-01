@@ -144,6 +144,24 @@ struct DepositRefresh {
     required_confirmations: u32,
 }
 
+/// Local mirror of the canister's `RampCapability` (candid wire type) — needed to encode
+/// `register_currency_meta` calls from this test.
+#[derive(CandidType, serde::Serialize)]
+enum RampCapability {
+    Direct,
+    Partner,
+    Unavailable,
+}
+
+/// Local mirror of the canister's `MinterFamily` (candid wire type) — the `None` variant is all the
+/// cap-only registration needs.
+#[derive(CandidType, serde::Serialize)]
+enum MinterFamily {
+    CkBtcUtxo,
+    CkEthErc20,
+    CkSol,
+}
+
 fn nat_to_u64(n: &Nat) -> u64 {
     num_traits::ToPrimitive::to_u64(&n.0).expect("nat fits in u64")
 }
@@ -308,6 +326,40 @@ fn register_deposit(pic: &PocketIc, mock: Principal, facade: Principal, pk: [u8;
     .expect("register_deposit update_call rejected");
 }
 
+/// Register currency metadata with ONLY a per-tx `cap` (MC2 U1). `pay` is fail-closed on a cap-less
+/// currency, so the deposit→pay closed-loop test needs a registered cap on CKBTC to settle. Called
+/// as the seeded controller (the management-canister principal); `register_currency_meta` replaces
+/// the record in place.
+fn register_currency_meta_cap(pic: &PocketIc, dpay: Principal, caller: Principal, currency: Currency, cap: u64) {
+    let reply = pic
+        .update_call(
+            dpay,
+            caller,
+            "register_currency_meta",
+            encode_args((
+                currency,
+                None::<String>,               // symbol
+                None::<u8>,                   // decimals
+                None::<MinterFamily>,         // minter_family
+                None::<String>,               // wrapper_name
+                None::<String>,               // backing_symbol
+                None::<String>,               // network
+                None::<u8>,                   // display_decimals
+                None::<u64>,                  // fee
+                Some(cap),                    // cap
+                None::<u32>,                  // chain_id
+                None::<String>,               // token_contract
+                RampCapability::Unavailable,  // onramp
+                RampCapability::Unavailable,  // offramp
+            ))
+            .unwrap(),
+        )
+        .expect("register_currency_meta update_call rejected");
+    decode_one::<Result<(), String>>(&reply)
+        .unwrap()
+        .expect("register_currency_meta should succeed for the controller");
+}
+
 fn setup_deposit() -> (PocketIc, Principal, Principal, Principal, SigningKey, [u8; 32]) {
     let pic = PocketIc::new();
     pic.set_time(Time::from_nanos_since_unix_epoch(T0_NANOS));
@@ -352,6 +404,10 @@ fn setup_deposit() -> (PocketIc, Principal, Principal, Principal, SigningKey, [u
     decode_one::<Result<(), String>>(&reply)
         .unwrap()
         .expect("register_minter should succeed for the controller");
+
+    // MC2 U1: `pay` reads the per-currency cap (fail-closed). Register a cap for CKBTC so the
+    // deposit→pay closed-loop test (deposited_funds_are_spendable_via_pay) can settle.
+    register_currency_meta_cap(&pic, dpay, admin, CKBTC, CAP);
 
     (pic, ckbtc, dpay, mock, payer_sk, payer)
 }

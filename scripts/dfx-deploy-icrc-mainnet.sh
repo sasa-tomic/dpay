@@ -87,12 +87,15 @@ REG_OUT="$(dfx --identity dpay canister call "$FACADE_ID" register_ledger \
   "(0 : nat32, principal \"${LEDGER_ID}\", true)" --network "$NETWORK")"
 case "$REG_OUT" in *Ok*) echo "   register Ok";; *) echo "FAIL: register_ledger did not return Ok: $REG_OUT" >&2; exit 1;; esac
 
-echo "== register the DEMO currency metadata (MC1 unit 5: onramp=Direct faucet, offramp=Unavailable) =="
+echo "== register the DEMO currency metadata (MC1 unit 5 + MC2 U1: onramp=Direct faucet, offramp=Unavailable, cap) =="
 # register_currency_meta : (nat32, opt text, opt nat8, opt MinterFamily, opt text, opt text, opt text,
 #   opt nat8, opt nat64, opt nat64, opt nat32, opt text, RampCapability, RampCapability). DEMO = play
 # money: Direct faucet onramp, Unavailable offramp (no cash-out).
+# MC2 U1: pay reads the per-currency cap (fail-closed — a cap-less currency rejects every non-zero
+# pay). Register an explicit DEMO cap = the global per_tx_cap default ($1,000.00 = 100_000 minor) so
+# DEMO pays keep working on mainnet.
 META_OUT="$(dfx --identity dpay canister call "$FACADE_ID" register_currency_meta \
-  "(0 : nat32, opt \"\$\", opt (2 : nat8), null, null, null, null, null, null, null, null, null, variant { Direct }, variant { Unavailable })" --network "$NETWORK")"
+  "(0 : nat32, opt \"\$\", opt (2 : nat8), null, null, null, null, null, null, opt (100_000 : nat64), null, null, variant { Direct }, variant { Unavailable })" --network "$NETWORK")"
 case "$META_OUT" in *Ok*) echo "   meta Ok";; *) echo "WARN: register_currency_meta did not return Ok: $META_OUT" >&2;; esac
 
 echo "== verify a: mint DUSD to the payer subaccount via the facade (caller = OPERATOR) =="
