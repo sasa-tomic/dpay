@@ -14,7 +14,7 @@ export ANDROID_SDK_ROOT="$ANDROID_HOME"
 # Respect a valid JAVA_HOME; otherwise (unset, or an inherited-but-bogus value) ask the JVM itself.
 [ -x "${JAVA_HOME:-}/bin/javac" ] || export JAVA_HOME="$(java -XshowSettings:properties -version 2>&1 | sed -n 's/.*java\.home = //p')"
 export PATH="$ANDROID_HOME/platform-tools:$PATH"
-APP_ID=com.dpay
+APP_ID=org.kalaj.dpay
 SHOTS="$ROOT/app/shots"; mkdir -p "$SHOTS"
 
 echo "== select target device =="

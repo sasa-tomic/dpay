@@ -111,7 +111,7 @@ android {
 
     namespace "com.dpay"
     defaultConfig {
-        applicationId "com.dpay"
+        applicationId "org.kalaj.dpay"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode releaseVersionCode

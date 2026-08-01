@@ -48,6 +48,9 @@ must not be used to sign a Play release.
 
 ## Automated internal-track uploads
 
+The Google Play application ID is `org.kalaj.dpay`. The Android source
+namespace remains `com.dpay`; these values are intentionally different.
+
 `just play-upload` is the release command. It:
 
 1. runs the full offline `just verify` gate;

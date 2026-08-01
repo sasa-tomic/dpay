@@ -35,6 +35,12 @@ Milestone acceptance: a fresh install visibly exposes configured assets; a merch
 
 ## Other open issues
 
+### 11. (medium) RN release toolchain must move past AGP 8.5 before API 36
+
+- **What/why.** The Play app now targets/compiles API 35 after Play rejected the old API 34 bundle. The standalone `android/` device-fidelity module explicitly pins AGP 8.7.3, but the separate React Native release build in `app/android/` uses the versionless Android plugin dependency supplied by RN 0.75.4, whose bundled version catalog pins AGP 8.5.0. AGP 8.5 emits a warning that it was tested only through compile SDK 34.
+- **Current mitigation.** The signed API 35 AAB built successfully, passed package/target/certificate checks, and Play committed version code `1785619014` to the internal track on 2026-08-01. This is a tooling-support warning, not a blocker for that accepted artifact.
+- **Next step.** Before the Play API 36 deadline (2026-08-31), upgrade the RN release build to an API-36-compatible AGP/Gradle combination (preferably through the corresponding RN upgrade rather than patching `node_modules`), rebuild, run `just app` + `just ondevice`, and upload a fresh internal release.
+
 ### 1. (low) ckBTC live deposit→mint not yet exercised with real BTC
 
 - **What/why.** No KYC/NNS allowlist is required to mint ckBTC — the mainnet ckBTC minter (`mqygn-kiaaa-aaaar-qaadq-cai`) runs in GeneralAvailability mode with **no KYC checker** (`get_minter_info` returns only `min_confirmations=4`, `kyt_fee=100`, `deposit_btc_min_amount=300`, `retrieve_btc_min_amount=50000`; the `btc_checker_principal` is unset). The minter's `UpdateBalanceError` has no "not allowed"/KYC variant; the only screening is automatic **KYT (Know-Your-Transaction)** that flags tainted *UTXOs*, not principals. A previous version of this issue incorrectly claimed a hard KYC/NNS blocker — that was an **unverified assumption**, disproven by the live minter config and by the facade's own `get_btc_address`/`update_balance` calls succeeding against mainnet.
