@@ -6,6 +6,7 @@
 //! offline. The candid surface it drives is exactly the facade canister's:
 //!   - `pay        : (blob) -> (variant { Ok : PayReceipt; Err : text })`  [update]
 //!   - `balance_of : (blob, nat32) -> (nat64) query`                       [query; display cache]
+//!   - `refresh_balance : (blob, nat32) -> (variant { Ok : nat64; Err : text })`  [update; authoritative read + cache write]
 //!   - `faucet     : (blob, nat32) -> (variant { Ok : nat64; Err : text })`  [update; self-service, fixed amount, rate-limited]
 //!   - `transactions_of : (blob, nat32, nat32) -> (vec record {...}) query`
 //!
@@ -13,6 +14,10 @@
 //! what `dpay-canister-tests` does with `encode_one(&wire)`. `balance` and `mint` pass `currency`
 //! as a positional `nat32` next to the pubkey `blob`, matching the canister's multi-currency
 //! `(pubkey, currency) -> balance` shape.
+
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::Instant;
 
 use async_trait::async_trait;
 use candid::{decode_one, encode_args, encode_one, CandidType, Nat, Principal};
@@ -168,9 +173,16 @@ struct CurrencyDescriptorMirror {
 
 /// A [`Ledger`] backed by a real IC replica. Owns an [`Agent`] pointed at the replica/gateway URL
 /// and the dpay canister's [`Principal`]. Cheap to `clone` semantically via `Arc` at the call site.
+///
+/// `last_refresh` is the per-`(pubkey, currency)` TTL freshness clock for the [`Ledger::balance`]
+/// path (see [`Self::is_stale`] / [`Self::refresh_balance`]). Most balance polls hit the fast cached
+/// `balance_of` query; once per `BALANCE_TTL_SECS` window one poll does the authoritative
+/// `refresh_balance` update so credits that bypass the facade (direct ICRC transfers + async ckERC20
+/// heartbeat mints) surface without waiting for a `pay`/`mint`/`faucet` cache refresh.
 pub struct AgentLedger {
     agent: Agent,
     canister_id: Principal,
+    last_refresh: Mutex<HashMap<([u8; PUBKEY_LEN], Currency), Instant>>,
 }
 
 impl AgentLedger {
@@ -212,7 +224,7 @@ impl AgentLedger {
                 .await
                 .map_err(|e| LedgerError::Transient(format!("fetch_root_key: {e}")))?;
         }
-        Ok(AgentLedger { agent, canister_id })
+        Ok(AgentLedger { agent, canister_id, last_refresh: Mutex::new(HashMap::new()) })
     }
 
     /// Read a balance via a real `balance_of(blob, nat32)` query. Test/demo introspection (mirrors
@@ -235,6 +247,57 @@ impl AgentLedger {
             .map_err(|e| LedgerError::Transient(format!("balance_of query: {e}")))?;
         decode_one::<u64>(&reply)
             .map_err(|e| LedgerError::Transient(format!("decode balance: {e}")))
+    }
+
+    /// AUTHORITATIVE balance via the facade's `refresh_balance(blob, nat32) -> Result<nat64, text>`
+    /// UPDATE — does a cross-canister `icrc1_balance_of`, writes `BAL_CACHE`, and returns the
+    /// amount. Covers credit paths the cached `balance_of` query can't see (direct ICRC transfers +
+    /// async ckERC20 heartbeat mints, which land on the ledger WITHOUT invoking the facade). On
+    /// success, marks this `(pubkey, currency)` fresh (resets the TTL timer).
+    ///
+    /// Modeled EXACTLY on `balance_of`'s encode/decode and `faucet`'s update-call +
+    /// `Result<u64, String>` error mapping: a transport/replica failure is `Transient` (503,
+    /// retried); a canister-level `Err(text)` is `Rejected` (422, never retried) — though in
+    /// practice the only `Err` here is a malformed pubkey / unknown currency (deploy-time
+    /// invariants), since the call moves no value and is ungated.
+    pub async fn refresh_balance(
+        &self,
+        pubkey: &[u8; PUBKEY_LEN],
+        currency: Currency,
+    ) -> Result<u64, LedgerError> {
+        let arg = encode_args((pubkey.to_vec(), currency))
+            .map_err(|e| LedgerError::Transient(format!("encode refresh_balance arg: {e}")))?;
+        let reply = self
+            .agent
+            .update(&self.canister_id, "refresh_balance")
+            .with_arg(arg)
+            .call_and_wait()
+            .await
+            .map_err(|e| LedgerError::Transient(format!("refresh_balance update: {e}")))?;
+        let result: Result<u64, String> = decode_one(&reply)
+            .map_err(|e| LedgerError::Transient(format!("decode refresh_balance reply: {e}")))?;
+        let bal = result.map_err(LedgerError::Rejected)?;
+        // Mark fresh — the next `balance()` within the TTL window hits the fast cached query.
+        self.last_refresh
+            .lock()
+            .unwrap()
+            .insert((*pubkey, currency), Instant::now());
+        Ok(bal)
+    }
+
+    /// Per-`(pubkey, currency)` freshness decision for the TTL-gated [`Ledger::balance`] path.
+    /// `true` = stale → the next `balance()` does an authoritative [`refresh_balance`] update;
+    /// `false` = fresh → it hits the fast cached `balance_of` query. A missing entry (cold start /
+    /// relay restart) is treated as stale so a restart can't wedge a stale displayed balance.
+    fn is_stale(&self, pubkey: [u8; PUBKEY_LEN], currency: Currency) -> bool {
+        /// Bounded staleness window for a displayed balance. One poll per window does the
+        /// authoritative `refresh_balance` update; the rest hit the fast cached query. Bounds
+        /// displayed-balance staleness to ~TTL+one-poll. Tunable.
+        const BALANCE_TTL_SECS: u64 = 15;
+        match self.last_refresh.lock().unwrap().get(&(pubkey, currency)) {
+            None => true,
+            Some(t) => Instant::now().duration_since(*t).as_secs() >= BALANCE_TTL_SECS,
+        }
     }
 }
 
@@ -283,7 +346,16 @@ impl Ledger for AgentLedger {
     }
 
     async fn balance(&self, pubkey: [u8; PUBKEY_LEN], currency: Currency) -> Result<u64, LedgerError> {
-        self.balance_of(&pubkey, currency).await
+        // TTL-gated freshness contract (MC3 U2). One poll per BALANCE_TTL_SECS window does the
+        // authoritative `refresh_balance` update (re-reads the ledger + writes the cache + covers
+        // facade-bypassing credits); the rest hit the fast cached `balance_of` query. The decision
+        // lives in the RELAY (not the canister) so a cold start / relay restart forces a first-poll
+        // refresh and can't wedge a stale balance.
+        if self.is_stale(pubkey, currency) {
+            self.refresh_balance(&pubkey, currency).await
+        } else {
+            self.balance_of(&pubkey, currency).await
+        }
     }
 
     async fn receipt_pubkey(&self) -> Result<Vec<u8>, LedgerError> {

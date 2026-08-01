@@ -37,7 +37,6 @@ use tower::ServiceExt; // oneshot
 
 use candid::{decode_one, encode_args, encode_one, CandidType, Nat, Principal};
 use pocket_ic::PocketIc;
-use serde::Deserialize;
 
 use dpay_core::{generate_keypair, Authorization, SignedAuthorization, DEMO_USD};
 use dpay_relay::{app, AgentLedger, AppState, Ledger};
@@ -102,6 +101,77 @@ struct LedgerInitArgs {
 #[derive(CandidType, serde::Serialize)]
 enum LedgerArg {
     Init(LedgerInitArgs),
+}
+
+/// A minimal `icrc1_transfer` argument shape for simulating an EXTERNAL credit that BYPASSES the
+/// facade (mirrors the canister test's `direct_credit` helper). `fee`/`memo` are only ever `None`
+/// here, so the exact wrapper types do not matter — `None` serializes as `null`, candid-compatible
+/// with any `opt T`. Field labels match the ICRC-1 TransferArg record names exactly.
+#[derive(CandidType, serde::Serialize)]
+struct DirectTransferArg {
+    from_subaccount: Option<Vec<u8>>,
+    to: Account,
+    amount: Nat,
+    fee: Option<Nat>,
+    memo: Option<Vec<u8>>,
+    created_at_time: Option<u64>,
+}
+
+/// Local candid mirrors of the canister's `MinterFamily` / `RampCapability` variants, for the
+/// `register_currency_meta` cap-registration args (MC2 U1: `pay` is fail-closed on the per-currency
+/// cap, so the live `pay` test must register a cap for DEMO_USD). Variant LABELS match the canister's
+/// `.did` exactly — candid serde hashes the label, so declaration order is irrelevant.
+#[derive(CandidType, serde::Serialize)]
+enum TestMinterFamily {
+    CkBtcUtxo,
+    CkEthErc20,
+    CkSol,
+}
+
+#[derive(CandidType, serde::Serialize)]
+enum TestRampCapability {
+    Direct,
+    Partner,
+    Unavailable,
+}
+
+/// Register a per-tx `cap` for `currency` (MC2 U1). Mirrors the canister test's
+/// `register_currency_meta_cap` — all other fields `None`/`Unavailable`. Called as the controller
+/// (the live test seeds `management_canister` as the controller so this admin op is permitted).
+fn register_currency_meta_cap(
+    pic: &PocketIc,
+    dpay: Principal,
+    controller: Principal,
+    currency: u32,
+    cap: u64,
+) {
+    let reply = pic
+        .update_call(
+            dpay,
+            controller,
+            "register_currency_meta",
+            encode_args((
+                currency,
+                None::<String>,              // symbol
+                None::<u8>,                  // decimals
+                None::<TestMinterFamily>,    // minter_family
+                None::<String>,              // wrapper_name
+                None::<String>,              // backing_symbol
+                None::<String>,              // network
+                None::<u8>,                  // display_decimals
+                None::<u64>,                 // fee
+                Some(cap),                   // cap
+                None::<u32>,                 // chain_id
+                None::<String>,              // token_contract
+                TestRampCapability::Unavailable, // onramp
+                TestRampCapability::Unavailable, // offramp
+            ))
+            .unwrap(),
+        )
+        .expect("register_currency_meta update_call rejected");
+    decode_one::<Result<(), String>>(&reply)
+        .unwrap()
+        .expect("register_currency_meta should succeed for the controller");
 }
 
 fn now_secs() -> u64 {
@@ -211,13 +281,21 @@ fn live_settlement_end_to_end() {
     });
     pic.install_canister(ledger, ledger_wasm(), encode_one(&ledger_init).unwrap(), None);
 
-    // Install the facade wired to the ledger (DUSD, mintable, open controller).
+    // Install the facade wired to the ledger (DUSD, mintable, seeded controller).
+    //
+    // MC2 U1 fallout: `pay` now reads the per-currency cap from `CURRENCY_META` (fail-closed — a
+    // cap-less currency rejects every non-zero pay). This live test exercises `pay`, so it must
+    // seed a controller (the management-canister principal) and register a DEMO cap. Pre-MC2 this
+    // test ran in open mode (controller=None); the cap registration restores the pre-MC2 settle
+    // behavior against the governed-cap gate.
+    let admin = Principal::management_canister();
     let dpay_init = DpayInitArg {
         ledgers: vec![LedgerConfig { currency: DEMO_USD, principal: ledger, mintable: true }],
         per_tx_cap: CAP,
-        controller: None,
+        controller: Some(admin),
     };
     pic.install_canister(dpay, facade_wasm(), encode_one(&dpay_init).unwrap(), None);
+    register_currency_meta_cap(&pic, dpay, admin, DEMO_USD, CAP);
     let canister_id: Principal = dpay;
 
     // Fund the payer through the self-service FAUCET. Since R1 the privileged `mint` is
@@ -286,11 +364,12 @@ fn live_settlement_end_to_end() {
         let (s1, b1) = call(&state, pay_wire(&sa.to_wire())).await;
         assert_eq!(s1, StatusCode::OK, "valid pay must settle: {b1}");
         let r = &b1["receipt"];
-        assert_eq!(r["amount"], 2_500);
+        // U64String (exact-amount transport): amounts cross the wire as JSON strings.
+        assert_eq!(r["amount"], "2500");
         assert_eq!(r["from"], hex::encode(payer_pk));
         assert_eq!(r["to"], hex::encode(merch_pk));
         assert_eq!(r["nonce"], hex::encode(nonce));
-        assert_eq!(r["new_from_balance"], INIT_A - 2_500);
+        assert_eq!(r["new_from_balance"], (INIT_A - 2_500).to_string());
 
         // Read back through REAL balance_of queries — the cache was refreshed post-settle.
         assert_eq!(ledger.balance_of(&payer_pk, DEMO_USD).await.unwrap(), INIT_A - 2_500);
@@ -327,5 +406,163 @@ fn live_settlement_end_to_end() {
     });
 
     // Tear down the gateway + replica explicitly (also happens on drop).
+    pic.stop_live();
+}
+
+/// MC3 U2 — the relay's TTL-gated `Ledger::balance` path is AUTHORITATIVE after a cache-bypassing
+/// credit. Covers credits the facade cache cannot see on its own: direct ICRC transfers + async
+/// ckERC20 heartbeat mints (which land on the ledger WITHOUT invoking the facade, so `BAL_CACHE`
+/// stays stale). Proves the FULL contract:
+///
+/// 1. Cold start → `balance()` is stale → does an authoritative `refresh_balance` UPDATE (re-reads
+///    the ledger + writes the cache) and returns the true amount.
+/// 2. A direct `icrc1_transfer` to `Account{owner: facade, subaccount: payer}` (the exact shape of
+///    a direct ICRC transfer / async ckERC20 heartbeat mint) leaves the cached `balance_of` query
+///    STALE — proving the bug the TTL contract fixes.
+/// 3. `refresh_balance` then surfaces the new (higher) authoritative amount.
+/// 4. A subsequent `balance()` is now FRESH (within the TTL window) → hits the fast cached
+///    `balance_of` query and returns the SAME authoritative amount (TTL-gating + cache coherence).
+#[test]
+fn balance_refresh_is_authoritative_after_cache_bypass_credit() {
+    let mut pic = PocketIc::new();
+    let gateway_url = pic.make_live(None).to_string();
+
+    // The facade owns the ledger's minting account, so a direct `icrc1_transfer` AS the facade
+    // with `from_subaccount: None` debits the minting account — ICRC treats that as a MINT. This is
+    // exactly how a direct ICRC transfer / async ckERC20 heartbeat mint lands funds at the user's
+    // facade subaccount with the facade NEVER invoked.
+    let dpay = pic.create_canister();
+    pic.add_cycles(dpay, 2_000_000_000_000);
+
+    let ledger = pic.create_canister();
+    pic.add_cycles(ledger, 10_000_000_000_000);
+    let ledger_init = LedgerArg::Init(LedgerInitArgs {
+        minting_account: Account { owner: dpay, subaccount: None },
+        fee_collector_account: None,
+        transfer_fee: Nat::from(0u64),
+        decimals: Some(2),
+        max_memo_length: None,
+        token_symbol: "DUSD".into(),
+        token_name: "dpay demo USD".into(),
+        metadata: vec![],
+        initial_balances: vec![],
+        feature_flags: Some(FeatureFlags { icrc2: true, icrc152: false }),
+        archive_options: ArchiveOptions {
+            num_blocks_to_archive: 10_000,
+            max_transactions_per_response: None,
+            trigger_threshold: 10_000_000,
+            max_message_size_bytes: None,
+            cycles_for_archive_creation: None,
+            node_max_memory_size_bytes: None,
+            controller_id: dpay,
+            more_controller_ids: None,
+        },
+        index_principal: None,
+    });
+    pic.install_canister(ledger, ledger_wasm(), encode_one(&ledger_init).unwrap(), None);
+
+    let dpay_init = DpayInitArg {
+        ledgers: vec![LedgerConfig { currency: DEMO_USD, principal: ledger, mintable: true }],
+        per_tx_cap: CAP,
+        controller: None,
+    };
+    pic.install_canister(dpay, facade_wasm(), encode_one(&dpay_init).unwrap(), None);
+    let canister_id: Principal = dpay;
+
+    // Fund the payer through the self-service faucet (the demo on-ramp). This populates the cache
+    // AND — once the relay reads it — sets `last_refresh` for this (pubkey, currency).
+    let payer_sk = generate_keypair();
+    let payer_pk = payer_sk.verifying_key().to_bytes();
+    let mint_reply = pic
+        .update_call(dpay, Principal::anonymous(), "faucet", encode_args((payer_pk.to_vec(), DEMO_USD)).unwrap())
+        .expect("faucet update rejected");
+    let minted = decode_one::<Result<u64, String>>(&mint_reply).unwrap().expect("faucet must succeed");
+    assert_eq!(minted, INIT_A);
+
+    const CREDIT: u64 = 7_300; // the cache-bypassing external credit (e.g. direct ICRC transfer)
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime");
+
+    // ---- Phase 1 (async): connect + cold-start authoritative balance. ----
+    // A fresh AgentLedger has NO `last_refresh` entry → `is_stale` is true → `balance()` does the
+    // authoritative `refresh_balance` update (not the cached query) and returns INIT_A.
+    let agent_ledger = rt
+        .block_on(async {
+            let l = AgentLedger::connect(&gateway_url, canister_id)
+                .await
+                .expect("AgentLedger must connect to the live gateway");
+            let bal0 = l.balance(payer_pk, DEMO_USD).await.expect("cold-start balance");
+            assert_eq!(bal0, INIT_A, "cold-start balance() must do the authoritative refresh");
+            l
+        });
+
+    // ---- Phase 2 (sync): the cache-bypassing credit. ----
+    // A direct `icrc1_transfer` ON the ledger, AS the facade (minting-account owner),
+    // `from_subaccount: None` (mint), to the payer's subaccount. The facade is NEVER invoked, so
+    // its `BAL_CACHE` stays stale. (Done OUTSIDE the tokio runtime to avoid a runtime-in-runtime.)
+    let credit_reply = pic
+        .update_call(
+            ledger,
+            dpay, // caller = the facade = the minting-account owner
+            "icrc1_transfer",
+            encode_one(&DirectTransferArg {
+                from_subaccount: None,
+                to: Account { owner: dpay, subaccount: Some(payer_pk) },
+                amount: Nat::from(CREDIT),
+                fee: None,
+                memo: None,
+                created_at_time: Some(now_secs().saturating_mul(1_000_000_000)),
+            })
+            .unwrap(),
+        )
+        .expect("direct icrc1_transfer (cache-bypassing credit) rejected");
+    decode_one::<Result<Nat, candid::Reserved>>(&credit_reply)
+        .expect("direct icrc1_transfer reply decode")
+        .expect("direct credit transfer should succeed (minting account debited)");
+
+    // ---- Phase 3 (async): stale cache → authoritative refresh → TTL-gated fresh read. ----
+    rt.block_on(async move {
+        // (2) The cached `balance_of` query is now STALE — the bug the TTL contract fixes.
+        let stale = agent_ledger
+            .balance_of(&payer_pk, DEMO_USD)
+            .await
+            .expect("balance_of query");
+        assert_eq!(
+            stale, INIT_A,
+            "cached balance_of must be STALE after a facade-bypassing credit (the bug)",
+        );
+
+        // (3) refresh_balance returns the NEW authoritative amount (re-reads the ledger + writes the
+        // cache) and marks the (pubkey, currency) fresh.
+        let auth = agent_ledger
+            .refresh_balance(&payer_pk, DEMO_USD)
+            .await
+            .expect("refresh_balance must succeed");
+        assert_eq!(
+            auth,
+            INIT_A + CREDIT,
+            "refresh_balance must surface the cache-bypassing credit (authoritative read)",
+        );
+
+        // The cache was written by the refresh, so the cached query now agrees too.
+        let cached = agent_ledger
+            .balance_of(&payer_pk, DEMO_USD)
+            .await
+            .expect("balance_of query post-refresh");
+        assert_eq!(cached, INIT_A + CREDIT, "cached balance_of must agree post-refresh");
+
+        // (4) A subsequent balance() is FRESH (within the TTL window) → fast cached query → same
+        // authoritative amount. Proves TTL-gating + cache coherence: the second poll does NOT
+        // re-hit the authoritative update, yet returns the authoritative amount via the cache.
+        let bal1 = agent_ledger.balance(payer_pk, DEMO_USD).await.expect("fresh balance()");
+        assert_eq!(
+            bal1, INIT_A + CREDIT,
+            "fresh (within-TTL) balance() must return the authoritative amount via the cache",
+        );
+    });
+
     pic.stop_live();
 }
