@@ -165,6 +165,14 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled
         // R2: trust the outcome only if the receipt's signature verifies under the canister/ledger
         // pubkey. A merchant/relay cannot forge this; an unverifiable receipt is treated as unknown
         // (pending), never a fake success.
+        //
+        // MC4 U5: the full-auth binding (the `auth` arg to verifyOutcomeReceipt) is intentionally
+        // NOT passed here. This is the MERCHANT (reader) path; the merchant forwards the payer's
+        // opaque signed wire but never decodes the payer's `from` pubkey, so it cannot supply the
+        // full 5-field authorization. The merchant's defenses are the key-pin + signature + the
+        // nonce match enforced via `settledNonceHex` above (the nonce is single-use → a receipt for
+        // a different payment is already rejected there). The PAYER-side binding (PayMode) carries
+        // the complete authorization.
         const verified = settledReceipt ? await verifyOutcomeReceipt(settledReceipt) : false;
         if (verified) {
           record();

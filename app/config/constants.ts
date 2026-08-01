@@ -29,6 +29,17 @@ export const POLL = (() => {
     receiptRcv: t?.receiptRcv ?? 1500,
   };
 })();
+// Expected canister receipt-signing pubkey (32-byte hex). Empty string = dev/unpinned fallback
+// (`verifyOutcomeReceipt` then trusts the receipt's embedded key — the e2e/dev path; a malicious
+// relay can still self-sign in this mode, so it is NOT production-safe). Production bakes the real
+// canister's `receipt_pubkey()` here (one-time per canister deploy; the key never rotates), which
+// closes the malicious-relay trust gap (MC4 U5 / OPEN_ISSUES #2): a relay can no longer fabricate a
+// key+sig+claim that passes the app's check, because the trusted key is sourced INDEPENDENTLY of the
+// receipt body. The e2e harness injects the FakeLedger's test key via `__DPAY_TEST_RECEIPT_PUBKEY`
+// before the bundle evaluates, exactly like `__DPAY_TEST_POLL` (driver.mjs evaluateOnNewDocument).
+export const EXPECTED_RECEIPT_PUBKEY =
+  ((globalThis as unknown as {__DPAY_TEST_RECEIPT_PUBKEY?: string}).__DPAY_TEST_RECEIPT_PUBKEY ?? '');
+
 export const WITHDRAW_TIMEOUT_MS = 8000; // bound the /withdraw POST (every new fetch has a timeout)
 export const WITHDRAW_EXPIRY_WINDOW = 600; // the signed WithdrawAuth is valid 10 min
 // Mirrors the canister's fixed FAUCET_AMOUNT ($100.00 = 10_000 cents). The demo top-up POSTs this

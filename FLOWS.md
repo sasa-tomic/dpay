@@ -41,6 +41,7 @@ positive paths come first, then error/edge paths.
 | 08 | merchant-settle | Merchant side: sees incoming payment → settles | The recipient's "Received $X" confirmation. |
 | 09 | double-spend | Attacker replays a captured signed code | Replay refused (nonce single-use), no double debit. |
 | 10 | expired | Payer scans an already-expired request | Expiry refused, Approve button disabled, no leaked nonce. |
+| 30 | trusted-receipt | A "malicious relay" returns a wrong-key receipt (valid Ed25519 sig under a fresh attacker key, all other fields matching) | The app's key-pin rejects it → NO fake "Paid ✓", honest "Couldn't verify" shown, no debit. RED under an empty pin (proves the pin is load-bearing). Closes MC4 U5 / OPEN_ISSUES #2. |
 | 19 | low-balance | Payer with insufficient funds scans a request | Offline: review-lowbal warning. Online: Approve disabled, "Not enough balance". |
 | 25 | asset-request | Merchant selects ckBTC chip → types BTC amount → shows request QR | The encoded request carries the RUNTIME currency id 1 (not hardcoded 0) + 50000 sats; the readout shows "0.00050000 BTC", never a dollar amount. Proves the merchant-side of MC5 (asset selection; dpay never swaps). |
 | 26 | names-memo | Alice pays Bob with memo "coffee" | Both wallets' history shows friendly names (from_name/to_name) + memo, no raw-hex counterparties. Proves N6/H3 closure via wire-format v2. |

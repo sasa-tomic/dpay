@@ -76,4 +76,17 @@ export type DpayCoreApi = {
   nfcStatus?(): Promise<string>;
 };
 
+// MC4 U5: the signed authorization the payer holds, used to bind a relay-returned receipt to the
+// EXACT payment (defense-in-depth against a stale/malicious relay returning a different settled
+// payment's receipt). Every field is the canonical signed value: `from`/`to` are pubkey hex strings;
+// `amount` is a raw-u64 decimal STRING (MC1 units 2-4 — never `number`, lossy above 2^53); `currency`
+// is the small u32; `nonce` is hex. `verifyOutcomeReceipt` compares each receipt field against these.
+export type ReceiptAuth = {
+  from: string;
+  to: string;
+  amount: string;
+  currency: number;
+  nonce: string;
+};
+
 export type NfcStatus = 'ready' | 'off' | 'unsupported' | 'unknown';

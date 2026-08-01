@@ -62,9 +62,12 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
       try {
         const r = await fetch(`${base(relayUrl)}/api/v1/receipt/${qr.nonce}`, {signal: ctrl.signal});
         // R2: only believe the reconciled receipt if its canister/ledger signature verifies.
+        // MC4 U5: full-auth binding — the receipt must answer the exact authorization the payer
+        // holds (same from/to/amount/currency/nonce), so a stale relay returning a different
+        // payment's receipt is rejected. `req` holds the payee + amount the payer signed for.
         if (alive && r.ok) {
           const j = await r.json().catch(() => ({} as any));
-          if (await verifyOutcomeReceipt(j.receipt)) {
+          if (req && await verifyOutcomeReceipt(j.receipt, {from: identity.publicHex, to: req.toHex, amount: req.amount, currency: req.currency, nonce: req.nonceHex})) {
             onSettled(); setPaid({amount: qr.amount, currency: qr.currency, who: qr.who, already: false}); setPhase('paid');
           }
         }
@@ -72,7 +75,7 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
     };
     check(); const id = setInterval(check, POLL.receiptPay);
     return () => { alive = false; clearInterval(id); };
-  }, [phase, qr, relayUrl, onSettled]);
+  }, [phase, qr, relayUrl, onSettled, identity, req]);
 
   async function approve() {
     if (!req) return;
@@ -99,7 +102,9 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
         if (outcome === 'settled') {
           // R2: trust the outcome only if the receipt's canister/ledger signature verifies. A
           // replay (replayed:true) returns the SAME cached receipt, which verifies identically.
-          const verified = await verifyOutcomeReceipt(j.receipt);
+          // MC4 U5: full-auth binding — the receipt must match the signed authorization (same
+          // from/to/amount/currency/nonce) so a stale/different payment's receipt is rejected.
+          const verified = await verifyOutcomeReceipt(j.receipt, {from: identity.publicHex, to: req.toHex, amount: req.amount, currency: req.currency, nonce: req.nonceHex});
           if (verified) {
             if (!j.replayed) onSettled();
             setPaid({amount: req.amount, currency: req.currency, who, already: !!j.replayed}); setPhase('paid'); return;
