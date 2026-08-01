@@ -2,9 +2,10 @@
 
 > **Read this before starting work** on dpay, alongside `CLAUDE.md` and `CODEBASE_ANALYSIS.md`.
 > This is the authoritative list of known blockers and documented follow-ups after the verified
-> fix-set (R1–R4 + ckBTC top-up + minter-arg + production deploy; gates green — `just check`,
-> `just e2e` 15/15, `just verify`, live curl all 200). Most entries below are **deliberate,
-> documented follow-ups**, not regressions — each carries its current mitigation and the concrete
+> fix-set (R1–R4 + ckBTC top-up + minter-arg + production deploy). Do not infer production
+> readiness from the currently-green unit/browser counts: the latest audit found a failing app
+> self-check, a stale `dpay-sim`, and major non-dollar paths that the browser suite bypasses. Most
+> entries below are **deliberate, documented follow-ups**, not regressions — each carries its current mitigation and the concrete
 > next step. Structural detail lives in `CODEBASE_ANALYSIS.md`.
 
 ## Severity key
@@ -14,13 +15,31 @@
 - **medium** — production/scale tradeoff; defer with the documented mitigation in place.
 - **low** — polish / config invariant.
 
-## Open issues
+## Immediate next milestone: complete multi-currency wallet (2026-08-01)
+
+The protocol/canister settlement kernel is currency-aware, but the installed product gives users effectively no indication that other currencies exist. The next milestone is therefore **correct end-to-end asset support plus an asset-first navigation rework**, not a cosmetic currency toggle. The merchant selects the settlement asset; the payer cannot substitute another asset because dpay does not swap.
+
+Work in this order:
+
+1. **MC1 — exact amounts and authoritative asset metadata (high).** Replace JavaScript `number`/Android `Double` transport for protocol `u64` values with decimal strings or another exact representation. Parse user amounts without `parseFloat`/rounding. Expand the catalog to distinguish backing asset code/symbol, wrapper name, network, ledger/display decimals, fee, cap, chain ID/token contract, and per-direction ramp capabilities. Unknown families must fail closed, never fall back to Bitcoin.
+2. **MC2 — safe currency identity and policy (high).** Prevent a registered currency ID from being reassigned under an already-reviewed authorization, or bind a versioned immutable asset identity. Activate ledger+metadata+minter atomically and validate metadata against the ledger. Replace the one global raw-unit transaction cap with governed per-currency caps; the ledger fee remains outside the payer authorization.
+3. **MC3 — authoritative balances (high).** The wallet balance path must observe ckBTC refreshes, asynchronous ckERC20 mints, and direct ICRC transfers. `BAL_CACHE` may remain an optimization but cannot be the only display source without an explicit refresh/freshness contract. Tests must assert facade/relay balance, not only direct ledger balance.
+4. **MC4 — trusted receipts and durable reconciliation (high).** The app must verify receipts against an authenticated/pinned canister key, not the public key supplied inside the same untrusted receipt. Initialize signing before accepting payments, make post-transfer receipt recovery durable, and have relay ambiguous-outcome/restart handling query canister-backed receipt state bound to the authorization, currency, and nonce.
+5. **MC5 — asset-first wallet and transaction UX (high).** Show every enabled asset, including zero balances and no-ramp assets. Make the demo rail visibly separate. Add asset detail/actions; require merchant asset selection in Request; lock the payer review to that exact asset and matching balance; key offline deductions by currency; reject unknown assets before signing. No cross-asset portfolio total.
+6. **MC6 — dedicated Ledger and cleaner navigation (high).** Move transaction history out of the Pay/Receive scroll into a dedicated Ledger page. Preserve currency in the row model, format each row with its asset descriptor, retain successful per-asset history when another asset fails, and add an asset filter. Move Settings from the detached footer into an intuitive header/account/overflow control with a proper touch target; put relay configuration under an advanced section with an explicit Apply action.
+7. **MC7 — remove zombie primary actions (medium).** Remove the prominent `Paste request` button from the main Pay screen. Keep clipboard decode only as a subordinate scan fallback if no-camera/desktop/support usage justifies it; otherwise delete it and update flow coverage. The primary Pay entry remains tap or scan.
+8. **MC8 — native/NFC parity and honest ramps (high).** Repair Android bridge parity (`toName`, `memo`, full signing arguments, withdrawal signing, exact amounts). NFC must disclose and validate the requested asset. Make ckERC20 parameters token-specific, enforce chain ID, persist transaction state, wait for receipts/reverts, and provide an Android wallet/partner handoff. Do not advertise CkSol or unsupported cash-out paths.
+9. **MC9 — release gates and operations (high).** Add request→QR/NFC→settle→receipt→balance/history coverage for 2/6/8/18-decimal assets, FakeLedger/canister conformance, Android bridge tests, declarative atomic asset deployment, per-asset readiness/metrics, and real outer-loop ckBTC+ckUSDC runs before pilot. Make `DPAY_SELFCHECK FAIL` a failing gate and repair `dpay-sim`.
+
+Milestone acceptance: a fresh install visibly exposes configured assets; a merchant can request ckBTC or ckUSDC; a payer sees the exact unit and matching balance; settlement, receipt, Ledger row, and resulting balance all retain that asset; unsupported funding/cash-out paths are explicit and never route through another family.
+
+## Other open issues
 
 ### 1. (low) ckBTC live deposit→mint not yet exercised with real BTC
 
 - **What/why.** No KYC/NNS allowlist is required to mint ckBTC — the mainnet ckBTC minter (`mqygn-kiaaa-aaaar-qaadq-cai`) runs in GeneralAvailability mode with **no KYC checker** (`get_minter_info` returns only `min_confirmations=4`, `kyt_fee=100`, `deposit_btc_min_amount=300`, `retrieve_btc_min_amount=50000`; the `btc_checker_principal` is unset). The minter's `UpdateBalanceError` has no "not allowed"/KYC variant; the only screening is automatic **KYT (Know-Your-Transaction)** that flags tainted *UTXOs*, not principals. A previous version of this issue incorrectly claimed a hard KYC/NNS blocker — that was an **unverified assumption**, disproven by the live minter config and by the facade's own `get_btc_address`/`update_balance` calls succeeding against mainnet.
-- **Current state.** The full path is proven **offline end-to-end** (PocketIC + `dpay-mock-minter` + `FakeLedger`). Live, the wiring is proven reachable: `GET /deposit/address?currency=1` → 200 real `bc1...` address; `POST /deposit/refresh` → 200 `NoNewUtxos`; `GET /deposit/info` → 200. A clean, real BTC deposit (≥300 sats, 4 confirmations) will credit currency 1 with **no code change** — the mint lands at `Account{owner: facade, subaccount: pubkey}` where `balance_of`/`pay`/`transactions_of` already read.
-- **Next step.** (Optional, costs real BTC) Send a small on-chain deposit to a facade deposit address, wait 4 confirmations, trigger `refresh_deposit`, and confirm the live mint credits currency 1. This is a final real-money confidence check, not a blocker.
+- **Current state.** The full mint/spend path is proven **offline end-to-end** (PocketIC + `dpay-mock-minter` + `FakeLedger`). Live, the wiring is proven reachable: `GET /deposit/address?currency=1` → 200 real `bc1...` address; `POST /deposit/refresh` → 200 `NoNewUtxos`; `GET /deposit/info` → 200. A clean, real BTC deposit (≥300 sats, 4 confirmations) should mint currency 1 to `Account{owner: facade, subaccount: pubkey}`, which `pay()` reads authoritatively. The current `balance_of` display query can remain stale because `refresh_deposit` does not refresh `BAL_CACHE`; that separate product blocker is MC3.
+- **Next step.** After MC3 defines the authoritative display path, send a small on-chain deposit, wait 4 confirmations, trigger `refresh_deposit`, and verify the direct ledger balance, relay/app balance, payment spend, and Ledger history all agree. This costs real BTC and is a final outer-loop gate before pilot.
 
 ### 8. (low) ckBTC live withdrawal not yet exercised with real BTC
 
@@ -34,11 +53,11 @@
 - **Current mitigation.** Blast radius is bounded to the EXACT authorized `amount` (the approval is for that amount, consumed once) — never the user's whole balance. The facade's own retrieve follows immediately. This is the documented residual every `retrieve_btc_with_approval` client (incl. the NNS reference clients) carries; the minter offers no signature-binding-the-destination path, so no code fix is possible without a minter change. It is a known, bounded property, not a dpay-specific gap.
 - **Next step.** Track ckBTC minter upgrades for a destination-bound retrieve variant; none exists today.
 
-### 2. (high) R2 receipt key lives in stable memory, not IC chain-key
+### 2. (high) Receipt signing exists, but the app does not authenticate the signer
 
-- **What/why.** The canister-signed receipt (R2) uses an Ed25519 key generated once from `management_canister::raw_rand` (strong consensus entropy) and stored in stable memory (`RECEIPT_SECRET`, MemoryId 10). This defeats the actual threat model — a lying merchant/relay cannot forge the outcome receipt, and the app verifies the signature before showing "Paid ✓" — and it is uniform with the app's existing Ed25519 verify path. The residual exposure: a canister compromise (e.g. a malicious upgrade) could exfiltrate the secret key from stable state.
-- **Current mitigation.** The signing key only ever lives in the canister's own stable memory; only the canister signs. The threat the receipt actually defends against (lying merchant/relay) is fully closed. Controller governance (issue 3) bounds who can ever upgrade the canister to read it.
-- **Next step.** Migrate receipt signing to **IC chain-key** (`sign_with_schnorr` / `sign_with_ecdsa`) so the key never lives in canister state. Do this before pilot.
+- **What/why.** R2 added a canonical Ed25519-signed receipt and the canister exposes `receipt_pubkey()`, but the app currently verifies each receipt against the public key carried inside that same untrusted receipt. A malicious relay can therefore create its own key, claim, and signature that pass this self-consistency check. Separately, the real canister key is generated from `raw_rand` and stored in stable memory (`RECEIPT_SECRET`, MemoryId 10), so a malicious upgrade could exfiltrate it.
+- **Current mitigation.** The canonical claim and canister signing/storage path are implemented and tested; tampering with a receipt under a known expected key fails. This is useful protocol plumbing, but it is not an authenticated client trust anchor until the expected key is obtained independently.
+- **Next step.** Complete MC4: authenticate or pin the expected canister signer independently of the receipt, close the post-transfer receipt/recovery gap, and migrate to **IC chain-key** (`sign_with_schnorr` / `sign_with_ecdsa`) before pilot so no exportable secret lives in canister state.
 
 ### 3. (high) R4 external governance hand-off pending
 
@@ -58,32 +77,42 @@
 - **Current mitigation.** This is a **cycle-cost/operations tradeoff, NOT a correctness gap.** The trap window is already narrowed by the quantized `created_at_time` dedup (same-bucket retry → ledger `Duplicate`); reconcile is idempotent and admin-gated, so an operator can run it after any suspected trap or on a schedule. Proven on PocketIC via a reinstall-based trap simulation.
 - **Next step.** Add a heartbeat auto-trigger + archived-range paging as scale/cycle-cost demands.
 
-### 6. (medium) Merchant request QR defaults to currency 0 (DEMO_USD)
+### 6. (high) App does not expose functional multi-currency payments
 
-- **What/why.** The demo merchant request-generation UI defaults the request currency to 0 (DEMO_USD). The payment protocol itself is already currency-aware — `signAuthorization(..., req.currency)` honors the currency the merchant's request QR carries — so ckBTC **is** spendable today when a merchant issues a currency-1 request (proven: the e2e deposit flow credits currency 1 and the wallet shows an `asset-ckbtc` card). The gap is only in the demo UI's picker, not the protocol.
-- **Current mitigation.** PoC scope is single-`$`/DEMO_USD by design; the multi-currency framing is the pitch/roadmap layer. No protocol limitation is being hidden.
-- **Next step.** Add a multi-currency picker to the merchant request generation when the demo moves past single-currency.
+- **What/why.** `ReceiveMode` hardcodes currency 0, cents, and `$`. `PayMode` does copy `req.currency` into the signature, but displays every request with `usd()` and compares its raw amount against the DEMO_USD balance. NFC has the same display/balance problem. Offline optimistic spending carries amount but not currency. The protocol can route ckBTC, but the real app cannot safely request, review, validate, or present it end to end.
+- **Current mitigation.** The canister routes ledgers independently and rejects cross-currency funding, so the settlement kernel does not silently swap. The UI must not be treated as multi-currency until MC5/MC8 land.
+- **Next step.** Implement the asset-first request/pay design in MC5, including unknown-asset rejection and currency-keyed offline state. Add real app flows for currencies 1 and 2 rather than Node-side signing that bypasses the UI.
 
-### 7. (low) App↔canister config coupling ✅ CLOSED (M0)
+### 7. (high) Runtime catalog foundation exists, but config-only asset addition is not safe
 
-- ✅ **RESOLVED** by the `currencies()` catalog (commits 849ad59/66703af/736746d): the app now fetches +
-  AsyncStorage-caches currency ids/display metadata at runtime (`GET /api/v1/currencies`) and keys ramp
-  assets off `minter_family` instead of a hardcoded `DEPOSIT_CURRENCY=1`. Adding a currency is
-  canister-config-only (`register_ledger`/`register_minter`/`register_currency_meta` — no app redeploy).
-  Verified live: mainnet `GET /api/v1/currencies` returns all 3 (DEMO_USD, ckBTC/CkBtcUtxo, ckUSDC/CkEthErc20).
+- **What/why.** M0 removed the original hardcoded deposit currency and shipped `currencies()`, but the descriptor is too weak for arbitrary assets. Token-specific facts are incorrectly attached to minter families, every `CkEthErc20` displays as USDC, unknown/`CkSol` families can fall back to BTC, and another ckERC20 still requires relay/app code. Registration is three non-atomic mutable writes and metadata is not validated against the ledger. The AsyncStorage cache is global rather than relay/network scoped and has no revision/TTL.
+- **Current mitigation.** The live 0/1/2 catalog works for its narrow known configuration. It is a discovery foundation, not proof that adding a currency is config-only.
+- **Next step.** Complete MC1/MC2: richer asset/capability metadata, source-scoped versioned cache, strict validation, immutable ID semantics, and atomic activation. Remove “config-only” claims until an additional ckERC20 and a no-minter ICRC asset pass the same app/relay/canister conformance suite without code changes.
+
+### 10. (high) Wire/arity regressions ship to the device because no enforced gate exercises the real RN bridge
+
+- **What/why.** The 2026-07-31 wire-format v2 wave grew `signAuthorization` (6→9 JS params) and the wire (196→292 B). `just verify` (core+canister+relay+e2e) stayed GREEN and shipped a release that **crashed on launch on a physical device** (`NativeArgumentsParseException: DpayCore.signAuthorization got 8 arguments, expected 11`). Three failures lined up: (a) the TS `signAuthorization`/`encodeRequest` name params were declared **optional** (`fromName?/toName?/memo?` in `app/lib/types.ts:40-41`), so `App.tsx:68`'s stale 6-arg call compiled; (b) **no `tsc` typecheck exists anywhere** (`app/package.json` has only eslint/jest; `justfile` has zero tsc refs; the e2e builds via Vite/esbuild which strips types without checking); (c) the e2e suite drives a JS **shim** (`e2e/web/dpay-core.ts`), not `libdpay_ffi.so` or the Kotlin `@ReactMethod` — `just app` (the ONLY gate exercising the real bridge) is not in `just verify` and was never re-run after wire-v2. A wrong JS→Kotlin argument count throws on the native-modules thread, bypassing the JS self-check's try/catch, so it is a hard process kill at startup, not a caught error. Separately, `App.tsx:69` had a hardcoded magic `392` (rotted from the pre-v2 wire hex; real value is `584`=292×2), and `signWithdrawal` has **no** Kotlin `@ReactMethod` (declared at `types.ts:48`, called at `WithdrawSheet.tsx:60`) → withdrawal is silently broken on Android (a pre-existing MC8 instance).
+- **Current mitigation.** The launch crash is FIXED and verified on the physical device (see changelog below): `App.tsx` + `NfcTap.tsx` call sites pass the full 9 args; the self-check literal is `584`. But there is still **no automated guard** — the next wire/signature change will regress identically unless Layers 1–5 below ship.
+- **Next step (authoritative spec: `2026-08-01-device-bridge-parity-plan.md`).** Ship the 5 defense-in-depth layers, any one of which would have caught this crash:
+  1. **Strict types + typecheck gate (highest leverage).** Drop the `?` on `signAuthorization`/`encodeRequest` name params in `app/lib/types.ts`; add `"typecheck": "tsc --noEmit"` to `app/package.json`; add a `just typecheck` recipe and wire it into `check`/`verify` (~2s, offline). Arity drift becomes a compile error in the fast inner loop.
+  2. **Bridge-parity assertion.** A `scripts/bridge-parity.mjs` that parses `@ReactMethod` arity from `DpayCoreModule.kt`/`DpayNfcModule.kt` and asserts it equals the `DpayCoreApi`/`DpayNfcApi` TS-interface arity; `just bridge-parity` in `check` (<1s). Ultimate form: codegen the TS interface from the UniFFI IDL.
+  3. **Emulator bridge gate.** Run `just app` (already asserts `DPAY_SELFCHECK PASS`) on the sandbox emulator via a path-filtered pre-merge gate for changes touching `app/android/**`, `crates/dpay-ffi/**`, `app/lib/types.ts`, or the core wire consts. Off the hot `verify` path for unrelated changes.
+  4. **Magic-number-free self-check.** Expose `wire_len()` from the FFI; assert `wire.length === (await wireLen())*2` in `App.tsx` — no literal that can rot.
+  5. **Add `signWithdrawal` `@ReactMethod`** to `DpayCoreModule.kt` (Layer 2 will then keep it in parity automatically). Closes an MC8 instance.
 
 ## Resolved this session (changelog)
 
 The following previously-open risks are now **CLOSED** (see `CODEBASE_ANALYSIS.md` for detail):
 
 - ✅ **Open `mint()` / admin surface** → closed (R1): admin ops denied when `controller == null`; self-service `faucet` (fixed amount, rate-limited) is the demo on-ramp; relay `Ledger::mint` removed.
-- ✅ **Unsigned receipt** → closed (R2): canister signs a canonical outcome receipt (`ReceiptClaim`, Ed25519); app verifies before "Paid ✓".
+- 🟡 **Unsigned receipt primitive** → signing shipped (R2), but signer authentication and durable recovery are reopened under MC4. The embedded receipt public key is not itself a trust anchor.
 - ✅ **`pay()` cross-canister trap window** → closed/bounded (R3): admin-gated `icrc3` `reconcile(currency)` repairs trap-orphan debits; idempotent; PocketIC-proven.
 - ✅ **ckBTC deposit unreachable in prod** → closed: the ckBTC minter call is now encoded as ONE record argument (was a 2-positional trap); proven LIVE — `GET /deposit/address?currency=1` returns a real `bc1...` address and the mint path is open (no KYC blocker; see issue 1).
 - ✅ **minter-arg trap** → closed: facade encodes a single candid record arg to the ckBTC minter; mock aligned; an honesty-guard test fails if either reverts to the 2-tuple shape.
-- ✅ **ckBTC top-up invisible** → closed (F1): wallet fetches currency 1 in parallel and renders a separate `asset-ckbtc` "Bitcoin" card (not merged into `$`); spendable when a merchant issues a currency-1 request.
+- 🟡 **ckBTC card discoverability** → the wallet can fetch currency 1 and render a separate Bitcoin card, but authoritative post-deposit display freshness is reopened under MC3 because production credits can bypass `BAL_CACHE` refresh.
 - ✅ **e2e harness** → 15/15 flows driving the REAL app; relay isolated into `.dev/target-e2e` (clobber-proof) with a latent stale-binary build gate fixed (always invokes `cargo build`); parallel flow pool (~60s → ~13s, concurrency-safe, no assertions weakened). Old `ui/` parallel-component harness deleted.
 - ✅ **NFC seam** → audited true: rides RNW's real `RCTDeviceEventEmitter` singleton (not a private registry).
+- ✅ **Device launch crash (wire-v2 arity)** → FIXED + verified on a physical device (Redmi/POCO duchamp, arm64). Root cause: `signAuthorization` grew to 9 params in wire-v2 but `App.tsx:68` (self-check) and `NfcTap.tsx:186` (autoSign) still called with 6 → `NativeArgumentsParseException` killed the process on the native-modules thread before the JS self-check could catch it. Fix: both call sites pass the full 9 args (empty names where the NFC request event carries none); `App.tsx:69` literal corrected `392`→`584` (WIRE_LEN 292 × 2). Verified: `just app` → `DPAY_SELFCHECK PASS` in logcat, process alive, onboarding screen renders. The **structural gap** (no gate catches this) remains as issue 10 + the `2026-08-01-device-bridge-parity-plan.md` hardening plan.
 
 ## Resolved this wave (W2/W3/W4)
 
@@ -237,9 +266,10 @@ The following previously-open risks are now **CLOSED** (see `CODEBASE_ANALYSIS.m
   only when the ckERC20 offramp lands (see O3). The dual-approve + partial-failure (`CkErc20LedgerError`
   after `CkEthLedgerError` → reimbursement) residual is documented; inherent to the ckETH minter, not
   dpay-specific.
-- **O5 (medium) | UX/config | single-sourcing** — ✅ **CLOSED by M0** (commits 849ad59/66703af/736746d).
-  Canister `currencies()` + relay `GET /api/v1/currencies` + app runtime catalog shipped; `DEPOSIT_CURRENCY`
-  deleted; adding a currency is config-only.
+- **O5 (high) | UX/config | single-sourcing** — 🟡 **FOUNDATION SHIPPED, REOPENED by MC1/MC2.**
+  Canister `currencies()` + relay `GET /api/v1/currencies` + app runtime catalog shipped and
+  `DEPOSIT_CURRENCY` was deleted. The audit found that metadata, activation, cache scoping, and
+  token-specific ramp dispatch are still insufficient for config-only asset addition; see issue 7.
 - **O6 (low) | verification | live ckUSDC params** — ✅ **VERIFIED 2026-07-31** via mainnet query
   (`dfx canister --network ic call sv3dd-oaaaa-aaaar-qacoa-cai get_minter_info`) + authoritative source
   (`dfinity/ic` `DepositHelperWithSubaccount.sol`, `templates/principal_to_bytes.js`, `tests/principal_to_bytes_test.js`).
@@ -269,11 +299,13 @@ The following previously-open risks are now **CLOSED** (see `CODEBASE_ANALYSIS.m
   choice + mode; KYC-surfacing posture; ckUSDC chains at launch (Ethereum only?); ramp fees = partner's
   only (zero dpay cut); keep the demo faucet once real ckUSDC exists; wrong-network recourse messaging.
 
-## UX audit (2026-07-31) — 23 issues, all resolved or mitigated
+## Prior UX audit (2026-07-31) — historical closure record
 
 > Source: `UX_AUDIT_FINDINGS.md` (code-review + zai-vision visual audit). All 23 issues addressed;
 > independent verifier confirmed 21 fully resolved + 2 mitigated. Visual re-audit (zai-vision on live
-> screenshots) confirmed no regressions. Suite now 26/26 GREEN.
+> screenshots) confirmed no regressions. Suite reached 26/26 GREEN. The 2026-08-01 installed-app review
+> supersedes this as the current product direction via MC5-MC7; in particular, making Paste request more
+> prominent is no longer desired, and inline history/settings placement must be redesigned.
 
 **Critical (3) — RESOLVED:**
 - ✅ C1: Approve button disabled on expired request (error moved above button; greyed out).
@@ -305,7 +337,7 @@ The following previously-open risks are now **CLOSED** (see `CODEBASE_ANALYSIS.m
 
 **Low (6) — RESOLVED:**
 - ✅ L1: Add-money shadow no longer clipped (shadowRadius 12→8).
-- ✅ L2: "Paste request" styled as a bordered button (minHeight:44, brand wash).
+- ↩ L2: "Paste request" received a proper touch target in this wave, but MC7 now removes it from the primary Pay surface or demotes it to a subordinate scanner fallback.
 - ✅ L3: Withdraw success has a Copy-destination button + selectable address.
 - ✅ L4: "Payer paid offline? Scan their signed code to settle." (was ambiguous).
 - ✅ L5: Raw hex request nonce removed from review screen.
