@@ -574,6 +574,28 @@ fn transactions_of(
     decode_one(&reply).unwrap()
 }
 
+/// `receipt_pubkey()` query — the canister's receipt Ed25519 public key (32 bytes), or `None` if the
+/// key has not been generated yet (no successful `pay` and no `init_receipt_key`).
+fn receipt_pubkey(pic: &PocketIc, dpay: Principal) -> Option<Vec<u8>> {
+    let reply = pic
+        .query_call(dpay, Principal::anonymous(), "receipt_pubkey", encode_args(()).unwrap())
+        .expect("receipt_pubkey query rejected");
+    decode_one::<Option<Vec<u8>>>(&reply).unwrap()
+}
+
+/// `receipt(blob nonce)` query — the canister-signed stored receipt for a settled nonce, or `None`.
+fn receipt(pic: &PocketIc, dpay: Principal, nonce: [u8; 16]) -> Option<ReceiptView> {
+    let reply = pic
+        .query_call(
+            dpay,
+            Principal::anonymous(),
+            "receipt",
+            encode_args((nonce.to_vec(),)).unwrap(),
+        )
+        .expect("receipt query rejected");
+    decode_one::<Option<ReceiptView>>(&reply).unwrap()
+}
+
 /// A stable principal to use as the governed controller in admin-gating tests. The management
 /// canister is a fixed, non-anonymous principal always available offline.
 fn pic_admin() -> Principal {
@@ -736,6 +758,69 @@ fn pay_yields_canister_signed_verifiable_receipt() {
     let mut sg2 = [0u8; SIG_LEN];
     sg2.copy_from_slice(&view.receipt_sig);
     assert!(verify_receipt(&pk, &claim, &sg2), "stored receipt verifies");
+}
+
+/// MC4 U1: the receipt signing key MUST be generated BEFORE the ledger commit. Today `pay()`
+/// generates it POST-commit (`ensure_receipt_key().await?` after `ledger_transfer`), so on the very
+/// first pay to a fresh canister a `raw_rand` trap leaves a SETTLED payment (ledger debited) with NO
+/// stored receipt — the highest-risk pay. The fix moves key-gen before the commit.
+///
+/// We prove the pre-commit placement via a side effect: on a fresh canister (no key), a pay that is
+/// REJECTED at the balance gate (which runs after the awaits, before any commit) STILL generates the
+/// receipt key — because key-gen now runs before the balance await. On the old post-commit code a
+/// rejected pay never reached key-gen, so `receipt_pubkey()` stayed `None`. We then prove the
+/// happy-path corollary: the first successful pay's receipt verifies under that exact pre-commit key
+/// and the key is unchanged (never rotated) by the successful pay.
+#[test]
+fn receipt_key_generated_before_ledger_commit() {
+    let (pic, _ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
+    // NO mint (payer balance = 0) and NO init_receipt_key — the receipt key does not exist yet.
+    assert!(receipt_pubkey(&pic, dpay).is_none(), "no receipt key before any pay");
+
+    // A pay that fails for insufficient balance. The reject happens after the balance await, before
+    // any commit. (Valid sig; amount under CAP; fresh nonce — the ONLY reject reason is balance.)
+    let expiry = T0_SECS + 120;
+    let err = pay(&pic, dpay, signed(&sk, payer, merch, 1_000, [0x11; 16], expiry, DEMO_USD))
+        .expect_err("insufficient-balance pay must be rejected");
+    assert!(
+        err.contains("InsufficientFunds"),
+        "reject reason must be balance, got: {err}"
+    );
+
+    // MC4 U1 INVARIANT: the receipt key was generated BEFORE the reject (key-gen now runs before
+    // the balance await, i.e. pre-commit). On the old post-commit code this stayed None — the first
+    // successful pay would have been the highest-risk pay (raw_rand post-commit).
+    let pk_after_reject = receipt_pubkey(&pic, dpay)
+        .expect("receipt key generated pre-commit even on a rejected pay");
+
+    // Happy-path corollary: the first SUCCESSFUL pay's receipt verifies under that exact pre-commit
+    // key, and the key is unchanged by the successful pay (generated once, never rotated).
+    mint(&pic, dpay, payer, DEMO_USD, INIT_A);
+    let nonce = [0x22; 16];
+    let r = pay(&pic, dpay, signed(&sk, payer, merch, 2_500, nonce, expiry, DEMO_USD))
+        .expect("pay should succeed now");
+    assert_eq!(
+        receipt_pubkey(&pic, dpay).unwrap(),
+        pk_after_reject,
+        "receipt key unchanged by a successful pay (never rotated)"
+    );
+    let mut pk = [0u8; PUBKEY_LEN];
+    pk.copy_from_slice(&pk_after_reject);
+    let mut sg = [0u8; SIG_LEN];
+    sg.copy_from_slice(&r.receipt_sig);
+    let claim = ReceiptClaim {
+        nonce,
+        from: payer,
+        to: merch,
+        amount: 2_500,
+        currency: DEMO_USD,
+        block_index: r.block_index,
+        settle_ts: r.settle_ts,
+    };
+    assert!(
+        verify_receipt(&pk, &claim, &sg),
+        "first successful pay's receipt verifies under the pre-commit key"
+    );
 }
 
 #[test]

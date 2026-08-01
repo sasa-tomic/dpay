@@ -1609,6 +1609,17 @@ async fn pay(signed: Vec<u8>) -> Result<PayReceipt, String> {
     let from_acct = account_of(&from);
     let to_acct = account_of(&to);
 
+    // MC4 U1: ensure the receipt signing key exists BEFORE the ledger commit. On the very first pay
+    // to a fresh canister this calls `raw_rand` to generate the key; if that traps, the payment has
+    // NOT yet settled (no ledger debit) — eliminating the first-pay trap where a POST-commit
+    // key-gen failure left a settled payment (ledger debited) with NO stored receipt. Placed AFTER
+    // the cheap local rejects (bad sig / zero / self / mint-sentinel / expiry / cap / unknown or
+    // retired currency) so a garbage payload triggers no key-gen side effect, and BEFORE
+    // `reserve_nonce` so a key-gen failure also does not burn a nonce. The bound `SigningKey` is
+    // held across the awaits below and signs the receipt post-commit (the key never rotates, so
+    // holding it across awaits is correct).
+    let receipt_sk = ensure_receipt_key().await?;
+
     // Reserve the nonce synchronously (no await) — this is the concurrency barrier. A concurrent
     // `pay` with the same nonce observes it as used and is rejected at this point.
     if !reserve_nonce(&nonce) {
@@ -1715,9 +1726,10 @@ async fn pay(signed: Vec<u8>) -> Result<PayReceipt, String> {
 
     // Sign the outcome receipt. The block index caps at u64 (the demo's ledgers never exceed it;
     // a Nat overflow surfaces as block_index=0, which still verifies under the same key — the
-    // amount/nonce/from/to/currency/ts bind the claim, and the sig is canister-authored).
+    // amount/nonce/from/to/currency/ts bind the claim, and the sig is canister-authored). The
+    // receipt key was bound BEFORE the ledger commit (MC4 U1), so this is now a pure Ed25519 sign
+    // with NO await — a post-commit key-gen failure can no longer orphan a settled payment.
     let block_index = nat_to_u64(&block_index_nat).unwrap_or(0);
-    let receipt_sk = ensure_receipt_key().await?;
     let pubkey = receipt_sk.verifying_key().to_bytes();
     let claim = ReceiptClaim {
         nonce: sa.auth.nonce,
