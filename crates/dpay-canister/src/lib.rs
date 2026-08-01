@@ -2344,20 +2344,24 @@ async fn reconcile(currency: Currency) -> Result<ReconcileReport, String> {
     let (ledger, _mintable) = ledger_for(currency)?;
     let self_id = canister_self();
 
-    let (log_length, txs) = ledger_get_transactions(ledger, 0, RECONCILE_MAX_BLOCKS).await?;
+    let (log_length, txs_initial) = ledger_get_transactions(ledger, 0, RECONCILE_MAX_BLOCKS).await?;
     // `get_transactions` returns up to `length` from `start`; if the log is longer than the cap, the
     // recent window is what we want (a trap's orphan is recent). Re-fetch the tail when the log
-    // exceeds the cap so we scan the NEWEST blocks, not the oldest.
-    let txs = if log_length > RECONCILE_MAX_BLOCKS {
+    // exceeds the cap so we scan the NEWEST blocks, not the oldest. Capture the effective `start` so
+    // the loop can derive each transaction's ledger block index — the ICRC-3 `Transaction` itself
+    // carries no `block_index` field, and `get_transactions(start, length)` returns blocks
+    // `[start, start+len)` in order, so the tx at loop position `i` is ledger block `start + i`.
+    let (start, txs) = if log_length > RECONCILE_MAX_BLOCKS {
         let start = log_length - RECONCILE_MAX_BLOCKS;
-        ledger_get_transactions(ledger, start, RECONCILE_MAX_BLOCKS).await?.1
+        let txs = ledger_get_transactions(ledger, start, RECONCILE_MAX_BLOCKS).await?.1;
+        (start, txs)
     } else {
-        txs
+        (0, txs_initial)
     };
 
     let mut scanned: u64 = 0;
     let mut repaired: u64 = 0;
-    for tx in txs {
+    for (i, tx) in txs.into_iter().enumerate() {
         scanned += 1;
         let Some(t) = tx.transfer else { continue };
         // Only debits from a user subaccount of THIS canister (a `pay`). Mints use subaccount None;
@@ -2397,6 +2401,37 @@ async fn reconcile(currency: Currency) -> Result<ReconcileReport, String> {
         }
         if let Ok(bal) = ledger_balance_of(ledger, &account_of(&to_pk)).await {
             write_cache(to_pk, currency, bal);
+        }
+        // MC4 U2: reconstruct + sign + store a receipt for this orphan so `receipt(nonce)` returns a
+        // verifiable canister-signed attestation for EVERY settled payment (a durable recovery
+        // primitive requires a signed receipt even for a payment whose post-commit message trapped).
+        // The claim mirrors `pay`'s exactly; `block_index = start + i` is the orphan's actual ledger
+        // block (byte-identical to what a normal pay recorded for the same transfer); `settle_ts` is
+        // the on-ledger timestamp (the canister settle time is gone post-trap — the ledger time is
+        // the authoritative proxy). Idempotent: skip if a receipt is already stored for this nonce
+        // (reconcile is re-runnable — re-running must not error or double-write). The key is ensured
+        // here (regenerated on the first orphan after a wipe, since the receipt secret is also
+        // stable state that a trap/reinstall can lose); on a normal canister it already exists.
+        let already_stored = RECEIPTS.with(|m| m.borrow().contains_key(&nonce_key));
+        if !already_stored {
+            let receipt_sk = ensure_receipt_key().await?;
+            let block_index = start + i as u64;
+            let claim = ReceiptClaim {
+                nonce,
+                from: from_pk,
+                to: to_pk,
+                amount,
+                currency,
+                block_index,
+                settle_ts: tx.timestamp,
+            };
+            let sig = dpay_core::sign_receipt(&receipt_sk, &claim).to_bytes();
+            RECEIPTS.with(|m| {
+                m.borrow_mut().insert(
+                    nonce_key.clone(),
+                    StoredReceipt { claim_bytes: claim.signing_bytes(), sig },
+                );
+            });
         }
         repaired += 1;
     }
