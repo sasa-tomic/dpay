@@ -2,8 +2,7 @@ import {useState} from 'react';
 import {View, Text, Pressable} from 'react-native';
 import {S} from '../styles';
 import {C} from '../config/palette';
-import {usd, fmtAsset} from '../lib/format';
-import {familyDisplay, assetTestKey, displayName, type CurrencyDescriptor} from '../config/catalog';
+import {assetTestKey, displayName, fmtCurrencyAmount, type CurrencyDescriptor} from '../config/catalog';
 import type {Txn} from '../lib/types';
 
 // Filter-chip label for a currency. Currency 0 (DEMO_USD) has symbol '$' (length 1) so displayName
@@ -63,8 +62,11 @@ export function Ledger({history, catalog}: {history: Txn[]; catalog: CurrencyDes
         </View>
       ) : null}
       {rows.map((t, i) => {
-        const disp = familyDisplay(catalog, t.currency);
-        const amtTxt = t.currency === 0 ? usd(t.amount) : fmtAsset(t.amount, disp.amountDecimals, disp.nativeAsset);
+        // MC1 unit 6: fmtCurrencyAmount is fail-closed — it returns the explicit "Unsupported"
+        // sentinel for an unknown family (never a wrong "… BTC" amount). Currency 0 still renders
+        // as ∂ via the helper's early-return. This replaces a direct familyDisplay() call that
+        // would have NPE'd on a null family display.
+        const amtTxt = fmtCurrencyAmount(catalog, t.currency, t.amount);
         return (
           <View key={t.nonce} style={S.histRow}>
             <View style={S.histWhoCol}>

@@ -53,12 +53,17 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
               ? (primaryBalance == null ? '—' : `${online ? '' : '~'}${fmtCurrencyAmount(catalog, a.currency, primaryBalance)}`)
               : fmtCurrencyAmount(catalog, a.currency, assetBalances[a.currency] ?? 0);
             const active = a.currency === currentCurrency;
-            const onrampable = !!a.minter_family;
-            const disp = onrampable ? familyDisplay(catalog, a.currency) : null;
+            // MC1 unit 6 — FAIL-CLOSED: a ramp (Top Up / Cash out) exists ONLY for a KNOWN family
+            // (CkBtcUtxo/CkEthErc20). familyDisplay returns null for an unknown family (e.g. CkSol) or
+            // a no-minter ICRC currency → no ramp buttons render, and the subtitle is an explicit
+            // "Unsupported asset" (honest, never a fake BTC label, never a crash via `!`). DEMO
+            // (currency 0) is special-cased above (isPrimary) so it never reaches here.
+            const disp = familyDisplay(catalog, a.currency);
+            const onrampable = disp !== null;
             const cashable = a.minter_family === 'CkBtcUtxo' && funded;
             const sub = isPrimary
               ? 'play money for testing'
-              : onrampable ? `Send ${disp!.nativeAsset} on ${disp!.networkLabel}` : 'not yet funded';
+              : onrampable && disp ? `Send ${disp.nativeAsset} on ${disp.networkLabel}` : 'Unsupported asset';
             return (
               <View key={a.currency} testID={`asset-${key}`} style={S.assetCard}>
                 <View style={S.assetRow}>

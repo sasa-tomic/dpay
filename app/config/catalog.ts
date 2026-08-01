@@ -79,17 +79,25 @@ const FD_CKETH_ERC20: FamilyDisplay = {
   withdrawMinRaw: 0, amountDecimals: 6, addressPlaceholder: '0x…',
 };
 const FAMILY_DISPLAY: Partial<Record<MinterFamily, FamilyDisplay>> = {CkBtcUtxo: FD_CKBTC, CkEthErc20: FD_CKETH_ERC20};
-// Resolve a currency's family display from the catalog; falls back to the ckBTC config so the flows
-// always render (the catalog guarantees the CkBtcUtxo entry carries its family).
-export function familyDisplay(catalog: CurrencyDescriptor[], currency: number): FamilyDisplay {
+// Resolve a currency's family display from the catalog. MC1 unit 6 — FAIL-CLOSED: an unknown family
+// (e.g. CkSol) or a no-minter ICRC currency returns `null` instead of silently falling back to the
+// ckBTC config. Per CLAUDE.md dpay never swaps, so a wrong-currency render (a SOL asset labelled
+// "BTC") is a non-custodial-trust violation, not a cosmetic glitch. Every caller MUST branch on
+// `null` → explicit "Unsupported" UI (the type system enforces this; no `!`/`any` suppression).
+// NOTE: DEMO (currency 0) also has minter_family null → returns null here, but its display never
+// depended on this — displayName/currencySymbol/fmtCurrencyAmount early-return for currency 0.
+export function familyDisplay(catalog: CurrencyDescriptor[], currency: number): FamilyDisplay | null {
   const f = catalog.find(c => c.currency === currency)?.minter_family ?? null;
-  return (f ? FAMILY_DISPLAY[f] : null) ?? FD_CKBTC;
+  return f ? (FAMILY_DISPLAY[f] ?? null) : null;
 }
 // A stable ASCII key for an asset's testID (the catalog symbol may be a non-ASCII glyph like ₿).
 // ckBTC keeps 'ckbtc' to honour the existing e2e testID contract; other assets use their symbol.
+// MC1 unit 6: an unknown family with no symbol returns the honest 'asset' key (never 'btc').
 export function assetTestKey(a: CurrencyDescriptor): string {
   if (a.minter_family === 'CkBtcUtxo') return 'ckbtc';
-  return (a.symbol ?? familyDisplay([], a.currency).nativeAsset ?? 'asset').toLowerCase();
+  const sym = a.symbol;
+  if (sym && sym.length > 0) return sym.toLowerCase();
+  return 'asset';
 }
 // Validate a native-chain destination address against its minter family's format. Catches the most
 // common user error — pasting a wrong-chain address (e.g. an ETH 0x… into the BTC cash-out) — before
@@ -117,10 +125,11 @@ export function displayName(a: CurrencyDescriptor): string {
   if (a.currency === 0) return 'DEMO';
   if (a.minter_family === 'CkBtcUtxo') return 'BTC';
   if (a.minter_family === 'CkEthErc20') return 'USDC';
-  // Future families: the catalog symbol when it reads as a name, else the native asset unit.
+  // Future families: the catalog symbol when it reads as a name, else an explicit "Unsupported".
+  // MC1 unit 6: NEVER fall back to the BTC native-asset unit for an unknown family.
   const sym = a.symbol;
   if (sym && sym.length >= 2) return sym;
-  return familyDisplay([], a.currency).nativeAsset;
+  return 'Unsupported';
 }
 
 // The amount-prefix glyph for a currency (shown before a typed amount in Receive + as the prefix of
@@ -134,18 +143,24 @@ export function currencySymbol(catalog: CurrencyDescriptor[], currency: number):
   if (fam === 'CkBtcUtxo') return '₿';
   if (fam === 'CkEthErc20') return '$';
   const sym = a?.symbol;
-  return sym && sym.length <= 2 ? sym : familyDisplay(catalog, currency).nativeAsset;
+  if (sym && sym.length <= 2) return sym;
+  // MC1 unit 6: unknown family → explicit "?" glyph, never the Bitcoin ₿ fallback.
+  return '?';
 }
 
 // Format a raw smallest-units amount for display in its OWN currency's units. Currency 0 (DEMO_USD)
-// renders as `$`; any other currency renders via its catalog descriptor's decimals + the family's
+// renders as `∂`; any other currency renders via its catalog descriptor's decimals + the family's
 // native asset unit (e.g. 50000 raw @ currency 1 → "0.00050000 BTC"). Used by ReceiveMode + PayMode
 // so a ckBTC request/review reads "0.00050000 BTC" (never a misleading dollar amount) — the
 // merchant-selected asset is what the payer sees + pays. Per CLAUDE.md, dpay never swaps, so the
 // display NEVER converts across assets. Decimals come from the catalog descriptor directly (NOT
-// `familyDisplay`, which falls back to ckBTC's 8 decimals and would mis-render DEMO_USD's 2).
+// `familyDisplay`, which would mis-render DEMO_USD's 2). MC1 unit 6 — FAIL-CLOSED: an unknown family
+// returns the explicit "Unsupported" sentinel instead of a wrong "… BTC" amount.
 export function fmtCurrencyAmount(catalog: CurrencyDescriptor[], currency: number, raw: number): string {
   if (currency === 0) return usd(raw);
-  const decimals = catalog.find(c => c.currency === currency)?.decimals ?? familyDisplay(catalog, currency).amountDecimals;
-  return fmtAsset(raw, decimals, familyDisplay(catalog, currency).nativeAsset);
+  const a = catalog.find(c => c.currency === currency);
+  const disp = familyDisplay(catalog, currency);
+  if (!disp) return 'Unsupported';
+  const decimals = a?.decimals ?? disp.amountDecimals;
+  return fmtAsset(raw, decimals, disp.nativeAsset);
 }

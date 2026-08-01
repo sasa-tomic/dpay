@@ -345,23 +345,37 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
           onClose={() => setBalancesOpen(false)}
         />
       ) : null}
-      {depositCurrency != null ? (
-        catalog.find(c => c.currency === depositCurrency)?.minter_family === 'CkEthErc20'
-          ? <CkErc20DepositSheet identity={identity} relayUrl={relayUrl} currency={depositCurrency} display={familyDisplay(catalog, depositCurrency)} onClose={() => setDepositCurrency(null)} />
-          : <DepositSheet identity={identity} relayUrl={relayUrl} currency={depositCurrency} display={familyDisplay(catalog, depositCurrency)} onClose={() => setDepositCurrency(null)} />
-      ) : null}
-      {withdrawCurrency != null ? (
-        <WithdrawSheet
-          identity={identity}
-          relayUrl={relayUrl}
-          currency={withdrawCurrency}
-          display={familyDisplay(catalog, withdrawCurrency)}
-          family={catalog.find(c => c.currency === withdrawCurrency)?.minter_family ?? 'CkBtcUtxo'}
-          ckBtcBalance={assetBalances[withdrawCurrency] ?? 0}
-          onClose={() => setWithdrawCurrency(null)}
-          onWithdrawn={onActivity}
-        />
-      ) : null}
+      {depositCurrency != null ? (() => {
+        // MC1 unit 6 — FAIL-CLOSED: the deposit sheet is rendered ONLY when familyDisplay is
+        // non-null (a known family). The BalancesSheet "Top Up" button is already gated on a known
+        // family, so this is unreachable in normal flow; but if an unknown family reaches here we
+        // render nothing instead of a mis-rendered BTC/ETH form (no silent wrong-currency fallback).
+        const dpDisplay = familyDisplay(catalog, depositCurrency);
+        if (!dpDisplay) return null;
+        return catalog.find(c => c.currency === depositCurrency)?.minter_family === 'CkEthErc20'
+          ? <CkErc20DepositSheet identity={identity} relayUrl={relayUrl} currency={depositCurrency} display={dpDisplay} onClose={() => setDepositCurrency(null)} />
+          : <DepositSheet identity={identity} relayUrl={relayUrl} currency={depositCurrency} display={dpDisplay} onClose={() => setDepositCurrency(null)} />;
+      })() : null}
+      {withdrawCurrency != null ? (() => {
+        // MC1 unit 6 — FAIL-CLOSED: cash-out is offered ONLY for CkBtcUtxo (BalancesSheet gates the
+        // button on family + funded). An unknown/non-BTC family renders nothing instead of a BTC
+        // cash-out form. Removes the old `?? 'CkBtcUtxo'` fail-open family default.
+        const wdDisplay = familyDisplay(catalog, withdrawCurrency);
+        const wdFamily = catalog.find(c => c.currency === withdrawCurrency)?.minter_family ?? null;
+        if (wdFamily !== 'CkBtcUtxo' || !wdDisplay) return null;
+        return (
+          <WithdrawSheet
+            identity={identity}
+            relayUrl={relayUrl}
+            currency={withdrawCurrency}
+            display={wdDisplay}
+            family={wdFamily}
+            ckBtcBalance={assetBalances[withdrawCurrency] ?? 0}
+            onClose={() => setWithdrawCurrency(null)}
+            onWithdrawn={onActivity}
+          />
+        );
+      })() : null}
       {settingsOpen ? (
         <SettingsSheet
           relayUrl={relayUrl}
