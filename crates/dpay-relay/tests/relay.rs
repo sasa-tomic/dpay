@@ -1012,6 +1012,9 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(dusd["minter"], serde_json::Value::Null);
     assert_eq!(dusd["minter_family"], serde_json::Value::Null);
     assert!(!dusd["ledger"].as_str().unwrap().is_empty(), "ledger principal text present");
+    // MC1 unit 5: DEMO ramp honesty — onramp=Direct (faucet), offramp=Unavailable (no cash-out).
+    assert_eq!(dusd["onramp"], "Direct");
+    assert_eq!(dusd["offramp"], "Unavailable");
 
     // ckBTC-shaped (currency 1): the deposit/withdraw ramp asset — CkBtcUtxo family, ₿, 8 decimals.
     let ckbtc = rows
@@ -1024,6 +1027,13 @@ async fn currencies_route_returns_demo_catalog() {
     // The variant serializes as the plain PascalCase tag (matches the candid label + wallet contract).
     assert_eq!(ckbtc["minter_family"], "CkBtcUtxo");
     assert!(!ckbtc["minter"].as_str().unwrap().is_empty(), "ramp minter principal text present");
+    // MC1 unit 5: authoritative per-currency metadata (no family-level assumption).
+    assert_eq!(ckbtc["wrapper_name"], "ckBTC");
+    assert_eq!(ckbtc["backing_symbol"], "BTC");
+    assert_eq!(ckbtc["network"], "Bitcoin");
+    assert_eq!(ckbtc["display_decimals"], 8);
+    assert_eq!(ckbtc["onramp"], "Direct"); // chain-key Bitcoin ramp
+    assert_eq!(ckbtc["offramp"], "Direct"); // retrieve_btc_with_approval
 
     // ckUSDC (currency 2): the ckERC-20 onramp asset — CkEthErc20 family, ckUSDC, 6 decimals.
     let ckusdc = rows
@@ -1035,6 +1045,17 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(ckusdc["decimals"], 6);
     assert_eq!(ckusdc["minter_family"], "CkEthErc20");
     assert!(!ckusdc["minter"].as_str().unwrap().is_empty(), "ramp minter principal text present");
+    // MC1 unit 5: per-token ckERC20 facts (O6) replace the old hardcoded currency-2 params.
+    assert_eq!(ckusdc["wrapper_name"], "ckUSDC");
+    assert_eq!(ckusdc["backing_symbol"], "USDC");
+    assert_eq!(ckusdc["network"], "Ethereum");
+    assert_eq!(ckusdc["display_decimals"], 6);
+    assert_eq!(ckusdc["fee"], 10_000); // ckUSDC icrc1_fee (O6): 0.01 USDC
+    assert_eq!(ckusdc["chain_id"], 1); // Ethereum mainnet
+    assert_eq!(ckusdc["token_contract"], "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
+    assert_eq!(ckusdc["onramp"], "Direct"); // ckETH helper-contract onramp (client-side)
+    // NO-SWAP HONESTY (Fork-C / O3): ckUSDC offramp is Unavailable — the wallet shows NO cash-out.
+    assert_eq!(ckusdc["offramp"], "Unavailable");
 }
 
 // --- ckERC-20 onramp surface (ckUSDC; M2) -------------------------------------

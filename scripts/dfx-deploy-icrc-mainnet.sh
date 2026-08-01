@@ -87,6 +87,14 @@ REG_OUT="$(dfx --identity dpay canister call "$FACADE_ID" register_ledger \
   "(0 : nat32, principal \"${LEDGER_ID}\", true)" --network "$NETWORK")"
 case "$REG_OUT" in *Ok*) echo "   register Ok";; *) echo "FAIL: register_ledger did not return Ok: $REG_OUT" >&2; exit 1;; esac
 
+echo "== register the DEMO currency metadata (MC1 unit 5: onramp=Direct faucet, offramp=Unavailable) =="
+# register_currency_meta : (nat32, opt text, opt nat8, opt MinterFamily, opt text, opt text, opt text,
+#   opt nat8, opt nat64, opt nat64, opt nat32, opt text, RampCapability, RampCapability). DEMO = play
+# money: Direct faucet onramp, Unavailable offramp (no cash-out).
+META_OUT="$(dfx --identity dpay canister call "$FACADE_ID" register_currency_meta \
+  "(0 : nat32, opt \"\$\", opt (2 : nat8), null, null, null, null, null, null, null, null, null, variant { Direct }, variant { Unavailable })" --network "$NETWORK")"
+case "$META_OUT" in *Ok*) echo "   meta Ok";; *) echo "WARN: register_currency_meta did not return Ok: $META_OUT" >&2;; esac
+
 echo "== verify a: mint DUSD to the payer subaccount via the facade (caller = OPERATOR) =="
 MINT_OUT="$(dfx --identity dpay canister call "$FACADE_ID" mint "($PAYER_BLOB, 0 : nat32, $INIT_A : nat64)" --network "$NETWORK")"
 case "$MINT_OUT" in *Ok*) echo "   mint Ok";; *) echo "FAIL: mint did not return Ok: $MINT_OUT" >&2; exit 1;; esac

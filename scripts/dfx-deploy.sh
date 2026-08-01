@@ -96,6 +96,13 @@ echo "== register the DUSD ledger in the facade (currency 0 = DEMO_USD, mintable
 # literal `principal "..."` (no field name; the reserved-word quoting only applies to record labels).
 dfx canister call "$CANISTER" register_ledger "(0 : nat32, principal \"$LEDGER_ID\", true)"
 
+echo "== register the DEMO currency metadata (MC1 unit 5: onramp=Direct faucet, offramp=Unavailable) =="
+# register_currency_meta : (nat32, opt text, opt nat8, opt MinterFamily, opt text, opt text, opt text,
+#   opt nat8, opt opt nat64, opt nat64, opt nat32, opt text, RampCapability, RampCapability) — the
+# DEMO currency is play money: Direct faucet onramp, Unavailable offramp (no cash-out).
+dfx canister call "$CANISTER" register_currency_meta \
+  "(0 : nat32, opt \"\$\", opt (2 : nat8), null, null, null, null, null, null, null, null, null, variant { Direct }, variant { Unavailable })"
+
 acct() { echo "record { owner = principal \"$CID\"; subaccount = opt $1 }"; }
 
 echo "== fund the demo payer via facade mint ($INIT_A DUSD base units) =="

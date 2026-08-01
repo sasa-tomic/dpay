@@ -1,10 +1,20 @@
 type CurrencyDescriptor = record {
+  cap : opt nat64;
+  fee : opt nat64;
+  onramp : RampCapability;
   decimals : opt nat8;
+  wrapper_name : opt text;
+  backing_symbol : opt text;
   minter_family : opt MinterFamily;
   minter : opt principal;
+  network : opt text;
   mintable : bool;
+  chain_id : opt nat32;
   ledger : principal;
   currency : nat32;
+  display_decimals : opt nat8;
+  offramp : RampCapability;
+  token_contract : opt text;
   symbol : opt text;
 };
 type DepositInfo = record {
@@ -42,6 +52,7 @@ type PayReceipt = record {
   settle_ts : nat64;
 };
 type PendingUtxo = record { confirmations : nat64; value : nat64 };
+type RampCapability = variant { Partner; Unavailable; Direct };
 type ReceiptView = record {
   to : blob;
   block_index : nat64;
@@ -108,11 +119,14 @@ service : (InitArg) -> {
   // the ledger transfer's block index (unlike `mint`, which returns the new balance): `burn` is
   // facade-internal with no relay consumer, so no contract pins its return to a balance.
   burn : (blob, nat32, nat64) -> (Result);
-  // Catalog of every registered currency + its ledger/minter/display metadata — the wallet's runtime
-  // source of truth. The app fetches this once (cached) instead of hardcoding `DEPOSIT_CURRENCY`
-  // (issue #7). Joins LEDGERS (id + principal + mintable) with MINTERS (ramp principal) and
-  // CURRENCY_META (family + display). A currency appears if it has a ledger; the rest are `None` when
-  // not registered. Unauthenticated (catalog only — no balances); sorted by currency id.
+  // Catalog of every registered currency + its ledger/minter/display/ramp metadata — the wallet's
+  // runtime source of truth. The app fetches this once (cached) instead of hardcoding
+  // `DEPOSIT_CURRENCY` (issue #7) or family-level token facts (MC1 unit 5). Joins LEDGERS
+  // (id + principal + mintable) with MINTERS (ramp principal) and CURRENCY_META (family + display +
+  // ramp). A currency appears if it has a ledger; the rest are `None` when not registered. Ramp
+  // directions default to `Unavailable` when not registered (fail-closed — the wallet shows NO
+  // fund/cash-out button for an unknown ramp). Unauthenticated (catalog only — no balances); sorted
+  // by currency id.
   currencies : () -> (vec CurrencyDescriptor) query;
   // `(blob pubkey, nat32 currency) -> Result<text, text>`. Proxies the minter's `get_btc_address` —
   // the user's native deposit address for the currency. No auth: a deposit address is not secret
@@ -178,13 +192,29 @@ service : (InitArg) -> {
   // pending; `Err(NoNewUtxos{..})` -> empty minted + pending mapped from the error; the remaining
   // minter errors surface as `Err(String)`.
   refresh_deposit : (blob, nat32) -> (Result_7);
-  // Register or replace display/family metadata for a currency. Gated to the controller in
-  // production. Each field is optional — register only what you know; `None` fields keep the wallet
-  // in a best-effort fallback. This is what `currencies()` joins in, so the wallet renders asset
-  // cards without hardcoding currency ids or symbols (closes issue #7).
-  register_currency_meta : (nat32, opt text, opt nat8, opt MinterFamily) -> (
-      Result_8,
-    );
+  // Register or replace display/family/authoritative metadata for a currency. Gated to the
+  // controller in production. Each `Option` field is registered independently — register only what
+  // you know; `None` fields keep the wallet in a best-effort fallback. `onramp`/`offramp` are
+  // required (`RampCapability`, non-optional) and stored verbatim — pass `Unavailable` to withdraw a
+  // ramp direction honestly. This is what `currencies()` joins in, so the wallet renders asset cards
+  // + ramp buttons from a single source of truth (no hardcoded currency ids/symbols, no
+  // family-level token assumptions — closes issue #7 + MC1 unit 5).
+  register_currency_meta : (
+      nat32,
+      opt text,
+      opt nat8,
+      opt MinterFamily,
+      opt text,
+      opt text,
+      opt text,
+      opt nat8,
+      opt nat64,
+      opt nat64,
+      opt nat32,
+      opt text,
+      RampCapability,
+      RampCapability,
+    ) -> (Result_8);
   // Register or replace the ledger for a currency at runtime. Gated to the controller in production
   // (open only when `controller` is unset, i.e. the demo).
   register_ledger : (nat32, principal, bool) -> (Result_8);

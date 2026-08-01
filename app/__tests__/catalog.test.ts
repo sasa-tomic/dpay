@@ -6,14 +6,23 @@ import {
   currencySymbol,
   fmtCurrencyAmount,
   assetTestKey,
+  BUNDLED_CATALOG,
   type CurrencyDescriptor,
 } from '../config/catalog';
 
 // --- shared fixtures --------------------------------------------------------------------------
-const CKBTC_DESC: CurrencyDescriptor = {currency: 1, ledger: '', mintable: false, minter: 'm', minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8};
-const CKUSDC_DESC: CurrencyDescriptor = {currency: 2, ledger: 'l', mintable: false, minter: 's', minter_family: 'CkEthErc20', symbol: 'ckUSDC', decimals: 6};
-const CKSOL_DESC: CurrencyDescriptor = {currency: 99, ledger: '', mintable: false, minter: 'x', minter_family: 'CkSol', symbol: 'SOL', decimals: 9};
-const DEMO_DESC: CurrencyDescriptor = {currency: 0, ledger: '', mintable: true, minter: null, minter_family: null, symbol: '$', decimals: 2};
+// MC1 unit 5: fixtures carry the full authoritative per-currency field set. `mk` fills the new
+// fields with null defaults so each test only spells out what it asserts.
+const mk = (d: Partial<CurrencyDescriptor> & Pick<CurrencyDescriptor, 'currency' | 'minter_family'>): CurrencyDescriptor => ({
+  ledger: '', mintable: false, minter: null, symbol: null, decimals: null,
+  wrapper_name: null, backing_symbol: null, network: null, display_decimals: null,
+  fee: null, cap: null, chain_id: null, token_contract: null,
+  onramp: 'Unavailable', offramp: 'Unavailable', ...d,
+});
+const CKBTC_DESC: CurrencyDescriptor = mk({currency: 1, minter: 'm', minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8, wrapper_name: 'ckBTC', backing_symbol: 'BTC', network: 'Bitcoin', display_decimals: 8, onramp: 'Direct', offramp: 'Direct'});
+const CKUSDC_DESC: CurrencyDescriptor = mk({currency: 2, ledger: 'l', minter: 's', minter_family: 'CkEthErc20', symbol: 'ckUSDC', decimals: 6, wrapper_name: 'ckUSDC', backing_symbol: 'USDC', network: 'Ethereum', display_decimals: 6, fee: '10000', chain_id: 1, token_contract: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', onramp: 'Direct', offramp: 'Unavailable'});
+const CKSOL_DESC: CurrencyDescriptor = mk({currency: 99, minter: 'x', minter_family: 'CkSol', symbol: 'SOL', decimals: 9});
+const DEMO_DESC: CurrencyDescriptor = mk({currency: 0, mintable: true, minter_family: null, symbol: '$', decimals: 2, onramp: 'Direct', offramp: 'Unavailable'});
 const KNOWN_CATALOG: CurrencyDescriptor[] = [DEMO_DESC, CKBTC_DESC, CKUSDC_DESC];
 const UNKNOWN_CATALOG: CurrencyDescriptor[] = [CKSOL_DESC];
 
@@ -91,7 +100,7 @@ describe('familyDisplay — fail-closed for unknown families', () => {
   });
   it('returns NULL for a non-DEMO currency with minter_family null (unknown ICRC)', () => {
     const noMinter: CurrencyDescriptor[] = [
-      {currency: 7, ledger: 'l', mintable: false, minter: null, minter_family: null, symbol: null, decimals: null},
+      mk({currency: 7, minter_family: null}),
     ];
     expect(familyDisplay(noMinter, 7)).toBeNull();
   });
@@ -181,5 +190,98 @@ describe('assetTestKey — no BTC fallback for unknown families', () => {
   it('returns "asset" for an unknown family with no symbol (never "btc")', () => {
     const noSym: CurrencyDescriptor = {...CKSOL_DESC, symbol: null};
     expect(assetTestKey(noSym)).toBe('asset');
+  });
+});
+
+// --- MC1 unit 5: authoritative per-currency asset metadata ------------------------------------
+// RED-first proof that BUNDLED_CATALOG carries the authoritative per-currency field set (backing
+// symbol, wrapper name, network, decimals, fee/cap, chain id, token contract, per-direction ramp
+// capability), and that displayName/currencySymbol read from the PER-CURRENCY descriptor instead of
+// family-level assumptions (closes "every CkEthErc20 displays as USDC"). Also pins the no-swap
+// honesty contract: ckUSDC offramp is Unavailable (Fork-C/O3 — NO cash-out button).
+
+describe('BUNDLED_CATALOG — authoritative per-currency metadata populated', () => {
+  const byId = (id: number) => BUNDLED_CATALOG.find(c => c.currency === id)!;
+
+  it('ckBTC carries backing_symbol=BTC, wrapper_name=ckBTC, network=Bitcoin, onramp=Direct, offramp=Direct', () => {
+    const a = byId(1);
+    expect(a.backing_symbol).toBe('BTC');
+    expect(a.wrapper_name).toBe('ckBTC');
+    expect(a.network).toBe('Bitcoin');
+    expect(a.display_decimals).toBe(8);
+    expect(a.onramp).toBe('Direct');
+    expect(a.offramp).toBe('Direct');
+  });
+
+  it('ckUSDC carries backing_symbol=USDC, token_contract set, fee=10000, chain_id=1, onramp=Direct', () => {
+    const a = byId(2);
+    expect(a.backing_symbol).toBe('USDC');
+    expect(a.wrapper_name).toBe('ckUSDC');
+    expect(a.network).toBe('Ethereum');
+    expect(a.fee).toBe('10000');
+    expect(a.chain_id).toBe(1);
+    expect(a.token_contract).toBe('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48');
+    expect(a.onramp).toBe('Direct');
+  });
+
+  it('ckUSDC offramp is Unavailable (NO cash-out — Fork-C/O3 no-swap honesty)', () => {
+    expect(byId(2).offramp).toBe('Unavailable');
+  });
+
+  it('DEMO offramp is Unavailable (play money — no cash-out) and onramp is Direct (faucet)', () => {
+    const a = byId(0);
+    expect(a.offramp).toBe('Unavailable');
+    expect(a.onramp).toBe('Direct');
+  });
+});
+
+describe('displayName/currencySymbol — per-currency fields over family assumptions (MC1 unit 5)', () => {
+  it('displayName(ckUSDC) reads backing_symbol="USDC" (not a family-level assumption)', () => {
+    expect(displayName(CKUSDC_DESC)).toBe('USDC');
+  });
+  it('displayName(ckBTC) reads backing_symbol="BTC"', () => {
+    expect(displayName(CKBTC_DESC)).toBe('BTC');
+  });
+  it('a future ckERC20 (ckUSDT) renders as ITSELF, not "USDC" (per-currency backing_symbol wins)', () => {
+    const ckusdt: CurrencyDescriptor = mk({currency: 5, minter_family: 'CkEthErc20', symbol: 'ckUSDT', decimals: 6, wrapper_name: 'ckUSDT', backing_symbol: 'USDT', network: 'Ethereum', display_decimals: 6});
+    expect(displayName(ckusdt)).toBe('USDT');
+    expect(displayName(ckusdt)).not.toBe('USDC');
+  });
+  it('currencySymbol(ckUSDC) is "$" (USD-backed stablecoin via backing_symbol)', () => {
+    expect(currencySymbol([CKUSDC_DESC], 2)).toBe('$');
+  });
+  it('currencySymbol(ckBTC) is "₿"', () => {
+    expect(currencySymbol([CKBTC_DESC], 1)).toBe('₿');
+  });
+  it('fmtCurrencyAmount(ckUSDC) reads per-currency decimals + backing_symbol', () => {
+    // 1000000 raw @ 6 decimals → "1.000000 USDC" (reads descriptor.backing_symbol + display_decimals)
+    expect(fmtCurrencyAmount([CKUSDC_DESC], 2, 1000000)).toBe('1.000000 USDC');
+  });
+  it('fmtCurrencyAmount(ckBTC) reads per-currency decimals + backing_symbol', () => {
+    expect(fmtCurrencyAmount([CKBTC_DESC], 1, 50000)).toBe('0.00050000 BTC');
+  });
+  it('fmtCurrencyAmount renders a future ckERC20 in its OWN unit (not USDC)', () => {
+    const ckusdt: CurrencyDescriptor = mk({currency: 5, minter_family: 'CkEthErc20', symbol: 'ckUSDT', decimals: 6, wrapper_name: 'ckUSDT', backing_symbol: 'USDT', network: 'Ethereum', display_decimals: 6});
+    expect(fmtCurrencyAmount([ckusdt], 5, 2000000)).toBe('2.000000 USDT');
+    expect(fmtCurrencyAmount([ckusdt], 5, 2000000)).not.toMatch(/USDC/);
+  });
+});
+
+describe('familyDisplay sources per-currency facts from the descriptor (MC1 unit 5)', () => {
+  it('familyDisplay(ckBTC).nativeAsset === "BTC" from the descriptor backing_symbol', () => {
+    expect(familyDisplay(KNOWN_CATALOG, 1)?.nativeAsset).toBe('BTC');
+    expect(familyDisplay(KNOWN_CATALOG, 1)?.networkLabel).toBe('Bitcoin');
+    expect(familyDisplay(KNOWN_CATALOG, 1)?.amountDecimals).toBe(8);
+  });
+  it('familyDisplay(ckUSDC).nativeAsset === "USDC" from the descriptor backing_symbol', () => {
+    expect(familyDisplay(KNOWN_CATALOG, 2)?.nativeAsset).toBe('USDC');
+    expect(familyDisplay(KNOWN_CATALOG, 2)?.networkLabel).toBe('Ethereum');
+    expect(familyDisplay(KNOWN_CATALOG, 2)?.amountDecimals).toBe(6);
+  });
+  it('a legacy descriptor without backing_symbol falls back to the family-default', () => {
+    // No backing_symbol/network/display_decimals ⇒ family defaults (BTC/Bitcoin/8) keep working.
+    const legacy: CurrencyDescriptor[] = [mk({currency: 1, minter_family: 'CkBtcUtxo', decimals: 8, symbol: '₿'})];
+    expect(familyDisplay(legacy, 1)?.nativeAsset).toBe('BTC');
+    expect(familyDisplay(legacy, 1)?.amountDecimals).toBe(8);
   });
 });

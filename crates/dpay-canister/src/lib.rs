@@ -266,10 +266,44 @@ impl MinterFamily {
     }
 }
 
-/// One entry of the `currencies()` catalog. The wallet reads currency ids + display metadata from
-/// here at runtime instead of hardcoding `DEPOSIT_CURRENCY` (issue #7). `minter` is `Some` only for
-/// ck currencies with a registered ramp; `minter_family`/`symbol`/`decimals` are `None` when not
-/// registered (app falls back to a wrapper symbol / best-effort formatting).
+/// Per-direction ramp capability for a currency (MC1 unit 5). Honesty contract: the wallet renders
+/// NO fund/cash-out button for a direction marked `Unavailable` (per CLAUDE.md dpay never swaps and
+/// never advertises a ramp it cannot honour — OPEN_ISSUES O3 keeps ckUSDC offramp `Unavailable`).
+/// `Direct` = a native chain-key path the facade/wallet drives directly (ckBTC Bitcoin ramp, the
+/// DEMO faucet, the ckETH helper-contract onramp); `Partner` = a licensed third-party handoff (dpay
+/// is a screen); `Unavailable` = not offered (the fail-closed default for any unregistered currency).
+#[derive(CandidType, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RampCapability {
+    /// A native chain-key path the facade/wallet drives directly (ckBTC Bitcoin ramp, DEMO faucet,
+    /// the ckETH helper-contract onramp already built client-side).
+    Direct = 0,
+    /// A licensed third-party handoff: dpay shows an address + status, the user authorizes the
+    /// third party directly (dpay never holds keys/creds — preserves no-swap/no-custody).
+    Partner = 1,
+    /// Not offered. The wallet MUST render no button for this direction.
+    Unavailable = 2,
+}
+
+impl RampCapability {
+    fn from_byte(b: u8) -> Option<Self> {
+        match b {
+            0 => Some(RampCapability::Direct),
+            1 => Some(RampCapability::Partner),
+            2 => Some(RampCapability::Unavailable),
+            _ => None,
+        }
+    }
+}
+
+/// One entry of the `currencies()` catalog. The wallet reads currency ids + authoritative
+/// per-currency metadata from here at runtime instead of hardcoding `DEPOSIT_CURRENCY` (issue #7)
+/// or family-level assumptions (MC1 unit 5: every CkEthErc20 used to inherit USDC's facts). The
+/// metadata fields are the single source of truth the relay passes through and the app caches.
+///
+/// `onramp`/`offramp` are NON-optional (`RampCapability`): an unregistered currency defaults to
+/// `Unavailable` for both directions in `currencies()` — fail-closed, so the wallet never shows a
+/// fund/cash-out button for a ramp it cannot honour. All other new fields are `Option<...>` so a
+/// registration that predates MC1 unit 5 (or only sets what it knows) stays valid.
 #[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct CurrencyDescriptor {
     pub currency: Currency,
@@ -284,40 +318,196 @@ pub struct CurrencyDescriptor {
     pub symbol: Option<String>,
     /// Smallest-unit decimal count (USD=2, BTC=8, ETH=18, USDC=6). `None` = app guesses.
     pub decimals: Option<u8>,
+    /// The IC wrapper token NAME, e.g. "ckBTC"/"ckUSDC" — the chain-key token's own name (distinct
+    /// from the backing native chain asset `backing_symbol`). `None` = unknown wrapper.
+    pub wrapper_name: Option<String>,
+    /// The BACKING native-chain asset symbol, e.g. "BTC"/"USDC"/"ETH" — drives `displayName`/
+    /// `currencySymbol` instead of family-level assumptions so each ckERC20 renders as itself.
+    pub backing_symbol: Option<String>,
+    /// The native settlement network name for display, e.g. "Bitcoin"/"Ethereum". `None` = unknown.
+    pub network: Option<String>,
+    /// UI display precision; **default = `decimals`** (full precision) when unset. Must be ≤
+    /// `decimals` when set (a smaller display precision for readable balances).
+    pub display_decimals: Option<u8>,
+    /// ICRC ledger fee in RAW smallest units, registered statically (MC2 adds live validation).
+    pub fee: Option<u64>,
+    /// Per-currency transaction cap in RAW smallest units, registered (MC2 governs). Authoritative
+    /// per-currency replacement for the single global `per_tx_cap` for display/policy.
+    pub cap: Option<u64>,
+    /// EVM chain id for ckERC20 (1=Ethereum mainnet). `None` for non-EVM families.
+    pub chain_id: Option<u32>,
+    /// The ERC-20 contract address (0x…) for a ckERC20 token — PER-TOKEN, replacing the relay's old
+    /// hardcoded currency-2 params. `None` for non-ERC20 families.
+    pub token_contract: Option<String>,
+    /// Funding (on-ramp) capability. `Unavailable` ⇒ the wallet shows NO "Add money" button.
+    pub onramp: RampCapability,
+    /// Cash-out (off-ramp) capability. `Unavailable` ⇒ the wallet shows NO "Cash out" button
+    /// (ckUSDC offramp is `Unavailable` per Fork-C — OPEN_ISSUES O3).
+    pub offramp: RampCapability,
 }
 
-/// Display + family metadata for a currency, stored in `CURRENCY_META` (MemoryId 13). Encoded as:
-/// symbol-flag(1) + [len(1) + ≤16 bytes] + decimals-flag(1) + [decimals(1)] + family-flag(1) +
-/// [family(1)]. Compact; the only repeated registration surface is `register_currency_meta`.
-const CURRENCY_META_MAX: usize = 1 + (1 + 16) + 1 + 1 + 1 + 1;
+/// Display + family + authoritative per-currency metadata, stored in `CURRENCY_META` (MemoryId 13).
+///
+/// Encoding (MC1 unit 5 — additive, fail-closed on truncation): a sequence of self-delimiting
+/// fields, each an `Option` encoded as a 1-byte present-flag (0=absent, 1=present) followed by its
+/// payload when present:
+///   1. symbol          : flag + [len(1) + ≤16 bytes]
+///   2. decimals        : flag + [byte(1)]
+///   3. minter_family   : flag + [byte(1)]
+///   4. wrapper_name    : flag + [len(1) + ≤32 bytes]
+///   5. backing_symbol  : flag + [len(1) + ≤16 bytes]
+///   6. network         : flag + [len(1) + ≤32 bytes]
+///   7. display_decimals: flag + [byte(1)]
+///   8. fee             : flag + [u64 LE 8]
+///   9. cap             : flag + [u64 LE 8]
+///  10. chain_id        : flag + [u32 LE 4]
+///  11. token_contract  : flag + [len(1) + ≤64 bytes]
+///  12. onramp          : flag + [byte(1)]   (Option<RampCapability>; None→Unavailable default)
+///  13. offramp         : flag + [byte(1)]   (Option<RampCapability>; None→Unavailable default)
+///
+/// `from_bytes` reads each field in order and treats the record as truncated at the first missing
+/// byte (the remainder default to `None`) — so a record written by an older canister version (which
+/// ends earlier) decodes with the new fields as `None`, and `currencies()` surfaces `Unavailable`
+/// ramps for it. Compact; the only repeated registration surface is `register_currency_meta`.
+const CURRENCY_META_MAX: usize = (1 + (1 + 16)) + (1 + 1) + (1 + 1) + (1 + (1 + 32)) + (1 + (1 + 16))
+    + (1 + (1 + 32)) + (1 + 1) + (1 + 8) + (1 + 8) + (1 + 4) + (1 + (1 + 64)) + (1 + 1) + (1 + 1);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct CurrencyMetaStorable {
     symbol: Option<String>,
     decimals: Option<u8>,
     minter_family: Option<MinterFamily>,
+    wrapper_name: Option<String>,
+    backing_symbol: Option<String>,
+    network: Option<String>,
+    display_decimals: Option<u8>,
+    fee: Option<u64>,
+    cap: Option<u64>,
+    chain_id: Option<u32>,
+    token_contract: Option<String>,
+    /// `None` in storage ⇒ `Unavailable` in the returned descriptor (fail-closed ramp default).
+    onramp: Option<RampCapability>,
+    /// `None` in storage ⇒ `Unavailable` in the returned descriptor (fail-closed ramp default).
+    offramp: Option<RampCapability>,
+}
+
+/// Push a present-flagged optional string, truncating to `max` bytes (lossy but bounded).
+fn push_opt_str(v: &mut Vec<u8>, s: &Option<String>, max: usize) {
+    match s {
+        Some(s) => {
+            let bytes = s.as_bytes();
+            let n = bytes.len().min(max) as u8;
+            v.push(1u8);
+            v.push(n);
+            v.extend_from_slice(&bytes[..n as usize]);
+        }
+        None => v.push(0u8),
+    }
+}
+
+/// Push a present-flagged optional single byte.
+fn push_opt_u8(v: &mut Vec<u8>, x: Option<u8>) {
+    match x {
+        Some(b) => {
+            v.push(1u8);
+            v.push(b);
+        }
+        None => v.push(0u8),
+    }
+}
+
+/// Push a present-flagged optional little-endian u64.
+fn push_opt_u64(v: &mut Vec<u8>, x: Option<u64>) {
+    match x {
+        Some(n) => {
+            v.push(1u8);
+            v.extend_from_slice(&n.to_le_bytes());
+        }
+        None => v.push(0u8),
+    }
+}
+
+/// Push a present-flagged optional little-endian u32.
+fn push_opt_u32(v: &mut Vec<u8>, x: Option<u32>) {
+    match x {
+        Some(n) => {
+            v.push(1u8);
+            v.extend_from_slice(&n.to_le_bytes());
+        }
+        None => v.push(0u8),
+    }
+}
+
+/// Read a present-flagged optional string of ≤`max` bytes from `b` at `pos`, returning the value and
+/// advancing `pos` past it. A flag byte of 0 (or running out of bytes) yields `None`.
+fn read_opt_str(b: &[u8], pos: &mut usize, max: usize) -> Option<String> {
+    if *pos >= b.len() {
+        return None;
+    }
+    if b[*pos] == 0 {
+        *pos += 1;
+        return None;
+    }
+    *pos += 1; // consume flag
+    let n = b.get(*pos).copied().unwrap_or(0) as usize;
+    *pos += 1;
+    let n = n.min(max).min(b.len().saturating_sub(*pos));
+    let s = String::from_utf8_lossy(&b[*pos..*pos + n]).to_string();
+    *pos += n;
+    Some(s)
+}
+
+/// Read a present-flagged optional single byte from `b` at `pos`.
+fn read_opt_u8(b: &[u8], pos: &mut usize) -> Option<u8> {
+    if *pos >= b.len() || b[*pos] == 0 {
+        *pos = (*pos + 1).min(b.len());
+        return None;
+    }
+    *pos += 1;
+    let v = b.get(*pos).copied();
+    *pos += 1;
+    v
+}
+
+/// Read a present-flagged optional little-endian u64 from `b` at `pos`.
+fn read_opt_u64(b: &[u8], pos: &mut usize) -> Option<u64> {
+    if *pos >= b.len() || b[*pos] == 0 {
+        *pos = (*pos + 1).min(b.len());
+        return None;
+    }
+    *pos += 1;
+    if *pos + 8 > b.len() {
+        *pos = b.len();
+        return None;
+    }
+    let mut buf = [0u8; 8];
+    buf.copy_from_slice(&b[*pos..*pos + 8]);
+    *pos += 8;
+    Some(u64::from_le_bytes(buf))
+}
+
+/// Read a present-flagged optional little-endian u32 from `b` at `pos`.
+fn read_opt_u32(b: &[u8], pos: &mut usize) -> Option<u32> {
+    if *pos >= b.len() || b[*pos] == 0 {
+        *pos = (*pos + 1).min(b.len());
+        return None;
+    }
+    *pos += 1;
+    if *pos + 4 > b.len() {
+        *pos = b.len();
+        return None;
+    }
+    let mut buf = [0u8; 4];
+    buf.copy_from_slice(&b[*pos..*pos + 4]);
+    *pos += 4;
+    Some(u32::from_le_bytes(buf))
 }
 
 impl Storable for CurrencyMetaStorable {
     fn to_bytes(&self) -> Cow<'_, [u8]> {
         let mut v = Vec::with_capacity(CURRENCY_META_MAX);
-        match &self.symbol {
-            Some(s) => {
-                let bytes = s.as_bytes();
-                let n = bytes.len().min(16) as u8;
-                v.push(1u8);
-                v.push(n);
-                v.extend_from_slice(&bytes[..n as usize]);
-            }
-            None => v.push(0u8),
-        }
-        match self.decimals {
-            Some(d) => {
-                v.push(1u8);
-                v.push(d);
-            }
-            None => v.push(0u8),
-        }
+        push_opt_str(&mut v, &self.symbol, 16);
+        push_opt_u8(&mut v, self.decimals);
         match self.minter_family {
             Some(f) => {
                 v.push(1u8);
@@ -325,33 +515,70 @@ impl Storable for CurrencyMetaStorable {
             }
             None => v.push(0u8),
         }
+        push_opt_str(&mut v, &self.wrapper_name, 32);
+        push_opt_str(&mut v, &self.backing_symbol, 16);
+        push_opt_str(&mut v, &self.network, 32);
+        push_opt_u8(&mut v, self.display_decimals);
+        push_opt_u64(&mut v, self.fee);
+        push_opt_u64(&mut v, self.cap);
+        push_opt_u32(&mut v, self.chain_id);
+        push_opt_str(&mut v, &self.token_contract, 64);
+        match self.onramp {
+            Some(r) => {
+                v.push(1u8);
+                v.push(r as u8);
+            }
+            None => v.push(0u8),
+        }
+        match self.offramp {
+            Some(r) => {
+                v.push(1u8);
+                v.push(r as u8);
+            }
+            None => v.push(0u8),
+        }
         Cow::Owned(v)
     }
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
         let b = bytes.as_ref();
-        let len = b.len();
-        // symbol: flag + [len + bytes]
-        let (symbol, rest_start) = match b.first() {
-            Some(&1u8) => {
-                let n = b.get(1).copied().unwrap_or(0) as usize;
-                let end = (2 + n).min(len);
-                (Some(String::from_utf8_lossy(&b[2..end]).to_string()), end)
-            }
-            _ => (None, 1.min(len)),
+        let mut pos = 0usize;
+        let symbol = read_opt_str(b, &mut pos, 16);
+        let decimals = read_opt_u8(b, &mut pos);
+        let minter_family = match read_opt_u8(b, &mut pos) {
+            Some(x) => MinterFamily::from_byte(x),
+            None => None,
         };
-        let rest = &b[rest_start..];
-        // decimals: flag + [byte]
-        let (decimals, rest2_start) = match rest.first() {
-            Some(&1u8) => (rest.get(1).copied(), 2.min(rest.len())),
-            _ => (None, 1.min(rest.len())),
+        let wrapper_name = read_opt_str(b, &mut pos, 32);
+        let backing_symbol = read_opt_str(b, &mut pos, 16);
+        let network = read_opt_str(b, &mut pos, 32);
+        let display_decimals = read_opt_u8(b, &mut pos);
+        let fee = read_opt_u64(b, &mut pos);
+        let cap = read_opt_u64(b, &mut pos);
+        let chain_id = read_opt_u32(b, &mut pos);
+        let token_contract = read_opt_str(b, &mut pos, 64);
+        let onramp = match read_opt_u8(b, &mut pos) {
+            Some(x) => RampCapability::from_byte(x),
+            None => None,
         };
-        let rest2 = &rest[rest2_start..];
-        // minter_family: flag + [byte]
-        let minter_family = match rest2.first() {
-            Some(&1u8) => rest2.get(1).copied().and_then(MinterFamily::from_byte),
-            _ => None,
+        let offramp = match read_opt_u8(b, &mut pos) {
+            Some(x) => RampCapability::from_byte(x),
+            None => None,
         };
-        CurrencyMetaStorable { symbol, decimals, minter_family }
+        CurrencyMetaStorable {
+            symbol,
+            decimals,
+            minter_family,
+            wrapper_name,
+            backing_symbol,
+            network,
+            display_decimals,
+            fee,
+            cap,
+            chain_id,
+            token_contract,
+            onramp,
+            offramp,
+        }
     }
     const BOUND: Bound = Bound::Bounded {
         max_size: CURRENCY_META_MAX as u32,
@@ -1662,32 +1889,63 @@ fn register_minter(currency: Currency, minter: Principal) -> Result<(), String> 
     Ok(())
 }
 
-/// Register or replace display/family metadata for a currency. Gated to the controller in
-/// production. Each field is optional — register only what you know; `None` fields keep the wallet
-/// in a best-effort fallback. This is what `currencies()` joins in, so the wallet renders asset
-/// cards without hardcoding currency ids or symbols (closes issue #7).
+/// Register or replace display/family/authoritative metadata for a currency. Gated to the
+/// controller in production. Each `Option` field is registered independently — register only what
+/// you know; `None` fields keep the wallet in a best-effort fallback. `onramp`/`offramp` are
+/// required (`RampCapability`, non-optional) and stored verbatim — pass `Unavailable` to withdraw a
+/// ramp direction honestly. This is what `currencies()` joins in, so the wallet renders asset cards
+/// + ramp buttons from a single source of truth (no hardcoded currency ids/symbols, no
+/// family-level token assumptions — closes issue #7 + MC1 unit 5).
 #[update]
+#[allow(clippy::too_many_arguments)] // flat positional candid args match register_ledger/register_minter
 fn register_currency_meta(
     currency: Currency,
     symbol: Option<String>,
     decimals: Option<u8>,
     minter_family: Option<MinterFamily>,
+    wrapper_name: Option<String>,
+    backing_symbol: Option<String>,
+    network: Option<String>,
+    display_decimals: Option<u8>,
+    fee: Option<u64>,
+    cap: Option<u64>,
+    chain_id: Option<u32>,
+    token_contract: Option<String>,
+    onramp: RampCapability,
+    offramp: RampCapability,
 ) -> Result<(), String> {
     require_admin()?;
     CURRENCY_META.with(|m| {
         m.borrow_mut().insert(
             currency,
-            CurrencyMetaStorable { symbol, decimals, minter_family },
+            CurrencyMetaStorable {
+                symbol,
+                decimals,
+                minter_family,
+                wrapper_name,
+                backing_symbol,
+                network,
+                display_decimals,
+                fee,
+                cap,
+                chain_id,
+                token_contract,
+                onramp: Some(onramp),
+                offramp: Some(offramp),
+            },
         );
     });
     Ok(())
 }
 
-/// Catalog of every registered currency + its ledger/minter/display metadata — the wallet's runtime
-/// source of truth. The app fetches this once (cached) instead of hardcoding `DEPOSIT_CURRENCY`
-/// (issue #7). Joins LEDGERS (id + principal + mintable) with MINTERS (ramp principal) and
-/// CURRENCY_META (family + display). A currency appears if it has a ledger; the rest are `None` when
-/// not registered. Unauthenticated (catalog only — no balances); sorted by currency id.
+/// Catalog of every registered currency + its ledger/minter/display/ramp metadata — the wallet's
+/// runtime source of truth. The app fetches this once (cached) instead of hardcoding
+/// `DEPOSIT_CURRENCY` (issue #7) or family-level token facts (MC1 unit 5). Joins LEDGERS
+/// (id + principal + mintable) with MINTERS (ramp principal) and CURRENCY_META (family + display +
+/// ramp). A currency appears if it has a ledger; the rest are `None` when not registered. Ramp
+/// directions default to `Unavailable` when not registered (fail-closed — the wallet shows NO
+/// fund/cash-out button for an unknown ramp). Unauthenticated (catalog only — no balances); sorted
+/// by currency id.
 #[query]
 fn currencies() -> Vec<CurrencyDescriptor> {
     let entries: Vec<(Currency, LedgerEntry)> =
@@ -1705,6 +1963,18 @@ fn currencies() -> Vec<CurrencyDescriptor> {
                 minter_family: meta.as_ref().and_then(|x| x.minter_family),
                 symbol: meta.as_ref().and_then(|x| x.symbol.clone()),
                 decimals: meta.as_ref().and_then(|x| x.decimals),
+                wrapper_name: meta.as_ref().and_then(|x| x.wrapper_name.clone()),
+                backing_symbol: meta.as_ref().and_then(|x| x.backing_symbol.clone()),
+                network: meta.as_ref().and_then(|x| x.network.clone()),
+                display_decimals: meta.as_ref().and_then(|x| x.display_decimals),
+                fee: meta.as_ref().and_then(|x| x.fee),
+                cap: meta.as_ref().and_then(|x| x.cap),
+                chain_id: meta.as_ref().and_then(|x| x.chain_id),
+                token_contract: meta.as_ref().and_then(|x| x.token_contract.clone()),
+                // Fail-closed: a currency with no ramp metadata registered surfaces Unavailable for
+                // BOTH directions — the wallet renders no fund/cash-out button for it.
+                onramp: meta.as_ref().and_then(|x| x.onramp).unwrap_or(RampCapability::Unavailable),
+                offramp: meta.as_ref().and_then(|x| x.offramp).unwrap_or(RampCapability::Unavailable),
             }
         })
         .collect();

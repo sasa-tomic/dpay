@@ -206,9 +206,24 @@ pub enum MinterFamily {
     CkSol,
 }
 
+/// Per-direction ramp capability for a currency (MC1 unit 5). Mirrors the canister's
+/// `RampCapability` candid variant; serialized as the plain variant name (e.g. `"Direct"`),
+/// matching the candid label and the wallet's JSON contract. `Unavailable` ⇒ the wallet renders NO
+/// button for that direction (no-swap honesty; ckUSDC offramp is `Unavailable` per Fork-C/O3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub enum RampCapability {
+    Direct,
+    Partner,
+    Unavailable,
+}
+
 /// One currency the wallet can hold/fund — the runtime catalog entry. Mirrors the canister's
 /// `CurrencyDescriptor`. `minter` is `Some` only for ck currencies with a registered ramp;
 /// `minter_family`/`symbol`/`decimals` are `None` when unregistered (the wallet falls back).
+/// `onramp`/`offramp` are NON-optional `RampCapability` (the canister defaults an unregistered
+/// currency to `Unavailable` for both — fail-closed). The new per-currency metadata fields
+/// (`wrapper_name`/`backing_symbol`/`network`/`display_decimals`/`fee`/`cap`/`chain_id`/
+/// `token_contract`) are the authoritative single source of truth; the relay is a pass-through.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct CurrencyDescriptor {
     pub currency: Currency,
@@ -221,6 +236,27 @@ pub struct CurrencyDescriptor {
     pub minter_family: Option<MinterFamily>,
     pub symbol: Option<String>,
     pub decimals: Option<u8>,
+    /// The IC wrapper token NAME, e.g. "ckBTC"/"ckUSDC" (distinct from the backing native asset).
+    pub wrapper_name: Option<String>,
+    /// The backing native-chain asset symbol, e.g. "BTC"/"USDC"/"ETH" — drives app display.
+    pub backing_symbol: Option<String>,
+    /// The native settlement network name for display, e.g. "Bitcoin"/"Ethereum".
+    pub network: Option<String>,
+    /// UI display precision; default = `decimals` (full precision) when unset. ≤ `decimals`.
+    pub display_decimals: Option<u8>,
+    /// ICRC ledger fee in RAW smallest units (registered statically; MC2 adds live validation).
+    pub fee: Option<u64>,
+    /// Per-currency tx cap in RAW smallest units (registered; MC2 governs).
+    pub cap: Option<u64>,
+    /// EVM chain id for ckERC20 (1=Ethereum mainnet). `None` for non-EVM families.
+    pub chain_id: Option<u32>,
+    /// ERC-20 contract address (0x…) for a ckERC20 token — per-token, replacing the old hardcoded
+    /// currency-2 params. `None` for non-ERC20 families.
+    pub token_contract: Option<String>,
+    /// Funding (on-ramp) capability. `Unavailable` ⇒ wallet shows NO "Add money" button.
+    pub onramp: RampCapability,
+    /// Cash-out (off-ramp) capability. `Unavailable` ⇒ wallet shows NO "Cash out" button.
+    pub offramp: RampCapability,
 }
 
 /// Onramp parameters for a ckERC-20 currency (ckUSDC etc.). The app builds the user's two Ethereum
@@ -509,14 +545,18 @@ impl FakeLedger {
 }
 
 /// The catalog the offline FakeLedger reports — mirrors a demo deployment: DEMO_USD (currency 0,
-/// mintable, the `$` faucet asset) + ckBTC (currency 1, the CkBtcUtxo deposit/withdraw ramp asset) +
+/// mintable, the `∂` faucet asset) + ckBTC (currency 1, the CkBtcUtxo deposit/withdraw ramp asset) +
 /// ckUSDC (currency 2, the CkEthErc20 onramp asset). The principal text values are the canonical
 /// management/anon/minter stand-ins the demo uses (`aaaaa-aa` = the mgmt canister, `2vxsx-fae` = the
 /// anonymous principal, `mqygn-kiaaa-aaaar-qaadq-cai` = the live ckBTC minter, `sv3dd-…` = the live
-/// ckETH minter, `xevnm-…` = the live ckUSDC ledger); the wallet only reads
-/// `currency`/`symbol`/`decimals`/`minter_family` for display. Hardcoded as TEXT (not built via
-/// `candid::Principal`) because `candid` is feature-gated to `agent` and `ledger.rs` ships in the lean
-/// offline build.
+/// ckETH minter, `xevnm-…` = the live ckUSDC ledger); the wallet reads
+/// `currency`/`symbol`/`decimals`/`minter_family` + the MC1 unit 5 per-currency metadata for display.
+/// Hardcoded as TEXT (not built via `candid::Principal`) because `candid` is feature-gated to `agent`
+/// and `ledger.rs` ships in the lean offline build.
+///
+/// Ramp honesty (MC1 unit 5, no-swap non-negotiable + OPEN_ISSUES O3): DEMO onramp=`Direct` (faucet),
+/// offramp=`Unavailable`; ckBTC onramp=`Direct` (Bitcoin ramp), offramp=`Direct`; ckUSDC
+/// onramp=`Direct` (ckETH helper built client-side), offramp=`Unavailable` (Fork-C — NO cash-out).
 fn fake_catalog() -> Vec<CurrencyDescriptor> {
     vec![
         CurrencyDescriptor {
@@ -527,6 +567,16 @@ fn fake_catalog() -> Vec<CurrencyDescriptor> {
             minter_family: None,
             symbol: Some("$".into()),
             decimals: Some(2),
+            wrapper_name: None,
+            backing_symbol: None,
+            network: None,
+            display_decimals: None,
+            fee: None,
+            cap: None,
+            chain_id: None,
+            token_contract: None,
+            onramp: RampCapability::Direct, // self-service faucet (fixed amount, rate-limited)
+            offramp: RampCapability::Unavailable, // play money — no cash-out
         },
         CurrencyDescriptor {
             currency: 1, // ckBTC-shaped deposit currency
@@ -536,15 +586,35 @@ fn fake_catalog() -> Vec<CurrencyDescriptor> {
             minter_family: Some(MinterFamily::CkBtcUtxo),
             symbol: Some("₿".into()),
             decimals: Some(8),
+            wrapper_name: Some("ckBTC".into()),
+            backing_symbol: Some("BTC".into()),
+            network: Some("Bitcoin".into()),
+            display_decimals: Some(8),
+            fee: None,        // ckBTC ledger fee read live at runtime (MC2 validates)
+            cap: None,
+            chain_id: None,   // not EVM
+            token_contract: None,
+            onramp: RampCapability::Direct, // chain-key Bitcoin ramp
+            offramp: RampCapability::Direct, // retrieve_btc_with_approval
         },
         CurrencyDescriptor {
             currency: 2, // ckUSDC (ckERC-20 onramp currency)
-            ledger: "xevnm-gaaaa-aaaar-qafnq-cai".to_string(), // ckUSDC ledger principal text
+            ledger: "xevnm-gaaaa-aaaar-qafnq-cai".to_string(), // ckUSDC ledger principal text (O6)
             mintable: false,
             minter: Some("sv3dd-oaaaa-aaaar-qacoa-cai".to_string()), // ckETH minter
             minter_family: Some(MinterFamily::CkEthErc20),
             symbol: Some("ckUSDC".to_string()),
             decimals: Some(6),
+            wrapper_name: Some("ckUSDC".into()),
+            backing_symbol: Some("USDC".into()),
+            network: Some("Ethereum".into()),
+            display_decimals: Some(6),
+            fee: Some(10_000), // ckUSDC ledger icrc1_fee (O6): 0.01 USDC = 10000 raw
+            cap: None,
+            chain_id: Some(1), // Ethereum mainnet
+            token_contract: Some("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".into()), // ckUSDC ERC-20 (O6)
+            onramp: RampCapability::Direct, // ckETH helper-contract onramp (client-side)
+            offramp: RampCapability::Unavailable, // deferred per Fork-C — NO cash-out (O3)
         },
     ]
 }

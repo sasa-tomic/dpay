@@ -23,8 +23,8 @@ use dpay_core::{Currency, PUBKEY_LEN, SignedAuthorization};
 
 use crate::ledger::{
     CKERC20_HELPER_ADDRESS, CKUSDC_ERC20_ADDRESS, CkErc20OnrampParams, CurrencyDescriptor, DepositInfo,
-    DepositRefresh, Ledger, LedgerError, MinterFamily, MintedUtxo, PendingUtxo, Receipt, TxnRecord,
-    WithdrawReceipt, WithdrawRequest,
+    DepositRefresh, Ledger, LedgerError, MinterFamily, MintedUtxo, PendingUtxo, RampCapability,
+    Receipt, TxnRecord, WithdrawReceipt, WithdrawRequest,
 };
 
 /// Read the settlement currency out of a 292-byte signed-authorization wire (the canister does the
@@ -133,9 +133,18 @@ enum MinterFamilyMirror {
     CkSol,
 }
 
-/// Candid mirror of the canister's `CurrencyDescriptor` (M0 catalog). Principals decode as
-/// `candid::Principal`; the trait impl round-trips each through `.to_text()` into the relay's
-/// JSON-shaped [`CurrencyDescriptor`].
+/// Candid mirror of the canister's `RampCapability` variant (MC1 unit 5). Maps to the relay's
+/// serde [`RampCapability`].
+#[derive(CandidType, Deserialize, Debug)]
+enum RampCapabilityMirror {
+    Direct,
+    Partner,
+    Unavailable,
+}
+
+/// Candid mirror of the canister's `CurrencyDescriptor` (M0 catalog + MC1 unit 5 authoritative
+/// metadata). Principals decode as `candid::Principal`; the trait impl round-trips each through
+/// `.to_text()` into the relay's JSON-shaped [`CurrencyDescriptor`].
 #[derive(CandidType, Deserialize, Debug)]
 struct CurrencyDescriptorMirror {
     currency: u32,
@@ -145,6 +154,16 @@ struct CurrencyDescriptorMirror {
     minter_family: Option<MinterFamilyMirror>,
     symbol: Option<String>,
     decimals: Option<u8>,
+    wrapper_name: Option<String>,
+    backing_symbol: Option<String>,
+    network: Option<String>,
+    display_decimals: Option<u8>,
+    fee: Option<u64>,
+    cap: Option<u64>,
+    chain_id: Option<u32>,
+    token_contract: Option<String>,
+    onramp: RampCapabilityMirror,
+    offramp: RampCapabilityMirror,
 }
 
 /// A [`Ledger`] backed by a real IC replica. Owns an [`Agent`] pointed at the replica/gateway URL
@@ -465,6 +484,24 @@ impl Ledger for AgentLedger {
                 }),
                 symbol: d.symbol,
                 decimals: d.decimals,
+                wrapper_name: d.wrapper_name,
+                backing_symbol: d.backing_symbol,
+                network: d.network,
+                display_decimals: d.display_decimals,
+                fee: d.fee,
+                cap: d.cap,
+                chain_id: d.chain_id,
+                token_contract: d.token_contract,
+                onramp: match d.onramp {
+                    RampCapabilityMirror::Direct => RampCapability::Direct,
+                    RampCapabilityMirror::Partner => RampCapability::Partner,
+                    RampCapabilityMirror::Unavailable => RampCapability::Unavailable,
+                },
+                offramp: match d.offramp {
+                    RampCapabilityMirror::Direct => RampCapability::Direct,
+                    RampCapabilityMirror::Partner => RampCapability::Partner,
+                    RampCapabilityMirror::Unavailable => RampCapability::Unavailable,
+                },
             })
             .collect())
     }

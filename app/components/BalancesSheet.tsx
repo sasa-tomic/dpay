@@ -58,9 +58,13 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
             // a no-minter ICRC currency → no ramp buttons render, and the subtitle is an explicit
             // "Unsupported asset" (honest, never a fake BTC label, never a crash via `!`). DEMO
             // (currency 0) is special-cased above (isPrimary) so it never reaches here.
+            // MC1 unit 5: the per-currency `onramp`/`offramp` RampCapability is the authoritative
+            // gate — AND-ed with the family gate so an `Unavailable` direction NEVER shows a button
+            // (no-swap honesty; ckUSDC offramp is Unavailable per Fork-C/O3). This can only NARROW
+            // the enabled set, never re-enable a disabled direction.
             const disp = familyDisplay(catalog, a.currency);
-            const onrampable = disp !== null;
-            const cashable = a.minter_family === 'CkBtcUtxo' && funded;
+            const onrampable = disp !== null && a.onramp !== 'Unavailable';
+            const cashable = a.minter_family === 'CkBtcUtxo' && funded && a.offramp !== 'Unavailable';
             const sub = isPrimary
               ? 'play money for testing'
               : onrampable && disp ? `Send ${disp.nativeAsset} on ${disp.networkLabel}` : 'Unsupported asset';
