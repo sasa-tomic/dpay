@@ -1628,3 +1628,78 @@ fn reconcile_repairs_trap_orphan_and_blocks_double_debit() {
     let refused = reconcile(&pic, dpay, DEMO_USD, Principal::anonymous());
     assert!(refused.is_err(), "non-controller reconcile must be refused: {refused:?}");
 }
+
+// --- MC2 unit 3: irreversible retire — pay rejection + history preservation -------------------
+// RED-first proof that a retired currency id is rejected by the settlement path (`pay` calls
+// `ledger_for` which honors RETIRED) AND that retire preserves durable history (LEDGERS/MINTERS/
+// CURRENCY_META/ACCOUNT_TXNS rows are NOT deleted — only the id is marked RETIRED). These need the
+// real-ledger + signed-wire setup, so they live here rather than in currencies.rs.
+
+/// `retire_currency(nat32) -> Result<(), text>` — admin-gated, irreversible, idempotent.
+fn retire_currency(
+    pic: &PocketIc,
+    dpay: Principal,
+    caller: Principal,
+    currency: Currency,
+) -> Result<(), String> {
+    let reply = pic
+        .update_call(dpay, caller, "retire_currency", encode_args((currency,)).unwrap())
+        .expect("retire_currency update_call rejected at IC level");
+    decode_one(&reply).unwrap()
+}
+
+#[test]
+fn retired_currency_rejects_pay() {
+    // After retire, `pay` on that currency is rejected — `ledger_for(currency)` honors RETIRED and
+    // returns Err before any cross-canister transfer. The signed authorization is otherwise valid
+    // (in-cap, in-expiry, good signature), so the ONLY thing that can reject it is the retire gate.
+    let (pic, _ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
+    // Fund the payer so balance is not the reject reason.
+    mint(&pic, dpay, payer, DEMO_USD, INIT_A);
+
+    let expiry = T0_SECS + 120;
+    // A pay on DEMO_USD succeeds BEFORE retire (sanity: the path works).
+    pay(&pic, dpay, signed(&sk, payer, merch, 1_000, [1u8; 16], expiry, DEMO_USD))
+        .expect("pre-retire pay settles");
+
+    // Retire DEMO_USD — the id is now dead.
+    retire_currency(&pic, dpay, pic_admin(), DEMO_USD).expect("retire DEMO_USD");
+
+    // A subsequent pay on the retired currency is REJECTED with a retired message. A fresh nonce is
+    // used so the only possible reject reason is the retire gate (not a nonce replay).
+    let err = pay(&pic, dpay, signed(&sk, payer, merch, 1_000, [2u8; 16], expiry, DEMO_USD))
+        .expect_err("pay on a retired currency must be rejected");
+    assert!(err.contains("retired"), "error must say retired, got: {err}");
+}
+
+#[test]
+fn retire_preserves_transaction_history() {
+    // Retire is history-preserving by construction: it marks the id RETIRED but does NOT delete any
+    // LEDGERS/MINTERS/CURRENCY_META/ACCOUNT_TXNS rows. A retired currency's prior transactions are
+    // still returned by `transactions_of` (the audit trail survives).
+    let (pic, _ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
+    mint(&pic, dpay, payer, DEMO_USD, INIT_A);
+
+    let expiry = T0_SECS + 120;
+    let nonce = [0x77u8; 16];
+    pay(&pic, dpay, signed(&sk, payer, merch, 2_500, nonce, expiry, DEMO_USD))
+        .expect("pay settles and records history");
+
+    // Pre-retire: the payer's history has mint + pay (2 rows).
+    let before = transactions_of(&pic, dpay, payer, DEMO_USD, 10);
+    assert_eq!(before.len(), 2, "mint + pay recorded pre-retire");
+
+    // Retire DEMO_USD.
+    retire_currency(&pic, dpay, pic_admin(), DEMO_USD).expect("retire DEMO_USD");
+
+    // Post-retire: the SAME rows are still there — retire preserved the audit trail (no deletion).
+    let after = transactions_of(&pic, dpay, payer, DEMO_USD, 10);
+    assert_eq!(after.len(), before.len(), "history survives retire (no rows deleted)");
+    assert_eq!(after[0].amount, before[0].amount, "newest row intact");
+    assert_eq!(after[1].amount, before[1].amount, "oldest row intact");
+    // The specific pay row (identifiable by its nonce) is still present.
+    assert!(
+        after.iter().any(|t| t.nonce == nonce.to_vec()),
+        "the pre-retire pay row is still in history after retire"
+    );
+}

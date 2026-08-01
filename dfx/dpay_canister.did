@@ -125,8 +125,8 @@ service : (InitArg) -> {
   // (id + principal + mintable) with MINTERS (ramp principal) and CURRENCY_META (family + display +
   // ramp). A currency appears if it has a ledger; the rest are `None` when not registered. Ramp
   // directions default to `Unavailable` when not registered (fail-closed — the wallet shows NO
-  // fund/cash-out button for an unknown ramp). Unauthenticated (catalog only — no balances); sorted
-  // by currency id.
+  // fund/cash-out button for an unknown ramp). RETIRED currency ids are SKIPPED (a retired id leaves
+  // the catalog forever). Unauthenticated (catalog only — no balances); sorted by currency id.
   currencies : () -> (vec CurrencyDescriptor) query;
   // `(blob pubkey, nat32 currency) -> Result<text, text>`. Proxies the minter's `get_btc_address` —
   // the user's native deposit address for the currency. No auth: a deposit address is not secret
@@ -215,13 +215,34 @@ service : (InitArg) -> {
       RampCapability,
       RampCapability,
     ) -> (Result_8);
-  // Register or replace the ledger for a currency at runtime. Gated to the controller in production
-  // (open only when `controller` is unset, i.e. the demo).
+  // Register the ledger for a currency at runtime (INSERT-ONLY, MC2 unit 2). Gated to the controller
+  // in production (open only when `controller` is unset, i.e. the demo). Once a currency key exists its
+  // ledger principal + `mintable` flag are IMMUTABLE — a re-register with the SAME value is a no-op
+  // `Ok` (keeps deploy scripts idempotent / re-runnable), but a DIFFERENT principal or `mintable` flag
+  // is REJECTED with a currency-named message. This prevents re-targeting an already-reviewed currency
+  // at a fake ledger (or silently flipping a real currency to mintable demo money) under an existing
+  // authorization/history. To repoint a currency, retire it and register a new id. Display metadata
+  // (`register_currency_meta`) is deliberately NOT frozen here — symbol/decimals/cap are policy/display,
+  // not identity, and remain updatable.
   register_ledger : (nat32, principal, bool) -> (Result_8);
-  // Register or replace the ck-minter principal for a currency at runtime. Gated to the controller in
-  // production (open only when `controller` is unset, i.e. the demo). A currency need not have a minter
-  // (only ck currencies do); absence means the facade exposes no deposit path for it.
+  // Register the ck-minter principal for a currency at runtime (INSERT-ONLY, MC2 unit 2). Gated to the
+  // controller in production (open only when `controller` is unset, i.e. the demo). A currency need not
+  // have a minter (only ck currencies do); absence means the facade exposes no deposit path for it.
+  // Once set, the minter principal is IMMUTABLE — a re-register with the SAME principal is a no-op `Ok`
+  // (deploy scripts stay re-runnable), but a DIFFERENT principal is REJECTED with a currency-named
+  // message. To repoint a currency's minter, retire it and register a new id. (Mirrors `register_ledger`
+  // — both are identity, not display/policy.)
   register_minter : (nat32, principal) -> (Result_8);
+  // `(nat32 currency) -> Result<(), text>` — IRREVERSIBLY retire a currency id (MC2 unit 3). Gated to
+  // the controller in production (open only when `controller` is unset, i.e. the demo). A retired id is
+  // dead FOREVER: it leaves the wallet catalog (`currencies()` skips it), is rejected by `ledger_for`/
+  // `minter_for` (so `pay`/`withdraw`/`mint`/`faucet` reject it), and can NEVER be reused or
+  // re-registered (`register_ledger`/`register_minter` reject a retired id before their insert-only
+  // logic). Its LEDGERS/MINTERS/CURRENCY_META/ACCOUNT_TXNS rows are NOT deleted — history is preserved
+  // for the audit trail (`transactions_of` still returns prior rows). There is NO un-retire method.
+  // "Retire + create a new id" is the only replacement — the strongest identity guarantee. Idempotent:
+  // retiring an already-retired currency is a no-op `Ok` (the RETIRED set is append-only).
+  retire_currency : (nat32) -> (Result_8);
   // Rotate (or, from open/demo mode, set the first) governance principal for `mint`/`burn`/
   // `register_ledger`/`register_minter`/`reconcile`/`set_controller`. Governed by
   // [`require_controller_rotation`]: in open-demo mode (no controller set) any caller may set the

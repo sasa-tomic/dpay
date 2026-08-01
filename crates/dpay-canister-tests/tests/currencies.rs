@@ -593,3 +593,135 @@ fn register_minter_same_value_is_idempotent() {
     let fresh = cat.iter().find(|d| d.currency == FRESH).unwrap();
     assert_eq!(fresh.minter, Some(minter_a));
 }
+
+// --- MC2 unit 3: irreversible retire + append-only RETIRED set ---------------------------------
+// RED-first proof that `retire_currency` is an IRREVERSIBLE operation: a retired currency id leaves
+// the wallet catalog (`currencies()` skips it), can never be re-registered (`register_ledger`/
+// `register_minter` reject a retired id), is admin-gated, and is idempotent. The id is dead forever;
+// "retire + create a new id" is the only replacement. History is preserved (see icrc_settle.rs).
+
+/// `retire_currency(nat32) -> Result<(), text>` — admin-gated, irreversible, idempotent. Marks a
+/// currency id as RETIRED (it leaves the catalog; pay/withdraw/mint reject it); the id can never be
+/// reused or un-retired.
+fn retire_currency(
+    pic: &PocketIc,
+    dpay: Principal,
+    caller: Principal,
+    currency: Currency,
+) -> Result<(), String> {
+    let reply = pic
+        .update_call(
+            dpay,
+            caller,
+            "retire_currency",
+            encode_args((currency,)).unwrap(),
+        )
+        .expect("retire_currency update_call rejected at IC level");
+    decode_one(&reply).unwrap()
+}
+
+#[test]
+fn retire_currency_removes_currency_from_catalog() {
+    let pic = PocketIc::new();
+    let dpay = install_facade(
+        &pic,
+        Some(pic_admin()),
+        vec![
+            LedgerConfig { currency: DEMO_USD, principal: Principal::anonymous(), mintable: true },
+            LedgerConfig { currency: CKX, principal: Principal::anonymous(), mintable: false },
+        ],
+    );
+
+    // Both currencies appear before retire.
+    let cat = currencies(&pic, dpay);
+    assert_eq!(cat.len(), 2, "both seeded ledgers appear pre-retire");
+
+    // Retire CKX → Ok; it must leave the catalog entirely.
+    retire_currency(&pic, dpay, pic_admin(), CKX).expect("controller retires CKX");
+
+    let cat = currencies(&pic, dpay);
+    assert_eq!(cat.len(), 1, "retired currency leaves the catalog");
+    assert!(cat.iter().all(|d| d.currency != CKX), "CKX must not appear after retire");
+    assert_eq!(cat[0].currency, DEMO_USD, "the non-retired currency stays");
+}
+
+#[test]
+fn register_ledger_on_retired_id_is_rejected() {
+    // A retired id is dead forever — it can never be re-registered (no reuse, no un-retire). The guard
+    // fires BEFORE the insert-only immutability logic.
+    let pic = PocketIc::new();
+    let dpay = install_facade(
+        &pic,
+        Some(pic_admin()),
+        vec![LedgerConfig { currency: FRESH, principal: dummy_principal(1), mintable: false }],
+    );
+
+    retire_currency(&pic, dpay, pic_admin(), FRESH).expect("retire FRESH");
+
+    // Re-registering the ledger for the retired id → REJECTED with a retired/id-not-reusable message.
+    let err = register_ledger(&pic, dpay, pic_admin(), FRESH, dummy_principal(2), false)
+        .expect_err("registering a retired id must be rejected");
+    assert!(err.contains("retired"), "error must say retired, got: {err}");
+    assert!(
+        err.contains(&format!("currency {}", FRESH)),
+        "error must name the offending currency id, got: {err}"
+    );
+}
+
+#[test]
+fn register_minter_on_retired_id_is_rejected() {
+    // Mirrors register_ledger: a retired id's minter can never be re-registered either.
+    let pic = PocketIc::new();
+    let dpay = install_facade(
+        &pic,
+        Some(pic_admin()),
+        vec![LedgerConfig { currency: FRESH, principal: Principal::anonymous(), mintable: false }],
+    );
+
+    retire_currency(&pic, dpay, pic_admin(), FRESH).expect("retire FRESH");
+
+    let err = register_minter(&pic, dpay, pic_admin(), FRESH, dummy_principal(3))
+        .expect_err("registering a minter for a retired id must be rejected");
+    assert!(err.contains("retired"), "error must say retired, got: {err}");
+}
+
+#[test]
+fn retire_currency_is_admin_gated() {
+    // A non-controller caller cannot retire a currency (require_admin gate, like the other privileged
+    // ops). An anonymous caller is rejected.
+    let pic = PocketIc::new();
+    let dpay = install_facade(
+        &pic,
+        Some(pic_admin()),
+        vec![LedgerConfig { currency: FRESH, principal: Principal::anonymous(), mintable: false }],
+    );
+
+    let err = retire_currency(&pic, dpay, Principal::anonymous(), FRESH)
+        .expect_err("anonymous must not retire a currency when a controller is set");
+    assert!(
+        err.contains("unauthorized") || err.contains("admin"),
+        "error must be an admin-gate rejection, got: {err}"
+    );
+
+    // The currency is STILL in the catalog (the rejected retire changed nothing).
+    let cat = currencies(&pic, dpay);
+    assert!(cat.iter().any(|d| d.currency == FRESH), "rejected retire leaves catalog unchanged");
+}
+
+#[test]
+fn retire_currency_is_idempotent() {
+    // Retiring an already-retired currency → Ok (idempotent). The RETIRED set is append-only.
+    let pic = PocketIc::new();
+    let dpay = install_facade(
+        &pic,
+        Some(pic_admin()),
+        vec![LedgerConfig { currency: FRESH, principal: Principal::anonymous(), mintable: false }],
+    );
+
+    retire_currency(&pic, dpay, pic_admin(), FRESH).expect("first retire ok");
+    // Retiring again is a no-op Ok, not an error.
+    retire_currency(&pic, dpay, pic_admin(), FRESH).expect("idempotent second retire ok");
+
+    let cat = currencies(&pic, dpay);
+    assert!(cat.iter().all(|d| d.currency != FRESH), "still retired after idempotent re-retire");
+}

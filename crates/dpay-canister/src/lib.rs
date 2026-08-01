@@ -982,6 +982,18 @@ thread_local! {
     /// encodings are untouched (no upgrade-layout churn).
     static CURRENCY_META: RefCell<StableBTreeMap<Currency, CurrencyMetaStorable, Memory>> =
         RefCell::new(StableBTreeMap::init(MEMORY.with(|m| m.borrow().get(MemoryId::new(13)))));
+
+    /// currency -> `()`. MemoryId 14 (new facade state). The RETIRED set: an append-only marker that a
+    /// currency id is IRREVERSIBLY dead. Retire is one-way — there is no un-retire method, and the id
+    /// can NEVER be reused or re-registered (a retired id is rejected by `register_ledger`/
+    /// `register_minter` BEFORE their insert-only logic). A retired currency leaves the wallet catalog
+    /// (`currencies()` skips it) and is rejected by `ledger_for`/`minter_for` (so `pay`/`withdraw`/
+    /// `mint`/`faucet` reject it), but its LEDGERS/MINTERS/CURRENCY_META/ACCOUNT_TXNS rows are NOT
+    /// deleted — history is preserved for the audit trail. "Retire + create a new id" is the only
+    /// replacement. Same set semantics as `SPENT`/`WITHDRAW_NONCES` (value `()`, membership is the
+    /// signal); `Currency` (`u32`) is already `Storable` (it keys LEDGERS/MINTERS/CURRENCY_META).
+    static RETIRED: RefCell<StableBTreeMap<Currency, (), Memory>> =
+        RefCell::new(StableBTreeMap::init(MEMORY.with(|m| m.borrow().get(MemoryId::new(14)))));
 }
 
 /// Configuration for one currency, supplied at init (and via `register_ledger`).
@@ -1248,17 +1260,33 @@ fn init(arg: InitArg) {
 }
 
 /// Resolve a currency to its ledger principal + mintability. Unknown currency -> hard reject.
+/// Honors RETIRED: a retired currency id is dead forever and resolves to an error (so `pay`/`mint`/
+/// `burn`/`faucet`/`reconcile` all reject it) — its LEDGERS row is preserved for history but is no
+/// longer reachable through the live settlement path.
 fn ledger_for(currency: Currency) -> Result<(Principal, bool), String> {
+    if is_retired(currency) {
+        return Err(format!("currency {currency} is retired"));
+    }
     LEDGERS.with(|m| m.borrow().get(&currency))
         .map(|e| (e.principal, e.mintable))
         .ok_or_else(|| format!("unknown currency {currency}"))
 }
 
 /// Resolve a currency to its ck-minter principal (only ck currencies have one). Absent -> Err.
+/// Honors RETIRED (same as `ledger_for`): a retired currency's minter is unreachable.
 fn minter_for(currency: Currency) -> Result<Principal, String> {
+    if is_retired(currency) {
+        return Err(format!("currency {currency} is retired"));
+    }
     MINTERS
         .with(|m| m.borrow().get(&currency).map(|s| s.0))
         .ok_or_else(|| format!("currency {currency} has no ck minter"))
+}
+
+/// Whether a currency id has been IRREVERSIBLY retired (membership in the append-only RETIRED set).
+/// Retire is one-way: the id is dead forever and can never be reused or re-registered.
+fn is_retired(currency: Currency) -> bool {
+    RETIRED.with(|r| r.borrow().contains_key(&currency))
 }
 
 /// The governed per-currency transaction cap (MC2 U1). Read from `CURRENCY_META` — the authoritative
@@ -1894,6 +1922,11 @@ async fn burn(from: Vec<u8>, currency: Currency, amount: u64) -> Result<u64, Str
 #[update]
 fn register_ledger(currency: Currency, principal: Principal, mintable: bool) -> Result<(), String> {
     require_admin()?;
+    // RETIRED guard (checked BEFORE the insert-only immutability logic): a retired id is dead forever
+    // and can NEVER be re-registered — the only replacement is retire + create a new id.
+    if is_retired(currency) {
+        return Err(format!("currency {currency} is retired; id not reusable"));
+    }
     LEDGERS.with(|m| {
         let mut map = m.borrow_mut();
         if let Some(existing) = map.get(&currency) {
@@ -1924,6 +1957,11 @@ fn register_ledger(currency: Currency, principal: Principal, mintable: bool) -> 
 #[update]
 fn register_minter(currency: Currency, minter: Principal) -> Result<(), String> {
     require_admin()?;
+    // RETIRED guard (checked BEFORE the insert-only immutability logic): mirrors `register_ledger` —
+    // a retired id's minter can never be re-registered either.
+    if is_retired(currency) {
+        return Err(format!("currency {currency} is retired; id not reusable"));
+    }
     MINTERS.with(|m| {
         let mut map = m.borrow_mut();
         if let Some(existing) = map.get(&currency) {
@@ -1991,20 +2029,39 @@ fn register_currency_meta(
     Ok(())
 }
 
+/// `(nat32 currency) -> Result<(), text>` — IRREVERSIBLY retire a currency id (MC2 unit 3). Gated to
+/// the controller in production (open only when `controller` is unset, i.e. the demo). A retired id is
+/// dead FOREVER: it leaves the wallet catalog (`currencies()` skips it), is rejected by `ledger_for`/
+/// `minter_for` (so `pay`/`withdraw`/`mint`/`faucet` reject it), and can NEVER be reused or
+/// re-registered (`register_ledger`/`register_minter` reject a retired id before their insert-only
+/// logic). Its LEDGERS/MINTERS/CURRENCY_META/ACCOUNT_TXNS rows are NOT deleted — history is preserved
+/// for the audit trail (`transactions_of` still returns prior rows). There is NO un-retire method.
+/// "Retire + create a new id" is the only replacement — the strongest identity guarantee. Idempotent:
+/// retiring an already-retired currency is a no-op `Ok` (the RETIRED set is append-only).
+#[update]
+fn retire_currency(currency: Currency) -> Result<(), String> {
+    require_admin()?;
+    RETIRED.with(|r| {
+        r.borrow_mut().insert(currency, ());
+    });
+    Ok(())
+}
+
 /// Catalog of every registered currency + its ledger/minter/display/ramp metadata — the wallet's
 /// runtime source of truth. The app fetches this once (cached) instead of hardcoding
 /// `DEPOSIT_CURRENCY` (issue #7) or family-level token facts (MC1 unit 5). Joins LEDGERS
 /// (id + principal + mintable) with MINTERS (ramp principal) and CURRENCY_META (family + display +
 /// ramp). A currency appears if it has a ledger; the rest are `None` when not registered. Ramp
 /// directions default to `Unavailable` when not registered (fail-closed — the wallet shows NO
-/// fund/cash-out button for an unknown ramp). Unauthenticated (catalog only — no balances); sorted
-/// by currency id.
+/// fund/cash-out button for an unknown ramp). RETIRED currency ids are SKIPPED (a retired id leaves
+/// the catalog forever). Unauthenticated (catalog only — no balances); sorted by currency id.
 #[query]
 fn currencies() -> Vec<CurrencyDescriptor> {
     let entries: Vec<(Currency, LedgerEntry)> =
         LEDGERS.with(|m| m.borrow().iter().map(|(c, e)| (c, e)).collect());
     let mut out: Vec<CurrencyDescriptor> = entries
         .into_iter()
+        .filter(|(currency, _)| !is_retired(*currency))
         .map(|(currency, entry)| {
             let minter = MINTERS.with(|m| m.borrow().get(&currency).map(|s| s.0));
             let meta = CURRENCY_META.with(|m| m.borrow().get(&currency));
