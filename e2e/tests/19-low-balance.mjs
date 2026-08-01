@@ -47,6 +47,7 @@ export async function run() {
     // review-lowbal guard is `!online && shownBalance != null && req.amount > shownBalance`.
     const deadPort = await pickFreePort();
     const DEAD_RELAY = `http://127.0.0.1:${deadPort}`;
+    driver.allowRequestFailuresFrom(DEAD_RELAY);
     console.log(`[19-low-balance] going offline (dead relay ${DEAD_RELAY})…`);
     await driver.click('btn-settings', { timeoutMs: 4_000 });
     await driver.type('settings-relay', DEAD_RELAY, { timeoutMs: 4_000 });

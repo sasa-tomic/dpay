@@ -43,6 +43,7 @@ export async function run() {
     // 2. Go OFFLINE: point at a genuinely-dead relay → online=false on the next failed poll.
     const deadPort = await pickFreePort();
     const DEAD_RELAY = `http://127.0.0.1:${deadPort}`;
+    driver.allowRequestFailuresFrom(DEAD_RELAY);
     console.log(`[20-offline-handoff] going offline (${DEAD_RELAY})…`);
     await driver.click('btn-settings', { timeoutMs: 4_000 });
     await driver.type('settings-relay', DEAD_RELAY, { timeoutMs: 4_000 });

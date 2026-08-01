@@ -70,24 +70,33 @@ export class Driver {
     return { browser, stop };
   }
 
-  /** Attach page diagnostics (pageerror / console / requestfailed) so a swallowed exception in the
-   *  app bubbles up. Shared between `create()` paths so a fresh context gets the same surfacing. */
-  static attachPageListeners(page) {
-    page.on('pageerror', (e) => console.error(`[driver] pageerror: ${e.message}`));
-    page.on('console', (m) => {
+  /** Attach page diagnostics and retain every unexpected error so teardown fails the flow. */
+  attachPageListeners() {
+    this.page.on('pageerror', (e) => {
+      this.recordUnexpectedDiagnostic(`pageerror: ${e.message}`);
+    });
+    this.page.on('console', (m) => {
       const t = m.type();
       const text = m.text();
-      // Always surface logs that mention [shims] (install order diagnostics) and any error/warn.
-      if (t === 'error' || t === 'warning' || text.includes('[shims]') || text.includes('DPAY_SELFCHECK')) {
+      // Chrome emits this URL-less duplicate for request failures. `requestfailed` below is the
+      // authoritative, URL-aware gate and can distinguish an explicitly allowed dead relay.
+      if (t === 'error' && text.startsWith('Failed to load resource:')) return;
+      if (text.includes('DPAY_SELFCHECK FAIL')) {
+        this.recordUnexpectedDiagnostic(`console.${t}: ${text}`);
+      } else if (t === 'error') {
+        this.recordUnexpectedDiagnostic(`console.error: ${text}`);
+      } else if (t === 'warning' || text.includes('[shims]')) {
         console.error(`[driver] console.${t}: ${text}`);
+      } else if (text.includes('DPAY_SELFCHECK')) {
+        console.log(`[driver] console.${t}: ${text}`);
       }
     });
-    page.on('requestfailed', (req) => {
+    this.page.on('requestfailed', (req) => {
       const url = req.url();
-      // Ignore favicon + the relay's intentional best-effort fetches (the app's `try { fetch } catch`
-      // paths produce requestfailed events when the relay is briefly down — those are not test bugs).
-      if (url.endsWith('/favicon.ico')) return;
-      console.error(`[driver] requestfailed: ${url} — ${req.failure()?.errorText ?? 'unknown'}`);
+      const errorText = req.failure()?.errorText ?? 'unknown';
+      const navigationAbort = this.navigationDepth > 0 && errorText === 'net::ERR_ABORTED';
+      if (this.closing || navigationAbort || url.endsWith('/favicon.ico') || this.isRequestFailureAllowed(url)) return;
+      this.recordUnexpectedDiagnostic(`requestfailed: ${url} — ${errorText}`);
     });
   }
 
@@ -110,8 +119,9 @@ export class Driver {
     if (o.timezone !== undefined) await page.emulateTimezone(o.timezone);
     await page.evaluateOnNewDocument(injectFreezeCss, FREEZE_CSS);
     await page.evaluateOnNewDocument(injectTestGlobals);
-    Driver.attachPageListeners(page);
-    return new Driver(browser, context, page, ownsBrowser);
+    const driver = new Driver(browser, context, page, ownsBrowser);
+    driver.attachPageListeners();
+    return driver;
   }
 
   constructor(browser, context, page, ownsBrowser = true) {
@@ -119,6 +129,43 @@ export class Driver {
     this.context = context;
     this.page = page;
     this.ownsBrowser = ownsBrowser;
+    this.allowedRequestFailureOrigins = new Set();
+    this.unexpectedDiagnostics = new Set();
+    this.navigationDepth = 0;
+    this.closing = false;
+    this.closed = false;
+  }
+
+  /** Explicitly permit transport failures to one origin. Offline flows must call this before they
+   *  retarget the app; every other failed request remains fatal. */
+  allowRequestFailuresFrom(baseURL) {
+    let origin;
+    try {
+      origin = new URL(baseURL).origin;
+    } catch {
+      throw new Error(`[driver] invalid allowed request-failure URL: ${baseURL}`);
+    }
+    this.allowedRequestFailureOrigins.add(origin);
+  }
+
+  isRequestFailureAllowed(url) {
+    try {
+      return this.allowedRequestFailureOrigins.has(new URL(url).origin);
+    } catch {
+      return false;
+    }
+  }
+
+  recordUnexpectedDiagnostic(message) {
+    if (this.unexpectedDiagnostics.has(message)) return;
+    this.unexpectedDiagnostics.add(message);
+    console.error(`[driver] ${message}`);
+  }
+
+  assertNoUnexpectedDiagnostics() {
+    if (this.unexpectedDiagnostics.size === 0) return;
+    const details = [...this.unexpectedDiagnostics].map((d) => `  - ${d}`).join('\n');
+    throw new Error(`[driver] unexpected page diagnostics:\n${details}`);
   }
 
   /** Navigate to `${base}${path}` (path includes the query, e.g. `?relay=...`). Times out at 8s.
@@ -130,10 +177,13 @@ export class Driver {
     const url = `${base}${path}`;
     const timeoutMs = opts.timeoutMs ?? 8_000;
     const waitUntil = opts.waitUntil ?? 'networkidle0';
+    this.navigationDepth += 1;
     try {
       await this.page.goto(url, { waitUntil, timeout: timeoutMs });
     } catch (e) {
       throw new Error(`[driver] navigate ${url} failed within ${timeoutMs}ms: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      this.navigationDepth -= 1;
     }
   }
 
@@ -312,8 +362,20 @@ export class Driver {
   /** Close the context (and the browser if this Driver owns it — a shared-browser Driver never
    *  tears down the session's browser). Safe to call multiple times. */
   async close() {
-    try { await this.context.close(); } catch {}
-    if (this.ownsBrowser) { try { await this.browser.close(); } catch {} }
+    const failures = [];
+    if (!this.closed) {
+      this.closed = true;
+      // Ignore request aborts caused by our own context teardown, but retain diagnostics observed
+      // before teardown and assert them only after resources have been cleaned up.
+      this.closing = true;
+      try { await this.context.close(); } catch (e) { failures.push(e); }
+      if (this.ownsBrowser) {
+        try { await this.browser.close(); } catch (e) { failures.push(e); }
+      }
+    }
+    try { this.assertNoUnexpectedDiagnostics(); } catch (e) { failures.push(e); }
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1) throw new AggregateError(failures, '[driver] teardown failed');
   }
 }
 

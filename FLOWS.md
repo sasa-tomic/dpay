@@ -120,4 +120,5 @@ These flows are **not** covered and why:
 - **testID + textContent only.** The e2e net does NOT pixel-diff. Style regressions are invisible to the suite — keep `styles.ts` as ONE `StyleSheet.create` block.
 - **Fast-poll seam.** `globalThis.__DPAY_TEST_POLL` is injected by the harness (150ms intervals). Never hardcode a `setTimeout` that depends on the prod poll interval.
 - **One relay per run.** The relay + web server + browser are shared; each test gets a fresh incognito context (fresh identity, no cross-test state). Serialize web-building runs (the `e2e/dist` cache is a shared path).
+- **Browser errors fail closed.** Page exceptions, app `console.error`, `DPAY_SELFCHECK FAIL`, and failed requests make the owning flow RED at teardown. A deliberate offline flow must call `driver.allowRequestFailuresFrom(deadOrigin)` before retargeting, scoped to its unique closed-port origin.
 - **No broad mocking.** The `fetch` recorder in `09-double-spend` is the sanctioned pattern: narrow (one route), transparent (calls through), self-uninstalling.

@@ -30,6 +30,7 @@ export async function run() {
     // is refused (ECONNREFUSED), not unsafe-port-blocked.
     const deadPort = await pickFreePort();
     const DEAD_RELAY = `http://127.0.0.1:${deadPort}`;
+    driver.allowRequestFailuresFrom(DEAD_RELAY);
 
     // Onboard against the GOOD relay (funds $100, proves the wallet works when online).
     console.log('[13-offline] onboarding (online)…');

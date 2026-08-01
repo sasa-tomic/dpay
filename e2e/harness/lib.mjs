@@ -164,7 +164,9 @@ export async function setup(opts = {}) {
   // Fresh incognito context per test → fresh localStorage → fresh identity (the isolation gate).
   const driver = await Driver.create(browser);
 
-  const stop = async () => { try { await driver.close(); } catch {} };
+  // `driver.close()` also asserts that the page produced no unexpected diagnostics. Never swallow
+  // that assertion: a flow that looked correct after a page/network error must be RED.
+  const stop = async () => { await driver.close(); };
 
   try {
     if (!opts.noWeb) {

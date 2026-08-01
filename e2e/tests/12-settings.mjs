@@ -43,7 +43,9 @@ export async function run() {
     console.log(`[12-settings] ✓ relay input holds ${relayVal}`);
 
     // 4. Editing the relay input updates it (component state; the polls retarget to the new URL).
-    const edited = 'http://127.0.0.1:9999';
+    // Keep the relay reachable: this flow proves edit/persistence, not offline handling. The trailing
+    // slash is a real edit while the app's request URL normalizer still targets the same relay.
+    const edited = `${relayBaseURL}/`;
     await driver.type('settings-relay', edited, { timeoutMs: 4_000 });
     await driver.click('btn-relay-apply', { timeoutMs: 4_000 });
     const after = await driver.readInputValue('settings-relay');
