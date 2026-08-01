@@ -502,6 +502,160 @@ impl Receipt {
     }
 }
 
+// --- exact decimal <-> u64 amount parser (MC1 unit 1) ----------------------------------------
+//
+// The single source of truth for converting a human decimal string ("8.4") to/from the raw integer
+// `u64` units every protocol type already carries (`Authorization.amount`, `PaymentRequest.amount`,
+// `WithdrawAuth.amount`, `ReceiptClaim.amount`). Exact — no float intermediate, no silent rounding.
+// The FFI exposes it to the app (`parse_amount` / `format_amount`); the TS BigInt mirror
+// (`app/lib/amount.ts`) is parity-pinned by the e2e cross-val + jest. The OLD app path rounded u64
+// through JS `number` / Kotlin `Double` (lossy above 2^53); this parser + the string-typed TS mirror
+// retire that loss surface for amount I/O. The FROZEN wire itself is untouched — `amount` is already
+// an exact `u64` in every wire struct; this only governs the human<->u64 boundary.
+
+/// Maximum decimal precision supported. A `u64` (≤ 1.8e19) holds 18 decimals for any whole unit
+/// ≥ 1; 19 decimals would overflow for whole units ≥ 2, so the parser bounds precision here. A
+/// `decimals` argument above this is rejected by [`parse_decimal_to_units`] as [`AmountError::Overflow`]
+/// (the precision is unsupported in the u64 value space); [`format_units_to_decimal`] clamps it.
+pub const MAX_DECIMALS: u8 = 18;
+
+/// Why a decimal amount string was rejected. Typed (never a silent rounding); the FFI maps each
+/// variant to a debuggable `DpayError::Amount(code)` so the app reacts without string-sniffing.
+/// The codes mirror the TS mirror's `err` strings exactly (`empty`/`not_a_number`/`negative`/
+/// `too_many_decimals`/`overflow`) — single acceptance/rejection policy on both sides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AmountError {
+    /// The input (after whitespace trim) was empty.
+    Empty,
+    /// Not a valid decimal: non-digit chars, multiple dots, a bare `.`, a leading `.` with no whole
+    /// part (`.5`), or a trailing `.` with no fraction (`5.`).
+    NotANumber,
+    /// A leading `-`. Amounts are always non-negative, so any `-` (regardless of magnitude) is an
+    /// error — checked before the rest of the shape so `-abc` is `Negative`, not `NotANumber`.
+    Negative,
+    /// More fractional digits than `decimals` allows (e.g. `"1.5"` at `decimals == 0`).
+    TooManyDecimals,
+    /// The scaled value does not fit in a `u64`, OR `decimals > MAX_DECIMALS`.
+    Overflow,
+}
+
+/// Parse a human decimal string (e.g. `"8.4"`) into raw `u64` units at `decimals` precision.
+///
+/// Exact: the whole and fractional parts are scaled by `10^decimals` via a `u128` checked-arithmetic
+/// intermediate — no `f64` ever touches the value. Acceptance (precedence in order):
+///   1. Surrounding ASCII whitespace is trimmed.
+///   2. Empty (after trim) → [`AmountError::Empty`].
+///   3. A leading `-` → [`AmountError::Negative`] (regardless of what follows).
+///   4. Must match `^\d+(\.\d+)?$` (a `.`-only, leading-`.`, trailing-`.`, or multi-dot input is
+///      [`AmountError::NotANumber`]); a leading `+` is NOT accepted.
+///   5. Fractional digits beyond `decimals` → [`AmountError::TooManyDecimals`].
+///   6. `decimals > MAX_DECIMALS`, or the scaled whole+fraction does not fit in `u64` →
+///      [`AmountError::Overflow`].
+///
+/// `decimals == 0` rejects any fractional part as `TooManyDecimals`. This is the exact inverse of
+/// [`format_units_to_decimal`] for every `u64` and every `decimals ≤ 18` (pinned by a proptest).
+pub fn parse_decimal_to_units(human: &str, decimals: u8) -> Result<u64, AmountError> {
+    let s = human.trim();
+    if s.is_empty() {
+        return Err(AmountError::Empty);
+    }
+    // A leading `-` is always Negative (checked before shape so "-abc" is Negative, not NotANumber).
+    if s.starts_with('-') {
+        return Err(AmountError::Negative);
+    }
+    // Split on the FIRST '.'; a second '.' lands inside the fractional part and is rejected below.
+    let (whole_str, frac_opt) = match s.split_once('.') {
+        Some((w, f)) => (w, Some(f)),
+        None => (s, None),
+    };
+    // Whole part: non-empty, all ASCII digits.
+    if whole_str.is_empty() || !whole_str.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(AmountError::NotANumber);
+    }
+    // Fractional part (if present): non-empty, all ASCII digits (rejects "5." and "1..2"/"1.2.3").
+    if let Some(frac) = frac_opt {
+        if frac.is_empty() || !frac.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(AmountError::NotANumber);
+        }
+    }
+    // Bound precision: u64 holds ≤ 18 decimals for any meaningful whole unit.
+    if decimals > MAX_DECIMALS {
+        return Err(AmountError::Overflow);
+    }
+    // Fractional digit count beyond the asset's precision.
+    if let Some(frac) = frac_opt {
+        if frac.len() > decimals as usize {
+            return Err(AmountError::TooManyDecimals);
+        }
+    }
+    // Scale with u128 checked arithmetic (10^18 ≈ 1e18 ≪ u128::MAX ≈ 3.4e38).
+    let scale = 10u128
+        .checked_pow(decimals as u32)
+        .ok_or(AmountError::Overflow)?;
+    let whole = parse_decimal_digits_u128(whole_str)?;
+    let frac = match frac_opt {
+        Some(frac) => {
+            let fval = parse_decimal_digits_u128(frac)?;
+            let pad = decimals
+                .checked_sub(frac.len() as u8)
+                .expect("frac.len() ≤ decimals (checked above)") as u32;
+            let pad_scale = 10u128.checked_pow(pad).ok_or(AmountError::Overflow)?;
+            fval.checked_mul(pad_scale).ok_or(AmountError::Overflow)?
+        }
+        None => 0,
+    };
+    let whole_scaled = whole.checked_mul(scale).ok_or(AmountError::Overflow)?;
+    let total = whole_scaled.checked_add(frac).ok_or(AmountError::Overflow)?;
+    if total > u64::MAX as u128 {
+        return Err(AmountError::Overflow);
+    }
+    Ok(total as u64)
+}
+
+/// Format raw `u64` units as a human decimal string at `decimals` precision. Trims trailing
+/// fractional zeros (so `8400000000000000000` at 18 → `"8.4"`, and a whole number renders without a
+/// decimal point — `8400` at 2 → `"84"`); the integer part is never touched. `decimals` is bounded at
+/// [`MAX_DECIMALS`] (a larger value is clamped, matching the parser's ≤ 18 contract, so the `u128`
+/// power never overflows).
+///
+/// This is the exact inverse of [`parse_decimal_to_units`]: for every `u64` and every
+/// `decimals ≤ 18`, `parse_decimal_to_units(&format_units_to_decimal(raw, d), d) == Ok(raw)` (pinned
+/// by a proptest). Trimming (not padding to `decimals`) is chosen deliberately so high-precision
+/// assets render readably (`"8.4 BTC"` not `"8.400000000000000000 BTC"`); display-padding to a fixed
+/// width remains a UI concern (the app's `fmtAsset`), separate from this primitive.
+pub fn format_units_to_decimal(raw: u64, decimals: u8) -> String {
+    let d = (decimals.min(MAX_DECIMALS)) as u32;
+    let scale = 10u128.pow(d);
+    let val = raw as u128;
+    let whole = val / scale;
+    let frac = val % scale;
+    if d == 0 || frac == 0 {
+        return whole.to_string();
+    }
+    // Fraction as a zero-padded (width = d) string, then trim trailing zeros.
+    let mut frac_str = format!("{:0width$}", frac, width = d as usize);
+    while frac_str.ends_with('0') {
+        frac_str.pop();
+    }
+    format!("{}.{}", whole, frac_str)
+}
+
+/// Checked decimal-digit accumulation into `u128`. Returns [`AmountError::Overflow`] if the digit
+/// string represents a value too large for `u128` (e.g. a 40-digit whole part) rather than panicking
+/// or silently wrapping — the parser's job is to surface a typed error, never to round.
+fn parse_decimal_digits_u128(s: &str) -> Result<u128, AmountError> {
+    let mut acc: u128 = 0;
+    for b in s.bytes() {
+        // Caller has already validated all bytes are ASCII digits; this is belt-and-suspenders.
+        let digit = (b - b'0') as u128;
+        acc = acc
+            .checked_mul(10)
+            .and_then(|v| v.checked_add(digit))
+            .ok_or(AmountError::Overflow)?;
+    }
+    Ok(acc)
+}
+
 // ---------------------------------------------------------------------------
 // Tests (keygen needs `rng`): run with `cargo nextest run -p dpay-core --features rng`
 // ---------------------------------------------------------------------------
@@ -811,5 +965,112 @@ mod tests {
 
         // A bad sig shape (all-zero) is rejected, not panicked.
         assert!(!auth.verify(&pk, &Signature::from_bytes(&[0u8; SIG_LEN])), "zero sig must fail");
+    }
+
+    // --- amount parser (MC1 unit 1) — exact decimal<->u64, no float intermediate --------------
+
+    #[test]
+    fn amount_parse_basic_vectors() {
+        // decimals=2 (cents): "84.00" -> 8400, "0.84" -> 84, "8.4" -> 840.
+        assert_eq!(parse_decimal_to_units("84.00", 2), Ok(8400));
+        assert_eq!(parse_decimal_to_units("0.84", 2), Ok(84));
+        assert_eq!(parse_decimal_to_units("8.4", 2), Ok(840));
+        // decimals=0: integer only.
+        assert_eq!(parse_decimal_to_units("42", 0), Ok(42));
+        assert_eq!(parse_decimal_to_units("0", 0), Ok(0));
+        // decimals=18: a value > 2^53 that would be WRONG via f64. 8.4 * 1e18 = 8400000000000000000.
+        assert_eq!(parse_decimal_to_units("8.4", 18), Ok(8_400_000_000_000_000_000));
+        // 0.009007199254740993 * 1e18 = 9007199254740993 (2^53 + 1 — the canonical f64-loss probe).
+        assert_eq!(parse_decimal_to_units("0.009007199254740993", 18), Ok(9_007_199_254_740_993));
+        // Surrounding ASCII whitespace is trimmed.
+        assert_eq!(parse_decimal_to_units("  8.4  ", 18), Ok(8_400_000_000_000_000_000));
+        // A whole number at high precision parses too.
+        assert_eq!(parse_decimal_to_units("18", 18), Ok(18_000_000_000_000_000_000));
+    }
+
+    #[test]
+    fn amount_format_basic_vectors() {
+        // Trim trailing fractional zeros; whole numbers render without a decimal point.
+        assert_eq!(format_units_to_decimal(8400, 2), "84");
+        assert_eq!(format_units_to_decimal(84, 2), "0.84");
+        assert_eq!(format_units_to_decimal(840, 2), "8.4");
+        assert_eq!(format_units_to_decimal(42, 0), "42");
+        assert_eq!(format_units_to_decimal(0, 18), "0");
+        // 8.4 at 18 decimals (the > 2^53 case): trims the 17 trailing zeros.
+        assert_eq!(format_units_to_decimal(8_400_000_000_000_000_000, 18), "8.4");
+        assert_eq!(format_units_to_decimal(9_007_199_254_740_993, 18), "0.009007199254740993");
+        // u64::MAX at 18 decimals has no trailing zero to trim.
+        assert_eq!(format_units_to_decimal(u64::MAX, 18), "18.446744073709551615");
+    }
+
+    #[test]
+    fn amount_parse_rejections() {
+        // Empty (also after whitespace trim).
+        assert_eq!(parse_decimal_to_units("", 2), Err(AmountError::Empty));
+        assert_eq!(parse_decimal_to_units("   ", 2), Err(AmountError::Empty));
+        // Not a number.
+        assert_eq!(parse_decimal_to_units("abc", 2), Err(AmountError::NotANumber));
+        assert_eq!(parse_decimal_to_units("1.2.3", 2), Err(AmountError::NotANumber));
+        assert_eq!(parse_decimal_to_units(".", 2), Err(AmountError::NotANumber));
+        assert_eq!(parse_decimal_to_units(".5", 2), Err(AmountError::NotANumber));
+        assert_eq!(parse_decimal_to_units("5.", 2), Err(AmountError::NotANumber));
+        assert_eq!(parse_decimal_to_units("+5", 2), Err(AmountError::NotANumber));
+        // Negative: any leading `-` is Negative (checked before shape), regardless of magnitude.
+        assert_eq!(parse_decimal_to_units("-1", 2), Err(AmountError::Negative));
+        assert_eq!(parse_decimal_to_units("-0.01", 2), Err(AmountError::Negative));
+        assert_eq!(parse_decimal_to_units("-abc", 2), Err(AmountError::Negative));
+        // Too many fractional digits.
+        assert_eq!(parse_decimal_to_units("1.5", 0), Err(AmountError::TooManyDecimals));
+        assert_eq!(
+            parse_decimal_to_units("0.1234567890123456789", 18),
+            Err(AmountError::TooManyDecimals),
+            "19 fractional digits at decimals=18"
+        );
+        // Overflow: 29 nines ≈ 1e29 ≫ u64::MAX (≈ 1.8e19).
+        assert_eq!(
+            parse_decimal_to_units("99999999999999999999999999999", 0),
+            Err(AmountError::Overflow)
+        );
+        // decimals beyond MAX_DECIMALS is unsupported in the u64 value space.
+        assert_eq!(parse_decimal_to_units("1", 19), Err(AmountError::Overflow));
+    }
+
+    #[test]
+    fn amount_format_clamps_decimals_above_max() {
+        // format never panics on a too-large decimals (it clamps to MAX_DECIMALS, matching the
+        // parser's ≤ 18 contract — a non-panicking fallback for malformed input).
+        assert_eq!(format_units_to_decimal(8_400_000_000_000_000_000, 255), "8.4");
+    }
+
+    #[test]
+    fn amount_u64_max_round_trips_at_max_decimals() {
+        // The hardest round-trip: every u64 at every d ≤ 18 is covered by the proptest below, but
+        // pin u64::MAX at 18 explicitly — it's the boundary that would catch an off-by-one in the
+        // scale or the trim.
+        let formatted = format_units_to_decimal(u64::MAX, 18);
+        assert_eq!(formatted, "18.446744073709551615");
+        assert_eq!(parse_decimal_to_units(&formatted, 18), Ok(u64::MAX));
+    }
+
+    proptest! {
+        /// Round-trip invariant: for every u64 raw and every decimals in 0..=MAX_DECIMALS,
+        /// parse(format(raw, d), d) == Ok(raw). This is the load-bearing correctness property of the
+        /// parser pair — it must hold across the WHOLE u64 range and every supported precision.
+        #[test]
+        fn amount_format_parse_round_trip(raw in any::<u64>(), decimals in 0u8..=MAX_DECIMALS) {
+            let formatted = format_units_to_decimal(raw, decimals);
+            prop_assert_eq!(parse_decimal_to_units(&formatted, decimals), Ok(raw));
+        }
+
+        /// parse is left-inverse to format: scaling is exact (no float, no rounding) across the
+        /// whole u64 range at every precision. Feeds the human string back through format for a
+        /// double round-trip (format(parse(format(raw, d), d), d) == format(raw, d)).
+        #[test]
+        fn amount_double_round_trip_stable(raw in any::<u64>(), decimals in 0u8..=MAX_DECIMALS) {
+            let once = format_units_to_decimal(raw, decimals);
+            let back = parse_decimal_to_units(&once, decimals).unwrap();
+            let twice = format_units_to_decimal(back, decimals);
+            prop_assert_eq!(once, twice);
+        }
     }
 }

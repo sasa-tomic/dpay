@@ -13,8 +13,8 @@
 use dpay_core::{
     generate_keypair as core_generate_keypair, sign, validate as core_validate, Authorization,
     CodecError, Currency, DEMO_USD, MEMO_LEN, NAME_LEN, PayError, PaymentRequest, ReceiptClaim,
-    SignedAuthorization, WithdrawAuth, NONCE_LEN, PUBKEY_LEN, REQUEST_LEN, SIG_LEN, SIGNING_LEN,
-    WIRE_LEN,
+    SignedAuthorization, WithdrawAuth, AmountError, NONCE_LEN, PUBKEY_LEN, REQUEST_LEN, SIG_LEN,
+    SIGNING_LEN, WIRE_LEN,
 };
 use ed25519_dalek::SigningKey;
 
@@ -73,6 +73,11 @@ pub enum DpayError {
     PubkeyMismatch,
     #[error("{0}")]
     BadInput(String),
+    /// A decimal amount string was rejected by `parse_amount`. Carries a debuggable code matching
+    /// `dpay_core::AmountError` (`empty`/`not_a_number`/`negative`/`too_many_decimals`/`overflow`)
+    /// so the app reacts without string-sniffing. MC1 unit 1.
+    #[error("amount: {0}")]
+    Amount(String),
     // --- NFC transport (see `dpay_core::nfc`) ---
     #[error("nfc: a command/call was issued in a state that doesn't allow it")]
     NfcWrongState,
@@ -107,6 +112,27 @@ impl From<CodecError> for DpayError {
             CodecError::PubkeyMismatch => DpayError::PubkeyMismatch,
         }
     }
+}
+
+/// Map `dpay_core::AmountError` → `DpayError::Amount(code)`. The code strings mirror the TS BigInt
+/// mirror's `err` strings exactly (`app/lib/amount.ts`) — one acceptance/rejection policy, both
+/// sides. MC1 unit 1.
+impl From<AmountError> for DpayError {
+    fn from(e: AmountError) -> Self {
+        DpayError::Amount(amount_error_code(e))
+    }
+}
+
+/// Debuggable code for an `AmountError` (mirrors the TS mirror's `err` strings).
+fn amount_error_code(e: AmountError) -> String {
+    match e {
+        AmountError::Empty => "empty",
+        AmountError::NotANumber => "not_a_number",
+        AmountError::Negative => "negative",
+        AmountError::TooManyDecimals => "too_many_decimals",
+        AmountError::Overflow => "overflow",
+    }
+    .to_string()
 }
 
 /// Human-facing reason a payment was rejected. Mirrors [`dpay_core::PayError`]; returned as a
@@ -164,6 +190,25 @@ pub fn signing_len() -> u64 {
 #[uniffi::export]
 pub fn request_len() -> u64 {
     REQUEST_LEN as u64
+}
+
+/// Parse a human decimal string (e.g. `"8.4"`) into raw `u64` units at `decimals` precision — the
+/// single source of truth for the human↔u64 amount boundary (MC1 unit 1). Exact (no float
+/// intermediate; `u128` checked arithmetic); `decimals` bounded ≤ 18. Rejects empty/non-numeric/
+/// negative/too-many-decimals/overflow as `DpayError::Amount(<code>)` (debuggable codes matching the
+/// TS mirror's `err` strings). Retires the old app path that rounded `u64` through `number`/`Double`.
+#[uniffi::export]
+pub fn parse_amount(human: String, decimals: u8) -> Result<u64, DpayError> {
+    Ok(dpay_core::parse_decimal_to_units(&human, decimals)?)
+}
+
+/// Format raw `u64` units as a human decimal string at `decimals` precision (e.g.
+/// `8_400_000_000_000_000_000` at 18 → `"8.4"`). Trims trailing fractional zeros (a whole number
+/// renders without a decimal point); the exact inverse of [`parse_amount`] for every `u64` and
+/// `decimals ≤ 18`. MC1 unit 1.
+#[uniffi::export]
+pub fn format_amount(raw: u64, decimals: u8) -> String {
+    dpay_core::format_units_to_decimal(raw, decimals)
 }
 
 /// Payer side: build `Authorization {from, to, amount, nonce, expiry, currency, from_name,

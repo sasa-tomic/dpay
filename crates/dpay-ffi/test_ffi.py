@@ -298,5 +298,65 @@ while True:
 check(d.nfc_decode_receipt(c2.receipt()).settled is False, "payer sees: rejected (settled == False)")
 
 
+# 9) Exact decimal <-> u64 amount parser (MC1 unit 1) ------------------------------------------
+# parse_amount / format_amount call the SAME compiled dpay-core parser the canister/relay link.
+# This is the human↔u64 boundary that retires the lossy number/Double amount path: a green run here
+# proves the app's languages parse amounts with the real core, exact (no float), at up to 18 decimals.
+# Goldens are deterministic and triple-pinned (here + core Rust unit tests + the e2e TS cross-val).
+
+# decimals=2 (cents): "84.00" -> 8400, "0.84" -> 84.
+check(d.parse_amount("84.00", 2) == 8400, "parse_amount('84.00', 2) == 8400")
+check(d.parse_amount("0.84", 2) == 84, "parse_amount('0.84', 2) == 84")
+check(d.parse_amount("8.4", 2) == 840, "parse_amount('8.4', 2) == 840")
+check(d.parse_amount("0", 0) == 0, "parse_amount('0', 0) == 0")
+
+# decimals=18: 8.4 -> 8.4e18 (> 2^53; would be WRONG via IEEE-754 float). Surrounding ws trimmed.
+check(d.parse_amount("8.4", 18) == 8_400_000_000_000_000_000, "parse_amount('8.4', 18) == 8.4e18 (> 2^53)")
+check(d.parse_amount("  8.4  ", 18) == 8_400_000_000_000_000_000, "parse_amount trims surrounding whitespace")
+# The 2^53 + 1 f64-loss probe: 0.009007199254740993 * 1e18 == 9007199254740993.
+check(d.parse_amount("0.009007199254740993", 18) == 9_007_199_254_740_993, "parse_amount('0.009007199254740993', 18) == 2^53+1")
+
+# format_amount trims trailing fractional zeros; whole numbers render with no decimal point.
+check(d.format_amount(8400, 2) == "84", "format_amount(8400, 2) == '84' (trims, no decimal pt)")
+check(d.format_amount(84, 2) == "0.84", "format_amount(84, 2) == '0.84'")
+check(d.format_amount(42, 0) == "42", "format_amount(42, 0) == '42'")
+check(d.format_amount(0, 18) == "0", "format_amount(0, 18) == '0'")
+check(d.format_amount(8_400_000_000_000_000_000, 18) == "8.4", "format_amount(8.4e18, 18) == '8.4' (trims 17 zeros)")
+check(d.format_amount(9_007_199_254_740_993, 18) == "0.009007199254740993", "format_amount(2^53+1 @18) golden")
+
+# u64::MAX at 18 decimals round-trips exactly (the boundary case; no trailing zero to trim).
+U64_MAX = 18_446_744_073_709_551_615
+check(d.format_amount(U64_MAX, 18) == "18.446744073709551615", "format_amount(u64::MAX, 18) == canonical")
+check(d.parse_amount(d.format_amount(U64_MAX, 18), 18) == U64_MAX, "u64::MAX round-trips at 18 decimals")
+# A general round-trip over a few precisions + values (mirrors the core proptest).
+for raw, dec in [(0, 0), (1, 2), (99, 2), (8400, 2), (50_000, 8), (U64_MAX, 18), (9_007_199_254_740_993, 18)]:
+    check(d.parse_amount(d.format_amount(raw, dec), dec) == raw,
+          f"round-trip raw={raw} dec={dec}")
+
+# Rejections map to DpayError.Amount(<code>) — debuggable codes matching the TS mirror's err strings.
+# UniFFI surfaces the payload via thiserror's Display, so str(e) is "amount: <code>"; we check the
+# code is carried (substring) and the exception TYPE is exactly DpayError.Amount.
+def expect_amount_err(human, dec, code, label):
+    try:
+        d.parse_amount(human, dec)
+        raise AssertionError(f"FAILED: {label} should have raised")
+    except d.DpayError.Amount as e:
+        # str(e) is "amount: <code>" via #[error("amount: {0}")]; the code is the debuggable part.
+        check(code in str(e), f"{label} -> DpayError.Amount carries code '{code}' (got '{e}')")
+
+expect_amount_err("", 2, "empty", "empty input")
+expect_amount_err("   ", 2, "empty", "whitespace-only input")
+expect_amount_err("abc", 2, "not_a_number", "non-numeric")
+expect_amount_err("1.2.3", 2, "not_a_number", "multiple dots")
+expect_amount_err(".5", 2, "not_a_number", "leading dot (no whole part)")
+expect_amount_err("5.", 2, "not_a_number", "trailing dot (no fraction)")
+expect_amount_err("-1", 2, "negative", "negative (-1)")
+expect_amount_err("-abc", 2, "negative", "leading minus (regardless of shape)")
+expect_amount_err("1.5", 0, "too_many_decimals", "1 fractional digit > decimals=0")
+expect_amount_err("0.1234567890123456789", 18, "too_many_decimals", "19 frac digits at decimals=18")
+expect_amount_err("99999999999999999999999999999", 0, "overflow", "29 nines > u64::MAX")
+expect_amount_err("1", 19, "overflow", "decimals > MAX_DECIMALS (18)")
+
+
 print(f"\nALL {passed} FFI CHECKS PASSED — Python called the real dpay-core across UniFFI.")
 sys.exit(0)

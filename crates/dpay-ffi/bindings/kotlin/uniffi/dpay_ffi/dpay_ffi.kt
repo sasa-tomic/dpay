@@ -786,6 +786,10 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is 
 // rather `InterfaceTooLargeException`, caused by too many methods 
@@ -809,6 +813,8 @@ fun uniffi_dpay_ffi_checksum_func_encode_qr(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_encode_request(
 ): Short
+fun uniffi_dpay_ffi_checksum_func_format_amount(
+): Short
 fun uniffi_dpay_ffi_checksum_func_generate_keypair(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_nfc_decode_receipt(
@@ -822,6 +828,8 @@ fun uniffi_dpay_ffi_checksum_func_nfc_receipt_bytes(
 fun uniffi_dpay_ffi_checksum_func_nfc_receipt_codes(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_nfc_request_bytes(
+): Short
+fun uniffi_dpay_ffi_checksum_func_parse_amount(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_request_len(
 ): Short
@@ -968,6 +976,8 @@ fun uniffi_dpay_ffi_fn_func_encode_qr(`wire`: RustBuffer.ByValue,uniffi_out_err:
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_encode_request(`to`: RustBuffer.ByValue,`amount`: Long,`nonce`: RustBuffer.ByValue,`expiry`: Long,`currency`: Int,`toName`: RustBuffer.ByValue,`memo`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_format_amount(`raw`: Long,`decimals`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_generate_keypair(uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_nfc_decode_receipt(`bytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -982,6 +992,8 @@ fun uniffi_dpay_ffi_fn_func_nfc_receipt_codes(uniffi_out_err: UniffiRustCallStat
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_nfc_request_bytes(`to`: RustBuffer.ByValue,`amount`: Long,`nonce`: RustBuffer.ByValue,`expiry`: Long,`currency`: Int,`toName`: RustBuffer.ByValue,`memo`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_parse_amount(`human`: RustBuffer.ByValue,`decimals`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+): Long
 fun uniffi_dpay_ffi_fn_func_request_len(uniffi_out_err: UniffiRustCallStatus, 
 ): Long
 fun uniffi_dpay_ffi_fn_func_sign_authorization(`secret`: RustBuffer.ByValue,`to`: RustBuffer.ByValue,`amount`: Long,`nonce`: RustBuffer.ByValue,`expiry`: Long,`currency`: Int,`fromName`: RustBuffer.ByValue,`toName`: RustBuffer.ByValue,`memo`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1136,6 +1148,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_dpay_ffi_checksum_func_encode_request() != 42219.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_dpay_ffi_checksum_func_format_amount() != 44035.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_dpay_ffi_checksum_func_generate_keypair() != 36207.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1155,6 +1170,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_nfc_request_bytes() != 53714.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_parse_amount() != 56752.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_request_len() != 35464.toShort()) {
@@ -2563,6 +2581,19 @@ sealed class DpayException: kotlin.Exception() {
             get() = "v1=${ v1 }"
     }
     
+    /**
+     * A decimal amount string was rejected by `parse_amount`. Carries a debuggable code matching
+     * `dpay_core::AmountError` (`empty`/`not_a_number`/`negative`/`too_many_decimals`/`overflow`)
+     * so the app reacts without string-sniffing. MC1 unit 1.
+     */
+    class Amount(
+        
+        val v1: kotlin.String
+        ) : DpayException() {
+        override val message
+            get() = "v1=${ v1 }"
+    }
+    
     class NfcWrongState(
         ) : DpayException() {
         override val message
@@ -2606,9 +2637,12 @@ public object FfiConverterTypeDpayError : FfiConverterRustBuffer<DpayException> 
             7 -> DpayException.BadInput(
                 FfiConverterString.read(buf),
                 )
-            8 -> DpayException.NfcWrongState()
-            9 -> DpayException.NfcNotDpay()
-            10 -> DpayException.NfcProtocol()
+            8 -> DpayException.Amount(
+                FfiConverterString.read(buf),
+                )
+            9 -> DpayException.NfcWrongState()
+            10 -> DpayException.NfcNotDpay()
+            11 -> DpayException.NfcProtocol()
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
     }
@@ -2640,6 +2674,11 @@ public object FfiConverterTypeDpayError : FfiConverterRustBuffer<DpayException> 
                 4UL
             )
             is DpayException.BadInput -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.v1)
+            )
+            is DpayException.Amount -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
                 + FfiConverterString.allocationSize(value.v1)
@@ -2690,16 +2729,21 @@ public object FfiConverterTypeDpayError : FfiConverterRustBuffer<DpayException> 
                 FfiConverterString.write(value.v1, buf)
                 Unit
             }
-            is DpayException.NfcWrongState -> {
+            is DpayException.Amount -> {
                 buf.putInt(8)
+                FfiConverterString.write(value.v1, buf)
                 Unit
             }
-            is DpayException.NfcNotDpay -> {
+            is DpayException.NfcWrongState -> {
                 buf.putInt(9)
                 Unit
             }
-            is DpayException.NfcProtocol -> {
+            is DpayException.NfcNotDpay -> {
                 buf.putInt(10)
+                Unit
+            }
+            is DpayException.NfcProtocol -> {
+                buf.putInt(11)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
@@ -2927,6 +2971,21 @@ public object FfiConverterOptionalByteArray: FfiConverterRustBuffer<kotlin.ByteA
     
 
         /**
+         * Format raw `u64` units as a human decimal string at `decimals` precision (e.g.
+         * `8_400_000_000_000_000_000` at 18 → `"8.4"`). Trims trailing fractional zeros (a whole number
+         * renders without a decimal point); the exact inverse of [`parse_amount`] for every `u64` and
+         * `decimals ≤ 18`. MC1 unit 1.
+         */ fun `formatAmount`(`raw`: kotlin.ULong, `decimals`: kotlin.UByte): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_format_amount(
+        FfiConverterULong.lower(`raw`),FfiConverterUByte.lower(`decimals`),_status)
+}
+    )
+    }
+    
+
+        /**
          * Generate a fresh Ed25519 keypair (native OS CSPRNG). Called once per device at onboarding.
          */ fun `generateKeypair`(): KeyPair {
             return FfiConverterTypeKeyPair.lift(
@@ -3013,6 +3072,23 @@ public object FfiConverterOptionalByteArray: FfiConverterRustBuffer<kotlin.ByteA
     uniffiRustCallWithError(DpayException) { _status ->
     UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_nfc_request_bytes(
         FfiConverterByteArray.lower(`to`),FfiConverterULong.lower(`amount`),FfiConverterByteArray.lower(`nonce`),FfiConverterULong.lower(`expiry`),FfiConverterUInt.lower(`currency`),FfiConverterString.lower(`toName`),FfiConverterString.lower(`memo`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Parse a human decimal string (e.g. `"8.4"`) into raw `u64` units at `decimals` precision — the
+         * single source of truth for the human↔u64 amount boundary (MC1 unit 1). Exact (no float
+         * intermediate; `u128` checked arithmetic); `decimals` bounded ≤ 18. Rejects empty/non-numeric/
+         * negative/too-many-decimals/overflow as `DpayError::Amount(<code>)` (debuggable codes matching the
+         * TS mirror's `err` strings). Retires the old app path that rounded `u64` through `number`/`Double`.
+         */
+    @Throws(DpayException::class) fun `parseAmount`(`human`: kotlin.String, `decimals`: kotlin.UByte): kotlin.ULong {
+            return FfiConverterULong.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_parse_amount(
+        FfiConverterString.lower(`human`),FfiConverterUByte.lower(`decimals`),_status)
 }
     )
     }

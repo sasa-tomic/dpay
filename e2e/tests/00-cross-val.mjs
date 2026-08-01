@@ -274,7 +274,88 @@ export async function run() {
   assert(rOk, 'verifyAsync(receipt golden sig, signing, receipt public_hex) must be true (mirrors verify_receipt)');
   console.log('[00-cross-val] ✓ receipt sig matches Rust core byte-for-byte + verifies');
 
-  console.log('[00-cross-val] ALL CHECKS GREEN — local pay + withdraw + receipt flows byte-exact vs the Rust core');
+  // --- (8) amount parser cross-val: TS BigInt parser == fixed Rust goldens --------------------
+  //   MC1 unit 1. The canonical parser is `dpay_core::{parse_decimal_to_units,
+  //   format_units_to_decimal}`; the TS BigInt mirror lives at `app/lib/amount.ts`. This cross-val
+  //   asserts the TS logic produces byte-identical results to the Rust core for fixed goldens,
+  //   including a value > 2^53 (the IEEE-754 loss zone the OLD number/Double amount path fell into).
+  //
+  //   The parser is REPLICATED inline here for the SAME reason the signing shim is replicated at the
+  //   top of this file: Node cannot import `.ts` (no TS loader in e2e), so the cross-val mirrors the
+  //   module's pure logic and compares against Rust-golden strings. The REAL `app/lib/amount.ts` is
+  //   exercised by `app/__tests__/amount.test.ts` (jest, 23 checks); the same goldens are triple-
+  //   pinned by the Python FFI roundtrip (`test_ffi.py` §9, which calls the REAL compiled Rust via
+  //   UniFFI). So Rust core + Python-via-FFI + TS-logic all agree on these exact strings.
+  const MAX_DECIMALS = 18;
+  const U64_MAX = (1n << 64n) - 1n;
+  const RE_NUMERIC_AMOUNT = /^\d+(\.\d+)?$/;
+  function tsParseDecimalToUnits(human, decimals) {
+    const s = String(human).trim();
+    if (s.length === 0) return { ok: false, err: 'empty' };
+    if (s.startsWith('-')) return { ok: false, err: 'negative' };
+    if (!RE_NUMERIC_AMOUNT.test(s)) return { ok: false, err: 'not_a_number' };
+    if (!Number.isInteger(decimals) || decimals < 0 || decimals > MAX_DECIMALS) {
+      return { ok: false, err: 'overflow' };
+    }
+    const dot = s.indexOf('.');
+    const wholeStr = dot < 0 ? s : s.slice(0, dot);
+    const fracStr = dot < 0 ? '' : s.slice(dot + 1);
+    if (fracStr.length > decimals) return { ok: false, err: 'too_many_decimals' };
+    const scale = 10n ** BigInt(decimals);
+    const whole = wholeStr.length === 0 ? 0n : BigInt(wholeStr);
+    const frac = fracStr.length === 0 ? 0n : BigInt(fracStr) * (10n ** BigInt(decimals - fracStr.length));
+    const total = whole * scale + frac;
+    if (total > U64_MAX) return { ok: false, err: 'overflow' };
+    return { ok: true, raw: total.toString(10) };
+  }
+  function tsFormatUnitsToDecimal(raw, decimals) {
+    const d = Math.min(decimals, MAX_DECIMALS);
+    const scale = 10n ** BigInt(d);
+    const val = BigInt(raw);
+    const whole = val / scale;
+    const frac = val % scale;
+    if (d === 0 || frac === 0n) return whole.toString(10);
+    let fracStr = frac.toString(10).padStart(d, '0');
+    while (fracStr.endsWith('0')) fracStr = fracStr.slice(0, -1);
+    return `${whole.toString(10)}.${fracStr}`;
+  }
+
+  // Fixed Rust goldens — deterministic values the Rust parser produces (triple-pinned: Rust unit
+  // tests + Python FFI §9 + this cross-val). Each entry: [rawUnitsStr, decimals, rustGoldenFormatted].
+  const amountGoldens = [
+    // value > 2^53 (the IEEE-754 loss zone): 0.009007199254740993 * 1e18 == 2^53 + 1.
+    ['9007199254740993', 18, '0.009007199254740993'],
+    // u64::MAX at 18 decimals (no trailing zero to trim) — the boundary round-trip.
+    ['18446744073709551615', 18, '18.446744073709551615'],
+    // zero.
+    ['0', 18, '0'],
+    // 8.4 at 18 decimals (trims 17 trailing zeros — readable, not "8.400000000000000000").
+    ['8400000000000000000', 18, '8.4'],
+    // cents: 8400 @ 2 trims to a whole "84".
+    ['8400', 2, '84'],
+  ];
+  for (const [rawStr, dec, rustGolden] of amountGoldens) {
+    const tsFormatted = tsFormatUnitsToDecimal(rawStr, dec);
+    assertEq(tsFormatted, rustGolden, `TS format("${rawStr}", ${dec}) == Rust golden`);
+    const tsParsed = tsParseDecimalToUnits(rustGolden, dec);
+    assert(tsParsed.ok && tsParsed.raw === rawStr,
+      `TS parse(rustGolden, ${dec}) == "${rawStr}" (round-trip; got ${JSON.stringify(tsParsed)})`);
+  }
+
+  // The > 2^53 value MUST parse to the EXACT raw — the whole point of MC1 (Number() would lose it).
+  const lossyProbe = tsParseDecimalToUnits('0.009007199254740993', 18);
+  assert(lossyProbe.ok && lossyProbe.raw === '9007199254740993',
+    `2^53+1 parses exactly via BigInt (got ${JSON.stringify(lossyProbe)}); Number() would give 9007199254740992`);
+
+  // Rejection parity: the TS err codes match the Rust AmountError variants exactly.
+  assertEq(JSON.stringify(tsParseDecimalToUnits('', 2)), JSON.stringify({ ok: false, err: 'empty' }), 'TS reject empty');
+  assertEq(JSON.stringify(tsParseDecimalToUnits('abc', 2)), JSON.stringify({ ok: false, err: 'not_a_number' }), 'TS reject not_a_number');
+  assertEq(JSON.stringify(tsParseDecimalToUnits('-1', 2)), JSON.stringify({ ok: false, err: 'negative' }), 'TS reject negative');
+  assertEq(JSON.stringify(tsParseDecimalToUnits('1.5', 0)), JSON.stringify({ ok: false, err: 'too_many_decimals' }), 'TS reject too_many_decimals');
+  assertEq(JSON.stringify(tsParseDecimalToUnits('99999999999999999999999999999', 0)), JSON.stringify({ ok: false, err: 'overflow' }), 'TS reject overflow');
+  console.log('[00-cross-val] ✓ TS BigInt amount parser matches Rust goldens (incl. > 2^53, u64::MAX, rejections)');
+
+  console.log('[00-cross-val] ALL CHECKS GREEN — local pay + withdraw + receipt + amount flows byte-exact vs the Rust core');
 }
 
 // Allow `node tests/00-cross-val.mjs` to run standalone (the orchestrator imports `run`).

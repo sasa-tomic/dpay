@@ -1,0 +1,147 @@
+// Exact decimal <-> raw-u64 amount parser — TS BigInt mirror of `dpay_core::parse_decimal_to_units`
+// / `format_units_to_decimal`. MC1 unit 1.
+//
+// The canonical parser lives in the Rust core; this module is its parity-pinned I/O-boundary mirror
+// for the JS side (the same role the `e2e/web/dpay-core.ts` ed25519 signing shim plays for sigs). It
+// is NOT a mock — it IS the parser logic for JS, and the e2e cross-val (`e2e/tests/00-cross-val.mjs`)
+// + the jest suite (`app/__tests__/amount.test.ts`) pin it byte-for-byte against the Rust core.
+//
+// WHY: protocol amounts are exact `u64` in every wire struct (`Authorization.amount`,
+// `PaymentRequest.amount`, `WithdrawAuth.amount`, `ReceiptClaim.amount`). The OLD app path rounded
+// them through JS `number` / Kotlin `Double` — lossy above 2^53 (e.g. `0.009007199254740993 * 1e18`
+// ≠ 9007199254740993 via `Number`). This module retires that loss surface: raw u64 values are carried
+// as DECIMAL-DIGIT STRINGS (never `number`), and ALL math uses JS `BigInt` (`10n ** BigInt(decimals)`).
+// There is no `parseFloat` / `Number()` on a raw amount anywhere in this module.
+//
+// Acceptance/rejection policy mirrors the Rust parser EXACTLY (same precedence, same codes):
+//   1. Surrounding whitespace is trimmed.
+//   2. Empty (after trim) → `err: "empty"`.
+//   3. A leading `-` → `err: "negative"` (regardless of what follows; checked before shape).
+//   4. Must match `^\d+(\.\d+)?$` (a `.`-only / leading-`.` / trailing-`.` / multi-dot input is
+//      `"not_a_number"`); a leading `+` is NOT accepted.
+//   5. Fractional digits beyond `decimals` → `"too_many_decimals"`.
+//   6. `decimals > MAX_DECIMALS`, or the scaled value > u64::MAX → `"overflow"`.
+
+/** Maximum decimal precision (mirrors `dpay_core::MAX_DECIMALS`). A u64 holds ≤ 18 decimals. */
+export const MAX_DECIMALS = 18;
+
+/** u64::MAX as a BigInt, for the overflow bound. */
+const U64_MAX: bigint = (1n << 64n) - 1n;
+
+/**
+ * A typed parse result. `ok: true` carries the raw u64 as a decimal-digit STRING (never a `number` —
+ * a raw > 2^53 would lose precision). `ok: false` carries a debuggable `err` code matching the Rust
+ * `AmountError` variants (`empty`/`not_a_number`/`negative`/`too_many_decimals`/`overflow`).
+ */
+export type AmountResult =
+  | { ok: true; raw: string }
+  | { ok: false; err: string };
+
+// `^\d+(\.\d+)?$` — require at least one digit before the dot; a dot requires ≥1 digit after.
+const RE_NUMERIC = /^\d+(\.\d+)?$/;
+// A valid raw input is a non-empty run of decimal digits (no sign, no dot, no exponent).
+const RE_RAW_DIGITS = /^\d+$/;
+
+/**
+ * Parse a human decimal string into raw u64 units (returned as a decimal-digit string) at `decimals`
+ * precision. Exact — uses `BigInt` throughout, never `number`/`parseFloat`. See the module doc for
+ * the acceptance/rejection policy (mirrors `dpay_core::parse_decimal_to_units`).
+ *
+ * `decimals` must be an integer in `0..=MAX_DECIMALS` (18); a larger/non-integer value yields
+ * `err: "overflow"` (the precision is unsupported in the u64 value space, matching the Rust bound).
+ */
+export function parseDecimalToUnits(human: string, decimals: number): AmountResult {
+  if (typeof human !== 'string') {
+    return { ok: false, err: 'not_a_number' };
+  }
+  const s = human.trim();
+  if (s.length === 0) {
+    return { ok: false, err: 'empty' };
+  }
+  // A leading `-` is always Negative, regardless of what follows (mirrors Rust: checked before shape).
+  if (s.startsWith('-')) {
+    return { ok: false, err: 'negative' };
+  }
+  if (!RE_NUMERIC.test(s)) {
+    return { ok: false, err: 'not_a_number' };
+  }
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > MAX_DECIMALS) {
+    return { ok: false, err: 'overflow' };
+  }
+  const d = decimals;
+  const dot = s.indexOf('.');
+  const wholeStr = dot < 0 ? s : s.slice(0, dot);
+  const fracStr = dot < 0 ? '' : s.slice(dot + 1);
+  if (fracStr.length > d) {
+    return { ok: false, err: 'too_many_decimals' };
+  }
+  // BigInt math (exact). `10n ** BigInt(d)` is well-defined for d ≤ 18 (mirrors Rust's u128 scale).
+  const scale = 10n ** BigInt(d);
+  const whole = wholeStr.length === 0 ? 0n : BigInt(wholeStr);
+  let frac = 0n;
+  if (fracStr.length > 0) {
+    // Pad the fractional digits to `decimals` places (left-shift by the missing trailing zeros).
+    frac = BigInt(fracStr) * (10n ** BigInt(d - fracStr.length));
+  }
+  const total = whole * scale + frac;
+  if (total > U64_MAX) {
+    return { ok: false, err: 'overflow' };
+  }
+  return { ok: true, raw: total.toString(10) };
+}
+
+/**
+ * Format raw u64 units (a decimal-digit string) as a human decimal string at `decimals` precision.
+ * Trims trailing fractional zeros (so `8400000000000000000` at 18 → `"8.4"`; a whole number renders
+ * without a decimal point — `8400` at 2 → `"84"`); the integer part is never touched.
+ *
+ * The exact inverse of [`parseDecimalToUnits`]: for every u64 and every `decimals ≤ 18`,
+ * `parseDecimalToUnits(formatUnitsToDecimal(raw, d), d).raw === raw`. Trimming (not padding to
+ * `decimals`) is chosen so high-precision assets render readably (`"8.4 BTC"` not
+ * `"8.400000000000000000 BTC"`); display-padding to a fixed width remains a UI concern (the app's
+ * `fmtAsset`), separate from this primitive.
+ *
+ * `raw` MUST be a non-empty decimal-digit string (`^\d+$`); any other input throws a `TypeError`
+ * (a programming error — debuggable, never a silent NaN/`?.` swallow). `decimals > MAX_DECIMALS` is
+ * clamped to `MAX_DECIMALS` (matching the Rust bound — a non-throwing fallback for malformed input).
+ */
+export function formatUnitsToDecimal(raw: string, decimals: number): string {
+  if (typeof raw !== 'string' || !RE_RAW_DIGITS.test(raw)) {
+    // Programming error (Rust takes a u64 and cannot be invalid). Debuggable typed throw, not silent.
+    throw new TypeError(`formatUnitsToDecimal: raw must be a decimal-digit string, got ${JSON.stringify(raw)}`);
+  }
+  if (!Number.isInteger(decimals) || decimals < 0) {
+    throw new TypeError(`formatUnitsToDecimal: decimals must be a non-negative integer, got ${JSON.stringify(decimals)}`);
+  }
+  const d = Math.min(decimals, MAX_DECIMALS);
+  const scale = 10n ** BigInt(d);
+  const val = BigInt(raw);
+  const whole = val / scale;
+  const frac = val % scale;
+  if (d === 0 || frac === 0n) {
+    return whole.toString(10);
+  }
+  // Fraction as a zero-padded (width = d) string, then trim trailing zeros.
+  let fracStr = frac.toString(10).padStart(d, '0');
+  while (fracStr.endsWith('0')) {
+    fracStr = fracStr.slice(0, -1);
+  }
+  return `${whole.toString(10)}.${fracStr}`;
+}
+
+/**
+ * Compare two raw u64 amounts (decimal-digit strings) using `BigInt` — NEVER lexicographic string
+ * compare (which would wrongly rank `"9" > "10"`). Returns -1 / 0 / 1. Throws `TypeError` on a
+ * non-digit input (debuggable; both inputs must be valid raw-amount strings).
+ */
+export function cmpRaw(a: string, b: string): -1 | 0 | 1 {
+  if (typeof a !== 'string' || !RE_RAW_DIGITS.test(a)) {
+    throw new TypeError(`cmpRaw: a must be a decimal-digit string, got ${JSON.stringify(a)}`);
+  }
+  if (typeof b !== 'string' || !RE_RAW_DIGITS.test(b)) {
+    throw new TypeError(`cmpRaw: b must be a decimal-digit string, got ${JSON.stringify(b)}`);
+  }
+  const ba = BigInt(a);
+  const bb = BigInt(b);
+  return ba < bb ? -1 : ba > bb ? 1 : 0;
+}

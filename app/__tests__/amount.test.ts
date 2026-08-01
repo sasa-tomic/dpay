@@ -1,0 +1,162 @@
+import { describe, test, expect } from '@jest/globals';
+import {
+  parseDecimalToUnits,
+  formatUnitsToDecimal,
+  cmpRaw,
+  MAX_DECIMALS,
+} from '../lib/amount';
+
+// Mirrors `dpay_core::{parse_decimal_to_units, format_units_to_decimal}` and the Python FFI round-
+// trip (`test_ffi.py` §9). The Rust core is canonical; this jest suite exercises the REAL TS module
+// (the e2e cross-val `00-cross-val.mjs` adds the Rust-golden parity pin). Raw u64 is carried as a
+// decimal-digit STRING everywhere — the whole point of MC1 is to never round a u64 through `number`.
+
+describe('parseDecimalToUnits — exact BigInt (no Number loss)', () => {
+  test('"8.4" at 18 decimals → 8.4e18 (would be WRONG via Number)', () => {
+    // 8.4e18 > 2^53; parseFloat("8.4")*1e18 would not equal this. BigInt is exact.
+    expect(parseDecimalToUnits('8.4', 18)).toEqual({ ok: true, raw: '8400000000000000000' });
+  });
+
+  test('2^53 + 1 — the canonical IEEE-754 loss probe', () => {
+    // Number(9007199254740993) === 9007199254740992 (lossy); BigInt recovers the exact value.
+    expect(parseDecimalToUnits('0.009007199254740993', 18)).toEqual({
+      ok: true,
+      raw: '9007199254740993',
+    });
+  });
+
+  test('u64::MAX at 18 decimals parses exactly', () => {
+    expect(parseDecimalToUnits('18.446744073709551615', 18)).toEqual({
+      ok: true,
+      raw: '18446744073709551615',
+    });
+  });
+
+  test('decimals=2 (cents)', () => {
+    expect(parseDecimalToUnits('84.00', 2)).toEqual({ ok: true, raw: '8400' });
+    expect(parseDecimalToUnits('0.84', 2)).toEqual({ ok: true, raw: '84' });
+    expect(parseDecimalToUnits('8.4', 2)).toEqual({ ok: true, raw: '840' });
+  });
+
+  test('decimals=0 integer', () => {
+    expect(parseDecimalToUnits('42', 0)).toEqual({ ok: true, raw: '42' });
+    expect(parseDecimalToUnits('0', 0)).toEqual({ ok: true, raw: '0' });
+  });
+
+  test('trims surrounding whitespace', () => {
+    expect(parseDecimalToUnits('  8.4  ', 18)).toEqual({ ok: true, raw: '8400000000000000000' });
+  });
+});
+
+describe('formatUnitsToDecimal — trim trailing zeros (readable for high-precision assets)', () => {
+  test('8.4e18 at 18 → "8.4" (trims 17 trailing zeros)', () => {
+    expect(formatUnitsToDecimal('8400000000000000000', 18)).toBe('8.4');
+  });
+
+  test('u64::MAX at 18 → canonical (no trailing zero to trim)', () => {
+    expect(formatUnitsToDecimal('18446744073709551615', 18)).toBe('18.446744073709551615');
+  });
+
+  test('"0" → "0" (whole; no decimal point)', () => {
+    expect(formatUnitsToDecimal('0', 18)).toBe('0');
+  });
+
+  test('whole number at d=2 → no decimal point (8400 → "84")', () => {
+    expect(formatUnitsToDecimal('8400', 2)).toBe('84');
+    expect(formatUnitsToDecimal('84', 2)).toBe('0.84');
+  });
+
+  test('decimals=0', () => {
+    expect(formatUnitsToDecimal('42', 0)).toBe('42');
+  });
+});
+
+describe('round-trip invariant (format ∘ parse == identity)', () => {
+  test('every vector round-trips across 0/2/6/8/18 decimals', () => {
+    const cases: Array<[string, number]> = [
+      ['0', 0],
+      ['1', 2],
+      ['99', 2],
+      ['100', 2],
+      ['8400', 2],
+      ['123456789', 6],
+      ['50000', 8],
+      ['123', 18],
+      ['9007199254740993', 18], // > 2^53
+      ['8400000000000000000', 18], // 8.4 at 18
+      ['18446744073709551615', 18], // u64::MAX
+    ];
+    for (const [raw, d] of cases) {
+      const formatted = formatUnitsToDecimal(raw, d);
+      const back = parseDecimalToUnits(formatted, d);
+      expect(back).toEqual({ ok: true, raw });
+    }
+  });
+
+  test('u64::MAX at MAX_DECIMALS (18) round-trips', () => {
+    const max = '18446744073709551615';
+    expect(parseDecimalToUnits(formatUnitsToDecimal(max, MAX_DECIMALS), MAX_DECIMALS)).toEqual({
+      ok: true,
+      raw: max,
+    });
+  });
+});
+
+describe('cmpRaw — BigInt compare (no lexicographic trap)', () => {
+  test('"9" < "10" (lexicographic string compare would get this WRONG)', () => {
+    expect(cmpRaw('9', '10')).toBe(-1);
+  });
+  test('equal', () => {
+    expect(cmpRaw('100', '100')).toBe(0);
+  });
+  test('greater', () => {
+    expect(cmpRaw('11', '10')).toBe(1);
+  });
+  test('big values compare by magnitude, not length-first-as-string', () => {
+    expect(cmpRaw('18446744073709551615', '18446744073709551614')).toBe(1);
+    expect(cmpRaw('9007199254740993', '9007199254740992')).toBe(1);
+  });
+  test('throws TypeError on non-digit input (debuggable, no silent NaN)', () => {
+    expect(() => cmpRaw('abc', '10')).toThrow(TypeError);
+    expect(() => cmpRaw('9', '')).toThrow(TypeError);
+  });
+});
+
+describe('rejections — typed err codes matching Rust AmountError', () => {
+  test('empty → "empty"', () => {
+    expect(parseDecimalToUnits('', 2)).toEqual({ ok: false, err: 'empty' });
+    expect(parseDecimalToUnits('   ', 2)).toEqual({ ok: false, err: 'empty' });
+  });
+
+  test('non-numeric → "not_a_number"', () => {
+    expect(parseDecimalToUnits('abc', 2)).toEqual({ ok: false, err: 'not_a_number' });
+    expect(parseDecimalToUnits('1.2.3', 2)).toEqual({ ok: false, err: 'not_a_number' });
+    expect(parseDecimalToUnits('.', 2)).toEqual({ ok: false, err: 'not_a_number' });
+    expect(parseDecimalToUnits('.5', 2)).toEqual({ ok: false, err: 'not_a_number' });
+    expect(parseDecimalToUnits('5.', 2)).toEqual({ ok: false, err: 'not_a_number' });
+    expect(parseDecimalToUnits('+5', 2)).toEqual({ ok: false, err: 'not_a_number' });
+  });
+
+  test('negative → "negative" (regardless of magnitude/shape)', () => {
+    expect(parseDecimalToUnits('-1', 2)).toEqual({ ok: false, err: 'negative' });
+    expect(parseDecimalToUnits('-0.01', 2)).toEqual({ ok: false, err: 'negative' });
+    expect(parseDecimalToUnits('-abc', 2)).toEqual({ ok: false, err: 'negative' });
+  });
+
+  test('too many fractional digits → "too_many_decimals"', () => {
+    expect(parseDecimalToUnits('1.5', 0)).toEqual({ ok: false, err: 'too_many_decimals' });
+    expect(parseDecimalToUnits('0.1234567890123456789', 18)).toEqual({
+      ok: false,
+      err: 'too_many_decimals',
+    });
+  });
+
+  test('overflow → "overflow" (value > u64::MAX or decimals > MAX_DECIMALS)', () => {
+    expect(parseDecimalToUnits('99999999999999999999999999999', 0)).toEqual({
+      ok: false,
+      err: 'overflow',
+    });
+    expect(parseDecimalToUnits('1', 19)).toEqual({ ok: false, err: 'overflow' });
+    expect(parseDecimalToUnits('1', -1 as unknown as number)).toEqual({ ok: false, err: 'overflow' });
+  });
+});

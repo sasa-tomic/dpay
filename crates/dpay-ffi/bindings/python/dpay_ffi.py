@@ -468,6 +468,8 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_encode_request() != 42219:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_format_amount() != 44035:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_generate_keypair() != 36207:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_nfc_decode_receipt() != 25249:
@@ -481,6 +483,8 @@ def _uniffi_check_api_checksums(lib):
     if lib.uniffi_dpay_ffi_checksum_func_nfc_receipt_codes() != 63617:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_nfc_request_bytes() != 53714:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_parse_amount() != 56752:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_request_len() != 35464:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -767,6 +771,12 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_encode_request.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_encode_request.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_format_amount.argtypes = (
+    ctypes.c_uint64,
+    ctypes.c_uint8,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_format_amount.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_func_generate_keypair.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
@@ -806,6 +816,12 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_nfc_request_bytes.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_nfc_request_bytes.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_parse_amount.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.c_uint8,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_parse_amount.restype = ctypes.c_uint64
 _UniffiLib.uniffi_dpay_ffi_fn_func_request_len.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
@@ -1150,6 +1166,9 @@ _UniffiLib.uniffi_dpay_ffi_checksum_func_encode_qr.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_encode_request.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_encode_request.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_format_amount.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_format_amount.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_generate_keypair.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_generate_keypair.restype = ctypes.c_uint16
@@ -1171,6 +1190,9 @@ _UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_receipt_codes.restype = ctypes.c_ui
 _UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_request_bytes.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_request_bytes.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_parse_amount.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_parse_amount.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_request_len.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_request_len.restype = ctypes.c_uint16
@@ -1682,6 +1704,27 @@ class DpayError:  # type: ignore
         def __repr__(self):
             return "DpayError.BadInput({})".format(str(self))
     _UniffiTempDpayError.BadInput = BadInput # type: ignore
+    class Amount(_UniffiTempDpayError):
+        """
+        A decimal amount string was rejected by `parse_amount`. Carries a debuggable code matching
+        `dpay_core::AmountError` (`empty`/`not_a_number`/`negative`/`too_many_decimals`/`overflow`)
+        so the app reacts without string-sniffing. MC1 unit 1.
+        """
+
+        def __init__(self, *values):
+            if len(values) != 1:
+                raise TypeError(f"Expected 1 arguments, found {len(values)}")
+            if not isinstance(values[0], str):
+                raise TypeError(f"unexpected type for tuple element 0 - expected 'str', got '{type(values[0])}'")
+            super().__init__(", ".join(map(repr, values)))
+            self._values = values
+
+        def __getitem__(self, index):
+            return self._values[index]
+
+        def __repr__(self):
+            return "DpayError.Amount({})".format(str(self))
+    _UniffiTempDpayError.Amount = Amount # type: ignore
     class NfcWrongState(_UniffiTempDpayError):
         def __init__(self):
             pass
@@ -1735,12 +1778,16 @@ class _UniffiConverterTypeDpayError(_UniffiConverterRustBuffer):
                 _UniffiConverterString.read(buf),
             )
         if variant == 8:
-            return DpayError.NfcWrongState(
+            return DpayError.Amount(
+                _UniffiConverterString.read(buf),
             )
         if variant == 9:
-            return DpayError.NfcNotDpay(
+            return DpayError.NfcWrongState(
             )
         if variant == 10:
+            return DpayError.NfcNotDpay(
+            )
+        if variant == 11:
             return DpayError.NfcProtocol(
             )
         raise InternalError("Raw enum value doesn't match any cases")
@@ -1760,6 +1807,9 @@ class _UniffiConverterTypeDpayError(_UniffiConverterRustBuffer):
         if isinstance(value, DpayError.PubkeyMismatch):
             return
         if isinstance(value, DpayError.BadInput):
+            _UniffiConverterString.check_lower(value._values[0])
+            return
+        if isinstance(value, DpayError.Amount):
             _UniffiConverterString.check_lower(value._values[0])
             return
         if isinstance(value, DpayError.NfcWrongState):
@@ -1786,12 +1836,15 @@ class _UniffiConverterTypeDpayError(_UniffiConverterRustBuffer):
         if isinstance(value, DpayError.BadInput):
             buf.write_i32(7)
             _UniffiConverterString.write(value._values[0], buf)
-        if isinstance(value, DpayError.NfcWrongState):
+        if isinstance(value, DpayError.Amount):
             buf.write_i32(8)
-        if isinstance(value, DpayError.NfcNotDpay):
+            _UniffiConverterString.write(value._values[0], buf)
+        if isinstance(value, DpayError.NfcWrongState):
             buf.write_i32(9)
-        if isinstance(value, DpayError.NfcProtocol):
+        if isinstance(value, DpayError.NfcNotDpay):
             buf.write_i32(10)
+        if isinstance(value, DpayError.NfcProtocol):
+            buf.write_i32(11)
 
 
 
@@ -2537,6 +2590,23 @@ def encode_request(to: "bytes",amount: "int",nonce: "bytes",expiry: "int",curren
         _UniffiConverterString.lower(memo)))
 
 
+def format_amount(raw: "int",decimals: "int") -> "str":
+    """
+    Format raw `u64` units as a human decimal string at `decimals` precision (e.g.
+    `8_400_000_000_000_000_000` at 18 → `"8.4"`). Trims trailing fractional zeros (a whole number
+    renders without a decimal point); the exact inverse of [`parse_amount`] for every `u64` and
+    `decimals ≤ 18`. MC1 unit 1.
+    """
+
+    _UniffiConverterUInt64.check_lower(raw)
+    
+    _UniffiConverterUInt8.check_lower(decimals)
+    
+    return _UniffiConverterString.lift(_uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_func_format_amount,
+        _UniffiConverterUInt64.lower(raw),
+        _UniffiConverterUInt8.lower(decimals)))
+
+
 def generate_keypair() -> "KeyPair":
     """
     Generate a fresh Ed25519 keypair (native OS CSPRNG). Called once per device at onboarding.
@@ -2627,6 +2697,24 @@ def nfc_request_bytes(to: "bytes",amount: "int",nonce: "bytes",expiry: "int",cur
         _UniffiConverterUInt32.lower(currency),
         _UniffiConverterString.lower(to_name),
         _UniffiConverterString.lower(memo)))
+
+
+def parse_amount(human: "str",decimals: "int") -> "int":
+    """
+    Parse a human decimal string (e.g. `"8.4"`) into raw `u64` units at `decimals` precision — the
+    single source of truth for the human↔u64 amount boundary (MC1 unit 1). Exact (no float
+    intermediate; `u128` checked arithmetic); `decimals` bounded ≤ 18. Rejects empty/non-numeric/
+    negative/too-many-decimals/overflow as `DpayError::Amount(<code>)` (debuggable codes matching the
+    TS mirror's `err` strings). Retires the old app path that rounded `u64` through `number`/`Double`.
+    """
+
+    _UniffiConverterString.check_lower(human)
+    
+    _UniffiConverterUInt8.check_lower(decimals)
+    
+    return _UniffiConverterUInt64.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_parse_amount,
+        _UniffiConverterString.lower(human),
+        _UniffiConverterUInt8.lower(decimals)))
 
 
 def request_len() -> "int":
@@ -2833,6 +2921,7 @@ __all__ = [
     "decode_request",
     "encode_qr",
     "encode_request",
+    "format_amount",
     "generate_keypair",
     "nfc_decode_receipt",
     "nfc_decode_request",
@@ -2840,6 +2929,7 @@ __all__ = [
     "nfc_receipt_bytes",
     "nfc_receipt_codes",
     "nfc_request_bytes",
+    "parse_amount",
     "request_len",
     "sign_authorization",
     "sign_withdrawal",
