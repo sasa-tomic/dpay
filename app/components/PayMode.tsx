@@ -1,18 +1,29 @@
 import {useEffect, useState} from 'react';
-import {View, Text, Pressable, Share} from 'react-native';
+import {View, Text, Pressable, Share, Modal} from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import {S} from '../styles';
+import {C} from '../config/palette';
 import {EXPIRY_WINDOW, DIRECT_PAY_TIMEOUT_MS, NFC_PAY_TIMEOUT_MS, POLL} from '../config/constants';
 import {usd, short, base, parseRequestQR, randNonceHex, nowSecs} from '../lib/format';
 import {type CurrencyDescriptor, fmtCurrencyAmount} from '../config/catalog';
-import type {Identity, Req} from '../lib/types';
+import type {Identity, Req, NfcStatus} from '../lib/types';
 import {classifyPayHttp, rejectionMessage, isNonceReused} from '../payments';
 import {verifyOutcomeReceipt} from '../services/receipt';
 import {DpayCore, DpayNfc} from '../services/native';
 import {NfcTap} from './NfcTap';
+import {NfcIcon} from './NfcIcon';
 import {QrScanner} from './QrScanner';
+import {useEscapeToClose} from '../hooks/useHotkeys';
 
-export function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOfflinePaid, shownBalance, catalog, assetBalances}: {identity: Identity; online: boolean; relayUrl: string; nfcReady: boolean; onSettled: () => void; onOfflinePaid: (amount: number) => void; shownBalance: number | null; catalog: CurrencyDescriptor[]; assetBalances: Record<number, number>}) {
+// Plain-language per-reason text for the NFC-unavailable info popup. Each ends with the honest
+// fallback that QR always works, so the payer is never stuck.
+const NFC_REASON: Record<Exclude<NfcStatus, 'ready'>, string> = {
+  off: 'NFC is turned off in your device settings. Turn NFC on to pay by tap — or scan the QR code to pay now.',
+  unsupported: "This device doesn't have NFC hardware. Scan the QR code to pay.",
+  unknown: "Couldn't check NFC status. Scan the QR code to pay.",
+};
+
+export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assetBalances}: {identity: Identity; online: boolean; relayUrl: string; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: number) => void; shownBalance: number | null; catalog: CurrencyDescriptor[]; assetBalances: Record<number, number>}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid'>('scan');
   const [req, setReq] = useState<Req | null>(null);
   const [qr, setQr] = useState<{code: string; amount: number; currency: number; who: string; nonce: string} | null>(null);
@@ -24,6 +35,11 @@ export function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOffl
   // A tap arriving on the always-armed card takes over the scan screen; nfcKey re-arms after each.
   const [nfcActive, setNfcActive] = useState(false);
   const [nfcKey, setNfcKey] = useState(0);
+  // NFC is usable only when the adapter probe reports 'ready' (on + present). Everything else falls
+  // through to the QR-only scan surface, with a per-reason explanation in the info popup below.
+  const nfcReady = nfcStatus === 'ready';
+  const [nfcInfoOpen, setNfcInfoOpen] = useState(false);
+  useEscapeToClose(() => setNfcInfoOpen(false));
 
   async function onRequestString(raw: string) {
     try {
@@ -196,6 +212,8 @@ export function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOffl
 
   // Scan screen: the card is armed in the background (if NFC is ready) AND the QR scanner is live at
   // the same time — the payer taps the merchant's phone OR scans its QR, with no button in between.
+  // A leading NFC status row tells the payer whether tap-to-pay is available; QR always works.
+  const nfcInfo: Exclude<NfcStatus, 'ready'> = (nfcStatus === 'ready' ? 'unknown' : nfcStatus);
   return (
     <View style={S.center}>
       {nfcReady && DpayNfc ? (
@@ -208,12 +226,36 @@ export function PayMode({identity, online, relayUrl, nfcReady, onSettled, onOffl
       ) : null}
       {!nfcActive ? (
         <>
-          <Text style={S.label} testID="pay-scan">{nfcReady ? 'Tap or scan to pay' : 'Scan a request to pay'}</Text>
+          {nfcReady ? (
+            <View style={S.nfcStatusRow} testID="pay-scan">
+              <NfcIcon color={C.brand} />
+              <Text style={S.nfcStatusLabel}>Tap or scan to pay</Text>
+            </View>
+          ) : (
+            <View style={S.nfcStatusRow} testID="pay-scan">
+              <NfcIcon color={C.bad} />
+              <Pressable style={S.nfcInfoLink} onPress={() => setNfcInfoOpen(true)} accessibilityRole="button" accessibilityLabel="Why NFC is unavailable" accessibilityState={{disabled: false}}>
+                <Text style={S.nfcInfoLinkText}>NFC not available</Text>
+                <Text style={S.nfcInfoGlyph}>ⓘ</Text>
+              </Pressable>
+            </View>
+          )}
+          {!nfcReady ? <Text style={S.dim2}>Scan the QR code to pay.</Text> : null}
           <QrScanner onScan={onRequestString} />
-          <Text style={S.dim2}>{nfcReady ? "Tap the merchant's phone, or point at its request QR" : "Point at the payee's request QR"}</Text>
           {err ? <Text style={S.err}>{err}</Text> : null}
         </>
       ) : null}
+      <Modal visible={nfcInfoOpen} transparent animationType="fade" onRequestClose={() => setNfcInfoOpen(false)}>
+        <Pressable style={S.pickBackdrop} onPress={() => setNfcInfoOpen(false)}>
+          <View style={S.pickCard} onStartShouldSetResponder={() => true}>
+            <Text style={S.pickTitle}>NFC unavailable</Text>
+            <Text style={S.nfcInfoBody}>{NFC_REASON[nfcInfo]}</Text>
+            <Pressable style={S.nfcInfoClose} onPress={() => setNfcInfoOpen(false)} accessibilityRole="button" accessibilityLabel="Close" accessibilityState={{disabled: false}}>
+              <Text style={S.nfcInfoCloseText}>Close</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
     </View>
   );
 }

@@ -196,6 +196,16 @@ export const S = StyleSheet.create({
   pickGlyph: {fontSize: 22, fontWeight: '700', color: C.ink, width: 40},
   pickName: {flex: 1, fontSize: 16, fontWeight: '700', color: C.ink},
   pickCheck: {color: C.brand, fontSize: 18, fontWeight: '700'},
+  // Pay-scan NFC status row — a large colored NFC mark + a short label, leading the scanner. Green
+  // when tap-to-pay is ready, red with a tappable "NFC not available ⓘ" link + reason popup otherwise.
+  nfcStatusRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 14},
+  nfcStatusLabel: {fontSize: 18, fontWeight: '700', color: C.ink},
+  nfcInfoLink: {flexDirection: 'row', alignItems: 'center', gap: 5},
+  nfcInfoLinkText: {fontSize: 18, fontWeight: '700', color: C.bad},
+  nfcInfoGlyph: {fontSize: 15, color: C.sub2},
+  nfcInfoBody: {fontSize: 15, color: C.ink, lineHeight: 21, marginBottom: 16},
+  nfcInfoClose: {alignSelf: 'flex-end', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 999, borderWidth: 1, borderColor: C.line2},
+  nfcInfoCloseText: {fontSize: 15, fontWeight: '700', color: C.ink},
   // Deposit instructions — a scannable card (network/asset + est. time + fee/min + non-custody line).
   instrCard: {alignSelf: 'stretch', backgroundColor: C.card, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: C.line2, marginBottom: 18},
   instrLine: {fontSize: 15, color: C.ink, textAlign: 'center', lineHeight: 21, marginBottom: 10},
