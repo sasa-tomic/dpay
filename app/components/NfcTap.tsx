@@ -183,7 +183,7 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled
   // Payer side: the tap is the consent — sign the incoming request and serve it right away.
   const autoSign = useCallback(async (req: {toHex: string; amount: number; nonceHex: string; expiry: number; currency: number}) => {
     try {
-      const wireHex = await DpayCore.signAuthorization(identity.secretHex, req.toHex, req.amount, req.nonceHex, req.expiry, req.currency);
+      const wireHex = await DpayCore.signAuthorization(identity.secretHex, req.toHex, req.amount, req.nonceHex, req.expiry, req.currency, identity.username, '', '');
       if (!(await DpayCore.verifyWire(wireHex))) throw new Error('local verify failed');
       sentRef.current = {amount: req.amount, who: short(req.toHex), nonce: req.nonceHex};
       setPayAmount(req.amount);

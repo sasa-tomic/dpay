@@ -65,8 +65,10 @@ export default function App() {
     (async () => {
       try {
         const kp = await DpayCore.generateKeypair();
-        const wire = await DpayCore.signAuthorization(kp.secretHex, kp.publicHex, 1, randNonceHex(), 4102444800, 0);
-        console.log(`DPAY_SELFCHECK ${(await DpayCore.verifyWire(wire)) && wire.length === 392 ? 'PASS' : 'FAIL'}`);
+        const wire = await DpayCore.signAuthorization(kp.secretHex, kp.publicHex, 1, randNonceHex(), 4102444800, 0, '', '', '');
+        // wire is the 292-byte authorization as lowercase hex (WIRE_LEN × 2). The length check guards
+        // against truncation; verifyWire guards the signature round-trip. Both must hold.
+        console.log(`DPAY_SELFCHECK ${(await DpayCore.verifyWire(wire)) && wire.length === 584 ? 'PASS' : 'FAIL'}`);
       } catch (e: any) { console.log(`DPAY_SELFCHECK FAIL ${String(e?.message ?? e)}`); }
     })();
   }, []);
