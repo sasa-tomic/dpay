@@ -36,8 +36,6 @@ export const S = StyleSheet.create({
   nfcSub: {fontSize: 15, color: C.sub, marginTop: 10, textAlign: 'center', paddingHorizontal: 20},
   balBox: {alignItems: 'flex-end'},
   balLabelRow: {flexDirection: 'row', alignItems: 'center', gap: 5},
-  demoPill: {backgroundColor: 'rgba(62,224,172,0.12)', borderRadius: 5, paddingHorizontal: 5, paddingVertical: 1, marginLeft: 2},
-  demoPillText: {fontSize: 9, fontWeight: '800', color: C.brand, letterSpacing: 0.5},
   balAmtRow: {flexDirection: 'row', alignItems: 'center', gap: 8},
   topUpErr: {fontSize: 13, color: C.bad, marginTop: 8, textAlign: 'center'},
   dot: {width: 8, height: 8, borderRadius: 4},

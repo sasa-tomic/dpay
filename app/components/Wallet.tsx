@@ -5,7 +5,7 @@ import {C} from '../config/palette';
 import {S} from '../styles';
 import {STORAGE_KEY, POLL, TOP_UP_CENTS} from '../config/constants';
 import {
-  type CurrencyDescriptor, CATALOG_CACHE_KEY, BUNDLED_CATALOG, fetchCurrencies, familyDisplay, displayName, fmtCurrencyAmount,
+  type CurrencyDescriptor, CATALOG_CACHE_KEY, BUNDLED_CATALOG, fetchCurrencies, familyDisplay, fmtCurrencyAmount,
 } from '../config/catalog';
 import {usd, short, isMintSentinel, fmtTime, base} from '../lib/format';
 import type {Identity, Txn, TransactionsRow, NfcStatus} from '../lib/types';
@@ -301,9 +301,6 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
           <View style={S.balLabelRow}>
             <View style={[S.dot, {backgroundColor: online ? C.ok : C.sub2}]} />
             <Text style={S.balLabel}>{online ? 'balance' : '~ approx.'}</Text>
-            {/* The current currency's NAME (DEMO/BTC/USDC). Tapping the balance opens the Balances
-                sheet to switch the current currency or top up. */}
-            <View style={S.demoPill}><Text style={S.demoPillText}>{displayName(catalog.find(c => c.currency === currentCurrency) ?? catalog[0])}</Text></View>
             <HotkeyHint k="A" />
           </View>
           <View style={S.balAmtRow}>
