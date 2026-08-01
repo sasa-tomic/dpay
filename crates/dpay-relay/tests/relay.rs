@@ -1531,3 +1531,30 @@ async fn u3_pay_transient_exhausted_recovers_settled_receipt() {
         "the inner ledger settled"
     );
 }
+
+// --- MC4 U4: GET /api/v1/receipt_pubkey discovery route ----------------------------------------
+//
+// The receipt-verification pubkey, surfaced as a discovery/diagnostic endpoint. This is the e2e
+// harness's key source, but it is explicitly NOT the app's trust anchor — a malicious relay could
+// lie here as easily as on any other route. The app pins the key in config (U5) and verifies the
+// receipt signature under the PIN; this route is a convenience for the harness + a diagnostic.
+
+/// `GET /api/v1/receipt_pubkey` → `200 {"pubkey": "<hex>"}` — the ledger's receipt Ed25519 public
+/// key. Unauthenticated (read-only diagnostic; revealing a public key moves no funds). The FakeLedger
+/// returns its stable test key. The route does NOT exist as the app's trust anchor (a malicious relay
+/// could lie); the app pins the key in config.
+#[tokio::test]
+async fn u4_receipt_pubkey_route_returns_ledger_test_key() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+
+    // The route returns the ledger's receipt pubkey (the same key FakeLedger signs receipts with).
+    let (status, body) = call(&state, get_req("/api/v1/receipt_pubkey")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let pub_hex = body["pubkey"].as_str().expect("pubkey field present");
+    // Matches the ledger's actual receipt_pubkey (cross-check via the trait method).
+    let led_pk = led.receipt_pubkey().await.unwrap();
+    assert_eq!(pub_hex, hex::encode(&led_pk));
+    assert_eq!(led_pk.len(), 32, "32-byte Ed25519 pubkey");
+}

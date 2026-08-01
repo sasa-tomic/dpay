@@ -125,6 +125,7 @@ pub fn app(state: AppState) -> Router {
         .route("/balance/{hex}", get(balance))
         .route("/transactions/{hex}", get(transactions))
         .route("/receipt/{nonce}", get(receipt))
+        .route("/receipt_pubkey", get(receipt_pubkey))
         .route("/deposit/address/{hex}", get(deposit_address))
         .route("/deposit/refresh/{hex}", post(deposit_refresh))
         .route("/deposit/info", get(deposit_info))
@@ -241,6 +242,32 @@ async fn receipt(State(state): State<AppState>, Path(nonce_hex): Path<String>) -
         Ok(Some(rc)) => (StatusCode::OK, Json(PayOk { receipt: rc, replayed: true })).into_response(),
         Ok(None) => err(StatusCode::NOT_FOUND, "not settled"),
         Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("ledger unavailable: {e}")),
+    }
+}
+
+/// `GET /api/v1/receipt_pubkey` → `200 {"pubkey": "<hex>"}` — the ledger/canister's receipt Ed25519
+/// public key (32 bytes, hex). Unauthenticated (read-only diagnostic; revealing a *public* key moves
+/// no funds and lets no one forge a signature).
+///
+/// **⚠️ This is a discovery/diagnostic aid + the e2e harness's key source — NOT the app's trust
+/// anchor.** A malicious relay could lie on this route as easily as on any other. The app does NOT
+/// trust the pubkey reported here: it PINs the receipt key in config (U5) and verifies each receipt's
+/// signature under the pin. This route exists so the harness can fetch the key for offline test
+/// verification, and so an operator can diagnose "has the canister generated its receipt key yet?".
+/// An empty string means the canister/FakeLedger hasn't generated a key yet (no successful `pay` and
+/// no `init_receipt_key`); a `Transient` ledger error → `503`.
+async fn receipt_pubkey(State(state): State<AppState>) -> Response {
+    match state.ledger.receipt_pubkey().await {
+        Ok(pk) => (StatusCode::OK, Json(ReceiptPubkeyBody { pubkey: hex::encode(&pk) }))
+            .into_response(),
+        Err(LedgerError::Transient(msg)) => {
+            err(StatusCode::SERVICE_UNAVAILABLE, format!("ledger unavailable: {msg}"))
+        }
+        // receipt_pubkey has no permanent-policy failure (it reads a public key), but surface a
+        // Rejected honestly rather than swallowing it.
+        Err(LedgerError::Rejected(msg)) => {
+            err(StatusCode::SERVICE_UNAVAILABLE, format!("ledger unavailable: {msg}"))
+        }
     }
 }
 
@@ -563,6 +590,14 @@ struct PayOk {
     /// True when this nonce was already settled and the receipt came from the idempotency cache —
     /// lets the terminal say "already paid, not charged twice" instead of a second "Paid ✓".
     replayed: bool,
+}
+
+/// `GET /api/v1/receipt_pubkey` response body — the ledger's receipt Ed25519 public key (hex). Empty
+/// string when the canister hasn't generated a key yet. See [`receipt_pubkey`] for the trust-anchor
+/// caveat (this route is a diagnostic, NOT the app's pinned trust source).
+#[derive(Serialize)]
+struct ReceiptPubkeyBody {
+    pubkey: String,
 }
 
 #[derive(Serialize)]
