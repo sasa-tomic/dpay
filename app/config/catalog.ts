@@ -110,7 +110,7 @@ export function isValidDestinationAddress(family: MinterFamily, addr: string): b
 // The primary ASSET NAME shown as the heading on the asset card + picker rows (H1). Maps each
 // currency/family to its friendly NAME, independent of the raw catalog `symbol` (the on-chain
 // icrc1_symbol, which may be a unit glyph like '₿' or a 'ck'-prefixed token id like 'ckUSDC').
-// DISTINCT from `currencySymbol` (the amount-prefix glyph: Đ/₿/$) and from `nativeAsset` (the
+// DISTINCT from `currencySymbol` (the amount-prefix glyph: ∂/₿/$) and from `nativeAsset` (the
 // backing token unit, used in raw-amount formatting + the "Send X on NETWORK" line). So a user
 // scanning for an asset sees its NAME (BTC/USDC/DEMO), not the chain it rides on.
 export function displayName(a: CurrencyDescriptor): string {
@@ -125,10 +125,10 @@ export function displayName(a: CurrencyDescriptor): string {
 
 // The amount-prefix glyph for a currency (shown before a typed amount in Receive + as the prefix of
 // a DEMO amount string). Family-driven so it is stable regardless of the raw catalog `symbol`:
-// DEMO→'Đ', BTC→'₿', USDC→'$'. ('$' was DEMO's old prefix; it moves to USDC now that DEMO uses Đ.)
+// DEMO→'∂', BTC→'₿', USDC→'$'. ('$' was DEMO's old prefix; it moves to USDC now that DEMO uses ∂.)
 // Distinct from displayName (the NAME) and nativeAsset (the raw-amount unit suffix).
 export function currencySymbol(catalog: CurrencyDescriptor[], currency: number): string {
-  if (currency === 0) return 'Đ';
+  if (currency === 0) return '∂';
   const a = catalog.find(c => c.currency === currency);
   const fam = a?.minter_family ?? null;
   if (fam === 'CkBtcUtxo') return '₿';

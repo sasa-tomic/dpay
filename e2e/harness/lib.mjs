@@ -211,14 +211,14 @@ export function assertIncludes(actual, substring, label) {
  * Onboard a fresh wallet: type the username, click create, wait for the funded balance. This is the
  * shared preamble every browser test used to copy-paste (4 lines × 15 files). Returns the driver for
  * chaining. The faucet funds synchronously in create(); the balance poll (fast-poll seam = 150ms in
- * test, 2.5s in prod) reflects it on the next tick, so waitForText('Đ100.00') lands quickly.
+ * test, 2.5s in prod) reflects it on the next tick, so waitForText('∂100.00') lands quickly.
  */
 export async function onboardWallet(driver, name = 'e2e', opts = {}) {
   const timeoutMs = opts.timeoutMs ?? 12_000;
   await driver.typeByPlaceholder('e.g. Alice', name, { timeoutMs: 8_000 });
   await driver.click('btn-create', { timeoutMs: 4_000 });
   await driver.findByTestID('balance', { timeoutMs: 10_000 });
-  await driver.waitForText('Đ100.00', { timeoutMs });
+  await driver.waitForText('∂100.00', { timeoutMs });
   return driver;
 }
 

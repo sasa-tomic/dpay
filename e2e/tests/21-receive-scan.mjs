@@ -7,14 +7,14 @@
 // on-device sig + settles → the merchant's /receipt poll confirms → "Received $X".
 //
 // Proves the full path through the REAL app + REAL relay:
-//   1. Merchant B onboards, requests Đ25 → the request QR screen renders with the
+//   1. Merchant B onboards, requests ∂25 → the request QR screen renders with the
 //      "Payer paid offline? Scan to settle" affordance.
 //   2. Click it → the QrScanner mounts (scanning=true); the affordance label swaps to
 //      "Scan the payer's signed QR".
 //   3. The payer (generated in-test, faucet-funded) signs an authorization for B's EXACT request
 //      (byte-exact wire via wire.mjs) and the test injects the signed code via the camera seam.
 //   4. B's onSignedQr POSTs /api/v1/pay → FakeLedger verifies the sig + settles (credits B).
-//   5. B's /receipt poll reconciles → "Received Đ25.00" + B's balance grows to Đ125.
+//   5. B's /receipt poll reconciles → "Received ∂25.00" + B's balance grows to ∂125.
 //
 // This mirrors flow 08 (merchant-settle) but drives the SETTLE through the app's OWN scan→submit
 // path (onSignedQr), not a direct postPay — proving the "Payer paid offline? Scan to settle"
@@ -24,7 +24,7 @@
 import { setup, assert, getBalance, onboardWallet, accountOf } from '../harness/lib.mjs';
 import { generateKeypair, decodeRequest, signAuthorizationCode } from '../harness/wire.mjs';
 
-const PAY_CENTS = 2500; // Đ25.00
+const PAY_CENTS = 2500; // ∂25.00
 
 export async function run() {
   const start = Date.now();
@@ -40,7 +40,7 @@ export async function run() {
       body: JSON.stringify({ account: alice.publicHex, amount: 10_000 }),
     });
     assert(fundA.ok, `payer faucet funding must succeed, got ${fundA.status}`);
-    console.log(`[21-receive-scan] payer A (funded Đ100): ${alice.publicHex.slice(0, 16)}…`);
+    console.log(`[21-receive-scan] payer A (funded ∂100): ${alice.publicHex.slice(0, 16)}…`);
 
     // Merchant B onboards in the browser.
     console.log('[21-receive-scan] onboarding merchant B…');
@@ -48,8 +48,8 @@ export async function run() {
     const bob = await accountOf(driver);
     const bobHex = bob.publicHex;
 
-    // B requests Đ25 → the request QR screen renders.
-    console.log('[21-receive-scan] B requesting Đ25.00…');
+    // B requests ∂25 → the request QR screen renders.
+    console.log('[21-receive-scan] B requesting ∂25.00…');
     await driver.click('tab-receive', { timeoutMs: 4_000 });
     await driver.type('amount-input', '25.00', { timeoutMs: 4_000 });
     await driver.click('btn-request', { timeoutMs: 4_000 });
@@ -89,17 +89,17 @@ export async function run() {
     const code = await signAuthorizationCode(alice.secretHex, bobHex, PAY_CENTS, req.nonceHex, req.expiry, 0);
     await driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), code);
 
-    // B's onSignedQr POSTs /pay → FakeLedger settles → /receipt poll confirms → "Received Đ25".
+    // B's onSignedQr POSTs /pay → FakeLedger settles → /receipt poll confirms → "Received ∂25".
     const received = await driver.waitForText('Received', { timeoutMs: 12_000 });
-    assert(received, 'merchant B should reach "Received Đ25.00" after scanning the payer’s signed QR');
+    assert(received, 'merchant B should reach "Received ∂25.00" after scanning the payer’s signed QR');
     console.log('[21-receive-scan] ✓ B received (app scanned + submitted the payer’s signed QR)');
 
-    // B's balance grew by Đ25 (ledger-sourced — the FakeLedger credited B's subaccount).
-    const bobUp = await driver.waitForText('Đ125.00', { timeoutMs: 10_000 });
-    assert(bobUp, 'merchant B balance should be Đ125.00 (Đ100 + Đ25)');
+    // B's balance grew by ∂25 (ledger-sourced — the FakeLedger credited B's subaccount).
+    const bobUp = await driver.waitForText('∂125.00', { timeoutMs: 10_000 });
+    assert(bobUp, 'merchant B balance should be ∂125.00 (∂100 + ∂25)');
     const bobLedger = await getBalance(relayBaseURL, bobHex, 0);
     assert(bobLedger === 12_500, `B ledger balance must be 12500 cents, got ${bobLedger}`);
-    console.log('[21-receive-scan] ✓ B balance Đ100.00 → Đ125.00 (credited through the scan→submit path)');
+    console.log('[21-receive-scan] ✓ B balance ∂100.00 → ∂125.00 (credited through the scan→submit path)');
 
     await driver.screenshot('21-receive-scan');
 

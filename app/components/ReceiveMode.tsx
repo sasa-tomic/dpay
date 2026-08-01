@@ -47,7 +47,7 @@ export function ReceiveMode({identity, relayUrl, nfcReady, onReceived, catalog}:
 
   // Resolve the selected asset's display config ONCE per render. Decimals come from the catalog
   // descriptor directly (NOT familyDisplay, which falls back to BTC's 8 + would mis-render DEMO's
-  // 2). The amount-input prefix is the currency's display glyph (Đ/₿/$) via currencySymbol.
+  // 2). The amount-input prefix is the currency's display glyph (∂/₿/$) via currencySymbol.
   const reqDesc = catalog.find(c => c.currency === reqCurrency);
   const reqDecimals = reqDesc?.decimals ?? 2;
   const reqPrefix = currencySymbol(catalog, reqCurrency);

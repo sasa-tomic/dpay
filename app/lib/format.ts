@@ -1,7 +1,8 @@
 // Formats an integer cent amount as the DEMO currency's amount string. The DEMO currency (currency
-// 0) uses the 'Đ' prefix (D-with-stroke); '$' is reserved for USDC. Despite the historical name
-// `usd`, this formats DEMO amounts only; other currencies render via fmtAsset in their family unit.
-export const usd = (c: number) => `Đ${Math.floor(c / 100)}.${String(c % 100).padStart(2, '0')}`;
+// 0) uses the '∂' prefix (partial-differential sign, chosen as a D-like glyph distinct from BTC's ₿);
+// '$' is reserved for USDC. Despite the historical name `usd`, this formats DEMO amounts only; other
+// currencies render via fmtAsset in their family unit.
+export const usd = (c: number) => `∂${Math.floor(c / 100)}.${String(c % 100).padStart(2, '0')}`;
 export const short = (h: string) => `${h.slice(0, 8)}…`;
 // The MINT_ACCOUNT sentinel — 32 bytes of 0xFF, hex-encoded as 64 `f`s. The canister records faucet
 // mints and withdrawals with this as the counterparty; we detect it and render a friendly label
