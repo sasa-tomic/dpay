@@ -123,6 +123,13 @@ pub struct Receipt {
     pub new_from_balance: U64String,
     pub currency: Currency,
     pub block_index: U64String,
+    /// Unix-seconds settlement time. NOTE the principled JSON-boundary split (applies here + to the
+    /// other bounded non-money `u64` fields below — `TxnRecord.timestamp`, `PendingUtxo.confirmations`,
+    /// `WithdrawRequest.expiry`): MONEY `u64` fields cross JSON as [`U64String`] (a decimal string) so
+    /// the full u64 range round-trips without precision loss above 2^53; these NON-MONEY fields (a
+    /// unix-seconds time, a block-confirmation count) are bounded ≪ 2^53 by construction and so cross
+    /// as a RAW JSON number by design — `serde_json`'s default `u64` → bare number. This is
+    /// intentional, not an oversight; do NOT change the types (a wire change). Money stays `U64String`.
     pub settle_ts: u64,
     /// Hex-encoded 64-byte Ed25519 signature over the canonical ReceiptClaim.
     pub receipt_sig: String,
@@ -143,6 +150,7 @@ pub struct TxnRecord {
     pub amount: U64String,
     pub nonce: String,
     pub currency: Currency,
+    /// Unix seconds. Bounded ≪ 2^53 → raw JSON number by design (see `Receipt.settle_ts`).
     pub timestamp: u64,
     /// The payer's display name (decoded from the signed 32-byte `from_name` field). Empty string
     /// for synthesized mint/burn sentinel rows (the app special-cases those).
@@ -174,6 +182,7 @@ pub struct MintedUtxo {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct PendingUtxo {
     pub value: U64String,
+    /// Block-confirmation count. Bounded ≪ 2^53 → raw JSON number by design (see `Receipt.settle_ts`).
     pub confirmations: u64,
 }
 
@@ -215,6 +224,7 @@ pub struct WithdrawRequest {
     pub destination: String,
     pub amount: U64String,
     pub nonce: String,
+    /// Unix-seconds expiry. Bounded ≪ 2^53 → raw JSON number by design (see `Receipt.settle_ts`).
     pub expiry: u64,
     pub currency: Currency,
     pub sig: String,

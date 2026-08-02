@@ -7,21 +7,58 @@ export type MintedUtxo = {block_index: string; amount: string};
 export type PendingUtxo = {value: string; confirmations: number};
 export type DepositRefresh = {minted_total: string; minted: MintedUtxo[]; pending: PendingUtxo[]; required_confirmations: number};
 
+// Safety-net default for every relay fetch — bounds a caller that omits its own signal so a hung
+// relay can't produce an infinite spinner. Callers that pass their own (typically shorter-timeout)
+// signal still abort at THEIR timeout: the two aborts race and the first wins (the caller's signal
+// is forwarded into the internal controller via an `abort` listener). Composed manually with
+// AbortController + setTimeout instead of AbortSignal.any/AbortSignal.timeout — those are ES2024 /
+// ES2022 statics not present in this project's TS `lib` (which tops out at es2022) and not guaranteed
+// on every RN/Hermes runtime the app targets, so the manual compose is the portable choice.
+const DEFAULT_RELAY_TIMEOUT_MS = 10000;
+
+/** Compose an optional caller signal with the default timeout. First abort wins; never throws. */
+function withDefaultTimeout(callerSignal?: AbortSignal): AbortSignal {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), DEFAULT_RELAY_TIMEOUT_MS);
+  if (callerSignal) {
+    if (callerSignal.aborted) {
+      // Caller already aborted before we started — propagate immediately and don't arm the timer.
+      clearTimeout(timer);
+      ctrl.abort();
+    } else {
+      // Forward a late caller abort to our controller (and cancel the timer). `{once: true}` so the
+      // listener removes itself on fire; if the fetch settles normally first the listener stays
+      // attached to the caller's single-use signal, which is GC'd with it (harmless — a controller
+      // aborts at most once).
+      callerSignal.addEventListener(
+        'abort',
+        () => {
+          clearTimeout(timer);
+          ctrl.abort();
+        },
+        {once: true},
+      );
+    }
+  }
+  return ctrl.signal;
+}
+
 // Relay deposit client — same fetch style as the inline balance/faucet/pay calls (AbortController
-// optional, errors thrown to the caller). Co-located here to match the existing pattern.
+// optional, errors thrown to the caller). Co-located here to match the existing pattern. The default
+// timeout above is a backstop only — every existing caller passes its own shorter-timeout signal.
 export async function depositInfo(relayUrl: string, currency: number, signal?: AbortSignal): Promise<DepositInfo> {
-  const r = await fetch(`${base(relayUrl)}/api/v1/deposit/info?currency=${currency}`, {signal});
+  const r = await fetch(`${base(relayUrl)}/api/v1/deposit/info?currency=${currency}`, {signal: withDefaultTimeout(signal)});
   if (!r.ok) throw new Error(`deposit/info ${r.status}`);
   return r.json();
 }
 export async function depositAddress(relayUrl: string, accountHex: string, currency: number, signal?: AbortSignal): Promise<string> {
-  const r = await fetch(`${base(relayUrl)}/api/v1/deposit/address/${accountHex}?currency=${currency}`, {signal});
+  const r = await fetch(`${base(relayUrl)}/api/v1/deposit/address/${accountHex}?currency=${currency}`, {signal: withDefaultTimeout(signal)});
   if (!r.ok) throw new Error(`deposit/address ${r.status}`);
   const j = await r.json();
   return j.address as string;
 }
 export async function depositRefresh(relayUrl: string, accountHex: string, currency: number, signal?: AbortSignal): Promise<DepositRefresh> {
-  const r = await fetch(`${base(relayUrl)}/api/v1/deposit/refresh/${accountHex}?currency=${currency}`, {method: 'POST', signal});
+  const r = await fetch(`${base(relayUrl)}/api/v1/deposit/refresh/${accountHex}?currency=${currency}`, {method: 'POST', signal: withDefaultTimeout(signal)});
   if (!r.ok) throw new Error(`deposit/refresh ${r.status}`);
   return r.json();
 }
@@ -32,7 +69,7 @@ export async function depositRefresh(relayUrl: string, accountHex: string, curre
 // currency / relay unreachable).
 export type CkErc20OnrampParams = {helper_address: string; erc20_address: string; facade_principal: string};
 export async function ckerc20OnrampParams(relayUrl: string, currency: number, signal?: AbortSignal): Promise<CkErc20OnrampParams> {
-  const r = await fetch(`${base(relayUrl)}/api/v1/onramp/ckerc20?currency=${currency}`, {signal});
+  const r = await fetch(`${base(relayUrl)}/api/v1/onramp/ckerc20?currency=${currency}`, {signal: withDefaultTimeout(signal)});
   if (!r.ok) throw new Error(`onramp/ckerc20 ${r.status}`);
   return r.json();
 }
@@ -47,7 +84,7 @@ export async function withdrawFunds(relayUrl: string, accountHex: string, btcAdd
   const r = await fetch(`${base(relayUrl)}/api/v1/withdraw`, {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({from: accountHex, destination: btcAddress, amount: amountSats, nonce: nonceHex, expiry, currency, sig: sigHex}),
-    signal,
+    signal: withDefaultTimeout(signal),
   });
   const j = await r.json().catch(() => ({} as any));
   if (r.ok && j?.receipt) {

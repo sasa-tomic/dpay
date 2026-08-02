@@ -35,7 +35,9 @@ export async function verifyOutcomeReceipt(receipt: any, auth?: ReceiptAuth): Pr
   if (typeof sigHex !== 'string' || typeof pubHex !== 'string') return false;
 
   // (1) Key pin — rejects a fabricated key even when the forged signature is internally valid.
-  if (EXPECTED_RECEIPT_PUBKEY !== '' && pubHex !== EXPECTED_RECEIPT_PUBKEY) return false;
+  //     Case-insensitive: the relay emits lowercase hex (`hex::encode`); a prod pin baked in mixed
+  //     case must still match. Precedent: `decidePayerReceipt` lower-cases its nonce compare.
+  if (EXPECTED_RECEIPT_PUBKEY !== '' && pubHex.toLowerCase() !== EXPECTED_RECEIPT_PUBKEY.toLowerCase()) return false;
 
   // (2) Signature over the canonical ReceiptClaim.
   let sigOk: boolean;

@@ -92,6 +92,22 @@ describe('verifyOutcomeReceipt — (1) key pin: the malicious-relay close', () =
     sigReturns = false;
     expect(await verify(goodReceipt())).toBe(false);
   });
+
+  test('mixed-case pin still matches a different-case key (case-insensitive hex compare)', async () => {
+    // The relay emits lowercase hex via `hex::encode`; a prod pin baked in mixed case must still
+    // match the receipt's key. A case-sensitive compare would fail-closed ("Couldn't verify") on
+    // EVERY receipt for a mixed-case pin — not a security hole, but operationally fragile. Precedent:
+    // decidePayerReceipt already lower-cases its nonce compare. Covered both directions.
+    const upperPin = 'A'.repeat(64); // same 32 bytes as PIN ('a'.repeat(64)), uppercased
+    // (a) pin UPPER, receipt key LOWER → accepted
+    const verifyUpper = loadWithPin(upperPin);
+    sigReturns = true;
+    expect(await verifyUpper(goodReceipt({pubkey: 'a'.repeat(64)}))).toBe(true);
+    // (b) pin LOWER, receipt key UPPER → accepted
+    const verifyLower = loadWithPin('a'.repeat(64));
+    sigReturns = true;
+    expect(await verifyLower(goodReceipt({pubkey: 'A'.repeat(64)}))).toBe(true);
+  });
 });
 
 describe('verifyOutcomeReceipt — (2)+(3) signature + full-auth binding', () => {
