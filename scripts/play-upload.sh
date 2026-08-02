@@ -38,6 +38,8 @@ bash scripts/build-apk.sh
 BUILT_AAB="$ROOT/app/android/app/build/outputs/bundle/release/app-release.aab"
 [ -f "$BUILT_AAB" ] || { echo "FAIL: verified AAB not found: $BUILT_AAB" >&2; exit 1; }
 
+BUILT_MAPPING="$ROOT/app/android/app/build/outputs/mapping/release/mapping.txt"
+
 # GPP uploads every bundle in artifact-dir. Isolate one immutable copy so an old build can never be
 # swept into the same release and the uploaded bytes are exactly those build-apk.sh verified.
 UPLOAD_DIR="$ROOT/.dev/releases/play-$DPAY_VERSION_CODE"
@@ -53,6 +55,16 @@ BUILT_SHA="$(sha256sum "$BUILT_AAB" | cut -d' ' -f1)"
 UPLOAD_SHA="$(sha256sum "$UPLOAD_AAB" | cut -d' ' -f1)"
 [ "$BUILT_SHA" = "$UPLOAD_SHA" ] || { echo "FAIL: staged AAB hash mismatch" >&2; exit 1; }
 
+# Preserve the R8 obfuscation mapping tied to this exact build (needed to retrace crashes). The
+# release build enables minification, so the mapping must exist and be non-empty; fail otherwise.
+UPLOAD_MAPPING="$UPLOAD_DIR/dpay-release-$DPAY_VERSION_CODE-mapping.txt"
+if [ ! -s "$BUILT_MAPPING" ]; then
+  echo "FAIL: R8 mapping missing or empty: $BUILT_MAPPING" >&2
+  echo "Re-run scripts/build-apk.sh; the minified release should emit outputs/mapping/release/mapping.txt." >&2
+  exit 1
+fi
+install -m 0644 "$BUILT_MAPPING" "$UPLOAD_MAPPING"
+
 echo "== upload exact verified AAB to internal testing =="
 (
   cd app/android
@@ -62,6 +74,7 @@ echo "== upload exact verified AAB to internal testing =="
 echo
 echo "== Google Play upload complete =="
 echo "   track: internal (completed)"
-echo "   AAB:  $UPLOAD_AAB"
-echo "   sha:  $UPLOAD_SHA"
-echo "   APK:  $ROOT/deploy/dist/dpay.apk (direct sideload)"
+echo "   AAB:     $UPLOAD_AAB"
+echo "   sha:     $UPLOAD_SHA"
+echo "   mapping: $UPLOAD_MAPPING"
+echo "   APK:     $ROOT/deploy/dist/dpay.apk (direct sideload)"
