@@ -1,6 +1,6 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **37 flows.**
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **39 flows.**
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay (FakeLedger, offline). No UI stubs. The only shimmed I/O boundary is
 > the camera scan (sanctioned smallest-boundary seam) and the NFC radio (physical-device gate).
@@ -17,7 +17,7 @@
 Flows grouped by user journey; within each table, every row lists what the flow **verifies** and
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`).
 
-wire (1) · onboard (4) · pay (13) · offline (2) · deposit (7) · withdraw (2) · nfc (2) · system (5) · tour (1)
+wire (1) · onboard (4) · pay (14) · offline (2) · deposit (7) · withdraw (2) · nfc (2) · system (6) · tour (1)
 
 ---
 
@@ -49,6 +49,7 @@ wire (1) · onboard (4) · pay (13) · offline (2) · deposit (7) · withdraw (2
 | 25 | asset-request | ckBTC chip + BTC amount → request QR encodes RUNTIME currency 1 + 50000 sats; readout '0.00050000 BTC' (no $). | asset-request, ckbtc, currency-id, encode, btc-units |
 | 26 | names-memo | Alice pays Bob with memo 'coffee' → both histories show friendly names + memo (wire-format v2, no raw hex). | names, memo, history, wire-v2, friendly-counterparties |
 | 27 | asset-pay | ckBTC pay: review shows '0.00050000 BTC' (no $); per-asset balance gate (60000≥50000 sats) → settles on currency 1; Ledger row shows the exact ckBTC units. | asset-pay, ckbtc, per-asset-balance, locked-asset-display, ledger-units |
+| 28 | ckusdc-request | ckUSDC chip + 0.05 amount → request QR encodes currency 2 + 50000 raw (6-dec); readout '0.050000 USDC' (no $0.05). | ckusdc-merchant-create, request-asset-picker, multi-currency, 6-decimal, byte-exact |
 | 29 | exact-amount | Raw amount > 2^53 round-trips byte-exact through faucet/request-wire/sign/settle (BigInt codec, u64 LE). | exact-amount, decimal-transport, u64, bigint-codec |
 | 30 | trusted-receipt | Malicious relay returns a wrong-key receipt → app's key-pin rejects it → honest 'Couldn't verify', no debit. | receipt-key-pin, malicious-relay, honest-error |
 | 31 | ckusdc-pay | ckUSDC (currency 2, 6-decimal) pay end-to-end: review '0.050000 USDC', byte-exact raw, settles on currency 2. | ckusdc-pay, multi-currency, 6-decimal, byte-exact |
@@ -96,6 +97,7 @@ wire (1) · onboard (4) · pay (13) · offline (2) · deposit (7) · withdraw (2
 | 14 | keyboard | Single-key shortcuts (P/R/T/A/Esc) switch tabs / top-up / add-money / close sheet; input + sheet guards work. | keyboard-shortcuts, tabs, sheet-guard, input-guard |
 | 17 | scan-cleanup | Switch Pay→Receive→Pay: QrScanner listeners tear down cleanly (no leak across unmount/remount). | qr-scanner, teardown, unmount, listener-leak |
 | 24 | wallet-cleanup | Seeded non-dollar balances/history render as asset cards/rows with known symbols (presence, not exact units). | asset-cards, labels, symbols |
+| 38 | relay-retarget | Settings relay-switch retargets the LIVE balance poll: header changes from A's ∂100.00 to B's ∂500.00. | relay-retarget, settings-relay-switch, live-poll |
 
 ### Visual capture (UX tour)
 
