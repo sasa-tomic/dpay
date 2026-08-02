@@ -112,8 +112,12 @@ typecheck:
 bridge-parity:
     node scripts/bridge-parity.mjs
 
-# the native Rust inner loop — core + canister + relay
-check: test-core test-canister test-relay typecheck bridge-parity
+# the native Rust inner loop — core + canister + relay. test-live is INCLUDED (not off-path):
+# it is offline (PocketIC HTTP gateway) + ~seconds-fast, and exercises the AgentLedger↔real-canister
+# path that test-relay's FakeLedger cannot (receipt recovery, TTL balance refresh, currency wiring).
+# Keeping it on the hot path closes the gap that once let a fail-closed-cap change break test-live
+# silently while `just verify` stayed green (MC2 U1 / OPEN_ISSUES #10 lesson).
+check: test-core test-canister test-relay test-live typecheck bridge-parity
     @echo "rust inner loop green"
 
 # everything: rust loop + radical e2e (real app + real relay + real browser). The e2e harness
