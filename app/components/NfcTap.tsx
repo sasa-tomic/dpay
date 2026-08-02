@@ -45,14 +45,14 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled
   requestHex?: string;
   reqInfo?: {amount: string; nonce: string; who: string};
   onSettled?: () => void;
-  onOfflinePaid?: (amount: string) => void;
+  onOfflinePaid?: (amount: string, currency: number) => void;
   onActive?: () => void; // fired the moment a real tap starts (so the parent can hide the QR/scanner)
   onClose: () => void;
 }) {
   const [phase, setPhase] = useState<NfcPhaseName | 'error'>('listening');
   const [reason, setReason] = useState<string | null>(null);
   const [payAmount, setPayAmount] = useState<string | null>(null);
-  const sentRef = useRef<{amount: string; who: string; nonce: string} | null>(null);
+  const sentRef = useRef<{amount: string; currency: number; who: string; nonce: string} | null>(null);
   const finalized = useRef(false);
   const recordedRef = useRef(false);
   const activeRef = useRef(false);
@@ -195,7 +195,7 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled
     try {
       const wireHex = await DpayCore.signAuthorization(identity.secretHex, req.toHex, req.amount, req.nonceHex, req.expiry, req.currency, identity.username, '', '');
       if (!(await DpayCore.verifyWire(wireHex))) throw new Error('local verify failed');
-      sentRef.current = {amount: req.amount, who: short(req.toHex), nonce: req.nonceHex};
+      sentRef.current = {amount: req.amount, currency: req.currency, who: short(req.toHex), nonce: req.nonceHex};
       setPayAmount(req.amount);
       await DpayNfc.approveCard(wireHex);
     } catch (e: any) { finalize('error', String(e?.message ?? e)); }
@@ -230,7 +230,8 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled
           // The ledger refused — undo the optimistic deduction so the local balance is whole again.
           // MC1 units 2-4: amount is a decimal STRING; negate via BigInt (the Wallet reducer sums as
           // BigInt, so a negative raw-string is the exact undo — never `−string` which is NaN).
-          if (deductedRef.current && sentRef.current) { onOfflinePaid?.(`-${sentRef.current.amount}`); }
+          // MC5: pass the signed request's currency so the undo lands on the SAME asset's entry.
+          if (deductedRef.current && sentRef.current) { onOfflinePaid?.(`-${sentRef.current.amount}`, sentRef.current.currency); }
           finalize('declined', 'The ledger declined the payment');
         } else {
           finalize('pending', 'Couldn’t confirm — check your balance when back online');
@@ -243,9 +244,11 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled
           committed.current = true;
           // The wire has left the phone — optimistically deduct from the local balance. The real
           // balance reconciles on the next online poll; if the receipt says declined we undo below.
+          // MC5: the deduction is KEYED BY the request's currency — a ckBTC tap debits ckBTC, NOT
+          // the DEMO ∂ counter (per-currency offline deduction).
           if (!deductedRef.current && sentRef.current) {
             deductedRef.current = true;
-            onOfflinePaid?.(sentRef.current.amount);
+            onOfflinePaid?.(sentRef.current.amount, sentRef.current.currency);
           }
           if (!settleTimer.current) {
             settleTimer.current = setTimeout(() => {

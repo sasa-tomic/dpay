@@ -145,3 +145,37 @@ export function cmpRaw(a: string, b: string): -1 | 0 | 1 {
   const bb = BigInt(b);
   return ba < bb ? -1 : ba > bb ? 1 : 0;
 }
+
+/**
+ * Apply the per-currency offline deduction to a polled balance (MC5 — currency-keyed). The wallet's
+ * offline QR/NFC hand-off (`markOfflinePaid(amount, currency)`) debits a local per-currency map so
+ * the payer's displayed balance honestly reflects an in-flight offline payment BEFORE the next
+ * online poll reconciles. This helper is the pure display-side read of that map.
+ *
+ * - `balance == null` ⇒ `null` (an unknown balance stays unknown — never fabricate a number).
+ * - `offlineMap[currency]` missing ⇒ `balance` unchanged (no deduction recorded for this asset).
+ * - Otherwise subtracts the map entry from the balance using BigInt, **clamped at 0** by `cmpRaw`
+ *   so a wayward refund that over-subtracts never renders a negative raw string.
+ *
+ * MC5 KEY INVARIANT: the map is KEYED BY CURRENCY — a currency-1 (ckBTC) offline spend MUST NOT
+ * reduce the DEMO (currency-0) ∂ balance. The lookup is `offlineMap[currency]`, so cross-currency
+ * isolation is structural. Mirrors the canister's per-currency ledger segregation (dpay never
+ * swaps): each asset's display lives independently. Used by Wallet for both the DEMO header
+ * (`currency=0`) and every per-asset card / balance gate (`currency=1..N`).
+ *
+ * `balance` MUST be a non-empty decimal-digit string when non-null; `offlineMap` values MUST be
+ * decimal-digit strings (the reducer's BigInt arithmetic enforces this on the write side; this read
+ * uses `cmpRaw` which `TypeError`s on bad input — debuggable, never silent NaN).
+ */
+export function applyOffline(
+  balance: string | null,
+  offlineMap: Record<number, string>,
+  currency: number,
+): string | null {
+  if (balance == null) return null;
+  const spent = offlineMap[currency];
+  if (spent == null) return balance;
+  // cmpRaw-guarded: never go below 0. The reducer clamps too, but a refund edge case can leave the
+  // entry above the balance transiently — clamp here as well so the display is always whole.
+  return cmpRaw(balance, spent) >= 0 ? (BigInt(balance) - BigInt(spent)).toString() : '0';
+}

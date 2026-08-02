@@ -3,6 +3,7 @@ import {
   parseDecimalToUnits,
   formatUnitsToDecimal,
   cmpRaw,
+  applyOffline,
   MAX_DECIMALS,
 } from '../lib/amount';
 
@@ -119,6 +120,56 @@ describe('cmpRaw — BigInt compare (no lexicographic trap)', () => {
   test('throws TypeError on non-digit input (debuggable, no silent NaN)', () => {
     expect(() => cmpRaw('abc', '10')).toThrow(TypeError);
     expect(() => cmpRaw('9', '')).toThrow(TypeError);
+  });
+});
+
+// MC5 — currency-keyed offline deduction. The offline QR/NFC hand-off debits the LOCAL view of the
+// payer's balance per-currency (a ckBTC offline pay must reduce the ckBTC displayed balance, NOT the
+// DEMO ∂ balance). `applyOffline` is the pure helper Wallet uses to render every shown balance: it
+// subtracts the per-currency raw-u64 `offlineSpent[currency]` from the polled balance, guarded by
+// cmpRaw so it never goes below 0 (the wayward refund case can over-subtract; the guard catches it).
+// Keys NOT in the map ⇒ '0' spent ⇒ balance unchanged. A null balance stays null (unknown).
+describe('applyOffline — currency-keyed offline deduction (MC5)', () => {
+  test('null balance stays null (unknown stays unknown)', () => {
+    expect(applyOffline(null, {}, 0)).toBeNull();
+    expect(applyOffline(null, {0: '100'}, 0)).toBeNull();
+  });
+  test('balance with no entry for this currency is unchanged', () => {
+    expect(applyOffline('1000', {}, 0)).toBe('1000');
+    expect(applyOffline('1000', {1: '500'}, 0)).toBe('1000');
+  });
+  test('deducts the currency-0 entry from a currency-0 balance', () => {
+    expect(applyOffline('10000', {0: '2500'}, 0)).toBe('7500');
+  });
+  test('MC5 KEY ASSERTION: a currency-1 offline spend does NOT reduce the DEMO (currency-0) balance', () => {
+    // The bug: a ckBTC offline pay was reducing the DEMO ∂ header. Per-currency keying must ISOLATE
+    // the deduction to its own asset.
+    expect(applyOffline('10000', {1: '50000'}, 0)).toBe('10000');
+    // And the mirror: a currency-0 spend does NOT reduce a currency-1 balance.
+    expect(applyOffline('60000', {0: '2500'}, 1)).toBe('60000');
+  });
+  test('deducts the currency-1 entry from a currency-1 balance (ckBTC offline pay reduces ckBTC)', () => {
+    expect(applyOffline('60000', {1: '50000'}, 1)).toBe('10000');
+  });
+  test('deducts a currency-2 entry from a currency-2 balance (ckUSDC)', () => {
+    expect(applyOffline('5000000', {2: '2500000'}, 2)).toBe('2500000');
+  });
+  test('cmpRaw-guarded: never goes below 0 (the refund-over-subtract case)', () => {
+    // If the map somehow exceeds the balance (e.g. a refund that overshot via the reducer), the
+    // display clamps at 0 rather than rendering a negative raw string. Mirrors the DEMO shownBalance
+    // guard that existed pre-MC5.
+    expect(applyOffline('100', {0: '5000'}, 0)).toBe('0');
+    expect(applyOffline('100', {1: '999999'}, 1)).toBe('0');
+  });
+  test('refund restored: an entry reduced by a negative markOfflinePaid restores the balance', () => {
+    // The reducer sums BigInt(amount) under the key, so a refund ("-50000") reduces the entry. Here
+    // we simulate the post-refund map state and confirm the balance comes back.
+    const afterRefund = {1: '0'}; // 50000 spent, then -50000 refund → 0
+    expect(applyOffline('60000', afterRefund, 1)).toBe('60000');
+  });
+  test('exact BigInt math: 2^53+1 boundary deducts exactly (no Number loss)', () => {
+    // The deduction must use BigInt throughout — a Number-based path would lose precision above 2^53.
+    expect(applyOffline('9007199254740993', {0: '1'}, 0)).toBe('9007199254740992');
   });
 });
 

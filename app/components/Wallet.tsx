@@ -8,7 +8,7 @@ import {
   type CurrencyDescriptor, CATALOG_CACHE_KEY, BUNDLED_CATALOG, fetchCurrencies, familyDisplay, fmtCurrencyAmount,
 } from '../config/catalog';
 import {usd, short, isMintSentinel, fmtTime, base} from '../lib/format';
-import {cmpRaw} from '../lib/amount';
+import {cmpRaw, applyOffline} from '../lib/amount';
 import type {Identity, Txn, TransactionsRow, NfcStatus} from '../lib/types';
 import {DpayCore} from '../services/native';
 import {useHotkeys} from '../hooks/useHotkeys';
@@ -43,7 +43,13 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
         // MC1 units 2-4: balances are raw-u64 decimal STRINGS (never `number`).
   const [assetBalances, setAssetBalances] = useState<Record<number, string>>({});
   const [online, setOnline] = useState(false);
-  const [offlineSpent, setOfflineSpent] = useState('0');
+  // MC5 — currency-KEYED offline deduction. Was a single DEMO-only string; now a per-currency map of
+  // raw-u64 decimal strings (missing key ⇒ '0' spent ⇒ no deduction). The offline QR/NFC hand-off
+  // (`markOfflinePaid(amount, currency)`) debits THIS asset's entry, NOT the DEMO counter — so a
+  // ckBTC offline pay reduces the ckBTC display, NOT the ∂ header. The reducer handles negative
+  // inputs (the refund-on-failed-but-signed case) by summing as BigInt; this map is the source of
+  // truth for every "shown" balance via the `applyOffline` helper.
+  const [offlineSpent, setOfflineSpent] = useState<Record<number, string>>({});
   const [history, setHistory] = useState<Txn[]>([]);
   const [nfc, setNfc] = useState<NfcStatus>('unknown');
   // Demo top-up: a single click adds $50 of demo currency via /api/v1/faucet. The button sits next
@@ -138,16 +144,30 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
       try {
         const r = await fetch(`${base(relayUrl)}/api/v1/balance/${identity.publicHex}`, {signal: ctrl.signal});
         const j = await r.json();
-        if (alive && r.ok && typeof j.balance === 'string') { setBalance(j.balance); setOnline(true); setOfflineSpent('0'); }
+        // MC5: reset ONLY the DEMO (currency-0) offline deduction on a successful primary poll — the
+        // authoritative balance replaces the local optimistic view, and any pending offline DEMO
+        // hand-off has either settled (reflected in this balance) or never will (stale). Per-asset
+        // deductions reset on their own per-currency poll below (same rationale, per asset).
+        if (alive && r.ok && typeof j.balance === 'string') { setBalance(j.balance); setOnline(true); setOfflineSpent(prev => prev[0] != null && prev[0] !== '0' ? {...prev, 0: '0'} : prev); }
         else if (alive) setOnline(false);
       } catch { if (alive) setOnline(false); } finally { clearTimeout(t); }
       // Settle the asset balances after the primary poll resolves; merge keeping prior on null.
+      // MC5: a successful asset poll resets that currency's offline deduction (the authoritative
+      // polled balance replaces the optimistic local view — same rationale as the DEMO reset above).
       const results = await Promise.all(assetFetches);
       if (alive) {
         setAssetBalances(prev => {
           const next = {...prev};
           for (const {currency, balance} of results) if (balance != null) next[currency] = balance;
           return next;
+        });
+        setOfflineSpent(prev => {
+          let changed = false;
+          const next = {...prev};
+          for (const {currency, balance} of results) {
+            if (balance != null && next[currency] != null && next[currency] !== '0') { next[currency] = '0'; changed = true; }
+          }
+          return changed ? next : prev;
         });
       }
     };
@@ -225,13 +245,31 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
   // Children signal that a payment activity happened; the ledger-sourced `refreshHistory` is the SOLE
   // writer to `history` (fetched eagerly here — no optimistic in-memory state). Stable across renders.
   const onActivity = useCallback(() => { refreshHistory(); }, [refreshHistory]);
-  // MC1 units 2-4: the offline-deducted amount is a raw-u64 decimal STRING. `cmpRaw` (BigInt) guards
-  // the subtraction so the local balance never goes negative; never `+`/`-` on strings.
-  const markOfflinePaid = useCallback((amount: string) => setOfflineSpent(s => {
-    const next = BigInt(s) + BigInt(amount);
-    return (next < 0n ? 0n : next).toString();
+  // MC5 — currency-KEYED offline deduction. The reducer sums BigInt(amount) under the given currency
+  // key; the negative case (the refund-on-failed-but-signed NFC path) UNDOES a prior deduction. The
+  // per-asset balance display + gate read this map through `applyOffline` (cmpRaw-guarded, never
+  // below 0). MC1 units 2-4: amount is a raw-u64 decimal STRING; never `+`/`-` on strings.
+  const markOfflinePaid = useCallback((amount: string, currency: number) => setOfflineSpent(prev => {
+    const cur = prev[currency] ?? '0';
+    const next = BigInt(cur) + BigInt(amount);
+    return {...prev, [currency]: (next < 0n ? 0n : next).toString()};
   }), []);
-  const shownBalance = balance == null ? null : online ? balance : (cmpRaw(balance, offlineSpent) >= 0 ? (BigInt(balance) - BigInt(offlineSpent)).toString() : '0');
+  // The DEMO header balance (currency 0): when online the polled balance is authoritative (the
+  // deduction resets on every successful poll); when offline we apply the per-currency deduction.
+  const shownBalance = applyOffline(balance, online ? {} : offlineSpent, 0);
+  // MC5 — the per-asset displayed balances fed to children. Online ⇒ the polled authoritative
+  // values (offlineSpent resets on each successful poll, so passing {} is equivalent). Offline ⇒ the
+  // deduction applies so the card + the per-asset balance gate honestly reflect the in-flight
+  // hand-off. This is the SAME map the DEMO shownBalance reads; keyed by currency, never cross-talk.
+  const displayAssetBalances = useMemo(() => {
+    if (online) return assetBalances;
+    const next: Record<number, string> = {};
+    for (const [k, v] of Object.entries(assetBalances)) {
+      const c = Number(k);
+      next[c] = applyOffline(v, offlineSpent, c) ?? v;
+    }
+    return next;
+  }, [assetBalances, offlineSpent, online]);
 
   // Demo top-up: POST /api/v1/faucet {account, amount}. Uses the response balance directly for an
   // immediate refresh (no waiting on the 2.5s poll). Errors are surfaced inline under the button.
@@ -248,7 +286,8 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
       });
       const j = await r.json().catch(() => ({} as any));
       if (r.ok && typeof j.balance === 'string') {
-        setBalance(j.balance); setOnline(true); setOfflineSpent('0');
+        // MC5: topUp is a DEMO (currency-0) credit, so reset ONLY the currency-0 offline deduction.
+        setBalance(j.balance); setOnline(true); setOfflineSpent(prev => prev[0] != null && prev[0] !== '0' ? {...prev, 0: '0'} : prev);
       } else {
         // N5: surface the relay/canister's real reason (e.g. "faucet cooldown: try again in ~58 min")
         // rather than a generic "Faucet unavailable". The canister returns the retry time; showing it
@@ -314,9 +353,13 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
             {/* The header shows ONLY the current currency's balance. DEMO (currency 0) keeps its
                 offline '~' approx + null '—' handling; an asset shows its polled balance formatted
                 in native units. */}
+            {/* The header shows ONLY the current currency's balance. DEMO (currency 0) keeps its
+                offline '~' approx + null '—' handling; an asset shows its polled balance formatted
+                in native units. MC5: a non-DEMO asset applies the per-currency offline deduction via
+                `displayAssetBalances` (the per-currency deduction never crosses assets). */}
             <Text style={S.balAmt}>{currentCurrency === 0
               ? (shownBalance == null ? '—' : `${online ? '' : '~'}${usd(shownBalance)}`)
-              : fmtCurrencyAmount(catalog, currentCurrency, assetBalances[currentCurrency] ?? '0')}</Text>
+              : fmtCurrencyAmount(catalog, currentCurrency, displayAssetBalances[currentCurrency] ?? '0')}</Text>
             <Text style={S.swapHint}>⇅</Text>
           </View>
         </Pressable>
@@ -330,7 +373,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
 
       <ScrollView style={S.scroll} contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
         {mode === 'pay'
-          ? <PayMode identity={identity} online={online} relayUrl={relayUrl} nfcStatus={nfc} onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance} catalog={catalog} assetBalances={assetBalances} />
+          ? <PayMode identity={identity} online={online} relayUrl={relayUrl} nfcStatus={nfc} onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance} catalog={catalog} assetBalances={displayAssetBalances} />
           : mode === 'receive'
           ? <ReceiveMode identity={identity} relayUrl={relayUrl} nfcReady={nfc === 'ready'} onReceived={onActivity} catalog={catalog} />
           : <Ledger history={history} catalog={catalog} />}
@@ -339,7 +382,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
       {balancesOpen ? (
         <BalancesSheet
           catalog={catalog}
-          assetBalances={assetBalances}
+          assetBalances={displayAssetBalances}
           primaryBalance={shownBalance}
           online={online}
           currentCurrency={currentCurrency}
