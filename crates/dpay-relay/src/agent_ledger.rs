@@ -17,7 +17,7 @@
 
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use candid::{decode_one, encode_args, encode_one, CandidType, Nat, Principal};
@@ -32,6 +32,15 @@ use crate::ledger::{
     Receipt, TxnRecord, U64String, WithdrawReceipt, WithdrawRequest,
     ckerc20_onramp_from_descriptor,
 };
+
+/// Per-call I/O budget for every cross-canister call this ledger makes on the balance-poll path
+/// (`balance_of`, `refresh_balance`, `refresh_deposit`). A stalled replica would otherwise wedge
+/// the poll loop for the agent's full ~5min expiry before failing; this bound fails the call fast
+/// (→ `LedgerError::Transient`, retried by the caller) so a single hung replica can't lock up the
+/// 10s-poll liveness loop. Single source of truth — every `tokio::time::timeout` wrap below reads
+/// this const. Sized to comfortably fit one poll interval (POLL=10s) while still tolerating a
+/// healthy replica's normal round-trip latency.
+const CANISTER_CALL_TIMEOUT_SECS: u64 = 10;
 
 /// Read the settlement currency out of a 292-byte signed-authorization wire (the canister does the
 /// same; the relay surfaces it in the receipt so the app can rebuild the `ReceiptClaim`). Falls back
@@ -256,13 +265,17 @@ impl AgentLedger {
         // is `u32` (the `Currency` alias), so `encode_args` emits `nat32` automatically.
         let arg = encode_args((pubkey.to_vec(), currency))
             .map_err(|e| LedgerError::Transient(format!("encode balance arg: {e}")))?;
-        let reply = self
-            .agent
-            .query(&self.canister_id, "balance_of")
-            .with_arg(arg)
-            .call()
-            .await
-            .map_err(|e| LedgerError::Transient(format!("balance_of query: {e}")))?;
+        let reply = tokio::time::timeout(
+            Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
+            self.agent.query(&self.canister_id, "balance_of").with_arg(arg).call(),
+        )
+        .await
+        .map_err(|_| {
+            LedgerError::Transient(format!(
+                "balance_of timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
+            ))
+        })?
+        .map_err(|e| LedgerError::Transient(format!("balance_of query: {e}")))?;
         decode_one::<u64>(&reply)
             .map_err(|e| LedgerError::Transient(format!("decode balance: {e}")))
     }
@@ -285,13 +298,20 @@ impl AgentLedger {
     ) -> Result<u64, LedgerError> {
         let arg = encode_args((pubkey.to_vec(), currency))
             .map_err(|e| LedgerError::Transient(format!("encode refresh_balance arg: {e}")))?;
-        let reply = self
-            .agent
-            .update(&self.canister_id, "refresh_balance")
-            .with_arg(arg)
-            .call_and_wait()
-            .await
-            .map_err(|e| LedgerError::Transient(format!("refresh_balance update: {e}")))?;
+        let reply = tokio::time::timeout(
+            Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
+            self.agent
+                .update(&self.canister_id, "refresh_balance")
+                .with_arg(arg)
+                .call_and_wait(),
+        )
+        .await
+        .map_err(|_| {
+            LedgerError::Transient(format!(
+                "refresh_balance timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
+            ))
+        })?
+        .map_err(|e| LedgerError::Transient(format!("refresh_balance update: {e}")))?;
         let result: Result<u64, String> = decode_one(&reply)
             .map_err(|e| LedgerError::Transient(format!("decode refresh_balance reply: {e}")))?;
         let bal = result.map_err(LedgerError::Rejected)?;
@@ -530,13 +550,20 @@ impl Ledger for AgentLedger {
         // (JSON-safe). Any `Err(String)` → `Transient` (§0).
         let arg = encode_args((pubkey.to_vec(), currency))
             .map_err(|e| LedgerError::Transient(format!("encode refresh_deposit arg: {e}")))?;
-        let reply = self
-            .agent
-            .update(&self.canister_id, "refresh_deposit")
-            .with_arg(arg)
-            .call_and_wait()
-            .await
-            .map_err(|e| LedgerError::Transient(format!("refresh_deposit update: {e}")))?;
+        let reply = tokio::time::timeout(
+            Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
+            self.agent
+                .update(&self.canister_id, "refresh_deposit")
+                .with_arg(arg)
+                .call_and_wait(),
+        )
+        .await
+        .map_err(|_| {
+            LedgerError::Transient(format!(
+                "refresh_deposit timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
+            ))
+        })?
+        .map_err(|e| LedgerError::Transient(format!("refresh_deposit update: {e}")))?;
         let result: Result<DepositRefreshMirror, String> = decode_one(&reply)
             .map_err(|e| LedgerError::Transient(format!("decode refresh_deposit reply: {e}")))?;
         let m = result.map_err(LedgerError::Transient)?;

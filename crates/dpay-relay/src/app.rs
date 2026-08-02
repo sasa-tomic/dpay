@@ -767,8 +767,11 @@ async fn pay(State(state): State<AppState>, headers: HeaderMap, body: axum::body
                 Ok(None) => {
                     return err(StatusCode::SERVICE_UNAVAILABLE, format!("ledger unavailable: {msg}"));
                 }
-                Err(_) => {
-                    return err(StatusCode::SERVICE_UNAVAILABLE, format!("ledger unavailable: {msg}"));
+                Err(e) => {
+                    return err(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        format!("ledger unavailable: {msg} (receipt lookup also failed: {e})"),
+                    );
                 }
             }
         }
