@@ -42,7 +42,7 @@ export function ReceiveMode({identity, relayUrl, nfcReady, onReceived, catalog}:
   useEscapeToClose(() => setPickOpen(false));
   // Stable across renders (NfcTap's effect depends on it) — only changes when the request does.
   const readerReqInfo = useMemo(
-    () => (reqQr ? {amount: reqQr.rawAmount, nonce: reqQr.nonce, who: 'payer'} : undefined),
+    () => (reqQr ? {amount: reqQr.rawAmount, nonce: reqQr.nonce, who: 'payer', currency: reqQr.currency} : undefined),
     [reqQr],
   );
 

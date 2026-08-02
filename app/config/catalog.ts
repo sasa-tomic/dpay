@@ -155,6 +155,47 @@ export function familyDisplay(catalog: CurrencyDescriptor[], currency: number): 
     addressPlaceholder: base.addressPlaceholder,
   };
 }
+// MC8 U1 — NFC asset disclosure resolver. The blind-tap bug: NfcTap.autoSign fired
+// `await signAuthorization` and only set the amount disclosure AFTER the await, so during signing the
+// payer saw a generic "Communicating…" with NO asset name / amount / network. This PURE resolver
+// returns the honest asset name + network + asset-correct amount so the caller (autoSign) can set
+// the disclosure state SYNCHRONOUSLY BEFORE the first await — React then renders
+// "Paying 0.00050000 BTC on Bitcoin" during the exchanging/awaitingApproval/settling window.
+//
+// Returns `null` when an honest disclosure is impossible (defense-in-depth): the caller declines the
+// card and NEVER signs. This is a STRICTER gate than `isPayableAsset` — a payable asset whose amount
+// cannot be formatted honestly (no decimals) or whose network cannot be resolved still gets declined,
+// because signing it blind is worse than declining. DEMO (currency 0) always resolves (internal play
+// money; `usd()` always formats; it has no external network → `networkLabel: null` is expected).
+export type NfcDisclosure = {
+  assetName: string;        // the honest asset NAME (BTC/USDC/DEMO) — never a raw ledger id
+  networkLabel: string | null; // the native settlement network (Bitcoin/Ethereum); null for DEMO
+  formattedAmount: string;  // asset-correct amount ("0.00050000 BTC"), never the DEMO ∂ formatter
+};
+export function resolveNfcDisclosure(
+  catalog: CurrencyDescriptor[],
+  req: {currency: number; amount: string},
+): NfcDisclosure | null {
+  const {currency, amount} = req;
+  // DEMO (currency 0): internal play money. No external network to disclose, but the amount is
+  // always formattable via the DEMO ∂ formatter. DEMO is the one payable asset whose display never
+  // depended on familyDisplay, so it gets an early return (mirrors every other display helper).
+  if (currency === 0) {
+    return {assetName: 'DEMO', networkLabel: null, formattedAmount: usd(amount)};
+  }
+  // Non-DEMO: resolve an honest asset NAME + NETWORK + asset-correct amount. If ANY leg cannot be
+  // resolved honestly, return null so the caller declines (never blind-sign a real asset).
+  const a = catalog.find(c => c.currency === currency);
+  if (!a) return null; // unknown currency id
+  const name = displayName(a);
+  if (name === 'Unsupported') return null; // no honest name → decline
+  const network = a.network ?? familyDisplay(catalog, currency)?.networkLabel ?? null;
+  if (!network) return null; // no honest network → decline
+  const formatted = fmtCurrencyAmount(catalog, currency, amount);
+  if (formatted === 'Unsupported') return null; // no honest amount → decline
+  return {assetName: name, networkLabel: network, formattedAmount: formatted};
+}
+
 // MC5 — the "is this currency a PAYABLE asset" predicate. Used as the defense-in-depth gate BEFORE
 // the payer signs: a request carrying an unknown/unsupported currency (a garbage/retired id, or a
 // CkSol-family currency with no ramp config) must NEVER reach signAuthorization. The canister also

@@ -5,8 +5,8 @@ import {
   NFC_PAY_TIMEOUT_MS, RECONCILE_ATTEMPTS, RECONCILE_INTERVAL_MS, RECEIPT_WAIT_MS,
 } from '../config/constants';
 import {S} from '../styles';
-import {usd, short, base} from '../lib/format';
-import {type CurrencyDescriptor, isPayableAsset} from '../config/catalog';
+import {short, base} from '../lib/format';
+import {type CurrencyDescriptor, type NfcDisclosure, isPayableAsset, resolveNfcDisclosure, fmtCurrencyAmount} from '../config/catalog';
 import type {NfcEvent, NfcPhaseName, Identity} from '../lib/types';
 import {
   classifyPayHttp, receiptCodeFor, decidePayerReceipt, rejectionMessage, isNonceReused,
@@ -44,7 +44,7 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
   identity: Identity;
   relayUrl: string;
   requestHex?: string;
-  reqInfo?: {amount: string; nonce: string; who: string};
+  reqInfo?: {amount: string; nonce: string; who: string; currency: number};
   catalog: CurrencyDescriptor[];
   onSettled?: () => void;
   onOfflinePaid?: (amount: string, currency: number) => void;
@@ -53,7 +53,10 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
 }) {
   const [phase, setPhase] = useState<NfcPhaseName | 'error'>('listening');
   const [reason, setReason] = useState<string | null>(null);
-  const [payAmount, setPayAmount] = useState<string | null>(null);
+  // MC8 U1 — the asset-correct disclosure (asset name + network + formatted amount), resolved and
+  // set SYNCHRONOUSLY in autoSign BEFORE the first await, so React renders "Paying 0.00050000 BTC on
+  // Bitcoin" during the exchanging/awaitingApproval/settling window — never a blind "Communicating…".
+  const [disclosure, setDisclosure] = useState<NfcDisclosure | null>(null);
   const sentRef = useRef<{amount: string; currency: number; who: string; nonce: string} | null>(null);
   const finalized = useRef(false);
   const recordedRef = useRef(false);
@@ -204,10 +207,20 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
         finalize('declined', `Unsupported asset (currency ${req.currency}) — tap cancelled`);
         return;
       }
+      // MC8 U1 — resolve the asset-correct disclosure SYNCHRONOUSLY BEFORE the first await, so React
+      // renders "Paying 0.00050000 BTC on Bitcoin" while signAuthorization is in flight (the
+      // exchanging/awaitingApproval/settling window). A null disclosure is a defense-in-depth decline:
+      // a payable asset whose name/network/amount can't be resolved honestly is declined, NEVER signed.
+      const disc = resolveNfcDisclosure(catalog, {currency: req.currency, amount: req.amount});
+      if (!disc) {
+        try { await DpayNfc.declineCard(); } catch {}
+        finalize('declined', `Cannot confirm the asset (currency ${req.currency}) — tap cancelled`);
+        return;
+      }
+      setDisclosure(disc);
       const wireHex = await DpayCore.signAuthorization(identity.secretHex, req.toHex, req.amount, req.nonceHex, req.expiry, req.currency, identity.username, '', '');
       if (!(await DpayCore.verifyWire(wireHex))) throw new Error('local verify failed');
       sentRef.current = {amount: req.amount, currency: req.currency, who: short(req.toHex), nonce: req.nonceHex};
-      setPayAmount(req.amount);
       await DpayNfc.approveCard(wireHex);
     } catch (e: any) { finalize('error', String(e?.message ?? e)); }
   }, [identity, finalize, catalog]);
@@ -288,14 +301,23 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
 
   const m = NFC_UI[phase] ?? NFC_UI.listening;
   const terminal = phase === 'success' || phase === 'declined' || phase === 'error' || phase === 'pending';
-  const amt = role === 'card' ? payAmount : reqInfo?.amount;
   const active = phase === 'exchanging' || phase === 'settling' || phase === 'awaitingApproval';
+  // MC8 U1 — the asset-correct amount string for the active/success lines. Card side: the disclosure
+  // resolved synchronously in autoSign (asset-correct — "0.00050000 BTC", never the DEMO ∂ formatter).
+  // Reader side: format from the request's currency + amount. Replaces the old `usd(amt)` which
+  // mis-rendered a ckBTC tap as "$0.00050000".
+  const formattedAmt = role === 'card'
+    ? disclosure?.formattedAmount ?? null
+    : reqInfo ? fmtCurrencyAmount(catalog, reqInfo.currency, reqInfo.amount) : null;
   const title = phase === 'success'
-    ? `${role === 'card' ? 'Paid' : 'Received'} ✓ ${amt != null ? usd(amt) : ''}`.trim()
+    ? `${role === 'card' ? 'Paid' : 'Received'} ✓ ${formattedAmt ?? ''}`.trim()
     : m.title;
   const sub = (phase === 'error' || phase === 'declined' || phase === 'pending') && reason ? reason
     : phase === 'success' ? 'The payment settled'
-    : active && amt != null ? `${role === 'card' ? 'Paying' : 'Collecting'} ${usd(amt)}`
+    : active && formattedAmt != null
+      // Card side shows the honest asset + network ("Paying 0.00050000 BTC on Bitcoin"); the network
+      // is null only for DEMO (internal) → no "on …" suffix. Reader side mirrors without the network.
+      ? `${role === 'card' ? 'Paying' : 'Collecting'} ${formattedAmt}${disclosure?.networkLabel ? ` on ${disclosure.networkLabel}` : ''}`
     : m.sub;
   return (
     <View style={S.center} testID="nfc-status">
