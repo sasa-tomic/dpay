@@ -42,12 +42,14 @@ export const EXPECTED_RECEIPT_PUBKEY =
 
 // WalletConnect v2 project id (from cloud.walletconnect.com, free). Required by the dApp-side
 // `EthereumProvider.init` for the native (Android) ckERC20 onramp — the only WalletConnect entry
-// point in dpay. Empty default = WalletConnect DISABLED = exactly today's behavior (the web/browser
-// `window.ethereum` path and the e2e mock provider are untouched). Production bakes the real
-// project id here. Mirrors the EXPECTED_RECEIPT_PUBKEY + POLL override seam exactly: the e2e
-// harness / a dev build injects the value via `__DPAY_TEST_WALLETCONNECT_PROJECT_ID` before the
-// bundle evaluates; an empty value keeps the offline inner loop free of any WalletConnect code
-// (MC8 U6.1 — the seam only; the provider source lands in U6.2, isolated to the native path).
+// point in dpay. DEFAULTS EMPTY (= WC disabled): the native onramp is NOT end-to-end functional
+// yet because `app/metro.config.js` redirects `@reown/appkit/core` (the built-in QR modal, pulled
+// by ethereum-provider@2.23.10, web-only) to a stub whose `createAppKit()` THROWS. Baking a real
+// projectId here would enable `EthereumProvider.init({showQrModal:true})` on native and hit that
+// throw. So: keep empty UNTIL `@walletconnect/modal-react-native` replaces the shim (or
+// showQrModal:false + a custom display_uri QR). A release build sets the real id via
+// `__DPAY_TEST_WALLETCONNECT_PROJECT_ID` / a build-time override once the modal works. Mirrors the
+// EXPECTED_RECEIPT_PUBKEY + POLL override seam exactly.
 export const WALLETCONNECT_PROJECT_ID =
   ((globalThis as unknown as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID ?? '');
 
