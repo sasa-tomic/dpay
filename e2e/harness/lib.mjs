@@ -175,7 +175,12 @@ export async function setup(opts = {}) {
       await driver.navigate('about:blank', '/');
       try { await driver.clearStorage(); } catch {}
       const navPath = `/?relay=${encodeURIComponent(relayBaseURL)}`;
-      await driver.navigate(webBaseURL, navPath, { timeoutMs: mode === 'live' ? 20_000 : 8_000 });
+      // domcontentloaded (not networkidle0): a fresh context lands on the Onboarding screen, which
+      // starts NO continuous polls, so networkidle0's 500ms zero-network window is pure waste. The
+      // real readiness gate is waitReady() polling `window.__DPAY_READY` (set after shims install),
+      // so resolving navigation as soon as the DOM is parsed cuts ~500ms/flow with no correctness
+      // change. This mirrors the pattern flows 12/33 already use for returning-user reloads.
+      await driver.navigate(webBaseURL, navPath, { waitUntil: 'domcontentloaded', timeoutMs: mode === 'live' ? 20_000 : 8_000 });
       await driver.waitReady({ timeoutMs: mode === 'live' ? 20_000 : 10_000 });
     }
     return { mode, relayBaseURL, webBaseURL, driver, stop };
