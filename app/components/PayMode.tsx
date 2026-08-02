@@ -6,7 +6,7 @@ import {C} from '../config/palette';
 import {EXPIRY_WINDOW, DIRECT_PAY_TIMEOUT_MS, NFC_PAY_TIMEOUT_MS, POLL} from '../config/constants';
 import {usd, short, base, parseRequestQR, randNonceHex, nowSecs} from '../lib/format';
 import {cmpRaw} from '../lib/amount';
-import {type CurrencyDescriptor, fmtCurrencyAmount} from '../config/catalog';
+import {type CurrencyDescriptor, fmtCurrencyAmount, isPayableAsset} from '../config/catalog';
 import type {Identity, Req, NfcStatus} from '../lib/types';
 import {classifyPayHttp, rejectionMessage, isNonceReused} from '../payments';
 import {verifyOutcomeReceipt} from '../services/receipt';
@@ -174,6 +174,21 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
   }
 
   if (phase === 'review' && req) {
+    // MC5 — fail closed BEFORE signing: a request carrying an unknown/unsupported currency (a
+    // garbage/retired id, or a CkSol-family currency with no ramp config) must NEVER reach the
+    // signAuthorization call. The canister also rejects these, but the app should never let the user
+    // Approve a sign for an unsupported asset. Mirror the BalancesSheet "Unsupported asset" pattern:
+    // honest copy + NO sign button + a back-to-scan affordance. dpay never swaps, so we do NOT
+    // offer to substitute another asset — the request is for this asset or none.
+    if (!isPayableAsset(catalog, req.currency)) {
+      return (
+        <View style={S.center}>
+          <Text style={S.label}>Unsupported asset</Text>
+          <Text testID="review-unsupported" style={S.warnNote}>This payment requests an asset this wallet can’t pay (currency {req.currency}). dpay never swaps, so there’s no fallback. Ask the merchant to request a supported asset.</Text>
+          <Pressable style={S.linkBtn} onPress={reset} accessibilityRole="button" accessibilityLabel="Cancel" accessibilityState={{disabled: false}}><Text style={S.linkTextMuted}>Cancel</Text></Pressable>
+        </View>
+      );
+    }
     // MC5: locked-asset review — the payer sees + pays the EXACT asset the merchant requested (dpay
     // never swaps). The balance check uses ONLY that asset's balance: currency 0 → shownBalance
     // (DEMO_USD, tracked in the header), else assetBalances[req.currency] (the polled per-asset
@@ -228,6 +243,7 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
       {nfcReady && DpayNfc ? (
         <NfcTap
           key={nfcKey} role="card" identity={identity} relayUrl={relayUrl}
+          catalog={catalog}
           onSettled={onSettled} onOfflinePaid={onOfflinePaid}
           onActive={() => setNfcActive(true)}
           onClose={() => { setNfcActive(false); setNfcKey(k => k + 1); }}

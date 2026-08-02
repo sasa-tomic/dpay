@@ -6,6 +6,7 @@ import {
   currencySymbol,
   fmtCurrencyAmount,
   assetTestKey,
+  isPayableAsset,
   BUNDLED_CATALOG,
   type CurrencyDescriptor,
 } from '../config/catalog';
@@ -283,5 +284,42 @@ describe('familyDisplay sources per-currency facts from the descriptor (MC1 unit
     const legacy: CurrencyDescriptor[] = [mk({currency: 1, minter_family: 'CkBtcUtxo', decimals: 8, symbol: '₿'})];
     expect(familyDisplay(legacy, 1)?.nativeAsset).toBe('BTC');
     expect(familyDisplay(legacy, 1)?.amountDecimals).toBe(8);
+  });
+});
+
+// --- MC5: isPayableAsset — reject unknown/unsupported currencies BEFORE signing ----------------
+// The bug: the payer signed ANY req.currency the merchant's request carried, even if that currency
+// was unknown/unsupported. Defense-in-depth at the app: never let the user Approve a sign for a
+// garbage/unsupported currency. The canister also rejects retired/unknown currencies, but the app
+// should fail closed BEFORE the user signs.
+//
+// "Supported" ≠ "familyDisplay non-null": DEMO (currency 0) has minter_family null → familyDisplay
+// returns null, BUT DEMO IS payable (the faucet funds it). So the predicate is:
+//   currency === 0 || familyDisplay(catalog, currency) !== null.
+// Known families (CkBtcUtxo/CkEthErc20) ⇒ payable. Unknown family (CkSol) / missing-from-catalog
+// ⇒ NOT payable. Mirrors the fail-closed discipline of MC1 unit 6 (no Bitcoin fallback).
+describe('isPayableAsset — payable predicate (MC5 fail-closed before signing)', () => {
+  it('DEMO (currency 0) is payable even though familyDisplay returns null', () => {
+    // CRITICAL: familyDisplay(KNOWN_CATALOG, 0) === null but DEMO IS supported. The predicate MUST
+    // not collapse "supported" onto familyDisplay — currency 0 is the special case.
+    expect(familyDisplay(KNOWN_CATALOG, 0)).toBeNull();
+    expect(isPayableAsset(KNOWN_CATALOG, 0)).toBe(true);
+  });
+  it('ckBTC (currency 1, CkBtcUtxo) is payable', () => {
+    expect(isPayableAsset(KNOWN_CATALOG, 1)).toBe(true);
+  });
+  it('ckUSDC (currency 2, CkEthErc20) is payable', () => {
+    expect(isPayableAsset(KNOWN_CATALOG, 2)).toBe(true);
+  });
+  it('an unknown currency id (999, missing from the catalog) is NOT payable', () => {
+    expect(isPayableAsset(KNOWN_CATALOG, 999)).toBe(false);
+  });
+  it('a CkSol-family currency is NOT payable (unknown family — fail closed)', () => {
+    // CkSol is in the catalog but familyDisplay returns null for it (no ramp config) → NOT payable.
+    expect(isPayableAsset(UNKNOWN_CATALOG, 99)).toBe(false);
+  });
+  it('empty catalog: only currency 0 is payable (DEMO special case)', () => {
+    expect(isPayableAsset([], 0)).toBe(true);
+    expect(isPayableAsset([], 1)).toBe(false);
   });
 });

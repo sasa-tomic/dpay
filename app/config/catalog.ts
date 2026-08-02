@@ -155,6 +155,22 @@ export function familyDisplay(catalog: CurrencyDescriptor[], currency: number): 
     addressPlaceholder: base.addressPlaceholder,
   };
 }
+// MC5 — the "is this currency a PAYABLE asset" predicate. Used as the defense-in-depth gate BEFORE
+// the payer signs: a request carrying an unknown/unsupported currency (a garbage/retired id, or a
+// CkSol-family currency with no ramp config) must NEVER reach signAuthorization. The canister also
+// rejects retired/unknown currencies, but the app should fail closed FIRST — never let the user
+// Approve a sign for an unsupported asset.
+//
+// "Supported" ≠ "familyDisplay non-null": DEMO (currency 0) has minter_family null → familyDisplay
+// returns null, BUT DEMO IS payable (the faucet funds it; its display never depended on
+// familyDisplay's BTC fallback — see MC1 unit 6). So the predicate is the disjunction:
+//   currency === 0 (DEMO always payable) || familyDisplay(catalog, currency) !== null (known family).
+// CkBtcUtxo + CkEthErc20 ⇒ payable; CkSol / missing-from-catalog / no-minter ICRC ⇒ NOT payable.
+// Mirrors the fail-closed discipline of MC1 unit 6 (never a silent Bitcoin fallback).
+export function isPayableAsset(catalog: CurrencyDescriptor[], currency: number): boolean {
+  if (currency === 0) return true; // DEMO is always payable (the faucet funds it).
+  return familyDisplay(catalog, currency) !== null; // known family ⇒ payable; else fail closed.
+}
 // A stable ASCII key for an asset's testID (the catalog symbol may be a non-ASCII glyph like ₿).
 // ckBTC keeps 'ckbtc' to honour the existing e2e testID contract; other assets use their wrapper
 // name (MC1 unit 5 authoritative) or symbol. MC1 unit 6: an unknown family with no name returns the

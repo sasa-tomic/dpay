@@ -129,6 +129,7 @@ export function ReceiveMode({identity, relayUrl, nfcReady, onReceived, catalog}:
           <NfcTap
             key={nfcKey} role="reader" identity={identity} relayUrl={relayUrl} requestHex={reqQr.nfcHex}
             reqInfo={readerReqInfo}
+            catalog={catalog}
             onSettled={onReceived} onActive={() => setNfcActive(true)}
             onClose={() => { setNfcActive(false); reset(); }}
           />

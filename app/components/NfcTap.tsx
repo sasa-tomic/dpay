@@ -6,6 +6,7 @@ import {
 } from '../config/constants';
 import {S} from '../styles';
 import {usd, short, base} from '../lib/format';
+import {type CurrencyDescriptor, isPayableAsset} from '../config/catalog';
 import type {NfcEvent, NfcPhaseName, Identity} from '../lib/types';
 import {
   classifyPayHttp, receiptCodeFor, decidePayerReceipt, rejectionMessage, isNonceReused,
@@ -38,12 +39,13 @@ const NFC_UI: Record<string, {tone: string; glyph?: string; spin?: boolean; icon
  * extra Approve button). It renders the live phase the core emits and, on the merchant side, submits
  * the reassembled wire and hands the receipt back. The radio hop is a physical-device gate.
  */
-export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled, onOfflinePaid, onActive, onClose}: {
+export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, onSettled, onOfflinePaid, onActive, onClose}: {
   role: 'card' | 'reader';
   identity: Identity;
   relayUrl: string;
   requestHex?: string;
   reqInfo?: {amount: string; nonce: string; who: string};
+  catalog: CurrencyDescriptor[];
   onSettled?: () => void;
   onOfflinePaid?: (amount: string, currency: number) => void;
   onActive?: () => void; // fired the moment a real tap starts (so the parent can hide the QR/scanner)
@@ -191,15 +193,24 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, onSettled
   }, [reqInfo, record, finalize, postPay, reconcile]); // relayUrl is captured transitively via postPay/reconcile (both depend on it)
 
   // Payer side: the tap is the consent — sign the incoming request and serve it right away.
+  // MC5 — fail closed BEFORE signing: a request carrying an unknown/unsupported currency must NEVER
+  // reach signAuthorization. The tap is the consent, so we cannot surface an Approve button —
+  // instead we cancel the tap with an honest "Unsupported asset" phase (never sign a garbage
+  // currency). Mirrors the PayMode review-phase fail-closed branch.
   const autoSign = useCallback(async (req: {toHex: string; amount: string; nonceHex: string; expiry: number; currency: number}) => {
     try {
+      if (!isPayableAsset(catalog, req.currency)) {
+        try { await DpayNfc.declineCard(); } catch {}
+        finalize('declined', `Unsupported asset (currency ${req.currency}) — tap cancelled`);
+        return;
+      }
       const wireHex = await DpayCore.signAuthorization(identity.secretHex, req.toHex, req.amount, req.nonceHex, req.expiry, req.currency, identity.username, '', '');
       if (!(await DpayCore.verifyWire(wireHex))) throw new Error('local verify failed');
       sentRef.current = {amount: req.amount, currency: req.currency, who: short(req.toHex), nonce: req.nonceHex};
       setPayAmount(req.amount);
       await DpayNfc.approveCard(wireHex);
     } catch (e: any) { finalize('error', String(e?.message ?? e)); }
-  }, [identity, finalize]);
+  }, [identity, finalize, catalog]);
 
   useEffect(() => {
     const emitter = new NativeEventEmitter(DpayNfc as any);
