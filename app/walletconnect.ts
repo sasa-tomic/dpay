@@ -29,6 +29,14 @@ import type {Eip1193Provider} from './wallet';
 // The single cached init promise. WalletConnect's pairing/session is long-lived; calling
 // `EthereumProvider.init` again would tear down the session and re-prompt the QR modal every time
 // the sheet opens. Init once, share the resulting provider across calls.
+//
+// MC8 U6.2 hardening: typed as `Promise<Eip1193Provider>` and populated by a NO-CAST assignment from
+// `EthereumProvider.init(...)` (which returns `Promise<EthereumProvider>`). A real `EthereumProvider`
+// IS structurally assignable to dpay's `Eip1193Provider` (its `request<T>(args, expiry?)` accepts
+// the same args and `Promise<T>` is assignable to `Promise<unknown>`), so the assignment below
+// compiles cleanly TODAY and — crucially — FAILS `just typecheck` if a future SDK bump makes the
+// `request` signature incompatible. The old `as unknown as Eip1193Provider` double-cast disabled
+// exactly that check; this pure-assignability form makes the cast a compile-time drift detector.
 let cachedProvider: Promise<Eip1193Provider> | null = null;
 
 /**
@@ -55,7 +63,7 @@ export async function getWalletConnectProvider(): Promise<Eip1193Provider | null
         icons: [],
         redirect: {native: 'org.kalaj.dpay://'}, // deep-link back into this app after the wallet signs
       },
-    }).then((p) => p as unknown as Eip1193Provider);
+    }); // no cast — see cachedProvider note (assignability is the drift check).
   }
   return cachedProvider;
 }
