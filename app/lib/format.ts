@@ -23,10 +23,13 @@ export const isMintSentinel = (h: string) => h.toLowerCase() === MINT_HEX;
 // the ledger (which settle on `ic time / 1e9`).
 export const fmtTime = (ts: number) => { const d = new Date(ts * 1000); return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`; };
 export const nowSecs = () => Math.floor(Date.now() / 1000);
+// 128-bit payment nonce as lowercase hex. Uses the cryptographic RNG (`crypto.getRandomValues`,
+// polyfilled by `react-native-get-random-values` on native, native on web/Node) — NOT `Math.random`,
+// which is xorshift128+ on some engines and unsuitable for an idempotency key.
 export function randNonceHex(): string {
-  let s = '';
-  for (let i = 0; i < 16; i++) s += Math.floor(Math.random() * 256).toString(16).padStart(2, '0');
-  return s;
+  const bytes = new Uint8Array(16);
+  globalThis.crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 // Parse a user-entered DEMO amount (decimal string) into raw cents as a decimal-digit STRING. MC1
 // units 2-4: delegates to the exact BigInt parser (`parseDecimalToUnits`) — never `parseFloat`

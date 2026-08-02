@@ -53,7 +53,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
   const [offlineSpent, setOfflineSpent] = useState<Record<number, string>>({});
   const [history, setHistory] = useState<Txn[]>([]);
   const [nfc, setNfc] = useState<NfcStatus>('unknown');
-  // Demo top-up: a single click adds $50 of demo currency via /api/v1/faucet. The button sits next
+  // Demo top-up: a single click adds $100 of demo currency via /api/v1/faucet. The button sits next
   // to the balance so users find it without hunting. `topUpBusy` drives the spinner; `topUpErr`
   // surfaces a one-line failure (offline / faucet disabled) without blocking the rest of the UI.
   const [topUpBusy, setTopUpBusy] = useState(false);
