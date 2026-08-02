@@ -1,5 +1,5 @@
 import { describe, test, expect } from '@jest/globals';
-import { connectWallet, sendTransaction, getEthereumProvider, type Eip1193Provider } from '../wallet';
+import { connectWallet, sendTransaction, getChainId, getEthereumProvider, type Eip1193Provider } from '../wallet';
 
 // A minimal recording Eip1193 provider — same surface the e2e harness mock uses.
 function mockProvider(opts: {
@@ -102,5 +102,53 @@ describe('getEthereumProvider', () => {
     } finally {
       delete (globalThis as { ethereum?: unknown }).ethereum;
     }
+  });
+});
+
+// --- MC8 U3 — chain-ID enforcement at connect -------------------------------------------------
+// The bug: connectWallet only called eth_requestAccounts; the sheet did no eth_chainId check, so a
+// wrong-network MetaMask silently broadcast calldata to the wrong chain. getChainId parses the hex
+// chain id the wallet reports so the sheet can compare it to the catalog's per-currency chain_id
+// (ckUSDC = 1 = Ethereum mainnet) and abort the connect on a mismatch.
+describe('getChainId', () => {
+  function chainIdProvider(chainId: unknown): Eip1193Provider {
+    return {
+      request: async ({ method }) => {
+        if (method === 'eth_chainId') return chainId;
+        throw new Error(`unexpected method ${method}`);
+      },
+    };
+  }
+
+  test('parses "0x1" → 1 (Ethereum mainnet)', async () => {
+    expect(await getChainId(chainIdProvider('0x1'))).toBe(1);
+  });
+
+  test('parses "0x89" → 137 (Polygon)', async () => {
+    expect(await getChainId(chainIdProvider('0x89'))).toBe(137);
+  });
+
+  test('parses "0xa" → 10 (Optimism)', async () => {
+    expect(await getChainId(chainIdProvider('0xa'))).toBe(10);
+  });
+
+  test('parses "0x0" → 0', async () => {
+    expect(await getChainId(chainIdProvider('0x0'))).toBe(0);
+  });
+
+  test('rejects a non-hex string', async () => {
+    await expect(getChainId(chainIdProvider('0xnothex'))).rejects.toThrow();
+  });
+
+  test('rejects a missing 0x prefix', async () => {
+    await expect(getChainId(chainIdProvider('1'))).rejects.toThrow();
+  });
+
+  test('rejects a non-string result (null)', async () => {
+    await expect(getChainId(chainIdProvider(null))).rejects.toThrow();
+  });
+
+  test('rejects an empty string', async () => {
+    await expect(getChainId(chainIdProvider(''))).rejects.toThrow();
   });
 });

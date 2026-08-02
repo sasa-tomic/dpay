@@ -49,6 +49,21 @@ export async function connectWallet(p: Eip1193Provider): Promise<string> {
   return String(accounts[0]);
 }
 
+/**
+ * Get the wallet's current chain id via `eth_chainId`. The result is an EIP-1193 hex string
+ * (`"0x1"` = Ethereum mainnet, `"0x89"` = Polygon); this parses it to a decimal number so the caller
+ * can compare it to the catalog's per-currency `chain_id` and abort a connect on a wrong-network
+ * wallet (MC8 U3). Throws on a malformed/non-hex result — the caller treats that as "cannot confirm
+ * the network", which fails closed (no calldata is sent on an unconfirmed chain).
+ */
+export async function getChainId(p: Eip1193Provider): Promise<number> {
+  const raw = await p.request({ method: 'eth_chainId', params: [] });
+  if (typeof raw !== 'string' || !/^0x[0-9a-fA-F]+$/.test(raw)) {
+    throw new Error(`wallet returned an invalid chain id: ${JSON.stringify(raw)}`);
+  }
+  return parseInt(raw, 16);
+}
+
 /** Encode a bigint amount as EIP-1193 hex (`0x…`; `0n` → `0x0`). */
 function toHexValue(n: bigint): string {
   if (n < 0n) throw new Error('value cannot be negative');

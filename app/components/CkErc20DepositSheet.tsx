@@ -9,7 +9,7 @@ import type {Identity} from '../lib/types';
 import type {FamilyDisplay} from '../config/catalog';
 import {type CkErc20OnrampParams, ckerc20OnrampParams} from '../services/relay';
 import {encodeApprove, encodeDepositErc20, principalToBytes32} from '../cketh';
-import {getEthereumProvider, connectWallet, sendTransaction} from '../wallet';
+import {getEthereumProvider, connectWallet, getChainId, sendTransaction} from '../wallet';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 
 // ckERC20 (ckUSDC) direct onramp — a wallet-connect flow. The user connects their OWN Ethereum wallet
@@ -19,11 +19,12 @@ import {useEscapeToClose} from '../hooks/useHotkeys';
 // ckETH minter scrapes Ethereum logs on a ~3min heartbeat and mints ckUSDC to the user's subaccount
 // (~20min); dpay just polls the ckUSDC balance. The calldata is built by cketh.ts (byte-exact vs the
 // real helper-contract ABI; pinned by goldens).
-export function CkErc20DepositSheet({identity, relayUrl, currency, display, onClose}: {
+export function CkErc20DepositSheet({identity, relayUrl, currency, display, chainId, onClose}: {
   identity: Identity;
   relayUrl: string;
   currency: number;
   display: FamilyDisplay;
+  chainId: number | null; // MC8 U3: the catalog's per-currency EVM chain id (ckUSDC = 1 = Ethereum mainnet)
   onClose: () => void;
 }) {
   // phase: 'connect' (no wallet yet) → 'enter' (wallet connected, enter amount) → 'sending' (txs
@@ -59,6 +60,17 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, onCl
     if (!provider) { setErr('No Ethereum wallet found. Install MetaMask or Rabby in this browser.'); return; }
     try {
       const acct = await connectWallet(provider);
+      // MC8 U3 — enforce the chain id right after connect. The catalog's per-currency chain_id is
+      // the source of truth (ckUSDC = 1 = Ethereum mainnet). A wrong-network wallet is aborted BEFORE
+      // the user enters an amount, so no calldata can be silently broadcast to the wrong chain. The
+      // wallet cannot switch chains without re-prompting, so no re-check at submit is needed.
+      if (chainId != null) {
+        const actual = await getChainId(provider);
+        if (actual !== chainId) {
+          setErr(`Wrong network: connect to ${display.networkLabel} (chain ${chainId}). Your wallet is on chain ${actual}.`);
+          return; // stay in 'connect' phase — do NOT enter 'enter'
+        }
+      }
       setAccount(acct);
       // Snapshot the starting balance so the watching poll can detect the mint (a GROWTH from here).
       try {
@@ -73,7 +85,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, onCl
     } catch (e: any) {
       setErr(String(e?.message ?? e) || 'Could not connect to your wallet.');
     }
-  }, [relayUrl, currency, identity.publicHex]);
+  }, [relayUrl, currency, identity.publicHex, chainId, display.networkLabel]);
 
   const submit = useCallback(async () => {
     if (!account || !params) return;

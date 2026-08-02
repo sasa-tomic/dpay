@@ -403,7 +403,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
         const dpDisplay = familyDisplay(catalog, depositCurrency);
         if (!dpDisplay) return null;
         return catalog.find(c => c.currency === depositCurrency)?.minter_family === 'CkEthErc20'
-          ? <CkErc20DepositSheet identity={identity} relayUrl={relayUrl} currency={depositCurrency} display={dpDisplay} onClose={() => setDepositCurrency(null)} />
+          ? <CkErc20DepositSheet identity={identity} relayUrl={relayUrl} currency={depositCurrency} display={dpDisplay} chainId={catalog.find(c => c.currency === depositCurrency)?.chain_id ?? null} onClose={() => setDepositCurrency(null)} />
           : <DepositSheet identity={identity} relayUrl={relayUrl} currency={depositCurrency} display={dpDisplay} onClose={() => setDepositCurrency(null)} />;
       })() : null}
       {withdrawCurrency != null ? (() => {
