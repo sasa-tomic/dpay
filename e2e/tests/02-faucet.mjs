@@ -10,6 +10,18 @@
 // Selector contract: `balance` (header balance → opens Balances), `btn-topup` (inside Balances).
 import { setup, assert, onboardWallet, openBalances } from '../harness/lib.mjs';
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '02',
+  name: 'faucet',
+  journey: 'onboard',
+  covers: ['faucet', 'topup', 'balance-delta'],
+  verifies: 'Returning user taps \'Add demo money\' → faucet top-up works, balance increases.',
+  timeoutMs: 15000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[02-faucet] setup (relay + web + browser)…');

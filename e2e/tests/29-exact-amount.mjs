@@ -41,6 +41,18 @@ function readAmountFromWire(wireB64) {
   return v.toString();
 }
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '29',
+  name: 'exact-amount',
+  journey: 'pay',
+  covers: ['exact-amount', 'decimal-transport', 'u64', 'bigint-codec'],
+  verifies: 'Raw amount > 2^53 round-trips byte-exact through faucet/request-wire/sign/settle (BigInt codec, u64 LE).',
+  timeoutMs: 15000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[29-exact-amount] setup (relay + web + browser)…');

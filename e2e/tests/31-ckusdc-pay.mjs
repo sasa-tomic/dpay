@@ -37,6 +37,18 @@ const SEED_RAW = 60_000;        // 0.060000 USDC (6-decimal)
 const PAY_RAW = 50_000;         // 0.050000 USDC (6-decimal) — mirrors flow 27's PAY_SATS shape
 const EXPECTED_DISPLAY = '0.050000 USDC'; // fmtCurrencyAmount output for 6-dec USDC
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '31',
+  name: 'ckusdc-pay',
+  journey: 'pay',
+  covers: ['ckusdc-pay', 'multi-currency', '6-decimal', 'byte-exact'],
+  verifies: 'ckUSDC (currency 2, 6-decimal) pay end-to-end: review \'0.050000 USDC\', byte-exact raw, settles on currency 2.',
+  timeoutMs: 20000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[31-ckusdc-pay] setup…');

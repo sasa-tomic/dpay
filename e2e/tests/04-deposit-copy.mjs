@@ -12,6 +12,18 @@
 // `btn-deposit-copy`.
 import { setup, assertEq, onboardWallet, openBalances } from '../harness/lib.mjs';
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '04',
+  name: 'deposit-copy',
+  journey: 'deposit',
+  covers: ['deposit-address', 'clipboard'],
+  verifies: '\'Copy address\' writes the REAL address to the clipboard (not the Share noop).',
+  timeoutMs: 15000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[04-deposit-copy] setup (relay + web + browser)…');

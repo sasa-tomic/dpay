@@ -13,6 +13,18 @@ import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.m
 
 const PAY_CENTS = 2500; // ∂25.00 (DEMO_USD = currency 0)
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '10',
+  name: 'expired',
+  journey: 'pay',
+  covers: ['expiry', 'disabled-approve'],
+  verifies: 'Payer scans an already-expired request → refused, Approve disabled, no leaked nonce.',
+  timeoutMs: 15000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[10-expired] setup (relay + web + browser)…');

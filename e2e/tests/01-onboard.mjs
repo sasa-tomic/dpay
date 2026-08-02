@@ -20,6 +20,18 @@ import { setup, assert, assertIncludes } from '../harness/lib.mjs';
 const ONBOARD_USERNAME = 'e2e-alice';
 const ONBOARD_PLACEHOLDER = 'e.g. Alice';
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '01',
+  name: 'onboard',
+  journey: 'onboard',
+  covers: ['onboard', 'faucet', 'first-balance', 'empty-history'],
+  verifies: 'New user enters a name → wallet created, faucet funds ∂100, balance + empty history render.',
+  timeoutMs: 20000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[01-onboard] setup (relay + web + browser)…');

@@ -23,6 +23,18 @@ const WITHDRAW_BTC = '0.00050000'; // 50_000 sats == retrieve_btc_min_amount
 const WITHDRAW_SATS = 50_000;
 const WITHDRAW_ADDR = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '15',
+  name: 'withdraw',
+  journey: 'withdraw',
+  covers: ['withdraw', 'sign', 'settle', 'clipboard', 'balance-delta', 'destination-copy'],
+  verifies: 'Withdraw ckBTC: enter addr + amount → sign on-device → settle; success screen + Copy destination; balance debits.',
+  timeoutMs: 20000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[15-withdraw] setup (relay + web + browser)…');

@@ -19,6 +19,18 @@
 // Selector contract: `nfc-status` (the NfcTap view once active).
 import { setup, assert, onboardWallet } from '../harness/lib.mjs';
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '32',
+  name: 'nfc-disclosure',
+  journey: 'nfc',
+  covers: ['nfc-disclosure', 'consent', 'asset-name', 'network'],
+  verifies: 'NFC asset disclosure: mid-tap the status shows honest asset name + network + \'0.00050000 BTC\' BEFORE success.',
+  timeoutMs: 15000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[32-nfc-disclosure] setup (relay + web + browser)…');

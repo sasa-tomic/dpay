@@ -19,6 +19,18 @@
 // Balances), `btn-topup` (inside Balances), `btn-balances-close`.
 import { setup, assert, onboardWallet, pickFreePort, openBalances } from '../harness/lib.mjs';
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '13',
+  name: 'offline',
+  journey: 'system',
+  covers: ['offline', 'econnrefused', 'graceful', 'retry', 'right-reason'],
+  verifies: 'Relay down → faucet top-up surfaces honest \'Offline\' (ECONNREFUSED, not unsafe-port), no crash; retry path.',
+  timeoutMs: 20000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[13-offline] setup (relay + web + browser)…');

@@ -23,6 +23,18 @@ const CKBTC_CURRENCY = 1;   // the CkBtcUtxo catalog entry (resolved at runtime,
 const SEED_SATS = 60_000;   // 0.00060000 BTC — funds A so it can spend currency 1
 const PAY_SATS = 50_000;    // 0.00050000 BTC — under the per-tx cap; a valid currency-1 payment
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '24',
+  name: 'wallet-cleanup',
+  journey: 'system',
+  covers: ['asset-cards', 'labels', 'symbols'],
+  verifies: 'Seeded non-dollar balances/history render as asset cards/rows with known symbols (presence, not exact units).',
+  timeoutMs: 15000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[24-wallet-cleanup] setup (relay + web + browser)…');

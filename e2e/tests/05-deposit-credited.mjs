@@ -30,6 +30,18 @@ import { setup, assert, assertIncludes, seedDeposit, getBalance, onboardWallet, 
 const DEPOSIT_CURRENCY = 1; // BTC — matches App.tsx DEPOSIT_CURRENCY (the deposit asset)
 const SEED_SATS = 50_000;   // 0.00050000 BTC
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '05',
+  name: 'deposit-credited',
+  journey: 'deposit',
+  covers: ['deposit-credit', 'mint', 'asset-card', 'balance-update'],
+  verifies: 'ckBTC deposit lands via test-helpers seed → \'Deposited ✓\', balance updates, asset card appears.',
+  timeoutMs: 20000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[05-deposit-credited] setup (relay + web + browser)…');

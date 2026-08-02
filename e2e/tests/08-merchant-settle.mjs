@@ -17,6 +17,18 @@ import { generateKeypair, randNonceHex, decodeRequest, signAuthorizationCode } f
 
 const PAY_CENTS = 3000; // ∂30.00
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '08',
+  name: 'merchant-settle',
+  journey: 'pay',
+  covers: ['receive', 'settle', 'confirmation'],
+  verifies: 'Merchant side sees the incoming payment settle → recipient \'Received $X\' confirmation.',
+  timeoutMs: 15000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[08-merchant-settle] setup (relay + web + browser)…');

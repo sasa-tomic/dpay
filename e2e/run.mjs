@@ -5,10 +5,12 @@
 // summary with per-test timing.
 //
 // Usage: `node run.mjs` (local, default) | `DPAY_E2E_MODE=live node run.mjs` (live).
-// Concurrency: `DPAY_E2E_CONCURRENCY=N` (default 6; `1` = sequential, useful for debugging).
-// Filter:     `DPAY_E2E_FILTER=13 node run.mjs` runs only tests whose filename contains "13"
-//             (comma-separated for several, e.g. `DPAY_E2E_FILTER=09,13,15`). Free ports per run →
-//             parallel `node run.mjs` invocations do not collide; use the filter for fast per-test TDD.
+// Concurrency: `DPAY_E2E_CONCURRENCY=N` (default 12; `1` = sequential, useful for debugging).
+// Filter:     `DPAY_E2E_FILTER=<token>` runs only tests the token matches. A token matches on ANY of:
+//             filename substring (legacy), meta.id (`07`), meta.name (`scan-pay`), meta.journey
+//             (`pay` → every pay flow), or a covers slug (`receipt`). Comma-separated for several,
+//             e.g. `DPAY_E2E_FILTER=07,13,15` or `pay,offline`. Free ports per run → parallel
+//             `node run.mjs` invocations do not collide; use the filter for fast per-test TDD.
 //
 // --- Why parallel is sound here (the concurrency-safety proof) ---
 // The shared relay is concurrency-safe by construction: FakeLedger holds ALL state (balances, spent
@@ -25,14 +27,11 @@
 // only overlaps independent flows. (If a future test ever reuses a fixed account/nonce, it must be
 // marked exclusive; none do today.)
 //
-// Add a flow = add `tests/NN-name.mjs` exporting `async function run()`. No other change needed.
-import { readdir } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+// Add a flow = add `tests/NN-name.mjs` exporting `async function run()` + a `meta` export (see
+// harness/meta.mjs). No other change needed — the harness auto-discovers it, filters by it, and
+// regenerates FLOWS.md from it.
 import { stopSession } from './harness/lib.mjs';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const TESTS_DIR = join(__dirname, 'tests');
+import { loadTestsMeta, filterByToken, JOURNEYS } from './harness/meta.mjs';
 
 // Default concurrency: 12. The host has 16 cores; each parallel test is one chrome incognito context
 // against the shared relay + web + browser process. 12 leaves headroom for the relay/web/V8 and is
@@ -47,18 +46,34 @@ function resolveConcurrency() {
   return raw;
 }
 
+/**
+ * Discover + filter the tests via the shared metadata loader. A token matches on filename (legacy),
+ * meta.id, meta.name, meta.journey, or a covers slug — so `DPAY_E2E_FILTER=pay` runs the whole pay
+ * journey, `=07` runs flow 07, `=scan-pay` runs by slug, `=receipt` runs every flow covering receipts.
+ * Comma-separated for several. Empty = all. Returns objects with `{file, id, name, path, meta}`.
+ */
 async function loadTests() {
-  const filterRaw = process.env.DPAY_E2E_FILTER ?? '';
-  const filters = filterRaw.split(',').map((s) => s.trim()).filter(Boolean);
-  const files = (await readdir(TESTS_DIR)).filter((f) => /^\d{2}-.+\.mjs$/.test(f)).sort();
-  const matched = filters.length === 0 ? files : files.filter((f) => filters.some((tok) => f.includes(tok)));
-  return matched.map((f) => ({ name: f, path: join(TESTS_DIR, f) }));
+  const all = await loadTestsMeta();
+  return filterByToken(all, process.env.DPAY_E2E_FILTER ?? '');
 }
 
-async function runOne(path) {
-  const mod = await import(`file://${path}`);
-  if (typeof mod.run !== 'function') throw new Error(`${path}: no \`run\` export`);
-  await mod.run();
+/** Race `promise` against a hard timeout; reject with a labeled, debuggable error on expiry. */
+function withTimeout(promise, timeoutMs, label) {
+  let timer;
+  const expired = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`[${label}] exceeded its per-test timeout of ${timeoutMs}ms — likely hung (the suite is ~17s, so this is a genuine stall, not slow hardware)`)),
+      timeoutMs,
+    );
+  });
+  return Promise.race([promise, expired]).finally(() => clearTimeout(timer));
+}
+
+async function runOne(test) {
+  const mod = await import(`file://${test.path}`);
+  if (typeof mod.run !== 'function') throw new Error(`${test.file}: no \`run\` export`);
+  const timeoutMs = test.meta?.timeoutMs ?? 60_000;
+  await withTimeout(mod.run(), timeoutMs, test.file);
 }
 
 /**
@@ -85,18 +100,19 @@ async function runPool(tests, concurrency) {
     if (firstFailure) return; // fail-fast: don't start new tests after a failure
     const idx = nextIdx++;
     if (idx >= tests.length) return;
-    const { name, path } = tests[idx];
+    const test = tests[idx];
+    const key = test.file;
     activeWorkers++;
     const tStart = Date.now();
     try {
-      await runOne(path);
-      results.set(name, { ok: true, ms: Date.now() - tStart });
-      console.log(`  ✓ ${name}  ${((Date.now() - tStart) / 1000).toFixed(2)}s`);
+      await runOne(test);
+      results.set(key, { ok: true, ms: Date.now() - tStart });
+      console.log(`  ✓ ${key}  ${((Date.now() - tStart) / 1000).toFixed(2)}s`);
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
-      results.set(name, { ok: false, ms: Date.now() - tStart, err });
-      if (!firstFailure) firstFailure = { name, err };
-      console.error(`  ✗ ${name}  RED after ${((Date.now() - tStart) / 1000).toFixed(2)}s: ${err.stack || err.message || err}`);
+      results.set(key, { ok: false, ms: Date.now() - tStart, err });
+      if (!firstFailure) firstFailure = { key, err };
+      console.error(`  ✗ ${key}  RED after ${((Date.now() - tStart) / 1000).toFixed(2)}s: ${err.stack || err.message || err}`);
     } finally {
       activeWorkers--;
       // Spawn the next test (unless we've fail-fast-stopped), then check for drain.
@@ -119,12 +135,16 @@ async function main() {
   const startedAt = Date.now();
   const tests = await loadTests();
   if (tests.length === 0) {
-    console.error('[run] no tests found under e2e/tests/');
+    console.error('[run] no tests matched (check DPAY_E2E_FILTER — try a journey/id/name/covers slug)');
     process.exit(1);
   }
   const concurrency = resolveConcurrency();
+  const filter = process.env.DPAY_E2E_FILTER ?? '';
+  const filterNote = filter
+    ? ` matching filter "${filter}" (by journey/id/name/filename/covers)`
+    : '';
   console.log(
-    `[run] running ${tests.length} test(s) in ${process.env.DPAY_E2E_MODE ?? 'local'} mode` +
+    `[run] running ${tests.length} test(s)${filterNote} in ${process.env.DPAY_E2E_MODE ?? 'local'} mode` +
     ` (parallel, concurrency=${concurrency})\n`,
   );
 
@@ -139,15 +159,26 @@ async function main() {
 
   // Ordered per-test summary (so the report is stable regardless of completion order).
   console.log('\n--- results ---');
-  for (const { name } of tests) {
-    const r = results.get(name);
-    if (!r) { console.log(`  · ${name}  (not run — fail-fast)`); continue; }
+  for (const test of tests) {
+    const r = results.get(test.file);
+    if (!r) { console.log(`  · ${test.file}  (not run — fail-fast)`); continue; }
     const mark = r.ok ? '✓' : '✗';
-    console.log(`  ${mark} ${name}  ${(r.ms / 1000).toFixed(2)}s`);
+    console.log(`  ${mark} ${test.file}  ${(r.ms / 1000).toFixed(2)}s`);
+  }
+
+  // Coverage matrix: journey → flows, for the selected set. Makes the suite self-describing at a
+  // glance and surfaces journeys with thin coverage. Derived purely from each flow's `meta`.
+  console.log('\n--- coverage (journey → flows) ---');
+  for (const journey of JOURNEYS) {
+    const inJourney = tests.filter((t) => t.meta.journey === journey);
+    if (inJourney.length === 0) continue;
+    const label = journey.padEnd(10);
+    const flows = inJourney.map((t) => `${t.meta.id}-${t.meta.name}`).join(' · ');
+    console.log(`  ${label} [${String(inJourney.length).padStart(2)}]   ${flows}`);
   }
 
   if (firstFailure) {
-    console.error(`\n[run] FAILED in ${elapsed}s (first RED: ${firstFailure.name})`);
+    console.error(`\n[run] FAILED in ${elapsed}s (first RED: ${firstFailure.key})`);
     process.exit(1);
   }
   console.log(`\n[run] ${passed}/${total} GREEN in ${elapsed}s`);

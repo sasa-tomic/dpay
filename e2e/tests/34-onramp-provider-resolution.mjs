@@ -45,6 +45,18 @@ async function installMockProvider(driver, chainIdHex) {
   }, chainIdHex);
 }
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '34',
+  name: 'onramp-provider-resolution',
+  journey: 'deposit',
+  covers: ['onramp-resolver', 'eip-1193', 'walletconnect-gate'],
+  verifies: 'Onramp resolver: window.ethereum wins when present; WC branch unreachable on web even when \'configured\' → honest null.',
+  timeoutMs: 15000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[34-onramp-provider-resolution] setup (relay + web + browser)…');

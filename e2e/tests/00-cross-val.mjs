@@ -117,6 +117,18 @@ function b64urlDecode(s) {
   return new Uint8Array(bytes);
 }
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '00',
+  name: 'cross-val',
+  journey: 'wire',
+  covers: ['wire-format', 'ed25519-parity', 'golden-bytes', 'receipt-claim'],
+  verifies: 'JS ed25519 shim is byte-exact vs the Rust core (withdraw sig, pay golden, receipt-claim golden) — no browser, ~0.1s.',
+  timeoutMs: 5000,
+};
+
 export async function run() {
   const g = layout.golden;
   console.log('[00-cross-val] golden secret:', g.secret_hex.slice(0, 16) + '…');

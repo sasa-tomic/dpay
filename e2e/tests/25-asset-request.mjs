@@ -17,6 +17,18 @@ import { decodeRequest } from '../harness/wire.mjs';
 
 const CKBTC_SATS = 50_000; // 0.00050000 BTC
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '25',
+  name: 'asset-request',
+  journey: 'pay',
+  covers: ['asset-request', 'ckbtc', 'currency-id', 'encode', 'btc-units'],
+  verifies: 'ckBTC chip + BTC amount → request QR encodes RUNTIME currency 1 + 50000 sats; readout \'0.00050000 BTC\' (no $).',
+  timeoutMs: 15000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[25-asset-request] setup…');

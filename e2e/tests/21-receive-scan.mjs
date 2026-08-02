@@ -26,6 +26,18 @@ import { generateKeypair, decodeRequest, signAuthorizationCode } from '../harnes
 
 const PAY_CENTS = 2500; // ∂25.00
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '21',
+  name: 'receive-scan',
+  journey: 'offline',
+  covers: ['receive-scan', 'offline-settle'],
+  verifies: 'Merchant \'Payer paid offline? Scan to settle\' → scans the payer\'s signed QR → settles.',
+  timeoutMs: 20000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[21-receive-scan] setup (relay + web + browser)…');

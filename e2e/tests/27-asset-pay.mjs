@@ -31,6 +31,18 @@ const CKBTC_CURRENCY = 1;
 const SEED_SATS = 60_000;   // 0.00060000 BTC
 const PAY_SATS = 50_000;    // 0.00050000 BTC
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '27',
+  name: 'asset-pay',
+  journey: 'pay',
+  covers: ['asset-pay', 'ckbtc', 'per-asset-balance', 'locked-asset-display'],
+  verifies: 'ckBTC pay: review shows \'0.00050000 BTC\' (no $); per-asset balance gate (60000≥50000 sats) → settles on currency 1.',
+  timeoutMs: 20000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[27-asset-pay] setup…');

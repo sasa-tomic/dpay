@@ -23,6 +23,18 @@ const PAYEE_NAME = 'Bob';
 const PAYER_NAME = 'Alice';
 const MEMO = 'coffee';
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '26',
+  name: 'names-memo',
+  journey: 'pay',
+  covers: ['names', 'memo', 'history', 'wire-v2', 'friendly-counterparties'],
+  verifies: 'Alice pays Bob with memo \'coffee\' → both histories show friendly names + memo (wire-format v2, no raw hex).',
+  timeoutMs: 20000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[26-names-memo] setup (relay + web + browser)…');

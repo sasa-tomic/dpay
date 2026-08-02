@@ -13,6 +13,18 @@
 // Screens captured: onboarded wallet (Pay), Receive + request QR, Balances hub, Settings, Ledger.
 import { setup, onboardWallet, assert } from '../harness/lib.mjs';
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '35',
+  name: 'ux-tour',
+  journey: 'tour',
+  covers: ['visual-capture', 'screen-census', 'screenshots'],
+  verifies: 'Visual capture: screenshots of every major screen (Pay, Receive+QR, Balances, Settings, Ledger) for review.',
+  timeoutMs: 20000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[35-ux-tour] setup (relay + web + browser)…');

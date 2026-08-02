@@ -14,6 +14,18 @@ import { setup, assert, assertIncludes, assertEq, onboardWallet, accountOf } fro
 
 const USERNAME = 'e2e-settings';
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '12',
+  name: 'settings',
+  journey: 'system',
+  covers: ['settings', 'relay-config', 'reset', 'persist'],
+  verifies: 'Settings: edit relay URL (persists across reload) + reset wallet (wipes identity → onboarding).',
+  timeoutMs: 20000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[12-settings] setup (relay + web + browser)…');

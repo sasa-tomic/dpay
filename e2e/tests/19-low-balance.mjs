@@ -23,6 +23,18 @@ import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.m
 
 const OVER_CENTS = 20_000; // ∂200.00 — exceeds the ∂100.00 faucet-funded balance
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '19',
+  name: 'low-balance',
+  journey: 'pay',
+  covers: ['low-balance', 'insufficient', 'disabled-approve'],
+  verifies: 'Insufficient funds: offline review-lowbal warning; online Approve disabled, \'Not enough balance\'.',
+  timeoutMs: 15000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[19-low-balance] setup (relay + web + browser)…');

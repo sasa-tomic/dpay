@@ -14,6 +14,18 @@
 // Selector contract: `username-input` (M6), `btn-create`, `balance`.
 import { setup, assert, assertEq, accountOf } from '../harness/lib.mjs';
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '23',
+  name: 'username-default',
+  journey: 'onboard',
+  covers: ['onboard', 'default-username'],
+  verifies: 'New user leaves name empty → creates → defaults to \'me\', onboards + funds.',
+  timeoutMs: 15000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[23-username-default] setup (relay + web + browser)…');

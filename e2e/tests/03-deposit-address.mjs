@@ -12,6 +12,18 @@
 // (manual refresh), `btn-deposit-copy` (copy), `btn-deposit-close` (Esc/X close).
 import { setup, assert, assertIncludes, onboardWallet } from '../harness/lib.mjs';
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '03',
+  name: 'deposit-address',
+  journey: 'deposit',
+  covers: ['deposit-address', 'qr', 'instructions', 'fee-min', 'deep-link'],
+  verifies: 'ckBTC deposit sheet: address + QR + instructions + fee/min; deep-link ?screen=deposit works.',
+  timeoutMs: 15000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[03-deposit-address] setup (relay + web + browser)…');

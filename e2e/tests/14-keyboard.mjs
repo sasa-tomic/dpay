@@ -14,6 +14,18 @@
 // `deposit-address` (deposit sheet), `amount-input`.
 import { setup, assert, assertIncludes, onboardWallet, openBalances } from '../harness/lib.mjs';
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '14',
+  name: 'keyboard',
+  journey: 'system',
+  covers: ['keyboard-shortcuts', 'tabs', 'sheet-guard', 'input-guard'],
+  verifies: 'Single-key shortcuts (P/R/T/A/Esc) switch tabs / top-up / add-money / close sheet; input + sheet guards work.',
+  timeoutMs: 15000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[14-keyboard] setup (relay + web + browser)…');

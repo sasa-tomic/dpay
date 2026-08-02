@@ -40,6 +40,18 @@ async function installHappyProvider(driver) {
   });
 }
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '33',
+  name: 'ckerc20-persist',
+  journey: 'deposit',
+  covers: ['ckerc20', 'persist', 'restart', 'watching-resume'],
+  verifies: 'ckERC20 deposit watching PERSISTS across restart: reload rehydrates watching (no reconnect), resumed notice shown.',
+  timeoutMs: 20000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[33-ckerc20-persist] setup (relay + web + browser)…');

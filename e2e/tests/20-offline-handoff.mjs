@@ -27,6 +27,18 @@ import { generateKeypair, randNonceHex, buildRequestQR, decodeRequest } from '..
 
 const PAY_CENTS = 2500; // ∂25.00
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '20',
+  name: 'offline-handoff',
+  journey: 'offline',
+  covers: ['offline-sign', 'qr-handoff', 'settle', 'reconcile', 'round-trip'],
+  verifies: 'Payer signs offline → relay unreachable → signed QR → merchant settles → payer reconnects → \'Paid ✓\'.',
+  timeoutMs: 25000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[20-offline-handoff] setup (relay + web + browser)…');

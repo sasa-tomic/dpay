@@ -21,6 +21,18 @@ import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.m
 const PAY_CENTS = 2500; // ∂25.00 (DEMO_USD = currency 0, the wallet asset)
 const MERCHANT_NAME = 'Bob';
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '07',
+  name: 'scan-pay',
+  journey: 'pay',
+  covers: ['scan', 'sign', 'settle', 'receipt', 'history', 'recipient-name'],
+  verifies: 'Payer scans → reviews → approves: two-wallet real ed25519 sign + relay settle → \'Paid ✓\', balances correct.',
+  timeoutMs: 20000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[07-scan-pay] setup (relay + web + browser)…');

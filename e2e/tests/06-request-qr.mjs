@@ -20,6 +20,18 @@ import { decodeRequest, REQUEST_LEN } from '../harness/wire.mjs';
 
 const EXPIRY_WINDOW_SLACK = 700; // EXPIRY_WINDOW=600 in App.tsx + a few seconds of test latency
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '06',
+  name: 'request-qr',
+  journey: 'pay',
+  covers: ['request-qr', 'encode', 'merchant', 'to-name', 'memo'],
+  verifies: 'Merchant enters amount → request QR renders AND decodes to a valid 132-byte request (to_name + memo).',
+  timeoutMs: 15000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[06-request-qr] setup (relay + web + browser)…');

@@ -19,6 +19,18 @@
 // Selector contract: `nfc-status` (the NfcTap view once active).
 import { setup, assert, onboardWallet } from '../harness/lib.mjs';
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '11',
+  name: 'nfc',
+  journey: 'nfc',
+  covers: ['nfc-phases', 'event-bus'],
+  verifies: 'NFC phase transitions (Idle→Linking→Exchanging→Settling→Complete) render via the RNW event bus.',
+  timeoutMs: 15000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[11-nfc] setup (relay + web + browser)…');

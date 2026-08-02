@@ -53,6 +53,18 @@ async function installMockProvider(driver, chainIdHex, receiptStatus) {
   }, chainIdHex, receiptStatus);
 }
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '16',
+  name: 'ckusdc-onramp',
+  journey: 'deposit',
+  covers: ['ckusdc', 'onramp', 'eip-1193', 'calldata', 'eth-gas'],
+  verifies: 'ckUSDC onramp: connect wallet → enter USDC → approve+deposit (EIP-1193 seam, byte-exact calldata, ETH gas note).',
+  timeoutMs: 20000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[16-ckusdc-onramp] setup (relay + web + browser)…');

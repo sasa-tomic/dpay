@@ -31,6 +31,18 @@ const SEED_SATS = 100_000;   // 0.00100000 BTC — enough to withdraw but small 
 const MIN_SATS = 50_000;     // retrieve_btc_min_amount (mirrors the live minter + the relay constant)
 const DEST = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '18',
+  name: 'withdraw-errors',
+  journey: 'withdraw',
+  covers: ['withdraw-errors', 'below-min', 'over-balance', 'bad-sig', 'bad-addr'],
+  verifies: 'Withdraw errors: below-min / over-balance / bad-addr UI guards (confirm disabled) + relay 422 (bad-sig/insufficient).',
+  timeoutMs: 20000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[18-withdraw-errors] setup (relay + web + browser)…');

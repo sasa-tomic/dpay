@@ -15,6 +15,18 @@ async function scanCount(driver) {
   return n;
 }
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '17',
+  name: 'scan-cleanup',
+  journey: 'system',
+  covers: ['qr-scanner', 'teardown', 'unmount', 'listener-leak'],
+  verifies: 'Switch Pay→Receive→Pay: QrScanner listeners tear down cleanly (no leak across unmount/remount).',
+  timeoutMs: 15000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[17-scan-cleanup] setup (relay + web + browser)…');

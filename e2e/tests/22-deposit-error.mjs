@@ -23,6 +23,18 @@
 // fetched).
 import { setup, assert, assertIncludes, onboardWallet, pickFreePort, openBalances } from '../harness/lib.mjs';
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '22',
+  name: 'deposit-error',
+  journey: 'deposit',
+  covers: ['deposit-error', 'offline', 'graceful'],
+  verifies: 'Relay unreachable when opening the deposit sheet → honest error (\'Check connection\'), no spinner-forever.',
+  timeoutMs: 15000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[22-deposit-error] setup (relay + web + browser)…');

@@ -1,92 +1,105 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **35 flows.**
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay (FakeLedger, offline). No UI stubs. The only shimmed I/O boundary is
 > the camera scan (sanctioned smallest-boundary seam) and the NFC radio (physical-device gate).
 >
-> **Run:** `just e2e` (all flows, ~15s) · `DPAY_E2E_FILTER=07 node e2e/run.mjs` (one flow) ·
-> `DPAY_E2E_FILTER=07,15 node e2e/run.mjs` (subset).
+> **This file is GENERATED** by `node e2e/gen-flows-md.mjs` from each flow's `meta` export. Never
+> hand-edit the tables — edit the `meta` and re-run. Only the "Coverage gaps" / "How to add" prose
+> is hand-maintained (inside that script).
+>
+> **Run:** `just e2e` (all flows, ~17s) · `DPAY_E2E_FILTER=07 node e2e/run.mjs` (one flow) ·
+> `DPAY_E2E_FILTER=pay node e2e/run.mjs` (a whole journey) · `DPAY_E2E_FILTER=07,15 node e2e/run.mjs` (subset).
 
-## How to read this
+## Coverage matrix
 
-| # | Flow | User journey | Verifies |
-|---|------|-------------|----------|
+Flows grouped by user journey; within each table, every row lists what the flow **verifies** and
+the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`).
 
-Flows are numbered `NN-name.mjs` in `e2e/tests/`. Categories group related flows; within a category,
-positive paths come first, then error/edge paths.
+wire (1) · onboard (3) · pay (12) · offline (2) · deposit (7) · withdraw (2) · nfc (2) · system (5) · tour (1)
 
 ---
 
-## Wire-format cross-validation (no browser)
+### Wire-format cross-validation (no browser)
 
-| # | Flow | Verifies |
-|---|------|----------|
-| 00 | cross-val | JS ed25519 shim is **byte-exact** vs the Rust core: withdraw signing_hex/sig_hex, pay golden, and receipt-claim golden all reconstruct from `wire_layout.json` offsets and verify. ~0.1s, no browser/relay. |
+| # | Flow | Verifies | Covers |
+|---|------|----------|--------|
+| 00 | cross-val | JS ed25519 shim is byte-exact vs the Rust core (withdraw sig, pay golden, receipt-claim golden) — no browser, ~0.1s. | wire-format, ed25519-parity, golden-bytes, receipt-claim |
 
-## Onboarding & funding
+### Onboarding & funding
 
-| # | Flow | User journey | Verifies |
-|---|------|-------------|----------|
-| 01 | onboard | New user enters name → taps "Create & fund wallet" | Wallet created, $100 funded, balance visible. |
-| 02 | faucet | Returning user taps "Add demo money" | Faucet top-up works, balance increases. |
-| 23 | username-default | New user leaves name empty → creates | Defaults to 'me', onboards + funds successfully. |
+| # | Flow | Verifies | Covers |
+|---|------|----------|--------|
+| 01 | onboard | New user enters a name → wallet created, faucet funds ∂100, balance + empty history render. | onboard, faucet, first-balance, empty-history |
+| 02 | faucet | Returning user taps 'Add demo money' → faucet top-up works, balance increases. | faucet, topup, balance-delta |
+| 23 | username-default | New user leaves name empty → creates → defaults to 'me', onboards + funds. | onboard, default-username |
 
-## Payments (the core offline-pay flow)
+### Payments (the core offline-pay flow)
 
-| # | Flow | User journey | Verifies |
-|---|------|-------------|----------|
-| 06 | request-qr | Merchant enters amount → shows request QR | QR renders AND decodes to a valid 132-byte request (incl. to_name + memo). |
-| 07 | scan-pay | Payer scans request → reviews → approves | Two-wallet real ed25519 sign + relay settle → "Paid ✓", balance correct. Recipient name shown ("to Bob"). |
-| 08 | merchant-settle | Merchant side: sees incoming payment → settles | The recipient's "Received $X" confirmation. |
-| 09 | double-spend | Attacker replays a captured signed code | Replay refused (nonce single-use), no double debit. |
-| 10 | expired | Payer scans an already-expired request | Expiry refused, Approve button disabled, no leaked nonce. |
-| 30 | trusted-receipt | A "malicious relay" returns a wrong-key receipt (valid Ed25519 sig under a fresh attacker key, all other fields matching) | The app's key-pin rejects it → NO fake "Paid ✓", honest "Couldn't verify" shown, no debit. RED under an empty pin (proves the pin is load-bearing). Closes MC4 U5 / OPEN_ISSUES #2. |
-| 19 | low-balance | Payer with insufficient funds scans a request | Offline: review-lowbal warning. Online: Approve disabled, "Not enough balance". |
-| 25 | asset-request | Merchant selects ckBTC chip → types BTC amount → shows request QR | The encoded request carries the RUNTIME currency id 1 (not hardcoded 0) + 50000 sats; the readout shows "0.00050000 BTC", never a dollar amount. Proves the merchant-side of MC5 (asset selection; dpay never swaps). |
-| 26 | names-memo | Alice pays Bob with memo "coffee" | Both wallets' history shows friendly names (from_name/to_name) + memo, no raw-hex counterparties. Proves N6/H3 closure via wire-format v2. |
-| 27 | asset-pay | Payer scans a ckBTC request → reviews the locked asset → approves | Review shows "Pay 0.00050000 BTC" (not `$`); per-asset balance check uses ONLY ckBTC (60000 sats ≥ 50000), so the DEMO balance ($100) can't block it; settles on currency 1. Proves the payer-side of MC5 (locked-asset review + per-asset balance gate). |
+| # | Flow | Verifies | Covers |
+|---|------|----------|--------|
+| 06 | request-qr | Merchant enters amount → request QR renders AND decodes to a valid 132-byte request (to_name + memo). | request-qr, encode, merchant, to-name, memo |
+| 07 | scan-pay | Payer scans → reviews → approves: two-wallet real ed25519 sign + relay settle → 'Paid ✓', balances correct. | scan, sign, settle, receipt, history, recipient-name |
+| 08 | merchant-settle | Merchant side sees the incoming payment settle → recipient 'Received $X' confirmation. | receive, settle, confirmation |
+| 09 | double-spend | Replay of a captured signed code is refused (nonce single-use), no double debit. | replay-defense, nonce, single-use |
+| 10 | expired | Payer scans an already-expired request → refused, Approve disabled, no leaked nonce. | expiry, disabled-approve |
+| 19 | low-balance | Insufficient funds: offline review-lowbal warning; online Approve disabled, 'Not enough balance'. | low-balance, insufficient, disabled-approve |
+| 25 | asset-request | ckBTC chip + BTC amount → request QR encodes RUNTIME currency 1 + 50000 sats; readout '0.00050000 BTC' (no $). | asset-request, ckbtc, currency-id, encode, btc-units |
+| 26 | names-memo | Alice pays Bob with memo 'coffee' → both histories show friendly names + memo (wire-format v2, no raw hex). | names, memo, history, wire-v2, friendly-counterparties |
+| 27 | asset-pay | ckBTC pay: review shows '0.00050000 BTC' (no $); per-asset balance gate (60000≥50000 sats) → settles on currency 1. | asset-pay, ckbtc, per-asset-balance, locked-asset-display |
+| 29 | exact-amount | Raw amount > 2^53 round-trips byte-exact through faucet/request-wire/sign/settle (BigInt codec, u64 LE). | exact-amount, decimal-transport, u64, bigint-codec |
+| 30 | trusted-receipt | Malicious relay returns a wrong-key receipt → app's key-pin rejects it → honest 'Couldn't verify', no debit. | receipt-key-pin, malicious-relay, honest-error |
+| 31 | ckusdc-pay | ckUSDC (currency 2, 6-decimal) pay end-to-end: review '0.050000 USDC', byte-exact raw, settles on currency 2. | ckusdc-pay, multi-currency, 6-decimal, byte-exact |
 
-## Offline hand-off (the signature feature)
+### Offline hand-off (the signature feature)
 
-| # | Flow | User journey | Verifies |
-|---|------|-------------|----------|
-| 20 | offline-handoff | Payer signs offline → relay unreachable → shows signed QR → merchant settles later → payer reconnects | Full round trip: offline sign → QR hand-off → online settle → receipt reconciliation → "Paid ✓". |
-| 21 | receive-scan | Merchant: "Payer paid offline? Scan to settle" → scans payer's signed QR | Receive-side scan path settles the offline payer's signed code. |
+| # | Flow | Verifies | Covers |
+|---|------|----------|--------|
+| 20 | offline-handoff | Payer signs offline → relay unreachable → signed QR → merchant settles → payer reconnects → 'Paid ✓'. | offline-sign, qr-handoff, settle, reconcile, round-trip |
+| 21 | receive-scan | Merchant 'Payer paid offline? Scan to settle' → scans the payer's signed QR → settles. | receive-scan, offline-settle |
 
-## Deposits (ckBTC + ckUSDC onramp)
+### Deposits & onramp (ckBTC + ckUSDC + ckERC20)
 
-| # | Flow | User journey | Verifies |
-|---|------|-------------|----------|
-| 03 | deposit-address | User opens ckBTC deposit sheet | Address + QR + instructions + fee/min (or "—" if zero). Deep-link `?screen=deposit` works. |
-| 04 | deposit-copy | User taps "Copy address" | REAL clipboard write (not Share noop). |
-| 05 | deposit-credited | ckBTC deposit lands via test-helpers seed | "Deposited ✓" after mint, balance updates, asset card appears. |
-| 16 | ckusdc-onramp | User connects wallet → enters USDC amount → approves+deposits | Wiring of the non-custodial ckERC20 flow (calldata byte-exact, EIP-1193 seam). ETH gas note shown. |
-| 34 | onramp-provider-resolution | Resolver picks the provider SOURCE with/without `window.ethereum` | The web-first `resolveOnrampProvider()` seam: web-mock wins when `window.ethereum` is set; without it, the WC branch is unreachable on web (Platform gate) even though WC is "configured" → honest "No Ethereum wallet found" + 0 sends. |
-| 22 | deposit-error | Relay unreachable when opening deposit sheet | Honest error ("Check your connection"), no spinner-forever. |
+| # | Flow | Verifies | Covers |
+|---|------|----------|--------|
+| 03 | deposit-address | ckBTC deposit sheet: address + QR + instructions + fee/min; deep-link ?screen=deposit works. | deposit-address, qr, instructions, fee-min, deep-link |
+| 04 | deposit-copy | 'Copy address' writes the REAL address to the clipboard (not the Share noop). | deposit-address, clipboard |
+| 05 | deposit-credited | ckBTC deposit lands via test-helpers seed → 'Deposited ✓', balance updates, asset card appears. | deposit-credit, mint, asset-card, balance-update |
+| 16 | ckusdc-onramp | ckUSDC onramp: connect wallet → enter USDC → approve+deposit (EIP-1193 seam, byte-exact calldata, ETH gas note). | ckusdc, onramp, eip-1193, calldata, eth-gas |
+| 22 | deposit-error | Relay unreachable when opening the deposit sheet → honest error ('Check connection'), no spinner-forever. | deposit-error, offline, graceful |
+| 33 | ckerc20-persist | ckERC20 deposit watching PERSISTS across restart: reload rehydrates watching (no reconnect), resumed notice shown. | ckerc20, persist, restart, watching-resume |
+| 34 | onramp-provider-resolution | Onramp resolver: window.ethereum wins when present; WC branch unreachable on web even when 'configured' → honest null. | onramp-resolver, eip-1193, walletconnect-gate |
 
-## Withdrawal (ckBTC cash-out)
+### Withdrawal (ckBTC cash-out)
 
-| # | Flow | User journey | Verifies |
-|---|------|-------------|----------|
-| 15 | withdraw | User enters BTC address + amount → confirms | Withdrawal submitted, success screen with copy-destination button. |
-| 18 | withdraw-errors | Below-min / over-balance / relay-rejected | UI guards (confirm disabled) + relay-level 422 enforcement (bad-sig/insufficient/below-min). |
+| # | Flow | Verifies | Covers |
+|---|------|----------|--------|
+| 15 | withdraw | Withdraw ckBTC: enter addr + amount → sign on-device → settle; success screen + Copy destination; balance debits. | withdraw, sign, settle, clipboard, balance-delta, destination-copy |
+| 18 | withdraw-errors | Withdraw errors: below-min / over-balance / bad-addr UI guards (confirm disabled) + relay 422 (bad-sig/insufficient). | withdraw-errors, below-min, over-balance, bad-sig, bad-addr |
 
-## NFC (tap-to-pay)
+### NFC (tap-to-pay)
 
-| # | Flow | User journey | Verifies |
-|---|------|-------------|----------|
-| 11 | nfc | Tap phase transitions (Idle→Linking→Exchanging→Settling→Complete) | NFC seam wired to RNW event bus; phase UI renders. (Radio hop = physical-device gate.) |
+| # | Flow | Verifies | Covers |
+|---|------|----------|--------|
+| 11 | nfc | NFC phase transitions (Idle→Linking→Exchanging→Settling→Complete) render via the RNW event bus. | nfc-phases, event-bus |
+| 32 | nfc-disclosure | NFC asset disclosure: mid-tap the status shows honest asset name + network + '0.00050000 BTC' BEFORE success. | nfc-disclosure, consent, asset-name, network |
 
-## Settings & system
+### Settings & system
 
-| # | Flow | User journey | Verifies |
-|---|------|-------------|----------|
-| 12 | settings | User opens Settings → edits relay URL → resets wallet | Relay URL persists across reload; reset wipes identity → back to onboarding. |
-| 13 | offline | Relay goes down → user tries top-up | Graceful offline (ECONNREFUSED), no crash/blank, retry path. |
-| 14 | keyboard | User presses P/R/T/A/Esc keys | Single-key shortcuts switch tabs / top-up / add-money / close sheet. Input-guard + sheet-guard work. |
-| 17 | scan-cleanup | Switch Pay→Receive→Pay | QrScanner listeners teardown correctly (no leak across unmount/remount). |
-| 24 | wallet-cleanup | Seeded non-dollar balances/history appear | Asset cards and rows are present and labels use known symbols. This flow does **not** prove correct non-dollar amount units, merchant selection, payer review, or matching-balance validation. |
+| # | Flow | Verifies | Covers |
+|---|------|----------|--------|
+| 12 | settings | Settings: edit relay URL (persists across reload) + reset wallet (wipes identity → onboarding). | settings, relay-config, reset, persist |
+| 13 | offline | Relay down → faucet top-up surfaces honest 'Offline' (ECONNREFUSED, not unsafe-port), no crash; retry path. | offline, econnrefused, graceful, retry, right-reason |
+| 14 | keyboard | Single-key shortcuts (P/R/T/A/Esc) switch tabs / top-up / add-money / close sheet; input + sheet guards work. | keyboard-shortcuts, tabs, sheet-guard, input-guard |
+| 17 | scan-cleanup | Switch Pay→Receive→Pay: QrScanner listeners tear down cleanly (no leak across unmount/remount). | qr-scanner, teardown, unmount, listener-leak |
+| 24 | wallet-cleanup | Seeded non-dollar balances/history render as asset cards/rows with known symbols (presence, not exact units). | asset-cards, labels, symbols |
+
+### Visual capture (UX tour)
+
+| # | Flow | Verifies | Covers |
+|---|------|----------|--------|
+| 35 | ux-tour | Visual capture: screenshots of every major screen (Pay, Receive+QR, Balances, Settings, Ledger) for review. | visual-capture, screen-census, screenshots |
 
 ---
 
@@ -94,28 +107,29 @@ positive paths come first, then error/edge paths.
 
 These flows are **not** covered and why:
 
-- **True multi-currency app payment** — flow 25 + flow 27 now cover the merchant's ckBTC request encoding and the payer's locked-asset review + per-asset balance check + correct settlement on currency 1 (the core of MC5 Slice 7a + 7b). **Still uncovered:** the resulting Ledger row's exact units post-settle (the row is rendered via `familyDisplay`'s native asset, but no flow asserts the row text after a multi-currency pay), and the round trip through ReceiveMode ckUSDC (currency 2, 6-decimal) end to end. Flow 24 seeds/settles outside the app payment UI and only proves presence.
-- **Exact 2/6/8/18-decimal amount transport** — JavaScript/Kotlin boundaries and formatting are not exercised beyond safe demo values; values around `2^53` and excess fractional input are uncovered.
-- **Non-dollar NFC consent** — flow 11 injects phase events only; it does not carry and sign a real nonzero-currency request or validate that asset's balance/display.
-- **Android React Native bridge parity** — instrumented tests mostly exercise UniFFI directly, not the `NativeModules` argument/return surface that currently drops wire-v2 fields.
-- **External-credit balance freshness** — deposit tests can assert direct ledger/FakeLedger credit while missing stale facade `BAL_CACHE` behavior.
-- **NFC radio round trip** (two phones, HCE↔reader, full wire transit over ISO-DEP) — physical-device gate; the web NFC shim's `approveCard(wireHex)` is a no-op, so driving the full round trip would inject the wire the test built itself (false confidence). Signing/settlement are already byte-exact in `00`; the phase plumbing is proven in `11`. (The v2 wire is now 292 B → 2 ISO-DEP frames; the multi-frame chunking path is unit-tested in core, but the over-the-air round trip still needs two phones.)
+- **Exact 2/6/8/18-decimal amount transport at the JS/Kotlin boundary** — `29-exact-amount` proves the >2^53 raw amount round-trips byte-exact through the TS↔relay stack, but values around `2^53` and excess fractional input at the Kotlin/UniFFI boundary are not exercised.
+- **Non-dollar NFC consent over the radio** — `11-nfc` + `32-nfc-disclosure` inject JS phase/request events; they do not carry a real nonzero-currency request over the actual ISO-DEP radio (physical-device gate).
+- **Android React Native bridge parity** — instrumented tests mostly exercise UniFFI directly, not the full `NativeModules` argument/return surface.
+- **External-credit balance freshness** — deposit tests assert direct ledger/FakeLedger credit while missing stale facade `BAL_CACHE` behavior.
+- **NFC radio round trip** (two phones, HCE↔reader, full wire transit over ISO-DEP) — physical-device gate; the web NFC shim's `approveCard(wireHex)` is a no-op, so driving the full round trip would inject the wire the test built itself (false confidence). Signing/settlement are byte-exact in `00`; phase plumbing in `11`.
 - **ckUSDC onramp final ETH hop** (wallet signs → tx mined → minter scrapes ~20min) — inherent outer-loop gate; offline e2e proves the calldata wiring + byte-exactness.
 - **ckBTC live deposit/withdrawal with real BTC** — requires real mainnet funds; offline path proven via FakeLedger seed (issues 1/8 in OPEN_ISSUES.md).
 
-> **Closed gap:** destination-address format validation is now covered (flow `18-withdraw-errors`
-> asserts a bad-addr UI warning + disabled confirm), so it no longer appears above.
+> **Closed gaps:** destination-address format validation (`18-withdraw-errors`); the multi-currency Ledger row units + withdraw balance delta + bad-QR + onboarding-faucet-failure (flows `36`–`39`, see the catalog above).
+
+---
 
 ## How to add a new flow
 
 1. Copy `e2e/tests/NN-name.mjs` → `e2e/tests/<next>-<slug>.mjs` (zero-padded number).
-2. Import `{setup, onboardWallet, assert, ...}` from `../harness/lib.mjs`.
-3. `export async function test(ctx) { ... }` — the harness calls it with `{driver, relayBaseURL, ...}`.
-4. Call `onboardWallet(ctx.driver, 'name')` to get a funded wallet in <1s.
-5. Use `findByTestID`, `waitForText`, `click`, `type` from the driver. Take a screenshot: `ctx.driver.screenshot('NN-name')`.
-6. Assert behavior (button states, text content, balance changes) — not pixel layout.
-7. Run: `DPAY_E2E_FILTER=<number> node e2e/run.mjs` to iterate in ~10s (one flow), then `just e2e` for the full suite.
-8. Add a row to the table above.
+2. Edit the `meta` export at the top: `id`, `name` (the slug), `journey` (a value from the matrix above), `covers` (slugs), `verifies` (one line), `timeoutMs`.
+3. Import `{setup, onboardWallet, assert, ...}` from `../harness/lib.mjs`.
+4. `export async function run() { ... }` — the harness calls it; `setup()` returns `{driver, relayBaseURL, ...}`.
+5. Call `onboardWallet(ctx.driver, 'name')` to get a funded wallet in <1s.
+6. Use `findByTestID`, `waitForText`, `click`, `type` from the driver. Take a screenshot: `ctx.driver.screenshot('NN-name')`.
+7. Assert behavior (button states, text content, balance changes) — not pixel layout.
+8. Run: `DPAY_E2E_FILTER=<id|name|journey> node e2e/run.mjs` to iterate in <10s (one flow or one journey), then `just e2e` for the full suite.
+9. Regenerate this file: `node e2e/gen-flows-md.mjs` (commits the new row).
 
 ### Conventions
 
@@ -124,3 +138,4 @@ These flows are **not** covered and why:
 - **One relay per run.** The relay + web server + browser are shared; each test gets a fresh incognito context (fresh identity, no cross-test state). Serialize web-building runs (the `e2e/dist` cache is a shared path).
 - **Browser errors fail closed.** Page exceptions, app `console.error`, `DPAY_SELFCHECK FAIL`, and failed requests make the owning flow RED at teardown. A deliberate offline flow must call `driver.allowRequestFailuresFrom(deadOrigin)` before retargeting, scoped to its unique closed-port origin.
 - **No broad mocking.** The `fetch` recorder in `09-double-spend` is the sanctioned pattern: narrow (one route), transparent (calls through), self-uninstalling.
+- **Per-test timeout.** Each flow's `meta.timeoutMs` is enforced by the orchestrator — a hung test fails loudly instead of stalling the pool.

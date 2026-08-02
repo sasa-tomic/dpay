@@ -85,6 +85,18 @@ async function installMaliciousPayInterceptor(driver, fields) {
   return attackerPub;
 }
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '30',
+  name: 'trusted-receipt',
+  journey: 'pay',
+  covers: ['receipt-key-pin', 'malicious-relay', 'honest-error'],
+  verifies: 'Malicious relay returns a wrong-key receipt → app\'s key-pin rejects it → honest \'Couldn\'t verify\', no debit.',
+  timeoutMs: 20000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[30-trusted-receipt] setup (relay + web + browser)…');

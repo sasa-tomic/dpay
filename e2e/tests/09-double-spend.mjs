@@ -56,6 +56,18 @@ async function installPayRecorder(driver) {
   });
 }
 
+/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
+  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
+  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
+export const meta = {
+  id: '09',
+  name: 'double-spend',
+  journey: 'pay',
+  covers: ['replay-defense', 'nonce', 'single-use'],
+  verifies: 'Replay of a captured signed code is refused (nonce single-use), no double debit.',
+  timeoutMs: 15000,
+};
+
 export async function run() {
   const start = Date.now();
   console.log('[09-double-spend] setup (relay + web + browser)…');
