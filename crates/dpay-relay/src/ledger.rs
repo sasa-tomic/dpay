@@ -319,6 +319,43 @@ pub struct CkErc20OnrampParams {
     pub facade_principal: String,   // the facade canister principal (text) — the depositErc20 `principal` arg
 }
 
+/// Resolve ckERC-20 onramp params from a catalog descriptor (MC8 U2). PURE + single-sourced — both
+/// the FakeLedger and AgentLedger `ckerc20_onramp_params` impls delegate here so the fail-closed
+/// gate is identical across the offline demo + the live canister paths.
+///
+/// **Gate (fail-closed — non-custodial / no-swap honesty):** returns `Err(Transient)` (→ HTTP 503)
+/// unless ALL of:
+/// 1. `desc` is `Some` (the currency exists in the catalog),
+/// 2. `desc.minter_family == Some(CkEthErc20)` (it is a ckERC-20 family currency), AND
+/// 3. `desc.token_contract` is `Some` (its per-token ERC-20 address is populated).
+///
+/// A CkEthErc20 currency with NO `token_contract` (a partially-registered ckERC20) MUST surface a
+/// 503 — it must NEVER fall back to ckUSDC's address. Returning a wrong-token address would make the
+/// user approve + depositErc20 against the wrong ERC-20 contract (non-custodial-trust violation).
+///
+/// The `helper_address` is minter-scoped (ONE verified mainnet constant for ALL ckERC20 tokens — the
+/// ckETH deposit helper is shared across the family); only the `erc20_address` is per-token, read
+/// from the descriptor's `token_contract`. `facade_principal` is passed in (the FakeLedger uses a
+/// demo stand-in; the AgentLedger uses the live canister id it is pointed at).
+pub fn ckerc20_onramp_from_descriptor(
+    desc: Option<&CurrencyDescriptor>,
+    facade_principal: String,
+) -> Result<CkErc20OnrampParams, LedgerError> {
+    let d = desc.ok_or_else(|| LedgerError::Transient("no ckERC-20 onramp for currency".into()))?;
+    if d.minter_family != Some(MinterFamily::CkEthErc20) {
+        return Err(LedgerError::Transient("no ckERC-20 onramp for currency".into()));
+    }
+    // Fail-closed: a CkEthErc20 with no token_contract MUST NOT fall back to ckUSDC's address.
+    let erc20_address = d.token_contract.clone().ok_or_else(|| {
+        LedgerError::Transient("ckERC-20 currency has no token_contract (fail-closed)".into())
+    })?;
+    Ok(CkErc20OnrampParams {
+        helper_address: CKERC20_HELPER_ADDRESS.to_string(),
+        erc20_address,
+        facade_principal,
+    })
+}
+
 /// Settlement outcome. `Rejected` is a permanent policy failure (bad sig, expired, over cap,
 /// insufficient funds, reused nonce, malformed wire) — the relay must NOT retry it and surfaces
 /// it as `422`. `Transient` is an infrastructure hiccup (e.g. the agent/canister was briefly
@@ -618,16 +655,17 @@ impl FakeLedger {
 
 /// The catalog the offline FakeLedger reports — mirrors a demo deployment: DEMO_USD (currency 0,
 /// mintable, the `∂` faucet asset) + ckBTC (currency 1, the CkBtcUtxo deposit/withdraw ramp asset) +
-/// ckUSDC (currency 2, the CkEthErc20 onramp asset). The principal text values are the canonical
-/// management/anon/minter stand-ins the demo uses (`aaaaa-aa` = the mgmt canister, `2vxsx-fae` = the
-/// anonymous principal, `mqygn-kiaaa-aaaar-qaadq-cai` = the live ckBTC minter, `sv3dd-…` = the live
-/// ckETH minter, `xevnm-…` = the live ckUSDC ledger); the wallet reads
+/// ckUSDC (currency 2, the CkEthErc20 onramp asset) + ckUSDT (currency 3, a SECOND CkEthErc20
+/// proving the onramp is per-token, not hardcoded to currency 2 / USDC — MC8 U2). The principal text
+/// values are the canonical management/anon/minter stand-ins the demo uses (`aaaaa-aa` = the mgmt
+/// canister, `2vxsx-fae` = the anonymous principal, `mqygn-kiaaa-aaaar-qaadq-cai` = the live ckBTC
+/// minter, `sv3dd-…` = the live ckETH minter, `xevnm-…` = the live ckUSDC ledger); the wallet reads
 /// `currency`/`symbol`/`decimals`/`minter_family` + the MC1 unit 5 per-currency metadata for display.
 /// Hardcoded as TEXT (not built via `candid::Principal`) because `candid` is feature-gated to `agent`
 /// and `ledger.rs` ships in the lean offline build.
 ///
 /// Ramp honesty (MC1 unit 5, no-swap non-negotiable + OPEN_ISSUES O3): DEMO onramp=`Direct` (faucet),
-/// offramp=`Unavailable`; ckBTC onramp=`Direct` (Bitcoin ramp), offramp=`Direct`; ckUSDC
+/// offramp=`Unavailable`; ckBTC onramp=`Direct` (Bitcoin ramp), offramp=`Direct`; ckUSDC + ckUSDT
 /// onramp=`Direct` (ckETH helper built client-side), offramp=`Unavailable` (Fork-C — NO cash-out).
 fn fake_catalog() -> Vec<CurrencyDescriptor> {
     vec![
@@ -684,8 +722,33 @@ fn fake_catalog() -> Vec<CurrencyDescriptor> {
             fee: Some(U64String(10_000)), // ckUSDC ledger icrc1_fee (O6): 0.01 USDC = 10000 raw
             cap: None,
             chain_id: Some(1), // Ethereum mainnet
-            token_contract: Some("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".into()), // ckUSDC ERC-20 (O6)
+            token_contract: Some(CKUSDC_ERC20_ADDRESS.to_string()), // ckUSDC ERC-20 (O6) — single-sourced constant
             onramp: RampCapability::Direct, // ckETH helper-contract onramp (client-side)
+            offramp: RampCapability::Unavailable, // deferred per Fork-C — NO cash-out (O3)
+        },
+        CurrencyDescriptor {
+            // MC8 U2 — a SECOND ckERC20 token proving the onramp is CATALOG/TOKEN-SPECIFIC, not
+            // hardcoded to currency 2 / USDC. ckUSDT carries its OWN ERC-20 contract (real mainnet
+            // USDT), so the onramp must surface the USDT address — never USDC's. Same minter
+            // (ckETH minter handles all ckERC20), same helper address, same chain; only the
+            // `token_contract` + display metadata differ. Ramp honesty mirrors ckUSDC: onramp=
+            // `Direct`, offramp=`Unavailable` (Fork-C — NO cash-out).
+            currency: 3, // ckUSDT (a second ckERC-20 onramp currency)
+            ledger: "xevnm-gaaaa-aaaar-qafnq-cai".to_string(), // ckUSDT ledger principal text (demo stand-in)
+            mintable: false,
+            minter: Some("sv3dd-oaaaa-aaaar-qacoa-cai".to_string()), // ckETH minter (handles all ckERC20)
+            minter_family: Some(MinterFamily::CkEthErc20),
+            symbol: Some("ckUSDT".to_string()),
+            decimals: Some(6),
+            wrapper_name: Some("ckUSDT".into()),
+            backing_symbol: Some("USDT".into()),
+            network: Some("Ethereum".into()),
+            display_decimals: Some(6),
+            fee: Some(U64String(10_000)), // demo stand-in (mirrors ckUSDC's 6-decimal fee unit)
+            cap: None,
+            chain_id: Some(1), // Ethereum mainnet
+            token_contract: Some("0xdAC17F958D2ee523a2206206994597C13D831ec7".into()), // real USDT ERC-20
+            onramp: RampCapability::Direct, // ckETH helper-contract onramp (client-side, per-token)
             offramp: RampCapability::Unavailable, // deferred per Fork-C — NO cash-out (O3)
         },
     ]
@@ -895,18 +958,14 @@ impl Ledger for FakeLedger {
     }
 
     async fn ckerc20_onramp_params(&self, currency: Currency) -> Result<CkErc20OnrampParams, LedgerError> {
-        if currency == 2 {
-            Ok(CkErc20OnrampParams {
-                helper_address: CKERC20_HELPER_ADDRESS.to_string(),
-                erc20_address: CKUSDC_ERC20_ADDRESS.to_string(),
-                // demo placeholder; offline mode never broadcasts — the calldata encoding is
-                // shape-correct regardless of the value, and the mock window.ethereum in e2e never
-                // submits. In production this is the facade canister principal.
-                facade_principal: "aaaaa-aa".to_string(),
-            })
-        } else {
-            Err(LedgerError::Transient("no ckERC-20 onramp for currency".into()))
-        }
+        // MC8 U2: resolve the onramp from the CATALOG descriptor, not a hardcoded `currency == 2`
+        // guard. Reads `self.currencies()` (the same `fake_catalog()` the wallet sees) so the
+        // descriptor is the single source of truth, then delegates to the shared pure resolver.
+        // `facade_principal` is the demo stand-in (offline mode never broadcasts — the calldata
+        // encoding is shape-correct regardless; in production this is the facade canister id).
+        let catalog = self.currencies().await?;
+        let desc = catalog.iter().find(|d| d.currency == currency);
+        ckerc20_onramp_from_descriptor(desc, "aaaaa-aa".to_string())
     }
 
     /// Withdraw ckBTC to a native BTC address. Mirrors the canister's `withdraw` settlement EXACTLY

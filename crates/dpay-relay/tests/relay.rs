@@ -1034,8 +1034,9 @@ async fn deposit_routes_map_ledger_transient_to_503() {
 //
 // Covers GET /api/v1/currencies — the wallet's runtime asset catalog (closes issue #7). The
 // FakeLedger reports a demo deployment: DEMO_USD (currency 0, $, mintable, no ramp) + a ckBTC-shaped
-// currency (1, ₿, CkBtcUtxo ramp) + ckUSDC (2, ckUSDC, CkEthErc20 onramp). The wallet reads this once
-// on load instead of hardcoding DEPOSIT_CURRENCY.
+// currency (1, ₿, CkBtcUtxo ramp) + ckUSDC (2, ckUSDC, CkEthErc20 onramp) + ckUSDT (3, a second
+// CkEthErc20 proving the onramp is per-token — MC8 U2). The wallet reads this once on load instead
+// of hardcoding DEPOSIT_CURRENCY.
 
 /// `GET /api/v1/currencies` returns `200 {"currencies": [...]}` with every registered currency's
 /// ledger/minter/display metadata. Mirrors how the wallet consumes the catalog on load.
@@ -1049,7 +1050,7 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(status, StatusCode::OK, "{body}");
 
     let rows = body["currencies"].as_array().expect("currencies array");
-    assert_eq!(rows.len(), 3, "demo catalog = DEMO_USD + ckBTC + ckUSDC: {body}");
+    assert_eq!(rows.len(), 4, "demo catalog = DEMO_USD + ckBTC + ckUSDC + ckUSDT: {body}");
 
     // DEMO_USD (currency 0): the mintable $ faucet asset, no ramp.
     let dusd = rows
@@ -1106,6 +1107,26 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(ckusdc["onramp"], "Direct"); // ckETH helper-contract onramp (client-side)
     // NO-SWAP HONESTY (Fork-C / O3): ckUSDC offramp is Unavailable — the wallet shows NO cash-out.
     assert_eq!(ckusdc["offramp"], "Unavailable");
+
+    // MC8 U2 — ckUSDT (currency 3): a SECOND CkEthErc20 token proving the onramp is per-token.
+    // Carries its OWN ERC-20 contract (real mainnet USDT, NOT USDC's address); same minter family +
+    // chain. Ramp honesty mirrors ckUSDC: onramp=Direct, offramp=Unavailable (Fork-C — NO cash-out).
+    let ckusdt = rows
+        .iter()
+        .find(|r| r["currency"] == 3)
+        .expect("ckUSDT currency present");
+    assert_eq!(ckusdt["mintable"], false);
+    assert_eq!(ckusdt["symbol"], "ckUSDT");
+    assert_eq!(ckusdt["decimals"], 6);
+    assert_eq!(ckusdt["minter_family"], "CkEthErc20");
+    assert_eq!(ckusdt["wrapper_name"], "ckUSDT");
+    assert_eq!(ckusdt["backing_symbol"], "USDT");
+    assert_eq!(ckusdt["network"], "Ethereum");
+    assert_eq!(ckusdt["display_decimals"], 6);
+    assert_eq!(ckusdt["chain_id"], 1); // Ethereum mainnet
+    assert_eq!(ckusdt["token_contract"], "0xdAC17F958D2ee523a2206206994597C13D831ec7"); // real USDT
+    assert_eq!(ckusdt["onramp"], "Direct");
+    assert_eq!(ckusdt["offramp"], "Unavailable"); // Fork-C — NO cash-out
 }
 
 // --- ckERC-20 onramp surface (ckUSDC; M2) -------------------------------------
@@ -1137,6 +1158,111 @@ async fn ckerc20_onramp_returns_params_for_ckusdc() {
     // currency 0 (DEMO_USD) → 503: DEMO_USD has no ckERC-20 onramp configured.
     let (status0, _body0) = call(&state, get_req("/api/v1/onramp/ckerc20?currency=0")).await;
     assert_eq!(status0, StatusCode::SERVICE_UNAVAILABLE);
+}
+
+/// MC8 U2 — the ckERC-20 onramp is CATALOG/TOKEN-SPECIFIC, not hardcoded to currency 2 / USDC.
+///
+/// Before U2 the impl was `if currency == 2 { erc20_address = CKUSDC_ERC20_ADDRESS } else { Err }` —
+/// every future ckERC20 (ckUSDT, ckETH, …) inherited ckUSDC's address or got a 503. U2 resolves the
+/// currency descriptor from the catalog and reads the per-token `token_contract` instead, so:
+///   - ckUSDC (currency 2) → the USDC ERC-20 address (NO regression).
+///   - ckUSDT (currency 3) → the USDT ERC-20 address (NOT USDC — proves token-specificity).
+///   - ckBTC (1) / DEMO (0) → 503 (not a CkEthErc20 family currency).
+///
+/// The `helper_address` is minter-scoped (ONE verified mainnet constant for ALL ckERC20 tokens) and
+/// stays unchanged; only the `erc20_address` source moves to the catalog.
+#[tokio::test]
+async fn ckerc20_onramp_is_token_specific() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+
+    // ckUSDC (currency 2) → 200 with the USDC ERC-20 address (NO regression — same as the golden above).
+    let (s_usdc, body_usdc) = call(&state, get_req("/api/v1/onramp/ckerc20?currency=2")).await;
+    assert_eq!(s_usdc, StatusCode::OK, "{body_usdc}");
+    assert_eq!(body_usdc["helper_address"], "0x18901044688D3756C35Ed2b36D93e6a5B8e00E68");
+    assert_eq!(body_usdc["erc20_address"], "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
+
+    // ckUSDT (currency 3) → 200 with the USDT ERC-20 address — NOT the USDC address. This is the
+    // token-specificity proof: a second ckERC20 reads ITS OWN `token_contract` from the catalog.
+    let (s_usdt, body_usdt) = call(&state, get_req("/api/v1/onramp/ckerc20?currency=3")).await;
+    assert_eq!(s_usdt, StatusCode::OK, "{body_usdt}");
+    assert_eq!(body_usdt["helper_address"], "0x18901044688D3756C35Ed2b36D93e6a5B8e00E68");
+    assert_eq!(body_usdt["erc20_address"], "0xdAC17F958D2ee523a2206206994597C13D831ec7");
+    assert_ne!(
+        body_usdt["erc20_address"], body_usdc["erc20_address"],
+        "ckUSDT must NOT inherit ckUSDC's ERC-20 address",
+    );
+
+    // ckBTC (currency 1) → 503: CkBtcUtxo family, not CkEthErc20 — no ckERC-20 onramp.
+    let (s_btc, _body_btc) = call(&state, get_req("/api/v1/onramp/ckerc20?currency=1")).await;
+    assert_eq!(s_btc, StatusCode::SERVICE_UNAVAILABLE);
+
+    // DEMO (currency 0) → 503: no minter family — no ckERC-20 onramp.
+    let (s_demo, _body_demo) = call(&state, get_req("/api/v1/onramp/ckerc20?currency=0")).await;
+    assert_eq!(s_demo, StatusCode::SERVICE_UNAVAILABLE);
+
+    // An unknown currency id (999, not in the catalog) → 503 (fail-closed — never falls back).
+    let (s_unk, _body_unk) = call(&state, get_req("/api/v1/onramp/ckerc20?currency=999")).await;
+    assert_eq!(s_unk, StatusCode::SERVICE_UNAVAILABLE);
+}
+
+/// MC8 U2 — fail-closed: a CkEthErc20-family currency with `token_contract: None` MUST NOT fall
+/// back to the USDC address. This is the non-custodial / no-swap honesty invariant — a partially-
+/// registered ckERC20 (family set, ERC-20 contract not yet populated) must surface a `Transient`
+/// (HTTP 503), never a silent wrong-token address. Pinned directly against the pure resolver the
+/// FakeLedger + AgentLedger impls share, so the gate is single-sourced and testable in isolation.
+#[tokio::test]
+async fn ckerc20_onramp_fails_closed_without_token_contract() {
+    // A CkEthErc20-family descriptor with NO token_contract — the dangerous "partial registration".
+    let partial = dpay_relay::CurrencyDescriptor {
+        currency: 7,
+        ledger: "xevnm-gaaaa-aaaar-qafnq-cai".to_string(),
+        mintable: false,
+        minter: Some("sv3dd-oaaaa-aaaar-qacoa-cai".to_string()),
+        minter_family: Some(dpay_relay::MinterFamily::CkEthErc20),
+        symbol: Some("ckERC20-pending".into()),
+        decimals: Some(6),
+        wrapper_name: None,
+        backing_symbol: None,
+        network: None,
+        display_decimals: None,
+        fee: None,
+        cap: None,
+        chain_id: Some(1),
+        token_contract: None, // ← the dangerous case
+        onramp: dpay_relay::RampCapability::Direct,
+        offramp: dpay_relay::RampCapability::Unavailable,
+    };
+    let r = dpay_relay::ckerc20_onramp_from_descriptor(Some(&partial), "aaaaa-aa".to_string());
+    assert!(r.is_err(), "a CkEthErc20 with no token_contract must NOT resolve an onramp");
+    match r {
+        Err(dpay_relay::LedgerError::Transient(_)) => {} // 503 — the correct shape
+        Err(other) => panic!("expected Transient (503) for a token-less ckERC20, got Rejected: {other}"),
+        Ok(_) => panic!("expected Transient (503) for a token-less ckERC20, got Ok"),
+    }
+    // Also: a non-CkEthErc20 descriptor (e.g. CkBtcUtxo) and a missing descriptor both fail closed.
+    let ckbtc = dpay_relay::CurrencyDescriptor {
+        currency: 1,
+        ledger: "2vxsx-fae".to_string(),
+        mintable: false,
+        minter: Some("mqygn-kiaaa-aaaar-qaadq-cai".to_string()),
+        minter_family: Some(dpay_relay::MinterFamily::CkBtcUtxo),
+        symbol: Some("₿".into()),
+        decimals: Some(8),
+        wrapper_name: Some("ckBTC".into()),
+        backing_symbol: Some("BTC".into()),
+        network: Some("Bitcoin".into()),
+        display_decimals: Some(8),
+        fee: None,
+        cap: None,
+        chain_id: None,
+        token_contract: None,
+        onramp: dpay_relay::RampCapability::Direct,
+        offramp: dpay_relay::RampCapability::Direct,
+    };
+    assert!(dpay_relay::ckerc20_onramp_from_descriptor(Some(&ckbtc), "aaaaa-aa".to_string()).is_err());
+    assert!(dpay_relay::ckerc20_onramp_from_descriptor(None, "aaaaa-aa".to_string()).is_err());
 }
 
 // --- withdrawal surface (ckBTC → native BTC out; W2) -----------------------------------------

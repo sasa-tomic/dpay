@@ -27,9 +27,10 @@ use serde::Deserialize;
 use dpay_core::{Currency, NONCE_LEN, PUBKEY_LEN, SignedAuthorization};
 
 use crate::ledger::{
-    CKERC20_HELPER_ADDRESS, CKUSDC_ERC20_ADDRESS, CkErc20OnrampParams, CurrencyDescriptor, DepositInfo,
+    CkErc20OnrampParams, CurrencyDescriptor, DepositInfo,
     DepositRefresh, Ledger, LedgerError, MinterFamily, MintedUtxo, PendingUtxo, RampCapability,
     Receipt, TxnRecord, U64String, WithdrawReceipt, WithdrawRequest,
+    ckerc20_onramp_from_descriptor,
 };
 
 /// Read the settlement currency out of a 292-byte signed-authorization wire (the canister does the
@@ -631,20 +632,16 @@ impl Ledger for AgentLedger {
     }
 
     async fn ckerc20_onramp_params(&self, currency: Currency) -> Result<CkErc20OnrampParams, LedgerError> {
-        // TODO(M2): fetch from facade/minter at runtime once the canister surfaces ckERC20 onramp
-        // config. The verified mainnet constants are correct for ckUSDC today; the runtime-fetch is a
-        // documented follow-up (the canister ckERC20 ramp dispatch is not built yet). `facade_principal`
-        // is the canister this AgentLedger is already pointed at (the depositErc20 `principal` arg);
-        // the helper + ERC-20 addresses are the verified mainnet values single-sourced in ledger.rs.
-        if currency == 2 {
-            Ok(CkErc20OnrampParams {
-                helper_address: CKERC20_HELPER_ADDRESS.to_string(),
-                erc20_address: CKUSDC_ERC20_ADDRESS.to_string(),
-                facade_principal: self.canister_id.to_text(),
-            })
-        } else {
-            Err(LedgerError::Transient("no ckERC-20 onramp for currency".into()))
-        }
+        // MC8 U2: resolve the onramp from the CATALOG descriptor (the live `currencies()` query),
+        // not a hardcoded `currency == 2` guard. The descriptor's per-token `token_contract` is the
+        // authoritative ERC-20 address; the `helper_address` is the verified mainnet ckETH deposit
+        // helper (minter-scoped — ONE constant for ALL ckERC20 tokens). `facade_principal` is the
+        // canister this AgentLedger is already pointed at (the depositErc20 `principal` arg). The
+        // pure resolver (`ckerc20_onramp_from_descriptor`) is shared with the FakeLedger so the
+        // fail-closed gate (no token_contract ⇒ 503, never a USDC fallback) is single-sourced.
+        let catalog = self.currencies().await?;
+        let desc = catalog.iter().find(|d| d.currency == currency);
+        ckerc20_onramp_from_descriptor(desc, self.canister_id.to_text())
     }
 
     async fn withdraw(&self, req: WithdrawRequest) -> Result<WithdrawReceipt, LedgerError> {
