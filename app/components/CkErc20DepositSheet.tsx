@@ -9,7 +9,7 @@ import type {Identity} from '../lib/types';
 import type {FamilyDisplay} from '../config/catalog';
 import {type CkErc20OnrampParams, ckerc20OnrampParams} from '../services/relay';
 import {encodeApprove, encodeDepositErc20, principalToBytes32} from '../cketh';
-import {getEthereumProvider, connectWallet, getChainId, sendTransaction, waitForReceipt, ReceiptReverted, ReceiptTimeout} from '../wallet';
+import {resolveOnrampProvider, connectWallet, getChainId, sendTransaction, waitForReceipt, ReceiptReverted, ReceiptTimeout} from '../wallet';
 import {loadDeposit, saveDeposit, clearDeposit} from '../services/ckerc20Persist';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 
@@ -106,8 +106,18 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
 
   const connect = useCallback(async () => {
     setErr(null);
-    const provider = getEthereumProvider();
-    if (!provider) { setErr('No Ethereum wallet found. Install MetaMask or Rabby in this browser.'); return; }
+    // MC8 U6.3 — resolve the onramp provider SOURCE via the web-first resolver (wallet.ts). On web
+    // this returns `window.ethereum` (the browser wallet / the e2e mock); on native it lazy-loads the
+    // WalletConnect provider when WALLETCONNECT_PROJECT_ID is configured. The null path (no source
+    // available) surfaces an honest, platform-aware message — NOT a browser-only "install MetaMask"
+    // instruction that would lie to a native user.
+    const provider = await resolveOnrampProvider();
+    if (!provider) {
+      setErr(Platform.OS === 'web'
+        ? 'No Ethereum wallet found. Install MetaMask or Rabby in this browser.'
+        : 'No wallet connected. Pair a wallet via WalletConnect.');
+      return;
+    }
     try {
       const acct = await connectWallet(provider);
       // MC8 U3 — enforce the chain id right after connect. The catalog's per-currency chain_id is
@@ -139,7 +149,10 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
 
   const submit = useCallback(async () => {
     if (!account || !params) return;
-    const provider = getEthereumProvider();
+    // MC8 U6.3 — same web-first resolver as connect(). On submit the provider was non-null at connect
+    // time; if it has since vanished (the EIP-1193 session dropped), this surfaces an honest error
+    // rather than sending calldata into the void.
+    const provider = await resolveOnrampProvider();
     if (!provider) { setErr('Wallet disconnected.'); return; }
     // Parse the human amount into the smallest units (USDC = 6 decimals). MC1 units 2-4: use the
     // exact BigInt parser — `parseFloat`/`Math.pow` are lossy above 2^53.
