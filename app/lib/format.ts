@@ -19,9 +19,23 @@ export const short = (h: string) => `${h.slice(0, 8)}…`;
 // instead of leaking raw protocol data ("from ffffffff…") to end users (N4).
 export const MINT_HEX = 'ff'.repeat(32);
 export const isMintSentinel = (h: string) => h.toLowerCase() === MINT_HEX;
-// Format a unix-seconds timestamp as HH:MM (24h, local) — the durable history rows are sourced from
-// the ledger (which settle on `ic time / 1e9`).
-export const fmtTime = (ts: number) => { const d = new Date(ts * 1000); return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`; };
+// Format a unix-seconds timestamp as HH:MM (24h, local) + a short GMT offset so a traveler can
+// tell home-vs-away at a glance ("14:30 GMT+2" vs an ambiguous bare "14:30"). The durable history
+// rows are sourced from the ledger (which settle on `ic time / 1e9`). `getTimezoneOffset` returns
+// minutes UTC is BEHIND local (sign-inverted vs the usual GMT display), so we negate; partial-hour
+// offsets (India: +5:30) append the minutes for unambiguity. No Intl API (trimmed on some RN builds).
+export const fmtTime = (ts: number) => {
+  const d = new Date(ts * 1000);
+  const hh = d.getHours();
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const offMin = -d.getTimezoneOffset();
+  const sign = offMin > 0 ? '+' : offMin < 0 ? '-' : '';
+  if (sign === '') return `${hh}:${mm} GMT`;
+  const absMin = Math.abs(offMin);
+  const h = Math.floor(absMin / 60);
+  const m = absMin % 60;
+  return m === 0 ? `${hh}:${mm} GMT${sign}${h}` : `${hh}:${mm} GMT${sign}${h}:${String(m).padStart(2, '0')}`;
+};
 export const nowSecs = () => Math.floor(Date.now() / 1000);
 // 128-bit payment nonce as lowercase hex. Uses the cryptographic RNG (`crypto.getRandomValues`,
 // polyfilled by `react-native-get-random-values` on native, native on web/Node) — NOT `Math.random`,
