@@ -44,9 +44,9 @@ export async function run() {
     console.log('[32-nfc-disclosure] onboarding (NFC forced ready)…');
     await onboardWallet(driver, 'e2e-nfc-disc');
 
-    // Waiting-for-tap: NFC ready → the Pay screen arms the card; NfcTap renders nothing yet.
-    const waiting = await driver.waitForText('Tap or scan to pay', { timeoutMs: 5_000 });
-    assert(waiting, 'Pay screen should invite a tap or scan while NFC is ready');
+    // Waiting-for-tap: NFC ready → the Pay scan surface is visible. On web NFC text is suppressed
+    // (PR35); the `pay-scan` testID is platform-agnostic.
+    await driver.findByTestID('pay-scan', { timeoutMs: 5_000 });
 
     // Helper: dispatch one NFC event through the seam (role='card' = the payer being tapped).
     const dispatch = (event) => driver.eval((e) => window.__DPAY_TEST_NFC_SESSION(e), event);

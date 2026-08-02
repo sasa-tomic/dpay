@@ -1,4 +1,4 @@
-export const EXPIRY_WINDOW = 600; // request valid 10 min
+export const EXPIRY_WINDOW = 300; // request valid 5 min — kills stale replays
 export const DIRECT_PAY_TIMEOUT_MS = 5000;
 // Merchant NFC settlement: bound the /pay call, then reconcile the ambiguous case via the
 // idempotent /receipt/:nonce so a settled payment is never reported as failed.

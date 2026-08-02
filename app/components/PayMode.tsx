@@ -1,5 +1,5 @@
 import {useEffect, useState} from 'react';
-import {View, Text, Pressable, Share, Modal} from 'react-native';
+import {View, Text, Pressable, Share, Modal, Platform} from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import {S} from '../styles';
 import {C} from '../config/palette';
@@ -248,12 +248,12 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
       ) : null}
       {!nfcActive ? (
         <>
-          {nfcReady ? (
+          {Platform.OS !== 'web' && nfcReady ? (
             <View style={S.nfcStatusRow} testID="pay-scan">
               <NfcIcon color={C.brand} size={34} />
               <Text style={S.nfcStatusLabel}>Tap or scan to pay</Text>
             </View>
-          ) : (
+          ) : Platform.OS !== 'web' ? (
             <View style={S.nfcStatusRow} testID="pay-scan">
               <NfcIcon color={C.bad} size={34} off />
               <Pressable style={S.nfcInfoLink} onPress={() => setNfcInfoOpen(true)} accessibilityRole="button" accessibilityLabel="Why NFC is unavailable" accessibilityState={{disabled: false}}>
@@ -261,8 +261,10 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
                 <Text style={S.nfcInfoGlyph}>ⓘ</Text>
               </Pressable>
             </View>
+          ) : (
+            <Text style={[S.nfcStatusLabel, {paddingTop: 16}]} testID="pay-scan">Scan to pay</Text>
           )}
-          {!nfcReady ? <Text style={S.dim2}>Scan the QR code to pay.</Text> : null}
+          {Platform.OS !== 'web' && !nfcReady ? <Text style={S.dim2}>Scan the QR code to pay.</Text> : null}
           <QrScanner onScan={onRequestString} />
           {err ? <Text style={S.err}>{err}</Text> : null}
         </>

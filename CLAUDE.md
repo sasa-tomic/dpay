@@ -75,7 +75,7 @@ The next product milestone is an **asset-first wallet**, not a generic payer-sid
 2. **Payer (offline)** scans it, reviews "Pay <amount> <asset> to <merchant>" against that asset's balance, approves → signs the complete authorization → shows a signed-auth QR.
 3. **Merchant** scans the signed-auth QR → submits via relay → canister verifies sig + nonce/expiry/cap/balance, settles atomically → "Paid ✓".
 
-The signature binds the **exact amount + payee + request**, so consent is unambiguous and the merchant-issued `request_id` doubles as the ledger nonce (single-use → no double-charge). Short `expiry` (~2 min) kills stale replays. Rejected: single-scan payer-presented pre-auth (merchant fills the amount) — faster but weaker consent. Deferred: a signed receipt QR back to the payer for offline confirmation.
+The signature binds the **exact amount + payee + request**, so consent is unambiguous and the merchant-issued `request_id` doubles as the ledger nonce (single-use → no double-charge). Short `expiry` (~5 min) kills stale replays. Rejected: single-scan payer-presented pre-auth (merchant fills the amount) — faster but weaker consent. Deferred: a signed receipt QR back to the payer for offline confirmation.
 
 ## Non-negotiable: dpay never holds, swaps, or can move user funds
 

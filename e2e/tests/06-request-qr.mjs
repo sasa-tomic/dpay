@@ -18,7 +18,7 @@
 import { setup, assert, assertEq, onboardWallet, accountOf } from '../harness/lib.mjs';
 import { decodeRequest, REQUEST_LEN } from '../harness/wire.mjs';
 
-const EXPIRY_WINDOW_SLACK = 700; // EXPIRY_WINDOW=600 in App.tsx + a few seconds of test latency
+const EXPIRY_WINDOW_SLACK = 400; // EXPIRY_WINDOW=300 in constants.ts + a few seconds of test latency
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -75,7 +75,7 @@ export async function run() {
     assertEq(req.toHex, accountHex, 'request.to == this wallet account (the deposit destination)');
     assertEq(req.amount, '4250', 'request.amount == entered 42.50 in minor units (cents)');
     assert(req.expiry > now, `request.expiry must be in the future (got ${req.expiry}, now ${now})`);
-    assert(req.expiry < now + EXPIRY_WINDOW_SLACK, `request.expiry must be within the ~10min window (got ${req.expiry}, now ${now})`);
+    assert(req.expiry < now + EXPIRY_WINDOW_SLACK, `request.expiry must be within the ~5min window (got ${req.expiry}, now ${now})`);
     assertEq(req.currency, 0, 'request.currency == DEMO_USD (the wallet `$` asset)');
     // The merchant's own username rides as `to_name` INSIDE the request bytes now.
     assertEq(req.toName, 'e2e-bob', 'request.to_name == the merchant username (now in the bytes, not a suffix)');

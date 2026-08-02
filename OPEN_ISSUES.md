@@ -59,7 +59,7 @@ updates land in-line as fixes commit.
 
 Exhaustive app structure scan (`app/**` + `e2e/`) + screenshot UX analysis of 50 real-app captures.
 
-> **Status:** PR20–PR22 RESOLVED (`6fa523b`); PR23–PR27 + PR30 RESOLVED (DRY pass — named timeouts/QR_SIZE, `payAndClassify`/`readJsonOrEmpty`, hooks→lib, documented catches); PR28–PR29 + PR31–PR33 open (tech-debt phase); PR34–PR35 need founder input.
+> **Status:** PR20–PR22 RESOLVED (`6fa523b`); PR23–PR27 + PR30 RESOLVED (DRY pass — named timeouts/QR_SIZE, `payAndClassify`/`readJsonOrEmpty`, hooks→lib, documented catches); PR28–PR29 + PR31–PR33 open (tech-debt phase); PR34–PR35 ✅ RESOLVED (founder decision: tighten expiry to 300s; suppress NFC banner on web).
 
 ### Resolved
 - **PR20 (security) | `Math.random` for payment nonce.** `app/lib/format.ts:26` `randNonceHex()` used `Math.random()` (xorshift128+ on some engines) for the 128-bit payment idempotency key. Fix: `globalThis.crypto.getRandomValues` (polyfilled by `react-native-get-random-values`). Conf 9/9. `6fa523b`.
@@ -78,10 +78,10 @@ Exhaustive app structure scan (`app/**` + `e2e/`) + screenshot UX analysis of 50
 - **PR31 (low, a11y) | `accessibilityHint` used once** (`ReceiveMode:201`); all interactive elements have labels but no hints. Conf 7/10.
 - **PR32 (low) | `fmtTime` ignores timezone** (`format.ts:24`) — a traveler can't tell if "14:30" is home or away. Show tz or relative time. Conf 7/10.
 - **PR33 (low) | `useHotkeys` re-subscribes on every render** (`useHotkeys.ts:53` deps `[handlers, opts]`). `useRef`-mirror like NfcTap does for `onActive`. Conf 6/10.
+### Needs founder input (FORK) — ✅ ALL RESOLVED
 
-### Needs founder input (FORK)
-- **PR34 (high, policy) | `EXPIRY_WINDOW = 600` (10 min) but `CLAUDE.md:78` says "~2 min kills stale replays."** The security argument is 5× weaker than documented. Options: (a) tighten to ~120s (consider NFC round-trip time), (b) correct CLAUDE.md to match the 600s reality. **Needs founder decision** — 10min is generous for a slow NFC exchange + relay settle; 2min might abort a legitimate tap. Conf 10/10 a mismatch exists.
-- **PR35 (medium, UX) | "NFC not available" prominent on web onboarding** — the web build shows a jarring "NFC not available" message above the fold before the user understands the app. On native (the real target) NFC is present; only the web/test build shows this. Options: suppress the NFC-absent banner on web, or gate it behind first-use. **Needs founder decision.**
+- **PR34 (high, policy) | `EXPIRY_WINDOW` mismatch.** ✅ RESOLVED (founder: middle ~300s). `EXPIRY_WINDOW` tightened 600→300 (5 min); `CLAUDE.md:78` updated "~2 min"→"~5 min"; `e2e/tests/06-request-qr.mjs` SLACK 700→400. Halves the replay window while preserving comfortable NFC/relay headroom.
+- **PR35 (medium, UX) | "NFC not available" prominent on web.** ✅ RESOLVED (founder: suppress on web). `app/components/PayMode.tsx` now gates the NFC status row behind `Platform.OS !== 'web'`; web shows a neutral "Scan to pay" label (keeping `testID="pay-scan"` for e2e). Native is unchanged.
 
 ### Test coverage gaps (Phase 3)
 1. Ledger row exact units after multi-currency pay (flow 24 checks presence, not "−0.00050000 BTC").

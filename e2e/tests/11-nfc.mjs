@@ -45,11 +45,11 @@ export async function run() {
     console.log('[11-nfc] onboarding (NFC forced ready)…');
     await onboardWallet(driver, 'e2e-nfc');
 
-    // Waiting-for-tap: NFC ready → the Pay screen says "Tap or scan to pay".
+    // Waiting-for-tap: NFC ready → the Pay scan surface is visible. On native the text is "Tap or
+    // scan to pay" (NFC armed); on web NFC is suppressed → "Scan to pay". Either way `pay-scan` mounts.
     // (NfcTap renders nothing while merely listening — the QR scanner stays live alongside it.)
-    const waiting = await driver.waitForText('Tap or scan to pay', { timeoutMs: 5_000 });
-    assert(waiting, 'Pay screen should invite a tap or scan while NFC is ready');
-    console.log('[11-nfc] ✓ waiting-for-tap: "Tap or scan to pay"');
+    await driver.findByTestID('pay-scan', { timeoutMs: 5_000 });
+    console.log('[11-nfc] ✓ waiting-for-tap: pay-scan surface visible');
 
     // Helper: dispatch one NFC event through the seam (role='card' = the payer being tapped).
     const dispatch = (event) => driver.eval((e) => window.__DPAY_TEST_NFC_SESSION(e), event);
