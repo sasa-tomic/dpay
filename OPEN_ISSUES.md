@@ -17,6 +17,44 @@ the code + invariants from every completed stage (security-critical: MC4 receipt
 identity, MC1 exact amounts, MC8 WalletConnect isolation) with a fresh context. Do not trust the
 progress doc's claims — verify against the code.
 
+## Pedantic review findings (2026-08-02)
+
+Six fresh-context subagents reviewed MC1–MC8 + bridge-parity (L1–L5). **VERDICT: no CRITICAL/HIGH
+money-safety gaps — every claimed invariant holds, verified against code with file:line evidence.**
+Gates green at review time: test-core 45/45, test-canister 65/65, test-relay 46/46, test-live 48/48,
+jest, e2e 35/35, typecheck clean, bridge-parity OK (21 methods). The items below are the material
+(MEDIUM) + batchable LOW findings worth fixing. Each is filed with its fix + confidence; status
+updates land in-line as fixes commit.
+
+> **Status (2026-08-02): ✅ PR1–PR15 + PR18 RESOLVED** (committed + `just verify` green: test-core 45/45,
+> test-canister 66/66, test-relay 46/46, test-live 48/48, jest, e2e 35/35, typecheck, bridge-parity OK 21).
+> Commits: `0028c84` (PR1), `6976905` (PR4/PR5-relay/PR9), `db3d0ce` (PR11/PR5-canister/PR14/PR15),
+> `35c9bd2` (PR2), `e56dce8` (PR6/PR8/PR10/PR18), `0017c42` (PR3/U6.5/PR12/PR13). PR16/PR17 optional (no
+> action); PR19 accepted (no action). PR7 (AGENTS.md doc) lands via the docs pass below.
+
+### MEDIUM (fix, TDD RED-first) — ✅ ALL RESOLVED
+- **PR1 (security) | NFC merchant path missing receipt↔request nonce match.** `app/components/NfcTap.tsx:147-181` `submitWire`. The comment at :174-181 claims the nonce match is "enforced via `settledNonceHex` above" but `settledNonceHex` is only ASSIGNED (:153/:160/:166), never COMPARED against `reqInfo.nonce`. A malicious relay returns ANY past valid canister-signed receipt (different nonce) → merchant passes key-pin ✓ + sig ✓ → `finalize('success')` → goods fraud. Payer side IS protected (`decidePayerReceipt` at `app/payments.ts:77`). Fix: pure `isReceiptForRequest(receipt, expectedNonceHex)` in payments.ts + call in submitWire before `verifyOutcomeReceipt`. Conf 9/7.
+- **PR2 (defense-in-depth) | Kotlin `rawU64` range-permissive.** `app/android/app/src/main/java/com/dpay/DpayCoreModule.kt:49-56` + `DpayNfcModule.kt:89-93`. `BigInteger(trim).toLong().toULong()` doesn't reject negative strings (→ near u64::MAX) or overflow (→ 0). Current callers pre-parse, so no live exploit, but only device-gate-tested. Fix: reject negative + `[0, 2^64)` range guard. Conf 9/8.
+- **PR3 (liveness) | WC `provider.connect()` no timeout/cancel.** `app/walletconnect.ts:119` + `app/components/CkErc20DepositSheet.tsx:133`. No dpay-side bound; sheet-close not wired to abort. Bounded by SDK pairing-topic TTL (~5min); pairs with U6.5 (no disconnect helper / `cachedProvider` :52 never cleared). Fix: `Promise.race` timeout + cancel-on-close + `provider.disconnect()`. Conf 8/7.
+- **PR4 (liveness) | No I/O timeout on relay→canister calls.** `crates/dpay-relay/src/agent_ledger.rs:235-238,250-302,528-541`; axum `/balance` handler `app.rs:280-305`. A stalled replica wedges the balance poll ~5min instead of failing fast to `LedgerError::Transient` (503). Fix: `tokio::time::timeout` (5-10s budget) → Transient. Conf 9/7.
+- **PR5 (test pinning) | MC3 TTL-decision + NoNewUtxos cache refresh not test-pinned.** `crates/dpay-relay/tests/live.rs:442-584` (can't distinguish refresh-vs-cache; faucet pre-warms) + `crates/dpay-canister-tests/tests/deposit.rs:415-452` (NoNewUtxos hit twice, `dpay_balance` never asserted). A regression making `is_stale()` always-false would pass. Fix: stale-without-refresh test + `dpay_balance` assertion after NoNewUtxos. Conf 9/8.
+
+### LOW (batch, ≥6/10) — ✅ ALL RESOLVED (PR16/PR17 optional, PR19 accepted)
+- **PR6 | `dashboard.html` (97651B, repo root) = SLOP** — unrelated "Productivity" SPA, terracotta theme, referenced nowhere. DELETE. Conf 9/10.
+- **PR7 | `AGENTS.md:23` modular-tree omits 4 wired root modules** (`app/payments.ts`, `wallet.ts`, `cketh.ts`, `walletconnect.ts` — all wired; WC via dynamic import = intentional isolation). Doc update. Conf 9/10.
+- **PR8 | `app/services/relay.ts:13-47` no default timeout** on 5 fetch calls (callers disciplined but defense-in-depth gap). Add default `AbortSignal.timeout()`. Conf 8/9.
+- **PR9 | `crates/dpay-relay/src/app.rs:770-772` `/pay` Transient fallback drops receipt-lookup error context** (`Err(_) => ...format!("ledger unavailable: {msg}")` discards secondary error). Include it. Conf 9/10.
+- **PR10 | `app/services/receipt.ts:38` `EXPECTED_RECEIPT_PUBKEY` pin compare case-sensitive** (relay emits lowercase; mixed-case prod pin silently fails EVERY receipt — fail-closed but operationally fragile). Make case-insensitive (precedent `payments.ts:77`). Conf 8/9.
+- **PR11 | `crates/dpay-canister/src/lib.rs:2418` `reconcile` ignores `GetTransactionsResponse.first_index`**, hardcodes `block_index = start + i`. Correct today (no archiving) but drift if paging added. Use `first_index + i`. Conf 9/9.
+- **PR12 | `app/package.json` `@walletconnect/modal-react-native@1.1.0` unused dep** (capstone uses react-native-qrcode-svg). Uninstall. Conf 9/9.
+- **PR13 | `app/walletconnect.ts:66` hardcoded `redirect: {native: 'org.kalaj.dpay://'}`** (namespace `com.dpay` ≠ applicationId; silent break if it changes). Derive/cross-reference. Conf 7/9.
+- **PR14 (doc) | MC2 `register_currency_meta` (`lib.rs:2060-2100`) doesn't re-check RETIRED** (cosmetic — money paths reject retired first). Add docstring/retire-check. Conf 10/10.
+- **PR15 (doc) | MC3 `refresh_deposit` docstring "Modeled EXACTLY on `mint`" (`lib.rs:2479`, `dfx/dpay_canister.did:221`) inaccurate** — mint hard-fails (`?`) while refresh_deposit is best-effort (`if let Ok`). Soften doc. Conf 9/9.
+- **PR16 (optional) | MC3 TOCTOU/thundering-herd on `last_refresh`** (`agent_ledger.rs:310-318` + `:299-302` not under lock across await) — concurrent refresh waste, not correctness (idempotent). Optional per-key mutex. Conf 8/10.
+- **PR17 (optional) | MC1 `e2e/tests/00-cross-val.mjs:286-313` replicates the TS parser inline** (Node can't import .ts; real guard is jest `amount.test.ts`). Drift surface. Conf 9/9.
+- **PR18 (doc) | MC1 three protocol-u64-as-number JSON fields** (`ledger.rs:126` `Receipt.settle_ts`, `:146` timestamp, `:177` confirmations, `:218` expiry — all bounded non-money). Make `settle_ts` U64String or document. Conf 10/9.
+- **PR19 (accepted) | MC2 mainnet deploy (`scripts/dfx-deploy-icrc-mainnet.sh:82-108`) bypasses U4 strict validation for seeded DEMO id** — documented + accepted under U2 idempotency. No action.
+
 ## Severity key
 
 - **HARD blocker** — blocks a specific path until an *external* step lands; cannot be fixed in code in this repo.
