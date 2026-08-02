@@ -49,11 +49,15 @@ type InitMock = typeof FAKE_INIT;
 function load(id: string): {
   getWalletConnectProvider: () => Promise<Eip1193Provider | null>;
   pairWalletConnect: (onUri: (uri: string | null) => void) => Promise<void>;
+  disconnectWalletConnect: () => Promise<void>;
+  pairTimeoutMs: number;
   init: InitMock;
 } {
   let out!: {
     getWalletConnectProvider: () => Promise<Eip1193Provider | null>;
     pairWalletConnect: (onUri: (uri: string | null) => void) => Promise<void>;
+    disconnectWalletConnect: () => Promise<void>;
+    pairTimeoutMs: number;
     init: InitMock;
   };
   jest.isolateModules(() => {
@@ -67,10 +71,18 @@ function load(id: string): {
     const stub = require('@walletconnect/ethereum-provider') as {
       EthereumProvider: {init: InitMock};
     };
+    const mod = require('../walletconnect') as {
+      getWalletConnectProvider: () => Promise<Eip1193Provider | null>;
+      pairWalletConnect: (onUri: (uri: string | null) => void) => Promise<void>;
+      disconnectWalletConnect: () => Promise<void>;
+      PAIR_TIMEOUT_MS: number;
+    };
     out = {
       init: stub.EthereumProvider.init,
-      getWalletConnectProvider: require('../walletconnect').getWalletConnectProvider,
-      pairWalletConnect: require('../walletconnect').pairWalletConnect,
+      getWalletConnectProvider: mod.getWalletConnectProvider,
+      pairWalletConnect: mod.pairWalletConnect,
+      disconnectWalletConnect: mod.disconnectWalletConnect,
+      pairTimeoutMs: mod.PAIR_TIMEOUT_MS,
     };
   });
   return out;
@@ -252,6 +264,138 @@ describe('pairWalletConnect — display_uri + connect event handling', () => {
     await pairWalletConnect(onUri);
     expect(onUri).not.toHaveBeenCalled();
     expect(fake.connect).toHaveBeenCalledTimes(1);
+  });
+});
+
+// --- PR3 — provider.connect() is dpay-bounded (no infinite spinner) ----------------------------
+// Without a dpay-side bound, a wallet that never scans the QR leaves `provider.connect()` pending
+// forever (relying silently on the SDK's internal pairing-topic TTL). PR3 wraps it in Promise.race
+// with PAIR_TIMEOUT_MS (5min) so the user sees an honest "timed out" error. Listeners + the timer
+// are cleaned up in `finally` on both the happy path and the timeout.
+describe('pairWalletConnect — PR3 pair timeout', () => {
+  test('times out after PAIR_TIMEOUT_MS when connect() never resolves (wallet never scanned)', async () => {
+    jest.useFakeTimers();
+    try {
+      const fake = new FakeEthereumProvider();
+      const {init, pairWalletConnect, pairTimeoutMs} = load(PROJECT_ID);
+      init.mockResolvedValue(fake);
+      // connect() never settles: the wallet never scanned the QR.
+      fake.connect.mockImplementation(() => new Promise<void>(() => {}));
+
+      const onUri = jest.fn();
+      const p = pairWalletConnect(onUri);
+      // `pairWalletConnect` is async: it has run synchronously to its first `await cachedProvider`
+      // and then suspended (the listeners + the timeout timer are scheduled AFTER that await). The
+      // async variant of advanceTimersByTime drains pending microtasks first → the function resumes
+      // past the await, registers the listeners, schedules the setTimeout, and settles into the
+      // Promise.race; then advancing past PAIR_TIMEOUT_MS fires the timeout → the race rejects →
+      // the catch wraps it → pairWalletConnect rejects with an honest "timed out" message.
+      //
+      // Register the rejection assertion BEFORE firing the timer: under fake timers the rejection
+      // lands during `advanceTimersByTimeAsync`, and an unattached rejection would surface as an
+      // unhandled-rejection test failure before a later `await expect(p).rejects` could catch it.
+      const assertion = expect(p).rejects.toThrow(/timed out/i);
+      await jest.advanceTimersByTimeAsync(pairTimeoutMs);
+      await assertion;
+
+      // Cleanup still runs on timeout (listeners + the timer cleared in `finally`).
+      expect(fake.removeListener).toHaveBeenCalledWith('display_uri', expect.any(Function));
+      expect(fake.removeListener).toHaveBeenCalledWith('connect', expect.any(Function));
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test('PAIR_TIMEOUT_MS is the documented 5-minute bound (mirrors the SDK pairing-topic TTL)', () => {
+    const {pairTimeoutMs} = load(PROJECT_ID);
+    expect(pairTimeoutMs).toBe(5 * 60 * 1000);
+  });
+});
+
+// --- U6.5 — disconnectWalletConnect (clear cache + provider.disconnect) ------------------------
+// `cachedProvider` was previously NEVER cleared: a pairing left mid-flight (or a dropped session)
+// wedged the cache so the next open reused a dead provider. U6.5 adds a teardown helper that calls
+// `provider.disconnect()` AND nulls the cache, forcing a fresh `init` on the next open. Idempotent
+// and safe to fire-and-forget from a React unmount cleanup (swallows disconnect failures).
+describe('disconnectWalletConnect — U6.5 (clear cache + provider.disconnect)', () => {
+  test('clears the cached provider and calls provider.disconnect() exactly once', async () => {
+    const fake = new FakeEthereumProvider();
+    const {init, getWalletConnectProvider, disconnectWalletConnect} = load(PROJECT_ID);
+    init.mockResolvedValue(fake);
+    await getWalletConnectProvider(); // prime the cache
+    await disconnectWalletConnect();
+    expect(fake.disconnect).toHaveBeenCalledTimes(1);
+    // Cache cleared → a subsequent get re-inits (init fires again with a fresh provider).
+    init.mockClear();
+    init.mockResolvedValue(new FakeEthereumProvider());
+    await getWalletConnectProvider();
+    expect(init).toHaveBeenCalledTimes(1);
+  });
+
+  test('no-op when no provider is cached (never initialized)', async () => {
+    const {init, disconnectWalletConnect} = load(PROJECT_ID);
+    await expect(disconnectWalletConnect()).resolves.toBeUndefined();
+    expect(init).not.toHaveBeenCalled();
+  });
+
+  test('empty projectId → no-op (disabled guard)', async () => {
+    const {init, disconnectWalletConnect} = load('');
+    await expect(disconnectWalletConnect()).resolves.toBeUndefined();
+    expect(init).not.toHaveBeenCalled();
+  });
+
+  test('web Platform → no-op (disabled guard, even with a projectId set)', async () => {
+    mockPlatformOS = 'web';
+    const {init, disconnectWalletConnect} = load(PROJECT_ID);
+    await expect(disconnectWalletConnect()).resolves.toBeUndefined();
+    expect(init).not.toHaveBeenCalled();
+  });
+
+  test('idempotent — a second call is a no-op (cache already cleared by the first)', async () => {
+    const fake = new FakeEthereumProvider();
+    const {init, getWalletConnectProvider, disconnectWalletConnect} = load(PROJECT_ID);
+    init.mockResolvedValue(fake);
+    await getWalletConnectProvider();
+    await disconnectWalletConnect();
+    await disconnectWalletConnect(); // second call: cache is null → no-op
+    expect(fake.disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  test('swallows a provider.disconnect failure (cache still cleared, no throw to caller)', async () => {
+    const fake = new FakeEthereumProvider();
+    fake.disconnect.mockRejectedValue(new Error('session already closed'));
+    const {init, getWalletConnectProvider, disconnectWalletConnect} = load(PROJECT_ID);
+    init.mockResolvedValue(fake);
+    await getWalletConnectProvider();
+    // Must NOT throw — the helper is called fire-and-forget from a React unmount cleanup where an
+    // unhandled rejection would be invisible + noisy.
+    await expect(disconnectWalletConnect()).resolves.toBeUndefined();
+    expect(fake.disconnect).toHaveBeenCalledTimes(1);
+    // Cache cleared despite the failure → next get re-inits.
+    init.mockClear();
+    init.mockResolvedValue(new FakeEthereumProvider());
+    await getWalletConnectProvider();
+    expect(init).toHaveBeenCalledTimes(1);
+  });
+});
+
+// --- PR13 — redirect.native deep-link literal pinned to the build.gradle applicationId ---------
+// The wallet's "return to dpay" deep-link depends on redirect.native matching the applicationId. A
+// drift breaks it SILENTLY (no error, just a dead tap). This pins the literal so a future change to
+// ANDROID_DEEP_LINK is visible here (and points the reader at build.gradle to cross-check).
+describe('initProvider — PR13 deep-link redirect', () => {
+  test('passes redirect.native = "org.kalaj.dpay://" (the build.gradle applicationId + "://")', async () => {
+    // Cross-reference: app/android/app/build.gradle → applicationId "org.kalaj.dpay".
+    const {init, getWalletConnectProvider} = load(PROJECT_ID);
+    init.mockResolvedValue(new FakeEthereumProvider());
+    await getWalletConnectProvider();
+    expect(init).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          redirect: {native: 'org.kalaj.dpay://'},
+        }),
+      }),
+    );
   });
 });
 

@@ -77,8 +77,13 @@ export class FakeEthereumProvider
     EthereumProviderInstance['connect']
   >;
 
-  /** WC `disconnect` — inert jest.fn. */
-  disconnect = jest.fn(async (): Promise<void> => undefined) as EthereumProviderInstance['disconnect'];
+  /** WC `disconnect` — jest.fn (tests override to reject to drive the teardown-error path). Typed
+   * as `jest.MockedFunction<real signature>` so tests can call `.mockRejectedValue()` while STILL
+   * satisfying the `implements Pick<..., 'disconnect'>` constraint (the intersection preserves the
+   * SDK call signature for drift detection — mirrors `connect` above). */
+  disconnect = jest.fn(async (): Promise<void> => undefined) as jest.MockedFunction<
+    EthereumProviderInstance['disconnect']
+  >;
 
   /**
    * WC `on` — jest.fn that ALSO registers the listener in the internal registry so `emit` can fire

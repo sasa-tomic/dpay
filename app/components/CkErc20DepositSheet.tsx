@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useState} from 'react';
+import {useCallback, useEffect, useRef, useState} from 'react';
 import {View, Text, Pressable, TextInput, ScrollView, SafeAreaView, StatusBar, ActivityIndicator, Platform} from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import {C} from '../config/palette';
@@ -46,6 +46,11 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
   // QR (between display_uri and the connect event). On web this is ALWAYS null (pairOnrampWallet is
   // a no-op that returns false without ever calling onUri), so the QR never renders in the e2e flow.
   const [wcUri, setWcUri] = useState<string | null>(null);
+  // PR3/U6.5 — a ref mirror of wcUri so the unmount cleanup (empty-deps effect) can read the LATEST
+  // value at teardown time. Without this, an unmount-only effect would capture the initial null and
+  // never see a pairing in flight. Updated synchronously every render (no effect needed).
+  const wcUriRef = useRef(wcUri);
+  wcUriRef.current = wcUri;
   const [params, setParams] = useState<CkErc20OnrampParams | null>(null);
   const [startBal, setStartBal] = useState<string | null>(null);
   // Captured during submit() so the persisted watching state can carry the two ETH tx hashes
@@ -54,6 +59,26 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
   const [resumed, setResumed] = useState(false);
 
   useEscapeToClose(onClose);
+
+  // PR3/U6.5 — on unmount (the close X, Esc, or any parent-driven teardown), if a WalletConnect
+  // pairing is still in flight (wcUri is non-null: display_uri fired but the connect event never
+  // did → no session established), abort it via the WC disconnect helper so the relay isn't left
+  // holding a dangling pairing topic and the cached provider is cleared for a clean re-pair next
+  // open. Fire-and-forget: the sheet is already tearing down, so there is no UI to surface an error
+  // (the helper swallows failures internally anyway). Reached via a lazy dynamic import — the SAME
+  // isolation boundary `wallet.ts` uses (wallet.ts is read-only here; the sheet never statically
+  // imports walletconnect.ts). The guard (`wcUriRef.current !== null`) means a successful pair (QR
+  // already cleared → null) does NOT tear down the session the user is actively depositing through.
+  useEffect(() => {
+    return () => {
+      if (wcUriRef.current !== null) {
+        // eslint-disable-next-line @typescript-eslint/no-floating-promises -- fire-and-forget teardown; disconnectWalletConnect swallows internally
+        import('../walletconnect')
+          .then(({disconnectWalletConnect}) => disconnectWalletConnect())
+          .catch(() => { /* best-effort: a teardown import failure must not crash unmount */ });
+      }
+    };
+  }, []);
 
   // MC8 U5 — RESUME on mount. The watching poll is relay-bound (not Ethereum), so a watching deposit
   // survives an app restart WITHOUT a wallet reconnect: hydrate amount/account/startBal/txHashes and

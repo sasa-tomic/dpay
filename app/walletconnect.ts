@@ -40,9 +40,25 @@ import type {Eip1193Provider} from './wallet';
 // type is derived via InstanceType — see walletconnect-fake.ts for the detailed rationale).
 type EthereumProviderInstance = InstanceType<typeof EthereumProvider>;
 
+// PR3 — dpay-side bound on `provider.connect()`. The WC SDK's pairing topic has its own ~5min TTL,
+// but dpay must NOT rely silently on that internal behavior: if the wallet never scans the QR, the
+// sheet would otherwise wait indefinitely on `connect()` with no honest error. 5min is generous
+// (matches the SDK's pairing-topic TTL ceiling) and surfaces a truthful "timed out" error to the
+// user instead of an infinite spinner. Exported so the test can advance fake timers by exactly this.
+export const PAIR_TIMEOUT_MS = 5 * 60 * 1000;
+
+// PR13 — the Android deep-link back into this app after the wallet signs. MUST stay in lockstep
+// with the `applicationId` in `app/android/app/build.gradle` (currently "org.kalaj.dpay", which is
+// INTENTIONALLY != the java package namespace "com.dpay" — see app/android/app/play-signing/README.md).
+// If the applicationId ever changes and this drifts, the wallet's "return to dpay" deep-link breaks
+// SILENTLY (no error, just a dead tap). A documented named const is the single source here — no
+// build-time injection (the applicationId is a gradle value, not reachable from JS at runtime).
+const ANDROID_DEEP_LINK = 'org.kalaj.dpay://';
+
 // The single cached init promise. WalletConnect's pairing/session is long-lived; calling
 // `EthereumProvider.init` again would tear down the session and re-pair every time the sheet opens.
-// Init once, share the resulting provider across calls.
+// Init once, share the resulting provider across calls. Cleared by `disconnectWalletConnect()` (U6.5)
+// so a teardown (sheet close mid-pair, or an aborted session) forces a fresh init on the next open.
 //
 // MC8 U6 capstone — typed as `Promise<EthereumProviderInstance>` (the FULL provider surface) so
 // `pairWalletConnect` can use `.on('display_uri', ...)` / `.connect()` / `.removeListener(...)`.
@@ -63,7 +79,7 @@ function initProvider(): Promise<EthereumProviderInstance> {
       description: 'dpay non-custodial wallet',
       url: 'https://dpay.kalaj.org',
       icons: [],
-      redirect: {native: 'org.kalaj.dpay://'}, // deep-link back into this app after the wallet signs
+      redirect: {native: ANDROID_DEEP_LINK}, // PR13: deep-link back into this app after the wallet signs
     },
   });
 }
@@ -112,19 +128,66 @@ export async function pairWalletConnect(onUri: (uri: string | null) => void): Pr
   provider.on('display_uri', onDisplayUri);
   provider.on('connect', onConnect);
 
+  // PR3 — bound connect() with Promise.race + PAIR_TIMEOUT_MS so a wallet that never scans the QR
+  // surfaces an honest "timed out" error instead of hanging forever on the SDK's internal TTL. The
+  // timeout promise's timer is cleared in `finally` on the happy path (no dangling timer). Declared
+  // in the enclosing scope so `finally` can clear it (a `let` inside `try` would be out of scope).
+  // NOTE: Promise.race cannot truly cancel the underlying connect() (JS promises aren't
+  // cancellable) — the SDK's connect() stays pending until its own pairing-topic TTL or until
+  // `disconnectWalletConnect()` tears the provider down (the sheet wires that on close).
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     // connect() initiates the pairing handshake; it resolves when the session is established (the
     // wallet approved). The SDK emits display_uri (→ onUri(uri)) during this call, then connect
     // (→ onUri(null)) when the session settles. No opts needed (the chains were set at init).
-    await provider.connect();
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error('pairing timed out — no wallet scanned within 5 min')),
+        PAIR_TIMEOUT_MS,
+      );
+    });
+    await Promise.race([provider.connect(), timeout]);
   } catch (e) {
     // Translate to a clear, typed pair-failure error so the sheet can surface friendly copy.
     throw new Error(
       `WalletConnect pairing failed: ${e instanceof Error ? e.message : String(e)}`,
     );
   } finally {
-    // Always clean up listeners (success OR failure) so a re-pair doesn't stack duplicate handlers.
+    // Always clean up listeners + the timeout timer (success OR failure) so a re-pair doesn't stack
+    // duplicate handlers or leak a dangling timer.
+    if (timer) clearTimeout(timer);
     provider.removeListener('display_uri', onDisplayUri);
     provider.removeListener('connect', onConnect);
+  }
+}
+
+/**
+ * U6.5 — disconnect the cached WalletConnect provider AND clear the cache. Idempotent + safe to call
+ * from a fire-and-forget teardown (the sheet's unmount cleanup): swallows any provider.disconnect()
+ * failure so a teardown glitch never propagates to a caller that has already torn down its UI.
+ *
+ * Why clear the cache: the WC pairing/session is bound to a specific provider instance. Leaving a
+ * disconnected/stale provider cached would make the next `getWalletConnectProvider()` /
+ * `pairWalletConnect()` reuse a dead session. Clearing forces a fresh `EthereumProvider.init` on the
+ * next open, so the user gets a clean re-pair rather than errors on a stale provider. The cache is
+ * cleared BEFORE awaiting disconnect so even a rejecting disconnect leaves the module in the clean
+ * (re-init-next) state.
+ *
+ * Disabled guard: web Platform / empty projectId → immediate no-op (mirrors the other exports, so
+ * the sheet can call this unconditionally without special-casing the disabled path).
+ */
+export async function disconnectWalletConnect(): Promise<void> {
+  // Disabled guard — same gate as the other exports (defense-in-depth).
+  if (Platform.OS === 'web' || !WALLETCONNECT_PROJECT_ID) return;
+  const cached = cachedProvider;
+  if (!cached) return; // nothing cached (never initialized, or already disconnected) → no-op.
+  // Clear the cache FIRST so a rejecting disconnect cannot leave a stale provider cached.
+  cachedProvider = null;
+  try {
+    const provider = await cached;
+    await provider.disconnect();
+  } catch {
+    // Swallow — best-effort teardown. The cache is already cleared; a disconnect failure (e.g. the
+    // SDK session already dropped on its own) must not propagate to the fire-and-forget caller.
   }
 }
