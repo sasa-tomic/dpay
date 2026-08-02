@@ -30,6 +30,7 @@
 // Add a flow = add `tests/NN-name.mjs` exporting `async function run()` + a `meta` export (see
 // harness/meta.mjs). No other change needed — the harness auto-discovers it, filters by it, and
 // regenerates FLOWS.md from it.
+import os from 'node:os';
 import { stopSession } from './harness/lib.mjs';
 import { loadTestsMeta, filterByToken, JOURNEYS } from './harness/meta.mjs';
 
@@ -39,11 +40,51 @@ import { loadTestsMeta, filterByToken, JOURNEYS } from './harness/meta.mjs';
 // throughput, so going higher yields diminishing returns and risks CPU contention thrash). Tunable
 // via env; `DPAY_E2E_CONCURRENCY=1` runs sequentially (debugging).
 const DEFAULT_CONCURRENCY = 12;
+const FALLBACK_TIMEOUT_MS = 60_000;
 
+/**
+ * How overloaded is the host RIGHT NOW? Returns the ratio of 1-min load average to logical cores.
+ * ≤1 means the host has headroom (idle-ish); ≥2 means the runqueue is at least 2× oversubscribed —
+ * every flow will run that much slower, so per-test timeouts must scale up by the same factor or they
+ * false-fire on slow (not hung) hardware. This is the difference between a GREEN-but-slow suite on a
+ * busy shared dev box and a uniformly RED one.
+ *
+ * The load average is a trailing metric (1-min window), so this is a one-shot decision at run start —
+ * it does NOT re-adapt mid-run. That's fine: we pick a sustainable concurrency + timeout scale up
+ * front and hold them for the whole run. If the host frees up, the next `just e2e` picks the faster
+ * settings automatically.
+ */
+function hostLoadFactor() {
+  const cpus = os.cpus().length || 4;
+  const load1 = os.loadavg()[0]; // 1-min load average (runqueue length)
+  return { cpus, load1, factor: Math.max(1, load1 / cpus) };
+}
+
+/**
+ * Sustainable concurrency: the number of heavy browser contexts the host can run in parallel WITHOUT
+ * thrashing. Estimated as the free cores (cores − 1-min load), clamped to [2, 12]. On an idle 16-core
+ * box → 12 (the cap); on a box at load 35 → 2 (the floor). This keeps the suite GREEN on a busy shared
+ * host (slower but reliable) instead of uniformly RED. An explicit `DPAY_E2E_CONCURRENCY` overrides it.
+ */
+function autoConcurrency() {
+  const { cpus, load1 } = hostLoadFactor();
+  const headroom = cpus - load1;
+  return Math.min(DEFAULT_CONCURRENCY, Math.max(2, Math.round(headroom)));
+}
+
+/**
+ * Resolve run concurrency: an explicit `DPAY_E2E_CONCURRENCY` wins (the caller knows their host);
+ * otherwise auto-pick from current headroom. Returns `{ concurrency, auto, load }` so the startup log
+ * can report exactly which path was taken (debuggable — no silent magic).
+ */
 function resolveConcurrency() {
-  const raw = parseInt(process.env.DPAY_E2E_CONCURRENCY ?? String(DEFAULT_CONCURRENCY), 10);
-  if (!Number.isFinite(raw) || raw < 1) return DEFAULT_CONCURRENCY;
-  return raw;
+  const load = hostLoadFactor();
+  const env = process.env.DPAY_E2E_CONCURRENCY;
+  if (env !== undefined && env !== '') {
+    const raw = parseInt(env, 10);
+    if (Number.isFinite(raw) && raw >= 1) return { concurrency: raw, auto: false, load };
+  }
+  return { concurrency: autoConcurrency(), auto: true, load };
 }
 
 /**
@@ -57,23 +98,27 @@ async function loadTests() {
   return filterByToken(all, process.env.DPAY_E2E_FILTER ?? '');
 }
 
-/** Race `promise` against a hard timeout; reject with a labeled, debuggable error on expiry. */
+/** Race `promise` against a hard timeout; reject with a labeled, debuggable error on expiry. The
+ *  message names the EFFECTIVE timeout (after the host-load scale) so a false-fire is self-diagnosing:
+ *  if a flow trips a 33s timeout on a host whose load factor is ×2.2, the base timeout was 15s and the
+ *  flow genuinely hung (vs. just running slowly under contention). */
 function withTimeout(promise, timeoutMs, label) {
   let timer;
   const expired = new Promise((_, reject) => {
     timer = setTimeout(
-      () => reject(new Error(`[${label}] exceeded its per-test timeout of ${timeoutMs}ms — likely hung (the suite is ~17s, so this is a genuine stall, not slow hardware)`)),
+      () => reject(new Error(`[${label}] exceeded its per-test timeout of ${timeoutMs}ms (after host-load scaling) — likely a genuine hang; a merely-slow flow should have completed by now`)),
       timeoutMs,
     );
   });
   return Promise.race([promise, expired]).finally(() => clearTimeout(timer));
 }
 
-async function runOne(test) {
+async function runOne(test, timeoutScale) {
   const mod = await import(`file://${test.path}`);
   if (typeof mod.run !== 'function') throw new Error(`${test.file}: no \`run\` export`);
-  const timeoutMs = test.meta?.timeoutMs ?? 60_000;
-  await withTimeout(mod.run(), timeoutMs, test.file);
+  const base = test.meta?.timeoutMs ?? FALLBACK_TIMEOUT_MS;
+  const effective = Math.round(base * timeoutScale);
+  await withTimeout(mod.run(), effective, test.file);
 }
 
 /**
@@ -81,7 +126,7 @@ async function runOne(test) {
  * STARTED; in-flight tests are allowed to finish (so their contexts tear down cleanly), then the
  * pool drains. Returns the ordered results + the first failure (if any).
  */
-async function runPool(tests, concurrency) {
+async function runPool(tests, concurrency, timeoutScale) {
   const results = new Map(); // name -> { ok, ms, err? }
   let firstFailure = null;
   let nextIdx = 0;
@@ -105,7 +150,7 @@ async function runPool(tests, concurrency) {
     activeWorkers++;
     const tStart = Date.now();
     try {
-      await runOne(test);
+      await runOne(test, timeoutScale);
       results.set(key, { ok: true, ms: Date.now() - tStart });
       console.log(`  ✓ ${key}  ${((Date.now() - tStart) / 1000).toFixed(2)}s`);
     } catch (e) {
@@ -138,17 +183,21 @@ async function main() {
     console.error('[run] no tests matched (check DPAY_E2E_FILTER — try a journey/id/name/covers slug)');
     process.exit(1);
   }
-  const concurrency = resolveConcurrency();
+  const { concurrency, auto, load } = resolveConcurrency();
+  const timeoutScale = load.factor;
   const filter = process.env.DPAY_E2E_FILTER ?? '';
   const filterNote = filter
     ? ` matching filter "${filter}" (by journey/id/name/filename/covers)`
     : '';
+  const concurrencyNote = auto
+    ? `concurrency=${concurrency} (auto: load ${load.load1.toFixed(1)} on ${load.cpus} cores → headroom ${Math.max(0, load.cpus - load.load1).toFixed(1)}, timeout scale ×${timeoutScale.toFixed(2)})`
+    : `concurrency=${concurrency} (explicit; timeout scale ×${timeoutScale.toFixed(2)} from load ${load.load1.toFixed(1)} on ${load.cpus} cores)`;
   console.log(
     `[run] running ${tests.length} test(s)${filterNote} in ${process.env.DPAY_E2E_MODE ?? 'local'} mode` +
-    ` (parallel, concurrency=${concurrency})\n`,
+    ` (parallel, ${concurrencyNote})\n`,
   );
 
-  const { results, firstFailure } = await runPool(tests, concurrency);
+  const { results, firstFailure } = await runPool(tests, concurrency, timeoutScale);
 
   // Tear down the shared relay + web server + browser once the run is done (pass OR fail).
   await stopSession();
@@ -184,9 +233,13 @@ async function main() {
   console.log(`\n[run] ${passed}/${total} GREEN in ${elapsed}s`);
   // The target scales with suite size: 18 flows → 15s; the Wave-E expansion to 24 flows → 20s; wire-
   // format v2 (flow 26 + per-payment name encoding) → 22s. The suite runs real-browser flows in a
-  // bounded-parallel pool; CPU contention adds ±3s variance.
-  if (parseFloat(elapsed) > 22) {
-    console.warn(`[run] ⚠️  suite slipped past the 22s target (took ${elapsed}s) — flag this`);
+  // bounded-parallel pool; CPU contention adds ±3s variance. The target is a LOAD-ADJUSTED ceiling —
+  // on a busy shared host the per-flow wall time inflates by the load factor, so a 22s×factor budget
+  // keeps the signal meaningful (a genuinely regressed suite still trips it; a merely-loaded host
+  // does not). The raw 22s target is what an idle 16-core box should hit.
+  const target = 22 * timeoutScale;
+  if (parseFloat(elapsed) > target) {
+    console.warn(`[run] ⚠️  suite slipped past the load-adjusted target of ${target.toFixed(0)}s (took ${elapsed}s, load factor ×${timeoutScale.toFixed(2)}) — flag this`);
   }
 }
 
