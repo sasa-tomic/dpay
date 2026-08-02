@@ -230,7 +230,7 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
       if (!(await DpayCore.verifyWire(wireHex))) throw new Error('local verify failed');
       sentRef.current = {amount: req.amount, currency: req.currency, who: short(req.toHex), nonce: req.nonceHex};
       await DpayNfc.approveCard(wireHex);
-    } catch (e: any) { finalize('error', String(e?.message ?? e)); }
+    } catch (e: unknown) { finalize('error', e instanceof Error ? e.message : String(e)); }
   }, [identity, finalize, catalog]);
 
   useEffect(() => {
@@ -292,8 +292,8 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
       }
       // 'confirmed' (reader): the receipt reached the payer; the merchant already finalized on submit.
     });
-    if (role === 'card') DpayNfc.armCard().catch((e: any) => finalize('error', String(e?.message ?? e)));
-    else if (requestHex) DpayNfc.startReader(requestHex).catch((e: any) => finalize('error', String(e?.message ?? e)));
+    if (role === 'card') DpayNfc.armCard().catch((e: unknown) => finalize('error', e instanceof Error ? e.message : String(e)));
+    else if (requestHex) DpayNfc.startReader(requestHex).catch((e: unknown) => finalize('error', e instanceof Error ? e.message : String(e)));
     return () => {
       aliveRef.current = false;
       clearSettleTimer();

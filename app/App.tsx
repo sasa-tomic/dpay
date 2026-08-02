@@ -44,9 +44,9 @@ export default function App() {
         setIdentity(idV ? JSON.parse(idV) : null);
         if (typeof relayV === 'string' && relayV.length > 0) setRelayUrl(relayV);
       })
-      .catch((e: any) => {
+      .catch((e: unknown) => {
         // No silent errors: log with context, then fall back to a safe empty identity.
-        console.log(`[dpay] failed to load identity/relay: ${e?.message ?? e}`);
+        console.log(`[dpay] failed to load identity/relay: ${e instanceof Error ? e.message : String(e)}`);
         setIdentity(null);
       });
   }, []);
@@ -55,8 +55,8 @@ export default function App() {
   // This is the single mutator SettingsSheet's input binds to, so every edit endures across reloads.
   const persistRelay = useCallback((url: string) => {
     setRelayUrl(url);
-    AsyncStorage.setItem(RELAY_STORAGE_KEY, url).catch((e: any) => {
-      console.log(`[dpay] failed to persist relay URL: ${e?.message ?? e}`);
+    AsyncStorage.setItem(RELAY_STORAGE_KEY, url).catch((e: unknown) => {
+      console.log(`[dpay] failed to persist relay URL: ${e instanceof Error ? e.message : String(e)}`);
     });
   }, []);
 
@@ -71,7 +71,7 @@ export default function App() {
         // silently rot the self-check. verifyWire guards the signature round-trip; both must hold.
         const expectedHexLen = (await DpayCore.wireLen()) * 2;
         console.log(`DPAY_SELFCHECK ${(await DpayCore.verifyWire(wire)) && wire.length === expectedHexLen ? 'PASS' : 'FAIL'}`);
-      } catch (e: any) { console.log(`DPAY_SELFCHECK FAIL ${String(e?.message ?? e)}`); }
+      } catch (e: unknown) { console.log(`DPAY_SELFCHECK FAIL ${e instanceof Error ? e.message : String(e)}`); }
     })();
   }, []);
 

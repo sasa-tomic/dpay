@@ -42,7 +42,7 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset}: {
             {confirmReset ? (
               <View style={S.resetConfirmBox}>
                 <Text style={S.warnNote}>This erases your wallet identity from this device. Funds at this address become irrecoverable. This cannot be undone.</Text>
-                <Pressable testID="btn-reset-confirm" style={[S.primaryWide, {backgroundColor: C.bad, marginTop: 16}]} onPress={onReset} accessibilityRole="button" accessibilityLabel="Yes, reset everything" accessibilityState={{disabled: false}}>
+                <Pressable testID="btn-reset-confirm" style={[S.primaryWide, {backgroundColor: C.bad, marginTop: 16}]} onPress={onReset} accessibilityRole="button" accessibilityLabel="Yes, reset everything" accessibilityHint="Permanently erase your wallet from this device — funds become irrecoverable" accessibilityState={{disabled: false}}>
                   <Text style={S.primaryText}>Yes, reset everything</Text>
                 </Pressable>
                 <Pressable testID="btn-reset-cancel" style={S.linkBtn} onPress={() => setConfirmReset(false)} accessibilityRole="button" accessibilityLabel="Cancel reset" accessibilityState={{disabled: false}}>
@@ -78,6 +78,7 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset}: {
               onPress={applyRelay}
               accessibilityRole="button"
               accessibilityLabel="Apply relay URL"
+              accessibilityHint="Switch your wallet to the entered relay URL"
               accessibilityState={{disabled: !relayDirty}}>
               <Text style={S.applyBtnText}>Apply</Text>
             </Pressable>

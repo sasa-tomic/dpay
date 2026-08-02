@@ -30,7 +30,7 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
         } finally { clearTimeout(t); }
       } catch { /* offline/timeout: created with $0, can be funded later */ }
       onCreated(id);
-    } catch (e: any) { setErr(String(e?.message ?? e)); setBusy(false); }
+    } catch (e: unknown) { setErr(e instanceof Error ? e.message : String(e)); setBusy(false); }
   }
 
   return (
@@ -41,10 +41,10 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
         <Wordmark style={S.wordmarkBig} />
         <Text style={S.onboardSub}>Tap or scan to pay — online or offline.</Text>
         <Text style={S.label}>Choose a username</Text>
-        <TextInput testID="username-input" style={S.usernameInput} value={username} onChangeText={setUsername} placeholder="e.g. Alice" placeholderTextColor={C.sub2} autoCapitalize="words" autoCorrect={false} onSubmitEditing={busy ? undefined : create} />
+        <TextInput testID="username-input" style={S.usernameInput} value={username} onChangeText={setUsername} placeholder="e.g. Alice" placeholderTextColor={C.sub2} autoCapitalize="words" autoCorrect={false} onSubmitEditing={busy ? undefined : create} accessibilityLabel="Username" accessibilityHint="The name others see when you request or receive a payment" />
         {err ? <Text style={S.err}>{err}</Text> : null}
         <Pressable testID="btn-create" style={[S.primary, busy && S.dim]} disabled={busy} onPress={create}
-          accessibilityRole="button" accessibilityLabel="Create and fund wallet" accessibilityState={{disabled: busy}}>
+          accessibilityRole="button" accessibilityLabel="Create and fund wallet" accessibilityHint="Generate your on-device key and add demo funds" accessibilityState={{disabled: busy}}>
           <Text style={S.primaryText}>{busy ? 'Creating…' : 'Create & fund wallet'}</Text>
         </Pressable>
         <Text style={S.dim2}>Creates your wallet and adds $100 in demo funds to get started.</Text>

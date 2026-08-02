@@ -79,6 +79,7 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
                     onPress={() => onSelect(a.currency)}
                     accessibilityRole="button"
                     accessibilityLabel={`Select ${name}`}
+                    accessibilityHint="Show this asset's balance on your home screen"
                   >
                     <View style={[S.dot, {backgroundColor: active ? C.brand : C.line}]} />
                     <Text style={S.assetLabel}>{name}</Text>
@@ -94,6 +95,7 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
                           onPress={onTopUp}
                           accessibilityRole="button"
                           accessibilityLabel={`Top up ${name}`}
+                          accessibilityHint="Add demo funds to this wallet"
                           accessibilityState={{disabled: topUpBusy}}
                         >
                           {topUpBusy
@@ -108,6 +110,7 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
                           onPress={() => onAdd(a.currency)}
                           accessibilityRole="button"
                           accessibilityLabel={`Top up ${name}`}
+                          accessibilityHint="Open the deposit address and instructions for this asset"
                         >
                           <Text style={S.assetActionPlus}>+</Text>
                           <Text style={S.assetActionText}>Top Up</Text>
@@ -120,6 +123,7 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
                           onPress={() => onWithdraw(a.currency)}
                           accessibilityRole="button"
                           accessibilityLabel={`Cash out ${name}`}
+                          accessibilityHint="Send this asset to a native BTC address"
                         >
                           <Text style={S.withdrawLinkText}>Cash out</Text>
                         </Pressable>

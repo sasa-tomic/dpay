@@ -81,7 +81,7 @@ export function ReceiveMode({identity, relayUrl, nfcReady, onReceived, catalog}:
       if (nfcReady && DpayNfc) { try { nfcHex = await DpayNfc.buildRequest(identity.publicHex, rawAmount, nonce, expiry, reqCurrency, identity.username, memoVal); } catch { /* best-effort: NFC reader is a parallel path; the QR still works */ } }
       setReqQr({value: reqB64, rawAmount, currency: reqCurrency, nonce, nfcHex, expiry});
       setResult(null); setErr(null);
-    } catch (e: any) { setErr(String(e?.message ?? e)); }
+    } catch (e: unknown) { setErr(e instanceof Error ? e.message : String(e)); }
   }
 
   // Poll the ledger for this request's settlement (payer paid directly, or we submitted their QR).
@@ -182,7 +182,7 @@ export function ReceiveMode({identity, relayUrl, nfcReady, onReceived, catalog}:
         {/* MC5: the merchant selects the EXACT settlement asset by tapping the amount prefix (glyph +
             ▾), which opens the compact currency picker below. The amount is cleared on switch so a
             stale '25.00' is never reinterpreted as 25 BTC (8-decimal) on the new asset. */}
-        <Pressable testID="req-prefix" style={S.prefixBtn} onPress={() => setPickOpen(true)} accessibilityRole="button" accessibilityLabel="Choose settlement currency" accessibilityState={{disabled: false}}>
+        <Pressable testID="req-prefix" style={S.prefixBtn} onPress={() => setPickOpen(true)} accessibilityRole="button" accessibilityLabel="Choose settlement currency" accessibilityHint="Pick which asset the payer will send you" accessibilityState={{disabled: false}}>
           <Text style={S.currency}>{reqPrefix}</Text>
           <Text style={S.caret}>▾</Text>
         </Pressable>
@@ -199,7 +199,7 @@ export function ReceiveMode({identity, relayUrl, nfcReady, onReceived, catalog}:
         accessibilityHint="An optional note attached to this payment request"
         maxLength={32}
       />
-      <Pressable testID="btn-request" style={S.primaryWide} onPress={makeRequest} accessibilityRole="button" accessibilityLabel="Request" accessibilityState={{disabled: false}}><Text style={S.primaryText}>Request</Text></Pressable>
+      <Pressable testID="btn-request" style={S.primaryWide} onPress={makeRequest} accessibilityRole="button" accessibilityLabel="Request" accessibilityHint="Show your QR code so the payer can scan it to pay you" accessibilityState={{disabled: false}}><Text style={S.primaryText}>Request</Text></Pressable>
       {err ? <Text style={S.err}>{err}</Text> : null}
       <CurrencyPicker
         open={pickOpen}

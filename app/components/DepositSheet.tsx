@@ -55,11 +55,11 @@ export function DepositSheet({identity, relayUrl, currency, display, onClose}: {
         // H5: fetch succeeded but no address returned → the asset has no deposit minter configured.
         if (!a) { setErr(NO_MINTER_DEPOSIT_ERR); return; }
         setInfo(i); setAddress(a);
-      } catch (e: any) {
+      } catch (e: unknown) {
         // H5: distinguish "no minter" (503 — the relay signals no ck-minter is registered for this
         // currency) from a transient network/relay error (ECONNREFUSED, timeout, other status). The
         // relay client throws with the status in the message; a missing status means a network error.
-        const msg = String(e?.message ?? e);
+        const msg = e instanceof Error ? e.message : String(e);
         const isNoMinter = /503/.test(msg);
         if (alive) setErr(isNoMinter ? NO_MINTER_DEPOSIT_ERR : TRANSIENT_DEPOSIT_ERR);
       } finally {

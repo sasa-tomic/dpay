@@ -360,6 +360,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
             onPress={() => setSettingsOpen(true)}
             accessibilityRole="button"
             accessibilityLabel="Settings"
+            accessibilityHint="Open relay, reset, and advanced settings"
           >
             <Text style={S.headerSettingsIcon}>⚙</Text>
           </Pressable>
@@ -377,6 +378,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
           onPress={() => setBalancesOpen(true)}
           accessibilityRole="button"
           accessibilityLabel="Balances — switch currency or top up"
+          accessibilityHint="Open the full asset list, switch the displayed currency, or top up"
         >
           <View style={S.balLabelRow}>
             <View style={[S.dot, {backgroundColor: online ? C.ok : C.sub2}]} />

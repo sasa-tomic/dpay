@@ -65,10 +65,10 @@ export function WithdrawSheet({identity, relayUrl, currency, display, family, ck
       setPhase('done');
       void saveWithdrawAddr(currency, address.trim()); // remember for next cash-out (Fork-B)
       onWithdrawn(); // trigger a balance/history refresh
-    } catch (e: any) {
+    } catch (e: unknown) {
       // A 422 policy error (bad sig / insufficient / below min / nonce) or a 503 transient / offline.
       // Surface the reason; the user can correct + retry from the form.
-      setErr(String(e?.message ?? e));
+      setErr(e instanceof Error ? e.message : String(e));
       setPhase('error');
     } finally {
       clearTimeout(t);

@@ -71,8 +71,8 @@ export async function fetchCurrencies(relayUrl: string, prior: CurrencyDescripto
     const list: unknown = j?.currencies;
     if (!Array.isArray(list) || list.length === 0) return prior;
     const clean: CurrencyDescriptor[] = list
-      .filter((c: any): c is Record<string, unknown> => !!c && typeof c.currency === 'number')
-      .map((c: any) => ({
+      .filter((c: Record<string, unknown>): c is Record<string, unknown> => !!c && typeof c.currency === 'number')
+      .map((c: Record<string, unknown>) => ({
         currency: c.currency as number,
         ledger: typeof c.ledger === 'string' ? c.ledger : '',
         mintable: !!c.mintable,

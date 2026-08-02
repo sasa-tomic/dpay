@@ -51,7 +51,7 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
       const reqB64 = parseRequestQR(raw);
       const r = await DpayCore.decodeRequest(reqB64);
       setReq(r); setErr(null); setPhase('review');
-    } catch (e: any) { setErr(`bad request QR: ${String(e?.message ?? e)}`); }
+    } catch (e: unknown) { setErr(`bad request QR: ${e instanceof Error ? e.message : String(e)}`); }
   }
 
   // Confirm an offline (QR-dance) settlement via the ledger, so it lands in Recent once, when settled.
@@ -121,7 +121,7 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
       }
       setQr({code, amount: req.amount, currency: req.currency, who, nonce});
       setPhase('qr');
-    } catch (e: any) { setErr(String(e?.message ?? e)); } finally { setBusy(false); }
+    } catch (e: unknown) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   }
 
   function reset() { setReq(null); setQr(null); setPaid(null); setErr(null); setPhase('scan'); }
@@ -160,7 +160,7 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
                   reconciles on the next online poll. It does NOT fabricate a settled history entry.
                   MC5: pass the request's currency so the deduction lands on THIS asset's entry, not
                   the DEMO counter (currency-keyed offline deduction). */}
-              <Pressable testID="btn-paid" style={S.paidBtn} onPress={() => { onOfflinePaid(qr.amount, qr.currency); setPaid({amount: qr.amount, currency: qr.currency, who: qr.who, already: false, pending: true}); setPhase('paid'); }} accessibilityRole="button" accessibilityLabel={`Handed to ${qr.who}`} accessibilityState={{disabled: false}}><Text style={S.paidBtnText}>Handed to {qr.who}</Text></Pressable>
+              <Pressable testID="btn-paid" style={S.paidBtn} onPress={() => { onOfflinePaid(qr.amount, qr.currency); setPaid({amount: qr.amount, currency: qr.currency, who: qr.who, already: false, pending: true}); setPhase('paid'); }} accessibilityRole="button" accessibilityLabel={`Handed to ${qr.who}`} accessibilityHint="Mark the signed payment as handed off; your balance updates when the merchant settles" accessibilityState={{disabled: false}}><Text style={S.paidBtnText}>Handed to {qr.who}</Text></Pressable>
               <Pressable testID="btn-notpaid" style={S.notPaidBtn} onPress={reset} accessibilityRole="button" accessibilityLabel="Cancel" accessibilityState={{disabled: false}}><Text style={S.notPaidText}>Cancel</Text></Pressable>
             </View>
           </>
@@ -222,6 +222,7 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
           disabled={approveDisabled}
           accessibilityRole="button"
           accessibilityLabel="Approve payment"
+          accessibilityHint="Sign the displayed amount with your key and send it"
           accessibilityState={{disabled: approveDisabled}}
           onPress={approve}>
           <Text style={S.primaryText}>{busy ? 'Signing…' : 'Approve'}</Text>

@@ -156,9 +156,9 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
     setWcUri(null);
     try {
       await pairOnrampWallet((uri) => setWcUri(uri));
-    } catch (e: any) {
+    } catch (e: unknown) {
       setWcUri(null);
-      const msg = String(e?.message ?? e);
+      const msg = e instanceof Error ? e.message : String(e);
       setErr(/reject|denied|user/i.test(msg) ? 'Pairing not approved.' : (msg || 'Could not pair with your wallet.'));
       return; // stay in 'connect' — the WC session is not established.
     }
@@ -186,8 +186,8 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
         clearTimeout(t);
       } catch { /* best-effort snapshot; watching falls back to any-positive */ }
       setPhase('enter');
-    } catch (e: any) {
-      setErr(String(e?.message ?? e) || 'Could not connect to your wallet.');
+    } catch (e: unknown) {
+      setErr((e instanceof Error ? e.message : String(e)) || 'Could not connect to your wallet.');
     }
   }, [relayUrl, currency, identity.publicHex, chainId, display.networkLabel]);
 
@@ -229,7 +229,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
       setTxHashes(hashes);
       setResumed(false);
       setPhase('watching');
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (e instanceof ReceiptReverted) {
         // Hard fail: the tx was mined but reverted — it will NEVER credit. Stay in 'enter' so the
         // user can see the error and retry; do NOT transition to a false "watching".
@@ -243,7 +243,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
         setErr('Transaction sent but not yet confirmed — still watching for the mint.');
         setPhase('watching');
       } else {
-        const msg = String(e?.message ?? e);
+        const msg = e instanceof Error ? e.message : String(e);
         setErr(/reject|denied|user/i.test(msg) ? 'Transaction not signed.' : (msg || 'Transaction failed.'));
         setPhase('enter');
       }

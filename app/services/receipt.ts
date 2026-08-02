@@ -28,10 +28,11 @@ import type {ReceiptAuth} from '../lib/types';
 // STRINGS (raw u64). They are passed through to `verifyReceiptSig` verbatim (the FFI parses them);
 // `currency` is a small u32 carried as number/string interchangeably. No `Number()` coercion on the
 // amount path.
-export async function verifyOutcomeReceipt(receipt: any, auth?: ReceiptAuth): Promise<boolean> {
+export async function verifyOutcomeReceipt(receipt: unknown, auth?: ReceiptAuth): Promise<boolean> {
   if (!receipt || typeof receipt !== 'object') return false;
-  const sigHex = receipt.receipt_sig;
-  const pubHex = receipt.pubkey;
+  const r = receipt as Record<string, unknown>;
+  const sigHex = r.receipt_sig;
+  const pubHex = r.pubkey;
   if (typeof sigHex !== 'string' || typeof pubHex !== 'string') return false;
 
   // (1) Key pin — rejects a fabricated key even when the forged signature is internally valid.
@@ -43,9 +44,9 @@ export async function verifyOutcomeReceipt(receipt: any, auth?: ReceiptAuth): Pr
   let sigOk: boolean;
   try {
     sigOk = await DpayCore.verifyReceiptSig(
-      String(receipt.nonce), String(receipt.from), String(receipt.to),
-      String(receipt.amount), Number(receipt.currency),
-      String(receipt.block_index), String(receipt.settle_ts),
+      String(r.nonce), String(r.from), String(r.to),
+      String(r.amount), Number(r.currency),
+      String(r.block_index), String(r.settle_ts),
       sigHex, pubHex,
     );
   } catch {
@@ -58,15 +59,15 @@ export async function verifyOutcomeReceipt(receipt: any, auth?: ReceiptAuth): Pr
   //     not-verified. `amount` via cmpRaw (BigInt exact); a non-digit receipt amount is malformed →
   //     cmpRaw throws TypeError, translated to `false` (never a thrown crash on the verify path).
   if (auth) {
-    if (String(receipt.from) !== auth.from) return false;
-    if (String(receipt.to) !== auth.to) return false;
+    if (String(r.from) !== auth.from) return false;
+    if (String(r.to) !== auth.to) return false;
     try {
-      if (cmpRaw(String(receipt.amount), auth.amount) !== 0) return false;
+      if (cmpRaw(String(r.amount), auth.amount) !== 0) return false;
     } catch {
       return false;
     }
-    if (Number(receipt.currency) !== auth.currency) return false;
-    if (String(receipt.nonce) !== auth.nonce) return false;
+    if (Number(r.currency) !== auth.currency) return false;
+    if (String(r.nonce) !== auth.nonce) return false;
   }
   return true;
 }

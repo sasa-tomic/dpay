@@ -50,7 +50,7 @@ function withDefaultTimeout(callerSignal?: AbortSignal): AbortSignal {
 // a throw that masks the real HTTP outcome. Replaces the inline `r.json().catch(() => ({} as any))`
 // repeated across the pay/reconcile/withdraw paths.
 export async function readJsonOrEmpty(r: Response): Promise<any> {
-  return r.json().catch(() => ({} as any));
+  return r.json().catch(() => ({} as Record<string, unknown>));
 }
 
 // PR25 — the shared `/pay` fetch+parse+classify helper. Three call sites (PayMode.approve,
@@ -65,7 +65,7 @@ export async function payAndClassify(relayUrl: string, code: string, signal?: Ab
     const body = await readJsonOrEmpty(r);
     return {outcome: classifyPayHttp({ok: r.ok, status: r.status}), body};
   } catch {
-    return {outcome: classifyPayHttp(null), body: {} as any};
+    return {outcome: classifyPayHttp(null), body: {} as Record<string, unknown>};
   }
 }
 
