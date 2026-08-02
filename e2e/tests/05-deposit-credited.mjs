@@ -54,7 +54,7 @@ export async function run() {
     await openBalances(driver);
     const zeroCard = await driver.findByTestID('asset-ckbtc', { timeoutMs: 5_000 });
     const zeroTxt = await zeroCard.evaluate((n) => (n.textContent ?? '').trim());
-    assertIncludes(zeroTxt, '0.00000000 BTC', `the BTC card should show the zero balance before any top-up. card text:\n${zeroTxt}`);
+    assertIncludes(zeroTxt, '0 BTC', `the BTC card should show the zero balance before any top-up. card text:\n${zeroTxt}`);
     assertIncludes(zeroTxt, 'BTC', `the BTC card should be clearly labeled "BTC". card text:\n${zeroTxt}`);
     console.log(`[05-deposit-credited] BTC card visible at zero balance: "${zeroTxt}"`);
 

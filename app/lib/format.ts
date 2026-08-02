@@ -86,6 +86,7 @@ export function trimName32(hexStr: string): string {
 // amount.ts's module doc). Never `Math.floor`/`parseFloat` (lossy above 2^53).
 export function fmtAsset(raw: string, decimals: number, unit: string): string {
   const n = BigInt(raw);
+  if (n === 0n) return `0 ${unit}`; // a zero balance needs no precision padding ("0 BTC", not "0.00000000 BTC")
   const scale = 10n ** BigInt(decimals);
   return `${(n / scale).toString()}.${(n % scale).toString().padStart(decimals, '0')} ${unit}`;
 }

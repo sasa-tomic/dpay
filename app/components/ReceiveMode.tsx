@@ -30,7 +30,11 @@ export function ReceiveMode({identity, relayUrl, nfcReady, onReceived, catalog}:
   // `rawAmount` (was `cents`) is the integer smallest-units the encoded request carries (2-decimal
   // for DEMO, 8 for BTC, 6 for USDC) — now a raw-u64 decimal STRING (MC1 units 2-4). Renamed because
   // the field was never truly cents for a non-USD currency; this is more honest.
-  const [reqQr, setReqQr] = useState<{value: string; rawAmount: string; currency: number; nonce: string; nfcHex: string | null} | null>(null);
+  const [reqQr, setReqQr] = useState<{value: string; rawAmount: string; currency: number; nonce: string; nfcHex: string | null; expiry: number} | null>(null);
+  // A 1s display clock so the request-QR screen can show a live expiry countdown (the signed request
+  // is only valid for EXPIRY_WINDOW secs; a stale QR scans to a confusing rejection). Declared here;
+  // the ticking effect is wired after `result` (the gate it reads) is declared below.
+  const [now, setNow] = useState(() => nowSecs());
   const [result, setResult] = useState<{amount: string; currency: number; from: string} | null>(null);
   const [scanning, setScanning] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -40,6 +44,13 @@ export function ReceiveMode({identity, relayUrl, nfcReady, onReceived, catalog}:
   // chip row: the settlement currency is picked from a popup, freeing the form's vertical space.
   const [pickOpen, setPickOpen] = useState(false);
   useEscapeToClose(() => setPickOpen(false));
+  // Tick the display clock only while a request QR is shown (not after settlement) — display-only,
+  // so a plain setInterval (not the network POLL seam) is the right cadence for a countdown.
+  useEffect(() => {
+    if (!reqQr || result) return;
+    const id = setInterval(() => setNow(nowSecs()), 1000);
+    return () => clearInterval(id);
+  }, [reqQr, result]);
   // Stable across renders (NfcTap's effect depends on it) — only changes when the request does.
   const readerReqInfo = useMemo(
     () => (reqQr ? {amount: reqQr.rawAmount, nonce: reqQr.nonce, who: 'payer', currency: reqQr.currency} : undefined),
@@ -67,7 +78,7 @@ export function ReceiveMode({identity, relayUrl, nfcReady, onReceived, catalog}:
       // merchant's username + memo ride as to_name/memo in the request bytes, same as the QR path.
       let nfcHex: string | null = null;
       if (nfcReady && DpayNfc) { try { nfcHex = await DpayNfc.buildRequest(identity.publicHex, rawAmount, nonce, expiry, reqCurrency, identity.username, memoVal); } catch {} }
-      setReqQr({value: reqB64, rawAmount, currency: reqCurrency, nonce, nfcHex});
+      setReqQr({value: reqB64, rawAmount, currency: reqCurrency, nonce, nfcHex, expiry});
       setResult(null); setErr(null);
     } catch (e: any) { setErr(String(e?.message ?? e)); }
   }
@@ -141,8 +152,18 @@ export function ReceiveMode({identity, relayUrl, nfcReady, onReceived, catalog}:
               <Text style={S.nfcHintLabel}>Show this to the payer{reqQr.nfcHex ? ' · or let them tap' : ''}</Text>
             </View>
             <View testID="request-qr" style={S.qrCard}><QRCode value={reqQr.value} size={244} ecl="M" /></View>
-            <Text style={S.amountBig}>{fmtCurrencyAmount(catalog, reqQr.currency, reqQr.rawAmount)}</Text>
-            <Text style={S.qrHint}>Waiting for payment…</Text>
+        <Text style={S.amountBig}>{fmtCurrencyAmount(catalog, reqQr.currency, reqQr.rawAmount)}</Text>
+        {(() => {
+          const remaining = reqQr.expiry - now;
+          if (remaining <= 0) return <Text style={S.qrExpired}>Expired — make a new request</Text>;
+          const m = Math.floor(remaining / 60);
+          const s = remaining % 60;
+          // While there's a minute+ of headroom, show the calm "~N min" form; under a minute, count
+          // down seconds (and tint red) so the merchant knows to refresh before a payer scans a stale QR.
+          if (m >= 1) return <Text style={S.qrExpiry}>Valid for ~{m} min</Text>;
+          return <Text style={S.qrExpiryWarn}>Expires in 0:{s.toString().padStart(2, '0')}</Text>;
+        })()}
+        <Text style={S.qrHint}>Waiting for payment…</Text>
             {scanning ? (
               <><QrScanner onScan={onSignedQr} /><Text style={S.dim2}>Scan the payer's signed QR</Text></>
             ) : (

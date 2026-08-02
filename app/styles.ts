@@ -79,6 +79,11 @@ export const S = StyleSheet.create({
   amountBig: {fontSize: 24, fontWeight: '800', color: C.ink, textAlign: 'center'},
   badgeOk: {marginTop: 10, fontSize: 13, fontWeight: '600', color: C.brand, backgroundColor: 'rgba(62,224,172,0.12)', paddingVertical: 6, paddingHorizontal: 14, borderRadius: 999, overflow: 'hidden'},
   qrHint: {marginTop: 12, fontSize: 13, color: C.sub, textAlign: 'center'},
+  // Request-QR validity countdown (the signed request expires after EXPIRY_WINDOW; a stale QR scans
+  // to a confusing rejection, so the merchant is told how long it's good for).
+  qrExpiry: {marginTop: 6, fontSize: 13, color: C.sub, textAlign: 'center'},
+  qrExpiryWarn: {marginTop: 6, fontSize: 14, fontWeight: '600', color: C.warn, textAlign: 'center'},
+  qrExpired: {marginTop: 6, fontSize: 14, fontWeight: '700', color: C.warn, textAlign: 'center'},
   confirmRow: {flexDirection: 'row', gap: 12, marginTop: 12},
   paidBtn: {backgroundColor: C.ok, borderRadius: 12, paddingVertical: 13, paddingHorizontal: 24, minHeight: 44, justifyContent: 'center', alignItems: 'center'},
   paidBtnText: {color: C.brandInk, fontWeight: '700', fontSize: 16},
