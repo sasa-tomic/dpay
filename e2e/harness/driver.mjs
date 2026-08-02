@@ -414,6 +414,15 @@ function injectFreezeCss(css) {
  * the override a pure page-start injection identical to `__DPAY_TEST_POLL`. If the FakeLedger seed
  * ever changes, this constant breaks loudly on the next `just e2e` (every pay flow goes RED) and the
  * comment points the maintainer at the source.
+ *
+ * MC8 U6.7: also inject a test WalletConnect project id (`__DPAY_TEST_WALLETCONNECT_PROJECT_ID`) so
+ * the resolver's WalletConnect branch is "configured" across every flow. This is SAFE: the resolver
+ * is web-first — `resolveOnrampProvider()` returns `window.ethereum` before ever reaching the WC
+ * branch, and the WC branch is additionally gated by `Platform.OS !== 'web'` (react-native-web sets
+ * Platform.OS='web' in this harness), so NO WalletConnect code ever executes. Setting it globally
+ * proves the STRONGER property: even with WC configured, the web harness returns `window.ethereum`
+ * (when present) or null — WC pairing is a native outer-loop gate by design. Prod bakes the real id;
+ * this override never ships. (See flow 34-onramp-provider-resolution for the explicit seam test.)
  */
 function injectTestGlobals() {
   globalThis.__DPAY_TEST_POLL = {
@@ -421,4 +430,6 @@ function injectTestGlobals() {
   };
   // FakeLedger receipt pubkey for secret = [0xf5; 32] (ed25519-dalek, the same lib the relay uses).
   globalThis.__DPAY_TEST_RECEIPT_PUBKEY = '379bd5b7d1494939afe9f87b3587a50a96bde608f695e759daf3a3f106173e76';
+  // MC8 U6.7 — a non-empty test project id so WALLETCONNECT_PROJECT_ID is "configured" app-wide.
+  globalThis.__DPAY_TEST_WALLETCONNECT_PROJECT_ID = 'e2e-test-project-id';
 }

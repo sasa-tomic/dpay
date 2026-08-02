@@ -62,6 +62,7 @@ positive paths come first, then error/edge paths.
 | 04 | deposit-copy | User taps "Copy address" | REAL clipboard write (not Share noop). |
 | 05 | deposit-credited | ckBTC deposit lands via test-helpers seed | "Deposited ✓" after mint, balance updates, asset card appears. |
 | 16 | ckusdc-onramp | User connects wallet → enters USDC amount → approves+deposits | Wiring of the non-custodial ckERC20 flow (calldata byte-exact, EIP-1193 seam). ETH gas note shown. |
+| 34 | onramp-provider-resolution | Resolver picks the provider SOURCE with/without `window.ethereum` | The web-first `resolveOnrampProvider()` seam: web-mock wins when `window.ethereum` is set; without it, the WC branch is unreachable on web (Platform gate) even though WC is "configured" → honest "No Ethereum wallet found" + 0 sends. |
 | 22 | deposit-error | Relay unreachable when opening deposit sheet | Honest error ("Check your connection"), no spinner-forever. |
 
 ## Withdrawal (ckBTC cash-out)
