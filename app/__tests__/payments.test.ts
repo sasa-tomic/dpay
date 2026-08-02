@@ -10,6 +10,7 @@ import {
   decidePayerReceipt,
   rejectionMessage,
   isNonceReused,
+  isReceiptForRequest,
   RECEIPT_SETTLED,
   RECEIPT_REJECTED,
   RECEIPT_UNREACHABLE,
@@ -66,6 +67,29 @@ describe('decidePayerReceipt', () => {
   });
   it('no signed nonce → ignore (we have nothing to match against)', () => {
     expect(decidePayerReceipt({status: RECEIPT_SETTLED, nonceHex: NONCE}, '')).toBe('ignore');
+  });
+});
+
+describe('isReceiptForRequest', () => {
+  // PR1 (goods-fraud guard): the merchant (reader) path must bind a settled receipt to the request's
+  // nonce BEFORE trusting its signature. A malicious relay can replay any past valid canister-signed
+  // receipt for a DIFFERENT payment — without this check the merchant would release goods on a stale
+  // receipt. Mirrors decidePayerReceipt's case-insensitive compare but operates on the raw receipt
+  // object the relay/FakeLedger emits (nonce under the `nonce` key).
+  const NONCE = 'a1b2c3d4e5f600112233445566778899';
+
+  it('receipt nonce matching the request nonce → true', () => {
+    expect(isReceiptForRequest({nonce: NONCE}, NONCE)).toBe(true);
+  });
+  it('receipt nonce for a DIFFERENT payment → false (the goods-fraud guard)', () => {
+    const other = '00000000000000000000000000000000';
+    expect(isReceiptForRequest({nonce: other}, NONCE)).toBe(false);
+  });
+  it('nonce match is case-insensitive (mirrors decidePayerReceipt)', () => {
+    expect(isReceiptForRequest({nonce: NONCE.toUpperCase()}, NONCE)).toBe(true);
+  });
+  it('empty expected nonce → false (defensive — nothing to bind the receipt to)', () => {
+    expect(isReceiptForRequest({nonce: NONCE}, '')).toBe(false);
   });
 });
 

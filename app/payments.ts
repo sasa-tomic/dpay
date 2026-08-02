@@ -88,6 +88,25 @@ export function decidePayerReceipt(
 }
 
 /**
+ * True iff `receipt` answers the exact payment identified by `expectedNonceHex`. Mirrors the
+ * case-insensitive nonce compare in `decidePayerReceipt` (the payer-side guard) but operates on the
+ * raw receipt object the relay/FakeLedger emits (nonce under the `nonce` key). This is the
+ * MERCHANT-side guard that closes the goods-fraud hole: a malicious relay returning any past valid
+ * canister-signed receipt for a DIFFERENT payment is rejected here, before the signature check.
+ *
+ * Empty `expectedNonceHex` → false (defensive — without a request nonce there is nothing to bind
+ * the receipt to, so we do not believe it). A missing/non-string `receipt.nonce` → false.
+ */
+export function isReceiptForRequest(
+  receipt: {nonce?: string} | null | undefined,
+  expectedNonceHex: string,
+): boolean {
+  if (!expectedNonceHex) return false;
+  if (!receipt || typeof receipt.nonce !== 'string') return false;
+  return receipt.nonce.toLowerCase() === expectedNonceHex.toLowerCase();
+}
+
+/**
  * Turn the relay's raw rejection string (e.g. `"InsufficientFunds"`, `"rejected: Expired"`) into a
  * short human line for the merchant. `nonceReused` is surfaced separately (via `isNonceReused`)
  * because it is not a real refusal — it means this exact payment already settled — so the caller

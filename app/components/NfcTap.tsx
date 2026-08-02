@@ -10,6 +10,7 @@ import {type CurrencyDescriptor, type NfcDisclosure, isPayableAsset, resolveNfcD
 import type {NfcEvent, NfcPhaseName, Identity} from '../lib/types';
 import {
   classifyPayHttp, receiptCodeFor, decidePayerReceipt, rejectionMessage, isNonceReused,
+  isReceiptForRequest,
   type SettleOutcome,
 } from '../payments';
 import {verifyOutcomeReceipt} from '../services/receipt';
@@ -133,7 +134,8 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
   }, [relayUrl]);
 
   // Verify a settled receipt's canister/ledger signature (R2) before trusting the outcome — see the
-  // module-level `verifyOutcomeReceipt`. The nonce match is enforced upstream (settledNonceHex).
+  // module-level `verifyOutcomeReceipt`. The receipt↔request nonce match is enforced in this
+  // callback via isReceiptForRequest, just before the signature check.
   // Merchant side: submit the reassembled wire, decide the authoritative outcome, then hand it back
   // to the payer over the same tap. The ledger is the source of truth; an ambiguous transport/HTTP
   // result is reconciled by nonce before we ever call a payment failed.
@@ -171,14 +173,21 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
         // pubkey. A merchant/relay cannot forge this; an unverifiable receipt is treated as unknown
         // (pending), never a fake success.
         //
+        // PR1 (goods-fraud guard): bind the receipt to THIS request's nonce BEFORE the signature
+        // check. A malicious relay can replay any past valid canister-signed receipt for a different
+        // payment — the key-pin + signature would pass on their own, so the nonce mismatch must
+        // reject it first. Mirrors the payer-side guard in decidePayerReceipt.
+        //
         // MC4 U5: the full-auth binding (the `auth` arg to verifyOutcomeReceipt) is intentionally
         // NOT passed here. This is the MERCHANT (reader) path; the merchant forwards the payer's
         // opaque signed wire but never decodes the payer's `from` pubkey, so it cannot supply the
         // full 5-field authorization. The merchant's defenses are the key-pin + signature + the
-        // nonce match enforced via `settledNonceHex` above (the nonce is single-use → a receipt for
-        // a different payment is already rejected there). The PAYER-side binding (PayMode) carries
-        // the complete authorization.
-        const verified = settledReceipt ? await verifyOutcomeReceipt(settledReceipt) : false;
+        // receipt↔request nonce match (isReceiptForRequest, computed just below). The PAYER-side
+        // binding (PayMode) carries the complete authorization.
+        const nonceMatches = settledReceipt && reqInfo?.nonce
+          ? isReceiptForRequest(settledReceipt, reqInfo.nonce)
+          : true;
+        const verified = nonceMatches && settledReceipt ? await verifyOutcomeReceipt(settledReceipt) : false;
         if (verified) {
           record();
           finalize('success');
