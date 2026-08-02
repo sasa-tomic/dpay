@@ -34,11 +34,14 @@ export async function run() {
     await driver.findByTestID('request-qr', { timeoutMs: 5_000 });
     await driver.screenshot('35-tour-receive-request');
     console.log('[35-ux-tour] ✓ shot: receive + request QR');
-    // Leave the request screen (New button) so we're back at the tab root.
-    try { await driver.click('btn-new', { timeoutMs: 3_000 }); } catch { /* no-op if absent */ }
+    // NOTE: an earlier version tried `click('btn-new')` here to leave the request screen, but btn-new
+    // exists ONLY in PayMode (after a payment), never in ReceiveMode — so that click burned its full
+    // 3s timeout every run waiting for a button that cannot exist (a silent 3s tax on the critical
+    // path). The header `balance` is always present (even over the request card), and tapping it
+    // opens the Balances hub directly — the next destination anyway. One click, zero wasted seconds.
 
-    // 3. Balances hub (full currency list + per-asset actions).
-    await driver.click('balance', { timeoutMs: 4_000 });
+    // 3. Balances hub (full currency list + per-asset actions) — opened by tapping the header balance.
+    await driver.click('balance', { timeoutMs: 5_000 });
     await driver.findByTestID('btn-balances-close', { timeoutMs: 5_000 });
     await driver.screenshot('35-tour-balances');
     console.log('[35-ux-tour] ✓ shot: balances hub');
@@ -49,16 +52,18 @@ export async function run() {
     await driver.findByTestID('settings-relay', { timeoutMs: 5_000 });
     await driver.screenshot('35-tour-settings');
     console.log('[35-ux-tour] ✓ shot: settings');
-    // Return to the clean wallet root: reload (the funded identity persists in AsyncStorage, so the
-    // wallet restores without re-onboarding). More robust than guessing the sheet's dismiss testID.
-    await driver.eval(() => { location.reload(); });
-    await driver.waitForText('∂100.00', { timeoutMs: 6_000 });
+    // Dismiss Settings via its close button (NOT a full location.reload() — that re-fetched the
+    // bundle + re-ran the poll IIFE, costing ~2s for no coverage gain). btn-settings-close returns
+    // to the wallet root with the funded identity still mounted.
+    await driver.click('btn-settings-close', { timeoutMs: 4_000 });
 
     // 5. Ledger tab (transaction history — empty initially for a fresh wallet).
     //    The tab is labeled "Transactions" → testID `tab-transactions` (Tab.tsx: `tab-${label.toLowerCase()}`).
     await driver.click('tab-transactions', { timeoutMs: 5_000 });
-    // Give the (empty) history a beat to render before the shot.
-    await driver.waitForText(/Ledger|History|No transactions/i, { timeoutMs: 5_000 }).catch(() => {});
+    // An empty wallet renders the literal "No transactions yet" (Ledger.tsx); wait for it with a
+    // SHORT timeout — the fast-poll seam (150ms) lands it near-instantly, and this is a non-asserting
+    // best-effort render beat, not a correctness gate, so never pay a long timeout here.
+    await driver.waitForText('No transactions', { timeoutMs: 3_000 }).catch(() => {});
     await driver.screenshot('35-tour-ledger');
     console.log('[35-ux-tour] ✓ shot: ledger');
 

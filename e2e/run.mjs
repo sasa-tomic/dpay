@@ -34,10 +34,12 @@ import { stopSession } from './harness/lib.mjs';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TESTS_DIR = join(__dirname, 'tests');
 
-// Default concurrency: 10. The host has 16 cores; each parallel test is one chrome context + the
-// shared relay. 10 leaves headroom for the relay/web/V8 and is the measured sweet spot (16 tests in
-// ~10s). Tunable via env; `DPAY_E2E_CONCURRENCY=1` runs sequentially (debugging).
-const DEFAULT_CONCURRENCY = 10;
+// Default concurrency: 12. The host has 16 cores; each parallel test is one chrome incognito context
+// against the shared relay + web + browser process. 12 leaves headroom for the relay/web/V8 and is
+// the measured sweet spot (the suite is bounded by the slowest test on the critical path, not raw
+// throughput, so going higher yields diminishing returns and risks CPU contention thrash). Tunable
+// via env; `DPAY_E2E_CONCURRENCY=1` runs sequentially (debugging).
+const DEFAULT_CONCURRENCY = 12;
 
 function resolveConcurrency() {
   const raw = parseInt(process.env.DPAY_E2E_CONCURRENCY ?? String(DEFAULT_CONCURRENCY), 10);
