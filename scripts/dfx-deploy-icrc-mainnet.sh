@@ -107,6 +107,28 @@ META_OUT="$(dfx --identity dpay canister call "$FACADE_ID" register_currency_met
   "(0 : nat32, opt \"\$\", opt (2 : nat8), null, null, null, null, null, null, opt (100_000 : nat64), null, null, variant { Direct }, variant { Unavailable })" --network "$NETWORK")"
 case "$META_OUT" in *Ok*) echo "   meta Ok";; *) echo "WARN: register_currency_meta did not return Ok: $META_OUT" >&2;; esac
 
+# Register the REAL-asset display metadata + ramp capabilities for ckBTC (currency 1) + ckUSDC
+# (currency 2). These were registered ledger+minter-only (piecemeal), which sets minter_family but
+# leaves wrapper_name/backing_symbol/network null and onramp/offramp at the Unavailable default — so
+# on mainnet the wallet rendered them with no Add-money/Cash-out ramps and no display unit ("looks
+# unsupported"). Values mirror the relay FakeLedger fake_catalog() (the tested source of truth) +
+# the app's BUNDLED_CATALOG. The cap follows the SAME convention as DEMO above (the global per_tx_cap
+# default) so ckBTC/ckUSDC pays are not fail-closed ("over cap", lib.rs currency_cap().unwrap_or(0));
+# the founder SHOULD tighten these to a per-asset policy before pilot.
+# register_currency_meta arg order: (currency, symbol, decimals, minter_family, wrapper_name,
+#   backing_symbol, network, display_decimals, fee, cap, chain_id, token_contract, onramp, offramp).
+GLOBAL_CAP="$(dfx canister call "$FACADE_ID" per_tx_cap --network "$NETWORK" 2>/dev/null | nat)"
+[ -n "$GLOBAL_CAP" ] || GLOBAL_CAP=100_000   # fallback if the read ever fails — non-zero so pays work
+echo "== register ckBTC metadata (currency 1: Direct Bitcoin onramp + offramp, 8 decimals) =="
+META_BTC="$(dfx --identity dpay canister call "$FACADE_ID" register_currency_meta \
+  "(1 : nat32, opt \"₿\", opt (8 : nat8), opt variant { CkBtcUtxo }, opt \"ckBTC\", opt \"BTC\", opt \"Bitcoin\", opt (8 : nat8), null, opt (${GLOBAL_CAP} : nat64), null, null, variant { Direct }, variant { Direct })" --network "$NETWORK")"
+case "$META_BTC" in *Ok*) echo "   ckBTC meta Ok (cap=${GLOBAL_CAP} raw = placeholder — tighten per-asset before pilot)";; *) echo "WARN: ckBTC register_currency_meta did not return Ok: $META_BTC" >&2;; esac
+
+echo "== register ckUSDC metadata (currency 2: Direct ckETH onramp, NO offramp per Fork-C, 6 decimals, ERC-20 = mainnet USDC) =="
+META_USDC="$(dfx --identity dpay canister call "$FACADE_ID" register_currency_meta \
+  "(2 : nat32, opt \"ckUSDC\", opt (6 : nat8), opt variant { CkEthErc20 }, opt \"ckUSDC\", opt \"USDC\", opt \"Ethereum\", opt (6 : nat8), opt (10_000 : nat64), opt (${GLOBAL_CAP} : nat64), opt (1 : nat32), opt \"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48\", variant { Direct }, variant { Unavailable })" --network "$NETWORK")"
+case "$META_USDC" in *Ok*) echo "   ckUSDC meta Ok (cap=${GLOBAL_CAP} raw = placeholder — tighten per-asset before pilot)";; *) echo "WARN: ckUSDC register_currency_meta did not return Ok: $META_USDC" >&2;; esac
+
 echo "== verify a: mint DUSD to the payer subaccount via the facade (caller = OPERATOR) =="
 MINT_OUT="$(dfx --identity dpay canister call "$FACADE_ID" mint "($PAYER_BLOB, 0 : nat32, $INIT_A : nat64)" --network "$NETWORK")"
 case "$MINT_OUT" in *Ok*) echo "   mint Ok";; *) echo "FAIL: mint did not return Ok: $MINT_OUT" >&2; exit 1;; esac
