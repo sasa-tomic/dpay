@@ -2057,6 +2057,15 @@ fn register_minter(currency: Currency, minter: Principal) -> Result<(), String> 
 /// ramp direction honestly. This is what `currencies()` joins in, so the wallet renders asset cards
 /// + ramp buttons from a single source of truth (no hardcoded currency ids/symbols, no
 /// family-level token assumptions — closes issue #7 + MC1 unit 5).
+///
+/// RETIRED is intentionally NOT re-checked here (unlike `register_ledger`/`register_minter`/`
+/// `register_currency`, which gate on it first): this surface only mutates display/policy metadata,
+/// which is INERT on a retired id — `currencies()` filters RETIRED ids out of the catalog, and no
+/// money-moving path (`pay`/`mint`/`withdraw`/`refresh_deposit`) ever reads `CURRENCY_META` without
+/// first resolving the currency through `ledger_for`/`minter_for`, both of which reject RETIRED. So
+/// editing meta on a retired id can change no value flow; it is a cosmetic edit only. (The other
+/// three registration paths must reject RETIRED because they rebind the ledger/minter identity a
+/// money-moving path dereferences — re-targeting a retired id WOULD reinterpret history.)
 #[update]
 #[allow(clippy::too_many_arguments)] // flat positional candid args match register_ledger/register_minter
 fn register_currency_meta(
@@ -2309,15 +2318,22 @@ struct ReconcileReport {
     orphans_repaired: u64,
 }
 
-/// Cross-canister `get_transactions` (the typed ICRC ledger endpoint) → `(log_length, transactions)`.
-/// Uses the typed `Transaction` reply rather than hand-decoding generic ICRC-3 blocks: more robust
-/// against block-layout drift, and the cached `ic-icrc1-ledger` exposes it. Only the in-canister
-/// recent transactions are returned (archived ranges are not paged in this bounded version).
+/// Cross-canister `get_transactions` (the typed ICRC ledger endpoint) →
+/// `(log_length, first_index, transactions)`. Uses the typed `Transaction` reply rather than
+/// hand-decoding generic ICRC-3 blocks: more robust against block-layout drift, and the cached
+/// `ic-icrc1-ledger` exposes it. Only the in-canister recent transactions are returned (archived
+/// ranges are not paged in this bounded version).
+///
+/// `first_index` is the ACTUAL first block index of the returned range, captured from
+/// `GetTransactionsResponse.first_index` rather than assuming it equals the requested `start`: the
+/// response range may begin elsewhere once archived-range paging is in play. Callers that need to
+/// derive a transaction's ledger block index MUST use `first_index + i`, never `start + i`. (Today
+/// PocketIC has no archiving, so `first_index == start` always; this is the drift-safe read.)
 async fn ledger_get_transactions(
     ledger: Principal,
     start: u64,
     length: u64,
-) -> Result<(u64, Vec<Transaction>), String> {
+) -> Result<(u64, u64, Vec<Transaction>), String> {
     let req = GetBlocksRequest { start: Nat::from(start), length: Nat::from(length) };
     let response = Call::bounded_wait(ledger, "get_transactions")
         .with_arg(req)
@@ -2327,7 +2343,8 @@ async fn ledger_get_transactions(
         .candid()
         .map_err(|e| format!("get_transactions decode: {e:?}"))?;
     let log_length = nat_to_u64(&res.log_length)?;
-    Ok((log_length, res.transactions))
+    let first_index = nat_to_u64(&res.first_index)?;
+    Ok((log_length, first_index, res.transactions))
 }
 
 /// `(nat32 currency) -> Result<ReconcileReport, text>` — walk the currency's recent ledger
@@ -2344,19 +2361,22 @@ async fn reconcile(currency: Currency) -> Result<ReconcileReport, String> {
     let (ledger, _mintable) = ledger_for(currency)?;
     let self_id = canister_self();
 
-    let (log_length, txs_initial) = ledger_get_transactions(ledger, 0, RECONCILE_MAX_BLOCKS).await?;
+    let (log_length, first_index_initial, txs_initial) =
+        ledger_get_transactions(ledger, 0, RECONCILE_MAX_BLOCKS).await?;
     // `get_transactions` returns up to `length` from `start`; if the log is longer than the cap, the
     // recent window is what we want (a trap's orphan is recent). Re-fetch the tail when the log
-    // exceeds the cap so we scan the NEWEST blocks, not the oldest. Capture the effective `start` so
-    // the loop can derive each transaction's ledger block index — the ICRC-3 `Transaction` itself
-    // carries no `block_index` field, and `get_transactions(start, length)` returns blocks
-    // `[start, start+len)` in order, so the tx at loop position `i` is ledger block `start + i`.
-    let (start, txs) = if log_length > RECONCILE_MAX_BLOCKS {
-        let start = log_length - RECONCILE_MAX_BLOCKS;
-        let txs = ledger_get_transactions(ledger, start, RECONCILE_MAX_BLOCKS).await?.1;
-        (start, txs)
+    // exceeds the cap so we scan the NEWEST blocks, not the oldest. Capture the response's
+    // `first_index` (the ACTUAL first block index of the returned range — NOT necessarily the
+    // requested `start` once archived-range paging is in play) so the loop can derive each
+    // transaction's ledger block index: the ICRC-3 `Transaction` itself carries no `block_index`
+    // field, and the tx at loop position `i` is ledger block `first_index + i`.
+    let (first_index, txs) = if log_length > RECONCILE_MAX_BLOCKS {
+        let tail_start = log_length - RECONCILE_MAX_BLOCKS;
+        let (_, first_index, txs) =
+            ledger_get_transactions(ledger, tail_start, RECONCILE_MAX_BLOCKS).await?;
+        (first_index, txs)
     } else {
-        (0, txs_initial)
+        (first_index_initial, txs_initial)
     };
 
     let mut scanned: u64 = 0;
@@ -2405,8 +2425,8 @@ async fn reconcile(currency: Currency) -> Result<ReconcileReport, String> {
         // MC4 U2: reconstruct + sign + store a receipt for this orphan so `receipt(nonce)` returns a
         // verifiable canister-signed attestation for EVERY settled payment (a durable recovery
         // primitive requires a signed receipt even for a payment whose post-commit message trapped).
-        // The claim mirrors `pay`'s exactly; `block_index = start + i` is the orphan's actual ledger
-        // block (byte-identical to what a normal pay recorded for the same transfer); `settle_ts` is
+        // The claim mirrors `pay`'s exactly; `block_index = first_index + i` is the orphan's actual
+        // ledger block (byte-identical to what a normal pay recorded for the same transfer); `settle_ts` is
         // the on-ledger timestamp (the canister settle time is gone post-trap — the ledger time is
         // the authoritative proxy). Idempotent: skip if a receipt is already stored for this nonce
         // (reconcile is re-runnable — re-running must not error or double-write). The key is ensured
@@ -2415,7 +2435,7 @@ async fn reconcile(currency: Currency) -> Result<ReconcileReport, String> {
         let already_stored = RECEIPTS.with(|m| m.borrow().contains_key(&nonce_key));
         if !already_stored {
             let receipt_sk = ensure_receipt_key().await?;
-            let block_index = start + i as u64;
+            let block_index = first_index + i as u64;
             let claim = ReceiptClaim {
                 nonce,
                 from: from_pk,
@@ -2497,8 +2517,14 @@ async fn refresh_deposit(pubkey: Vec<u8>, currency: Currency) -> Result<DepositR
                 // UTXO is reported again by a subsequent `update_balance` (or never, if tainted).
             }
             // Inline cache refresh: a freshly-minted ckBTC deposit must be immediately visible via
-            // `balance_of` WITHOUT an extra refresh_balance call (MC3 U1). Modeled on `mint`'s
-            // post-mint authoritative re-read. Best-effort: a read failure does not undo the mint.
+            // `balance_of` WITHOUT an extra refresh_balance call (MC3 U1). NOT modeled on `mint`'s
+            // post-mint read: `mint` hard-fails (`?`) if the re-read errors (the mint already
+            // settled, so the error surfaces a now-unobservable balance); this refresh is
+            // BEST-EFFORT (`if let Ok`) — a read failure leaves the cache stale but does NOT undo
+            // the mint or error the call. The staleness is bounded: the NoNewUtxos branch below
+            // re-reads on every 10s poll, and the relay's `BALANCE_TTL_SECS` freshness contract
+            // (see dpay-relay AgentLedger) forces an authoritative `refresh_balance` within one
+            // TTL window, which re-reads and overwrites the cache.
             if let Ok(bal) = ledger_balance_of(ledger, &account_of(&pk)).await {
                 write_cache(pk, currency, bal);
             }

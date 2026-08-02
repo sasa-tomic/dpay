@@ -233,6 +233,13 @@ service : (InitArg) -> {
   // is deliberately NOT added to the AlreadyProcessing / TemporarilyUnavailable / GenericError
   // branches — the minter call FAILED there and the cache state is unknown, so we do not paper over
   // it with a speculative read.
+  // 
+  // The cache refresh here is BEST-EFFORT (`if let Ok`), NOT the hard-fail re-read `mint` and
+  // `refresh_balance` use (`?`): `mint`/`refresh_balance` surface a read error to the caller,
+  // whereas `refresh_deposit` swallows it — a read failure leaves the cache stale but does NOT undo
+  // the mint or fail the call (the mint already settled on the ledger). The staleness is bounded by
+  // self-heal: the `NoNewUtxos` branch re-reads every 10s poll, and the relay's `BALANCE_TTL_SECS`
+  // freshness contract forces an authoritative `refresh_balance` within one TTL window.
   refresh_deposit : (blob, nat32) -> (Result_7);
   // `(CurrencyRegistration) -> Result<(), text>` — the SINGLE ATOMIC currency-activation path (MC2
   // unit 4). Activates a NEW currency id by inserting LEDGERS + (optionally) MINTERS + CURRENCY_META

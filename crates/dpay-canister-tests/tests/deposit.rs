@@ -445,11 +445,60 @@ fn deposit_flow_mints_to_facade_subaccount() {
     assert!(post.pending.is_empty());
 
     assert_eq!(ledger_balance(&pic, ckbtc, dpay, payer), DEPOSIT_AMOUNT);
+    // Facade cache (the display path the app/relay read) MUST reflect the mint too — not only the
+    // authoritative ledger balance. Pins the `Ok(statuses)` mint-branch cache refresh.
+    assert_eq!(dpay_balance(&pic, dpay, payer, CKBTC), DEPOSIT_AMOUNT);
 
     let second = refresh_deposit(&pic, dpay, payer).expect("second refresh ok");
     assert_eq!(second.minted_total, 0);
     assert!(second.minted.is_empty());
     assert_eq!(ledger_balance(&pic, ckbtc, dpay, payer), DEPOSIT_AMOUNT);
+    assert_eq!(dpay_balance(&pic, dpay, payer, CKBTC), DEPOSIT_AMOUNT);
+}
+
+/// Pins the `NoNewUtxos` branch's inline cache refresh in `refresh_deposit` (lib.rs ~2530). The plain
+/// happy-path test above cannot catch a regression that deletes ONLY the NoNewUtxos cache refresh:
+/// the preceding mint branch already wrote `DEPOSIT_AMOUNT` into the cache, so the subsequent
+/// NoNewUtxos refresh could be a no-op and `dpay_balance` would still read correctly.
+///
+/// This test isolates the NoNewUtxos branch: it credits the payer's facade subaccount with a DIRECT
+/// ICRC transfer (bypassing the facade entirely, so `BAL_CACHE` stays stale at 0), then calls
+/// `refresh_deposit`. With no UTXO registered the mock minter returns `NoNewUtxos` (no mint), so the
+/// ONLY thing that can surface the credit via `balance_of` is the NoNewUtxos branch's cache re-read.
+/// If that branch is deleted, `dpay_balance` stays 0 and this test fails.
+#[test]
+fn refresh_deposit_nonewutxos_branch_refreshes_cache_after_direct_credit() {
+    let (pic, ckbtc, dpay, mock, _sk, payer) = setup_deposit();
+    const CREDIT: u64 = 25_000;
+
+    // External credit that bypasses the facade (direct ICRC mint to the payer's subaccount). The
+    // facade is NEVER invoked, so BAL_CACHE has no entry for `payer` → `balance_of` returns 0.
+    direct_credit(&pic, ckbtc, mock, dpay, payer, CREDIT);
+
+    // Sanity: the credit landed on the authoritative ledger, but the facade cache is stale (0).
+    // This double-check proves the credit bypassed the facade (so only a NoNewUtxos refresh can
+    // surface it — the mint branch never ran).
+    assert_eq!(ledger_balance(&pic, ckbtc, dpay, payer), CREDIT);
+    assert_eq!(
+        dpay_balance(&pic, dpay, payer, CKBTC),
+        0,
+        "cache must be stale (direct credit bypassed the facade) before refresh_deposit",
+    );
+
+    // No UTXO registered → the mock minter returns NoNewUtxos (minted_total 0, no mint). The cache
+    // refresh in THIS branch is the only thing that can update the facade cache.
+    let res = refresh_deposit(&pic, dpay, payer).expect("NoNewUtxos refresh ok");
+    assert_eq!(res.minted_total, 0, "no UTXO registered → NoNewUtxos, nothing minted");
+    assert!(res.minted.is_empty());
+
+    // THE regression assertion: the NoNewUtxos branch re-read the ledger and refreshed the cache, so
+    // the direct credit is now visible via the facade display path. FAILS if the NoNewUtxos cache
+    // refresh (lib.rs `if let Ok(bal) ... write_cache`) is deleted.
+    assert_eq!(
+        dpay_balance(&pic, dpay, payer, CKBTC),
+        CREDIT,
+        "NoNewUtxos branch must refresh the facade cache so a bypassing credit is visible",
+    );
 }
 
 #[test]
