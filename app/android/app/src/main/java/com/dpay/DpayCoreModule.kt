@@ -25,6 +25,10 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
 
     private val HEX = "0123456789abcdef".toCharArray()
 
+    /** Exclusive u64 upper bound (2^64) for [rawU64] range validation — shift form avoids a
+     *  typo-prone decimal literal. */
+    private val U64_LIMIT = BigInteger.valueOf(1).shiftLeft(64)
+
     private fun hex(bytes: ByteArray): String {
         val sb = StringBuilder(bytes.size * 2)
         for (b in bytes) {
@@ -41,18 +45,29 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
 
     /**
      * Parse a raw-u64 decimal STRING (from the JS bridge) into a ULong for the UniFFI binding.
-     * MC1 units 2-4: `BigInteger(amount).toLong().toULong()` is EXACT for the full u64 bit-pattern
-     * — `toLong()` takes the low 64 bits (so values in `[2^63, 2^64)` wrap to a negative long), and
-     * `.toULong()` reinterprets those same bits unsigned. A malformed amount rejects the promise
-     * with a debuggable code+message (never silent).
+     * MC1 units 2-4: for any value in `[0, 2^64)`, `toLong().toULong()` reproduces the exact u64
+     * bit-pattern — `toLong()` takes the low 64 bits (so values in `[2^63, 2^64)` wrap to a negative
+     * long) and `.toULong()` reinterprets those same bits unsigned. A malformed amount rejects the
+     * promise with a debuggable code+message (never silent).
+     *
+     * Defense-in-depth (PR2): a sign + range guard runs BEFORE the bit-truncating `toLong()`. A
+     * negative string (`"-5"`) would otherwise reinterpret to a near-`u64::MAX` value, and an
+     * overflow (`"18446744073709551616"` == 2^64) would silently truncate to `0`. Current callers
+     * pre-parse, but a future caller threading an unvalidated string straight here must not silently
+     * corrupt the amount.
      */
     private fun rawU64(amount: String, field: String, promise: Promise): ULong? {
-        return try {
-            BigInteger(amount.trim()).toLong().toULong()
+        val bi = try {
+            BigInteger(amount.trim())
         } catch (e: Throwable) {
             promise.reject("dpay_core", "invalid $field: ${e.message}", e)
-            null
+            return null
         }
+        if (bi.signum() < 0 || bi >= U64_LIMIT) {
+            promise.reject("dpay_core", "out of u64 range for $field: $amount")
+            return null
+        }
+        return bi.toLong().toULong()
     }
 
     /** Fresh on-device Ed25519 keypair (native CSPRNG, inside Rust). */

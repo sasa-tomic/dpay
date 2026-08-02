@@ -30,6 +30,10 @@ class DpayNfcModule(reactContext: ReactApplicationContext) :
 
     private val HEXCH = "0123456789abcdef".toCharArray()
 
+    /** Exclusive u64 upper bound (2^64) for [rawU64] range validation — shift form avoids a
+     *  typo-prone decimal literal. Mirrors `DpayCoreModule.U64_LIMIT`. */
+    private val U64_LIMIT = BigInteger.valueOf(1).shiftLeft(64)
+
     private fun hex(b: ByteArray): String {
         val sb = StringBuilder(b.size * 2)
         for (x in b) {
@@ -43,6 +47,26 @@ class DpayNfcModule(reactContext: ReactApplicationContext) :
         ByteArray(s.length / 2) {
             ((Character.digit(s[it * 2], 16) shl 4) + Character.digit(s[it * 2 + 1], 16)).toByte()
         }
+
+    /**
+     * Parse a raw-u64 decimal STRING into a ULong for the UniFFI binding; rejects the promise
+     * (never silent) on a malformed or out-of-`[0, 2^64)` value. Mirrors `DpayCoreModule.rawU64` —
+     * the sign + range guard runs BEFORE the bit-truncating `toLong()` so a negative or overflowing
+     * amount can't silently corrupt the wire (PR2 defense-in-depth).
+     */
+    private fun rawU64(amount: String, field: String, promise: Promise): ULong? {
+        val bi = try {
+            BigInteger(amount.trim())
+        } catch (e: Throwable) {
+            promise.reject("dpay_nfc", "invalid $field: ${e.message}", e)
+            return null
+        }
+        if (bi.signum() < 0 || bi >= U64_LIMIT) {
+            promise.reject("dpay_nfc", "out of u64 range for $field: $amount")
+            return null
+        }
+        return bi.toLong().toULong()
+    }
 
     // ---------------------------------------------------------------- payer / card (Pay mode)
     @ReactMethod
@@ -84,13 +108,9 @@ class DpayNfcModule(reactContext: ReactApplicationContext) :
         memo: String,
         promise: Promise,
     ) {
-        // MC1 units 2-4: `amount` is a raw-u64 decimal STRING. `BigInteger(amount).toLong().toULong()`
-        // is exact for the full u64 bit-pattern; a malformed value rejects the promise (never silent).
-        val amountU = try {
-            BigInteger(amount.trim()).toLong().toULong()
-        } catch (e: Throwable) {
-            promise.reject("dpay_nfc", "invalid amount: ${e.message}", e); return
-        }
+        // MC1 units 2-4: `amount` is a raw-u64 decimal STRING. `rawU64` is exact for the full u64
+        // bit-pattern and rejects the promise (never silent) on a malformed or out-of-range value.
+        val amountU = rawU64(amount, "amount", promise) ?: return
         try {
             val bytes = uniffi.dpay_ffi.nfcRequestBytes(
                 unhex(toHex),
