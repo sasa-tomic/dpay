@@ -36,13 +36,21 @@ type RequestArgs = {method: string; params?: unknown[] | object};
  * FakeEthereumProvider — a controllable jest.fn-backed provider that `implements` the REAL
  * EthereumProvider instance surface (a `Pick` of it). `request` is a jest.fn (assert/override via
  * `setHandler` or directly with `.mockResolvedValue`); `enable`/`connect`/`disconnect` are inert
- * jest.fn stubs so the fake can also stand in for the fuller WC contract. This is what `FAKE_INIT`
- * resolves to.
+ * jest.fn stubs so the fake can also stand in for the fuller WC contract. `on`/`removeListener` are
+ * a real listener registry (backed by a Map) so tests can `emit` events (`display_uri`, `connect`)
+ * to exercise the pairing flow; they are ALSO jest.fn-wrapped so tests can assert registration.
+ * This is what `FAKE_INIT` resolves to.
  */
 export class FakeEthereumProvider
-  implements Pick<EthereumProviderInstance, 'request' | 'enable' | 'connect' | 'disconnect'>
+  implements Pick<
+    EthereumProviderInstance,
+    'request' | 'enable' | 'connect' | 'disconnect' | 'on' | 'removeListener'
+  >
 {
   private readonly handlers = new Map<string, (args: RequestArgs) => unknown>();
+  // The listener registry: event name → set of listener fns. `emit` (test helper) fans a payload
+  // out to every registered listener for that event, exactly like the real EventEmitter.
+  private readonly eventListeners = new Map<string, Set<(args: unknown) => void>>();
 
   /** Install a per-`method` handler (tests override the default `null` return for a given method). */
   setHandler(method: string, fn: (args: RequestArgs) => unknown): this {
@@ -61,11 +69,46 @@ export class FakeEthereumProvider
   /** WC `enable` — inert jest.fn returning an empty account list. */
   enable = jest.fn(async (): Promise<string[]> => []) as EthereumProviderInstance['enable'];
 
-  /** WC `connect` — inert jest.fn. */
-  connect = jest.fn(async (_opts?: unknown): Promise<void> => undefined) as EthereumProviderInstance['connect'];
+  /** WC `connect` — jest.fn (tests override to resolve or reject to drive the pairing flow). Typed
+   * as `jest.MockedFunction<real signature>` so tests can call `.mockImplementation()`/`.mockResolvedValue()`
+   * while STILL satisfying the `implements Pick<..., 'connect'>` constraint (the intersection preserves
+   * the SDK call signature for drift detection). */
+  connect = jest.fn(async (_opts?: unknown): Promise<void> => undefined) as jest.MockedFunction<
+    EthereumProviderInstance['connect']
+  >;
 
   /** WC `disconnect` — inert jest.fn. */
   disconnect = jest.fn(async (): Promise<void> => undefined) as EthereumProviderInstance['disconnect'];
+
+  /**
+   * WC `on` — jest.fn that ALSO registers the listener in the internal registry so `emit` can fire
+   * it. Returns `this` (the real `on` returns the EthereumProvider for chaining). Typed as the real
+   * generic `on` signature.
+   */
+  on = jest.fn(((event: string, listener: (args: unknown) => void) => {
+    if (!this.eventListeners.has(event)) this.eventListeners.set(event, new Set());
+    this.eventListeners.get(event)!.add(listener);
+    return this;
+  }) as unknown as EthereumProviderInstance['on']);
+
+  /**
+   * WC `removeListener` — jest.fn that ALSO removes the listener from the registry so cleanup is
+   * observable. Typed as the real generic `removeListener` signature.
+   */
+  removeListener = jest.fn(((event: string, listener: (args: unknown) => void) => {
+    this.eventListeners.get(event)?.delete(listener);
+    return this;
+  }) as unknown as EthereumProviderInstance['removeListener']);
+
+  /**
+   * Test helper: emit an event payload to every registered listener for that event (mirrors the real
+   * EventEmitter). The payload is passed as the SINGLE listener argument — matches the real SDK's
+   * `display_uri: string` and `connect: ProviderInfo` shapes (one arg, not spread).
+   */
+  emit(event: string, payload: unknown): void {
+    const set = this.eventListeners.get(event);
+    if (set) for (const fn of set) fn(payload);
+  }
 }
 
 /**

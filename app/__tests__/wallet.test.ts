@@ -1,16 +1,21 @@
 import { describe, test, expect, jest } from '@jest/globals';
 import {
   connectWallet, sendTransaction, getChainId, waitForReceipt,
-  ReceiptReverted, ReceiptTimeout, getEthereumProvider, resolveOnrampProvider, type Eip1193Provider,
+  ReceiptReverted, ReceiptTimeout, getEthereumProvider, resolveOnrampProvider, pairOnrampWallet,
+  type Eip1193Provider,
 } from '../wallet';
 
 // MC8 U6.2 — sentinel mock for the WalletConnect source. `resolveOnrampProvider()` is WEB-FIRST: it
 // returns `window.ethereum` before ever reaching the WC branch, so this rejecting sentinel PROVES
 // the web-first path never touches WalletConnect (a call would reject and fail the test). The
-// native-delegation test re-wires this to resolve a fake inside its `jest.isolateModules` block.
+// native-delegation tests re-wire this to resolve a fake inside their `jest.isolateModules` block.
+// `pairOnrampWallet` is also wired here as a rejecting sentinel for the same reason.
 jest.mock('../walletconnect', () => ({
   getWalletConnectProvider: jest.fn(() =>
     Promise.reject(new Error('WalletConnect must not be reached on the web-first path')),
+  ),
+  pairWalletConnect: jest.fn(() =>
+    Promise.reject(new Error('pairWalletConnect must not be reached on the web-first path')),
   ),
 }));
 
@@ -269,9 +274,12 @@ describe('resolveOnrampProvider', () => {
 
   test('returns null when no web provider and WalletConnect disabled (empty projectId)', async () => {
     delete (globalThis as {ethereum?: unknown}).ethereum;
-    delete (globalThis as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID;
-    // The top-level wallet.ts import captured projectId='' (no override) → the WC branch's
-    // `&& WALLETCONNECT_PROJECT_ID` short-circuits → null (today's behavior, no onramp source).
+    // MC8 U6 capstone: constants.ts now defaults to the REAL project id, so SET '' to disable WC
+    // (deleting would fall through to the real id). jest.setup.js does this globally; this is the
+    // per-test explicit pin.
+    (globalThis as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID = '';
+    // The top-level wallet.ts import captured projectId='' (jest.setup.js global) → the WC branch's
+    // `&& WALLETCONNECT_PROJECT_ID` short-circuits → null (no onramp source).
     const result = await resolveOnrampProvider();
     expect(result).toBeNull();
   });
@@ -294,7 +302,51 @@ describe('resolveOnrampProvider', () => {
       const result = await pending;
       expect(result).toBe(FAKE);
     } finally {
-      delete (globalThis as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID;
+      (globalThis as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID = '';
+    }
+  });
+});
+
+// --- MC8 U6 capstone — pairOnrampWallet (dynamic-import boundary for pairing) ----------------
+// `pairOnrampWallet(onUri)` is the ISOLATION-BOUNDARY wrapper around `pairWalletConnect` (the sheet
+// imports ONLY from wallet.ts, never statically from walletconnect.ts). Web-first / disabled → false
+// (no dynamic import); native + configured → delegates to the dynamically-imported pairWalletConnect.
+// The rejecting sentinel mock (top of file) PROVES the web path never reaches pairWalletConnect.
+describe('pairOnrampWallet', () => {
+  test('web-first: returns false and NEVER reaches WalletConnect (no window.ethereum needed)', async () => {
+    delete (globalThis as {ethereum?: unknown}).ethereum;
+    const result = await pairOnrampWallet(jest.fn());
+    expect(result).toBe(false);
+    // The rejecting sentinel mock would fail the test if the WC branch were ever reached.
+    const wc = require('../walletconnect');
+    expect(wc.pairWalletConnect).not.toHaveBeenCalled();
+  });
+
+  test('disabled (empty projectId) → returns false and never reaches WalletConnect', async () => {
+    delete (globalThis as {ethereum?: unknown}).ethereum;
+    (globalThis as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID = '';
+    const result = await pairOnrampWallet(jest.fn());
+    expect(result).toBe(false);
+  });
+
+  test('native + projectId set → delegates to pairWalletConnect and returns true', async () => {
+    delete (globalThis as {ethereum?: unknown}).ethereum;
+    const onUriStub = jest.fn();
+    let pending!: Promise<boolean>;
+    jest.isolateModules(() => {
+      (globalThis as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID =
+        'test-project-id';
+      // Re-wire the WC mock to resolve (the sentinel rejects); the delegation path must call it.
+      require('../walletconnect').pairWalletConnect = jest.fn(async () => undefined);
+      pending = require('../wallet').pairOnrampWallet(onUriStub);
+    });
+    try {
+      const result = await pending;
+      expect(result).toBe(true);
+      const wc = require('../walletconnect');
+      expect(wc.pairWalletConnect).toHaveBeenCalledWith(onUriStub);
+    } finally {
+      (globalThis as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID = '';
     }
   });
 });

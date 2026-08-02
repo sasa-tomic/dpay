@@ -42,16 +42,16 @@ export const EXPECTED_RECEIPT_PUBKEY =
 
 // WalletConnect v2 project id (from cloud.walletconnect.com, free). Required by the dApp-side
 // `EthereumProvider.init` for the native (Android) ckERC20 onramp — the only WalletConnect entry
-// point in dpay. DEFAULTS EMPTY (= WC disabled): the native onramp is NOT end-to-end functional
-// yet because `app/metro.config.js` redirects `@reown/appkit/core` (the built-in QR modal, pulled
-// by ethereum-provider@2.23.10, web-only) to a stub whose `createAppKit()` THROWS. Baking a real
-// projectId here would enable `EthereumProvider.init({showQrModal:true})` on native and hit that
-// throw. So: keep empty UNTIL `@walletconnect/modal-react-native` replaces the shim (or
-// showQrModal:false + a custom display_uri QR). A release build sets the real id via
-// `__DPAY_TEST_WALLETCONNECT_PROJECT_ID` / a build-time override once the modal works. Mirrors the
-// EXPECTED_RECEIPT_PUBKEY + POLL override seam exactly.
+// point in dpay. PRODUCTION ID IS BAKED HERE: the capstone (showQrModal:false + display_uri QR)
+// makes WC's built-in @reown/appkit modal path RUNTIME-UNREACHABLE (ethereum-provider only
+// dynamic-imports the modal when showQrModal is true; we render the pairing URI ourselves via a
+// custom on-brand <QRCode>). So a non-empty projectId is now SAFE to ship. The test override
+// `__DPAY_TEST_WALLETCONNECT_PROJECT_ID=''` DISABLES WC for the offline inner loop (e2e/jest/web):
+// jest.setup.js sets it globally to '' (so no jest test triggers WC); the e2e harness injects a
+// test id via driver.mjs; prod never sets the global → every `??` falls through to the baked id.
+// Mirrors the EXPECTED_RECEIPT_PUBKEY + POLL override seam exactly.
 export const WALLETCONNECT_PROJECT_ID =
-  ((globalThis as unknown as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID ?? '');
+  ((globalThis as unknown as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID ?? '648afbc757419fa381f77ba0c900bc85');
 
 export const WITHDRAW_TIMEOUT_MS = 8000; // bound the /withdraw POST (every new fetch has a timeout)
 export const WITHDRAW_EXPIRY_WINDOW = 600; // the signed WithdrawAuth is valid 10 min

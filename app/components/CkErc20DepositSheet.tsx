@@ -1,5 +1,6 @@
 import {useCallback, useEffect, useState} from 'react';
 import {View, Text, Pressable, TextInput, ScrollView, SafeAreaView, StatusBar, ActivityIndicator, Platform} from 'react-native';
+import QRCode from 'react-native-qrcode-svg';
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {POLL} from '../config/constants';
@@ -9,7 +10,7 @@ import type {Identity} from '../lib/types';
 import type {FamilyDisplay} from '../config/catalog';
 import {type CkErc20OnrampParams, ckerc20OnrampParams} from '../services/relay';
 import {encodeApprove, encodeDepositErc20, principalToBytes32} from '../cketh';
-import {resolveOnrampProvider, connectWallet, getChainId, sendTransaction, waitForReceipt, ReceiptReverted, ReceiptTimeout} from '../wallet';
+import {resolveOnrampProvider, connectWallet, getChainId, sendTransaction, waitForReceipt, ReceiptReverted, ReceiptTimeout, pairOnrampWallet} from '../wallet';
 import {loadDeposit, saveDeposit, clearDeposit} from '../services/ckerc20Persist';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 
@@ -41,6 +42,10 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
   const [account, setAccount] = useState<string | null>(null);
   const [amount, setAmount] = useState('');
   const [err, setErr] = useState<string | null>(null);
+  // MC8 U6 capstone — the WalletConnect pairing URI. Non-null while the user should see the pairing
+  // QR (between display_uri and the connect event). On web this is ALWAYS null (pairOnrampWallet is
+  // a no-op that returns false without ever calling onUri), so the QR never renders in the e2e flow.
+  const [wcUri, setWcUri] = useState<string | null>(null);
   const [params, setParams] = useState<CkErc20OnrampParams | null>(null);
   const [startBal, setStartBal] = useState<string | null>(null);
   // Captured during submit() so the persisted watching state can carry the two ETH tx hashes
@@ -117,6 +122,20 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
         ? 'No Ethereum wallet found. Install MetaMask or Rabby in this browser.'
         : 'No wallet connected. Pair a wallet via WalletConnect.');
       return;
+    }
+    // MC8 U6 capstone — pair via WalletConnect BEFORE eth_requestAccounts. On web this is a no-op
+    // (pairOnrampWallet returns false immediately — never reaches the WC dynamic import). On native
+    // it subscribes to display_uri → renders the pairing QR (wcUri state), calls provider.connect()
+    // (the wallet handshake), and clears the QR when the session is established. A pair failure
+    // surfaces an honest error and aborts (does NOT proceed to connectWallet on a dead session).
+    setWcUri(null);
+    try {
+      await pairOnrampWallet((uri) => setWcUri(uri));
+    } catch (e: any) {
+      setWcUri(null);
+      const msg = String(e?.message ?? e);
+      setErr(/reject|denied|user/i.test(msg) ? 'Pairing not approved.' : (msg || 'Could not pair with your wallet.'));
+      return; // stay in 'connect' — the WC session is not established.
     }
     try {
       const acct = await connectWallet(provider);
@@ -279,9 +298,19 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
           {err ? <Text testID="ckerc20-status" style={S.err}>{err}</Text> : null}
 
           {phase === 'connect' ? (
-            <Pressable testID="btn-connect-wallet" accessibilityRole="button" accessibilityLabel="Connect Ethereum wallet" style={S.primaryWide} onPress={connect}>
-              <Text style={S.primaryText}>Connect wallet</Text>
-            </Pressable>
+            // MC8 U6 capstone — while wcUri is non-null (display_uri fired, waiting for the wallet to
+            // scan + approve), render the pairing QR with on-brand copy. On web wcUri is ALWAYS null
+            // (pairOnrampWallet is a no-op), so this branch is unreachable in the e2e harness.
+            wcUri ? (
+              <View style={S.centerAll}>
+                <View testID="wc-pair-qr" style={S.qrCard}><QRCode value={wcUri} size={244} ecl="M" /></View>
+                <Text style={S.paidSub}>Scan with your wallet to pair</Text>
+              </View>
+            ) : (
+              <Pressable testID="btn-connect-wallet" accessibilityRole="button" accessibilityLabel="Connect Ethereum wallet" style={S.primaryWide} onPress={connect}>
+                <Text style={S.primaryText}>Connect wallet</Text>
+              </Pressable>
+            )
           ) : phase === 'enter' || phase === 'sending' ? (
             <>
               <Text style={S.inputLabel}>{`Amount (${display.nativeAsset})`}</Text>

@@ -76,6 +76,26 @@ export async function resolveOnrampProvider(): Promise<Eip1193Provider | null> {
 }
 
 /**
+ * MC8 U6 capstone — pair the onramp wallet (WalletConnect session establishment). Web-first /
+ * disabled → returns `false` (no dynamic import, no WC code touched). Native + configured → lazily
+ * dynamic-imports `./walletconnect` (the isolation boundary — the sheet imports ONLY from wallet.ts,
+ * never statically from walletconnect.ts) and delegates to `pairWalletConnect(onUri)`, which
+ * subscribes to the WC `display_uri` event and drives the pairing. Returns `true` after a successful
+ * delegation. The sheet renders a custom `<QRCode>` from the URI `onUri` surfaces.
+ *
+ * Mirrors `resolveOnrampProvider()`'s web-first ordering and isolation boundary exactly.
+ */
+export async function pairOnrampWallet(onUri: (uri: string | null) => void): Promise<boolean> {
+  // Web-first / disabled — no dynamic import is ever evaluated on the web/jest path.
+  if (Platform.OS === 'web' || !WALLETCONNECT_PROJECT_ID) return false;
+  // Native + configured → lazy-load the WC pairing driver (the dynamic import is the isolation
+  // boundary; this line is unreachable on web/jest because the gate above short-circuits).
+  const {pairWalletConnect} = await import('./walletconnect');
+  await pairWalletConnect(onUri);
+  return true;
+}
+
+/**
  * Connect: `eth_requestAccounts` → the first authorized account address (0x…). Throws if the user
  * rejects or no account is returned. (On real wallets this is the prompt the user explicitly approves.)
  */

@@ -48,18 +48,18 @@ type InitMock = typeof FAKE_INIT;
 /** Re-evaluate `walletconnect.ts` with `projectId` baked into constants + `mockPlatformOS` set. */
 function load(id: string): {
   getWalletConnectProvider: () => Promise<Eip1193Provider | null>;
+  pairWalletConnect: (onUri: (uri: string | null) => void) => Promise<void>;
   init: InitMock;
 } {
   let out!: {
     getWalletConnectProvider: () => Promise<Eip1193Provider | null>;
+    pairWalletConnect: (onUri: (uri: string | null) => void) => Promise<void>;
     init: InitMock;
   };
   jest.isolateModules(() => {
-    if (id) {
-      (globalThis as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID = id;
-    } else {
-      delete (globalThis as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID;
-    }
+    // ALWAYS set the override (even to '') — constants.ts now defaults to the REAL project id, so
+    // deleting the override would ENABLE WC. `load('')` → '' disables WC (the disabled-guard test).
+    (globalThis as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID = id;
     // The stub is re-evaluated inside isolateModules → a fresh FAKE_INIT jest.fn. Grab it so the
     // test can configure + assert on the SAME instance walletconnect.ts captured at import time.
     // One cast on the untyped CJS `require` boundary (connects it to the typed fake) — NOT a
@@ -70,6 +70,7 @@ function load(id: string): {
     out = {
       init: stub.EthereumProvider.init,
       getWalletConnectProvider: require('../walletconnect').getWalletConnectProvider,
+      pairWalletConnect: require('../walletconnect').pairWalletConnect,
     };
   });
   return out;
@@ -77,7 +78,7 @@ function load(id: string): {
 
 afterEach(() => {
   mockPlatformOS = 'android';
-  delete (globalThis as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID;
+  (globalThis as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID = '';
 });
 
 describe('getWalletConnectProvider — (1) disabled guard', () => {
@@ -113,7 +114,9 @@ describe('getWalletConnectProvider — (2) singleton (init exactly once)', () =>
         projectId: PROJECT_ID,
         chains: [1],
         optionalChains: [1],
-        showQrModal: true,
+        // MC8 U6 capstone — showQrModal:false: WC's built-in @reown/appkit modal is web-only and
+        // unreachable on RN. We render the pairing URI ourselves via display_uri → custom <QRCode>.
+        showQrModal: false,
       }),
     );
   });
@@ -131,6 +134,124 @@ describe('getWalletConnectProvider — (3) EIP-1193 surface', () => {
     const p = provider as Eip1193Provider;
     await p.request({method: 'eth_chainId', params: []});
     expect(fake.request).toHaveBeenCalledWith({method: 'eth_chainId', params: []});
+  });
+});
+
+// --- MC8 U6 capstone — pairWalletConnect (display_uri → custom QR) ---------------------------
+// `pairWalletConnect(onUri)` drives the WC pairing with showQrModal:false: it subscribes to the
+// provider's `display_uri` event (the SDK emits the WC URI as a plain string — see
+// IProviderEvents.EventArguments.display_uri in the installed .d.ts), passes it to `onUri` so the
+// sheet can render a custom on-brand <QRCode>, then calls `provider.connect()` (which initiates the
+// pairing handshake). The `connect` event fires on session established → `onUri(null)` clears the
+// QR. Listeners are cleaned up on both success and failure. The disabled guard (web/empty projectId)
+// short-circuits without touching the provider.
+describe('pairWalletConnect — disabled guard', () => {
+  test('empty projectId → returns without calling connect', async () => {
+    const {init, pairWalletConnect} = load('');
+    const fake = new FakeEthereumProvider();
+    init.mockResolvedValue(fake);
+    const onUri = jest.fn();
+    await pairWalletConnect(onUri);
+    expect(onUri).not.toHaveBeenCalled();
+    expect(fake.connect).not.toHaveBeenCalled();
+  });
+
+  test('web Platform → returns without calling connect (even with a projectId set)', async () => {
+    mockPlatformOS = 'web';
+    const {init, pairWalletConnect} = load(PROJECT_ID);
+    const fake = new FakeEthereumProvider();
+    init.mockResolvedValue(fake);
+    const onUri = jest.fn();
+    await pairWalletConnect(onUri);
+    expect(onUri).not.toHaveBeenCalled();
+    expect(fake.connect).not.toHaveBeenCalled();
+  });
+});
+
+describe('pairWalletConnect — display_uri + connect event handling', () => {
+  test('display_uri → onUri(string); connect → onUri(null); connect() is called', async () => {
+    const fake = new FakeEthereumProvider();
+    const {init, pairWalletConnect} = load(PROJECT_ID);
+    init.mockResolvedValue(fake);
+
+    // `connect()` resolves immediately (the fake's default). The real SDK resolves connect() when
+    // the session is established; we simulate the event ordering by emitting display_uri + connect
+    // right after connect() is invoked.
+    fake.connect.mockImplementation(async () => {
+      // The SDK emits display_uri (with the WC pairing URI as a plain string) then connect (with
+      // ProviderInfo {chainId}) when the wallet approves the session.
+      fake.emit('display_uri', 'wc:abcdef-1234@2?relay-protocol=…&symKey=…');
+      fake.emit('connect', {chainId: '0x1'});
+    });
+
+    const uris: (string | null)[] = [];
+    await pairWalletConnect((uri) => uris.push(uri));
+
+    // The display_uri payload (a plain string) was forwarded to onUri, then connect cleared it.
+    expect(uris).toEqual(['wc:abcdef-1234@2?relay-protocol=…&symKey=…', null]);
+    expect(fake.connect).toHaveBeenCalledTimes(1);
+    expect(fake.connect).toHaveBeenCalledWith();
+  });
+
+  test('registers display_uri + connect listeners BEFORE calling connect()', async () => {
+    const fake = new FakeEthereumProvider();
+    const {init, pairWalletConnect} = load(PROJECT_ID);
+    init.mockResolvedValue(fake);
+    fake.connect.mockImplementation(async () => {
+      // If the listeners weren't registered before connect(), these emits would be no-ops and onUri
+      // would never fire → the assertion at the end would fail. This pins the subscribe-before-call
+      // ordering (critical: missing display_uri means no QR shown; missing connect means no clear).
+      fake.emit('display_uri', 'wc:test-uri');
+      fake.emit('connect', {chainId: '0x1'});
+    });
+
+    const onUri = jest.fn();
+    await pairWalletConnect(onUri);
+    expect(onUri).toHaveBeenCalledWith('wc:test-uri');
+    expect(onUri).toHaveBeenCalledWith(null);
+  });
+
+  test('a pair failure (connect rejects) throws and cleans up listeners', async () => {
+    const fake = new FakeEthereumProvider();
+    const {init, pairWalletConnect} = load(PROJECT_ID);
+    init.mockResolvedValue(fake);
+    fake.connect.mockRejectedValue(new Error('user rejected'));
+
+    const onUri = jest.fn();
+    await expect(pairWalletConnect(onUri)).rejects.toThrow(/pairing/i);
+
+    // Cleanup: both listeners removed after a failure (so a subsequent pair doesn't double-fire).
+    expect(fake.removeListener).toHaveBeenCalledWith('display_uri', expect.any(Function));
+    expect(fake.removeListener).toHaveBeenCalledWith('connect', expect.any(Function));
+  });
+
+  test('cleans up listeners after a successful pair', async () => {
+    const fake = new FakeEthereumProvider();
+    const {init, pairWalletConnect} = load(PROJECT_ID);
+    init.mockResolvedValue(fake);
+    fake.connect.mockImplementation(async () => {
+      fake.emit('display_uri', 'wc:uri');
+      fake.emit('connect', {chainId: '0x1'});
+    });
+
+    await pairWalletConnect(jest.fn());
+
+    expect(fake.removeListener).toHaveBeenCalledWith('display_uri', expect.any(Function));
+    expect(fake.removeListener).toHaveBeenCalledWith('connect', expect.any(Function));
+  });
+
+  test('no display_uri event (e.g. already-paired session) → onUri never called, still resolves', async () => {
+    const fake = new FakeEthereumProvider();
+    const {init, pairWalletConnect} = load(PROJECT_ID);
+    init.mockResolvedValue(fake);
+    // connect() resolves but neither display_uri nor connect fires (an already-paired provider
+    // short-circuits). The function should still resolve cleanly.
+    fake.connect.mockResolvedValue(undefined);
+
+    const onUri = jest.fn();
+    await pairWalletConnect(onUri);
+    expect(onUri).not.toHaveBeenCalled();
+    expect(fake.connect).toHaveBeenCalledTimes(1);
   });
 });
 
