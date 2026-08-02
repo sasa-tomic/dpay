@@ -10,6 +10,7 @@ import type {FamilyDisplay} from '../config/catalog';
 import {type CkErc20OnrampParams, ckerc20OnrampParams} from '../services/relay';
 import {encodeApprove, encodeDepositErc20, principalToBytes32} from '../cketh';
 import {getEthereumProvider, connectWallet, getChainId, sendTransaction, waitForReceipt, ReceiptReverted, ReceiptTimeout} from '../wallet';
+import {loadDeposit, saveDeposit, clearDeposit} from '../services/ckerc20Persist';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 
 // ckERC20 (ckUSDC) direct onramp — a wallet-connect flow. The user connects their OWN Ethereum wallet
@@ -30,14 +31,63 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
   // phase: 'connect' (no wallet yet) → 'enter' (wallet connected, enter amount) → 'sending' (txs
   // submitted, waiting on the user's wallet to sign) → 'watching' (txs mined, waiting for the mint)
   // → 'done' (balance grew).
+  //
+  // MC8 U5 — the WATCHING phase is RESUMABLE across app restart because the watching poll hits the
+  // RELAY balance (not Ethereum), so it needs NO wallet session. `resumed` is true iff phase==
+  // 'watching' was hydrated from AsyncStorage on mount (vs reached naturally via submit). The
+  // ephemeral wallet-bound phases (connect/enter/sending) are NEVER persisted — an EIP-1193 session
+  // does not survive restart, so resuming them would lie.
   const [phase, setPhase] = useState<'connect' | 'enter' | 'sending' | 'watching' | 'done'>('connect');
   const [account, setAccount] = useState<string | null>(null);
   const [amount, setAmount] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [params, setParams] = useState<CkErc20OnrampParams | null>(null);
   const [startBal, setStartBal] = useState<string | null>(null);
+  // Captured during submit() so the persisted watching state can carry the two ETH tx hashes
+  // (informational for the resumed UI; never used to send on resume).
+  const [txHashes, setTxHashes] = useState<string[]>([]);
+  const [resumed, setResumed] = useState(false);
 
   useEscapeToClose(onClose);
+
+  // MC8 U5 — RESUME on mount. The watching poll is relay-bound (not Ethereum), so a watching deposit
+  // survives an app restart WITHOUT a wallet reconnect: hydrate amount/account/startBal/txHashes and
+  // set phase='watching' + resumed=true. The relay balance poll effect re-runs and picks up where it
+  // left off. loadDeposit returns null for any non-watching/malformed value (hydrateWatch filters),
+  // so a stale/corrupt key degrades to a fresh 'connect' sheet — never a crash, never a false resume.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const persisted = await loadDeposit(identity.publicHex, currency);
+      if (!alive || !persisted) return; // null = nothing to resume (fresh or filtered-out)
+      // hydrateWatch guarantees persisted.phase === 'watching' (it returns null otherwise), so this
+      // is always a watching resume. Defensive discarding of other phases is handled at the service
+      // layer (loadDeposit → hydrateWatch → null for non-watching), so no dead branch here.
+      setAmount(persisted.amount);
+      setAccount(persisted.account);
+      setStartBal(persisted.startBal);
+      setTxHashes(persisted.txHashes);
+      setResumed(true);
+      setPhase('watching');
+    })();
+    return () => { alive = false; };
+  }, [identity.publicHex, currency]);
+
+  // MC8 U5 — PERSIST on phase transitions. Entering 'watching' → save the resumable slice; reaching
+  // 'done' (the mint landed) → clear the key. Idempotent: re-saving the same watching data on a
+  // re-render is harmless. Only persisted when account + startBal are present (the watching poll's
+  // resume needs); a watching reached via hydrate already has them (loaded from the same key).
+  useEffect(() => {
+    if (phase === 'watching') {
+      if (account && startBal != null) {
+        saveDeposit(identity.publicHex, currency, {
+          currency, amount, account, startBal, txHashes, phase: 'watching',
+        });
+      }
+    } else if (phase === 'done') {
+      clearDeposit(identity.publicHex, currency);
+    }
+  }, [phase, account, amount, startBal, txHashes, identity.publicHex, currency]);
 
   // Load the onramp params (helper address, ERC-20 address, facade principal) once on open.
   useEffect(() => {
@@ -102,10 +152,14 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
     const subaccount = identity.publicHex;
     setErr(null);
     setPhase('sending');
+    // MC8 U5 — accumulate the tx hashes as they're produced so a timeout (soft → watching) still
+    // persists whichever hashes were captured before the throw. The happy path captures both.
+    const hashes: string[] = [];
     try {
       // 1. approve(helper, amount) on the USDC ERC-20 contract.
       const approveData = encodeApprove(params.helper_address, unitBig);
       const approveHash = await sendTransaction(provider, account, {to: params.erc20_address, data: approveData});
+      hashes.push(approveHash);
       // MC8 U4 — wait for each tx to be MINED before proceeding. eth_sendTransaction returning a hash
       // only means the wallet accepted it, NOT that it succeeded. A reverted approve must surface an
       // honest error here, not a false "watching for the mint".
@@ -113,7 +167,10 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
       // 2. depositErc20(usdc, amount, principal, subaccount) on the helper contract.
       const depositData = encodeDepositErc20(params.erc20_address, unitBig, principalWord, subaccount);
       const depositHash = await sendTransaction(provider, account, {to: params.helper_address, data: depositData});
+      hashes.push(depositHash);
       await waitForReceipt(provider, depositHash);
+      setTxHashes(hashes);
+      setResumed(false);
       setPhase('watching');
     } catch (e: any) {
       if (e instanceof ReceiptReverted) {
@@ -124,6 +181,8 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
       } else if (e instanceof ReceiptTimeout) {
         // SOFT (Fork-2 resolution): the tx was broadcast but not mined within the timeout. Transition
         // to watching anyway — the watching poll will catch the eventual mint, or the user can retry.
+        setTxHashes(hashes);
+        setResumed(false);
         setErr('Transaction sent but not yet confirmed — still watching for the mint.');
         setPhase('watching');
       } else {
@@ -133,6 +192,22 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
       }
     }
   }, [account, params, amount, display.amountDecimals, identity.publicHex]);
+
+  // MC8 U5 — "Start a new deposit" escape from a RESUMED watching state. A stuck watching key (a
+  // deposit that never mints) would otherwise wedge the sheet in watching forever on every restart.
+  // This clears the persisted key + returns to 'connect' so the user can begin fresh. The wallet
+  // session is gone after a restart (EIP-1193 doesn't persist), so 'connect' is the honest reset
+  // target — the user re-connects to start a new deposit.
+  const startNew = useCallback(async () => {
+    await clearDeposit(identity.publicHex, currency);
+    setResumed(false);
+    setAmount('');
+    setAccount(null);
+    setStartBal(null);
+    setTxHashes([]);
+    setErr(null);
+    setPhase('connect');
+  }, [identity.publicHex, currency]);
 
   // Watching: poll the ckUSDC balance for the mint. The minter scrapes ETH logs on a ~3min heartbeat;
   // credit typically lands within ~20min. Any growth from the snapshot (or a positive balance when no
@@ -222,8 +297,31 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
           ) : phase === 'watching' ? (
             <View style={S.centerAll}>
               <ActivityIndicator color={C.brand} />
-              {/* M9: one clear line — no "scrapes" jargon, no duplicate ~20min (confirmation + credit). */}
-              <Text testID="ckerc20-status" style={S.paidSub}>Waiting for confirmation — your ckUSDC will appear in about 20 minutes.</Text>
+              {/* MC8 U5 — surface the in-flight amount so a resumed watching state shows WHAT is
+                  pending (the user may have forgotten the exact amount across a restart). */}
+              {amount ? (
+                <Text style={S.paidSub}>{`Depositing ${amount} ${display.nativeAsset}`}</Text>
+              ) : null}
+              {/* M9: one clear line — no "scrapes" jargon, no duplicate ~20min (confirmation + credit).
+                  MC8 U5 — the RESUMED variant is honest that the wallet isn't connected but the watch
+                  continues (relay-bound, not Ethereum-bound). */}
+              <Text testID="ckerc20-status" style={S.paidSub}>{resumed
+                ? 'Deposit pending (~20 min) — your wallet isn\u2019t connected, but we\u2019re still watching for the mint.'
+                : 'Waiting for confirmation — your ckUSDC will appear in about 20 minutes.'}</Text>
+              {/* MC8 U5 — escape from a resumed watching state. A deposit that never mints would
+                  otherwise wedge the sheet in watching on every restart; this clears the key + returns
+                  to 'connect' so the user can start fresh. Only rendered in the resumed state (a
+                  fresh watch just completed submit; the user is still on the same browser session). */}
+              {resumed ? (
+                <Pressable
+                  testID="btn-ckerc20-new"
+                  accessibilityRole="button"
+                  accessibilityLabel="Start a new deposit"
+                  style={[S.primaryWide, {marginTop: 16}]}
+                  onPress={startNew}>
+                  <Text style={S.primaryText}>Start a new deposit</Text>
+                </Pressable>
+              ) : null}
             </View>
           ) : (
             <View style={S.centerAll}>

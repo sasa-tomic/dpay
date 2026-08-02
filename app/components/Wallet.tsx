@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useMemo, useState} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {SafeAreaView, StatusBar, View, Text, Pressable, ScrollView, AppState} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {C} from '../config/palette';
@@ -11,6 +11,7 @@ import {usd, short, isMintSentinel, fmtTime, base} from '../lib/format';
 import {cmpRaw, applyOffline} from '../lib/amount';
 import type {Identity, Txn, TransactionsRow, NfcStatus} from '../lib/types';
 import {DpayCore} from '../services/native';
+import {loadDeposit} from '../services/ckerc20Persist';
 import {useHotkeys} from '../hooks/useHotkeys';
 import {readDepositDeepLink} from '../hooks/useDeepLink';
 import {Wordmark} from './Logo';
@@ -120,6 +121,38 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
     })();
     return () => { alive = false; };
   }, [relayUrl]);
+
+  // MC8 U5 — AUTO-OPEN the ckERC20 deposit sheet on mount if a watching deposit was persisted across
+  // a restart. The watching poll is relay-bound (NOT Ethereum), so it is resumable WITHOUT a wallet
+  // reconnect — surfacing the in-flight watch immediately on launch is the honest UX (the user
+  // mid-deposit doesn't want to hunt for the right sheet after a restart). Scans the catalog's
+  // CkEthErc20 currencies (the only family whose CkErc20DepositSheet persists a watching key) and
+  // opens the first one with a persisted watching state. Once-only (a manual sheet-close must NOT be
+  // re-opened by a later catalog refresh); the `?screen=deposit` deep link seeds the ckBTC sheet, so
+  // it is left alone when present.
+  const autoOpenAttempted = useRef(false);
+  useEffect(() => {
+    if (autoOpenAttempted.current) return;
+    autoOpenAttempted.current = true;
+    if (readDepositDeepLink()) return; // deep link takes priority (opens ckBTC, no ckERC20 resume)
+    let alive = true;
+    (async () => {
+      for (const a of catalog) {
+        if (a.minter_family !== 'CkEthErc20') continue;
+        const persisted = await loadDeposit(identity.publicHex, a.currency);
+        if (!alive) return;
+        if (persisted && persisted.phase === 'watching') {
+          setDepositCurrency(a.currency);
+          return; // one resume is enough
+        }
+      }
+    })();
+    return () => { alive = false; };
+    // Mount-only: `catalog` at mount is the bundled default (covers every shipped ckERC20 id). The
+    // scan reads AsyncStorage directly, independent of catalog state. Re-running on a catalog refresh
+    // would re-open a sheet the user may have just closed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     let alive = true;
