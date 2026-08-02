@@ -9,7 +9,7 @@ import type {Identity} from '../lib/types';
 import type {FamilyDisplay} from '../config/catalog';
 import {type CkErc20OnrampParams, ckerc20OnrampParams} from '../services/relay';
 import {encodeApprove, encodeDepositErc20, principalToBytes32} from '../cketh';
-import {getEthereumProvider, connectWallet, getChainId, sendTransaction} from '../wallet';
+import {getEthereumProvider, connectWallet, getChainId, sendTransaction, waitForReceipt, ReceiptReverted, ReceiptTimeout} from '../wallet';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 
 // ckERC20 (ckUSDC) direct onramp — a wallet-connect flow. The user connects their OWN Ethereum wallet
@@ -105,15 +105,32 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
     try {
       // 1. approve(helper, amount) on the USDC ERC-20 contract.
       const approveData = encodeApprove(params.helper_address, unitBig);
-      await sendTransaction(provider, account, {to: params.erc20_address, data: approveData});
+      const approveHash = await sendTransaction(provider, account, {to: params.erc20_address, data: approveData});
+      // MC8 U4 — wait for each tx to be MINED before proceeding. eth_sendTransaction returning a hash
+      // only means the wallet accepted it, NOT that it succeeded. A reverted approve must surface an
+      // honest error here, not a false "watching for the mint".
+      await waitForReceipt(provider, approveHash);
       // 2. depositErc20(usdc, amount, principal, subaccount) on the helper contract.
       const depositData = encodeDepositErc20(params.erc20_address, unitBig, principalWord, subaccount);
-      await sendTransaction(provider, account, {to: params.helper_address, data: depositData});
+      const depositHash = await sendTransaction(provider, account, {to: params.helper_address, data: depositData});
+      await waitForReceipt(provider, depositHash);
       setPhase('watching');
     } catch (e: any) {
-      const msg = String(e?.message ?? e);
-      setErr(/reject|denied|user/i.test(msg) ? 'Transaction not signed.' : (msg || 'Transaction failed.'));
-      setPhase('enter');
+      if (e instanceof ReceiptReverted) {
+        // Hard fail: the tx was mined but reverted — it will NEVER credit. Stay in 'enter' so the
+        // user can see the error and retry; do NOT transition to a false "watching".
+        setErr('Transaction reverted on chain.');
+        setPhase('enter');
+      } else if (e instanceof ReceiptTimeout) {
+        // SOFT (Fork-2 resolution): the tx was broadcast but not mined within the timeout. Transition
+        // to watching anyway — the watching poll will catch the eventual mint, or the user can retry.
+        setErr('Transaction sent but not yet confirmed — still watching for the mint.');
+        setPhase('watching');
+      } else {
+        const msg = String(e?.message ?? e);
+        setErr(/reject|denied|user/i.test(msg) ? 'Transaction not signed.' : (msg || 'Transaction failed.'));
+        setPhase('enter');
+      }
     }
   }, [account, params, amount, display.amountDecimals, identity.publicHex]);
 

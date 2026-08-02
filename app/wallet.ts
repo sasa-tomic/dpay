@@ -64,6 +64,55 @@ export async function getChainId(p: Eip1193Provider): Promise<number> {
   return parseInt(raw, 16);
 }
 
+// MC8 U4 — typed receipt errors so the caller can distinguish a REVERT (hard fail: the tx will never
+// credit) from a TIMEOUT (soft: the tx was broadcast but not mined yet — keep watching). These close
+// the false-"watching" bug where a reverted approve/deposit lied as "will appear in ~20 min".
+/** The transaction was mined but reverted (receipt status 0x0) — it will never credit. Hard fail. */
+export class ReceiptReverted extends Error {
+  override readonly name = 'ReceiptReverted';
+  constructor(public readonly hash: string) {
+    super(`transaction ${hash} reverted on chain`);
+  }
+}
+/** The transaction was not mined within the timeout — it may still land. Soft (keep watching). */
+export class ReceiptTimeout extends Error {
+  override readonly name = 'ReceiptTimeout';
+  constructor(public readonly hash: string) {
+    super(`transaction ${hash} was not mined within the timeout`);
+  }
+}
+
+/**
+ * Poll `eth_getTransactionReceipt` until the transaction is mined or the timeout elapses (MC8 U4).
+ * - mined `status === '0x1'` → `{status: 1, gasUsed?}` (success).
+ * - mined `status === '0x0'` → throws `ReceiptReverted` (the caller surfaces an honest error + stays
+ *   in the enter phase; never transitions to a false "watching").
+ * - no receipt for the full timeout → throws `ReceiptTimeout` (the caller treats SOFT: keeps watching,
+ *   since the tx was broadcast and may still land — Fork-2 resolution).
+ */
+export async function waitForReceipt(
+  p: Eip1193Provider,
+  hash: string,
+  opts: { timeoutMs?: number; pollMs?: number } = {},
+): Promise<{ status: number; gasUsed?: string }> {
+  const timeoutMs = opts.timeoutMs ?? 120_000;
+  const pollMs = opts.pollMs ?? 2_000;
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const receipt = await p.request({ method: 'eth_getTransactionReceipt', params: [hash] });
+    if (receipt != null && typeof receipt === 'object') {
+      const r = receipt as { status?: string; gasUsed?: string };
+      if (typeof r.status === 'string') {
+        if (r.status === '0x1') return { status: 1, gasUsed: r.gasUsed };
+        if (r.status === '0x0') throw new ReceiptReverted(hash);
+        throw new Error(`unexpected receipt status for ${hash}: ${r.status}`);
+      }
+    }
+    if (Date.now() >= deadline) throw new ReceiptTimeout(hash);
+    await new Promise((res) => setTimeout(res, pollMs));
+  }
+}
+
 /** Encode a bigint amount as EIP-1193 hex (`0x…`; `0n` → `0x0`). */
 function toHexValue(n: bigint): string {
   if (n < 0n) throw new Error('value cannot be negative');

@@ -1,5 +1,8 @@
 import { describe, test, expect } from '@jest/globals';
-import { connectWallet, sendTransaction, getChainId, getEthereumProvider, type Eip1193Provider } from '../wallet';
+import {
+  connectWallet, sendTransaction, getChainId, waitForReceipt,
+  ReceiptReverted, ReceiptTimeout, getEthereumProvider, type Eip1193Provider,
+} from '../wallet';
 
 // A minimal recording Eip1193 provider — same surface the e2e harness mock uses.
 function mockProvider(opts: {
@@ -150,5 +153,86 @@ describe('getChainId', () => {
 
   test('rejects an empty string', async () => {
     await expect(getChainId(chainIdProvider(''))).rejects.toThrow();
+  });
+});
+
+// --- MC8 U4 — wait for ETH receipts/reverts ---------------------------------------------------
+// The bug: sendTransaction returned the tx hash on eth_sendTransaction accept (NOT mined), and the
+// sheet unconditionally setPhase('watching') → a REVERTED approve/deposit lied as "will appear in
+// ~20 min" (never credits). waitForReceipt polls eth_getTransactionReceipt until mined; a 0x0 status
+// throws a typed ReceiptReverted (caller surfaces an honest error) and a no-receipt timeout throws a
+// typed ReceiptTimeout (caller treats SOFT — keeps watching). This pins the typed-error contract.
+describe('waitForReceipt', () => {
+  // A provider whose eth_getTransactionReceipt responses are driven by a per-call function (so a test
+  // can return null for N polls then a receipt, or always null to drive the timeout).
+  function receiptProvider(getReceipt: (call: number) => unknown): Eip1193Provider {
+    let calls = 0;
+    return {
+      request: async ({ method }) => {
+        if (method === 'eth_getTransactionReceipt') {
+          const r = getReceipt(calls);
+          calls++;
+          return r;
+        }
+        throw new Error(`unexpected method ${method}`);
+      },
+    };
+  }
+
+  test('a mined receipt (status 0x1) → {status:1}', async () => {
+    const p = receiptProvider(() => ({ status: '0x1', gasUsed: '0x5208' }));
+    const r = await waitForReceipt(p, '0xhash', { timeoutMs: 1000, pollMs: 5 });
+    expect(r.status).toBe(1);
+    expect(r.gasUsed).toBe('0x5208');
+  });
+
+  test('returns {status:1} after a few null polls (mined on the Nth)', async () => {
+    const p = receiptProvider((n) => (n < 3 ? null : { status: '0x1' }));
+    const r = await waitForReceipt(p, '0xhash', { timeoutMs: 5000, pollMs: 5 });
+    expect(r.status).toBe(1);
+  });
+
+  test('a reverted receipt (status 0x0) → throws ReceiptReverted', async () => {
+    const p = receiptProvider(() => ({ status: '0x0' }));
+    await expect(waitForReceipt(p, '0xhash', { timeoutMs: 1000, pollMs: 5 })).rejects.toBeInstanceOf(
+      ReceiptReverted,
+    );
+  });
+
+  test('no receipt for the full timeout → throws ReceiptTimeout', async () => {
+    const p = receiptProvider(() => null);
+    await expect(waitForReceipt(p, '0xhash', { timeoutMs: 60, pollMs: 10 })).rejects.toBeInstanceOf(
+      ReceiptTimeout,
+    );
+  });
+
+  test('ReceiptReverted and ReceiptTimeout are distinguishable (instanceof)', async () => {
+    const reverted = receiptProvider(() => ({ status: '0x0' }));
+    const timedOut = receiptProvider(() => null);
+    try {
+      await waitForReceipt(reverted, '0xh', { timeoutMs: 200, pollMs: 5 });
+      throw new Error('should have thrown');
+    } catch (e) {
+      expect(e).toBeInstanceOf(ReceiptReverted);
+      expect(e).not.toBeInstanceOf(ReceiptTimeout);
+    }
+    try {
+      await waitForReceipt(timedOut, '0xh', { timeoutMs: 40, pollMs: 10 });
+      throw new Error('should have thrown');
+    } catch (e) {
+      expect(e).toBeInstanceOf(ReceiptTimeout);
+      expect(e).not.toBeInstanceOf(ReceiptReverted);
+    }
+  });
+
+  test('the reverted error carries the hash', async () => {
+    const p = receiptProvider(() => ({ status: '0x0' }));
+    try {
+      await waitForReceipt(p, '0xdeadbeef', { timeoutMs: 200, pollMs: 5 });
+      throw new Error('should have thrown');
+    } catch (e) {
+      expect(e).toBeInstanceOf(ReceiptReverted);
+      expect((e as ReceiptReverted).hash).toBe('0xdeadbeef');
+    }
   });
 });
