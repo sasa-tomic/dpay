@@ -30,8 +30,8 @@ export const meta = {
   id: '15',
   name: 'withdraw',
   journey: 'withdraw',
-  covers: ['withdraw', 'sign', 'settle', 'clipboard', 'balance-delta', 'destination-copy'],
-  verifies: 'Withdraw ckBTC: enter addr + amount → sign on-device → settle; success screen + Copy destination; balance debits.',
+  covers: ['withdraw', 'sign', 'settle', 'clipboard', 'balance-delta', 'destination-copy', 'ui-balance-delta'],
+  verifies: 'Withdraw ckBTC: enter addr + amount → sign on-device → settle; success screen + Copy destination; balance debits at both the ledger AND the UI (Balances row drops to 0.00050000 BTC).',
   timeoutMs: 20000,
 };
 
@@ -108,6 +108,20 @@ export async function run() {
     const clipAfter = await driver.eval(() => window.__DPAY_TEST_CLIPBOARD);
     assertEq(clipAfter, WITHDRAW_ADDR, 'clipboard seam holds the destination after copy');
     console.log(`[15-withdraw] ✓ Copy destination wrote "${WITHDRAW_ADDR}" to the clipboard`);
+
+    // 9. UI balance delta (closes the withdraw coverage gap): the relay-level delta is already proven
+    //    in step 7 (after === SEED_SATS − WITHDRAW_SATS). This step proves the wallet SURFACE reflects
+    //    the debit too — close the withdraw sheet, open the Balances hub, and assert the BTC row now
+    //    shows the REDUCED remaining balance (0.00050000 BTC = 50000 sats), not the pre-withdraw
+    //    0.00100000 BTC. This locks the UI↔ledger agreement (a stale facade `BAL_CACHE` would fail
+    //    here, showing the old amount).
+    await driver.click('btn-withdraw-close', { timeoutMs: 5_000 });
+    await openBalances(driver);
+    const reduced = await driver.waitForText('0.00050000 BTC', { timeoutMs: 10_000 });
+    const balBody = await driver.bodyText();
+    assert(reduced, `Balances BTC row should show the reduced 0.00050000 BTC (50000 sats remaining) after the withdraw. body excerpt:\n${balBody.slice(0, 500)}`);
+    assert(!balBody.includes('0.00100000 BTC'), 'Balances must NOT still show the pre-withdraw 0.00100000 BTC (stale facade cache?)');
+    console.log('[15-withdraw] ✓ UI ckBTC balance dropped to 0.00050000 BTC (matches the ledger delta)');
 
     const elapsed = ((Date.now() - start) / 1000).toFixed(2);
     console.log(`[15-withdraw] GREEN in ${elapsed}s`);

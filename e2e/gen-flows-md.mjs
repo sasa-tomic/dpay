@@ -40,7 +40,7 @@ function coverageGapsSection() {
     '- **ckUSDC onramp final ETH hop** (wallet signs → tx mined → minter scrapes ~20min) — inherent outer-loop gate; offline e2e proves the calldata wiring + byte-exactness.',
     '- **ckBTC live deposit/withdrawal with real BTC** — requires real mainnet funds; offline path proven via FakeLedger seed (issues 1/8 in OPEN_ISSUES.md).',
     '',
-    '> **Closed gaps:** destination-address format validation (`18-withdraw-errors`); the multi-currency Ledger row units + withdraw balance delta + bad-QR + onboarding-faucet-failure (flows `36`–`39`, see the catalog above).',
+    '> **Closed gaps:** destination-address format validation (`18-withdraw-errors`); the multi-currency Ledger row exact units (folded into `27-asset-pay`); the withdraw UI balance delta (folded into `15-withdraw`); malformed-QR scanning (`36-bad-qr`); onboarding-time faucet failure against a dead relay (`37-onboard-no-faucet`).',
   ].join('\n');
 }
 
@@ -86,7 +86,7 @@ async function main() {
     '> hand-edit the tables — edit the `meta` and re-run. Only the "Coverage gaps" / "How to add" prose',
     '> is hand-maintained (inside that script).',
     '>',
-    '> **Run:** `just e2e` (all flows, ~17s) · `DPAY_E2E_FILTER=07 node e2e/run.mjs` (one flow) ·',
+    '> **Run:** `just e2e` (all flows, ~18s) · `DPAY_E2E_FILTER=07 node e2e/run.mjs` (one flow) ·',
     '> `DPAY_E2E_FILTER=pay node e2e/run.mjs` (a whole journey) · `DPAY_E2E_FILTER=07,15 node e2e/run.mjs` (subset).',
     '',
     '## Coverage matrix',

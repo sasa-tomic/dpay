@@ -1,6 +1,6 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **35 flows.**
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **37 flows.**
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay (FakeLedger, offline). No UI stubs. The only shimmed I/O boundary is
 > the camera scan (sanctioned smallest-boundary seam) and the NFC radio (physical-device gate).
@@ -9,7 +9,7 @@
 > hand-edit the tables — edit the `meta` and re-run. Only the "Coverage gaps" / "How to add" prose
 > is hand-maintained (inside that script).
 >
-> **Run:** `just e2e` (all flows, ~17s) · `DPAY_E2E_FILTER=07 node e2e/run.mjs` (one flow) ·
+> **Run:** `just e2e` (all flows, ~18s) · `DPAY_E2E_FILTER=07 node e2e/run.mjs` (one flow) ·
 > `DPAY_E2E_FILTER=pay node e2e/run.mjs` (a whole journey) · `DPAY_E2E_FILTER=07,15 node e2e/run.mjs` (subset).
 
 ## Coverage matrix
@@ -17,7 +17,7 @@
 Flows grouped by user journey; within each table, every row lists what the flow **verifies** and
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`).
 
-wire (1) · onboard (3) · pay (12) · offline (2) · deposit (7) · withdraw (2) · nfc (2) · system (5) · tour (1)
+wire (1) · onboard (4) · pay (13) · offline (2) · deposit (7) · withdraw (2) · nfc (2) · system (5) · tour (1)
 
 ---
 
@@ -34,6 +34,7 @@ wire (1) · onboard (3) · pay (12) · offline (2) · deposit (7) · withdraw (2
 | 01 | onboard | New user enters a name → wallet created, faucet funds ∂100, balance + empty history render. | onboard, faucet, first-balance, empty-history |
 | 02 | faucet | Returning user taps 'Add demo money' → faucet top-up works, balance increases. | faucet, topup, balance-delta |
 | 23 | username-default | New user leaves name empty → creates → defaults to 'me', onboards + funds. | onboard, default-username |
+| 37 | onboard-no-faucet | Onboard against a dead relay → wallet created with $0 (∂100 never shown), honest "~ approx." offline indicator, faucet fails with ECONNREFUSED. | onboard, faucet-failure, offline, dead-relay, right-reason, zero-balance |
 
 ### Payments (the core offline-pay flow)
 
@@ -47,10 +48,11 @@ wire (1) · onboard (3) · pay (12) · offline (2) · deposit (7) · withdraw (2
 | 19 | low-balance | Insufficient funds: offline review-lowbal warning; online Approve disabled, 'Not enough balance'. | low-balance, insufficient, disabled-approve |
 | 25 | asset-request | ckBTC chip + BTC amount → request QR encodes RUNTIME currency 1 + 50000 sats; readout '0.00050000 BTC' (no $). | asset-request, ckbtc, currency-id, encode, btc-units |
 | 26 | names-memo | Alice pays Bob with memo 'coffee' → both histories show friendly names + memo (wire-format v2, no raw hex). | names, memo, history, wire-v2, friendly-counterparties |
-| 27 | asset-pay | ckBTC pay: review shows '0.00050000 BTC' (no $); per-asset balance gate (60000≥50000 sats) → settles on currency 1. | asset-pay, ckbtc, per-asset-balance, locked-asset-display |
+| 27 | asset-pay | ckBTC pay: review shows '0.00050000 BTC' (no $); per-asset balance gate (60000≥50000 sats) → settles on currency 1; Ledger row shows the exact ckBTC units. | asset-pay, ckbtc, per-asset-balance, locked-asset-display, ledger-units |
 | 29 | exact-amount | Raw amount > 2^53 round-trips byte-exact through faucet/request-wire/sign/settle (BigInt codec, u64 LE). | exact-amount, decimal-transport, u64, bigint-codec |
 | 30 | trusted-receipt | Malicious relay returns a wrong-key receipt → app's key-pin rejects it → honest 'Couldn't verify', no debit. | receipt-key-pin, malicious-relay, honest-error |
 | 31 | ckusdc-pay | ckUSDC (currency 2, 6-decimal) pay end-to-end: review '0.050000 USDC', byte-exact raw, settles on currency 2. | ckusdc-pay, multi-currency, 6-decimal, byte-exact |
+| 36 | bad-qr | Scanning/pasting garbage (non-base64 + wrong-length) surfaces an honest 'bad request QR' error; review never mounts; scan surface re-arms. | bad-qr, malformed, error-handling, input-validation |
 
 ### Offline hand-off (the signature feature)
 
@@ -75,7 +77,7 @@ wire (1) · onboard (3) · pay (12) · offline (2) · deposit (7) · withdraw (2
 
 | # | Flow | Verifies | Covers |
 |---|------|----------|--------|
-| 15 | withdraw | Withdraw ckBTC: enter addr + amount → sign on-device → settle; success screen + Copy destination; balance debits. | withdraw, sign, settle, clipboard, balance-delta, destination-copy |
+| 15 | withdraw | Withdraw ckBTC: enter addr + amount → sign on-device → settle; success screen + Copy destination; balance debits at both the ledger AND the UI (Balances row drops to 0.00050000 BTC). | withdraw, sign, settle, clipboard, balance-delta, destination-copy, ui-balance-delta |
 | 18 | withdraw-errors | Withdraw errors: below-min / over-balance / bad-addr UI guards (confirm disabled) + relay 422 (bad-sig/insufficient). | withdraw-errors, below-min, over-balance, bad-sig, bad-addr |
 
 ### NFC (tap-to-pay)
@@ -115,7 +117,7 @@ These flows are **not** covered and why:
 - **ckUSDC onramp final ETH hop** (wallet signs → tx mined → minter scrapes ~20min) — inherent outer-loop gate; offline e2e proves the calldata wiring + byte-exactness.
 - **ckBTC live deposit/withdrawal with real BTC** — requires real mainnet funds; offline path proven via FakeLedger seed (issues 1/8 in OPEN_ISSUES.md).
 
-> **Closed gaps:** destination-address format validation (`18-withdraw-errors`); the multi-currency Ledger row units + withdraw balance delta + bad-QR + onboarding-faucet-failure (flows `36`–`39`, see the catalog above).
+> **Closed gaps:** destination-address format validation (`18-withdraw-errors`); the multi-currency Ledger row exact units (folded into `27-asset-pay`); the withdraw UI balance delta (folded into `15-withdraw`); malformed-QR scanning (`36-bad-qr`); onboarding-time faucet failure against a dead relay (`37-onboard-no-faucet`).
 
 ---
 

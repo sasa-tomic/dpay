@@ -38,8 +38,8 @@ export const meta = {
   id: '27',
   name: 'asset-pay',
   journey: 'pay',
-  covers: ['asset-pay', 'ckbtc', 'per-asset-balance', 'locked-asset-display'],
-  verifies: 'ckBTC pay: review shows \'0.00050000 BTC\' (no $); per-asset balance gate (60000≥50000 sats) → settles on currency 1.',
+  covers: ['asset-pay', 'ckbtc', 'per-asset-balance', 'locked-asset-display', 'ledger-units'],
+  verifies: 'ckBTC pay: review shows \'0.00050000 BTC\' (no $); per-asset balance gate (60000≥50000 sats) → settles on currency 1; Ledger row shows the exact ckBTC units.',
   timeoutMs: 20000,
 };
 
@@ -107,6 +107,22 @@ export async function run() {
     const bobAfter = await getBalance(relayBaseURL, bob.publicHex, CKBTC_CURRENCY);
     assertEqMoney(bobAfter, PAY_SATS, 'payee B ckBTC balance after settle');
     console.log(`[27-asset-pay] ✓ B credited ${bobAfter} ckBTC sats on currency 1`);
+
+    // --- Ledger row exact units (closes the MC5 coverage gap): the payer's transaction history row
+    //     must render the ckBTC payment in its OWN asset's units — "−0.00050000 BTC" (Ledger.tsx
+    //     composes the U+2212 minus + fmtCurrencyAmount) — NOT a misleading dollar amount. The OLD
+    //     familyDisplay() path would have NPE'd or shown `$`; fmtCurrencyAmount is fail-closed. This
+    //     is the assertion FLOWS.md documented as missing (the row's exact units post multi-currency
+    //     settle). 'RECENT' is uppercased via CSS text-transform (matches flow 07's anchor). ---------
+    await driver.click('tab-transactions', { timeoutMs: 5_000 });
+    const hasRecent = await driver.waitForText('RECENT', { timeoutMs: 8_000 });
+    assert(hasRecent, 'the Ledger should render the ckBTC payment row once it lands in history');
+    const ledgerBody = await driver.bodyText();
+    assertIncludes(ledgerBody, '0.00050000 BTC', 'Ledger row must show the EXACT ckBTC units (−0.00050000 BTC), not a $ amount');
+    // The row must not leak a dollar figure for this ckBTC payment (the header's ∂ glyph is not '$',
+    // so any '$' here would be a cross-asset formatting bug).
+    assert(!ledgerBody.includes('$'), 'Ledger must not show a dollar amount for a ckBTC payment row');
+    console.log('[27-asset-pay] ✓ Ledger row shows the exact ckBTC units (−0.00050000 BTC, no $)');
 
     await driver.screenshot('27-asset-pay');
 
