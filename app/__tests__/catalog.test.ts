@@ -323,3 +323,67 @@ describe('isPayableAsset — payable predicate (MC5 fail-closed before signing)'
     expect(isPayableAsset([], 1)).toBe(false);
   });
 });
+
+// --- MC8 U7 — ramp-honesty regression pins (no false cash-out / no CkSol advertising) ---------
+// MC1 unit 5 + MC5 item 2 closed false ramp advertising: BalancesSheet.tsx:70 AND-gates the Cash
+// out button on `minter_family === 'CkBtcUtxo' && funded && offramp !== 'Unavailable'`, and
+// familyDisplay returns null for unknown families (CkSol). ckUSDC (`offramp: 'Unavailable'`) shows
+// NO Cash out; CkSol appears only in tests. This block pins those invariants so a future edit can't
+// silently reopen either false-advertising path. NO behavior change — pins only.
+//
+// The cash-out predicate mirrors BalancesSheet.tsx:70 at the CATALOG level (the `funded` leg is
+// runtime balance state, out of catalog scope). A currency is cash-out-ELIGIBLE at the catalog
+// level iff `minter_family === 'CkBtcUtxo' && offramp !== 'Unavailable'`.
+describe('MC8 U7 — ramp-honesty regression pins (no false cash-out / no CkSol advertising)', () => {
+  const cashOutEligible = (a: CurrencyDescriptor): boolean =>
+    a.minter_family === 'CkBtcUtxo' && a.offramp !== 'Unavailable';
+
+  it('ckUSDC (currency 2) is payable/onrampable BUT offramp === Unavailable (NO cash-out path)', () => {
+    // The AND-gate pin: a currency can be fully payable (familyDisplay non-null) AND have a Direct
+    // on-ramp, yet have NO cash-out path because offramp === 'Unavailable'. ckUSDC is exactly this
+    // case (Fork-C/O3 — no-swap honesty). Asserting familyDisplay + onramp + offramp + the cash-out
+    // predicate together so flipping ANY one leg turns this RED.
+    const ckusdc = BUNDLED_CATALOG.find(c => c.currency === 2)!;
+    expect(familyDisplay(BUNDLED_CATALOG, 2)).not.toBeNull(); // payable / onrampable
+    expect(ckusdc.onramp).toBe('Direct');                      // HAS an on-ramp
+    expect(ckusdc.offramp).toBe('Unavailable');                // NO off-ramp
+    expect(cashOutEligible(ckusdc)).toBe(false);               // cash-out predicate FALSE
+  });
+
+  it('NO currency in BUNDLED_CATALOG has minter_family === CkSol (CkSol is test-only)', () => {
+    // CkSol has no shipped ramp config (no per-principal deposit address, no retrieve path). It
+    // must NEVER appear in the bundled fallback catalog — a user would see a SOL asset they can
+    // neither fund nor cash out, and a familyDisplay bug could mis-render it as BTC. Pinned so
+    // adding one is a deliberate, review-visible change, not an accidental catalog entry.
+    const sol = BUNDLED_CATALOG.filter(c => c.minter_family === 'CkSol');
+    expect(sol).toEqual([]);
+  });
+
+  it('familyDisplay returns null for an explicit CkSol fixture (fail-closed — never BTC fallback)', () => {
+    // Explicit mirror of the MC1 unit 6 fail-closed pin with a CkSol descriptor. familyDisplay MUST
+    // return null for an unknown family — a SOL asset labelled "BTC" is a non-custodial-trust
+    // violation (dpay never swaps). Consumers render "Unsupported" + disable ramps on null.
+    const cksol: CurrencyDescriptor = mk({
+      currency: 42, minter: 'x', minter_family: 'CkSol', symbol: 'SOL', decimals: 9,
+    });
+    expect(familyDisplay([cksol], 42)).toBeNull();
+  });
+
+  it('EVERY currency with offramp === Unavailable has a FALSE cash-out predicate (catalog scan)', () => {
+    // The no-false-cash-out-advertising invariant over the WHOLE catalog: every offramp=Unavailable
+    // currency MUST fail the cash-out gate. DEMO (play money) + ckUSDC (Fork-C) both qualify.
+    const noCashOut = BUNDLED_CATALOG.filter(c => c.offramp === 'Unavailable');
+    expect(noCashOut.length).toBeGreaterThan(0); // DEMO + ckUSDC at minimum
+    for (const c of noCashOut) {
+      expect(cashOutEligible(c)).toBe(false);
+    }
+  });
+
+  it('ckBTC (currency 1) is the ONLY cash-out-eligible asset in BUNDLED_CATALOG', () => {
+    // Belt-and-suspenders: cash-out is exclusive to CkBtcUtxo with offramp !== Unavailable. In the
+    // shipped catalog that is ckBTC (currency 1) alone. Pinned so adding a second cash-out asset is
+    // a deliberate change (not an accidental offramp flip on ckUSDC/DEMO).
+    const eligible = BUNDLED_CATALOG.filter(cashOutEligible).map(c => c.currency);
+    expect(eligible).toEqual([1]);
+  });
+});
