@@ -233,13 +233,6 @@ service : (InitArg) -> {
   // is deliberately NOT added to the AlreadyProcessing / TemporarilyUnavailable / GenericError
   // branches — the minter call FAILED there and the cache state is unknown, so we do not paper over
   // it with a speculative read.
-  // 
-  // The cache refresh here is BEST-EFFORT (`if let Ok`), NOT the hard-fail re-read `mint` and
-  // `refresh_balance` use (`?`): `mint`/`refresh_balance` surface a read error to the caller,
-  // whereas `refresh_deposit` swallows it — a read failure leaves the cache stale but does NOT undo
-  // the mint or fail the call (the mint already settled on the ledger). The staleness is bounded by
-  // self-heal: the `NoNewUtxos` branch re-reads every 10s poll, and the relay's `BALANCE_TTL_SECS`
-  // freshness contract forces an authoritative `refresh_balance` within one TTL window.
   refresh_deposit : (blob, nat32) -> (Result_7);
   // `(CurrencyRegistration) -> Result<(), text>` — the SINGLE ATOMIC currency-activation path (MC2
   // unit 4). Activates a NEW currency id by inserting LEDGERS + (optionally) MINTERS + CURRENCY_META
@@ -276,6 +269,15 @@ service : (InitArg) -> {
   // ramp direction honestly. This is what `currencies()` joins in, so the wallet renders asset cards
   // + ramp buttons from a single source of truth (no hardcoded currency ids/symbols, no
   // family-level token assumptions — closes issue #7 + MC1 unit 5).
+  // 
+  // RETIRED is intentionally NOT re-checked here (unlike `register_ledger`/`register_minter`/`
+  // `register_currency`, which gate on it first): this surface only mutates display/policy metadata,
+  // which is INERT on a retired id — `currencies()` filters RETIRED ids out of the catalog, and no
+  // money-moving path (`pay`/`mint`/`withdraw`/`refresh_deposit`) ever reads `CURRENCY_META` without
+  // first resolving the currency through `ledger_for`/`minter_for`, both of which reject RETIRED. So
+  // editing meta on a retired id can change no value flow; it is a cosmetic edit only. (The other
+  // three registration paths must reject RETIRED because they rebind the ledger/minter identity a
+  // money-moving path dereferences — re-targeting a retired id WOULD reinterpret history.)
   register_currency_meta : (
       nat32,
       opt text,
