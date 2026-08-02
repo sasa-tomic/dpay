@@ -1,8 +1,18 @@
-import { describe, test, expect } from '@jest/globals';
+import { describe, test, expect, jest } from '@jest/globals';
 import {
   connectWallet, sendTransaction, getChainId, waitForReceipt,
-  ReceiptReverted, ReceiptTimeout, getEthereumProvider, type Eip1193Provider,
+  ReceiptReverted, ReceiptTimeout, getEthereumProvider, resolveOnrampProvider, type Eip1193Provider,
 } from '../wallet';
+
+// MC8 U6.2 — sentinel mock for the WalletConnect source. `resolveOnrampProvider()` is WEB-FIRST: it
+// returns `window.ethereum` before ever reaching the WC branch, so this rejecting sentinel PROVES
+// the web-first path never touches WalletConnect (a call would reject and fail the test). The
+// native-delegation test re-wires this to resolve a fake inside its `jest.isolateModules` block.
+jest.mock('../walletconnect', () => ({
+  getWalletConnectProvider: jest.fn(() =>
+    Promise.reject(new Error('WalletConnect must not be reached on the web-first path')),
+  ),
+}));
 
 // A minimal recording Eip1193 provider — same surface the e2e harness mock uses.
 function mockProvider(opts: {
@@ -233,6 +243,58 @@ describe('waitForReceipt', () => {
     } catch (e) {
       expect(e).toBeInstanceOf(ReceiptReverted);
       expect((e as ReceiptReverted).hash).toBe('0xdeadbeef');
+    }
+  });
+});
+
+// --- MC8 U6.2 — resolveOnrampProvider (web-first source picker) --------------------------------
+// The resolver picks the EIP-1193 provider SOURCE: window.ethereum first (the browser path + the
+// e2e mock provider flow 16 installs), else WalletConnect on native when configured. The web-first
+// ordering is load-bearing — it GUARANTEES flow 16 + the web browser path return window.ethereum
+// unchanged and never reach WalletConnect, so the offline inner loop stays free of WC execution.
+describe('resolveOnrampProvider', () => {
+  test('web-first: returns window.ethereum when present and NEVER reaches WalletConnect', async () => {
+    const fake = {request: async () => []};
+    (globalThis as {ethereum?: unknown}).ethereum = fake;
+    try {
+      const result = await resolveOnrampProvider();
+      expect(result).toBe(fake);
+      // The rejecting sentinel mock would fail the test if the WC branch were ever reached.
+      const wc = require('../walletconnect');
+      expect(wc.getWalletConnectProvider).not.toHaveBeenCalled();
+    } finally {
+      delete (globalThis as {ethereum?: unknown}).ethereum;
+    }
+  });
+
+  test('returns null when no web provider and WalletConnect disabled (empty projectId)', async () => {
+    delete (globalThis as {ethereum?: unknown}).ethereum;
+    delete (globalThis as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID;
+    // The top-level wallet.ts import captured projectId='' (no override) → the WC branch's
+    // `&& WALLETCONNECT_PROJECT_ID` short-circuits → null (today's behavior, no onramp source).
+    const result = await resolveOnrampProvider();
+    expect(result).toBeNull();
+  });
+
+  test('native + projectId set → delegates to the WalletConnect source', async () => {
+    delete (globalThis as {ethereum?: unknown}).ethereum;
+    const FAKE = {request: async () => '0x1'} as unknown as Eip1193Provider;
+    // Reload wallet.ts with a non-empty projectId (captured at module-load), and re-wire the WC
+    // mock to resolve the fake. resolveOnrampProvider is FIRED inside isolateModules so the dynamic
+    // `import('./walletconnect')` resolves against the isolated registry (the require runs
+    // synchronously up to the first await), then awaited outside.
+    let pending!: Promise<Eip1193Provider | null>;
+    jest.isolateModules(() => {
+      (globalThis as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID =
+        'test-project-id';
+      require('../walletconnect').getWalletConnectProvider = jest.fn(async () => FAKE);
+      pending = require('../wallet').resolveOnrampProvider();
+    });
+    try {
+      const result = await pending;
+      expect(result).toBe(FAKE);
+    } finally {
+      delete (globalThis as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID;
     }
   });
 });

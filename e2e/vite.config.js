@@ -97,6 +97,15 @@ export default defineConfig({
       // ed25519 DpayCore over @noble/ed25519 reading dfx/wire_layout.json).
       { find: /^react-native-vision-camera$/, replacement: join(WEB, 'camera.ts') },
 
+      // MC8 U6.2 — WalletConnect isolation. wallet.ts's resolveOnrampProvider() is web-first and
+      // only dynamic-imports ./walletconnect on native, so the WC branch is unreachable in this
+      // build (Platform.OS === 'web' under react-native-web + no projectId). Alias BOTH WC
+      // specifiers (the static `EthereumProvider` import + the side-effect `react-native-compat`
+      // import inside walletconnect.ts) to a single noop shim so the bundle never executes real WC
+      // code nor pulls its heavy dep tree. Mirrors the react-native-vision-camera alias above.
+      { find: /^@walletconnect\/ethereum-provider$/, replacement: join(WEB, 'walletconnect-provider.ts') },
+      { find: /^@walletconnect\/react-native-compat$/, replacement: join(WEB, 'walletconnect-provider.ts') },
+
       // qrcode-svg pokes `global.TextEncoder = require('text-encoding').TextEncoder` at the top of
       // its index. The `text-encoding` polyfill package is in app/node_modules and resolves via node
       // walk-up; alias it to a tiny shim that re-uses the BROWSER's native TextEncoder so we don't

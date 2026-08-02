@@ -1,19 +1,28 @@
 /**
- * wallet — the EIP-1193 (window.ethereum) seam for the ckERC-20 direct onramp.
+ * wallet — the EIP-1193 provider seam for the ckERC-20 direct onramp.
  *
  * The onramp is NON-CUSTODIAL: dpay never sees the user's Ethereum key. The user connects their own
- * wallet (MetaMask/Rabby/etc. via `window.ethereum` on web; WalletConnect on Android is a follow-up),
- * dpay BUILDS the two transactions' calldata (see `cketh.ts`), and the user's wallet SIGNS + broadcasts.
- * This module is the thin transport over the injected EIP-1193 provider — it does no key handling.
+ * wallet (`window.ethereum` on web; WalletConnect v2 on Android — see `walletconnect.ts`), dpay
+ * BUILDS the two transactions' calldata (see `cketh.ts`), and the user's wallet SIGNS + broadcasts.
+ * This module is the thin transport over the EIP-1193 provider — it does no key handling.
  *
- * Web/browser-wallet first (matches the e2e harness, which injects a mock provider). On native, or when
- * no wallet is injected, `getEthereumProvider()` returns null and the UI offers the manual path.
+ * `resolveOnrampProvider()` is the provider SOURCE picker (MC8 U6.2): web-first — it returns
+ * `window.ethereum` when present (the browser path + the e2e mock provider flow 16 installs), and
+ * otherwise lazily dynamic-imports `./walletconnect` ONLY on native with a non-empty
+ * `WALLETCONNECT_PROJECT_ID`. That dynamic import is the load-bearing isolation boundary: web/jest
+ * never statically pull `@walletconnect/*`, so the offline inner loop (`just verify`) never executes
+ * WalletConnect code. The dedicated transport helpers below (`connectWallet`/`getChainId`/
+ * `waitForReceipt`/`sendTransaction`) are pure and take `provider: Eip1193Provider` as a param —
+ * they work identically against `window.ethereum` OR a WalletConnect provider.
  *
  * The mock-provider contract (unit test + e2e harness both use it): an object with a `request({method,
  * params}) -> Promise<unknown>` method, identical to the real EIP-1193 surface. The e2e mock records the
  * `eth_sendTransaction` params so a flow can assert the calldata is byte-exact vs the `cketh.ts` goldens
  * — proving the onramp wiring is correct offline, with zero real ETH movement.
  */
+
+import {Platform} from 'react-native';
+import {WALLETCONNECT_PROJECT_ID} from './config/constants';
 
 /** The minimal EIP-1193 provider surface this module uses (a subset of the real injected wallet). */
 export type Eip1193Provider = {
@@ -35,6 +44,35 @@ export function getEthereumProvider(): Eip1193Provider | null {
   if (!w) return null;
   if (Array.isArray(w.providers) && w.providers.length > 0) return w.providers[0];
   return w;
+}
+
+/**
+ * MC8 U6.2 — resolve the onramp EIP-1193 provider SOURCE. Web-first:
+ *  (a) `window.ethereum` when present (the browser path; the e2e harness mock provider; the ONLY
+ *      path `just verify` ever exercises). Returned FIRST, before any WalletConnect code is reached.
+ *  (b) else, on native AND with a non-empty `WALLETCONNECT_PROJECT_ID`, lazily dynamic-import
+ *      `./walletconnect` (the isolation boundary — web/jest never statically pull `@walletconnect/*`)
+ *      and return its singleton WalletConnect provider.
+ *  (c) else null (no onramp source available — the UI offers the manual path).
+ *
+ * The (a)→(b) ordering is load-bearing: it GUARANTEES the web/browser path and flow 16's mock
+ * provider return `window.ethereum` unchanged, so WalletConnect is invisible to the offline inner
+ * loop. The transport helpers below (`connectWallet`/`sendTransaction`/…) consume the result purely
+ * via the `Eip1193Provider` interface, so they are source-agnostic.
+ */
+export async function resolveOnrampProvider(): Promise<Eip1193Provider | null> {
+  // (a) Web-first — the injected browser wallet / the e2e mock. Never reaches WalletConnect.
+  const web = getEthereumProvider();
+  if (web) return web;
+  // (b) Native + configured → lazy-load the WalletConnect source (the dynamic import is the
+  //     isolation boundary; this line is unreachable on web/jest because (a) returned or the
+  //     Platform/projectId gate fails closed).
+  if (Platform.OS !== 'web' && WALLETCONNECT_PROJECT_ID) {
+    const {getWalletConnectProvider} = await import('./walletconnect');
+    return getWalletConnectProvider();
+  }
+  // (c) No onramp source available.
+  return null;
 }
 
 /**
