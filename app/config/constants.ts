@@ -40,6 +40,17 @@ export const POLL = (() => {
 export const EXPECTED_RECEIPT_PUBKEY =
   ((globalThis as unknown as {__DPAY_TEST_RECEIPT_PUBKEY?: string}).__DPAY_TEST_RECEIPT_PUBKEY ?? '');
 
+// WalletConnect v2 project id (from cloud.walletconnect.com, free). Required by the dApp-side
+// `EthereumProvider.init` for the native (Android) ckERC20 onramp — the only WalletConnect entry
+// point in dpay. Empty default = WalletConnect DISABLED = exactly today's behavior (the web/browser
+// `window.ethereum` path and the e2e mock provider are untouched). Production bakes the real
+// project id here. Mirrors the EXPECTED_RECEIPT_PUBKEY + POLL override seam exactly: the e2e
+// harness / a dev build injects the value via `__DPAY_TEST_WALLETCONNECT_PROJECT_ID` before the
+// bundle evaluates; an empty value keeps the offline inner loop free of any WalletConnect code
+// (MC8 U6.1 — the seam only; the provider source lands in U6.2, isolated to the native path).
+export const WALLETCONNECT_PROJECT_ID =
+  ((globalThis as unknown as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID ?? '');
+
 export const WITHDRAW_TIMEOUT_MS = 8000; // bound the /withdraw POST (every new fetch has a timeout)
 export const WITHDRAW_EXPIRY_WINDOW = 600; // the signed WithdrawAuth is valid 10 min
 // Mirrors the canister's fixed FAUCET_AMOUNT ($100.00 = 10_000 cents). The demo top-up POSTs this
