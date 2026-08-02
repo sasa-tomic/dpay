@@ -35,7 +35,7 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
 
   return (
     <SafeAreaView style={S.root}>
-      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+      <StatusBar barStyle="light-content" backgroundColor={C.bg} translucent={false} />
       <View style={S.onboard}>
         <Logo size={104} />
         <Wordmark style={S.wordmarkBig} />

@@ -351,7 +351,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
 
   return (
     <SafeAreaView style={S.root}>
-      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+      <StatusBar barStyle="light-content" backgroundColor={C.bg} translucent={false} />
       <View style={S.header}>
         <View style={S.headerLeft}>
           <Pressable
