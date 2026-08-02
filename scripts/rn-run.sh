@@ -61,7 +61,13 @@ echo "   APK: ${APK#$ROOT/}  ($(du -h "$APK" | cut -f1))"
 echo "== install + launch =="
 adb install -r "$APK" >/dev/null
 adb logcat -c || true
-adb shell am start -n "$APP_ID/.MainActivity" >/dev/null
+# Launch via the fully-qualified component: `<applicationId>/<namespace.MainActivity>`. The namespace
+# (where MainActivity is declared, build.gradle `namespace`) is NOT necessarily the applicationId
+# (the Play/launcher identity) — here namespace=com.dpay but applicationId=org.kalaj.dpay. The bare
+# `.MainActivity` shorthand resolves relative to the applicationId and resolves to a non-existent
+# class (Error type 3), so the namespace must be prepended explicitly.
+ANDROID_NS="$(sed -n 's/.*namespace *=* *"\(.*\)".*/\1/p' app/android/app/build.gradle | head -1)"
+adb shell am start -n "$APP_ID/$ANDROID_NS.MainActivity" >/dev/null
 
 echo "== wait for the on-device self-check marker (proves the app called dpay-core) =="
 MARK=""
