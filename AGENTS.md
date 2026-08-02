@@ -26,12 +26,27 @@ Inner loop runs fully offline via `just` and completes in seconds (`just verify`
 
 `just verify` (core + canister + relay + typecheck + bridge-parity + e2e) is fully offline and runs in seconds, but it does **not** exercise the real RN→Kotlin→`libdpay_ffi.so` bridge — that needs the Android emulator (outer-loop). A wire/bridge-arity regression (e.g. the 2026-07-31 wire-v2 launch crash) sails through `verify` and only explodes on a device. The two static guards now in `check` (`typecheck` + `bridge-parity`, see `scripts/bridge-parity.mjs`) catch most of this class, but they are not exhaustive.
 
-**Before merging a change that touches any of** `app/android/**`, `crates/dpay-ffi/**`, `app/lib/types.ts`, `app/services/**`, or the core wire consts (`WIRE_LEN`/`SIGNING_LEN`/`REQUEST_LEN` in `crates/dpay-core/src/lib.rs`), run the device gates off the hot path:
+### Structural blind spots of browser e2e (the classes `just verify` CANNOT see)
 
-- **`just app`** (~1 min) — rebuilds the APK and launches it; assert `DPAY_SELFCHECK PASS` in logcat. Proves the full `NativeModules`→`@ReactMethod`→UniFFI→`.so` surface, incl. `wireLen`/`signWithdrawal`.
+The e2e harness and jest both run under Node/V8 (or a headless browser), NOT Hermes/RN. Three classes of bug are **structurally invisible** to `just verify` and ONLY surface on a real device:
+
+1. **Native-module / autolinking changes.** Adding/removing a native dependency, changing `app/react-native.config.js`, or first use of a Web API (e.g. `globalThis.crypto.getRandomValues`) that needs a polyfill on RN but is native on web/Node. Example: the `react-native-get-random-values` codegenConfig + `newArchEnabled=false` autolinking skip (PR20 regression → `DPAY_SELFCHECK FAIL` on device, invisible to e2e).
+2. **Android-only rendering / platform APIs.** `StatusBar` translucency, `SafeAreaView` gaps, hardware-back behavior, intent/deep-link handling — browsers render none of these. Example: content rendering under the status bar (`translucent={true}` default).
+3. **Wire/bridge arity.** A JS↔Kotlin argument-count or type mismatch throws on the native-modules thread, bypassing the JS self-check's try/catch (hard process kill, not a caught error). Example: the wire-v2 launch crash.
+
+**Before merging a change that touches any of the trigger paths below, run the device gates off the hot path.** The trigger paths are intentionally broad — when in doubt, run the gate.
+
+- `app/android/**`, `crates/dpay-ffi/**`, `app/lib/types.ts`, `app/services/**`, or the core wire consts (`WIRE_LEN`/`SIGNING_LEN`/`REQUEST_LEN` in `crates/dpay-core/src/lib.rs`) — the wire/bridge surface (blind spot 3).
+- `app/react-native.config.js`, `app/package.json` (add/remove a native dep), `app/index.js` (polyfill imports) — the native-module/autolinking surface (blind spot 1).
+- Any change introducing a NEW dependency on a Web API (`crypto`, `fetch` internals, `WebAssembly`, `URL`/`URLSearchParams`, etc.) that may need a RN polyfill — first-use-of-native-API surface (blind spot 1).
+- `app/components/**` changes touching `StatusBar`, `SafeAreaView`, `BackHandler`, or `Platform`-gated rendering — the Android-rendering surface (blind spot 2).
+
+The gates:
+
+- **`just app`** (~1 min) — rebuilds the APK and launches it; assert `DPAY_SELFCHECK PASS` in logcat. Proves the full `NativeModules`→`@ReactMethod`→UniFFI→`.so` surface, incl. `wireLen`/`signWithdrawal`, AND that every autolinked native module (e.g. `RNGetRandomValues`) is present and callable.
 - **`just ondevice`** — 8 instrumented tests driving the real UniFFI binding + NFC framing on the emulator.
 
-This is the documented resolution of OPEN_ISSUES #10 Layer 3 (the path-filtered pre-merge gate). The gate code path is proven and green; the checklist keeps it from being skipped.
+This is the documented resolution of OPEN_ISSUES #10 Layer 3 (the path-filtered pre-merge gate) + the 2026-08-02 process fix (blind spots 1+2 added after a user-filed `---` balance / status-bar / self-check triple regression that sailed through `verify`). The gate code path is proven and green; the checklist keeps it from being skipped.
 
 ## E2e flow catalog
 

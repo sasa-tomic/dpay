@@ -95,7 +95,16 @@ Exhaustive app structure scan (`app/**` + `e2e/`) + screenshot UX analysis of 50
 9. Flow #28 missing (numbering gap 27→29; FLOWS.md says "28 flows" vs 35 files).
 10. WalletConnect pairing QR rendering (unreachable on web by design).
 
-## Severity key
+## Process fix (2026-08-02): device-gate trigger paths expanded (blind spots 1 + 2)
+
+A user-filed triple regression (`---` balance / status-bar overlap / `DPAY_SELFCHECK FAIL`) sailed through `just verify` and only surfaced on a fresh APK install. All three are **structurally invisible** to browser-e2e + jest (they run under V8/Node, not Hermes/RN):
+
+1. **`react-native-get-random-values` autolinking skip** (PR20 regression). The module declares `codegenConfig` but the project runs `newArchEnabled=false`, so gradle autolinking dropped it → `TurboModuleRegistry.getEnforcing('RNGetRandomValues')` threw at call-time. Browsers/Node have native `crypto.getRandomValues`, so e2e + jest never saw it. **Fix:** `app/react-native.config.js` force-includes the module in the gradle build (`ee78a55`).
+2. **`StatusBar translucent={true}` default** rendered app content under the system status bar. Browsers have no status bar. **Fix:** `translucent={false}` in `Wallet.tsx` + `Onboarding.tsx` (`07f3f03`).
+3. **Stale mainnet canister** (deployment drift, not code). The deployed canister predates `RampCapability` fields → relay couldn't decode `currencies()` → `---`. FakeLedger has current Candid types. **Fix:** canister upgrade via `scripts/dfx-deploy-ic.sh` + `register_currency_meta` (deployment-only; `.did` refreshed `c52ae49`).
+
+**Resolution (the process fix, not code):** the `AGENTS.md` "Pre-merge gates off the hot verify path" section now enumerates the three structural blind-spot classes and **expands the device-gate trigger paths** to cover them: `app/react-native.config.js`, `app/package.json` (native-module add/remove), `app/index.js` (polyfill imports), any new use of a Web API that may need a RN polyfill (`crypto`/`fetch`/`WebAssembly`/`URL`/…), and `app/components/**` changes touching `StatusBar`/`SafeAreaView`/`BackHandler`/`Platform`-gated rendering. The gate itself (`just app` / `just ondevice`) is unchanged and proven green; the checklist now keeps these classes from being skipped. This is the documented closure of the gap the founder flagged ("did you test this?") after the triple regression.
+
 
 - **HARD blocker** — blocks a specific path until an *external* step lands; cannot be fixed in code in this repo.
 - **high** — should land before pilot.
