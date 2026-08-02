@@ -3,7 +3,7 @@ import {SafeAreaView, StatusBar, View, Text, Pressable, TextInput} from 'react-n
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {C} from '../config/palette';
 import {S} from '../styles';
-import {STORAGE_KEY} from '../config/constants';
+import {STORAGE_KEY, BALANCE_TIMEOUT_MS} from '../config/constants';
 import {base} from '../lib/format';
 import type {Identity} from '../lib/types';
 import {DpayCore} from '../services/native';
@@ -24,7 +24,7 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
       // Fund the new account from the demo faucet (best-effort — works when the ledger is reachable).
       // Bounded by a 4s timeout so a hanging/dead relay can't stall onboarding (fail fast → $0, fund later).
       try {
-        const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 4000);
+        const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), BALANCE_TIMEOUT_MS);
         try {
           await fetch(`${base(relayUrl)}/api/v1/faucet`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({account: id.publicHex}), signal: ctrl.signal});
         } finally { clearTimeout(t); }

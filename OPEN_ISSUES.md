@@ -55,6 +55,46 @@ updates land in-line as fixes commit.
 - **PR18 (doc) | MC1 three protocol-u64-as-number JSON fields** (`ledger.rs:126` `Receipt.settle_ts`, `:146` timestamp, `:177` confirmations, `:218` expiry — all bounded non-money). Make `settle_ts` U64String or document. Conf 10/9.
 - **PR19 (accepted) | MC2 mainnet deploy (`scripts/dfx-deploy-icrc-mainnet.sh:82-108`) bypasses U4 strict validation for seeded DEMO id** — documented + accepted under U2 idempotency. No action.
 
+## Structure scan + UX findings (2026-08-02)
+
+Exhaustive app structure scan (`app/**` + `e2e/`) + screenshot UX analysis of 50 real-app captures.
+
+> **Status:** PR20–PR22 RESOLVED (`6fa523b`); PR23–PR27 + PR30 RESOLVED (DRY pass — named timeouts/QR_SIZE, `payAndClassify`/`readJsonOrEmpty`, hooks→lib, documented catches); PR28–PR29 + PR31–PR33 open (tech-debt phase); PR34–PR35 need founder input.
+
+### Resolved
+- **PR20 (security) | `Math.random` for payment nonce.** `app/lib/format.ts:26` `randNonceHex()` used `Math.random()` (xorshift128+ on some engines) for the 128-bit payment idempotency key. Fix: `globalThis.crypto.getRandomValues` (polyfilled by `react-native-get-random-values`). Conf 9/9. `6fa523b`.
+- **PR21 (slop) | `app/README.md` = unmodified RN CLI boilerplate** (iOS instructions, `npm run android` walkthrough). Replaced with dpay-specific module map + dev-loop guide. Conf 10/10. `6fa523b`.
+- **PR22 (doc) | `Wallet.tsx:56` stale comment** said "adds $50" but `TOP_UP_CENTS=10000` ($100). Fixed. Conf 10/10. `6fa523b`.
+- **PR23 (medium, DRY) | Magic timeout literals.** RESOLVED — every bare `4000`/`6000`/`8000`/`3000` timeout literal now named in `config/constants.ts` (`BALANCE_TIMEOUT_MS`, `FAUCET_TIMEOUT_MS`, `DEPOSIT_TIMEOUT_MS`, `DEPOSIT_REFRESH_TIMEOUT_MS`, `RECONCILE_FETCH_TIMEOUT_MS`); values unchanged.
+- **PR24 (medium, DRY) | QR size hardcoded.** RESOLVED — `QR_SIZE=244` + `QR_SIZE_SMALL=200` in `config/constants.ts`; all 4 sites (PayMode/ReceiveMode/CkErc20DepositSheet/DepositSheet) use the named consts.
+- **PR25 (medium, DRY) | Duplicated fetch-classify pattern.** RESOLVED — shared `payAndClassify(relayUrl, code, signal?)` in `services/relay.ts` returns `{outcome, body}`; PayMode.approve + ReceiveMode.onSignedQr + NfcTap.postPay all use it; the callers still do their own `isNonceReused` / `verifyOutcomeReceipt` / reconciliation.
+- **PR26 (medium, DRY) | Duplicated JSON-or-empty.** RESOLVED — `readJsonOrEmpty(r)` in `services/relay.ts`; used by `payAndClassify`, `withdrawFunds`, and every prior inline site (PayMode receipt reconcile, NfcTap reconcile, CkErc20DepositSheet snapshot+watch, Wallet faucet). ReceiveMode's receipt poll intentionally keeps raw `r.json()` (a parse failure aborts the iteration rather than falsely firing `onReceived` on `{}`).
+- **PR27 (low, naming) | Misnamed hooks.** RESOLVED — `app/hooks/useDeepLink.ts` → `app/lib/deepLink.ts`, `app/hooks/clipboard.ts` → `app/lib/clipboard.ts`; exports unchanged; the only true hook (`useHotkeys`/`useEscapeToClose`) remains in `hooks/`. Importers updated (Wallet, DepositSheet, WithdrawSheet).
+- **PR30 (low) | 3 undocumented silent catches.** RESOLVED — `PayMode.tsx` receipt-reconcile catch + `ReceiveMode.tsx` NFC-buildRequest + receipt-poll catches now carry `/* best-effort: ... */` comments matching their siblings.
+
+### Open — tech debt (Phase 5)
+- **PR28 (low, config) | `app/relayConfig.ts` committed AND regenerated** by `scripts/build-apk.sh:36` + `scripts/rn-run.sh:50`. Gitignore + commit `.example`, or make it the hand-edited source. Conf 8/9.
+- **PR29 (low, type) | ~20 `any` casts in production code** — mostly `catch (e: any)` + `r.json().catch(() => ({} as any))`. Type as `unknown` + narrow. Conf 7/10.
+- **PR31 (low, a11y) | `accessibilityHint` used once** (`ReceiveMode:201`); all interactive elements have labels but no hints. Conf 7/10.
+- **PR32 (low) | `fmtTime` ignores timezone** (`format.ts:24`) — a traveler can't tell if "14:30" is home or away. Show tz or relative time. Conf 7/10.
+- **PR33 (low) | `useHotkeys` re-subscribes on every render** (`useHotkeys.ts:53` deps `[handlers, opts]`). `useRef`-mirror like NfcTap does for `onActive`. Conf 6/10.
+
+### Needs founder input (FORK)
+- **PR34 (high, policy) | `EXPIRY_WINDOW = 600` (10 min) but `CLAUDE.md:78` says "~2 min kills stale replays."** The security argument is 5× weaker than documented. Options: (a) tighten to ~120s (consider NFC round-trip time), (b) correct CLAUDE.md to match the 600s reality. **Needs founder decision** — 10min is generous for a slow NFC exchange + relay settle; 2min might abort a legitimate tap. Conf 10/10 a mismatch exists.
+- **PR35 (medium, UX) | "NFC not available" prominent on web onboarding** — the web build shows a jarring "NFC not available" message above the fold before the user understands the app. On native (the real target) NFC is present; only the web/test build shows this. Options: suppress the NFC-absent banner on web, or gate it behind first-use. **Needs founder decision.**
+
+### Test coverage gaps (Phase 3)
+1. Ledger row exact units after multi-currency pay (flow 24 checks presence, not "−0.00050000 BTC").
+2. ReceiveMode ckUSDC end-to-end (flow 31 covers pay, not merchant-create).
+3. Real NFC 'request' event with nonzero currency (MC8 U1 asset-disclosure-during-signing only unit-tested).
+4. Withdraw success → balance actually decreased (flow 15 asserts success screen, not balance delta).
+5. Settings relay-switch mid-session (balance poll retargets).
+6. ckERC20 "Start a new deposit" escape path.
+7. Bad QR / malformed request (PayMode catch branch unexercised).
+8. Onboarding faucet failure ($0 wallet, dead faucet at create time).
+9. Flow #28 missing (numbering gap 27→29; FLOWS.md says "28 flows" vs 35 files).
+10. WalletConnect pairing QR rendering (unreachable on web by design).
+
 ## Severity key
 
 - **HARD blocker** — blocks a specific path until an *external* step lands; cannot be fixed in code in this repo.

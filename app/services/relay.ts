@@ -1,4 +1,5 @@
 import {base} from '../lib/format';
+import {classifyPayHttp, type SettleOutcome} from '../payments';
 
 // --- ck-deposit (ckBTC-style top-up) response shapes -----------------------------------------
 // MC1 units 2-4: protocol u64 amounts cross the JSON boundary as decimal-digit STRINGS.
@@ -41,6 +42,31 @@ function withDefaultTimeout(callerSignal?: AbortSignal): AbortSignal {
     }
   }
   return ctrl.signal;
+}
+
+// PR26 — read a fetch Response's body as JSON, returning `{}` on any parse failure (a malformed
+// body, an empty 5xx, a non-JSON 422) instead of throwing. The relay's /pay and /withdraw bodies
+// are best-effort: callers want `body.receipt` / `body.error` if present and `{}` otherwise, never
+// a throw that masks the real HTTP outcome. Replaces the inline `r.json().catch(() => ({} as any))`
+// repeated across the pay/reconcile/withdraw paths.
+export async function readJsonOrEmpty(r: Response): Promise<any> {
+  return r.json().catch(() => ({} as any));
+}
+
+// PR25 — the shared `/pay` fetch+parse+classify helper. Three call sites (PayMode.approve,
+// ReceiveMode.onSignedQr, NfcTap.postPay) each used to duplicate the same pattern: POST /pay with
+// the caller's timeout-bound signal → parse the body JSON-or-empty → classifyPayHttp on the
+// `{ok,status}` (or `null` if fetch threw). The helper keeps the existing error handling: a fetch
+// throw (network/timeout/abort) returns outcome='unknown' + empty body — the caller still does its
+// own isNonceReused / verifyOutcomeReceipt / reconciliation on the returned body.
+export async function payAndClassify(relayUrl: string, code: string, signal?: AbortSignal): Promise<{outcome: SettleOutcome; body: any}> {
+  try {
+    const r = await fetch(`${base(relayUrl)}/api/v1/pay`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({qr: code}), signal});
+    const body = await readJsonOrEmpty(r);
+    return {outcome: classifyPayHttp({ok: r.ok, status: r.status}), body};
+  } catch {
+    return {outcome: classifyPayHttp(null), body: {} as any};
+  }
 }
 
 // Relay deposit client — same fetch style as the inline balance/faucet/pay calls (AbortController
@@ -86,7 +112,7 @@ export async function withdrawFunds(relayUrl: string, accountHex: string, btcAdd
     body: JSON.stringify({from: accountHex, destination: btcAddress, amount: amountSats, nonce: nonceHex, expiry, currency, sig: sigHex}),
     signal: withDefaultTimeout(signal),
   });
-  const j = await r.json().catch(() => ({} as any));
+  const j = await readJsonOrEmpty(r);
   if (r.ok && j?.receipt) {
     return j.receipt as WithdrawReceipt;
   }

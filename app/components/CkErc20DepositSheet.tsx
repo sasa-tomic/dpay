@@ -3,12 +3,12 @@ import {View, Text, Pressable, TextInput, ScrollView, SafeAreaView, StatusBar, A
 import QRCode from 'react-native-qrcode-svg';
 import {C} from '../config/palette';
 import {S} from '../styles';
-import {POLL} from '../config/constants';
+import {POLL, DEPOSIT_TIMEOUT_MS, BALANCE_TIMEOUT_MS, QR_SIZE} from '../config/constants';
 import {base} from '../lib/format';
 import {parseDecimalToUnits, cmpRaw} from '../lib/amount';
 import type {Identity} from '../lib/types';
 import type {FamilyDisplay} from '../config/catalog';
-import {type CkErc20OnrampParams, ckerc20OnrampParams} from '../services/relay';
+import {type CkErc20OnrampParams, ckerc20OnrampParams, readJsonOrEmpty} from '../services/relay';
 import {encodeApprove, encodeDepositErc20, principalToBytes32} from '../cketh';
 import {resolveOnrampProvider, connectWallet, getChainId, sendTransaction, waitForReceipt, ReceiptReverted, ReceiptTimeout, pairOnrampWallet} from '../wallet';
 import {loadDeposit, saveDeposit, clearDeposit} from '../services/ckerc20Persist';
@@ -123,7 +123,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
   useEffect(() => {
     let alive = true;
     const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 8000);
+    const t = setTimeout(() => ctrl.abort(), DEPOSIT_TIMEOUT_MS);
     (async () => {
       try {
         const p = await ckerc20OnrampParams(relayUrl, currency, ctrl.signal);
@@ -179,9 +179,9 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
       // Snapshot the starting balance so the watching poll can detect the mint (a GROWTH from here).
       try {
         const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 4000);
+        const t = setTimeout(() => ctrl.abort(), BALANCE_TIMEOUT_MS);
         const r = await fetch(`${base(relayUrl)}/api/v1/balance/${identity.publicHex}?currency=${currency}`, {signal: ctrl.signal});
-        const j = await r.json().catch(() => ({} as any));
+        const j = await readJsonOrEmpty(r);
         if (typeof j.balance === 'string') setStartBal(j.balance);
         clearTimeout(t);
       } catch { /* best-effort snapshot; watching falls back to any-positive */ }
@@ -274,10 +274,10 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
     let alive = true;
     const poll = async () => {
       const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 4000);
+      const t = setTimeout(() => ctrl.abort(), BALANCE_TIMEOUT_MS);
       try {
         const r = await fetch(`${base(relayUrl)}/api/v1/balance/${identity.publicHex}?currency=${currency}`, {signal: ctrl.signal});
-        const j = await r.json().catch(() => ({} as any));
+        const j = await readJsonOrEmpty(r);
         if (alive && r.ok && typeof j.balance === 'string') {
           // MC1 units 2-4: balance presence/growth via `cmpRaw` (BigInt) — never `>` on strings.
           const grew = startBal == null ? j.balance !== '0' : cmpRaw(j.balance, startBal) > 0;
@@ -328,7 +328,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
             // (pairOnrampWallet is a no-op), so this branch is unreachable in the e2e harness.
             wcUri ? (
               <View style={S.centerAll}>
-                <View testID="wc-pair-qr" style={S.qrCard}><QRCode value={wcUri} size={244} ecl="M" /></View>
+                <View testID="wc-pair-qr" style={S.qrCard}><QRCode value={wcUri} size={QR_SIZE} ecl="M" /></View>
                 <Text style={S.paidSub}>Scan with your wallet to pair</Text>
               </View>
             ) : (

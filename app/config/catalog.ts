@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {base, fmtAsset, usd} from '../lib/format';
+import {BALANCE_TIMEOUT_MS} from './constants';
 
 // --- currency catalog (M0 + MC1 unit 5 authoritative per-currency metadata) ------------------
 // The wallet's runtime source of truth for which assets exist + how to display/fund them. Fetched
@@ -62,7 +63,7 @@ export const BUNDLED_CATALOG: CurrencyDescriptor[] = [
 // relay JSON (forward-compatible: fee/cap carried as string for future exact-amount transport).
 export async function fetchCurrencies(relayUrl: string, prior: CurrencyDescriptor[]): Promise<CurrencyDescriptor[]> {
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 4000);
+  const t = setTimeout(() => ctrl.abort(), BALANCE_TIMEOUT_MS);
   try {
     const r = await fetch(`${base(relayUrl)}/api/v1/currencies`, {signal: ctrl.signal});
     if (!r.ok) return prior;

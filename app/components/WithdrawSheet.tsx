@@ -12,7 +12,7 @@ import {withdrawFunds} from '../services/relay';
 import {loadSavedWithdrawAddr, saveWithdrawAddr} from '../services/withdraw';
 import {DpayCore} from '../services/native';
 import {useEscapeToClose} from '../hooks/useHotkeys';
-import {copyToClipboard} from '../hooks/clipboard';
+import {copyToClipboard} from '../lib/clipboard';
 
 /**
  * Withdraw ckBTC to a native BTC address. The user enters a BTC address + amount, reviews

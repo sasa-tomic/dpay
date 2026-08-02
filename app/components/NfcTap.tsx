@@ -3,17 +3,19 @@ import {View, Text, Pressable, ActivityIndicator, NativeEventEmitter} from 'reac
 import {C} from '../config/palette';
 import {
   NFC_PAY_TIMEOUT_MS, RECONCILE_ATTEMPTS, RECONCILE_INTERVAL_MS, RECEIPT_WAIT_MS,
+  RECONCILE_FETCH_TIMEOUT_MS,
 } from '../config/constants';
 import {S} from '../styles';
 import {short, base} from '../lib/format';
 import {type CurrencyDescriptor, type NfcDisclosure, isPayableAsset, resolveNfcDisclosure, fmtCurrencyAmount} from '../config/catalog';
 import type {NfcEvent, NfcPhaseName, Identity} from '../lib/types';
 import {
-  classifyPayHttp, receiptCodeFor, decidePayerReceipt, rejectionMessage, isNonceReused,
+  receiptCodeFor, decidePayerReceipt, rejectionMessage, isNonceReused,
   isReceiptForRequest,
   type SettleOutcome,
 } from '../payments';
 import {verifyOutcomeReceipt} from '../services/receipt';
+import {payAndClassify, readJsonOrEmpty} from '../services/relay';
 import {DpayCore, DpayNfc} from '../services/native';
 import {NfcIcon} from './NfcIcon';
 
@@ -103,17 +105,14 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
     onSettled();
   }, [onSettled]);
 
-  // POST /pay once, bounded by a timeout. Returns the (ok,status) + parsed body, or a null result
-  // when fetch threw (network/timeout/abort) — which the caller treats as UNKNOWN, not failure.
+  // POST /pay once, bounded by a timeout. Returns the classified outcome + parsed body, or
+  // outcome='unknown' + empty body when fetch threw (network/timeout/abort) — which the caller
+  // treats as UNKNOWN, not failure. PR25 — delegates to the shared `payAndClassify` helper.
   const postPay = useCallback(async (code: string) => {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), NFC_PAY_TIMEOUT_MS);
     try {
-      const r = await fetch(`${base(relayUrl)}/api/v1/pay`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({qr: code}), signal: ctrl.signal});
-      const body = await r.json().catch(() => ({} as any));
-      return {res: {ok: r.ok, status: r.status}, body};
-    } catch {
-      return {res: null as {ok: boolean; status: number} | null, body: {} as any};
+      return await payAndClassify(relayUrl, code, ctrl.signal);
     } finally { clearTimeout(t); }
   }, [relayUrl]);
 
@@ -123,10 +122,10 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
   const reconcile = useCallback(async (nonceHex: string) => {
     for (let i = 0; i < RECONCILE_ATTEMPTS; i++) {
       const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 3000);
+      const t = setTimeout(() => ctrl.abort(), RECONCILE_FETCH_TIMEOUT_MS);
       try {
         const r = await fetch(`${base(relayUrl)}/api/v1/receipt/${nonceHex}`, {signal: ctrl.signal});
-        if (r.ok) { const j = await r.json().catch(() => ({} as any)); clearTimeout(t); return j.receipt ?? {}; }
+        if (r.ok) { const j = await readJsonOrEmpty(r); clearTimeout(t); return j.receipt ?? {}; }
       } catch { /* keep polling */ } finally { clearTimeout(t); }
       await new Promise(res => setTimeout(res, RECONCILE_INTERVAL_MS));
     }
@@ -144,8 +143,8 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
     const code = await DpayCore.encodeQr(wireHex).catch(() => null);
     if (!code) { finalize('error', 'Could not encode the authorization'); return; } // pre-settlement
 
-    const {res, body} = await postPay(code);
-    let outcome: SettleOutcome = classifyPayHttp(res);
+    const {outcome: payOutcome, body} = await postPay(code);
+    let outcome: SettleOutcome = payOutcome;
     let settledNonceHex: string | null = nonceHex;
     // The receipt object backing a 'settled' outcome (from the /pay body or the /receipt reconcile).
     // R2: we verify its canister/ledger signature before finalizing success.

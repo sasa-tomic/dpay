@@ -3,7 +3,7 @@ import {SafeAreaView, StatusBar, View, Text, Pressable, ScrollView, AppState} fr
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {C} from '../config/palette';
 import {S} from '../styles';
-import {STORAGE_KEY, POLL, TOP_UP_CENTS} from '../config/constants';
+import {STORAGE_KEY, POLL, TOP_UP_CENTS, BALANCE_TIMEOUT_MS, FAUCET_TIMEOUT_MS} from '../config/constants';
 import {
   type CurrencyDescriptor, CATALOG_CACHE_KEY, BUNDLED_CATALOG, fetchCurrencies, familyDisplay, fmtCurrencyAmount,
 } from '../config/catalog';
@@ -12,8 +12,9 @@ import {cmpRaw, applyOffline} from '../lib/amount';
 import type {Identity, Txn, TransactionsRow, NfcStatus} from '../lib/types';
 import {DpayCore} from '../services/native';
 import {loadDeposit} from '../services/ckerc20Persist';
+import {readJsonOrEmpty} from '../services/relay';
 import {useHotkeys} from '../hooks/useHotkeys';
-import {readDepositDeepLink} from '../hooks/useDeepLink';
+import {readDepositDeepLink} from '../lib/deepLink';
 import {Wordmark} from './Logo';
 import {HotkeyHint} from './HotkeyHint';
 import {Tab} from './Tab';
@@ -158,7 +159,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
     let alive = true;
     const poll = async () => {
       const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 4000);
+      const t = setTimeout(() => ctrl.abort(), BALANCE_TIMEOUT_MS);
       // Non-primary asset balances run in PARALLEL + best-effort, each with its own AbortController,
       // so a hiccup on one asset's ledger can never flip the primary `$` balance offline or fail its
       // poll. The assets live on separate ledgers — fetching one must not affect another's display. A
@@ -166,7 +167,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
       // currency (ramp + no-minter ICRC), so an unfunded asset still reads its real zero balance.
       const assetFetches = displayAssets.map(a => {
         const c = new AbortController();
-        const to = setTimeout(() => c.abort(), 4000);
+        const to = setTimeout(() => c.abort(), BALANCE_TIMEOUT_MS);
         return fetch(`${base(relayUrl)}/api/v1/balance/${identity.publicHex}?currency=${a.currency}`, {signal: c.signal})
           .then(r => r.ok ? r.json().catch(() => null) : null)
           .then(j => (j && typeof j.balance === 'string') ? (j.balance as string) : null)
@@ -225,7 +226,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
     let anySucceeded = false;
     const perCurrency = await Promise.all(currencies.map(async (currency) => {
       const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 4000);
+      const t = setTimeout(() => ctrl.abort(), BALANCE_TIMEOUT_MS);
       try {
         const r = await fetch(`${base(relayUrl)}/api/v1/transactions/${identity.publicHex}?currency=${currency}&limit=20`, {signal: ctrl.signal});
         const j = await r.json().catch(() => null);
@@ -310,14 +311,14 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
     if (topUpBusy) return;
     setTopUpBusy(true); setTopUpErr(null);
     const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 6000);
+    const t = setTimeout(() => ctrl.abort(), FAUCET_TIMEOUT_MS);
     try {
       const r = await fetch(`${base(relayUrl)}/api/v1/faucet`, {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({account: identity.publicHex, amount: TOP_UP_CENTS}),
         signal: ctrl.signal,
       });
-      const j = await r.json().catch(() => ({} as any));
+      const j = await readJsonOrEmpty(r);
       if (r.ok && typeof j.balance === 'string') {
         // MC5: topUp is a DEMO (currency-0) credit, so reset ONLY the currency-0 offline deduction.
         setBalance(j.balance); setOnline(true); setOfflineSpent(prev => prev[0] != null && prev[0] !== '0' ? {...prev, 0: '0'} : prev);

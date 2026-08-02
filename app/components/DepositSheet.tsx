@@ -3,13 +3,13 @@ import {View, Text, Pressable, ScrollView, SafeAreaView, StatusBar, ActivityIndi
 import QRCode from 'react-native-qrcode-svg';
 import {C} from '../config/palette';
 import {S} from '../styles';
-import {POLL} from '../config/constants';
+import {POLL, DEPOSIT_TIMEOUT_MS, DEPOSIT_REFRESH_TIMEOUT_MS, QR_SIZE_SMALL} from '../config/constants';
 import {fmtAsset} from '../lib/format';
 import {cmpRaw} from '../lib/amount';
 import type {Identity} from '../lib/types';
 import type {FamilyDisplay} from '../config/catalog';
 import {type DepositInfo, type DepositRefresh, depositInfo, depositAddress, depositRefresh} from '../services/relay';
-import {copyToClipboard} from '../hooks/clipboard';
+import {copyToClipboard} from '../lib/clipboard';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 
 /**
@@ -43,7 +43,7 @@ export function DepositSheet({identity, relayUrl, currency, display, onClose}: {
   useEffect(() => {
     let alive = true;
     const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 8000);
+    const t = setTimeout(() => ctrl.abort(), DEPOSIT_TIMEOUT_MS);
     (async () => {
       setLoading(true); setErr(null);
       try {
@@ -75,7 +75,7 @@ export function DepositSheet({identity, relayUrl, currency, display, onClose}: {
   // The manual path is debounced via `checkBusy`; the poll is already spaced, so it never sets it.
   const refreshNow = useCallback(async (manual: boolean) => {
     const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 6000);
+    const t = setTimeout(() => ctrl.abort(), DEPOSIT_REFRESH_TIMEOUT_MS);
     if (manual) {
       setCheckBusy(true);
     }
@@ -173,7 +173,7 @@ export function DepositSheet({identity, relayUrl, currency, display, onClose}: {
                 </Text>
               </View>
 
-              <View style={S.qrCard}><QRCode value={address} size={200} ecl="L" /></View>
+              <View style={S.qrCard}><QRCode value={address} size={QR_SIZE_SMALL} ecl="L" /></View>
 
               <Text testID="deposit-address" style={S.sheetAddr} selectable={true}>{address}</Text>
 

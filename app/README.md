@@ -13,9 +13,9 @@ layer is a thin presentational + orchestration shell.
 ```
 App.tsx              root — identity + relay load, self-check, route Onboarding | Wallet
 config/              palette, constants (POLL, currency catalog, timeouts), catalog helpers
-lib/                 types + pure format/amount helpers (BigInt exact parser)
-hooks/               useHotkeys, useEscapeToClose, useDeepLink, useBalance, etc.
-services/            NativeModules destructure, relay/withdraw/receipt fetch clients
+lib/                 types + pure format/amount helpers (BigInt exact parser), clipboard + deep-link utilities
+hooks/               useHotkeys, useEscapeToClose (the only TRUE hooks — others moved to lib/)
+services/            NativeModules destructure, relay/withdraw/receipt fetch clients (+ payAndClassify, readJsonOrEmpty)
 styles.ts            ONE StyleSheet.create block (do NOT partition — e2e matches testID + text)
 components/          all presentational components (Wallet container, sheets, NfcTap, QrScanner…)
 payments.ts          pure settlement-outcome logic + receipt↔request nonce-match helper
@@ -29,8 +29,8 @@ walletconnect.ts     the ONLY file that statically imports @walletconnect/* (laz
 The inner loop is fully offline via `just` (from the repo root) and runs in seconds:
 
 ```
-just verify      # core + canister + relay + typecheck + bridge-parity + e2e (35 flows)
-just e2e         # the 35-flow browser harness driving the REAL app via react-native-web
+just verify      # core + canister + relay + typecheck + bridge-parity + e2e (37 flows)
+just e2e         # the 37-flow browser harness driving the REAL app via react-native-web
 just typecheck   # tsc --noEmit
 just app         # rebuild APK + launch on emulator (outer-loop device gate)
 just ondevice    # 8 instrumented tests on the emulator

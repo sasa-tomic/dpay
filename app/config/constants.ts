@@ -3,6 +3,18 @@ export const DIRECT_PAY_TIMEOUT_MS = 5000;
 // Merchant NFC settlement: bound the /pay call, then reconcile the ambiguous case via the
 // idempotent /receipt/:nonce so a settled payment is never reported as failed.
 export const NFC_PAY_TIMEOUT_MS = 8000;
+// PR23 — named timeouts for the remaining bare fetch literals. The value is the SAME the inline
+// constants carried; only the name is new. BALANCE_TIMEOUT_MS bounds every "fast read" poll
+// (balance/history/receipt/catalog + the onboarding best-effort fund). FAUCET_TIMEOUT_MS bounds
+// the user-initiated top-up. DEPOSIT_TIMEOUT_MS bounds the initial deposit-info/address load +
+// the ckERC20 onramp-params fetch; DEPOSIT_REFRESH_TIMEOUT_MS bounds the deposit-status refresh
+// (manual "Check now" + the 10s poll). RECONCILE_FETCH_TIMEOUT_MS bounds a single /receipt fetch
+// inside the NFC reconcile loop (distinct from RECONCILE_INTERVAL_MS, the poll spacing).
+export const BALANCE_TIMEOUT_MS = 4000;
+export const FAUCET_TIMEOUT_MS = 6000;
+export const DEPOSIT_TIMEOUT_MS = 8000;
+export const DEPOSIT_REFRESH_TIMEOUT_MS = 6000;
+export const RECONCILE_FETCH_TIMEOUT_MS = 3000;
 export const RECONCILE_ATTEMPTS = 4;
 export const RECONCILE_INTERVAL_MS = 1200;
 // Payer NFC: how long to wait for the merchant's receipt before falling back to a truthful
@@ -59,3 +71,9 @@ export const WITHDRAW_EXPIRY_WINDOW = 600; // the signed WithdrawAuth is valid 1
 // amount to /api/v1/faucet; the real canister mints the fixed amount regardless of the request. MC1
 // units 2-4: a decimal-digit STRING (raw u64) — the relay accepts string-OR-number at the JSON seam.
 export const TOP_UP_CENTS = '10000';
+
+// PR24 — single source of truth for the QR code render size. QR_SIZE is the standard signed-QR /
+// request-QR / WC-pairing-QR card (244px, the long-shipped value); QR_SIZE_SMALL is the deposit-
+// address QR (200px — slightly smaller so a long native address QR scans reliably at high density).
+export const QR_SIZE = 244;
+export const QR_SIZE_SMALL = 200;

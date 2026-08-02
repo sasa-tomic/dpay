@@ -3,13 +3,14 @@ import {View, Text, Pressable, Share, Modal} from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import {S} from '../styles';
 import {C} from '../config/palette';
-import {EXPIRY_WINDOW, DIRECT_PAY_TIMEOUT_MS, NFC_PAY_TIMEOUT_MS, POLL} from '../config/constants';
+import {EXPIRY_WINDOW, DIRECT_PAY_TIMEOUT_MS, POLL, BALANCE_TIMEOUT_MS, QR_SIZE} from '../config/constants';
 import {usd, short, base, parseRequestQR, randNonceHex, nowSecs} from '../lib/format';
 import {cmpRaw} from '../lib/amount';
 import {type CurrencyDescriptor, fmtCurrencyAmount, isPayableAsset} from '../config/catalog';
 import type {Identity, Req, NfcStatus} from '../lib/types';
-import {classifyPayHttp, rejectionMessage, isNonceReused} from '../payments';
+import {rejectionMessage, isNonceReused} from '../payments';
 import {verifyOutcomeReceipt} from '../services/receipt';
+import {payAndClassify, readJsonOrEmpty} from '../services/relay';
 import {DpayCore, DpayNfc} from '../services/native';
 import {NfcTap} from './NfcTap';
 import {NfcIcon} from './NfcIcon';
@@ -58,7 +59,7 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
     if (phase !== 'qr' || !qr) return;
      let alive = true;
     const check = async () => {
-      const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 4000);
+      const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), BALANCE_TIMEOUT_MS);
       try {
         const r = await fetch(`${base(relayUrl)}/api/v1/receipt/${qr.nonce}`, {signal: ctrl.signal});
         // R2: only believe the reconciled receipt if its canister/ledger signature verifies.
@@ -66,12 +67,12 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
         // holds (same from/to/amount/currency/nonce), so a stale relay returning a different
         // payment's receipt is rejected. `req` holds the payee + amount the payer signed for.
         if (alive && r.ok) {
-          const j = await r.json().catch(() => ({} as any));
+          const j = await readJsonOrEmpty(r);
           if (req && await verifyOutcomeReceipt(j.receipt, {from: identity.publicHex, to: req.toHex, amount: req.amount, currency: req.currency, nonce: req.nonceHex})) {
             onSettled(); setPaid({amount: qr.amount, currency: qr.currency, who: qr.who, already: false}); setPhase('paid');
           }
         }
-      } catch {} finally { clearTimeout(t); }
+      } catch { /* best-effort: keep polling — the next tick reconciles if the ledger settled */ } finally { clearTimeout(t); }
     };
     check(); const id = setInterval(check, POLL.receiptPay);
     return () => { alive = false; clearInterval(id); };
@@ -91,14 +92,10 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
       const nonce = req.nonceHex;
       if (online) {
         const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), DIRECT_PAY_TIMEOUT_MS);
-        let res: {ok: boolean; status: number} | null = null;
-        let j: any = {};
-        try {
-          const r = await fetch(`${base(relayUrl)}/api/v1/pay`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({qr: code}), signal: ctrl.signal});
-          res = {ok: r.ok, status: r.status};
-          j = await r.json().catch(() => ({} as any));
-        } catch { res = null; /* network/timeout → unknown, fall back to the QR hand-off below */ } finally { clearTimeout(timer); }
-        const outcome = classifyPayHttp(res);
+        // PR25 — payAndClassify does fetch + JSON-or-empty parse + classifyPayHttp, returning the
+        // authoritative outcome + the parsed body (so the caller can read `body.receipt` /
+        // `body.error` / `body.replayed`). A fetch throw collapses to outcome='unknown'.
+        const {outcome, body: j} = await payAndClassify(relayUrl, code, ctrl.signal).finally(() => clearTimeout(timer));
         if (outcome === 'settled') {
           // R2: trust the outcome only if the receipt's canister/ledger signature verifies. A
           // replay (replayed:true) returns the SAME cached receipt, which verifies identically.
@@ -151,7 +148,7 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
     return (
       <View style={S.center}>
         <Text style={S.label}>Show this to {qr.who}</Text>
-        <View style={S.qrCard}><QRCode value={qr.code} size={244} ecl="L" /></View>
+        <View style={S.qrCard}><QRCode value={qr.code} size={QR_SIZE} ecl="L" /></View>
         <Text style={S.amountBig}>{`${fmtCurrencyAmount(catalog, qr.currency, qr.amount)} to ${qr.who}`}</Text>
         <Text style={S.badgeOk}>signed on this device ✓</Text>
         {online ? <Text style={S.qrHint}>Waiting for {qr.who} to scan…</Text> : (

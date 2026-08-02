@@ -3,11 +3,12 @@ import {View, Text, Pressable, TextInput, Modal, type TextStyle} from 'react-nat
 import QRCode from 'react-native-qrcode-svg';
 import {C} from '../config/palette';
 import {S} from '../styles';
-import {EXPIRY_WINDOW, NFC_PAY_TIMEOUT_MS, POLL} from '../config/constants';
+import {EXPIRY_WINDOW, NFC_PAY_TIMEOUT_MS, POLL, BALANCE_TIMEOUT_MS, QR_SIZE} from '../config/constants';
 import {short, base, toUnits, randNonceHex, nowSecs} from '../lib/format';
 import {type CurrencyDescriptor, assetTestKey, displayName, fmtCurrencyAmount, currencySymbol} from '../config/catalog';
 import type {Identity} from '../lib/types';
-import {classifyPayHttp, rejectionMessage, isNonceReused} from '../payments';
+import {rejectionMessage, isNonceReused} from '../payments';
+import {payAndClassify, readJsonOrEmpty} from '../services/relay';
 import {DpayCore, DpayNfc} from '../services/native';
 import {NfcTap} from './NfcTap';
 import {QrScanner} from './QrScanner';
@@ -77,7 +78,7 @@ export function ReceiveMode({identity, relayUrl, nfcReady, onReceived, catalog}:
       // Build the NFC request too so reader mode can start alongside the QR (best-effort). The
       // merchant's username + memo ride as to_name/memo in the request bytes, same as the QR path.
       let nfcHex: string | null = null;
-      if (nfcReady && DpayNfc) { try { nfcHex = await DpayNfc.buildRequest(identity.publicHex, rawAmount, nonce, expiry, reqCurrency, identity.username, memoVal); } catch {} }
+      if (nfcReady && DpayNfc) { try { nfcHex = await DpayNfc.buildRequest(identity.publicHex, rawAmount, nonce, expiry, reqCurrency, identity.username, memoVal); } catch { /* best-effort: NFC reader is a parallel path; the QR still works */ } }
       setReqQr({value: reqB64, rawAmount, currency: reqCurrency, nonce, nfcHex, expiry});
       setResult(null); setErr(null);
     } catch (e: any) { setErr(String(e?.message ?? e)); }
@@ -88,11 +89,11 @@ export function ReceiveMode({identity, relayUrl, nfcReady, onReceived, catalog}:
     if (!reqQr || result) return;
     let alive = true;
     const check = async () => {
-      const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 4000);
+      const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), BALANCE_TIMEOUT_MS);
       try {
         const r = await fetch(`${base(relayUrl)}/api/v1/receipt/${reqQr.nonce}`, {signal: ctrl.signal});
         if (alive && r.ok) { const j = await r.json(); const from = j.receipt?.from ? short(j.receipt.from) : 'payer'; setResult({amount: reqQr.rawAmount, currency: reqQr.currency, from}); onReceived(); }
-      } catch {} finally { clearTimeout(t); }
+      } catch { /* best-effort: keep polling — the next tick surfaces the settlement */ } finally { clearTimeout(t); }
     };
     check(); const id = setInterval(check, POLL.receiptRcv);
     return () => { alive = false; clearInterval(id); };
@@ -103,15 +104,12 @@ export function ReceiveMode({identity, relayUrl, nfcReady, onReceived, catalog}:
     setErr(null);
     try {
       const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), NFC_PAY_TIMEOUT_MS);
-      let r;
-      try {
-        r = await fetch(`${base(relayUrl)}/api/v1/pay`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({qr: raw.trim()}), signal: ctrl.signal});
-      } finally { clearTimeout(timer); }
-      const j = await r.json().catch(() => ({} as any));
-      // Only a definitive rejection is worth an error. A settled or ambiguous (network) result is
+      // PR25 — payAndClassify does fetch + JSON-or-empty parse + classifyPayHttp. The merchant only
+      // acts on a definitive 'rejected' (a 422 policy refusal); a settled or unknown outcome is
       // surfaced by the /receipt poll (which sets `result`), so we never flash a false failure on a
       // payment that actually went through.
-      if (classifyPayHttp({ok: r.ok, status: r.status}) === 'rejected' && !isNonceReused(j?.error)) {
+      const {outcome, body: j} = await payAndClassify(relayUrl, raw.trim(), ctrl.signal).finally(() => clearTimeout(timer));
+      if (outcome === 'rejected' && !isNonceReused(j?.error)) {
         setErr(rejectionMessage(typeof j?.error === 'string' ? j.error : null));
       }
     } catch { /* network/timeout — the /receipt poll reconciles; don't show a false error */ }
@@ -151,7 +149,7 @@ export function ReceiveMode({identity, relayUrl, nfcReady, onReceived, catalog}:
               {reqQr.nfcHex ? <NfcIcon color={C.brand} size={18} /> : null}
               <Text style={S.nfcHintLabel}>Show this to the payer{reqQr.nfcHex ? ' · or let them tap' : ''}</Text>
             </View>
-            <View testID="request-qr" style={S.qrCard}><QRCode value={reqQr.value} size={244} ecl="M" /></View>
+            <View testID="request-qr" style={S.qrCard}><QRCode value={reqQr.value} size={QR_SIZE} ecl="M" /></View>
         <Text style={S.amountBig}>{fmtCurrencyAmount(catalog, reqQr.currency, reqQr.rawAmount)}</Text>
         {(() => {
           const remaining = reqQr.expiry - now;
