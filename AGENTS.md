@@ -16,6 +16,8 @@ It is not a historical snapshot — it is maintained alongside the code:
 - **When a change adds a new surface, invariant, or risk**, add it to `CODEBASE_ANALYSIS.md` in the same change.
 - **If anything here stops matching the code, the doc is wrong — fix the doc.** Stale analysis is worse than none.
 
+**Canister topology lives in `docs/CANISTERS.md`** — the authoritative map of mainnet canisters (2 owned: facade `ssqti` + DUSD ICRC-3 ledger `td2nx`; 4 external IC chain-key deps). The tracked `canister_ids.json` (repo root) holds the durable mainnet ids of the owned canisters; the deploy script resolves canister names against it, so adding an owned canister means adding both a `dfx.json` entry and its `ic` id there.
+
 ## Working in this repo
 
 Inner loop runs fully offline via `just` and completes in seconds (`just verify` = core + canister + relay + e2e; `just test-core`, `just test-canister`, `just test-relay`, `just sim`, `just ffi` for individual slices). `third_party/` is the canonical local source cache — look there first; `.dev/`, `third_party/`, `vendor/`, and `target/` are gitignored. The Android emulator / physical devices are an outer-loop fidelity gate only, never on the inner loop.
