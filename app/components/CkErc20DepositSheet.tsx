@@ -330,11 +330,21 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
               <View style={S.centerAll}>
                 <View testID="wc-pair-qr" style={S.qrCard}><QRCode value={wcUri} size={QR_SIZE} ecl="M" /></View>
                 <Text style={S.paidSub}>Scan with your wallet to pair</Text>
+                <Text style={S.dim2}>MetaMask · Trust · Rabby · any WalletConnect wallet</Text>
               </View>
             ) : (
-              <Pressable testID="btn-connect-wallet" accessibilityRole="button" accessibilityLabel="Connect Ethereum wallet" style={S.primaryWide} onPress={connect}>
-                <Text style={S.primaryText}>Connect wallet</Text>
-              </Pressable>
+              <View style={S.centerAll}>
+                {/* Why a wallet, not an address: USDC is an Ethereum smart-contract token — unlike
+                    Bitcoin (UTXO, send-to-address), depositing it requires two wallet-SIGNED
+                    transactions (approve the helper to spend, then depositErc20 into it). There is
+                    no "deposit address" for an ERC-20 on the ckETH ramp; the deposit must be
+                    initiated from the wallet that holds the USDC + ETH for gas. */}
+                <Text style={S.dim2}>USDC is an Ethereum token — depositing it needs two transactions your wallet signs, not a send-to-address like Bitcoin.</Text>
+                <Pressable testID="btn-connect-wallet" accessibilityRole="button" accessibilityLabel="Connect Ethereum wallet" style={S.primaryWide} onPress={connect}>
+                  <Text style={S.primaryText}>Connect wallet</Text>
+                </Pressable>
+                <Text style={S.dim2}>MetaMask · Trust · Rabby · any WalletConnect-compatible wallet</Text>
+              </View>
             )
           ) : phase === 'enter' || phase === 'sending' ? (
             <>

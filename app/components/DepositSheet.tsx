@@ -3,7 +3,7 @@ import {View, Text, Pressable, ScrollView, SafeAreaView, StatusBar, ActivityIndi
 import QRCode from 'react-native-qrcode-svg';
 import {C} from '../config/palette';
 import {S} from '../styles';
-import {POLL, DEPOSIT_TIMEOUT_MS, DEPOSIT_REFRESH_TIMEOUT_MS, QR_SIZE_SMALL} from '../config/constants';
+import {POLL, DEPOSIT_TIMEOUT_MS, DEPOSIT_ADDRESS_TIMEOUT_MS, DEPOSIT_REFRESH_TIMEOUT_MS, QR_SIZE_SMALL} from '../config/constants';
 import {fmtAsset} from '../lib/format';
 import {cmpRaw} from '../lib/amount';
 import type {Identity} from '../lib/types';
@@ -38,23 +38,25 @@ export function DepositSheet({identity, relayUrl, currency, display, onClose}: {
   // Escape closes the sheet (seed of the keyboard-shortcuts surface — plan flow 14).
   useEscapeToClose(onClose);
 
-  // Load deposit info + the deposit address once on open (same AbortController/timeout style as the
-  // balance/pay calls). Address reveal is safe — sending to it only credits the user.
+  // The deposit ADDRESS is the critical path (it's the thing the user came for); deposit INFO
+  // (fee/min/confirmations) is supplementary. They are fetched on SEPARATE controllers so the slow
+  // deposit_info (an IC read-only update proxying the minter, observed 7–15s on mainnet) can never
+  // abort the address (a faster ~5–7s update). Previously both ran in one Promise.all under a single
+  // 8s controller → the slow info aborted the ready address → "Couldn't load your deposit address."
+  // The sheet tolerates a null `info` (renders "—" for fee/min), so a best-effort info miss degrades
+  // gracefully instead of hiding the address.
   useEffect(() => {
     let alive = true;
     const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), DEPOSIT_TIMEOUT_MS);
+    const t = setTimeout(() => ctrl.abort(), DEPOSIT_ADDRESS_TIMEOUT_MS);
     (async () => {
       setLoading(true); setErr(null);
       try {
-        const [i, a] = await Promise.all([
-          depositInfo(relayUrl, currency, ctrl.signal),
-          depositAddress(relayUrl, identity.publicHex, currency, ctrl.signal),
-        ]);
+        const a = await depositAddress(relayUrl, identity.publicHex, currency, ctrl.signal);
         if (!alive) return;
         // H5: fetch succeeded but no address returned → the asset has no deposit minter configured.
         if (!a) { setErr(NO_MINTER_DEPOSIT_ERR); return; }
-        setInfo(i); setAddress(a);
+        setAddress(a);
       } catch (e: unknown) {
         // H5: distinguish "no minter" (503 — the relay signals no ck-minter is registered for this
         // currency) from a transient network/relay error (ECONNREFUSED, timeout, other status). The
@@ -69,6 +71,23 @@ export function DepositSheet({identity, relayUrl, currency, display, onClose}: {
     })();
     return () => { alive = false; ctrl.abort(); };
   }, [relayUrl, identity.publicHex, currency]);
+
+  // Best-effort deposit info (fee / min / confirmations). Independent controller + timeout so a slow
+  // or failing info fetch never blocks the address above. `info` stays null on a miss → the sheet
+  // renders "—" for the fee/min fields (graceful, not an error).
+  useEffect(() => {
+    let alive = true;
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), DEPOSIT_TIMEOUT_MS);
+    (async () => {
+      try {
+        const i = await depositInfo(relayUrl, currency, ctrl.signal);
+        if (alive) setInfo(i);
+      } catch { /* best-effort: fee/min show "—" when info is absent */ }
+      finally { clearTimeout(t); }
+    })();
+    return () => { alive = false; ctrl.abort(); };
+  }, [relayUrl, currency]);
 
   // ONE refresh function reused by BOTH the 10s poll and the manual "Check now" button — single
   // source of truth. minted_total > 0 => the deposit credited (mint landed on the user's subaccount).

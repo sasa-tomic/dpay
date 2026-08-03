@@ -12,7 +12,14 @@ export const NFC_PAY_TIMEOUT_MS = 8000;
 // inside the NFC reconcile loop (distinct from RECONCILE_INTERVAL_MS, the poll spacing).
 export const BALANCE_TIMEOUT_MS = 4000;
 export const FAUCET_TIMEOUT_MS = 6000;
+// DEPOSIT_TIMEOUT_MS bounds the best-effort deposit-info load + the ckERC20 onramp-params fetch.
+// DEPOSIT_ADDRESS_TIMEOUT_MS bounds the CRITICAL deposit-address fetch on its OWN controller: the
+// address is an IC update call (relay → facade → ckBTC minter, ~5–7s observed on mainnet), so it
+// gets ample headroom AND is decoupled from the slower deposit_info (a read-only update that proxies
+// the minter's get_minter_info, observed at 7–15s). Sharing one controller let the slow info abort
+// the ready address at 8s → "Couldn't load your deposit address." (fixed 2026-08-03).
 export const DEPOSIT_TIMEOUT_MS = 8000;
+export const DEPOSIT_ADDRESS_TIMEOUT_MS = 20000;
 export const DEPOSIT_REFRESH_TIMEOUT_MS = 6000;
 export const RECONCILE_FETCH_TIMEOUT_MS = 3000;
 export const RECONCILE_ATTEMPTS = 4;
