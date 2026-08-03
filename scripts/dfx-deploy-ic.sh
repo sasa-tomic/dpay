@@ -2,8 +2,12 @@
 # Deploy (or redeploy) the dpay canister to ICP MAINNET (the built-in `ic` network) as an explicit
 # named dfx identity, then write the resulting canister id back into deploy/.env so the relay picks
 # it up. The mainnet sibling of scripts/dfx-deploy.sh (which stands up a throwaway LOCAL replica and
-# self-tests a settlement). Here we only build, (re)deploy, and read back a couple of *free* query
-# calls as a sanity check — we deliberately do NOT push a state-changing payment to mainnet.
+# self-tests a settlement). This is the ONE mainnet deploy path: it builds, (re)deploys, reads back a
+# couple of *free* query calls, AND registers the DUSD ledger + currency metadata for DEMO/ckBTC/
+# ckUSDC (idempotent config — folds in the former separate icrc-deploy-mainnet setup). It deliberately
+# does NOT push a state-changing payment to mainnet: the one-time settle smoke was run at initial
+# deploy and the settlement kernel is covered going forward by PocketIC canister tests + e2e +
+# `just verify-deploy` (wasm-hash fidelity).
 #
 # Identity (DPAY_DFX_IDENTITY) is REQUIRED and load-bearing: `dfx deploy --network ic` spends the
 # identity's cycles AND makes it the CANISTER CONTROLLER (upgrade authority). Create one with
@@ -92,7 +96,11 @@ cargo run -q -p dpay-fixture
 # remote networks from ./canister_ids.json (regenerated here from .env, so .env stays authoritative).
 EXISTING_CID="$(env_get DPAY_CANISTER_ID deploy/.env)"
 if [ "$NETWORK" != "local" ] && [ -n "$EXISTING_CID" ]; then
-  jq -n --arg c "$CANISTER" --arg n "$NETWORK" --arg id "$EXISTING_CID" '{($c):{($n):$id}}' > canister_ids.json
+  # MERGE the facade id into the TRACKED canister_ids.json — never clobber (the file is the durable
+  # map of ALL owned canisters; overwriting would drop icrc_ledger/td2nx). .env stays the operator's
+  # source of truth for the facade id; see docs/CANISTERS.md.
+  _tmp="$(mktemp)"
+  jq --arg c "$CANISTER" --arg n "$NETWORK" --arg id "$EXISTING_CID" '.[$c][$n] = $id' canister_ids.json > "$_tmp" && mv "$_tmp" canister_ids.json
   echo "== target: existing canister $EXISTING_CID on $NETWORK (from deploy/.env) =="
   # Mode from the canister's ACTUAL state: no code yet → a safe first install (nothing to lose); code
   # already installed → upgrade (default) preserves state via stable memory; reinstall re-funds.
@@ -150,6 +158,28 @@ CAP="$(dfx_i canister call "$CANISTER" per_tx_cap --network "$NETWORK" --query |
 PA0="$(dfx_i canister call "$CANISTER" balance_of --network "$NETWORK" --query --argument-file dfx/args/payer.arg | nat)" || { echo "readback failed: payer balance query" >&2; exit 1; }
 MB0="$(dfx_i canister call "$CANISTER" balance_of --network "$NETWORK" --query --argument-file dfx/args/merchant.arg | nat)" || { echo "readback failed: merchant balance query" >&2; exit 1; }
 echo "   cap: $CAP   opening balances: payer=$PA0  merchant=$MB0"
+
+# --- register the DUSD ledger + currency metadata (idempotent config; folds in the former
+# icrc-deploy-mainnet setup so ONE deploy leaves the canister correctly configured) ----------------
+# register_ledger(0) points DEMO at the DUSD ICRC-3 ledger (icrc_ledger); register_currency_meta sets
+# display + ramp capabilities + per-tx cap for DEMO(0)/ckBTC(1)/ckUSDC(2). All idempotent under MC2
+# (same-value re-register Ok; meta overwrites display fields). WITHOUT this, the app renders ckBTC/
+# ckUSDC "unsupported" (null wrapper/backing/ramps) and cap-less currencies reject every pay
+# (lib.rs currency_cap().unwrap_or(0)). cap mirrors the global per_tx_cap as a PLACEHOLDER — tighten
+# to a per-asset policy before pilot. Values mirror the relay FakeLedger fake_catalog() + app catalog.
+LEDGER_ID="$(dfx_i canister id icrc_ledger --network "$NETWORK" 2>/dev/null || true)"
+if [ -z "$LEDGER_ID" ]; then
+  echo "WARN: icrc_ledger unresolved on $NETWORK — skipping currency config (ensure canister_ids.json tracks it; see docs/CANISTERS.md)" >&2
+else
+  echo "== register DUSD ledger + currency metadata for DEMO(0)/ckBTC(1)/ckUSDC(2) =="
+  REG="$(dfx_i canister call "$CANISTER" register_ledger "(0 : nat32, principal \"${LEDGER_ID}\", true)" --network "$NETWORK")"
+  case "$REG" in *Ok*) echo "   register_ledger(0) -> $LEDGER_ID Ok";; *) echo "WARN: register_ledger: $REG" >&2;; esac
+  M0="$(dfx_i canister call "$CANISTER" register_currency_meta "(0 : nat32, opt \"\$\", opt (2 : nat8), null, null, null, null, null, null, opt (${CAP} : nat64), null, null, variant { Direct }, variant { Unavailable })" --network "$NETWORK")"
+  M1="$(dfx_i canister call "$CANISTER" register_currency_meta "(1 : nat32, opt \"₿\", opt (8 : nat8), opt variant { CkBtcUtxo }, opt \"ckBTC\", opt \"BTC\", opt \"Bitcoin\", opt (8 : nat8), null, opt (${CAP} : nat64), null, null, variant { Direct }, variant { Direct })" --network "$NETWORK")"
+  M2="$(dfx_i canister call "$CANISTER" register_currency_meta "(2 : nat32, opt \"ckUSDC\", opt (6 : nat8), opt variant { CkEthErc20 }, opt \"ckUSDC\", opt \"USDC\", opt \"Ethereum\", opt (6 : nat8), opt (10_000 : nat64), opt (${CAP} : nat64), opt (1 : nat32), opt \"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48\", variant { Direct }, variant { Unavailable })" --network "$NETWORK")"
+  for _m in "$M0" "$M1" "$M2"; do case "$_m" in *Ok*) :;; *) echo "WARN: register_currency_meta: $_m" >&2;; esac; done
+  echo "   metadata registered; cap=${CAP} raw (placeholder — tighten per-asset before pilot)"
+fi
 
 # --- connective tissue: hand the canister id to the relay's config -----------------------------
 # Only for the real network: a local rehearsal must not overwrite the mainnet id in deploy/.env.

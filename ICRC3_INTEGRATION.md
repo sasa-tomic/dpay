@@ -11,7 +11,7 @@
 > FACADE over external ICRC ledgers") for the current authoritative analysis. The recipes below are
 > superseded: the PocketIC proof is now `just test-canister` (multi-ledger, incl. the double-spend
 > regression), the local dfx deploy is `just deploy` (`scripts/dfx-deploy.sh`), and the mainnet
-> verify is `just icrc-deploy-mainnet` (`scripts/dfx-deploy-icrc-mainnet.sh`, targeting `ssqti`).
+> verify is `just deploy-ic` (`scripts/dfx-deploy-ic.sh`, targeting `ssqti` — the ONE mainnet path; also registers currency metadata).
 > The rest of this document is retained as the historical design rationale for that integration.
 >
 > Historical status (pre-promotion): **demonstrated** via two isolated crates plus a pre-built copy

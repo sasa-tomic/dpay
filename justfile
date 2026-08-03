@@ -33,13 +33,6 @@ build-mock-minter:
 test-canister: build-canister build-mock-minter
     cargo nextest run -p dpay-canister-tests
 
-# MAINNET deploy of the facade canister (ssqti) into the LIVE ic-icrc1-ledger on the IC `ic` network.
-# Spends REAL cycles + moves REAL state on mainnet; self-asserting end-to-end (register ledger ->
-# mint -> settle -> replay-refused -> balance check, reading balances DIRECTLY off the ledger). Read
-# scripts/dfx-deploy-icrc-mainnet.sh before running. See CODEBASE_ANALYSIS.md.
-icrc-deploy-mainnet:
-    bash scripts/dfx-deploy-icrc-mainnet.sh
-
 # relay tests (native, in-memory FakeLedger — no network)
 test-relay:
     cargo nextest run -p dpay-relay
@@ -82,8 +75,10 @@ ffi:
 deploy:
     bash scripts/dfx-deploy.sh
 
-# deploy/upgrade the canister to ICP MAINNET as DPAY_DFX_IDENTITY (becomes controller); writes
-# DPAY_CANISTER_ID into deploy/.env. Redeploy defaults to upgrade (state preserved). See deploy/README.md
+# deploy/upgrade the facade canister to ICP MAINNET as DPAY_DFX_IDENTITY (becomes controller); writes
+# DPAY_CANISTER_ID into deploy/.env AND registers the DUSD ledger + currency metadata for DEMO/ckBTC/
+# ckUSDC (idempotent config). The ONE mainnet deploy path (state-preserving upgrade by default).
+# Redeploy defaults to upgrade (state preserved). See deploy/README.md + docs/CANISTERS.md.
 deploy-ic:
     bash scripts/dfx-deploy-ic.sh
 

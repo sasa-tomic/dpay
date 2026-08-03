@@ -53,7 +53,7 @@ updates land in-line as fixes commit.
 - **PR16 (optional) | MC3 TOCTOU/thundering-herd on `last_refresh`** (`agent_ledger.rs:310-318` + `:299-302` not under lock across await) — concurrent refresh waste, not correctness (idempotent). Optional per-key mutex. Conf 8/10.
 - **PR17 (optional) | MC1 `e2e/tests/00-cross-val.mjs:286-313` replicates the TS parser inline** (Node can't import .ts; real guard is jest `amount.test.ts`). Drift surface. Conf 9/9.
 - **PR18 (doc) | MC1 three protocol-u64-as-number JSON fields** (`ledger.rs:126` `Receipt.settle_ts`, `:146` timestamp, `:177` confirmations, `:218` expiry — all bounded non-money). Make `settle_ts` U64String or document. Conf 10/9.
-- **PR19 (accepted) | MC2 mainnet deploy (`scripts/dfx-deploy-icrc-mainnet.sh:82-108`) bypasses U4 strict validation for seeded DEMO id** — documented + accepted under U2 idempotency. No action.
+- **PR19 (accepted) | MC2 mainnet DEMO meta registration (the idempotent `register_currency_meta` for currency 0, now in `scripts/dfx-deploy-ic.sh`) bypasses U4 strict validation for seeded DEMO id** — documented + accepted under U2 idempotency. No action.
 
 ## Structure scan + UX findings (2026-08-02)
 
