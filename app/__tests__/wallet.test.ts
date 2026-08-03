@@ -2,6 +2,7 @@ import { describe, test, expect, jest } from '@jest/globals';
 import {
   connectWallet, sendTransaction, getChainId, waitForReceipt,
   ReceiptReverted, ReceiptTimeout, getEthereumProvider, resolveOnrampProvider, pairOnrampWallet,
+  openWalletApp,
   type Eip1193Provider,
 } from '../wallet';
 
@@ -16,6 +17,9 @@ jest.mock('../walletconnect', () => ({
   ),
   pairWalletConnect: jest.fn(() =>
     Promise.reject(new Error('pairWalletConnect must not be reached on the web-first path')),
+  ),
+  openWalletApp: jest.fn(() =>
+    Promise.reject(new Error('openWalletApp must not be reached on the web-first path')),
   ),
 }));
 
@@ -345,6 +349,45 @@ describe('pairOnrampWallet', () => {
       expect(result).toBe(true);
       const wc = require('../walletconnect');
       expect(wc.pairWalletConnect).toHaveBeenCalledWith(onUriStub);
+    } finally {
+      (globalThis as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID = '';
+    }
+  });
+});
+
+// --- openWalletApp (dynamic-import boundary for same-device pairing) -------------------------
+// `openWalletApp(uri)` mirrors pairOnrampWallet's isolation boundary: web-first / disabled → false
+// (no dynamic import); native + configured → delegates to walletconnect.ts's openWalletApp.
+describe('openWalletApp', () => {
+  test('web-first: returns false and NEVER reaches WalletConnect', async () => {
+    delete (globalThis as {ethereum?: unknown}).ethereum;
+    const result = await openWalletApp('wc:test');
+    expect(result).toBe(false);
+    const wc = require('../walletconnect');
+    expect(wc.openWalletApp).not.toHaveBeenCalled();
+  });
+
+  test('disabled (empty projectId) → returns false and never reaches WalletConnect', async () => {
+    delete (globalThis as {ethereum?: unknown}).ethereum;
+    (globalThis as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID = '';
+    const result = await openWalletApp('wc:test');
+    expect(result).toBe(false);
+  });
+
+  test('native + projectId set → delegates to walletconnect openWalletApp', async () => {
+    delete (globalThis as {ethereum?: unknown}).ethereum;
+    let pending!: Promise<boolean>;
+    jest.isolateModules(() => {
+      (globalThis as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID =
+        'test-project-id';
+      require('../walletconnect').openWalletApp = jest.fn(async () => true);
+      pending = require('../wallet').openWalletApp('wc:delegate');
+    });
+    try {
+      const result = await pending;
+      expect(result).toBe(true);
+      const wc = require('../walletconnect');
+      expect(wc.openWalletApp).toHaveBeenCalledWith('wc:delegate');
     } finally {
       (globalThis as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID = '';
     }

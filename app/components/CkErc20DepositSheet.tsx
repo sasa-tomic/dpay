@@ -10,7 +10,7 @@ import type {Identity} from '../lib/types';
 import type {FamilyDisplay} from '../config/catalog';
 import {type CkErc20OnrampParams, ckerc20OnrampParams, readJsonOrEmpty} from '../services/relay';
 import {encodeApprove, encodeDepositErc20, principalToBytes32} from '../cketh';
-import {resolveOnrampProvider, connectWallet, getChainId, sendTransaction, waitForReceipt, ReceiptReverted, ReceiptTimeout, pairOnrampWallet} from '../wallet';
+import {resolveOnrampProvider, connectWallet, getChainId, sendTransaction, waitForReceipt, ReceiptReverted, ReceiptTimeout, pairOnrampWallet, openWalletApp} from '../wallet';
 import {loadDeposit, saveDeposit, clearDeposit} from '../services/ckerc20Persist';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 
@@ -191,6 +191,15 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
     }
   }, [relayUrl, currency, identity.publicHex, chainId, display.networkLabel]);
 
+  // Same-device pairing — open the OS wallet app with the WC pairing URI (alternative to scanning
+  // the QR with a second device). The URI is non-null only while the pairing QR is shown. On web
+  // openWalletApp is a no-op (returns false), but the button itself is gated to native below.
+  const openInWallet = useCallback(async () => {
+    if (!wcUri) return;
+    const opened = await openWalletApp(wcUri);
+    if (!opened) setErr('No wallet app found. Scan the QR with a wallet on another device instead.');
+  }, [wcUri]);
+
   const submit = useCallback(async () => {
     if (!account || !params) return;
     // MC8 U6.3 — same web-first resolver as connect(). On submit the provider was non-null at connect
@@ -330,6 +339,11 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
               <View style={S.centerAll}>
                 <View testID="wc-pair-qr" style={S.qrCard}><QRCode value={wcUri} size={QR_SIZE} ecl="M" /></View>
                 <Text style={S.paidSub}>Scan with your wallet to pair</Text>
+                {Platform.OS !== 'web' ? (
+                  <Pressable testID="btn-open-wallet" accessibilityRole="button" accessibilityHint="Open an installed wallet app on this device" style={[S.primaryWide, {marginTop: 12}]} onPress={openInWallet}>
+                    <Text style={S.primaryText}>Open wallet on this device</Text>
+                  </Pressable>
+                ) : null}
                 <Text style={S.dim2}>MetaMask · Trust · Rabby · any WalletConnect wallet</Text>
               </View>
             ) : (

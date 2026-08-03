@@ -96,6 +96,18 @@ export async function pairOnrampWallet(onUri: (uri: string | null) => void): Pro
 }
 
 /**
+ * Same-device wallet pairing — open the OS wallet app for the current WC pairing URI. Mirrors
+ * `pairOnrampWallet()`'s web-first / disabled gate + lazy dynamic import isolation boundary:
+ * web / disabled → false (no dynamic import); native + configured → delegates to walletconnect.ts's
+ * `openWalletApp`. The sheet calls this when the user taps "Open in wallet" alongside the pairing QR.
+ */
+export async function openWalletApp(uri: string): Promise<boolean> {
+  if (Platform.OS === 'web' || !WALLETCONNECT_PROJECT_ID) return false;
+  const {openWalletApp: open} = await import('./walletconnect');
+  return open(uri);
+}
+
+/**
  * Connect: `eth_requestAccounts` → the first authorized account address (0x…). Throws if the user
  * rejects or no account is returned. (On real wallets this is the prompt the user explicitly approves.)
  */

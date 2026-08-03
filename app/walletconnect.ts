@@ -30,7 +30,7 @@
  * moduleNameMapper maps `^@walletconnect/.*` to a stub (__stubs__/walletconnect-stub.ts) — so even
  * a stray import resolves to a no-op, never real WC code.
  */
-import {Platform} from 'react-native';
+import {Platform, Linking} from 'react-native';
 import {EthereumProvider} from '@walletconnect/ethereum-provider';
 import '@walletconnect/react-native-compat'; // side-effect: RN polyfills for the WC SDK
 import {WALLETCONNECT_PROJECT_ID} from './config/constants';
@@ -176,6 +176,24 @@ export async function pairWalletConnect(onUri: (uri: string | null) => void): Pr
  * Disabled guard: web Platform / empty projectId → immediate no-op (mirrors the other exports, so
  * the sheet can call this unconditionally without special-casing the disabled path).
  */
+export async function openWalletApp(uri: string): Promise<boolean> {
+  // Disabled guard — same gate as the other exports (defense-in-depth).
+  if (Platform.OS === 'web' || !WALLETCONNECT_PROJECT_ID) return false;
+  try {
+    // On Android the `wc:` scheme routes to an installed wallet (MetaMask/Trust/Rabby) via the
+    // system intent chooser. The wallet reads the pairing URI from the intent, connects to the WC
+    // relay, and the session establishes the same way a QR scan would — the user approves there and
+    // returns to dpay via the redirect.native deep-link (PR13). This is the same-device alternative
+    // to scanning the QR (which needs a second device).
+    await Linking.openURL(uri);
+    return true;
+  } catch {
+    // No wallet app registered for the `wc:` scheme (or the intent chooser was dismissed). The
+    // caller keeps the QR visible so the user can scan with a wallet on another device.
+    return false;
+  }
+}
+
 export async function disconnectWalletConnect(): Promise<void> {
   // Disabled guard — same gate as the other exports (defense-in-depth).
   if (Platform.OS === 'web' || !WALLETCONNECT_PROJECT_ID) return;

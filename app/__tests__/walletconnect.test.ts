@@ -35,9 +35,11 @@ import {FakeEthereumProvider, FAKE_INIT} from './walletconnect-fake';
 // hoisting rule permits the reference. Default 'android' (the native path under test); the web
 // case sets it to 'web' before `load()`.
 let mockPlatformOS = 'android';
+const mockLinkingOpenURL = jest.fn<(uri: string) => Promise<void>>();
 jest.mock('react-native', () => ({
-  // walletconnect.ts imports ONLY `Platform` from react-native — mock the surface minimally.
+  // walletconnect.ts imports `Platform` + `Linking` from react-native — mock both minimally.
   Platform: {OS: mockPlatformOS},
+  Linking: {openURL: mockLinkingOpenURL},
 }));
 
 const PROJECT_ID = 'test-project-id';
@@ -50,6 +52,7 @@ function load(id: string): {
   getWalletConnectProvider: () => Promise<Eip1193Provider | null>;
   pairWalletConnect: (onUri: (uri: string | null) => void) => Promise<void>;
   disconnectWalletConnect: () => Promise<void>;
+  openWalletApp: (uri: string) => Promise<boolean>;
   pairTimeoutMs: number;
   init: InitMock;
 } {
@@ -57,6 +60,7 @@ function load(id: string): {
     getWalletConnectProvider: () => Promise<Eip1193Provider | null>;
     pairWalletConnect: (onUri: (uri: string | null) => void) => Promise<void>;
     disconnectWalletConnect: () => Promise<void>;
+    openWalletApp: (uri: string) => Promise<boolean>;
     pairTimeoutMs: number;
     init: InitMock;
   };
@@ -75,6 +79,7 @@ function load(id: string): {
       getWalletConnectProvider: () => Promise<Eip1193Provider | null>;
       pairWalletConnect: (onUri: (uri: string | null) => void) => Promise<void>;
       disconnectWalletConnect: () => Promise<void>;
+      openWalletApp: (uri: string) => Promise<boolean>;
       PAIR_TIMEOUT_MS: number;
     };
     out = {
@@ -82,6 +87,7 @@ function load(id: string): {
       getWalletConnectProvider: mod.getWalletConnectProvider,
       pairWalletConnect: mod.pairWalletConnect,
       disconnectWalletConnect: mod.disconnectWalletConnect,
+      openWalletApp: mod.openWalletApp,
       pairTimeoutMs: mod.PAIR_TIMEOUT_MS,
     };
   });
@@ -90,6 +96,7 @@ function load(id: string): {
 
 afterEach(() => {
   mockPlatformOS = 'android';
+  mockLinkingOpenURL.mockReset();
   (globalThis as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID = '';
 });
 
@@ -376,6 +383,35 @@ describe('disconnectWalletConnect — U6.5 (clear cache + provider.disconnect)',
     init.mockResolvedValue(new FakeEthereumProvider());
     await getWalletConnectProvider();
     expect(init).toHaveBeenCalledTimes(1);
+  });
+});
+
+// --- openWalletApp — same-device pairing via OS intent chooser -------------------------------
+// `openWalletApp(uri)` is the same-device alternative to scanning the QR: it calls Linking.openURL
+// with the wc: URI, routing to an installed wallet on Android via the system intent. Returns true on
+// success, false if no wallet is registered (the caller keeps the QR visible for cross-device scan).
+describe('openWalletApp — same-device pairing via OS intent', () => {
+  test('calls Linking.openURL with the wc: URI and returns true', async () => {
+    const {openWalletApp} = load(PROJECT_ID);
+    mockLinkingOpenURL.mockResolvedValue(undefined);
+    const result = await openWalletApp('wc:abcdef@2?relay-protocol=…&symKey=…');
+    expect(mockLinkingOpenURL).toHaveBeenCalledWith('wc:abcdef@2?relay-protocol=…&symKey=…');
+    expect(result).toBe(true);
+  });
+
+  test('web Platform → returns false without calling Linking.openURL (disabled guard)', async () => {
+    mockPlatformOS = 'web';
+    const {openWalletApp} = load(PROJECT_ID);
+    const result = await openWalletApp('wc:test');
+    expect(result).toBe(false);
+    expect(mockLinkingOpenURL).not.toHaveBeenCalled();
+  });
+
+  test('returns false when no wallet app is registered (Linking.openURL rejects)', async () => {
+    const {openWalletApp} = load(PROJECT_ID);
+    mockLinkingOpenURL.mockRejectedValue(new Error('No activity found to handle Intent { wc:… }'));
+    const result = await openWalletApp('wc:no-wallet');
+    expect(result).toBe(false);
   });
 });
 
