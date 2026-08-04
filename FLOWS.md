@@ -1,6 +1,6 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **39 flows.**
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **40 flows.**
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay (FakeLedger, offline). No UI stubs. The only shimmed I/O boundary is
 > the camera scan (sanctioned smallest-boundary seam) and the NFC radio (physical-device gate).
@@ -17,7 +17,7 @@
 Flows grouped by user journey; within each table, every row lists what the flow **verifies** and
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`).
 
-wire (1) · onboard (4) · pay (14) · offline (2) · deposit (7) · withdraw (2) · nfc (2) · system (6) · tour (1)
+wire (1) · onboard (4) · pay (14) · offline (2) · deposit (7) · withdraw (2) · nfc (2) · system (6) · tour (2)
 
 ---
 
@@ -104,6 +104,7 @@ wire (1) · onboard (4) · pay (14) · offline (2) · deposit (7) · withdraw (2
 | # | Flow | Verifies | Covers |
 |---|------|----------|--------|
 | 35 | ux-tour | Visual capture: screenshots of every major screen (Pay, Receive+QR, Balances, Settings, Ledger) for review. | visual-capture, screen-census, screenshots |
+| 39 | store-screens | Visual capture: 5 hero screenshots for Play Store compositing (wallet, request, balances, ledger, deposit). | visual-capture, store-screenshots |
 
 ---
 
