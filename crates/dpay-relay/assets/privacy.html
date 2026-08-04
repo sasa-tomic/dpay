@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Privacy Policy | dpay</title>
+<meta name="description" content="Privacy Policy for the dpay Android wallet, website, and merchant terminal." />
+<meta name="color-scheme" content="dark" />
+<style>
+  :root{
+    --bg:#06070a;
+    --panel:#0c0f14;
+    --ink:#f1f4f7;
+    --ink-2:#a6afba;
+    --ink-3:#69727d;
+    --accent:#3ee0ac;
+    --accent-soft:rgba(62,224,172,.1);
+    --accent-line:rgba(62,224,172,.28);
+    --line:rgba(255,255,255,.075);
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+  body{
+    margin:0;font-family:var(--sans);color:var(--ink);background:var(--bg);
+    line-height:1.68;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+  }
+  body::before{
+    content:"";position:fixed;inset:0;pointer-events:none;
+    background:
+      radial-gradient(760px 520px at 12% -8%,rgba(62,224,172,.12),transparent 62%),
+      linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);
+    background-size:auto,52px 52px,52px 52px;
+  }
+  a{color:var(--accent);text-underline-offset:3px}
+  a:hover{color:#7aebc7}
+  nav,main,footer{position:relative;z-index:1}
+  .wrap{width:min(100% - 40px,880px);margin:0 auto}
+  nav{
+    width:min(100% - 40px,1120px);margin:0 auto;padding:24px 0;
+    display:flex;align-items:center;justify-content:space-between;gap:20px;
+  }
+  .word{color:var(--ink);font-size:1.3rem;font-weight:800;letter-spacing:-.03em;text-decoration:none}
+  .word b,.word .dot{color:var(--accent)}
+  .back{
+    color:var(--ink-2);font-size:.92rem;font-weight:600;text-decoration:none;
+    border:1px solid var(--line);border-radius:10px;padding:8px 13px;
+  }
+  .back:hover{color:var(--ink);border-color:var(--accent-line)}
+  header{padding:64px 0 42px;border-bottom:1px solid var(--line)}
+  .kicker{
+    display:flex;align-items:center;gap:9px;color:var(--ink-3);font-family:var(--mono);
+    font-size:.72rem;font-weight:600;letter-spacing:.2em;text-transform:uppercase;
+  }
+  .kicker::before{content:"";width:22px;height:1px;background:var(--accent-line)}
+  h1{margin:18px 0 14px;font-size:clamp(2.5rem,7vw,4.5rem);line-height:1;letter-spacing:-.045em}
+  .intro{max-width:660px;margin:0;color:var(--ink-2);font-size:1.08rem}
+  .date{margin-top:24px;color:var(--ink-3);font-family:var(--mono);font-size:.76rem;letter-spacing:.06em}
+  .highlights{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:34px 0 8px}
+  .highlight{padding:18px;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.018)}
+  .highlight b{display:block;color:var(--accent);font-size:.91rem;margin-bottom:4px}
+  .highlight span{display:block;color:var(--ink-2);font-size:.83rem;line-height:1.5}
+  article{padding:36px 0 72px}
+  section{padding:28px 0;border-bottom:1px solid var(--line)}
+  section:last-child{border-bottom:0}
+  h2{margin:0 0 12px;font-size:1.38rem;letter-spacing:-.025em}
+  h3{margin:22px 0 6px;font-size:1rem;color:var(--ink)}
+  p{margin:0 0 12px;color:var(--ink-2)}
+  ul{margin:10px 0 14px;padding-left:22px;color:var(--ink-2)}
+  li{margin:8px 0;padding-left:4px}
+  strong{color:var(--ink);font-weight:650}
+  .notice{
+    margin:18px 0 4px;padding:16px 18px;border-left:2px solid var(--accent);
+    border-radius:0 12px 12px 0;background:var(--accent-soft);color:var(--ink-2);
+  }
+  .contact{padding:22px;border:1px solid var(--accent-line);border-radius:16px;background:var(--accent-soft)}
+  .contact p:last-child{margin-bottom:0}
+  footer{border-top:1px solid var(--line);padding:32px 0 44px;color:var(--ink-3);font-size:.82rem}
+  footer .wrap{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}
+  footer a{color:var(--ink-2)}
+  @media(max-width:680px){
+    header{padding-top:38px}
+    .highlights{grid-template-columns:1fr}
+    article{padding-top:20px}
+    section{padding:24px 0}
+  }
+  @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+<nav>
+  <a class="word" href="/" aria-label="dpay home">d<b>pay</b><span class="dot">.</span></a>
+  <a class="back" href="/">Back to dpay</a>
+</nav>
+
+<header>
+  <div class="wrap">
+    <span class="kicker">Your data, clearly explained</span>
+    <h1>Privacy Policy</h1>
+    <p class="intro">This policy explains how the dpay developer ("dpay", "we", "us") handles information when you use the dpay Android app, website, or web merchant terminal.</p>
+    <p class="date">Effective and last updated: August 4, 2026</p>
+    <div class="highlights" aria-label="Privacy highlights">
+      <div class="highlight"><b>Your keys stay local</b><span>We do not receive or store your dpay private key.</span></div>
+      <div class="highlight"><b>No ads or tracking</b><span>We do not sell data or use it for targeted advertising.</span></div>
+      <div class="highlight"><b>Ledger records persist</b><span>Completed transactions on distributed networks cannot be deleted by dpay.</span></div>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+<article>
+  <section id="scope">
+    <h2>1. Scope</h2>
+    <p>This Privacy Policy applies to the <strong>dpay</strong> non-custodial wallet for Android (package <strong>org.kalaj.dpay</strong>), the website at <strong>dpay.kalaj.org</strong>, the dpay relay service, and the web merchant terminal.</p>
+    <p>Third-party wallets, networks, websites, and services have their own privacy practices. This policy describes dpay's practices, not theirs.</p>
+  </section>
+
+  <section id="data">
+    <h2>2. Information dpay handles</h2>
+    <h3>Information stored on your device</h3>
+    <p>The app stores a randomly generated dpay private key and public wallet address, your chosen display name, your selected relay address, and app settings on your device. If you fund supported assets from an external wallet, the app may also temporarily store the external account address, amount, transaction hashes, and funding progress so it can resume status checks after a restart.</p>
+    <div class="notice"><strong>Your dpay private key is generated and used on your device. It is not sent to dpay.</strong> dpay does not provide cloud backup or key recovery.</div>
+
+    <h3>Wallet and transaction information</h3>
+    <p>To provide balances, deposits, withdrawals, payments, receipts, and transaction history, the app and merchant terminal process and transmit information such as:</p>
+    <ul>
+      <li>public wallet addresses and public deposit addresses;</li>
+      <li>transaction amounts, assets, payment or request identifiers, expiration times, signatures, settlement status, block references, and timestamps;</li>
+      <li>optional display names and memos included in a payment;</li>
+      <li>withdrawal destination addresses, deposit status, external wallet addresses, and public blockchain transaction hashes; and</li>
+      <li>signed payment authorizations submitted by you or by a merchant at your direction.</li>
+    </ul>
+    <p>This information is used to execute the features you request. Public addresses, transaction details, display names, and memos written to a distributed ledger may be visible to other network users. Do not put confidential information in a display name or memo.</p>
+
+    <h3>Camera and NFC data</h3>
+    <p>Camera access is optional and used only when you scan a QR code. Camera frames are processed locally and are not uploaded by dpay. NFC is optional and transfers payment requests, authorizations, and receipts directly between nearby devices. The app does not request access to your contacts, precise location, microphone, or advertising ID.</p>
+
+    <h3>Website and technical information</h3>
+    <p>The public website uses no dpay analytics, advertising trackers, or cookies. When you connect to the website or relay, our infrastructure and hosting provider may process standard network information such as IP address, browser or device headers, request time, requested URL, and security or error events. We use this information only to deliver, secure, troubleshoot, and maintain the service.</p>
+    <p>The merchant terminal processes camera frames in your browser. Only a decoded payment request or signed authorization is submitted to the dpay relay when you choose to create or settle a payment. Its recent-payment list remains in that browser session.</p>
+  </section>
+
+  <section id="use">
+    <h2>3. How we use information</h2>
+    <p>We use the information described above only to:</p>
+    <ul>
+      <li>create and display wallet addresses, balances, deposit instructions, and transaction history;</li>
+      <li>authorize, submit, settle, reconcile, and display payments and withdrawals;</li>
+      <li>connect to an external wallet when you request a supported funding transaction;</li>
+      <li>prevent duplicate payments, detect invalid requests, and protect service integrity;</li>
+      <li>operate, secure, debug, and improve reliability of the app, website, and relay; and</li>
+      <li>comply with applicable law and valid legal requests.</li>
+    </ul>
+    <p>We do not sell personal or sensitive information. We do not use it for behavioral advertising, targeted advertising, cross-app tracking, or advertising measurement.</p>
+  </section>
+
+  <section id="sharing">
+    <h2>4. When information is shared</h2>
+    <p>dpay does not share information for advertising. Information is disclosed only as needed to provide a feature you request, operate the service, or meet legal obligations:</p>
+    <ul>
+      <li><strong>Internet Computer and ledger services.</strong> Public wallet addresses and transaction data are submitted to Internet Computer canisters, ICRC ledgers, and chain-key minter services to execute payments, deposits, withdrawals, and receipts.</li>
+      <li><strong>Blockchain networks.</strong> Funding or withdrawing assets can publish addresses, amounts, and transaction data to networks such as Bitcoin or Ethereum, where records are generally public and permanent.</li>
+      <li><strong>WalletConnect and connected wallets.</strong> If you choose an external-wallet funding flow, WalletConnect and your selected wallet or provider handle pairing, connection, public account details, and transaction requests under their own terms. dpay never receives the external wallet's private key.</li>
+      <li><strong>Cloudflare.</strong> Cloudflare provides network delivery, TLS termination, security, and tunnel infrastructure and may process standard network and security metadata on our behalf.</li>
+      <li><strong>Google Play.</strong> Google processes information relating to app distribution, installation, and Play services under Google's own privacy policy.</li>
+      <li><strong>Legal and safety disclosures.</strong> We may disclose information when reasonably necessary to comply with law, a valid legal process, protect rights or safety, investigate abuse, or support a business transfer with appropriate notice and safeguards.</li>
+    </ul>
+  </section>
+
+  <section id="security">
+    <h2>5. Security</h2>
+    <p>dpay is non-custodial. Payment and withdrawal authorizations are signed on your device, and the service uses cryptographic verification before settlement. Network traffic to the public service is protected with HTTPS, and access to operational systems is restricted.</p>
+    <p>No system is completely secure. You are responsible for protecting your device. Anyone who obtains your private key may be able to control funds associated with it, and dpay cannot restore a lost key.</p>
+  </section>
+
+  <section id="retention">
+    <h2>6. Retention and deletion</h2>
+    <h3>No server account</h3>
+    <p>dpay does not create a server account with an email address, password, or verified identity. Your wallet identity is created and operated locally on your device.</p>
+
+    <h3>Data on your device</h3>
+    <p>The app keeps local information until you remove it. <strong>Reset wallet</strong> deletes the wallet identity from the app on that device. Clearing the app's storage or uninstalling the app removes its other local app data according to Android's behavior.</p>
+    <div class="notice"><strong>Warning:</strong> resetting, clearing storage, or uninstalling without preserving your key can permanently make funds at that address inaccessible. dpay cannot recover them.</div>
+
+    <h3>Service and ledger records</h3>
+    <p>The relay may retain temporary payment receipt data in process memory and limited operational or security records for as long as reasonably needed to settle requests, prevent duplicate actions, troubleshoot failures, secure the service, and meet legal obligations.</p>
+    <p>Distributed ledger and blockchain transaction records are maintained by their networks. They are generally permanent and cannot be changed or deleted by dpay. Copies already submitted to merchants, external wallets, providers, or network participants are also outside dpay's control.</p>
+    <p>You may contact us to request access to or deletion of personal information controlled by dpay. We will verify and respond to the request as required by applicable law, but we cannot delete distributed-ledger records or data controlled independently by a third party.</p>
+  </section>
+
+  <section id="children">
+    <h2>7. Children</h2>
+    <p>dpay is not directed to children under 13, or a higher minimum age where local law requires it. We do not knowingly collect personal information from children. If you believe a child has provided information to dpay, contact us so we can review and take appropriate action for information we control.</p>
+  </section>
+
+  <section id="international">
+    <h2>8. International and distributed processing</h2>
+    <p>dpay's providers and distributed networks may process information in countries other than yours. Data recorded on a decentralized or distributed network may be replicated across nodes in multiple jurisdictions. Where required, we apply appropriate protections to information under our control.</p>
+  </section>
+
+  <section id="changes">
+    <h2>9. Changes to this policy</h2>
+    <p>We may update this policy when dpay's features, providers, or legal obligations change. We will post the revised policy here and update the date above. Material changes will be communicated in the app or website when appropriate.</p>
+  </section>
+
+  <section id="contact">
+    <div class="contact">
+      <h2>10. Contact</h2>
+      <p><strong>App and developer:</strong> dpay<br /><strong>Android package:</strong> org.kalaj.dpay</p>
+      <p>For privacy questions or requests, email <a href="mailto:tomic.cld@kalaj.org">tomic.cld@kalaj.org</a>.</p>
+    </div>
+  </section>
+</article>
+</main>
+
+<footer>
+  <div class="wrap"><span>dpay Privacy Policy</span><a href="/">dpay home</a></div>
+</footer>
+</body>
+</html>

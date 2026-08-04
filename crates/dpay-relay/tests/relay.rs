@@ -156,7 +156,7 @@ async fn call(state: &AppState, req: Request<Body>) -> (StatusCode, Value) {
     (status, json)
 }
 
-/// A bare GET request — for the non-JSON pages (landing, merchant, APK).
+/// A bare GET request — for the non-JSON pages (landing, privacy, merchant, APK).
 fn get_req(uri: &str) -> Request<Body> {
     Request::builder().method("GET").uri(uri).body(Body::empty()).unwrap()
 }
@@ -589,6 +589,31 @@ async fn landing_page_without_apk_shows_coming_soon() {
     );
     assert!(!html.contains("{{DOWNLOAD}}"), "placeholder must be substituted");
     assert!(!html.contains("href=\"/download/dpay.apk\""), "no live download link without an APK");
+    assert!(html.contains("href=\"/privacy\""), "privacy policy link missing");
+}
+
+/// Google Play needs a clearly labeled policy at a public HTML URL. Pin the route, content type,
+/// app/developer identification, contact, retention disclosure, and distributed-ledger limitation.
+#[tokio::test]
+async fn privacy_policy_is_served_with_required_disclosures() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+
+    let (status, headers, bytes) = call_raw(&state, get_req("/privacy")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers.get(header::CONTENT_TYPE).unwrap(), "text/html; charset=utf-8");
+    let html = String::from_utf8(bytes).unwrap();
+    for required in [
+        "<title>Privacy Policy | dpay</title>",
+        "org.kalaj.dpay",
+        "tomic.cld@kalaj.org",
+        "Retention and deletion",
+        "cannot be changed or deleted by dpay",
+        "We do not sell personal or sensitive information",
+    ] {
+        assert!(html.contains(required), "privacy policy must contain {required:?}");
+    }
 }
 
 /// With an APK configured, `GET /` swaps the placeholder for a live download button carrying the

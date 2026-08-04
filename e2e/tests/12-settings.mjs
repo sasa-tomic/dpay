@@ -9,7 +9,8 @@
 //   - editing the relay input updates it (it persists in component state — the polls retarget).
 //   - reset shows a confirmation dialog; confirming clears the on-device identity → Onboarding.
 //
-// Selector contract: `btn-settings`, `settings-relay`, `btn-reset`, `btn-reset-confirm`, `btn-create`.
+// Selector contract: `btn-settings`, `settings-relay`, `privacy-policy`, `btn-reset`,
+// `btn-reset-confirm`, `btn-create`.
 import { setup, assert, assertIncludes, assertEq, onboardWallet, accountOf } from '../harness/lib.mjs';
 
 const USERNAME = 'e2e-settings';
@@ -21,8 +22,8 @@ export const meta = {
   id: '12',
   name: 'settings',
   journey: 'system',
-  covers: ['settings', 'relay-config', 'reset', 'persist'],
-  verifies: 'Settings: edit relay URL (persists across reload) + reset wallet (wipes identity → onboarding).',
+  covers: ['settings', 'relay-config', 'privacy-policy', 'reset', 'persist'],
+  verifies: 'Settings: privacy policy is reachable, relay URL persists, and reset wallet wipes identity.',
   timeoutMs: 20000,
 };
 
@@ -52,6 +53,7 @@ export async function run() {
     // 3. The relay input holds the relay URL the app is using.
     const relayVal = await driver.readInputValue('settings-relay', { timeoutMs: 4_000 });
     assertEq(relayVal, relayBaseURL, 'settings-relay should hold the active relay URL');
+    await driver.findByTestID('privacy-policy', { timeoutMs: 4_000 });
     console.log(`[12-settings] ✓ relay input holds ${relayVal}`);
 
     // 4. Editing the relay input updates it (component state; the polls retarget to the new URL).

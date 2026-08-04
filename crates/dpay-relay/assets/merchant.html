@@ -50,6 +50,8 @@
   .txns .amt { font-weight:700; color:var(--ok); }
   .txns .meta { font-size:11px; color:var(--sub); font-family:ui-monospace,monospace; }
   .empty { color:var(--sub); font-size:13px; padding:8px 0; }
+  footer { max-width:1040px; margin:0 auto; padding:0 22px 28px; color:var(--sub); font-size:13px; }
+  footer a { color:var(--brand); }
 </style>
 </head>
 <body>
@@ -96,6 +98,7 @@
     <ul class="txns" id="txns"><li class="empty">No payments yet.</li></ul>
   </div>
 </main>
+<footer><a href="/">dpay home</a> · <a href="/privacy">Privacy policy</a></footer>
 
 <script src="/jsqr.js"></script>
 <script src="/qrcode.js"></script>

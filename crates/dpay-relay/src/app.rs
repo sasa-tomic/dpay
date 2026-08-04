@@ -4,6 +4,7 @@
 //! - `GET /` — the marketing landing page (with a download CTA when an APK is configured).
 //! - `GET /download/dpay.apk` — the Android build, when one is configured; else `404`.
 //! - `GET /merchant` — the merchant terminal web page, driven by the merchant phone.
+//! - `GET /privacy` — the public privacy policy for the app, website, and merchant terminal.
 //! - `GET /shots/{name}` — the real app screenshots embedded in the landing page.
 //! - `POST /api/v1/pay` — hands the payer's signed-authorization QR to the ledger and returns a
 //!   receipt. Two properties matter for the demo and are enforced here (not in the ledger):
@@ -145,6 +146,7 @@ pub fn app(state: AppState) -> Router {
         .route("/", get(landing_page))
         .route("/download/dpay.apk", get(apk_download))
         .route("/merchant", get(merchant_page))
+        .route("/privacy", get(privacy_page))
         .route("/jsqr.js", get(jsqr_js))
         .route("/qrcode.js", get(qrcode_js))
         .route("/shots/{name}", get(screenshot))
@@ -506,6 +508,15 @@ async fn merchant_page() -> Response {
     (
         [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
         include_str!("../assets/merchant.html"),
+    )
+        .into_response()
+}
+
+/// `GET /privacy` — the public privacy policy linked from Google Play, the app, and this website.
+async fn privacy_page() -> Response {
+    (
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        include_str!("../assets/privacy.html"),
     )
         .into_response()
 }

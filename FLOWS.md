@@ -92,7 +92,7 @@ wire (1) · onboard (4) · pay (14) · offline (2) · deposit (7) · withdraw (2
 
 | # | Flow | Verifies | Covers |
 |---|------|----------|--------|
-| 12 | settings | Settings: edit relay URL (persists across reload) + reset wallet (wipes identity → onboarding). | settings, relay-config, reset, persist |
+| 12 | settings | Settings: privacy policy is reachable, relay URL persists, and reset wallet wipes identity. | settings, relay-config, privacy-policy, reset, persist |
 | 13 | offline | Relay down → faucet top-up surfaces honest 'Offline' (ECONNREFUSED, not unsafe-port), no crash; retry path. | offline, econnrefused, graceful, retry, right-reason |
 | 14 | keyboard | Single-key shortcuts (P/R/T/A/Esc) switch tabs / top-up / add-money / close sheet; input + sheet guards work. | keyboard-shortcuts, tabs, sheet-guard, input-guard |
 | 17 | scan-cleanup | Switch Pay→Receive→Pay: QrScanner listeners tear down cleanly (no leak across unmount/remount). | qr-scanner, teardown, unmount, listener-leak |

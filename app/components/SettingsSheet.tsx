@@ -1,6 +1,7 @@
 import {useEffect, useState} from 'react';
-import {View, Text, Pressable, TextInput, ScrollView, SafeAreaView, StatusBar, Platform} from 'react-native';
+import {View, Text, Pressable, TextInput, ScrollView, SafeAreaView, StatusBar, Platform, Linking} from 'react-native';
 import {C} from '../config/palette';
+import {PRIVACY_URL} from '../config/constants';
 import {S} from '../styles';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 
@@ -54,6 +55,18 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset}: {
                 <Text style={S.resetLink}>Reset wallet</Text>
               </Pressable>
             )}
+          </View>
+
+          <View style={S.settingsSection}>
+            <Text style={S.inputLabel}>About</Text>
+            <Pressable
+              testID="privacy-policy"
+              style={S.linkBtn}
+              onPress={() => Linking.openURL(PRIVACY_URL)}
+              accessibilityRole="link"
+              accessibilityLabel="Privacy policy">
+              <Text style={S.linkTextMuted}>Privacy policy</Text>
+            </Pressable>
           </View>
 
           {/* Advanced: Relay URL */}
