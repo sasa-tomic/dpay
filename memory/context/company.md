@@ -2,7 +2,7 @@
 
 ## Team
 
-Solo founder & engineer (contact: tomic.cld@kalaj.org). Pre-seed stage.
+Solo founder & engineer (contact: sato.dpay@kalaj.org). Pre-seed stage.
 Build estimate: ~1 month solo, or ~2 weeks with two people (one on canister + relay, one on the app).
 
 ## Tech stack (PoC)

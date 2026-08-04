@@ -2,7 +2,7 @@
 
 ## Me
 
-Solo founder & engineer building **dpay** (working name TBD). Contact: tomic.cld@kalaj.org.
+Solo founder & engineer building **dpay** (working name TBD). Contact: sato.dpay@kalaj.org.
 Currently pre-seed: building the investor proof-of-concept, then a first pilot.
 
 ## Non-negotiable: how Claude must be able to iterate

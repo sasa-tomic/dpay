@@ -54,7 +54,13 @@ fn state_from(ledger: FakeLedger) -> (AppState, Arc<FakeLedger>) {
     (AppState::new(arc.clone()), arc)
 }
 
-fn signed(sk: &SigningKey, to: [u8; 32], amount: u64, nonce: [u8; 16], expiry: u64) -> SignedAuthorization {
+fn signed(
+    sk: &SigningKey,
+    to: [u8; 32],
+    amount: u64,
+    nonce: [u8; 16],
+    expiry: u64,
+) -> SignedAuthorization {
     let auth = Authorization {
         from: pubkey(sk),
         to,
@@ -158,15 +164,28 @@ async fn call(state: &AppState, req: Request<Body>) -> (StatusCode, Value) {
 
 /// A bare GET request — for the non-JSON pages (landing, privacy, merchant, APK).
 fn get_req(uri: &str) -> Request<Body> {
-    Request::builder().method("GET").uri(uri).body(Body::empty()).unwrap()
+    Request::builder()
+        .method("GET")
+        .uri(uri)
+        .body(Body::empty())
+        .unwrap()
 }
 
 /// Like `call`, but returns the raw status/headers/bytes (the pages aren't JSON).
-async fn call_raw(state: &AppState, req: Request<Body>) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
+async fn call_raw(
+    state: &AppState,
+    req: Request<Body>,
+) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
     let resp = app(state.clone()).oneshot(req).await.unwrap();
     let status = resp.status();
     let headers = resp.headers().clone();
-    let bytes = resp.into_body().collect().await.unwrap().to_bytes().to_vec();
+    let bytes = resp
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes()
+        .to_vec();
     (status, headers, bytes)
 }
 
@@ -258,7 +277,10 @@ async fn pay_returns_signed_receipt_that_verifies() {
     // Tampering the amount (a lying merchant) breaks verification.
     let mut tampered = claim;
     tampered.amount = 251;
-    assert!(!dpay_core::verify_receipt(&pkb, &tampered, &sgb), "tampered amount must fail verify");
+    assert!(
+        !dpay_core::verify_receipt(&pkb, &tampered, &sgb),
+        "tampered amount must fail verify"
+    );
 }
 
 #[tokio::test]
@@ -276,13 +298,32 @@ async fn duplicate_nonce_is_idempotent_and_credits_once() {
     // Second submission of the SAME nonce: 200, identical receipt, flagged as a replay, no re-settle.
     let (s2, b2) = call(&state, pay_json(&sa.encode())).await;
     assert_eq!(s2, StatusCode::OK);
-    assert_eq!(b1["receipt"], b2["receipt"], "duplicate must return identical receipt");
-    assert_eq!(b1["replayed"], serde_json::json!(false), "first settle is not a replay");
-    assert_eq!(b2["replayed"], serde_json::json!(true), "duplicate is flagged as a replay");
+    assert_eq!(
+        b1["receipt"], b2["receipt"],
+        "duplicate must return identical receipt"
+    );
+    assert_eq!(
+        b1["replayed"],
+        serde_json::json!(false),
+        "first settle is not a replay"
+    );
+    assert_eq!(
+        b2["replayed"],
+        serde_json::json!(true),
+        "duplicate is flagged as a replay"
+    );
 
     // Merchant credited exactly once; payer debited exactly once.
-    assert_eq!(led.balance_of(&pubkey(&merchant), DEMO_USD), 400, "credited once only");
-    assert_eq!(led.balance_of(&pubkey(&payer), DEMO_USD), BAL_A - 400, "debited once only");
+    assert_eq!(
+        led.balance_of(&pubkey(&merchant), DEMO_USD),
+        400,
+        "credited once only"
+    );
+    assert_eq!(
+        led.balance_of(&pubkey(&payer), DEMO_USD),
+        BAL_A - 400,
+        "debited once only"
+    );
 }
 
 /// Reconciliation contract the merchant app depends on: once a payment settles, its nonce is
@@ -308,8 +349,15 @@ async fn settled_receipt_is_retrievable_by_nonce_for_reconciliation() {
 
     // Now the same nonce reconciles to the identical receipt, flagged as a replay (already settled).
     let (s2, b2) = call(&state, get_receipt(nonce)).await;
-    assert_eq!(s2, StatusCode::OK, "settled nonce must be retrievable: {b2}");
-    assert_eq!(b2["receipt"], b1["receipt"], "reconciled receipt is identical to the settle receipt");
+    assert_eq!(
+        s2,
+        StatusCode::OK,
+        "settled nonce must be retrievable: {b2}"
+    );
+    assert_eq!(
+        b2["receipt"], b1["receipt"],
+        "reconciled receipt is identical to the settle receipt"
+    );
     assert_eq!(b2["replayed"], serde_json::json!(true));
 }
 
@@ -349,7 +397,10 @@ async fn expired_rejected_422() {
     let (status, body) = call(&state, pay_json(&sa.encode())).await;
 
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert!(body["error"].as_str().unwrap().contains("Expired"), "error={body}");
+    assert!(
+        body["error"].as_str().unwrap().contains("Expired"),
+        "error={body}"
+    );
     assert_eq!(led.balance_of(&pubkey(&merchant), DEMO_USD), BAL_B);
 }
 
@@ -364,7 +415,10 @@ async fn over_cap_rejected_422() {
     let (status, body) = call(&state, pay_json(&sa.encode())).await;
 
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert!(body["error"].as_str().unwrap().contains("OverCap"), "error={body}");
+    assert!(
+        body["error"].as_str().unwrap().contains("OverCap"),
+        "error={body}"
+    );
     assert_eq!(led.balance_of(&pubkey(&payer), DEMO_USD), BAL_A);
     assert_eq!(led.balance_of(&pubkey(&merchant), DEMO_USD), BAL_B);
 }
@@ -390,7 +444,10 @@ async fn insufficient_funds_rejected_422() {
 
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert!(
-        body["error"].as_str().unwrap().contains("InsufficientFunds"),
+        body["error"]
+            .as_str()
+            .unwrap()
+            .contains("InsufficientFunds"),
         "error={body}"
     );
     assert_eq!(ledarc.balance_of(&pubkey(&payer), DEMO_USD), 200);
@@ -428,7 +485,10 @@ async fn version_route_reports_baked_commit() {
     assert_eq!(body["name"], "dpay-relay");
     // The pkg version is a non-empty string (CARGO_PKG_VERSION); don't pin the exact number so a
     // bump doesn't break this test, just assert it's present.
-    assert!(body["version"].as_str().unwrap_or("").len() > 0, "version present: {body}");
+    assert!(
+        body["version"].as_str().unwrap_or("").len() > 0,
+        "version present: {body}"
+    );
     let commit = body["commit"].as_str().expect("commit present");
     // The baked commit is either a 40-char SHA (a git checkout) or the "unknown" fallback (no git).
     // In the test build (run from the repo) it MUST be a real SHA — proves build.rs wired through.
@@ -499,7 +559,10 @@ async fn amounts_serialize_as_decimal_string_above_2p53() {
     let (status, body) = call(&state, req).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     // The balance serializes as a QUOTED decimal string (not a JSON number) — the MC1 units 2-4 shape.
-    assert!(body["balance"].is_string(), "balance must be a JSON string: {body}");
+    assert!(
+        body["balance"].is_string(),
+        "balance must be a JSON string: {body}"
+    );
     assert_eq!(body["balance"], BIG.to_string().as_str());
     // The exact value round-trips on the ledger (FakeLedger honors the requested amount).
     assert_eq!(led.balance_of(&pubkey(&merchant), DEMO_USD), BIG);
@@ -535,9 +598,16 @@ async fn transient_then_success_retries_to_200() {
     let sa = signed(&payer, pubkey(&merchant), 300, [8u8; 16], FUTURE);
     let (status, body) = call(&state, pay_json(&sa.encode())).await;
 
-    assert_eq!(status, StatusCode::OK, "should have retried through transients: {body}");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "should have retried through transients: {body}"
+    );
     assert_eq!(body["receipt"]["amount"], "300");
-    assert_eq!(body["receipt"]["new_from_balance"], (BAL_A - 300).to_string());
+    assert_eq!(
+        body["receipt"]["new_from_balance"],
+        (BAL_A - 300).to_string()
+    );
 }
 
 #[tokio::test]
@@ -563,7 +633,10 @@ async fn malformed_qr_rejected_422() {
 
     let (status, body) = call(&state, pay_json("not-valid-base64url!!!")).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert!(body["error"].as_str().unwrap().contains("qr"), "error={body}");
+    assert!(
+        body["error"].as_str().unwrap().contains("qr"),
+        "error={body}"
+    );
 }
 
 // --- landing page + APK download (the public root) -----------------------
@@ -579,7 +652,10 @@ async fn landing_page_without_apk_shows_coming_soon() {
 
     let (status, headers, bytes) = call_raw(&state, get_req("/")).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(headers.get(header::CONTENT_TYPE).unwrap(), "text/html; charset=utf-8");
+    assert_eq!(
+        headers.get(header::CONTENT_TYPE).unwrap(),
+        "text/html; charset=utf-8"
+    );
     let html = String::from_utf8(bytes).unwrap();
     // The exact injected disabled chip (the `.btn-disabled` CSS class always exists in the sheet,
     // so match on the injected copy, which is unique to the None branch).
@@ -587,9 +663,18 @@ async fn landing_page_without_apk_shows_coming_soon() {
         html.contains("<span class=\"btn btn-disabled\">Android build coming soon</span>"),
         "disabled CTA missing"
     );
-    assert!(!html.contains("{{DOWNLOAD}}"), "placeholder must be substituted");
-    assert!(!html.contains("href=\"/download/dpay.apk\""), "no live download link without an APK");
-    assert!(html.contains("href=\"/privacy\""), "privacy policy link missing");
+    assert!(
+        !html.contains("{{DOWNLOAD}}"),
+        "placeholder must be substituted"
+    );
+    assert!(
+        !html.contains("href=\"/download/dpay.apk\""),
+        "no live download link without an APK"
+    );
+    assert!(
+        html.contains("href=\"/privacy\""),
+        "privacy policy link missing"
+    );
 }
 
 /// Google Play needs a clearly labeled policy at a public HTML URL. Pin the route, content type,
@@ -602,17 +687,23 @@ async fn privacy_policy_is_served_with_required_disclosures() {
 
     let (status, headers, bytes) = call_raw(&state, get_req("/privacy")).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(headers.get(header::CONTENT_TYPE).unwrap(), "text/html; charset=utf-8");
+    assert_eq!(
+        headers.get(header::CONTENT_TYPE).unwrap(),
+        "text/html; charset=utf-8"
+    );
     let html = String::from_utf8(bytes).unwrap();
     for required in [
         "<title>Privacy Policy | dpay</title>",
         "org.kalaj.dpay",
-        "tomic.cld@kalaj.org",
+        "sato.dpay@kalaj.org",
         "Retention and deletion",
         "cannot be changed or deleted by dpay",
         "We do not sell personal or sensitive information",
     ] {
-        assert!(html.contains(required), "privacy policy must contain {required:?}");
+        assert!(
+            html.contains(required),
+            "privacy policy must contain {required:?}"
+        );
     }
 }
 
@@ -628,10 +719,22 @@ async fn landing_page_with_apk_shows_download_button() {
     let (status, _headers, bytes) = call_raw(&state, get_req("/")).await;
     assert_eq!(status, StatusCode::OK);
     let html = String::from_utf8(bytes).unwrap();
-    assert!(html.contains("href=\"/download/dpay.apk?v="), "download link missing");
-    assert!(html.contains("APK · 1 MB"), "rounded size (min 1 MB) missing");
-    assert!(!html.contains("Android build coming soon"), "must not show the disabled chip");
-    assert!(!html.contains("{{DOWNLOAD}}"), "placeholder must be substituted");
+    assert!(
+        html.contains("href=\"/download/dpay.apk?v="),
+        "download link missing"
+    );
+    assert!(
+        html.contains("APK · 1 MB"),
+        "rounded size (min 1 MB) missing"
+    );
+    assert!(
+        !html.contains("Android build coming soon"),
+        "must not show the disabled chip"
+    );
+    assert!(
+        !html.contains("{{DOWNLOAD}}"),
+        "placeholder must be substituted"
+    );
 }
 
 /// The landing page embeds the three real app screenshots (served from `/shots/…`), so a QR-bearing
@@ -645,7 +748,11 @@ async fn landing_page_embeds_app_screenshots() {
     let (status, _headers, bytes) = call_raw(&state, get_req("/")).await;
     assert_eq!(status, StatusCode::OK);
     let html = String::from_utf8(bytes).unwrap();
-    for shot in ["/shots/request.png", "/shots/approve.png", "/shots/paid.png"] {
+    for shot in [
+        "/shots/request.png",
+        "/shots/approve.png",
+        "/shots/paid.png",
+    ] {
         assert!(html.contains(shot), "landing page must reference {shot}");
     }
 }
@@ -671,7 +778,10 @@ async fn screenshots_served_as_png_and_unknown_is_404() {
         let (status, headers, bytes) = call_raw(&state, get_req(&format!("/shots/{name}"))).await;
         assert_eq!(status, StatusCode::OK, "{name} must serve");
         assert_eq!(headers.get(header::CONTENT_TYPE).unwrap(), "image/png");
-        assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"), "{name} must be a PNG");
+        assert!(
+            bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
+            "{name} must be a PNG"
+        );
     }
 
     let (status, _h, _b) = call_raw(&state, get_req("/shots/nope.png")).await;
@@ -687,16 +797,25 @@ async fn merchant_terminal_served_at_merchant_not_root() {
 
     let (ms, mh, mbytes) = call_raw(&state, get_req("/merchant")).await;
     assert_eq!(ms, StatusCode::OK);
-    assert_eq!(mh.get(header::CONTENT_TYPE).unwrap(), "text/html; charset=utf-8");
+    assert_eq!(
+        mh.get(header::CONTENT_TYPE).unwrap(),
+        "text/html; charset=utf-8"
+    );
     let merch = String::from_utf8(mbytes).unwrap();
     // `id="merchId"` is unique to the merchant terminal (the landing page shares the words
     // "Merchant terminal" in its nav link, so match on the terminal-only element instead).
-    assert!(merch.contains("id=\"merchId\""), "/merchant must serve the terminal");
+    assert!(
+        merch.contains("id=\"merchId\""),
+        "/merchant must serve the terminal"
+    );
 
     // The root is the landing page, not the terminal.
     let (_rs, _rh, rbytes) = call_raw(&state, get_req("/")).await;
     let root = String::from_utf8(rbytes).unwrap();
-    assert!(!root.contains("id=\"merchId\""), "root must not be the merchant terminal");
+    assert!(
+        !root.contains("id=\"merchId\""),
+        "root must not be the merchant terminal"
+    );
 }
 
 /// Without a configured APK the download route is a clean 404 — not an empty 200.
@@ -730,7 +849,10 @@ async fn apk_download_serves_configured_bytes() {
         headers.get(header::CONTENT_DISPOSITION).unwrap(),
         "attachment; filename=\"dpay.apk\""
     );
-    assert_eq!(bytes, apk, "served bytes must match the configured build verbatim");
+    assert_eq!(
+        bytes, apk,
+        "served bytes must match the configured build verbatim"
+    );
 }
 
 // --- transaction history ---------------------------------------------------
@@ -757,7 +879,11 @@ async fn transactions_endpoint_returns_history_newest_first() {
 
     // Payer's history: newest-first => the $1.00 outgoing, then the $2.50 outgoing. `from == payer`
     // for both (outgoing); direction is derivable from the from/to fields.
-    let (status, body) = call(&state, get_req(&format!("/api/v1/transactions/{payer_hex}"))).await;
+    let (status, body) = call(
+        &state,
+        get_req(&format!("/api/v1/transactions/{payer_hex}")),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let rows = body["transactions"].as_array().unwrap();
     assert_eq!(rows.len(), 2, "both payments recorded: {body}");
@@ -770,7 +896,11 @@ async fn transactions_endpoint_returns_history_newest_first() {
     assert_eq!(rows[1]["nonce"], hex::encode([1u8; 16]));
 
     // Merchant sees the same two as incoming (from == payer).
-    let (m_status, m_body) = call(&state, get_req(&format!("/api/v1/transactions/{merch_hex}"))).await;
+    let (m_status, m_body) = call(
+        &state,
+        get_req(&format!("/api/v1/transactions/{merch_hex}")),
+    )
+    .await;
     assert_eq!(m_status, StatusCode::OK, "{m_body}");
     let m_rows = m_body["transactions"].as_array().unwrap();
     assert_eq!(m_rows.len(), 2);
@@ -778,8 +908,11 @@ async fn transactions_endpoint_returns_history_newest_first() {
     assert_eq!(m_rows[0]["to"], merch_hex);
 
     // limit is honored.
-    let (l_status, l_body) =
-        call(&state, get_req(&format!("/api/v1/transactions/{payer_hex}?limit=1"))).await;
+    let (l_status, l_body) = call(
+        &state,
+        get_req(&format!("/api/v1/transactions/{payer_hex}?limit=1")),
+    )
+    .await;
     assert_eq!(l_status, StatusCode::OK, "{l_body}");
     assert_eq!(l_body["transactions"].as_array().unwrap().len(), 1);
 
@@ -822,7 +955,11 @@ async fn names_and_memo_flow_from_signed_wire_into_history() {
     let merch_hex = hex::encode(pubkey(&merchant));
 
     // Payer's outgoing history: newest-first => the names-less $1.00 row, then the named $2.50 row.
-    let (s, body) = call(&state, get_req(&format!("/api/v1/transactions/{payer_hex}"))).await;
+    let (s, body) = call(
+        &state,
+        get_req(&format!("/api/v1/transactions/{payer_hex}")),
+    )
+    .await;
     assert_eq!(s, StatusCode::OK, "{body}");
     let rows = body["transactions"].as_array().unwrap();
     assert_eq!(rows.len(), 2, "{body}");
@@ -835,17 +972,30 @@ async fn names_and_memo_flow_from_signed_wire_into_history() {
 
     // Oldest (named): the signed names + memo decoded cleanly.
     assert_eq!(rows[1]["amount"], "250");
-    assert_eq!(rows[1]["from_name"], "Alice", "payer's own from_name: {body}");
-    assert_eq!(rows[1]["to_name"], "Bob", "payer's counterparty to_name: {body}");
+    assert_eq!(
+        rows[1]["from_name"], "Alice",
+        "payer's own from_name: {body}"
+    );
+    assert_eq!(
+        rows[1]["to_name"], "Bob",
+        "payer's counterparty to_name: {body}"
+    );
     assert_eq!(rows[1]["memo"], "coffee", "memo: {body}");
 
     // Payee's incoming history: the payer's name is the friendly counterparty (closes N6/H3 — the
     // payee no longer sees a raw hex `from`).
-    let (s, body) = call(&state, get_req(&format!("/api/v1/transactions/{merch_hex}"))).await;
+    let (s, body) = call(
+        &state,
+        get_req(&format!("/api/v1/transactions/{merch_hex}")),
+    )
+    .await;
     assert_eq!(s, StatusCode::OK, "{body}");
     let rows = body["transactions"].as_array().unwrap();
     assert_eq!(rows.len(), 2, "{body}");
-    let named = rows.iter().find(|r| r["amount"] == "250").expect("named row present");
+    let named = rows
+        .iter()
+        .find(|r| r["amount"] == "250")
+        .expect("named row present");
     assert_eq!(
         named["from_name"], "Alice",
         "payee sees payer's name, not a raw pubkey: {body}"
@@ -890,7 +1040,11 @@ async fn deposit_status_credits_balance_and_drains_pending() {
 
     // Seed a pending deposit of 5000 minor units for account `b`.
     led.register_deposit(b, DEMO_USD, 5000);
-    assert_eq!(led.balance_of(&b, DEMO_USD), BAL_B, "no credit before refresh");
+    assert_eq!(
+        led.balance_of(&b, DEMO_USD),
+        BAL_B,
+        "no credit before refresh"
+    );
 
     // First refresh: mints the pending deposit, credits the balance.
     let r1 = led.deposit_status(b, DEMO_USD).await.unwrap();
@@ -900,13 +1054,25 @@ async fn deposit_status_credits_balance_and_drains_pending() {
     assert_eq!(r1.minted[0].block_index, "0");
     assert!(r1.pending.is_empty(), "nothing pending after a full drain");
     assert_eq!(r1.required_confirmations, 1);
-    assert_eq!(led.balance_of(&b, DEMO_USD), BAL_B + 5000, "credited after refresh");
+    assert_eq!(
+        led.balance_of(&b, DEMO_USD),
+        BAL_B + 5000,
+        "credited after refresh"
+    );
 
     // Second refresh: pending is drained → minted_total = 0, no double-credit.
     let r2 = led.deposit_status(b, DEMO_USD).await.unwrap();
-    assert_eq!(r2.minted_total, U64String(0), "pending drained: nothing more to mint");
+    assert_eq!(
+        r2.minted_total,
+        U64String(0),
+        "pending drained: nothing more to mint"
+    );
     assert!(r2.minted.is_empty());
-    assert_eq!(led.balance_of(&b, DEMO_USD), BAL_B + 5000, "no double-credit on re-refresh");
+    assert_eq!(
+        led.balance_of(&b, DEMO_USD),
+        BAL_B + 5000,
+        "no double-credit on re-refresh"
+    );
 }
 
 /// The three deposit REST routes return the correct JSON shapes via the axum router (driven with
@@ -920,8 +1086,11 @@ async fn deposit_routes_return_correct_shapes() {
     let merch_hex = hex::encode(pubkey(&merchant));
 
     // GET /deposit/address/{hex} → {"address": "bc1qdpay..."}.
-    let (s_addr, b_addr) =
-        call(&state, get_req(&format!("/api/v1/deposit/address/{merch_hex}"))).await;
+    let (s_addr, b_addr) = call(
+        &state,
+        get_req(&format!("/api/v1/deposit/address/{merch_hex}")),
+    )
+    .await;
     assert_eq!(s_addr, StatusCode::OK, "{b_addr}");
     let expected_addr = format!("bc1qdpay{}", hex::encode(&pubkey(&merchant)[..8]));
     assert_eq!(b_addr["address"], expected_addr);
@@ -1008,9 +1177,7 @@ impl Ledger for DepositFailingLedger {
     async fn deposit_info(&self, _c: Currency) -> Result<DepositInfo, LedgerError> {
         Err(LedgerError::Transient("injected deposit failure".into()))
     }
-    async fn currencies(
-        &self,
-    ) -> Result<Vec<dpay_relay::CurrencyDescriptor>, LedgerError> {
+    async fn currencies(&self) -> Result<Vec<dpay_relay::CurrencyDescriptor>, LedgerError> {
         self.inner.currencies().await
     }
     async fn ckerc20_onramp_params(
@@ -1031,7 +1198,9 @@ async fn deposit_routes_map_ledger_transient_to_503() {
     let a = pubkey(&keypair());
     let b = pubkey(&keypair());
     let inner = Arc::new(ledger(a, b));
-    let state = AppState::new(Arc::new(DepositFailingLedger { inner: inner.clone() }));
+    let state = AppState::new(Arc::new(DepositFailingLedger {
+        inner: inner.clone(),
+    }));
     let hex_b = hex::encode(b);
 
     // GET /deposit/address/{hex} → 503.
@@ -1052,7 +1221,11 @@ async fn deposit_routes_map_ledger_transient_to_503() {
     assert_eq!(s3, StatusCode::SERVICE_UNAVAILABLE, "{body3}");
 
     // No deposit was credited — a failing refresh mints nothing.
-    assert_eq!(inner.balance_of(&b, DEMO_USD), BAL_B, "transient refresh must not mint");
+    assert_eq!(
+        inner.balance_of(&b, DEMO_USD),
+        BAL_B,
+        "transient refresh must not mint"
+    );
 }
 
 // --- currency catalog (M0) ---------------------------------------------------
@@ -1075,7 +1248,11 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(status, StatusCode::OK, "{body}");
 
     let rows = body["currencies"].as_array().expect("currencies array");
-    assert_eq!(rows.len(), 4, "demo catalog = DEMO_USD + ckBTC + ckUSDC + ckUSDT: {body}");
+    assert_eq!(
+        rows.len(),
+        4,
+        "demo catalog = DEMO_USD + ckBTC + ckUSDC + ckUSDT: {body}"
+    );
 
     // DEMO_USD (currency 0): the mintable $ faucet asset, no ramp.
     let dusd = rows
@@ -1087,7 +1264,10 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(dusd["decimals"], 2);
     assert_eq!(dusd["minter"], serde_json::Value::Null);
     assert_eq!(dusd["minter_family"], serde_json::Value::Null);
-    assert!(!dusd["ledger"].as_str().unwrap().is_empty(), "ledger principal text present");
+    assert!(
+        !dusd["ledger"].as_str().unwrap().is_empty(),
+        "ledger principal text present"
+    );
     // MC1 unit 5: DEMO ramp honesty — onramp=Direct (faucet), offramp=Unavailable (no cash-out).
     assert_eq!(dusd["onramp"], "Direct");
     assert_eq!(dusd["offramp"], "Unavailable");
@@ -1102,7 +1282,10 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(ckbtc["decimals"], 8);
     // The variant serializes as the plain PascalCase tag (matches the candid label + wallet contract).
     assert_eq!(ckbtc["minter_family"], "CkBtcUtxo");
-    assert!(!ckbtc["minter"].as_str().unwrap().is_empty(), "ramp minter principal text present");
+    assert!(
+        !ckbtc["minter"].as_str().unwrap().is_empty(),
+        "ramp minter principal text present"
+    );
     // MC1 unit 5: authoritative per-currency metadata (no family-level assumption).
     assert_eq!(ckbtc["wrapper_name"], "ckBTC");
     assert_eq!(ckbtc["backing_symbol"], "BTC");
@@ -1120,7 +1303,10 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(ckusdc["symbol"], "ckUSDC");
     assert_eq!(ckusdc["decimals"], 6);
     assert_eq!(ckusdc["minter_family"], "CkEthErc20");
-    assert!(!ckusdc["minter"].as_str().unwrap().is_empty(), "ramp minter principal text present");
+    assert!(
+        !ckusdc["minter"].as_str().unwrap().is_empty(),
+        "ramp minter principal text present"
+    );
     // MC1 unit 5: per-token ckERC20 facts (O6) replace the old hardcoded currency-2 params.
     assert_eq!(ckusdc["wrapper_name"], "ckUSDC");
     assert_eq!(ckusdc["backing_symbol"], "USDC");
@@ -1128,9 +1314,12 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(ckusdc["display_decimals"], 6);
     assert_eq!(ckusdc["fee"], "10000"); // ckUSDC icrc1_fee (O6): 0.01 USDC = 10000 raw
     assert_eq!(ckusdc["chain_id"], 1); // Ethereum mainnet
-    assert_eq!(ckusdc["token_contract"], "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
+    assert_eq!(
+        ckusdc["token_contract"],
+        "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+    );
     assert_eq!(ckusdc["onramp"], "Direct"); // ckETH helper-contract onramp (client-side)
-    // NO-SWAP HONESTY (Fork-C / O3): ckUSDC offramp is Unavailable — the wallet shows NO cash-out.
+                                            // NO-SWAP HONESTY (Fork-C / O3): ckUSDC offramp is Unavailable — the wallet shows NO cash-out.
     assert_eq!(ckusdc["offramp"], "Unavailable");
 
     // MC8 U2 — ckUSDT (currency 3): a SECOND CkEthErc20 token proving the onramp is per-token.
@@ -1149,7 +1338,10 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(ckusdt["network"], "Ethereum");
     assert_eq!(ckusdt["display_decimals"], 6);
     assert_eq!(ckusdt["chain_id"], 1); // Ethereum mainnet
-    assert_eq!(ckusdt["token_contract"], "0xdAC17F958D2ee523a2206206994597C13D831ec7"); // real USDT
+    assert_eq!(
+        ckusdt["token_contract"],
+        "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+    ); // real USDT
     assert_eq!(ckusdt["onramp"], "Direct");
     assert_eq!(ckusdt["offramp"], "Unavailable"); // Fork-C — NO cash-out
 }
@@ -1173,8 +1365,14 @@ async fn ckerc20_onramp_returns_params_for_ckusdc() {
     // currency 2 (ckUSDC) → 200 with the verified mainnet onramp constants.
     let (status, body) = call(&state, get_req("/api/v1/onramp/ckerc20?currency=2")).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["helper_address"], "0x18901044688D3756C35Ed2b36D93e6a5B8e00E68");
-    assert_eq!(body["erc20_address"], "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
+    assert_eq!(
+        body["helper_address"],
+        "0x18901044688D3756C35Ed2b36D93e6a5B8e00E68"
+    );
+    assert_eq!(
+        body["erc20_address"],
+        "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+    );
     assert!(
         !body["facade_principal"].as_str().unwrap().is_empty(),
         "facade principal present: {body}"
@@ -1205,15 +1403,27 @@ async fn ckerc20_onramp_is_token_specific() {
     // ckUSDC (currency 2) → 200 with the USDC ERC-20 address (NO regression — same as the golden above).
     let (s_usdc, body_usdc) = call(&state, get_req("/api/v1/onramp/ckerc20?currency=2")).await;
     assert_eq!(s_usdc, StatusCode::OK, "{body_usdc}");
-    assert_eq!(body_usdc["helper_address"], "0x18901044688D3756C35Ed2b36D93e6a5B8e00E68");
-    assert_eq!(body_usdc["erc20_address"], "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
+    assert_eq!(
+        body_usdc["helper_address"],
+        "0x18901044688D3756C35Ed2b36D93e6a5B8e00E68"
+    );
+    assert_eq!(
+        body_usdc["erc20_address"],
+        "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+    );
 
     // ckUSDT (currency 3) → 200 with the USDT ERC-20 address — NOT the USDC address. This is the
     // token-specificity proof: a second ckERC20 reads ITS OWN `token_contract` from the catalog.
     let (s_usdt, body_usdt) = call(&state, get_req("/api/v1/onramp/ckerc20?currency=3")).await;
     assert_eq!(s_usdt, StatusCode::OK, "{body_usdt}");
-    assert_eq!(body_usdt["helper_address"], "0x18901044688D3756C35Ed2b36D93e6a5B8e00E68");
-    assert_eq!(body_usdt["erc20_address"], "0xdAC17F958D2ee523a2206206994597C13D831ec7");
+    assert_eq!(
+        body_usdt["helper_address"],
+        "0x18901044688D3756C35Ed2b36D93e6a5B8e00E68"
+    );
+    assert_eq!(
+        body_usdt["erc20_address"],
+        "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+    );
     assert_ne!(
         body_usdt["erc20_address"], body_usdc["erc20_address"],
         "ckUSDT must NOT inherit ckUSDC's ERC-20 address",
@@ -1260,10 +1470,15 @@ async fn ckerc20_onramp_fails_closed_without_token_contract() {
         offramp: dpay_relay::RampCapability::Unavailable,
     };
     let r = dpay_relay::ckerc20_onramp_from_descriptor(Some(&partial), "aaaaa-aa".to_string());
-    assert!(r.is_err(), "a CkEthErc20 with no token_contract must NOT resolve an onramp");
+    assert!(
+        r.is_err(),
+        "a CkEthErc20 with no token_contract must NOT resolve an onramp"
+    );
     match r {
         Err(dpay_relay::LedgerError::Transient(_)) => {} // 503 — the correct shape
-        Err(other) => panic!("expected Transient (503) for a token-less ckERC20, got Rejected: {other}"),
+        Err(other) => {
+            panic!("expected Transient (503) for a token-less ckERC20, got Rejected: {other}")
+        }
         Ok(_) => panic!("expected Transient (503) for a token-less ckERC20, got Ok"),
     }
     // Also: a non-CkEthErc20 descriptor (e.g. CkBtcUtxo) and a missing descriptor both fail closed.
@@ -1286,7 +1501,9 @@ async fn ckerc20_onramp_fails_closed_without_token_contract() {
         onramp: dpay_relay::RampCapability::Direct,
         offramp: dpay_relay::RampCapability::Direct,
     };
-    assert!(dpay_relay::ckerc20_onramp_from_descriptor(Some(&ckbtc), "aaaaa-aa".to_string()).is_err());
+    assert!(
+        dpay_relay::ckerc20_onramp_from_descriptor(Some(&ckbtc), "aaaaa-aa".to_string()).is_err()
+    );
     assert!(dpay_relay::ckerc20_onramp_from_descriptor(None, "aaaaa-aa".to_string()).is_err());
 }
 
@@ -1361,7 +1578,11 @@ fn withdraw_json(req: &WithdrawRequest) -> Request<Body> {
 /// path to credit through the real seam.
 async fn fund_ckbtc(state: &AppState, led: &FakeLedger, pk: [u8; 32], amount: u64) {
     led.register_deposit(pk, CKBTC, amount);
-    let _ = state.ledger.deposit_status(pk, CKBTC).await.expect("deposit_status credits");
+    let _ = state
+        .ledger
+        .deposit_status(pk, CKBTC)
+        .await
+        .expect("deposit_status credits");
     assert_eq!(led.balance_of(&pk, CKBTC), amount, "pre-fund credited");
 }
 
@@ -1374,7 +1595,14 @@ async fn withdraw_debits_ckbtc_from_subaccount() {
     const FUND: u64 = 100_000;
     fund_ckbtc(&state, &led, pubkey(&payer), FUND).await;
 
-    let req = withdraw_req(&payer, "bc1qdestination", MIN_WITHDRAW, [1u8; 16], FUTURE, CKBTC);
+    let req = withdraw_req(
+        &payer,
+        "bc1qdestination",
+        MIN_WITHDRAW,
+        [1u8; 16],
+        FUTURE,
+        CKBTC,
+    );
     let r = state.ledger.withdraw(req).await.expect("withdraw ok");
     assert_eq!(r.amount, U64String(MIN_WITHDRAW));
     assert_eq!(r.destination, "bc1qdestination");
@@ -1396,7 +1624,10 @@ async fn withdraw_route_returns_receipt_on_success() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["receipt"]["amount"], MIN_WITHDRAW.to_string().as_str());
     assert_eq!(body["receipt"]["destination"], "bc1qroute");
-    assert_eq!(led.balance_of(&pubkey(&payer), CKBTC), 100_000 - MIN_WITHDRAW);
+    assert_eq!(
+        led.balance_of(&pubkey(&payer), CKBTC),
+        100_000 - MIN_WITHDRAW
+    );
 }
 
 /// A replay with the SAME nonce is rejected (422) — no double-burn. Mirrors the canister.
@@ -1410,13 +1641,22 @@ async fn withdraw_double_withdraw_same_nonce_rejected() {
     let req = withdraw_req(&payer, "bc1qfirst", MIN_WITHDRAW, [3u8; 16], FUTURE, CKBTC);
     let (s1, _b1) = call(&state, withdraw_json(&req)).await;
     assert_eq!(s1, StatusCode::OK);
-    assert_eq!(led.balance_of(&pubkey(&payer), CKBTC), 200_000 - MIN_WITHDRAW);
+    assert_eq!(
+        led.balance_of(&pubkey(&payer), CKBTC),
+        200_000 - MIN_WITHDRAW
+    );
 
     // Same nonce again → 422, no second debit.
     let (s2, b2) = call(&state, withdraw_json(&req)).await;
     assert_eq!(s2, StatusCode::UNPROCESSABLE_ENTITY, "{b2}");
-    assert!(b2["error"].as_str().unwrap().contains("nonce"), "error={b2}");
-    assert_eq!(led.balance_of(&pubkey(&payer), CKBTC), 200_000 - MIN_WITHDRAW);
+    assert!(
+        b2["error"].as_str().unwrap().contains("nonce"),
+        "error={b2}"
+    );
+    assert_eq!(
+        led.balance_of(&pubkey(&payer), CKBTC),
+        200_000 - MIN_WITHDRAW
+    );
 }
 
 /// A wrong signature is rejected (422) and moves no funds.
@@ -1449,8 +1689,15 @@ async fn withdraw_wrong_sig_rejected_no_funds_move() {
     };
     let (status, body) = call(&state, withdraw_json(&req)).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
-    assert!(body["error"].as_str().unwrap().contains("signature"), "error={body}");
-    assert_eq!(led.balance_of(&pubkey(&payer), CKBTC), 100_000, "no debit on a bad sig");
+    assert!(
+        body["error"].as_str().unwrap().contains("signature"),
+        "error={body}"
+    );
+    assert_eq!(
+        led.balance_of(&pubkey(&payer), CKBTC),
+        100_000,
+        "no debit on a bad sig"
+    );
 }
 
 /// A below-min withdrawal is rejected (422) and moves no funds. Mirrors the canister's local floor.
@@ -1461,11 +1708,28 @@ async fn withdraw_below_min_rejected() {
     let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
     fund_ckbtc(&state, &led, pubkey(&payer), 100_000).await;
 
-    let req = withdraw_req(&payer, "bc1qtoosmall", MIN_WITHDRAW - 1, [5u8; 16], FUTURE, CKBTC);
+    let req = withdraw_req(
+        &payer,
+        "bc1qtoosmall",
+        MIN_WITHDRAW - 1,
+        [5u8; 16],
+        FUTURE,
+        CKBTC,
+    );
     let (status, body) = call(&state, withdraw_json(&req)).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
-    assert!(body["error"].as_str().unwrap().contains("retrieve_btc_min_amount"), "error={body}");
-    assert_eq!(led.balance_of(&pubkey(&payer), CKBTC), 100_000, "no debit on a below-min withdraw");
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap()
+            .contains("retrieve_btc_min_amount"),
+        "error={body}"
+    );
+    assert_eq!(
+        led.balance_of(&pubkey(&payer), CKBTC),
+        100_000,
+        "no debit on a below-min withdraw"
+    );
 }
 
 /// Insufficient funds is rejected (422) and the nonce is RELEASED (a later deposit + same-auth retry
@@ -1477,21 +1741,49 @@ async fn withdraw_insufficient_funds_releases_nonce_for_retry() {
     let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
     fund_ckbtc(&state, &led, pubkey(&payer), 30_000).await; // < MIN_WITHDRAW (50_000)
 
-    let req = withdraw_req(&payer, "bc1qnotenough", MIN_WITHDRAW, [6u8; 16], FUTURE, CKBTC);
+    let req = withdraw_req(
+        &payer,
+        "bc1qnotenough",
+        MIN_WITHDRAW,
+        [6u8; 16],
+        FUTURE,
+        CKBTC,
+    );
     let (status, body) = call(&state, withdraw_json(&req)).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
-    assert!(body["error"].as_str().unwrap().contains("InsufficientFunds"), "error={body}");
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap()
+            .contains("InsufficientFunds"),
+        "error={body}"
+    );
     assert_eq!(led.balance_of(&pubkey(&payer), CKBTC), 30_000, "no debit");
 
     // Now top up to 100_000 and retry the SAME nonce — it must succeed (nonce was released, not
     // burned). register_deposit + deposit_status credit through the real seam.
     led.register_deposit(pubkey(&payer), CKBTC, 70_000);
-    let _ = state.ledger.deposit_status(pubkey(&payer), CKBTC).await.expect("deposit_status credits");
-    assert_eq!(led.balance_of(&pubkey(&payer), CKBTC), 100_000, "topped up to 100_000");
+    let _ = state
+        .ledger
+        .deposit_status(pubkey(&payer), CKBTC)
+        .await
+        .expect("deposit_status credits");
+    assert_eq!(
+        led.balance_of(&pubkey(&payer), CKBTC),
+        100_000,
+        "topped up to 100_000"
+    );
 
     let (status2, body2) = call(&state, withdraw_json(&req)).await;
-    assert_eq!(status2, StatusCode::OK, "same-nonce retry must succeed after funding: {body2}");
-    assert_eq!(led.balance_of(&pubkey(&payer), CKBTC), 100_000 - MIN_WITHDRAW);
+    assert_eq!(
+        status2,
+        StatusCode::OK,
+        "same-nonce retry must succeed after funding: {body2}"
+    );
+    assert_eq!(
+        led.balance_of(&pubkey(&payer), CKBTC),
+        100_000 - MIN_WITHDRAW
+    );
 }
 
 // --- W3 audit: FakeLedger.pay must mirror the canister's hard rejects -------------------------
@@ -1511,7 +1803,10 @@ async fn w3_fakeledger_rejects_self_transfer_like_canister() {
     let sa = signed(&payer, pubkey(&payer), 100, [7u8; 16], FUTURE);
     let (status, body) = call(&state, pay_json(&sa.encode())).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
-    assert!(body["error"].as_str().unwrap().contains("self transfer"), "error={body}");
+    assert!(
+        body["error"].as_str().unwrap().contains("self transfer"),
+        "error={body}"
+    );
     // Nothing moved + the nonce was NOT burned (no state change).
     assert_eq!(led.balance_of(&pubkey(&payer), DEMO_USD), BAL_A);
 }
@@ -1526,7 +1821,10 @@ async fn w3_fakeledger_rejects_pay_to_mint_sentinel_like_canister() {
     let sa = signed(&payer, [0xFF; 32], 100, [8u8; 16], FUTURE);
     let (status, body) = call(&state, pay_json(&sa.encode())).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
-    assert!(body["error"].as_str().unwrap().contains("mint sentinel"), "error={body}");
+    assert!(
+        body["error"].as_str().unwrap().contains("mint sentinel"),
+        "error={body}"
+    );
     assert_eq!(led.balance_of(&pubkey(&payer), DEMO_USD), BAL_A);
     // The sentinel subaccount was NOT credited (the canister would have rejected before any move).
     assert_eq!(led.balance_of(&[0xFF; 32], DEMO_USD), 0);
@@ -1565,9 +1863,20 @@ async fn u3_receipt_route_recovers_from_ledger_after_restart() {
     // cache — else this would be a 404 "not settled" false-negative.
     let state2 = AppState::new(led_arc.clone());
     let (s2, b2) = call(&state2, get_receipt(nonce)).await;
-    assert_eq!(s2, StatusCode::OK, "durable receipt must be recoverable after restart: {b2}");
-    assert_eq!(b2["receipt"], b1["receipt"], "recovered receipt identical to the settle receipt");
-    assert_eq!(b2["replayed"], serde_json::json!(true), "a recovery is always a replay");
+    assert_eq!(
+        s2,
+        StatusCode::OK,
+        "durable receipt must be recoverable after restart: {b2}"
+    );
+    assert_eq!(
+        b2["receipt"], b1["receipt"],
+        "recovered receipt identical to the settle receipt"
+    );
+    assert_eq!(
+        b2["replayed"],
+        serde_json::json!(true),
+        "a recovery is always a replay"
+    );
 }
 
 /// A test-only ledger that simulates "canister settled but the reply was lost" — `pay` settles on
@@ -1633,9 +1942,7 @@ impl Ledger for SettlesButLosesReply {
     async fn deposit_info(&self, c: Currency) -> Result<DepositInfo, LedgerError> {
         self.inner.deposit_info(c).await
     }
-    async fn currencies(
-        &self,
-    ) -> Result<Vec<dpay_relay::CurrencyDescriptor>, LedgerError> {
+    async fn currencies(&self) -> Result<Vec<dpay_relay::CurrencyDescriptor>, LedgerError> {
         self.inner.currencies().await
     }
     async fn ckerc20_onramp_params(
@@ -1671,10 +1978,21 @@ async fn u3_pay_transient_exhausted_recovers_settled_receipt() {
 
     // The canister settled (the inner ledger committed); the reply was lost. The relay recovers the
     // receipt via `Ledger::receipt(nonce)` instead of misreporting a 503.
-    assert_eq!(status, StatusCode::OK, "settled-but-lost-reply must recover, not 503: {body}");
-    assert_eq!(body["receipt"]["amount"], "300", "recovered the settled receipt");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "settled-but-lost-reply must recover, not 503: {body}"
+    );
+    assert_eq!(
+        body["receipt"]["amount"], "300",
+        "recovered the settled receipt"
+    );
     assert_eq!(body["receipt"]["nonce"], hex::encode(nonce));
-    assert_eq!(body["replayed"], serde_json::json!(true), "a recovery is always a replay");
+    assert_eq!(
+        body["replayed"],
+        serde_json::json!(true),
+        "a recovery is always a replay"
+    );
     // The ledger actually settled (the inner committed despite the lost reply).
     assert_eq!(
         inner.balance_of(&pubkey(&merchant), DEMO_USD),
