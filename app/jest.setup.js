@@ -1,8 +1,12 @@
 // Jest setup: mock the native-backed modules that aren't available under node/jsdom so <App/>
 // renders in the test harness. AsyncStorage ships an official mock; vision-camera is stubbed via
 // the root __mocks__ directory.
+//
+// async-storage v3 moved the mock: it now lives at the package subpath `.../jest` (was
+// `.../jest/async-storage-mock`) and exports a DEFAULT instance — `require(...).default` — rather
+// than the module itself being the mock.
 jest.mock('@react-native-async-storage/async-storage', () =>
-  require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
+  require('@react-native-async-storage/async-storage/jest').default,
 );
 
 // MC8 U6 capstone — WalletConnect is now ENABLED in production (real projectId baked in

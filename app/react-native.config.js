@@ -1,18 +1,12 @@
-// react-native-get-random-values declares `codegenConfig` in its package.json, which suppresses
-// old-style android autolinking (platforms.android comes back null from `react-native config`).
-// With newArchEnabled=false the TurboModule runtime isn't active either, so the module is entirely
-// absent from the APK → crypto.getRandomValues throws at call-time. Force-include the android
-// sourceDir so the gradle plugin links it as a regular native module.
-module.exports = {
-  dependencies: {
-    'react-native-get-random-values': {
-      platforms: {
-        android: {
-          sourceDir: '../node_modules/react-native-get-random-values/android',
-          packageImportPath: 'import org.linusu.RNGetRandomValuesPackage;',
-          packageInstance: 'new RNGetRandomValuesPackage()',
-        },
-      },
-    },
-  },
-};
+// Under the New Architecture (RN 0.82+, `newArchEnabled=true`), `react-native-get-random-values`
+// is auto-linked via its `codegenConfig` (TurboModule registration through BaseReactPackage), so
+// no manual project-config override is needed here.
+//
+// History: under the LEGACY architecture (RN 0.75 + `newArchEnabled=false`), the module's
+// `codegenConfig` suppressed its old-style android autolinking (platforms.android came back null
+// from `react-native config`), and the TurboModule runtime was not active either, so the module
+// was entirely absent from the APK and `crypto.getRandomValues` threw at call-time. The previous
+// override force-included the android sourceDir. That override is now HARMFUL under New Arch
+// (it would bypass codegen and cause a double-registration / missing-TurboModule error), so it
+// has been removed.
+module.exports = {};

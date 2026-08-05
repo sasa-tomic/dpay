@@ -25,7 +25,11 @@ class MainApplication : Application(), ReactApplication {
 
         override fun getUseDeveloperSupport(): Boolean = BuildConfig.DEBUG
 
-        override val isNewArchEnabled: Boolean = BuildConfig.IS_NEW_ARCHITECTURE_ENABLED
+        // RN 0.82+ removed the legacy architecture; overriding isNewArchEnabled to false throws at
+        // startup. The base DefaultReactNativeHost resolves it from BuildConfig.IS_NEW_ARCHITECTURE_ENABLED,
+        // which is driven by the `newArchEnabled=true` gradle property. The hand-written DpayCore /
+        // DpayNfc NativeModules are wrapped by the New Arch interop layer (BridgelessNativeModuleProxy),
+        // so they keep working as legacy modules under the bridgeless runtime with no codegen changes.
         override val isHermesEnabled: Boolean = BuildConfig.IS_HERMES_ENABLED
       }
 
@@ -35,9 +39,7 @@ class MainApplication : Application(), ReactApplication {
   override fun onCreate() {
     super.onCreate()
     SoLoader.init(this, false)
-    if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
-      // If you opted-in for the New Architecture, we load the native entry point for this app.
-      load()
-    }
+    // The New Architecture is always enabled in RN 0.82+; load() the native entry point unconditionally.
+    load()
   }
 }

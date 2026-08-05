@@ -1,9 +1,11 @@
 module.exports = {
-  preset: 'react-native',
+  preset: '@react-native/jest-preset',
   setupFiles: ['<rootDir>/jest.setup.js'],
   // react-native-qrcode-svg ships ESM (`export default`); transform it so jest can load it.
+  // async-storage v3 also ships its jest mock as ESM under lib/module — list it here so babel-jest
+  // transforms the `export` syntax before jest's VM tries to evaluate it.
   transformIgnorePatterns: [
-    'node_modules/(?!(react-native|@react-native|react-native-qrcode-svg|react-native-vision-camera)/)',
+    'node_modules/(?!(react-native|@react-native|react-native-qrcode-svg|react-native-vision-camera|@react-native-async-storage/async-storage)/)',
   ],
   // MC8 U6.2 — WalletConnect isolation. `wallet.ts`'s `resolveOnrampProvider()` is web-first and
   // only dynamic-imports `./walletconnect` on native with a non-empty projectId, so jest never

@@ -10,7 +10,7 @@
 // `PaymentRequest.amount`, `WithdrawAuth.amount`, `ReceiptClaim.amount`). The OLD app path rounded
 // them through JS `number` / Kotlin `Double` — lossy above 2^53 (e.g. `0.009007199254740993 * 1e18`
 // ≠ 9007199254740993 via `Number`). This module retires that loss surface: raw u64 values are carried
-// as DECIMAL-DIGIT STRINGS (never `number`), and ALL math uses JS `BigInt` (`10n ** BigInt(decimals)`).
+// as DECIMAL-DIGIT STRINGS (never `number`), and ALL math uses JS `BigInt` (see `pow10` below).
 // There is no `parseFloat` / `Number()` on a raw amount anywhere in this module.
 //
 // Acceptance/rejection policy mirrors the Rust parser EXACTLY (same precedence, same codes):
@@ -27,6 +27,21 @@ export const MAX_DECIMALS = 18;
 
 /** u64::MAX as a BigInt, for the overflow bound. */
 const U64_MAX: bigint = (1n << 64n) - 1n;
+
+/**
+ * 10^n as a BigInt. We use a multiply loop (not the `**` operator) because Babel's
+ * `@babel/plugin-transform-exponentiation-operator` (pulled in by `@babel/preset-env` under the
+ * RN 0.86 jest-preset) rewrites `a ** b` to `Math.pow(a, b)` for older-engine compatibility, and
+ * `Math.pow` requires `number` operands — it throws `TypeError: Cannot convert a BigInt value to a
+ * number` for BigInt operands. The runtime engines we ship (Hermes, modern V8) all support BigInt
+ * `**` natively, but the transpiler can't see operand types, so we sidestep the operator entirely.
+ * Mirrors `10n ** BigInt(n)` for `n in 0..=MAX_DECIMALS` exactly.
+ */
+function pow10(exp: number): bigint {
+  let r = 1n;
+  for (let i = 0; i < exp; i++) r *= 10n;
+  return r;
+}
 
 /**
  * A typed parse result. `ok: true` carries the raw u64 as a decimal-digit STRING (never a `number` —
@@ -75,13 +90,13 @@ export function parseDecimalToUnits(human: string, decimals: number): AmountResu
   if (fracStr.length > d) {
     return { ok: false, err: 'too_many_decimals' };
   }
-  // BigInt math (exact). `10n ** BigInt(d)` is well-defined for d ≤ 18 (mirrors Rust's u128 scale).
-  const scale = 10n ** BigInt(d);
+  // BigInt math (exact). `pow10(d)` is well-defined for d ≤ 18 (mirrors Rust's u128 scale).
+  const scale = pow10(d);
   const whole = wholeStr.length === 0 ? 0n : BigInt(wholeStr);
   let frac = 0n;
   if (fracStr.length > 0) {
     // Pad the fractional digits to `decimals` places (left-shift by the missing trailing zeros).
-    frac = BigInt(fracStr) * (10n ** BigInt(d - fracStr.length));
+    frac = BigInt(fracStr) * pow10(d - fracStr.length);
   }
   const total = whole * scale + frac;
   if (total > U64_MAX) {
@@ -114,7 +129,7 @@ export function formatUnitsToDecimal(raw: string, decimals: number): string {
     throw new TypeError(`formatUnitsToDecimal: decimals must be a non-negative integer, got ${JSON.stringify(decimals)}`);
   }
   const d = Math.min(decimals, MAX_DECIMALS);
-  const scale = 10n ** BigInt(d);
+  const scale = pow10(d);
   const val = BigInt(raw);
   const whole = val / scale;
   const frac = val % scale;

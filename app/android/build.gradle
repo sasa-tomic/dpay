@@ -8,7 +8,7 @@ buildscript {
         compileSdkVersion = 36
         targetSdkVersion = 36
         ndkVersion = "27.3.13750724"          // the NDK actually installed in this environment
-        kotlinVersion = "1.9.24"
+        kotlinVersion = "2.1.20"               // matches the Kotlin pinned by RN 0.86's gradle-plugin
     }
     repositories {
         google()

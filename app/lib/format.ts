@@ -104,7 +104,10 @@ export function trimName32(hexStr: string): string {
 export function fmtAsset(raw: string, decimals: number, unit: string): string {
   const n = BigInt(raw);
   if (n === 0n) return `0 ${unit}`; // a zero balance needs no precision padding ("0 BTC", not "0.00000000 BTC")
-  const scale = 10n ** BigInt(decimals);
+  // `pow10` (multiplication loop) instead of `10n ** BigInt(d)` — see amount.ts; Babel's
+  // exponentiation-operator transform rewrites `**` to `Math.pow` which throws on BigInt operands.
+  let scale = 1n;
+  for (let i = 0; i < decimals; i++) scale *= 10n;
   return `${(n / scale).toString()}.${(n % scale).toString().padStart(decimals, '0')} ${unit}`;
 }
 // Parse a user-entered BTC amount (decimal string) into integer satoshis as a decimal-digit STRING.
