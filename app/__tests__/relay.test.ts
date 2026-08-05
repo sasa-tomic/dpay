@@ -87,3 +87,60 @@ describe('relay fetch default timeout (PR8 safety net)', () => {
     await expect(p).rejects.toThrow('aborted');
   });
 });
+
+/**
+ * `fetchWithTimeout` — the single source of truth for the inline `AbortController + setTimeout +
+ * fetch + clearTimeout` incantation previously duplicated across Wallet.tsx + the component sheets
+ * + catalog.ts. A caller-configurable timeout (default = the 10s relay backstop), composing an
+ * optional caller signal so a caller abort still wins (first abort wins), and clearing the timer in
+ * `finally` so no lingering no-op abort fires after the fetch settles. These tests mirror the
+ * safety-net tests above: mock `globalThis.fetch`, fake timers, the mock rejects on signal abort.
+ */
+describe('fetchWithTimeout helper', () => {
+  test('omits a signal → aborts at the given timeoutMs (caller-configurable)', async () => {
+    jest.useFakeTimers();
+    const getCaptured = installNeverResolvingFetch();
+    const {fetchWithTimeout} = require('../services/relay');
+
+    const p = fetchWithTimeout('http://relay.example', undefined, 3000);
+    const signal = getCaptured()?.signal;
+    expect(signal).toBeDefined();
+    expect(signal!.aborted).toBe(false);
+
+    jest.advanceTimersByTime(2999);
+    expect(signal!.aborted).toBe(false);
+
+    jest.advanceTimersByTime(1); // cross 3000ms → internal controller aborts
+    expect(signal!.aborted).toBe(true);
+    await expect(p).rejects.toThrow('aborted');
+  });
+
+  test('a caller-supplied signal that fires FIRST wins (composed, shorter timeout preserved)', async () => {
+    jest.useFakeTimers();
+    const getCaptured = installNeverResolvingFetch();
+    const {fetchWithTimeout} = require('../services/relay');
+
+    const callerCtrl = new AbortController();
+    const p = fetchWithTimeout('http://relay.example', {signal: callerCtrl.signal}, 3000);
+    const signal = getCaptured()?.signal;
+    expect(signal!.aborted).toBe(false);
+
+    jest.advanceTimersByTime(500);
+    callerCtrl.abort(); // caller aborts well before the 3000ms timeout
+    expect(signal!.aborted).toBe(true); // forwarded into the internal controller
+    await expect(p).rejects.toThrow('aborted');
+  });
+
+  test('success before timeout → returns the Response and clears the timer (no lingering abort)', async () => {
+    jest.useFakeTimers();
+    const fakeResponse = {__sentinel: true} as unknown as Response;
+    (globalThis as unknown as {fetch: typeof fetch}).fetch = jest.fn(() => Promise.resolve(fakeResponse));
+    const {fetchWithTimeout} = require('../services/relay');
+
+    const before = jest.getTimerCount();
+    const r = await fetchWithTimeout('http://relay.example', undefined, 5000);
+    expect(r).toBe(fakeResponse);
+    // The internal timeout timer was cleared in `finally` — advancing past the timeout fires nothing.
+    expect(jest.getTimerCount()).toBe(before);
+  });
+});

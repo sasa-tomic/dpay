@@ -17,31 +17,67 @@ export type DepositRefresh = {minted_total: string; minted: MintedUtxo[]; pendin
 // on every RN/Hermes runtime the app targets, so the manual compose is the portable choice.
 const DEFAULT_RELAY_TIMEOUT_MS = 10000;
 
-/** Compose an optional caller signal with the default timeout. First abort wins; never throws. */
-function withDefaultTimeout(callerSignal?: AbortSignal): AbortSignal {
+/** Compose an optional caller signal with a timeout. First abort wins; never throws. Returns the
+ *  composed signal AND a `cancel()` that clears the armed timer — so a fetch wrapper can drop the
+ *  no-op abort that would otherwise fire at `timeoutMs` after a normal settle. The cancel is also
+ *  invoked on an early caller-abort (the listener + the pre-aborted branch) so the timer never
+ *  outlives the compose. Composed manually with `AbortController` + `setTimeout` instead of
+ *  `AbortSignal.any`/`AbortSignal.timeout` — those are ES2024/ES2022 statics not present in this
+ *  project's TS `lib` (tops out at es2022) and not guaranteed on every RN/Hermes runtime, so the
+ *  manual compose is the portable choice. */
+function composeTimeout(callerSignal?: AbortSignal, timeoutMs = DEFAULT_RELAY_TIMEOUT_MS): {signal: AbortSignal; cancel: () => void} {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), DEFAULT_RELAY_TIMEOUT_MS);
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  const cancel = () => clearTimeout(timer);
   if (callerSignal) {
     if (callerSignal.aborted) {
       // Caller already aborted before we started — propagate immediately and don't arm the timer.
-      clearTimeout(timer);
+      cancel();
       ctrl.abort();
     } else {
-      // Forward a late caller abort to our controller (and cancel the timer). `{once: true}` so the
+      // Forward a LATE caller abort to our controller (and cancel the timer). `{once: true}` so the
       // listener removes itself on fire; if the fetch settles normally first the listener stays
       // attached to the caller's single-use signal, which is GC'd with it (harmless — a controller
       // aborts at most once).
       callerSignal.addEventListener(
         'abort',
         () => {
-          clearTimeout(timer);
+          cancel();
           ctrl.abort();
         },
         {once: true},
       );
     }
   }
-  return ctrl.signal;
+  return {signal: ctrl.signal, cancel};
+}
+
+/** Compose an optional caller signal with the default timeout (signal-only view). The existing
+ *  exported relay clients below use this as the 10s backstop; they pass the caller's signal and rely
+ *  on the default. The timer fires as a no-op-at-timeout on a normal settle (harmless — the fetch is
+ *  already done), which is unchanged from before `composeTimeout` was split out. */
+function withDefaultTimeout(callerSignal?: AbortSignal, timeoutMs = DEFAULT_RELAY_TIMEOUT_MS): AbortSignal {
+  return composeTimeout(callerSignal, timeoutMs).signal;
+}
+
+// `fetch` + a caller-configurable timeout — the single source of truth for the inline
+// `AbortController + setTimeout + fetch + clearTimeout` incantation previously duplicated across
+// Wallet.tsx + the component sheets + catalog.ts. Composes an optional caller signal (first abort
+// wins) and CLEARS the timer in `finally` so no lingering no-op abort fires after the fetch settles
+// (matches the inline pattern's semantics byte-for-byte). `{...init, signal}` overrides any caller
+// `init.signal` with the composed one (fetch rejects a double assignment; the caller's signal is
+// already forwarded into the composed controller). Default timeout is the 10s relay backstop;
+// callers pass a shorter named timeout (BALANCE_TIMEOUT_MS / FAUCET_TIMEOUT_MS etc.) to bound fast
+// polls. NOTE: the timer covers the fetch (headers) settle; the caller's subsequent body read
+// (`r.json()`) happens after the timer is cleared — bodies are tiny JSON across every call site, so
+// this is equivalent in practice to the inline pattern.
+export async function fetchWithTimeout(url: string, init?: RequestInit, timeoutMs = DEFAULT_RELAY_TIMEOUT_MS): Promise<Response> {
+  const {signal, cancel} = composeTimeout(init?.signal, timeoutMs);
+  try {
+    return await fetch(url, {...init, signal});
+  } finally {
+    cancel();
+  }
 }
 
 // PR26 — read a fetch Response's body as JSON, returning `{}` on any parse failure (a malformed
