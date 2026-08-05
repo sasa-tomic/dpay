@@ -55,10 +55,10 @@ export async function run() {
     // 3. The request QR renders (the `request-qr` container is the gate).
     await driver.findByTestID('request-qr', { timeoutMs: 5_000 });
 
-    // L4: the offline-payer affordance uses clear merchant-facing wording (not the ambiguous
-    // "Payer offline? Scan their QR").
+    // L4: the offline-payer affordance uses clear merchant-facing wording (a concrete one-line
+    // action, not the ambiguous "Payer offline? Scan their QR" / insider-jargon "settle").
     const reqBody = await driver.bodyText();
-    assert(/payer paid offline/i.test(reqBody) && /scan to settle/i.test(reqBody),
+    assert(/paid without scanning/i.test(reqBody) && /confirm with their phone/i.test(reqBody),
       `request screen should show the clear offline-payer affordance (L4). body excerpt:\n${reqBody.slice(0, 400)}`);
     console.log('[06-request-qr] ✓ offline-payer affordance wording is clear (L4)');
 
