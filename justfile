@@ -93,12 +93,16 @@ e2e-watch-filter filter:
 e2e-live:
     cd e2e && DPAY_E2E_MODE=live DPAY_E2E_BASE=https://dpay.kalaj.org node run.mjs
 
-# LIVE testnet-wiring flow (OPEN_ISSUES #1/#2/#8) — drives the STAGING relay at DPAY_E2E_BASE against
-# a deployed staging facade (scripts/dfx-deploy-ic-staging.sh). Proves the FREE testnet chain-key path:
+# LIVE testnet-wiring flow (OPEN_ISSUES #1/#2/#8) — drives a relay at DPAY_E2E_BASE carrying the
+# testnet currencies against REAL IC testnet chain-key canisters. Proves the FREE testnet path:
 # 3 testnet asset cards, real Testnet4 deposit address, relay deposit/onramp endpoints with the real
 # testnet minter config + Sepolia ckERC20 helper. OPT-IN only — NEVER part of verify/check (hits
-# mainnet + needs a staging relay). ~30s, no real funds (IC testnet tokens are free).
-# Requires: DPAY_E2E_BASE=<staging relay URL> + a staging relay pointed at the staging facade.
+# mainnet + needs a relay). No real funds (IC testnet tokens are free).
+# PROVEN route (prod ssqti, testnet currencies registered directly): run a LOCAL relay from HEAD —
+#   DPAY_LEDGER=ic DPAY_CANISTER_ID=ssqti-wiaaa-aaaab-qhdia-cai DPAY_IC_URL=https://icp-api.io \
+#   DPAY_RELAY_ADDR=127.0.0.1:8788 cargo run -p dpay-relay --features agent
+# — then: DPAY_E2E_BASE=http://127.0.0.1:8788 just e2e-live-testnet
+# (Alt: deploy scripts/dfx-deploy-ic-staging.sh for an isolated staging facade.)
 e2e-live-testnet:
     cd e2e && npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps
     node ../e2e-live/run.mjs
