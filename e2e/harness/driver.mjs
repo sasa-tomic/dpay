@@ -11,6 +11,7 @@ import { writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { resolveExecutablePath } from './browser.mjs';
+import { _testCtx } from './lib.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SHOTS_DIR = join(__dirname, '..', 'shots');
@@ -422,6 +423,14 @@ export class Driver {
       // Ignore request aborts caused by our own context teardown, but retain diagnostics observed
       // before teardown and assert them only after resources have been cleaned up.
       this.closing = true;
+      if (this.unexpectedDiagnostics.size > 0) {
+        try {
+          const dir = await this.dumpDiagnostics(`${this._closeLabel()}-diagnostics`, null);
+          if (dir) console.error(`[driver] unexpected-diagnostics snapshot dumped to ${dir}`);
+        } catch (e) {
+          console.error(`[driver] diagnostics snapshot failed: ${e instanceof Error ? e.message : e}`);
+        }
+      }
       try { await this.context.close(); } catch (e) { failures.push(e); }
       if (this.ownsBrowser) {
         try { await this.browser.close(); } catch (e) { failures.push(e); }
@@ -430,6 +439,18 @@ export class Driver {
     try { this.assertNoUnexpectedDiagnostics(); } catch (e) { failures.push(e); }
     if (failures.length === 1) throw failures[0];
     if (failures.length > 1) throw new AggregateError(failures, '[driver] teardown failed');
+  }
+
+  /** Best-effort per-flow label for the close-time diagnostics dump. Resolves the active test file
+   *  from the harness AsyncLocalStorage (lib.mjs exports `_testCtx`); falls back to 'flow' when no
+   *  store is active (standalone runs). The live-binding resolves at runtime, so the module-cycle
+   *  driver.mjs ↔ lib.mjs is safe — neither module reads the binding at top-level. */
+  _closeLabel() {
+    try {
+      const store = _testCtx?.getStore?.();
+      if (store) return String(store).replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 64);
+    } catch {}
+    return 'flow';
   }
 
   /**
