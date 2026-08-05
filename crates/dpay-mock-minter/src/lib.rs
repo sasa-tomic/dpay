@@ -372,6 +372,150 @@ fn get_deposit_fee() -> u64 {
     0
 }
 
+// --- ckETH-minter withdraw surface (native ckETH → ETH out) -----------------------------------
+// Mirror types + the two methods the REAL ckETH minter exposes for native-ETH withdrawal, verified
+// against `dfx canister metadata sv3dd-oaaaa-aaaar-qacoa-cai candid:service --network ic` (the .did
+// is cached at /tmp/opencode/cketh-minter.did):
+//   `eip_1559_transaction_price : (opt Eip1559TransactionPriceArg) -> (Eip1559TransactionPrice) query`
+//   `withdraw_eth : (WithdrawalArg) -> (variant { Ok : RetrieveEthRequest; Err : WithdrawalError })`
+// Field/variant labels mirror the real minter exactly so a facade that diverges is caught by the
+// PocketIC withdraw_eth test. The mock reuses the SAME ledger it was init'd with (the test points it
+// at the ckETH ledger), so it serves both the BTC and ETH withdraw surfaces depending on the ledger.
+
+/// `WithdrawalArg` — the EXACT argument record the REAL ckETH minter's `withdraw_eth` takes:
+///   `record { recipient : text; amount : nat; from_subaccount : opt blob }`.
+#[derive(CandidType, Deserialize)]
+struct WithdrawalArg {
+    recipient: String,
+    amount: Nat,
+    from_subaccount: Option<Vec<u8>>,
+}
+
+/// `RetrieveEthRequest` — the real minter's success record: `record { block_index : nat }` (the burn
+/// transaction index on the ckETH ledger).
+#[derive(CandidType, Deserialize)]
+struct RetrieveEthRequest {
+    block_index: Nat,
+}
+
+/// `WithdrawalError` — the real ckETH minter's error variant for `withdraw_eth`. Variant + field
+/// labels mirror the real minter's candid exactly so the facade's decode is wire-compatible.
+#[derive(CandidType, Deserialize, Debug)]
+enum WithdrawalError {
+    AmountTooLow { min_withdrawal_amount: Nat },
+    InsufficientFunds { balance: Nat },
+    InsufficientAllowance { allowance: Nat },
+    RecipientAddressBlocked { address: String },
+    TemporarilyUnavailable(String),
+}
+
+/// `Eip1559TransactionPriceArg` — when `Some`, the real minter looks up the price for a ckERC20
+/// withdrawal; `None` (passed by the facade for ETH) means native-ETH withdrawal.
+#[derive(CandidType, Deserialize)]
+struct Eip1559TransactionPriceArg {
+    ckerc20_ledger_id: Principal,
+}
+
+/// `Eip1559TransactionPrice` — the real minter's gas-fee estimate record. `max_transaction_fee` is
+/// the precomputed Wei cap the facade approves on top of `amount`.
+#[derive(CandidType, Deserialize)]
+struct Eip1559TransactionPrice {
+    gas_limit: Nat,
+    max_fee_per_gas: Nat,
+    max_priority_fee_per_gas: Nat,
+    max_transaction_fee: Nat,
+    timestamp: Option<u64>,
+}
+
+/// The minimal ckETH withdrawal amount this mock honors, in Wei. Mirrors the real ckETH minter's
+/// `minimum_withdrawal_amount` (an `InitArg` field on mainnet) so the mock's `AmountTooLow` behavior
+/// matches mainnet exactly. Small (1_000 Wei) so the wiring proof stays readable; the facade relies
+/// on the minter to enforce the ETH floor (no local Wei constant that could drift).
+const MIN_WITHDRAWAL_ETH_AMOUNT: u64 = 1_000;
+
+/// Minter `eip_1559_transaction_price(opt Eip1559TransactionPriceArg) -> Eip1559TransactionPrice`
+/// (query). Returns a fixed small fee: 21_000 gas * 10 gwei = 210_000_000_000_000 Wei (≈ 0.00021
+/// ETH). The real minter queries live mainnet gas; the mock returns a constant — enough to prove the
+/// facade's `approve(amount + max_transaction_fee)` wiring. `arg` is ignored (the facade passes
+/// `null` for ETH).
+#[query]
+fn eip_1559_transaction_price(_arg: Option<Eip1559TransactionPriceArg>) -> Eip1559TransactionPrice {
+    Eip1559TransactionPrice {
+        gas_limit: Nat::from(21_000u64),
+        max_fee_per_gas: Nat::from(10_000_000_000u64),
+        max_priority_fee_per_gas: Nat::from(1_000_000_000u64),
+        max_transaction_fee: Nat::from(21_000u64 * 10_000_000_000u64),
+        timestamp: None,
+    }
+}
+
+/// Minter `withdraw_eth(WithdrawalArg) -> Result<RetrieveEthRequest, WithdrawalError>` — the
+/// value-creating call that burns ckETH and (on mainnet) sends native ETH to `recipient`. Mirrors the
+/// mock's `retrieve_btc_with_approval` exactly: validate recipient + min, then `icrc2_transfer_from`
+/// of `amount` from the caller's subaccount. The mock IGNORES the gas fee for the wiring proof — it
+/// consumes only `amount` (the fee approval lands as leftover allowance, which is correct: ICRC-2
+/// allowance is a running balance). Settlement mechanics identical to `retrieve_btc_with_approval`
+/// (the mock is the ledger's minting-account owner, so a transfer to its default account burns).
+#[update]
+async fn withdraw_eth(arg: WithdrawalArg) -> Result<RetrieveEthRequest, WithdrawalError> {
+    if arg.recipient.trim().is_empty() {
+        return Err(WithdrawalError::TemporarilyUnavailable("recipient is empty".to_string()));
+    }
+    let min = Nat::from(MIN_WITHDRAWAL_ETH_AMOUNT);
+    if arg.amount < min {
+        return Err(WithdrawalError::AmountTooLow { min_withdrawal_amount: min });
+    }
+    let sub_vec = arg.from_subaccount.unwrap_or_default();
+    let sub_arr: [u8; 32] = sub_vec.as_slice().try_into().map_err(|_| {
+        WithdrawalError::TemporarilyUnavailable(
+            "from_subaccount is not a valid 32-byte ICRC subaccount".to_string(),
+        )
+    })?;
+    let caller = msg_caller();
+    let ledger = LEDGER.with(|l| *l.borrow());
+    let self_id = canister_self();
+    let tf_arg = TransferFromArgs {
+        spender_subaccount: None,
+        from: Account { owner: caller, subaccount: Some(sub_arr) },
+        to: Account { owner: self_id, subaccount: None }, // minting account → burn
+        amount: arg.amount,
+        fee: None,
+        memo: None,
+        created_at_time: Some(time()),
+    };
+    let response = match Call::bounded_wait(ledger, "icrc2_transfer_from")
+        .with_arg(tf_arg)
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            return Err(WithdrawalError::TemporarilyUnavailable(format!(
+                "icrc2_transfer_from rejected: {e:?}"
+            )));
+        }
+    };
+    match response.candid::<Result<Nat, TransferFromError>>() {
+        Ok(Ok(block_index)) => Ok(RetrieveEthRequest { block_index }),
+        Ok(Err(TransferFromError::InsufficientAllowance { allowance })) => {
+            Err(WithdrawalError::InsufficientAllowance { allowance })
+        }
+        Ok(Err(TransferFromError::InsufficientFunds { balance })) => {
+            Err(WithdrawalError::InsufficientFunds { balance })
+        }
+        Ok(Err(TransferFromError::TemporarilyUnavailable)) => {
+            Err(WithdrawalError::TemporarilyUnavailable(
+                "ledger temporarily unavailable".to_string(),
+            ))
+        }
+        Ok(Err(e)) => Err(WithdrawalError::TemporarilyUnavailable(format!(
+            "icrc2_transfer_from error: {e}"
+        ))),
+        Err(e) => Err(WithdrawalError::TemporarilyUnavailable(format!(
+            "icrc2_transfer_from decode: {e:?}"
+        ))),
+    }
+}
+
 /// Minter `get_known_utxos(record { owner: opt principal; subaccount: opt blob }) -> vec Utxo`. The
 /// real ckBTC minter takes ONE record argument; this mock mirrors that surface exactly. The mock
 /// tracks no UTXO history, so this is always empty.

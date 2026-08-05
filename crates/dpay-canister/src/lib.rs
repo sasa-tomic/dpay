@@ -1248,6 +1248,53 @@ enum RetrieveBtcWithApprovalError {
     GenericError { error_message: String, error_code: Nat },
 }
 
+// --- ckETH-minter withdraw proxy (native ckETH → ETH out) -------------------------------------
+// Mirror types for decoding the REAL ckETH minter's `withdraw_eth` + `eip_1559_transaction_price`
+// candid replies, verified against `dfx canister metadata sv3dd-oaaaa-aaaar-qacoa-cai
+// candid:service --network ic` (the .did is cached at /tmp/opencode/cketh-minter.did):
+//   `withdraw_eth : (WithdrawalArg) -> (variant { Ok : RetrieveEthRequest; Err : WithdrawalError })`
+//   `eip_1559_transaction_price : (opt Eip1559TransactionPriceArg) -> (Eip1559TransactionPrice) query`
+// Field/variant labels mirror the real minter exactly so the decode is wire-compatible with mainnet.
+// Internal only — kept out of the public candid surface (like the BTC mirror types above). The ETH
+// path's approve semantics DIFFER from ckBTC: `withdraw_eth` burns `amount` immediately and burns the
+// gas fee in a SEPARATE `icrc2_transfer_from` later, so a SINGLE `icrc2_approve(amount +
+// max_transaction_fee)` covers BOTH burns (ICRC-2 allowance is a running balance, not single-use).
+
+#[derive(CandidType, Deserialize)]
+struct WithdrawalArg {
+    recipient: String,
+    amount: Nat,
+    from_subaccount: Option<Vec<u8>>,
+}
+
+#[derive(CandidType, Deserialize)]
+struct RetrieveEthRequest {
+    block_index: Nat,
+}
+
+#[derive(CandidType, Deserialize, Debug)]
+enum WithdrawalError {
+    AmountTooLow { min_withdrawal_amount: Nat },
+    InsufficientFunds { balance: Nat },
+    InsufficientAllowance { allowance: Nat },
+    RecipientAddressBlocked { address: String },
+    TemporarilyUnavailable(String),
+}
+
+#[derive(CandidType, Deserialize)]
+struct Eip1559TransactionPriceArg {
+    ckerc20_ledger_id: Principal,
+}
+
+#[derive(CandidType, Deserialize)]
+struct Eip1559TransactionPrice {
+    gas_limit: Nat,
+    max_fee_per_gas: Nat,
+    max_priority_fee_per_gas: Nat,
+    max_transaction_fee: Nat,
+    timestamp: Option<u64>,
+}
+
 /// The candid argument the facade's `withdraw` takes: the user's signed authorization fields +
 /// the Ed25519 signature over the canonical [`dpay_core::WithdrawAuth`] signing bytes. The facade
 /// rebuilds the [`dpay_core::WithdrawAuth`] from these fields, recomputes the signing bytes (single
@@ -1333,6 +1380,17 @@ fn is_retired(currency: Currency) -> bool {
 /// longer consults them.
 fn currency_cap(currency: Currency) -> Option<u64> {
     CURRENCY_META.with(|m| m.borrow().get(&currency).and_then(|meta| meta.cap))
+}
+
+/// The minter family registered for a currency (M0 ramp-dispatch key). Read from `CURRENCY_META`.
+/// `withdraw` reads this to dispatch to the family-specific minter method: `CkBtcUtxo` →
+/// `retrieve_btc_with_approval`; `CkEthErc20` + `token_contract = None` → `withdraw_eth` (native ETH);
+/// `CkEthErc20` + `token_contract = Some` → fail-closed (ckERC20 needs a separate ckETH-for-fees
+/// path). `None` (no metadata registered) maps to `CkBtcUtxo` at the single call site in `withdraw`
+/// (the legacy default before family dispatch existed — preserves existing ckBTC deployments that
+/// registered a minter but no family meta, so the BTC path is unchanged).
+fn currency_family(currency: Currency) -> Option<MinterFamily> {
+    CURRENCY_META.with(|m| m.borrow().get(&currency).and_then(|meta| meta.minter_family))
 }
 
 /// The ICRC account this canister controls for a user pubkey: the canister is the `owner`, the
@@ -1470,22 +1528,63 @@ async fn minter_call_retrieve_btc(
         .map_err(|e| format!("retrieve_btc_with_approval decode: {e:?}"))
 }
 
+/// ckETH minter `eip_1559_transaction_price(opt Eip1559TransactionPriceArg) -> Eip1559TransactionPrice`
+/// (query) — the gas-fee estimate for an ETH withdrawal. Pass `opt None` (ETH, not ckERC20): the arg
+/// is a 1-tuple `(Option::<Eip1559TransactionPriceArg>::None,)`. The returned `max_transaction_fee`
+/// is the precomputed Wei cap the facade approves ON TOP of `amount` so the minter's later
+/// gas-fee `icrc2_transfer_from` succeeds.
+async fn minter_call_eip1559_price(minter: Principal) -> Result<Eip1559TransactionPrice, String> {
+    let arg = (Option::<Eip1559TransactionPriceArg>::None,);
+    let response = Call::bounded_wait(minter, "eip_1559_transaction_price")
+        .with_args(&arg)
+        .await
+        .map_err(|e| format!("eip_1559_transaction_price rejected: {e:?}"))?;
+    response
+        .candid::<Eip1559TransactionPrice>()
+        .map_err(|e| format!("eip_1559_transaction_price decode: {e:?}"))
+}
+
+/// ckETH minter `withdraw_eth(WithdrawalArg) -> variant { Ok : RetrieveEthRequest; Err :
+/// WithdrawalError }` — the value-creating call that burns `amount` ckETH (immediately) and queues a
+/// native ETH send to `recipient`. The real ckETH minter takes ONE record argument; encoded here as a
+/// 1-tuple `(arg,)` so `with_args` emits exactly one argument. The variant reply decodes as a Rust
+/// `Result` (candid `Ok`/`Err` variant names). The facade passes `from_subaccount = Some(pubkey)`, so
+/// the minter pulls `amount` ckETH from `Account{owner: canister_self(), subaccount: pubkey}` via
+/// `icrc2_transfer_from` (consuming part of the allowance the facade set via [`icrc2_approve`]); the
+/// gas fee is burned in a SEPARATE later `transfer_from` against the SAME allowance.
+async fn minter_call_withdraw_eth(
+    minter: Principal,
+    arg: WithdrawalArg,
+) -> Result<Result<RetrieveEthRequest, WithdrawalError>, String> {
+    let args = (arg,);
+    let response = Call::bounded_wait(minter, "withdraw_eth")
+        .with_args(&args)
+        .await
+        .map_err(|e| format!("withdraw_eth rejected: {e:?}"))?;
+    response
+        .candid::<Result<RetrieveEthRequest, WithdrawalError>>()
+        .map_err(|e| format!("withdraw_eth decode: {e:?}"))
+}
+
 /// Cross-canister `icrc2_approve` — grants `spender` an allowance of `amount` from
-/// `from_subaccount` on the ckBTC ledger. The facade is the owner of `Account{owner: canister_self(),
+/// `from_subaccount` on the ck ledger. The facade is the owner of `Account{owner: canister_self(),
 /// subaccount: pubkey}`, so it may approve the minter to pull (via `transfer_from`) the withdrawal
-/// amount. This is the ckBTC withdrawal primitive: approve the minter, then call
-/// `retrieve_btc_with_approval` which consumes the allowance. The approval is for EXACTLY the
-/// withdrawal amount (bounded blast radius — see the front-running note on `withdraw`).
+/// amount. This is the ckBTC/ckETH withdrawal primitive: approve the minter, then call the minter's
+/// retrieve/withdraw method which consumes the allowance. The BTC path approves EXACTLY `amount`
+/// (single-use, bounded blast radius — see the front-running note on `withdraw`). The ETH path
+/// approves `amount + max_transaction_fee` (Wei): the ckETH minter burns `amount` immediately and the
+/// gas fee in a SEPARATE later `transfer_from`, so a single running-balance allowance covers both.
+/// `amount` is a candid `Nat` (not u64) so the ETH `amount + fee` sum cannot overflow.
 async fn icrc2_approve(
     ledger: Principal,
     from_subaccount: [u8; PUBKEY_LEN],
     spender: Account,
-    amount: u64,
+    amount: Nat,
 ) -> Result<Nat, ApproveError> {
     let arg = ApproveArgs {
         from_subaccount: Some(from_subaccount),
         spender,
-        amount: Nat::from(amount),
+        amount,
         expected_allowance: None,
         expires_at: None,
         fee: None,
@@ -2584,33 +2683,44 @@ async fn deposit_info(currency: Currency) -> Result<DepositInfo, String> {
     })
 }
 
-// --- ck-minter withdrawal proxy (ckBTC → native BTC out) --------------------------------------
-// The mirror of the deposit proxy: where `refresh_deposit` mints IN confirmed BTC, `withdraw` burns
-// OUT ckBTC to a native BTC address. The facade is the OWNER of the ckBTC held at
-// `Account{owner: canister_self(), subaccount: pubkey}`, so on a VERIFIED USER SIGNATURE it (1)
-// `icrc2_approve`s the minter to pull `amount` from that subaccount, then (2) calls the minter's
-// `retrieve_btc_with_approval`, which consumes the allowance via `icrc2_transfer_from` and sends BTC
-// to the user's address. Non-custodial: the facade moves nothing without a verified Ed25519
-// signature over the canonical [`WithdrawAuth`] bytes (single source of truth in `dpay-core`).
+// --- ck-minter withdrawal proxy (ckBTC → BTC / ckETH → ETH out) --------------------------------
+// The mirror of the deposit proxy: where `refresh_deposit` mints IN confirmed BTC/ETH, `withdraw`
+// burns OUT the chain-key asset to a native address. The facade is the OWNER of the ck asset held at
+// `Account{owner: canister_self(), subaccount: pubkey}`, so on a VERIFIED USER SIGNATURE it
+// `icrc2_approve`s the minter to pull from that subaccount, then calls the family-specific minter
+// method which consumes the allowance via `icrc2_transfer_from` and sends the native asset to the
+// user's address. Non-custodial: the facade moves nothing without a verified Ed25519 signature over
+// the canonical [`WithdrawAuth`] bytes (single source of truth in `dpay-core`).
 //
-// FRONT-RUNNING NOTE (documented residual risk, same as every `retrieve_btc_with_approval` caller):
-// the approval + retrieve are two cross-canister calls with an `await` between them. In principle a
-// separate caller could invoke the minter's `retrieve_btc_with_approval` with the same subaccount +
-// an attacker address between the facade's approve and retrieve, consuming the allowance. The blast
-// radius is bounded to the EXACT authorized `amount` (the approval is for that amount, single-use),
-// so only one withdrawal's worth of ckBTC could be misdirected — never the user's whole balance. This
-// is inherent to the ckBTC withdrawal design (the minter has no signature-binding-the-destination
-// path); the reference NNS minter clients accept the same residual. See CODEBASE_ANALYSIS.
+// FAMILY DISPATCH (M0): the currency's registered `minter_family` selects the minter method:
+//   - CkBtcUtxo → `retrieve_btc_with_approval` (approve EXACTLY `amount`; minter burns it single-use).
+//   - CkEthErc20 + token_contract None → `withdraw_eth` (approve `amount + max_transaction_fee`; the
+//     minter burns `amount` immediately and the gas fee in a SEPARATE later transfer_from — ICRC-2
+//     allowance is a running balance, so one approve covers both).
+//   - CkEthErc20 + token_contract Some → fail-closed (ckERC20 withdraw needs a separate
+//     ckETH-for-fees path; a USDC withdraw must NOT hit native-eth withdraw_eth).
+// A currency with no family meta defaults to CkBtcUtxo (the legacy path before family dispatch).
+//
+// FRONT-RUNNING NOTE (documented residual risk, same as every retrieve_btc_with_approval /
+// withdraw_eth caller): the approve + retrieve/withdraw are two cross-canister calls with an `await`
+// between them. In principle a separate caller could invoke the minter with the same subaccount + an
+// attacker address between the facade's approve and retrieve, consuming the allowance. The blast
+// radius is bounded to the EXACT authorized `amount` (the approval is for that amount), so only one
+// withdrawal's worth could be misdirected — never the user's whole balance. This is inherent to the
+// ckBTC/ckETH withdrawal design (the minters have no signature-binding-the-destination path); the
+// reference NNS minter clients accept the same residual. See CODEBASE_ANALYSIS risk 8.
 
-/// `(WithdrawRequest) -> Result<WithdrawReceipt, text>` — withdraw ckBTC to a native BTC address on a
-/// verified user signature. The request carries the [`WithdrawAuth`] fields + the user's Ed25519
-/// signature over the canonical signing bytes; the facade verifies the signature under `from_pubkey`
-/// (== the debit subaccount) before moving any funds.
+/// `(WithdrawRequest) -> Result<WithdrawReceipt, text>` — withdraw a chain-key asset to a native
+/// address on a verified user signature. The request carries the [`WithdrawAuth`] fields + the user's
+/// Ed25519 signature over the canonical signing bytes; the facade verifies the signature under
+/// `from_pubkey` (== the debit subaccount) before moving any funds.
 ///
 /// Idempotency / replay safety mirrors `pay`: the withdraw nonce is reserved synchronously before any
 /// cross-canister call (the concurrency barrier — two concurrent withdraws with the same nonce
 /// cannot both succeed), released on a transient/pre-burn failure (the same auth may retry), and
-/// settled once the burn commits (the auth can never replay → no double-burn).
+/// settled once the burn commits (the auth can never replay → no double-burn). The family branch
+/// owns its own settle/release classification of the minter's typed errors (permanent → settle the
+/// dead auth; transient → release so the same auth retries).
 #[update]
 async fn withdraw(req: WithdrawRequest) -> Result<WithdrawReceipt, String> {
     // 1. Parse + length-validate the fields (cheap, before any signature/ledger work).
@@ -2644,18 +2754,46 @@ async fn withdraw(req: WithdrawRequest) -> Result<WithdrawReceipt, String> {
     }
 
     let now_secs = time() / 1_000_000_000;
-    // 3. Cheap local rejects (DoS hygiene before cross-canister calls cost cycles).
+    // 3. Cheap local rejects (DoS hygiene before cross-canister calls cost cycles). The
+    //    family-specific floor (BTC's retrieve_btc_min_amount) is applied in the family dispatch
+    //    below — it does NOT apply to ETH (the ckETH minter enforces its own Wei minimum).
     if req.amount == 0 {
         return Err("zero amount".to_string());
     }
     if req.expiry < now_secs {
         return Err("expired".to_string());
     }
-    if req.amount < RETRIEVE_BTC_MIN_AMOUNT {
-        return Err(format!(
-            "amount below retrieve_btc_min_amount ({RETRIEVE_BTC_MIN_AMOUNT})"
-        ));
-    }
+
+    // 3b. FAMILY DISPATCH: read the currency's minter family (+ token_contract for ckERC20) and apply
+    //     family-specific cheap rejects BEFORE reserving the nonce. `None` family defaults to
+    //     CkBtcUtxo (legacy default — a currency with a registered minter but no family meta is the
+    //     pre-dispatch ckBTC path). CkSol / unknown → fail-closed (no withdraw path).
+    let family = currency_family(req.currency).unwrap_or(MinterFamily::CkBtcUtxo);
+    let is_native_eth = match family {
+        MinterFamily::CkBtcUtxo => {
+            if req.amount < RETRIEVE_BTC_MIN_AMOUNT {
+                return Err(format!(
+                    "amount below retrieve_btc_min_amount ({RETRIEVE_BTC_MIN_AMOUNT})"
+                ));
+            }
+            false
+        }
+        MinterFamily::CkEthErc20 => {
+            // token_contract Some ⇒ ckERC20 (e.g. ckUSDC). Fail-closed: ckERC20 withdraw needs a
+            // separate ckETH-for-fees path (withdraw_erc20), a follow-on. This guard prevents a USDC
+            // withdraw hitting native-eth withdraw_eth.
+            let token_contract = CURRENCY_META.with(|m| {
+                m.borrow().get(&req.currency).and_then(|meta| meta.token_contract.clone())
+            });
+            if token_contract.is_some() {
+                return Err("erc20 withdraw not supported on this path".to_string());
+            }
+            true
+        }
+        MinterFamily::CkSol => {
+            return Err("withdraw not supported for CkSol family".to_string());
+        }
+    };
 
     let (ledger, _mintable) = ledger_for(req.currency)?;
     let minter = minter_for(req.currency)?;
@@ -2685,60 +2823,121 @@ async fn withdraw(req: WithdrawRequest) -> Result<WithdrawReceipt, String> {
         ));
     }
 
-    // 5. icrc2_approve: grant the minter an allowance of EXACTLY `amount` over the user's subaccount.
-    //    Any approve failure → release (no burn happened); the user may retry the same authorization.
-    let spender = Account { owner: minter, subaccount: None };
-    if let Err(e) = icrc2_approve(ledger, from, spender, req.amount).await {
-        release_withdraw_nonce(&wnonce);
-        return Err(format!("icrc2_approve: {e}"));
-    }
-
-    // 6. retrieve_btc_with_approval: the minter consumes the allowance (transfer_from) and sends BTC
-    //    to `destination`. Error classification (mirrors `pay`'s reserve/release/settle):
-    //      Ok → SETTLE the nonce (burn committed; the auth can never replay → no double-burn);
-    //      transient (TemporarilyUnavailable / AlreadyProcessing / InsufficientFunds /
-    //      InsufficientAllowance / a transport failure) → RELEASE (retryable; funds did not move);
-    //      permanent (MalformedAddress / AmountTooLow / GenericError) → SETTLE (dead auth; the user
-    //      must sign a fresh authorization).
-    let retrieve_args = RetrieveBtcWithApprovalArgs {
-        address: req.destination.clone(),
-        amount: req.amount,
-        from_subaccount: Some(from.to_vec()),
-    };
-    let block_index_nat = match minter_call_retrieve_btc(minter, retrieve_args).await {
-        Ok(Ok(ok)) => {
-            settle_withdraw_nonce(&wnonce);
-            ok.block_index
-        }
-        Ok(Err(RetrieveBtcWithApprovalError::TemporarilyUnavailable(m))) => {
+    // 5-6. Family branch: approve → minter retrieve/withdraw. Each branch either early-returns Err
+    //      (after the branch's settle/release classification of the nonce) or yields the burn's
+    //      ledger block_index. Error classification mirrors `pay`'s reserve/release/settle:
+    //        Ok → SETTLE the nonce (burn committed; the auth can never replay → no double-burn);
+    //        transient (transport / InsufficientFunds / InsufficientAllowance / TemporarilyUnavailable
+    //        / AlreadyProcessing) → RELEASE (retryable; funds did not move);
+    //        permanent (MalformedAddress / AmountTooLow / RecipientAddressBlocked / GenericError) →
+    //        SETTLE (dead auth; the user must sign a fresh authorization).
+    let block_index_nat = if is_native_eth {
+        // NATIVE ETH: query the gas-fee estimate, approve `amount + max_transaction_fee` (a single
+        // running-balance allowance covers the amount burn NOW + the gas-fee burn LATER), then call
+        // `withdraw_eth`. Any pre-burn failure → RELEASE the nonce (retryable).
+        let price = match minter_call_eip1559_price(minter).await {
+            Ok(p) => p,
+            Err(e) => {
+                release_withdraw_nonce(&wnonce);
+                return Err(e);
+            }
+        };
+        let spender = Account { owner: minter, subaccount: None };
+        // Nat arithmetic: `amount + max_transaction_fee` cannot overflow (candid Nat is arbitrary
+        // precision). The BTC path approves exactly `amount`; the ETH path adds the gas-fee cap.
+        let approve_amount = Nat::from(req.amount) + price.max_transaction_fee;
+        if let Err(e) = icrc2_approve(ledger, from, spender, approve_amount).await {
             release_withdraw_nonce(&wnonce);
-            return Err(format!("retrieve_btc transient: {m}"));
+            return Err(format!("icrc2_approve: {e}"));
         }
-        Ok(Err(RetrieveBtcWithApprovalError::AlreadyProcessing)) => {
+        let eth_arg = WithdrawalArg {
+            recipient: req.destination.clone(),
+            amount: Nat::from(req.amount),
+            from_subaccount: Some(from.to_vec()),
+        };
+        match minter_call_withdraw_eth(minter, eth_arg).await {
+            Ok(Ok(retrieve)) => {
+                settle_withdraw_nonce(&wnonce);
+                retrieve.block_index
+            }
+            Ok(Err(WithdrawalError::AmountTooLow { min_withdrawal_amount })) => {
+                // Permanent — the amount is below the minter's Wei floor. Settle the dead auth.
+                settle_withdraw_nonce(&wnonce);
+                return Err(format!(
+                    "withdraw_eth amount too low (min {min_withdrawal_amount})"
+                ));
+            }
+            Ok(Err(WithdrawalError::InsufficientFunds { balance })) => {
+                release_withdraw_nonce(&wnonce);
+                return Err(format!("withdraw_eth insufficient funds: balance {balance}"));
+            }
+            Ok(Err(WithdrawalError::InsufficientAllowance { allowance })) => {
+                // Should not happen given the approve; surfaces a fee spike between the price query
+                // and the burn. Release so the same auth retries with a fresh fee estimate.
+                release_withdraw_nonce(&wnonce);
+                return Err(format!("withdraw_eth insufficient allowance: {allowance}"));
+            }
+            Ok(Err(WithdrawalError::RecipientAddressBlocked { address })) => {
+                // Permanent — the recipient is blocked. Settle the dead auth.
+                settle_withdraw_nonce(&wnonce);
+                return Err(format!("withdraw_eth recipient blocked: {address}"));
+            }
+            Ok(Err(WithdrawalError::TemporarilyUnavailable(m))) => {
+                release_withdraw_nonce(&wnonce);
+                return Err(format!("withdraw_eth temporarily unavailable: {m}"));
+            }
+            Err(transport) => {
+                release_withdraw_nonce(&wnonce);
+                return Err(transport);
+            }
+        }
+    } else {
+        // BTC: approve EXACTLY `amount`, then retrieve_btc_with_approval consumes it (single-use).
+        let spender = Account { owner: minter, subaccount: None };
+        if let Err(e) = icrc2_approve(ledger, from, spender, Nat::from(req.amount)).await {
             release_withdraw_nonce(&wnonce);
-            return Err("retrieve_btc already processing".to_string());
+            return Err(format!("icrc2_approve: {e}"));
         }
-        Ok(Err(RetrieveBtcWithApprovalError::InsufficientFunds { balance })) => {
-            release_withdraw_nonce(&wnonce);
-            return Err(format!("retrieve_btc insufficient funds: balance {balance}"));
-        }
-        Ok(Err(RetrieveBtcWithApprovalError::InsufficientAllowance { allowance })) => {
-            release_withdraw_nonce(&wnonce);
-            return Err(format!("retrieve_btc insufficient allowance: {allowance}"));
-        }
-        Ok(Err(e)) => {
-            // MalformedAddress / AmountTooLow / GenericError — permanent; burn the nonce so the dead
-            // auth can never replay. The user must sign a fresh authorization.
-            settle_withdraw_nonce(&wnonce);
-            return Err(format!("retrieve_btc: {e:?}"));
-        }
-        Err(transport) => {
-            // A transport/decode failure between approve and the minter's reply. Funds may or may not
-            // have moved — release is the retryable choice (matches `pay`'s transient handling); the
-            // single-use nonce keeps a successful-but-unreported burn from being driven twice by a
-            // DIFFERENT auth, and the user's same-auth retry reconciles via the ckBTC ledger.
-            release_withdraw_nonce(&wnonce);
-            return Err(transport);
+        let retrieve_args = RetrieveBtcWithApprovalArgs {
+            address: req.destination.clone(),
+            amount: req.amount,
+            from_subaccount: Some(from.to_vec()),
+        };
+        match minter_call_retrieve_btc(minter, retrieve_args).await {
+            Ok(Ok(ok)) => {
+                settle_withdraw_nonce(&wnonce);
+                ok.block_index
+            }
+            Ok(Err(RetrieveBtcWithApprovalError::TemporarilyUnavailable(m))) => {
+                release_withdraw_nonce(&wnonce);
+                return Err(format!("retrieve_btc transient: {m}"));
+            }
+            Ok(Err(RetrieveBtcWithApprovalError::AlreadyProcessing)) => {
+                release_withdraw_nonce(&wnonce);
+                return Err("retrieve_btc already processing".to_string());
+            }
+            Ok(Err(RetrieveBtcWithApprovalError::InsufficientFunds { balance })) => {
+                release_withdraw_nonce(&wnonce);
+                return Err(format!("retrieve_btc insufficient funds: balance {balance}"));
+            }
+            Ok(Err(RetrieveBtcWithApprovalError::InsufficientAllowance { allowance })) => {
+                release_withdraw_nonce(&wnonce);
+                return Err(format!("retrieve_btc insufficient allowance: {allowance}"));
+            }
+            Ok(Err(e)) => {
+                // MalformedAddress / AmountTooLow / GenericError — permanent; settle the nonce so the
+                // dead auth can never replay. The user must sign a fresh authorization.
+                settle_withdraw_nonce(&wnonce);
+                return Err(format!("retrieve_btc: {e:?}"));
+            }
+            Err(transport) => {
+                // A transport/decode failure between approve and the minter's reply. Funds may or may
+                // not have moved — release is the retryable choice (matches `pay`'s transient
+                // handling); the single-use nonce keeps a successful-but-unreported burn from being
+                // driven twice by a DIFFERENT auth, and the same-auth retry reconciles via the ledger.
+                release_withdraw_nonce(&wnonce);
+                return Err(transport);
+            }
         }
     };
 
