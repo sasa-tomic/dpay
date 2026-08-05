@@ -414,7 +414,7 @@ export class Driver {
   }
 
   /** Close the context (and the browser if this Driver owns it — a shared-browser Driver never
-    *  tears down the session's browser). Safe to call multiple times. */
+   *  tears down the session's browser). Safe to call multiple times. */
   async close() {
     const failures = [];
     if (!this.closed) {
