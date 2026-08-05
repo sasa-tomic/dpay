@@ -2,4 +2,8 @@
 node_modules/
 dist/
 .browser/
-shots/
+# Per-run captures are regenerable → ignored. The visual-regression BASELINES are the contract
+# (committed PNGs the suite diffs against), so un-ignore the baselines/ subdir + its contents.
+shots/*
+!shots/baselines/
+!shots/baselines/**
