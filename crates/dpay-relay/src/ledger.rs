@@ -97,14 +97,25 @@ fn display_field_to_string(buf: &[u8; NAME_LEN]) -> String {
     String::from_utf8_lossy(&buf[..end]).into_owned()
 }
 
-/// Verified mainnet constants for the ckUSDC onramp (ckERC-20 family). ckUSDC has NO per-principal
-/// IC deposit address and NO user-callable mint — the user performs two Ethereum transactions from
-/// their own wallet (approve + depositErc20); the relay only surfaces these so the app can build the
-/// calldata (see OPEN_ISSUES.md O6 + `app/cketh.ts`). In production these are read at runtime from the
-/// ckETH minter's `get_minter_info`; the constants below are the authoritative mainnet values
+/// Verified constants for the ckUSDC onramp (ckERC-20 family). ckUSDC has NO per-principal IC deposit
+/// address and NO user-callable mint — the user performs two Ethereum transactions from their own
+/// wallet (approve + depositErc20); the relay only surfaces these so the app can build the calldata
+/// (see OPEN_ISSUES.md O6 + `app/cketh.ts`). In production these are read at runtime from the ckETH
+/// minter's `get_minter_info`; the constants below are the authoritative values
 /// (verified 2026-07-31 — do not re-derive). Single-sourced here so the FakeLedger + AgentLedger
 /// impls can't drift from the verified addresses.
-pub(crate) const CKERC20_HELPER_ADDRESS: &str = "0x18901044688D3756C35Ed2b36D93e6a5B8e00E68";
+///
+/// The `helper_address` is NETWORK-scoped, not minter-scoped: Ethereum mainnet and Sepolia testnet
+/// each deploy their own CkDeposit helper contract under the same ckETH minter. The chain-id gate in
+/// [`ckerc20_onramp_from_descriptor`] selects the right one from the descriptor's `chain_id`. The
+/// drift-free source for either value is the minter's
+/// `get_minter_info.deposit_with_subaccount_helper_contract_address` (OPEN_ISSUES #1/#2 testnet
+/// wiring). `CKUSDC_ERC20_ADDRESS` is the token contract (USDC), NOT the helper — kept separate so a
+/// per-token descriptor's `token_contract` stays the source of truth for the ERC-20 address.
+pub(crate) const CKERC20_HELPER_ADDRESS_MAINNET: &str =
+    "0x18901044688D3756C35Ed2b36D93e6a5B8e00E68";
+pub(crate) const CKERC20_HELPER_ADDRESS_SEPOLIA: &str =
+    "0x2D39863d30716aaf2B7fFFd85Dd03Dda2BFC2E38";
 pub(crate) const CKUSDC_ERC20_ADDRESS: &str = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
 
 /// What the merchant sees on success. Byte fields are hex so the JSON is a plain string map.
@@ -343,10 +354,12 @@ pub struct CkErc20OnrampParams {
 /// 503 — it must NEVER fall back to ckUSDC's address. Returning a wrong-token address would make the
 /// user approve + depositErc20 against the wrong ERC-20 contract (non-custodial-trust violation).
 ///
-/// The `helper_address` is minter-scoped (ONE verified mainnet constant for ALL ckERC20 tokens — the
-/// ckETH deposit helper is shared across the family); only the `erc20_address` is per-token, read
-/// from the descriptor's `token_contract`. `facade_principal` is passed in (the FakeLedger uses a
-/// demo stand-in; the AgentLedger uses the live canister id it is pointed at).
+/// The `helper_address` is NETWORK-scoped (Ethereum mainnet vs Sepolia testnet each deploy their own
+/// CkDeposit helper under the same ckETH minter); the descriptor's `chain_id` selects which verified
+/// constant to surface (Sepolia = 11155111; anything else, including `None`, = mainnet — the safe
+/// default for a non-EVM-family metadata gap). Only the `erc20_address` is per-token, read from the
+/// descriptor's `token_contract`. `facade_principal` is passed in (the FakeLedger uses a demo
+/// stand-in; the AgentLedger uses the live canister id it is pointed at).
 pub fn ckerc20_onramp_from_descriptor(
     desc: Option<&CurrencyDescriptor>,
     facade_principal: String,
@@ -359,8 +372,15 @@ pub fn ckerc20_onramp_from_descriptor(
     let erc20_address = d.token_contract.clone().ok_or_else(|| {
         LedgerError::Transient("ckERC-20 currency has no token_contract (fail-closed)".into())
     })?;
+    // Network-scoped helper: Sepolia (chain_id 11155111) gets the Sepolia CkDeposit helper;
+    // anything else (mainnet chain_id 1, or a None chain_id on a non-EVM-family metadata gap) falls
+    // through to the mainnet value. The chain-id gate is the minimal testnet fix (OPEN_ISSUES #1/#2).
+    let helper_address = match d.chain_id {
+        Some(11155111) => CKERC20_HELPER_ADDRESS_SEPOLIA,
+        _ => CKERC20_HELPER_ADDRESS_MAINNET,
+    };
     Ok(CkErc20OnrampParams {
-        helper_address: CKERC20_HELPER_ADDRESS.to_string(),
+        helper_address: helper_address.to_string(),
         erc20_address,
         facade_principal,
     })

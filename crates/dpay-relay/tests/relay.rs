@@ -1533,6 +1533,72 @@ async fn ckerc20_onramp_fails_closed_without_token_contract() {
     assert!(dpay_relay::ckerc20_onramp_from_descriptor(None, "aaaaa-aa".to_string()).is_err());
 }
 
+/// OPEN_ISSUES #1/#2 — the `helper_address` is NETWORK-scoped, not a single mainnet constant. The
+/// ckETH minter deploys its own CkDeposit helper on each chain it bridges: Ethereum mainnet (chain_id
+/// 1) and Sepolia testnet (chain_id 11155111). A testnet ckERC20 (e.g. ckSepoliaUSDC) MUST surface
+/// the Sepolia helper, not the mainnet one — otherwise the user's approve+depositErc20 txs would
+/// target a contract on the wrong chain and never credit (non-custodial-trust violation: the deposit
+/// silently fails). This pins the chain-id gate in the pure resolver both paths (FakeLedger +
+/// AgentLedger) share, so the two can't drift.
+#[tokio::test]
+async fn ckerc20_onramp_helper_is_chain_scoped() {
+    // A CkEthErc20 descriptor on Sepolia (chain_id 11155111) — the testnet wiring shape.
+    let sepolia = dpay_relay::CurrencyDescriptor {
+        currency: 4,
+        ledger: "yfumr-cyaaa-aaaar-qaela-cai".to_string(),
+        mintable: false,
+        minter: Some("jzenf-aiaaa-aaaar-qaa7q-cai".to_string()),
+        minter_family: Some(dpay_relay::MinterFamily::CkEthErc20),
+        symbol: Some("ckSepoliaUSDC".into()),
+        decimals: Some(6),
+        wrapper_name: Some("ckSepoliaUSDC".into()),
+        backing_symbol: Some("USDC".into()),
+        network: Some("Sepolia".into()),
+        display_decimals: Some(6),
+        fee: None,
+        cap: None,
+        chain_id: Some(11155111), // Sepolia
+        token_contract: Some("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238".into()),
+        onramp: dpay_relay::RampCapability::Direct,
+        offramp: dpay_relay::RampCapability::Unavailable,
+    };
+    let r_sep = dpay_relay::ckerc20_onramp_from_descriptor(Some(&sepolia), "aaaaa-aa".to_string())
+        .expect("Sepolia ckERC20 must resolve an onramp");
+    assert_eq!(
+        r_sep.helper_address, "0x2D39863d30716aaf2B7fFFd85Dd03Dda2BFC2E38",
+        "Sepolia chain_id must select the Sepolia CkDeposit helper",
+    );
+    assert_eq!(
+        r_sep.erc20_address, "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+        "the per-token ERC-20 address is unchanged (read from the descriptor's token_contract)",
+    );
+
+    // Same family + token on MAINNET (chain_id 1) → mainnet helper.
+    let mut mainnet = sepolia.clone();
+    mainnet.chain_id = Some(1);
+    let r_main = dpay_relay::ckerc20_onramp_from_descriptor(Some(&mainnet), "aaaaa-aa".to_string())
+        .expect("mainnet ckERC20 must resolve an onramp");
+    assert_eq!(
+        r_main.helper_address, "0x18901044688D3756C35Ed2b36D93e6a5B8e00E68",
+        "mainnet chain_id must select the mainnet CkDeposit helper",
+    );
+    assert_eq!(
+        r_main.erc20_address, r_sep.erc20_address,
+        "the per-token ERC-20 address is identical across chains (same token_contract)",
+    );
+
+    // A CkEthErc20 with chain_id=None (a non-EVM-family metadata gap) → falls through to mainnet
+    // (the safe default — the existing verified value, never a silent None/panic).
+    let mut no_chain = sepolia.clone();
+    no_chain.chain_id = None;
+    let r_none = dpay_relay::ckerc20_onramp_from_descriptor(Some(&no_chain), "aaaaa-aa".to_string())
+        .expect("a chain_id-less ckERC20 must still resolve an onramp (mainnet default)");
+    assert_eq!(
+        r_none.helper_address, "0x18901044688D3756C35Ed2b36D93e6a5B8e00E68",
+        "chain_id=None falls through to the mainnet helper (safe default)",
+    );
+}
+
 // --- withdrawal surface (ckBTC → native BTC out; W2) -----------------------------------------
 //
 // Covers the new Ledger::withdraw trait method + the POST /api/v1/withdraw route. The FakeLedger

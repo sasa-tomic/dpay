@@ -348,7 +348,8 @@ describe('pairOnrampWallet', () => {
       const result = await pending;
       expect(result).toBe(true);
       const wc = require('../walletconnect');
-      expect(wc.pairWalletConnect).toHaveBeenCalledWith(onUriStub);
+      // OPEN_ISSUES #1/#2: pairOnrampWallet threads chainId (default 1 = mainnet) into pairWalletConnect.
+      expect(wc.pairWalletConnect).toHaveBeenCalledWith(onUriStub, 1);
     } finally {
       (globalThis as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID = '';
     }

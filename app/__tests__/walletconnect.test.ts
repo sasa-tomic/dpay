@@ -49,16 +49,22 @@ type InitMock = typeof FAKE_INIT;
 
 /** Re-evaluate `walletconnect.ts` with `projectId` baked into constants + `mockPlatformOS` set. */
 function load(id: string): {
-  getWalletConnectProvider: () => Promise<Eip1193Provider | null>;
-  pairWalletConnect: (onUri: (uri: string | null) => void) => Promise<void>;
+  getWalletConnectProvider: (chainId?: number) => Promise<Eip1193Provider | null>;
+  pairWalletConnect: (
+    onUri: (uri: string | null) => void,
+    chainId?: number,
+  ) => Promise<void>;
   disconnectWalletConnect: () => Promise<void>;
   openWalletApp: (uri: string) => Promise<boolean>;
   pairTimeoutMs: number;
   init: InitMock;
 } {
   let out!: {
-    getWalletConnectProvider: () => Promise<Eip1193Provider | null>;
-    pairWalletConnect: (onUri: (uri: string | null) => void) => Promise<void>;
+    getWalletConnectProvider: (chainId?: number) => Promise<Eip1193Provider | null>;
+    pairWalletConnect: (
+      onUri: (uri: string | null) => void,
+      chainId?: number,
+    ) => Promise<void>;
     disconnectWalletConnect: () => Promise<void>;
     openWalletApp: (uri: string) => Promise<boolean>;
     pairTimeoutMs: number;
@@ -76,8 +82,11 @@ function load(id: string): {
       EthereumProvider: {init: InitMock};
     };
     const mod = require('../walletconnect') as {
-      getWalletConnectProvider: () => Promise<Eip1193Provider | null>;
-      pairWalletConnect: (onUri: (uri: string | null) => void) => Promise<void>;
+      getWalletConnectProvider: (chainId?: number) => Promise<Eip1193Provider | null>;
+      pairWalletConnect: (
+        onUri: (uri: string | null) => void,
+        chainId?: number,
+      ) => Promise<void>;
       disconnectWalletConnect: () => Promise<void>;
       openWalletApp: (uri: string) => Promise<boolean>;
       PAIR_TIMEOUT_MS: number;
@@ -124,7 +133,7 @@ describe('getWalletConnectProvider — (2) singleton (init exactly once)', () =>
     // arg signature (EthereumProviderOptions), so an SDK signature change breaks compilation.
     init.mockResolvedValue(new FakeEthereumProvider());
     // Both calls are made before either resolves; the module-level cache means the second sees the
-    // init promise the first created → init fires exactly once.
+    // init promise the first created → init fires exactly once. Default chainId=1 (mainnet).
     const [a, b] = await Promise.all([getWalletConnectProvider(), getWalletConnectProvider()]);
     expect(a).toBe(b); // same resolved provider (both awaited the one cached init promise)
     expect(init).toHaveBeenCalledTimes(1);
@@ -135,6 +144,25 @@ describe('getWalletConnectProvider — (2) singleton (init exactly once)', () =>
         optionalChains: [1],
         // MC8 U6 capstone — showQrModal:false: WC's built-in @reown/appkit modal is web-only and
         // unreachable on RN. We render the pairing URI ourselves via display_uri → custom <QRCode>.
+        showQrModal: false,
+      }),
+    );
+  });
+
+  // OPEN_ISSUES #1/#2 — the chains parameterization. A Sepolia ckERC20 (chain_id 11155111) MUST seed
+  // `chains:[11155111]` so the WC session binds to Sepolia (a mainnet-only session would force a
+  // network switch, and the chain-id gate in CkErc20DepositSheet aborts a wrong-network wallet). The
+  // default (no arg) stays mainnet (chains:[1]) — pinned by the test above. This case is RED under
+  // the pre-testnet code (which hardcoded chains:[1] regardless of the arg).
+  test('chainId=11155111 → init seeds chains:[11155111] (Sepolia testnet wiring)', async () => {
+    const {init, getWalletConnectProvider} = load(PROJECT_ID);
+    init.mockResolvedValue(new FakeEthereumProvider());
+    await getWalletConnectProvider(11155111);
+    expect(init).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: PROJECT_ID,
+        chains: [11155111],
+        optionalChains: [11155111],
         showQrModal: false,
       }),
     );

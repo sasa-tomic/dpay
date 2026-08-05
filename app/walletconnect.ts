@@ -67,12 +67,22 @@ const ANDROID_DEEP_LINK = 'org.kalaj.dpay://';
 // `_instanceToEip1193`), so an SDK bump that breaks the narrowing fails `just typecheck`.
 let cachedProvider: Promise<EthereumProviderInstance> | null = null;
 
-/** Initialize the provider with the capstone options (showQrModal:false — we render the QR ourselves). */
-function initProvider(): Promise<EthereumProviderInstance> {
+/**
+ * Initialize the provider with the capstone options (showQrModal:false — we render the QR ourselves).
+ *
+ * `chainId` (OPEN_ISSUES #1/#2 testnet wiring) is the EVM chain the requested ckERC20 currency
+ * settles on (ckUSDC = 1 Ethereum mainnet; ckSepoliaUSDC = 11155111 Sepolia). It seeds BOTH
+ * `chains` and `optionalChains` so the WC session binds to the EXACT network the deposit targets —
+ * a mainnet-only session would force the user to switch networks (and the chain-id gate in
+ * CkErc20DepositSheet aborts a wrong-network wallet anyway), and a Sepolia deposit MUST pair against
+ * Sepolia from the start. Default 1 (mainnet) preserves the pre-testnet behavior for callers that
+ * don't thread the currency's chain_id.
+ */
+function initProvider(chainId: number = 1): Promise<EthereumProviderInstance> {
   return EthereumProvider.init({
     projectId: WALLETCONNECT_PROJECT_ID,
-    chains: [1], // Ethereum mainnet — ckERC20 (ckUSDC) deposits settle on chain 1 (MC8 U3 gate).
-    optionalChains: [1],
+    chains: [chainId], // the chain the ckERC20 deposit settles on (MC8 U3 gate + testnet wiring)
+    optionalChains: [chainId],
     showQrModal: false, // MC8 U6 capstone: bypass the web-only @reown/appkit modal; render our own QR.
     metadata: {
       name: 'dpay',
@@ -90,12 +100,20 @@ function initProvider(): Promise<EthereumProviderInstance> {
  * `WALLETCONNECT_PROJECT_ID` is configured (empty = disabled). When enabled, initializes the
  * provider once and caches the promise; the resolved provider's `.request` IS the EIP-1193 surface
  * `wallet.ts` consumes.
+ *
+ * `chainId` (OPEN_ISSUES #1/#2): the EVM chain the requested ckERC20 currency settles on. The FIRST
+ * call wins the cached init promise — its `chains:[chainId]` binds the WC session to that network.
+ * A subsequent call for a DIFFERENT chain reuses the cached session (the chain-id gate in
+ * CkErc20DepositSheet aborts a wrong-network wallet before any deposit, so this is a UX nuance, not
+ * a correctness gap). Default 1 (mainnet) for callers that don't thread the currency's chain_id.
  */
-export async function getWalletConnectProvider(): Promise<Eip1193Provider | null> {
+export async function getWalletConnectProvider(
+  chainId: number = 1,
+): Promise<Eip1193Provider | null> {
   // Disabled guard (defense-in-depth — `resolveOnrampProvider()` already gates Platform + projectId
   // before dynamically importing this module; this makes the module self-protecting too).
   if (Platform.OS === 'web' || !WALLETCONNECT_PROJECT_ID) return null;
-  if (!cachedProvider) cachedProvider = initProvider();
+  if (!cachedProvider) cachedProvider = initProvider(chainId);
   // EthereumProviderInstance is assignable to Eip1193Provider (request signature compatible) —
   // pinned by walletconnect-conformance.test.ts. No cast needed (pure assignability).
   return cachedProvider;
@@ -113,11 +131,17 @@ export async function getWalletConnectProvider(): Promise<Eip1193Provider | null
  *
  * Disabled guard: web Platform / empty projectId → returns immediately (no-op). This mirrors
  * `getWalletConnectProvider()`'s guard and makes `pairOnrampWallet`'s delegation safe.
+ *
+ * `chainId` (OPEN_ISSUES #1/#2): the EVM chain the requested ckERC20 currency settles on, threaded
+ * into `initProvider` so the pairing session binds to that network. Default 1 (mainnet).
  */
-export async function pairWalletConnect(onUri: (uri: string | null) => void): Promise<void> {
+export async function pairWalletConnect(
+  onUri: (uri: string | null) => void,
+  chainId: number = 1,
+): Promise<void> {
   // Disabled guard — same gate as getWalletConnectProvider (defense-in-depth).
   if (Platform.OS === 'web' || !WALLETCONNECT_PROJECT_ID) return;
-  if (!cachedProvider) cachedProvider = initProvider();
+  if (!cachedProvider) cachedProvider = initProvider(chainId);
   const provider = await cachedProvider;
 
   // Subscribe BEFORE connect() so the display_uri event (emitted during connect) is never missed.

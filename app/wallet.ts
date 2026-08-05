@@ -59,8 +59,14 @@ export function getEthereumProvider(): Eip1193Provider | null {
  * provider return `window.ethereum` unchanged, so WalletConnect is invisible to the offline inner
  * loop. The transport helpers below (`connectWallet`/`sendTransaction`/…) consume the result purely
  * via the `Eip1193Provider` interface, so they are source-agnostic.
+ *
+ * `chainId` (OPEN_ISSUES #1/#2): the requested ckERC20 currency's EVM chain id (ckUSDC=1 mainnet,
+ * ckSepoliaUSDC=11155111 Sepolia). Passed through to `getWalletConnectProvider` so the WC session
+ * binds to the deposit's target network. Default 1 (mainnet) — the pre-testnet behavior.
  */
-export async function resolveOnrampProvider(): Promise<Eip1193Provider | null> {
+export async function resolveOnrampProvider(
+  chainId: number = 1,
+): Promise<Eip1193Provider | null> {
   // (a) Web-first — the injected browser wallet / the e2e mock. Never reaches WalletConnect.
   const web = getEthereumProvider();
   if (web) return web;
@@ -69,7 +75,7 @@ export async function resolveOnrampProvider(): Promise<Eip1193Provider | null> {
   //     Platform/projectId gate fails closed).
   if (Platform.OS !== 'web' && WALLETCONNECT_PROJECT_ID) {
     const {getWalletConnectProvider} = await import('./walletconnect');
-    return getWalletConnectProvider();
+    return getWalletConnectProvider(chainId);
   }
   // (c) No onramp source available.
   return null;
@@ -83,15 +89,19 @@ export async function resolveOnrampProvider(): Promise<Eip1193Provider | null> {
  * subscribes to the WC `display_uri` event and drives the pairing. Returns `true` after a successful
  * delegation. The sheet renders a custom `<QRCode>` from the URI `onUri` surfaces.
  *
- * Mirrors `resolveOnrampProvider()`'s web-first ordering and isolation boundary exactly.
+ * Mirrors `resolveOnrampProvider()`'s web-first ordering and isolation boundary exactly. `chainId`
+ * (OPEN_ISSUES #1/#2) threads the requested currency's EVM chain into the pairing session.
  */
-export async function pairOnrampWallet(onUri: (uri: string | null) => void): Promise<boolean> {
+export async function pairOnrampWallet(
+  onUri: (uri: string | null) => void,
+  chainId: number = 1,
+): Promise<boolean> {
   // Web-first / disabled — no dynamic import is ever evaluated on the web/jest path.
   if (Platform.OS === 'web' || !WALLETCONNECT_PROJECT_ID) return false;
   // Native + configured → lazy-load the WC pairing driver (the dynamic import is the isolation
   // boundary; this line is unreachable on web/jest because the gate above short-circuits).
   const {pairWalletConnect} = await import('./walletconnect');
-  await pairWalletConnect(onUri);
+  await pairWalletConnect(onUri, chainId);
   return true;
 }
 

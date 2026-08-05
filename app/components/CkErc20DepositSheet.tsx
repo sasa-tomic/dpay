@@ -141,7 +141,11 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
     // WalletConnect provider when WALLETCONNECT_PROJECT_ID is configured. The null path (no source
     // available) surfaces an honest, platform-aware message — NOT a browser-only "install MetaMask"
     // instruction that would lie to a native user.
-    const provider = await resolveOnrampProvider();
+    //
+    // OPEN_ISSUES #1/#2 — thread the requested currency's chain_id so a Sepolia ckERC20 pairs against
+    // Sepolia (not a mainnet-only session). `chainId` is the catalog descriptor's per-currency value;
+    // default 1 preserves the pre-testnet mainnet behavior.
+    const provider = await resolveOnrampProvider(chainId ?? 1);
     if (!provider) {
       setErr(Platform.OS === 'web'
         ? 'No Ethereum wallet found. Install MetaMask or Rabby in this browser.'
@@ -155,7 +159,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
     // surfaces an honest error and aborts (does NOT proceed to connectWallet on a dead session).
     setWcUri(null);
     try {
-      await pairOnrampWallet((uri) => setWcUri(uri));
+      await pairOnrampWallet((uri) => setWcUri(uri), chainId ?? 1);
     } catch (e: unknown) {
       setWcUri(null);
       const msg = e instanceof Error ? e.message : String(e);
@@ -202,7 +206,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
     // MC8 U6.3 — same web-first resolver as connect(). On submit the provider was non-null at connect
     // time; if it has since vanished (the EIP-1193 session dropped), this surfaces an honest error
     // rather than sending calldata into the void.
-    const provider = await resolveOnrampProvider();
+    const provider = await resolveOnrampProvider(chainId ?? 1);
     if (!provider) { setErr('Wallet disconnected.'); return; }
     // Parse the human amount into the smallest units (USDC = 6 decimals). MC1 units 2-4: use the
     // exact BigInt parser — `parseFloat`/`Math.pow` are lossy above 2^53.
