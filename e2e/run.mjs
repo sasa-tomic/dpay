@@ -31,7 +31,7 @@
 // harness/meta.mjs). No other change needed — the harness auto-discovers it, filters by it, and
 // regenerates FLOWS.md from it.
 import os from 'node:os';
-import { stopSession } from './harness/lib.mjs';
+import { stopSession, _testCtx, dumpDiagnosticsFor } from './harness/lib.mjs';
 import { loadTestsMeta, filterByToken, JOURNEYS } from './harness/meta.mjs';
 
 // Default concurrency: 12. The host has 16 cores; each parallel test is one chrome incognito context
@@ -118,7 +118,13 @@ async function runOne(test, timeoutScale) {
   if (typeof mod.run !== 'function') throw new Error(`${test.file}: no \`run\` export`);
   const base = test.meta?.timeoutMs ?? FALLBACK_TIMEOUT_MS;
   const effective = Math.round(base * timeoutScale);
-  await withTimeout(mod.run(), effective, test.file);
+  // Wrap mod.run() in an AsyncLocalStorage context carrying the test file. setup() (called inside
+  // the flow body) reads this store to register its freshly-created driver into the per-test
+  // registry, so runPool's catch can later reach it for the RED-path diagnostics dump. ALS
+  // propagates through native async/promise boundaries in Node 18+, surviving the
+  // runOne → mod.run → flow body → setup() chain. No flow file had to change.
+  const run = _testCtx.run(test.file, () => mod.run());
+  await withTimeout(run, effective, test.file);
 }
 
 /**
@@ -155,6 +161,16 @@ async function runPool(tests, concurrency, timeoutScale) {
       console.log(`  ✓ ${key}  ${((Date.now() - tStart) / 1000).toFixed(2)}s`);
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
+      // Dump diagnostics (screenshot/DOM/console/timeline/error) BEFORE recording the failure. The
+      // flow's own `finally { await env.stop(); }` has usually already closed the page by now, so
+      // screenshot/DOM are best-effort — but the in-memory timeline + consoleLog + error always
+      // land. Wrapped so a diagnostics failure can NEVER mask the real RED error.
+      try {
+        const dir = await dumpDiagnosticsFor(test.file, err);
+        if (dir) console.error(`  diagnostics dumped to ${dir}`);
+      } catch (diagErr) {
+        console.error(`  (diagnostics dump failed: ${diagErr instanceof Error ? diagErr.message : diagErr})`);
+      }
       results.set(key, { ok: false, ms: Date.now() - tStart, err });
       if (!firstFailure) firstFailure = { key, err };
       console.error(`  ✗ ${key}  RED after ${((Date.now() - tStart) / 1000).toFixed(2)}s: ${err.stack || err.message || err}`);

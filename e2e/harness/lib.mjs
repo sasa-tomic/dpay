@@ -9,6 +9,7 @@
 // `setup()` returns an `env` with `{ mode, relayBaseURL?, webBaseURL, driver, stop }`. `stop()` is
 // the single teardown path — closes the browser, stops the relay (if local), stops the web server.
 import { spawn } from 'node:child_process';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { existsSync } from 'node:fs';
@@ -20,6 +21,52 @@ import { buildWeb, serveWeb, pickFreePort } from './web.mjs';
 // immediately closes — nothing listens, so a connect yields ECONNREFUSED, the REAL "relay
 // unreachable" failure mode — not Chrome's ERR_UNSAFE_PORT artifact). See `13-offline`.
 export { pickFreePort };
+
+/**
+ * Per-test AsyncLocalStorage context. `runOne` (in run.mjs) wraps each `mod.run()` in
+ * `_testCtx.run(test.file, ...)`, so any code path inside the flow — including `setup()` — can read
+ * `_testCtx.getStore()` to discover WHICH test file it is running under. This is how `setup()`
+ * registers its freshly-created driver into the `_drivers` registry WITHOUT the flow having to pass
+ * its filename through (which would mean editing every flow's `setup()` call). AsyncLocalStorage
+ * propagates through native promises/async boundaries in Node 18+, so it survives the
+ * `runOne → mod.run → flow body → setup()` call chain. Standalone runs (`node tests/NN.mjs` directly)
+ * have no store → `setup()` skips registration (fine — no orchestrator to dump on RED).
+ */
+export const _testCtx = new AsyncLocalStorage();
+
+/**
+ * Per-test driver registry: `Map<testFile, Driver>`. Populated by `setup()` (keyed by the active
+ * `_testCtx` store) so `runPool`'s catch can reach the failing test's driver and call
+ * `dumpDiagnostics` on it. Concurrency-safe: each test file runs at most once per run, so the keys
+ * are disjoint across the parallel pool — no race.
+ */
+const _drivers = new Map();
+
+/** Register a driver under its test file (called from `setup()` when an `_testCtx` store is active). */
+export function _registerDriver(file, driver) {
+  if (file) _drivers.set(file, driver);
+}
+
+/** Drop a driver from the registry (called from the per-test `stop()` closure). */
+export function _unregisterDriver(file) {
+  if (file) _drivers.delete(file);
+}
+
+/**
+ * Dump diagnostics for the named test file's driver. Returns the dump directory path (or null if no
+ * driver is registered for that file, e.g. a standalone run). The dump itself is best-effort; any
+ * failure is logged and swallowed so it can never mask the real RED error that triggered the dump.
+ */
+export async function dumpDiagnosticsFor(file, err) {
+  const driver = _drivers.get(file);
+  if (!driver || typeof driver.dumpDiagnostics !== 'function') return null;
+  try {
+    return await driver.dumpDiagnostics(file, err);
+  } catch (e) {
+    console.error(`[lib] dumpDiagnosticsFor(${file}) failed: ${e instanceof Error ? e.message : e}`);
+    return null;
+  }
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..', '..');
@@ -164,9 +211,19 @@ export async function setup(opts = {}) {
   // Fresh incognito context per test → fresh localStorage → fresh identity (the isolation gate).
   const driver = await Driver.create(browser);
 
+  // Register this driver for diagnostics-on-RED lookup, keyed by the active test file (propagated
+  // through `_testCtx` by `runOne`). When run under the orchestrator this lets `runPool`'s catch
+  // reach the driver and dump screenshot/DOM/timeline at the RED point. Standalone runs (no store)
+  // skip registration — there's no orchestrator to call `dumpDiagnosticsFor`.
+  const testFile = _testCtx.getStore();
+  if (testFile) _registerDriver(testFile, driver);
+
   // `driver.close()` also asserts that the page produced no unexpected diagnostics. Never swallow
   // that assertion: a flow that looked correct after a page/network error must be RED.
-  const stop = async () => { await driver.close(); };
+  const stop = async () => {
+    if (testFile) _unregisterDriver(testFile);
+    await driver.close();
+  };
 
   try {
     if (!opts.noWeb) {
