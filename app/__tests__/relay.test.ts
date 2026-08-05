@@ -74,6 +74,33 @@ describe('relay fetch default timeout (PR8 safety net)', () => {
     await expect(p).rejects.toThrow('aborted');
   });
 
+  // A caller that takes EXPLICIT responsibility for its deadline (passes a signal) must NOT be
+  // silently capped by the 10s backstop. A real example: ckBTC deposit_address is an IC update call
+  // (relay → facade → minter) observed at 5–7s on mainnet and occasionally longer; DepositSheet arms
+  // a 20s controller (DEPOSIT_ADDRESS_TIMEOUT_MS). Before this fix the backstop always armed and
+  // "first abort wins" capped that fetch at 10s, defeating the 20s headroom and re-introducing the
+  // "Couldn't load your deposit address" failure the separate-controller decoupling was meant to
+  // prevent. The backstop is a SAFETY NET for callers that OMIT their signal only.
+  test('a caller signal with a LONGER deadline is NOT capped at the backstop (caller owns the deadline)', async () => {
+    jest.useFakeTimers();
+    const getCaptured = installNeverResolvingFetch();
+    const {depositInfo} = require('../services/relay');
+
+    const callerCtrl = new AbortController();
+    const callerTimer = setTimeout(() => callerCtrl.abort(), 20000);
+    const p = depositInfo('http://relay.example', 1, callerCtrl.signal);
+    p.catch(() => {}); // suppress unhandled rejection so the RED assertion below can report
+    const signal = getCaptured()?.signal;
+
+    jest.advanceTimersByTime(10000); // cross the 10s backstop
+    expect(signal!.aborted).toBe(false); // caller's 20s deadline must win, not the 10s backstop
+
+    jest.advanceTimersByTime(10000); // reach the caller's 20s deadline
+    expect(signal!.aborted).toBe(true);
+    clearTimeout(callerTimer);
+    await expect(p).rejects.toThrow('aborted');
+  });
+
   test('a caller signal already aborted before the call propagates immediately', async () => {
     jest.useFakeTimers();
     const getCaptured = installNeverResolvingFetch();

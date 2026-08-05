@@ -24,38 +24,26 @@ const DEFAULT_RELAY_TIMEOUT_MS = 10000;
  *  outlives the compose. Composed manually with `AbortController` + `setTimeout` instead of
  *  `AbortSignal.any`/`AbortSignal.timeout` — those are ES2024/ES2022 statics not present in this
  *  project's TS `lib` (tops out at es2022) and not guaranteed on every RN/Hermes runtime, so the
- *  manual compose is the portable choice. */
+ *  manual compose is the portable choice.
+ *
+ *  The backstop is a SAFETY NET for callers that OMIT their signal. A caller that PROVIDES a signal
+ *  has taken explicit responsibility for the deadline — its timer may be SHORTER than the backstop
+ *  (every fast poll) or LONGER (a slow IC update like ckBTC `deposit_address`, 5–7s+ on mainnet, for
+ *  which DepositSheet arms a 20s controller). Arming the backstop unconditionally would cap every
+ *  caller at the backstop ("first abort wins"), silently overriding a deliberate longer deadline —
+ *  a real bug that defeated DEPOSIT_ADDRESS_TIMEOUT_MS=20s. So when a caller signal is present it is
+ *  returned AS-IS (the caller owns the timer); the backstop arms only for omitted-signal callers. */
 function composeTimeout(callerSignal?: AbortSignal, timeoutMs = DEFAULT_RELAY_TIMEOUT_MS): {signal: AbortSignal; cancel: () => void} {
+  if (callerSignal) return {signal: callerSignal, cancel: () => {}};
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  const cancel = () => clearTimeout(timer);
-  if (callerSignal) {
-    if (callerSignal.aborted) {
-      // Caller already aborted before we started — propagate immediately and don't arm the timer.
-      cancel();
-      ctrl.abort();
-    } else {
-      // Forward a LATE caller abort to our controller (and cancel the timer). `{once: true}` so the
-      // listener removes itself on fire; if the fetch settles normally first the listener stays
-      // attached to the caller's single-use signal, which is GC'd with it (harmless — a controller
-      // aborts at most once).
-      callerSignal.addEventListener(
-        'abort',
-        () => {
-          cancel();
-          ctrl.abort();
-        },
-        {once: true},
-      );
-    }
-  }
-  return {signal: ctrl.signal, cancel};
+  return {signal: ctrl.signal, cancel: () => clearTimeout(timer)};
 }
 
-/** Compose an optional caller signal with the default timeout (signal-only view). The existing
- *  exported relay clients below use this as the 10s backstop; they pass the caller's signal and rely
- *  on the default. The timer fires as a no-op-at-timeout on a normal settle (harmless — the fetch is
- *  already done), which is unchanged from before `composeTimeout` was split out. */
+/** Compose an optional caller signal with the default timeout (signal-only view). The exported
+ *  relay clients below use this; when the caller passes a signal that signal is returned AS-IS
+ *  (caller owns the deadline — see `composeTimeout`), and when the caller omits it the 10s backstop
+ *  arms. */
 function withDefaultTimeout(callerSignal?: AbortSignal, timeoutMs = DEFAULT_RELAY_TIMEOUT_MS): AbortSignal {
   return composeTimeout(callerSignal, timeoutMs).signal;
 }
