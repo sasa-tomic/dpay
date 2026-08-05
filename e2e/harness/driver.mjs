@@ -109,8 +109,8 @@ export class Driver {
     this.page.on('requestfailed', (req) => {
       const url = req.url();
       const errorText = req.failure()?.errorText ?? 'unknown';
-      const navigationAbort = this.navigationDepth > 0 && errorText === 'net::ERR_ABORTED';
-      if (this.closing || navigationAbort || url.endsWith('/favicon.ico') || this.isRequestFailureAllowed(url)) return;
+      const intentionalAbort = errorText === 'net::ERR_ABORTED';
+      if (this.closing || intentionalAbort || url.endsWith('/favicon.ico') || this.isRequestFailureAllowed(url)) return;
       this.recordUnexpectedDiagnostic(`requestfailed: ${url} — ${errorText}`);
     });
   }
