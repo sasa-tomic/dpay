@@ -5,6 +5,19 @@
 Solo founder & engineer building **dpay** (working name TBD). Contact: sato.dpay@kalaj.org.
 Currently pre-seed: building the investor proof-of-concept, then a first pilot.
 
+## CURRENT TOP PRIORITY — native-asset in/out (BTC / ETH / SOL)  (set 2026-08-06)
+
+**The single highest-priority product direction.** Getting BTC, ETH, and SOL **in and out** of the wallet, as **convenient as possible** for the user, is the top of the backlog for every future session until it's done. Concretely:
+
+- **In (deposit / add money):** the user must be given a **real native account/address to send funds to** on each chain (a real BTC/ETH/SOL address) — IC Chain Fusion ck-minters derive these per-principal. Other deposit options (partner hand-off) are fine too, but the native-address path is the primary UX.
+- **Out (withdraw / cash out):** the mirror — burn the chain-key asset and send native BTC/ETH/SOL to the user's address.
+- **Testnet coverage for BOTH directions** is the bar (paying in *and* withdrawing), proven live, not just wiring-reachable. Testnet4 BTC / Sepolia / Solana devnet are the targets.
+- **Convenience is a hard requirement, not a nice-to-have.** One-tap address, copy/QR, clear confirmations, honest fees/time.
+
+This is an *asset-ramp* effort layered on the existing facade (the facade is minter-family-agnostic and already dispatches `CkBtcUtxo` / `CkEthErc20` / `CkSol`). Scope: deposit-address UX, refresh/confirm UX, withdraw UX, per-asset testnet end-to-end proof, and surfacing these actions prominently in the asset-detail surface. The offline-pay rail is unaffected and must stay untouched.
+
+When in doubt about sequencing, **pick the work that gets a user real native BTC/ETH/SOL into or out of the wallet fastest.**
+
 ## Non-negotiable: how Claude must be able to iterate
 
 These are hard requirements, **not preferences**. Do not accept a design that violates them — restructure the design instead.

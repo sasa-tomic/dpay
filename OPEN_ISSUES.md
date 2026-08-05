@@ -41,7 +41,9 @@
 
 ## NEXT SESSION — work order (read this before deferring anything)
 
-**Several items below were previously mislabeled "founder outer-loop" and safe-punted. That was wrong.** They are NOT blocked — they should be done in the next session(s). Only the items in the explicit **POSTPONE** list are genuinely blocked on founder action or external steps; treat everything else as in-scope autonomous work. Founder directive (2026-08-05): *only the genuinely-blocked tasks get postponed.*
+**🔴 TOP PRIORITY (founder directive, 2026-08-06): native-asset in/out — BTC / ETH / SOL.** Getting BTC, ETH, and SOL **in and out** of the wallet, as convenient as possible for the user, is the single highest-priority product direction until done. See the "CURRENT TOP PRIORITY" section at the top of `CLAUDE.md` for the full directive. Concretely: (a) a real native deposit address per chain (ck-minter per-principal derivation; BTC/ETH/SOL); (b) the withdraw mirror (burn chain-key → send native); (c) **testnet end-to-end for BOTH directions** (Testnet4 BTC / Sepolia / Solana devnet) proven live, not just wiring-reachable; (d) one-tap, copy/QR, clear confirmations, honest fees/time. The facade already dispatches `CkBtcUtxo` / `CkEthErc20` / `CkSol` and is minter-family-agnostic; `CkSol` (family=2) is **declared but not yet wired** in the facade deposit/withdraw proxies — that's the SOL gap. The offline-pay rail is unaffected. **When sequencing, pick the work that gets real native BTC/ETH/SOL into or out of the wallet fastest.**
+
+**Several items below were previously mislabeled "founder outer-loop" and safe-punted. That was wrong.** They are NOT blocked — they should be done in the next session(s). Only the items in the explicit **POSTPONE** list are genuinely blocked on founder action or external steps; treat everything else as in-scope autonomous work. Founder directive (2026-08-05): *only the genuinely-blocked tasks get postponed.* (Items 1–8 below are all ✅ shipped as of 2026-08-06; they remain as the completion record. The TOP PRIORITY block above supersedes them as the active work order.)
 
 ### DO NEXT (unblocked — high value first)
 
