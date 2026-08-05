@@ -7,12 +7,20 @@
 // independent — the app's first-run key generation runs every time, with a throwaway identity.
 import puppeteer from 'puppeteer-core';
 import { mkdirSync, statSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { resolveExecutablePath } from './browser.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SHOTS_DIR = join(__dirname, '..', 'shots');
+const FAILURES_DIR = join(SHOTS_DIR, 'failures');
+
+// Timeline ring-buffer + console-log caps. Kept small so the per-call push is trivial (the suite
+// makes thousands of driver calls); the dump only needs the last N actions to reconstruct what a
+// failing flow was doing right before it went RED.
+const TIMELINE_MAX = 200;
+const CONSOLE_MAX = 500;
 
 // iPhone-12-ish viewport — the RN app's styles are designed for a phone; this keeps the layout
 // correct (and matches what golden-shot visual regression would compare against).
@@ -78,6 +86,12 @@ export class Driver {
     this.page.on('console', (m) => {
       const t = m.type();
       const text = m.text();
+      // Buffer EVERY console message (all types) for the RED-path diagnostics dump. Capped; the
+      // push is O(1) and only runs while the buffer has room. This is ADDITIVE — the existing
+      // fail-closed diagnostic-recording below is unchanged.
+      if (this.consoleLog.length < CONSOLE_MAX) {
+        this.consoleLog.push({ t: Date.now(), type: t, text });
+      }
       // Chrome emits this URL-less duplicate for request failures. `requestfailed` below is the
       // authoritative, URL-aware gate and can distinguish an explicitly allowed dead relay.
       if (t === 'error' && text.startsWith('Failed to load resource:')) return;
@@ -134,6 +148,12 @@ export class Driver {
     this.navigationDepth = 0;
     this.closing = false;
     this.closed = false;
+    // Action timeline (ring buffer) + full console-message buffer, captured for the RED-path
+    // diagnostics dump. Both are in-memory only — they survive context close, so the dump can
+    // always write actions.json + console.log even when the page is already torn down.
+    this.timeline = [];
+    this.timelineHead = 0;
+    this.consoleLog = [];
   }
 
   /** Explicitly permit transport failures to one origin. Offline flows must call this before they
@@ -162,6 +182,28 @@ export class Driver {
     console.error(`[driver] ${message}`);
   }
 
+  /**
+   * Push a timeline entry `{t, op, arg}` at the START of a driver method (before the await). O(1)
+   * ring buffer — once full, overwrites the oldest entry in place via `timelineHead`. The arg is
+   * flattened to a SHORT string by `_fmtTimelineArg` (never JSON.stringify large objects on the hot
+   * path; testIDs are tiny strings). Called thousands of times per run — must stay trivial.
+   */
+  _recordTimeline(op, arg) {
+    const entry = { t: Date.now(), op, arg: _fmtTimelineArg(arg) };
+    if (this.timeline.length < TIMELINE_MAX) {
+      this.timeline.push(entry);
+    } else {
+      this.timeline[this.timelineHead] = entry;
+      this.timelineHead = (this.timelineHead + 1) % TIMELINE_MAX;
+    }
+  }
+
+  /** Chronologically-ordered view of the ring buffer (oldest → newest). */
+  _orderedTimeline() {
+    if (this.timeline.length < TIMELINE_MAX) return this.timeline;
+    return [...this.timeline.slice(this.timelineHead), ...this.timeline.slice(0, this.timelineHead)];
+  }
+
   assertNoUnexpectedDiagnostics() {
     if (this.unexpectedDiagnostics.size === 0) return;
     const details = [...this.unexpectedDiagnostics].map((d) => `  - ${d}`).join('\n');
@@ -173,6 +215,7 @@ export class Driver {
    *  `domcontentloaded` for a returning-user page that mounts the Wallet and starts continuous polls
    *  (balance 2.5s / history 5s / deposit 10s) — networkidle0 may never settle there. */
   async navigate(base, path = '/', opts = {}) {
+    this._recordTimeline('navigate', `${base}${path}`);
     this.baseURL = base;
     const url = `${base}${path}`;
     const timeoutMs = opts.timeoutMs ?? 8_000;
@@ -199,6 +242,7 @@ export class Driver {
 
   /** Find an element by RN `testID` (RNW renders it as `data-testid`). Returns the ElementHandle. */
   async findByTestID(testID, opts = {}) {
+    this._recordTimeline('findByTestID', testID);
     const timeoutMs = opts.timeoutMs ?? 5_000;
     try {
       return await this.page.waitForSelector(`[data-testid="${cssEscape(testID)}"]`, { timeout: timeoutMs });
@@ -225,6 +269,7 @@ export class Driver {
   /** Click the element matched by `testID`. Scrolls into view first. Retries on element-detachment
    *  (React re-renders under fast polls can unmount a node between find and click). */
   async click(testID, opts = {}) {
+    this._recordTimeline('click', testID);
     const attempts = opts.retries ?? 3;
     for (let i = 1; i <= attempts; i++) {
       const el = await this.findByTestID(testID, opts);
@@ -246,6 +291,7 @@ export class Driver {
    *  typed text REPLACES the current value (reliable for RN-web controlled inputs, including the
    *  pre-filled decimal amount field — triple-click + Backspace was racy and left partial values). */
   async type(testID, text, opts = {}) {
+    this._recordTimeline('type', `${testID}:${text}`);
     const el = await this.findByTestID(testID, opts);
     await el.focus();
     // Select all current text so the subsequent keystrokes replace it (standard browser behavior).
@@ -259,6 +305,7 @@ export class Driver {
   /** Read the `.value` of the input matched by `testID` (readText reads textContent, which is empty
    *  for `<input>`/TextInput). Use this to verify what a controlled input actually holds. */
   async readInputValue(testID, opts = {}) {
+    this._recordTimeline('readInputValue', testID);
     const el = await this.findByTestID(testID, opts);
     return await el.evaluate((node) => (node.value ?? '').toString());
   }
@@ -268,6 +315,7 @@ export class Driver {
    * has NO testID — its placeholder is "e.g. Alice"). Used when a flow's only handle is text.
    */
   async typeByPlaceholder(placeholder, text, opts = {}) {
+    this._recordTimeline('typeByPlaceholder', `${placeholder}:${text}`);
     const timeoutMs = opts.timeoutMs ?? 5_000;
     const el = await this.page.waitForSelector(`input[placeholder="${cssEscape(placeholder)}"]`, { timeout: timeoutMs });
     await el.click({ clickCount: 3 });
@@ -277,6 +325,7 @@ export class Driver {
 
   /** Read the textContent of the element matched by `testID` (trimmed). */
   async readText(testID, opts = {}) {
+    this._recordTimeline('readText', testID);
     const el = await this.findByTestID(testID, opts);
     return await el.evaluate((node) => (node.textContent ?? '').trim());
   }
@@ -301,12 +350,14 @@ export class Driver {
    *  injected value). Forwards extra args to `page.evaluate(fn, ...args)` — e.g.
    *  `driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), requestQR)` injects `requestQR` into the seam. */
   async eval(fn, ...args) {
+    this._recordTimeline('eval', fn);
     return this.page.evaluate(fn, ...args);
   }
 
   /** Press a keyboard key (e.g. 'Escape', 'Enter') via a real DOM event. Powers the keyboard-shortcut
    *  surface (Escape-to-close on sheets — plan flow 14). Throws with the key name on failure. */
   async pressKey(key) {
+    this._recordTimeline('pressKey', key);
     try {
       await this.page.keyboard.press(key);
     } catch (e) {
@@ -316,6 +367,7 @@ export class Driver {
 
   /** Wait until NO element matches `testID` (e.g. a sheet closed and unmounted). */
   async waitGone(testID, opts = {}) {
+    this._recordTimeline('waitGone', testID);
     const timeoutMs = opts.timeoutMs ?? 3_000;
     try {
       await this.page.waitForFunction(
@@ -332,6 +384,7 @@ export class Driver {
    *  DOM (no wait, no throw). Use for "should be hidden" / "should be shown" guards that must not
    *  block on a timeout. Distinct from `findByTestID` (which waits + throws). */
   async isPresent(testID) {
+    this._recordTimeline('isPresent', testID);
     return await this.page.evaluate(
       (sel) => document.querySelector(sel) != null,
       `[data-testid="${cssEscape(testID)}"]`,
@@ -340,6 +393,7 @@ export class Driver {
 
   /** Wipe localStorage (forces the app's first-run identity flow on the next load). */
   async clearStorage() {
+    this._recordTimeline('clearStorage', null);
     await this.page.evaluate(() => { try { localStorage.clear(); } catch {} });
   }
 
@@ -360,7 +414,7 @@ export class Driver {
   }
 
   /** Close the context (and the browser if this Driver owns it — a shared-browser Driver never
-   *  tears down the session's browser). Safe to call multiple times. */
+    *  tears down the session's browser). Safe to call multiple times. */
   async close() {
     const failures = [];
     if (!this.closed) {
@@ -377,6 +431,87 @@ export class Driver {
     if (failures.length === 1) throw failures[0];
     if (failures.length > 1) throw new AggregateError(failures, '[driver] teardown failed');
   }
+
+  /**
+   * Dump diagnostics for a RED test to `e2e/shots/failures/<label>-<timestamp>/`. Writes five
+   * artifacts; each capture is BEST-EFFORT (a closed page makes screenshot/DOM fail, but the
+   * in-memory timeline + console + unexpected-diagnostics survive context close, so those always
+   * land). A failure to capture one artifact is logged and NEVER aborts the others. Returns the
+   * dump directory path (or null if the dir could not be created).
+   *
+   * Reachability note: by the time this runs (from `runPool`'s catch), the flow's own
+   * `finally { await env.stop(); }` has usually closed the context — so `page.screenshot()` and
+   * `page.content()` will throw. The ring-buffer timeline + consoleLog arrays are instance state,
+   * so actions.json + console.log + error.txt are the reliably-captured artifacts for real flows.
+   * (The page is still alive for flows that throw WITHOUT a stop-finally, e.g. a throwaway probe.)
+   */
+  async dumpDiagnostics(label, err) {
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const safeLabel = String(label ?? 'unknown').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80) || 'unknown';
+    const dir = join(FAILURES_DIR, `${safeLabel}-${ts}`);
+    try {
+      mkdirSync(dir, { recursive: true });
+    } catch (e) {
+      console.error(`[driver] dumpDiagnostics: could not create ${dir}: ${e instanceof Error ? e.message : e}`);
+      return null;
+    }
+
+    // screenshot.png — best-effort (page may be closed).
+    await this._dumpArtifact(dir, 'screenshot.png', async () => {
+      await this.page.screenshot({ path: join(dir, 'screenshot.png'), type: 'png', fullPage: false });
+    });
+    // dom.html — best-effort (page may be closed).
+    await this._dumpArtifact(dir, 'dom.html', async () => {
+      const html = await this.page.content();
+      await writeFile(join(dir, 'dom.html'), html);
+    });
+    // console.log — the recorded diagnostics Set + the buffered console timeline (in-memory, reliable).
+    await this._dumpArtifact(dir, 'console.log', async () => {
+      await writeFile(join(dir, 'console.log'), this._formatConsoleDump());
+    });
+    // actions.json — the ring-buffer timeline, chronologically ordered (in-memory, reliable).
+    await this._dumpArtifact(dir, 'actions.json', async () => {
+      await writeFile(join(dir, 'actions.json'), JSON.stringify(this._orderedTimeline(), null, 2));
+    });
+    // error.txt — the thrown error's message + stack (if provided).
+    if (err) {
+      await this._dumpArtifact(dir, 'error.txt', async () => {
+        const text = err.stack || err.message || String(err);
+        await writeFile(join(dir, 'error.txt'), text);
+      });
+    }
+    return dir;
+  }
+
+  /** Run a single artifact write; any throw is logged and swallowed so the other artifacts still
+   *  land. No silent errors — every failure is named on stderr. */
+  async _dumpArtifact(dir, name, write) {
+    try {
+      await write();
+    } catch (e) {
+      console.error(`[driver] dumpDiagnostics: ${name} capture failed: ${e instanceof Error ? e.message : e}`);
+    }
+  }
+
+  /** Render the console dump: the unexpected-diagnostics Set first (the fail-closed signal), then
+   *  the full buffered console timeline (info/warn/error, all types). Pure string build — cheap. */
+  _formatConsoleDump() {
+    const lines = [];
+    lines.push('=== unexpected diagnostics (pageerror / console.error / requestfailed) ===');
+    if (this.unexpectedDiagnostics.size === 0) {
+      lines.push('(none)');
+    } else {
+      for (const d of this.unexpectedDiagnostics) lines.push(`  - ${d}`);
+    }
+    lines.push('');
+    lines.push(`=== console timeline (${this.consoleLog.length} entries, capped at ${CONSOLE_MAX}) ===`);
+    if (this.consoleLog.length === 0) {
+      lines.push('(no console messages buffered)');
+    } else {
+      for (const e of this.consoleLog) lines.push(`[${new Date(e.t).toISOString()}] console.${e.type}: ${e.text}`);
+    }
+    return lines.join('\n');
+  }
 }
 
 /** Minimal CSS-string escaper for `data-testid` attribute selectors (handles quotes / brackets). */
@@ -384,6 +519,27 @@ function cssEscape(s) {
   // testIDs in this app are simple (`btn-create`, `balance`, `tab-pay`); a backslash escape of any
   // char outside [A-Za-z0-9_-] is sufficient and overcautious rather than risky.
   return s.replace(/[^A-Za-z0-9_-]/g, (c) => `\\${c}`);
+}
+
+/**
+ * Flatten a timeline arg to a SHORT string for the ring-buffer entry. CHEAP by design — the suite
+ * makes thousands of driver calls and this runs on every one. Strings are capped at 40 chars; tiny
+ * opts objects (`{timeoutMs: 5000}`) get a capped JSON.stringify; functions (the `eval` first arg)
+ * become `fn:<name>`; large objects are never deep-stringified (the cap truncates the surface).
+ */
+function _fmtTimelineArg(arg) {
+  if (arg == null) return '';
+  const type = typeof arg;
+  if (type === 'string') return arg.length > 40 ? arg.slice(0, 40) + '…' : arg;
+  if (type === 'number' || type === 'boolean') return String(arg);
+  if (type === 'function') return arg.name ? `fn:${arg.name}` : 'fn';
+  try {
+    const s = JSON.stringify(arg);
+    if (s === undefined) return String(arg);
+    return s.length > 80 ? s.slice(0, 80) + '…' : s;
+  } catch {
+    return String(arg);
+  }
 }
 
 /** Page-start CSS injection (defined outside the class so it serializes cleanly to the browser). */
