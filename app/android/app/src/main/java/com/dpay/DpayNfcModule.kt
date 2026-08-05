@@ -130,7 +130,11 @@ class DpayNfcModule(reactContext: ReactApplicationContext) :
     /** Enter reader mode and collect the payer's tap for this request (hex). */
     @ReactMethod
     fun startReader(requestHex: String, promise: Promise) {
-        val act = currentActivity ?: run { promise.reject("dpay_nfc", "no foreground activity"); return }
+        // RN 0.80 deprecated ReactContextBaseJavaModule.getCurrentActivity() in favor of
+        // reactApplicationContext.currentActivity (the former was a Java method, accessible from
+        // Kotlin as the `currentActivity` property; the new path is a Kotlin property on
+        // ReactApplicationContext).
+        val act = reactApplicationContext.currentActivity ?: run { promise.reject("dpay_nfc", "no foreground activity"); return }
         try { DpayNfc.startReader(act, unhex(requestHex)); promise.resolve(null) } catch (e: Throwable) { promise.reject("dpay_nfc", e) }
     }
 
@@ -147,7 +151,7 @@ class DpayNfcModule(reactContext: ReactApplicationContext) :
 
     @ReactMethod
     fun stopReader(promise: Promise) {
-        currentActivity?.let { DpayNfc.stopReader(it) }
+        reactApplicationContext.currentActivity?.let { DpayNfc.stopReader(it) }
         promise.resolve(null)
     }
 }
