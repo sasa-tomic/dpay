@@ -2,17 +2,18 @@ import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {SafeAreaView, StatusBar, View, Text, Pressable, ScrollView, AppState} from 'react-native';
 import {C} from '../config/palette';
 import {S} from '../styles';
-import {STORAGE_KEY, POLL, TOP_UP_CENTS, BALANCE_TIMEOUT_MS, FAUCET_TIMEOUT_MS} from '../config/constants';
+import {TOP_UP_CENTS, FAUCET_TIMEOUT_MS} from '../config/constants';
 import {familyDisplay, fmtCurrencyAmount} from '../config/catalog';
-import {usd, short, isMintSentinel, fmtTime, base} from '../lib/format';
+import {usd, base} from '../lib/format';
 import {cmpRaw, applyOffline} from '../lib/amount';
-import type {Identity, Txn, TransactionsRow, NfcStatus} from '../lib/types';
+import type {Identity, NfcStatus} from '../lib/types';
 import {DpayCore} from '../services/native';
 import {loadDeposit} from '../services/ckerc20Persist';
 import {fetchWithTimeout, readJsonOrEmpty} from '../services/relay';
 import {useHotkeys} from '../hooks/useHotkeys';
 import {useCatalog} from '../hooks/useCatalog';
 import {useBalancePoll} from '../hooks/useBalancePoll';
+import {useTransactionHistory} from '../hooks/useTransactionHistory';
 import {readDepositDeepLink} from '../lib/deepLink';
 import {Wordmark} from './Logo';
 import {HotkeyHint} from './HotkeyHint';
@@ -35,7 +36,6 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
   // Balances sheet. Pay/Receive still settle in whatever currency a request specifies (unchanged).
   const [currentCurrency, setCurrentCurrency] = useState(0);
   const [balancesOpen, setBalancesOpen] = useState(false);
-  const [history, setHistory] = useState<Txn[]>([]);
   const [nfc, setNfc] = useState<NfcStatus>('unknown');
   // Demo top-up: a single click adds $100 of demo currency via /api/v1/faucet. The button sits next
   // to the balance so users find it without hunting. `topUpBusy` drives the spinner; `topUpErr`
@@ -76,10 +76,11 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
     balance, online, assetBalances, offlineSpent,
     markOfflinePaid, resetDeduction, setBalance, setOnline,
   } = useBalancePoll({relayUrl, publicHex: identity.publicHex, displayAssets, displayCurrencyIds});
-  // The full set of currency ids to fetch HISTORY for (H2): every catalog currency (DEMO_USD + every
-  // non-primary asset), since transactions_of is per-currency and a hardcoded currency=0 hid non-USD
-  // payments. Stable signature for the history effect deps (mirrors displayCurrencyIds).
-  const catalogCurrencyIds = useMemo(() => catalog.map(c => c.currency).join(','), [catalog]);
+  // Durable transaction history sourced from the ledger. Extracted verbatim into
+  // hooks/useTransactionHistory.ts (Effect C): the per-currency fan-out + dedup-by-nonce + sort +
+  // direction-derivation all move in. catalogCurrencyIds (the stable dep signature) is now internal
+  // to the hook (computed from `catalog`). `onActivity` below still calls refreshHistory.
+  const {history, refreshHistory} = useTransactionHistory({relayUrl, publicHex: identity.publicHex, catalog});
 
   // Read the device NFC radio state once (re-checked when the app returns to the foreground, since
   // the user may toggle NFC in system settings). Purely informational for the status chip; failure
@@ -129,73 +130,9 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Durable transaction history sourced from the ledger (the canister records every settled payment;
-  // the relay surfaces it at GET /api/v1/transactions/{hex}). This replaces the ephemeral in-memory
-  // list that was empty on every restart. Each row's direction (in/out) is derived by comparing the
-  // queried account to `from`.
-  //
-  // H2: history is fetched for EVERY catalog currency (not just currency=0). Each currency lives on
-  // a separate ledger, and `transactions_of` is per-currency, so a single hardcoded currency=0 hid
-  // every ckBTC/ckUSDC payment. We fan out one bounded fetch per currency, best-effort per currency
-  // (a transient failure on one must NOT blank the others — only the currencies that respond
-  // contribute), union the rows, dedup by nonce, and sort newest-first. If EVERY fetch fails
-  // (offline), the prior list is kept — mirroring the old single-fetch behavior so an outage never
-  // blanks the RECENT card.
-  const refreshHistory = useCallback(async () => {
-    const currencies = catalog.map(c => c.currency);
-    let anySucceeded = false;
-    const perCurrency = await Promise.all(currencies.map(async (currency) => {
-      try {
-        const r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/transactions/${identity.publicHex}?currency=${currency}&limit=20`, undefined, BALANCE_TIMEOUT_MS);
-        const j = await r.json().catch(() => null);
-        if (r.ok && j && Array.isArray(j.transactions)) { anySucceeded = true; return j.transactions as TransactionsRow[]; }
-        return [];
-      } catch { return []; }
-    }));
-    if (!anySucceeded) return; // offline / all failed: keep the existing list
-    const me = identity.publicHex.toLowerCase();
-    // Dedup by nonce (a payment id is globally unique) across currencies, then sort the UNION
-    // newest-first by raw timestamp — each per-currency fetch is already newest-first within its own
-    // currency, but mixed currencies must interleave by time.
-    const seen = new Set<string>();
-    const all: TransactionsRow[] = [];
-    for (const rows of perCurrency) {
-      for (const rec of rows) {
-        if (seen.has(rec.nonce)) continue;
-        seen.add(rec.nonce);
-        all.push(rec);
-      }
-    }
-    all.sort((a, b) => b.timestamp - a.timestamp);
-    setHistory(all.map((rec): Txn => {
-      const dir: 'out' | 'in' = rec.from.toLowerCase() === me ? 'out' : 'in';
-      const counterparty = dir === 'out' ? rec.to.toLowerCase() : rec.from.toLowerCase();
-      const fromName = rec.from_name ?? '';
-      const toName = rec.to_name ?? '';
-      const memo = rec.memo ?? '';
-      // N6/H3 RESOLVED: the counterparty's display name now rides the signed wire (from_name/to_name)
-      // and is returned per row by the relay. For an OUT row (I am `from`) the counterparty is `to`
-      // → show to_name; for an IN row the counterparty is `from` → show from_name. Fall back to the
-      // short hex ONLY when no name was signed (unnamed payment); the mint sentinel keeps its label.
-      const who = isMintSentinel(counterparty)
-        ? (dir === 'in' ? 'Demo funds' : 'Withdrawal')
-        : (dir === 'out' ? (toName || short(rec.to)) : (fromName || short(rec.from)));
-      return {nonce: rec.nonce, amount: rec.amount, who, memo, time: fmtTime(rec.timestamp), dir, currency: rec.currency};
-    }));
-  }, [relayUrl, identity.publicHex, catalogCurrencyIds]);
-
-  // Fetch on mount and re-poll while online (the balance poll runs every 2.5s; history every 5s is
-  // plenty for a list that only changes when a payment settles). Clears on unmount.
-  useEffect(() => {
-    let alive = true;
-    const wrapped = () => { if (alive) refreshHistory(); };
-    wrapped();
-    const id = setInterval(wrapped, POLL.history);
-    return () => { alive = false; clearInterval(id); };
-  }, [refreshHistory]);
-
   // Children signal that a payment activity happened; the ledger-sourced `refreshHistory` is the SOLE
-  // writer to `history` (fetched eagerly here — no optimistic in-memory state). Stable across renders.
+  // writer to `history` (fetched eagerly inside the hook — no optimistic in-memory state). Stable
+  // across renders.
   const onActivity = useCallback(() => { refreshHistory(); }, [refreshHistory]);
   // The DEMO header balance (currency 0): when online the polled balance is authoritative (the
   // deduction resets on every successful poll); when offline we apply the per-currency deduction.
