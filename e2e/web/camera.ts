@@ -35,7 +35,8 @@ installGlobalHook();
 
 // Inert React component — the real app only renders <Camera/> when permission is granted AND a
 // device exists. Our `useCameraPermission` returns `hasPermission: false`, so the placeholder branch
-// ("camera permission needed") renders instead. The test driver then injects via the seam.
+// (QrScanner.tsx: "Point your camera at a payment code to pay") renders instead. The test driver then
+// injects via the seam.
 export const Camera = () => null;
 
 export function useCameraDevice(_position?: string) {
@@ -44,9 +45,9 @@ export function useCameraDevice(_position?: string) {
 }
 
 export function useCameraPermission() {
-  // Report no permission so the placeholder ("Grant camera" button) renders, which matches what a
-  // real user sees before granting. The button's onPress is `requestPermission` — a no-op here; the
-  // test driver does not click it, it injects via __DPAY_TEST_SCAN.
+  // Report no permission so the placeholder (QrScanner.tsx's "Allow camera scan" button) renders,
+  // which matches what a real user sees before granting. The button's onPress is `requestPermission`
+  // — a no-op here; the test driver does not click it, it injects via __DPAY_TEST_SCAN.
   return {
     hasPermission: false,
     requestPermission: () => Promise.resolve(false),
