@@ -1251,8 +1251,8 @@ async fn currencies_route_returns_demo_catalog() {
     let rows = body["currencies"].as_array().expect("currencies array");
     assert_eq!(
         rows.len(),
-        5,
-        "demo catalog = DEMO_USD + ckBTC + ckUSDC + ckUSDT + ckDAI: {body}"
+        6,
+        "demo catalog = DEMO_USD + ckBTC + ckUSDC + ckUSDT + ckDAI + native-ETH: {body}"
     );
 
     // DEMO_USD (currency 0): the mintable $ faucet asset, no ramp.
@@ -1370,6 +1370,32 @@ async fn currencies_route_returns_demo_catalog() {
     ); // real DAI ERC-20
     assert_eq!(ckdai["onramp"], "Direct");
     assert_eq!(ckdai["offramp"], "Unavailable"); // Fork-C — NO cash-out
+
+    // Native ckETH (currency 5): a CkEthErc20-family currency with `token_contract == None`, the
+    // discriminator that selects the native-ETH deposit/withdraw path (depositEth / withdraw_eth)
+    // instead of the ERC-20 path. This is the catalog entry the native-ETH withdraw e2e (flow 44)
+    // drives. Ramp honesty: onramp=Direct (single payable depositEth tx), offramp=Direct
+    // (withdraw_eth — the Cash-out button renders; the no-swap Unavailable gate stays closed for the
+    // ERC-20 tokens above). 18-dec Wei, same ckETH minter + chain as the ckERC20 entries.
+    let cketh = rows
+        .iter()
+        .find(|r| r["currency"] == 5)
+        .expect("native ckETH currency present");
+    assert_eq!(cketh["mintable"], false);
+    assert_eq!(cketh["symbol"], "Ξ");
+    assert_eq!(cketh["decimals"], 18);
+    assert_eq!(cketh["display_decimals"], 18);
+    assert_eq!(cketh["minter_family"], "CkEthErc20");
+    assert_eq!(cketh["wrapper_name"], "ckETH");
+    assert_eq!(cketh["backing_symbol"], "ETH");
+    assert_eq!(cketh["network"], "Ethereum");
+    assert_eq!(cketh["chain_id"], 1); // Ethereum mainnet
+    assert_eq!(cketh["fee"], "10000000000000000"); // 0.01 ETH at 18 dec = 1e16 raw
+    assert_eq!(cketh["cap"], "100000");
+    // THE KEY FIELD: token_contract must be null so the app treats this as native ETH (not ERC-20).
+    assert_eq!(cketh["token_contract"], serde_json::Value::Null);
+    assert_eq!(cketh["onramp"], "Direct"); // ckETH helper depositEth (single payable tx)
+    assert_eq!(cketh["offramp"], "Direct"); // withdraw_eth — Cash-out button renders
 }
 
 // --- ckERC-20 onramp surface (ckUSDC; M2) -------------------------------------

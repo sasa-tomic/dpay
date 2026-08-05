@@ -1,6 +1,6 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **44 flows.**
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **45 flows.**
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay (FakeLedger, offline). No UI stubs. The only shimmed I/O boundary is
 > the camera scan (sanctioned smallest-boundary seam) and the NFC radio (physical-device gate).
@@ -17,7 +17,7 @@
 Flows grouped by user journey; within each table, every row lists what the flow **verifies** and
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`).
 
-wire (1) · onboard (4) · pay (16) · offline (2) · deposit (7) · withdraw (2) · nfc (2) · system (7) · tour (3)
+wire (1) · onboard (4) · pay (16) · offline (2) · deposit (7) · withdraw (3) · nfc (2) · system (7) · tour (3)
 
 ---
 
@@ -55,7 +55,7 @@ wire (1) · onboard (4) · pay (16) · offline (2) · deposit (7) · withdraw (2
 | 31 | ckusdc-pay | ckUSDC (currency 2, 6-decimal) pay end-to-end: review '0.050000 USDC', byte-exact raw, settles on currency 2. | ckusdc-pay, multi-currency, 6-decimal, byte-exact |
 | 36 | bad-qr | Scanning/pasting garbage (non-base64 + wrong-length) surfaces an honest 'bad request QR' error; review never mounts; scan surface re-arms. | bad-qr, malformed, error-handling, input-validation |
 | 42 | receipt-reject | Tampered receipt (wrong pubkey / flipped sig) → verifyOutcomeReceipt rejects → honest "Couldn't verify", no fake Paid ✓, no debit. | receipt, receipt-reject, malicious-relay, verifyOutcomeReceipt |
-| 43 | decimal-edges | 8-dec (ckBTC) + 6-dec (ckUSDC) amounts render with exact decimals on review (no rounding, no sci-notation, no trailing-zero drift). | decimal, format, ckbtc, ckerc20 |
+| 43 | decimal-edges | 8-dec (ckBTC) + 6-dec (ckUSDC) + 18-dec (ckDAI) amounts render with exact decimals on review (no rounding, no sci-notation, no trailing-zero drift). | decimal, format, ckbtc, ckerc20, 18-decimal |
 
 ### Offline hand-off (the signature feature)
 
@@ -82,6 +82,7 @@ wire (1) · onboard (4) · pay (16) · offline (2) · deposit (7) · withdraw (2
 |---|------|----------|--------|
 | 15 | withdraw | Withdraw ckBTC: enter addr + amount → sign on-device → settle; success screen + Copy destination; balance debits at both the ledger AND the UI (Balances row drops to 0.00050000 BTC). | withdraw, sign, settle, clipboard, balance-delta, destination-copy, ui-balance-delta |
 | 18 | withdraw-errors | Withdraw errors: below-min / over-balance / bad-addr UI guards (confirm disabled) + relay 422 (bad-sig/insufficient). | withdraw-errors, below-min, over-balance, bad-sig, bad-addr |
+| 44 | cketh-withdraw | Withdraw native ckETH: Cash-out button renders for a CkEthErc20 + token_contract=null asset; enter 0x addr + ETH amount → sign on-device at 18-dec Wei → settle; balance debits at both the ledger AND the UI (family-dispatch UI path). | native-eth-withdraw, cketh, family-dispatch, withdraw, sign, settle, balance-delta, ui-balance-delta |
 
 ### NFC (tap-to-pay)
 
@@ -125,24 +126,6 @@ These flows are **not** covered and why:
 - **ckBTC live deposit/withdrawal with real BTC** — requires real mainnet funds; offline path proven via FakeLedger seed (issues 1/8 in OPEN_ISSUES.md).
 
 > **Closed gaps:** destination-address format validation (`18-withdraw-errors`); the multi-currency Ledger row exact units (folded into `27-asset-pay`); the withdraw UI balance delta (folded into `15-withdraw`); malformed-QR scanning (`36-bad-qr`); onboarding-time faucet failure against a dead relay (`37-onboard-no-faucet`).
-
----
-
-## Live journey (OUTSIDE `just verify` — opt-in, hits mainnet)
-
-The flows above run offline against a FakeLedger relay (seconds-fast, no network). The **live**
-journey drives a STAGING relay against REAL IC testnet chain-key canisters (free tokens, mainnet-
-resident). It is a separate harness (`e2e-live/`, `just e2e-live-testnet`) that reuses the
-`e2e/harness/` Driver but targets `DPAY_E2E_BASE` (the staging relay URL). NEVER part of `just
-verify`/`just check` — it needs a deployed staging facade + a staging relay.
-
-| # | Flow | Verifies | Covers |
-|---|------|----------|--------|
-| 01 | testnet-wiring | Staging facade: onboard (DEMO faucet ∂100), 3 testnet asset cards (ckTESTBTC/ckSepoliaUSDC/ckSepoliaETH), REAL Testnet4 deposit address (not FakeLedger stub), relay deposit/info (min_confirmations==4, min>=300 sats), deposit/refresh (minted_total==0), onramp/ckerc20 (Sepolia CkDeposit helper + Sepolia USDC contract). | live, testnet, ckbtc-testnet, cksepolia-usdc, deposit-address, onramp, chain-aware-helper |
-
-Closes OPEN_ISSUES #1/#2/#8 — the FREE testnet chain-key path that proves the deposit/onramp wiring
-without real funds. The staging facade is provisioned by `scripts/dfx-deploy-ic-staging.sh`
-(`just deploy-ic-staging` for the offline rehearsal; mainnet deploy needs founder greenlight).
 
 ---
 

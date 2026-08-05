@@ -821,6 +821,32 @@ fn fake_catalog() -> Vec<CurrencyDescriptor> {
             onramp: RampCapability::Direct, // ckETH helper-contract onramp (client-side, per-token)
             offramp: RampCapability::Unavailable, // deferred per Fork-C — NO cash-out (O3)
         },
+        CurrencyDescriptor {
+            // Native ETH within the CkEthErc20 family — discriminated by `token_contract == None`
+            // (the app's `familyDisplay` branches CkEthErc20 on this: None ⇒ FD_CKETH_NATIVE ⇒ the
+            // Cash-out button renders + the withdraw sheet uses 18-dec Wei). This is the catalog entry
+            // the e2e drives through the native-ETH withdraw path (the facade's `withdraw` family
+            // dispatch burns ckETH → sends native ETH). Same ckETH minter + chain as the other
+            // ckERC20 entries; only `token_contract` (None) + the 18-dec/ETH display metadata differ.
+            // Ramp honesty: onramp=Direct (single payable `depositEth` tx), offramp=Direct (withdraw_eth).
+            currency: 5, // native ckETH (CkEthErc20 + token_contract None)
+            ledger: "xevnm-gaaaa-aaaar-qafnq-cai".to_string(), // ckETH ledger principal text (demo stand-in)
+            mintable: false,
+            minter: Some("sv3dd-oaaaa-aaaar-qacoa-cai".to_string()), // ckETH minter (handles native ETH + all ckERC20)
+            minter_family: Some(MinterFamily::CkEthErc20),
+            symbol: Some("Ξ".to_string()),
+            decimals: Some(18),
+            wrapper_name: Some("ckETH".into()),
+            backing_symbol: Some("ETH".into()),
+            network: Some("Ethereum".into()),
+            display_decimals: Some(18),
+            fee: Some(U64String(10_000_000_000_000_000)), // demo stand-in — 0.01 ETH at 18 dec = 1e16 raw
+            cap: Some(U64String(100_000)),
+            chain_id: Some(1), // Ethereum mainnet
+            token_contract: None, // None ⇒ native ETH (NOT an ERC-20) — the family discriminator
+            onramp: RampCapability::Direct, // ckETH helper `depositEth` (client-side, single payable tx)
+            offramp: RampCapability::Direct, // withdraw_eth: burn ckETH → send native ETH
+        },
     ]
 }
 
@@ -1093,7 +1119,18 @@ impl Ledger for FakeLedger {
         if req.expiry < now {
             return Err(LedgerError::Rejected("expired".to_string()));
         }
-        if amount < RETRIEVE_BTC_MIN_AMOUNT {
+        // The retrieve_btc_min_amount floor is BTC-FAMILY-SPECIFIC: the canister's family dispatch
+        // applies it only inside the CkBtcUtxo branch (retrieve_btc_with_approval). The ckETH minter
+        // enforces its OWN governed minimum_withdrawal_amount for native ETH, so a CkEthErc20 withdraw
+        // must NOT be rejected against the BTC sat floor here (else the native-ETH cash-out path is
+        // unreachable). Resolve the family from the same catalog the wallet sees.
+        let family = fake_catalog()
+            .into_iter()
+            .find(|d| d.currency == req.currency)
+            .and_then(|d| d.minter_family);
+        if family == Some(MinterFamily::CkBtcUtxo)
+            && amount < RETRIEVE_BTC_MIN_AMOUNT
+        {
             return Err(LedgerError::Rejected(format!(
                 "amount below retrieve_btc_min_amount ({RETRIEVE_BTC_MIN_AMOUNT})"
             )));
