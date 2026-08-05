@@ -1,12 +1,9 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {SafeAreaView, StatusBar, View, Text, Pressable, ScrollView, AppState} from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {STORAGE_KEY, POLL, TOP_UP_CENTS, BALANCE_TIMEOUT_MS, FAUCET_TIMEOUT_MS} from '../config/constants';
-import {
-  type CurrencyDescriptor, CATALOG_CACHE_KEY, BUNDLED_CATALOG, fetchCurrencies, familyDisplay, fmtCurrencyAmount,
-} from '../config/catalog';
+import {familyDisplay, fmtCurrencyAmount} from '../config/catalog';
 import {usd, short, isMintSentinel, fmtTime, base} from '../lib/format';
 import {cmpRaw, applyOffline} from '../lib/amount';
 import type {Identity, Txn, TransactionsRow, NfcStatus} from '../lib/types';
@@ -14,6 +11,7 @@ import {DpayCore} from '../services/native';
 import {loadDeposit} from '../services/ckerc20Persist';
 import {fetchWithTimeout, readJsonOrEmpty} from '../services/relay';
 import {useHotkeys} from '../hooks/useHotkeys';
+import {useCatalog} from '../hooks/useCatalog';
 import {readDepositDeepLink} from '../lib/deepLink';
 import {Wordmark} from './Logo';
 import {HotkeyHint} from './HotkeyHint';
@@ -64,7 +62,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
   // them. Loaded from AsyncStorage cache then refreshed from GET /currencies on mount; the bundled
   // default covers a cold first load. The ckBTC currency id (and any future asset's) is RESOLVED
   // from this, never hardcoded (issue #7).
-  const [catalog, setCatalog] = useState<CurrencyDescriptor[]>(BUNDLED_CATALOG);
+  const catalog = useCatalog(relayUrl);
 
   // ckBTC currency id, resolved from the catalog (find the CkBtcUtxo-family entry). Falls back to
   // 1 only before the catalog loads (the bundled default already carries currency 1 as CkBtcUtxo).
@@ -103,25 +101,6 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
     const sub = AppState.addEventListener('change', x => { if (x === 'active') read(); });
     return () => { alive = false; sub.remove(); };
   }, []);
-
-  // Load the currency catalog: AsyncStorage cache first (instant), then refresh from the relay.
-  // Re-runs when the relay URL changes (a relay switch may expose a different asset set).
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      let prior = BUNDLED_CATALOG;
-      try {
-        const cached = await AsyncStorage.getItem(CATALOG_CACHE_KEY);
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          if (Array.isArray(parsed) && parsed.length) { prior = parsed as CurrencyDescriptor[]; if (alive) setCatalog(prior); }
-        }
-      } catch { /* cache miss is fine — the bundled default + live fetch cover it */ }
-      const fresh = await fetchCurrencies(relayUrl, prior);
-      if (alive && fresh !== prior) setCatalog(fresh);
-    })();
-    return () => { alive = false; };
-  }, [relayUrl]);
 
   // MC8 U5 — AUTO-OPEN the ckERC20 deposit sheet on mount if a watching deposit was persisted across
   // a restart. The watching poll is relay-bound (NOT Ethereum), so it is resumable WITHOUT a wallet
