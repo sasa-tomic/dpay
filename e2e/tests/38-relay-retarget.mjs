@@ -57,7 +57,14 @@ export async function run() {
     await refreshDeposit(r2.baseURL, accountHex, 0);
 
     // Switch the app to relay B via Settings. The polls retarget LIVE (SettingsSheet.applyRelay →
-    // setRelayUrl → Wallet prop → poll effect re-runs) — no reload needed.
+    // setRelayUrl → Wallet prop → poll effect re-runs) — no reload needed. The balance-poll hook now
+    // aborts in-flight fetches from relay A on the relayUrl change + rejects stale results via a
+    // generation ref (OPEN_ISSUES #6), so the header reflects relay B's ∂500.00 promptly.
+    //
+    // NOTE: W1.B's "Advanced" disclosure (btn-advanced-toggle) wraps the relay section but DEFAULTS
+    // OPEN, so `settings-relay` is visible at first render — no expand step needed (same contract
+    // flows 12/13/19/20/22/41 rely on). If a future default-collapse lands, ALL those flows (incl.
+    // this one) must add a `click('btn-advanced-toggle')` before typing.
     console.log('[38-relay-retarget] opening Settings → switching relay to B…');
     await driver.click('btn-settings', { timeoutMs: 4_000 });
     await driver.type('settings-relay', r2.baseURL, { timeoutMs: 4_000 });
