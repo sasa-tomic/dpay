@@ -43,7 +43,7 @@ export function DepositSheet({identity, relayUrl, currency, display, onClose}: {
   // deposit_info (an IC read-only update proxying the minter, observed 7–15s on mainnet) can never
   // abort the address (a faster ~5–7s update). Previously both ran in one Promise.all under a single
   // 8s controller → the slow info aborted the ready address → "Couldn't load your deposit address."
-  // The sheet tolerates a null `info` (renders "—" for fee/min), so a best-effort info miss degrades
+  // The sheet tolerates a null `info` (renders "none"/"no minimum" for fee/min), so a best-effort info miss degrades
   // gracefully instead of hiding the address.
   useEffect(() => {
     let alive = true;
@@ -74,7 +74,7 @@ export function DepositSheet({identity, relayUrl, currency, display, onClose}: {
 
   // Best-effort deposit info (fee / min / confirmations). Independent controller + timeout so a slow
   // or failing info fetch never blocks the address above. `info` stays null on a miss → the sheet
-  // renders "—" for the fee/min fields (graceful, not an error).
+  // renders "none"/"no minimum" for the fee/min fields (graceful, not an error).
   useEffect(() => {
     let alive = true;
     const ctrl = new AbortController();
@@ -137,12 +137,14 @@ export function DepositSheet({identity, relayUrl, currency, display, onClose}: {
   const maxConf = pending.reduce((m, p) => Math.max(m, p.confirmations), 0);
   const estMin = required > 0 ? required * display.blockMin : 0;
   // C3: never render a raw "0.00000000 BTC" — when a fee/min value is zero (the test minter /
-  // FakeLedger returns zeros; a future no-fee asset) show "—" for that part and format normally only
-  // when non-zero. The labels stay so the fields remain visible; only the bogus zero amount (8
-  // trailing zeros) is suppressed — a premium app never shows that to a user. MC1 units 2-4:
-  // fee/min are raw-u64 decimal STRINGS; zero-presence via `cmpRaw` (BigInt) — never `> 0`.
-  const feeVal = info && cmpRaw(info.deposit_fee, '0') > 0 ? fmtAsset(info.deposit_fee, display.amountDecimals, display.nativeAsset) : '—';
-  const minVal = info && info.deposit_min_amount != null && cmpRaw(info.deposit_min_amount, '0') > 0 ? fmtAsset(info.deposit_min_amount, display.amountDecimals, display.nativeAsset) : '—';
+  // FakeLedger returns zeros; a future no-fee asset) show an explicit word for that part and format
+  // normally only when non-zero. The labels stay so the fields remain visible; only the bogus zero
+  // amount (8 trailing zeros) is suppressed — a premium app never shows that to a user. The word
+  // (vs a bare "—") keeps the field from reading as "broken/loading" on a money screen: fee →
+  // "none", min → "no minimum". MC1 units 2-4: fee/min are raw-u64 decimal STRINGS; zero-presence
+  // via `cmpRaw` (BigInt) — never `> 0`.
+  const feeVal = info && cmpRaw(info.deposit_fee, '0') > 0 ? fmtAsset(info.deposit_fee, display.amountDecimals, display.nativeAsset) : 'none';
+  const minVal = info && info.deposit_min_amount != null && cmpRaw(info.deposit_min_amount, '0') > 0 ? fmtAsset(info.deposit_min_amount, display.amountDecimals, display.nativeAsset) : 'no minimum';
 
   return (
     <View style={S.sheetOverlay}>
