@@ -45,7 +45,8 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
           accessibilityRole="button" accessibilityLabel="Create wallet" accessibilityHint="Generate your on-device key and add demo funds" accessibilityState={{disabled: busy}}>
           <Text style={S.primaryText}>{busy ? 'Creating…' : 'Create wallet'}</Text>
         </Pressable>
-        <Text style={S.dim2}>Creates your wallet and adds $100 in demo funds to get started.</Text>
+        <Text style={S.dim2}>Creates your wallet and adds ∂100 in demo funds to get started.</Text>
+        <Text style={S.dpayGlyphNote}><Text style={S.dpayGlyph}>∂</Text> is the demo-dollar symbol — play money, ∂1 = $1.</Text>
       </View>
     </SafeAreaView>
   );

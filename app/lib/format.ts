@@ -19,22 +19,27 @@ export const short = (h: string) => `${h.slice(0, 8)}…`;
 // instead of leaking raw protocol data ("from ffffffff…") to end users (N4).
 export const MINT_HEX = 'ff'.repeat(32);
 export const isMintSentinel = (h: string) => h.toLowerCase() === MINT_HEX;
-// Format a unix-seconds timestamp as HH:MM (24h, local) + a short GMT offset so a traveler can
-// tell home-vs-away at a glance ("14:30 GMT+2" vs an ambiguous bare "14:30"). The durable history
-// rows are sourced from the ledger (which settle on `ic time / 1e9`). `getTimezoneOffset` returns
-// minutes UTC is BEHIND local (sign-inverted vs the usual GMT display), so we negate; partial-hour
-// offsets (India: +5:30) append the minutes for unambiguity. No Intl API (trimmed on some RN builds).
+// Format a unix-seconds timestamp as a locale-friendly, relative-day label: "Today, 1:19 PM" /
+// "Yesterday, 1:19 PM" / "Aug 4" / "Aug 4, 2025" (older rows). The durable history rows are sourced
+// from the ledger (which settle on `ic time / 1e9`). The bare "13:19 GMT+2" form was a developer
+// affordance (audit P2): most consumer wallets render locale-relative time, and a raw GMT offset
+// means nothing to a non-technical user. No Intl API (trimmed on some RN builds) — the formatter
+// uses Date math only (same-day / yesterday / same-year / older), so it is Hermes-safe.
+const _MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const _isSameCalendarDay = (a: Date, b: Date) =>
+  a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 export const fmtTime = (ts: number) => {
   const d = new Date(ts * 1000);
-  const hh = d.getHours();
+  const now = new Date();
+  const hh12 = ((d.getHours() + 11) % 12) + 1; // 1..12
   const mm = String(d.getMinutes()).padStart(2, '0');
-  const offMin = -d.getTimezoneOffset();
-  const sign = offMin > 0 ? '+' : offMin < 0 ? '-' : '';
-  if (sign === '') return `${hh}:${mm} GMT`;
-  const absMin = Math.abs(offMin);
-  const h = Math.floor(absMin / 60);
-  const m = absMin % 60;
-  return m === 0 ? `${hh}:${mm} GMT${sign}${h}` : `${hh}:${mm} GMT${sign}${h}:${String(m).padStart(2, '0')}`;
+  const ampm = d.getHours() < 12 ? 'AM' : 'PM';
+  const timeStr = `${hh12}:${mm} ${ampm}`;
+  if (_isSameCalendarDay(d, now)) return `Today, ${timeStr}`;
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  if (_isSameCalendarDay(d, yesterday)) return `Yesterday, ${timeStr}`;
+  if (d.getFullYear() === now.getFullYear()) return `${_MONTHS[d.getMonth()]} ${d.getDate()}, ${timeStr}`;
+  return `${_MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
 };
 export const nowSecs = () => Math.floor(Date.now() / 1000);
 // 128-bit payment nonce as lowercase hex. Uses the cryptographic RNG (`crypto.getRandomValues`,

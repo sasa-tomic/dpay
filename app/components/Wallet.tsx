@@ -210,9 +210,13 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
           </Pressable>
           <View>
             <Wordmark style={S.brand} />
-            {/* H4: the header shows ONLY the username. The hex pubkey was developer-facing protocol data
-                ("Alice · 1b8a5ee7…") that made the header read like a debug panel; it's removed from the
-                main display. The short hex is no longer appended anywhere in the header. */}
+            {/* H4 + audit P1: the header shows ONLY the username. The hex pubkey was developer-facing
+                protocol data ("Alice · 1b8a5ee7…") that made the header read like a debug panel; it's
+                removed from the main display. The short hex is no longer appended anywhere in the
+                header. A small "ACCOUNT" eyebrow above the username separates the wordmark from the
+                user identity so the pair no longer reads as a single currency label (a fresh-eyes
+                vision misread). The `header-who` element still holds ONLY the username (e2e contract). */}
+            <Text style={S.whoLabel} accessibilityLabel="Account">ACCOUNT</Text>
             <Text style={S.who} testID="header-who">{identity.username}</Text>
           </View>
         </View>
@@ -255,7 +259,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
         {mode === 'pay'
           ? <PayMode identity={identity} online={online} relayUrl={relayUrl} nfcStatus={nfc} onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance} catalog={catalog} assetBalances={displayAssetBalances} />
           : mode === 'receive'
-          ? <ReceiveMode identity={identity} relayUrl={relayUrl} nfcReady={nfc === 'ready'} onReceived={onActivity} catalog={catalog} />
+          ? <ReceiveMode identity={identity} relayUrl={relayUrl} online={online} nfcReady={nfc === 'ready'} onReceived={onActivity} catalog={catalog} />
           : <Ledger history={history} catalog={catalog} />}
       </ScrollView>
 

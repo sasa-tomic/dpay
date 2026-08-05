@@ -21,6 +21,12 @@ export const S = StyleSheet.create({
   wordmarkPay: {color: C.brand},
   wordmarkBig: {fontSize: 34, marginTop: 14},
   onboardSub: {fontSize: 15, color: C.sub, textAlign: 'center', marginTop: 8, marginBottom: 28, paddingHorizontal: 12, lineHeight: 22},
+  // Audit P1: ∂ is the demo-dollar symbol — unfamiliar on first glance (a fresh-eyes vision MCP
+  // misread it as δ / ð / ₹). The onboarding one-liner explains it inline next to the demo funds note
+  // so a first-time user has the mapping before they see their balance. `dpayGlyph` carries the glyph
+  // in brand color so it visually anchors the explanation; `dpayGlyphNote` is the surrounding line.
+  dpayGlyph: {color: C.brand, fontWeight: '800'},
+  dpayGlyphNote: {fontSize: 13, color: C.sub, marginTop: 4, textAlign: 'center', paddingHorizontal: 12, lineHeight: 18},
   usernameInput: {backgroundColor: C.field, borderRadius: 14, height: 56, paddingHorizontal: 18, fontSize: 20, color: C.ink, marginBottom: 8, borderWidth: 1, borderColor: C.line2, alignSelf: 'stretch'},
   // Header — tightened vertical rhythm (was paddingTop:20/paddingBottom:12) and balanced horizontal
   // padding (was an asymmetric 22/10). Reclaims ~9px vertical and reads less top-heavy.
@@ -29,6 +35,11 @@ export const S = StyleSheet.create({
   headerSettingsBtn: {width: 40, height: 40, borderRadius: 20, backgroundColor: C.field, alignItems: 'center', justifyContent: 'center'},
   headerSettingsIcon: {fontSize: 20, fontWeight: '600', color: C.sub},
   brand: {fontSize: 24},
+  // Audit P1: a small ACCOUNT eyebrow above the username separates the wordmark "dpay" from the user
+  // identity so the pair no longer reads as a single currency label. Mirrors the existing
+  // `assetsSectionTitle` / `histTitle` / `inputLabel` eyebrow pattern. The `who` line below stays the
+  // authoritative username text (e2e `header-who` reads it verbatim).
+  whoLabel: {fontSize: 10, fontWeight: '700', color: C.sub2, marginTop: 6, letterSpacing: 1.1, textTransform: 'uppercase', fontFamily: 'monospace'},
   who: {fontSize: 12, color: C.sub, marginTop: 2},
   nfcBadge: {width: 108, height: 108, borderRadius: 54, borderWidth: 4, borderColor: C.line, alignItems: 'center', justifyContent: 'center', marginBottom: 26},
   nfcGlyph: {fontSize: 54, fontWeight: '700', lineHeight: 62},
@@ -84,6 +95,12 @@ export const S = StyleSheet.create({
   qrExpiry: {marginTop: 6, fontSize: 13, color: C.sub, textAlign: 'center'},
   qrExpiryWarn: {marginTop: 6, fontSize: 14, fontWeight: '600', color: C.warn, textAlign: 'center'},
   qrExpired: {marginTop: 6, fontSize: 14, fontWeight: '700', color: C.warn, textAlign: 'center'},
+  // Audit P2: an inline offline-status pill on the Receive-QR screen — mirrors the header's `~ approx.`
+  // indicator but in context, so a merchant staring at "Waiting for payment…" knows they won't see
+  // incoming payments until reconnected. Subtle bad-tinted pill (red dot + label) — informational, not
+  // a hard error (the wait state is still valid; the poll reconciles once reconnected).
+  qrOfflinePill: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, backgroundColor: 'rgba(248,113,113,0.08)', borderWidth: 1, borderColor: 'rgba(248,113,113,0.25)'},
+  qrOfflinePillText: {fontSize: 12, fontWeight: '600', color: C.bad},
   confirmRow: {flexDirection: 'row', gap: 12, marginTop: 12},
   paidBtn: {backgroundColor: C.ok, borderRadius: 12, paddingVertical: 13, paddingHorizontal: 24, minHeight: 44, justifyContent: 'center', alignItems: 'center'},
   paidBtnText: {color: C.brandInk, fontWeight: '700', fontSize: 16},
@@ -107,6 +124,13 @@ export const S = StyleSheet.create({
   linkTextMuted: {color: C.sub, fontWeight: '600', fontSize: 15},
   smallBtn: {backgroundColor: C.brand, borderRadius: 10, paddingHorizontal: 16, height: 44, alignItems: 'center', justifyContent: 'center', shadowColor: C.brand, shadowOpacity: 0.35, shadowRadius: 12, shadowOffset: {width: 0, height: 6}, elevation: 6},
   smallBtnText: {color: C.brandInk, fontWeight: '700'},
+  // Audit P2: a bordered secondary button (Cancel/secondary action parity with the primary Approve).
+  // Same width + height + radius as `primary` so the tap targets are equivalent + the user makes a
+  // deliberate choice. No fill + a subtle border = clearly secondary but unambiguously tappable
+  // (stronger than a link, weaker than a filled brand button). Used by the Pay review Cancel; reusable
+  // by other Cancel/secondary CTAs that need parity with a primary button.
+  secondaryBtn: {alignSelf: 'stretch', height: 56, borderRadius: 14, marginTop: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.line2, backgroundColor: C.field, minHeight: 44},
+  secondaryBtnText: {color: C.sub, fontWeight: '700', fontSize: 17},
   histCard: {marginTop: 20, borderTopWidth: 1, borderTopColor: C.line, paddingTop: 14},
   histTitle: {fontSize: 12, fontWeight: '700', color: C.sub2, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 6, fontFamily: 'monospace'},
   histRow: {flexDirection: 'row', alignItems: 'baseline', paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: C.line2},
@@ -151,12 +175,25 @@ export const S = StyleSheet.create({
   // via the Apply button (no live retarget on each keystroke). `advancedLabel` is the small uppercase
   // eyebrow shared with the other section headers; `applyBtn` mirrors the primary button chrome but is
   // compact (48pt, 44pt min touch target); `applyBtnDisabled` mutes it when the draft == the active URL.
-  advancedLabel: {fontSize: 12, fontWeight: '700', color: C.sub2, alignSelf: 'flex-start', textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 4, fontFamily: 'monospace'},
+  advancedLabel: {fontSize: 12, fontWeight: '700', color: C.sub2, alignSelf: 'flex-start', textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 0, fontFamily: 'monospace'},
+  // Audit P1: the Advanced disclosure toggle (Settings → Server). The header is itself a Pressable
+  // spanning the row (label + caret) so the whole header is the tap target. `advancedLabel`'s bottom
+  // margin was zeroed above so the toggle controls its own vertical rhythm — the caret + label sit on
+  // the same baseline inside the toggle, and the disclosure's body adds its own spacing below.
+  advancedToggle: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', alignSelf: 'stretch', paddingVertical: 10, marginBottom: 4, minHeight: 44},
+  advancedCaret: {color: C.sub2, fontSize: 13, fontFamily: 'monospace'},
   applyBtn: {backgroundColor: C.brand, borderRadius: 14, height: 48, minHeight: 44, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center', marginTop: 16, shadowColor: C.brand, shadowOpacity: 0.35, shadowRadius: 12, shadowOffset: {width: 0, height: 6}, elevation: 6},
   applyBtnText: {color: C.brandInk, fontSize: 16, fontWeight: '700'},
   applyBtnDisabled: {opacity: 0.4, shadowOpacity: 0, elevation: 0},
   resetConfirmBox: {alignSelf: 'stretch', backgroundColor: 'rgba(248,113,113,0.06)', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: 'rgba(248,113,113,0.2)'},
   resetLink: {fontSize: 15, color: C.bad, fontWeight: '600'},
+  // Audit P2: Reset entry-point — a bordered red-outline button "Reset wallet…" with the ellipsis
+  // signaling "opens a dialog". Visually distinct from the muted "Privacy policy" link above it (so
+  // it no longer reads as the same chrome), but NOT a loud filled-red button (the actual destructive
+  // gate stays in the confirmation dialog). minHeight:44 meets the touch target; alignSelf:stretch
+  // matches the consumer affordances.
+  resetEntryBtn: {alignSelf: 'stretch', marginTop: 14, minHeight: 48, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(248,113,113,0.45)', backgroundColor: 'rgba(248,113,113,0.04)', alignItems: 'center', justifyContent: 'center'},
+  resetEntryText: {color: C.bad, fontWeight: '700', fontSize: 15},
   // The PRIMARY funding affordance in the balance header: a clear "Add money" brand button that
   // opens the deposit sheet. Filled brand so it reads as primary; the DEMO_USD faucet (topUpBtn)
   // is the secondary outline pill beside it. minHeight:44 meets the 44pt touch target; the shadow

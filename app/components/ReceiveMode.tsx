@@ -22,7 +22,7 @@ import {useEscapeToClose} from '../hooks/useHotkeys';
 // left the field floating shorter than its neighbors), 44pt-min.
 const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeight: 44, borderWidth: 1, borderColor: C.sub2, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink};
 
-export function ReceiveMode({identity, relayUrl, nfcReady, onReceived, catalog}: {identity: Identity; relayUrl: string; nfcReady: boolean; onReceived: () => void; catalog: CurrencyDescriptor[]}) {
+export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, catalog}: {identity: Identity; relayUrl: string; online: boolean; nfcReady: boolean; onReceived: () => void; catalog: CurrencyDescriptor[]}) {
   // The merchant's CHOSEN settlement asset. Defaults to 0 (DEMO_USD) so the existing single-`$` flows
   // keep working unchanged (MC5: merchant selects the exact asset; the payer does NOT switch).
   const [reqCurrency, setReqCurrency] = useState(0);
@@ -160,7 +160,16 @@ export function ReceiveMode({identity, relayUrl, nfcReady, onReceived, catalog}:
           if (m >= 1) return <Text style={S.qrExpiry}>Valid for ~{m} min</Text>;
           return <Text style={S.qrExpiryWarn}>Expires in 0:{s.toString().padStart(2, '0')}</Text>;
         })()}
-        <Text style={S.qrHint}>Waiting for payment…</Text>
+        <Text style={S.qrHint}>Waiting for payment{online ? '…' : ' — reconnecting…'}</Text>
+        {/* Audit P2: an offline wait state looks identical to the online wait state from the header
+            alone (the small `~ approx.` is easy to miss). Mirror it inline as a contextual pill so the
+            merchant knows incoming payments won't appear until reconnected (no false "still waiting"). */}
+        {!online ? (
+          <View style={S.qrOfflinePill}>
+            <View style={[S.dot, {backgroundColor: C.bad}]} />
+            <Text style={S.qrOfflinePillText}>Offline — won't see payments until reconnected</Text>
+          </View>
+        ) : null}
             {scanning ? (
               <><QrScanner onScan={onSignedQr} /><Text style={S.dim2}>Scan the payer's signed QR</Text></>
             ) : (

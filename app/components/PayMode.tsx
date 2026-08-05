@@ -226,7 +226,19 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
           onPress={approve}>
           <Text style={S.primaryText}>{busy ? 'Signing…' : 'Approve'}</Text>
         </Pressable>
-        <Pressable style={S.linkBtn} onPress={reset} accessibilityRole="button" accessibilityLabel="Cancel" accessibilityState={{disabled: false}}><Text style={S.linkTextMuted}>Cancel</Text></Pressable>
+        {/* Audit P2: Cancel-as-secondary-button parity — a bordered secondary button of the same
+            width as Approve so the tap targets are equivalent and the user makes a deliberate choice
+            (a reflex Approve tap was the asymmetry risk). Matches the Cancel style used by the
+            offline confirm row + the unsupported-asset cancel below. */}
+        <Pressable
+          testID="btn-review-cancel"
+          style={S.secondaryBtn}
+          onPress={reset}
+          accessibilityRole="button"
+          accessibilityLabel="Cancel"
+          accessibilityState={{disabled: false}}>
+          <Text style={S.secondaryBtnText}>Cancel</Text>
+        </Pressable>
       </View>
     );
   }
