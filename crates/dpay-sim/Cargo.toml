@@ -11,6 +11,9 @@ path = "src/main.rs"
 
 [dependencies]
 dpay-core = { path = "../dpay-core", features = ["rng"] }
+ed25519-dalek = { workspace = true }
 pocket-ic = { workspace = true }
 candid = { workspace = true }
 serde = { version = "1", features = ["derive"] }
+icrc-ledger-types = { workspace = true }
+num-traits = "0.2"
