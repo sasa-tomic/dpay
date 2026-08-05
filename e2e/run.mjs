@@ -311,7 +311,14 @@ async function main() {
   if (firstFailure) process.exit(1);
 }
 
-main().catch((e) => {
-  console.error(`[run] FATAL: ${e.stack || e.message}`);
-  process.exit(1);
-});
+// Only auto-run when invoked directly (`node run.mjs` / `just e2e`). When imported (by
+// `e2e/watch.mjs` reusing `runTestsSubset`), main() does NOT fire — the importing module decides
+// when to run. Same guard pattern the test files use (`if (import.meta.url === process.argv[1])`).
+// Without this guard, `import { runTestsSubset } from './run.mjs'` would side-effect the entire
+// suite as soon as the module loads.
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((e) => {
+    console.error(`[run] FATAL: ${e.stack || e.message}`);
+    process.exit(1);
+  });
+}
