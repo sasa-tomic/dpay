@@ -117,6 +117,12 @@ deploy:
 deploy-ic:
     bash scripts/dfx-deploy-ic.sh
 
+# REHEARSE the staging facade deploy OFFLINE against a local replica (mock DUSD ledger, no cycles).
+# Proves the register_currency call shapes are well-formed before any mainnet spend. Set
+# DPAY_DFX_NETWORK=ic (omitted) for the REAL mainnet staging deploy — REQUIRES founder greenlight.
+deploy-ic-staging:
+    DPAY_DFX_NETWORK=local bash scripts/dfx-deploy-ic-staging.sh
+
 # OBJECTIVE deploy-fidelity gate: asserts the canister code RUNNING on mainnet is byte-identical to
 # the code built from the current source (compares the dfx-built artifact's sha256 to the live module
 # hash). Catches a stale WASM shipping while `just check` is green. Exit 1 = stale → `just deploy-ic`.

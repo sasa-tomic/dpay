@@ -11,6 +11,16 @@
         { "name": "candid:service", "visibility": "public" }
       ]
     },
+    "dpay_canister_staging": {
+      "type": "custom",
+      "candid": "dfx/dpay_canister.did",
+      "wasm": "target/wasm32-unknown-unknown/release/dpay_canister.wasm",
+      "build": [],
+      "gzip": false,
+      "metadata": [
+        { "name": "candid:service", "visibility": "public" }
+      ]
+    },
     "icrc_ledger": {
       "type": "custom",
       "candid": "third_party/ic-icrc1-ledger/ledger.did",
