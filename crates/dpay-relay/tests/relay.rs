@@ -1233,8 +1233,9 @@ async fn deposit_routes_map_ledger_transient_to_503() {
 // Covers GET /api/v1/currencies — the wallet's runtime asset catalog (closes issue #7). The
 // FakeLedger reports a demo deployment: DEMO_USD (currency 0, $, mintable, no ramp) + a ckBTC-shaped
 // currency (1, ₿, CkBtcUtxo ramp) + ckUSDC (2, ckUSDC, CkEthErc20 onramp) + ckUSDT (3, a second
-// CkEthErc20 proving the onramp is per-token — MC8 U2). The wallet reads this once on load instead
-// of hardcoding DEPOSIT_CURRENCY.
+// CkEthErc20 proving the onramp is per-token — MC8 U2) + ckDAI (4, an 18-dec CkEthErc20 — the
+// precision-extreme fixture for OPEN_ISSUES #3). The wallet reads this once on load instead of
+// hardcoding DEPOSIT_CURRENCY.
 
 /// `GET /api/v1/currencies` returns `200 {"currencies": [...]}` with every registered currency's
 /// ledger/minter/display metadata. Mirrors how the wallet consumes the catalog on load.
@@ -1250,8 +1251,8 @@ async fn currencies_route_returns_demo_catalog() {
     let rows = body["currencies"].as_array().expect("currencies array");
     assert_eq!(
         rows.len(),
-        4,
-        "demo catalog = DEMO_USD + ckBTC + ckUSDC + ckUSDT: {body}"
+        5,
+        "demo catalog = DEMO_USD + ckBTC + ckUSDC + ckUSDT + ckDAI: {body}"
     );
 
     // DEMO_USD (currency 0): the mintable $ faucet asset, no ramp.
@@ -1344,6 +1345,31 @@ async fn currencies_route_returns_demo_catalog() {
     ); // real USDT
     assert_eq!(ckusdt["onramp"], "Direct");
     assert_eq!(ckusdt["offramp"], "Unavailable"); // Fork-C — NO cash-out
+
+    // OPEN_ISSUES #3 — ckDAI (currency 4): an 18-dec CkEthErc20, the precision-extreme fixture. Same
+    // minter family + chain as ckUSDC/ckUSDT; only `decimals`/`display_decimals`/`token_contract`/
+    // display metadata differ (18 dec mirrors native DAI). Ramp honesty mirrors the other ckERC20s:
+    // onramp=Direct, offramp=Unavailable (Fork-C — NO cash-out).
+    let ckdai = rows
+        .iter()
+        .find(|r| r["currency"] == 4)
+        .expect("ckDAI currency present");
+    assert_eq!(ckdai["mintable"], false);
+    assert_eq!(ckdai["symbol"], "ckDAI");
+    assert_eq!(ckdai["decimals"], 18);
+    assert_eq!(ckdai["display_decimals"], 18);
+    assert_eq!(ckdai["minter_family"], "CkEthErc20");
+    assert_eq!(ckdai["wrapper_name"], "ckDAI");
+    assert_eq!(ckdai["backing_symbol"], "DAI");
+    assert_eq!(ckdai["network"], "Ethereum");
+    assert_eq!(ckdai["chain_id"], 1); // Ethereum mainnet
+    assert_eq!(ckdai["fee"], "10000000000000000"); // 0.01 DAI at 18 dec = 1e16 raw
+    assert_eq!(
+        ckdai["token_contract"],
+        "0x6B175474E89094C44Da98b954EedeAC495271d0F"
+    ); // real DAI ERC-20
+    assert_eq!(ckdai["onramp"], "Direct");
+    assert_eq!(ckdai["offramp"], "Unavailable"); // Fork-C — NO cash-out
 }
 
 // --- ckERC-20 onramp surface (ckUSDC; M2) -------------------------------------

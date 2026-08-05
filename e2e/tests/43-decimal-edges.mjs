@@ -1,7 +1,8 @@
-// Flow 43 — Decimal-edges: 8-dec (ckBTC) + 6-dec (ckUSDC) amounts render with EXACT decimals on the
-// payment review screen — no rounding, no scientific notation, no trailing-zero drift, no float
-// artifact. Covers the browser-reachable slice of the MC1 units-2-4 decimal matrix (the format path
-// `fmtCurrencyAmount` → `fmtAsset`).
+// Flow 43 — Decimal-edges: 8-dec (ckBTC) + 6-dec (ckUSDC) + 18-dec (ckDAI) amounts render with
+// EXACT decimals on the payment review screen — no rounding, no scientific notation, no trailing-zero
+// drift, no float artifact. Covers the browser-reachable slice of the MC1 units-2-4 decimal matrix
+// (the format path `fmtCurrencyAmount` → `fmtAsset`), including the 18-dec precision extreme that
+// would lose low digits under a Number/parseFloat path (OPEN_ISSUES #3).
 //
 // The format primitive under test (`fmtAsset` in app/lib/format.ts):
 //     const n = BigInt(raw);
@@ -17,13 +18,14 @@
 //   - The low-digit case (1 sat → 0.00000001 BTC) catches a padStart bug.
 //
 // Plan scope note: the plan asked for 8-dec (ckBTC) + 18-dec (ckERC20). The catalog (FakeLedger's
-// `fake_catalog`) has NO 18-dec currency — only DEMO (2), ckBTC (8), ckUSDC (6), ckUSDT (6). All
-// three ckERC20 tokens registered (ckUSDC + ckUSDT) mirror their native 6-dec USDC/USDT contract
-// precision. An 18-dec asset (e.g. ckDAI, ckWETH) is NOT in the catalog — adding one is a founder
-// outer-loop decision (register the ledger + minter on the canister), not a test-harness concern.
-// This flow covers the catalog-reachable 8-dec + 6-dec cases; an 18-dec case lands the day a
-// 18-dec ckERC20 is registered. The 6-dec case proves the formatter works at non-2,non-8 precision
-// just as well as the 8-dec case (the math is decimals-agnostic; only the scale exponent changes).
+// `fake_catalog`) now ships a 18-dec ckERC20 — ckDAI (currency 4, DAI on Ethereum mainnet, 18 dec)
+// — added under OPEN_ISSUES #3 to close the decimal-edges gap. The 18-dec case is the precision
+// extreme: at 18 decimals a Number/parseFloat path drops low digits past 2^53 (e.g. 0.5 DAI =
+// 5e17 raw, well above 2^53 ≈ 9e15), so the BigInt-only `fmtAsset` is the only correct path. The
+// 6-dec case proves the formatter works at non-2,non-8 precision; the 8-dec case covers the
+// Bitcoin-shaped family; the 18-dec case covers the precision extreme. Raw values >2^53 are
+// BigInt literals (the wire codec's `putU64Le` does `BigInt(val)`, so a Number literal would
+// already have lost precision before reaching the codec).
 //
 // Coverage matrix:
 //   ckBTC (8 dec):
@@ -34,6 +36,10 @@
 //     - mid: 1234567 raw  → '1.234567 USDC'            (full-precision)
 //     - low: 1 raw        → '0.000001 USDC'           (padStart: 5 leading zeros)
 //     - pad: 1000000 raw  → '1.000000 USDC'            (trailing-zero integrity)
+//   ckDAI (18 dec):
+//     - mid: 1234567890123456789 raw → '1.234567890123456789 DAI' (full-precision past 2^53)
+//     - low: 1 raw                    → '0.000000000000000001 DAI' (padStart: 17 leading zeros)
+//     - pad: 1000000000000000000 raw  → '1.000000000000000000 DAI' (trailing-zero integrity)
 //
 // Approach: build a request QR per case via buildRequestQR (encoding the raw amount + currency),
 // inject it via the camera seam (`window.__DPAY_TEST_SCAN`), then read the review screen's pay-amount
@@ -48,6 +54,7 @@ import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.m
 
 const CKBTC_CURRENCY = 1;
 const CKUSDC_CURRENCY = 2;
+const CKDAI_CURRENCY = 4;
 
 // Each case: { label, currency, raw, expected }. `expected` is the exact substring the review's
 // `pay-amount` should contain (PayMode renders `Pay ${fmtCurrencyAmount(...)}`, so the assertion is
@@ -62,6 +69,12 @@ const CASES = [
   { label: 'ckUSDC mid (1234567 raw)',   currency: CKUSDC_CURRENCY, raw: 1_234_567,   expected: '1.234567 USDC' },
   { label: 'ckUSDC low (1 raw)',         currency: CKUSDC_CURRENCY, raw: 1,           expected: '0.000001 USDC' },
   { label: 'ckUSDC pad (1000000 raw)',   currency: CKUSDC_CURRENCY, raw: 1_000_000,   expected: '1.000000 USDC' },
+  // ckDAI (18 dec) — full-precision past 2^53, low-digit, trailing-zero. BigInt literals are
+  // REQUIRED: the mid + pad raw values exceed 2^53, so a Number literal would lose low digits
+  // BEFORE the wire codec's `BigInt(val)` ever ran (the codec is exact, but Number parsing is not).
+  { label: 'ckDAI mid (1234567890123456789 raw)',  currency: CKDAI_CURRENCY, raw: 1_234_567_890_123_456_789n, expected: '1.234567890123456789 DAI' },
+  { label: 'ckDAI low (1 raw)',                     currency: CKDAI_CURRENCY, raw: 1n,                        expected: '0.000000000000000001 DAI' },
+  { label: 'ckDAI pad (1000000000000000000 raw)',   currency: CKDAI_CURRENCY, raw: 1_000_000_000_000_000_000n, expected: '1.000000000000000000 DAI' },
 ];
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
@@ -71,9 +84,9 @@ export const meta = {
   id: '43',
   name: 'decimal-edges',
   journey: 'pay',
-  covers: ['decimal', 'format', 'ckbtc', 'ckerc20'],
-  verifies: '8-dec (ckBTC) + 6-dec (ckUSDC) amounts render with exact decimals on review (no rounding, no sci-notation, no trailing-zero drift).',
-  timeoutMs: 25000, // 6 scan/cancel cycles + onboard — wider than the 20s default
+  covers: ['decimal', 'format', 'ckbtc', 'ckerc20', '18-decimal'],
+  verifies: '8-dec (ckBTC) + 6-dec (ckUSDC) + 18-dec (ckDAI) amounts render with exact decimals on review (no rounding, no sci-notation, no trailing-zero drift).',
+  timeoutMs: 35000, // 9 scan/cancel cycles + onboard — wider than the 20s default
 };
 
 export async function run() {
@@ -135,7 +148,7 @@ export async function run() {
     await driver.screenshot('43-decimal-edges');
 
     const elapsed = ((Date.now() - start) / 1000).toFixed(2);
-    console.log(`[43-decimal-edges] GREEN in ${elapsed}s (${CASES.length} cases across 8-dec + 6-dec assets)`);
+    console.log(`[43-decimal-edges] GREEN in ${elapsed}s (${CASES.length} cases across 8-dec + 6-dec + 18-dec assets)`);
   } finally {
     await env.stop();
   }

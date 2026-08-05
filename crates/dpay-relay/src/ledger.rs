@@ -761,6 +761,31 @@ fn fake_catalog() -> Vec<CurrencyDescriptor> {
             onramp: RampCapability::Direct, // ckETH helper-contract onramp (client-side, per-token)
             offramp: RampCapability::Unavailable, // deferred per Fork-C — NO cash-out (O3)
         },
+        CurrencyDescriptor {
+            // OPEN_ISSUES #3 — an 18-decimal ckERC20 to close the decimal-edges coverage gap.
+            // ckDAI mirrors its native 18-dec precision (DAI on Ethereum mainnet is 18 dec), giving
+            // the format path a fixture at the precision extreme where Number's 2^53 mantissa would
+            // drop low digits. Same ckETH minter + helper + chain as the other ckERC20 entries; only
+            // `decimals`/`display_decimals`/`token_contract`/display metadata differ. Ramp honesty
+            // mirrors ckUSDC/ckUSDT: onramp=`Direct`, offramp=`Unavailable` (Fork-C — NO cash-out).
+            currency: 4, // ckDAI (18-dec ckERC-20 — the precision-extreme fixture)
+            ledger: "xevnm-gaaaa-aaaar-qafnq-cai".to_string(), // ckDAI ledger principal text (demo stand-in)
+            mintable: false,
+            minter: Some("sv3dd-oaaaa-aaaar-qacoa-cai".to_string()), // ckETH minter (handles all ckERC20)
+            minter_family: Some(MinterFamily::CkEthErc20),
+            symbol: Some("ckDAI".to_string()),
+            decimals: Some(18),
+            wrapper_name: Some("ckDAI".into()),
+            backing_symbol: Some("DAI".into()),
+            network: Some("Ethereum".into()),
+            display_decimals: Some(18),
+            fee: Some(U64String(10_000_000_000_000_000)), // demo stand-in — 0.01 DAI at 18 dec = 1e16 raw
+            cap: None,
+            chain_id: Some(1), // Ethereum mainnet
+            token_contract: Some("0x6B175474E89094C44Da98b954EedeAC495271d0F".into()), // real DAI ERC-20
+            onramp: RampCapability::Direct, // ckETH helper-contract onramp (client-side, per-token)
+            offramp: RampCapability::Unavailable, // deferred per Fork-C — NO cash-out (O3)
+        },
     ]
 }
 
