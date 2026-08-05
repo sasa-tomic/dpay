@@ -21,7 +21,29 @@
 - **Phase 6 — UX audit** (read-only): 14 real-app screenshots driven through real FakeLedger relay, each analyzed via zai-vision. Deliverable: `2026-08-05-ux-audit.md` (315 lines, 10-item Quick Wins table with file:line). Top findings: [P0] camera-gate jargon; [P1] Settings raw Relay URL footgun; [P1] deposit fee/min bare `—`; [P1] Receive "Scan to settle" unexplained; [P1] empty Transactions dead-end.
 - **Phase 6.5 — UX quick-win copy fixes** (`1106e32`/`4f67b4c`/`35d3ea3`/`0d096c6`/`7467070`/`af475fc`/`f8da5ec`/`d1cb553`): applied 6 of the audit's copy fixes (P0 + 3 P1 + 2 P2), each its own commit; updated e2e assertions (regex in 06/21 + best-effort waits in 35/40/41); re-seeded 4 drifted visual baselines.
 
-## Session summary (2026-08-03): e2e unblocked + tech-debt + coverage + deploy consolidation
+## NEXT SESSION — work order (read this before deferring anything)
+
+**Several items below were previously mislabeled "founder outer-loop" and safe-punted. That was wrong.** They are NOT blocked — they should be done in the next session(s). Only the items in the explicit **POSTPONE** list are genuinely blocked on founder action or external steps; treat everything else as in-scope autonomous work. Founder directive (2026-08-05): *only the genuinely-blocked tasks get postponed.*
+
+### DO NEXT (unblocked — high value first)
+
+1. **Testnet ckBTC + ckSepoliaUSDC live-path wiring → closes issues #1 / #8 for FREE.** IC ships **free** testnet chain-key tokens on mainnet: ckBTC Testnet (Bitcoin Testnet4) Ledger `mc6ru-gyaaa-aaaar-qaaaq-cai` / Minter `ml52i-qqaaa-aaaar-qaaba-cai` / Index `mm444-5iaaa-aaaar-qaabq-cai`; ckETH Sepolia Ledger `apia6-jaaaa-aaaar-qabma-cai` / Minter `jzenf-aiaaa-aaaar-qaa7q-cai`; ckSepoliaUSDC Ledger `yfumr-cyaaa-aaaar-qaela-cai` (contract `0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`). The facade code path is **identical** (same minter candid, same 1-tuple `Call::with_args` invariant) — only the registered minter+ledger principals differ. Work: (a) a deploy-script block to `register_currency` the testnet currencies in a founder-controlled facade; (b) an `e2e-live` flow exercising `deposit_address` → free testnet deposit → mint → spend → withdraw. Autonomous up to the one-time founder `register_currency` op (or a throwaway staging facade). This converts the two biggest "carryovers" into closed items.
+2. **WalletConnect live pairing via Sepolia** (rides on #1). The ckSepoliaUSDC testnet path also exercises the WC onramp live (MetaMask-on-Sepolia + WC relay) — closes the WC-pairing outer-loop gate for free.
+3. **18-dec ckERC20 coverage** (flow 43 gap). Add an 18-dec fake asset to `FakeLedger.fake_catalog` + a test canister ledger + a flow 43 case. Pure test code, no mainnet. Closes the last decimal-edge gap.
+4. **Settings "Server" rename + Advanced disclosure** (audit P1 — the structural one deferred in 6.5). Rename "Relay URL" → "Server", collapse behind an Advanced disclosure with an Apply-gate/confirm when the URL differs from last-known-good. App code. See `2026-08-05-ux-audit.md`.
+5. **Remaining UX audit P1/P2** (all app code, all listed in `2026-08-05-ux-audit.md`): ∂ glyph in-onboarding explanation; timestamps locale-format; offline pill on Receive-QR; reset-entry-point visual weight; Cancel-as-secondary-button parity.
+6. **Flow 38 relay-retarget race fix.** Real polling race (asset-balance poll lags the relay retarget) — went RED once, GREEN 4× since. Fix the race, don't just document it.
+7. **MC9 autonomous pieces:** repair `dpay-sim`; 2/6/8/18-decimal conformance matrix (overlaps #3); atomic asset-deploy script; per-asset readiness/metrics. (Split out anything that touches founder ops.)
+8. **Real-flow RED diagnostics enhancement:** snapshot in `driver.close()` when `unexpectedDiagnostics.size > 0` so screenshot/DOM also land for real flows (~8% wall cost — measure before committing).
+
+### POSTPONE (genuinely blocked — do NOT autonomously attempt)
+
+- **Issue #3 — governance hand-off.** Founder-at-launch. **DO NOT NAG** (see item 3 below).
+- **Issue #4 — `ADMIN_CALLERS` rotation.** Needs the founder to designate the governed principal; can't pick it autonomously.
+- **Issue #11 — RN/AGP 8.5→8.12.** Device-gate required (`just app` / `just ondevice`); founder's `2026-08-02-android-release-optimization-plan.md` Phase B; high-risk version dance. Defer unless founder greenlights.
+- **Real MAINNET ckBTC deposit/withdraw** (as opposed to testnet). Superseded by #1 above as the primary proof path; only a final pre-pilot mainnet confidence check, low-cost, not blocking, and only after the testnet wiring proves out.
+
+
 
 > All gates green at this session's close: `just verify` clean (39/39 e2e), `just typecheck` clean, jest 248/248. On `main`, 17 commits ahead of origin/main. Wire FROZEN (292/196/132) untouched.
 
