@@ -1,9 +1,12 @@
 buildscript {
     ext {
-        buildToolsVersion = "35.0.0"
+        // Phase B (issue #11): API 36 + build-tools 36.1.0 before the 2026-08-31 Play deadline.
+        // AGP 8.12 (which supports API 36) is brought in by the RN 0.86 bundled gradle-plugin
+        // catalog; the versionless classpath below resolves through that included build.
+        buildToolsVersion = "36.1.0"
         minSdkVersion = 24                    // matches the API level the NDK .so is built against
-        compileSdkVersion = 35
-        targetSdkVersion = 35
+        compileSdkVersion = 36
+        targetSdkVersion = 36
         ndkVersion = "27.3.13750724"          // the NDK actually installed in this environment
         kotlinVersion = "1.9.24"
     }
