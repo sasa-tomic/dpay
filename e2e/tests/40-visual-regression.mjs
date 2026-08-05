@@ -102,7 +102,7 @@ export async function run() {
 
     // 6. Ledger (transaction history — empty initially for a fresh wallet).
     await driver.click('tab-transactions', { timeoutMs: 5_000 });
-    await driver.waitForText('No transactions', { timeoutMs: 3_000 }).catch(() => {});
+    await driver.waitForText('No payments yet', { timeoutMs: 3_000 }).catch(() => {});
     await driver.screenshot(SURFACES[4].capture);
 
     // 7. Diff each capture against its baseline (or seed if missing + REGEN).

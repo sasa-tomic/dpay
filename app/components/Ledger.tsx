@@ -20,7 +20,12 @@ const chipLabel = (currency: number, catalog: CurrencyDescriptor[]): string => {
 export function Ledger({history, catalog}: {history: Txn[]; catalog: CurrencyDescriptor[]}) {
   const [filter, setFilter] = useState<number | null>(null);
   if (history.length === 0) {
-    return <Text style={S.ledgerEmpty}>No transactions yet</Text>;
+    return (
+      <View>
+        <Text style={S.ledgerEmpty}>No payments yet.</Text>
+        <Text style={S.dim2}>Tap Receive to create a payment request, or Pay to scan one.</Text>
+      </View>
+    );
   }
   // Unique currency ids actually present in history — drives whether the filter row renders (hidden
   // for a single-currency wallet, where a filter would be noise).

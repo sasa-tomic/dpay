@@ -72,10 +72,10 @@ export async function run() {
     // 5. Ledger tab (transaction history — empty initially for a fresh wallet).
     //    The tab is labeled "Transactions" → testID `tab-transactions` (Tab.tsx: `tab-${label.toLowerCase()}`).
     await driver.click('tab-transactions', { timeoutMs: 5_000 });
-    // An empty wallet renders the literal "No transactions yet" (Ledger.tsx); wait for it with a
+    // An empty wallet renders the literal "No payments yet." (Ledger.tsx); wait for it with a
     // SHORT timeout — the fast-poll seam (150ms) lands it near-instantly, and this is a non-asserting
     // best-effort render beat, not a correctness gate, so never pay a long timeout here.
-    await driver.waitForText('No transactions', { timeoutMs: 3_000 }).catch(() => {});
+    await driver.waitForText('No payments yet', { timeoutMs: 3_000 }).catch(() => {});
     await driver.screenshot('35-tour-ledger');
     console.log('[35-ux-tour] ✓ shot: ledger');
 
