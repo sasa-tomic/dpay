@@ -9,24 +9,29 @@ import {parseDecimalToUnits, cmpRaw} from '../lib/amount';
 import type {Identity} from '../lib/types';
 import type {FamilyDisplay} from '../config/catalog';
 import {type CkErc20OnrampParams, ckerc20OnrampParams, fetchWithTimeout, readJsonOrEmpty} from '../services/relay';
-import {encodeApprove, encodeDepositErc20, principalToBytes32} from '../cketh';
+import {encodeApprove, encodeDepositErc20, encodeDepositEth, principalToBytes32} from '../cketh';
 import {resolveOnrampProvider, connectWallet, getChainId, sendTransaction, waitForReceipt, ReceiptReverted, ReceiptTimeout, pairOnrampWallet, openWalletApp} from '../wallet';
 import {loadDeposit, saveDeposit, clearDeposit} from '../services/ckerc20Persist';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 
-// ckERC20 (ckUSDC) direct onramp — a wallet-connect flow. The user connects their OWN Ethereum wallet
-// (MetaMask/Rabby; window.ethereum on web), dpay BUILDS the two transactions (approve the helper to
-// spend USDC, then depositErc20 into the helper with the facade principal + the user's pubkey as the
-// subaccount), and the wallet SIGNS + broadcasts. dpay never sees the ETH key — non-custodial. The
-// ckETH minter scrapes Ethereum logs on a ~3min heartbeat and mints ckUSDC to the user's subaccount
-// (~20min); dpay just polls the ckUSDC balance. The calldata is built by cketh.ts (byte-exact vs the
-// real helper-contract ABI; pinned by goldens).
-export function CkErc20DepositSheet({identity, relayUrl, currency, display, chainId, onClose}: {
+// ckERC20 (ckUSDC) / native ckETH direct onramp — a wallet-connect flow. The user connects their OWN
+// Ethereum wallet (MetaMask/Rabby; window.ethereum on web), dpay BUILDS the transaction(s), and the
+// wallet SIGNS + broadcasts. dpay never sees the ETH key — non-custodial. The ckETH minter scrapes
+// Ethereum logs on a ~3min heartbeat and mints the chain-key asset to the user's subaccount (~20min);
+// dpay just polls the balance. The calldata is built by cketh.ts (byte-exact vs the real
+// helper-contract ABI; pinned by goldens).
+//
+// Two deposit shapes share this sheet (the CkEthErc20 family + the SAME helper contract), discriminated
+// by `nativeEth` (descriptor.token_contract == null):
+//  - ERC-20 (USDC/USDT/DAI): TWO txs — approve(helper, amount) on the ERC-20, then depositErc20(...).
+//  - native ETH: ONE payable tx — depositEth(principal, subaccount) carrying the ETH `value` (Wei).
+export function CkErc20DepositSheet({identity, relayUrl, currency, display, chainId, nativeEth, onClose}: {
   identity: Identity;
   relayUrl: string;
   currency: number;
   display: FamilyDisplay;
   chainId: number | null; // MC8 U3: the catalog's per-currency EVM chain id (ckUSDC = 1 = Ethereum mainnet)
+  nativeEth: boolean; // true ⇒ native-ETH single-tx deposit (depositEth); false ⇒ ERC-20 two-tx (approve + depositErc20)
   onClose: () => void;
 }) {
   // phase: 'connect' (no wallet yet) → 'enter' (wallet connected, enter amount) → 'sending' (txs
@@ -220,22 +225,35 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
     setErr(null);
     setPhase('sending');
     // MC8 U5 — accumulate the tx hashes as they're produced so a timeout (soft → watching) still
-    // persists whichever hashes were captured before the throw. The happy path captures both.
+    // persists whichever hashes were captured before the throw. The happy path captures both (ERC-20)
+    // or just one (native ETH).
     const hashes: string[] = [];
     try {
-      // 1. approve(helper, amount) on the USDC ERC-20 contract.
-      const approveData = encodeApprove(params.helper_address, unitBig);
-      const approveHash = await sendTransaction(provider, account, {to: params.erc20_address, data: approveData});
-      hashes.push(approveHash);
-      // MC8 U4 — wait for each tx to be MINED before proceeding. eth_sendTransaction returning a hash
-      // only means the wallet accepted it, NOT that it succeeded. A reverted approve must surface an
-      // honest error here, not a false "watching for the mint".
-      await waitForReceipt(provider, approveHash);
-      // 2. depositErc20(usdc, amount, principal, subaccount) on the helper contract.
-      const depositData = encodeDepositErc20(params.erc20_address, unitBig, principalWord, subaccount);
-      const depositHash = await sendTransaction(provider, account, {to: params.helper_address, data: depositData});
-      hashes.push(depositHash);
-      await waitForReceipt(provider, depositHash);
+      if (nativeEth) {
+        // Native ETH — ONE payable tx: depositEth(principal, subaccount) with the ETH `value` (Wei).
+        // No approve step (ETH is native, not an ERC-20 allowance). The amount is the tx `value`.
+        const depositData = encodeDepositEth(principalWord, subaccount);
+        const depositHash = await sendTransaction(provider, account, {to: params.helper_address, data: depositData, value: unitBig});
+        hashes.push(depositHash);
+        await waitForReceipt(provider, depositHash);
+      } else {
+        // ERC-20 — TWO txs: approve(helper, amount) on the ERC-20 contract, then depositErc20(...).
+        const erc20Address = params.erc20_address;
+        if (!erc20Address) { setErr('Onramp details missing the ERC-20 address.'); setPhase('enter'); return; }
+        // 1. approve(helper, amount) on the USDC ERC-20 contract.
+        const approveData = encodeApprove(params.helper_address, unitBig);
+        const approveHash = await sendTransaction(provider, account, {to: erc20Address, data: approveData});
+        hashes.push(approveHash);
+        // MC8 U4 — wait for each tx to be MINED before proceeding. eth_sendTransaction returning a hash
+        // only means the wallet accepted it, NOT that it succeeded. A reverted approve must surface an
+        // honest error here, not a false "watching for the mint".
+        await waitForReceipt(provider, approveHash);
+        // 2. depositErc20(usdc, amount, principal, subaccount) on the helper contract.
+        const depositData = encodeDepositErc20(erc20Address, unitBig, principalWord, subaccount);
+        const depositHash = await sendTransaction(provider, account, {to: params.helper_address, data: depositData});
+        hashes.push(depositHash);
+        await waitForReceipt(provider, depositHash);
+      }
       setTxHashes(hashes);
       setResumed(false);
       setPhase('watching');
@@ -258,7 +276,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
         setPhase('enter');
       }
     }
-  }, [account, params, amount, display.amountDecimals, identity.publicHex]);
+  }, [account, params, amount, display.amountDecimals, identity.publicHex, nativeEth]);
 
   // MC8 U5 — "Start a new deposit" escape from a RESUMED watching state. A stuck watching key (a
   // deposit that never mints) would otherwise wedge the sheet in watching forever on every restart.
@@ -317,14 +335,16 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
               this way won't credit and may be lost.
             </Text>
             <Text style={S.instrCustody}>
-              dpay never holds your keys — your wallet signs, and ckUSDC mints 1:1 to your wallet on
-              confirmation (~20 min).
+              dpay never holds your keys — your wallet signs, and the chain-key asset mints 1:1 to your
+              wallet on confirmation (~20 min).
             </Text>
-            {/* M8: gas warning — the onramp needs two Ethereum transactions (approve + deposit), so the
-                user must hold a little ETH for gas or both will fail. Inline style (amber) so it reads
-                as a note, not body copy. */}
+            {/* Gas warning. ERC-20: the onramp needs Ethereum transactions the user must hold ETH to
+                pay gas for (separate from the deposited token). Native ETH: the deposit tx itself
+                carries ETH, so the network fee comes out of the sent amount — send a little extra. */}
             <Text style={[S.instrCustody, {color: C.warn}]}>
-              You'll need a small amount of ETH for Ethereum network gas fees.
+              {nativeEth
+                ? 'The network fee is paid in ETH — send a little more than you want to deposit.'
+                : "You'll need a small amount of ETH for Ethereum network gas fees."}
             </Text>
           </View>
 
@@ -347,12 +367,14 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
               </View>
             ) : (
               <View style={S.centerAll}>
-                {/* Why a wallet, not an address: USDC is an Ethereum smart-contract token — unlike
-                    Bitcoin (UTXO, send-to-address), depositing it requires two wallet-SIGNED
-                    transactions (approve the helper to spend, then depositErc20 into it). There is
-                    no "deposit address" for an ERC-20 on the ckETH ramp; the deposit must be
-                    initiated from the wallet that holds the USDC + ETH for gas. */}
-                <Text style={S.dim2}>USDC is an Ethereum token — depositing it needs two transactions your wallet signs, not a send-to-address like Bitcoin.</Text>
+                {/* Why a wallet, not an address: depositing on the ckETH ramp requires a wallet-SIGNED
+                    transaction (ERC-20: two txs — approve + depositErc20; native ETH: one payable tx —
+                    depositEth with the amount as ETH value). Unlike Bitcoin (UTXO, send-to-address),
+                    there is no "deposit address" here; the deposit must be initiated from the wallet
+                    that holds the asset (+ ETH for gas, for ERC-20). */}
+                <Text style={S.dim2}>{nativeEth
+                  ? 'Send ETH directly to the deposit contract — one transaction your wallet signs, with your deposit amount as the ETH value.'
+                  : `${display.nativeAsset} is an Ethereum token — depositing it needs two transactions your wallet signs, not a send-to-address like Bitcoin.`}</Text>
                 <Pressable testID="btn-connect-wallet" accessibilityRole="button" accessibilityLabel="Connect Ethereum wallet" style={S.primaryWide} onPress={connect}>
                   <Text style={S.primaryText}>Connect wallet</Text>
                 </Pressable>
@@ -376,12 +398,12 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
               <Pressable
                 testID="btn-approve"
                 accessibilityRole="button"
-                accessibilityLabel={phase === 'sending' ? 'Confirming in your wallet' : 'Approve and deposit'}
+                accessibilityLabel={phase === 'sending' ? 'Confirming in your wallet' : (nativeEth ? 'Deposit' : 'Approve and deposit')}
                 accessibilityState={{disabled: phase === 'sending'}}
                 style={[S.primaryWide, phase === 'sending' && {opacity: 0.6}]}
                 onPress={submit}
                 disabled={phase === 'sending'}>
-                <Text style={S.primaryText}>{phase === 'sending' ? 'Confirm in your wallet…' : 'Approve & deposit'}</Text>
+                <Text style={S.primaryText}>{phase === 'sending' ? 'Confirm in your wallet…' : (nativeEth ? 'Deposit' : 'Approve & deposit')}</Text>
               </Pressable>
             </>
           ) : phase === 'watching' ? (
@@ -397,7 +419,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
                   continues (relay-bound, not Ethereum-bound). */}
               <Text testID="ckerc20-status" style={S.paidSub}>{resumed
                 ? 'Deposit pending (~20 min) — your wallet isn\u2019t connected, but we\u2019re still watching for the mint.'
-                : 'Waiting for confirmation — your ckUSDC will appear in about 20 minutes.'}</Text>
+                : 'Waiting for confirmation — your deposit will appear in about 20 minutes.'}</Text>
               {/* MC8 U5 — escape from a resumed watching state. A deposit that never mints would
                   otherwise wedge the sheet in watching on every restart; this clears the key + returns
                   to 'connect' so the user can start fresh. Only rendered in the resumed state (a
@@ -417,7 +439,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
             <View style={S.centerAll}>
               <View style={S.check}><Text style={S.checkMark}>✓</Text></View>
               <Text style={S.paidText}>Deposited ✓</Text>
-              <Text style={S.paidSub}>ckUSDC minted to your wallet.</Text>
+              <Text style={S.paidSub}>{`${display.nativeAsset} minted to your wallet.`}</Text>
               <Text style={S.dim2}>Your balance updates automatically.</Text>
             </View>
           )}

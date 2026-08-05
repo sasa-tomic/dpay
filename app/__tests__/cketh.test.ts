@@ -15,8 +15,10 @@ import {
   principalToBytes32,
   encodeApprove,
   encodeDepositErc20,
+  encodeDepositEth,
   SELECTOR_APPROVE,
   SELECTOR_DEPOSIT_ERC20,
+  SELECTOR_DEPOSIT_ETH,
 } from '../cketh';
 
 // Live mainnet constants (verified 2026-07-31; helper addr is fetched at runtime in prod, but the
@@ -30,6 +32,12 @@ describe('cketh calldata — function selectors (keccak256, cross-checked)', () 
   });
   it('depositErc20(address,uint256,bytes32,bytes32) = 0xdb9751af', () => {
     expect(SELECTOR_DEPOSIT_ERC20).toBe('db9751af');
+  });
+  // SELECTOR_DEPOSIT_ETH verified 2026-08-06: signature taken verbatim from DFINITY
+  // DepositHelperWithSubaccount.sol `depositEth(bytes32,bytes32)`, keccak256 computed with js-sha3
+  // cross-checked against the two known selectors above.
+  it('depositEth(bytes32,bytes32) = 0x17c819c4', () => {
+    expect(SELECTOR_DEPOSIT_ETH).toBe('17c819c4');
   });
 });
 
@@ -97,5 +105,44 @@ describe('cketh calldata — depositErc20 full 132-byte golden (plan §9e)', () 
 
   it('rejects a negative amount', () => {
     expect(() => encodeDepositErc20(USDC, -1n, '0'.repeat(64))).toThrow();
+  });
+});
+
+describe('cketh calldata — depositEth payable native-ETH golden (68-byte)', () => {
+  it('k2t6j principal, default subaccount (no erc20/amount words — value travels as tx value)', () => {
+    const principalWord = principalToBytes32('k2t6j-2nvnp-4zjm3-25dtz-6xhaa-c7boj-5gayf-oj3xs-i43lp-teztq-6ae');
+    const calldata = encodeDepositEth(principalWord);
+    // selector + principalWord + 32-byte zero subaccount = 68 bytes (NO erc20-address or amount word;
+    // the ETH amount is the tx `value`, not calldata).
+    expect(calldata).toBe(
+      '0x17c819c4' +
+        '1db56bf994b37ae8e79f5ce000be1727a6060ae4eef24736b7cc999c3c020000' +
+        '0'.repeat(64), // default subaccount = 32 zero bytes
+    );
+    // 4 bytes selector + 2*32 bytes args = 68 bytes = 136 hex chars after 0x
+    expect(calldata.length).toBe(2 + 4 * 2 + 2 * 64);
+  });
+
+  it('carries a custom subaccount when given', () => {
+    const principalWord = principalToBytes32('2chl6-4hpzw-vqaaa-aaaaa-c');
+    // a 32-byte subaccount (the user's pubkey hex is the canonical subaccount, same as depositErc20)
+    const sub = 'aabbccdd'.repeat(8);
+    const calldata = encodeDepositEth(principalWord, sub);
+    expect(calldata).toBe(
+      '0x17c819c4' +
+        '09efcdab00000000000100000000000000000000000000000000000000000000' +
+        sub,
+    );
+  });
+
+  it('strips a leading 0x and is case-insensitive on the subaccount string', () => {
+    const pw = principalToBytes32('2chl6-4hpzw-vqaaa-aaaaa-c');
+    // The canonical subaccount is the user's 32-byte pubkey hex (64 chars, no internal 0x). A single
+    // leading 0x is tolerated; case is normalized. Both forms must encode identically.
+    const sub = 'aabbccdd'.repeat(8); // 64 hex chars = 32 bytes
+    const with0x = encodeDepositEth(pw, '0x' + sub.toUpperCase());
+    const without = encodeDepositEth(pw, sub);
+    expect(with0x).toBe(without);
+    expect(without.endsWith(sub)).toBe(true);
   });
 });

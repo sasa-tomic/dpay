@@ -328,38 +328,50 @@ pub struct CurrencyDescriptor {
     pub offramp: RampCapability,
 }
 
-/// Onramp parameters for a ckERC-20 currency (ckUSDC etc.). The app builds the user's two Ethereum
-/// transactions (approve + depositErc20) from these; the user signs in their own wallet (non-custodial).
-/// `facade_principal` is the canister id encoded as the depositErc20 `principal` arg; the user's pubkey
-/// is the subaccount. In production these come from the ckETH minter's `get_minter_info`; the offline
+/// Onramp parameters for a CkEthErc20-family currency (ckUSDC etc. OR native ckETH). The app builds
+/// the user's Ethereum transaction(s) from these; the user signs in their own wallet (non-custodial).
+/// `facade_principal` is the canister id encoded as the deposit `principal` arg; the user's pubkey is
+/// the subaccount. In production these come from the ckETH minter's `get_minter_info`; the offline
 /// FakeLedger returns the verified mainnet constants.
+///
+/// `kind` discriminates the two deposit shapes sharing the CkEthErc20 family + the SAME helper:
+///  - `"erc20"`: two txs (approve the ERC-20, then `depositErc20`) — `erc20_address` is `Some`.
+///  - `"native_eth"`: ONE payable tx (`depositEth`) carrying the ETH `value` — `erc20_address` is
+///    `None` (the descriptor's `token_contract` is null). The discriminator within the family is the
+///    descriptor's `token_contract`, surfaced here so the app need not re-derive it.
 #[derive(Serialize)]
 pub struct CkErc20OnrampParams {
-    pub helper_address: String,     // the CkDeposit helper contract (0x…)
-    pub erc20_address: String,      // the token's ERC-20 contract (0x…) — per-token
-    pub facade_principal: String,   // the facade canister principal (text) — the depositErc20 `principal` arg
+    pub helper_address: String,             // the CkDeposit helper contract (0x…) — shared by both kinds
+    pub erc20_address: Option<String>,      // Some(addr) for erc20; None for native_eth
+    pub facade_principal: String,           // the facade canister principal (text) — the deposit `principal` arg
+    pub kind: String,                       // "erc20" | "native_eth"
 }
 
-/// Resolve ckERC-20 onramp params from a catalog descriptor (MC8 U2). PURE + single-sourced — both
-/// the FakeLedger and AgentLedger `ckerc20_onramp_params` impls delegate here so the fail-closed
-/// gate is identical across the offline demo + the live canister paths.
+/// Resolve ckERC-20 / native-ETH onramp params from a catalog descriptor (MC8 U2). PURE +
+/// single-sourced — both the FakeLedger and AgentLedger `ckerc20_onramp_params` impls delegate here so
+/// the fail-closed gate is identical across the offline demo + the live canister paths.
 ///
 /// **Gate (fail-closed — non-custodial / no-swap honesty):** returns `Err(Transient)` (→ HTTP 503)
 /// unless ALL of:
-/// 1. `desc` is `Some` (the currency exists in the catalog),
-/// 2. `desc.minter_family == Some(CkEthErc20)` (it is a ckERC-20 family currency), AND
-/// 3. `desc.token_contract` is `Some` (its per-token ERC-20 address is populated).
+/// 1. `desc` is `Some` (the currency exists in the catalog), AND
+/// 2. `desc.minter_family == Some(CkEthErc20)` (it is a CkEthErc20-family currency).
 ///
-/// A CkEthErc20 currency with NO `token_contract` (a partially-registered ckERC20) MUST surface a
-/// 503 — it must NEVER fall back to ckUSDC's address. Returning a wrong-token address would make the
-/// user approve + depositErc20 against the wrong ERC-20 contract (non-custodial-trust violation).
+/// Within the family, `token_contract` discriminates the two deposit shapes:
+///  - `Some(addr)` ⇒ `"erc20"`: a known ERC-20 token (ckUSDC). Two txs (approve + depositErc20). The
+///    `erc20_address` is the descriptor's token (fail-closed would NEVER fall back to ckUSDC's address
+///    for a different token — but `Some` already carries the right per-token address).
+///  - `None` ⇒ `"native_eth"`: native ETH. ONE payable `depositEth` tx; `erc20_address` is `None`.
+///
+/// A non-CkEthErc20 family (e.g. CkBtcUtxo, CkSol) or a missing descriptor MUST surface a 503 — it
+/// must NEVER fall back to a default address.
 ///
 /// The `helper_address` is NETWORK-scoped (Ethereum mainnet vs Sepolia testnet each deploy their own
 /// CkDeposit helper under the same ckETH minter); the descriptor's `chain_id` selects which verified
 /// constant to surface (Sepolia = 11155111; anything else, including `None`, = mainnet — the safe
-/// default for a non-EVM-family metadata gap). Only the `erc20_address` is per-token, read from the
-/// descriptor's `token_contract`. `facade_principal` is passed in (the FakeLedger uses a demo
-/// stand-in; the AgentLedger uses the live canister id it is pointed at).
+/// default for a non-EVM-family metadata gap). The SAME helper serves both `depositEth` and
+/// `depositErc20` (see DFINITY `DepositHelperWithSubaccount.sol` `CkDeposit`). `facade_principal` is
+/// passed in (the FakeLedger uses a demo stand-in; the AgentLedger uses the live canister id it is
+/// pointed at).
 pub fn ckerc20_onramp_from_descriptor(
     desc: Option<&CurrencyDescriptor>,
     facade_principal: String,
@@ -368,21 +380,24 @@ pub fn ckerc20_onramp_from_descriptor(
     if d.minter_family != Some(MinterFamily::CkEthErc20) {
         return Err(LedgerError::Transient("no ckERC-20 onramp for currency".into()));
     }
-    // Fail-closed: a CkEthErc20 with no token_contract MUST NOT fall back to ckUSDC's address.
-    let erc20_address = d.token_contract.clone().ok_or_else(|| {
-        LedgerError::Transient("ckERC-20 currency has no token_contract (fail-closed)".into())
-    })?;
     // Network-scoped helper: Sepolia (chain_id 11155111) gets the Sepolia CkDeposit helper;
     // anything else (mainnet chain_id 1, or a None chain_id on a non-EVM-family metadata gap) falls
     // through to the mainnet value. The chain-id gate is the minimal testnet fix (OPEN_ISSUES #1/#2).
+    // The SAME helper contract serves native ETH (depositEth) and ERC-20 (depositErc20).
     let helper_address = match d.chain_id {
         Some(11155111) => CKERC20_HELPER_ADDRESS_SEPOLIA,
         _ => CKERC20_HELPER_ADDRESS_MAINNET,
+    };
+    // Discriminate within the family by token_contract: Some = ERC-20 token; None = native ETH.
+    let (erc20_address, kind) = match &d.token_contract {
+        Some(addr) => (Some(addr.clone()), "erc20"),
+        None => (None, "native_eth"),
     };
     Ok(CkErc20OnrampParams {
         helper_address: helper_address.to_string(),
         erc20_address,
         facade_principal,
+        kind: kind.to_string(),
     })
 }
 

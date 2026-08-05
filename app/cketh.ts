@@ -81,6 +81,16 @@ export function principalToBytes32(principal: string): string {
 export const SELECTOR_APPROVE = '095ea7b3';
 /** keccak256("depositErc20(address,uint256,bytes32,bytes32)") — the live CkDeposit helper. */
 export const SELECTOR_DEPOSIT_ERC20 = 'db9751af';
+/**
+ * keccak256("depositEth(bytes32,bytes32)") — the live CkDeposit helper's payable native-ETH deposit.
+ * Verified 2026-08-06: the function signature is taken verbatim from DFINITY's
+ * `rs/ethereum/cketh/minter/DepositHelperWithSubaccount.sol` (`CkDeposit.depositEth(bytes32 principal,
+ * bytes32 subaccount) public payable`), and the keccak256 was computed with `js-sha3` cross-checked
+ * against the two known selectors above (`approve`=095ea7b3, `depositErc20`=db9751af) so the hash
+ * impl is proven correct → the resulting selector 17c819c4 is authoritative. The ETH `value` (Wei) is
+ * sent as the tx's `value` field, NOT in the calldata (depositEth is payable).
+ */
+export const SELECTOR_DEPOSIT_ETH = '17c819c4';
 
 /** Left-pad a 20-byte Ethereum address to a 32-byte word (64 lowercase hex chars, no 0x). */
 function addressToWord(addr: string): string {
@@ -126,6 +136,36 @@ export function encodeDepositErc20(
     SELECTOR_DEPOSIT_ERC20 +
     addressToWord(erc20Address) +
     uint256ToWord(amount) +
+    principalWord.replace(/^0x/, '').toLowerCase().padEnd(64, '0').slice(0, 64) +
+    bytesToHex(sub)
+  );
+}
+
+/**
+ * Build the calldata for the helper contract's payable `depositEth(principal, subaccount)` call. This
+ * is the NATIVE-ETH deposit (one tx, not two): the user sends ETH `value` (Wei) to the helper along
+ * with this calldata; the helper emits `ReceivedEthOrErc20(ZERO_ADDRESS, msg.sender, msg.value, …)`
+ * and the ckETH minter scrapes that log on a heartbeat and mints ckETH (~20 min). `principalWord` is
+ * the 64-hex output of `principalToBytes32`; `subaccount` is an optional 32-byte value (default
+ * all-zeros). Returns 0x-prefixed hex (selector + two 32-byte words = 68 bytes). The ETH amount is NOT
+ * in the calldata — it travels as the transaction's `value` field (the caller sets it on sendTransaction).
+ */
+export function encodeDepositEth(
+  principalWord: string,
+  subaccount?: Uint8Array | string,
+): string {
+  const sub = new Uint8Array(32);
+  if (subaccount instanceof Uint8Array) {
+    sub.set(subaccount.subarray(0, 32));
+  } else if (typeof subaccount === 'string') {
+    const h = subaccount.replace(/^0x/, '').toLowerCase();
+    const bytes = new Uint8Array(h.length / 2);
+    for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(h.substr(i * 2, 2), 16);
+    sub.set(bytes.subarray(0, 32));
+  }
+  return (
+    '0x' +
+    SELECTOR_DEPOSIT_ETH +
     principalWord.replace(/^0x/, '').toLowerCase().padEnd(64, '0').slice(0, 64) +
     bytesToHex(sub)
   );

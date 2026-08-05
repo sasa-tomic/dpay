@@ -67,7 +67,15 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
             // the enabled set, never re-enable a disabled direction.
             const disp = familyDisplay(catalog, a.currency);
             const onrampable = disp !== null && a.onramp !== 'Unavailable';
-            const cashable = a.minter_family === 'CkBtcUtxo' && funded && a.offramp !== 'Unavailable';
+            // Cash-out is offered for a funded asset whose family has a native offramp: ckBTC
+            // (CkBtcUtxo → retrieve_btc) AND native ckETH (CkEthErc20 with token_contract == null →
+            // withdraw_eth). The `token_contract == null` guard keeps ckUSDC (offramp Unavailable +
+            // token_contract Some) fail-closed — an ERC-20 token never reaches the ETH offramp.
+            const cashable =
+              funded &&
+              a.offramp !== 'Unavailable' &&
+              (a.minter_family === 'CkBtcUtxo' ||
+               (a.minter_family === 'CkEthErc20' && a.token_contract == null));
             // Subtitle is user-benefit, not network topology — drop the "Send X on Y" tautology (BTC
             // on Bitcoin, USDC on Ethereum) that names a network meaningless to a non-technical user.
             // BTC family -> "Bitcoin"; Ethereum USD stablecoins (USDC/USDT) -> "US dollar stablecoin";
@@ -134,7 +142,7 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
                           onPress={() => onWithdraw(a.currency)}
                           accessibilityRole="button"
                           accessibilityLabel={`Cash out ${name}`}
-                          accessibilityHint="Send this asset to a native BTC address"
+                          accessibilityHint="Send this asset to a native address"
                         >
                           <Text style={S.withdrawLinkText}>Cash out</Text>
                         </Pressable>

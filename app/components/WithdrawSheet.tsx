@@ -3,7 +3,7 @@ import {View, Text, Pressable, TextInput, ScrollView, SafeAreaView, StatusBar, A
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {WITHDRAW_TIMEOUT_MS, WITHDRAW_EXPIRY_WINDOW} from '../config/constants';
-import {fmtAsset, toSats, randNonceHex, nowSecs} from '../lib/format';
+import {fmtAsset, toUnits, randNonceHex, nowSecs} from '../lib/format';
 import {cmpRaw} from '../lib/amount';
 import type {Identity} from '../lib/types';
 import type {FamilyDisplay, MinterFamily} from '../config/catalog';
@@ -15,13 +15,14 @@ import {useEscapeToClose} from '../hooks/useHotkeys';
 import {copyToClipboard} from '../lib/clipboard';
 
 /**
- * Withdraw ckBTC to a native BTC address. The user enters a BTC address + amount, reviews
- * "Withdraw X BTC to bc1…", then the app signs the WithdrawAuth ON-DEVICE (the non-custodial gate)
- * and submits to the relay's POST /api/v1/withdraw. The facade verifies the signature before moving
- * funds. Amounts are shown in BTC (the backing currency symbol — never the wrapper/raw ledger id).
- * Escape closes the sheet (web), matching DepositSheet.
+ * Withdraw a chain-key asset to a native address (ckBTC → BTC, native ckETH → ETH). The user enters a
+ * destination address + amount, reviews "Withdraw X <asset> to …", then the app signs the WithdrawAuth
+ * ON-DEVICE (the non-custodial gate) and submits to the relay's POST /api/v1/withdraw. The facade
+ * verifies the signature before moving funds. Amounts are converted to raw smallest-units via the
+ * family's `amountDecimals` (8 for BTC sats, 18 for ETH Wei); the on-device `WithdrawAuth.amount` is a
+ * u64 carrying those raw units. Escape closes the sheet (web), matching DepositSheet.
  */
-export function WithdrawSheet({identity, relayUrl, currency, display, family, ckBtcBalance, onClose, onWithdrawn}: {identity: Identity; relayUrl: string; currency: number; display: FamilyDisplay; family: MinterFamily; ckBtcBalance: string; onClose: () => void; onWithdrawn: () => void}) {
+export function WithdrawSheet({identity, relayUrl, currency, display, family, balance, onClose, onWithdrawn}: {identity: Identity; relayUrl: string; currency: number; display: FamilyDisplay; family: MinterFamily; balance: string; onClose: () => void; onWithdrawn: () => void}) {
   const [address, setAddress] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
@@ -39,13 +40,16 @@ export function WithdrawSheet({identity, relayUrl, currency, display, family, ck
     return () => { alive = false; };
   }, [currency]);
 
-  const sats = toSats(amountStr);
-  // MC1 units 2-4: comparisons use `cmpRaw` (BigInt) — never `>` on strings (lexicographic trap).
-  const belowMin = sats !== '0' && cmpRaw(sats, String(display.withdrawMinRaw)) < 0;
-  const overBalance = cmpRaw(sats, ckBtcBalance) > 0;
+  // Convert the entered amount to raw smallest-units at the family's decimal count (8 sats for BTC,
+  // 18 Wei for ETH). The on-device `WithdrawAuth.amount` is a u64 carrying these raw units; the FFI
+  // parses the decimal string. MC1 units 2-4: comparisons use `cmpRaw` (BigInt) — never `>` on
+  // strings (lexicographic trap).
+  const raw = toUnits(amountStr, display.amountDecimals);
+  const belowMin = raw !== '0' && cmpRaw(raw, String(display.withdrawMinRaw)) < 0;
+  const overBalance = cmpRaw(raw, balance) > 0;
   const addrEntered = address.trim().length > 0;
   const badAddr = addrEntered && !isValidDestinationAddress(family, address);
-  const canReview = addrEntered && !badAddr && sats !== '0' && !belowMin && !overBalance;
+  const canReview = addrEntered && !badAddr && raw !== '0' && !belowMin && !overBalance;
 
   async function confirm() {
     if (!canReview) {
@@ -59,8 +63,8 @@ export function WithdrawSheet({identity, relayUrl, currency, display, family, ck
       const nonce = randNonceHex();
       const expiry = nowSecs() + WITHDRAW_EXPIRY_WINDOW;
       // Sign the WithdrawAuth on-device (non-custodial gate). The facade verifies this exact sig.
-      const sigHex = await DpayCore.signWithdrawal(identity.secretHex, address.trim(), sats, nonce, expiry, currency);
-      const r = await withdrawFunds(relayUrl, identity.publicHex, address.trim(), sats, nonce, expiry, currency, sigHex, ctrl.signal);
+      const sigHex = await DpayCore.signWithdrawal(identity.secretHex, address.trim(), raw, nonce, expiry, currency);
+      const r = await withdrawFunds(relayUrl, identity.publicHex, address.trim(), raw, nonce, expiry, currency, sigHex, ctrl.signal);
       setReceipt({amount: r.amount, btcAddress: r.destination});
       setPhase('done');
       void saveWithdrawAddr(currency, address.trim()); // remember for next cash-out (Fork-B)
@@ -112,12 +116,12 @@ export function WithdrawSheet({identity, relayUrl, currency, display, family, ck
           ) : phase === 'submitting' ? (
             <View style={S.centerAll}>
               <ActivityIndicator color={C.brand} />
-              <Text style={S.dim2}>{`Withdrawing ${fmtAsset(sats, display.amountDecimals, display.nativeAsset)}…`}</Text>
+              <Text style={S.dim2}>{`Withdrawing ${fmtAsset(raw, display.amountDecimals, display.nativeAsset)}…`}</Text>
             </View>
           ) : (
             <>
               <Text style={S.label}>{`Send your ${display.networkLabel} to a native ${display.nativeAsset} address`}</Text>
-              <Text style={S.dim2}>{`Available: ${fmtAsset(ckBtcBalance, display.amountDecimals, display.nativeAsset)} · min ${fmtAsset(String(display.withdrawMinRaw), display.amountDecimals, display.nativeAsset)}`}</Text>
+              <Text style={S.dim2}>{`Available: ${fmtAsset(balance, display.amountDecimals, display.nativeAsset)} · min ${fmtAsset(String(display.withdrawMinRaw), display.amountDecimals, display.nativeAsset)}`}</Text>
 
               <Text style={S.inputLabel}>{`${display.nativeAsset} address`}</Text>
               {savedAddr && address.trim().length === 0 ? (
@@ -148,13 +152,13 @@ export function WithdrawSheet({identity, relayUrl, currency, display, family, ck
               />
 
               {belowMin ? <Text style={S.warnNote}>{`Below the ${fmtAsset(String(display.withdrawMinRaw), display.amountDecimals, display.nativeAsset)} minimum withdrawal.`}</Text> : null}
-              {overBalance ? <Text style={S.warnNote}>{`More than your available ${fmtAsset(ckBtcBalance, display.amountDecimals, display.nativeAsset)}.`}</Text> : null}
+              {overBalance ? <Text style={S.warnNote}>{`More than your available ${fmtAsset(balance, display.amountDecimals, display.nativeAsset)}.`}</Text> : null}
               {badAddr ? <Text testID="withdraw-bad-addr" style={S.warnNote}>{`That doesn't look like a valid ${display.nativeAsset} address.`}</Text> : null}
 
-              {(phase === 'form' || phase === 'error') && sats !== '0' ? (
+              {(phase === 'form' || phase === 'error') && raw !== '0' ? (
                 <View testID="withdraw-review" style={S.reviewCard}>
                   <Text style={S.reviewLabel}>Review withdrawal</Text>
-                  <Text testID="withdraw-review-amount" style={S.reviewAmount}>{`Withdraw ${fmtAsset(sats, display.amountDecimals, display.nativeAsset)}`}</Text>
+                  <Text testID="withdraw-review-amount" style={S.reviewAmount}>{`Withdraw ${fmtAsset(raw, display.amountDecimals, display.nativeAsset)}`}</Text>
                   <Text style={S.reviewTo}>{`to ${address.trim() || '—'}`}</Text>
                 </View>
               ) : null}
@@ -169,7 +173,7 @@ export function WithdrawSheet({identity, relayUrl, currency, display, family, ck
                 accessibilityRole="button"
                 accessibilityLabel="Confirm withdrawal"
                 accessibilityState={{disabled: !canReview}}>
-                <Text style={S.primaryText}>{sats !== '0' ? `Withdraw ${fmtAsset(sats, display.amountDecimals, display.nativeAsset)}` : 'Enter an amount'}</Text>
+                <Text style={S.primaryText}>{raw !== '0' ? `Withdraw ${fmtAsset(raw, display.amountDecimals, display.nativeAsset)}` : 'Enter an amount'}</Text>
               </Pressable>
 
               {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}

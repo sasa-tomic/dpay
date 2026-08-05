@@ -113,11 +113,13 @@ export async function depositRefresh(relayUrl: string, accountHex: string, curre
   return r.json();
 }
 
-// ckERC-20 onramp params (helper contract, ERC-20 address, facade principal) for a CkEthErc20-family
-// currency. The app builds the user's two Ethereum transactions from these (cketh.ts); the user signs
-// in their own wallet (non-custodial). Errors throw with the status (503 = no ckERC-20 onramp for the
-// currency / relay unreachable).
-export type CkErc20OnrampParams = {helper_address: string; erc20_address: string; facade_principal: string};
+// ckERC-20 / native-ETH onramp params (helper contract, ERC-20 address, facade principal) for a
+// CkEthErc20-family currency. The app builds the user's Ethereum transaction(s) from these; the user
+// signs in their own wallet (non-custodial). `kind` discriminates the deposit shape:
+//  - "erc20": two txs (approve the ERC-20, then depositErc20); `erc20_address` is the token contract.
+//  - "native_eth": ONE payable tx (depositEth) carrying the ETH `value`; `erc20_address` is null.
+// Errors throw with the status (503 = no CkEthErc20 onramp for the currency / relay unreachable).
+export type CkErc20OnrampParams = {helper_address: string; erc20_address: string | null; facade_principal: string; kind: 'erc20' | 'native_eth'};
 export async function ckerc20OnrampParams(relayUrl: string, currency: number, signal?: AbortSignal): Promise<CkErc20OnrampParams> {
   const r = await fetch(`${base(relayUrl)}/api/v1/onramp/ckerc20?currency=${currency}`, {signal: withDefaultTimeout(signal)});
   if (!r.ok) throw new Error(`onramp/ckerc20 ${r.status}`);

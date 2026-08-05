@@ -127,6 +127,17 @@ const FD_CKETH_ERC20: FamilyDisplay = {
   networkLabel: 'Ethereum', nativeAsset: 'USDC', amountDecimals: 6, blockMin: 1,
   withdrawMinRaw: 0, addressPlaceholder: '0x…',
 };
+// Native ETH within the CkEthErc20 family — discriminated by `token_contract == null`. The facade's
+// `withdraw` dispatches this as `withdraw_eth` (burn ckETH → send native ETH); the deposit is a single
+// payable `depositEth` tx to the shared helper (see cketh.ts). 18-decimal Wei amounts. The
+// `withdrawMinRaw` floor is a CONSERVATIVE local UX pre-filter (0.001 ETH = 1e15 Wei): the live ckETH
+// minter's governed `minimum_withdrawal_amount` (sv3dd-oaaaa…; see cketh-minter.did) is the real gate
+// and returns AmountTooLow below it — this floor only stops an obvious-tiny entry before signing. It
+// fits comfortably inside u64 / Number.MAX_SAFE_INTEGER so it stays a plain number like the BTC floor.
+const FD_CKETH_NATIVE: FamilyDisplay = {
+  networkLabel: 'Ethereum', nativeAsset: 'ETH', amountDecimals: 18, blockMin: 1,
+  withdrawMinRaw: 1_000_000_000_000_000, addressPlaceholder: '0x…',
+};
 const FAMILY_DISPLAY: Partial<Record<MinterFamily, FamilyDisplay>> = {CkBtcUtxo: FD_CKBTC, CkEthErc20: FD_CKETH_ERC20};
 // Resolve a currency's family display from the catalog. MC1 unit 6 — FAIL-CLOSED: an unknown family
 // (e.g. CkSol) or a no-minter ICRC currency returns `null` instead of silently falling back to the
@@ -142,8 +153,16 @@ export function familyDisplay(catalog: CurrencyDescriptor[], currency: number): 
   const a = catalog.find(c => c.currency === currency);
   const f = a?.minter_family ?? null;
   if (!f) return null;
-  const base = FAMILY_DISPLAY[f];
-  if (!base) return null;
+  const mapped = FAMILY_DISPLAY[f];
+  if (!mapped) return null;
+  // CkEthErc20 branches by `token_contract`: null = native ETH (depositEth/withdraw_eth, 18-dec
+  // Wei), Some = an ERC-20 token (depositErc20, the token's decimals). The discriminator is selected
+  // BEFORE injecting descriptor overrides, so a native-ETH descriptor (backing_symbol='ETH',
+  // decimals=18) still produces ETH-correct values rather than the ERC-20 family default.
+  let base: FamilyDisplay = mapped;
+  if (f === 'CkEthErc20' && a && a.token_contract == null) {
+    base = FD_CKETH_NATIVE;
+  }
   if (!a) return base;
   // Inject the authoritative per-currency facts from the descriptor (single source of truth).
   return {

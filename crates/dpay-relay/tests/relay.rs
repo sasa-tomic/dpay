@@ -1468,45 +1468,48 @@ async fn ckerc20_onramp_is_token_specific() {
     assert_eq!(s_unk, StatusCode::SERVICE_UNAVAILABLE);
 }
 
-/// MC8 U2 — fail-closed: a CkEthErc20-family currency with `token_contract: None` MUST NOT fall
-/// back to the USDC address. This is the non-custodial / no-swap honesty invariant — a partially-
-/// registered ckERC20 (family set, ERC-20 contract not yet populated) must surface a `Transient`
-/// (HTTP 503), never a silent wrong-token address. Pinned directly against the pure resolver the
-/// FakeLedger + AgentLedger impls share, so the gate is single-sourced and testable in isolation.
+/// MC8 U2 + native-ETH — within the CkEthErc20 family, `token_contract` discriminates the deposit
+/// shape: `None` ⇒ native ETH (one payable `depositEth` tx, `kind="native_eth"`, `erc20_address`
+/// null); `Some` ⇒ an ERC-20 token (`kind="erc20"`). The fail-closed invariant is now at the FAMILY
+/// level: a non-CkEthErc20 descriptor (e.g. CkBtcUtxo) or a missing descriptor MUST surface a
+/// `Transient` (HTTP 503), never a silent default address. Pinned directly against the pure resolver
+/// the FakeLedger + AgentLedger impls share, so the gate is single-sourced and testable in isolation.
 #[tokio::test]
-async fn ckerc20_onramp_fails_closed_without_token_contract() {
-    // A CkEthErc20-family descriptor with NO token_contract — the dangerous "partial registration".
-    let partial = dpay_relay::CurrencyDescriptor {
+async fn ckerc20_onramp_native_eth_without_token_contract() {
+    // A CkEthErc20-family descriptor with NO token_contract — native ETH (ckSepoliaETH shape).
+    let native = dpay_relay::CurrencyDescriptor {
         currency: 7,
         ledger: "xevnm-gaaaa-aaaar-qafnq-cai".to_string(),
         mintable: false,
         minter: Some("sv3dd-oaaaa-aaaar-qacoa-cai".to_string()),
         minter_family: Some(dpay_relay::MinterFamily::CkEthErc20),
-        symbol: Some("ckERC20-pending".into()),
-        decimals: Some(6),
-        wrapper_name: None,
-        backing_symbol: None,
-        network: None,
-        display_decimals: None,
+        symbol: Some("ckETH".into()),
+        decimals: Some(18),
+        wrapper_name: Some("ckETH".into()),
+        backing_symbol: Some("ETH".into()),
+        network: Some("Ethereum".into()),
+        display_decimals: Some(18),
         fee: None,
         cap: None,
         chain_id: Some(1),
-        token_contract: None, // ← the dangerous case
+        token_contract: None, // ← native ETH (not a partial ERC-20 registration)
         onramp: dpay_relay::RampCapability::Direct,
-        offramp: dpay_relay::RampCapability::Unavailable,
+        offramp: dpay_relay::RampCapability::Direct,
     };
-    let r = dpay_relay::ckerc20_onramp_from_descriptor(Some(&partial), "aaaaa-aa".to_string());
-    assert!(
-        r.is_err(),
-        "a CkEthErc20 with no token_contract must NOT resolve an onramp"
+    let r = dpay_relay::ckerc20_onramp_from_descriptor(Some(&native), "aaaaa-aa".to_string())
+        .expect("a CkEthErc20 with no token_contract must resolve a NATIVE-ETH onramp");
+    assert_eq!(
+        r.kind, "native_eth",
+        "token_contract=None discriminates native ETH",
     );
-    match r {
-        Err(dpay_relay::LedgerError::Transient(_)) => {} // 503 — the correct shape
-        Err(other) => {
-            panic!("expected Transient (503) for a token-less ckERC20, got Rejected: {other}")
-        }
-        Ok(_) => panic!("expected Transient (503) for a token-less ckERC20, got Ok"),
-    }
+    assert!(
+        r.erc20_address.is_none(),
+        "native ETH carries no ERC-20 address",
+    );
+    assert_eq!(
+        r.helper_address, "0x18901044688D3756C35Ed2b36D93e6a5B8e00E68",
+        "mainnet chain_id selects the mainnet CkDeposit helper (shared by depositEth + depositErc20)",
+    );
     // Also: a non-CkEthErc20 descriptor (e.g. CkBtcUtxo) and a missing descriptor both fail closed.
     let ckbtc = dpay_relay::CurrencyDescriptor {
         currency: 1,
@@ -1569,9 +1572,11 @@ async fn ckerc20_onramp_helper_is_chain_scoped() {
         "Sepolia chain_id must select the Sepolia CkDeposit helper",
     );
     assert_eq!(
-        r_sep.erc20_address, "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+        r_sep.erc20_address,
+        Some("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238".to_string()),
         "the per-token ERC-20 address is unchanged (read from the descriptor's token_contract)",
     );
+    assert_eq!(r_sep.kind, "erc20", "a token_contract=Some discriminates erc20");
 
     // Same family + token on MAINNET (chain_id 1) → mainnet helper.
     let mut mainnet = sepolia.clone();
@@ -1586,6 +1591,7 @@ async fn ckerc20_onramp_helper_is_chain_scoped() {
         r_main.erc20_address, r_sep.erc20_address,
         "the per-token ERC-20 address is identical across chains (same token_contract)",
     );
+    assert_eq!(r_main.kind, "erc20", "mainnet ERC-20 still discriminates erc20");
 
     // A CkEthErc20 with chain_id=None (a non-EVM-family metadata gap) → falls through to mainnet
     // (the safe default — the existing verified value, never a silent None/panic).

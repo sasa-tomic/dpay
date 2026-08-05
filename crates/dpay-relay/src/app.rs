@@ -400,11 +400,14 @@ async fn currencies(State(state): State<AppState>) -> Response {
 }
 
 /// `GET /api/v1/onramp/ckerc20?currency=N` → `200 {"helper_address","erc20_address",
-/// "facade_principal"}`. Surfaces the runtime parameters the app needs to build the user's two
-/// Ethereum transactions (approve + depositErc20) for a ckERC-20 onramp. Only meaningful for
-/// CkEthErc20-family currencies (e.g. ckUSDC = currency 2); a non-ckERC-20 currency is a `Transient`
-/// (no onramp configured) → 503. Error mapping mirrors `withdraw`/`faucet`: Rejected → 422,
-/// Transient → 503.
+/// "facade_principal","kind"}`. Surfaces the runtime parameters the app needs to build the user's
+/// Ethereum transaction(s) for a CkEthErc20-family onramp. For an ERC-20 token (`kind="erc20"`,
+/// `erc20_address` set) the app builds two txs (approve + depositErc20); for native ETH
+/// (`kind="native_eth"`, `erc20_address=null`) it builds ONE payable tx (depositEth, ETH value in
+/// the tx). Only meaningful for CkEthErc20-family currencies (e.g. ckUSDC = currency 2, native
+/// ckETH = a CkEthErc20 currency with token_contract null); a non-CkEthErc20 currency is a
+/// `Transient` (no onramp configured) → 503. Error mapping mirrors `withdraw`/`faucet`: Rejected →
+/// 422, Transient → 503.
 async fn ckerc20_onramp(
     State(state): State<AppState>,
     Query(qs): Query<CkErc20Query>,
@@ -417,6 +420,7 @@ async fn ckerc20_onramp(
                 helper_address: p.helper_address,
                 erc20_address: p.erc20_address,
                 facade_principal: p.facade_principal,
+                kind: p.kind,
             }),
         )
             .into_response(),
@@ -672,13 +676,16 @@ struct CurrenciesBody {
     currencies: Vec<CurrencyDescriptor>,
 }
 
-/// `GET /api/v1/onramp/ckerc20` response body — the ckERC-20 onramp params the app needs to build
-/// the user's two Ethereum transactions (approve + depositErc20).
+/// `GET /api/v1/onramp/ckerc20` response body — the CkEthErc20-family onramp params the app needs to
+/// build the user's Ethereum transaction(s). `kind` discriminates the two deposit shapes
+/// ("erc20" = two txs approve+depositErc20 with `erc20_address` set; "native_eth" = one payable
+/// depositEth tx with `erc20_address` null and the ETH amount in the tx `value`).
 #[derive(Serialize)]
 struct CkErc20OnrampBody {
     helper_address: String,
-    erc20_address: String,
+    erc20_address: Option<String>,
     facade_principal: String,
+    kind: String,
 }
 
 /// `POST /api/v1/withdraw` response body — the withdrawal receipt (echoes the authorization + the

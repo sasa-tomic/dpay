@@ -286,17 +286,22 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
         // render nothing instead of a mis-rendered BTC/ETH form (no silent wrong-currency fallback).
         const dpDisplay = familyDisplay(catalog, depositCurrency);
         if (!dpDisplay) return null;
-        return catalog.find(c => c.currency === depositCurrency)?.minter_family === 'CkEthErc20'
-          ? <CkErc20DepositSheet identity={identity} relayUrl={relayUrl} currency={depositCurrency} display={dpDisplay} chainId={catalog.find(c => c.currency === depositCurrency)?.chain_id ?? null} onClose={() => setDepositCurrency(null)} />
+        const dpDesc = catalog.find(c => c.currency === depositCurrency);
+        return dpDesc?.minter_family === 'CkEthErc20'
+          ? <CkErc20DepositSheet identity={identity} relayUrl={relayUrl} currency={depositCurrency} display={dpDisplay} chainId={dpDesc?.chain_id ?? null} nativeEth={dpDesc?.token_contract == null} onClose={() => setDepositCurrency(null)} />
           : <DepositSheet identity={identity} relayUrl={relayUrl} currency={depositCurrency} display={dpDisplay} onClose={() => setDepositCurrency(null)} />;
       })() : null}
       {withdrawCurrency != null ? (() => {
-        // MC1 unit 6 — FAIL-CLOSED: cash-out is offered ONLY for CkBtcUtxo (BalancesSheet gates the
-        // button on family + funded). An unknown/non-BTC family renders nothing instead of a BTC
-        // cash-out form. Removes the old `?? 'CkBtcUtxo'` fail-open family default.
+        // MC1 unit 6 — FAIL-CLOSED: cash-out is offered ONLY for an asset whose family has a native
+        // offramp — ckBTC (CkBtcUtxo → retrieve_btc) or native ckETH (CkEthErc20 with token_contract
+        // == null → withdraw_eth). The BalancesSheet gates the button on the same predicate; an
+        // unknown family or an ERC-20 token (ckUSDC) renders nothing instead of a wrong cash-out form.
         const wdDisplay = familyDisplay(catalog, withdrawCurrency);
-        const wdFamily = catalog.find(c => c.currency === withdrawCurrency)?.minter_family ?? null;
-        if (wdFamily !== 'CkBtcUtxo' || !wdDisplay) return null;
+        const wdCur = catalog.find(c => c.currency === withdrawCurrency);
+        const wdFamily = wdCur?.minter_family ?? null;
+        if (!wdDisplay || !wdFamily) return null;
+        const isNativeEth = wdFamily === 'CkEthErc20' && wdCur?.token_contract == null;
+        if (wdFamily !== 'CkBtcUtxo' && !isNativeEth) return null;
         return (
           <WithdrawSheet
             identity={identity}
@@ -304,7 +309,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
             currency={withdrawCurrency}
             display={wdDisplay}
             family={wdFamily}
-            ckBtcBalance={assetBalances[withdrawCurrency] ?? '0'}
+            balance={assetBalances[withdrawCurrency] ?? '0'}
             onClose={() => setWithdrawCurrency(null)}
             onWithdrawn={onActivity}
           />
