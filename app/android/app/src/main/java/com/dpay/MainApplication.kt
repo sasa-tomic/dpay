@@ -9,6 +9,7 @@ import com.facebook.react.ReactPackage
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.load
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.facebook.react.defaults.DefaultReactNativeHost
+import com.facebook.react.soloader.OpenSourceMergedSoMapping
 import com.facebook.soloader.SoLoader
 
 class MainApplication : Application(), ReactApplication {
@@ -38,7 +39,13 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
-    SoLoader.init(this, false)
+    // RN 0.79+ merges several per-feature .so files (react_featureflagsjni, react_devtoolsruntimesettings,
+    // etc.) INTO libreactnative.so to cut APK size and load time. SoLoader needs the
+    // OpenSourceMergedSoMapping so its loadLibrary("react_featureflagsjni") call resolves to a symbol
+    // inside the merged library instead of looking for a standalone libreact_featureflagsjni.so that
+    // is no longer shipped. Passing `false` (the legacy flag) means "do not use a merged mapping" →
+    // UnsatisfiedLinkError on first feature-flag read at startup.
+    SoLoader.init(this, OpenSourceMergedSoMapping)
     // The New Architecture is always enabled in RN 0.82+; load() the native entry point unconditionally.
     load()
   }
