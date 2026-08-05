@@ -1,4 +1,4 @@
-// Flow 21 — Receive-side "Payer paid offline? Scan to settle" path.
+// Flow 21 — Receive-side "confirm with the payer's phone" (offline-payer scan) path.
 //
 // The Receive screen's offline-payer affordance: after the merchant generates a request QR, if the
 // PAYER is the offline party (the signature feature inverted — merchant online, payer offline), the
@@ -8,7 +8,7 @@
 //
 // Proves the full path through the REAL app + REAL relay:
 //   1. Merchant B onboards, requests ∂25 → the request QR screen renders with the
-//      "Payer paid offline? Scan to settle" affordance.
+//      "If the payer paid without scanning your code, tap here to confirm with their phone." affordance.
 //   2. Click it → the QrScanner mounts (scanning=true); the affordance label swaps to
 //      "Scan the payer's signed QR".
 //   3. The payer (generated in-test, faucet-funded) signs an authorization for B's EXACT request
@@ -17,8 +17,8 @@
 //   5. B's /receipt poll reconciles → "Received ∂25.00" + B's balance grows to ∂125.
 //
 // This mirrors flow 08 (merchant-settle) but drives the SETTLE through the app's OWN scan→submit
-// path (onSignedQr), not a direct postPay — proving the "Payer paid offline? Scan to settle"
-// affordance is wired end-to-end. The signing is REAL (byte-exact vs Rust, cross-validated in 00).
+// path (onSignedQr), not a direct postPay — proving the offline-payer confirm affordance is wired
+// end-to-end. The signing is REAL (byte-exact vs Rust, cross-validated in 00).
 //
 // Selector contract: `tab-receive`, `amount-input`, `btn-request`, `request-qr`, `balance`.
 import { setup, assert, getBalance, onboardWallet, accountOf } from '../harness/lib.mjs';
@@ -72,18 +72,18 @@ export async function run() {
     const req = decodeRequest(requestQR);
     assert(req.toHex.toLowerCase() === bobHex.toLowerCase(), 'B request.to == B account');
 
-    // L4: the offline-payer affordance uses clear merchant-facing language (not the ambiguous
-    // "Payer offline? Scan their QR").
+    // L4: the offline-payer affordance uses clear merchant-facing language (a concrete one-line
+    // action, not the ambiguous "Payer offline? Scan their QR" / insider-jargon "settle").
     const beforeScan = await driver.bodyText();
-    assert(/payer paid offline/i.test(beforeScan) && /scan to settle/i.test(beforeScan),
-      `the request screen should show "Payer paid offline? Scan to settle.". body excerpt:\n${beforeScan.slice(0, 500)}`);
-    console.log('[21-receive-scan] ✓ "Payer paid offline? Scan to settle." affordance visible (L4)');
+    assert(/paid without scanning/i.test(beforeScan) && /confirm with their phone/i.test(beforeScan),
+      `the request screen should show the offline-payer confirm affordance ("If the payer paid without scanning your code, tap here to confirm with their phone."). body excerpt:\n${beforeScan.slice(0, 500)}`);
+    console.log('[21-receive-scan] ✓ offline-payer confirm affordance visible (L4)');
 
     // Click it → the scanner mounts. The affordance is a Pressable with no testID — click by text.
     // RNW renders Pressables as plain elements (not <button>), so search the full DOM for the label.
     await driver.eval(() => {
       const nodes = Array.from(document.querySelectorAll('text, span, div, a, button, [role]'));
-      const target = nodes.find(e => /scan to settle/i.test((e.textContent || '').trim()) && e.children.length === 0);
+      const target = nodes.find(e => /confirm with their phone/i.test((e.textContent || '').trim()) && e.children.length === 0);
       if (!target) throw new Error('affordance text node not found');
       // Walk up to the nearest clickable (the Pressable wrapper).
       let el = target;

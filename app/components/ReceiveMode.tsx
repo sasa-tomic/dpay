@@ -164,7 +164,7 @@ export function ReceiveMode({identity, relayUrl, nfcReady, onReceived, catalog}:
             {scanning ? (
               <><QrScanner onScan={onSignedQr} /><Text style={S.dim2}>Scan the payer's signed QR</Text></>
             ) : (
-              <Pressable style={S.linkBtn} onPress={() => setScanning(true)} accessibilityRole="button" accessibilityLabel="Payer paid offline, scan to settle" accessibilityState={{disabled: false}}><Text style={S.linkText}>Payer paid offline? Scan to settle.</Text></Pressable>
+              <Pressable style={S.linkBtn} onPress={() => setScanning(true)} accessibilityRole="button" accessibilityLabel="Confirm with the payer's phone if they paid without scanning your code" accessibilityHint="Scan the payer's signed QR to submit their offline payment" accessibilityState={{disabled: false}}><Text style={S.linkText}>If the payer paid without scanning your code, tap here to confirm with their phone.</Text></Pressable>
             )}
             {err ? <Text style={S.err}>{err}</Text> : null}
             <Pressable style={S.linkBtn} onPress={reset} accessibilityRole="button" accessibilityLabel="New request" accessibilityState={{disabled: false}}><Text style={S.linkTextMuted}>New request</Text></Pressable>
