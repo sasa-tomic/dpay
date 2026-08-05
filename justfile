@@ -93,6 +93,16 @@ e2e-watch-filter filter:
 e2e-live:
     cd e2e && DPAY_E2E_MODE=live DPAY_E2E_BASE=https://dpay.kalaj.org node run.mjs
 
+# LIVE testnet-wiring flow (OPEN_ISSUES #1/#2/#8) — drives the STAGING relay at DPAY_E2E_BASE against
+# a deployed staging facade (scripts/dfx-deploy-ic-staging.sh). Proves the FREE testnet chain-key path:
+# 3 testnet asset cards, real Testnet4 deposit address, relay deposit/onramp endpoints with the real
+# testnet minter config + Sepolia ckERC20 helper. OPT-IN only — NEVER part of verify/check (hits
+# mainnet + needs a staging relay). ~30s, no real funds (IC testnet tokens are free).
+# Requires: DPAY_E2E_BASE=<staging relay URL> + a staging relay pointed at the staging facade.
+e2e-live-testnet:
+    cd e2e && npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps
+    node ../e2e-live/run.mjs
+
 # narrated end-to-end demo: offline sign -> canister -> Paid (self-checking)
 sim: build-canister
     cargo run -q -p dpay-sim

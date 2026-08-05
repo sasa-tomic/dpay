@@ -128,6 +128,24 @@ These flows are **not** covered and why:
 
 ---
 
+## Live journey (OUTSIDE `just verify` — opt-in, hits mainnet)
+
+The flows above run offline against a FakeLedger relay (seconds-fast, no network). The **live**
+journey drives a STAGING relay against REAL IC testnet chain-key canisters (free tokens, mainnet-
+resident). It is a separate harness (`e2e-live/`, `just e2e-live-testnet`) that reuses the
+`e2e/harness/` Driver but targets `DPAY_E2E_BASE` (the staging relay URL). NEVER part of `just
+verify`/`just check` — it needs a deployed staging facade + a staging relay.
+
+| # | Flow | Verifies | Covers |
+|---|------|----------|--------|
+| 01 | testnet-wiring | Staging facade: onboard (DEMO faucet ∂100), 3 testnet asset cards (ckTESTBTC/ckSepoliaUSDC/ckSepoliaETH), REAL Testnet4 deposit address (not FakeLedger stub), relay deposit/info (min_confirmations==4, min>=300 sats), deposit/refresh (minted_total==0), onramp/ckerc20 (Sepolia CkDeposit helper + Sepolia USDC contract). | live, testnet, ckbtc-testnet, cksepolia-usdc, deposit-address, onramp, chain-aware-helper |
+
+Closes OPEN_ISSUES #1/#2/#8 — the FREE testnet chain-key path that proves the deposit/onramp wiring
+without real funds. The staging facade is provisioned by `scripts/dfx-deploy-ic-staging.sh`
+(`just deploy-ic-staging` for the offline rehearsal; mainnet deploy needs founder greenlight).
+
+---
+
 ## How to add a new flow
 
 1. Copy `e2e/tests/NN-name.mjs` → `e2e/tests/<next>-<slug>.mjs` (zero-padded number).

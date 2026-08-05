@@ -17,6 +17,24 @@
 - **Control:** currently the deploy identity (founder). Admin methods are denied once `controller == null`
   (R1/R4). The hand-off to an SNS / blackhole is an external operator step — see `docs/GOVERNANCE.md`.
 
+### `dpay_canister_staging` — the staging facade (testnet chain-key wiring)
+- **Mainnet id:** provisioned on first deploy via `provision_ledger_canister` on `ssqti` (id lands in
+  `canister_ids.json` under `dpay_canister_staging.ic` + `deploy/.env` as `DPAY_STAGING_CANISTER_ID`).
+- **Role:** a SEPARATE facade wired to IC's FREE testnet chain-key tokens (ckBTC Testnet on Bitcoin
+  Testnet4, ckSepoliaUSDC, ckSepoliaETH on Sepolia) — the live testnet path that closes OPEN_ISSUES
+  #1/#2/#8. Same wasm as the prod facade; differs only in its registered currencies (DEMO + the 3
+  testnet chain-key currencies vs prod's DEMO + ckBTC + ckUSDC). The e2e-live Tier 1 flow
+  (`e2e-live/tests/01-testnet-wiring.mjs`, `just e2e-live-testnet`) drives it end-to-end.
+- **Provisioning:** `scripts/dfx-deploy-ic-staging.sh` provisions the facade (200 TC) + a staging DUSD
+  ledger (20 TC) from `ssqti`'s cycle balance (the `dpay` identity is in `ADMIN_CALLERS`). The staging
+  DUSD ledger is staging-owned (NOT prod `td2nx` — whose minting_account.owner is `ssqti`, so the
+  staging facade cannot mint from it). Local rehearsal: `just deploy-ic-staging` (DPAY_DFX_NETWORK=local,
+  mock DUSD ledger, no cycles).
+- **Control:** the `dpay` deploy identity (set_controller locks the facade-level controller after init).
+- **Currencies:** DEMO(0, staging DUSD), ckBTC Testnet(3, `mc6ru-…`/`ml52i-…`), ckSepoliaUSDC(4,
+  `yfumr-…`/`jzenf-…`), ckSepoliaETH(5, `apia6-…`/`jzenf-…`). Exact validated metadata in the deploy
+  script — do not edit.
+
 ### `icrc_ledger` — the DUSD ICRC-3 ledger
 - **Mainnet id:** `td2nx-oaaaa-aaaab-qhdnq-cai`
 - **Role:** backs the **DEMO currency** (currency `0`, token symbol `DUSD`, 2 decimals). Every new
