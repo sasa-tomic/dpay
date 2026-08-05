@@ -18,8 +18,15 @@ export function QrScanner({onScan}: {onScan: (v: string) => void}) {
         <Camera style={StyleSheet.absoluteFill} device={device} isActive={appActive} codeScanner={codeScanner} />
       ) : (
         <View style={S.camPlaceholder}>
-          <Text style={S.dim2}>{hasPermission ? 'no camera' : 'camera permission needed'}</Text>
-          {!hasPermission ? <Pressable style={S.smallBtn} onPress={requestPermission} accessibilityRole="button" accessibilityLabel="Grant camera permission" accessibilityState={{disabled: false}}><Text style={S.smallBtnText}>Grant camera</Text></Pressable> : null}
+          {hasPermission ? (
+            <Text style={S.dim2}>no camera</Text>
+          ) : (
+            <>
+              <Text style={S.reviewTo}>Point your camera at a payment code to pay</Text>
+              <Text style={S.dim2}>dpay uses your camera only to scan codes — never records or uploads.</Text>
+              <Pressable style={S.smallBtn} onPress={requestPermission} accessibilityRole="button" accessibilityLabel="Allow camera scan" accessibilityHint="Permission to use your camera so you can scan payment codes" accessibilityState={{disabled: false}}><Text style={S.smallBtnText}>Allow camera scan</Text></Pressable>
+            </>
+          )}
         </View>
       )}
     </View>
