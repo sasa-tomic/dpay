@@ -52,7 +52,7 @@ This is the documented resolution of OPEN_ISSUES #10 Layer 3 (the path-filtered 
 
 ## E2e flow catalog
 
-**`FLOWS.md`** is the authoritative manifest of every tested user flow (28 flows, organized by journey). Read it to see what's covered and how to add a new flow. Run `just e2e` (all) or `DPAY_E2E_FILTER=NN node e2e/run.mjs` (one flow).
+**`FLOWS.md`** is the authoritative manifest of every tested user flow (**44 flows**, organized by journey). Read it to see what's covered and how to add a new flow. Run `just e2e` (all) or `DPAY_E2E_FILTER=NN node e2e/run.mjs` (one flow). Inner-loop e2e recipes (all offline, seconds): `just e2e` (full suite, 44 flows); `just e2e-visual` (pixel-diff flow 40 standalone — for fast iteration after a UI tweak; flow 40 ALSO runs in the full `e2e` suite so `just verify` already covers it); `just e2e-visual-seed` (regenerate the visual baselines after an intentional UI change — commit the new baselines); `just e2e-watch` (file→journey re-run on save — the shared relay+web+browser session persists across re-runs for sub-5s feedback); `just e2e-watch-filter <token>` (watch mode pinned to a journey/id/name/covers slug).
 
 ## Human expectations
 
