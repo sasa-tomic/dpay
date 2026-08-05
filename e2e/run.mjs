@@ -93,7 +93,7 @@ function resolveConcurrency() {
  * journey, `=07` runs flow 07, `=scan-pay` runs by slug, `=receipt` runs every flow covering receipts.
  * Comma-separated for several. Empty = all. Returns objects with `{file, id, name, path, meta}`.
  */
-async function loadTests() {
+export async function loadTests() {
   const all = await loadTestsMeta();
   return filterByToken(all, process.env.DPAY_E2E_FILTER ?? '');
 }
@@ -102,7 +102,7 @@ async function loadTests() {
  *  message names the EFFECTIVE timeout (after the host-load scale) so a false-fire is self-diagnosing:
  *  if a flow trips a 33s timeout on a host whose load factor is ×2.2, the base timeout was 15s and the
  *  flow genuinely hung (vs. just running slowly under contention). */
-function withTimeout(promise, timeoutMs, label) {
+export function withTimeout(promise, timeoutMs, label) {
   let timer;
   const expired = new Promise((_, reject) => {
     timer = setTimeout(
@@ -176,31 +176,46 @@ async function runPool(tests, concurrency, timeoutScale) {
   return { results, firstFailure };
 }
 
-async function main() {
+/**
+ * Run a SUBSET of tests through the bounded-parallel pool, print the per-test summary + coverage
+ * matrix for the subset, optionally tear down the shared session, and return the verdict. This is
+ * the shared runner both `main()` (the all-flows `just e2e` entry) and `e2e/watch.mjs` (the long-
+ * running dev loop) call. It does NOT print the startup banner — the caller decides what to print
+ * before the run (so the watcher can print its own re-run header).
+ *
+ * Options:
+ *   - `concurrency`  (number)  override the auto/explicit concurrency resolution (caller-knows).
+ *                              If omitted, the same `resolveConcurrency()` as `main()` is used.
+ *   - `timeoutScale` (number)  override the host-load timeout scale. If omitted, derived from load.
+ *   - `keepSession`  (boolean) if TRUE, do NOT call `stopSession()` after the run — the shared
+ *                              relay+web+browser process PERSISTS for the next re-run. The caller
+ *                              (e2e/watch.mjs) is then responsible for tearing it down on exit.
+ *                              Default FALSE → tears down (the `just e2e` behavior).
+ *
+ * Returns `{ passed, total, elapsed, firstFailure, timeoutScale }`. Does NOT call `process.exit` —
+ * the caller decides the exit code (the watcher keeps running on RED; the one-shot run exits 1).
+ *
+ * The fail-fast behavior (no further tests STARTED after the first RED; in-flight tests drain) is
+ * inherited from `runPool`. The per-test timeout scaling (so a slow-under-load host doesn't false-
+ * fire) is preserved: `effective = base * timeoutScale`.
+ *
+ * The load-adjusted 22s×factor slip target is ONLY checked when `keepSession` is FALSE — a watch
+ * re-run of a single journey is not the full-suite gate, so the slip signal doesn't apply there.
+ */
+export async function runTestsSubset(tests, opts = {}) {
   const startedAt = Date.now();
-  const tests = await loadTests();
-  if (tests.length === 0) {
-    console.error('[run] no tests matched (check DPAY_E2E_FILTER — try a journey/id/name/covers slug)');
-    process.exit(1);
-  }
-  const { concurrency, auto, load } = resolveConcurrency();
-  const timeoutScale = load.factor;
-  const filter = process.env.DPAY_E2E_FILTER ?? '';
-  const filterNote = filter
-    ? ` matching filter "${filter}" (by journey/id/name/filename/covers)`
-    : '';
-  const concurrencyNote = auto
-    ? `concurrency=${concurrency} (auto: load ${load.load1.toFixed(1)} on ${load.cpus} cores → headroom ${Math.max(0, load.cpus - load.load1).toFixed(1)}, timeout scale ×${timeoutScale.toFixed(2)})`
-    : `concurrency=${concurrency} (explicit; timeout scale ×${timeoutScale.toFixed(2)} from load ${load.load1.toFixed(1)} on ${load.cpus} cores)`;
-  console.log(
-    `[run] running ${tests.length} test(s)${filterNote} in ${process.env.DPAY_E2E_MODE ?? 'local'} mode` +
-    ` (parallel, ${concurrencyNote})\n`,
-  );
+  const { concurrency: explicitConcurrency, timeoutScale: explicitScale, keepSession = false } = opts;
 
-  const { results, firstFailure } = await runPool(tests, concurrency, timeoutScale);
+  const resolved = explicitConcurrency
+    ? { concurrency: explicitConcurrency, auto: false, load: hostLoadFactor() }
+    : resolveConcurrency();
+  const timeoutScale = explicitScale ?? resolved.load.factor;
 
-  // Tear down the shared relay + web server + browser once the run is done (pass OR fail).
-  await stopSession();
+  const { results, firstFailure } = await runPool(tests, resolved.concurrency, timeoutScale);
+
+  // Tear down the shared relay + web server + browser once the run is done (pass OR fail) — UNLESS
+  // the caller asked to keep it alive (watch mode reuses it across re-runs).
+  if (!keepSession) await stopSession();
 
   const elapsed = ((Date.now() - startedAt) / 1000).toFixed(2);
   const passed = [...results.values()].filter((r) => r.ok).length;
@@ -228,19 +243,56 @@ async function main() {
 
   if (firstFailure) {
     console.error(`\n[run] FAILED in ${elapsed}s (first RED: ${firstFailure.key})`);
+  } else {
+    console.log(`\n[run] ${passed}/${total} GREEN in ${elapsed}s`);
+    // The target scales with suite size: 18 flows → 15s; the Wave-E expansion to 24 flows → 20s; wire-
+    // format v2 (flow 26 + per-payment name encoding) → 22s. The suite runs real-browser flows in a
+    // bounded-parallel pool; CPU contention adds ±3s variance. The target is a LOAD-ADJUSTED ceiling —
+    // on a busy shared host the per-flow wall time inflates by the load factor, so a 22s×factor budget
+    // keeps the signal meaningful (a genuinely regressed suite still trips it; a merely-loaded host
+    // does not). The raw 22s target is what an idle 16-core box should hit. Only meaningful for a
+    // full-suite run — skipped in watch mode (keepSession) where a single journey re-runs.
+    if (!keepSession) {
+      const target = 22 * timeoutScale;
+      if (parseFloat(elapsed) > target) {
+        console.warn(`[run] ⚠️  suite slipped past the load-adjusted target of ${target.toFixed(0)}s (took ${elapsed}s, load factor ×${timeoutScale.toFixed(2)}) — flag this`);
+      }
+    }
+  }
+
+  return { passed, total, elapsed, firstFailure, timeoutScale };
+}
+
+/**
+ * The `just e2e` entry: discover + filter the tests (via DPAY_E2E_FILTER), print the startup banner,
+ * run them via `runTestsSubset`, and translate the verdict to a process exit code. Behavior here is
+ * preserved byte-for-byte from before the `runTestsSubset` extraction — the banner wording, the
+ * concurrency/load reporting, the slip-target warning, and the exit codes all match the original
+ * `main()`. The runner itself (pool + summary + verdict) now lives in `runTestsSubset` so the watch
+ * loop can re-invoke it without re-printing the banner or re-launching the shared session.
+ */
+async function main() {
+  const tests = await loadTests();
+  if (tests.length === 0) {
+    console.error('[run] no tests matched (check DPAY_E2E_FILTER — try a journey/id/name/covers slug)');
     process.exit(1);
   }
-  console.log(`\n[run] ${passed}/${total} GREEN in ${elapsed}s`);
-  // The target scales with suite size: 18 flows → 15s; the Wave-E expansion to 24 flows → 20s; wire-
-  // format v2 (flow 26 + per-payment name encoding) → 22s. The suite runs real-browser flows in a
-  // bounded-parallel pool; CPU contention adds ±3s variance. The target is a LOAD-ADJUSTED ceiling —
-  // on a busy shared host the per-flow wall time inflates by the load factor, so a 22s×factor budget
-  // keeps the signal meaningful (a genuinely regressed suite still trips it; a merely-loaded host
-  // does not). The raw 22s target is what an idle 16-core box should hit.
-  const target = 22 * timeoutScale;
-  if (parseFloat(elapsed) > target) {
-    console.warn(`[run] ⚠️  suite slipped past the load-adjusted target of ${target.toFixed(0)}s (took ${elapsed}s, load factor ×${timeoutScale.toFixed(2)}) — flag this`);
-  }
+  const { concurrency, auto, load } = resolveConcurrency();
+  const timeoutScale = load.factor;
+  const filter = process.env.DPAY_E2E_FILTER ?? '';
+  const filterNote = filter
+    ? ` matching filter "${filter}" (by journey/id/name/filename/covers)`
+    : '';
+  const concurrencyNote = auto
+    ? `concurrency=${concurrency} (auto: load ${load.load1.toFixed(1)} on ${load.cpus} cores → headroom ${Math.max(0, load.cpus - load.load1).toFixed(1)}, timeout scale ×${timeoutScale.toFixed(2)})`
+    : `concurrency=${concurrency} (explicit; timeout scale ×${timeoutScale.toFixed(2)} from load ${load.load1.toFixed(1)} on ${load.cpus} cores)`;
+  console.log(
+    `[run] running ${tests.length} test(s)${filterNote} in ${process.env.DPAY_E2E_MODE ?? 'local'} mode` +
+    ` (parallel, ${concurrencyNote})\n`,
+  );
+
+  const { firstFailure } = await runTestsSubset(tests, { concurrency, timeoutScale });
+  if (firstFailure) process.exit(1);
 }
 
 main().catch((e) => {
