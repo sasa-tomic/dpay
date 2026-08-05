@@ -53,6 +53,22 @@ e2e:
     cd e2e && npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps
     cd e2e && node run.mjs
 
+# visual-regression gate (standalone for now — NOT in `verify` yet): re-capture the 5 primary
+# surfaces and pixel-diff each vs its committed baseline (e2e/shots/baselines/). Fails on drift
+# >0.5%. Catches the exact class of style/layout regression that sails through the testID+textContent
+# e2e net. Run after a UI change to confirm no visual drift; on intentional change, regenerate via
+# `just e2e-visual-seed` and commit the new baselines (the diff is reviewable in the commit).
+e2e-visual:
+    cd e2e && npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps
+    cd e2e && DPAY_E2E_FILTER=40 node run.mjs
+
+# regenerate the visual-regression baselines from the current app surfaces (run after an intentional
+# UI/style change). Writes e2e/shots/baselines/<surface>.png for each of the 5 surfaces. COMMIT the
+# new baselines — they ARE the contract; a future regression diffs against them.
+e2e-visual-seed:
+    cd e2e && npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps
+    cd e2e && DPAY_E2E_REGEN_BASELINES=1 DPAY_E2E_FILTER=40 node run.mjs
+
 # production gate: same harness drives the LIVE relay + canister at DPAY_E2E_BASE. Throwaway identities,
 # throttled, read-only-ish (never sends real BTC). Honest ceiling until KYC-allowlist lands (see plan §4.3).
 e2e-live:
