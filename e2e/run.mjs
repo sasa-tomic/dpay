@@ -215,7 +215,7 @@ async function runPool(tests, concurrency, timeoutScale) {
  * inherited from `runPool`. The per-test timeout scaling (so a slow-under-load host doesn't false-
  * fire) is preserved: `effective = base * timeoutScale`.
  *
- * The load-adjusted 22s×factor slip target is ONLY checked when `keepSession` is FALSE — a watch
+ * The load-adjusted 30s×factor slip target is ONLY checked when `keepSession` is FALSE — a watch
  * re-run of a single journey is not the full-suite gate, so the slip signal doesn't apply there.
  */
 export async function runTestsSubset(tests, opts = {}) {
@@ -262,14 +262,16 @@ export async function runTestsSubset(tests, opts = {}) {
   } else {
     console.log(`\n[run] ${passed}/${total} GREEN in ${elapsed}s`);
     // The target scales with suite size: 18 flows → 15s; the Wave-E expansion to 24 flows → 20s; wire-
-    // format v2 (flow 26 + per-payment name encoding) → 22s. The suite runs real-browser flows in a
-    // bounded-parallel pool; CPU contention adds ±3s variance. The target is a LOAD-ADJUSTED ceiling —
-    // on a busy shared host the per-flow wall time inflates by the load factor, so a 22s×factor budget
-    // keeps the signal meaningful (a genuinely regressed suite still trips it; a merely-loaded host
-    // does not). The raw 22s target is what an idle 16-core box should hit. Only meaningful for a
-    // full-suite run — skipped in watch mode (keepSession) where a single journey re-runs.
+    // format v2 (flow 26 + per-payment name encoding) → 22s; the Phase-4 coverage expansion to 44 flows
+    // (00-43, incl. visual-regression + a11y census + receipt-reject + decimal-edges) → ~30s. The suite
+    // runs real-browser flows in a bounded-parallel pool; CPU contention adds ±3s variance. The target
+    // is a LOAD-ADJUSTED ceiling — on a busy shared host the per-flow wall time inflates by the load
+    // factor, so a 30s×factor budget keeps the signal meaningful (a genuinely regressed suite still
+    // trips it; a merely-loaded host does not). The raw 30s target is what an idle 16-core box should
+    // hit. Only meaningful for a full-suite run — skipped in watch mode (keepSession) where a single
+    // journey re-runs.
     if (!keepSession) {
-      const target = 22 * timeoutScale;
+      const target = 30 * timeoutScale;
       if (parseFloat(elapsed) > target) {
         console.warn(`[run] ⚠️  suite slipped past the load-adjusted target of ${target.toFixed(0)}s (took ${elapsed}s, load factor ×${timeoutScale.toFixed(2)}) — flag this`);
       }
