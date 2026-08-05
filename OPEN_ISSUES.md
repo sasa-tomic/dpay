@@ -10,7 +10,7 @@
 
 ## Session summary (2026-08-05): radical e2e + polish (visual regression, diagnostics, watch mode, coverage, de-god-component, UX audit)
 
-> All gates green at this session's close: `just verify` clean (**44/44 e2e**), `just typecheck` clean, jest **257/257**, `just bridge-parity` OK (21 methods), `just e2e-visual` GREEN. On `main`, **36 commits** ahead of origin/main. Wire FROZEN (292/196/132) untouched. No canister/relay/core CODE changed — all 7 phases shipped under the existing kernel.
+> All gates green at this session's close: `just verify` clean (**44/44 e2e**), `just typecheck` clean, jest **258/258**, `just bridge-parity` OK (21 methods), `just e2e-visual` GREEN, gradle release build `BUILD SUCCESSFUL` (AGP 8.12 + API 36), `just app`/`just ondevice` GREEN on the API-36 emulator. On `main`, **41 commits** ahead of origin/main. Wire FROZEN (292/196/132) untouched. No canister/relay/core CODE changed — all 7 phases + the Phase-B RN 0.86.2 migration shipped under the existing kernel.
 
 - **Phase 1 — Visual regression harness** (commits `f1159e5`/`816b9fb`/`b8668f3`): pixel-diff comparator `e2e/harness/pixel.mjs` (pngjs, tolerance 0.5%, per-channel delta 3, `masks` for non-deterministic QR regions); flow `40-visual-regression` re-captures the 5 primary surfaces and diffs each vs committed baselines in `e2e/shots/baselines/`; `just e2e-visual` (standalone iteration) + `just e2e-visual-seed` (regenerate baselines). **Closes the documented "styles.ts single-block class dropped = pixel-blind to e2e net" blind spot** — flow 40 is part of the suite so `verify` already covers it.
 - **Phase 2 — RED-path diagnostics** (`9290d55`/`e76241e`/`de8bc89`/`cb76128`): on RED, dumps `e2e/shots/failures/<flow>-<ts>/` — `actions.json` (timeline) + `console.log` + `error.txt` always land; `screenshot.png` + `dom.html` best-effort (a real flow's `finally{env.stop()}` closes the page first). `_testCtx` AsyncLocalStorage + `_drivers` Map + `dumpDiagnosticsFor(file,err)` in the runPool catch. Wall-time +0.27s.
@@ -40,7 +40,6 @@
 
 - **Issue #3 — governance hand-off.** Founder-at-launch. **DO NOT NAG** (see item 3 below).
 - **Issue #4 — `ADMIN_CALLERS` rotation.** Needs the founder to designate the governed principal; can't pick it autonomously.
-- **Issue #11 — RN/AGP 8.5→8.12.** Device-gate required (`just app` / `just ondevice`); founder's `2026-08-02-android-release-optimization-plan.md` Phase B; high-risk version dance. Defer unless founder greenlights.
 - **Real MAINNET ckBTC deposit/withdraw** (as opposed to testnet). Superseded by #1 above as the primary proof path; only a final pre-pilot mainnet confidence check, low-cost, not blocking, and only after the testnet wiring proves out.
 
 
@@ -180,11 +179,10 @@ Milestone acceptance: a fresh install visibly exposes configured assets; a merch
 
 ## Other open issues
 
-### 11. (medium) RN release toolchain must move past AGP 8.5 before API 36
+### 11. ✅ RESOLVED (2026-08-05) RN release toolchain moved to AGP 8.12 + API 36 (Phase B)
 
 - **What/why.** The Play app now targets/compiles API 35 after Play rejected the old API 34 bundle. The standalone `android/` device-fidelity module explicitly pins AGP 8.7.3, but the separate React Native release build in `app/android/` uses the versionless Android plugin dependency supplied by RN 0.75.4, whose bundled version catalog pins AGP 8.5.0. AGP 8.5 emits a warning that it was tested only through compile SDK 34.
-- **Current mitigation.** The signed API 35 AAB built successfully, passed package/target/certificate checks, and Play committed version code `1785619014` to the internal track on 2026-08-01. This is a tooling-support warning, not a blocker for that accepted artifact.
-- **Next step.** Follow Phase B of [`2026-08-02-android-release-optimization-plan.md`](2026-08-02-android-release-optimization-plan.md) before the Play API 36 deadline (2026-08-31). Upgrade through a supported RN release/toolchain rather than patching `node_modules`; AGP 8.12 supports API 36 and is a valid intermediate, while AGP 9 should wait until the selected RN template supports it. Rebuild, run `just app` + `just ondevice`, and upload a fresh internal release.
+- **Resolution.** Founder-greenlit Phase B of [`2026-08-02-android-release-optimization-plan.md`](2026-08-02-android-release-optimization-plan.md). Migrated RN `0.75.4` → **`0.86.2`**, which brings **AGP 8.12.0** (supports API 36) via the bundled `@react-native/gradle-plugin` catalog (no catalog override, no `node_modules` patch). Also: React `18.3.1` → `19.2.3`, Kotlin `1.9.24` → `2.1.20`, Gradle wrapper `8.8` → `8.13`, compile/target SDK `35` → `36`, build-tools `36.1.0`, `newArchEnabled=true` (forced — RN 0.82+ removed the legacy arch; the hand-written `DpayCore`/`DpayNfc` modules survive via the New-Arch interop layer, no TurboModule/codegen rewrite). Commits `bb1bbf0`/`f5eca10`/`39fb642`/`f3b145b`. Gates 1–6 GREEN on the API-36 emulator (`just typecheck` clean, `just bridge-parity` OK 21 methods, `just verify` 44/44 e2e, `just ndk` builds the 16 KB-aligned `.so`, gradle `assembleRelease`+`bundleRelease` `BUILD SUCCESSFUL` with R8 diagnostics present, `just app` `DPAY_SELFCHECK PASS`, `just ondevice` 9/9). **Founder real-device check (camera/NFC-radio/Play pre-launch report) still pending; upload-key AAB + staged `mapping.txt` ready for `just play-upload`.**
 
 ### 12. ✅ RESOLVED (2026-08-02) Release builds do not use R8 or resource shrinking
 

@@ -38,7 +38,7 @@ The e2e harness and jest both run under Node/V8 (or a headless browser), NOT Her
 
 **Before merging a change that touches any of the trigger paths below, run the device gates off the hot path.** The trigger paths are intentionally broad — when in doubt, run the gate.
 
-- `app/android/**`, `crates/dpay-ffi/**`, `app/lib/types.ts`, `app/services/**`, or the core wire consts (`WIRE_LEN`/`SIGNING_LEN`/`REQUEST_LEN` in `crates/dpay-core/src/lib.rs`) — the wire/bridge surface (blind spot 3).
+- `app/android/**` (incl. `MainApplication.kt` — `SoLoader.init(... OpenSourceMergedSoMapping)` + the `ReactNativeHost`/New-Arch setup; a regression here throws on the native-modules thread and only surfaces on device), `crates/dpay-ffi/**`, `app/lib/types.ts`, `app/services/**`, or the core wire consts (`WIRE_LEN`/`SIGNING_LEN`/`REQUEST_LEN` in `crates/dpay-core/src/lib.rs`) — the wire/bridge surface (blind spot 3).
 - `app/react-native.config.js`, `app/package.json` (add/remove a native dep), `app/index.js` (polyfill imports) — the native-module/autolinking surface (blind spot 1).
 - Any change introducing a NEW dependency on a Web API (`crypto`, `fetch` internals, `WebAssembly`, `URL`/`URLSearchParams`, etc.) that may need a RN polyfill — first-use-of-native-API surface (blind spot 1).
 - `app/components/**` changes touching `StatusBar`, `SafeAreaView`, `BackHandler`, or `Platform`-gated rendering — the Android-rendering surface (blind spot 2).

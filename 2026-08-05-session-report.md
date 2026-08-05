@@ -28,6 +28,7 @@
   relay, each analyzed via zai-vision → `2026-08-05-ux-audit.md` (10-item Quick Wins table). Applied 6
   (P0 + 3 P1 + 2 P2): camera-gate copy, deposit fee/min placeholders, empty Transactions state, Receive
   settle link, balance subtitles, onboarding CTA.
+- **Phase B — Android toolchain migrated to AGP 8.12 + API 36** (`bb1bbf0`/`f5eca10`/`39fb642`/`f3b145b`, founder-greenlit after the 7 phases). RN `0.75.4`→`0.86.2` (bundles AGP 8.12.0), React `18`→`19`, Kotlin `1.9.24`→`2.1.20` (K2), Gradle `8.8`→`8.13`, compile/target SDK `35`→`36`, New Arch forced-on (interop-layer survival for the hand-written `DpayCore`/`DpayNfc` modules — no codegen rewrite), `MainApplication.kt` → `OpenSourceMergedSoMapping`. Gates 1–6 GREEN on the API-36 emulator (typecheck, bridge-parity 21, `just verify` 44/44, `just ndk`, gradle `assembleRelease`+`bundleRelease` `BUILD SUCCESSFUL` w/ R8 diagnostics, `just app` `DPAY_SELFCHECK PASS`, `just ondevice` 9/9). **Closes OPEN_ISSUES #11.** Founder real-device check (camera/NFC-radio/Play pre-launch) still pending.
 - **Gate state:** jest 257; typecheck clean; bridge-parity 21; `just e2e-visual` GREEN. **Wire untouched**
   (292/196/132). No canister/relay/core CODE changed — all 7 phases shipped under the existing kernel.
 
@@ -151,7 +152,7 @@ Apply-gate design) or low-ROI polish. See §5.
 - **Carryover open items still apply:**
   - **Issue #1 / #8** — live ckBTC deposit/withdraw. **CORRECTION:** these are exercisable on the **free** IC testnet chain-key tokens, NOT a real-money gate (I incorrectly claimed otherwise earlier this session). ckBTC Testnet (Bitcoin Testnet4): Ledger `mc6ru-gyaaa-aaaar-qaaaq-cai`, Minter `ml52i-qqaaa-aaaar-qaaba-cai`; ckETH Sepolia + ckSepoliaUSDC `yfumr-cyaaa-aaaar-qaela-cai` also exist. Wiring = register a testnet currency in the facade (admin `register_currency` w/ the testnet minter+ledger principals) + free testnet coins; the facade code path is identical (same minter candid, same 1-tuple `Call::with_args` invariant). Autonomous up to the founder's one-time currency-registration op.
   - **Issue #4** — `ADMIN_CALLERS` rotate pre-pilot.
-  - **Issue #11** — RN/AGP 8.5 → 8.12 before the Play API 36 deadline (Aug 31).
+  - **Issue #11** — ✅ RESOLVED this session (Phase B migration above; RN 0.86.2 / AGP 8.12 / API 36; founder real-device check pending).
   - **MC9 remainder** — repair `dpay-sim`; 2/6/8/18-decimal conformance matrix; atomic deploy; per-asset
     metrics.
   - **(Issue #3 — governance hand-off is founder-at-launch, DO NOT NAG; deliberately omitted from this list.)**
