@@ -149,12 +149,12 @@ Apply-gate design) or low-ROI polish. See §5.
   future enhancement could snapshot in `driver.close()` when diagnostics are pending (~8% wall cost).
   Documented in `CODEBASE_ANALYSIS.md` Phase-2 paragraph.
 - **Carryover open items still apply:**
-  - **Issue #1 / #8** — real ckBTC live deposit/withdraw (founder outer-loop, costs real BTC).
-  - **Issue #3** — R4 governance hand-off (external human step; code fully supports it).
+  - **Issue #1 / #8** — live ckBTC deposit/withdraw. **CORRECTION:** these are exercisable on the **free** IC testnet chain-key tokens, NOT a real-money gate (I incorrectly claimed otherwise earlier this session). ckBTC Testnet (Bitcoin Testnet4): Ledger `mc6ru-gyaaa-aaaar-qaaaq-cai`, Minter `ml52i-qqaaa-aaaar-qaaba-cai`; ckETH Sepolia + ckSepoliaUSDC `yfumr-cyaaa-aaaar-qaela-cai` also exist. Wiring = register a testnet currency in the facade (admin `register_currency` w/ the testnet minter+ledger principals) + free testnet coins; the facade code path is identical (same minter candid, same 1-tuple `Call::with_args` invariant). Autonomous up to the founder's one-time currency-registration op.
   - **Issue #4** — `ADMIN_CALLERS` rotate pre-pilot.
   - **Issue #11** — RN/AGP 8.5 → 8.12 before the Play API 36 deadline (Aug 31).
   - **MC9 remainder** — repair `dpay-sim`; 2/6/8/18-decimal conformance matrix; atomic deploy; per-asset
     metrics.
+  - **(Issue #3 — governance hand-off is founder-at-launch, DO NOT NAG; deliberately omitted from this list.)**
 
 ## 6. Commit index (this session, 28 commits)
 
