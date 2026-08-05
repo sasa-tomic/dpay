@@ -69,6 +69,23 @@ e2e-visual-seed:
     cd e2e && npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps
     cd e2e && DPAY_E2E_REGEN_BASELINES=1 DPAY_E2E_FILTER=40 node run.mjs
 
+# watch mode (Phase 3): a LONG-RUNNING dev loop that re-runs a SUBSET of flows on every change to
+# app/, e2e/, crates/dpay-core/src/, or crates/dpay-ffi/src/. The changed file is mapped to a journey
+# (e.g. app/components/PayMode.tsx → the `pay` journey, 16 flows) and only that subset re-runs —
+# sub-second-to-~5s feedback while iterating instead of the full ~23s suite. The shared relay+web+
+# browser session PERSISTS across re-runs (only per-test contexts churn). Ctrl-C tears it down.
+# Shared-infra changes (App.tsx, styles.ts, services/native.ts, harness/*, crates/**) re-run ALL.
+e2e-watch:
+    cd e2e && npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps
+    cd e2e && node watch.mjs
+
+# watch mode PINNED to a filter token (journey/id/name/covers slug). The pinned filter always wins
+# — the changed-file→journey mapping is bypassed. Use this to iterate on a specific journey or flow
+# (e.g. `just e2e-watch pay` runs the 16 pay flows; `just e2e-watch 07` runs flow 07 alone).
+e2e-watch-filter filter:
+    cd e2e && npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps
+    cd e2e && DPAY_E2E_WATCH_FILTER={{filter}} node watch.mjs
+
 # production gate: same harness drives the LIVE relay + canister at DPAY_E2E_BASE. Throwaway identities,
 # throttled, read-only-ish (never sends real BTC). Honest ceiling until KYC-allowlist lands (see plan §4.3).
 e2e-live:
