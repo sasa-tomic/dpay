@@ -8,7 +8,7 @@ import {base} from '../lib/format';
 import {parseDecimalToUnits, cmpRaw} from '../lib/amount';
 import type {Identity} from '../lib/types';
 import type {FamilyDisplay} from '../config/catalog';
-import {type CkErc20OnrampParams, ckerc20OnrampParams, readJsonOrEmpty} from '../services/relay';
+import {type CkErc20OnrampParams, ckerc20OnrampParams, fetchWithTimeout, readJsonOrEmpty} from '../services/relay';
 import {encodeApprove, encodeDepositErc20, principalToBytes32} from '../cketh';
 import {resolveOnrampProvider, connectWallet, getChainId, sendTransaction, waitForReceipt, ReceiptReverted, ReceiptTimeout, pairOnrampWallet, openWalletApp} from '../wallet';
 import {loadDeposit, saveDeposit, clearDeposit} from '../services/ckerc20Persist';
@@ -178,12 +178,9 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
       setAccount(acct);
       // Snapshot the starting balance so the watching poll can detect the mint (a GROWTH from here).
       try {
-        const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), BALANCE_TIMEOUT_MS);
-        const r = await fetch(`${base(relayUrl)}/api/v1/balance/${identity.publicHex}?currency=${currency}`, {signal: ctrl.signal});
+        const r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/balance/${identity.publicHex}?currency=${currency}`, undefined, BALANCE_TIMEOUT_MS);
         const j = await readJsonOrEmpty(r);
         if (typeof j.balance === 'string') setStartBal(j.balance);
-        clearTimeout(t);
       } catch { /* best-effort snapshot; watching falls back to any-positive */ }
       setPhase('enter');
     } catch (e: unknown) {
@@ -282,17 +279,15 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
     if (phase !== 'watching') return;
     let alive = true;
     const poll = async () => {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), BALANCE_TIMEOUT_MS);
       try {
-        const r = await fetch(`${base(relayUrl)}/api/v1/balance/${identity.publicHex}?currency=${currency}`, {signal: ctrl.signal});
+        const r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/balance/${identity.publicHex}?currency=${currency}`, undefined, BALANCE_TIMEOUT_MS);
         const j = await readJsonOrEmpty(r);
         if (alive && r.ok && typeof j.balance === 'string') {
           // MC1 units 2-4: balance presence/growth via `cmpRaw` (BigInt) — never `>` on strings.
           const grew = startBal == null ? j.balance !== '0' : cmpRaw(j.balance, startBal) > 0;
           if (grew) setPhase('done');
         }
-      } catch { /* keep watching */ } finally { clearTimeout(t); }
+      } catch { /* keep watching */ }
     };
     poll();
     const id = setInterval(poll, POLL.deposit);

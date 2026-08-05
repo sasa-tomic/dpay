@@ -15,7 +15,7 @@ import {
   type SettleOutcome,
 } from '../payments';
 import {verifyOutcomeReceipt} from '../services/receipt';
-import {payAndClassify, readJsonOrEmpty} from '../services/relay';
+import {fetchWithTimeout, payAndClassify, readJsonOrEmpty} from '../services/relay';
 import {DpayCore, DpayNfc} from '../services/native';
 import {NfcIcon} from './NfcIcon';
 
@@ -121,12 +121,10 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
   // single-use, so this can never cause a second charge — it only *reads* whether it landed.
   const reconcile = useCallback(async (nonceHex: string) => {
     for (let i = 0; i < RECONCILE_ATTEMPTS; i++) {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), RECONCILE_FETCH_TIMEOUT_MS);
       try {
-        const r = await fetch(`${base(relayUrl)}/api/v1/receipt/${nonceHex}`, {signal: ctrl.signal});
-        if (r.ok) { const j = await readJsonOrEmpty(r); clearTimeout(t); return j.receipt ?? {}; }
-      } catch { /* keep polling */ } finally { clearTimeout(t); }
+        const r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/receipt/${nonceHex}`, undefined, RECONCILE_FETCH_TIMEOUT_MS);
+        if (r.ok) { const j = await readJsonOrEmpty(r); return j.receipt ?? {}; }
+      } catch { /* keep polling */ }
       await new Promise(res => setTimeout(res, RECONCILE_INTERVAL_MS));
     }
     return null;

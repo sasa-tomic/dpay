@@ -7,6 +7,7 @@ import {STORAGE_KEY, BALANCE_TIMEOUT_MS} from '../config/constants';
 import {base} from '../lib/format';
 import type {Identity} from '../lib/types';
 import {DpayCore} from '../services/native';
+import {fetchWithTimeout} from '../services/relay';
 import {Logo, Wordmark} from './Logo';
 
 export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: (id: Identity) => void}) {
@@ -24,10 +25,7 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
       // Fund the new account from the demo faucet (best-effort — works when the ledger is reachable).
       // Bounded by a 4s timeout so a hanging/dead relay can't stall onboarding (fail fast → $0, fund later).
       try {
-        const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), BALANCE_TIMEOUT_MS);
-        try {
-          await fetch(`${base(relayUrl)}/api/v1/faucet`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({account: id.publicHex}), signal: ctrl.signal});
-        } finally { clearTimeout(t); }
+        await fetchWithTimeout(`${base(relayUrl)}/api/v1/faucet`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({account: id.publicHex})}, BALANCE_TIMEOUT_MS);
       } catch { /* offline/timeout: created with $0, can be funded later */ }
       onCreated(id);
     } catch (e: unknown) { setErr(e instanceof Error ? e.message : String(e)); setBusy(false); }

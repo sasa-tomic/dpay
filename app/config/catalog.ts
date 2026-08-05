@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {base, fmtAsset, usd} from '../lib/format';
 import {BALANCE_TIMEOUT_MS} from './constants';
+import {fetchWithTimeout} from '../services/relay';
 
 // --- currency catalog (M0 + MC1 unit 5 authoritative per-currency metadata) ------------------
 // The wallet's runtime source of truth for which assets exist + how to display/fund them. Fetched
@@ -62,10 +63,8 @@ export const BUNDLED_CATALOG: CurrencyDescriptor[] = [
 // Timeout-bound like every other fetch. Reads the MC1 unit 5 per-currency metadata fields from the
 // relay JSON (forward-compatible: fee/cap carried as string for future exact-amount transport).
 export async function fetchCurrencies(relayUrl: string, prior: CurrencyDescriptor[]): Promise<CurrencyDescriptor[]> {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), BALANCE_TIMEOUT_MS);
   try {
-    const r = await fetch(`${base(relayUrl)}/api/v1/currencies`, {signal: ctrl.signal});
+    const r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/currencies`, undefined, BALANCE_TIMEOUT_MS);
     if (!r.ok) return prior;
     const j = await r.json();
     const list: unknown = j?.currencies;
@@ -96,7 +95,7 @@ export async function fetchCurrencies(relayUrl: string, prior: CurrencyDescripto
     if (clean.length === 0) return prior;
     AsyncStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify(clean)).catch(() => {});
     return clean;
-  } catch { return prior; } finally { clearTimeout(t); }
+  } catch { return prior; }
 }
 
 // Per-minter-family display config. MC1 unit 5 DOWNSIZED the FAMILY-LEVEL constants to the

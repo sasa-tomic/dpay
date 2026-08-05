@@ -12,7 +12,7 @@ import {cmpRaw, applyOffline} from '../lib/amount';
 import type {Identity, Txn, TransactionsRow, NfcStatus} from '../lib/types';
 import {DpayCore} from '../services/native';
 import {loadDeposit} from '../services/ckerc20Persist';
-import {readJsonOrEmpty} from '../services/relay';
+import {fetchWithTimeout, readJsonOrEmpty} from '../services/relay';
 import {useHotkeys} from '../hooks/useHotkeys';
 import {readDepositDeepLink} from '../lib/deepLink';
 import {Wordmark} from './Logo';
@@ -158,25 +158,20 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
   useEffect(() => {
     let alive = true;
     const poll = async () => {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), BALANCE_TIMEOUT_MS);
-      // Non-primary asset balances run in PARALLEL + best-effort, each with its own AbortController,
-      // so a hiccup on one asset's ledger can never flip the primary `$` balance offline or fail its
+      // Non-primary asset balances run in PARALLEL + best-effort, each with its own timeout, so a
+      // hiccup on one asset's ledger can never flip the primary `$` balance offline or fail its
       // poll. The assets live on separate ledgers — fetching one must not affect another's display. A
       // null result keeps the prior value (no flap on a single miss). Covers EVERY non-primary catalog
       // currency (ramp + no-minter ICRC), so an unfunded asset still reads its real zero balance.
       const assetFetches = displayAssets.map(a => {
-        const c = new AbortController();
-        const to = setTimeout(() => c.abort(), BALANCE_TIMEOUT_MS);
-        return fetch(`${base(relayUrl)}/api/v1/balance/${identity.publicHex}?currency=${a.currency}`, {signal: c.signal})
+        return fetchWithTimeout(`${base(relayUrl)}/api/v1/balance/${identity.publicHex}?currency=${a.currency}`, undefined, BALANCE_TIMEOUT_MS)
           .then(r => r.ok ? r.json().catch(() => null) : null)
           .then(j => (j && typeof j.balance === 'string') ? (j.balance as string) : null)
           .catch(() => null)
-          .finally(() => clearTimeout(to))
           .then(b => ({currency: a.currency, balance: b}));
       });
       try {
-        const r = await fetch(`${base(relayUrl)}/api/v1/balance/${identity.publicHex}`, {signal: ctrl.signal});
+        const r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/balance/${identity.publicHex}`, undefined, BALANCE_TIMEOUT_MS);
         const j = await r.json();
         // MC5: reset ONLY the DEMO (currency-0) offline deduction on a successful primary poll — the
         // authoritative balance replaces the local optimistic view, and any pending offline DEMO
@@ -184,7 +179,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
         // deductions reset on their own per-currency poll below (same rationale, per asset).
         if (alive && r.ok && typeof j.balance === 'string') { setBalance(j.balance); setOnline(true); setOfflineSpent(prev => prev[0] != null && prev[0] !== '0' ? {...prev, 0: '0'} : prev); }
         else if (alive) setOnline(false);
-      } catch { if (alive) setOnline(false); } finally { clearTimeout(t); }
+      } catch { if (alive) setOnline(false); }
       // Settle the asset balances after the primary poll resolves; merge keeping prior on null.
       // MC5: a successful asset poll resets that currency's offline deduction (the authoritative
       // polled balance replaces the optimistic local view — same rationale as the DEMO reset above).
@@ -225,14 +220,12 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
     const currencies = catalog.map(c => c.currency);
     let anySucceeded = false;
     const perCurrency = await Promise.all(currencies.map(async (currency) => {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), BALANCE_TIMEOUT_MS);
       try {
-        const r = await fetch(`${base(relayUrl)}/api/v1/transactions/${identity.publicHex}?currency=${currency}&limit=20`, {signal: ctrl.signal});
+        const r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/transactions/${identity.publicHex}?currency=${currency}&limit=20`, undefined, BALANCE_TIMEOUT_MS);
         const j = await r.json().catch(() => null);
         if (r.ok && j && Array.isArray(j.transactions)) { anySucceeded = true; return j.transactions as TransactionsRow[]; }
         return [];
-      } catch { return []; } finally { clearTimeout(t); }
+      } catch { return []; }
     }));
     if (!anySucceeded) return; // offline / all failed: keep the existing list
     const me = identity.publicHex.toLowerCase();
@@ -310,14 +303,11 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
   const topUp = useCallback(async () => {
     if (topUpBusy) return;
     setTopUpBusy(true); setTopUpErr(null);
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), FAUCET_TIMEOUT_MS);
     try {
-      const r = await fetch(`${base(relayUrl)}/api/v1/faucet`, {
+      const r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/faucet`, {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({account: identity.publicHex, amount: TOP_UP_CENTS}),
-        signal: ctrl.signal,
-      });
+      }, FAUCET_TIMEOUT_MS);
       const j = await readJsonOrEmpty(r);
       if (r.ok && typeof j.balance === 'string') {
         // MC5: topUp is a DEMO (currency-0) credit, so reset ONLY the currency-0 offline deduction.
@@ -332,7 +322,6 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
     } catch {
       setTopUpErr('Offline — try again when connected');
     } finally {
-      clearTimeout(t);
       setTopUpBusy(false);
     }
   }, [topUpBusy, relayUrl, identity.publicHex]);

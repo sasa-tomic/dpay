@@ -10,7 +10,7 @@ import {type CurrencyDescriptor, fmtCurrencyAmount, isPayableAsset} from '../con
 import type {Identity, Req, NfcStatus} from '../lib/types';
 import {rejectionMessage, isNonceReused} from '../payments';
 import {verifyOutcomeReceipt} from '../services/receipt';
-import {payAndClassify, readJsonOrEmpty} from '../services/relay';
+import {fetchWithTimeout, payAndClassify, readJsonOrEmpty} from '../services/relay';
 import {DpayCore, DpayNfc} from '../services/native';
 import {NfcTap} from './NfcTap';
 import {NfcIcon} from './NfcIcon';
@@ -59,9 +59,8 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
     if (phase !== 'qr' || !qr) return;
      let alive = true;
     const check = async () => {
-      const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), BALANCE_TIMEOUT_MS);
       try {
-        const r = await fetch(`${base(relayUrl)}/api/v1/receipt/${qr.nonce}`, {signal: ctrl.signal});
+        const r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/receipt/${qr.nonce}`, undefined, BALANCE_TIMEOUT_MS);
         // R2: only believe the reconciled receipt if its canister/ledger signature verifies.
         // MC4 U5: full-auth binding — the receipt must answer the exact authorization the payer
         // holds (same from/to/amount/currency/nonce), so a stale relay returning a different
@@ -72,7 +71,7 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
             onSettled(); setPaid({amount: qr.amount, currency: qr.currency, who: qr.who, already: false}); setPhase('paid');
           }
         }
-      } catch { /* best-effort: keep polling — the next tick reconciles if the ledger settled */ } finally { clearTimeout(t); }
+      } catch { /* best-effort: keep polling — the next tick reconciles if the ledger settled */ }
     };
     check(); const id = setInterval(check, POLL.receiptPay);
     return () => { alive = false; clearInterval(id); };

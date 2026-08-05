@@ -8,7 +8,7 @@ import {short, base, toUnits, randNonceHex, nowSecs} from '../lib/format';
 import {type CurrencyDescriptor, assetTestKey, displayName, fmtCurrencyAmount, currencySymbol} from '../config/catalog';
 import type {Identity} from '../lib/types';
 import {rejectionMessage, isNonceReused} from '../payments';
-import {payAndClassify, readJsonOrEmpty} from '../services/relay';
+import {fetchWithTimeout, payAndClassify, readJsonOrEmpty} from '../services/relay';
 import {DpayCore, DpayNfc} from '../services/native';
 import {NfcTap} from './NfcTap';
 import {QrScanner} from './QrScanner';
@@ -89,11 +89,10 @@ export function ReceiveMode({identity, relayUrl, nfcReady, onReceived, catalog}:
     if (!reqQr || result) return;
     let alive = true;
     const check = async () => {
-      const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), BALANCE_TIMEOUT_MS);
       try {
-        const r = await fetch(`${base(relayUrl)}/api/v1/receipt/${reqQr.nonce}`, {signal: ctrl.signal});
+        const r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/receipt/${reqQr.nonce}`, undefined, BALANCE_TIMEOUT_MS);
         if (alive && r.ok) { const j = await r.json(); const from = j.receipt?.from ? short(j.receipt.from) : 'payer'; setResult({amount: reqQr.rawAmount, currency: reqQr.currency, from}); onReceived(); }
-      } catch { /* best-effort: keep polling — the next tick surfaces the settlement */ } finally { clearTimeout(t); }
+      } catch { /* best-effort: keep polling — the next tick surfaces the settlement */ }
     };
     check(); const id = setInterval(check, POLL.receiptRcv);
     return () => { alive = false; clearInterval(id); };
