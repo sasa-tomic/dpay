@@ -42,8 +42,8 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
         <TextInput testID="username-input" style={S.usernameInput} value={username} onChangeText={setUsername} placeholder="e.g. Alice" placeholderTextColor={C.sub2} autoCapitalize="words" autoCorrect={false} onSubmitEditing={busy ? undefined : create} accessibilityLabel="Username" accessibilityHint="The name others see when you request or receive a payment" />
         {err ? <Text style={S.err}>{err}</Text> : null}
         <Pressable testID="btn-create" style={[S.primary, busy && S.dim]} disabled={busy} onPress={create}
-          accessibilityRole="button" accessibilityLabel="Create and fund wallet" accessibilityHint="Generate your on-device key and add demo funds" accessibilityState={{disabled: busy}}>
-          <Text style={S.primaryText}>{busy ? 'Creating…' : 'Create & fund wallet'}</Text>
+          accessibilityRole="button" accessibilityLabel="Create wallet" accessibilityHint="Generate your on-device key and add demo funds" accessibilityState={{disabled: busy}}>
+          <Text style={S.primaryText}>{busy ? 'Creating…' : 'Create wallet'}</Text>
         </Pressable>
         <Text style={S.dim2}>Creates your wallet and adds $100 in demo funds to get started.</Text>
       </View>
