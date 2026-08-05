@@ -186,7 +186,7 @@ export function ReceiveMode({identity, relayUrl, nfcReady, onReceived, catalog}:
           <Text style={S.currency}>{reqPrefix}</Text>
           <Text style={S.caret}>▾</Text>
         </Pressable>
-        <TextInput testID="amount-input" style={S.amountInput} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={C.sub2} />
+        <TextInput testID="amount-input" style={S.amountInput} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={C.sub2} accessibilityLabel="Amount to receive" accessibilityHint="The amount the payer will send you" />
       </View>
       <TextInput
         testID="memo-input"

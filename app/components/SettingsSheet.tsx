@@ -82,6 +82,8 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset}: {
               autoCorrect={false}
               placeholder="http://<ip>:8787"
               placeholderTextColor={C.sub2}
+              accessibilityLabel="Relay URL"
+              accessibilityHint="The server your wallet talks to"
             />
             <Text style={S.dim2}>The server your wallet talks to. Changes apply when you tap Apply.</Text>
             <Pressable
