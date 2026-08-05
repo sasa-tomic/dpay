@@ -53,10 +53,12 @@ e2e:
     cd e2e && npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps
     cd e2e && node run.mjs
 
-# visual-regression gate (standalone for now — NOT in `verify` yet): re-capture the 5 primary
-# surfaces and pixel-diff each vs its committed baseline (e2e/shots/baselines/). Fails on drift
-# >0.5%. Catches the exact class of style/layout regression that sails through the testID+textContent
-# e2e net. Run after a UI change to confirm no visual drift; on intentional change, regenerate via
+# visual-regression gate (fast iteration on flow 40 alone): re-capture the 5 primary surfaces and
+# pixel-diff each vs its committed baseline (e2e/shots/baselines/). Fails on drift >0.5%. Catches the
+# exact class of style/layout regression that sails through the testID+textContent e2e net. NOTE:
+# flow 40 IS part of the suite (00-43), so `just verify` → `check e2e` already runs the pixel-diff —
+# this standalone recipe re-runs ONLY flow 40 in isolation for fast feedback after a UI tweak (no
+# banner, no other flows). On an intentional UI change, regenerate the baselines via
 # `just e2e-visual-seed` and commit the new baselines (the diff is reviewable in the commit).
 e2e-visual:
     cd e2e && npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps
