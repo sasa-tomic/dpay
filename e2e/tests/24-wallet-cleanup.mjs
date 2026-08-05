@@ -4,7 +4,8 @@
 // This flow is the RED→GREEN gate for the four Group-A issues:
 //   - H1: USDC was labeled "Ethereum" (the chain) instead of "USDC" (the asset). The picker rows
 //         + the wallet asset card must show the asset NAME (symbol) as the primary heading; the chain
-//         ('Ethereum'/'Bitcoin') appears ONLY in the "Send X on NETWORK" instruction line.
+//         name no longer appears in the row subtitle at all (it now reads "US dollar stablecoin" /
+//         "Bitcoin" — user-benefit, not network topology).
 //   - H2: history was hardcoded to currency=0, so BTC/USDC payments never appeared. The wallet
 //         must now fetch history for EVERY catalog currency, union + dedup by nonce, newest-first.
 //         Proven by settling a currency-1 (BTC) payment and asserting it surfaces in RECENT — the
@@ -57,8 +58,9 @@ export async function run() {
     console.log('[24-wallet-cleanup] ✓ header shows only the username (H4)');
 
     // --- H1: Balances rows are labeled by the asset NAME (symbol), not the chain. ----------------
-    // USDC: primary heading "USDC" (was "Ethereum"). The chain still appears in the instruction
-    // subtitle "Send USDC on Ethereum" — that's correct. BTC: primary heading "BTC" (was "Bitcoin").
+    // USDC: primary heading "USDC" (was "Ethereum"). The subtitle is now the user-benefit
+    // "US dollar stablecoin" (was the tautological "Send USDC on Ethereum"). BTC: primary heading
+    // "BTC" (was "Bitcoin"); subtitle "Bitcoin".
     await openBalances(driver);
     const ckusdcRow = await driver.findByTestID('asset-ckusdc', { timeoutMs: 5_000 });
     const ckusdcTxt = await ckusdcRow.evaluate((n) => (n.textContent ?? '').trim());

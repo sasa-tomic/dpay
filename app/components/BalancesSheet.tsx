@@ -68,9 +68,20 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
             const disp = familyDisplay(catalog, a.currency);
             const onrampable = disp !== null && a.onramp !== 'Unavailable';
             const cashable = a.minter_family === 'CkBtcUtxo' && funded && a.offramp !== 'Unavailable';
+            // Subtitle is user-benefit, not network topology — drop the "Send X on Y" tautology (BTC
+            // on Bitcoin, USDC on Ethereum) that names a network meaningless to a non-technical user.
+            // BTC family -> "Bitcoin"; Ethereum USD stablecoins (USDC/USDT) -> "US dollar stablecoin";
+            // any other onrampable asset -> its native asset name alone. DEMO (isPrimary) keeps its
+            // exact "play money for testing" copy (unchanged — the audit praised it).
             const sub = isPrimary
               ? 'play money for testing'
-              : onrampable && disp ? `Send ${disp.nativeAsset} on ${disp.networkLabel}` : 'Unsupported asset';
+              : onrampable && disp
+                ? (a.minter_family === 'CkBtcUtxo'
+                    ? 'Bitcoin'
+                    : a.minter_family === 'CkEthErc20' && (a.backing_symbol === 'USDC' || a.backing_symbol === 'USDT')
+                      ? 'US dollar stablecoin'
+                      : disp.nativeAsset)
+                : 'Unsupported asset';
             return (
               <View key={a.currency} testID={`asset-${key}`} style={S.assetCard}>
                 <View style={S.assetRow}>
