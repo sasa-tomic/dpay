@@ -47,7 +47,9 @@ export function _registerDriver(file, driver) {
   if (file) _drivers.set(file, driver);
 }
 
-/** Drop a driver from the registry (called from the per-test `stop()` closure). */
+/** Drop a driver from the registry. NOT called from the per-test `stop()` closure (the dump fires
+ *  AFTER stop() — see setup()), but exported for explicit cleanup by long-lived callers (e.g. a
+ *  future watch-mode exit hook) that want to free entries proactively. */
 export function _unregisterDriver(file) {
   if (file) _drivers.delete(file);
 }
@@ -215,13 +217,20 @@ export async function setup(opts = {}) {
   // through `_testCtx` by `runOne`). When run under the orchestrator this lets `runPool`'s catch
   // reach the driver and dump screenshot/DOM/timeline at the RED point. Standalone runs (no store)
   // skip registration — there's no orchestrator to call `dumpDiagnosticsFor`.
+  //
+  // NOTE: the driver is intentionally NEVER unregistered from `stop()`. The flow's own
+  // `finally { await env.stop(); }` runs BEFORE the rejection reaches `runPool`'s catch (where the
+  // dump fires), so unregistering in `stop()` would erase the driver from the registry before the
+  // dump could find it. The map self-bounds: it is keyed by test file (at most one entry per file),
+  // a re-run of the same file overwrites, and a CLOSED driver is cheap to retain (its page/context/
+  // browser are gone — only the small in-memory timeline/consoleLog arrays persist, which is exactly
+  // what the dump needs). One-shot runs reap the map at process exit; watch-mode re-runs overwrite.
   const testFile = _testCtx.getStore();
   if (testFile) _registerDriver(testFile, driver);
 
   // `driver.close()` also asserts that the page produced no unexpected diagnostics. Never swallow
   // that assertion: a flow that looked correct after a page/network error must be RED.
   const stop = async () => {
-    if (testFile) _unregisterDriver(testFile);
     await driver.close();
   };
 
