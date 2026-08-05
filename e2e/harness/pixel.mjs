@@ -41,16 +41,23 @@ const DEFAULT_DECODE_TIMEOUT_MS = 5_000;
  * - `perChannelDelta` is the max allowed per-channel drift before a pixel counts as "different"
  *   (default 3 — absorbs font-AA noise; a real style change moves pixels by orders of magnitude
  *   more).
+ * - `masks` (optional): array of `{x, y, w, h}` rectangles in DEVICE pixels to exclude from the
+ *   diff. Each mask is painted to a sentinel color in BOTH images before counting, so masked
+ *   regions contribute zero diff. Use this to ignore known non-deterministic surfaces — the
+ *   request-QR screen, for example, encodes a per-run random nonce + a fresh per-onboarding pubkey
+ *   in the QR bitmap, so the QR rectangle is masked while the surrounding layout is still diffed.
+ *   Padding the rect by a few px guards against sub-pixel render shifts at the QR boundary.
  * - `ok = diffPct <= tolerancePct`.
  * - On ANY non-zero diff (even sub-threshold), a diff-highlight PNG is written to
  *   `e2e/shots/diffs/<basename>-<timestamp>.png` and `diffPath` is set, so a developer can see
- *   exactly which pixels drifted. `diffPath` is null only when the two images are pixel-identical.
+ *   exactly which pixels drifted. `diffPath` is null only when the two images are pixel-identical
+ *   (after masking).
  *
  * Throws with context on file-read or PNG-decode failure (no silent errors).
  *
  * @param {string} baselinePath  Absolute path to the committed baseline PNG.
  * @param {string} actualPath    Absolute path to the freshly-captured PNG.
- * @param {{ tolerancePct?: number, perChannelDelta?: number, decodeTimeoutMs?: number }} [opts]
+ * @param {{ tolerancePct?: number, perChannelDelta?: number, decodeTimeoutMs?: number, masks?: Array<{x:number,y:number,w:number,h:number}> }} [opts]
  * @returns {Promise<{ matching: number, total: number, diffPct: number, matchPct: number, diffPath: string|null, ok: boolean }>}
  */
 export async function comparePng(baselinePath, actualPath, opts = {}) {
@@ -60,6 +67,17 @@ export async function comparePng(baselinePath, actualPath, opts = {}) {
 
   const baselinePng = await decodePng(baselinePath, 'baseline', decodeTimeoutMs);
   const actualPng = await decodePng(actualPath, 'actual', decodeTimeoutMs);
+
+  // Apply masks (in device pixels) to BOTH images BEFORE the dimension check. A mask paints its
+  // rectangle to a sentinel color in both images so the region contributes zero diff. This is the
+  // standard visual-regression tool escape hatch for known non-deterministic surfaces (e.g. a QR
+  // that encodes a per-run random nonce).
+  if (Array.isArray(opts.masks) && opts.masks.length > 0) {
+    for (const m of opts.masks) {
+      paintMaskRect(baselinePng, m);
+      paintMaskRect(actualPng, m);
+    }
+  }
 
   // Dimension mismatch is its own class of regression (viewport / layout shift that resized the
   // page). Report it distinctly so the failure message names the cause rather than just "100% diff".
@@ -153,6 +171,33 @@ function withTimeout(p, timeoutMs, label) {
     timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
   });
   return Promise.race([p, expired]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * Paint a rectangle in `png` to the mask sentinel color (opaque magenta). The rect is in DEVICE
+ * pixels and clamped to the image bounds. Coordinates outside the image are silently clipped (a
+ * slightly-too-large mask is harmless; a slightly-too-small one leaks diff pixels).
+ *
+ * Sentinel choice: magenta (255,0,255) is highly unlikely to collide with real UI pixels and is
+ * visually distinct in the rare case a masked image is opened directly.
+ */
+function paintMaskRect(png, rect) {
+  if (!rect || typeof rect !== 'object') return;
+  const x0 = Math.max(0, Math.floor(rect.x ?? 0));
+  const y0 = Math.max(0, Math.floor(rect.y ?? 0));
+  const x1 = Math.min(png.width, Math.ceil((rect.x ?? 0) + (rect.w ?? 0)));
+  const y1 = Math.min(png.height, Math.ceil((rect.y ?? 0) + (rect.h ?? 0)));
+  const data = png.data;
+  for (let yy = y0; yy < y1; yy++) {
+    const rowStart = yy * png.width;
+    for (let xx = x0; xx < x1; xx++) {
+      const o = (rowStart + xx) * 4;
+      data[o] = 255;     // R
+      data[o + 1] = 0;   // G
+      data[o + 2] = 255; // B
+      data[o + 3] = 255; // A
+    }
+  }
 }
 
 /** Write the diff-highlight PNG to `e2e/shots/diffs/<basename>-<timestamp>.png`. Returns its path. */
