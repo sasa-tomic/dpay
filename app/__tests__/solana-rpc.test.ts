@@ -119,3 +119,153 @@ describe('solana rpc — confirmTransaction poll', () => {
     await expect(confirmTransaction('https://rpc.example', 'Sig1')).rejects.toThrow('transaction failed');
   });
 });
+
+// bs58 v6 is CJS under jest (babel-jest): the default export lives under `.default`.
+const _bs58Mod: unknown = require('bs58');
+const bs58 = (_bs58Mod as {default?: {decode: (s: string) => Uint8Array; encode: (b: Uint8Array) => string}}).default ??
+  (_bs58Mod as {decode: (s: string) => Uint8Array; encode: (b: Uint8Array) => string});
+
+// Hand-rolled standard base64 (RFC 4648) — mirrors rpc.ts's private `bytesToBase64`. Test-side copy
+// so the fixture builder does not depend on the impl's private helper.
+function bytesToBase64(bytes: Uint8Array): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  let out = '';
+  for (let i = 0; i < bytes.length; i += 3) {
+    const b0 = bytes[i];
+    const b1 = i + 1 < bytes.length ? bytes[i + 1] : 0;
+    const b2 = i + 2 < bytes.length ? bytes[i + 2] : 0;
+    out += chars[b0 >> 2];
+    out += chars[((b0 & 0x03) << 4) | (b1 >> 4)];
+    out += i + 1 < bytes.length ? chars[((b1 & 0x0f) << 2) | (b2 >> 6)] : '=';
+    out += i + 2 < bytes.length ? chars[b2 & 0x3f] : '=';
+  }
+  return out;
+}
+
+// Build an 80-byte NonceState account-data blob (the raw layout @solana/web3.js's
+// NonceAccountLayout decodes): u32 version | u32 state | 32B authority | 32B nonce | u64 fee.
+function buildNonceAccountData(authorityB58: string, nonceValueB58: string, lamportsPerSig = 5000): string {
+  const buf = new Uint8Array(80);
+  const dv = new DataView(buf.buffer);
+  dv.setUint32(0, 0, true);  // version = 0
+  dv.setUint32(4, 1, true);  // state = Initialized
+  buf.set(bs58.decode(authorityB58), 8);
+  buf.set(bs58.decode(nonceValueB58), 40);
+  dv.setUint32(72, lamportsPerSig, true);  // low 4 bytes of u64 (5000 fits)
+  dv.setUint32(76, 0, true);               // high 4 bytes
+  return bytesToBase64(buf);
+}
+
+const AUTHORITY = '3jsvVphLjwR6wih9fQydrRNGieNjYzyMkyTxFueCssaK';
+const NONCE_VALUE = 'FzFAtwLSSzxhug4sEvUeusLxFdjAS3ByYqgseUYkFpkN';
+
+describe('solana rpc — getNonceAccount', () => {
+  test('parses an Initialized NonceState into {authority, value}', async () => {
+    const data = buildNonceAccountData(AUTHORITY, NONCE_VALUE);
+    installRpcFetch([{value: {data: [data, 'base64'], owner: '11111111111111111111111111111111', lamports: 1447680}}]);
+    const {getNonceAccount} = require('../solana/rpc');
+    const na = await getNonceAccount('https://rpc.example', 'NonceAcctAddr');
+    expect(na).toEqual({authority: AUTHORITY, value: NONCE_VALUE});
+  });
+
+  test('throws on an Uninitialized nonce account (state=0)', async () => {
+    const buf = new Uint8Array(80); // all zeros → version=0, state=0 (Uninitialized)
+    installRpcFetch([{value: {data: [bytesToBase64(buf), 'base64'], owner: '11111111111111111111111111111111', lamports: 1447680}}]);
+    const {getNonceAccount} = require('../solana/rpc');
+    await expect(getNonceAccount('https://rpc.example', 'NonceAcctAddr')).rejects.toThrow(/uninitialized|nonce/i);
+  });
+
+  test('throws on a null account (does not exist)', async () => {
+    installRpcFetch([{value: null}]);
+    const {getNonceAccount} = require('../solana/rpc');
+    await expect(getNonceAccount('https://rpc.example', 'NonceAcctAddr')).rejects.toThrow(/not found|absent|exist/i);
+  });
+
+  test('throws on truncated/malformed account data', async () => {
+    installRpcFetch([{value: {data: [bytesToBase64(new Uint8Array(40)), 'base64'], owner: '11111111111111111111111111111111', lamports: 1}}]);
+    const {getNonceAccount} = require('../solana/rpc');
+    await expect(getNonceAccount('https://rpc.example', 'NonceAcctAddr')).rejects.toThrow(/malformed|truncat|short|nonce/i);
+  });
+
+  test('requests getAccountInfo with base64 encoding', async () => {
+    const {calls} = installRpcFetch([{value: {data: [buildNonceAccountData(AUTHORITY, NONCE_VALUE), 'base64']}}]);
+    const {getNonceAccount} = require('../solana/rpc');
+    await getNonceAccount('https://rpc.example', 'NonceAcctAddr');
+    // `id` is a module-level counter advanced by every prior rpcFetch call across the suite, so
+    // assert shape (not the exact id) — mirrors how the other request-shape asserts stay stable.
+    expect(calls[0].body).toEqual(expect.objectContaining({
+      jsonrpc: '2.0', method: 'getAccountInfo', params: ['NonceAcctAddr', {encoding: 'base64'}],
+    }));
+  });
+});
+
+describe('solana rpc — getMinimumBalanceForRentExemption', () => {
+  test('returns the rent as a bigint', async () => {
+    const {calls} = installRpcFetch([1447680]);
+    const {getMinimumBalanceForRentExemption} = require('../solana/rpc');
+    const rent = await getMinimumBalanceForRentExemption('https://rpc.example', 80);
+    expect(rent).toBe(1447680n);
+    expect(typeof rent).toBe('bigint');
+    expect(calls[0].body).toEqual(expect.objectContaining({
+      jsonrpc: '2.0', method: 'getMinimumBalanceForRentExemption', params: [80],
+    }));
+  });
+});
+
+describe('solana rpc — e2e stub seam (__DPAY_TEST_SOLANA_RPC_STUB)', () => {
+  afterEach(() => {
+    delete (globalThis as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB;
+  });
+
+  test('when the stub is set, rpcFetch routes to it and fetch is NEVER called', async () => {
+    let fetchCalls = 0;
+    (globalThis as {fetch: unknown}).fetch = () => { fetchCalls++; throw new Error('fetch must not be called'); };
+    const stub = {
+      getBalance: (_params: unknown[]) => ({value: 777}),
+    };
+    (globalThis as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB = stub;
+    const {getBalance} = require('../solana/rpc');
+    const bal = await getBalance('https://rpc.example', 'AddrX');
+    expect(bal).toBe('777');
+    expect(fetchCalls).toBe(0);
+  });
+
+  test('getNonceAccount routes through the stub getAccountInfo and parses the result', async () => {
+    (globalThis as {fetch: unknown}).fetch = () => { throw new Error('fetch must not be called'); };
+    const stub = {
+      getAccountInfo: (_params: unknown[]) => ({value: {data: [buildNonceAccountData(AUTHORITY, NONCE_VALUE), 'base64']}}),
+    };
+    (globalThis as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB = stub;
+    const {getNonceAccount} = require('../solana/rpc');
+    const na = await getNonceAccount('https://rpc.example', 'NonceAcctAddr');
+    expect(na).toEqual({authority: AUTHORITY, value: NONCE_VALUE});
+  });
+
+  test('sendTransaction routes through the stub', async () => {
+    (globalThis as {fetch: unknown}).fetch = () => { throw new Error('fetch must not be called'); };
+    const stub = {
+      sendTransaction: (params: unknown[]) => 'STUB_SIG_' + String((params as unknown[])[0]).slice(0, 4),
+    };
+    (globalThis as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB = stub;
+    const {sendTransaction} = require('../solana/rpc');
+    const sig = await sendTransaction('https://rpc.example', new Uint8Array([1, 2, 3]));
+    expect(sig).toBe('STUB_SIG_AQID');
+  });
+
+  test('a method missing from the stub throws a typed error and does not fall through to fetch', async () => {
+    let fetchCalls = 0;
+    (globalThis as {fetch: unknown}).fetch = () => { fetchCalls++; throw new Error('fetch must not be called'); };
+    (globalThis as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB = {}; // no methods
+    const {getBalance} = require('../solana/rpc');
+    await expect(getBalance('https://rpc.example', 'X')).rejects.toThrow(/stub|not implemented|getBalance/i);
+    expect(fetchCalls).toBe(0);
+  });
+
+  test('clearing the stub restores real fetch routing', async () => {
+    delete (globalThis as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB;
+    installRpcFetch([{value: 42}]);
+    const {getBalance} = require('../solana/rpc');
+    const bal = await getBalance('https://rpc.example', 'X');
+    expect(bal).toBe('42');
+  });
+});
