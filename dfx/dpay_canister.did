@@ -347,14 +347,16 @@ service : (InitArg) -> {
   // the authority on liquid cycles — no CDK API exposes liquid balance) — retry with a smaller amount.
   // Returns the amount actually transferred so the caller can confirm.
   transfer_cycles : (principal, nat) -> (Result_9);
-  // `(WithdrawRequest) -> Result<WithdrawReceipt, text>` — withdraw ckBTC to a native BTC address on a
-  // verified user signature. The request carries the [`WithdrawAuth`] fields + the user's Ed25519
-  // signature over the canonical signing bytes; the facade verifies the signature under `from_pubkey`
-  // (== the debit subaccount) before moving any funds.
+  // `(WithdrawRequest) -> Result<WithdrawReceipt, text>` — withdraw a chain-key asset to a native
+  // address on a verified user signature. The request carries the [`WithdrawAuth`] fields + the user's
+  // Ed25519 signature over the canonical signing bytes; the facade verifies the signature under
+  // `from_pubkey` (== the debit subaccount) before moving any funds.
   // 
   // Idempotency / replay safety mirrors `pay`: the withdraw nonce is reserved synchronously before any
   // cross-canister call (the concurrency barrier — two concurrent withdraws with the same nonce
   // cannot both succeed), released on a transient/pre-burn failure (the same auth may retry), and
-  // settled once the burn commits (the auth can never replay → no double-burn).
+  // settled once the burn commits (the auth can never replay → no double-burn). The family branch
+  // owns its own settle/release classification of the minter's typed errors (permanent → settle the
+  // dead auth; transient → release so the same auth retries).
   withdraw : (WithdrawRequest) -> (Result_10);
 }
