@@ -86,7 +86,7 @@
 
 ## Status
 
-- [ ] Phase 1a — transitive deps promoted
-- [ ] Phase 1b — device gate SOL self-check PASS
-- [ ] Phase 1c — devnet round-trip from the app (or recorded blocker)
+- [x] Phase 1a — transitive deps promoted (commit `ed1b4c2`)
+- [x] Phase 1b — device gate SOL self-check PASS (`just app` 2026-08-06: `DPAY_SOL_SELFCHECK PASS`)
+- [x] Phase 1c — devnet round-trip from the app (send sig `36iNhSstnx5DW72hmne27Thr453JmQUGFiTrL3pLYdrEHU4BukAgCUSQH6cBiZHsb9BxnEXrAjEWpYvit4rJyb3X`; proof at `.dev/sol-proof/run.cjs`)
 - [ ] Phase 2 — forks resolved + offline-pay rail built
