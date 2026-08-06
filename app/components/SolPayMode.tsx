@@ -9,7 +9,7 @@ import type {Identity} from '../lib/types';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {USDC_DECIMALS} from '../solana/spl';
 import {decodeSolReq, type SolReq} from '../solana/qr';
-import {createNonceAccount, signOfflineSolPayment, signOfflineSplPayment} from '../solana';
+import {createNonceAccount, resyncNonce, signOfflineSolPayment, signOfflineSplPayment} from '../solana';
 import {loadSolNonce, saveSolNonce, type SolNonceState} from '../services/solNoncePersist';
 import {DpaySolNfc} from '../services/native';
 import {QrScanner} from './QrScanner';
@@ -109,6 +109,28 @@ export function SolPayMode({identity, online, nfcReady, onClose}: {identity: Ide
 
   function reset() { setReq(null); setSolpayUri(null); setErr(null); setPhase('scan'); }
 
+  // Resync the durable-nonce value after a stale/rejected broadcast. ONLINE — re-reads the on-chain
+  // nonce value and flips the persisted state back to 'ready' so offline signing works again. Cheaper
+  // than re-running setupNonce (which would create a NEW nonce account at fresh rent cost).
+  async function resync() {
+    const ns = nonceState;
+    if (!ns || !ns.address || busy) return;
+    setBusy(true); setErr(null);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), SOL_SEND_TIMEOUT_MS);
+    try {
+      const value = await resyncNonce(ns.address, ctrl.signal);
+      const updated: SolNonceState = {address: ns.address, value, status: 'ready'};
+      setNonceState(updated);
+      await saveSolNonce(identity.publicHex, updated);
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      clearTimeout(timer);
+      setBusy(false);
+    }
+  }
+
   // NFC card callbacks. onPaid: the merchant's settled receipt carried the advanced nonce — adopt it
   // optimistically (the receipt-nonce-relay win: the NEXT offline payment needs NO online resync) +
   // persist. onStale: the broadcast was rejected — mark the nonce stale so the next sign refuses.
@@ -185,7 +207,26 @@ export function SolPayMode({identity, online, nfcReady, onClose}: {identity: Ide
                   {nonceState?.status === 'stale' ? (
                     <View testID="sol-pay-stale" style={S.reviewCard}>
                       <Text style={S.reviewLabel}>Offline pay needs a resync</Text>
-                      <Text style={S.warnNote}>Your nonce was marked stale after a failed broadcast. Go online and resync to use offline pay again.</Text>
+                      <Text style={S.warnNote}>Your nonce was marked stale after a failed broadcast. {online ? 'Resync to use offline pay again.' : 'Go online and resync to use offline pay again.'}</Text>
+                      {err ? <Text testID="sol-pay-stale-err" style={S.err}>{err}</Text> : null}
+                      {busy ? (
+                        <>
+                          <ActivityIndicator color={C.brand} />
+                          <Text style={S.dim2}>Resyncing…</Text>
+                        </>
+                      ) : (
+                        <Pressable
+                          testID="btn-sol-pay-resync"
+                          style={[S.primaryWide, !online && S.dim]}
+                          disabled={!online}
+                          onPress={resync}
+                          accessibilityRole="button"
+                          accessibilityLabel="Resync offline pay"
+                          accessibilityHint="Re-read the current on-chain nonce value so you can sign offline again"
+                          accessibilityState={{disabled: !online}}>
+                          <Text style={S.primaryText}>{online ? 'Resync' : 'Go online to resync'}</Text>
+                        </Pressable>
+                      )}
                     </View>
                   ) : null}
                   <View testID="sol-pay-scan">
