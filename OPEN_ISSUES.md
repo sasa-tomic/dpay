@@ -8,6 +8,38 @@
 > entries below are **deliberate, documented follow-ups**, not regressions — each carries its current mitigation and the concrete
 > next step. Structural detail lives in `CODEBASE_ANALYSIS.md`.
 
+## Session summary (2026-08-06, part 6): polish + tech-debt — canister split, 5 correctness/DRY fixes, UX pass
+
+> All gates green at this session's close: `just verify` clean (**49/49 e2e** in 86.54s), `just test-canister` **81/81**, `just test-relay` **50/50** (incl 2 live ICP), jest **401/401**, `just typecheck` clean, `just bridge-parity` OK (28 methods), visual regression GREEN (ledger baseline re-seeded for intentional L-hotkey drift). On `main`, **49 commits** ahead of origin/main. Wire FROZEN (292/196/132) untouched.
+
+**Headline: no planned work remained, so this session found+fixed all issues, split the 3450-line canister, and did a UX pass.** Three parallel research subagents audited the entire prod codebase (panic/silent-err/vague-error audit, network-timeout audit, unused-code audit). All findings ACTIONED across 3 waves (8 commits total). Plan: `2026-08-06-polish-and-debt.md`.
+
+**Wave 1 — 5 fixes (commits `08e6a70`..`ceca63b`):**
+- **P1 `resyncNonce` wired** (`08e6a70`): `app/solana.ts:209` was exported/tested/documented but NEVER called by any prod component — a SOL payer whose nonce went stale had NO in-app recovery (forced a rent-costing fresh `setupNonce` ~0.0015 SOL). Added a `resync()` handler + `btn-sol-pay-resync` button in `SolPayMode.tsx`.
+- **P2 canister `expect()`→`?`** (`8d3b2ee`): `record_txn` (post-commit history write, canister `lib.rs:2038`) and `ensure_receipt_key` (`:1803`, inside `pay`) now propagate `StableCell::set` failures via `?` instead of trapping. Narrows the orphan-trap window: the nonce reservation survives a stable-write failure (no double-spend vector), only the history record is missing (repaired by `reconcile`).
+- **P3 `composeTimeout` DRY** (`387aaa5`): extracted the byte-for-byte duplicate from `services/relay.ts:36` + `solana/rpc.ts:66` to ONE shared helper `app/lib/timeout.ts`. ALSO fixed `payAndClassify` (relay.ts:88) which used bare `signal` unlike its 5 siblings — now uses `withDefaultTimeout(signal)`.
+- **P4 canister vague error** (`19d82f1`): `format!("transient: {:?}", "ledger busy/insufficient")` Debug-formatted a string literal and collapsed two distinct `TransferError` variants while dropping `InsufficientFunds.balance`. Split into two arms: `insufficient_funds balance={balance}` and `temporarily_unavailable`.
+- **P5 dead exports** (`ceca63b`): dropped unnecessary `export` from `findProgramAddress` (spl.ts:73, internal-only) and `SYSVAR_RENT_ADDRESS` (nonce.ts:26, internal-only).
+
+**Wave 2 — canister split (commit `e8ee866`):**
+- Split the **3450-line** `crates/dpay-canister/src/lib.rs` along two seams: **`types.rs`** (1167 lines — all data types, Storable impls, encoding helpers, API structs, mirror types, constants) + **`calls.rs`** (313 lines — all cross-canister call helpers + pure value helpers) + **`lib.rs`** (1997 lines — thread_local statics, nonce management, guards, entry points). All split-out items `pub(crate)`; candid-exported types stay `pub`. 81/81 PocketIC tests green; candid interface byte-for-byte unchanged.
+
+**Wave 3 — UX pass (commits `40cc9bd`, `80cf85a`):**
+- Added Done buttons to `DepositSheet` + `CkErc20DepositSheet` success screens (inconsistent with all other success sheets). Fixed surviving "relay" jargon in `CkErc20DepositSheet` error ("server"). Fixed bare-lowercase "no camera" → "No camera found on this device." in `QrScanner.tsx`. Added Copy signature button to `SolReceiveMode` success (was selectable-only).
+- Added **L** keyboard shortcut for the Transactions tab (T was taken by Top-up, so Ledger had no shortcut). De-jargoned SOL offline-pay Setup + Stale copy in `SolPayMode.tsx` to plain language. Re-seeded `ledger.png` baseline (intentional drift from the L-hotkey hint).
+
+**Tech-debt findings DEFERRED (documented, not doing — design decisions / larger surface / inherent):**
+- Relay `Mutex::lock().unwrap()` ×17 (app.rs ×8, ledger.rs ×9) — poison would wedge the service; FFI already has the recoverable pattern (`unwrap_or_else(|p| p.into_inner())`). Bodies don't panic in practice.
+- Display-cache refresh silent `Err` drops (canister :1983/:2237/:2683/:2686/:2792/:2814/:3250) + silent `Tainted` UTXO skip (:2774) — no settle impact; would benefit from an `ic_cdk::print` log.
+- Dispatch default `unwrap_or(CkBtcUtxo)` (canister :2944) — a currency with no family meta defaults to the BTC path; should fail-closed.
+- BTC withdraw catch-all (canister :3217) collapses variants into the permanent/settle arm — fragile to upstream enum growth.
+- WC per-`request()` unbounded (wallet.ts:125/140/182/213) — inherent to EIP-1193 (no standard timeout param); pair bounded at 5min.
+- UX deferred: SOL rail different action vocabulary; SOL offline Pay/Request buried 2 taps deep; Request QR no Share affordance; no focus management/trap on sheets (bigger a11y refactor); Onboarding faucet failure silent; Enter-to-submit inconsistent; WithdrawSheet no explicit confirm step; SolanaWithdrawSheet raw RPC error verbatim; pre-filled request amounts.
+
+**Audit verdicts (clean areas, no action needed):** dpay-core prod genuinely panic-free; dpay-ffi prod clean; NO unbounded outbound network I/O in prod (all relay fetches via fetchWithTimeout, all IC calls via `Call::bounded_wait`, all agent calls via `tokio::time::timeout`); ckERC20 withdraw fully wired across canister+candid+relay+app+e2e; SOL rail structurally complete + device-gated.
+
+---
+
 ## Session summary (2026-08-06, part 5): SOL offline-pay durable-nonce rail — FULLY BUILT (QR + NFC, all 13 units done)
 
 > All gates green: `just verify` **48/48 e2e** (added flows 46+47) in ~115s, jest **400/400** (added solana-nonce/spl/qr/rpc/seam/persist/payments suites), `just typecheck` clean, `just bridge-parity` OK (28 methods, +7 SOL NFC). Device gate: `just app` → `DPAY_SELFCHECK PASS` + `DPAY_SOL_SELFCHECK PASS` (module loads, no crash). Wire FROZEN (292/196/132) untouched; ZERO canister/relay/facade/core change — fully app-scoped.
