@@ -48,15 +48,20 @@
 
 ### Design forks (founder input needed BEFORE building — batch the question)
 
+> **RESOLVED 2026-08-06 (founder).** Decisions recorded below; the chosen path expands scope over the
+> minimalist recommendations (NFC parity + SPL tokens in addition to the recommended receipt-relay).
+
 1. **QR-only vs NFC tap for the MVP.** The IC rail has NFC HCE glue; SOL has no NFC work yet.
-   Recommendation: **QR-only MVP** (matches the existing offline-handoff flow 20/21; NFC = follow-on).
+   Recommendation was: QR-only MVP. **DECISION: QR + NFC tap now** — build NFC HCE parity for SOL
+   alongside QR (both transports). NFC work is net-new for the SOL rail.
 2. **Sequential offline payments.** Solana's `advance` rotates the nonce value, so it's one offline
-   payment per nonce-sync. Options: (a) nonce-account POOL on-chain (payer pre-creates N nonce
-   accounts, draws one per offline payment, resyncs when empty); (b) merchant receipt-nonce-relay
-   (merchant hands the advanced nonce back over the tap/QR so the payer's next offline payment uses
-   it without a resync). Recommendation: **(b) merchant receipt-nonce-relay for MVP** (mirrors the
-   IC receipt round-trip; a pool is the later scale mitigation).
-3. **Scope.** Native SOL only (no SPL tokens / USDC-on-Solana)? Recommendation: **yes, SOL only**.
+   payment per nonce-sync. **DECISION: merchant receipt-nonce-relay** (the recommendation) — the
+   online merchant hands the advanced nonce back over the tap/QR so the payer's next offline payment
+   uses it without a resync. A nonce-account POOL is the later scale mitigation (non-goal for MVP).
+3. **Scope.** Native SOL only (no SPL tokens / USDC-on-Solana)? Recommendation was: SOL only.
+   **DECISION: SOL + SPL/USDC now** — the offline rail covers BOTH native System Program transfers
+   AND SPL Token transfers (incl. USDC-on-Solana). Adds Token-program instruction formats + ATA +
+   rent concerns to the build.
 
 ### Build (after forks resolved)
 
@@ -73,7 +78,7 @@
 
 ### Non-goals (recorded so they aren't re-attempted)
 - ckSOL (production canisters don't exist; the device-key path is the chosen direction).
-- SPL tokens / USDC-on-Solana (out of MVP scope).
+- Nonce-account POOL (the later scale mitigation; MVP uses merchant receipt-nonce-relay).
 - Mainnet RPC config (operator step; `SOLANA_RPC_URL` defaults to public devnet).
 
 ## Verification (per phase)
