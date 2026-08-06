@@ -101,6 +101,20 @@ export function deriveSolanaAddress(secretHex: string): string {
   return deriveSolanaKeypair(secretHex).address;
 }
 
+const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+
+// Conservative Solana address sanity check: base58 charset + the length a 32-byte pubkey encodes to
+// (32–44 chars). Purely a paste-error guard (mirrors the catalog's isValidDestinationAddress for
+// BTC/ETH) — catches a wrong-chain paste before the user signs. Does NOT verify on-chain existence.
+export function isValidSolanaAddress(addr: string): boolean {
+  const a = addr.trim();
+  if (a.length < 32 || a.length > 44) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (!BASE58_ALPHABET.includes(a[i])) return false;
+  }
+  return true;
+}
+
 // 9 decimals: 1 SOL = 1_000_000_000 lamports. Centralised so callers never hard-code it.
 export const SOL_DECIMALS = 9;
 export const SOL_UNIT = 'SOL';

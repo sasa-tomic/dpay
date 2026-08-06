@@ -3,6 +3,8 @@ import {C} from '../config/palette';
 import {S} from '../styles';
 import {type CurrencyDescriptor, familyDisplay, assetTestKey, displayName, fmtCurrencyAmount} from '../config/catalog';
 import {cmpRaw} from '../lib/amount';
+import {fmtAsset} from '../lib/format';
+import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 
 // Balances sheet — the wallet's asset hub. Reached by tapping the header balance (the main screen
@@ -12,7 +14,7 @@ import {useEscapeToClose} from '../hooks/useHotkeys';
 // BTC cash-out for a funded CkBtcUtxo balance). Tapping a row's name/balance selects that currency
 // as the wallet's "current" currency (the header then reflects it); the action buttons top up
 // WITHOUT changing the current currency. Rows stay independent — no cross-asset merge.
-export function BalancesSheet({catalog, assetBalances, primaryBalance, online, currentCurrency, onSelect, onTopUp, topUpBusy, topUpErr, onAdd, onWithdraw, onClose}: {
+export function BalancesSheet({catalog, assetBalances, primaryBalance, online, currentCurrency, onSelect, onTopUp, topUpBusy, topUpErr, onAdd, onWithdraw, solAddress, solBalance, onSolReceive, onSolSend, onClose}: {
   catalog: CurrencyDescriptor[];
   assetBalances: Record<number, string>;
   primaryBalance: string | null;
@@ -24,6 +26,13 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
   topUpErr: string | null;
   onAdd: (currency: number) => void;
   onWithdraw: (currency: number) => void;
+  // Native SOL rail — a SEPARATE concern from the catalog loop (a device-derived key, not a relay-
+  // mediated ICRC asset). `solAddress` is null only before the key is derived; `solBalance` is null
+  // when offline / not yet polled (the card renders `—`). Both buttons are null when no address.
+  solAddress?: string | null;
+  solBalance?: string | null;
+  onSolReceive?: () => void;
+  onSolSend?: () => void;
   onClose: () => void;
 }) {
   useEscapeToClose(onClose);
@@ -155,6 +164,46 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
               </View>
             );
           })}
+          {solAddress ? (
+            <View testID="asset-sol" style={S.assetCard}>
+              <View style={S.assetRow}>
+                <View style={S.assetSelect}>
+                  <View style={[S.dot, {backgroundColor: C.brand}]} />
+                  <Text style={S.assetLabel}>SOL</Text>
+                  <Text style={[S.assetAmt, (solBalance == null || cmpRaw(solBalance, '0') === 0) && S.assetCardZero]}>
+                    {solBalance == null ? '—' : fmtAsset(solBalance, SOL_DECIMALS, SOL_UNIT)}
+                  </Text>
+                </View>
+                {onSolReceive || onSolSend ? (
+                  <View style={S.assetActions}>
+                    {onSolReceive ? (
+                      <Pressable
+                        testID="btn-sol-receive"
+                        style={S.assetActionBtn}
+                        onPress={onSolReceive}
+                        accessibilityRole="button"
+                        accessibilityLabel="Receive SOL"
+                        accessibilityHint="Show your Solana deposit address">
+                        <Text style={S.assetActionPlus}>+</Text><Text style={S.assetActionText}>Receive</Text>
+                      </Pressable>
+                    ) : null}
+                    {onSolSend && solBalance != null && cmpRaw(solBalance, '0') > 0 ? (
+                      <Pressable
+                        testID="btn-sol-send"
+                        style={S.withdrawLink}
+                        onPress={onSolSend}
+                        accessibilityRole="button"
+                        accessibilityLabel="Send SOL"
+                        accessibilityHint="Send SOL to a native Solana address">
+                        <Text style={S.withdrawLinkText}>Send</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                ) : null}
+              </View>
+              <Text style={S.assetSub}>Solana · self-custody</Text>
+            </View>
+          ) : null}
           {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
         </ScrollView>
       </SafeAreaView>

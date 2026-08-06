@@ -1,5 +1,5 @@
 import { describe, test, expect } from '@jest/globals';
-import { deriveSolanaKeypair, deriveSolanaAddress, deriveSlip10Ed25519 } from '../solana/identity';
+import { deriveSolanaKeypair, deriveSolanaAddress, deriveSlip10Ed25519, isValidSolanaAddress } from '../solana/identity';
 
 function toHex(bytes: Uint8Array): string {
   return Array.from(bytes)
@@ -68,5 +68,32 @@ describe('solana/identity — SLIP-10 ed25519 m/44\'/501\'/0\'/0\' (real seed)',
 
   test('rejects odd-length hex', () => {
     expect(() => deriveSolanaAddress('abc')).toThrow(/odd length/);
+  });
+});
+
+describe('solana/identity — isValidSolanaAddress', () => {
+  test('accepts a derived address (the real-seed golden)', () => {
+    expect(isValidSolanaAddress(EXPECTED_ADDRESS)).toBe(true);
+  });
+
+  test('accepts the System Program address (all-zero pubkey)', () => {
+    expect(isValidSolanaAddress('11111111111111111111111111111111')).toBe(true);
+  });
+
+  test('rejects a 0x-prefixed Ethereum address (wrong chain paste)', () => {
+    expect(isValidSolanaAddress('0x1234567890abcdef1234567890abcdef12345678')).toBe(false);
+  });
+
+  test('rejects a base58 string with invalid chars (0/O/I/l)', () => {
+    expect(isValidSolanaAddress('0OIIlllllllllllllllllllllllllllllllll')).toBe(false);
+  });
+
+  test('rejects too-short input', () => {
+    expect(isValidSolanaAddress('short')).toBe(false);
+  });
+
+  test('rejects empty / whitespace', () => {
+    expect(isValidSolanaAddress('')).toBe(false);
+    expect(isValidSolanaAddress('   ')).toBe(false);
   });
 });

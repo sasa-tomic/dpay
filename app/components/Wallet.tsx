@@ -13,7 +13,9 @@ import {fetchWithTimeout, readJsonOrEmpty} from '../services/relay';
 import {useHotkeys} from '../hooks/useHotkeys';
 import {useCatalog} from '../hooks/useCatalog';
 import {useBalancePoll} from '../hooks/useBalancePoll';
+import {useSolanaBalance} from '../hooks/useSolanaBalance';
 import {useTransactionHistory} from '../hooks/useTransactionHistory';
+import {deriveSolanaAddress} from '../solana';
 import {readDepositDeepLink} from '../lib/deepLink';
 import {Wordmark} from './Logo';
 import {HotkeyHint} from './HotkeyHint';
@@ -23,6 +25,8 @@ import {ReceiveMode} from './ReceiveMode';
 import {Ledger} from './Ledger';
 import {DepositSheet} from './DepositSheet';
 import {WithdrawSheet} from './WithdrawSheet';
+import {SolanaReceiveSheet} from './SolanaReceiveSheet';
+import {SolanaWithdrawSheet} from './SolanaWithdrawSheet';
 import {SettingsSheet} from './SettingsSheet';
 import {CkErc20DepositSheet} from './CkErc20DepositSheet';
 import {BalancesSheet} from './BalancesSheet';
@@ -81,6 +85,15 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
   // direction-derivation all move in. catalogCurrencyIds (the stable dep signature) is now internal
   // to the hook (computed from `catalog`). `onActivity` below still calls refreshHistory.
   const {history, refreshHistory} = useTransactionHistory({relayUrl, publicHex: identity.publicHex, catalog});
+
+  // Native SOL rail — a device-derived Solana key (SLIP-10 m/44'/501'/0'/0') from the SAME IC identity
+  // seed, so one backup recovers both rails. The address is derived once (pure; stable per identity).
+  // useSolanaBalance polls the SOL RPC directly (no relay); when SOLANA_RPC_URL is empty (jest/e2e)
+  // it no-ops and the card renders `—`. Separate from the catalog loop — SOL is not an ICRC asset.
+  const solAddress = useMemo(() => { try { return deriveSolanaAddress(identity.secretHex); } catch { return null; } }, [identity.secretHex]);
+  const {balance: solBalance, refresh: refreshSol} = useSolanaBalance(solAddress);
+  const [solReceiveOpen, setSolReceiveOpen] = useState(false);
+  const [solSendOpen, setSolSendOpen] = useState(false);
 
   // Read the device NFC radio state once (re-checked when the app returns to the foreground, since
   // the user may toggle NFC in system settings). Purely informational for the status chip; failure
@@ -185,7 +198,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
   // P=Pay, R=Receive, T=Top-up (demo money), A=Balances (the asset hub). Active ONLY on the wallet
   // main view with no text input focused and no sheet/overlay open (Esc is handled per-sheet by
   // useEscapeToClose). Native (no physical keyboard) is a no-op; the on-UI hints are web-only too.
-  const anySheetOpen = balancesOpen || depositCurrency != null || withdrawCurrency != null || settingsOpen;
+  const anySheetOpen = balancesOpen || depositCurrency != null || withdrawCurrency != null || settingsOpen || solReceiveOpen || solSendOpen;
   useHotkeys({
     p: () => setMode('pay'),
     r: () => setMode('receive'),
@@ -276,6 +289,10 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
           topUpErr={topUpErr}
           onAdd={(currency) => { setDepositCurrency(currency); setBalancesOpen(false); }}
           onWithdraw={(currency) => { setWithdrawCurrency(currency); setBalancesOpen(false); }}
+          solAddress={solAddress}
+          solBalance={solBalance}
+          onSolReceive={() => { setSolReceiveOpen(true); setBalancesOpen(false); }}
+          onSolSend={() => { setSolSendOpen(true); setBalancesOpen(false); }}
           onClose={() => setBalancesOpen(false)}
         />
       ) : null}
@@ -314,7 +331,18 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
             onWithdrawn={onActivity}
           />
         );
-      })() : null}
+      })(      ) : null}
+      {solReceiveOpen && solAddress ? (
+        <SolanaReceiveSheet address={solAddress} onClose={() => setSolReceiveOpen(false)} />
+      ) : null}
+      {solSendOpen && solAddress ? (
+        <SolanaWithdrawSheet
+          identity={identity}
+          balance={solBalance ?? '0'}
+          onSent={refreshSol}
+          onClose={() => setSolSendOpen(false)}
+        />
+      ) : null}
       {settingsOpen ? (
         <SettingsSheet
           relayUrl={relayUrl}

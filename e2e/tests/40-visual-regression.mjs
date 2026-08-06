@@ -173,27 +173,37 @@ async function getTestIDRectDevicePx(driver, testID) {
  */
 async function diffOrSeed(baselinePath, capturePath, baselineName, masks = []) {
   const baselineExists = existsSync(baselinePath);
+  const validMasks = masks.filter(Boolean);
+  // Missing baseline: hard-fail unless REGEN, in which case seed it. This is what makes the contract
+  // enforceable: a new surface without a baseline REDS until it's deliberately seeded.
   if (!baselineExists) {
     if (REGEN) {
+      await mkdir(dirname(baselinePath), { recursive: true });
       await copyFile(capturePath, baselinePath);
       console.log(`[40-visual-regression] seeded baseline ${baselineName} → ${baselinePath}`);
       return `✓ ${baselineName.padEnd(18)} SEEDED (baseline written; commit it)`;
     }
-    // Missing baseline without REGEN is a hard failure with the exact remediation — never silently
-    // pass. This is what makes the contract enforceable: a new surface without a baseline REDS.
     throw new Error(
       `[40-visual-regression] baseline missing for ${baselineName}; run with DPAY_E2E_REGEN_BASELINES=1 to seed`,
     );
   }
 
-  const validMasks = masks.filter(Boolean);
+  // Compare the capture against the existing baseline (masked regions ignored).
   const r = await comparePng(baselinePath, capturePath, { tolerancePct: TOLERANCE_PCT, masks: validMasks });
-  const mark = r.ok ? '✓' : '✗';
   const maskNote = validMasks.length > 0 ? ` (masked:${validMasks.length})` : '';
+  // REGEN mode: only OVERWRITE a baseline that actually DRIFTED past tolerance. Stable surfaces keep
+  // their original baseline → the seed commit shows ONLY the surfaces that genuinely changed (clean,
+  // reviewable). Without this gate, `just e2e-visual-seed` would overwrite every baseline with a
+  // fresh capture (incl. non-deterministic masked regions like the random request QR), making the
+  // commit diff noisy and obscuring which surface actually moved.
+  if (REGEN && !r.ok) {
+    await copyFile(capturePath, baselinePath);
+    console.log(`[40-visual-regression] re-seeded drifted baseline ${baselineName} (${r.diffPct.toFixed(3)}% → 0%) → ${baselinePath}`);
+    return `✓ ${baselineName.padEnd(18)} RE-SEEDED (was ${r.diffPct.toFixed(3)}%; overwritten; commit it)`;
+  }
+  const mark = r.ok ? '✓' : '✗';
   const diffNote = r.diffPath ? ` diff=${r.diffPath}` : '';
   if (!r.ok) {
-    // Surface drifted past tolerance. Log the diff path + diffPct for immediate triage, then mark
-    // the summary line so the run reports RED with all surfaces (not just the first).
     console.error(
       `[40-visual-regression] ✗ ${baselineName} drifted: ${r.diffPct.toFixed(3)}% diff (tolerance ${TOLERANCE_PCT}%)${maskNote}.${diffNote}`,
     );
