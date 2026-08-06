@@ -1,4 +1,5 @@
 import {base} from '../lib/format';
+import {composeTimeout} from '../lib/timeout';
 import {classifyPayHttp, type SettleOutcome} from '../payments';
 
 // --- ck-deposit (ckBTC-style top-up) response shapes -----------------------------------------
@@ -17,33 +18,9 @@ export type DepositRefresh = {minted_total: string; minted: MintedUtxo[]; pendin
 // on every RN/Hermes runtime the app targets, so the manual compose is the portable choice.
 const DEFAULT_RELAY_TIMEOUT_MS = 10000;
 
-/** Compose an optional caller signal with a timeout. First abort wins; never throws. Returns the
- *  composed signal AND a `cancel()` that clears the armed timer — so a fetch wrapper can drop the
- *  no-op abort that would otherwise fire at `timeoutMs` after a normal settle. The cancel is also
- *  invoked on an early caller-abort (the listener + the pre-aborted branch) so the timer never
- *  outlives the compose. Composed manually with `AbortController` + `setTimeout` instead of
- *  `AbortSignal.any`/`AbortSignal.timeout` — those are ES2024/ES2022 statics not present in this
- *  project's TS `lib` (tops out at es2022) and not guaranteed on every RN/Hermes runtime, so the
- *  manual compose is the portable choice.
- *
- *  The backstop is a SAFETY NET for callers that OMIT their signal. A caller that PROVIDES a signal
- *  has taken explicit responsibility for the deadline — its timer may be SHORTER than the backstop
- *  (every fast poll) or LONGER (a slow IC update like ckBTC `deposit_address`, 5–7s+ on mainnet, for
- *  which DepositSheet arms a 20s controller). Arming the backstop unconditionally would cap every
- *  caller at the backstop ("first abort wins"), silently overriding a deliberate longer deadline —
- *  a real bug that defeated DEPOSIT_ADDRESS_TIMEOUT_MS=20s. So when a caller signal is present it is
- *  returned AS-IS (the caller owns the timer); the backstop arms only for omitted-signal callers. */
-function composeTimeout(callerSignal?: AbortSignal, timeoutMs = DEFAULT_RELAY_TIMEOUT_MS): {signal: AbortSignal; cancel: () => void} {
-  if (callerSignal) return {signal: callerSignal, cancel: () => {}};
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  return {signal: ctrl.signal, cancel: () => clearTimeout(timer)};
-}
-
-/** Compose an optional caller signal with the default timeout (signal-only view). The exported
- *  relay clients below use this; when the caller passes a signal that signal is returned AS-IS
- *  (caller owns the deadline — see `composeTimeout`), and when the caller omits it the 10s backstop
- *  arms. */
+/** Signal-only view of the shared `composeTimeout` with the relay default backstop (10s). When the
+ *  caller passes a signal that signal is returned AS-IS (caller owns the deadline — see
+ *  `lib/timeout.ts`); when the caller omits it the backstop arms. */
 function withDefaultTimeout(callerSignal?: AbortSignal, timeoutMs = DEFAULT_RELAY_TIMEOUT_MS): AbortSignal {
   return composeTimeout(callerSignal, timeoutMs).signal;
 }
@@ -85,7 +62,7 @@ export async function readJsonOrEmpty(r: Response): Promise<any> {
 // own isNonceReused / verifyOutcomeReceipt / reconciliation on the returned body.
 export async function payAndClassify(relayUrl: string, code: string, signal?: AbortSignal): Promise<{outcome: SettleOutcome; body: any}> {
   try {
-    const r = await fetch(`${base(relayUrl)}/api/v1/pay`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({qr: code}), signal});
+    const r = await fetch(`${base(relayUrl)}/api/v1/pay`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({qr: code}), signal: withDefaultTimeout(signal)});
     const body = await readJsonOrEmpty(r);
     return {outcome: classifyPayHttp({ok: r.ok, status: r.status}), body};
   } catch {

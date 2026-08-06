@@ -5,9 +5,9 @@
 //   getBalance, getLatestBlockhash, sendTransaction, confirmTransaction (poll getSignatureStatuses),
 //   getNonceAccount (parses the 80-byte durable-nonce NonceState), getMinimumBalanceForRentExemption.
 //
-// Timeouts mirror `services/relay.ts`'s manual `AbortController + setTimeout` compose (NOT
-// AbortSignal.any/AbortSignal.timeout — those ES2024/ES2022 statics are absent from this project's
-// TS `lib` and not guaranteed on Hermes/RN). A caller signal (first-abort-wins) is forwarded in.
+// Timeouts use the shared `lib/timeout.ts` compose (NOT AbortSignal.any/AbortSignal.timeout —
+// those ES2024/ES2022 statics are absent from this project's TS `lib` and not guaranteed on
+// Hermes/RN). A caller signal (first-abort-wins) is forwarded in.
 //
 // E2E STUB SEAM: when `globalThis.__DPAY_TEST_SOLANA_RPC_STUB` is set (by jest.setup.js or the e2e
 // driver), every `rpcFetch` routes to that object keyed by raw RPC method name instead of `fetch`.
@@ -16,6 +16,7 @@
 // stub is checked per-call (runtime), so setting/clearing it between tests takes effect immediately.
 
 import bs58 from 'bs58';
+import {composeTimeout as composeTimeoutShared} from '../lib/timeout';
 
 export interface SolanaBlockhash {
   /** base58-encoded recent blockhash (raw RPC shape — decode to 32 bytes at the call site). */
@@ -64,10 +65,7 @@ function activeStub(): SolanaRpcStub | undefined {
 }
 
 function composeTimeout(callerSignal?: AbortSignal, timeoutMs = DEFAULT_TIMEOUT_MS): {signal: AbortSignal; cancel: () => void} {
-  if (callerSignal) return {signal: callerSignal, cancel: () => {}};
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  return {signal: ctrl.signal, cancel: () => clearTimeout(timer)};
+  return composeTimeoutShared(callerSignal, timeoutMs);
 }
 
 async function rpcFetch(url: string, method: string, params: unknown[], opts?: SolanaRpcOpts): Promise<unknown> {
