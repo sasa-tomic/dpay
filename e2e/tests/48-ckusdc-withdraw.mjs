@@ -1,4 +1,4 @@
-// Flow 48 — Withdraw ckUSDC to a native Ethereum address (the ckERC-20 dual-ledger cash-out path).
+// Flow 48 — Withdraw ckUSDC to a native Ethereum address (the ckERC-20 dual-ledger send path).
 //
 // Proves the ckERC-20 CASH-OUT path end-to-end through the REAL app + relay + FakeLedger: the
 // wallet's ckUSDC asset card (currency 2, CkEthErc20 family with token_contract Some) exposes a
@@ -88,7 +88,7 @@ export async function run() {
     await driver.findByTestID('btn-withdraw', { timeoutMs: 8_000 });
 
     // 4. Open the Withdraw sheet via the asset card's Cash-out affordance. The sheet title reads
-    //    "Cash out Ethereum" (the ckUSDC family display's networkLabel — the settlement NETWORK, not
+    //    "Send Ethereum" (the ckUSDC family display's networkLabel — the settlement NETWORK, not
     //    the asset; mirrors the native-ETH sheet).
     console.log('[48-ckusdc-withdraw] opening the withdraw sheet…');
     await driver.click('btn-withdraw', { timeoutMs: 5_000 });

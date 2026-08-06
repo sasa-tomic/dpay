@@ -243,8 +243,8 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
           style={S.balBox}
           onPress={() => setBalancesOpen(true)}
           accessibilityRole="button"
-          accessibilityLabel="Balances — switch currency or top up"
-          accessibilityHint="Open the full asset list, switch the displayed currency, or top up"
+          accessibilityLabel="Balances — switch currency or receive"
+          accessibilityHint="Open the full asset list, switch the displayed currency, or receive"
         >
           <View style={S.balLabelRow}>
             <View style={[S.dot, {backgroundColor: online ? C.ok : C.sub2}]} />

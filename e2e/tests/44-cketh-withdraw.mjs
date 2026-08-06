@@ -1,8 +1,8 @@
 // Flow 44 — Withdraw native ckETH to a native ETH address (the family-dispatch UI path).
 //
-// Proves the NATIVE-ETH cash-out path end-to-end through the REAL app + relay + FakeLedger: the
+// Proves the NATIVE-ETH send path end-to-end through the REAL app + relay + FakeLedger: the
 // wallet's native-ETH asset card (currency 5, CkEthErc20 family with token_contract == null) exposes
-// a "Cash out" affordance (the no-swap offramp gate — `offramp !== Unavailable` AND the family's
+// a "Send" affordance (the no-swap offramp gate — `offramp !== Unavailable` AND the family's
 // native-ETH discriminator); opening it signs a WithdrawAuth ON-DEVICE at 18-dec Wei precision and
 // submits to POST /api/v1/withdraw; the FakeLedger's family-aware `withdraw` verifies the signature
 // and debits ckETH from the subaccount (the BTC-family retrieve_btc_min_amount floor does NOT apply —
@@ -83,7 +83,7 @@ export async function run() {
     await driver.findByTestID('btn-withdraw', { timeoutMs: 8_000 });
 
     // 4. Open the Withdraw sheet via the asset card's Cash-out affordance. The sheet title reads
-    //    "Cash out Ethereum" (the native-ETH family display's networkLabel).
+    //    "Send Ethereum" (the native-ETH family display's networkLabel).
     console.log('[44-cketh-withdraw] opening the withdraw sheet…');
     await driver.click('btn-withdraw', { timeoutMs: 5_000 });
     await driver.findByTestID('withdraw-address-input', { timeoutMs: 5_000 });
@@ -115,7 +115,7 @@ export async function run() {
     await driver.screenshot('44-cketh-withdraw');
 
     // 8. L3 — the success screen exposes a Copy affordance for the destination address (same surface
-    //    as the BTC cash-out, flow 15). Prove the button exists + writes the EXACT destination to the
+    //    as the BTC send, flow 15). Prove the button exists + writes the EXACT destination to the
     //    clipboard seam.
     await driver.findByTestID('btn-copy-destination', { timeoutMs: 4_000 });
     const dest = await driver.readText('withdraw-destination');
