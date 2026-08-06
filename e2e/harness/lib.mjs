@@ -211,7 +211,7 @@ export async function setup(opts = {}) {
   const { mode, relayBaseURL, webBaseURL, browser } = await getSession(opts);
 
   // Fresh incognito context per test → fresh localStorage → fresh identity (the isolation gate).
-  const driver = await Driver.create(browser);
+  const driver = await Driver.create(browser, { solStub: opts.solStub });
 
   // Register this driver for diagnostics-on-RED lookup, keyed by the active test file (propagated
   // through `_testCtx` by `runOne`). When run under the orchestrator this lets `runPool`'s catch

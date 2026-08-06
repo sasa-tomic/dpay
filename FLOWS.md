@@ -1,6 +1,6 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **46 flows.**
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **47 flows.**
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay (FakeLedger, offline). No UI stubs. The only shimmed I/O boundary is
 > the camera scan (sanctioned smallest-boundary seam) and the NFC radio (physical-device gate).
@@ -17,7 +17,7 @@
 Flows grouped by user journey; within each table, every row lists what the flow **verifies** and
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`).
 
-wire (1) · onboard (4) · pay (16) · offline (2) · deposit (8) · withdraw (3) · nfc (2) · system (7) · tour (3)
+wire (1) · onboard (4) · pay (16) · offline (3) · deposit (8) · withdraw (3) · nfc (2) · system (7) · tour (3)
 
 ---
 
@@ -63,6 +63,7 @@ wire (1) · onboard (4) · pay (16) · offline (2) · deposit (8) · withdraw (3
 |---|------|----------|--------|
 | 20 | offline-handoff | Payer signs offline → relay unreachable → signed QR → merchant settles → payer reconnects → 'Paid ✓'. | offline-sign, qr-handoff, settle, reconcile, round-trip |
 | 21 | receive-scan | Merchant 'Payer paid offline? Scan to settle' → scans the payer's signed QR → settles. | receive-scan, offline-settle |
+| 46 | sol-offline-handoff | SOL durable-nonce setup → scan solreq: → offline sign → solpay: QR → honest pending. | sol-offline-sign, sol-nonce-setup, qr-handoff, honest-pending |
 
 ### Deposits & onramp (ckBTC + ckUSDC + ckERC20)
 

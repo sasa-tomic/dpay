@@ -134,6 +134,12 @@ export class Driver {
     if (o.timezone !== undefined) await page.emulateTimezone(o.timezone);
     await page.evaluateOnNewDocument(injectFreezeCss, FREEZE_CSS);
     await page.evaluateOnNewDocument(injectTestGlobals);
+    // SOL stub RPC: when a flow requests it (opts.solStub), override the SOLANA_RPC_URL disable so
+    // the app's SOL seam functions work against the stub. Runs AFTER injectTestGlobals (which sets
+    // URL='') so the override takes effect. The stub object itself is set at runtime via driver.eval.
+    if (o.solStub) {
+      await page.evaluateOnNewDocument(() => { globalThis.__DPAY_TEST_SOLANA_RPC_URL = 'stub'; });
+    }
     const driver = new Driver(browser, context, page, ownsBrowser);
     driver.attachPageListeners();
     return driver;

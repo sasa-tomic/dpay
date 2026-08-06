@@ -27,6 +27,8 @@ import {DepositSheet} from './DepositSheet';
 import {WithdrawSheet} from './WithdrawSheet';
 import {SolanaReceiveSheet} from './SolanaReceiveSheet';
 import {SolanaWithdrawSheet} from './SolanaWithdrawSheet';
+import {SolPayMode} from './SolPayMode';
+import {SolReceiveMode} from './SolReceiveMode';
 import {SettingsSheet} from './SettingsSheet';
 import {CkErc20DepositSheet} from './CkErc20DepositSheet';
 import {BalancesSheet} from './BalancesSheet';
@@ -94,6 +96,8 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
   const {balance: solBalance, refresh: refreshSol} = useSolanaBalance(solAddress);
   const [solReceiveOpen, setSolReceiveOpen] = useState(false);
   const [solSendOpen, setSolSendOpen] = useState(false);
+  const [solPayOpen, setSolPayOpen] = useState(false);
+  const [solReqOpen, setSolReqOpen] = useState(false);
 
   // Read the device NFC radio state once (re-checked when the app returns to the foreground, since
   // the user may toggle NFC in system settings). Purely informational for the status chip; failure
@@ -198,7 +202,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
   // P=Pay, R=Receive, T=Top-up (demo money), A=Balances (the asset hub). Active ONLY on the wallet
   // main view with no text input focused and no sheet/overlay open (Esc is handled per-sheet by
   // useEscapeToClose). Native (no physical keyboard) is a no-op; the on-UI hints are web-only too.
-  const anySheetOpen = balancesOpen || depositCurrency != null || withdrawCurrency != null || settingsOpen || solReceiveOpen || solSendOpen;
+  const anySheetOpen = balancesOpen || depositCurrency != null || withdrawCurrency != null || settingsOpen || solReceiveOpen || solSendOpen || solPayOpen || solReqOpen;
   useHotkeys({
     p: () => setMode('pay'),
     r: () => setMode('receive'),
@@ -293,6 +297,8 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
           solBalance={solBalance}
           onSolReceive={() => { setSolReceiveOpen(true); setBalancesOpen(false); }}
           onSolSend={() => { setSolSendOpen(true); setBalancesOpen(false); }}
+          onSolPayOffline={() => { setSolPayOpen(true); setBalancesOpen(false); }}
+          onSolReqOffline={() => { setSolReqOpen(true); setBalancesOpen(false); }}
           onClose={() => setBalancesOpen(false)}
         />
       ) : null}
@@ -342,6 +348,12 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
           onSent={refreshSol}
           onClose={() => setSolSendOpen(false)}
         />
+      ) : null}
+      {solPayOpen && solAddress ? (
+        <SolPayMode identity={identity} online={online} onClose={() => setSolPayOpen(false)} />
+      ) : null}
+      {solReqOpen && solAddress ? (
+        <SolReceiveMode identity={identity} online={online} onClose={() => setSolReqOpen(false)} />
       ) : null}
       {settingsOpen ? (
         <SettingsSheet

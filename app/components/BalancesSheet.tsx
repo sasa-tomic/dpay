@@ -14,7 +14,7 @@ import {useEscapeToClose} from '../hooks/useHotkeys';
 // BTC cash-out for a funded CkBtcUtxo balance). Tapping a row's name/balance selects that currency
 // as the wallet's "current" currency (the header then reflects it); the action buttons top up
 // WITHOUT changing the current currency. Rows stay independent — no cross-asset merge.
-export function BalancesSheet({catalog, assetBalances, primaryBalance, online, currentCurrency, onSelect, onTopUp, topUpBusy, topUpErr, onAdd, onWithdraw, solAddress, solBalance, onSolReceive, onSolSend, onClose}: {
+export function BalancesSheet({catalog, assetBalances, primaryBalance, online, currentCurrency, onSelect, onTopUp, topUpBusy, topUpErr, onAdd, onWithdraw, solAddress, solBalance, onSolReceive, onSolSend, onSolPayOffline, onSolReqOffline, onClose}: {
   catalog: CurrencyDescriptor[];
   assetBalances: Record<number, string>;
   primaryBalance: string | null;
@@ -33,6 +33,8 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
   solBalance?: string | null;
   onSolReceive?: () => void;
   onSolSend?: () => void;
+  onSolPayOffline?: () => void;
+  onSolReqOffline?: () => void;
   onClose: () => void;
 }) {
   useEscapeToClose(onClose);
@@ -174,7 +176,7 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
                     {solBalance == null ? '—' : fmtAsset(solBalance, SOL_DECIMALS, SOL_UNIT)}
                   </Text>
                 </View>
-                {onSolReceive || onSolSend ? (
+                {onSolReceive || onSolSend || onSolPayOffline || onSolReqOffline ? (
                   <View style={S.assetActions}>
                     {onSolReceive ? (
                       <Pressable
@@ -196,6 +198,28 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
                         accessibilityLabel="Send SOL"
                         accessibilityHint="Send SOL to a native Solana address">
                         <Text style={S.withdrawLinkText}>Send</Text>
+                      </Pressable>
+                    ) : null}
+                    {onSolPayOffline ? (
+                      <Pressable
+                        testID="btn-sol-pay-offline"
+                        style={S.withdrawLink}
+                        onPress={onSolPayOffline}
+                        accessibilityRole="button"
+                        accessibilityLabel="Pay SOL offline"
+                        accessibilityHint="Sign a payment offline for a merchant to settle">
+                        <Text style={S.withdrawLinkText}>Pay offline</Text>
+                      </Pressable>
+                    ) : null}
+                    {onSolReqOffline ? (
+                      <Pressable
+                        testID="btn-sol-req-offline"
+                        style={S.withdrawLink}
+                        onPress={onSolReqOffline}
+                        accessibilityRole="button"
+                        accessibilityLabel="Request SOL offline"
+                        accessibilityHint="Build a payment code and scan the payer's signed payment">
+                        <Text style={S.withdrawLinkText}>Request</Text>
                       </Pressable>
                     ) : null}
                   </View>
