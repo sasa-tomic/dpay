@@ -112,4 +112,4 @@ export function buildSignedTransfer(
   return signTransaction(buildTransferMessage(fromPubkey, toAddress, lamports, blockhash), seed);
 }
 
-export { base58Decode32, encodeCompactU16 };
+export { base58Decode32, encodeCompactU16, encodeU32LE, encodeU64LE, SYSTEM_PROGRAM_BYTES };
