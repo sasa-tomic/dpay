@@ -345,6 +345,12 @@ pub struct CurrencyDescriptor {
     /// Cash-out (off-ramp) capability. `Unavailable` ⇒ the wallet shows NO "Cash out" button
     /// (ckUSDC offramp is `Unavailable` per Fork-C — OPEN_ISSUES O3).
     pub offramp: RampCapability,
+    /// The ckETH gas-ledger principal for a ckERC20 currency (the `withdraw_erc20` dual-ledger path
+    /// burns ckETH gas fees from this ledger + the amount from `ledger`). `None` for non-ckERC20
+    /// families (BTC / native ETH / DEMO) and for a ckERC20 currency whose gas ledger is unregistered
+    /// (the facade fail-closes a ckERC20 withdraw with no gas ledger). Appended LAST for stable-
+    /// encoding backward compat (an older `CURRENCY_META` row decodes with this as `None`).
+    pub gas_ledger: Option<Principal>,
 }
 
 /// Atomic currency-activation argument for [`register_currency`] (MC2 unit 4). A single candid
@@ -378,6 +384,9 @@ pub struct CurrencyRegistration {
     pub token_contract: Option<String>,
     pub onramp: RampCapability,
     pub offramp: RampCapability,
+    /// The ckETH gas-ledger principal for a ckERC20 currency (the dual-ledger `withdraw_erc20` path).
+    /// `None` for non-ckERC20 families. Stored verbatim into `CURRENCY_META.gas_ledger`.
+    pub gas_ledger: Option<Principal>,
 }
 
 /// Display + family + authoritative per-currency metadata, stored in `CURRENCY_META` (MemoryId 13).
@@ -396,15 +405,19 @@ pub struct CurrencyRegistration {
 ///   9. cap             : flag + [u64 LE 8]
 ///  10. chain_id        : flag + [u32 LE 4]
 ///  11. token_contract  : flag + [len(1) + ≤64 bytes]
-///  12. onramp          : flag + [byte(1)]   (Option<RampCapability>; None→Unavailable default)
+///   12. onramp          : flag + [byte(1)]   (Option<RampCapability>; None→Unavailable default)
 ///  13. offramp         : flag + [byte(1)]   (Option<RampCapability>; None→Unavailable default)
+///  14. gas_ledger       : flag + [len(1) + ≤29 bytes]   (Option<Principal>; the ckETH gas ledger
+///      for a ckERC20 currency's `withdraw_erc20` dual-ledger path. Appended LAST so an older
+///      CURRENCY_META row — written before this field existed — decodes with gas_ledger = None.)
 ///
 /// `from_bytes` reads each field in order and treats the record as truncated at the first missing
 /// byte (the remainder default to `None`) — so a record written by an older canister version (which
 /// ends earlier) decodes with the new fields as `None`, and `currencies()` surfaces `Unavailable`
 /// ramps for it. Compact; the only repeated registration surface is `register_currency_meta`.
 const CURRENCY_META_MAX: usize = (1 + (1 + 16)) + (1 + 1) + (1 + 1) + (1 + (1 + 32)) + (1 + (1 + 16))
-    + (1 + (1 + 32)) + (1 + 1) + (1 + 8) + (1 + 8) + (1 + 4) + (1 + (1 + 64)) + (1 + 1) + (1 + 1);
+    + (1 + (1 + 32)) + (1 + 1) + (1 + 8) + (1 + 8) + (1 + 4) + (1 + (1 + 64)) + (1 + 1) + (1 + 1)
+    + (1 + (1 + 29));
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct CurrencyMetaStorable {
@@ -423,6 +436,10 @@ struct CurrencyMetaStorable {
     onramp: Option<RampCapability>,
     /// `None` in storage ⇒ `Unavailable` in the returned descriptor (fail-closed ramp default).
     offramp: Option<RampCapability>,
+    /// The ckETH gas-ledger principal for a ckERC20 currency's dual-ledger `withdraw_erc20` path.
+    /// `None` for non-ckERC20 families. `PrincipalStorable` semantics (raw ≤29 bytes); stored under a
+    /// present-flag + length-prefixed payload for forward-compat.
+    gas_ledger: Option<Principal>,
 }
 
 /// Push a present-flagged optional string, truncating to `max` bytes (lossy but bounded).
@@ -537,6 +554,40 @@ fn read_opt_u32(b: &[u8], pos: &mut usize) -> Option<u32> {
     Some(u32::from_le_bytes(buf))
 }
 
+/// Push a present-flagged optional principal, length-prefixed (≤29 bytes; mirrors `push_opt_str`).
+/// The length byte keeps the record forward-compat (a future field after gas_ledger can be read even
+/// when gas_ledger is present).
+fn push_opt_principal(v: &mut Vec<u8>, p: &Option<Principal>) {
+    match p {
+        Some(p) => {
+            let bytes = p.as_slice();
+            let n = bytes.len().min(29) as u8;
+            v.push(1u8);
+            v.push(n);
+            v.extend_from_slice(&bytes[..n as usize]);
+        }
+        None => v.push(0u8),
+    }
+}
+
+/// Read a present-flagged optional length-prefixed principal (≤29 bytes) from `b` at `pos`.
+fn read_opt_principal(b: &[u8], pos: &mut usize) -> Option<Principal> {
+    if *pos >= b.len() {
+        return None;
+    }
+    if b[*pos] == 0 {
+        *pos += 1;
+        return None;
+    }
+    *pos += 1; // consume flag
+    let n = b.get(*pos).copied().unwrap_or(0) as usize;
+    *pos += 1;
+    let n = n.min(29).min(b.len().saturating_sub(*pos));
+    let p = Principal::from_slice(&b[*pos..*pos + n]);
+    *pos += n;
+    Some(p)
+}
+
 impl Storable for CurrencyMetaStorable {
     fn to_bytes(&self) -> Cow<'_, [u8]> {
         let mut v = Vec::with_capacity(CURRENCY_META_MAX);
@@ -571,6 +622,7 @@ impl Storable for CurrencyMetaStorable {
             }
             None => v.push(0u8),
         }
+        push_opt_principal(&mut v, &self.gas_ledger);
         Cow::Owned(v)
     }
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
@@ -598,6 +650,7 @@ impl Storable for CurrencyMetaStorable {
             Some(x) => RampCapability::from_byte(x),
             None => None,
         };
+        let gas_ledger = read_opt_principal(b, &mut pos);
         CurrencyMetaStorable {
             symbol,
             decimals,
@@ -612,6 +665,7 @@ impl Storable for CurrencyMetaStorable {
             token_contract,
             onramp,
             offramp,
+            gas_ledger,
         }
     }
     const BOUND: Bound = Bound::Bounded {
@@ -1393,6 +1447,15 @@ fn currency_family(currency: Currency) -> Option<MinterFamily> {
     CURRENCY_META.with(|m| m.borrow().get(&currency).and_then(|meta| meta.minter_family))
 }
 
+/// The ckETH gas-ledger principal registered for a ckERC20 currency (the dual-ledger `withdraw_erc20`
+/// path burns ckETH gas fees from this ledger). Read from `CURRENCY_META`. `None` for non-ckERC20
+/// families (BTC / native ETH / DEMO) and for a ckERC20 currency whose gas ledger is unregistered —
+/// the facade fail-closes a ckERC20 withdraw with no gas ledger (cannot fall through to the native-
+/// ETH `withdraw_eth` path, which would mis-burn the amount as ckETH).
+fn currency_gas_ledger(currency: Currency) -> Option<Principal> {
+    CURRENCY_META.with(|m| m.borrow().get(&currency).and_then(|meta| meta.gas_ledger))
+}
+
 /// The ICRC account this canister controls for a user pubkey: the canister is the `owner`, the
 /// 32-byte Ed25519 pubkey is the `subaccount`. Identical on every ledger.
 fn account_of(pk: &[u8; PUBKEY_LEN]) -> Account {
@@ -1564,6 +1627,104 @@ async fn minter_call_withdraw_eth(
     response
         .candid::<Result<RetrieveEthRequest, WithdrawalError>>()
         .map_err(|e| format!("withdraw_eth decode: {e:?}"))
+}
+
+// --- ckETH-minter withdraw_erc20 proxy (ckERC20 → ERC20 out) -----------------------------------
+// Mirror types for decoding the REAL ckETH minter's `withdraw_erc20` candid reply, verified against
+// `dfx canister metadata sv3dd-oaaaa-aaaar-qacoa-cai candid:service --network ic` (cached .did):
+//   `withdraw_erc20 : (WithdrawErc20Arg) -> (variant { Ok : RetrieveErc20Request; Err : WithdrawErc20Error })`
+// Field/variant labels mirror the real minter EXACTLY (incl. `ckerc20_ledger_id : principal`, NOT
+// nat — encoding it as nat traps IC0503 on mainnet). The dual-ledger path: the facade approves the
+// minter on the ckETH gas ledger (gas fee) + the ckERC20 amount ledger (amount), then calls
+// `withdraw_erc20` which burns BOTH.
+
+/// `WithdrawErc20Arg` — the EXACT argument record the REAL ckETH minter's `withdraw_erc20` takes
+/// (verified in the cached .did): `record { amount : nat; ckerc20_ledger_id : principal; recipient :
+/// text; from_cketh_subaccount : opt blob; from_ckerc20_subaccount : opt blob }`. The facade passes
+/// `ckerc20_ledger_id = <the ckERC20 amount ledger>`, both subaccounts = `Some(pubkey)`.
+#[derive(CandidType, Deserialize)]
+struct WithdrawErc20Arg {
+    amount: Nat,
+    ckerc20_ledger_id: Principal,
+    recipient: String,
+    from_cketh_subaccount: Option<Vec<u8>>,
+    from_ckerc20_subaccount: Option<Vec<u8>>,
+}
+
+/// `RetrieveErc20Request` — the real minter's success record: burn block indices on BOTH ledgers.
+#[derive(CandidType, Deserialize)]
+struct RetrieveErc20Request {
+    cketh_block_index: Nat,
+    ckerc20_block_index: Nat,
+}
+
+/// `LedgerError` — the inner error wrapped by `CkEthLedgerError` / `CkErc20LedgerError`. Variant +
+/// field labels mirror the cached .did exactly.
+#[derive(CandidType, Deserialize, Debug)]
+enum LedgerError {
+    InsufficientFunds { balance: Nat, failed_burn_amount: Nat, token_symbol: String, ledger_id: Principal },
+    InsufficientAllowance { allowance: Nat, failed_burn_amount: Nat, token_symbol: String, ledger_id: Principal },
+    AmountTooLow { minimum_burn_amount: Nat, failed_burn_amount: Nat, token_symbol: String, ledger_id: Principal },
+    TemporarilyUnavailable(String),
+}
+
+/// `WithdrawErc20Error` — the real ckETH minter's error variant for `withdraw_erc20`. The load-bearing
+/// variant for the partial-failure path is `CkErc20LedgerError { cketh_block_index, error }`: the gas
+/// fee burned successfully but the amount burn failed → the minter schedules a reimbursement. This is
+/// a TERMINAL state (funds moved), so the facade SETTLES the nonce (vs `CkEthLedgerError` where the
+/// gas burn itself failed → nothing moved → RELEASE).
+#[derive(CandidType, Deserialize, Debug)]
+enum WithdrawErc20Error {
+    TokenNotSupported { supported_tokens: Vec<CkErc20Token> },
+    RecipientAddressBlocked { address: String },
+    CkEthLedgerError { error: LedgerError },
+    CkErc20LedgerError { cketh_block_index: Nat, error: LedgerError },
+    TemporarilyUnavailable(String),
+}
+
+/// `CkErc20Token` — the record the real minter returns inside `TokenNotSupported.supported_tokens`.
+/// Defined here so `WithdrawErc20Error` decodes fully (the facade does not surface the inner record).
+#[derive(CandidType, Deserialize, Debug)]
+struct CkErc20Token {
+    ckerc20_token_symbol: String,
+    erc20_contract_address: String,
+    ledger_canister_id: Principal,
+}
+
+/// ckETH minter `eip_1559_transaction_price(opt Eip1559TransactionPriceArg) -> Eip1559TransactionPrice`
+/// (query) — the gas-fee estimate for a ckERC20 withdrawal. Pass `Some(Eip1559TransactionPriceArg{
+/// ckerc20_ledger_id })` (ckERC20, NOT native ETH which passes None). The returned
+/// `max_transaction_fee` is the Wei cap the facade approves on the ckETH GAS ledger.
+async fn minter_call_eip1559_price_erc20(
+    minter: Principal,
+    ckerc20_ledger_id: Principal,
+) -> Result<Eip1559TransactionPrice, String> {
+    let arg = (Some(Eip1559TransactionPriceArg { ckerc20_ledger_id }),);
+    let response = Call::bounded_wait(minter, "eip_1559_transaction_price")
+        .with_args(&arg)
+        .await
+        .map_err(|e| format!("eip_1559_transaction_price rejected: {e:?}"))?;
+    response
+        .candid::<Eip1559TransactionPrice>()
+        .map_err(|e| format!("eip_1559_transaction_price decode: {e:?}"))
+}
+
+/// ckETH minter `withdraw_erc20(WithdrawErc20Arg) -> variant { Ok : RetrieveErc20Request; Err :
+/// WithdrawErc20Error }` — the dual-ledger value-creating call that burns ckETH (gas) + ckERC20
+/// (amount) and (on mainnet) sends native ERC-20 to `recipient`. Encoded as a 1-tuple `(arg,)` so
+/// `with_args` emits exactly one argument (mirrors `withdraw_eth`'s 1-tuple invariant).
+async fn minter_call_withdraw_erc20(
+    minter: Principal,
+    arg: WithdrawErc20Arg,
+) -> Result<Result<RetrieveErc20Request, WithdrawErc20Error>, String> {
+    let args = (arg,);
+    let response = Call::bounded_wait(minter, "withdraw_erc20")
+        .with_args(&args)
+        .await
+        .map_err(|e| format!("withdraw_erc20 rejected: {e:?}"))?;
+    response
+        .candid::<Result<RetrieveErc20Request, WithdrawErc20Error>>()
+        .map_err(|e| format!("withdraw_erc20 decode: {e:?}"))
 }
 
 /// Cross-canister `icrc2_approve` — grants `spender` an allowance of `amount` from
@@ -2182,6 +2343,7 @@ fn register_currency_meta(
     token_contract: Option<String>,
     onramp: RampCapability,
     offramp: RampCapability,
+    gas_ledger: Option<Principal>,
 ) -> Result<(), String> {
     require_admin()?;
     CURRENCY_META.with(|m| {
@@ -2201,6 +2363,7 @@ fn register_currency_meta(
                 token_contract,
                 onramp: Some(onramp),
                 offramp: Some(offramp),
+                gas_ledger,
             },
         );
     });
@@ -2324,6 +2487,7 @@ async fn register_currency(reg: CurrencyRegistration) -> Result<(), String> {
                 token_contract: reg.token_contract,
                 onramp: Some(reg.onramp),
                 offramp: Some(reg.offramp),
+                gas_ledger: reg.gas_ledger,
             },
         );
     });
@@ -2386,6 +2550,7 @@ fn currencies() -> Vec<CurrencyDescriptor> {
                 // BOTH directions — the wallet renders no fund/cash-out button for it.
                 onramp: meta.as_ref().and_then(|x| x.onramp).unwrap_or(RampCapability::Unavailable),
                 offramp: meta.as_ref().and_then(|x| x.offramp).unwrap_or(RampCapability::Unavailable),
+                gas_ledger: meta.as_ref().and_then(|x| x.gas_ledger),
             }
         })
         .collect();
@@ -2764,31 +2929,44 @@ async fn withdraw(req: WithdrawRequest) -> Result<WithdrawReceipt, String> {
         return Err("expired".to_string());
     }
 
-    // 3b. FAMILY DISPATCH: read the currency's minter family (+ token_contract for ckERC20) and apply
-    //     family-specific cheap rejects BEFORE reserving the nonce. `None` family defaults to
-    //     CkBtcUtxo (legacy default — a currency with a registered minter but no family meta is the
-    //     pre-dispatch ckBTC path). CkSol / unknown → fail-closed (no withdraw path).
+    // 3b. FAMILY DISPATCH: read the currency's minter family (+ token_contract / gas_ledger for
+    //     ckERC20) and apply family-specific cheap rejects BEFORE reserving the nonce. `None` family
+    //     defaults to CkBtcUtxo (legacy default — a currency with a registered minter but no family
+    //     meta is the pre-dispatch ckBTC path). CkSol / unknown → fail-closed (no withdraw path).
+    //     ckERC20 (CkEthErc20 + token_contract Some) REQUIRES a registered ckETH gas ledger — without
+    //     one the dual-ledger `withdraw_erc20` path cannot run, and the facade MUST fail closed rather
+    //     than fall through to the native-ETH `withdraw_eth` (which would mis-burn the amount as ckETH).
+    enum WithdrawPath {
+        Btc,
+        NativeEth,
+        Erc20 { gas_ledger: Principal },
+    }
     let family = currency_family(req.currency).unwrap_or(MinterFamily::CkBtcUtxo);
-    let is_native_eth = match family {
+    let path = match family {
         MinterFamily::CkBtcUtxo => {
             if req.amount < RETRIEVE_BTC_MIN_AMOUNT {
                 return Err(format!(
                     "amount below retrieve_btc_min_amount ({RETRIEVE_BTC_MIN_AMOUNT})"
                 ));
             }
-            false
+            WithdrawPath::Btc
         }
         MinterFamily::CkEthErc20 => {
-            // token_contract Some ⇒ ckERC20 (e.g. ckUSDC). Fail-closed: ckERC20 withdraw needs a
-            // separate ckETH-for-fees path (withdraw_erc20), a follow-on. This guard prevents a USDC
-            // withdraw hitting native-eth withdraw_eth.
             let token_contract = CURRENCY_META.with(|m| {
                 m.borrow().get(&req.currency).and_then(|meta| meta.token_contract.clone())
             });
             if token_contract.is_some() {
-                return Err("erc20 withdraw not supported on this path".to_string());
+                // ckERC20 (e.g. ckUSDC): dual-ledger `withdraw_erc20` path. Requires a registered
+                // ckETH gas ledger (burned for Ethereum gas). No gas ledger → fail closed (the user
+                // must register one before this currency is withdrawable); cannot fall through to the
+                // native-ETH `withdraw_eth`.
+                let gas_ledger = currency_gas_ledger(req.currency).ok_or_else(|| {
+                    "withdraw_erc20 requires a ckETH gas ledger registered for this currency".to_string()
+                })?;
+                WithdrawPath::Erc20 { gas_ledger }
+            } else {
+                WithdrawPath::NativeEth
             }
-            true
         }
         MinterFamily::CkSol => {
             return Err("withdraw not supported for CkSol family".to_string());
@@ -2829,114 +3007,227 @@ async fn withdraw(req: WithdrawRequest) -> Result<WithdrawReceipt, String> {
     //        Ok → SETTLE the nonce (burn committed; the auth can never replay → no double-burn);
     //        transient (transport / InsufficientFunds / InsufficientAllowance / TemporarilyUnavailable
     //        / AlreadyProcessing) → RELEASE (retryable; funds did not move);
-    //        permanent (MalformedAddress / AmountTooLow / RecipientAddressBlocked / GenericError) →
-    //        SETTLE (dead auth; the user must sign a fresh authorization).
-    let block_index_nat = if is_native_eth {
-        // NATIVE ETH: query the gas-fee estimate, approve `amount + max_transaction_fee` (a single
-        // running-balance allowance covers the amount burn NOW + the gas-fee burn LATER), then call
-        // `withdraw_eth`. Any pre-burn failure → RELEASE the nonce (retryable).
-        let price = match minter_call_eip1559_price(minter).await {
-            Ok(p) => p,
-            Err(e) => {
+    //        permanent (MalformedAddress / AmountTooLow / RecipientAddressBlocked / GenericError /
+    //        TokenNotSupported) → SETTLE (dead auth; the user must sign a fresh authorization).
+    //      ckERC20 partial-failure (CkErc20LedgerError — gas burned, amount burn failed) → SETTLE
+    //      (funds moved; the minter schedules a reimbursement; the auth must never replay).
+    let block_index_nat = match path {
+        WithdrawPath::NativeEth => {
+            // NATIVE ETH: query the gas-fee estimate, approve `amount + max_transaction_fee` (a single
+            // running-balance allowance covers the amount burn NOW + the gas-fee burn LATER), then call
+            // `withdraw_eth`. Any pre-burn failure → RELEASE the nonce (retryable).
+            let price = match minter_call_eip1559_price(minter).await {
+                Ok(p) => p,
+                Err(e) => {
+                    release_withdraw_nonce(&wnonce);
+                    return Err(e);
+                }
+            };
+            let spender = Account { owner: minter, subaccount: None };
+            // Nat arithmetic: `amount + max_transaction_fee` cannot overflow (candid Nat is arbitrary
+            // precision). The BTC path approves exactly `amount`; the ETH path adds the gas-fee cap.
+            let approve_amount = Nat::from(req.amount) + price.max_transaction_fee;
+            if let Err(e) = icrc2_approve(ledger, from, spender, approve_amount).await {
                 release_withdraw_nonce(&wnonce);
-                return Err(e);
+                return Err(format!("icrc2_approve: {e}"));
             }
-        };
-        let spender = Account { owner: minter, subaccount: None };
-        // Nat arithmetic: `amount + max_transaction_fee` cannot overflow (candid Nat is arbitrary
-        // precision). The BTC path approves exactly `amount`; the ETH path adds the gas-fee cap.
-        let approve_amount = Nat::from(req.amount) + price.max_transaction_fee;
-        if let Err(e) = icrc2_approve(ledger, from, spender, approve_amount).await {
-            release_withdraw_nonce(&wnonce);
-            return Err(format!("icrc2_approve: {e}"));
+            let eth_arg = WithdrawalArg {
+                recipient: req.destination.clone(),
+                amount: Nat::from(req.amount),
+                from_subaccount: Some(from.to_vec()),
+            };
+            match minter_call_withdraw_eth(minter, eth_arg).await {
+                Ok(Ok(retrieve)) => {
+                    settle_withdraw_nonce(&wnonce);
+                    retrieve.block_index
+                }
+                Ok(Err(WithdrawalError::AmountTooLow { min_withdrawal_amount })) => {
+                    // Permanent — the amount is below the minter's Wei floor. Settle the dead auth.
+                    settle_withdraw_nonce(&wnonce);
+                    return Err(format!(
+                        "withdraw_eth amount too low (min {min_withdrawal_amount})"
+                    ));
+                }
+                Ok(Err(WithdrawalError::InsufficientFunds { balance })) => {
+                    release_withdraw_nonce(&wnonce);
+                    return Err(format!("withdraw_eth insufficient funds: balance {balance}"));
+                }
+                Ok(Err(WithdrawalError::InsufficientAllowance { allowance })) => {
+                    // Should not happen given the approve; surfaces a fee spike between the price query
+                    // and the burn. Release so the same auth retries with a fresh fee estimate.
+                    release_withdraw_nonce(&wnonce);
+                    return Err(format!("withdraw_eth insufficient allowance: {allowance}"));
+                }
+                Ok(Err(WithdrawalError::RecipientAddressBlocked { address })) => {
+                    // Permanent — the recipient is blocked. Settle the dead auth.
+                    settle_withdraw_nonce(&wnonce);
+                    return Err(format!("withdraw_eth recipient blocked: {address}"));
+                }
+                Ok(Err(WithdrawalError::TemporarilyUnavailable(m))) => {
+                    release_withdraw_nonce(&wnonce);
+                    return Err(format!("withdraw_eth temporarily unavailable: {m}"));
+                }
+                Err(transport) => {
+                    release_withdraw_nonce(&wnonce);
+                    return Err(transport);
+                }
+            }
         }
-        let eth_arg = WithdrawalArg {
-            recipient: req.destination.clone(),
-            amount: Nat::from(req.amount),
-            from_subaccount: Some(from.to_vec()),
-        };
-        match minter_call_withdraw_eth(minter, eth_arg).await {
-            Ok(Ok(retrieve)) => {
-                settle_withdraw_nonce(&wnonce);
-                retrieve.block_index
-            }
-            Ok(Err(WithdrawalError::AmountTooLow { min_withdrawal_amount })) => {
-                // Permanent — the amount is below the minter's Wei floor. Settle the dead auth.
-                settle_withdraw_nonce(&wnonce);
-                return Err(format!(
-                    "withdraw_eth amount too low (min {min_withdrawal_amount})"
-                ));
-            }
-            Ok(Err(WithdrawalError::InsufficientFunds { balance })) => {
+        WithdrawPath::Erc20 { gas_ledger } => {
+            // ckERC20 (e.g. ckUSDC): DUAL-ledger `withdraw_erc20` path. The minter burns ckETH gas
+            // fees from `gas_ledger` + the amount from `ledger`. Approve BOTH ledgers (gas fee on the
+            // ckETH ledger, amount on the ckERC20 ledger), then call `withdraw_erc20`. The amount-
+            // ledger approve failure (after the gas-ledger approve succeeded) → RELEASE (retryable:
+            // an approve is an allowance grant, not a burn — nothing moved). The partial-failure
+            // (CkErc20LedgerError: gas burned, amount burn failed) → SETTLE (terminal; funds moved).
+            let price = match minter_call_eip1559_price_erc20(minter, ledger).await {
+                Ok(p) => p,
+                Err(e) => {
+                    release_withdraw_nonce(&wnonce);
+                    return Err(e);
+                }
+            };
+            let spender = Account { owner: minter, subaccount: None };
+            // Approve the GAS (ckETH) ledger for the gas fee.
+            if let Err(e) =
+                icrc2_approve(gas_ledger, from, spender, price.max_transaction_fee.clone()).await
+            {
                 release_withdraw_nonce(&wnonce);
-                return Err(format!("withdraw_eth insufficient funds: balance {balance}"));
+                return Err(format!("icrc2_approve (gas): {e}"));
             }
-            Ok(Err(WithdrawalError::InsufficientAllowance { allowance })) => {
-                // Should not happen given the approve; surfaces a fee spike between the price query
-                // and the burn. Release so the same auth retries with a fresh fee estimate.
+            // Approve the AMOUNT (ckERC20) ledger for the withdrawal amount. A failure here → RELEASE
+            // (nothing burned yet; the gas-ledger approve is just an allowance a retry overwrites).
+            if let Err(e) =
+                icrc2_approve(ledger, from, spender, Nat::from(req.amount)).await
+            {
                 release_withdraw_nonce(&wnonce);
-                return Err(format!("withdraw_eth insufficient allowance: {allowance}"));
+                return Err(format!("icrc2_approve (amount): {e}"));
             }
-            Ok(Err(WithdrawalError::RecipientAddressBlocked { address })) => {
-                // Permanent — the recipient is blocked. Settle the dead auth.
-                settle_withdraw_nonce(&wnonce);
-                return Err(format!("withdraw_eth recipient blocked: {address}"));
-            }
-            Ok(Err(WithdrawalError::TemporarilyUnavailable(m))) => {
-                release_withdraw_nonce(&wnonce);
-                return Err(format!("withdraw_eth temporarily unavailable: {m}"));
-            }
-            Err(transport) => {
-                release_withdraw_nonce(&wnonce);
-                return Err(transport);
+            let erc20_arg = WithdrawErc20Arg {
+                amount: Nat::from(req.amount),
+                ckerc20_ledger_id: ledger,
+                recipient: req.destination.clone(),
+                from_cketh_subaccount: Some(from.to_vec()),
+                from_ckerc20_subaccount: Some(from.to_vec()),
+            };
+            match minter_call_withdraw_erc20(minter, erc20_arg).await {
+                Ok(Ok(retrieve)) => {
+                    settle_withdraw_nonce(&wnonce);
+                    // The amount-ledger burn index is the primary outcome proof for the withdrawn
+                    // ckERC20 (mirrors how the ETH path returns the ckETH burn index).
+                    retrieve.ckerc20_block_index
+                }
+                Ok(Err(WithdrawErc20Error::TokenNotSupported { .. })) => {
+                    // Permanent — the ckERC20 ledger is not supported by this minter. Settle the dead auth.
+                    settle_withdraw_nonce(&wnonce);
+                    return Err("withdraw_erc20 token not supported by the minter".to_string());
+                }
+                Ok(Err(WithdrawErc20Error::RecipientAddressBlocked { address })) => {
+                    // Permanent — the recipient is blocked. Settle the dead auth.
+                    settle_withdraw_nonce(&wnonce);
+                    return Err(format!("withdraw_erc20 recipient blocked: {address}"));
+                }
+                Ok(Err(WithdrawErc20Error::TemporarilyUnavailable(m))) => {
+                    release_withdraw_nonce(&wnonce);
+                    return Err(format!("withdraw_erc20 temporarily unavailable: {m}"));
+                }
+                Ok(Err(WithdrawErc20Error::CkEthLedgerError { error })) => {
+                    // The GAS burn failed → nothing moved. Classify by the inner LedgerError:
+                    // transient (TemporarilyUnavailable / InsufficientFunds / InsufficientAllowance)
+                    // → RELEASE (the user can fund ckETH / retry the SAME auth); permanent
+                    // (AmountTooLow) → SETTLE the dead auth.
+                    match error {
+                        LedgerError::TemporarilyUnavailable(m) => {
+                            release_withdraw_nonce(&wnonce);
+                            return Err(format!(
+                                "withdraw_erc20 cketh gas ledger temporarily unavailable: {m}"
+                            ));
+                        }
+                        LedgerError::InsufficientFunds { .. } => {
+                            release_withdraw_nonce(&wnonce);
+                            return Err(
+                                "withdraw_erc20 cketh insufficient funds: you need ckETH for gas"
+                                    .to_string(),
+                            );
+                        }
+                        LedgerError::InsufficientAllowance { .. } => {
+                            release_withdraw_nonce(&wnonce);
+                            return Err(
+                                "withdraw_erc20 cketh insufficient allowance".to_string()
+                            );
+                        }
+                        LedgerError::AmountTooLow { .. } => {
+                            settle_withdraw_nonce(&wnonce);
+                            return Err(
+                                "withdraw_erc20 cketh gas amount too low".to_string()
+                            );
+                        }
+                    }
+                }
+                Ok(Err(WithdrawErc20Error::CkErc20LedgerError { cketh_block_index, error })) => {
+                    // PARTIAL FAILURE: the gas burn SUCCEEDED (cketh_block_index is real) but the
+                    // amount burn FAILED → the minter schedules a reimbursement of the burned gas.
+                    // Funds DID move (the ckETH gas debit) → TERMINAL → SETTLE the nonce so the dead
+                    // auth can never replay (a retry would burn gas a second time). Surfaced as an Err
+                    // (the withdrawal did not complete; the user did NOT receive their ERC-20).
+                    settle_withdraw_nonce(&wnonce);
+                    return Err(format!(
+                        "withdraw_erc20 partial failure: ckETH gas burned (block_index {cketh_block_index}), ckERC20 amount burn failed ({error:?}); reimbursement scheduled"
+                    ));
+                }
+                Err(transport) => {
+                    release_withdraw_nonce(&wnonce);
+                    return Err(transport);
+                }
             }
         }
-    } else {
-        // BTC: approve EXACTLY `amount`, then retrieve_btc_with_approval consumes it (single-use).
-        let spender = Account { owner: minter, subaccount: None };
-        if let Err(e) = icrc2_approve(ledger, from, spender, Nat::from(req.amount)).await {
-            release_withdraw_nonce(&wnonce);
-            return Err(format!("icrc2_approve: {e}"));
-        }
-        let retrieve_args = RetrieveBtcWithApprovalArgs {
-            address: req.destination.clone(),
-            amount: req.amount,
-            from_subaccount: Some(from.to_vec()),
-        };
-        match minter_call_retrieve_btc(minter, retrieve_args).await {
-            Ok(Ok(ok)) => {
-                settle_withdraw_nonce(&wnonce);
-                ok.block_index
-            }
-            Ok(Err(RetrieveBtcWithApprovalError::TemporarilyUnavailable(m))) => {
+        WithdrawPath::Btc => {
+            // BTC: approve EXACTLY `amount`, then retrieve_btc_with_approval consumes it (single-use).
+            let spender = Account { owner: minter, subaccount: None };
+            if let Err(e) = icrc2_approve(ledger, from, spender, Nat::from(req.amount)).await {
                 release_withdraw_nonce(&wnonce);
-                return Err(format!("retrieve_btc transient: {m}"));
+                return Err(format!("icrc2_approve: {e}"));
             }
-            Ok(Err(RetrieveBtcWithApprovalError::AlreadyProcessing)) => {
-                release_withdraw_nonce(&wnonce);
-                return Err("retrieve_btc already processing".to_string());
-            }
-            Ok(Err(RetrieveBtcWithApprovalError::InsufficientFunds { balance })) => {
-                release_withdraw_nonce(&wnonce);
-                return Err(format!("retrieve_btc insufficient funds: balance {balance}"));
-            }
-            Ok(Err(RetrieveBtcWithApprovalError::InsufficientAllowance { allowance })) => {
-                release_withdraw_nonce(&wnonce);
-                return Err(format!("retrieve_btc insufficient allowance: {allowance}"));
-            }
-            Ok(Err(e)) => {
-                // MalformedAddress / AmountTooLow / GenericError — permanent; settle the nonce so the
-                // dead auth can never replay. The user must sign a fresh authorization.
-                settle_withdraw_nonce(&wnonce);
-                return Err(format!("retrieve_btc: {e:?}"));
-            }
-            Err(transport) => {
-                // A transport/decode failure between approve and the minter's reply. Funds may or may
-                // not have moved — release is the retryable choice (matches `pay`'s transient
-                // handling); the single-use nonce keeps a successful-but-unreported burn from being
-                // driven twice by a DIFFERENT auth, and the same-auth retry reconciles via the ledger.
-                release_withdraw_nonce(&wnonce);
-                return Err(transport);
+            let retrieve_args = RetrieveBtcWithApprovalArgs {
+                address: req.destination.clone(),
+                amount: req.amount,
+                from_subaccount: Some(from.to_vec()),
+            };
+            match minter_call_retrieve_btc(minter, retrieve_args).await {
+                Ok(Ok(ok)) => {
+                    settle_withdraw_nonce(&wnonce);
+                    ok.block_index
+                }
+                Ok(Err(RetrieveBtcWithApprovalError::TemporarilyUnavailable(m))) => {
+                    release_withdraw_nonce(&wnonce);
+                    return Err(format!("retrieve_btc transient: {m}"));
+                }
+                Ok(Err(RetrieveBtcWithApprovalError::AlreadyProcessing)) => {
+                    release_withdraw_nonce(&wnonce);
+                    return Err("retrieve_btc already processing".to_string());
+                }
+                Ok(Err(RetrieveBtcWithApprovalError::InsufficientFunds { balance })) => {
+                    release_withdraw_nonce(&wnonce);
+                    return Err(format!("retrieve_btc insufficient funds: balance {balance}"));
+                }
+                Ok(Err(RetrieveBtcWithApprovalError::InsufficientAllowance { allowance })) => {
+                    release_withdraw_nonce(&wnonce);
+                    return Err(format!("retrieve_btc insufficient allowance: {allowance}"));
+                }
+                Ok(Err(e)) => {
+                    // MalformedAddress / AmountTooLow / GenericError — permanent; settle the nonce so the
+                    // dead auth can never replay. The user must sign a fresh authorization.
+                    settle_withdraw_nonce(&wnonce);
+                    return Err(format!("retrieve_btc: {e:?}"));
+                }
+                Err(transport) => {
+                    // A transport/decode failure between approve and the minter's reply. Funds may or may
+                    // not have moved — release is the retryable choice (matches `pay`'s transient
+                    // handling); the single-use nonce keeps a successful-but-unreported burn from being
+                    // driven twice by a DIFFERENT auth, and the same-auth retry reconciles via the ledger.
+                    release_withdraw_nonce(&wnonce);
+                    return Err(transport);
+                }
             }
         }
     };

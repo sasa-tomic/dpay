@@ -165,6 +165,7 @@ fn register_currency_meta_cap(
                 None::<String>,              // token_contract
                 TestRampCapability::Unavailable, // onramp
                 TestRampCapability::Unavailable, // offramp
+                None::<Principal>,               // gas_ledger
             ))
             .unwrap(),
         )

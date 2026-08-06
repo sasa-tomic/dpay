@@ -174,9 +174,12 @@ else
   echo "== register DUSD ledger + currency metadata for DEMO(0)/ckBTC(1)/ckUSDC(2) =="
   REG="$(dfx_i canister call "$CANISTER" register_ledger "(0 : nat32, principal \"${LEDGER_ID}\", true)" --network "$NETWORK")"
   case "$REG" in *Ok*) echo "   register_ledger(0) -> $LEDGER_ID Ok";; *) echo "WARN: register_ledger: $REG" >&2;; esac
-  M0="$(dfx_i canister call "$CANISTER" register_currency_meta "(0 : nat32, opt \"\$\", opt (2 : nat8), null, null, null, null, null, null, opt (${CAP} : nat64), null, null, variant { Direct }, variant { Unavailable })" --network "$NETWORK")"
-  M1="$(dfx_i canister call "$CANISTER" register_currency_meta "(1 : nat32, opt \"₿\", opt (8 : nat8), opt variant { CkBtcUtxo }, opt \"ckBTC\", opt \"BTC\", opt \"Bitcoin\", opt (8 : nat8), null, opt (${CAP} : nat64), null, null, variant { Direct }, variant { Direct })" --network "$NETWORK")"
-  M2="$(dfx_i canister call "$CANISTER" register_currency_meta "(2 : nat32, opt \"ckUSDC\", opt (6 : nat8), opt variant { CkEthErc20 }, opt \"ckUSDC\", opt \"USDC\", opt \"Ethereum\", opt (6 : nat8), opt (10_000 : nat64), opt (${CAP} : nat64), opt (1 : nat32), opt \"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48\", variant { Direct }, variant { Unavailable })" --network "$NETWORK")"
+  M0="$(dfx_i canister call "$CANISTER" register_currency_meta "(0 : nat32, opt \"\$\", opt (2 : nat8), null, null, null, null, null, null, opt (${CAP} : nat64), null, null, variant { Direct }, variant { Unavailable }, null)" --network "$NETWORK")"
+  M1="$(dfx_i canister call "$CANISTER" register_currency_meta "(1 : nat32, opt \"₿\", opt (8 : nat8), opt variant { CkBtcUtxo }, opt \"ckBTC\", opt \"BTC\", opt \"Bitcoin\", opt (8 : nat8), null, opt (${CAP} : nat64), null, null, variant { Direct }, variant { Direct }, null)" --network "$NETWORK")"
+  # ckUSDC(2): CkEthErc20 + token_contract + the ckETH gas ledger (sv3dd's ckETH ledger
+  # ss2fx-dyaaa-aaaar-qacoq-cai) for the dual-ledger withdraw_erc20 path. offramp flipped to Direct
+  # now that withdraw_erc20 is wired (was Unavailable while fail-closed).
+  M2="$(dfx_i canister call "$CANISTER" register_currency_meta "(2 : nat32, opt \"ckUSDC\", opt (6 : nat8), opt variant { CkEthErc20 }, opt \"ckUSDC\", opt \"USDC\", opt \"Ethereum\", opt (6 : nat8), opt (10_000 : nat64), opt (${CAP} : nat64), opt (1 : nat32), opt \"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48\", variant { Direct }, variant { Direct }, opt principal \"ss2fx-dyaaa-aaaar-qacoq-cai\")" --network "$NETWORK")"
   for _m in "$M0" "$M1" "$M2"; do case "$_m" in *Ok*) :;; *) echo "WARN: register_currency_meta: $_m" >&2;; esac; done
   echo "   metadata registered; cap=${CAP} raw (placeholder — tighten per-asset before pilot)"
 fi

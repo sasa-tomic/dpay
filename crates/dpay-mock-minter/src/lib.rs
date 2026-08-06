@@ -137,24 +137,44 @@ struct AccountArg {
 
 #[derive(CandidType, Deserialize)]
 struct InitArg {
-    ledger: Principal,
+    /// The ledger this mock operates on. For the ckBTC/ckETH surfaces this is the SINGLE ledger the
+    /// mock burns from (`retrieve_btc_with_approval` / `withdraw_eth`). For the ckERC20 surface
+    /// (`withdraw_erc20`) this is the **amount ledger** (e.g. ckUSDC) — the gas ledger is `gas_ledger`.
+    /// Renamed from `ledger` for clarity; the legacy single-ledger tests pass `gas_ledger: None`.
+    amount_ledger: Principal,
+    /// The ckETH gas ledger a `withdraw_erc20` burns gas fees from. `None` for the single-ledger
+    /// surfaces (ckBTC/ckETH native) → `withdraw_erc20` returns `TokenNotSupported` (no dual-ledger
+    /// path is configured). `Some(cketh)` for a ckERC20 minter.
+    gas_ledger: Option<Principal>,
 }
 
 thread_local! {
-    /// The ICRC ledger this mock mints onto. The test installs the ledger with
-    /// `minting_account.owner = mock_minter`, so the mock is authorized to mint from that account's
-    /// default subaccount. Sentinel `management_canister` until overwritten by `init`.
+    /// The ICRC ledger this mock mints/burns onto (the amount ledger for ckERC20). The test installs
+    /// the ledger with `minting_account.owner = mock_minter`, so the mock is authorized to mint from
+    /// that account's default subaccount. Sentinel `management_canister` until overwritten by `init`.
     static LEDGER: RefCell<Principal> = RefCell::new(Principal::management_canister());
+
+    /// The ckETH gas ledger a `withdraw_erc20` burns gas fees from. Sentinel `management_canister`
+    /// when `None` was passed at init → `withdraw_erc20` returns `TokenNotSupported`.
+    static GAS_LEDGER: RefCell<Principal> = RefCell::new(Principal::management_canister());
 
     /// Pending deposits keyed by `(owner, subaccount)`. `register_deposit` seeds an entry;
     /// `update_balance` drains it (one mint) and removes it. `subaccount` is the 32-byte pubkey blob
     /// the facade passes.
     static PENDING: RefCell<BTreeMap<(Principal, Vec<u8>), u64>> = RefCell::new(BTreeMap::new());
+
+    /// Test-only hook: when set, the NEXT `withdraw_erc20` burns the ckETH gas fee (succeeds) then
+    /// returns `CkErc20LedgerError` (partial failure → minter schedules reimbursement). Cleared after
+    /// one call. Models the real minter's "gas burned, amount burn failed" terminal state.
+    static FORCE_NEXT_ERC20_PARTIAL: RefCell<bool> = RefCell::new(false);
 }
 
 #[init]
 fn init(arg: InitArg) {
-    LEDGER.with(|l| *l.borrow_mut() = arg.ledger);
+    LEDGER.with(|l| *l.borrow_mut() = arg.amount_ledger);
+    if let Some(g) = arg.gas_ledger {
+        GAS_LEDGER.with(|gl| *gl.borrow_mut() = g);
+    }
 }
 
 /// Minter `get_btc_address(record { owner: opt principal; subaccount: opt blob }) -> text`. The real
@@ -434,17 +454,22 @@ struct Eip1559TransactionPrice {
 const MIN_WITHDRAWAL_ETH_AMOUNT: u64 = 1_000;
 
 /// Minter `eip_1559_transaction_price(opt Eip1559TransactionPriceArg) -> Eip1559TransactionPrice`
-/// (query). Returns a fixed small fee: 21_000 gas * 10 gwei = 210_000_000_000_000 Wei (≈ 0.00021
-/// ETH). The real minter queries live mainnet gas; the mock returns a constant — enough to prove the
-/// facade's `approve(amount + max_transaction_fee)` wiring. `arg` is ignored (the facade passes
-/// `null` for ETH).
+/// (query). Returns a fixed small fee. When `arg` is `None` (native ETH) the gas limit is 21_000 (a
+/// plain ETH transfer); when `arg` is `Some(ckerc20_ledger_id)` (a ckERC20 withdrawal) the gas limit
+/// is 60_000 (an ERC-20 transfer costs more — the real minter returns a higher estimate here). Both
+/// at 10 gwei. The real minter queries live mainnet gas; the mock returns a constant — enough to
+/// prove the facade's dual-approve wiring. Honoring the `Some` arg lets the PocketIC honesty test
+/// assert the facade passes `Some(ckerc20_ledger_id)` for ckERC20 (NOT `None`, which would hit the
+/// native-ETH price path).
 #[query]
-fn eip_1559_transaction_price(_arg: Option<Eip1559TransactionPriceArg>) -> Eip1559TransactionPrice {
+fn eip_1559_transaction_price(arg: Option<Eip1559TransactionPriceArg>) -> Eip1559TransactionPrice {
+    // ckERC20 transfer ≈ 60k gas; native ETH send = 21k. The arg's presence is the dispatch signal.
+    let gas_limit: u64 = if arg.is_some() { 60_000 } else { 21_000 };
     Eip1559TransactionPrice {
-        gas_limit: Nat::from(21_000u64),
+        gas_limit: Nat::from(gas_limit),
         max_fee_per_gas: Nat::from(10_000_000_000u64),
         max_priority_fee_per_gas: Nat::from(1_000_000_000u64),
-        max_transaction_fee: Nat::from(21_000u64 * 10_000_000_000u64),
+        max_transaction_fee: Nat::from(gas_limit * 10_000_000_000u64),
         timestamp: None,
     }
 }
@@ -516,7 +541,244 @@ async fn withdraw_eth(arg: WithdrawalArg) -> Result<RetrieveEthRequest, Withdraw
     }
 }
 
-/// Minter `get_known_utxos(record { owner: opt principal; subaccount: opt blob }) -> vec Utxo`. The
+// --- ckETH-minter withdraw_erc20 surface (ckERC20 → ERC20 out) --------------------------------
+// Mirror types for the REAL ckETH minter's `withdraw_erc20` candid, verified against `dfx canister
+// metadata sv3dd-oaaaa-aaaar-qacoa-cai candid:service --network ic` (cached .did):
+//   `withdraw_erc20 : (WithdrawErc20Arg) -> (variant { Ok : RetrieveErc20Request; Err : WithdrawErc20Error })`
+// Field/variant labels mirror the real minter EXACTLY (incl. `ckerc20_ledger_id : principal`, NOT
+// nat — encoding it as nat traps IC0503 on mainnet). This mock's candid surface MUST match the real
+// minter's so a facade that diverges (wrong arg shape, nat-vs-principal, wrong error variant) is
+// caught by the PocketIC withdraw_erc20 honesty test — the mirror-the-real-counterparty lesson that
+// caught the live withdraw_eth 1-tuple trap.
+
+/// `WithdrawErc20Arg` — the EXACT argument record the REAL ckETH minter's `withdraw_erc20` takes:
+///   `record { amount : nat; ckerc20_ledger_id : principal; recipient : text;
+///             from_cketh_subaccount : opt blob; from_ckerc20_subaccount : opt blob }`.
+/// `ckerc20_ledger_id` is a `principal` (NOT nat) — verified in the cached .did. The facade passes
+/// `ckerc20_ledger_id = ledger` (the ckERC20 amount ledger), `from_cketh_subaccount = Some(pubkey)`,
+/// `from_ckerc20_subaccount = Some(pubkey)` (the SAME subaccount on both ledgers — the facade owns the
+/// user's account on every ledger).
+#[derive(CandidType, Deserialize)]
+struct WithdrawErc20Arg {
+    amount: Nat,
+    ckerc20_ledger_id: Principal,
+    recipient: String,
+    from_cketh_subaccount: Option<Vec<u8>>,
+    from_ckerc20_subaccount: Option<Vec<u8>>,
+}
+
+/// `RetrieveErc20Request` — the real minter's success record: the burn block indices on BOTH ledgers
+/// (`cketh_block_index` for the gas-fee burn, `ckerc20_block_index` for the amount burn).
+#[derive(CandidType, Deserialize)]
+struct RetrieveErc20Request {
+    cketh_block_index: Nat,
+    ckerc20_block_index: Nat,
+}
+
+/// `LedgerError` — the inner error the minter wraps in `CkEthLedgerError` / `CkErc20LedgerError`.
+/// Variant + field labels mirror the real minter's candid exactly (verified in the cached .did).
+#[derive(CandidType, Deserialize, Debug)]
+enum LedgerError {
+    InsufficientFunds { balance: Nat, failed_burn_amount: Nat, token_symbol: String, ledger_id: Principal },
+    InsufficientAllowance { allowance: Nat, failed_burn_amount: Nat, token_symbol: String, ledger_id: Principal },
+    AmountTooLow { minimum_burn_amount: Nat, failed_burn_amount: Nat, token_symbol: String, ledger_id: Principal },
+    TemporarilyUnavailable(String),
+}
+
+/// `CkErc20Token` — the record the real minter returns inside `TokenNotSupported.supported_tokens`.
+#[derive(CandidType, Deserialize, Debug)]
+struct CkErc20Token {
+    ckerc20_token_symbol: String,
+    erc20_contract_address: String,
+    ledger_canister_id: Principal,
+}
+
+/// `WithdrawErc20Error` — the real ckETH minter's error variant for `withdraw_erc20`. Variant + field
+/// labels mirror the cached .did EXACTLY so the facade's decode is wire-compatible with mainnet. The
+/// load-bearing variant for the partial-failure path is `CkErc20LedgerError { cketh_block_index,
+/// error }`: the gas fee burned successfully but the amount burn failed → the minter schedules a
+/// reimbursement. This is a TERMINAL state (funds moved), distinct from `CkEthLedgerError` (gas burn
+/// itself failed → nothing moved).
+#[derive(CandidType, Deserialize, Debug)]
+enum WithdrawErc20Error {
+    TokenNotSupported { supported_tokens: Vec<CkErc20Token> },
+    RecipientAddressBlocked { address: String },
+    CkEthLedgerError { error: LedgerError },
+    CkErc20LedgerError { cketh_block_index: Nat, error: LedgerError },
+    TemporarilyUnavailable(String),
+}
+
+/// Test-only hook: force the NEXT `withdraw_erc20` to burn the ckETH gas fee (succeed) then return
+/// `CkErc20LedgerError` — the partial-failure terminal state. Cleared after one call. Lets the
+/// PocketIC test prove the facade SETTLES the nonce on a partial failure (gas burned → funds moved →
+/// no replay) rather than releasing it.
+#[update]
+fn force_next_withdraw_erc20_partial() {
+    FORCE_NEXT_ERC20_PARTIAL.with(|f| *f.borrow_mut() = true);
+}
+
+/// The gas-fee cap the mock burns from the ckETH gas ledger in `withdraw_erc20`. Mirrors the
+/// `max_transaction_fee` returned by `eip_1559_transaction_price(Some(...))` (60_000 gas × 10 gwei)
+/// so the facade's approve-then-burn wiring reconciles. Single-sourced so the price query + the burn
+/// can't drift.
+fn gas_price_max_fee() -> u64 {
+    60_000u64 * 10_000_000_000u64
+}
+
+/// Helper: burn `amount` from `from_subaccount` on `ledger` via `icrc2_transfer_from` (the minter is
+/// the spender, consuming the allowance the facade set). Returns the burn's block index or a
+/// `LedgerError` mirror of the ledger's `TransferFromError`. Shared by the gas-ledger + amount-ledger
+/// burns in `withdraw_erc20` so both branches classify errors identically.
+async fn burn_from_subaccount(
+    ledger: Principal,
+    caller: Principal,
+    from_subaccount: [u8; 32],
+    amount: Nat,
+    token_symbol: &str,
+) -> Result<Nat, LedgerError> {
+    let self_id = canister_self();
+    let arg = TransferFromArgs {
+        spender_subaccount: None,
+        from: Account { owner: caller, subaccount: Some(from_subaccount) },
+        to: Account { owner: self_id, subaccount: None }, // minting account → burn
+        amount,
+        fee: None,
+        memo: None,
+        created_at_time: Some(time()),
+    };
+    let response = match Call::bounded_wait(ledger, "icrc2_transfer_from").with_arg(arg).await {
+        Ok(r) => r,
+        Err(_) => {
+            return Err(LedgerError::TemporarilyUnavailable(
+                "icrc2_transfer_from rejected".to_string(),
+            ));
+        }
+    };
+    match response.candid::<Result<Nat, TransferFromError>>() {
+        Ok(Ok(block_index)) => Ok(block_index),
+        Ok(Err(TransferFromError::InsufficientFunds { balance })) => Err(LedgerError::InsufficientFunds {
+            balance,
+            failed_burn_amount: Nat::from(0u64),
+            token_symbol: token_symbol.to_string(),
+            ledger_id: ledger,
+        }),
+        Ok(Err(TransferFromError::InsufficientAllowance { allowance })) => {
+            Err(LedgerError::InsufficientAllowance {
+                allowance,
+                failed_burn_amount: Nat::from(0u64),
+                token_symbol: token_symbol.to_string(),
+                ledger_id: ledger,
+            })
+        }
+        Ok(Err(TransferFromError::TemporarilyUnavailable)) => {
+            Err(LedgerError::TemporarilyUnavailable("ledger temporarily unavailable".to_string()))
+        }
+        Ok(Err(_)) => Err(LedgerError::TemporarilyUnavailable("icrc2_transfer_from error".to_string())),
+        Err(_) => Err(LedgerError::TemporarilyUnavailable("icrc2_transfer_from decode".to_string())),
+    }
+}
+
+/// Minter `withdraw_erc20(WithdrawErc20Arg) -> Result<RetrieveErc20Request, WithdrawErc20Error>` —
+/// the dual-ledger value-creating call that burns ckETH (gas) + ckERC20 (amount) and (on mainnet)
+/// sends native ERC-20 to `recipient`. Mirrors the mock's single-ledger burns but across TWO
+/// ledgers: the gas burn lands on `GAS_LEDGER` (ckETH), the amount burn on `LEDGER` (the ckERC20
+/// amount ledger = `arg.ckerc20_ledger_id`). Settlement mechanics identical to
+/// `retrieve_btc_with_approval` / `withdraw_eth` (the mock owns each ledger's minting account, so a
+/// transfer to its default account burns).
+///
+/// Error classification (mirrors mainnet): a gas-burn failure → `CkEthLedgerError` (nothing moved);
+/// an amount-burn failure AFTER a successful gas burn → `CkErc20LedgerError { cketh_block_index }`
+/// (the partial-failure terminal state — the minter schedules a reimbursement of the burned gas). The
+/// `force_next_withdraw_erc20_partial` test hook forces the amount burn to fail so the facade's
+/// settle-on-partial classification is provable offline.
+#[update]
+async fn withdraw_erc20(arg: WithdrawErc20Arg) -> Result<RetrieveErc20Request, WithdrawErc20Error> {
+    if arg.recipient.trim().is_empty() {
+        return Err(WithdrawErc20Error::TemporarilyUnavailable("recipient is empty".to_string()));
+    }
+    let caller = msg_caller();
+    let amount_ledger = LEDGER.with(|l| *l.borrow());
+    // The minter only supports the ONE ckERC20 ledger it was init'd with. A different ledger id →
+    // TokenNotSupported (mirrors the real minter's supported-tokens gate).
+    if arg.ckerc20_ledger_id != amount_ledger {
+        return Err(WithdrawErc20Error::TokenNotSupported {
+            supported_tokens: vec![CkErc20Token {
+                ckerc20_token_symbol: "ckERC20".to_string(),
+                erc20_contract_address: "0xMOCK".to_string(),
+                ledger_canister_id: amount_ledger,
+            }],
+        });
+    }
+    let gas_ledger = GAS_LEDGER.with(|gl| *gl.borrow());
+    if gas_ledger == Principal::management_canister() {
+        // No gas ledger configured (single-ledger mock) → dual-ledger withdraw is not supported.
+        return Err(WithdrawErc20Error::TokenNotSupported {
+            supported_tokens: vec![CkErc20Token {
+                ckerc20_token_symbol: "ckERC20".to_string(),
+                erc20_contract_address: "0xMOCK".to_string(),
+                ledger_canister_id: amount_ledger,
+            }],
+        });
+    }
+
+    let gas_sub_vec = arg.from_cketh_subaccount.unwrap_or_default();
+    let gas_sub: [u8; 32] = gas_sub_vec.as_slice().try_into().map_err(|_| {
+        WithdrawErc20Error::TemporarilyUnavailable(
+            "from_cketh_subaccount is not a valid 32-byte ICRC subaccount".to_string(),
+        )
+    })?;
+    let amt_sub_vec = arg.from_ckerc20_subaccount.unwrap_or_default();
+    let amt_sub: [u8; 32] = amt_sub_vec.as_slice().try_into().map_err(|_| {
+        WithdrawErc20Error::TemporarilyUnavailable(
+            "from_ckerc20_subaccount is not a valid 32-byte ICRC subaccount".to_string(),
+        )
+    })?;
+
+    // 1. Burn the ckETH gas fee FIRST. A failure here → CkEthLedgerError (nothing moved; the facade
+    //    RELEASES the nonce — retryable).
+    let cketh_block_index = match burn_from_subaccount(
+        gas_ledger, caller, gas_sub, Nat::from(gas_price_max_fee()), "ckETH",
+    )
+    .await
+    {
+        Ok(idx) => idx,
+        Err(e) => return Err(WithdrawErc20Error::CkEthLedgerError { error: e }),
+    };
+
+    // 2. Test hook: force the amount burn to fail → CkErc20LedgerError (partial failure). The gas
+    //    burn already succeeded (cketh_block_index is real), modeling the real minter's "gas burned,
+    //    amount burn failed → reimbursement scheduled" terminal state.
+    let force_partial = FORCE_NEXT_ERC20_PARTIAL.with(|f| {
+        let v = *f.borrow();
+        *f.borrow_mut() = false;
+        v
+    });
+    if force_partial {
+        return Err(WithdrawErc20Error::CkErc20LedgerError {
+            cketh_block_index,
+            error: LedgerError::TemporarilyUnavailable("forced partial failure (test hook)".to_string()),
+        });
+    }
+
+    // 3. Burn the ckERC20 amount. A failure here → CkErc20LedgerError (partial; gas already burned).
+    let ckerc20_block_index = match burn_from_subaccount(
+        amount_ledger, caller, amt_sub, arg.amount, "ckERC20",
+    )
+    .await
+    {
+        Ok(idx) => idx,
+        Err(e) => {
+            return Err(WithdrawErc20Error::CkErc20LedgerError {
+                cketh_block_index,
+                error: e,
+            });
+        }
+    };
+
+    Ok(RetrieveErc20Request { cketh_block_index, ckerc20_block_index })
+}
+
+/// Minter `get_known_utxos(record { owner: opt principal; subaccount : opt blob }) -> vec Utxo`. The
 /// real ckBTC minter takes ONE record argument; this mock mirrors that surface exactly. The mock
 /// tracks no UTXO history, so this is always empty.
 #[query]

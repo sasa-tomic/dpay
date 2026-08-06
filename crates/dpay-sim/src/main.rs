@@ -197,6 +197,7 @@ fn register_currency_meta_cap(pic: &PocketIc, dpay: Principal, currency: dpay_co
                 None::<String>,              // token_contract
                 RampCapability::Unavailable, // onramp
                 RampCapability::Unavailable, // offramp
+                None::<Principal>,           // gas_ledger
             ))
             .unwrap(),
         )

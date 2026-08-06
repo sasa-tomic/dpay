@@ -316,15 +316,15 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
       })() : null}
       {withdrawCurrency != null ? (() => {
         // MC1 unit 6 — FAIL-CLOSED: cash-out is offered ONLY for an asset whose family has a native
-        // offramp — ckBTC (CkBtcUtxo → retrieve_btc) or native ckETH (CkEthErc20 with token_contract
-        // == null → withdraw_eth). The BalancesSheet gates the button on the same predicate; an
-        // unknown family or an ERC-20 token (ckUSDC) renders nothing instead of a wrong cash-out form.
+        // offramp — ckBTC (CkBtcUtxo → retrieve_btc) or any CkEthErc20 asset whose `offramp` is
+        // enabled (native ckETH → withdraw_eth, single-ledger; ckERC20 tokens like ckUSDC →
+        // withdraw_erc20, dual-ledger). The BalancesSheet gates the button on the same predicate; an
+        // unknown family renders nothing instead of a wrong cash-out form.
         const wdDisplay = familyDisplay(catalog, withdrawCurrency);
         const wdCur = catalog.find(c => c.currency === withdrawCurrency);
         const wdFamily = wdCur?.minter_family ?? null;
         if (!wdDisplay || !wdFamily) return null;
-        const isNativeEth = wdFamily === 'CkEthErc20' && wdCur?.token_contract == null;
-        if (wdFamily !== 'CkBtcUtxo' && !isNativeEth) return null;
+        if (wdFamily !== 'CkBtcUtxo' && wdFamily !== 'CkEthErc20') return null;
         return (
           <WithdrawSheet
             identity={identity}
@@ -332,6 +332,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
             currency={withdrawCurrency}
             display={wdDisplay}
             family={wdFamily}
+            tokenContract={wdCur?.token_contract ?? null}
             balance={assetBalances[withdrawCurrency] ?? '0'}
             onClose={() => setWithdrawCurrency(null)}
             onWithdrawn={onActivity}

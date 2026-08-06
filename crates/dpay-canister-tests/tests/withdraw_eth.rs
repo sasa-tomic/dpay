@@ -98,7 +98,8 @@ struct DpayInitArg {
 
 #[derive(CandidType, serde::Serialize)]
 struct MockMinterInit {
-    ledger: Principal,
+    amount_ledger: Principal,
+    gas_ledger: Option<Principal>,
 }
 
 #[derive(CandidType, serde::Serialize)]
@@ -331,6 +332,7 @@ fn register_currency_meta_eth(pic: &PocketIc, dpay: Principal, caller: Principal
                 None::<String>,                      // token_contract = None → native ETH
                 RampCapability::Unavailable,         // onramp
                 RampCapability::Direct,              // offramp (cash-out is the direct ckETH→ETH path)
+                None::<Principal>,                   // gas_ledger (native ETH has no separate gas ledger)
             ))
             .unwrap(),
         )
@@ -360,7 +362,7 @@ fn setup_eth() -> (PocketIc, Principal, Principal, Principal, SigningKey, [u8; 3
     pic.install_canister(
         mock,
         mock_minter_wasm(),
-        encode_one(&MockMinterInit { ledger: cketh }).unwrap(),
+        encode_one(&MockMinterInit { amount_ledger: cketh, gas_ledger: None }).unwrap(),
         None,
     );
 
@@ -656,7 +658,7 @@ fn mock_minter_withdraw_eth_mirrors_real_cketh_minter_contract() {
     pic.install_canister(
         mock,
         mock_minter_wasm(),
-        encode_one(&MockMinterInit { ledger: cketh }).unwrap(),
+        encode_one(&MockMinterInit { amount_ledger: cketh, gas_ledger: None }).unwrap(),
         None,
     );
 

@@ -17,11 +17,11 @@ import {
 const mk = (d: Partial<CurrencyDescriptor> & Pick<CurrencyDescriptor, 'currency' | 'minter_family'>): CurrencyDescriptor => ({
   ledger: '', mintable: false, minter: null, symbol: null, decimals: null,
   wrapper_name: null, backing_symbol: null, network: null, display_decimals: null,
-  fee: null, cap: null, chain_id: null, token_contract: null,
+  fee: null, cap: null, chain_id: null, token_contract: null, gas_ledger: null,
   onramp: 'Unavailable', offramp: 'Unavailable', ...d,
 });
 const CKBTC_DESC: CurrencyDescriptor = mk({currency: 1, minter: 'm', minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8, wrapper_name: 'ckBTC', backing_symbol: 'BTC', network: 'Bitcoin', display_decimals: 8, onramp: 'Direct', offramp: 'Direct'});
-const CKUSDC_DESC: CurrencyDescriptor = mk({currency: 2, ledger: 'l', minter: 's', minter_family: 'CkEthErc20', symbol: 'ckUSDC', decimals: 6, wrapper_name: 'ckUSDC', backing_symbol: 'USDC', network: 'Ethereum', display_decimals: 6, fee: '10000', chain_id: 1, token_contract: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', onramp: 'Direct', offramp: 'Unavailable'});
+const CKUSDC_DESC: CurrencyDescriptor = mk({currency: 2, ledger: 'l', minter: 's', minter_family: 'CkEthErc20', symbol: 'ckUSDC', decimals: 6, wrapper_name: 'ckUSDC', backing_symbol: 'USDC', network: 'Ethereum', display_decimals: 6, fee: '10000', chain_id: 1, token_contract: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', gas_ledger: 'ss2fx-dyaaa-aaaar-qacoq-cai', onramp: 'Direct', offramp: 'Direct'});
 const CKSOL_DESC: CurrencyDescriptor = mk({currency: 99, minter: 'x', minter_family: 'CkSol', symbol: 'SOL', decimals: 9});
 const DEMO_DESC: CurrencyDescriptor = mk({currency: 0, mintable: true, minter_family: null, symbol: '$', decimals: 2, onramp: 'Direct', offramp: 'Unavailable'});
 const KNOWN_CATALOG: CurrencyDescriptor[] = [DEMO_DESC, CKBTC_DESC, CKUSDC_DESC];
@@ -225,8 +225,13 @@ describe('BUNDLED_CATALOG — authoritative per-currency metadata populated', ()
     expect(a.onramp).toBe('Direct');
   });
 
-  it('ckUSDC offramp is Unavailable (NO cash-out — Fork-C/O3 no-swap honesty)', () => {
-    expect(byId(2).offramp).toBe('Unavailable');
+  it('ckUSDC offramp is Direct + gas_ledger carries the ckETH principal (dual-ledger withdraw_erc20 cash-out)', () => {
+    // The dual-ledger `withdraw_erc20` cash-out path: ckUSDC offramp=Direct + the ckETH gas_ledger
+    // principal. dpay never converts ckUSDC→ckETH (no-swap); the user MUST hold ckETH for gas. The
+    // app surfaces an honest "You need ckETH for gas" note in the WithdrawSheet.
+    const a = byId(2);
+    expect(a.offramp).toBe('Direct');
+    expect(a.gas_ledger).toBe('ss2fx-dyaaa-aaaar-qacoq-cai');
   });
 
   it('DEMO offramp is Unavailable (play money — no cash-out) and onramp is Direct (faucet)', () => {
@@ -325,29 +330,42 @@ describe('isPayableAsset — payable predicate (MC5 fail-closed before signing)'
 });
 
 // --- MC8 U7 — ramp-honesty regression pins (no false cash-out / no CkSol advertising) ---------
-// MC1 unit 5 + MC5 item 2 closed false ramp advertising: BalancesSheet.tsx:70 AND-gates the Cash
-// out button on `minter_family === 'CkBtcUtxo' && funded && offramp !== 'Unavailable'`, and
-// familyDisplay returns null for unknown families (CkSol). ckUSDC (`offramp: 'Unavailable'`) shows
-// NO Cash out; CkSol appears only in tests. This block pins those invariants so a future edit can't
-// silently reopen either false-advertising path. NO behavior change — pins only.
+// MC1 unit 5 + MC5 item 2 closed false ramp advertising: BalancesSheet.tsx AND-gates the Cash
+// out button on `funded && offramp !== 'Unavailable' && (minter_family === 'CkBtcUtxo' ||
+// minter_family === 'CkEthErc20')`, and familyDisplay returns null for unknown families (CkSol).
+// ckUSDC (`offramp: 'Direct'` + `gas_ledger` set) now shows Cash-out (the dual-ledger
+// withdraw_erc20 path); an `offramp: 'Unavailable'` currency (DEMO) still shows NO button. CkSol
+// appears only in tests. This block pins those invariants so a future edit can't silently reopen a
+// false-advertising path. NO behavior change — pins only.
 //
-// The cash-out predicate mirrors BalancesSheet.tsx:70 at the CATALOG level (the `funded` leg is
+// The cash-out predicate mirrors BalancesSheet.tsx at the CATALOG level (the `funded` leg is
 // runtime balance state, out of catalog scope). A currency is cash-out-ELIGIBLE at the catalog
-// level iff `minter_family === 'CkBtcUtxo' && offramp !== 'Unavailable'`.
+// level iff `offramp !== 'Unavailable' && (CkBtcUtxo || CkEthErc20)`.
 describe('MC8 U7 — ramp-honesty regression pins (no false cash-out / no CkSol advertising)', () => {
   const cashOutEligible = (a: CurrencyDescriptor): boolean =>
-    a.minter_family === 'CkBtcUtxo' && a.offramp !== 'Unavailable';
+    a.offramp !== 'Unavailable' &&
+    (a.minter_family === 'CkBtcUtxo' || a.minter_family === 'CkEthErc20');
 
-  it('ckUSDC (currency 2) is payable/onrampable BUT offramp === Unavailable (NO cash-out path)', () => {
-    // The AND-gate pin: a currency can be fully payable (familyDisplay non-null) AND have a Direct
-    // on-ramp, yet have NO cash-out path because offramp === 'Unavailable'. ckUSDC is exactly this
-    // case (Fork-C/O3 — no-swap honesty). Asserting familyDisplay + onramp + offramp + the cash-out
-    // predicate together so flipping ANY one leg turns this RED.
+  it('ckUSDC (currency 2) is payable/onrampable AND cash-out-eligible (dual-ledger withdraw_erc20)', () => {
+    // The ckERC20 cash-out pin: ckUSDC is fully payable (familyDisplay non-null), HAS a Direct
+    // on-ramp, AND now HAS a Direct off-ramp (the dual-ledger withdraw_erc20 path). The gas_ledger
+    // field carries the ckETH principal; the app surfaces a "You need ckETH for gas" note. Asserting
+    // familyDisplay + onramp + offramp + gas_ledger + the cash-out predicate together so flipping
+    // ANY leg turns this RED.
     const ckusdc = BUNDLED_CATALOG.find(c => c.currency === 2)!;
     expect(familyDisplay(BUNDLED_CATALOG, 2)).not.toBeNull(); // payable / onrampable
-    expect(ckusdc.onramp).toBe('Direct');                      // HAS an on-ramp
-    expect(ckusdc.offramp).toBe('Unavailable');                // NO off-ramp
-    expect(cashOutEligible(ckusdc)).toBe(false);               // cash-out predicate FALSE
+    expect(ckusdc.onramp).toBe('Direct');                    // HAS an on-ramp
+    expect(ckusdc.offramp).toBe('Direct');                   // HAS an off-ramp (withdraw_erc20)
+    expect(ckusdc.gas_ledger).toBe('ss2fx-dyaaa-aaaar-qacoq-cai'); // ckETH gas ledger
+    expect(cashOutEligible(ckusdc)).toBe(true);              // cash-out predicate TRUE
+  });
+
+  it('DEMO (currency 0) is NOT cash-out-eligible (play money — offramp Unavailable)', () => {
+    // The no-false-cash-out pin for play money: DEMO has onramp=Direct (faucet) but offramp=
+    // Unavailable (no real-world value). The cash-out gate stays closed.
+    const demo = BUNDLED_CATALOG.find(c => c.currency === 0)!;
+    expect(demo.offramp).toBe('Unavailable');
+    expect(cashOutEligible(demo)).toBe(false);
   });
 
   it('NO currency in BUNDLED_CATALOG has minter_family === CkSol (CkSol is test-only)', () => {
@@ -371,19 +389,20 @@ describe('MC8 U7 — ramp-honesty regression pins (no false cash-out / no CkSol 
 
   it('EVERY currency with offramp === Unavailable has a FALSE cash-out predicate (catalog scan)', () => {
     // The no-false-cash-out-advertising invariant over the WHOLE catalog: every offramp=Unavailable
-    // currency MUST fail the cash-out gate. DEMO (play money) + ckUSDC (Fork-C) both qualify.
+    // currency MUST fail the cash-out gate. DEMO (play money) qualifies; ckUSDC no longer does
+    // (its offramp is now Direct).
     const noCashOut = BUNDLED_CATALOG.filter(c => c.offramp === 'Unavailable');
-    expect(noCashOut.length).toBeGreaterThan(0); // DEMO + ckUSDC at minimum
+    expect(noCashOut.length).toBeGreaterThan(0); // DEMO at minimum
     for (const c of noCashOut) {
       expect(cashOutEligible(c)).toBe(false);
     }
   });
 
-  it('ckBTC (currency 1) is the ONLY cash-out-eligible asset in BUNDLED_CATALOG', () => {
-    // Belt-and-suspenders: cash-out is exclusive to CkBtcUtxo with offramp !== Unavailable. In the
-    // shipped catalog that is ckBTC (currency 1) alone. Pinned so adding a second cash-out asset is
-    // a deliberate change (not an accidental offramp flip on ckUSDC/DEMO).
-    const eligible = BUNDLED_CATALOG.filter(cashOutEligible).map(c => c.currency);
-    expect(eligible).toEqual([1]);
+  it('ckBTC (currency 1) + ckUSDC (currency 2) are the cash-out-eligible assets in BUNDLED_CATALOG', () => {
+    // Belt-and-suspenders: cash-out is offered for CkBtcUtxo OR CkEthErc20 with offramp !==
+    // Unavailable. In the shipped catalog that is ckBTC (retrieve_btc) + ckUSDC (withdraw_erc20).
+    // Pinned so removing either — or accidentally enabling cash-out on DEMO — is a deliberate change.
+    const eligible = BUNDLED_CATALOG.filter(cashOutEligible).map(c => c.currency).sort((a, b) => a - b);
+    expect(eligible).toEqual([1, 2]);
   });
 });

@@ -196,6 +196,10 @@ struct CurrencyDescriptorMirror {
     token_contract: Option<String>,
     onramp: RampCapabilityMirror,
     offramp: RampCapabilityMirror,
+    /// The ckETH gas-ledger principal for a ckERC20 currency (the `withdraw_erc20` dual-ledger path).
+    /// `None` for non-ckERC20 families. Appended LAST in the canister's candid record for backward
+    /// compat (an older `currencies()` reply without it decodes with this as `None`).
+    gas_ledger: Option<Principal>,
 }
 
 /// A [`Ledger`] backed by a real IC replica. Owns an [`Agent`] pointed at the replica/gateway URL
@@ -644,6 +648,7 @@ impl Ledger for AgentLedger {
                 cap: d.cap.map(U64String),
                 chain_id: d.chain_id,
                 token_contract: d.token_contract,
+                gas_ledger: d.gas_ledger.map(|p| p.to_text()),
                 onramp: match d.onramp {
                     RampCapabilityMirror::Direct => RampCapability::Direct,
                     RampCapabilityMirror::Partner => RampCapability::Partner,

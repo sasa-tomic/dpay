@@ -97,7 +97,8 @@ struct DpayInitArg {
 
 #[derive(CandidType, serde::Serialize)]
 struct MockMinterInit {
-    ledger: Principal,
+    amount_ledger: Principal,
+    gas_ledger: Option<Principal>,
 }
 
 /// The facade `withdraw` request: the WithdrawAuth fields + the Ed25519 signature. Mirrors the
@@ -295,7 +296,7 @@ fn setup() -> (PocketIc, Principal, Principal, Principal, SigningKey, [u8; 32]) 
     pic.install_canister(
         mock,
         mock_minter_wasm(),
-        encode_one(&MockMinterInit { ledger: ckbtc }).unwrap(),
+        encode_one(&MockMinterInit { amount_ledger: ckbtc, gas_ledger: None }).unwrap(),
         None,
     );
 
@@ -510,7 +511,7 @@ fn mock_minter_retrieve_btc_with_approval_mirrors_real_minter_contract() {
     pic.install_canister(
         mock,
         mock_minter_wasm(),
-        encode_one(&MockMinterInit { ledger: ckbtc }).unwrap(),
+        encode_one(&MockMinterInit { amount_ledger: ckbtc, gas_ledger: None }).unwrap(),
         None,
     );
 

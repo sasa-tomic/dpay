@@ -116,7 +116,17 @@ pub(crate) const CKERC20_HELPER_ADDRESS_MAINNET: &str =
     "0x18901044688D3756C35Ed2b36D93e6a5B8e00E68";
 pub(crate) const CKERC20_HELPER_ADDRESS_SEPOLIA: &str =
     "0x2D39863d30716aaf2B7fFFd85Dd03Dda2BFC2E38";
-pub(crate) const CKUSDC_ERC20_ADDRESS: &str = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
+pub(crate) const CKUSDC_ERC20_ADDRESS: &str =
+    "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
+
+/// The ckETH LEDGER principal (mainnet) — the gas ledger a ckERC20 `withdraw_erc20` burns ckETH gas
+/// fees from (the amount comes from the ckERC20 amount ledger). Verified against the IC mainnet
+/// ckETH ledger `ss2fx-dyaaa-aaaar-qacoq-cai` (2026-08-06). Single-sourced here so the FakeLedger
+/// catalog's per-ckERC20 `gas_ledger` field can't drift from the real value the AgentLedger reads at
+/// runtime from the facade's `currencies()` query. `None` for non-ckERC20 families (BTC / native ETH /
+/// DEMO): native ckETH's gas ledger IS its own `ledger` (the `withdraw_eth` path), so it carries no
+/// separate `gas_ledger`.
+pub(crate) const CKETH_LEDGER_PRINCIPAL: &str = "ss2fx-dyaaa-aaaar-qacoq-cai";
 
 /// What the merchant sees on success. Byte fields are hex so the JSON is a plain string map.
 /// Mirrors the canister's `PayReceipt` (which returns the same fields as candid `blob`s).
@@ -292,7 +302,8 @@ pub enum RampCapability {
 /// `onramp`/`offramp` are NON-optional `RampCapability` (the canister defaults an unregistered
 /// currency to `Unavailable` for both — fail-closed). The new per-currency metadata fields
 /// (`wrapper_name`/`backing_symbol`/`network`/`display_decimals`/`fee`/`cap`/`chain_id`/
-/// `token_contract`) are the authoritative single source of truth; the relay is a pass-through.
+/// `token_contract`/`gas_ledger`) are the authoritative single source of truth; the relay is a
+/// pass-through.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct CurrencyDescriptor {
     pub currency: Currency,
@@ -322,6 +333,11 @@ pub struct CurrencyDescriptor {
     /// ERC-20 contract address (0x…) for a ckERC20 token — per-token, replacing the old hardcoded
     /// currency-2 params. `None` for non-ERC20 families.
     pub token_contract: Option<String>,
+    /// The ckETH gas-ledger principal (text) for a ckERC20 currency — the `withdraw_erc20` dual-ledger
+    /// path burns ckETH gas fees from this ledger + the amount from `ledger`. `None` for non-ckERC20
+    /// families (BTC / native ETH / DEMO) and for a ckERC20 whose gas ledger is unregistered (the
+    /// facade fail-closes such a withdraw). Mirrors the canister's appended-last `gas_ledger` field.
+    pub gas_ledger: Option<String>,
     /// Funding (on-ramp) capability. `Unavailable` ⇒ wallet shows NO "Add money" button.
     pub onramp: RampCapability,
     /// Cash-out (off-ramp) capability. `Unavailable` ⇒ wallet shows NO "Cash out" button.
@@ -710,8 +726,10 @@ impl FakeLedger {
 /// and `ledger.rs` ships in the lean offline build.
 ///
 /// Ramp honesty (MC1 unit 5, no-swap non-negotiable + OPEN_ISSUES O3): DEMO onramp=`Direct` (faucet),
-/// offramp=`Unavailable`; ckBTC onramp=`Direct` (Bitcoin ramp), offramp=`Direct`; ckUSDC + ckUSDT
-/// onramp=`Direct` (ckETH helper built client-side), offramp=`Unavailable` (Fork-C — NO cash-out).
+/// offramp=`Unavailable`; ckBTC onramp=`Direct` (Bitcoin ramp), offramp=`Direct`; ckUSDC
+/// onramp=`Direct` (ckETH helper built client-side), offramp=`Direct` (the dual-ledger `withdraw_erc20`
+/// cash-out, gated on the user holding ckETH for gas); ckUSDT/ckDAI onramp=`Direct`, offramp=
+/// `Unavailable` (their cash-out is not yet wired — only ckUSDC is the e2e proof).
 fn fake_catalog() -> Vec<CurrencyDescriptor> {
     vec![
         CurrencyDescriptor {
@@ -730,6 +748,7 @@ fn fake_catalog() -> Vec<CurrencyDescriptor> {
             cap: None,
             chain_id: None,
             token_contract: None,
+            gas_ledger: None,
             onramp: RampCapability::Direct, // self-service faucet (fixed amount, rate-limited)
             offramp: RampCapability::Unavailable, // play money — no cash-out
         },
@@ -749,11 +768,12 @@ fn fake_catalog() -> Vec<CurrencyDescriptor> {
             cap: None,
             chain_id: None,   // not EVM
             token_contract: None,
+            gas_ledger: None, // BTC family — no ckETH gas ledger
             onramp: RampCapability::Direct, // chain-key Bitcoin ramp
             offramp: RampCapability::Direct, // retrieve_btc_with_approval
         },
         CurrencyDescriptor {
-            currency: 2, // ckUSDC (ckERC-20 onramp currency)
+            currency: 2, // ckUSDC (ckERC-20 onramp + cash-out currency)
             ledger: "xevnm-gaaaa-aaaar-qafnq-cai".to_string(), // ckUSDC ledger principal text (O6)
             mintable: false,
             minter: Some("sv3dd-oaaaa-aaaar-qacoa-cai".to_string()), // ckETH minter
@@ -768,16 +788,23 @@ fn fake_catalog() -> Vec<CurrencyDescriptor> {
             cap: None,
             chain_id: Some(1), // Ethereum mainnet
             token_contract: Some(CKUSDC_ERC20_ADDRESS.to_string()), // ckUSDC ERC-20 (O6) — single-sourced constant
+            // The dual-ledger `withdraw_erc20` cash-out burns ckETH gas fees from THIS ledger (the
+            // verified mainnet ckETH ledger) + the USDC amount from `ledger` above. The user MUST
+            // hold ckETH for gas (Fork-C — dpay never converts ckUSDC→ckETH, no-swap); the app
+            // surfaces an honest "You need ckETH for gas" note.
+            gas_ledger: Some(CKETH_LEDGER_PRINCIPAL.to_string()),
             onramp: RampCapability::Direct, // ckETH helper-contract onramp (client-side)
-            offramp: RampCapability::Unavailable, // deferred per Fork-C — NO cash-out (O3)
+            offramp: RampCapability::Direct, // dual-ledger withdraw_erc20 cash-out (ckETH gas + USDC amount)
         },
         CurrencyDescriptor {
             // MC8 U2 — a SECOND ckERC20 token proving the onramp is CATALOG/TOKEN-SPECIFIC, not
             // hardcoded to currency 2 / USDC. ckUSDT carries its OWN ERC-20 contract (real mainnet
             // USDT), so the onramp must surface the USDT address — never USDC's. Same minter
             // (ckETH minter handles all ckERC20), same helper address, same chain; only the
-            // `token_contract` + display metadata differ. Ramp honesty mirrors ckUSDC: onramp=
-            // `Direct`, offramp=`Unavailable` (Fork-C — NO cash-out).
+            // `token_contract` + display metadata differ. The `gas_ledger` is the SAME ckETH ledger
+            // (one gas ledger serves every ckERC20 cash-out). Ramp honesty: ckUSDT cash-out is not
+            // yet wired (offramp=`Unavailable`) — only ckUSDC is the e2e proof; ckUSDT keeps the
+            // no-swap fail-closed gate until its offramp is enabled.
             currency: 3, // ckUSDT (a second ckERC-20 onramp currency)
             ledger: "xevnm-gaaaa-aaaar-qafnq-cai".to_string(), // ckUSDT ledger principal text (demo stand-in)
             mintable: false,
@@ -793,16 +820,18 @@ fn fake_catalog() -> Vec<CurrencyDescriptor> {
             cap: None,
             chain_id: Some(1), // Ethereum mainnet
             token_contract: Some("0xdAC17F958D2ee523a2206206994597C13D831ec7".into()), // real USDT ERC-20
+            gas_ledger: Some(CKETH_LEDGER_PRINCIPAL.to_string()), // ckETH gas ledger (shared by all ckERC20)
             onramp: RampCapability::Direct, // ckETH helper-contract onramp (client-side, per-token)
-            offramp: RampCapability::Unavailable, // deferred per Fork-C — NO cash-out (O3)
+            offramp: RampCapability::Unavailable, // cash-out not yet wired (only ckUSDC) — Fork-C gate
         },
         CurrencyDescriptor {
             // OPEN_ISSUES #3 — an 18-decimal ckERC20 to close the decimal-edges coverage gap.
             // ckDAI mirrors its native 18-dec precision (DAI on Ethereum mainnet is 18 dec), giving
             // the format path a fixture at the precision extreme where Number's 2^53 mantissa would
             // drop low digits. Same ckETH minter + helper + chain as the other ckERC20 entries; only
-            // `decimals`/`display_decimals`/`token_contract`/display metadata differ. Ramp honesty
-            // mirrors ckUSDC/ckUSDT: onramp=`Direct`, offramp=`Unavailable` (Fork-C — NO cash-out).
+            // `decimals`/`display_decimals`/`token_contract`/display metadata differ. The `gas_ledger`
+            // is the SAME ckETH ledger (one gas ledger serves every ckERC20 cash-out). Ramp honesty:
+            // ckDAI cash-out is not yet wired (offramp=`Unavailable`) — only ckUSDC is the e2e proof.
             currency: 4, // ckDAI (18-dec ckERC-20 — the precision-extreme fixture)
             ledger: "xevnm-gaaaa-aaaar-qafnq-cai".to_string(), // ckDAI ledger principal text (demo stand-in)
             mintable: false,
@@ -818,8 +847,9 @@ fn fake_catalog() -> Vec<CurrencyDescriptor> {
             cap: None,
             chain_id: Some(1), // Ethereum mainnet
             token_contract: Some("0x6B175474E89094C44Da98b954EedeAC495271d0F".into()), // real DAI ERC-20
+            gas_ledger: Some(CKETH_LEDGER_PRINCIPAL.to_string()), // ckETH gas ledger (shared by all ckERC20)
             onramp: RampCapability::Direct, // ckETH helper-contract onramp (client-side, per-token)
-            offramp: RampCapability::Unavailable, // deferred per Fork-C — NO cash-out (O3)
+            offramp: RampCapability::Unavailable, // cash-out not yet wired (only ckUSDC) — Fork-C gate
         },
         CurrencyDescriptor {
             // Native ETH within the CkEthErc20 family — discriminated by `token_contract == None`
@@ -829,6 +859,8 @@ fn fake_catalog() -> Vec<CurrencyDescriptor> {
             // dispatch burns ckETH → sends native ETH). Same ckETH minter + chain as the other
             // ckERC20 entries; only `token_contract` (None) + the 18-dec/ETH display metadata differ.
             // Ramp honesty: onramp=Direct (single payable `depositEth` tx), offramp=Direct (withdraw_eth).
+            // `gas_ledger` is None: native ckETH's gas ledger IS its own `ledger` (the `withdraw_eth`
+            // path approves amount+fee on the single ckETH ledger), so it carries no separate gas ledger.
             currency: 5, // native ckETH (CkEthErc20 + token_contract None)
             ledger: "xevnm-gaaaa-aaaar-qafnq-cai".to_string(), // ckETH ledger principal text (demo stand-in)
             mintable: false,
@@ -844,6 +876,7 @@ fn fake_catalog() -> Vec<CurrencyDescriptor> {
             cap: Some(U64String(100_000)),
             chain_id: Some(1), // Ethereum mainnet
             token_contract: None, // None ⇒ native ETH (NOT an ERC-20) — the family discriminator
+            gas_ledger: None, // native ETH — its own ledger IS the gas ledger (withdraw_eth single-ledger path)
             onramp: RampCapability::Direct, // ckETH helper `depositEth` (client-side, single payable tx)
             offramp: RampCapability::Direct, // withdraw_eth: burn ckETH → send native ETH
         },

@@ -1320,8 +1320,16 @@ async fn currencies_route_returns_demo_catalog() {
         "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
     );
     assert_eq!(ckusdc["onramp"], "Direct"); // ckETH helper-contract onramp (client-side)
-                                            // NO-SWAP HONESTY (Fork-C / O3): ckUSDC offramp is Unavailable — the wallet shows NO cash-out.
-    assert_eq!(ckusdc["offramp"], "Unavailable");
+    // ckUSDC cash-out is now `Direct` (the dual-ledger `withdraw_erc20` path): the gas_ledger field
+    // carries the ckETH gas ledger so the facade can burn ckETH gas + the USDC amount. The app gates
+    // the Cash-out button on `offramp !== Unavailable` + a known CkEthErc20 family (no-swap honesty
+    // still holds — dpay never converts ckUSDC→ckETH; the user must hold ckETH for gas).
+    assert_eq!(ckusdc["offramp"], "Direct"); // dual-ledger withdraw_erc20 cash-out
+    assert_eq!(
+        ckusdc["gas_ledger"],
+        "ss2fx-dyaaa-aaaar-qacoq-cai",
+        "ckUSDC carries the ckETH gas ledger principal (withdraw_erc20 dual-ledger path)"
+    );
 
     // MC8 U2 — ckUSDT (currency 3): a SECOND CkEthErc20 token proving the onramp is per-token.
     // Carries its OWN ERC-20 contract (real mainnet USDT, NOT USDC's address); same minter family +
@@ -1344,7 +1352,12 @@ async fn currencies_route_returns_demo_catalog() {
         "0xdAC17F958D2ee523a2206206994597C13D831ec7"
     ); // real USDT
     assert_eq!(ckusdt["onramp"], "Direct");
-    assert_eq!(ckusdt["offramp"], "Unavailable"); // Fork-C — NO cash-out
+    assert_eq!(ckusdt["offramp"], "Unavailable"); // cash-out not yet wired (only ckUSDC) — Fork-C gate
+    assert_eq!(
+        ckusdt["gas_ledger"],
+        "ss2fx-dyaaa-aaaar-qacoq-cai",
+        "ckUSDT carries the shared ckETH gas ledger (one gas ledger serves every ckERC20)"
+    );
 
     // OPEN_ISSUES #3 — ckDAI (currency 4): an 18-dec CkEthErc20, the precision-extreme fixture. Same
     // minter family + chain as ckUSDC/ckUSDT; only `decimals`/`display_decimals`/`token_contract`/
@@ -1369,7 +1382,12 @@ async fn currencies_route_returns_demo_catalog() {
         "0x6B175474E89094C44Da98b954EedeAC495271d0F"
     ); // real DAI ERC-20
     assert_eq!(ckdai["onramp"], "Direct");
-    assert_eq!(ckdai["offramp"], "Unavailable"); // Fork-C — NO cash-out
+    assert_eq!(ckdai["offramp"], "Unavailable"); // cash-out not yet wired (only ckUSDC) — Fork-C gate
+    assert_eq!(
+        ckdai["gas_ledger"],
+        "ss2fx-dyaaa-aaaar-qacoq-cai",
+        "ckDAI carries the shared ckETH gas ledger (one gas ledger serves every ckERC20)"
+    );
 
     // Native ckETH (currency 5): a CkEthErc20-family currency with `token_contract == None`, the
     // discriminator that selects the native-ETH deposit/withdraw path (depositEth / withdraw_eth)
@@ -1394,6 +1412,10 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(cketh["cap"], "100000");
     // THE KEY FIELD: token_contract must be null so the app treats this as native ETH (not ERC-20).
     assert_eq!(cketh["token_contract"], serde_json::Value::Null);
+    // Native ckETH carries NO separate gas_ledger: the withdraw_eth single-ledger path approves
+    // amount+fee on ckETH's OWN ledger, so the field is null (distinct from a ckERC20 whose gas
+    // ledger IS the ckETH ledger). This null also keeps native ETH out of the dual-ledger path.
+    assert_eq!(cketh["gas_ledger"], serde_json::Value::Null);
     assert_eq!(cketh["onramp"], "Direct"); // ckETH helper depositEth (single payable tx)
     assert_eq!(cketh["offramp"], "Direct"); // withdraw_eth — Cash-out button renders
 }
@@ -1519,6 +1541,7 @@ async fn ckerc20_onramp_native_eth_without_token_contract() {
         cap: None,
         chain_id: Some(1),
         token_contract: None, // ← native ETH (not a partial ERC-20 registration)
+        gas_ledger: None,
         onramp: dpay_relay::RampCapability::Direct,
         offramp: dpay_relay::RampCapability::Direct,
     };
@@ -1553,6 +1576,7 @@ async fn ckerc20_onramp_native_eth_without_token_contract() {
         cap: None,
         chain_id: None,
         token_contract: None,
+        gas_ledger: None,
         onramp: dpay_relay::RampCapability::Direct,
         offramp: dpay_relay::RampCapability::Direct,
     };
@@ -1588,6 +1612,7 @@ async fn ckerc20_onramp_helper_is_chain_scoped() {
         cap: None,
         chain_id: Some(11155111), // Sepolia
         token_contract: Some("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238".into()),
+        gas_ledger: None,
         onramp: dpay_relay::RampCapability::Direct,
         offramp: dpay_relay::RampCapability::Unavailable,
     };

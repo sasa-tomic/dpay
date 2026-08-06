@@ -1,6 +1,6 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **48 flows.**
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **49 flows.**
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay (FakeLedger, offline). No UI stubs. The only shimmed I/O boundary is
 > the camera scan (sanctioned smallest-boundary seam) and the NFC radio (physical-device gate).
@@ -17,7 +17,7 @@
 Flows grouped by user journey; within each table, every row lists what the flow **verifies** and
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`).
 
-wire (1) · onboard (4) · pay (16) · offline (3) · deposit (8) · withdraw (3) · nfc (3) · system (7) · tour (3)
+wire (1) · onboard (4) · pay (16) · offline (3) · deposit (8) · withdraw (4) · nfc (3) · system (7) · tour (3)
 
 ---
 
@@ -85,6 +85,7 @@ wire (1) · onboard (4) · pay (16) · offline (3) · deposit (8) · withdraw (3
 | 15 | withdraw | Withdraw ckBTC: enter addr + amount → sign on-device → settle; success screen + Copy destination; balance debits at both the ledger AND the UI (Balances row drops to 0.00050000 BTC). | withdraw, sign, settle, clipboard, balance-delta, destination-copy, ui-balance-delta |
 | 18 | withdraw-errors | Withdraw errors: below-min / over-balance / bad-addr UI guards (confirm disabled) + relay 422 (bad-sig/insufficient). | withdraw-errors, below-min, over-balance, bad-sig, bad-addr |
 | 44 | cketh-withdraw | Withdraw native ckETH: Cash-out button renders for a CkEthErc20 + token_contract=null asset; enter 0x addr + ETH amount → sign on-device at 18-dec Wei → settle; balance debits at both the ledger AND the UI (family-dispatch UI path). | native-eth-withdraw, cketh, family-dispatch, withdraw, sign, settle, balance-delta, ui-balance-delta |
+| 48 | ckusdc-withdraw | ckUSDC Cash-out: the flipped cashable gate renders Cash-out for a ckERC20 token; enter 0x addr + USDC amount → gas-dependency note renders → sign on-device at 6-dec → settle; balance debits at both the ledger AND the UI. | ckerc20-offramp, cashable-gate, ckusdc, withdraw, sign, settle, balance-delta, ui-balance-delta, gas-note |
 
 ### NFC (tap-to-pay)
 

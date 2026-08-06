@@ -130,6 +130,7 @@ fn register_currency_meta(
     token_contract: Option<String>,
     onramp: RampCapability,
     offramp: RampCapability,
+    gas_ledger: Option<Principal>,
 ) -> Result<(), String> {
     let reply = pic
         .update_call(
@@ -138,7 +139,7 @@ fn register_currency_meta(
             "register_currency_meta",
             encode_args((
                 currency, symbol, decimals, family, wrapper_name, backing_symbol, network,
-                display_decimals, fee, cap, chain_id, token_contract, onramp, offramp,
+                display_decimals, fee, cap, chain_id, token_contract, onramp, offramp, gas_ledger,
             ))
             .unwrap(),
         )
@@ -216,7 +217,7 @@ fn currencies_joins_all_three_registries() {
     register_currency_meta(
         &pic, dpay, pic_admin(), CKX, Some("₿".into()), Some(8), Some(MinterFamily::CkBtcUtxo),
         None, None, None, None, None, None, None, None,
-        RampCapability::Unavailable, RampCapability::Unavailable,
+        RampCapability::Unavailable, RampCapability::Unavailable, None::<Principal>,
     )
     .expect("register_currency_meta ok");
 
@@ -265,14 +266,14 @@ fn register_currency_meta_is_admin_gated() {
     let r = register_currency_meta(
         &pic, dpay, Principal::anonymous(), DEMO_USD, Some("$".into()), Some(2), None,
         None, None, None, None, None, None, None, None,
-        RampCapability::Unavailable, RampCapability::Unavailable,
+        RampCapability::Unavailable, RampCapability::Unavailable, None::<Principal>,
     );
     assert!(r.is_err(), "anonymous must not register meta when a controller is set");
     // The controller succeeds.
     register_currency_meta(
         &pic, dpay, pic_admin(), DEMO_USD, Some("$".into()), Some(2), None,
         None, None, None, None, None, None, None, None,
-        RampCapability::Unavailable, RampCapability::Unavailable,
+        RampCapability::Unavailable, RampCapability::Unavailable, None::<Principal>,
     )
     .expect("controller registers meta");
 }
@@ -291,7 +292,7 @@ fn register_currency_meta_rejected_when_no_controller() {
     let r = register_currency_meta(
         &pic, dpay, Principal::anonymous(), DEMO_USD, Some("$".into()), Some(2), None,
         None, None, None, None, None, None, None, None,
-        RampCapability::Unavailable, RampCapability::Unavailable,
+        RampCapability::Unavailable, RampCapability::Unavailable, None::<Principal>,
     );
     assert!(r.is_err(), "register_currency_meta must be closed in open-demo mode");
 }
@@ -309,13 +310,13 @@ fn register_currency_meta_replaces_in_place() {
     register_currency_meta(
         &pic, dpay, pic_admin(), CKX, Some("X".into()), Some(6), None,
         None, None, None, None, None, None, None, None,
-        RampCapability::Unavailable, RampCapability::Unavailable,
+        RampCapability::Unavailable, RampCapability::Unavailable, None::<Principal>,
     )
     .expect("first register");
     register_currency_meta(
         &pic, dpay, pic_admin(), CKX, Some("◎".into()), Some(9), Some(MinterFamily::CkSol),
         None, None, None, None, None, None, None, None,
-        RampCapability::Unavailable, RampCapability::Unavailable,
+        RampCapability::Unavailable, RampCapability::Unavailable, None::<Principal>,
     )
     .expect("second register replaces");
 
@@ -350,7 +351,7 @@ fn register_currency_meta_stores_full_authoritative_field_set() {
     register_currency_meta(
         &pic, dpay, pic_admin(), DEMO_USD, Some("$".into()), Some(2), None,
         None, None, None, None, None, None, None, None,
-        RampCapability::Direct, RampCapability::Unavailable,
+        RampCapability::Direct, RampCapability::Unavailable, None::<Principal>,
     )
     .expect("register DEMO meta");
 
@@ -359,7 +360,7 @@ fn register_currency_meta_stores_full_authoritative_field_set() {
         &pic, dpay, pic_admin(), 1, Some("₿".into()), Some(8), Some(MinterFamily::CkBtcUtxo),
         Some("ckBTC".into()), Some("BTC".into()), Some("Bitcoin".into()), Some(8),
         None, None, None, None,
-        RampCapability::Direct, RampCapability::Direct,
+        RampCapability::Direct, RampCapability::Direct, None::<Principal>,
     )
     .expect("register ckBTC meta");
 
@@ -369,7 +370,7 @@ fn register_currency_meta_stores_full_authoritative_field_set() {
         Some("ckUSDC".into()), Some("USDC".into()), Some("Ethereum".into()), Some(6),
         Some(10_000), None, Some(1),
         Some("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".into()),
-        RampCapability::Direct, RampCapability::Unavailable,
+        RampCapability::Direct, RampCapability::Unavailable, None::<Principal>,
     )
     .expect("register ckUSDC meta");
 
@@ -757,6 +758,7 @@ struct CurrencyRegistration {
     token_contract: Option<String>,
     onramp: RampCapability,
     offramp: RampCapability,
+    gas_ledger: Option<Principal>,
 }
 
 /// `register_currency(CurrencyRegistration) -> Result<(), text>` — the atomic activation path.
@@ -797,6 +799,7 @@ fn fresh_registration(currency: Currency) -> CurrencyRegistration {
         token_contract: None,
         onramp: RampCapability::Unavailable,
         offramp: RampCapability::Unavailable,
+        gas_ledger: None,
     }
 }
 

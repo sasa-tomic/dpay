@@ -518,6 +518,7 @@ fn register_currency_meta_cap(
                 None::<String>,               // token_contract
                 RampCapability::Unavailable,  // onramp
                 RampCapability::Unavailable,  // offramp
+                None::<Principal>,            // gas_ledger
             ))
             .unwrap(),
         )
@@ -1862,6 +1863,7 @@ struct CurrencyRegistration {
     token_contract: Option<String>,
     onramp: RampCapability,
     offramp: RampCapability,
+    gas_ledger: Option<Principal>,
 }
 
 /// `register_currency(CurrencyRegistration) -> Result<(), text>` — the atomic activation path.
@@ -1898,6 +1900,7 @@ struct CurrencyDescriptor {
     token_contract: Option<String>,
     onramp: RampCapability,
     offramp: RampCapability,
+    gas_ledger: Option<Principal>,
 }
 
 fn currencies_query(pic: &PocketIc, dpay: Principal) -> Vec<CurrencyDescriptor> {
@@ -1934,6 +1937,7 @@ fn registration_matching(
         token_contract: None,
         onramp: RampCapability::Unavailable,
         offramp: RampCapability::Unavailable,
+        gas_ledger: None,
     }
 }
 

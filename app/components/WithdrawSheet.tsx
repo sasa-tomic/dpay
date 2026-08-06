@@ -15,14 +15,23 @@ import {useEscapeToClose} from '../hooks/useHotkeys';
 import {copyToClipboard} from '../lib/clipboard';
 
 /**
- * Withdraw a chain-key asset to a native address (ckBTC → BTC, native ckETH → ETH). The user enters a
- * destination address + amount, reviews "Withdraw X <asset> to …", then the app signs the WithdrawAuth
- * ON-DEVICE (the non-custodial gate) and submits to the relay's POST /api/v1/withdraw. The facade
- * verifies the signature before moving funds. Amounts are converted to raw smallest-units via the
- * family's `amountDecimals` (8 for BTC sats, 18 for ETH Wei); the on-device `WithdrawAuth.amount` is a
- * u64 carrying those raw units. Escape closes the sheet (web), matching DepositSheet.
+ * Withdraw a chain-key asset to a native address (ckBTC → BTC, native ckETH → ETH, ckERC20 tokens like
+ * ckUSDC → USDC). The user enters a destination address + amount, reviews "Withdraw X <asset> to …",
+ * then the app signs the WithdrawAuth ON-DEVICE (the non-custodial gate) and submits to the relay's
+ * POST /api/v1/withdraw. The facade verifies the signature before moving funds. Amounts are converted
+ * to raw smallest-units via the family's `amountDecimals` (8 for BTC sats, 18 for ETH Wei, 6 for
+ * USDC micro-units); the on-device `WithdrawAuth.amount` is a u64 carrying those raw units. Escape
+ * closes the sheet (web), matching DepositSheet.
+ *
+ * ckERC20 gas dependency (Fork-C — no-swap): a ckERC20 withdraw (token_contract is Some) burns ckETH
+ * for gas + the token amount from its own ledger (the dual-ledger `withdraw_erc20` path). dpay NEVER
+ * converts ckUSDC→ckETH, so the user MUST independently hold ckETH for gas. The sheet shows an honest
+ * "You need ckETH for gas" note when `tokenContract` is present; the real gas check happens at the
+ * canister (the minter returns InsufficientFunds if the user has no ckETH gas → honest retryable
+ * error). A partial-failure settlement surfaces "Gas was burned but the transfer may not have landed"
+ * so the user checks their balance rather than assuming success.
  */
-export function WithdrawSheet({identity, relayUrl, currency, display, family, balance, onClose, onWithdrawn}: {identity: Identity; relayUrl: string; currency: number; display: FamilyDisplay; family: MinterFamily; balance: string; onClose: () => void; onWithdrawn: () => void}) {
+export function WithdrawSheet({identity, relayUrl, currency, display, family, tokenContract, balance, onClose, onWithdrawn}: {identity: Identity; relayUrl: string; currency: number; display: FamilyDisplay; family: MinterFamily; tokenContract: string | null; balance: string; onClose: () => void; onWithdrawn: () => void}) {
   const [address, setAddress] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
@@ -50,6 +59,9 @@ export function WithdrawSheet({identity, relayUrl, currency, display, family, ba
   const addrEntered = address.trim().length > 0;
   const badAddr = addrEntered && !isValidDestinationAddress(family, address);
   const canReview = addrEntered && !badAddr && raw !== '0' && !belowMin && !overBalance;
+  // ckERC20 (token_contract Some) burns ckETH for gas on the dual-ledger withdraw_erc20 path. Native
+  // ETH (token_contract None) and BTC are NOT affected — they don't carry a separate gas ledger.
+  const isErc20 = family === 'CkEthErc20' && tokenContract != null;
 
   async function confirm() {
     if (!canReview) {
@@ -71,8 +83,16 @@ export function WithdrawSheet({identity, relayUrl, currency, display, family, ba
       onWithdrawn(); // trigger a balance/history refresh
     } catch (e: unknown) {
       // A 422 policy error (bad sig / insufficient / below min / nonce) or a 503 transient / offline.
-      // Surface the reason; the user can correct + retry from the form.
-      setErr(e instanceof Error ? e.message : String(e));
+      // Surface the reason; the user can correct + retry from the form. For a ckERC20 partial-failure
+      // settlement (the dual-ledger path burned ckETH gas but the ERC-20 transfer may not have
+      // landed — the canister RELEASES with an honest partial-failure marker), surface the specific
+      // "gas was burned" guidance so the user checks their balance instead of assuming success.
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/partial[ _-]?failure/i.test(msg)) {
+        setErr('Gas was burned but the transfer may not have landed. Check your balance.');
+      } else {
+        setErr(msg);
+      }
       setPhase('error');
     } finally {
       clearTimeout(t);
@@ -154,6 +174,10 @@ export function WithdrawSheet({identity, relayUrl, currency, display, family, ba
               {belowMin ? <Text style={S.warnNote}>{`Below the ${fmtAsset(String(display.withdrawMinRaw), display.amountDecimals, display.nativeAsset)} minimum withdrawal.`}</Text> : null}
               {overBalance ? <Text style={S.warnNote}>{`More than your available ${fmtAsset(balance, display.amountDecimals, display.nativeAsset)}.`}</Text> : null}
               {badAddr ? <Text testID="withdraw-bad-addr" style={S.warnNote}>{`That doesn't look like a valid ${display.nativeAsset} address.`}</Text> : null}
+
+              {isErc20 ? (
+                <Text testID="withdraw-gas-note" style={S.warnNote}>You need ckETH for gas. Add ckETH first if you don't have any.</Text>
+              ) : null}
 
               {(phase === 'form' || phase === 'error') && raw !== '0' ? (
                 <View testID="withdraw-review" style={S.reviewCard}>

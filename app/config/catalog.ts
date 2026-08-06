@@ -37,6 +37,7 @@ export type CurrencyDescriptor = {
   cap: string | null;              // per-currency tx cap in RAW units (string for forward-compat; MC2 governs)
   chain_id: number | null;         // EVM chain id for ckERC20 (1=Ethereum mainnet)
   token_contract: string | null;   // ERC-20 contract address (0x…) for ckERC20 — per-token
+  gas_ledger: string | null;       // ckETH gas-ledger principal for ckERC20 cash-out (withdraw_erc20); null otherwise
   onramp: RampCapability;          // funding capability; Unavailable ⇒ no "Add money" button
   offramp: RampCapability;         // cash-out capability; Unavailable ⇒ no "Cash out" button
 };
@@ -45,18 +46,19 @@ export const CATALOG_CACHE_KEY = 'dpay.currencies.v1';
 // the first successful fetch. Mirrors the canister's demo deployment (DEMO_USD + ckBTC + ckUSDC).
 // The ledger principals are empty here (the wallet reads currency/symbol/decimals/minter_family +
 // the MC1 unit 5 per-currency metadata for display; the relay resolves ledgers server-side from the
-// query's currency id). Ramp honesty (no-swap + Fork-C/O3): DEMO onramp=Direct(off)/offramp=Unavailable;
-// ckBTC onramp=Direct/offramp=Direct; ckUSDC onramp=Direct/offramp=Unavailable (NO cash-out).
+// query's currency id). Ramp honesty (no-swap + Fork-C/O3): DEMO onramp=Direct(faucet)/offramp=Unavailable;
+// ckBTC onramp=Direct/offramp=Direct; ckUSDC onramp=Direct/offramp=Direct (dual-ledger withdraw_erc20
+// cash-out, gated on the user holding ckETH for gas — the gas_ledger carries the ckETH principal).
 export const BUNDLED_CATALOG: CurrencyDescriptor[] = [
   {currency: 0, ledger: '', mintable: true, minter: null, minter_family: null, symbol: '$', decimals: 2,
     wrapper_name: null, backing_symbol: null, network: null, display_decimals: null, fee: null, cap: null,
-    chain_id: null, token_contract: null, onramp: 'Direct', offramp: 'Unavailable'},
+    chain_id: null, token_contract: null, gas_ledger: null, onramp: 'Direct', offramp: 'Unavailable'},
   {currency: 1, ledger: '', mintable: false, minter: 'mqygn-kiaaa-aaaar-qaadq-cai', minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8,
     wrapper_name: 'ckBTC', backing_symbol: 'BTC', network: 'Bitcoin', display_decimals: 8, fee: null, cap: null,
-    chain_id: null, token_contract: null, onramp: 'Direct', offramp: 'Direct'},
+    chain_id: null, token_contract: null, gas_ledger: null, onramp: 'Direct', offramp: 'Direct'},
   {currency: 2, ledger: 'xevnm-gaaaa-aaaar-qafnq-cai', mintable: false, minter: 'sv3dd-oaaaa-aaaar-qacoa-cai', minter_family: 'CkEthErc20', symbol: 'ckUSDC', decimals: 6,
     wrapper_name: 'ckUSDC', backing_symbol: 'USDC', network: 'Ethereum', display_decimals: 6, fee: '10000', cap: null,
-    chain_id: 1, token_contract: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', onramp: 'Direct', offramp: 'Unavailable'},
+    chain_id: 1, token_contract: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', gas_ledger: 'ss2fx-dyaaa-aaaar-qacoq-cai', onramp: 'Direct', offramp: 'Direct'},
 ];
 // Fetch the catalog from the relay, caching to AsyncStorage. Best-effort: on any failure (offline,
 // timeout, bad JSON) returns `prior` (the cache or bundled default) so the UI never blocks on it.
@@ -89,6 +91,7 @@ export async function fetchCurrencies(relayUrl: string, prior: CurrencyDescripto
         cap: c.cap == null ? null : String(c.cap),
         chain_id: typeof c.chain_id === 'number' ? c.chain_id : null,
         token_contract: typeof c.token_contract === 'string' ? c.token_contract : null,
+        gas_ledger: typeof c.gas_ledger === 'string' ? c.gas_ledger : null,
         onramp: (typeof c.onramp === 'string' && (c.onramp === 'Direct' || c.onramp === 'Partner' || c.onramp === 'Unavailable') ? c.onramp : 'Unavailable') as RampCapability,
         offramp: (typeof c.offramp === 'string' && (c.offramp === 'Direct' || c.offramp === 'Partner' || c.offramp === 'Unavailable') ? c.offramp : 'Unavailable') as RampCapability,
       }));

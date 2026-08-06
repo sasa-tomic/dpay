@@ -96,7 +96,8 @@ struct DpayInitArg {
 
 #[derive(CandidType, serde::Serialize)]
 struct MockMinterInit {
-    ledger: Principal,
+    amount_ledger: Principal,
+    gas_ledger: Option<Principal>,
 }
 
 /// The single record argument the REAL ckBTC minter takes for `get_btc_address` / `update_balance` —
@@ -351,6 +352,7 @@ fn register_currency_meta_cap(pic: &PocketIc, dpay: Principal, caller: Principal
                 None::<String>,               // token_contract
                 RampCapability::Unavailable,  // onramp
                 RampCapability::Unavailable,  // offramp
+                None::<Principal>,            // gas_ledger
             ))
             .unwrap(),
         )
@@ -383,7 +385,7 @@ fn setup_deposit() -> (PocketIc, Principal, Principal, Principal, SigningKey, [u
     pic.install_canister(
         mock,
         mock_minter_wasm(),
-        encode_one(&MockMinterInit { ledger: ckbtc }).unwrap(),
+        encode_one(&MockMinterInit { amount_ledger: ckbtc, gas_ledger: None }).unwrap(),
         None,
     );
 
@@ -553,7 +555,7 @@ fn mock_minter_enforces_real_minter_single_record_arg_contract() {
     pic.install_canister(
         mock,
         mock_minter_wasm(),
-        encode_one(&MockMinterInit { ledger }).unwrap(),
+        encode_one(&MockMinterInit { amount_ledger: ledger, gas_ledger: None }).unwrap(),
         None,
     );
 

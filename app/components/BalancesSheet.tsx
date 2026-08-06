@@ -79,14 +79,18 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
             const disp = familyDisplay(catalog, a.currency);
             const onrampable = disp !== null && a.onramp !== 'Unavailable';
             // Cash-out is offered for a funded asset whose family has a native offramp: ckBTC
-            // (CkBtcUtxo → retrieve_btc) AND native ckETH (CkEthErc20 with token_contract == null →
-            // withdraw_eth). The `token_contract == null` guard keeps ckUSDC (offramp Unavailable +
-            // token_contract Some) fail-closed — an ERC-20 token never reaches the ETH offramp.
+            // (CkBtcUtxo → retrieve_btc) AND any CkEthErc20 asset whose `offramp` is enabled — native
+            // ckETH (token_contract == null → withdraw_eth, single-ledger) AND ckERC20 tokens
+            // (token_contract Some → withdraw_erc20, dual-ledger; the user must hold ckETH for gas).
+            // The per-currency `offramp` RampCapability stays the authoritative no-swap gate (an
+            // `Unavailable` direction NEVER shows the button — e.g. ckUSDT/ckDAI until their offramp
+            // is wired). The `gas_ledger` field carries the ckETH gas principal for the dual-ledger
+            // path; the app surfaces an honest "You need ckETH for gas" note in the WithdrawSheet.
             const cashable =
               funded &&
               a.offramp !== 'Unavailable' &&
               (a.minter_family === 'CkBtcUtxo' ||
-               (a.minter_family === 'CkEthErc20' && a.token_contract == null));
+               a.minter_family === 'CkEthErc20');
             // Subtitle is user-benefit, not network topology — drop the "Send X on Y" tautology (BTC
             // on Bitcoin, USDC on Ethereum) that names a network meaningless to a non-technical user.
             // BTC family -> "Bitcoin"; Ethereum USD stablecoins (USDC/USDT) -> "US dollar stablecoin";
