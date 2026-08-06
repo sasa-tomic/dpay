@@ -105,7 +105,7 @@
   - [x] U8 `components/SolPayMode.tsx` — payer offline-sign + hand-off UI
   - [x] U9 `components/SolReceiveMode.tsx` — merchant request + broadcast UI
   - [x] U10 Wallet wiring + e2e flow 46 (QR offline handoff via stub RPC, 47/47 GREEN)
-  - [ ] U11 SOL NFC transport (Kotlin HCE + RN bridge) — DEVICE GATED, deferred
-  - [ ] U12 e2e SOL NFC seam + flow 47 — deferred
-  - [x] U13 `DPAY_SOL_SELFCHECK` extended (nonce builder on Hermes) — **needs `just app` device gate**
-- [ ] Phase 2 NFC — U11 (Kotlin HCE) + U12 (e2e NFC seam) remain; the QR path ships the feature standalone
+  - [x] U11 SOL NFC transport (Kotlin HCE + RN bridge, AID `F06470617902`) — DEVICE GATE CONFIRMED (`just app` → both self-checks PASS, module loads)
+  - [x] U12 e2e SOL NFC seam + flow 47 (48/48 GREEN)
+  - [x] U13 `DPAY_SOL_SELFCHECK` extended (nonce builder on Hermes) — device gate CONFIRMED PASS
+- [x] Phase 2 NFC — U11 (Kotlin HCE `DpaySolNfc`) + U12 (e2e flow 47) DONE (commit `d772ae3`); physical two-phone radio proof stays a physical-device gate
