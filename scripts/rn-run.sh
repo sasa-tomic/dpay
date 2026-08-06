@@ -84,6 +84,17 @@ done
 echo "   $MARK"
 echo "$MARK" | grep -q 'DPAY_SELFCHECK PASS' || { echo "FAIL: self-check did not pass"; adb logcat -d | grep -iE 'dpay|ReactNativeJS|AndroidRuntime' | tail -30; exit 1; }
 
+# SOL native device-key self-check: proves the SLIP-10 ed25519 derivation + bs58/noble deps run on
+# the real device (Hermes). Independent of the FFI; pure derivation only (no RPC).
+SOL_MARK=""
+for _ in $(seq 1 30); do
+  SOL_MARK="$(adb logcat -d 2>/dev/null | grep -m1 'DPAY_SOL_SELFCHECK' || true)"
+  [ -n "$SOL_MARK" ] && break
+  sleep 1
+done
+echo "   $SOL_MARK"
+echo "$SOL_MARK" | grep -q 'DPAY_SOL_SELFCHECK PASS' || { echo "FAIL: SOL self-check did not pass"; adb logcat -d | grep -iE 'dpay|ReactNativeJS|AndroidRuntime' | tail -30; exit 1; }
+
 # Best-effort UI drive for screenshots (non-fatal): tap a node by its visible text via uiautomator.
 tap_text() {
   local needle="$1"

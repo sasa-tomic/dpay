@@ -22,6 +22,7 @@ import {RELAY_DEFAULT} from './relayConfig';
 import {C} from './config/palette';
 import {STORAGE_KEY, RELAY_STORAGE_KEY} from './config/constants';
 import {randNonceHex} from './lib/format';
+import {deriveSolanaAddress, isValidSolanaAddress} from './solana/identity';
 import type {Identity} from './lib/types';
 import {DpayCore} from './services/native';
 import {S} from './styles';
@@ -72,6 +73,19 @@ export default function App() {
         const expectedHexLen = (await DpayCore.wireLen()) * 2;
         console.log(`DPAY_SELFCHECK ${(await DpayCore.verifyWire(wire)) && wire.length === expectedHexLen ? 'PASS' : 'FAIL'}`);
       } catch (e: unknown) { console.log(`DPAY_SELFCHECK FAIL ${e instanceof Error ? e.message : String(e)}`); }
+    })();
+  }, []);
+
+  // On-device SOL self-check → logcat. Proves the SLIP-10 ed25519 derivation + bs58/noble deps run
+  // on the real device (Hermes) — the native-module/polyfill blind spot — independent of the FFI and
+  // of any network (pure derivation only; no RPC). The device gate greps for `DPAY_SOL_SELFCHECK PASS`.
+  useEffect(() => {
+    (async () => {
+      try {
+        const kp = await DpayCore.generateKeypair();
+        const addr = deriveSolanaAddress(kp.secretHex);
+        console.log(`DPAY_SOL_SELFCHECK ${isValidSolanaAddress(addr) ? 'PASS' : 'FAIL'}`);
+      } catch (e: unknown) { console.log(`DPAY_SOL_SELFCHECK FAIL ${e instanceof Error ? e.message : String(e)}`); }
     })();
   }, []);
 
