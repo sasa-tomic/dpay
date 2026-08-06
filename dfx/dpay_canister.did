@@ -2,6 +2,7 @@ type CurrencyDescriptor = record {
   cap : opt nat64;
   fee : opt nat64;
   onramp : RampCapability;
+  gas_ledger : opt principal;
   decimals : opt nat8;
   wrapper_name : opt text;
   backing_symbol : opt text;
@@ -21,6 +22,7 @@ type CurrencyRegistration = record {
   cap : opt nat64;
   fee : nat64;
   onramp : RampCapability;
+  gas_ledger : opt principal;
   decimals : nat8;
   wrapper_name : text;
   backing_symbol : opt text;
@@ -293,6 +295,7 @@ service : (InitArg) -> {
       opt text,
       RampCapability,
       RampCapability,
+      opt principal,
     ) -> (Result_8);
   // Register the ledger for a currency at runtime (INSERT-ONLY, MC2 unit 2). Gated to the controller
   // in production (open only when `controller` is unset, i.e. the demo). Once a currency key exists its
