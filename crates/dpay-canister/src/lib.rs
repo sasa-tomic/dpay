@@ -1800,7 +1800,10 @@ async fn ensure_receipt_key() -> Result<SigningKey, String> {
         .try_into()
         .map_err(|_| format!("raw_rand returned {} bytes (need 32)", rand.len()))?;
     RECEIPT_SECRET
-        .with(|c| c.borrow_mut().set(ReceiptSecretStorable(Some(sk))).expect("set receipt secret"));
+        .with(|c| -> Result<(), String> {
+            c.borrow_mut().set(ReceiptSecretStorable(Some(sk))).map_err(|e| format!("set receipt secret: {e:?}"))?;
+            Ok(())
+        })?;
     Ok(SigningKey::from_bytes(&sk))
 }
 
@@ -1974,7 +1977,7 @@ async fn pay(signed: Vec<u8>) -> Result<PayReceipt, String> {
         sa.auth.from_name,
         sa.auth.to_name,
         sa.auth.memo,
-    );
+    )?;
     let new_from_balance = ledger_balance_of(ledger, &from_acct).await.unwrap_or_else(|_| {
         balance.saturating_sub(amount).saturating_sub(fee)
     });
@@ -2032,18 +2035,23 @@ fn record_txn(
     from_name: [u8; NAME_LEN],
     to_name: [u8; NAME_LEN],
     memo: [u8; MEMO_LEN],
-) {
-    let seq = TXN_SEQ.with(|c| {
+) -> Result<(), String> {
+    let seq = TXN_SEQ.with(|c| -> Result<u64, String> {
         let v = *c.borrow().get();
-        c.borrow_mut().set(v + 1).expect("advance txn seq");
-        v
-    });
+        // StableCell::set failures are rare (stable-memory exhaustion). Returning Err here (vs the
+        // prior `expect`) avoids a trap that would also roll back the nonce reservation — the
+        // orphan state `reconcile` repairs is narrowed to "ledger debited, history missing", with
+        // the nonce still reserved (no double-spend vector).
+        c.borrow_mut().set(v + 1).map_err(|e| format!("advance txn seq: {e:?}"))?;
+        Ok(v)
+    })?;
     let rec = TxnRecord { from, to, amount, nonce, currency, timestamp, from_name, to_name, memo };
     ACCOUNT_TXNS.with(|m| {
         let mut m = m.borrow_mut();
         m.insert(AccountTxnKey::new(from, currency, seq), rec);
         m.insert(AccountTxnKey::new(to, currency, seq), rec);
     });
+    Ok(())
 }
 
 /// `balance_of(blob, nat32) -> nat64` — now a **query** returning the display-only cache. The cache
@@ -2114,7 +2122,7 @@ async fn mint(to: Vec<u8>, currency: Currency, amount: u64) -> Result<u64, Strin
         [0u8; NAME_LEN],
         [0u8; NAME_LEN],
         [0u8; MEMO_LEN],
-    );
+    )?;
     // Re-read the authoritative post-mint balance: refresh the display cache AND return it. The
     // `Ledger` trait contract is that `mint` returns the NEW BALANCE (FakeLedger honors this; the
     // relay faucet surfaces the return directly as `{balance}`), NOT the ledger's block index.
@@ -2182,7 +2190,7 @@ async fn faucet(account: Vec<u8>, currency: Currency) -> Result<u64, String> {
         [0u8; NAME_LEN],
         [0u8; NAME_LEN],
         [0u8; MEMO_LEN],
-    );
+    )?;
     // Re-read the authoritative post-faucet balance: refresh the display cache AND return it (the
     // `Ledger::faucet` contract returns the NEW BALANCE, surfaced by the relay as `{balance}`).
     let new_balance = ledger_balance_of(ledger, &account_of(&pk))
@@ -2232,7 +2240,7 @@ async fn burn(from: Vec<u8>, currency: Currency, amount: u64) -> Result<u64, Str
         [0u8; NAME_LEN],
         [0u8; NAME_LEN],
         [0u8; MEMO_LEN],
-    );
+    )?;
     // Refresh the display cache from the authoritative ledger.
     if let Ok(bal) = ledger_balance_of(ledger, &from_acct).await {
         write_cache(pk, currency, bal);
@@ -2678,7 +2686,7 @@ async fn reconcile(currency: Currency) -> Result<ReconcileReport, String> {
             [0u8; NAME_LEN],
             [0u8; NAME_LEN],
             [0u8; MEMO_LEN],
-        );
+        )?;
         // Best-effort: refresh the display cache for both sides from the authoritative ledger.
         if let Ok(bal) = ledger_balance_of(ledger, &account_of(&from_pk)).await {
             write_cache(from_pk, currency, bal);
@@ -3246,7 +3254,7 @@ async fn withdraw(req: WithdrawRequest) -> Result<WithdrawReceipt, String> {
         [0u8; NAME_LEN],
         [0u8; NAME_LEN],
         [0u8; MEMO_LEN],
-    );
+    )?;
     if let Ok(bal) = ledger_balance_of(ledger, &from_acct).await {
         write_cache(from, req.currency, bal);
     }
