@@ -90,8 +90,8 @@ export default function App() {
         if (!isValidSolanaAddress(addr)) throw new Error('invalid SOL address');
         const {publicKey} = deriveSolanaKeypair(kp.secretHex);
         const nonceAcct = base58Decode32('GZXyfzSTCBmA7rpeDLrmUbiSA45H5EEwJhoBeR6ZNb3u');
-        const storedNonce = base58Decode32(addr);
-        const msg = buildAdvanceAndTransferMessage(publicKey, nonceAcct, addr, 1_000_000n, storedNonce);
+        const storedNonce = base58Decode32('FzFAtwLSSzxhug4sEvUeusLxFdjAS3ByYqgseUYkFpkN');
+        const msg = buildAdvanceAndTransferMessage(publicKey, nonceAcct, 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r', 1_000_000n, storedNonce);
         if (msg[0] !== 1 || msg.length < 200) throw new Error(`nonce msg sanity fail: hdr=${msg[0]} len=${msg.length}`);
         console.log('DPAY_SOL_SELFCHECK PASS');
       } catch (e: unknown) { console.log(`DPAY_SOL_SELFCHECK FAIL ${e instanceof Error ? e.message : String(e)}`); }
