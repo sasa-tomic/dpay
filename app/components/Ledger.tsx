@@ -21,7 +21,7 @@ export function Ledger({history, catalog}: {history: Txn[]; catalog: CurrencyDes
   const [filter, setFilter] = useState<number | null>(null);
   if (history.length === 0) {
     return (
-      <View>
+      <View testID="ledger-view">
         <Text style={S.ledgerEmpty}>No payments yet.</Text>
         <Text style={S.dim2}>Tap Receive to create a payment request, or Pay to scan one.</Text>
       </View>
@@ -33,7 +33,7 @@ export function Ledger({history, catalog}: {history: Txn[]; catalog: CurrencyDes
   const showFilter = presentCurrencies.length > 1;
   const rows = filter == null ? history : history.filter(t => t.currency === filter);
   return (
-    <View style={S.ledgerWrap}>
+    <View style={S.ledgerWrap} testID="ledger-view">
       <Text style={S.histTitle}>Recent</Text>
       {showFilter ? (
         <View style={S.filterRow}>

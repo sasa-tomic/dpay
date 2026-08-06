@@ -167,7 +167,7 @@ export function SolPayMode({identity, online, nfcReady, onClose}: {identity: Ide
           {phase === 'setup' ? (
             <View style={S.centerAll} testID="sol-pay-setup">
               <Text style={S.label}>Set up offline pay</Text>
-              <Text style={S.dim2}>Offline pay needs a one-time setup: it creates a durable-nonce account on Solana so you can sign payments without being online. This requires a connection + a small amount of SOL for rent (~0.0015 SOL, recoverable).</Text>
+              <Text style={S.dim2}>Set up once so you can pay without a connection. This needs a brief connection and a small amount of SOL (~0.0015 SOL, recoverable).</Text>
               {err ? <Text testID="sol-pay-setup-err" style={S.err}>{err}</Text> : null}
               {busy ? (
                 <>
@@ -207,7 +207,7 @@ export function SolPayMode({identity, online, nfcReady, onClose}: {identity: Ide
                   {nonceState?.status === 'stale' ? (
                     <View testID="sol-pay-stale" style={S.reviewCard}>
                       <Text style={S.reviewLabel}>Offline pay needs a resync</Text>
-                      <Text style={S.warnNote}>Your nonce was marked stale after a failed broadcast. {online ? 'Resync to use offline pay again.' : 'Go online and resync to use offline pay again.'}</Text>
+                      <Text style={S.warnNote}>A recent payment couldn't be confirmed, so offline pay needs a refresh. {online ? 'Resync to keep paying offline.' : 'Go online and resync to keep paying offline.'}</Text>
                       {err ? <Text testID="sol-pay-stale-err" style={S.err}>{err}</Text> : null}
                       {busy ? (
                         <>

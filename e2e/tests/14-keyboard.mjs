@@ -3,6 +3,7 @@
 // The wallet is fully keyboard-driveable on web (desktop power-user feature; on mobile the NFC/tap
 // is the input, so the shortcuts + hints are web-only). The first letters map to the main actions:
 //   P → Pay tab · R → Receive tab · T → Top-up (demo money) · A → Balances (the money hub)
+//   L → Ledger (transactions)
 // Esc closes whatever sheet/overlay is open (the seed affordance, built in Wave U / useEscapeToClose,
 // now shared with the wallet shortcuts via one `useHotkeys` source of truth).
 //
@@ -22,7 +23,7 @@ export const meta = {
   name: 'keyboard',
   journey: 'system',
   covers: ['keyboard-shortcuts', 'tabs', 'sheet-guard', 'input-guard'],
-  verifies: 'Single-key shortcuts (P/R/T/A/Esc) switch tabs / top-up / add-money / close sheet; input + sheet guards work.',
+  verifies: 'Single-key shortcuts (P/R/T/A/L/Esc) switch tabs / top-up / add-money / ledger / close sheet; input + sheet guards work.',
   timeoutMs: 15000,
 };
 
@@ -49,6 +50,14 @@ export async function run() {
     await driver.findByTestID('pay-scan', { timeoutMs: 3_000 });
     assert(!(await driver.isPresent('btn-request')), 'P should hide the Receive affordance (btn-request)');
     console.log('[14-keyboard] ✓ P activated the Pay tab');
+
+    // --- L : single-key Ledger (transactions) ---------------------------------------
+    console.log('[14-keyboard] pressing L (→ Ledger / Transactions)…');
+    await driver.pressKey('l');
+    await driver.findByTestID('ledger-view', { timeoutMs: 3_000 });
+    console.log('[14-keyboard] ✓ L activated the Transactions tab');
+    await driver.pressKey('p'); // back to Pay for the rest of the flow
+    await driver.findByTestID('pay-scan', { timeoutMs: 3_000 });
 
     // --- T : single-key top-up (demo money) -----------------------------------------
     console.log('[14-keyboard] pressing T (→ top-up +∂100 demo money)…');
