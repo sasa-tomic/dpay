@@ -13,6 +13,7 @@ import {encodeSolReq, decodeSolPay, type SolReq} from '../solana/qr';
 import {deriveSolanaAddress, broadcastSolPayment} from '../solana';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from '../payments';
 import {DpaySolNfc} from '../services/native';
+import {copyToClipboard} from '../lib/clipboard';
 import {QrScanner} from './QrScanner';
 import {SolNfcTap} from './SolNfcTap';
 import {useEscapeToClose} from '../hooks/useHotkeys';
@@ -42,6 +43,7 @@ export function SolReceiveMode({identity, online, nfcReady, onClose}: {identity:
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{amount: string; cur: 'SOL' | 'USDC'; sig: string | null} | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [copied, setCopied] = useState<'clipboard' | 'shared' | null>(null);
   // A tap taking over while the QR is shown; nfcKey re-starts the reader after each.
   const [nfcActive, setNfcActive] = useState(false);
   const [nfcKey, setNfcKey] = useState(0);
@@ -99,6 +101,13 @@ export function SolReceiveMode({identity, online, nfcReady, onClose}: {identity:
 
   function reset() { setReqUri(null); setReqSnapshot(null); setResult(null); setScanning(false); setErr(null); setMemo(''); setNfcActive(false); setNfcKey(k => k + 1); setPhase('form'); }
 
+  const copySig = async () => {
+    if (!result?.sig) return;
+    const how = await copyToClipboard(result.sig);
+    setCopied(how);
+    setTimeout(() => setCopied(null), 1500);
+  };
+
   return (
     <View style={S.sheetOverlay}>
       <SafeAreaView style={S.sheet}>
@@ -119,6 +128,9 @@ export function SolReceiveMode({identity, online, nfcReady, onClose}: {identity:
                 <>
                   <Text style={S.dim2}>transaction signature</Text>
                   <Text testID="sol-req-sig" selectable={true} style={S.sheetAddr}>{result.sig}</Text>
+                  <Pressable testID="btn-sol-req-copy" style={S.primaryWide} onPress={copySig} accessibilityRole="button" accessibilityLabel="Copy transaction signature">
+                    <Text style={S.primaryText}>{copied === 'clipboard' ? 'Copied ✓' : copied === 'shared' ? 'Shared ✓' : 'Copy signature'}</Text>
+                  </Pressable>
                 </>
               ) : null}
               <Pressable testID="btn-sol-req-done" style={S.linkBtn} onPress={reset} accessibilityRole="button" accessibilityLabel="New request" accessibilityState={{disabled: false}}>

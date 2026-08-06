@@ -19,7 +19,7 @@ export function QrScanner({onScan}: {onScan: (v: string) => void}) {
       ) : (
         <View style={S.camPlaceholder}>
           {hasPermission ? (
-            <Text style={S.dim2}>no camera</Text>
+            <Text style={S.dim2}>No camera found on this device.</Text>
           ) : (
             <>
               <Text style={S.reviewTo}>Point your camera at a payment code to pay</Text>

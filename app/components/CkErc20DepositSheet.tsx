@@ -133,7 +133,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
       try {
         const p = await ckerc20OnrampParams(relayUrl, currency, ctrl.signal);
         if (alive) setParams(p);
-      } catch { if (alive) setErr('Could not reach the relay for onramp details.'); }
+      } catch { if (alive) setErr("Couldn't reach the server for onramp details."); }
       finally { if (alive) clearTimeout(t); }
     })();
     return () => { alive = false; ctrl.abort(); };
@@ -441,6 +441,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
               <Text style={S.paidText}>Deposited ✓</Text>
               <Text style={S.paidSub}>{`${display.nativeAsset} minted to your wallet.`}</Text>
               <Text style={S.dim2}>Your balance updates automatically.</Text>
+              <Pressable testID="btn-ckerc20-deposit-done" style={S.linkBtn} onPress={onClose} accessibilityRole="button" accessibilityLabel="Done" accessibilityState={{disabled: false}}><Text style={S.linkText}>Done</Text></Pressable>
             </View>
           )}
           {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}

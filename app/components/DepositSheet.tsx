@@ -173,6 +173,7 @@ export function DepositSheet({identity, relayUrl, currency, display, onClose}: {
               <Text style={S.paidText}>Deposited ✓</Text>
               <Text style={S.paidSub}>{fmtAsset(refresh?.minted_total ?? '0', display.amountDecimals, display.nativeAsset)} minted</Text>
               <Text style={S.dim2}>Your balance updates automatically.</Text>
+              <Pressable testID="btn-deposit-done" style={S.linkBtn} onPress={onClose} accessibilityRole="button" accessibilityLabel="Done" accessibilityState={{disabled: false}}><Text style={S.linkText}>Done</Text></Pressable>
             </View>
           ) : (
             <>
