@@ -1947,10 +1947,15 @@ async fn pay(signed: Vec<u8>) -> Result<PayReceipt, String> {
         // receipt must attest. Use that block index.
         Err(TransferError::Duplicate { duplicate_of, .. }) => duplicate_of,
         // Genuinely transient — funds provably did not move, or the ledger is unsure. Release so the
-        // payer may retry the SAME nonce.
-        Err(TransferError::InsufficientFunds { .. }) | Err(TransferError::TemporarilyUnavailable) => {
+        // payer may retry the SAME nonce. Carry the variant identity + InsufficientFunds.balance so
+        // the payer/operator can distinguish "broke" from "ledger down" (distinct retry guidance).
+        Err(TransferError::InsufficientFunds { balance }) => {
             release_nonce(&nonce);
-            return Err(format!("transient: {:?}", "ledger busy/insufficient"));
+            return Err(format!("transient: insufficient_funds balance={balance}"));
+        }
+        Err(TransferError::TemporarilyUnavailable) => {
+            release_nonce(&nonce);
+            return Err("transient: temporarily_unavailable".to_string());
         }
         // Any other ledger error is not safe to retry blindly — burn the nonce so the dead auth can
         // never replay. The payer must obtain a fresh authorization.
