@@ -609,4 +609,7 @@ function injectTestGlobals() {
   globalThis.__DPAY_TEST_RECEIPT_PUBKEY = '379bd5b7d1494939afe9f87b3587a50a96bde608f695e759daf3a3f106173e76';
   // MC8 U6.7 — a non-empty test project id so WALLETCONNECT_PROJECT_ID is "configured" app-wide.
   globalThis.__DPAY_TEST_WALLETCONNECT_PROJECT_ID = 'e2e-test-project-id';
+  // SOL rail: DISABLE so the offline e2e suite never hits real Solana devnet. An empty URL makes
+  // useSolanaBalance no-op and the SOL card render with `—` (tested offline-rendered, see flow SOL).
+  globalThis.__DPAY_TEST_SOLANA_RPC_URL = '';
 }

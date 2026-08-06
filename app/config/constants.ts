@@ -75,6 +75,18 @@ export const EXPECTED_RECEIPT_PUBKEY =
 export const WALLETCONNECT_PROJECT_ID =
   ((globalThis as unknown as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID ?? '648afbc757419fa381f77ba0c900bc85');
 
+// Solana RPC endpoint for the native device-key SOL rail (balance/send). Config-driven: the MVP
+// defaults to the public DEVNET endpoint (the PoC key on devnet is funded; no signup/key needed). An
+// operator switches to mainnet (api.mainnet-beta.solana.com) or a paid provider (Helius/QuickNode)
+// by editing this one line — no key is required for the public endpoints. The test override
+// `__DPAY_TEST_SOLANA_RPC_URL=''` DISABLES SOL for the offline inner loop (jest.setup.js sets it
+// globally; the e2e driver injects it via evaluateOnNewDocument): an empty URL makes the SOL balance
+// hook no-op and the SOL card render with `—`, so jest/e2e never touch real devnet. Mirrors the
+// WALLETCONNECT_PROJECT_ID + EXPECTED_RECEIPT_PUBKEY override seam exactly. Prod never sets the
+// global → falls through to the baked default.
+export const SOLANA_RPC_URL =
+  ((globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_URL?: string}).__DPAY_TEST_SOLANA_RPC_URL ?? 'https://api.devnet.solana.com');
+
 export const WITHDRAW_TIMEOUT_MS = 8000; // bound the /withdraw POST (every new fetch has a timeout)
 export const WITHDRAW_EXPIRY_WINDOW = 600; // the signed WithdrawAuth is valid 10 min
 // Mirrors the canister's fixed FAUCET_AMOUNT ($100.00 = 10_000 cents). The demo top-up POSTs this

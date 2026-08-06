@@ -17,3 +17,7 @@ jest.mock('@react-native-async-storage/async-storage', () =>
 // WC ENABLED (walletconnect.test.ts) set the override inside jest.isolateModules. Mirrors the
 // EXPECTED_RECEIPT_PUBKEY seam exactly.
 globalThis.__DPAY_TEST_WALLETCONNECT_PROJECT_ID = '';
+// SOL native device-key rail: DISABLE for the offline jest inner loop so no test hits real devnet.
+// An empty SOLANA_RPC_URL makes useSolanaBalance no-op and the SOL card render with `—`. Mirrors
+// the WC seam above. (solana-rpc.test.ts mocks fetch itself and never reads this constant.)
+globalThis.__DPAY_TEST_SOLANA_RPC_URL = '';
