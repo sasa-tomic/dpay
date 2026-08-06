@@ -72,3 +72,20 @@ DEFERRED (lower value / larger surface, note in OPEN_ISSUES):
 
 ## Finalize
 - `just verify` green; re-seed visual baselines if any UI copy drifts; update living docs; session report.
+
+---
+
+## Session report (2026-08-06, COMPLETE)
+
+All 4 waves done. 9 commits on `main` (`08e6a70`..`34ed108`). Final `just verify`: 49/49 e2e (86.54s), 81/81 canister, 50/50 relay, 401/401 jest, typecheck + bridge-parity clean, visual regression GREEN.
+
+| Wave | Commits | Summary |
+|------|---------|---------|
+| 1 | `08e6a70`..`ceca63b` (5) | P1 resyncNonce wired (real UX bug — stale nonce had no recovery); P2 canister expect→? (narrows orphan-trap window); P3 composeTimeout DRY + payAndClassify backstop; P4 canister vague error split into coded arms; P5 dead exports dropped |
+| 2 | `e8ee866` (1) | Split 3450-line canister along type/call seams → types.rs (1167) + calls.rs (313) + lib.rs (1997). 81/81 tests green, candid byte-for-byte unchanged |
+| 3 | `40cc9bd`, `80cf85a` (2) | UX pass: Done buttons on deposit success, Copy sig on SOL receive, de-jargon SOL + relay copy, L shortcut for Transactions, honest camera error |
+| Docs | `34ed108` (1) | CODEBASE_ANALYSIS + OPEN_ISSUES updated |
+
+**3 research subagents audited the entire prod codebase** (panic/silent-err/vague-error, network-timeout, unused-code). All actionable findings shipped; all deferred items documented in OPEN_ISSUES with rationale.
+
+**Audit verdicts (clean — no action needed):** dpay-core prod genuinely panic-free; dpay-ffi prod clean; NO unbounded outbound network I/O in prod; ckERC20 withdraw fully wired; SOL rail structurally complete.
