@@ -104,6 +104,69 @@
 - **Autonomous follow-up (2026-08-06, `2e0a163` → `087e69a`):** re-verified everything autonomously reachable. Relay Sepolia fix PROVEN against prod (local relay from HEAD → `ssqti`: Sepolia helper for cur 4, mainnet for cur 2, full catalog, real `tb1…`). Device gate BOTH GREEN (`just app` → `DPAY_SELFCHECK PASS`, `just ondevice` PASSED — validates the WC `chains` change on the real bridge). **e2e-live Tier 1 now GREEN against prod (`087e69a`):** local-relay→prod passes end-to-end in ~55s (onboard → 3 testnet cards → real Testnet4 address → deposit/info → Sepolia onramp). PR-list (HIGH/MEDIUM/LOW) all RESOLVED. **NEW external blocker found:** the DFINITY-operated ckBTC Testnet minter (`ml52i-…`) is cycle-starved — `update_balance` (and intermittently `get_minter_info`) reject with `InsufficientLiquidCycleBalance`; would block a Tier 2 mint too (DFINITY-side, outside our control).
 - **Remaining (outer-loop / founder-ops — genuine blockers only):** (1) **prod relay image swap** (fix PROVEN locally; live image ~10 commits behind HEAD at `e0a8c3d`; `just image && just up` on the founder-held kalaj.org host — no SSH/CF-token from dev box); (2) **Tier 2 full Testnet4 mint** (faucet captcha + the cycle-starved minter — low dpay value, proves DFINITY infra); (3) **WalletConnect live pairing on Sepolia** (physical device + MetaMask-on-Sepolia + funded Sepolia USDC, which isn't freely mintable).
 
+## ckERC20(USDC) withdraw — next-session work order (researched 2026-08-06)
+
+> The ONLY remaining native-asset out-path. BTC + ETH (native) + SOL are all DONE + proven. ckUSDC offramp is currently **fail-closed** in the canister. This section is the full implementation research — read alongside `2026-07-30-ckusdc-onramp-offramp.md` (the original design doc, esp. §1b + §8 Fork-C) + `CODEBASE_ANALYSIS.md` risk 7.
+
+### Current state (exactly what's built vs blocked)
+
+- **Canister `withdraw()`** (`crates/dpay-canister/src/lib.rs:2725`) has family dispatch:
+  - `CkBtcUtxo` → `retrieve_btc_with_approval` ✅ DONE + live (ckBTC mainnet + Testnet).
+  - `CkEthErc20 + token_contract None` → `withdraw_eth` ✅ DONE + live-proven (Sepolia, both directions).
+  - **`CkEthErc20 + token_contract Some` → FAIL-CLOSED** (`lib.rs:2788-2789`: `return Err("erc20 withdraw not supported on this path")`). This is the gate that blocks ckUSDC withdraw.
+- **App `BalancesSheet.tsx:85-89`**: `cashable` = `CkBtcUtxo || (CkEthErc20 && token_contract == null)`. ckUSDC (token_contract Some) → NO Cash-out button (honest deferral).
+- **Relay**: pure pass-through — `POST /withdraw` dispatches by currency; no relay change needed (the `AgentLedger::withdraw` calls the facade's `withdraw`, which already has the family branch).
+- **Mock-minter** (`crates/dpay-mock-minter/src/lib.rs`): has `withdraw_eth` but NO `withdraw_erc20`.
+
+### What `withdraw_erc20` requires (the dual-ledger flow)
+
+The ckETH minter (`sv3dd-oaaaa-aaaar-qacoq-cai`) method:
+```
+withdraw_erc20(WithdrawErc20Arg { amount: Nat; ckerc20_ledger_id: Nat; recipient: text; from_cketh_subaccount: Option<Subaccount>; from_ckerc20_subaccount: Option<Subaccount> })
+  -> Result<RetrieveErc20Request { cketh_block_index: Nat; ckerc20_block_index: Nat }, WithdrawErc20Error>
+```
+`WithdrawErc20Error` variants: `TokenNotSupported | RecipientAddressBlocked | CkEthLedgerError{...} | CkErc20LedgerError{partial→reimbursement} | TemporarilyUnavailable | ...`
+
+**DUAL-ledger approve** (the key difference from `withdraw_eth`):
+1. `icrc2_approve(minter, gas_fee)` on the **ckETH ledger** (`ss2fx-dyaaa-aaaar-qacoq-cai`) — pays Ethereum gas.
+2. `icrc2_approve(minter, amount)` on the **ckUSDC ledger** (`xevnm-gaaaa-aaaar-qafnq-cai`) — the amount to burn.
+3. Call `withdraw_erc20` — burns from BOTH ledgers.
+
+**The user MUST hold ckETH for gas.** This is a hard dependency (ERC-20 transfers need ETH gas; the minter burns ckETH to fund it). Founder Fork-C (locked 2026-07-30): "defer gas; when done, gas-via-THIRD-PARTY not dpay" (no-swap non-negotiable). The simplest autonomous implementation: require the user to already hold ckETH (honest "You need ckETH for gas" UX). The third-party conversion path is a later product decision.
+
+### Implementation plan (3 units — canister + mock + app)
+
+**NO wire change needed.** The existing `WithdrawAuth { from_pubkey, destination: String, amount: u64, nonce, expiry, currency: u32 }` already suffices — the facade derives both ledger principals + both subaccounts from `CURRENCY_META` + `from_pubkey`. Wire FROZEN (292/196/132) stays untouched.
+
+**Unit 1 — Canister: add `withdraw_erc20` family branch** (`crates/dpay-canister/src/lib.rs`)
+- Replace the fail-closed guard (`lib.rs:2788-2789`) with a new ERC20 branch alongside the existing native-ETH branch.
+- Needs: the **ckETH gas ledger principal** per ckERC20 currency. Options: (a) a new optional `gas_ledger` field in `CurrencyMeta` (cleanest — set once per ckERC20 currency at `register_currency` time; `None` for native ETH = the currency's own ledger IS the gas ledger); (b) query the minter's `get_minter_info.cketh_ledger_id` at withdraw time (adds a cross-canister call; survives minter upgrades). Recommend (a).
+- Flow: query `eip_1559_transaction_price` → `icrc2_approve(gas_fee)` on the **ckETH ledger** + `icrc2_approve(amount)` on the **ckUSDC ledger** → call `withdraw_erc20` → decode `WithdrawErc20Error` (the partial-failure `CkErc20LedgerError` after `CkEthLedgerError` → minter schedules reimbursement, NOT atomic fail — a new terminal state to surface).
+- Settle/release nonce classification mirrors `withdraw_eth`: permanent errs (TokenNotSupported, RecipientAddressBlocked) → settle dead auth; transient (TemporarilyUnavailable, InsufficientFunds, InsufficientAllowance) → release retryable; partial-failure → settle (funds DID move, can't replay).
+- **7+ new PocketIC tests** mirroring `tests/withdraw_eth.rs` (dispatch/debit/nonce/sig/expiry/min + the dual-ledger approve proof + partial-failure path).
+
+**Unit 2 — Mock-minter: add `withdraw_erc20`** (`crates/dpay-mock-minter/src/lib.rs`)
+- Mirror the ckETH minter's dual-ledger `withdraw_erc20` candid exactly (the honesty guard that caught the live `withdraw_eth` trap).
+- The mock reuses the same ckETH ledger it was init'd with for the gas burn + a second ICRC ledger for the ckERC20 amount.
+
+**Unit 3 — App: flip the `cashable` gate + ckETH gas UX** (`app/components/BalancesSheet.tsx` + `WithdrawSheet.tsx`)
+- `cashable` admits `CkEthErc20` regardless of `token_contract` (both native ETH + ERC20).
+- `WithdrawSheet` shows the ckETH gas dependency honestly: "You need ckETH for gas. Current gas estimate: ~X Wei" (read from the relay's deposit/info or a new withdraw/info endpoint). Below-min ckETH → honest "Not enough ckETH for gas" gate.
+- e2e flow: extend flow 44 (or a new flow) to cover ckUSDC withdraw via FakeLedger (the stub simulates the dual-ledger burn).
+
+### Verified live params (from O6, READ AT RUNTIME — never hardcode)
+- ckETH minter: `sv3dd-oaaaa-aaaar-qacoq-cai`; ckETH gas ledger: `ss2fx-dyaaa-aaaar-qacoq-cai`; ckUSDC ledger: `xevnm-gaaaa-aaaar-qafnq-cai` (6 dec, fee 10_000).
+- `minimum_withdrawal_amount` = 5_000_000_000_000_000 (5e15 Wei; minter-wide gas floor, shared by ckETH + ckERC20).
+- 11 ckERC20 tokens live on the ckETH minter (ckUSDC, ckUSDT, ckEURC, ckWBTC, ckLINK, ckUNI, ckWSTETH, ckPEPE, ckOCT, ckSHIB, ckXAUT) — the family dispatch covers ALL of them config-only once built.
+
+### Risks (documented, inherent to the ckETH minter)
+1. **Dual-approve front-running** (extends risk 8): approve-then-withdraw across `await`s with TWO ledgers. Blast radius bounded to the exact authorized amount + gas fee. Inherent to every `withdraw_erc20` client.
+2. **Partial-failure / reimbursement**: `CkErc20LedgerError` after `CkEthLedgerError` → the minter schedules a reimbursement (ckETH gas burned, ckUSDC NOT sent). New terminal state — the app must surface this honestly ("gas was burned but the transfer may not have landed; check your balance").
+3. **ckETH gas dependency**: user must hold ckETH. Per Fork-C, dpay never converts ckUSDC→ckETH (no-swap). The user must acquire ckETH independently (via the ckETH onramp already built, or a third party).
+
+### Gate plan
+`just test-canister` (new dual-ledger tests), `just test-relay` (pass-through), `just typecheck`, jest, e2e (new/extended withdraw flow). Device gate NOT required (no native module / bridge / wire change — pure canister + app logic). Prod WASM upgrade IS required (founder op — the new family branch must deploy to `ssqti`).
+
 ## Prior session summary (2026-08-05): radical e2e + polish (visual regression, diagnostics, watch mode, coverage, de-god-component, UX audit)
 
 > All gates green at this session's close: `just verify` clean (**44/44 e2e**), `just typecheck` clean, jest **258/258**, `just bridge-parity` OK (21 methods), `just e2e-visual` GREEN, gradle release build `BUILD SUCCESSFUL` (AGP 8.12 + API 36), `just app`/`just ondevice` GREEN on the API-36 emulator. On `main`, **41 commits** ahead of origin/main. Wire FROZEN (292/196/132) untouched. No canister/relay/core CODE changed — all 7 phases + the Phase-B RN 0.86.2 migration shipped under the existing kernel.
@@ -126,7 +189,7 @@
 - **ETH — in/out DONE + LIVE-PROVEN BOTH DIRECTIONS on Sepolia.** Proven against prod mainnet IC canisters + real Sepolia ETH (deposit tx `0x108c8680…5839`, block #11429442; 0.08 SepETH → 0.08 ckSepoliaETH minted to the dpay subaccount; 0.04 ckSepoliaETH burned at ledger `block_index = 8168` → 0.039923 real SepETH delivered, fee reconciliation ties out). Facade WASM upgraded by the founder (family-dispatch live on `ssqti`); currency 5 offramp flipped to Direct; app min-floor fixed (`7dc894a`). **Only residual: a prod relay image redeploy** (founder op — the Sepolia helper fix + app-side changes are in source; prod relay runs old commit but withdraw worked as a generic pass-through).
 - **SOL — MVP DONE + OFFLINE-PAY RAIL DONE (2026-08-06): native device-key path, QR + NFC.** Online SOL in/out (balance + receive QR + send/withdraw) SHIPPED (`0fafae7`→`329b4d5`). Offline-pay durable-nonce rail FULLY BUILT (`fe2be81`→`d772ae3`): pure builders (nonce.ts/spl.ts byte-exact vs @solana/web3.js goldens), QR codec (solreq:/solpay:), RPC stub seam, seam lifecycle (signOffline/createNonce/broadcast/resync), payer nonce persist, receipt-nonce-relay outcome logic, SolPayMode + SolReceiveMode UI, NFC HCE transport (Kotlin DpaySolNfc + SolNfcTap UI + e2e flow 47). All gates green: e2e 48/48, jest 400/400, typecheck clean, bridge-parity OK (28 methods), device gate `DPAY_SELFCHECK PASS` + `DPAY_SOL_SELFCHECK PASS`. No IC canister / relay / facade / wire change. Remaining outer-loop: mainnet RPC config (operator), physical two-phone NFC radio proof. Two v2 follow-ups (non-blocking): source-ATA auto-create for USDC, stronger getTransaction receipt verify.
 
-**The active engineering work is: (1) SOL MVP (3-4 days) then the offline-pay durable-nonce rail (+5-7 days); (2) prod relay image redeploy (founder op, not blocking SOL); (3) ckERC20(USDC) withdraw (lower priority — offramp Unavailable, needs ckETH-for-fees).**
+**The active engineering work is: ckERC20(USDC) withdraw (the only remaining native-asset out path — BTC + ETH + SOL are all DONE).** See the "ckERC20(USDC) withdraw — next-session work order" section below for the full research + implementation plan. SOL MVP + offline-pay rail = DONE. Prod relay image redeployed (2026-08-06).
 
 **Several items below were previously mislabeled "founder outer-loop" and safe-punted. That was wrong.** They are NOT blocked — they should be done in the next session(s). Only the items in the explicit **POSTPONE** list are genuinely blocked on founder action or external steps; treat everything else as in-scope autonomous work. Founder directive (2026-08-05): *only the genuinely-blocked tasks get postponed.* (Items 1–8 below are all ✅ shipped as of 2026-08-06; they remain as the completion record. The TOP PRIORITY block above supersedes them as the active work order.)
 
