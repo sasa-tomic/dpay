@@ -94,4 +94,18 @@
 - [x] Phase 1a — transitive deps promoted (commit `ed1b4c2`)
 - [x] Phase 1b — device gate SOL self-check PASS (`just app` 2026-08-06: `DPAY_SOL_SELFCHECK PASS`)
 - [x] Phase 1c — devnet round-trip from the app (send sig `36iNhSstnx5DW72hmne27Thr453JmQUGFiTrL3pLYdrEHU4BukAgCUSQH6cBiZHsb9BxnEXrAjEWpYvit4rJyb3X`; proof at `.dev/sol-proof/run.cjs`)
-- [ ] Phase 2 — forks resolved + offline-pay rail built
+- [x] Phase 2 — QR offline-pay rail built + e2e-proven (commits `fe2be81`→`cb4ff51`):
+  - [x] U1 `solana/nonce.ts` — durable-nonce builders (byte-exact vs `@solana/web3.js` golden)
+  - [x] U2 `solana/spl.ts` — SPL Token transfer + ATA PDA (byte-exact vs `@solana/spl-token` golden)
+  - [x] U3 `solana/qr.ts` — `solreq:`/`solpay:` codec (30 tests, strict validation)
+  - [x] U4 `solana/rpc.ts` — `getNonceAccount` + rent + e2e stub seam (`__DPAY_TEST_SOLANA_RPC_STUB`)
+  - [x] U5 `solana.ts` seam — offline-pay lifecycle (signOffline/createNonce/broadcast/resync)
+  - [x] U6 `services/solNoncePersist.ts` — payer nonce-account state (AsyncStorage)
+  - [x] U7 `solana/payments.ts` — SOL receipt outcome logic (receipt-nonce-relay)
+  - [x] U8 `components/SolPayMode.tsx` — payer offline-sign + hand-off UI
+  - [x] U9 `components/SolReceiveMode.tsx` — merchant request + broadcast UI
+  - [x] U10 Wallet wiring + e2e flow 46 (QR offline handoff via stub RPC, 47/47 GREEN)
+  - [ ] U11 SOL NFC transport (Kotlin HCE + RN bridge) — DEVICE GATED, deferred
+  - [ ] U12 e2e SOL NFC seam + flow 47 — deferred
+  - [x] U13 `DPAY_SOL_SELFCHECK` extended (nonce builder on Hermes) — **needs `just app` device gate**
+- [ ] Phase 2 NFC — U11 (Kotlin HCE) + U12 (e2e NFC seam) remain; the QR path ships the feature standalone

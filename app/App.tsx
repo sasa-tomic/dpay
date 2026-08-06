@@ -22,7 +22,9 @@ import {RELAY_DEFAULT} from './relayConfig';
 import {C} from './config/palette';
 import {STORAGE_KEY, RELAY_STORAGE_KEY} from './config/constants';
 import {randNonceHex} from './lib/format';
-import {deriveSolanaAddress, isValidSolanaAddress} from './solana/identity';
+import {deriveSolanaAddress, isValidSolanaAddress, deriveSolanaKeypair} from './solana/identity';
+import {base58Decode32} from './solana/tx';
+import {buildAdvanceAndTransferMessage} from './solana/nonce';
 import type {Identity} from './lib/types';
 import {DpayCore} from './services/native';
 import {S} from './styles';
@@ -78,13 +80,20 @@ export default function App() {
 
   // On-device SOL self-check → logcat. Proves the SLIP-10 ed25519 derivation + bs58/noble deps run
   // on the real device (Hermes) — the native-module/polyfill blind spot — independent of the FFI and
-  // of any network (pure derivation only; no RPC). The device gate greps for `DPAY_SOL_SELFCHECK PASS`.
+  // of any network (pure derivation + nonce message builder; no RPC). The device gate greps for
+  // `DPAY_SOL_SELFCHECK PASS`.
   useEffect(() => {
     (async () => {
       try {
         const kp = await DpayCore.generateKeypair();
         const addr = deriveSolanaAddress(kp.secretHex);
-        console.log(`DPAY_SOL_SELFCHECK ${isValidSolanaAddress(addr) ? 'PASS' : 'FAIL'}`);
+        if (!isValidSolanaAddress(addr)) throw new Error('invalid SOL address');
+        const {publicKey} = deriveSolanaKeypair(kp.secretHex);
+        const nonceAcct = base58Decode32('GZXyfzSTCBmA7rpeDLrmUbiSA45H5EEwJhoBeR6ZNb3u');
+        const storedNonce = base58Decode32(addr);
+        const msg = buildAdvanceAndTransferMessage(publicKey, nonceAcct, addr, 1_000_000n, storedNonce);
+        if (msg[0] !== 1 || msg.length < 200) throw new Error(`nonce msg sanity fail: hdr=${msg[0]} len=${msg.length}`);
+        console.log('DPAY_SOL_SELFCHECK PASS');
       } catch (e: unknown) { console.log(`DPAY_SOL_SELFCHECK FAIL ${e instanceof Error ? e.message : String(e)}`); }
     })();
   }, []);
