@@ -1,6 +1,6 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **45 flows.**
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **46 flows.**
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay (FakeLedger, offline). No UI stubs. The only shimmed I/O boundary is
 > the camera scan (sanctioned smallest-boundary seam) and the NFC radio (physical-device gate).
@@ -17,7 +17,7 @@
 Flows grouped by user journey; within each table, every row lists what the flow **verifies** and
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`).
 
-wire (1) · onboard (4) · pay (16) · offline (2) · deposit (7) · withdraw (3) · nfc (2) · system (7) · tour (3)
+wire (1) · onboard (4) · pay (16) · offline (2) · deposit (8) · withdraw (3) · nfc (2) · system (7) · tour (3)
 
 ---
 
@@ -75,6 +75,7 @@ wire (1) · onboard (4) · pay (16) · offline (2) · deposit (7) · withdraw (3
 | 22 | deposit-error | Relay unreachable when opening the deposit sheet → honest error ('Check connection'), no spinner-forever. | deposit-error, offline, graceful |
 | 33 | ckerc20-persist | ckERC20 deposit watching PERSISTS across restart: reload rehydrates watching (no reconnect), resumed notice shown. | ckerc20, persist, restart, watching-resume |
 | 34 | onramp-provider-resolution | Onramp resolver: window.ethereum wins when present; WC branch unreachable on web even when 'configured' → honest null. | onramp-resolver, eip-1193, walletconnect-gate |
+| 45 | sol-receive | Native SOL rail: device-derived SOL card in Balances + receive address QR (offline, no devnet). | sol-card, sol-derive, sol-receive, qr, address |
 
 ### Withdrawal (ckBTC cash-out)
 
