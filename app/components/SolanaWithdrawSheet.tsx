@@ -10,6 +10,15 @@ import {SOL_DECIMALS, SOL_UNIT, isValidSolanaAddress} from '../solana/identity';
 import {sendSol} from '../solana';
 import {copyToClipboard} from '../lib/clipboard';
 import {useEscapeToClose} from '../hooks/useHotkeys';
+import {SheetOverlay} from './SheetOverlay';
+
+function friendlySolError(msg: string): string {
+  if (/abort/i.test(msg)) return 'Timed out. Check your connection and try again.';
+  if (/insufficient/i.test(msg)) return 'Not enough SOL for this send plus the network fee.';
+  if (/rent.exempt/i.test(msg)) return 'After this send, your account would fall below the minimum balance. Send a smaller amount.';
+  if (/blockhash/i.test(msg)) return 'The network was too busy. Try again.';
+  return msg;
+}
 
 /**
  * Send SOL to a native Solana address. Mirrors WithdrawSheet's form/submitting/done/error phases, but
@@ -51,7 +60,7 @@ export function SolanaWithdrawSheet({identity, balance, onSent, onClose}: {ident
       onSent(); // trigger an immediate balance refresh
     } catch (e: unknown) {
       // A Solana RPC error (insufficient funds / rent-exempt violation / network) or an abort.
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(friendlySolError(e instanceof Error ? e.message : String(e)));
       setPhase('error');
     } finally {
       clearTimeout(t);
@@ -68,7 +77,7 @@ export function SolanaWithdrawSheet({identity, balance, onSent, onClose}: {ident
   };
 
   return (
-    <View style={S.sheetOverlay}>
+    <SheetOverlay>
       <SafeAreaView style={S.sheet}>
         <StatusBar barStyle="light-content" backgroundColor={C.bg} />
         <View style={S.sheetHead}>
@@ -153,6 +162,6 @@ export function SolanaWithdrawSheet({identity, balance, onSent, onClose}: {ident
           )}
         </ScrollView>
       </SafeAreaView>
-    </View>
+    </SheetOverlay>
   );
 }

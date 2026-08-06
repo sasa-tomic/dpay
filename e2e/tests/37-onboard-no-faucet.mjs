@@ -1,11 +1,13 @@
 // Flow 37 — Onboarding-time faucet failure: onboard against a DEAD relay → wallet created with $0
 // AND an honest offline indicator (no fake funding, no crash, no stall).
 //
-// Onboarding's `create()` (Onboarding.tsx) is deliberately resilient: it generates the on-device
-// keypair + persists the identity, then fires a BEST-EFFORT faucet POST bounded by a 4s timeout. If
-// the relay is unreachable the faucet throw is CAUGHT + SWALLOWED ("created with $0, fund later") —
-// the wallet mounts anyway. This flow proves that contract end-to-end against the REAL failure mode
-// (ECONNREFUSED to a genuinely-closed port, not Chrome's ERR_UNSAFE_PORT artifact):
+// Onboarding's `create()` (Onboarding.tsx) generates the on-device keypair + persists the identity,
+// then fires a BEST-EFFORT faucet POST bounded by a 4s timeout. If the relay is unreachable the
+// faucet throw is CAUGHT and SURFACED: instead of silently transitioning to the wallet at $0, the
+// app shows an honest "starter funds couldn't be added" message + a "Continue" button so the user
+// explicitly proceeds knowing starter funds weren't added (then the wallet mounts). This flow proves
+// that contract end-to-end against the REAL failure mode (ECONNREFUSED to a genuinely-closed port,
+// not Chrome's ERR_UNSAFE_PORT artifact):
 //   - the wallet IS created (identity persisted, header username renders, balance element mounts);
 //   - the faucet request fails for the RIGHT reason (a connection refusal);
 //   - the header NEVER shows ∂100.00 (the funded happy path) — it shows the honest offline state
@@ -27,7 +29,7 @@ export const meta = {
   name: 'onboard-no-faucet',
   journey: 'onboard',
   covers: ['onboard', 'faucet-failure', 'offline', 'dead-relay', 'right-reason', 'zero-balance'],
-  verifies: 'Onboard against a dead relay → wallet created with $0 (∂100 never shown), honest "~ approx." offline indicator, faucet fails with ECONNREFUSED.',
+  verifies: 'Onboard against a dead relay → faucet failure surfaces an honest "Continue" prompt (not a silent $0 transition), wallet created with $0 (∂100 never shown), honest "~ approx." offline indicator, faucet fails with ECONNREFUSED.',
   timeoutMs: 20000,
 };
 
@@ -59,7 +61,12 @@ export async function run() {
     await driver.typeByPlaceholder('e.g. Alice', 'e2e-nofaucet', { timeoutMs: 8_000 });
     await driver.click('btn-create', { timeoutMs: 4_000 });
 
-    // The wallet MOUNTS despite the dead relay (create() swallows the faucet throw → onCreated fires).
+    // The faucet fails (dead relay) → create() sets pendingId + shows the honest "Continue" prompt
+    // instead of auto-transitioning. Tap Continue to proceed to the wallet at $0.
+    await driver.findByTestID('onboard-faucet-failed', { timeoutMs: 10_000 });
+    await driver.click('btn-onboard-continue', { timeoutMs: 4_000 });
+
+    // The wallet MOUNTS after the explicit Continue (onCreated(pendingId) fires).
     await driver.findByTestID('balance', { timeoutMs: 10_000 });
     const who = await driver.readText('header-who');
     assert(who === 'e2e-nofaucet', `wallet header should show the username after onboarding, got "${who}"`);

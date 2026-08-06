@@ -17,6 +17,7 @@ import {copyToClipboard} from '../lib/clipboard';
 import {QrScanner} from './QrScanner';
 import {SolNfcTap} from './SolNfcTap';
 import {useEscapeToClose} from '../hooks/useHotkeys';
+import {SheetOverlay} from './SheetOverlay';
 
 const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeight: 44, borderWidth: 1, borderColor: C.sub2, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink};
 
@@ -109,7 +110,7 @@ export function SolReceiveMode({identity, online, nfcReady, onClose}: {identity:
   };
 
   return (
-    <View style={S.sheetOverlay}>
+    <SheetOverlay>
       <SafeAreaView style={S.sheet}>
         <StatusBar barStyle="light-content" backgroundColor={C.bg} />
         <View style={S.sheetHead}>
@@ -237,6 +238,6 @@ export function SolReceiveMode({identity, online, nfcReady, onClose}: {identity:
           )}
         </ScrollView>
       </SafeAreaView>
-    </View>
+    </SheetOverlay>
   );
 }

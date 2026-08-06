@@ -12,6 +12,7 @@ import {withdrawFunds} from '../services/relay';
 import {loadSavedWithdrawAddr, saveWithdrawAddr} from '../services/withdraw';
 import {DpayCore} from '../services/native';
 import {useEscapeToClose} from '../hooks/useHotkeys';
+import {SheetOverlay} from './SheetOverlay';
 import {copyToClipboard} from '../lib/clipboard';
 
 /**
@@ -111,11 +112,11 @@ export function WithdrawSheet({identity, relayUrl, currency, display, family, to
   }, [receipt]);
 
   return (
-    <View style={S.sheetOverlay}>
+    <SheetOverlay>
       <SafeAreaView style={S.sheet}>
         <StatusBar barStyle="light-content" backgroundColor={C.bg} />
         <View style={S.sheetHead}>
-          <Text style={S.sheetTitle}>{`Cash out ${display.networkLabel}`}</Text>
+          <Text style={S.sheetTitle}>{`Send ${display.networkLabel}`}</Text>
           <Pressable testID="btn-withdraw-close" style={S.sheetClose} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" accessibilityState={{disabled: false}}><Text style={S.sheetCloseX}>✕</Text></Pressable>
         </View>
 
@@ -205,6 +206,6 @@ export function WithdrawSheet({identity, relayUrl, currency, display, family, to
           )}
         </ScrollView>
       </SafeAreaView>
-    </View>
+    </SheetOverlay>
   );
 }

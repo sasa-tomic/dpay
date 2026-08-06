@@ -15,6 +15,7 @@ import {DpaySolNfc} from '../services/native';
 import {QrScanner} from './QrScanner';
 import {SolNfcTap} from './SolNfcTap';
 import {useEscapeToClose} from '../hooks/useHotkeys';
+import {SheetOverlay} from './SheetOverlay';
 
 /**
  * SolPayMode — the payer-side offline-pay sheet for the SOL durable-nonce rail.
@@ -153,7 +154,7 @@ export function SolPayMode({identity, online, nfcReady, onClose}: {identity: Ide
   const unit = req?.cur === 'USDC' ? 'USDC' : SOL_UNIT;
 
   return (
-    <View style={S.sheetOverlay}>
+    <SheetOverlay>
       <SafeAreaView style={S.sheet}>
         <StatusBar barStyle="light-content" backgroundColor={C.bg} />
         <View style={S.sheetHead}>
@@ -301,6 +302,6 @@ export function SolPayMode({identity, online, nfcReady, onClose}: {identity: Ide
           {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
         </ScrollView>
       </SafeAreaView>
-    </View>
+    </SheetOverlay>
   );
 }

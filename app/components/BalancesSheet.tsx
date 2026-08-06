@@ -6,6 +6,7 @@ import {cmpRaw} from '../lib/amount';
 import {fmtAsset} from '../lib/format';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {useEscapeToClose} from '../hooks/useHotkeys';
+import {SheetOverlay} from './SheetOverlay';
 
 // Balances sheet — the wallet's asset hub. Reached by tapping the header balance (the main screen
 // shows ONLY the current currency's balance; this screen is the sole home for the full balance list
@@ -39,7 +40,7 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
 }) {
   useEscapeToClose(onClose);
   return (
-    <View style={S.sheetOverlay}>
+    <SheetOverlay>
       <SafeAreaView style={S.sheet}>
         <StatusBar barStyle="light-content" backgroundColor={C.bg} />
         <View style={S.sheetHead}>
@@ -55,7 +56,7 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
           </Pressable>
         </View>
         <ScrollView contentContainerStyle={S.sheetCenter} keyboardShouldPersistTaps="handled">
-          <Text style={S.dim2}>Tap a currency to show it on your home screen. Top up any of them below.</Text>
+          <Text style={S.dim2}>Tap a currency to show it on your home screen. Receive or send any of them below.</Text>
           {catalog.map(a => {
             const isPrimary = a.currency === 0;
             const key = isPrimary ? 'demo' : assetTestKey(a);
@@ -128,13 +129,13 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
                           disabled={topUpBusy}
                           onPress={onTopUp}
                           accessibilityRole="button"
-                          accessibilityLabel={`Top up ${name}`}
+                          accessibilityLabel={`Receive ${name}`}
                           accessibilityHint="Add demo funds to this wallet"
                           accessibilityState={{disabled: topUpBusy}}
                         >
                           {topUpBusy
                             ? <ActivityIndicator size="small" color={C.brand} />
-                            : <><Text style={S.assetActionPlus}>+</Text><Text style={S.assetActionText}>Top Up</Text></>}
+                            : <><Text style={S.assetActionPlus}>+</Text><Text style={S.assetActionText}>Receive</Text></>}
                         </Pressable>
                       ) : null}
                       {onrampable && !isPrimary ? (
@@ -143,11 +144,11 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
                           style={S.assetActionBtn}
                           onPress={() => onAdd(a.currency)}
                           accessibilityRole="button"
-                          accessibilityLabel={`Top up ${name}`}
+                          accessibilityLabel={`Receive ${name}`}
                           accessibilityHint="Open the deposit address and instructions for this asset"
                         >
                           <Text style={S.assetActionPlus}>+</Text>
-                          <Text style={S.assetActionText}>Top Up</Text>
+                          <Text style={S.assetActionText}>Receive</Text>
                         </Pressable>
                       ) : null}
                       {cashable ? (
@@ -156,10 +157,10 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
                           style={S.withdrawLink}
                           onPress={() => onWithdraw(a.currency)}
                           accessibilityRole="button"
-                          accessibilityLabel={`Cash out ${name}`}
+                          accessibilityLabel={`Send ${name}`}
                           accessibilityHint="Send this asset to a native address"
                         >
-                          <Text style={S.withdrawLinkText}>Cash out</Text>
+                          <Text style={S.withdrawLinkText}>Send</Text>
                         </Pressable>
                       ) : null}
                     </View>
@@ -235,6 +236,6 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
           {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
         </ScrollView>
       </SafeAreaView>
-    </View>
+    </SheetOverlay>
   );
 }

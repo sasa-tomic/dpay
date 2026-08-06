@@ -13,6 +13,7 @@ import {encodeApprove, encodeDepositErc20, encodeDepositEth, principalToBytes32}
 import {resolveOnrampProvider, connectWallet, getChainId, sendTransaction, waitForReceipt, ReceiptReverted, ReceiptTimeout, pairOnrampWallet, openWalletApp} from '../wallet';
 import {loadDeposit, saveDeposit, clearDeposit} from '../services/ckerc20Persist';
 import {useEscapeToClose} from '../hooks/useHotkeys';
+import {SheetOverlay} from './SheetOverlay';
 
 // ckERC20 (ckUSDC) / native ckETH direct onramp — a wallet-connect flow. The user connects their OWN
 // Ethereum wallet (MetaMask/Rabby; window.ethereum on web), dpay BUILDS the transaction(s), and the
@@ -317,7 +318,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
   }, [phase, relayUrl, identity.publicHex, currency, startBal]);
 
   return (
-    <View style={S.sheetOverlay}>
+    <SheetOverlay>
       <SafeAreaView style={S.sheet}>
         <StatusBar barStyle="light-content" backgroundColor={C.bg} />
         <View style={S.sheetHead}>
@@ -447,6 +448,6 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
           {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
         </ScrollView>
       </SafeAreaView>
-    </View>
+    </SheetOverlay>
   );
 }

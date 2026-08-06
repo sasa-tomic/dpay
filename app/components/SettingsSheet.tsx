@@ -4,6 +4,7 @@ import {C} from '../config/palette';
 import {PRIVACY_URL} from '../config/constants';
 import {S} from '../styles';
 import {useEscapeToClose} from '../hooks/useHotkeys';
+import {SheetOverlay} from './SheetOverlay';
 
 /**
  * Settings sheet — server config + reset (app configuration only). Moved off the main wallet screen
@@ -49,7 +50,7 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset}: {
   const applyRelay = () => { if (relayDirty) { setRelayUrl(draftRelay); setLastApplied(draftRelay.trim()); } };
 
   return (
-    <View style={S.sheetOverlay}>
+    <SheetOverlay>
       <SafeAreaView style={S.sheet}>
         <StatusBar barStyle="light-content" backgroundColor={C.bg} />
         <View style={S.sheetHead}>
@@ -140,6 +141,6 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset}: {
           {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
         </ScrollView>
       </SafeAreaView>
-    </View>
+    </SheetOverlay>
   );
 }

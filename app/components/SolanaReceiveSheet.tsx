@@ -6,6 +6,7 @@ import {S} from '../styles';
 import {QR_SIZE_SMALL} from '../config/constants';
 import {copyToClipboard} from '../lib/clipboard';
 import {useEscapeToClose} from '../hooks/useHotkeys';
+import {SheetOverlay} from './SheetOverlay';
 
 /**
  * Receive SOL — the device's native Solana deposit address (derived from the IC identity seed via
@@ -24,7 +25,7 @@ export function SolanaReceiveSheet({address, onClose}: {address: string; onClose
   }, [address]);
 
   return (
-    <View style={S.sheetOverlay}>
+    <SheetOverlay>
       <SafeAreaView style={S.sheet}>
         <StatusBar barStyle="light-content" backgroundColor={C.bg} />
         <View style={S.sheetHead}>
@@ -66,6 +67,6 @@ export function SolanaReceiveSheet({address, onClose}: {address: string; onClose
           {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
         </ScrollView>
       </SafeAreaView>
-    </View>
+    </SheetOverlay>
   );
 }
