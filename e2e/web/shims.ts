@@ -14,6 +14,7 @@
 import { NativeModules, Share } from 'react-native-web';
 import { DpayCore } from './dpay-core';
 import { DpayNfc, installNfcSeam } from './dpay-nfc';
+import { DpaySolNfc, installSolNfcSeam } from './dpay-sol-nfc';
 
 // The app destructure `const {DpayCore, DpayNfc} = NativeModules` runs after this module's side
 // effects (entry.tsx imports `./shims` BEFORE `app/App`), so assigning onto the singleton makes them
@@ -21,6 +22,7 @@ import { DpayNfc, installNfcSeam } from './dpay-nfc';
 // react-native-web/dist/exports/NativeModules/index.js.)
 (NativeModules as any).DpayCore = DpayCore;
 (NativeModules as any).DpayNfc = DpayNfc;
+(NativeModules as any).DpaySolNfc = DpaySolNfc;
 
 // Share.share in RNW calls navigator.share if defined, else REJECTS. In headless chrome neither path
 // is useful; the app's deposit "Copy address" and "Share auth code" paths both use it as a clipboard
@@ -57,6 +59,12 @@ if (typeof window !== 'undefined') {
 // the Pay screen shows the NFC-unavailable row and NfcTap never mounts).
 if (typeof window !== 'undefined') {
   installNfcSeam(window);
+}
+
+// Install the SOL NFC session seam (`window.__DPAY_TEST_SOL_NFC_SESSION`) — same pattern as the IC
+// NFC seam, for the SOL durable-nonce tap transport (flow 47).
+if (typeof window !== 'undefined') {
+  installSolNfcSeam(window);
 }
 
 // Marker the driver waits on (mirrors ui/src/App.jsx's `window.__DPAY_READY = true`). Set AFTER all

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  dpay SOL HCE AID registration. The AID F0 64 70 61 79 02 is proprietary (0xF0 prefix) + "dpay" + a
+  version byte 02 (v2/SOL) — distinct from the IC AID (...01), so both transports coexist and routing
+  is dpay's alone. Category "other" (NOT "payment") means dpay never competes for the tap-to-pay
+  default slot Google Wallet owns. requireDeviceUnlock=false: the payer auto-signs in-app (screen on,
+  the tap IS the consent), so no separate unlock gate is needed.
+-->
+<host-apdu-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/dpay_sol_nfc_desc"
+    android:requireDeviceUnlock="false">
+    <aid-group
+        android:description="@string/dpay_sol_nfc_aid_group"
+        android:category="other">
+        <aid-filter android:name="F06470617902" />
+    </aid-group>
+</host-apdu-service>

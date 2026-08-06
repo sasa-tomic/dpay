@@ -26,6 +26,37 @@ export type NfcEvent =
 
 export type NfcPhaseName = 'listening' | 'linking' | 'exchanging' | 'awaitingApproval' | 'settling' | 'success' | 'declined' | 'pending';
 
+// SOL NFC tap transport (see android/com/dpay/DpaySolNfc*). A SECOND, fully-independent transport
+// (pure Kotlin — no Rust core, no UniFFI) carrying opaque `solreq:`/`solpay:` URI strings + a JSON
+// receipt for the SOL durable-nonce rail. The money logic (decode/sign/broadcast) stays in JS; the
+// Kotlin layer is PURE TRANSPORT. SolPayMode = HCE card (payer is tapped); SolReceiveMode = reader.
+export type DpaySolNfcApi = {
+  armCard(): Promise<void>;
+  disarmCard(): Promise<void>;
+  approveSolCard(solpayUri: string): Promise<void>;
+  declineSolCard(): Promise<void>;
+  startSolReader(solreqUri: string): Promise<void>;
+  stopSolReader(): Promise<void>;
+  // Merchant: after broadcasting + confirming online, hand the outcome back to the offline payer.
+  // `status` is the receipt code (0 settled, 1 rejected, 2 unreachable); `nextNonce` is the advanced
+  // durable nonce value (the receipt-nonce-relay the payer adopts — empty when unreachable); `sig`
+  // is the on-chain tx signature (empty when not settled); `npub` binds the receipt to the payer's
+  // nonce account (a mismatch → the payer ignores it — defense against a cross-tap receipt).
+  confirmSolReceipt(status: number, nextNonce: string, sig: string, npub: string): Promise<void>;
+  addListener(eventName: string): void;
+  removeListeners(count: number): void;
+};
+
+export type SolNfcEvent =
+  | {type: 'phase'; role: 'card' | 'reader'; phase: SolNfcPhaseName}
+  | {type: 'request'; role: 'card'; solreqUri: string}
+  | {type: 'payment'; role: 'reader'; solpayUri: string}
+  | {type: 'receipt'; role: 'card'; status: number; npub: string; nextNonce: string; sig: string}
+  | {type: 'confirmed'; role: 'reader'}
+  | {type: 'error'; role: 'card' | 'reader'; reason: string};
+
+export type SolNfcPhaseName = 'listening' | 'linking' | 'exchanging' | 'awaitingApproval' | 'settling' | 'success' | 'declined' | 'pending';
+
 // MC1 units 2-4: every protocol-u64 amount travels as a decimal-digit STRING (never `number`) so the
 // full u64 range round-trips without precision loss above 2^53. `expiry`/`currency`/time fields stay
 // `number` (they are small bounded values, not money).

@@ -12,7 +12,9 @@ import {USDC_DECIMALS, USDC_MINT_ADDRESS, deriveAta} from '../solana/spl';
 import {encodeSolReq, decodeSolPay, type SolReq} from '../solana/qr';
 import {deriveSolanaAddress, broadcastSolPayment} from '../solana';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from '../payments';
+import {DpaySolNfc} from '../services/native';
 import {QrScanner} from './QrScanner';
+import {SolNfcTap} from './SolNfcTap';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 
 const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeight: 44, borderWidth: 1, borderColor: C.sub2, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink};
@@ -29,7 +31,7 @@ const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeigh
  * Mirrors ReceiveMode.tsx's form → reqQr → result phase machine, but settles directly on Solana
  * (no relay, no /receipt poll — `confirmTransaction` is the source of truth).
  */
-export function SolReceiveMode({identity, online, onClose}: {identity: Identity; online: boolean; onClose: () => void}) {
+export function SolReceiveMode({identity, online, nfcReady, onClose}: {identity: Identity; online: boolean; nfcReady: boolean; onClose: () => void}) {
   const [amount, setAmount] = useState('0.025');
   const [cur, setCur] = useState<'SOL' | 'USDC'>('SOL');
   const [memo, setMemo] = useState('');
@@ -40,6 +42,9 @@ export function SolReceiveMode({identity, online, onClose}: {identity: Identity;
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{amount: string; cur: 'SOL' | 'USDC'; sig: string | null} | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // A tap taking over while the QR is shown; nfcKey re-starts the reader after each.
+  const [nfcActive, setNfcActive] = useState(false);
+  const [nfcKey, setNfcKey] = useState(0);
 
   useEscapeToClose(onClose);
 
@@ -92,7 +97,7 @@ export function SolReceiveMode({identity, online, onClose}: {identity: Identity;
     }
   }
 
-  function reset() { setReqUri(null); setReqSnapshot(null); setResult(null); setScanning(false); setErr(null); setMemo(''); setPhase('form'); }
+  function reset() { setReqUri(null); setReqSnapshot(null); setResult(null); setScanning(false); setErr(null); setMemo(''); setNfcActive(false); setNfcKey(k => k + 1); setPhase('form'); }
 
   return (
     <View style={S.sheetOverlay}>
@@ -106,7 +111,7 @@ export function SolReceiveMode({identity, online, onClose}: {identity: Identity;
         </View>
 
         <ScrollView contentContainerStyle={S.sheetBody} keyboardShouldPersistTaps="handled">
-          {phase === 'result' && result ? (
+          {phase === 'result' && result && !nfcActive ? (
             <View style={S.centerAll}>
               <View style={S.check}><Text style={S.checkMark}>✓</Text></View>
               <Text testID="sol-req-status" style={S.paidText}>{`Received ${fmtAsset(result.amount, result.cur === 'USDC' ? USDC_DECIMALS : SOL_DECIMALS, result.cur === 'USDC' ? 'USDC' : SOL_UNIT)}`}</Text>
@@ -122,10 +127,20 @@ export function SolReceiveMode({identity, online, onClose}: {identity: Identity;
             </View>
           ) : phase === 'reqQr' && reqUri ? (
             <>
+              {/* Reader runs in the background while the QR is shown: the payer taps OR scans. */}
+              {nfcReady && DpaySolNfc ? (
+                <SolNfcTap
+                  key={nfcKey} role="reader" identity={identity} solreqUri={reqUri}
+                  onActive={() => setNfcActive(true)}
+                  onClose={() => { setNfcActive(false); setNfcKey(k => k + 1); }}
+                />
+              ) : null}
+              {!nfcActive ? (
+                <>
               {!scanning && !busy ? (
                 <>
                   <View style={S.nfcHintRow}>
-                    <Text style={S.nfcHintLabel}>Show this to the payer</Text>
+                    <Text style={S.nfcHintLabel}>Show this to the payer{nfcReady ? ' · or let them tap' : ''}</Text>
                   </View>
                   <View testID="sol-req-qr" style={S.qrCard}><QRCode value={reqUri} size={QR_SIZE_SMALL} ecl="M" /></View>
                   <Text style={S.amountBig}>{fmtAsset(reqSnapshot!.amt, decimals, unit)}</Text>
@@ -153,6 +168,8 @@ export function SolReceiveMode({identity, online, onClose}: {identity: Identity;
                   </Pressable>
                 </>
               )}
+                </>
+              ) : null}
             </>
           ) : (
             <>

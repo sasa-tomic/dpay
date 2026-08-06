@@ -11,7 +11,9 @@ import {USDC_DECIMALS} from '../solana/spl';
 import {decodeSolReq, type SolReq} from '../solana/qr';
 import {createNonceAccount, signOfflineSolPayment, signOfflineSplPayment} from '../solana';
 import {loadSolNonce, saveSolNonce, type SolNonceState} from '../services/solNoncePersist';
+import {DpaySolNfc} from '../services/native';
 import {QrScanner} from './QrScanner';
+import {SolNfcTap} from './SolNfcTap';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 
 /**
@@ -29,13 +31,16 @@ import {useEscapeToClose} from '../hooks/useHotkeys';
  * The 'setup' phase handles this — createNonceAccount funds + initializes the durable-nonce
  * account on-chain and persists its address + initial value.
  */
-export function SolPayMode({identity, online, onClose}: {identity: Identity; online: boolean; onClose: () => void}) {
+export function SolPayMode({identity, online, nfcReady, onClose}: {identity: Identity; online: boolean; nfcReady: boolean; onClose: () => void}) {
   const [phase, setPhase] = useState<'setup' | 'scan' | 'review' | 'qr' | 'paid'>('setup');
   const [nonceState, setNonceState] = useState<SolNonceState | null>(null);
   const [req, setReq] = useState<SolReq | null>(null);
   const [solpayUri, setSolpayUri] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // A tap arriving on the always-armed card takes over the scan screen; nfcKey re-arms after each.
+  const [nfcActive, setNfcActive] = useState(false);
+  const [nfcKey, setNfcKey] = useState(0);
 
   useEscapeToClose(onClose);
 
@@ -104,6 +109,24 @@ export function SolPayMode({identity, online, onClose}: {identity: Identity; onl
 
   function reset() { setReq(null); setSolpayUri(null); setErr(null); setPhase('scan'); }
 
+  // NFC card callbacks. onPaid: the merchant's settled receipt carried the advanced nonce — adopt it
+  // optimistically (the receipt-nonce-relay win: the NEXT offline payment needs NO online resync) +
+  // persist. onStale: the broadcast was rejected — mark the nonce stale so the next sign refuses.
+  async function onNfcPaid(nextNonce: string) {
+    const ns = nonceState;
+    if (!ns || !nextNonce) return;
+    const updated: SolNonceState = {address: ns.address, value: nextNonce, status: 'ready'};
+    setNonceState(updated);
+    await saveSolNonce(identity.publicHex, updated);
+  }
+  async function onNfcStale() {
+    const ns = nonceState;
+    if (!ns) return;
+    const updated: SolNonceState = {address: ns.address, value: ns.value, status: 'stale'};
+    setNonceState(updated);
+    await saveSolNonce(identity.publicHex, updated);
+  }
+
   const decimals = req?.cur === 'USDC' ? USDC_DECIMALS : SOL_DECIMALS;
   const unit = req?.cur === 'USDC' ? 'USDC' : SOL_UNIT;
 
@@ -148,17 +171,30 @@ export function SolPayMode({identity, online, onClose}: {identity: Identity; onl
             </View>
           ) : phase === 'scan' ? (
             <>
-              {nonceState?.status === 'stale' ? (
-                <View testID="sol-pay-stale" style={S.reviewCard}>
-                  <Text style={S.reviewLabel}>Offline pay needs a resync</Text>
-                  <Text style={S.warnNote}>Your nonce was marked stale after a failed broadcast. Go online and resync to use offline pay again.</Text>
-                </View>
+              {/* NFC card runs in the background (if ready + a live nonce) while the QR scanner is
+                  live at the same time — the payer taps the merchant's phone OR scans its QR. */}
+              {nfcReady && DpaySolNfc && nonceState?.status === 'ready' ? (
+                <SolNfcTap
+                  key={nfcKey} role="card" identity={identity} nonceState={nonceState}
+                  onPaid={onNfcPaid} onStale={onNfcStale}
+                  onClose={() => { setNfcActive(false); setNfcKey(k => k + 1); }}
+                />
               ) : null}
-              <View testID="sol-pay-scan">
-                <Text style={S.dim2}>Scan the merchant's payment code to pay offline.</Text>
-                <QrScanner onScan={onScan} />
-              </View>
-              {err ? <Text style={S.err}>{err}</Text> : null}
+              {!nfcActive ? (
+                <>
+                  {nonceState?.status === 'stale' ? (
+                    <View testID="sol-pay-stale" style={S.reviewCard}>
+                      <Text style={S.reviewLabel}>Offline pay needs a resync</Text>
+                      <Text style={S.warnNote}>Your nonce was marked stale after a failed broadcast. Go online and resync to use offline pay again.</Text>
+                    </View>
+                  ) : null}
+                  <View testID="sol-pay-scan">
+                    <Text style={S.dim2}>Scan the merchant's payment code to pay offline.</Text>
+                    <QrScanner onScan={onScan} />
+                  </View>
+                  {err ? <Text style={S.err}>{err}</Text> : null}
+                </>
+              ) : null}
             </>
           ) : phase === 'review' && req ? (
             <View style={S.centerAll}>

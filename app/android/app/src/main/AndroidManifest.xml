@@ -57,5 +57,19 @@
             android:name="android.nfc.cardemulation.host_apdu_service"
             android:resource="@xml/apduservice" />
       </service>
+
+      <!-- SOL payer-side HCE card — a SECOND transport (pure Kotlin, no Rust core) on its own AID
+           (F0 64 70 61 79 02 = "dpay" + v2/SOL), distinct from the IC AID so both coexist. -->
+      <service
+        android:name=".DpaySolHostApduService"
+        android:exported="true"
+        android:permission="android.permission.BIND_NFC_SERVICE">
+        <intent-filter>
+            <action android:name="android.nfc.cardemulation.action.HOST_APDU_SERVICE" />
+        </intent-filter>
+        <meta-data
+            android:name="android.nfc.cardemulation.host_apdu_service"
+            android:resource="@xml/solapduservice" />
+      </service>
     </application>
 </manifest>

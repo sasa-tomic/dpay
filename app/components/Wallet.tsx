@@ -350,10 +350,10 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
         />
       ) : null}
       {solPayOpen && solAddress ? (
-        <SolPayMode identity={identity} online={online} onClose={() => setSolPayOpen(false)} />
+        <SolPayMode identity={identity} online={online} nfcReady={nfc === 'ready'} onClose={() => setSolPayOpen(false)} />
       ) : null}
       {solReqOpen && solAddress ? (
-        <SolReceiveMode identity={identity} online={online} onClose={() => setSolReqOpen(false)} />
+        <SolReceiveMode identity={identity} online={online} nfcReady={nfc === 'ready'} onClose={() => setSolReqOpen(false)} />
       ) : null}
       {settingsOpen ? (
         <SettingsSheet

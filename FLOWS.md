@@ -1,6 +1,6 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **47 flows.**
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **48 flows.**
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay (FakeLedger, offline). No UI stubs. The only shimmed I/O boundary is
 > the camera scan (sanctioned smallest-boundary seam) and the NFC radio (physical-device gate).
@@ -17,7 +17,7 @@
 Flows grouped by user journey; within each table, every row lists what the flow **verifies** and
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`).
 
-wire (1) · onboard (4) · pay (16) · offline (3) · deposit (8) · withdraw (3) · nfc (2) · system (7) · tour (3)
+wire (1) · onboard (4) · pay (16) · offline (3) · deposit (8) · withdraw (3) · nfc (3) · system (7) · tour (3)
 
 ---
 
@@ -92,6 +92,7 @@ wire (1) · onboard (4) · pay (16) · offline (3) · deposit (8) · withdraw (3
 |---|------|----------|--------|
 | 11 | nfc | NFC phase transitions (Idle→Linking→Exchanging→Settling→Complete) render via the RNW event bus. | nfc-phases, event-bus |
 | 32 | nfc-disclosure | NFC asset disclosure: mid-tap the status shows honest asset name + network + '0.00050000 BTC' BEFORE success. | nfc-disclosure, consent, asset-name, network |
+| 47 | sol-nfc | SOL NFC tap: arm card → auto-sign → broadcast-stub → receipt → adopt nonce → Paid ✓ | sol-nfc, sol-nonce-relay, event-bus |
 
 ### Settings & system
 

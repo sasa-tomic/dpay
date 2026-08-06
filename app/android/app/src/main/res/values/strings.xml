@@ -2,4 +2,6 @@
     <string name="app_name">dpay</string>
     <string name="dpay_nfc_desc">dpay tap-to-pay</string>
     <string name="dpay_nfc_aid_group">dpay offline payment</string>
+    <string name="dpay_sol_nfc_desc">dpay SOL tap-to-pay</string>
+    <string name="dpay_sol_nfc_aid_group">dpay SOL offline payment</string>
 </resources>

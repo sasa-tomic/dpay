@@ -11,6 +11,7 @@ import {fileURLToPath} from 'node:url';
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const CORE_KT = `${ROOT}app/android/app/src/main/java/com/dpay/DpayCoreModule.kt`;
 const NFC_KT = `${ROOT}app/android/app/src/main/java/com/dpay/DpayNfcModule.kt`;
+const SOL_NFC_KT = `${ROOT}app/android/app/src/main/java/com/dpay/DpaySolNfcModule.kt`;
 const TYPES_TS = `${ROOT}app/lib/types.ts`;
 
 // RN emitter-lifecycle plumbing: present on both sides but not app API — never counted in parity.
@@ -80,14 +81,20 @@ function compare(label, ts, kt) {
 const types = readFileSync(TYPES_TS, 'utf8');
 const coreTs = parseTsInterface(types, 'DpayCoreApi');
 const nfcTs = parseTsInterface(types, 'DpayNfcApi');
+const solNfcTs = parseTsInterface(types, 'DpaySolNfcApi');
 const coreKt = parseKotlin(readFileSync(CORE_KT, 'utf8'));
 const nfcKt = parseKotlin(readFileSync(NFC_KT, 'utf8'));
+const solNfcKt = parseKotlin(readFileSync(SOL_NFC_KT, 'utf8'));
 
-const diffs = [...compare('DpayCoreApi', coreTs, coreKt), ...compare('DpayNfcApi', nfcTs, nfcKt)];
+const diffs = [
+  ...compare('DpayCoreApi', coreTs, coreKt),
+  ...compare('DpayNfcApi', nfcTs, nfcKt),
+  ...compare('DpaySolNfcApi', solNfcTs, solNfcKt),
+];
 if (diffs.length > 0) {
   console.error('bridge-parity FAIL — TS interface and Kotlin @ReactMethod disagree:\n' + diffs.join('\n'));
   process.exit(1);
 }
 
 const count = (obj) => Object.keys(obj).filter(n => !LIFECYCLE.has(n)).length;
-console.log(`bridge-parity OK (${count(coreTs.methods) + count(nfcTs.methods)} methods)`);
+console.log(`bridge-parity OK (${count(coreTs.methods) + count(nfcTs.methods) + count(solNfcTs.methods)} methods)`);
