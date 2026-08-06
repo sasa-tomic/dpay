@@ -130,13 +130,14 @@ const FD_CKETH_ERC20: FamilyDisplay = {
 // Native ETH within the CkEthErc20 family — discriminated by `token_contract == null`. The facade's
 // `withdraw` dispatches this as `withdraw_eth` (burn ckETH → send native ETH); the deposit is a single
 // payable `depositEth` tx to the shared helper (see cketh.ts). 18-decimal Wei amounts. The
-// `withdrawMinRaw` floor is a CONSERVATIVE local UX pre-filter (0.001 ETH = 1e15 Wei): the live ckETH
-// minter's governed `minimum_withdrawal_amount` (sv3dd-oaaaa…; see cketh-minter.did) is the real gate
-// and returns AmountTooLow below it — this floor only stops an obvious-tiny entry before signing. It
-// fits comfortably inside u64 / Number.MAX_SAFE_INTEGER so it stays a plain number like the BTC floor.
+// `withdrawMinRaw` floor mirrors the live ckETH minter's governed `minimum_withdrawal_amount`
+// (sv3dd-oaaaa… / jzenf- Sepolia; see cketh-minter.did) = 0.01 ETH (1e16 Wei), confirmed live. The
+// minter returns AmountTooLow below it; matching it here stops the user from signing an entry the
+// minter will reject. Fits comfortably inside u64 / Number.MAX_SAFE_INTEGER so it stays a plain
+// number like the BTC floor.
 const FD_CKETH_NATIVE: FamilyDisplay = {
   networkLabel: 'Ethereum', nativeAsset: 'ETH', amountDecimals: 18, blockMin: 1,
-  withdrawMinRaw: 1_000_000_000_000_000, addressPlaceholder: '0x…',
+  withdrawMinRaw: 10_000_000_000_000_000, addressPlaceholder: '0x…',
 };
 const FAMILY_DISPLAY: Partial<Record<MinterFamily, FamilyDisplay>> = {CkBtcUtxo: FD_CKBTC, CkEthErc20: FD_CKETH_ERC20};
 // Resolve a currency's family display from the catalog. MC1 unit 6 — FAIL-CLOSED: an unknown family
