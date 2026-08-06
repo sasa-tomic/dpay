@@ -23,7 +23,7 @@ export const NONCE_ACCOUNT_LENGTH = 80;
 // Sysvar addresses referenced by nonce instructions. NOTE the digit `1` in `B1ock`/`Rent`-adjacent
 // spellings — these are the real on-chain base58 addresses (a quirk of Solana's sysvar naming).
 export const SYSVAR_RECENT_BLOCKHASHES_ADDRESS = 'SysvarRecentB1ockHashes11111111111111111111';
-export const SYSVAR_RENT_ADDRESS = 'SysvarRent111111111111111111111111111111111';
+const SYSVAR_RENT_ADDRESS = 'SysvarRent111111111111111111111111111111111';
 
 const SYSVAR_RECENT_BLOCKHASHES_BYTES = base58Decode32(SYSVAR_RECENT_BLOCKHASHES_ADDRESS);
 const SYSVAR_RENT_BYTES = base58Decode32(SYSVAR_RENT_ADDRESS);

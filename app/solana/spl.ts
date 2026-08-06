@@ -70,7 +70,7 @@ function createProgramAddress(seeds: Uint8Array[], programId: Uint8Array): Uint8
  * Find the canonical PDA: iterate the bump seed 255→0 and return the first that derives off-curve.
  * Mirrors @solana/web3.js PublicKey.findProgramAddressSync. Returns {pubkey, bump}.
  */
-export function findProgramAddress(
+function findProgramAddress(
   seeds: Uint8Array[],
   programId: Uint8Array,
 ): { pubkey: Uint8Array; bump: number } {
