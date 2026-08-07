@@ -40,11 +40,11 @@
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
-ROOT="$PWD"
-export CARGO_HOME="$ROOT/.dev/cargo" RUSTUP_HOME="$ROOT/.dev/rustup"
-export PATH="$ROOT/.dev/cargo/bin:$HOME/.local/share/dfx/bin:$PATH"
 # shellcheck source=deploy/env-lib.sh
 source deploy/env-lib.sh
+# shellcheck source=deploy/dfx-lib.sh
+source deploy/dfx-lib.sh
+setup_dfx_env
 CANISTER=dpay_canister_staging   # dfx canister name (distinct from the prod dpay_canister)
 CRATE=dpay-canister              # cargo package name (same code as prod — same wasm)
 NETWORK="${DPAY_DFX_NETWORK:-ic}" # `ic` = mainnet (default); `local` = rehearsal
@@ -70,25 +70,14 @@ strip_us() { printf '%s' "$1" | tr -d '_'; }
 STAGING_CYCLES="$(strip_us "$STAGING_CYCLES_RAW")"
 DUSD_CYCLES="$(strip_us "$DUSD_CYCLES_RAW")"
 
-command -v dfx >/dev/null 2>&1 || { echo "dfx not found on PATH" >&2; exit 1; }
+require_cmd dfx "dfx not found on PATH"
 [ -f "$LEDGER_WASM" ] || { echo "ledger wasm not found at $LEDGER_WASM (build it once: see ICRC3_INTEGRATION.md)" >&2; exit 1; }
 
 # --- identity: required, must exist, becomes the controller ------------------------------------
-IDENT="${DPAY_DFX_IDENTITY:-$(env_get DPAY_DFX_IDENTITY deploy/.env)}"
-[ -n "$IDENT" ] || {
-  echo "DPAY_DFX_IDENTITY is required — the identity that provisions + controls the staging facade." >&2
-  echo "  it MUST be 'dpay' (the ADMIN_CALLERS entry authorized to call provision_ledger_canister)." >&2
-  echo "  create it:  icp-cli new-identity dpay   (or: dfx identity new dpay)" >&2
-  echo "  set it:     DPAY_DFX_IDENTITY=dpay in deploy/.env (or the environment)" >&2
-  exit 1
-}
-dfx_i() { dfx --identity "$IDENT" "$@"; }
-_iderr="$(mktemp)"
-if ! PRINCIPAL="$(dfx_i identity get-principal 2>"$_iderr")"; then
-  echo "cannot load dfx identity '$IDENT' — dfx reported:" >&2
-  sed 's/^/    /' "$_iderr" >&2; rm -f "$_iderr"; exit 1
-fi
-rm -f "$_iderr"
+load_identity "DPAY_DFX_IDENTITY is required — the identity that provisions + controls the staging facade.
+  it MUST be 'dpay' (the ADMIN_CALLERS entry authorized to call provision_ledger_canister).
+  create it:  icp-cli new-identity dpay   (or: dfx identity new dpay)
+  set it:     DPAY_DFX_IDENTITY=dpay in deploy/.env (or the environment)"
 
 echo "== staging deploy: network=$NETWORK   identity=$IDENT   principal=$PRINCIPAL =="
 if [ "$NETWORK" != "local" ]; then
@@ -99,7 +88,7 @@ else
 fi
 
 echo "== build canister wasm (release) =="
-cargo build -p "$CRATE" --target wasm32-unknown-unknown --release
+build_canister_wasm "$CRATE"
 
 # --- resolve the staging facade + DUSD ledger canister ids -------------------------------------
 # MAINNET: provision BOTH from prod ssqti's cycle balance via provision_ledger_canister (the dpay
@@ -147,8 +136,7 @@ fi
 # MERGE the staging facade id into the TRACKED canister_ids.json (never clobber). Keyed under
 # `dpay_canister_staging.ic` (mainnet only; the local rehearsal does not pollute the tracked file).
 if [ "$NETWORK" != "local" ]; then
-  _tmp="$(mktemp)"
-  jq --arg c "$CANISTER" --arg n "$NETWORK" --arg id "$STAGING_CID" '.[$c][$n] = $id' canister_ids.json > "$_tmp" && mv "$_tmp" canister_ids.json
+  merge_canister_id "$CANISTER" "$NETWORK" "$STAGING_CID"
 fi
 
 echo "== deploy facade wasm into $STAGING_CID (init: controller=null, ledgers=vec{}, cap=100000) =="
@@ -184,7 +172,8 @@ _install_ledger() { # $1=decimals  $2=fee  $3=symbol  $4=token_name
   # already-installed ledger → --mode reinstall (replaces with a fresh init). Surface any real error
   # (a swallowed install failure leaves the canister codeless → every register_currency validation
   # rejects with "no Wasm module", which is confusing).
-  local ierr="$(mktemp)"
+  local ierr
+  ierr="$(mktemp)"
   if ! dfx_i canister install icrc_ledger --network "$NETWORK" --mode install \
       --wasm "$LEDGER_WASM" --argument "$init_arg" 2>"$ierr"; then
     # Retry as reinstall (the canister already had code from a prior run).
@@ -216,10 +205,9 @@ has_currency() { echo "$CATALOG" | grep -qE "currency = $1 : nat32" && echo yes 
 # well-formed candid. We pass a 2nd arg "expect_mismatch" to treat that case as success locally.
 _register() { # $1=arg  $2=expect_mismatch (optional, local rehearsal only)
   local arg="$1" expect="${2:-}"
-  local out rc
+  local out
   set +e
   out="$(dfx_i canister call "$CANISTER" register_currency "$arg" --network "$NETWORK" 2>&1)"
-  rc=$?
   set -e
   if echo "$out" | grep -q 'Ok'; then
     echo "   → Ok"
@@ -229,6 +217,7 @@ _register() { # $1=arg  $2=expect_mismatch (optional, local rehearsal only)
     echo "   → expected validation mismatch (local rehearsal) — call shape OK"
   else
     echo "   → UNEXPECTED register_currency outcome:" >&2
+    # shellcheck disable=SC2001 # sed prefixes EVERY line; ${var//} can't do per-line substitution.
     sed 's/^/     /' <<<"$out" >&2
     exit 1
   fi

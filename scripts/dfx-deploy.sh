@@ -10,15 +10,13 @@
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
-ROOT="$PWD"
-export CARGO_HOME="$ROOT/.dev/cargo" RUSTUP_HOME="$ROOT/.dev/rustup"
-export PATH="$ROOT/.dev/cargo/bin:$HOME/.local/share/dfx/bin:$PATH"
+# shellcheck source=deploy/dfx-lib.sh
+source deploy/dfx-lib.sh
+setup_dfx_env
 CANISTER=dpay_canister        # dfx canister name + wasm artifact basename (cargo maps - to _)
 CRATE=dpay-canister           # cargo package name
 LEDGER_WASM=third_party/ic-icrc1-ledger/ic-icrc1-ledger.wasm
 
-# Extract the first candid nat value from a `dfx canister call` reply, e.g. `(7_500 : nat64)` -> 7500.
-nat() { grep -oE '[0-9][0-9_]*' | head -1 | tr -d '_'; }
 # Hex string (even length) -> a candid blob literal `blob "\hh\hh..."`.
 hexesc() { local h="$1" out="" i; for ((i=0; i<${#h}; i+=2)); do out+="\\${h:$i:2}"; done; printf '%s' "$out"; }
 blob()   { printf 'blob "%s"' "$(hexesc "$1")"; }
@@ -30,12 +28,11 @@ blob()   { printf 'blob "%s"' "$(hexesc "$1")"; }
 }
 
 echo "== build facade wasm (release) =="
-cargo build -p "$CRATE" --target wasm32-unknown-unknown --release
+build_canister_wasm "$CRATE"
 
 echo "== refresh candid from the wasm =="
-mkdir -p dfx
-command -v candid-extractor >/dev/null 2>&1 || { echo "candid-extractor not found — cargo install candid-extractor" >&2; exit 1; }
-candid-extractor "target/wasm32-unknown-unknown/release/${CANISTER}.wasm" > dfx/dpay_canister.did
+require_cmd candid-extractor "candid-extractor not found — cargo install candid-extractor"
+refresh_candid "$CANISTER"
 
 echo "== generate deterministic candid args (offline-signed payment) =="
 cargo run -q -p dpay-fixture            # writes dfx/args/{init,pay,payer,merchant}.arg + expect.env

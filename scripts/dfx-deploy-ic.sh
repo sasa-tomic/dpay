@@ -35,44 +35,30 @@
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
-ROOT="$PWD"
-export CARGO_HOME="$ROOT/.dev/cargo" RUSTUP_HOME="$ROOT/.dev/rustup"
-export PATH="$ROOT/.dev/cargo/bin:$HOME/.local/share/dfx/bin:$PATH"
 # shellcheck source=deploy/env-lib.sh
 source deploy/env-lib.sh
+# shellcheck source=deploy/dfx-lib.sh
+source deploy/dfx-lib.sh
+setup_dfx_env
 CANISTER=dpay_canister        # dfx canister name + wasm artifact basename (cargo maps - to _)
 CRATE=dpay-canister           # cargo package name
 NETWORK="${DPAY_DFX_NETWORK:-ic}"   # `ic` = mainnet (default); `local` to rehearse on a local replica
 
-# Extract the first candid nat value from a reply, e.g. `(7_500 : nat64)` -> 7500.
-nat() { grep -oE '[0-9][0-9_]*' | head -1 | tr -d '_'; }
-
-command -v dfx >/dev/null 2>&1 || { echo "dfx not found on PATH" >&2; exit 1; }
-# Guard before the `> dfx/dpay_canister.did` redirect below, which would otherwise truncate the
-# committed candid file to empty (→ dfx "no main service") when the tool is absent.
-command -v candid-extractor >/dev/null 2>&1 || { echo "candid-extractor not found — cargo install candid-extractor" >&2; exit 1; }
+require_cmd dfx "dfx not found on PATH"
+# Guard before the `> dfx/dpay_canister.did` redirect in refresh_candid, which would otherwise
+# truncate the committed candid file to empty (→ dfx "no main service") when the tool is absent.
+require_cmd candid-extractor "candid-extractor not found — cargo install candid-extractor"
 
 # --- identity: required, must exist, becomes the controller ------------------------------------
-IDENT="${DPAY_DFX_IDENTITY:-$(env_get DPAY_DFX_IDENTITY deploy/.env)}"
-[ -n "$IDENT" ] || {
-  echo "DPAY_DFX_IDENTITY is required — the identity that deploys becomes the canister CONTROLLER." >&2
-  echo "  create it:  icp-cli new-identity dpay   (or: dfx identity new dpay)" >&2
-  echo "  set it:     DPAY_DFX_IDENTITY=dpay in deploy/.env (or the environment)" >&2
-  exit 1
-}
-dfx_i() { dfx --identity "$IDENT" "$@"; }
-# Load the principal, surfacing dfx's ACTUAL error (keyring/encryption/missing) rather than hiding it
-# behind a generic message. stderr is captured separately so PRINCIPAL stays clean on success.
-_iderr="$(mktemp)"
-if ! PRINCIPAL="$(dfx_i identity get-principal 2>"$_iderr")"; then
-  echo "cannot load dfx identity '$IDENT' — dfx reported:" >&2
-  sed 's/^/    /' "$_iderr" >&2
-  rm -f "$_iderr"
+# Keyring troubleshooting hint, surfaced on dfx's PRINCIPAL-load failure (headless envs). load_identity
+# sets IDENT before invoking the hook, so $IDENT resolves to the configured identity name.
+identity_load_hint() {
   echo "  if it is keyring-backed in a headless env, point dfx at the on-disk key instead: set" >&2
   echo "  keyring_identity_suffix to null in ~/.config/dfx/identity/$IDENT/identity.json (identity.pem is the key)." >&2
-  exit 1
-fi
-rm -f "$_iderr"
+}
+load_identity "DPAY_DFX_IDENTITY is required — the identity that deploys becomes the canister CONTROLLER.
+  create it:  icp-cli new-identity dpay   (or: dfx identity new dpay)
+  set it:     DPAY_DFX_IDENTITY=dpay in deploy/.env (or the environment)"
 
 echo "== preflight: reach $NETWORK + the identity that will control the canister =="
 dfx ping "$NETWORK" >/dev/null || { echo "cannot reach the '$NETWORK' network (dfx ping $NETWORK failed)" >&2; exit 1; }
@@ -80,11 +66,10 @@ echo "   identity:  $IDENT"
 echo "   principal: $PRINCIPAL   <- becomes/controls the canister"
 
 echo "== build canister wasm (release) =="
-cargo build -p "$CRATE" --target wasm32-unknown-unknown --release
+build_canister_wasm "$CRATE"
 
 echo "== refresh candid from the wasm =="
-mkdir -p dfx
-candid-extractor "target/wasm32-unknown-unknown/release/${CANISTER}.wasm" > dfx/dpay_canister.did
+refresh_candid "$CANISTER"
 
 echo "== generate deterministic candid init args (pre-funded demo accounts) =="
 cargo run -q -p dpay-fixture
@@ -99,8 +84,7 @@ if [ "$NETWORK" != "local" ] && [ -n "$EXISTING_CID" ]; then
   # MERGE the facade id into the TRACKED canister_ids.json — never clobber (the file is the durable
   # map of ALL owned canisters; overwriting would drop icrc_ledger/td2nx). .env stays the operator's
   # source of truth for the facade id; see docs/CANISTERS.md.
-  _tmp="$(mktemp)"
-  jq --arg c "$CANISTER" --arg n "$NETWORK" --arg id "$EXISTING_CID" '.[$c][$n] = $id' canister_ids.json > "$_tmp" && mv "$_tmp" canister_ids.json
+  merge_canister_id "$CANISTER" "$NETWORK" "$EXISTING_CID"
   echo "== target: existing canister $EXISTING_CID on $NETWORK (from deploy/.env) =="
   # Mode from the canister's ACTUAL state: no code yet → a safe first install (nothing to lose); code
   # already installed → upgrade (default) preserves state via stable memory; reinstall re-funds.
