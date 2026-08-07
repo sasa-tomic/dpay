@@ -18,16 +18,26 @@
 These items are unblocked and owner-less — do them next session (RED-first, commit each unit, confidence ≥6/10). Order is a
 suggested priority, not a hard sequence.
 
-1. **NFC component merge (DRY, MEDIUM).** `app/components/NfcTap.tsx` (338L) and `SolNfcTap.tsx` (239L) are ~80% structurally
-   identical: the `NFC_UI`/`SOL_NFC_UI` status records are byte-for-byte identical (9 phases), the `finalize`/`clearSettleTimer`/
-   `markActive`/`aliveRef`/`committed` lifecycle is shared, the `useEffect` subscribe/arm/disarm is structurally the same, and the
-   terminal render JSX differs only in `testID`. Extract a `useNfcTapState({...})` hook + a shared `<NfcTapView>` presentational
-   shell; the IC and SOL variants become thin adapters. **The protocols differ genuinely and must stay separate in the adapters:**
-   IC = `signAuthorization` + relay `/pay` + nonce-reconcile + optimistic balance deduction; SOL = `signOfflineSolPayment` +
-   RPC broadcast + npub-match + nextNonce adoption. **CAUTION:** e2e flows 11 (IC) and 47 (SOL) emit on DIFFERENT seam event names
-   (`DpayNfcEvent`/`__DPAY_TEST_NFC_SESSION` vs `DpaySolNfcEvent`/`__DPAY_TEST_SOL_NFC_SESSION`) and the native modules differ
-   (`DpayNfc` vs `DpaySolNfc`, different Kotlin AIDs) — keep those boundaries. This is device-gated money-moving UI: run `just app`
-   + `just ondevice` after. ~150 lines removed.
+1. ~~**NFC component merge (DRY, MEDIUM).** `app/components/NfcTap.tsx` (338L) and `SolNfcTap.tsx` (239L) are ~80% structurally~~
+   ~~identical: the `NFC_UI`/`SOL_NFC_UI` status records are byte-for-byte identical (9 phases), the `finalize`/`clearSettleTimer`/~~
+   ~~`markActive`/`aliveRef`/`committed` lifecycle is shared, the `useEffect` subscribe/arm/disarm is structurally the same, and~~
+   ~~the terminal render JSX differs only in `testID`. Extract a `useNfcTapState({...})` hook + a shared `<NfcTapView>` presentational~~
+   ~~shell; the IC and SOL variants become thin adapters.~~ **✅ DONE (2026-08-08).** Extracted `app/hooks/useNfcTapState.ts`
+   (shared phase state machine + `finalize`/`markActive`/settle-timer + the subscribe→arm→cleanup effect + the
+   `error`/`phase`/`request`/`done`/`payment`/`receipt` dispatch skeleton) + `app/components/NfcTapView.tsx` (single-source
+   9-phase `TAP_PHASES` record + terminal render + a pure jest-tested `computeTapStatus`). `NfcTap.tsx` (IC) and
+   `SolNfcTap.tsx` (SOL) are now thin adapters filling ONLY their protocol (IC: `signAuthorization` + relay `/pay` +
+   nonce-reconcile + optimistic deduction + canister-signed receipt verify; SOL: `signOfflineSolPayment` + RPC broadcast +
+   npub-match + nextNonce adoption). The seam event names (`DpayNfcEvent`/`__DPAY_TEST_NFC_SESSION` vs
+   `DpaySolNfcEvent`/`__DPAY_TEST_SOL_NFC_SESSION`) + native modules (`DpayNfc` vs `DpaySolNfc`) stay correctly distinct.
+   testIDs `nfc-status`/`sol-nfc-status` preserved. Latent IC `aliveRef` bug (only SOL had the reset) now closed for both
+   rails via the shared hook. Gates: typecheck 0, jest 413/413 (+16 new `nfc-tap-view.test.ts`), e2e **49/49** (flows
+   11+32+47 green), bridge-parity OK (28 methods, untouched). **Line delta was ~break-even (+16 net prod)** — the raw
+   duplication removed (~218 lines from the two adapters) was offset by the shared infra (hook 162L + view 72L) + type
+   defs + the ctx indirection; the DRY win (single-source 9-phase record, lifecycle, render; a 3rd rail is now trivial) is
+   the real value, not line count. **Device gate NOT run** (no emulator on this host) — pending `just app` +
+   `DPAY_SELFCHECK PASS` + `just ondevice` on a device host; the change is pure TS/React (no native/wire/bridge change),
+   so e2e + typecheck + jest cover the actual risk surface.
 
 2. **Currency catalog single-source-of-truth (DRY/anti-pattern, MEDIUM).** The ckUSDC ERC-20 contract
    (`0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48`), the ckETH gas-ledger principal (`ss2fx-dyaaa-aaaar-qacoq-cai`), ckBTC minter
