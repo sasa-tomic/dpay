@@ -565,3 +565,52 @@ fn mock_minter_retrieve_btc_with_approval_mirrors_real_minter_contract() {
 
     println!("[withdraw] ✓ mock minter's retrieve_btc_with_approval mirrors the real minter's error variants");
 }
+
+/// A currency with NEITHER minter NOR family meta MUST fail closed at the family dispatch gate —
+/// never silently default to the BTC retrieve path. DEMO play money (minter=null, family=null) is
+/// the production instance of this: an accidental withdraw attempt must reject before any cross-
+/// canister call.
+#[test]
+fn withdraw_failclosed_no_minter_no_family() {
+    let pic = PocketIc::new();
+    pic.set_time(Time::from_nanos_since_unix_epoch(T0_NANOS));
+
+    let payer_sk = generate_keypair();
+    let payer = payer_sk.verifying_key().to_bytes();
+
+    let dpay = pic.create_canister();
+    pic.add_cycles(dpay, 2_000_000_000_000);
+    // Install a ledger for CKBTC but register NO minter and NO family meta.
+    let ckbtc = install_ledger(&pic, Account { owner: dpay, subaccount: None });
+    let admin = Principal::management_canister();
+    let dpay_init = DpayInitArg {
+        ledgers: vec![LedgerConfig { currency: CKBTC, principal: ckbtc, mintable: false }],
+        per_tx_cap: CAP,
+        controller: Some(admin),
+    };
+    pic.install_canister(dpay, dpay_wasm(), encode_one(&dpay_init).unwrap(), None);
+
+    let nonce = [0u8; 16];
+    let req = withdraw_request(
+        &payer_sk,
+        payer,
+        "bcrt1qexample",
+        50_000,
+        nonce,
+        T0_SECS + 3600,
+        CKBTC,
+    );
+    let result = withdraw(&pic, dpay, req);
+    assert!(
+        result.is_err(),
+        "withdraw on a no-minter no-family currency must fail closed, got: {:?}",
+        result
+    );
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("no minter family") && err.contains("no minter"),
+        "fail-closed error must explain the cause, got: {err}"
+    );
+
+    println!("[withdraw] ✓ currency with no minter + no family fails closed (no silent BTC default)");
+}

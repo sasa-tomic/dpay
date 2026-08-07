@@ -383,9 +383,9 @@ fn currency_cap(currency: Currency) -> Option<u64> {
 /// `withdraw` reads this to dispatch to the family-specific minter method: `CkBtcUtxo` →
 /// `retrieve_btc_with_approval`; `CkEthErc20` + `token_contract = None` → `withdraw_eth` (native ETH);
 /// `CkEthErc20` + `token_contract = Some` → fail-closed (ckERC20 needs a separate ckETH-for-fees
-/// path). `None` (no metadata registered) maps to `CkBtcUtxo` at the single call site in `withdraw`
-/// (the legacy default before family dispatch existed — preserves existing ckBTC deployments that
-/// registered a minter but no family meta, so the BTC path is unchanged).
+/// path). `None` (no family meta registered) defaults to `CkBtcUtxo` at the single call site in
+/// `withdraw` ONLY when a minter IS registered (legacy backward compat for pre-family-dispatch ckBTC
+/// deployments); when NEITHER minter NOR family is registered the call site fails closed.
 fn currency_family(currency: Currency) -> Option<MinterFamily> {
     CURRENCY_META.with(|m| m.borrow().get(&currency).and_then(|meta| meta.minter_family))
 }
@@ -582,13 +582,16 @@ async fn pay(signed: Vec<u8>) -> Result<PayReceipt, String> {
         sa.auth.to_name,
         sa.auth.memo,
     )?;
-    let new_from_balance = ledger_balance_of(ledger, &from_acct).await.unwrap_or_else(|_| {
+    let new_from_balance = ledger_balance_of(ledger, &from_acct).await.unwrap_or_else(|e| {
+        ic_cdk::print(format!("WARN pay: post-settle from_balance re-read failed ({e}) — receipt uses computed estimate"));
         balance.saturating_sub(amount).saturating_sub(fee)
     });
     // Refresh the display cache for both sides (best-effort; never blocks settlement).
     write_cache(from, currency, new_from_balance);
     if let Ok(to_bal) = ledger_balance_of(ledger, &to_acct).await {
         write_cache(to, currency, to_bal);
+    } else {
+        ic_cdk::print("WARN pay: post-settle payee cache refresh failed (display-only)");
     }
 
     // Sign the outcome receipt. The block index caps at u64 (the demo's ledgers never exceed it;
@@ -596,7 +599,10 @@ async fn pay(signed: Vec<u8>) -> Result<PayReceipt, String> {
     // amount/nonce/from/to/currency/ts bind the claim, and the sig is canister-authored). The
     // receipt key was bound BEFORE the ledger commit (MC4 U1), so this is now a pure Ed25519 sign
     // with NO await — a post-commit key-gen failure can no longer orphan a settled payment.
-    let block_index = nat_to_u64(&block_index_nat).unwrap_or(0);
+    let block_index = nat_to_u64(&block_index_nat).unwrap_or_else(|e| {
+        ic_cdk::print(format!("WARN pay: block_index Nat overflow ({e}) — receipt block_index coerced to 0"));
+        0
+    });
     let pubkey = receipt_sk.verifying_key().to_bytes();
     let claim = ReceiptClaim {
         nonce: sa.auth.nonce,
@@ -848,6 +854,8 @@ async fn burn(from: Vec<u8>, currency: Currency, amount: u64) -> Result<u64, Str
     // Refresh the display cache from the authoritative ledger.
     if let Ok(bal) = ledger_balance_of(ledger, &from_acct).await {
         write_cache(pk, currency, bal);
+    } else {
+        ic_cdk::print("WARN burn: post-burn cache refresh failed (display-only)");
     }
     Ok(nat_to_u64(&block_index)?)
 }
@@ -1237,7 +1245,10 @@ async fn reconcile(currency: Currency) -> Result<ReconcileReport, String> {
         // Orphaned debit (trap window): the ledger moved funds but the nonce reservation was rolled
         // back. Repair: mark the nonce spent (a retry is now a duplicate) + record the txn (history).
         let to_pk = t.to.subaccount.unwrap_or(MINT_ACCOUNT);
-        let amount = nat_to_u64(&t.amount).unwrap_or(0);
+        let amount = nat_to_u64(&t.amount).unwrap_or_else(|e| {
+            ic_cdk::print(format!("WARN reconcile: orphaned-debit amount Nat overflow ({e}) — recorded as 0"));
+            0
+        });
         settle_nonce(&nonce_key);
         // The on-ledger transfer log carries only the ICRC memo (= nonce), NOT the authorization's
         // display names/memo — those live in the signed wire, which is gone post-trap. So a repaired
@@ -1256,9 +1267,13 @@ async fn reconcile(currency: Currency) -> Result<ReconcileReport, String> {
         // Best-effort: refresh the display cache for both sides from the authoritative ledger.
         if let Ok(bal) = ledger_balance_of(ledger, &account_of(&from_pk)).await {
             write_cache(from_pk, currency, bal);
+        } else {
+            ic_cdk::print("WARN reconcile: from-side cache refresh failed (display-only)");
         }
         if let Ok(bal) = ledger_balance_of(ledger, &account_of(&to_pk)).await {
             write_cache(to_pk, currency, bal);
+        } else {
+            ic_cdk::print("WARN reconcile: to-side cache refresh failed (display-only)");
         }
         // MC4 U2: reconstruct + sign + store a receipt for this orphan so `receipt(nonce)` returns a
         // verifiable canister-signed attestation for EVERY settled payment (a durable recovery
@@ -1351,6 +1366,8 @@ async fn refresh_deposit(pubkey: Vec<u8>, currency: Currency) -> Result<DepositR
             // TTL window, which re-reads and overwrites the cache.
             if let Ok(bal) = ledger_balance_of(ledger, &account_of(&pk)).await {
                 write_cache(pk, currency, bal);
+            } else {
+                ic_cdk::print("WARN refresh_deposit: post-mint cache refresh failed (display-only)");
             }
             Ok(DepositRefresh {
                 minted,
@@ -1373,6 +1390,8 @@ async fn refresh_deposit(pubkey: Vec<u8>, currency: Currency) -> Result<DepositR
             // "after refresh_deposit returns, the cache reflects the ledger" (MC3 U1).
             if let Ok(bal) = ledger_balance_of(ledger, &account_of(&pk)).await {
                 write_cache(pk, currency, bal);
+            } else {
+                ic_cdk::print("WARN refresh_deposit: post-confirm cache refresh failed (display-only)");
             }
             Ok(DepositRefresh {
                 minted: Vec::new(),
@@ -1424,7 +1443,8 @@ async fn deposit_info(currency: Currency) -> Result<DepositInfo, String> {
 //     allowance is a running balance, so one approve covers both).
 //   - CkEthErc20 + token_contract Some → fail-closed (ckERC20 withdraw needs a separate
 //     ckETH-for-fees path; a USDC withdraw must NOT hit native-eth withdraw_eth).
-// A currency with no family meta defaults to CkBtcUtxo (the legacy path before family dispatch).
+// A currency with a minter but no family meta defaults to CkBtcUtxo (legacy backward compat); one
+// with NEITHER minter NOR family fails closed (no withdraw ramp — e.g. DEMO play money).
 //
 // FRONT-RUNNING NOTE (documented residual risk, same as every retrieve_btc_with_approval /
 // withdraw_eth caller): the approve + retrieve/withdraw are two cross-canister calls with an `await`
@@ -1490,18 +1510,30 @@ async fn withdraw(req: WithdrawRequest) -> Result<WithdrawReceipt, String> {
     }
 
     // 3b. FAMILY DISPATCH: read the currency's minter family (+ token_contract / gas_ledger for
-    //     ckERC20) and apply family-specific cheap rejects BEFORE reserving the nonce. `None` family
-    //     defaults to CkBtcUtxo (legacy default — a currency with a registered minter but no family
-    //     meta is the pre-dispatch ckBTC path). CkSol / unknown → fail-closed (no withdraw path).
-    //     ckERC20 (CkEthErc20 + token_contract Some) REQUIRES a registered ckETH gas ledger — without
-    //     one the dual-ledger `withdraw_erc20` path cannot run, and the facade MUST fail closed rather
-    //     than fall through to the native-ETH `withdraw_eth` (which would mis-burn the amount as ckETH).
+    //     ckERC20) and apply family-specific cheap rejects BEFORE reserving the nonce. A currency
+    //     with a registered minter but no family meta defaults to CkBtcUtxo (legacy backward compat —
+    //     the pre-family-dispatch ckBTC path). A currency with NEITHER minter NOR family (e.g. DEMO
+    //     play money, offramp=Unavailable) has no withdraw ramp and MUST fail closed here — never
+    //     silently route an unconfigured currency to the BTC retrieve path. ckERC20 (CkEthErc20 +
+    //     token_contract Some) REQUIRES a registered ckETH gas ledger — without one the dual-ledger
+    //     `withdraw_erc20` path cannot run, and the facade MUST fail closed rather than fall through
+    //     to the native-ETH `withdraw_eth` (which would mis-burn the amount as ckETH).
     enum WithdrawPath {
         Btc,
         NativeEth,
         Erc20 { gas_ledger: Principal },
     }
-    let family = currency_family(req.currency).unwrap_or(MinterFamily::CkBtcUtxo);
+    let has_minter = minter_for(req.currency).is_ok();
+    let family = match currency_family(req.currency) {
+        Some(f) => f,
+        None if has_minter => MinterFamily::CkBtcUtxo,
+        None => {
+            return Err(format!(
+                "currency {} has no minter family and no minter — cannot withdraw",
+                req.currency
+            ));
+        }
+    };
     let path = match family {
         MinterFamily::CkBtcUtxo => {
             if req.amount < RETRIEVE_BTC_MIN_AMOUNT {
@@ -1777,6 +1809,7 @@ async fn withdraw(req: WithdrawRequest) -> Result<WithdrawReceipt, String> {
                 Ok(Err(e)) => {
                     // MalformedAddress / AmountTooLow / GenericError — permanent; settle the nonce so the
                     // dead auth can never replay. The user must sign a fresh authorization.
+                    ic_cdk::print(format!("withdraw btc: retrieve_btc permanent error variant {e:?} — nonce settled"));
                     settle_withdraw_nonce(&wnonce);
                     return Err(format!("retrieve_btc: {e:?}"));
                 }
@@ -1809,6 +1842,8 @@ async fn withdraw(req: WithdrawRequest) -> Result<WithdrawReceipt, String> {
     )?;
     if let Ok(bal) = ledger_balance_of(ledger, &from_acct).await {
         write_cache(from, req.currency, bal);
+    } else {
+        ic_cdk::print("WARN withdraw: post-burn cache refresh failed (display-only)");
     }
     Ok(WithdrawReceipt {
         from: from.to_vec(),
@@ -1816,7 +1851,10 @@ async fn withdraw(req: WithdrawRequest) -> Result<WithdrawReceipt, String> {
         amount: req.amount,
         nonce: nonce_bytes.to_vec(),
         currency: req.currency,
-        block_index: nat_to_u64(&block_index_nat).unwrap_or(0),
+        block_index: nat_to_u64(&block_index_nat).unwrap_or_else(|e| {
+            ic_cdk::print(format!("WARN withdraw: block_index Nat overflow ({e}) — receipt block_index coerced to 0"));
+            0
+        }),
     })
 }
 
