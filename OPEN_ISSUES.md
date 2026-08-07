@@ -8,7 +8,22 @@
 > entries below are **deliberate, documented follow-ups**, not regressions — each carries its current mitigation and the concrete
 > next step. Structural detail lives in `CODEBASE_ANALYSIS.md`.
 
-## NEXT SESSION — work order (2026-08-08)
+## NEXT SESSION — work order (post 2026-08-08 sweep)
+
+The 2026-08-08 tech-debt + deeplink sweep landed all 6 work-order items (see the completed section
+below; git HEAD `c5b1e69`, 19 commits ahead of origin/main). Verified green offline: typecheck 0,
+test-core 45/45, bridge-parity OK (28), jest 432/432, e2e **50/50** (flow 05 confirmed as the
+pre-existing host-load flake via isolated re-run). Three genuinely-remaining items:
+
+1. **Device gate for items 1 + 6 (BLOCKING for ship, founder/device host).** No emulator on this host.
+   - **Item 1 (NFC merge, pure TS/React):** run `just app` (assert `DPAY_SELFCHECK PASS` + `DPAY_SOL_SELFCHECK PASS`) + `just ondevice` (8 instrumented tests). Risk surface is low (no native/wire/FFI change — e2e+jest+typecheck cover the logic), but the device gate is the documented blind-spot-3 requirement for money-moving UI.
+   - **Item 6 (deeplink):** run `just app`, then `adb shell am start -a android.intent.action.VIEW -d 'dpay:req/<blob>'` and assert the pay REVIEW screen opens pre-filled (NOT auto-paid). This is the genuine outstanding gate — it validates the AndroidManifest intent-filter dispatch + the RN `Linking` bridge (native-modules-thread surface) + the money-path-adjacent prefill.
+2. **`dpay:pay/` receipt hand-back (FEATURE — HIGH effort, split into medium tasks).** Codec exists (`encodeDeeplink`/`decodeDeeplink` support `pay`; jest-tested). To wire: (a) pay-side: after an offline sign, offer a "Share receipt" that encodes the signed payment as `dpay:pay/<blob>`; (b) `readPaymentDeeplink()` web reader (`?pay=`) — re-add to `app/lib/deepLink.ts` WITH the wiring (currently deleted to honor no-dead-code); (c) merchant-side: decode + verify the receipt signature (reuse `services/receipt.ts` `verifyOutcomeReceipt`) + reconcile the open request as settled. Mirror the e2e flow 49 structure. Start with a design note, then build incrementally.
+3. **`just e2e` npm-install flake (tooling, LOW).** `just e2e` fails at the `npm install` step with `npm error Invalid Version` (`@rolldown/binding-wasm32-wasi` dedupe crash in `@npmcli/arborist` under Node 24) — a **pre-existing** npm/Node-v24 env bug, NOT a code regression (`node_modules` already exists; `node e2e/run.mjs` runs directly). Consider: pin the e2e Node version, or make the justfile `npm install` tolerant of this error, or skip install when `node_modules` exists.
+
+---
+
+## NEXT SESSION — work order (2026-08-08) — ✅ ALL 6 DONE
 
 > **CORRECTION (founder, 2026-08-07): the wire is NOT frozen.** No public release has shipped, so wire-format changes remain
 > on the table pre-pilot. Earlier "Wire FROZEN (292/196/132)" notes in the session summaries below were the *working assumption*
