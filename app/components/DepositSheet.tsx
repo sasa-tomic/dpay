@@ -10,6 +10,7 @@ import type {Identity} from '../lib/types';
 import type {FamilyDisplay} from '../config/catalog';
 import {type DepositInfo, type DepositRefresh, depositInfo, depositAddress, depositRefresh} from '../services/relay';
 import {copyToClipboard} from '../lib/clipboard';
+import {withTimeout} from '../lib/timeout';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {SheetOverlay} from './SheetOverlay';
 
@@ -48,12 +49,11 @@ export function DepositSheet({identity, relayUrl, currency, display, onClose}: {
   // gracefully instead of hiding the address.
   useEffect(() => {
     let alive = true;
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), DEPOSIT_ADDRESS_TIMEOUT_MS);
+    const {signal, cancel} = withTimeout(DEPOSIT_ADDRESS_TIMEOUT_MS);
     (async () => {
       setLoading(true); setErr(null);
       try {
-        const a = await depositAddress(relayUrl, identity.publicHex, currency, ctrl.signal);
+        const a = await depositAddress(relayUrl, identity.publicHex, currency, signal);
         if (!alive) return;
         // H5: fetch succeeded but no address returned → the asset has no deposit minter configured.
         if (!a) { setErr(NO_MINTER_DEPOSIT_ERR); return; }
@@ -67,10 +67,10 @@ export function DepositSheet({identity, relayUrl, currency, display, onClose}: {
         if (alive) setErr(isNoMinter ? NO_MINTER_DEPOSIT_ERR : TRANSIENT_DEPOSIT_ERR);
       } finally {
         if (alive) setLoading(false);
-        clearTimeout(t);
+        cancel();
       }
     })();
-    return () => { alive = false; ctrl.abort(); };
+    return () => { alive = false; };
   }, [relayUrl, identity.publicHex, currency]);
 
   // Best-effort deposit info (fee / min / confirmations). Independent controller + timeout so a slow
@@ -78,29 +78,27 @@ export function DepositSheet({identity, relayUrl, currency, display, onClose}: {
   // renders "none"/"no minimum" for the fee/min fields (graceful, not an error).
   useEffect(() => {
     let alive = true;
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), DEPOSIT_TIMEOUT_MS);
+    const {signal, cancel} = withTimeout(DEPOSIT_TIMEOUT_MS);
     (async () => {
       try {
-        const i = await depositInfo(relayUrl, currency, ctrl.signal);
+        const i = await depositInfo(relayUrl, currency, signal);
         if (alive) setInfo(i);
       } catch { /* best-effort: fee/min show "—" when info is absent */ }
-      finally { clearTimeout(t); }
+      finally { cancel(); }
     })();
-    return () => { alive = false; ctrl.abort(); };
+    return () => { alive = false; };
   }, [relayUrl, currency]);
 
   // ONE refresh function reused by BOTH the 10s poll and the manual "Check now" button — single
   // source of truth. minted_total > 0 => the deposit credited (mint landed on the user's subaccount).
   // The manual path is debounced via `checkBusy`; the poll is already spaced, so it never sets it.
   const refreshNow = useCallback(async (manual: boolean) => {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), DEPOSIT_REFRESH_TIMEOUT_MS);
+    const {signal, cancel} = withTimeout(DEPOSIT_REFRESH_TIMEOUT_MS);
     if (manual) {
       setCheckBusy(true);
     }
     try {
-      const r = await depositRefresh(relayUrl, identity.publicHex, currency, ctrl.signal);
+      const r = await depositRefresh(relayUrl, identity.publicHex, currency, signal);
       setRefresh(r);
       // MC1 units 2-4: `minted_total` is a raw-u64 decimal STRING; presence via `cmpRaw` (BigInt).
       if (cmpRaw(r.minted_total, '0') > 0) {
@@ -108,7 +106,7 @@ export function DepositSheet({identity, relayUrl, currency, display, onClose}: {
       }
     } catch { /* offline: keep the last status; the next tick retries */ }
     finally {
-      clearTimeout(t);
+      cancel();
       if (manual) {
         setCheckBusy(false);
       }

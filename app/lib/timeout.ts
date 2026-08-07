@@ -19,8 +19,6 @@ export function composeTimeout(
   return {signal: ctrl.signal, cancel: () => clearTimeout(timer)};
 }
 
-/** Signal-only view of `composeTimeout` — the caller's signal is returned as-is when present;
- *  otherwise the backstop arms at `timeoutMs`. */
-export function composeSignal(callerSignal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
-  return composeTimeout(callerSignal, timeoutMs).signal;
+export function withTimeout(timeoutMs: number): {signal: AbortSignal; cancel: () => void} {
+  return composeTimeout(undefined, timeoutMs);
 }

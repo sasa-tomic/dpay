@@ -14,6 +14,7 @@ import {NfcTap} from './NfcTap';
 import {QrScanner} from './QrScanner';
 import {NfcIcon} from './NfcIcon';
 import {useEscapeToClose} from '../hooks/useHotkeys';
+import {withTimeout} from '../lib/timeout';
 
 // The optional merchant memo input — a real secondary field (not a bare text link), mirroring the
 // paste-button affordance pattern (44pt-min touch target + a visible border). Inline (Group E owns
@@ -102,12 +103,12 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
     setScanning(false);
     setErr(null);
     try {
-      const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), NFC_PAY_TIMEOUT_MS);
+      const {signal, cancel} = withTimeout(NFC_PAY_TIMEOUT_MS);
       // PR25 — payAndClassify does fetch + JSON-or-empty parse + classifyPayHttp. The merchant only
       // acts on a definitive 'rejected' (a 422 policy refusal); a settled or unknown outcome is
       // surfaced by the /receipt poll (which sets `result`), so we never flash a false failure on a
       // payment that actually went through.
-      const {outcome, body: j} = await payAndClassify(relayUrl, raw.trim(), ctrl.signal).finally(() => clearTimeout(timer));
+      const {outcome, body: j} = await payAndClassify(relayUrl, raw.trim(), signal).finally(() => cancel());
       if (outcome === 'rejected' && !isNonceReused(j?.error)) {
         setErr(rejectionMessage(typeof j?.error === 'string' ? j.error : null));
       }

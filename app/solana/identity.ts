@@ -13,6 +13,7 @@
 import { ed25519 } from '@noble/curves/ed25519';
 import { sha512 } from '@noble/hashes/sha512';
 import bs58 from 'bs58';
+import { hexToBytes } from '../lib/format';
 
 // HMAC-SHA512 hand-rolled on the (stable) sha512 primitive. We avoid noble's `hmac` module on
 // purpose: the resolved version across this tree's node_modules disagrees with standard
@@ -34,15 +35,6 @@ export interface SolanaKeypair {
   readonly publicKey: Uint8Array;
   /** base58-encoded public key — the Solana account address. */
   readonly address: string;
-}
-
-function hexToBytes(hex: string): Uint8Array {
-  if (hex.length % 2 !== 0) throw new Error('hex string has odd length');
-  const out = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < out.length; i++) {
-    out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  }
-  return out;
 }
 
 function hmacSha512(key: Uint8Array, data: Uint8Array): Uint8Array {

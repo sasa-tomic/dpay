@@ -26,8 +26,6 @@ export const ASSOCIATED_TOKEN_PROGRAM_ADDRESS = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH2
 export const USDC_MINT_ADDRESS = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 /** USDC has 6 decimals (1 USDC = 1_000_000 raw units). */
 export const USDC_DECIMALS = 6;
-/** Wrapped SOL mint (for wSOL ATAs; not used by the MVP but documented for completeness). */
-export const NATIVE_MINT_ADDRESS = 'So11111111111111111111111111111111111111112';
 
 const TOKEN_PROGRAM_BYTES = base58Decode32(TOKEN_PROGRAM_ADDRESS);
 const ASSOCIATED_TOKEN_PROGRAM_BYTES = base58Decode32(ASSOCIATED_TOKEN_PROGRAM_ADDRESS);

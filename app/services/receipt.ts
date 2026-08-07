@@ -49,7 +49,8 @@ export async function verifyOutcomeReceipt(receipt: unknown, auth?: ReceiptAuth)
       String(r.block_index), String(r.settle_ts),
       sigHex, pubHex,
     );
-  } catch {
+  } catch (e) {
+    console.warn('verifyOutcomeReceipt failed:', e);
     return false;
   }
   if (!sigOk) return false;
@@ -63,7 +64,8 @@ export async function verifyOutcomeReceipt(receipt: unknown, auth?: ReceiptAuth)
     if (String(r.to) !== auth.to) return false;
     try {
       if (cmpRaw(String(r.amount), auth.amount) !== 0) return false;
-    } catch {
+    } catch (e) {
+      console.warn('verifyOutcomeReceipt amount compare failed:', e);
       return false;
     }
     if (Number(r.currency) !== auth.currency) return false;

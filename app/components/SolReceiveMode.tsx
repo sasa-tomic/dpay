@@ -18,6 +18,7 @@ import {QrScanner} from './QrScanner';
 import {SolNfcTap} from './SolNfcTap';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {SheetOverlay} from './SheetOverlay';
+import {withTimeout} from '../lib/timeout';
 
 const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeight: 44, borderWidth: 1, borderColor: C.sub2, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink};
 
@@ -79,11 +80,10 @@ export function SolReceiveMode({identity, online, nfcReady, onClose}: {identity:
     setScanning(false);
     setBusy(true);
     setErr(null);
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), SOL_SEND_TIMEOUT_MS * 2);
+    const {signal, cancel} = withTimeout(SOL_SEND_TIMEOUT_MS * 2);
     try {
       const solpay = decodeSolPay(raw);
-      const receipt = await broadcastSolPayment(solpay, ctrl.signal);
+      const receipt = await broadcastSolPayment(solpay, signal);
       if (receipt.status === RECEIPT_SETTLED) {
         setResult({amount: solpay.amt, cur: solpay.cur, sig: receipt.sig});
         setPhase('result');
@@ -95,7 +95,7 @@ export function SolReceiveMode({identity, online, nfcReady, onClose}: {identity:
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
-      clearTimeout(timer);
+      cancel();
       setBusy(false);
     }
   }

@@ -14,6 +14,7 @@ import {DpayCore} from '../services/native';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {SheetOverlay} from './SheetOverlay';
 import {copyToClipboard} from '../lib/clipboard';
+import {withTimeout} from '../lib/timeout';
 
 /**
  * Withdraw a chain-key asset to a native address (ckBTC → BTC, native ckETH → ETH, ckERC20 tokens like
@@ -70,14 +71,13 @@ export function WithdrawSheet({identity, relayUrl, currency, display, family, to
     }
     setPhase('submitting');
     setErr(null);
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), WITHDRAW_TIMEOUT_MS);
+    const {signal, cancel} = withTimeout(WITHDRAW_TIMEOUT_MS);
     try {
       const nonce = randNonceHex();
       const expiry = nowSecs() + WITHDRAW_EXPIRY_WINDOW;
       // Sign the WithdrawAuth on-device (non-custodial gate). The facade verifies this exact sig.
       const sigHex = await DpayCore.signWithdrawal(identity.secretHex, address.trim(), raw, nonce, expiry, currency);
-      const r = await withdrawFunds(relayUrl, identity.publicHex, address.trim(), raw, nonce, expiry, currency, sigHex, ctrl.signal);
+      const r = await withdrawFunds(relayUrl, identity.publicHex, address.trim(), raw, nonce, expiry, currency, sigHex, signal);
       setReceipt({amount: r.amount, btcAddress: r.destination});
       setPhase('done');
       void saveWithdrawAddr(currency, address.trim()); // remember for next cash-out (Fork-B)
@@ -96,7 +96,7 @@ export function WithdrawSheet({identity, relayUrl, currency, display, family, to
       }
       setPhase('error');
     } finally {
-      clearTimeout(t);
+      cancel();
     }
   }
 

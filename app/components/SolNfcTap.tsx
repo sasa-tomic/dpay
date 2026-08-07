@@ -13,6 +13,7 @@ import {decideSolPayerReceipt} from '../solana/payments';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from '../payments';
 import type {SolNonceState} from '../services/solNoncePersist';
 import {DpaySolNfc} from '../services/native';
+import {withTimeout} from '../lib/timeout';
 import {NfcIcon} from './NfcIcon';
 
 // Phase → status-view presentation (mirrors NfcTap's NFC_UI). `spin` renders a spinner; `icon`
@@ -114,13 +115,12 @@ export function SolNfcTap({role, identity, solreqUri, nonceState, onPaid, onStal
   // Merchant side: decode the payer's solpay:, broadcast online, confirm — then hand the outcome +
   // the advanced nonce back to the payer over the same tap.
   const submitPayment = useCallback(async (solpayUri: string) => {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), SOL_SEND_TIMEOUT_MS * 2);
+    const {signal, cancel} = withTimeout(SOL_SEND_TIMEOUT_MS * 2);
     try {
       const solpay = decodeSolPay(solpayUri);
       const {decimals, unit} = solUnit(solpay.cur);
       setAmtText(fmtAsset(solpay.amt, decimals, unit));
-      const receipt = await broadcastSolPayment(solpay, ctrl.signal);
+      const receipt = await broadcastSolPayment(solpay, signal);
       if (receipt.status === RECEIPT_SETTLED) {
         try { await DpaySolNfc.confirmSolReceipt(RECEIPT_SETTLED, receipt.nextNonce ?? '', receipt.sig ?? '', solpay.npub); } catch {}
         finalize('success');
@@ -137,7 +137,7 @@ export function SolNfcTap({role, identity, solreqUri, nonceState, onPaid, onStal
       try { await DpaySolNfc.confirmSolReceipt(RECEIPT_UNREACHABLE, '', '', npubRef.current); } catch {}
       finalize('pending', e instanceof Error ? e.message : String(e));
     } finally {
-      clearTimeout(timer);
+      cancel();
     }
   }, [finalize]);
 

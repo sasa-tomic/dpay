@@ -16,6 +16,7 @@ import {QrScanner} from './QrScanner';
 import {SolNfcTap} from './SolNfcTap';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {SheetOverlay} from './SheetOverlay';
+import {withTimeout} from '../lib/timeout';
 
 /**
  * SolPayMode — the payer-side offline-pay sheet for the SOL durable-nonce rail.
@@ -63,10 +64,9 @@ export function SolPayMode({identity, online, nfcReady, onClose}: {identity: Ide
   // key as the authority, and reads back the initial nonce value to sign against offline.
   async function setupNonce() {
     setBusy(true); setErr(null);
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), SOL_SEND_TIMEOUT_MS * 2);
+    const {signal, cancel} = withTimeout(SOL_SEND_TIMEOUT_MS * 2);
     try {
-      const {address, value} = await createNonceAccount(identity.secretHex, ctrl.signal);
+      const {address, value} = await createNonceAccount(identity.secretHex, signal);
       const ns: SolNonceState = {address, value, status: 'ready'};
       await saveSolNonce(identity.publicHex, ns);
       setNonceState(ns);
@@ -74,7 +74,7 @@ export function SolPayMode({identity, online, nfcReady, onClose}: {identity: Ide
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
-      clearTimeout(timer);
+      cancel();
       setBusy(false);
     }
   }
@@ -117,17 +117,16 @@ export function SolPayMode({identity, online, nfcReady, onClose}: {identity: Ide
     const ns = nonceState;
     if (!ns || !ns.address || busy) return;
     setBusy(true); setErr(null);
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), SOL_SEND_TIMEOUT_MS);
+    const {signal, cancel} = withTimeout(SOL_SEND_TIMEOUT_MS);
     try {
-      const value = await resyncNonce(ns.address, ctrl.signal);
+      const value = await resyncNonce(ns.address, signal);
       const updated: SolNonceState = {address: ns.address, value, status: 'ready'};
       setNonceState(updated);
       await saveSolNonce(identity.publicHex, updated);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
-      clearTimeout(timer);
+      cancel();
       setBusy(false);
     }
   }

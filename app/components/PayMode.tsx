@@ -16,6 +16,7 @@ import {NfcTap} from './NfcTap';
 import {NfcIcon} from './NfcIcon';
 import {QrScanner} from './QrScanner';
 import {useEscapeToClose} from '../hooks/useHotkeys';
+import {withTimeout} from '../lib/timeout';
 
 // Plain-language per-reason text for the NFC-unavailable info popup. Each ends with the honest
 // fallback that QR always works, so the payer is never stuck.
@@ -90,11 +91,11 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
       const who = req.toName || short(req.toHex);
       const nonce = req.nonceHex;
       if (online) {
-        const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), DIRECT_PAY_TIMEOUT_MS);
+        const {signal, cancel} = withTimeout(DIRECT_PAY_TIMEOUT_MS);
         // PR25 — payAndClassify does fetch + JSON-or-empty parse + classifyPayHttp, returning the
         // authoritative outcome + the parsed body (so the caller can read `body.receipt` /
         // `body.error` / `body.replayed`). A fetch throw collapses to outcome='unknown'.
-        const {outcome, body: j} = await payAndClassify(relayUrl, code, ctrl.signal).finally(() => clearTimeout(timer));
+        const {outcome, body: j} = await payAndClassify(relayUrl, code, signal).finally(() => cancel());
         if (outcome === 'settled') {
           // R2: trust the outcome only if the receipt's canister/ledger signature verifies. A
           // replay (replayed:true) returns the SAME cached receipt, which verifies identically.

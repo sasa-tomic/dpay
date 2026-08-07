@@ -106,45 +106,6 @@ export function parseDecimalToUnits(human: string, decimals: number): AmountResu
 }
 
 /**
- * Format raw u64 units (a decimal-digit string) as a human decimal string at `decimals` precision.
- * Trims trailing fractional zeros (so `8400000000000000000` at 18 → `"8.4"`; a whole number renders
- * without a decimal point — `8400` at 2 → `"84"`); the integer part is never touched.
- *
- * The exact inverse of [`parseDecimalToUnits`]: for every u64 and every `decimals ≤ 18`,
- * `parseDecimalToUnits(formatUnitsToDecimal(raw, d), d).raw === raw`. Trimming (not padding to
- * `decimals`) is chosen so high-precision assets render readably (`"8.4 BTC"` not
- * `"8.400000000000000000 BTC"`); display-padding to a fixed width remains a UI concern (the app's
- * `fmtAsset`), separate from this primitive.
- *
- * `raw` MUST be a non-empty decimal-digit string (`^\d+$`); any other input throws a `TypeError`
- * (a programming error — debuggable, never a silent NaN/`?.` swallow). `decimals > MAX_DECIMALS` is
- * clamped to `MAX_DECIMALS` (matching the Rust bound — a non-throwing fallback for malformed input).
- */
-export function formatUnitsToDecimal(raw: string, decimals: number): string {
-  if (typeof raw !== 'string' || !RE_RAW_DIGITS.test(raw)) {
-    // Programming error (Rust takes a u64 and cannot be invalid). Debuggable typed throw, not silent.
-    throw new TypeError(`formatUnitsToDecimal: raw must be a decimal-digit string, got ${JSON.stringify(raw)}`);
-  }
-  if (!Number.isInteger(decimals) || decimals < 0) {
-    throw new TypeError(`formatUnitsToDecimal: decimals must be a non-negative integer, got ${JSON.stringify(decimals)}`);
-  }
-  const d = Math.min(decimals, MAX_DECIMALS);
-  const scale = pow10(d);
-  const val = BigInt(raw);
-  const whole = val / scale;
-  const frac = val % scale;
-  if (d === 0 || frac === 0n) {
-    return whole.toString(10);
-  }
-  // Fraction as a zero-padded (width = d) string, then trim trailing zeros.
-  let fracStr = frac.toString(10).padStart(d, '0');
-  while (fracStr.endsWith('0')) {
-    fracStr = fracStr.slice(0, -1);
-  }
-  return `${whole.toString(10)}.${fracStr}`;
-}
-
-/**
  * Compare two raw u64 amounts (decimal-digit strings) using `BigInt` — NEVER lexicographic string
  * compare (which would wrongly rank `"9" > "10"`). Returns -1 / 0 / 1. Throws `TypeError` on a
  * non-digit input (debuggable; both inputs must be valid raw-amount strings).

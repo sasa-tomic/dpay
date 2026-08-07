@@ -11,6 +11,7 @@ import {sendSol} from '../solana';
 import {copyToClipboard} from '../lib/clipboard';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {SheetOverlay} from './SheetOverlay';
+import {withTimeout} from '../lib/timeout';
 
 function friendlySolError(msg: string): string {
   if (/abort/i.test(msg)) return 'Timed out. Check your connection and try again.';
@@ -51,10 +52,9 @@ export function SolanaWithdrawSheet({identity, balance, onSent, onClose}: {ident
     }
     setPhase('submitting');
     setErr(null);
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), SOL_SEND_TIMEOUT_MS);
+    const {signal, cancel} = withTimeout(SOL_SEND_TIMEOUT_MS);
     try {
-      const sig = await sendSol(identity.secretHex, address.trim(), BigInt(raw), ctrl.signal);
+      const sig = await sendSol(identity.secretHex, address.trim(), BigInt(raw), signal);
       setSignature(sig);
       setPhase('done');
       onSent(); // trigger an immediate balance refresh
@@ -63,7 +63,7 @@ export function SolanaWithdrawSheet({identity, balance, onSent, onClose}: {ident
       setErr(friendlySolError(e instanceof Error ? e.message : String(e)));
       setPhase('error');
     } finally {
-      clearTimeout(t);
+      cancel();
     }
   }
 

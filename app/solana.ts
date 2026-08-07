@@ -26,6 +26,7 @@ import {encodeSolPay} from './solana/qr';
 import type {SolReq, SolPay} from './solana/qr';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from './payments';
 import type {ReceiptCode} from './payments';
+import {hexToBytes} from './lib/format';
 
 export {deriveSolanaAddress};
 
@@ -44,12 +45,6 @@ export interface SolReceipt {
 }
 
 // --- private helpers -----------------------------------------------------------
-
-function hexToBytes(hex: string): Uint8Array {
-  const out = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  return out;
-}
 
 // SLIP-10 path m/44'/501'/0'/1' — a sibling of the main Solana key (m/44'/501'/0'/0') for the
 // durable-nonce account keypair. Deterministic from the device seed (a single backup recovers both
@@ -196,6 +191,7 @@ export async function broadcastSolPayment(
     const {value: nextNonce} = await getNonceAccount(SOLANA_RPC_URL, npub, {signal});
     return {status: RECEIPT_SETTLED, npub, nextNonce, sig};
   } catch (e) {
+    console.warn('broadcastSolPayment error:', e);
     const msg = String((e as Error)?.message ?? e);
     if (/Instruction|insufficient|custom|already|blockhash|nonce/i.test(msg)) {
       return {status: RECEIPT_REJECTED, npub, nextNonce: null, sig: null};

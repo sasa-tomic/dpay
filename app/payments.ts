@@ -136,16 +136,7 @@ export function isNonceReused(reason: string | null | undefined): boolean {
 // Kept here (pure, unit-tested) so the web/e2e shim and any TS caller share one layout source; the
 // on-device path builds the same bytes inside the Rust core (dpay-ffi `verify_receipt_sig`).
 
-/** Decode a hex string (no 0x prefix) to bytes. Pure; returns [] on a malformed/odd-length string. */
-export function hexToBytes(hex: string): Uint8Array {
-  const h = (hex || '').toLowerCase().replace(/^0x/, '');
-  if (h.length % 2 !== 0) return new Uint8Array(0);
-  const out = new Uint8Array(h.length / 2);
-  for (let i = 0; i < out.length; i++) {
-    out[i] = parseInt(h.substr(i * 2, 2), 16);
-  }
-  return out;
-}
+import {hexToBytes} from './lib/format';
 
 /** Length of the canonical receipt claim (== dpay_core::RECEIPT_CLAIM_LEN). */
 export const RECEIPT_CLAIM_LEN = 16 + 32 + 32 + 8 + 4 + 8 + 8; // 108

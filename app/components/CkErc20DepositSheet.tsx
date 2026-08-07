@@ -12,6 +12,7 @@ import {type CkErc20OnrampParams, ckerc20OnrampParams, fetchWithTimeout, readJso
 import {encodeApprove, encodeDepositErc20, encodeDepositEth, principalToBytes32} from '../cketh';
 import {resolveOnrampProvider, connectWallet, getChainId, sendTransaction, waitForReceipt, ReceiptReverted, ReceiptTimeout, pairOnrampWallet, openWalletApp} from '../wallet';
 import {loadDeposit, saveDeposit, clearDeposit} from '../services/ckerc20Persist';
+import {withTimeout} from '../lib/timeout';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {SheetOverlay} from './SheetOverlay';
 
@@ -128,16 +129,15 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
   // Load the onramp params (helper address, ERC-20 address, facade principal) once on open.
   useEffect(() => {
     let alive = true;
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), DEPOSIT_TIMEOUT_MS);
+    const {signal, cancel} = withTimeout(DEPOSIT_TIMEOUT_MS);
     (async () => {
       try {
-        const p = await ckerc20OnrampParams(relayUrl, currency, ctrl.signal);
+        const p = await ckerc20OnrampParams(relayUrl, currency, signal);
         if (alive) setParams(p);
       } catch { if (alive) setErr("Couldn't reach the server for onramp details."); }
-      finally { if (alive) clearTimeout(t); }
+      finally { if (alive) cancel(); }
     })();
-    return () => { alive = false; ctrl.abort(); };
+    return () => { alive = false; };
   }, [relayUrl, currency]);
 
   const connect = useCallback(async () => {

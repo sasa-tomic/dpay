@@ -97,6 +97,19 @@ function addressToWord(addr: string): string {
   return addr.replace(/^0x/i, '').toLowerCase().padStart(64, '0');
 }
 
+function normalizeSubaccount(input?: Uint8Array | string): Uint8Array {
+  const out = new Uint8Array(32);
+  if (input instanceof Uint8Array) {
+    out.set(input.subarray(0, 32));
+  } else if (typeof input === 'string') {
+    const h = input.replace(/^0x/, '').toLowerCase();
+    const bytes = new Uint8Array(h.length / 2);
+    for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(h.substr(i * 2, 2), 16);
+    out.set(bytes.subarray(0, 32));
+  }
+  return out;
+}
+
 /** Encode a uint256 as a 32-byte big-endian word (64 lowercase hex chars, no 0x). */
 function uint256ToWord(n: bigint): string {
   if (n < 0n) throw new Error('uint256 cannot be negative');
@@ -122,15 +135,7 @@ export function encodeDepositErc20(
   principalWord: string,
   subaccount?: Uint8Array | string,
 ): string {
-  const sub = new Uint8Array(32);
-  if (subaccount instanceof Uint8Array) {
-    sub.set(subaccount.subarray(0, 32));
-  } else if (typeof subaccount === 'string') {
-    const h = subaccount.replace(/^0x/, '').toLowerCase();
-    const bytes = new Uint8Array(h.length / 2);
-    for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(h.substr(i * 2, 2), 16);
-    sub.set(bytes.subarray(0, 32));
-  }
+  const sub = normalizeSubaccount(subaccount);
   return (
     '0x' +
     SELECTOR_DEPOSIT_ERC20 +
@@ -154,15 +159,7 @@ export function encodeDepositEth(
   principalWord: string,
   subaccount?: Uint8Array | string,
 ): string {
-  const sub = new Uint8Array(32);
-  if (subaccount instanceof Uint8Array) {
-    sub.set(subaccount.subarray(0, 32));
-  } else if (typeof subaccount === 'string') {
-    const h = subaccount.replace(/^0x/, '').toLowerCase();
-    const bytes = new Uint8Array(h.length / 2);
-    for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(h.substr(i * 2, 2), 16);
-    sub.set(bytes.subarray(0, 32));
-  }
+  const sub = normalizeSubaccount(subaccount);
   return (
     '0x' +
     SELECTOR_DEPOSIT_ETH +

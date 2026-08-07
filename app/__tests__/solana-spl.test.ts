@@ -5,7 +5,6 @@ import {
   ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
   USDC_MINT_ADDRESS,
   USDC_DECIMALS,
-  NATIVE_MINT_ADDRESS,
   deriveAta,
   buildSplTransferInstruction,
   buildAdvanceAndSplTransferMessage,
@@ -66,9 +65,6 @@ describe('solana/spl — constants', () => {
     expect(USDC_MINT_ADDRESS).toBe('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
     expect(USDC_DECIMALS).toBe(6);
   });
-  test('NATIVE_MINT_ADDRESS is wrapped SOL', () => {
-    expect(NATIVE_MINT_ADDRESS).toBe('So11111111111111111111111111111111111111112');
-  });
 });
 
 describe('solana/spl — ATA PDA derivation', () => {
@@ -81,8 +77,9 @@ describe('solana/spl — ATA PDA derivation', () => {
     expect(bs58.encode(deriveAta('Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r', USDC_MINT_ADDRESS))).toBe(DEST_ATA);
   });
   test('cross-check vs @solana/web3.js findProgramAddressSync (authority/NATIVE wSOL)', () => {
-    // golden from 09-spl-golden.mjs pdaCrossCheck[2]
-    const ata = deriveAta(AUTHORITY_ADDRESS, NATIVE_MINT_ADDRESS);
+    // golden from 09-spl-golden.mjs pdaCrossCheck[2] — wSOL mint literal (the NATIVE_MINT_ADDRESS
+    // constant was removed as dead prod code; the value is inlined here to keep the PDA coverage).
+    const ata = deriveAta(AUTHORITY_ADDRESS, 'So11111111111111111111111111111111111111112');
     expect(bs58.encode(ata)).toBe('6CUTU46AaBQZGVnmdM8UeL6ofmS9EqYqyuXVvow56VtM');
   });
   test('cross-check vs @solana/web3.js findProgramAddressSync (nonceAccount/USDC)', () => {

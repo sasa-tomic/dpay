@@ -17,6 +17,7 @@ import {
 import {verifyOutcomeReceipt} from '../services/receipt';
 import {fetchWithTimeout, payAndClassify, readJsonOrEmpty} from '../services/relay';
 import {DpayCore, DpayNfc} from '../services/native';
+import {withTimeout} from '../lib/timeout';
 import {NfcIcon} from './NfcIcon';
 
 // Phase → status-view presentation (mirrors ui/src/NfcSession.jsx). `spin` renders a spinner; `icon`
@@ -109,11 +110,10 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
   // outcome='unknown' + empty body when fetch threw (network/timeout/abort) — which the caller
   // treats as UNKNOWN, not failure. PR25 — delegates to the shared `payAndClassify` helper.
   const postPay = useCallback(async (code: string) => {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), NFC_PAY_TIMEOUT_MS);
+    const {signal, cancel} = withTimeout(NFC_PAY_TIMEOUT_MS);
     try {
-      return await payAndClassify(relayUrl, code, ctrl.signal);
-    } finally { clearTimeout(t); }
+      return await payAndClassify(relayUrl, code, signal);
+    } finally { cancel(); }
   }, [relayUrl]);
 
   // Reconcile an ambiguous outcome via the idempotent GET /receipt/:nonce. Returns the settled
