@@ -22,10 +22,14 @@ pub mod agent_ledger;
 pub use app::{app, AppState};
 pub use ledger::{
     ckerc20_onramp_from_descriptor, Clock, CkErc20OnrampParams, CurrencyDescriptor, DepositInfo,
-    DepositRefresh, FakeLedger, FixedClock, FlakyLedger, Ledger, LedgerError, MinterFamily,
+    DepositRefresh, FakeLedger, FixedClock, Ledger, LedgerError, MinterFamily,
     MintedUtxo, PendingUtxo, RampCapability, Receipt, SystemClock, TxnRecord, U64String,
     WithdrawReceipt, WithdrawRequest,
 };
+
+// FlakyLedger is a test-only retry harness (gated in `ledger`); re-export only under the same gate.
+#[cfg(any(test, feature = "test-helpers"))]
+pub use ledger::FlakyLedger;
 
 #[cfg(feature = "agent")]
 pub use agent_ledger::AgentLedger;

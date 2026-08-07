@@ -1231,13 +1231,16 @@ impl Ledger for FakeLedger {
 // ---------------------------------------------------------------------------
 
 /// Wraps a ledger and returns [`LedgerError::Transient`] for the first `fail_first` calls to
-/// `pay`, then delegates. Used to prove the relay's retry loop eventually succeeds. Not compiled
-/// into the shipping binary in spirit, but kept in the lib so integration tests can reach it.
+/// `pay`, then delegates. Used to prove the relay's retry loop eventually succeeds. Test-only:
+/// gated so it does NOT compile into the shipping prod binary (`just image` never enables
+/// `test-helpers`); unit tests (`cfg(test)`) and the feature-gated integration tests reach it.
+#[cfg(any(test, feature = "test-helpers"))]
 pub struct FlakyLedger<L: Ledger> {
     inner: L,
     fail_first: Mutex<u32>,
 }
 
+#[cfg(any(test, feature = "test-helpers"))]
 impl<L: Ledger> FlakyLedger<L> {
     pub fn new(inner: L, fail_first: u32) -> Self {
         FlakyLedger {
@@ -1247,6 +1250,7 @@ impl<L: Ledger> FlakyLedger<L> {
     }
 }
 
+#[cfg(any(test, feature = "test-helpers"))]
 #[async_trait]
 impl<L: Ledger> Ledger for FlakyLedger<L> {
     async fn pay(&self, wire: Vec<u8>) -> Result<Receipt, LedgerError> {

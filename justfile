@@ -33,11 +33,13 @@ build-mock-minter:
 test-canister: build-canister build-mock-minter
     cargo nextest run -p dpay-canister-tests
 
-# relay tests (native, in-memory FakeLedger — no network)
+# relay tests (native, in-memory FakeLedger — no network). Enables `test-helpers` so the
+# integration-test retry harness (`FlakyLedger`) is compiled in; that feature is OFF in the prod
+# image (`just image` never passes it), so FlakyLedger stays out of shipping binaries.
 test-relay:
-    cargo nextest run -p dpay-relay
+    cargo nextest run -p dpay-relay --features test-helpers
 
-# relay's test-helpers-gated tests (the deposit-seed route; OFF in the prod image — `just image` never enables it)
+# historical alias — now equivalent to `test-relay` (test-helpers is always on for tests).
 test-relay-test-helpers:
     cargo nextest run -p dpay-relay --features test-helpers
 

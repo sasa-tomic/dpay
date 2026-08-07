@@ -100,8 +100,9 @@ async fn seed_then_refresh_credits_balance_through_real_router() {
         .unwrap();
     let (s_r, b_r) = call(&state, refresh_req).await;
     assert_eq!(s_r, StatusCode::OK, "refresh must return 200: {b_r}");
-    assert_eq!(b_r["minted_total"], 5000);
-    assert_eq!(b_r["minted"][0]["amount"], 5000);
+    // minted_total / amount are U64String (u64 stringified for JS safe-integer range).
+    assert_eq!(b_r["minted_total"], "5000");
+    assert_eq!(b_r["minted"][0]["amount"], "5000");
     assert!(b_r["pending"].as_array().unwrap().is_empty());
 
     // The balance actually moved on the ledger — the credited path is proven end-to-end.
@@ -119,7 +120,7 @@ async fn seed_then_refresh_credits_balance_through_real_router() {
         .unwrap();
     let (s_r2, b_r2) = call(&state, refresh_req2).await;
     assert_eq!(s_r2, StatusCode::OK);
-    assert_eq!(b_r2["minted_total"], 0, "pending drained: nothing more to mint");
+    assert_eq!(b_r2["minted_total"], "0", "pending drained: nothing more to mint");
     assert_eq!(led.balance_of(&pubkey(&merchant), DEMO_USD), BAL_B + 5000);
 }
 
