@@ -8,6 +8,43 @@
 > entries below are **deliberate, documented follow-ups**, not regressions — each carries its current mitigation and the concrete
 > next step. Structural detail lives in `CODEBASE_ANALYSIS.md`.
 
+## Session summary (2026-08-07): deep audit + hardening — fail-closed dispatch, debuggability, timeout/lock hardening, DRY
+
+> All gates green at this session's close: `just verify` clean (**49/49 e2e** in ~100s at concurrency 2), `just test-canister` **82/82** (+1 fail-closed), `just test-relay` **49/49** (--features test-helpers), `just test-live` **51** (2 live ICP marked LEAK = thread-cleanup), jest **393/393**, `just typecheck` 0 errors, `just bridge-parity` OK (28 methods). On `main`, **6 commits this session** (8 ahead of origin/main). Wire FROZEN (292/196/132) untouched.
+
+**Headline: a fresh whole-codebase audit (2 parallel subagents) surfaced ~20 NEW correctness/debuggability/DRY findings beyond the documented-deferred list; ALL high+medium items actioned across 6 waves.** No new features; this was a quality/correctness pass. Plan: `2026-08-07-deep-audit-ux-harness.md`.
+
+**Wave 1 — canister correctness + observability (commit `39c83a7`):**
+- **Fail-closed withdraw dispatch** (resolves the documented `unwrap_or(CkBtcUtxo)` deferred item): `lib.rs:1504` now match-arms `currency_family()`: `Some(f) => f`; `None` + a registered minter => legacy `CkBtcUtxo` (backward-compat with ckBTC deployments that registered a minter but no family meta); `None` + NO minter => `Err("no minter family and no minter")`. Pure fail-closed would have broken the BTC test `setup()` (registers minter, no family meta); the hybrid closes DEMO play money while preserving compat. New PocketIC test `withdraw_failclosed_no_minter_no_family` (82/82).
+- **`nat_to_u64(...).unwrap_or(0)` silent coercion → logged** (3 sites — pay ReceiptClaim block_index, reconcile orphaned-debit amount, withdraw WithdrawReceipt block_index): now `.unwrap_or_else(|e| { ic_cdk::print(...); 0 })`. Defensive today (real indices fit u64) but a Nat overflow would have falsified a SIGNED outcome claim with no alarm.
+- **Display-cache `Err` drops → logged** (8 sites — pay payee/burn, reconcile both sides, refresh_deposit both branches, withdraw): added `else { ic_cdk::print("WARN ...") }`. Display-only (settlement reads the ledger authoritatively); the gap was zero observability.
+- **BTC withdraw catch-all → logged**: `lib.rs:1809` adds an `ic_cdk::print` naming the `RetrieveBtcWithApprovalError` variant before the settle arm. Behavior unchanged (settling unknowns = treat as dead auth = prevents double-burn, the money-safe choice); observability only.
+
+**Wave 2 — app debuggability + dead code + DRY (commit `89005de`, 22 files, net −163/+106):**
+- **Silent catches → `console.warn`**: `verifyOutcomeReceipt` (sig-verify + cmpRaw catches, `services/receipt.ts`), `payAndClassify` + `readJsonOrEmpty` (`services/relay.ts`), `broadcastSolPayment` (`solana.ts`). Safe returns preserved; only diagnostic logging added. Closes the device-blind-spot class where a bridge/FFI throw looked identical to an invalid signature.
+- **Dead code deleted** (each grep-verified zero prod callers): `toCents`/`toSats` (`lib/format.ts`), `formatUnitsToDecimal` (`lib/amount.ts`), `composeSignal` (`lib/timeout.ts`), `NATIVE_MINT_ADDRESS` (`solana/spl.ts`) + their test cases.
+- **`hexToBytes` consolidated** (was triplicated): canonical throwing version in `lib/format.ts`; copies deleted from `payments.ts`/`solana.ts`/`solana/identity.ts`.
+- **`withTimeout(ms)` helper** added to `lib/timeout.ts`; replaced 12 inline `AbortController+setTimeout+clearTimeout` blocks across 10 components.
+- **`normalizeSubaccount`** extracted in `cketh.ts`; both `encodeDepositErc20`/`encodeDepositEth` use it.
+
+**Wave 3 — relay hardening (commit `10e2ff4`):**
+- **AgentLedger value-moving calls now timeout-bounded** (resolves an INACCURATE prior audit claim): `pay`/`withdraw`/`faucet`/`deposit_address`/`deposit_info` `.call_and_wait()` wrapped in `tokio::time::timeout(CANISTER_CALL_TIMEOUT_SECS)` (previously only the 3 poll-path methods were). A stalled replica no longer wedges a value-moving request ~5min (ic-agent default expiry).
+- **Mutex poison recovery** (resolves the documented ×17/×18 deferred item): all `.lock().unwrap()` → `.lock().unwrap_or_else(|p| p.into_inner())` across `app.rs` (8), `ledger.rs` (9), `agent_ledger.rs` (1). Matches the FFI's recoverable `lock()` helper.
+
+**Wave 4 — FlakyLedger cfg-gate (commit `a762de2`):** gated the test-only `FlakyLedger` retry harness out of the prod binary (`#[cfg(any(test, feature = "test-helpers"))]` on struct + impls + re-export). `test-relay` recipe now passes `--features test-helpers`. Surfaced + fixed a latent assertion bug (`tests/test_helpers.rs` compared int literals against the relay's `U64String`-serialized u64 — prod serialization was correct, the test was wrong).
+
+**Wave 5 — test-live recipe fix (commit `12181dd`):** `test-live` now passes `--features agent,test-helpers` (FlakyLedger is feature-gated).
+
+**Wave 6 — visual baseline re-seed (commit `ee556ef`):** flow 40 pixel-drift proven pre-existing (identical on pristine tree via stash) → baselines re-seeded. No intentional UI change.
+
+**Items examined but deliberately NOT changed (low ROI / risky / subjective):**
+- Enter-to-submit consistency: mobile decimal-pad keyboards have no Enter key; only fires on web. Marginal for the Android-first target. Left as-is.
+- WithdrawSheet confirm step: the inline review card + disabled-until-valid confirm button IS the confirm step; a separate two-step would add friction + risk the e2e flows. Left as-is.
+- Pre-filled request amount ('25.00'): demo convenience; changing risks e2e flows that type over it. Left as-is.
+- `RECEIPT_CLAIM_LEN` magic-number sum in `payments.ts:142`: e2e flow 00 already cross-validates `wire_layout.json receipt.fixed_len==108`; drift causes a LOUD receipt-verification failure, not silent. Low priority.
+- NFC component merge (NfcTap.tsx + SolNfcTap.tsx ~80% identical): larger refactor with e2e-seam-event-name divergence risk; deferred.
+- Catalog single-sourcing (app BUNDLED_CATALOG / relay fake_catalog / deploy candid literals): partly inherent (offline fallback vs demo ledger vs deploy); full unification is a larger coordination effort.
+
 ## Session summary (2026-08-06, part 6): polish + tech-debt — canister split, 5 correctness/DRY fixes, UX pass
 
 > All gates green at this session's close: `just verify` clean (**49/49 e2e** in 86.54s), `just test-canister` **81/81**, `just test-relay` **50/50** (incl 2 live ICP), jest **401/401**, `just typecheck` clean, `just bridge-parity` OK (28 methods), visual regression GREEN (ledger baseline re-seeded for intentional L-hotkey drift). On `main`, **49 commits** ahead of origin/main. Wire FROZEN (292/196/132) untouched.
@@ -28,15 +65,15 @@
 - Added Done buttons to `DepositSheet` + `CkErc20DepositSheet` success screens (inconsistent with all other success sheets). Fixed surviving "relay" jargon in `CkErc20DepositSheet` error ("server"). Fixed bare-lowercase "no camera" → "No camera found on this device." in `QrScanner.tsx`. Added Copy signature button to `SolReceiveMode` success (was selectable-only).
 - Added **L** keyboard shortcut for the Transactions tab (T was taken by Top-up, so Ledger had no shortcut). De-jargoned SOL offline-pay Setup + Stale copy in `SolPayMode.tsx` to plain language. Re-seeded `ledger.png` baseline (intentional drift from the L-hotkey hint).
 
-**Tech-debt findings DEFERRED (documented, not doing — design decisions / larger surface / inherent):**
-- Relay `Mutex::lock().unwrap()` ×17 (app.rs ×8, ledger.rs ×9) — poison would wedge the service; FFI already has the recoverable pattern (`unwrap_or_else(|p| p.into_inner())`). Bodies don't panic in practice.
-- Display-cache refresh silent `Err` drops (canister :1983/:2237/:2683/:2686/:2792/:2814/:3250) + silent `Tainted` UTXO skip (:2774) — no settle impact; would benefit from an `ic_cdk::print` log.
-- Dispatch default `unwrap_or(CkBtcUtxo)` (canister :2944) — a currency with no family meta defaults to the BTC path; should fail-closed.
-- BTC withdraw catch-all (canister :3217) collapses variants into the permanent/settle arm — fragile to upstream enum growth.
+**Tech-debt findings DEFERRED (documented 2026-08-06; status updated 2026-08-07):**
+- ~~Relay `Mutex::lock().unwrap()` ×17 (app.rs ×8, ledger.rs ×9) — poison would wedge the service; FFI already has the recoverable pattern.~~ ✅ **DONE (2026-08-07, `10e2ff4`)** — all 18 sites now `.lock().unwrap_or_else(|p| p.into_inner())`.
+- ~~Display-cache refresh silent `Err` drops + silent `Tainted` UTXO skip — no settle impact; would benefit from `ic_cdk::print`.~~ ✅ **DONE (2026-08-07, `39c83a7`)** — 8 sites now log.
+- ~~Dispatch default `unwrap_or(CkBtcUtxo)` — a currency with no family meta defaults to the BTC path; should fail-closed.~~ ✅ **DONE (2026-08-07, `39c83a7`)** — now fails-closed when no minter AND no family meta (legacy compat preserved when a minter is registered).
+- ~~BTC withdraw catch-all collapses variants into the permanent/settle arm — fragile to upstream enum growth.~~ ✅ **OBSERVABILITY-DONE (2026-08-07, `39c83a7`)** — the MinterFamily match is now exhaustive (no `_ =>` wildcard, compiler-enforced); the external-enum `RetrieveBtcWithApprovalError` catch-all keeps the money-safe settle behavior but now logs the variant. Behavior unchanged (settling unknowns prevents double-burn).
 - WC per-`request()` unbounded (wallet.ts:125/140/182/213) — inherent to EIP-1193 (no standard timeout param); pair bounded at 5min.
-- UX deferred: SOL rail different action vocabulary; SOL offline Pay/Request buried 2 taps deep; Request QR no Share affordance; no focus management/trap on sheets (bigger a11y refactor); Onboarding faucet failure silent; Enter-to-submit inconsistent; WithdrawSheet no explicit confirm step; SolanaWithdrawSheet raw RPC error verbatim; pre-filled request amounts.
+- ~~UX deferred: SOL rail different action vocabulary; SOL offline Pay/Request buried 2 taps deep; Request QR no Share affordance; no focus management/trap on sheets (bigger a11y refactor); Onboarding faucet failure silent; Enter-to-submit inconsistent; WithdrawSheet no explicit confirm step; SolanaWithdrawSheet raw RPC error verbatim; pre-filled request amounts.~~ Partially DONE in `55ee6ef` (focus trap on sheets, faucet-failure honesty, SOL error mapping, Receive/Send verbs). The remainder (Enter-to-submit, confirm step, Share, pre-fill, SOL depth) examined 2026-08-07 and left as-is — see the 2026-08-07 session summary "Items examined but deliberately NOT changed" for rationale.
 
-**Audit verdicts (clean areas, no action needed):** dpay-core prod genuinely panic-free; dpay-ffi prod clean; NO unbounded outbound network I/O in prod (all relay fetches via fetchWithTimeout, all IC calls via `Call::bounded_wait`, all agent calls via `tokio::time::timeout`); ckERC20 withdraw fully wired across canister+candid+relay+app+e2e; SOL rail structurally complete + device-gated.
+**Audit verdicts (clean areas, no action needed):** dpay-core prod genuinely panic-free; dpay-ffi prod clean; ckERC20 withdraw fully wired across canister+candid+relay+app+e2e; SOL rail structurally complete + device-gated. **Updated 2026-08-07:** the prior claim "all agent calls via `tokio::time::timeout`" was INACCURATE (5 value-moving `AgentLedger` calls lacked it) — now CORRECTED in code (`10e2ff4`) so the claim is true.
 
 ---
 
