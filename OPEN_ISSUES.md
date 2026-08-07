@@ -93,14 +93,28 @@ suggested priority, not a hard sequence.
    screen, with no loss of confirmation clarity. Adding a second screen would add a tap and risk 4 e2e flows (15-withdraw,
    18-withdraw-errors, 44-cketh-withdraw, 48-ckusdc-withdraw) for no UX gain. Verdict: keep as-is.
 
-6. **Deeplink scheme + remote request-payment (FEATURE — plan, then build).** A merchant's Request QR (`ReceiveMode.tsx:152`)
-   cannot currently be shared as a link: the request value is a raw base64url blob, not a URI, so copying/sharing it is useless to
-   a recipient. **Plan and/or build a `dpay:` deeplink scheme** so a request can be sent over a messaging app and opened on the
-   payer's phone to populate the pay screen (remote "send me money"). Scope questions to resolve up front: the URI shape
-   (`dpay:req:<base64url>`?), deep-link registration in `android/app/src/main/AndroidManifest.xml` (intent-filter), how the payer
-   app receives + routes it (App.tsx deep-link handling — there is already a `lib/deepLink.ts` helper to check), and whether the
-   same scheme should carry signed-payment receipts (e.g. `dpay:pay:...`) for a non-NFC receipt hand-back. This is the largest
-   item; start with a design note in the plan doc, then implement incrementally. Pairs with the existing request-QR + NFC tap paths.
+6. ~~**Deeplink scheme + remote request-payment (FEATURE — plan, then build).** A merchant's Request QR (`ReceiveMode.tsx:152`)~~
+   ~~cannot currently be shared as a link: the request value is a raw base64url blob, not a URI, so copying/sharing it is useless to~~
+   ~~a recipient. **Plan and/or build a `dpay:` deeplink scheme** so a request can be sent over a messaging app and opened on the~~
+   ~~payer's phone to populate the pay screen (remote "send me money"). Scope questions to resolve up front: the URI shape~~
+   ~~(`dpay:req:<base64url>`?), deep-link registration in `android/app/src/main/AndroidManifest.xml` (intent-filter), how the payer~~
+   ~~app receives + routes it (App.tsx deep-link handling — there is already a `lib/deepLink.ts` helper to check), and whether the~~
+   ~~same scheme should carry signed-payment receipts (e.g. `dpay:pay:...`) for a non-NFC receipt hand-back. This is the largest~~
+   ~~item; start with a design note in the plan doc, then implement incrementally. Pairs with the existing request-QR + NFC tap paths.~~
+   **✅ DONE (2026-08-08).** Built a `dpay:req/<blob>` + `dpay:pay/<blob>` codec (`app/lib/deepLink.ts` — pure `encodeDeeplink`/
+   `decodeDeeplink`, 16 jest cases) where `<blob>` is the EXACT base64url the request QR already carries (no new wire format). The
+   `req` path is FULLY WIRED: ReceiveMode's "Share request link" (`btn-share-request`) wraps `reqQr.value` via `encodeDeeplink`;
+   the payer's Wallet routes a `dpay:req/` arriving at launch (Android `Linking.getInitialURL` + `addEventListener('url')`, 2s-
+   timeout-bounded) or the web `?req=` mirror (`readRequestDeeplink`) → `prefillRequest` state → PayMode's prefill effect reuses the
+   EXACT camera-scan decode path (`onRequestString` → `parseRequestQR` → `decodeRequest` → review). **SECURITY INVARIANT: a
+   deeplink ONLY pre-fills the review screen — it NEVER calls `approve()`/signs** (the payer taps Approve; e2e flow 49 asserts it
+   lands on REVIEW not Paid). Android intent-filter added on MainActivity (`dpay` scheme, BROWSABLE, singleTask already set).
+   `dpay:pay/` (signed-receipt hand-back, payer→merchant when NFC is unavailable) is CODEC-ONLY — its `decodeDeeplink` parses + a
+   `readPaymentDeeplink` web reader exists, but the merchant-side verify/reconcile wiring is **DEFERRED to a follow-up** (spec the
+   reconcile path first). Gates: jest 432/432 (+16 codec), e2e **50/50** (flow 49 added; FLOWS.md regenerated), typecheck 0,
+   bridge-parity OK (28, untouched), test-core 45/45. **Device gate PENDING** (`just app` + `just ondevice` — the manifest
+   intent-filter + the `Linking` native wiring + the money-path-adjacent prefill are device-gated per AGENTS.md blind-spot 3; no
+   emulator on this host). Commits `1bf4045` (codec) → `811dbe6` (e2e).
 
 ## Session summary (2026-08-07): deep audit + hardening — fail-closed dispatch, debuggability, timeout/lock hardening, DRY
 

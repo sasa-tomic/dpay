@@ -92,6 +92,16 @@ the e2e shim.
 - Build order: (a) URI codec pure helper + jest tests (RED-first), (b) App.tsx routing, (c)
   AndroidManifest intent-filter, (d) optionally receipt hand-back `dpay:pay:...`.
 
+**✅ DONE (2026-08-08).** (a) pure codec + 16 jest cases (`app/lib/deepLink.ts`); (b) routing in
+`Wallet.tsx` (native `Linking.getInitialURL`/`addEventListener('url')`, 2s-timeout-bounded) + the web
+`?req=` mirror (`readRequestDeeplink`) → `prefillRequest` state → `PayMode` prefill effect reusing the
+camera-scan decode path; ReceiveMode's "Share request link" (`btn-share-request`); (c) AndroidManifest
+`dpay`-scheme intent-filter on MainActivity; e2e flow 49 (reload to `?req=<blob>` — asserts review
+prefill + no auto-approve + full settle). **SECURITY: a deeplink ONLY prefills review — never signs.**
+(d) **DEFERRED** — `dpay:pay/<blob>` is codec-only (`decodeDeeplink` + `readPaymentDeeplink`); the
+merchant-side verify/reconcile wiring is a follow-up (spec the reconcile path first). Commits
+`1bf4045` → `811dbe6`. Device gate PENDING (`just app` + `just ondevice`). See OPEN_ISSUES item 6.
+
 ## Deeplink design (item 6)
 
 ### Goal
@@ -136,19 +146,32 @@ dpay:pay/<base64url-receipt-blob>           # signed payment receipt (payer → 
   path already produces (`receiptClaimBytes()` + sig). Merchant app verifies + reconciles. This
   closes the loop for devices without NFC or when tap fails. **Only build if (a)-(c) land cleanly
   and the founder wants it this session; otherwise defer to a follow-up.**
+- **STATUS: DEFERRED (2026-08-08).** (a)-(c) landed cleanly (see above). The `dpay:pay/` codec is in
+  place (`decodeDeeplink` parses it; `readPaymentDeeplink` reads `?pay=` on web), but the merchant-
+  side verify/reconcile wiring is deferred — it needs a spec for how a merchant app consumes a
+  receipt handed back over a messaging channel (where the NFC path's `confirmReceipt`/reconcile is
+  not applicable). Tracked in OPEN_ISSUES as a follow-up.
 
 ### Test plan (TDD)
 - RED: jest test asserting `decodeRequest(encodeRequest(req)) deep-equal req` and that a tampered
   byte round-trips to a decode error. Test the `App.tsx` routing with the e2e seam (`?dpay=...` on
   web) — add an e2e flow that simulates opening `dpay:req/...` and asserts the pay sheet pre-fills.
 - The e2e flow goes in `e2e/tests/NN-name.mjs` with a `meta` export; regenerate `FLOWS.md`.
+- **STATUS: DONE (2026-08-08).** jest `app/__tests__/deeplink.test.ts` (16 cases: round-trip both
+  kinds, null for non-dpay/garbage/empty-blob/unknown-kind/missing-slash, base64url `-`/`_`
+  preserved, scheme case-sensitivity). e2e `e2e/tests/49-deeplink-request.mjs`: reloads the browser
+  to `?relay=&req=<blob>` (the REAL web `?req=` path — no test-only prod seam), asserts the review
+  screen pre-fills with the merchant request (no auto-approve) then the full Approve→settle. Chose
+  reload-over-seam: zero test-only prod code + flow 12 proves reload+remount is reliable. FLOWS.md
+  regenerated (50 flows).
 
 ### Confidence / safety
 - URI codec + parsing: confidence **9/10** (pure, testable, reuses existing wire). Safety **9/10**.
+  **✅ DELIVERED** (jest 16 cases + e2e flow 49).
 - Android intent-filter: confidence **7/10** (standard pattern, but device-gated — must run `just
-  app` + `just ondevice`). Safety **8/10**.
+  app` + `just ondevice`). Safety **8/10**. **✅ DELIVERED (intent-filter added); device gate PENDING.**
 - Receipt hand-back: confidence **6/10** until the merchant-side reconcile path is specced. Defer
-  if uncertain.
+  if uncertain. **⏸️ DEFERRED** (codec only).
 
 ## Session-end checklist
 - [ ] Each item committed as its own unit.
