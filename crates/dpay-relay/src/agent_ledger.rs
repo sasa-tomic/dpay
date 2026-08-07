@@ -336,7 +336,7 @@ impl AgentLedger {
         /// authoritative `refresh_balance` update; the rest hit the fast cached query. Bounds
         /// displayed-balance staleness to ~TTL+one-poll. Tunable.
         const BALANCE_TTL_SECS: u64 = 15;
-        match self.last_refresh.lock().unwrap().get(&(pubkey, currency)) {
+        match self.last_refresh.lock().unwrap_or_else(|p| p.into_inner()).get(&(pubkey, currency)) {
             None => true,
             Some(t) => Instant::now().duration_since(*t).as_secs() >= BALANCE_TTL_SECS,
         }
@@ -356,13 +356,20 @@ impl Ledger for AgentLedger {
         // retry from double-spending even if a prior attempt landed). A canister-level `Err(text)`
         // is a *permanent* policy rejection (bad sig / expired / over-cap / insufficient / nonce
         // reused / malformed) — never retried.
-        let reply = self
-            .agent
-            .update(&self.canister_id, "pay")
-            .with_arg(arg)
-            .call_and_wait()
-            .await
-            .map_err(|e| LedgerError::Transient(format!("pay update: {e}")))?;
+        let reply = tokio::time::timeout(
+            Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
+            self.agent
+                .update(&self.canister_id, "pay")
+                .with_arg(arg)
+                .call_and_wait(),
+        )
+        .await
+        .map_err(|_| {
+            LedgerError::Transient(format!(
+                "pay timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
+            ))
+        })?
+        .map_err(|e| LedgerError::Transient(format!("pay update: {e}")))?;
 
         let result: Result<PayReceipt, String> = decode_one(&reply)
             .map_err(|e| LedgerError::Transient(format!("decode pay reply: {e}")))?;
@@ -465,13 +472,20 @@ impl Ledger for AgentLedger {
         // transport/replica failure is `Transient` (503, retried).
         let arg = encode_args((to.to_vec(), currency))
             .map_err(|e| LedgerError::Transient(format!("encode faucet args: {e}")))?;
-        let reply = self
-            .agent
-            .update(&self.canister_id, "faucet")
-            .with_arg(arg)
-            .call_and_wait()
-            .await
-            .map_err(|e| LedgerError::Transient(format!("faucet update: {e}")))?;
+        let reply = tokio::time::timeout(
+            Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
+            self.agent
+                .update(&self.canister_id, "faucet")
+                .with_arg(arg)
+                .call_and_wait(),
+        )
+        .await
+        .map_err(|_| {
+            LedgerError::Transient(format!(
+                "faucet timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
+            ))
+        })?
+        .map_err(|e| LedgerError::Transient(format!("faucet update: {e}")))?;
         let result: Result<u64, String> = decode_one(&reply)
             .map_err(|e| LedgerError::Transient(format!("decode faucet reply: {e}")))?;
         result.map_err(LedgerError::Rejected)
@@ -532,13 +546,20 @@ impl Ledger for AgentLedger {
         // failure ("no minter for currency") is a deploy-time invariant that also surfaces as 503.
         let arg = encode_args((pubkey.to_vec(), currency))
             .map_err(|e| LedgerError::Transient(format!("encode deposit_address arg: {e}")))?;
-        let reply = self
-            .agent
-            .update(&self.canister_id, "deposit_address")
-            .with_arg(arg)
-            .call_and_wait()
-            .await
-            .map_err(|e| LedgerError::Transient(format!("deposit_address update: {e}")))?;
+        let reply = tokio::time::timeout(
+            Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
+            self.agent
+                .update(&self.canister_id, "deposit_address")
+                .with_arg(arg)
+                .call_and_wait(),
+        )
+        .await
+        .map_err(|_| {
+            LedgerError::Transient(format!(
+                "deposit_address timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
+            ))
+        })?
+        .map_err(|e| LedgerError::Transient(format!("deposit_address update: {e}")))?;
         let result: Result<String, String> = decode_one(&reply)
             .map_err(|e| LedgerError::Transient(format!("decode deposit_address reply: {e}")))?;
         result.map_err(LedgerError::Transient)
@@ -596,13 +617,20 @@ impl Ledger for AgentLedger {
         // straight copy. Any `Err(String)` → `Transient` (§0).
         let arg = encode_args((currency,))
             .map_err(|e| LedgerError::Transient(format!("encode deposit_info arg: {e}")))?;
-        let reply = self
-            .agent
-            .update(&self.canister_id, "deposit_info")
-            .with_arg(arg)
-            .call_and_wait()
-            .await
-            .map_err(|e| LedgerError::Transient(format!("deposit_info update: {e}")))?;
+        let reply = tokio::time::timeout(
+            Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
+            self.agent
+                .update(&self.canister_id, "deposit_info")
+                .with_arg(arg)
+                .call_and_wait(),
+        )
+        .await
+        .map_err(|_| {
+            LedgerError::Transient(format!(
+                "deposit_info timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
+            ))
+        })?
+        .map_err(|e| LedgerError::Transient(format!("deposit_info update: {e}")))?;
         let result: Result<DepositInfoMirror, String> = decode_one(&reply)
             .map_err(|e| LedgerError::Transient(format!("decode deposit_info reply: {e}")))?;
         let m = result.map_err(LedgerError::Transient)?;
@@ -699,13 +727,20 @@ impl Ledger for AgentLedger {
         };
         let arg = encode_one(&mirror)
             .map_err(|e| LedgerError::Transient(format!("encode withdraw arg: {e}")))?;
-        let reply = self
-            .agent
-            .update(&self.canister_id, "withdraw")
-            .with_arg(arg)
-            .call_and_wait()
-            .await
-            .map_err(|e| LedgerError::Transient(format!("withdraw update: {e}")))?;
+        let reply = tokio::time::timeout(
+            Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
+            self.agent
+                .update(&self.canister_id, "withdraw")
+                .with_arg(arg)
+                .call_and_wait(),
+        )
+        .await
+        .map_err(|_| {
+            LedgerError::Transient(format!(
+                "withdraw timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
+            ))
+        })?
+        .map_err(|e| LedgerError::Transient(format!("withdraw update: {e}")))?;
         let result: Result<WithdrawReceiptMirror, String> = decode_one(&reply)
             .map_err(|e| LedgerError::Transient(format!("decode withdraw reply: {e}")))?;
         match result {

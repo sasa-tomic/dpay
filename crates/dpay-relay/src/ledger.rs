@@ -701,7 +701,7 @@ impl FakeLedger {
 
     /// Read a balance (test/demo introspection; not part of the trait).
     pub fn balance_of(&self, pubkey: &[u8; PUBKEY_LEN], currency: Currency) -> u64 {
-        let s = self.state.lock().unwrap();
+        let s = self.state.lock().unwrap_or_else(|p| p.into_inner());
         *s.balances.get(&(*pubkey, currency)).unwrap_or(&0)
     }
 
@@ -709,7 +709,7 @@ impl FakeLedger {
     /// call drains it and credits the balance, mirroring the ck minter minting after confirmations.
     /// Multiple seeds for the same `(pubkey, currency)` accumulate.
     pub fn register_deposit(&self, pubkey: [u8; PUBKEY_LEN], currency: Currency, amount: u64) {
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.state.lock().unwrap_or_else(|p| p.into_inner());
         *s.pending_deposits.entry((pubkey, currency)).or_insert(0) += amount;
     }
 }
@@ -913,7 +913,7 @@ impl Ledger for FakeLedger {
         // Single critical section: read balance/nonce, validate, commit atomically — exactly the
         // canister's `pay` body. Lookups are keyed by (pubkey, currency) — debiting/crediting the
         // asset the authorization actually names.
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.state.lock().unwrap_or_else(|p| p.into_inner());
         let from = sa.auth.from;
         let balance = *s.balances.get(&(from, currency)).unwrap_or(&0);
         let nonce_seen = s.spent.contains(&sa.auth.nonce);
@@ -991,7 +991,7 @@ impl Ledger for FakeLedger {
     /// idempotency cache is an optimization; this is the source of truth the relay falls back to
     /// after a restart).
     async fn receipt(&self, nonce: [u8; NONCE_LEN]) -> Result<Option<Receipt>, LedgerError> {
-        Ok(self.state.lock().unwrap().receipts.get(&nonce).cloned())
+        Ok(self.state.lock().unwrap_or_else(|p| p.into_inner()).receipts.get(&nonce).cloned())
     }
 
     async fn faucet(
@@ -1003,7 +1003,7 @@ impl Ledger for FakeLedger {
         // FakeLedger is the permissive DEMO model: credit the requested amount, no cooldown (play
         // money; the e2e flow exercises a repeatable top-up). The real canister's faucet mints a
         // FIXED amount and rate-limits — proven on PocketIC, not modeled here.
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.state.lock().unwrap_or_else(|p| p.into_inner());
         let bal = s.balances.entry((to, currency)).or_insert(0);
         *bal = bal.saturating_add(amount);
         Ok(*bal)
@@ -1015,7 +1015,7 @@ impl Ledger for FakeLedger {
         currency: Currency,
         limit: u32,
     ) -> Result<Vec<TxnRecord>, LedgerError> {
-        let s = self.state.lock().unwrap();
+        let s = self.state.lock().unwrap_or_else(|p| p.into_inner());
         let pk_hex = hex::encode(pubkey);
         // FakeState pushes oldest-first; filter to this (currency, account) and reverse to newest.
         let mut rows: Vec<TxnRecord> = s
@@ -1052,7 +1052,7 @@ impl Ledger for FakeLedger {
         // Drain the pending deposit for this (pubkey, currency) and credit the balance — the
         // offline analogue of the minter's `update_balance` minting confirmed UTXOs. A second call
         // finds nothing pending and reports minted_total = 0.
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.state.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(amount) = s.pending_deposits.remove(&(pubkey, currency)) {
             let bal = s.balances.entry((pubkey, currency)).or_insert(0);
             *bal = bal.saturating_add(amount);
@@ -1170,7 +1170,7 @@ impl Ledger for FakeLedger {
         }
 
         // Single critical section: reserve the withdraw nonce, check funds, commit the burn atomically.
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.state.lock().unwrap_or_else(|p| p.into_inner());
         if !s.withdraw_nonces.insert(nonce) {
             return Err(LedgerError::Rejected("nonce already used".to_string()));
         }
@@ -1252,7 +1252,7 @@ impl<L: Ledger> Ledger for FlakyLedger<L> {
     async fn pay(&self, wire: Vec<u8>) -> Result<Receipt, LedgerError> {
         // Decrement-and-check under the lock, then release before awaiting inner.
         let should_fail = {
-            let mut n = self.fail_first.lock().unwrap();
+            let mut n = self.fail_first.lock().unwrap_or_else(|p| p.into_inner());
             if *n > 0 {
                 *n -= 1;
                 true

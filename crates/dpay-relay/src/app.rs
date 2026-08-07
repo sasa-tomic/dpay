@@ -100,19 +100,19 @@ impl AppState {
     }
 
     pub fn set_safe_mode(&self, on: bool) {
-        *self.safe_mode.lock().unwrap() = on;
+        *self.safe_mode.lock().unwrap_or_else(|p| p.into_inner()) = on;
     }
 
     pub fn safe_mode(&self) -> bool {
-        *self.safe_mode.lock().unwrap()
+        *self.safe_mode.lock().unwrap_or_else(|p| p.into_inner())
     }
 
     pub fn set_faucet_enabled(&self, on: bool) {
-        *self.faucet_enabled.lock().unwrap() = on;
+        *self.faucet_enabled.lock().unwrap_or_else(|p| p.into_inner()) = on;
     }
 
     pub fn faucet_enabled(&self) -> bool {
-        *self.faucet_enabled.lock().unwrap()
+        *self.faucet_enabled.lock().unwrap_or_else(|p| p.into_inner())
     }
 }
 
@@ -234,7 +234,7 @@ async fn receipt(State(state): State<AppState>, Path(nonce_hex): Path<String>) -
     let mut nonce = [0u8; NONCE_LEN];
     nonce.copy_from_slice(&bytes);
     // Fast path: the process-local idempotency cache (fresh settle this process).
-    if let Some(rc) = state.idempotency.lock().unwrap().get(&nonce).cloned() {
+    if let Some(rc) = state.idempotency.lock().unwrap_or_else(|p| p.into_inner()).get(&nonce).cloned() {
         return (StatusCode::OK, Json(PayOk { receipt: rc, replayed: true })).into_response();
     }
     // Durable fallback: the ledger's per-nonce receipt store (survives a relay restart). The canister
@@ -757,7 +757,7 @@ async fn pay(State(state): State<AppState>, headers: HeaderMap, body: axum::body
 
     // 2. Idempotency: if we've already settled this nonce, replay the cached receipt verbatim.
     //    Never touch the ledger again.
-    if let Some(cached) = state.idempotency.lock().unwrap().get(&nonce).cloned() {
+    if let Some(cached) = state.idempotency.lock().unwrap_or_else(|p| p.into_inner()).get(&nonce).cloned() {
         return (StatusCode::OK, Json(PayOk { receipt: cached, replayed: true })).into_response();
     }
 
@@ -778,7 +778,7 @@ async fn pay(State(state): State<AppState>, headers: HeaderMap, body: axum::body
                 Ok(Some(rc)) => {
                     // Recovered a settled-but-lost-reply payment. Cache it under the nonce so a
                     // subsequent duplicate /pay or /receipt hits the fast path.
-                    state.idempotency.lock().unwrap().entry(nonce).or_insert_with(|| rc.clone());
+                    state.idempotency.lock().unwrap_or_else(|p| p.into_inner()).entry(nonce).or_insert_with(|| rc.clone());
                     return (StatusCode::OK, Json(PayOk { receipt: rc, replayed: true }))
                         .into_response();
                 }
@@ -798,7 +798,7 @@ async fn pay(State(state): State<AppState>, headers: HeaderMap, body: axum::body
     // 4. Cache under the nonce (guard against a race that settled the same nonce concurrently:
     //    keep whatever landed first).
     {
-        let mut idem = state.idempotency.lock().unwrap();
+        let mut idem = state.idempotency.lock().unwrap_or_else(|p| p.into_inner());
         let stored = idem.entry(nonce).or_insert_with(|| receipt.clone()).clone();
         return (StatusCode::OK, Json(PayOk { receipt: stored, replayed: false })).into_response();
     }
