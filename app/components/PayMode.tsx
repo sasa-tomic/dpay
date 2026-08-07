@@ -26,7 +26,7 @@ const NFC_REASON: Record<Exclude<NfcStatus, 'ready'>, string> = {
   unknown: "Couldn't check NFC status. Scan the QR code to pay.",
 };
 
-export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assetBalances}: {identity: Identity; online: boolean; relayUrl: string; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assetBalances: Record<number, string>}) {
+export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assetBalances, prefillRequest, onPrefillConsumed}: {identity: Identity; online: boolean; relayUrl: string; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assetBalances: Record<number, string>; prefillRequest?: string | null; onPrefillConsumed?: () => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid'>('scan');
   const [req, setReq] = useState<Req | null>(null);
   const [qr, setQr] = useState<{code: string; amount: string; currency: number; who: string; nonce: string} | null>(null);
@@ -54,6 +54,25 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
       setReq(r); setErr(null); setPhase('review');
     } catch (e: unknown) { setErr(`bad request QR: ${e instanceof Error ? e.message : String(e)}`); }
   }
+
+  // Deeplink prefill (item 6): a `dpay:req/<blob>` (or the web `?req=<blob>` mirror) hands the EXACT
+  // base64url blob the merchant's QR carries straight to this effect, which reuses the camera-scan
+  // decode path (onRequestString → parseRequestQR → decodeRequest → review). NO duplicate decode —
+  // the deeplink blob goes through the same single source of truth. SECURITY INVARIANT: this ONLY
+  // pre-fills the review screen; it NEVER calls approve() or signs anything — the payer taps Approve.
+  // Guarded on phase==='scan' so it can't clobber an in-flight review/qr/paid. The prefill is cleared
+  // (onPrefillConsumed) BEFORE the async decode resolves so the effect can't re-fire mid-flight.
+  useEffect(() => {
+    if (prefillRequest == null) return;
+    if (phase !== 'scan') return;
+    const blob = prefillRequest;
+    onPrefillConsumed?.();
+    onRequestString(blob);
+    // onRequestString/onPrefillConsumed are inline closures; the [prefillRequest, phase] guard +
+    // immediate clear make their identity irrelevant (exhaustive-deps would force a re-run on every
+    // render's new closure for no behavioral change).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillRequest, phase]);
 
   // Confirm an offline (QR-dance) settlement via the ledger, so it lands in Recent once, when settled.
   useEffect(() => {

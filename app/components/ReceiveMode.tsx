@@ -1,10 +1,11 @@
 import {useEffect, useMemo, useState} from 'react';
-import {View, Text, Pressable, TextInput, Modal, type TextStyle} from 'react-native';
+import {View, Text, Pressable, TextInput, Modal, Share, type TextStyle} from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {EXPIRY_WINDOW, NFC_PAY_TIMEOUT_MS, POLL, BALANCE_TIMEOUT_MS, QR_SIZE} from '../config/constants';
 import {short, base, toUnits, randNonceHex, nowSecs} from '../lib/format';
+import {encodeDeeplink} from '../lib/deepLink';
 import {type CurrencyDescriptor, assetTestKey, displayName, fmtCurrencyAmount, currencySymbol} from '../config/catalog';
 import type {Identity} from '../lib/types';
 import {rejectionMessage, isNonceReused} from '../payments';
@@ -171,6 +172,23 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
             <Text style={S.qrOfflinePillText}>Offline — won't see payments until reconnected</Text>
           </View>
         ) : null}
+            {/* Item 6 — share this request as a dpay:req/ link so a payer far away (no camera, over a
+                messaging app) can open it and have the pay review screen pre-filled. The blob is the
+                EXACT base64url the QR carries (no new codec); the payer still taps Approve. */}
+            <Pressable
+              testID="btn-share-request"
+              style={S.linkBtn}
+              onPress={() => {
+                Share.share({message: encodeDeeplink('req', reqQr.value)}).catch(
+                  (e: unknown) => { console.log(`[dpay] share request failed: ${e instanceof Error ? e.message : String(e)}`); },
+                );
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Share request link"
+              accessibilityHint="Share this request as a link the payer can open to pay"
+              accessibilityState={{disabled: false}}>
+              <Text style={S.linkText}>Share request link</Text>
+            </Pressable>
             {scanning ? (
               <><QrScanner onScan={onSignedQr} /><Text style={S.dim2}>Scan the payer's signed QR</Text></>
             ) : (
