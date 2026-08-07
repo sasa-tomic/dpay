@@ -39,14 +39,24 @@ suggested priority, not a hard sequence.
    `DPAY_SELFCHECK PASS` + `just ondevice` on a device host; the change is pure TS/React (no native/wire/bridge change),
    so e2e + typecheck + jest cover the actual risk surface.
 
-2. **Currency catalog single-source-of-truth (DRY/anti-pattern, MEDIUM).** The ckUSDC ERC-20 contract
-   (`0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48`), the ckETH gas-ledger principal (`ss2fx-dyaaa-aaaar-qacoq-cai`), ckBTC minter
-   principal, and decimals (8/6/18) are each independently hardcoded in ≥3 places that can drift: `app/config/catalog.ts`
-   (`BUNDLED_CATALOG`, the cold-load fallback), `crates/dpay-relay/src/ledger.rs` (`fake_catalog`), and the deploy scripts
-   (`scripts/dfx-deploy-ic.sh`, `dfx-deploy-ic-staging.sh`). Drift = wrong-decimals balance display on cold load or wrong metadata
-   registered at deploy. Minimum bar: `fake_catalog()` references the same Rust consts it already defines (it doesn't, for all
-   fields). Ideal: generate the app fallback + deploy literals from one JSON. The app fallback MUST stay in the bundle (offline
-   render path) — the goal is one generator, not deletion.
+2. ~~**Currency catalog single-source-of-truth (DRY/anti-pattern, MEDIUM).** The ckUSDC ERC-20 contract~~
+   ~~/(`0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48`), the ckETH gas-ledger principal (`ss2fx-dyaaa-aaaar-qacoq-cai`), ckBTC minter~~
+   ~~principal, and decimals (8/6/18) are each independently hardcoded in ≥3 places that can drift: `app/config/catalog.ts`~~
+   ~~/(`BUNDLED_CATALOG`, the cold-load fallback), `crates/dpay-relay/src/ledger.rs` (`fake_catalog`), and the deploy scripts~~
+   ~~/(`scripts/dfx-deploy-ic.sh`, `dfx-deploy-ic-staging.sh`). Drift = wrong-decimals balance display on cold load or wrong metadata~~
+   ~~registered at deploy. Minimum bar: `fake_catalog()` references the same Rust consts it already defines (it doesn't, for all~~
+   ~~fields). Ideal: generate the app fallback + deploy literals from one JSON. The app fallback MUST stay in the bundle (offline~~
+   ~~render path) — the goal is one generator, not deletion.~~ **✅ DONE (2026-08-08, minimum bar).** Introduced `dfx/catalog_truth.json`
+   as the single source of truth for drift-prone mainnet metadata (ckBTC/ckETH minters, ckUSDC ledger, ckETH gas-ledger, ckUSDC
+   ERC-20 contract, decimals). `fake_catalog()` now references 3 newly-added `pub(crate) const`s (ckBTC minter, ckETH minter,
+   ckUSDC ledger) instead of re-stringifying them. **Drift alarms: Rust** (`catalog_truth_tests` — 2 tests, `include_str!` JSON,
+   consts==JSON + fake_catalog==JSON; RED verified by mutation) **+ jest** (`app/__tests__/catalog.test.ts` — 3 tests,
+   BUNDLED_CATALOG==JSON for currencies 0/1/2). `BUNDLED_CATALOG` stays a static bundle value (offline render path intact). Chose
+   minimum bar over codegen: fake_catalog already used its consts; codegen would add CI surface the founder didn't ask for; and
+   staging deploy is a *different* (testnet) catalog that can't be cleanly unified. Gates: test-relay **51/51** (+2), jest **416**
+   (+3), typecheck 0. **Remaining drift surface (ops-only, follow-up):** deploy scripts hardcode inline `dfx canister call` candid
+   literals (mainnet) + staging's distinct testnet catalog — bash literals can't be cleanly cross-checked offline without a fragile
+   grep step. Commit `f1dd97b`.
 
 3. ~~**`RECEIPT_CLAIM_LEN` single-source (UNBLOCKED, correctness).** The receipt-claim length is `16+32+32+8+4+8+8 = 108` bytes.~~
    ~~Rust has it as a named sum (`dpay-core/src/lib.rs:123`, `RECEIPT_CLAIM_LEN = NONCE_LEN + PUBKEY_LEN + ...`); the TS mirror~~
@@ -59,13 +69,18 @@ suggested priority, not a hard sequence.
    bundle-bloat with no precedent in the app; the test-only assertion is the clean single-source guard. Gates: jest 397/397
    (+4), typecheck 0, test-core 45/45. No wire bytes changed. Commit `0b18911`.
 
-4. **Deploy-script consolidation (DRY/anti-pattern, LOW-MEDIUM, ops-only).** `scripts/dfx-deploy.sh` (152L), `dfx-deploy-ic.sh`
-   (198L), `dfx-deploy-ic-staging.sh` (369L) share copy-pasted scaffolding: the `CARGO_HOME`/`RUSTUP_HOME`/`PATH` export block,
-   a verbatim-identical `nat()` candid-extract helper, `load_identity` + `dfx_i` wrappers, the `candid-extractor` guard, the wasm
-   build, the `jq` merge into `canister_ids.json`, and the `register_currency` idempotency logic. Extract a `deploy/dfx-lib.sh`
-   (alongside the existing `deploy/env-lib.sh`); the three scripts become thin target-specific callers. Not shipped code; the
-   cost of NOT doing it is a deploy-process bug must be fixed in three places. This is the "many disconnected scripts that should
-   be one with subcommands" anti-pattern (mild — different deploy targets, but heavy shared scaffolding).
+4. ~~**Deploy-script consolidation (DRY/anti-pattern, LOW-MEDIUM, ops-only).** `scripts/dfx-deploy.sh` (152L), `dfx-deploy-ic.sh`~~
+   ~~(198L), `dfx-deploy-ic-staging.sh` (369L) share copy-pasted scaffolding: the `CARGO_HOME`/`RUSTUP_HOME`/`PATH` export block,~~
+   ~~a verbatim-identical `nat()` candid-extract helper, `load_identity` + `dfx_i` wrappers, the `candid-extractor` guard, the wasm~~
+   ~~build, the `jq` merge into `canister_ids.json`, and the `register_currency` idempotency logic. Extract a `deploy/dfx-lib.sh`~~
+   ~(alongside the existing `deploy/env-lib.sh`); the three scripts become thin target-specific callers. Not shipped code; the~~
+   ~~/cost of NOT doing it is a deploy-process bug must be fixed in three places. This is the "many disconnected scripts that should~~
+   ~~be one with subcommands" anti-pattern (mild — different deploy targets, but heavy shared scaffolding).~~ **✅ DONE (2026-08-08).**
+   Extracted `deploy/dfx-lib.sh` (`setup_dfx_env`/`require_cmd`/`nat`/`build_canister_wasm`/`refresh_candid`/`merge_canister_id`/
+   `load_identity` + optional `identity_load_hint` hook). 3 scripts now thin target-specific callers. `bash -n` + `shellcheck 0.7.1`
+   clean on all 4 files. **`register_currency` idempotency intentionally LEFT duplicated** — the 3 scripts use genuinely
+   incompatible strategies (clean-replica no-guard / overwrite-meta / probe+classifier), so a shared helper would force a bad
+   abstraction (KISS/YAGNI). Behavior byte-faithful (section-sequence + jq/cargo bodies diffed identical). Commit `27a1a82`.
 
 5. ~~**WithdrawSheet confirm-step verification (verify-or-improve).** The 2026-08-07 audit found `WithdrawSheet.tsx` already has an~~
    ~~inline review card (`withdraw-review`, lines 183-189: "Review withdrawal / Withdraw X to Y") + a disabled-until-valid confirm~~
