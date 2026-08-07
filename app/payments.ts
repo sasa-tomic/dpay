@@ -138,7 +138,16 @@ export function isNonceReused(reason: string | null | undefined): boolean {
 
 import {hexToBytes} from './lib/format';
 
-/** Length of the canonical receipt claim (== dpay_core::RECEIPT_CLAIM_LEN). */
+/**
+ * Length of the canonical receipt claim (== dpay_core::RECEIPT_CLAIM_LEN).
+ *
+ * Source of truth: `dfx/wire_layout.json`'s `receipt.fixed_len` (itself generated from the Rust
+ * named sum by `just wire-layout`). Kept as the explicit per-field sum here only to avoid a JSON
+ * import in the prod bundle (the app has no JSON imports); the jest suite in
+ * `__tests__/payments.test.ts` asserts this equals the JSON value plus every per-field offset/len,
+ * so a Rust receipt-field resize → `just wire-layout` regen → that test goes RED until this sum is
+ * updated in lockstep (the wire is mutable since 2026-08-07).
+ */
 export const RECEIPT_CLAIM_LEN = 16 + 32 + 32 + 8 + 4 + 8 + 8; // 108
 
 /** The canonical 108-byte little-endian encoding of a settled-payment outcome claim. */

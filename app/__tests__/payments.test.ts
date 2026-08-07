@@ -4,6 +4,8 @@
  * No react-native / native deps here, so this runs on the fast inner loop (`npx jest payments`).
  */
 import {describe, it, expect} from '@jest/globals';
+import {readFileSync} from 'node:fs';
+import {join} from 'node:path';
 import {
   classifyPayHttp,
   receiptCodeFor,
@@ -139,5 +141,61 @@ describe('receiptClaimBytes', () => {
     expect(dv.getBigUint64(92, true)).toBe(7n);
     // settle_ts at offset 100.
     expect(dv.getBigUint64(100, true)).toBe(1800000120n);
+  });
+});
+
+// --- wire-layout cross-check (drift alarm) --------------------------------------
+// `dfx/wire_layout.json` is GENERATED from the frozen Rust named sum `dpay_core::RECEIPT_CLAIM_LEN`
+// by `just wire-layout` (`dpay-fixture wire-layout`). The prod app re-derives 108 as a magic-number
+// sum rather than importing the JSON (the prod app has NO JSON imports — importing it would add a
+// JSON blob to the bundle for a single constant). This suite is the DRIFT ALARM between them: since
+// the wire became mutable (2026-08-07), a receipt-field resize in Rust → `just wire-layout` regen →
+// THIS suite goes RED until payments.ts is updated in lockstep — otherwise receipts silently verify
+// wrong. The file is read at test time (mirrors e2e/tests/29-exact-amount.mjs) so it is independent
+// of any bundler / resolveJsonModule config.
+describe('RECEIPT_CLAIM_LEN vs dfx/wire_layout.json (drift alarm)', () => {
+  const layout = JSON.parse(
+    readFileSync(join(__dirname, '..', '..', 'dfx', 'wire_layout.json'), 'utf8'),
+  ).receipt;
+
+  // Per-field byte layout that `receiptClaimBytes()` writes, in encode order. Each `len` is the
+  // exact width the function advances the cursor by — i.e. the literal widths behind the magic sum
+  // `16+32+32+8+4+8+8`. The running offset walk below mirrors the function's `let o = 0; ...; o += N;`.
+  const tsFields: ReadonlyArray<{name: string; len: number}> = [
+    {name: 'nonce', len: 16},
+    {name: 'from', len: 32},
+    {name: 'to', len: 32},
+    {name: 'amount', len: 8},
+    {name: 'currency', len: 4},
+    {name: 'block_index', len: 8},
+    {name: 'settle_ts', len: 8},
+  ];
+
+  it('RECEIPT_CLAIM_LEN equals the JSON-sourced receipt.fixed_len (the Rust named sum)', () => {
+    expect(RECEIPT_CLAIM_LEN).toBe(layout.fixed_len);
+  });
+
+  it('the magic-number per-field sum equals receipt.fixed_len (108 today)', () => {
+    const sum = tsFields.reduce((acc, f) => acc + f.len, 0);
+    expect(sum).toBe(layout.fixed_len);
+  });
+
+  it('every receiptClaimBytes field offset+len matches the wire-layout JSON (resize/reorder caught)', () => {
+    // Walk the buffer exactly as receiptClaimBytes does and assert each field lands where the JSON
+    // says it must. A field resized in Rust (regen JSON) but not in TS fails on `len`; a reordering
+    // fails on `offset`; a missing/trailing field fails on the final `o === fixed_len` check.
+    let o = 0;
+    for (const f of tsFields) {
+      const j = layout.fields[f.name];
+      expect(j).toBeDefined();
+      expect(o).toBe(j.offset);  // drifted offset → field reordered or an upstream width changed
+      expect(f.len).toBe(j.len); // drifted width → field resized in Rust but not mirrored in TS
+      o += f.len;
+    }
+    expect(o).toBe(layout.fixed_len); // no trailing slack / no missing field
+  });
+
+  it('the JSON golden signing_hex has exactly receipt.fixed_len bytes (the JSON itself is self-consistent)', () => {
+    expect(layout.golden.signing_hex.length / 2).toBe(layout.fixed_len);
   });
 });
