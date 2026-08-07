@@ -1,6 +1,6 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **49 flows.**
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **50 flows.**
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay (FakeLedger, offline). No UI stubs. The only shimmed I/O boundary is
 > the camera scan (sanctioned smallest-boundary seam) and the NFC radio (physical-device gate).
@@ -17,7 +17,7 @@
 Flows grouped by user journey; within each table, every row lists what the flow **verifies** and
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`).
 
-wire (1) · onboard (4) · pay (16) · offline (3) · deposit (8) · withdraw (4) · nfc (3) · system (7) · tour (3)
+wire (1) · onboard (4) · pay (17) · offline (3) · deposit (8) · withdraw (4) · nfc (3) · system (7) · tour (3)
 
 ---
 
@@ -34,7 +34,7 @@ wire (1) · onboard (4) · pay (16) · offline (3) · deposit (8) · withdraw (4
 | 01 | onboard | New user enters a name → wallet created, faucet funds ∂100, balance + empty history render. | onboard, faucet, first-balance, empty-history |
 | 02 | faucet | Returning user taps 'Add demo money' → faucet top-up works, balance increases. | faucet, topup, balance-delta |
 | 23 | username-default | New user leaves name empty → creates → defaults to 'me', onboards + funds. | onboard, default-username |
-| 37 | onboard-no-faucet | Onboard against a dead relay → wallet created with $0 (∂100 never shown), honest "~ approx." offline indicator, faucet fails with ECONNREFUSED. | onboard, faucet-failure, offline, dead-relay, right-reason, zero-balance |
+| 37 | onboard-no-faucet | Onboard against a dead relay → faucet failure surfaces an honest "Continue" prompt (not a silent $0 transition), wallet created with $0 (∂100 never shown), honest "~ approx." offline indicator, faucet fails with ECONNREFUSED. | onboard, faucet-failure, offline, dead-relay, right-reason, zero-balance |
 
 ### Payments (the core offline-pay flow)
 
@@ -56,6 +56,7 @@ wire (1) · onboard (4) · pay (16) · offline (3) · deposit (8) · withdraw (4
 | 36 | bad-qr | Scanning/pasting garbage (non-base64 + wrong-length) surfaces an honest 'bad request QR' error; review never mounts; scan surface re-arms. | bad-qr, malformed, error-handling, input-validation |
 | 42 | receipt-reject | Tampered receipt (wrong pubkey / flipped sig) → verifyOutcomeReceipt rejects → honest "Couldn't verify", no fake Paid ✓, no debit. | receipt, receipt-reject, malicious-relay, verifyOutcomeReceipt |
 | 43 | decimal-edges | 8-dec (ckBTC) + 6-dec (ckUSDC) + 18-dec (ckDAI) amounts render with exact decimals on review (no rounding, no sci-notation, no trailing-zero drift). | decimal, format, ckbtc, ckerc20, 18-decimal |
+| 49 | deeplink-request | dpay:req deeplink opens the pay review screen pre-filled with the merchant request (no auto-approve). | deeplink, request-link, prefill, pay-review |
 
 ### Offline hand-off (the signature feature)
 
@@ -101,7 +102,7 @@ wire (1) · onboard (4) · pay (16) · offline (3) · deposit (8) · withdraw (4
 |---|------|----------|--------|
 | 12 | settings | Settings: privacy policy is reachable, relay URL persists, and reset wallet wipes identity. | settings, relay-config, privacy-policy, reset, persist |
 | 13 | offline | Relay down → faucet top-up surfaces honest 'Offline' (ECONNREFUSED, not unsafe-port), no crash; retry path. | offline, econnrefused, graceful, retry, right-reason |
-| 14 | keyboard | Single-key shortcuts (P/R/T/A/Esc) switch tabs / top-up / add-money / close sheet; input + sheet guards work. | keyboard-shortcuts, tabs, sheet-guard, input-guard |
+| 14 | keyboard | Single-key shortcuts (P/R/T/A/L/Esc) switch tabs / top-up / add-money / ledger / close sheet; input + sheet guards work. | keyboard-shortcuts, tabs, sheet-guard, input-guard |
 | 17 | scan-cleanup | Switch Pay→Receive→Pay: QrScanner listeners tear down cleanly (no leak across unmount/remount). | qr-scanner, teardown, unmount, listener-leak |
 | 24 | wallet-cleanup | Seeded non-dollar balances/history render as asset cards/rows with known symbols (presence, not exact units). | asset-cards, labels, symbols |
 | 38 | relay-retarget | Settings relay-switch retargets the LIVE balance poll: header changes from A's ∂100.00 to B's ∂500.00. | relay-retarget, settings-relay-switch, live-poll |
