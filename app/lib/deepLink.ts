@@ -65,20 +65,9 @@ export function readRequestDeeplink(): string | null {
   }
 }
 
-/** Web-only: read a `?pay=<base64url-blob>` query param. Symmetric mirror of `readRequestDeeplink`
- *  for the deferred receipt-handback path (codec exists; wiring is a follow-up). Returns the raw
- *  blob or null. */
-export function readPaymentDeeplink(): string | null {
-  if (Platform.OS !== 'web') return null;
-  const w = globalThis as unknown as {location?: {search?: string}};
-  if (!w.location) return null;
-  try {
-    const v = new URLSearchParams(w.location.search ?? '').get('pay');
-    return v && v.length > 0 ? v : null;
-  } catch {
-    return null;
-  }
-}
+// NOTE: a `readPaymentDeeplink()` (?pay= reader) is intentionally NOT defined yet — it will be
+// added together with the deferred `dpay:pay/` receipt-handback wiring (see OPEN_ISSUES). Defining
+// an unwired reader now would be dead code (the repo carries no unused exports).
 
 // --- existing web deposit deep link ----------------------------------------------------------
 
