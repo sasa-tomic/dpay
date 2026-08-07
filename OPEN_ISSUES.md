@@ -48,13 +48,16 @@ suggested priority, not a hard sequence.
    fields). Ideal: generate the app fallback + deploy literals from one JSON. The app fallback MUST stay in the bundle (offline
    render path) — the goal is one generator, not deletion.
 
-3. **`RECEIPT_CLAIM_LEN` single-source (UNBLOCKED, correctness).** The receipt-claim length is `16+32+32+8+4+8+8 = 108` bytes.
-   Rust has it as a named sum (`dpay-core/src/lib.rs:123`, `RECEIPT_CLAIM_LEN = NONCE_LEN + PUBKEY_LEN + ...`); the TS mirror
-   re-derives it as a magic-number sum (`app/payments.ts:142`). The other wire consts are already cross-validated by
-   `dfx/wire_layout.json` (which has a full `receipt` section, asserted by e2e flow 00). **Now that the wire is mutable
-   (correction above), this is a real drift risk:** a receipt-field resize must be applied in Rust + TS + JSON in lockstep or
-   receipts silently verify wrong. Single-source it: add `receipt_claim_len` to the wire-layout generation and read it in
-   `payments.ts` (mirror how the other lengths are sourced), OR at minimum assert the TS sum against the JSON value in a test.
+3. ~~**`RECEIPT_CLAIM_LEN` single-source (UNBLOCKED, correctness).** The receipt-claim length is `16+32+32+8+4+8+8 = 108` bytes.~~
+   ~~Rust has it as a named sum (`dpay-core/src/lib.rs:123`, `RECEIPT_CLAIM_LEN = NONCE_LEN + PUBKEY_LEN + ...`); the TS mirror~~
+   ~~re-derives it as a magic-number sum (`app/payments.ts:142`). The other wire consts are already cross-validated by~~
+   ~~`dfx/wire_layout.json` (which has a full `receipt` section, asserted by e2e flow 00).~~ **✅ DONE (2026-08-08).** Added a
+   jest drift-alarm in `app/__tests__/payments.test.ts` (4 tests) that reads `dfx/wire_layout.json` and asserts the TS
+   `RECEIPT_CLAIM_LEN` + the per-field magic sum + every field's offset+len match the JSON (catches resize AND reorder) +
+   JSON self-consistency. A receipt-field resize now goes RED until `payments.ts` is updated in lockstep. The prod const keeps
+   its explicit sum (annotated to name the JSON as source of truth) — importing JSON into the RN bundle for one const would be
+   bundle-bloat with no precedent in the app; the test-only assertion is the clean single-source guard. Gates: jest 397/397
+   (+4), typecheck 0, test-core 45/45. No wire bytes changed. Commit `0b18911`.
 
 4. **Deploy-script consolidation (DRY/anti-pattern, LOW-MEDIUM, ops-only).** `scripts/dfx-deploy.sh` (152L), `dfx-deploy-ic.sh`
    (198L), `dfx-deploy-ic-staging.sh` (369L) share copy-pasted scaffolding: the `CARGO_HOME`/`RUSTUP_HOME`/`PATH` export block,
@@ -64,11 +67,16 @@ suggested priority, not a hard sequence.
    cost of NOT doing it is a deploy-process bug must be fixed in three places. This is the "many disconnected scripts that should
    be one with subcommands" anti-pattern (mild — different deploy targets, but heavy shared scaffolding).
 
-5. **WithdrawSheet confirm-step verification (verify-or-improve).** The 2026-08-07 audit found `WithdrawSheet.tsx` already has an
-   inline review card (`withdraw-review`, lines 183-189: "Review withdrawal / Withdraw X to Y") + a disabled-until-valid confirm
-   button (`btn-withdraw-confirm`, lines 193-202) with live validation (below-min/over-balance/bad-addr). **Verify this is a
-   sufficient confirm affordance** (it was judged so). If on re-review a separate explicit two-step review screen reads better,
-   add it — but weigh the extra tap + the e2e-flow risk. Do not assume it's missing.
+5. ~~**WithdrawSheet confirm-step verification (verify-or-improve).** The 2026-08-07 audit found `WithdrawSheet.tsx` already has an~~
+   ~~inline review card (`withdraw-review`, lines 183-189: "Review withdrawal / Withdraw X to Y") + a disabled-until-valid confirm~~
+   ~~button (`btn-withdraw-confirm`, lines 193-202) with live validation (below-min/over-balance/bad-addr). **Verify this is a~~
+   ~~sufficient confirm affordance** (it was judged so). If on re-review a separate explicit two-step review screen reads better,~~
+   ~~add it — but weigh the extra tap + the e2e-flow risk. Do not assume it's missing.~~ **✅ VERIFIED SUFFICIENT — NO CHANGE
+   (2026-08-08).** The inline `withdraw-review` card renders live as soon as amount > 0 (showing "Withdraw X to <addr>") and
+   `btn-withdraw-confirm` is `disabled={!canReview}` until addr+amount validate (live `belowMin`/`overBalance`/`badAddr` guards).
+   This is a one-screen inline review with a disabled-until-valid confirm — strictly fewer taps than a separate two-step review
+   screen, with no loss of confirmation clarity. Adding a second screen would add a tap and risk 4 e2e flows (15-withdraw,
+   18-withdraw-errors, 44-cketh-withdraw, 48-ckusdc-withdraw) for no UX gain. Verdict: keep as-is.
 
 6. **Deeplink scheme + remote request-payment (FEATURE — plan, then build).** A merchant's Request QR (`ReceiveMode.tsx:152`)
    cannot currently be shared as a link: the request value is a raw base64url blob, not a URI, so copying/sharing it is useless to
