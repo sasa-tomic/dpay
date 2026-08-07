@@ -42,6 +42,19 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent-filter>
+        <!-- Item 6 — dpay: deeplink scheme. A `dpay:req/<blob>` (or `dpay:pay/<blob>`) opened from a
+             messaging app / QR / NFC handoff routes into MainActivity, which RN's Linking surfaces
+             via getInitialURL (launch) + the 'url' event (foreground). singleTask (set above) keeps
+             the existing instance singleTop so a deeplink reaches the live Wallet instead of stacking
+             a second activity. The blob is the exact base64url the request QR carries — Wallet decodes
+             + pre-fills the pay review (never auto-signs). BROWSABLE lets a web page / messaging app
+             dispatch the link. -->
+        <intent-filter>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="dpay" />
+        </intent-filter>
       </activity>
 
       <!-- Payer-side HCE card. BIND_NFC_SERVICE ensures only the OS NFC stack can bind it; the AID
