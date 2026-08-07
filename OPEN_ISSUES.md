@@ -8,6 +8,67 @@
 > entries below are **deliberate, documented follow-ups**, not regressions — each carries its current mitigation and the concrete
 > next step. Structural detail lives in `CODEBASE_ANALYSIS.md`.
 
+## NEXT SESSION — work order (2026-08-08)
+
+> **CORRECTION (founder, 2026-08-07): the wire is NOT frozen.** No public release has shipped, so wire-format changes remain
+> on the table pre-pilot. Earlier "Wire FROZEN (292/196/132)" notes in the session summaries below were the *working assumption*
+> at the time, not a hard constraint. Treat the wire as mutable; any change must still be kept byte-exact across
+> `dpay-core` (Rust) ↔ `app/payments.ts` (TS mirror) ↔ `dfx/wire_layout.json` (e2e fixture) ↔ the e2e shim.
+
+These items are unblocked and owner-less — do them next session (RED-first, commit each unit, confidence ≥6/10). Order is a
+suggested priority, not a hard sequence.
+
+1. **NFC component merge (DRY, MEDIUM).** `app/components/NfcTap.tsx` (338L) and `SolNfcTap.tsx` (239L) are ~80% structurally
+   identical: the `NFC_UI`/`SOL_NFC_UI` status records are byte-for-byte identical (9 phases), the `finalize`/`clearSettleTimer`/
+   `markActive`/`aliveRef`/`committed` lifecycle is shared, the `useEffect` subscribe/arm/disarm is structurally the same, and the
+   terminal render JSX differs only in `testID`. Extract a `useNfcTapState({...})` hook + a shared `<NfcTapView>` presentational
+   shell; the IC and SOL variants become thin adapters. **The protocols differ genuinely and must stay separate in the adapters:**
+   IC = `signAuthorization` + relay `/pay` + nonce-reconcile + optimistic balance deduction; SOL = `signOfflineSolPayment` +
+   RPC broadcast + npub-match + nextNonce adoption. **CAUTION:** e2e flows 11 (IC) and 47 (SOL) emit on DIFFERENT seam event names
+   (`DpayNfcEvent`/`__DPAY_TEST_NFC_SESSION` vs `DpaySolNfcEvent`/`__DPAY_TEST_SOL_NFC_SESSION`) and the native modules differ
+   (`DpayNfc` vs `DpaySolNfc`, different Kotlin AIDs) — keep those boundaries. This is device-gated money-moving UI: run `just app`
+   + `just ondevice` after. ~150 lines removed.
+
+2. **Currency catalog single-source-of-truth (DRY/anti-pattern, MEDIUM).** The ckUSDC ERC-20 contract
+   (`0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48`), the ckETH gas-ledger principal (`ss2fx-dyaaa-aaaar-qacoq-cai`), ckBTC minter
+   principal, and decimals (8/6/18) are each independently hardcoded in ≥3 places that can drift: `app/config/catalog.ts`
+   (`BUNDLED_CATALOG`, the cold-load fallback), `crates/dpay-relay/src/ledger.rs` (`fake_catalog`), and the deploy scripts
+   (`scripts/dfx-deploy-ic.sh`, `dfx-deploy-ic-staging.sh`). Drift = wrong-decimals balance display on cold load or wrong metadata
+   registered at deploy. Minimum bar: `fake_catalog()` references the same Rust consts it already defines (it doesn't, for all
+   fields). Ideal: generate the app fallback + deploy literals from one JSON. The app fallback MUST stay in the bundle (offline
+   render path) — the goal is one generator, not deletion.
+
+3. **`RECEIPT_CLAIM_LEN` single-source (UNBLOCKED, correctness).** The receipt-claim length is `16+32+32+8+4+8+8 = 108` bytes.
+   Rust has it as a named sum (`dpay-core/src/lib.rs:123`, `RECEIPT_CLAIM_LEN = NONCE_LEN + PUBKEY_LEN + ...`); the TS mirror
+   re-derives it as a magic-number sum (`app/payments.ts:142`). The other wire consts are already cross-validated by
+   `dfx/wire_layout.json` (which has a full `receipt` section, asserted by e2e flow 00). **Now that the wire is mutable
+   (correction above), this is a real drift risk:** a receipt-field resize must be applied in Rust + TS + JSON in lockstep or
+   receipts silently verify wrong. Single-source it: add `receipt_claim_len` to the wire-layout generation and read it in
+   `payments.ts` (mirror how the other lengths are sourced), OR at minimum assert the TS sum against the JSON value in a test.
+
+4. **Deploy-script consolidation (DRY/anti-pattern, LOW-MEDIUM, ops-only).** `scripts/dfx-deploy.sh` (152L), `dfx-deploy-ic.sh`
+   (198L), `dfx-deploy-ic-staging.sh` (369L) share copy-pasted scaffolding: the `CARGO_HOME`/`RUSTUP_HOME`/`PATH` export block,
+   a verbatim-identical `nat()` candid-extract helper, `load_identity` + `dfx_i` wrappers, the `candid-extractor` guard, the wasm
+   build, the `jq` merge into `canister_ids.json`, and the `register_currency` idempotency logic. Extract a `deploy/dfx-lib.sh`
+   (alongside the existing `deploy/env-lib.sh`); the three scripts become thin target-specific callers. Not shipped code; the
+   cost of NOT doing it is a deploy-process bug must be fixed in three places. This is the "many disconnected scripts that should
+   be one with subcommands" anti-pattern (mild — different deploy targets, but heavy shared scaffolding).
+
+5. **WithdrawSheet confirm-step verification (verify-or-improve).** The 2026-08-07 audit found `WithdrawSheet.tsx` already has an
+   inline review card (`withdraw-review`, lines 183-189: "Review withdrawal / Withdraw X to Y") + a disabled-until-valid confirm
+   button (`btn-withdraw-confirm`, lines 193-202) with live validation (below-min/over-balance/bad-addr). **Verify this is a
+   sufficient confirm affordance** (it was judged so). If on re-review a separate explicit two-step review screen reads better,
+   add it — but weigh the extra tap + the e2e-flow risk. Do not assume it's missing.
+
+6. **Deeplink scheme + remote request-payment (FEATURE — plan, then build).** A merchant's Request QR (`ReceiveMode.tsx:152`)
+   cannot currently be shared as a link: the request value is a raw base64url blob, not a URI, so copying/sharing it is useless to
+   a recipient. **Plan and/or build a `dpay:` deeplink scheme** so a request can be sent over a messaging app and opened on the
+   payer's phone to populate the pay screen (remote "send me money"). Scope questions to resolve up front: the URI shape
+   (`dpay:req:<base64url>`?), deep-link registration in `android/app/src/main/AndroidManifest.xml` (intent-filter), how the payer
+   app receives + routes it (App.tsx deep-link handling — there is already a `lib/deepLink.ts` helper to check), and whether the
+   same scheme should carry signed-payment receipts (e.g. `dpay:pay:...`) for a non-NFC receipt hand-back. This is the largest
+   item; start with a design note in the plan doc, then implement incrementally. Pairs with the existing request-QR + NFC tap paths.
+
 ## Session summary (2026-08-07): deep audit + hardening — fail-closed dispatch, debuggability, timeout/lock hardening, DRY
 
 > All gates green at this session's close: `just verify` clean (**49/49 e2e** in ~100s at concurrency 2), `just test-canister` **82/82** (+1 fail-closed), `just test-relay` **49/49** (--features test-helpers), `just test-live` **51** (2 live ICP marked LEAK = thread-cleanup), jest **393/393**, `just typecheck` 0 errors, `just bridge-parity` OK (28 methods). On `main`, **6 commits this session** (8 ahead of origin/main). Wire FROZEN (292/196/132) untouched.
