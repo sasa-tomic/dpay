@@ -1,0 +1,19 @@
+{
+  "_doc": "Single source of truth for the drift-prone currency literals shared across the relay's fake_catalog() (crates/dpay-relay/src/ledger.rs) and the app's BUNDLED_CATALOG (app/config/catalog.ts). Cross-checked by: (1) a Rust #[cfg(test)] drift-alarm in ledger.rs, (2) a jest drift-alarm in app/__tests__/catalog.test.ts. A drift in either direction goes RED. The relay's live /catalog response remains the RUNTIME source of truth; this file + the two fallbacks are COLD-START FALLBACKS only. Does NOT cover the staging deploy script (scripts/dfx-deploy-ic-staging.sh), whose testnet catalog uses genuinely different principals/contracts (Sepolia). The decimals.eth entry pins the precision-extreme 18-dec fixture that lives only in fake_catalog (no ETH in BUNDLED_CATALOG) — the jest side does not assert it.",
+  "version": 1,
+  "principals": {
+    "ckbtc_minter": "mqygn-kiaaa-aaaar-qaadq-cai",
+    "cketh_minter": "sv3dd-oaaaa-aaaar-qacoa-cai",
+    "ckusdc_ledger": "xevnm-gaaaa-aaaar-qafnq-cai",
+    "cketh_gas_ledger": "ss2fx-dyaaa-aaaar-qacoq-cai"
+  },
+  "erc20_contracts": {
+    "ckusdc": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+  },
+  "decimals": {
+    "demo": 2,
+    "ckbtc": 8,
+    "ckusdc": 6,
+    "eth": 18
+  }
+}

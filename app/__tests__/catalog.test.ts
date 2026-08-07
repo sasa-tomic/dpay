@@ -1,4 +1,6 @@
 import {describe, it, expect} from '@jest/globals';
+import {readFileSync} from 'node:fs';
+import {join} from 'node:path';
 import {
   isValidDestinationAddress,
   familyDisplay,
@@ -404,5 +406,55 @@ describe('MC8 U7 — ramp-honesty regression pins (no false cash-out / no CkSol 
     // Pinned so removing either — or accidentally enabling cash-out on DEMO — is a deliberate change.
     const eligible = BUNDLED_CATALOG.filter(cashOutEligible).map(c => c.currency).sort((a, b) => a - b);
     expect(eligible).toEqual([1, 2]);
+  });
+});
+
+// --- catalog single-source drift alarm (item 2, 2026-08-08) -----------------------------------
+// `dfx/catalog_truth.json` is the single source of truth for the drift-prone currency literals
+// shared across the relay's fake_catalog() (crates/dpay-relay/src/ledger.rs) and the app's
+// BUNDLED_CATALOG (app/config/catalog.ts). The RELAY side is cross-checked by a Rust #[cfg(test)]
+// drift-alarm in ledger.rs (catalog_truth_tests); THIS suite is the APP half. A drift in either
+// direction goes RED:
+//   - someone changes a literal in BUNDLED_CATALOG without updating the JSON → this suite RED;
+//   - someone changes the JSON without updating BUNDLED_CATALOG → this suite RED.
+// The relay's live /catalog response remains the RUNTIME source of truth; BUNDLED_CATALOG +
+// fake_catalog are COLD-START FALLBACKS only — no second runtime source is introduced. Read at test
+// time (mirrors payments.test.ts's wire_layout.json drift alarm) so it is independent of any bundler
+// / resolveJsonModule config — the prod app has NO JSON imports.
+const TRUTH = JSON.parse(
+  readFileSync(join(__dirname, '..', '..', 'dfx', 'catalog_truth.json'), 'utf8'),
+) as {
+  principals: {ckbtc_minter: string; cketh_minter: string; ckusdc_ledger: string; cketh_gas_ledger: string};
+  erc20_contracts: {ckusdc: string};
+  decimals: {demo: number; ckbtc: number; ckusdc: number; eth: number};
+};
+
+describe('BUNDLED_CATALOG vs dfx/catalog_truth.json (drift alarm)', () => {
+  const byId = (id: number) => BUNDLED_CATALOG.find(c => c.currency === id)!;
+
+  it('DEMO (currency 0) decimals match the shared truth', () => {
+    expect(byId(0).decimals).toBe(TRUTH.decimals.demo);
+  });
+
+  it('ckBTC (currency 1) decimals + ckBTC minter principal match the shared truth', () => {
+    // The ckBTC ledger principal is deliberately NOT asserted here: BUNDLED_CATALOG leaves it empty
+    // (the relay resolves ledgers server-side from the currency id), so it is not a cross-side drift
+    // risk. Only the minter principal + decimals are shared across the two fallbacks.
+    const a = byId(1);
+    expect(a.decimals).toBe(TRUTH.decimals.ckbtc);
+    expect(a.minter).toBe(TRUTH.principals.ckbtc_minter);
+  });
+
+  it('ckUSDC (currency 2) decimals + ledger + minter + ERC-20 + gas-ledger all match the shared truth', () => {
+    // ckUSDC is the highest-stakes entry: it carries the ckUSDC ERC-20 contract, the ckETH gas-ledger
+    // principal (the dual-ledger withdraw_erc20 cash-out), AND the ckUSDC ledger + ckETH minter. A
+    // drift on ANY of these → wrong-decimals display on cold load OR a broken cash-out path. All five
+    // drift-prone values are pinned against the JSON here.
+    const a = byId(2);
+    expect(a.decimals).toBe(TRUTH.decimals.ckusdc);
+    expect(a.ledger).toBe(TRUTH.principals.ckusdc_ledger);
+    expect(a.minter).toBe(TRUTH.principals.cketh_minter);
+    expect(a.token_contract).toBe(TRUTH.erc20_contracts.ckusdc);
+    expect(a.gas_ledger).toBe(TRUTH.principals.cketh_gas_ledger);
   });
 });

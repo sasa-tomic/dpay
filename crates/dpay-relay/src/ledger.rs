@@ -128,6 +128,28 @@ pub(crate) const CKUSDC_ERC20_ADDRESS: &str =
 /// separate `gas_ledger`.
 pub(crate) const CKETH_LEDGER_PRINCIPAL: &str = "ss2fx-dyaaa-aaaar-qacoq-cai";
 
+/// The ckBTC MINTER principal (mainnet) — `mqygn-kiaaa-aaaar-qaadq-cai`, the live chain-key Bitcoin
+/// minter whose `retrieve_btc_with_approval` burns ckBTC → sends native BTC, and whose
+/// `retrieve_btc_min_amount` (= 50_000) backs [`RETRIEVE_BTC_MIN_AMOUNT`] above. Single-sourced here
+/// so the FakeLedger catalog's ckBTC `minter` field can't drift from the verified value; the same
+/// literal is the drift-prone value cross-checked against `dfx/catalog_truth.json` (see the
+/// `catalog_truth_tests` module below). Verified 2026-08-06.
+pub(crate) const CKBTC_MINTER_PRINCIPAL: &str = "mqygn-kiaaa-aaaar-qaadq-cai";
+
+/// The ckETH MINTER principal (mainnet) — `sv3dd-oaaaa-aaaar-qacoa-cai`, the live ckETH minter that
+/// handles native ETH (`withdraw_eth`) AND every ckERC20 token (`withdraw_erc20`). Shared by all
+/// ckERC20 catalog entries (ckUSDC/ckUSDT/ckDAI) + the native-ckETH entry, so it is referenced 5× in
+/// [`fake_catalog`] — single-sourced here so the copies can't drift. Cross-checked against
+/// `dfx/catalog_truth.json`. Verified 2026-08-06.
+pub(crate) const CKETH_MINTER_PRINCIPAL: &str = "sv3dd-oaaaa-aaaar-qacoa-cai";
+
+/// The ckUSDC LEDGER principal (mainnet) — `xevnm-gaaaa-aaaar-qafnq-cai`, the live ckUSDC ICRC-1
+/// ledger. Reused as the demo ledger stand-in for the OTHER ckERC20 catalog entries (ckUSDT/ckDAI/
+/// native-ckETH) since the offline FakeLedger has no per-token ledger — referenced 4× in
+/// [`fake_catalog`], single-sourced here so the copies can't drift. Cross-checked against
+/// `dfx/catalog_truth.json`. Verified 2026-08-06.
+pub(crate) const CKUSDC_LEDGER_PRINCIPAL: &str = "xevnm-gaaaa-aaaar-qafnq-cai";
+
 /// What the merchant sees on success. Byte fields are hex so the JSON is a plain string map.
 /// Mirrors the canister's `PayReceipt` (which returns the same fields as candid `blob`s).
 ///
@@ -756,7 +778,7 @@ fn fake_catalog() -> Vec<CurrencyDescriptor> {
             currency: 1, // ckBTC-shaped deposit currency
             ledger: "2vxsx-fae".to_string(), // anonymous principal text
             mintable: false,
-            minter: Some("mqygn-kiaaa-aaaar-qaadq-cai".to_string()),
+            minter: Some(CKBTC_MINTER_PRINCIPAL.to_string()),
             minter_family: Some(MinterFamily::CkBtcUtxo),
             symbol: Some("₿".into()),
             decimals: Some(8),
@@ -774,9 +796,9 @@ fn fake_catalog() -> Vec<CurrencyDescriptor> {
         },
         CurrencyDescriptor {
             currency: 2, // ckUSDC (ckERC-20 onramp + cash-out currency)
-            ledger: "xevnm-gaaaa-aaaar-qafnq-cai".to_string(), // ckUSDC ledger principal text (O6)
+            ledger: CKUSDC_LEDGER_PRINCIPAL.to_string(), // ckUSDC ledger principal text (O6)
             mintable: false,
-            minter: Some("sv3dd-oaaaa-aaaar-qacoa-cai".to_string()), // ckETH minter
+            minter: Some(CKETH_MINTER_PRINCIPAL.to_string()), // ckETH minter
             minter_family: Some(MinterFamily::CkEthErc20),
             symbol: Some("ckUSDC".to_string()),
             decimals: Some(6),
@@ -806,9 +828,9 @@ fn fake_catalog() -> Vec<CurrencyDescriptor> {
             // yet wired (offramp=`Unavailable`) — only ckUSDC is the e2e proof; ckUSDT keeps the
             // no-swap fail-closed gate until its offramp is enabled.
             currency: 3, // ckUSDT (a second ckERC-20 onramp currency)
-            ledger: "xevnm-gaaaa-aaaar-qafnq-cai".to_string(), // ckUSDT ledger principal text (demo stand-in)
+            ledger: CKUSDC_LEDGER_PRINCIPAL.to_string(), // ckUSDT ledger principal text (demo stand-in)
             mintable: false,
-            minter: Some("sv3dd-oaaaa-aaaar-qacoa-cai".to_string()), // ckETH minter (handles all ckERC20)
+            minter: Some(CKETH_MINTER_PRINCIPAL.to_string()), // ckETH minter (handles all ckERC20)
             minter_family: Some(MinterFamily::CkEthErc20),
             symbol: Some("ckUSDT".to_string()),
             decimals: Some(6),
@@ -833,9 +855,9 @@ fn fake_catalog() -> Vec<CurrencyDescriptor> {
             // is the SAME ckETH ledger (one gas ledger serves every ckERC20 cash-out). Ramp honesty:
             // ckDAI cash-out is not yet wired (offramp=`Unavailable`) — only ckUSDC is the e2e proof.
             currency: 4, // ckDAI (18-dec ckERC-20 — the precision-extreme fixture)
-            ledger: "xevnm-gaaaa-aaaar-qafnq-cai".to_string(), // ckDAI ledger principal text (demo stand-in)
+            ledger: CKUSDC_LEDGER_PRINCIPAL.to_string(), // ckDAI ledger principal text (demo stand-in)
             mintable: false,
-            minter: Some("sv3dd-oaaaa-aaaar-qacoa-cai".to_string()), // ckETH minter (handles all ckERC20)
+            minter: Some(CKETH_MINTER_PRINCIPAL.to_string()), // ckETH minter (handles all ckERC20)
             minter_family: Some(MinterFamily::CkEthErc20),
             symbol: Some("ckDAI".to_string()),
             decimals: Some(18),
@@ -862,9 +884,9 @@ fn fake_catalog() -> Vec<CurrencyDescriptor> {
             // `gas_ledger` is None: native ckETH's gas ledger IS its own `ledger` (the `withdraw_eth`
             // path approves amount+fee on the single ckETH ledger), so it carries no separate gas ledger.
             currency: 5, // native ckETH (CkEthErc20 + token_contract None)
-            ledger: "xevnm-gaaaa-aaaar-qafnq-cai".to_string(), // ckETH ledger principal text (demo stand-in)
+            ledger: CKUSDC_LEDGER_PRINCIPAL.to_string(), // ckETH ledger principal text (demo stand-in)
             mintable: false,
-            minter: Some("sv3dd-oaaaa-aaaar-qacoa-cai".to_string()), // ckETH minter (handles native ETH + all ckERC20)
+            minter: Some(CKETH_MINTER_PRINCIPAL.to_string()), // ckETH minter (handles native ETH + all ckERC20)
             minter_family: Some(MinterFamily::CkEthErc20),
             symbol: Some("Ξ".to_string()),
             decimals: Some(18),
@@ -1344,5 +1366,118 @@ impl<L: Ledger> Ledger for FlakyLedger<L> {
         // Clean passthrough: FlakyLedger only injects transients into `pay` (the retry path under
         // test); the durable receipt lookup delegates unchanged, mirroring receipt_pubkey.
         self.inner.receipt(nonce).await
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Catalog single-source drift alarm (item 2, 2026-08-08).
+// ---------------------------------------------------------------------------
+// `dfx/catalog_truth.json` is the single source of truth for the drift-prone currency literals
+// shared across this file's [`fake_catalog`] (the relay's cold-start fallback) and the app's
+// `BUNDLED_CATALOG` (`app/config/catalog.ts`, the wallet's cold-load fallback). The two fallbacks
+// MUST stay byte-aligned on the mainnet principals/ERC-20/decimals, or a cold-load render shows the
+// wrong decimals / a deploy registers the wrong metadata. This module is the RELAY half of the
+// drift alarm; the APP half is `app/__tests__/catalog.test.ts`. A literal/const change here without
+// a JSON update (or vice-versa) goes RED. The relay's LIVE `/catalog` response (the canister's
+// `currencies()`) remains the runtime source of truth; this file + `BUNDLED_CATALOG` are
+// COLD-START FALLBACKS only — no second runtime source is introduced.
+//
+// The JSON is embedded at compile time via `include_str!` so the test fails to BUILD if the file
+// moves (no runtime path fragility). Path is relative to this source file
+// (`crates/dpay-relay/src/ledger.rs`) → repo-root `dfx/catalog_truth.json`.
+#[cfg(test)]
+mod catalog_truth_tests {
+    use super::*;
+    use serde_json::Value;
+
+    const CATALOG_TRUTH: &str = include_str!("../../../dfx/catalog_truth.json");
+
+    fn truth() -> Value {
+        serde_json::from_str(CATALOG_TRUTH).expect("dfx/catalog_truth.json must be valid JSON")
+    }
+
+    fn catalog_currency(cat: &[CurrencyDescriptor], currency: Currency) -> &CurrencyDescriptor {
+        cat.iter()
+            .find(|d| d.currency == currency)
+            .unwrap_or_else(|| panic!("fake_catalog() missing currency {currency}"))
+    }
+
+    #[test]
+    fn named_consts_are_the_catalog_truth_values() {
+        // Belt-and-suspenders: the named principal/contract consts ARE the JSON's values. A const
+        // edit without a JSON update (or vice-versa) goes RED here, before the catalog-level check.
+        let t = truth();
+        let p = &t["principals"];
+        assert_eq!(CKBTC_MINTER_PRINCIPAL, p["ckbtc_minter"].as_str().unwrap());
+        assert_eq!(CKETH_MINTER_PRINCIPAL, p["cketh_minter"].as_str().unwrap());
+        assert_eq!(CKUSDC_LEDGER_PRINCIPAL, p["ckusdc_ledger"].as_str().unwrap());
+        assert_eq!(CKETH_LEDGER_PRINCIPAL, p["cketh_gas_ledger"].as_str().unwrap());
+        assert_eq!(
+            CKUSDC_ERC20_ADDRESS,
+            t["erc20_contracts"]["ckusdc"].as_str().unwrap()
+        );
+    }
+
+    #[test]
+    fn fake_catalog_matches_catalog_truth_json() {
+        // The drift alarm: fake_catalog()'s drift-prone fields for the SHARED currencies match the
+        // JSON. DEMO(0)/ckBTC(1)/ckUSDC(2) are the currencies present in BOTH fake_catalog and the
+        // app's BUNDLED_CATALOG; native-ckETH(5) lives only here (it pins the 18-dec precision
+        // extreme). ckBTC's `ledger` is deliberately NOT asserted — the two fallbacks disagree by
+        // design (BUNDLED_CATALOG leaves it empty; fake_catalog uses the anonymous principal) and
+        // the relay resolves ledgers server-side from the currency id, so that field is not a
+        // cross-side drift risk.
+        let t = truth();
+        let cat = fake_catalog();
+
+        // DEMO (currency 0): decimals only (no minter/ledger in the shared truth).
+        let demo = catalog_currency(&cat, DEMO_USD);
+        assert_eq!(
+            demo.decimals.unwrap(),
+            t["decimals"]["demo"].as_u64().unwrap() as u8
+        );
+
+        // ckBTC (currency 1): decimals + the ckBTC minter principal.
+        let ckbtc = catalog_currency(&cat, 1);
+        assert_eq!(
+            ckbtc.decimals.unwrap(),
+            t["decimals"]["ckbtc"].as_u64().unwrap() as u8
+        );
+        assert_eq!(
+            ckbtc.minter.as_deref().unwrap(),
+            t["principals"]["ckbtc_minter"].as_str().unwrap()
+        );
+
+        // ckUSDC (currency 2): decimals + ledger + minter + ERC-20 contract + gas-ledger principal.
+        let ckusdc = catalog_currency(&cat, 2);
+        assert_eq!(
+            ckusdc.decimals.unwrap(),
+            t["decimals"]["ckusdc"].as_u64().unwrap() as u8
+        );
+        assert_eq!(
+            ckusdc.ledger.as_str(),
+            t["principals"]["ckusdc_ledger"].as_str().unwrap()
+        );
+        assert_eq!(
+            ckusdc.minter.as_deref().unwrap(),
+            t["principals"]["cketh_minter"].as_str().unwrap()
+        );
+        assert_eq!(
+            ckusdc.token_contract.as_deref().unwrap(),
+            t["erc20_contracts"]["ckusdc"].as_str().unwrap()
+        );
+        assert_eq!(
+            ckusdc.gas_ledger.as_deref().unwrap(),
+            t["principals"]["cketh_gas_ledger"].as_str().unwrap()
+        );
+
+        // native ckETH (currency 5): the 18-dec precision-extreme fixture (fake_catalog only — no
+        // matching entry in BUNDLED_CATALOG, so the jest side does not assert it). Pinning it here
+        // so a future edit can't silently change the precision at the Number 2^53 edge.
+        let cketh = catalog_currency(&cat, 5);
+        assert_eq!(
+            cketh.decimals.unwrap(),
+            t["decimals"]["eth"].as_u64().unwrap() as u8
+        );
     }
 }
