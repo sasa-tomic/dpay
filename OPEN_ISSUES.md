@@ -8,24 +8,35 @@
 > entries below are **deliberate, documented follow-ups**, not regressions — each carries its current mitigation and the concrete
 > next step. Structural detail lives in `CODEBASE_ANALYSIS.md`.
 
-## NEXT SESSION — work order (post 2026-08-08 sweep)
+## NEXT SESSION — work order (post 2026-08-08 UX sweep)
 
-The 2026-08-08 tech-debt + deeplink sweep landed all 6 work-order items (see the completed section
-below). Verified green offline: typecheck 0, test-core 45/45, bridge-parity OK (28), jest 432/432,
-e2e **50/50** (flow 05 confirmed as the pre-existing host-load flake via isolated re-run). Two
-genuinely-remaining items:
+The 2026-08-08 tech-debt + deeplink sweep (6 items, all done — see below) was followed by a
+**real-app UX audit** that found and fixed 4 user-reported bugs the browser e2e is structurally
+blind to (it uses a 3-currency FakeLedger, not the 6-currency prod catalog). All fixed + verified on
+the emulator against the production relay:
+- **Testnet duplicates** → hidden by default, toggle to unhide, labelled "BTC testnet"/"USDC testnet"/"ETH testnet" (`cf520ac`).
+- **SOL 2 extra buttons** → removed; offline flows re-homed into SOL Send/Receive sheets (`cf520ac`).
+- **Balance latency (N+1 fetches)** → relay batch endpoint `GET /api/v1/balances/{hex}` + app single-fetch; N+1→1 HTTP request (`b7eddb3`, prod relay redeployed).
+- **AGENTS.md prod-reconciliation directive** added so future sessions catch this class of bug (`53a0bc5`).
+
+Verified green: typecheck 0, test-core 45/45, test-relay 53/53, bridge-parity OK (28), jest 448/448,
+e2e **50/50**, device gate (`just app` + `just ondevice` 9/9). git HEAD `53a0bc5`.
+
+Four genuinely-remaining items (none block pilot):
 
 1. **`dpay:pay/` receipt hand-back (FEATURE — HIGH effort, split into medium tasks).** Codec exists (`encodeDeeplink`/`decodeDeeplink` support `pay`; jest-tested). To wire: (a) pay-side: after an offline sign, offer a "Share receipt" that encodes the signed payment as `dpay:pay/<blob>`; (b) `readPaymentDeeplink()` web reader (`?pay=`) — re-add to `app/lib/deepLink.ts` WITH the wiring (currently deleted to honor no-dead-code); (c) merchant-side: decode + verify the receipt signature (reuse `services/receipt.ts` `verifyOutcomeReceipt`) + reconcile the open request as settled. Mirror the e2e flow 49 structure. Start with a design note, then build incrementally.
-2. **`just e2e` npm-install flake (tooling, LOW).** `just e2e` fails at the `npm install` step with `npm error Invalid Version` (`@rolldown/binding-wasm32-wasi` dedupe crash in `@npmcli/arborist` under Node 24) — a **pre-existing** npm/Node-v24 env bug, NOT a code regression (`node_modules` already exists; `node e2e/run.mjs` runs directly). Consider: pin the e2e Node version, or make the justfile `npm install` tolerant of this error, or skip install when `node_modules` exists.
+2. **SOL as first-class in main Pay/Receive tabs (REFACTOR — MEDIUM).** SOL offline flows are currently re-homed into the SOL Send/Receive sheets (interim). The deeper refactor: make SOL a selectable asset in the main Pay/Receive tabs (parity with IC currencies) instead of a separate bolt-on reached only via the Balances sheet. Requires unifying the PayMode/ReceiveMode (IC) + SolPayMode/SolReceiveMode entry points behind a currency-aware router.
+3. **Balance latency — inherent IC round-trip (OPTIMIZATION, LOW).** The batch endpoint cut client requests 6→1 and parallelizes ledger queries server-side, but the first poll still takes a few seconds (relay→IC-mainnet round trip per ledger). A future relay-side balance cache (short TTL) or a single multi-ledger query-call optimization could help. Acceptable for pilot.
+4. **`just e2e` npm-install flake (tooling, LOW).** `just e2e` fails at the `npm install` step with `npm error Invalid Version` (`@rolldown/binding-wasm32-wasi` dedupe crash in `@npmcli/arborist` under Node 24) — a **pre-existing** npm/Node-v24 env bug, NOT a code regression (`node_modules` already exists; `node e2e/run.mjs` runs directly). Consider: pin the e2e Node version, or make the justfile `npm install` tolerant of this error, or skip install when `node_modules` exists.
 
 > **Device gate RESOLVED (2026-08-08).** The prior "no emulator on this host / BLOCKING" claim was
 > a false negative — the host has AVD `dpay_api36` (API-36 google_apis x86_64 system image) which
-> boots in ~40s. The device gate for items 1 + 6 **PASSED** this session:
+> boots in ~40s. Boot: `tmux new-session -d -s emu "$ANDROID_HOME/emulator/emulator -avd dpay_api36 -no-window -no-audio -no-snapshot -gpu swiftshader_indirect -read-only"`; poll `adb shell getprop sys.boot_completed` (~40s). Device gates PASSED this session:
 > - `just ondevice`: **9 instrumented tests GREEN** (UniFFI binding + NFC framing on the emulator).
-> - `just app`: APK built + installed + launched; **`DPAY_SELFCHECK PASS`** + **`DPAY_SOL_SELFCHECK PASS`** (proves the full `NativeModules`→`@ReactMethod`→UniFFI→`libdpay_ffi.so` surface incl. the NFC native modules + every autolinked module).
-> - **Deeplink dispatch**: `adb shell am start -a android.intent.action.VIEW -d 'dpay:req/<blob>'` resolves to `org.kalaj.dpay/.MainActivity` on BOTH cold start (getInitialURL path) and warm start (onNewIntent→url event path), **no crash**, app stays alive. The intent-filter + the RN `Linking` bridge work.
+> - `just app`: APK built + installed + launched; **`DPAY_SELFCHECK PASS`** + **`DPAY_SOL_SELFCHECK PASS`**.
+> - **Deeplink dispatch**: `adb shell am start -a android.intent.action.VIEW -d 'dpay:req/<blob>'` resolves to `org.kalaj.dpay/.MainActivity` on cold + warm start, no crash.
 >
-> Note: the `dpay_api35` AVD was removed (its android-35 system image isn't installed; only android-36 is). If a 2nd AVD is wanted, install via `sdkmanager "system-images;android-35;google_apis;x86_64"` then `avdmanager create avd`.
+> Note: the `dpay_api35` AVD was removed (its android-35 system image isn't installed; only android-36 is). To recreate: `sdkmanager "system-images;android-35;google_apis;x86_64"` then `avdmanager create avd -n dpay_api35 -k "system-images;android-35;google_apis;x86_64"`.
 
 ---
 
