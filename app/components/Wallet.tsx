@@ -5,7 +5,8 @@ import {C} from '../config/palette';
 import {S} from '../styles';
 import {TOP_UP_CENTS, FAUCET_TIMEOUT_MS, SHOW_TESTNET_STORAGE_KEY} from '../config/constants';
 import {familyDisplay, fmtCurrencyAmount} from '../config/catalog';
-import {usd, base} from '../lib/format';
+import {usd, base, fmtAsset} from '../lib/format';
+import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {cmpRaw, applyOffline} from '../lib/amount';
 import type {Identity, NfcStatus} from '../lib/types';
 import {DpayCore} from '../services/native';
@@ -33,7 +34,6 @@ import {SolReceiveMode} from './SolReceiveMode';
 import {SettingsSheet} from './SettingsSheet';
 import {CkErc20DepositSheet} from './CkErc20DepositSheet';
 import {BalancesSheet} from './BalancesSheet';
-import {RailSelector} from './RailSelector';
 
 export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity; relayUrl: string; setRelayUrl: (s: string) => void; onReset: () => void}) {
   const [mode, setMode] = useState<'pay' | 'receive' | 'ledger'>('pay');
@@ -112,14 +112,14 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
   const {balance: solBalance, refresh: refreshSol} = useSolanaBalance(solAddress);
   const [solReceiveOpen, setSolReceiveOpen] = useState(false);
   const [solSendOpen, setSolSendOpen] = useState(false);
-  // The settlement rail selected in the Pay/Receive tabs: 'ic' (default, unchanged) or 'sol'. SOL is
-  // a first-class asset now — selecting it renders SolPayMode/SolReceiveMode INLINE in the tab body
-  // instead of PayMode/ReceiveMode. IC and SOL use SEPARATE NFC HCE services (DpayNfc AID `…01` vs
-  // DpaySolNfc AID `…02`) that must be armed BEFORE a tap, so the user MUST pre-select the rail —
-  // auto-detection is impossible (the AID is committed before the reader's first APDU). The rail
-  // defaults to 'ic' and resets naturally on unmount; switching unmounts the mode component, whose
-  // useNfcTapState cleanup disarms the HCE card/reader (no arm-leak).
-  const [rail, setRail] = useState<'ic' | 'sol'>('ic');
+  // The active asset rail: true when the user has selected SOL in the Balances sheet, false for any
+  // IC catalog currency. This REPLACES the old RailSelector toggle — the selected currency now
+  // IMPLIES the rail (SOL → SOL NFC HCE / SOL send-receive; any IC currency → IC NFC HCE / IC
+  // send-receive). The NFC AID is still armed before a tap — it's just driven by the asset
+  // selection instead of a separate toggle. IC and SOL use SEPARATE NFC HCE services (DpayNfc AID
+  // `…01` vs DpaySolNfc AID `…02`); switching the active asset unmounts the old mode component,
+  // whose useNfcTapState cleanup disarms the HCE card/reader (no arm-leak).
+  const [activeSol, setActiveSol] = useState(false);
 
   // Read the device NFC radio state once (re-checked when the app returns to the foreground, since
   // the user may toggle NFC in system settings). Purely informational for the status chip; failure
@@ -337,7 +337,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
         >
           <View style={S.balLabelRow}>
             <View style={[S.dot, {backgroundColor: online ? C.ok : C.sub2}]} />
-            <Text style={S.balLabel}>{online ? 'balance' : '~ approx.'}</Text>
+            <Text style={S.balLabel}>{activeSol ? 'balance' : (online ? 'balance' : '~ approx.')}</Text>
             <HotkeyHint k="A" />
           </View>
           <View style={S.balAmtRow}>
@@ -348,9 +348,11 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
                 offline '~' approx + null '—' handling; an asset shows its polled balance formatted
                 in native units. MC5: a non-DEMO asset applies the per-currency offline deduction via
                 `displayAssetBalances` (the per-currency deduction never crosses assets). */}
-            <Text style={S.balAmt}>{currentCurrency === 0
-              ? (shownBalance == null ? '—' : `${online ? '' : '~'}${usd(shownBalance)}`)
-              : fmtCurrencyAmount(catalog, currentCurrency, displayAssetBalances[currentCurrency] ?? '0')}</Text>
+            <Text style={S.balAmt}>{activeSol
+              ? (solBalance == null ? '—' : fmtAsset(solBalance, SOL_DECIMALS, SOL_UNIT))
+              : currentCurrency === 0
+                ? (shownBalance == null ? '—' : `${online ? '' : '~'}${usd(shownBalance)}`)
+                : fmtCurrencyAmount(catalog, currentCurrency, displayAssetBalances[currentCurrency] ?? '0')}</Text>
             <Text style={S.swapHint}>⇅</Text>
           </View>
         </Pressable>
@@ -364,22 +366,14 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
 
       <ScrollView style={S.scroll} contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
         {mode === 'pay'
-          ? (
-            <>
-              <RailSelector current={rail} onSelect={setRail} solAvailable={!!solAddress} />
-              {rail === 'sol' && solAddress
-                ? <SolPayMode identity={identity} online={online} nfcReady={nfc === 'ready'} />
-                : <PayMode identity={identity} online={online} relayUrl={relayUrl} nfcStatus={nfc} onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance} catalog={catalog} assetBalances={displayAssetBalances} prefillRequest={prefillRequest} onPrefillConsumed={() => setPrefillRequest(null)} />}
-            </>
+          ? (activeSol && solAddress
+              ? <SolPayMode identity={identity} online={online} nfcReady={nfc === 'ready'} />
+              : <PayMode identity={identity} online={online} relayUrl={relayUrl} nfcStatus={nfc} onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance} catalog={catalog} assetBalances={displayAssetBalances} prefillRequest={prefillRequest} onPrefillConsumed={() => setPrefillRequest(null)} />
           )
           : mode === 'receive'
-          ? (
-            <>
-              <RailSelector current={rail} onSelect={setRail} solAvailable={!!solAddress} />
-              {rail === 'sol' && solAddress
-                ? <SolReceiveMode identity={identity} online={online} nfcReady={nfc === 'ready'} />
-                : <ReceiveMode identity={identity} relayUrl={relayUrl} online={online} nfcReady={nfc === 'ready'} onReceived={onActivity} catalog={catalog} prefillReceipt={prefillReceipt} onReceiptConsumed={() => setPrefillReceipt(null)} />}
-            </>
+          ? (activeSol && solAddress
+              ? <SolReceiveMode identity={identity} online={online} nfcReady={nfc === 'ready'} />
+              : <ReceiveMode identity={identity} relayUrl={relayUrl} online={online} nfcReady={nfc === 'ready'} onReceived={onActivity} catalog={catalog} prefillReceipt={prefillReceipt} onReceiptConsumed={() => setPrefillReceipt(null)} />
           )
           : <Ledger history={history} catalog={catalog} />}
       </ScrollView>
@@ -391,7 +385,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
           primaryBalance={shownBalance}
           online={online}
           currentCurrency={currentCurrency}
-          onSelect={(currency) => { setCurrentCurrency(currency); setBalancesOpen(false); }}
+          onSelect={(currency) => { setCurrentCurrency(currency); setActiveSol(false); setBalancesOpen(false); }}
           onTopUp={topUp}
           topUpBusy={topUpBusy}
           topUpErr={topUpErr}
@@ -399,6 +393,8 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
           onWithdraw={(currency) => { setWithdrawCurrency(currency); setBalancesOpen(false); }}
           solAddress={solAddress}
           solBalance={solBalance}
+          activeSol={activeSol}
+          onSelectSol={() => { setActiveSol(true); setBalancesOpen(false); }}
           onSolReceive={() => { setSolReceiveOpen(true); setBalancesOpen(false); }}
           onSolSend={() => { setSolSendOpen(true); setBalancesOpen(false); }}
           showTestnet={showTestnet}

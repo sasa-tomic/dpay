@@ -16,7 +16,7 @@ import {SheetOverlay} from './SheetOverlay';
  *
  * The durable-nonce offline-merchant flow (SolReceiveMode — build a `solreq:` code + scan/broadcast
  * the payer's signed `solpay:`) now lives INLINE in the main Receive tab (selected via the SOL rail
- * of the RailSelector), NOT here. This sheet is purely the deposit-address surface (money IN from an
+ * selecting SOL as the active asset in Balances), NOT here. This sheet is purely the deposit-address surface (money IN from an
  * external Solana account). No functionality lost and no dead code.
  */
 export function SolanaReceiveSheet({address, onClose}: {address: string; onClose: () => void}) {

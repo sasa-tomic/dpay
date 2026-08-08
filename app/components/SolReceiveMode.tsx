@@ -23,7 +23,7 @@ const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeigh
 /**
  * SolReceiveMode — the merchant-side offline-pay component for the SOL durable-nonce rail.
  *
- * Rendered INLINE in the Receive tab body (behind the RailSelector) when the user selects the SOL
+ * Rendered INLINE in the Receive tab body when SOL is the active asset (selected in Balances).
  * rail. The merchant builds a `solreq:` QR (amount + currency + their address), the payer scans it +
  * signs offline (SolPayMode), then the merchant scans the payer's `solpay:` QR and broadcasts it
  * online (broadcastSolPayment). On success, the merchant sees the received amount + the tx
@@ -34,7 +34,7 @@ const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeigh
  * (no relay, no /receipt poll — `confirmTransaction` is the source of truth).
  *
  * NFC arming: this component mounts only while the SOL rail is selected. Switching the rail (via
- * the RailSelector) unmounts it, whose `useNfcTapState` cleanup stops the reader — no arm-leak.
+ * Switching the active asset unmounts it, whose `useNfcTapState` cleanup stops the reader — no arm-leak.
  */
 export function SolReceiveMode({identity, online, nfcReady}: {identity: Identity; online: boolean; nfcReady: boolean}) {
   const [amount, setAmount] = useState('0.025');

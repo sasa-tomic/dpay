@@ -19,7 +19,7 @@ import {withTimeout} from '../lib/timeout';
 /**
  * SolPayMode — the payer-side offline-pay component for the SOL durable-nonce rail.
  *
- * Rendered INLINE in the Pay tab body (behind the RailSelector) when the user selects the SOL rail.
+ * Rendered INLINE in the Pay tab body when SOL is the active asset (selected in Balances).
  * The payer scans a merchant's `solreq:` QR, reviews, and signs FULLY OFFLINE (no RPC needed — the
  * signature uses the stored durable-nonce value as the recentBlockhash). The signed `solpay:` QR is
  * shown for the merchant to scan + broadcast.
@@ -33,7 +33,7 @@ import {withTimeout} from '../lib/timeout';
  * account on-chain and persists its address + initial value.
  *
  * NFC arming: this component mounts only while the SOL rail is selected. Switching the rail (via
- * the RailSelector) unmounts it, whose `useNfcTapState` cleanup disarms the HCE card — no arm-leak.
+ * switching the active asset unmounts it, whose `useNfcTapState` cleanup disarms the HCE card — no arm-leak.
  */
 export function SolPayMode({identity, online, nfcReady}: {identity: Identity; online: boolean; nfcReady: boolean}) {
   const [phase, setPhase] = useState<'setup' | 'scan' | 'review' | 'qr' | 'paid'>('setup');
@@ -176,7 +176,7 @@ export function SolPayMode({identity, online, nfcReady}: {identity: Identity; on
             <Text style={S.primaryText}>{online ? 'Set up offline pay' : 'Go online to set up'}</Text>
           </Pressable>
         )}
-        {/* No Cancel button: the user switches rail via the RailSelector, not a per-phase cancel. */}
+        {/* No Cancel button: the user switches the active asset in Balances, not a per-phase cancel. */}
       </View>
     );
   }

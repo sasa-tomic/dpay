@@ -18,8 +18,8 @@
 // The stub RPC (`__DPAY_TEST_SOLANA_RPC_STUB`) simulates a Solana node for createNonceAccount (first-
 // use setup). The offline sign itself is PURE (no RPC — signs against the stored durable-nonce value).
 //
-// Selector contract: `rail-sol` (the SOL rail of the Pay tab's segmented selector — SOL is a
-// first-class asset now, selected inline via the RailSelector, not via Balances→send sheet),
+// Selector contract: `asset-sol-select` (the SOL row in the Balances sheet — the selected asset
+// implies the settlement rail, no separate chain toggle),
 // `btn-sol-pay-setup`, `sol-pay-scan`, `sol-nfc-status`.
 import {setup, assert, onboardWallet, accountOf} from '../harness/lib.mjs';
 
@@ -84,13 +84,14 @@ export async function run() {
       };
     }, nonceB64);
 
-    console.log('[47-sol-nfc] selecting the SOL rail on the Pay tab…');
-    // SOL is a first-class asset now: select the SOL rail on the Pay tab (the default tab after
-    // onboarding) to mount SolPayMode INLINE. The RailSelector pre-selects the NFC HCE service
-    // (DpaySolNfc AID ..02) — this MUST happen before any tap, so the rail is user-chosen, not
-    // auto-detected. (Was reached via Balances → SOL send sheet → 'Pay offline instead' link.)
-    await driver.findByTestID('rail-sol', {timeoutMs: 8_000});
-    await driver.click('rail-sol', {timeoutMs: 5_000});
+    console.log('[47-sol-nfc] selecting SOL as the active asset via Balances…');
+    // SOL is a first-class asset now: select SOL via the Balances sheet (the selected asset implies
+    // the rail — no separate chain toggle). Opens Balances → taps the SOL row → the Pay tab mounts
+    // SolPayMode, arming the SOL HCE service (DpaySolNfc AID ..02) before any tap.
+    await driver.findByTestID('balance', {timeoutMs: 8_000});
+    await driver.click('balance', {timeoutMs: 5_000});
+    await driver.findByTestID('asset-sol-select', {timeoutMs: 5_000});
+    await driver.click('asset-sol-select', {timeoutMs: 5_000});
 
     // First-use setup: create the durable-nonce account (online, via stub).
     console.log('[47-sol-nfc] setting up durable-nonce account…');

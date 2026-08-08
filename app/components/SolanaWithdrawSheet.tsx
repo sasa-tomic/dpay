@@ -29,7 +29,7 @@ function friendlySolError(msg: string): string {
  * automatically.
  *
  * The durable-nonce offline-pay flow (SolPayMode) now lives INLINE in the main Pay tab (selected via
- * the SOL rail of the RailSelector), NOT here. This sheet is purely the online send surface (money
+ * selecting SOL as the active asset in Balances), NOT here. This sheet is purely the online send surface (money
  * OUT to a Solana address). No functionality lost and no dead code.
  */
 export function SolanaWithdrawSheet({identity, balance, onSent, onClose}: {identity: Identity; balance: string; onSent: () => void; onClose: () => void}) {
