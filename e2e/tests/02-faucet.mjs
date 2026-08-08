@@ -19,7 +19,7 @@ export const meta = {
   journey: 'onboard',
   covers: ['faucet', 'topup', 'balance-delta'],
   verifies: 'Returning user taps \'Add demo money\' → faucet top-up works, balance increases.',
-  timeoutMs: 15000,
+  timeoutMs: 25000,
 };
 
 export async function run() {

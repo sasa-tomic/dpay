@@ -82,11 +82,11 @@ export async function run() {
     // 4. Seed a pending BTC deposit for THIS account via the test-helpers route. The balance is NOT
     //    credited yet — a real mint lands only after the next /deposit/refresh drains it (mirrors the
     //    ck minter minting after confirmations). This is the honesty property: no false "Deposited ✓".
+    //    (The pre-credit `=== '0'` assertion was removed: the app's 150ms auto-poll can fire between
+    //    the seed and the relay read, legitimately crediting the balance and false-firing the race.)
     console.log(`[05-deposit-credited] seeding ${SEED_SATS} sats BTC via test/deposit/seed…`);
     const seeded = await seedDeposit(relayBaseURL, accountHex, DEPOSIT_CURRENCY, SEED_SATS);
     assert(seeded?.seeded === true, `seed must return {seeded:true}, got ${JSON.stringify(seeded)}`);
-    const notYet = await getBalance(relayBaseURL, accountHex, DEPOSIT_CURRENCY);
-    assert(notYet === '0', `seed must NOT credit the balance before a refresh, got ${notYet}`);
 
     // 5. The deposit sheet's own auto-poll (refreshNow, the app's real code path) drains the seeded
     //    pending deposit and credits currency 1; minted_total > 0 flips the sheet to "Deposited ✓".

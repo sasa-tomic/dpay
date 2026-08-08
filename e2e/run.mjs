@@ -43,6 +43,14 @@ const DEFAULT_CONCURRENCY = 12;
 const FALLBACK_TIMEOUT_MS = 60_000;
 
 /**
+ * Triage mode: `DPAY_E2E_NO_FAILFAST=1` lets every flow attempt regardless of earlier REDs (the
+ * default fail-fast aborts ~45 flows on one flake, yielding almost no signal under contention).
+ * `firstFailure` still records the first RED for the exit code (exit 1 if any test failed), but
+ * doesn't stop new tests from starting. Useful for surfacing ALL flakes in one run instead of one.
+ */
+const noFailFast = process.env.DPAY_E2E_NO_FAILFAST === '1';
+
+/**
  * How overloaded is the host RIGHT NOW? Returns the ratio of 1-min load average to logical cores.
  * ≤1 means the host has headroom (idle-ish); ≥2 means the runqueue is at least 2× oversubscribed —
  * every flow will run that much slower, so per-test timeouts must scale up by the same factor or they
@@ -142,13 +150,13 @@ async function runPool(tests, concurrency, timeoutScale) {
 
   const maybeFinish = () => {
     // Drain when every test has been started (or we've stopped enqueueing after a failure) AND no
-    // worker is still running a test.
-    const exhausted = firstFailure || nextIdx >= tests.length;
+    // worker is still running a test. In no-failfast mode, `firstFailure` does NOT stop enqueueing.
+    const exhausted = (!noFailFast && firstFailure) || nextIdx >= tests.length;
     if (exhausted && activeWorkers === 0) resolveAll();
   };
 
   const startOne = async () => {
-    if (firstFailure) return; // fail-fast: don't start new tests after a failure
+    if (firstFailure && !noFailFast) return; // fail-fast: don't start new tests after a failure
     const idx = nextIdx++;
     if (idx >= tests.length) return;
     const test = tests[idx];
@@ -177,7 +185,7 @@ async function runPool(tests, concurrency, timeoutScale) {
     } finally {
       activeWorkers--;
       // Spawn the next test (unless we've fail-fast-stopped), then check for drain.
-      if (!firstFailure) {
+      if (!firstFailure || noFailFast) {
         void startOne();
       }
       maybeFinish();
@@ -241,7 +249,7 @@ export async function runTestsSubset(tests, opts = {}) {
   console.log('\n--- results ---');
   for (const test of tests) {
     const r = results.get(test.file);
-    if (!r) { console.log(`  · ${test.file}  (not run — fail-fast)`); continue; }
+    if (!r) { console.log(`  · ${test.file}  (not run${noFailFast ? '' : ' — fail-fast'})`); continue; }
     const mark = r.ok ? '✓' : '✗';
     console.log(`  ${mark} ${test.file}  ${(r.ms / 1000).toFixed(2)}s`);
   }
@@ -306,7 +314,8 @@ async function main() {
     : `concurrency=${concurrency} (explicit; timeout scale ×${timeoutScale.toFixed(2)} from load ${load.load1.toFixed(1)} on ${load.cpus} cores)`;
   console.log(
     `[run] running ${tests.length} test(s)${filterNote} in ${process.env.DPAY_E2E_MODE ?? 'local'} mode` +
-    ` (parallel, ${concurrencyNote})\n`,
+    ` (parallel, ${concurrencyNote})` +
+    `${noFailFast ? ' [NO-FAILFAST: every flow attempts; first RED still sets exit 1]' : ''}\n`,
   );
 
   const { firstFailure } = await runTestsSubset(tests, { concurrency, timeoutScale });
