@@ -5,11 +5,12 @@ import {C} from '../config/palette';
 import {S} from '../styles';
 import {EXPIRY_WINDOW, NFC_PAY_TIMEOUT_MS, POLL, BALANCE_TIMEOUT_MS, QR_SIZE} from '../config/constants';
 import {short, base, toUnits, randNonceHex, nowSecs} from '../lib/format';
-import {encodeDeeplink} from '../lib/deepLink';
+import {encodeDeeplink, decodeReceiptDeeplink} from '../lib/deepLink';
 import {type CurrencyDescriptor, assetTestKey, displayName, fmtCurrencyAmount, currencySymbol} from '../config/catalog';
 import type {Identity} from '../lib/types';
-import {rejectionMessage, isNonceReused} from '../payments';
+import {rejectionMessage, isNonceReused, isReceiptForRequest} from '../payments';
 import {fetchWithTimeout, payAndClassify, readJsonOrEmpty} from '../services/relay';
+import {verifyOutcomeReceipt} from '../services/receipt';
 import {DpayCore, DpayNfc} from '../services/native';
 import {NfcTap} from './NfcTap';
 import {QrScanner} from './QrScanner';
@@ -24,7 +25,7 @@ import {withTimeout} from '../lib/timeout';
 // left the field floating shorter than its neighbors), 44pt-min.
 const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeight: 44, borderWidth: 1, borderColor: C.sub2, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink};
 
-export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, catalog}: {identity: Identity; relayUrl: string; online: boolean; nfcReady: boolean; onReceived: () => void; catalog: CurrencyDescriptor[]}) {
+export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, catalog, prefillReceipt, onReceiptConsumed}: {identity: Identity; relayUrl: string; online: boolean; nfcReady: boolean; onReceived: () => void; catalog: CurrencyDescriptor[]; prefillReceipt?: string | null; onReceiptConsumed?: () => void}) {
   // The merchant's CHOSEN settlement asset. Defaults to 0 (DEMO_USD) so the existing single-`$` flows
   // keep working unchanged (MC5: merchant selects the exact asset; the payer does NOT switch).
   const [reqCurrency, setReqCurrency] = useState(0);
@@ -99,6 +100,56 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
     check(); const id = setInterval(check, POLL.receiptRcv);
     return () => { alive = false; clearInterval(id); };
   }, [reqQr, result, relayUrl, onReceived]);
+
+  // Receipt hand-back (dpay:pay/): a payer who settled ONLINE (NFC unavailable) shares the
+  // canister-signed receipt back as a `dpay:pay/<blob>` link. This effect consumes the blob, verifies
+  // the receipt INDEPENDENTLY, and reconciles the open request as Paid — mirroring the NFC merchant
+  // path's security posture (NfcTap.tsx): PR1 nonce binding (if there's an open request) BEFORE the
+  // signature check, then verifyOutcomeReceipt (key-pin + Ed25519 sig). SECURITY INVARIANT: the
+  // merchant sees "Received" ONLY after verify passes — an unverified receipt NEVER reconciles.
+  //
+  // Two arrival shapes:
+  //   • Open request present (foreground link, request screen open): bind the receipt's nonce to the
+  //     request's nonce (isReceiptForRequest) + verify sig → reconcile THIS request as Paid.
+  //   • No open request (cold launch via the link, or a different screen): the receipt still verifies
+  //     on its own (key-pin + sig authenticates the full claim incl. from/amount) → show "Received X
+  //     from Y" from the receipt's own fields. Honest: a verified receipt IS a real settlement.
+  // A malformed blob or a failed verify surfaces a clear error (never a silent failure, never a fake
+  // Paid). The prefill is cleared (onReceiptConsumed) BEFORE the async verify so the effect can't
+  // re-fire mid-flight.
+  useEffect(() => {
+    if (prefillReceipt == null) return;
+    const blob = prefillReceipt;
+    onReceiptConsumed?.();
+    let alive = true;
+    (async () => {
+      const receipt = decodeReceiptDeeplink(blob);
+      if (!receipt) { if (alive) setErr('This receipt link is malformed.'); return; }
+      // PR1 goods-fraud guard: if there's an open request, the receipt's nonce MUST match it before
+      // the signature check (a malicious payer/relay can replay any past valid receipt for a different
+      // payment). Without an open request the signature alone authenticates the claim.
+      const openReq = reqQr;
+      const nonceMatches = openReq ? isReceiptForRequest(receipt, openReq.nonce) : true;
+      if (openReq && !nonceMatches) {
+        if (alive) setErr('This receipt doesn’t match your open request.');
+        return;
+      }
+      const verified = await verifyOutcomeReceipt(receipt);
+      if (!alive) return;
+      if (!verified) { setErr('Couldn’t verify this receipt — the signature is invalid.'); return; }
+      const from = typeof receipt.from === 'string' && receipt.from.length > 0 ? short(receipt.from) : 'payer';
+      // Reconcile against the open request if the nonce matched; else show the receipt's own amount.
+      const amount = openReq ? openReq.rawAmount : (typeof receipt.amount === 'string' ? receipt.amount : '0');
+      const currency = openReq ? openReq.currency : (typeof receipt.currency === 'number' ? receipt.currency : 0);
+      setResult({amount, currency, from});
+      onReceived();
+    })();
+    // onReceiptConsumed/onReceived are inline closures; the [prefillReceipt] guard + immediate clear
+    // make their identity irrelevant (exhaustive-deps would force a re-run on every render's new
+    // closure for no behavioral change). reqQr is captured at fire time (the open request when the
+    // link arrived) — re-running on a later reqQr change would re-verify a consumed prefill.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillReceipt]);
 
   async function onSignedQr(raw: string) {
     setScanning(false);

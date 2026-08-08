@@ -17,7 +17,7 @@ import {useBalancePoll} from '../hooks/useBalancePoll';
 import {useSolanaBalance} from '../hooks/useSolanaBalance';
 import {useTransactionHistory} from '../hooks/useTransactionHistory';
 import {deriveSolanaAddress} from '../solana';
-import {readDepositDeepLink, readRequestDeeplink, decodeDeeplink} from '../lib/deepLink';
+import {readDepositDeepLink, readRequestDeeplink, readPaymentDeeplink, decodeDeeplink, type DeeplinkKind} from '../lib/deepLink';
 import {Wordmark} from './Logo';
 import {HotkeyHint} from './HotkeyHint';
 import {Tab} from './Tab';
@@ -41,6 +41,11 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
   // the camera-scan decode path), then calls onPrefillConsumed to clear it. A deeplink ONLY
   // pre-fills review — it never auto-signs/approves.
   const [prefillRequest, setPrefillRequest] = useState<string | null>(null);
+  // The symmetric `dpay:pay/<blob>` (NFC-less receipt hand-back): a payer who settled online shares
+  // the canister-signed receipt back to the merchant. This holds the raw blob; ReceiveMode consumes
+  // it via its verify effect (decode → verifyOutcomeReceipt → reconcile as Paid), then calls
+  // onReceiptConsumed to clear it. SECURITY: ReceiveMode verifies the signature BEFORE showing Paid.
+  const [prefillReceipt, setPrefillReceipt] = useState<string | null>(null);
   // The "current" currency — the one whose balance the header reflects. Tapping the header balance
   // opens the Balances sheet, where tapping a currency row sets this. Currency 0 (DEMO) is the
   // default. This replaces the old DEMO-only header (the founder's restructure): the main screen now
@@ -147,43 +152,47 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
     });
   }, []);
 
-  // Deeplink routing (item 6): a `dpay:req/<blob>` arriving at launch pre-fills the Pay review screen.
-  // Two receive paths, both bounded + best-effort (a failure just doesn't prefill — but it's logged,
-  // never swallowed):
-  //   • Web: readRequestDeeplink() reads `?req=<blob>` from the page URL (the OS scheme never fires on
-  //     web — there's no dpay: handler in a browser).
-  //   • Native: Linking.getInitialURL() returns the dpay: URI the OS handed the app on launch (Android
-  //     intent-filter), and the 'url' listener catches a dpay: link tapped while the app is foreground.
-  //     On web getInitialURL returns the http page URL → decodeDeeplink → null → no-op, so BOTH paths
-  //     are safe to run on every platform and decodeDeeplink's null cleanly separates them.
+  // Deeplink routing (item 6 + receipt hand-back): a `dpay:req/<blob>` arriving at launch pre-fills
+  // the Pay review screen; a `dpay:pay/<blob>` carries a canister-signed receipt to the merchant's
+  // Receive screen. Two receive paths each, both bounded + best-effort (a failure just doesn't
+  // prefill — but it's logged, never swallowed):
+  //   • Web: readRequestDeeplink()/readPaymentDeeplink() read `?req=`/`?pay=` from the page URL (the
+  //     OS scheme never fires on web — there's no dpay: handler in a browser).
+  //   • Native: Linking.getInitialURL() returns the dpay: URI the OS handed the app on launch
+  //     (Android intent-filter), and the 'url' listener catches a dpay: link tapped while the app is
+  //     foreground. On web getInitialURL returns the http page URL → decodeDeeplink → null → no-op,
+  //     so BOTH paths are safe to run on every platform and decodeDeeplink's null cleanly separates.
   // getInitialURL is wrapped in a 2s timeout so a stalled native bridge can't wedge the prefill (the
-  // repo rule: all I/O has a timeout). SECURITY: applyBlob only sets the blob + mode='pay' — it never
-  // signs; the payer taps Approve on the review screen PayMode renders.
+  // repo rule: all I/O has a timeout). SECURITY: applyBlob only sets a blob + mode — it never signs
+  // (req) and never marks Paid (pay — ReceiveMode verifies the receipt signature first).
   useEffect(() => {
     let alive = true;
-    const applyBlob = (blob: string) => {
+    const applyBlob = (kind: DeeplinkKind, blob: string) => {
       if (!alive) return;
-      setPrefillRequest(blob);
-      setMode('pay');
+      if (kind === 'req') { setPrefillRequest(blob); setMode('pay'); }
+      else { setPrefillReceipt(blob); setMode('receive'); }
     };
-    // Web path first (sync read of ?req=).
-    const webBlob = readRequestDeeplink();
-    if (webBlob) applyBlob(webBlob);
+    // Web path first (sync read of ?req= / ?pay=).
+    const webReq = readRequestDeeplink();
+    if (webReq) applyBlob('req', webReq);
+    const webPay = readPaymentDeeplink();
+    if (webPay) applyBlob('pay', webPay);
     // Native path: the launch dpay: URI, timeout-bounded. On web this resolves to the page URL and
-    // decodeDeeplink returns null (harmless fall-through — the web reader above already handled ?req=).
+    // decodeDeeplink returns null (harmless fall-through — the web readers above already handled the
+    // query params).
     const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000));
     const initial = (Linking.getInitialURL?.() ?? Promise.resolve(null)) as Promise<string | null>;
     Promise.race([initial, timeout])
       .then((url) => {
         if (!alive || !url) return;
         const dl = decodeDeeplink(String(url));
-        if (dl?.kind === 'req') applyBlob(dl.blob);
+        if (dl) applyBlob(dl.kind, dl.blob);
       })
       .catch((e: unknown) => { console.log(`[dpay] deeplink getInitialURL failed: ${e instanceof Error ? e.message : String(e)}`); });
     // Foreground links: a dpay: link tapped while the app is already open.
     const sub = Linking.addEventListener('url', ({url}) => {
       const dl = decodeDeeplink(url);
-      if (dl?.kind === 'req') applyBlob(dl.blob);
+      if (dl) applyBlob(dl.kind, dl.blob);
     });
     return () => { alive = false; sub.remove(); };
   }, []);
@@ -350,7 +359,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
         {mode === 'pay'
           ? <PayMode identity={identity} online={online} relayUrl={relayUrl} nfcStatus={nfc} onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance} catalog={catalog} assetBalances={displayAssetBalances} prefillRequest={prefillRequest} onPrefillConsumed={() => setPrefillRequest(null)} />
           : mode === 'receive'
-          ? <ReceiveMode identity={identity} relayUrl={relayUrl} online={online} nfcReady={nfc === 'ready'} onReceived={onActivity} catalog={catalog} />
+          ? <ReceiveMode identity={identity} relayUrl={relayUrl} online={online} nfcReady={nfc === 'ready'} onReceived={onActivity} catalog={catalog} prefillReceipt={prefillReceipt} onReceiptConsumed={() => setPrefillReceipt(null)} />
           : <Ledger history={history} catalog={catalog} />}
       </ScrollView>
 
