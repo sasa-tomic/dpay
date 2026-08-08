@@ -1,6 +1,6 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **51 flows.**
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **55 flows.**
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay (FakeLedger, offline). No UI stubs. The only shimmed I/O boundary is
 > the camera scan (sanctioned smallest-boundary seam) and the NFC radio (physical-device gate).
@@ -17,7 +17,7 @@
 Flows grouped by user journey; within each table, every row lists what the flow **verifies** and
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`).
 
-wire (1) · onboard (4) · pay (18) · offline (3) · deposit (8) · withdraw (4) · nfc (3) · system (7) · tour (3)
+wire (1) · onboard (5) · pay (18) · offline (5) · deposit (8) · withdraw (5) · nfc (3) · system (7) · tour (3)
 
 ---
 
@@ -35,6 +35,7 @@ wire (1) · onboard (4) · pay (18) · offline (3) · deposit (8) · withdraw (4
 | 02 | faucet | Returning user taps 'Add demo money' → faucet top-up works, balance increases. | faucet, topup, balance-delta |
 | 23 | username-default | New user leaves name empty → creates → defaults to 'me', onboards + funds. | onboard, default-username |
 | 37 | onboard-no-faucet | Onboard against a dead relay → faucet failure surfaces an honest "Continue" prompt (not a silent $0 transition), wallet created with $0 (∂100 never shown), honest "~ approx." offline indicator, faucet fails with ECONNREFUSED. | onboard, faucet-failure, offline, dead-relay, right-reason, zero-balance |
+| 54 | testnet-toggle | Balances testnet toggle reveals + hides a "BTC testnet" row (catalog-driven testnet detection). | testnet, catalog, toggle, balances |
 
 ### Payments (the core offline-pay flow)
 
@@ -66,6 +67,8 @@ wire (1) · onboard (4) · pay (18) · offline (3) · deposit (8) · withdraw (4
 | 20 | offline-handoff | Payer signs offline → relay unreachable → signed QR → merchant settles → payer reconnects → 'Paid ✓'. | offline-sign, qr-handoff, settle, reconcile, round-trip |
 | 21 | receive-scan | Merchant 'Payer paid offline? Scan to settle' → scans the payer's signed QR → settles. | receive-scan, offline-settle |
 | 46 | sol-offline-handoff | SOL durable-nonce setup → scan solreq: → offline sign → solpay: QR → honest pending. | sol-offline-sign, sol-nonce-setup, qr-handoff, honest-pending |
+| 51 | sol-merchant-broadcast | SOL merchant: build solreq → scan matching solpay → broadcast (stub) → Received. | sol-merchant, sol-broadcast, solpay-match, qr-scan |
+| 53 | sol-merchant-error | SOL merchant broadcast error surfaces a friendly message (not raw RPC, not false Received). | sol-merchant, sol-error, solpay-match, friendly-error |
 
 ### Deposits & onramp (ckBTC + ckUSDC + ckERC20)
 
@@ -88,6 +91,7 @@ wire (1) · onboard (4) · pay (18) · offline (3) · deposit (8) · withdraw (4
 | 18 | withdraw-errors | Withdraw errors: below-min / over-balance / bad-addr UI guards (confirm disabled) + relay 422 (bad-sig/insufficient). | withdraw-errors, below-min, over-balance, bad-sig, bad-addr |
 | 44 | cketh-withdraw | Withdraw native ckETH: Cash-out button renders for a CkEthErc20 + token_contract=null asset; enter 0x addr + ETH amount → sign on-device at 18-dec Wei → settle; balance debits at both the ledger AND the UI (family-dispatch UI path). | native-eth-withdraw, cketh, family-dispatch, withdraw, sign, settle, balance-delta, ui-balance-delta |
 | 48 | ckusdc-withdraw | ckUSDC Cash-out: the flipped cashable gate renders Cash-out for a ckERC20 token; enter 0x addr + USDC amount → gas-dependency note renders → sign on-device at 6-dec → settle; balance debits at both the ledger AND the UI. | ckerc20-offramp, cashable-gate, ckusdc, withdraw, sign, settle, balance-delta, ui-balance-delta, gas-note |
+| 52 | sol-withdraw | SOL withdraw: funded SOL row Send → enter addr+amount → sign+broadcast (stub) → Sent ✓. | sol-withdraw, sol-send, sol-balance-gate, sign |
 
 ### NFC (tap-to-pay)
 
