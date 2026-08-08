@@ -12,11 +12,11 @@
 // minimums, accepts transactions, confirms them immediately, and serves the nonce account state.
 // This keeps the inner loop fully offline (no devnet) while proving the REAL app code path.
 //
-// Selector contract: `btn-sol-send` (Balances SOL row → send sheet), `btn-sol-pay-offline` (the
-// offline-pay link INSIDE the SOL send sheet — re-homed from the Balances row 2026-08-08),
+// Selector contract: `rail-sol` (the SOL rail of the Pay tab's segmented selector — SOL is a
+// first-class asset now, selected inline via the RailSelector, not via Balances→send sheet),
 // `btn-sol-pay-setup`, `sol-pay-scan`, `sol-pay-amount`, `btn-sol-pay-approve`, `sol-pay-qr`,
 // `btn-sol-pay-handed`, `sol-pay-status`.
-import {setup, assert, onboardWallet, openBalances} from '../harness/lib.mjs';
+import {setup, assert, onboardWallet} from '../harness/lib.mjs';
 
 export const meta = {
   id: '46',
@@ -76,15 +76,14 @@ export async function run() {
       };
     }, nonceB64);
 
-    // 3. Open the Balances hub → SOL card → Send (the SOL send sheet) → "Pay offline instead" link.
-    //    The offline-pay flow was re-homed from the Balances row into the SOL send sheet (2026-08-08)
-    //    so the Balances SOL row stays at Receive+Send parity with every other asset. The Send button
-    //    is gated on a positive balance; the stub's getBalance → 5 SOL populates it within a poll tick.
-    console.log('[46-sol-offline-handoff] opening SolPayMode via the SOL send sheet…');
-    await openBalances(driver);
-    await driver.findByTestID('btn-sol-send', {timeoutMs: 8_000});
-    await driver.click('btn-sol-send', {timeoutMs: 5_000});
-    await driver.click('btn-sol-pay-offline', {timeoutMs: 5_000});
+    // 3. SOL is a first-class asset now: select the SOL rail on the Pay tab (the default tab after
+    //    onboarding) to mount SolPayMode INLINE. The RailSelector pre-selects the NFC HCE service
+    //    (DpaySolNfc AID ..02) — this MUST happen before any tap, so the rail is user-chosen, not
+    //    auto-detected. (Was reached via Balances → SOL send sheet → 'Pay offline instead' link,
+    //    now removed; the direct rail path is faster — no Balances detour.)
+    console.log('[46-sol-offline-handoff] selecting the SOL rail on the Pay tab…');
+    await driver.findByTestID('rail-sol', {timeoutMs: 8_000});
+    await driver.click('rail-sol', {timeoutMs: 5_000});
 
     // 4. First-use setup: create the durable-nonce account (online, via stub).
     console.log('[46-sol-offline-handoff] setting up durable-nonce account…');
