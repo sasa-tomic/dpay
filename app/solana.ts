@@ -169,7 +169,19 @@ export async function createNonceAccount(
   const raw = signTransactionMulti([authority.seed, nonceAcct.seed], msg);
   const sig = await sendTransaction(SOLANA_RPC_URL, raw, {signal});
   await confirmTransaction(SOLANA_RPC_URL, sig, {signal});
-  const {value} = await getNonceAccount(SOLANA_RPC_URL, nonceAcct.address, {signal});
+  // Read back the initial nonce value. Retry briefly — the account state may lag `confirm` by a
+  // slot or two on a fast-producing node (the local test-validator is the extreme case; mainnet
+  // has a smaller but nonzero gap).
+  let value: string;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      ({value} = await getNonceAccount(SOLANA_RPC_URL, nonceAcct.address, {signal}));
+      break;
+    } catch (e) {
+      if (attempt >= 3 || signal?.aborted) throw e;
+      await new Promise(r => setTimeout(r, 500));
+    }
+  }
   return {address: nonceAcct.address, value};
 }
 
