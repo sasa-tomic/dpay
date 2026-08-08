@@ -1251,8 +1251,8 @@ async fn currencies_route_returns_demo_catalog() {
     let rows = body["currencies"].as_array().expect("currencies array");
     assert_eq!(
         rows.len(),
-        6,
-        "demo catalog = DEMO_USD + ckBTC + ckUSDC + ckUSDT + ckDAI + native-ETH: {body}"
+        7,
+        "demo catalog = DEMO_USD + ckBTC + ckUSDC + ckUSDT + ckDAI + native-ETH + ckTESTBTC: {body}"
     );
 
     // DEMO_USD (currency 0): the mintable $ faucet asset, no ramp.
@@ -1447,8 +1447,8 @@ async fn balances_route_returns_all_currencies_in_one_response() {
     assert!(body.is_object(), "balances response is a JSON object: {body}");
     assert_eq!(
         body.as_object().unwrap().len(),
-        6,
-        "demo catalog = 6 currencies, all present in one batch: {body}"
+        7,
+        "demo catalog = 7 currencies, all present in one batch: {body}"
     );
 
     // The funded primary (currency 0) reads its real balance as a DECIMAL STRING.

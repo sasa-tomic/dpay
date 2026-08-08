@@ -912,6 +912,31 @@ fn fake_catalog() -> Vec<CurrencyDescriptor> {
             onramp: RampCapability::Direct, // ckETH helper `depositEth` (client-side, single payable tx)
             offramp: RampCapability::Direct, // withdraw_eth: burn ckETH → send native ETH
         },
+        CurrencyDescriptor {
+            // ckTESTBTC — testnet fixture for catalog-driven testnet detection. network "Bitcoin
+            // Testnet" is NOT in MAINNET_NETWORKS → isTestnetCurrency() = true, so the wallet hides
+            // it by default + reveals it via the testnet toggle (the only way to exercise that path
+            // in e2e; the rest of fake_catalog is mainnet-only). display-only: Unavailable ramps,
+            // same anonymous ledger as ckBTC. Mirrors the ckBTC shape (CkBtcUtxo family, 8 dec).
+            currency: 6,
+            ledger: "2vxsx-fae".to_string(),
+            mintable: false,
+            minter: Some(CKBTC_MINTER_PRINCIPAL.to_string()),
+            minter_family: Some(MinterFamily::CkBtcUtxo),
+            symbol: Some("₿".into()),
+            decimals: Some(8),
+            wrapper_name: Some("ckTESTBTC".into()),
+            backing_symbol: Some("BTC".into()),
+            network: Some("Bitcoin Testnet".into()),
+            display_decimals: Some(8),
+            fee: None,
+            cap: None,
+            chain_id: None,
+            token_contract: None,
+            gas_ledger: None,
+            onramp: RampCapability::Unavailable,
+            offramp: RampCapability::Unavailable,
+        },
     ]
 }
 
