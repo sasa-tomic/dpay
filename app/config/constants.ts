@@ -91,11 +91,22 @@ export const WALLETCONNECT_PROJECT_ID =
 export const SOLANA_RPC_URL =
   ((globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_URL?: string}).__DPAY_TEST_SOLANA_RPC_URL ?? 'https://api.devnet.solana.com');
 
+// Whether the configured SOL RPC is a devnet endpoint. Derived from the URL so it stays correct
+// when an operator flips SOLANA_RPC_URL. Used to badge SOL screens ("DEVNET") and warn on the
+// receive-address sheet that mainnet SOL sent here would be invisible — a real fund-loss risk while
+// the rail ships on devnet. A prod build that leaves this true is caught by scripts/check-prod-sol.mjs.
+export const IS_SOLANA_DEVNET = /devnet|testnet/i.test(SOLANA_RPC_URL);
+
 export const WITHDRAW_TIMEOUT_MS = 8000; // bound the /withdraw POST (every new fetch has a timeout)
 // SOL native send: getLatestBlockhash + sendTransaction + confirmTransaction (which polls up to
 // CONFIRM_TIMEOUT_MS=30s). 60s gives headroom over the full confirm path so a slow-but-finalising
 // transfer is never reported as a false failure.
 export const SOL_SEND_TIMEOUT_MS = 60000;
+// SOL merchant broadcast: getLatestBlockhash + sendTransaction + confirmTransaction, with headroom
+// for the merchant↔payer round trip. 2× the native send timeout. Single source — the offline-pay
+// broadcast path (solana.ts) and the merchant NFC path (SolNfcTap) reference this instead of
+// inlining SOL_SEND_TIMEOUT_MS * 2 at each site.
+export const SOL_BROADCAST_TIMEOUT_MS = SOL_SEND_TIMEOUT_MS * 2;
 export const WITHDRAW_EXPIRY_WINDOW = 600; // the signed WithdrawAuth is valid 10 min
 // Mirrors the canister's fixed FAUCET_AMOUNT ($100.00 = 10_000 cents). The demo top-up POSTs this
 // amount to /api/v1/faucet; the real canister mints the fixed amount regardless of the request. MC1

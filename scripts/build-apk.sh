@@ -43,6 +43,9 @@ if [ "$COMMITTED_RELAY" != "$RELAY_URL" ]; then
 fi
 echo "== default relay verified in app/relayConfig.ts: $RELAY_URL =="
 
+echo "== verify Solana RPC is safe for a production build (no devnet/rate-limited public endpoint) =="
+node scripts/check-prod-sol.mjs
+
 echo "== cross-compile dpay-ffi (.so per ABI) + sync into the app =="
 bash scripts/ndk-build-ffi.sh
 mkdir -p app/android/app/src/main/jniLibs

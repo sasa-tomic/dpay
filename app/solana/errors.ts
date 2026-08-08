@@ -13,9 +13,12 @@
  *  Returns the original string unchanged when no known class matches — diagnosis stays possible. */
 export function friendlySolError(msg: string): string {
   // Account does not exist on-chain / has never been credited (zero balance). This is the "no
-  // funds" error — distinct from "insufficient" (account exists but can't cover amount+fee).
+  // funds" error — distinct from "insufficient" (account exists but can't cover amount+fee). NOTE:
+  // on a load-balanced public endpoint (the shipped devnet default), a freshly-credited account can
+  // be invisible to the simulating node and produce the SAME string transiently — so the copy covers
+  // both the genuine unfunded case and the devnet-pool-lag case rather than asserting "no SOL".
   if (/no record of a prior credit|found no record/i.test(msg)) {
-    return "Your account has no SOL yet. Deposit SOL to your address first, then try again.";
+    return "This account has no SOL, or the network hasn't synced your balance yet. If you just deposited, wait a moment and retry — otherwise deposit SOL to your address first.";
   }
   if (/abort|timed out|timeout|confirmation timeout/i.test(msg)) {
     return "Timed out. Check your connection and try again.";
