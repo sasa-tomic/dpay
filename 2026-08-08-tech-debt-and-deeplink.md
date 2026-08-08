@@ -100,7 +100,7 @@ camera-scan decode path; ReceiveMode's "Share request link" (`btn-share-request`
 prefill + no auto-approve + full settle). **SECURITY: a deeplink ONLY prefills review — never signs.**
 (d) **DEFERRED** — `dpay:pay/<blob>` is codec-only (`decodeDeeplink` + `readPaymentDeeplink`); the
 merchant-side verify/reconcile wiring is a follow-up (spec the reconcile path first). Commits
-`1bf4045` → `811dbe6`. Device gate PENDING (`just app` + `just ondevice`). See OPEN_ISSUES item 6.
+`1bf4045` → `811dbe6`. Device gate PASSED 2026-08-08 (`just app` + `just ondevice` 9/9 + adb deeplink dispatch). See OPEN_ISSUES item 6.
 
 ## Deeplink design (item 6)
 

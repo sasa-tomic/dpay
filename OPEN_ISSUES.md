@@ -11,15 +11,21 @@
 ## NEXT SESSION — work order (post 2026-08-08 sweep)
 
 The 2026-08-08 tech-debt + deeplink sweep landed all 6 work-order items (see the completed section
-below; git HEAD `c5b1e69`, 19 commits ahead of origin/main). Verified green offline: typecheck 0,
-test-core 45/45, bridge-parity OK (28), jest 432/432, e2e **50/50** (flow 05 confirmed as the
-pre-existing host-load flake via isolated re-run). Three genuinely-remaining items:
+below). Verified green offline: typecheck 0, test-core 45/45, bridge-parity OK (28), jest 432/432,
+e2e **50/50** (flow 05 confirmed as the pre-existing host-load flake via isolated re-run). Two
+genuinely-remaining items:
 
-1. **Device gate for items 1 + 6 (BLOCKING for ship, founder/device host).** No emulator on this host.
-   - **Item 1 (NFC merge, pure TS/React):** run `just app` (assert `DPAY_SELFCHECK PASS` + `DPAY_SOL_SELFCHECK PASS`) + `just ondevice` (8 instrumented tests). Risk surface is low (no native/wire/FFI change — e2e+jest+typecheck cover the logic), but the device gate is the documented blind-spot-3 requirement for money-moving UI.
-   - **Item 6 (deeplink):** run `just app`, then `adb shell am start -a android.intent.action.VIEW -d 'dpay:req/<blob>'` and assert the pay REVIEW screen opens pre-filled (NOT auto-paid). This is the genuine outstanding gate — it validates the AndroidManifest intent-filter dispatch + the RN `Linking` bridge (native-modules-thread surface) + the money-path-adjacent prefill.
-2. **`dpay:pay/` receipt hand-back (FEATURE — HIGH effort, split into medium tasks).** Codec exists (`encodeDeeplink`/`decodeDeeplink` support `pay`; jest-tested). To wire: (a) pay-side: after an offline sign, offer a "Share receipt" that encodes the signed payment as `dpay:pay/<blob>`; (b) `readPaymentDeeplink()` web reader (`?pay=`) — re-add to `app/lib/deepLink.ts` WITH the wiring (currently deleted to honor no-dead-code); (c) merchant-side: decode + verify the receipt signature (reuse `services/receipt.ts` `verifyOutcomeReceipt`) + reconcile the open request as settled. Mirror the e2e flow 49 structure. Start with a design note, then build incrementally.
-3. **`just e2e` npm-install flake (tooling, LOW).** `just e2e` fails at the `npm install` step with `npm error Invalid Version` (`@rolldown/binding-wasm32-wasi` dedupe crash in `@npmcli/arborist` under Node 24) — a **pre-existing** npm/Node-v24 env bug, NOT a code regression (`node_modules` already exists; `node e2e/run.mjs` runs directly). Consider: pin the e2e Node version, or make the justfile `npm install` tolerant of this error, or skip install when `node_modules` exists.
+1. **`dpay:pay/` receipt hand-back (FEATURE — HIGH effort, split into medium tasks).** Codec exists (`encodeDeeplink`/`decodeDeeplink` support `pay`; jest-tested). To wire: (a) pay-side: after an offline sign, offer a "Share receipt" that encodes the signed payment as `dpay:pay/<blob>`; (b) `readPaymentDeeplink()` web reader (`?pay=`) — re-add to `app/lib/deepLink.ts` WITH the wiring (currently deleted to honor no-dead-code); (c) merchant-side: decode + verify the receipt signature (reuse `services/receipt.ts` `verifyOutcomeReceipt`) + reconcile the open request as settled. Mirror the e2e flow 49 structure. Start with a design note, then build incrementally.
+2. **`just e2e` npm-install flake (tooling, LOW).** `just e2e` fails at the `npm install` step with `npm error Invalid Version` (`@rolldown/binding-wasm32-wasi` dedupe crash in `@npmcli/arborist` under Node 24) — a **pre-existing** npm/Node-v24 env bug, NOT a code regression (`node_modules` already exists; `node e2e/run.mjs` runs directly). Consider: pin the e2e Node version, or make the justfile `npm install` tolerant of this error, or skip install when `node_modules` exists.
+
+> **Device gate RESOLVED (2026-08-08).** The prior "no emulator on this host / BLOCKING" claim was
+> a false negative — the host has AVD `dpay_api36` (API-36 google_apis x86_64 system image) which
+> boots in ~40s. The device gate for items 1 + 6 **PASSED** this session:
+> - `just ondevice`: **9 instrumented tests GREEN** (UniFFI binding + NFC framing on the emulator).
+> - `just app`: APK built + installed + launched; **`DPAY_SELFCHECK PASS`** + **`DPAY_SOL_SELFCHECK PASS`** (proves the full `NativeModules`→`@ReactMethod`→UniFFI→`libdpay_ffi.so` surface incl. the NFC native modules + every autolinked module).
+> - **Deeplink dispatch**: `adb shell am start -a android.intent.action.VIEW -d 'dpay:req/<blob>'` resolves to `org.kalaj.dpay/.MainActivity` on BOTH cold start (getInitialURL path) and warm start (onNewIntent→url event path), **no crash**, app stays alive. The intent-filter + the RN `Linking` bridge work.
+>
+> Note: the `dpay_api35` AVD was removed (its android-35 system image isn't installed; only android-36 is). If a 2nd AVD is wanted, install via `sdkmanager "system-images;android-35;google_apis;x86_64"` then `avdmanager create avd`.
 
 ---
 
@@ -50,9 +56,7 @@ suggested priority, not a hard sequence.
    11+32+47 green), bridge-parity OK (28 methods, untouched). **Line delta was ~break-even (+16 net prod)** — the raw
    duplication removed (~218 lines from the two adapters) was offset by the shared infra (hook 162L + view 72L) + type
    defs + the ctx indirection; the DRY win (single-source 9-phase record, lifecycle, render; a 3rd rail is now trivial) is
-   the real value, not line count. **Device gate NOT run** (no emulator on this host) — pending `just app` +
-   `DPAY_SELFCHECK PASS` + `just ondevice` on a device host; the change is pure TS/React (no native/wire/bridge change),
-   so e2e + typecheck + jest cover the actual risk surface.
+   the real value, not line count. **Device gate PASSED (2026-08-08):** `just ondevice` 9/9, `just app` `DPAY_SELFCHECK PASS` + `DPAY_SOL_SELFCHECK PASS`.
 
 2. ~~**Currency catalog single-source-of-truth (DRY/anti-pattern, MEDIUM).** The ckUSDC ERC-20 contract~~
    ~~/(`0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48`), the ckETH gas-ledger principal (`ss2fx-dyaaa-aaaar-qacoq-cai`), ckBTC minter~~
@@ -127,9 +131,7 @@ suggested priority, not a hard sequence.
    `dpay:pay/` (signed-receipt hand-back, payer→merchant when NFC is unavailable) is CODEC-ONLY — its `decodeDeeplink` parses + a
    `readPaymentDeeplink` web reader exists, but the merchant-side verify/reconcile wiring is **DEFERRED to a follow-up** (spec the
    reconcile path first). Gates: jest 432/432 (+16 codec), e2e **50/50** (flow 49 added; FLOWS.md regenerated), typecheck 0,
-   bridge-parity OK (28, untouched), test-core 45/45. **Device gate PENDING** (`just app` + `just ondevice` — the manifest
-   intent-filter + the `Linking` native wiring + the money-path-adjacent prefill are device-gated per AGENTS.md blind-spot 3; no
-   emulator on this host). Commits `1bf4045` (codec) → `811dbe6` (e2e).
+   bridge-parity OK (28, untouched), test-core 45/45. **Device gate PASSED (2026-08-08):** `just app` (`DPAY_SELFCHECK PASS`) + `just ondevice` (9/9) + `adb shell am start -d 'dpay:req/<blob>'` resolves to MainActivity on cold AND warm start, no crash. Commits `1bf4045` (codec) → `811dbe6` (e2e).
 
 ## Session summary (2026-08-07): deep audit + hardening — fail-closed dispatch, debuggability, timeout/lock hardening, DRY
 
