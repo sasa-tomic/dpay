@@ -11,6 +11,7 @@ import type {Identity, Req, NfcStatus} from '../lib/types';
 import {rejectionMessage, isNonceReused} from '../payments';
 import {verifyOutcomeReceipt} from '../services/receipt';
 import {fetchWithTimeout, payAndClassify, readJsonOrEmpty} from '../services/relay';
+import {encodeReceiptDeeplink} from '../lib/deepLink';
 import {DpayCore, DpayNfc} from '../services/native';
 import {NfcTap} from './NfcTap';
 import {NfcIcon} from './NfcIcon';
@@ -32,7 +33,11 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
   const [qr, setQr] = useState<{code: string; amount: string; currency: number; who: string; nonce: string} | null>(null);
   // `pending` = handed to the merchant offline but NOT confirmed by the ledger (we can't claim it
   // settled). `already` = the ledger reported this nonce was already settled (idempotent replay).
-  const [paid, setPaid] = useState<{amount: string; currency: number; who: string; already: boolean; pending?: boolean} | null>(null);
+  // `receipt` = the canister-signed receipt object captured on an ONLINE settle (so the payer can
+  // share it back as a `dpay:pay/` link when NFC is unavailable — the merchant verifies the signature
+  // + reconciles). Null/absent on the offline hand-off (the merchant settles that themselves) and on
+  // a replay (no fresh receipt body).
+  const [paid, setPaid] = useState<{amount: string; currency: number; who: string; already: boolean; pending?: boolean; receipt?: Record<string, unknown> | null} | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   // A tap arriving on the always-armed card takes over the scan screen; nfcKey re-arms after each.
@@ -123,7 +128,12 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
           const verified = await verifyOutcomeReceipt(j.receipt, {from: identity.publicHex, to: req.toHex, amount: req.amount, currency: req.currency, nonce: req.nonceHex});
           if (verified) {
             if (!j.replayed) onSettled();
-            setPaid({amount: req.amount, currency: req.currency, who, already: !!j.replayed}); setPhase('paid'); return;
+            // Capture the verified receipt so the payer can share it back as a dpay:pay/ link (the
+            // NFC-less hand-back: the merchant opens the link + re-verifies + reconciles as Paid).
+            // Only set on a fresh settle (not a replay — the replay body carries the same cached
+            // receipt, but sharing it is redundant since it already settled).
+            const receipt = (!j.replayed && j.receipt && typeof j.receipt === 'object') ? j.receipt as Record<string, unknown> : null;
+            setPaid({amount: req.amount, currency: req.currency, who, already: !!j.replayed, receipt}); setPhase('paid'); return;
           }
           // Settled at the HTTP layer but the receipt did not verify — honest, never a fake Paid.
           setErr('Couldn’t verify the payment — check the balance'); return;
@@ -158,6 +168,28 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
         <View style={[S.check, warn && S.checkAlready]}><Text style={S.checkMark}>{glyph}</Text></View>
         <Text style={[S.paidText, warn && S.alreadyText]}>{headline}</Text>
         <Text style={S.paidSub}>{sub}</Text>
+        {/* NFC-less receipt hand-back: when the payer settled ONLINE (NFC unavailable) they hold the
+            canister-signed receipt. Offer to share it back as a dpay:pay/ link so the merchant can
+            open it + verify + reconcile as Paid without waiting for the request poll (or for the
+            async case where the receipt travels over a messaging app). Only shown when a verified
+            receipt was captured (a fresh online settle) — not on the offline hand-off (the merchant
+            settles that themselves) nor on a replay (no fresh receipt). Mirrors btn-share-request. */}
+        {paid.receipt ? (
+          <Pressable
+            testID="btn-share-receipt"
+            style={S.linkBtn}
+            onPress={() => {
+              Share.share({message: encodeReceiptDeeplink(paid.receipt!)}).catch(
+                (e: unknown) => { console.log(`[dpay] share receipt failed: ${e instanceof Error ? e.message : String(e)}`); },
+              );
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Share receipt"
+            accessibilityHint="Share the canister-signed receipt as a link the merchant can open to confirm"
+            accessibilityState={{disabled: false}}>
+            <Text style={S.linkText}>Share receipt</Text>
+          </Pressable>
+        ) : null}
         <Pressable testID="btn-new" style={S.linkBtn} onPress={reset} accessibilityRole="button" accessibilityLabel="New payment" accessibilityState={{disabled: false}}><Text style={S.linkText}>New payment</Text></Pressable>
       </View>
     );
