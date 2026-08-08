@@ -1,14 +1,24 @@
 import {Platform} from 'react-native';
+import {bytesToBase64Url, base64UrlToBytes, utf8ToBytes, bytesToUtf8} from './base64url';
 
 // --- dpay: deeplink codec (item 6) -----------------------------------------------------------
 // A merchant's Request QR carries a raw base64url blob. The deeplink wraps it as `dpay:req/<blob>`
 // so it can be shared over a messaging app and opened on the payer's phone to PRE-FILL the pay
 // review screen (the payer still taps Approve — a deeplink NEVER auto-signs/auto-approves). The
-// symmetric `dpay:pay/<blob>` carries a signed receipt for a future NFC-less hand-back (codec only
-// this session; wiring deferred).
+// symmetric `dpay:pay/<blob>` carries a CANISTER-SIGNED receipt for the NFC-less hand-back: when NFC
+// is unavailable the payer (online) settles directly + shares the verified receipt back to the
+// merchant, whose request screen verifies the signature + reconciles as Paid.
 //
-// The `<blob>` is the EXACT same base64url string the QR already carries — no new wire format, no
-// new codec for the bytes. Version lives INSIDE the blob (the wire already has a version byte).
+// The two kinds carry DIFFERENT blob payloads:
+//   • `req` — the blob is the EXACT raw base64url the request QR carries (the 132-byte wire request,
+//     base64url-encoded by DpayCore.encodeRequest). No new codec; handed straight to PayMode's
+//     camera-scan decode path.
+//   • `pay` — the blob is base64url(JSON.stringify(receipt)), i.e. base64url of the UTF-8 JSON of the
+//     canister-signed receipt object the relay's POST /api/v1/pay returns. `decodeReceiptDeeplink`
+//     base64url-decodes THEN JSON.parses. (The receipt is JSON, not a fixed-width binary wire — so a
+//     JSON codec is the natural shape; the canister signature inside it is still verified byte-exact
+//     via verifyOutcomeReceipt before anything is marked Paid.)
+//
 // Slash-not-query (`/` not `?`) keeps the blob opaque to URL-parsing libs so they don't mangle
 // `+`/`%`. The codec is PURE (no React/native deps beyond the file's existing Platform import) so
 // jest can exercise it on the fast inner loop.
@@ -65,9 +75,52 @@ export function readRequestDeeplink(): string | null {
   }
 }
 
-// NOTE: a `readPaymentDeeplink()` (?pay= reader) is intentionally NOT defined yet — it will be
-// added together with the deferred `dpay:pay/` receipt-handback wiring (see OPEN_ISSUES). Defining
-// an unwired reader now would be dead code (the repo carries no unused exports).
+/** Web-only: read a `?pay=<base64url-blob>` query param from the page URL. Returns the raw blob
+ *  (base64url of JSON.stringify(receipt)), or null on native / when no `?pay=` is present. The
+ *  merchant's ReceiveMode consumes it via `decodeReceiptDeeplink` → `verifyOutcomeReceipt` (the
+ *  receipt is NEVER trusted unverified). Mirrors `readRequestDeeplink`. */
+export function readPaymentDeeplink(): string | null {
+  if (Platform.OS !== 'web') return null;
+  const w = globalThis as unknown as {location?: {search?: string}};
+  if (!w.location) return null;
+  try {
+    const v = new URLSearchParams(w.location.search ?? '').get('pay');
+    return v && v.length > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+// --- dpay:pay/ receipt-handback codec ---------------------------------------------------------
+// `<blob>` = base64url(JSON.stringify(receipt)) — DIFFERENT from `req`'s raw base64url. The receipt
+// is the canister-signed JSON object the relay's POST /api/v1/pay returns under `body.receipt`. The
+// merchant MUST verify it via `verifyOutcomeReceipt` before reconciling — these codec fns carry the
+// blob opaquely; they do NOT validate the signature (that is the consumer's security gate).
+
+/** Wrap a receipt object as a `dpay:pay/<base64url(JSON)>` URI for the NFC-less hand-back (payer
+ *  shares this over a messaging app; the merchant opens it + verifies the signature). Pure + total. */
+export function encodeReceiptDeeplink(receipt: object): string {
+  const blob = bytesToBase64Url(utf8ToBytes(JSON.stringify(receipt)));
+  return encodeDeeplink('pay', blob);
+}
+
+/** Decode the `<blob>` portion of a `dpay:pay/` URI back into the receipt object. Returns null on a
+ *  malformed/empty blob or one that is not valid base64url/JSON — NEVER throws (the merchant's
+ *  reconcile path treats null as "not a valid receipt" and surfaces an error, never a silent Paid).
+ *  Does NOT verify the signature — the caller MUST run `verifyOutcomeReceipt` on the result. */
+export function decodeReceiptDeeplink(blob: string): Record<string, unknown> | null {
+  if (typeof blob !== 'string' || blob.length === 0) return null;
+  const bytes = base64UrlToBytes(blob);
+  if (bytes === null) return null;
+  try {
+    const json = JSON.parse(bytesToUtf8(bytes));
+    // Only a JSON object is a meaningful receipt; a number/string/array is malformed → null.
+    if (typeof json !== 'object' || json === null || Array.isArray(json)) return null;
+    return json as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
 
 // --- existing web deposit deep link ----------------------------------------------------------
 
