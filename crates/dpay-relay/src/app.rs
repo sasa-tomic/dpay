@@ -22,8 +22,11 @@
 //!   what landed + what's still pending (proxies the facade → ck minter `update_balance`).
 //! - `GET  /api/v1/deposit/info?currency=N` — static deposit instructions (min confirmations, fee,
 //!   min amount) so the sheet can render before showing the address.
-//! - `GET  /api/v1/currencies` — the wallet's runtime asset catalog (closes issue #7): every
+//! - `GET /api/v1/currencies` — the wallet's runtime asset catalog (closes issue #7): every
 //!   registered currency with its ledger/minter/display metadata; read once on wallet load.
+//! - `GET  /api/v1/balances/{hex}` — ALL currency balances in ONE response (a flat map
+//!   `{currency: minor-units}`), replacing the wallet's old N+1 per-poll fetch loop (1 primary +
+//!   1 per-asset, each a relay→IC round trip) with a single request.
 //!
 //! The three deposit routes map **any** `LedgerError` to `503` — there is no `422` path, because the
 //! deposit proxy has no permanent-policy failure (no sig, no cap, no replay); see deposit plan §0.
@@ -124,6 +127,7 @@ pub fn app(state: AppState) -> Router {
         .route("/withdraw", post(withdraw))
         .route("/faucet", post(faucet))
         .route("/balance/{hex}", get(balance))
+        .route("/balances/{hex}", get(balances))
         .route("/transactions/{hex}", get(transactions))
         .route("/receipt/{nonce}", get(receipt))
         .route("/receipt_pubkey", get(receipt_pubkey))
@@ -295,6 +299,85 @@ async fn balance(
         Ok(bal) => (StatusCode::OK, Json(BalanceBody { balance: U64String(bal) })).into_response(),
         Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
     }
+}
+
+/// Per-currency balance-query timeout for the batch endpoint. Bounds a SINGLE ledger query inside
+/// [`balances`]; the whole batch completes within ~this (the queries fan out concurrently via
+/// `join_all`, so the batch wall-clock ≈ the slowest single query, not the sum). Generous enough for
+/// a real IC query (a query read or a cold-start `refresh_balance` update: 1–5s observed), short
+/// enough that a fully-hung ledger can't stall the response. The app's own HTTP timeout
+/// (BALANCE_TIMEOUT_MS = 4s) is the tighter user-facing bound — it will abort the app→relay fetch
+/// first in the slow case; this is the relay's own safety net against a wedged ledger so the route
+/// never hangs indefinitely.
+const BALANCE_BATCH_QUERY_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// `GET /api/v1/balances/{hex}` (note the PLURAL) → `{"<currency>": "<minor units>", ...}` mapping
+/// EVERY currency in the catalog to its balance string, in ONE response. Replaces the wallet's old
+/// N+1 poll (1 primary fetch + 1 per-asset fetch, each a relay→IC round trip) with a SINGLE fetch —
+/// with 6 production currencies that's 1 HTTP request instead of 6 sequential-ish round trips.
+///
+/// Internally fans the per-currency `Ledger::balance` queries out CONCURRENTLY (`futures_util::join_all`),
+/// each under its own `BALANCE_BATCH_QUERY_TIMEOUT`, so a slow/hung ledger for ONE currency can't
+/// stall the rest — best-effort per currency, matching the old per-asset poll's "a hiccup on one
+/// asset's ledger never flips the primary offline" guarantee. A currency whose query errors or times
+/// out is OMITTED from the map (the wallet keeps its prior value for that currency) and logged here
+/// (no silent errors). The catalog fetch itself is all-or-nothing: if it fails the route is `503`
+/// (the relay can't enumerate currencies without it).
+///
+/// Response shape (flat map, currency index string → minor-units decimal string): the JSON object
+/// keys are serde-serialized currency indices as decimal strings, e.g. `{"0":"5000","1":"0",...}`.
+async fn balances(State(state): State<AppState>, Path(hex_pk): Path<String>) -> Response {
+    let bytes = match hex::decode(hex_pk.trim()) {
+        Ok(b) if b.len() == PUBKEY_LEN => b,
+        _ => return err(StatusCode::BAD_REQUEST, "pubkey must be 32 bytes hex"),
+    };
+    let mut pk = [0u8; PUBKEY_LEN];
+    pk.copy_from_slice(&bytes);
+
+    // Enumerate the catalog (the source of truth for which currencies exist). An unreachable ledger
+    // can't be enumerated → 503; there is no per-currency permanent-policy failure on this surface.
+    let catalog = match state.ledger.currencies().await {
+        Ok(c) => c,
+        Err(e) => return err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
+    };
+
+    // Fan out one balance query per catalog currency, each under its own timeout. `join_all` polls
+    // them concurrently (one relay→ledger round trip each, in flight together) so the batch returns
+    // in ~the slowest query, not the sum. A per-currency timeout preserves the old per-asset
+    // best-effort semantics: one wedged ledger is dropped (omitted + logged), the rest still answer.
+    let futs = catalog.iter().map(|d| {
+        let ledger = state.ledger.clone();
+        let currency = d.currency;
+        async move {
+            let res = tokio::time::timeout(
+                BALANCE_BATCH_QUERY_TIMEOUT,
+                ledger.balance(pk, currency),
+            )
+            .await;
+            (currency, res)
+        }
+    });
+    let results = futures_util::future::join_all(futs).await;
+
+    // Collect into a BTreeMap so the keys serialize in stable, ascending order (0,1,2,…), matching
+    // the documented shape and keeping test fixtures + relay logs deterministic. A successful query
+    // inserts; an erroring/timed-out query is omitted (best-effort) and logged — never silent.
+    let mut map: std::collections::BTreeMap<String, U64String> = std::collections::BTreeMap::new();
+    for (currency, res) in results {
+        match res {
+            Ok(Ok(bal)) => { map.insert(currency.to_string(), U64String(bal)); }
+            Ok(Err(e)) => {
+                eprintln!("dpay-relay: balances: currency {currency} query failed: {e}");
+            }
+            Err(_) => {
+                eprintln!(
+                    "dpay-relay: balances: currency {currency} query timed out after {}ms",
+                    BALANCE_BATCH_QUERY_TIMEOUT.as_millis(),
+                );
+            }
+        }
+    }
+    (StatusCode::OK, Json(map)).into_response()
 }
 
 /// `GET /api/v1/transactions/{hex}?currency=N&limit=30` → `{"transactions": [...]}` newest-first.

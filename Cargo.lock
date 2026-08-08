@@ -863,6 +863,7 @@ dependencies = [
  "candid",
  "dpay-core",
  "ed25519-dalek",
+ "futures-util",
  "hex",
  "http-body-util",
  "ic-agent",

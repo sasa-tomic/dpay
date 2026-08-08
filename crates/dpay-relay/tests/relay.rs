@@ -1420,6 +1420,75 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(cketh["offramp"], "Direct"); // withdraw_eth — Cash-out button renders
 }
 
+// --- batch balances (the N+1→1 poll fix) --------------------------------------
+//
+// Covers GET /api/v1/balances/{hex} (PLURAL) — the single-fetch batch endpoint that returns EVERY
+// currency's balance in one response, replacing the wallet's old N+1 per-poll loop (1 primary fetch
+// + 1 per-asset, each a relay→IC round trip). With the 6-currency demo catalog this is 1 HTTP request
+// instead of 6. Response shape: a flat map `{<currency>: <minor-units-string>}`, currency index as a
+// decimal-string key, balance as a U64String (decimal string). Mirrors how the wallet consumes it.
+
+/// `GET /api/v1/balances/{hex}` returns `200` with a flat map of EVERY catalog currency's balance in
+/// ONE response. The payer is funded BAL_A in DEMO_USD (currency 0); every other catalog currency is
+/// unfunded → "0". Asserts: all 6 catalog currencies present, the funded primary reads BAL_A, the
+/// unfunded assets read "0", and the values are DECIMAL STRINGS (the MC1 units 2-4 shape — raw u64
+/// across the JSON boundary as a string, never a number).
+#[tokio::test]
+async fn balances_route_returns_all_currencies_in_one_response() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+
+    let (status, body) =
+        call(&state, get_req(&format!("/api/v1/balances/{}", hex::encode(pubkey(&payer))))).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // A flat map (not wrapped under a key) — every catalog currency is a top-level entry.
+    assert!(body.is_object(), "balances response is a JSON object: {body}");
+    assert_eq!(
+        body.as_object().unwrap().len(),
+        6,
+        "demo catalog = 6 currencies, all present in one batch: {body}"
+    );
+
+    // The funded primary (currency 0) reads its real balance as a DECIMAL STRING.
+    assert!(
+        body["0"].is_string(),
+        "balance must be a JSON string (MC1 units 2-4): {body}"
+    );
+    assert_eq!(body["0"], BAL_A.to_string().as_str());
+
+    // Every non-primary catalog currency is present and unfunded → "0" (the FakeLedger default).
+    for c in 1..=5u32 {
+        assert_eq!(
+            body[c.to_string()], "0",
+            "currency {c} present + unfunded (FakeLedger default 0): {body}"
+        );
+    }
+
+    // A SECOND account (the merchant, also unfunded in DEMO_USD per the test ledger) reads all-zero
+    // across the batch — proves the map is account-specific, not a constant.
+    let (status_m, body_m) = call(
+        &state,
+        get_req(&format!("/api/v1/balances/{}", hex::encode(pubkey(&merchant)))),
+    )
+    .await;
+    assert_eq!(status_m, StatusCode::OK, "{body_m}");
+    assert_eq!(body_m["0"], "0", "merchant primary unfunded: {body_m}");
+}
+
+/// A bad account (not 32 bytes hex) is a clean `400` — matches the single `/balance` endpoint's
+/// parsing contract (the batch route shares the same hex-decode path).
+#[tokio::test]
+async fn balances_route_rejects_bad_pubkey() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+
+    let (status, body) = call(&state, get_req("/api/v1/balances/deadbeef")).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+}
+
 // --- ckERC-20 onramp surface (ckUSDC; M2) -------------------------------------
 //
 // Covers GET /api/v1/onramp/ckerc20 — surfaces the runtime parameters (helper contract, ERC-20

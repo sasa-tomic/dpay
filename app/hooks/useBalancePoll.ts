@@ -13,16 +13,19 @@ type Args = {
 
 /**
  * The primary (`$` DEMO) + per-asset balance poll. Extracted from Wallet.tsx (Effect B):
- *   - Primary fetch + each per-asset fetch run on their OWN timeout (BALANCE_TIMEOUT_MS); a hiccup
- *     on one asset's ledger never flips the primary offline or fails its poll (separate ledgers).
- *     A null asset result keeps the prior value (no flap on a single miss).
- *   - MC5 offline-deduction resets are COUPLED to a successful fetch and stay INTERNAL: the primary
- *     poll resets currency-0; each successful per-asset poll resets that currency. These never fire
- *     on a miss (the authoritative balance must land before the optimistic view is cleared).
+ *   - SINGLE batch fetch (`GET /api/v1/balances/<account>`) returns EVERY catalog currency's balance
+ *     in one response — replacing the old N+1 loop (1 primary fetch + 1 per-asset, each a relay→IC
+ *     round trip). With 6 production currencies that's 1 HTTP request per poll instead of 6.
+ *   - The relay fans the per-currency ledger queries out concurrently + best-effort (a hiccup on one
+ *     asset's ledger OMITS it from the response, never failing the whole batch), so a slow ledger for
+ *     one asset never flips the primary offline. A missing entry keeps the prior value (no flap).
+ *   - MC5 offline-deduction resets are COUPLED to a successful per-currency read and stay INTERNAL:
+ *     the primary read resets currency-0; each successful per-asset read resets that currency. These
+ *     never fire on a miss (the authoritative balance must land before the optimistic view is cleared).
  *   - The effect dep is `displayCurrencyIds` (a stable STRING signature), NOT `displayAssets` (a new
  *     array each render) — so the poll resets only when a currency is added/removed, not every frame.
  *   - Relay-retarget race fix (OPEN_ISSUES #6): on teardown (relayUrl/displayCurrencyIds change) the
- *     effect aborts ALL in-flight fetches via an AbortController, and a generation ref rejects any
+ *     effect aborts the in-flight batch fetch via an AbortController, and a generation ref rejects any
  *     poll whose result lands after a newer generation started. This closes the window where an old
  *     relay's slow in-flight poll could resolve after the new relay's poll and shadow the new balance
  *     (the `alive` closure flag is retained as a secondary gate).
@@ -66,11 +69,11 @@ export function useBalancePoll(args: Args): {
   useEffect(() => {
     let alive = true;
     const gen = ++genRef.current;
-    // AbortController tied to this effect's lifetime. On teardown it aborts EVERY in-flight fetch
-    // (primary + per-asset) IMMEDIATELY, so a slow old-relay poll cannot resolve after the new relay's
-    // poll and overwrite the fresh balance. fetchWithTimeout uses the caller signal AS-IS when present
-    // (see services/relay.ts composeTimeout), so the per-fetch BALANCE_TIMEOUT_MS is composed below
-    // via `timed` (first-abort-wins: the effect controller OR the per-fetch timeout).
+    // AbortController tied to this effect's lifetime. On teardown it aborts the in-flight batch fetch
+    // IMMEDIATELY, so a slow old-relay poll cannot resolve after the new relay's poll and overwrite the
+    // fresh balance. fetchWithTimeout uses the caller signal AS-IS when present (see services/relay.ts
+    // composeTimeout), so the per-fetch BALANCE_TIMEOUT_MS is composed below via `timed` (first-abort-
+    // wins: the effect controller OR the per-fetch timeout).
     const ctrl = new AbortController();
 
     // Compose the effect's abort signal with a per-fetch timeout. First abort wins; never throws.
@@ -91,51 +94,65 @@ export function useBalancePoll(args: Args): {
     const fresh = () => alive && gen === genRef.current;
 
     const poll = async () => {
-      // Non-primary asset balances run in PARALLEL + best-effort, each with its own timeout, so a
-      // hiccup on one asset's ledger can never flip the primary `$` balance offline or fail its
-      // poll. The assets live on separate ledgers — fetching one must not affect another's display. A
-      // null result keeps the prior value (no flap on a single miss). Covers EVERY non-primary catalog
-      // currency (ramp + no-minter ICRC), so an unfunded asset still reads its real zero balance.
-      const assetFetches = displayAssets.map(a => {
-        const t = timed(BALANCE_TIMEOUT_MS);
-        return fetchWithTimeout(`${base(relayUrl)}/api/v1/balance/${publicHex}?currency=${a.currency}`, {signal: t.signal}, BALANCE_TIMEOUT_MS)
-          .then(r => r.ok ? r.json().catch(() => null) : null)
-          .then(j => (j && typeof j.balance === 'string') ? (j.balance as string) : null)
-          .catch(() => null)
-          .then(b => { t.stop(); return {currency: a.currency, balance: b}; });
-      });
+      // SINGLE batch fetch — the relay returns EVERY catalog currency's balance in one response
+      // (a flat map {currency: minor-units-string}), replacing the old N+1 loop (1 primary + 1 per
+      // asset, each a relay→IC round trip). The relay fans the per-currency queries out concurrently
+      // + best-effort (a hiccup on one ledger OMITS that currency, never failing the batch), so a
+      // missing entry keeps the prior value (no flap on a single miss). Covers EVERY catalog currency
+      // (primary 0 + every non-primary), so an unfunded asset still reads its real zero balance.
+      const t = timed(BALANCE_TIMEOUT_MS);
       try {
-        const t = timed(BALANCE_TIMEOUT_MS);
         try {
-          const r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/balance/${publicHex}`, {signal: t.signal}, BALANCE_TIMEOUT_MS);
-          const j = await r.json();
-          // MC5: reset ONLY the DEMO (currency-0) offline deduction on a successful primary poll — the
-          // authoritative balance replaces the local optimistic view, and any pending offline DEMO
-          // hand-off has either settled (reflected in this balance) or never will (stale). Per-asset
-          // deductions reset on their own per-currency poll below (same rationale, per asset).
-          if (fresh() && r.ok && typeof j.balance === 'string') { setBalance(j.balance); setOnline(true); setOfflineSpent(prev => prev[0] != null && prev[0] !== '0' ? {...prev, 0: '0'} : prev); }
-          else if (fresh()) setOnline(false);
+          const r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/balances/${publicHex}`, {signal: t.signal}, BALANCE_TIMEOUT_MS);
+          if (r.ok) {
+            // The body is a flat {currency: minor-units-string} map (JSON keys are strings). A parse
+            // failure / non-object body is treated like an offline blip (no state change to balances).
+            const j: unknown = await r.json().catch(() => null);
+            const map = (j && typeof j === 'object' && !Array.isArray(j)) ? j as Record<string, string> : null;
+            if (!map) { if (fresh()) setOnline(false); return; }
+            // Primary (currency 0): a successful read sets the balance + flips online + resets the
+            // DEMO offline deduction (the authoritative balance replaces the optimistic local view).
+            // A missing/non-string primary in an otherwise-200 batch → offline (primary ledger hiccup).
+            const primary = map['0'];
+            if (fresh() && typeof primary === 'string') {
+              setBalance(primary);
+              setOnline(true);
+              setOfflineSpent(prev => prev[0] != null && prev[0] !== '0' ? {...prev, 0: '0'} : prev);
+            } else if (fresh()) {
+              setOnline(false);
+            }
+            if (!fresh()) return;
+            // Non-primary assets: merge keeping prior on a missing entry (the relay omits a currency
+            // whose ledger hiccupped — best-effort, no flap). MC5: a successful per-asset read resets
+            // that currency's offline deduction (the authoritative polled balance replaces the local
+            // optimistic view — same rationale as the DEMO reset above).
+            setAssetBalances(prev => {
+              let changed = false;
+              const next = {...prev};
+              for (const a of displayAssets) {
+                const v = map[String(a.currency)];
+                if (typeof v === 'string') { next[a.currency] = v; changed = true; }
+              }
+              return changed ? next : prev;
+            });
+            setOfflineSpent(prev => {
+              let changed = false;
+              const next = {...prev};
+              for (const a of displayAssets) {
+                const v = map[String(a.currency)];
+                if (typeof v === 'string' && next[a.currency] != null && next[a.currency] !== '0') { next[a.currency] = '0'; changed = true; }
+              }
+              return changed ? next : prev;
+            });
+          } else {
+            // Non-2xx: no silent errors — log the status + body so a relay 5xx/4xx is debuggable, then
+            // flip offline (the next poll retries). The body is tiny JSON; read best-effort.
+            const bodyText = await r.text().catch(() => '<unreadable>');
+            console.warn(`balances ${r.status}: ${bodyText}`);
+            if (fresh()) setOnline(false);
+          }
         } finally { t.stop(); }
       } catch { if (fresh()) setOnline(false); }
-      // Settle the asset balances after the primary poll resolves; merge keeping prior on null.
-      // MC5: a successful asset poll resets that currency's offline deduction (the authoritative
-      // polled balance replaces the optimistic local view — same rationale as the DEMO reset above).
-      const results = await Promise.all(assetFetches);
-      if (fresh()) {
-        setAssetBalances(prev => {
-          const next = {...prev};
-          for (const {currency, balance} of results) if (balance != null) next[currency] = balance;
-          return next;
-        });
-        setOfflineSpent(prev => {
-          let changed = false;
-          const next = {...prev};
-          for (const {currency, balance} of results) {
-            if (balance != null && next[currency] != null && next[currency] !== '0') { next[currency] = '0'; changed = true; }
-          }
-          return changed ? next : prev;
-        });
-      }
     };
     poll(); const id = setInterval(poll, POLL.balance);
     return () => { alive = false; clearInterval(id); ctrl.abort(); };

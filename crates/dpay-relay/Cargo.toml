@@ -47,6 +47,12 @@ async-trait = "0.1.91"
 thiserror = "2.0.19"
 hex = "0.4.3"
 base64 = "0.22.1"
+# `join_all` for the batch balances endpoint — fans out the per-currency balance queries CONCURRENTLY
+# (one relay→ledger round trip per currency, polled together) so a 6-currency batch returns in ~the
+# slowest single query, not 6× sequentially. Already compiled transitively (tokio/async-trait pull
+# futures-core/-task/-util), so this adds no new build weight. Default features (std/async-await/alloc)
+# are exactly what `join_all` needs.
+futures-util = "0.3"
 
 # --- `agent` feature only ---
 # ic-agent 0.48.1 is the current crates.io release (2026-07-07); it depends on candid ^0.10.10,
