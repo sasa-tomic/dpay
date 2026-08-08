@@ -27,7 +27,7 @@
 #![cfg(feature = "agent")]
 
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
@@ -435,28 +435,24 @@ fn live_settlement_end_to_end() {
     pic.stop_live();
 }
 
-/// MC3 U2 — the relay's TTL-gated `Ledger::balance` path is AUTHORITATIVE after a cache-bypassing
+/// MC3 U2 — the relay's BATCH `refresh_all_balances` path is AUTHORITATIVE after a cache-bypassing
 /// credit. Covers credits the facade cache cannot see on its own: direct ICRC transfers + async
 /// ckERC20 heartbeat mints (which land on the ledger WITHOUT invoking the facade, so `BAL_CACHE`
-/// stays stale). Proves the FULL contract:
+/// stays stale). Proves the FULL contract under the batch-refresh architecture:
 ///
-/// 1. Cold start → `balance()` is stale → does an authoritative `refresh_balance` UPDATE (re-reads
-///    the ledger + writes the cache) and returns the true amount.
+/// 1. `balance()` is a PURE fast cached query — it returns the cached `balance_of` value and does
+///    NOT auto-refresh (the per-currency refresh was REMOVED from `balance()`; the authoritative
+///    refresh moved to `refresh_all_if_stale`, called ONCE by the `/balances` handler).
 /// 2. A direct `icrc1_transfer` to `Account{owner: facade, subaccount: payer}` (the exact shape of
 ///    a direct ICRC transfer / async ckERC20 heartbeat mint) leaves the cached `balance_of` query
-///    STALE — proving the bug the TTL contract fixes.
-/// 3. `refresh_balance` then surfaces the new (higher) authoritative amount.
-/// 4. A subsequent `balance()` is now FRESH (within the TTL window) → hits the fast cached
-///    `balance_of` query and returns the SAME authoritative amount (TTL-gating + cache coherence).
-/// 5. PIN the TTL DECISION (not just the outcome). Phases 1+4 can't distinguish refresh-path from
-///    cached-path when both yield the same value (the faucet pre-warmed the cache; the explicit
-///    `refresh_balance` updated both). A regression flattening `is_stale()` to a constant would
-///    pass 1–4. Phase 5 makes the cached query and the authoritative ledger DISAGREE, then calls
-///    `balance()` on a fresh `AgentLedger` — the returned value uniquely identifies which branch
-///    `is_stale` chose: cold (stale → refresh path → authoritative amount) and then within-TTL
-///    (fresh → cached path → stale amount).
+///    STALE — and `balance()` returns that stale value (proving `balance()` does not refresh).
+/// 3. `refresh_all_if_stale()` on a cold AgentLedger fires ONE batch `refresh_all_balances` UPDATE
+///    in the background (fire-and-forget); once it lands, `balance()` reflects the authoritative
+///    amount — collapsing the old N per-currency refreshes into a single consensus round.
+/// 4. Within the TTL window, a second `refresh_all_if_stale()` is a NO-OP (the TTL gate prevents a
+///    redundant refresh) — `balance()` returns the stale cached value, proving the gate.
 #[test]
-fn balance_refresh_is_authoritative_after_cache_bypass_credit() {
+fn balance_and_batch_refresh_are_authoritative_after_cache_bypass_credit() {
     let mut pic = PocketIc::new();
     let gateway_url = pic.make_live(None).to_string();
 
@@ -519,16 +515,19 @@ fn balance_refresh_is_authoritative_after_cache_bypass_credit() {
         .build()
         .expect("tokio runtime");
 
-    // ---- Phase 1 (async): connect + cold-start authoritative balance. ----
-    // A fresh AgentLedger has NO `last_refresh` entry → `is_stale` is true → `balance()` does the
-    // authoritative `refresh_balance` update (not the cached query) and returns INIT_A.
+    // ---- Phase 1 (async): connect + cold-start balance() is a PURE fast query. ----
+    // The faucet pre-warmed the facade cache to INIT_A, so `balance()` (now a pure cached query,
+    // no auto-refresh) returns INIT_A immediately. Proves `balance()` returns the cached value.
     let agent_ledger = rt
         .block_on(async {
             let l = AgentLedger::connect(&gateway_url, canister_id)
                 .await
                 .expect("AgentLedger must connect to the live gateway");
             let bal0 = l.balance(payer_pk, DEMO_USD).await.expect("cold-start balance");
-            assert_eq!(bal0, INIT_A, "cold-start balance() must do the authoritative refresh");
+            assert_eq!(
+                bal0, INIT_A,
+                "cold-start balance() returns the cached value (faucet pre-warmed the cache)",
+            );
             l
         });
 
@@ -556,61 +555,88 @@ fn balance_refresh_is_authoritative_after_cache_bypass_credit() {
         .expect("direct icrc1_transfer reply decode")
         .expect("direct credit transfer should succeed (minting account debited)");
 
-    // ---- Phase 3 (async): stale cache → authoritative refresh → TTL-gated fresh read. ----
-    rt.block_on(async move {
-        // (2) The cached `balance_of` query is now STALE — the bug the TTL contract fixes.
-        let stale = agent_ledger
-            .balance_of(&payer_pk, DEMO_USD)
-            .await
-            .expect("balance_of query");
-        assert_eq!(
-            stale, INIT_A,
-            "cached balance_of must be STALE after a facade-bypassing credit (the bug)",
-        );
+    // ---- Phase 3 (async): balance() returns the STALE cached value (pure query, no refresh). ----
+    // This is the KEY behavior change: `balance()` no longer auto-refreshes. The cache is stale at
+    // INIT_A (the credit bypassed the facade), and `balance()` returns that stale value — proving
+    // the per-currency refresh was removed from `balance()`. The authoritative refresh now lives in
+    // `refresh_all_if_stale` (Phase 4).
+    //
+    // Each `block_on` borrows `agent_ledger` by shared reference (taken outside the async block so
+    // `async move` copies the reference, not the ledger — `AgentLedger` is not `Clone`, and Phases
+    // 4+5 must share its `last_refresh` so the TTL gate is observable).
+    {
+        let l = &agent_ledger;
+        rt.block_on(async move {
+            // The cached `balance_of` query is STALE — the credit bypassed the facade.
+            let stale = l.balance_of(&payer_pk, DEMO_USD).await.expect("balance_of query");
+            assert_eq!(
+                stale, INIT_A,
+                "cached balance_of must be STALE after a facade-bypassing credit",
+            );
 
-        // (3) refresh_balance returns the NEW authoritative amount (re-reads the ledger + writes the
-        // cache) and marks the (pubkey, currency) fresh.
-        let auth = agent_ledger
-            .refresh_balance(&payer_pk, DEMO_USD)
-            .await
-            .expect("refresh_balance must succeed");
-        assert_eq!(
-            auth,
-            INIT_A + CREDIT,
-            "refresh_balance must surface the cache-bypassing credit (authoritative read)",
-        );
+            // balance() is a PURE fast query → returns the SAME stale cached value (NO auto-refresh).
+            let bal = l.balance(payer_pk, DEMO_USD).await.expect("balance()");
+            assert_eq!(
+                bal, INIT_A,
+                "balance() must return the stale cached value — it no longer auto-refreshes \
+                 (the per-currency refresh moved to refresh_all_if_stale)",
+            );
+        });
+    }
 
-        // The cache was written by the refresh, so the cached query now agrees too.
-        let cached = agent_ledger
-            .balance_of(&payer_pk, DEMO_USD)
-            .await
-            .expect("balance_of query post-refresh");
-        assert_eq!(cached, INIT_A + CREDIT, "cached balance_of must agree post-refresh");
+    // ---- Phase 4 (async): refresh_all_if_stale fires the batch → cache refreshed. ----
+    // A cold AgentLedger has NO `last_refresh` entries → `any_stale_for` is true →
+    // `refresh_all_if_stale` spawns ONE `refresh_all_balances` update (fire-and-forget). Once it
+    // lands, the canister's BAL_CACHE is refreshed for ALL currencies, so `balance()` reflects the
+    // authoritative amount. The poll loop drives the runtime (yields via sleep) so the spawned task
+    // makes progress on its IC update call.
+    {
+        let l = &agent_ledger;
+        rt.block_on(async move {
+            // Fire-and-forget: spawns the batch task and returns immediately.
+            l.refresh_all_if_stale(payer_pk).await;
 
-        // (4) A subsequent balance() is FRESH (within the TTL window) → fast cached query → same
-        // authoritative amount. Proves TTL-gating + cache coherence: the second poll does NOT
-        // re-hit the authoritative update, yet returns the authoritative amount via the cache.
-        let bal1 = agent_ledger.balance(payer_pk, DEMO_USD).await.expect("fresh balance()");
-        assert_eq!(
-            bal1, INIT_A + CREDIT,
-            "fresh (within-TTL) balance() must return the authoritative amount via the cache",
-        );
-    });
+            // Poll until the background batch refresh lands (writes BAL_CACHE on the canister).
+            let mut landed = false;
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+            while tokio::time::Instant::now() < deadline {
+                // Yield to the runtime so the spawned task (IC update call) can make progress.
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                let bal = l.balance(payer_pk, DEMO_USD).await.expect("balance() poll");
+                if bal == INIT_A + CREDIT {
+                    landed = true;
+                    break;
+                }
+            }
+            assert!(
+                landed,
+                "refresh_all_if_stale spawn must land within 30s and refresh the cache to the \
+                 authoritative amount",
+            );
 
-    // ---- Phase 5: PIN the TTL DECISION (not just the outcome). ----
-    // Phases 1–4 cannot distinguish whether `balance()` took the refresh path vs the cached path
-    // when both return the same value: the faucet pre-warmed the facade cache to INIT_A, and
-    // Phase 3's explicit `refresh_balance` updated BOTH the ledger view and the cache. So a
-    // regression flattening `is_stale()` to a constant (always-true OR always-false) would pass
-    // every assertion above. Phase 5 makes the cached `balance_of` query and the authoritative
-    // ledger DISAGREE, then calls `balance()` — the returned value uniquely identifies which
-    // branch `is_stale` chose. Proves the DECISION, not just the outcome.
+            // Give the spawned task a moment to finish marking `last_refresh` fresh (it does so
+            // right after the canister cache write — a tiny window) before Phase 5 checks the gate.
+            tokio::time::sleep(Duration::from_millis(500)).await;
+
+            // balance() now returns the AUTHORITATIVE amount (cache was refreshed by the batch).
+            let bal = l.balance(payer_pk, DEMO_USD).await.expect("post-refresh balance()");
+            assert_eq!(
+                bal, INIT_A + CREDIT,
+                "balance() must reflect the authoritative amount after the batch refresh landed",
+            );
+        });
+    }
+
+    // ---- Phase 5: within-TTL refresh_all_if_stale is a NO-OP (TTL gate). ----
+    // Phase 4's spawn marked (payer, DEMO_USD) fresh in `last_refresh`. A second
+    // `refresh_all_if_stale` within the TTL window must NOT spawn (the TTL gate returns false). To
+    // prove the no-op, we make the cache STALE again (a second credit) and verify the cache does NOT
+    // refresh over a window long enough that a spawn (if the gate broke and fired one) would have
+    // landed. On the local PocketIC gateway an update lands in ~1-2s, so a 8s window is generous.
     const CREDIT_2: u64 = 9_100; // second cache-bypassing credit
-    const CREDIT_3: u64 = 11_700; // third cache-bypassing credit (drives the within-TTL pin)
-    let baseline = INIT_A + CREDIT; // ledger + facade cache agree here (Phase 3 left them in sync)
+    let baseline = INIT_A + CREDIT; // cache + ledger agree here (Phase 4 left them in sync)
 
-    // (a) Second direct credit. Ledger += CREDIT_2; facade cache stays at `baseline` (the facade
-    //     is NEVER invoked by a direct `icrc1_transfer`, so BAL_CACHE is not refreshed).
+    // (a) Second direct credit. Ledger += CREDIT_2; facade cache stays at `baseline`.
     let credit2_reply = pic
         .update_call(
             ledger,
@@ -631,95 +657,29 @@ fn balance_refresh_is_authoritative_after_cache_bypass_credit() {
         .expect("second credit reply decode")
         .expect("credit_2 transfer should succeed (minting account debited)");
 
-    // (b) Cold `balance()` MUST take the refresh path. A FRESH `AgentLedger` has an empty
-    //     `last_refresh` → `is_stale` is true → `balance()` does the authoritative
-    //     `refresh_balance` UPDATE. The cached `balance_of` is STALE at `baseline`, so a
-    //     `balance()` that returns `baseline + CREDIT_2` PROVES it refreshed — a constant-false
-    //     `is_stale` regression would return the stale cached `baseline` instead.
-    let fresh_ledger = rt
-        .block_on(async {
-            let fresh = AgentLedger::connect(&gateway_url, canister_id)
-                .await
-                .expect("second AgentLedger must connect to the live gateway");
+    // (b) refresh_all_if_stale again — entries are FRESH (Phase 4 marked them < TTL ago) → no spawn.
+    //     Poll for 8s; the cache must STAY stale at `baseline` (no spawn fired). A broken
+    //     always-spawn gate would land a refresh within ~2s and the cache would jump to
+    //     `baseline + CREDIT_2` → the assertion below would catch it.
+    {
+        let l = &agent_ledger;
+        rt.block_on(async move {
+            // The TTL gate sees the fresh entry → no spawn.
+            l.refresh_all_if_stale(payer_pk).await;
 
-            // The cached query is STALE — proves the cache and ledger now diverge.
-            let stale_cached = fresh
-                .balance_of(&payer_pk, DEMO_USD)
-                .await
-                .expect("balance_of query (stale cache after credit_2)");
-            assert_eq!(
-                stale_cached, baseline,
-                "cached balance_of must be STALE at baseline after credit_2 (facade not invoked)",
-            );
-
-            // `balance()` on a cold AgentLedger → is_stale=true → refresh path. Returns the
-            // AUTHORITATIVE amount, which differs from the stale cache above — pinning the branch.
-            let via_balance = fresh
-                .balance(payer_pk, DEMO_USD)
-                .await
-                .expect("cold balance() on the second AgentLedger");
-            assert_eq!(
-                via_balance,
-                baseline + CREDIT_2,
-                "cold balance() MUST take the refresh path (is_stale=true) and return the \
-                 authoritative amount — a constant-false is_stale regression would return the \
-                 stale cached {baseline}",
-            );
-            fresh
+            // Observe over a window long enough for a hypothetical spawn to land.
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
+            while tokio::time::Instant::now() < deadline {
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                let bal = l.balance(payer_pk, DEMO_USD).await.expect("balance() poll");
+                assert_eq!(
+                    bal, baseline,
+                    "within-TTL refresh_all_if_stale must be a no-op (TTL gate holds) — cache must \
+                     stay stale at baseline; if it refreshed, the TTL gate is broken (always spawns)",
+                );
+            }
         });
-
-    // (c) Third direct credit. Ledger += CREDIT_3; facade cache stays at `baseline + CREDIT_2`
-    //     (the refresh in (b) wrote that value; the facade is not invoked again here). Done AFTER
-    //     (b)'s `balance()` so the (payer, currency) entry is FRESH in `last_refresh` — within the
-    //     TTL window the next `balance()` MUST hit the cached path.
-    let credit3_reply = pic
-        .update_call(
-            ledger,
-            dpay,
-            "icrc1_transfer",
-            encode_one(&DirectTransferArg {
-                from_subaccount: None,
-                to: Account { owner: dpay, subaccount: Some(payer_pk) },
-                amount: Nat::from(CREDIT_3),
-                fee: None,
-                memo: None,
-                created_at_time: Some(now_secs().saturating_mul(1_000_000_000)),
-            })
-            .unwrap(),
-        )
-        .expect("third direct icrc1_transfer (cache-bypassing credit_3) rejected");
-    decode_one::<Result<Nat, candid::Reserved>>(&credit3_reply)
-        .expect("third credit reply decode")
-        .expect("credit_3 transfer should succeed (minting account debited)");
-
-    // (d) Within-TTL `balance()` MUST take the cached path. (b)'s refresh marked the entry fresh
-    //     (< TTL window), so `is_stale` is false → `balance()` hits the cached `balance_of`. The
-    //     cache is STALE at `baseline + CREDIT_2`, so a `balance()` that returns `baseline +
-    //     CREDIT_2` (NOT `+ CREDIT_3`) PROVES it hit the cache — a constant-true `is_stale`
-    //     regression would refresh and return `baseline + CREDIT_2 + CREDIT_3` instead.
-    rt.block_on(async move {
-        let stale_cached = fresh_ledger
-            .balance_of(&payer_pk, DEMO_USD)
-            .await
-            .expect("balance_of query (stale cache after credit_3)");
-        assert_eq!(
-            stale_cached,
-            baseline + CREDIT_2,
-            "cached balance_of must be STALE at baseline+credit_2 after credit_3 (facade not invoked)",
-        );
-
-        let via_balance = fresh_ledger
-            .balance(payer_pk, DEMO_USD)
-            .await
-            .expect("within-TTL balance()");
-        assert_eq!(
-            via_balance,
-            baseline + CREDIT_2,
-            "within-TTL balance() MUST hit the cached path (is_stale=false) and return the stale \
-             cached amount — a constant-true is_stale regression would refresh and return {}",
-            baseline + CREDIT_2 + CREDIT_3,
-        );
-    });
+    }
 
     pic.stop_live();
 }

@@ -377,6 +377,15 @@ async fn balances(State(state): State<AppState>, Path(hex_pk): Path<String>) -> 
             }
         }
     }
+
+    // Fire ONE batch background refresh of ALL currencies if any are stale (cold start / TTL
+    // expired). The `balance()` calls above returned the fast cached `balance_of` queries; this
+    // single `refresh_all_balances` update (one consensus round) refreshes `BAL_CACHE` for every
+    // currency so the NEXT poll reflects facade-bypassing credits (direct transfers / async mints).
+    // Collapses the old N per-currency background refreshes into one. Fire-and-forget: the method
+    // spawns a tokio task and returns immediately (FakeLedger's default is a no-op).
+    state.ledger.refresh_all_if_stale(pk).await;
+
     (StatusCode::OK, Json(map)).into_response()
 }
 

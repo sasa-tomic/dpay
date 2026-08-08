@@ -1,3 +1,4 @@
+type BalanceEntry = record { currency : nat32; amount : nat64 };
 type CurrencyDescriptor = record {
   cap : opt nat64;
   fee : opt nat64;
@@ -92,15 +93,16 @@ type ReconcileReport = record {
 };
 type Result = variant { Ok : nat64; Err : text };
 type Result_1 = variant { Ok : text; Err : text };
-type Result_10 = variant { Ok : WithdrawReceipt; Err : text };
+type Result_10 = variant { Ok : nat; Err : text };
+type Result_11 = variant { Ok : WithdrawReceipt; Err : text };
 type Result_2 = variant { Ok : DepositInfo; Err : text };
 type Result_3 = variant { Ok : blob; Err : text };
 type Result_4 = variant { Ok : PayReceipt; Err : text };
 type Result_5 = variant { Ok : principal; Err : text };
 type Result_6 = variant { Ok : ReconcileReport; Err : text };
-type Result_7 = variant { Ok : DepositRefresh; Err : text };
-type Result_8 = variant { Ok; Err : text };
-type Result_9 = variant { Ok : nat; Err : text };
+type Result_7 = variant { Ok : vec BalanceEntry; Err : text };
+type Result_8 = variant { Ok : DepositRefresh; Err : text };
+type Result_9 = variant { Ok; Err : text };
 type TxnView = record {
   to : blob;
   from_name : text;
@@ -206,6 +208,23 @@ service : (InitArg) -> {
   // account (subaccount `None`) or carry no nonce memo, so they are not matched. Each repair inserts
   // the nonce into SPENT (so a retry is a duplicate) and records the txn (so history reflects it).
   reconcile : (nat32) -> (Result_6);
+  // `(blob pubkey) -> Result<vec record { currency: nat32, amount: nat64 }, text>` — batch
+  // authoritative refresh for ALL registered currencies in a SINGLE update call (one consensus
+  // round). Does N inter-canister `icrc1_balance_of` calls (fast, same-subnet reads, sequential
+  // inside the update) and writes each to `BAL_CACHE`. Replaces the relay's N separate
+  // `refresh_balance` update calls (each its own 2-5s consensus round) with ONE. Best-effort per
+  // currency: a ledger hiccup on ONE currency keeps its last-known cached value (logged, never
+  // silent) and the rest of the batch still succeeds — one bad ledger cannot fail the whole batch.
+  // 
+  // Inter-canister calls are sequential (a `for` loop with `.await`). Parallelizing them inside an
+  // `#[update]` would require `futures` in the canister; not worth the complexity — inter-canister
+  // `icrc1_balance_of` calls are fast (~50-100ms each, same subnet), so N sequential ≈ 300-600ms
+  // inside ONE consensus round vs N × 2-5s consensus rounds for the per-currency path it replaces.
+  // 
+  // No auth gate — consistent with the unauthenticated `refresh_balance`/`balance_of` surface: this
+  // is a read + cache writes that move NO value. RETIRED currency ids are skipped (a retired id is
+  // dead forever and resolves to no live ledger). Modeled on `refresh_balance`'s per-currency read.
+  refresh_all_balances : (blob) -> (Result_7);
   // `(blob pubkey, nat32 currency) -> Result<nat64, text>` — the AUTHORITATIVE on-demand balance
   // refresh (MC3 U1). Reads the live ledger balance via `icrc1_balance_of` for
   // `Account{owner: canister_self(), subaccount: pubkey}`, writes it to `BAL_CACHE` (so the fast
@@ -235,7 +254,7 @@ service : (InitArg) -> {
   // is deliberately NOT added to the AlreadyProcessing / TemporarilyUnavailable / GenericError
   // branches — the minter call FAILED there and the cache state is unknown, so we do not paper over
   // it with a speculative read.
-  refresh_deposit : (blob, nat32) -> (Result_7);
+  refresh_deposit : (blob, nat32) -> (Result_8);
   // `(CurrencyRegistration) -> Result<(), text>` — the SINGLE ATOMIC currency-activation path (MC2
   // unit 4). Activates a NEW currency id by inserting LEDGERS + (optionally) MINTERS + CURRENCY_META
   // in ONE update message (all-or-nothing), AFTER strictly validating the identity metadata against
@@ -263,7 +282,7 @@ service : (InitArg) -> {
   // (deprecated for fresh activation, still useful for incremental display-meta corrections) and still
   // enforce U2 immutability + U3 retire. Deploy scripts SHOULD use `register_currency` for the
   // currencies they register (F5) — see `scripts/dfx-deploy*.sh`.
-  register_currency : (CurrencyRegistration) -> (Result_8);
+  register_currency : (CurrencyRegistration) -> (Result_9);
   // Register or replace display/family/authoritative metadata for a currency. Gated to the
   // controller in production. Each `Option` field is registered independently — register only what
   // you know; `None` fields keep the wallet in a best-effort fallback. `onramp`/`offramp` are
@@ -296,7 +315,7 @@ service : (InitArg) -> {
       RampCapability,
       RampCapability,
       opt principal,
-    ) -> (Result_8);
+    ) -> (Result_9);
   // Register the ledger for a currency at runtime (INSERT-ONLY, MC2 unit 2). Gated to the controller
   // in production (open only when `controller` is unset, i.e. the demo). Once a currency key exists its
   // ledger principal + `mintable` flag are IMMUTABLE — a re-register with the SAME value is a no-op
@@ -306,7 +325,7 @@ service : (InitArg) -> {
   // authorization/history. To repoint a currency, retire it and register a new id. Display metadata
   // (`register_currency_meta`) is deliberately NOT frozen here — symbol/decimals/cap are policy/display,
   // not identity, and remain updatable.
-  register_ledger : (nat32, principal, bool) -> (Result_8);
+  register_ledger : (nat32, principal, bool) -> (Result_9);
   // Register the ck-minter principal for a currency at runtime (INSERT-ONLY, MC2 unit 2). Gated to the
   // controller in production (open only when `controller` is unset, i.e. the demo). A currency need not
   // have a minter (only ck currencies do); absence means the facade exposes no deposit path for it.
@@ -314,7 +333,7 @@ service : (InitArg) -> {
   // (deploy scripts stay re-runnable), but a DIFFERENT principal is REJECTED with a currency-named
   // message. To repoint a currency's minter, retire it and register a new id. (Mirrors `register_ledger`
   // — both are identity, not display/policy.)
-  register_minter : (nat32, principal) -> (Result_8);
+  register_minter : (nat32, principal) -> (Result_9);
   // `(nat32 currency) -> Result<(), text>` — IRREVERSIBLY retire a currency id (MC2 unit 3). Gated to
   // the controller in production (open only when `controller` is unset, i.e. the demo). A retired id is
   // dead FOREVER: it leaves the wallet catalog (`currencies()` skips it), is rejected by `ledger_for`/
@@ -324,7 +343,7 @@ service : (InitArg) -> {
   // for the audit trail (`transactions_of` still returns prior rows). There is NO un-retire method.
   // "Retire + create a new id" is the only replacement — the strongest identity guarantee. Idempotent:
   // retiring an already-retired currency is a no-op `Ok` (the RETIRED set is append-only).
-  retire_currency : (nat32) -> (Result_8);
+  retire_currency : (nat32) -> (Result_9);
   // Rotate (or, from open/demo mode, set the first) governance principal for `mint`/`burn`/
   // `register_ledger`/`register_minter`/`reconcile`/`set_controller`. Governed by
   // [`require_controller_rotation`]: in open-demo mode (no controller set) any caller may set the
@@ -333,7 +352,7 @@ service : (InitArg) -> {
   // (`InitArg::controller`) so the canister never runs in open mode against an adversary. (This gates
   // admin *methods* only. The IC-level canister controller — who can `install_code`/upgrade — is a
   // separate concern set via `dfx`/NNS/SNS; see docs/GOVERNANCE.md.)
-  set_controller : (opt principal) -> (Result_8);
+  set_controller : (opt principal) -> (Result_9);
   // Newest-first history for a (pubkey, currency) pair. O(limit): the underlying `range` iterator is
   // double-ended, so `.rev().take(limit)` walks from the newest end and stops early — it does NOT
   // materialize the whole history. `limit == 0` returns no rows.
@@ -349,7 +368,7 @@ service : (InitArg) -> {
   // never traps. A request at/above the LIQUID cycle balance returns `Err` (the management canister is
   // the authority on liquid cycles — no CDK API exposes liquid balance) — retry with a smaller amount.
   // Returns the amount actually transferred so the caller can confirm.
-  transfer_cycles : (principal, nat) -> (Result_9);
+  transfer_cycles : (principal, nat) -> (Result_10);
   // `(WithdrawRequest) -> Result<WithdrawReceipt, text>` — withdraw a chain-key asset to a native
   // address on a verified user signature. The request carries the [`WithdrawAuth`] fields + the user's
   // Ed25519 signature over the canonical signing bytes; the facade verifies the signature under
@@ -361,5 +380,5 @@ service : (InitArg) -> {
   // settled once the burn commits (the auth can never replay → no double-burn). The family branch
   // owns its own settle/release classification of the minter's typed errors (permanent → settle the
   // dead auth; transient → release so the same auth retries).
-  withdraw : (WithdrawRequest) -> (Result_10);
+  withdraw : (WithdrawRequest) -> (Result_11);
 }

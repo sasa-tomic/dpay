@@ -700,6 +700,59 @@ async fn refresh_balance(pubkey: Vec<u8>, currency: Currency) -> Result<u64, Str
     Ok(bal)
 }
 
+/// `(blob pubkey) -> Result<vec record { currency: nat32, amount: nat64 }, text>` — batch
+/// authoritative refresh for ALL registered currencies in a SINGLE update call (one consensus
+/// round). Does N inter-canister `icrc1_balance_of` calls (fast, same-subnet reads, sequential
+/// inside the update) and writes each to `BAL_CACHE`. Replaces the relay's N separate
+/// `refresh_balance` update calls (each its own 2-5s consensus round) with ONE. Best-effort per
+/// currency: a ledger hiccup on ONE currency keeps its last-known cached value (logged, never
+/// silent) and the rest of the batch still succeeds — one bad ledger cannot fail the whole batch.
+///
+/// Inter-canister calls are sequential (a `for` loop with `.await`). Parallelizing them inside an
+/// `#[update]` would require `futures` in the canister; not worth the complexity — inter-canister
+/// `icrc1_balance_of` calls are fast (~50-100ms each, same subnet), so N sequential ≈ 300-600ms
+/// inside ONE consensus round vs N × 2-5s consensus rounds for the per-currency path it replaces.
+///
+/// No auth gate — consistent with the unauthenticated `refresh_balance`/`balance_of` surface: this
+/// is a read + cache writes that move NO value. RETIRED currency ids are skipped (a retired id is
+/// dead forever and resolves to no live ledger). Modeled on `refresh_balance`'s per-currency read.
+#[update]
+async fn refresh_all_balances(pubkey: Vec<u8>) -> Result<Vec<BalanceEntry>, String> {
+    let pk = to_pubkey(&pubkey)?;
+    // Collect all non-retired currency → ledger pairs in one synchronous read (no await in the
+    // borrow). `is_retired` honors the RETIRED set: a retired id's LEDGERS row is preserved for
+    // history but is skipped here (no live ledger to read).
+    let entries: Vec<(Currency, Principal)> = LEDGERS.with(|m| {
+        m.borrow()
+            .iter()
+            .filter(|(c, _)| !is_retired(*c))
+            .map(|(c, e)| (c, e.principal))
+            .collect()
+    });
+    let mut results = Vec::with_capacity(entries.len());
+    for (currency, ledger) in entries {
+        match ledger_balance_of(ledger, &account_of(&pk)).await {
+            Ok(bal) => {
+                write_cache(pk, currency, bal);
+                results.push(BalanceEntry { currency, amount: bal });
+            }
+            Err(e) => {
+                // Best-effort: a ledger hiccup on ONE currency must not fail the batch. Keep the
+                // last-known cached value (display-only; settlement always reads the ledger
+                // directly — the money-safety invariant is unchanged) and log the error so it is
+                // observable, never silently swallowed.
+                ic_cdk::print(format!(
+                    "WARN refresh_all_balances: currency {currency} read failed ({e}) — kept cached value"
+                ));
+                let cached = BAL_CACHE
+                    .with(|c| c.borrow().get(&CacheKey::new(pk, currency)).map(|b| b.amount).unwrap_or(0));
+                results.push(BalanceEntry { currency, amount: cached });
+            }
+        }
+    }
+    Ok(results)
+}
+
 /// `mint(blob, nat32, nat64) -> Result<nat64, text>` — fund a user on a MINTABLE (demo) currency by
 /// transferring from the ledger's minting account (which this canister owns). Real ck currencies are
 /// not mintable. Refreshes the display cache from the authoritative ledger post-settle. Gated to the

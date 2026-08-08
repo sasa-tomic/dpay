@@ -745,3 +745,91 @@ fn refresh_balance_reflects_a_cache_bypassing_credit() {
         "balance_of (facade cache) must reflect the credit after refresh_balance",
     );
 }
+
+// --- refresh_all_balances: ONE update call refreshes ALL currencies --------------------------
+//
+// The batch endpoint collapses the relay's N per-currency `refresh_balance` update calls (each its
+// own 2-5s consensus round) into ONE. It must: (a) return an entry per registered (non-retired)
+// currency with the authoritative balance, (b) write each to BAL_CACHE so `balance_of` reflects it,
+// and (c) surface a facade-bypassing credit (direct ICRC transfer) the same way `refresh_balance`
+// does for a single currency.
+
+/// The batch authoritative refresh method (one update, all currencies). Returns the entries.
+fn refresh_all_balances(
+    pic: &PocketIc,
+    dpay: Principal,
+    pk: [u8; 32],
+) -> Result<Vec<BalanceEntry>, String> {
+    let reply = pic
+        .update_call(
+            dpay,
+            Principal::anonymous(),
+            "refresh_all_balances",
+            encode_one(pk.to_vec()).unwrap(),
+        )
+        .expect("refresh_all_balances update_call rejected");
+    decode_one::<Result<Vec<BalanceEntry>, String>>(&reply).unwrap()
+}
+
+/// Mirror of the canister's `BalanceEntry` (one entry of the batch result).
+#[derive(CandidType, Deserialize, Debug, PartialEq, Eq)]
+struct BalanceEntry {
+    currency: Currency,
+    amount: u64,
+}
+
+/// The batch refresh returns an entry per registered currency and writes each to `BAL_CACHE`, so a
+/// facade-bypassing credit (direct ICRC transfer) is surfaced for ALL currencies in ONE call.
+#[test]
+fn refresh_all_balances_returns_every_currency_and_refreshes_cache() {
+    let (pic, ckbtc, dpay, mock, _sk, payer) = setup_deposit();
+    const CREDIT: u64 = 42_000;
+
+    // External credit that bypasses the facade (direct ICRC mint to the payer's subaccount).
+    direct_credit(&pic, ckbtc, mock, dpay, payer, CREDIT);
+
+    // AUTHORITATIVE ledger balance grew.
+    assert_eq!(ledger_balance(&pic, ckbtc, dpay, payer), CREDIT);
+
+    // The facade cache is STALE before the batch refresh.
+    assert_eq!(dpay_balance(&pic, dpay, payer, CKBTC), 0, "cache must be stale before the batch refresh");
+
+    // ONE batch refresh call → returns an entry for every registered currency.
+    let entries = refresh_all_balances(&pic, dpay, payer).expect("refresh_all_balances ok");
+    assert!(
+        !entries.is_empty(),
+        "refresh_all_balances must return at least one entry (the registered currency)",
+    );
+    // The registered currency (CKBTC) must be present with the authoritative credited amount.
+    let ckbtc_entry = entries
+        .iter()
+        .find(|e| e.currency == CKBTC)
+        .expect("refresh_all_balances result must include the registered CKBTC currency");
+    assert_eq!(
+        ckbtc_entry.amount, CREDIT,
+        "refresh_all_balances entry for CKBTC must carry the authoritative credited amount",
+    );
+
+    // The cache was written by the batch, so the fast `balance_of` query now reflects the credit.
+    assert_eq!(
+        dpay_balance(&pic, dpay, payer, CKBTC),
+        CREDIT,
+        "balance_of (facade cache) must reflect the credit after refresh_all_balances",
+    );
+}
+
+/// `refresh_all_balances` is idempotent + re-readable: a second call returns the same authoritative
+/// balances without side effects (the canister-level read is a pure ledger query + cache write).
+#[test]
+fn refresh_all_balances_is_idempotent() {
+    let (pic, _ckbtc, dpay, _mock, _sk, payer) = setup_deposit();
+
+    let first = refresh_all_balances(&pic, dpay, payer).expect("first refresh_all_balances ok");
+    let second = refresh_all_balances(&pic, dpay, payer).expect("second refresh_all_balances ok");
+
+    // Same currencies, same amounts — the batch is a pure read + cache write.
+    assert_eq!(
+        first, second,
+        "refresh_all_balances must be idempotent (same authoritative balances on re-read)",
+    );
+}
