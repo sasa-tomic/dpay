@@ -53,7 +53,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
   // shows a single selected currency's balance, and the full asset list + every top-up live in the
   // Balances sheet. Pay/Receive still settle in whatever currency a request specifies (unchanged).
   const [currentCurrency, setCurrentCurrency] = useState(0);
-  const [balancesOpen, setBalancesOpen] = useState(!readDepositDeepLink());
+  const [balancesOpen, setBalancesOpen] = useState(false);
   const [nfc, setNfc] = useState<NfcStatus>('unknown');
   // Demo top-up: a single click adds $100 of demo currency via /api/v1/faucet. The button sits next
   // to the balance so users find it without hunting. `topUpBusy` drives the spinner; `topUpErr`
