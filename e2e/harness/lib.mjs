@@ -407,3 +407,24 @@ export async function postPay(relayBaseURL, qrCode, timeoutMs = 6000) {
     return { ok: null, status: null, body: {} };
   } finally { clearTimeout(t); }
 }
+
+/**
+ * POST `/api/v1/faucet` `{account, amount}` → credits DEMO (currency 0) to an ARBITRARY account hex
+ * (not just the browser-onboarded identity). Used by flows that need to fund a server-side keypair
+ * (e.g. flow 50 funds a payer keypair B that settles a merchant request + shares the receipt back).
+ * Returns `{ok, status, body}`; a non-2xx (e.g. cooldown) surfaces in `body.error`. Mirrors postPay.
+ */
+export async function faucetAccount(relayBaseURL, accountHex, amount, timeoutMs = 6000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch(`${relayBaseURL}/api/v1/faucet`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account: accountHex, amount }), signal: ctrl.signal,
+    });
+    const body = await r.json().catch(() => ({}));
+    return { ok: r.ok, status: r.status, body };
+  } catch {
+    return { ok: null, status: null, body: {} };
+  } finally { clearTimeout(t); }
+}
