@@ -192,36 +192,8 @@ echo "== lock the staging facade: set_controller(dpay principal) — enables reg
 # After this, msg_caller == controller → require_admin passes → register_currency works.
 dfx_i canister call "$CANISTER" set_controller "(opt principal \"$PRINCIPAL\")" --network "$NETWORK"
 
-# --- register_currency is NOT idempotent (rejects an existing id) — guard by probing currencies() -
-# Probe the live catalog; skip ids already present. This makes the script safely re-runnable without
-# a "currency already exists" reject on the second pass.
-CATALOG="$(dfx_i canister call "$CANISTER" currencies --network "$NETWORK" --query 2>/dev/null || true)"
-has_currency() { echo "$CATALOG" | grep -qE "currency = $1 : nat32" && echo yes || echo no; }
-
-# _register: call register_currency, expect Ok on mainnet (real ledgers validate). On local rehearsal
-# against the mock DUSD ledger, the testnet calls (currency 3/4/5) are EXPECTED to reject with a
-# metadata-mismatch error (the mock ledger has DUSD metadata, not ckTESTBTC) — a reject that is a
-# VALIDATION failure (not a decode/transport error) proves the register_currency argument is
-# well-formed candid. We pass a 2nd arg "expect_mismatch" to treat that case as success locally.
-_register() { # $1=arg  $2=expect_mismatch (optional, local rehearsal only)
-  local arg="$1" expect="${2:-}"
-  local out
-  set +e
-  out="$(dfx_i canister call "$CANISTER" register_currency "$arg" --network "$NETWORK" 2>&1)"
-  set -e
-  if echo "$out" | grep -q 'Ok'; then
-    echo "   → Ok"
-  elif [ "$expect" = expect_mismatch ] && echo "$out" | grep -qiE 'metadata mismatch'; then
-    echo "   → expected validation mismatch (local rehearsal: mock ledger ≠ target metadata) — call shape OK"
-  elif [ "$expect" = expect_mismatch ] && echo "$out" | grep -qiE 'icrc1_(decimals|fee|symbol)|wrapper_name'; then
-    echo "   → expected validation mismatch (local rehearsal) — call shape OK"
-  else
-    echo "   → UNEXPECTED register_currency outcome:" >&2
-    # shellcheck disable=SC2001 # sed prefixes EVERY line; ${var//} can't do per-line substitution.
-    sed 's/^/     /' <<<"$out" >&2
-    exit 1
-  fi
-}
+# --- probe the catalog once; has_currency/_register are shared helpers (deploy/dfx-lib.sh) -------
+probe_catalog
 
 # (a) DEMO (currency 0) — staging DUSD ledger. onramp=Direct (faucet), offramp=Unavailable (play $).
 #     Full proof: validates against the real (staging) DUSD ledger on BOTH mainnet and local.

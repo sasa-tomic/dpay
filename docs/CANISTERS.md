@@ -60,6 +60,8 @@ They appear in the facade `currencies()` response but are deliberately absent fr
 | 1 ckBTC  | minter   | `mqygn-kiaaa-aaaar-qaadq-cai` |
 | 2 ckUSDC | ledger   | `xevnm-gaaaa-aaaar-qafnq-cai` |
 | 2 ckUSDC | minter   | `sv3dd-oaaaa-aaaar-qacoa-cai` (the ckETH minter; ckERC20s share it) |
+| 6 ckETH  | ledger   | `ss2fx-dyaaa-aaaar-qacoq-cai` (native ETH mainnet; `token_contract=null`) |
+| 6 ckETH  | minter   | `sv3dd-oaaaa-aaaar-qacoa-cai` (same ckETH minter; single-ledger `withdraw_eth`) |
 
 ## Notes
 

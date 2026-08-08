@@ -168,6 +168,45 @@ else
   echo "   metadata registered; cap=${CAP} raw (placeholder — tighten per-asset before pilot)"
 fi
 
+# --- register mainnet ckETH (currency 6) — native ETH on Ethereum mainnet ----------------------
+# The only MAINNET native-ETH currency: CkEthErc20 family + token_contract=null (the native-ETH
+# discriminator → the facade's withdraw_eth SINGLE-ledger path; the depositEth onramp). ckUSDC(2) is
+# mainnet Ethereum too but an ERC-20 token; this adds the native coin itself. Principals are DFINITY's
+# live mainnet ckETH canisters: ledger ss2fx-dyaaa… (currently registered as ckUSDC's gas_ledger) +
+# minter sv3dd-oaaaa… (the ckETH minter ckUSDC already uses). register_currency STRICTLY VALIDATES
+# decimals/fee/wrapper_name against the live ledger (F3), so these three are sourced from the ledger's
+# own icrc1_decimals(18)/icrc1_fee(2_000_000_000_000 Wei)/icrc1_symbol("ckETH") — queried 2026-08-08.
+# gas_ledger=null: native-ETH withdraw_eth burns only the amount ledger (single-ledger), UNLIKE the
+# ckERC20 withdraw_erc20 dual-ledger path which needs a separate gas ledger. NOTE: ${CAP} is a raw-unit
+# per-tx ceiling; at 18 decimals it is dust Wei — tighten to a Wei-appropriate value before ckETH
+# NFC-pay goes live (same placeholder discipline as currencies 0-2; deposit/withdraw are unaffected).
+probe_catalog
+if [ "$(has_currency 6)" = no ]; then
+  echo "== register_currency ckETH mainnet(6) → ss2fx-dyaaa-aaaar-qacoq-cai =="
+  _register "(record {
+       currency = 6 : nat32;
+       ledger = principal \"ss2fx-dyaaa-aaaar-qacoq-cai\";
+       mintable = false;
+       minter = opt principal \"sv3dd-oaaaa-aaaar-qacoa-cai\";
+       symbol = opt \"Ξ\";
+       decimals = 18 : nat8;
+       minter_family = opt variant { CkEthErc20 };
+       wrapper_name = \"ckETH\";
+       backing_symbol = opt \"ETH\";
+       network = opt \"Ethereum\";
+       display_decimals = opt (6 : nat8);
+       fee = 2_000_000_000_000 : nat64;
+       cap = opt (${CAP} : nat64);
+       chain_id = opt (1 : nat32);
+       token_contract = null;
+       onramp = variant { Direct };
+       offramp = variant { Direct };
+       gas_ledger = null;
+     })" "$([ "$NETWORK" = local ] && echo expect_mismatch)"
+else
+  echo "== ckETH mainnet(6) already registered — skipping (idempotent) =="
+fi
+
 # --- connective tissue: hand the canister id to the relay's config -----------------------------
 # Only for the real network: a local rehearsal must not overwrite the mainnet id in deploy/.env.
 if [ "$NETWORK" != "local" ]; then
