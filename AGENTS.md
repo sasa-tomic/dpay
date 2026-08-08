@@ -36,6 +36,14 @@ The e2e harness and jest both run under Node/V8 (or a headless browser), NOT Her
 2. **Android-only rendering / platform APIs.** `StatusBar` translucency, `SafeAreaView` gaps, hardware-back behavior, intent/deep-link handling — browsers render none of these. Example: content rendering under the status bar (`translucent={true}` default).
 3. **Wire/bridge arity.** A JS↔Kotlin argument-count or type mismatch throws on the native-modules thread, bypassing the JS self-check's try/catch (hard process kill, not a caught error). Example: the wire-v2 launch crash.
 
+### Prod reconciliation (don't wait for the founder to find prod-only bugs)
+
+The e2e harness drives the REAL app but against a **3-currency FakeLedger test relay** — it is **structurally blind** to prod-only catalog entries (e.g. testnet ckBTC/ckUSDC/ckETH that render as duplicate "BTC"/"USDC" rows), prod-only latency (N+1 relay→IC round trips with 6 currencies), and prod-only UI rows (e.g. the SOL bolt-on with extra buttons not present for IC assets). Before declaring catalog/balance/Balances/UI work done, reconcile against **prod**:
+
+- **One curl** against the prod relay reconciles the catalog: `curl -s https://dpay.kalaj.org/api/v1/currencies | jq '.[]|{currency,network,backing_symbol,minter_family}'`. Compare against what the app renders — duplicates, missing rows, testnet leakage, and unexpected families are all visible here.
+- When the emulator is booted (`dpay_api36` in tmux), **drive the real app against the real relay** (NOT the e2e fake) for any UX change touching Balances, catalog rendering, or balance polling. Screenshot + zai-vision confirms what the user sees. The e2e fake catalog hides exactly these classes of bug.
+- This is context-cheap (one curl + one screenshot) and catches the bugs that sailed through `just verify`.
+
 **Before merging a change that touches any of the trigger paths below, run the device gates off the hot path.** The trigger paths are intentionally broad — when in doubt, run the gate.
 
 - `app/android/**` (incl. `MainApplication.kt` — `SoLoader.init(... OpenSourceMergedSoMapping)` + the `ReactNativeHost`/New-Arch setup; a regression here throws on the native-modules thread and only surfaces on device), `crates/dpay-ffi/**`, `app/lib/types.ts`, `app/services/**`, or the core wire consts (`WIRE_LEN`/`SIGNING_LEN`/`REQUEST_LEN` in `crates/dpay-core/src/lib.rs`) — the wire/bridge surface (blind spot 3).
