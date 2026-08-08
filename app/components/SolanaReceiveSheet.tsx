@@ -14,14 +14,12 @@ import {SheetOverlay} from './SheetOverlay';
  * address is local + instant, so this sheet shows the address QR + copy immediately, with a plain-
  * language note that a send credits on confirmation (the balance poll reflects it automatically).
  *
- * Offline-receive re-home (2026-08-08): the durable-nonce offline-merchant flow (SolReceiveMode —
- * build a `solreq:` code + scan/broadcast the payer's signed `solpay:`) lives here as a SECONDARY
- * action, NOT on the Balances row. A "Request offline payment" link (testID `btn-sol-req-offline`)
- * opens SolReceiveMode — the heavier request→scan-payer→broadcast flow that's contextually a sibling
- * of showing your address (both are "receive SOL"). Keeps the Balances SOL row uncluttered, with no
- * functionality lost and no dead code.
+ * The durable-nonce offline-merchant flow (SolReceiveMode — build a `solreq:` code + scan/broadcast
+ * the payer's signed `solpay:`) now lives INLINE in the main Receive tab (selected via the SOL rail
+ * of the RailSelector), NOT here. This sheet is purely the deposit-address surface (money IN from an
+ * external Solana account). No functionality lost and no dead code.
  */
-export function SolanaReceiveSheet({address, onSolReqOffline, onClose}: {address: string; onSolReqOffline?: () => void; onClose: () => void}) {
+export function SolanaReceiveSheet({address, onClose}: {address: string; onClose: () => void}) {
   const [copied, setCopied] = useState<'clipboard' | 'shared' | null>(null);
   useEscapeToClose(onClose);
 
@@ -71,22 +69,6 @@ export function SolanaReceiveSheet({address, onSolReqOffline, onClose}: {address
           </Pressable>
 
           <Text style={S.dim2}>Your balance updates automatically once the send confirms.</Text>
-
-          {/* Offline-receive re-home: SolReceiveMode (offline merchant request + scan/broadcast) is
-              reached as a sibling secondary action, not from the Balances row. Sits below the address
-              copy so it reads as an alternative receive path, not a competing primary. */}
-          {onSolReqOffline ? (
-            <Pressable
-              testID="btn-sol-req-offline"
-              style={S.linkBtn}
-              onPress={onSolReqOffline}
-              accessibilityRole="button"
-              accessibilityLabel="Request offline payment"
-              accessibilityHint="Build a payment code and scan the payer's signed offline payment"
-              accessibilityState={{disabled: false}}>
-              <Text style={S.linkText}>Request offline payment</Text>
-            </Pressable>
-          ) : null}
 
           {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
         </ScrollView>

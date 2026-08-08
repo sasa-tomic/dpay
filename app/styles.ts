@@ -58,6 +58,17 @@ export const S = StyleSheet.create({
   tabActive: {backgroundColor: C.brand},
   tabText: {color: C.sub, fontWeight: '600'},
   tabTextActive: {color: C.brandInk},
+  // Rail selector — a segmented [ IC | SOL ] pill toggle at the top of the Pay/Receive tab bodies.
+  // Reuses the `tab` visual language (rounded pills, brand fill on the active side) but as a joined
+  // segmented control: one rounded field holding two equal-width pills, the active one filled brand.
+  // Sits inline at the top of the mode body (NOT in the ledger branch). `railRow` is the joined
+  // container with inner padding so the pills read as one control; `railPill` is each half-width
+  // segment; `railPillActive` flips the fill; the text styles mirror tabText/tabTextActive.
+  railRow: {flexDirection: 'row', gap: 4, marginTop: 2, marginBottom: 12, backgroundColor: C.field, borderRadius: 999, padding: 4, alignSelf: 'stretch'},
+  railPill: {flex: 1, paddingVertical: 9, paddingHorizontal: 16, borderRadius: 999, alignItems: 'center', justifyContent: 'center', minHeight: 40},
+  railPillActive: {backgroundColor: C.brand},
+  railPillText: {color: C.sub, fontWeight: '700', fontSize: 14},
+  railPillTextActive: {color: C.brandInk},
   // Body — `justifyContent: 'flex-start'` (was 'center') so mode content flows from the top and the
   // asset rail follows naturally; the old vertical centering floated sparse content mid-screen and
   // left awkward gaps above the assets. Horizontal padding tightened 22→16 for more usable width.

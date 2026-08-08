@@ -33,6 +33,7 @@ import {SolReceiveMode} from './SolReceiveMode';
 import {SettingsSheet} from './SettingsSheet';
 import {CkErc20DepositSheet} from './CkErc20DepositSheet';
 import {BalancesSheet} from './BalancesSheet';
+import {RailSelector} from './RailSelector';
 
 export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity; relayUrl: string; setRelayUrl: (s: string) => void; onReset: () => void}) {
   const [mode, setMode] = useState<'pay' | 'receive' | 'ledger'>('pay');
@@ -111,8 +112,14 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
   const {balance: solBalance, refresh: refreshSol} = useSolanaBalance(solAddress);
   const [solReceiveOpen, setSolReceiveOpen] = useState(false);
   const [solSendOpen, setSolSendOpen] = useState(false);
-  const [solPayOpen, setSolPayOpen] = useState(false);
-  const [solReqOpen, setSolReqOpen] = useState(false);
+  // The settlement rail selected in the Pay/Receive tabs: 'ic' (default, unchanged) or 'sol'. SOL is
+  // a first-class asset now — selecting it renders SolPayMode/SolReceiveMode INLINE in the tab body
+  // instead of PayMode/ReceiveMode. IC and SOL use SEPARATE NFC HCE services (DpayNfc AID `…01` vs
+  // DpaySolNfc AID `…02`) that must be armed BEFORE a tap, so the user MUST pre-select the rail —
+  // auto-detection is impossible (the AID is committed before the reader's first APDU). The rail
+  // defaults to 'ic' and resets naturally on unmount; switching unmounts the mode component, whose
+  // useNfcTapState cleanup disarms the HCE card/reader (no arm-leak).
+  const [rail, setRail] = useState<'ic' | 'sol'>('ic');
 
   // Read the device NFC radio state once (re-checked when the app returns to the foreground, since
   // the user may toggle NFC in system settings). Purely informational for the status chip; failure
@@ -284,7 +291,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
   // P=Pay, R=Receive, T=Receive (demo money), A=Balances (the asset hub), L=Ledger (transactions). Active ONLY on the wallet
   // main view with no text input focused and no sheet/overlay open (Esc is handled per-sheet by
   // useEscapeToClose). Native (no physical keyboard) is a no-op; the on-UI hints are web-only too.
-  const anySheetOpen = balancesOpen || depositCurrency != null || withdrawCurrency != null || settingsOpen || solReceiveOpen || solSendOpen || solPayOpen || solReqOpen;
+  const anySheetOpen = balancesOpen || depositCurrency != null || withdrawCurrency != null || settingsOpen || solReceiveOpen || solSendOpen;
   useHotkeys({
     p: () => setMode('pay'),
     r: () => setMode('receive'),
@@ -357,9 +364,23 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
 
       <ScrollView style={S.scroll} contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
         {mode === 'pay'
-          ? <PayMode identity={identity} online={online} relayUrl={relayUrl} nfcStatus={nfc} onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance} catalog={catalog} assetBalances={displayAssetBalances} prefillRequest={prefillRequest} onPrefillConsumed={() => setPrefillRequest(null)} />
+          ? (
+            <>
+              <RailSelector current={rail} onSelect={setRail} solAvailable={!!solAddress} />
+              {rail === 'sol' && solAddress
+                ? <SolPayMode identity={identity} online={online} nfcReady={nfc === 'ready'} />
+                : <PayMode identity={identity} online={online} relayUrl={relayUrl} nfcStatus={nfc} onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance} catalog={catalog} assetBalances={displayAssetBalances} prefillRequest={prefillRequest} onPrefillConsumed={() => setPrefillRequest(null)} />}
+            </>
+          )
           : mode === 'receive'
-          ? <ReceiveMode identity={identity} relayUrl={relayUrl} online={online} nfcReady={nfc === 'ready'} onReceived={onActivity} catalog={catalog} prefillReceipt={prefillReceipt} onReceiptConsumed={() => setPrefillReceipt(null)} />
+          ? (
+            <>
+              <RailSelector current={rail} onSelect={setRail} solAvailable={!!solAddress} />
+              {rail === 'sol' && solAddress
+                ? <SolReceiveMode identity={identity} online={online} nfcReady={nfc === 'ready'} />
+                : <ReceiveMode identity={identity} relayUrl={relayUrl} online={online} nfcReady={nfc === 'ready'} onReceived={onActivity} catalog={catalog} prefillReceipt={prefillReceipt} onReceiptConsumed={() => setPrefillReceipt(null)} />}
+            </>
+          )
           : <Ledger history={history} catalog={catalog} />}
       </ScrollView>
 
@@ -425,8 +446,6 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
       {solReceiveOpen && solAddress ? (
         <SolanaReceiveSheet
           address={solAddress}
-          // Re-home: SolReceiveMode (offline merchant request) opens from the SOL receive sheet.
-          onSolReqOffline={() => { setSolReqOpen(true); setSolReceiveOpen(false); }}
           onClose={() => setSolReceiveOpen(false)}
         />
       ) : null}
@@ -435,16 +454,8 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
           identity={identity}
           balance={solBalance ?? '0'}
           onSent={refreshSol}
-          // Re-home: SolPayMode (offline payer sign) opens from the SOL send sheet.
-          onSolPayOffline={() => { setSolPayOpen(true); setSolSendOpen(false); }}
           onClose={() => setSolSendOpen(false)}
         />
-      ) : null}
-      {solPayOpen && solAddress ? (
-        <SolPayMode identity={identity} online={online} nfcReady={nfc === 'ready'} onClose={() => setSolPayOpen(false)} />
-      ) : null}
-      {solReqOpen && solAddress ? (
-        <SolReceiveMode identity={identity} online={online} nfcReady={nfc === 'ready'} onClose={() => setSolReqOpen(false)} />
       ) : null}
       {settingsOpen ? (
         <SettingsSheet

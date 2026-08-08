@@ -28,13 +28,11 @@ function friendlySolError(msg: string): string {
  * confirmed send returns the transaction signature (shown + copyable); the balance poll refreshes
  * automatically.
  *
- * Offline-pay re-home (2026-08-08): the durable-nonce offline-pay flow (SolPayMode) lives here as a
- * SECONDARY action, NOT on the Balances row. A "Pay offline instead" link (testID `btn-sol-pay-
- * offline`) opens SolPayMode — the heavier scan→offline-sign→QR hand-off that's contextually a sibling
- * of an online send (both are "pay someone"). Keeps the Balances SOL row at Receive+Send parity with
- * every other asset, with no functionality lost and no dead code.
+ * The durable-nonce offline-pay flow (SolPayMode) now lives INLINE in the main Pay tab (selected via
+ * the SOL rail of the RailSelector), NOT here. This sheet is purely the online send surface (money
+ * OUT to a Solana address). No functionality lost and no dead code.
  */
-export function SolanaWithdrawSheet({identity, balance, onSent, onSolPayOffline, onClose}: {identity: Identity; balance: string; onSent: () => void; onSolPayOffline?: () => void; onClose: () => void}) {
+export function SolanaWithdrawSheet({identity, balance, onSent, onClose}: {identity: Identity; balance: string; onSent: () => void; onClose: () => void}) {
   const [address, setAddress] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
@@ -162,22 +160,6 @@ export function SolanaWithdrawSheet({identity, balance, onSent, onSolPayOffline,
                 accessibilityState={{disabled: !canReview}}>
                 <Text style={S.primaryText}>{raw !== '0' ? `Send ${fmtAsset(raw, SOL_DECIMALS, SOL_UNIT)}` : 'Enter an amount'}</Text>
               </Pressable>
-
-              {/* Offline-pay re-home: SolPayMode (durable-nonce offline sign) is reached as a sibling
-                  secondary action, not from the Balances row. Sits below the online send so it reads
-                  as an alternative, not a competing primary. */}
-              {onSolPayOffline ? (
-                <Pressable
-                  testID="btn-sol-pay-offline"
-                  style={S.linkBtn}
-                  onPress={onSolPayOffline}
-                  accessibilityRole="button"
-                  accessibilityLabel="Pay offline instead"
-                  accessibilityHint="Sign a payment offline for a merchant to settle (no connection needed)"
-                  accessibilityState={{disabled: false}}>
-                  <Text style={S.linkText}>Pay offline instead</Text>
-                </Pressable>
-              ) : null}
 
               {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
             </>
