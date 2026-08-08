@@ -10,6 +10,7 @@ import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {USDC_DECIMALS} from '../solana/spl';
 import {decodeSolReq, type SolReq} from '../solana/qr';
 import {createNonceAccount, resyncNonce, signOfflineSolPayment, signOfflineSplPayment} from '../solana';
+import {friendlySolError} from '../solana/errors';
 import {loadSolNonce, saveSolNonce, type SolNonceState} from '../services/solNoncePersist';
 import {DpaySolNfc} from '../services/native';
 import {QrScanner} from './QrScanner';
@@ -72,7 +73,7 @@ export function SolPayMode({identity, online, nfcReady}: {identity: Identity; on
       setNonceState(ns);
       setPhase('scan');
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(friendlySolError(e instanceof Error ? e.message : String(e)));
     } finally {
       cancel();
       setBusy(false);
@@ -124,7 +125,7 @@ export function SolPayMode({identity, online, nfcReady}: {identity: Identity; on
       setNonceState(updated);
       await saveSolNonce(identity.publicHex, updated);
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(friendlySolError(e instanceof Error ? e.message : String(e)));
     } finally {
       cancel();
       setBusy(false);

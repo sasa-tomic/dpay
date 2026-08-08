@@ -8,18 +8,11 @@ import {cmpRaw} from '../lib/amount';
 import type {Identity} from '../lib/types';
 import {SOL_DECIMALS, SOL_UNIT, isValidSolanaAddress} from '../solana/identity';
 import {sendSol} from '../solana';
+import {friendlySolError} from '../solana/errors';
 import {copyToClipboard} from '../lib/clipboard';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {SheetOverlay} from './SheetOverlay';
 import {withTimeout} from '../lib/timeout';
-
-function friendlySolError(msg: string): string {
-  if (/abort/i.test(msg)) return 'Timed out. Check your connection and try again.';
-  if (/insufficient/i.test(msg)) return 'Not enough SOL for this send plus the network fee.';
-  if (/rent.exempt/i.test(msg)) return 'After this send, your account would fall below the minimum balance. Send a smaller amount.';
-  if (/blockhash/i.test(msg)) return 'The network was too busy. Try again.';
-  return msg;
-}
 
 /**
  * Send SOL to a native Solana address. Mirrors WithdrawSheet's form/submitting/done/error phases, but

@@ -251,6 +251,22 @@ describe('solana seam — configured lifecycle (stub RPC)', () => {
     expect(receipt.status).toBe(RECEIPT_REJECTED);
   });
 
+  test('broadcastSolPayment classifies an unfunded-account "no record of a prior credit" as rejected (not unreachable)', async () => {
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      sendTransaction: () => {
+        throw new Error('solana rpc: Transaction simulation failed: Attempt to debit on account but found no record of a prior credit');
+      },
+    };
+    const receipt = await withStubUrl(async () => {
+      const {broadcastSolPayment} = require('../solana');
+      return broadcastSolPayment({
+        v: 1, to: MERCHANT_ADDRESS, amt: '2000000', cur: 'SOL',
+        npub: NONCE_ACCOUNT_ADDRESS, tx: new Uint8Array(129),
+      }) as Promise<{status: number}>;
+    });
+    expect(receipt.status).toBe(RECEIPT_REJECTED);
+  });
+
   test('broadcastSolPayment classifies a network error as unreachable', async () => {
     (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
       sendTransaction: () => {

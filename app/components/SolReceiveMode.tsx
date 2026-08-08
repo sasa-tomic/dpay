@@ -11,6 +11,7 @@ import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {USDC_DECIMALS, USDC_MINT_ADDRESS, deriveAta} from '../solana/spl';
 import {encodeSolReq, decodeSolPay, type SolReq} from '../solana/qr';
 import {deriveSolanaAddress, broadcastSolPayment} from '../solana';
+import {friendlySolError} from '../solana/errors';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from '../payments';
 import {DpaySolNfc} from '../services/native';
 import {copyToClipboard} from '../lib/clipboard';
@@ -93,7 +94,7 @@ export function SolReceiveMode({identity, online, nfcReady}: {identity: Identity
         setErr("Couldn't confirm — the payment may still settle. Check your balance shortly.");
       }
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(friendlySolError(e instanceof Error ? e.message : String(e)));
     } finally {
       cancel();
       setBusy(false);

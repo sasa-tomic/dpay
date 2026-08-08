@@ -205,7 +205,7 @@ export async function broadcastSolPayment(
   } catch (e) {
     console.warn('broadcastSolPayment error:', e);
     const msg = String((e as Error)?.message ?? e);
-    if (/Instruction|insufficient|custom|already|blockhash|nonce/i.test(msg)) {
+    if (/Instruction|insufficient|no record of a prior credit|simulation failed|debit|custom|already|blockhash|nonce/i.test(msg)) {
       return {status: RECEIPT_REJECTED, npub, nextNonce: null, sig: null};
     }
     return {status: RECEIPT_UNREACHABLE, npub, nextNonce: null, sig: null};
