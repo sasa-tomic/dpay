@@ -239,13 +239,48 @@ export function isPayableAsset(catalog: CurrencyDescriptor[], currency: number):
 // ckBTC keeps 'ckbtc' to honour the existing e2e testID contract; other assets use their wrapper
 // name (MC1 unit 5 authoritative) or symbol. MC1 unit 6: an unknown family with no name returns the
 // honest 'asset' key (never 'btc').
+//
+// TESTNET disambiguation: a testnet currency shares its backing_symbol/wrapper_name with a mainnet
+// sibling (ckTESTBTC + ckBTC both render "BTC"; a Sepolia ckUSDC + mainnet ckUSDC both "USDC"). To
+// keep the testID UNIQUE (the e2e net matches testID literally — a collision makes two rows
+// indistinguishable + breaks `asset-add-<key>`), a testnet currency's key gets a `-testnet` suffix.
+// Mainnet keys are UNCHANGED (the e2e testID contract for currencies 0/1/2 + the SOL bolt-on is
+// preserved byte-for-byte).
 export function assetTestKey(a: CurrencyDescriptor): string {
-  if (a.minter_family === 'CkBtcUtxo') return 'ckbtc';
-  const name = a.wrapper_name;
-  if (name && name.length > 0) return name.toLowerCase();
-  const sym = a.symbol;
-  if (sym && sym.length > 0) return sym.toLowerCase();
-  return 'asset';
+  let key: string;
+  if (a.minter_family === 'CkBtcUtxo') key = 'ckbtc';
+  else {
+    const name = a.wrapper_name;
+    if (name && name.length > 0) key = name.toLowerCase();
+    else {
+      const sym = a.symbol;
+      if (sym && sym.length > 0) key = sym.toLowerCase();
+      else key = 'asset';
+    }
+  }
+  return isTestnetCurrency(a) ? `${key}-testnet` : key;
+}
+
+// --- testnet detection + labelling (single source of truth) ----------------------------------
+// The production relay serves mainnet AND testnet chain-key currencies side-by-side: mainnet ckBTC
+// (network "Bitcoin") next to ckTESTBTC (network "Bitcoin Testnet"), mainnet ckUSDC (network
+// "Ethereum") next to ckSepoliaUSDC (network "Sepolia"). A currency is TESTNET iff it carries a
+// `network` that is NOT a known mainnet network. SOL is NOT in the catalog (a device-key rail), so
+// it is unaffected. DEMO (currency 0, network null) is NOT testnet (null network ⇒ not testnet).
+const MAINNET_NETWORKS = new Set(['Bitcoin', 'Ethereum']);
+export function isTestnetCurrency(a: CurrencyDescriptor): boolean {
+  return a.network != null && !MAINNET_NETWORKS.has(a.network);
+}
+// The display NAME for a testnet currency: "<backing_symbol> testnet" → "BTC testnet" / "USDC
+// testnet" / "ETH testnet". This is the founder-chosen label (not "ckTESTBTC" / "ckBTC" — those are
+// indistinguishable duplicates of the mainnet row). Falls back to the wrapper name then "Testnet"
+// when backing_symbol is absent, so a malformed descriptor still reads honestly.
+export function testnetDisplayName(a: CurrencyDescriptor): string {
+  const backing = a.backing_symbol;
+  if (backing && backing.length > 0) return `${backing} testnet`;
+  const wrap = a.wrapper_name;
+  if (wrap && wrap.length > 0) return `${wrap} testnet`;
+  return 'Testnet';
 }
 // Validate a native-chain destination address against its minter family's format. Catches the most
 // common user error — pasting a wrong-chain address (e.g. an ETH 0x… into the BTC cash-out) — before

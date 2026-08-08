@@ -1,7 +1,7 @@
 import {View, Text, Pressable, ScrollView, SafeAreaView, StatusBar, ActivityIndicator, Platform} from 'react-native';
 import {C} from '../config/palette';
 import {S} from '../styles';
-import {type CurrencyDescriptor, familyDisplay, assetTestKey, displayName, fmtCurrencyAmount} from '../config/catalog';
+import {type CurrencyDescriptor, familyDisplay, assetTestKey, displayName, fmtCurrencyAmount, isTestnetCurrency, testnetDisplayName} from '../config/catalog';
 import {cmpRaw} from '../lib/amount';
 import {fmtAsset} from '../lib/format';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
@@ -15,7 +15,17 @@ import {SheetOverlay} from './SheetOverlay';
 // BTC cash-out for a funded CkBtcUtxo balance). Tapping a row's name/balance selects that currency
 // as the wallet's "current" currency (the header then reflects it); the action buttons top up
 // WITHOUT changing the current currency. Rows stay independent — no cross-asset merge.
-export function BalancesSheet({catalog, assetBalances, primaryBalance, online, currentCurrency, onSelect, onTopUp, topUpBusy, topUpErr, onAdd, onWithdraw, solAddress, solBalance, onSolReceive, onSolSend, onSolPayOffline, onSolReqOffline, onClose}: {
+//
+// TESTNET currencies (network "Bitcoin Testnet"/"Sepolia") are HIDDEN by default and labelled
+// "<symbol> testnet" (not the indistinguishable mainnet duplicate). `showTestnet` reveals them; the
+// toggle only renders when there's something to reveal (or they're already shown) so a catalog with
+// no testnet currencies (the e2e FakeLedger, a mainnet-only deploy) shows no no-op toggle.
+//
+// The SOL row mirrors every other asset: Receive + Send only. The two heavier offline-pay flows
+// (SolPayMode / SolReceiveMode) live as secondary actions INSIDE the SOL send/receive sheets, not
+// here — keeping the row uncluttered and the offline flows reachable where they're contextually
+// expected (no functionality lost, no dead code).
+export function BalancesSheet({catalog, assetBalances, primaryBalance, online, currentCurrency, onSelect, onTopUp, topUpBusy, topUpErr, onAdd, onWithdraw, showTestnet, onToggleTestnet, solAddress, solBalance, onSolReceive, onSolSend, onClose}: {
   catalog: CurrencyDescriptor[];
   assetBalances: Record<number, string>;
   primaryBalance: string | null;
@@ -27,18 +37,28 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
   topUpErr: string | null;
   onAdd: (currency: number) => void;
   onWithdraw: (currency: number) => void;
+  showTestnet: boolean;
+  onToggleTestnet: () => void;
   // Native SOL rail — a SEPARATE concern from the catalog loop (a device-derived key, not a relay-
   // mediated ICRC asset). `solAddress` is null only before the key is derived; `solBalance` is null
-  // when offline / not yet polled (the card renders `—`). Both buttons are null when no address.
+  // when offline / not yet polled (the card renders `—`). Receive is always shown when the card
+  // renders; Send is gated on a positive balance. Both are null when no address.
   solAddress?: string | null;
   solBalance?: string | null;
   onSolReceive?: () => void;
   onSolSend?: () => void;
-  onSolPayOffline?: () => void;
-  onSolReqOffline?: () => void;
   onClose: () => void;
 }) {
   useEscapeToClose(onClose);
+  // Hide testnet currencies unless the user has opted in. Filtered ONCE so the key/name/subtitle
+  // logic below operates on the visible set. A hidden testnet asset still exists in the catalog
+  // (polling/balances unaffected) — it just isn't rendered.
+  const visibleCatalog = showTestnet ? catalog : catalog.filter(a => !isTestnetCurrency(a));
+  // The toggle renders only when there's at least one testnet currency to reveal OR testnet rows
+  // are currently shown (so the user can hide them again). A catalog with no testnet currencies
+  // shows no toggle (no no-op affordance).
+  const hasTestnet = catalog.some(isTestnetCurrency);
+  const showToggle = hasTestnet || showTestnet;
   return (
     <SheetOverlay>
       <SafeAreaView style={S.sheet}>
@@ -57,10 +77,13 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
         </View>
         <ScrollView contentContainerStyle={S.sheetCenter} keyboardShouldPersistTaps="handled">
           <Text style={S.dim2}>Tap a currency to show it on your home screen. Receive or send any of them below.</Text>
-          {catalog.map(a => {
+          {visibleCatalog.map(a => {
             const isPrimary = a.currency === 0;
+            const testnet = !isPrimary && isTestnetCurrency(a);
             const key = isPrimary ? 'demo' : assetTestKey(a);
-            const name = displayName(a);
+            // A testnet currency shows its testnet display name ("BTC testnet") instead of the bare
+            // backing_symbol ("BTC") so it never reads as a duplicate of its mainnet sibling.
+            const name = isPrimary ? 'DEMO' : (testnet ? testnetDisplayName(a) : displayName(a));
             const assetBal = assetBalances[a.currency] ?? '0';
             // MC1 units 2-4: balance presence via `cmpRaw` (BigInt) — never `> 0` on a string.
             const funded = !isPrimary && cmpRaw(assetBal, '0') > 0;
@@ -95,17 +118,21 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
             // Subtitle is user-benefit, not network topology — drop the "Send X on Y" tautology (BTC
             // on Bitcoin, USDC on Ethereum) that names a network meaningless to a non-technical user.
             // BTC family -> "Bitcoin"; Ethereum USD stablecoins (USDC/USDT) -> "US dollar stablecoin";
-            // any other onrampable asset -> its native asset name alone. DEMO (isPrimary) keeps its
-            // exact "play money for testing" copy (unchanged — the audit praised it).
+            // any other onrampable asset -> its native asset name alone. A TESTNET currency shows its
+            // actual `network` ("Bitcoin Testnet" / "Sepolia") so the testnet status is unmistakable.
+            // DEMO (isPrimary) keeps its exact "play money for testing" copy (unchanged — the audit
+            // praised it).
             const sub = isPrimary
               ? 'play money for testing'
-              : onrampable && disp
-                ? (a.minter_family === 'CkBtcUtxo'
-                    ? 'Bitcoin'
-                    : a.minter_family === 'CkEthErc20' && (a.backing_symbol === 'USDC' || a.backing_symbol === 'USDT')
-                      ? 'US dollar stablecoin'
-                      : disp.nativeAsset)
-                : 'Unsupported asset';
+              : testnet
+                ? (a.network ?? 'testnet')
+                : onrampable && disp
+                  ? (a.minter_family === 'CkBtcUtxo'
+                      ? 'Bitcoin'
+                      : a.minter_family === 'CkEthErc20' && (a.backing_symbol === 'USDC' || a.backing_symbol === 'USDT')
+                        ? 'US dollar stablecoin'
+                        : disp.nativeAsset)
+                  : 'Unsupported asset';
             return (
               <View key={a.currency} testID={`asset-${key}`} style={S.assetCard}>
                 <View style={S.assetRow}>
@@ -181,7 +208,7 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
                     {solBalance == null ? '—' : fmtAsset(solBalance, SOL_DECIMALS, SOL_UNIT)}
                   </Text>
                 </View>
-                {onSolReceive || onSolSend || onSolPayOffline || onSolReqOffline ? (
+                {onSolReceive || onSolSend ? (
                   <View style={S.assetActions}>
                     {onSolReceive ? (
                       <Pressable
@@ -205,33 +232,23 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
                         <Text style={S.withdrawLinkText}>Send</Text>
                       </Pressable>
                     ) : null}
-                    {onSolPayOffline ? (
-                      <Pressable
-                        testID="btn-sol-pay-offline"
-                        style={S.withdrawLink}
-                        onPress={onSolPayOffline}
-                        accessibilityRole="button"
-                        accessibilityLabel="Pay SOL offline"
-                        accessibilityHint="Sign a payment offline for a merchant to settle">
-                        <Text style={S.withdrawLinkText}>Pay offline</Text>
-                      </Pressable>
-                    ) : null}
-                    {onSolReqOffline ? (
-                      <Pressable
-                        testID="btn-sol-req-offline"
-                        style={S.withdrawLink}
-                        onPress={onSolReqOffline}
-                        accessibilityRole="button"
-                        accessibilityLabel="Request SOL offline"
-                        accessibilityHint="Build a payment code and scan the payer's signed payment">
-                        <Text style={S.withdrawLinkText}>Request</Text>
-                      </Pressable>
-                    ) : null}
                   </View>
                 ) : null}
               </View>
               <Text style={S.assetSub}>Solana · self-custody</Text>
             </View>
+          ) : null}
+          {showToggle ? (
+            <Pressable
+              testID="btn-toggle-testnet"
+              style={S.testnetToggle}
+              onPress={onToggleTestnet}
+              accessibilityRole="button"
+              accessibilityLabel={showTestnet ? 'Hide testnet assets' : 'Show testnet assets'}
+              accessibilityHint={showTestnet ? 'Hide testnet currencies from this list' : 'Reveal testnet currencies in this list'}
+              accessibilityState={{disabled: false}}>
+              <Text style={S.testnetToggleText}>{showTestnet ? 'Hide testnet assets' : 'Show testnet assets'}</Text>
+            </Pressable>
           ) : null}
           {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
         </ScrollView>

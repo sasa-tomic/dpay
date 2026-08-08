@@ -33,6 +33,10 @@ export const STORAGE_KEY = 'dpay.identity.v1';
 // catalog) so changing networks in Settings survives an app restart. Default is `relayConfig`'s
 // value when no persisted choice exists (the harness passes ?relay=; prod codegens the real URL).
 export const RELAY_STORAGE_KEY = 'dpay.relay.v1';
+// Whether the user has unhid testnet currencies in the Balances sheet. Defaults to false (testnet
+// assets are hidden by default per the founder decision); persisted so the choice survives a
+// restart. Mirrors the identity/relay AsyncStorage pattern.
+export const SHOW_TESTNET_STORAGE_KEY = 'dpay.showTestnet';
 // Google Play requires the public privacy policy to be reachable from inside the app as well as the
 // store listing. This is the stable website URL, independent of the user-editable relay endpoint.
 export const PRIVACY_URL = 'https://dpay.kalaj.org/privacy';

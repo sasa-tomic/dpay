@@ -9,6 +9,8 @@ import {
   fmtCurrencyAmount,
   assetTestKey,
   isPayableAsset,
+  isTestnetCurrency,
+  testnetDisplayName,
   BUNDLED_CATALOG,
   type CurrencyDescriptor,
 } from '../config/catalog';
@@ -193,6 +195,95 @@ describe('assetTestKey — no BTC fallback for unknown families', () => {
   it('returns "asset" for an unknown family with no symbol (never "btc")', () => {
     const noSym: CurrencyDescriptor = {...CKSOL_DESC, symbol: null};
     expect(assetTestKey(noSym)).toBe('asset');
+  });
+});
+
+// --- testnet detection + labelling (single source of truth) -----------------------------------
+// The production relay serves mainnet AND testnet chain-key currencies side-by-side: mainnet ckBTC
+// (network "Bitcoin") next to ckTESTBTC (network "Bitcoin Testnet"), mainnet ckUSDC (network
+// "Ethereum") next to ckSepoliaUSDC (network "Sepolia"). `displayName` returns the backing_symbol
+// first, so WITHOUT testnet-aware labelling the two BTC rows render as indistinguishable "BTC"
+// duplicates. These pin the three load-bearing invariants:
+//   1. isTestnetCurrency: a currency is testnet iff it has a network NOT in {Bitcoin, Ethereum}.
+//      DEMO (network null) + SOL (not in catalog) are unaffected.
+//   2. testnetDisplayName: "<backing_symbol> testnet" → "BTC testnet" / "USDC testnet" / "ETH testnet".
+//   3. assetTestKey: a testnet currency's key gets a `-testnet` suffix so two rows sharing a backing
+//      symbol (ckBTC + ckTESTBTC) get DISTINCT testIDs (the e2e net matches testID literally). Mainnet
+//      keys are UNCHANGED (the e2e testID contract for currencies 0/1/2 is preserved).
+const CKTESTBTC_DESC: CurrencyDescriptor = mk({currency: 3, minter: 'mt', minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8, wrapper_name: 'ckTESTBTC', backing_symbol: 'BTC', network: 'Bitcoin Testnet', display_decimals: 8, onramp: 'Direct', offramp: 'Direct'});
+const CKSEPOLIA_USDC_DESC: CurrencyDescriptor = mk({currency: 4, minter: 'ms', minter_family: 'CkEthErc20', symbol: 'ckSepoliaUSDC', decimals: 6, wrapper_name: 'ckSepoliaUSDC', backing_symbol: 'USDC', network: 'Sepolia', display_decimals: 6, chain_id: 11155111, token_contract: '0x...', onramp: 'Direct', offramp: 'Direct'});
+const CKSEPOLIA_ETH_DESC: CurrencyDescriptor = mk({currency: 5, minter: 'me', minter_family: 'CkEthErc20', symbol: 'ckSepoliaETH', decimals: 18, wrapper_name: 'ckSepoliaETH', backing_symbol: 'ETH', network: 'Sepolia', display_decimals: 18, token_contract: null, onramp: 'Direct', offramp: 'Direct'});
+
+describe('isTestnetCurrency — a network NOT in {Bitcoin, Ethereum} is testnet', () => {
+  it('mainnet ckBTC (network "Bitcoin") is NOT testnet', () => {
+    expect(isTestnetCurrency(CKBTC_DESC)).toBe(false);
+  });
+  it('mainnet ckUSDC (network "Ethereum") is NOT testnet', () => {
+    expect(isTestnetCurrency(CKUSDC_DESC)).toBe(false);
+  });
+  it('DEMO (network null) is NOT testnet (null network ⇒ not testnet)', () => {
+    expect(isTestnetCurrency(DEMO_DESC)).toBe(false);
+  });
+  it('ckTESTBTC (network "Bitcoin Testnet") IS testnet', () => {
+    expect(isTestnetCurrency(CKTESTBTC_DESC)).toBe(true);
+  });
+  it('ckSepoliaUSDC (network "Sepolia") IS testnet', () => {
+    expect(isTestnetCurrency(CKSEPOLIA_USDC_DESC)).toBe(true);
+  });
+  it('ckSepoliaETH (network "Sepolia") IS testnet', () => {
+    expect(isTestnetCurrency(CKSEPOLIA_ETH_DESC)).toBe(true);
+  });
+});
+
+describe('testnetDisplayName — "<backing_symbol> testnet" (never the bare duplicate)', () => {
+  it('ckTESTBTC → "BTC testnet" (NOT "BTC" — the indistinguishable mainnet duplicate)', () => {
+    expect(testnetDisplayName(CKTESTBTC_DESC)).toBe('BTC testnet');
+    expect(testnetDisplayName(CKTESTBTC_DESC)).not.toBe('BTC');
+  });
+  it('ckSepoliaUSDC → "USDC testnet"', () => {
+    expect(testnetDisplayName(CKSEPOLIA_USDC_DESC)).toBe('USDC testnet');
+  });
+  it('ckSepoliaETH → "ETH testnet"', () => {
+    expect(testnetDisplayName(CKSEPOLIA_ETH_DESC)).toBe('ETH testnet');
+  });
+  it('falls back to the wrapper name when backing_symbol is absent', () => {
+    const noBacking: CurrencyDescriptor = {...CKTESTBTC_DESC, backing_symbol: null};
+    expect(testnetDisplayName(noBacking)).toBe('ckTESTBTC testnet');
+  });
+  it('falls back to "Testnet" when both backing_symbol + wrapper_name are absent', () => {
+    const bare: CurrencyDescriptor = mk({currency: 9, minter_family: 'CkBtcUtxo', network: 'Bitcoin Testnet'});
+    expect(testnetDisplayName(bare)).toBe('Testnet');
+  });
+});
+
+describe('assetTestKey — testnet currencies get a "-testnet" suffix (unique testIDs)', () => {
+  it('mainnet ckBTC keeps "ckbtc" (e2e testID contract UNCHANGED)', () => {
+    expect(assetTestKey(CKBTC_DESC)).toBe('ckbtc');
+  });
+  it('ckTESTBTC (CkBtcUtxo + testnet) → "ckbtc-testnet" — DISTINCT from mainnet ckBTC', () => {
+    // The collision this prevents: both ckBTC + ckTESTBTC are CkBtcUtxo → both would map to "ckbtc"
+    // → `asset-ckbtc` + `asset-add-ckbtc` would match TWO rows in the e2e net. The suffix keeps them
+    // distinct while leaving the mainnet key byte-for-byte unchanged.
+    expect(assetTestKey(CKTESTBTC_DESC)).toBe('ckbtc-testnet');
+    expect(assetTestKey(CKTESTBTC_DESC)).not.toBe('ckbtc');
+  });
+  it('ckSepoliaUSDC → "cksepoliausdc-testnet" — distinct from a mainnet ckUSDC', () => {
+    expect(assetTestKey(CKSEPOLIA_USDC_DESC)).toBe('cksepoliausdc-testnet');
+  });
+  it('ckSepoliaETH (CkEthErc20 native ETH + testnet) → "cksepoliaeth-testnet"', () => {
+    expect(assetTestKey(CKSEPOLIA_ETH_DESC)).toBe('cksepoliaeth-testnet');
+  });
+  it('a mainnet asset stays UNSUFFIXED (only the testnet sibling gets the -testnet suffix)', () => {
+    // Belt-and-suspenders: the mainnet key is the unsuffixed base; only the testnet sibling suffixes.
+    // A CkBtcUtxo-family mainnet currency always maps to the e2e-contracted "ckbtc" (the early
+    // return), so it is NEVER confused with "ckbtc-testnet".
+    const mainnetBtcClone: CurrencyDescriptor = mk({currency: 6, minter_family: 'CkBtcUtxo', wrapper_name: 'ckTESTBTC', backing_symbol: 'BTC', network: 'Bitcoin'});
+    expect(isTestnetCurrency(mainnetBtcClone)).toBe(false);
+    expect(assetTestKey(mainnetBtcClone)).toBe('ckbtc');
+    // A CkEthErc20 mainnet currency keeps its wrapper-name key unsuffixed too.
+    const mainnetErcClone: CurrencyDescriptor = mk({currency: 7, minter_family: 'CkEthErc20', wrapper_name: 'ckFoo', backing_symbol: 'FOO', network: 'Ethereum'});
+    expect(isTestnetCurrency(mainnetErcClone)).toBe(false);
+    expect(assetTestKey(mainnetErcClone)).toBe('ckfoo');
   });
 });
 

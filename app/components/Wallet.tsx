@@ -1,8 +1,9 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {SafeAreaView, StatusBar, View, Text, Pressable, ScrollView, AppState, Linking} from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {C} from '../config/palette';
 import {S} from '../styles';
-import {TOP_UP_CENTS, FAUCET_TIMEOUT_MS} from '../config/constants';
+import {TOP_UP_CENTS, FAUCET_TIMEOUT_MS, SHOW_TESTNET_STORAGE_KEY} from '../config/constants';
 import {familyDisplay, fmtCurrencyAmount} from '../config/catalog';
 import {usd, base} from '../lib/format';
 import {cmpRaw, applyOffline} from '../lib/amount';
@@ -54,6 +55,10 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
   const [topUpBusy, setTopUpBusy] = useState(false);
   const [topUpErr, setTopUpErr] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+  // Whether testnet currencies (network "Bitcoin Testnet"/"Sepolia") are revealed in the Balances
+  // sheet. Hidden by default (founder decision); persisted so the choice survives a restart. Mirrors
+  // the identity/relay AsyncStorage pattern (best-effort load; a read failure falls back to hidden).
+  const [showTestnet, setShowTestnet] = useState(false);
   // Currency catalog — the runtime source of truth for which assets exist + how to display/fund
   // them. Loaded from AsyncStorage cache then refreshed from GET /currencies on mount; the bundled
   // default covers a cold first load. The ckBTC currency id (and any future asset's) is RESOLVED
@@ -118,6 +123,28 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
     read();
     const sub = AppState.addEventListener('change', x => { if (x === 'active') read(); });
     return () => { alive = false; sub.remove(); };
+  }, []);
+
+  // Load the persisted testnet-visibility preference on mount (default false). Best-effort: a read
+  // failure leaves it hidden (never blocks the UI).
+  useEffect(() => {
+    let alive = true;
+    AsyncStorage.getItem(SHOW_TESTNET_STORAGE_KEY)
+      .then((v) => { if (alive && v === 'true') setShowTestnet(true); })
+      .catch((e: unknown) => { console.log(`[dpay] failed to load showTestnet: ${e instanceof Error ? e.message : String(e)}`); });
+    return () => { alive = false; };
+  }, []);
+
+  // Toggle + persist the testnet-visibility preference. The Balances sheet renders the toggle only
+  // when there's something to reveal, so this fires solely from a meaningful affordance.
+  const toggleTestnet = useCallback(() => {
+    setShowTestnet((prev) => {
+      const next = !prev;
+      AsyncStorage.setItem(SHOW_TESTNET_STORAGE_KEY, next ? 'true' : 'false').catch((e: unknown) => {
+        console.log(`[dpay] failed to persist showTestnet: ${e instanceof Error ? e.message : String(e)}`);
+      });
+      return next;
+    });
   }, []);
 
   // Deeplink routing (item 6): a `dpay:req/<blob>` arriving at launch pre-fills the Pay review screen.
@@ -344,8 +371,8 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
           solBalance={solBalance}
           onSolReceive={() => { setSolReceiveOpen(true); setBalancesOpen(false); }}
           onSolSend={() => { setSolSendOpen(true); setBalancesOpen(false); }}
-          onSolPayOffline={() => { setSolPayOpen(true); setBalancesOpen(false); }}
-          onSolReqOffline={() => { setSolReqOpen(true); setBalancesOpen(false); }}
+          showTestnet={showTestnet}
+          onToggleTestnet={toggleTestnet}
           onClose={() => setBalancesOpen(false)}
         />
       ) : null}
@@ -387,13 +414,20 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
         );
       })(      ) : null}
       {solReceiveOpen && solAddress ? (
-        <SolanaReceiveSheet address={solAddress} onClose={() => setSolReceiveOpen(false)} />
+        <SolanaReceiveSheet
+          address={solAddress}
+          // Re-home: SolReceiveMode (offline merchant request) opens from the SOL receive sheet.
+          onSolReqOffline={() => { setSolReqOpen(true); setSolReceiveOpen(false); }}
+          onClose={() => setSolReceiveOpen(false)}
+        />
       ) : null}
       {solSendOpen && solAddress ? (
         <SolanaWithdrawSheet
           identity={identity}
           balance={solBalance ?? '0'}
           onSent={refreshSol}
+          // Re-home: SolPayMode (offline payer sign) opens from the SOL send sheet.
+          onSolPayOffline={() => { setSolPayOpen(true); setSolSendOpen(false); }}
           onClose={() => setSolSendOpen(false)}
         />
       ) : null}

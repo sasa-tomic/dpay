@@ -266,6 +266,11 @@ export const S = StyleSheet.create({
   // "Add money" flow (money OUT, not IN). Sits below the balance line.
   withdrawLink: {paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: C.brand, minHeight: 44, justifyContent: 'center', alignItems: 'center'},
   withdrawLinkText: {color: C.brand, fontWeight: '700', fontSize: 13},
+  // Testnet show/hide toggle at the bottom of the Balances sheet — a subtle secondary affordance
+  // (never the primary action). Muted text so it doesn't compete with the asset rows; full-width
+  // 44pt touch target.
+  testnetToggle: {marginTop: 18, minHeight: 44, justifyContent: 'center', alignItems: 'center', paddingVertical: 8},
+  testnetToggleText: {color: C.sub, fontWeight: '600', fontSize: 14},
   // Withdraw sheet form fields.
   inputLabel: {fontSize: 13, fontWeight: '700', color: C.sub, alignSelf: 'flex-start', marginTop: 18, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8},
   withdrawAddrInput: {alignSelf: 'stretch', backgroundColor: C.field, borderRadius: 12, height: 56, paddingHorizontal: 16, fontSize: 15, color: C.ink, fontFamily: 'monospace', borderWidth: 1, borderColor: C.line2},
