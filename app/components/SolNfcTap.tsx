@@ -1,12 +1,12 @@
 import {useCallback, useRef, useState} from 'react';
-import {SOL_SEND_TIMEOUT_MS} from '../config/constants';
+import {SOL_BROADCAST_TIMEOUT_MS} from '../config/constants';
 import {fmtAsset} from '../lib/format';
 import type {SolNfcEvent, Identity} from '../lib/types';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {USDC_DECIMALS} from '../solana/spl';
 import {decodeSolReq, decodeSolPay} from '../solana/qr';
 import {signOfflineSolPayment, signOfflineSplPayment, broadcastSolPayment} from '../solana';
-import {decideSolPayerReceipt} from '../solana/payments';
+import {decideSolPayerReceipt, isSolReqExpired, solpayMatchesReq} from '../solana/payments';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from '../payments';
 import type {SolNonceState} from '../services/solNoncePersist';
 import {DpaySolNfc} from '../services/native';
@@ -50,11 +50,16 @@ export function SolNfcTap({role, identity, solreqUri, nonceState, onPaid, onStal
   const autoSign = useCallback(async (solreqUri: string, ctx: TapCtx) => {
     try {
       if (!nonceState || nonceState.status !== 'ready') {
-        try { await DpaySolNfc.declineSolCard(); } catch {}
+        try { await DpaySolNfc.declineSolCard(); } catch (e: unknown) { console.warn('DpaySolNfc.declineSolCard failed (nonce not ready)', e); }
         ctx.finalize('declined', 'Set up offline pay first');
         return;
       }
       const req = decodeSolReq(solreqUri);
+      if (isSolReqExpired(req)) {
+        try { await DpaySolNfc.declineSolCard(); } catch (e: unknown) { console.warn('DpaySolNfc.declineSolCard failed (expired req)', e); }
+        ctx.finalize('declined', 'This payment request has expired');
+        return;
+      }
       const {decimals, unit} = solUnit(req.cur);
       setAmtText(fmtAsset(req.amt, decimals, unit));
       npubRef.current = nonceState.address;
@@ -68,31 +73,41 @@ export function SolNfcTap({role, identity, solreqUri, nonceState, onPaid, onStal
   // Merchant side: decode the payer's solpay:, broadcast online, confirm — then hand the outcome +
   // the advanced nonce back to the payer over the same tap.
   const submitPayment = useCallback(async (solpayUri: string, ctx: TapCtx) => {
-    const {signal, cancel} = withTimeout(SOL_SEND_TIMEOUT_MS * 2);
+    const {signal, cancel} = withTimeout(SOL_BROADCAST_TIMEOUT_MS);
     try {
       const solpay = decodeSolPay(solpayUri);
+      // Bind the payer's solpay to THIS merchant's open solreq (to/cur/amt) before broadcasting — a
+      // mismatched or cheating solpay is rejected, never broadcast. Mirrors SolReceiveMode.onSignedQr.
+      if (solreqUri) {
+        const req = decodeSolReq(solreqUri);
+        if (!solpayMatchesReq(solpay, req)) {
+          try { await DpaySolNfc.confirmSolReceipt(RECEIPT_REJECTED, '', '', solpay.npub); } catch (e: unknown) { console.warn('DpaySolNfc.confirmSolReceipt failed (mismatch)', e); }
+          ctx.finalize('declined', 'Payment doesn’t match this request');
+          return;
+        }
+      }
       const {decimals, unit} = solUnit(solpay.cur);
       setAmtText(fmtAsset(solpay.amt, decimals, unit));
       const receipt = await broadcastSolPayment(solpay, signal);
       if (receipt.status === RECEIPT_SETTLED) {
-        try { await DpaySolNfc.confirmSolReceipt(RECEIPT_SETTLED, receipt.nextNonce ?? '', receipt.sig ?? '', solpay.npub); } catch {}
+        try { await DpaySolNfc.confirmSolReceipt(RECEIPT_SETTLED, receipt.nextNonce ?? '', receipt.sig ?? '', solpay.npub); } catch (e: unknown) { console.warn('DpaySolNfc.confirmSolReceipt failed (settled)', e); }
         ctx.finalize('success');
       } else if (receipt.status === RECEIPT_REJECTED) {
-        try { await DpaySolNfc.confirmSolReceipt(RECEIPT_REJECTED, '', '', solpay.npub); } catch {}
+        try { await DpaySolNfc.confirmSolReceipt(RECEIPT_REJECTED, '', '', solpay.npub); } catch (e: unknown) { console.warn('DpaySolNfc.confirmSolReceipt failed (rejected)', e); }
         ctx.finalize('declined', 'Payment rejected');
       } else {
-        try { await DpaySolNfc.confirmSolReceipt(RECEIPT_UNREACHABLE, '', '', solpay.npub); } catch {}
+        try { await DpaySolNfc.confirmSolReceipt(RECEIPT_UNREACHABLE, '', '', solpay.npub); } catch (e: unknown) { console.warn('DpaySolNfc.confirmSolReceipt failed (unreachable)', e); }
         ctx.finalize('pending', 'Couldn’t confirm');
       }
     } catch (e: unknown) {
       // A network/RPC throw is genuinely unknown — hand UNREACHABLE so the payer falls back to
       // "couldn't confirm" honestly (never a false decline).
-      try { await DpaySolNfc.confirmSolReceipt(RECEIPT_UNREACHABLE, '', '', npubRef.current); } catch {}
+      try { await DpaySolNfc.confirmSolReceipt(RECEIPT_UNREACHABLE, '', '', npubRef.current); } catch (e2: unknown) { console.warn('DpaySolNfc.confirmSolReceipt failed (catch-all)', e2); }
       ctx.finalize('pending', e instanceof Error ? e.message : String(e));
     } finally {
       cancel();
     }
-  }, []);
+  }, [solreqUri]);
 
   const {phase, reason, activeRef} = useNfcTapState<SolNfcEvent>({
     role, readerPayload: solreqUri, onActive,

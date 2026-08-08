@@ -1,5 +1,5 @@
 import {describe, it, expect} from '@jest/globals';
-import {decideSolPayerReceipt} from '../solana/payments';
+import {decideSolPayerReceipt, isSolReqExpired, solpayMatchesReq} from '../solana/payments';
 import type {SolPayerOutcome} from '../solana/payments';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from '../payments';
 
@@ -118,5 +118,61 @@ describe('SolPayerOutcome — type contract', () => {
   it('declined carries no extra field', () => {
     const o: SolPayerOutcome = {outcome: 'declined'};
     expect(o.outcome).toBe('declined');
+  });
+});
+
+// A1 — the SOL rail has no server, so request expiry MUST be enforced client-side. The IC rail
+// enforces `exp` in the canister; `isSolReqExpired` is the SOL analog (the solreq's `exp` is unix
+// seconds). A stale/replayed solreq would otherwise be fully signable. The boundary contract: a
+// request is valid THROUGH its expiry second (now == exp is NOT expired); one second later it is.
+describe('isSolReqExpired — SOL request expiry (client-enforced; no server on this rail)', () => {
+  it('a fresh request (exp well in the future) is NOT expired', () => {
+    const exp = Math.floor(Date.now() / 1000) + 300;
+    expect(isSolReqExpired({exp})).toBe(false);
+  });
+
+  it('a request whose expiry is in the past IS expired', () => {
+    const exp = Math.floor(Date.now() / 1000) - 60;
+    expect(isSolReqExpired({exp})).toBe(true);
+  });
+
+  it('exact boundary: nowSecs == exp → NOT expired (valid through its expiry second)', () => {
+    expect(isSolReqExpired({exp: 1000}, 1000_000)).toBe(false);
+  });
+
+  it('one second past expiry → expired', () => {
+    expect(isSolReqExpired({exp: 1000}, 1001_000)).toBe(true);
+  });
+
+  it('one second before expiry → NOT expired', () => {
+    expect(isSolReqExpired({exp: 1000}, 999_000)).toBe(false);
+  });
+});
+
+// A2 — the merchant must NOT broadcast a solpay that doesn't match the open solreq. A cheating payer
+// could otherwise broadcast a mismatched amount and the merchant would surface the payer's claimed
+// amount. `solpayMatchesReq` binds to/cur/amt (the three fields a replay/swap would alter); npub is
+// the payer's own (not a match target — the merchant doesn't know it ahead of time).
+describe('solpayMatchesReq — solpay→solreq binding (merchant broadcast integrity)', () => {
+  const req = {to: '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU', cur: 'SOL' as const, amt: '5000000'};
+
+  it('matches when to/cur/amt all equal', () => {
+    expect(solpayMatchesReq({to: req.to, cur: 'SOL', amt: '5000000'}, req)).toBe(true);
+  });
+
+  it('mismatched amount → false (the cheating-payer case)', () => {
+    expect(solpayMatchesReq({to: req.to, cur: 'SOL', amt: '1'}, req)).toBe(false);
+  });
+
+  it('mismatched recipient → false', () => {
+    expect(solpayMatchesReq({to: 'Di1y6TQ37kbdCdy2FwfUnq9kePKgVe5LSjL8m5pXyWrB', cur: 'SOL', amt: '5000000'}, req)).toBe(false);
+  });
+
+  it('mismatched currency → false', () => {
+    expect(solpayMatchesReq({to: req.to, cur: 'USDC', amt: '5000000'}, req)).toBe(false);
+  });
+
+  it('base58 to compare is CASE-SENSITIVE (distinct address, not a case variant)', () => {
+    expect(solpayMatchesReq({to: req.to.toLowerCase(), cur: 'SOL', amt: '5000000'}, req)).toBe(false);
   });
 });

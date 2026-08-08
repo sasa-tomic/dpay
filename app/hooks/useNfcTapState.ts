@@ -150,8 +150,8 @@ export function useNfcTapState<E>(args: {
       aliveRef.current = false;
       clearSettleTimer();
       sub.remove();
-      if (role === 'card') disarmCard().catch(() => {});
-      else stopReader().catch(() => {});
+      if (role === 'card') disarmCard().catch((e: unknown) => console.warn('disarmCard failed (cleanup)', e));
+      else stopReader().catch((e: unknown) => console.warn('stopReader failed (cleanup)', e));
     };
   }, [
     role, readerPayload, eventName, nativeModule, armCard, disarmCard, startReader, stopReader,

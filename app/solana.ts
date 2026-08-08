@@ -46,6 +46,27 @@ export interface SolReceipt {
 
 // --- private helpers -----------------------------------------------------------
 
+// Read a durable-nonce account's current value, retrying up to 3× with 500ms spacing to absorb the
+// confirm→queryable lag (the account state may lag `confirm` by a slot or two on a fast-producing
+// node — the local test-validator is the extreme case; mainnet has a smaller but nonzero gap).
+// Shared by createNonceAccount (the post-confirm initial read) and resyncNonce (a standalone read) so
+// a transient RPC lag doesn't strand the user on the stale-nonce screen (resyncNonce previously made
+// a SINGLE getNonceAccount call with no retry — asymmetric with createNonceAccount's retry loop).
+async function readNonceWithRetry(address: string, signal?: AbortSignal): Promise<string> {
+  const {getNonceAccount} = await import('./solana/rpc');
+  let value: string;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      ({value} = await getNonceAccount(SOLANA_RPC_URL, address, {signal}));
+      break;
+    } catch (e) {
+      if (attempt >= 3 || signal?.aborted) throw e;
+      await new Promise(r => setTimeout(r, 500));
+    }
+  }
+  return value;
+}
+
 // SLIP-10 path m/44'/501'/0'/1' — a sibling of the main Solana key (m/44'/501'/0'/0') for the
 // durable-nonce account keypair. Deterministic from the device seed (a single backup recovers both
 // the wallet key and the nonce-account key). The nonce account is a utility account: its private key
@@ -161,7 +182,7 @@ export async function createNonceAccount(
   if (!SOLANA_RPC_URL) throw new Error('Solana is offline (no RPC endpoint configured)');
   const authority = deriveSolanaKeypair(secretHex);
   const nonceAcct = deriveNonceAccountKeypair(secretHex);
-  const {getLatestBlockhash, getMinimumBalanceForRentExemption, sendTransaction, confirmTransaction, getNonceAccount} =
+  const {getLatestBlockhash, getMinimumBalanceForRentExemption, sendTransaction, confirmTransaction} =
     await import('./solana/rpc');
   const {blockhash} = await getLatestBlockhash(SOLANA_RPC_URL, {signal});
   const rent = await getMinimumBalanceForRentExemption(SOLANA_RPC_URL, 80, {signal});
@@ -169,19 +190,9 @@ export async function createNonceAccount(
   const raw = signTransactionMulti([authority.seed, nonceAcct.seed], msg);
   const sig = await sendTransaction(SOLANA_RPC_URL, raw, {signal});
   await confirmTransaction(SOLANA_RPC_URL, sig, {signal});
-  // Read back the initial nonce value. Retry briefly — the account state may lag `confirm` by a
-  // slot or two on a fast-producing node (the local test-validator is the extreme case; mainnet
-  // has a smaller but nonzero gap).
-  let value: string;
-  for (let attempt = 0; ; attempt++) {
-    try {
-      ({value} = await getNonceAccount(SOLANA_RPC_URL, nonceAcct.address, {signal}));
-      break;
-    } catch (e) {
-      if (attempt >= 3 || signal?.aborted) throw e;
-      await new Promise(r => setTimeout(r, 500));
-    }
-  }
+  // Read back the initial nonce value (with retry — the account state may lag `confirm` by a slot or
+  // two; the shared readNonceWithRetry mirrors resyncNonce's retry so both read paths are symmetric).
+  const value = await readNonceWithRetry(nonceAcct.address, signal);
   return {address: nonceAcct.address, value};
 }
 
@@ -213,13 +224,12 @@ export async function broadcastSolPayment(
 }
 
 /** Re-read the current durable-nonce value (after a stale/rejected payment). ONLINE — throws if SOL
- *  is offline. */
+ *  is offline. Retries 3×/500ms via the shared readNonceWithRetry (same as createNonceAccount's
+ *  post-confirm read) so a transient RPC lag doesn't strand the user on the stale-nonce screen. */
 export async function resyncNonce(
   nonceAccountAddress: string,
   signal?: AbortSignal,
 ): Promise<string> {
   if (!SOLANA_RPC_URL) throw new Error('Solana is offline (no RPC endpoint configured)');
-  const {getNonceAccount} = await import('./solana/rpc');
-  const {value} = await getNonceAccount(SOLANA_RPC_URL, nonceAccountAddress, {signal});
-  return value;
+  return readNonceWithRetry(nonceAccountAddress, signal);
 }

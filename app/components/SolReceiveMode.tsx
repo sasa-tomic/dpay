@@ -1,15 +1,16 @@
-import {useState} from 'react';
+import {useState, useEffect} from 'react';
 import {View, Text, Pressable, TextInput, ActivityIndicator, type TextStyle} from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import {C} from '../config/palette';
 import {S} from '../styles';
-import {QR_SIZE_SMALL, SOL_SEND_TIMEOUT_MS} from '../config/constants';
+import {QR_SIZE_SMALL, SOL_BROADCAST_TIMEOUT_MS, IS_SOLANA_DEVNET} from '../config/constants';
 import {fmtAsset, toUnits} from '../lib/format';
 import type {Identity} from '../lib/types';
 import bs58 from 'bs58';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {USDC_DECIMALS, USDC_MINT_ADDRESS, deriveAta} from '../solana/spl';
 import {encodeSolReq, decodeSolPay, type SolReq} from '../solana/qr';
+import {solpayMatchesReq} from '../solana/payments';
 import {deriveSolanaAddress, broadcastSolPayment} from '../solana';
 import {friendlySolError} from '../solana/errors';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from '../payments';
@@ -49,12 +50,24 @@ export function SolReceiveMode({identity, online, nfcReady}: {identity: Identity
   const [result, setResult] = useState<{amount: string; cur: 'SOL' | 'USDC'; sig: string | null} | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [copied, setCopied] = useState<'clipboard' | 'shared' | null>(null);
+  // A 1s display clock so the request-QR screen shows a live expiry countdown (mirrors the IC rail's
+  // ReceiveMode). A stale solreq scans to a confusing payer-side rejection (SolPayMode enforces exp),
+  // so the merchant is told how long the QR is good for and prompted to refresh before it expires.
+  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
   // A tap taking over while the QR is shown; nfcKey re-starts the reader after each.
   const [nfcActive, setNfcActive] = useState(false);
   const [nfcKey, setNfcKey] = useState(0);
 
   const decimals = cur === 'SOL' ? SOL_DECIMALS : USDC_DECIMALS;
   const unit = cur === 'SOL' ? SOL_UNIT : 'USDC';
+
+  // Tick the display clock only while a request QR is shown (not after settlement). Display-only, so
+  // a plain setInterval (not a network poll seam) is the right cadence for a countdown.
+  useEffect(() => {
+    if (phase !== 'reqQr' || !reqSnapshot || result) return;
+    const id = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [phase, reqSnapshot, result]);
 
   // Build the solreq: QR. Derives the merchant's SOL address (or their USDC ATA) for the `to`/`toAta`.
   function makeRequest() {
@@ -76,14 +89,21 @@ export function SolReceiveMode({identity, online, nfcReady}: {identity: Identity
     }
   }
 
-  // Scan the payer's signed solpay: QR → broadcast → confirm.
+  // Scan the payer's signed solpay: QR → broadcast → confirm. A2: BEFORE broadcasting, assert the
+  // solpay matches the open solreq (to/cur/amt). `reqSnapshot` was captured at makeRequest time but
+  // previously used only for display — a cheating payer could otherwise broadcast a mismatched amount
+  // and the merchant would surface the payer's claimed amount as "Received".
   async function onSignedQr(raw: string) {
     setScanning(false);
     setBusy(true);
     setErr(null);
-    const {signal, cancel} = withTimeout(SOL_SEND_TIMEOUT_MS * 2);
+    const {signal, cancel} = withTimeout(SOL_BROADCAST_TIMEOUT_MS);
     try {
       const solpay = decodeSolPay(raw);
+      if (!reqSnapshot || !solpayMatchesReq(solpay, reqSnapshot)) {
+        setErr("Payment doesn't match this request. Ask the payer to scan your request QR again.");
+        return;
+      }
       const receipt = await broadcastSolPayment(solpay, signal);
       if (receipt.status === RECEIPT_SETTLED) {
         setResult({amount: solpay.amt, cur: solpay.cur, sig: receipt.sig});
@@ -134,6 +154,12 @@ export function SolReceiveMode({identity, online, nfcReady}: {identity: Identity
   if (phase === 'reqQr' && reqUri) {
     return (
       <View style={S.center}>
+        {IS_SOLANA_DEVNET ? (
+          <View style={S.devnetBadge}>
+            <View style={S.devnetBadgeDot} />
+            <Text style={S.devnetBadgeText}>Devnet — not real SOL</Text>
+          </View>
+        ) : null}
         {/* Reader runs in the background while the QR is shown: the payer taps OR scans. */}
         {nfcReady && DpaySolNfc ? (
           <SolNfcTap
@@ -151,6 +177,16 @@ export function SolReceiveMode({identity, online, nfcReady}: {identity: Identity
                 </View>
                 <View testID="sol-req-qr" style={S.qrCard}><QRCode value={reqUri} size={QR_SIZE_SMALL} ecl="M" /></View>
                 <Text style={S.amountBig}>{fmtAsset(reqSnapshot!.amt, decimals, unit)}</Text>
+                {/* A1 — live expiry countdown (mirrors ReceiveMode). A stale solreq scans to a
+                    confusing payer-side rejection, so the merchant knows when to refresh. */}
+                {(() => {
+                  const remaining = (reqSnapshot?.exp ?? 0) - now;
+                  if (remaining <= 0) return <Text style={S.qrExpired}>Expired — make a new request</Text>;
+                  const m = Math.floor(remaining / 60);
+                  const s = remaining % 60;
+                  if (m >= 1) return <Text style={S.qrExpiry}>Valid for ~{m} min</Text>;
+                  return <Text style={S.qrExpiryWarn}>Expires in 0:{s.toString().padStart(2, '0')}</Text>;
+                })()}
                 <Text style={S.qrHint}>Waiting for the payer to sign offline…</Text>
                 <Pressable style={S.linkBtn} onPress={() => setScanning(true)} accessibilityRole="button" accessibilityLabel="Scan the payer's signed code" accessibilityHint="Scan the payer's signed QR to submit their offline payment" accessibilityState={{disabled: false}}>
                   <Text style={S.linkText}>Scan the payer's signed code</Text>
@@ -184,6 +220,12 @@ export function SolReceiveMode({identity, online, nfcReady}: {identity: Identity
   // phase === 'form'
   return (
     <View style={S.center}>
+      {IS_SOLANA_DEVNET ? (
+        <View style={S.devnetBadge}>
+          <View style={S.devnetBadgeDot} />
+          <Text style={S.devnetBadgeText}>Devnet — not real SOL</Text>
+        </View>
+      ) : null}
       <Text style={S.label}>Amount to receive</Text>
       <View style={S.amountRow}>
         <Pressable

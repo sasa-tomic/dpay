@@ -70,3 +70,35 @@ export function decideSolPayerReceipt(
       return {outcome: 'pending'};
   }
 }
+
+/**
+ * Whether a `solreq` has expired. The SOL rail has NO server (the payer signs fully offline, the
+ * merchant broadcasts), so unlike the IC rail there is no canister to reject a stale request — the
+ * client MUST enforce `exp` itself. A stale/replayed solreq is otherwise fully signable.
+ *
+ * `exp` is unix SECONDS (the solreq codec's frozen v1 field). `nowMs` defaults to `Date.now()` but
+ * is a parameter so the boundary is unit-testable. Contract: a request is valid THROUGH its expiry
+ * second (`nowSecs === exp` ⇒ NOT expired); one second later it is. This mirrors the IC rail's
+ * "valid through the window" semantics (a request built with `exp = now + 300` is signable at the
+ * 300th second).
+ */
+export function isSolReqExpired(req: {exp: number}, nowMs: number = Date.now()): boolean {
+  return Math.floor(nowMs / 1000) > req.exp;
+}
+
+/**
+ * Whether a scanned `solpay` matches the open `solreq` (to/cur/amt). The merchant broadcasts
+ * whatever the payer's solpay carries; without this binding a cheating payer could hand over a
+ * signed transfer for a different amount/recipient and the merchant would surface the payer's
+ * CLAIMED amount as "Received". `to`/`cur`/`amt` are the three fields a replay-or-swap would alter;
+ * `npub` is the payer's own (the merchant doesn't know it ahead of time, so it's not a match target).
+ *
+ * Pure + total. base58 `to` is compared EXACT (case-sensitive — lowercasing a base58 string changes
+ * its meaning, same as the npub compare in decideSolPayerReceipt).
+ */
+export function solpayMatchesReq(
+  solpay: {to: string; cur: string; amt: string},
+  req: {to: string; cur: string; amt: string},
+): boolean {
+  return solpay.to === req.to && solpay.cur === req.cur && solpay.amt === req.amt;
+}

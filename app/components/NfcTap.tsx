@@ -133,7 +133,7 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
       ctx.finalize('pending', 'Couldn’t confirm with the ledger — check the balance');
     }
     // Best-effort: hand the outcome back to the payer, stamped with the authoritative nonce.
-    try { await DpayNfc.confirmReceipt(receiptCodeFor(outcome), settledNonceHex ?? nonceHex ?? ''); } catch {}
+    try { await DpayNfc.confirmReceipt(receiptCodeFor(outcome), settledNonceHex ?? nonceHex ?? ''); } catch (e: unknown) { console.warn('DpayNfc.confirmReceipt failed (native-module regression?)', e); }
   }, [reqInfo, record, postPay, reconcile]);
 
   // Payer side: the tap is the consent — sign the incoming request and serve it right away.
@@ -144,13 +144,13 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
   const autoSign = useCallback(async (req: {toHex: string; amount: string; nonceHex: string; expiry: number; currency: number}, ctx: TapCtx) => {
     try {
       if (!isPayableAsset(catalog, req.currency)) {
-        try { await DpayNfc.declineCard(); } catch {}
+        try { await DpayNfc.declineCard(); } catch (e: unknown) { console.warn('DpayNfc.declineCard failed (unsupported asset)', e); }
         ctx.finalize('declined', `Unsupported asset (currency ${req.currency}) — tap cancelled`);
         return;
       }
       const disc = resolveNfcDisclosure(catalog, {currency: req.currency, amount: req.amount});
       if (!disc) {
-        try { await DpayNfc.declineCard(); } catch {}
+        try { await DpayNfc.declineCard(); } catch (e: unknown) { console.warn('DpayNfc.declineCard failed (no disclosure)', e); }
         ctx.finalize('declined', `Cannot confirm the asset (currency ${req.currency}) — tap cancelled`);
         return;
       }

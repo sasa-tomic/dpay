@@ -3,12 +3,13 @@ import {View, Text, Pressable, ActivityIndicator, Share} from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import {C} from '../config/palette';
 import {S} from '../styles';
-import {QR_SIZE, SOL_SEND_TIMEOUT_MS} from '../config/constants';
+import {QR_SIZE, SOL_SEND_TIMEOUT_MS, SOL_BROADCAST_TIMEOUT_MS, IS_SOLANA_DEVNET} from '../config/constants';
 import {fmtAsset} from '../lib/format';
 import type {Identity} from '../lib/types';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {USDC_DECIMALS} from '../solana/spl';
 import {decodeSolReq, type SolReq} from '../solana/qr';
+import {isSolReqExpired} from '../solana/payments';
 import {createNonceAccount, resyncNonce, signOfflineSolPayment, signOfflineSplPayment} from '../solana';
 import {friendlySolError} from '../solana/errors';
 import {loadSolNonce, saveSolNonce, type SolNonceState} from '../services/solNoncePersist';
@@ -36,7 +37,7 @@ import {withTimeout} from '../lib/timeout';
  * NFC arming: this component mounts only while the SOL rail is selected. Switching the rail (via
  * switching the active asset unmounts it, whose `useNfcTapState` cleanup disarms the HCE card — no arm-leak.
  */
-export function SolPayMode({identity, online, nfcReady}: {identity: Identity; online: boolean; nfcReady: boolean}) {
+export function SolPayMode({identity, online, nfcReady, onShowDeposit}: {identity: Identity; online: boolean; nfcReady: boolean; onShowDeposit?: () => void}) {
   const [phase, setPhase] = useState<'setup' | 'scan' | 'review' | 'qr' | 'paid'>('setup');
   const [nonceState, setNonceState] = useState<SolNonceState | null>(null);
   const [req, setReq] = useState<SolReq | null>(null);
@@ -65,7 +66,7 @@ export function SolPayMode({identity, online, nfcReady}: {identity: Identity; on
   // key as the authority, and reads back the initial nonce value to sign against offline.
   async function setupNonce() {
     setBusy(true); setErr(null);
-    const {signal, cancel} = withTimeout(SOL_SEND_TIMEOUT_MS * 2);
+    const {signal, cancel} = withTimeout(SOL_BROADCAST_TIMEOUT_MS);
     try {
       const {address, value} = await createNonceAccount(identity.secretHex, signal);
       const ns: SolNonceState = {address, value, status: 'ready'};
@@ -80,10 +81,17 @@ export function SolPayMode({identity, online, nfcReady}: {identity: Identity; on
     }
   }
 
-  // Scan the merchant's solreq: QR → decode → review.
+  // Scan the merchant's solreq: QR → decode → review. A1: enforce `exp` CLIENT-SIDE (the SOL rail
+  // has no server to reject a stale request — unlike the IC canister — so a stale/replayed solreq is
+  // fully signable unless we refuse it here, before signing).
   function onScan(raw: string) {
     try {
       const r = decodeSolReq(raw);
+      if (isSolReqExpired(r)) {
+        setReq(null);
+        setErr('This payment request has expired. Ask the merchant for a fresh QR.');
+        return;
+      }
       setReq(r);
       setErr(null);
       setPhase('review');
@@ -156,9 +164,29 @@ export function SolPayMode({identity, online, nfcReady}: {identity: Identity; on
   if (phase === 'setup') {
     return (
       <View style={S.center} testID="sol-pay-setup">
+        {IS_SOLANA_DEVNET ? (
+          <View style={S.devnetBadge}>
+            <View style={S.devnetBadgeDot} />
+            <Text style={S.devnetBadgeText}>Devnet — not real SOL</Text>
+          </View>
+        ) : null}
         <Text style={S.label}>Set up offline pay</Text>
         <Text style={S.dim2}>Set up once so you can pay without a connection. This needs a brief connection and a small amount of SOL (~0.0015 SOL, recoverable).</Text>
         {err ? <Text testID="sol-pay-setup-err" style={S.err}>{err}</Text> : null}
+        {/* A3 — unfunded escape hatch: the 0-SOL setup error points the user at their deposit
+            address but offered no link to it. Surface it here so the dead-end has an exit. */}
+        {onShowDeposit && err ? (
+          <Pressable
+            testID="sol-show-deposit"
+            style={S.linkBtn}
+            onPress={onShowDeposit}
+            accessibilityRole="button"
+            accessibilityLabel="Show my SOL address"
+            accessibilityHint="Open the SOL receive sheet to fund your address"
+            accessibilityState={{disabled: false}}>
+            <Text style={S.linkText}>Show my SOL address</Text>
+          </Pressable>
+        ) : null}
         {busy ? (
           <>
             <ActivityIndicator color={C.brand} />
@@ -185,6 +213,12 @@ export function SolPayMode({identity, online, nfcReady}: {identity: Identity; on
   if (phase === 'scan') {
     return (
       <View style={S.center}>
+        {IS_SOLANA_DEVNET ? (
+          <View style={S.devnetBadge}>
+            <View style={S.devnetBadgeDot} />
+            <Text style={S.devnetBadgeText}>Devnet — not real SOL</Text>
+          </View>
+        ) : null}
         {/* NFC card runs in the background (if ready + a live nonce) while the QR scanner is
             live at the same time — the payer taps the merchant's phone OR scans its QR. */}
         {nfcReady && DpaySolNfc && nonceState?.status === 'ready' ? (
@@ -201,6 +235,19 @@ export function SolPayMode({identity, online, nfcReady}: {identity: Identity; on
                 <Text style={S.reviewLabel}>Offline pay needs a resync</Text>
                 <Text style={S.warnNote}>A recent payment couldn't be confirmed, so offline pay needs a refresh. {online ? 'Resync to keep paying offline.' : 'Go online and resync to keep paying offline.'}</Text>
                 {err ? <Text testID="sol-pay-stale-err" style={S.err}>{err}</Text> : null}
+                {/* A3 — escape hatch on the stale-nonce dead-end too. */}
+                {onShowDeposit ? (
+                  <Pressable
+                    testID="sol-show-deposit"
+                    style={S.linkBtn}
+                    onPress={onShowDeposit}
+                    accessibilityRole="button"
+                    accessibilityLabel="Show my SOL address"
+                    accessibilityHint="Open the SOL receive sheet to fund your address"
+                    accessibilityState={{disabled: false}}>
+                    <Text style={S.linkText}>Show my SOL address</Text>
+                  </Pressable>
+                ) : null}
                 {busy ? (
                   <>
                     <ActivityIndicator color={C.brand} />

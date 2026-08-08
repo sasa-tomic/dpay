@@ -122,10 +122,11 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
             // Subtitle is user-benefit, not network topology — drop the "Send X on Y" tautology (BTC
             // on Bitcoin, USDC on Ethereum) that names a network meaningless to a non-technical user.
             // BTC family -> "Bitcoin"; Ethereum USD stablecoins (USDC/USDT) -> "US dollar stablecoin";
-            // any other onrampable asset -> its native asset name alone. A TESTNET currency shows its
-            // actual `network` ("Bitcoin Testnet" / "Sepolia") so the testnet status is unmistakable.
-            // DEMO (isPrimary) keeps its exact "play money for testing" copy (unchanged — the audit
-            // praised it).
+            // any other onrampable asset -> its SETTLEMENT NETWORK name ("Ethereum" for native ckETH,
+            // matching how BTC reads "Bitcoin" rather than its bare symbol "BTC"). A TESTNET currency
+            // shows its actual `network` ("Bitcoin Testnet" / "Sepolia") so the testnet status is
+            // unmistakable. DEMO (isPrimary) keeps its exact "play money for testing" copy (unchanged —
+            // the audit praised it).
             const sub = isPrimary
               ? 'play money for testing'
               : testnet
@@ -135,7 +136,7 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
                       ? 'Bitcoin'
                       : a.minter_family === 'CkEthErc20' && (a.backing_symbol === 'USDC' || a.backing_symbol === 'USDT')
                         ? 'US dollar stablecoin'
-                        : disp.nativeAsset)
+                        : disp.networkLabel)
                   : 'Unsupported asset';
             return (
               <View key={a.currency} testID={`asset-${key}`} style={S.assetCard}>

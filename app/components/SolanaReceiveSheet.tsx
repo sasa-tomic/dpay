@@ -3,7 +3,7 @@ import {View, Text, Pressable, ScrollView, SafeAreaView, StatusBar, Platform} fr
 import QRCode from 'react-native-qrcode-svg';
 import {C} from '../config/palette';
 import {S} from '../styles';
-import {QR_SIZE_SMALL} from '../config/constants';
+import {QR_SIZE_SMALL, IS_SOLANA_DEVNET} from '../config/constants';
 import {copyToClipboard} from '../lib/clipboard';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {SheetOverlay} from './SheetOverlay';
@@ -53,6 +53,11 @@ export function SolanaReceiveSheet({address, onClose}: {address: string; onClose
             <Text style={S.instrCustody}>
               dpay never holds your keys — SOL lands directly in your wallet on confirmation.
             </Text>
+            {IS_SOLANA_DEVNET ? (
+              <Text testID="sol-devnet-warning" style={S.warnNote}>
+                ⚠ Connected to Solana devnet. Do NOT send mainnet SOL here — it will not appear. Use devnet SOL only.
+              </Text>
+            ) : null}
           </View>
 
           <View style={S.qrCard}><QRCode value={address} size={QR_SIZE_SMALL} ecl="L" /></View>

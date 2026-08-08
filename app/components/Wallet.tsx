@@ -53,7 +53,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
   // shows a single selected currency's balance, and the full asset list + every top-up live in the
   // Balances sheet. Pay/Receive still settle in whatever currency a request specifies (unchanged).
   const [currentCurrency, setCurrentCurrency] = useState(0);
-  const [balancesOpen, setBalancesOpen] = useState(false);
+  const [balancesOpen, setBalancesOpen] = useState(!readDepositDeepLink());
   const [nfc, setNfc] = useState<NfcStatus>('unknown');
   // Demo top-up: a single click adds $100 of demo currency via /api/v1/faucet. The button sits next
   // to the balance so users find it without hunting. `topUpBusy` drives the spinner; `topUpErr`
@@ -178,6 +178,9 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
       if (!alive) return;
       if (kind === 'req') { setPrefillRequest(blob); setMode('pay'); }
       else { setPrefillReceipt(blob); setMode('receive'); }
+      // A6 — a req/pay deep link targets a specific Pay/Receive flow, so dismiss the Balances landing
+      // sheet (it would otherwise overlay the deep-linked screen).
+      setBalancesOpen(false);
     };
     // Web path first (sync read of ?req= / ?pay=).
     const webReq = readRequestDeeplink();
@@ -362,12 +365,18 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
         <Tab label="Pay" active={mode === 'pay'} onPress={() => setMode('pay')} hotkey="P" />
         <Tab label="Receive" active={mode === 'receive'} onPress={() => setMode('receive')} hotkey="R" />
         <Tab label="Transactions" active={mode === 'ledger'} onPress={() => setMode('ledger')} hotkey="L" />
+        {/* A6 — active-rail/asset chip: labels which asset's Pay/Receive flow is armed (SOL vs the
+            selected IC currency) so a user who switched to SOL in the Balances sheet doesn't get
+            silently stuck in SOL mode (the IC ↔ SOL NFC AIDs differ). */}
+        <View testID="active-rail-chip" style={S.activeRailChip}>
+          <Text style={S.activeRailChipText}>{activeSol ? 'SOL' : (currentCurrency === 0 ? 'DEMO' : (catalog.find(c => c.currency === currentCurrency)?.wrapper_name ?? 'IC'))}</Text>
+        </View>
       </View>
 
       <ScrollView style={S.scroll} contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
         {mode === 'pay'
           ? (activeSol && solAddress
-              ? <SolPayMode identity={identity} online={online} nfcReady={nfc === 'ready'} />
+              ? <SolPayMode identity={identity} online={online} nfcReady={nfc === 'ready'} onShowDeposit={() => setSolReceiveOpen(true)} />
               : <PayMode identity={identity} online={online} relayUrl={relayUrl} nfcStatus={nfc} onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance} catalog={catalog} assetBalances={displayAssetBalances} prefillRequest={prefillRequest} onPrefillConsumed={() => setPrefillRequest(null)} />
           )
           : mode === 'receive'
