@@ -6,7 +6,7 @@
 //! offline. The candid surface it drives is exactly the facade canister's:
 //!   - `pay        : (blob) -> (variant { Ok : PayReceipt; Err : text })`  [update]
 //!   - `balance_of : (blob, nat32) -> (nat64) query`                       [query; display cache]
-//!   - `refresh_balance : (blob, nat32) -> (variant { Ok : nat64; Err : text })`  [update; authoritative read + cache write]
+//!   - `refresh_balances : (blob, vec nat32) -> (variant { Ok : vec BalanceEntry; Err : text })`  [update; authoritative read + cache write, single + batch via the same call]
 //!   - `faucet     : (blob, nat32) -> (variant { Ok : nat64; Err : text })`  [update; self-service, fixed amount, rate-limited]
 //!   - `transactions_of : (blob, nat32, nat32) -> (vec record {...}) query`
 //!
@@ -34,7 +34,7 @@ use crate::ledger::{
 };
 
 /// Per-call I/O budget for every cross-canister call this ledger makes on the balance-poll path
-/// (`balance_of`, `refresh_balance`, `refresh_deposit`). A stalled replica would otherwise wedge
+/// (`balance_of`, `refresh_balances`, `refresh_deposit`). A stalled replica would otherwise wedge
 /// the poll loop for the agent's full ~5min expiry before failing; this bound fails the call fast
 /// (→ `LedgerError::Transient`, retried by the caller) so a single hung replica can't lock up the
 /// 10s-poll liveness loop. Single source of truth — every `tokio::time::timeout` wrap below reads
@@ -42,7 +42,7 @@ use crate::ledger::{
 /// healthy replica's normal round-trip latency.
 const CANISTER_CALL_TIMEOUT_SECS: u64 = 10;
 
-/// Bounded staleness window for a displayed balance. ONE background batch `refresh_all_balances`
+/// Bounded staleness window for a displayed balance. ONE background batch `refresh_balances`
 /// per window catches facade-bypassing credits for ALL currencies; the rest of the polls hit the
 /// fast cached `balance_of` query. Bounds displayed-balance staleness to ~TTL+one-refresh. Tunable.
 const BALANCE_TTL_SECS: u64 = 15;
@@ -102,8 +102,8 @@ struct TxnView {
     memo: String,
 }
 
-/// Candid mirror of the canister's `BalanceEntry` (one entry of the `refresh_all_balances` batch
-/// result). The batch refresh decodes these to mark every currency fresh in `last_refresh`.
+/// Candid mirror of the canister's `BalanceEntry` (one entry of the `refresh_balances` result).
+/// The refresh decodes these to mark every currency fresh in `last_refresh`.
 #[derive(CandidType, Deserialize, Debug)]
 struct BalanceEntryMirror {
     currency: u32,
@@ -220,10 +220,10 @@ struct CurrencyDescriptorMirror {
 ///
 /// `last_refresh` (an `Arc<Mutex<...>>` so a background task can mutate it) is the
 /// per-`(pubkey, currency)` TTL freshness clock for the batch refresh path (see
-/// [`Self::any_stale_for`] / [`Self::refresh_all_balances`] / [`Self::spawn_background_refresh_all`]).
+/// [`Self::any_stale_for`] / [`Self::refresh_balances`] / [`Self::spawn_background_refresh_all`]).
 /// [`Ledger::balance`] is a PURE fast cached `balance_of` query (no consensus); the `/balances`
 /// handler calls [`Ledger::refresh_all_if_stale`] ONCE after the fan-out, which — when ANY currency
-/// for the pubkey is stale (or on cold start) — fires a SINGLE `refresh_all_balances` UPDATE in the
+/// for the pubkey is stale (or on cold start) — fires a SINGLE `refresh_balances` UPDATE in the
 /// background (never blocking the response) so credits that bypass the facade (direct ICRC transfers
 /// + async ckERC20 heartbeat mints) surface within one refresh cycle without waiting for a
 /// `pay`/`mint`/`faucet` cache refresh. Collapses the old N per-currency background refreshes into
@@ -302,107 +302,86 @@ impl AgentLedger {
             .map_err(|e| LedgerError::Transient(format!("decode balance: {e}")))
     }
 
-    /// AUTHORITATIVE balance via the facade's `refresh_balance(blob, nat32) -> Result<nat64, text>`
-    /// UPDATE — does a cross-canister `icrc1_balance_of`, writes `BAL_CACHE`, and returns the
-    /// amount. Covers credit paths the cached `balance_of` query can't see (direct ICRC transfers +
-    /// async ckERC20 heartbeat mints, which land on the ledger WITHOUT invoking the facade). On
-    /// success, marks this `(pubkey, currency)` fresh (resets the TTL timer).
+    /// AUTHORITATIVE balance via the facade's `refresh_balances(blob, vec nat32) -> Result<vec
+    /// BalanceEntry, text>` UPDATE — does a cross-canister `icrc1_balance_of` for each REQUESTED
+    /// currency inside ONE update call, writes `BAL_CACHE` for each, and returns the list. Covers
+    /// credit paths the cached `balance_of` query can't see (direct ICRC transfers + async ckERC20
+    /// heartbeat mints, which land on the ledger WITHOUT invoking the facade). Pass `[currency]`
+    /// for a single-currency refresh, every registered id for a batch — same call either way.
     ///
-    /// Modeled EXACTLY on `balance_of`'s encode/decode and `faucet`'s update-call +
-    /// `Result<u64, String>` error mapping: a transport/replica failure is `Transient` (503,
-    /// retried); a canister-level `Err(text)` is `Rejected` (422, never retried) — though in
-    /// practice the only `Err` here is a malformed pubkey / unknown currency (deploy-time
-    /// invariants), since the call moves no value and is ungated.
-    pub async fn refresh_balance(
+    /// Pure canister-call wrapper (no freshness marking here — the caller owns the TTL clock; see
+    /// [`spawn_background_refresh_all`]). Error mapping mirrors `faucet`'s update-call +
+    /// `Result<_, String>` shape: a transport/replica failure is `Transient` (503, retried); a
+    /// canister-level `Err(text)` is `Rejected` (422, never retried) — in practice the only `Err`
+    /// here is a malformed pubkey (deploy-time invariant), since the call moves no value and is
+    /// ungated (unknown/retired currency ids are best-effort SKIPPED inside the canister, not
+    /// errors).
+    async fn refresh_balances(
         &self,
         pubkey: &[u8; PUBKEY_LEN],
-        currency: Currency,
-    ) -> Result<u64, LedgerError> {
-        let arg = encode_args((pubkey.to_vec(), currency))
-            .map_err(|e| LedgerError::Transient(format!("encode refresh_balance arg: {e}")))?;
-        let reply = tokio::time::timeout(
-            Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
-            self.agent
-                .update(&self.canister_id, "refresh_balance")
-                .with_arg(arg)
-                .call_and_wait(),
-        )
-        .await
-        .map_err(|_| {
-            LedgerError::Transient(format!(
-                "refresh_balance timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
-            ))
-        })?
-        .map_err(|e| LedgerError::Transient(format!("refresh_balance update: {e}")))?;
-        let result: Result<u64, String> = decode_one(&reply)
-            .map_err(|e| LedgerError::Transient(format!("decode refresh_balance reply: {e}")))?;
-        let bal = result.map_err(LedgerError::Rejected)?;
-        // Mark fresh — the next `balance()` within the TTL window hits the fast cached query.
-        self.last_refresh
-            .lock()
-            .unwrap()
-            .insert((*pubkey, currency), Instant::now());
-        Ok(bal)
-    }
-
-    /// AUTHORITATIVE batch balance via the facade's `refresh_all_balances(blob) -> Result<vec
-    /// BalanceEntry, text>` UPDATE — does N cross-canister `icrc1_balance_of` calls inside ONE
-    /// consensus round, writes `BAL_CACHE` for each, and returns the list. Covers the SAME
-    /// facade-bypassing credit paths as [`refresh_balance`] (direct ICRC transfers + async ckERC20
-    /// heartbeat mints) but for ALL currencies in ONE update call instead of N. On success, the
-    /// caller marks every returned currency fresh (resets the TTL timer for each).
-    ///
-    /// Error mapping mirrors [`refresh_balance`]: a transport/replica failure is `Transient` (503,
-    /// retried); a canister-level `Err(text)` is `Rejected` (422) — in practice only a malformed
-    /// pubkey, since the call moves no value and is ungated.
-    async fn refresh_all_balances(
-        &self,
-        pubkey: &[u8; PUBKEY_LEN],
+        currencies: &[Currency],
     ) -> Result<Vec<BalanceEntryMirror>, LedgerError> {
-        let arg = encode_one(pubkey.to_vec())
-            .map_err(|e| LedgerError::Transient(format!("encode refresh_all_balances arg: {e}")))?;
-        // The batch does N inter-canister reads inside one update (~300-600ms for 6 currencies),
+        let arg = encode_args((pubkey.to_vec(), currencies.to_vec()))
+            .map_err(|e| LedgerError::Transient(format!("encode refresh_balances arg: {e}")))?;
+        // The call does N inter-canister reads inside one update (~300-600ms for 6 currencies),
         // comfortably under the 10s I/O budget. A stalled replica still fails fast → Transient.
         let reply = tokio::time::timeout(
             Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
             self.agent
-                .update(&self.canister_id, "refresh_all_balances")
+                .update(&self.canister_id, "refresh_balances")
                 .with_arg(arg)
                 .call_and_wait(),
         )
         .await
         .map_err(|_| {
             LedgerError::Transient(format!(
-                "refresh_all_balances timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
+                "refresh_balances timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
             ))
         })?
-        .map_err(|e| LedgerError::Transient(format!("refresh_all_balances update: {e}")))?;
+        .map_err(|e| LedgerError::Transient(format!("refresh_balances update: {e}")))?;
         let result: Result<Vec<BalanceEntryMirror>, String> = decode_one(&reply)
-            .map_err(|e| LedgerError::Transient(format!("decode refresh_all_balances reply: {e}")))?;
+            .map_err(|e| LedgerError::Transient(format!("decode refresh_balances reply: {e}")))?;
         result.map_err(LedgerError::Rejected)
     }
 
-    /// Fire-and-forget an authoritative [`refresh_all_balances`](Self::refresh_all_balances) UPDATE
-    /// on a detached tokio task — never blocks the response path. The canister's `BAL_CACHE`
-    /// (written by `refresh_all_balances`/`pay`/`mint`/`faucet`) persists in canister state across
-    /// relay restarts, so [`Ledger::balance`] can safely return the fast cached `balance_of` query
-    /// immediately; this ONE batch background refresh catches facade-bypassing credits (direct ICRC
-    /// transfers + async ckERC20 mints) for ALL currencies within one poll cycle — collapsing the
+    /// Fire-and-forget an authoritative [`refresh_balances`](Self::refresh_balances) UPDATE for EVERY
+    /// registered currency on a detached tokio task — never blocks the response path. The canister's
+    /// `BAL_CACHE` (written by `refresh_balances`/`pay`/`mint`/`faucet`) persists in canister state
+    /// across relay restarts, so [`Ledger::balance`] can safely return the fast cached `balance_of`
+    /// query immediately; this ONE batch background refresh catches facade-bypassing credits (direct
+    /// ICRC transfers + async ckERC20 mints) for ALL currencies within one poll cycle — collapsing the
     /// old N per-currency background spawns into a single update call (one consensus round).
     ///
-    /// `Agent` is `Clone` (its internals are `Arc`'d, so the clone is cheap) and `Principal` is
-    /// `Copy`, so the owned snapshot handed to the spawned task is light. On success, EVERY currency
-    /// in the reply is marked fresh (the batch just wrote BAL_CACHE for all); on failure the task
-    /// logs the pubkey + error (`eprintln!` — no silent errors) and the entries stay stale, so the
-    /// next stale poll re-attempts. `refresh_all_balances` is idempotent at the canister level, so
-    /// overlapping tasks on a slow replica are safe (just wasteful — bounded by the poll interval).
+    /// The unified canister method takes the REQUESTED currency ids (it no longer enumerates ALL
+    /// ledgers itself), so this fetches the catalog (`currencies()`) inside the spawned task to get
+    /// the full id list, then passes it to `refresh_balances`. `Agent` is `Clone` (its internals are
+    /// `Arc`'d, so the clone is cheap) and `Principal` is `Copy`, so the owned snapshot handed to the
+    /// spawned task is light. On success, EVERY currency in the reply is marked fresh (the batch just
+    /// wrote BAL_CACHE for all); on failure the task logs the pubkey + error (`eprintln!` — no silent
+    /// errors) and the entries stay stale, so the next stale poll re-attempts. `refresh_balances` is
+    /// idempotent at the canister level, so overlapping tasks on a slow replica are safe (just
+    /// wasteful — bounded by the poll interval).
     fn spawn_background_refresh_all(&self, pubkey: [u8; PUBKEY_LEN]) {
         let agent = self.agent.clone();
         let canister_id = self.canister_id;
         let last_refresh = Arc::clone(&self.last_refresh);
         tokio::spawn(async move {
             let ledger = AgentLedger { agent, canister_id, last_refresh };
-            match ledger.refresh_all_balances(&pubkey).await {
+            // The unified canister method takes the requested currency ids, so enumerate the catalog
+            // (the source of truth for which currencies exist). An unreachable canister can't be
+            // enumerated → log + give up (the entries stay stale; the next stale poll re-attempts).
+            let catalog = match ledger.currencies().await {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!(
+                        "dpay-relay: background refresh_balances catalog fetch failed for pubkey={}: {e}",
+                        hex::encode(pubkey)
+                    );
+                    return;
+                }
+            };
+            let all_ids: Vec<Currency> = catalog.iter().map(|d| d.currency).collect();
+            match ledger.refresh_balances(&pubkey, &all_ids).await {
                 Ok(entries) => {
                     // Mark EVERY refreshed currency fresh — the batch just wrote BAL_CACHE for all.
                     let now = Instant::now();
@@ -413,7 +392,7 @@ impl AgentLedger {
                 }
                 Err(e) => {
                     eprintln!(
-                        "dpay-relay: background refresh_all_balances failed for pubkey={}: {e}",
+                        "dpay-relay: background refresh_balances failed for pubkey={}: {e}",
                         hex::encode(pubkey)
                     );
                 }
@@ -495,9 +474,9 @@ impl Ledger for AgentLedger {
     async fn balance(&self, pubkey: [u8; PUBKEY_LEN], currency: Currency) -> Result<u64, LedgerError> {
         // Query-first (MC3 U2). The response path ALWAYS returns the fast cached `balance_of` query
         // (~200ms, no consensus). The authoritative refresh is now a SINGLE batch update fired by the
-        // `/balances` handler via [`refresh_all_if_stale`] (ONE `refresh_all_balances` call for ALL
+        // `/balances` handler via [`refresh_all_if_stale`] (ONE `refresh_balances` call for ALL
         // currencies, not a per-currency spawn here) — so this method is a pure fast query. The
-        // canister's `BAL_CACHE` (written by `refresh_all_balances`/`pay`/`mint`/`faucet`) persists
+        // canister's `BAL_CACHE` (written by `refresh_balances`/`pay`/`mint`/`faucet`) persists
         // across relay restarts, so `balance_of` returns the last-known value immediately; the batch
         // refresh catches direct ICRC transfers that bypass the facade within one poll cycle.
         self.balance_of(&pubkey, currency).await
@@ -506,7 +485,7 @@ impl Ledger for AgentLedger {
     async fn refresh_all_if_stale(&self, pubkey: [u8; PUBKEY_LEN]) {
         // The `/balances` handler calls this ONCE after fanning out the per-currency fast queries.
         // If ANY currency for this pubkey is stale (or none have been refreshed yet — cold start),
-        // fire ONE batch `refresh_all_balances` update in the background. Collapses the old N
+        // fire ONE batch `refresh_balances` update in the background. Collapses the old N
         // per-currency background spawns into a single consensus round. Fire-and-forget: the spawn
         // returns immediately; the task does the IC round trip and marks every currency fresh.
         if self.any_stale_for(pubkey) {

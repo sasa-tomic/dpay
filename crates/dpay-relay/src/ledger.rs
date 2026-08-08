@@ -593,12 +593,13 @@ pub trait Ledger: Send + Sync {
     }
 
     /// Fire a background batch refresh of ALL stale currencies for this pubkey in ONE update call
-    /// (the canister's `refresh_all_balances`), collapsing the relay's N per-currency
-    /// `refresh_balance` update calls into a single consensus round. Default: no-op ([`FakeLedger`]
+    /// (the canister's `refresh_balances`), collapsing the relay's N per-currency
+    /// `refresh_balances` update calls into a single consensus round. Default: no-op ([`FakeLedger`]
     /// is instant and has no refresh concept). [`AgentLedger`](crate::AgentLedger) overrides it to
-    /// spawn a fire-and-forget tokio task that calls the canister's batch refresh when ANY currency
-    /// for this pubkey is stale (or on cold start). The method itself returns immediately (it only
-    /// decides + spawns); the spawned task does the IC round trip.
+    /// spawn a fire-and-forget tokio task that calls the canister's unified refresh (passing every
+    /// registered currency id) when ANY currency for this pubkey is stale (or on cold start). The
+    /// method itself returns immediately (it only decides + spawns); the spawned task does the IC
+    /// round trip.
     async fn refresh_all_if_stale(&self, _pubkey: [u8; PUBKEY_LEN]) {}
 
     /// Seed a pending deposit for `pubkey`/`currency` (the test-helpers hook a browser e2e harness

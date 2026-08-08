@@ -208,37 +208,38 @@ service : (InitArg) -> {
   // account (subaccount `None`) or carry no nonce memo, so they are not matched. Each repair inserts
   // the nonce into SPENT (so a retry is a duplicate) and records the txn (so history reflects it).
   reconcile : (nat32) -> (Result_6);
-  // `(blob pubkey) -> Result<vec record { currency: nat32, amount: nat64 }, text>` — batch
-  // authoritative refresh for ALL registered currencies in a SINGLE update call (one consensus
-  // round). Does N inter-canister `icrc1_balance_of` calls (fast, same-subnet reads, sequential
-  // inside the update) and writes each to `BAL_CACHE`. Replaces the relay's N separate
-  // `refresh_balance` update calls (each its own 2-5s consensus round) with ONE. Best-effort per
-  // currency: a ledger hiccup on ONE currency keeps its last-known cached value (logged, never
-  // silent) and the rest of the batch still succeeds — one bad ledger cannot fail the whole batch.
+  // `(blob pubkey, vec nat32 currencies) -> Result<vec record { currency: nat32, amount: nat64 },
+  // text>` — the UNIFIED authoritative on-demand balance refresh (single + batch via the SAME call;
+  // pass `[currency]` for one, every registered id for all). Reads the live ledger balance via
+  // `icrc1_balance_of` for `Account{owner: canister_self(), subaccount: pubkey}` for each REQUESTED
+  // currency, writes each to `BAL_CACHE` (so the fast `balance_of` query reflects it on subsequent
+  // reads), and returns the list of `BalanceEntry { currency, amount }`.
   // 
-  // Inter-canister calls are sequential (a `for` loop with `.await`). Parallelizing them inside an
-  // `#[update]` would require `futures` in the canister; not worth the complexity — inter-canister
-  // `icrc1_balance_of` calls are fast (~50-100ms each, same subnet), so N sequential ≈ 300-600ms
-  // inside ONE consensus round vs N × 2-5s consensus rounds for the per-currency path it replaces.
+  // Replaces the relay's N separate per-currency update calls (each its own 2-5s consensus round)
+  // with ONE call that does N inter-canister `icrc1_balance_of` reads sequentially inside a single
+  // update (one consensus round). Inter-canister calls are sequential (a `for` loop with `.await`) —
+  // parallelizing them would require `futures` in the canister; not worth it, since same-subnet
+  // `icrc1_balance_of` calls are fast (~50-100ms each), so N sequential ≈ 300-600ms inside ONE
+  // consensus round vs N × 2-5s rounds for the per-currency path.
   // 
-  // No auth gate — consistent with the unauthenticated `refresh_balance`/`balance_of` surface: this
-  // is a read + cache writes that move NO value. RETIRED currency ids are skipped (a retired id is
-  // dead forever and resolves to no live ledger). Modeled on `refresh_balance`'s per-currency read.
-  refresh_all_balances : (blob) -> (Result_7);
-  // `(blob pubkey, nat32 currency) -> Result<nat64, text>` — the AUTHORITATIVE on-demand balance
-  // refresh (MC3 U1). Reads the live ledger balance via `icrc1_balance_of` for
-  // `Account{owner: canister_self(), subaccount: pubkey}`, writes it to `BAL_CACHE` (so the fast
-  // `balance_of` query reflects it on subsequent reads), and returns it.
+  // Best-effort per currency, two layers:
+  // - An UNKNOWN or RETIRED id (one `ledger_for` fails to resolve to a live ledger) is SKIPPED
+  // (logged via `ic_cdk::print`, never silent) and the batch continues — the caller asked for it,
+  // but it resolves to no live ledger; the returned entries cover only the currencies that resolved.
+  // - A `ledger_balance_of` read failure on ONE currency keeps its last-known cached value
+  // (display-only; settlement always reads the ledger directly — the money-safety invariant is
+  // unchanged), is logged via `ic_cdk::print` (never silent), and the batch continues — one bad
+  // ledger cannot fail the whole batch.
   // 
   // **No auth gate** — consistent with the unauthenticated `balance_of`/`deposit_address` surface:
-  // this is a read + a cache write that moves NO value; it only ever credits the named pubkey's
-  // true balance. Use this to surface credits that bypass the facade: asynchronous ckERC20 heartbeat
+  // this is a read + cache writes that move NO value; it only ever credits the named pubkey's true
+  // balance. Use this to surface credits that bypass the facade: asynchronous ckERC20 heartbeat
   // mints and direct ICRC transfers land on the ledger WITHOUT invoking the facade, so `BAL_CACHE`
   // stays stale until this is called. Settlement (`pay`) NEVER reads this — it reads the ledger
-  // directly (the money-safety invariant is unchanged).
-  // 
-  // Modeled EXACTLY on the post-mint authoritative read in `mint` (re-read + `write_cache`).
-  refresh_balance : (blob, nat32) -> (Result);
+  // directly (the money-safety invariant is unchanged). The ONLY hard error is a malformed `pubkey`
+  // (via `to_pubkey`); everything else is best-effort. Modeled on the post-mint authoritative read
+  // in `mint` (re-read + `write_cache`).
+  refresh_balances : (blob, vec nat32) -> (Result_7);
   // `(blob pubkey, nat32 currency) -> Result<DepositRefresh, text>`. Proxies the minter's
   // `update_balance` — the value-creating call that mints confirmed UTXOs onto the currency's ledger
   // at `Account{owner: canister_self(), subaccount: pubkey}`. No auth: idempotent and safe to call by
@@ -248,7 +249,7 @@ service : (InitArg) -> {
   // 
   // After a successful minter call (both the `Ok(statuses)` and the `NoNewUtxos` branches), the
   // display cache is refreshed from the authoritative ledger so a freshly-minted deposit is
-  // immediately visible via `balance_of` WITHOUT an extra `refresh_balance` call (MC3 U1). The
+  // immediately visible via `balance_of` WITHOUT an extra `refresh_balances` call (MC3 U1). The
   // `NoNewUtxos` branch is hit every 10s poll and catches coincident direct transfers / async mints
   // for free (the ~1 extra `icrc1_balance_of` per 10s-poll-per-user is negligible). The cache refresh
   // is deliberately NOT added to the AlreadyProcessing / TemporarilyUnavailable / GenericError

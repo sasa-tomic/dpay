@@ -841,11 +841,11 @@ pub(crate) fn name_field_to_string<const N: usize>(b: &[u8; N]) -> String {
     String::from_utf8_lossy(&bytes).into_owned()
 }
 
-/// One entry of a `refresh_all_balances` batch result: the currency id + its freshly-read
-/// authoritative balance (minor units). Returned by the batch refresh endpoint that reads ALL
-/// registered currencies' balances in a SINGLE update call (one consensus round), replacing the
-/// relay's N separate `refresh_balance` calls. A per-currency ledger hiccup keeps the last-known
-/// cached value (settlement always reads the ledger directly; the cache is display-only).
+/// One entry of a `refresh_balances` result: the currency id + its freshly-read authoritative
+/// balance (minor units). Returned by the unified refresh endpoint that reads the REQUESTED
+/// currencies' balances in a SINGLE update call (one consensus round) — pass `[currency]` for one,
+/// every registered id for all. A per-currency ledger hiccup keeps the last-known cached value
+/// (settlement always reads the ledger directly; the cache is display-only).
 #[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct BalanceEntry {
     pub currency: Currency,

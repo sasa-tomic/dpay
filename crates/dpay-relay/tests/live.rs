@@ -435,7 +435,7 @@ fn live_settlement_end_to_end() {
     pic.stop_live();
 }
 
-/// MC3 U2 — the relay's BATCH `refresh_all_balances` path is AUTHORITATIVE after a cache-bypassing
+/// MC3 U2 — the relay's BATCH `refresh_balances` path is AUTHORITATIVE after a cache-bypassing
 /// credit. Covers credits the facade cache cannot see on its own: direct ICRC transfers + async
 /// ckERC20 heartbeat mints (which land on the ledger WITHOUT invoking the facade, so `BAL_CACHE`
 /// stays stale). Proves the FULL contract under the batch-refresh architecture:
@@ -446,7 +446,7 @@ fn live_settlement_end_to_end() {
 /// 2. A direct `icrc1_transfer` to `Account{owner: facade, subaccount: payer}` (the exact shape of
 ///    a direct ICRC transfer / async ckERC20 heartbeat mint) leaves the cached `balance_of` query
 ///    STALE — and `balance()` returns that stale value (proving `balance()` does not refresh).
-/// 3. `refresh_all_if_stale()` on a cold AgentLedger fires ONE batch `refresh_all_balances` UPDATE
+/// 3. `refresh_all_if_stale()` on a cold AgentLedger fires ONE batch `refresh_balances` UPDATE
 ///    in the background (fire-and-forget); once it lands, `balance()` reflects the authoritative
 ///    amount — collapsing the old N per-currency refreshes into a single consensus round.
 /// 4. Within the TTL window, a second `refresh_all_if_stale()` is a NO-OP (the TTL gate prevents a
@@ -586,7 +586,7 @@ fn balance_and_batch_refresh_are_authoritative_after_cache_bypass_credit() {
 
     // ---- Phase 4 (async): refresh_all_if_stale fires the batch → cache refreshed. ----
     // A cold AgentLedger has NO `last_refresh` entries → `any_stale_for` is true →
-    // `refresh_all_if_stale` spawns ONE `refresh_all_balances` update (fire-and-forget). Once it
+    // `refresh_all_if_stale` spawns ONE `refresh_balances` update (fire-and-forget). Once it
     // lands, the canister's BAL_CACHE is refreshed for ALL currencies, so `balance()` reflects the
     // authoritative amount. The poll loop drives the runtime (yields via sleep) so the spawned task
     // makes progress on its IC update call.

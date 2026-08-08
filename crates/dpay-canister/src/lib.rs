@@ -676,61 +676,57 @@ fn balance_of(pubkey: Vec<u8>, currency: Currency) -> u64 {
     }
 }
 
-/// `(blob pubkey, nat32 currency) -> Result<nat64, text>` — the AUTHORITATIVE on-demand balance
-/// refresh (MC3 U1). Reads the live ledger balance via `icrc1_balance_of` for
-/// `Account{owner: canister_self(), subaccount: pubkey}`, writes it to `BAL_CACHE` (so the fast
-/// `balance_of` query reflects it on subsequent reads), and returns it.
+/// `(blob pubkey, vec nat32 currencies) -> Result<vec record { currency: nat32, amount: nat64 },
+/// text>` — the UNIFIED authoritative on-demand balance refresh (single + batch via the SAME call;
+/// pass `[currency]` for one, every registered id for all). Reads the live ledger balance via
+/// `icrc1_balance_of` for `Account{owner: canister_self(), subaccount: pubkey}` for each REQUESTED
+/// currency, writes each to `BAL_CACHE` (so the fast `balance_of` query reflects it on subsequent
+/// reads), and returns the list of `BalanceEntry { currency, amount }`.
+///
+/// Replaces the relay's N separate per-currency update calls (each its own 2-5s consensus round)
+/// with ONE call that does N inter-canister `icrc1_balance_of` reads sequentially inside a single
+/// update (one consensus round). Inter-canister calls are sequential (a `for` loop with `.await`) —
+/// parallelizing them would require `futures` in the canister; not worth it, since same-subnet
+/// `icrc1_balance_of` calls are fast (~50-100ms each), so N sequential ≈ 300-600ms inside ONE
+/// consensus round vs N × 2-5s rounds for the per-currency path.
+///
+/// Best-effort per currency, two layers:
+/// - An UNKNOWN or RETIRED id (one `ledger_for` fails to resolve to a live ledger) is SKIPPED
+///   (logged via `ic_cdk::print`, never silent) and the batch continues — the caller asked for it,
+///   but it resolves to no live ledger; the returned entries cover only the currencies that resolved.
+/// - A `ledger_balance_of` read failure on ONE currency keeps its last-known cached value
+///   (display-only; settlement always reads the ledger directly — the money-safety invariant is
+///   unchanged), is logged via `ic_cdk::print` (never silent), and the batch continues — one bad
+///   ledger cannot fail the whole batch.
 ///
 /// **No auth gate** — consistent with the unauthenticated `balance_of`/`deposit_address` surface:
-/// this is a read + a cache write that moves NO value; it only ever credits the named pubkey's
-/// true balance. Use this to surface credits that bypass the facade: asynchronous ckERC20 heartbeat
+/// this is a read + cache writes that move NO value; it only ever credits the named pubkey's true
+/// balance. Use this to surface credits that bypass the facade: asynchronous ckERC20 heartbeat
 /// mints and direct ICRC transfers land on the ledger WITHOUT invoking the facade, so `BAL_CACHE`
 /// stays stale until this is called. Settlement (`pay`) NEVER reads this — it reads the ledger
-/// directly (the money-safety invariant is unchanged).
-///
-/// Modeled EXACTLY on the post-mint authoritative read in `mint` (re-read + `write_cache`).
+/// directly (the money-safety invariant is unchanged). The ONLY hard error is a malformed `pubkey`
+/// (via `to_pubkey`); everything else is best-effort. Modeled on the post-mint authoritative read
+/// in `mint` (re-read + `write_cache`).
 #[update]
-async fn refresh_balance(pubkey: Vec<u8>, currency: Currency) -> Result<u64, String> {
+async fn refresh_balances(
+    pubkey: Vec<u8>,
+    currencies: Vec<Currency>,
+) -> Result<Vec<BalanceEntry>, String> {
     let pk = to_pubkey(&pubkey)?;
-    let (ledger, _) = ledger_for(currency)?;
-    let bal = ledger_balance_of(ledger, &account_of(&pk))
-        .await
-        .map_err(|e| format!("refresh_balance ledger read: {e}"))?;
-    write_cache(pk, currency, bal);
-    Ok(bal)
-}
-
-/// `(blob pubkey) -> Result<vec record { currency: nat32, amount: nat64 }, text>` — batch
-/// authoritative refresh for ALL registered currencies in a SINGLE update call (one consensus
-/// round). Does N inter-canister `icrc1_balance_of` calls (fast, same-subnet reads, sequential
-/// inside the update) and writes each to `BAL_CACHE`. Replaces the relay's N separate
-/// `refresh_balance` update calls (each its own 2-5s consensus round) with ONE. Best-effort per
-/// currency: a ledger hiccup on ONE currency keeps its last-known cached value (logged, never
-/// silent) and the rest of the batch still succeeds — one bad ledger cannot fail the whole batch.
-///
-/// Inter-canister calls are sequential (a `for` loop with `.await`). Parallelizing them inside an
-/// `#[update]` would require `futures` in the canister; not worth the complexity — inter-canister
-/// `icrc1_balance_of` calls are fast (~50-100ms each, same subnet), so N sequential ≈ 300-600ms
-/// inside ONE consensus round vs N × 2-5s consensus rounds for the per-currency path it replaces.
-///
-/// No auth gate — consistent with the unauthenticated `refresh_balance`/`balance_of` surface: this
-/// is a read + cache writes that move NO value. RETIRED currency ids are skipped (a retired id is
-/// dead forever and resolves to no live ledger). Modeled on `refresh_balance`'s per-currency read.
-#[update]
-async fn refresh_all_balances(pubkey: Vec<u8>) -> Result<Vec<BalanceEntry>, String> {
-    let pk = to_pubkey(&pubkey)?;
-    // Collect all non-retired currency → ledger pairs in one synchronous read (no await in the
-    // borrow). `is_retired` honors the RETIRED set: a retired id's LEDGERS row is preserved for
-    // history but is skipped here (no live ledger to read).
-    let entries: Vec<(Currency, Principal)> = LEDGERS.with(|m| {
-        m.borrow()
-            .iter()
-            .filter(|(c, _)| !is_retired(*c))
-            .map(|(c, e)| (c, e.principal))
-            .collect()
-    });
-    let mut results = Vec::with_capacity(entries.len());
-    for (currency, ledger) in entries {
+    let mut results = Vec::with_capacity(currencies.len());
+    for currency in currencies {
+        // Resolve the ledger for this REQUESTED currency. An unknown/retired id resolves to no live
+        // ledger — skip it (logged, never silent) and continue the batch; the caller asked for it,
+        // but it cannot be refreshed. The returned entries cover only the resolved currencies.
+        let ledger = match ledger_for(currency) {
+            Ok((l, _)) => l,
+            Err(e) => {
+                ic_cdk::print(format!(
+                    "WARN refresh_balances: currency {currency} skipped ({e}) — no live ledger"
+                ));
+                continue;
+            }
+        };
         match ledger_balance_of(ledger, &account_of(&pk)).await {
             Ok(bal) => {
                 write_cache(pk, currency, bal);
@@ -742,7 +738,7 @@ async fn refresh_all_balances(pubkey: Vec<u8>) -> Result<Vec<BalanceEntry>, Stri
                 // directly — the money-safety invariant is unchanged) and log the error so it is
                 // observable, never silently swallowed.
                 ic_cdk::print(format!(
-                    "WARN refresh_all_balances: currency {currency} read failed ({e}) — kept cached value"
+                    "WARN refresh_balances: currency {currency} read failed ({e}) — kept cached value"
                 ));
                 let cached = BAL_CACHE
                     .with(|c| c.borrow().get(&CacheKey::new(pk, currency)).map(|b| b.amount).unwrap_or(0));
@@ -1384,7 +1380,7 @@ async fn deposit_address(pubkey: Vec<u8>, currency: Currency) -> Result<String, 
 ///
 /// After a successful minter call (both the `Ok(statuses)` and the `NoNewUtxos` branches), the
 /// display cache is refreshed from the authoritative ledger so a freshly-minted deposit is
-/// immediately visible via `balance_of` WITHOUT an extra `refresh_balance` call (MC3 U1). The
+/// immediately visible via `balance_of` WITHOUT an extra `refresh_balances` call (MC3 U1). The
 /// `NoNewUtxos` branch is hit every 10s poll and catches coincident direct transfers / async mints
 /// for free (the ~1 extra `icrc1_balance_of` per 10s-poll-per-user is negligible). The cache refresh
 /// is deliberately NOT added to the AlreadyProcessing / TemporarilyUnavailable / GenericError
@@ -1409,13 +1405,13 @@ async fn refresh_deposit(pubkey: Vec<u8>, currency: Currency) -> Result<DepositR
                 // UTXO is reported again by a subsequent `update_balance` (or never, if tainted).
             }
             // Inline cache refresh: a freshly-minted ckBTC deposit must be immediately visible via
-            // `balance_of` WITHOUT an extra refresh_balance call (MC3 U1). NOT modeled on `mint`'s
+            // `balance_of` WITHOUT an extra refresh_balances call (MC3 U1). NOT modeled on `mint`'s
             // post-mint read: `mint` hard-fails (`?`) if the re-read errors (the mint already
             // settled, so the error surfaces a now-unobservable balance); this refresh is
             // BEST-EFFORT (`if let Ok`) — a read failure leaves the cache stale but does NOT undo
             // the mint or error the call. The staleness is bounded: the NoNewUtxos branch below
             // re-reads on every 10s poll, and the relay's `BALANCE_TTL_SECS` freshness contract
-            // (see dpay-relay AgentLedger) forces an authoritative `refresh_balance` within one
+            // (see dpay-relay AgentLedger) forces an authoritative `refresh_balances` within one
             // TTL window, which re-reads and overwrites the cache.
             if let Ok(bal) = ledger_balance_of(ledger, &account_of(&pk)).await {
                 write_cache(pk, currency, bal);

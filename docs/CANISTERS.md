@@ -10,7 +10,7 @@
 ### `dpay_canister` — the facade / settlement gateway
 - **Mainnet id:** `ssqti-wiaaa-aaaab-qhdia-cai`
 - **Role:** the core. Settlement kernel, canister-signed receipts, multi-currency catalog
-  (`currencies()`), per-currency caps, DEMO faucet entrypoint (`mint`), `reconcile`, `refresh_balance`.
+  (`currencies()`), per-currency caps, DEMO faucet entrypoint (`mint`), `reconcile`, `refresh_balances`.
   All user funds live at `{ owner: facade, subaccount: <ed25519 pubkey> }`.
 - **Source:** `crates/dpay-canister` → `target/wasm32-unknown-unknown/release/dpay_canister.wasm`;
   candid `dfx/dpay_canister.did`.

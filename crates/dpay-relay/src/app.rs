@@ -304,7 +304,7 @@ async fn balance(
 /// Per-currency balance-query timeout for the batch endpoint. Bounds a SINGLE ledger query inside
 /// [`balances`]; the whole batch completes within ~this (the queries fan out concurrently via
 /// `join_all`, so the batch wall-clock ≈ the slowest single query, not the sum). Generous enough for
-/// a real IC query (a query read or a cold-start `refresh_balance` update: 1–5s observed), short
+/// a real IC query (a query read or a cold-start `refresh_balances` update: 1–5s observed), short
 /// enough that a fully-hung ledger can't stall the response. The app's own HTTP timeout
 /// (BALANCE_TIMEOUT_MS = 4s) is the tighter user-facing bound — it will abort the app→relay fetch
 /// first in the slow case; this is the relay's own safety net against a wedged ledger so the route
@@ -380,7 +380,7 @@ async fn balances(State(state): State<AppState>, Path(hex_pk): Path<String>) -> 
 
     // Fire ONE batch background refresh of ALL currencies if any are stale (cold start / TTL
     // expired). The `balance()` calls above returned the fast cached `balance_of` queries; this
-    // single `refresh_all_balances` update (one consensus round) refreshes `BAL_CACHE` for every
+    // single `refresh_balances` update (one consensus round) refreshes `BAL_CACHE` for every
     // currency so the NEXT poll reflects facade-bypassing credits (direct transfers / async mints).
     // Collapses the old N per-currency background refreshes into one. Fire-and-forget: the method
     // spawns a tokio task and returns immediately (FakeLedger's default is a no-op).
