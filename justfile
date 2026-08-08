@@ -52,7 +52,7 @@ wire-layout:
 # drives every flow through the real app AND screenshots each state (shots land in e2e/shots/),
 # superseding the old parallel-component ui/ harness (removed). Add a flow = add `e2e/tests/NN-name.mjs`.
 e2e:
-    cd e2e && npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps
+    cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps)
     cd e2e && node run.mjs
 
 # visual-regression gate (fast iteration on flow 40 alone): re-capture the 5 primary surfaces and
@@ -63,14 +63,14 @@ e2e:
 # banner, no other flows). On an intentional UI change, regenerate the baselines via
 # `just e2e-visual-seed` and commit the new baselines (the diff is reviewable in the commit).
 e2e-visual:
-    cd e2e && npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps
+    cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps)
     cd e2e && DPAY_E2E_FILTER=40 node run.mjs
 
 # regenerate the visual-regression baselines from the current app surfaces (run after an intentional
 # UI/style change). Writes e2e/shots/baselines/<surface>.png for each of the 5 surfaces. COMMIT the
 # new baselines — they ARE the contract; a future regression diffs against them.
 e2e-visual-seed:
-    cd e2e && npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps
+    cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps)
     cd e2e && DPAY_E2E_REGEN_BASELINES=1 DPAY_E2E_FILTER=40 node run.mjs
 
 # watch mode (Phase 3): a LONG-RUNNING dev loop that re-runs a SUBSET of flows on every change to
@@ -80,14 +80,14 @@ e2e-visual-seed:
 # browser session PERSISTS across re-runs (only per-test contexts churn). Ctrl-C tears it down.
 # Shared-infra changes (App.tsx, styles.ts, services/native.ts, harness/*, crates/**) re-run ALL.
 e2e-watch:
-    cd e2e && npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps
+    cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps)
     cd e2e && node watch.mjs
 
 # watch mode PINNED to a filter token (journey/id/name/covers slug). The pinned filter always wins
 # — the changed-file→journey mapping is bypassed. Use this to iterate on a specific journey or flow
 # (e.g. `just e2e-watch pay` runs the 16 pay flows; `just e2e-watch 07` runs flow 07 alone).
 e2e-watch-filter filter:
-    cd e2e && npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps
+    cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps)
     cd e2e && DPAY_E2E_WATCH_FILTER={{filter}} node watch.mjs
 
 # production gate: same harness drives the LIVE relay + canister at DPAY_E2E_BASE. Throwaway identities,
@@ -106,7 +106,7 @@ e2e-live:
 # — then: DPAY_E2E_BASE=http://127.0.0.1:8788 just e2e-live-testnet
 # (Alt: deploy scripts/dfx-deploy-ic-staging.sh for an isolated staging facade.)
 e2e-live-testnet:
-    cd e2e && npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps
+    cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps)
     node ../e2e-live/run.mjs
 
 # narrated end-to-end demo: offline sign -> canister -> Paid (self-checking)
