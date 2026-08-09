@@ -1,27 +1,30 @@
-// Flow 52 — SOL withdraw (SolanaWithdrawSheet).
+// Flow 52 — SOL withdraw (SolanaWithdrawSheet, inline in the Pay tab).
 //
 // The SOL withdraw sheet (8KB component) had ZERO e2e coverage before this flow. Its local signing
 // is byte-exact vs @solana/web3.js (proven in jest), but the UI submit/confirm/done phases were only
 // covered by mirror (WithdrawSheet). This flow drives the REAL SolanaWithdrawSheet through the stub
-// RPC: enter address + amount → Send → "Sent ✓" + signature.
+// RPC via the SAME tab IA every IC currency uses (no per-currency exception): Balances → select SOL
+// → Pay tab → "Send to address" sub-mode (the pay-mode-toggle right segment) → enter addr+amount →
+// Send → "Sent ✓" + signature.
 //
 // Proves end-to-end through the REAL app:
-//   1. The SOL row's Send button (`btn-sol-send`) renders ONLY when solBalance > 0 (stub = 5 SOL).
-//   2. Opening the sheet + entering a valid address + amount surfaces the review card.
-//   3. Confirm → sendSol (getLatestBlockhash + sendTransaction + confirm, all stubbed) → "Sent ✓".
-//   4. The transaction signature is rendered + the success state is reachable.
+//   1. SOL is selectable in Balances (whole-row select, uniform with IC — no per-row Send button).
+//   2. The Pay tab "Send to address" toggle surfaces the SolanaWithdrawSheet body INLINE in the tab.
+//   3. Entering a valid address + amount surfaces the review card.
+//   4. Confirm → sendSol (getLatestBlockhash + sendTransaction + confirm, all stubbed) → "Sent ✓".
+//   5. The transaction signature is rendered + the success state is reachable.
 //
-// Selector contract: `btn-sol-send`, `sol-send-address-input`, `sol-send-amount-input`,
-// `sol-send-review`, `sol-send-review-amount`, `btn-sol-send-confirm`, `sol-send-status`,
-// `sol-send-signature`.
+// Selector contract: `asset-sol-select`, `tab-pay`, `btn-pay-send`, `sol-send-address-input`,
+// `sol-send-amount-input`, `sol-send-review`, `sol-send-review-amount`, `btn-sol-send-confirm`,
+// `sol-send-status`, `sol-send-signature`.
 import {setup, assert, onboardWallet, openBalances} from '../harness/lib.mjs';
 
 export const meta = {
   id: '52',
   name: 'sol-withdraw',
   journey: 'withdraw',
-  covers: ['sol-withdraw', 'sol-send', 'sol-balance-gate', 'sign'],
-  verifies: 'SOL withdraw: funded SOL row Send → enter addr+amount → sign+broadcast (stub) → Sent ✓.',
+  covers: ['sol-withdraw', 'sol-send', 'sol-tab-ia', 'sign'],
+  verifies: 'SOL withdraw: select SOL → Pay tab "Send to address" → enter addr+amount → sign+broadcast (stub) → Sent ✓.',
   timeoutMs: 25000,
 };
 
@@ -39,7 +42,7 @@ export async function run() {
     await onboardWallet(driver, 'e2e-sol-send');
 
     // Install the SOL RPC stub. sendSol needs: getLatestBlockhash, sendTransaction, confirmTransaction
-    // (getSignatureStatuses). getBalance (5 SOL) is polled by useSolanaBalance → funds the Send button.
+    // (getSignatureStatuses). getBalance (5 SOL) is polled by useSolanaBalance → funds the inline send.
     await driver.eval(() => {
       globalThis.__DPAY_TEST_SOLANA_RPC_STUB = {
         getLatestBlockhash: () => ({value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
@@ -51,15 +54,20 @@ export async function run() {
       };
     });
 
-    // 1. Open Balances → the SOL row's Send button renders (solBalance = 5 SOL > 0).
-    console.log('[52-sol-withdraw] opening Balances; waiting for the SOL Send button…');
+    // 1. Open Balances → select SOL as the active asset (whole-row select, uniform with IC). The
+    //    stub funds the SOL balance to 5 SOL, but that no longer gates a per-row Send button — the
+    //    send surface lives in the Pay tab now.
+    console.log('[52-sol-withdraw] opening Balances; selecting SOL…');
     await openBalances(driver);
-    await driver.findByTestID('btn-sol-send', {timeoutMs: 8_000});
-    console.log('[52-sol-withdraw] ✓ SOL Send button rendered (balance funded)');
+    await driver.findByTestID('asset-sol-select', {timeoutMs: 8_000});
+    await driver.click('asset-sol-select', {timeoutMs: 5_000});
+    await driver.waitGone('btn-balances-close', {timeoutMs: 5_000});
 
-    // 2. Open the SolanaWithdrawSheet.
-    console.log('[52-sol-withdraw] opening the send sheet…');
-    await driver.click('btn-sol-send', {timeoutMs: 5_000});
+    // 2. Switch to the Pay tab → tap "Send to address" → the SolanaWithdrawSheet body renders INLINE.
+    console.log('[52-sol-withdraw] switching to the Pay tab + opening "Send to address"…');
+    await driver.click('tab-pay', {timeoutMs: 5_000});
+    await driver.findByTestID('pay-mode-toggle', {timeoutMs: 5_000});
+    await driver.click('btn-pay-send', {timeoutMs: 5_000});
     await driver.findByTestID('sol-send-address-input', {timeoutMs: 5_000});
 
     // 3. Enter the destination address + amount.

@@ -1,23 +1,24 @@
-// Flow 45 — Native SOL rail: balance card + receive address sheet.
+// Flow 45 — Native SOL rail: balance card + receive address (inline in the Receive tab).
 //
 // Proves the device-derived Solana key path renders in the Balances hub (a SEPARATE card from the
-// relay-mediated catalog) and that tapping Receive opens a sheet with the locally-derived Solana
-// address + QR + copy. The address is derived IN-BROWSER from the real onboarding seed via the same
-// SLIP-10 m/44'/501'/0'/0' path the device uses (e2e/web/dpay-core.ts provides a real noble
-// generateKeypair), so this is a true end-to-end check of the derivation + rendering, not a stub.
+// relay-mediated catalog) and that the locally-derived Solana address + QR + copy surface is reached
+// via the SAME tab IA every IC currency uses (no per-currency exception): Balances → select SOL →
+// Receive tab → "My address" sub-mode (the receive-mode-toggle right segment). The address is derived
+// IN-BROWSER from the real onboarding seed via the same SLIP-10 m/44'/501'/0'/0' path the device uses
+// (e2e/web/dpay-core.ts provides a real noble generateKeypair), so this is a true end-to-end check of
+// the derivation + rendering, not a stub.
 //
 // RPC is DISABLED in e2e (`__DPAY_TEST_SOLANA_RPC_URL=''`) so the balance shows "—" and no devnet
-// call is ever made — the inner loop stays fully offline. The Send button is gated on a positive
-// balance, so it is correctly ABSENT here; the send sheet's local signing is covered byte-exact by
-// jest (solana-tx.test.ts vs @solana/web3.js) and its UI mirrors the e2e-covered WithdrawSheet.
+// call is ever made — the inner loop stays fully offline. The deposit address renders inline (no
+// overlay sheet); the SOL per-row Balances buttons are gone (uniform with IC).
 import {setup, assert, assertIncludes, onboardWallet, openBalances} from '../harness/lib.mjs';
 
 export const meta = {
   id: '45',
   name: 'sol-receive',
   journey: 'deposit',
-  covers: ['sol-card', 'sol-derive', 'sol-receive', 'qr', 'address'],
-  verifies: 'Native SOL rail: device-derived SOL card in Balances + receive address QR (offline, no devnet).',
+  covers: ['sol-card', 'sol-derive', 'sol-receive', 'qr', 'address', 'sol-tab-ia'],
+  verifies: 'Native SOL rail: device-derived SOL card in Balances + receive address QR via the Receive tab "My address" sub-mode (offline, no devnet).',
   timeoutMs: 20000,
 };
 
@@ -46,33 +47,40 @@ export async function run() {
     assertIncludes(cardTxt, '—', 'SOL card should show "—" balance when RPC is disabled (offline)');
     console.log('[45-sol-receive] ✓ SOL card renders with offline "—" balance');
 
-    // 2. Receive opens the locally-derived address sheet. The address comes from the SAME seed as the
-    //    IC identity, derived via SLIP-10 m/44'/501'/0'/0' — fully in-browser, no network.
-    console.log('[45-sol-receive] opening the SOL receive sheet…');
-    await driver.click('btn-sol-receive', {timeoutMs: 5_000});
-    await driver.findByTestID('sol-receive-address', {timeoutMs: 8_000});
+    // 2. Select SOL as the active asset (the whole-row select; SOL === IC — no per-row Receive/Send
+    //    buttons anymore). The Balances sheet auto-closes; SOL becomes the active rail.
+    console.log('[45-sol-receive] selecting SOL as the active asset…');
+    await driver.click('asset-sol-select', {timeoutMs: 5_000});
+    await driver.waitGone('btn-balances-close', {timeoutMs: 5_000});
+
+    // 3. Switch to the Receive tab. SolReceiveMode mounts; the "My address" sub-mode toggle (the
+    //    right segment of the receive-mode-toggle) is always rendered for SOL.
+    console.log('[45-sol-receive] switching to the Receive tab…');
+    await driver.click('tab-receive', {timeoutMs: 5_000});
+    await driver.findByTestID('receive-mode-toggle', {timeoutMs: 5_000});
+
+    // 4. Tap "My address" → the SolanaReceiveSheet body renders INLINE in the tab (no overlay).
+    //    The address comes from the SAME seed as the IC identity, derived via SLIP-10 m/44'/501'/0'/0'
+    //    — fully in-browser, no network.
+    console.log('[45-sol-receive] opening the SOL receive address sub-mode…');
+    await driver.click('btn-receive-address', {timeoutMs: 5_000});
     const address = await driver.readText('sol-receive-address');
     assert(BASE58.test(address),
       `SOL receive address should be a valid base58 Solana address (32–44 chars), got "${address}"`);
     console.log(`[45-sol-receive] ✓ receive address: ${address}`);
 
-    // 3. The copy control is present (mirrors the ckBTC deposit sheet's copy affordance).
+    // 5. The copy control is present inline (mirrors the ckBTC deposit sheet's copy affordance).
     await driver.findByTestID('btn-sol-receive-copy', {timeoutMs: 5_000});
-    console.log('[45-sol-receive] ✓ copy control present');
+    console.log('[45-sol-receive] ✓ copy control present (inline)');
 
     await driver.screenshot('45-sol-receive');
 
-    // 4. Closing returns to the Balances hub (the sheet unmounts).
-    await driver.click('btn-sol-receive-close', {timeoutMs: 5_000});
-    await driver.waitGone('sol-receive-address', {timeoutMs: 5_000});
-    console.log('[45-sol-receive] ✓ receive sheet closed');
-
-    // 5. The Send button is gated on a positive balance — with RPC disabled it must NOT render.
-    //    This guards against a gating regression that would offer a send with no funded balance.
-    let sendPresent = true;
-    try { await driver.findByTestID('btn-sol-send', {timeoutMs: 1_500}); } catch { sendPresent = false; }
-    assert(!sendPresent, 'Send SOL button must be absent when balance is unfunded (offline)');
-    console.log('[45-sol-receive] ✓ Send button correctly absent (balance unfunded)');
+    // 6. Pay tab parity: switching to the Pay tab surfaces the SOL "Send to address" toggle (uniform
+    //    with IC — SOL no longer carries per-row Balances Send). Assert the toggle exists; it's gated
+    //    on no balance offline, so only the toggle (not the funded-only send surface) is asserted.
+    await driver.click('tab-pay', {timeoutMs: 5_000});
+    await driver.findByTestID('btn-pay-send', {timeoutMs: 5_000});
+    console.log('[45-sol-receive] ✓ Pay tab "Send to address" toggle present (SOL === IC)');
 
     const elapsed = ((Date.now() - start) / 1000).toFixed(2);
     console.log(`[45-sol-receive] GREEN in ${elapsed}s`);
