@@ -47,6 +47,51 @@ details.
 
 ---
 
+## Session summary (2026-08-09): SOL UX + codebase sweep — reported bug fix, integrity hardening, devnet safety, e2e coverage
+
+> All gates green: `just verify` **55/55 e2e** (added flows 51–54) in ~106s under ×3.15 load factor, jest **480/480** (+10 new solana-payments tests + 6 solana-errors tests), test-relay **49/49** (fake_catalog grew by 1 testnet currency), typecheck clean, bridge-parity OK (28 methods). On `main`, **8 commits** this session (`30045a8`→`80bb302`). Wire FROZEN (292/196/132) untouched; ZERO canister/facade/core/relay change — fully app-scoped + e2e + docs. Plan: `2026-08-08-sol-ux-and-sweep.md`.
+
+**Headline: the founder tried to "pay" with SOL on Android and got a raw Solana RPC error with no guidance.** Root cause: the SOL source account had no balance (devnet `Attempt to debit... no record of a prior credit`), shown raw because `friendlySolError` didn't exist + 3 UI surfaces had no error mapping + `broadcastSolPayment` regex misclassified the error. Fixed immediately, then a 4-subagent research swarm + fix sweep addressed the broader SOL rail integrity + UX gaps the bug exposed.
+
+**Reported bug fix (commit `30045a8`):** created `app/solana/errors.ts` — pure `friendlySolError(msg)` (single source, jest-tested 6 cases). Wired into all 3 SOL UI surfaces (`SolPayMode`, `SolanaWithdrawSheet`, `SolReceiveMode`). Extended `solana.ts:208` regex to classify the no-credit class as REJECTED.
+
+**Integrity hardening (commits `d81d004`, `6e71071`) — the deeper gaps the bug exposed:**
+- **F1 expiry enforcement (HIGH):** `validateReq` checked `exp` was an integer but NEVER compared to `now` — a stale/replayed `solreq:` was fully signable (SOL has no server-side enforcement unlike IC). Added pure `isSolReqExpired(req, nowMs)` (`app/solana/payments.ts`, jest-tested); `SolPayMode.onScan` + `SolNfcTap.autoSign` reject expired solreq. SolReceiveMode now shows a live expiry countdown (mirrors IC ReceiveMode).
+- **F2 merchant binding (HIGH):** `SolReceiveMode.onSignedQr` did NOT verify the scanned `solpay` matched the open `solreq` (to/cur/amt) — it broadcast whatever the payer claimed + showed the payer's claimed amount. Added pure `solpayMatchesReq(solpay, req)` (jest-tested); asserts to/cur/amt before broadcast in `SolReceiveMode.onSignedQr` + `SolNfcTap.submitPayment`.
+- **F8 resyncNonce retry (MED):** `createNonceAccount` retried 3×/500ms but `resyncNonce` had NO retry — asymmetric robustness on the same lag surface. Extracted shared `readNonceWithRetry` in `solana.ts`; both use it.
+- **F6 honest devnet error (MED):** refined `friendlySolError` no-credit message to cover BOTH unfunded AND devnet-pool lag (the load-balanced pool can make a funded account look unfunded to the simulating node). The regex stays TIGHT (`/no record of a prior credit|found no record/i`) — adding `simulation failed|debit` was too greedy (caught insufficient-funds).
+
+**Devnet safety surface (commits `d81d004`, `6e71071`):**
+- `IS_SOLANA_DEVNET` flag (derived from `SOLANA_RPC_URL`) in `config/constants.ts`.
+- DEVNET badges on `SolPayMode` (setup+scan) + `SolReceiveMode` (form+reqQr).
+- Devnet warning on `SolanaReceiveSheet` (testID `sol-devnet-warning`) — the highest fund-loss-risk surface (a user sending mainnet SOL to a devnet-polled address).
+- **Release-path prod guard** (`scripts/check-prod-sol.mjs`, wired into `scripts/build-apk.sh`): fails the build if the baked RPC default points at devnet/testnet or the rate-limited public mainnet (`api.mainnet-beta.solana.com`). `DPAY_SOL_RPC` env acknowledges an explicit choice. Currently FAILS (baked default is devnet) — correct until operator sets a paid provider. Closes F9 (launch risk: no guard prevented a prod build shipping at devnet).
+
+**UX fixes (commit `6e71071`):**
+- **Keyboard covers "Create wallet" CTA** — `Onboarding.tsx` wrapped in `KeyboardAvoidingView` + `ScrollView` (AndroidManifest already had `adjustResize`).
+- **Unfunded escape hatch** — `onShowDeposit` callback threaded Wallet→SolPayMode; "Show my SOL address" button (testID `sol-show-deposit`) on setup-error + stale screens (the error said "deposit to your address" but offered no path to the address — a dead-end).
+- **ETH sub-label** — `disp.nativeAsset` → `disp.networkLabel` in BalancesSheet (ETH→Ethereum; was backing_symbol='ETH').
+- **Active-rail chip** (testID `active-rail-chip`) on the main screen showing SOL/DEMO/IC wrapper_name (prevents users getting silently stuck in SOL mode).
+- **10 empty NFC catches → console.warn** (`NfcTap` ×3, `SolNfcTap` ×5, `useNfcTapState` ×2) — closes the device-blind-spot class where a bridge/FFI throw looked identical to an invalid signature.
+- **`app/sol-devnet-test.ts` moved to `.dev/`** (was a 212-line standalone test script in the prod tree with zero references; imports rewritten `./`→`../app/`).
+- **`SOL_BROADCAST_TIMEOUT_MS`** named const (replaces 3 inlined `SOL_SEND_TIMEOUT_MS*2` sites).
+
+**Default-tab change → REVERTED (commit `6ec2682`):** Subagent A's A6 changed `balancesOpen` default to open on launch. BROKE e2e flow 14 (keyboard hotkey assertion blocked by the modal sheet). Reverted to `useState(false)`. The underlying UX concern (new user lands on Pay scanner + NFC error) is DEFERRED — any default-tab change needs coordinated e2e updates.
+
+**E2e coverage (commits `e7ad2c6`, `8f22092`, `9c7b88d`, `80bb302`):**
+- **4 new SOL flows (51-53 + funded balance):** `51-sol-merchant-broadcast` (entire merchant broadcast path), `52-sol-withdraw` (first coverage of SolanaWithdrawSheet), `53-sol-merchant-error` (rejecting stub → friendly "Payment rejected", no raw RPC leak).
+- **Flow 54 testnet-toggle:** seeded ckTESTBTC into `fake_catalog()` as currency 6 (5 was already native ckETH) → the toggle becomes exercisable; closes the prod-only-catalog blind spot flagged in AGENTS.md.
+- **Flake stabilization:** `02-faucet` timeout 15s→25s; removed `05-deposit-credited` racy `notYet` assertion (raced the app's 150ms auto-poll); `DPAY_E2E_NO_FAILFAST=1` triage mode (fail-fast previously aborted ~45 flows on one flake).
+- FLOWS.md regenerated (55 flows); AGENTS.md "44 flows" → "55 flows".
+
+**Items DEFERRED (optional Subagent D, not blocking):**
+- **F3 merchant ed25519.verify** — the payer's `solpay.tx` signature is currently only validated *implicitly* by Solana accepting/rejecting the broadcast. A merchant-side `ed25519.verify(sig, message, payerPubkey)` before broadcast would mirror the IC receipt-verify posture (defense-in-depth, not a funds risk — on-chain rejects a bad sig).
+- **F4 USDC toggle gating** — the SOL/USDC toggle is offered in the UI but USDC offline-pay is non-functional without pre-existing ATAs (`sourceAta` must exist on-chain). Gating it behind an ATA-existence check is a documented follow-up.
+- **Default-tab/first-impression UX** — the new user lands on the Pay scanner + "NFC not available" instead of a wallet overview. Requires coordinated e2e updates (any modal-sheet change blocks the keyboard hotkey flow). Deferred to a dedicated UX session.
+- **Seed/backup affordance** — Settings has Reset + Privacy + relay URL but no way to view/export the seed phrase ("one backup recovers both rails" is a pitch point with no UI backing it).
+
+---
+
 ## NEXT SESSION — work order (2026-08-08) — ✅ ALL 6 DONE
 
 > **CORRECTION (founder, 2026-08-07): the wire is NOT frozen.** No public release has shipped, so wire-format changes remain
@@ -262,7 +307,7 @@ suggested priority, not a hard sequence.
 3. **✅ DONE (2026-08-06).** Real devnet round-trip from the APP proven. A faithful Node proof transpiled the app's REAL `solana.ts`/`identity.ts`/`tx.ts`/`rpc.ts` (+ the `config/constants.ts` `SOLANA_RPC_URL` seam) to CJS via `tsc`, funded the app-SLIP-10-derived address `ByXPEXoQdV5y4KqXmykrkwSDhbNjMuwqdp4uYdvWNZPS` from PoC key `a`, and ran the app's `getSolanaBalance` + `sendSol` → `getLatestBlockhash` + `sendTransaction` + `confirmTransaction` path against `api.devnet.solana.com`. Send sig `36iNhSstnx5DW72hmne27Thr453JmQUGFiTrL3pLYdrEHU4BukAgCUSQH6cBiZHsb9BxnEXrAjEWpYvit4rJyb3X` (0.001 SOL → PoC key `b`), target delta exactly +1_000_000 lamports, confirm passed. Proof script lives at `.dev/sol-proof/run.cjs` (gitignored; re-runnable: `node .dev/sol-proof/run.cjs`). **Note:** devnet RPC is a load-balanced pool — a freshly-confirmed fund may be invisible to the node that simulates the next tx (preflight "no record of a prior credit"); the proof polls the app's `getBalance` until it sees the funds + retries the send. This is a devnet-pool quirk, not an app bug.
 4. **✅ DONE (2026-08-06).** Offline-pay durable-nonce rail — QR path BUILT + e2e-proven (commits `fe2be81`→`cb4ff51` + self-check `e85fbd7`/`79c475e`). The full QR offline-pay feature is implemented: pure builders (`nonce.ts`+`spl.ts`), QR codec (`solreq:`/`solpay:`), RPC stub seam, seam lifecycle (signOffline/createNonce/broadcast/resync), payer nonce persist, receipt-nonce-relay outcome logic, SolPayMode + SolReceiveMode UI, Wallet wiring, e2e flow 46 (47/47 GREEN, jest 400/400). Covers SOL + SPL/USDC. **Device gate CONFIRMED: `just app` → `DPAY_SELFCHECK PASS` + `DPAY_SOL_SELFCHECK PASS`** (the extended self-check exercises `deriveSolanaKeypair` + `buildAdvanceAndTransferMessage` on Hermes; the initial run caught a self-check-input bug where authority==toAddress caused `assembleMessage` to dedup accounts — fixed `79c475e`). **NFC parity ALSO DONE** (commit `d772ae3`): a second fully-independent NFC transport (pure Kotlin HCE, AID `F06470617902`) + e2e flow 47. The `DpaySolNfc` coordinator carries variable-length `solreq:`/`solpay:` URI strings + the receipt-nonce-relay JSON over a chunked APDU protocol (PUT/GET + tag/moreflag). Device gate CONFIRMED: `just app` → both self-checks PASS, module loads, no crash. Physical two-phone radio hop stays a physical-device gate (same as the IC rail). Two v2 follow-ups recorded (non-blocking): source-ATA auto-create for USDC, stronger getTransaction receipt verify.
 5. **🟡 Mainnet RPC config (operator step).** `SOLANA_RPC_URL` defaults to public devnet. For production, an operator edits `config/constants.ts` to a Helius/QuickNode URL+key (public `api.mainnet-beta.solana.com` rate-limits at 40 req/10s — fails the 2.5s balance poll). No code change; config + redeploy.
-6. **🟢 e2e SOL send flow (deferred).** Flow 45 covers the SOL card + receive address QR. A send flow needs a funded balance, which requires live RPC — incompatible with the offline e2e loop (RPC disabled → balance `—` → send button hidden). Defer to the devnet/device confidence path (item 3), or add a `__DPAY_TEST_SOLANA_RPC` stub seam later.
+6. ~~**🟢 e2e SOL send flow (deferred).** Flow 45 covers the SOL card + receive address QR. A send flow needs a funded balance, which requires live RPC — incompatible with the offline e2e loop (RPC disabled → balance `—` → send button hidden). Defer to the devnet/device confidence path (item 3), or add a `__DPAY_TEST_SOLANA_RPC` stub seam later.~~ **✅ DONE (2026-08-09).** The `__DPAY_TEST_SOLANA_RPC_STUB` seam (already used by flows 46/47 for the offline-pay rail) now backs flow 52-sol-withdraw (stub funds 5 SOL → `btn-sol-send` renders → enter addr+amt → `sendSol` via stub → "Sent ✓" + signature). Plus flow 51-sol-merchant-broadcast (merchant broadcast path) + flow 53-sol-merchant-error (rejecting stub → friendly error). The entire SOL merchant + withdraw + error surface is now e2e-covered.
 
 ## Session summary (2026-08-06, part 3): native-ETH LIVE-PROVEN both directions on Sepolia + SOL native-device-key decision + PoC + architecture plan
 
