@@ -89,7 +89,7 @@ export const WALLETCONNECT_PROJECT_ID =
 // WALLETCONNECT_PROJECT_ID + EXPECTED_RECEIPT_PUBKEY override seam exactly. Prod never sets the
 // global → falls through to the baked default.
 export const SOLANA_RPC_URL =
-  ((globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_URL?: string}).__DPAY_TEST_SOLANA_RPC_URL ?? 'https://api.devnet.solana.com');
+  ((globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_URL?: string}).__DPAY_TEST_SOLANA_RPC_URL ?? 'https://mainnet.helius-rpc.com/?api-key=76929a9c-96d5-4866-9e71-f0e8a8930777');
 
 // Whether the configured SOL RPC is a devnet endpoint. Derived from the URL so it stays correct
 // when an operator flips SOLANA_RPC_URL. Used to badge SOL screens ("DEVNET") and warn on the
