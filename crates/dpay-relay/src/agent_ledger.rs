@@ -420,6 +420,17 @@ impl AgentLedger {
     }
 }
 
+/// Candid mirror of the ICRC-1 `Account` record (`{ owner: principal; subaccount: opt blob }`) for
+/// the direct `icrc1_balance_of` query. The `subaccount` is the raw 32-byte pubkey — identical to
+/// the canister's `account_of(pk) = Account { owner: canister_self(), subaccount: Some(pk) }`, so a
+/// direct ledger query sees the exact account the facade mints into (and the facade's `pay`/`mint`
+/// credit). `owner` is THIS facade (`self.canister_id`).
+#[derive(CandidType)]
+struct Icrc1AccountMirror {
+    owner: Principal,
+    subaccount: Option<Vec<u8>>,
+}
+
 #[async_trait]
 impl Ledger for AgentLedger {
     async fn pay(&self, wire: Vec<u8>) -> Result<Receipt, LedgerError> {
@@ -480,6 +491,46 @@ impl Ledger for AgentLedger {
         // across relay restarts, so `balance_of` returns the last-known value immediately; the batch
         // refresh catches direct ICRC transfers that bypass the facade within one poll cycle.
         self.balance_of(&pubkey, currency).await
+    }
+
+    /// Direct `icrc1_balance_of(account) -> nat` QUERY on the currency's ledger — free, always-live,
+    /// and one hop fewer than the facade's cached `balance_of` (no consensus, no `BAL_CACHE`). The
+    /// batch `/balances` handler fans this out per catalog currency, replacing the facade-cached read
+    /// path AND the background `refresh_balances` update (the relay no longer routes balance reads
+    /// through the facade at all). The account is the SAME subaccount the facade mints into
+    /// (`Account{owner: <this facade>, subaccount: pubkey}`), so a direct query sees exactly what the
+    /// facade would. `ledger_text` is the catalog's text Principal; `_currency` is unused (the ledger
+    /// IS the right one for that currency).
+    async fn balance_on_ledger(
+        &self,
+        ledger_text: &str,
+        pubkey: [u8; PUBKEY_LEN],
+        _currency: Currency,
+    ) -> Result<u64, LedgerError> {
+        let ledger = Principal::from_text(ledger_text).map_err(|e| {
+            LedgerError::Transient(format!("parse ledger principal '{ledger_text}': {e}"))
+        })?;
+        let arg = encode_one(&Icrc1AccountMirror {
+            owner: self.canister_id,
+            subaccount: Some(pubkey.to_vec()),
+        })
+        .map_err(|e| LedgerError::Transient(format!("encode icrc1_balance_of arg: {e}")))?;
+        let reply = tokio::time::timeout(
+            Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
+            self.agent.query(&ledger, "icrc1_balance_of").with_arg(arg).call(),
+        )
+        .await
+        .map_err(|_| {
+            LedgerError::Transient(format!(
+                "icrc1_balance_of timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
+            ))
+        })?
+        .map_err(|e| LedgerError::Transient(format!("icrc1_balance_of query: {e}")))?;
+        // ICRC-1 returns `nat`; candid decodes it into `u128` (balances are bounded far below u64).
+        let bal: u128 = decode_one(&reply)
+            .map_err(|e| LedgerError::Transient(format!("decode icrc1_balance_of reply: {e}")))?;
+        u64::try_from(bal)
+            .map_err(|_| LedgerError::Transient("icrc1_balance_of result exceeds u64".into()))
     }
 
     async fn refresh_all_if_stale(&self, pubkey: [u8; PUBKEY_LEN]) {

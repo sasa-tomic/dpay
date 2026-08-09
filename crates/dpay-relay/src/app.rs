@@ -351,13 +351,15 @@ const BALANCE_BATCH_QUERY_TIMEOUT: Duration = Duration::from_secs(5);
 /// N+1 poll (1 primary fetch + 1 per-asset fetch, each a relay→IC round trip) with a SINGLE fetch —
 /// with 6 production currencies that's 1 HTTP request instead of 6 sequential-ish round trips.
 ///
-/// Internally fans the per-currency `Ledger::balance` queries out CONCURRENTLY (`futures_util::join_all`),
-/// each under its own `BALANCE_BATCH_QUERY_TIMEOUT`, so a slow/hung ledger for ONE currency can't
-/// stall the rest — best-effort per currency, matching the old per-asset poll's "a hiccup on one
-/// asset's ledger never flips the primary offline" guarantee. A currency whose query errors or times
-/// out is OMITTED from the map (the wallet keeps its prior value for that currency) and logged here
-/// (no silent errors). The catalog fetch itself is all-or-nothing: if it fails the route is `503`
-/// (the relay can't enumerate currencies without it).
+/// Internally fans one DIRECT `icrc1_balance_of` query per catalog ledger out CONCURRENTLY
+/// (`futures_util::join_all`), each under its own `BALANCE_BATCH_QUERY_TIMEOUT`, so a slow/hung
+/// ledger for ONE currency can't stall the rest — best-effort per currency, matching the old
+/// per-asset poll's "a hiccup on one asset's ledger never flips the primary offline" guarantee. A
+/// currency whose query errors or times out is OMITTED from the map (the wallet keeps its prior
+/// value for that currency) and logged here (no silent errors). The catalog fetch itself is
+/// all-or-nothing: if it fails the route is `503` (the relay can't enumerate currencies without it).
+/// Each query is a free read DIRECTLY on the currency's ledger (no facade hop, no consensus, no
+/// cache), so the batch is always-live at near-zero cost.
 ///
 /// Response shape (flat map, currency index string → minor-units decimal string): the JSON object
 /// keys are serde-serialized currency indices as decimal strings, e.g. `{"0":"5000","1":"0",...}`.
@@ -383,10 +385,14 @@ async fn balances(State(state): State<AppState>, Path(hex_pk): Path<String>) -> 
     let futs = catalog.iter().map(|d| {
         let ledger = state.ledger.clone();
         let currency = d.currency;
+        let ledger_text = d.ledger.clone();
         async move {
+            // Query each ledger DIRECTLY (`icrc1_balance_of`) — free, always-live, no facade hop
+            // (the catalog already carries each ledger's Principal as text). A non-IC ledger impl
+            // (FakeLedger in tests) ignores `ledger_text` via the trait default → `balance()`.
             let res = tokio::time::timeout(
                 BALANCE_BATCH_QUERY_TIMEOUT,
-                ledger.balance(pk, currency),
+                ledger.balance_on_ledger(&ledger_text, pk, currency),
             )
             .await;
             (currency, res)
@@ -413,13 +419,10 @@ async fn balances(State(state): State<AppState>, Path(hex_pk): Path<String>) -> 
         }
     }
 
-    // Fire ONE batch background refresh of ALL currencies if any are stale (cold start / TTL
-    // expired). The `balance()` calls above returned the fast cached `balance_of` queries; this
-    // single `refresh_balances` update (one consensus round) refreshes `BAL_CACHE` for every
-    // currency so the NEXT poll reflects facade-bypassing credits (direct transfers / async mints).
-    // Collapses the old N per-currency background refreshes into one. Fire-and-forget: the method
-    // spawns a tokio task and returns immediately (FakeLedger's default is a no-op).
-    state.ledger.refresh_all_if_stale(pk).await;
+    // Balances are now read DIRECTLY off each ledger (icrc1_balance_of, above) — free + always-live,
+    // so there is no facade cache to refresh and no background update to fire. The facade's
+    // `BAL_CACHE`/`refresh_balances` are simply unused on the read path (left in place on the
+    // canister; harmless — the relay no longer calls them).
 
     (StatusCode::OK, Json(map)).into_response()
 }

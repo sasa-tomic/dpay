@@ -490,6 +490,28 @@ pub trait Ledger: Send + Sync {
     /// for the asset it actually holds when online.
     async fn balance(&self, pubkey: [u8; PUBKEY_LEN], currency: Currency) -> Result<u64, LedgerError>;
 
+    /// Read a balance by querying the ICRC-1 ledger `icrc1_balance_of` DIRECTLY on `ledger` — free,
+    /// always-live, and one hop fewer than the facade's cached `balance_of` (no consensus, no
+    /// `BAL_CACHE`). The account is `Account{owner: <facade>, subaccount: pubkey}` (the SAME
+    /// subaccount the facade mints into — see the canister's `account_of`); `ledger` is the currency's
+    /// ledger Principal as canonical TEXT (the catalog carries it as text so the candid-free trait
+    /// does not depend on the `agent` feature).
+    ///
+    /// Default: ignore `ledger` and delegate to [`balance`](Self::balance) — so test stubs
+    /// ([`FakeLedger`], the flaky wrapper) and any future non-IC impl keep working unchanged.
+    /// [`AgentLedger`](crate::AgentLedger) overrides this with the real direct query, which the batch
+    /// `/balances` handler now fans out per catalog currency (replacing the facade-cached path + the
+    /// background `refresh_balances` update — the relay no longer moves through the facade to read
+    /// balances, eliminating that hop and its cost entirely).
+    async fn balance_on_ledger(
+        &self,
+        _ledger: &str,
+        pubkey: [u8; PUBKEY_LEN],
+        currency: Currency,
+    ) -> Result<u64, LedgerError> {
+        self.balance(pubkey, currency).await
+    }
+
     /// Self-service demo faucet: credit `to` with `amount` of `currency`, returning the new balance.
     /// Funds a freshly-generated on-device account (the demo on-ramp).
     ///
