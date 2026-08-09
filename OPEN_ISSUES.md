@@ -88,7 +88,7 @@ details.
 - **F3 merchant ed25519.verify** — the payer's `solpay.tx` signature is currently only validated *implicitly* by Solana accepting/rejecting the broadcast. A merchant-side `ed25519.verify(sig, message, payerPubkey)` before broadcast would mirror the IC receipt-verify posture (defense-in-depth, not a funds risk — on-chain rejects a bad sig).
 - **F4 USDC toggle gating** — the SOL/USDC toggle is offered in the UI but USDC offline-pay is non-functional without pre-existing ATAs (`sourceAta` must exist on-chain). Gating it behind an ATA-existence check is a documented follow-up.
 - **Default-tab/first-impression UX** — the new user lands on the Pay scanner + "NFC not available" instead of a wallet overview. Requires coordinated e2e updates (any modal-sheet change blocks the keyboard hotkey flow). Deferred to a dedicated UX session.
-- **Seed/backup affordance** — Settings has Reset + Privacy + relay URL but no way to view/export the seed phrase ("one backup recovers both rails" is a pitch point with no UI backing it).
+- ~~**Seed/backup affordance** — Settings has Reset + Privacy + relay URL but no way to view/export the seed phrase ("one backup recovers both rails" is a pitch point with no UI backing it).~~ **✅ DONE (2026-08-09, commit `2482500`).** See the Phase 2 summary below.
 
 ---
 
@@ -107,6 +107,25 @@ details.
 **Fix (commit `3e60a56`):** all three methods now gate on family BEFORE the minter call — `CkBtcUtxo` (incl. the legacy "has minter, no family" default) → existing BTC path unchanged; `CkEthErc20` / `CkSol` / no-minter-no-family → clean typed `Err` directing to the onramp endpoint. Mirrors `withdraw`'s family-dispatch pattern exactly. `MinterFamily` already derived `PartialEq` (no wire/struct change). 2 new PocketIC tests (`deposit_family_gate.rs`): `deposit_proxies_reject_cketherc20_family` (registers a `CkEthErc20` currency at the BTC-shaped mock → asserts all 3 methods return `Err` naming CkBtcUtxo/onramp — went RED→GREEN as predicted, proving the gate fires on FAMILY not on minter behavior) + `deposit_proxies_still_serve_ckbtc_legacy_default_family` (BTC path regression guard). No relay change (relay maps facade `Err` → 503 with a now-clean message).
 
 **SOL mainnet verdict:** NOT operational in the shipped APK — `SOLANA_RPC_URL` defaults to devnet (`config/constants.ts:91`); `scripts/check-prod-sol.mjs` (wired into `build-apk.sh`) fail-closes the build on a devnet/rate-limited default. **Correctly blocked on an operator step** (set a paid Helius/QuickNode RPC URL). No code change warranted — the guard is right.
+
+---
+
+## Session summary (2026-08-09): Phase 2 — app UX, e2e coverage, canister panic-surface docs
+
+> Follow-on to the mainnet check above (Phase 1). App-scoped UX + e2e + canister docs, no wire/canister-behavior change. `just verify` green: core 45, canister 86, relay 53, e2e **58/58** (+3 new), typecheck clean, bridge-parity OK (28). **6 commits** (`2482500`→`a8e21e4`). FLOWS.md regenerated (58 flows across 9 journeys).
+
+**A1 — Seed/backup affordance (commit `2482500`) — resolves the DEFERRED "Seed/backup affordance" item from the SOL sweep above.** New "Backup" section in `SettingsSheet.tsx` reveals `identity.secretHex` behind a two-step confirm gate (entry `btn-backup` → warning + `btn-backup-confirm` → monospace `seed-phrase` block + `btn-copy-seed`). The warning names the BOTH-rails consequence ("This seed recovers BOTH your IC and Solana funds"). Pure display + `copyToClipboard` (mirrors the DepositSheet/WithdrawSheet copy pattern); no new persistence, no money logic, no wire change — the seed already lives in AsyncStorage. `secretHex` threaded as a new prop from `Wallet.tsx` (identity in scope). 5 new style keys added to the single `styles.ts` `StyleSheet.create` block (brand-tinted entry, neutral confirm box, monospace seed box). Visual baseline `settings.png` re-seeded (31.9% drift → 0%). This makes the documented "one backup recovers both rails" pitch point real.
+
+**E2e coverage (commits `d7f9644`, `38f2bdd`, + flow 57 in `2482500`):**
+- **Flow 55 `balances-select-asset`** — selecting an asset in Balances binds the header: `active-rail-chip` DEMO→ckBTC→SOL and the balance text follows the active-rail branch (`Wallet.tsx:354-358` three-way header branch, previously no dedicated coverage). Note: the IC catalog row's select `Pressable` in `BalancesSheet.tsx:144-150` carries NO testID (only the SOL row `asset-sol-select` + the container `asset-${key}` do); flow 55 drives the real `onSelect` via the `driver.eval` escape-hatch (clicks the row's first `[role="button"]`). **Follow-up:** add `testID={`asset-${key}-select`}` to the IC select Pressable for parity with the SOL row.
+- **Flow 56 `withdraw-saved-addr`** — a successful withdraw persists the destination (AsyncStorage via `loadSavedWithdrawAddr`/`saveWithdrawAddr`); reopening the sheet shows the `btn-withdraw-saved` chip that pre-fills the address input. This persistence path had ZERO coverage (flows 15/18/44/48 always typed a fresh address).
+- **Flow 57 `settings-seed-backup`** — guards A1: seed hidden until confirm; revealed value equals `identity.secretHex`; copy writes to the real clipboard via the `window.__DPAY_TEST_CLIPBOARD` seam. Mirrors flow 04 (deposit-copy) + flow 12 (settings) patterns.
+
+**Canister panic-surface docs (commits `37cc872`, `a8e21e4`):**
+- **C2 SAFETY comments** — documented all 16 acceptable `.unwrap()`/`.expect()` sites in `crates/dpay-canister/src/` (lib.rs + types.rs): 4 init `StableCell` sets, 3 init/admin writes, 5 `Storable::from_bytes` (the `ic-stable-structures` trait returns `Self` not `Result` — cannot be `?`-ed), and 4 `receipt()` decode slices (provably infallible — `claim_bytes` is a fixed `[u8; RECEIPT_CLAIM_LEN]`=108 array whose offsets exactly consume it; a length guard would guard an impossible state). NO code change, comment-only. No panic site fell outside these 4 acceptable categories.
+- **C4 dead-code sweep** — `cargo` flagged 6 "never constructed" variants on local `MinterFamily`/`RampCapability` candid-wire mirror enums in 3 canister-test files; these are NOT dead (the full variant set is load-bearing for wire fidelity — dropping a variant would silently re-target the registered family/ramp), so `#[allow(dead_code)]` was added matching the `deposit_family_gate.rs` precedent. TS-side: 267 exported symbols scanned across `app/`, 0 unreferenced — prior sessions were thorough. No code deleted.
+
+**Items still DEFERRED (no change):** Default-tab/first-impression UX (A2 copy-soften — skipped as marginal value / med risk, touches 7 pay flows); F3 merchant ed25519.verify; F4 USDC toggle ATA gating. The seed/backup item is now RESOLVED.
 
 ---
 
