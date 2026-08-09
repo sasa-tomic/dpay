@@ -647,6 +647,10 @@ impl Storable for CachedBalance {
     }
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
         let b = &bytes[..];
+        // SAFETY (the 2 `.try_into().unwrap()` calls below): `Storable::from_bytes` returns `Self`
+        // (not `Result`) by the ic-stable-structures API contract, so a corrupt entry traps. The bytes
+        // are fixed-layout (CACHED_BALANCE_LEN = 16), written by this canister's own `to_bytes`, so
+        // the two 8-byte slice→array conversions are infallible for any canister-written entry.
         let amount = u64::from_le_bytes(b[..8].try_into().unwrap());
         let fetched_at_secs = u64::from_le_bytes(b[8..].try_into().unwrap());
         CachedBalance { amount, fetched_at_secs }
@@ -748,6 +752,10 @@ impl Storable for TxnRecord {
         from.copy_from_slice(&b[..PUBKEY_LEN]);
         let mut to = [0u8; PUBKEY_LEN];
         to.copy_from_slice(&b[PUBKEY_LEN..2 * PUBKEY_LEN]);
+        // SAFETY (the 3 `.try_into().unwrap()` calls below): `Storable::from_bytes` returns `Self`
+        // (not `Result`) by the ic-stable-structures API contract, so a corrupt entry traps. The bytes
+        // are fixed-layout (TXN_RECORD_LEN = 196), written by this canister's own `to_bytes`, so the
+        // amount(8)/currency(4)/timestamp(8) slice→array conversions are infallible.
         let amount = u64::from_le_bytes(b[2 * PUBKEY_LEN..2 * PUBKEY_LEN + 8].try_into().unwrap());
         let mut nonce = [0u8; NONCE_LEN];
         nonce.copy_from_slice(&b[2 * PUBKEY_LEN + 8..2 * PUBKEY_LEN + 8 + NONCE_LEN]);

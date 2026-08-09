@@ -238,12 +238,14 @@ thread_local! {
     /// per-transaction spending cap (minor units). MemoryId 2.
     static CAP: RefCell<StableCell<u64, Memory>> = RefCell::new(
         StableCell::init(MEMORY.with(|m| m.borrow().get(MemoryId::new(2))), 0)
+            // SAFETY: one-time stable-cell init; a trap means corrupt stable storage (canister can't boot).
             .expect("init cap cell"),
     );
 
     /// Monotonic counter assigning each settled transaction a global sequence number. MemoryId 3.
     static TXN_SEQ: RefCell<StableCell<u64, Memory>> = RefCell::new(
         StableCell::init(MEMORY.with(|m| m.borrow().get(MemoryId::new(3))), 0)
+            // SAFETY: one-time stable-cell init; a trap means corrupt stable storage (canister can't boot).
             .expect("init txn seq cell"),
     );
 
@@ -260,6 +262,7 @@ thread_local! {
     /// optional governance controller for admin ops. MemoryId 6 (new facade state).
     static CONTROLLER: RefCell<StableCell<ControllerStorable, Memory>> = RefCell::new(
         StableCell::init(MEMORY.with(|m| m.borrow().get(MemoryId::new(6))), ControllerStorable(None))
+            // SAFETY: one-time stable-cell init; a trap means corrupt stable storage (canister can't boot).
             .expect("init controller cell"),
     );
 
@@ -286,6 +289,7 @@ thread_local! {
     /// receipts). The public half is derived and exposed via `receipt_pubkey`.
     static RECEIPT_SECRET: RefCell<StableCell<ReceiptSecretStorable, Memory>> = RefCell::new(
         StableCell::init(MEMORY.with(|m| m.borrow().get(MemoryId::new(10))), ReceiptSecretStorable(None))
+            // SAFETY: one-time stable-cell init; a trap means corrupt stable storage (canister can't boot).
             .expect("init receipt secret cell"),
     );
 
@@ -326,7 +330,9 @@ thread_local! {
 
 #[init]
 fn init(arg: InitArg) {
+    // SAFETY: init-only write to an already-initialized stable cell; runs once at canister install.
     CAP.with(|c| c.borrow_mut().set(arg.per_tx_cap).expect("set cap"));
+    // SAFETY: init-only write to an already-initialized stable cell; runs once at canister install.
     CONTROLLER
         .with(|c| c.borrow_mut().set(ControllerStorable(arg.controller)).expect("set controller"));
     LEDGERS.with(|m| {
@@ -1985,6 +1991,8 @@ async fn withdraw(req: WithdrawRequest) -> Result<WithdrawReceipt, String> {
 fn set_controller(new: Option<Principal>) -> Result<(), String> {
     require_controller_rotation()?;
     CONTROLLER
+        // SAFETY: admin-only path, controller-gated by require_controller_rotation above; a trap here
+        // rejects this admin call, not a money/settlement path.
         .with(|c| c.borrow_mut().set(ControllerStorable(new)).expect("set controller"));
     Ok(())
 }
@@ -2066,6 +2074,12 @@ fn receipt(nonce: Vec<u8>) -> Option<ReceiptView> {
     from.copy_from_slice(&cb[NONCE_LEN..NONCE_LEN + PUBKEY_LEN]);
     let mut to = [0u8; PUBKEY_LEN];
     to.copy_from_slice(&cb[NONCE_LEN + PUBKEY_LEN..NONCE_LEN + 2 * PUBKEY_LEN]);
+    // SAFETY (the 4 `.try_into().unwrap()` calls below): `stored.claim_bytes` is a fixed
+    // `[u8; RECEIPT_CLAIM_LEN]` array (= 108) authored by `ReceiptClaim::signing_bytes` (dpay-core).
+    // The four slice ranges — amount(8) | currency(4) | block_index(8) | settle_ts(8), starting at
+    // `NONCE_LEN + 2*PUBKEY_LEN` (= 80) — exactly consume the tail (80..108), so each conversion is
+    // infallible. If `RECEIPT_CLAIM_LEN` or these offsets ever change they MUST change together; a
+    // length guard here would guard against an impossible state.
     let amount = u64::from_le_bytes(
         cb[NONCE_LEN + 2 * PUBKEY_LEN..NONCE_LEN + 2 * PUBKEY_LEN + 8].try_into().unwrap(),
     );
