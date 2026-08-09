@@ -147,6 +147,7 @@ struct DepositRefresh {
 
 /// Local mirror of the canister's `RampCapability` (candid wire type) — needed to encode
 /// `register_currency_meta` calls from this test.
+#[allow(dead_code)] // mirror type; only some variants are constructed in this file
 #[derive(CandidType, serde::Serialize)]
 enum RampCapability {
     Direct,
@@ -156,6 +157,7 @@ enum RampCapability {
 
 /// Local mirror of the canister's `MinterFamily` (candid wire type) — the `None` variant is all the
 /// cap-only registration needs.
+#[allow(dead_code)] // mirror type; only some variants are constructed in this file
 #[derive(CandidType, serde::Serialize)]
 enum MinterFamily {
     CkBtcUtxo,

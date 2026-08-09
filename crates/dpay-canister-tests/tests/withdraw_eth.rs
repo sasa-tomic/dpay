@@ -124,6 +124,7 @@ struct WithdrawReceipt {
 }
 
 /// Local mirror of the canister's `MinterFamily` (candid wire type) for `register_currency_meta`.
+#[allow(dead_code)] // mirror type; only some variants are constructed in this file
 #[derive(CandidType, serde::Serialize)]
 enum MinterFamily {
     CkBtcUtxo,
@@ -132,6 +133,7 @@ enum MinterFamily {
 }
 
 /// Local mirror of the canister's `RampCapability` (candid wire type).
+#[allow(dead_code)] // mirror type; only some variants are constructed in this file
 #[derive(CandidType, serde::Serialize)]
 enum RampCapability {
     Direct,
