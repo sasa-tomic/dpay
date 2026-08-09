@@ -205,6 +205,17 @@ export const S = StyleSheet.create({
   // matches the consumer affordances.
   resetEntryBtn: {alignSelf: 'stretch', marginTop: 14, minHeight: 48, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(248,113,113,0.45)', backgroundColor: 'rgba(248,113,113,0.04)', alignItems: 'center', justifyContent: 'center'},
   resetEntryText: {color: C.bad, fontWeight: '700', fontSize: 15},
+  // Backup affordance (Settings → Backup). The entry button mirrors `resetEntryBtn`'s shape but is
+  // BRAND-tinted (not red) so it reads as a safe, recommended action rather than a destructive one.
+  // `backupConfirmBox` mirrors `resetConfirmBox` but uses a neutral field tint (the backup warning is
+  // cautionary, not destructive). `seedBox` is the revealed seed display block: monospace, padded,
+  // subtle background to distinguish it from body text + a faint border so it reads as a discrete
+  // selectable token block. `seedText` is the monospace seed itself (selectable is a Text prop).
+  backupEntryBtn: {alignSelf: 'stretch', marginTop: 14, minHeight: 48, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(62,224,172,0.45)', backgroundColor: 'rgba(62,224,172,0.06)', alignItems: 'center', justifyContent: 'center'},
+  backupEntryText: {color: C.brand, fontWeight: '700', fontSize: 15},
+  backupConfirmBox: {alignSelf: 'stretch', backgroundColor: C.field, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: C.line2},
+  seedBox: {alignSelf: 'stretch', backgroundColor: C.bg, borderRadius: 10, padding: 14, borderWidth: 1, borderColor: C.line2, marginTop: 4},
+  seedText: {color: C.ink, fontFamily: 'monospace', fontSize: 14, lineHeight: 20},
   // The PRIMARY funding affordance in the balance header: a clear "Add money" brand button that
   // opens the deposit sheet. Filled brand so it reads as primary; the DEMO_USD faucet (topUpBtn)
   // is the secondary outline pill beside it. minHeight:44 meets the 44pt touch target; the shadow

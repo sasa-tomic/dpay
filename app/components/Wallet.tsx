@@ -468,6 +468,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
           setRelayUrl={setRelayUrl}
           onClose={() => setSettingsOpen(false)}
           onReset={onReset}
+          secretHex={identity.secretHex}
         />
       ) : null}
     </SafeAreaView>

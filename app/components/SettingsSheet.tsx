@@ -3,6 +3,7 @@ import {View, Text, Pressable, TextInput, ScrollView, SafeAreaView, StatusBar, P
 import {C} from '../config/palette';
 import {PRIVACY_URL} from '../config/constants';
 import {S} from '../styles';
+import {copyToClipboard} from '../lib/clipboard';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {SheetOverlay} from './SheetOverlay';
 
@@ -29,14 +30,25 @@ import {SheetOverlay} from './SheetOverlay';
  *    the action opens a confirmation dialog (the destructive gate stays in place). Visually distinct
  *    from the "Privacy policy" link above it (which previously shared the same link chrome).
  */
-export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset}: {
+export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, secretHex}: {
   relayUrl: string;
   setRelayUrl: (s: string) => void;
   onClose: () => void;
   onReset: () => void;
+  // The IC ed25519 seed hex (32 bytes). The same seed derives BOTH the IC account and the Solana
+  // keypair (app/solana/identity.ts SLIP-10 derivation), so revealing this ONE secret is the full
+  // backup. Pure display + copy; no money logic, no persistence (it already lives in AsyncStorage).
+  secretHex: string;
 }) {
   useEscapeToClose(onClose);
   const [confirmReset, setConfirmReset] = useState(false);
+  // Backup reveal is a TWO-step gate (mirrors the reset confirm idiom): `confirmBackup` opens the
+  // warning + btn-backup-confirm; `backupRevealed` (set only after confirming) shows the seed. This
+  // keeps the seed off-screen until the user has explicitly acknowledged the BOTH-rails warning — no
+  // accidental shoulder-surf reveal on a first tap. `copied` mirrors DepositSheet/WithdrawSheet.
+  const [confirmBackup, setConfirmBackup] = useState(false);
+  const [backupRevealed, setBackupRevealed] = useState(false);
+  const [copied, setCopied] = useState<'clipboard' | 'shared' | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(true);
   const [draftRelay, setDraftRelay] = useState(relayUrl);
   // `lastApplied` tracks the URL the app is actually using (the parent's `relayUrl` updates AFTER
@@ -48,6 +60,14 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset}: {
   const relayClean = draftRelay.trim();
   const relayDirty = relayClean.length > 0 && relayClean !== lastApplied.trim();
   const applyRelay = () => { if (relayDirty) { setRelayUrl(draftRelay); setLastApplied(draftRelay.trim()); } };
+
+  // Copy the seed via the same clipboard path as the deposit/withdraw copy buttons. Resolves to
+  // 'clipboard' (web navigator.clipboard) or 'shared' (native Share sheet); the label follows.
+  const copySeed = async () => {
+    const how = await copyToClipboard(secretHex);
+    setCopied(how);
+    setTimeout(() => setCopied(null), 1500);
+  };
 
   return (
     <SheetOverlay>
@@ -75,6 +95,74 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset}: {
             ) : (
               <Pressable testID="btn-reset" style={S.resetEntryBtn} onPress={() => setConfirmReset(true)} accessibilityRole="button" accessibilityLabel="Reset wallet" accessibilityHint="Opens a confirmation dialog — permanently erases your wallet from this device" accessibilityState={{disabled: false}}>
                 <Text style={S.resetEntryText}>Reset wallet…</Text>
+              </Pressable>
+            )}
+          </View>
+
+          {/* Backup — reveal the IC seed (which ALSO derives the Solana key) behind a two-step confirm
+              gate. Pure display + copy; the seed already lives in AsyncStorage. The warning names the
+              BOTH-rails consequence so the user stores it before any shoulder-surf risk. */}
+          <View style={S.settingsSection}>
+            <Text style={S.inputLabel}>Backup</Text>
+            {backupRevealed ? (
+              <View style={S.backupConfirmBox}>
+                <Text style={S.warnNote}>This seed recovers BOTH your IC and Solana funds. Store it safely. Never share it.</Text>
+                <View style={S.seedBox}>
+                  <Text testID="seed-phrase" style={S.seedText} selectable={true}>{secretHex}</Text>
+                </View>
+                <Pressable
+                  testID="btn-copy-seed"
+                  style={[S.primaryWide, {marginTop: 16}]}
+                  onPress={copySeed}
+                  accessibilityRole="button"
+                  accessibilityLabel={copied === 'clipboard' ? 'Seed copied' : copied === 'shared' ? 'Seed shared' : 'Copy seed'}
+                  accessibilityHint="Copies your recovery seed to the clipboard"
+                  accessibilityState={{disabled: false}}>
+                  <Text style={S.primaryText}>{copied === 'clipboard' ? 'Copied ✓' : copied === 'shared' ? 'Shared ✓' : 'Copy seed'}</Text>
+                </Pressable>
+                <Pressable
+                  testID="btn-backup-hide"
+                  style={S.linkBtn}
+                  onPress={() => { setBackupRevealed(false); setConfirmBackup(false); setCopied(null); }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Hide seed"
+                  accessibilityState={{disabled: false}}>
+                  <Text style={S.linkTextMuted}>Hide</Text>
+                </Pressable>
+              </View>
+            ) : confirmBackup ? (
+              <View style={S.backupConfirmBox}>
+                <Text style={S.warnNote}>This seed recovers BOTH your IC and Solana funds. Store it safely. Never share it.</Text>
+                <Pressable
+                  testID="btn-backup-confirm"
+                  style={[S.primaryWide, {marginTop: 16}]}
+                  onPress={() => setBackupRevealed(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Reveal recovery seed"
+                  accessibilityHint="Shows your seed on screen — anyone viewing your screen can copy it"
+                  accessibilityState={{disabled: false}}>
+                  <Text style={S.primaryText}>Reveal seed</Text>
+                </Pressable>
+                <Pressable
+                  testID="btn-backup-cancel"
+                  style={S.linkBtn}
+                  onPress={() => setConfirmBackup(false)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cancel backup"
+                  accessibilityState={{disabled: false}}>
+                  <Text style={S.linkTextMuted}>Cancel</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <Pressable
+                testID="btn-backup"
+                style={S.backupEntryBtn}
+                onPress={() => setConfirmBackup(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Back up wallet"
+                accessibilityHint="Reveals your recovery seed — backs up both your IC and Solana funds"
+                accessibilityState={{disabled: false}}>
+                <Text style={S.backupEntryText}>Back up wallet…</Text>
               </Pressable>
             )}
           </View>
