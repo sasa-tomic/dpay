@@ -21,11 +21,12 @@ import {SheetOverlay} from './SheetOverlay';
 // toggle only renders when there's something to reveal (or they're already shown) so a catalog with
 // no testnet currencies (the e2e FakeLedger, a mainnet-only deploy) shows no no-op toggle.
 //
-// The SOL row is now a first-class selectable asset (like every IC row): tapping its name/balance
-// selects SOL as the active asset — the header shows the SOL balance and the Pay/Receive tabs auto-
-// use the SOL NFC rail. No separate chain toggle; the asset implies the rail. Receive + Send remain
-// as secondary actions for the online deposit/send flows.
-export function BalancesSheet({catalog, assetBalances, primaryBalance, online, currentCurrency, onSelect, onTopUp, topUpBusy, topUpErr, showTestnet, onToggleTestnet, solAddress, solBalance, activeSol, onSelectSol, onSolReceive, onSolSend, onClose}: {
+// The SOL row is now a first-class selectable asset (uniform with every IC non-DEMO row — the entire
+// card is one whole-row select Pressable, no per-row action buttons): tapping it selects SOL as the
+// active asset — the header shows the SOL balance and the Pay/Receive tabs auto-use the SOL NFC rail.
+// No separate chain toggle; the asset implies the rail. On-chain Send/Receive lives in the Pay/
+// Receive tab sub-modes (selected once SOL is the active asset), exactly like every IC asset.
+export function BalancesSheet({catalog, assetBalances, primaryBalance, online, currentCurrency, onSelect, onTopUp, topUpBusy, topUpErr, showTestnet, onToggleTestnet, solAddress, solBalance, activeSol, onSelectSol, onClose}: {
   catalog: CurrencyDescriptor[];
   assetBalances: Record<number, string>;
   primaryBalance: string | null;
@@ -41,14 +42,12 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
   // mediated ICRC asset). `solAddress` is null only before the key is derived; `solBalance` is null
   // when offline / not yet polled (the card renders `—`). Tapping the SOL row selects it as the
   // active asset (the header + Pay/Receive tabs follow) — the rail is inferred from the asset, no
-  // separate toggle. Receive + Send are the secondary online deposit/send actions. All null when no
-  // address.
+  // separate toggle. On-chain Send/Receive lives in the Pay/Receive tab sub-modes (uniform with IC).
+  // All null when no address.
   solAddress?: string | null;
   solBalance?: string | null;
   activeSol?: boolean;
   onSelectSol?: () => void;
-  onSolReceive?: () => void;
-  onSolSend?: () => void;
   onClose: () => void;
 }) {
   useEscapeToClose(onClose);
@@ -172,49 +171,28 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
             );
           })}
           {solAddress ? (
+            // SOL row: the ENTIRE card is one select Pressable (uniform with every IC non-DEMO row —
+            // no per-row action buttons). On-chain Send/Receive lives in the Pay/Receive tab sub-modes
+            // (selected once SOL is the active asset). The container View keeps the `asset-sol` testID
+            // (read by flows that assert the row's textContent); the inner Pressable carries
+            // `asset-sol-select` (the clickable whole-row select).
             <View testID="asset-sol" style={[S.assetCard, activeSol && S.assetCardActive]}>
-              <View style={S.assetRow}>
-                <Pressable
-                  testID="asset-sol-select"
-                  style={S.assetSelect}
-                  onPress={() => onSelectSol?.()}
-                  accessibilityRole="button"
-                  accessibilityLabel="Select SOL"
-                  accessibilityHint="Show SOL on your home screen and use the Solana rail for Pay/Receive"
-                >
+              <Pressable
+                testID="asset-sol-select"
+                style={S.assetRow}
+                onPress={() => onSelectSol?.()}
+                accessibilityRole="button"
+                accessibilityLabel="Select SOL"
+                accessibilityHint="Show SOL on your home screen and use the Solana rail for Pay/Receive"
+              >
+                <View style={S.assetSelect}>
                   <View style={[S.dot, {backgroundColor: activeSol ? C.brand : C.line}]} />
                   <Text style={S.assetLabel}>SOL</Text>
                   <Text style={[S.assetAmt, (solBalance == null || cmpRaw(solBalance, '0') === 0) && S.assetCardZero]}>
                     {solBalance == null ? '—' : fmtAsset(solBalance, SOL_DECIMALS, SOL_UNIT)}
                   </Text>
-                </Pressable>
-                {onSolReceive || onSolSend ? (
-                  <View style={S.assetActions}>
-                    {onSolReceive ? (
-                      <Pressable
-                        testID="btn-sol-receive"
-                        style={S.assetActionBtn}
-                        onPress={onSolReceive}
-                        accessibilityRole="button"
-                        accessibilityLabel="Receive SOL"
-                        accessibilityHint="Show your Solana deposit address">
-                        <Text style={S.assetActionPlus}>+</Text><Text style={S.assetActionText}>Receive</Text>
-                      </Pressable>
-                    ) : null}
-                    {onSolSend && solBalance != null && cmpRaw(solBalance, '0') > 0 ? (
-                      <Pressable
-                        testID="btn-sol-send"
-                        style={S.withdrawLink}
-                        onPress={onSolSend}
-                        accessibilityRole="button"
-                        accessibilityLabel="Send SOL"
-                        accessibilityHint="Send SOL to a native Solana address">
-                        <Text style={S.withdrawLinkText}>Send</Text>
-                      </Pressable>
-                    ) : null}
-                  </View>
-                ) : null}
-              </View>
+                </View>
+              </Pressable>
               <Text style={S.assetSub}>Solana · self-custody</Text>
             </View>
           ) : null}

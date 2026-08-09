@@ -25,8 +25,6 @@ import {Tab} from './Tab';
 import {PayMode} from './PayMode';
 import {ReceiveMode} from './ReceiveMode';
 import {Ledger} from './Ledger';
-import {SolanaReceiveSheet} from './SolanaReceiveSheet';
-import {SolanaWithdrawSheet} from './SolanaWithdrawSheet';
 import {SolPayMode} from './SolPayMode';
 import {SolReceiveMode} from './SolReceiveMode';
 import {SettingsSheet} from './SettingsSheet';
@@ -118,8 +116,6 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
   // it no-ops and the card renders `—`. Separate from the catalog loop — SOL is not an ICRC asset.
   const solAddress = useMemo(() => { try { return deriveSolanaAddress(identity.secretHex); } catch { return null; } }, [identity.secretHex]);
   const {balance: solBalance, refresh: refreshSol} = useSolanaBalance(solAddress);
-  const [solReceiveOpen, setSolReceiveOpen] = useState(false);
-  const [solSendOpen, setSolSendOpen] = useState(false);
   // The active asset rail: true when the user has selected SOL in the Balances sheet, false for any
   // IC catalog currency. This REPLACES the old RailSelector toggle — the selected currency now
   // IMPLIES the rail (SOL → SOL NFC HCE / SOL send-receive; any IC currency → IC NFC HCE / IC
@@ -308,7 +304,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
   // P=Pay, R=Receive, T=Receive (demo money), A=Balances (the asset hub), L=Ledger (transactions). Active ONLY on the wallet
   // main view with no text input focused and no sheet/overlay open (Esc is handled per-sheet by
   // useEscapeToClose). Native (no physical keyboard) is a no-op; the on-UI hints are web-only too.
-  const anySheetOpen = balancesOpen || settingsOpen || solReceiveOpen || solSendOpen;
+  const anySheetOpen = balancesOpen || settingsOpen;
   useHotkeys({
     p: () => setMode('pay'),
     r: () => setMode('receive'),
@@ -390,7 +386,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
       <ScrollView style={S.scroll} contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
         {mode === 'pay'
           ? (activeSol && solAddress
-              ? <SolPayMode identity={identity} online={online} nfcReady={nfc === 'ready'} onShowDeposit={() => setSolReceiveOpen(true)} />
+              ? <SolPayMode identity={identity} online={online} nfcReady={nfc === 'ready'} solBalance={solBalance ?? '0'} onSent={refreshSol} subMode={paySubMode} onSubModeChange={setPaySubMode} onShowDeposit={() => { setMode('receive'); setReceiveSubMode('address'); }} />
               : <PayMode
                   identity={identity} online={online} relayUrl={relayUrl} nfcStatus={nfc}
                   onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance}
@@ -405,7 +401,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
           )
           : mode === 'receive'
           ? (activeSol && solAddress
-              ? <SolReceiveMode identity={identity} online={online} nfcReady={nfc === 'ready'} />
+              ? <SolReceiveMode identity={identity} online={online} nfcReady={nfc === 'ready'} solAddress={solAddress} subMode={receiveSubMode} onSubModeChange={setReceiveSubMode} />
               : <ReceiveMode
                   identity={identity} relayUrl={relayUrl} online={online} nfcReady={nfc === 'ready'}
                   onReceived={onActivity} catalog={catalog}
@@ -434,26 +430,10 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
           solAddress={solAddress}
           solBalance={solBalance}
           activeSol={activeSol}
-          onSelectSol={() => { setActiveSol(true); setBalancesOpen(false); }}
-          onSolReceive={() => { setSolReceiveOpen(true); setBalancesOpen(false); }}
-          onSolSend={() => { setSolSendOpen(true); setBalancesOpen(false); }}
+          onSelectSol={() => { setActiveSol(true); setBalancesOpen(false); setReceiveSubMode('request'); setPaySubMode('scan'); }}
           showTestnet={showTestnet}
           onToggleTestnet={toggleTestnet}
           onClose={() => setBalancesOpen(false)}
-        />
-      ) : null}
-      {solReceiveOpen && solAddress ? (
-        <SolanaReceiveSheet
-          address={solAddress}
-          onClose={() => setSolReceiveOpen(false)}
-        />
-      ) : null}
-      {solSendOpen && solAddress ? (
-        <SolanaWithdrawSheet
-          identity={identity}
-          balance={solBalance ?? '0'}
-          onSent={refreshSol}
-          onClose={() => setSolSendOpen(false)}
         />
       ) : null}
       {settingsOpen ? (

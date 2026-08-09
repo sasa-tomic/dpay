@@ -21,11 +21,12 @@ import {withTimeout} from '../lib/timeout';
  * confirmed send returns the transaction signature (shown + copyable); the balance poll refreshes
  * automatically.
  *
- * The durable-nonce offline-pay flow (SolPayMode) now lives INLINE in the main Pay tab (selected via
- * selecting SOL as the active asset in Balances), NOT here. This sheet is purely the online send surface (money
- * OUT to a Solana address). No functionality lost and no dead code.
+ * Rendered INLINE in the Pay tab's "Send to address" sub-mode (selected via the SOL pay-mode-toggle),
+ * mirroring the IC WithdrawSheet dual-mode idiom: `inline` skips the SheetOverlay/SafeAreaView/
+ * StatusBar/sheet-head chrome (the tab body already provides the surface) and the close button —
+ * `onClose` is still wired via the tab's toggle (the inline context has no overlay ✕).
  */
-export function SolanaWithdrawSheet({identity, balance, onSent, onClose}: {identity: Identity; balance: string; onSent: () => void; onClose: () => void}) {
+export function SolanaWithdrawSheet({identity, balance, inline, onSent, onClose}: {identity: Identity; balance: string; inline?: boolean; onSent: () => void; onClose: () => void}) {
   const [address, setAddress] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
@@ -73,6 +74,88 @@ export function SolanaWithdrawSheet({identity, balance, onSent, onClose}: {ident
     setTimeout(() => setCopied(null), 1500);
   };
 
+  const body = (
+    <>
+      {phase === 'done' && signature ? (
+        <View style={S.centerAll}>
+          <View style={S.check}><Text style={S.checkMark}>✓</Text></View>
+          <Text testID="sol-send-status" style={S.paidText}>Sent ✓</Text>
+          <Text style={S.paidSub}>{fmtAsset(raw, SOL_DECIMALS, SOL_UNIT)}</Text>
+          <Text style={S.dim2}>transaction signature</Text>
+          <Text testID="sol-send-signature" selectable={true} style={S.sheetAddr}>{signature}</Text>
+          <Pressable testID="btn-sol-send-copy" style={S.primaryWide} onPress={copySig} accessibilityRole="button" accessibilityLabel="Copy transaction signature">
+            <Text style={S.primaryText}>{copied === 'clipboard' ? 'Copied ✓' : copied === 'shared' ? 'Shared ✓' : 'Copy signature'}</Text>
+          </Pressable>
+          <Text style={S.dim2}>Your balance updates automatically.</Text>
+          <Pressable testID="btn-sol-send-done" style={S.linkBtn} onPress={onClose} accessibilityRole="button" accessibilityLabel="Done"><Text style={S.linkText}>Done</Text></Pressable>
+        </View>
+      ) : phase === 'submitting' ? (
+        <View style={S.centerAll}>
+          <ActivityIndicator color={C.brand} />
+          <Text style={S.dim2}>{`Sending ${fmtAsset(raw, SOL_DECIMALS, SOL_UNIT)}…`}</Text>
+          <Text style={S.dim2}>Confirming on Solana — this can take up to a minute.</Text>
+        </View>
+      ) : (
+        <>
+          <Text style={S.label}>Send your SOL to a Solana address</Text>
+          <Text style={S.dim2}>{`Available: ${fmtAsset(balance, SOL_DECIMALS, SOL_UNIT)}`}</Text>
+
+          <Text style={S.inputLabel}>Solana address</Text>
+          <TextInput
+            testID="sol-send-address-input"
+            style={S.withdrawAddrInput}
+            value={address}
+            onChangeText={setAddress}
+            placeholder="Receiver base58 address"
+            placeholderTextColor={C.sub2}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+
+          <Text style={S.inputLabel}>{`Amount (${SOL_UNIT})`}</Text>
+          <TextInput
+            testID="sol-send-amount-input"
+            style={S.withdrawAmtInput}
+            value={amountStr}
+            onChangeText={setAmountStr}
+            keyboardType="decimal-pad"
+            placeholder="0.025"
+            placeholderTextColor={C.sub2}
+          />
+
+          {overBalance ? <Text style={S.warnNote}>{`More than your available ${fmtAsset(balance, SOL_DECIMALS, SOL_UNIT)}.`}</Text> : null}
+          {badAddr ? <Text testID="sol-send-bad-addr" style={S.warnNote}>That doesn't look like a valid Solana address.</Text> : null}
+
+          {(phase === 'form' || phase === 'error') && raw !== '0' ? (
+            <View testID="sol-send-review" style={S.reviewCard}>
+              <Text style={S.reviewLabel}>Review send</Text>
+              <Text testID="sol-send-review-amount" style={S.reviewAmount}>{`Send ${fmtAsset(raw, SOL_DECIMALS, SOL_UNIT)}`}</Text>
+              <Text style={S.reviewTo}>{`to ${address.trim() || '—'}`}</Text>
+            </View>
+          ) : null}
+
+          {err ? <Text testID="sol-send-err" style={S.err}>{err}</Text> : null}
+
+          <Pressable
+            testID="btn-sol-send-confirm"
+            style={[S.primaryWide, !canReview && S.dim]}
+            disabled={!canReview}
+            onPress={confirm}
+            accessibilityRole="button"
+            accessibilityLabel="Confirm SOL send"
+            accessibilityState={{disabled: !canReview}}>
+            <Text style={S.primaryText}>{raw !== '0' ? `Send ${fmtAsset(raw, SOL_DECIMALS, SOL_UNIT)}` : 'Enter an amount'}</Text>
+          </Pressable>
+
+          {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
+        </>
+      )}
+    </>
+  );
+
+  if (inline) {
+    return <View style={S.sheetBody}>{body}</View>;
+  }
   return (
     <SheetOverlay>
       <SafeAreaView style={S.sheet}>
@@ -81,82 +164,8 @@ export function SolanaWithdrawSheet({identity, balance, onSent, onClose}: {ident
           <Text style={S.sheetTitle}>Send SOL</Text>
           <Pressable testID="btn-sol-send-close" accessibilityRole="button" accessibilityLabel="Close send SOL sheet" style={S.sheetClose} onPress={onClose}><Text style={S.sheetCloseX}>✕</Text></Pressable>
         </View>
-
         <ScrollView contentContainerStyle={S.sheetBody} keyboardShouldPersistTaps="handled">
-          {phase === 'done' && signature ? (
-            <View style={S.centerAll}>
-              <View style={S.check}><Text style={S.checkMark}>✓</Text></View>
-              <Text testID="sol-send-status" style={S.paidText}>Sent ✓</Text>
-              <Text style={S.paidSub}>{fmtAsset(raw, SOL_DECIMALS, SOL_UNIT)}</Text>
-              <Text style={S.dim2}>transaction signature</Text>
-              <Text testID="sol-send-signature" selectable={true} style={S.sheetAddr}>{signature}</Text>
-              <Pressable testID="btn-sol-send-copy" style={S.primaryWide} onPress={copySig} accessibilityRole="button" accessibilityLabel="Copy transaction signature">
-                <Text style={S.primaryText}>{copied === 'clipboard' ? 'Copied ✓' : copied === 'shared' ? 'Shared ✓' : 'Copy signature'}</Text>
-              </Pressable>
-              <Text style={S.dim2}>Your balance updates automatically.</Text>
-              <Pressable testID="btn-sol-send-done" style={S.linkBtn} onPress={onClose} accessibilityRole="button" accessibilityLabel="Done"><Text style={S.linkText}>Done</Text></Pressable>
-            </View>
-          ) : phase === 'submitting' ? (
-            <View style={S.centerAll}>
-              <ActivityIndicator color={C.brand} />
-              <Text style={S.dim2}>{`Sending ${fmtAsset(raw, SOL_DECIMALS, SOL_UNIT)}…`}</Text>
-              <Text style={S.dim2}>Confirming on Solana — this can take up to a minute.</Text>
-            </View>
-          ) : (
-            <>
-              <Text style={S.label}>Send your SOL to a Solana address</Text>
-              <Text style={S.dim2}>{`Available: ${fmtAsset(balance, SOL_DECIMALS, SOL_UNIT)}`}</Text>
-
-              <Text style={S.inputLabel}>Solana address</Text>
-              <TextInput
-                testID="sol-send-address-input"
-                style={S.withdrawAddrInput}
-                value={address}
-                onChangeText={setAddress}
-                placeholder="Receiver base58 address"
-                placeholderTextColor={C.sub2}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-
-              <Text style={S.inputLabel}>{`Amount (${SOL_UNIT})`}</Text>
-              <TextInput
-                testID="sol-send-amount-input"
-                style={S.withdrawAmtInput}
-                value={amountStr}
-                onChangeText={setAmountStr}
-                keyboardType="decimal-pad"
-                placeholder="0.025"
-                placeholderTextColor={C.sub2}
-              />
-
-              {overBalance ? <Text style={S.warnNote}>{`More than your available ${fmtAsset(balance, SOL_DECIMALS, SOL_UNIT)}.`}</Text> : null}
-              {badAddr ? <Text testID="sol-send-bad-addr" style={S.warnNote}>That doesn't look like a valid Solana address.</Text> : null}
-
-              {(phase === 'form' || phase === 'error') && raw !== '0' ? (
-                <View testID="sol-send-review" style={S.reviewCard}>
-                  <Text style={S.reviewLabel}>Review send</Text>
-                  <Text testID="sol-send-review-amount" style={S.reviewAmount}>{`Send ${fmtAsset(raw, SOL_DECIMALS, SOL_UNIT)}`}</Text>
-                  <Text style={S.reviewTo}>{`to ${address.trim() || '—'}`}</Text>
-                </View>
-              ) : null}
-
-              {err ? <Text testID="sol-send-err" style={S.err}>{err}</Text> : null}
-
-              <Pressable
-                testID="btn-sol-send-confirm"
-                style={[S.primaryWide, !canReview && S.dim]}
-                disabled={!canReview}
-                onPress={confirm}
-                accessibilityRole="button"
-                accessibilityLabel="Confirm SOL send"
-                accessibilityState={{disabled: !canReview}}>
-                <Text style={S.primaryText}>{raw !== '0' ? `Send ${fmtAsset(raw, SOL_DECIMALS, SOL_UNIT)}` : 'Enter an amount'}</Text>
-              </Pressable>
-
-              {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
-            </>
-          )}
+          {body}
         </ScrollView>
       </SafeAreaView>
     </SheetOverlay>

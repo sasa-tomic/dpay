@@ -16,6 +16,8 @@ import {loadSolNonce, saveSolNonce, type SolNonceState} from '../services/solNon
 import {DpaySolNfc} from '../services/native';
 import {QrScanner} from './QrScanner';
 import {SolNfcTap} from './SolNfcTap';
+import {ModeToggle} from './ModeToggle';
+import {SolanaWithdrawSheet} from './SolanaWithdrawSheet';
 import {withTimeout} from '../lib/timeout';
 
 /**
@@ -37,7 +39,35 @@ import {withTimeout} from '../lib/timeout';
  * NFC arming: this component mounts only while the SOL rail is selected. Switching the rail (via
  * switching the active asset unmounts it, whose `useNfcTapState` cleanup disarms the HCE card — no arm-leak.
  */
-export function SolPayMode({identity, online, nfcReady, onShowDeposit}: {identity: Identity; online: boolean; nfcReady: boolean; onShowDeposit?: () => void}) {
+export function SolPayMode({identity, online, nfcReady, solBalance, onSent, subMode, onSubModeChange, onShowDeposit}: {identity: Identity; online: boolean; nfcReady: boolean; solBalance: string; onSent: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; onShowDeposit?: () => void}) {
+  const toggle = (
+    <ModeToggle
+      testID="pay-mode-toggle"
+      value={subMode}
+      onChange={(v) => onSubModeChange(v as 'scan' | 'send')}
+      left={{label: 'Scan to pay', value: 'scan', testID: 'btn-pay-scan'}}
+      right={{label: 'Send to address', value: 'send', testID: 'btn-pay-send'}}
+    />
+  );
+
+  // "Send to address" sub-mode: render the on-chain SOL send flow INLINE (the SolanaWithdrawSheet
+  // body). The toggle above lets the user flip back to "Scan to pay". `inline` skips the overlay
+  // chrome. Mirrors the IC PayMode "Send to address" sub-mode byte-for-byte.
+  if (subMode === 'send') {
+    return (
+      <View style={S.center}>
+        {toggle}
+        <SolanaWithdrawSheet
+          identity={identity}
+          balance={solBalance}
+          inline
+          onSent={onSent}
+          onClose={() => onSubModeChange('scan')}
+        />
+      </View>
+    );
+  }
+
   const [phase, setPhase] = useState<'setup' | 'scan' | 'review' | 'qr' | 'paid'>('setup');
   const [nonceState, setNonceState] = useState<SolNonceState | null>(null);
   const [req, setReq] = useState<SolReq | null>(null);
@@ -164,6 +194,7 @@ export function SolPayMode({identity, online, nfcReady, onShowDeposit}: {identit
   if (phase === 'setup') {
     return (
       <View style={S.center} testID="sol-pay-setup">
+        {toggle}
         {IS_SOLANA_DEVNET ? (
           <View style={S.devnetBadge}>
             <View style={S.devnetBadgeDot} />
@@ -213,6 +244,7 @@ export function SolPayMode({identity, online, nfcReady, onShowDeposit}: {identit
   if (phase === 'scan') {
     return (
       <View style={S.center}>
+        {toggle}
         {IS_SOLANA_DEVNET ? (
           <View style={S.devnetBadge}>
             <View style={S.devnetBadgeDot} />
@@ -282,6 +314,7 @@ export function SolPayMode({identity, online, nfcReady, onShowDeposit}: {identit
   if (phase === 'review' && req) {
     return (
       <View style={S.center}>
+        {toggle}
         <Text style={S.label}>Review payment</Text>
         <Text testID="sol-pay-amount" style={S.reviewAmount}>{`Pay ${fmtAsset(req.amt, decimals, unit)}`}</Text>
         <Text style={S.reviewTo}>{`to ${req.name || req.to}`}</Text>
@@ -310,6 +343,7 @@ export function SolPayMode({identity, online, nfcReady, onShowDeposit}: {identit
   if (phase === 'qr' && solpayUri) {
     return (
       <View style={S.center}>
+        {toggle}
         <Text style={S.label}>Show this to the merchant</Text>
         <View testID="sol-pay-qr" style={S.qrCard}><QRCode value={solpayUri} size={QR_SIZE} ecl="L" /></View>
         <Text style={S.amountBig}>{`${fmtAsset(req!.amt, decimals, unit)} to ${req!.name || req!.to}`}</Text>
@@ -340,6 +374,7 @@ export function SolPayMode({identity, online, nfcReady, onShowDeposit}: {identit
   // phase === 'paid'
   return (
     <View style={S.center}>
+      {toggle}
       <View style={[S.check, S.checkAlready]}><Text style={S.checkMark}>⋯</Text></View>
       <Text testID="sol-pay-status" style={[S.paidText, S.alreadyText]}>{`Sent ${fmtAsset(req!.amt, decimals, unit)}`}</Text>
       <Text style={S.paidSub}>{`to ${req!.name || req!.to} · awaiting the merchant's confirmation`}</Text>

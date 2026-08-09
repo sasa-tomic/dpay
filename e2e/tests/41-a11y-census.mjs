@@ -48,11 +48,11 @@ const SURFACES = {
   receive: ['req-prefix', 'amount-input', 'memo-input', 'btn-request',
             'req-pick-demo', 'req-pick-ckbtc', 'req-pick-ckusdc', 'req-pick-ckusdt'],
   // Balances hub (open via `balance` tap). btn-topup is the DEMO row's faucet button; `asset-*-select`
-  // is each row's whole-row select Pressable (the per-row +Receive/Send buttons moved to the Pay/
-  // Receive tabs). btn-sol-receive/btn-sol-send render for the SOL row when a SOL address is derived.
+  // is each row's whole-row select Pressable. SOL is uniform with the IC rows now (whole-row select,
+  // no per-row Receive/Send buttons — on-chain deposit/send lives in the Pay/Receive tab sub-modes).
   balances: ['btn-balances-close', 'btn-topup',
              'asset-demo-select', 'asset-ckbtc-select', 'asset-ckusdc-select', 'asset-ckusdt-select',
-             'asset-sol-select', 'btn-sol-receive'],
+             'asset-sol-select'],
   // Settings sheet (open via `btn-settings`). btn-reset-* are revealed only after tapping btn-reset
   // (the confirmation dialog); listed separately below to keep this census aligned with the visible
   // surface at first open.

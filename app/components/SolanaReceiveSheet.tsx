@@ -14,12 +14,12 @@ import {SheetOverlay} from './SheetOverlay';
  * address is local + instant, so this sheet shows the address QR + copy immediately, with a plain-
  * language note that a send credits on confirmation (the balance poll reflects it automatically).
  *
- * The durable-nonce offline-merchant flow (SolReceiveMode — build a `solreq:` code + scan/broadcast
- * the payer's signed `solpay:`) now lives INLINE in the main Receive tab (selected via the SOL rail
- * selecting SOL as the active asset in Balances), NOT here. This sheet is purely the deposit-address surface (money IN from an
- * external Solana account). No functionality lost and no dead code.
+ * Rendered INLINE in the Receive tab's "My address" sub-mode (selected via the SOL receive-mode-
+ * toggle), mirroring the IC DepositSheet dual-mode idiom: `inline` skips the SheetOverlay/
+ * SafeAreaView/StatusBar/sheet-head chrome (the tab body already provides the surface) and the close
+ * button — `onClose` is still wired via the tab's toggle (the inline context has no overlay ✕).
  */
-export function SolanaReceiveSheet({address, onClose}: {address: string; onClose: () => void}) {
+export function SolanaReceiveSheet({address, inline, onClose}: {address: string; inline?: boolean; onClose: () => void}) {
   const [copied, setCopied] = useState<'clipboard' | 'shared' | null>(null);
   useEscapeToClose(onClose);
 
@@ -29,6 +29,44 @@ export function SolanaReceiveSheet({address, onClose}: {address: string; onClose
     setTimeout(() => setCopied(null), 1500);
   }, [address]);
 
+  const body = (
+    <>
+      <View testID="sol-receive-instructions" style={S.instrCard}>
+        <Text style={S.instrLine}>
+          Send <Text style={S.instrAsset}>SOL</Text> to your Solana address below.
+        </Text>
+        <Text style={S.instrCustody}>
+          dpay never holds your keys — SOL lands directly in your wallet on confirmation.
+        </Text>
+        {IS_SOLANA_DEVNET ? (
+          <Text testID="sol-devnet-warning" style={S.warnNote}>
+            ⚠ Connected to Solana devnet. Do NOT send mainnet SOL here — it will not appear. Use devnet SOL only.
+          </Text>
+        ) : null}
+      </View>
+
+      <View style={S.qrCard}><QRCode value={address} size={QR_SIZE_SMALL} ecl="L" /></View>
+
+      <Text testID="sol-receive-address" style={S.sheetAddr} selectable={true}>{address}</Text>
+
+      <Pressable
+        testID="btn-sol-receive-copy"
+        accessibilityRole="button"
+        accessibilityLabel={copied === 'clipboard' ? 'Address copied' : copied === 'shared' ? 'Address shared' : 'Copy Solana address'}
+        style={[S.primaryWide, S.depositCopy]}
+        onPress={copy}>
+        <Text style={S.primaryText}>{copied === 'clipboard' ? 'Copied ✓' : copied === 'shared' ? 'Shared ✓' : 'Copy address'}</Text>
+      </Pressable>
+
+      <Text style={S.dim2}>Your balance updates automatically once the send confirms.</Text>
+
+      {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
+    </>
+  );
+
+  if (inline) {
+    return <View style={S.sheetBody}>{body}</View>;
+  }
   return (
     <SheetOverlay>
       <SafeAreaView style={S.sheet}>
@@ -44,38 +82,8 @@ export function SolanaReceiveSheet({address, onClose}: {address: string; onClose
             <Text style={S.sheetCloseX}>✕</Text>
           </Pressable>
         </View>
-
         <ScrollView contentContainerStyle={S.sheetBody} keyboardShouldPersistTaps="handled">
-          <View testID="sol-receive-instructions" style={S.instrCard}>
-            <Text style={S.instrLine}>
-              Send <Text style={S.instrAsset}>SOL</Text> to your Solana address below.
-            </Text>
-            <Text style={S.instrCustody}>
-              dpay never holds your keys — SOL lands directly in your wallet on confirmation.
-            </Text>
-            {IS_SOLANA_DEVNET ? (
-              <Text testID="sol-devnet-warning" style={S.warnNote}>
-                ⚠ Connected to Solana devnet. Do NOT send mainnet SOL here — it will not appear. Use devnet SOL only.
-              </Text>
-            ) : null}
-          </View>
-
-          <View style={S.qrCard}><QRCode value={address} size={QR_SIZE_SMALL} ecl="L" /></View>
-
-          <Text testID="sol-receive-address" style={S.sheetAddr} selectable={true}>{address}</Text>
-
-          <Pressable
-            testID="btn-sol-receive-copy"
-            accessibilityRole="button"
-            accessibilityLabel={copied === 'clipboard' ? 'Address copied' : copied === 'shared' ? 'Address shared' : 'Copy Solana address'}
-            style={[S.primaryWide, S.depositCopy]}
-            onPress={copy}>
-            <Text style={S.primaryText}>{copied === 'clipboard' ? 'Copied ✓' : copied === 'shared' ? 'Shared ✓' : 'Copy address'}</Text>
-          </Pressable>
-
-          <Text style={S.dim2}>Your balance updates automatically once the send confirms.</Text>
-
-          {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
+          {body}
         </ScrollView>
       </SafeAreaView>
     </SheetOverlay>

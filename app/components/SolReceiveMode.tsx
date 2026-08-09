@@ -18,6 +18,8 @@ import {DpaySolNfc} from '../services/native';
 import {copyToClipboard} from '../lib/clipboard';
 import {QrScanner} from './QrScanner';
 import {SolNfcTap} from './SolNfcTap';
+import {ModeToggle} from './ModeToggle';
+import {SolanaReceiveSheet} from './SolanaReceiveSheet';
 import {withTimeout} from '../lib/timeout';
 
 const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeight: 44, borderWidth: 1, borderColor: C.sub2, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink};
@@ -38,7 +40,33 @@ const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeigh
  * NFC arming: this component mounts only while the SOL rail is selected. Switching the rail (via
  * Switching the active asset unmounts it, whose `useNfcTapState` cleanup stops the reader — no arm-leak.
  */
-export function SolReceiveMode({identity, online, nfcReady}: {identity: Identity; online: boolean; nfcReady: boolean}) {
+export function SolReceiveMode({identity, online, nfcReady, solAddress, subMode, onSubModeChange}: {identity: Identity; online: boolean; nfcReady: boolean; solAddress: string; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void}) {
+  const toggle = (
+    <ModeToggle
+      testID="receive-mode-toggle"
+      value={subMode}
+      onChange={(v) => onSubModeChange(v as 'request' | 'address')}
+      left={{label: 'Request payment', value: 'request', testID: 'btn-receive-request'}}
+      right={{label: 'My address', value: 'address', testID: 'btn-receive-address'}}
+    />
+  );
+
+  // "My address" sub-mode: render the SOL deposit-address flow INLINE (the SolanaReceiveSheet body).
+  // The toggle above lets the user flip back to "Request payment". `inline` skips the overlay chrome.
+  // Mirrors the IC ReceiveMode "My address" sub-mode byte-for-byte.
+  if (subMode === 'address') {
+    return (
+      <View style={S.center}>
+        {toggle}
+        <SolanaReceiveSheet
+          address={solAddress}
+          inline
+          onClose={() => onSubModeChange('request')}
+        />
+      </View>
+    );
+  }
+
   const [amount, setAmount] = useState('0.025');
   const [cur, setCur] = useState<'SOL' | 'USDC'>('SOL');
   const [memo, setMemo] = useState('');
@@ -133,6 +161,7 @@ export function SolReceiveMode({identity, online, nfcReady}: {identity: Identity
   if (phase === 'result' && result && !nfcActive) {
     return (
       <View style={S.center}>
+        {toggle}
         <View style={S.check}><Text style={S.checkMark}>✓</Text></View>
         <Text testID="sol-req-status" style={S.paidText}>{`Received ${fmtAsset(result.amount, result.cur === 'USDC' ? USDC_DECIMALS : SOL_DECIMALS, result.cur === 'USDC' ? 'USDC' : SOL_UNIT)}`}</Text>
         {result.sig ? (
@@ -154,6 +183,7 @@ export function SolReceiveMode({identity, online, nfcReady}: {identity: Identity
   if (phase === 'reqQr' && reqUri) {
     return (
       <View style={S.center}>
+        {toggle}
         {IS_SOLANA_DEVNET ? (
           <View style={S.devnetBadge}>
             <View style={S.devnetBadgeDot} />
@@ -220,6 +250,7 @@ export function SolReceiveMode({identity, online, nfcReady}: {identity: Identity
   // phase === 'form'
   return (
     <View style={S.center}>
+      {toggle}
       {IS_SOLANA_DEVNET ? (
         <View style={S.devnetBadge}>
           <View style={S.devnetBadgeDot} />
