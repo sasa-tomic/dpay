@@ -36,7 +36,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
@@ -48,13 +48,25 @@ use serde::{Deserialize, Serialize};
 use dpay_core::{Currency, SignedAuthorization, DEMO_USD, NONCE_LEN, PUBKEY_LEN};
 
 use crate::ledger::{
-    CurrencyDescriptor, Ledger, LedgerError, MintedUtxo, PendingUtxo, Receipt, TxnRecord, U64String,
-    WithdrawReceipt,
+    CurrencyDescriptor, DepositRefresh, Ledger, LedgerError, MintedUtxo, PendingUtxo, Receipt,
+    TxnRecord, U64String, WithdrawReceipt,
 };
 
 /// Retry policy for transient ledger errors (idempotency makes retries safe).
 const MAX_ATTEMPTS: u32 = 3;
 const BACKOFF: Duration = Duration::from_millis(20);
+
+/// TTL for the `deposit_refresh` per-`(pubkey, currency)` cache. The ckBTC minter's `update_balance`
+/// (the HTTPS Bitcoin-indexing outcall `deposit_refresh` proxies via the facade) costs ~170M cycles
+/// and only needs to run ~once per the minter's own ~3min heartbeat — Bitcoin confirmations take
+/// minutes either way. WITHOUT this cache, the wallet's "Add money" sheet polled the route every
+/// `POLL.deposit` (10s in prod) = ~8,640 minter calls/day × 170M ≈ **1.47 TC/day** — the 2026-08-09
+/// cycles drain. The endpoint is also unauthenticated with no other throttle, so the same leak
+/// applies to arbitrary bot traffic. A cache HIT returns the prior result with ZERO ledger/canister
+/// calls; 120s gives a 12× reduction from the 10s poll while keeping the sheet responsive (the user
+/// is waiting on multi-minute confirmations anyway). Errors are NOT cached (a transient ledger
+/// failure stays retryable).
+const DEPOSIT_REFRESH_TTL: Duration = Duration::from_secs(120);
 
 /// Shared relay state. `Arc<dyn Ledger>` is the settlement seam; `idempotency` caches receipts by
 /// nonce so a duplicate submission is answered from cache and never re-settled.
@@ -62,6 +74,14 @@ const BACKOFF: Duration = Duration::from_millis(20);
 pub struct AppState {
     pub ledger: Arc<dyn Ledger>,
     idempotency: Arc<Mutex<HashMap<[u8; NONCE_LEN], Receipt>>>,
+    /// Per-`(pubkey, currency)` TTL cache for `deposit_refresh` results — the fix for the 2026-08-09
+    /// cycles drain (see [`DEPOSIT_REFRESH_TTL`]). On a HIT (within the TTL) the handler returns the
+    /// cached [`DepositRefresh`] with ZERO ledger/canister calls; the minter `update_balance` outcall
+    /// only fires on a MISS or a stale entry. Mirrors the `idempotency` field's `Arc<Mutex<HashMap>>`
+    /// shape. The value is cloned out of the lock before responding (the lock is held only for the
+    /// read/insert, never across the ledger await).
+    deposit_refresh_cache:
+        Arc<Mutex<HashMap<([u8; PUBKEY_LEN], Currency), (Instant, DepositRefresh)>>>,
     /// Seam for the demo's degraded fallback. Wiring only for now.
     pub safe_mode: Arc<Mutex<bool>>,
     /// Whether `POST /api/v1/faucet` (which *mints*) is served. Defaults to `true` — harmless
@@ -82,6 +102,7 @@ impl AppState {
         AppState {
             ledger,
             idempotency: Arc::new(Mutex::new(HashMap::new())),
+            deposit_refresh_cache: Arc::new(Mutex::new(HashMap::new())),
             safe_mode: Arc::new(Mutex::new(false)),
             faucet_enabled: Arc::new(Mutex::new(true)),
             apk: Arc::new(None),
@@ -116,6 +137,20 @@ impl AppState {
 
     pub fn faucet_enabled(&self) -> bool {
         *self.faucet_enabled.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// Invalidate the `deposit_refresh` cache entry for `(pubkey, currency)`. Called by the
+    /// test-helpers seed route ([`test_deposit_seed`]) because seeding CHANGES the ledger's deposit
+    /// state (adds a pending UTXO), making any cached `deposit_status` stale — without this, the
+    /// wallet's pre-seed auto-poll would mask a freshly-seeded deposit behind a cached zero for the
+    /// whole TTL window. Feature-gated `test-helpers` only (never in prod: there a real deposit
+    /// confirms asynchronously over minutes and the TTL naturally expires first).
+    #[cfg(feature = "test-helpers")]
+    fn invalidate_deposit_refresh(&self, pubkey: [u8; PUBKEY_LEN], currency: Currency) {
+        self.deposit_refresh_cache
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&(pubkey, currency));
     }
 }
 
@@ -439,6 +474,14 @@ async fn deposit_address(
 /// (proxies the facade → ck minter `update_balance`); the wallet polls this from the "Add money"
 /// sheet and re-reads its balance when `minted_total > 0`. Path/query parsing mirrors `balance`;
 /// any ledger error → `503` (deposit plan §0).
+///
+/// **TTL cache.** A successful result is cached per `(pubkey, currency)` for [`DEPOSIT_REFRESH_TTL`]
+/// (120s). A HIT within the window returns the prior result with ZERO ledger/canister calls — the
+/// fix for the 2026-08-09 cycles drain, where an open sheet polled the ~170M-cycle `update_balance`
+/// outcall every 10s (≈ 1.47 TC/day). Errors (`503`) are NOT cached so a transient failure stays
+/// retryable. The wallet's own auto-poll is the only thing that can warm this cache in prod; the
+/// test-helpers seed route ([`test_deposit_seed`]) invalidates its key so a freshly-seeded deposit
+/// is drained on the next refresh instead of being masked by a stale zero.
 async fn deposit_refresh(
     State(state): State<AppState>,
     Path(hex_pk): Path<String>,
@@ -451,14 +494,50 @@ async fn deposit_refresh(
     let mut pk = [0u8; PUBKEY_LEN];
     pk.copy_from_slice(&bytes);
     let currency = qs.currency.unwrap_or(DEMO_USD);
+    let key = (pk, currency);
+
+    // Cache HIT (within TTL): return the prior result with ZERO ledger/canister calls — the cycles
+    // drain fix (see DEPOSIT_REFRESH_TTL). The lock is held only for the read; the cached value is
+    // cloned out before responding. On a MISS or stale entry, fall through to the ledger call below.
+    {
+        let cache = state
+            .deposit_refresh_cache
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        if let Some((at, cached)) = cache.get(&key) {
+            if at.elapsed() < DEPOSIT_REFRESH_TTL {
+                let r = cached.clone();
+                return (StatusCode::OK, Json(DepositRefreshBody {
+                    minted: r.minted,
+                    minted_total: r.minted_total,
+                    pending: r.pending,
+                    required_confirmations: r.required_confirmations,
+                }))
+                    .into_response();
+            }
+        }
+    }
+
+    // Cache MISS / stale: ask the ledger (→ facade → ck minter `update_balance`). This is the ONLY
+    // path that performs the ~170M-cycle outcall; the cache above coalesces the 10s poll into ≤1
+    // call per TTL window per (pubkey, currency).
     match state.ledger.deposit_status(pk, currency).await {
-        Ok(r) => (StatusCode::OK, Json(DepositRefreshBody {
-            minted: r.minted,
-            minted_total: r.minted_total,
-            pending: r.pending,
-            required_confirmations: r.required_confirmations,
-        }))
-            .into_response(),
+        Ok(r) => {
+            // Cache the fresh result BEFORE responding so a rapid retry hits the cache. Errors are
+            // deliberately NOT cached (a transient failure stays retryable).
+            state
+                .deposit_refresh_cache
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .insert(key, (Instant::now(), r.clone()));
+            (StatusCode::OK, Json(DepositRefreshBody {
+                minted: r.minted,
+                minted_total: r.minted_total,
+                pending: r.pending,
+                required_confirmations: r.required_confirmations,
+            }))
+                .into_response()
+        }
         Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
     }
 }
@@ -544,7 +623,15 @@ async fn test_deposit_seed(
     pk.copy_from_slice(&bytes);
     let currency = req.currency.unwrap_or(DEMO_USD);
     match state.ledger.seed_deposit(pk, currency, req.amount.0).await {
-        Ok(()) => (StatusCode::OK, Json(DepositSeedBody { seeded: true })).into_response(),
+        Ok(()) => {
+            // Seeding changes the ledger's deposit state (adds a pending UTXO), so any cached
+            // `deposit_status` for this key is now stale — drop it so the next `deposit_refresh`
+            // actually hits the ledger and drains the seed (mirrors how a real confirmation lands
+            // outside the TTL in prod). Without this the wallet's pre-seed auto-poll would mask the
+            // seed behind a cached zero for the whole TTL window (the e2e deposit-credited flow).
+            state.invalidate_deposit_refresh(pk, currency);
+            (StatusCode::OK, Json(DepositSeedBody { seeded: true })).into_response()
+        }
         // Mirror the deposit routes: any LedgerError → 503. seed_deposit on FakeLedger is infallible
         // in practice, but the default trait impl returns Rejected — surface it honestly rather than
         // swallowing.

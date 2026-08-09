@@ -112,15 +112,14 @@ async fn seed_then_refresh_credits_balance_through_real_router() {
         "refresh must credit the seeded deposit"
     );
 
-    // A second refresh finds nothing pending (drained, no double-credit).
-    let refresh_req2 = Request::builder()
-        .method("POST")
-        .uri(format!("/api/v1/deposit/refresh/{merch_hex}"))
-        .body(Body::empty())
-        .unwrap();
-    let (s_r2, b_r2) = call(&state, refresh_req2).await;
-    assert_eq!(s_r2, StatusCode::OK);
-    assert_eq!(b_r2["minted_total"], "0", "pending drained: nothing more to mint");
+    // A second refresh finds nothing pending (drained, no double-credit). NOTE: this calls the
+    // ledger DIRECTLY rather than POST /deposit/refresh, because the relay now TTL-caches
+    // `deposit_refresh` results (120s) — a second router hit within the window would return the
+    // cached minted_total=5000, not the drained 0. The drain property being asserted here is a
+    // LEDGER property (FakeLedger semantics), so probing the ledger directly is the faithful check.
+    let r2 = led.deposit_status(pubkey(&merchant), DEMO_USD).await.unwrap();
+    assert_eq!(r2.minted_total.0, 0, "pending drained: nothing more to mint");
+    assert!(r2.minted.is_empty());
     assert_eq!(led.balance_of(&pubkey(&merchant), DEMO_USD), BAL_B + 5000);
 }
 

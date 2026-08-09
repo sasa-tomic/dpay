@@ -1228,6 +1228,58 @@ async fn deposit_routes_map_ledger_transient_to_503() {
     );
 }
 
+/// `deposit_refresh` TTL-caches a successful result per `(pubkey, currency)`, so a second call within
+/// the TTL window is served from cache with ZERO ledger calls — the fix for the 2026-08-09 cycles
+/// drain (an open deposit sheet polled the ckBTC minter's `update_balance` every 10s ≈ 1.47 TC/day).
+///
+/// The proof exploits FakeLedger's DRAIN semantics: `deposit_status` drains a pending deposit on the
+/// FIRST call (returns `minted_total = amount`) and returns `minted_total = 0` on the second —
+/// UNLESS the relay serves the second call from the cache (returning the first's result verbatim).
+/// This test seeds via the FakeLedger's `register_deposit` DIRECTLY (not the test/seed route, which
+/// would invalidate the cache), then fires two identical POSTs and asserts the second response's
+/// `minted_total` EQUALS the first's (both non-zero). Without the cache the second drains to 0.
+#[tokio::test]
+async fn deposit_refresh_ttl_cache_serves_second_call_from_cache() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let merch_hex = hex::encode(pubkey(&merchant));
+
+    // Seed a pending deposit DIRECTLY on the FakeLedger (bypassing the /test/deposit/seed route,
+    // which invalidates the cache — we want the cache to be the only thing standing between the
+    // second call and a drained minted_total=0).
+    led.register_deposit(pubkey(&merchant), DEMO_USD, 5000);
+
+    let build_req = || {
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/deposit/refresh/{merch_hex}"))
+            .body(Body::empty())
+            .unwrap()
+    };
+
+    // First call: cache MISS → drains the pending deposit, mints 5000, stores it in the cache.
+    let (s1, b1) = call(&state, build_req()).await;
+    assert_eq!(s1, StatusCode::OK, "{b1}");
+    assert_eq!(b1["minted_total"], "5000", "first call mints the seeded deposit");
+
+    // Second call within the TTL: WITHOUT a cache this drains to minted_total=0 (FakeLedger
+    // semantics). WITH the cache it returns the cached first result (minted_total=5000).
+    let (s2, b2) = call(&state, build_req()).await;
+    assert_eq!(s2, StatusCode::OK, "{b2}");
+    assert_eq!(
+        b2["minted_total"], "5000",
+        "second call within TTL must be served from cache (same minted_total as first): {b2}"
+    );
+
+    // The ledger was credited exactly once (the cache served the second call, no re-mint).
+    assert_eq!(
+        led.balance_of(&pubkey(&merchant), DEMO_USD),
+        BAL_B + 5000,
+        "cache must not double-credit"
+    );
+}
+
 // --- currency catalog (M0) ---------------------------------------------------
 //
 // Covers GET /api/v1/currencies — the wallet's runtime asset catalog (closes issue #7). The
