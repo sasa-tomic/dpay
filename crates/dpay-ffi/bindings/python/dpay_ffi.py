@@ -472,6 +472,8 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_generate_keypair() != 36207:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_keypair_from_secret() != 64641:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_nfc_decode_receipt() != 25249:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_nfc_decode_request() != 42034:
@@ -781,6 +783,11 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_generate_keypair.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_generate_keypair.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_keypair_from_secret.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_keypair_from_secret.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_func_nfc_decode_receipt.argtypes = (
     _UniffiRustBuffer,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -1172,6 +1179,9 @@ _UniffiLib.uniffi_dpay_ffi_checksum_func_format_amount.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_generate_keypair.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_generate_keypair.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_keypair_from_secret.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_keypair_from_secret.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_decode_receipt.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_decode_receipt.restype = ctypes.c_uint16
@@ -2615,6 +2625,20 @@ def generate_keypair() -> "KeyPair":
     return _UniffiConverterTypeKeyPair.lift(_uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_func_generate_keypair,))
 
 
+def keypair_from_secret(secret: "bytes") -> "KeyPair":
+    """
+    Derive the Ed25519 keypair from an existing 32-byte seed (the recovery seed Backup reveals).
+    Called at onboarding when the user restores a wallet. Reuses [`signing_key_from_seed`]; rejects
+    a wrong-length seed as `DpayError::BadSecretLength`. The seed recovers BOTH the IC rail (this
+    Ed25519 key) AND the Solana rail (SLIP-10 derivation in `app/solana/identity.ts`).
+    """
+
+    _UniffiConverterBytes.check_lower(secret)
+    
+    return _UniffiConverterTypeKeyPair.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_keypair_from_secret,
+        _UniffiConverterBytes.lower(secret)))
+
+
 def nfc_decode_receipt(bytes: "bytes") -> "ReceiptData":
     """
     Payer side: decode the receipt the card received, so the offline payer shows the outcome and can
@@ -2923,6 +2947,7 @@ __all__ = [
     "encode_request",
     "format_amount",
     "generate_keypair",
+    "keypair_from_secret",
     "nfc_decode_receipt",
     "nfc_decode_request",
     "nfc_default_max_chunk",

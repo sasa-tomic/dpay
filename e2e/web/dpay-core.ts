@@ -307,6 +307,14 @@ async function generateKeypair(): Promise<{ secretHex: string; publicHex: string
   return { secretHex: bytesToHex(secret), publicHex: bytesToHex(pub) };
 }
 
+async function keypairFromSecret(secretHex: string): Promise<{ secretHex: string; publicHex: string }> {
+  // Restore path: derive the public key from an existing seed (the Backup value). Mirrors
+  // `dpay_ffi::keypair_from_secret`. The same seed also derives the Solana key (SLIP-10) in app code.
+  const secret = hexToBytes(secretHex);
+  const pub = await ed.getPublicKeyAsync(secret);
+  return { secretHex: bytesToHex(secret), publicHex: bytesToHex(pub) };
+}
+
 // Wire-format byte lengths, single-sourced from `wire_layout.json` (itself generated from the Rust
 // core consts — see `dfx/wire_layout.json`). The App.tsx self-check derives its expected hex length
 // from `wireLen()` so no magic literal rots on resize; the FFI is the source of truth on device.
@@ -478,6 +486,7 @@ async function nfcStatus(): Promise<string> {
 
 export const DpayCore = {
   generateKeypair,
+  keypairFromSecret,
   wireLen,
   signingLen,
   requestLen,

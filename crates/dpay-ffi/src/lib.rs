@@ -172,6 +172,19 @@ pub fn generate_keypair() -> KeyPair {
     }
 }
 
+/// Derive the Ed25519 keypair from an existing 32-byte seed (the recovery seed Backup reveals).
+/// Called at onboarding when the user restores a wallet. Reuses [`signing_key_from_seed`]; rejects
+/// a wrong-length seed as `DpayError::BadSecretLength`. The seed recovers BOTH the IC rail (this
+/// Ed25519 key) AND the Solana rail (SLIP-10 derivation in `app/solana/identity.ts`).
+#[uniffi::export]
+pub fn keypair_from_secret(secret: Vec<u8>) -> Result<KeyPair, DpayError> {
+    let sk = signing_key_from_seed(&secret)?;
+    Ok(KeyPair {
+        secret: sk.to_bytes().to_vec(),
+        public: sk.verifying_key().to_bytes().to_vec(),
+    })
+}
+
 /// The frozen wire-format byte lengths, single-sourced from `dpay_core`. The app derives its self-check
 /// expected hex length from [`wire_len`] so no magic literal can rot when the wire resizes. Exposed as
 /// `u64` because UniFFI has no `usize`; values are tiny (292/196/132) and stay well under 2^53 in JS.

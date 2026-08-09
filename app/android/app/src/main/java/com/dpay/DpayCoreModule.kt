@@ -84,6 +84,21 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         }
     }
 
+    /** Derive the Ed25519 keypair from a 32-byte recovery seed (hex in, keypair out). Restores a wallet
+     *  from the Backup seed. Rejects a wrong-length seed via the UniFFI DpayError. */
+    @ReactMethod
+    fun keypairFromSecret(secretHex: String, promise: Promise) {
+        try {
+            val kp = uniffi.dpay_ffi.keypairFromSecret(unhex(secretHex))
+            val out = Arguments.createMap()
+            out.putString("secretHex", hex(kp.secret))
+            out.putString("publicHex", hex(kp.`public`))
+            promise.resolve(out)
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
     /** Wire-format byte lengths from the core (single source of truth). Resolved as Double because
      *  RN's bridge has no u64; values (292/196/132) are tiny. App.tsx derives its self-check expected
      *  hex length from this so no magic literal can rot on a wire resize. */

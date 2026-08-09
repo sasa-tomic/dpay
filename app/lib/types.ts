@@ -69,6 +69,9 @@ export type Txn = {nonce: string; amount: string; who: string; memo: string; tim
 export type TransactionsRow = {from: string; to: string; amount: string; nonce: string; currency: number; timestamp: number; from_name: string; to_name: string; memo: string};
 export type DpayCoreApi = {
   generateKeypair(): Promise<{secretHex: string; publicHex: string}>;
+  // Derive the Ed25519 keypair from a 32-byte recovery seed (64 hex chars — the value Backup
+  // reveals). Restores BOTH rails (IC Ed25519 + Solana SLIP-10 derivation) from one seed.
+  keypairFromSecret(secretHex: string): Promise<{secretHex: string; publicHex: string}>;
   // Wire-format byte lengths, single-sourced from the FFI (dpay_core consts). The App.tsx self-check
   // derives the expected hex length from `wireLen()` so no magic literal can rot on a wire resize.
   wireLen(): Promise<number>;

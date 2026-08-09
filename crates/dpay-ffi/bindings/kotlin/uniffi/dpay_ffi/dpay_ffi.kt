@@ -790,6 +790,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is 
 // rather `InterfaceTooLargeException`, caused by too many methods 
@@ -816,6 +818,8 @@ fun uniffi_dpay_ffi_checksum_func_encode_request(
 fun uniffi_dpay_ffi_checksum_func_format_amount(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_generate_keypair(
+): Short
+fun uniffi_dpay_ffi_checksum_func_keypair_from_secret(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_nfc_decode_receipt(
 ): Short
@@ -979,6 +983,8 @@ fun uniffi_dpay_ffi_fn_func_encode_request(`to`: RustBuffer.ByValue,`amount`: Lo
 fun uniffi_dpay_ffi_fn_func_format_amount(`raw`: Long,`decimals`: Byte,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_generate_keypair(uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_keypair_from_secret(`secret`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_nfc_decode_receipt(`bytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1152,6 +1158,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_generate_keypair() != 36207.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_keypair_from_secret() != 64641.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_nfc_decode_receipt() != 25249.toShort()) {
@@ -2992,6 +3001,22 @@ public object FfiConverterOptionalByteArray: FfiConverterRustBuffer<kotlin.ByteA
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_generate_keypair(
         _status)
+}
+    )
+    }
+    
+
+        /**
+         * Derive the Ed25519 keypair from an existing 32-byte seed (the recovery seed Backup reveals).
+         * Called at onboarding when the user restores a wallet. Reuses [`signing_key_from_seed`]; rejects
+         * a wrong-length seed as `DpayError::BadSecretLength`. The seed recovers BOTH the IC rail (this
+         * Ed25519 key) AND the Solana rail (SLIP-10 derivation in `app/solana/identity.ts`).
+         */
+    @Throws(DpayException::class) fun `keypairFromSecret`(`secret`: kotlin.ByteArray): KeyPair {
+            return FfiConverterTypeKeyPair.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_keypair_from_secret(
+        FfiConverterByteArray.lower(`secret`),_status)
 }
     )
     }
