@@ -18,9 +18,9 @@ export const FAUCET_TIMEOUT_MS = 6000;
 // gets ample headroom AND is decoupled from the slower deposit_info (a read-only update that proxies
 // the minter's get_minter_info, observed at 7–15s). Sharing one controller let the slow info abort
 // the ready address at 8s → "Couldn't load your deposit address." (fixed 2026-08-03).
-export const DEPOSIT_TIMEOUT_MS = 8000;
+export const DEPOSIT_TIMEOUT_MS = 20000;
 export const DEPOSIT_ADDRESS_TIMEOUT_MS = 20000;
-export const DEPOSIT_REFRESH_TIMEOUT_MS = 6000;
+export const DEPOSIT_REFRESH_TIMEOUT_MS = 30000;
 export const RECONCILE_FETCH_TIMEOUT_MS = 3000;
 export const RECONCILE_ATTEMPTS = 4;
 export const RECONCILE_INTERVAL_MS = 1200;

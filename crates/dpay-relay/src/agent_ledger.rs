@@ -42,6 +42,15 @@ use crate::ledger::{
 /// healthy replica's normal round-trip latency.
 const CANISTER_CALL_TIMEOUT_SECS: u64 = 10;
 
+/// Timeout for the ck-minter-proxy deposit endpoints (deposit_address / refresh_deposit /
+/// deposit_info). These proxy into the ckBTC minter's `get_btc_address` / `update_balance` /
+/// `get_minter_info`, which perform Bitcoin-indexing (Bitcoin canister UTXO query + the KYC
+/// checker's HTTPS outcall) — observed at 7–15s on mainnet, well past the 10s default. A too-tight
+/// timeout here makes every cold deposit poll fail before the minter returns, so the TTL cache
+/// (commit 91cae05) never warms and the deposit sheet shows permanent failure. 30s gives ample
+/// headroom for the slowest healthy minter round-trip; the TTL cache then coalesces repeats.
+const MINTER_CALL_TIMEOUT_SECS: u64 = 30;
+
 /// Bounded staleness window for a displayed balance. ONE background batch `refresh_balances`
 /// per window catches facade-bypassing credits for ALL currencies; the rest of the polls hit the
 /// fast cached `balance_of` query. Bounds displayed-balance staleness to ~TTL+one-refresh. Tunable.
@@ -684,7 +693,7 @@ impl Ledger for AgentLedger {
         let arg = encode_args((pubkey.to_vec(), currency))
             .map_err(|e| LedgerError::Transient(format!("encode deposit_address arg: {e}")))?;
         let reply = tokio::time::timeout(
-            Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
+            Duration::from_secs(MINTER_CALL_TIMEOUT_SECS),
             self.agent
                 .update(&self.canister_id, "deposit_address")
                 .with_arg(arg)
@@ -693,7 +702,7 @@ impl Ledger for AgentLedger {
         .await
         .map_err(|_| {
             LedgerError::Transient(format!(
-                "deposit_address timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
+                "deposit_address timed out after {MINTER_CALL_TIMEOUT_SECS}s"
             ))
         })?
         .map_err(|e| LedgerError::Transient(format!("deposit_address update: {e}")))?;
@@ -713,7 +722,7 @@ impl Ledger for AgentLedger {
         let arg = encode_args((pubkey.to_vec(), currency))
             .map_err(|e| LedgerError::Transient(format!("encode refresh_deposit arg: {e}")))?;
         let reply = tokio::time::timeout(
-            Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
+            Duration::from_secs(MINTER_CALL_TIMEOUT_SECS),
             self.agent
                 .update(&self.canister_id, "refresh_deposit")
                 .with_arg(arg)
@@ -722,7 +731,7 @@ impl Ledger for AgentLedger {
         .await
         .map_err(|_| {
             LedgerError::Transient(format!(
-                "refresh_deposit timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
+                "refresh_deposit timed out after {MINTER_CALL_TIMEOUT_SECS}s"
             ))
         })?
         .map_err(|e| LedgerError::Transient(format!("refresh_deposit update: {e}")))?;
@@ -755,7 +764,7 @@ impl Ledger for AgentLedger {
         let arg = encode_args((currency,))
             .map_err(|e| LedgerError::Transient(format!("encode deposit_info arg: {e}")))?;
         let reply = tokio::time::timeout(
-            Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
+            Duration::from_secs(MINTER_CALL_TIMEOUT_SECS),
             self.agent
                 .update(&self.canister_id, "deposit_info")
                 .with_arg(arg)
@@ -764,7 +773,7 @@ impl Ledger for AgentLedger {
         .await
         .map_err(|_| {
             LedgerError::Transient(format!(
-                "deposit_info timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
+                "deposit_info timed out after {MINTER_CALL_TIMEOUT_SECS}s"
             ))
         })?
         .map_err(|e| LedgerError::Transient(format!("deposit_info update: {e}")))?;
