@@ -90,6 +90,10 @@ export async function run() {
     assert(afterToggle === '1.0', `amount should be preserved across the address detour (Rules of Hooks), got "${afterToggle}"`);
     console.log('[45-sol-receive] ✓ request-form state preserved across address detour');
 
+    // Return to the "My address" sub-mode for the original copy-control + screenshot checks below.
+    await driver.click('btn-receive-address', {timeoutMs: 5_000});
+    await driver.findByTestID('sol-receive-address', {timeoutMs: 5_000});
+
     // 5. The copy control is present inline (mirrors the ckBTC deposit sheet's copy affordance).
     await driver.findByTestID('btn-sol-receive-copy', {timeoutMs: 5_000});
     console.log('[45-sol-receive] ✓ copy control present (inline)');

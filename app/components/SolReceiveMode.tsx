@@ -41,32 +41,6 @@ const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeigh
  * Switching the active asset unmounts it, whose `useNfcTapState` cleanup stops the reader — no arm-leak.
  */
 export function SolReceiveMode({identity, online, nfcReady, solAddress, subMode, onSubModeChange}: {identity: Identity; online: boolean; nfcReady: boolean; solAddress: string; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void}) {
-  const toggle = (
-    <ModeToggle
-      testID="receive-mode-toggle"
-      value={subMode}
-      onChange={(v) => onSubModeChange(v as 'request' | 'address')}
-      left={{label: 'Request payment', value: 'request', testID: 'btn-receive-request'}}
-      right={{label: 'My address', value: 'address', testID: 'btn-receive-address'}}
-    />
-  );
-
-  // "My address" sub-mode: render the SOL deposit-address flow INLINE (the SolanaReceiveSheet body).
-  // The toggle above lets the user flip back to "Request payment". The sheet is inline-only (no
-  // overlay chrome — the tab body provides the surface). Mirrors the IC ReceiveMode "My address"
-  // sub-mode byte-for-byte.
-  if (subMode === 'address') {
-    return (
-      <View style={S.center}>
-        {toggle}
-        <SolanaReceiveSheet
-          address={solAddress}
-          onClose={() => onSubModeChange('request')}
-        />
-      </View>
-    );
-  }
-
   const [amount, setAmount] = useState('0.025');
   const [cur, setCur] = useState<'SOL' | 'USDC'>('SOL');
   const [memo, setMemo] = useState('');
@@ -96,6 +70,33 @@ export function SolReceiveMode({identity, online, nfcReady, solAddress, subMode,
     const id = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
     return () => clearInterval(id);
   }, [phase, reqSnapshot, result]);
+
+  const toggle = (
+    <ModeToggle
+      testID="receive-mode-toggle"
+      value={subMode}
+      onChange={(v) => onSubModeChange(v as 'request' | 'address')}
+      left={{label: 'Request payment', value: 'request', testID: 'btn-receive-request'}}
+      right={{label: 'My address', value: 'address', testID: 'btn-receive-address'}}
+    />
+  );
+
+  // "My address" sub-mode: render the SOL deposit-address flow INLINE (the SolanaReceiveSheet body).
+  // The toggle above lets the user flip back to "Request payment". The sheet is inline-only (no
+  // overlay chrome — the tab body provides the surface). Mirrors the IC ReceiveMode "My address"
+  // sub-mode. Sits BELOW the useState/useEffect so React's Rules of Hooks hold across sub-mode flips
+  // (the merchant's amount/memo/form state survives a My-address detour without re-mounting).
+  if (subMode === 'address') {
+    return (
+      <View style={S.center}>
+        {toggle}
+        <SolanaReceiveSheet
+          address={solAddress}
+          onClose={() => onSubModeChange('request')}
+        />
+      </View>
+    );
+  }
 
   // Build the solreq: QR. Derives the merchant's SOL address (or their USDC ATA) for the `to`/`toAta`.
   function makeRequest() {

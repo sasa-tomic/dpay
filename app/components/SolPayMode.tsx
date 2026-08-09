@@ -40,34 +40,6 @@ import {withTimeout} from '../lib/timeout';
  * switching the active asset unmounts it, whose `useNfcTapState` cleanup disarms the HCE card — no arm-leak.
  */
 export function SolPayMode({identity, online, nfcReady, solBalance, onSent, subMode, onSubModeChange, onShowDeposit}: {identity: Identity; online: boolean; nfcReady: boolean; solBalance: string; onSent: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; onShowDeposit?: () => void}) {
-  const toggle = (
-    <ModeToggle
-      testID="pay-mode-toggle"
-      value={subMode}
-      onChange={(v) => onSubModeChange(v as 'scan' | 'send')}
-      left={{label: 'Scan to pay', value: 'scan', testID: 'btn-pay-scan'}}
-      right={{label: 'Send to address', value: 'send', testID: 'btn-pay-send'}}
-    />
-  );
-
-  // "Send to address" sub-mode: render the on-chain SOL send flow INLINE (the SolanaWithdrawSheet
-  // body). The toggle above lets the user flip back to "Scan to pay". The sheet is inline-only (no
-  // overlay chrome — the tab body provides the surface). Mirrors the IC PayMode "Send to address"
-  // sub-mode byte-for-byte.
-  if (subMode === 'send') {
-    return (
-      <View style={S.center}>
-        {toggle}
-        <SolanaWithdrawSheet
-          identity={identity}
-          balance={solBalance}
-          onSent={onSent}
-          onClose={() => onSubModeChange('scan')}
-        />
-      </View>
-    );
-  }
-
   const [phase, setPhase] = useState<'setup' | 'scan' | 'review' | 'qr' | 'paid'>('setup');
   const [nonceState, setNonceState] = useState<SolNonceState | null>(null);
   const [req, setReq] = useState<SolReq | null>(null);
@@ -90,6 +62,35 @@ export function SolPayMode({identity, online, nfcReady, solBalance, onSent, subM
     })();
     return () => { alive = false; };
   }, [identity.publicHex]);
+
+  const toggle = (
+    <ModeToggle
+      testID="pay-mode-toggle"
+      value={subMode}
+      onChange={(v) => onSubModeChange(v as 'scan' | 'send')}
+      left={{label: 'Scan to pay', value: 'scan', testID: 'btn-pay-scan'}}
+      right={{label: 'Send to address', value: 'send', testID: 'btn-pay-send'}}
+    />
+  );
+
+  // "Send to address" sub-mode: render the on-chain SOL send flow INLINE (the SolanaWithdrawSheet
+  // body). The toggle above lets the user flip back to "Scan to pay". The sheet is inline-only (no
+  // overlay chrome — the tab body provides the surface). Mirrors the IC PayMode "Send to address"
+  // sub-mode. Sits BELOW the useState/useEffect so React's Rules of Hooks hold across sub-mode flips
+  // (the payer's nonce/phase state survives a Send detour without re-mounting).
+  if (subMode === 'send') {
+    return (
+      <View style={S.center}>
+        {toggle}
+        <SolanaWithdrawSheet
+          identity={identity}
+          balance={solBalance}
+          onSent={onSent}
+          onClose={() => onSubModeChange('scan')}
+        />
+      </View>
+    );
+  }
 
   // First-use: create the durable-nonce account on-chain (online). This funds a nonce account at
   // SLIP-10 m/44'/501'/0'/1' (deterministic from the device seed), initializes it with the device
