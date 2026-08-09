@@ -8,42 +8,59 @@
 > entries below are **deliberate, documented follow-ups**, not regressions — each carries its current mitigation and the concrete
 > next step. Structural detail lives in `CODEBASE_ANALYSIS.md`.
 
-## NEXT SESSION — work order (2026-08-09): Send/Receive tabs IA refactor — AGREED, NOT YET BUILT
+## NEXT SESSION — work order (2026-08-09): Send/Receive tabs IA refactor — ✅ DONE
 
 > **Top of the work order.** Founder-directed (2026-08-09). Fully `app/`-scoped (zero wire/canister/
 > relay/core change). Full plan + phased breakdown + e2e-impact table in `2026-08-09-send-receive-tabs-refactor.md`.
 
-**Goal:** move on-chain Send/Receive OUT of the Balances sheet and INTO the existing Pay/Receive
-tabs (extend those tabs), so Balances becomes a pure balance-list + select screen. This replaces the
-busy per-row `+Receive`/`Send` buttons (and the rejected "..." popup-menu alternative). Precedent:
-SOL already does this — when SOL is active, the Receive tab shows `SolReceiveMode` (the deposit
-address); IC assets stop being the exception.
+**✅ DONE (2026-08-09, commits `f882a04` + `65b7094` + timeout bump).** The on-chain Send/Receive
+moved OUT of the Balances per-row buttons and INTO the existing Pay/Receive tabs (extended with a
+within-tab `[ ... | ... ]` toggle). Balances is now a pure balance-list + select screen. 3 founder
+issues resolved: (1) Balances rows decluttered — IC rows are one whole-row select Pressable
+(`asset-<key>-select`), per-row `+Receive`/`Send` buttons removed; brand left-border is active-ONLY
+(`assetCardActive`) so the selected card pops. (2) Deposit address (was Balances `+Receive`) now lives
+in the Receive tab's "My address" sub-mode — no more naming collision with the Receive-tab payment-
+request flow; the "Receive" label is kept (NO rename to "Deposit"). (3) The Receive-tab
+`CurrencyPicker` is unified with Balances (testnet-filtered + dot active indicator + matching
+typography).
 
-**The 3 founder-reported issues this resolves:**
-1. Balances rows are busy + selecting the active currency is undiscoverable (the brand left-border is
-   always on; only an 8×8 dot signals active). → whole-row select, active-only border.
-2. `+Receive` (Balances, = deposit address) collides with the Receive tab (= payment request). →
-   deposit address moves into the Receive tab; keep the "Receive" label (NO rename).
-3. The Receive-tab `CurrencyPicker` (`ReceiveMode.tsx:297`) is ugly + out of date (no testnet filter,
-   divergent style). → unified with Balances (testnet-filtered, matching row style).
+**Design decisions (build-time):**
+- **Inline-vs-sheet: INLINE for all three bodies** (deposit CkBtcUtxo / deposit CkEthErc20 / withdraw)
+  — matching SOL's `SolReceiveMode`/`SolPayMode` inline pattern. `DepositSheet`/`CkErc20DepositSheet`/
+  `WithdrawSheet` each gained an `inline?: boolean` prop that skips the `SheetOverlay`/`SafeAreaView`/
+  sheet-head chrome (the tab body is the surface); the body JSX + all downstream testIDs are byte-
+  unchanged. `onClose` flips the sub-mode back. The sheets are still importable as overlays (the prop
+  defaults false) — kept as thin presentational components rather than deleted (minimizes risk).
+- **DEMO:** no on-chain deposit/withdraw family → the within-tab toggle is HIDDEN for DEMO (the
+  request/scan flow stands alone). DEMO's faucet stays in Balances (`btn-topup`).
+- **SOL: kept its Balances entry** (`onSolReceive`/`onSolSend`) as a deliberate exception. The plan's
+  e2e impact table did NOT list SOL flows (45/52) for re-routing and stated "SOL routing unchanged",
+  so dropping SOL's buttons would have broken those flows without a re-route target. IC assets are the
+  clean declutter the founder asked for; SOL is a separate bolt-on rail. Follow-up: unify SOL into the
+  tab toggles too (re-route 45/52) if desired for consistency.
+- **Deeplink migration:** `?screen=deposit` + the auto-open-ckERC20-on-restart effect now set
+  `mode='receive'` + `receiveSubMode='address'` + select the currency (was: open an overlay sheet).
+  The within-tab sub-mode state is OWNED by Wallet (not the mode components) so deeplinks can land the
+  user on the right surface.
 
-**Phases (each TDD RED-first, e2e reconciled, committed per unit — build as a sequence, gate once):**
-- **P1** Balances: whole-row `Pressable`→`onSelect`, drop `+Receive`/`Send` buttons, active-only
-  border, `testID="asset-${key}-select"`.
-- **P2** Receive tab: add `[ Request payment | My address ]` toggle — "My address" renders the
-  deposit-address flow inline for the active IC asset's family (lift `DepositSheet`/`CkErc20DepositSheet`
-  bodies). Unified `CurrencyPicker` (testnet-filter + restyle).
-- **P3** Pay tab: add `[ Scan to pay | Send to address ]` toggle — "Send to address" renders the
-  `WithdrawSheet` body inline. SOL → `SolanaWithdrawSheet` (already exists).
-- **P4** picker polish + a11y-census (flow 41) reconciliation + `FLOWS.md` regen.
+**e2e:** 59/59 GREEN. ~14 flows re-routed (all mechanical — same downstream assertions, new nav path
+`Balances → select currency → tab → toggle`): deposit 03/04/05/16/22/33/34, withdraw 15/18/44/48/56,
+balances 55, plus incidental touch-ups (14 keyboard, 39 store-screens, 41 a11y census). New harness
+helpers: `selectCurrency`, `openReceiveAddress`, `openPaySend`. `balances.png` visual baseline re-seeded
+(21.8% drift → 0% — the per-row buttons + always-on border are gone). `wallet-pay`/`receive-request`/
+`settings`/`ledger` baselines unchanged.
 
-**e2e impact:** ~12 flows re-routed (deposit 03/04/05/16/22/33, withdraw 15/18/44/48/56, balances
-24/55, a11y 41, visual 40). All mechanical (same downstream assertions, new navigation path). Visual
-baselines `balances.png` + `wallet-pay.png` re-seed.
+**testID delta (a11y-census flow 41 reconciled):** REMOVED `asset-add-*`, `btn-withdraw` (from
+Balances), `btn-deposit-close`, `btn-ckerc20-close` (inline bodies have no overlay close). ADDED
+`asset-<key>-select` (whole-row select), `btn-receive-request`/`btn-receive-address`,
+`btn-pay-scan`/`btn-pay-send`, `receive-mode-toggle`/`pay-mode-toggle`. The `asset-<key>` CONTAINER
+testID is preserved (wraps the select Pressable) so flows that read row textContent (05/24) are
+unchanged.
 
-**Constraints:** "..." popup menu EXPLICITLY REJECTED. Do NOT rename "Receive"→"Deposit". Wire/canister
-untouched. SOL routing unchanged (already address-based). Decide at build time: inline-vs-sheet for
-the lifted bodies, and DEMO's faucet home (Balances vs Receive "My address").
+**Gates:** `just verify` green — typecheck 0, jest 480/480, bridge-parity OK (29 methods, untouched),
+e2e **59/59**. No wire/canister/relay/core change (pure `app/` + `e2e/`). Prod catalog reconciled (7
+currencies: DEMO + ckBTC/ckUSDC/ckETH mainnet + 3 testnet) — the unified picker/Balances handle it
+with no duplicate symbols and no testnet leakage.
 
 ---
 
