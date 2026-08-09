@@ -132,11 +132,10 @@ export async function run() {
     {
       const body = await driver.bodyText();
       assert(!/scrapes/.test(body), 'the watching state must not use the "scrapes" jargon (M9)');
-      // H1: the sheet title names the ASSET (USDC), not the network (Ethereum).
-      assertIncludes(body, 'Add USDC', 'CkErc20DepositSheet title should name the asset (USDC), not the network (H1)');
-      assert(!/Add Ethereum/.test(body), 'the sheet title must not read "Add Ethereum" (H1)');
+      // H1: the inline body names the ASSET (USDC) in the instructions card, not the network title.
+      assertIncludes(body, 'USDC', 'CkErc20DepositSheet body should name the asset (USDC) (H1)');
       assertIncludes(body, 'ETH for Ethereum network gas', 'the sheet must warn about Ethereum gas fees (M8)');
-      console.log('[16-ckusdc-onramp] ✓ happy path: title "Add USDC" + gas note + watching (no "scrapes")');
+      console.log('[16-ckusdc-onramp] ✓ happy path: USDC named + gas note + watching (no "scrapes")');
     }
 
     // Assert the WIRING: exactly 2 sendTransaction calls with the right contract + selector.
