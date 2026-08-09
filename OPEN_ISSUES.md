@@ -8,6 +8,45 @@
 > entries below are **deliberate, documented follow-ups**, not regressions — each carries its current mitigation and the concrete
 > next step. Structural detail lives in `CODEBASE_ANALYSIS.md`.
 
+## NEXT SESSION — work order (2026-08-09): Send/Receive tabs IA refactor — AGREED, NOT YET BUILT
+
+> **Top of the work order.** Founder-directed (2026-08-09). Fully `app/`-scoped (zero wire/canister/
+> relay/core change). Full plan + phased breakdown + e2e-impact table in `2026-08-09-send-receive-tabs-refactor.md`.
+
+**Goal:** move on-chain Send/Receive OUT of the Balances sheet and INTO the existing Pay/Receive
+tabs (extend those tabs), so Balances becomes a pure balance-list + select screen. This replaces the
+busy per-row `+Receive`/`Send` buttons (and the rejected "..." popup-menu alternative). Precedent:
+SOL already does this — when SOL is active, the Receive tab shows `SolReceiveMode` (the deposit
+address); IC assets stop being the exception.
+
+**The 3 founder-reported issues this resolves:**
+1. Balances rows are busy + selecting the active currency is undiscoverable (the brand left-border is
+   always on; only an 8×8 dot signals active). → whole-row select, active-only border.
+2. `+Receive` (Balances, = deposit address) collides with the Receive tab (= payment request). →
+   deposit address moves into the Receive tab; keep the "Receive" label (NO rename).
+3. The Receive-tab `CurrencyPicker` (`ReceiveMode.tsx:297`) is ugly + out of date (no testnet filter,
+   divergent style). → unified with Balances (testnet-filtered, matching row style).
+
+**Phases (each TDD RED-first, e2e reconciled, committed per unit — build as a sequence, gate once):**
+- **P1** Balances: whole-row `Pressable`→`onSelect`, drop `+Receive`/`Send` buttons, active-only
+  border, `testID="asset-${key}-select"`.
+- **P2** Receive tab: add `[ Request payment | My address ]` toggle — "My address" renders the
+  deposit-address flow inline for the active IC asset's family (lift `DepositSheet`/`CkErc20DepositSheet`
+  bodies). Unified `CurrencyPicker` (testnet-filter + restyle).
+- **P3** Pay tab: add `[ Scan to pay | Send to address ]` toggle — "Send to address" renders the
+  `WithdrawSheet` body inline. SOL → `SolanaWithdrawSheet` (already exists).
+- **P4** picker polish + a11y-census (flow 41) reconciliation + `FLOWS.md` regen.
+
+**e2e impact:** ~12 flows re-routed (deposit 03/04/05/16/22/33, withdraw 15/18/44/48/56, balances
+24/55, a11y 41, visual 40). All mechanical (same downstream assertions, new navigation path). Visual
+baselines `balances.png` + `wallet-pay.png` re-seed.
+
+**Constraints:** "..." popup menu EXPLICITLY REJECTED. Do NOT rename "Receive"→"Deposit". Wire/canister
+untouched. SOL routing unchanged (already address-based). Decide at build time: inline-vs-sheet for
+the lifted bodies, and DEMO's faucet home (Balances vs Receive "My address").
+
+---
+
 ## NEXT SESSION — work order (post 2026-08-08 UX sweep)
 
 The 2026-08-08 tech-debt + deeplink sweep (6 items, all done — see below) was followed by a
