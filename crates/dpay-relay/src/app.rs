@@ -57,7 +57,7 @@ const MAX_ATTEMPTS: u32 = 3;
 const BACKOFF: Duration = Duration::from_millis(20);
 
 /// TTL for the `deposit_refresh` per-`(pubkey, currency)` cache. The ckBTC minter's `update_balance`
-/// (the HTTPS Bitcoin-indexing outcall `deposit_refresh` proxies via the facade) costs ~170M cycles
+/// (the inter-canister Bitcoin canister call `deposit_refresh` proxies via the facade) costs ~170M cycles
 /// and only needs to run ~once per the minter's own ~3min heartbeat — Bitcoin confirmations take
 /// minutes either way. WITHOUT this cache, the wallet's "Add money" sheet polled the route every
 /// `POLL.deposit` (10s in prod) = ~8,640 minter calls/day × 170M ≈ **1.47 TC/day** — the 2026-08-09
@@ -76,8 +76,8 @@ pub struct AppState {
     idempotency: Arc<Mutex<HashMap<[u8; NONCE_LEN], Receipt>>>,
     /// Per-`(pubkey, currency)` TTL cache for `deposit_refresh` results — the fix for the 2026-08-09
     /// cycles drain (see [`DEPOSIT_REFRESH_TTL`]). On a HIT (within the TTL) the handler returns the
-    /// cached [`DepositRefresh`] with ZERO ledger/canister calls; the minter `update_balance` outcall
-    /// only fires on a MISS or a stale entry. Mirrors the `idempotency` field's `Arc<Mutex<HashMap>>`
+    /// cached [`DepositRefresh`] with ZERO ledger/canister calls; the minter `update_balance`
+    /// inter-canister Bitcoin canister call (not an HTTPS outcall) only fires on a MISS or a stale entry. Mirrors the `idempotency` field's `Arc<Mutex<HashMap>>`
     /// shape. The value is cloned out of the lock before responding (the lock is held only for the
     /// read/insert, never across the ledger await).
     deposit_refresh_cache:
@@ -481,7 +481,7 @@ async fn deposit_address(
 /// **TTL cache.** A successful result is cached per `(pubkey, currency)` for [`DEPOSIT_REFRESH_TTL`]
 /// (120s). A HIT within the window returns the prior result with ZERO ledger/canister calls — the
 /// fix for the 2026-08-09 cycles drain, where an open sheet polled the ~170M-cycle `update_balance`
-/// outcall every 10s (≈ 1.47 TC/day). Errors (`503`) are NOT cached so a transient failure stays
+/// inter-canister call every 10s (≈ 1.47 TC/day). Errors (`503`) are NOT cached so a transient failure stays
 /// retryable. The wallet's own auto-poll is the only thing that can warm this cache in prod; the
 /// test-helpers seed route ([`test_deposit_seed`]) invalidates its key so a freshly-seeded deposit
 /// is drained on the next refresh instead of being masked by a stale zero.
@@ -522,7 +522,7 @@ async fn deposit_refresh(
     }
 
     // Cache MISS / stale: ask the ledger (→ facade → ck minter `update_balance`). This is the ONLY
-    // path that performs the ~170M-cycle outcall; the cache above coalesces the 10s poll into ≤1
+    // path that performs the ~170M-cycle inter-canister Bitcoin canister call; the cache above coalesces the 10s poll into ≤1
     // call per TTL window per (pubkey, currency).
     match state.ledger.deposit_status(pk, currency).await {
         Ok(r) => {

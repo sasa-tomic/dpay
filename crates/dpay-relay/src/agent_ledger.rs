@@ -44,8 +44,9 @@ const CANISTER_CALL_TIMEOUT_SECS: u64 = 10;
 
 /// Timeout for the ck-minter-proxy deposit endpoints (deposit_address / refresh_deposit /
 /// deposit_info). These proxy into the ckBTC minter's `get_btc_address` / `update_balance` /
-/// `get_minter_info`, which perform Bitcoin-indexing (Bitcoin canister UTXO query + the KYC
-/// checker's HTTPS outcall) — observed at 7–15s on mainnet, well past the 10s default. A too-tight
+/// `get_minter_info`, which perform Bitcoin indexing (a Bitcoin canister UTXO query via the IC's
+/// native Bitcoin integration — an inter-canister call, not an HTTPS outcall; the indexing/retrieval
+/// latency is what shows up at 7–15s on mainnet, well past the 10s default. A too-tight
 /// timeout here makes every cold deposit poll fail before the minter returns, so the TTL cache
 /// (commit 91cae05) never warms and the deposit sheet shows permanent failure. 30s gives ample
 /// headroom for the slowest healthy minter round-trip; the TTL cache then coalesces repeats.
