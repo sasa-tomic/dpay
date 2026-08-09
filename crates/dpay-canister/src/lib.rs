@@ -1367,6 +1367,28 @@ async fn reconcile(currency: Currency) -> Result<ReconcileReport, String> {
 #[update]
 async fn deposit_address(pubkey: Vec<u8>, currency: Currency) -> Result<String, String> {
     let _pk = to_pubkey(&pubkey)?; // validate length; the minter takes the subaccount as a blob
+    // FAMILY GATE: the BTC deposit proxy (`get_btc_address`) is only valid for CkBtcUtxo-family
+    // minters. A CkEthErc20 minter has NO `get_btc_address` method (ckETH/ckUSDC deposits use the
+    // helper-contract onramp / ckerc20 endpoint, not an IC mint trigger), so calling it would trap
+    // at the minter (prod: IC0536 "Canister has no update method 'get_btc_address'"). A currency
+    // with a registered minter but no family meta defaults to CkBtcUtxo (legacy backward compat);
+    // one with NEITHER minter NOR family fails closed here. Mirrors the family dispatch in `withdraw`.
+    let has_minter = minter_for(currency).is_ok();
+    let family = match currency_family(currency) {
+        Some(f) => f,
+        None if has_minter => MinterFamily::CkBtcUtxo,
+        None => {
+            return Err(format!(
+                "currency {currency} has no minter family and no minter — cannot resolve deposit_address"
+            ));
+        }
+    };
+    if family != MinterFamily::CkBtcUtxo {
+        return Err(format!(
+            "deposit_address is only available for CkBtcUtxo-family currencies; {:?} deposits use the onramp/ckerc20 endpoint",
+            family
+        ));
+    }
     let minter = minter_for(currency)?;
     minter_call_btc_address(minter, pubkey).await
 }
@@ -1389,6 +1411,28 @@ async fn deposit_address(pubkey: Vec<u8>, currency: Currency) -> Result<String, 
 #[update]
 async fn refresh_deposit(pubkey: Vec<u8>, currency: Currency) -> Result<DepositRefresh, String> {
     let pk = to_pubkey(&pubkey)?;
+    // FAMILY GATE: the BTC deposit proxy (`update_balance`) is a UTXO-confirmation model that only
+    // applies to CkBtcUtxo-family minters. A CkEthErc20 minter has NO `update_balance` method
+    // (ckETH/ckUSDC deposits are EVM-log-sourced by the minter's heartbeat, not pulled by the
+    // facade), so calling it would trap at the minter. A currency with a registered minter but no
+    // family meta defaults to CkBtcUtxo (legacy backward compat); one with NEITHER minter NOR family
+    // fails closed here. Mirrors the family dispatch in `withdraw`.
+    let has_minter = minter_for(currency).is_ok();
+    let family = match currency_family(currency) {
+        Some(f) => f,
+        None if has_minter => MinterFamily::CkBtcUtxo,
+        None => {
+            return Err(format!(
+                "currency {currency} has no minter family and no minter — cannot resolve refresh_deposit"
+            ));
+        }
+    };
+    if family != MinterFamily::CkBtcUtxo {
+        return Err(format!(
+            "refresh_deposit is only available for CkBtcUtxo-family currencies; {:?} deposits use the onramp/ckerc20 endpoint",
+            family
+        ));
+    }
     let minter = minter_for(currency)?;
     let (ledger, _) = ledger_for(currency)?;
     match minter_call_update_balance(minter, pubkey).await? {
@@ -1466,6 +1510,28 @@ async fn refresh_deposit(pubkey: Vec<u8>, currency: Currency) -> Result<DepositR
 /// `get_deposit_fee` into the normalized deposit parameters the app renders as instructions.
 #[update]
 async fn deposit_info(currency: Currency) -> Result<DepositInfo, String> {
+    // FAMILY GATE: `get_minter_info` + `get_deposit_fee` decode against the BTC minter's `MinterInfo`
+    // struct (min_confirmations / deposit_btc_min_amount). A CkEthErc20 minter returns a DIFFERENT
+    // `MinterInfo` shape, so decoding would fail (prod: CandidDecodeFailed). ckETH/ckUSDC deposits
+    // use the helper-contract onramp / ckerc20 endpoint, not this BTC-shaped info. A currency with a
+    // registered minter but no family meta defaults to CkBtcUtxo (legacy backward compat); one with
+    // NEITHER minter NOR family fails closed here. Mirrors the family dispatch in `withdraw`.
+    let has_minter = minter_for(currency).is_ok();
+    let family = match currency_family(currency) {
+        Some(f) => f,
+        None if has_minter => MinterFamily::CkBtcUtxo,
+        None => {
+            return Err(format!(
+                "currency {currency} has no minter family and no minter — cannot resolve deposit_info"
+            ));
+        }
+    };
+    if family != MinterFamily::CkBtcUtxo {
+        return Err(format!(
+            "deposit_info is only available for CkBtcUtxo-family currencies; {:?} deposits use the onramp/ckerc20 endpoint",
+            family
+        ));
+    }
     let minter = minter_for(currency)?;
     let info = minter_call_minter_info(minter).await?;
     let deposit_fee = minter_call_deposit_fee(minter).await?;
