@@ -22,10 +22,11 @@
 // move — merging them would blur the non-custodial, no-swap line.
 //
 // Selector contract: `balance` (header → Balances), `asset-ckbtc` (the BTC row in the Balances
-// sheet), `asset-add-ckbtc` (BTC row Add → deposit sheet), `deposit-address`, `btn-deposit-check`
-// (manual refresh), `deposit-status`, `btn-deposit-close`. Seed route: POST /api/v1/test/deposit/seed
+// sheet — still the container testID), `asset-ckbtc-select` (the whole-row select Pressable),
+// `btn-receive-address` (Receive → "My address"), `deposit-address`, `btn-deposit-check`
+// (manual refresh), `deposit-status`. Seed route: POST /api/v1/test/deposit/seed
 // {account, currency, amount}.
-import { setup, assert, assertIncludes, seedDeposit, getBalance, onboardWallet, accountOf, openBalances } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, seedDeposit, getBalance, onboardWallet, accountOf, openBalances, selectCurrency, openReceiveAddress } from '../harness/lib.mjs';
 
 const DEPOSIT_CURRENCY = 1; // BTC — matches App.tsx DEPOSIT_CURRENCY (the deposit asset)
 const SEED_SATS = 50_000;   // 0.00050000 BTC
@@ -61,7 +62,7 @@ export async function run() {
     // Before any top-up, open the Balances sheet. The BTC row is ALWAYS visible there — asset rows
     // render at every balance (including zero). Assert it reads the zero balance in BTC units + carries
     // the BTC label (MC5: cards always visible, clearly labeled, never merged). The sheet stays open
-    // for the whole flow: the deposit sheet stacks ON TOP of it, and closing the deposit returns here.
+    // long enough to read the row; we then SELECT ckBTC so the Receive "My address" sub-mode keys off it.
     console.log('[05-deposit-credited] opening Balances…');
     await openBalances(driver);
     const zeroCard = await driver.findByTestID('asset-ckbtc', { timeoutMs: 5_000 });
@@ -74,9 +75,10 @@ export async function run() {
     const before = await getBalance(relayBaseURL, accountHex, DEPOSIT_CURRENCY);
     assert(before === '0', `pre-seed BTC balance must be 0, got ${before}`);
 
-    // 3. Open the deposit sheet from the Balances BTC row's "Add" action (stacks on top of Balances).
-    console.log('[05-deposit-credited] opening the deposit sheet (from the Balances BTC row)…');
-    await driver.click('asset-add-ckbtc', { timeoutMs: 5_000 });
+    // 3. Select ckBTC (makes it the active asset) → Receive → "My address" (the inline deposit body).
+    console.log('[05-deposit-credited] selecting ckBTC → Receive → My address…');
+    await selectCurrency(driver, 'ckbtc');
+    await openReceiveAddress(driver);
     await driver.findByTestID('deposit-address', { timeoutMs: 10_000 });
 
     // 4. Seed a pending BTC deposit for THIS account via the test-helpers route. The balance is NOT
@@ -106,15 +108,15 @@ export async function run() {
     assert(after === String(SEED_SATS), `credited BTC balance must equal the seed (${SEED_SATS}), got ${after}`);
     console.log(`[05-deposit-credited] ✓ BTC balance 0 → ${after} sats (credited through the REAL relay+FakeLedger)`);
 
-    // 7. SEAMLESSNESS: close the deposit sheet (returns to the Balances sheet still open underneath)
-    //    and prove the credited BTC stays VISIBLE. The wallet's balance poll (every 2.5s) fetches
-    //    currency 1; the Balances BTC row re-renders with the minted amount. A top-up whose balance
-    //    vanishes when the sheet closes is the bug this guards.
-    console.log('[05-deposit-credited] closing the deposit sheet — asserting the balance stays visible…');
-    await driver.click('btn-deposit-close', { timeoutMs: 5_000 });
+    // 7. SEAMLESSNESS: flip the toggle back to "Request payment" (hides the inline deposit body) and
+    //    prove the credited BTC stays VISIBLE. The wallet's balance poll (every 2.5s) fetches currency
+    //    1; re-open the Balances hub and the BTC row re-renders with the minted amount. A top-up whose
+    //    balance vanishes when the deposit closes is the bug this guards.
+    console.log('[05-deposit-credited] toggle to "Request payment" — asserting the balance stays visible…');
+    await driver.click('btn-receive-request', { timeoutMs: 5_000 });
     await driver.waitGone('deposit-address', { timeoutMs: 4_000 });
-    // Re-open Balances (opening the deposit closed it — one sheet at a time). The BTC row re-renders
-    // with the minted amount on the next currency-1 poll (≤2.5s).
+    // Re-open Balances (selecting ckBTC auto-closed it). The BTC row re-renders with the minted
+    // amount on the next currency-1 poll (≤2.5s).
     await openBalances(driver);
     const assetEl = await driver.findByTestID('asset-ckbtc', { timeoutMs: 8_000 });
     const assetTxt = await assetEl.evaluate((n) => (n.textContent ?? '').trim());

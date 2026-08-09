@@ -4,7 +4,7 @@
 // This is a VISUAL capture harness (like flow 35), not a behavior test. Its GREEN contract is
 // "every screen rendered without throwing" — the screenshots are the product. The compose script
 // (`e2e/store-assets/compose.mjs`) turns these raw captures into 1080×1920 Play Store images.
-import { setup, onboardWallet, accountOf, seedDeposit, refreshDeposit, postPay, assert } from '../harness/lib.mjs';
+import { setup, onboardWallet, accountOf, seedDeposit, refreshDeposit, postPay, assert, selectCurrency, openReceiveAddress } from '../harness/lib.mjs';
 import { decodeRequest } from '../harness/wire.mjs';
 
 export const meta = {
@@ -83,7 +83,8 @@ export async function run() {
     await driver.click('tab-pay', { timeoutMs: 4_000 });
     await driver.click('balance', { timeoutMs: 5_000 });
     await driver.findByTestID('btn-balances-close', { timeoutMs: 5_000 });
-    await driver.click('asset-add-ckbtc', { timeoutMs: 5_000 });
+    await selectCurrency(driver, 'ckbtc');
+    await openReceiveAddress(driver);
     await driver.waitForText('bc1', { timeoutMs: 12_000 }).catch(() => {});
     await driver.findByTestID('deposit-address', { timeoutMs: 8_000 }).catch(() => {});
     await driver.screenshot('39-store-deposit');

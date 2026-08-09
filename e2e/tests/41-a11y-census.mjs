@@ -47,12 +47,12 @@ const SURFACES = {
   // the wallet's catalog (FakeLedger) ships DEMO/ckBTC/ckUSDC/ckUSDT, so all four picker rows assert.
   receive: ['req-prefix', 'amount-input', 'memo-input', 'btn-request',
             'req-pick-demo', 'req-pick-ckbtc', 'req-pick-ckusdc', 'req-pick-ckusdt'],
-  // Balances hub (open via `balance` tap). btn-topup is the DEMO row's faucet button; asset-add-* is
-  // the per-asset Top-Up button (every non-DEMO asset has one). btn-withdraw only renders for a
-  // funded CkBtcUtxo asset — not asserted here (a fresh wallet has 0 ckBTC, so the button is absent
-  // by design; flow 15 covers the funded-withdraw path).
+  // Balances hub (open via `balance` tap). btn-topup is the DEMO row's faucet button; `asset-*-select`
+  // is each row's whole-row select Pressable (the per-row +Receive/Send buttons moved to the Pay/
+  // Receive tabs). btn-sol-receive/btn-sol-send render for the SOL row when a SOL address is derived.
   balances: ['btn-balances-close', 'btn-topup',
-             'asset-add-ckbtc', 'asset-add-ckusdc', 'asset-add-ckusdt'],
+             'asset-demo-select', 'asset-ckbtc-select', 'asset-ckusdc-select', 'asset-ckusdt-select',
+             'asset-sol-select', 'btn-sol-receive'],
   // Settings sheet (open via `btn-settings`). btn-reset-* are revealed only after tapping btn-reset
   // (the confirmation dialog); listed separately below to keep this census aligned with the visible
   // surface at first open.

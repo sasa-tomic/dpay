@@ -26,7 +26,7 @@ import {SheetOverlay} from './SheetOverlay';
 // minter configured yet. Detection keys off the status the relay client throws (503 = no minter).
 const TRANSIENT_DEPOSIT_ERR = "Couldn't load your deposit address. Check your connection and try again.";
 const NO_MINTER_DEPOSIT_ERR = "This asset isn't available for deposits yet.";
-export function DepositSheet({identity, relayUrl, currency, display, onClose}: {identity: Identity; relayUrl: string; currency: number; display: FamilyDisplay; onClose: () => void}) {
+export function DepositSheet({identity, relayUrl, currency, display, inline, onClose}: {identity: Identity; relayUrl: string; currency: number; display: FamilyDisplay; inline?: boolean; onClose: () => void}) {
   const [info, setInfo] = useState<DepositInfo | null>(null);
   const [address, setAddress] = useState<string | null>(null);
   const [refresh, setRefresh] = useState<DepositRefresh | null>(null);
@@ -145,6 +145,102 @@ export function DepositSheet({identity, relayUrl, currency, display, onClose}: {
   const feeVal = info && cmpRaw(info.deposit_fee, '0') > 0 ? fmtAsset(info.deposit_fee, display.amountDecimals, display.nativeAsset) : 'none';
   const minVal = info && info.deposit_min_amount != null && cmpRaw(info.deposit_min_amount, '0') > 0 ? fmtAsset(info.deposit_min_amount, display.amountDecimals, display.nativeAsset) : 'no minimum';
 
+  // The body content is identical whether rendered as an overlay sheet or inline in the Receive tab's
+  // "My address" sub-mode. `inline` skips the SheetOverlay/SafeAreaView/StatusBar/sheet-head chrome
+  // (the tab body already provides the surface) and the close button — `onClose` is still wired to the
+  // inner "Done" buttons so a completed/esc flow returns to the request sub-mode.
+  const body = (
+    <>
+      {loading ? (
+        <View style={S.centerAll}>
+          <ActivityIndicator color={C.brand} />
+          <Text style={S.dim2}>Fetching your deposit address…</Text>
+        </View>
+      ) : err || !address ? (
+        <View style={S.centerAll}>
+          {/* H5: the message already carries its own plain-language guidance (retry hint for
+              transient; "not available yet" for no-minter), so no secondary jargon line is shown. */}
+          <Text style={S.err}>{err ?? 'No deposit address available.'}</Text>
+        </View>
+      ) : minted ? (
+        <View style={S.centerAll}>
+          <View style={S.check}><Text style={S.checkMark}>✓</Text></View>
+          <Text style={S.paidText}>Deposited ✓</Text>
+          <Text style={S.paidSub}>{fmtAsset(refresh?.minted_total ?? '0', display.amountDecimals, display.nativeAsset)} minted</Text>
+          <Text style={S.dim2}>Your balance updates automatically.</Text>
+          <Pressable testID="btn-deposit-done" style={S.linkBtn} onPress={onClose} accessibilityRole="button" accessibilityLabel="Done" accessibilityState={{disabled: false}}><Text style={S.linkText}>Done</Text></Pressable>
+        </View>
+      ) : (
+        <>
+          {/* Complete, scannable instructions: network + asset + est. time + fee + min + the
+              one-line non-custody reassurance. All values come from `deposit_info` (never
+              hardcoded); the network/asset are the family's config (FAMILY_DISPLAY). */}
+          <View testID="deposit-instructions" style={S.instrCard}>
+            <Text style={S.instrLine}>
+              Send <Text style={S.instrAsset}>{display.nativeAsset}</Text> to your{' '}
+              <Text style={S.instrAsset}>{display.networkLabel}</Text> address below.
+            </Text>
+            <Text style={S.instrMeta}>
+              {required > 0 ? `~${required} confirmation${required === 1 ? '' : 's'}` : 'confirmations'}
+              {estMin > 0 ? ` · typically ~${estMin} min` : ''}
+            </Text>
+            <Text style={S.instrMeta}>{`Network fee ${feeVal} · Min deposit ${minVal}`}</Text>
+            <Text style={S.instrCustody}>
+              dpay never holds your keys — funds mint 1:1 to your wallet on confirmation.
+            </Text>
+          </View>
+
+          <View style={S.qrCard}><QRCode value={address} size={QR_SIZE_SMALL} ecl="L" /></View>
+
+          <Text testID="deposit-address" style={S.sheetAddr} selectable={true}>{address}</Text>
+
+          <Pressable
+            testID="btn-deposit-copy"
+            accessibilityRole="button"
+            accessibilityLabel={copied === 'clipboard' ? 'Address copied' : copied === 'shared' ? 'Address shared' : 'Copy deposit address'}
+            style={[S.primaryWide, S.depositCopy]}
+            onPress={copy}>
+            <Text style={S.primaryText}>{copied === 'clipboard' ? 'Copied ✓' : copied === 'shared' ? 'Shared ✓' : 'Copy address'}</Text>
+          </Pressable>
+
+          {/* ONE single linear progress cue (no dual zero-state): either "Waiting for your
+              deposit" (no pending utxos yet) or "Confirming · k/N". The manual "Check now"
+              button nudges the poll instead of relying solely on the 10s interval. The cue line
+              is normal-case (readable); only the "STATUS" label is the small uppercase tag. */}
+          <View testID="deposit-status" style={S.depositStatus}>
+            <Text style={S.depositStatusTitle}>Status</Text>
+            <Text style={S.depositStatusMain}>
+              {pending.length > 0 ? `Confirming · ${maxConf}/${required || '?'}` : 'Waiting for your deposit'}
+            </Text>
+            <Text style={S.depositStatusRow}>
+              {pending.length > 0
+                ? `${pending.map(p => fmtAsset(p.value, display.amountDecimals, display.nativeAsset)).join(', ')} · ${required || '?'} confirmation${required === 1 ? '' : 's'} needed`
+                : `checking every ${POLL.deposit / 1000}s`}
+            </Text>
+          </View>
+
+          <Pressable
+            testID="btn-deposit-check"
+            accessibilityRole="button"
+            accessibilityLabel="Check deposit status now"
+            accessibilityState={{disabled: checkBusy}}
+            style={[S.checkBtn, checkBusy && S.dim]}
+            disabled={checkBusy}
+            onPress={() => refreshNow(true)}>
+            {checkBusy
+              ? <ActivityIndicator size="small" color={C.brand} />
+              : <Text style={S.checkBtnText}>Check now</Text>}
+          </Pressable>
+
+          {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
+        </>
+      )}
+    </>
+  );
+
+  if (inline) {
+    return <View style={S.sheetBody}>{body}</View>;
+  }
   return (
     <SheetOverlay>
       <SafeAreaView style={S.sheet}>
@@ -153,92 +249,8 @@ export function DepositSheet({identity, relayUrl, currency, display, onClose}: {
           <Text style={S.sheetTitle}>{`Add ${display.nativeAsset}`}</Text>
           <Pressable testID="btn-deposit-close" accessibilityRole="button" accessibilityLabel="Close deposit sheet" style={S.sheetClose} onPress={onClose}><Text style={S.sheetCloseX}>✕</Text></Pressable>
         </View>
-
         <ScrollView contentContainerStyle={S.sheetBody} keyboardShouldPersistTaps="handled">
-          {loading ? (
-            <View style={S.centerAll}>
-              <ActivityIndicator color={C.brand} />
-              <Text style={S.dim2}>Fetching your deposit address…</Text>
-            </View>
-          ) : err || !address ? (
-            <View style={S.centerAll}>
-              {/* H5: the message already carries its own plain-language guidance (retry hint for
-                  transient; "not available yet" for no-minter), so no secondary jargon line is shown. */}
-              <Text style={S.err}>{err ?? 'No deposit address available.'}</Text>
-            </View>
-          ) : minted ? (
-            <View style={S.centerAll}>
-              <View style={S.check}><Text style={S.checkMark}>✓</Text></View>
-              <Text style={S.paidText}>Deposited ✓</Text>
-              <Text style={S.paidSub}>{fmtAsset(refresh?.minted_total ?? '0', display.amountDecimals, display.nativeAsset)} minted</Text>
-              <Text style={S.dim2}>Your balance updates automatically.</Text>
-              <Pressable testID="btn-deposit-done" style={S.linkBtn} onPress={onClose} accessibilityRole="button" accessibilityLabel="Done" accessibilityState={{disabled: false}}><Text style={S.linkText}>Done</Text></Pressable>
-            </View>
-          ) : (
-            <>
-              {/* Complete, scannable instructions: network + asset + est. time + fee + min + the
-                  one-line non-custody reassurance. All values come from `deposit_info` (never
-                  hardcoded); the network/asset are the family's config (FAMILY_DISPLAY). */}
-              <View testID="deposit-instructions" style={S.instrCard}>
-                <Text style={S.instrLine}>
-                  Send <Text style={S.instrAsset}>{display.nativeAsset}</Text> to your{' '}
-                  <Text style={S.instrAsset}>{display.networkLabel}</Text> address below.
-                </Text>
-                <Text style={S.instrMeta}>
-                  {required > 0 ? `~${required} confirmation${required === 1 ? '' : 's'}` : 'confirmations'}
-                  {estMin > 0 ? ` · typically ~${estMin} min` : ''}
-                </Text>
-                <Text style={S.instrMeta}>{`Network fee ${feeVal} · Min deposit ${minVal}`}</Text>
-                <Text style={S.instrCustody}>
-                  dpay never holds your keys — funds mint 1:1 to your wallet on confirmation.
-                </Text>
-              </View>
-
-              <View style={S.qrCard}><QRCode value={address} size={QR_SIZE_SMALL} ecl="L" /></View>
-
-              <Text testID="deposit-address" style={S.sheetAddr} selectable={true}>{address}</Text>
-
-              <Pressable
-                testID="btn-deposit-copy"
-                accessibilityRole="button"
-                accessibilityLabel={copied === 'clipboard' ? 'Address copied' : copied === 'shared' ? 'Address shared' : 'Copy deposit address'}
-                style={[S.primaryWide, S.depositCopy]}
-                onPress={copy}>
-                <Text style={S.primaryText}>{copied === 'clipboard' ? 'Copied ✓' : copied === 'shared' ? 'Shared ✓' : 'Copy address'}</Text>
-              </Pressable>
-
-              {/* ONE single linear progress cue (no dual zero-state): either "Waiting for your
-                  deposit" (no pending utxos yet) or "Confirming · k/N". The manual "Check now"
-                  button nudges the poll instead of relying solely on the 10s interval. The cue line
-                  is normal-case (readable); only the "STATUS" label is the small uppercase tag. */}
-              <View testID="deposit-status" style={S.depositStatus}>
-                <Text style={S.depositStatusTitle}>Status</Text>
-                <Text style={S.depositStatusMain}>
-                  {pending.length > 0 ? `Confirming · ${maxConf}/${required || '?'}` : 'Waiting for your deposit'}
-                </Text>
-                <Text style={S.depositStatusRow}>
-                  {pending.length > 0
-                    ? `${pending.map(p => fmtAsset(p.value, display.amountDecimals, display.nativeAsset)).join(', ')} · ${required || '?'} confirmation${required === 1 ? '' : 's'} needed`
-                    : `checking every ${POLL.deposit / 1000}s`}
-                </Text>
-              </View>
-
-              <Pressable
-                testID="btn-deposit-check"
-                accessibilityRole="button"
-                accessibilityLabel="Check deposit status now"
-                accessibilityState={{disabled: checkBusy}}
-                style={[S.checkBtn, checkBusy && S.dim]}
-                disabled={checkBusy}
-                onPress={() => refreshNow(true)}>
-                {checkBusy
-                  ? <ActivityIndicator size="small" color={C.brand} />
-                  : <Text style={S.checkBtnText}>Check now</Text>}
-              </Pressable>
-
-              {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
-            </>
-          )}
+          {body}
         </ScrollView>
       </SafeAreaView>
     </SheetOverlay>

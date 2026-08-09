@@ -20,12 +20,13 @@
 // pattern (seed → refresh → assert balance) but at 18-dec Wei precision (BigInt — the raw values
 // exceed 2^53, so plain JS number arithmetic would lose precision).
 //
-// Selector contract: `btn-withdraw` (the native-ETH row Cash-out — the SHARED testID; only ONE
-// cashable asset is funded in this flow so exactly one renders), `withdraw-address-input`,
-// `withdraw-amount-input`, `btn-withdraw-confirm`, `withdraw-status`, `btn-copy-destination`,
-// `btn-withdraw-close`. Asset segregation note: native ETH is currency 5, a SEPARATE asset from the
-// `$` DEMO_USD header (currency 0) — the withdraw debits currency 5.
-import { setup, assert, assertEq, seedDeposit, refreshDeposit, getBalance, onboardWallet, accountOf, openBalances } from '../harness/lib.mjs';
+// Selector contract: `asset-cketh-select` (the native-ETH row whole-row select — only ONE on-chain
+// asset is funded in this flow so the select is unambiguous), `btn-pay-send` (Pay → "Send to
+// address"), `withdraw-address-input`, `withdraw-amount-input`, `btn-withdraw-confirm`,
+// `withdraw-status`, `btn-copy-destination`, `btn-pay-scan` (flip back to scan). Asset segregation
+// note: native ETH is currency 5, a SEPARATE asset from the `$` DEMO_USD header (currency 0) — the
+// withdraw debits currency 5.
+import { setup, assert, assertEq, seedDeposit, refreshDeposit, getBalance, onboardWallet, accountOf, openBalances, selectCurrency, openPaySend } from '../harness/lib.mjs';
 
 const NATIVE_ETH_CURRENCY = 5; // native ckETH — CkEthErc20 + token_contract == null (matches App catalog)
 // 18-dec Wei. Plain JS numbers lose precision above 2^53 (~9e15), so every raw value is a BigInt and
@@ -74,18 +75,18 @@ export async function run() {
     const before = await getBalance(relayBaseURL, accountHex, NATIVE_ETH_CURRENCY);
     assertEq(before, String(SEED_WEI), 'pre-withdraw native-ETH balance');
 
-    // 3. Open the Balances sheet; wait for the native-ETH row's Cash-out to appear (it renders once
-    //    the balance poll credits currency 5 → funded, AND the family's native-ETH offramp gate
-    //    passes: offramp=Direct + token_contract=null). `btn-withdraw` is the SHARED Cash-out testID;
-    //    only ONE cashable asset is funded in this flow (currency 5), so exactly one renders.
-    console.log('[44-cketh-withdraw] opening Balances; waiting for the native-ETH Cash-out…');
+    // 3. Open the Balances sheet; wait for the native-ETH row to appear funded (the balance poll
+    //    credits currency 5), then SELECT ckETH → Pay → "Send to address" (the inline withdraw body,
+    //    family-dispatched to native-ETH withdraw_eth). The send is no longer a per-row Balances
+    //    button — it lives in the Pay tab.
+    console.log('[44-cketh-withdraw] opening Balances; waiting for the funded ckETH row…');
     await openBalances(driver);
-    await driver.findByTestID('btn-withdraw', { timeoutMs: 8_000 });
+    await driver.waitForText('5.000000000000000000 ETH', { timeoutMs: 8_000 });
 
-    // 4. Open the Withdraw sheet via the asset card's Cash-out affordance. The sheet title reads
-    //    "Send Ethereum" (the native-ETH family display's networkLabel).
-    console.log('[44-cketh-withdraw] opening the withdraw sheet…');
-    await driver.click('btn-withdraw', { timeoutMs: 5_000 });
+    // 4. Select ckETH → Pay → "Send to address". The sheet title reads "Send Ethereum" (native-ETH).
+    console.log('[44-cketh-withdraw] selecting ckETH → Pay → Send to address…');
+    await selectCurrency(driver, 'cketh');
+    await openPaySend(driver);
     await driver.findByTestID('withdraw-address-input', { timeoutMs: 5_000 });
 
     // 5. Enter the ETH destination + amount (in ETH, >= the 0.001 ETH local floor), then confirm.
@@ -128,10 +129,10 @@ export async function run() {
     assertEq(clipAfter, WITHDRAW_ADDR, 'clipboard seam holds the destination after copy');
     console.log(`[44-cketh-withdraw] ✓ Copy destination wrote "${WITHDRAW_ADDR}" to the clipboard`);
 
-    // 9. UI balance delta (locks the UI↔ledger agreement): close the withdraw sheet, re-open the
-    //    Balances hub, and assert the ETH row now shows the REDUCED remaining balance
-    //    (4.000000000000000000 ETH = 4e18 Wei), not the pre-withdraw 5 ETH.
-    await driver.click('btn-withdraw-close', { timeoutMs: 5_000 });
+    // 9. UI balance delta (locks the UI↔ledger agreement): flip the toggle back to "Scan to pay"
+    //    (hides the inline withdraw body), re-open the Balances hub, and assert the ETH row now shows
+    //    the REDUCED remaining balance (4.000000000000000000 ETH = 4e18 Wei), not the pre-withdraw 5 ETH.
+    await driver.click('btn-pay-scan', { timeoutMs: 5_000 });
     await openBalances(driver);
     const reduced = await driver.waitForText('4.000000000000000000 ETH', { timeoutMs: 10_000 });
     const balBody = await driver.bodyText();

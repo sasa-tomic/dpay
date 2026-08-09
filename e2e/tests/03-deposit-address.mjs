@@ -1,15 +1,17 @@
-// Flow 03 — Deposit sheet: address + complete instructions (U1) + web deep link (U6).
+// Flow 03 — Deposit (Receive "My address"): address + complete instructions (U1) + web deep link.
 //
-// Proves the deposit sheet renders the per-account native address AND a complete, reassuring
-// instruction block (network name "Bitcoin", asset "BTC", est. time, fee, min, non-custody line).
-// Opens the sheet via the WEB DEEP LINK `?screen=deposit` — a returning user (identity already in
-// localStorage from onboarding) lands directly on the open sheet, which is also what makes the web
-// build bookmarkable/shareable to top-up. Values are read from the REAL relay's `deposit_info`
-// (FakeLedger: min_confirmations=1, deposit_fee=0, deposit_min_amount=0) — never hardcoded.
+// Proves the on-chain deposit surface renders the per-account native address AND a complete,
+// reassuring instruction block (network name "Bitcoin", asset "BTC", est. time, fee, min, non-custody
+// line). The `?screen=deposit` deep link now lands a returning user (identity already in localStorage
+// from onboarding) directly on the Receive tab's "My address" sub-mode for ckBTC (the deposit/withdraw
+// surfaces moved OUT of the Balances per-row buttons INTO the Pay/Receive tabs). Values are read from
+// the REAL relay's `deposit_info` (FakeLedger: min_confirmations=1, deposit_fee=0,
+// deposit_min_amount=0) — never hardcoded.
 //
 // Selector contract for Wave E1: `deposit-address` (the address text), `deposit-instructions`
 // (the instruction card), `deposit-status` (the single linear progress cue), `btn-deposit-check`
-// (manual refresh), `btn-deposit-copy` (copy), `btn-deposit-close` (Esc/X close).
+// (manual refresh), `btn-deposit-copy` (copy). (The old `btn-deposit-close` is gone — the inline body
+// has no overlay close button; the "Done" button + the toggle handle the exit.)
 import { setup, assert, assertIncludes, onboardWallet } from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
@@ -31,20 +33,20 @@ export async function run() {
   try {
     const { driver, webBaseURL, relayBaseURL } = env;
 
-    // 1. Onboard once so an identity is persisted to localStorage (the deep link only auto-opens the
-    //    sheet for a RETURNING user — Onboarding never mounts the Wallet).
+    // 1. Onboard once so an identity is persisted to localStorage (the deep link only seeds the
+    //    Receive "My address" sub-mode for a RETURNING user — Onboarding never mounts the Wallet).
     console.log('[03-deposit-address] onboarding to seed an identity…');
     await onboardWallet(driver, 'e2e-deposit');
 
     // 2. Re-navigate with the deep link. The browser context retains localStorage, so the Wallet
-    //    mounts directly and `?screen=deposit` auto-opens the sheet. `domcontentloaded` because the
-    //    Wallet's continuous polls (balance/history/deposit) can stall networkidle0.
-    console.log('[03-deposit-address] deep-linking to ?screen=deposit…');
+    //    mounts directly and `?screen=deposit` flips mode to 'receive' + the "My address" sub-mode +
+    //    selects ckBTC. `domcontentloaded` because the Wallet's continuous polls can stall networkidle0.
+    console.log('[03-deposit-address] deep-linking to ?screen=deposit (Receive → My address)…');
     const deepLink = `/?relay=${encodeURIComponent(relayBaseURL)}&screen=deposit`;
     await driver.navigate(webBaseURL, deepLink, { waitUntil: 'domcontentloaded', timeoutMs: 8_000 });
     await driver.waitReady({ timeoutMs: 10_000 });
 
-    // 3. The sheet auto-opened via the deep link — the address is the gate.
+    // 3. The deep link landed on the Receive "My address" sub-mode — the address is the gate.
     console.log('[03-deposit-address] waiting for the deposit address…');
     await driver.findByTestID('deposit-address', { timeoutMs: 10_000 });
     const address = await driver.readText('deposit-address');

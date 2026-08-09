@@ -10,12 +10,12 @@
 // ckBTC; the withdraw nonce is app-generated (random 16 bytes, collision-free). Follows flow 05's
 // pattern (seed → refresh → assert balance).
 //
-// Selector contract: `balance` (header → Balances), `asset-ckbtc` (the BTC row in Balances),
-// `btn-withdraw` (the BTC row Cash-out, shown once funded), `withdraw-address-input`,
+// Selector contract: `balance` (header → Balances), `asset-ckbtc-select` (the BTC row whole-row
+// select), `btn-pay-send` (Pay → "Send to address"), `withdraw-address-input`,
 // `withdraw-amount-input`, `btn-withdraw-confirm`, `withdraw-status`, `btn-copy-destination` (L3),
-// `btn-withdraw-close`. Asset segregation note (same as flow 05): ckBTC is currency 1, a SEPARATE
-// asset from the `$` DEMO_USD header — the withdraw debits currency 1.
-import { setup, assert, assertEq, seedDeposit, refreshDeposit, getBalance, onboardWallet, accountOf, openBalances } from '../harness/lib.mjs';
+// `btn-withdraw-done` (success-screen Done). Asset segregation note (same as flow 05): ckBTC is
+// currency 1, a SEPARATE asset from the `$` DEMO_USD header — the withdraw debits currency 1.
+import { setup, assert, assertEq, seedDeposit, refreshDeposit, getBalance, onboardWallet, accountOf, openBalances, selectCurrency, openPaySend } from '../harness/lib.mjs';
 
 const DEPOSIT_CURRENCY = 1; // ckBTC — matches App.tsx DEPOSIT_CURRENCY
 const SEED_SATS = 100_000;   // 0.00100000 BTC
@@ -59,15 +59,17 @@ export async function run() {
     const before = await getBalance(relayBaseURL, accountHex, DEPOSIT_CURRENCY);
     assertEq(before, String(SEED_SATS), 'pre-withdraw ckBTC balance');
 
-    // 3. Open the Balances sheet; wait for the BTC row's Cash-out to appear (it renders once the
-    //    balance poll credits currency 1 → funded). The asset row + withdraw affordance live here now.
-    console.log('[15-withdraw] opening Balances; waiting for the ckBTC Cash-out…');
+    // 3. Open the Balances sheet; wait for the BTC row to appear funded (the balance poll credits
+    //    currency 1), then SELECT ckBTC (makes it the active asset) → Pay → "Send to address" (the
+    //    inline WithdrawSheet body). The on-chain send moved out of Balances into the Pay tab.
+    console.log('[15-withdraw] opening Balances; waiting for the funded ckBTC row…');
     await openBalances(driver);
-    await driver.findByTestID('btn-withdraw', { timeoutMs: 8_000 });
+    await driver.waitForText('0.00100000 BTC', { timeoutMs: 8_000 });
 
-    // 4. Open the Withdraw sheet via the asset card's "Withdraw" affordance.
-    console.log('[15-withdraw] opening the withdraw sheet…');
-    await driver.click('btn-withdraw', { timeoutMs: 5_000 });
+    // 4. Select ckBTC → Pay → "Send to address" (the inline withdraw body).
+    console.log('[15-withdraw] selecting ckBTC → Pay → Send to address…');
+    await selectCurrency(driver, 'ckbtc');
+    await openPaySend(driver);
     await driver.findByTestID('withdraw-address-input', { timeoutMs: 5_000 });
 
     // 5. Enter the BTC destination + amount (in BTC, >= the 0.0005 min), then confirm.
@@ -111,11 +113,11 @@ export async function run() {
 
     // 9. UI balance delta (closes the withdraw coverage gap): the relay-level delta is already proven
     //    in step 7 (after === SEED_SATS − WITHDRAW_SATS). This step proves the wallet SURFACE reflects
-    //    the debit too — close the withdraw sheet, open the Balances hub, and assert the BTC row now
-    //    shows the REDUCED remaining balance (0.00050000 BTC = 50000 sats), not the pre-withdraw
-    //    0.00100000 BTC. This locks the UI↔ledger agreement (a stale facade `BAL_CACHE` would fail
-    //    here, showing the old amount).
-    await driver.click('btn-withdraw-close', { timeoutMs: 5_000 });
+    //    the debit too — flip the toggle back to "Scan to pay" (hides the inline withdraw body), open
+    //    the Balances hub, and assert the BTC row now shows the REDUCED remaining balance
+    //    (0.00050000 BTC = 50000 sats), not the pre-withdraw 0.00100000 BTC. This locks the UI↔ledger
+    //    agreement (a stale facade `BAL_CACHE` would fail here, showing the old amount).
+    await driver.click('btn-pay-scan', { timeoutMs: 5_000 });
     await openBalances(driver);
     const reduced = await driver.waitForText('0.00050000 BTC', { timeoutMs: 10_000 });
     const balBody = await driver.bodyText();

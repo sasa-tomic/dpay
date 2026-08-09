@@ -6,7 +6,7 @@ import {C} from '../config/palette';
 import {EXPIRY_WINDOW, DIRECT_PAY_TIMEOUT_MS, POLL, BALANCE_TIMEOUT_MS, QR_SIZE} from '../config/constants';
 import {usd, short, base, parseRequestQR, randNonceHex, nowSecs} from '../lib/format';
 import {cmpRaw} from '../lib/amount';
-import {type CurrencyDescriptor, fmtCurrencyAmount, isPayableAsset} from '../config/catalog';
+import {type CurrencyDescriptor, type FamilyDisplay, type MinterFamily, fmtCurrencyAmount, isPayableAsset} from '../config/catalog';
 import type {Identity, Req, NfcStatus} from '../lib/types';
 import {rejectionMessage, isNonceReused} from '../payments';
 import {verifyOutcomeReceipt} from '../services/receipt';
@@ -16,6 +16,8 @@ import {DpayCore, DpayNfc} from '../services/native';
 import {NfcTap} from './NfcTap';
 import {NfcIcon} from './NfcIcon';
 import {QrScanner} from './QrScanner';
+import {ModeToggle} from './ModeToggle';
+import {WithdrawSheet} from './WithdrawSheet';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {withTimeout} from '../lib/timeout';
 
@@ -27,8 +29,11 @@ const NFC_REASON: Record<Exclude<NfcStatus, 'ready'>, string> = {
   unknown: "Couldn't check NFC status. Scan the QR code to pay.",
 };
 
-export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assetBalances, prefillRequest, onPrefillConsumed}: {identity: Identity; online: boolean; relayUrl: string; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assetBalances: Record<number, string>; prefillRequest?: string | null; onPrefillConsumed?: () => void}) {
+export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assetBalances, withdrawCurrency, onWithdrawCurrencyChange, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillRequest, onPrefillConsumed}: {identity: Identity; online: boolean; relayUrl: string; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assetBalances: Record<number, string>; withdrawCurrency: number; onWithdrawCurrencyChange: (c: number) => void; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillRequest?: string | null; onPrefillConsumed?: () => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid'>('scan');
+  // The within-tab sub-mode is OWNED by Wallet. "scan" = the existing scan-to-pay flow; "send" = the
+  // on-chain send-to-address flow (the WithdrawSheet body, lifted inline). The toggle renders only
+  // when withdrawFamily is non-null (an on-chain offramp family); DEMO hides it.
   const [req, setReq] = useState<Req | null>(null);
   const [qr, setQr] = useState<{code: string; amount: string; currency: number; who: string; nonce: string} | null>(null);
   // `pending` = handed to the merchant offline but NOT confirmed by the ledger (we can't claim it
@@ -295,12 +300,50 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
     );
   }
 
+  // "Send to address" sub-mode: render the on-chain withdraw flow INLINE (the WithdrawSheet body) for
+  // the active asset's family. The toggle above lets the user flip back to "Scan to pay". `inline`
+  // skips the overlay chrome. Only reached when withdrawFamily is non-null (the toggle is gated).
+  if (subMode === 'send' && withdrawFamily && withdrawDisplay) {
+    return (
+      <View style={S.center}>
+        <ModeToggle
+          testID="pay-mode-toggle"
+          value={subMode}
+          onChange={(v) => onSubModeChange(v as 'scan' | 'send')}
+          left={{label: 'Scan to pay', value: 'scan', testID: 'btn-pay-scan'}}
+          right={{label: 'Send to address', value: 'send', testID: 'btn-pay-send'}}
+        />
+        <WithdrawSheet
+          identity={identity}
+          relayUrl={relayUrl}
+          currency={withdrawCurrency}
+          display={withdrawDisplay}
+          family={withdrawFamily}
+          tokenContract={withdrawTokenContract}
+          balance={withdrawBalance}
+          inline
+          onClose={() => onSubModeChange('scan')}
+          onWithdrawn={onSettled}
+        />
+      </View>
+    );
+  }
+
   // Scan screen: the card is armed in the background (if NFC is ready) AND the QR scanner is live at
   // the same time — the payer taps the merchant's phone OR scans its QR, with no button in between.
   // A leading NFC status row tells the payer whether tap-to-pay is available; QR always works.
   const nfcInfo: Exclude<NfcStatus, 'ready'> = (nfcStatus === 'ready' ? 'unknown' : nfcStatus);
   return (
     <View style={S.center}>
+      {withdrawFamily ? (
+        <ModeToggle
+          testID="pay-mode-toggle"
+          value={subMode}
+          onChange={(v) => onSubModeChange(v as 'scan' | 'send')}
+          left={{label: 'Scan to pay', value: 'scan', testID: 'btn-pay-scan'}}
+          right={{label: 'Send to address', value: 'send', testID: 'btn-pay-send'}}
+        />
+      ) : null}
       {nfcReady && DpayNfc ? (
         <NfcTap
           key={nfcKey} role="card" identity={identity} relayUrl={relayUrl}

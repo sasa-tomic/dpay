@@ -24,9 +24,10 @@
 // I/O is faked; the app's real calldata-building + sendTransaction + waitForReceipt runs verbatim.
 // Responds to: eth_requestAccounts, eth_chainId, eth_sendTransaction, eth_getTransactionReceipt.
 //
-// Selector contract: `balance` (header → Balances), `asset-add-ckusdc` (USDC row Add),
-// `ckerc20-deposit`, `btn-connect-wallet`, `ckerc20-amount`, `btn-approve`, `ckerc20-status`.
-import { setup, assert, assertIncludes, onboardWallet, openBalances } from '../harness/lib.mjs';
+// Selector contract: `balance` (header → Balances), `asset-ckusdc-select` (USDC row whole-row
+// select), `btn-receive-address` (Receive → "My address"), `ckerc20-deposit`, `btn-connect-wallet`,
+// `ckerc20-amount`, `btn-approve`, `ckerc20-status`.
+import { setup, assert, assertIncludes, onboardWallet, openBalances, selectCurrency, openReceiveAddress } from '../harness/lib.mjs';
 
 const USDC_ADDR = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
 const HELPER_ADDR = '0x18901044688D3756C35Ed2b36D93e6a5B8e00E68';
@@ -77,9 +78,10 @@ export async function run() {
     console.log('[16-ckusdc-onramp] mock installed (chainId=0x89 Polygon)');
 
     await onboardWallet(driver, 'e2e-ckusdc');
-    console.log('[16-ckusdc-onramp] Balances → pick USDC…');
+    console.log('[16-ckusdc-onramp] Balances → select USDC → Receive → My address…');
     await openBalances(driver);
-    await driver.click('asset-add-ckusdc', { timeoutMs: 5_000 });
+    await selectCurrency(driver, 'ckusdc');
+    await openReceiveAddress(driver);
     await driver.findByTestID('ckerc20-deposit', { timeoutMs: 8_000 });
 
     await driver.click('btn-connect-wallet', { timeoutMs: 5_000 });

@@ -6,7 +6,7 @@ import {S} from '../styles';
 import {EXPIRY_WINDOW, NFC_PAY_TIMEOUT_MS, POLL, BALANCE_TIMEOUT_MS, QR_SIZE} from '../config/constants';
 import {short, base, toUnits, randNonceHex, nowSecs} from '../lib/format';
 import {encodeDeeplink, decodeReceiptDeeplink} from '../lib/deepLink';
-import {type CurrencyDescriptor, assetTestKey, displayName, fmtCurrencyAmount, currencySymbol} from '../config/catalog';
+import {type CurrencyDescriptor, type FamilyDisplay, assetTestKey, displayName, fmtCurrencyAmount, currencySymbol, isTestnetCurrency} from '../config/catalog';
 import type {Identity} from '../lib/types';
 import {rejectionMessage, isNonceReused, isReceiptForRequest} from '../payments';
 import {fetchWithTimeout, payAndClassify, readJsonOrEmpty} from '../services/relay';
@@ -15,6 +15,9 @@ import {DpayCore, DpayNfc} from '../services/native';
 import {NfcTap} from './NfcTap';
 import {QrScanner} from './QrScanner';
 import {NfcIcon} from './NfcIcon';
+import {ModeToggle} from './ModeToggle';
+import {DepositSheet} from './DepositSheet';
+import {CkErc20DepositSheet} from './CkErc20DepositSheet';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {withTimeout} from '../lib/timeout';
 
@@ -25,7 +28,10 @@ import {withTimeout} from '../lib/timeout';
 // left the field floating shorter than its neighbors), 44pt-min.
 const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeight: 44, borderWidth: 1, borderColor: C.sub2, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink};
 
-export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, catalog, prefillReceipt, onReceiptConsumed}: {identity: Identity; relayUrl: string; online: boolean; nfcReady: boolean; onReceived: () => void; catalog: CurrencyDescriptor[]; prefillReceipt?: string | null; onReceiptConsumed?: () => void}) {
+export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, catalog, currentCurrency, depositCurrency, onDepositCurrencyChange, depositDisplay, depositChainId, depositNativeEth, depositFamily, subMode, onSubModeChange, prefillReceipt, onReceiptConsumed}: {identity: Identity; relayUrl: string; online: boolean; nfcReady: boolean; onReceived: () => void; catalog: CurrencyDescriptor[]; currentCurrency: number; depositCurrency: number; onDepositCurrencyChange: (c: number) => void; depositDisplay: FamilyDisplay | null; depositChainId: number | null; depositNativeEth: boolean; depositFamily: 'CkBtcUtxo' | 'CkEthErc20' | null; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; prefillReceipt?: string | null; onReceiptConsumed?: () => void}) {
+  // The within-tab sub-mode is OWNED by Wallet so deeplinks (?screen=deposit, auto-open-ckERC20) can
+  // land the user directly on "My address". "request" = the dpay-to-dpay payment-request QR;
+  // "address" = the on-chain deposit flow. The toggle renders only when depositFamily is non-null.
   // The merchant's CHOSEN settlement asset. Defaults to 0 (DEMO_USD) so the existing single-`$` flows
   // keep working unchanged (MC5: merchant selects the exact asset; the payer does NOT switch).
   const [reqCurrency, setReqCurrency] = useState(0);
@@ -253,8 +259,56 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
     );
   }
 
+  // "My address" sub-mode: render the on-chain deposit-address flow INLINE for the active IC
+  // asset's family (mirrors Wallet's old family routing). CkBtcUtxo → DepositSheet body;
+  // CkEthErc20 → CkErc20DepositSheet body (native-ETH vs ERC-20 via depositNativeEth). The toggle
+  // above lets the user flip back to "Request payment". `inline` skips the overlay chrome.
+  if (subMode === 'address' && depositFamily && depositDisplay) {
+    return (
+      <View style={S.center}>
+        <ModeToggle
+          testID="receive-mode-toggle"
+          value={subMode}
+          onChange={(v) => onSubModeChange(v as 'request' | 'address')}
+          left={{label: 'Request payment', value: 'request', testID: 'btn-receive-request'}}
+          right={{label: 'My address', value: 'address', testID: 'btn-receive-address'}}
+        />
+        {depositFamily === 'CkEthErc20' ? (
+          <CkErc20DepositSheet
+            identity={identity}
+            relayUrl={relayUrl}
+            currency={depositCurrency}
+            display={depositDisplay}
+            chainId={depositChainId}
+            nativeEth={depositNativeEth}
+            inline
+            onClose={() => onSubModeChange('request')}
+          />
+        ) : (
+          <DepositSheet
+            identity={identity}
+            relayUrl={relayUrl}
+            currency={depositCurrency}
+            display={depositDisplay}
+            inline
+            onClose={() => onSubModeChange('request')}
+          />
+        )}
+      </View>
+    );
+  }
+
   return (
     <View style={S.center}>
+      {depositFamily ? (
+        <ModeToggle
+          testID="receive-mode-toggle"
+          value={subMode}
+          onChange={(v) => onSubModeChange(v as 'request' | 'address')}
+          left={{label: 'Request payment', value: 'request', testID: 'btn-receive-request'}}
+          right={{label: 'My address', value: 'address', testID: 'btn-receive-address'}}
+        />
+      ) : null}
       <Text style={S.label}>Amount to receive</Text>
       <View style={S.amountRow}>
         {/* MC5: the merchant selects the EXACT settlement asset by tapping the amount prefix (glyph +
@@ -291,16 +345,21 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
 }
 
 // Compact settlement-currency picker, opened from the Receive amount prefix. Rendered in a <Modal> so
-// it overlays the whole screen regardless of where ReceiveMode sits in the tree (a nested absolute
-// overlay would be clipped/positioned by the ScrollView content). One row per catalog currency: glyph
-// + name; a ✓ marks the active selection. Tap a row to choose, or the backdrop / Esc to dismiss.
+// it overlays the whole screen regardless of where ReceiveMode sits in the tree. UNIFIED with the
+// Balances row style: the same testnet filter (hidden unless opted in app-wide is NOT threaded here —
+// the picker mirrors Balances by hiding testnet currencies so the two lists match), a dot active
+// indicator, and matching typography (assetLabel + assetAmt). Tap a row to choose, or the backdrop /
+// Esc to dismiss.
 function CurrencyPicker({open, catalog, current, onPick, onClose}: {open: boolean; catalog: CurrencyDescriptor[]; current: number; onPick: (c: number) => void; onClose: () => void}) {
+  // Mirror the Balances sheet's testnet filter so the two lists show the SAME set of currencies (the
+  // founder issue: the old picker listed every catalog entry incl. testnet rows Balances hid).
+  const visible = catalog.filter(c => c.currency === 0 || !isTestnetCurrency(c));
   return (
     <Modal visible={open} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={S.pickBackdrop} onPress={onClose}>
         <View style={S.pickCard}>
           <Text style={S.pickTitle}>Receive in</Text>
-          {catalog.map(desc => {
+          {visible.map(desc => {
             const key = desc.currency === 0 ? 'demo' : assetTestKey(desc);
             const label = desc.currency === 0 ? 'DEMO' : displayName(desc);
             const active = current === desc.currency;
@@ -314,7 +373,7 @@ function CurrencyPicker({open, catalog, current, onPick, onClose}: {open: boolea
                 accessibilityLabel={`Receive in ${label}`}
                 accessibilityState={{disabled: false}}
               >
-                <Text style={S.pickGlyph}>{currencySymbol(catalog, desc.currency)}</Text>
+                <View style={[S.dot, {backgroundColor: active ? C.brand : C.line}]} />
                 <Text style={S.pickName}>{label}</Text>
                 {active ? <Text style={S.pickCheck}>✓</Text> : null}
               </Pressable>

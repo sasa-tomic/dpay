@@ -24,12 +24,12 @@
 // ckUSDC; the withdraw nonce is app-generated (random 16 bytes, collision-free). Follows flow 44's
 // pattern (seed → refresh → assert balance) but at 6-dec USDC precision.
 //
-// Selector contract: `btn-withdraw` (the ckUSDC row Cash-out — the SHARED testID; only ONE cashable
-// asset is funded in this flow so exactly one renders), `withdraw-address-input`,
-// `withdraw-amount-input`, `withdraw-gas-note` (the ckETH-gas-dependency note — renders ONLY for a
-// ckERC20 token), `btn-withdraw-confirm`, `withdraw-status`, `btn-withdraw-close`. Asset
-// segregation note: ckUSDC is currency 2, a SEPARATE asset from the `$` DEMO_USD header (currency 0).
-import { setup, assert, assertEq, seedDeposit, refreshDeposit, getBalance, onboardWallet, accountOf, openBalances } from '../harness/lib.mjs';
+// Selector contract: `asset-ckusdc-select` (the ckUSDC row whole-row select), `btn-pay-send`
+// (Pay → "Send to address"), `withdraw-address-input`, `withdraw-amount-input`,
+// `withdraw-gas-note` (the ckETH-gas-dependency note — renders ONLY for a ckERC20 token),
+// `btn-withdraw-confirm`, `withdraw-status`, `btn-pay-scan` (flip back to scan). Asset segregation
+// note: ckUSDC is currency 2, a SEPARATE asset from the `$` DEMO_USD header (currency 0).
+import { setup, assert, assertEq, seedDeposit, refreshDeposit, getBalance, onboardWallet, accountOf, openBalances, selectCurrency, openPaySend } from '../harness/lib.mjs';
 
 const CKUSDC_CURRENCY = 2; // ckUSDC — CkEthErc20 + token_contract Some (matches App + relay catalog)
 // 6-dec micro-units. The raw values here stay well under 2^53, so plain JS numbers are safe; the
@@ -78,20 +78,19 @@ export async function run() {
     const before = await getBalance(relayBaseURL, accountHex, CKUSDC_CURRENCY);
     assertEq(before, String(SEED_RAW), 'pre-withdraw ckUSDC balance');
 
-    // 3. Open the Balances sheet; wait for the ckUSDC row's Cash-out to appear (it renders once the
-    //    balance poll credits currency 2 → funded, AND the FLIPPED cashable gate passes:
-    //    offramp=Direct + minter_family=CkEthErc20 — the old `token_contract == null` restriction is
-    //    gone, so a ckERC20 token now reaches Cash-out). `btn-withdraw` is the SHARED Cash-out testID;
-    //    only ONE cashable asset is funded in this flow (currency 2), so exactly one renders.
-    console.log('[48-ckusdc-withdraw] opening Balances; waiting for the ckUSDC Cash-out (flipped gate)…');
+    // 3. Open the Balances sheet; wait for the ckUSDC row to appear funded (the balance poll credits
+    //    currency 2), then SELECT ckUSDC → Pay → "Send to address" (the inline withdraw body,
+    //    family-dispatched to the dual-ledger withdraw_erc20 path). The send is no longer a per-row
+    //    Balances button.
+    console.log('[48-ckusdc-withdraw] opening Balances; waiting for the funded ckUSDC row…');
     await openBalances(driver);
-    await driver.findByTestID('btn-withdraw', { timeoutMs: 8_000 });
+    await driver.waitForText('1000.000000 USDC', { timeoutMs: 8_000 });
 
-    // 4. Open the Withdraw sheet via the asset card's Cash-out affordance. The sheet title reads
-    //    "Send Ethereum" (the ckUSDC family display's networkLabel — the settlement NETWORK, not
-    //    the asset; mirrors the native-ETH sheet).
-    console.log('[48-ckusdc-withdraw] opening the withdraw sheet…');
-    await driver.click('btn-withdraw', { timeoutMs: 5_000 });
+    // 4. Select ckUSDC → Pay → "Send to address". The sheet title reads "Send Ethereum" (the ckUSDC
+    //    family display's networkLabel — the settlement NETWORK, not the asset).
+    console.log('[48-ckusdc-withdraw] selecting ckUSDC → Pay → Send to address…');
+    await selectCurrency(driver, 'ckusdc');
+    await openPaySend(driver);
     await driver.findByTestID('withdraw-address-input', { timeoutMs: 5_000 });
 
     // 5. Assert the ckETH gas-dependency note renders (Fork-C — no-swap honesty). It appears ONLY for
@@ -127,10 +126,11 @@ export async function run() {
 
     await driver.screenshot('48-ckusdc-withdraw');
 
-    // 9. UI balance delta (locks the UI↔ledger agreement): close the withdraw sheet, re-open the
-    //    Balances hub, and assert the ckUSDC row now shows the REDUCED remaining balance
-    //    (999.000000 USDC = 999_000_000 raw), not the pre-withdraw 1000 USDC.
-    await driver.click('btn-withdraw-close', { timeoutMs: 5_000 });
+    // 9. UI balance delta (locks the UI↔ledger agreement): flip the toggle back to "Scan to pay"
+    //    (hides the inline withdraw body), re-open the Balances hub, and assert the ckUSDC row now
+    //    shows the REDUCED remaining balance (999.000000 USDC = 999_000_000 raw), not the pre-withdraw
+    //    1000 USDC.
+    await driver.click('btn-pay-scan', { timeoutMs: 5_000 });
     await openBalances(driver);
     const reduced = await driver.waitForText('999.000000 USDC', { timeoutMs: 10_000 });
     const balBody = await driver.bodyText();

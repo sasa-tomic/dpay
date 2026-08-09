@@ -16,14 +16,15 @@
 //   - Wrong-sig: a sig under a DIFFERENT key → relay 422 "bad signature" (no UI guard; only the
 //     relay catches this since the app always signs correctly).
 //
-// Selector contract: `balance` (header → Balances), `asset-ckbtc` + `btn-withdraw` (the BTC row in
-// Balances), `withdraw-address-input`, `withdraw-amount-input`, `btn-withdraw-confirm` (asserted
-// disabled via the dim style / no review card).
+// Selector contract: `balance` (header → Balances), `asset-ckbtc-select` (BTC row whole-row
+// select), `btn-pay-send` (Pay → "Send to address"), `withdraw-address-input`,
+// `withdraw-amount-input`, `btn-withdraw-confirm` (asserted disabled via the dim style / no review
+// card).
 //
 // Also covers INVALID-ADDRESS validation (the documented gap, now closed): the app validates the
 // destination format family-aware — a wrong-chain address (ETH 0x… in the BTC cash-out) shows a
 // warning + disables the confirm button.
-import { setup, assert, assertEq, seedDeposit, refreshDeposit, getBalance, postWithdraw, onboardWallet, accountOf, openBalances } from '../harness/lib.mjs';
+import { setup, assert, assertEq, seedDeposit, refreshDeposit, getBalance, postWithdraw, onboardWallet, accountOf, openBalances, selectCurrency, openPaySend } from '../harness/lib.mjs';
 import { signWithdrawalHex, randNonceHex, generateKeypair } from '../harness/wire.mjs';
 
 const DEPOSIT_CURRENCY = 1; // ckBTC — matches the CkBtcUtxo catalog entry
@@ -57,13 +58,14 @@ export async function run() {
     await seedDeposit(relayBaseURL, accountHex, DEPOSIT_CURRENCY, SEED_SATS);
     await refreshDeposit(relayBaseURL, accountHex, DEPOSIT_CURRENCY);
     assertEq(await getBalance(relayBaseURL, accountHex, DEPOSIT_CURRENCY), String(SEED_SATS), 'seeded ckBTC balance');
-    // Open Balances; wait for the BTC Cash-out (renders once the poll credits currency 1 → funded).
+    // Open Balances; wait for the funded ckBTC row, then SELECT ckBTC → Pay → "Send to address".
     await openBalances(driver);
-    await driver.findByTestID('btn-withdraw', { timeoutMs: 8_000 });
+    await driver.waitForText('0.00100000 BTC', { timeoutMs: 8_000 });
 
     // --- 1. BELOW-MINIMUM (UI guard): type an amount under the 50_000 floor. -----------------
     console.log('[18-withdraw-errors] below-min UI guard…');
-    await driver.click('btn-withdraw', { timeoutMs: 5_000 });
+    await selectCurrency(driver, 'ckbtc');
+    await openPaySend(driver);
     await driver.findByTestID('withdraw-address-input', { timeoutMs: 5_000 });
     await driver.type('withdraw-address-input', DEST, { timeoutMs: 4_000 });
     await driver.type('withdraw-amount-input', '0.00010000', { timeoutMs: 4_000 }); // 10_000 sats
@@ -97,8 +99,9 @@ export async function run() {
       'confirm must be DISABLED for a wrong-chain address');
     console.log('[18-withdraw-errors] ✓ invalid-address warning + confirm disabled');
 
-    // Close the sheet so the relay-level checks below are a clean separate phase.
-    await driver.click('btn-withdraw-close', { timeoutMs: 4_000 });
+    // Close the inline withdraw body so the relay-level checks below are a clean separate phase.
+    // Flipping the toggle back to "Scan to pay" unmounts the WithdrawSheet.
+    await driver.click('btn-pay-scan', { timeoutMs: 4_000 });
     await driver.waitGone('withdraw-address-input', { timeoutMs: 4_000 });
 
     // --- 3. RELAY-LEVEL enforcement (the API gate the UI mirrors): drive POST /api/v1/withdraw

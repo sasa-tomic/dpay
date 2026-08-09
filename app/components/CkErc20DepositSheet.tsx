@@ -27,13 +27,14 @@ import {SheetOverlay} from './SheetOverlay';
 // by `nativeEth` (descriptor.token_contract == null):
 //  - ERC-20 (USDC/USDT/DAI): TWO txs — approve(helper, amount) on the ERC-20, then depositErc20(...).
 //  - native ETH: ONE payable tx — depositEth(principal, subaccount) carrying the ETH `value` (Wei).
-export function CkErc20DepositSheet({identity, relayUrl, currency, display, chainId, nativeEth, onClose}: {
+export function CkErc20DepositSheet({identity, relayUrl, currency, display, chainId, nativeEth, inline, onClose}: {
   identity: Identity;
   relayUrl: string;
   currency: number;
   display: FamilyDisplay;
   chainId: number | null; // MC8 U3: the catalog's per-currency EVM chain id (ckUSDC = 1 = Ethereum mainnet)
   nativeEth: boolean; // true ⇒ native-ETH single-tx deposit (depositEth); false ⇒ ERC-20 two-tx (approve + depositErc20)
+  inline?: boolean;
   onClose: () => void;
 }) {
   // phase: 'connect' (no wallet yet) → 'enter' (wallet connected, enter amount) → 'sending' (txs
@@ -317,6 +318,134 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
     return () => { alive = false; clearInterval(id); };
   }, [phase, relayUrl, identity.publicHex, currency, startBal]);
 
+  // The body content is identical whether rendered as an overlay sheet or inline in the Receive tab's
+  // "My address" sub-mode. `inline` skips the SheetOverlay/SafeAreaView/StatusBar/sheet-head chrome.
+  const body = (
+    <>
+      {/* Wrong-network warning — unmissable, above the flow. */}
+      <View testID="ckerc20-deposit" style={S.instrCard}>
+        <Text style={S.instrLine}>
+          Send only <Text style={S.instrAsset}>{display.nativeAsset}</Text> on{' '}
+          <Text style={S.instrAsset}>{display.networkLabel}</Text>. Other assets or chains sent
+          this way won't credit and may be lost.
+        </Text>
+        <Text style={S.instrCustody}>
+          dpay never holds your keys — your wallet signs, and the chain-key asset mints 1:1 to your
+          wallet on confirmation (~20 min).
+        </Text>
+        {/* Gas warning. ERC-20: the onramp needs Ethereum transactions the user must hold ETH to
+            pay gas for (separate from the deposited token). Native ETH: the deposit tx itself
+            carries ETH, so the network fee comes out of the sent amount — send a little extra. */}
+        <Text style={[S.instrCustody, {color: C.warn}]}>
+          {nativeEth
+            ? 'The network fee is paid in ETH — send a little more than you want to deposit.'
+            : "You'll need a small amount of ETH for Ethereum network gas fees."}
+        </Text>
+      </View>
+
+      {err ? <Text testID="ckerc20-status" style={S.err}>{err}</Text> : null}
+
+      {phase === 'connect' ? (
+        // MC8 U6 capstone — while wcUri is non-null (display_uri fired, waiting for the wallet to
+        // scan + approve), render the pairing QR with on-brand copy. On web wcUri is ALWAYS null
+        // (pairOnrampWallet is a no-op), so this branch is unreachable in the e2e harness.
+        wcUri ? (
+          <View style={S.centerAll}>
+            <View testID="wc-pair-qr" style={S.qrCard}><QRCode value={wcUri} size={QR_SIZE} ecl="M" /></View>
+            <Text style={S.paidSub}>Scan with your wallet to pair</Text>
+            {Platform.OS !== 'web' ? (
+              <Pressable testID="btn-open-wallet" accessibilityRole="button" accessibilityHint="Open an installed wallet app on this device" style={[S.primaryWide, {marginTop: 12}]} onPress={openInWallet}>
+                <Text style={S.primaryText}>Open wallet on this device</Text>
+              </Pressable>
+            ) : null}
+            <Text style={S.dim2}>MetaMask · Trust · Rabby · any WalletConnect wallet</Text>
+          </View>
+        ) : (
+          <View style={S.centerAll}>
+            {/* Why a wallet, not an address: depositing on the ckETH ramp requires a wallet-SIGNED
+                transaction (ERC-20: two txs — approve + depositErc20; native ETH: one payable tx —
+                depositEth with the amount as ETH value). Unlike Bitcoin (UTXO, send-to-address),
+                there is no "deposit address" here; the deposit must be initiated from the wallet
+                that holds the asset (+ ETH for gas, for ERC-20). */}
+            <Text style={S.dim2}>{nativeEth
+              ? 'Send ETH directly to the deposit contract — one transaction your wallet signs, with your deposit amount as the ETH value.'
+              : `${display.nativeAsset} is an Ethereum token — depositing it needs two transactions your wallet signs, not a send-to-address like Bitcoin.`}</Text>
+            <Pressable testID="btn-connect-wallet" accessibilityRole="button" accessibilityLabel="Connect Ethereum wallet" style={S.primaryWide} onPress={connect}>
+              <Text style={S.primaryText}>Connect wallet</Text>
+            </Pressable>
+            <Text style={S.dim2}>MetaMask · Trust · Rabby · any WalletConnect-compatible wallet</Text>
+          </View>
+        )
+      ) : phase === 'enter' || phase === 'sending' ? (
+        <>
+          <Text style={S.inputLabel}>{`Amount (${display.nativeAsset})`}</Text>
+          <TextInput
+            testID="ckerc20-amount"
+            style={S.amountInput}
+            keyboardType="decimal-pad"
+            placeholder={`0.00`}
+            value={amount}
+            onChangeText={setAmount}
+            editable={phase === 'enter'}
+            onSubmitEditing={phase === 'enter' ? submit : undefined}
+          />
+          {account ? <Text style={S.dim2}>{`From ${account.slice(0, 6)}…${account.slice(-4)}`}</Text> : null}
+          <Pressable
+            testID="btn-approve"
+            accessibilityRole="button"
+            accessibilityLabel={phase === 'sending' ? 'Confirming in your wallet' : (nativeEth ? 'Deposit' : 'Approve and deposit')}
+            accessibilityState={{disabled: phase === 'sending'}}
+            style={[S.primaryWide, phase === 'sending' && {opacity: 0.6}]}
+            onPress={submit}
+            disabled={phase === 'sending'}>
+            <Text style={S.primaryText}>{phase === 'sending' ? 'Confirm in your wallet…' : (nativeEth ? 'Deposit' : 'Approve & deposit')}</Text>
+          </Pressable>
+        </>
+      ) : phase === 'watching' ? (
+        <View style={S.centerAll}>
+          <ActivityIndicator color={C.brand} />
+          {/* MC8 U5 — surface the in-flight amount so a resumed watching state shows WHAT is
+              pending (the user may have forgotten the exact amount across a restart). */}
+          {amount ? (
+            <Text style={S.paidSub}>{`Depositing ${amount} ${display.nativeAsset}`}</Text>
+          ) : null}
+          {/* M9: one clear line — no "scrapes" jargon, no duplicate ~20min (confirmation + credit).
+              MC8 U5 — the RESUMED variant is honest that the wallet isn't connected but the watch
+              continues (relay-bound, not Ethereum-bound). */}
+          <Text testID="ckerc20-status" style={S.paidSub}>{resumed
+            ? 'Deposit pending (~20 min) — your wallet isn\u2019t connected, but we\u2019re still watching for the mint.'
+            : 'Waiting for confirmation — your deposit will appear in about 20 minutes.'}</Text>
+          {/* MC8 U5 — escape from a resumed watching state. A deposit that never mints would
+              otherwise wedge the sheet in watching on every restart; this clears the key + returns
+              to 'connect' so the user can start fresh. Only rendered in the resumed state (a
+              fresh watch just completed submit; the user is still on the same browser session). */}
+          {resumed ? (
+            <Pressable
+              testID="btn-ckerc20-new"
+              accessibilityRole="button"
+              accessibilityLabel="Start a new deposit"
+              style={[S.primaryWide, {marginTop: 16}]}
+              onPress={startNew}>
+              <Text style={S.primaryText}>Start a new deposit</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : (
+        <View style={S.centerAll}>
+          <View style={S.check}><Text style={S.checkMark}>✓</Text></View>
+          <Text style={S.paidText}>Deposited ✓</Text>
+          <Text style={S.paidSub}>{`${display.nativeAsset} minted to your wallet.`}</Text>
+          <Text style={S.dim2}>Your balance updates automatically.</Text>
+          <Pressable testID="btn-ckerc20-deposit-done" style={S.linkBtn} onPress={onClose} accessibilityRole="button" accessibilityLabel="Done" accessibilityState={{disabled: false}}><Text style={S.linkText}>Done</Text></Pressable>
+        </View>
+      )}
+      {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
+    </>
+  );
+
+  if (inline) {
+    return <View style={S.sheetCenter}>{body}</View>;
+  }
   return (
     <SheetOverlay>
       <SafeAreaView style={S.sheet}>
@@ -328,124 +457,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
           <Pressable testID="btn-ckerc20-close" accessibilityRole="button" accessibilityLabel="Close deposit sheet" style={S.sheetClose} onPress={onClose}><Text style={S.sheetCloseX}>✕</Text></Pressable>
         </View>
         <ScrollView contentContainerStyle={S.sheetCenter} keyboardShouldPersistTaps="handled">
-          {/* Wrong-network warning — unmissable, above the flow. */}
-          <View testID="ckerc20-deposit" style={S.instrCard}>
-            <Text style={S.instrLine}>
-              Send only <Text style={S.instrAsset}>{display.nativeAsset}</Text> on{' '}
-              <Text style={S.instrAsset}>{display.networkLabel}</Text>. Other assets or chains sent
-              this way won't credit and may be lost.
-            </Text>
-            <Text style={S.instrCustody}>
-              dpay never holds your keys — your wallet signs, and the chain-key asset mints 1:1 to your
-              wallet on confirmation (~20 min).
-            </Text>
-            {/* Gas warning. ERC-20: the onramp needs Ethereum transactions the user must hold ETH to
-                pay gas for (separate from the deposited token). Native ETH: the deposit tx itself
-                carries ETH, so the network fee comes out of the sent amount — send a little extra. */}
-            <Text style={[S.instrCustody, {color: C.warn}]}>
-              {nativeEth
-                ? 'The network fee is paid in ETH — send a little more than you want to deposit.'
-                : "You'll need a small amount of ETH for Ethereum network gas fees."}
-            </Text>
-          </View>
-
-          {err ? <Text testID="ckerc20-status" style={S.err}>{err}</Text> : null}
-
-          {phase === 'connect' ? (
-            // MC8 U6 capstone — while wcUri is non-null (display_uri fired, waiting for the wallet to
-            // scan + approve), render the pairing QR with on-brand copy. On web wcUri is ALWAYS null
-            // (pairOnrampWallet is a no-op), so this branch is unreachable in the e2e harness.
-            wcUri ? (
-              <View style={S.centerAll}>
-                <View testID="wc-pair-qr" style={S.qrCard}><QRCode value={wcUri} size={QR_SIZE} ecl="M" /></View>
-                <Text style={S.paidSub}>Scan with your wallet to pair</Text>
-                {Platform.OS !== 'web' ? (
-                  <Pressable testID="btn-open-wallet" accessibilityRole="button" accessibilityHint="Open an installed wallet app on this device" style={[S.primaryWide, {marginTop: 12}]} onPress={openInWallet}>
-                    <Text style={S.primaryText}>Open wallet on this device</Text>
-                  </Pressable>
-                ) : null}
-                <Text style={S.dim2}>MetaMask · Trust · Rabby · any WalletConnect wallet</Text>
-              </View>
-            ) : (
-              <View style={S.centerAll}>
-                {/* Why a wallet, not an address: depositing on the ckETH ramp requires a wallet-SIGNED
-                    transaction (ERC-20: two txs — approve + depositErc20; native ETH: one payable tx —
-                    depositEth with the amount as ETH value). Unlike Bitcoin (UTXO, send-to-address),
-                    there is no "deposit address" here; the deposit must be initiated from the wallet
-                    that holds the asset (+ ETH for gas, for ERC-20). */}
-                <Text style={S.dim2}>{nativeEth
-                  ? 'Send ETH directly to the deposit contract — one transaction your wallet signs, with your deposit amount as the ETH value.'
-                  : `${display.nativeAsset} is an Ethereum token — depositing it needs two transactions your wallet signs, not a send-to-address like Bitcoin.`}</Text>
-                <Pressable testID="btn-connect-wallet" accessibilityRole="button" accessibilityLabel="Connect Ethereum wallet" style={S.primaryWide} onPress={connect}>
-                  <Text style={S.primaryText}>Connect wallet</Text>
-                </Pressable>
-                <Text style={S.dim2}>MetaMask · Trust · Rabby · any WalletConnect-compatible wallet</Text>
-              </View>
-            )
-          ) : phase === 'enter' || phase === 'sending' ? (
-            <>
-              <Text style={S.inputLabel}>{`Amount (${display.nativeAsset})`}</Text>
-              <TextInput
-                testID="ckerc20-amount"
-                style={S.amountInput}
-                keyboardType="decimal-pad"
-                placeholder={`0.00`}
-                value={amount}
-                onChangeText={setAmount}
-                editable={phase === 'enter'}
-                onSubmitEditing={phase === 'enter' ? submit : undefined}
-              />
-              {account ? <Text style={S.dim2}>{`From ${account.slice(0, 6)}…${account.slice(-4)}`}</Text> : null}
-              <Pressable
-                testID="btn-approve"
-                accessibilityRole="button"
-                accessibilityLabel={phase === 'sending' ? 'Confirming in your wallet' : (nativeEth ? 'Deposit' : 'Approve and deposit')}
-                accessibilityState={{disabled: phase === 'sending'}}
-                style={[S.primaryWide, phase === 'sending' && {opacity: 0.6}]}
-                onPress={submit}
-                disabled={phase === 'sending'}>
-                <Text style={S.primaryText}>{phase === 'sending' ? 'Confirm in your wallet…' : (nativeEth ? 'Deposit' : 'Approve & deposit')}</Text>
-              </Pressable>
-            </>
-          ) : phase === 'watching' ? (
-            <View style={S.centerAll}>
-              <ActivityIndicator color={C.brand} />
-              {/* MC8 U5 — surface the in-flight amount so a resumed watching state shows WHAT is
-                  pending (the user may have forgotten the exact amount across a restart). */}
-              {amount ? (
-                <Text style={S.paidSub}>{`Depositing ${amount} ${display.nativeAsset}`}</Text>
-              ) : null}
-              {/* M9: one clear line — no "scrapes" jargon, no duplicate ~20min (confirmation + credit).
-                  MC8 U5 — the RESUMED variant is honest that the wallet isn't connected but the watch
-                  continues (relay-bound, not Ethereum-bound). */}
-              <Text testID="ckerc20-status" style={S.paidSub}>{resumed
-                ? 'Deposit pending (~20 min) — your wallet isn\u2019t connected, but we\u2019re still watching for the mint.'
-                : 'Waiting for confirmation — your deposit will appear in about 20 minutes.'}</Text>
-              {/* MC8 U5 — escape from a resumed watching state. A deposit that never mints would
-                  otherwise wedge the sheet in watching on every restart; this clears the key + returns
-                  to 'connect' so the user can start fresh. Only rendered in the resumed state (a
-                  fresh watch just completed submit; the user is still on the same browser session). */}
-              {resumed ? (
-                <Pressable
-                  testID="btn-ckerc20-new"
-                  accessibilityRole="button"
-                  accessibilityLabel="Start a new deposit"
-                  style={[S.primaryWide, {marginTop: 16}]}
-                  onPress={startNew}>
-                  <Text style={S.primaryText}>Start a new deposit</Text>
-                </Pressable>
-              ) : null}
-            </View>
-          ) : (
-            <View style={S.centerAll}>
-              <View style={S.check}><Text style={S.checkMark}>✓</Text></View>
-              <Text style={S.paidText}>Deposited ✓</Text>
-              <Text style={S.paidSub}>{`${display.nativeAsset} minted to your wallet.`}</Text>
-              <Text style={S.dim2}>Your balance updates automatically.</Text>
-              <Pressable testID="btn-ckerc20-deposit-done" style={S.linkBtn} onPress={onClose} accessibilityRole="button" accessibilityLabel="Done" accessibilityState={{disabled: false}}><Text style={S.linkText}>Done</Text></Pressable>
-            </View>
-          )}
-          {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
+          {body}
         </ScrollView>
       </SafeAreaView>
     </SheetOverlay>

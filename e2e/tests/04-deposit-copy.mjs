@@ -1,16 +1,16 @@
 // Flow 04 — Deposit copy: REAL clipboard, not the Share noop (U4).
 //
-// Opens the BTC deposit sheet via the Balances sheet (the wallet's money hub) — tap the header
-// balance → Balances → the BTC row's "＋ Add" button → the deposit sheet, then click "Copy address"
-// and assert the test seam `window.__DPAY_TEST_CLIPBOARD` now holds the EXACT deposit address. This
-// proves the copy button uses `navigator.clipboard.writeText` (the real clipboard on web) rather than
-// the `Share.share` noop shimmed in shims.ts (which captures nothing). On native the same code path
-// falls back to the real Share sheet; the harness proves the clipboard path, which is the regression
-// surface.
+// Opens the ckBTC deposit via the Receive tab's "My address" sub-mode — Balances (select ckBTC) →
+// Receive → "My address" → the inline deposit body, then click "Copy address" and assert the test
+// seam `window.__DPAY_TEST_CLIPBOARD` now holds the EXACT deposit address. This proves the copy
+// button uses `navigator.clipboard.writeText` (the real clipboard on web) rather than the `Share.share`
+// noop shimmed in shims.ts (which captures nothing). On native the same code path falls back to the
+// real Share sheet; the harness proves the clipboard path, which is the regression surface.
 //
-// Selector contract: `balance` (header → Balances), `asset-add-ckbtc` (BTC row Add), `deposit-address`,
+// Selector contract: `balance` (header → Balances), `asset-ckbtc-select` (the BTC row whole-row
+// select), `btn-receive-address` (the Receive "My address" toggle), `deposit-address`,
 // `btn-deposit-copy`.
-import { setup, assertEq, onboardWallet, openBalances } from '../harness/lib.mjs';
+import { setup, assertEq, onboardWallet, openBalances, selectCurrency, openReceiveAddress } from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -35,10 +35,11 @@ export async function run() {
     console.log('[04-deposit-copy] onboarding…');
     await onboardWallet(driver, 'e2e-copy');
 
-    // 2. Open Balances → pick Bitcoin (the CkBtcUtxo ramp) via its "Add" action to reach the deposit sheet.
-    console.log('[04-deposit-copy] opening Balances → BTC deposit…');
+    // 2. Open Balances → select ckBTC (makes it the active asset) → Receive → "My address".
+    console.log('[04-deposit-copy] Balances → select ckBTC → Receive → My address…');
     await openBalances(driver);
-    await driver.click('asset-add-ckbtc', { timeoutMs: 5_000 });
+    await selectCurrency(driver, 'ckbtc');
+    await openReceiveAddress(driver);
 
     // 3. Read the address before copying.
     await driver.findByTestID('deposit-address', { timeoutMs: 10_000 });
@@ -60,10 +61,11 @@ export async function run() {
     assertEq(after, address, `clipboard seam after copy should equal the deposit address "${address}"`);
     console.log(`[04-deposit-copy] ✓ clipboard captured the deposit address (${address})`);
 
-    // 8. U7 — Escape closes the open sheet (seed of the keyboard-shortcuts surface, plan flow 14).
-    await driver.pressKey('Escape');
+    // 8. Flipping the toggle back to "Request payment" hides the deposit body (the inline deposit
+    //    unmounts). There is no overlay Esc any more — the toggle is the exit affordance.
+    await driver.click('btn-receive-request', { timeoutMs: 5_000 });
     await driver.waitGone('deposit-address', { timeoutMs: 3_000 });
-    console.log('[04-deposit-copy] ✓ Escape closed the deposit sheet');
+    console.log('[04-deposit-copy] ✓ toggle back to "Request payment" hid the deposit body');
 
     await driver.screenshot('04-deposit-copy');
 

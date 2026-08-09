@@ -11,9 +11,10 @@
 // Typing into the amount field must NOT trip a shortcut (activeElement INPUT/TEXTAREA guard).
 //
 // Selector contract: `pay-scan` (Pay scan screen), `btn-request` (Receive affordance), `balance`,
-// `btn-balances-close` (Balances open), `asset-add-ckbtc` (BTC row Add → deposit sheet),
-// `deposit-address` (deposit sheet), `amount-input`.
-import { setup, assert, assertIncludes, onboardWallet, openBalances } from '../harness/lib.mjs';
+// `btn-balances-close` (Balances open), `asset-ckbtc-select` (BTC row whole-row select),
+// `btn-receive-address` (Receive → "My address"), `deposit-address` (inline deposit body),
+// `amount-input`.
+import { setup, assert, assertIncludes, onboardWallet, openBalances, selectCurrency, openReceiveAddress } from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -91,21 +92,24 @@ export async function run() {
     await driver.findByTestID('pay-scan', { timeoutMs: 3_000 });
     console.log('[14-keyboard] ✓ P activated again after the input lost focus');
 
-    // --- Esc closes a sheet (the seed affordance) + the in-UI hint renders -----------
-    console.log('[14-keyboard] opening the deposit sheet (from Balances → BTC row)…');
+    // --- Esc closes the inline deposit body (the seed affordance) + the in-UI hint renders -------
+    // The deposit now lives inline in the Receive tab's "My address" sub-mode. The inline body still
+    // registers useEscapeToClose → Escape flips the sub-mode back to "Request payment".
+    console.log('[14-keyboard] opening the deposit (Balances → select ckBTC → Receive → My address)…');
     await openBalances(driver);
-    await driver.click('asset-add-ckbtc', { timeoutMs: 5_000 });
+    await selectCurrency(driver, 'ckbtc');
+    await openReceiveAddress(driver);
     await driver.findByTestID('deposit-address', { timeoutMs: 10_000 });
 
     // The keyboard surface is documented in-UI: the "Press Esc to close" hint renders on web.
     const body = await driver.bodyText();
-    assertIncludes(body, 'Press Esc to close', 'the deposit sheet should document the Esc shortcut in-UI');
+    assertIncludes(body, 'Press Esc to close', 'the deposit body should document the Esc shortcut in-UI');
     console.log('[14-keyboard] ✓ "Press Esc to close" hint is visible');
 
-    console.log('[14-keyboard] pressing Escape (close the deposit sheet)…');
+    console.log('[14-keyboard] pressing Escape (flip back to Request payment)…');
     await driver.pressKey('Escape');
     await driver.waitGone('deposit-address', { timeoutMs: 3_000 });
-    console.log('[14-keyboard] ✓ Escape closed the deposit sheet');
+    console.log('[14-keyboard] ✓ Escape closed the inline deposit body');
 
     await driver.screenshot('14-keyboard');
 

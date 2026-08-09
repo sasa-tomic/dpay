@@ -17,9 +17,10 @@
 // escape is then clicked to prove it returns to 'connect' (clearing the persisted key).
 //
 // Mock provider contract is identical to flow 16 (only provider I/O faked; cketh.ts calldata runs
-// verbatim). Selector contract: `asset-add-ckusdc`, `ckerc20-deposit`, `btn-connect-wallet`,
+// verbatim). Selector contract: `asset-ckusdc-select` (USDC row whole-row select),
+// `btn-receive-address` (Receive → "My address"), `ckerc20-deposit`, `btn-connect-wallet`,
 // `btn-approve`, `ckerc20-amount`, `ckerc20-status`, `btn-ckerc20-new`.
-import { setup, assert, assertIncludes, onboardWallet, openBalances } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, onboardWallet, openBalances, selectCurrency, openReceiveAddress } from '../harness/lib.mjs';
 
 // Install a recording EIP-1193 mock identical to flow 16's (chainId 0x1 = Ethereum mainnet, receipt
 // status 0x1 = success). After reload this is GONE (window.ethereum is undefined) — proving the
@@ -65,7 +66,8 @@ export async function run() {
 
     await onboardWallet(driver, 'e2e-persist');
     await openBalances(driver);
-    await driver.click('asset-add-ckusdc', { timeoutMs: 5_000 });
+    await selectCurrency(driver, 'ckusdc');
+    await openReceiveAddress(driver);
     await driver.findByTestID('ckerc20-deposit', { timeoutMs: 8_000 });
 
     // Connect + enter amount + approve → both txs mined (mock receipt 0x1) → watching.

@@ -25,7 +25,7 @@ import {SheetOverlay} from './SheetOverlay';
 // selects SOL as the active asset — the header shows the SOL balance and the Pay/Receive tabs auto-
 // use the SOL NFC rail. No separate chain toggle; the asset implies the rail. Receive + Send remain
 // as secondary actions for the online deposit/send flows.
-export function BalancesSheet({catalog, assetBalances, primaryBalance, online, currentCurrency, onSelect, onTopUp, topUpBusy, topUpErr, onAdd, onWithdraw, showTestnet, onToggleTestnet, solAddress, solBalance, activeSol, onSelectSol, onSolReceive, onSolSend, onClose}: {
+export function BalancesSheet({catalog, assetBalances, primaryBalance, online, currentCurrency, onSelect, onTopUp, topUpBusy, topUpErr, showTestnet, onToggleTestnet, solAddress, solBalance, activeSol, onSelectSol, onSolReceive, onSolSend, onClose}: {
   catalog: CurrencyDescriptor[];
   assetBalances: Record<number, string>;
   primaryBalance: string | null;
@@ -35,8 +35,6 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
   onTopUp: () => void;
   topUpBusy: boolean;
   topUpErr: string | null;
-  onAdd: (currency: number) => void;
-  onWithdraw: (currency: number) => void;
   showTestnet: boolean;
   onToggleTestnet: () => void;
   // Native SOL rail — a SEPARATE concern from the catalog loop (a device-derived key, not a relay-
@@ -80,7 +78,7 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
           </Pressable>
         </View>
         <ScrollView contentContainerStyle={S.sheetCenter} keyboardShouldPersistTaps="handled">
-          <Text style={S.dim2}>Tap a currency to show it on your home screen. Receive or send any of them below.</Text>
+          <Text style={S.dim2}>Tap a currency to show it on your home screen. Receive or send it from the Receive and Pay tabs.</Text>
           {visibleCatalog.map(a => {
             const isPrimary = a.currency === 0;
             const testnet = !isPrimary && isTestnetCurrency(a);
@@ -95,116 +93,86 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
               ? (primaryBalance == null ? '—' : `${online ? '' : '~'}${fmtCurrencyAmount(catalog, a.currency, primaryBalance)}`)
               : fmtCurrencyAmount(catalog, a.currency, assetBal);
             const active = a.currency === currentCurrency;
-            // MC1 unit 6 — FAIL-CLOSED: a ramp (Top Up / Cash out) exists ONLY for a KNOWN family
-            // (CkBtcUtxo/CkEthErc20). familyDisplay returns null for an unknown family (e.g. CkSol) or
-            // a no-minter ICRC currency → no ramp buttons render, and the subtitle is an explicit
-            // "Unsupported asset" (honest, never a fake BTC label, never a crash via `!`). DEMO
-            // (currency 0) is special-cased above (isPrimary) so it never reaches here.
-            // MC1 unit 5: the per-currency `onramp`/`offramp` RampCapability is the authoritative
-            // gate — AND-ed with the family gate so an `Unavailable` direction NEVER shows a button
-            // (no-swap honesty; ckUSDC offramp is Unavailable per Fork-C/O3). This can only NARROW
-            // the enabled set, never re-enable a disabled direction.
-            const disp = familyDisplay(catalog, a.currency);
-            const onrampable = disp !== null && a.onramp !== 'Unavailable';
-            // Cash-out is offered for a funded asset whose family has a native offramp: ckBTC
-            // (CkBtcUtxo → retrieve_btc) AND any CkEthErc20 asset whose `offramp` is enabled — native
-            // ckETH (token_contract == null → withdraw_eth, single-ledger) AND ckERC20 tokens
-            // (token_contract Some → withdraw_erc20, dual-ledger; the user must hold ckETH for gas).
-            // The per-currency `offramp` RampCapability stays the authoritative no-swap gate (an
-            // `Unavailable` direction NEVER shows the button — e.g. ckUSDT/ckDAI until their offramp
-            // is wired). The `gas_ledger` field carries the ckETH gas principal for the dual-ledger
-            // path; the app surfaces an honest "You need ckETH for gas" note in the WithdrawSheet.
-            const cashable =
-              funded &&
-              a.offramp !== 'Unavailable' &&
-              (a.minter_family === 'CkBtcUtxo' ||
-               a.minter_family === 'CkEthErc20');
-            // Subtitle is user-benefit, not network topology — drop the "Send X on Y" tautology (BTC
-            // on Bitcoin, USDC on Ethereum) that names a network meaningless to a non-technical user.
-            // BTC family -> "Bitcoin"; Ethereum USD stablecoins (USDC/USDT) -> "US dollar stablecoin";
-            // any other onrampable asset -> its SETTLEMENT NETWORK name ("Ethereum" for native ckETH,
-            // matching how BTC reads "Bitcoin" rather than its bare symbol "BTC"). A TESTNET currency
-            // shows its actual `network` ("Bitcoin Testnet" / "Sepolia") so the testnet status is
-            // unmistakable. DEMO (isPrimary) keeps its exact "play money for testing" copy (unchanged —
-            // the audit praised it).
+            // Subtitle is user-benefit, not network topology. BTC family -> "Bitcoin"; Ethereum USD
+            // stablecoins (USDC/USDT) -> "US dollar stablecoin"; any other onrampable asset -> its
+            // SETTLEMENT NETWORK name. A TESTNET currency shows its actual `network` so the testnet
+            // status is unmistakable. DEMO keeps its "play money for testing" copy.
             const sub = isPrimary
               ? 'play money for testing'
               : testnet
                 ? (a.network ?? 'testnet')
-                : onrampable && disp
-                  ? (a.minter_family === 'CkBtcUtxo'
-                      ? 'Bitcoin'
-                      : a.minter_family === 'CkEthErc20' && (a.backing_symbol === 'USDC' || a.backing_symbol === 'USDT')
-                        ? 'US dollar stablecoin'
-                        : disp.networkLabel)
-                  : 'Unsupported asset';
+                : ((a.minter_family === 'CkBtcUtxo'
+                    ? 'Bitcoin'
+                    : a.minter_family === 'CkEthErc20' && (a.backing_symbol === 'USDC' || a.backing_symbol === 'USDT')
+                      ? 'US dollar stablecoin'
+                      : (familyDisplay(catalog, a.currency)?.networkLabel ?? 'Unsupported asset')));
+            if (isPrimary) {
+              // DEMO keeps a two-part row: the select area + the faucet top-up button (a sibling, so
+              // tapping top-up doesn't also fire select). Every on-chain send/receive moved to the
+              // Pay/Receive tabs, so DEMO is the only row that still carries an inline action.
+              return (
+                <View key={a.currency} testID={`asset-${key}`} style={[S.assetCard, active && S.assetCardActive]}>
+                  <View style={S.assetRow}>
+                    <Pressable
+                      testID={`asset-${key}-select`}
+                      style={S.assetSelect}
+                      onPress={() => onSelect(a.currency)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Select ${name}`}
+                      accessibilityHint="Show this asset's balance on your home screen"
+                    >
+                      <View style={[S.dot, {backgroundColor: active ? C.brand : C.line}]} />
+                      <Text style={S.assetLabel}>{name}</Text>
+                      <Text style={S.assetAmt}>{balanceText}</Text>
+                    </Pressable>
+                    <View style={S.assetActions}>
+                      <Pressable
+                        testID="btn-topup"
+                        style={[S.assetActionBtn, topUpBusy && S.dim]}
+                        disabled={topUpBusy}
+                        onPress={onTopUp}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Receive ${name}`}
+                        accessibilityHint="Add demo funds to this wallet"
+                        accessibilityState={{disabled: topUpBusy}}
+                      >
+                        {topUpBusy
+                          ? <ActivityIndicator size="small" color={C.brand} />
+                          : <><Text style={S.assetActionPlus}>+</Text><Text style={S.assetActionText}>Receive</Text></>}
+                      </Pressable>
+                    </View>
+                  </View>
+                  <Text style={S.assetSub}>{sub}</Text>
+                  {topUpErr ? <Text testID="topup-err" style={S.topUpErr}>{topUpErr}</Text> : null}
+                </View>
+              );
+            }
+            // Non-DEMO IC row: the ENTIRE card is one select Pressable (no per-row action buttons —
+            // on-chain Send/Receive now lives in the Pay/Receive tabs). The container View keeps the
+            // `asset-<key>` testID (read by flows that assert the row's textContent); the inner
+            // Pressable carries `asset-<key>-select` (the clickable whole-row select).
             return (
-              <View key={a.currency} testID={`asset-${key}`} style={S.assetCard}>
-                <View style={S.assetRow}>
-                  <Pressable
-                    style={S.assetSelect}
-                    onPress={() => onSelect(a.currency)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Select ${name}`}
-                    accessibilityHint="Show this asset's balance on your home screen"
-                  >
+              <View key={a.currency} testID={`asset-${key}`} style={[S.assetCard, active && S.assetCardActive]}>
+                <Pressable
+                  testID={`asset-${key}-select`}
+                  style={S.assetRow}
+                  onPress={() => onSelect(a.currency)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Select ${name}`}
+                  accessibilityHint="Show this asset's balance on your home screen"
+                >
+                  <View style={S.assetSelect}>
                     <View style={[S.dot, {backgroundColor: active ? C.brand : C.line}]} />
                     <Text style={S.assetLabel}>{name}</Text>
-                    <Text style={[S.assetAmt, !isPrimary && !funded && S.assetCardZero]}>{balanceText}</Text>
-                  </Pressable>
-                  {(isPrimary || onrampable || cashable) ? (
-                    <View style={S.assetActions}>
-                      {isPrimary ? (
-                        <Pressable
-                          testID="btn-topup"
-                          style={[S.assetActionBtn, topUpBusy && S.dim]}
-                          disabled={topUpBusy}
-                          onPress={onTopUp}
-                          accessibilityRole="button"
-                          accessibilityLabel={`Receive ${name}`}
-                          accessibilityHint="Add demo funds to this wallet"
-                          accessibilityState={{disabled: topUpBusy}}
-                        >
-                          {topUpBusy
-                            ? <ActivityIndicator size="small" color={C.brand} />
-                            : <><Text style={S.assetActionPlus}>+</Text><Text style={S.assetActionText}>Receive</Text></>}
-                        </Pressable>
-                      ) : null}
-                      {onrampable && !isPrimary ? (
-                        <Pressable
-                          testID={`asset-add-${key}`}
-                          style={S.assetActionBtn}
-                          onPress={() => onAdd(a.currency)}
-                          accessibilityRole="button"
-                          accessibilityLabel={`Receive ${name}`}
-                          accessibilityHint="Open the deposit address and instructions for this asset"
-                        >
-                          <Text style={S.assetActionPlus}>+</Text>
-                          <Text style={S.assetActionText}>Receive</Text>
-                        </Pressable>
-                      ) : null}
-                      {cashable ? (
-                        <Pressable
-                          testID="btn-withdraw"
-                          style={S.withdrawLink}
-                          onPress={() => onWithdraw(a.currency)}
-                          accessibilityRole="button"
-                          accessibilityLabel={`Send ${name}`}
-                          accessibilityHint="Send this asset to a native address"
-                        >
-                          <Text style={S.withdrawLinkText}>Send</Text>
-                        </Pressable>
-                      ) : null}
-                    </View>
-                  ) : null}
-                </View>
+                    <Text style={[S.assetAmt, !funded && S.assetCardZero]}>{balanceText}</Text>
+                  </View>
+                </Pressable>
                 <Text style={S.assetSub}>{sub}</Text>
-                {isPrimary && topUpErr ? <Text testID="topup-err" style={S.topUpErr}>{topUpErr}</Text> : null}
               </View>
             );
           })}
           {solAddress ? (
-            <View testID="asset-sol" style={S.assetCard}>
+            <View testID="asset-sol" style={[S.assetCard, activeSol && S.assetCardActive]}>
               <View style={S.assetRow}>
                 <Pressable
                   testID="asset-sol-select"

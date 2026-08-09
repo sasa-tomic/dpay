@@ -315,6 +315,40 @@ export async function openBalances(driver, opts = {}) {
   await driver.findByTestID('btn-balances-close', { timeoutMs: opts.timeoutMs ?? 5_000 });
 }
 
+/**
+ * Select an IC catalog currency in the Balances sheet via its whole-row select Pressable
+ * (`asset-<key>-select`). Closes the sheet (onSelect auto-closes) + waits for it to unmount, then
+ * waits for the wallet header to reflect the new active asset. The new Send/Receive IA moved the
+ * on-chain deposit/withdraw entry out of Balances into the Pay/Receive tabs, so this is the SOLE way
+ * to make a currency the active asset (the row is one big select Pressable). `key` is the
+ * assetTestKey (e.g. 'ckbtc', 'ckusdc', 'ckusdt'); 'demo' for the DEMO row.
+ */
+export async function selectCurrency(driver, key, opts = {}) {
+  await driver.click(`asset-${key}-select`, { timeoutMs: opts.timeoutMs ?? 5_000 });
+  await driver.waitGone('btn-balances-close', { timeoutMs: opts.timeoutMs ?? 5_000 });
+}
+
+/**
+ * Switch to the Receive tab and open the "My address" sub-mode (the on-chain deposit flow, lifted
+ * inline). Assumes the desired currency is already the active asset (select it in Balances first).
+ * The "My address" toggle only renders for an on-chain asset (CkBtcUtxo/CkEthErc20), so the caller
+ * must have selected one. Returns nothing; the deposit body (e.g. `deposit-address`) is the gate.
+ */
+export async function openReceiveAddress(driver, opts = {}) {
+  await driver.click('tab-receive', { timeoutMs: opts.timeoutMs ?? 5_000 });
+  await driver.click('btn-receive-address', { timeoutMs: opts.timeoutMs ?? 5_000 });
+}
+
+/**
+ * Switch to the Pay tab and open the "Send to address" sub-mode (the on-chain withdraw flow, lifted
+ * inline). Assumes the desired currency is already the active asset (select it in Balances first).
+ * The "Send to address" toggle only renders for an on-chain asset (CkBtcUtxo/CkEthErc20).
+ */
+export async function openPaySend(driver, opts = {}) {
+  await driver.click('tab-pay', { timeoutMs: opts.timeoutMs ?? 5_000 });
+  await driver.click('btn-pay-send', { timeoutMs: opts.timeoutMs ?? 5_000 });
+}
+
 // --- relay client helpers (used by the deposit/pay flows) -------------------------------------
 //
 // Every call has a timeout (AbortController) and surfaces a thrown Error on non-2xx — no silent

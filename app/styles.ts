@@ -61,12 +61,11 @@ export const S = StyleSheet.create({
   tabActive: {backgroundColor: C.brand},
   tabText: {color: C.sub, fontWeight: '600'},
   tabTextActive: {color: C.brandInk},
-  // Rail selector — a segmented [ IC | SOL ] pill toggle at the top of the Pay/Receive tab bodies.
-  // Reuses the `tab` visual language (rounded pills, brand fill on the active side) but as a joined
-  // segmented control: one rounded field holding two equal-width pills, the active one filled brand.
-  // Sits inline at the top of the mode body (NOT in the ledger branch). `railRow` is the joined
-  // container with inner padding so the pills read as one control; `railPill` is each half-width
-  // segment; `railPillActive` flips the fill; the text styles mirror tabText/tabTextActive.
+  // Mode toggle — a joined two-segment pill control at the top of the Pay/Receive tab bodies:
+  // `[ Scan to pay | Send to address ]` (Pay) and `[ Request payment | My address ]` (Receive). The
+  // active side fills brand; the inactive side stays neutral. Sits inline at the top of the mode body.
+  // `railRow` is the joined container; `railPill` is each half-width segment; the text styles mirror
+  // tabText/tabTextActive. (Originally named for the removed IC|SOL RailSelector; reused verbatim.)
   railRow: {flexDirection: 'row', gap: 4, marginTop: 2, marginBottom: 12, backgroundColor: C.field, borderRadius: 999, padding: 4, alignSelf: 'stretch'},
   railPill: {flex: 1, paddingVertical: 9, paddingHorizontal: 16, borderRadius: 999, alignItems: 'center', justifyContent: 'center', minHeight: 40},
   railPillActive: {backgroundColor: C.brand},
@@ -165,10 +164,11 @@ export const S = StyleSheet.create({
   filterChipActive: {backgroundColor: C.brand, borderColor: C.brand},
   filterChipText: {color: C.sub, fontWeight: '600', fontSize: 13},
   filterChipTextActive: {color: C.brandInk},
-  // ckBTC asset card — a DISTINCT, clearly-labeled asset (not the `$` balance). Same card chrome as
-  // the deposit status block so it reads as a related-but-separate asset affordance. The brand-tinted
-  // left edge + "Bitcoin" label + BTC units make it unambiguously NOT the DEMO_USD `$` header.
-  assetCard: {marginTop: 12, alignSelf: 'stretch', backgroundColor: C.card, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: C.line2, borderLeftColor: C.brand, borderLeftWidth: 3},
+  // Asset card. The brand-tinted left edge is now ACTIVE-ONLY (transparent/neutral when inactive,
+  // brand-colored when the row is the selected currency) so the selected card visibly pops instead of
+  // every card carrying an always-on brand edge that drowned out the active cue.
+  assetCard: {marginTop: 12, alignSelf: 'stretch', backgroundColor: C.card, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: C.line2, borderLeftColor: C.line2, borderLeftWidth: 3},
+  assetCardActive: {borderLeftColor: C.brand},
   assetRow: {flexDirection: 'row', alignItems: 'center'},
   assetSelect: {flex: 1, flexDirection: 'row', alignItems: 'baseline'},
   assetLabel: {flex: 1, marginLeft: 8, fontSize: 16, fontWeight: '700', color: C.ink},

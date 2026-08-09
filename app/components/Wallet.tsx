@@ -25,14 +25,11 @@ import {Tab} from './Tab';
 import {PayMode} from './PayMode';
 import {ReceiveMode} from './ReceiveMode';
 import {Ledger} from './Ledger';
-import {DepositSheet} from './DepositSheet';
-import {WithdrawSheet} from './WithdrawSheet';
 import {SolanaReceiveSheet} from './SolanaReceiveSheet';
 import {SolanaWithdrawSheet} from './SolanaWithdrawSheet';
 import {SolPayMode} from './SolPayMode';
 import {SolReceiveMode} from './SolReceiveMode';
 import {SettingsSheet} from './SettingsSheet';
-import {CkErc20DepositSheet} from './CkErc20DepositSheet';
 import {BalancesSheet} from './BalancesSheet';
 
 export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity; relayUrl: string; setRelayUrl: (s: string) => void; onReset: () => void}) {
@@ -54,6 +51,12 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
   // Balances sheet. Pay/Receive still settle in whatever currency a request specifies (unchanged).
   const [currentCurrency, setCurrentCurrency] = useState(0);
   const [balancesOpen, setBalancesOpen] = useState(false);
+  // Within-tab sub-modes for the Receive/Pay IA: "request"/"address" (Receive) and "scan"/"send"
+  // (Pay). The on-chain deposit + withdraw surfaces now live INLINE in these tabs (lifted out of the
+  // Balances per-row buttons + the overlay sheets). Owned here so deeplinks (?screen=deposit, the
+  // auto-open-ckERC20 effect) can land the user directly on the right sub-mode + currency.
+  const [receiveSubMode, setReceiveSubMode] = useState<'request' | 'address'>('request');
+  const [paySubMode, setPaySubMode] = useState<'scan' | 'send'>('scan');
   const [nfc, setNfc] = useState<NfcStatus>('unknown');
   // Demo top-up: a single click adds $100 of demo currency via /api/v1/faucet. The button sits next
   // to the balance so users find it without hunting. `topUpBusy` drives the spinner; `topUpErr`
@@ -77,11 +80,16 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
     () => catalog.find(c => c.minter_family === 'CkBtcUtxo')?.currency ?? 1,
     [catalog],
   );
-  // Which asset's deposit/withdraw sheet is open (null = closed). Set from the Balances sheet's per-
-  // row actions. The sheet rendered is chosen by the currency's minter_family (DepositSheet vs
-  // CkErc20DepositSheet). The `?screen=deposit` deep link seeds the ckBTC ramp on mount.
-  const [depositCurrency, setDepositCurrency] = useState<number | null>(readDepositDeepLink() ? ckBtcCurrency : null);
-  const [withdrawCurrency, setWithdrawCurrency] = useState<number | null>(null);
+  // The "current" currency drives BOTH the header balance AND the Receive "My address" / Pay "Send to
+  // address" sub-modes (the on-chain deposit/withdraw surfaces now live in the tabs, keyed off the
+  // active asset's family). The deposit/withdraw family routing resolves `familyDisplay` for the
+  // current currency; null ⇒ the within-tab toggle is hidden (DEMO / unsupported family).
+  const currentDesc = catalog.find(c => c.currency === currentCurrency) ?? null;
+  const currentFamily = currentDesc?.minter_family ?? null;
+  const depositDisplay = currentFamily ? familyDisplay(catalog, currentCurrency) : null;
+  const depositFamily = (currentFamily === 'CkBtcUtxo' || currentFamily === 'CkEthErc20') ? currentFamily : null;
+  const depositChainId = currentDesc?.chain_id ?? null;
+  const depositNativeEth = currentFamily === 'CkEthErc20' && currentDesc?.token_contract == null;
   // Every NON-primary catalog currency (the assets polled in parallel below + listed in the Balances
   // sheet). The balance poll covers every id here (a no-minter ICRC asset still has a readable ledger
   // principal; a failed read is swallowed so it never flaps the display). Each stays INDEPENDENT — no
@@ -207,19 +215,25 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
     return () => { alive = false; sub.remove(); };
   }, []);
 
-  // MC8 U5 — AUTO-OPEN the ckERC20 deposit sheet on mount if a watching deposit was persisted across
-  // a restart. The watching poll is relay-bound (NOT Ethereum), so it is resumable WITHOUT a wallet
+  // MC8 U5 — AUTO-OPEN the ckERC20 deposit on mount if a watching deposit was persisted across a
+  // restart. The watching poll is relay-bound (NOT Ethereum), so it is resumable WITHOUT a wallet
   // reconnect — surfacing the in-flight watch immediately on launch is the honest UX (the user
-  // mid-deposit doesn't want to hunt for the right sheet after a restart). Scans the catalog's
+  // mid-deposit doesn't want to hunt for the right tab after a restart). Scans the catalog's
   // CkEthErc20 currencies (the only family whose CkErc20DepositSheet persists a watching key) and
-  // opens the first one with a persisted watching state. Once-only (a manual sheet-close must NOT be
-  // re-opened by a later catalog refresh); the `?screen=deposit` deep link seeds the ckBTC sheet, so
-  // it is left alone when present.
+  // lands on the Receive tab's "My address" sub-mode for the first one with a persisted watching
+  // state. Once-only (a manual flip back must NOT be re-opened by a later catalog refresh); the
+  // `?screen=deposit` deep link seeds the ckBTC deposit, so it takes priority.
   const autoOpenAttempted = useRef(false);
   useEffect(() => {
     if (autoOpenAttempted.current) return;
     autoOpenAttempted.current = true;
-    if (readDepositDeepLink()) return; // deep link takes priority (opens ckBTC, no ckERC20 resume)
+    const seedDeposit = (currency: number) => {
+      setCurrentCurrency(currency);
+      setMode('receive');
+      setReceiveSubMode('address');
+      setBalancesOpen(false);
+    };
+    if (readDepositDeepLink()) { seedDeposit(ckBtcCurrency); return; } // deep link → ckBTC deposit
     let alive = true;
     (async () => {
       for (const a of catalog) {
@@ -227,7 +241,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
         const persisted = await loadDeposit(identity.publicHex, a.currency);
         if (!alive) return;
         if (persisted && persisted.phase === 'watching') {
-          setDepositCurrency(a.currency);
+          seedDeposit(a.currency);
           return; // one resume is enough
         }
       }
@@ -235,7 +249,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
     return () => { alive = false; };
     // Mount-only: `catalog` at mount is the bundled default (covers every shipped ckERC20 id). The
     // scan reads AsyncStorage directly, independent of catalog state. Re-running on a catalog refresh
-    // would re-open a sheet the user may have just closed.
+    // would re-seed a sub-mode the user may have just flipped away from.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -294,7 +308,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
   // P=Pay, R=Receive, T=Receive (demo money), A=Balances (the asset hub), L=Ledger (transactions). Active ONLY on the wallet
   // main view with no text input focused and no sheet/overlay open (Esc is handled per-sheet by
   // useEscapeToClose). Native (no physical keyboard) is a no-op; the on-UI hints are web-only too.
-  const anySheetOpen = balancesOpen || depositCurrency != null || withdrawCurrency != null || settingsOpen || solReceiveOpen || solSendOpen;
+  const anySheetOpen = balancesOpen || settingsOpen || solReceiveOpen || solSendOpen;
   useHotkeys({
     p: () => setMode('pay'),
     r: () => setMode('receive'),
@@ -377,12 +391,31 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
         {mode === 'pay'
           ? (activeSol && solAddress
               ? <SolPayMode identity={identity} online={online} nfcReady={nfc === 'ready'} onShowDeposit={() => setSolReceiveOpen(true)} />
-              : <PayMode identity={identity} online={online} relayUrl={relayUrl} nfcStatus={nfc} onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance} catalog={catalog} assetBalances={displayAssetBalances} prefillRequest={prefillRequest} onPrefillConsumed={() => setPrefillRequest(null)} />
+              : <PayMode
+                  identity={identity} online={online} relayUrl={relayUrl} nfcStatus={nfc}
+                  onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance}
+                  catalog={catalog} assetBalances={displayAssetBalances}
+                  withdrawCurrency={currentCurrency} onWithdrawCurrencyChange={setCurrentCurrency}
+                  withdrawDisplay={depositDisplay} withdrawFamily={depositFamily}
+                  withdrawTokenContract={currentDesc?.token_contract ?? null}
+                  withdrawBalance={displayAssetBalances[currentCurrency] ?? '0'}
+                  subMode={paySubMode} onSubModeChange={setPaySubMode}
+                  prefillRequest={prefillRequest} onPrefillConsumed={() => setPrefillRequest(null)}
+                />
           )
           : mode === 'receive'
           ? (activeSol && solAddress
               ? <SolReceiveMode identity={identity} online={online} nfcReady={nfc === 'ready'} />
-              : <ReceiveMode identity={identity} relayUrl={relayUrl} online={online} nfcReady={nfc === 'ready'} onReceived={onActivity} catalog={catalog} prefillReceipt={prefillReceipt} onReceiptConsumed={() => setPrefillReceipt(null)} />
+              : <ReceiveMode
+                  identity={identity} relayUrl={relayUrl} online={online} nfcReady={nfc === 'ready'}
+                  onReceived={onActivity} catalog={catalog}
+                  currentCurrency={currentCurrency} depositCurrency={currentCurrency}
+                  onDepositCurrencyChange={setCurrentCurrency}
+                  depositDisplay={depositDisplay} depositChainId={depositChainId}
+                  depositNativeEth={depositNativeEth} depositFamily={depositFamily}
+                  subMode={receiveSubMode} onSubModeChange={setReceiveSubMode}
+                  prefillReceipt={prefillReceipt} onReceiptConsumed={() => setPrefillReceipt(null)}
+                />
           )
           : <Ledger history={history} catalog={catalog} />}
       </ScrollView>
@@ -394,12 +427,10 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
           primaryBalance={shownBalance}
           online={online}
           currentCurrency={currentCurrency}
-          onSelect={(currency) => { setCurrentCurrency(currency); setActiveSol(false); setBalancesOpen(false); }}
+          onSelect={(currency) => { setCurrentCurrency(currency); setActiveSol(false); setBalancesOpen(false); setReceiveSubMode('request'); setPaySubMode('scan'); }}
           onTopUp={topUp}
           topUpBusy={topUpBusy}
           topUpErr={topUpErr}
-          onAdd={(currency) => { setDepositCurrency(currency); setBalancesOpen(false); }}
-          onWithdraw={(currency) => { setWithdrawCurrency(currency); setBalancesOpen(false); }}
           solAddress={solAddress}
           solBalance={solBalance}
           activeSol={activeSol}
@@ -411,43 +442,6 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
           onClose={() => setBalancesOpen(false)}
         />
       ) : null}
-      {depositCurrency != null ? (() => {
-        // MC1 unit 6 — FAIL-CLOSED: the deposit sheet is rendered ONLY when familyDisplay is
-        // non-null (a known family). The BalancesSheet "Top Up" button is already gated on a known
-        // family, so this is unreachable in normal flow; but if an unknown family reaches here we
-        // render nothing instead of a mis-rendered BTC/ETH form (no silent wrong-currency fallback).
-        const dpDisplay = familyDisplay(catalog, depositCurrency);
-        if (!dpDisplay) return null;
-        const dpDesc = catalog.find(c => c.currency === depositCurrency);
-        return dpDesc?.minter_family === 'CkEthErc20'
-          ? <CkErc20DepositSheet identity={identity} relayUrl={relayUrl} currency={depositCurrency} display={dpDisplay} chainId={dpDesc?.chain_id ?? null} nativeEth={dpDesc?.token_contract == null} onClose={() => setDepositCurrency(null)} />
-          : <DepositSheet identity={identity} relayUrl={relayUrl} currency={depositCurrency} display={dpDisplay} onClose={() => setDepositCurrency(null)} />;
-      })() : null}
-      {withdrawCurrency != null ? (() => {
-        // MC1 unit 6 — FAIL-CLOSED: cash-out is offered ONLY for an asset whose family has a native
-        // offramp — ckBTC (CkBtcUtxo → retrieve_btc) or any CkEthErc20 asset whose `offramp` is
-        // enabled (native ckETH → withdraw_eth, single-ledger; ckERC20 tokens like ckUSDC →
-        // withdraw_erc20, dual-ledger). The BalancesSheet gates the button on the same predicate; an
-        // unknown family renders nothing instead of a wrong cash-out form.
-        const wdDisplay = familyDisplay(catalog, withdrawCurrency);
-        const wdCur = catalog.find(c => c.currency === withdrawCurrency);
-        const wdFamily = wdCur?.minter_family ?? null;
-        if (!wdDisplay || !wdFamily) return null;
-        if (wdFamily !== 'CkBtcUtxo' && wdFamily !== 'CkEthErc20') return null;
-        return (
-          <WithdrawSheet
-            identity={identity}
-            relayUrl={relayUrl}
-            currency={withdrawCurrency}
-            display={wdDisplay}
-            family={wdFamily}
-            tokenContract={wdCur?.token_contract ?? null}
-            balance={assetBalances[withdrawCurrency] ?? '0'}
-            onClose={() => setWithdrawCurrency(null)}
-            onWithdrawn={onActivity}
-          />
-        );
-      })(      ) : null}
       {solReceiveOpen && solAddress ? (
         <SolanaReceiveSheet
           address={solAddress}

@@ -33,7 +33,7 @@ import {withTimeout} from '../lib/timeout';
  * error). A partial-failure settlement surfaces "Gas was burned but the transfer may not have landed"
  * so the user checks their balance rather than assuming success.
  */
-export function WithdrawSheet({identity, relayUrl, currency, display, family, tokenContract, balance, onClose, onWithdrawn}: {identity: Identity; relayUrl: string; currency: number; display: FamilyDisplay; family: MinterFamily; tokenContract: string | null; balance: string; onClose: () => void; onWithdrawn: () => void}) {
+export function WithdrawSheet({identity, relayUrl, currency, display, family, tokenContract, balance, inline, onClose, onWithdrawn}: {identity: Identity; relayUrl: string; currency: number; display: FamilyDisplay; family: MinterFamily; tokenContract: string | null; balance: string; inline?: boolean; onClose: () => void; onWithdrawn: () => void}) {
   const [address, setAddress] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
@@ -111,6 +111,101 @@ export function WithdrawSheet({identity, relayUrl, currency, display, family, to
     setTimeout(() => setCopied(null), 1500);
   }, [receipt]);
 
+  // The body content is identical whether rendered as an overlay sheet or inline in the Pay tab's
+  // "Send to address" sub-mode. `inline` skips the SheetOverlay/SafeAreaView/StatusBar/sheet-head
+  // chrome (the tab body already provides the surface); `onClose` is still wired to the inner
+  // "Done" button so a completed flow returns to the scan sub-mode.
+  const body = (
+    <>
+      {phase === 'done' && receipt ? (
+        <View style={S.centerAll}>
+          <View style={S.check}><Text style={S.checkMark}>✓</Text></View>
+          <Text testID="withdraw-status" style={S.paidText}>Withdrawn ✓</Text>
+          <Text style={S.paidSub}>{fmtAsset(receipt.amount, display.amountDecimals, display.nativeAsset)}</Text>
+          <Text style={S.dim2}>sent to</Text>
+          <Text testID="withdraw-destination" selectable={true} style={S.sheetAddr}>{receipt.btcAddress}</Text>
+          <Pressable testID="btn-copy-destination" style={S.primaryWide} onPress={copyDest} accessibilityRole="button" accessibilityLabel="Copy destination address" accessibilityState={{disabled: false}}>
+            <Text style={S.primaryText}>{copied === 'clipboard' ? 'Copied ✓' : copied === 'shared' ? 'Shared ✓' : 'Copy address'}</Text>
+          </Pressable>
+          <Text style={S.dim2}>Your balance updates automatically.</Text>
+          <Pressable testID="btn-withdraw-done" style={S.linkBtn} onPress={onClose} accessibilityRole="button" accessibilityLabel="Done" accessibilityState={{disabled: false}}><Text style={S.linkText}>Done</Text></Pressable>
+        </View>
+      ) : phase === 'submitting' ? (
+        <View style={S.centerAll}>
+          <ActivityIndicator color={C.brand} />
+          <Text style={S.dim2}>{`Withdrawing ${fmtAsset(raw, display.amountDecimals, display.nativeAsset)}…`}</Text>
+        </View>
+      ) : (
+        <>
+          <Text style={S.label}>{`Send your ${display.networkLabel} to a native ${display.nativeAsset} address`}</Text>
+          <Text style={S.dim2}>{`Available: ${fmtAsset(balance, display.amountDecimals, display.nativeAsset)} · min ${fmtAsset(String(display.withdrawMinRaw), display.amountDecimals, display.nativeAsset)}`}</Text>
+
+          <Text style={S.inputLabel}>{`${display.nativeAsset} address`}</Text>
+          {savedAddr && address.trim().length === 0 ? (
+            <Pressable testID="btn-withdraw-saved" style={S.savedAddrChip} onPress={() => setAddress(savedAddr)} accessibilityRole="button" accessibilityLabel="Use last saved address" accessibilityState={{disabled: false}}>
+              <Text style={S.savedAddrText}>{`Use last: ${savedAddr.length > 28 ? savedAddr.slice(0, 14) + '…' + savedAddr.slice(-12) : savedAddr}`}</Text>
+            </Pressable>
+          ) : null}
+          <TextInput
+            testID="withdraw-address-input"
+            style={S.withdrawAddrInput}
+            value={address}
+            onChangeText={setAddress}
+            placeholder={display.addressPlaceholder}
+            placeholderTextColor={C.sub2}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+
+          <Text style={S.inputLabel}>{`Amount (${display.nativeAsset})`}</Text>
+          <TextInput
+            testID="withdraw-amount-input"
+            style={S.withdrawAmtInput}
+            value={amountStr}
+            onChangeText={setAmountStr}
+            keyboardType="decimal-pad"
+            placeholder="0.00050000"
+            placeholderTextColor={C.sub2}
+          />
+
+          {belowMin ? <Text style={S.warnNote}>{`Below the ${fmtAsset(String(display.withdrawMinRaw), display.amountDecimals, display.nativeAsset)} minimum withdrawal.`}</Text> : null}
+          {overBalance ? <Text style={S.warnNote}>{`More than your available ${fmtAsset(balance, display.amountDecimals, display.nativeAsset)}.`}</Text> : null}
+          {badAddr ? <Text testID="withdraw-bad-addr" style={S.warnNote}>{`That doesn't look like a valid ${display.nativeAsset} address.`}</Text> : null}
+
+          {isErc20 ? (
+            <Text testID="withdraw-gas-note" style={S.warnNote}>You need ckETH for gas. Add ckETH first if you don't have any.</Text>
+          ) : null}
+
+          {(phase === 'form' || phase === 'error') && raw !== '0' ? (
+            <View testID="withdraw-review" style={S.reviewCard}>
+              <Text style={S.reviewLabel}>Review withdrawal</Text>
+              <Text testID="withdraw-review-amount" style={S.reviewAmount}>{`Withdraw ${fmtAsset(raw, display.amountDecimals, display.nativeAsset)}`}</Text>
+              <Text style={S.reviewTo}>{`to ${address.trim() || '—'}`}</Text>
+            </View>
+          ) : null}
+
+          {err ? <Text testID="withdraw-err" style={S.err}>{err}</Text> : null}
+
+          <Pressable
+            testID="btn-withdraw-confirm"
+            style={[S.primaryWide, !canReview && S.dim]}
+            disabled={!canReview}
+            onPress={confirm}
+            accessibilityRole="button"
+            accessibilityLabel="Confirm withdrawal"
+            accessibilityState={{disabled: !canReview}}>
+            <Text style={S.primaryText}>{raw !== '0' ? `Withdraw ${fmtAsset(raw, display.amountDecimals, display.nativeAsset)}` : 'Enter an amount'}</Text>
+          </Pressable>
+
+          {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
+        </>
+      )}
+    </>
+  );
+
+  if (inline) {
+    return <View style={S.sheetBody}>{body}</View>;
+  }
   return (
     <SheetOverlay>
       <SafeAreaView style={S.sheet}>
@@ -119,91 +214,8 @@ export function WithdrawSheet({identity, relayUrl, currency, display, family, to
           <Text style={S.sheetTitle}>{`Send ${display.networkLabel}`}</Text>
           <Pressable testID="btn-withdraw-close" style={S.sheetClose} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" accessibilityState={{disabled: false}}><Text style={S.sheetCloseX}>✕</Text></Pressable>
         </View>
-
         <ScrollView contentContainerStyle={S.sheetBody} keyboardShouldPersistTaps="handled">
-          {phase === 'done' && receipt ? (
-            <View style={S.centerAll}>
-              <View style={S.check}><Text style={S.checkMark}>✓</Text></View>
-              <Text testID="withdraw-status" style={S.paidText}>Withdrawn ✓</Text>
-              <Text style={S.paidSub}>{fmtAsset(receipt.amount, display.amountDecimals, display.nativeAsset)}</Text>
-              <Text style={S.dim2}>sent to</Text>
-              <Text testID="withdraw-destination" selectable={true} style={S.sheetAddr}>{receipt.btcAddress}</Text>
-              <Pressable testID="btn-copy-destination" style={S.primaryWide} onPress={copyDest} accessibilityRole="button" accessibilityLabel="Copy destination address" accessibilityState={{disabled: false}}>
-                <Text style={S.primaryText}>{copied === 'clipboard' ? 'Copied ✓' : copied === 'shared' ? 'Shared ✓' : 'Copy address'}</Text>
-              </Pressable>
-              <Text style={S.dim2}>Your balance updates automatically.</Text>
-              <Pressable testID="btn-withdraw-done" style={S.linkBtn} onPress={onClose} accessibilityRole="button" accessibilityLabel="Done" accessibilityState={{disabled: false}}><Text style={S.linkText}>Done</Text></Pressable>
-            </View>
-          ) : phase === 'submitting' ? (
-            <View style={S.centerAll}>
-              <ActivityIndicator color={C.brand} />
-              <Text style={S.dim2}>{`Withdrawing ${fmtAsset(raw, display.amountDecimals, display.nativeAsset)}…`}</Text>
-            </View>
-          ) : (
-            <>
-              <Text style={S.label}>{`Send your ${display.networkLabel} to a native ${display.nativeAsset} address`}</Text>
-              <Text style={S.dim2}>{`Available: ${fmtAsset(balance, display.amountDecimals, display.nativeAsset)} · min ${fmtAsset(String(display.withdrawMinRaw), display.amountDecimals, display.nativeAsset)}`}</Text>
-
-              <Text style={S.inputLabel}>{`${display.nativeAsset} address`}</Text>
-              {savedAddr && address.trim().length === 0 ? (
-                <Pressable testID="btn-withdraw-saved" style={S.savedAddrChip} onPress={() => setAddress(savedAddr)} accessibilityRole="button" accessibilityLabel="Use last saved address" accessibilityState={{disabled: false}}>
-                  <Text style={S.savedAddrText}>{`Use last: ${savedAddr.length > 28 ? savedAddr.slice(0, 14) + '…' + savedAddr.slice(-12) : savedAddr}`}</Text>
-                </Pressable>
-              ) : null}
-              <TextInput
-                testID="withdraw-address-input"
-                style={S.withdrawAddrInput}
-                value={address}
-                onChangeText={setAddress}
-                placeholder={display.addressPlaceholder}
-                placeholderTextColor={C.sub2}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-
-              <Text style={S.inputLabel}>{`Amount (${display.nativeAsset})`}</Text>
-              <TextInput
-                testID="withdraw-amount-input"
-                style={S.withdrawAmtInput}
-                value={amountStr}
-                onChangeText={setAmountStr}
-                keyboardType="decimal-pad"
-                placeholder="0.00050000"
-                placeholderTextColor={C.sub2}
-              />
-
-              {belowMin ? <Text style={S.warnNote}>{`Below the ${fmtAsset(String(display.withdrawMinRaw), display.amountDecimals, display.nativeAsset)} minimum withdrawal.`}</Text> : null}
-              {overBalance ? <Text style={S.warnNote}>{`More than your available ${fmtAsset(balance, display.amountDecimals, display.nativeAsset)}.`}</Text> : null}
-              {badAddr ? <Text testID="withdraw-bad-addr" style={S.warnNote}>{`That doesn't look like a valid ${display.nativeAsset} address.`}</Text> : null}
-
-              {isErc20 ? (
-                <Text testID="withdraw-gas-note" style={S.warnNote}>You need ckETH for gas. Add ckETH first if you don't have any.</Text>
-              ) : null}
-
-              {(phase === 'form' || phase === 'error') && raw !== '0' ? (
-                <View testID="withdraw-review" style={S.reviewCard}>
-                  <Text style={S.reviewLabel}>Review withdrawal</Text>
-                  <Text testID="withdraw-review-amount" style={S.reviewAmount}>{`Withdraw ${fmtAsset(raw, display.amountDecimals, display.nativeAsset)}`}</Text>
-                  <Text style={S.reviewTo}>{`to ${address.trim() || '—'}`}</Text>
-                </View>
-              ) : null}
-
-              {err ? <Text testID="withdraw-err" style={S.err}>{err}</Text> : null}
-
-              <Pressable
-                testID="btn-withdraw-confirm"
-                style={[S.primaryWide, !canReview && S.dim]}
-                disabled={!canReview}
-                onPress={confirm}
-                accessibilityRole="button"
-                accessibilityLabel="Confirm withdrawal"
-                accessibilityState={{disabled: !canReview}}>
-                <Text style={S.primaryText}>{raw !== '0' ? `Withdraw ${fmtAsset(raw, display.amountDecimals, display.nativeAsset)}` : 'Enter an amount'}</Text>
-              </Pressable>
-
-              {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
-            </>
-          )}
+          {body}
         </ScrollView>
       </SafeAreaView>
     </SheetOverlay>

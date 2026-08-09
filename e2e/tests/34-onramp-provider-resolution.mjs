@@ -23,9 +23,10 @@
 // handshake → encrypted session) needs a real wallet + network and is an outer-loop device gate —
 // explicitly scoped OUT (same class as the NFC radio hop + the ETH tx-mining hop).
 //
-// Selector contract: `balance` (header → Balances), `asset-add-ckusdc` (USDC row Add → deposit sheet),
-// `ckerc20-deposit`, `btn-connect-wallet`, `ckerc20-amount`, `ckerc20-status`, `btn-ckerc20-close`.
-import { setup, assert, assertIncludes, onboardWallet, openBalances } from '../harness/lib.mjs';
+// Selector contract: `balance` (header → Balances), `asset-ckusdc-select` (USDC row whole-row
+// select), `btn-receive-address` / `btn-receive-request` (Receive → "My address" / "Request payment"
+// toggles), `ckerc20-deposit`, `btn-connect-wallet`, `ckerc20-amount`, `ckerc20-status`.
+import { setup, assert, assertIncludes, onboardWallet, openBalances, selectCurrency, openReceiveAddress } from '../harness/lib.mjs';
 
 // A minimal recording EIP-1193 mock — only the methods `connect` calls (eth_requestAccounts +
 // eth_chainId). eth_sendTransaction is recorded (pushed to window.__DPAY_TEST_ETH_CALLS) so the flow
@@ -72,7 +73,8 @@ export async function run() {
 
     await onboardWallet(driver, 'e2e-resolve');
     await openBalances(driver);
-    await driver.click('asset-add-ckusdc', { timeoutMs: 5_000 });
+    await selectCurrency(driver, 'ckusdc');
+    await openReceiveAddress(driver);
     await driver.findByTestID('ckerc20-deposit', { timeoutMs: 8_000 });
 
     await driver.click('btn-connect-wallet', { timeoutMs: 5_000 });
@@ -83,17 +85,17 @@ export async function run() {
     console.log('[34-onramp-provider-resolution] ✓ web-mock wins: connect succeeded, amount input shown');
 
     // === (b) NO WALLET — WC unreachable on web (Platform gate) ========================
-    // Close the connected sheet, delete window.ethereum, reopen the deposit sheet, and click connect.
-    // WALLETCONNECT_PROJECT_ID is "configured" (driver.mjs injects __DPAY_TEST_WALLETCONNECT_PROJECT_ID
-    // before the bundle loads), BUT the resolver's WC branch is gated by `Platform.OS !== 'web'` —
-    // react-native-web sets Platform.OS='web' in this harness, so the WC branch is unreachable. The
-    // resolver falls through to null → the sheet surfaces the honest "No Ethereum wallet found" error.
-    await driver.click('btn-ckerc20-close', { timeoutMs: 5_000 });
+    // Flip back to "Request payment" (unmounts the inline CkErc20DepositSheet), delete window.ethereum,
+    // flip back to "My address" (re-mounts a FRESH sheet), and click connect. WALLETCONNECT_PROJECT_ID
+    // is "configured" (driver.mjs injects __DPAY_TEST_WALLETCONNECT_PROJECT_ID before the bundle loads),
+    // BUT the resolver's WC branch is gated by `Platform.OS !== 'web'` — react-native-web sets
+    // Platform.OS='web' in this harness, so the WC branch is unreachable. The resolver falls through
+    // to null → the sheet surfaces the honest "No Ethereum wallet found" error.
+    await driver.click('btn-receive-request', { timeoutMs: 5_000 });
     await driver.eval(() => { delete window.ethereum; });
     console.log('[34-onramp-provider-resolution] window.ethereum deleted (WC configured but Platform-gated out)');
 
-    await openBalances(driver);
-    await driver.click('asset-add-ckusdc', { timeoutMs: 5_000 });
+    await driver.click('btn-receive-address', { timeoutMs: 5_000 });
     await driver.findByTestID('ckerc20-deposit', { timeoutMs: 8_000 });
     await driver.click('btn-connect-wallet', { timeoutMs: 5_000 });
 
