@@ -69,6 +69,27 @@ export async function run() {
       `SOL receive address should be a valid base58 Solana address (32–44 chars), got "${address}"`);
     console.log(`[45-sol-receive] ✓ receive address: ${address}`);
 
+    // Back-toggle regression (Rules of Hooks): SolReceiveMode's early return for the 'address'
+    // sub-mode MUST sit below its useState/useEffect calls. Otherwise toggling back to 'request'
+    // renders more hooks than the previous (address) render and React silently resets the component
+    // state. We detect the reset by mutating a piece of state (the amount input), toggling away to
+    // 'address' and back to 'request', then asserting the amount SURVIVED. A hook-order violation
+    // re-initializes useState on the toggle-back, so the amount snaps back to its default '0.025'.
+    await driver.click('btn-receive-request', {timeoutMs: 5_000});
+    await driver.waitGone('sol-receive-address', {timeoutMs: 5_000});
+    await driver.findByTestID('receive-mode-toggle', {timeoutMs: 5_000});
+    const amountInput = await driver.findByTestID('sol-req-amount-input', {timeoutMs: 8_000});
+    await driver.type('sol-req-amount-input', '1.0', {timeoutMs: 5_000});
+    const beforeToggle = await driver.readInputValue('sol-req-amount-input');
+    assert(beforeToggle === '1.0', `amount should be 1.0 after typing, got "${beforeToggle}"`);
+    await driver.click('btn-receive-address', {timeoutMs: 5_000});
+    await driver.findByTestID('sol-receive-address', {timeoutMs: 5_000});
+    await driver.click('btn-receive-request', {timeoutMs: 5_000});
+    await driver.waitGone('sol-receive-address', {timeoutMs: 5_000});
+    const afterToggle = await driver.readInputValue('sol-req-amount-input', {timeoutMs: 8_000});
+    assert(afterToggle === '1.0', `amount should be preserved across the address detour (Rules of Hooks), got "${afterToggle}"`);
+    console.log('[45-sol-receive] ✓ request-form state preserved across address detour');
+
     // 5. The copy control is present inline (mirrors the ckBTC deposit sheet's copy affordance).
     await driver.findByTestID('btn-sol-receive-copy', {timeoutMs: 5_000});
     console.log('[45-sol-receive] ✓ copy control present (inline)');

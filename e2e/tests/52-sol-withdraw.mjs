@@ -54,6 +54,16 @@ export async function run() {
       };
     });
 
+    // Seed a "ready" durable-nonce state so SolPayMode's mount effect lands on the scan phase
+    // (phase='scan') instead of the first-use setup gate. This lets the back-toggle regression below
+    // assert phase preservation across a "Send to address" detour.
+    const pubHex = await driver.eval(() => JSON.parse(localStorage.getItem('dpay.identity.v1')).publicHex);
+    await driver.eval(
+      (k, v) => { localStorage.setItem(k, v); },
+      `dpay.sol.nonce.v1.${pubHex}`,
+      JSON.stringify({address: '11111111111111111111111111111111', value: '11111111111111111111111111111111', status: 'ready'}),
+    );
+
     // 1. Open Balances → select SOL as the active asset (whole-row select, uniform with IC). The
     //    stub funds the SOL balance to 5 SOL, but that no longer gates a per-row Send button — the
     //    send surface lives in the Pay tab now.
@@ -63,14 +73,30 @@ export async function run() {
     await driver.click('asset-sol-select', {timeoutMs: 5_000});
     await driver.waitGone('btn-balances-close', {timeoutMs: 5_000});
 
-    // 2. Switch to the Pay tab → tap "Send to address" → the SolanaWithdrawSheet body renders INLINE.
-    console.log('[52-sol-withdraw] switching to the Pay tab + opening "Send to address"…');
+    // 2. Switch to the Pay tab. SolPayMode mounts; its mount effect reads the seeded nonce →
+    //    phase='scan' (the scan screen, not the setup gate).
+    console.log('[52-sol-withdraw] switching to the Pay tab (scan phase via seeded nonce)…');
     await driver.click('tab-pay', {timeoutMs: 5_000});
     await driver.findByTestID('pay-mode-toggle', {timeoutMs: 5_000});
+    await driver.findByTestID('sol-pay-scan', {timeoutMs: 8_000});
+
+    // Back-toggle regression (Rules of Hooks): SolPayMode's early return for the 'send' sub-mode
+    // MUST sit below its useState/useEffect calls. Otherwise toggling send→scan silently resets the
+    // component state AND re-runs the mount effect. We detect that by DELETING the seeded nonce
+    // before the detour: a correct build preserves phase='scan' (the effect does not re-run, so the
+    // missing nonce is never re-read); a hook-order violation re-runs the effect, reads the now-empty
+    // key → null → snaps back to the setup gate (sol-pay-setup).
+    await driver.eval((k) => { localStorage.removeItem(k); }, `dpay.sol.nonce.v1.${pubHex}`);
     await driver.click('btn-pay-send', {timeoutMs: 5_000});
     await driver.findByTestID('sol-send-address-input', {timeoutMs: 5_000});
+    await driver.click('btn-pay-scan', {timeoutMs: 5_000});
+    await driver.waitGone('sol-send-address-input', {timeoutMs: 5_000});
+    await driver.findByTestID('sol-pay-scan', {timeoutMs: 8_000});
+    console.log('[52-sol-withdraw] ✓ scan phase preserved across the send detour (no hook-order reset)');
 
-    // 3. Enter the destination address + amount.
+    // 3. Re-open "Send to address" + enter the destination address + amount.
+    await driver.click('btn-pay-send', {timeoutMs: 5_000});
+    await driver.findByTestID('sol-send-address-input', {timeoutMs: 5_000});
     await driver.type('sol-send-address-input', DEST_ADDR, {timeoutMs: 4_000});
     await driver.type('sol-send-amount-input', SEND_AMOUNT, {timeoutMs: 4_000});
 
