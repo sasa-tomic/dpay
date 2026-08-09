@@ -52,15 +52,15 @@ export function SolReceiveMode({identity, online, nfcReady, solAddress, subMode,
   );
 
   // "My address" sub-mode: render the SOL deposit-address flow INLINE (the SolanaReceiveSheet body).
-  // The toggle above lets the user flip back to "Request payment". `inline` skips the overlay chrome.
-  // Mirrors the IC ReceiveMode "My address" sub-mode byte-for-byte.
+  // The toggle above lets the user flip back to "Request payment". The sheet is inline-only (no
+  // overlay chrome — the tab body provides the surface). Mirrors the IC ReceiveMode "My address"
+  // sub-mode byte-for-byte.
   if (subMode === 'address') {
     return (
       <View style={S.center}>
         {toggle}
         <SolanaReceiveSheet
           address={solAddress}
-          inline
           onClose={() => onSubModeChange('request')}
         />
       </View>

@@ -301,8 +301,9 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
   }
 
   // "Send to address" sub-mode: render the on-chain withdraw flow INLINE (the WithdrawSheet body) for
-  // the active asset's family. The toggle above lets the user flip back to "Scan to pay". `inline`
-  // skips the overlay chrome. Only reached when withdrawFamily is non-null (the toggle is gated).
+  // the active asset's family. The toggle above lets the user flip back to "Scan to pay". The sheet is
+  // inline-only (no overlay chrome — the tab body provides the surface). Only reached when
+  // withdrawFamily is non-null (the toggle is gated).
   if (subMode === 'send' && withdrawFamily && withdrawDisplay) {
     return (
       <View style={S.center}>
@@ -321,7 +322,6 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
           family={withdrawFamily}
           tokenContract={withdrawTokenContract}
           balance={withdrawBalance}
-          inline
           onClose={() => onSubModeChange('scan')}
           onWithdrawn={onSettled}
         />

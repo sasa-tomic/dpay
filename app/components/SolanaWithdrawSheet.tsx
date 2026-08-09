@@ -1,5 +1,5 @@
 import {useState} from 'react';
-import {View, Text, Pressable, TextInput, ScrollView, SafeAreaView, StatusBar, ActivityIndicator, Platform} from 'react-native';
+import {View, Text, Pressable, TextInput, ActivityIndicator, Platform} from 'react-native';
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {SOL_SEND_TIMEOUT_MS} from '../config/constants';
@@ -11,7 +11,6 @@ import {sendSol} from '../solana';
 import {friendlySolError} from '../solana/errors';
 import {copyToClipboard} from '../lib/clipboard';
 import {useEscapeToClose} from '../hooks/useHotkeys';
-import {SheetOverlay} from './SheetOverlay';
 import {withTimeout} from '../lib/timeout';
 
 /**
@@ -21,12 +20,11 @@ import {withTimeout} from '../lib/timeout';
  * confirmed send returns the transaction signature (shown + copyable); the balance poll refreshes
  * automatically.
  *
- * Rendered INLINE in the Pay tab's "Send to address" sub-mode (selected via the SOL pay-mode-toggle),
- * mirroring the IC WithdrawSheet dual-mode idiom: `inline` skips the SheetOverlay/SafeAreaView/
- * StatusBar/sheet-head chrome (the tab body already provides the surface) and the close button —
- * `onClose` is still wired via the tab's toggle (the inline context has no overlay ✕).
+ * Rendered inline in the Pay tab's "Send to address" sub-mode (selected via the SOL pay-mode-toggle),
+ * mirroring the IC WithdrawSheet. The tab body provides the scroll surface + chrome; `onClose` is
+ * wired via the tab's toggle (no overlay ✕).
  */
-export function SolanaWithdrawSheet({identity, balance, inline, onSent, onClose}: {identity: Identity; balance: string; inline?: boolean; onSent: () => void; onClose: () => void}) {
+export function SolanaWithdrawSheet({identity, balance, onSent, onClose}: {identity: Identity; balance: string; onSent: () => void; onClose: () => void}) {
   const [address, setAddress] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
@@ -153,21 +151,5 @@ export function SolanaWithdrawSheet({identity, balance, inline, onSent, onClose}
     </>
   );
 
-  if (inline) {
-    return <View style={S.sheetBody}>{body}</View>;
-  }
-  return (
-    <SheetOverlay>
-      <SafeAreaView style={S.sheet}>
-        <StatusBar barStyle="light-content" backgroundColor={C.bg} />
-        <View style={S.sheetHead}>
-          <Text style={S.sheetTitle}>Send SOL</Text>
-          <Pressable testID="btn-sol-send-close" accessibilityRole="button" accessibilityLabel="Close send SOL sheet" style={S.sheetClose} onPress={onClose}><Text style={S.sheetCloseX}>✕</Text></Pressable>
-        </View>
-        <ScrollView contentContainerStyle={S.sheetBody} keyboardShouldPersistTaps="handled">
-          {body}
-        </ScrollView>
-      </SafeAreaView>
-    </SheetOverlay>
-  );
+  return <View style={S.sheetBody}>{body}</View>;
 }

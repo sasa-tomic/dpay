@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useState} from 'react';
-import {View, Text, Pressable, TextInput, ScrollView, SafeAreaView, StatusBar, ActivityIndicator, Platform} from 'react-native';
+import {View, Text, Pressable, TextInput, ActivityIndicator, Platform} from 'react-native';
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {WITHDRAW_TIMEOUT_MS, WITHDRAW_EXPIRY_WINDOW} from '../config/constants';
@@ -12,7 +12,6 @@ import {withdrawFunds} from '../services/relay';
 import {loadSavedWithdrawAddr, saveWithdrawAddr} from '../services/withdraw';
 import {DpayCore} from '../services/native';
 import {useEscapeToClose} from '../hooks/useHotkeys';
-import {SheetOverlay} from './SheetOverlay';
 import {copyToClipboard} from '../lib/clipboard';
 import {withTimeout} from '../lib/timeout';
 
@@ -33,7 +32,7 @@ import {withTimeout} from '../lib/timeout';
  * error). A partial-failure settlement surfaces "Gas was burned but the transfer may not have landed"
  * so the user checks their balance rather than assuming success.
  */
-export function WithdrawSheet({identity, relayUrl, currency, display, family, tokenContract, balance, inline, onClose, onWithdrawn}: {identity: Identity; relayUrl: string; currency: number; display: FamilyDisplay; family: MinterFamily; tokenContract: string | null; balance: string; inline?: boolean; onClose: () => void; onWithdrawn: () => void}) {
+export function WithdrawSheet({identity, relayUrl, currency, display, family, tokenContract, balance, onClose, onWithdrawn}: {identity: Identity; relayUrl: string; currency: number; display: FamilyDisplay; family: MinterFamily; tokenContract: string | null; balance: string; onClose: () => void; onWithdrawn: () => void}) {
   const [address, setAddress] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
@@ -111,9 +110,8 @@ export function WithdrawSheet({identity, relayUrl, currency, display, family, to
     setTimeout(() => setCopied(null), 1500);
   }, [receipt]);
 
-  // The body content is identical whether rendered as an overlay sheet or inline in the Pay tab's
-  // "Send to address" sub-mode. `inline` skips the SheetOverlay/SafeAreaView/StatusBar/sheet-head
-  // chrome (the tab body already provides the surface); `onClose` is still wired to the inner
+  // The body content is rendered inline in the Pay tab's "Send to address" sub-mode (the tab body
+  // already provides the scroll surface + the overlay chrome). `onClose` is wired to the inner
   // "Done" button so a completed flow returns to the scan sub-mode.
   const body = (
     <>
@@ -203,21 +201,5 @@ export function WithdrawSheet({identity, relayUrl, currency, display, family, to
     </>
   );
 
-  if (inline) {
-    return <View style={S.sheetBody}>{body}</View>;
-  }
-  return (
-    <SheetOverlay>
-      <SafeAreaView style={S.sheet}>
-        <StatusBar barStyle="light-content" backgroundColor={C.bg} />
-        <View style={S.sheetHead}>
-          <Text style={S.sheetTitle}>{`Send ${display.networkLabel}`}</Text>
-          <Pressable testID="btn-withdraw-close" style={S.sheetClose} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" accessibilityState={{disabled: false}}><Text style={S.sheetCloseX}>✕</Text></Pressable>
-        </View>
-        <ScrollView contentContainerStyle={S.sheetBody} keyboardShouldPersistTaps="handled">
-          {body}
-        </ScrollView>
-      </SafeAreaView>
-    </SheetOverlay>
-  );
+  return <View style={S.sheetBody}>{body}</View>;
 }

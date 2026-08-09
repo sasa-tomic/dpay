@@ -51,8 +51,9 @@ export function SolPayMode({identity, online, nfcReady, solBalance, onSent, subM
   );
 
   // "Send to address" sub-mode: render the on-chain SOL send flow INLINE (the SolanaWithdrawSheet
-  // body). The toggle above lets the user flip back to "Scan to pay". `inline` skips the overlay
-  // chrome. Mirrors the IC PayMode "Send to address" sub-mode byte-for-byte.
+  // body). The toggle above lets the user flip back to "Scan to pay". The sheet is inline-only (no
+  // overlay chrome — the tab body provides the surface). Mirrors the IC PayMode "Send to address"
+  // sub-mode byte-for-byte.
   if (subMode === 'send') {
     return (
       <View style={S.center}>
@@ -60,7 +61,6 @@ export function SolPayMode({identity, online, nfcReady, solBalance, onSent, subM
         <SolanaWithdrawSheet
           identity={identity}
           balance={solBalance}
-          inline
           onSent={onSent}
           onClose={() => onSubModeChange('scan')}
         />

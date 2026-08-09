@@ -262,7 +262,8 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
   // "My address" sub-mode: render the on-chain deposit-address flow INLINE for the active IC
   // asset's family (mirrors Wallet's old family routing). CkBtcUtxo → DepositSheet body;
   // CkEthErc20 → CkErc20DepositSheet body (native-ETH vs ERC-20 via depositNativeEth). The toggle
-  // above lets the user flip back to "Request payment". `inline` skips the overlay chrome.
+  // above lets the user flip back to "Request payment". The sheets are inline-only (no overlay chrome
+  // — the tab body provides the surface).
   if (subMode === 'address' && depositFamily && depositDisplay) {
     return (
       <View style={S.center}>
@@ -281,7 +282,6 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
             display={depositDisplay}
             chainId={depositChainId}
             nativeEth={depositNativeEth}
-            inline
             onClose={() => onSubModeChange('request')}
           />
         ) : (
@@ -290,7 +290,6 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
             relayUrl={relayUrl}
             currency={depositCurrency}
             display={depositDisplay}
-            inline
             onClose={() => onSubModeChange('request')}
           />
         )}

@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
-import {View, Text, Pressable, TextInput, ScrollView, SafeAreaView, StatusBar, ActivityIndicator, Platform} from 'react-native';
+import {View, Text, Pressable, TextInput, ActivityIndicator, Platform} from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import {C} from '../config/palette';
 import {S} from '../styles';
@@ -14,7 +14,6 @@ import {resolveOnrampProvider, connectWallet, getChainId, sendTransaction, waitF
 import {loadDeposit, saveDeposit, clearDeposit} from '../services/ckerc20Persist';
 import {withTimeout} from '../lib/timeout';
 import {useEscapeToClose} from '../hooks/useHotkeys';
-import {SheetOverlay} from './SheetOverlay';
 
 // ckERC20 (ckUSDC) / native ckETH direct onramp — a wallet-connect flow. The user connects their OWN
 // Ethereum wallet (MetaMask/Rabby; window.ethereum on web), dpay BUILDS the transaction(s), and the
@@ -27,14 +26,13 @@ import {SheetOverlay} from './SheetOverlay';
 // by `nativeEth` (descriptor.token_contract == null):
 //  - ERC-20 (USDC/USDT/DAI): TWO txs — approve(helper, amount) on the ERC-20, then depositErc20(...).
 //  - native ETH: ONE payable tx — depositEth(principal, subaccount) carrying the ETH `value` (Wei).
-export function CkErc20DepositSheet({identity, relayUrl, currency, display, chainId, nativeEth, inline, onClose}: {
+export function CkErc20DepositSheet({identity, relayUrl, currency, display, chainId, nativeEth, onClose}: {
   identity: Identity;
   relayUrl: string;
   currency: number;
   display: FamilyDisplay;
   chainId: number | null; // MC8 U3: the catalog's per-currency EVM chain id (ckUSDC = 1 = Ethereum mainnet)
   nativeEth: boolean; // true ⇒ native-ETH single-tx deposit (depositEth); false ⇒ ERC-20 two-tx (approve + depositErc20)
-  inline?: boolean;
   onClose: () => void;
 }) {
   // phase: 'connect' (no wallet yet) → 'enter' (wallet connected, enter amount) → 'sending' (txs
@@ -318,8 +316,8 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
     return () => { alive = false; clearInterval(id); };
   }, [phase, relayUrl, identity.publicHex, currency, startBal]);
 
-  // The body content is identical whether rendered as an overlay sheet or inline in the Receive tab's
-  // "My address" sub-mode. `inline` skips the SheetOverlay/SafeAreaView/StatusBar/sheet-head chrome.
+  // The body content is rendered inline in the Receive tab's "My address" sub-mode (the tab body
+  // already provides the scroll surface + the overlay chrome).
   const body = (
     <>
       {/* Wrong-network warning — unmissable, above the flow. */}
@@ -443,23 +441,5 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
     </>
   );
 
-  if (inline) {
-    return <View style={S.sheetCenter}>{body}</View>;
-  }
-  return (
-    <SheetOverlay>
-      <SafeAreaView style={S.sheet}>
-        <StatusBar barStyle="light-content" backgroundColor={C.bg} />
-        <View style={S.sheetHead}>
-          {/* H1: title is the ASSET (USDC), not the network (Ethereum) — networkLabel stays only in the
-              "Send only USDC on Ethereum" instruction below. */}
-          <Text style={S.sheetTitle}>{`Add ${display.nativeAsset}`}</Text>
-          <Pressable testID="btn-ckerc20-close" accessibilityRole="button" accessibilityLabel="Close deposit sheet" style={S.sheetClose} onPress={onClose}><Text style={S.sheetCloseX}>✕</Text></Pressable>
-        </View>
-        <ScrollView contentContainerStyle={S.sheetCenter} keyboardShouldPersistTaps="handled">
-          {body}
-        </ScrollView>
-      </SafeAreaView>
-    </SheetOverlay>
-  );
+  return <View style={S.sheetCenter}>{body}</View>;
 }
