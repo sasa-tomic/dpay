@@ -15,6 +15,8 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<Identity | null>(null);
+  const [mode, setMode] = useState<'create' | 'restore'>('create');
+  const [seed, setSeed] = useState('');
 
   async function create() {
     const name = username.trim() || 'me';
@@ -32,6 +34,25 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
         setPendingId(id);
         setBusy(false);
       }
+    } catch (e: unknown) { setErr(e instanceof Error ? e.message : String(e)); setBusy(false); }
+  }
+
+  // Restore a wallet from the 64-hex recovery seed (the value Backup reveals). Mirrors `create` but
+  // derives the keypair from the entered seed via `keypairFromSecret` instead of generating a random
+  // one, and skips the faucet — a restored wallet already has its on-chain funds. One seed recovers
+  // BOTH rails: the IC Ed25519 key (this keypair) AND the Solana key (SLIP-10 derivation, see
+  // app/solana/identity.ts).
+  async function restore() {
+    const s = seed.trim().toLowerCase();
+    setErr(null);
+    if (!/^[0-9a-f]{64}$/.test(s)) { setErr('Recovery seed must be 64 hex characters (0-9, a-f).'); return; }
+    const name = username.trim() || 'me';
+    setBusy(true);
+    try {
+      const kp = await DpayCore.keypairFromSecret(s);
+      const id: Identity = {secretHex: kp.secretHex, publicHex: kp.publicHex, username: name};
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(id));
+      onCreated(id);
     } catch (e: unknown) { setErr(e instanceof Error ? e.message : String(e)); setBusy(false); }
   }
 
@@ -60,6 +81,23 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
                 <Text style={S.primaryText}>Continue</Text>
               </Pressable>
             </>
+          ) : mode === 'restore' ? (
+            <>
+              <Text style={S.label}>Recovery seed</Text>
+              <TextInput testID="restore-seed-input" style={S.seedInput} value={seed} onChangeText={setSeed} placeholder="64 hex characters" placeholderTextColor={C.sub2} autoCapitalize="none" autoCorrect={false} multiline accessibilityLabel="Recovery seed" accessibilityHint="The 64-hex seed shown by Backup that recovers your wallet" />
+              <Text style={S.dim2}>One seed recovers both your IC and Solana funds.</Text>
+              <Text style={S.label}>Choose a username</Text>
+              <TextInput testID="username-input" style={S.usernameInput} value={username} onChangeText={setUsername} placeholder="e.g. Alice" placeholderTextColor={C.sub2} autoCapitalize="words" autoCorrect={false} accessibilityLabel="Username" accessibilityHint="The name others see when you request or receive a payment" />
+              {err ? <Text style={S.err}>{err}</Text> : null}
+              <Pressable testID="btn-restore-confirm" style={[S.primary, (busy || seed.trim() === '') && S.dim]} disabled={busy || seed.trim() === ''} onPress={restore}
+                accessibilityRole="button" accessibilityLabel="Restore wallet" accessibilityHint="Recover your wallet from the recovery seed" accessibilityState={{disabled: busy || seed.trim() === ''}}>
+                <Text style={S.primaryText}>{busy ? 'Restoring…' : 'Restore wallet'}</Text>
+              </Pressable>
+              <Pressable testID="btn-restore-cancel" style={S.linkBtn} onPress={() => { setMode('create'); setSeed(''); setErr(null); }}
+                accessibilityRole="button" accessibilityLabel="Cancel restore" accessibilityHint="Go back to creating a new wallet">
+                <Text style={S.linkTextMuted}>Cancel</Text>
+              </Pressable>
+            </>
           ) : (
             <>
               <Text style={S.label}>Choose a username</Text>
@@ -71,6 +109,10 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
               </Pressable>
               <Text style={S.dim2}>Creates your wallet and adds ∂100 in demo funds to get started.</Text>
               <Text style={S.dpayGlyphNote}><Text style={S.dpayGlyph}>∂</Text> is the demo-dollar symbol — play money, ∂1 = $1.</Text>
+              <Pressable testID="btn-restore" style={S.linkBtn} onPress={() => { setMode('restore'); setErr(null); }}
+                accessibilityRole="button" accessibilityLabel="Restore wallet" accessibilityHint="Recover a wallet from your 64-hex recovery seed">
+                <Text style={S.linkTextMuted}>Restore wallet</Text>
+              </Pressable>
             </>
           )}
         </ScrollView>

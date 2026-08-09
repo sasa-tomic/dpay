@@ -28,6 +28,9 @@ export const S = StyleSheet.create({
   dpayGlyph: {color: C.brand, fontWeight: '800'},
   dpayGlyphNote: {fontSize: 13, color: C.sub, marginTop: 4, textAlign: 'center', paddingHorizontal: 12, lineHeight: 18},
   usernameInput: {backgroundColor: C.field, borderRadius: 14, height: 56, paddingHorizontal: 18, fontSize: 20, color: C.ink, marginBottom: 8, borderWidth: 1, borderColor: C.line2, alignSelf: 'stretch'},
+  // Restore-mode recovery-seed input (64 hex chars). Like usernameInput but monospace + multiline so
+  // the long seed wraps readably; minHeight instead of fixed height so it grows with content.
+  seedInput: {backgroundColor: C.field, borderRadius: 14, minHeight: 56, paddingHorizontal: 18, paddingVertical: 14, fontSize: 16, fontFamily: 'monospace', color: C.ink, marginBottom: 8, borderWidth: 1, borderColor: C.line2, alignSelf: 'stretch'},
   // Header — tightened vertical rhythm (was paddingTop:20/paddingBottom:12) and balanced horizontal
   // padding (was an asymmetric 22/10). Reclaims ~9px vertical and reads less top-heavy.
   header: {paddingTop: 14, paddingLeft: 16, paddingRight: 14, paddingBottom: 9, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', borderBottomWidth: 1, borderBottomColor: C.line},

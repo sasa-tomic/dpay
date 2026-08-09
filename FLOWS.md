@@ -1,6 +1,6 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **58 flows.**
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **59 flows.**
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay (FakeLedger, offline). No UI stubs. The only shimmed I/O boundary is
 > the camera scan (sanctioned smallest-boundary seam) and the NFC radio (physical-device gate).
@@ -17,7 +17,7 @@
 Flows grouped by user journey; within each table, every row lists what the flow **verifies** and
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`).
 
-wire (1) · onboard (5) · pay (18) · offline (5) · deposit (8) · withdraw (6) · nfc (3) · system (9) · tour (3)
+wire (1) · onboard (6) · pay (18) · offline (5) · deposit (8) · withdraw (6) · nfc (3) · system (9) · tour (3)
 
 ---
 
@@ -36,6 +36,7 @@ wire (1) · onboard (5) · pay (18) · offline (5) · deposit (8) · withdraw (6
 | 23 | username-default | New user leaves name empty → creates → defaults to 'me', onboards + funds. | onboard, default-username |
 | 37 | onboard-no-faucet | Onboard against a dead relay → faucet failure surfaces an honest "Continue" prompt (not a silent $0 transition), wallet created with $0 (∂100 never shown), honest "~ approx." offline indicator, faucet fails with ECONNREFUSED. | onboard, faucet-failure, offline, dead-relay, right-reason, zero-balance |
 | 54 | testnet-toggle | Balances testnet toggle reveals + hides a "BTC testnet" row (catalog-driven testnet detection). | testnet, catalog, toggle, balances |
+| 58 | restore-wallet | A wallet can be restored from the 64-hex recovery seed (no faucet; secretHex matches). | restore-seed, keypair-from-secret, both-rails-recovery |
 
 ### Payments (the core offline-pay flow)
 
