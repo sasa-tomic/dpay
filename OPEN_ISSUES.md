@@ -33,12 +33,15 @@ typography).
   defaults false) — kept as thin presentational components rather than deleted (minimizes risk).
 - **DEMO:** no on-chain deposit/withdraw family → the within-tab toggle is HIDDEN for DEMO (the
   request/scan flow stands alone). DEMO's faucet stays in Balances (`btn-topup`).
-- **SOL: kept its Balances entry** (`onSolReceive`/`onSolSend`) as a DELIBERATE, TEMPORARY exception.
-  The plan's e2e impact table did NOT list SOL flows (45/52) for re-routing and stated "SOL routing
-  unchanged", so dropping SOL's buttons would have broken those flows without a re-route target. IC
-  assets got the clean declutter the founder asked for; SOL was deferred to keep this change safe.
-  **This is tracked as a MUST follow-up — see "SOL parity in tab IA" below.** SOL MUST be unified into
-  the same Pay/Receive tab toggles (re-route 45/52), not left as a Balances exception.
+- **SOL:~~kept its Balances entry~~** ~~(`onSolReceive`/`onSolSend`) as a DELIBERATE, TEMPORARY exception.~~
+  ~~The plan's e2e impact table did NOT list SOL flows (45/52) for re-routing and stated "SOL routing~~
+  ~~unchanged", so dropping SOL's buttons would have broken those flows without a re-route target. IC~~
+  ~~assets got the clean declutter the founder asked for; SOL was deferred to keep this change safe.~~
+  ~~**This is tracked as a MUST follow-up — see "SOL parity in tab IA" below.** SOL MUST be unified into~~
+  ~~the same Pay/Receive tab toggles (re-route 45/52), not left as a Balances exception.~~
+  ✅ **DONE 2026-08-09** — SOL unified into the Pay/Receive tab toggles (flows 45/52 re-routed); see the
+  struck-through "SOL parity in tab IA" follow-up below. SOL is now uniform with IC (whole-row select in
+  Balances; deposit/send inline in the tab sub-modes).
 - **Deeplink migration:** `?screen=deposit` + the auto-open-ckERC20-on-restart effect now set
   `mode='receive'` + `receiveSubMode='address'` + select the currency (was: open an overlay sheet).
   The within-tab sub-mode state is OWNED by Wallet (not the mode components) so deeplinks can land the
@@ -65,39 +68,50 @@ with no duplicate symbols and no testnet leakage.
 
 ---
 
-## FOLLOW-UP (MUST, founder-directed 2026-08-09): SOL parity in tab IA — all currencies uniform
+## ~~FOLLOW-UP (MUST, founder-directed 2026-08-09): SOL parity in tab IA — all currencies uniform~~ ✅ DONE 2026-08-09
 
-> **Hard rule (added to `CLAUDE.md` "Current wallet UX direction", 2026-08-09): every currency MUST be
-> handled through the SAME UI surfaces and flows — now and for the future.** A per-currency/per-rail
-> special case in the wallet IA is a bug, not an exception. This follow-up closes the one outstanding
-> divergence from that rule.
+> ~~**Hard rule (added to `CLAUDE.md` "Current wallet UX direction", 2026-08-09): every currency MUST be~~
+> ~~handled through the SAME UI surfaces and flows — now and for the future.**~~ A per-currency/per-rail
+> special case in the wallet IA is a bug, not an exception. ~~This follow-up closes the one outstanding~~
+> ~~divergence from that rule.~~ ✅ **Closed 2026-08-09** — the rule now holds with zero exceptions.
 
-The 2026-08-09 IA refactor (DONE above) moved IC assets' on-chain deposit/withdraw into the Pay/Receive
-tab toggles, but **SOL was left as a deliberate, temporary exception** — SOL's Balances row still carries
-`btn-sol-receive`/`btn-sol-send` (the `onSolReceive`/`onSolSend` props in `BalancesSheet.tsx`). This
-violates the all-currencies-uniform rule and MUST be closed. Pure `app/` + `e2e/` (no core/wire/canister/
-relay), mirroring the main refactor's pattern exactly.
+~~The 2026-08-09 IA refactor (DONE above) moved IC assets' on-chain deposit/withdraw into the Pay/Receive~~
+~~tab toggles, but **SOL was left as a deliberate, temporary exception** — SOL's Balances row still carries~~
+~~`btn-sol-receive`/`btn-sol-send` (the `onSolReceive`/`onSolSend` props in `BalancesSheet.tsx`). This~~
+~~violates the all-currencies-uniform rule and MUST be closed. Pure `app/` + `e2e/` (no core/wire/canister/~~
+~~relay), mirroring the main refactor's pattern exactly.~~
 
-**Scope:**
-1. **`BalancesSheet.tsx` SOL row** — drop `btn-sol-receive`/`btn-sol-send` + the `onSolReceive`/`onSolSend`
-   props; SOL row becomes a pure whole-row select (the existing `asset-sol-select` + `onSelectSol`), byte-
-   parallel to the IC rows. Update `Wallet.tsx` to stop passing the dropped props.
-2. **Receive tab when SOL is active** — "My address" sub-mode renders the SOL deposit address inline
-   (`SolReceiveMode` body, already inline-capable). Build-time decision: whether the `[ Request payment |
-   My address ]` toggle renders for SOL (SOL has no IC-relay request flow) or SOL's Receive is just the
-   address — but the entry-point shape stays uniform from the user's perspective (same tab, same "My
-   address" affordance as IC).
-3. **Pay tab when SOL is active** — "Send to address" sub-mode renders `SolanaWithdrawSheet` body inline
-   (mirror the IC `WithdrawSheet inline` pattern from the main refactor).
+**✅ Resolution (2026-08-09, plan `2026-08-09-sol-tab-ia-parity.md`, commits `32b8d48` + `1f50d3d`):**
+SOL is now byte-parallel to IC. `BalancesSheet`'s SOL row is a pure whole-row select (the `onSolReceive`/
+`onSolSend` props + `btn-sol-receive`/`btn-sol-send` are gone). `SolReceiveMode` renders a
+`[ Request payment | My address ]` `receive-mode-toggle`; "My address" renders the `SolanaReceiveSheet`
+body inline. `SolPayMode` renders a `[ Scan to pay | Send to address ]` `pay-mode-toggle`; "Send to
+address" renders the `SolanaWithdrawSheet` body inline. All five deposit/withdraw sheets are now
+inline-only (the overlay branches were dead code after both refactors and were removed). Flows 45/52
+re-routed to the tab sub-mode path; a11y census (flow 41) updated; balances visual baseline re-seeded.
+`just verify` 59/59 green. The all-currencies-uniform hard rule now holds with no exceptions.
 
-**e2e to re-route (2 flows):**
-- **Flow 45 (sol-receive):** `Balances → btn-sol-receive → sheet` → `Balances → asset-sol-select → Receive → "My address"`.
-- **Flow 52 (sol-withdraw):** `Balances → btn-sol-send → SolanaWithdrawSheet` → `Balances → asset-sol-select → Pay → "Send to address"`.
-- **Flows 46/47/51/53 are UNAFFECTED** — they reach `SolPayMode` via `asset-sol-select` (the scan/pay path), not the Balances buttons.
+<details><summary>Original scope + e2e re-route plan (historical, struck through)</summary>
 
-**Verify:** `just verify` green; a11y census (flow 41) updated for the removed `btn-sol-receive`/`btn-sol-send`.
-When done: strike this section, strike the inline SOL exception note in the DONE work-order above, and
-update `CODEBASE_ANALYSIS.md` if the SOL exception is noted there.
+~~**Scope:**~~
+~~1. **`BalancesSheet.tsx` SOL row** — drop `btn-sol-receive`/`btn-sol-send` + the `onSolReceive`/`onSolSend`~~
+~~   props; SOL row becomes a pure whole-row select (the existing `asset-sol-select` + `onSelectSol`), byte-~~
+~~   parallel to the IC rows. Update `Wallet.tsx` to stop passing the dropped props.~~
+~~2. **Receive tab when SOL is active** — "My address" sub-mode renders the SOL deposit address inline~~
+~~   (`SolReceiveMode` body, already inline-capable). Build-time decision: whether the `[ Request payment |~~
+~~   My address ]` toggle renders for SOL (SOL has no IC-relay request flow) or SOL's Receive is just the~~
+~~   address — but the entry-point shape stays uniform from the user's perspective (same tab, same "My~~
+~~   address" affordance as IC).~~
+~~3. **Pay tab when SOL is active** — "Send to address" sub-mode renders `SolanaWithdrawSheet` body inline~~
+~~   (mirror the IC `WithdrawSheet inline` pattern from the main refactor).~~
+
+~~**e2e to re-route (2 flows):**~~
+~- ~~**Flow 45 (sol-receive):** `Balances → btn-sol-receive → sheet` → `Balances → asset-sol-select → Receive → "My address"`.~~
+~- ~~**Flow 52 (sol-withdraw):** `Balances → btn-sol-send → SolanaWithdrawSheet` → `Balances → asset-sol-select → Pay → "Send to address"`.~~
+~- ~~**Flows 46/47/51/53 are UNAFFECTED** — they reach `SolPayMode` via `asset-sol-select` (the scan/pay path), not the Balances buttons.~~
+
+~~**Verify:** `just verify` green; a11y census (flow 41) updated for the removed `btn-sol-receive`/`btn-sol-send`.~~
+</details>
 
 ---
 

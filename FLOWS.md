@@ -82,7 +82,7 @@ wire (1) · onboard (6) · pay (18) · offline (5) · deposit (8) · withdraw (6
 | 22 | deposit-error | Relay unreachable when opening the deposit sheet → honest error ('Check connection'), no spinner-forever. | deposit-error, offline, graceful |
 | 33 | ckerc20-persist | ckERC20 deposit watching PERSISTS across restart: reload rehydrates watching (no reconnect), resumed notice shown. | ckerc20, persist, restart, watching-resume |
 | 34 | onramp-provider-resolution | Onramp resolver: window.ethereum wins when present; WC branch unreachable on web even when 'configured' → honest null. | onramp-resolver, eip-1193, walletconnect-gate |
-| 45 | sol-receive | Native SOL rail: device-derived SOL card in Balances + receive address QR (offline, no devnet). | sol-card, sol-derive, sol-receive, qr, address |
+| 45 | sol-receive | Native SOL rail: device-derived SOL card in Balances + receive address QR via the Receive tab "My address" sub-mode (offline, no devnet). | sol-card, sol-derive, sol-receive, qr, address, sol-tab-ia |
 
 ### Withdrawal (ckBTC cash-out)
 
@@ -92,7 +92,7 @@ wire (1) · onboard (6) · pay (18) · offline (5) · deposit (8) · withdraw (6
 | 18 | withdraw-errors | Withdraw errors: below-min / over-balance / bad-addr UI guards (confirm disabled) + relay 422 (bad-sig/insufficient). | withdraw-errors, below-min, over-balance, bad-sig, bad-addr |
 | 44 | cketh-withdraw | Withdraw native ckETH: Cash-out button renders for a CkEthErc20 + token_contract=null asset; enter 0x addr + ETH amount → sign on-device at 18-dec Wei → settle; balance debits at both the ledger AND the UI (family-dispatch UI path). | native-eth-withdraw, cketh, family-dispatch, withdraw, sign, settle, balance-delta, ui-balance-delta |
 | 48 | ckusdc-withdraw | ckUSDC Cash-out: the flipped cashable gate renders Cash-out for a ckERC20 token; enter 0x addr + USDC amount → gas-dependency note renders → sign on-device at 6-dec → settle; balance debits at both the ledger AND the UI. | ckerc20-offramp, cashable-gate, ckusdc, withdraw, sign, settle, balance-delta, ui-balance-delta, gas-note |
-| 52 | sol-withdraw | SOL withdraw: funded SOL row Send → enter addr+amount → sign+broadcast (stub) → Sent ✓. | sol-withdraw, sol-send, sol-balance-gate, sign |
+| 52 | sol-withdraw | SOL withdraw: select SOL → Pay tab "Send to address" → enter addr+amount → sign+broadcast (stub) → Sent ✓. | sol-withdraw, sol-send, sol-tab-ia, sign |
 | 56 | withdraw-saved-addr | A successful withdraw persists the destination (AsyncStorage); reopening the sheet shows a "Use last" chip that pre-fills the address input. | saved-address, btn-withdraw-saved, withdraw-persist |
 
 ### NFC (tap-to-pay)
