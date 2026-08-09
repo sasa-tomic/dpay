@@ -92,6 +92,24 @@ details.
 
 ---
 
+## Session summary (2026-08-09): ETH + SOL mainnet operational check — family-blind deposit bug found + fixed
+
+> Direct prod-relay verification (`https://dpay.kalaj.org`) + a TDDRED→GREEN canister fix. `just verify` green (core 45, canister **86** +2 new, relay 53/55, e2e 55/55, typecheck, bridge-parity 28). 1 commit (`3e60a56`). Plan: `2026-08-09-eth-sol-mainnet-check.md`.
+
+**ETH mainnet verdict (per endpoint, curled against prod facade `ssqti`):**
+- **Deposit UX (in): OPERATIONAL** — the app routes `CkEthErc20` family to `CkErc20DepositSheet` (`Wallet.tsx:422-424`) → `GET /onramp/ckerc20?currency=6` → 200 (helper `0x1890…`, `kind:"native_eth"`). The WalletConnect onramp path was never affected.
+- **Balance: OPERATIONAL** — `GET /balance?currency=6` → 200 `{"balance":"0"}` in ~0.2s (ledger query only, no minter call).
+- **Withdraw: PARTIAL** — native-ETH `withdraw_eth` is deployed (commit `9fc4a9f`); ckERC20 `withdraw_erc20` needs a prod WASM upgrade (founder op, tracked below).
+- **Deposit metadata endpoints (the bug):** `GET /deposit/info?currency=6` + `GET /deposit/address/…?currency=6` → **503** for every `CkEthErc20` currency (ckETH=6, ckUSDC=2, ckSepoliaETH=5). App-unaffected (never called for ETH) but prod-API landmines + log noise.
+
+**🚨 Root cause — three family-blind deposit methods (`crates/dpay-canister/src/lib.rs`):** `deposit_address` (1368), `deposit_info` (1468), `refresh_deposit` (1390) all unconditionally called BTC-minter-only methods (`get_btc_address` / BTC-shaped `get_minter_info` / UTXO `update_balance`) regardless of `minter_family`. The ckETH minter has no `get_btc_address` and returns a different `MinterInfo` shape → `IC0536 method not found` / `CandidDecodeFailed` on prod. The `withdraw` method (1576-1615) ALREADY did correct family dispatch; the three deposit proxies were never updated to match when `CkEthErc20` was added.
+
+**Fix (commit `3e60a56`):** all three methods now gate on family BEFORE the minter call — `CkBtcUtxo` (incl. the legacy "has minter, no family" default) → existing BTC path unchanged; `CkEthErc20` / `CkSol` / no-minter-no-family → clean typed `Err` directing to the onramp endpoint. Mirrors `withdraw`'s family-dispatch pattern exactly. `MinterFamily` already derived `PartialEq` (no wire/struct change). 2 new PocketIC tests (`deposit_family_gate.rs`): `deposit_proxies_reject_cketherc20_family` (registers a `CkEthErc20` currency at the BTC-shaped mock → asserts all 3 methods return `Err` naming CkBtcUtxo/onramp — went RED→GREEN as predicted, proving the gate fires on FAMILY not on minter behavior) + `deposit_proxies_still_serve_ckbtc_legacy_default_family` (BTC path regression guard). No relay change (relay maps facade `Err` → 503 with a now-clean message).
+
+**SOL mainnet verdict:** NOT operational in the shipped APK — `SOLANA_RPC_URL` defaults to devnet (`config/constants.ts:91`); `scripts/check-prod-sol.mjs` (wired into `build-apk.sh`) fail-closes the build on a devnet/rate-limited default. **Correctly blocked on an operator step** (set a paid Helius/QuickNode RPC URL). No code change warranted — the guard is right.
+
+---
+
 ## NEXT SESSION — work order (2026-08-08) — ✅ ALL 6 DONE
 
 > **CORRECTION (founder, 2026-08-07): the wire is NOT frozen.** No public release has shipped, so wire-format changes remain
