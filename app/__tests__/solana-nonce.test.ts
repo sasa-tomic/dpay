@@ -12,10 +12,8 @@ import { base58Decode32 } from '../solana/tx';
 // nonceAccount = Keypair.fromSeed(0xaa*32); merchant = Keypair.fromSeed(0xcc*32); the stored nonce
 // value is 0xdeadbeef repeated 8x. These two messages are the on-chain-proven durable-nonce shapes
 // from .dev/sol-poc/05-durable-nonce.mjs (stale-blockhash-immune offline sign + merchant broadcast).
-const AUTHORITY_ADDRESS = '3jsvVphLjwR6wih9fQydrRNGieNjYzyMkyTxFueCssaK';
 const AUTHORITY_HEX = '28b3588eeebf53152ed5ad420e105eb28ecccdff90f068884ac30cc8eb3d4f34';
 const NONCE_ACCOUNT_ADDRESS = 'GZXyfzSTCBmA7rpeDLrmUbiSA45H5EEwJhoBeR6ZNb3u';
-const NONCE_ACCOUNT_HEX = 'e734ea6c2b6257de72355e472aa05a4c487e6b463c029ed306df2f01b5636b58';
 const MERCHANT_ADDRESS = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';
 const STORED_NONCE_ADDRESS = 'FzFAtwLSSzxhug4sEvUeusLxFdjAS3ByYqgseUYkFpkN';
 const RENT_LAMPORTS = 1447680n;

@@ -25,8 +25,7 @@
  * IS `FAKE_INIT`, so NO real WalletConnect code executes and the test asserts on the same typed
  * `jest.fn` instance `walletconnect.ts` captured at import time.
  */
-import {describe, test, expect, jest, beforeEach, afterEach} from '@jest/globals';
-import type {EthereumProviderOptions} from '@walletconnect/ethereum-provider';
+import {describe, test, expect, jest, afterEach} from '@jest/globals';
 import type {Eip1193Provider} from '../wallet';
 import {FakeEthereumProvider, FAKE_INIT} from './walletconnect-fake';
 

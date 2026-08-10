@@ -17,7 +17,6 @@ import { base58Decode32 } from '../solana/tx';
 // The USDC mainnet mint and a stored durable nonce value (0xdeadbeef*8, NOT a live blockhash) make
 // this the offline-signed USDC payment shape: {AdvanceNonce(ix0), Token.transfer(ix1)}.
 const AUTHORITY_ADDRESS = '3jsvVphLjwR6wih9fQydrRNGieNjYzyMkyTxFueCssaK';
-const AUTHORITY_HEX = '28b3588eeebf53152ed5ad420e105eb28ecccdff90f068884ac30cc8eb3d4f34';
 const NONCE_ACCOUNT_ADDRESS = 'GZXyfzSTCBmA7rpeDLrmUbiSA45H5EEwJhoBeR6ZNb3u';
 const STORED_NONCE_ADDRESS = 'FzFAtwLSSzxhug4sEvUeusLxFdjAS3ByYqgseUYkFpkN';
 
