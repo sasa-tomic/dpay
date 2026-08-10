@@ -309,7 +309,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
           const grew = startBal == null ? j.balance !== '0' : cmpRaw(j.balance, startBal) > 0;
           if (grew) setPhase('done');
         }
-      } catch { /* keep watching */ }
+      } catch (e) { console.warn('ckERC20 balance poll failed:', e instanceof Error ? e.message : String(e)); /* keep watching */ }
     };
     poll();
     const id = setInterval(poll, POLL.deposit);

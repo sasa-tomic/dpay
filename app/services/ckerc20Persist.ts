@@ -55,14 +55,16 @@ export async function loadDeposit(
   let raw: string | null;
   try {
     raw = await AsyncStorage.getItem(depositKey(pubkeyHex, currency));
-  } catch {
+  } catch (e) {
+    console.warn('ckERC20 persist failed:', e instanceof Error ? e.message : String(e));
     return null;
   }
   if (raw == null) return null;
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
-  } catch {
+  } catch (e) {
+    console.warn('ckERC20 persist failed:', e instanceof Error ? e.message : String(e));
     return null; // malformed JSON — swallow, never throw
   }
   return hydrateWatch(parsed);
@@ -79,7 +81,8 @@ export async function saveDeposit(
 ): Promise<void> {
   try {
     await AsyncStorage.setItem(depositKey(pubkeyHex, currency), JSON.stringify(state));
-  } catch {
+  } catch (e) {
+    console.warn('ckERC20 persist failed:', e instanceof Error ? e.message : String(e));
     /* best-effort — a missed persist just means a restart won't resume this watch */
   }
 }
@@ -88,7 +91,8 @@ export async function saveDeposit(
 export async function clearDeposit(pubkeyHex: string, currency: number): Promise<void> {
   try {
     await AsyncStorage.removeItem(depositKey(pubkeyHex, currency));
-  } catch {
+  } catch (e) {
+    console.warn('ckERC20 persist failed:', e instanceof Error ? e.message : String(e));
     /* best-effort */
   }
 }

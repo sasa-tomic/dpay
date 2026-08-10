@@ -61,14 +61,16 @@ export async function loadSolNonce(pubkeyHex: string): Promise<SolNonceState | n
   let raw: string | null;
   try {
     raw = await AsyncStorage.getItem(nonceKey(pubkeyHex));
-  } catch {
+  } catch (e) {
+    console.warn('sol nonce persist failed:', e instanceof Error ? e.message : String(e));
     return null;
   }
   if (raw == null) return null;
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
-  } catch {
+  } catch (e) {
+    console.warn('sol nonce persist failed:', e instanceof Error ? e.message : String(e));
     return null; // malformed JSON — swallow, never throw
   }
   return hydrateNonce(parsed);
@@ -82,7 +84,8 @@ export async function loadSolNonce(pubkeyHex: string): Promise<SolNonceState | n
 export async function saveSolNonce(pubkeyHex: string, state: SolNonceState): Promise<void> {
   try {
     await AsyncStorage.setItem(nonceKey(pubkeyHex), JSON.stringify(state));
-  } catch {
+  } catch (e) {
+    console.warn('sol nonce persist failed:', e instanceof Error ? e.message : String(e));
     /* best-effort — a missed persist just means a restart won't resume the nonce (resync needed) */
   }
 }
@@ -91,7 +94,8 @@ export async function saveSolNonce(pubkeyHex: string, state: SolNonceState): Pro
 export async function clearSolNonce(pubkeyHex: string): Promise<void> {
   try {
     await AsyncStorage.removeItem(nonceKey(pubkeyHex));
-  } catch {
+  } catch (e) {
+    console.warn('sol nonce persist failed:', e instanceof Error ? e.message : String(e));
     /* best-effort */
   }
 }

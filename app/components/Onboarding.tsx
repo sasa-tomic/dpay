@@ -30,7 +30,8 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
       try {
         await fetchWithTimeout(`${base(relayUrl)}/api/v1/faucet`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({account: id.publicHex})}, BALANCE_TIMEOUT_MS);
         onCreated(id);
-      } catch {
+      } catch (e) {
+        console.warn('faucet fetch failed:', e instanceof Error ? e.message : String(e));
         setPendingId(id);
         setBusy(false);
       }

@@ -178,7 +178,7 @@ function startPoll(){
     try {
       const r=await fetchWithTimeout('/api/v1/receipt/'+currentNonce, {}, 5000);
       if(r.ok){ const j=await r.json(); handleSettled(j); }
-    } catch {}
+    } catch (e) { console.warn('receipt poll failed:', e); }
   }, 1200);
 }
 function handleSettled(j){

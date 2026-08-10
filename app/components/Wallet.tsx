@@ -134,7 +134,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
       try {
         const s = (await DpayCore.nfcStatus?.()) as NfcStatus | undefined;
         if (alive) setNfc(s ?? 'unknown');
-      } catch { if (alive) setNfc('unknown'); }
+      } catch (e) { console.warn('NFC status read failed:', e instanceof Error ? e.message : String(e)); if (alive) setNfc('unknown'); }
     };
     read();
     const sub = AppState.addEventListener('change', x => { if (x === 'active') read(); });
@@ -301,7 +301,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
   }, [topUpBusy, relayUrl, identity.publicHex, setBalance, setOnline, resetDeduction]);
 
   // Web keyboard shortcuts (plan 1b / UX-V5): the first letters of the main actions —
-  // P=Pay, R=Receive, T=Receive (demo money), A=Balances (the asset hub), L=Ledger (transactions). Active ONLY on the wallet
+  // P=Pay, R=Receive, T=Top-up (demo money), A=Balances (the asset hub), L=Ledger (transactions). Active ONLY on the wallet
   // main view with no text input focused and no sheet/overlay open (Esc is handled per-sheet by
   // useEscapeToClose). Native (no physical keyboard) is a no-op; the on-UI hints are web-only too.
   const anySheetOpen = balancesOpen || settingsOpen;

@@ -152,7 +152,7 @@ export function useBalancePoll(args: Args): {
             if (fresh()) setOnline(false);
           }
         } finally { t.stop(); }
-      } catch { if (fresh()) setOnline(false); }
+      } catch (e) { console.warn('balance poll failed:', e instanceof Error ? e.message : String(e)); if (fresh()) setOnline(false); }
     };
     poll(); const id = setInterval(poll, POLL.balance);
     return () => { alive = false; clearInterval(id); ctrl.abort(); };

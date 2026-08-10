@@ -101,7 +101,7 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
             onSettled(); setPaid({amount: qr.amount, currency: qr.currency, who: qr.who, already: false}); setPhase('paid');
           }
         }
-      } catch { /* best-effort: keep polling — the next tick reconciles if the ledger settled */ }
+      } catch (e) { console.warn('receipt reconcile poll failed:', e instanceof Error ? e.message : String(e)); /* best-effort: keep polling — the next tick reconciles if the ledger settled */ }
     };
     check(); const id = setInterval(check, POLL.receiptPay);
     return () => { alive = false; clearInterval(id); };

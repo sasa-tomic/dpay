@@ -73,7 +73,7 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
       try {
         const r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/receipt/${nonceHex}`, undefined, RECONCILE_FETCH_TIMEOUT_MS);
         if (r.ok) { const j = await readJsonOrEmpty(r); return j.receipt ?? {}; }
-      } catch { /* keep polling */ }
+      } catch (e) { console.warn('NFC receipt reconcile poll failed:', e instanceof Error ? e.message : String(e)); /* keep polling */ }
       await new Promise(res => setTimeout(res, RECONCILE_INTERVAL_MS));
     }
     return null;
@@ -85,7 +85,7 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
   // receipt's canister/ledger signature before finalizing success.
   const submitWire = useCallback(async (wireHex: string, ctx: TapCtx) => {
     const nonceHex = reqInfo?.nonce ?? null;
-    const code = await DpayCore.encodeQr(wireHex).catch(() => null);
+    const code = await DpayCore.encodeQr(wireHex).catch((e: unknown) => { console.warn('encodeQr failed:', e instanceof Error ? e.message : String(e)); return null; });
     if (!code) { ctx.finalize('error', 'Could not encode the authorization'); return; } // pre-settlement
 
     const {outcome: payOutcome, body} = await postPay(code);

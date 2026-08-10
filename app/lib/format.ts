@@ -75,36 +75,6 @@ export function parseRequestQR(raw: string): string {
   return i < 0 ? t : t.slice(0, i);
 }
 
-// Display name + memo codec — mirrors `dpay_core::pad_name` + the canister's lossy NUL-trim. Fixed
-// 32-byte fields: UTF-8, trailing-NUL padded, truncated to 32 bytes; empty = all zeros. These are
-// the hex-string variants (the byte-array equivalents live in the DpayCore shim + e2e harness; the
-// app itself passes plain name STRINGS to DpayCore, which packs the bytes). Used by the jest tests
-// + available wherever hex name/memo fields appear. Decode is lossy + NUL-trimmed, never throws.
-const NAME_LEN = 32;
-export function padName32(s: string): string {
-  let utf8 = '';
-  for (let i = 0; i < s.length; i++) {
-    const c = s.charCodeAt(i);
-    if (c < 0x80) utf8 += String.fromCharCode(c);
-    else if (c < 0x800) { utf8 += String.fromCharCode(0xc0 | (c >> 6), 0x80 | (c & 0x3f)); }
-    else { utf8 += String.fromCharCode(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f)); }
-  }
-  const bytes: number[] = [];
-  for (let i = 0; i < utf8.length && bytes.length < NAME_LEN; i++) bytes.push(utf8.charCodeAt(i) & 0xff);
-  while (bytes.length < NAME_LEN) bytes.push(0);
-  return bytes.map((b) => b.toString(16).padStart(2, '0')).join('');
-}
-export function trimName32(hexStr: string): string {
-  const clean = hexStr.replace(/[^0-9a-fA-F]/g, '');
-  const bytes: number[] = [];
-  for (let i = 0; i + 1 < clean.length && bytes.length < NAME_LEN; i += 2) bytes.push(parseInt(clean.slice(i, i + 2), 16));
-  let end = bytes.indexOf(0);
-  if (end < 0) end = bytes.length;
-  let out = '';
-  for (let i = 0; i < end; i++) out += String.fromCharCode(bytes[i]);
-  try { return decodeURIComponent(escape(out)); } catch { return out; }
-}
-
 // Format raw smallest-units (a decimal-digit STRING) as a decimal amount + unit suffix (e.g.
 // "50000" sats → "0.00050000 BTC"). MC1 units 2-4: exact BigInt math PADDED to `decimals` places
 // (the fixed-width display the wallet asserts — "0.00050000 BTC", never "0.0005 BTC"). This formatter

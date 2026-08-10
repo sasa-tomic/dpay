@@ -111,7 +111,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
           const from = fromName ?? (j.receipt?.from ? short(j.receipt.from) : 'payer');
           setResult({amount: reqQr.rawAmount, currency: reqQr.currency, from}); onReceived();
         }
-      } catch { /* best-effort: keep polling — the next tick surfaces the settlement */ }
+      } catch (e) { console.warn('settlement receipt poll failed:', e instanceof Error ? e.message : String(e)); /* best-effort: keep polling — the next tick surfaces the settlement */ }
     };
     check(); const id = setInterval(check, POLL.receiptRcv);
     return () => { alive = false; clearInterval(id); };
@@ -180,7 +180,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
       if (outcome === 'rejected' && !isNonceReused(j?.error)) {
         setErr(rejectionMessage(typeof j?.error === 'string' ? j.error : null));
       }
-    } catch { /* network/timeout — the /receipt poll reconciles; don't show a false error */ }
+    } catch (e) { console.warn('pay and classify failed:', e instanceof Error ? e.message : String(e)); /* network/timeout — the /receipt poll reconciles; don't show a false error */ }
   }
 
   function reset() { setReqQr(null); setResult(null); setScanning(false); setErr(null); setMemo(''); setNfcActive(false); setNfcKey(k => k + 1); }
