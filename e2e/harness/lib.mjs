@@ -367,6 +367,7 @@ export async function openPaySend(driver, opts = {}) {
 export async function setRelay(driver, url, opts = {}) {
   const t = opts.timeoutMs ?? 4_000;
   await driver.click('btn-settings', { timeoutMs: t });
+  await driver.click('btn-advanced-toggle', { timeoutMs: t }); // expand the disclosure (defaults collapsed)
   await driver.type('settings-relay', url, { timeoutMs: t });
   await driver.click('btn-relay-apply', { timeoutMs: t });
   await driver.click('btn-settings-close', { timeoutMs: t });

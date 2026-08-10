@@ -59,8 +59,10 @@ export async function run() {
     console.log('[35-ux-tour] ✓ shot: balances hub');
     await driver.click('btn-balances-close', { timeoutMs: 4_000 });
 
-    // 4. Settings (relay config + reset).
+    // 4. Settings (relay config + reset). Expand the Advanced disclosure so the relay input is
+    //    captured (the founder-directed default is collapsed).
     await driver.click('btn-settings', { timeoutMs: 4_000 });
+    await driver.click('btn-advanced-toggle', { timeoutMs: 4_000 });
     await driver.findByTestID('settings-relay', { timeoutMs: 5_000 });
     await driver.screenshot('35-tour-settings');
     console.log('[35-ux-tour] ✓ shot: settings');
