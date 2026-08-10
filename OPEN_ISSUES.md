@@ -76,12 +76,11 @@ item; low priority (ops-only, no runtime impact, both deploy scripts are byte-fa
 | U5 | intuitive | MED | 8 | MED | `app/components/SettingsSheet.tsx` + e2e flows `12`/`35`/`38`/`40`/`41`/`57` + harness `lib.mjs setRelay()` | **Settings "Advanced" disclosure defaults COLLAPSED.** The relay URL input + Apply button no longer appear on first Settings open (was a known footgun: a one-paste-away brick). The founder-directed consumer posture from the 2026-08-05 audit P1; the default-open was a temporary e2e-compatibility hack. 6 e2e flows that read `settings-relay` now expand `btn-advanced-toggle` first; `settings.png` visual baseline re-seeded (30.3% drift → 0%); the harness `setRelay()` helper (used by `13`/`19`/`20`/`22`/`33`) updated in ONE place so all callers benefit. |
 | U6 | (cleanup) | LOW | 10 | LOW | (none — code-paths verified clean) | **No AI slop / templates / "coming soon" / lorem ipsum / TODO markers in `app/`.** A `grep` for `coming soon|lorem ipsum|TODO|FIXME|stub|not implemented` against `app/**.{ts,tsx}` returned ZERO consumer-facing matches (only legitimate `__stubs__/walletconnect-stub.ts` for jest, plus `placeholder=` TextInput props which are correct). The codebase is clean of this class. |
 
-### Findings DEFERRED (2 remaining — D3, D4; D1/D2/D5 resolved 2026-08-10)
+### Findings DEFERRED (1 remaining — D4; D1/D2/D3/D5 resolved 2026-08-10)
 
 These are real but the user instruction was to defer HIGH-effort findings. Each carries enough detail
-to be picked up directly. **D1, D2, D5 were MED-or-less effort with confidence ≥6/10 and are now
-DONE** (commits `af321e3` D1, `2acaae9` D2+D5); D3 + D4 remain deferred (visual-baseline churn /
-HIGH effort).
+to be picked up directly. **D1, D2, D3, D5 were MED-or-less effort with confidence ≥6/10 and are now
+DONE** (commits `af321e3` D1, `2acaae9` D2+D5, `eeb5e84` D3); D4 remains deferred (HIGH effort).
 
 #### ✅ D1 — Pre-filled "25.00" amount in ReceiveMode looks like a fixed amount — DONE (commit `af321e3`)
 
@@ -104,14 +103,19 @@ HIGH effort).
   Visual baselines re-seeded (`wallet-pay`, `ledger` — header balance row; `receive-request` — header
   + D5 button). Verified via zai-vision (no ⇅ icon in any re-seeded baseline). `just verify` 62/62.
 
-#### D3 — Header "balance" label is generic (LOW)
+#### ✅ D3 — Header "balance" label is generic (LOW) — DONE (commit `eeb5e84`)
 
-- **Symptom:** `app/components/Wallet.tsx:353` shows the literal text "balance" above the amount.
+- **Symptom:** `app/components/Wallet.tsx:353` showed the literal text "balance" above the amount.
   Most consumer wallets label this with the asset name (e.g. "DEMO balance", "BTC balance"). The
-  current generic label reads as a developer-facing label.
-- **Fix:** prefix with the active currency's symbol/name (e.g. "DEMO", "BTC", "SOL").
-- **Why deferred:** visual-baseline impact (4 of 5 surfaces); confidence 6/10 (the active-rail chip
-  already conveys this, so the label change is partly redundant). Effort LOW with baseline re-seed.
+  generic label read as developer-facing.
+- **Resolution (2026-08-10, `eeb5e84`):** the label now prefixes the active asset's name — "DEMO
+  balance", "BTC balance", "SOL balance", etc. IC assets use the catalog `displayName` (backing
+  symbol); SOL uses "SOL". An `activeAssetName` variable is computed once and reused by both the
+  balance label and the active-rail chip (removing the duplicated inline ternary the chip carried).
+  Offline DEMO/IC keeps the "~ approx." indicator; SOL always shows the named label (its amount
+  renders "—" when the RPC is unreachable). No visual-baseline re-seed was needed — flow 40
+  `wallet-pay` drift was 0.08% (well under 0.5%); the added characters are small relative to the
+  surface. `just verify` 62/62 green.
 
 #### D4 — 64-hex recovery seed is hard to transcribe (HIGH effort — BIP-39)
 
