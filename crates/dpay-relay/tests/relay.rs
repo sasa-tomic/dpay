@@ -808,6 +808,22 @@ async fn merchant_terminal_served_at_merchant_not_root() {
         merch.contains("id=\"merchId\""),
         "/merchant must serve the terminal"
     );
+    // M2: the 3 served fetches (submit / health / receipt-poll) must be wired through
+    // `fetchWithTimeout` so a hung relay never leaves the merchant UI in "settling…" forever.
+    // Asserting the helper + its 3 call sites are present is the offline-testable proxy for
+    // "the timeouts are wired" — the JS itself runs only in the browser (manual verify).
+    assert!(
+        merch.contains("function fetchWithTimeout"),
+        "/merchant must serve the fetchWithTimeout helper (M2)"
+    );
+    assert!(
+        merch.contains("isTimeout(e) ? 'relay unreachable (timed out)'"),
+        "/merchant health fetch must surface a timed-out message (M2)"
+    );
+    assert!(
+        merch.contains("Settlement timed out"),
+        "/merchant submit fetch must surface a timed-out message (M2)"
+    );
 
     // The root is the landing page, not the terminal.
     let (_rs, _rh, rbytes) = call_raw(&state, get_req("/")).await;

@@ -105,15 +105,29 @@
 <script>
 const $ = id => document.getElementById(id);
 const usd = c => '$' + Math.floor(c/100) + '.' + String(c%100).padStart(2,'0');
+// Bounded fetch: aborts after `ms` so a hung relay never leaves the UI in "settling…" forever.
+// A timed-out fetch rejects with an AbortError (`e.name === 'AbortError'`); `isTimeout` lets the
+// caller surface an honest "timed out" message instead of a generic error.
+function fetchWithTimeout(url, opts, ms){
+  const ctrl = new AbortController();
+  const id = setTimeout(()=>ctrl.abort(), ms);
+  return fetch(url, Object.assign({}, opts, {signal: ctrl.signal})).finally(()=>clearTimeout(id));
+}
+function isTimeout(e){ return e && e.name === 'AbortError'; }
 const MERCHANT_HEX = '8139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394';
 $('merchId').textContent = MERCHANT_HEX.slice(0,10) + '…';
 let stream=null, scanning=false, lastCode=null, busy=false, currentNonce=null, pollTimer=null, settled=false;
 const txns=[];
 
 async function health(){
-  try { const r=await fetch('/api/v1/health'); const j=await r.json(); const ok=r.ok&&j.status==='ok';
+  try {
+    const r=await fetchWithTimeout('/api/v1/health', {}, 5000);
+    const j=await r.json(); const ok=r.ok&&j.status==='ok';
     $('dot').className='dot '+(ok?'ok':'down'); $('dotText').textContent=ok?'ledger online':'ledger down';
-  } catch { $('dot').className='dot down'; $('dotText').textContent='relay unreachable'; }
+  } catch(e) {
+    $('dot').className='dot down';
+    $('dotText').textContent = isTimeout(e) ? 'relay unreachable (timed out)' : 'relay unreachable';
+  }
 }
 setInterval(health,3000); health();
 
@@ -156,11 +170,15 @@ function createRequest(){
 function newCharge(){ stopScan(); clearInterval(pollTimer); currentNonce=null; settled=false; $('reqArea').style.display='none'; $('collectCard').classList.add('muted'); $('result').innerHTML=''; }
 
 // Poll the ledger for this request's completion (the payer may have paid directly while online).
+// A timed-out /receipt fetch is silently swallowed — the 1.2s poll retries next tick.
 function startPoll(){
   clearInterval(pollTimer);
   pollTimer=setInterval(async ()=>{
     if(settled || !currentNonce) return;
-    try { const r=await fetch('/api/v1/receipt/'+currentNonce); if(r.ok){ const j=await r.json(); handleSettled(j.receipt); } } catch {}
+    try {
+      const r=await fetchWithTimeout('/api/v1/receipt/'+currentNonce, {}, 5000);
+      if(r.ok){ const j=await r.json(); handleSettled(j.receipt); }
+    } catch {}
   }, 1200);
 }
 function handleSettled(rc){
@@ -194,7 +212,7 @@ async function submit(qr){
   busy=true;
   const res=$('result'); res.innerHTML='<div class="sub">settling…</div>';
   try{
-    const r=await fetch('/api/v1/pay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({qr})});
+    const r=await fetchWithTimeout('/api/v1/pay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({qr})}, 30000);
     const j=await r.json();
     if(r.ok){
       if(settled){ res.innerHTML=`<div class="warnmsg">↩ Already paid</div><div class="sub">${usd(j.receipt.amount)} — not charged twice</div>`; }
@@ -202,7 +220,13 @@ async function submit(qr){
     }else{
       res.innerHTML=`<div class="refused">Refused</div><div class="sub">${j.error||'rejected'}</div>`;
     }
-  }catch(e){ res.innerHTML=`<div class="refused">Error</div><div class="sub">${e}</div>`; }
+  }catch(e){
+    if(isTimeout(e)){
+      res.innerHTML=`<div class="refused">Settlement timed out</div><div class="sub">no response in 30s — check the relay.</div>`;
+    }else{
+      res.innerHTML=`<div class="refused">Error</div><div class="sub">${e}</div>`;
+    }
+  }
   finally{ busy=false; }
 }
 
