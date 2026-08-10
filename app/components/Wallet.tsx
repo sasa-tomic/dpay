@@ -313,6 +313,8 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
     l: () => setMode('ledger'),
   }, {ignoreIfInputFocused: true, enabled: !anySheetOpen});
 
+  const activeAssetName = activeSol ? 'SOL' : (currentCurrency === 0 ? 'DEMO' : displayName(currentDesc ?? catalog[0]));
+
   return (
     <SafeAreaView style={S.root}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg} translucent={false} />
@@ -350,7 +352,11 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
         >
           <View style={S.balLabelRow}>
             <View style={[S.dot, {backgroundColor: online ? C.ok : C.sub2}]} />
-            <Text style={S.balLabel}>{activeSol ? 'balance' : (online ? 'balance' : '~ approx.')}</Text>
+            {/* D3: the header label names the active asset in BOTH branches — online reads "X balance",
+                offline reads "~ X approx.". Drops the old `activeSol ||` redundancy (SOL now follows the
+                same online/offline label rule as every IC asset) and shares `activeAssetName` with the
+                active-rail chip below (one source of truth for the symbol). */}
+            <Text style={S.balLabel}>{online ? `${activeAssetName} balance` : `~ ${activeAssetName} approx.`}</Text>
             <HotkeyHint k="A" />
           </View>
           <View style={S.balAmtRow}>
@@ -378,7 +384,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
             selected IC currency) so a user who switched to SOL in the Balances sheet doesn't get
             silently stuck in SOL mode (the IC ↔ SOL NFC AIDs differ). */}
         <View testID="active-rail-chip" style={S.activeRailChip}>
-          <Text style={S.activeRailChipText}>{activeSol ? 'SOL' : (currentCurrency === 0 ? 'DEMO' : (displayName(catalog.find(c => c.currency === currentCurrency) ?? catalog[0])))}</Text>
+          <Text style={S.activeRailChipText}>{activeAssetName}</Text>
         </View>
       </View>
 
