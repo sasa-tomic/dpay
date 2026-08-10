@@ -56,6 +56,90 @@ item; low priority (ops-only, no runtime impact, both deploy scripts are byte-fa
 
 ---
 
+## Session summary (2026-08-10): UX review — 6 findings DONE + 5 deferred; 62/62 e2e green
+
+> Real-app UX review (stream 3 of the 2026-08-10 quality sweep). Drove the REAL web build of the
+> REAL app (`app/App.tsx` via `react-native-web`) against the REAL test relay (FakeLedger) using
+> chrome-cli + a standalone vite server. No mocks, no stubs — the same code path the production APK
+> ships. All gates green: `just verify` clean (**62/62 e2e** — added flow 61), **551 jest**,
+> typecheck clean, canister **86**, relay **57**, core **45**, ffi **99**, aid-parity 2 AIDs,
+> bridge-parity **29 methods**. **4 commits** (`71e3560` → `d5d472b`).
+
+### Findings DONE (LOW + MEDIUM, confidence ≥ 6)
+
+| # | Type | Severity | Conf | Effort | File(s) | What |
+|---|------|----------|------|--------|---------|------|
+| U1 | intuitive | MED | 9 | MED | `crates/dpay-relay/src/{app,ledger}.rs` + `app/components/ReceiveMode.tsx` + new e2e `61-merchant-received-name.mjs` | **Merchant "Received" shows the payer's friendly name.** The polling-confirmed `Received ∂X from <hex>…` screen was the last raw-hex counterparty left in the wire-v2 era. Relay now attaches `from_name`/`to_name`/`memo` as additive UNSIGNED display fields on `/receipt/:nonce` (sibling `idempotency_display` cache, populated at `/pay` time from the signed auth); ReceiveMode prefers `j.from_name` over `short(j.receipt.from)`. The signed receipt body + `verifyOutcomeReceipt` are unchanged (these fields are display-only, never trust-bearing). Cold-start recovery path returns empty strings (app falls back to short pubkey — same as pre-fix, no regression). New flow `61-merchant-received-name` proves "Received ∂25.00 from Bob" (not `<hex>`) when the payer chose a name. Commit `f53222d`. |
+| U2 | intuitive | MED | 8 | LOW | `app/components/BalancesSheet.tsx` | **DEMO row "+Receive" → "+ Demo funds".** The button calls the faucet (mints ∂100 play money), not the receive-payment flow. The "Receive" label misled users into thinking only DEMO was receivable (every other row had no inline button). E2e testID `btn-topup` unchanged; flow 02 still GREEN. |
+| U3 | edge-state | MED | 9 | LOW | `app/components/PayMode.tsx` + e2e `36-bad-qr.mjs` | **Bad-QR error: "bad request QR: Length" → "This isn't a dpay payment code".** The developer-facing decode error leaked to consumers; the new copy is plain-language. Flow 36 updated for the new assertion substring. |
+| U4 | intuitive | LOW | 8 | LOW | `app/components/Wallet.tsx` + e2e `55-balances-select-asset.mjs` | **Active-rail chip uses `displayName` (BTC/USDC/ETH) instead of IC `wrapper_name` (ckBTC/ckUSDC/ckETH).** Aligns with the CLAUDE.md rule "UI shows the backing native currency symbol when known ($, €, CHF, ₿/BTC, Ξ/ETH, ◎/SOL) and only falls back to the wrapper (ck*) symbol when the backing is unknown." |
+| U5 | intuitive | MED | 8 | MED | `app/components/SettingsSheet.tsx` + e2e flows `12`/`35`/`38`/`40`/`41`/`57` + harness `lib.mjs setRelay()` | **Settings "Advanced" disclosure defaults COLLAPSED.** The relay URL input + Apply button no longer appear on first Settings open (was a known footgun: a one-paste-away brick). The founder-directed consumer posture from the 2026-08-05 audit P1; the default-open was a temporary e2e-compatibility hack. 6 e2e flows that read `settings-relay` now expand `btn-advanced-toggle` first; `settings.png` visual baseline re-seeded (30.3% drift → 0%); the harness `setRelay()` helper (used by `13`/`19`/`20`/`22`/`33`) updated in ONE place so all callers benefit. |
+| U6 | (cleanup) | LOW | 10 | LOW | (none — code-paths verified clean) | **No AI slop / templates / "coming soon" / lorem ipsum / TODO markers in `app/`.** A `grep` for `coming soon|lorem ipsum|TODO|FIXME|stub|not implemented` against `app/**.{ts,tsx}` returned ZERO consumer-facing matches (only legitimate `__stubs__/walletconnect-stub.ts` for jest, plus `placeholder=` TextInput props which are correct). The codebase is clean of this class. |
+
+### Findings DEFERRED (HIGH effort or larger scope — recorded for next session)
+
+These are real but the user instruction was to defer HIGH-effort findings. Each carries enough detail
+to be picked up directly.
+
+#### D1 — Pre-filled "25.00" amount in ReceiveMode looks like a fixed amount (LOW-MED)
+
+- **Symptom:** `app/components/ReceiveMode.tsx:38` defaults `amount` to `'25.00'`. The vision-model
+  review flagged this as confusing for a new user (might think the amount is fixed). `SolReceiveMode`
+  mirrors it with `'0.025'`.
+- **Fix:** default to empty string (`useState('')`); let the existing `placeholder="0.00"` carry the
+  affordance.
+- **Why deferred:** ~10 e2e flows (06/07/08/28/etc.) assert state AFTER typing an explicit amount, so
+  they're robust. But flow 06 (request-qr) and a few others have inner logic that may rely on the
+  default; needs a careful sweep + visual-baseline re-seed (the captured request-qr screen shows
+  "∂25.00" today). Confidence 7/10, effort MED (e2e sweep + baseline).
+
+#### D2 — "⇅" swap-hint icon next to balance suggests currency swap (LOW)
+
+- **Symptom:** `app/components/Wallet.tsx:369` renders `<Text style={S.swapHint}>⇅</Text>` next to
+  the balance to signal "tap to switch currency." The icon is the standard "swap / exchange"
+  metaphor — directly contradicts the no-swap non-negotiable.
+- **Fix:** a different metaphor — `☰` (list), `⊗` (asset), or simply remove (the existing "balance"
+  label + tap-target is enough; the icon is decorative).
+- **Why deferred:** visual-baseline impact (4 of 5 surfaces include the balance row); confidence 6/10
+  (subjective — the metaphor could be defended as "switch which currency is displayed"). Effort LOW
+  with baseline re-seed.
+
+#### D3 — Header "balance" label is generic (LOW)
+
+- **Symptom:** `app/components/Wallet.tsx:353` shows the literal text "balance" above the amount.
+  Most consumer wallets label this with the asset name (e.g. "DEMO balance", "BTC balance"). The
+  current generic label reads as a developer-facing label.
+- **Fix:** prefix with the active currency's symbol/name (e.g. "DEMO", "BTC", "SOL").
+- **Why deferred:** visual-baseline impact (4 of 5 surfaces); confidence 6/10 (the active-rail chip
+  already conveys this, so the label change is partly redundant). Effort LOW with baseline re-seed.
+
+#### D4 — 64-hex recovery seed is hard to transcribe (HIGH effort — BIP-39)
+
+- **Symptom:** `app/components/SettingsSheet.tsx:107` shows the 64-char hex recovery seed as one
+  long string. Most modern wallets use BIP-39 mnemonic phrases (12/24 words) because they're
+  error-detectable and far easier to transcribe accurately.
+- **Fix:** adopt BIP-39 derivation in the key path — generate a mnemonic at onboarding, derive the
+  IC Ed25519 seed + the SOL SLIP-10 seed from it. The restore flow would accept either the mnemonic
+  or the hex (backward compat).
+- **Why deferred:** HIGH effort (touches the key derivation path + onboarding + restore + Backup UI
+  + jest + e2e). Not blocked, just larger than the "fix direct" bar. The current hex seed is
+  CORRECT and WORKS today — this is purely a usability polish. Confidence 8/10 on the issue, but
+  effort HIGH.
+
+#### D5 — Verbose "If the payer paid..." button label (LOW)
+
+- **Symptom:** `app/components/ReceiveMode.tsx:252` renders a Pressable whose entire label is the
+  sentence "If the payer paid without scanning your code, tap here to confirm with their phone." The
+  vision-model review flagged this as a sentence masquerading as a button label.
+- **Fix:** shorten the visible label to "Scan payer's signed QR" (the shorter helper text already in
+  the `scanning` branch). Keep the explanatory sentence as a smaller help-text BELOW the button.
+- **Why deferred:** e2e flows 06 (`/paid without scanning/i`) + 21 (`/confirm with their phone/i`)
+  assert the long text appears; needs coordinated update. The current text IS clear (the vision
+  model said "the clarity it provides likely justifies its length for the target user"). Confidence
+  7/10, effort MED (e2e sweep).
+
+---
+
 ## NEXT SESSION — work order (2026-08-09): Send/Receive tabs IA refactor — ✅ DONE
 
 > **Top of the work order.** Founder-directed (2026-08-09). Fully `app/`-scoped (zero wire/canister/
