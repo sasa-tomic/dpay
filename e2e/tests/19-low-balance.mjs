@@ -59,9 +59,9 @@ export async function run() {
     // review-lowbal guard is `!online && shownBalance != null && req.amount > shownBalance`.
     console.log('[19-low-balance] going offline (dead relay)…');
     await goOffline(driver);
-    // Wait for the header's offline indicator ("~ approx.") — proves online flipped to false.
+    // Wait for the header's offline indicator ("~ DEMO approx." after D3) — proves online flipped to false.
     const approx = await driver.waitForText('approx.', { timeoutMs: 8_000 });
-    assert(approx, 'the header should show the offline indicator ("~ approx.") once offline');
+    assert(approx, 'the header should show the offline indicator ("~ DEMO approx.") once offline');
 
     // Scan a ∂200 request (> the ~∂100 local balance) → review screen renders the low-balance warning.
     console.log('[19-low-balance] scanning a ∂200 request while offline…');

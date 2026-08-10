@@ -55,7 +55,7 @@ export async function run() {
     // 2. Go OFFLINE: point at a genuinely-dead relay → online=false on the next failed poll.
     console.log('[20-offline-handoff] going offline…');
     await goOffline(driver);
-    await driver.waitForText('approx.', { timeoutMs: 8_000 }); // offline indicator
+    await driver.waitForText('approx.', { timeoutMs: 8_000 }); // offline indicator ("~ DEMO approx." after D3)
 
     // 3. A scans B's request + Approves → signs offline → direct /pay fails → QR hand-off screen.
     const nonce = randNonceHex();

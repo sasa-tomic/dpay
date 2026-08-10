@@ -5,7 +5,8 @@
 // fails fast with ECONNREFUSED (the REAL "relay unreachable" failure mode); the topUp path catches
 // it and surfaces a clear, honest "Offline — try again when connected" — NOT a crash, NOT a blank
 // screen, NOT a false success. After closing Settings, the wallet stays rendered (balance still
-// visible) and the header shows the offline indicator ("~ approx."). Every network op has a timeout
+// visible) and the header shows the offline indicator ("~ approx." — substring 'approx.'; the full
+// label is "~ DEMO approx." after D3 asset-prefixing). Every network op has a timeout
 // (AbortController); failures are logged by the driver (requestfailed) with context.
 //
 // DEAD RELAY CHOICE (NIT 1a-i): the harness grabs a free TCP port (binds to :0 then immediately
@@ -77,11 +78,12 @@ export async function run() {
     console.log(`[13-offline] ✓ dead relay failed for the right reason: ${errText}`);
 
     // Close Balances — the balance poll has been failing underneath; the header should now show the
-    // offline indicator ("~ approx.").
+    // offline indicator ("~ DEMO approx." — the asset name is prefixed after D3; substring 'approx.'
+    // is what the assertion matches).
     console.log('[13-offline] closing Balances to verify the wallet surface…');
     await driver.click('btn-balances-close', { timeoutMs: 4_000 });
     const approx = await driver.waitForText('approx.', { timeoutMs: 8_000 });
-    assert(approx, 'the header should show the offline indicator ("~ approx.") once the relay is unreachable');
+    assert(approx, 'the header should show the offline indicator ("~ DEMO approx.") once the relay is unreachable');
     console.log('[13-offline] ✓ header shows the offline indicator (graceful, no crash)');
 
     // The wallet is still rendered (no blank/crash): the balance element is still present.
