@@ -49,6 +49,12 @@ const CANISTER_CALL_TIMEOUT_SECS: u64 = 10;
 /// headroom for the slowest healthy minter round-trip; the TTL cache then coalesces repeats.
 const MINTER_CALL_TIMEOUT_SECS: u64 = 30;
 
+/// Timeout for the `agent.status()` liveness probe behind [`Ledger::healthy`]. The merchant
+/// terminal polls `/api/v1/health` every 3s, so a hung replica would otherwise wedge the green-dot
+/// poll for ic-agent's full ~5min expiry before flipping the dot red. 5s comfortably covers a
+/// healthy replica's status round-trip while keeping the merchant's pre-flight responsive.
+const STATUS_TIMEOUT_SECS: u64 = 5;
+
 /// Read the settlement currency out of a 292-byte signed-authorization wire (the canister does the
 /// same; the relay surfaces it in the receipt so the app can rebuild the `ReceiptClaim`). Falls back
 /// to `DEMO_USD` on a malformed wire (which the canister would already have rejected).
@@ -401,13 +407,20 @@ impl Ledger for AgentLedger {
     async fn receipt_pubkey(&self) -> Result<Vec<u8>, LedgerError> {
         // facade `receipt_pubkey() -> opt blob` (query). `null` (key not yet generated) → empty vec
         // (the relay treats an absent pubkey as "no receipts verifiable yet").
-        let reply = self
-            .agent
-            .query(&self.canister_id, "receipt_pubkey")
-            .with_arg(encode_args(()).map_err(|e| LedgerError::Transient(format!("encode pubkey: {e}")))?)
-            .call()
-            .await
-            .map_err(|e| LedgerError::Transient(format!("receipt_pubkey query: {e}")))?;
+        let reply = tokio::time::timeout(
+            Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
+            self.agent
+                .query(&self.canister_id, "receipt_pubkey")
+                .with_arg(encode_args(()).map_err(|e| LedgerError::Transient(format!("encode pubkey: {e}")))?)
+                .call(),
+        )
+        .await
+        .map_err(|_| {
+            LedgerError::Transient(format!(
+                "receipt_pubkey timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
+            ))
+        })?
+        .map_err(|e| LedgerError::Transient(format!("receipt_pubkey query: {e}")))?;
         let pk: Option<Vec<u8>> = decode_one(&reply)
             .map_err(|e| LedgerError::Transient(format!("decode receipt_pubkey: {e}")))?;
         Ok(pk.unwrap_or_default())
@@ -424,13 +437,20 @@ impl Ledger for AgentLedger {
     async fn receipt(&self, nonce: [u8; NONCE_LEN]) -> Result<Option<Receipt>, LedgerError> {
         let arg = encode_one(nonce.to_vec())
             .map_err(|e| LedgerError::Transient(format!("encode receipt arg: {e}")))?;
-        let reply = self
-            .agent
-            .query(&self.canister_id, "receipt")
-            .with_arg(arg)
-            .call()
-            .await
-            .map_err(|e| LedgerError::Transient(format!("receipt query: {e}")))?;
+        let reply = tokio::time::timeout(
+            Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
+            self.agent
+                .query(&self.canister_id, "receipt")
+                .with_arg(arg)
+                .call(),
+        )
+        .await
+        .map_err(|_| {
+            LedgerError::Transient(format!(
+                "receipt query timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
+            ))
+        })?
+        .map_err(|e| LedgerError::Transient(format!("receipt query: {e}")))?;
         let view: Option<ReceiptView> = decode_one(&reply)
             .map_err(|e| LedgerError::Transient(format!("decode receipt: {e}")))?;
         Ok(view.map(|v| Receipt {
@@ -493,13 +513,20 @@ impl Ledger for AgentLedger {
         // (matching `Receipt`).
         let arg = encode_args((pubkey.to_vec(), currency, limit))
             .map_err(|e| LedgerError::Transient(format!("encode transactions_of arg: {e}")))?;
-        let reply = self
-            .agent
-            .query(&self.canister_id, "transactions_of")
-            .with_arg(arg)
-            .call()
-            .await
-            .map_err(|e| LedgerError::Transient(format!("transactions_of query: {e}")))?;
+        let reply = tokio::time::timeout(
+            Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
+            self.agent
+                .query(&self.canister_id, "transactions_of")
+                .with_arg(arg)
+                .call(),
+        )
+        .await
+        .map_err(|_| {
+            LedgerError::Transient(format!(
+                "transactions_of query timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
+            ))
+        })?
+        .map_err(|e| LedgerError::Transient(format!("transactions_of query: {e}")))?;
         let views: Vec<TxnView> = decode_one(&reply)
             .map_err(|e| LedgerError::Transient(format!("decode transactions_of: {e}")))?;
         Ok(views
@@ -522,8 +549,17 @@ impl Ledger for AgentLedger {
 
     async fn healthy(&self) -> bool {
         // Liveness = the replica answers the management canister's read-only `status`. Cheap, and
-        // proves the gateway + replica are actually reachable (not just that a socket is open).
-        self.agent.status().await.is_ok()
+        // proves the gateway + replica are actually reachable (not just that a socket is open). Bounded
+        // by STATUS_TIMEOUT_SECS so a hung replica flips the merchant terminal's green dot red within
+        // one poll cycle (the terminal hits /health every 3s) instead of wedging for ic-agent's full
+        // ~5min expiry.
+        tokio::time::timeout(
+            Duration::from_secs(STATUS_TIMEOUT_SECS),
+            self.agent.status(),
+        )
+        .await
+        .map(|status_result| status_result.is_ok())
+        .unwrap_or(false)
     }
 
     async fn deposit_address(
@@ -636,13 +672,20 @@ impl Ledger for AgentLedger {
         // facade `currencies() -> vec CurrencyDescriptor` (query). Translate candid mirrors -> the
         // relay's text-principal serde structs. Errors are `Transient` (canister unreachable); there
         // is no permanent-policy failure on the catalog surface.
-        let reply = self
-            .agent
-            .query(&self.canister_id, "currencies")
-            .with_arg(encode_args(()).map_err(|e| LedgerError::Transient(format!("encode currencies: {e}")))?)
-            .call()
-            .await
-            .map_err(|e| LedgerError::Transient(format!("currencies query: {e}")))?;
+        let reply = tokio::time::timeout(
+            Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
+            self.agent
+                .query(&self.canister_id, "currencies")
+                .with_arg(encode_args(()).map_err(|e| LedgerError::Transient(format!("encode currencies: {e}")))?)
+                .call(),
+        )
+        .await
+        .map_err(|_| {
+            LedgerError::Transient(format!(
+                "currencies query timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
+            ))
+        })?
+        .map_err(|e| LedgerError::Transient(format!("currencies query: {e}")))?;
         let list: Vec<CurrencyDescriptorMirror> =
             decode_one(&reply).map_err(|e| LedgerError::Transient(format!("decode currencies: {e}")))?;
         Ok(list
