@@ -96,7 +96,7 @@ export async function fetchCurrencies(relayUrl: string, prior: CurrencyDescripto
         offramp: (typeof c.offramp === 'string' && (c.offramp === 'Direct' || c.offramp === 'Partner' || c.offramp === 'Unavailable') ? c.offramp : 'Unavailable') as RampCapability,
       }));
     if (clean.length === 0) return prior;
-    AsyncStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify(clean)).catch(() => {});
+    AsyncStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify(clean)).catch((e: unknown) => { console.warn('catalog cache persist failed: ', e); });
     return clean;
   } catch { return prior; }
 }

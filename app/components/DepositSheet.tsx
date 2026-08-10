@@ -82,7 +82,7 @@ export function DepositSheet({identity, relayUrl, currency, display, onClose}: {
       try {
         const i = await depositInfo(relayUrl, currency, signal);
         if (alive) setInfo(i);
-      } catch { /* best-effort: fee/min show "—" when info is absent */ }
+      } catch (e) { console.warn('depositInfo fetch failed: ', e); }
       finally { cancel(); }
     })();
     return () => { alive = false; };
@@ -103,8 +103,8 @@ export function DepositSheet({identity, relayUrl, currency, display, onClose}: {
       if (cmpRaw(r.minted_total, '0') > 0) {
         setMinted(true);
       }
-    } catch { /* offline: keep the last status; the next tick retries */ }
-    finally {
+      } catch (e) { console.warn('depositRefresh fetch failed: ', e); }
+      finally {
       cancel();
       if (manual) {
         setCheckBusy(false);

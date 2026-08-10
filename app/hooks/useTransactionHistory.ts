@@ -46,7 +46,7 @@ export function useTransactionHistory(args: Args): {history: Txn[]; refreshHisto
         const j = await r.json().catch(() => null);
         if (r.ok && j && Array.isArray(j.transactions)) { anySucceeded = true; return j.transactions as TransactionsRow[]; }
         return [];
-      } catch { return []; }
+      } catch (e) { console.warn(`useTransactionHistory fetch failed for currency ${currency}: `, e); return []; }
     }));
     if (!anySucceeded) return; // offline / all failed: keep the existing list
     const me = publicHex.toLowerCase();

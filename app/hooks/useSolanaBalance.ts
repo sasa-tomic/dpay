@@ -30,7 +30,8 @@ export function useSolanaBalance(address: string | null): {balance: string | nul
       try {
         const b = await getSolanaBalance(address, ctrl.signal);
         if (fresh()) setBalance(b);
-      } catch {
+      } catch (e) {
+        console.warn(`useSolanaBalance poll failed for ${address}: `, e);
         if (fresh()) setBalance(null);
       }
     };
