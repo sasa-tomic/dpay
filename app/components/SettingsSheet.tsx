@@ -3,8 +3,8 @@ import {View, Text, Pressable, TextInput, ScrollView, SafeAreaView, StatusBar, P
 import {C} from '../config/palette';
 import {PRIVACY_URL} from '../config/constants';
 import {S} from '../styles';
-import {copyToClipboard} from '../lib/clipboard';
 import {useEscapeToClose} from '../hooks/useHotkeys';
+import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {SheetOverlay} from './SheetOverlay';
 
 /**
@@ -48,7 +48,7 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, secretHe
   // accidental shoulder-surf reveal on a first tap. `copied` mirrors DepositSheet/WithdrawSheet.
   const [confirmBackup, setConfirmBackup] = useState(false);
   const [backupRevealed, setBackupRevealed] = useState(false);
-  const [copied, setCopied] = useState<'clipboard' | 'shared' | null>(null);
+  const {copied, copy: doCopy, clear: clearCopied} = useCopyFeedback();
   const [advancedOpen, setAdvancedOpen] = useState(true);
   const [draftRelay, setDraftRelay] = useState(relayUrl);
   // `lastApplied` tracks the URL the app is actually using (the parent's `relayUrl` updates AFTER
@@ -61,13 +61,9 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, secretHe
   const relayDirty = relayClean.length > 0 && relayClean !== lastApplied.trim();
   const applyRelay = () => { if (relayDirty) { setRelayUrl(draftRelay); setLastApplied(draftRelay.trim()); } };
 
-  // Copy the seed via the same clipboard path as the deposit/withdraw copy buttons. Resolves to
-  // 'clipboard' (web navigator.clipboard) or 'shared' (native Share sheet); the label follows.
-  const copySeed = async () => {
-    const how = await copyToClipboard(secretHex);
-    setCopied(how);
-    setTimeout(() => setCopied(null), 1500);
-  };
+  // Copy the seed via the shared clipboard-feedback hook (real clipboard on web, Share on native;
+  // surfaces the "Copied ✓"/"Shared ✓" confirmation for 1500ms).
+  const copySeed = () => { void doCopy(secretHex); };
 
   return (
     <SheetOverlay>
@@ -123,7 +119,7 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, secretHe
                 <Pressable
                   testID="btn-backup-hide"
                   style={S.linkBtn}
-                  onPress={() => { setBackupRevealed(false); setConfirmBackup(false); setCopied(null); }}
+                  onPress={() => { setBackupRevealed(false); setConfirmBackup(false); clearCopied(); }}
                   accessibilityRole="button"
                   accessibilityLabel="Hide seed"
                   accessibilityState={{disabled: false}}>

@@ -15,11 +15,11 @@ import {deriveSolanaAddress, broadcastSolPayment} from '../solana';
 import {friendlySolError} from '../solana/errors';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED} from '../payments';
 import {DpaySolNfc} from '../services/native';
-import {copyToClipboard} from '../lib/clipboard';
 import {QrScanner} from './QrScanner';
 import {SolNfcTap} from './SolNfcTap';
 import {ModeToggle} from './ModeToggle';
 import {SolanaReceiveSheet} from './SolanaReceiveSheet';
+import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {withTimeout} from '../lib/timeout';
 
 const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeight: 44, borderWidth: 1, borderColor: C.sub2, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink};
@@ -51,7 +51,7 @@ export function SolReceiveMode({identity, online, nfcReady, solAddress, subMode,
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{amount: string; cur: 'SOL' | 'USDC'; sig: string | null} | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [copied, setCopied] = useState<'clipboard' | 'shared' | null>(null);
+  const {copied, copy: doCopy} = useCopyFeedback();
   // A 1s display clock so the request-QR screen shows a live expiry countdown (mirrors the IC rail's
   // ReceiveMode). A stale solreq scans to a confusing payer-side rejection (SolPayMode enforces exp),
   // so the merchant is told how long the QR is good for and prompted to refresh before it expires.
@@ -154,10 +154,7 @@ export function SolReceiveMode({identity, online, nfcReady, solAddress, subMode,
   function reset() { setReqUri(null); setReqSnapshot(null); setResult(null); setScanning(false); setErr(null); setMemo(''); setNfcActive(false); setNfcKey(k => k + 1); setPhase('form'); }
 
   const copySig = async () => {
-    if (!result?.sig) return;
-    const how = await copyToClipboard(result.sig);
-    setCopied(how);
-    setTimeout(() => setCopied(null), 1500);
+    if (result?.sig) { await doCopy(result.sig); }
   };
 
   if (phase === 'result' && result && !nfcActive) {

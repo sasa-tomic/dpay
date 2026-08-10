@@ -12,7 +12,7 @@ import {withdrawFunds} from '../services/relay';
 import {loadSavedWithdrawAddr, saveWithdrawAddr} from '../services/withdraw';
 import {DpayCore} from '../services/native';
 import {useEscapeToClose} from '../hooks/useHotkeys';
-import {copyToClipboard} from '../lib/clipboard';
+import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {withTimeout} from '../lib/timeout';
 
 /**
@@ -39,7 +39,7 @@ export function WithdrawSheet({identity, relayUrl, currency, display, family, to
   const [err, setErr] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<{amount: string; btcAddress: string} | null>(null);
   const [savedAddr, setSavedAddr] = useState<string | null>(null);
-  const [copied, setCopied] = useState<'clipboard' | 'shared' | null>(null);
+  const {copied, copy: doCopy} = useCopyFeedback();
 
   useEscapeToClose(onClose);
 
@@ -102,11 +102,8 @@ export function WithdrawSheet({identity, relayUrl, currency, display, family, to
   // L3 — copy the destination address on the success screen (otherwise it's a raw, long, un-copyable
   // string). Mirrors the deposit copy button: real clipboard on web, Share sheet fallback on native.
   const copyDest = useCallback(async () => {
-    if (!receipt?.btcAddress) return;
-    const how = await copyToClipboard(receipt.btcAddress);
-    setCopied(how);
-    setTimeout(() => setCopied(null), 1500);
-  }, [receipt]);
+    if (receipt?.btcAddress) { await doCopy(receipt.btcAddress); }
+  }, [receipt, doCopy]);
 
   // The body content is rendered inline in the Pay tab's "Send to address" sub-mode (the tab body
   // already provides the scroll surface + the overlay chrome). `onClose` is wired to the inner

@@ -1,10 +1,10 @@
-import {useCallback, useState} from 'react';
+import {useCallback} from 'react';
 import {View, Text, Pressable, Platform} from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import {S} from '../styles';
 import {QR_SIZE_SMALL, IS_SOLANA_DEVNET} from '../config/constants';
-import {copyToClipboard} from '../lib/clipboard';
 import {useEscapeToClose} from '../hooks/useHotkeys';
+import {useCopyFeedback} from '../hooks/useCopyFeedback';
 
 /**
  * Receive SOL — the device's native Solana deposit address (derived from the IC identity seed via
@@ -17,14 +17,10 @@ import {useEscapeToClose} from '../hooks/useHotkeys';
  * `onClose` is wired via the tab's toggle (no overlay ✕).
  */
 export function SolanaReceiveSheet({address, onClose}: {address: string; onClose: () => void}) {
-  const [copied, setCopied] = useState<'clipboard' | 'shared' | null>(null);
+  const {copied, copy: doCopy} = useCopyFeedback();
   useEscapeToClose(onClose);
 
-  const copy = useCallback(async () => {
-    const how = await copyToClipboard(address);
-    setCopied(how);
-    setTimeout(() => setCopied(null), 1500);
-  }, [address]);
+  const copy = useCallback(async () => { await doCopy(address); }, [address, doCopy]);
 
   return (
     <View style={S.sheetBody}>

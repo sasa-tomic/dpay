@@ -9,8 +9,8 @@ import type {Identity} from '../lib/types';
 import {SOL_DECIMALS, SOL_UNIT, isValidSolanaAddress} from '../solana/identity';
 import {sendSol} from '../solana';
 import {friendlySolError} from '../solana/errors';
-import {copyToClipboard} from '../lib/clipboard';
 import {useEscapeToClose} from '../hooks/useHotkeys';
+import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {withTimeout} from '../lib/timeout';
 
 /**
@@ -30,7 +30,7 @@ export function SolanaWithdrawSheet({identity, balance, onSent, onClose}: {ident
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
   const [err, setErr] = useState<string | null>(null);
   const [signature, setSignature] = useState<string | null>(null);
-  const [copied, setCopied] = useState<'clipboard' | 'shared' | null>(null);
+  const {copied, copy: doCopy} = useCopyFeedback();
 
   useEscapeToClose(onClose);
 
@@ -64,10 +64,7 @@ export function SolanaWithdrawSheet({identity, balance, onSent, onClose}: {ident
   }
 
   const copySig = async () => {
-    if (!signature) return;
-    const how = await copyToClipboard(signature);
-    setCopied(how);
-    setTimeout(() => setCopied(null), 1500);
+    if (signature) { await doCopy(signature); }
   };
 
   const body = (
