@@ -91,6 +91,17 @@ inline-only (the overlay branches were dead code after both refactors and were r
 re-routed to the tab sub-mode path; a11y census (flow 41) updated; balances visual baseline re-seeded.
 `just verify` 59/59 green. The all-currencies-uniform hard rule now holds with no exceptions.
 
+**Post-verification catch (same session, commits `ba0c857` + `eb6429e`):** an independent verifier found
+a **React Rules of Hooks violation** the e2e suite was structurally blind to — `SolPayMode`/`SolReceiveMode`
+placed their sub-mode early `return` *above* the `useState`/`useEffect` calls (unlike the IC
+`PayMode`/`ReceiveMode`), causing silent state corruption on the back-toggle (Send→Scan reset the phase/
+nonce; Address→Request reset the form). `just verify` passed because flows 45/52 only exercised the
+forward toggle. Fixed by lifting both returns below all hooks (mirroring IC exactly); RED→GREEN back-
+toggle regression assertions (state-preservation: amount/scan-phase survive the detour) added to flows
+45+52 so the class can't regress. **Lesson:** a within-component conditional-`return` that changes hook
+count is the canonical device-invisible hooks bug — always grep new early-returns against the nearest
+hook. Final HEAD `eb6429e`: `just verify` 59/59 green, typecheck clean, bridge-parity 29, jest green.
+
 <details><summary>Original scope + e2e re-route plan (historical, struck through)</summary>
 
 ~~**Scope:**~~
