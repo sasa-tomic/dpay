@@ -419,11 +419,15 @@ pub struct CkErc20OnrampParams {
 ///
 /// The `helper_address` is NETWORK-scoped (Ethereum mainnet vs Sepolia testnet each deploy their own
 /// CkDeposit helper under the same ckETH minter); the descriptor's `chain_id` selects which verified
-/// constant to surface (Sepolia = 11155111; anything else, including `None`, = mainnet — the safe
-/// default for a non-EVM-family metadata gap). The SAME helper serves both `depositEth` and
-/// `depositErc20` (see DFINITY `DepositHelperWithSubaccount.sol` `CkDeposit`). `facade_principal` is
-/// passed in (the FakeLedger uses a demo stand-in; the AgentLedger uses the live canister id it is
-/// pointed at).
+/// constant to surface. The match is EXPLICIT and FAIL-CLOSED on an unknown chain_id: a future
+/// ckERC20 deployed on, say, Polygon (chain_id 137) that hasn't been wired into the relay must NOT
+/// silently mis-route to the mainnet helper (the user's deposit would never arrive). Known chains:
+/// mainnet (`Some(1)`) and Sepolia (`Some(11155111)`). `None` is treated as mainnet — a CkEthErc20
+/// currency with no `chain_id` is a metadata gap (the cold-start fallback before the catalog
+/// populated chain_id), and the mainnet helper is the safe default. The SAME helper serves both
+/// `depositEth` and `depositErc20` (see DFINITY `DepositHelperWithSubaccount.sol` `CkDeposit`).
+/// `facade_principal` is passed in (the FakeLedger uses a demo stand-in; the AgentLedger uses the
+/// live canister id it is pointed at).
 pub fn ckerc20_onramp_from_descriptor(
     desc: Option<&CurrencyDescriptor>,
     facade_principal: String,
@@ -432,13 +436,18 @@ pub fn ckerc20_onramp_from_descriptor(
     if d.minter_family != Some(MinterFamily::CkEthErc20) {
         return Err(LedgerError::Transient("no ckERC-20 onramp for currency".into()));
     }
-    // Network-scoped helper: Sepolia (chain_id 11155111) gets the Sepolia CkDeposit helper;
-    // anything else (mainnet chain_id 1, or a None chain_id on a non-EVM-family metadata gap) falls
-    // through to the mainnet value. The chain-id gate is the minimal testnet fix (OPEN_ISSUES #1/#2).
+    // Network-scoped helper, EXPLICIT + fail-closed: known chain_ids resolve to their verified
+    // helper; an UNKNOWN chain_id returns Err (Transient → HTTP 503) instead of silently mis-routing
+    // to the mainnet helper. `None` falls through to mainnet — the cold-start metadata-gap default.
     // The SAME helper contract serves native ETH (depositEth) and ERC-20 (depositErc20).
     let helper_address = match d.chain_id {
+        Some(1) | None => CKERC20_HELPER_ADDRESS_MAINNET,
         Some(11155111) => CKERC20_HELPER_ADDRESS_SEPOLIA,
-        _ => CKERC20_HELPER_ADDRESS_MAINNET,
+        Some(other) => {
+            return Err(LedgerError::Transient(format!(
+                "unknown chain_id {other} for CkEthErc20 onramp (only mainnet=1 and Sepolia=11155111 are wired)"
+            )));
+        }
     };
     // Discriminate within the family by token_contract: Some = ERC-20 token; None = native ETH.
     let (erc20_address, kind) = match &d.token_contract {
@@ -1525,5 +1534,67 @@ mod catalog_truth_tests {
             cketh.decimals.unwrap(),
             t["decimals"]["eth"].as_u64().unwrap() as u8
         );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ckerc20_onramp_from_descriptor — chain_id fail-closed (M5).
+// ---------------------------------------------------------------------------
+// The chain_id → helper_address match must NOT silently fall back to mainnet for an UNKNOWN chain:
+// a future ckERC20 deployed on, say, Polygon (chain_id 137) that hasn't been wired into the relay
+// would mis-route deposits to the mainnet helper and the user's funds would never arrive. The match
+// must be explicit: mainnet (1) and Sepolia (11155111) are the only known-good chains; anything
+// else fails-closed with a clear error so the operator notices instead of a silent misroute.
+#[cfg(test)]
+mod ckerc20_onramp_chain_id_tests {
+    use super::*;
+
+    fn cketh_descriptor(chain_id: Option<u32>) -> CurrencyDescriptor {
+        CurrencyDescriptor {
+            currency: 99,
+            ledger: "aaaaa-aa".to_string(),
+            mintable: false,
+            minter: None,
+            minter_family: Some(MinterFamily::CkEthErc20),
+            symbol: None,
+            decimals: Some(18),
+            wrapper_name: None,
+            backing_symbol: None,
+            network: None,
+            display_decimals: None,
+            fee: None,
+            cap: None,
+            chain_id,
+            token_contract: None,
+            gas_ledger: None,
+            onramp: RampCapability::Direct,
+            offramp: RampCapability::Direct,
+        }
+    }
+
+    #[test]
+    fn unknown_chain_id_is_rejected_not_silently_mainnet_routed() {
+        let desc = cketh_descriptor(Some(999));
+        let res = ckerc20_onramp_from_descriptor(Some(&desc), "aaaaa-aa".to_string());
+        assert!(
+            res.is_err(),
+            "an unknown chain_id must fail-closed, not silently route to the mainnet helper"
+        );
+    }
+
+    #[test]
+    fn mainnet_chain_id_resolves_to_mainnet_helper() {
+        let desc = cketh_descriptor(Some(1));
+        let onramp =
+            ckerc20_onramp_from_descriptor(Some(&desc), "aaaaa-aa".to_string()).expect("mainnet ok");
+        assert_eq!(onramp.helper_address, CKERC20_HELPER_ADDRESS_MAINNET);
+    }
+
+    #[test]
+    fn sepolia_chain_id_resolves_to_sepolia_helper() {
+        let desc = cketh_descriptor(Some(11155111));
+        let onramp =
+            ckerc20_onramp_from_descriptor(Some(&desc), "aaaaa-aa".to_string()).expect("sepolia ok");
+        assert_eq!(onramp.helper_address, CKERC20_HELPER_ADDRESS_SEPOLIA);
     }
 }
