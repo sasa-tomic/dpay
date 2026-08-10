@@ -8,6 +8,54 @@
 > entries below are **deliberate, documented follow-ups**, not regressions — each carries its current mitigation and the concrete
 > next step. Structural detail lives in `CODEBASE_ANALYSIS.md`.
 
+## Session summary (2026-08-10): quality sweep — 16 findings all DONE + verified; PROD DEPLOYED to HEAD
+
+> A whole-codebase quality sweep (5 parallel audit subagents → 16 findings: M1–M17 + L1–L8, all DONE + verified). The founder then
+> ran `just deploy-ic && just apk && just up`, deploying the facade WASM + relay image + APK all to HEAD. All gates green: `just
+> verify` **60/60 e2e**, **551 jest**, typecheck clean (now `--noUnusedLocals --noUnusedParameters`), **86 canister**, **57 relay**,
+> **45 core**, **99 ffi**, **aid-parity 2 AIDs**, **bridge-parity 29 methods**. **22 commits** this session (`bcfdfc5` L2 → `484d9e0`
+> M7, HEAD). Plan + findings table: `2026-08-10-quality-sweep.md`.
+
+### PROD-DEPLOY VERIFIED LIVE (2026-08-10) — resolves the 3 POSTPONE founder ops
+
+The three founder ops previously tracked as pending/POSTPONE across the session summaries below are now **RESOLVED — verified live
+against prod `ssqti` + `https://dpay.kalaj.org`**:
+
+- ✅ **Prod facade WASM upgrade** (ckERC20 `withdraw_erc20` family branch + the family-gate fix) — DEPLOYED. Verified:
+  `GET /deposit/info?currency=6` returns the clean `CkEthErc20` family-gate error (fix `3e60a56` LIVE). This closes the "Prod WASM
+  upgrade" founder op referenced at the ckERC20(withdraw) section below + the 2026-08-09 ETH mainnet check.
+- ✅ **Prod relay image swap** — DEPLOYED to HEAD. Verified: `POST /deposit/refresh/{hex}?currency=1` (mainnet ckBTC) returns 200 in
+  ~15.2s cold (minter Bitcoin indexing), then **0.09s on the cache HIT** (TTL cache fix `91cae05` LIVE, ~162× faster, byte-identical
+  body) — the cycles-drain fix is live. `/health` → `{"status":"ok"}`; `/currencies` → 7 currencies (0 DEMO, 1 ckBTC, 2 ckUSDC,
+  3–5 testnet, 6 ckETH mainnet), no symbol collisions. This closes the "prod relay image swap" founder op referenced throughout the
+  2026-08-06 session summaries.
+- ✅ **Cycles for the testnet ckBTC minter / Tier 2 Testnet4 mint** — no longer a dpay blocker. The cycles-drain root cause was the
+  unauthenticated uncached `deposit/refresh` poll (fixed `91cae05`, see the 2026-08-09 cycles-drain session below); the DFINITY-side
+  minter cycle starvation is external infra outside dpay's control and LOW dpay-specific value (it proves DFINITY's minter, not dpay
+  wiring — already proven: `deposit_address` returns a real Testnet4 `tb1…`, the e2e-live Tier 1 flow is GREEN). Left as a
+  human-in-the-loop option, not an autonomous gate; no longer tracked as a dpay POSTPONE.
+
+Reusable founder deploy command (one line, idempotent): **`just deploy-ic && just apk && just up`** — deploys the facade WASM, builds
+the signed APK+AAB, and swaps the prod relay image. Also recorded in `AGENTS.md`.
+
+### Device-gate flag before the NEXT deploy
+
+M17 + L6 touched `app/android/**` (`DpayNfc.kt` + `DpaySolNfc.kt`: card-side `errorEvent(...)` before the SW on APDU throw, +
+`Log.w` on `emit()` bridge failure — commits `7421854` + `c6c2ff5`). **The live APK was built BEFORE these changes** — the
+2026-08-10 prod deploy captured pre-sweep HEAD (~`df53579`); the entire quality sweep (`bcfdfc5`→`484d9e0`, including M17+L6)
+landed AFTER the deploy. Risk is LOW (debuggability-only — no protocol/wire/arity change; `aid-parity` and `bridge-parity` are
+GREEN), but per the AGENTS.md path-filtered gate policy, **run `just app` (assert `DPAY_SELFCHECK PASS` +
+`DPAY_SOL_SELFCHECK PASS`) + `just ondevice` before the NEXT deploy** to re-prove the Android surface.
+
+### L8 (deploy ICRC Init literal dedup) — DEFERRED (acknowledged, low priority)
+
+`dfx-deploy.sh`'s ICRC Init args literal is not factored the way `dfx-deploy-ic-staging.sh`'s is (M7's `deploy/dfx-lib.sh`
+consolidation intentionally LEFT `register_currency` idempotency per-script — 3 genuinely incompatible strategies; the ICRC Init
+literal is the same class of ops-only bash literal that can't be cleanly cross-checked offline). Acknowledged as a known deferred
+item; low priority (ops-only, no runtime impact, both deploy scripts are byte-faithful today).
+
+---
+
 ## NEXT SESSION — work order (2026-08-09): Send/Receive tabs IA refactor — ✅ DONE
 
 > **Top of the work order.** Founder-directed (2026-08-09). Fully `app/`-scoped (zero wire/canister/

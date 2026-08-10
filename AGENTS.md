@@ -22,6 +22,8 @@ It is not a historical snapshot — it is maintained alongside the code:
 
 Inner loop runs fully offline via `just` and completes in seconds (`just verify` = core + canister + relay + e2e; `just test-core`, `just test-canister`, `just test-relay`, `just sim`, `just ffi` for individual slices). `third_party/` is the canonical local source cache — look there first; `.dev/`, `third_party/`, `vendor/`, and `target/` are gitignored. The Android emulator / physical devices are an outer-loop fidelity gate only, never on the inner loop.
 
+**Reusable prod deploy (founder-run, idempotent):** `just deploy-ic && just apk && just up` — deploys the facade WASM (`scripts/dfx-deploy-ic.sh`), builds the signed APK+AAB, and swaps the prod relay image. This is the one-line "ship to prod" command; everything else in the inner loop is offline. The founder ran it 2026-08-10 to bring facade + relay + APK all to HEAD.
+
 **The RN app (`app/`) is a modular tree, not a monolith** (split 2026-07-31; see `2026-07-31-app-split-plan.md`). `app/App.tsx` (~80 lines) is the root — it loads identity + relay, self-checks, and routes `Onboarding | Wallet`. The rest is layered: `config/` (palette, constants incl. the module-level `POLL`, currency catalog), `lib/` (types + pure format helpers), `hooks/`, `services/` (the single `NativeModules.DpayCore/DpayNfc` destructure + relay/withdraw fetch clients + receipt verify), `styles.ts` (ONE `StyleSheet.create` block — do NOT partition it; the e2e net matches testID + textContent only and cannot catch a dropped style key), and `components/` (all presentational components incl. the `Wallet` container). Four production modules also live at the `app/` root: `payments.ts` (pure settlement-outcome logic + the receipt↔request nonce-match helper), `wallet.ts` (EIP-1193 onramp provider resolution), `cketh.ts` (byte-exact ckERC20 calldata builder), and `walletconnect.ts` (the ONLY file that statically imports `@walletconnect/*`, reached via a dynamic `import('./walletconnect')` in `wallet.ts` — an intentional isolation boundary so `just verify` never executes WC SDK code). Use relative imports only (no `@/` aliases). Only `app/App.tsx` imports `./relayConfig` (the e2e `?relay=` override is anchored on that path); thread `relayUrl` as a prop everywhere else.
 
 ## Pre-merge gates off the hot verify path
@@ -58,6 +60,8 @@ The gates:
 - **`just ondevice`** — 8 instrumented tests driving the real UniFFI binding + NFC framing on the emulator.
 
 This is the documented resolution of OPEN_ISSUES #10 Layer 3 (the path-filtered pre-merge gate) + the 2026-08-02 process fix (blind spots 1+2 added after a user-filed `---` balance / status-bar / self-check triple regression that sailed through `verify`). The gate code path is proven and green; the checklist keeps it from being skipped.
+
+**Stricter typecheck (commit `8a6ca28`).** `just typecheck` runs `tsc --noEmit --noUnusedLocals --noUnusedParameters`, so dead imports / unused locals / unused params now FAIL the gate (previously sailed through under plain `tsc --noEmit`). A green `just typecheck` is now a positive proof of no dead declarations in `app/`, not just a type-correctness check.
 
 ## E2e flow catalog
 
