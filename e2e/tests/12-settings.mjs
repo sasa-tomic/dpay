@@ -50,6 +50,9 @@ export async function run() {
     console.log('[12-settings] opening Settings…');
     await driver.click('btn-settings', { timeoutMs: 4_000 });
 
+    // 2b. Expand the "Advanced" disclosure so the relay input is reachable (defaults collapsed).
+    await driver.click('btn-advanced-toggle', { timeoutMs: 4_000 });
+
     // 3. The relay input holds the relay URL the app is using.
     const relayVal = await driver.readInputValue('settings-relay', { timeoutMs: 4_000 });
     assertEq(relayVal, relayBaseURL, 'settings-relay should hold the active relay URL');
@@ -74,6 +77,7 @@ export async function run() {
     await driver.navigate(webBaseURL, '/', { waitUntil: 'domcontentloaded', timeoutMs: 8_000 });
     await driver.waitReady({ timeoutMs: 8_000 });
     await driver.click('btn-settings', { timeoutMs: 6_000 });
+    await driver.click('btn-advanced-toggle', { timeoutMs: 4_000 }); // expand the disclosure again
     const persistedRelay = await driver.readInputValue('settings-relay', { timeoutMs: 4_000 });
     assertEq(persistedRelay, edited, 'settings-relay must persist across reload (AsyncStorage)');
     console.log(`[12-settings] ✓ relay URL persisted across reload → ${persistedRelay}`);

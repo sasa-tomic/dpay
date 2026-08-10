@@ -152,8 +152,10 @@ export async function run() {
     console.log('[41-a11y-census] ✓ census: balances hub');
     await driver.click('btn-balances-close', { timeoutMs: 4_000 });
 
-    // 4. Settings sheet (open via btn-settings).
+    // 4. Settings sheet (open via btn-settings). Expand the Advanced disclosure so the census
+    //    covers settings-relay + btn-relay-apply (the founder-directed default is collapsed).
     await driver.click('btn-settings', { timeoutMs: 4_000 });
+    await driver.click('btn-advanced-toggle', { timeoutMs: 4_000 });
     await driver.findByTestID('settings-relay', { timeoutMs: 4_000 });
     await census('settings');
     console.log('[41-a11y-census] ✓ census: settings');

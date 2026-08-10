@@ -94,9 +94,11 @@ export async function run() {
     await driver.screenshot(SURFACES[2].capture);
     await driver.click('btn-balances-close', { timeoutMs: 4_000 });
 
-    // 5. Settings (relay config + reset).
+    // 5. Settings (relay config + reset). The "Advanced" disclosure defaults COLLAPSED now (the
+    //    founder-directed consumer posture: relay URL hidden unless explicitly expanded). The
+    //    captured baseline reflects the collapsed state.
     await driver.click('btn-settings', { timeoutMs: 4_000 });
-    await driver.findByTestID('settings-relay', { timeoutMs: 5_000 });
+    await driver.findByTestID('btn-advanced-toggle', { timeoutMs: 5_000 });
     await driver.screenshot(SURFACES[3].capture);
     await driver.click('btn-settings-close', { timeoutMs: 4_000 });
 

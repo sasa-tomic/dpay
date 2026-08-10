@@ -49,7 +49,7 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, secretHe
   const [confirmBackup, setConfirmBackup] = useState(false);
   const [backupRevealed, setBackupRevealed] = useState(false);
   const {copied, copy: doCopy, clear: clearCopied} = useCopyFeedback();
-  const [advancedOpen, setAdvancedOpen] = useState(true);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [draftRelay, setDraftRelay] = useState(relayUrl);
   // `lastApplied` tracks the URL the app is actually using (the parent's `relayUrl` updates AFTER
   // Apply succeeds). It's the source of truth for the "draft differs from active" gate so the Apply
@@ -175,10 +175,10 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, secretHe
             </Pressable>
           </View>
 
-          {/* Advanced: Server (the relay URL) — collapsed-capable disclosure. Defaults open so the
-              e2e flows that type into `settings-relay` immediately after opening Settings still work
-              without an extra "expand" step. The header is the toggle; testID `btn-advanced-toggle`
-              lets a future default-collapse add an expand-first step to those flows. */}
+          {/* Advanced: Server (the relay URL) — disclosure COLLAPSES by default so a curious
+              consumer doesn't see the relay URL input + a one-paste-away brick on first open.
+              The header is the toggle; testID `btn-advanced-toggle` is the expansion step the e2e
+              flows add before reading `settings-relay`. Expanding is one tap — keep it cheap. */}
           <View style={S.settingsSection}>
             <Pressable
               testID="btn-advanced-toggle"

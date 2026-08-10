@@ -42,9 +42,11 @@ export async function run() {
       `identity.secretHex should be a non-empty string in localStorage (got ${JSON.stringify(secretHex)})`,
     );
 
-    // 2. Open Settings.
+    // 2. Open Settings. Expand the Advanced disclosure to confirm the relay row is still wired
+    //    (the default-collapse change must not regress the e2e contract for the seed-backup flow).
     console.log('[57-settings-seed-backup] opening Settings → Backup…');
     await driver.click('btn-settings', { timeoutMs: 5_000 });
+    await driver.click('btn-advanced-toggle', { timeoutMs: 5_000 });
     await driver.findByTestID('settings-relay', { timeoutMs: 5_000 });
 
     // 3. The Backup entry row is present; the seed is NOT (it lives behind the confirm gate).

@@ -61,12 +61,12 @@ export async function run() {
     // aborts in-flight fetches from relay A on the relayUrl change + rejects stale results via a
     // generation ref (OPEN_ISSUES #6), so the header reflects relay B's ∂500.00 promptly.
     //
-    // NOTE: W1.B's "Advanced" disclosure (btn-advanced-toggle) wraps the relay section but DEFAULTS
-    // OPEN, so `settings-relay` is visible at first render — no expand step needed (same contract
-    // flows 12/13/19/20/22/41 rely on). If a future default-collapse lands, ALL those flows (incl.
-    // this one) must add a `click('btn-advanced-toggle')` before typing.
+    // NOTE: W1.B's "Advanced" disclosure (btn-advanced-toggle) wraps the relay section and now
+    // DEFAULTS COLLAPSED (the founder-directed consumer posture). The flow expands it before typing
+    // into `settings-relay` — same pattern flows 12/40/41/57 use.
     console.log('[38-relay-retarget] opening Settings → switching relay to B…');
     await driver.click('btn-settings', { timeoutMs: 4_000 });
+    await driver.click('btn-advanced-toggle', { timeoutMs: 4_000 }); // expand the Advanced disclosure
     await driver.type('settings-relay', r2.baseURL, { timeoutMs: 4_000 });
     await driver.click('btn-relay-apply', { timeoutMs: 4_000 });
     await driver.click('btn-settings-close', { timeoutMs: 4_000 });
