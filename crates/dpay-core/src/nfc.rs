@@ -1053,12 +1053,6 @@ impl ReaderConductor {
 // Typed decoders over the transported payloads
 // ---------------------------------------------------------------------------
 
-/// Fragment a merchant [`PaymentRequest`] for the reader to push. Convenience over
-/// [`ReaderConductor::new`] when you want the frames directly.
-pub fn request_to_frames(req: &PaymentRequest, max_chunk: usize) -> Result<Vec<Vec<u8>>, NfcError> {
-    Ok(frame::fragment(&req.to_bytes(), max_chunk)?)
-}
-
 /// Decode the bytes the reader reassembled from the card back into a [`SignedAuthorization`], with a
 /// length guard so a truncated/oversized transfer is caught before the core parser. The signature is
 /// **not** trusted here — the caller still calls [`SignedAuthorization::verify`] / [`crate::verify`].
