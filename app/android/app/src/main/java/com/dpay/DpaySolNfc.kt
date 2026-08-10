@@ -82,8 +82,8 @@ object DpaySolNfc {
     private fun emit(map: WritableMap) {
         try {
             ctx?.getJSModule(RCTDeviceEventEmitter::class.java)?.emit(EVENT, map)
-        } catch (_: Throwable) {
-            // JS bridge not ready (e.g. a background tap before the app is up) — never fatal.
+        } catch (e: Throwable) {
+            android.util.Log.w("dpay", "NFC emit failed", e)
         }
     }
 
