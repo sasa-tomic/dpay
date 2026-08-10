@@ -261,10 +261,17 @@ impl AgentLedger {
             .build()
             .map_err(|e| LedgerError::Transient(format!("agent build: {e}")))?;
         if fetch_root_key {
-            agent
-                .fetch_root_key()
-                .await
-                .map_err(|e| LedgerError::Transient(format!("fetch_root_key: {e}")))?;
+            tokio::time::timeout(
+                Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
+                agent.fetch_root_key(),
+            )
+            .await
+            .map_err(|_| {
+                LedgerError::Transient(format!(
+                    "fetch_root_key timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
+                ))
+            })?
+            .map_err(|e| LedgerError::Transient(format!("fetch_root_key: {e}")))?;
         }
         Ok(AgentLedger { agent, canister_id })
     }
