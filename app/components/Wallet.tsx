@@ -30,7 +30,7 @@ import {SolReceiveMode} from './SolReceiveMode';
 import {SettingsSheet} from './SettingsSheet';
 import {BalancesSheet} from './BalancesSheet';
 
-export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Identity; relayUrl: string; setRelayUrl: (s: string) => void; onReset: () => void}) {
+export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {identity: Identity; relayUrl: string; setRelayUrl: (s: string) => void; onReset: () => void; onRestore: (id: Identity) => Promise<void>}) {
   const [mode, setMode] = useState<'pay' | 'receive' | 'ledger'>('pay');
   // Deeplink prefill (item 6): a `dpay:req/<blob>` (or the web `?req=<blob>` mirror) sets the raw
   // base64url blob + flips mode to 'pay'; PayMode consumes it via its prefill effect (which reuses
@@ -450,7 +450,9 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
           setRelayUrl={setRelayUrl}
           onClose={() => setSettingsOpen(false)}
           onReset={onReset}
+          onRestore={onRestore}
           secretHex={identity.secretHex}
+          username={identity.username}
         />
       ) : null}
     </SafeAreaView>

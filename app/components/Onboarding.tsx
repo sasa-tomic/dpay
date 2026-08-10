@@ -4,7 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {STORAGE_KEY, BALANCE_TIMEOUT_MS} from '../config/constants';
-import {base} from '../lib/format';
+import {base, validateSeed} from '../lib/format';
 import type {Identity} from '../lib/types';
 import {DpayCore} from '../services/native';
 import {fetchWithTimeout} from '../services/relay';
@@ -44,9 +44,10 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
   // BOTH rails: the IC Ed25519 key (this keypair) AND the Solana key (SLIP-10 derivation, see
   // app/solana/identity.ts).
   async function restore() {
-    const s = seed.trim().toLowerCase();
     setErr(null);
-    if (!/^[0-9a-f]{64}$/.test(s)) { setErr('Recovery seed must be 64 hex characters (0-9, a-f).'); return; }
+    const e = validateSeed(seed);
+    if (e) { setErr(e); return; }
+    const s = seed.trim().toLowerCase();
     const name = username.trim() || 'me';
     setBusy(true);
     try {
@@ -108,12 +109,19 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
                 accessibilityRole="button" accessibilityLabel="Create wallet" accessibilityHint="Generate your on-device key and add demo funds" accessibilityState={{disabled: busy}}>
                 <Text style={S.primaryText}>{busy ? 'Creating…' : 'Create wallet'}</Text>
               </Pressable>
+              {/* Restore entry — promoted (UX fix 2026-08-10) from a muted bottom link (S.linkBtn /
+                  S.linkTextMuted) to S.secondaryBtn / S.secondaryBtnText, and repositioned to sit
+                  IMMEDIATELY after Create. Create stays the filled-brand default (primary); Restore
+                  is now equal visual weight (same 56pt, full-width, bordered) but distinct prominence
+                  — a returning user sees recovery at true parity with Create. The expandable model +
+                  ALL restore-mode testIDs (btn-restore, restore-seed-input, btn-restore-confirm,
+                  btn-restore-cancel) are unchanged; only the entry button's style + position change. */}
+              <Pressable testID="btn-restore" style={S.secondaryBtn} onPress={() => { setMode('restore'); setErr(null); }}
+                accessibilityRole="button" accessibilityLabel="Restore wallet" accessibilityHint="Recover a wallet from your 64-hex recovery seed">
+                <Text style={S.secondaryBtnText}>Restore wallet</Text>
+              </Pressable>
               <Text style={S.dim2}>Creates your wallet and adds ∂100 in demo funds to get started.</Text>
               <Text style={S.dpayGlyphNote}><Text style={S.dpayGlyph}>∂</Text> is the demo-dollar symbol — play money, ∂1 = $1.</Text>
-              <Pressable testID="btn-restore" style={S.linkBtn} onPress={() => { setMode('restore'); setErr(null); }}
-                accessibilityRole="button" accessibilityLabel="Restore wallet" accessibilityHint="Recover a wallet from your 64-hex recovery seed">
-                <Text style={S.linkTextMuted}>Restore wallet</Text>
-              </Pressable>
             </>
           )}
         </ScrollView>

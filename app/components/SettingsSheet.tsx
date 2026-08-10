@@ -3,6 +3,9 @@ import {View, Text, Pressable, TextInput, ScrollView, SafeAreaView, StatusBar, P
 import {C} from '../config/palette';
 import {PRIVACY_URL} from '../config/constants';
 import {S} from '../styles';
+import {validateSeed} from '../lib/format';
+import type {Identity} from '../lib/types';
+import {DpayCore} from '../services/native';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {SheetOverlay} from './SheetOverlay';
@@ -28,15 +31,22 @@ import {SheetOverlay} from './SheetOverlay';
  *    the action opens a confirmation dialog (the destructive gate stays in place). Visually distinct
  *    from the "Privacy policy" link above it (which previously shared the same link chrome).
  */
-export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, secretHex}: {
+export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestore, secretHex, username}: {
   relayUrl: string;
   setRelayUrl: (s: string) => void;
   onClose: () => void;
   onReset: () => void;
+  // Replace the current identity with a restored one (built from a 64-hex seed the user pastes).
+  // Mirrors Onboarding's restore semantics; App.tsx persists + setIdentity. Restore REPLACES the
+  // identity directly (no wipe) — the old wallet stays recoverable via its own seed.
+  onRestore: (id: Identity) => Promise<void>;
   // The IC ed25519 seed hex (32 bytes). The same seed derives BOTH the IC account and the Solana
   // keypair (app/solana/identity.ts SLIP-10 derivation), so revealing this ONE secret is the full
   // backup. Pure display + copy; no money logic, no persistence (it already lives in AsyncStorage).
   secretHex: string;
+  // The current wallet's username — PRESERVED across a restore (the seed recovers keys, not local
+  // display metadata). Passed to the rebuilt Identity so the user keeps their display name.
+  username: string;
 }) {
   useEscapeToClose(onClose);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -46,6 +56,15 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, secretHe
   // accidental shoulder-surf reveal on a first tap. `copied` mirrors DepositSheet/WithdrawSheet.
   const [confirmBackup, setConfirmBackup] = useState(false);
   const [backupRevealed, setBackupRevealed] = useState(false);
+  // Restore form state (mirrors the backup/reset confirm pattern): `confirmRestore` opens the inline
+  // seed-input form; `restoreSeed` holds the user-entered 64-hex; `restoreBusy` gates the confirm
+  // button during the keypairFromSecret FFI call; `restoreErr` surfaces a validation/derivation
+  // failure (bad seed shape, FFI throw). On a successful confirm the parent replaces the identity
+  // and this sheet unmounts (App.tsx setIdentity → wallet re-mounts under the new key).
+  const [confirmRestore, setConfirmRestore] = useState(false);
+  const [restoreSeed, setRestoreSeed] = useState('');
+  const [restoreBusy, setRestoreBusy] = useState(false);
+  const [restoreErr, setRestoreErr] = useState<string | null>(null);
   const {copied, copy: doCopy, clear: clearCopied} = useCopyFeedback();
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [draftRelay, setDraftRelay] = useState(relayUrl);
@@ -62,6 +81,33 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, secretHe
   // Copy the seed via the shared clipboard-feedback hook (real clipboard on web, Share on native;
   // surfaces the "Copied ✓"/"Shared ✓" confirmation for 1500ms).
   const copySeed = () => { void doCopy(secretHex); };
+
+  // Validate + derive + replace the identity from a pasted 64-hex seed. Mirrors Onboarding.restore:
+  // validateSeed → keypairFromSecret → build Identity (username preserved) → hand to onRestore
+  // (App.tsx persists + setIdentity → wallet re-renders under the new key). On success we ALSO
+  // dismiss the sheet: a Wallet re-render (not unmount) follows a non-null identity replace, so
+  // without `onClose` the Settings sheet would stay open over the now-replaced wallet. Closing it
+  // lands the user back at the wallet view (the natural "I just restored → show me my wallet"
+  // expectation), and is symmetric with Reset (which makes the whole Wallet unmount). The form's
+  // busy/error state stays co-located with the input (same idiom as Onboarding restore).
+  async function doRestore() {
+    if (restoreBusy) return;
+    const e = validateSeed(restoreSeed);
+    if (e) { setRestoreErr(e); return; }
+    const seed = restoreSeed.trim().toLowerCase();
+    setRestoreBusy(true); setRestoreErr(null);
+    try {
+      const kp = await DpayCore.keypairFromSecret(seed);
+      const id: Identity = {secretHex: kp.secretHex, publicHex: kp.publicHex, username};
+      await onRestore(id);
+      onClose();
+      // On success the sheet unmounts (Wallet setSettingsOpen(false)); no need to reset local form
+      // state — the component is gone.
+    } catch (err: unknown) {
+      setRestoreErr(err instanceof Error ? err.message : String(err));
+      setRestoreBusy(false);
+    }
+  }
 
   return (
     <SheetOverlay>
@@ -157,6 +203,67 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, secretHe
                 accessibilityHint="Reveals your recovery seed — backs up both your IC and Solana funds"
                 accessibilityState={{disabled: false}}>
                 <Text style={S.backupEntryText}>Back up wallet…</Text>
+              </Pressable>
+            )}
+          </View>
+
+          {/* Restore — import a wallet from a 64-hex seed WITHOUT resetting first. Mirrors the Backup
+              two-step idiom (entry button → expandable seed form → confirm) so a user who loses their
+              phone has an in-app import path: they no longer need to wipe (Reset) then restore from
+              Onboarding. On confirm: keypairFromSecret → build Identity (username preserved) → onRestore
+              (App.tsx persists + setIdentity). Restore REPLACES identity directly (no wipe); the old
+              wallet stays recoverable via its own seed. Entry button uses `secondaryBtn` (neutral
+              bordered — reads as "import", not destructive-red like Reset, not brand-green like Backup). */}
+          <View style={S.settingsSection}>
+            <Text style={S.inputLabel}>Restore</Text>
+            {confirmRestore ? (
+              <View style={S.backupConfirmBox}>
+                <Text style={S.warnNote}>This replaces your current wallet with the one recovered from this seed. Back up your current wallet first if you haven't — its funds are only reachable via its own seed.</Text>
+                <TextInput
+                  testID="settings-restore-seed-input"
+                  style={S.seedInput}
+                  value={restoreSeed}
+                  onChangeText={setRestoreSeed}
+                  placeholder="64 hex characters"
+                  placeholderTextColor={C.sub2}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  multiline
+                  accessibilityLabel="Recovery seed"
+                  accessibilityHint="The 64-hex seed shown by Backup that recovers your wallet"
+                />
+                {restoreErr ? <Text style={S.err}>{restoreErr}</Text> : null}
+                <Pressable
+                  testID="btn-settings-restore-confirm"
+                  style={[S.primary, (restoreBusy || restoreSeed.trim() === '') && S.dim]}
+                  disabled={restoreBusy || restoreSeed.trim() === ''}
+                  onPress={doRestore}
+                  accessibilityRole="button"
+                  accessibilityLabel="Restore wallet"
+                  accessibilityHint="Replaces your current wallet with the one recovered from this seed"
+                  accessibilityState={{disabled: restoreBusy || restoreSeed.trim() === ''}}>
+                  <Text style={S.primaryText}>{restoreBusy ? 'Restoring…' : 'Restore wallet'}</Text>
+                </Pressable>
+                <Pressable
+                  testID="btn-settings-restore-cancel"
+                  style={S.linkBtn}
+                  onPress={() => { setConfirmRestore(false); setRestoreSeed(''); setRestoreErr(null); }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cancel restore"
+                  accessibilityState={{disabled: false}}>
+                  <Text style={S.linkTextMuted}>Cancel</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <Pressable
+                testID="btn-settings-restore"
+                style={S.secondaryBtn}
+                onPress={() => { setConfirmRestore(true); setRestoreErr(null); }}
+                accessibilityRole="button"
+                accessibilityLabel="Restore wallet"
+                accessibilityHint="Import a wallet from your 64-hex recovery seed — replaces your current wallet"
+                accessibilityState={{disabled: false}}>
+                <Text style={S.secondaryBtnText}>Restore wallet…</Text>
               </Pressable>
             )}
           </View>

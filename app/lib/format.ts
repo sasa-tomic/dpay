@@ -65,6 +65,17 @@ export function hexToBytes(hex: string): Uint8Array {
 }
 export const base = (u: string) => u.replace(/\/$/, '');
 
+// Validate a 64-hex recovery seed (the value Backup reveals). Returns null when valid, else a
+// one-line error message. Trims + lowercases first so a pasted seed with stray whitespace or mixed
+// case is accepted (the canonical form is lowercase, which keypairFromSecret expects). Shared by
+// the Onboarding restore form + the Settings restore form — single source of truth for the rule
+// "the seed is 64 chars from [0-9a-f]".
+export function validateSeed(s: string): string | null {
+  const t = s.trim().toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(t)) return 'Recovery seed must be 64 hex characters (0-9, a-f).';
+  return null;
+}
+
 // Request QR = plain base64url of the 132-byte PaymentRequest (the payee's `to_name` + `memo` ride
 // INSIDE the bytes now — wire-format v2; the old `<b64>|<name>` suffix is GONE). Returns the trimmed
 // base64url string the app hands to DpayCore.decodeRequest. Defensively strips a stray `|…` suffix

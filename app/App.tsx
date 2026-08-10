@@ -100,6 +100,16 @@ export default function App() {
 
   const onReset = useCallback(async () => { await AsyncStorage.removeItem(STORAGE_KEY); setIdentity(null); }, []);
 
+  // Replace the current identity with a restored one (Settings → Restore). Symmetric with `onReset`
+  // (which removes): this WRITES + setIdentity. App.tsx remains the sole owner of AsyncStorage
+  // writes; SettingsSheet does the FFI key-derivation + Identity build inline (mirrors Onboarding's
+  // restore) and hands the built identity here for persistence + state replacement. Restore
+  // REPLACES identity directly (no wipe) — the old wallet stays recoverable via its own seed.
+  const onRestore = useCallback(async (id: Identity) => {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(id));
+    setIdentity(id);
+  }, []);
+
   // M5: wrap every root in `screenFrame` so the capped (`maxWidth:480`) app column centers on a
   // wide desktop viewport, with the bg filling the honest side margins. At <=480px it is inert.
   if (identity === undefined) {
@@ -108,5 +118,5 @@ export default function App() {
   if (identity === null) {
     return <View style={S.screenFrame}><Onboarding relayUrl={relayUrl} onCreated={setIdentity} /></View>;
   }
-  return <View style={S.screenFrame}><Wallet identity={identity} relayUrl={relayUrl} setRelayUrl={persistRelay} onReset={onReset} /></View>;
+  return <View style={S.screenFrame}><Wallet identity={identity} relayUrl={relayUrl} setRelayUrl={persistRelay} onReset={onReset} onRestore={onRestore} /></View>;
 }
