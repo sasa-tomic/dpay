@@ -9,7 +9,7 @@ import {encodeDeeplink, decodeReceiptDeeplink} from '../lib/deepLink';
 import {type CurrencyDescriptor, type FamilyDisplay, assetTestKey, displayName, fmtCurrencyAmount, currencySymbol, isTestnetCurrency} from '../config/catalog';
 import type {Identity} from '../lib/types';
 import {rejectionMessage, isNonceReused, isReceiptForRequest} from '../payments';
-import {fetchWithTimeout, payAndClassify, readJsonOrEmpty} from '../services/relay';
+import {fetchWithTimeout, payAndClassify} from '../services/relay';
 import {verifyOutcomeReceipt} from '../services/receipt';
 import {DpayCore, DpayNfc} from '../services/native';
 import {NfcTap} from './NfcTap';
@@ -28,7 +28,7 @@ import {withTimeout} from '../lib/timeout';
 // left the field floating shorter than its neighbors), 44pt-min.
 const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeight: 44, borderWidth: 1, borderColor: C.sub2, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink};
 
-export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, catalog, currentCurrency, depositCurrency, onDepositCurrencyChange, depositDisplay, depositChainId, depositNativeEth, depositFamily, subMode, onSubModeChange, prefillReceipt, onReceiptConsumed}: {identity: Identity; relayUrl: string; online: boolean; nfcReady: boolean; onReceived: () => void; catalog: CurrencyDescriptor[]; currentCurrency: number; depositCurrency: number; onDepositCurrencyChange: (c: number) => void; depositDisplay: FamilyDisplay | null; depositChainId: number | null; depositNativeEth: boolean; depositFamily: 'CkBtcUtxo' | 'CkEthErc20' | null; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; prefillReceipt?: string | null; onReceiptConsumed?: () => void}) {
+export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, catalog, depositCurrency, depositDisplay, depositChainId, depositNativeEth, depositFamily, subMode, onSubModeChange, prefillReceipt, onReceiptConsumed}: {identity: Identity; relayUrl: string; online: boolean; nfcReady: boolean; onReceived: () => void; catalog: CurrencyDescriptor[]; depositCurrency: number; depositDisplay: FamilyDisplay | null; depositChainId: number | null; depositNativeEth: boolean; depositFamily: 'CkBtcUtxo' | 'CkEthErc20' | null; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; prefillReceipt?: string | null; onReceiptConsumed?: () => void}) {
   // The within-tab sub-mode is OWNED by Wallet so deeplinks (?screen=deposit, auto-open-ckERC20) can
   // land the user directly on "My address". "request" = the dpay-to-dpay payment-request QR;
   // "address" = the on-chain deposit flow. The toggle renders only when depositFamily is non-null.

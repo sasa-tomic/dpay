@@ -63,8 +63,6 @@ export function SolanaWithdrawSheet({identity, balance, onSent, onClose}: {ident
     }
   }
 
-  function reset() { setAddress(''); setAmountStr(''); setErr(null); setSignature(null); setCopied(null); setPhase('form'); }
-
   const copySig = async () => {
     if (!signature) return;
     const how = await copyToClipboard(signature);

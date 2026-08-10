@@ -99,8 +99,6 @@ export function WithdrawSheet({identity, relayUrl, currency, display, family, to
     }
   }
 
-  function reset() { setAddress(''); setAmountStr(''); setErr(null); setReceipt(null); setCopied(null); setPhase('form'); }
-
   // L3 — copy the destination address on the success screen (otherwise it's a raw, long, un-copyable
   // string). Mirrors the deposit copy button: real clipboard on web, Share sheet fallback on native.
   const copyDest = useCallback(async () => {

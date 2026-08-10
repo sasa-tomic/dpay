@@ -7,7 +7,7 @@ import {TOP_UP_CENTS, FAUCET_TIMEOUT_MS, SHOW_TESTNET_STORAGE_KEY} from '../conf
 import {familyDisplay, fmtCurrencyAmount} from '../config/catalog';
 import {usd, base, fmtAsset} from '../lib/format';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
-import {cmpRaw, applyOffline} from '../lib/amount';
+import {applyOffline} from '../lib/amount';
 import type {Identity, NfcStatus} from '../lib/types';
 import {DpayCore} from '../services/native';
 import {loadDeposit} from '../services/ckerc20Persist';
@@ -391,7 +391,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
                   identity={identity} online={online} relayUrl={relayUrl} nfcStatus={nfc}
                   onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance}
                   catalog={catalog} assetBalances={displayAssetBalances}
-                  withdrawCurrency={currentCurrency} onWithdrawCurrencyChange={setCurrentCurrency}
+                  withdrawCurrency={currentCurrency}
                   withdrawDisplay={depositDisplay} withdrawFamily={depositFamily}
                   withdrawTokenContract={currentDesc?.token_contract ?? null}
                   withdrawBalance={displayAssetBalances[currentCurrency] ?? '0'}
@@ -405,8 +405,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
               : <ReceiveMode
                   identity={identity} relayUrl={relayUrl} online={online} nfcReady={nfc === 'ready'}
                   onReceived={onActivity} catalog={catalog}
-                  currentCurrency={currentCurrency} depositCurrency={currentCurrency}
-                  onDepositCurrencyChange={setCurrentCurrency}
+                  depositCurrency={currentCurrency}
                   depositDisplay={depositDisplay} depositChainId={depositChainId}
                   depositNativeEth={depositNativeEth} depositFamily={depositFamily}
                   subMode={receiveSubMode} onSubModeChange={setReceiveSubMode}

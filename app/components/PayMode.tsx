@@ -3,8 +3,8 @@ import {View, Text, Pressable, Share, Modal, Platform} from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import {S} from '../styles';
 import {C} from '../config/palette';
-import {EXPIRY_WINDOW, DIRECT_PAY_TIMEOUT_MS, POLL, BALANCE_TIMEOUT_MS, QR_SIZE} from '../config/constants';
-import {usd, short, base, parseRequestQR, randNonceHex, nowSecs} from '../lib/format';
+import {DIRECT_PAY_TIMEOUT_MS, POLL, BALANCE_TIMEOUT_MS, QR_SIZE} from '../config/constants';
+import {short, base, parseRequestQR} from '../lib/format';
 import {cmpRaw} from '../lib/amount';
 import {type CurrencyDescriptor, type FamilyDisplay, type MinterFamily, fmtCurrencyAmount, isPayableAsset} from '../config/catalog';
 import type {Identity, Req, NfcStatus} from '../lib/types';
@@ -29,7 +29,7 @@ const NFC_REASON: Record<Exclude<NfcStatus, 'ready'>, string> = {
   unknown: "Couldn't check NFC status. Scan the QR code to pay.",
 };
 
-export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assetBalances, withdrawCurrency, onWithdrawCurrencyChange, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillRequest, onPrefillConsumed}: {identity: Identity; online: boolean; relayUrl: string; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assetBalances: Record<number, string>; withdrawCurrency: number; onWithdrawCurrencyChange: (c: number) => void; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillRequest?: string | null; onPrefillConsumed?: () => void}) {
+export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assetBalances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillRequest, onPrefillConsumed}: {identity: Identity; online: boolean; relayUrl: string; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assetBalances: Record<number, string>; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillRequest?: string | null; onPrefillConsumed?: () => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid'>('scan');
   // The within-tab sub-mode is OWNED by Wallet. "scan" = the existing scan-to-pay flow; "send" = the
   // on-chain send-to-address flow (the WithdrawSheet body, lifted inline). The toggle renders only

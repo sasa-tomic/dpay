@@ -13,7 +13,7 @@ import {encodeSolReq, decodeSolPay, type SolReq} from '../solana/qr';
 import {solpayMatchesReq} from '../solana/payments';
 import {deriveSolanaAddress, broadcastSolPayment} from '../solana';
 import {friendlySolError} from '../solana/errors';
-import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from '../payments';
+import {RECEIPT_SETTLED, RECEIPT_REJECTED} from '../payments';
 import {DpaySolNfc} from '../services/native';
 import {copyToClipboard} from '../lib/clipboard';
 import {QrScanner} from './QrScanner';

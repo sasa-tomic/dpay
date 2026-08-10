@@ -14,7 +14,6 @@
 
 import { ed25519 } from '@noble/curves/ed25519';
 import { sha256 } from '@noble/hashes/sha256';
-import bs58 from 'bs58';
 import { base58Decode32, encodeU32LE, encodeU64LE, SYSTEM_PROGRAM_BYTES } from './tx';
 import { assembleMessage, type Instruction, SYSVAR_RECENT_BLOCKHASHES_ADDRESS } from './nonce';
 
