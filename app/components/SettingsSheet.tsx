@@ -17,11 +17,9 @@ import {SheetOverlay} from './SheetOverlay';
  * Audit 2026-08-05 P1/P2:
  *  - "Relay URL" → "Server" (jargon a non-technical user has no mental model for).
  *  - The Server input lives behind an "Advanced" disclosure so a curious user doesn't trip a
- *    one-paste-away brick. The disclosure DEFAULTS OPEN — many e2e flows (12/13/19/20/22/38/41) type
- *    into `settings-relay` immediately after opening Settings, so a default-collapsed disclosure would
- *    break the e2e contract (`settings-relay`/`btn-relay-apply` must be present at first render). The
- *    user CAN collapse it via `btn-advanced-toggle`; a future default-collapse needs the e2e flows
- *    updated to expand first.
+ *    one-paste-away brick. The disclosure DEFAULTS COLLAPSED (U5, 2026-08-10) — e2e flows that need
+ *    `settings-relay` expand it first via `btn-advanced-toggle` (wired in the harness `setRelay`
+ *    helper). A curious user can expand it; most users never need to.
  *  - Helper text moved ABOVE the input so the user reads the consequence before editing.
  *  - Apply is visually distinct (brand shadow) when the draft differs from the active URL; neutral
  *    when the draft matches it (the existing dirty-gate). The dirty/apply state still gates on the

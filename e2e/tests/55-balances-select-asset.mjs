@@ -52,7 +52,7 @@ export async function run() {
     await openBalances(driver);
     await selectCurrency(driver, 'ckbtc');
 
-    // 4. Primary: the chip switches to the catalog wrapper_name 'ckBTC'.
+    // 4. Primary: the chip switches to the backing_symbol 'BTC' (not the wrapper_name 'ckBTC').
     chip = await driver.readText('active-rail-chip');
     assertEq(chip, 'BTC', 'active-rail-chip after selecting ckBTC (uses backing_symbol, not wrapper_name)');
 
@@ -60,7 +60,7 @@ export async function run() {
     //    fmtCurrencyAmount(...'0') = "0 BTC" (fmtAsset's zero special-case, not "0.00000000 BTC").
     const btcHeader = await driver.readText('balance');
     assertIncludes(btcHeader, '0 BTC', 'header balance after selecting ckBTC (unfunded → "0 BTC")');
-    console.log('[55-balances-select-asset] ✓ header bound to ckBTC (chip "ckBTC", balance "0 BTC")');
+    console.log('[55-balances-select-asset] ✓ header bound to ckBTC (chip "BTC", balance "0 BTC")');
 
     // 6. Select SOL — the SOL row's select Pressable carries `asset-sol-select`. onSelectSol sets
     //    activeSol true + closes the sheet. The header then takes the `activeSol` branch.

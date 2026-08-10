@@ -177,17 +177,19 @@ function startPoll(){
     if(settled || !currentNonce) return;
     try {
       const r=await fetchWithTimeout('/api/v1/receipt/'+currentNonce, {}, 5000);
-      if(r.ok){ const j=await r.json(); handleSettled(j.receipt); }
+      if(r.ok){ const j=await r.json(); handleSettled(j); }
     } catch {}
   }, 1200);
 }
-function handleSettled(rc){
+function handleSettled(j){
+  const rc=j.receipt;
   if(settled) return; settled=true;
   stopScan(); clearInterval(pollTimer);
+  const fromLabel=j.from_name || rc.from.slice(0,16)+'…';
   $('result').innerHTML=`<div class="paid">Paid ✓ ${usd(rc.amount)}</div>`
     +`<div class="sub">payer balance now ${usd(rc.new_from_balance)}</div>`
-    +`<div class="mono">from ${rc.from.slice(0,16)}… · request ${rc.nonce.slice(0,12)}…</div>`;
-  txns.push({amount:rc.amount, from:rc.from, time:new Date().toLocaleTimeString()});
+    +`<div class="mono">from ${fromLabel} · request ${rc.nonce.slice(0,12)}…</div>`;
+  txns.push({amount:rc.amount, from:rc.from, name:j.from_name, time:new Date().toLocaleTimeString()});
   renderTxns();
 }
 $('createBtn').onclick=createRequest;
@@ -196,8 +198,10 @@ $('newBtn').onclick=newCharge;
 function renderTxns(){
   const ul=$('txns');
   if(!txns.length){ ul.innerHTML='<li class="empty">No payments yet.</li>'; return; }
-  ul.innerHTML=txns.slice().reverse().map(t=>
-    `<li><span class="amt">${usd(t.amount)}</span><span class="meta">${t.from.slice(0,8)}… · ${t.time}</span></li>`).join('');
+  ul.innerHTML=txns.slice().reverse().map(t=>{
+    const fromLabel=t.name || t.from.slice(0,8)+'…';
+    return `<li><span class="amt">${usd(t.amount)}</span><span class="meta">${fromLabel} · ${t.time}</span></li>`;
+  }).join('');
 }
 
 async function submit(qr){
@@ -216,7 +220,7 @@ async function submit(qr){
     const j=await r.json();
     if(r.ok){
       if(settled){ res.innerHTML=`<div class="warnmsg">↩ Already paid</div><div class="sub">${usd(j.receipt.amount)} — not charged twice</div>`; }
-      else handleSettled(j.receipt);
+      else handleSettled(j);
     }else{
       res.innerHTML=`<div class="refused">Refused</div><div class="sub">${j.error||'rejected'}</div>`;
     }
