@@ -59,6 +59,9 @@ export const BUNDLED_CATALOG: CurrencyDescriptor[] = [
   {currency: 2, ledger: 'xevnm-gaaaa-aaaar-qafnq-cai', mintable: false, minter: 'sv3dd-oaaaa-aaaar-qacoa-cai', minter_family: 'CkEthErc20', symbol: 'ckUSDC', decimals: 6,
     wrapper_name: 'ckUSDC', backing_symbol: 'USDC', network: 'Ethereum', display_decimals: 6, fee: '10000', cap: null,
     chain_id: 1, token_contract: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', gas_ledger: 'ss2fx-dyaaa-aaaar-qacoq-cai', onramp: 'Direct', offramp: 'Direct'},
+  {currency: 6, ledger: 'ss2fx-dyaaa-aaaar-qacoq-cai', mintable: false, minter: 'sv3dd-oaaaa-aaaar-qacoa-cai', minter_family: 'CkEthErc20', symbol: 'Ξ', decimals: 18,
+    wrapper_name: 'ckETH', backing_symbol: 'ETH', network: 'Ethereum', display_decimals: 6, fee: '2000000000000', cap: null,
+    chain_id: 1, token_contract: null, gas_ledger: null, onramp: 'Direct', offramp: 'Direct'},
 ];
 // Fetch the catalog from the relay, caching to AsyncStorage. Best-effort: on any failure (offline,
 // timeout, bad JSON) returns `prior` (the cache or bundled default) so the UI never blocks on it.

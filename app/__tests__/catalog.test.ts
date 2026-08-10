@@ -492,12 +492,13 @@ describe('MC8 U7 — ramp-honesty regression pins (no false cash-out / no CkSol 
     }
   });
 
-  it('ckBTC (currency 1) + ckUSDC (currency 2) are the cash-out-eligible assets in BUNDLED_CATALOG', () => {
+  it('ckBTC (currency 1) + ckUSDC (currency 2) + ckETH (currency 6) are the cash-out-eligible assets in BUNDLED_CATALOG', () => {
     // Belt-and-suspenders: cash-out is offered for CkBtcUtxo OR CkEthErc20 with offramp !==
-    // Unavailable. In the shipped catalog that is ckBTC (retrieve_btc) + ckUSDC (withdraw_erc20).
-    // Pinned so removing either — or accidentally enabling cash-out on DEMO — is a deliberate change.
+    // Unavailable. In the shipped catalog that is ckBTC (retrieve_btc) + ckUSDC (withdraw_erc20) +
+    // ckETH native (withdraw_eth, token_contract null). Pinned so removing any — or accidentally
+    // enabling cash-out on DEMO — is a deliberate change.
     const eligible = BUNDLED_CATALOG.filter(cashOutEligible).map(c => c.currency).sort((a, b) => a - b);
-    expect(eligible).toEqual([1, 2]);
+    expect(eligible).toEqual([1, 2, 6]);
   });
 });
 
@@ -516,7 +517,7 @@ describe('MC8 U7 — ramp-honesty regression pins (no false cash-out / no CkSol 
 const TRUTH = JSON.parse(
   readFileSync(join(__dirname, '..', '..', 'dfx', 'catalog_truth.json'), 'utf8'),
 ) as {
-  principals: {ckbtc_minter: string; cketh_minter: string; ckusdc_ledger: string; cketh_gas_ledger: string};
+  principals: {ckbtc_minter: string; cketh_minter: string; ckusdc_ledger: string; cketh_gas_ledger: string; cketh_ledger: string};
   erc20_contracts: {ckusdc: string};
   decimals: {demo: number; ckbtc: number; ckusdc: number; eth: number};
   wire_consts: {retrieve_btc_min_amount: number; mint_account: string};
@@ -549,6 +550,18 @@ describe('BUNDLED_CATALOG vs dfx/catalog_truth.json (drift alarm)', () => {
     expect(a.minter).toBe(TRUTH.principals.cketh_minter);
     expect(a.token_contract).toBe(TRUTH.erc20_contracts.ckusdc);
     expect(a.gas_ledger).toBe(TRUTH.principals.cketh_gas_ledger);
+  });
+
+  it('ckETH native (currency 6) decimals + ledger + minter match the shared truth (18-dec mainnet)', () => {
+    // ckETH mainnet (id 6) is the native-ETH entry: token_contract null (depositEth/withdraw_eth,
+    // not an ERC-20), 18 decimals (Wei), backing_symbol ETH. The ledger principal (ss2fx…) is the
+    // SAME principal as cketh_gas_ledger (the ckETH ledger serves dual purpose: native-ETH ledger +
+    // gas source for ckERC20 cash-out). Pinned against the JSON so a cold-load (relay unreachable)
+    // renders the correct 4th mainnet asset + the 18-dec precision extreme matches prod.
+    const a = byId(6);
+    expect(a.decimals).toBe(TRUTH.decimals.eth);
+    expect(a.ledger).toBe(TRUTH.principals.cketh_ledger);
+    expect(a.minter).toBe(TRUTH.principals.cketh_minter);
   });
 });
 
