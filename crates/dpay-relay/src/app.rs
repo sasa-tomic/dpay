@@ -233,12 +233,7 @@ async fn faucet(State(state): State<AppState>, Json(req): Json<FaucetRequest>) -
     if !state.faucet_enabled() {
         return err(StatusCode::NOT_FOUND, "faucet disabled");
     }
-    let bytes = match hex::decode(req.account.trim()) {
-        Ok(b) if b.len() == PUBKEY_LEN => b,
-        _ => return err(StatusCode::BAD_REQUEST, "account must be 32 bytes hex"),
-    };
-    let mut pk = [0u8; PUBKEY_LEN];
-    pk.copy_from_slice(&bytes);
+    let pk = ok_or_bail!(parse_hex_array(&req.account, "account"));
     // Currency defaults to DEMO_USD — the faucet's whole point is play money for the demo. A missing
     // amount is the demo's $100.00 top-up.
     let currency = req.currency.unwrap_or(DEMO_USD);
@@ -266,12 +261,7 @@ async fn faucet(State(state): State<AppState>, Json(req): Json<FaucetRequest>) -
 /// enforces a single-use nonce, so the recovered receipt is authoritative (two authorizations can
 /// never both settle under one nonce).
 async fn receipt(State(state): State<AppState>, Path(nonce_hex): Path<String>) -> Response {
-    let bytes = match hex::decode(nonce_hex.trim()) {
-        Ok(b) if b.len() == NONCE_LEN => b,
-        _ => return err(StatusCode::BAD_REQUEST, "nonce must be 16 bytes hex"),
-    };
-    let mut nonce = [0u8; NONCE_LEN];
-    nonce.copy_from_slice(&bytes);
+    let nonce = ok_or_bail!(parse_hex_array(&nonce_hex, "nonce"));
     // Fast path: the process-local idempotency cache (fresh settle this process).
     if let Some(rc) = state.idempotency.lock().unwrap_or_else(|p| p.into_inner()).get(&nonce).cloned() {
         return (StatusCode::OK, Json(PayOk { receipt: rc, replayed: true })).into_response();
@@ -323,12 +313,7 @@ async fn balance(
     Path(hex_pk): Path<String>,
     Query(qs): Query<BalanceQuery>,
 ) -> Response {
-    let bytes = match hex::decode(hex_pk.trim()) {
-        Ok(b) if b.len() == PUBKEY_LEN => b,
-        _ => return err(StatusCode::BAD_REQUEST, "pubkey must be 32 bytes hex"),
-    };
-    let mut pk = [0u8; PUBKEY_LEN];
-    pk.copy_from_slice(&bytes);
+    let pk = ok_or_bail!(parse_pubkey_hex(&hex_pk));
     let currency = qs.currency.unwrap_or(DEMO_USD);
     match state.ledger.balance(pk, currency).await {
         Ok(bal) => (StatusCode::OK, Json(BalanceBody { balance: U64String(bal) })).into_response(),
@@ -364,12 +349,7 @@ const BALANCE_BATCH_QUERY_TIMEOUT: Duration = Duration::from_secs(5);
 /// Response shape (flat map, currency index string → minor-units decimal string): the JSON object
 /// keys are serde-serialized currency indices as decimal strings, e.g. `{"0":"5000","1":"0",...}`.
 async fn balances(State(state): State<AppState>, Path(hex_pk): Path<String>) -> Response {
-    let bytes = match hex::decode(hex_pk.trim()) {
-        Ok(b) if b.len() == PUBKEY_LEN => b,
-        _ => return err(StatusCode::BAD_REQUEST, "pubkey must be 32 bytes hex"),
-    };
-    let mut pk = [0u8; PUBKEY_LEN];
-    pk.copy_from_slice(&bytes);
+    let pk = ok_or_bail!(parse_pubkey_hex(&hex_pk));
 
     // Enumerate the catalog (the source of truth for which currencies exist). An unreachable ledger
     // can't be enumerated → 503; there is no per-currency permanent-policy failure on this surface.
@@ -435,12 +415,7 @@ async fn transactions(
     Path(hex_pk): Path<String>,
     Query(qs): Query<TransactionsQuery>,
 ) -> Response {
-    let bytes = match hex::decode(hex_pk.trim()) {
-        Ok(b) if b.len() == PUBKEY_LEN => b,
-        _ => return err(StatusCode::BAD_REQUEST, "pubkey must be 32 bytes hex"),
-    };
-    let mut pk = [0u8; PUBKEY_LEN];
-    pk.copy_from_slice(&bytes);
+    let pk = ok_or_bail!(parse_pubkey_hex(&hex_pk));
     let currency = qs.currency.unwrap_or(DEMO_USD);
     let limit = qs.limit.unwrap_or(30).min(100);
     match state.ledger.transactions_of(pk, currency, limit).await {
@@ -459,12 +434,7 @@ async fn deposit_address(
     Path(hex_pk): Path<String>,
     Query(qs): Query<BalanceQuery>,
 ) -> Response {
-    let bytes = match hex::decode(hex_pk.trim()) {
-        Ok(b) if b.len() == PUBKEY_LEN => b,
-        _ => return err(StatusCode::BAD_REQUEST, "pubkey must be 32 bytes hex"),
-    };
-    let mut pk = [0u8; PUBKEY_LEN];
-    pk.copy_from_slice(&bytes);
+    let pk = ok_or_bail!(parse_pubkey_hex(&hex_pk));
     let currency = qs.currency.unwrap_or(DEMO_USD);
     match state.ledger.deposit_address(pk, currency).await {
         Ok(addr) => (StatusCode::OK, Json(DepositAddressBody { address: addr })).into_response(),
@@ -490,12 +460,7 @@ async fn deposit_refresh(
     Path(hex_pk): Path<String>,
     Query(qs): Query<BalanceQuery>,
 ) -> Response {
-    let bytes = match hex::decode(hex_pk.trim()) {
-        Ok(b) if b.len() == PUBKEY_LEN => b,
-        _ => return err(StatusCode::BAD_REQUEST, "pubkey must be 32 bytes hex"),
-    };
-    let mut pk = [0u8; PUBKEY_LEN];
-    pk.copy_from_slice(&bytes);
+    let pk = ok_or_bail!(parse_pubkey_hex(&hex_pk));
     let currency = qs.currency.unwrap_or(DEMO_USD);
     let key = (pk, currency);
 
@@ -618,12 +583,7 @@ async fn test_deposit_seed(
     State(state): State<AppState>,
     Json(req): Json<DepositSeedRequest>,
 ) -> Response {
-    let bytes = match hex::decode(req.account.trim()) {
-        Ok(b) if b.len() == PUBKEY_LEN => b,
-        _ => return err(StatusCode::BAD_REQUEST, "account must be 32 bytes hex"),
-    };
-    let mut pk = [0u8; PUBKEY_LEN];
-    pk.copy_from_slice(&bytes);
+    let pk = ok_or_bail!(parse_hex_array(&req.account, "account"));
     let currency = req.currency.unwrap_or(DEMO_USD);
     match state.ledger.seed_deposit(pk, currency, req.amount.0).await {
         Ok(()) => {
@@ -898,6 +858,45 @@ struct DepositSeedBody {
 fn err(status: StatusCode, msg: impl Into<String>) -> Response {
     (status, Json(ErrorBody { error: msg.into() })).into_response()
 }
+
+/// Decode a hex string into a fixed-size byte array, returning a `BAD_REQUEST` [`Response`] on any
+/// decode or length failure (the same status + shape every hex-path handler returns for malformed
+/// input). The single message collapses both failure modes — byte-identical to the prior
+/// `match hex::decode … _ => BAD_REQUEST` blocks this replaces (no separate decode-vs-length error
+/// surfaced; a 400 with the field name is enough for the client to debug).
+///
+/// Returns `Result<_, Response>` (not `[u8; N]` directly) because callers can't `?`-bail out of a
+/// `-> Response` handler — they use the [`ok_or_bail!`] macro below. The dedicated
+/// `parse_pubkey_hex` wrapper names the common 32-byte case.
+fn parse_hex_array<const N: usize>(s: &str, label: &str) -> Result<[u8; N], Response> {
+    let decoded = hex::decode(s.trim()).ok();
+    match decoded.and_then(|b| <[u8; N]>::try_from(b).ok()) {
+        Some(arr) => Ok(arr),
+        None => Err(err(StatusCode::BAD_REQUEST, format!("{label} must be {N} bytes hex"))),
+    }
+}
+
+/// Decode a hex `pubkey` (32 bytes) path param / body field. Thin wrapper over [`parse_hex_array`]
+/// so the 7+ handlers that take a pubkey collapse to one line; the message reads
+/// `"pubkey must be 32 bytes hex"` (byte-identical to the prior inline blocks). Sites that take an
+/// `account` field (faucet / deposit seed) pass a different label so the message reads naturally.
+fn parse_pubkey_hex(s: &str) -> Result<[u8; PUBKEY_LEN], Response> {
+    parse_hex_array::<PUBKEY_LEN>(s, "pubkey")
+}
+
+/// Unwrap a `Result<T, Response>` or early-return the `Response` from the enclosing `-> Response`
+/// handler. The handlers can't use `?` (the `Response` return type doesn't implement
+/// `FromResidual`), so without this macro every hex-parse call site would need a 3-line `match`.
+/// Local to this module: the only `Result<_, Response>` producers here are the hex-parse helpers.
+macro_rules! ok_or_bail {
+    ($e:expr) => {
+        match $e {
+            Ok(v) => v,
+            Err(r) => return r,
+        }
+    };
+}
+use ok_or_bail;
 
 /// `GET /api/v1/health` → `200 {"status":"ok"}` when the ledger reports healthy, else `503`.
 async fn health(State(state): State<AppState>) -> Response {

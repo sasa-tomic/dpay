@@ -97,6 +97,20 @@ fn display_field_to_string(buf: &[u8; NAME_LEN]) -> String {
     String::from_utf8_lossy(&buf[..end]).into_owned()
 }
 
+/// Decode a hex string into a fixed-size byte array, surfacing a `Rejected` (→ HTTP 422) on any
+/// decode or length failure. Mirrors [`parse_hex_array`](crate::app) on the app side but for
+/// ledger-trait callers (the FakeLedger withdrawal path) whose error type is [`LedgerError`] not an
+/// HTTP [`Response`](axum::response::Response). `field` labels the bytes in the message so the
+/// client can tell `from` from `nonce` from `sig` apart. Byte-identical to the prior inline blocks
+/// (two distinct messages per field: `bad {field} hex: {e}` for a hex-decode failure, `{field} must
+/// be {N} bytes` for a length mismatch — both surfaced as `Rejected`).
+fn decode_hex_array<const N: usize>(s: &str, field: &str) -> Result<[u8; N], LedgerError> {
+    let bytes = hex::decode(s)
+        .map_err(|e| LedgerError::Rejected(format!("bad {field} hex: {e}")))?;
+    <[u8; N]>::try_from(bytes)
+        .map_err(|_| LedgerError::Rejected(format!("{field} must be {N} bytes")))
+}
+
 /// Verified constants for the ckUSDC onramp (ckERC-20 family). ckUSDC has NO per-principal IC deposit
 /// address and NO user-callable mint — the user performs two Ethereum transactions from their own
 /// wallet (approve + depositErc20); the relay only surfaces these so the app can build the calldata
@@ -1177,24 +1191,9 @@ impl Ledger for FakeLedger {
         // internal Rust arithmetic uses the native u64).
         let amount = req.amount.0;
         // Decode hex fields outside the lock (pure; a bad shape is a permanent reject).
-        let from = hex::decode(&req.from)
-            .map_err(|e| LedgerError::Rejected(format!("bad from hex: {e}")))
-            .and_then(|b| {
-                <[u8; PUBKEY_LEN]>::try_from(b.as_slice())
-                    .map_err(|_| LedgerError::Rejected("from must be 32 bytes".into()))
-            })?;
-        let nonce = hex::decode(&req.nonce)
-            .map_err(|e| LedgerError::Rejected(format!("bad nonce hex: {e}")))
-            .and_then(|b| {
-                <[u8; NONCE_LEN]>::try_from(b.as_slice())
-                    .map_err(|_| LedgerError::Rejected("nonce must be 16 bytes".into()))
-            })?;
-        let sig_arr = hex::decode(&req.sig)
-            .map_err(|e| LedgerError::Rejected(format!("bad sig hex: {e}")))
-            .and_then(|b| {
-                <[u8; 64]>::try_from(b.as_slice())
-                    .map_err(|_| LedgerError::Rejected("sig must be 64 bytes".into()))
-            })?;
+        let from = decode_hex_array(&req.from, "from")?;
+        let nonce = decode_hex_array(&req.nonce, "nonce")?;
+        let sig_arr = decode_hex_array(&req.sig, "sig")?;
         let sig = Signature::from_bytes(&sig_arr);
 
         // NON-CUSTODIAL GATE: rebuild the WithdrawAuth + verify the signature under `from` BEFORE
