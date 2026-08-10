@@ -99,8 +99,9 @@ export async function run() {
     await driver.click('tab-receive', {timeoutMs: 5_000});
     await driver.findByTestID('sol-req-amount-input', {timeoutMs: 5_000});
 
-    // 3. Build the request QR. The default amount (0.025 SOL) is fine; tap Request.
+    // 3. Build the request QR. Type an explicit amount (the field defaults to empty — D1).
     console.log('[51-sol-merchant-broadcast] creating the solreq QR…');
+    await driver.type('sol-req-amount-input', '0.025', {timeoutMs: 5_000});
     await driver.click('btn-sol-req-make', {timeoutMs: 5_000});
     await driver.findByTestID('sol-req-qr', {timeoutMs: 5_000});
 

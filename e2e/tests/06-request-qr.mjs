@@ -46,7 +46,7 @@ export async function run() {
     const accountHex = identity?.publicHex;
     assert(typeof accountHex === 'string' && accountHex.length === 64, `wallet account must be 32-byte hex, got "${accountHex}"`);
 
-    // 2. Switch to Receive + enter an amount. amount-input defaults to "25.00"; set 42.50 → 4250 cents.
+    // 2. Switch to Receive + enter an amount. Type 42.50 → 4250 cents (amount-input defaults to empty).
     console.log('[06-request-qr] receive mode → request…');
     await driver.click('tab-receive', { timeoutMs: 4_000 });
     await driver.type('amount-input', '42.50', { timeoutMs: 4_000 });

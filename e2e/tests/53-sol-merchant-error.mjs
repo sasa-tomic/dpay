@@ -90,6 +90,7 @@ export async function run() {
     await driver.findByTestID('sol-req-amount-input', {timeoutMs: 5_000});
 
     console.log('[53-sol-merchant-error] creating the solreq QR…');
+    await driver.type('sol-req-amount-input', '0.025', {timeoutMs: 5_000});
     await driver.click('btn-sol-req-make', {timeoutMs: 5_000});
     await driver.findByTestID('sol-req-qr', {timeoutMs: 5_000});
 

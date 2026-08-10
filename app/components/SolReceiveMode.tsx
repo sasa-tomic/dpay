@@ -41,7 +41,7 @@ const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeigh
  * Switching the active asset unmounts it, whose `useNfcTapState` cleanup stops the reader — no arm-leak.
  */
 export function SolReceiveMode({identity, online, nfcReady, solAddress, subMode, onSubModeChange}: {identity: Identity; online: boolean; nfcReady: boolean; solAddress: string; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void}) {
-  const [amount, setAmount] = useState('0.025');
+  const [amount, setAmount] = useState('');
   const [cur, setCur] = useState<'SOL' | 'USDC'>('SOL');
   const [memo, setMemo] = useState('');
   const [phase, setPhase] = useState<'form' | 'reqQr' | 'result'>('form');

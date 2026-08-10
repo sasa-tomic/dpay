@@ -74,7 +74,7 @@ export async function run() {
     // renders more hooks than the previous (address) render and React silently resets the component
     // state. We detect the reset by mutating a piece of state (the amount input), toggling away to
     // 'address' and back to 'request', then asserting the amount SURVIVED. A hook-order violation
-    // re-initializes useState on the toggle-back, so the amount snaps back to its default '0.025'.
+    // re-initializes useState on the toggle-back, so the amount snaps back to its default (empty).
     await driver.click('btn-receive-request', {timeoutMs: 5_000});
     await driver.waitGone('sol-receive-address', {timeoutMs: 5_000});
     await driver.findByTestID('receive-mode-toggle', {timeoutMs: 5_000});

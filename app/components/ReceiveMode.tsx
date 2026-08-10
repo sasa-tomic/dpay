@@ -35,7 +35,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
   // The merchant's CHOSEN settlement asset. Defaults to 0 (DEMO_USD) so the existing single-`$` flows
   // keep working unchanged (MC5: merchant selects the exact asset; the payer does NOT switch).
   const [reqCurrency, setReqCurrency] = useState(0);
-  const [amount, setAmount] = useState('25.00');
+  const [amount, setAmount] = useState('');
   const [memo, setMemo] = useState('');
   // `rawAmount` (was `cents`) is the integer smallest-units the encoded request carries (2-decimal
   // for DEMO, 8 for BTC, 6 for USDC) — now a raw-u64 decimal STRING (MC1 units 2-4). Renamed because
