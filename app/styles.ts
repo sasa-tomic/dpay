@@ -251,8 +251,13 @@ export const S = StyleSheet.create({
   sheetCenter: {flexGrow: 1, justifyContent: 'center', paddingHorizontal: 22, paddingTop: 22, paddingBottom: 22, alignItems: 'center'},
   // Compact currency picker (Receive prefix tap): a centered card over a dimmed backdrop (rendered
   // inside a <Modal>, so it covers the whole screen regardless of where ReceiveMode sits in the tree).
+  // `pickCard` uses `C.panel` (opaque #0c0f14), NOT `C.card` — the 2.5% white wash reads correctly
+  // over opaque `C.bg`, but composites with the 60% black `pickBackdrop` veil into ~#080808 and the
+  // card vanishes. The opaque raised-surface color is the established "panel above backdrop" idiom
+  // (matches Settings/Deposit sheet chrome). The other 5 `C.card` consumers sit directly on opaque
+  // `C.bg` and are unaffected (Issue 4 fix, scoped to pickCard only).
   pickBackdrop: {flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 28},
-  pickCard: {alignSelf: 'stretch', backgroundColor: C.card, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: C.line2},
+  pickCard: {alignSelf: 'stretch', backgroundColor: C.panel, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: C.line2},
   pickTitle: {fontSize: 13, fontWeight: '700', color: C.sub2, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 8, fontFamily: 'monospace'},
   pickItem: {flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: C.line2},
   pickGlyph: {fontSize: 22, fontWeight: '700', color: C.ink, width: 40},
