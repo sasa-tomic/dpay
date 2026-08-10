@@ -113,3 +113,70 @@ export function buildSignedTransfer(
 }
 
 export { base58Decode32, encodeCompactU16, encodeU32LE, encodeU64LE, SYSTEM_PROGRAM_BYTES };
+
+/** Decode a Solana compact-u16 (little-endian base-128 varint) starting at `offset`. Pure + total:
+ *  a malformed/truncated input yields a best-effort value + offset (callers validate bounds before
+ *  slicing — the verify path returns false on any out-of-bounds, never throws). The inverse of
+ *  `encodeCompactU16`. Capped at 5 bytes (shift > 28) so a runaway input can't spin. */
+export function decodeCompactU16(bytes: Uint8Array, offset: number): {value: number; next: number} {
+  let value = 0;
+  let shift = 0;
+  let i = offset;
+  while (i < bytes.length && shift <= 28) {
+    const b = bytes[i];
+    i++;
+    value += (b & 0x7f) << shift;
+    if ((b & 0x80) === 0) return {value, next: i};
+    shift += 7;
+  }
+  return {value, next: i};
+}
+
+/** Extract the fee-payer signature, the signed message, and the fee-payer public key from a
+ *  serialized legacy Solana transaction. Returns null on any malformed layout (too short, zero-sig
+ *  count, account table underflow). Pure + total — the verify path must NEVER throw.
+ *
+ *  Layout: compact-u16(sigCount) || sigCount*64 || message. The message's account table is
+ *  header(3) || compact-u16(numAccounts) || account[0](32) || …; account[0] is the fee payer (the
+ *  first signer), pinned to index 0 by Solana's message format — whose signature authorizes the
+ *  transfer. Only the FIRST signature is verified (the offline-pay tx is single-signer); a
+ *  multi-signer tx parses but only sig[0] is checked. */
+export function extractSignedTxParts(signedTx: Uint8Array): {
+  signature: Uint8Array;
+  message: Uint8Array;
+  feePayer: Uint8Array;
+} | null {
+  const sigCountDec = decodeCompactU16(signedTx, 0);
+  const sigCount = sigCountDec.value;
+  if (sigCount < 1) return null;
+  const sigStart = sigCountDec.next;
+  const msgStart = sigStart + 64 * sigCount;
+  if (signedTx.length < msgStart + 4) return null;
+  const signature = signedTx.subarray(sigStart, sigStart + 64);
+  const message = signedTx.subarray(msgStart);
+  const numAccountsDec = decodeCompactU16(message, 3);
+  const firstKeyStart = numAccountsDec.next;
+  const firstKeyEnd = firstKeyStart + 32;
+  if (message.length < firstKeyEnd) return null;
+  const feePayer = message.subarray(firstKeyStart, firstKeyEnd);
+  return {signature, message, feePayer};
+}
+
+/** F3 — defense-in-depth: verify the fee-payer's ed25519 signature over the signed message, locally,
+ *  BEFORE broadcasting. Returns true on a valid signature; false on ANY parse failure or mismatch
+ *  (never throws). The on-chain broadcast is the authoritative gate (Solana rejects a bad sig
+ *  anyway); this is the fast, local, pre-broadcast check that mirrors the IC receipt-verify posture
+ *  and gives an immediate debug signal for a tampered/garbage tx.
+ *
+ *  Callers MUST treat `false` as NON-BLOCKING (log + still attempt broadcast): a parse edge case
+ *  (e.g. a future versioned-tx format, or an e2e harness carrying placeholder bytes) must never
+ *  strand a legitimate payment. The real correctness gate stays on-chain. */
+export function verifySignedTransaction(signedTx: Uint8Array): boolean {
+  const parts = extractSignedTxParts(signedTx);
+  if (!parts) return false;
+  try {
+    return ed25519.verify(parts.signature, parts.message, parts.feePayer);
+  } catch {
+    return false;
+  }
+}

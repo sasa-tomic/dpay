@@ -5,6 +5,7 @@ import type {SolNfcEvent, Identity} from '../lib/types';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {USDC_DECIMALS} from '../solana/spl';
 import {decodeSolReq, decodeSolPay} from '../solana/qr';
+import {verifySignedTransaction} from '../solana/tx';
 import {signOfflineSolPayment, signOfflineSplPayment, broadcastSolPayment} from '../solana';
 import {decideSolPayerReceipt, isSolReqExpired, solpayMatchesReq} from '../solana/payments';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from '../payments';
@@ -85,6 +86,9 @@ export function SolNfcTap({role, identity, solreqUri, nonceState, onPaid, onStal
           ctx.finalize('declined', 'Payment doesn’t match this request');
           return;
         }
+      }
+      if (!verifySignedTransaction(solpay.tx)) {
+        console.warn('SolNfcTap: payer signature failed pre-broadcast verify (defense-in-depth; still attempting broadcast)', {npub: solpay.npub, txLen: solpay.tx.length});
       }
       const {decimals, unit} = solUnit(solpay.cur);
       setAmtText(fmtAsset(solpay.amt, decimals, unit));

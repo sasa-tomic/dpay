@@ -3,7 +3,7 @@ import {View, Text, Pressable, TextInput, ActivityIndicator, type TextStyle} fro
 import QRCode from 'react-native-qrcode-svg';
 import {C} from '../config/palette';
 import {S} from '../styles';
-import {QR_SIZE_SMALL, SOL_BROADCAST_TIMEOUT_MS, IS_SOLANA_DEVNET, EXPIRY_WINDOW} from '../config/constants';
+import {QR_SIZE_SMALL, SOL_BROADCAST_TIMEOUT_MS, SOL_ATA_CHECK_TIMEOUT_MS, IS_SOLANA_DEVNET, EXPIRY_WINDOW} from '../config/constants';
 import {fmtAsset, toUnits} from '../lib/format';
 import type {Identity} from '../lib/types';
 import bs58 from 'bs58';
@@ -11,7 +11,8 @@ import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {USDC_DECIMALS, USDC_MINT_ADDRESS, deriveAta} from '../solana/spl';
 import {encodeSolReq, decodeSolPay, type SolReq} from '../solana/qr';
 import {solpayMatchesReq} from '../solana/payments';
-import {deriveSolanaAddress, broadcastSolPayment} from '../solana';
+import {verifySignedTransaction} from '../solana/tx';
+import {deriveSolanaAddress, broadcastSolPayment, checkUsdcAta} from '../solana';
 import {friendlySolError} from '../solana/errors';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED} from '../payments';
 import {DpaySolNfc} from '../services/native';
@@ -70,6 +71,31 @@ export function SolReceiveMode({identity, online, nfcReady, solAddress, subMode,
     const id = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
     return () => clearInterval(id);
   }, [phase, reqSnapshot, result]);
+
+  // F4 — USDC ATA existence gate. USDC offline-pay needs the device's ATA to pre-exist on-chain (the
+  // merchant's `toAta` is encoded in the request); without it the request is unfulfillable and the
+  // broadcast fails opaquely. Check ONLY when USDC is selected AND online (SOL needs no ATA; offline
+  // the button is already disabled). 'absent' blocks Request with a clear warning; 'checking' briefly
+  // disables; 'unknown' (offline/error) falls through to allow (the broadcast is the real gate).
+  const [usdcAta, setUsdcAta] = useState<'unknown' | 'checking' | 'present' | 'absent'>('unknown');
+  useEffect(() => {
+    if (cur !== 'USDC' || !online) { setUsdcAta('unknown'); return; }
+    let alive = true;
+    setUsdcAta('checking');
+    const {signal, cancel} = withTimeout(SOL_ATA_CHECK_TIMEOUT_MS);
+    (async () => {
+      try {
+        const exists = await checkUsdcAta(identity.secretHex, signal);
+        if (alive) setUsdcAta(exists === true ? 'present' : exists === false ? 'absent' : 'unknown');
+      } catch (e: unknown) {
+        console.warn('SolReceiveMode: USDC ATA check failed', e);
+        if (alive) setUsdcAta('unknown');
+      } finally {
+        cancel();
+      }
+    })();
+    return () => { alive = false; cancel(); };
+  }, [cur, online, identity.secretHex]);
 
   const toggle = (
     <ModeToggle
@@ -133,6 +159,9 @@ export function SolReceiveMode({identity, online, nfcReady, solAddress, subMode,
       if (!reqSnapshot || !solpayMatchesReq(solpay, reqSnapshot)) {
         setErr("Payment doesn't match this request. Ask the payer to scan your request QR again.");
         return;
+      }
+      if (!verifySignedTransaction(solpay.tx)) {
+        console.warn('SolReceiveMode: payer signature failed pre-broadcast verify (defense-in-depth; still attempting broadcast)', {npub: solpay.npub, txLen: solpay.tx.length});
       }
       const receipt = await broadcastSolPayment(solpay, signal);
       if (receipt.status === RECEIPT_SETTLED) {
@@ -291,17 +320,21 @@ export function SolReceiveMode({identity, online, nfcReady, solAddress, subMode,
         maxLength={32}
       />
       {!online ? <Text style={S.warnNote}>You're offline — the payer can sign, but you need a connection to broadcast their payment.</Text> : null}
+      {cur === 'USDC' && usdcAta === 'absent' ? (
+        <Text testID="sol-usdc-ata-warn" style={S.warnNote}>No USDC account on this device — set one up online first to receive USDC.</Text>
+      ) : null}
+      {cur === 'USDC' && usdcAta === 'checking' ? <Text style={S.dim2}>Checking USDC account…</Text> : null}
       {err ? <Text style={S.err}>{err}</Text> : null}
       <Pressable
         testID="btn-sol-req-make"
-        style={[S.primaryWide, !online && S.dim]}
-        disabled={!online}
+        style={[S.primaryWide, (!online || usdcAta === 'absent' || usdcAta === 'checking') && S.dim]}
+        disabled={!online || usdcAta === 'absent' || usdcAta === 'checking'}
         onPress={makeRequest}
         accessibilityRole="button"
         accessibilityLabel="Request"
-        accessibilityHint="Show your QR code so the payer can scan it to pay you"
-        accessibilityState={{disabled: !online}}>
-        <Text style={S.primaryText}>Request</Text>
+        accessibilityHint={usdcAta === 'absent' ? 'No USDC account on this device — set one up online first' : 'Show your QR code so the payer can scan it to pay you'}
+        accessibilityState={{disabled: !online || usdcAta === 'absent' || usdcAta === 'checking'}}>
+        <Text style={S.primaryText}>{usdcAta === 'checking' ? 'Checking…' : 'Request'}</Text>
       </Pressable>
     </View>
   );

@@ -212,6 +212,31 @@ describe('solana rpc — getMinimumBalanceForRentExemption', () => {
   });
 });
 
+describe('solana rpc — accountExists (F4 ATA gate)', () => {
+  test('returns true when getAccountInfo returns a non-null account', async () => {
+    const {calls} = installRpcFetch([{value: {data: ['', 'base64'], owner: 'tok', lamports: 1}}]);
+    const {accountExists} = require('../solana/rpc');
+    const exists = await accountExists('https://rpc.example', 'SomeAtaAddr');
+    expect(exists).toBe(true);
+    expect(calls[0].body).toEqual(expect.objectContaining({
+      jsonrpc: '2.0', method: 'getAccountInfo', params: ['SomeAtaAddr', {encoding: 'base64'}],
+    }));
+  });
+
+  test('returns false when getAccountInfo returns null (the ATA does not exist on-chain)', async () => {
+    installRpcFetch([{value: null}]);
+    const {accountExists} = require('../solana/rpc');
+    const exists = await accountExists('https://rpc.example', 'MissingAtaAddr');
+    expect(exists).toBe(false);
+  });
+
+  test('throws on a network error (never silently reports absent)', async () => {
+    installRpcFetch([{ok: false, status: 500}]);
+    const {accountExists} = require('../solana/rpc');
+    await expect(accountExists('https://rpc.example', 'X')).rejects.toThrow('solana rpc http 500');
+  });
+});
+
 describe('solana rpc — e2e stub seam (__DPAY_TEST_SOLANA_RPC_STUB)', () => {
   afterEach(() => {
     delete (globalThis as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB;

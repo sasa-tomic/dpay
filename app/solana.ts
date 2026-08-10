@@ -21,7 +21,7 @@ import {SOLANA_RPC_URL} from './config/constants';
 import {deriveSolanaKeypair, deriveSolanaAddress, deriveSlip10Ed25519} from './solana/identity';
 import {base58Decode32, buildSignedTransfer, signTransaction} from './solana/tx';
 import {buildAdvanceAndTransferMessage, buildCreateNonceAccountMessage} from './solana/nonce';
-import {buildAdvanceAndSplTransferMessage, deriveAta} from './solana/spl';
+import {buildAdvanceAndSplTransferMessage, deriveAta, USDC_MINT_ADDRESS} from './solana/spl';
 import {encodeSolPay} from './solana/qr';
 import type {SolReq, SolPay} from './solana/qr';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from './payments';
@@ -232,4 +232,21 @@ export async function resyncNonce(
 ): Promise<string> {
   if (!SOLANA_RPC_URL) throw new Error('Solana is offline (no RPC endpoint configured)');
   return readNonceWithRetry(nonceAccountAddress, signal);
+}
+
+/** F4 — whether THIS device has a USDC Associated Token Account. USDC offline-pay needs the device's
+ *  ATA to pre-exist on-chain (the payer debits its source ATA; the merchant's request encodes its
+ *  `toAta`). Without one the broadcast fails opaquely at the Token program; this gate surfaces the
+ *  missing account BEFORE the user commits.
+ *
+ *  ONLINE — returns null (no throw, no network) when SOL is offline (`SOLANA_RPC_URL` empty), mirroring
+ *  `getSolanaBalance`. Derives the device ATA from the seed + USDC mint and checks on-chain existence.
+ *  Throws on a network error (the caller treats that as "couldn't verify" — non-blocking, since the
+ *  on-chain broadcast is the authoritative gate). */
+export async function checkUsdcAta(secretHex: string, signal?: AbortSignal): Promise<boolean | null> {
+  if (!SOLANA_RPC_URL) return null;
+  const {accountExists} = await import('./solana/rpc');
+  const address = deriveSolanaAddress(secretHex);
+  const ataAddress = bs58.encode(deriveAta(address, USDC_MINT_ADDRESS));
+  return accountExists(SOLANA_RPC_URL, ataAddress, {signal});
 }

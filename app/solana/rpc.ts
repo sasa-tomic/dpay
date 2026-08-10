@@ -178,5 +178,16 @@ export async function getMinimumBalanceForRentExemption(url: string, dataLength:
   return BigInt(result);
 }
 
+/** Whether an on-chain account exists at `address` — a non-null `getAccountInfo` result. True for
+ *  any funded/owned account; false for a never-created account (the F4 ATA gate: a missing USDC
+ *  Associated Token Account makes an offline USDC payment unfulfillable). Throws on a network/RPC
+ *  error so the caller can surface "couldn't verify" honestly (a failed check is never silent). */
+export async function accountExists(url: string, address: string, opts?: SolanaRpcOpts): Promise<boolean> {
+  const result = (await rpcFetch(url, 'getAccountInfo', [address, {encoding: 'base64'}], opts)) as {
+    value: unknown;
+  };
+  return result.value !== null && result.value !== undefined;
+}
+
 // RFC 4648 base64 of a byte array — imported from `lib/base64.ts` (the SINGLE implementation shared
 // with the URL-safe codec in `lib/base64url.ts`). Standard alphabet, padded, throws-on-malformed.

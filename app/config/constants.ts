@@ -107,6 +107,9 @@ export const SOL_SEND_TIMEOUT_MS = 60000;
 // broadcast path (solana.ts) and the merchant NFC path (SolNfcTap) reference this instead of
 // inlining SOL_SEND_TIMEOUT_MS * 2 at each site.
 export const SOL_BROADCAST_TIMEOUT_MS = SOL_SEND_TIMEOUT_MS * 2;
+// F4 — bounded timeout for the pre-request USDC ATA existence check (network I/O via getAccountInfo).
+// A single RPC call; 8s mirrors the rpc default and keeps a stalled node from wedging the form.
+export const SOL_ATA_CHECK_TIMEOUT_MS = 8000;
 export const WITHDRAW_EXPIRY_WINDOW = 600; // the signed WithdrawAuth is valid 10 min
 // Mirrors the canister's fixed FAUCET_AMOUNT ($100.00 = 10_000 cents). The demo top-up POSTs this
 // amount to /api/v1/faucet; the real canister mints the fixed amount regardless of the request. MC1
