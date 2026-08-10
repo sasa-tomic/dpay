@@ -185,6 +185,7 @@ object DpaySolNfc {
             }
         } catch (_: Throwable) {
             // Never let an exception escape into the NFC stack.
+            errorEvent("card", "Card error — try again")
             SW_WRONG_LENGTH
         }
     }

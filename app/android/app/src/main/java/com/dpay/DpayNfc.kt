@@ -146,6 +146,7 @@ object DpayNfc {
             resp
         } catch (e: Throwable) {
             // The core never panics, but never let an exception escape into the NFC stack.
+            errorEvent("card", "Card error — try again")
             SW_WRONG_LENGTH
         }
     }
