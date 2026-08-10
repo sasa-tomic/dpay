@@ -263,6 +263,14 @@ export const S = StyleSheet.create({
   pickGlyph: {fontSize: 22, fontWeight: '700', color: C.ink, width: 40},
   pickName: {flex: 1, fontSize: 16, fontWeight: '700', color: C.ink},
   pickCheck: {color: C.brand, fontSize: 18, fontWeight: '700'},
+  // pickTextCol — the name+subtitle column inside a plain-variant CurrencyRow (the Receive picker).
+  // Takes flex:1 so the trailing ✓ check pushes to the row's right edge; marginLeft matches assetLabel
+  // (8) so the name-to-dot gap is identical in both variants (unified visual language, Issue 3).
+  pickTextCol: {flex: 1, marginLeft: 8},
+  // pickSubtitle — the chain-label line below the name in a plain-variant row. Same typography as
+  // assetSub (the card variant's subtitle) for visual parity; a slightly tighter marginTop (3 vs 6)
+  // suits the picker's denser row rhythm.
+  pickSubtitle: {fontSize: 12, color: C.sub2, marginTop: 3},
   // Pay-scan NFC status row — a large colored NFC mark + a short label, leading the scanner. Green
   // when tap-to-pay is ready, red with a tappable "NFC not available ⓘ" link + reason popup otherwise.
   nfcStatusRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 14},
