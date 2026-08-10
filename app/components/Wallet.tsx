@@ -415,6 +415,10 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
                   depositNativeEth={depositNativeEth} depositFamily={depositFamily}
                   subMode={receiveSubMode} onSubModeChange={setReceiveSubMode}
                   prefillReceipt={prefillReceipt} onReceiptConsumed={() => setPrefillReceipt(null)}
+                  solAddress={solAddress}
+                  solBalance={solBalance}
+                  activeSol={activeSol}
+                  onSelectSol={() => { setActiveSol(true); setReceiveSubMode('request'); setPaySubMode('scan'); }}
                 />
           )
           : <Ledger history={history} catalog={catalog} />}

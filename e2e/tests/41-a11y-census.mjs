@@ -45,8 +45,9 @@ const SURFACES = {
   home: [],
   // Receive tab + currency picker (open via req-prefix). The picker rows are req-pick-<assetTestKey>;
   // the wallet's catalog (FakeLedger) ships DEMO/ckBTC/ckUSDC/ckUSDT, so all four picker rows assert.
+  // req-pick-sol is the unified SOL entry (Issue #2) — picking it flips the rail to SolReceiveMode.
   receive: ['req-prefix', 'amount-input', 'memo-input', 'btn-request',
-            'req-pick-demo', 'req-pick-ckbtc', 'req-pick-ckusdc', 'req-pick-ckusdt'],
+            'req-pick-demo', 'req-pick-ckbtc', 'req-pick-ckusdc', 'req-pick-ckusdt', 'req-pick-sol'],
   // Balances hub (open via `balance` tap). btn-topup is the DEMO row's faucet button; `asset-*-select`
   // is each row's whole-row select Pressable. SOL is uniform with the IC rows now (whole-row select,
   // no per-row Receive/Send buttons — on-chain deposit/send lives in the Pay/Receive tab sub-modes).
