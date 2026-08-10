@@ -18,7 +18,7 @@
 //
 // Selector contract: `pay-amount`, `review-lowbal`, `btn-approve`, `btn-settings`,
 // `settings-relay`, `btn-settings-close`.
-import { setup, assert, onboardWallet, pickFreePort } from '../harness/lib.mjs';
+import { setup, assert, onboardWallet, goOffline, setRelay, assertDisabled } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
 const OVER_CENTS = 20_000; // ∂200.00 — exceeds the ∂100.00 faucet-funded balance
@@ -57,14 +57,8 @@ export async function run() {
 
     // Point the app at a genuinely-dead relay so the next balance poll fails → online=false. The
     // review-lowbal guard is `!online && shownBalance != null && req.amount > shownBalance`.
-    const deadPort = await pickFreePort();
-    const DEAD_RELAY = `http://127.0.0.1:${deadPort}`;
-    driver.allowRequestFailuresFrom(DEAD_RELAY);
-    console.log(`[19-low-balance] going offline (dead relay ${DEAD_RELAY})…`);
-    await driver.click('btn-settings', { timeoutMs: 4_000 });
-    await driver.type('settings-relay', DEAD_RELAY, { timeoutMs: 4_000 });
-    await driver.click('btn-relay-apply', { timeoutMs: 4_000 });
-    await driver.click('btn-settings-close', { timeoutMs: 4_000 });
+    console.log('[19-low-balance] going offline (dead relay)…');
+    await goOffline(driver);
     // Wait for the header's offline indicator ("~ approx.") — proves online flipped to false.
     const approx = await driver.waitForText('approx.', { timeoutMs: 8_000 });
     assert(approx, 'the header should show the offline indicator ("~ approx.") once offline');
@@ -83,10 +77,7 @@ export async function run() {
     // --- 2. ONLINE insufficient: client-side gate disables Approve + shows a warning (C2). --------
     // Restore the good relay URL; the balance poll reconnects → online=true again.
     console.log('[19-low-balance] going back online to test the C2 pre-submit gate…');
-    await driver.click('btn-settings', { timeoutMs: 4_000 });
-    await driver.type('settings-relay', relayBaseURL, { timeoutMs: 4_000 });
-    await driver.click('btn-relay-apply', { timeoutMs: 4_000 });
-    await driver.click('btn-settings-close', { timeoutMs: 4_000 });
+    await setRelay(driver, relayBaseURL);
     // Wait for the header to drop the offline indicator (online=true) before scanning.
     await driver.waitForText('balance', { timeoutMs: 8_000 });
 
@@ -102,12 +93,7 @@ export async function run() {
     const lowbalOnlineTxt = await driver.readText('review-lowbal');
     assert(/balance/i.test(lowbalOnlineTxt), `review-lowbal should warn about balance, got: "${lowbalOnlineTxt}"`);
     // C2: btn-approve must be DISABLED (online + insufficient) — no doomed submit.
-    const approveDisabled = await driver.eval(() => {
-      const el = document.querySelector('[data-testid="btn-approve"]');
-      if (!el) return null;
-      return el.getAttribute('aria-disabled') === 'true' || el.hasAttribute('disabled') || el.disabled === true;
-    });
-    assert(approveDisabled === true, 'btn-approve must be disabled when online + balance insufficient (C2)');
+    await assertDisabled(driver, 'btn-approve', 'btn-approve must be disabled when online + balance insufficient (C2)');
     console.log(`[19-low-balance] ✓ online insufficient: gate shows "${lowbalOnlineTxt}" + btn-approve disabled (C2, no doomed submit)`);
 
     await driver.screenshot('19-low-balance');

@@ -349,6 +349,84 @@ export async function openPaySend(driver, opts = {}) {
   await driver.click('btn-pay-send', { timeoutMs: opts.timeoutMs ?? 5_000 });
 }
 
+// --- relay-retarget / offline helpers -----------------------------------------------------------
+//
+// The "open Settings → type relay URL → Apply → close Settings" dance is repeated across the offline
+// + deposit-error + low-balance flows (13/19/20/22). `setRelay` is the one-direction primitive (used
+// for BOTH going offline AND restoring the good relay); `goOffline` wraps it with a guaranteed-dead
+// port + the request-failure allowance the offline flows need. Pure refactor — the click sequence +
+// timeouts match the inline originals byte-for-byte so no behavior changes.
+
+/**
+ * Open Settings, type `url` into the relay field, click Apply, then close Settings. This is the
+ * single primitive for retargeting the app's relay (used by the offline, deposit-error, low-balance,
+ * and relay-retarget flows). Mirrors the exact inline sequence that was copy-pasted across 4 flows:
+ * `btn-settings` → type `settings-relay` → `btn-relay-apply` → `btn-settings-close`. The `type`
+ * helper select-all's first, so the URL REPLACES the current value (no need to clear).
+ */
+export async function setRelay(driver, url, opts = {}) {
+  const t = opts.timeoutMs ?? 4_000;
+  await driver.click('btn-settings', { timeoutMs: t });
+  await driver.type('settings-relay', url, { timeoutMs: t });
+  await driver.click('btn-relay-apply', { timeoutMs: t });
+  await driver.click('btn-settings-close', { timeoutMs: t });
+}
+
+/**
+ * Point the app at a GENUINELY-DEAD relay (a port nothing listens on → ECONNREFUSED, the real
+ * "relay unreachable" failure mode — NOT Chrome's ERR_UNSAFE_PORT artifact). Picks a free port,
+ * registers it with `driver.allowRequestFailuresFrom` (so the dead-relay connection refusals don't
+ * fail-closed the flow at teardown), and retargets the app via `setRelay`. Returns `{deadRelay}` so
+ * the caller can reference the origin (e.g. to filter `recordRequestFailures()` by URL) if needed.
+ *
+ * The reverse (coming back online) is just `setRelay(driver, goodRelayUrl)` — no port/allowance
+ * needed for a live relay.
+ */
+export async function goOffline(driver, opts = {}) {
+  const deadPort = await pickFreePort();
+  const deadRelay = `http://127.0.0.1:${deadPort}`;
+  driver.allowRequestFailuresFrom(deadRelay);
+  await setRelay(driver, deadRelay, opts);
+  return { deadRelay };
+}
+
+// --- disabled-state helpers --------------------------------------------------------------------
+//
+// `btn-approve`/`btn-withdraw-confirm` are RN `Pressable` with `disabled={...}`. RNW surfaces that
+// as `aria-disabled="true"` + the DOM `disabled` property. The aria-disabled/disabled eval was
+// copy-pasted across the expired (10), low-balance (19), and withdraw-errors (18) flows. Centralized
+// here so the probe stays identical everywhere (and a future testID gets the check for free).
+
+/**
+ * Read the disabled state of the element matched by `testID`. Returns true iff the Pressable is
+ * currently disabled (aria-disabled="true" OR the DOM `disabled` property/attribute, including a
+ * nested <button>'s disabled). Returns false if the element is absent (matches the inline original —
+ * a missing button is treated as "not disabled" rather than throwing, so the caller's assertion
+ * message is the one that fires).
+ */
+export async function isDisabled(driver, testID) {
+  return await driver.eval((id) => {
+    const el = document.querySelector(`[data-testid="${id}"]`);
+    if (!el) return false;
+    if (el.getAttribute('aria-disabled') === 'true') return true;
+    if (el.hasAttribute('disabled')) return true;
+    if (el.disabled === true) return true;
+    const innerBtn = el.querySelector('button');
+    if (innerBtn && innerBtn.disabled) return true;
+    return false;
+  }, testID);
+}
+
+/**
+ * Assert the element matched by `testID` is currently disabled. Used to prove a doomed action
+ * (expired request, insufficient balance, below-min withdraw) is gated at the UI before it can reach
+ * the relay. Pairs with `isDisabled` for the rare "disabled until condition clears" checks.
+ */
+export async function assertDisabled(driver, testID, label) {
+  const disabled = await isDisabled(driver, testID);
+  if (!disabled) throw new Error(`[assert] ${label}: element testID=${testID} should be disabled but is not`);
+}
+
 // --- relay client helpers (used by the deposit/pay flows) -------------------------------------
 //
 // Every call has a timeout (AbortController) and surfaces a thrown Error on non-2xx — no silent

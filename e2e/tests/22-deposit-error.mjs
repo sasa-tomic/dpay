@@ -21,7 +21,7 @@
 // Selector contract: `btn-settings`, `settings-relay`, `btn-settings-close`, `balance` (header →
 // Balances), `asset-ckbtc-select` (BTC row whole-row select), `btn-receive-address` (Receive → "My
 // address"), `deposit-status` (absent — no address fetched).
-import { setup, assert, assertIncludes, onboardWallet, pickFreePort, openBalances, selectCurrency, openReceiveAddress } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, onboardWallet, goOffline, openBalances, selectCurrency, openReceiveAddress } from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -47,14 +47,8 @@ export async function run() {
     await onboardWallet(driver, 'e2e-deposit-err');
 
     // Switch to a genuinely-dead relay (closed port → ECONNREFUSED, the real failure mode).
-    const deadPort = await pickFreePort();
-    const DEAD_RELAY = `http://127.0.0.1:${deadPort}`;
-    driver.allowRequestFailuresFrom(DEAD_RELAY);
-    console.log(`[22-deposit-error] going offline (${DEAD_RELAY})…`);
-    await driver.click('btn-settings', { timeoutMs: 4_000 });
-    await driver.type('settings-relay', DEAD_RELAY, { timeoutMs: 4_000 });
-    await driver.click('btn-relay-apply', { timeoutMs: 4_000 });
-    await driver.click('btn-settings-close', { timeoutMs: 4_000 });
+    console.log('[22-deposit-error] going offline…');
+    await goOffline(driver);
 
     // Open Balances → select ckBTC → Receive → "My address" (the inline deposit body). The
     // DepositSheet mounts against the dead relay. `asset-ckbtc-select` is always present (selectable

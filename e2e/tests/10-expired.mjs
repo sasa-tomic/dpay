@@ -8,7 +8,7 @@
 // stale request) and that the app surfaces a clear error rather than silently failing.
 //
 // Selector contract: `pay-amount`, `btn-approve`, `review-err`, `balance`.
-import { setup, assert, assertIncludes, onboardWallet } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, onboardWallet, assertDisabled } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
 const PAY_CENTS = 2500; // ∂25.00 (DEMO_USD = currency 0)
@@ -67,13 +67,8 @@ export async function run() {
     console.log('[10-expired] no raw request nonce leaked on the review screen (L5)');
 
     // C1: once the expiry error is shown, btn-approve MUST be disabled (greyed out) so the user
-    // cannot re-tap a doomed/expired payment. RNW surfaces Pressable `disabled` as `aria-disabled`.
-    const approveDisabled = await driver.eval(() => {
-      const el = document.querySelector('[data-testid="btn-approve"]');
-      if (!el) return null;
-      return el.getAttribute('aria-disabled') === 'true' || el.hasAttribute('disabled') || el.disabled === true;
-    });
-    assert(approveDisabled === true, 'btn-approve must be disabled once the expiry error shows (C1)');
+    // cannot re-tap a doomed/expired payment.
+    await assertDisabled(driver, 'btn-approve', 'btn-approve must be disabled once the expiry error shows (C1)');
     console.log('[10-expired] btn-approve disabled while the error is shown (C1)');
 
     // The balance is UNCHANGED — the expired auth debited nothing.

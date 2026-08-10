@@ -24,7 +24,7 @@
 // Also covers INVALID-ADDRESS validation (the documented gap, now closed): the app validates the
 // destination format family-aware — a wrong-chain address (ETH 0x… in the BTC cash-out) shows a
 // warning + disables the confirm button.
-import { setup, assert, assertEq, seedDeposit, refreshDeposit, getBalance, postWithdraw, onboardWallet, accountOf, openBalances, selectCurrency, openPaySend } from '../harness/lib.mjs';
+import { setup, assert, assertEq, seedDeposit, refreshDeposit, getBalance, postWithdraw, onboardWallet, accountOf, openBalances, selectCurrency, openPaySend, assertDisabled } from '../harness/lib.mjs';
 import { signWithdrawalHex, randNonceHex, generateKeypair } from '../harness/wire.mjs';
 
 const DEPOSIT_CURRENCY = 1; // ckBTC — matches the CkBtcUtxo catalog entry
@@ -74,8 +74,7 @@ export async function run() {
       `below-min warning should show. body excerpt:\n${bodyBelow.slice(0, 500)}`);
     // The confirm button is the gate: `canReview` is false when belowMin, so the Pressable is disabled
     // (the review card itself still renders the amount — that's fine; the SUBMIT is blocked).
-    assert(await isConfirmDisabled(driver),
-      'the confirm button must be DISABLED for a below-min amount (canReview=false)');
+    await assertDisabled(driver, 'btn-withdraw-confirm', 'the confirm button must be DISABLED for a below-min amount (canReview=false)');
     console.log('[18-withdraw-errors] ✓ below-min warning shows + confirm disabled');
 
     // --- 2. OVER-BALANCE (UI guard): type an amount exceeding the available balance. ----------
@@ -84,8 +83,7 @@ export async function run() {
     const bodyOver = await driver.bodyText();
     assert(bodyOver.includes('More than your available 0.00100000 BTC.'),
       `over-balance warning should show. body excerpt:\n${bodyOver.slice(0, 500)}`);
-    assert(await isConfirmDisabled(driver),
-      'the confirm button must be DISABLED for an over-balance amount (canReview=false)');
+    await assertDisabled(driver, 'btn-withdraw-confirm', 'the confirm button must be DISABLED for an over-balance amount (canReview=false)');
     console.log('[18-withdraw-errors] ✓ over-balance warning shows + confirm disabled');
 
     // --- 2b. INVALID ADDRESS (UI guard): paste a wrong-chain address (ETH format in BTC cash-out). -
@@ -95,8 +93,7 @@ export async function run() {
     const bodyBad = await driver.bodyText();
     assert(bodyBad.includes("That doesn't look like a valid BTC address."),
       `bad-addr warning should show. body excerpt:\n${bodyBad.slice(0, 500)}`);
-    assert(await isConfirmDisabled(driver),
-      'confirm must be DISABLED for a wrong-chain address');
+    await assertDisabled(driver, 'btn-withdraw-confirm', 'confirm must be DISABLED for a wrong-chain address');
     console.log('[18-withdraw-errors] ✓ invalid-address warning + confirm disabled');
 
     // Close the inline withdraw body so the relay-level checks below are a clean separate phase.
@@ -163,17 +160,4 @@ export async function run() {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   run().catch(async (e) => { console.error(`\n[18-withdraw-errors] RED: ${e.stack || e.message || e}\n`); process.exit(1); });
-}
-
-// Read the withdraw-confirm Pressable's disabled state. RNW renders a Pressable's `disabled` as the
-// DOM node's `disabled` property (on the rendered button/role=button element). Returns true iff the
-// confirm button is currently disabled (canReview=false: below-min / over-balance / empty address).
-async function isConfirmDisabled(driver) {
-  return await driver.eval(() => {
-    const el = document.querySelector('[data-testid="btn-withdraw-confirm"]');
-    if (!el) return false;
-    // RNW maps `disabled` to aria-disabled + the DOM disabled property on the underlying element.
-    return el.getAttribute('aria-disabled') === 'true' || el.disabled === true ||
-      (el.querySelector('button')?.disabled ?? false);
-  });
 }

@@ -22,7 +22,7 @@
 //
 // Selector contract: `btn-settings`, `settings-relay`, `btn-settings-close`, `pay-amount`,
 // `btn-approve`, `btn-paid`, `btn-notpaid`, `btn-new`.
-import { setup, assert, postPay, onboardWallet, pickFreePort } from '../harness/lib.mjs';
+import { setup, assert, postPay, onboardWallet, goOffline, setRelay } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR, decodeRequest } from '../harness/wire.mjs';
 
 const PAY_CENTS = 2500; // ∂25.00
@@ -53,14 +53,8 @@ export async function run() {
     await onboardWallet(driver, 'e2e-offline-pay');
 
     // 2. Go OFFLINE: point at a genuinely-dead relay → online=false on the next failed poll.
-    const deadPort = await pickFreePort();
-    const DEAD_RELAY = `http://127.0.0.1:${deadPort}`;
-    driver.allowRequestFailuresFrom(DEAD_RELAY);
-    console.log(`[20-offline-handoff] going offline (${DEAD_RELAY})…`);
-    await driver.click('btn-settings', { timeoutMs: 4_000 });
-    await driver.type('settings-relay', DEAD_RELAY, { timeoutMs: 4_000 });
-    await driver.click('btn-relay-apply', { timeoutMs: 4_000 });
-    await driver.click('btn-settings-close', { timeoutMs: 4_000 });
+    console.log('[20-offline-handoff] going offline…');
+    await goOffline(driver);
     await driver.waitForText('approx.', { timeoutMs: 8_000 }); // offline indicator
 
     // 3. A scans B's request + Approves → signs offline → direct /pay fails → QR hand-off screen.
@@ -107,10 +101,7 @@ export async function run() {
     // 7. A comes back online → the /receipt poll reconciles the settled nonce → "Paid ✓".
     console.log('[20-offline-handoff] A reconnecting (restore good relay)…');
     await driver.click('btn-new', { timeoutMs: 4_000 }); // leave the pending screen first
-    await driver.click('btn-settings', { timeoutMs: 4_000 });
-    await driver.type('settings-relay', relayBaseURL, { timeoutMs: 4_000 });
-    await driver.click('btn-relay-apply', { timeoutMs: 4_000 });
-    await driver.click('btn-settings-close', { timeoutMs: 4_000 });
+    await setRelay(driver, relayBaseURL);
     // The reconnect reconciles: balance returns to the authoritative ∂75 (∂100 − ∂25).
     const reconnected = await driver.waitForText('∂75.00', { timeoutMs: 12_000 });
     assert(reconnected, 'A balance should reconcile to ∂75.00 (∂100 − ∂25) once back online');

@@ -17,7 +17,7 @@
 //
 // Selector contract: `btn-settings`, `settings-relay`, `btn-settings-close`, `balance` (header →
 // Balances), `btn-topup` (inside Balances), `btn-balances-close`.
-import { setup, assert, onboardWallet, pickFreePort, openBalances } from '../harness/lib.mjs';
+import { setup, assert, onboardWallet, openBalances, goOffline } from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -38,23 +38,16 @@ export async function run() {
   try {
     const { driver } = env;
 
-    // A genuinely-dead relay: a port nothing listens on (bind :0 → close → freed). A connect to it
-    // is refused (ECONNREFUSED), not unsafe-port-blocked.
-    const deadPort = await pickFreePort();
-    const DEAD_RELAY = `http://127.0.0.1:${deadPort}`;
-    driver.allowRequestFailuresFrom(DEAD_RELAY);
-
     // Onboard against the GOOD relay (funds $100, proves the wallet works when online).
     console.log('[13-offline] onboarding (online)…');
     await onboardWallet(driver, 'e2e-offline');
 
-    // Open Settings, retarget the app at a DEAD relay via the settings input, then close Settings.
-    console.log('[13-offline] opening Settings to change the relay URL…');
-    await driver.click('btn-settings', { timeoutMs: 4_000 });
-    console.log(`[13-offline] pointing the app at a dead relay (${DEAD_RELAY})…`);
-    await driver.type('settings-relay', DEAD_RELAY, { timeoutMs: 4_000 });
-    await driver.click('btn-relay-apply', { timeoutMs: 4_000 });
-    await driver.click('btn-settings-close', { timeoutMs: 4_000 });
+    // Retarget the app at a GENUINELY-DEAD relay (a port nothing listens on → ECONNREFUSED, the real
+    // "relay unreachable" failure mode, not an unsafe-port artifact). `goOffline` picks the port,
+    // registers the dead origin with the driver (so ECONNREFUSED doesn't fail-close the flow), and
+    // retargets via Settings. The faucet below then fires against this dead relay.
+    console.log('[13-offline] going offline (dead relay)…');
+    await goOffline(driver);
 
     // Record the underlying request failures so we can prove the dead relay fails for the RIGHT
     // reason (ECONNREFUSED — a real connection refusal), not the ERR_UNSAFE_PORT artifact.
