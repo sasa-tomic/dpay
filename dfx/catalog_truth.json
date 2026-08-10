@@ -1,5 +1,5 @@
 {
-  "_doc": "Single source of truth for the drift-prone currency literals shared across the relay's fake_catalog() (crates/dpay-relay/src/ledger.rs) and the app's BUNDLED_CATALOG (app/config/catalog.ts). Cross-checked by: (1) a Rust #[cfg(test)] drift-alarm in ledger.rs, (2) a jest drift-alarm in app/__tests__/catalog.test.ts. A drift in either direction goes RED. The relay's live /catalog response remains the RUNTIME source of truth; this file + the two fallbacks are COLD-START FALLBACKS only. Does NOT cover the staging deploy script (scripts/dfx-deploy-ic-staging.sh), whose testnet catalog uses genuinely different principals/contracts (Sepolia). The decimals.eth entry pins the precision-extreme 18-dec fixture that lives only in fake_catalog (no ETH in BUNDLED_CATALOG) — the jest side does not assert it.",
+  "_doc": "Single source of truth for the drift-prone currency literals shared across the relay's fake_catalog() (crates/dpay-relay/src/ledger.rs) and the app's BUNDLED_CATALOG (app/config/catalog.ts). Cross-checked by: (1) a Rust #[cfg(test)] drift-alarm in ledger.rs, (2) a jest drift-alarm in app/__tests__/catalog.test.ts. A drift in either direction goes RED. The relay's live /catalog response remains the RUNTIME source of truth; this file + the two fallbacks are COLD-START FALLBACKS only. Does NOT cover the staging deploy script (scripts/dfx-deploy-ic-staging.sh), whose testnet catalog uses genuinely different principals/contracts (Sepolia). The decimals.eth entry pins the precision-extreme 18-dec fixture that lives only in fake_catalog (no ETH in BUNDLED_CATALOG) — the jest side does not assert it. The wire_consts object is the canister half (cross-checked by a Rust #[cfg(test)] drift-alarm in crates/dpay-canister/src/types.rs + a jest drift-alarm added by the app side): RETRIEVE_BTC_MIN_AMOUNT mirrors types.rs and the relay's ckBTC withdraw floor; MINT_ACCOUNT (32 bytes of 0xFF) mirrors types.rs and the relay's MINT sentinel / the app's MINT_HEX.",
   "version": 1,
   "principals": {
     "ckbtc_minter": "mqygn-kiaaa-aaaar-qaadq-cai",
@@ -15,5 +15,9 @@
     "ckbtc": 8,
     "ckusdc": 6,
     "eth": 18
+  },
+  "wire_consts": {
+    "retrieve_btc_min_amount": 50000,
+    "mint_account": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
   }
 }

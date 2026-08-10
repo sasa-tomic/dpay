@@ -1184,3 +1184,54 @@ pub(crate) fn memo_to_nonce(memo: &Option<icrc_ledger_types::icrc1::transfer::Me
         None
     }
 }
+
+#[cfg(test)]
+mod catalog_truth_tests {
+    use super::*;
+    use serde_json::Value;
+
+    const CATALOG_TRUTH: &str = include_str!("../../../dfx/catalog_truth.json");
+
+    fn wire_consts() -> Value {
+        let t: Value =
+            serde_json::from_str(CATALOG_TRUTH).expect("dfx/catalog_truth.json must be valid JSON");
+        t.get("wire_consts")
+            .cloned()
+            .expect("dfx/catalog_truth.json must define a wire_consts object")
+    }
+
+    fn decode_hex_const(s: &str) -> Vec<u8> {
+        let s = s.strip_prefix("0x").unwrap_or(s);
+        (0..s.len())
+            .step_by(2)
+            .map(|i| {
+                u8::from_str_radix(&s[i..i + 2], 16)
+                    .unwrap_or_else(|_| panic!("wire_consts hex byte invalid at offset {i}"))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn retrieve_btc_min_amount_matches_catalog_truth() {
+        let wc = wire_consts();
+        let want = wc["retrieve_btc_min_amount"]
+            .as_u64()
+            .expect("wire_consts.retrieve_btc_min_amount must be a u64");
+        assert_eq!(RETRIEVE_BTC_MIN_AMOUNT, want);
+    }
+
+    #[test]
+    fn mint_account_matches_catalog_truth() {
+        let wc = wire_consts();
+        let hex = wc["mint_account"]
+            .as_str()
+            .expect("wire_consts.mint_account must be a hex string");
+        let want = decode_hex_const(hex);
+        assert_eq!(
+            want.len(),
+            PUBKEY_LEN,
+            "wire_consts.mint_account must decode to exactly PUBKEY_LEN bytes"
+        );
+        assert_eq!(want.as_slice(), MINT_ACCOUNT);
+    }
+}

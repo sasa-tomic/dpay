@@ -796,6 +796,7 @@ dependencies = [
  "icrc-ledger-types",
  "num-traits",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
