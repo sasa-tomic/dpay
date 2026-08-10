@@ -3,7 +3,7 @@ import {View, Text, Pressable, TextInput, ActivityIndicator, type TextStyle} fro
 import QRCode from 'react-native-qrcode-svg';
 import {C} from '../config/palette';
 import {S} from '../styles';
-import {QR_SIZE_SMALL, SOL_BROADCAST_TIMEOUT_MS, IS_SOLANA_DEVNET} from '../config/constants';
+import {QR_SIZE_SMALL, SOL_BROADCAST_TIMEOUT_MS, IS_SOLANA_DEVNET, EXPIRY_WINDOW} from '../config/constants';
 import {fmtAsset, toUnits} from '../lib/format';
 import type {Identity} from '../lib/types';
 import bs58 from 'bs58';
@@ -104,9 +104,10 @@ export function SolReceiveMode({identity, online, nfcReady, solAddress, subMode,
     if (!raw || raw === '0') return;
     try {
       const addr = deriveSolanaAddress(identity.secretHex);
+      const exp = Math.floor(Date.now() / 1000) + EXPIRY_WINDOW;
       const reqInput = cur === 'SOL'
-        ? {to: addr, amt: raw, cur: 'SOL' as const, mint: null, toAta: null, exp: Math.floor(Date.now() / 1000) + 300, name: identity.username, memo: memo.trim()}
-        : {to: addr, amt: raw, cur: 'USDC' as const, mint: USDC_MINT_ADDRESS,         toAta: bs58.encode(deriveAta(addr, USDC_MINT_ADDRESS)), exp: Math.floor(Date.now() / 1000) + 300, name: identity.username, memo: memo.trim()};
+        ? {to: addr, amt: raw, cur: 'SOL' as const, mint: null, toAta: null, exp, name: identity.username, memo: memo.trim()}
+        : {to: addr, amt: raw, cur: 'USDC' as const, mint: USDC_MINT_ADDRESS,         toAta: bs58.encode(deriveAta(addr, USDC_MINT_ADDRESS)), exp, name: identity.username, memo: memo.trim()};
       const uri = encodeSolReq(reqInput);
       setReqUri(uri);
       setReqSnapshot({...reqInput, v: 1 as const});

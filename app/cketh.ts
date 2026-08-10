@@ -29,7 +29,7 @@
 // --- byte helpers -----------------------------------------------------------------------------
 
 /** Encode bytes as lowercase hex WITHOUT a 0x prefix. */
-export function bytesToHex(b: Uint8Array): string {
+function bytesToHex(b: Uint8Array): string {
   let s = '';
   for (let i = 0; i < b.length; i++) s += b[i].toString(16).padStart(2, '0');
   return s;

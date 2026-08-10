@@ -37,7 +37,7 @@ export {deriveSolanaAddress};
  *  truth in `payments.ts`). `nextNonce` is the advanced nonce value IF settled — the payer adopts it
  *  optimistically for the next offline payment (the receipt-nonce-relay). `sig` is the on-chain
  *  transaction signature IF settled. */
-export interface SolReceipt {
+interface SolReceipt {
   readonly status: ReceiptCode;
   readonly npub: string;
   readonly nextNonce: string | null;
