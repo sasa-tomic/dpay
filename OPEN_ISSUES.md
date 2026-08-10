@@ -76,33 +76,33 @@ item; low priority (ops-only, no runtime impact, both deploy scripts are byte-fa
 | U5 | intuitive | MED | 8 | MED | `app/components/SettingsSheet.tsx` + e2e flows `12`/`35`/`38`/`40`/`41`/`57` + harness `lib.mjs setRelay()` | **Settings "Advanced" disclosure defaults COLLAPSED.** The relay URL input + Apply button no longer appear on first Settings open (was a known footgun: a one-paste-away brick). The founder-directed consumer posture from the 2026-08-05 audit P1; the default-open was a temporary e2e-compatibility hack. 6 e2e flows that read `settings-relay` now expand `btn-advanced-toggle` first; `settings.png` visual baseline re-seeded (30.3% drift → 0%); the harness `setRelay()` helper (used by `13`/`19`/`20`/`22`/`33`) updated in ONE place so all callers benefit. |
 | U6 | (cleanup) | LOW | 10 | LOW | (none — code-paths verified clean) | **No AI slop / templates / "coming soon" / lorem ipsum / TODO markers in `app/`.** A `grep` for `coming soon|lorem ipsum|TODO|FIXME|stub|not implemented` against `app/**.{ts,tsx}` returned ZERO consumer-facing matches (only legitimate `__stubs__/walletconnect-stub.ts` for jest, plus `placeholder=` TextInput props which are correct). The codebase is clean of this class. |
 
-### Findings DEFERRED (HIGH effort or larger scope — recorded for next session)
+### Findings DEFERRED (2 remaining — D3, D4; D1/D2/D5 resolved 2026-08-10)
 
 These are real but the user instruction was to defer HIGH-effort findings. Each carries enough detail
-to be picked up directly.
+to be picked up directly. **D1, D2, D5 were MED-or-less effort with confidence ≥6/10 and are now
+DONE** (commits `af321e3` D1, `2acaae9` D2+D5); D3 + D4 remain deferred (visual-baseline churn /
+HIGH effort).
 
-#### D1 — Pre-filled "25.00" amount in ReceiveMode looks like a fixed amount (LOW-MED)
+#### ✅ D1 — Pre-filled "25.00" amount in ReceiveMode looks like a fixed amount — DONE (commit `af321e3`)
 
-- **Symptom:** `app/components/ReceiveMode.tsx:38` defaults `amount` to `'25.00'`. The vision-model
+- **Symptom:** `app/components/ReceiveMode.tsx:38` defaulted `amount` to `'25.00'`. The vision-model
   review flagged this as confusing for a new user (might think the amount is fixed). `SolReceiveMode`
-  mirrors it with `'0.025'`.
-- **Fix:** default to empty string (`useState('')`); let the existing `placeholder="0.00"` carry the
-  affordance.
-- **Why deferred:** ~10 e2e flows (06/07/08/28/etc.) assert state AFTER typing an explicit amount, so
-  they're robust. But flow 06 (request-qr) and a few others have inner logic that may rely on the
-  default; needs a careful sweep + visual-baseline re-seed (the captured request-qr screen shows
-  "∂25.00" today). Confidence 7/10, effort MED (e2e sweep + baseline).
+  mirrored it with `'0.025'`.
+- **Resolution (2026-08-10, `af321e3`):** both defaults changed to `useState('')`; the existing
+  `placeholder="0.00"` / `placeholder="0.025"` carries the affordance. No visual-baseline re-seed was
+  needed (flow 40 types `42.50` explicitly, so the `receive-request` baseline never showed `∂25.00`).
+  Flows 51 + 53 relied on the SOL default `0.025` and now type it explicitly; flows 06 + 45 already
+  typed explicitly (comment touch-ups only). `just verify` 62/62 green.
 
-#### D2 — "⇅" swap-hint icon next to balance suggests currency swap (LOW)
+#### ✅ D2 — "⇅" swap-hint icon next to balance suggests currency swap — DONE (commit `2acaae9`)
 
-- **Symptom:** `app/components/Wallet.tsx:369` renders `<Text style={S.swapHint}>⇅</Text>` next to
+- **Symptom:** `app/components/Wallet.tsx:369` rendered `<Text style={S.swapHint}>⇅</Text>` next to
   the balance to signal "tap to switch currency." The icon is the standard "swap / exchange"
   metaphor — directly contradicts the no-swap non-negotiable.
-- **Fix:** a different metaphor — `☰` (list), `⊗` (asset), or simply remove (the existing "balance"
-  label + tap-target is enough; the icon is decorative).
-- **Why deferred:** visual-baseline impact (4 of 5 surfaces include the balance row); confidence 6/10
-  (subjective — the metaphor could be defended as "switch which currency is displayed"). Effort LOW
-  with baseline re-seed.
+- **Resolution (2026-08-10, `2acaae9`):** removed the icon entirely (KISS — no replacement; the
+  "balance" label + tap-target is enough). Dead `swapHint` style key dropped from `styles.ts`.
+  Visual baselines re-seeded (`wallet-pay`, `ledger` — header balance row; `receive-request` — header
+  + D5 button). Verified via zai-vision (no ⇅ icon in any re-seeded baseline). `just verify` 62/62.
 
 #### D3 — Header "balance" label is generic (LOW)
 
@@ -126,17 +126,18 @@ to be picked up directly.
   CORRECT and WORKS today — this is purely a usability polish. Confidence 8/10 on the issue, but
   effort HIGH.
 
-#### D5 — Verbose "If the payer paid..." button label (LOW)
+#### ✅ D5 — Verbose "If the payer paid..." button label — DONE (commit `2acaae9`)
 
-- **Symptom:** `app/components/ReceiveMode.tsx:252` renders a Pressable whose entire label is the
+- **Symptom:** `app/components/ReceiveMode.tsx:252` rendered a Pressable whose entire label was the
   sentence "If the payer paid without scanning your code, tap here to confirm with their phone." The
   vision-model review flagged this as a sentence masquerading as a button label.
-- **Fix:** shorten the visible label to "Scan payer's signed QR" (the shorter helper text already in
-  the `scanning` branch). Keep the explanatory sentence as a smaller help-text BELOW the button.
-- **Why deferred:** e2e flows 06 (`/paid without scanning/i`) + 21 (`/confirm with their phone/i`)
-  assert the long text appears; needs coordinated update. The current text IS clear (the vision
-  model said "the clarity it provides likely justifies its length for the target user"). Confidence
-  7/10, effort MED (e2e sweep).
+- **Resolution (2026-08-10, `2acaae9`):** the button label is now the concise action "Scan payer's
+  signed QR"; the explanatory sentence moved to smaller help-text (`S.dim2`) BELOW the button (so
+  the clarity is preserved without the sentence-as-label anti-pattern). `SolReceiveMode`'s
+  equivalent label was already concise ("Scan the payer's signed code") — no change needed there.
+  Flows 06 + 21 updated to assert the new structure (short label + help-text both present); flow
+  21's click-by-text target retargeted to the new concise label. `receive-request` visual baseline
+  re-seeded (D2 header + D5 button). `just verify` 62/62.
 
 ---
 
