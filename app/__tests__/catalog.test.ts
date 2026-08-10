@@ -14,6 +14,7 @@ import {
   BUNDLED_CATALOG,
   type CurrencyDescriptor,
 } from '../config/catalog';
+import {MINT_HEX} from '../lib/format';
 
 // --- shared fixtures --------------------------------------------------------------------------
 // MC1 unit 5: fixtures carry the full authoritative per-currency field set. `mk` fills the new
@@ -518,6 +519,7 @@ const TRUTH = JSON.parse(
   principals: {ckbtc_minter: string; cketh_minter: string; ckusdc_ledger: string; cketh_gas_ledger: string};
   erc20_contracts: {ckusdc: string};
   decimals: {demo: number; ckbtc: number; ckusdc: number; eth: number};
+  wire_consts: {retrieve_btc_min_amount: number; mint_account: string};
 };
 
 describe('BUNDLED_CATALOG vs dfx/catalog_truth.json (drift alarm)', () => {
@@ -547,5 +549,33 @@ describe('BUNDLED_CATALOG vs dfx/catalog_truth.json (drift alarm)', () => {
     expect(a.minter).toBe(TRUTH.principals.cketh_minter);
     expect(a.token_contract).toBe(TRUTH.erc20_contracts.ckusdc);
     expect(a.gas_ledger).toBe(TRUTH.principals.cketh_gas_ledger);
+  });
+});
+
+// --- wire_consts drift alarm (M15 app half) ---------------------------------------------------
+// `dfx/catalog_truth.json` `wire_consts` carries two literals that ALSO live as app-side values:
+//   - `retrieve_btc_min_amount` (50_000 sats) — the ckBTC offramp floor, mirrored in the app as
+//     `familyDisplay(BUNDLED_CATALOG, 1).withdrawMinRaw` (FD_CKBTC). A drift → the app's WithdrawSheet
+//     would accept an amount the minter rejects (or reject one the minter accepts).
+//   - `mint_account` (32 bytes of 0xFF, hex) — the faucet-mint sentinel, mirrored in the app as
+//     `MINT_HEX` (lib/format.ts). A drift → the app would leak raw protocol hex ("from ffff…") instead
+//     of the friendly "faucet" label (N4).
+// The CANISTER half is cross-checked by a Rust drift-alarm in types.rs; this is the APP half. A drift
+// in either direction goes RED here.
+describe('wire_consts vs dfx/catalog_truth.json (M15 app-half drift alarm)', () => {
+  it('ckBTC offramp floor familyDisplay(1).withdrawMinRaw === retrieve_btc_min_amount', () => {
+    // The app's ckBTC withdraw floor (FD_CKBTC.withdrawMinRaw, surfaced via familyDisplay for
+    // currency 1) must equal the shared truth's retrieve_btc_min_amount. Resolved through
+    // familyDisplay (the same path WithdrawSheet reads) rather than the unexported FD_CKBTC const.
+    const fd = familyDisplay(BUNDLED_CATALOG, 1);
+    expect(fd).not.toBeNull();
+    expect(fd!.withdrawMinRaw).toBe(TRUTH.wire_consts.retrieve_btc_min_amount);
+  });
+
+  it('MINT_HEX (lib/format) === mint_account (32 bytes of 0xFF)', () => {
+    // The app's faucet-mint sentinel (MINT_HEX) must equal the shared truth's mint_account. A drift
+    // breaks the friendly "faucet" label → leaks raw protocol hex to end users (N4).
+    expect(MINT_HEX).toBe(TRUTH.wire_consts.mint_account);
+    expect(MINT_HEX.length).toBe(64);
   });
 });
