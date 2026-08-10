@@ -8,8 +8,8 @@
 //
 // Proves the full path through the REAL app + REAL relay:
 //   1. Merchant B onboards, requests ∂25 → the request QR screen renders with the
-//      "If the payer paid without scanning your code, tap here to confirm with their phone." affordance.
-//   2. Click it → the QrScanner mounts (scanning=true); the affordance label swaps to
+//      "Scan payer's signed QR" affordance button (D5: concise label + help-text below).
+//   2. Click it → the QrScanner mounts (scanning=true); the help-text swaps to
 //      "Scan the payer's signed QR".
 //   3. The payer (generated in-test, faucet-funded) signs an authorization for B's EXACT request
 //      (byte-exact wire via wire.mjs) and the test injects the signed code via the camera seam.
@@ -72,20 +72,22 @@ export async function run() {
     const req = decodeRequest(requestQR);
     assert(req.toHex.toLowerCase() === bobHex.toLowerCase(), 'B request.to == B account');
 
-    // L4: the offline-payer affordance uses clear merchant-facing language (a concrete one-line
-    // action, not the ambiguous "Payer offline? Scan their QR" / insider-jargon "settle").
+    // L4 + D5: the offline-payer affordance is a CONCISE button label ("Scan payer's signed QR")
+    // with the explanatory sentence as smaller help-text below it. Both must be present.
     const beforeScan = await driver.bodyText();
+    assert(/Scan payer's signed QR/i.test(beforeScan),
+      `the request screen should show the concise affordance button label (D5). body excerpt:\n${beforeScan.slice(0, 500)}`);
     assert(/paid without scanning/i.test(beforeScan) && /confirm with their phone/i.test(beforeScan),
-      `the request screen should show the offline-payer confirm affordance ("If the payer paid without scanning your code, tap here to confirm with their phone."). body excerpt:\n${beforeScan.slice(0, 500)}`);
-    console.log('[21-receive-scan] ✓ offline-payer confirm affordance visible (L4)');
+      `the request screen should show the explanatory help-text below the affordance (D5). body excerpt:\n${beforeScan.slice(0, 500)}`);
+    console.log('[21-receive-scan] ✓ concise offline-payer affordance + help-text (L4 + D5)');
 
-    // Click it → the scanner mounts. The affordance is a Pressable with no testID — click by text.
-    // RNW renders Pressables as plain elements (not <button>), so search the full DOM for the label.
+    // Click it → the scanner mounts. The affordance button label is "Scan payer's signed QR";
+    // find that text node and walk up to the Pressable wrapper (RNW renders Pressables as plain
+    // elements, not <button>).
     await driver.eval(() => {
       const nodes = Array.from(document.querySelectorAll('text, span, div, a, button, [role]'));
-      const target = nodes.find(e => /confirm with their phone/i.test((e.textContent || '').trim()) && e.children.length === 0);
-      if (!target) throw new Error('affordance text node not found');
-      // Walk up to the nearest clickable (the Pressable wrapper).
+      const target = nodes.find(e => (e.textContent || '').trim() === "Scan payer's signed QR" && e.children.length === 0);
+      if (!target) throw new Error('affordance button label node not found');
       let el = target;
       for (let i = 0; i < 5 && el; i++) {
         el.click?.();

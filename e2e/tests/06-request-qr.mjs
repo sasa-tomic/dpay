@@ -55,12 +55,14 @@ export async function run() {
     // 3. The request QR renders (the `request-qr` container is the gate).
     await driver.findByTestID('request-qr', { timeoutMs: 5_000 });
 
-    // L4: the offline-payer affordance uses clear merchant-facing wording (a concrete one-line
-    // action, not the ambiguous "Payer offline? Scan their QR" / insider-jargon "settle").
+    // L4 + D5: the offline-payer affordance is a CONCISE button label ("Scan payer's signed QR")
+    // with the explanatory sentence as smaller help-text below it (not as the button label).
     const reqBody = await driver.bodyText();
+    assert(/Scan payer's signed QR/i.test(reqBody),
+      `request screen should show the concise affordance button label (D5). body excerpt:\n${reqBody.slice(0, 400)}`);
     assert(/paid without scanning/i.test(reqBody) && /confirm with their phone/i.test(reqBody),
-      `request screen should show the clear offline-payer affordance (L4). body excerpt:\n${reqBody.slice(0, 400)}`);
-    console.log('[06-request-qr] ✓ offline-payer affordance wording is clear (L4)');
+      `request screen should show the explanatory help-text below the affordance (D5). body excerpt:\n${reqBody.slice(0, 400)}`);
+    console.log('[06-request-qr] ✓ concise offline-payer affordance + help-text (L4 + D5)');
 
     // 4. Read the EXACT value the QR encodes via the shim seam, then decode the 132-byte request.
     //    The QR is now PLAIN base64url (the merchant's `to_name` lives inside the bytes — wire-format

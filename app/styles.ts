@@ -55,7 +55,6 @@ export const S = StyleSheet.create({
   dot: {width: 8, height: 8, borderRadius: 4},
   balLabel: {fontSize: 12, color: C.sub},
   balAmt: {fontSize: 26, fontWeight: '800', color: C.ink},
-  swapHint: {fontSize: 18, color: C.sub2, marginLeft: 6},
   tabs: {flexDirection: 'row', paddingHorizontal: 16, gap: 8, marginTop: 6},
   tab: {flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 8, paddingHorizontal: 20, borderRadius: 999, backgroundColor: C.field, minHeight: 44},
   tabActive: {backgroundColor: C.brand},

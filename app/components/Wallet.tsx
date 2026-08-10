@@ -366,7 +366,6 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
               : currentCurrency === 0
                 ? (shownBalance == null ? '—' : `${online ? '' : '~'}${usd(shownBalance)}`)
                 : fmtCurrencyAmount(catalog, currentCurrency, displayAssetBalances[currentCurrency] ?? '0')}</Text>
-            <Text style={S.swapHint}>⇅</Text>
           </View>
         </Pressable>
       </View>
