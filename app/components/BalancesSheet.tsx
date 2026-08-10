@@ -131,13 +131,13 @@ export function BalancesSheet({catalog, assetBalances, primaryBalance, online, c
                         disabled={topUpBusy}
                         onPress={onTopUp}
                         accessibilityRole="button"
-                        accessibilityLabel={`Receive ${name}`}
-                        accessibilityHint="Add demo funds to this wallet"
+                        accessibilityLabel={`Get demo funds`}
+                        accessibilityHint="Add ∂100 of demo money to this wallet"
                         accessibilityState={{disabled: topUpBusy}}
                       >
                         {topUpBusy
                           ? <ActivityIndicator size="small" color={C.brand} />
-                          : <><Text style={S.assetActionPlus}>+</Text><Text style={S.assetActionText}>Receive</Text></>}
+                          : <><Text style={S.assetActionPlus}>+</Text><Text style={S.assetActionText}>Demo funds</Text></>}
                       </Pressable>
                     </View>
                   </View>

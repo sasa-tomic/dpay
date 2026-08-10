@@ -3,16 +3,16 @@
 // The camera seam (`window.__DPAY_TEST_SCAN`) is the sanctioned smallest-boundary shim; every other
 // flow injects a WELL-FORMED request through it. This flow injects GARBAGE and asserts the app's
 // input-validation path: `onRequestString` → `parseRequestQR` (a trim-only pass-through) →
-// `DpayCore.decodeRequest` throws on the malformed bytes → PayMode catches and surfaces
-// `setErr('bad request QR: <reason>')` on the scan screen. The honest contract:
-//   - the error text names the problem ("bad request QR"), never a silent swallow or a fake success;
+// `DpayCore.decodeRequest` throws on the malformed bytes → PayMode catches and surfaces a friendly
+// "This isn't a dpay payment code" error on the scan screen. The honest contract:
+//   - the error text names the problem in plain language, never a silent swallow or a fake success;
 //   - the review screen NEVER mounts (no `pay-amount`, no Approve of a nonsensical request);
 //   - the scan surface stays alive — a second garbage payload lands a second error (re-arms), proving
 //     the failure is transient and non-fatal (the user can scan again).
 //
 // Two payloads exercise the two real failure shapes: a plain non-base64 string, and a valid-base64
 // but wrong-length decode (the 132-byte request can't reconstruct from 3 bytes). Both must hit the
-// same honest "bad request QR" path.
+// same honest error path.
 //
 // Selector contract: the scan-screen error renders via `<Text style={S.err}>{err}</Text>` (no testID
 // — matched by body text). The review screen's `pay-amount` is the "did we wrongly advance?" canary.
@@ -26,7 +26,7 @@ export const meta = {
   name: 'bad-qr',
   journey: 'pay',
   covers: ['bad-qr', 'malformed', 'error-handling', 'input-validation'],
-  verifies: 'Scanning/pasting garbage (non-base64 + wrong-length) surfaces an honest \'bad request QR\' error; review never mounts; scan surface re-arms.',
+  verifies: 'Scanning/pasting garbage (non-base64 + wrong-length) surfaces a friendly \'This isn\'t\'t a dpay payment code\' error; review never mounts; scan surface re-arms.',
   timeoutMs: 15000,
 };
 
@@ -54,19 +54,19 @@ export async function run() {
         payload,
       );
 
-      // The honest error: the scan screen shows "bad request QR: <reason>" (PayMode catches the
-      // decode throw and surfaces it — never a silent swallow, never a fake review/Paid).
-      const got = await driver.waitForText('bad request QR', { timeoutMs: 5_000 });
+      // The honest error: the scan screen shows a friendly "This isn't a dpay payment code" message
+      // (PayMode catches the decode throw and surfaces it — never a silent swallow, never a fake review).
+      const got = await driver.waitForText("isn't a dpay payment code", { timeoutMs: 5_000 });
       const body = await driver.bodyText();
       assert(
         got,
-        `garbage payload ${JSON.stringify(payload)} should surface an honest "bad request QR" error.\n  body excerpt:\n${body.slice(0, 500)}`,
+        `garbage payload ${JSON.stringify(payload)} should surface a friendly "This isn't a dpay payment code" error.\n  body excerpt:\n${body.slice(0, 500)}`,
       );
 
       // The review screen MUST NOT have mounted — a nonsensical request can never reach Approve.
       const reviewMounted = await driver.isPresent('pay-amount');
       assert(!reviewMounted, 'the review screen must NOT mount for a malformed request (no pay-amount)');
-      console.log(`[36-bad-qr] ✓ garbage #${i + 1} → honest "bad request QR" error, no review mount`);
+      console.log(`[36-bad-qr] ✓ garbage #${i + 1} → friendly error, no review mount`);
     }
 
     // The scan surface is still alive after the errors (transient, non-fatal): the camera seam still

@@ -54,7 +54,7 @@ export async function run() {
 
     // 4. Primary: the chip switches to the catalog wrapper_name 'ckBTC'.
     chip = await driver.readText('active-rail-chip');
-    assertEq(chip, 'ckBTC', 'active-rail-chip after selecting ckBTC');
+    assertEq(chip, 'BTC', 'active-rail-chip after selecting ckBTC (uses backing_symbol, not wrapper_name)');
 
     // 5. Secondary: the header balance text follows — ckBTC is unfunded, so the `else` branch renders
     //    fmtCurrencyAmount(...'0') = "0 BTC" (fmtAsset's zero special-case, not "0.00000000 BTC").

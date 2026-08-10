@@ -4,7 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {TOP_UP_CENTS, FAUCET_TIMEOUT_MS, SHOW_TESTNET_STORAGE_KEY} from '../config/constants';
-import {familyDisplay, fmtCurrencyAmount} from '../config/catalog';
+import {familyDisplay, fmtCurrencyAmount, displayName} from '../config/catalog';
 import {usd, base, fmtAsset} from '../lib/format';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {applyOffline} from '../lib/amount';
@@ -379,7 +379,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset}: {identity: Id
             selected IC currency) so a user who switched to SOL in the Balances sheet doesn't get
             silently stuck in SOL mode (the IC ↔ SOL NFC AIDs differ). */}
         <View testID="active-rail-chip" style={S.activeRailChip}>
-          <Text style={S.activeRailChipText}>{activeSol ? 'SOL' : (currentCurrency === 0 ? 'DEMO' : (catalog.find(c => c.currency === currentCurrency)?.wrapper_name ?? 'IC'))}</Text>
+          <Text style={S.activeRailChipText}>{activeSol ? 'SOL' : (currentCurrency === 0 ? 'DEMO' : (displayName(catalog.find(c => c.currency === currentCurrency) ?? catalog[0])))}</Text>
         </View>
       </View>
 
