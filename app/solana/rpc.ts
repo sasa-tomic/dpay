@@ -17,6 +17,7 @@
 
 import bs58 from 'bs58';
 import {composeTimeout as composeTimeoutShared} from '../lib/timeout';
+import {bytesToBase64, base64ToBytes} from '../lib/base64';
 
 export interface SolanaBlockhash {
   /** base58-encoded recent blockhash (raw RPC shape — decode to 32 bytes at the call site). */
@@ -177,42 +178,5 @@ export async function getMinimumBalanceForRentExemption(url: string, dataLength:
   return BigInt(result);
 }
 
-// RFC 4648 base64 of a byte array. Hand-rolled (no Buffer/btoa dependency) so it is identical on
-// RN/Hermes, jest/Node, and the e2e browser bundle.
-function bytesToBase64(bytes: Uint8Array): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  let out = '';
-  for (let i = 0; i < bytes.length; i += 3) {
-    const b0 = bytes[i];
-    const b1 = i + 1 < bytes.length ? bytes[i + 1] : 0;
-    const b2 = i + 2 < bytes.length ? bytes[i + 2] : 0;
-    out += chars[b0 >> 2];
-    out += chars[((b0 & 0x03) << 4) | (b1 >> 4)];
-    out += i + 1 < bytes.length ? chars[((b1 & 0x0f) << 2) | (b2 >> 6)] : '=';
-    out += i + 2 < bytes.length ? chars[b2 & 0x3f] : '=';
-  }
-  return out;
-}
-
-// RFC 4648 base64 decode (standard alphabet, '=' padding tolerated). Hand-rolled to match
-// `bytesToBase64` — no Buffer/atob dependency so it is identical across RN/Hermes/jest/browser.
-function base64ToBytes(b64: string): Uint8Array {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  const lookup = new Int8Array(128).fill(-1);
-  for (let i = 0; i < chars.length; i++) lookup[chars.charCodeAt(i)] = i;
-  // Strip padding; tolerate whitespace.
-  const clean = b64.replace(/=+$/, '').replace(/\s/g, '');
-  const out = new Uint8Array(Math.floor(clean.length * 3 / 4));
-  let o = 0;
-  for (let i = 0; i < clean.length; i += 4) {
-    const v0 = lookup[clean.charCodeAt(i) & 0x7f];
-    const v1 = i + 1 < clean.length ? lookup[clean.charCodeAt(i + 1) & 0x7f] : -1;
-    const v2 = i + 2 < clean.length ? lookup[clean.charCodeAt(i + 2) & 0x7f] : -1;
-    const v3 = i + 3 < clean.length ? lookup[clean.charCodeAt(i + 3) & 0x7f] : -1;
-    if (v0 < 0 || v1 < 0) throw new Error('solana rpc: malformed base64');
-    out[o++] = (v0 << 2) | (v1 >> 4);
-    if (v2 >= 0) out[o++] = ((v1 & 0x0f) << 4) | (v2 >> 2);
-    if (v3 >= 0) out[o++] = ((v2 & 0x03) << 6) | v3;
-  }
-  return out.subarray(0, o);
-}
+// RFC 4648 base64 of a byte array — imported from `lib/base64.ts` (the SINGLE implementation shared
+// with the URL-safe codec in `lib/base64url.ts`). Standard alphabet, padded, throws-on-malformed.
