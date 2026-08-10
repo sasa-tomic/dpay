@@ -164,12 +164,18 @@ typecheck:
 bridge-parity:
     node scripts/bridge-parity.mjs
 
+# aid parity: assert each NFC AID's byte literal (Rust const / Kotlin val) is byte-equal to its XML
+# <aid-filter> hex. Sub-second, no device — the static net that makes an AID routing drift fail the
+# build (a mismatch silently breaks OS tap routing → opaque "not a dpay phone" / SW_NOT_READY).
+aid-parity:
+    node scripts/aid-parity.mjs
+
 # the native Rust inner loop — core + canister + relay. test-live is INCLUDED (not off-path):
 # it is offline (PocketIC HTTP gateway) + ~seconds-fast, and exercises the AgentLedger↔real-canister
 # path that test-relay's FakeLedger cannot (receipt recovery, TTL balance refresh, currency wiring).
 # Keeping it on the hot path closes the gap that once let a fail-closed-cap change break test-live
 # silently while `just verify` stayed green (MC2 U1 / OPEN_ISSUES #10 lesson).
-check: test-core test-canister test-relay test-live typecheck bridge-parity
+check: test-core test-canister test-relay test-live typecheck bridge-parity aid-parity
     @echo "rust inner loop green"
 
 # everything: rust loop + radical e2e (real app + real relay + real browser). The e2e harness
