@@ -27,9 +27,16 @@ import { DpaySolNfc, installSolNfcSeam } from './dpay-sol-nfc';
 // Share.share in RNW calls navigator.share if defined, else REJECTS. In headless chrome neither path
 // is useful; the app's deposit "Copy address" and "Share auth code" paths both use it as a clipboard
 // affordance, so resolve to dismissedAction (matches RNW's `Share.dismissedAction`). No silent error
-// — the call returns a deterministic outcome the app already handles.
-const shareNoop = () => Promise.resolve({ action: 'dismissedAction' } as
-  { action: 'sharedAction' | 'dismissedAction' });
+// — the call returns a deterministic outcome the app already handles. ALSO capture the share payload
+// into `window.__DPAY_TEST_SHARE` (mirrors the clipboard seam) so an e2e flow can assert the EXACT
+// message handed to Share.share (e.g. the dpay:pay/<base64url> receipt hand-back — flow 59).
+const shareNoop = (opts?: {message?: string; url?: string}) => {
+  if (typeof window !== 'undefined') {
+    (window as any).__DPAY_TEST_SHARE = opts && typeof opts.message === 'string' ? opts.message : '';
+  }
+  return Promise.resolve({ action: 'dismissedAction' } as
+    { action: 'sharedAction' | 'dismissedAction' });
+};
 (Share as any).share = shareNoop;
 
 // Clipboard seam (U4). The real app writes the deposit address via `navigator.clipboard.writeText`

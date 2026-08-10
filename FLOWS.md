@@ -1,6 +1,6 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **59 flows.**
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **60 flows.**
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay (FakeLedger, offline). No UI stubs. The only shimmed I/O boundary is
 > the camera scan (sanctioned smallest-boundary seam) and the NFC radio (physical-device gate).
@@ -17,7 +17,7 @@
 Flows grouped by user journey; within each table, every row lists what the flow **verifies** and
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`).
 
-wire (1) · onboard (6) · pay (18) · offline (5) · deposit (8) · withdraw (6) · nfc (3) · system (9) · tour (3)
+wire (1) · onboard (6) · pay (19) · offline (5) · deposit (8) · withdraw (6) · nfc (3) · system (9) · tour (3)
 
 ---
 
@@ -60,6 +60,7 @@ wire (1) · onboard (6) · pay (18) · offline (5) · deposit (8) · withdraw (6
 | 43 | decimal-edges | 8-dec (ckBTC) + 6-dec (ckUSDC) + 18-dec (ckDAI) amounts render with exact decimals on review (no rounding, no sci-notation, no trailing-zero drift). | decimal, format, ckbtc, ckerc20, 18-decimal |
 | 49 | deeplink-request | dpay:req deeplink opens the pay review screen pre-filled with the merchant request (no auto-approve). | deeplink, request-link, prefill, pay-review |
 | 50 | deeplink-receipt | merchant verifies a dpay:pay receipt (canister-signed) via the web ?pay= path + reconciles as Received. | deeplink, receipt-link, verify, receive, handback |
+| 59 | share-receipt | After an online settle, btn-share-receipt hands a dpay:pay/<base64url> receipt link to Share. | share-receipt, receipt-link, handback, online-settle, deeplink |
 
 ### Offline hand-off (the signature feature)
 
