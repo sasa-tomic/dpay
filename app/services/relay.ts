@@ -79,19 +79,21 @@ export async function payAndClassify(relayUrl: string, code: string, signal?: Ab
 // timeout above is a backstop only — every existing caller passes its own shorter-timeout signal.
 export async function depositInfo(relayUrl: string, currency: number, signal?: AbortSignal): Promise<DepositInfo> {
   const r = await fetch(`${base(relayUrl)}/api/v1/deposit/info?currency=${currency}`, {signal: withDefaultTimeout(signal)});
-  if (!r.ok) throw new Error(`deposit/info ${r.status}`);
-  return r.json();
+  const j = await readJsonOrEmpty(r);
+  if (!r.ok) throw new Error(typeof j?.error === 'string' ? j.error : `deposit/info ${r.status}`);
+  return j as DepositInfo;
 }
 export async function depositAddress(relayUrl: string, accountHex: string, currency: number, signal?: AbortSignal): Promise<string> {
   const r = await fetch(`${base(relayUrl)}/api/v1/deposit/address/${accountHex}?currency=${currency}`, {signal: withDefaultTimeout(signal)});
-  if (!r.ok) throw new Error(`deposit/address ${r.status}`);
-  const j = await r.json();
+  const j = await readJsonOrEmpty(r);
+  if (!r.ok) throw new Error(typeof j?.error === 'string' ? j.error : `deposit/address ${r.status}`);
   return j.address as string;
 }
 export async function depositRefresh(relayUrl: string, accountHex: string, currency: number, signal?: AbortSignal): Promise<DepositRefresh> {
   const r = await fetch(`${base(relayUrl)}/api/v1/deposit/refresh/${accountHex}?currency=${currency}`, {method: 'POST', signal: withDefaultTimeout(signal)});
-  if (!r.ok) throw new Error(`deposit/refresh ${r.status}`);
-  return r.json();
+  const j = await readJsonOrEmpty(r);
+  if (!r.ok) throw new Error(typeof j?.error === 'string' ? j.error : `deposit/refresh ${r.status}`);
+  return j as DepositRefresh;
 }
 
 // ckERC-20 / native-ETH onramp params (helper contract, ERC-20 address, facade principal) for a
@@ -103,8 +105,9 @@ export async function depositRefresh(relayUrl: string, accountHex: string, curre
 export type CkErc20OnrampParams = {helper_address: string; erc20_address: string | null; facade_principal: string; kind: 'erc20' | 'native_eth'};
 export async function ckerc20OnrampParams(relayUrl: string, currency: number, signal?: AbortSignal): Promise<CkErc20OnrampParams> {
   const r = await fetch(`${base(relayUrl)}/api/v1/onramp/ckerc20?currency=${currency}`, {signal: withDefaultTimeout(signal)});
-  if (!r.ok) throw new Error(`onramp/ckerc20 ${r.status}`);
-  return r.json();
+  const j = await readJsonOrEmpty(r);
+  if (!r.ok) throw new Error(typeof j?.error === 'string' ? j.error : `onramp/ckerc20 ${r.status}`);
+  return j as CkErc20OnrampParams;
 }
 
 // Withdraw a ckBTC balance to a native BTC address. The app signs the WithdrawAuth on-device (the

@@ -171,3 +171,70 @@ describe('fetchWithTimeout helper', () => {
     expect(jest.getTimerCount()).toBe(before);
   });
 });
+
+/**
+ * M11 — relay TS client surfaces the JSON `{error}` body on non-OK responses, mirroring
+ * `withdrawFunds`. Before this fix, depositInfo/depositAddress/depositRefresh/ckerc20OnrampParams
+ * threw `new Error('<path> <status>')`, dropping the relay/canister's real reason (e.g. the
+ * family-gate "cur 6 not a btc family" message). The fix reads the body via `readJsonOrEmpty`
+ * and surfaces `j?.error` when it's a string. These tests mock fetch to return a 503-with-body
+ * and assert the thrown Error carries the body message (not just the status).
+ */
+function installJsonResponse(status: number, body: unknown) {
+  const mock = jest.fn((_url: string, _init?: RequestInit) =>
+    Promise.resolve({
+      ok: false,
+      status,
+      json: () => Promise.resolve(body),
+    } as unknown as Response),
+  );
+  (globalThis as unknown as {fetch: typeof mock}).fetch = mock;
+}
+
+describe('relay client surfaces JSON error body (M11)', () => {
+  afterEach(() => {
+    (globalThis as unknown as {fetch: unknown}).fetch = realFetch;
+  });
+
+  test('depositInfo surfaces the body error on a 503', async () => {
+    installJsonResponse(503, {error: 'minter unreachable (currency 6)'});
+    const {depositInfo} = require('../services/relay');
+    await expect(depositInfo('http://relay.example', 6)).rejects.toThrow('minter unreachable (currency 6)');
+  });
+
+  test('depositAddress surfaces the body error on a 503', async () => {
+    installJsonResponse(503, {error: 'no minter registered for currency 6'});
+    const {depositAddress} = require('../services/relay');
+    await expect(depositAddress('http://relay.example', 'ab'.repeat(32), 6)).rejects.toThrow('no minter registered for currency 6');
+  });
+
+  test('depositRefresh surfaces the body error on a 503', async () => {
+    installJsonResponse(503, {error: 'update_balance transient error'});
+    const {depositRefresh} = require('../services/relay');
+    await expect(depositRefresh('http://relay.example', 'ab'.repeat(32), 1)).rejects.toThrow('update_balance transient error');
+  });
+
+  test('ckerc20OnrampParams surfaces the body error on a 503', async () => {
+    installJsonResponse(503, {error: 'no CkEthErc20 onramp for currency 6'});
+    const {ckerc20OnrampParams} = require('../services/relay');
+    await expect(ckerc20OnrampParams('http://relay.example', 6)).rejects.toThrow('no CkEthErc20 onramp for currency 6');
+  });
+
+  test('depositInfo falls back to "<path> <status>" when the body has no string error', async () => {
+    installJsonResponse(503, {});
+    const {depositInfo} = require('../services/relay');
+    await expect(depositInfo('http://relay.example', 1)).rejects.toThrow('deposit/info 503');
+  });
+
+  test('depositInfo falls back when the body fails to parse', async () => {
+    (globalThis as unknown as {fetch: unknown}).fetch = jest.fn((_url: string, _init?: RequestInit) =>
+      Promise.resolve({
+        ok: false,
+        status: 502,
+        json: () => Promise.reject(new Error('invalid json')),
+      } as unknown as Response),
+    );
+    const {depositInfo} = require('../services/relay');
+    await expect(depositInfo('http://relay.example', 1)).rejects.toThrow('deposit/info 502');
+  });
+});
