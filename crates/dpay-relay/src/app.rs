@@ -49,7 +49,7 @@ use dpay_core::{Currency, SignedAuthorization, DEMO_USD, NONCE_LEN, PUBKEY_LEN};
 
 use crate::ledger::{
     CurrencyDescriptor, DepositRefresh, Ledger, LedgerError, MintedUtxo, PendingUtxo, Receipt,
-    TxnRecord, U64String, WithdrawReceipt,
+    TxnRecord, U64String, WithdrawReceipt, display_field_to_string,
 };
 
 /// Retry policy for transient ledger errors (idempotency makes retries safe).
@@ -74,6 +74,12 @@ const DEPOSIT_REFRESH_TTL: Duration = Duration::from_secs(120);
 pub struct AppState {
     pub ledger: Arc<dyn Ledger>,
     idempotency: Arc<Mutex<HashMap<[u8; NONCE_LEN], Receipt>>>,
+    /// Per-nonce UNSIGNED display metadata (from_name/to_name/memo decoded from the signed
+    /// authorization at /pay time). Sibling to `idempotency` so `/receipt/:nonce` can return the
+    /// payer's friendly name alongside the signed receipt body (which carries only the raw pubkey).
+    /// Empty on cold-start recovery (the Ledger::receipt fallback path has no display fields); the
+    /// app falls back to `short(pubkey)` in that case — same as the pre-fix behavior.
+    idempotency_display: Arc<Mutex<HashMap<[u8; NONCE_LEN], PaymentDisplay>>>,
     /// Per-`(pubkey, currency)` TTL cache for `deposit_refresh` results — the fix for the 2026-08-09
     /// cycles drain (see [`DEPOSIT_REFRESH_TTL`]). On a HIT (within the TTL) the handler returns the
     /// cached [`DepositRefresh`] with ZERO ledger/canister calls; the minter `update_balance`
@@ -102,6 +108,7 @@ impl AppState {
         AppState {
             ledger,
             idempotency: Arc::new(Mutex::new(HashMap::new())),
+            idempotency_display: Arc::new(Mutex::new(HashMap::new())),
             deposit_refresh_cache: Arc::new(Mutex::new(HashMap::new())),
             safe_mode: Arc::new(Mutex::new(false)),
             faucet_enabled: Arc::new(Mutex::new(true)),
@@ -262,15 +269,33 @@ async fn faucet(State(state): State<AppState>, Json(req): Json<FaucetRequest>) -
 /// never both settle under one nonce).
 async fn receipt(State(state): State<AppState>, Path(nonce_hex): Path<String>) -> Response {
     let nonce = ok_or_bail!(parse_hex_array(&nonce_hex, "nonce"));
-    // Fast path: the process-local idempotency cache (fresh settle this process).
+    // Fast path: the process-local idempotency cache (fresh settle this process). Pull the display
+    // fields from the sibling cache so the merchant gets the payer's friendly name alongside the
+    // signed receipt body.
     if let Some(rc) = state.idempotency.lock().unwrap_or_else(|p| p.into_inner()).get(&nonce).cloned() {
-        return (StatusCode::OK, Json(PayOk { receipt: rc, replayed: true })).into_response();
+        let d = state.idempotency_display.lock().unwrap_or_else(|p| p.into_inner()).get(&nonce).cloned().unwrap_or_default();
+        return (StatusCode::OK, Json(PayOk {
+            receipt: rc,
+            replayed: true,
+            from_name: d.from_name,
+            to_name: d.to_name,
+            memo: d.memo,
+        })).into_response();
     }
     // Durable fallback: the ledger's per-nonce receipt store (survives a relay restart). The canister
     // records a signed receipt for every settled pay, so a cache miss here does NOT mean "not
     // settled" — it may just mean the process restarted. `replayed: true` flags a recovered receipt.
+    // NOTE: the display fields (from_name/to_name/memo) are NOT durable across a relay restart
+    // (they live in the process-local display cache); the app falls back to `short(pubkey)` — same
+    // as the pre-fix behavior, no regression.
     match state.ledger.receipt(nonce).await {
-        Ok(Some(rc)) => (StatusCode::OK, Json(PayOk { receipt: rc, replayed: true })).into_response(),
+        Ok(Some(rc)) => (StatusCode::OK, Json(PayOk {
+            receipt: rc,
+            replayed: true,
+            from_name: String::new(),
+            to_name: String::new(),
+            memo: String::new(),
+        })).into_response(),
         Ok(None) => err(StatusCode::NOT_FOUND, "not settled"),
         Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("ledger unavailable: {e}")),
     }
@@ -741,12 +766,32 @@ struct CkErc20Query {
     currency: Option<Currency>,
 }
 
+/// UNSIGNED display metadata for a settled payment — the friendly names + memo the signed
+/// `Receipt` body doesn't carry (the signed claim binds only pubkeys + amount + nonce). Decoded
+/// from the signed authorization's 32-byte UTF-8 fields at /pay time and cached alongside the
+/// receipt so `/receipt/:nonce` can return them as additive display fields. The app uses them for
+/// the "Received ∂X from <name>" rendering; a verified receipt still MUST verify the signature
+/// under the pinned key — these fields are display-only, never trust-bearing.
+#[derive(Clone, Default, Serialize)]
+pub struct PaymentDisplay {
+    pub from_name: String,
+    pub to_name: String,
+    pub memo: String,
+}
+
 #[derive(Serialize)]
 struct PayOk {
     receipt: Receipt,
     /// True when this nonce was already settled and the receipt came from the idempotency cache —
     /// lets the terminal say "already paid, not charged twice" instead of a second "Paid ✓".
     replayed: bool,
+    /// UNSIGNED display fields (additive over the signed receipt body; default empty when the
+    /// relay restarted after the settle and only the durable receipt was recovered). The app uses
+    /// `from_name` for the "Received X from <name>" rendering, falling back to `short(receipt.from)`
+    /// when empty. Never trust-bearing — verify the receipt signature independently.
+    #[serde(default)] from_name: String,
+    #[serde(default)] to_name: String,
+    #[serde(default)] memo: String,
 }
 
 /// `GET /api/v1/receipt_pubkey` response body — the ledger's receipt Ed25519 public key (hex). Empty
@@ -936,10 +981,25 @@ async fn pay(State(state): State<AppState>, headers: HeaderMap, body: axum::body
     let nonce = sa.auth.nonce;
     let wire = sa.to_wire().to_vec();
 
+    // Decode the UNSIGNED display fields (from_name/to_name/memo) ONCE from the signed auth bytes
+    // so every receipt-returning path can surface them without re-decoding. Empty for the
+    // mint-sentinel / faucet path (no payer-chosen name); the app falls back to short(pubkey).
+    let display = PaymentDisplay {
+        from_name: display_field_to_string(&sa.auth.from_name),
+        to_name: display_field_to_string(&sa.auth.to_name),
+        memo: display_field_to_string(&sa.auth.memo),
+    };
+
     // 2. Idempotency: if we've already settled this nonce, replay the cached receipt verbatim.
     //    Never touch the ledger again.
     if let Some(cached) = state.idempotency.lock().unwrap_or_else(|p| p.into_inner()).get(&nonce).cloned() {
-        return (StatusCode::OK, Json(PayOk { receipt: cached, replayed: true })).into_response();
+        return (StatusCode::OK, Json(PayOk {
+            receipt: cached,
+            replayed: true,
+            from_name: display.from_name,
+            to_name: display.to_name,
+            memo: display.memo,
+        })).into_response();
     }
 
     // 3. Settle, retrying transient failures with small backoff. (Idempotency at the ledger — the
@@ -959,9 +1019,18 @@ async fn pay(State(state): State<AppState>, headers: HeaderMap, body: axum::body
                 Ok(Some(rc)) => {
                     // Recovered a settled-but-lost-reply payment. Cache it under the nonce so a
                     // subsequent duplicate /pay or /receipt hits the fast path.
-                    state.idempotency.lock().unwrap_or_else(|p| p.into_inner()).entry(nonce).or_insert_with(|| rc.clone());
-                    return (StatusCode::OK, Json(PayOk { receipt: rc, replayed: true }))
-                        .into_response();
+                    {
+                        let mut idem = state.idempotency.lock().unwrap_or_else(|p| p.into_inner());
+                        idem.entry(nonce).or_insert_with(|| rc.clone());
+                    }
+                    state.idempotency_display.lock().unwrap_or_else(|p| p.into_inner()).entry(nonce).or_insert_with(|| display.clone());
+                    return (StatusCode::OK, Json(PayOk {
+                        receipt: rc,
+                        replayed: true,
+                        from_name: display.from_name,
+                        to_name: display.to_name,
+                        memo: display.memo,
+                    })).into_response();
                 }
                 Ok(None) => {
                     return err(StatusCode::SERVICE_UNAVAILABLE, format!("ledger unavailable: {msg}"));
@@ -981,7 +1050,14 @@ async fn pay(State(state): State<AppState>, headers: HeaderMap, body: axum::body
     {
         let mut idem = state.idempotency.lock().unwrap_or_else(|p| p.into_inner());
         let stored = idem.entry(nonce).or_insert_with(|| receipt.clone()).clone();
-        return (StatusCode::OK, Json(PayOk { receipt: stored, replayed: false })).into_response();
+        state.idempotency_display.lock().unwrap_or_else(|p| p.into_inner()).entry(nonce).or_insert_with(|| display.clone());
+        return (StatusCode::OK, Json(PayOk {
+            receipt: stored,
+            replayed: false,
+            from_name: display.from_name,
+            to_name: display.to_name,
+            memo: display.memo,
+        })).into_response();
     }
 }
 

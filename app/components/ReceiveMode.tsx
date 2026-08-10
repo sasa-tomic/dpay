@@ -100,7 +100,17 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
     const check = async () => {
       try {
         const r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/receipt/${reqQr.nonce}`, undefined, BALANCE_TIMEOUT_MS);
-        if (alive && r.ok) { const j = await r.json(); const from = j.receipt?.from ? short(j.receipt.from) : 'payer'; setResult({amount: reqQr.rawAmount, currency: reqQr.currency, from}); onReceived(); }
+        if (alive && r.ok) {
+          const j = await r.json();
+          // The relay attaches UNSIGNED display fields (from_name/to_name/memo) to the /receipt
+          // response so the merchant can show "Received X from <name>" instead of the raw hex
+          // pubkey prefix. The signed receipt body (verified independently by the payer path) still
+          // binds only pubkeys + amount + nonce; these fields are display-only. An empty from_name
+          // (cold-start recovery, or the payer chose no name) falls back to short(pubkey).
+          const fromName = typeof j.from_name === 'string' && j.from_name.length > 0 ? j.from_name : null;
+          const from = fromName ?? (j.receipt?.from ? short(j.receipt.from) : 'payer');
+          setResult({amount: reqQr.rawAmount, currency: reqQr.currency, from}); onReceived();
+        }
       } catch { /* best-effort: keep polling — the next tick surfaces the settlement */ }
     };
     check(); const id = setInterval(check, POLL.receiptRcv);

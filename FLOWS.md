@@ -1,6 +1,6 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **61 flows.**
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **62 flows.**
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay (FakeLedger, offline). No UI stubs. The only shimmed I/O boundary is
 > the camera scan (sanctioned smallest-boundary seam) and the NFC radio (physical-device gate).
@@ -17,7 +17,7 @@
 Flows grouped by user journey; within each table, every row lists what the flow **verifies** and
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`).
 
-wire (1) · onboard (6) · pay (19) · offline (5) · deposit (8) · withdraw (6) · nfc (4) · system (9) · tour (3)
+wire (1) · onboard (6) · pay (20) · offline (5) · deposit (8) · withdraw (6) · nfc (4) · system (9) · tour (3)
 
 ---
 
@@ -55,12 +55,13 @@ wire (1) · onboard (6) · pay (19) · offline (5) · deposit (8) · withdraw (6
 | 29 | exact-amount | Raw amount > 2^53 round-trips byte-exact through faucet/request-wire/sign/settle (BigInt codec, u64 LE). | exact-amount, decimal-transport, u64, bigint-codec |
 | 30 | trusted-receipt | Malicious relay returns a wrong-key receipt → app's key-pin rejects it → honest 'Couldn't verify', no debit. | receipt-key-pin, malicious-relay, honest-error |
 | 31 | ckusdc-pay | ckUSDC (currency 2, 6-decimal) pay end-to-end: review '0.050000 USDC', byte-exact raw, settles on currency 2. | ckusdc-pay, multi-currency, 6-decimal, byte-exact |
-| 36 | bad-qr | Scanning/pasting garbage (non-base64 + wrong-length) surfaces an honest 'bad request QR' error; review never mounts; scan surface re-arms. | bad-qr, malformed, error-handling, input-validation |
+| 36 | bad-qr | Scanning/pasting garbage (non-base64 + wrong-length) surfaces a friendly 'This isn't't a dpay payment code' error; review never mounts; scan surface re-arms. | bad-qr, malformed, error-handling, input-validation |
 | 42 | receipt-reject | Tampered receipt (wrong pubkey / flipped sig) → verifyOutcomeReceipt rejects → honest "Couldn't verify", no fake Paid ✓, no debit. | receipt, receipt-reject, malicious-relay, verifyOutcomeReceipt |
 | 43 | decimal-edges | 8-dec (ckBTC) + 6-dec (ckUSDC) + 18-dec (ckDAI) amounts render with exact decimals on review (no rounding, no sci-notation, no trailing-zero drift). | decimal, format, ckbtc, ckerc20, 18-decimal |
 | 49 | deeplink-request | dpay:req deeplink opens the pay review screen pre-filled with the merchant request (no auto-approve). | deeplink, request-link, prefill, pay-review |
 | 50 | deeplink-receipt | merchant verifies a dpay:pay receipt (canister-signed) via the web ?pay= path + reconciles as Received. | deeplink, receipt-link, verify, receive, handback |
 | 59 | share-receipt | After an online settle, btn-share-receipt hands a dpay:pay/<base64url> receipt link to Share. | share-receipt, receipt-link, handback, online-settle, deeplink |
+| 61 | merchant-received-name | Merchant's 'Received' confirmation shows the payer's friendly name (from_name) — not the raw short pubkey prefix — when the payer chose a name. | receive, settle, confirmation, from-name, wire-v2, friendly-counterparties |
 
 ### Offline hand-off (the signature feature)
 

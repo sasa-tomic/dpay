@@ -90,7 +90,7 @@ const MINT_ACCOUNT: [u8; PUBKEY_LEN] = [0xFF; PUBKEY_LEN];
 /// silent error or panic — the core stores/signs/verifies raw bytes; the relay only renders them.
 /// `NAME_LEN == MEMO_LEN`, so the same helper covers `from_name`/`to_name` and `memo`.
 const _: () = assert!(NAME_LEN == MEMO_LEN);
-fn display_field_to_string(buf: &[u8; NAME_LEN]) -> String {
+pub(crate) fn display_field_to_string(buf: &[u8; NAME_LEN]) -> String {
     // Trim trailing NULs (the builder's padding): take through the last non-zero byte. `[u8]` has no
     // `trim_end_matches` (that's a `str` method), so find the boundary by hand, then decode lossily.
     let end = buf.iter().rposition(|&b| b != 0).map_or(0, |i| i + 1);
