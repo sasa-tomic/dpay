@@ -56,10 +56,15 @@ const SURFACES = {
              'asset-sol-select'],
   // Settings sheet (open via `btn-settings`). btn-reset-* are revealed only after tapping btn-reset
   // (the confirmation dialog); listed separately below to keep this census aligned with the visible
-  // surface at first open.
-  settings: ['btn-settings-close', 'settings-relay', 'btn-relay-apply', 'btn-reset', 'privacy-policy'],
+  // surface at first open. btn-backup + btn-settings-restore are the always-visible section entries
+  // (Backup and Restore); their confirm-gate children are censused separately (settingsBackupConfirm
+  // is covered inline by the Backup flow's own census path; settingsRestoreConfirm below).
+  settings: ['btn-settings-close', 'settings-relay', 'btn-relay-apply', 'btn-backup', 'btn-reset', 'btn-settings-restore', 'privacy-policy'],
   // Settings → Reset confirmation (btn-reset was tapped). Surface = the dialog above.
   settingsResetConfirm: ['btn-reset-confirm', 'btn-reset-cancel'],
+  // Settings → Restore confirmation (btn-settings-restore was tapped). Surface = the inline seed
+  // form (settings-restore-seed-input + the confirm/cancel pair). Mirrors settingsResetConfirm.
+  settingsRestoreConfirm: ['settings-restore-seed-input', 'btn-settings-restore-confirm', 'btn-settings-restore-cancel'],
   // Transactions tab — empty initially (no transactions). When history is non-empty, ledger-filter-*
   // chips render (one per present currency); a fresh wallet has none, so only the chrome asserts.
   transactions: [],
@@ -168,6 +173,16 @@ export async function run() {
     console.log('[41-a11y-census] ✓ census: settings reset confirmation');
     // Cancel out of the dialog (Esc is NOT wired for this; tap the explicit cancel button).
     await driver.click('btn-reset-cancel', { timeoutMs: 4_000 });
+
+    // 4c. Settings → Restore confirmation form (tapping btn-settings-restore reveals the seed input
+    //     + btn-settings-restore-confirm + -cancel). Mirrors the reset-confirm census above for the
+    //     new Restore section (Issue 1: wallet recovery is barely visible). Cancel collapses the form.
+    await driver.findByTestID('btn-settings-restore', { timeoutMs: 4_000 });
+    await driver.click('btn-settings-restore', { timeoutMs: 4_000 });
+    await driver.findByTestID('settings-restore-seed-input', { timeoutMs: 4_000 });
+    await census('settingsRestoreConfirm');
+    console.log('[41-a11y-census] ✓ census: settings restore confirmation');
+    await driver.click('btn-settings-restore-cancel', { timeoutMs: 4_000 });
     await driver.click('btn-settings-close', { timeoutMs: 4_000 });
 
     // 5. Transactions tab (empty for a fresh wallet).

@@ -1,6 +1,6 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **64 flows.**
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **65 flows.**
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay (FakeLedger, offline). No UI stubs. The only shimmed I/O boundary is
 > the camera scan (sanctioned smallest-boundary seam) and the NFC radio (physical-device gate).
@@ -17,7 +17,7 @@
 Flows grouped by user journey; within each table, every row lists what the flow **verifies** and
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`).
 
-wire (1) · onboard (6) · pay (20) · offline (6) · deposit (8) · withdraw (6) · nfc (4) · system (10) · tour (3)
+wire (1) · onboard (6) · pay (20) · offline (6) · deposit (8) · withdraw (6) · nfc (4) · system (11) · tour (3)
 
 ---
 
@@ -121,6 +121,7 @@ wire (1) · onboard (6) · pay (20) · offline (6) · deposit (8) · withdraw (6
 | 55 | balances-select-asset | Selecting an asset in Balances binds the header: chip DEMO→ckBTC→SOL and the balance text follows the active-rail branch. | asset-select, header-balance-binding, active-rail-chip |
 | 57 | settings-seed-backup | Seed stays hidden behind a confirm gate; once revealed it matches identity.secretHex; copy writes the seed to the real clipboard. | seed-backup, confirm-gate, secret-reveal, clipboard-copy |
 | 63 | picker-sol-rail | SOL is selectable in the Receive currency picker → switches the active rail to SolReceiveMode. | receive-picker, sol-rail, currency-switch |
+| 64 | settings-restore | Settings → Restore replaces wallet identity from 64-hex seed (no wipe); username preserved. | restore-seed, settings-restore, identity-replace, keypair-from-secret |
 
 ### Visual capture (UX tour)
 
