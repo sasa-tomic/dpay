@@ -117,18 +117,18 @@ DONE** (commits `af321e3` D1, `2acaae9` D2+D5, `eeb5e84` D3); D4 remains deferre
   `wallet-pay` drift was 0.08% (well under 0.5%); the added characters are small relative to the
   surface. `just verify` 62/62 green.
 
-#### D4 — 64-hex recovery seed is hard to transcribe (HIGH effort — BIP-39)
+#### D4 — 64-hex recovery seed is hard to transcribe (HIGH effort — BIP-39) — PLANNED
 
 - **Symptom:** `app/components/SettingsSheet.tsx:107` shows the 64-char hex recovery seed as one
   long string. Most modern wallets use BIP-39 mnemonic phrases (12/24 words) because they're
-  error-detectable and far easier to transcribe accurately.
-- **Fix:** adopt BIP-39 derivation in the key path — generate a mnemonic at onboarding, derive the
-  IC Ed25519 seed + the SOL SLIP-10 seed from it. The restore flow would accept either the mnemonic
-  or the hex (backward compat).
-- **Why deferred:** HIGH effort (touches the key derivation path + onboarding + restore + Backup UI
-  + jest + e2e). Not blocked, just larger than the "fix direct" bar. The current hex seed is
-  CORRECT and WORKS today — this is purely a usability polish. Confidence 8/10 on the issue, but
-  effort HIGH.
+  error-detecting and far easier to transcribe accurately.
+- **Plan:** `2026-08-10-bip39-mnemonic-plan.md` — split into 5 medium tasks. Key insight: the 32-byte
+  IC Ed25519 seed IS the BIP-39 entropy (pure encoding, no PBKDF2, no key-derivation change). 24-word
+  mnemonic adds SHA-256 checksum error detection. SOL SLIP-10 derivation unchanged (same 32 bytes).
+  Tasks: A (codec+wordlist+jest), B (onboarding mnemonic screen), C (restore mnemonic input),
+  D (backup display), E (e2e+jest updates). Each independently committable.
+- **Why deferred from this session:** HIGH effort (5 medium tasks, ~11 hrs). The current hex seed is
+  CORRECT and WORKS today — this is purely a usability polish. Confidence 8/10 on the issue.
 
 #### ✅ D5 — Verbose "If the payer paid..." button label — DONE (commit `2acaae9`)
 
