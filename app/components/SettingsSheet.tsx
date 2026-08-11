@@ -119,26 +119,6 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
         </View>
 
         <ScrollView contentContainerStyle={S.sheetCenter} keyboardShouldPersistTaps="handled">
-          {/* Reset */}
-          <View style={S.settingsSection}>
-            <Text style={S.inputLabel}>Reset</Text>
-            {confirmReset ? (
-              <View style={S.resetConfirmBox}>
-                <Text style={S.warnNote}>This erases your wallet identity from this device. Funds at this address become irrecoverable. This cannot be undone.</Text>
-                <Pressable testID="btn-reset-confirm" style={[S.primaryWide, {backgroundColor: C.bad, marginTop: 16}]} onPress={onReset} accessibilityRole="button" accessibilityLabel="Yes, reset everything" accessibilityHint="Permanently erase your wallet from this device — funds become irrecoverable" accessibilityState={{disabled: false}}>
-                  <Text style={S.primaryText}>Yes, reset everything</Text>
-                </Pressable>
-                <Pressable testID="btn-reset-cancel" style={S.linkBtn} onPress={() => setConfirmReset(false)} accessibilityRole="button" accessibilityLabel="Cancel reset" accessibilityState={{disabled: false}}>
-                  <Text style={S.linkTextMuted}>Cancel</Text>
-                </Pressable>
-              </View>
-            ) : (
-              <Pressable testID="btn-reset" style={S.resetEntryBtn} onPress={() => setConfirmReset(true)} accessibilityRole="button" accessibilityLabel="Reset wallet" accessibilityHint="Opens a confirmation dialog — permanently erases your wallet from this device" accessibilityState={{disabled: false}}>
-                <Text style={S.resetEntryText}>Reset wallet…</Text>
-              </Pressable>
-            )}
-          </View>
-
           {/* Backup — reveal the IC seed (which ALSO derives the Solana key) behind a two-step confirm
               gate. Pure display + copy; the seed already lives in AsyncStorage. The warning names the
               BOTH-rails consequence so the user stores it before any shoulder-surf risk. */}
@@ -264,6 +244,27 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
                 accessibilityHint="Import a wallet from your 64-hex recovery seed — replaces your current wallet"
                 accessibilityState={{disabled: false}}>
                 <Text style={S.secondaryBtnText}>Restore wallet…</Text>
+              </Pressable>
+            )}
+          </View>
+
+          {/* Reset — the destructive action goes LAST in the wallet-management group (Backup → Restore
+              → Reset), so a user scanning top-down encounters the protective actions first. */}
+          <View style={S.settingsSection}>
+            <Text style={S.inputLabel}>Reset</Text>
+            {confirmReset ? (
+              <View style={S.resetConfirmBox}>
+                <Text style={S.warnNote}>This erases your wallet identity from this device. Funds at this address become irrecoverable. This cannot be undone.</Text>
+                <Pressable testID="btn-reset-confirm" style={[S.primaryWide, {backgroundColor: C.bad, marginTop: 16}]} onPress={onReset} accessibilityRole="button" accessibilityLabel="Yes, reset everything" accessibilityHint="Permanently erase your wallet from this device — funds become irrecoverable" accessibilityState={{disabled: false}}>
+                  <Text style={S.primaryText}>Yes, reset everything</Text>
+                </Pressable>
+                <Pressable testID="btn-reset-cancel" style={S.linkBtn} onPress={() => setConfirmReset(false)} accessibilityRole="button" accessibilityLabel="Cancel reset" accessibilityState={{disabled: false}}>
+                  <Text style={S.linkTextMuted}>Cancel</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <Pressable testID="btn-reset" style={S.resetEntryBtn} onPress={() => setConfirmReset(true)} accessibilityRole="button" accessibilityLabel="Reset wallet" accessibilityHint="Opens a confirmation dialog — permanently erases your wallet from this device" accessibilityState={{disabled: false}}>
+                <Text style={S.resetEntryText}>Reset wallet…</Text>
               </Pressable>
             )}
           </View>
