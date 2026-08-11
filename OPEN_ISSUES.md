@@ -8,6 +8,23 @@
 > entries below are **deliberate, documented follow-ups**, not regressions — each carries its current mitigation and the concrete
 > next step. Structural detail lives in `CODEBASE_ANALYSIS.md`.
 
+## Session summary (2026-08-11, cont.): device gate + code review + PROD DEPLOYED to HEAD
+
+> Follow-up session: all pending founder-run items from the 2026-08-11 mnemonic session are **DONE**.
+> - **Device gate PASSED**: `just app` → `DPAY_SELFCHECK PASS` + `DPAY_SOL_SELFCHECK PASS` in logcat (proves full
+>   NativeModules→@ReactMethod→UniFFI→.so surface incl. the mnemonic FFI path); `just ondevice` → **9/9 instrumented
+>   tests** PASS on `dpay_api36(AVD)` (was documented as 8 — the count drifted; 9 is current).
+> - **Code review (subagent)**: codebase remarkably clean. 5 LOW-severity items found, 0 medium/high. All structural
+>   refactors verified clean (nfc.rs→nfc/ split, ledger.rs→ledger/ split — no orphaned code). BIP-39 feature fully
+>   wired. typecheck clean (`--noUnusedLocals --noUnusedParameters`). Fixes applied + committed (`5dcdd83`): stale
+>   `ledger.rs` doc → `ledger module`; `WITHDRAW_FIXED_LEN`/`WITHDRAW_ADDR_LEN_BYTES` `pub`→`pub(crate)`;
+>   `generateMnemonic()` doc'd as kept FFI-free utility. Verified: core 45/45, relay 57/57, typecheck clean.
+> - **PROD DEPLOYED to HEAD (`5dcdd83`)**: canister WASM unchanged (zero `crates/dpay-canister/` changes since
+>   `af6ac8f` — correctly skipped `just deploy-ic`). `just apk` → signed release APK (54M) + AAB (36M), signer SHA-256
+>   `1e5cf510...`. `just up` → relay binary rebuilt (`--features agent`), Docker image `dpay-relay:latest` (157MB) with
+>   new APK embedded, container `dpay-relay-1` recreated + healthy, `{"status":"ok"}`. The mnemonic recovery feature,
+>   unified selector, SOL additions, and all UI sweep changes are now LIVE in the download APK + served by the relay.
+
 ## Session summary (2026-08-11): D4 BIP-39 mnemonic recovery DONE + e2e relay-leak fix; 68/68 e2e green
 
 > **D4 BIP-39 mnemonic recovery — COMPLETE.** The last deferred audit finding (D4, HIGH effort) is resolved.
@@ -30,11 +47,12 @@
 > (`1d04999`); #10 `ledger.rs` 1600L → `ledger/{types,clock,api,fake,flaky,ckerc20,mod}.rs` (`9b168d5`). All consumer
 > import paths preserved. 45/45 core + 86/86 canister + 57/57 relay + 68/68 e2e green.
 >
-> **All audit findings (D1–D5 + #9 + #10) now resolved.** 0 deferred findings remain. **IMPORTANT**: prod deploy still
+> **All audit findings (D1–D5 + #9 + #10) now resolved.** 0 deferred findings remain. ~~**IMPORTANT**: prod deploy still
 > PENDING (prod at `af6ac8f`; founder-run `just deploy-ic && just apk && just up` needed to ship the UI sweep
 > + mnemonic feature). **Device gate**: mnemonic UI touches `app/components/{Onboarding,SettingsSheet}.tsx` —
 > founder should run `just app` to confirm `DPAY_SELFCHECK PASS` (no native-module/wire/AID changes, but the
-> trigger-path rule says run it).
+> trigger-path rule says run it).~~ **DONE 2026-08-11 cont.** — see the session summary above: device gate PASSED,
+> prod deployed to HEAD (`5dcdd83`) via `just apk && just up` (canister correctly skipped).
 
 ## Session summary (2026-08-10): UI review sweep — 4 user issues + silent errors + dead code; 65/65 e2e green
 
@@ -49,8 +67,8 @@
 > Pay 9, Receive 9, Picker (opaque bg + SOL row + chain labels verified), Transactions (clean empty state), Settings
 > (reordered Backup→Restore→Reset→About→Advanced). Zero new issues. CORS test middleware (`89ed966`, feature-gated)
 > enables web-based UX review. Settings reorder (`379e5e5`) moves destructive Reset last.
-> **IMPORTANT 8** (commits `e78bd77`→`379e5e5`): all new code fully wired — zero unused/partially-wired. Prod deploy
-> PENDING (prod at `af6ac8f`; founder-run `just deploy-ic && just apk && just up` needed to ship UI sweep).
+> **IMPORTANT 8** (commits `e78bd77`→`379e5e5`): all new code fully wired — zero unused/partially-wired. ~~Prod deploy
+> PENDING (prod at `af6ac8f`; founder-run `just deploy-ic && just apk && just up` needed to ship UI sweep).~~ **DONE 2026-08-11 cont.** — prod now at HEAD (`5dcdd83`) via `just apk && just up`.
 
 ### Founder UI issues — all DONE (commits below)
 
