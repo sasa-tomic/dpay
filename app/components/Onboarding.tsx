@@ -5,7 +5,7 @@ import {C} from '../config/palette';
 import {S} from '../styles';
 import {STORAGE_KEY, BALANCE_TIMEOUT_MS} from '../config/constants';
 import {base, validateSeed} from '../lib/format';
-import {hexToWords} from '../lib/bip39';
+import {hexToWords, stringToWords, wordsToHex, validateMnemonic} from '../lib/bip39';
 import type {Identity} from '../lib/types';
 import {DpayCore} from '../services/native';
 import {fetchWithTimeout} from '../services/relay';
@@ -18,6 +18,11 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
   const [pendingId, setPendingId] = useState<Identity | null>(null);
   const [mode, setMode] = useState<'create' | 'restore'>('create');
   const [seed, setSeed] = useState('');
+  // Restore input mode: mnemonic words (default — the human-friendly form Backup reveals) or hex
+  // (the raw 64-char seed, kept as a fallback for users who copied it from an older backup). The
+  // toggle switches the input; `restore()` branches on this to pick the right codec path.
+  const [restoreMode, setRestoreMode] = useState<'mnemonic' | 'hex'>('mnemonic');
+  const [mnemonicText, setMnemonicText] = useState('');
   // BIP-39 backup gate (create flow). `backupMnemonic` holds the 24 words to display when non-null;
   // the backup screen renders INSTEAD of the create/restore form until the user checks the
   // acknowledgement and taps Continue. `backupChecked` is a pure UX gate (not a security mechanism).
@@ -61,20 +66,32 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
     }
   }
 
-  // Restore a wallet from the 64-hex recovery seed (the value Backup reveals). Mirrors `create` but
-  // derives the keypair from the entered seed via `keypairFromSecret` instead of generating a random
-  // one, and skips the faucet — a restored wallet already has its on-chain funds. One seed recovers
-  // BOTH rails: the IC Ed25519 key (this keypair) AND the Solana key (SLIP-10 derivation, see
+  // Restore a wallet from EITHER the 24-word BIP-39 mnemonic (default) OR the 64-hex recovery seed
+  // (legacy/advanced fallback). Both paths converge on `keypairFromSecret(hex)` — the mnemonic is
+  // just the human-readable serialization of the same 32-byte seed (see app/lib/bip39.ts). Mirrors
+  // `create` but derives the keypair from the entered seed instead of generating a random one, and
+  // skips the faucet — a restored wallet already has its on-chain funds. One seed recovers BOTH
+  // rails: the IC Ed25519 key (this keypair) AND the Solana key (SLIP-10 derivation, see
   // app/solana/identity.ts).
   async function restore() {
     setErr(null);
-    const e = validateSeed(seed);
-    if (e) { setErr(e); return; }
-    const s = seed.trim().toLowerCase();
     const name = username.trim() || 'me';
+    let hex: string;
+    if (restoreMode === 'mnemonic') {
+      const words = stringToWords(mnemonicText);
+      if (!validateMnemonic(words)) {
+        setErr('Some words are wrong or missing. Check you have all 24 words spelled correctly.');
+        return;
+      }
+      hex = wordsToHex(words);
+    } else {
+      const e = validateSeed(seed);
+      if (e) { setErr(e); return; }
+      hex = seed.trim().toLowerCase();
+    }
     setBusy(true);
     try {
-      const kp = await DpayCore.keypairFromSecret(s);
+      const kp = await DpayCore.keypairFromSecret(hex);
       const id: Identity = {secretHex: kp.secretHex, publicHex: kp.publicHex, username: name};
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(id));
       onCreated(id);
@@ -132,17 +149,31 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
             </>
           ) : mode === 'restore' ? (
             <>
-              <Text style={S.label}>Recovery seed</Text>
-              <TextInput testID="restore-seed-input" style={S.seedInput} value={seed} onChangeText={setSeed} placeholder="64 hex characters" placeholderTextColor={C.sub2} autoCapitalize="none" autoCorrect={false} multiline accessibilityLabel="Recovery seed" accessibilityHint="The 64-hex seed shown by Backup that recovers your wallet" />
-              <Text style={S.dim2}>One seed recovers both your IC and Solana funds.</Text>
+              {restoreMode === 'mnemonic' ? (
+                <>
+                  <Text style={S.label}>Recovery phrase</Text>
+                  <TextInput testID="restore-mnemonic-input" style={S.seedInput} value={mnemonicText} onChangeText={setMnemonicText} placeholder="Enter your 24 recovery words" placeholderTextColor={C.sub2} autoCapitalize="none" autoCorrect={false} multiline accessibilityLabel="Recovery phrase" accessibilityHint="The 24 recovery words from your backup" />
+                  <Text style={S.dim2}>Enter the 24 words from your backup. One seed recovers both your IC and Solana funds.</Text>
+                </>
+              ) : (
+                <>
+                  <Text style={S.label}>Recovery seed</Text>
+                  <TextInput testID="restore-seed-input" style={S.seedInput} value={seed} onChangeText={setSeed} placeholder="64 hex characters" placeholderTextColor={C.sub2} autoCapitalize="none" autoCorrect={false} multiline accessibilityLabel="Recovery seed" accessibilityHint="The 64-hex seed shown by Backup that recovers your wallet" />
+                  <Text style={S.dim2}>One seed recovers both your IC and Solana funds.</Text>
+                </>
+              )}
+              <Pressable testID="btn-restore-mode-toggle" style={S.linkBtn} onPress={() => { setRestoreMode(restoreMode === 'mnemonic' ? 'hex' : 'mnemonic'); setErr(null); }}
+                accessibilityRole="button" accessibilityLabel={restoreMode === 'mnemonic' ? 'Enter hex instead' : 'Enter words instead'}>
+                <Text style={S.linkText}>{restoreMode === 'mnemonic' ? 'Enter hex instead' : 'Enter words instead'}</Text>
+              </Pressable>
               <Text style={S.label}>Choose a username</Text>
               <TextInput testID="username-input" style={S.usernameInput} value={username} onChangeText={setUsername} placeholder="e.g. Alice" placeholderTextColor={C.sub2} autoCapitalize="words" autoCorrect={false} accessibilityLabel="Username" accessibilityHint="The name others see when you request or receive a payment" />
               {err ? <Text style={S.err}>{err}</Text> : null}
-              <Pressable testID="btn-restore-confirm" style={[S.primary, (busy || seed.trim() === '') && S.dim]} disabled={busy || seed.trim() === ''} onPress={restore}
-                accessibilityRole="button" accessibilityLabel="Restore wallet" accessibilityHint="Recover your wallet from the recovery seed" accessibilityState={{disabled: busy || seed.trim() === ''}}>
+              <Pressable testID="btn-restore-confirm" style={[S.primary, (busy || (restoreMode === 'mnemonic' ? mnemonicText : seed).trim() === '') && S.dim]} disabled={busy || (restoreMode === 'mnemonic' ? mnemonicText : seed).trim() === ''} onPress={restore}
+                accessibilityRole="button" accessibilityLabel="Restore wallet" accessibilityHint={restoreMode === 'mnemonic' ? 'Recover your wallet from your 24 recovery words' : 'Recover your wallet from the recovery seed'} accessibilityState={{disabled: busy || (restoreMode === 'mnemonic' ? mnemonicText : seed).trim() === ''}}>
                 <Text style={S.primaryText}>{busy ? 'Restoring…' : 'Restore wallet'}</Text>
               </Pressable>
-              <Pressable testID="btn-restore-cancel" style={S.linkBtn} onPress={() => { setMode('create'); setSeed(''); setErr(null); }}
+              <Pressable testID="btn-restore-cancel" style={S.linkBtn} onPress={() => { setMode('create'); setSeed(''); setMnemonicText(''); setRestoreMode('mnemonic'); setErr(null); }}
                 accessibilityRole="button" accessibilityLabel="Cancel restore" accessibilityHint="Go back to creating a new wallet">
                 <Text style={S.linkTextMuted}>Cancel</Text>
               </Pressable>
@@ -164,7 +195,7 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
                   ALL restore-mode testIDs (btn-restore, restore-seed-input, btn-restore-confirm,
                   btn-restore-cancel) are unchanged; only the entry button's style + position change. */}
               <Pressable testID="btn-restore" style={S.secondaryBtn} onPress={() => { setMode('restore'); setErr(null); }}
-                accessibilityRole="button" accessibilityLabel="Restore wallet" accessibilityHint="Recover a wallet from your 64-hex recovery seed">
+                accessibilityRole="button" accessibilityLabel="Restore wallet" accessibilityHint="Recover a wallet from your 24-word recovery phrase">
                 <Text style={S.secondaryBtnText}>Restore wallet</Text>
               </Pressable>
               <Text style={S.dim2}>Creates your wallet and adds ∂100 in demo funds to get started.</Text>
