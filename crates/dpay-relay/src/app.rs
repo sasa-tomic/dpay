@@ -188,7 +188,7 @@ pub fn app(state: AppState) -> Router {
     #[cfg(feature = "test-helpers")]
     let api = api.route("/test/deposit/seed", post(test_deposit_seed));
 
-    Router::new()
+    let router = Router::new()
         .route("/", get(landing_page))
         .route("/download/dpay.apk", get(apk_download))
         .route("/merchant", get(merchant_page))
@@ -197,7 +197,45 @@ pub fn app(state: AppState) -> Router {
         .route("/qrcode.js", get(qrcode_js))
         .route("/shots/{name}", get(screenshot))
         .nest("/api/v1", api)
-        .with_state(state)
+        .with_state(state);
+
+    // Test-only CORS: allows the web build of the app (served by vite on a different port) to make
+    // direct fetch() calls to the relay during e2e + UX review. Gated behind `test-helpers` so the
+    // prod image (built without the feature) never sends CORS headers. The e2e harness ALSO launches
+    // Chrome with --disable-web-security, but this layer makes the relay usable by ANY web-based test
+    // tool without requiring browser flags.
+    #[cfg(feature = "test-helpers")]
+    let router = router.layer(axum::middleware::from_fn(test_cors_middleware));
+
+    router
+}
+
+/// Permissive CORS middleware (test-only, feature-gated). Adds `Access-Control-Allow-Origin: *` to
+/// every response + intercepts OPTIONS preflight with a 204.
+#[cfg(feature = "test-helpers")]
+async fn test_cors_middleware(req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    use axum::http::Method;
+    if req.method() == Method::OPTIONS {
+        let mut resp = Response::new(axum::body::Body::empty());
+        *resp.status_mut() = StatusCode::NO_CONTENT;
+        let h = resp.headers_mut();
+        h.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, header::HeaderValue::from_static("*"));
+        h.insert(
+            header::ACCESS_CONTROL_ALLOW_METHODS,
+            header::HeaderValue::from_static("GET, POST, OPTIONS"),
+        );
+        h.insert(
+            header::ACCESS_CONTROL_ALLOW_HEADERS,
+            header::HeaderValue::from_static("Content-Type"),
+        );
+        return resp;
+    }
+    let mut resp = next.run(req).await;
+    resp.headers_mut().insert(
+        header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        header::HeaderValue::from_static("*"),
+    );
+    resp
 }
 
 /// `POST /api/v1/withdraw` JSON `{from, destination, amount, nonce, expiry, currency, sig}` (the
