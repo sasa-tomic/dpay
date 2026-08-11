@@ -1,6 +1,6 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **66 flows.**
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **67 flows.**
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay (FakeLedger, offline). No UI stubs. The only shimmed I/O boundary is
 > the camera scan (sanctioned smallest-boundary seam) and the NFC radio (physical-device gate).
@@ -17,7 +17,7 @@
 Flows grouped by user journey; within each table, every row lists what the flow **verifies** and
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`).
 
-wire (1) · onboard (6) · pay (20) · offline (6) · deposit (8) · withdraw (6) · nfc (5) · system (11) · tour (3)
+wire (1) · onboard (6) · pay (20) · offline (7) · deposit (8) · withdraw (6) · nfc (5) · system (11) · tour (3)
 
 ---
 
@@ -73,6 +73,7 @@ wire (1) · onboard (6) · pay (20) · offline (6) · deposit (8) · withdraw (6
 | 51 | sol-merchant-broadcast | SOL merchant: build solreq → scan matching solpay → broadcast (stub) → Received. | sol-merchant, sol-broadcast, solpay-match, qr-scan |
 | 53 | sol-merchant-error | SOL merchant broadcast error surfaces a friendly message (not raw RPC, not false Received). | sol-merchant, sol-error, solpay-match, friendly-error |
 | 62 | sol-usdc-ata-warning | SOL/USDC toggle: no USDC ATA → inline warning + Request disabled; SOL clears it. | sol-merchant, sol-usdc, ata-gate, toggle, disabled-request |
+| 67 | sol-setup-error | SOL setup-nonce failure surfaces a friendly error (not raw RPC) + the unfunded escape hatch; the stale-nonce resync flips status back to ready so offline signing works again. | sol-setup-error, sol-nonce-resync, sol-friendly-error, sol-unfunded-hatch, sol-stale-recovery |
 
 ### Deposits & onramp (ckBTC + ckUSDC + ckERC20)
 
