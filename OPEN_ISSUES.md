@@ -14,8 +14,15 @@
 > 13 findings). All 4 user issues DONE; top-value audit findings (silent errors, dead code, doc drift) DONE;
 > SOL e2e coverage gaps (F3/F8/F12) DONE. **9 new flows** (62 sol-usdc-ata + 63 picker-sol-rail + 64 settings-restore +
 > 66 sol-nfc-error + 67 sol-setup-error + flow 45 clipboard) bring the e2e suite 62 → **67/67 GREEN**.
-> **14 commits** (`e78bd77` → `e73c70c`). Plans: `2026-08-10-review-findings.md`, `2026-08-10-unified-selector-plan.md`,
+> **17 commits** (`e78bd77` → `379e5e5`). Plans: `2026-08-10-review-findings.md`, `2026-08-10-unified-selector-plan.md`,
 > `2026-08-10-recovery-plan.md`. D4 BIP-39 mnemonic split into 5 medium tasks (`2026-08-10-bip39-mnemonic-plan.md`).
+>
+> **UX review** (chrome-cli + zai-vision, REAL app, no mocks): all screens 8–9/10 — Onboarding 8, Balances 9,
+> Pay 9, Receive 9, Picker (opaque bg + SOL row + chain labels verified), Transactions (clean empty state), Settings
+> (reordered Backup→Restore→Reset→About→Advanced). Zero new issues. CORS test middleware (`89ed966`, feature-gated)
+> enables web-based UX review. Settings reorder (`379e5e5`) moves destructive Reset last.
+> **IMPORTANT 8** (commits `e78bd77`→`379e5e5`): all new code fully wired — zero unused/partially-wired. Prod deploy
+> PENDING (prod at `af6ac8f`; founder-run `just deploy-ic && just apk && just up` needed to ship UI sweep).
 
 ### Founder UI issues — all DONE (commits below)
 
