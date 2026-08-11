@@ -32,7 +32,7 @@ import { fileURLToPath } from 'node:url';
 
 import { runTestsSubset } from './run.mjs';
 import { loadTestsMeta, filterByToken } from './harness/meta.mjs';
-import { stopSession } from './harness/lib.mjs';
+import { stopSession, killTrackedChildren } from './harness/lib.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..');
@@ -352,19 +352,26 @@ function startWatcher(watchDirRel) {
 
 // --- exit handling ----------------------------------------------------------------------------------------------
 //
-// Tear down the shared session ONCE on exit. SIGINT (Ctrl-C) and SIGTERM both route here. We guard
-// against double-teardown with a `tearingDown` flag. The session (relay + web + browser children) is
-// the only stateful resource the watcher holds — once it's gone, exit is safe.
+// Tear down the shared session ONCE on exit. SIGINT (Ctrl-C), SIGTERM, and SIGHUP all route here. We
+// guard against double-teardown with a `tearingDown` flag; a SECOND signal exits IMMEDIATELY (the
+// operator's "I asked twice, just die" escape — don't make them wait on the first drain or reach for
+// `kill -9`, which would itself orphan the children).
 //
-// Two robustness measures:
+// Three robustness measures:
 //   1. The "tearing down" message is written to STDERR synchronously (Node can cut off buffered
 //      stdout on `process.exit`; stderr is line-buffered and flushes reliably to piped logs).
 //   2. A REF'd 3s force-exit timer guarantees the process exits even if `stopSession` stalls on a
-//      wedged child — the operator never gets a hung watcher they have to `kill -9` (which would
-//      orphan the relay/web/browser children, the exact leak this teardown prevents).
+//      wedged child — the operator never gets a hung watcher they have to `kill -9`.
+//   3. `process.on('exit', killTrackedChildren)` — a SYNC last-resort SIGKILL of every tracked child
+//      PID (relay + web server — see harness/procs.mjs). The `exit` event cannot await, so this is
+//      the ONLY layer that fires on a path that bypasses the async teardown (e.g. an
+//      uncaughtException that routes straight to `process.exit`). It is a no-op on a graceful stop
+//      (children already dead → ESRCH swallowed) and the structural guarantee no tracked child can
+//      outlive the watcher. uncaughtException + unhandledRejection are also routed here (logged first)
+//      so a bug in the watcher itself can't orphan the session either.
 let tearingDown = false;
 function teardownAndExit(code) {
-  if (tearingDown) return;
+  if (tearingDown) process.exit(code); // second signal → immediate exit
   tearingDown = true;
   process.stderr.write('\n[watch] tearing down shared session (relay + web + browser)…\n');
   // Force-exit fallback: if stopSession stalls (a child that won't die), exit hard after 3s so the
@@ -382,6 +389,20 @@ function teardownAndExit(code) {
 }
 process.on('SIGINT', () => teardownAndExit(0));
 process.on('SIGTERM', () => teardownAndExit(0));
+process.on('SIGHUP', () => teardownAndExit(0));
+process.on('uncaughtException', (e) => {
+  process.stderr.write(`[watch] uncaughtException: ${e instanceof Error ? e.stack || e.message : e}\n`);
+  teardownAndExit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  process.stderr.write(`[watch] unhandledRejection: ${reason instanceof Error ? reason.stack || reason.message : reason}\n`);
+  teardownAndExit(1);
+});
+// SYNC last-resort: SIGKILL any tracked child still alive when the process exits. No-op on a graceful
+// stop (children already dead); the guarantee on every abnormal path. See harness/procs.mjs. Wrapped
+// in an arrow so the `exit` event's exit-CODE arg isn't fed to killTrackedChildren's `signal` param
+// (which would make it an invalid signal → silently no-op → orphan).
+process.on('exit', () => killTrackedChildren());
 
 // --- main loop --------------------------------------------------------------------------------------------------
 /**

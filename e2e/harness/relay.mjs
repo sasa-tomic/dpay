@@ -28,6 +28,7 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { trackChild, untrackChild } from './procs.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..', '..');
@@ -219,6 +220,11 @@ async function spawnOnce(opts = {}) {
     RUST_LOG: process.env.RUST_LOG ?? 'warn',
   };
   const child = spawn(RELAY_BIN, [], { cwd: REPO_ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  // Track the PID the instant the child is born so a sync `process.on('exit')` SIGKILL can reach it
+  // even if Node dies before health checks complete (the window where _session is still null). Untrack
+  // on exit so the set never holds a dead/recycled PID. See harness/procs.mjs.
+  trackChild(child.pid);
+  child.on('exit', () => untrackChild(child.pid));
   let stdout = '';
   let stderr = '';
   child.stdout.on('data', (b) => { const s = b.toString(); stdout += s; if (process.env.DPAY_E2E_VERBOSE) process.stdout.write(s); });

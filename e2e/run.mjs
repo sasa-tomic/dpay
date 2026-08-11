@@ -31,7 +31,7 @@
 // harness/meta.mjs). No other change needed — the harness auto-discovers it, filters by it, and
 // regenerates FLOWS.md from it.
 import os from 'node:os';
-import { stopSession, _testCtx, dumpDiagnosticsFor } from './harness/lib.mjs';
+import { stopSession, killTrackedChildren, _testCtx, dumpDiagnosticsFor } from './harness/lib.mjs';
 import { loadTestsMeta, filterByToken, JOURNEYS } from './harness/meta.mjs';
 
 // Default concurrency: 12. The host has 16 cores; each parallel test is one chrome incognito context
@@ -322,12 +322,83 @@ async function main() {
   if (firstFailure) process.exit(1);
 }
 
+// --- process-level safety net (prevent orphaned child processes) ---------------------------------
+//
+// The shared session spawns long-lived children (the relay binary + the sirv web server — registered
+// into harness/procs.mjs at spawn time) whose NORMAL teardown is the async `stopSession()` called
+// from `runTestsSubset` on completion. But an ABNORMAL exit — Ctrl-C (SIGINT), SIGTERM, SIGHUP, an
+// uncaughtException, or an unhandledRejection — can kill Node BEFORE that async drain completes,
+// orphaning the children. Over many sessions ~9 zombie relays accumulated this way and starved the
+// host (load avg 55 on 16 cores → flaky e2e). After `pkill -f dpay-relay` the suite went 67/67 green.
+//
+// This net has two layers, both required:
+//   1. Signal/exception handlers → best-effort ASYNC `stopSession()` (graceful SIGTERM + SIGKILL
+//      after 2s per child) + a force-exit timer so a wedged teardown can't hang the exit, then exit
+//      non-zero. Re-entrancy-guarded: a SECOND Ctrl-C exits IMMEDIATELY (no waiting on the drain).
+//   2. `process.on('exit', killTrackedChildren)` → a SYNC SIGKILL of every tracked child PID still
+//      alive. The `exit` event CANNOT await, so this is the ONLY layer that can fire when an
+//      uncaughtException routes straight to `process.exit`. It is a no-op on the happy path (children
+//      already dead → ESRCH swallowed) and lifesaving on every abnormal path. This is what makes
+//      orphaning structurally impossible: no tracked child can outlive the harness process.
+//
+// Registered ONLY when run.mjs is the direct entry (the `import.meta.url` guard below) — watch.mjs
+// imports `runTestsSubset` and installs its OWN handlers, so registering here unconditionally would
+// double-register in watch mode.
+let cleaning = false;
+function teardownAndExit(code) {
+  if (cleaning) process.exit(code); // a second Ctrl-C → immediate exit (don't wait on the first drain)
+  cleaning = true;
+  process.stderr.write(`[run] exit(${code}) — tearing down shared session (relay + web + browser)…\n`);
+  // Force-exit fallback: if stopSession stalls on a child that won't die, exit hard after 6s so the
+  // operator never has to SIGKILL the harness (which would itself orphan the children). The natural
+  // drain is ≤ ~4-5s (relay SIGTERM+2s grace, then web SIGTERM+2s grace, then browser close); 6s
+  // leaves headroom. REF'd so the timer actually keeps the event loop alive until it fires.
+  const force = setTimeout(() => {
+    process.stderr.write('[run] force-exit after 6s (a child may not have torn down cleanly)\n');
+    process.exit(code);
+  }, 6_000);
+  stopSession()
+    .catch((e) => process.stderr.write(`[run] teardown error (continuing to exit): ${e instanceof Error ? e.message : e}\n`))
+    .finally(() => { clearTimeout(force); process.exit(code); });
+}
+
+function installExitHandlers() {
+  // SIGINT-family: best-effort graceful teardown, then exit with the conventional 128+signum code.
+  process.on('SIGINT', () => teardownAndExit(130));   // 128 + SIGINT(2)  — Ctrl-C
+  process.on('SIGTERM', () => teardownAndExit(143));  // 128 + SIGTERM(15) — default `kill`
+  process.on('SIGHUP', () => teardownAndExit(129));   // 128 + SIGHUP(1)   — terminal hangup
+  // An uncaught exception or unhandled rejection means the process is in an unknown state; log it,
+  // tear down best-effort, and exit non-zero (do NOT keep running — that masks bugs). Without these
+  // the default behavior is a hard exit that skips the async teardown entirely → orphaned children.
+  process.on('uncaughtException', (e) => {
+    process.stderr.write(`[run] uncaughtException: ${e instanceof Error ? e.stack || e.message : e}\n`);
+    teardownAndExit(1);
+  });
+  process.on('unhandledRejection', (reason) => {
+    process.stderr.write(`[run] unhandledRejection: ${reason instanceof Error ? reason.stack || reason.message : reason}\n`);
+    teardownAndExit(1);
+  });
+  // SYNC last-resort: fires on EVERY exit (normal + abnormal) and SIGKILLs any tracked child still
+  // alive. On normal completion stopSession has already killed them (ESRCH → no-op). On abnormal exit
+  // this is the guarantee. See harness/procs.mjs.
+  //
+  // NOTE: wrapped in an arrow (NOT `process.on('exit', killTrackedChildren)` directly) because the
+  // `exit` event passes the exit CODE as the first arg — a bare reference would feed that code into
+  // killTrackedChildren's `signal` param (e.g. signal=130), and `process.kill(pid, 130)` is an invalid
+  // signal → EINVAL → swallowed by the catch → NO kill → orphan. The arrow calls it with no args so
+  // `signal` defaults to 'SIGKILL'. (This is exactly the bug that let the relay survive the first
+  // SIGINT-verification attempt.)
+  process.on('exit', () => killTrackedChildren());
+}
+
 // Only auto-run when invoked directly (`node run.mjs` / `just e2e`). When imported (by
 // `e2e/watch.mjs` reusing `runTestsSubset`), main() does NOT fire — the importing module decides
 // when to run. Same guard pattern the test files use (`if (import.meta.url === process.argv[1])`).
 // Without this guard, `import { runTestsSubset } from './run.mjs'` would side-effect the entire
-// suite as soon as the module loads.
+// suite as soon as the module loads. The exit handlers are installed HERE (under the same guard) so
+// watch mode — which has its own handlers — never double-registers.
 if (import.meta.url === `file://${process.argv[1]}`) {
+  installExitHandlers();
   main().catch((e) => {
     console.error(`[run] FATAL: ${e.stack || e.message}`);
     process.exit(1);

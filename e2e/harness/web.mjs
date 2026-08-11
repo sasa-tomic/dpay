@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { trackChild, untrackChild } from './procs.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const E2E_DIR = join(__dirname, '..');
@@ -137,6 +138,10 @@ export async function serveWeb(opts = {}) {
     cwd: E2E_DIR,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  // Track the PID so a sync `process.on('exit')` SIGKILL can reach it if Node dies before the async
+  // stop() drains. Untrack on exit so the set never holds a dead/recycled PID. See harness/procs.mjs.
+  trackChild(child.pid);
+  child.on('exit', () => untrackChild(child.pid));
   let stderr = '';
   child.stderr.on('data', (b) => { stderr += b.toString(); });
 

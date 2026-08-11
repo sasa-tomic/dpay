@@ -16,6 +16,12 @@ import { existsSync } from 'node:fs';
 import { Driver } from './driver.mjs';
 import { startRelay } from './relay.mjs';
 import { buildWeb, serveWeb, pickFreePort } from './web.mjs';
+import { killTrackedChildren } from './procs.mjs';
+
+// Re-exported so the signal/exit handlers in run.mjs + watch.mjs can reach the SYNC last-resort
+// SIGKILL of every spawned child PID (relay + web server) without a new import path. See
+// harness/procs.mjs for why this is the critical orphan-prevention layer.
+export { killTrackedChildren };
 
 // Re-exported so a test can grab a guaranteed-dead relay URL (a port the harness binds to :0 then
 // immediately closes — nothing listens, so a connect yields ECONNREFUSED, the REAL "relay
