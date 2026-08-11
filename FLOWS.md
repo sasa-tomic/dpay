@@ -1,6 +1,6 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **65 flows.**
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **66 flows.**
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay (FakeLedger, offline). No UI stubs. The only shimmed I/O boundary is
 > the camera scan (sanctioned smallest-boundary seam) and the NFC radio (physical-device gate).
@@ -17,7 +17,7 @@
 Flows grouped by user journey; within each table, every row lists what the flow **verifies** and
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`).
 
-wire (1) · onboard (6) · pay (20) · offline (6) · deposit (8) · withdraw (6) · nfc (4) · system (11) · tour (3)
+wire (1) · onboard (6) · pay (20) · offline (6) · deposit (8) · withdraw (6) · nfc (5) · system (11) · tour (3)
 
 ---
 
@@ -106,6 +106,7 @@ wire (1) · onboard (6) · pay (20) · offline (6) · deposit (8) · withdraw (6
 | 32 | nfc-disclosure | NFC asset disclosure: mid-tap the status shows honest asset name + network + '0.00050000 BTC' BEFORE success. | nfc-disclosure, consent, asset-name, network |
 | 47 | sol-nfc | SOL NFC tap: arm card → auto-sign → broadcast-stub → receipt → adopt nonce → Paid ✓ | sol-nfc, sol-nonce-relay, event-bus |
 | 60 | nfc-error | NFC tap failure modes: a mid-tap transport error surfaces honest "Tap failed" (not Paid ✓); a decline surfaces "Declined"; a late error after settling is ignored (no false failure over a decided outcome). | nfc-error, nfc-declined, nfc-phases, error-handling, no-fake-paid, terminal-escape |
+| 66 | sol-nfc-error | SOL NFC tap failure modes: an expired solreq autoSign decline surfaces honest "Declined" + "expired" (never Paid); a mid-tap transport error surfaces "Tap failed"; a late error after settling is ignored (no false failure over a decided outcome); the merchant reader sees the same decline. | sol-nfc-decline, sol-nfc-error, sol-nfc-receipt-unreachable, sol-nfc-phases, sol-nfc-reader-decline, no-fake-paid, terminal-escape |
 
 ### Settings & system
 
