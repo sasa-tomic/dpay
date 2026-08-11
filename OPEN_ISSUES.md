@@ -8,6 +8,28 @@
 > entries below are **deliberate, documented follow-ups**, not regressions — each carries its current mitigation and the concrete
 > next step. Structural detail lives in `CODEBASE_ANALYSIS.md`.
 
+## Session summary (2026-08-11): D4 BIP-39 mnemonic recovery DONE + e2e relay-leak fix; 68/68 e2e green
+
+> **D4 BIP-39 mnemonic recovery — COMPLETE.** The last deferred audit finding (D4, HIGH effort) is resolved.
+> The 32-byte IC Ed25519 seed IS the BIP-39 entropy (pure encoding — no PBKDF2, no key-derivation change,
+> SOL SLIP-10 unchanged). 24-word mnemonic adds SHA-256 checksum error detection. New pure-codec
+> `app/lib/bip39.ts` + `app/lib/bip39-wordlist.ts` (official wordlist, `@noble/hashes/sha256` — already pinned).
+> Onboarding create() shows numbered-word backup screen with ack checkbox before faucet; restore() defaults to
+> 24-word textarea (hex behind toggle); SettingsSheet backup defaults to mnemonic words (hex behind toggle).
+> 42 jest tests; new e2e flow 68 (backup→reset→restore-via-words, identical publicHex). **6 commits**
+> (`00bee57` → `b8ea55c`). Plan: `2026-08-10-bip39-mnemonic-plan.md`. 68/68 e2e GREEN.
+>
+> **E2e relay-leak fix** (`58a0595`): the harness leaked `dpay-relay` child processes on SIGINT/SIGTERM/abnormal
+> exit (no process-level signal handlers → orphaned relays accumulated across sessions → load starvation → e2e
+> flakes). New `e2e/harness/procs.mjs` PID registry + `installExitHandlers()` in run.mjs/watch.mjs: async
+> `stopSession()` on SIGINT/SIGTERM/SIGHUP/uncaughtException/unhandledRejection (re-entrancy-guarded, 6s
+> force-exit, 2nd signal exits immediately); sync `process.on('exit', () => killTrackedChildren())` SIGKILL
+> fallback for the mid-build path where `_session=null`. Verified: SIGINT/SIGTERM leave zero orphaned relays.
+>
+> **All 5 audit findings (D1–D5) now resolved.** 0 deferred findings remain. **IMPORTANT**: prod deploy still
+> PENDING (prod at `af6ac8f`; founder-run `just deploy-ic && just apk && just up` needed to ship the UI sweep
+> + mnemonic feature).
+
 ## Session summary (2026-08-10): UI review sweep — 4 user issues + silent errors + dead code; 65/65 e2e green
 
 > Founder-directed UI review (4 issues raised mid-session) + a codebase audit (5 parallel planner subagents →
@@ -130,11 +152,12 @@ item; low priority (ops-only, no runtime impact, both deploy scripts are byte-fa
 | U5 | intuitive | MED | 8 | MED | `app/components/SettingsSheet.tsx` + e2e flows `12`/`35`/`38`/`40`/`41`/`57` + harness `lib.mjs setRelay()` | **Settings "Advanced" disclosure defaults COLLAPSED.** The relay URL input + Apply button no longer appear on first Settings open (was a known footgun: a one-paste-away brick). The founder-directed consumer posture from the 2026-08-05 audit P1; the default-open was a temporary e2e-compatibility hack. 6 e2e flows that read `settings-relay` now expand `btn-advanced-toggle` first; `settings.png` visual baseline re-seeded (30.3% drift → 0%); the harness `setRelay()` helper (used by `13`/`19`/`20`/`22`/`33`) updated in ONE place so all callers benefit. |
 | U6 | (cleanup) | LOW | 10 | LOW | (none — code-paths verified clean) | **No AI slop / templates / "coming soon" / lorem ipsum / TODO markers in `app/`.** A `grep` for `coming soon|lorem ipsum|TODO|FIXME|stub|not implemented` against `app/**.{ts,tsx}` returned ZERO consumer-facing matches (only legitimate `__stubs__/walletconnect-stub.ts` for jest, plus `placeholder=` TextInput props which are correct). The codebase is clean of this class. |
 
-### Findings DEFERRED (1 remaining — D4; D1/D2/D3/D5 resolved 2026-08-10)
+### Findings DEFERRED (0 remaining — D1/D2/D3/D4/D5 ALL resolved)
 
 These are real but the user instruction was to defer HIGH-effort findings. Each carries enough detail
 to be picked up directly. **D1, D2, D3, D5 were MED-or-less effort with confidence ≥6/10 and are now
-DONE** (commits `af321e3` D1, `2acaae9` D2+D5, `eeb5e84` D3); D4 remains deferred (HIGH effort).
+DONE** (commits `af321e3` D1, `2acaae9` D2+D5, `eeb5e84` D3); D4 (the only HIGH-effort finding) was
+resolved 2026-08-11.
 
 #### ✅ D1 — Pre-filled "25.00" amount in ReceiveMode looks like a fixed amount — DONE (commit `af321e3`)
 
@@ -171,18 +194,24 @@ DONE** (commits `af321e3` D1, `2acaae9` D2+D5, `eeb5e84` D3); D4 remains deferre
   `wallet-pay` drift was 0.08% (well under 0.5%); the added characters are small relative to the
   surface. `just verify` 62/62 green.
 
-#### D4 — 64-hex recovery seed is hard to transcribe (HIGH effort — BIP-39) — PLANNED
+#### ✅ D4 — 64-hex recovery seed is hard to transcribe (HIGH effort — BIP-39) — DONE (2026-08-11)
 
 - **Symptom:** `app/components/SettingsSheet.tsx:107` shows the 64-char hex recovery seed as one
   long string. Most modern wallets use BIP-39 mnemonic phrases (12/24 words) because they're
   error-detecting and far easier to transcribe accurately.
-- **Plan:** `2026-08-10-bip39-mnemonic-plan.md` — split into 5 medium tasks. Key insight: the 32-byte
-  IC Ed25519 seed IS the BIP-39 entropy (pure encoding, no PBKDF2, no key-derivation change). 24-word
-  mnemonic adds SHA-256 checksum error detection. SOL SLIP-10 derivation unchanged (same 32 bytes).
-  Tasks: A (codec+wordlist+jest), B (onboarding mnemonic screen), C (restore mnemonic input),
-  D (backup display), E (e2e+jest updates). Each independently committable.
-- **Why deferred from this session:** HIGH effort (5 medium tasks, ~11 hrs). The current hex seed is
-  CORRECT and WORKS today — this is purely a usability polish. Confidence 8/10 on the issue.
+- **Resolution (2026-08-11):** Pure BIP-39 ENCODING — the 32-byte IC Ed25519 seed IS the entropy (no
+  PBKDF2, no passphrase, no key-derivation change; SOL SLIP-10 derivation unchanged — same 32 bytes).
+  24-word mnemonic adds SHA-256 checksum error detection. New pure-codec module `app/lib/bip39.ts`
+  (+ `app/lib/bip39-wordlist.ts`, the official 2048-word English wordlist) using the already-pinned
+  `@noble/hashes/sha256` (sync, RN+jest-safe). Onboarding create() now shows a numbered-word backup
+  screen with an ack checkbox before running the faucet; restore() defaults to a 24-word textarea
+  input (with "Enter hex instead" toggle for the old hex path); SettingsSheet backup display defaults
+  to numbered mnemonic words (with "Show as hex" toggle preserving the hex view). 42 jest tests (5
+  official test vectors + round-trip + checksum-flip→invalid); new e2e flow 68 proves full
+  backup→reset→restore-via-words cycle with identical publicHex. All existing hex-entry paths preserved
+  behind toggles. **6 commits** (`00bee57` codec+wordlist+jest, `d4d9550` onboarding show,
+  `51d6421` onboarding restore, `b862f77` settings display, `b8ea55c` e2e updates) +
+  `58a0595` (relay leak fix, see below). 68/68 e2e GREEN.
 
 #### ✅ D5 — Verbose "If the payer paid..." button label — DONE (commit `2acaae9`)
 
