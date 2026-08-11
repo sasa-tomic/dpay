@@ -26,9 +26,15 @@
 > force-exit, 2nd signal exits immediately); sync `process.on('exit', () => killTrackedChildren())` SIGKILL
 > fallback for the mid-build path where `_session=null`. Verified: SIGINT/SIGTERM leave zero orphaned relays.
 >
-> **All 5 audit findings (D1–D5) now resolved.** 0 deferred findings remain. **IMPORTANT**: prod deploy still
+> **Structural refactors** (pure code reorganization, zero API change): #9 `nfc.rs` 1749L → `nfc/{apdu,frame,card,reader,mod}.rs`
+> (`1d04999`); #10 `ledger.rs` 1600L → `ledger/{types,clock,api,fake,flaky,ckerc20,mod}.rs` (`9b168d5`). All consumer
+> import paths preserved. 45/45 core + 86/86 canister + 57/57 relay + 68/68 e2e green.
+>
+> **All audit findings (D1–D5 + #9 + #10) now resolved.** 0 deferred findings remain. **IMPORTANT**: prod deploy still
 > PENDING (prod at `af6ac8f`; founder-run `just deploy-ic && just apk && just up` needed to ship the UI sweep
-> + mnemonic feature).
+> + mnemonic feature). **Device gate**: mnemonic UI touches `app/components/{Onboarding,SettingsSheet}.tsx` —
+> founder should run `just app` to confirm `DPAY_SELFCHECK PASS` (no native-module/wire/AID changes, but the
+> trigger-path rule says run it).
 
 ## Session summary (2026-08-10): UI review sweep — 4 user issues + silent errors + dead code; 65/65 e2e green
 
