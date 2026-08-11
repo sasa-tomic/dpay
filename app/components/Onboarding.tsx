@@ -1,10 +1,11 @@
 import {useState} from 'react';
-import {KeyboardAvoidingView, Platform, SafeAreaView, ScrollView, StatusBar, Text, Pressable, TextInput} from 'react-native';
+import {KeyboardAvoidingView, Platform, SafeAreaView, ScrollView, StatusBar, Text, Pressable, TextInput, View} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {STORAGE_KEY, BALANCE_TIMEOUT_MS} from '../config/constants';
 import {base, validateSeed} from '../lib/format';
+import {hexToWords} from '../lib/bip39';
 import type {Identity} from '../lib/types';
 import {DpayCore} from '../services/native';
 import {fetchWithTimeout} from '../services/relay';
@@ -17,7 +18,16 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
   const [pendingId, setPendingId] = useState<Identity | null>(null);
   const [mode, setMode] = useState<'create' | 'restore'>('create');
   const [seed, setSeed] = useState('');
+  // BIP-39 backup gate (create flow). `backupMnemonic` holds the 24 words to display when non-null;
+  // the backup screen renders INSTEAD of the create/restore form until the user checks the
+  // acknowledgement and taps Continue. `backupChecked` is a pure UX gate (not a security mechanism).
+  const [backupMnemonic, setBackupMnemonic] = useState<string[] | null>(null);
+  const [backupChecked, setBackupChecked] = useState(false);
 
+  // Generate a fresh on-device Ed25519 keypair, persist it, then SHOW THE BIP-39 BACKUP before entering
+  // the wallet. The faucet fund is DEFERRED to `finishCreate` (run after the user acknowledges the
+  // backup) so the wallet is never entered without the user having seen their 24 recovery words. The
+  // mnemonic is derived ON-DEMAND from secretHex via `hexToWords` — no storage change.
   async function create() {
     const name = username.trim() || 'me';
     setBusy(true); setErr(null);
@@ -25,17 +35,30 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
       const kp = await DpayCore.generateKeypair();
       const id: Identity = {secretHex: kp.secretHex, publicHex: kp.publicHex, username: name};
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(id));
-      // Fund the new account from the demo faucet (best-effort — works when the ledger is reachable).
-      // Bounded by a 4s timeout so a hanging/dead relay can't stall onboarding (fail fast → $0, fund later).
-      try {
-        await fetchWithTimeout(`${base(relayUrl)}/api/v1/faucet`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({account: id.publicHex})}, BALANCE_TIMEOUT_MS);
-        onCreated(id);
-      } catch (e) {
-        console.warn('faucet fetch failed:', e instanceof Error ? e.message : String(e));
-        setPendingId(id);
-        setBusy(false);
-      }
+      const words = hexToWords(kp.secretHex);
+      setPendingId(id);
+      setBackupMnemonic(words);
+      setBusy(false);
     } catch (e: unknown) { setErr(e instanceof Error ? e.message : String(e)); setBusy(false); }
+  }
+
+  // Continue create AFTER the user acknowledges the backup: clear the backup screen, run the demo
+  // faucet (best-effort — works when the ledger is reachable; bounded by a 4s timeout so a hanging/
+  // dead relay can't stall onboarding — fail fast → $0, fund later), then enter the wallet. On faucet
+  // failure, `pendingId` is already set so the existing faucet-failed screen renders with Continue.
+  async function finishCreate() {
+    if (!pendingId) return;
+    const id = pendingId;
+    setBackupMnemonic(null);
+    setBackupChecked(false);
+    setBusy(true);
+    try {
+      await fetchWithTimeout(`${base(relayUrl)}/api/v1/faucet`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({account: id.publicHex})}, BALANCE_TIMEOUT_MS);
+      onCreated(id);
+    } catch (e) {
+      console.warn('faucet fetch failed:', e instanceof Error ? e.message : String(e));
+      setBusy(false);
+    }
   }
 
   // Restore a wallet from the 64-hex recovery seed (the value Backup reveals). Mirrors `create` but
@@ -75,7 +98,31 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
           <Logo size={104} />
           <Wordmark style={S.wordmarkBig} />
           <Text style={S.onboardSub}>Tap or scan to pay — online or offline.</Text>
-          {pendingId ? (
+          {backupMnemonic ? (
+            <>
+              <Text style={S.wordmarkBig}>Back up your wallet</Text>
+              <Text style={S.warnNote}>Write down these 24 words and store them safely. They're the ONLY way to recover your wallet if you lose this device.</Text>
+              <View testID="mnemonic-backup" style={{flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignSelf: 'stretch', marginTop: 4, marginBottom: 8}}>
+                {backupMnemonic.map((w, i) => (
+                  <View key={i} testID={`mnemonic-word-${i}`} style={{flexDirection: 'row', alignItems: 'baseline', backgroundColor: C.field, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, margin: 4, borderWidth: 1, borderColor: C.line2}}>
+                    <Text style={{color: C.sub2, fontFamily: 'monospace', fontSize: 11, marginRight: 6}}>{i + 1}</Text>
+                    <Text style={{color: C.ink, fontFamily: 'monospace', fontSize: 15}}>{w}</Text>
+                  </View>
+                ))}
+              </View>
+              <Pressable testID="mnemonic-backup-checkbox" style={{flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch', marginTop: 4, marginBottom: 10, minHeight: 44}} onPress={() => setBackupChecked(!backupChecked)}
+                accessibilityRole="checkbox" accessibilityLabel="I've written down all 24 words" accessibilityState={{checked: backupChecked}}>
+                <View style={{width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: backupChecked ? C.brand : C.sub2, backgroundColor: backupChecked ? C.brand : 'transparent', alignItems: 'center', justifyContent: 'center', marginRight: 10}}>
+                  {backupChecked ? <Text style={{color: C.brandInk, fontWeight: '800', fontSize: 14, lineHeight: 16}}>✓</Text> : null}
+                </View>
+                <Text style={{color: C.sub, fontSize: 15, flex: 1}}>I've written down all 24 words</Text>
+              </Pressable>
+              <Pressable testID="btn-mnemonic-continue" style={[S.primary, !backupChecked && S.dim]} disabled={!backupChecked} onPress={finishCreate}
+                accessibilityRole="button" accessibilityLabel="Continue" accessibilityState={{disabled: !backupChecked}}>
+                <Text style={S.primaryText}>Continue</Text>
+              </Pressable>
+            </>
+          ) : pendingId ? (
             <>
               <Text testID="onboard-faucet-failed" style={S.warnNote}>Wallet created, but starter funds couldn't be added. The server may be offline — you can add funds later from Balances.</Text>
               <Pressable testID="btn-onboard-continue" style={S.primary} onPress={() => onCreated(pendingId!)}
