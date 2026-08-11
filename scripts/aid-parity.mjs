@@ -10,7 +10,7 @@
 // static net: decode the XML hex and assert byte-equality against the literal, sub-second, no device.
 //
 // Sources (2 AIDs):
-//   IC  AID: crates/dpay-core/src/nfc.rs `pub const AID`              vs  res/xml/apduservice.xml
+//   IC  AID: crates/dpay-core/src/nfc/mod.rs `pub const AID`          vs  res/xml/apduservice.xml
 //   SOL AID: app/android/.../DpaySolNfc.kt   `private val SOL_AID`    vs  res/xml/solapduservice.xml
 //
 // Usage: node scripts/aid-parity.mjs   (exit 0 = parity, exit 1 = drift)
@@ -18,7 +18,7 @@ import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
-const NFC_RS = `${ROOT}crates/dpay-core/src/nfc.rs`;
+const NFC_RS = `${ROOT}crates/dpay-core/src/nfc/mod.rs`;
 const SOL_NFC_KT = `${ROOT}app/android/app/src/main/java/com/dpay/DpaySolNfc.kt`;
 const IC_XML = `${ROOT}app/android/app/src/main/res/xml/apduservice.xml`;
 const SOL_XML = `${ROOT}app/android/app/src/main/res/xml/solapduservice.xml`;
@@ -73,7 +73,7 @@ const solLit = solAidKt(readFileSync(SOL_NFC_KT, 'utf8'));
 const solXml = aidFilterXml(readFileSync(SOL_XML, 'utf8'), SOL_XML);
 
 const checks = [
-  {label: 'IC  AID', lit: icLit, xml: icXml, litSrc: 'nfc.rs:const AID', xmlSrc: 'apduservice.xml'},
+  {label: 'IC  AID', lit: icLit, xml: icXml, litSrc: 'nfc/mod.rs:const AID', xmlSrc: 'apduservice.xml'},
   {label: 'SOL AID', lit: solLit, xml: solXml, litSrc: 'DpaySolNfc.kt:SOL_AID', xmlSrc: 'solapduservice.xml'},
 ];
 

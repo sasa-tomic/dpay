@@ -75,7 +75,7 @@
 |---|---------|-------|--------|--------|
 | 3 | SOL NFC error/decline/pending paths have ZERO e2e coverage | 7 | M | ✅ DONE `293ce8c` (flow 66) |
 | 8 | SOL setup-nonce failure + resync untested | 5 | M | ✅ DONE `e73c70c` (flow 67) |
-| 9 | `nfc.rs` 1749L — split candidate | 4 | M | Open |
+| 9 | `nfc.rs` 1749L — split candidate | 4 | M | ✅ DONE (split into `nfc/{apdu,frame,card,reader,mod}.rs`) |
 | 10 | `ledger.rs` 1600L — split candidate | 4 | M | Open |
 | 12 | SOL receive-address clipboard copy untested | 4 | S | ✅ DONE `c06c1c2` (flow 45) |
 
