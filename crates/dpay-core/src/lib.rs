@@ -193,9 +193,9 @@ pub struct WithdrawAuth {
 /// nonce(16) | expiry_le(8) | currency_le(4)` = 68 bytes. The variable-length `destination`
 /// follows as a u32-LE length prefix + the raw UTF-8 bytes, so the layout is unambiguous to decode
 /// without a frozen total length. All widths reference the core consts by name.
-pub const WITHDRAW_FIXED_LEN: usize = PUBKEY_LEN + 8 + NONCE_LEN + 8 + 4;
+pub(crate) const WITHDRAW_FIXED_LEN: usize = PUBKEY_LEN + 8 + NONCE_LEN + 8 + 4;
 /// Width of the address length prefix (u32 LE) appended after the fixed prefix.
-pub const WITHDRAW_ADDR_LEN_BYTES: usize = 4;
+pub(crate) const WITHDRAW_ADDR_LEN_BYTES: usize = 4;
 
 impl WithdrawAuth {
     /// Canonical, deterministic signing message. FROZEN field order:

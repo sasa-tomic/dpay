@@ -127,6 +127,10 @@ export function validateMnemonic(words: string[]): boolean {
  * `crypto.getRandomValues` (polyfilled by `react-native-get-random-values` on native, native on
  * web/Node — the same RNG `randNonceHex` in format.ts uses). The returned words encode the seed
  * directly; `DpayCore.keypairFromSecret(wordsToHex(words))` recovers the keypair.
+ *
+ * Production onboarding generates the keypair via FFI (`DpayCore.generateKeypair()` — Rust CSPRNG)
+ * then derives the mnemonic from that seed via `hexToWords`. This function is kept as an FFI-free
+ * alternative for future use (e.g., a JS-only recovery path).
  */
 export function generateMnemonic(): string[] {
   const entropy = new Uint8Array(ENTROPY_BYTES);

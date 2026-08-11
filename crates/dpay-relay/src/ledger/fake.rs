@@ -149,7 +149,7 @@ impl FakeLedger {
 /// minter, `sv3dd-…` = the live ckETH minter, `xevnm-…` = the live ckUSDC ledger); the wallet reads
 /// `currency`/`symbol`/`decimals`/`minter_family` + the MC1 unit 5 per-currency metadata for display.
 /// Hardcoded as TEXT (not built via `candid::Principal`) because `candid` is feature-gated to `agent`
-/// and `ledger.rs` ships in the lean offline build.
+/// and the ledger module ships in the lean offline build.
 ///
 /// Ramp honesty (MC1 unit 5, no-swap non-negotiable + OPEN_ISSUES O3): DEMO onramp=`Direct` (faucet),
 /// offramp=`Unavailable`; ckBTC onramp=`Direct` (Bitcoin ramp), offramp=`Direct`; ckUSDC
