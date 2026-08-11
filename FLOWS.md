@@ -85,7 +85,7 @@ wire (1) · onboard (6) · pay (20) · offline (6) · deposit (8) · withdraw (6
 | 22 | deposit-error | Relay unreachable when opening the deposit sheet → honest error ('Check connection'), no spinner-forever. | deposit-error, offline, graceful |
 | 33 | ckerc20-persist | ckERC20 deposit watching PERSISTS across restart: reload rehydrates watching (no reconnect), resumed notice shown. | ckerc20, persist, restart, watching-resume |
 | 34 | onramp-provider-resolution | Onramp resolver: window.ethereum wins when present; WC branch unreachable on web even when 'configured' → honest null. | onramp-resolver, eip-1193, walletconnect-gate |
-| 45 | sol-receive | Native SOL rail: device-derived SOL card in Balances + receive address QR via the Receive tab "My address" sub-mode (offline, no devnet). | sol-card, sol-derive, sol-receive, qr, address, sol-tab-ia |
+| 45 | sol-receive | Native SOL rail: device-derived SOL card in Balances + receive address QR via the Receive tab "My address" sub-mode (offline, no devnet). | sol-card, sol-derive, sol-receive, qr, address, sol-tab-ia, sol-clipboard |
 
 ### Withdrawal (ckBTC cash-out)
 

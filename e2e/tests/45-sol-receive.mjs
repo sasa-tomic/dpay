@@ -11,13 +11,13 @@
 // RPC is DISABLED in e2e (`__DPAY_TEST_SOLANA_RPC_URL=''`) so the balance shows "—" and no devnet
 // call is ever made — the inner loop stays fully offline. The deposit address renders inline (no
 // overlay sheet); the SOL per-row Balances buttons are gone (uniform with IC).
-import {setup, assert, assertIncludes, onboardWallet, openBalances} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, onboardWallet, openBalances} from '../harness/lib.mjs';
 
 export const meta = {
   id: '45',
   name: 'sol-receive',
   journey: 'deposit',
-  covers: ['sol-card', 'sol-derive', 'sol-receive', 'qr', 'address', 'sol-tab-ia'],
+  covers: ['sol-card', 'sol-derive', 'sol-receive', 'qr', 'address', 'sol-tab-ia', 'sol-clipboard'],
   verifies: 'Native SOL rail: device-derived SOL card in Balances + receive address QR via the Receive tab "My address" sub-mode (offline, no devnet).',
   timeoutMs: 20000,
 };
@@ -97,6 +97,19 @@ export async function run() {
     // 5. The copy control is present inline (mirrors the ckBTC deposit sheet's copy affordance).
     await driver.findByTestID('btn-sol-receive-copy', {timeoutMs: 5_000});
     console.log('[45-sol-receive] ✓ copy control present (inline)');
+
+    // 5b. Tapping the copy control writes the address to the REAL clipboard (proves the SOL copy
+    //     affordance uses navigator.clipboard.writeText — NOT the Share noop shimmed in shims.ts,
+    //     which captures nothing). Mirrors flow 04 (the IC ckBTC deposit copy check). The clipboard
+    //     seam starts empty; after the tap it must hold the EXACT derived address.
+    const clipBefore = await driver.eval(() => window.__DPAY_TEST_CLIPBOARD);
+    assertEq(clipBefore, '', 'clipboard seam should be empty before SOL copy');
+    await driver.click('btn-sol-receive-copy', {timeoutMs: 5_000});
+    await driver.waitForText('Copied', {timeoutMs: 4_000});
+    const clipAfter = await driver.eval(() => window.__DPAY_TEST_CLIPBOARD);
+    assertEq(clipAfter, address,
+      `clipboard seam after SOL copy should equal the derived address "${address}"`);
+    console.log(`[45-sol-receive] ✓ clipboard captured the SOL address (${address})`);
 
     await driver.screenshot('45-sol-receive');
 
