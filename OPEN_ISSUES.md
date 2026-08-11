@@ -8,6 +8,52 @@
 > entries below are **deliberate, documented follow-ups**, not regressions — each carries its current mitigation and the concrete
 > next step. Structural detail lives in `CODEBASE_ANALYSIS.md`.
 
+## Session summary (2026-08-10): UI review sweep — 4 user issues + silent errors + dead code; 65/65 e2e green
+
+> Founder-directed UI review (4 issues raised mid-session) + a codebase audit (5 parallel planner subagents →
+> 13 findings). All 4 user issues DONE; top-value audit findings (silent errors, dead code, doc drift) DONE;
+> SOL e2e coverage gaps (F3/F8/F12) DONE. **9 new flows** (62 sol-usdc-ata + 63 picker-sol-rail + 64 settings-restore +
+> 66 sol-nfc-error + 67 sol-setup-error + flow 45 clipboard) bring the e2e suite 62 → **67/67 GREEN**.
+> **14 commits** (`e78bd77` → `e73c70c`). Plans: `2026-08-10-review-findings.md`, `2026-08-10-unified-selector-plan.md`,
+> `2026-08-10-recovery-plan.md`. D4 BIP-39 mnemonic split into 5 medium tasks (`2026-08-10-bip39-mnemonic-plan.md`).
+
+### Founder UI issues — all DONE (commits below)
+
+| # | Issue | Resolution | Commit |
+|---|-------|-----------|--------|
+| 1 | **Recovery barely visible.** Restore was a muted bottom link in Onboarding; absent from Settings. | Restore promoted to equal-weight secondary button in Onboarding (after Create); new "Restore wallet" section in SettingsSheet (mirrors Backup: entry → seed input + warning → confirm). `onRestore(id)` callback in App.tsx (writes AsyncStorage + setIdentity, no wipe). Username preserved across restore. New flow 64 proves same-seed + different-seed restore. | `2e6a161`, `8f3fdc1` |
+| 2 | **IC + SOL currencies split across two lists.** SOL was a separate row in Balances; absent from the Receive picker. Two parallel rail systems. | New shared `CurrencyRow` component + `buildCurrencyList()` helper (IC catalog + ONE synthetic SOL entry; SOL stays OUT of the catalog — it's a device-key rail). BalancesSheet collapsed 3 row templates → 1 loop (216→135L). SOL added to Receive picker (`req-pick-sol`) with early-return `onSelectSol` → rail-switch. Chain labels as subtitles ("· Bitcoin", "· Solana", etc.). New flow 63 proves SOL-pick rail-switch. | `903bb0d`, `0ac15ff` |
+| 3 | **Currency selectors look/work differently.** BalancesSheet used cards (dot + name + amount + subtitle); picker used check-mark rows (no amount, no subtitle, different typography). | Both now use the same `CurrencyRow` (`variant: 'card'` in Balances, `variant: 'plain'` in picker) — one visual language, one active indicator, one typography. Style keys `pickTextCol` + `pickSubtitle` added. | `903bb0d`, `0ac15ff` |
+| 4 | **Receive dropdown nearly invisible.** `C.card = 'rgba(255,255,255,0.025)'` (2.5% white wash) on a `rgba(0,0,0,0.6)` backdrop = nearly transparent picker card. | Local fix: `pickCard.backgroundColor` `C.card` → opaque `C.panel = '#0c0f14'`. (5 other `C.card` consumers sit on opaque surfaces and are correct — left untouched.) | `38ed57d` |
+
+### Code-quality findings DONE (top-value from the 13-finding audit)
+
+| # | Finding | Resolution | Commit |
+|---|---------|-----------|--------|
+| 1 | **Silent network errors** (value 8) — 20 catch blocks across 11 files swallowed errors with zero logging (poll loops, reconcile, persist). | All 20 now `console.warn('<context>:', e instanceof Error ? e.message : String(e))`. Includes the `.catch(() => null)` on `DpayCore.encodeQr` (FFI error was permanently lost) + the empty `} catch {}` in `merchant.html`. | `e78bd77` |
+| 6 | **Dead exports `padName32`/`trimName32`/`NAME_LEN`** (value 5) — only test-referenced; Rust core is source of truth via FFI. | Removed from `app/lib/format.ts` + tests. | `e78bd77` |
+| 13 | **Stale hotkey comment** — `Wallet.tsx:304` said "T=Receive" but T=topUp (faucet). | Comment fixed. | `e78bd77` |
+| 11 | **D3 doc drift** — D3 was DONE in code but OPEN_ISSUES still said deferred. | Already struck by concurrent process. | (n/a) |
+
+### F3 + F4 (previously-DEFERRED founder-fork items) — DONE
+
+- **F4 (USDC ATA gate)** — `SolReceiveMode.tsx` now checks for an on-chain USDC ATA before allowing a USDC receive; if absent, shows a warning + disables the make button (fail-closed with a clear message instead of an opaque broadcast failure). `checkUsdcAta` in `app/solana.ts` → `accountExists` in `app/solana/rpc.ts` (bounded by `SOL_ATA_CHECK_TIMEOUT_MS=8000`). New flow 62 proves the gate (SOL→USDC toggle → warning → SOL→back → cleared).
+- **F3 (defense-in-depth sig verify)** — `verifySignedTransaction()` in `app/solana/tx.ts` extracts the fee-payer sig + verifies via ed25519 BEFORE broadcast. NON-BLOCKING: on mismatch logs `console.warn` + still broadcasts (defense-in-depth, not a gate). Wired into BOTH `SolReceiveMode.tsx` (merchant scan) + `SolNfcTap.tsx` (NFC path).
+
+### Remaining audit findings (deferred — value ≥4, documented for pickup)
+
+| # | Finding | Value | Effort | Status |
+|---|---------|-------|--------|--------|
+| 3 | SOL NFC error/decline/pending paths have ZERO e2e coverage | 7 | M | ✅ DONE `293ce8c` (flow 66) |
+| 8 | SOL setup-nonce failure + resync untested | 5 | M | ✅ DONE `e73c70c` (flow 67) |
+| 9 | `nfc.rs` 1749L — split candidate | 4 | M | Open |
+| 10 | `ledger.rs` 1600L — split candidate | 4 | M | Open |
+| 12 | SOL receive-address clipboard copy untested | 4 | S | ✅ DONE `c06c1c2` (flow 45) |
+
+Full 13-finding report: `2026-08-10-review-findings.md` (307L, all with file:line refs + concrete fixes).
+
+---
+
 ## Session summary (2026-08-10): quality sweep — 16 findings all DONE + verified; PROD DEPLOYED to HEAD
 
 > A whole-codebase quality sweep (5 parallel audit subagents → 16 findings: M1–M17 + L1–L8, all DONE + verified). The founder then
@@ -41,11 +87,12 @@ the signed APK+AAB, and swaps the prod relay image. Also recorded in `AGENTS.md`
 ### Device-gate flag before the NEXT deploy
 
 M17 + L6 touched `app/android/**` (`DpayNfc.kt` + `DpaySolNfc.kt`: card-side `errorEvent(...)` before the SW on APDU throw, +
-`Log.w` on `emit()` bridge failure — commits `7421854` + `c6c2ff5`). **The live APK was built BEFORE these changes** — the
-2026-08-10 prod deploy captured pre-sweep HEAD (~`df53579`); the entire quality sweep (`bcfdfc5`→`484d9e0`, including M17+L6)
-landed AFTER the deploy. Risk is LOW (debuggability-only — no protocol/wire/arity change; `aid-parity` and `bridge-parity` are
-GREEN), but per the AGENTS.md path-filtered gate policy, **run `just app` (assert `DPAY_SELFCHECK PASS` +
-`DPAY_SOL_SELFCHECK PASS`) + `just ondevice` before the NEXT deploy** to re-prove the Android surface.
+`Log.w` on `emit()` bridge failure — commits `7421854` + `c6c2ff5`). The 2026-08-10 UI review sweep (`e78bd77`→`8f3fdc1`) further
+touched `app/components/**` (CurrencyRow, BalancesSheet, ReceiveMode, Wallet, SettingsSheet, Onboarding) + `app/lib/format.ts` +
+`app/App.tsx` — all pure presentational RN (no StatusBar/SafeAreaView/BackHandler/Platform/native-module/wire/AID surface), so the
+structurally-invisible device-only classes don't apply. **The live APK was built BEFORE these changes** (the 2026-08-10 prod deploy
+captured pre-sweep HEAD ~`df53579`). Risk is LOW, but per the AGENTS.md path-filtered gate policy, **run `just app` (assert
+`DPAY_SELFCHECK PASS` + `DPAY_SOL_SELFCHECK PASS`) + `just ondevice` before the NEXT deploy** to re-prove the Android surface.
 
 ### L8 (deploy ICRC Init literal dedup) — DEFERRED (acknowledged, low priority)
 
