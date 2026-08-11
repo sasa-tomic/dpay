@@ -12,7 +12,7 @@
 // require a username fails THIS test loudly, forcing a conscious update rather than silent drift.
 //
 // Selector contract: `username-input` (M6), `btn-create`, `balance`.
-import { setup, assert, assertEq, accountOf } from '../harness/lib.mjs';
+import { setup, assert, assertEq, accountOf, waitForEnabled } from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -23,7 +23,7 @@ export const meta = {
   journey: 'onboard',
   covers: ['onboard', 'default-username'],
   verifies: 'New user leaves name empty → creates → defaults to \'me\', onboards + funds.',
-  timeoutMs: 15000,
+  timeoutMs: 20000,
 };
 
 export async function run() {
@@ -42,6 +42,12 @@ export async function run() {
     // Click Create directly — the app defaults the empty name to 'me'.
     console.log('[23-username-default] clicking btn-create (empty username → default "me")…');
     await driver.click('btn-create', { timeoutMs: 4_000 });
+
+    // D4-B: dismiss the mnemonic backup screen so the faucet runs.
+    await driver.findByTestID('mnemonic-backup', { timeoutMs: 8_000 });
+    await driver.click('mnemonic-backup-checkbox', { timeoutMs: 4_000 });
+    await waitForEnabled(driver, 'btn-mnemonic-continue', { timeoutMs: 4_000 });
+    await driver.click('btn-mnemonic-continue', { timeoutMs: 4_000 });
 
     // The wallet mounts + the faucet funds ∂100 (the real relay path, same as flow 01).
     await driver.findByTestID('balance', { timeoutMs: 10_000 });

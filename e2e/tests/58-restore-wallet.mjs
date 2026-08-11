@@ -13,8 +13,8 @@
 //   5. The stored identity's secretHex EQUALS the entered seed, and publicHex is a non-empty 64-hex
 //      value derived from it (proves keypairFromSecret ran through the DpayCore shim, not generate).
 //
-// Selector contract: `btn-restore`, `restore-seed-input`, `username-input`, `btn-restore-confirm`,
-// `balance`. The secretHex-equality gate is the proof: a fresh generateKeypair() would never yield
+// Selector contract: `btn-restore`, `btn-restore-mode-toggle`, `restore-seed-input`, `username-input`,
+// `btn-restore-confirm`, `balance`. The secretHex-equality gate is the proof: a fresh generateKeypair() would never yield
 // this exact seed.
 import { setup, assert, assertEq, accountOf } from '../harness/lib.mjs';
 
@@ -29,8 +29,8 @@ export const meta = {
   id: '58',
   name: 'restore-wallet',
   journey: 'onboard',
-  covers: ['restore-seed', 'keypair-from-secret', 'both-rails-recovery'],
-  verifies: 'A wallet can be restored from the 64-hex recovery seed (no faucet; secretHex matches).',
+  covers: ['restore-seed', 'keypair-from-secret', 'both-rails-recovery', 'btn-restore-mode-toggle'],
+  verifies: 'A wallet can be restored from the 64-hex recovery seed (toggle to hex mode; no faucet; secretHex matches).',
   timeoutMs: 15_000,
 };
 
@@ -49,7 +49,11 @@ export async function run() {
     console.log('[58-restore-wallet] tapping btn-restore → restore mode…');
     await driver.click('btn-restore', { timeoutMs: 5_000 });
 
-    // 3. The restore block appears.
+    // D4-C: restore defaults to mnemonic mode. Toggle to hex mode so restore-seed-input is visible
+    // for the fixed-seed test.
+    await driver.click('btn-restore-mode-toggle', { timeoutMs: 5_000 });
+
+    // 3. The restore block appears (hex input now visible).
     await driver.findByTestID('restore-seed-input', { timeoutMs: 5_000 });
 
     // 4. Type the seed + a username.

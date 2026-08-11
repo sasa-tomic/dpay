@@ -15,7 +15,7 @@
 // reads ∂100.00 — NOT ∂0.00. Asserting ∂0.00 would require disabling the faucet, which would break
 // the "use the REAL relay + REAL FakeLedger" rule. We assert ∂100.00 (proves faucet→balance
 // end-to-end) and note this deviation. Empty history is asserted verbatim (no payments settled yet).
-import { setup, assert, assertIncludes } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, waitForEnabled } from '../harness/lib.mjs';
 
 const ONBOARD_USERNAME = 'e2e-alice';
 const ONBOARD_PLACEHOLDER = 'e.g. Alice';
@@ -49,9 +49,15 @@ export async function run() {
     const onboardBody = await driver.bodyText();
     assertIncludes(onboardBody, 'demo funds to get started', 'onboarding subtext is user-benefit language (M7)');
 
-    // 2. Click btn-create. The button transitions to "Creating…" then the wallet mounts.
+    // 2. Click btn-create. The button transitions to "Creating…" then the mnemonic backup screen shows.
     console.log('[01-onboard] clicking btn-create…');
     await driver.click('btn-create', { timeoutMs: 4_000 });
+
+    // D4-B: dismiss the mnemonic backup screen (checkbox + Continue) so the faucet runs.
+    await driver.findByTestID('mnemonic-backup', { timeoutMs: 8_000 });
+    await driver.click('mnemonic-backup-checkbox', { timeoutMs: 4_000 });
+    await waitForEnabled(driver, 'btn-mnemonic-continue', { timeoutMs: 4_000 });
+    await driver.click('btn-mnemonic-continue', { timeoutMs: 4_000 });
 
     // 3. The Wallet screen mounts. The balance Text (testID="balance") is the gate. The app polls
     //    /api/v1/balance every 2.5s; the faucet funds the account synchronously in create(), so by

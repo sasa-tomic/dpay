@@ -287,18 +287,44 @@ export function assertIncludes(actual, substring, label) {
 // --- onboarding + identity helpers (shared across every browser flow) --------------------------
 
 /**
- * Onboard a fresh wallet: type the username, click create, wait for the funded balance. This is the
- * shared preamble every browser test used to copy-paste (4 lines × 15 files). Returns the driver for
- * chaining. The faucet funds synchronously in create(); the balance poll (fast-poll seam = 150ms in
- * test, 2.5s in prod) reflects it on the next tick, so waitForText('∂100.00') lands quickly.
+ * Onboard a fresh wallet: type the username, click create, dismiss the BIP-39 mnemonic backup screen,
+ * wait for the funded balance. This is the shared preamble every browser test used to copy-paste
+ * (4 lines × 15 files). Returns the driver for chaining.
+ *
+ * D4-B: clicking btn-create now shows the mnemonic backup screen BEFORE the faucet runs. The backup
+ * is dismissed (check the ack checkbox + Continue) so the faucet fires and the wallet loads. The
+ * checkbox→Continue pair uses `waitForEnabled` because btn-mnemonic-continue is `disabled` until
+ * React re-renders after the checkbox tap — a bare `click` could land before the re-render and be a
+ * silent no-op. The faucet funds synchronously in finishCreate(); the balance poll (fast-poll seam =
+ * 150ms in test, 2.5s in prod) reflects it on the next tick, so waitForText('∂100.00') lands quickly.
  */
 export async function onboardWallet(driver, name = 'e2e', opts = {}) {
-  const timeoutMs = opts.timeoutMs ?? 12_000;
+  const timeoutMs = opts.timeoutMs ?? 15_000;
   await driver.typeByPlaceholder('e.g. Alice', name, { timeoutMs: 8_000 });
   await driver.click('btn-create', { timeoutMs: 4_000 });
+  await driver.findByTestID('mnemonic-backup', { timeoutMs: 8_000 });
+  await driver.click('mnemonic-backup-checkbox', { timeoutMs: 4_000 });
+  await waitForEnabled(driver, 'btn-mnemonic-continue', { timeoutMs: 4_000 });
+  await driver.click('btn-mnemonic-continue', { timeoutMs: 4_000 });
   await driver.findByTestID('balance', { timeoutMs: 10_000 });
   await driver.waitForText('∂100.00', { timeoutMs });
   return driver;
+}
+
+/**
+ * Wait for a Pressable matched by `testID` to become enabled (not aria-disabled / not disabled).
+ * Needed after tapping a gate checkbox (e.g. `mnemonic-backup-checkbox`) that flips a separate
+ * button's `disabled` prop — the driver's `click` doesn't wait for enabled state, so clicking the
+ * gated button immediately after the gate can be a silent no-op if React hasn't re-rendered yet.
+ */
+export async function waitForEnabled(driver, testID, opts = {}) {
+  const timeoutMs = opts.timeoutMs ?? 5_000;
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (!(await isDisabled(driver, testID))) return;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error(`[lib] element testID=${testID} stayed disabled past ${timeoutMs}ms`);
 }
 
 /** Read the wallet identity from localStorage (the app stores it as `dpay.identity.v1`). Returns the

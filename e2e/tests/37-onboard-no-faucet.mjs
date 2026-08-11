@@ -19,7 +19,7 @@
 //
 // Selector contract: `balance` (header balance Pressable), `header-who` (username), the offline
 // label "~ DEMO approx." (Wallet.tsx renders it when `online === false`; asset-name-prefixed after D3).
-import { setup, assert, pickFreePort, getBalance, accountOf } from '../harness/lib.mjs';
+import { setup, assert, pickFreePort, getBalance, accountOf, waitForEnabled } from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -60,6 +60,13 @@ export async function run() {
     console.log('[37-onboard-no-faucet] onboarding (faucet will fail)…');
     await driver.typeByPlaceholder('e.g. Alice', 'e2e-nofaucet', { timeoutMs: 8_000 });
     await driver.click('btn-create', { timeoutMs: 4_000 });
+
+    // D4-B: dismiss the mnemonic backup screen so finishCreate() runs the faucet (which fails against
+    // the dead relay). Without this the backup screen holds and the faucet never fires.
+    await driver.findByTestID('mnemonic-backup', { timeoutMs: 8_000 });
+    await driver.click('mnemonic-backup-checkbox', { timeoutMs: 4_000 });
+    await waitForEnabled(driver, 'btn-mnemonic-continue', { timeoutMs: 4_000 });
+    await driver.click('btn-mnemonic-continue', { timeoutMs: 4_000 });
 
     // The faucet fails (dead relay) → create() sets pendingId + shows the honest "Continue" prompt
     // instead of auto-transitioning. Tap Continue to proceed to the wallet at $0.

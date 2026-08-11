@@ -19,8 +19,8 @@ export const meta = {
   id: '57',
   name: 'settings-seed-backup',
   journey: 'system',
-  covers: ['seed-backup', 'confirm-gate', 'secret-reveal', 'clipboard-copy'],
-  verifies: 'Seed stays hidden behind a confirm gate; once revealed it matches identity.secretHex; copy writes the seed to the real clipboard.',
+  covers: ['seed-backup', 'confirm-gate', 'secret-reveal', 'clipboard-copy', 'mnemonic-backup', 'mnemonic-word-{0..23}', 'btn-backup-show-hex', 'btn-copy-mnemonic', 'btn-copy-seed'],
+  verifies: 'Seed stays hidden behind a confirm gate; once revealed the 24 mnemonic words show by default, hex view toggles in and matches identity.secretHex; copy writes the seed to the real clipboard.',
   timeoutMs: 30_000,
 };
 
@@ -53,6 +53,8 @@ export async function run() {
     await driver.findByTestID('btn-backup', { timeoutMs: 5_000 });
     const seedBefore = await driver.isPresent('seed-phrase');
     assertEq(seedBefore, false, 'seed-phrase must be ABSENT before the confirm gate is opened');
+    const mnemonicBefore = await driver.isPresent('mnemonic-words');
+    assertEq(mnemonicBefore, false, 'mnemonic-words must be ABSENT before the confirm gate is opened');
 
     // 4. Open the confirm gate (btn-backup) — the warning + btn-backup-confirm appear; seed still hidden.
     await driver.click('btn-backup', { timeoutMs: 5_000 });
@@ -60,26 +62,36 @@ export async function run() {
     const seedAtGate = await driver.isPresent('seed-phrase');
     assertEq(seedAtGate, false, 'seed-phrase must be ABSENT at the confirm gate (before pressing confirm)');
 
-    // 5. Confirm → the seed is revealed and matches identity.secretHex EXACTLY.
+    // 5. Confirm → the mnemonic words are revealed by DEFAULT (D4-D). Assert mnemonic-words + at
+    //    least one word chip has text, and seed-phrase (hex) is NOT yet shown (it's behind the toggle).
     await driver.click('btn-backup-confirm', { timeoutMs: 5_000 });
+    await driver.findByTestID('mnemonic-words', { timeoutMs: 5_000 });
+    const word0 = await driver.readText('mnemonic-word-0');
+    assert(word0.replace(/^\d+\s*/, '').length > 0, `mnemonic-word-0 should hold a word (got "${word0}")`);
+    const seedAtReveal = await driver.isPresent('seed-phrase');
+    assertEq(seedAtReveal, false, 'seed-phrase must be ABSENT in the default mnemonic view (behind btn-backup-show-hex)');
+
+    // 6. Copy the mnemonic words → the clipboard seam captures the space-separated words.
+    const clipBefore = await driver.eval(() => window.__DPAY_TEST_CLIPBOARD);
+    assertEq(clipBefore, '', 'clipboard seam should be empty before copy');
+    await driver.click('btn-copy-mnemonic', { timeoutMs: 5_000 });
+    await driver.waitForText('Copied', { timeoutMs: 4_000 });
+    const clipMnemonic = await driver.eval(() => window.__DPAY_TEST_CLIPBOARD);
+    assert(clipMnemonic.split(' ').length === 24, `clipboard should hold 24 space-separated words (got ${clipMnemonic.length} chars)`);
+
+    // 7. Toggle to hex view → seed-phrase appears and matches identity.secretHex EXACTLY.
+    await driver.click('btn-backup-show-hex', { timeoutMs: 5_000 });
     await driver.findByTestID('seed-phrase', { timeoutMs: 5_000 });
     const revealed = await driver.readText('seed-phrase');
     assertEq(revealed, secretHex, 'revealed seed-phrase must equal identity.secretHex');
-    console.log(`[57-settings-seed-backup] ✓ revealed seed matches identity (${secretHex.slice(0, 8)}…${secretHex.slice(-4)})`);
+    console.log(`[57-settings-seed-backup] ✓ mnemonic words shown by default; hex toggle matches identity (${secretHex.slice(0, 8)}…${secretHex.slice(-4)})`);
 
-    // 6. The clipboard seam starts empty (proves no prior write leaked the seed).
-    const before = await driver.eval(() => window.__DPAY_TEST_CLIPBOARD);
-    assertEq(before, '', 'clipboard seam should be empty before copy');
-
-    // 7. Copy the seed → "Copied ✓" confirms the clipboard path (not the Share "Shared ✓" label).
-    console.log('[57-settings-seed-backup] clicking btn-copy-seed…');
+    // 8. Copy the hex seed → the clipboard seam now holds the EXACT seed.
     await driver.click('btn-copy-seed', { timeoutMs: 5_000 });
     await driver.waitForText('Copied', { timeoutMs: 4_000 });
-
-    // 8. The seam now holds the EXACT seed — proves a real clipboard write happened (not the Share noop).
     const after = await driver.eval(() => window.__DPAY_TEST_CLIPBOARD);
-    assertEq(after, secretHex, 'clipboard seam after copy should equal identity.secretHex');
-    console.log('[57-settings-seed-backup] ✓ clipboard captured the seed');
+    assertEq(after, secretHex, 'clipboard seam after hex copy should equal identity.secretHex');
+    console.log('[57-settings-seed-backup] ✓ clipboard captured the hex seed');
 
     await driver.screenshot('57-settings-seed-backup');
 

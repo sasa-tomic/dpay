@@ -1,6 +1,6 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **67 flows.**
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **68 flows.**
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay (FakeLedger, offline). No UI stubs. The only shimmed I/O boundary is
 > the camera scan (sanctioned smallest-boundary seam) and the NFC radio (physical-device gate).
@@ -17,7 +17,7 @@
 Flows grouped by user journey; within each table, every row lists what the flow **verifies** and
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`).
 
-wire (1) · onboard (6) · pay (20) · offline (7) · deposit (8) · withdraw (6) · nfc (5) · system (11) · tour (3)
+wire (1) · onboard (7) · pay (20) · offline (7) · deposit (8) · withdraw (6) · nfc (5) · system (11) · tour (3)
 
 ---
 
@@ -36,7 +36,8 @@ wire (1) · onboard (6) · pay (20) · offline (7) · deposit (8) · withdraw (6
 | 23 | username-default | New user leaves name empty → creates → defaults to 'me', onboards + funds. | onboard, default-username |
 | 37 | onboard-no-faucet | Onboard against a dead relay → faucet failure surfaces an honest "Continue" prompt (not a silent $0 transition), wallet created with $0 (∂100 never shown), honest "~ DEMO approx." offline indicator, faucet fails with ECONNREFUSED. | onboard, faucet-failure, offline, dead-relay, right-reason, zero-balance |
 | 54 | testnet-toggle | Balances testnet toggle reveals + hides a "BTC testnet" row (catalog-driven testnet detection). | testnet, catalog, toggle, balances |
-| 58 | restore-wallet | A wallet can be restored from the 64-hex recovery seed (no faucet; secretHex matches). | restore-seed, keypair-from-secret, both-rails-recovery |
+| 58 | restore-wallet | A wallet can be restored from the 64-hex recovery seed (toggle to hex mode; no faucet; secretHex matches). | restore-seed, keypair-from-secret, both-rails-recovery, btn-restore-mode-toggle |
+| 68 | mnemonic-backup-restore | The 24 mnemonic words shown at create time recover the exact same wallet keypair (publicHex match) when entered on restore. | mnemonic-backup, mnemonic-word-{0..23}, mnemonic-backup-checkbox, btn-mnemonic-continue, restore-mnemonic-input, bip39-round-trip, restore-via-mnemonic |
 
 ### Payments (the core offline-pay flow)
 
@@ -121,7 +122,7 @@ wire (1) · onboard (6) · pay (20) · offline (7) · deposit (8) · withdraw (6
 | 38 | relay-retarget | Settings relay-switch retargets the LIVE balance poll: header changes from A's ∂100.00 to B's ∂500.00. | relay-retarget, settings-relay-switch, live-poll |
 | 41 | a11y-census | Every interactive element (btn-*/tab-*/inputs/picker rows) carries a non-empty aria-label + role on every primary surface. | a11y, accessibility, aria |
 | 55 | balances-select-asset | Selecting an asset in Balances binds the header: chip DEMO→ckBTC→SOL and the balance text follows the active-rail branch. | asset-select, header-balance-binding, active-rail-chip |
-| 57 | settings-seed-backup | Seed stays hidden behind a confirm gate; once revealed it matches identity.secretHex; copy writes the seed to the real clipboard. | seed-backup, confirm-gate, secret-reveal, clipboard-copy |
+| 57 | settings-seed-backup | Seed stays hidden behind a confirm gate; once revealed the 24 mnemonic words show by default, hex view toggles in and matches identity.secretHex; copy writes the seed to the real clipboard. | seed-backup, confirm-gate, secret-reveal, clipboard-copy, mnemonic-backup, mnemonic-word-{0..23}, btn-backup-show-hex, btn-copy-mnemonic, btn-copy-seed |
 | 63 | picker-sol-rail | SOL is selectable in the Receive currency picker → switches the active rail to SolReceiveMode. | receive-picker, sol-rail, currency-switch |
 | 64 | settings-restore | Settings → Restore replaces wallet identity from 64-hex seed (no wipe); username preserved. | restore-seed, settings-restore, identity-replace, keypair-from-secret |
 
