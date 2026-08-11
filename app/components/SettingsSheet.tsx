@@ -1,9 +1,10 @@
-import {useEffect, useState} from 'react';
+import {useEffect, useMemo, useState} from 'react';
 import {View, Text, Pressable, TextInput, ScrollView, SafeAreaView, StatusBar, Platform, Linking} from 'react-native';
 import {C} from '../config/palette';
 import {PRIVACY_URL} from '../config/constants';
 import {S} from '../styles';
 import {validateSeed} from '../lib/format';
+import {hexToWords, wordsToString} from '../lib/bip39';
 import type {Identity} from '../lib/types';
 import {DpayCore} from '../services/native';
 import {useEscapeToClose} from '../hooks/useHotkeys';
@@ -56,6 +57,10 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
   // accidental shoulder-surf reveal on a first tap. `copied` mirrors DepositSheet/WithdrawSheet.
   const [confirmBackup, setConfirmBackup] = useState(false);
   const [backupRevealed, setBackupRevealed] = useState(false);
+  // The revealed backup shows the 24 BIP-39 words by default (the human-readable serialization of
+  // the 32-byte seed) with a toggle to the raw 64-hex view. Defaults to `'mnemonic'` and is reset
+  // back to it on Hide so re-revealing always starts at the words view (the friendlier default).
+  const [seedFormat, setSeedFormat] = useState<'mnemonic' | 'hex'>('mnemonic');
   // Restore form state (mirrors the backup/reset confirm pattern): `confirmRestore` opens the inline
   // seed-input form; `restoreSeed` holds the user-entered 64-hex; `restoreBusy` gates the confirm
   // button during the keypairFromSecret FFI call; `restoreErr` surfaces a validation/derivation
@@ -81,6 +86,14 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
   // Copy the seed via the shared clipboard-feedback hook (real clipboard on web, Share on native;
   // surfaces the "Copied ✓"/"Shared ✓" confirmation for 1500ms).
   const copySeed = () => { void doCopy(secretHex); };
+
+  // The 24 BIP-39 words for the mnemonic backup view. The 32-byte seed never changes for a given
+  // identity, so this memoizes on `secretHex` (a prop) — one synchronous SHA-256 per identity, not
+  // per render. Cheap enough to compute inline, but memoizing avoids a redundant encode on every
+  // `copied`/format-toggle re-render.
+  const mnemonicWords = useMemo(() => hexToWords(secretHex), [secretHex]);
+  const mnemonicString = useMemo(() => wordsToString(mnemonicWords), [mnemonicWords]);
+  const copyMnemonic = () => { void doCopy(mnemonicString); };
 
   // Validate + derive + replace the identity from a pasted 64-hex seed. Mirrors Onboarding.restore:
   // validateSeed → keypairFromSecret → build Identity (username preserved) → hand to onRestore
@@ -127,23 +140,71 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
             {backupRevealed ? (
               <View style={S.backupConfirmBox}>
                 <Text style={S.warnNote}>This seed recovers BOTH your IC and Solana funds. Store it safely. Never share it.</Text>
-                <View style={S.seedBox}>
-                  <Text testID="seed-phrase" style={S.seedText} selectable={true}>{secretHex}</Text>
-                </View>
-                <Pressable
-                  testID="btn-copy-seed"
-                  style={[S.primaryWide, {marginTop: 16}]}
-                  onPress={copySeed}
-                  accessibilityRole="button"
-                  accessibilityLabel={copied === 'clipboard' ? 'Seed copied' : copied === 'shared' ? 'Seed shared' : 'Copy seed'}
-                  accessibilityHint="Copies your recovery seed to the clipboard"
-                  accessibilityState={{disabled: false}}>
-                  <Text style={S.primaryText}>{copied === 'clipboard' ? 'Copied ✓' : copied === 'shared' ? 'Shared ✓' : 'Copy seed'}</Text>
-                </Pressable>
+                {seedFormat === 'mnemonic' ? (
+                  <>
+                    <View testID="mnemonic-words" style={{flexDirection: 'row', flexWrap: 'wrap', marginTop: 4}}>
+                      {mnemonicWords.map((w, i) => (
+                        <View
+                          key={i}
+                          testID={`mnemonic-word-${i}`}
+                          style={{flexDirection: 'row', alignItems: 'center', backgroundColor: C.bg, borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, margin: 3, borderWidth: 1, borderColor: C.line2}}>
+                          <Text style={{color: C.sub2, fontFamily: 'monospace', fontSize: 12, marginRight: 6}}>{i + 1}</Text>
+                          <Text style={{color: C.ink, fontSize: 15}}>{w}</Text>
+                        </View>
+                      ))}
+                    </View>
+                    <Pressable
+                      testID="btn-copy-mnemonic"
+                      style={[S.primaryWide, {marginTop: 16}]}
+                      onPress={copyMnemonic}
+                      accessibilityRole="button"
+                      accessibilityLabel={copied === 'clipboard' ? 'Words copied' : copied === 'shared' ? 'Words shared' : 'Copy words'}
+                      accessibilityHint="Copies your 24 recovery words to the clipboard"
+                      accessibilityState={{disabled: false}}>
+                      <Text style={S.primaryText}>{copied === 'clipboard' ? 'Copied ✓' : copied === 'shared' ? 'Shared ✓' : 'Copy words'}</Text>
+                    </Pressable>
+                    <Pressable
+                      testID="btn-backup-show-hex"
+                      style={S.linkBtn}
+                      onPress={() => setSeedFormat('hex')}
+                      accessibilityRole="button"
+                      accessibilityLabel="Show seed as hex"
+                      accessibilityHint="Switches to the raw 64-hex recovery seed view"
+                      accessibilityState={{disabled: false}}>
+                      <Text style={S.linkTextMuted}>Show as hex</Text>
+                    </Pressable>
+                  </>
+                ) : (
+                  <>
+                    <View style={S.seedBox}>
+                      <Text testID="seed-phrase" style={S.seedText} selectable={true}>{secretHex}</Text>
+                    </View>
+                    <Pressable
+                      testID="btn-copy-seed"
+                      style={[S.primaryWide, {marginTop: 16}]}
+                      onPress={copySeed}
+                      accessibilityRole="button"
+                      accessibilityLabel={copied === 'clipboard' ? 'Seed copied' : copied === 'shared' ? 'Seed shared' : 'Copy seed'}
+                      accessibilityHint="Copies your recovery seed to the clipboard"
+                      accessibilityState={{disabled: false}}>
+                      <Text style={S.primaryText}>{copied === 'clipboard' ? 'Copied ✓' : copied === 'shared' ? 'Shared ✓' : 'Copy seed'}</Text>
+                    </Pressable>
+                    <Pressable
+                      testID="btn-backup-show-hex"
+                      style={S.linkBtn}
+                      onPress={() => setSeedFormat('mnemonic')}
+                      accessibilityRole="button"
+                      accessibilityLabel="Show seed as words"
+                      accessibilityHint="Switches to the 24-word recovery phrase view"
+                      accessibilityState={{disabled: false}}>
+                      <Text style={S.linkTextMuted}>Show as words</Text>
+                    </Pressable>
+                  </>
+                )}
                 <Pressable
                   testID="btn-backup-hide"
                   style={S.linkBtn}
-                  onPress={() => { setBackupRevealed(false); setConfirmBackup(false); clearCopied(); }}
+                  onPress={() => { setBackupRevealed(false); setConfirmBackup(false); setSeedFormat('mnemonic'); clearCopied(); }}
                   accessibilityRole="button"
                   accessibilityLabel="Hide seed"
                   accessibilityState={{disabled: false}}>
