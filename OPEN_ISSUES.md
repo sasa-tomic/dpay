@@ -63,11 +63,24 @@
 >   `CODEBASE_ANALYSIS.md` RN-architecture section updated (one-selection invariant, selection lock,
 >   consistent fail-closed ATA principle, `__DPAY_TEST_DEEPLINK` test seam), this work-order closed.
 >
-> **Final gate evidence:** jest **697/697**, e2e **72/72**, typecheck clean, bridge-parity
+> **Final gate evidence:** jest **701/701**, e2e **72/72**, typecheck clean, bridge-parity
 > **29 methods**, aid-parity **2 AIDs**, visual **0 diffs**. Prod catalog reconciled (4 mainnet IC +
-> 3 testnet-hidden + SOL). Device gate (`just app` → `DPAY_SELFCHECK PASS` + `DPAY_SOL_SELFCHECK
-> PASS`; `just ondevice`) running in parallel — no wire/canister/relay/core change (pure `app/` +
-> `e2e/`), so the structurally-invisible device-only classes don't apply beyond re-proving the APK.
+> 3 testnet-hidden + SOL — no dupes/leakage). **Device gate PASSED**: `just app` →
+> `DPAY_SELFCHECK PASS` + `DPAY_SOL_SELFCHECK PASS` (full NativeModules→@ReactMethod→UniFFI→.so +
+> SOL-NFC surface on Hermes); `just ondevice` → **9/9** instrumented tests. Dead-code sweep clean
+> (all 4 deleted selection states fully removed; `assetList.ts` absent).
+>
+> **Post-rewrite review (UX + code + app-wide sweep):** 8 follow-up fixes, all gates green:
+> `57cef94` (a11y: stale SolReceive prefix label named the wrong token — post-rewrite regression);
+> `76103c6`/`a5d807f`/`5d4243a` (4 silent-catch logging fixes in Wallet/ReceiveMode/PayMode,
+> preexisting — exposed by reading); `7a16ec2` (chip label qualifies on symbol collision —
+> `USDC·Eth` vs `USDC·Sol` — net-new ambiguity from the rewrite); `b1f8691`/`3adbbb5` (2
+> silent-catch logging fixes in CkErc20DepositSheet, preexisting). Architecture PASS on all review
+> mandate checks: `selectedAssetId` is the single source of truth (no shadow state); wire/bridge
+> arity matches across JS↔Kotlin→UniFFI; fail-closed ATA principle consistent (only `'present'`
+> allows); selection lock cleanup correct (cannot get stuck); no missing timeouts / stuck spinners /
+> AI slop app-wide. 4 sub-threshold items documented in-session (value ≤5); none warrant an
+> OPEN_ISSUES entry per the value≥4 rule.
 >
 > **Also closes** the F4 follow-up ("USDC toggle gating", 2026-08-09 SOL sweep deferred-items): the
 > Solana-USDC request now fail-closes via `decideUsdcAtaGate` when the destination ATA is
