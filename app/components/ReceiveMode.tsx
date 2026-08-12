@@ -101,7 +101,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
       // Build the NFC request too so reader mode can start alongside the QR (best-effort). The
       // merchant's username + memo ride as to_name/memo in the request bytes, same as the QR path.
       let nfcHex: string | null = null;
-      if (nfcReady && DpayNfc) { try { nfcHex = await DpayNfc.buildRequest(identity.publicHex, rawAmount, nonce, expiry, selectedCurrency, identity.username, memoVal); } catch { /* best-effort: NFC reader is a parallel path; the QR still works */ } }
+      if (nfcReady && DpayNfc) { try { nfcHex = await DpayNfc.buildRequest(identity.publicHex, rawAmount, nonce, expiry, selectedCurrency, identity.username, memoVal); } catch (e) { console.warn('NFC buildRequest failed (best-effort, QR still works):', e instanceof Error ? e.message : String(e)); } }
       setReqQr({value: reqB64, rawAmount, currency: selectedCurrency, nonce, nfcHex, expiry});
       setResult(null); setErr(null);
     } catch (e: unknown) { setErr(e instanceof Error ? e.message : String(e)); }
