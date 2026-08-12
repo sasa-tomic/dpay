@@ -4,11 +4,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {TOP_UP_CENTS, FAUCET_TIMEOUT_MS, SHOW_TESTNET_STORAGE_KEY} from '../config/constants';
-import {familyDisplay, fmtCurrencyAmount, displayName} from '../config/catalog';
-import {usd, base, fmtAsset} from '../lib/format';
-import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
+import {familyDisplay, isTestnetCurrency} from '../config/catalog';
+import {base} from '../lib/format';
 import {applyOffline} from '../lib/amount';
-import type {Identity, NfcStatus} from '../lib/types';
+import {buildSelectableAssets, reconcileSelectedAsset, solanaUsdcAvailable} from '../config/assets';
+import {buildAssetBalances} from '../lib/assetBalances';
+import type {AssetId, Identity, NfcStatus} from '../lib/types';
 import {DpayCore} from '../services/native';
 import {loadDeposit} from '../services/ckerc20Persist';
 import {fetchWithTimeout, readJsonOrEmpty} from '../services/relay';
@@ -42,17 +43,19 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
   // it via its verify effect (decode → verifyOutcomeReceipt → reconcile as Paid), then calls
   // onReceiptConsumed to clear it. SECURITY: ReceiveMode verifies the signature BEFORE showing Paid.
   const [prefillReceipt, setPrefillReceipt] = useState<string | null>(null);
-  // The "current" currency — the one whose balance the header reflects. Tapping the header balance
-  // opens the Balances sheet, where tapping a currency row sets this. Currency 0 (DEMO) is the
-  // default. This replaces the old DEMO-only header (the founder's restructure): the main screen now
-  // shows a single selected currency's balance, and the full asset list + every top-up live in the
-  // Balances sheet. Pay/Receive still settle in whatever currency a request specifies (unchanged).
-  const [currentCurrency, setCurrentCurrency] = useState(0);
+  // THE one user-selection state (Phase 3 — 2026-08-12 unified asset selection rewrite). A single
+  // stable `AssetId` (`ic:${currency}` | 'solana:SOL' | 'solana:USDC') is the SOLE idle selection
+  // truth. It replaces the old `currentCurrency: number` + `activeSol: boolean` pair whose split was
+  // the root cause of the Balances↔Receive inconsistency and the SOL picker collapse. Every derived
+  // value (header name/balance, active chip, which Pay/Receive engine mounts, deposit/withdraw
+  // family, NFC AID dispatch) is computed from `selectedAsset` below. `null` only before the first
+  // reconcile runs; `effectiveSelectedId` (the reconciled value) is what every render reads.
+  const [selectedAssetId, setSelectedAssetId] = useState<AssetId | null>(null);
   const [balancesOpen, setBalancesOpen] = useState(false);
   // Within-tab sub-modes for the Receive/Pay IA: "request"/"address" (Receive) and "scan"/"send"
   // (Pay). The on-chain deposit + withdraw surfaces now live INLINE in these tabs (lifted out of the
   // Balances per-row buttons + the overlay sheets). Owned here so deeplinks (?screen=deposit, the
-  // auto-open-ckERC20 effect) can land the user directly on the right sub-mode + currency.
+  // auto-open-ckERC20 effect) can land the user directly on the right sub-mode + asset.
   const [receiveSubMode, setReceiveSubMode] = useState<'request' | 'address'>('request');
   const [paySubMode, setPaySubMode] = useState<'scan' | 'send'>('scan');
   const [nfc, setNfc] = useState<NfcStatus>('unknown');
@@ -78,16 +81,6 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
     () => catalog.find(c => c.minter_family === 'CkBtcUtxo')?.currency ?? 1,
     [catalog],
   );
-  // The "current" currency drives BOTH the header balance AND the Receive "My address" / Pay "Send to
-  // address" sub-modes (the on-chain deposit/withdraw surfaces now live in the tabs, keyed off the
-  // active asset's family). The deposit/withdraw family routing resolves `familyDisplay` for the
-  // current currency; null ⇒ the within-tab toggle is hidden (DEMO / unsupported family).
-  const currentDesc = catalog.find(c => c.currency === currentCurrency) ?? null;
-  const currentFamily = currentDesc?.minter_family ?? null;
-  const depositDisplay = currentFamily ? familyDisplay(catalog, currentCurrency) : null;
-  const depositFamily = (currentFamily === 'CkBtcUtxo' || currentFamily === 'CkEthErc20') ? currentFamily : null;
-  const depositChainId = currentDesc?.chain_id ?? null;
-  const depositNativeEth = currentFamily === 'CkEthErc20' && currentDesc?.token_contract == null;
   // Every NON-primary catalog currency (the assets polled in parallel below + listed in the Balances
   // sheet). The balance poll covers every id here (a no-minter ICRC asset still has a readable ledger
   // principal; a failed read is swallowed so it never flaps the display). Each stays INDEPENDENT — no
@@ -114,19 +107,54 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
   // seed, so one backup recovers both rails. The address is derived once (pure; stable per identity).
   // useSolanaBalances polls the SOL RPC directly (no relay) AND the device's USDC ATA concurrently
   // with independent statuses; when SOLANA_RPC_URL is empty (jest/e2e) it no-ops and the SOL card
-  // renders `—`. Phase 2 surfaces the USDC half too; Phase 3 will thread it into the Wallet selection.
-  // TODO(Phase 3): wire `usdc` + `refreshUsdc` into the asset selection state.
+  // renders `—`. Both halves feed the per-asset balance map below.
   const solAddress = useMemo(() => { try { return deriveSolanaAddress(identity.secretHex); } catch { return null; } }, [identity.secretHex]);
-  const {sol: solState, refreshSol} = useSolanaBalances(identity.secretHex, solAddress);
+  const {sol: solState, usdc: usdcState, refreshSol, refreshUsdc} = useSolanaBalances(identity.secretHex, solAddress);
   const solBalance = solState.balance;
-  // The active asset rail: true when the user has selected SOL in the Balances sheet, false for any
-  // IC catalog currency. This REPLACES the old RailSelector toggle — the selected currency now
-  // IMPLIES the rail (SOL → SOL NFC HCE / SOL send-receive; any IC currency → IC NFC HCE / IC
-  // send-receive). The NFC AID is still armed before a tap — it's just driven by the asset
-  // selection instead of a separate toggle. IC and SOL use SEPARATE NFC HCE services (DpayNfc AID
-  // `…01` vs DpaySolNfc AID `…02`); switching the active asset unmounts the old mode component,
-  // whose useNfcTapState cleanup disarms the HCE card/reader (no arm-leak).
-  const [activeSol, setActiveSol] = useState(false);
+
+  // --- Phase 3 selection layer --------------------------------------------------------------
+  // The ONE complete visible asset list, rebuilt from the catalog + Solana config. Pure; rebuilt on
+  // every catalog/testnet/SOL-address change. SOL is appended only when the device key is derived;
+  // Solana USDC only when the cluster is coherent (`solanaUsdcAvailable` — fail-closed on devnet +
+  // mainnet mint or an empty RPC). This list IS the visibility filter (testnet omitted, not flagged).
+  const assets = useMemo(
+    () => buildSelectableAssets(catalog, {showTestnet, solanaEnabled: !!solAddress, solanaUsdc: solanaUsdcAvailable()}),
+    [catalog, showTestnet, solAddress],
+  );
+  // Whether the FULL catalog carries any testnet currency (the assets list is already filtered, so
+  // it cannot answer this — the Balances sheet's reveal-toggle needs the unfiltered truth).
+  const hasTestnet = useMemo(() => catalog.some(isTestnetCurrency), [catalog]);
+  // The reconciled selection: preserve the selected id while it remains visible; fall back to ic:0
+  // (then first visible, else null) when it disappears. Computed every render so the header + chip
+  // + engine dispatch read a VALID id immediately (no flash on the first paint, no stale testnet
+  // selection leaking through a testnet hide). The effect below syncs the state so the fallback
+  // sticks; declared before the auto-open-deposit effect so a deep-link/persisted-deposit seed
+  // (which also runs on mount) wins the mount-time write order.
+  const effectiveSelectedId = useMemo(
+    () => reconcileSelectedAsset(selectedAssetId, assets),
+    [selectedAssetId, assets],
+  );
+  useEffect(() => {
+    if (effectiveSelectedId !== selectedAssetId) setSelectedAssetId(effectiveSelectedId);
+  }, [effectiveSelectedId, selectedAssetId]);
+  // The resolved selection view model (symbol/networkLabel/decimals/protocol). Null only before the
+  // first assets list resolves; downstream derived consts fall back to DEMO/IC in that case.
+  const selectedAsset = assets.find(a => a.id === effectiveSelectedId) ?? null;
+  // DERIVED dispatch consts (NOT state — the truth is selectedAssetId). `activeSol` picks which
+  // Pay/Receive engine mounts (and thus which NFC AID is armed); `selectedCurrency`/`selectedDesc`
+  // resolve the IC deposit/withdraw family for the "My address"/"Send to address" sub-modes.
+  const activeSol = selectedAsset?.protocol === 'solana';
+  const selectedCurrency = selectedAsset?.protocol === 'ic' ? selectedAsset.currency : 0;
+  const selectedDesc = selectedAsset?.protocol === 'ic' ? (catalog.find(c => c.currency === selectedAsset.currency) ?? null) : null;
+  const selectedFamily = selectedDesc?.minter_family ?? null;
+  const depositDisplay = selectedFamily ? familyDisplay(catalog, selectedCurrency) : null;
+  const depositFamily = (selectedFamily === 'CkBtcUtxo' || selectedFamily === 'CkEthErc20') ? selectedFamily : null;
+  const depositChainId = selectedDesc?.chain_id ?? null;
+  const depositNativeEth = selectedFamily === 'CkEthErc20' && selectedDesc?.token_contract == null;
+  // The header name + active-rail chip text. `selectedAsset.symbol` is the display NAME
+  // (DEMO/BTC/USDC/SOL/…), never a raw ledger id. The 'DEMO' fallback covers the pre-reconcile
+  // first paint (effectiveSelectedId resolves to ic:0 immediately, so this is defense-in-depth).
+  const activeAssetName = selectedAsset?.symbol ?? 'DEMO';
 
   // Read the device NFC radio state once (re-checked when the app returns to the foreground, since
   // the user may toggle NFC in system settings). Purely informational for the status chip; failure
@@ -227,7 +255,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
     if (autoOpenAttempted.current) return;
     autoOpenAttempted.current = true;
     const seedDeposit = (currency: number) => {
-      setCurrentCurrency(currency);
+      setSelectedAssetId(`ic:${currency}`);
       setMode('receive');
       setReceiveSubMode('address');
       setBalancesOpen(false);
@@ -273,6 +301,25 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
     return next;
   }, [assetBalances, offlineSpent, online]);
 
+  // The per-asset balance map — the ONE source every balance-rendering surface reads (header + the
+  // Balances sheet rows). Built pure from the IC poll + DEMO shownBalance + the SOL/USDC hook
+  // states; keyed by stable AssetId so a catalog object refresh never invalidates it.
+  const balances = useMemo(
+    () => buildAssetBalances({
+      catalog, assets,
+      icBalances: displayAssetBalances,
+      primaryBalance: shownBalance,
+      online,
+      solState, usdcState,
+    }),
+    [catalog, assets, displayAssetBalances, shownBalance, online, solState, usdcState],
+  );
+  // Solana-USDC refresh is consumed by the balance map (status/amount drive the USDC row). It is
+  // available for a future SPL-send confirmation to refresh USDC only (Phase 6); the SOL send path
+  // below still refreshes SOL only via `refreshSol`, so a confirmed native-SOL send does NOT perturb
+  // the independent USDC status (plan invariant: independent statuses).
+  void refreshUsdc;
+
   // Demo top-up: POST /api/v1/faucet {account, amount}. Uses the response balance directly for an
   // immediate refresh (no waiting on the 2.5s poll). Errors are surfaced inline under the button.
   const topUp = useCallback(async () => {
@@ -316,7 +363,17 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
     l: () => setMode('ledger'),
   }, {ignoreIfInputFocused: true, enabled: !anySheetOpen});
 
-  const activeAssetName = activeSol ? 'SOL' : (currentCurrency === 0 ? 'DEMO' : displayName(currentDesc ?? catalog[0]));
+  // The ONE selection setter. Setting the selection is a deliberate user action, so it dismisses the
+  // Balances sheet AND resets the within-tab sub-modes + clears any idle draft (the scan/send +
+  // request/address surfaces start fresh on the new asset). Money-critical review/sign flows are NOT
+  // affected: an active payer request is bound to its own immutable snapshot (Phase 5 formalizes the
+  // lock; this reset touches only the idle forms).
+  const handleSelect = useCallback((id: AssetId) => {
+    setSelectedAssetId(id);
+    setBalancesOpen(false);
+    setReceiveSubMode('request');
+    setPaySubMode('scan');
+  }, []);
 
   return (
     <SafeAreaView style={S.root}>
@@ -356,25 +413,16 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
           <View style={S.balLabelRow}>
             <View style={[S.dot, {backgroundColor: online ? C.ok : C.sub2}]} />
             {/* D3: the header label names the active asset in BOTH branches — online reads "X balance",
-                offline reads "~ X approx.". Drops the old `activeSol ||` redundancy (SOL now follows the
-                same online/offline label rule as every IC asset) and shares `activeAssetName` with the
-                active-rail chip below (one source of truth for the symbol). */}
+                offline reads "~ X approx.". `activeAssetName` is the single source of truth for the
+                symbol (shared with the active-rail chip below). */}
             <Text style={S.balLabel}>{online ? `${activeAssetName} balance` : `~ ${activeAssetName} approx.`}</Text>
             <HotkeyHint k="A" />
           </View>
           <View style={S.balAmtRow}>
-            {/* The header shows ONLY the current currency's balance. DEMO (currency 0) keeps its
-                offline '~' approx + null '—' handling; an asset shows its polled balance formatted
-                in native units. */}
-            {/* The header shows ONLY the current currency's balance. DEMO (currency 0) keeps its
-                offline '~' approx + null '—' handling; an asset shows its polled balance formatted
-                in native units. MC5: a non-DEMO asset applies the per-currency offline deduction via
-                `displayAssetBalances` (the per-currency deduction never crosses assets). */}
-            <Text style={S.balAmt}>{activeSol
-              ? (solBalance == null ? '—' : fmtAsset(solBalance, SOL_DECIMALS, SOL_UNIT))
-              : currentCurrency === 0
-                ? (shownBalance == null ? '—' : `${online ? '' : '~'}${usd(shownBalance)}`)
-                : fmtCurrencyAmount(catalog, currentCurrency, displayAssetBalances[currentCurrency] ?? '0')}</Text>
+            {/* The header reads the selected asset's pre-formatted displayText from the ONE balance
+                map. DEMO keeps its offline '~' prefix (baked into the map); an IC asset shows its
+                polled native-units balance; SOL/USDC show '—' when the RPC is offline (jest/e2e). */}
+            <Text style={S.balAmt}>{selectedAsset ? (balances[selectedAsset.id]?.displayText ?? '—') : '—'}</Text>
           </View>
         </Pressable>
       </View>
@@ -383,9 +431,8 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
         <Tab label="Pay" active={mode === 'pay'} onPress={() => setMode('pay')} hotkey="P" />
         <Tab label="Receive" active={mode === 'receive'} onPress={() => setMode('receive')} hotkey="R" />
         <Tab label="Transactions" active={mode === 'ledger'} onPress={() => setMode('ledger')} hotkey="L" />
-        {/* A6 — active-rail/asset chip: labels which asset's Pay/Receive flow is armed (SOL vs the
-            selected IC currency) so a user who switched to SOL in the Balances sheet doesn't get
-            silently stuck in SOL mode (the IC ↔ SOL NFC AIDs differ). */}
+        {/* A6 — active-asset chip: labels which asset's Pay/Receive flow is armed so a user who
+            switched assets doesn't get silently stuck on the wrong NFC AID (IC `…01` vs SOL `…02`). */}
         <View testID="active-rail-chip" style={S.activeRailChip}>
           <Text style={S.activeRailChipText}>{activeAssetName}</Text>
         </View>
@@ -399,10 +446,10 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
                   identity={identity} online={online} relayUrl={relayUrl} nfcStatus={nfc}
                   onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance}
                   catalog={catalog} assetBalances={displayAssetBalances}
-                  withdrawCurrency={currentCurrency}
+                  withdrawCurrency={selectedCurrency}
                   withdrawDisplay={depositDisplay} withdrawFamily={depositFamily}
-                  withdrawTokenContract={currentDesc?.token_contract ?? null}
-                  withdrawBalance={displayAssetBalances[currentCurrency] ?? '0'}
+                  withdrawTokenContract={selectedDesc?.token_contract ?? null}
+                  withdrawBalance={displayAssetBalances[selectedCurrency] ?? '0'}
                   subMode={paySubMode} onSubModeChange={setPaySubMode}
                   prefillRequest={prefillRequest} onPrefillConsumed={() => setPrefillRequest(null)}
                 />
@@ -410,38 +457,43 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
           : mode === 'receive'
           ? (activeSol && solAddress
               ? <SolReceiveMode identity={identity} online={online} nfcReady={nfc === 'ready'} solAddress={solAddress} subMode={receiveSubMode} onSubModeChange={setReceiveSubMode} />
-              : <ReceiveMode
-                  identity={identity} relayUrl={relayUrl} online={online} nfcReady={nfc === 'ready'}
-                  onReceived={onActivity} catalog={catalog}
-                  depositCurrency={currentCurrency}
-                  depositDisplay={depositDisplay} depositChainId={depositChainId}
-                  depositNativeEth={depositNativeEth} depositFamily={depositFamily}
-                  subMode={receiveSubMode} onSubModeChange={setReceiveSubMode}
-                  prefillReceipt={prefillReceipt} onReceiptConsumed={() => setPrefillReceipt(null)}
-                  solAddress={solAddress}
-                  solBalance={solBalance}
-                  activeSol={activeSol}
-                  onSelectSol={() => { setActiveSol(true); setReceiveSubMode('request'); setPaySubMode('scan'); }}
-                />
+              : (
+                  /* PHASE 3 INTERIM (2026-08-12 unified asset selection rewrite): `activeSol` +
+                     `onSelectSol` survive here as ReceiveMode PROP NAMES ONLY — the TRUTH is
+                     `selectedAssetId` (Wallet's one selection state). `activeSol` is a DERIVED CONST
+                     (`selectedAsset?.protocol === 'solana'`), not useState; `onSelectSol` delegates
+                     to the single `handleSelect(AssetId)` setter. Phase 4 deletes these props when
+                     ReceiveMode is rewritten to receive `selectedAssetId` + an `onSelect(id)` picker
+                     contract directly. Until then this bridge keeps flow 63 (the Receive picker SOL
+                     rail-switch) green without a parallel selection state in Wallet. */
+                  <ReceiveMode
+                    identity={identity} relayUrl={relayUrl} online={online} nfcReady={nfc === 'ready'}
+                    onReceived={onActivity} catalog={catalog}
+                    depositCurrency={selectedCurrency}
+                    depositDisplay={depositDisplay} depositChainId={depositChainId}
+                    depositNativeEth={depositNativeEth} depositFamily={depositFamily}
+                    subMode={receiveSubMode} onSubModeChange={setReceiveSubMode}
+                    prefillReceipt={prefillReceipt} onReceiptConsumed={() => setPrefillReceipt(null)}
+                    solAddress={solAddress}
+                    solBalance={solBalance}
+                    activeSol={activeSol}
+                    onSelectSol={() => handleSelect('solana:SOL')}
+                  />
+                )
           )
           : <Ledger history={history} catalog={catalog} />}
       </ScrollView>
 
       {balancesOpen ? (
         <BalancesSheet
-          catalog={catalog}
-          assetBalances={displayAssetBalances}
-          primaryBalance={shownBalance}
-          online={online}
-          currentCurrency={currentCurrency}
-          onSelect={(currency) => { setCurrentCurrency(currency); setActiveSol(false); setBalancesOpen(false); setReceiveSubMode('request'); setPaySubMode('scan'); }}
+          assets={assets}
+          balances={balances}
+          selectedId={effectiveSelectedId}
+          onSelect={handleSelect}
+          hasTestnet={hasTestnet}
           onTopUp={topUp}
           topUpBusy={topUpBusy}
           topUpErr={topUpErr}
-          solAddress={solAddress}
-          solBalance={solBalance}
-          activeSol={activeSol}
-          onSelectSol={() => { setActiveSol(true); setBalancesOpen(false); setReceiveSubMode('request'); setPaySubMode('scan'); }}
           showTestnet={showTestnet}
           onToggleTestnet={toggleTestnet}
           onClose={() => setBalancesOpen(false)}

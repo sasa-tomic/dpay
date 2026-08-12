@@ -2,10 +2,14 @@
 //
 // Direct coverage for founder issue #2b/2c/2d: the ReceiveMode CurrencyPicker was IC-only (SOL was
 // reachable only via the Balances sheet). The unified picker now lists SOL alongside the IC catalog
-// currencies (req-pick-sol), and tapping it flips the rail via onSelectSol → Wallet sets activeSol
-// true → SolReceiveMode mounts (ReceiveMode unmounts cleanly; the up-call fires before re-render,
-// no race). Proves the two selectors (Balances + the Receive picker) now share one entry path to
-// every asset, IC and SOL alike.
+// currencies (req-pick-sol). Phase 3 (2026-08-12 unified asset selection rewrite) keeps the
+// ReceiveMode picker on its legacy buildCurrencyList adapter + local reqCurrency state for now, but
+// Wallet threads an interim bridge: the picker's SOL branch calls Wallet's onSelectSol prop, which
+// is `() => handleSelect('solana:SOL')`. That sets selectedAssetId='solana:SOL' → selectedAsset.
+// protocol==='solana' → SolReceiveMode mounts (ReceiveMode unmounts cleanly; the up-call fires
+// before re-render, no race). Proves the two selectors (Balances + the Receive picker) share one
+// entry path to every asset. Phase 4 will converge the ReceiveMode picker onto the same
+// SelectableAsset contract and drop the interim bridge.
 //
 // Selector contract: `tab-receive`, `req-prefix` (amount glyph → opens picker), `req-pick-sol`
 // (the unified SOL row), `active-rail-chip` (the header chip — reads 'SOL' once the rail flips),
@@ -34,7 +38,7 @@ export async function run() {
     console.log('[63-picker-sol-rail] onboarding…');
     await onboardWallet(driver, 'e2e-picker-sol');
 
-    // 1. Baseline: the active rail is DEMO (currency 0, activeSol false).
+    // 1. Baseline: the active rail is DEMO (selectedAssetId reconciles to ic:0).
     let chip = await driver.readText('active-rail-chip');
     assertEq(chip, 'DEMO', 'baseline active-rail-chip (DEMO)');
 
@@ -48,13 +52,14 @@ export async function run() {
     console.log('[63-picker-sol-rail] waiting for the SOL row in the picker…');
     await driver.findByTestID('req-pick-sol', {timeoutMs: 4_000});
 
-    // 4. Tap the SOL row → onSelectSol fires → Wallet flips activeSol true → SolReceiveMode mounts.
-    //    ReceiveMode unmounts mid-update; the picker's SOL branch calls the up-call and returns
-    //    immediately (no local setState), so there's no "update on unmounting component" warning.
+    // 4. Tap the SOL row → the interim onSelectSol bridge fires → handleSelect('solana:SOL') →
+    //    selectedAssetId='solana:SOL' → SolReceiveMode mounts. ReceiveMode unmounts mid-update; the
+    //    picker's SOL branch calls the up-call and returns immediately (no local setState), so
+    //    there's no "update on unmounting component" warning.
     console.log('[63-picker-sol-rail] tapping SOL → switching rail…');
     await driver.click('req-pick-sol', {timeoutMs: 5_000});
 
-    // 5. The header chip flips to 'SOL' (the rail switched).
+    // 5. The header chip flips to 'SOL' (selectedAsset.symbol — the rail switched).
     chip = await driver.readText('active-rail-chip');
     assertEq(chip, 'SOL', 'active-rail-chip after picking SOL in the Receive picker');
 

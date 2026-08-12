@@ -10,9 +10,18 @@
 
 ## NEXT SESSION — work order (2026-08-12): unified asset selection rewrite
 
-> **Highest priority, unblocked. Start here.** The current selector is visually shared but
+> **Phases 1–3 DONE (commits Phase 1 + Phase 2 + Phase 3, 2026-08-12).** Next unblocked phase is
+> **Phase 4** (selected-asset Receive forms — converge `ReceiveMode.reqCurrency` +
+> `SolReceiveMode.cur` onto the `selectedAssetId` contract; drop the interim `onSelectSol` bridge
+> + the legacy `buildCurrencyList` adapter; the Receive picker reuses `buildSelectableAssets`).
+> See the plan's Phase 4 section for the exact contract. All inner-loop gates green after Phase 3:
+> typecheck clean, jest 671/671, e2e 68/68 (incl. 54/55/63), bridge-parity + aid-parity OK.
+>
+> ---
+>
+> **Original work order (context):** The current selector is visually shared but
 > behaviorally split across `Wallet.currentCurrency`, `Wallet.activeSol`,
-> `ReceiveMode.reqCurrency`, and `SolReceiveMode.cur`. This causes the confirmed failures where a
+> `ReceiveMode.reqCurrency`, and `SolReceiveMode.cur`. This caused the confirmed failures where a
 > Balances selection does not update the Receive dropdown, and selecting SOL collapses the picker
 > into a separate SOL/USDC toggle. Green flows 55/63 did not cover the end-to-end invariant and
 > partly codified the broken rail-switch behavior.
