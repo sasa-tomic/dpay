@@ -69,7 +69,7 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
       const reqB64 = parseRequestQR(raw);
       const r = await DpayCore.decodeRequest(reqB64);
       setReq(r); setErr(null); setPhase('review');
-    } catch (e: unknown) { setErr('This isn\'t a dpay payment code'); }
+    } catch (e: unknown) { console.warn('decode request QR failed:', e instanceof Error ? e.message : String(e)); setErr('This isn\'t a dpay payment code'); }
   }
 
   // Deeplink prefill (item 6): a `dpay:req/<blob>` (or the web `?req=<blob>` mirror) hands the EXACT
