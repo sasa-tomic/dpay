@@ -434,6 +434,85 @@ describe('solana seam — getSolanaUsdcBalance (Phase 2 honest balances)', () =>
   });
 });
 
+// ============================================================================
+// Phase 6 — sendSpl (USDC direct send). Mirrors sendSol's shape but builds an SPL
+// Token.transfer (single instruction, live blockhash) instead of a System Transfer.
+// Fail-closed: the device's source ATA + the recipient's ATA must BOTH exist on-chain
+// (the Token program rejects transfers to a non-existent account — pre-checking saves
+// the user a failed-fee confusion; a TOCTOU race is fine — the confirm path succeeds on
+// re-submit). Reuses the byte-exact buildSplTransferInstruction (proven in solana-spl.test.ts).
+// ============================================================================
+describe('solana seam — sendSpl (Phase 6 USDC direct send)', () => {
+  test('throws offline error when SOLANA_RPC_URL is empty', async () => {
+    let called = false;
+    (globalThis as unknown as {fetch: unknown}).fetch = jest.fn(() => {
+      called = true;
+      return Promise.resolve({});
+    });
+    const {sendSpl} = require('../solana');
+    await expect((sendSpl as (s: string, d: string, a: bigint) => Promise<string>)(SEED_HEX, MERCHANT_ADDRESS, 1_000_000n)).rejects.toThrow('offline');
+    expect(called).toBe(false);
+  });
+
+  test('throws a clear error when the sender ATA is missing (fail-closed)', async () => {
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      // Every ATA check returns null → device has no USDC account.
+      getAccountInfo: () => ({value: null}),
+    };
+    await expect(withStubUrl(async () => {
+      const {sendSpl} = require('../solana');
+      return (sendSpl as (s: string, d: string, a: bigint) => Promise<string>)(SEED_HEX, MERCHANT_ADDRESS, 1_000_000n);
+    })).rejects.toThrow(/USDC account/);
+  });
+
+  test('throws a clear error when the recipient ATA is missing (fail-closed)', async () => {
+    // First getAccountInfo call (sender ATA) returns funded; second (recipient ATA) returns null.
+    let calls = 0;
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getAccountInfo: () => {
+        calls++;
+        return calls === 1 ? {value: {data: ['', 'base64'], owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', lamports: 2039280}} : {value: null};
+      },
+    };
+    await expect(withStubUrl(async () => {
+      const {sendSpl} = require('../solana');
+      return (sendSpl as (s: string, d: string, a: bigint) => Promise<string>)(SEED_HEX, MERCHANT_ADDRESS, 1_000_000n);
+    })).rejects.toThrow(/recipient/i);
+  });
+
+  test('builds + broadcasts the SPL transfer when both ATAs exist', async () => {
+    const sent: string[] = []; // base64-encoded tx bytes
+    let accountChecks = 0;
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getAccountInfo: () => { accountChecks++; return {value: {data: ['', 'base64'], owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', lamports: 2039280}}; },
+      getLatestBlockhash: () => ({value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
+      sendTransaction: (params: unknown[]) => { sent.push(params[0] as string); return 'SigSplBase58'; },
+      getSignatureStatuses: () => ({value: [{confirmationStatus: 'confirmed'}]}),
+    };
+    const sig = await withStubUrl(async () => {
+      const {sendSpl} = require('../solana');
+      return (sendSpl as (s: string, d: string, a: bigint) => Promise<string>)(SEED_HEX, MERCHANT_ADDRESS, 1_000_000n);
+    });
+    expect(sig).toBe('SigSplBase58');
+    // Both ATA existence checks ran (sender + recipient).
+    expect(accountChecks).toBe(2);
+    // Exactly one broadcast, carrying a non-trivial signed transaction.
+    expect(sent.length).toBe(1);
+    expect(sent[0].length).toBeGreaterThan(120); // base64 of sig(64)+header+accounts+blockhash+ix
+  });
+
+  test('checks the sender ATA BEFORE the recipient ATA (clear error attribution)', async () => {
+    // Both ATAs missing: the error must be about the SENDER (the first check), not the recipient.
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getAccountInfo: () => ({value: null}),
+    };
+    await expect(withStubUrl(async () => {
+      const {sendSpl} = require('../solana');
+      return (sendSpl as (s: string, d: string, a: bigint) => Promise<string>)(SEED_HEX, MERCHANT_ADDRESS, 1_000_000n);
+    })).rejects.toThrow(/your wallet|USDC account/i); // not "recipient"
+  });
+});
+
 describe('solana seam — isSolanaRpcAvailable (independent of relay online)', () => {
   test('returns false when SOLANA_RPC_URL is empty (offline inner loop)', () => {
     const {isSolanaRpcAvailable} = require('../solana');

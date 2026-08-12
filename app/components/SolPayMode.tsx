@@ -40,7 +40,7 @@ import {withTimeout} from '../lib/timeout';
  * NFC arming: this component mounts only while the SOL rail is selected. Switching the rail (via
  * switching the active asset unmounts it, whose `useNfcTapState` cleanup disarms the HCE card — no arm-leak.
  */
-export function SolPayMode({identity, online, nfcReady, solBalance, onSent, subMode, onSubModeChange, onShowDeposit, onLockChange}: {identity: Identity; online: boolean; nfcReady: boolean; solBalance: string; onSent: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; onShowDeposit?: () => void; onLockChange?: (locked: boolean) => void}) {
+export function SolPayMode({identity, online, nfcReady, solBalance, usdcBalance, usdcAtaAbsent, selectedToken, onSent, onSentUsdc, subMode, onSubModeChange, onShowDeposit, onLockChange}: {identity: Identity; online: boolean; nfcReady: boolean; solBalance: string; usdcBalance: string; usdcAtaAbsent: boolean; selectedToken: 'SOL' | 'USDC'; onSent: () => void; onSentUsdc: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; onShowDeposit?: () => void; onLockChange?: (locked: boolean) => void}) {
   const [phase, setPhase] = useState<'setup' | 'scan' | 'review' | 'qr' | 'paid'>('setup');
   const [nonceState, setNonceState] = useState<SolNonceState | null>(null);
   const [req, setReq] = useState<SolReq | null>(null);
@@ -80,19 +80,27 @@ export function SolPayMode({identity, online, nfcReady, solBalance, onSent, subM
     />
   );
 
-  // "Send to address" sub-mode: render the on-chain SOL send flow INLINE (the SolanaWithdrawSheet
-  // body). The toggle above lets the user flip back to "Scan to pay". The sheet is inline-only (no
-  // overlay chrome — the tab body provides the surface). Mirrors the IC PayMode "Send to address"
-  // sub-mode. Sits BELOW the useState/useEffect so React's Rules of Hooks hold across sub-mode flips
-  // (the payer's nonce/phase state survives a Send detour without re-mounting).
+  // "Send to address" sub-mode: render the on-chain send flow INLINE (the SolanaWithdrawSheet body).
+  // The toggle above lets the user flip back to "Scan to pay". The sheet is inline-only (no overlay
+  // chrome — the tab body provides the surface). Mirrors the IC PayMode "Send to address" sub-mode.
+  // Sits BELOW the useState/useEffect so React's Rules of Hooks hold across sub-mode flips (the
+  // payer's nonce/phase state survives a Send detour without re-mounting).
+  //
+  // Phase 6 — asset-aware: the selected token (SOL or USDC) drives which transfer path runs + which
+  // balance is displayed. The `onSent` refresh is token-scoped (SOL send refreshes SOL only; USDC
+  // send refreshes USDC only — independent statuses, plan invariant).
   if (subMode === 'send') {
+    const sendBalance = selectedToken === 'SOL' ? solBalance : usdcBalance;
+    const sendOnSent = selectedToken === 'SOL' ? onSent : onSentUsdc;
     return (
       <View style={S.center}>
         {toggle}
         <SolanaWithdrawSheet
           identity={identity}
-          balance={solBalance}
-          onSent={onSent}
+          token={selectedToken}
+          balance={sendBalance}
+          usdcAtaAbsent={usdcAtaAbsent}
+          onSent={sendOnSent}
           onClose={() => onSubModeChange('scan')}
         />
       </View>

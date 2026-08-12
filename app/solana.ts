@@ -21,8 +21,8 @@ import {SOLANA_RPC_URL} from './config/constants';
 import {solanaUsdcAvailable} from './config/assets';
 import {deriveSolanaKeypair, deriveSolanaAddress, deriveSlip10Ed25519} from './solana/identity';
 import {base58Decode32, buildSignedTransfer, signTransaction} from './solana/tx';
-import {buildAdvanceAndTransferMessage, buildCreateNonceAccountMessage} from './solana/nonce';
-import {buildAdvanceAndSplTransferMessage, deriveAta, USDC_MINT_ADDRESS} from './solana/spl';
+import {assembleMessage, buildAdvanceAndTransferMessage, buildCreateNonceAccountMessage} from './solana/nonce';
+import {buildAdvanceAndSplTransferMessage, buildSplTransferInstruction, deriveAta, USDC_MINT_ADDRESS} from './solana/spl';
 import {encodeSolPay} from './solana/qr';
 import type {SolReq, SolPay} from './solana/qr';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from './payments';
@@ -120,6 +120,46 @@ export async function sendSol(secretHex: string, toAddress: string, lamports: bi
   const {getLatestBlockhash, sendTransaction, confirmTransaction} = await import('./solana/rpc');
   const {blockhash} = await getLatestBlockhash(SOLANA_RPC_URL, {signal});
   const raw = buildSignedTransfer(seed, publicKey, toAddress, lamports, base58Decode32(blockhash));
+  const signature = await sendTransaction(SOLANA_RPC_URL, raw, {signal});
+  await confirmTransaction(SOLANA_RPC_URL, signature, {signal});
+  return signature;
+}
+
+/** Phase 6 — Build, sign, broadcast, and confirm an SPL Token `transfer` of `amount` raw USDC (6
+ *  decimals) to `destAddress`. The recipient is a base58 Solana WALLET address (the same shape SOL
+ *  send takes); the recipient's USDC Associated Token Account is DERIVED from it. Signs LOCALLY with
+ *  the device-derived key (non-custodial — same shape as sendSol).
+ *
+ *  FAIL-CLOSED ATA checks (mirror Phase 4's principle): the device's source ATA + the recipient's ATA
+ *  must BOTH exist on-chain. The Token program rejects transfers to a non-existent account, so
+ *  pre-checking saves the user a failed-fee confusion. The sender check runs FIRST so the error names
+ *  the right party. A TOCTOU race (an ATA created between check + submit) is fine — the confirm path
+ *  succeeds on re-submit.
+ *
+ *  Throws if SOL is offline, if either ATA is missing, on a network/RPC error, or if the on-chain tx
+ *  fails. Returns the signature. Reuses the byte-exact `buildSplTransferInstruction` (Token program
+ *  transfer ix — proven in solana-spl.test.ts). */
+export async function sendSpl(secretHex: string, destAddress: string, amount: bigint, signal?: AbortSignal): Promise<string> {
+  if (!SOLANA_RPC_URL) throw new Error('Solana is offline (no RPC endpoint configured)');
+  const {seed, publicKey} = deriveSolanaKeypair(secretHex);
+  const senderAddress = bs58.encode(publicKey);
+  const senderAta = deriveAta(senderAddress, USDC_MINT_ADDRESS);
+  const recipientAta = deriveAta(destAddress, USDC_MINT_ADDRESS);
+  const {accountExists, getLatestBlockhash, sendTransaction, confirmTransaction} = await import('./solana/rpc');
+
+  // Sender ATA first — the device must hold a USDC account to debit from.
+  if (!(await accountExists(SOLANA_RPC_URL, bs58.encode(senderAta), {signal}))) {
+    throw new Error("Your wallet doesn't have a USDC account yet");
+  }
+  // Recipient ATA second — the Token program would otherwise reject the transfer.
+  if (!(await accountExists(SOLANA_RPC_URL, bs58.encode(recipientAta), {signal}))) {
+    throw new Error("The recipient doesn't have a USDC account — they need to set one up first");
+  }
+
+  const ix = buildSplTransferInstruction(senderAta, recipientAta, publicKey, amount);
+  const {blockhash} = await getLatestBlockhash(SOLANA_RPC_URL, {signal});
+  const message = assembleMessage(publicKey, [ix], base58Decode32(blockhash));
+  const raw = signTransaction(message, seed);
   const signature = await sendTransaction(SOLANA_RPC_URL, raw, {signal});
   await confirmTransaction(SOLANA_RPC_URL, signature, {signal});
   return signature;

@@ -352,11 +352,10 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
     }),
     [catalog, assets, displayAssetBalances, shownBalance, online, solState, usdcState],
   );
-  // Solana-USDC refresh is consumed by the balance map (status/amount drive the USDC row). It is
-  // available for a future SPL-send confirmation to refresh USDC only (Phase 6); the SOL send path
-  // below still refreshes SOL only via `refreshSol`, so a confirmed native-SOL send does NOT perturb
-  // the independent USDC status (plan invariant: independent statuses).
-  void refreshUsdc;
+  // Solana-USDC refresh is consumed by the balance map (status/amount drive the USDC row) AND by the
+  // Phase 6 USDC send path (SolPayMode's onSentUsdc refreshes USDC only after a confirmed SPL send).
+  // The SOL send path refreshes SOL only via `refreshSol`, so a confirmed native-SOL send does NOT
+  // perturb the independent USDC status (plan invariant: independent statuses).
 
   // Demo top-up: POST /api/v1/faucet {account, amount}. Uses the response balance directly for an
   // immediate refresh (no waiting on the 2.5s poll). Errors are surfaced inline under the button.
@@ -495,7 +494,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
       <ScrollView style={S.scroll} contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
         {mode === 'pay'
           ? (activeSol && solAddress
-              ? <SolPayMode identity={identity} online={online} nfcReady={nfc === 'ready'} solBalance={solBalance ?? '0'} onSent={refreshSol} subMode={paySubMode} onSubModeChange={setPaySubMode} onShowDeposit={() => { setMode('receive'); setReceiveSubMode('address'); }} onLockChange={setSelectionLocked} />
+              ? <SolPayMode identity={identity} online={online} nfcReady={nfc === 'ready'} solBalance={solBalance ?? '0'} usdcBalance={usdcState.amount ?? '0'} usdcAtaAbsent={usdcState.status === 'absent'} selectedToken={selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL'} onSent={refreshSol} onSentUsdc={refreshUsdc} subMode={paySubMode} onSubModeChange={setPaySubMode} onShowDeposit={() => { setMode('receive'); setReceiveSubMode('address'); }} onLockChange={setSelectionLocked} />
               : <PayMode
                   identity={identity} online={online} relayUrl={relayUrl} nfcStatus={nfc}
                   onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance}
