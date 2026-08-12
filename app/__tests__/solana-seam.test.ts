@@ -336,3 +336,119 @@ describe('solana seam — checkUsdcAta (F4 ATA gate)', () => {
     expect(result).toBe(false);
   });
 });
+
+// ============================================================================
+// Phase 2 — Solana USDC balance reader + RPC availability predicate.
+//
+// `getSolanaUsdcBalance` returns a discriminated union that distinguishes the four states the plan
+// (invariant #10) requires stay distinct: offline (no/invalid config), absent (ATA missing — KNOWN
+// zero/empty), balance (have an exact amount string), error (RPC failure — transient/unverifiable).
+// `isSolanaRpcAvailable` exposes RPC availability independently from relay `online` (invariant #9).
+// ============================================================================
+
+// A "mainnet-like" stub URL — does NOT match the `/devnet|testnet/i` regex (the existing
+// `withStubUrl` uses 'https://stub.test' which DOES match → USDC would be incoherent there). Used
+// only for the USDC-balance tests so `solanaUsdcAvailable()` returns true.
+function withStubMainnetUrl<T>(fn: () => Promise<T>): Promise<T> {
+  const g = globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_URL: string};
+  let p: Promise<T> | undefined;
+  jest.isolateModules(() => {
+    g.__DPAY_TEST_SOLANA_RPC_URL = 'https://sol.example';
+    p = fn();
+  });
+  g.__DPAY_TEST_SOLANA_RPC_URL = '';
+  return p!;
+}
+
+describe('solana seam — getSolanaUsdcBalance (Phase 2 honest balances)', () => {
+  test('returns {kind:"offline"} when SOLANA_RPC_URL is empty (no network, no dynamic import)', async () => {
+    let called = false;
+    (globalThis as unknown as {fetch: unknown}).fetch = jest.fn(() => {
+      called = true;
+      return Promise.resolve({});
+    });
+    const {getSolanaUsdcBalance} = require('../solana');
+    const r = await (getSolanaUsdcBalance as (s: string) => Promise<{kind: string}>)(SEED_HEX);
+    expect(r).toEqual({kind: 'offline'});
+    expect(called).toBe(false);
+  });
+
+  test('returns {kind:"absent"} when accountExists returns false (ATA missing on-chain)', async () => {
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getAccountInfo: () => ({value: null}),
+    };
+    const r = await withStubMainnetUrl(async () => {
+      const {getSolanaUsdcBalance} = require('../solana');
+      return (getSolanaUsdcBalance as (s: string) => Promise<{kind: string; amount?: string}>)(SEED_HEX);
+    });
+    expect(r).toEqual({kind: 'absent'});
+    expect('amount' in r).toBe(false); // absent carries no amount
+  });
+
+  test('returns {kind:"balance", amount, decimals} when ATA exists + getTokenAccountBalance succeeds', async () => {
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getAccountInfo: () => ({value: {data: ['', 'base64'], owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', lamports: 2039280}}),
+      getTokenAccountBalance: () => ({value: {amount: '1234567', decimals: 6, uiAmount: 1.234567}}),
+    };
+    const r = await withStubMainnetUrl(async () => {
+      const {getSolanaUsdcBalance} = require('../solana');
+      return (getSolanaUsdcBalance as (s: string) => Promise<{kind: string; amount?: string; decimals?: number}>)(SEED_HEX);
+    });
+    expect(r).toEqual({kind: 'balance', amount: '1234567', decimals: 6});
+    expect(typeof (r as {amount?: string}).amount).toBe('string');
+  });
+
+  test('preserves a large amount as an exact string (>2^53 — proves no number path)', async () => {
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getAccountInfo: () => ({value: {data: ['', 'base64'], owner: 'tok', lamports: 1}}),
+      getTokenAccountBalance: () => ({value: {amount: '10000000000000000', decimals: 6, uiAmount: null}}),
+    };
+    const r = await withStubMainnetUrl(async () => {
+      const {getSolanaUsdcBalance} = require('../solana');
+      return (getSolanaUsdcBalance as (s: string) => Promise<{kind: string; amount?: string}>)(SEED_HEX);
+    });
+    expect(r).toEqual({kind: 'balance', amount: '10000000000000000', decimals: 6});
+  });
+
+  test('returns {kind:"error"} when the accountExists RPC fails (transient/unverifiable)', async () => {
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getAccountInfo: () => { throw new Error('RPC node degraded'); },
+    };
+    const r = await withStubMainnetUrl(async () => {
+      const {getSolanaUsdcBalance} = require('../solana');
+      return (getSolanaUsdcBalance as (s: string) => Promise<{kind: string}>)(SEED_HEX);
+    });
+    expect(r).toEqual({kind: 'error'});
+  });
+
+  test('returns {kind:"error"} when getTokenAccountBalance fails after existence confirmed', async () => {
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getAccountInfo: () => ({value: {data: ['', 'base64'], owner: 'tok', lamports: 1}}),
+      getTokenAccountBalance: () => { throw new Error('account decoder error'); },
+    };
+    const r = await withStubMainnetUrl(async () => {
+      const {getSolanaUsdcBalance} = require('../solana');
+      return (getSolanaUsdcBalance as (s: string) => Promise<{kind: string}>)(SEED_HEX);
+    });
+    expect(r).toEqual({kind: 'error'});
+  });
+});
+
+describe('solana seam — isSolanaRpcAvailable (independent of relay online)', () => {
+  test('returns false when SOLANA_RPC_URL is empty (offline inner loop)', () => {
+    const {isSolanaRpcAvailable} = require('../solana');
+    expect((isSolanaRpcAvailable as () => boolean)()).toBe(false);
+  });
+
+  test('returns true when SOLANA_RPC_URL is non-empty', () => {
+    const g = globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_URL: string};
+    let result: boolean | undefined;
+    jest.isolateModules(() => {
+      g.__DPAY_TEST_SOLANA_RPC_URL = 'https://sol.example';
+      const {isSolanaRpcAvailable} = require('../solana');
+      result = (isSolanaRpcAvailable as () => boolean)();
+    });
+    g.__DPAY_TEST_SOLANA_RPC_URL = '';
+    expect(result).toBe(true);
+  });
+});

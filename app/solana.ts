@@ -18,6 +18,7 @@
 import {ed25519} from '@noble/curves/ed25519';
 import bs58 from 'bs58';
 import {SOLANA_RPC_URL} from './config/constants';
+import {solanaUsdcAvailable} from './config/assets';
 import {deriveSolanaKeypair, deriveSolanaAddress, deriveSlip10Ed25519} from './solana/identity';
 import {base58Decode32, buildSignedTransfer, signTransaction} from './solana/tx';
 import {buildAdvanceAndTransferMessage, buildCreateNonceAccountMessage} from './solana/nonce';
@@ -249,4 +250,68 @@ export async function checkUsdcAta(secretHex: string, signal?: AbortSignal): Pro
   const address = deriveSolanaAddress(secretHex);
   const ataAddress = bs58.encode(deriveAta(address, USDC_MINT_ADDRESS));
   return accountExists(SOLANA_RPC_URL, ataAddress, {signal});
+}
+
+// ============================================================================
+// Phase 2 — honest Solana SOL + USDC balances (2026-08-12 unified asset selection rewrite).
+//
+// The wallet must render a distinct Solana-USDC balance row AND keep five states distinguishable
+// (plan invariant #10): loading, known-absent ATA, known zero balance, stale/unavailable, RPC error.
+// `getSolanaUsdcBalance` is the discriminated-union reader; the `useSolanaBalances` hook translates
+// it into per-status state for the Wallet.
+// ============================================================================
+
+/** The Solana USDC balance result — a discriminated union capturing the four states the plan requires
+ *  stay distinct at the seam boundary (the hook maps them to per-status UI state):
+ *    - `offline`: SOLANA_RPC_URL empty (offline inner loop) OR `solanaUsdcAvailable()` false (a
+ *      mainnet mint pointed at a non-mainnet RPC — fail-closed rather than read a non-existent token).
+ *      No network call is made.
+ *    - `absent`: the device's USDC ATA does NOT exist on-chain. The user has never received USDC;
+ *      this is a KNOWN zero, not an unverifiable state.
+ *    - `balance`: ATA exists and `getTokenAccountBalance` returned the exact raw `amount` (a decimal-
+ *      digit STRING — money-critical, never coerced through JS `number`) + `decimals` (USDC = 6).
+ *      A zero balance is `{kind:'balance', amount:'0', decimals:6}` — still a balance, not absent.
+ *    - `error`: RPC failure (existence check or balance read threw). Transient/unverifiable; the hook
+ *      preserves any prior amount (it does NOT turn a prior value into zero). */
+export type SolanaUsdcBalanceResult =
+  | {kind: 'offline'}
+  | {kind: 'absent'}
+  | {kind: 'balance'; amount: string; decimals: number}
+  | {kind: 'error'};
+
+/** Read the device's USDC ATA balance as a discriminated result (the new balance path — replaces the
+ *  boolean-only `checkUsdcAta` for BALANCE purposes; `checkUsdcAta` stays for the F4 ATA-existence
+ *  gate in the receive flow).
+ *
+ *  ONLINE — returns `{kind:'offline'}` (no throw, no network) when `SOLANA_RPC_URL` is empty OR
+ *  `solanaUsdcAvailable()` is false (mirroring `getSolanaBalance`'s offline no-op). Derives the
+ *  device ATA from the seed + USDC mint, checks on-chain existence, and if present reads the exact
+ *  token balance string via `getTokenAccountBalance`. On any RPC error returns `{kind:'error'}` and
+ *  logs the ATA + message at `console.warn` (debuggability — a silent error here would render as a
+ *  stale balance forever). */
+export async function getSolanaUsdcBalance(
+  secretHex: string,
+  signal?: AbortSignal,
+): Promise<SolanaUsdcBalanceResult> {
+  if (!SOLANA_RPC_URL || !solanaUsdcAvailable()) return {kind: 'offline'};
+  const {accountExists, getTokenAccountBalance} = await import('./solana/rpc');
+  const address = deriveSolanaAddress(secretHex);
+  const ataAddress = bs58.encode(deriveAta(address, USDC_MINT_ADDRESS));
+  try {
+    const exists = await accountExists(SOLANA_RPC_URL, ataAddress, {signal});
+    if (!exists) return {kind: 'absent'};
+    const {amount, decimals} = await getTokenAccountBalance(SOLANA_RPC_URL, ataAddress, {signal});
+    return {kind: 'balance', amount, decimals};
+  } catch (e) {
+    console.warn(`getSolanaUsdcBalance: RPC failure for ATA ${ataAddress}:`, e instanceof Error ? e.message : String(e));
+    return {kind: 'error'};
+  }
+}
+
+/** Whether the Solana RPC rail is configured (RPC URL non-empty). A pure sync read of the constant —
+ *  independent of relay `online` (plan invariant #9 — the relay could be reachable while SOL RPC is
+ *  not, or vice versa). The USDC-coherence sense (a mainnet mint pointed at a non-mainnet RPC) is the
+ *  separate `solanaUsdcAvailable()` predicate. */
+export function isSolanaRpcAvailable(): boolean {
+  return SOLANA_RPC_URL !== '';
 }

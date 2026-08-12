@@ -294,3 +294,74 @@ describe('solana rpc — e2e stub seam (__DPAY_TEST_SOLANA_RPC_STUB)', () => {
     expect(bal).toBe('42');
   });
 });
+
+// Phase 2 — exact-string SPL token balance. `getTokenAccountBalance` reads an ATA's raw `amount`
+// (decimal-digit STRING) + `decimals` from `getTokenAccountBalance` and MUST preserve the exact
+// string — never coerce through JS `number` (money-critical; values >2^53 lose precision). The
+// hook (useSolanaBalances) trusts this to render a Solana-USDC balance row distinctly from SOL.
+describe('solana rpc — getTokenAccountBalance (exact-string SPL)', () => {
+  afterEach(() => {
+    // The stub set by the stub-routing tests MUST be cleared so the request-shape test (which uses
+    // installRpcFetch → real-fetch routing) sees no stub. Without this the stub leaks across tests.
+    delete (globalThis as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB;
+  });
+
+  test('returns the exact amount string + decimals from a stub response (no number coercion)', async () => {
+    (globalThis as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getTokenAccountBalance: () => ({value: {amount: '1234567', decimals: 6, uiAmount: 1.234567}}),
+    };
+    (globalThis as {fetch: unknown}).fetch = () => { throw new Error('fetch must not be called'); };
+    const {getTokenAccountBalance} = require('../solana/rpc');
+    const r = await getTokenAccountBalance('https://rpc.example', 'SomeAtaAddr');
+    expect(r).toEqual({amount: '1234567', decimals: 6});
+    expect(typeof r.amount).toBe('string'); // NEVER a number
+  });
+
+  test('preserves a large amount (>2^53) as a STRING — proves no JS number path', async () => {
+    // 10_000_000_000_000_000 raw units = 1e16 — well above 2^53 (~9e15). Number coercion would
+    // lose precision; the string must be preserved verbatim.
+    (globalThis as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getTokenAccountBalance: () => ({value: {amount: '10000000000000000', decimals: 6, uiAmount: null}}),
+    };
+    (globalThis as {fetch: unknown}).fetch = () => { throw new Error('fetch must not be called'); };
+    const {getTokenAccountBalance} = require('../solana/rpc');
+    const r = await getTokenAccountBalance('https://rpc.example', 'BigAta');
+    expect(r.amount).toBe('10000000000000000');
+    expect(typeof r.amount).toBe('string');
+  });
+
+  test('preserves the raw "0" amount for a zero-balance ATA (NOT coerced to null or absent)', async () => {
+    // A zero balance is still a balance — distinguishable from a missing ATA. Must stay '0'.
+    (globalThis as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getTokenAccountBalance: () => ({value: {amount: '0', decimals: 6, uiAmount: 0}}),
+    };
+    (globalThis as {fetch: unknown}).fetch = () => { throw new Error('fetch must not be called'); };
+    const {getTokenAccountBalance} = require('../solana/rpc');
+    const r = await getTokenAccountBalance('https://rpc.example', 'ZeroAta');
+    expect(r).toEqual({amount: '0', decimals: 6});
+  });
+
+  test('a method missing from the stub throws a typed error (never a falsy/zero default)', async () => {
+    (globalThis as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB = {}; // no methods
+    (globalThis as {fetch: unknown}).fetch = () => { throw new Error('fetch must not be called'); };
+    const {getTokenAccountBalance} = require('../solana/rpc');
+    await expect(getTokenAccountBalance('https://rpc.example', 'X'))
+      .rejects.toThrow(/stub|not implemented|getTokenAccountBalance/i);
+  });
+
+  test('an RPC error response throws (never silently returns a zero balance)', async () => {
+    installRpcFetch([{error: {code: -32000, message: 'Invalid param: account not found'}}]);
+    const {getTokenAccountBalance} = require('../solana/rpc');
+    await expect(getTokenAccountBalance('https://rpc.example', 'MissingAta'))
+      .rejects.toThrow(/account not found|solana rpc/i);
+  });
+
+  test('request shape: posts getTokenAccountBalance with the ATA pubkey as the sole param', async () => {
+    const {calls} = installRpcFetch([{value: {amount: '500000', decimals: 6, uiAmount: null}}]);
+    const {getTokenAccountBalance} = require('../solana/rpc');
+    await getTokenAccountBalance('https://rpc.example', 'AtaAddrXYZ');
+    expect(calls[0].body).toEqual(expect.objectContaining({
+      jsonrpc: '2.0', method: 'getTokenAccountBalance', params: ['AtaAddrXYZ'],
+    }));
+  });
+});

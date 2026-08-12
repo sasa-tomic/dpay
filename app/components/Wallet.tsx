@@ -15,7 +15,7 @@ import {fetchWithTimeout, readJsonOrEmpty} from '../services/relay';
 import {useHotkeys} from '../hooks/useHotkeys';
 import {useCatalog} from '../hooks/useCatalog';
 import {useBalancePoll} from '../hooks/useBalancePoll';
-import {useSolanaBalance} from '../hooks/useSolanaBalance';
+import {useSolanaBalances} from '../hooks/useSolanaBalances';
 import {useTransactionHistory} from '../hooks/useTransactionHistory';
 import {deriveSolanaAddress} from '../solana';
 import {readDepositDeepLink, readRequestDeeplink, readPaymentDeeplink, decodeDeeplink, type DeeplinkKind} from '../lib/deepLink';
@@ -112,10 +112,13 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
 
   // Native SOL rail — a device-derived Solana key (SLIP-10 m/44'/501'/0'/0') from the SAME IC identity
   // seed, so one backup recovers both rails. The address is derived once (pure; stable per identity).
-  // useSolanaBalance polls the SOL RPC directly (no relay); when SOLANA_RPC_URL is empty (jest/e2e)
-  // it no-ops and the card renders `—`. Separate from the catalog loop — SOL is not an ICRC asset.
+  // useSolanaBalances polls the SOL RPC directly (no relay) AND the device's USDC ATA concurrently
+  // with independent statuses; when SOLANA_RPC_URL is empty (jest/e2e) it no-ops and the SOL card
+  // renders `—`. Phase 2 surfaces the USDC half too; Phase 3 will thread it into the Wallet selection.
+  // TODO(Phase 3): wire `usdc` + `refreshUsdc` into the asset selection state.
   const solAddress = useMemo(() => { try { return deriveSolanaAddress(identity.secretHex); } catch { return null; } }, [identity.secretHex]);
-  const {balance: solBalance, refresh: refreshSol} = useSolanaBalance(solAddress);
+  const {sol: solState, refreshSol} = useSolanaBalances(identity.secretHex, solAddress);
+  const solBalance = solState.balance;
   // The active asset rail: true when the user has selected SOL in the Balances sheet, false for any
   // IC catalog currency. This REPLACES the old RailSelector toggle — the selected currency now
   // IMPLIES the rail (SOL → SOL NFC HCE / SOL send-receive; any IC currency → IC NFC HCE / IC

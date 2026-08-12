@@ -189,5 +189,33 @@ export async function accountExists(url: string, address: string, opts?: SolanaR
   return result.value !== null && result.value !== undefined;
 }
 
+/** Read a SPL token account's raw balance as an EXACT decimal-digit string + its `decimals`. Uses
+ *  `getTokenAccountBalance` and returns the raw `amount` field UNCHANGED — never coerced through JS
+ *  `number` (money-critical: values above 2^53 lose precision; the app-wide "amounts are strings"
+ *  invariant). The caller (the USDC balance hook) trusts this to render a distinct Solana-USDC row.
+ *
+ *  Throws on any RPC error (account not found, invalid param, network failure) — the hook translates
+ *  a throw into the `'error'` status so a transient RPC failure is honest, not a silent zero. */
+export async function getTokenAccountBalance(
+  url: string,
+  ataAddress: string,
+  opts?: SolanaRpcOpts,
+): Promise<{amount: string; decimals: number}> {
+  const result = (await rpcFetch(url, 'getTokenAccountBalance', [ataAddress], opts)) as {
+    value: {amount: unknown; decimals: unknown};
+  };
+  // Defensive validation: never trust the wire shape for money. A malformed response is an error,
+  // not a zero balance — the caller surfaces "couldn't read" honestly.
+  const amount = result?.value?.amount;
+  const decimals = result?.value?.decimals;
+  if (typeof amount !== 'string' || !/^\d+$/.test(amount)) {
+    throw new Error(`solana rpc: getTokenAccountBalance returned malformed amount for ${ataAddress}`);
+  }
+  if (typeof decimals !== 'number' || !Number.isFinite(decimals)) {
+    throw new Error(`solana rpc: getTokenAccountBalance returned malformed decimals for ${ataAddress}`);
+  }
+  return {amount, decimals};
+}
+
 // RFC 4648 base64 of a byte array — imported from `lib/base64.ts` (the SINGLE implementation shared
 // with the URL-safe codec in `lib/base64url.ts`). Standard alphabet, padded, throws-on-malformed.
