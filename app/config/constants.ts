@@ -110,6 +110,21 @@ export const SOL_BROADCAST_TIMEOUT_MS = SOL_SEND_TIMEOUT_MS * 2;
 // F4 — bounded timeout for the pre-request USDC ATA existence check (network I/O via getAccountInfo).
 // A single RPC call; 8s mirrors the rpc default and keeps a stalled node from wedging the form.
 export const SOL_ATA_CHECK_TIMEOUT_MS = 8000;
+
+// Phase 3 — Solana v2 recent-blockhash payment freshness constants. The merchant fetches a fresh
+// blockhash + cluster identity immediately before showing a request, then strictly verifies +
+// freshness-checks the offline-signed tx before broadcasting. These three values are frozen by the
+// v2 protocol (see 2026-08-12-solana-recent-blockhash-rewrite-plan.md "Freshness rules"):
+//   • SOL_PAYMENT_COMMITMENT — every freshness RPC call + preflight runs at 'confirmed'.
+//   • SOL_GENESIS_HASH — the immutable mainnet-beta cluster id; mismatch fail-closes the request.
+//   • SOL_PAYMENT_MAX_WINDOW_SECONDS — the codec's frozen max request lifetime (iat..exp ≤ 90s).
+// The genesis hash accepts a `__DPAY_TEST_SOL_GENESIS_HASH` override so a unit test can mutate the
+// expected cluster identity (mirrors the SOLANA_RPC_URL + EXPECTED_RECEIPT_PUBKEY override seam).
+export const SOL_PAYMENT_COMMITMENT = 'confirmed' as const;
+export const SOL_GENESIS_HASH =
+  ((globalThis as unknown as {__DPAY_TEST_SOL_GENESIS_HASH?: string}).__DPAY_TEST_SOL_GENESIS_HASH ??
+    '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d');
+export const SOL_PAYMENT_MAX_WINDOW_SECONDS = 90;
 export const WITHDRAW_EXPIRY_WINDOW = 600; // the signed WithdrawAuth is valid 10 min
 // Mirrors the canister's fixed FAUCET_AMOUNT ($100.00 = 10_000 cents). The demo top-up POSTs this
 // amount to /api/v1/faucet; the real canister mints the fixed amount regardless of the request. MC1

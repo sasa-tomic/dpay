@@ -8,6 +8,11 @@
 import {describe, test, expect, jest, afterEach} from '@jest/globals';
 import {decodeSolPay} from '../solana/qr_v1';
 import type {SolReq} from '../solana/qr_v1';
+import {encodeSolReq, decodeSolReq} from '../solana/qr';
+import type {SolReqV2, SolPayV2} from '../solana/qr';
+import {buildCanonicalSolMessage, verifySolPayment} from '../solana/tx';
+import {buildCanonicalUsdcMessage} from '../solana/spl';
+import {deriveSolanaKeypair} from '../solana/identity';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from '../payments';
 import type {SolanaRpcStub} from '../solana/rpc';
 
@@ -197,7 +202,7 @@ describe('solana seam — configured lifecycle (stub RPC)', () => {
   test('createNonceAccount returns address + value', async () => {
     const accountData = buildNonceAccountData(NONCE_ACCOUNT_ADDRESS, STORED_NONCE);
     (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
-      getLatestBlockhash: () => ({value: {blockhash: STORED_NONCE, lastValidBlockHeight: 100}}),
+      getLatestBlockhash: () => ({context: {slot: 100}, value: {blockhash: STORED_NONCE, lastValidBlockHeight: 100}}),
       getMinimumBalanceForRentExemption: () => 1447680,
       sendTransaction: () => 'FakeSigBase58',
       getSignatureStatuses: () => ({value: [{confirmationStatus: 'confirmed'}]}),
@@ -485,7 +490,7 @@ describe('solana seam — sendSpl (Phase 6 USDC direct send)', () => {
     let accountChecks = 0;
     (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
       getAccountInfo: () => { accountChecks++; return {value: {data: ['', 'base64'], owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', lamports: 2039280}}; },
-      getLatestBlockhash: () => ({value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
+      getLatestBlockhash: () => ({context: {slot: 100}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
       sendTransaction: (params: unknown[]) => { sent.push(params[0] as string); return 'SigSplBase58'; },
       getSignatureStatuses: () => ({value: [{confirmationStatus: 'confirmed'}]}),
     };
@@ -529,5 +534,360 @@ describe('solana seam — isSolanaRpcAvailable (independent of relay online)', (
     });
     g.__DPAY_TEST_SOLANA_RPC_URL = '';
     expect(result).toBe(true);
+  });
+});
+
+// ============================================================================
+// Phase 3 — v2 recent-blockhash payment seam. The lifecycle is: ONLINE merchant creates a request
+// carrying a fresh blockhash → OFFLINE payer signs → ONLINE merchant strictly verifies +
+// freshness-checks + broadcasts + confirms → returns a SolReceiptV2. These tests exercise every
+// branch of the money-critical freshness state machine via the rpc stub (no real network).
+// ============================================================================
+
+const TEST_BLOCKHASH = 'FzFAtwLSSzxhug4sEvUeusLxFdjAS3ByYqgseUYkFpkN'; // valid base58 32-byte
+const TEST_LVH = 300_000_000;
+const TEST_SLOT = 250_000_000;
+const MAINNET_GENESIS = '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d';
+
+function solReqV2(overrides: Partial<SolReqV2> = {}): SolReqV2 {
+  const iat = Math.floor(Date.now() / 1000);
+  return {
+    v: 2,
+    rid: 'a'.repeat(32),
+    net: 'mainnet-beta',
+    bh: TEST_BLOCKHASH,
+    lvh: TEST_LVH,
+    slot: TEST_SLOT,
+    iat,
+    exp: iat + 90,
+    to: MERCHANT_ADDRESS,
+    amt: '2000000',
+    cur: 'SOL',
+    mint: null,
+    toAta: null,
+    name: 'Test',
+    memo: '',
+    ...overrides,
+  };
+}
+
+function usdcReqV2(overrides: Partial<SolReqV2> = {}): SolReqV2 {
+  return solReqV2({
+    cur: 'USDC',
+    amt: '1000000',
+    mint: USDC_MINT,
+    toAta: MERCHANT_USDC_ATA,
+    rid: 'b'.repeat(32),
+    ...overrides,
+  });
+}
+
+/** Build the canonical URI for a request (strips `v` — the codec stamps it). */
+function buildUri(req: SolReqV2): string {
+  const {v: _v, ...input} = req;
+  void _v;
+  return encodeSolReq(input);
+}
+
+describe('solana seam — createSolPaymentRequest (v2 freshness at creation)', () => {
+  afterEach(() => {
+    delete (globalThis as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB;
+    jest.resetModules(); // clear the rpc module's genesisHashCache (dynamic import bypasses isolateModules)
+  });
+
+  test('stubs genesis=mainnet + blockhash → SolReqV2 with iat<exp≤iat+90, mainnet-beta, slot=contextSlot, round-trips', async () => {
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getGenesisHash: () => MAINNET_GENESIS,
+      getLatestBlockhash: () => ({context: {slot: 777}, value: {blockhash: TEST_BLOCKHASH, lastValidBlockHeight: 555}}),
+    };
+    const result = await withStubUrl(async () => {
+      const {createSolPaymentRequest} = require('../solana');
+      return createSolPaymentRequest(
+        {to: MERCHANT_ADDRESS, amt: '2000000', cur: 'SOL', mint: null, toAta: null, name: 'Test', memo: ''},
+        new AbortController().signal,
+      ) as Promise<{request: SolReqV2; uri: string}>;
+    });
+    const {request, uri} = result;
+    expect(request.v).toBe(2);
+    expect(request.net).toBe('mainnet-beta');
+    expect(request.bh).toBe(TEST_BLOCKHASH);
+    expect(request.lvh).toBe(555);
+    expect(request.slot).toBe(777); // contextSlot threads through
+    expect(request.to).toBe(MERCHANT_ADDRESS);
+    expect(request.cur).toBe('SOL');
+    expect(request.exp - request.iat).toBeLessThanOrEqual(90);
+    expect(request.exp).toBeGreaterThan(request.iat);
+    // URI round-trips: decodeSolReq(uri) deep-equals the request.
+    expect(decodeSolReq(uri)).toEqual(request);
+  });
+
+  test('genesis hash mismatch → throws (wrong cluster, never returns a silent result)', async () => {
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getGenesisHash: () => 'WrongClusterHash',
+      getLatestBlockhash: () => ({context: {slot: 1}, value: {blockhash: 'bh', lastValidBlockHeight: 1}}),
+    };
+    await expect(withStubUrl(async () => {
+      const {createSolPaymentRequest} = require('../solana');
+      return createSolPaymentRequest(
+        {to: MERCHANT_ADDRESS, amt: '1', cur: 'SOL', mint: null, toAta: null, name: '', memo: ''},
+        new AbortController().signal,
+      );
+    })).rejects.toThrow(/cluster genesis mismatch/i);
+  });
+
+  test('RPC failure → throws (honest error, never a silent empty result)', async () => {
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getGenesisHash: () => { throw new Error('RPC is down'); },
+    };
+    await expect(withStubUrl(async () => {
+      const {createSolPaymentRequest} = require('../solana');
+      return createSolPaymentRequest(
+        {to: MERCHANT_ADDRESS, amt: '1', cur: 'SOL', mint: null, toAta: null, name: '', memo: ''},
+        new AbortController().signal,
+      );
+    })).rejects.toThrow(/RPC is down/i);
+  });
+});
+
+describe('solana seam — signSolPayment / signSplPayment (OFFLINE, no network)', () => {
+  test('signSolPayment does NOT touch the rpc stub; returns a SolPayV2 that strict-verifies', () => {
+    let stubCalls = 0;
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      __trap: () => { stubCalls++; throw new Error('stub must not be called'); },
+    };
+    (globalThis as {fetch: unknown}).fetch = () => { throw new Error('fetch must not be called'); };
+
+    const request = solReqV2();
+    const {signSolPayment} = require('../solana');
+    const pay = (signSolPayment as (s: string, r: SolReqV2) => SolPayV2)(SEED_HEX, request);
+    expect(pay.v).toBe(2);
+    expect(pay.rid).toBe(request.rid);
+    expect(pay.tx.length).toBeGreaterThan(64);
+
+    // The signed tx must strict-verify against the canonical SOL message.
+    const {publicKey} = deriveSolanaKeypair(SEED_HEX);
+    const message = buildCanonicalSolMessage(publicKey, request);
+    const verify = verifySolPayment(message, pay);
+    expect(verify.ok).toBe(true);
+    if (verify.ok) {
+      expect(verify.signature.length).toBeGreaterThan(0);
+    }
+    expect(stubCalls).toBe(0); // OFFLINE — never touched the stub
+  });
+
+  test('signSplPayment does NOT touch the rpc stub; returns a SolPayV2 that strict-verifies (USDC)', () => {
+    let stubCalls = 0;
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      __trap: () => { stubCalls++; throw new Error('stub must not be called'); },
+    };
+    (globalThis as {fetch: unknown}).fetch = () => { throw new Error('fetch must not be called'); };
+
+    const request = usdcReqV2();
+    const {signSplPayment} = require('../solana');
+    const pay = (signSplPayment as (s: string, r: SolReqV2) => SolPayV2)(SEED_HEX, request);
+    expect(pay.v).toBe(2);
+    expect(pay.rid).toBe(request.rid);
+
+    const {publicKey} = deriveSolanaKeypair(SEED_HEX);
+    const message = buildCanonicalUsdcMessage(publicKey, request);
+    const verify = verifySolPayment(message, pay);
+    expect(verify.ok).toBe(true);
+    expect(stubCalls).toBe(0);
+  });
+});
+
+describe('solana seam — broadcastSolPaymentV2 (money-critical freshness state machine)', () => {
+  afterEach(() => {
+    delete (globalThis as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB;
+  });
+
+  /** Sign a payment for the request using the offline signer, then extract the verified sig (the
+   *  stable payment identity the broadcast must echo back via sendTransaction). */
+  function signAndExtractSig(request: SolReqV2): {payment: SolPayV2; sig: string} {
+    const {signSolPayment, signSplPayment} = require('../solana');
+    const signer = request.cur === 'SOL' ? signSolPayment : signSplPayment;
+    const payment = (signer as (s: string, r: SolReqV2) => SolPayV2)(SEED_HEX, request);
+    const {publicKey} = deriveSolanaKeypair(SEED_HEX);
+    const message = request.cur === 'SOL'
+      ? buildCanonicalSolMessage(publicKey, request)
+      : buildCanonicalUsdcMessage(publicKey, request);
+    const verify = verifySolPayment(message, payment);
+    if (!verify.ok) throw new Error('test fixture: payment failed to verify');
+    return {payment, sig: verify.signature};
+  }
+
+  test('happy path: freshness OK + sendTransaction returns verified sig + confirmed → SETTLED', async () => {
+    const request = solReqV2();
+    const {payment, sig} = signAndExtractSig(request);
+    let sendCalls = 0;
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      isBlockhashValid: () => ({context: {slot: request.slot + 1}, value: true}),
+      getBlockHeight: () => request.lvh - 10,
+      sendTransaction: () => { sendCalls++; return sig; },
+      getSignatureStatuses: () => ({context: {slot: request.slot + 100}, value: [{confirmationStatus: 'confirmed'}]}),
+    };
+    const receipt = await withStubUrl(async () => {
+      const {broadcastSolPaymentV2} = require('../solana');
+      return broadcastSolPaymentV2(request, buildUri(request), payment, new AbortController().signal) as Promise<{status: number; rid: string; sig: string}>;
+    });
+    expect(receipt.status).toBe(RECEIPT_SETTLED);
+    expect(receipt.rid).toBe(request.rid);
+    expect(receipt.sig).toBe(sig);
+    expect(sendCalls).toBe(1);
+  });
+
+  test('semantic reject: payment signed for a DIFFERENT request → REJECTED sig="", no sendTransaction', async () => {
+    const requestA = solReqV2({amt: '2000000'});
+    // Sign a payment for requestB (different amount) — its canonical message won't match requestA.
+    const requestB = solReqV2({amt: '9999999', rid: 'c'.repeat(32)});
+    const {payment} = signAndExtractSig(requestB);
+    let sendCalls = 0;
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      sendTransaction: () => { sendCalls++; return 'must-not-be-called'; },
+    };
+    const receipt = await withStubUrl(async () => {
+      const {broadcastSolPaymentV2} = require('../solana');
+      return broadcastSolPaymentV2(requestA, buildUri(requestA), payment, new AbortController().signal) as Promise<{status: number; rid: string; sig: string}>;
+    });
+    expect(receipt.status).toBe(RECEIPT_REJECTED);
+    expect(receipt.rid).toBe(requestA.rid);
+    expect(receipt.sig).toBe('');
+    expect(sendCalls).toBe(0);
+  });
+
+  test('pre-broadcast expiry: isBlockhashValid=false → REJECTED, no sendTransaction', async () => {
+    const request = solReqV2();
+    const {payment, sig} = signAndExtractSig(request);
+    let sendCalls = 0;
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      isBlockhashValid: () => ({context: {slot: request.slot + 1}, value: false}),
+      getBlockHeight: () => request.lvh - 10,
+      sendTransaction: () => { sendCalls++; return sig; },
+    };
+    const receipt = await withStubUrl(async () => {
+      const {broadcastSolPaymentV2} = require('../solana');
+      return broadcastSolPaymentV2(request, buildUri(request), payment, new AbortController().signal) as Promise<{status: number; rid: string; sig: string}>;
+    });
+    expect(receipt.status).toBe(RECEIPT_REJECTED);
+    expect(receipt.rid).toBe(request.rid);
+    expect(receipt.sig).toBe(sig); // sig is trusted post-verify (step 5)
+    expect(sendCalls).toBe(0);
+  });
+
+  test('pre-broadcast expiry: blockhash valid but height > lvh → REJECTED, no sendTransaction', async () => {
+    const request = solReqV2();
+    const {payment, sig} = signAndExtractSig(request);
+    let sendCalls = 0;
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      isBlockhashValid: () => ({context: {slot: request.slot + 1}, value: true}),
+      getBlockHeight: () => request.lvh + 50, // past the validity window
+      sendTransaction: () => { sendCalls++; return sig; },
+    };
+    const receipt = await withStubUrl(async () => {
+      const {broadcastSolPaymentV2} = require('../solana');
+      return broadcastSolPaymentV2(request, buildUri(request), payment, new AbortController().signal) as Promise<{status: number; rid: string; sig: string}>;
+    });
+    expect(receipt.status).toBe(RECEIPT_REJECTED);
+    expect(sendCalls).toBe(0);
+  });
+
+  test('on-chain rejection: history status with err → REJECTED', async () => {
+    const request = solReqV2();
+    const {payment, sig} = signAndExtractSig(request);
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      isBlockhashValid: () => ({context: {slot: request.slot + 1}, value: true}),
+      getBlockHeight: () => request.lvh - 10,
+      sendTransaction: () => sig,
+      getSignatureStatuses: () => ({context: {slot: request.slot + 100}, value: [{err: {InstructionError: [0, 'InsufficientFunds']}}]}),
+    };
+    const receipt = await withStubUrl(async () => {
+      const {broadcastSolPaymentV2} = require('../solana');
+      return broadcastSolPaymentV2(request, buildUri(request), payment, new AbortController().signal) as Promise<{status: number; rid: string; sig: string}>;
+    });
+    expect(receipt.status).toBe(RECEIPT_REJECTED);
+    expect(receipt.sig).toBe(sig);
+  });
+
+  test('sig-identity mismatch: sendTransaction returns a DIFFERENT sig → UNREACHABLE (honest unknown)', async () => {
+    const request = solReqV2();
+    const {payment, sig} = signAndExtractSig(request);
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      isBlockhashValid: () => ({context: {slot: request.slot + 1}, value: true}),
+      getBlockHeight: () => request.lvh - 10,
+      sendTransaction: () => sig + 'MUTATED', // different from the verified tx sig
+      getSignatureStatuses: () => ({context: {slot: 1}, value: [{confirmationStatus: 'confirmed'}]}),
+    };
+    const receipt = await withStubUrl(async () => {
+      const {broadcastSolPaymentV2} = require('../solana');
+      return broadcastSolPaymentV2(request, buildUri(request), payment, new AbortController().signal) as Promise<{status: number; rid: string; sig: string}>;
+    });
+    expect(receipt.status).toBe(RECEIPT_UNREACHABLE);
+    expect(receipt.sig).toBe(sig); // the LOCAL verified sig is the receipt identity
+  });
+
+  test('malformed payment: garbage tx → REJECTED sig="", no sendTransaction', async () => {
+    const request = solReqV2();
+    const garbage: SolPayV2 = {v: 2, rid: request.rid, tx: new Uint8Array([0xff, 0xff, 0xff])};
+    let sendCalls = 0;
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      sendTransaction: () => { sendCalls++; return 'must-not-be-called'; },
+    };
+    const receipt = await withStubUrl(async () => {
+      const {broadcastSolPaymentV2} = require('../solana');
+      return broadcastSolPaymentV2(request, buildUri(request), garbage, new AbortController().signal) as Promise<{status: number; rid: string; sig: string}>;
+    });
+    expect(receipt.status).toBe(RECEIPT_REJECTED);
+    expect(receipt.rid).toBe(request.rid);
+    expect(receipt.sig).toBe('');
+    expect(sendCalls).toBe(0);
+  });
+
+  test('authoritative expiry on confirm-timeout: height>lvh AND bh invalid AND history null → REJECTED', async () => {
+    const request = solReqV2();
+    const {payment, sig} = signAndExtractSig(request);
+    // Stateful stubs: pre-broadcast call (1st) returns fresh values so the broadcast proceeds;
+    // subsequent calls during the confirm loop + timeout return expired values.
+    let bhValidCalls = 0;
+    let heightCalls = 0;
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      isBlockhashValid: () => { bhValidCalls++; return {context: {slot: request.slot + 50}, value: bhValidCalls === 1}; },
+      getBlockHeight: () => { heightCalls++; return heightCalls === 1 ? request.lvh - 10 : request.lvh + 100; },
+      sendTransaction: () => sig,
+      // History-aware status is null (tx never landed) + contextSlot ≥ invalidityContextSlot.
+      getSignatureStatuses: () => ({context: {slot: request.slot + 60}, value: [null]}),
+    };
+    const receipt = await withStubUrl(async () => {
+      const {broadcastSolPaymentV2} = require('../solana');
+      return broadcastSolPaymentV2(
+        request, buildUri(request), payment, new AbortController().signal,
+        {confirmTimeoutMs: 50, pollMs: 5},
+      ) as Promise<{status: number; rid: string; sig: string}>;
+    });
+    expect(receipt.status).toBe(RECEIPT_REJECTED);
+    expect(receipt.sig).toBe(sig);
+  });
+
+  test('confirm-timeout INCONSISTENT (blockhash still valid) → UNREACHABLE (honest unknown)', async () => {
+    const request = solReqV2();
+    const {payment, sig} = signAndExtractSig(request);
+    // Stateful height: pre-broadcast returns fresh (height ≤ lvh → broadcast proceeds), confirm
+    // loop returns expired (height > lvh). But isBlockhashValid ALWAYS returns true — the
+    // inconsistency means we cannot authoritatively prove the blockhash is dead → honest unknown.
+    let heightCalls = 0;
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      isBlockhashValid: () => ({context: {slot: request.slot + 50}, value: true}), // always valid!
+      getBlockHeight: () => { heightCalls++; return heightCalls === 1 ? request.lvh - 10 : request.lvh + 100; },
+      sendTransaction: () => sig,
+      getSignatureStatuses: () => ({context: {slot: request.slot + 60}, value: [null]}),
+    };
+    const receipt = await withStubUrl(async () => {
+      const {broadcastSolPaymentV2} = require('../solana');
+      return broadcastSolPaymentV2(
+        request, buildUri(request), payment, new AbortController().signal,
+        {confirmTimeoutMs: 50, pollMs: 5},
+      ) as Promise<{status: number; rid: string; sig: string}>;
+    });
+    expect(receipt.status).toBe(RECEIPT_UNREACHABLE);
+    expect(receipt.sig).toBe(sig);
   });
 });

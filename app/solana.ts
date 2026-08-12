@@ -17,14 +17,17 @@
 
 import {ed25519} from '@noble/curves/ed25519';
 import bs58 from 'bs58';
-import {SOLANA_RPC_URL} from './config/constants';
+import {SOLANA_RPC_URL, SOL_GENESIS_HASH, SOL_PAYMENT_MAX_WINDOW_SECONDS, SOL_PAYMENT_COMMITMENT, SOL_BROADCAST_TIMEOUT_MS} from './config/constants';
 import {solanaUsdcAvailable} from './config/assets';
 import {deriveSolanaKeypair, deriveSolanaAddress, deriveSlip10Ed25519} from './solana/identity';
-import {base58Decode32, buildSignedTransfer, signTransaction} from './solana/tx';
+import {base58Decode32, buildSignedTransfer, signTransaction, buildCanonicalSolMessage, verifySolPayment, extractSignedTxParts} from './solana/tx';
 import {assembleMessage, buildAdvanceAndTransferMessage, buildCreateNonceAccountMessage} from './solana/nonce';
-import {buildAdvanceAndSplTransferMessage, buildSplTransferInstruction, deriveAta, USDC_MINT_ADDRESS} from './solana/spl';
+import {buildAdvanceAndSplTransferMessage, buildSplTransferInstruction, buildCanonicalUsdcMessage, deriveAta, USDC_MINT_ADDRESS} from './solana/spl';
 import {encodeSolPay} from './solana/qr_v1';
+import {encodeSolReq, generateRid} from './solana/qr';
 import type {SolReq, SolPay} from './solana/qr_v1';
+import type {SolReqV2, SolPayV2, SolReceiptV2, SolReqInput, SolPayInput} from './solana/qr';
+import type {SolanaSignatureStatus} from './solana/rpc';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from './payments';
 import type {ReceiptCode} from './payments';
 import {hexToBytes} from './lib/format';
@@ -354,4 +357,291 @@ export async function getSolanaUsdcBalance(
  *  separate `solanaUsdcAvailable()` predicate. */
 export function isSolanaRpcAvailable(): boolean {
   return SOLANA_RPC_URL !== '';
+}
+
+// ============================================================================
+// Phase 3 — v2 recent-blockhash payment seam. ADDITIVE alongside the v1 seam above; the UI stays on
+// v1 until Phase 4 rewires it. The lifecycle:
+//   createSolPaymentRequest — ONLINE merchant fetches genesis hash + fresh blockhash + builds SolReqV2.
+//   signSolPayment / signSplPayment — OFFLINE payer signs the canonical message (no network).
+//   broadcastSolPayment — ONLINE merchant strictly verifies, freshness-checks, broadcasts, confirms.
+// See `2026-08-12-solana-recent-blockhash-rewrite-plan.md` "Freshness rules" + invariants #4/#5/#12/#13.
+// ============================================================================
+
+/** ONLINE merchant. Fetches the cluster genesis hash (cached) + a fresh blockhash (with its context
+ *  slot), builds a `SolReqV2` with `iat = now` and `exp = iat + SOL_PAYMENT_MAX_WINDOW_SECONDS`, and
+ *  encodes to the canonical `solreq:v2?<base64url>` URI.
+ *
+ *  Throws on RPC failure, genesis mismatch (wrong cluster — invariant #4 fail-closed), or when the
+ *  rail is offline (`SOLANA_RPC_URL` empty). Never returns a silent empty result. */
+export async function createSolPaymentRequest(
+  input: {
+    to: string;
+    amt: string;
+    cur: 'SOL' | 'USDC';
+    mint: string | null;
+    toAta: string | null;
+    name: string;
+    memo: string;
+  },
+  signal: AbortSignal,
+): Promise<{request: SolReqV2; uri: string}> {
+  if (!isSolanaRpcAvailable()) throw new Error('Solana is offline (no RPC endpoint configured)');
+  const rpc = await import('./solana/rpc');
+
+  // Cluster identity check — fail-closed on a non-mainnet endpoint (genesis hash is immutable).
+  const genesis = await rpc.getGenesisHash(SOLANA_RPC_URL, {signal});
+  if (genesis !== SOL_GENESIS_HASH) {
+    throw new Error(`createSolPaymentRequest: cluster genesis mismatch (got ${genesis}, expected ${SOL_GENESIS_HASH})`);
+  }
+
+  // Fresh blockhash + its observation slot. The context slot threads as `minContextSlot` for every
+  // downstream freshness call in broadcastSolPayment so reorg-awareness is consistent.
+  const bh = await rpc.getLatestBlockhash(SOLANA_RPC_URL, {signal});
+
+  // iat captured when the RPC result is in hand; exp = iat + the codec's frozen max lifetime.
+  const iat = Math.floor(Date.now() / 1000);
+  const exp = iat + SOL_PAYMENT_MAX_WINDOW_SECONDS;
+
+  const reqInput: SolReqInput = {
+    rid: generateRid(),
+    net: 'mainnet-beta',
+    bh: bh.blockhash,
+    lvh: bh.lastValidBlockHeight,
+    slot: bh.contextSlot,
+    iat,
+    exp,
+    to: input.to,
+    amt: input.amt,
+    cur: input.cur,
+    mint: input.mint,
+    toAta: input.toAta,
+    name: input.name,
+    memo: input.memo,
+  };
+  const uri = encodeSolReq(reqInput);
+  const request: SolReqV2 = {v: 2, ...reqInput};
+  return {request, uri};
+}
+
+/** OFFLINE payer (SOL). NO network. Derives the payer keypair from `secretHex`, builds the canonical
+ *  SOL message (`{Memo, System.transfer}` bound to the request URI + amount), signs it, and returns
+ *  the `SolPayV2 {v:2, rid, tx}`. Pure + synchronous. */
+export function signSolPayment(secretHex: string, request: SolReqV2): SolPayV2 {
+  if (request.cur !== 'SOL') throw new Error('signSolPayment: expected SOL currency');
+  const {seed, publicKey} = deriveSolanaKeypair(secretHex);
+  const message = buildCanonicalSolMessage(publicKey, request);
+  const tx = signTransaction(message, seed);
+  const payInput: SolPayInput = {rid: request.rid, tx};
+  return {v: 2, ...payInput};
+}
+
+/** OFFLINE payer (USDC). NO network. Same as `signSolPayment` with the USDC canonical builder
+ *  (`{Memo, Token.transferChecked}` — commits to mint + decimals + ATAs). */
+export function signSplPayment(secretHex: string, request: SolReqV2): SolPayV2 {
+  if (request.cur !== 'USDC') throw new Error('signSplPayment: expected USDC currency');
+  if (!request.mint || !request.toAta) throw new Error('signSplPayment: mint and toAta required for USDC');
+  const {seed, publicKey} = deriveSolanaKeypair(secretHex);
+  const message = buildCanonicalUsdcMessage(publicKey, request);
+  const tx = signTransaction(message, seed);
+  const payInput: SolPayInput = {rid: request.rid, tx};
+  return {v: 2, ...payInput};
+}
+
+/** ONLINE merchant broadcast + confirm. STRICT. Runs the canonical-message rebuild + Ed25519 verify
+ *  BEFORE any network send, freshness-checks the blockhash + block height against the request, then
+ *  broadcasts with preflight and confirms via history-aware signature status polling.
+ *
+ *  Money-critical freshness state machine (invariants #4/#5/#10/#12/#13):
+ *    • URI ≠ request          → throw (programming error, never silent).
+ *    • Malformed payment      → REJECTED, sig='' (definitive — never broadcast).
+ *    • Strict verify fails    → REJECTED, sig='' (sig/parse/semantic failure is BLOCKING).
+ *    • Blockhash invalid OR
+ *      height > lvh pre-send  → REJECTED, sig=<verified> (authoritative on-chain expiry).
+ *    • sendTransaction RPC sig
+ *      ≠ local verified sig   → UNREACHABLE, sig=<verified> (honest unknown — never assume success).
+ *    • sendTransaction
+ *      InstructionError/etc.  → REJECTED, sig=<verified> (definitive Solana rejection).
+ *    • sendTransaction other
+ *      error                  → UNREACHABLE, sig=<verified> (honest unknown — tx MAY still land).
+ *    • Confirm: status w/err  → REJECTED, sig=<verified> (on-chain rejection).
+ *    • Confirm: confirmed     → SETTLED, sig=<verified>.
+ *    • Confirm timeout +
+ *      authoritative expiry
+ *      (height>lvh AND bh
+ *      invalid@ctx≥slot AND
+ *      history status null
+ *      @ctx≥invaliditySlot)   → REJECTED, sig=<verified> (the tx CANNOT land — blockhash dead).
+ *    • Confirm timeout,
+ *      anything else          → UNREACHABLE, sig=<verified> (honest unknown — invariant #12).
+ *
+ *  `opts.confirmTimeoutMs` / `opts.pollMs` default to `SOL_BROADCAST_TIMEOUT_MS` / 200ms; tests pass
+ *  shorter values so the timeout branches are exercisable in milliseconds. */
+export async function broadcastSolPaymentV2(
+  request: SolReqV2,
+  canonicalRequestUri: string,
+  payment: SolPayV2,
+  signal: AbortSignal,
+  opts?: {confirmTimeoutMs?: number; pollMs?: number},
+): Promise<SolReceiptV2> {
+  // 1. Defense: the canonical URI must match the request. A mismatch is a programming error (caller
+  //    passed a stale/foreign URI for this request); throw rather than risk broadcasting under wrong
+  //    claims. Strip `v` (the codec stamps it) before re-encoding.
+  const {v: _dropV, ...reqInput} = request;
+  void _dropV;
+  if (encodeSolReq(reqInput) !== canonicalRequestUri) {
+    throw new Error('broadcastSolPayment: canonicalRequestUri does not match request (programming error)');
+  }
+  const rid = request.rid;
+
+  // 2. Extract the payer pubkey from the signed transaction. Malformed → definitive reject (no sig
+  //    trusted, no broadcast).
+  const parts = extractSignedTxParts(payment.tx);
+  if (!parts) {
+    console.warn(`broadcastSolPayment: malformed payment tx for rid=${rid}`);
+    return {status: RECEIPT_REJECTED, rid, sig: ''};
+  }
+
+  // 3. Build the expected canonical message from the open request + extracted payer.
+  const expectedMessage = request.cur === 'SOL'
+    ? buildCanonicalSolMessage(parts.feePayer, request)
+    : buildCanonicalUsdcMessage(parts.feePayer, request);
+
+  // 4. STRICT verify: signed message must be byte-equal to the canonical rebuild + Ed25519 valid.
+  //    Failure is BLOCKING (invariant #5) — never broadcast a semantically wrong signature.
+  const verifyResult = verifySolPayment(expectedMessage, payment);
+  if (!verifyResult.ok) {
+    console.warn(`broadcastSolPayment: strict verify failed (${verifyResult.reason}) for rid=${rid}`);
+    return {status: RECEIPT_REJECTED, rid, sig: ''};
+  }
+
+  // 5. The verified first signature is the stable payment identity for the receipt (invariant #10:
+  //    the same signed bytes can be rebroadcast idempotently). Used for all downstream receipt codes.
+  const sig = verifyResult.signature;
+
+  if (!isSolanaRpcAvailable()) throw new Error('Solana is offline (no RPC endpoint configured)');
+  const rpc = await import('./solana/rpc');
+
+  // 6. Freshness pre-broadcast (invariant #4). The request's `slot` is `minContextSlot` so reorg-aware
+  //    behavior is consistent. Blockhash invalid OR current height past lvh → authoritative on-chain
+  //    expiry → definitive reject (not unreachable — the tx cannot land).
+  let bhValid: {valid: boolean; contextSlot: number};
+  let currentHeight: number;
+  try {
+    [bhValid, currentHeight] = await Promise.all([
+      rpc.isBlockhashValid(SOLANA_RPC_URL, request.bh, {signal, minContextSlot: request.slot}),
+      rpc.getBlockHeight(SOLANA_RPC_URL, {signal, minContextSlot: request.slot}),
+    ]);
+  } catch (e) {
+    // A freshness-check RPC failure is NOT an authoritative reject — the RPC is unavailable, not the
+    // blockhash. Honest unknown (the tx MAY still be broadcastable on retry).
+    console.warn(`broadcastSolPayment: freshness RPC failure for rid=${rid}:`, e instanceof Error ? e.message : String(e));
+    return {status: RECEIPT_UNREACHABLE, rid, sig};
+  }
+  if (!bhValid.valid || currentHeight > request.lvh) {
+    console.warn(`broadcastSolPayment: pre-broadcast expiry (bhValid=${bhValid.valid}, height=${currentHeight}, lvh=${request.lvh}) for rid=${rid}`);
+    return {status: RECEIPT_REJECTED, rid, sig};
+  }
+
+  // 7. Broadcast with preflight (skipPreflight:false) + the request's minContextSlot. The RPC-returned
+  //    signature MUST exactly equal the locally-extracted `sig` — a mismatch means the node accepted a
+  //    DIFFERENT transaction than the one we verified (honest unknown; do NOT assume success).
+  let broadcastSig: string;
+  try {
+    broadcastSig = await rpc.sendTransaction(SOLANA_RPC_URL, payment.tx, {
+      signal,
+      minContextSlot: request.slot,
+      config: {commitment: SOL_PAYMENT_COMMITMENT, minContextSlot: request.slot, skipPreflight: false},
+    });
+  } catch (e) {
+    const msg = String((e as Error)?.message ?? e);
+    console.warn(`broadcastSolPayment: sendTransaction error for rid=${rid}: ${msg}`);
+    // A class of error that's a definitive Solana rejection (the tx was definitively NOT accepted).
+    if (/Instruction|insufficient|no record of a prior credit|simulation failed|debit|custom|already|blockhash|nonce/i.test(msg)) {
+      return {status: RECEIPT_REJECTED, rid, sig};
+    }
+    return {status: RECEIPT_UNREACHABLE, rid, sig};
+  }
+  if (broadcastSig !== sig) {
+    console.warn(`broadcastSolPayment: sig identity mismatch (broadcast=${broadcastSig}, local=${sig}) for rid=${rid}`);
+    return {status: RECEIPT_UNREACHABLE, rid, sig};
+  }
+
+  // 8. Confirm via history-aware signature status polling + block-height observation. Each RPC call is
+  //    try/caught — a transient failure during confirm continues polling up to the timeout; only the
+  //    timeout boundary triggers the authoritative-expiry decision (invariant #12).
+  const deadline = Date.now() + (opts?.confirmTimeoutMs ?? SOL_BROADCAST_TIMEOUT_MS);
+  const pollMs = opts?.pollMs ?? 200;
+  let latestHeight: number | null = null;
+  let latestHistoryStatus: {status: SolanaSignatureStatus | null; contextSlot: number} | null = null;
+
+  while (Date.now() < deadline) {
+    if (signal.aborted) throw new Error('aborted');
+
+    try {
+      const statusResult = await rpc.getSignatureStatusesForSig(SOLANA_RPC_URL, sig, {signal});
+      latestHistoryStatus = statusResult;
+      if (statusResult.status) {
+        if (statusResult.status.err != null) {
+          console.warn(`broadcastSolPayment: on-chain rejection for rid=${rid}: ${JSON.stringify(statusResult.status.err)}`);
+          return {status: RECEIPT_REJECTED, rid, sig};
+        }
+        if (statusResult.status.confirmationStatus === 'confirmed' || statusResult.status.confirmationStatus === 'finalized') {
+          return {status: RECEIPT_SETTLED, rid, sig};
+        }
+      }
+    } catch (e) {
+      console.warn(`broadcastSolPayment: transient getSignatureStatuses failure for rid=${rid}:`, e instanceof Error ? e.message : String(e));
+    }
+
+    try {
+      latestHeight = await rpc.getBlockHeight(SOLANA_RPC_URL, {signal, minContextSlot: request.slot});
+    } catch (e) {
+      console.warn(`broadcastSolPayment: transient getBlockHeight failure for rid=${rid}:`, e instanceof Error ? e.message : String(e));
+    }
+
+    await new Promise(r => setTimeout(r, pollMs));
+  }
+
+  // Timeout — determine AUTHORITATIVE expiry (invariants #12/#13 + "Record the context slot" rule).
+  // Authoritative-expiry requires ALL THREE:
+  //   (a) currentHeight > request.lvh (blockhash window passed), AND
+  //   (b) isBlockhashValid returns false at contextSlot >= request.slot (reorg-safe observation), AND
+  //   (c) history-aware signature status is null at contextSlot >= invalidityContextSlot (proves the
+  //       tx never landed — observed AFTER the blockhash was demonstrably dead).
+  // The isBlockhashValid + getSignatureStatuses calls are done in that order so the sig-status context
+  // is >= the invalidity context. Anything inconsistent/unavailable → honest unknown (UNREACHABLE).
+  const heightExpired = latestHeight !== null && latestHeight > request.lvh;
+
+  let invalidityContextSlot = 0;
+  try {
+    const bhv = await rpc.isBlockhashValid(SOLANA_RPC_URL, request.bh, {signal, minContextSlot: request.slot});
+    if (!bhv.valid && bhv.contextSlot >= request.slot) {
+      invalidityContextSlot = bhv.contextSlot;
+    }
+  } catch (e) {
+    console.warn(`broadcastSolPayment: timeout isBlockhashValid failure for rid=${rid}:`, e instanceof Error ? e.message : String(e));
+  }
+
+  let historyProvesAbsent = false;
+  try {
+    const statusResult = await rpc.getSignatureStatusesForSig(SOLANA_RPC_URL, sig, {signal});
+    latestHistoryStatus = statusResult;
+    if (
+      invalidityContextSlot >= request.slot &&
+      statusResult.status === null &&
+      statusResult.contextSlot >= invalidityContextSlot
+    ) {
+      historyProvesAbsent = true;
+    }
+  } catch (e) {
+    console.warn(`broadcastSolPayment: timeout getSignatureStatuses failure for rid=${rid}:`, e instanceof Error ? e.message : String(e));
+  }
+
+  if (heightExpired && invalidityContextSlot >= request.slot && historyProvesAbsent) {
+    console.warn(`broadcastSolPayment: authoritative expiry for rid=${rid} (height=${latestHeight}, lvh=${request.lvh}, invaliditySlot=${invalidityContextSlot})`);
+    return {status: RECEIPT_REJECTED, rid, sig};
+  }
+  console.warn(`broadcastSolPayment: honest unknown for rid=${rid} (height=${latestHeight}, lvh=${request.lvh}, invaliditySlot=${invalidityContextSlot}, historyPresent=${latestHistoryStatus?.status != null})`);
+  return {status: RECEIPT_UNREACHABLE, rid, sig};
 }

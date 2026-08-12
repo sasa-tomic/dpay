@@ -18,11 +18,19 @@
 import bs58 from 'bs58';
 import {composeTimeout as composeTimeoutShared} from '../lib/timeout';
 import {bytesToBase64, base64ToBytes} from '../lib/base64';
+import {SOL_PAYMENT_COMMITMENT} from '../config/constants';
 
+/** A fetched recent blockhash + its validity window + the context slot it was observed at. The v2
+ *  payment rail threads `contextSlot` as the `minContextSlot` for every downstream freshness call
+ *  (isBlockhashValid, getBlockHeight, sendTransaction) so reorg-aware RPC behavior is consistent. */
 export interface SolanaBlockhash {
   /** base58-encoded recent blockhash (raw RPC shape — decode to 32 bytes at the call site). */
   readonly blockhash: string;
   readonly lastValidBlockHeight: number;
+  /** context.slot from the getLatestBlockhash response — passed as minContextSlot downstream. */
+  readonly slot: number;
+  /** alias for `slot` (the context slot); kept explicit so the freshness state machine reads clearly. */
+  readonly contextSlot: number;
 }
 
 export interface SolanaRpcOpts {
@@ -30,6 +38,9 @@ export interface SolanaRpcOpts {
   timeoutMs?: number;
   /** confirmTransaction poll spacing (default 1.5s). */
   pollMs?: number;
+  /** minContextSlot for RPC methods that support it (getBlockHeight, isBlockhashValid,
+   *  getFeeForMessage, sendTransaction). Threads the request's context slot for reorg-awareness. */
+  minContextSlot?: number;
 }
 
 export interface SolanaSignatureStatus {
@@ -113,18 +124,38 @@ export async function getBalance(url: string, address: string, opts?: SolanaRpcO
   return String(result.value);
 }
 
-/** Fetch a fresh recent blockhash + its last-valid block height (needed to build + track a tx). */
+/** Fetch a fresh recent blockhash + its last-valid block height (needed to build + track a tx).
+ *  v2: also captures `context.slot` (the slot the blockhash was observed at, threaded as
+ *  `minContextSlot` for every downstream freshness call). Backward-compatible — callers reading
+ *  `.blockhash`/`.lastValidBlockHeight` keep working; the new `slot`/`contextSlot` are additive. */
 export async function getLatestBlockhash(url: string, opts?: SolanaRpcOpts): Promise<SolanaBlockhash> {
-  const result = (await rpcFetch(url, 'getLatestBlockhash', [], opts)) as {
+  const result = (await rpcFetch(url, 'getLatestBlockhash', [{commitment: SOL_PAYMENT_COMMITMENT}], opts)) as {
+    context: {slot: number};
     value: {blockhash: string; lastValidBlockHeight: number};
   };
-  return {blockhash: result.value.blockhash, lastValidBlockHeight: result.value.lastValidBlockHeight};
+  const contextSlot = result.context.slot;
+  return {
+    blockhash: result.value.blockhash,
+    lastValidBlockHeight: result.value.lastValidBlockHeight,
+    slot: contextSlot,
+    contextSlot,
+  };
 }
 
 /** Broadcast a raw signed transaction (bytes). Base64-encodes internally for the wire. Returns the
- *  transaction signature (base58). */
-export async function sendTransaction(url: string, rawBytes: Uint8Array, opts?: SolanaRpcOpts): Promise<string> {
-  const result = (await rpcFetch(url, 'sendTransaction', [bytesToBase64(rawBytes), {encoding: 'base64'}], opts)) as string;
+ *  transaction signature (base58).
+ *
+ *  v2: when `opts.config` is provided, its `{commitment, minContextSlot, skipPreflight}` are passed
+ *  through as the second RPC param (the v2 freshness state machine sets these for preflight + context
+ *  slot binding). Without `opts.config` the original `{encoding:'base64'}`-only shape is sent, so the
+ *  v1 callers (sendSol, sendSpl, broadcastSolPayment-v1) stay byte-identical. */
+export async function sendTransaction(url: string, rawBytes: Uint8Array, opts?: SolanaRpcOpts & {
+  config?: {commitment?: 'confirmed' | 'processed' | 'finalized'; minContextSlot?: number; skipPreflight?: boolean};
+}): Promise<string> {
+  const params: unknown[] = opts?.config
+    ? [bytesToBase64(rawBytes), {encoding: 'base64', ...opts.config}]
+    : [bytesToBase64(rawBytes), {encoding: 'base64'}];
+  const result = (await rpcFetch(url, 'sendTransaction', params, opts)) as string;
   return result;
 }
 
@@ -219,3 +250,95 @@ export async function getTokenAccountBalance(
 
 // RFC 4648 base64 of a byte array — imported from `lib/base64.ts` (the SINGLE implementation shared
 // with the URL-safe codec in `lib/base64url.ts`). Standard alphabet, padded, throws-on-malformed.
+
+// ============================================================================
+// Phase 3 — v2 recent-blockhash freshness RPC methods. The merchant's broadcast state machine
+// (solana.ts broadcastSolPayment) requires these to authoritatively prove a request is still
+// broadcastable BEFORE sendTransaction, and to authoritatively classify a confirm timeout as
+// expired vs honest-unknown. All run at SOL_PAYMENT_COMMITMENT='confirmed' and accept
+// `minContextSlot` (the request's context slot) for reorg-aware behavior. See invariants #4/#12/#13
+// in 2026-08-12-solana-recent-blockhash-rewrite-plan.md "Freshness rules".
+// ============================================================================
+
+// Module-level genesis-hash cache: one successful mainnet check per RPC URL per app session. A
+// mismatch throws (fail-closed); a cache MISS on a subsequent call re-fetches. Never cached on
+// failure (a transient RPC error must not pin a wrong cluster identity for the session).
+const genesisHashCache = new Map<string, string>();
+
+/** The cluster's immutable genesis hash (mainnet-beta's frozen value is in `SOL_GENESIS_HASH`).
+ *  Cached per-URL on success so the createSolPaymentRequest fast path doesn't pay a round trip per
+ *  request. A mismatch with the configured `SOL_GENESIS_HASH` is a hard fail (wrong cluster). */
+export async function getGenesisHash(url: string, opts?: SolanaRpcOpts): Promise<string> {
+  const cached = genesisHashCache.get(url);
+  if (cached !== undefined) return cached;
+  const result = (await rpcFetch(url, 'getGenesisHash', [], opts)) as string;
+  genesisHashCache.set(url, result);
+  return result;
+}
+
+/** The current block height (the chain tip's slot number). Used to check whether a request's
+ *  `lastValidBlockHeight` has been exceeded — the authoritative on-chain expiry signal. */
+export async function getBlockHeight(url: string, opts?: SolanaRpcOpts): Promise<number> {
+  const config: Record<string, unknown> = {commitment: SOL_PAYMENT_COMMITMENT};
+  if (opts?.minContextSlot !== undefined) config.minContextSlot = opts.minContextSlot;
+  const result = (await rpcFetch(url, 'getBlockHeight', [config], opts)) as number;
+  return result;
+}
+
+/** Whether a given recent blockhash is still valid for transaction inclusion. Returns both the
+ *  validity and the context slot of the observation (the freshness state machine requires
+ *  `contextSlot >= request.slot` to treat an `invalid` result as authoritative). */
+export async function isBlockhashValid(
+  url: string,
+  blockhash: string,
+  opts?: SolanaRpcOpts,
+): Promise<{valid: boolean; contextSlot: number}> {
+  const config: Record<string, unknown> = {commitment: SOL_PAYMENT_COMMITMENT};
+  if (opts?.minContextSlot !== undefined) config.minContextSlot = opts.minContextSlot;
+  const result = (await rpcFetch(url, 'isBlockhashValid', [blockhash, config], opts)) as {
+    context: {slot: number};
+    value: boolean;
+  };
+  return {valid: result.value === true, contextSlot: result.context.slot};
+}
+
+/** History-aware signature status lookup for a single signature. Calls `getSignatureStatuses` with
+ *  `{searchTransactionHistory:true}` so a TX that already landed (even if it dropped out of the
+ *  node's recent-status cache) is still observable. Returns the parsed status (or null when the
+ *  signature is unknown to the node) + the context slot of the observation.
+ *
+ *  Distinct from the existing `confirmTransaction` poll (which uses a non-history-aware
+ *  `getSignatureStatuses` for the v1 rail). The v2 freshness state machine uses THIS helper so a
+ *  confirm timeout can be authoritatively classified: a null status, combined with an expired
+ *  blockhash, is definitive expiry; a present status is the on-chain verdict. */
+export async function getSignatureStatusesForSig(
+  url: string,
+  signature: string,
+  opts?: SolanaRpcOpts,
+): Promise<{status: SolanaSignatureStatus | null; contextSlot: number}> {
+  const result = (await rpcFetch(
+    url,
+    'getSignatureStatuses',
+    [[signature], {searchTransactionHistory: true}],
+    opts,
+  )) as {
+    context: {slot: number};
+    value: (SolanaSignatureStatus | null)[];
+  };
+  const status = Array.isArray(result.value) ? result.value[0] ?? null : null;
+  return {status, contextSlot: result.context.slot};
+}
+
+/** Quote the lamport fee for a (base64-encoded) message. Returns null when the RPC cannot compute
+ *  the fee (the message references accounts not yet loadable, or is otherwise invalid). Used by the
+ *  v2 path + the Phase 6 reclaim fee quote. */
+export async function getFeeForMessage(
+  url: string,
+  messageBase64: string,
+  opts?: SolanaRpcOpts,
+): Promise<bigint | null> {
+  const config: Record<string, unknown> = {commitment: SOL_PAYMENT_COMMITMENT};
+  if (opts?.minContextSlot !== undefined) config.minContextSlot = opts.minContextSlot;
+  const result = (await rpcFetch(url, 'getFeeForMessage', [messageBase64, config], opts)) as number | null;
+  return result === null ? null : BigInt(result);
+}

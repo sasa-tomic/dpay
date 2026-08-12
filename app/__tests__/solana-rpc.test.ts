@@ -43,11 +43,14 @@ describe('solana rpc — request/response', () => {
     expect(calls[0].body).toEqual({jsonrpc: '2.0', id: 1, method: 'getBalance', params: ['AddrXYZ']});
   });
 
-  test('getLatestBlockhash parses blockhash + lastValidBlockHeight', async () => {
-    installRpcFetch([{value: {blockhash: 'BlockhashABC', lastValidBlockHeight: 123456}}]);
+  test('getLatestBlockhash parses blockhash + lastValidBlockHeight + contextSlot', async () => {
+    const {calls} = installRpcFetch([{context: {slot: 200}, value: {blockhash: 'BlockhashABC', lastValidBlockHeight: 123456}}]);
     const {getLatestBlockhash} = require('../solana/rpc');
     const bh = await getLatestBlockhash('https://rpc.example');
-    expect(bh).toEqual({blockhash: 'BlockhashABC', lastValidBlockHeight: 123456});
+    expect(bh).toEqual({blockhash: 'BlockhashABC', lastValidBlockHeight: 123456, slot: 200, contextSlot: 200});
+    // Phase 3: commitment='confirmed' is now passed (the freshness state machine requires it for
+    // reorg-consistent getLatestBlockhash + downstream isBlockhashValid/getBlockHeight calls).
+    expect(calls[0].body).toEqual(expect.objectContaining({method: 'getLatestBlockhash', params: [{commitment: 'confirmed'}]}));
   });
 
   test('sendTransaction base64-encodes the raw bytes and returns the signature', async () => {
@@ -363,5 +366,141 @@ describe('solana rpc — getTokenAccountBalance (exact-string SPL)', () => {
     expect(calls[0].body).toEqual(expect.objectContaining({
       jsonrpc: '2.0', method: 'getTokenAccountBalance', params: ['AtaAddrXYZ'],
     }));
+  });
+});
+
+// Phase 3 — v2 recent-blockhash freshness RPC methods. The merchant's broadcast state machine
+// (solana.ts broadcastSolPaymentV2) requires these to authoritatively prove a request is still
+// broadcastable BEFORE sendTransaction, and to authoritatively classify a confirm timeout as
+// expired vs honest-unknown. All run at SOL_PAYMENT_COMMITMENT='confirmed' and accept
+// `minContextSlot` (the request's context slot) for reorg-aware behavior.
+describe('solana rpc — Phase 3 freshness methods', () => {
+  afterEach(() => {
+    delete (globalThis as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB;
+  });
+
+  test('getGenesisHash returns the hash string and caches per URL (second call skips rpcFetch)', async () => {
+    let calls = 0;
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getGenesisHash: () => { calls++; return '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d'; },
+    };
+    (globalThis as {fetch: unknown}).fetch = () => { throw new Error('fetch must not be called'); };
+    // isolateModules resets the rpc module so the genesisHashCache Map is fresh for this test
+    // (the cache is module-level and would otherwise persist across tests in this file).
+    await jest.isolateModules(async () => {
+      const {getGenesisHash} = require('../solana/rpc');
+      const url = 'https://genesis-cache.test';
+      const h1 = await getGenesisHash(url);
+      const h2 = await getGenesisHash(url);
+      expect(h1).toBe('5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d');
+      expect(h2).toBe(h1);
+      expect(calls).toBe(1); // cached — second call did NOT invoke the stub handler
+    });
+  });
+
+  test('getGenesisHash does NOT cache on failure (a transient error must not pin a wrong cluster)', async () => {
+    let calls = 0;
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getGenesisHash: () => { calls++; throw new Error('rpc down'); },
+    };
+    await jest.isolateModules(async () => {
+      const {getGenesisHash} = require('../solana/rpc');
+      await expect(getGenesisHash('https://genesis-fail.test')).rejects.toThrow('rpc down');
+      await expect(getGenesisHash('https://genesis-fail.test')).rejects.toThrow('rpc down');
+      expect(calls).toBe(2); // NOT cached — both calls invoked the stub handler
+    });
+  });
+
+  test('getBlockHeight passes commitment + minContextSlot through to the RPC params', async () => {
+    const {calls} = installRpcFetch([123456]);
+    const {getBlockHeight} = require('../solana/rpc');
+    const h = await getBlockHeight('https://rpc.example', {minContextSlot: 200});
+    expect(h).toBe(123456);
+    expect(calls[0].body).toEqual(expect.objectContaining({
+      method: 'getBlockHeight', params: [{commitment: 'confirmed', minContextSlot: 200}],
+    }));
+  });
+
+  test('getBlockHeight omits minContextSlot when not provided (only commitment)', async () => {
+    const {calls} = installRpcFetch([42]);
+    const {getBlockHeight} = require('../solana/rpc');
+    const h = await getBlockHeight('https://rpc.example');
+    expect(h).toBe(42);
+    expect(calls[0].body).toEqual(expect.objectContaining({
+      method: 'getBlockHeight', params: [{commitment: 'confirmed'}],
+    }));
+  });
+
+  test('isBlockhashValid returns {valid, contextSlot} from value + context.slot', async () => {
+    const {calls} = installRpcFetch([{context: {slot: 300}, value: true}]);
+    const {isBlockhashValid} = require('../solana/rpc');
+    const r = await isBlockhashValid('https://rpc.example', 'BlockhashX', {minContextSlot: 250});
+    expect(r).toEqual({valid: true, contextSlot: 300});
+    expect(calls[0].body).toEqual(expect.objectContaining({
+      method: 'isBlockhashValid', params: ['BlockhashX', {commitment: 'confirmed', minContextSlot: 250}],
+    }));
+  });
+
+  test('isBlockhashValid returns valid=false cleanly when the blockhash expired', async () => {
+    installRpcFetch([{context: {slot: 350}, value: false}]);
+    const {isBlockhashValid} = require('../solana/rpc');
+    const r = await isBlockhashValid('https://rpc.example', 'DeadBlockhash', {minContextSlot: 250});
+    expect(r).toEqual({valid: false, contextSlot: 350});
+  });
+
+  test('getSignatureStatusesForSig passes searchTransactionHistory:true and unwraps value[0]', async () => {
+    const {calls} = installRpcFetch([{context: {slot: 400}, value: [{confirmationStatus: 'confirmed'}]}]);
+    const {getSignatureStatusesForSig} = require('../solana/rpc');
+    const r = await getSignatureStatusesForSig('https://rpc.example', 'SigBase58');
+    expect(r).toEqual({status: {confirmationStatus: 'confirmed'}, contextSlot: 400});
+    const params = (calls[0].body as {params: unknown[]}).params;
+    expect(params[0]).toEqual(['SigBase58']);
+    expect(params[1]).toEqual({searchTransactionHistory: true});
+  });
+
+  test('getSignatureStatusesForSig returns null status cleanly when value is [null]', async () => {
+    installRpcFetch([{context: {slot: 410}, value: [null]}]);
+    const {getSignatureStatusesForSig} = require('../solana/rpc');
+    const r = await getSignatureStatusesForSig('https://rpc.example', 'UnknownSig');
+    expect(r).toEqual({status: null, contextSlot: 410});
+  });
+
+  test('getFeeForMessage returns the lamport fee as a bigint', async () => {
+    const {calls} = installRpcFetch([5000]);
+    const {getFeeForMessage} = require('../solana/rpc');
+    const fee = await getFeeForMessage('https://rpc.example', 'MessageBase64==', {minContextSlot: 200});
+    expect(fee).toBe(5000n);
+    expect(typeof fee).toBe('bigint');
+    expect(calls[0].body).toEqual(expect.objectContaining({
+      method: 'getFeeForMessage', params: ['MessageBase64==', {commitment: 'confirmed', minContextSlot: 200}],
+    }));
+  });
+
+  test('getFeeForMessage returns null cleanly (message not yet fee-calculable)', async () => {
+    installRpcFetch([null]);
+    const {getFeeForMessage} = require('../solana/rpc');
+    const fee = await getFeeForMessage('https://rpc.example', 'BadMessage==');
+    expect(fee).toBeNull();
+  });
+
+  test('all Phase 3 freshness methods route through the stub (no real network)', async () => {
+    let fetchCalls = 0;
+    (globalThis as {fetch: unknown}).fetch = () => { fetchCalls++; throw new Error('fetch must not be called'); };
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getGenesisHash: () => 'gen',
+      getBlockHeight: () => 1,
+      isBlockhashValid: () => ({context: {slot: 1}, value: true}),
+      getSignatureStatuses: () => ({context: {slot: 1}, value: [null]}),
+      getFeeForMessage: () => 42,
+    };
+    await jest.isolateModules(async () => {
+      const rpc = require('../solana/rpc');
+      await rpc.getGenesisHash('https://stub-freshness.test');
+      await rpc.getBlockHeight('https://stub-freshness.test');
+      await rpc.isBlockhashValid('https://stub-freshness.test', 'bh');
+      await rpc.getSignatureStatusesForSig('https://stub-freshness.test', 'sig');
+      await rpc.getFeeForMessage('https://stub-freshness.test', 'msg');
+      expect(fetchCalls).toBe(0);
+    });
   });
 });
