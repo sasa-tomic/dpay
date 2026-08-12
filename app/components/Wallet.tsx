@@ -116,7 +116,10 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
   // useSolanaBalances polls the SOL RPC directly (no relay) AND the device's USDC ATA concurrently
   // with independent statuses; when SOLANA_RPC_URL is empty (jest/e2e) it no-ops and the SOL card
   // renders `—`. Both halves feed the per-asset balance map below.
-  const solAddress = useMemo(() => { try { return deriveSolanaAddress(identity.secretHex); } catch { return null; } }, [identity.secretHex]);
+  const solAddress = useMemo(() => {
+    try { return deriveSolanaAddress(identity.secretHex); }
+    catch (e) { console.warn('deriveSolanaAddress failed:', e instanceof Error ? e.message : String(e)); return null; }
+  }, [identity.secretHex]);
   const {sol: solState, usdc: usdcState, refreshSol, refreshUsdc} = useSolanaBalances(identity.secretHex, solAddress);
   const solBalance = solState.balance;
 
@@ -380,7 +383,8 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
         const reason = typeof j?.error === 'string' && j.error.length > 0 ? j.error : null;
         setTopUpErr(reason ?? (r.ok ? 'Top-up failed' : 'Faucet unavailable'));
       }
-    } catch {
+    } catch (e) {
+      console.warn('topUp failed:', e instanceof Error ? e.message : String(e));
       setTopUpErr('Offline — try again when connected');
     } finally {
       setTopUpBusy(false);
