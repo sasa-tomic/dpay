@@ -326,7 +326,7 @@ export function SolReceiveMode({identity, online, nfcReady, solAddress, subMode,
           style={S.prefixBtn}
           onPress={() => setPickOpen(true)}
           accessibilityRole="button"
-          accessibilityLabel={`Receive in ${selectedToken === 'SOL' ? 'USDC' : 'SOL'}`}
+          accessibilityLabel={`Receive in ${selectedToken}`}
           accessibilityHint="Choose which asset the payer will send you"
           accessibilityState={{disabled: false}}>
           <Text style={S.currency}>{selectedToken === 'SOL' ? '◎' : '$'}</Text>
