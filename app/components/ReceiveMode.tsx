@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useState} from 'react';
-import {View, Text, Pressable, TextInput, Modal, Share, type TextStyle} from 'react-native';
+import {View, Text, Pressable, TextInput, Share, type TextStyle} from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import {C} from '../config/palette';
 import {S} from '../styles';
@@ -7,7 +7,9 @@ import {EXPIRY_WINDOW, NFC_PAY_TIMEOUT_MS, POLL, BALANCE_TIMEOUT_MS, QR_SIZE} fr
 import {short, base, toUnits, randNonceHex, nowSecs} from '../lib/format';
 import {encodeDeeplink, decodeReceiptDeeplink} from '../lib/deepLink';
 import {type CurrencyDescriptor, type FamilyDisplay, fmtCurrencyAmount, currencySymbol} from '../config/catalog';
-import type {Identity} from '../lib/types';
+import {type SelectableAsset} from '../config/assets';
+import {type BalanceView} from '../lib/assetBalances';
+import type {Identity, AssetId} from '../lib/types';
 import {rejectionMessage, isNonceReused, isReceiptForRequest} from '../payments';
 import {fetchWithTimeout, payAndClassify} from '../services/relay';
 import {verifyOutcomeReceipt} from '../services/receipt';
@@ -18,9 +20,7 @@ import {NfcIcon} from './NfcIcon';
 import {ModeToggle} from './ModeToggle';
 import {DepositSheet} from './DepositSheet';
 import {CkErc20DepositSheet} from './CkErc20DepositSheet';
-import {CurrencyRow} from './CurrencyRow';
-import {buildCurrencyList} from '../lib/assetList';
-import {useEscapeToClose} from '../hooks/useHotkeys';
+import {AssetPicker} from './AssetPicker';
 import {withTimeout} from '../lib/timeout';
 
 // The optional merchant memo input — a real secondary field (not a bare text link), mirroring the
@@ -30,13 +30,16 @@ import {withTimeout} from '../lib/timeout';
 // left the field floating shorter than its neighbors), 44pt-min.
 const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeight: 44, borderWidth: 1, borderColor: C.sub2, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink};
 
-export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, catalog, depositCurrency, depositDisplay, depositChainId, depositNativeEth, depositFamily, subMode, onSubModeChange, prefillReceipt, onReceiptConsumed, solAddress, solBalance, activeSol, onSelectSol}: {identity: Identity; relayUrl: string; online: boolean; nfcReady: boolean; onReceived: () => void; catalog: CurrencyDescriptor[]; depositCurrency: number; depositDisplay: FamilyDisplay | null; depositChainId: number | null; depositNativeEth: boolean; depositFamily: 'CkBtcUtxo' | 'CkEthErc20' | null; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; prefillReceipt?: string | null; onReceiptConsumed?: () => void; solAddress?: string | null; solBalance?: string | null; activeSol?: boolean; onSelectSol?: () => void}) {
+export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, catalog, depositCurrency, depositDisplay, depositChainId, depositNativeEth, depositFamily, subMode, onSubModeChange, prefillReceipt, onReceiptConsumed, selectedCurrency, assets, selectedAssetId, balances, onSelectAsset}: {identity: Identity; relayUrl: string; online: boolean; nfcReady: boolean; onReceived: () => void; catalog: CurrencyDescriptor[]; depositCurrency: number; depositDisplay: FamilyDisplay | null; depositChainId: number | null; depositNativeEth: boolean; depositFamily: 'CkBtcUtxo' | 'CkEthErc20' | null; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; prefillReceipt?: string | null; onReceiptConsumed?: () => void; selectedCurrency: number; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void}) {
   // The within-tab sub-mode is OWNED by Wallet so deeplinks (?screen=deposit, auto-open-ckERC20) can
   // land the user directly on "My address". "request" = the dpay-to-dpay payment-request QR;
   // "address" = the on-chain deposit flow. The toggle renders only when depositFamily is non-null.
-  // The merchant's CHOSEN settlement asset. Defaults to 0 (DEMO_USD) so the existing single-`$` flows
-  // keep working unchanged (MC5: merchant selects the exact asset; the payer does NOT switch).
-  const [reqCurrency, setReqCurrency] = useState(0);
+  //
+  // Phase 4 (2026-08-12 unified asset selection rewrite): the merchant's chosen settlement asset
+  // arrives as the `selectedCurrency` PROP from Wallet's single owned `selectedAssetId` — there is
+  // NO local `reqCurrency` state anymore. The amount-prefix picker opens the unified `AssetPicker`,
+  // whose `onSelect(id)` is Wallet's `handleSelect` (the same dispatch Balances uses). Selecting a
+  // SOL/USDC asset flips the rail via Wallet's reconcileSelectedAsset + re-mounts SolReceiveMode.
   const [amount, setAmount] = useState('');
   const [memo, setMemo] = useState('');
   // `rawAmount` (was `cents`) is the integer smallest-units the encoded request carries (2-decimal
@@ -52,10 +55,11 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
   const [err, setErr] = useState<string | null>(null);
   const [nfcActive, setNfcActive] = useState(false);
   const [nfcKey, setNfcKey] = useState(0);
-  // The compact currency picker (opened by tapping the amount prefix). Replaces the old always-visible
-  // chip row: the settlement currency is picked from a popup, freeing the form's vertical space.
+  // The unified asset picker (opened by tapping the amount prefix). Phase 4: replaced the old
+  // local CurrencyPicker + the SOL-onSelectSol bridge — AssetPicker is the ONE picker both Receive
+  // forms + Balances consume, with Wallet's handleSelect as its onSelect. Esc/backdrop close it
+  // (AssetPicker owns useEscapeToClose internally).
   const [pickOpen, setPickOpen] = useState(false);
-  useEscapeToClose(() => setPickOpen(false));
   // Tick the display clock only while a request QR is shown (not after settlement) — display-only,
   // so a plain setInterval (not the network POLL seam) is the right cadence for a countdown.
   useEffect(() => {
@@ -72,9 +76,9 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
   // Resolve the selected asset's display config ONCE per render. Decimals come from the catalog
   // descriptor directly (NOT familyDisplay, which falls back to BTC's 8 + would mis-render DEMO's
   // 2). The amount-input prefix is the currency's display glyph (∂/₿/$) via currencySymbol.
-  const reqDesc = catalog.find(c => c.currency === reqCurrency);
+  const reqDesc = catalog.find(c => c.currency === selectedCurrency);
   const reqDecimals = reqDesc?.decimals ?? 2;
-  const reqPrefix = currencySymbol(catalog, reqCurrency);
+  const reqPrefix = currencySymbol(catalog, selectedCurrency);
 
   async function makeRequest() {
     const rawAmount = toUnits(amount, reqDecimals);
@@ -85,12 +89,12 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
       // The merchant's own username rides as `to_name`; the optional memo is attached verbatim. Both
       // now live INSIDE the 132-byte request (wire-format v2) — the QR is plain base64url (no `|name`).
       const memoVal = memo.trim();
-      const reqB64 = await DpayCore.encodeRequest(identity.publicHex, rawAmount, nonce, expiry, reqCurrency, identity.username, memoVal);
+      const reqB64 = await DpayCore.encodeRequest(identity.publicHex, rawAmount, nonce, expiry, selectedCurrency, identity.username, memoVal);
       // Build the NFC request too so reader mode can start alongside the QR (best-effort). The
       // merchant's username + memo ride as to_name/memo in the request bytes, same as the QR path.
       let nfcHex: string | null = null;
-      if (nfcReady && DpayNfc) { try { nfcHex = await DpayNfc.buildRequest(identity.publicHex, rawAmount, nonce, expiry, reqCurrency, identity.username, memoVal); } catch { /* best-effort: NFC reader is a parallel path; the QR still works */ } }
-      setReqQr({value: reqB64, rawAmount, currency: reqCurrency, nonce, nfcHex, expiry});
+      if (nfcReady && DpayNfc) { try { nfcHex = await DpayNfc.buildRequest(identity.publicHex, rawAmount, nonce, expiry, selectedCurrency, identity.username, memoVal); } catch { /* best-effort: NFC reader is a parallel path; the QR still works */ } }
+      setReqQr({value: reqB64, rawAmount, currency: selectedCurrency, nonce, nfcHex, expiry});
       setResult(null); setErr(null);
     } catch (e: unknown) { setErr(e instanceof Error ? e.message : String(e)); }
   }
@@ -347,65 +351,14 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
       />
       <Pressable testID="btn-request" style={S.primaryWide} onPress={makeRequest} accessibilityRole="button" accessibilityLabel="Request" accessibilityHint="Show your QR code so the payer can scan it to pay you" accessibilityState={{disabled: false}}><Text style={S.primaryText}>Request</Text></Pressable>
       {err ? <Text style={S.err}>{err}</Text> : null}
-      <CurrencyPicker
+      <AssetPicker
         open={pickOpen}
-        catalog={catalog}
-        current={reqCurrency}
-        onPick={(c) => { setReqCurrency(c); setAmount(''); setPickOpen(false); }}
+        assets={assets}
+        selectedId={selectedAssetId}
+        balances={balances}
+        onSelect={(id) => { setAmount(''); onSelectAsset(id); }}
         onClose={() => setPickOpen(false)}
-        solAddress={solAddress}
-        solBalance={solBalance}
-        activeSol={activeSol}
-        onSelectSol={() => { onSelectSol?.(); }}
       />
     </View>
-  );
-}
-
-// Compact settlement-currency picker, opened from the Receive amount prefix. Rendered in a <Modal> so
-// it overlays the whole screen regardless of where ReceiveMode sits in the tree. UNIFIED with the
-// Balances sheet: both consume the shared CurrencyRow (variant='plain' here, 'card' in Balances) +
-// buildCurrencyList, so the two selectors render identical rows (dot + name + chain-label subtitle +
-// ✓ when active). The amount is OMITTED here (the picker is a selector, not a balance list).
-//
-// SOL is listed (req-pick-sol) alongside the IC catalog currencies — picking it flips the rail via
-// onSelectSol (ReceiveMode unmounts when activeSol flips; the picker calls the up-call and returns
-// BEFORE any local setState, so there's no "update on unmounting component" warning).
-function CurrencyPicker({open, catalog, current, onPick, onClose, solAddress, solBalance, activeSol, onSelectSol}: {open: boolean; catalog: CurrencyDescriptor[]; current: number; onPick: (c: number) => void; onClose: () => void; solAddress?: string | null; solBalance?: string | null; activeSol?: boolean; onSelectSol?: () => void}) {
-  // The unified list — IC catalog (testnet hidden, mirroring Balances' default) + SOL when the device
-  // key is derived. testnet is NOT threaded here (the picker is a quick pick surface; Balances owns
-  // the testnet reveal toggle), so showTestnet=false keeps the two lists in sync for the common case.
-  const items = buildCurrencyList({catalog, assetBalances: {}, primaryBalance: null, online: true, showTestnet: false, currentCurrency: current, activeSol: !!activeSol, solAddress: solAddress ?? null, solBalance: solBalance ?? null});
-  return (
-    <Modal visible={open} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={S.pickBackdrop} onPress={onClose}>
-        <View style={S.pickCard}>
-          <Text style={S.pickTitle}>Receive in</Text>
-          {items.map(item => (
-            <CurrencyRow
-              key={item.key}
-              testId={`req-pick-${item.key}`}
-              name={item.name}
-              subtitle={item.subtitle}
-              active={item.active}
-              variant="plain"
-              showCheck
-              accessibilityLabel={item.kind === 'sol' ? 'Receive in SOL' : `Receive in ${item.name}`}
-              accessibilityHint={item.kind === 'sol' ? 'Switch to the Solana rail to receive SOL' : undefined}
-              onPress={() => {
-                if (item.kind === 'sol') {
-                  // SOL flips the rail — ReceiveMode unmounts when activeSol flips true, so call the
-                  // up-call and RETURN immediately (no setReqCurrency/setPickOpen — the local state
-                  // churn is moot and React may warn about updating an unmounting component).
-                  onSelectSol?.();
-                  return;
-                }
-                onPick(item.desc.currency);
-              }}
-            />
-          ))}
-        </View>
-      </Pressable>
-    </Modal>
   );
 }

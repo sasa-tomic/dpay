@@ -1,6 +1,6 @@
 import {describe, it, expect} from '@jest/globals';
-import {decideSolPayerReceipt, isSolReqExpired, solpayMatchesReq} from '../solana/payments';
-import type {SolPayerOutcome} from '../solana/payments';
+import {decideSolPayerReceipt, isSolReqExpired, solpayMatchesReq, decideUsdcAtaGate} from '../solana/payments';
+import type {SolPayerOutcome, UsdcAtaStatus} from '../solana/payments';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from '../payments';
 
 // U7 — the SOL receipt-nonce-relay outcome logic (the analog of payments.ts:decidePayerReceipt, but
@@ -174,5 +174,67 @@ describe('solpayMatchesReq — solpay→solreq binding (merchant broadcast integ
 
   it('base58 to compare is CASE-SENSITIVE (distinct address, not a case variant)', () => {
     expect(solpayMatchesReq({to: req.to.toLowerCase(), cur: 'SOL', amt: '5000000'}, req)).toBe(false);
+  });
+});
+
+// F4 (Phase 4) — the fail-closed USDC ATA gate. Pre-Phase-4 the gate let an 'unknown' (offline /
+// RPC-failure / inconclusive) state FALL THROUGH TO ALLOW, leaking an unfulfillable USDC request
+// (the merchant's `toAta` is encoded in the request; without the device's on-chain ATA the payer's
+// source ATA can't be debited to it). The new gate BLOCKS on every non-'present' state with honest
+// copy + a retryable affordance for the unverifiable case. These tests pin the matrix:
+//   - present + online → ALLOW (the only allowed cell).
+//   - absent / checking / unknown + online → BLOCK (with the right reason + retryable flag).
+//   - offline (regardless of status) → BLOCK with the 'offline' reason (the probe was skipped).
+// The gate is pure + total — it never throws, so the matrix is exhaustive over (status × online).
+describe('decideUsdcAtaGate (fail-closed USDC ATA gate)', () => {
+  it('present + online → allowed (the ONLY allow cell)', () => {
+    const g = decideUsdcAtaGate('present', true);
+    expect(g.allowed).toBe(true);
+  });
+
+  it('absent + online → blocked, NOT retryable (user must set up the ATA out-of-band)', () => {
+    const g = decideUsdcAtaGate('absent', true);
+    if (g.allowed) throw new Error('expected blocked');
+    expect(g.reason).toBe('absent');
+    expect(g.retryable).toBe(false);
+    expect(g.message).toMatch(/USDC account/i);
+  });
+
+  it('checking + online → blocked, not retryable (transient — the probe is in flight)', () => {
+    const g = decideUsdcAtaGate('checking', true);
+    if (g.allowed) throw new Error('expected blocked');
+    expect(g.reason).toBe('checking');
+    expect(g.retryable).toBe(false);
+  });
+
+  // THE LOAD-BEARING CHANGE: 'unknown' used to fall through to allow. It now BLOCKS + is RETRYABLE
+  // (a transient RPC failure / inconclusive probe — the user re-probes; the next attempt may succeed).
+  it('unknown + online → BLOCKED + RETRYABLE (the fail-closed change — was previously allowed)', () => {
+    const g = decideUsdcAtaGate('unknown', true);
+    if (g.allowed) throw new Error('expected blocked — unknown must NOT fall through to allow');
+    expect(g.reason).toBe('unverified');
+    expect(g.retryable).toBe(true);
+    expect(g.message).toMatch(/couldn't verify/i);
+  });
+
+  // Offline dominates: even 'present' would be stale (the probe was skipped because !online), so the
+  // gate reports 'offline' regardless of the cached status. The button is disabled + the copy tells
+  // the user to reconnect (NOT retryable from the button — a tap won't bring the network back).
+  it('offline → blocked with reason "offline" regardless of cached status (offline dominates)', () => {
+    for (const status of ['present', 'absent', 'checking', 'unknown'] as UsdcAtaStatus[]) {
+      const g = decideUsdcAtaGate(status, false);
+      if (g.allowed) throw new Error(`expected blocked for status=${status} when offline`);
+      expect(g.reason).toBe('offline');
+      expect(g.retryable).toBe(false);
+    }
+  });
+
+  it('every blocked decision carries a non-empty message (honest copy — no silent block)', () => {
+    for (const status of ['absent', 'checking', 'unknown'] as UsdcAtaStatus[]) {
+      const g = decideUsdcAtaGate(status, true);
+      if (g.allowed) throw new Error('expected blocked');
+      expect(typeof g.message).toBe('string');
+      expect(g.message.length).toBeGreaterThan(0);
+    }
   });
 });

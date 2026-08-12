@@ -25,10 +25,9 @@ import type {AssetId} from '../lib/types';
 // toggle can offer revealing them). The toggle only renders when there's something to reveal OR
 // testnet rows are currently shown.
 //
-// Phase 3 note: the ReceiveMode picker still consumes the legacy `buildCurrencyList` adapter (its
-// rewrite to this same `SelectableAsset` contract is Phase 4). The two selectors therefore share the
-// selection TRUTH (one `selectedAssetId`) but not yet the row model. This sheet is the canonical
-// Phase-3 renderer; the picker converges in Phase 4.
+// Phase 4: the ReceiveMode + SolReceiveMode pickers now consume the SAME `SelectableAsset` contract
+// as this sheet (via the unified `AssetPicker`). Both selectors share the selection TRUTH (one
+// `selectedAssetId`) AND the row model — there is no second list builder.
 export function BalancesSheet({assets, balances, selectedId, onSelect, hasTestnet, onTopUp, topUpBusy, topUpErr, showTestnet, onToggleTestnet, onClose}: {
   assets: SelectableAsset[];
   balances: Record<AssetId, BalanceView>;

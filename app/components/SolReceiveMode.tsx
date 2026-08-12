@@ -5,12 +5,14 @@ import {C} from '../config/palette';
 import {S} from '../styles';
 import {QR_SIZE_SMALL, SOL_BROADCAST_TIMEOUT_MS, SOL_ATA_CHECK_TIMEOUT_MS, IS_SOLANA_DEVNET, EXPIRY_WINDOW} from '../config/constants';
 import {fmtAsset, toUnits} from '../lib/format';
-import type {Identity} from '../lib/types';
+import {type SelectableAsset} from '../config/assets';
+import {type BalanceView} from '../lib/assetBalances';
+import type {Identity, AssetId} from '../lib/types';
 import bs58 from 'bs58';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {USDC_DECIMALS, USDC_MINT_ADDRESS, deriveAta} from '../solana/spl';
 import {encodeSolReq, decodeSolPay, type SolReq} from '../solana/qr';
-import {solpayMatchesReq} from '../solana/payments';
+import {solpayMatchesReq, decideUsdcAtaGate, type UsdcAtaStatus} from '../solana/payments';
 import {verifySignedTransaction} from '../solana/tx';
 import {deriveSolanaAddress, broadcastSolPayment, checkUsdcAta} from '../solana';
 import {friendlySolError} from '../solana/errors';
@@ -20,6 +22,7 @@ import {QrScanner} from './QrScanner';
 import {SolNfcTap} from './SolNfcTap';
 import {ModeToggle} from './ModeToggle';
 import {SolanaReceiveSheet} from './SolanaReceiveSheet';
+import {AssetPicker} from './AssetPicker';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {withTimeout} from '../lib/timeout';
 
@@ -41,9 +44,8 @@ const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeigh
  * NFC arming: this component mounts only while the SOL rail is selected. Switching the rail (via
  * Switching the active asset unmounts it, whose `useNfcTapState` cleanup stops the reader — no arm-leak.
  */
-export function SolReceiveMode({identity, online, nfcReady, solAddress, subMode, onSubModeChange}: {identity: Identity; online: boolean; nfcReady: boolean; solAddress: string; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void}) {
+export function SolReceiveMode({identity, online, nfcReady, solAddress, subMode, onSubModeChange, selectedToken, assets, selectedAssetId, balances, onSelectAsset}: {identity: Identity; online: boolean; nfcReady: boolean; solAddress: string; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; selectedToken: 'SOL' | 'USDC'; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void}) {
   const [amount, setAmount] = useState('');
-  const [cur, setCur] = useState<'SOL' | 'USDC'>('SOL');
   const [memo, setMemo] = useState('');
   const [phase, setPhase] = useState<'form' | 'reqQr' | 'result'>('form');
   const [reqUri, setReqUri] = useState<string | null>(null);
@@ -60,9 +62,14 @@ export function SolReceiveMode({identity, online, nfcReady, solAddress, subMode,
   // A tap taking over while the QR is shown; nfcKey re-starts the reader after each.
   const [nfcActive, setNfcActive] = useState(false);
   const [nfcKey, setNfcKey] = useState(0);
+  // The unified asset picker (opened by tapping the SOL/USDC prefix). Phase 4: replaced the old
+  // binary SOL↔USDC toggle prefix — the prefix now opens AssetPicker (same picker ReceiveMode +
+  // Balances use), whose onSelect is Wallet's handleSelect. SOL↔USDC within the Solana rail stays
+  // same-form (no unmount) so the amount is cleared inline before the dispatch.
+  const [pickOpen, setPickOpen] = useState(false);
 
-  const decimals = cur === 'SOL' ? SOL_DECIMALS : USDC_DECIMALS;
-  const unit = cur === 'SOL' ? SOL_UNIT : 'USDC';
+  const decimals = selectedToken === 'SOL' ? SOL_DECIMALS : USDC_DECIMALS;
+  const unit = selectedToken === 'SOL' ? SOL_UNIT : 'USDC';
 
   // Tick the display clock only while a request QR is shown (not after settlement). Display-only, so
   // a plain setInterval (not a network poll seam) is the right cadence for a countdown.
@@ -72,14 +79,21 @@ export function SolReceiveMode({identity, online, nfcReady, solAddress, subMode,
     return () => clearInterval(id);
   }, [phase, reqSnapshot, result]);
 
-  // F4 — USDC ATA existence gate. USDC offline-pay needs the device's ATA to pre-exist on-chain (the
-  // merchant's `toAta` is encoded in the request); without it the request is unfulfillable and the
-  // broadcast fails opaquely. Check ONLY when USDC is selected AND online (SOL needs no ATA; offline
-  // the button is already disabled). 'absent' blocks Request with a clear warning; 'checking' briefly
-  // disables; 'unknown' (offline/error) falls through to allow (the broadcast is the real gate).
-  const [usdcAta, setUsdcAta] = useState<'unknown' | 'checking' | 'present' | 'absent'>('unknown');
+  // F4 (Phase 4) — USDC ATA existence gate, now FAIL-CLOSED. USDC offline-pay needs the device's
+  // ATA to pre-exist on-chain (the merchant's `toAta` is encoded in the request); without it the
+  // request is unfulfillable and the broadcast fails opaquely. Check ONLY when USDC is selected AND
+  // online (SOL needs no ATA; offline the button is already disabled by the relay-offline gate).
+  //
+  // The fail-closed change (plan line ~272): the previous code let 'unknown' (offline / probe-threw
+  // / RPC-failure) FALL THROUGH TO ALLOW, leaking an unfulfillable request. Now EVERY non-'present'
+  // state BLOCKS Request via decideUsdcAtaGate (pure helper), with honest copy + a retry affordance
+  // for the 'unknown' case. The retry bumps `ataCheckTick` to re-fire this effect (a fresh probe may
+  // succeed on a transient RPC failure). 'absent' is NOT retryable (the user must set up the ATA
+  // out-of-band); 'checking' briefly disables while the probe is in flight.
+  const [usdcAta, setUsdcAta] = useState<UsdcAtaStatus>('unknown');
+  const [ataCheckTick, setAtaCheckTick] = useState(0);
   useEffect(() => {
-    if (cur !== 'USDC' || !online) { setUsdcAta('unknown'); return; }
+    if (selectedToken !== 'USDC' || !online) { setUsdcAta('unknown'); return; }
     let alive = true;
     setUsdcAta('checking');
     const {signal, cancel} = withTimeout(SOL_ATA_CHECK_TIMEOUT_MS);
@@ -95,7 +109,9 @@ export function SolReceiveMode({identity, online, nfcReady, solAddress, subMode,
       }
     })();
     return () => { alive = false; cancel(); };
-  }, [cur, online, identity.secretHex]);
+    // ataCheckTick is the retry affordance: tapping the "Couldn't verify — retry" button bumps it to
+    // re-fire the effect (a fresh probe). selectedToken replaces the deleted `cur` as the gate input.
+  }, [selectedToken, online, identity.secretHex, ataCheckTick]);
 
   const toggle = (
     <ModeToggle
@@ -107,17 +123,26 @@ export function SolReceiveMode({identity, online, nfcReady, solAddress, subMode,
     />
   );
 
-  // "My address" sub-mode: render the SOL deposit-address flow INLINE (the SolanaReceiveSheet body).
+  // "My address" sub-mode: render the SOL/USDC deposit-address flow INLINE (SolanaReceiveSheet body).
   // The toggle above lets the user flip back to "Request payment". The sheet is inline-only (no
   // overlay chrome — the tab body provides the surface). Mirrors the IC ReceiveMode "My address"
   // sub-mode. Sits BELOW the useState/useEffect so React's Rules of Hooks hold across sub-mode flips
   // (the merchant's amount/memo/form state survives a My-address detour without re-mounting).
+  //
+  // Phase 4 — asset-aware: when `selectedToken === 'USDC'`, the displayed address is the device's
+  // DERIVED USDC ATA (via deriveAta(solAddress, USDC_MINT_ADDRESS)), and the sheet is gated by ATA
+  // readiness — sending USDC to a non-existent ATA is unfulfillable, so when usdcAta !== 'present'
+  // the sheet shows a "set up your USDC account" message instead of the address QR. Native SOL is
+  // unaffected (the device key IS the account; no ATA prerequisite).
   if (subMode === 'address') {
+    const usdcAtaAddress = selectedToken === 'USDC' ? bs58.encode(deriveAta(solAddress, USDC_MINT_ADDRESS)) : solAddress;
     return (
       <View style={S.center}>
         {toggle}
         <SolanaReceiveSheet
-          address={solAddress}
+          address={usdcAtaAddress}
+          token={selectedToken}
+          ataReady={selectedToken === 'SOL' ? true : usdcAta === 'present'}
           onClose={() => onSubModeChange('request')}
         />
       </View>
@@ -131,7 +156,7 @@ export function SolReceiveMode({identity, online, nfcReady, solAddress, subMode,
     try {
       const addr = deriveSolanaAddress(identity.secretHex);
       const exp = Math.floor(Date.now() / 1000) + EXPIRY_WINDOW;
-      const reqInput = cur === 'SOL'
+      const reqInput = selectedToken === 'SOL'
         ? {to: addr, amt: raw, cur: 'SOL' as const, mint: null, toAta: null, exp, name: identity.username, memo: memo.trim()}
         : {to: addr, amt: raw, cur: 'USDC' as const, mint: USDC_MINT_ADDRESS,         toAta: bs58.encode(deriveAta(addr, USDC_MINT_ADDRESS)), exp, name: identity.username, memo: memo.trim()};
       const uri = encodeSolReq(reqInput);
@@ -287,16 +312,19 @@ export function SolReceiveMode({identity, online, nfcReady, solAddress, subMode,
       ) : null}
       <Text style={S.label}>Amount to receive</Text>
       <View style={S.amountRow}>
+        {/* Phase 4: the prefix opens the unified AssetPicker (replaces the old binary SOL↔USDC
+            toggle). The testID `sol-req-prefix` STAYS so e2e flows (45/51/62/69) still find it;
+            the difference is what tapping it does — opens the picker instead of toggling inline. */}
         <Pressable
           testID="sol-req-prefix"
           style={S.prefixBtn}
-          onPress={() => setCur(c => c === 'SOL' ? 'USDC' : 'SOL')}
+          onPress={() => setPickOpen(true)}
           accessibilityRole="button"
-          accessibilityLabel={`Receive in ${cur === 'SOL' ? 'USDC' : 'SOL'}`}
-          accessibilityHint="Toggle between SOL and USDC"
+          accessibilityLabel={`Receive in ${selectedToken === 'SOL' ? 'USDC' : 'SOL'}`}
+          accessibilityHint="Choose which asset the payer will send you"
           accessibilityState={{disabled: false}}>
-          <Text style={S.currency}>{cur === 'SOL' ? '◎' : '$'}</Text>
-          <Text style={S.caret}>{cur === 'SOL' ? 'SOL' : 'USDC'} ▾</Text>
+          <Text style={S.currency}>{selectedToken === 'SOL' ? '◎' : '$'}</Text>
+          <Text style={S.caret}>{selectedToken === 'SOL' ? 'SOL' : 'USDC'} ▾</Text>
         </Pressable>
         <TextInput
           testID="sol-req-amount-input"
@@ -320,22 +348,65 @@ export function SolReceiveMode({identity, online, nfcReady, solAddress, subMode,
         maxLength={32}
       />
       {!online ? <Text style={S.warnNote}>You're offline — the payer can sign, but you need a connection to broadcast their payment.</Text> : null}
-      {cur === 'USDC' && usdcAta === 'absent' ? (
-        <Text testID="sol-usdc-ata-warn" style={S.warnNote}>No USDC account on this device — set one up online first to receive USDC.</Text>
-      ) : null}
-      {cur === 'USDC' && usdcAta === 'checking' ? <Text style={S.dim2}>Checking USDC account…</Text> : null}
+      {(() => {
+        // F4 fail-closed gate (pure helper). Only meaningful when USDC is selected (SOL needs no ATA);
+        // for SOL the gate returns allowed:true unconditionally (usdcAta stays 'unknown' but is never
+        // consulted). The decision drives the inline copy + the Request button's disabled state.
+        if (selectedToken !== 'USDC') return null;
+        const gate = decideUsdcAtaGate(usdcAta, online);
+        if (gate.allowed) return null;
+        if (gate.reason === 'checking') return <Text style={S.dim2}>{gate.message}</Text>;
+        // The 'absent' / 'unverified' / 'offline' reasons carry a sol-usdc-ata-warn testID so the
+        // e2e net (flow 62 / 69) finds the blocking message regardless of which fail-closed branch
+        // fired — the contract is "Request is blocked + a USDC warning is shown", not a specific copy.
+        return (
+          <View>
+            <Text testID="sol-usdc-ata-warn" style={S.warnNote}>{gate.message}</Text>
+            {gate.retryable ? (
+              <Pressable
+                testID="btn-sol-usdc-ata-retry"
+                style={S.linkBtn}
+                onPress={() => setAtaCheckTick(t => t + 1)}
+                accessibilityRole="button"
+                accessibilityLabel="Retry USDC account check"
+                accessibilityState={{disabled: false}}>
+                <Text style={S.linkText}>Retry</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        );
+      })()}
       {err ? <Text style={S.err}>{err}</Text> : null}
-      <Pressable
-        testID="btn-sol-req-make"
-        style={[S.primaryWide, (!online || usdcAta === 'absent' || usdcAta === 'checking') && S.dim]}
-        disabled={!online || usdcAta === 'absent' || usdcAta === 'checking'}
-        onPress={makeRequest}
-        accessibilityRole="button"
-        accessibilityLabel="Request"
-        accessibilityHint={usdcAta === 'absent' ? 'No USDC account on this device — set one up online first' : 'Show your QR code so the payer can scan it to pay you'}
-        accessibilityState={{disabled: !online || usdcAta === 'absent' || usdcAta === 'checking'}}>
-        <Text style={S.primaryText}>{usdcAta === 'checking' ? 'Checking…' : 'Request'}</Text>
-      </Pressable>
+      {(() => {
+        // The Request button's disabled state derives from the SAME fail-closed gate as the copy —
+        // so the inline message + the button stay consistent (no "blocked copy but enabled button").
+        // The `!usdcGate.allowed` narrowing gives us access to `.reason` on the blocked variant.
+        const usdcGate = selectedToken === 'USDC' ? decideUsdcAtaGate(usdcAta, online) : null;
+        const blockedReason = usdcGate !== null && !usdcGate.allowed ? usdcGate.reason : null;
+        const blocked = !online || blockedReason !== null;
+        const checking = blockedReason === 'checking';
+        return (
+          <Pressable
+            testID="btn-sol-req-make"
+            style={[S.primaryWide, blocked && S.dim]}
+            disabled={blocked}
+            onPress={makeRequest}
+            accessibilityRole="button"
+            accessibilityLabel="Request"
+            accessibilityHint={blockedReason === 'absent' ? 'No USDC account on this device — set one up online first' : 'Show your QR code so the payer can scan it to pay you'}
+            accessibilityState={{disabled: blocked}}>
+            <Text style={S.primaryText}>{checking ? 'Checking…' : 'Request'}</Text>
+          </Pressable>
+        );
+      })()}
+      <AssetPicker
+        open={pickOpen}
+        assets={assets}
+        selectedId={selectedAssetId}
+        balances={balances}
+        onSelect={(id) => { setAmount(''); onSelectAsset(id); }}
+        onClose={() => setPickOpen(false)}
+      />
     </View>
   );
 }

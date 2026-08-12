@@ -456,16 +456,23 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
           )
           : mode === 'receive'
           ? (activeSol && solAddress
-              ? <SolReceiveMode identity={identity} online={online} nfcReady={nfc === 'ready'} solAddress={solAddress} subMode={receiveSubMode} onSubModeChange={setReceiveSubMode} />
+              ? <SolReceiveMode
+                  identity={identity} online={online} nfcReady={nfc === 'ready'} solAddress={solAddress}
+                  subMode={receiveSubMode} onSubModeChange={setReceiveSubMode}
+                  selectedToken={selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL'}
+                  assets={assets}
+                  selectedAssetId={effectiveSelectedId}
+                  balances={balances}
+                  onSelectAsset={handleSelect}
+                />
               : (
-                  /* PHASE 3 INTERIM (2026-08-12 unified asset selection rewrite): `activeSol` +
-                     `onSelectSol` survive here as ReceiveMode PROP NAMES ONLY — the TRUTH is
-                     `selectedAssetId` (Wallet's one selection state). `activeSol` is a DERIVED CONST
-                     (`selectedAsset?.protocol === 'solana'`), not useState; `onSelectSol` delegates
-                     to the single `handleSelect(AssetId)` setter. Phase 4 deletes these props when
-                     ReceiveMode is rewritten to receive `selectedAssetId` + an `onSelect(id)` picker
-                     contract directly. Until then this bridge keeps flow 63 (the Receive picker SOL
-                     rail-switch) green without a parallel selection state in Wallet. */
+                  /* Phase 4 (2026-08-12 unified asset selection rewrite): the PHASE 3 INTERIM bridge
+                     (`activeSol`/`onSelectSol`/`solAddress`/`solBalance` props on ReceiveMode) is
+                     DELETED. ReceiveMode now receives the SAME selection contract as Balances:
+                     `selectedAssetId` + `assets` + `balances` + `onSelectAsset` (Wallet's single
+                     `handleSelect`). The amount-prefix picker in ReceiveMode opens the unified
+                     AssetPicker; selecting any row (IC or SOL) flips the rail via Wallet's
+                     reconcileSelectedAsset + re-mounts the right Receive form. ONE selection state. */
                   <ReceiveMode
                     identity={identity} relayUrl={relayUrl} online={online} nfcReady={nfc === 'ready'}
                     onReceived={onActivity} catalog={catalog}
@@ -474,10 +481,11 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
                     depositNativeEth={depositNativeEth} depositFamily={depositFamily}
                     subMode={receiveSubMode} onSubModeChange={setReceiveSubMode}
                     prefillReceipt={prefillReceipt} onReceiptConsumed={() => setPrefillReceipt(null)}
-                    solAddress={solAddress}
-                    solBalance={solBalance}
-                    activeSol={activeSol}
-                    onSelectSol={() => handleSelect('solana:SOL')}
+                    selectedCurrency={selectedCurrency}
+                    assets={assets}
+                    selectedAssetId={effectiveSelectedId}
+                    balances={balances}
+                    onSelectAsset={handleSelect}
                   />
                 )
           )
