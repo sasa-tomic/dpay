@@ -1,5 +1,9 @@
 # 2026-08-10 — Unified Currency Selector Plan (PLANNING ONLY)
 
+> **SUPERSEDED 2026-08-12 by `2026-08-12-unified-asset-selection-rewrite.md`.** This plan unified
+> row presentation but retained `currentCurrency`, `activeSol`, `reqCurrency`, and the Solana-local
+> SOL/USDC toggle. Do not use its rail-switch architecture for new work.
+>
 > Planning document for the 3 coupled UX issues the founder filed on the currency
 > selectors. **No source changes made here** — this is the design + file-by-file
 > change set + e2e impact analysis. Implementation is a follow-up.

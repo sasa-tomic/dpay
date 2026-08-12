@@ -8,6 +8,31 @@
 > entries below are **deliberate, documented follow-ups**, not regressions — each carries its current mitigation and the concrete
 > next step. Structural detail lives in `CODEBASE_ANALYSIS.md`.
 
+## NEXT SESSION — work order (2026-08-12): unified asset selection rewrite
+
+> **Highest priority, unblocked. Start here.** The current selector is visually shared but
+> behaviorally split across `Wallet.currentCurrency`, `Wallet.activeSol`,
+> `ReceiveMode.reqCurrency`, and `SolReceiveMode.cur`. This causes the confirmed failures where a
+> Balances selection does not update the Receive dropdown, and selecting SOL collapses the picker
+> into a separate SOL/USDC toggle. Green flows 55/63 did not cover the end-to-end invariant and
+> partly codified the broken rail-switch behavior.
+>
+> **Decision:** there is no user-facing rail switch. Implement one Wallet-owned selected asset ID
+> and one complete picker/list everywhere. The selected/requested asset internally dispatches to
+> the existing IC or Solana protocol engine and NFC AID. Keep those money/protocol implementations
+> separate; do not merge them into a giant conditional component and do not put fake Solana rows in
+> the facade/relay ICRC catalog.
+>
+> **Plan:** `2026-08-12-unified-asset-selection-rewrite.md`. It supersedes
+> `2026-08-10-unified-selector-plan.md` and defines 7 independently green TDD commits: asset domain
+> + catalog reconciliation; honest SOL/Solana-USDC balances; one Wallet selection + picker;
+> selected-asset Receive forms; immutable payer request lock + deeplink repair; asset-aware direct
+> Solana actions; full browser/visual/prod/device verification + living-doc updates.
+>
+> **Do not postpone as founder outer-loop.** All implementation and emulator/prod-reconciliation
+> work is available in this workspace. Only a physical two-phone NFC radio hop remains an existing
+> outer-loop fidelity check; it does not block the rewrite's inner-loop and emulator gates.
+
 ## Session summary (2026-08-11, cont.): device gate + code review + PROD DEPLOYED to HEAD
 
 > Follow-up session: all pending founder-run items from the 2026-08-11 mnemonic session are **DONE**.
