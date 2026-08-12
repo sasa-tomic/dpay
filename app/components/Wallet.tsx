@@ -7,7 +7,7 @@ import {TOP_UP_CENTS, FAUCET_TIMEOUT_MS, SHOW_TESTNET_STORAGE_KEY} from '../conf
 import {familyDisplay, isTestnetCurrency} from '../config/catalog';
 import {base} from '../lib/format';
 import {applyOffline} from '../lib/amount';
-import {buildSelectableAssets, reconcileSelectedAsset, solanaUsdcAvailable} from '../config/assets';
+import {buildSelectableAssets, reconcileSelectedAsset, routeDeeplinkToIc, shouldAllowUserSelect, solanaUsdcAvailable} from '../config/assets';
 import {buildAssetBalances} from '../lib/assetBalances';
 import type {AssetId, Identity, NfcStatus} from '../lib/types';
 import {DpayCore} from '../services/native';
@@ -52,6 +52,14 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
   // reconcile runs; `effectiveSelectedId` (the reconciled value) is what every render reads.
   const [selectedAssetId, setSelectedAssetId] = useState<AssetId | null>(null);
   const [balancesOpen, setBalancesOpen] = useState(false);
+  // Phase 5 — selection lock. While the mounted Pay/Receive engine is mid-flight (a pay review/qr/
+  // paid, or a receive request-QR/result), it reports `true` via `onLockChange`. A USER-initiated
+  // asset switch (Balances button, AssetPicker) is then suppressed so the active engine is not
+  // unmounted — that would destroy the captured, immutable request snapshot the review reads. The
+  // lock is per-component and resets on unmount (see useReportLock); a tab switch to Ledger clears it.
+  // PROGRAMMATIC selection (deeplink routing — see the routing effect below) calls setSelectedAssetId
+  // directly and bypasses this lock: an incoming request must always route to its engine.
+  const [selectionLocked, setSelectionLocked] = useState(false);
   // Within-tab sub-modes for the Receive/Pay IA: "request"/"address" (Receive) and "scan"/"send"
   // (Pay). The on-chain deposit + withdraw surfaces now live INLINE in these tabs (lifted out of the
   // Balances per-row buttons + the overlay sheets). Owned here so deeplinks (?screen=deposit, the
@@ -239,8 +247,38 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
       const dl = decodeDeeplink(url);
       if (dl) applyBlob(dl.kind, dl.blob);
     });
-    return () => { alive = false; sub.remove(); };
+    // Phase 5 test seam — simulate a FOREGROUND native deeplink arriving while a Solana asset is
+    // idle-selected. This is the scenario web reload CANNOT reproduce: selectedAssetId is
+    // session-local, so a reload resets it to the IC default and the SOL→IC routing never fires. The
+    // harness injects `dpay:req`/`dpay:pay` via this hook instead of a real OS intent — it drives the
+    // SAME applyBlob path as the web readers + getInitialURL + the foreground listener above.
+    // Mirrors the __DPAY_TEST_RECEIPT_PUBKEY precedent (a test global read in prod code).
+    if (typeof globalThis !== 'undefined') {
+      (globalThis as unknown as {__DPAY_TEST_DEEPLINK?: (d: {kind: DeeplinkKind; blob: string}) => void}).__DPAY_TEST_DEEPLINK = (d) => applyBlob(d.kind, d.blob);
+    }
+    return () => {
+      alive = false;
+      sub.remove();
+      if (typeof globalThis !== 'undefined') {
+        delete (globalThis as unknown as {__DPAY_TEST_DEEPLINK?: unknown}).__DPAY_TEST_DEEPLINK;
+      }
+    };
   }, []);
+
+  // Phase 5 (concern A) — route an IC deeplink to the IC engine regardless of the idle selection. A
+  // `dpay:req`/`dpay:pay` blob is IC-only (the requested currency lives INSIDE the blob, readable only
+  // by DpayCore.decodeRequest). If a Solana asset is idle-selected when the blob arrives,
+  // SolPayMode/SolReceiveMode would mount instead and the blob would be SILENTLY LOST (those engines
+  // never consume IC prefills). This programmatically selects an IC asset so the IC engine mounts +
+  // consumes the blob; the engine then reviews with the EXACT requested asset. PROGRAMMATIC — calls
+  // setSelectedAssetId directly, NOT handleSelect, so it bypasses the selection lock (an incoming
+  // request is not a user gesture; routing to the right engine must always win).
+  useEffect(() => {
+    if (prefillRequest == null && prefillReceipt == null) return;
+    if (selectedAsset?.protocol === 'ic') return;          // IC engine already mounts — nothing to do
+    const icId = routeDeeplinkToIc(effectiveSelectedId, assets);
+    if (icId) setSelectedAssetId(icId);
+  }, [prefillRequest, prefillReceipt, selectedAsset, effectiveSelectedId, assets]);
 
   // MC8 U5 — AUTO-OPEN the ckERC20 deposit on mount if a watching deposit was persisted across a
   // restart. The watching poll is relay-bound (NOT Ethereum), so it is resumable WITHOUT a wallet
@@ -355,25 +393,39 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
   // main view with no text input focused and no sheet/overlay open (Esc is handled per-sheet by
   // useEscapeToClose). Native (no physical keyboard) is a no-op; the on-UI hints are web-only too.
   const anySheetOpen = balancesOpen || settingsOpen;
+  // Phase 5 (concern B) — the Balances header button is disabled only while a PAY engine holds the
+  // lock (review/QR/paid = money-critical mid-transaction; opening the sheet over a review is a
+  // distraction and tapping a row would be a no-op anyway). During a RECEIVE lock (request QR shown /
+  // result) the button STAYS tappable: the Balances sheet is a harmless modal overlay that does NOT
+  // unmount the engine, and the tour/screen-capture flows legitimately open it over a request QR.
+  // The actual protection on the receive side is handleSelect bailing on the lock — a cross-protocol
+  // selection (the only thing that would unmount the engine) is suppressed regardless.
+  const balancesDisabled = selectionLocked && mode === 'pay';
+
   useHotkeys({
     p: () => setMode('pay'),
     r: () => setMode('receive'),
     t: topUp,
-    a: () => setBalancesOpen(true),
+    a: () => { if (!balancesDisabled) setBalancesOpen(true); },
     l: () => setMode('ledger'),
   }, {ignoreIfInputFocused: true, enabled: !anySheetOpen});
 
   // The ONE selection setter. Setting the selection is a deliberate user action, so it dismisses the
   // Balances sheet AND resets the within-tab sub-modes + clears any idle draft (the scan/send +
   // request/address surfaces start fresh on the new asset). Money-critical review/sign flows are NOT
-  // affected: an active payer request is bound to its own immutable snapshot (Phase 5 formalizes the
-  // lock; this reset touches only the idle forms).
+  // affected: an active payer request is bound to its own immutable snapshot.
+  //
+  // Phase 5 — this is a USER gesture, so it respects the selection lock (shouldAllowUserSelect). An
+  // in-flight pay/receive op reports the lock via onLockChange; bailing here keeps the active engine
+  // mounted so the captured request snapshot is not destroyed. PROGRAMMATIC selection (deeplink
+  // routing) calls setSelectedAssetId DIRECTLY, never here, so it bypasses the lock.
   const handleSelect = useCallback((id: AssetId) => {
+    if (!shouldAllowUserSelect(selectionLocked)) return;
     setSelectedAssetId(id);
     setBalancesOpen(false);
     setReceiveSubMode('request');
     setPaySubMode('scan');
-  }, []);
+  }, [selectionLocked]);
 
   return (
     <SafeAreaView style={S.root}>
@@ -404,11 +456,13 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
         </View>
         <Pressable
           testID="balance"
-          style={S.balBox}
+          style={[S.balBox, balancesDisabled && S.dim]}
+          disabled={balancesDisabled}
           onPress={() => setBalancesOpen(true)}
           accessibilityRole="button"
           accessibilityLabel="Balances — switch currency or receive"
-          accessibilityHint="Open the full asset list, switch the displayed currency, or receive"
+          accessibilityHint={balancesDisabled ? 'Finish or cancel the current payment first' : 'Open the full asset list, switch the displayed currency, or receive'}
+          accessibilityState={{disabled: balancesDisabled}}
         >
           <View style={S.balLabelRow}>
             <View style={[S.dot, {backgroundColor: online ? C.ok : C.sub2}]} />
@@ -441,7 +495,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
       <ScrollView style={S.scroll} contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
         {mode === 'pay'
           ? (activeSol && solAddress
-              ? <SolPayMode identity={identity} online={online} nfcReady={nfc === 'ready'} solBalance={solBalance ?? '0'} onSent={refreshSol} subMode={paySubMode} onSubModeChange={setPaySubMode} onShowDeposit={() => { setMode('receive'); setReceiveSubMode('address'); }} />
+              ? <SolPayMode identity={identity} online={online} nfcReady={nfc === 'ready'} solBalance={solBalance ?? '0'} onSent={refreshSol} subMode={paySubMode} onSubModeChange={setPaySubMode} onShowDeposit={() => { setMode('receive'); setReceiveSubMode('address'); }} onLockChange={setSelectionLocked} />
               : <PayMode
                   identity={identity} online={online} relayUrl={relayUrl} nfcStatus={nfc}
                   onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance}
@@ -452,6 +506,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
                   withdrawBalance={displayAssetBalances[selectedCurrency] ?? '0'}
                   subMode={paySubMode} onSubModeChange={setPaySubMode}
                   prefillRequest={prefillRequest} onPrefillConsumed={() => setPrefillRequest(null)}
+                  onLockChange={setSelectionLocked}
                 />
           )
           : mode === 'receive'
@@ -464,6 +519,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
                   selectedAssetId={effectiveSelectedId}
                   balances={balances}
                   onSelectAsset={handleSelect}
+                  onLockChange={setSelectionLocked}
                 />
               : (
                   /* Phase 4 (2026-08-12 unified asset selection rewrite): the PHASE 3 INTERIM bridge
@@ -486,6 +542,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
                     selectedAssetId={effectiveSelectedId}
                     balances={balances}
                     onSelectAsset={handleSelect}
+                    onLockChange={setSelectionLocked}
                   />
                 )
           )

@@ -199,6 +199,38 @@ export function reconcileSelectedAsset(selectedId: AssetId | null, assets: Selec
   return assets.length > 0 ? assets[0].id : null;
 }
 
+// Phase 5 — deeplink routing to the IC engine. A `dpay:req`/`dpay:pay` blob is IC-only: the requested
+// currency lives INSIDE the blob (only DpayCore.decodeRequest can read it), so at routing time ANY IC
+// selection suffices — PayMode/ReceiveMode decode the blob and review with the EXACT requested asset.
+// If a Solana asset is idle-selected when such a blob arrives, SolPayMode/SolReceiveMode would mount
+// instead and the blob would be SILENTLY LOST (those engines never consume IC prefills). This returns
+// the IC asset id the Wallet must programmatically select so the IC engine mounts. It is a NO-OP when
+// an IC asset is already selected (preserve the exact id — do not reset to ic:0, which would churn the
+// header). Solana deeplinks (solreq:/solpay:) are a different scheme handled by the SOL engines' own
+// QR-scan path and are NOT OS deeplinks; this helper is for IC blobs only.
+export function routeDeeplinkToIc(selectedId: AssetId | null, assets: SelectableAsset[]): AssetId | null {
+  // Already on an IC asset — the IC engine mounts; nothing to change.
+  if (selectedId !== null && selectedId.startsWith('ic:')) return selectedId;
+  // Prefer DEMO (always present, the default home asset), else the first IC asset in catalog order.
+  const demo = assets.find(a => a.id === 'ic:0');
+  if (demo) return demo.id;
+  const firstIc = assets.find(a => a.protocol === 'ic');
+  return firstIc ? firstIc.id : null;
+}
+
+// Phase 5 — the selection-lock gate for USER-initiated asset selection. While an in-flight pay/receive
+// op holds the lock (Wallet.selectionLocked), a user gesture that would switch the idle asset is
+// suppressed: switching unmounts the active engine and destroys the captured request snapshot (the
+// review the user is mid-flow on). It also arms the wrong protocol's NFC reader (invariant #11). The
+// lock is released when the user cancels/resets the op (the engine reports onLockChange(false)).
+//
+// PROGRAMMATIC selection (deeplink routing → routeDeeplinkToIc) BYPASSES this gate entirely: it calls
+// setSelectedAssetId directly, never through handleSelect, because a deeplink is not a user gesture
+// and routing the user to the right engine for an incoming request must always win.
+export function shouldAllowUserSelect(selectionLocked: boolean): boolean {
+  return !selectionLocked;
+}
+
 // Whether Solana USDC is selectable on the CURRENTLY configured cluster. Pure over the constants;
 // no network. The two fail-closed cases:
 //   - empty RPC URL (`SOLANA_RPC_URL=''` — the offline inner loop / jest / a build with SOL

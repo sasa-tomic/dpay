@@ -21,6 +21,7 @@ import {ModeToggle} from './ModeToggle';
 import {DepositSheet} from './DepositSheet';
 import {CkErc20DepositSheet} from './CkErc20DepositSheet';
 import {AssetPicker} from './AssetPicker';
+import {useReportLock} from '../hooks/useReportLock';
 import {withTimeout} from '../lib/timeout';
 
 // The optional merchant memo input — a real secondary field (not a bare text link), mirroring the
@@ -30,7 +31,7 @@ import {withTimeout} from '../lib/timeout';
 // left the field floating shorter than its neighbors), 44pt-min.
 const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeight: 44, borderWidth: 1, borderColor: C.sub2, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink};
 
-export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, catalog, depositCurrency, depositDisplay, depositChainId, depositNativeEth, depositFamily, subMode, onSubModeChange, prefillReceipt, onReceiptConsumed, selectedCurrency, assets, selectedAssetId, balances, onSelectAsset}: {identity: Identity; relayUrl: string; online: boolean; nfcReady: boolean; onReceived: () => void; catalog: CurrencyDescriptor[]; depositCurrency: number; depositDisplay: FamilyDisplay | null; depositChainId: number | null; depositNativeEth: boolean; depositFamily: 'CkBtcUtxo' | 'CkEthErc20' | null; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; prefillReceipt?: string | null; onReceiptConsumed?: () => void; selectedCurrency: number; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void}) {
+export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, catalog, depositCurrency, depositDisplay, depositChainId, depositNativeEth, depositFamily, subMode, onSubModeChange, prefillReceipt, onReceiptConsumed, selectedCurrency, assets, selectedAssetId, balances, onSelectAsset, onLockChange}: {identity: Identity; relayUrl: string; online: boolean; nfcReady: boolean; onReceived: () => void; catalog: CurrencyDescriptor[]; depositCurrency: number; depositDisplay: FamilyDisplay | null; depositChainId: number | null; depositNativeEth: boolean; depositFamily: 'CkBtcUtxo' | 'CkEthErc20' | null; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; prefillReceipt?: string | null; onReceiptConsumed?: () => void; selectedCurrency: number; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; onLockChange?: (locked: boolean) => void}) {
   // The within-tab sub-mode is OWNED by Wallet so deeplinks (?screen=deposit, auto-open-ckERC20) can
   // land the user directly on "My address". "request" = the dpay-to-dpay payment-request QR;
   // "address" = the on-chain deposit flow. The toggle renders only when depositFamily is non-null.
@@ -60,6 +61,13 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
   // forms + Balances consume, with Wallet's handleSelect as its onSelect. Esc/backdrop close it
   // (AssetPicker owns useEscapeToClose internally).
   const [pickOpen, setPickOpen] = useState(false);
+
+  // Phase 5 — lock the idle asset selection while a request QR is showing or a settlement result is
+  // displayed. Both hold an in-flight request the user must not lose to an asset switch (the QR is the
+  // encoded request a payer is scanning; the result is the settled outcome). The idle form is free.
+  const locked = !!reqQr || !!result;
+  useReportLock(onLockChange, locked);
+
   // Tick the display clock only while a request QR is shown (not after settlement) — display-only,
   // so a plain setInterval (not the network POLL seam) is the right cadence for a countdown.
   useEffect(() => {

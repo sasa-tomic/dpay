@@ -24,6 +24,7 @@ import {ModeToggle} from './ModeToggle';
 import {SolanaReceiveSheet} from './SolanaReceiveSheet';
 import {AssetPicker} from './AssetPicker';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
+import {useReportLock} from '../hooks/useReportLock';
 import {withTimeout} from '../lib/timeout';
 
 const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeight: 44, borderWidth: 1, borderColor: C.sub2, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink};
@@ -44,7 +45,7 @@ const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeigh
  * NFC arming: this component mounts only while the SOL rail is selected. Switching the rail (via
  * Switching the active asset unmounts it, whose `useNfcTapState` cleanup stops the reader — no arm-leak.
  */
-export function SolReceiveMode({identity, online, nfcReady, solAddress, subMode, onSubModeChange, selectedToken, assets, selectedAssetId, balances, onSelectAsset}: {identity: Identity; online: boolean; nfcReady: boolean; solAddress: string; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; selectedToken: 'SOL' | 'USDC'; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void}) {
+export function SolReceiveMode({identity, online, nfcReady, solAddress, subMode, onSubModeChange, selectedToken, assets, selectedAssetId, balances, onSelectAsset, onLockChange}: {identity: Identity; online: boolean; nfcReady: boolean; solAddress: string; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; selectedToken: 'SOL' | 'USDC'; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; onLockChange?: (locked: boolean) => void}) {
   const [amount, setAmount] = useState('');
   const [memo, setMemo] = useState('');
   const [phase, setPhase] = useState<'form' | 'reqQr' | 'result'>('form');
@@ -62,6 +63,11 @@ export function SolReceiveMode({identity, online, nfcReady, solAddress, subMode,
   // A tap taking over while the QR is shown; nfcKey re-starts the reader after each.
   const [nfcActive, setNfcActive] = useState(false);
   const [nfcKey, setNfcKey] = useState(0);
+
+  // Phase 5 — lock the idle asset selection while a SOL request QR is showing or a result is
+  // displayed (phase !== 'form'). The idle form is free.
+  const locked = phase !== 'form';
+  useReportLock(onLockChange, locked);
   // The unified asset picker (opened by tapping the SOL/USDC prefix). Phase 4: replaced the old
   // binary SOL↔USDC toggle prefix — the prefix now opens AssetPicker (same picker ReceiveMode +
   // Balances use), whose onSelect is Wallet's handleSelect. SOL↔USDC within the Solana rail stays

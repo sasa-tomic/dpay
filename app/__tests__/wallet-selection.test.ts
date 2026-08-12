@@ -16,7 +16,7 @@
  *      being deterministic, so the Wallet's reset-after-reconcile is safe).
  */
 import {describe, it, expect} from '@jest/globals';
-import {buildSelectableAssets, reconcileSelectedAsset} from '../config/assets';
+import {buildSelectableAssets, reconcileSelectedAsset, routeDeeplinkToIc, shouldAllowUserSelect} from '../config/assets';
 import {buildAssetBalances, type BalanceView} from '../lib/assetBalances';
 import type {CurrencyDescriptor} from '../config/catalog';
 import type {AssetId} from '../lib/types';
@@ -207,3 +207,59 @@ describe('reconcileSelectedAsset — hiding a selected testnet asset applies the
     expect(id).toBe('ic:0');
   });
 });
+
+// =============================================================================================
+// Phase 5 — deeplink routing to the IC engine + selection-lock predicate (pure helpers)
+// =============================================================================================
+//
+// A `dpay:req`/`dpay:pay` blob is IC-only: the requested currency lives INSIDE the blob (only
+// DpayCore.decodeRequest can read it). If a Solana asset is idle-selected when such a blob arrives,
+// SolPayMode/SolReceiveMode would mount and the blob would be SILENTLY LOST. `routeDeeplinkToIc`
+// returns the IC asset id to programmatically select so the IC engine mounts — any IC selection
+// suffices, since PayMode decodes the blob and reviews with the EXACT requested asset. It is a no-op
+// when an IC asset is already selected (preserve). `shouldAllowUserSelect` is the lock gate for
+// USER-initiated selection; programmatic routing (routeDeeplinkToIc) bypasses it by calling
+// setSelectedAssetId directly.
+describe('routeDeeplinkToIc — force the IC engine to mount for an IC deeplink', () => {
+  const assets = buildSelectableAssets(CATALOG, {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
+
+  it('SOL idle-selected ⇒ routes to ic:0 (DEMO, the always-present IC asset)', () => {
+    expect(routeDeeplinkToIc('solana:SOL', assets)).toBe('ic:0');
+  });
+
+  it('Solana USDC idle-selected ⇒ routes to ic:0 (Solana never hosts IC blobs)', () => {
+    expect(routeDeeplinkToIc('solana:USDC', assets)).toBe('ic:0');
+  });
+
+  it('no selection yet (null) ⇒ routes to ic:0', () => {
+    expect(routeDeeplinkToIc(null, assets)).toBe('ic:0');
+  });
+
+  it('an IC asset is already selected ⇒ no-op (preserve the exact IC id, do not reset to ic:0)', () => {
+    expect(routeDeeplinkToIc('ic:1', assets)).toBe('ic:1');
+    expect(routeDeeplinkToIc('ic:2', assets)).toBe('ic:2');
+    expect(routeDeeplinkToIc('ic:0', assets)).toBe('ic:0');
+  });
+
+  it('ic:0 absent but other IC assets present ⇒ falls back to the first available IC id', () => {
+    const noDemo = assets.filter(a => a.id !== 'ic:0');
+    // CKBTC (ic:1) is the first IC asset once DEMO is filtered out.
+    expect(routeDeeplinkToIc('solana:SOL', noDemo)).toBe('ic:1');
+  });
+
+  it('no IC asset exists at all ⇒ null (degenerate: cannot route; caller must guard)', () => {
+    const solOnly = assets.filter(a => a.protocol === 'solana');
+    expect(routeDeeplinkToIc('solana:SOL', solOnly)).toBeNull();
+  });
+});
+
+describe('shouldAllowUserSelect — the user-gesture lock gate', () => {
+  it('unlocked ⇒ allows user selection', () => {
+    expect(shouldAllowUserSelect(false)).toBe(true);
+  });
+
+  it('locked ⇒ suppresses user selection (an in-flight pay/receive op must not be unmounted)', () => {
+    expect(shouldAllowUserSelect(true)).toBe(false);
+  });
+});
+

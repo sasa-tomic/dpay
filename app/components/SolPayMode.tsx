@@ -18,6 +18,7 @@ import {QrScanner} from './QrScanner';
 import {SolNfcTap} from './SolNfcTap';
 import {ModeToggle} from './ModeToggle';
 import {SolanaWithdrawSheet} from './SolanaWithdrawSheet';
+import {useReportLock} from '../hooks/useReportLock';
 import {withTimeout} from '../lib/timeout';
 
 /**
@@ -39,7 +40,7 @@ import {withTimeout} from '../lib/timeout';
  * NFC arming: this component mounts only while the SOL rail is selected. Switching the rail (via
  * switching the active asset unmounts it, whose `useNfcTapState` cleanup disarms the HCE card — no arm-leak.
  */
-export function SolPayMode({identity, online, nfcReady, solBalance, onSent, subMode, onSubModeChange, onShowDeposit}: {identity: Identity; online: boolean; nfcReady: boolean; solBalance: string; onSent: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; onShowDeposit?: () => void}) {
+export function SolPayMode({identity, online, nfcReady, solBalance, onSent, subMode, onSubModeChange, onShowDeposit, onLockChange}: {identity: Identity; online: boolean; nfcReady: boolean; solBalance: string; onSent: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; onShowDeposit?: () => void; onLockChange?: (locked: boolean) => void}) {
   const [phase, setPhase] = useState<'setup' | 'scan' | 'review' | 'qr' | 'paid'>('setup');
   const [nonceState, setNonceState] = useState<SolNonceState | null>(null);
   const [req, setReq] = useState<SolReq | null>(null);
@@ -49,6 +50,12 @@ export function SolPayMode({identity, online, nfcReady, solBalance, onSent, subM
   // A tap arriving on the always-armed card takes over the scan screen; nfcKey re-arms after each.
   const [nfcActive, setNfcActive] = useState(false);
   const [nfcKey, setNfcKey] = useState(0);
+
+  // Phase 5 — lock the idle asset selection while a SOL payment is in flight. review/qr/paid hold the
+  // captured, immutable SolReq snapshot the user must not lose to an asset switch. setup (first-use
+  // nonce creation) and scan stay free — neither has captured a request yet.
+  const locked = phase === 'review' || phase === 'qr' || phase === 'paid';
+  useReportLock(onLockChange, locked);
 
   // Load the payer's nonce-account state on mount. If absent, stay in 'setup' (first-use gate).
   useEffect(() => {

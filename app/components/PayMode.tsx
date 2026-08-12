@@ -19,6 +19,7 @@ import {QrScanner} from './QrScanner';
 import {ModeToggle} from './ModeToggle';
 import {WithdrawSheet} from './WithdrawSheet';
 import {useEscapeToClose} from '../hooks/useHotkeys';
+import {useReportLock} from '../hooks/useReportLock';
 import {withTimeout} from '../lib/timeout';
 
 // Plain-language per-reason text for the NFC-unavailable info popup. Each ends with the honest
@@ -29,7 +30,7 @@ const NFC_REASON: Record<Exclude<NfcStatus, 'ready'>, string> = {
   unknown: "Couldn't check NFC status. Scan the QR code to pay.",
 };
 
-export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assetBalances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillRequest, onPrefillConsumed}: {identity: Identity; online: boolean; relayUrl: string; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assetBalances: Record<number, string>; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillRequest?: string | null; onPrefillConsumed?: () => void}) {
+export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assetBalances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillRequest, onPrefillConsumed, onLockChange}: {identity: Identity; online: boolean; relayUrl: string; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assetBalances: Record<number, string>; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillRequest?: string | null; onPrefillConsumed?: () => void; onLockChange?: (locked: boolean) => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid'>('scan');
   // The within-tab sub-mode is OWNED by Wallet. "scan" = the existing scan-to-pay flow; "send" = the
   // on-chain send-to-address flow (the WithdrawSheet body, lifted inline). The toggle renders only
@@ -53,6 +54,12 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
   const nfcReady = nfcStatus === 'ready';
   const [nfcInfoOpen, setNfcInfoOpen] = useState(false);
   useEscapeToClose(() => setNfcInfoOpen(false));
+
+  // Phase 5 — lock the idle asset selection while a payment is in flight. review/qr/paid each hold a
+  // captured, immutable request snapshot the user must not lose to an asset switch (which would
+  // unmount this component). 'scan' (incl. the 'send' sub-mode) leaves the selection free.
+  const locked = phase !== 'scan';
+  useReportLock(onLockChange, locked);
 
   async function onRequestString(raw: string) {
     try {
