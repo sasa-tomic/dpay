@@ -194,7 +194,11 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
         const r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/balance/${identity.publicHex}?currency=${currency}`, undefined, BALANCE_TIMEOUT_MS);
         const j = await readJsonOrEmpty(r);
         if (typeof j.balance === 'string') setStartBal(j.balance);
-      } catch { /* best-effort snapshot; watching falls back to any-positive */ }
+      } catch (e) {
+        // Best-effort: watching falls back to any-positive. Still log the cause so a relay 5xx or a
+        // recurring timeout on the balance endpoint is visible during a deposit debugging session.
+        console.warn('ckERC20 startBal snapshot failed:', e instanceof Error ? e.message : String(e));
+      }
       setPhase('enter');
     } catch (e: unknown) {
       setErr((e instanceof Error ? e.message : String(e)) || 'Could not connect to your wallet.');
