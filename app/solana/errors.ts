@@ -1,7 +1,7 @@
 // Solana RPC error → human copy. PURE (no react-native, no fetch, no globals) so it runs under
 // jest on the fast inner loop. This is the SINGLE source of truth for translating raw Solana RPC
-// errors into actionable user-facing text — used by the SOL pay setup (createNonceAccount), the
-// SOL send sheet (sendSol), and the SOL merchant broadcast surface (broadcastSolPayment).
+// errors into actionable user-facing text — used by the SOL send sheet (sendSol) and the SOL
+// merchant broadcast surface (broadcastSolPayment).
 //
 // Why this exists: a payer with no balance hit the verbatim string "solana rpc: Transaction
 // simulation failed: Attempt to debit on account but found no record of a prior credit" — a raw

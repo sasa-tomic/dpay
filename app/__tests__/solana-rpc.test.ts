@@ -370,7 +370,7 @@ describe('solana rpc — getTokenAccountBalance (exact-string SPL)', () => {
 });
 
 // Phase 3 — v2 recent-blockhash freshness RPC methods. The merchant's broadcast state machine
-// (solana.ts broadcastSolPaymentV2) requires these to authoritatively prove a request is still
+// (solana.ts broadcastSolPayment) requires these to authoritatively prove a request is still
 // broadcastable BEFORE sendTransaction, and to authoritatively classify a confirm timeout as
 // expired vs honest-unknown. All run at SOL_PAYMENT_COMMITMENT='confirmed' and accept
 // `minContextSlot` (the request's context slot) for reorg-aware behavior.

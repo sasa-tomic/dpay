@@ -1,56 +1,48 @@
-// Flow 53 — SOL error path: merchant broadcast with a rejecting stub.
+// Flow 53 — SOL v2 error path: merchant broadcast with a rejecting stub.
 //
 // Proves a SOL broadcast error is surfaced as a FRIENDLY message — never the raw RPC error text and
-// never a false "Received". Same setup as flow 51 (merchant broadcast) BUT the stub's sendTransaction
-// THROWS the canonical "no record of a prior credit" error (the #1 unfunded-account failure).
+// never a false "Received". Same setup as flow 51 (merchant broadcast with a REAL signed solpay) BUT
+// the stub's sendTransaction THROWS the canonical unfunded-account error.
 //
-// Code path: onSignedQr → broadcastSolPayment → sendTransaction THROWS → broadcastSolPayment's catch
-// matches the rejection regex (/no record of a prior credit|simulation failed|debit/i) → returns
-// {status: RECEIPT_REJECTED} → onSignedQr sets the friendly "Payment rejected" message on sol-req-err.
-// The raw RPC text ("Transaction simulation failed" / "Attempt to debit") NEVER reaches the DOM.
+// v2 code path: onSignedQr → broadcastSolPayment → strict-verify PASSES (real signed tx) →
+// freshness check PASSES → sendTransaction THROWS → catch matches the rejection regex
+// (/Instruction|insufficient|no record of a prior credit|simulation failed|debit|custom|already|blockhash|nonce/i)
+// → returns {status: RECEIPT_REJECTED} → SolReceiveMode shows the friendly "rejected" message on
+// sol-req-err. The raw RPC text NEVER reaches the DOM.
 //
 // Asserts:
 //   - sol-req-err renders with the friendly rejection text (contains "rejected").
-//   - The body does NOT contain the raw RPC error ("Transaction simulation failed" / "Attempt to debit").
-//   - sol-req-status (the "Received" success) does NOT render (no false success).
+//   - The body does NOT contain the raw RPC error text.
+//   - sol-req-status ("Received") does NOT render (no false success).
 //
-// Selector contract: same as flow 51 (asset-sol-select, tab-receive, btn-sol-req-make, sol-req-qr,
-// sol-req-err).
+// Selector contract: same as flow 51.
 import {setup, assert, onboardWallet} from '../harness/lib.mjs';
 
 export const meta = {
   id: '53',
   name: 'sol-merchant-error',
   journey: 'offline',
-  covers: ['sol-merchant', 'sol-error', 'solpay-match', 'friendly-error'],
-  verifies: 'SOL merchant broadcast error surfaces a friendly message (not raw RPC, not false Received).',
-  timeoutMs: 25000,
+  covers: ['sol-merchant', 'sol-error', 'sol-v2-rejected', 'friendly-error'],
+  verifies: 'SOL v2 merchant broadcast error surfaces a friendly message (not raw RPC, not false Received).',
+  timeoutMs: 30000,
 };
 
-const PAYER_NPUB = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';
-
-function nonceAccountB64() {
-  const buf = Buffer.alloc(80, 0);
-  buf.writeUInt32LE(0, 0);
-  buf.writeUInt32LE(1, 4);
-  buf.fill(1, 8, 40);
-  Buffer.from('deadbeef'.repeat(8), 'hex').copy(buf, 40);
-  buf.writeBigUInt64LE(5000n, 72);
-  return buf.toString('base64');
+// Minimal base58 encoder (see flow 47).
+const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+function bs58Encode(bytes) {
+  let num = 0n;
+  for (const b of bytes) num = num * 256n + BigInt(b);
+  let out = '';
+  while (num > 0n) { out = B58[Number(num % 58n)] + out; num /= 58n; }
+  for (const b of bytes) { if (b === 0) out = '1' + out; else break; }
+  return out;
 }
 
-function decodeSolReq(uri) {
-  const payload = uri.split('solreq:v1?')[1];
-  return JSON.parse(Buffer.from(payload, 'base64url').toString());
-}
-
-function buildSolPay(req) {
-  const obj = {
-    v: 1, to: req.to, amt: req.amt, cur: req.cur,
-    npub: PAYER_NPUB,
-    tx: Buffer.from('dummy-signed-tx-bytes').toString('base64url'),
-  };
-  return 'solpay:v1?' + Buffer.from(JSON.stringify(obj)).toString('base64url');
+function extractSig(solpayUri) {
+  const payload = solpayUri.split('solpay:v2?')[1];
+  const obj = JSON.parse(Buffer.from(payload, 'base64url').toString());
+  const tx = Buffer.from(obj.tx, 'base64url');
+  return bs58Encode(new Uint8Array(tx.slice(1, 65)));
 }
 
 export async function run() {
@@ -60,48 +52,73 @@ export async function run() {
   try {
     const {driver} = env;
 
+    await driver.eval(() => { window.__DPAY_TEST_NFC_STATUS = 'ready'; });
+
     console.log('[53-sol-merchant-error] onboarding…');
     await onboardWallet(driver, 'e2e-sol-err');
 
     // Install the REJECTING stub: sendTransaction throws the unfunded-account error. The other
-    // methods stay functional so the flow reaches the broadcast point (getBalance funds the SOL card,
-    // getLatestBlockhash is unused by broadcast but harmless, getSignatureStatuses is never reached).
-    const nonceB64 = nonceAccountB64();
-    await driver.eval((b64) => {
+    // methods stay functional so the flow reaches the broadcast point (createSolPaymentRequest uses
+    // getGenesisHash + getLatestBlockhash; broadcastSolPayment uses isBlockhashValid + getBlockHeight
+    // before hitting sendTransaction).
+    await driver.eval(() => {
       globalThis.__DPAY_TEST_SOLANA_RPC_STUB = {
-        getLatestBlockhash: () => ({value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
-        getMinimumBalanceForRentExemption: () => 1447680,
+        getGenesisHash: () => '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d',
+        getLatestBlockhash: () => ({context: {slot: 250000000}, value: {blockhash: 'FzFAtwLSSzxhug4sEvUeusLxFdjAS3ByYqgseUYkFpkN', lastValidBlockHeight: 300000000}}),
+        isBlockhashValid: () => ({context: {slot: 250000001}, value: true}),
+        getBlockHeight: () => 250000001,
         sendTransaction: () => { throw new Error('Transaction simulation failed: Attempt to debit an account but found no record of a prior credit'); },
-        getSignatureStatuses: () => ({value: [{confirmationStatus: 'confirmed'}]}),
-        getAccountInfo: () => ({value: {data: [b64, 'base64'], owner: '11111111111111111111111111111111', lamports: 1447680}}),
+        getSignatureStatuses: () => ({context: {slot: 250000002}, value: [{confirmationStatus: 'confirmed'}]}),
         getBalance: () => ({value: 5000000000}),
       };
-    }, nonceB64);
+    });
 
-    // 1. Select SOL → Receive tab → build the solreq QR (same as flow 51).
-    console.log('[53-sol-merchant-error] selecting SOL via Balances…');
+    // 1. Select SOL → Receive tab → create the solreq QR.
+    console.log('[53-sol-merchant-error] selecting SOL + switching to Receive…');
     await driver.findByTestID('balance', {timeoutMs: 8_000});
     await driver.click('balance', {timeoutMs: 5_000});
     await driver.findByTestID('asset-sol-select', {timeoutMs: 5_000});
     await driver.click('asset-sol-select', {timeoutMs: 5_000});
 
-    console.log('[53-sol-merchant-error] switching to the Receive tab…');
     await driver.click('tab-receive', {timeoutMs: 5_000});
     await driver.findByTestID('sol-req-amount-input', {timeoutMs: 5_000});
 
-    console.log('[53-sol-merchant-error] creating the solreq QR…');
+    console.log('[53-sol-merchant-error] creating the solreq:v2 QR (ONLINE)…');
     await driver.type('sol-req-amount-input', '0.025', {timeoutMs: 5_000});
     await driver.click('btn-sol-req-make', {timeoutMs: 5_000});
-    await driver.findByTestID('sol-req-qr', {timeoutMs: 5_000});
+    await driver.findByTestID('sol-req-qr', {timeoutMs: 8_000});
 
     const solreqUri = await driver.eval(() => window.__DPAY_QR_LAST);
-    assert(typeof solreqUri === 'string' && solreqUri.startsWith('solreq:v1?'),
-      `the solreq QR must be captured, got: ${JSON.stringify(solreqUri)?.slice(0, 80)}`);
-    const req = decodeSolReq(solreqUri);
-    const solpayUri = buildSolPay(req);
+    assert(typeof solreqUri === 'string' && solreqUri.startsWith('solreq:v2?'),
+      `the solreq:v2 QR must be captured, got: ${JSON.stringify(solreqUri)?.slice(0, 80)}`);
 
-    // 2. Open the scanner + fire the matching solpay → broadcast FAILS (rejecting stub).
-    console.log('[53-sol-merchant-error] opening the scanner + scanning the matching solpay…');
+    // 2. Produce a REAL signed solpay via NFC autoSign (same approach as flow 51).
+    console.log('[53-sol-merchant-error] switching to Pay tab + NFC autoSign…');
+    await driver.click('tab-pay', {timeoutMs: 5_000});
+    await driver.findByTestID('sol-pay-scan', {timeoutMs: 5_000});
+
+    const dispatch = (event) => driver.eval((e) => window.__DPAY_TEST_SOL_NFC_SESSION(e), event);
+    await dispatch({type: 'phase', role: 'card', phase: 'linking'});
+    await driver.findByTestID('sol-nfc-status', {timeoutMs: 4_000});
+    await dispatch({type: 'request', role: 'card', solreqUri});
+    await driver.waitForText('Communicating', {timeoutMs: 5_000});
+
+    const solpayUri = await driver.eval(() => window.__DPAY_SOL_NFC_LAST);
+    assert(typeof solpayUri === 'string' && solpayUri.startsWith('solpay:v2?'),
+      `autoSign should produce a solpay:v2 URI, got: ${JSON.stringify(solpayUri)?.slice(0, 80)}`);
+
+    // Dismiss the NFC overlay.
+    await driver.eval(() => {
+      const btn = document.querySelector('button[aria-label="Done"]') || document.querySelector('button[aria-label="Cancel"]');
+      if (btn) btn.click();
+    });
+    await driver.waitGone('sol-nfc-status', {timeoutMs: 5_000});
+
+    // 3. Switch back to Receive → scan the signed solpay → broadcast FAILS (rejecting stub).
+    console.log('[53-sol-merchant-error] switching to Receive + scanning the signed solpay…');
+    await driver.click('tab-receive', {timeoutMs: 5_000});
+    await driver.findByTestID('sol-req-qr', {timeoutMs: 5_000});
+
     await driver.eval(() => {
       const el = document.querySelector('[aria-label="Scan the payer\'s signed code"]');
       if (el) el.click();
@@ -109,8 +126,8 @@ export async function run() {
     await driver.waitForText('Scan the payer\'s signed code', {timeoutMs: 5_000});
     await driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), solpayUri);
 
-    // 3. Assert the friendly error is shown (sol-req-err) — NOT the raw RPC error.
-    const errEl = await driver.findByTestID('sol-req-err', {timeoutMs: 12_000});
+    // 4. Assert the friendly error is shown (sol-req-err) — NOT the raw RPC error.
+    const errEl = await driver.findByTestID('sol-req-err', {timeoutMs: 15_000});
     const errTxt = await errEl.evaluate((n) => (n.textContent ?? '').trim());
     assert(/rejected/i.test(errTxt),
       `the friendly error should mention "rejected", got: "${errTxt}"`);
@@ -121,7 +138,7 @@ export async function run() {
       `the raw RPC error must not leak to the UI, got: "${errTxt}"`);
     console.log(`[53-sol-merchant-error] ✓ friendly error: "${errTxt}"`);
 
-    // 4. No false success: sol-req-status ("Received") must NOT render.
+    // 5. No false success: sol-req-status ("Received") must NOT render.
     const body = await driver.bodyText();
     assert(!/Received/.test(body), 'the body must NOT show "Received" (no false success on a rejected broadcast)');
     console.log('[53-sol-merchant-error] ✓ no false "Received"');

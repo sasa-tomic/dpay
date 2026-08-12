@@ -1,84 +1,45 @@
 // SOL native device-key rail — the isolation-boundary seam (mirrors `app/wallet.ts`→
 // `app/walletconnect.ts`). Statically imports ONLY the PURE modules (`solana/identity`,
-// `solana/tx`, `solana/nonce`, `solana/spl`, `solana/qr`, `payments` — no network, no `@solana/*`
-// SDK, safe under jest/e2e). The network module `solana/rpc` is reached via a lazy
-// `await import('./solana/rpc')` INSIDE the async network functions, gated by a non-empty
-// `SOLANA_RPC_URL`. With the URL empty (jest.setup.js + the e2e driver set
-// `__DPAY_TEST_SOLANA_RPC_URL=''`), these functions no-op / throw — so the offline inner loop
-// never imports the network module and never touches devnet.
+// `solana/tx`, `solana/spl`, `solana/qr`, `payments` — no network, no `@solana/*` SDK, safe under
+// jest/e2e). The network module `solana/rpc` is reached via a lazy `await import('./solana/rpc')`
+// INSIDE the async network functions, gated by a non-empty `SOLANA_RPC_URL`. With the URL empty
+// (jest.setup.js + the e2e driver set `__DPAY_TEST_SOLANA_RPC_URL=''`), these functions no-op /
+// throw — so the offline inner loop never imports the network module and never touches devnet.
 //
-// Offline-pay lifecycle:
-//   signOfflineSolPayment / signOfflineSplPayment — PURE (no RPC). The payer signs fully offline
-//     against its stored durable-nonce value, producing a `solpay:` URI for the merchant.
-//   createNonceAccount — ONLINE. Funds a durable-nonce account owned by the device key.
-//   broadcastSolPayment — ONLINE (merchant). Broadcasts a signed `solpay`, confirms, returns the
-//     receipt with the advanced nonce value (the receipt-nonce-relay hand-back).
-//   resyncNonce — ONLINE. Re-reads the current nonce value after a stale/rejected payment.
+// v2 recent-blockhash payment lifecycle (the durable-nonce rail was REMOVED — see
+// 2026-08-12-solana-recent-blockhash-rewrite-plan.md):
+//   createSolPaymentRequest — ONLINE merchant fetches genesis hash + fresh blockhash + builds SolReqV2.
+//   signSolPayment / signSplPayment — OFFLINE payer signs the canonical message (no network).
+//   broadcastSolPayment — ONLINE merchant strictly verifies, freshness-checks, broadcasts, confirms.
+// The only retained legacy capability is `deriveNonceAccountKeypair` (private — Phase 6 reclaim).
 
 import {ed25519} from '@noble/curves/ed25519';
 import bs58 from 'bs58';
 import {SOLANA_RPC_URL, SOL_GENESIS_HASH, SOL_PAYMENT_MAX_WINDOW_SECONDS, SOL_PAYMENT_COMMITMENT, SOL_BROADCAST_TIMEOUT_MS} from './config/constants';
 import {solanaUsdcAvailable} from './config/assets';
 import {deriveSolanaKeypair, deriveSolanaAddress, deriveSlip10Ed25519} from './solana/identity';
-import {base58Decode32, buildSignedTransfer, signTransaction, buildCanonicalSolMessage, verifySolPayment, extractSignedTxParts} from './solana/tx';
-import {assembleMessage, buildAdvanceAndTransferMessage, buildCreateNonceAccountMessage} from './solana/nonce';
-import {buildAdvanceAndSplTransferMessage, buildSplTransferInstruction, buildCanonicalUsdcMessage, deriveAta, USDC_MINT_ADDRESS} from './solana/spl';
-import {encodeSolPay} from './solana/qr_v1';
+import {base58Decode32, buildSignedTransfer, signTransaction, assembleMessage, buildCanonicalSolMessage, verifySolPayment, extractSignedTxParts} from './solana/tx';
+import {buildSplTransferInstruction, buildCanonicalUsdcMessage, deriveAta, USDC_MINT_ADDRESS} from './solana/spl';
 import {encodeSolReq, generateRid} from './solana/qr';
-import type {SolReq, SolPay} from './solana/qr_v1';
 import type {SolReqV2, SolPayV2, SolReceiptV2, SolReqInput, SolPayInput} from './solana/qr';
 import type {SolanaSignatureStatus} from './solana/rpc';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from './payments';
-import type {ReceiptCode} from './payments';
 import {hexToBytes} from './lib/format';
 
 export {deriveSolanaAddress};
 
-// --- types ---------------------------------------------------------------------
-
-/** The receipt the merchant hands back to the offline payer after broadcasting a `solpay`.
- *  `status` mirrors the IC receipt codes (RECEIPT_SETTLED/REJECTED/UNREACHABLE — single source of
- *  truth in `payments.ts`). `nextNonce` is the advanced nonce value IF settled — the payer adopts it
- *  optimistically for the next offline payment (the receipt-nonce-relay). `sig` is the on-chain
- *  transaction signature IF settled. */
-interface SolReceipt {
-  readonly status: ReceiptCode;
-  readonly npub: string;
-  readonly nextNonce: string | null;
-  readonly sig: string | null;
-}
-
 // --- private helpers -----------------------------------------------------------
 
-// Read a durable-nonce account's current value, retrying up to 3× with 500ms spacing to absorb the
-// confirm→queryable lag (the account state may lag `confirm` by a slot or two on a fast-producing
-// node — the local test-validator is the extreme case; mainnet has a smaller but nonzero gap).
-// Shared by createNonceAccount (the post-confirm initial read) and resyncNonce (a standalone read) so
-// a transient RPC lag doesn't strand the user on the stale-nonce screen (resyncNonce previously made
-// a SINGLE getNonceAccount call with no retry — asymmetric with createNonceAccount's retry loop).
-async function readNonceWithRetry(address: string, signal?: AbortSignal): Promise<string> {
-  const {getNonceAccount} = await import('./solana/rpc');
-  let value: string;
-  for (let attempt = 0; ; attempt++) {
-    try {
-      ({value} = await getNonceAccount(SOLANA_RPC_URL, address, {signal}));
-      break;
-    } catch (e) {
-      if (attempt >= 3 || signal?.aborted) throw e;
-      await new Promise(r => setTimeout(r, 500));
-    }
-  }
-  return value;
-}
-
-// SLIP-10 path m/44'/501'/0'/1' — a sibling of the main Solana key (m/44'/501'/0'/0') for the
-// durable-nonce account keypair. Deterministic from the device seed (a single backup recovers both
-// the wallet key and the nonce-account key). The nonce account is a utility account: its private key
-// is only needed once (to sign CreateAccount); after initialization only the AUTHORITY (the device
-// key at m/44'/501'/0'/0') advances the nonce.
+// SLIP-10 path m/44'/501'/0'/1' — the SHIPPED durable-nonce account keypair (deterministic from the
+// device seed). Retained ONLY for the Phase 6 legacy reclaim tool (online, isolated in Settings) so
+// users who funded the nonce account before the v2 rewrite can recover its rent reserve. NOT used by
+// any normal payment path (invariant #2). The nonce-account key is only needed once (to sign
+// CreateAccount); the device key at m/44'/501'/0'/0' was the authority that advanced the nonce.
 const NONCE_ACCOUNT_PATH = [44, 501, 0, 1].map((i) => i + 0x80000000);
 
-function deriveNonceAccountKeypair(secretHex: string): {
+/** @internal Phase 6 reclaim — derives the shipped legacy nonce-account keypair from the recovery
+ *  seed. NOT imported by any payment component (the v2 rail has no nonce). */
+export function deriveNonceAccountKeypair(secretHex: string): {
   seed: Uint8Array;
   publicKey: Uint8Array;
   address: string;
@@ -88,20 +49,6 @@ function deriveNonceAccountKeypair(secretHex: string): {
   seed.set(derived);
   const publicKey = ed25519.getPublicKey(seed);
   return {seed, publicKey, address: bs58.encode(publicKey)};
-}
-
-// Multi-signer transaction serialization: compact-u16(n) || sig0(64) || ... || message.
-// Used for CreateAccount (2 signers). The offline-pay messages are single-signer (via signTransaction).
-function signTransactionMulti(seeds: Uint8Array[], message: Uint8Array): Uint8Array {
-  const out = new Uint8Array(1 + seeds.length * 64 + message.length);
-  out[0] = seeds.length; // compact-u16 for counts 0–127
-  let off = 1;
-  for (const seed of seeds) {
-    out.set(ed25519.sign(message, seed), off);
-    off += 64;
-  }
-  out.set(message, off);
-  return out;
 }
 
 // --- existing exports (unchanged) ----------------------------------------------
@@ -168,115 +115,7 @@ export async function sendSpl(secretHex: string, destAddress: string, amount: bi
   return signature;
 }
 
-// --- offline sign (PURE — no RPC, no dynamic import) ---------------------------
-
-/** Sign a durable-nonce SOL payment fully offline. Builds `{AdvanceNonceAccount, Transfer}` with
- *  `recentBlockhash = nonceValue` (the stored durable nonce, NOT a live blockhash) and signs with the
- *  device key. Returns the encoded `solpay:v1?…` URI for the merchant. Works in airplane mode — no
- *  network at all. */
-export function signOfflineSolPayment(
-  secretHex: string,
-  req: SolReq,
-  nonceAccountAddress: string,
-  nonceValue: string,
-): string {
-  if (req.cur !== 'SOL') throw new Error('signOfflineSolPayment: expected SOL currency');
-  const {seed, publicKey} = deriveSolanaKeypair(secretHex);
-  const nonceAccount = base58Decode32(nonceAccountAddress);
-  const storedNonce = base58Decode32(nonceValue);
-  const msg = buildAdvanceAndTransferMessage(publicKey, nonceAccount, req.to, BigInt(req.amt), storedNonce);
-  const tx = signTransaction(msg, seed);
-  return encodeSolPay({to: req.to, amt: req.amt, cur: req.cur, npub: nonceAccountAddress, tx});
-}
-
-/** Sign a durable-nonce SPL/USDC payment fully offline. Builds `{AdvanceNonceAccount, Token.transfer}`
- *  with `recentBlockhash = nonceValue` and signs with the device key. The payer's source ATA is
- *  derived from the device key + mint (must pre-exist on-chain — see OPEN_ISSUES v2 follow-up). */
-export function signOfflineSplPayment(
-  secretHex: string,
-  req: SolReq,
-  nonceAccountAddress: string,
-  nonceValue: string,
-): string {
-  if (req.cur !== 'USDC') throw new Error('signOfflineSplPayment: expected USDC currency');
-  if (!req.mint || !req.toAta) throw new Error('signOfflineSplPayment: mint and toAta required for USDC');
-  const {seed, publicKey} = deriveSolanaKeypair(secretHex);
-  const authorityAddress = bs58.encode(publicKey);
-  const sourceAta = deriveAta(authorityAddress, req.mint);
-  const nonceAccount = base58Decode32(nonceAccountAddress);
-  const destAta = base58Decode32(req.toAta);
-  const storedNonce = base58Decode32(nonceValue);
-  const msg = buildAdvanceAndSplTransferMessage(
-    publicKey, nonceAccount, sourceAta, destAta, publicKey, BigInt(req.amt), storedNonce,
-  );
-  const tx = signTransaction(msg, seed);
-  return encodeSolPay({to: req.to, amt: req.amt, cur: req.cur, npub: nonceAccountAddress, tx});
-}
-
-// --- online lifecycle (dynamic-import rpc; throw 'offline' when URL empty) -----
-
-/** Create a durable-nonce account funded by the device key. ONLINE — throws if SOL is offline.
- *  Derives the nonce-account keypair at m/44'/501'/0'/1' (deterministic from the seed), funds it with
- *  rent-exempt lamports, initializes it with the device key as authority, then reads back the initial
- *  nonce value. Returns `{address, value}` to persist for offline signing. */
-export async function createNonceAccount(
-  secretHex: string,
-  signal?: AbortSignal,
-): Promise<{address: string; value: string}> {
-  if (!SOLANA_RPC_URL) throw new Error('Solana is offline (no RPC endpoint configured)');
-  const authority = deriveSolanaKeypair(secretHex);
-  const nonceAcct = deriveNonceAccountKeypair(secretHex);
-  const {getLatestBlockhash, getMinimumBalanceForRentExemption, sendTransaction, confirmTransaction} =
-    await import('./solana/rpc');
-  const {blockhash} = await getLatestBlockhash(SOLANA_RPC_URL, {signal});
-  const rent = await getMinimumBalanceForRentExemption(SOLANA_RPC_URL, 80, {signal});
-  const msg = buildCreateNonceAccountMessage(authority.publicKey, nonceAcct.publicKey, rent, base58Decode32(blockhash));
-  const raw = signTransactionMulti([authority.seed, nonceAcct.seed], msg);
-  const sig = await sendTransaction(SOLANA_RPC_URL, raw, {signal});
-  await confirmTransaction(SOLANA_RPC_URL, sig, {signal});
-  // Read back the initial nonce value (with retry — the account state may lag `confirm` by a slot or
-  // two; the shared readNonceWithRetry mirrors resyncNonce's retry so both read paths are symmetric).
-  const value = await readNonceWithRetry(nonceAcct.address, signal);
-  return {address: nonceAcct.address, value};
-}
-
-/** Broadcast a signed `solpay` and return the receipt. ONLINE (merchant) — throws if SOL is offline.
- *  On settle, reads back the advanced nonce value (the receipt-nonce-relay hand-back the payer adopts
- *  for its next offline payment). On a definitive Solana rejection (instruction error, insufficient
- *  funds, nonce/blockhash issue) returns status REJECTED. On a network/timeout error returns
- *  UNREACHABLE (the tx MAY still land — honest pending, never a false failure). */
-export async function broadcastSolPayment(
-  solpay: SolPay,
-  signal?: AbortSignal,
-): Promise<SolReceipt> {
-  if (!SOLANA_RPC_URL) throw new Error('Solana is offline (no RPC endpoint configured)');
-  const {sendTransaction, confirmTransaction, getNonceAccount} = await import('./solana/rpc');
-  const npub = solpay.npub;
-  try {
-    const sig = await sendTransaction(SOLANA_RPC_URL, solpay.tx, {signal});
-    await confirmTransaction(SOLANA_RPC_URL, sig, {signal});
-    const {value: nextNonce} = await getNonceAccount(SOLANA_RPC_URL, npub, {signal});
-    return {status: RECEIPT_SETTLED, npub, nextNonce, sig};
-  } catch (e) {
-    console.warn('broadcastSolPayment error:', e);
-    const msg = String((e as Error)?.message ?? e);
-    if (/Instruction|insufficient|no record of a prior credit|simulation failed|debit|custom|already|blockhash|nonce/i.test(msg)) {
-      return {status: RECEIPT_REJECTED, npub, nextNonce: null, sig: null};
-    }
-    return {status: RECEIPT_UNREACHABLE, npub, nextNonce: null, sig: null};
-  }
-}
-
-/** Re-read the current durable-nonce value (after a stale/rejected payment). ONLINE — throws if SOL
- *  is offline. Retries 3×/500ms via the shared readNonceWithRetry (same as createNonceAccount's
- *  post-confirm read) so a transient RPC lag doesn't strand the user on the stale-nonce screen. */
-export async function resyncNonce(
-  nonceAccountAddress: string,
-  signal?: AbortSignal,
-): Promise<string> {
-  if (!SOLANA_RPC_URL) throw new Error('Solana is offline (no RPC endpoint configured)');
-  return readNonceWithRetry(nonceAccountAddress, signal);
-}
+// --- existing exports (unchanged) ----------------------------------------------
 
 /** F4 — whether THIS device has a USDC Associated Token Account. USDC offline-pay needs the device's
  *  ATA to pre-exist on-chain (the payer debits its source ATA; the merchant's request encodes its
@@ -360,8 +199,8 @@ export function isSolanaRpcAvailable(): boolean {
 }
 
 // ============================================================================
-// Phase 3 — v2 recent-blockhash payment seam. ADDITIVE alongside the v1 seam above; the UI stays on
-// v1 until Phase 4 rewires it. The lifecycle:
+// v2 recent-blockhash payment seam — the ONLY Solana payment path (the durable-nonce rail was
+// deleted). The lifecycle:
 //   createSolPaymentRequest — ONLINE merchant fetches genesis hash + fresh blockhash + builds SolReqV2.
 //   signSolPayment / signSplPayment — OFFLINE payer signs the canonical message (no network).
 //   broadcastSolPayment — ONLINE merchant strictly verifies, freshness-checks, broadcasts, confirms.
@@ -477,7 +316,7 @@ export function signSplPayment(secretHex: string, request: SolReqV2): SolPayV2 {
  *
  *  `opts.confirmTimeoutMs` / `opts.pollMs` default to `SOL_BROADCAST_TIMEOUT_MS` / 200ms; tests pass
  *  shorter values so the timeout branches are exercisable in milliseconds. */
-export async function broadcastSolPaymentV2(
+export async function broadcastSolPayment(
   request: SolReqV2,
   canonicalRequestUri: string,
   payment: SolPayV2,

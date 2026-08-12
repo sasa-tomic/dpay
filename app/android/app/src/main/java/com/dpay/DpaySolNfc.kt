@@ -119,13 +119,12 @@ object DpaySolNfc {
         emit(m)
     }
 
-    private fun emitReceipt(status: Int, npub: String, nextNonce: String, sig: String) {
+    private fun emitReceipt(status: Int, rid: String, sig: String) {
         val m = Arguments.createMap()
         m.putString("type", "receipt")
         m.putString("role", "card")
         m.putInt("status", status)
-        m.putString("npub", npub)
-        m.putString("nextNonce", nextNonce)
+        m.putString("rid", rid)
         m.putString("sig", sig)
         emit(m)
     }
@@ -227,15 +226,14 @@ object DpaySolNfc {
                     try {
                         val o = JSONObject(json)
                         val status = o.optInt("status", 2)
-                        val npub = o.optString("npub", "")
-                        val nextNonce = o.optString("nextNonce", "")
+                        val rid = o.optString("rid", "")
                         val sig = o.optString("sig", "")
                         when (status) {
                             0 -> { cardPhase = CardPhase.SUCCESS; phaseEvent("card", "success") }
                             1 -> { cardPhase = CardPhase.DECLINED; phaseEvent("card", "declined") }
                             else -> { cardPhase = CardPhase.PENDING; phaseEvent("card", "pending") }
                         }
-                        emitReceipt(status, npub, nextNonce, sig)
+                        emitReceipt(status, rid, sig)
                     } catch (_: Throwable) {
                         errorEvent("card", "Received a malformed receipt")
                         cardPhase = CardPhase.PENDING
@@ -314,11 +312,10 @@ object DpaySolNfc {
     }
 
     /** JS calls this after broadcasting online: stamp the receipt + wake the reader thread to send it. */
-    fun confirmSolReceipt(status: Int, nextNonce: String, sig: String, npub: String) {
+    fun confirmSolReceipt(status: Int, rid: String, sig: String) {
         val o = JSONObject()
         o.put("status", status)
-        o.put("npub", npub)
-        o.put("nextNonce", nextNonce)
+        o.put("rid", rid)
         o.put("sig", sig)
         val json = o.toString()
         pendingReceipt = json

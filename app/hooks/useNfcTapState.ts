@@ -22,7 +22,7 @@ export type TapCtx = {
  * `payment` event skeleton); the adapter owns ONLY the money-moving logic that genuinely differs
  * per rail and MUST stay separate:
  *   - IC:  `signAuthorization` + relay `/pay` + nonce-reconcile + optimistic balance deduction
- *   - SOL: `signOfflineSolPayment` + RPC broadcast + npub-match + nextNonce adoption
+ *   - SOL: `signSolPayment`/`signSplPayment` (offline) + RPC broadcast + rid/sig receipt matching
  *
  * `onSubmit` covers BOTH the IC `'done'` event (merchant reassembles + submits the wire) and the
  * SOL `'payment'` event (merchant broadcasts the solpay) — only one fires per rail, so a single

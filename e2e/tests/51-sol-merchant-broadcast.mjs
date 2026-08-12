@@ -1,65 +1,59 @@
-// Flow 51 — SOL merchant broadcast (SolReceiveMode.onSignedQr path).
+// Flow 51 — SOL v2 merchant broadcast (SolReceiveMode.onSignedQr path).
 //
-// The ENTIRE merchant broadcast path was uncovered before this flow: build solreq → scan the payer's
-// signed solpay → broadcast via the stub RPC → "Received". Flow 46 covers the PAYER side (offline
-// sign → solpay QR → honest pending); this flow is the MERCHANT side that consumes that solpay.
+// The ENTIRE merchant broadcast path through the REAL SolReceiveMode:
+//   1. Select SOL → Receive tab → enter amount → Request.
+//   2. createSolPaymentRequest (ONLINE via stub: getGenesisHash + getLatestBlockhash) → solreq:v2 QR.
+//   3. Produce a REAL v2 signed solpay (using the app's own NFC autoSign path — no crypto duplication).
+//   4. Feed the signed solpay to the merchant scanner → broadcastSolPayment (strict verify + broadcast).
+//   5. "Received" + the transaction signature.
 //
-// Proves end-to-end through the REAL SolReceiveMode:
-//   1. Select SOL → Receive tab mounts SolReceiveMode.
-//   2. Enter amount → Request → solreq: QR rendered (`sol-req-qr`), stashed at `__DPAY_QR_LAST`.
-//   3. Tap "Scan the payer's signed code" → QrScanner mounts (listener registered).
-//   4. Fire `__DPAY_TEST_SCAN(solpayUri)` with a MATCHING solpay (to/cur/amt echoed from the solreq).
-//   5. onSignedQr → decodeSolPay → solpayMatchesReq ✓ → broadcastSolPayment (stub) → "Received".
+// v2 strict verification: broadcastSolPayment checks encodeSolReq(request)===canonicalRequestUri,
+// verifies the Ed25519 signature, checks blockhash freshness, and asserts sendTransaction returns the
+// SAME sig the local verify produced. Dummy tx bytes are REJECTED — the solpay must be a REAL signed
+// transaction. This flow produces it via the app's own signSolPayment (through the NFC card autoSign
+// seam), then extracts the sig so the stub's sendTransaction echoes it back.
 //
-// The matching solpay is built in Node by decoding the stashed solreq (extract {to, amt, cur}) and
-// echoing them — `solpayMatchesReq` binds exactly those three fields. The stub's sendTransaction
-// always returns a random sig + getSignatureStatuses returns confirmed, so any tx bytes work. The
-// merchant does NOT set up a durable nonce (that's the payer's side); it only broadcasts.
+// Approach:
+//   - Merchant creates the solreq (Receive tab, ONLINE stub) → capture from __DPAY_QR_LAST.
+//   - Switch to Pay tab → dispatch NFC request with the solreq → autoSign → capture solpay from
+//     __DPAY_SOL_NFC_LAST (a REAL Ed25519-signed tx).
+//   - Extract the sig from the solpay, stash it for the stub's sendTransaction to echo.
+//   - Switch back to Receive tab → open scanner → scan the solpay → broadcast → "Received".
 //
-// Selector contract: `asset-sol-select`, `tab-receive`, `sol-req-amount-input`, `btn-sol-req-make`,
-// `sol-req-qr`, `sol-req-status`, `sol-req-sig`.
+// Selector contract: `asset-sol-select`, `tab-receive`, `tab-pay`, `sol-req-amount-input`,
+// `btn-sol-req-make`, `sol-req-qr`, `sol-req-status`, `sol-req-sig`, `sol-pay-scan`.
 import {setup, assert, onboardWallet} from '../harness/lib.mjs';
 
 export const meta = {
   id: '51',
   name: 'sol-merchant-broadcast',
   journey: 'offline',
-  covers: ['sol-merchant', 'sol-broadcast', 'solpay-match', 'qr-scan'],
-  verifies: 'SOL merchant: build solreq → scan matching solpay → broadcast (stub) → Received.',
-  timeoutMs: 25000,
+  covers: ['sol-merchant', 'sol-broadcast', 'sol-v2-strict-verify', 'qr-scan'],
+  verifies: 'SOL v2 merchant: createSolPaymentRequest (ONLINE) → scan real signed solpay → broadcast → Received.',
+  timeoutMs: 30000,
 };
 
-// Any valid base58 address for the solpay's npub (the merchant's stub getAccountInfo ignores the
-// address and always returns valid NonceState data, so this is never validated on-chain).
-const PAYER_NPUB = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';
+const MAINNET_GENESIS = '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d';
+const BLOCKHASH = 'FzFAtwLSSzxhug4sEvUeusLxFdjAS3ByYqgseUYkFpkN';
+const LVH = 300_000_000;
+const SLOT = 250_000_000;
 
-// Build the 80-byte NonceState account data as base64 (the layout getNonceAccount parses).
-// broadcastSolPayment calls getNonceAccount(npub) AFTER sendTransaction+confirm to read the advanced
-// nonce; the stub returns this for any address.
-function nonceAccountB64() {
-  const buf = Buffer.alloc(80, 0);
-  buf.writeUInt32LE(0, 0);    // version
-  buf.writeUInt32LE(1, 4);    // state = Initialized
-  buf.fill(1, 8, 40);         // authority
-  Buffer.from('deadbeef'.repeat(8), 'hex').copy(buf, 40); // nonce value
-  buf.writeBigUInt64LE(5000n, 72); // fee.lamports_per_signature
-  return buf.toString('base64');
+// Minimal base58 encoder (see flow 47).
+const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+function bs58Encode(bytes) {
+  let num = 0n;
+  for (const b of bytes) num = num * 256n + BigInt(b);
+  let out = '';
+  while (num > 0n) { out = B58[Number(num % 58n)] + out; num /= 58n; }
+  for (const b of bytes) { if (b === 0) out = '1' + out; else break; }
+  return out;
 }
 
-// Decode a solreq: URI → the parsed JSON object ({to, amt, cur, ...}).
-function decodeSolReq(uri) {
-  const payload = uri.split('solreq:v1?')[1];
-  return JSON.parse(Buffer.from(payload, 'base64url').toString());
-}
-
-// Build a matching solpay: URI (echoes to/amt/cur from the solreq so solpayMatchesReq passes).
-function buildSolPay(req) {
-  const obj = {
-    v: 1, to: req.to, amt: req.amt, cur: req.cur,
-    npub: PAYER_NPUB,
-    tx: Buffer.from('dummy-signed-tx-bytes').toString('base64url'),
-  };
-  return 'solpay:v1?' + Buffer.from(JSON.stringify(obj)).toString('base64url');
+function extractSig(solpayUri) {
+  const payload = solpayUri.split('solpay:v2?')[1];
+  const obj = JSON.parse(Buffer.from(payload, 'base64url').toString());
+  const tx = Buffer.from(obj.tx, 'base64url');
+  return bs58Encode(new Uint8Array(tx.slice(1, 65)));
 }
 
 export async function run() {
@@ -69,74 +63,100 @@ export async function run() {
   try {
     const {driver} = env;
 
+    // Force NFC ready (needed for the autoSign step that produces the real signed solpay).
+    await driver.eval(() => { window.__DPAY_TEST_NFC_STATUS = 'ready'; });
+
     console.log('[51-sol-merchant-broadcast] onboarding…');
     await onboardWallet(driver, 'e2e-sol-merchant');
 
-    // Install the SOL RPC stub. The merchant broadcast path needs: sendTransaction (broadcast),
-    // getSignatureStatuses (confirmTransaction), getAccountInfo (getNonceAccount post-confirm).
-    // getBalance is polled by useSolanaBalance regardless.
-    const nonceB64 = nonceAccountB64();
-    await driver.eval((b64) => {
+    // Install the SOL RPC stub with v2 methods.
+    // Phase 1 (createSolPaymentRequest): getGenesisHash + getLatestBlockhash.
+    // Phase 2 (broadcastSolPayment): isBlockhashValid + getBlockHeight + sendTransaction + getSignatureStatuses.
+    // sendTransaction echoes the sig stashed in __DPAY_TEST_SOL_SIG (set after extracting from the solpay).
+    await driver.eval(() => {
       globalThis.__DPAY_TEST_SOLANA_RPC_STUB = {
-        getLatestBlockhash: () => ({value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
-        getMinimumBalanceForRentExemption: () => 1447680,
-        sendTransaction: () => 'sig_' + Math.random().toString(36).slice(2, 12),
-        getSignatureStatuses: () => ({value: [{confirmationStatus: 'confirmed'}]}),
-        getAccountInfo: () => ({value: {data: [b64, 'base64'], owner: '11111111111111111111111111111111', lamports: 1447680}}),
+        getGenesisHash: () => '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d',
+        getLatestBlockhash: () => ({context: {slot: 250000000}, value: {blockhash: 'FzFAtwLSSzxhug4sEvUeusLxFdjAS3ByYqgseUYkFpkN', lastValidBlockHeight: 300000000}}),
+        isBlockhashValid: () => ({context: {slot: 250000001}, value: true}),
+        getBlockHeight: () => 250000001,
+        sendTransaction: () => globalThis.__DPAY_TEST_SOL_SIG || 'sig_fallback',
+        getSignatureStatuses: () => ({context: {slot: 250000002}, value: [{confirmationStatus: 'confirmed'}]}),
         getBalance: () => ({value: 5000000000}),
       };
-    }, nonceB64);
+    });
 
-    // 1. Select SOL via the Balances sheet (the selected asset implies the rail).
-    console.log('[51-sol-merchant-broadcast] selecting SOL via Balances…');
+    // 1. Select SOL → Receive tab → create the solreq QR.
+    console.log('[51-sol-merchant-broadcast] selecting SOL + switching to Receive…');
     await driver.findByTestID('balance', {timeoutMs: 8_000});
     await driver.click('balance', {timeoutMs: 5_000});
     await driver.findByTestID('asset-sol-select', {timeoutMs: 5_000});
     await driver.click('asset-sol-select', {timeoutMs: 5_000});
 
-    // 2. Switch to the Receive tab → SolReceiveMode mounts (activeSol + solAddress).
-    console.log('[51-sol-merchant-broadcast] switching to the Receive tab…');
     await driver.click('tab-receive', {timeoutMs: 5_000});
     await driver.findByTestID('sol-req-amount-input', {timeoutMs: 5_000});
 
-    // 3. Build the request QR. Type an explicit amount (the field defaults to empty — D1).
-    console.log('[51-sol-merchant-broadcast] creating the solreq QR…');
+    console.log('[51-sol-merchant-broadcast] creating the solreq:v2 QR (ONLINE)…');
     await driver.type('sol-req-amount-input', '0.025', {timeoutMs: 5_000});
     await driver.click('btn-sol-req-make', {timeoutMs: 5_000});
+    await driver.findByTestID('sol-req-qr', {timeoutMs: 8_000});
+
+    // 2. Capture the solreq:v2 URI.
+    const solreqUri = await driver.eval(() => window.__DPAY_QR_LAST);
+    assert(typeof solreqUri === 'string' && solreqUri.startsWith('solreq:v2?'),
+      `the solreq:v2 QR must be captured, got: ${JSON.stringify(solreqUri)?.slice(0, 80)}`);
+    console.log('[51-sol-merchant-broadcast] ✓ solreq:v2 QR created');
+
+    // 3. Switch to Pay tab → dispatch NFC request → autoSign produces a REAL signed solpay:v2.
+    console.log('[51-sol-merchant-broadcast] switching to Pay tab + NFC autoSign…');
+    await driver.click('tab-pay', {timeoutMs: 5_000});
+    await driver.findByTestID('sol-pay-scan', {timeoutMs: 5_000});
+
+    const dispatch = (event) => driver.eval((e) => window.__DPAY_TEST_SOL_NFC_SESSION(e), event);
+    await dispatch({type: 'phase', role: 'card', phase: 'linking'});
+    await driver.findByTestID('sol-nfc-status', {timeoutMs: 4_000});
+    await dispatch({type: 'request', role: 'card', solreqUri});
+    await driver.waitForText('Communicating', {timeoutMs: 5_000});
+
+    const solpayUri = await driver.eval(() => window.__DPAY_SOL_NFC_LAST);
+    assert(typeof solpayUri === 'string' && solpayUri.startsWith('solpay:v2?'),
+      `autoSign should produce a solpay:v2 URI, got: ${JSON.stringify(solpayUri)?.slice(0, 80)}`);
+    console.log('[51-sol-merchant-broadcast] ✓ autoSign produced a real signed solpay:v2');
+
+    // 4. Extract the sig + stash it so the stub's sendTransaction echoes it back (the v2 strict
+    //    verify requires sendTransaction to return the SAME sig the local verify computed).
+    const sig = extractSig(solpayUri);
+    await driver.eval((s) => { globalThis.__DPAY_TEST_SOL_SIG = s; }, sig);
+    console.log(`[51-sol-merchant-broadcast] sig extracted + stashed: ${sig.slice(0, 12)}…`);
+
+    // Dismiss the NFC overlay (Done button).
+    await driver.eval(() => {
+      const btn = document.querySelector('button[aria-label="Done"]') || document.querySelector('button[aria-label="Cancel"]');
+      if (btn) btn.click();
+    });
+    await driver.waitGone('sol-nfc-status', {timeoutMs: 5_000});
+
+    // 5. Switch back to Receive → open scanner → scan the real signed solpay → broadcast → "Received".
+    console.log('[51-sol-merchant-broadcast] switching to Receive + scanning the signed solpay…');
+    await driver.click('tab-receive', {timeoutMs: 5_000});
     await driver.findByTestID('sol-req-qr', {timeoutMs: 5_000});
 
-    // 4. Read the stashed solreq URI + decode it to build a matching solpay.
-    const solreqUri = await driver.eval(() => window.__DPAY_QR_LAST);
-    assert(typeof solreqUri === 'string' && solreqUri.startsWith('solreq:v1?'),
-      `the solreq QR must be captured, got: ${JSON.stringify(solreqUri)?.slice(0, 80)}`);
-    const req = decodeSolReq(solreqUri);
-    console.log(`[51-sol-merchant-broadcast] ✓ solreq decoded: to=${req.to.slice(0, 8)}… amt=${req.amt} cur=${req.cur}`);
-
-    const solpayUri = buildSolPay(req);
-    assert(solpayUri.startsWith('solpay:v1?'), 'built solpay URI must have the solpay: prefix');
-
-    // 5. Tap "Scan the payer's signed code" (no testID — click via aria-label) → QrScanner mounts.
-    console.log('[51-sol-merchant-broadcast] opening the scanner…');
     await driver.eval(() => {
       const el = document.querySelector('[aria-label="Scan the payer\'s signed code"]');
       if (el) el.click();
     });
-    // Wait for the scan listener to register (QrScanner's useEffect).
     await driver.waitForText('Scan the payer\'s signed code', {timeoutMs: 5_000});
-
-    // 6. Fire the scan with the matching solpay → onSignedQr → broadcast → "Received".
-    console.log('[51-sol-merchant-broadcast] scanning the matching solpay…');
     await driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), solpayUri);
 
-    // 7. Assert the success state: "Received" + a transaction signature.
-    const status = await driver.findByTestID('sol-req-status', {timeoutMs: 12_000});
+    // 6. Assert success: "Received" + the signature.
+    const status = await driver.findByTestID('sol-req-status', {timeoutMs: 15_000});
     const statusTxt = await status.evaluate((n) => (n.textContent ?? '').trim());
     assert(/Received/.test(statusTxt), `the merchant should see "Received", got: "${statusTxt}"`);
     console.log(`[51-sol-merchant-broadcast] ✓ ${statusTxt}`);
-    const sig = await driver.findByTestID('sol-req-sig', {timeoutMs: 5_000});
-    const sigTxt = await sig.evaluate((n) => (n.textContent ?? '').trim());
-    assert(/^sig_/.test(sigTxt), `the received signature should be rendered, got: "${sigTxt}"`);
-    console.log(`[51-sol-merchant-broadcast] ✓ signature: ${sigTxt}`);
+
+    const sigEl = await driver.findByTestID('sol-req-sig', {timeoutMs: 5_000});
+    const sigTxt = await sigEl.evaluate((n) => (n.textContent ?? '').trim());
+    assert(sigTxt.length > 0, `the received signature should be rendered, got: "${sigTxt}"`);
+    console.log(`[51-sol-merchant-broadcast] ✓ signature: ${sigTxt.slice(0, 24)}…`);
 
     await driver.screenshot('51-sol-merchant-broadcast');
 

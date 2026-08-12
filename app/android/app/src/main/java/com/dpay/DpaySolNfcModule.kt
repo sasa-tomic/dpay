@@ -57,12 +57,12 @@ class DpaySolNfcModule(reactContext: ReactApplicationContext) :
     }
 
     /** After broadcasting + confirming online, hand the outcome back to the payer over the same tap.
-     *  `status`: 0 = settled, 1 = ledger rejected, 2 = ledger unreachable. `nextNonce` is the
-     *  advanced durable nonce (the receipt-nonce-relay); `sig` the on-chain signature; `npub` binds
-     *  the receipt to the payer's nonce account. */
+     *  `status`: 0 = settled, 1 = ledger rejected, 2 = ledger unreachable. `rid` binds the receipt to
+     *  the request id (a cross-tap receipt for a different payment is ignored by the payer); `sig` the
+     *  on-chain signature. */
     @ReactMethod
-    fun confirmSolReceipt(status: Double, nextNonce: String, sig: String, npub: String, promise: Promise) {
-        DpaySolNfc.confirmSolReceipt(status.toInt(), nextNonce, sig, npub)
+    fun confirmSolReceipt(status: Double, rid: String, sig: String, promise: Promise) {
+        DpaySolNfc.confirmSolReceipt(status.toInt(), rid, sig)
         promise.resolve(null)
     }
 

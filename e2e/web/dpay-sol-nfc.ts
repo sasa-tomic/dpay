@@ -31,7 +31,7 @@ export const DpaySolNfc = {
   declineSolCard: () => Promise.resolve(),
   startSolReader: (_solreqUri: string) => Promise.resolve(),
   stopSolReader: () => Promise.resolve(),
-  confirmSolReceipt: (_status: number, _nextNonce: string, _sig: string, _npub: string) => Promise.resolve(),
+  confirmSolReceipt: (_status: number, _rid: string, _sig: string) => Promise.resolve(),
   // The NativeEventEmitter constructor calls these on subscribe/unsubscribe; no-op on web.
   addListener: (_eventName: string) => {},
   removeListeners: (_count: number) => {},

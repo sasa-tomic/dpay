@@ -41,28 +41,22 @@ export async function run() {
     console.log('[52-sol-withdraw] onboarding…');
     await onboardWallet(driver, 'e2e-sol-send');
 
-    // Install the SOL RPC stub. sendSol needs: getLatestBlockhash, sendTransaction, confirmTransaction
-    // (getSignatureStatuses). getBalance (5 SOL) is polled by useSolanaBalance → funds the inline send.
+    // Install the SOL RPC stub (v2 response shapes — context:{slot} wrappers). sendSol needs:
+    // getLatestBlockhash, sendTransaction, confirmTransaction (getSignatureStatuses). getBalance
+    // (5 SOL) is polled by useSolanaBalance → funds the inline send. getTokenAccountBalance silences
+    // the USDC balance poll (returns empty — no USDC ATA).
     await driver.eval(() => {
       globalThis.__DPAY_TEST_SOLANA_RPC_STUB = {
-        getLatestBlockhash: () => ({value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
+        getGenesisHash: () => '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d',
+        getLatestBlockhash: () => ({context: {slot: 250000000}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
         getMinimumBalanceForRentExemption: () => 1447680,
         sendTransaction: () => 'sig_' + Math.random().toString(36).slice(2, 12),
-        getSignatureStatuses: () => ({value: [{confirmationStatus: 'confirmed'}]}),
+        getSignatureStatuses: () => ({context: {slot: 250000001}, value: [{confirmationStatus: 'confirmed'}]}),
         getAccountInfo: () => ({value: {data: ['', 'base64'], owner: '11111111111111111111111111111111', lamports: 1447680}}),
         getBalance: () => ({value: 5000000000}),
+        getTokenAccountBalance: () => ({value: {amount: '0', decimals: 6, uiAmount: 0, uiAmountString: '0'}}),
       };
     });
-
-    // Seed a "ready" durable-nonce state so SolPayMode's mount effect lands on the scan phase
-    // (phase='scan') instead of the first-use setup gate. This lets the back-toggle regression below
-    // assert phase preservation across a "Send to address" detour.
-    const pubHex = await driver.eval(() => JSON.parse(localStorage.getItem('dpay.identity.v1')).publicHex);
-    await driver.eval(
-      (k, v) => { localStorage.setItem(k, v); },
-      `dpay.sol.nonce.v1.${pubHex}`,
-      JSON.stringify({address: '11111111111111111111111111111111', value: '11111111111111111111111111111111', status: 'ready'}),
-    );
 
     // 1. Open Balances → select SOL as the active asset (whole-row select, uniform with IC). The
     //    stub funds the SOL balance to 5 SOL, but that no longer gates a per-row Send button — the
@@ -81,12 +75,8 @@ export async function run() {
     await driver.findByTestID('sol-pay-scan', {timeoutMs: 8_000});
 
     // Back-toggle regression (Rules of Hooks): SolPayMode's early return for the 'send' sub-mode
-    // MUST sit below its useState/useEffect calls. Otherwise toggling send→scan silently resets the
-    // component state AND re-runs the mount effect. We detect that by DELETING the seeded nonce
-    // before the detour: a correct build preserves phase='scan' (the effect does not re-run, so the
-    // missing nonce is never re-read); a hook-order violation re-runs the effect, reads the now-empty
-    // key → null → snaps back to the setup gate (sol-pay-setup).
-    await driver.eval((k) => { localStorage.removeItem(k); }, `dpay.sol.nonce.v1.${pubHex}`);
+    // MUST sit below its useState calls. We verify toggling send→scan→send preserves the component
+    // state (the scan screen stays mounted, the send inputs come and go cleanly).
     await driver.click('btn-pay-send', {timeoutMs: 5_000});
     await driver.findByTestID('sol-send-address-input', {timeoutMs: 5_000});
     await driver.click('btn-pay-scan', {timeoutMs: 5_000});

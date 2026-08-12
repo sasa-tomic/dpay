@@ -1,10 +1,9 @@
 /**
  * solana/payments — the SOL recent-blockhash receipt outcome logic, as PURE functions.
  *
- * Phase 1 rewrite: the durable-nonce "adopt nextNonce" model is gone. SolReqV2 carries a request
- * id (`rid`) and the signed SolPayV2 echoes the SAME `rid`; the receipt's `sig` is the on-chain
- * signature. The money-critical decision of what the payer believes after handing off an
- * offline-signed tx to the merchant lives here in one place:
+ * SolReqV2 carries a request id (`rid`) and the signed SolPayV2 echoes the SAME `rid`; the
+ * receipt's `sig` is the on-chain signature. The money-critical decision of what the payer
+ * believes after handing off an offline-signed tx to the merchant lives here in one place:
  *
  *   The merchant's broadcast result is the source of truth. A receipt is believed ONLY if both
  *   `rid` and `sig` match the payer's open request — otherwise it is IGNORED (a stale or cross-tap

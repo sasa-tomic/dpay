@@ -11,7 +11,7 @@
 // gesture and routing to the right engine must always win.
 //
 // This flow reproduces the failure scenario and asserts the routing:
-//   1. Select SOL (Balances → asset-sol-select). The Pay tab now mounts SolPayMode (sol-pay-setup).
+//   1. Select SOL (Balances → asset-sol-select). The Pay tab now mounts SolPayMode (sol-pay-scan).
 //   2. Fire the foreground-deeplink seam `__DPAY_TEST_DEEPLINK({kind:'req', blob})` — the SAME
 //      applyBlob path the OS intent listener + web readers drive. (Web reload can't reproduce this:
 //      selectedAssetId is session-local, so a reload resets it to the IC default and the SOL→IC
@@ -19,9 +19,9 @@
 //      __DPAY_TEST_RECEIPT_PUBKEY / __DPAY_TEST_SCAN precedents.)
 //   3. The routing effect fires: selectedAssetId → ic:0, chip → 'DEMO', PayMode mounts, the prefill
 //      effect decodes the blob → review. Assert pay-amount (∂25.00, the EXACT requested amount) is
-//      showing and sol-pay-setup is GONE (SolPayMode unmounted).
+//      showing and sol-pay-scan is GONE (SolPayMode unmounted).
 //
-// Selector contract: `active-rail-chip` (header chip), `sol-pay-setup` (SolPayMode scan surface),
+// Selector contract: `active-rail-chip` (header chip), `sol-pay-scan` (SolPayMode scan surface),
 // `pay-amount` (PayMode review amount), `btn-approve` (review → sign).
 import { setup, assert, assertEq, assertIncludes, onboardWallet, openBalances } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
@@ -61,7 +61,7 @@ export async function run() {
     // 3. The Pay tab now mounts SolPayMode (the SOL scan surface). This is the failure precondition:
     //    if a dpay:req blob arrived here without routing, SolPayMode would ignore it.
     await driver.click('tab-pay', { timeoutMs: 5_000 });
-    await driver.findByTestID('sol-pay-setup', { timeoutMs: 5_000 });
+    await driver.findByTestID('sol-pay-scan', { timeoutMs: 5_000 });
     console.log('[70-deeplink-ic-routing] ✓ SOL idle-selected; SolPayMode mounted (failure precondition)');
 
     // 4. Fire the foreground-deeplink seam with a ∂25.00 DEMO request blob. This is the SAME applyBlob
@@ -83,7 +83,7 @@ export async function run() {
     assertIncludes(await driver.readText('pay-amount'), '∂25.00', 'PayMode review shows the exact requested amount (immutable snapshot)');
     const body = await driver.eval(() => document.body?.innerText ?? '');
     assertIncludes(body, 'Bob', 'review shows the merchant name from the decoded request');
-    const solPayGone = await driver.eval((id) => !document.querySelector(`[data-testid="${id}"]`), 'sol-pay-setup');
+    const solPayGone = await driver.eval((id) => !document.querySelector(`[data-testid="${id}"]`), 'sol-pay-scan');
     assert(solPayGone, 'SolPayMode must be unmounted after the IC deeplink routed to PayMode');
     await driver.findByTestID('btn-approve', { timeoutMs: 5_000 }); // review is actionable, not stuck
     console.log('[70-deeplink-ic-routing] ✓ dpay:req routed SOL → IC; PayMode review mounted (not SolPayMode)');

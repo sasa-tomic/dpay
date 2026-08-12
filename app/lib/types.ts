@@ -38,11 +38,10 @@ export type DpaySolNfcApi = {
   startSolReader(solreqUri: string): Promise<void>;
   stopSolReader(): Promise<void>;
   // Merchant: after broadcasting + confirming online, hand the outcome back to the offline payer.
-  // `status` is the receipt code (0 settled, 1 rejected, 2 unreachable); `nextNonce` is the advanced
-  // durable nonce value (the receipt-nonce-relay the payer adopts — empty when unreachable); `sig`
-  // is the on-chain tx signature (empty when not settled); `npub` binds the receipt to the payer's
-  // nonce account (a mismatch → the payer ignores it — defense against a cross-tap receipt).
-  confirmSolReceipt(status: number, nextNonce: string, sig: string, npub: string): Promise<void>;
+  // `status` is the receipt code (0 settled, 1 rejected, 2 unreachable); `rid` binds the receipt to
+  // the request id (a mismatch → the payer ignores it — defense against a cross-tap receipt); `sig`
+  // is the on-chain tx signature (empty when not settled).
+  confirmSolReceipt(status: number, rid: string, sig: string): Promise<void>;
   addListener(eventName: string): void;
   removeListeners(count: number): void;
 };
@@ -51,7 +50,7 @@ export type SolNfcEvent =
   | {type: 'phase'; role: 'card' | 'reader'; phase: SolNfcPhaseName}
   | {type: 'request'; role: 'card'; solreqUri: string}
   | {type: 'payment'; role: 'reader'; solpayUri: string}
-  | {type: 'receipt'; role: 'card'; status: number; npub: string; nextNonce: string; sig: string}
+  | {type: 'receipt'; role: 'card'; status: number; rid: string; sig: string}
   | {type: 'confirmed'; role: 'reader'}
   | {type: 'error'; role: 'card' | 'reader'; reason: string};
 

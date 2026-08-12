@@ -1,15 +1,16 @@
 import {useCallback, useRef, useState} from 'react';
+import bs58 from 'bs58';
 import {SOL_BROADCAST_TIMEOUT_MS} from '../config/constants';
 import {fmtAsset} from '../lib/format';
 import type {SolNfcEvent, Identity} from '../lib/types';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {USDC_DECIMALS} from '../solana/spl';
-import {decodeSolReq, decodeSolPay} from '../solana/qr_v1';
-import {verifySignedTransaction} from '../solana/tx';
-import {signOfflineSolPayment, signOfflineSplPayment, broadcastSolPayment} from '../solana';
-import {decideSolPayerReceipt, isSolReqExpired, solpayMatchesReq} from '../solana/payments_v1';
+import {decodeSolReq, decodeSolPay, encodeSolPay} from '../solana/qr';
+import type {SolReqV2, SolPayV2} from '../solana/qr';
+import {extractSignedTxParts} from '../solana/tx';
+import {signSolPayment, signSplPayment, broadcastSolPayment} from '../solana';
+import {decideSolPayerReceiptV2, isSolReqV2Expired} from '../solana/payments';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from '../payments';
-import type {SolNonceState} from '../services/solNoncePersist';
 import {DpaySolNfc} from '../services/native';
 import {withTimeout} from '../lib/timeout';
 import {useNfcTapState, type TapCtx} from '../hooks/useNfcTapState';
@@ -20,101 +21,98 @@ function solUnit(cur: 'SOL' | 'USDC'): {decimals: number; unit: string} {
 }
 
 /**
- * SOL NFC tap adapter. Drives one tap through the native glue (DpaySolNfc — pure Kotlin transport,
- * no Rust core). SolPay mode arms the HCE card (payer is tapped); SolReceive mode runs the reader.
- * The **tap itself is the consent** — when a `solreq:` arrives the payer signs fully offline
- * (against its stored durable nonce) and serves the `solpay:` immediately. The merchant broadcasts
- * online and hands a receipt back; the payer adopts the advanced nonce (receipt-nonce-relay). The
- * shared lifecycle lives in `useNfcTapState`; this adapter fills ONLY the SOL protocol:
- * `signOfflineSolPayment` + RPC broadcast + npub-match + nextNonce adoption.
+ * SOL NFC tap adapter (v2 recent-blockhash). Drives one tap through the native glue (DpaySolNfc —
+ * pure Kotlin transport, no Rust core). SolPay mode arms the HCE card (payer is tapped); SolReceive
+ * mode runs the reader. The **tap itself is the consent** — when a `solreq:v2:` arrives the payer
+ * signs fully offline (against the recent blockhash embedded in the request) and serves the
+ * `solpay:v2:` immediately. The merchant broadcasts online and hands a receipt `{status, rid, sig}`
+ * back; the payer matches rid+sig and transitions (or ignores a cross-tap receipt). The shared
+ * lifecycle lives in `useNfcTapState`; this adapter fills ONLY the SOL protocol:
+ * signSolPayment/signSplPayment + RPC broadcast + rid/sig receipt matching.
  */
-export function SolNfcTap({role, identity, solreqUri, nonceState, onPaid, onStale, onActive, onClose}: {
+export function SolNfcTap({role, identity, req, reqUri, onOutcome, onResult, onActive, onClose}: {
   role: 'card' | 'reader';
   identity: Identity;
-  solreqUri?: string;
-  nonceState?: SolNonceState | null;
-  onPaid?: (nextNonce: string) => void;
-  onStale?: () => void;
+  req?: SolReqV2;
+  reqUri?: string;
+  onOutcome?: (o: 'success' | 'pending' | 'declined') => void;
+  onResult?: (r: {amount: string; cur: 'SOL' | 'USDC'; sig: string} | null) => void;
   onActive?: () => void;
   onClose: () => void;
 }) {
   // The asset-correct amount string resolved SYNCHRONOUSLY in autoSign (card) / submitPayment
   // (reader) BEFORE the first await, so React renders the honest amount during the in-flight window.
   const [amtText, setAmtText] = useState<string | null>(null);
-  // The payer's nonce-account address (base58) — the binding key the receipt must match. Captured at
-  // sign time from the live nonceState (NOT the prop, which may change after mount).
-  const npubRef = useRef<string>('');
+  // The v2 receipt bindings captured at sign time: expectedRid (the request's 32-hex rid) +
+  // expectedSig (the first tx signature, base58). The receipt must match BOTH or it's ignored
+  // (defense against a cross-tap receipt for a different payment).
+  const expectedRidRef = useRef<string>('');
+  const expectedSigRef = useRef<string>('');
 
-  // Payer side: the tap is the consent — decode the incoming solreq:, sign fully offline against the
-  // stored durable nonce, and serve the solpay: right away. Fail closed BEFORE signing if the nonce
-  // account isn't ready (no offline sign without a stored nonce value).
+  // Payer (card): the tap is the consent — decode the incoming solreq:v2, check it's not expired,
+  // sign fully offline against the recent blockhash, and serve the solpay:v2 immediately.
   const autoSign = useCallback(async (solreqUri: string, ctx: TapCtx) => {
     try {
-      if (!nonceState || nonceState.status !== 'ready') {
-        try { await DpaySolNfc.declineSolCard(); } catch (e: unknown) { console.warn('DpaySolNfc.declineSolCard failed (nonce not ready)', e); }
-        ctx.finalize('declined', 'Set up offline pay first');
-        return;
-      }
-      const req = decodeSolReq(solreqUri);
-      if (isSolReqExpired(req)) {
+      const decoded = decodeSolReq(solreqUri);
+      if (isSolReqV2Expired(decoded)) {
         try { await DpaySolNfc.declineSolCard(); } catch (e: unknown) { console.warn('DpaySolNfc.declineSolCard failed (expired req)', e); }
         ctx.finalize('declined', 'This payment request has expired');
         return;
       }
-      const {decimals, unit} = solUnit(req.cur);
-      setAmtText(fmtAsset(req.amt, decimals, unit));
-      npubRef.current = nonceState.address;
-      const solpayUri = req.cur === 'SOL'
-        ? signOfflineSolPayment(identity.secretHex, req, nonceState.address, nonceState.value)
-        : signOfflineSplPayment(identity.secretHex, req, nonceState.address, nonceState.value);
+      const {decimals, unit} = solUnit(decoded.cur);
+      setAmtText(fmtAsset(decoded.amt, decimals, unit));
+      const solpay: SolPayV2 = decoded.cur === 'SOL'
+        ? signSolPayment(identity.secretHex, decoded)
+        : signSplPayment(identity.secretHex, decoded);
+      // Capture the rid + first signature for receipt binding (BEFORE the tap delivers the receipt).
+      expectedRidRef.current = decoded.rid;
+      const parts = extractSignedTxParts(solpay.tx);
+      expectedSigRef.current = parts ? bs58.encode(parts.signature) : '';
+      const solpayUri = encodeSolPay(solpay);
       await DpaySolNfc.approveSolCard(solpayUri);
     } catch (e: unknown) { ctx.finalize('error', e instanceof Error ? e.message : String(e)); }
-  }, [identity, nonceState]);
+  }, [identity]);
 
-  // Merchant side: decode the payer's solpay:, broadcast online, confirm — then hand the outcome +
-  // the advanced nonce back to the payer over the same tap.
+  // Merchant (reader): decode the payer's solpay:v2, broadcast online (strict verify + freshness +
+  // confirm inside broadcastSolPayment), then hand the receipt {status, rid, sig} back to the payer
+  // over the same tap. The 12s native receipt window + 8s JS settlement budget are enforced by
+  // SOL_BROADCAST_TIMEOUT_MS (withTimeout).
   const submitPayment = useCallback(async (solpayUri: string, ctx: TapCtx) => {
     const {signal, cancel} = withTimeout(SOL_BROADCAST_TIMEOUT_MS);
     try {
       const solpay = decodeSolPay(solpayUri);
-      // Bind the payer's solpay to THIS merchant's open solreq (to/cur/amt) before broadcasting — a
-      // mismatched or cheating solpay is rejected, never broadcast. Mirrors SolReceiveMode.onSignedQr.
-      if (solreqUri) {
-        const req = decodeSolReq(solreqUri);
-        if (!solpayMatchesReq(solpay, req)) {
-          try { await DpaySolNfc.confirmSolReceipt(RECEIPT_REJECTED, '', '', solpay.npub); } catch (e: unknown) { console.warn('DpaySolNfc.confirmSolReceipt failed (mismatch)', e); }
-          ctx.finalize('declined', 'Payment doesn’t match this request');
-          return;
-        }
+      if (!req || !reqUri) {
+        try { await DpaySolNfc.confirmSolReceipt(RECEIPT_REJECTED, '', ''); } catch (e: unknown) { console.warn('DpaySolNfc.confirmSolReceipt failed (no req)', e); }
+        ctx.finalize('declined', 'No open request');
+        return;
       }
-      if (!verifySignedTransaction(solpay.tx)) {
-        console.warn('SolNfcTap: payer signature failed pre-broadcast verify (defense-in-depth; still attempting broadcast)', {npub: solpay.npub, txLen: solpay.tx.length});
-      }
-      const {decimals, unit} = solUnit(solpay.cur);
-      setAmtText(fmtAsset(solpay.amt, decimals, unit));
-      const receipt = await broadcastSolPayment(solpay, signal);
+      // The amount/cur are known from the merchant's own request (the v2 SolPay carries only rid+tx).
+      const {decimals, unit} = solUnit(req.cur);
+      setAmtText(fmtAsset(req.amt, decimals, unit));
+      const receipt = await broadcastSolPayment(req, reqUri, solpay, signal);
       if (receipt.status === RECEIPT_SETTLED) {
-        try { await DpaySolNfc.confirmSolReceipt(RECEIPT_SETTLED, receipt.nextNonce ?? '', receipt.sig ?? '', solpay.npub); } catch (e: unknown) { console.warn('DpaySolNfc.confirmSolReceipt failed (settled)', e); }
+        try { await DpaySolNfc.confirmSolReceipt(RECEIPT_SETTLED, receipt.rid, receipt.sig); } catch (e: unknown) { console.warn('DpaySolNfc.confirmSolReceipt failed (settled)', e); }
+        onResult?.({amount: req.amt, cur: req.cur, sig: receipt.sig});
         ctx.finalize('success');
       } else if (receipt.status === RECEIPT_REJECTED) {
-        try { await DpaySolNfc.confirmSolReceipt(RECEIPT_REJECTED, '', '', solpay.npub); } catch (e: unknown) { console.warn('DpaySolNfc.confirmSolReceipt failed (rejected)', e); }
+        try { await DpaySolNfc.confirmSolReceipt(RECEIPT_REJECTED, receipt.rid, receipt.sig); } catch (e: unknown) { console.warn('DpaySolNfc.confirmSolReceipt failed (rejected)', e); }
         ctx.finalize('declined', 'Payment rejected');
       } else {
-        try { await DpaySolNfc.confirmSolReceipt(RECEIPT_UNREACHABLE, '', '', solpay.npub); } catch (e: unknown) { console.warn('DpaySolNfc.confirmSolReceipt failed (unreachable)', e); }
-        ctx.finalize('pending', 'Couldn’t confirm');
+        try { await DpaySolNfc.confirmSolReceipt(RECEIPT_UNREACHABLE, receipt.rid, receipt.sig); } catch (e: unknown) { console.warn('DpaySolNfc.confirmSolReceipt failed (unreachable)', e); }
+        ctx.finalize('pending', 'Couldn\u2019t confirm');
       }
     } catch (e: unknown) {
       // A network/RPC throw is genuinely unknown — hand UNREACHABLE so the payer falls back to
       // "couldn't confirm" honestly (never a false decline).
-      try { await DpaySolNfc.confirmSolReceipt(RECEIPT_UNREACHABLE, '', '', npubRef.current); } catch (e2: unknown) { console.warn('DpaySolNfc.confirmSolReceipt failed (catch-all)', e2); }
+      try { await DpaySolNfc.confirmSolReceipt(RECEIPT_UNREACHABLE, '', ''); } catch (e2: unknown) { console.warn('DpaySolNfc.confirmSolReceipt failed (catch-all)', e2); }
       ctx.finalize('pending', e instanceof Error ? e.message : String(e));
     } finally {
       cancel();
     }
-  }, [solreqUri]);
+  }, [req, reqUri, onResult]);
 
   const {phase, reason, activeRef} = useNfcTapState<SolNfcEvent>({
-    role, readerPayload: solreqUri, onActive,
+    role, readerPayload: reqUri, onActive,
     eventName: 'DpaySolNfcEvent', nativeModule: DpaySolNfc,
     armCard: () => DpaySolNfc.armCard(),
     disarmCard: () => DpaySolNfc.disarmCard(),
@@ -125,20 +123,22 @@ export function SolNfcTap({role, identity, solreqUri, nonceState, onPaid, onStal
     onReceipt: (e, ctx) => {
       if (e.type !== 'receipt') return;
       // The payer's outcome, learned offline over the tap — believed only if it answers the exact
-      // payment we signed (npub match, base58 case-sensitive).
-      const outcome = decideSolPayerReceipt(
-        {status: e.status, npub: e.npub, nextNonce: e.nextNonce, sig: e.sig},
-        npubRef.current,
+      // payment we signed (rid match EXACT hex, sig match EXACT base58).
+      const outcome = decideSolPayerReceiptV2(
+        {status: e.status, rid: e.rid, sig: e.sig},
+        expectedRidRef.current,
+        expectedSigRef.current,
       );
-      if (outcome.outcome === 'ignore') return; // a receipt for a different nonce account
+      if (outcome.outcome === 'ignore') return; // a receipt for a different payment (cross-tap)
       if (outcome.outcome === 'success') {
-        if (outcome.adoptNonce) onPaid?.(outcome.adoptNonce);
+        onOutcome?.('success');
         ctx.finalize('success');
       } else if (outcome.outcome === 'declined') {
-        onStale?.();
+        onOutcome?.('declined');
         ctx.finalize('declined', 'Payment rejected');
       } else {
-        ctx.finalize('pending', 'Couldn’t confirm');
+        onOutcome?.('pending');
+        ctx.finalize('pending', 'Couldn\u2019t confirm');
       }
     },
   });

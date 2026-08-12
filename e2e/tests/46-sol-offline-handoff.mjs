@@ -1,20 +1,18 @@
-// Flow 46 — SOL offline-pay: durable-nonce setup → scan → offline sign → honest pending.
+// Flow 46 — SOL v2 recent-blockhash offline-pay: scan → offline sign → honest pending.
 //
-// Proves the SOL offline-pay feature end-to-end through the REAL app:
-//   1. The payer creates a durable-nonce account (first-use setup, via the stub RPC simulator).
-//   2. The payer scans a merchant's `solreq:` QR (via the camera seam), reviews, Approves.
-//   3. The app signs FULLY OFFLINE (no RPC — signs against the stored durable-nonce value).
-//   4. The signed `solpay:` QR is shown for the merchant to scan + broadcast.
-//   5. The payer marks "Handed to merchant" → the HONEST pending state: "Sent X · awaiting
+// Proves the SOL v2 offline-pay payer path end-to-end through the REAL app:
+//   1. The payer scans a merchant's `solreq:v2?` QR (via the camera seam), reviews, Approves.
+//   2. The app signs FULLY OFFLINE (no RPC — signs against the blockhash embedded in the request).
+//   3. The signed `solpay:v2?` QR is shown for the merchant to scan + broadcast.
+//   4. The payer marks "Handed to merchant" → the HONEST pending state: "Sent X · awaiting
 //      the merchant's confirmation" (NEVER "Paid ✓" — the offline payer can't know it settled).
 //
-// The stub RPC (`__DPAY_TEST_SOLANA_RPC_STUB`) simulates a Solana node: it returns rent-exempt
-// minimums, accepts transactions, confirms them immediately, and serves the nonce account state.
-// This keeps the inner loop fully offline (no devnet) while proving the REAL app code path.
+// v2 eliminates the durable-nonce setup (first-use createNonceAccount) — the payer path is now
+// FULLY OFFLINE with zero prior setup. The blockhash + genesis come from the merchant's request
+// (the merchant fetched them online via createSolPaymentRequest before showing the QR).
 //
-// Selector contract: `asset-sol-select` (the SOL row in the Balances sheet — the selected asset
-// implies the settlement rail, no separate chain toggle),
-// `btn-sol-pay-setup`, `sol-pay-scan`, `sol-pay-amount`, `btn-sol-pay-approve`, `sol-pay-qr`,
+// Selector contract: `asset-sol-select` (the SOL row in the Balances sheet),
+// `sol-pay-scan`, `sol-pay-amount`, `btn-sol-pay-approve`, `sol-pay-qr`,
 // `btn-sol-pay-handed`, `sol-pay-status`.
 import {setup, assert, onboardWallet} from '../harness/lib.mjs';
 
@@ -22,40 +20,41 @@ export const meta = {
   id: '46',
   name: 'sol-offline-handoff',
   journey: 'offline',
-  covers: ['sol-offline-sign', 'sol-nonce-setup', 'qr-handoff', 'honest-pending'],
-  verifies: 'SOL durable-nonce setup → scan solreq: → offline sign → solpay: QR → honest pending.',
+  covers: ['sol-offline-sign', 'qr-handoff', 'honest-pending'],
+  verifies: 'SOL v2 scan solreq:v2 → offline sign (no setup, no nonce) → solpay:v2 QR → honest pending.',
   timeoutMs: 25000,
 };
 
 const MERCHANT_ADDR = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';
 const PAY_LAMPORTS = '1000000'; // 0.001 SOL
 
-// Build the 80-byte NonceState account data as base64 (the layout getNonceAccount parses).
-// u32(0) version | u32(1) state=Initialized | 32B authority | 32B nonce value | u64 fee.
-function nonceAccountB64() {
-  const buf = Buffer.alloc(80, 0);
-  buf.writeUInt32LE(0, 0);    // version
-  buf.writeUInt32LE(1, 4);    // state = Initialized
-  buf.fill(1, 8, 40);         // authority (arbitrary — createNonceAccount ignores .authority)
-  Buffer.from('deadbeef'.repeat(8), 'hex').copy(buf, 40); // nonce value (deadbeef×8)
-  buf.writeBigUInt64LE(5000n, 72); // fee.lamports_per_signature
-  return buf.toString('base64');
-}
-
+// Build a valid v2 SolReq URI with a fresh blockhash + 90-second window.
 function buildSolReq() {
+  const iat = Math.floor(Date.now() / 1000);
   const obj = {
-    v: 1, to: MERCHANT_ADDR, amt: PAY_LAMPORTS, cur: 'SOL',
-    mint: null, toAta: null,
-    exp: Math.floor(Date.now() / 1000) + 600,
-    name: 'merchant', memo: '',
+    v: 2,
+    rid: 'a'.repeat(32),
+    net: 'mainnet-beta',
+    bh: 'FzFAtwLSSzxhug4sEvUeusLxFdjAS3ByYqgseUYkFpkN',
+    lvh: 300_000_000,
+    slot: 250_000_000,
+    iat,
+    exp: iat + 90,
+    to: MERCHANT_ADDR,
+    amt: PAY_LAMPORTS,
+    cur: 'SOL',
+    mint: null,
+    toAta: null,
+    name: 'merchant',
+    memo: '',
   };
-  return 'solreq:v1?' + Buffer.from(JSON.stringify(obj)).toString('base64url');
+  return 'solreq:v2?' + Buffer.from(JSON.stringify(obj)).toString('base64url');
 }
 
 export async function run() {
   const start = Date.now();
-  console.log('[46-sol-offline-handoff] setup (relay + web + browser + sol stub)…');
-  const env = await setup({solStub: true});
+  console.log('[46-sol-offline-handoff] setup (relay + web + browser)…');
+  const env = await setup();
   try {
     const {driver} = env;
 
@@ -63,58 +62,41 @@ export async function run() {
     console.log('[46-sol-offline-handoff] onboarding…');
     await onboardWallet(driver, 'e2e-sol-pay');
 
-    // 2. Install the SOL RPC stub (simulates a Solana node for createNonceAccount).
-    const nonceB64 = nonceAccountB64();
-    await driver.eval((b64) => {
-      globalThis.__DPAY_TEST_SOLANA_RPC_STUB = {
-        getLatestBlockhash: () => ({value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
-        getMinimumBalanceForRentExemption: () => 1447680,
-        sendTransaction: () => 'sig_' + Math.random().toString(36).slice(2, 12),
-        getSignatureStatuses: () => ({value: [{confirmationStatus: 'confirmed'}]}),
-        getAccountInfo: () => ({value: {data: [b64, 'base64'], owner: '11111111111111111111111111111111', lamports: 1447680}}),
-        getBalance: () => ({value: 5000000000}),
-      };
-    }, nonceB64);
-
-    // 3. SOL is a first-class asset now: select SOL via the Balances sheet (the selected asset
-    //    implies the rail — no separate chain toggle). Opens Balances → taps the SOL row → the Pay
-    //    tab mounts SolPayMode, arming the SOL HCE service (DpaySolNfc AID ..02) before any tap.
+    // 2. Select SOL via the Balances sheet (the selected asset implies the rail).
+    //    SolPayMode mounts immediately in 'scan' — NO setup needed in v2.
     console.log('[46-sol-offline-handoff] selecting SOL as the active asset via Balances…');
     await driver.findByTestID('balance', {timeoutMs: 8_000});
     await driver.click('balance', {timeoutMs: 5_000});
     await driver.findByTestID('asset-sol-select', {timeoutMs: 5_000});
     await driver.click('asset-sol-select', {timeoutMs: 5_000});
 
-    // 4. First-use setup: create the durable-nonce account (online, via stub).
-    console.log('[46-sol-offline-handoff] setting up durable-nonce account…');
-    await driver.findByTestID('btn-sol-pay-setup', {timeoutMs: 5_000});
-    await driver.click('btn-sol-pay-setup', {timeoutMs: 5_000});
-    await driver.findByTestID('sol-pay-scan', {timeoutMs: 12_000});
-    console.log('[46-sol-offline-handoff] ✓ durable-nonce account created (stub)');
+    // 3. The scanner surface is immediately available (no setup phase in v2).
+    await driver.findByTestID('sol-pay-scan', {timeoutMs: 5_000});
+    console.log('[46-sol-offline-handoff] ✓ SolPayMode mounted in scan (no setup needed)');
 
-    // 5. Scan the merchant's solreq: QR (via the camera seam).
+    // 4. Scan the merchant's solreq:v2 QR (via the camera seam).
     const solreqUri = buildSolReq();
-    console.log('[46-sol-offline-handoff] scanning solreq:…');
+    console.log('[46-sol-offline-handoff] scanning solreq:v2…');
     await driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), solreqUri);
 
-    // 6. Review: the amount + merchant name are shown.
+    // 5. Review: the amount is shown.
     const amount = await driver.findByTestID('sol-pay-amount', {timeoutMs: 5_000});
     const amountTxt = await amount.evaluate((n) => (n.textContent ?? '').trim());
     assert(/SOL/.test(amountTxt), `review should show the SOL amount, got: "${amountTxt}"`);
     console.log(`[46-sol-offline-handoff] ✓ review: ${amountTxt}`);
 
-    // 7. Approve → offline sign (PURE, no RPC) → solpay: QR.
+    // 6. Approve → offline sign (PURE, no RPC) → solpay:v2 QR.
     console.log('[46-sol-offline-handoff] approving (offline sign)…');
     await driver.click('btn-sol-pay-approve', {timeoutMs: 5_000});
     await driver.findByTestID('sol-pay-qr', {timeoutMs: 5_000});
 
-    // Capture the signed solpay: URI (the QR shim stashes it on window.__DPAY_QR_LAST).
+    // Capture the signed solpay:v2 URI (the QR shim stashes it on window.__DPAY_QR_LAST).
     const solpayUri = await driver.eval(() => window.__DPAY_QR_LAST);
-    assert(typeof solpayUri === 'string' && solpayUri.startsWith('solpay:v1?'),
-      `the signed solpay: QR must be captured, got: ${JSON.stringify(solpayUri)?.slice(0, 80)}`);
-    console.log('[46-sol-offline-handoff] ✓ offline-signed solpay: QR rendered');
+    assert(typeof solpayUri === 'string' && solpayUri.startsWith('solpay:v2?'),
+      `the signed solpay:v2 QR must be captured, got: ${JSON.stringify(solpayUri)?.slice(0, 80)}`);
+    console.log('[46-sol-offline-handoff] ✓ offline-signed solpay:v2 QR rendered');
 
-    // 8. "Handed to merchant" → the HONEST pending state (NOT "Paid ✓").
+    // 7. "Handed to merchant" → the HONEST pending state (NOT "Paid ✓").
     console.log('[46-sol-offline-handoff] marking handed-off (honest pending)…');
     await driver.click('btn-sol-pay-handed', {timeoutMs: 5_000});
     const status = await driver.findByTestID('sol-pay-status', {timeoutMs: 5_000});
