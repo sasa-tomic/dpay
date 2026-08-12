@@ -133,8 +133,12 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
       try {
         const p = await ckerc20OnrampParams(relayUrl, currency, signal);
         if (alive) setParams(p);
-      } catch { if (alive) setErr("Couldn't reach the server for onramp details."); }
-      finally { if (alive) cancel(); }
+      } catch (e) {
+        // Log the real cause (HTTP status / body / network error / abort) so a 5xx, a CORS issue, or
+        // a relay config gap is debuggable; the user still sees the friendly fallback message.
+        console.warn('ckerc20OnrampParams failed:', e instanceof Error ? e.message : String(e));
+        if (alive) setErr("Couldn't reach the server for onramp details.");
+      } finally { if (alive) cancel(); }
     })();
     return () => { alive = false; };
   }, [relayUrl, currency]);
