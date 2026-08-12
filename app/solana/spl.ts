@@ -14,8 +14,19 @@
 
 import { ed25519 } from '@noble/curves/ed25519';
 import { sha256 } from '@noble/hashes/sha256';
-import { base58Decode32, encodeU32LE, encodeU64LE, SYSTEM_PROGRAM_BYTES } from './tx';
-import { assembleMessage, type Instruction, SYSVAR_RECENT_BLOCKHASHES_ADDRESS } from './nonce';
+import bs58 from 'bs58';
+import {
+  base58Decode32,
+  encodeU32LE,
+  encodeU64LE,
+  SYSTEM_PROGRAM_BYTES,
+  assembleMessage,
+  buildMemoInstruction,
+  solreqMemoData,
+  type Instruction,
+} from './tx';
+import { SYSVAR_RECENT_BLOCKHASHES_ADDRESS } from './nonce';
+import { encodeSolReq, type SolReqV2 } from './qr';
 
 /** SPL Token Program (the legacy TokenkegQ program that USDC/SPL fungibles use). */
 export const TOKEN_PROGRAM_ADDRESS = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
@@ -161,4 +172,75 @@ export function buildAdvanceAndSplTransferMessage(
     buildSplTransferInstruction(sourceAta, destAta, owner, amount),
   ];
   return assembleMessage(authority, instructions, storedNonce);
+}
+
+// ============================================================================
+// Phase 2 — Canonical recent-blockhash v2 USDC construction. Replaces the raw Token.transfer with
+// Token.transferChecked (commits to mint + decimals, invariant #6) and builds the
+// {Memo(ix0), Token.transferChecked(ix1)} message shape. The v1 builders above stay until Phase 3
+// rewires the seam and deletes them.
+// ============================================================================
+
+// SPL Token `transferChecked` instruction index — a SINGLE u8 (Token program bincode convention).
+const IX_TOKEN_TRANSFER_CHECKED = 12;
+
+/**
+ * Build a Token Program `transferChecked` instruction. Commits to the mint + decimals (unlike raw
+ * `transfer`), preventing a wrong-decimals or wrong-mint token from satisfying the payment. Accounts
+ * (matching @solana/spl-token createTransferCheckedInstruction):
+ *   [0] source   — writable, nonsigner
+ *   [1] mint     — readonly, nonsigner
+ *   [2] dest     — writable, nonsigner
+ *   [3] owner    — readonly, signer (authorizes the debit)
+ * Data: u8(12) || u64 LE amount || u8 decimals.
+ */
+export function buildTransferCheckedInstruction(
+  sourceAta: Uint8Array,
+  mint: Uint8Array,
+  destAta: Uint8Array,
+  owner: Uint8Array,
+  amount: bigint,
+  decimals: number,
+): Instruction {
+  if (amount < 0n) throw new Error('amount must be non-negative');
+  const data: number[] = [];
+  data.push(IX_TOKEN_TRANSFER_CHECKED);
+  encodeU64LE(data, amount);
+  data.push(decimals & 0xff);
+  return {
+    programId: TOKEN_PROGRAM_BYTES,
+    keys: [
+      { pubkey: sourceAta, signer: false, writable: true },
+      { pubkey: mint, signer: false, writable: false },
+      { pubkey: destAta, signer: false, writable: true },
+      { pubkey: owner, signer: true, writable: false },
+    ],
+    data: new Uint8Array(data),
+  };
+}
+
+/**
+ * Build the canonical USDC v2 message: {Memo(ix0), Token.transferChecked(ix1)} with
+ * recentBlockhash = request.bh. The memo binds every request field; transferChecked commits to the
+ * source ATA, mint, destination ATA, owner (payer), amount, and 6 decimals. The payer is the sole
+ * signer and fee payer; the source ATA is the payer's canonical ATA for the request mint.
+ */
+export function buildCanonicalUsdcMessage(payer: Uint8Array, request: SolReqV2): Uint8Array {
+  if (request.mint === null || request.toAta === null) {
+    throw new Error('buildCanonicalUsdcMessage: mint and toAta are required for USDC');
+  }
+  const canonicalUri = encodeSolReq(request);
+  const memoIx = buildMemoInstruction(solreqMemoData(canonicalUri));
+  const sourceAta = deriveAta(bs58.encode(payer), request.mint);
+  const mint = base58Decode32(request.mint);
+  const destAta = base58Decode32(request.toAta);
+  const transferCheckedIx = buildTransferCheckedInstruction(
+    sourceAta,
+    mint,
+    destAta,
+    payer,
+    BigInt(request.amt),
+    USDC_DECIMALS,
+  );
+  return assembleMessage(payer, [memoIx, transferCheckedIx], base58Decode32(request.bh));
 }

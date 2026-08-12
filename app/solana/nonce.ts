@@ -4,18 +4,25 @@
 //   (1) CreateAccount + InitializeNonceAccount  — sets up the payer's durable nonce account.
 //   (2) AdvanceNonceAccount(ix0) + Transfer       — the offline-signed, stale-blockhash-immune payment.
 //
-// Account ordering follows @solana/web3.js Message.compile exactly: unique accounts are sorted by
-// (isSigner desc, isWritable desc, base58 localeCompare asc) then the fee-payer is pinned to index 0;
-// the table is then split into a contiguous signer block followed by nonsigners. See golden parse notes.
+// Phase 2 of the recent-blockhash rewrite MOVED the generic message-assembly primitives
+// (AccountMeta, Instruction, bytesEqual, assembleMessage) to tx.ts — the low-level primitives
+// module that already owns base58Decode32/encodeCompactU16/encodeU64LE/ed25519. This file re-exports
+// them so every existing consumer (spl.ts, App.tsx, solana.ts, nonce-test) keeps compiling
+// UNCHANGED; Phase 3 deletes the nonce builders and re-points callers directly to tx.ts.
 
-import bs58 from 'bs58';
 import {
   base58Decode32,
-  encodeCompactU16,
   encodeU32LE,
   encodeU64LE,
   SYSTEM_PROGRAM_BYTES,
+  assembleMessage,
 } from './tx';
+import type { Instruction } from './tx';
+
+// Re-export the moved assembly primitives so existing consumers keep compiling (Phase 3 deletes
+// this re-export and re-points callers directly to ./tx).
+export { assembleMessage, bytesEqual } from './tx';
+export type { AccountMeta, Instruction } from './tx';
 
 /** Durable nonce accounts are exactly 80 bytes (rent-exempt minimum = 890880 + 80*6960 = 1447680). */
 export const NONCE_ACCOUNT_LENGTH = 80;
@@ -33,120 +40,6 @@ const IX_CREATE_ACCOUNT = 0;
 const IX_INITIALIZE_NONCE = 6;
 const IX_ADVANCE_NONCE = 4;
 const IX_TRANSFER = 2;
-
-// The collator @solana/web3.js uses to break ties within an account-key bucket.
-const LOCALE_OPTS = {
-  sensitivity: 'variant' as const,
-  numeric: false,
-  caseFirst: 'lower' as const,
-};
-
-/** An account reference inside an instruction (mirrors @solana/web3.js AccountMeta). */
-export interface AccountMeta {
-  pubkey: Uint8Array;
-  signer: boolean;
-  writable: boolean;
-}
-
-/** A compiled instruction: a program id, its ordered account references, and opaque data. */
-export interface Instruction {
-  programId: Uint8Array;
-  keys: AccountMeta[];
-  data: Uint8Array;
-}
-
-function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
-  return true;
-}
-
-/**
- * Assemble a legacy Solana message from a fee payer, an ordered instruction list, and a recent
- * blockhash. Produces the exact byte layout @solana/web3.js Message.compile emits, including the
- * account-key sort (signer, writable, base58-localeCompare) and the contiguous signer block.
- */
-export function assembleMessage(
-  feePayer: Uint8Array,
-  instructions: Instruction[],
-  blockhash: Uint8Array,
-): Uint8Array {
-  if (blockhash.length !== 32) throw new Error('blockhash must be 32 bytes');
-
-  // Collect unique accounts with OR-merged signer/writable flags (keyed by base58 string).
-  const order: string[] = [];
-  const map = new Map<string, AccountMeta>();
-  const upsert = (pubkey: Uint8Array, signer: boolean, writable: boolean): void => {
-    const b58 = bs58.encode(pubkey);
-    const existing = map.get(b58);
-    if (existing) {
-      existing.signer = existing.signer || signer;
-      existing.writable = existing.writable || writable;
-    } else {
-      map.set(b58, { pubkey, signer, writable });
-      order.push(b58);
-    }
-  };
-  for (const ix of instructions) {
-    for (const k of ix.keys) upsert(k.pubkey, k.signer, k.writable);
-    upsert(ix.programId, false, false);
-  }
-  // The fee payer is always a writable signer.
-  upsert(feePayer, true, true);
-
-  let metas = Array.from(map.values());
-  metas.sort((a, b) => {
-    if (a.signer !== b.signer) return a.signer ? -1 : 1;
-    if (a.writable !== b.writable) return a.writable ? -1 : 1;
-    return bs58.encode(a.pubkey).localeCompare(bs58.encode(b.pubkey), 'en', LOCALE_OPTS);
-  });
-
-  // Pin the fee payer to the front of the (already signer-first) table.
-  const fpIndex = metas.findIndex(m => bytesEqual(m.pubkey, feePayer));
-  if (fpIndex > 0) {
-    const [fp] = metas.splice(fpIndex, 1);
-    metas.unshift(fp);
-  }
-
-  // Split into a contiguous signer block followed by nonsigners, counting header fields.
-  const signedKeys: AccountMeta[] = [];
-  const unsignedKeys: AccountMeta[] = [];
-  let numReadonlySigned = 0;
-  let numReadonlyUnsigned = 0;
-  for (const m of metas) {
-    if (m.signer) {
-      signedKeys.push(m);
-      if (!m.writable) numReadonlySigned++;
-    } else {
-      unsignedKeys.push(m);
-      if (!m.writable) numReadonlyUnsigned++;
-    }
-  }
-  const accountKeys = signedKeys.concat(unsignedKeys);
-  const numRequiredSignatures = signedKeys.length;
-
-  const indexOf = (pubkey: Uint8Array): number => {
-    for (let i = 0; i < accountKeys.length; i++) {
-      if (bytesEqual(accountKeys[i].pubkey, pubkey)) return i;
-    }
-    throw new Error('internal: account key missing from table');
-  };
-
-  const out: number[] = [];
-  out.push(numRequiredSignatures, numReadonlySigned, numReadonlyUnsigned);
-  encodeCompactU16(out, accountKeys.length);
-  for (const k of accountKeys) for (let i = 0; i < 32; i++) out.push(k.pubkey[i]);
-  for (let i = 0; i < 32; i++) out.push(blockhash[i]);
-  encodeCompactU16(out, instructions.length);
-  for (const ix of instructions) {
-    out.push(indexOf(ix.programId));
-    encodeCompactU16(out, ix.keys.length);
-    for (const k of ix.keys) out.push(indexOf(k.pubkey));
-    encodeCompactU16(out, ix.data.length);
-    for (const b of ix.data) out.push(b);
-  }
-  return new Uint8Array(out);
-}
 
 /**
  * Build the CreateAccount + InitializeNonceAccount message for funding a durable nonce account.
