@@ -1,18 +1,6 @@
 import {View, Text, Pressable} from 'react-native';
 import {C} from '../config/palette';
 import {S} from '../styles';
-import {
-  type CurrencyDescriptor,
-  familyDisplay,
-  assetTestKey,
-  displayName,
-  fmtCurrencyAmount,
-  isTestnetCurrency,
-  testnetDisplayName,
-} from '../config/catalog';
-import {cmpRaw} from '../lib/amount';
-import {fmtAsset} from '../lib/format';
-import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 
 // Shared currency row — the single presentational component consumed by BOTH the BalancesSheet
 // (variant='card') and the ReceiveMode CurrencyPicker (variant='plain'). Closes founder issues #2
@@ -97,91 +85,4 @@ export function CurrencyRow({testId, name, subtitle, amount, active, onPress, ac
       {children}
     </View>
   );
-}
-
-// --- unified currency list builder (UI-layer concern — SOL stays OUT of the catalog) --------------
-// A pure helper that produces ONE ordered list of currency rows for BOTH selectors. IC items come
-// from the catalog (one per visible entry); a single synthetic SOL item is appended when
-// `solAddress` is non-null (mirrors BalancesSheet's existing gate). Subtitles are extracted from the
-// SAME curated logic BalancesSheet inlined (BTC→"Bitcoin", USDC/USDT→"US dollar stablecoin", testnet
-// →network, DEMO→"play money for testing", SOL→"Solana · self-custody") so both selectors render
-// identical labels. This is a UI concern, NOT a catalog change — SOL is a device-key rail with no
-// ICRC ledger; forcing it into CurrencyDescriptor would contaminate every catalog helper.
-export type CurrencyListItem =
-  | {kind: 'ic'; desc: CurrencyDescriptor; key: string; name: string; subtitle: string;
-     amountText: string | null; zero: boolean; active: boolean}
-  | {kind: 'sol'; key: 'sol'; name: 'SOL'; subtitle: string;
-     amountText: string | null; zero: boolean; active: boolean};
-
-// The curated subtitle for an IC catalog currency. Extracted verbatim from BalancesSheet's former
-// inline logic so the two selectors render identical subtitles (Issue 3 parity).
-function icSubtitle(catalog: CurrencyDescriptor[], a: CurrencyDescriptor): string {
-  const isPrimary = a.currency === 0;
-  const testnet = !isPrimary && isTestnetCurrency(a);
-  if (isPrimary) return 'play money for testing';
-  if (testnet) return a.network ?? 'testnet';
-  if (a.minter_family === 'CkBtcUtxo') return 'Bitcoin';
-  if (a.minter_family === 'CkEthErc20' && (a.backing_symbol === 'USDC' || a.backing_symbol === 'USDT')) return 'US dollar stablecoin';
-  return familyDisplay(catalog, a.currency)?.networkLabel ?? 'Unsupported asset';
-}
-
-// The display name for an IC catalog currency (DEMO / testnet-display / backing-symbol).
-function icName(a: CurrencyDescriptor): string {
-  const isPrimary = a.currency === 0;
-  const testnet = !isPrimary && isTestnetCurrency(a);
-  return isPrimary ? 'DEMO' : (testnet ? testnetDisplayName(a) : displayName(a));
-}
-
-// The stable ASCII testID key for an IC catalog currency.
-function icKey(a: CurrencyDescriptor): string {
-  return a.currency === 0 ? 'demo' : assetTestKey(a);
-}
-
-export function buildCurrencyList(args: {
-  catalog: CurrencyDescriptor[];
-  assetBalances: Record<number, string>;
-  primaryBalance: string | null;
-  online: boolean;
-  showTestnet: boolean;
-  currentCurrency: number;
-  activeSol: boolean;
-  solAddress: string | null;
-  solBalance: string | null;
-}): CurrencyListItem[] {
-  const {catalog, assetBalances, primaryBalance, online, showTestnet, currentCurrency, activeSol, solAddress, solBalance} = args;
-  // Mirror BalancesSheet's testnet filter: hide testnet currencies unless opted in app-wide.
-  const visibleCatalog = showTestnet ? catalog : catalog.filter(a => !isTestnetCurrency(a));
-  const items: CurrencyListItem[] = visibleCatalog.map(a => {
-    const isPrimary = a.currency === 0;
-    const assetBal = assetBalances[a.currency] ?? '0';
-    // MC1 units 2-4: balance presence via `cmpRaw` (BigInt) — never `> 0` on a string.
-    const funded = !isPrimary && cmpRaw(assetBal, '0') > 0;
-    const balanceText = isPrimary
-      ? (primaryBalance == null ? '—' : `${online ? '' : '~'}${fmtCurrencyAmount(catalog, a.currency, primaryBalance)}`)
-      : fmtCurrencyAmount(catalog, a.currency, assetBal);
-    return {
-      kind: 'ic' as const,
-      desc: a,
-      key: icKey(a),
-      name: icName(a),
-      subtitle: icSubtitle(catalog, a),
-      amountText: balanceText,
-      // DEMO never dims; a non-DEMO IC asset dims when unfunded (mirrors the former `[S.assetAmt, !funded && S.assetCardZero]`).
-      zero: !isPrimary && !funded,
-      active: a.currency === currentCurrency,
-    };
-  });
-  // SOL appended only when the device key is derived (mirrors BalancesSheet's existing gate).
-  if (solAddress) {
-    items.push({
-      kind: 'sol' as const,
-      key: 'sol',
-      name: 'SOL',
-      subtitle: 'Solana · self-custody',
-      amountText: solBalance == null ? '—' : fmtAsset(solBalance, SOL_DECIMALS, SOL_UNIT),
-      zero: solBalance == null || cmpRaw(solBalance, '0') === 0,
-      active: activeSol,
-    });
-  }
-  return items;
 }

@@ -18,7 +18,8 @@ import {NfcIcon} from './NfcIcon';
 import {ModeToggle} from './ModeToggle';
 import {DepositSheet} from './DepositSheet';
 import {CkErc20DepositSheet} from './CkErc20DepositSheet';
-import {CurrencyRow, buildCurrencyList} from './CurrencyRow';
+import {CurrencyRow} from './CurrencyRow';
+import {buildCurrencyList} from '../lib/assetList';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {withTimeout} from '../lib/timeout';
 

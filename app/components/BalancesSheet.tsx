@@ -4,7 +4,8 @@ import {S} from '../styles';
 import {type CurrencyDescriptor, isTestnetCurrency} from '../config/catalog';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {SheetOverlay} from './SheetOverlay';
-import {CurrencyRow, buildCurrencyList} from './CurrencyRow';
+import {CurrencyRow} from './CurrencyRow';
+import {buildCurrencyList} from '../lib/assetList';
 
 // Balances sheet — the wallet's asset hub. Reached by tapping the header balance (the main screen
 // shows ONLY the current currency's balance; this screen is the sole home for the full balance list

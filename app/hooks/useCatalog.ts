@@ -1,6 +1,6 @@
 import {useEffect, useState} from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {type CurrencyDescriptor, CATALOG_CACHE_KEY, BUNDLED_CATALOG, fetchCurrencies} from '../config/catalog';
+import {type CurrencyDescriptor, catalogCacheKey, BUNDLED_CATALOG, fetchCurrencies} from '../config/catalog';
 
 /**
  * The currency catalog — the runtime source of truth for which assets exist + how to display/fund
@@ -21,7 +21,7 @@ export function useCatalog(relayUrl: string): CurrencyDescriptor[] {
     (async () => {
       let prior = BUNDLED_CATALOG;
       try {
-        const cached = await AsyncStorage.getItem(CATALOG_CACHE_KEY);
+        const cached = await AsyncStorage.getItem(catalogCacheKey(relayUrl));
         if (cached) {
           const parsed = JSON.parse(cached);
           if (Array.isArray(parsed) && parsed.length) { prior = parsed as CurrencyDescriptor[]; if (alive) setCatalog(prior); }

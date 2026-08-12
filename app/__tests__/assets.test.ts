@@ -1,0 +1,269 @@
+/**
+ * Phase 1 — the pure asset domain (2026-08-12 unified asset selection rewrite).
+ *
+ * `buildSelectableAssets` is the ONE pure list builder every Wallet selector consumes. It produces
+ * a resolved view model (`SelectableAsset`) from the validated IC catalog PLUS explicit app-defined
+ * Solana assets. SOL never enters the relay/canister catalog; it is appended here as `solana:*` ids.
+ *
+ * These tests pin the load-bearing Phase-1 invariants:
+ *   1. The complete visible list = every visible IC descriptor + solana:SOL (+ solana:USDC when
+ *      the configured Solana cluster supports it).
+ *   2. AssetIds are STABLE across a catalog object/metadata refresh (same currency id, different
+ *      object reference ⇒ same AssetId). State never stores a descriptor.
+ *   3. Duplicate IC currency IDs are rejected deterministically (first wins).
+ *   4. `reconcileSelectedAsset` preserves a visible selection; falls back to `ic:0` then first
+ *      visible then null. Hiding a selected testnet asset applies the fallback atomically.
+ *   5. Every `testKey` is unique stable ASCII (e2e matches testID literally).
+ *   6. Two USDC assets (IC + Solana) carry distinct `networkLabel`s (no swap / no confusion).
+ *   7. `solanaUsdcAvailable` fail-closes on an empty or misconfigured cluster (mainnet mint on a
+ *      non-mainnet RPC ⇒ false; empty RPC ⇒ false).
+ */
+import {describe, it, expect} from '@jest/globals';
+import {
+  buildSelectableAssets,
+  reconcileSelectedAsset,
+  solanaUsdcAvailable,
+  solanaUsdcCoherent,
+  type SelectableAsset,
+} from '../config/assets';
+import type {CurrencyDescriptor} from '../config/catalog';
+
+// --- shared fixtures (mirror catalog.test.ts's `mk`) -----------------------------------------
+const mk = (d: Partial<CurrencyDescriptor> & Pick<CurrencyDescriptor, 'currency' | 'minter_family'>): CurrencyDescriptor => ({
+  ledger: '', mintable: false, minter: null, symbol: null, decimals: null,
+  wrapper_name: null, backing_symbol: null, network: null, display_decimals: null,
+  fee: null, cap: null, chain_id: null, token_contract: null, gas_ledger: null,
+  onramp: 'Unavailable', offramp: 'Unavailable', ...d,
+});
+const DEMO: CurrencyDescriptor = mk({currency: 0, mintable: true, minter_family: null, symbol: '$', decimals: 2, onramp: 'Direct', offramp: 'Unavailable'});
+const CKBTC: CurrencyDescriptor = mk({currency: 1, minter: 'm', minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8, wrapper_name: 'ckBTC', backing_symbol: 'BTC', network: 'Bitcoin', display_decimals: 8, onramp: 'Direct', offramp: 'Direct'});
+const CKUSDC: CurrencyDescriptor = mk({currency: 2, ledger: 'l', minter: 's', minter_family: 'CkEthErc20', symbol: 'ckUSDC', decimals: 6, wrapper_name: 'ckUSDC', backing_symbol: 'USDC', network: 'Ethereum', display_decimals: 6, chain_id: 1, token_contract: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', onramp: 'Direct', offramp: 'Direct'});
+const CKTESTBTC: CurrencyDescriptor = mk({currency: 3, minter: 'mt', minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8, wrapper_name: 'ckTESTBTC', backing_symbol: 'BTC', network: 'Bitcoin Testnet', display_decimals: 8, onramp: 'Direct', offramp: 'Direct'});
+const BASE_CATALOG: CurrencyDescriptor[] = [DEMO, CKBTC, CKUSDC];
+
+const ids = (as: SelectableAsset[]): string[] => as.map(a => a.id);
+
+// =============================================================================================
+// 1. Complete visible list = visible IC + solana:SOL (+ solana:USDC when configured)
+// =============================================================================================
+describe('buildSelectableAssets — complete visible list', () => {
+  it('returns every IC descriptor (in catalog order) when solanaEnabled=false', () => {
+    const assets = buildSelectableAssets(BASE_CATALOG, {showTestnet: false, solanaEnabled: false});
+    expect(ids(assets)).toEqual(['ic:0', 'ic:1', 'ic:2']);
+  });
+
+  it('appends exactly solana:SOL when solanaEnabled=true and USDC is unavailable', () => {
+    // The default jest state has SOLANA_RPC_URL='' (jest.setup.js) ⇒ solanaUsdcAvailable() === false.
+    const assets = buildSelectableAssets(BASE_CATALOG, {showTestnet: false, solanaEnabled: true});
+    expect(ids(assets)).toEqual(['ic:0', 'ic:1', 'ic:2', 'solana:SOL']);
+  });
+
+  it('appends solana:USDC after solana:SOL when solanaUsdcAvailable() is true', () => {
+    // Force-build the list with a stubbed USDC resolver so the order is provable without RPC.
+    const assets = buildSelectableAssets(BASE_CATALOG, {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
+    expect(ids(assets)).toEqual(['ic:0', 'ic:1', 'ic:2', 'solana:SOL', 'solana:USDC']);
+  });
+
+  it('omits solana:SOL/USDC entirely when solanaEnabled=false even if USDC would be available', () => {
+    const assets = buildSelectableAssets(BASE_CATALOG, {showTestnet: false, solanaEnabled: false, solanaUsdc: true});
+    expect(ids(assets)).toEqual(['ic:0', 'ic:1', 'ic:2']);
+  });
+
+  it('hides testnet IC descriptors when showTestnet=false', () => {
+    const catalog: CurrencyDescriptor[] = [DEMO, CKBTC, CKTESTBTC];
+    const assets = buildSelectableAssets(catalog, {showTestnet: false, solanaEnabled: false});
+    expect(ids(assets)).toEqual(['ic:0', 'ic:1']); // ic:3 (testnet) is omitted
+  });
+
+  it('reveals testnet IC descriptors when showTestnet=true', () => {
+    const catalog: CurrencyDescriptor[] = [DEMO, CKBTC, CKTESTBTC];
+    const assets = buildSelectableAssets(catalog, {showTestnet: true, solanaEnabled: false});
+    expect(ids(assets)).toEqual(['ic:0', 'ic:1', 'ic:3']);
+  });
+
+  it('every returned asset has visible=true (the builder is the visibility filter)', () => {
+    const assets = buildSelectableAssets(BASE_CATALOG, {showTestnet: true, solanaEnabled: true});
+    expect(assets.every(a => a.visible === true)).toBe(true);
+  });
+
+  it('handles an empty catalog (SOL still appended when enabled)', () => {
+    expect(ids(buildSelectableAssets([], {showTestnet: false, solanaEnabled: false}))).toEqual([]);
+    expect(ids(buildSelectableAssets([], {showTestnet: false, solanaEnabled: true}))).toEqual(['solana:SOL']);
+  });
+});
+
+// =============================================================================================
+// 2. AssetIds are STABLE across a descriptor object/metadata refresh
+// =============================================================================================
+describe('AssetIds survive a descriptor object/metadata refresh', () => {
+  it('same currency id + different object reference + changed metadata ⇒ SAME AssetId', () => {
+    // Two distinct object references for the SAME logical currency (1) with different cosmetic
+    // metadata (network label changed). The AssetId must be `ic:1` in both — state never stores a
+    // descriptor, so a catalog refresh cannot invalidate the selection.
+    const before: CurrencyDescriptor[] = [mk({currency: 1, minter_family: 'CkBtcUtxo', wrapper_name: 'ckBTC', backing_symbol: 'BTC', network: 'Bitcoin', decimals: 8})];
+    const after: CurrencyDescriptor[] = [mk({currency: 1, minter_family: 'CkBtcUtxo', wrapper_name: 'ckBTC', backing_symbol: 'BTC', network: 'Bitcoin Testnet', decimals: 8})];
+    const a1 = buildSelectableAssets(before, {showTestnet: true, solanaEnabled: false});
+    const a2 = buildSelectableAssets(after, {showTestnet: true, solanaEnabled: false});
+    expect(ids(a1)).toEqual(['ic:1']);
+    expect(ids(a2)).toEqual(['ic:1']);
+    expect(a1[0].id).toBe(a2[0].id);
+  });
+});
+
+// =============================================================================================
+// 3. Duplicate IC currency IDs are rejected deterministically (first wins)
+// =============================================================================================
+describe('Duplicate IC currency IDs are deduped deterministically', () => {
+  it('keeps the FIRST occurrence of a duplicate currency id (catalog order)', () => {
+    const first = mk({currency: 1, minter_family: 'CkBtcUtxo', wrapper_name: 'ckBTC', backing_symbol: 'BTC', network: 'Bitcoin', decimals: 8});
+    const dup = mk({currency: 1, minter_family: 'CkBtcUtxo', wrapper_name: 'ckBTC', backing_symbol: 'BTC', network: 'Bitcoin Testnet', decimals: 8});
+    const assets = buildSelectableAssets([first, dup], {showTestnet: true, solanaEnabled: false});
+    // Only ONE ic:1 entry; and it carries the FIRST descriptor's metadata (network 'Bitcoin').
+    expect(ids(assets)).toEqual(['ic:1']);
+    expect(assets[0].networkLabel).toContain('Bitcoin');
+    expect(assets[0].networkLabel).not.toContain('Testnet');
+  });
+});
+
+// =============================================================================================
+// 4. reconcileSelectedAsset — deterministic fallback policy
+// =============================================================================================
+describe('reconcileSelectedAsset — preserve/fallback policy', () => {
+  const VISIBLE = buildSelectableAssets(BASE_CATALOG, {showTestnet: false, solanaEnabled: true});
+
+  it('preserves a still-visible selection', () => {
+    expect(reconcileSelectedAsset('ic:1', VISIBLE)).toBe('ic:1');
+    expect(reconcileSelectedAsset('solana:SOL', VISIBLE)).toBe('solana:SOL');
+  });
+
+  it('returns null for a null selection when no assets are visible', () => {
+    expect(reconcileSelectedAsset(null, [])).toBeNull();
+  });
+
+  it('falls back to ic:0 when the selected id is no longer present', () => {
+    expect(reconcileSelectedAsset('ic:99', VISIBLE)).toBe('ic:0');
+  });
+
+  it('falls back to ic:0 when the selected id is null but ic:0 is present', () => {
+    expect(reconcileSelectedAsset(null, VISIBLE)).toBe('ic:0');
+  });
+
+  it('falls back to the FIRST visible asset when ic:0 is absent', () => {
+    const noDemo = buildSelectableAssets([CKBTC, CKUSDC], {showTestnet: false, solanaEnabled: false});
+    expect(reconcileSelectedAsset('ic:99', noDemo)).toBe('ic:1');
+    expect(reconcileSelectedAsset(null, noDemo)).toBe('ic:1');
+  });
+
+  it('falls back to ic:0 even when ic:0 is not the first visible asset (ic:0 wins over first)', () => {
+    // Catalog order: [ckBTC, DEMO, ckUSDC]. First visible is ic:1, but ic:0 is the preferred fallback.
+    const reordered = buildSelectableAssets([CKBTC, DEMO, CKUSDC], {showTestnet: false, solanaEnabled: false});
+    expect(ids(reordered)).toEqual(['ic:1', 'ic:0', 'ic:2']);
+    expect(reconcileSelectedAsset('ic:99', reordered)).toBe('ic:0');
+  });
+
+  it('returns null when no assets are visible (fail-closed)', () => {
+    expect(reconcileSelectedAsset('ic:99', [])).toBeNull();
+    expect(reconcileSelectedAsset('solana:SOL', [])).toBeNull();
+  });
+
+  it('hiding a selected testnet asset atomically applies the fallback (rebuild ⇒ reconcile)', () => {
+    // Step 1: testnet visible, user selects ic:3 (ckTESTBTC).
+    const withTestnet = buildSelectableAssets([DEMO, CKBTC, CKTESTBTC], {showTestnet: true, solanaEnabled: false});
+    expect(reconcileSelectedAsset('ic:3', withTestnet)).toBe('ic:3');
+    // Step 2: user hides testnet — the rebuilt list no longer contains ic:3.
+    const withoutTestnet = buildSelectableAssets([DEMO, CKBTC, CKTESTBTC], {showTestnet: false, solanaEnabled: false});
+    expect(ids(withoutTestnet)).not.toContain('ic:3');
+    // Step 3: reconcile falls back to ic:0 (deterministic).
+    expect(reconcileSelectedAsset('ic:3', withoutTestnet)).toBe('ic:0');
+  });
+});
+
+// =============================================================================================
+// 5. Every testKey is unique stable ASCII
+// =============================================================================================
+describe('testKey — unique stable ASCII', () => {
+  const isAscii = (s: string): boolean => /^[\x20-\x7E]+$/.test(s);
+
+  it('every entry\'s testKey is unique ASCII across a mixed catalog + testnet + SOL + USDC', () => {
+    const assets = buildSelectableAssets([DEMO, CKBTC, CKUSDC, CKTESTBTC], {showTestnet: true, solanaEnabled: true, solanaUsdc: true});
+    const keys = assets.map(a => a.testKey);
+    // All ASCII.
+    expect(keys.every(isAscii)).toBe(true);
+    // All unique.
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('the same descriptor (refreshed object) yields the same testKey', () => {
+    // A refreshed catalog descriptor is a NEW object reference with possibly-changed benign metadata
+    // (a new fee, a new ledger principal). The testKey — derived from the currency id alone — must
+    // be IDENTICAL so the e2e net's `asset-<key>` testID stays stable across a catalog refresh.
+    // (Mutating `network` to a testnet value would be classification-changing, not benign — use fee.)
+    const a1 = buildSelectableAssets([CKBTC], {showTestnet: false, solanaEnabled: false});
+    const a2 = buildSelectableAssets([{...CKBTC, fee: '99999'}], {showTestnet: false, solanaEnabled: false});
+    expect(a1[0].testKey).toBe(a2[0].testKey);
+  });
+
+  it('Solana SOL and USDC carry distinct stable keys', () => {
+    const assets = buildSelectableAssets([], {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
+    const sol = assets.find(a => a.id === 'solana:SOL')!;
+    const usdc = assets.find(a => a.id === 'solana:USDC')!;
+    expect(sol.testKey).not.toBe(usdc.testKey);
+    expect(isAscii(sol.testKey)).toBe(true);
+    expect(isAscii(usdc.testKey)).toBe(true);
+  });
+});
+
+// =============================================================================================
+// 6. Network qualification — two USDC assets carry distinct networkLabels
+// =============================================================================================
+describe('Network qualification — IC USDC vs Solana USDC', () => {
+  it('IC USDC networkLabel references Ethereum; Solana USDC references Solana', () => {
+    const assets = buildSelectableAssets([DEMO, CKUSDC], {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
+    const icUsdc = assets.find(a => a.id === 'ic:2')!;
+    const solUsdc = assets.find(a => a.id === 'solana:USDC')!;
+    expect(icUsdc.networkLabel).not.toBe(solUsdc.networkLabel);
+    expect(icUsdc.networkLabel).toMatch(/Ethereum/);
+    expect(solUsdc.networkLabel).toMatch(/Solana/);
+  });
+
+  it('SOL networkLabel references Solana (distinct from any IC asset)', () => {
+    const assets = buildSelectableAssets([DEMO, CKBTC, CKUSDC], {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
+    const sol = assets.find(a => a.id === 'solana:SOL')!;
+    expect(sol.networkLabel).toMatch(/Solana/);
+    // No IC asset's label references Solana.
+    expect(assets.filter(a => a.protocol === 'ic').every(a => !/Solana/.test(a.networkLabel))).toBe(true);
+  });
+});
+
+// =============================================================================================
+// 7. solanaUsdcAvailable / solanaUsdcCoherent — fail-closed for misconfigured cluster
+// =============================================================================================
+describe('solanaUsdcCoherent — pure coherence predicate', () => {
+  const MAINNET_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+
+  it('empty RPC URL ⇒ false (SOL disabled)', () => {
+    expect(solanaUsdcCoherent('', false, MAINNET_MINT)).toBe(false);
+  });
+
+  it('mainnet RPC + mainnet mint ⇒ true', () => {
+    expect(solanaUsdcCoherent('https://mainnet.helius-rpc.com', false, MAINNET_MINT)).toBe(true);
+  });
+
+  it('devnet RPC + mainnet mint ⇒ false (the only configured mint is mainnet; fail-closed)', () => {
+    // The fund-loss case this guards: devnet RPC + mainnet mint would silently point at a
+    // non-existent account. Fail-closed rather than risk an unfulfillable USDC row.
+    expect(solanaUsdcCoherent('https://api.devnet.solana.com', true, MAINNET_MINT)).toBe(false);
+  });
+
+  it('missing mint ⇒ false (no configured mint for this cluster)', () => {
+    expect(solanaUsdcCoherent('https://mainnet.solana.com', false, '')).toBe(false);
+  });
+});
+
+describe('solanaUsdcAvailable — default jest state is fail-closed', () => {
+  // jest.setup.js sets __DPAY_TEST_SOLANA_RPC_URL='' ⇒ SOLANA_RPC_URL resolves to '' at module
+  // load ⇒ solanaUsdcAvailable() MUST be false under the default jest state (no real devnet hit).
+  it('returns false when the RPC URL is empty (default offline inner loop)', () => {
+    expect(solanaUsdcAvailable()).toBe(false);
+  });
+});

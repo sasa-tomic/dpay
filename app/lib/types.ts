@@ -124,3 +124,22 @@ export type ReceiptAuth = {
 };
 
 export type NfcStatus = 'ready' | 'off' | 'unsupported' | 'unknown';
+
+// Phase 1 — the unified asset domain (2026-08-12 unified asset selection rewrite).
+// Stable, human-readable asset identifiers that are independent of any catalog object reference.
+// The wallet's idle selection state is ONE `AssetId` (Wallet-owned); it never stores a descriptor.
+//
+// `ic:${number}` carries the relay/canister currency u32 directly in the id — the SAME value the
+// IC wire format, request QRs, NFC requests, and ledger use — so resolving from id → currency id
+// is a pure parse, never a catalog lookup. Solana ids are the literal device-key-rail tokens; they
+// NEVER enter the relay/canister catalog, the ICRC polling, or the IC wire currency-id space (SOL
+// is a device-key rail, not an ICRC catalog asset — CLAUDE.md non-negotiable).
+export type AssetId = `ic:${number}` | 'solana:SOL' | 'solana:USDC';
+
+// A reference into the asset domain: either an IC currency u32 or a Solana token. This is the
+// discriminated payload a `SelectableAsset` carries alongside its display fields, so a consumer
+// narrowing on `protocol: 'ic'` recovers a typed `currency: number` and a consumer narrowing on
+// `protocol: 'solana'` recovers a typed `token: 'SOL' | 'USDC'` — no `any`, no `!`, no cast.
+export type AssetRef =
+  | {id: `ic:${number}`; protocol: 'ic'; currency: number}
+  | {id: 'solana:SOL' | 'solana:USDC'; protocol: 'solana'; token: 'SOL' | 'USDC'};

@@ -11,6 +11,7 @@ import {
   isPayableAsset,
   isTestnetCurrency,
   testnetDisplayName,
+  catalogCacheKey,
   BUNDLED_CATALOG,
   type CurrencyDescriptor,
 } from '../config/catalog';
@@ -590,5 +591,53 @@ describe('wire_consts vs dfx/catalog_truth.json (M15 app-half drift alarm)', () 
     // breaks the friendly "faucet" label → leaks raw protocol hex to end users (N4).
     expect(MINT_HEX).toBe(TRUTH.wire_consts.mint_account);
     expect(MINT_HEX.length).toBe(64);
+  });
+});
+
+// --- Phase 1: relay-scoped catalog cache (2026-08-12 unified asset selection rewrite) -------------
+// The cache key is now NAMESPACED BY RELAY URL (was a global 'dpay.currencies.v1'). The bug this
+// closes: a user who switches relay URLs (Settings → advanced) would otherwise reuse the PRIOR
+// relay's cached catalog — a relay that exposes a different asset set (testnet, a different
+// currency id mapping) would render stale/wrong rows until the next fetch landed. The cache key
+// now embeds the normalized relay URL + bumps the version (v1 → v2) so stale global v1 entries
+// do not bleed into the scoped cache. `catalogCacheKey` is PURE (no AsyncStorage) so it is unit-
+// testable without mocking the storage layer.
+describe('catalogCacheKey — relay-URL-scoped cache (Phase 1)', () => {
+  it('produces DISTINCT keys for two distinct relay URLs (no cross-relay bleed)', () => {
+    const a = catalogCacheKey('https://relay-a.example.com');
+    const b = catalogCacheKey('https://relay-b.example.com');
+    expect(a).not.toBe(b);
+  });
+
+  it('normalizes a trailing slash (https://x/ and https://x share ONE key)', () => {
+    // Without normalization, a user who edits the relay URL and accidentally pastes a trailing
+    // slash would miss the prior cache (two keys for one logical relay). Trim trailing slashes.
+    expect(catalogCacheKey('https://relay.example.com')).toBe(catalogCacheKey('https://relay.example.com/'));
+    expect(catalogCacheKey('https://relay.example.com')).toBe(catalogCacheKey('https://relay.example.com///'));
+  });
+
+  it('bumps the version to v2 (a stale global v1 entry must NOT bleed into the scoped cache)', () => {
+    // The pre-Phase-1 key was the global 'dpay.currencies.v1'. The new key is namespaced + version-
+    // bumped so a prior install's v1 cache entry is ignored (a schema drift between v1 and v2 would
+    // otherwise be parsed through the validator; cleaner to namespace-invalidate).
+    const k = catalogCacheKey('https://relay.example.com');
+    expect(k.startsWith('dpay.currencies.v2:')).toBe(true);
+    expect(k).not.toBe('dpay.currencies.v1');
+  });
+
+  it('embeds the normalized relay URL in the key (the scope IS the URL)', () => {
+    const k = catalogCacheKey('https://relay.example.com/');
+    expect(k).toContain('https://relay.example.com');
+    expect(k).not.toContain('https://relay.example.com/'); // trailing slash stripped from the scope
+  });
+
+  it('a relay switch does NOT reuse the other relay\'s cache (distinct keys ⇒ distinct reads)', () => {
+    // The relay-switch scenario end-to-end: cache one relay's catalog, switch relays, the new relay
+    // MUST NOT see the old relay's entry. Two distinct keys ⇒ two distinct AsyncStorage reads.
+    const keyA = catalogCacheKey('https://relay-a.example.com');
+    const keyB = catalogCacheKey('https://relay-b.example.com');
+    expect(keyA).not.toBe(keyB);
+    // And after switching BACK, the original key is recovered (stable per URL).
+    expect(catalogCacheKey('https://relay-a.example.com')).toBe(keyA);
   });
 });

@@ -41,7 +41,19 @@ export type CurrencyDescriptor = {
   onramp: RampCapability;          // funding capability; Unavailable ⇒ no "Add money" button
   offramp: RampCapability;         // cash-out capability; Unavailable ⇒ no "Cash out" button
 };
-export const CATALOG_CACHE_KEY = 'dpay.currencies.v1';
+// Relay-URL-scoped cache key (Phase 1 — 2026-08-12 unified asset selection rewrite). The cache is
+// keyed by the NORMALIZED relay URL (trailing slashes trimmed) so switching relays (Settings →
+// advanced) cannot reuse the prior relay's catalog (a relay that exposes a different asset set —
+// testnet, a different currency-id mapping — would otherwise render stale/wrong rows until the
+// next fetch landed). Version bumped v1 → v2 so a stale GLOBAL v1 entry does not bleed in.
+//
+// PURE: no AsyncStorage, no side effects — unit-testable directly. Consumers (`useCatalog`,
+// `fetchCurrencies`) call this with the active `relayUrl` to derive their read/write key.
+const CATALOG_CACHE_PREFIX = 'dpay.currencies.v2';
+export function catalogCacheKey(relayUrl: string): string {
+  const normalized = relayUrl.replace(/\/+$/, '');
+  return `${CATALOG_CACHE_PREFIX}:${normalized}`;
+}
 // Bundled fallback so a cold/offline first load still renders. Overwritten by the live catalog on
 // the first successful fetch. Mirrors the canister's demo deployment (DEMO_USD + ckBTC + ckUSDC).
 // The ledger principals are empty here (the wallet reads currency/symbol/decimals/minter_family +
@@ -99,7 +111,7 @@ export async function fetchCurrencies(relayUrl: string, prior: CurrencyDescripto
         offramp: (typeof c.offramp === 'string' && (c.offramp === 'Direct' || c.offramp === 'Partner' || c.offramp === 'Unavailable') ? c.offramp : 'Unavailable') as RampCapability,
       }));
     if (clean.length === 0) return prior;
-    AsyncStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify(clean)).catch((e: unknown) => { console.warn('catalog cache persist failed: ', e); });
+    AsyncStorage.setItem(catalogCacheKey(relayUrl), JSON.stringify(clean)).catch((e: unknown) => { console.warn('catalog cache persist failed: ', e); });
     return clean;
   } catch { return prior; }
 }
