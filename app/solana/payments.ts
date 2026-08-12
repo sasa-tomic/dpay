@@ -1,15 +1,16 @@
 /**
- * solana/payments — the SOL durable-nonce receipt outcome logic, as PURE functions.
+ * solana/payments — the SOL recent-blockhash receipt outcome logic, as PURE functions.
  *
- * This is the SOL analog of payments.ts:decidePayerReceipt, but for Solana's "adopt nextNonce
- * optimistically" model (the receipt-nonce-relay). The money-critical decision of what the payer
- * believes after handing off an offline-signed tx to the merchant lives here in one place:
+ * Phase 1 rewrite: the durable-nonce "adopt nextNonce" model is gone. SolReqV2 carries a request
+ * id (`rid`) and the signed SolPayV2 echoes the SAME `rid`; the receipt's `sig` is the on-chain
+ * signature. The money-critical decision of what the payer believes after handing off an
+ * offline-signed tx to the merchant lives here in one place:
  *
- *   The merchant's broadcast result is the source of truth. A settled receipt whose nonce account
- *   matches the payer's is SUCCESS, and the payer ADOPTS the handed-back nextNonce so the NEXT
- *   offline payment needs NO online resync. A rejected receipt is a definitive failure (mark the
- *   nonce stale). An unreachable receipt is honest-unknown (keep the value; the tx MAY still land).
- *   A receipt for a different nonce account is IGNORED.
+ *   The merchant's broadcast result is the source of truth. A receipt is believed ONLY if both
+ *   `rid` and `sig` match the payer's open request — otherwise it is IGNORED (a stale or cross-tap
+ *   receipt must never be believed for the wrong payment). On match: settled→success, rejected→
+ *   declined, unreachable→pending. An unknown status code is honest-unknown→pending (never a false
+ *   failure).
  *
  * Dependency-free (no react-native, no fetch, no globals) so it runs under jest on the fast inner
  * loop. Receipt codes are imported from payments.ts (single source of truth — RECEIPT_SETTLED etc.
@@ -18,49 +19,56 @@
 import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from '../payments';
 
 /**
- * The payer's terminal state, derived from a SolReceipt received over QR/NFC from the merchant:
- *  - `success` + `adoptNonce` — the broadcast settled THIS payment. The payer ADOPTS `adoptNonce` as
- *    the new stored nonce value (the receipt-nonce-relay win: the next offline payment is signable
- *    immediately, NO online resync). `adoptNonce` is null when the payment settled but the merchant
- *    couldn't read the advanced nonce (getNonceAccount failed after confirm) — the payer shows
- *    "Paid ✓" but must resync before the next offline sign (no loss of funds; the transfer landed).
- *  - `declined` — the broadcast was definitively rejected (InstructionError, insufficient funds,
- *    nonce mismatch). The payer marks its nonce STALE (the stored value can't be trusted anymore).
+ * The payer's terminal state, derived from a SolReceiptV2 received over QR/NFC from the merchant:
+ *  - `success` — the broadcast settled THIS payment (rid+sig both match). The transfer landed.
+ *  - `declined` — the broadcast was definitively rejected (InstructionError, insufficient funds).
  *  - `pending` — the merchant couldn't confirm (network/timeout). The outcome is genuinely unknown
- *    (the tx MAY still land). Keep the value; the next broadcast is the truth-check. NEVER a failure.
- *  - `ignore` — the receipt's nonce account is NOT the payer's (it answers a different payment).
+ *    (the tx MAY still land). NEVER a failure.
+ *  - `ignore` — the receipt's rid or sig does NOT match the payer's open request (it answers a
+ *    different payment, or is a stale/cross-tap receipt).
  *
- * `expectedNpub` is the payer's nonce account address (base58). Matching on it is what stops a
- * stale or cross-tap receipt from being believed for the wrong payment — the SOL analog of the IC
- * nonce compare. NOTE: base58 is CASE-SENSITIVE (unlike hex), so the compare is EXACT, not
- * lowercased — lowercasing a base58 string changes its meaning.
+ * Binding is `rid` (32 lowercase hex from the solreq:v2 codec) AND `sig` (base58 on-chain
+ * signature). Both are CASE-SENSITIVE — hex case and base58 case both carry meaning, so the compare
+ * is EXACT, never lowercased.
  */
-export type SolPayerOutcome =
-  | {outcome: 'success'; adoptNonce: string | null}
+export type SolPayerOutcomeV2 =
+  | {outcome: 'success'}
   | {outcome: 'declined'}
   | {outcome: 'pending'}
   | {outcome: 'ignore'};
 
 /**
+ * The v2 receipt shape the merchant hands back. `status` is a ReceiptCode (0=settled, 1=rejected,
+ * 2=unreachable — the SAME codes payments.ts defines). `rid` echoes the solreq:v2 request id;
+ * `sig` is the on-chain transaction signature (base58). Neither is a trusted claim — both must
+ * match what the payer signed.
+ */
+export interface SolReceiptV2 {
+  status: number;
+  rid: string;
+  sig: string;
+}
+
+/**
  * Decide the payer's outcome from a merchant receipt. Pure + total (never throws).
  *
- * Binding: `receipt.npub` must EXACTLY equal `expectedNpub` (base58 is case-sensitive). A mismatch
- * (including an empty expected) → 'ignore'. The nextNonce-adoption on success is the SOL-specific
- * behavior with no IC equivalent — it is OPTIMISTIC: if a malicious merchant hands a wrong value,
- * the payer's NEXT offline sign produces a tx that Solana rejects on-chain → 'declined' → resync.
- * Never a loss of funds (the payer only ever signs its own transfer out).
+ * Binding: `receipt.rid` must EXACTLY equal `expectedRid` (32 lowercase hex, case-sensitive) AND
+ * `receipt.sig` must EXACTLY equal `expectedSig` (base58, case-sensitive). A mismatch on EITHER
+ * (including an empty expected) → 'ignore'. There is no "partial match" — a receipt that gets one
+ * right and the other wrong is NOT believed (it answers a different payment).
  */
-export function decideSolPayerReceipt(
-  receipt: {status: number; npub: string; nextNonce: string | null; sig: string | null},
-  expectedNpub: string,
-): SolPayerOutcome {
-  // base58 is case-sensitive — exact compare, NOT lowercased (unlike the IC hex nonce compare).
-  if (!expectedNpub || receipt.npub !== expectedNpub) {
+export function decideSolPayerReceiptV2(
+  receipt: SolReceiptV2,
+  expectedRid: string,
+  expectedSig: string,
+): SolPayerOutcomeV2 {
+  // Both bindings are case-sensitive. An empty expected (the payer has no open request) → ignore.
+  if (!expectedRid || !expectedSig || receipt.rid !== expectedRid || receipt.sig !== expectedSig) {
     return {outcome: 'ignore'};
   }
   switch (receipt.status) {
     case RECEIPT_SETTLED:
-      return {outcome: 'success', adoptNonce: receipt.nextNonce};
+      return {outcome: 'success'};
     case RECEIPT_REJECTED:
       return {outcome: 'declined'};
     case RECEIPT_UNREACHABLE:
@@ -72,35 +80,24 @@ export function decideSolPayerReceipt(
 }
 
 /**
- * Whether a `solreq` has expired. The SOL rail has NO server (the payer signs fully offline, the
- * merchant broadcasts), so unlike the IC rail there is no canister to reject a stale request — the
- * client MUST enforce `exp` itself. A stale/replayed solreq is otherwise fully signable.
+ * Whether a `solreq:v2` has expired. The SOL rail has NO server (the payer signs fully offline,
+ * the merchant broadcasts), so unlike the IC rail there is no canister to reject a stale request
+ * — the client MUST enforce `exp` itself. A stale/replayed solreq is otherwise fully signable.
  *
- * `exp` is unix SECONDS (the solreq codec's frozen v1 field). `nowMs` defaults to `Date.now()` but
- * is a parameter so the boundary is unit-testable. Contract: a request is valid THROUGH its expiry
- * second (`nowSecs === exp` ⇒ NOT expired); one second later it is. This mirrors the IC rail's
- * "valid through the window" semantics (a request built with `exp = now + 300` is signable at the
- * 300th second).
+ * `exp`/`iat` are unix SECONDS (the solreq:v2 codec's frozen fields). `nowMs` defaults to
+ * `Date.now()` but is a parameter so the boundary is unit-testable. Contract: a request is valid
+ * THROUGH its expiry second (`nowSecs === exp` ⇒ NOT expired); one second later it is.
+ *
+ * Advisory cap: even if the local clock says not-yet-expired, a request whose window exceeds
+ * `iat + 90` is treated as expired — the producer is broken or hostile (the codec REJECTS such a
+ * request at decode time, so this is a defense-in-depth for a hand-built req that bypassed the
+ * codec). The boundary `exp === iat + 90` is the maximum legal window and is NOT expired.
  */
-export function isSolReqExpired(req: {exp: number}, nowMs: number = Date.now()): boolean {
+export function isSolReqV2Expired(req: {iat: number; exp: number}, nowMs: number = Date.now()): boolean {
+  if (req.exp > req.iat + 90) {
+    return true;
+  }
   return Math.floor(nowMs / 1000) > req.exp;
-}
-
-/**
- * Whether a scanned `solpay` matches the open `solreq` (to/cur/amt). The merchant broadcasts
- * whatever the payer's solpay carries; without this binding a cheating payer could hand over a
- * signed transfer for a different amount/recipient and the merchant would surface the payer's
- * CLAIMED amount as "Received". `to`/`cur`/`amt` are the three fields a replay-or-swap would alter;
- * `npub` is the payer's own (the merchant doesn't know it ahead of time, so it's not a match target).
- *
- * Pure + total. base58 `to` is compared EXACT (case-sensitive — lowercasing a base58 string changes
- * its meaning, same as the npub compare in decideSolPayerReceipt).
- */
-export function solpayMatchesReq(
-  solpay: {to: string; cur: string; amt: string},
-  req: {to: string; cur: string; amt: string},
-): boolean {
-  return solpay.to === req.to && solpay.cur === req.cur && solpay.amt === req.amt;
 }
 
 // =============================================================================================

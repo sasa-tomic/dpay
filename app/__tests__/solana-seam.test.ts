@@ -6,8 +6,8 @@
  * isolated module registry (mirrors walletconnect.test.ts) with a mocked fetch.
  */
 import {describe, test, expect, jest, afterEach} from '@jest/globals';
-import {decodeSolPay} from '../solana/qr';
-import type {SolReq} from '../solana/qr';
+import {decodeSolPay} from '../solana/qr_v1';
+import type {SolReq} from '../solana/qr_v1';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from '../payments';
 import type {SolanaRpcStub} from '../solana/rpc';
 

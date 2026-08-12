@@ -23,8 +23,8 @@ import {deriveSolanaKeypair, deriveSolanaAddress, deriveSlip10Ed25519} from './s
 import {base58Decode32, buildSignedTransfer, signTransaction} from './solana/tx';
 import {assembleMessage, buildAdvanceAndTransferMessage, buildCreateNonceAccountMessage} from './solana/nonce';
 import {buildAdvanceAndSplTransferMessage, buildSplTransferInstruction, deriveAta, USDC_MINT_ADDRESS} from './solana/spl';
-import {encodeSolPay} from './solana/qr';
-import type {SolReq, SolPay} from './solana/qr';
+import {encodeSolPay} from './solana/qr_v1';
+import type {SolReq, SolPay} from './solana/qr_v1';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from './payments';
 import type {ReceiptCode} from './payments';
 import {hexToBytes} from './lib/format';
