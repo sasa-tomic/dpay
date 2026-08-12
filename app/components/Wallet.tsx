@@ -7,7 +7,7 @@ import {TOP_UP_CENTS, FAUCET_TIMEOUT_MS, SHOW_TESTNET_STORAGE_KEY} from '../conf
 import {familyDisplay, isTestnetCurrency} from '../config/catalog';
 import {base} from '../lib/format';
 import {applyOffline} from '../lib/amount';
-import {buildSelectableAssets, reconcileSelectedAsset, routeDeeplinkToIc, shouldAllowUserSelect, solanaUsdcAvailable} from '../config/assets';
+import {buildSelectableAssets, chipLabel, reconcileSelectedAsset, routeDeeplinkToIc, shouldAllowUserSelect, solanaUsdcAvailable} from '../config/assets';
 import {buildAssetBalances} from '../lib/assetBalances';
 import type {AssetId, Identity, NfcStatus} from '../lib/types';
 import {DpayCore} from '../services/native';
@@ -162,10 +162,12 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
   const depositFamily = (selectedFamily === 'CkBtcUtxo' || selectedFamily === 'CkEthErc20') ? selectedFamily : null;
   const depositChainId = selectedDesc?.chain_id ?? null;
   const depositNativeEth = selectedFamily === 'CkEthErc20' && selectedDesc?.token_contract == null;
-  // The header name + active-rail chip text. `selectedAsset.symbol` is the display NAME
-  // (DEMO/BTC/USDC/SOL/…), never a raw ledger id. The 'DEMO' fallback covers the pre-reconcile
-  // first paint (effectiveSelectedId resolves to ic:0 immediately, so this is defense-in-depth).
-  const activeAssetName = selectedAsset?.symbol ?? 'DEMO';
+  // The header name + active-rail chip text. `chipLabel` returns the bare asset symbol UNLESS
+  // another visible asset shares it — the USDC collision (ic:2 Ethereum + solana:USDC Solana both
+  // read 'USDC') is then qualified with a short network tag (USDC·Eth / USDC·Sol) so a user can tell
+  // which network is selected from the main screen. Unique symbols (DEMO/BTC/ETH/SOL) stay compact.
+  // The 'DEMO' fallback covers the pre-reconcile first paint (selectedAsset is null only then).
+  const activeAssetName = selectedAsset ? chipLabel(selectedAsset, assets) : 'DEMO';
 
   // Read the device NFC radio state once (re-checked when the app returns to the foreground, since
   // the user may toggle NFC in system settings). Purely informational for the status chip; failure

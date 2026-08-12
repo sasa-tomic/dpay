@@ -21,6 +21,7 @@
 import {describe, it, expect} from '@jest/globals';
 import {
   buildSelectableAssets,
+  chipLabel,
   reconcileSelectedAsset,
   solanaUsdcAvailable,
   solanaUsdcCoherent,
@@ -265,5 +266,59 @@ describe('solanaUsdcAvailable — default jest state is fail-closed', () => {
   // load ⇒ solanaUsdcAvailable() MUST be false under the default jest state (no real devnet hit).
   it('returns false when the RPC URL is empty (default offline inner loop)', () => {
     expect(solanaUsdcAvailable()).toBe(false);
+  });
+});
+
+// =============================================================================================
+// 8. chipLabel — qualify the chip with a short network tag ONLY when two visible assets share a symbol
+// =============================================================================================
+describe('chipLabel — collision-driven network qualification', () => {
+  // The unified-asset-selection rewrite surfaced a UX ambiguity: `selectedAsset.symbol` is `USDC`
+  // for BOTH IC USDC (ic:2, network Ethereum) AND Solana USDC (solana:USDC, network Solana), so the
+  // active-rail chip + header balance label read bare `USDC` for both — a user could not tell which
+  // network was selected from the main screen. `chipLabel` qualifies the chip with a short network
+  // tag ONLY when another visible asset shares the same symbol (YAGNI: unique symbols stay compact).
+  it('returns the bare symbol when no other visible asset shares it (DEMO/BTC/ETH/SOL)', () => {
+    const assets = buildSelectableAssets([DEMO, CKBTC, CKUSDC], {showTestnet: false, solanaEnabled: true});
+    const demo = assets.find(a => a.id === 'ic:0')!;
+    const btc = assets.find(a => a.id === 'ic:1')!;
+    const sol = assets.find(a => a.id === 'solana:SOL')!;
+    expect(chipLabel(demo, assets)).toBe('DEMO');
+    expect(chipLabel(btc, assets)).toBe('BTC');
+    expect(chipLabel(sol, assets)).toBe('SOL');
+  });
+
+  it('qualifies IC USDC + Solana USDC with DISTINCT short network tags when both are visible', () => {
+    // Both ic:2 and solana:USDC carry symbol 'USDC' — a collision. The chip must distinguish them.
+    const assets = buildSelectableAssets([DEMO, CKBTC, CKUSDC], {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
+    const icUsdc = assets.find(a => a.id === 'ic:2')!;
+    const solUsdc = assets.find(a => a.id === 'solana:USDC')!;
+    const icLabel = chipLabel(icUsdc, assets);
+    const solLabel = chipLabel(solUsdc, assets);
+    // Both qualified (no longer the bare colliding symbol).
+    expect(icLabel).not.toBe('USDC');
+    expect(solLabel).not.toBe('USDC');
+    // The two labels are DISTINCT — the network tag disambiguates.
+    expect(icLabel).not.toBe(solLabel);
+    // The short tag is appended to the symbol so a user still reads `USDC` first.
+    expect(icLabel).toMatch(/^USDC/);
+    expect(solLabel).toMatch(/^USDC/);
+  });
+
+  it('a USDC asset whose counterpart is NOT visible stays bare (no spurious qualification)', () => {
+    // Solana disabled ⇒ no solana:USDC ⇒ ic:2 is the only USDC ⇒ bare symbol (YAGNI).
+    const icOnly = buildSelectableAssets([DEMO, CKUSDC], {showTestnet: false, solanaEnabled: false});
+    const icUsdc = icOnly.find(a => a.id === 'ic:2')!;
+    expect(chipLabel(icUsdc, icOnly)).toBe('USDC');
+    // Symmetric: Solana USDC alone (no IC catalog) ⇒ bare.
+    const solOnly = buildSelectableAssets([], {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
+    const solUsdc = solOnly.find(a => a.id === 'solana:USDC')!;
+    expect(chipLabel(solUsdc, solOnly)).toBe('USDC');
+  });
+
+  it('is pure: the same (asset, all) pair yields the same label across calls', () => {
+    const assets = buildSelectableAssets([DEMO, CKUSDC], {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
+    const icUsdc = assets.find(a => a.id === 'ic:2')!;
+    expect(chipLabel(icUsdc, assets)).toBe(chipLabel(icUsdc, assets));
   });
 });

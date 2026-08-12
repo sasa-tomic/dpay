@@ -251,3 +251,35 @@ export function solanaUsdcCoherent(rpcUrl: string, isDevnet: boolean, mint: stri
 export function solanaUsdcAvailable(): boolean {
   return solanaUsdcCoherent(SOLANA_RPC_URL, IS_SOLANA_DEVNET, USDC_MINT_ADDRESS);
 }
+
+// The active-rail chip + header balance label. Returns the bare asset `symbol` UNLESS another
+// visible asset shares the same symbol — the unified-asset-selection rewrite made USDC appear on
+// TWO rails (ic:2 = Ethereum, solana:USDC = Solana) with the SAME symbol 'USDC', so the bare chip
+// was ambiguous. When a collision exists, the chip qualifies with a SHORT network tag
+// (`USDC·Eth` / `USDC·Sol`) so a user reads the network at a glance. No collision (DEMO/BTC/ETH/SOL)
+// ⇒ the chip stays compact (YAGNI — qualifying every chip would just add noise).
+//
+// The short network tag is DERIVED FROM the existing `networkLabel` field (format "<symbol> ·
+// <network>" for non-DEMO; DEMO never collides — it's the only "play money" row): split off the
+// network segment, then abbreviate. The three known mainnet networks get clean tags; anything else
+// (a future/testnet network) falls back to a short prefix so it still disambiguates. Pure: no React,
+// no native deps; deterministic in (asset, all).
+const SHORT_NETWORK_TAG: Record<string, string> = {
+  Ethereum: 'Eth',
+  Solana: 'Sol',
+  Bitcoin: 'Btc',
+};
+function shortNetworkTag(asset: SelectableAsset): string {
+  // ` · ` is U+00B7 (middle dot) flanked by spaces — the joiner `icAsset`/`solana*Asset` use.
+  const network = asset.networkLabel.split(' · ').pop() ?? '';
+  const mapped = SHORT_NETWORK_TAG[network];
+  if (mapped) return mapped;
+  // Fallback for an unmapped network: a short prefix (≤3 chars) keeps the chip compact while still
+  // distinguishing the colliding assets (e.g. "Bitcoin Testnet" → "Bit", distinct from "Btc").
+  return network.length <= 3 ? network : network.slice(0, 3);
+}
+export function chipLabel(asset: SelectableAsset, all: SelectableAsset[]): string {
+  const collision = all.some(a => a.id !== asset.id && a.symbol === asset.symbol);
+  if (!collision) return asset.symbol;
+  return `${asset.symbol}·${shortNetworkTag(asset)}`;
+}
