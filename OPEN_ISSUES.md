@@ -8,39 +8,71 @@
 > entries below are **deliberate, documented follow-ups**, not regressions — each carries its current mitigation and the concrete
 > next step. Structural detail lives in `CODEBASE_ANALYSIS.md`.
 
-## NEXT SESSION — work order (2026-08-12): unified asset selection rewrite
+## NEXT SESSION — work order
 
-> **Phases 1–3 DONE (commits Phase 1 + Phase 2 + Phase 3, 2026-08-12).** Next unblocked phase is
-> **Phase 4** (selected-asset Receive forms — converge `ReceiveMode.reqCurrency` +
-> `SolReceiveMode.cur` onto the `selectedAssetId` contract; drop the interim `onSelectSol` bridge
-> + the legacy `buildCurrencyList` adapter; the Receive picker reuses `buildSelectableAssets`).
-> See the plan's Phase 4 section for the exact contract. All inner-loop gates green after Phase 3:
-> typecheck clean, jest 671/671, e2e 68/68 (incl. 54/55/63), bridge-parity + aid-parity OK.
+> **Empty / neutral.** No unblocked, owner-less work is currently queued. The previous work order —
+> the unified asset selection rewrite (2026-08-12) — is **COMPLETE** (see the session summary
+> directly below). Pick up new work only when a concrete next step is identified; do not re-derive
+> items the rewrite already closed.
+
+## Session summary (2026-08-12): unified asset selection rewrite — COMPLETE (7 phases, all gates green)
+
+> Resolves the top-of-file work order above. The 4 competing asset-selection states
+> (`Wallet.currentCurrency`, `Wallet.activeSol`, `ReceiveMode.reqCurrency`, `SolReceiveMode.cur`)
+> collapsed into ONE Wallet-owned `selectedAssetId: AssetId` (`ic:<n>` | `solana:SOL` |
+> `solana:USDC`). Confirmed bugs closed: a Balances selection now updates the Receive dropdown;
+> SOL no longer collapses the picker into a binary SOL/USDC toggle; IC vs Solana USDC are
+> network-qualified and financially isolated. Plan: `2026-08-12-unified-asset-selection-rewrite.md`.
 >
-> ---
+> **7 phases, 6 implementation commits + Phase 7 living-doc** (`bec5d2e` → `45b5ecb`, HEAD):
+> - **P1** (`8902ad1`) asset domain — `app/config/assets.ts`: `AssetId`/`SelectableAsset`/
+>   `buildSelectableAssets`/`reconcileSelectedAsset` (preserve→`ic:0`→first-visible→null fail-closed)/
+>   `solanaUsdcAvailable`; stable IDs survive catalog refresh; duplicate symbols network-qualified;
+>   testnet filtered unless `showTestnet`; catalog AsyncStorage cache namespaced by relay URL.
+>   `buildCurrencyList` moved out of `CurrencyRow.tsx` → `app/lib/assetList.ts` (deleted in P4 once
+>   the last consumer moved to `AssetPicker`).
+> - **P2** (`363e53e`) honest SOL + USDC balance state — `useSolanaBalance` (single native SOL)
+>   replaced by `useSolanaBalances` returning `{sol:{balance,status}, usdc:{amount,decimals,status}}`
+>   with independent statuses; `getTokenAccountBalance` RPC (exact decimal strings). Missing ATA =
+>   `'absent'` (not `'unavailable'`); RPC failure keeps prior; mainnet mint + non-mainnet RPC fails
+>   closed.
+> - **P3** (`e54b82e`) one Wallet selection — `Wallet.tsx` has ONE `selectedAssetId` state;
+>   `currentCurrency` + `activeSol` deleted. `buildAssetBalances` (`app/lib/assetBalances.ts`)
+>   aggregates IC+SOL+USDC into `Record<AssetId, BalanceView>`. `BalancesSheet` unified contract
+>   (assets/balances/selectedId/onSelect(id)); bespoke SOL card + `onSelectSol` gone.
+> - **P4** (`47985c7`) unified Receive forms — `app/components/AssetPicker.tsx` (single Modal
+>   picker; contract assets/selectedId/onSelect(id)/onClose; NO local state, NO SOL special-case).
+>   `ReceiveMode` + `SolReceiveMode` read Wallet's selected asset (deleted `reqCurrency`/`cur` +
+>   binary toggle). Fail-closed USDC ATA: `decideUsdcAtaGate(status, online)` — only `'present'`
+>   allows; `'unknown'` now blocks (was allowed). `SolanaReceiveSheet` USDC-aware. `app/lib/assetList.ts`
+>   deleted (dead). New e2e flow 69.
+> - **P5** (`1d2eb70`) payer request lock + deeplink routing — `dpay:req`/`dpay:pay` deeplinks force
+>   IC selection (`routeDeeplinkToIc`) so PayMode/ReceiveMode mount regardless of idle SOL selection
+>   (was silently lost). Selection lock: in-flight money ops (pay review/qr/paid, receive
+>   reqQr/result) report `onLockChange(true)` via `useReportLock` (`app/hooks/useReportLock.ts`);
+>   `handleSelect` bails when locked via `shouldAllowUserSelect` (prevents unmounting the active
+>   component mid-flow + wrong-protocol NFC arming); deeplink routing bypasses the lock (direct
+>   `setSelectedAssetId`). New e2e flows 70 (deeplink→IC when SOL idle) + 71 (lock during review).
+> - **P6** (`45b5ecb`) asset-aware Solana Send — `sendSpl(secretHex, destAddr, amount, signal)` in
+>   `solana.ts`: derives sender+recipient ATAs, fail-closed checks BOTH exist (sender missing →
+>   "Your wallet doesn't have a USDC account yet"; recipient missing → "they need to set one up
+>   first"), builds SPL transfer via the unchanged byte-exact `buildSplTransferInstruction`.
+>   `SolanaWithdrawSheet` token-aware (`token:'SOL'|'USDC'`); USDC + sender-ATA-absent → instruction
+>   card (no doomed submit). New e2e flow 72.
+> - **P7** (this commit) verification + living-doc — `FLOWS.md` regenerated (68→72 flows),
+>   `CODEBASE_ANALYSIS.md` RN-architecture section updated (one-selection invariant, selection lock,
+>   consistent fail-closed ATA principle, `__DPAY_TEST_DEEPLINK` test seam), this work-order closed.
 >
-> **Original work order (context):** The current selector is visually shared but
-> behaviorally split across `Wallet.currentCurrency`, `Wallet.activeSol`,
-> `ReceiveMode.reqCurrency`, and `SolReceiveMode.cur`. This caused the confirmed failures where a
-> Balances selection does not update the Receive dropdown, and selecting SOL collapses the picker
-> into a separate SOL/USDC toggle. Green flows 55/63 did not cover the end-to-end invariant and
-> partly codified the broken rail-switch behavior.
+> **Final gate evidence:** jest **697/697**, e2e **72/72**, typecheck clean, bridge-parity
+> **29 methods**, aid-parity **2 AIDs**, visual **0 diffs**. Prod catalog reconciled (4 mainnet IC +
+> 3 testnet-hidden + SOL). Device gate (`just app` → `DPAY_SELFCHECK PASS` + `DPAY_SOL_SELFCHECK
+> PASS`; `just ondevice`) running in parallel — no wire/canister/relay/core change (pure `app/` +
+> `e2e/`), so the structurally-invisible device-only classes don't apply beyond re-proving the APK.
 >
-> **Decision:** there is no user-facing rail switch. Implement one Wallet-owned selected asset ID
-> and one complete picker/list everywhere. The selected/requested asset internally dispatches to
-> the existing IC or Solana protocol engine and NFC AID. Keep those money/protocol implementations
-> separate; do not merge them into a giant conditional component and do not put fake Solana rows in
-> the facade/relay ICRC catalog.
->
-> **Plan:** `2026-08-12-unified-asset-selection-rewrite.md`. It supersedes
-> `2026-08-10-unified-selector-plan.md` and defines 7 independently green TDD commits: asset domain
-> + catalog reconciliation; honest SOL/Solana-USDC balances; one Wallet selection + picker;
-> selected-asset Receive forms; immutable payer request lock + deeplink repair; asset-aware direct
-> Solana actions; full browser/visual/prod/device verification + living-doc updates.
->
-> **Do not postpone as founder outer-loop.** All implementation and emulator/prod-reconciliation
-> work is available in this workspace. Only a physical two-phone NFC radio hop remains an existing
-> outer-loop fidelity check; it does not block the rewrite's inner-loop and emulator gates.
+> **Also closes** the F4 follow-up ("USDC toggle gating", 2026-08-09 SOL sweep deferred-items): the
+> Solana-USDC request now fail-closes via `decideUsdcAtaGate` when the destination ATA is
+> absent/unknown, and the direct-send path fail-closes on a missing sender ATA — so a USDC action can
+> never promise or submit an unfulfillable ATA silently.
 
 ## Session summary (2026-08-11, cont.): device gate + code review + PROD DEPLOYED to HEAD
 
@@ -482,7 +514,7 @@ details.
 
 **Items DEFERRED (optional Subagent D, not blocking):**
 - **F3 merchant ed25519.verify** — the payer's `solpay.tx` signature is currently only validated *implicitly* by Solana accepting/rejecting the broadcast. A merchant-side `ed25519.verify(sig, message, payerPubkey)` before broadcast would mirror the IC receipt-verify posture (defense-in-depth, not a funds risk — on-chain rejects a bad sig).
-- **F4 USDC toggle gating** — the SOL/USDC toggle is offered in the UI but USDC offline-pay is non-functional without pre-existing ATAs (`sourceAta` must exist on-chain). Gating it behind an ATA-existence check is a documented follow-up.
+- ~~**F4 USDC toggle gating** — the SOL/USDC toggle is offered in the UI but USDC offline-pay is non-functional without pre-existing ATAs (`sourceAta` must exist on-chain). Gating it behind an ATA-existence check is a documented follow-up.~~ **✅ DONE (2026-08-12, unified asset selection rewrite Phase 4 + Phase 6).** The binary SOL/USDC toggle is gone (replaced by the unified `AssetPicker` + one `selectedAssetId`). `decideUsdcAtaGate(status, online)` fail-closes Solana-USDC REQUEST creation when the destination ATA is absent/`'unknown'`/`'checking'` (only `'present'` allows); the Phase 6 direct-send path fail-closes on a missing SENDER ATA + a missing RECIPIENT ATA. So a USDC action can never promise or submit an unfulfillable ATA silently. See the 2026-08-12 session summary above.
 - **Default-tab/first-impression UX** — the new user lands on the Pay scanner + "NFC not available" instead of a wallet overview. Requires coordinated e2e updates (any modal-sheet change blocks the keyboard hotkey flow). Deferred to a dedicated UX session.
 - ~~**Seed/backup affordance** — Settings has Reset + Privacy + relay URL but no way to view/export the seed phrase ("one backup recovers both rails" is a pitch point with no UI backing it).~~ **✅ DONE (2026-08-09, commit `2482500`).** See the Phase 2 summary below.
 

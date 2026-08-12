@@ -1,6 +1,6 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **68 flows.**
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **72 flows.**
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay (FakeLedger, offline). No UI stubs. The only shimmed I/O boundary is
 > the camera scan (sanctioned smallest-boundary seam) and the NFC radio (physical-device gate).
@@ -17,7 +17,7 @@
 Flows grouped by user journey; within each table, every row lists what the flow **verifies** and
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`).
 
-wire (1) · onboard (7) · pay (20) · offline (7) · deposit (8) · withdraw (6) · nfc (5) · system (11) · tour (3)
+wire (1) · onboard (7) · pay (20) · offline (7) · deposit (8) · withdraw (6) · nfc (5) · system (15) · tour (3)
 
 ---
 
@@ -73,7 +73,7 @@ wire (1) · onboard (7) · pay (20) · offline (7) · deposit (8) · withdraw (6
 | 46 | sol-offline-handoff | SOL durable-nonce setup → scan solreq: → offline sign → solpay: QR → honest pending. | sol-offline-sign, sol-nonce-setup, qr-handoff, honest-pending |
 | 51 | sol-merchant-broadcast | SOL merchant: build solreq → scan matching solpay → broadcast (stub) → Received. | sol-merchant, sol-broadcast, solpay-match, qr-scan |
 | 53 | sol-merchant-error | SOL merchant broadcast error surfaces a friendly message (not raw RPC, not false Received). | sol-merchant, sol-error, solpay-match, friendly-error |
-| 62 | sol-usdc-ata-warning | SOL/USDC toggle: no USDC ATA → inline warning + Request disabled; SOL clears it. | sol-merchant, sol-usdc, ata-gate, toggle, disabled-request |
+| 62 | sol-usdc-ata-warning | USDC selection: no USDC ATA → inline warning + Request disabled; SOL clears it. | sol-merchant, sol-usdc, ata-gate, asset-picker, disabled-request |
 | 67 | sol-setup-error | SOL setup-nonce failure surfaces a friendly error (not raw RPC) + the unfunded escape hatch; the stale-nonce resync flips status back to ready so offline signing works again. | sol-setup-error, sol-nonce-resync, sol-friendly-error, sol-unfunded-hatch, sol-stale-recovery |
 
 ### Deposits & onramp (ckBTC + ckUSDC + ckERC20)
@@ -125,6 +125,10 @@ wire (1) · onboard (7) · pay (20) · offline (7) · deposit (8) · withdraw (6
 | 57 | settings-seed-backup | Seed stays hidden behind a confirm gate; once revealed the 24 mnemonic words show by default, hex view toggles in and matches identity.secretHex; copy writes the seed to the real clipboard. | seed-backup, confirm-gate, secret-reveal, clipboard-copy, mnemonic-backup, mnemonic-word-{0..23}, btn-backup-show-hex, btn-copy-mnemonic, btn-copy-seed |
 | 63 | picker-sol-rail | SOL is selectable in the Receive currency picker → switches the active rail to SolReceiveMode. | receive-picker, sol-rail, currency-switch |
 | 64 | settings-restore | Settings → Restore replaces wallet identity from 64-hex seed (no wipe); username preserved. | restore-seed, settings-restore, identity-replace, keypair-from-secret |
+| 69 | sol-usdc-selection | IC USDC ↔ Solana USDC: unified picker switches rail + clears amount; Solana USDC fails closed without ATA. | asset-picker, ic-usdc, sol-usdc, rail-switch, amount-clear, fail-closed-ata |
+| 70 | deeplink-ic-routing | A dpay:req deeplink arriving while SOL is idle-selected routes to the IC Pay engine (PayMode review), not SolPayMode — the blob is never silently lost. | deeplink-routing, ic-engine-routing, solana-to-ic-handoff, prefill-preserve |
+| 71 | selection-lock | An in-flight pay review locks the idle asset selection: the Balances button is disabled + a no-op, and canceling the review re-enables it. | selection-lock, in-flight-preserve, balances-disable, nfc-arming-invariant |
+| 72 | sol-usdc-send | Solana USDC "Send to address" fails closed when the device ATA is absent (no doomed SPL send). | sol-usdc-send, spl-transfer, fail-closed-ata, asset-aware-send |
 
 ### Visual capture (UX tour)
 

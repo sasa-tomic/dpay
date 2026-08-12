@@ -1,12 +1,32 @@
-# 2026-08-12 — Unified Asset Selection Rewrite (PLANNED)
+# 2026-08-12 — Unified Asset Selection Rewrite (✅ COMPLETE)
 
-> **Status: PLANNED, unblocked, highest-priority next-session work.** This plan supersedes
-> `2026-08-10-unified-selector-plan.md`. That earlier change unified row rendering but retained
-> three independent selection states and a hidden rail switch. The result looks unified while
-> behaving inconsistently.
+> **Status: COMPLETE — all 7 phases landed, every gate green (2026-08-12).** HEAD `45b5ecb`
+> (Phase 6). The 7 phases are 6 implementation commits + Phase 7 verification/living-doc:
 >
-> Scope is app + e2e + documentation. SOL remains app-only: do not change the facade, relay
-> catalog, IC wire format, Rust core, or canister settlement for this rewrite.
+> | Phase | Commit | Summary |
+> |---|---|---|
+> | 1 — asset domain + catalog reconciliation | `8902ad1` | `AssetId`, `buildSelectableAssets`, `reconcileSelectedAsset`, relay-scoped catalog cache |
+> | 2 — honest SOL + USDC balances | `363e53e` | `useSolanaBalances` (independent sol/usdc status), `getTokenAccountBalance` |
+> | 3 — one Wallet selection | `e54b82e` | ONE `selectedAssetId`; `currentCurrency`/`activeSol` deleted; `buildAssetBalances` |
+> | 4 — unified Receive forms | `47985c7` | `AssetPicker`; `reqCurrency`/`cur` deleted; fail-closed `decideUsdcAtaGate` |
+> | 5 — payer request lock + deeplink routing | `1d2eb70` | `routeDeeplinkToIc`; `useReportLock`; `shouldAllowUserSelect` |
+> | 6 — asset-aware Solana Send | `45b5ecb` | `sendSpl` (sender+recipient ATA fail-closed); token-aware `SolanaWithdrawSheet` |
+> | 7 — verification + living docs | (this commit) | FLOWS.md / CODEBASE_ANALYSIS.md / OPEN_ISSUES.md updated |
+>
+> **Final gate evidence:** jest **697/697**, e2e **72/72** (flows 69–72 added), typecheck clean,
+> bridge-parity **29 methods**, aid-parity **2 AIDs**, visual **0 diffs**. Prod catalog reconciled
+> (4 mainnet IC + 3 testnet-hidden + SOL). Plan: `bec5d2e` (this doc).
+>
+> The body below is the original plan, retained as the historical record of the decision and the
+> per-phase RED/implementation/exit contract each commit satisfied.
+>
+> ---
+>
+> **Original scope note:** this plan supersedes `2026-08-10-unified-selector-plan.md`. That earlier
+> change unified row rendering but retained three independent selection states and a hidden rail
+> switch. The result looked unified while behaving inconsistently. Scope is app + e2e +
+> documentation. SOL remains app-only: the facade, relay catalog, IC wire format, Rust core, and
+> canister settlement are unchanged by this rewrite.
 
 ## Executive decision
 
