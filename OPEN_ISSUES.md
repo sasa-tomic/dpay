@@ -10,29 +10,10 @@
 
 ## NEXT SESSION — work order
 
-> **Solana recent-blockhash rewrite** (plan: `2026-08-12-solana-recent-blockhash-rewrite-plan.md`):
-> Phases 1–6 **DONE** (`f665228`→`52f22cf`, HEAD=`d274ebd`). Phase 7 (delete legacy evidence +
-> living-doc update + self-check replacement) is the remaining planned work. Plus 2 cross-currency
-> verification gaps found after the rewrite. Pick up in priority order.
-
-### 1. Solana rewrite Phase 7 — delete legacy evidence + prove prod readiness [value 8, effort M]
-Replace `DPAY_SOL_SELFCHECK` nonce message with v2 canonical SOL/USDC construction + strict
-verification under Hermes. Update living docs (`CLAUDE.md`, `CODEBASE_ANALYSIS.md`,
-`FLOWS.md`) so durable nonce is NOT described as active. Delete `app/solana/nonce.ts` after
-moving `buildAdvanceAndTransferMessage` out of `App.tsx` self-check. Grep proof:
-`rg "createNonceAccount|resyncNonce|signOffline|nextNonce|npub|solreq:v1|solpay:v1" app`
-returns only reclaim/history references. Full gates + `just app` (both self-checks PASS).
-
-### 2. FakeLedger ↔ prod catalog divergence for ckETH [value 6, effort S]
-The test relay (`crates/dpay-relay/src/ledger/fake.rs`) sets `display_decimals: 18` for its
-native-ETH currency (= protocol decimals), while prod/bundled uses `display_decimals: 6`. This
-masked the ckETH withdraw bug (now fixed in `d274ebd`) — `display_decimals ≠ decimals` is an
-UNTESTED codepath for every IC asset. Align FakeLedger to `display_decimals: 6` + update flow 44
-assertion from 18-dec to 6-dec display.
-
-### 3. Cosmetic: Solana vs IC asset-picker caret inconsistency [value 4, effort S]
-Solana receive/send uses a glyph+text caret (`SOL ▾` / `USDC ▾`) while IC uses glyph-only.
-Minor cross-rail visual inconsistency; normalize if the picker is ever unified.
+> **Empty / neutral.** All queued work is COMPLETE. The Solana recent-blockhash rewrite (Phases 1–7,
+> plan `2026-08-12-solana-recent-blockhash-rewrite-plan.md`) is fully landed
+> (`f665228`→`c74988b`, HEAD=`c74988b`). All cross-currency verification gaps closed.
+> Pick up new work only when a concrete next step is identified.
 
 ## Session summary (2026-08-12): unified asset selection rewrite — COMPLETE (7 phases, all gates green)
 
