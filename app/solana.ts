@@ -11,45 +11,21 @@
 //   createSolPaymentRequest — ONLINE merchant fetches genesis hash + fresh blockhash + builds SolReqV2.
 //   signSolPayment / signSplPayment — OFFLINE payer signs the canonical message (no network).
 //   broadcastSolPayment — ONLINE merchant strictly verifies, freshness-checks, broadcasts, confirms.
-// The only retained legacy capability is `deriveNonceAccountKeypair` (private — Phase 6 reclaim).
+// The only retained legacy capability is the isolated reclaim tool (app/solana/reclaim.ts), which
+// drains the deterministic nonce account back to the main wallet — not a payment path (invariant #15).
 
-import {ed25519} from '@noble/curves/ed25519';
 import bs58 from 'bs58';
 import {SOLANA_RPC_URL, SOL_GENESIS_HASH, SOL_PAYMENT_MAX_WINDOW_SECONDS, SOL_PAYMENT_COMMITMENT, SOL_BROADCAST_TIMEOUT_MS} from './config/constants';
 import {solanaUsdcAvailable} from './config/assets';
-import {deriveSolanaKeypair, deriveSolanaAddress, deriveSlip10Ed25519} from './solana/identity';
+import {deriveSolanaKeypair, deriveSolanaAddress} from './solana/identity';
 import {base58Decode32, buildSignedTransfer, signTransaction, assembleMessage, buildCanonicalSolMessage, verifySolPayment, extractSignedTxParts} from './solana/tx';
 import {buildSplTransferInstruction, buildCanonicalUsdcMessage, deriveAta, USDC_MINT_ADDRESS} from './solana/spl';
 import {encodeSolReq, generateRid} from './solana/qr';
 import type {SolReqV2, SolPayV2, SolReceiptV2, SolReqInput, SolPayInput} from './solana/qr';
 import type {SolanaSignatureStatus} from './solana/rpc';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from './payments';
-import {hexToBytes} from './lib/format';
 
 export {deriveSolanaAddress};
-
-// --- private helpers -----------------------------------------------------------
-
-// SLIP-10 path m/44'/501'/0'/1' — the SHIPPED durable-nonce account keypair (deterministic from the
-// device seed). Retained ONLY for the Phase 6 legacy reclaim tool (online, isolated in Settings) so
-// users who funded the nonce account before the v2 rewrite can recover its rent reserve. NOT used by
-// any normal payment path (invariant #2). The nonce-account key is only needed once (to sign
-// CreateAccount); the device key at m/44'/501'/0'/0' was the authority that advanced the nonce.
-const NONCE_ACCOUNT_PATH = [44, 501, 0, 1].map((i) => i + 0x80000000);
-
-/** @internal Phase 6 reclaim — derives the shipped legacy nonce-account keypair from the recovery
- *  seed. NOT imported by any payment component (the v2 rail has no nonce). */
-export function deriveNonceAccountKeypair(secretHex: string): {
-  seed: Uint8Array;
-  publicKey: Uint8Array;
-  address: string;
-} {
-  const derived = deriveSlip10Ed25519(hexToBytes(secretHex), NONCE_ACCOUNT_PATH);
-  const seed = new Uint8Array(32);
-  seed.set(derived);
-  const publicKey = ed25519.getPublicKey(seed);
-  return {seed, publicKey, address: bs58.encode(publicKey)};
-}
 
 // --- existing exports (unchanged) ----------------------------------------------
 

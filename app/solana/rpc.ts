@@ -220,6 +220,28 @@ export async function accountExists(url: string, address: string, opts?: SolanaR
   return result.value !== null && result.value !== undefined;
 }
 
+/** Raw on-chain account info at the SOL_PAYMENT_COMMITMENT slot. Phase 6 reclaim uses this to read a
+ *  legacy durable-nonce account's 80-byte data + lamports in ONE round trip (the balance + data come
+ *  from the same RPC response, so they're mutually consistent — no getBalance/accountInfo race).
+ *  Returns null when the account does not exist (never-created or already closed). The `data` field
+ *  is null for accounts with no on-chain data; otherwise the decoded base64 bytes. */
+export interface SolanaAccountInfo {
+  readonly lamports: bigint;
+  readonly owner: string;
+  readonly data: Uint8Array | null;
+  readonly executable: boolean;
+  readonly rentEpoch: number;
+}
+export async function getAccountInfo(url: string, address: string, opts?: SolanaRpcOpts): Promise<SolanaAccountInfo | null> {
+  const result = (await rpcFetch(url, 'getAccountInfo', [address, {encoding: 'base64', commitment: SOL_PAYMENT_COMMITMENT}], opts)) as {
+    value: {data: [string, string] | null; owner: string; lamports: number; executable: boolean; rentEpoch: number} | null;
+  };
+  if (!result.value) return null;
+  const v = result.value;
+  const data = v.data && v.data[1] === 'base64' ? base64ToBytes(v.data[0]) : null;
+  return {lamports: BigInt(v.lamports), owner: v.owner, data, executable: v.executable, rentEpoch: v.rentEpoch};
+}
+
 /** Read a SPL token account's raw balance as an EXACT decimal-digit string + its `decimals`. Uses
  *  `getTokenAccountBalance` and returns the raw `amount` field UNCHANGED — never coerced through JS
  *  `number` (money-critical: values above 2^53 lose precision; the app-wide "amounts are strings"

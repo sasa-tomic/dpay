@@ -10,6 +10,7 @@ import {DpayCore} from '../services/native';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {SheetOverlay} from './SheetOverlay';
+import {SolNonceReclaim} from './SolNonceReclaim';
 
 /**
  * Settings sheet — server config + reset (app configuration only). Moved off the main wallet screen
@@ -308,6 +309,12 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
               </Pressable>
             )}
           </View>
+
+          {/* Legacy durable-nonce reclaim — isolated one-time recovery (NOT a payment path). Drains the
+              deterministic v1 nonce account back to the main wallet. Placed between Restore and Reset so
+              it sits with the wallet-management actions. Self-contained: the section + its async state
+              live in SolNonceReclaim; SettingsSheet just mounts it with the recovery seed. */}
+          <SolNonceReclaim secretHex={secretHex} />
 
           {/* Reset — the destructive action goes LAST in the wallet-management group (Backup → Restore
               → Reset), so a user scanning top-down encounters the protective actions first. */}
