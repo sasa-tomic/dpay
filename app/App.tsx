@@ -22,9 +22,7 @@ import {RELAY_DEFAULT} from './relayConfig';
 import {C} from './config/palette';
 import {STORAGE_KEY, RELAY_STORAGE_KEY} from './config/constants';
 import {randNonceHex} from './lib/format';
-import {deriveSolanaAddress, isValidSolanaAddress, deriveSolanaKeypair} from './solana/identity';
-import {base58Decode32} from './solana/tx';
-import {buildAdvanceAndTransferMessage} from './solana/nonce';
+import {runSolSelfCheck} from './solana/selfcheck';
 import type {Identity} from './lib/types';
 import {DpayCore} from './services/native';
 import {S} from './styles';
@@ -78,24 +76,14 @@ export default function App() {
     })();
   }, []);
 
-  // On-device SOL self-check → logcat. Proves the SLIP-10 ed25519 derivation + bs58/noble deps run
-  // on the real device (Hermes) — the native-module/polyfill blind spot — independent of the FFI and
-  // of any network (pure derivation + nonce message builder; no RPC). The device gate greps for
-  // `DPAY_SOL_SELFCHECK PASS`.
+  // On-device SOL v2 self-check → logcat. Proves the full recent-blockhash v2 code path (SLIP-10
+  // derivation + bs58/noble ed25519 + sha256 memo + canonical SOL/USDC message assembly + strict
+  // verify + signature extraction) runs on the real device (Hermes) — the native-module/polyfill
+  // blind spot — independent of the FFI and of any network. The device gate greps for
+  // `DPAY_SOL_SELFCHECK PASS`. Fixtures match the jest goldens (app/__tests__/solana-tx.test.ts).
   useEffect(() => {
-    (async () => {
-      try {
-        const kp = await DpayCore.generateKeypair();
-        const addr = deriveSolanaAddress(kp.secretHex);
-        if (!isValidSolanaAddress(addr)) throw new Error('invalid SOL address');
-        const {publicKey} = deriveSolanaKeypair(kp.secretHex);
-        const nonceAcct = base58Decode32('GZXyfzSTCBmA7rpeDLrmUbiSA45H5EEwJhoBeR6ZNb3u');
-        const storedNonce = base58Decode32('FzFAtwLSSzxhug4sEvUeusLxFdjAS3ByYqgseUYkFpkN');
-        const msg = buildAdvanceAndTransferMessage(publicKey, nonceAcct, 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r', 1_000_000n, storedNonce);
-        if (msg[0] !== 1 || msg.length < 200) throw new Error(`nonce msg sanity fail: hdr=${msg[0]} len=${msg.length}`);
-        console.log('DPAY_SOL_SELFCHECK PASS');
-      } catch (e: unknown) { console.log(`DPAY_SOL_SELFCHECK FAIL ${e instanceof Error ? e.message : String(e)}`); }
-    })();
+    const r = runSolSelfCheck();
+    console.log(`DPAY_SOL_SELFCHECK ${r.ok ? 'PASS' : `FAIL ${r.reason}`}`);
   }, []);
 
   const onReset = useCallback(async () => { await AsyncStorage.removeItem(STORAGE_KEY); setIdentity(null); }, []);
