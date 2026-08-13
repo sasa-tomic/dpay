@@ -135,9 +135,14 @@ export async function run() {
     assert(await driver.waitForText('Confirming', {timeoutMs: 4_000}),
       'settling should surface the "Confirming…" status');
     await dispatch({type: 'error', role: 'card', reason: 'should be ignored'});
-    const stillConfirming = await driver.waitForText('Confirming', {timeoutMs: 2_000});
-    assert(stillConfirming, 'a late error after settling must NOT overwrite the receipt path');
+    // STALE-ASSERTION FIX: a bare waitForText('Confirming') would resolve on the FIRST poll — catching
+    // the pre-render DOM before the error's effect (if any) could flip the phase. A fixed delay lets
+    // React flush any would-be state update, then we snapshot the post-flush DOM. If the bug existed
+    // (error overwrites the decided phase), "Confirming" would be gone after the flush.
+    await new Promise((r) => setTimeout(r, 500));
     const lateErrBody = await driver.bodyText();
+    assert(lateErrBody.includes('Confirming'),
+      'a late error after settling must NOT overwrite the receipt path');
     assert(!lateErrBody.includes('should be ignored'),
       'the late-error reason must NOT render (the error was ignored)');
     assert(!/Tap failed/.test(lateErrBody),

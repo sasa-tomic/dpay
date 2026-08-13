@@ -111,12 +111,15 @@ export async function run() {
     await driver.waitForText('Confirming', {timeoutMs: 4_000});
     // Fire the late error — it MUST be ignored (committed=true).
     await dispatch({type: 'error', role: 'card', reason: 'should be ignored'});
-    // The phase stays on the receipt path: still "Confirming…" (NOT "Tap failed"). Give the assertion
-    // a moment to catch a regression (a hook that overwrites would flip immediately).
-    const stillConfirming = await driver.waitForText('Confirming', {timeoutMs: 2_000});
-    assert(stillConfirming, 'a late error after settling must NOT overwrite the receipt path (no false "Tap failed")');
-    const noFalseFail = !(await driver.bodyText()).includes('should be ignored');
-    assert(noFalseFail, 'the late-error reason must NOT render (the error was ignored)');
+    // STALE-ASSERTION FIX: a bare waitForText('Confirming') would resolve on the FIRST poll — catching
+    // the pre-render DOM before the error's effect (if any) could flip the phase. A fixed delay lets
+    // React flush any would-be state update from the error, then we snapshot the post-flush DOM. If the
+    // bug existed (error overwrites the decided phase), "Confirming" would be gone after the flush.
+    await new Promise((r) => setTimeout(r, 500));
+    const bodyAfterLate = await driver.bodyText();
+    assert(bodyAfterLate.includes('Confirming'), 'a late error after settling must NOT overwrite the receipt path (no false "Tap failed")');
+    assert(!bodyAfterLate.includes('should be ignored'), 'the late-error reason must NOT render (the error was ignored)');
+    assert(!/Tap failed/.test(bodyAfterLate), 'a late error must NOT flip the status to "Tap failed"');
     console.log('[60-nfc-error] ✓ late error after settling ignored — phase stays on the receipt path');
     // Escape the receipt path (the button is "Cancel" mid-flow, not the terminal "Done"). The
     // settling timer would eventually time out to 'pending' on its own; we cancel to move on.
