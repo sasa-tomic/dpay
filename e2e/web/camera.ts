@@ -24,8 +24,20 @@ function installGlobalHook() {
   if (typeof window === 'undefined') return;
   if ((window as any)[SCAN_HOOK]) return;
   // Replacing the hook each call is allowed; we fan-out to every registered listener.
+  // FAIL-LOUD: if no <QrScanner> is mounted (listeners.size === 0) the scan payload would be
+  // SILENTLY LOST — the flow hangs and times out with an opaque error. Throwing here turns that
+  // into an immediate, actionable RED: "no QrScanner mounted — the scanner component failed to
+  // render on the scan screen". This catches the class of bug where a conditional/overlay prevents
+  // the scanner from mounting (e.g. an NFC status view covering it, a dead nfcActive gate, etc.).
   (window as any)[SCAN_HOOK] = (payload: unknown) => {
     if (typeof payload !== 'string') return;
+    if (listeners.size === 0) {
+      throw new Error(
+        '__DPAY_TEST_SCAN called but no QrScanner is mounted (listeners=0). ' +
+        'The scanner component failed to render — check for a conditional/overlay that prevents ' +
+        '<QrScanner> from mounting on the scan screen.',
+      );
+    }
     for (const fn of listeners) {
       try { fn(payload); } catch { /* a bad listener must not break the others */ }
     }

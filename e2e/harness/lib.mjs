@@ -381,6 +381,34 @@ export async function openPaySend(driver, opts = {}) {
   await driver.click('btn-pay-send', { timeoutMs: opts.timeoutMs ?? 5_000 });
 }
 
+/**
+ * Assert that a <QrScanner> is mounted and listening for scans. Catches the class of bug where the
+ * scanner fails to render (a conditional/overlay prevents it) — the camera shim would SILENTLY lose
+ * the injected scan payload, the flow hangs, and the failure is an opaque timeout instead of an
+ * actionable error. Call this BEFORE injecting a scan via `__DPAY_TEST_SCAN`.
+ */
+export async function assertScannerMounted(driver, label = 'scan screen') {
+  const count = await driver.eval(() => (typeof window.__DPAY_TEST_SCAN_COUNT === 'function' ? window.__DPAY_TEST_SCAN_COUNT() : -1));
+  assert(count > 0, `QrScanner must be mounted on ${label} (listeners=${count}); the scanner component failed to render — check for a conditional/overlay that prevents <QrScanner> from mounting.`);
+}
+
+/**
+ * Poll until a <QrScanner> is mounted (listener count > 0). Use after re-entering a scan phase
+ * (the scanner unmounts during review/qr phases and needs a tick to re-mount). The camera shim's
+ * fail-loud `__DPAY_TEST_SCAN` catches a missing scanner at injection time, but this helper gives
+ * a cleaner failure + avoids the race for flows that re-scan.
+ */
+export async function waitForScanner(driver, opts = {}) {
+  const timeoutMs = opts.timeoutMs ?? 5_000;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const count = await driver.eval(() => (typeof window.__DPAY_TEST_SCAN_COUNT === 'function' ? window.__DPAY_TEST_SCAN_COUNT() : -1));
+    if (count > 0) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  assert(false, `QrScanner did not mount within ${timeoutMs}ms (listeners=0 throughout)`);
+}
+
 // --- relay-retarget / offline helpers -----------------------------------------------------------
 //
 // The "open Settings → type relay URL → Apply → close Settings" dance is repeated across the offline

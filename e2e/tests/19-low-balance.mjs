@@ -18,7 +18,7 @@
 //
 // Selector contract: `pay-amount`, `review-lowbal`, `btn-approve`, `btn-settings`,
 // `settings-relay`, `btn-settings-close`.
-import { setup, assert, onboardWallet, goOffline, setRelay, assertDisabled } from '../harness/lib.mjs';
+import { setup, assert, onboardWallet, goOffline, setRelay, assertDisabled, waitForScanner } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
 const OVER_CENTS = 20_000; // ∂200.00 — exceeds the ∂100.00 faucet-funded balance
@@ -75,8 +75,9 @@ export async function run() {
     console.log(`[19-low-balance] ✓ offline review-lowbal shows: "${lowbalTxt}"`);
 
     // --- 2. ONLINE insufficient: client-side gate disables Approve + shows a warning (C2). --------
-    // Restore the good relay URL; the balance poll reconnects → online=true again.
-    console.log('[19-low-balance] going back online to test the C2 pre-submit gate…');
+    // Cancel out of the first review to return to the scan phase, then restore the relay URL.
+    console.log('[19-low-balance] cancelling first review, going back online…');
+    await driver.click('btn-review-cancel', {timeoutMs: 5_000});
     await setRelay(driver, relayBaseURL);
     // Wait for the header to drop the offline indicator (online=true) before scanning.
     await driver.waitForText('balance', { timeoutMs: 8_000 });
@@ -86,6 +87,7 @@ export async function run() {
     // AND disables btn-approve. (The relay's InsufficientFunds→"Not enough balance" surfacing stays
     // unit-tested in payments.ts; the C1 "any error disables the button" pattern is proven in 10.)
     const onlineReq = buildReq();
+    await waitForScanner(driver);
     await driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), onlineReq);
     await driver.findByTestID('pay-amount', { timeoutMs: 5_000 });
     // The online insufficient-balance warning now shows (re-uses review-lowbal as the balance note).
