@@ -571,12 +571,18 @@ export async function assertDisabled(driver, testID, label) {
 export async function getBalance(relayBaseURL, accountHex, currency = 0, timeoutMs = 4000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  const url = `${relayBaseURL}/api/v1/balance/${accountHex}?currency=${currency}`;
   try {
-    const r = await fetch(`${relayBaseURL}/api/v1/balance/${accountHex}?currency=${currency}`, { signal: ctrl.signal });
-    if (!r.ok) throw new Error(`balance ${r.status}`);
+    const r = await fetch(url, { signal: ctrl.signal });
+    if (!r.ok) throw new Error(`GET ${url} → HTTP ${r.status}: ${(await r.text().catch(() => '')).slice(0, 500)}`);
     const j = await r.json();
-    if (typeof j.balance !== 'string') throw new Error(`balance: bad body ${JSON.stringify(j)}`);
+    if (typeof j.balance !== 'string') throw new Error(`GET ${url}: unexpected body ${JSON.stringify(j).slice(0, 500)}`);
     return j.balance;
+  } catch (e) {
+    // Re-throw already-enriched errors verbatim; wrap a bare transport failure (abort/network) with
+    // method + URL so the failure names the endpoint instead of an opaque "operation was aborted".
+    if (e instanceof Error && /^GET /.test(e.message)) throw e;
+    throw new Error(`GET ${url} failed: ${e instanceof Error ? e.message : e}`);
   } finally { clearTimeout(t); }
 }
 
@@ -589,13 +595,17 @@ export async function getBalance(relayBaseURL, accountHex, currency = 0, timeout
 export async function seedDeposit(relayBaseURL, accountHex, currency, amount, timeoutMs = 4000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  const url = `${relayBaseURL}/api/v1/test/deposit/seed`;
   try {
-    const r = await fetch(`${relayBaseURL}/api/v1/test/deposit/seed`, {
+    const r = await fetch(url, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ account: accountHex, currency, amount }), signal: ctrl.signal,
     });
-    if (!r.ok) throw new Error(`seed ${r.status}: ${await r.text().catch(() => '')}`);
+    if (!r.ok) throw new Error(`POST ${url} → HTTP ${r.status}: ${(await r.text().catch(() => '')).slice(0, 500)}`);
     return r.json();
+  } catch (e) {
+    if (e instanceof Error && /^POST /.test(e.message)) throw e;
+    throw new Error(`POST ${url} failed: ${e instanceof Error ? e.message : e}`);
   } finally { clearTimeout(t); }
 }
 
@@ -608,12 +618,16 @@ export async function seedDeposit(relayBaseURL, accountHex, currency, amount, ti
 export async function refreshDeposit(relayBaseURL, accountHex, currency, timeoutMs = 4000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  const url = `${relayBaseURL}/api/v1/deposit/refresh/${accountHex}?currency=${currency}`;
   try {
-    const r = await fetch(`${relayBaseURL}/api/v1/deposit/refresh/${accountHex}?currency=${currency}`, {
+    const r = await fetch(url, {
       method: 'POST', signal: ctrl.signal,
     });
-    if (!r.ok) throw new Error(`deposit/refresh ${r.status}`);
+    if (!r.ok) throw new Error(`POST ${url} → HTTP ${r.status}: ${(await r.text().catch(() => '')).slice(0, 500)}`);
     return r.json();
+  } catch (e) {
+    if (e instanceof Error && /^POST /.test(e.message)) throw e;
+    throw new Error(`POST ${url} failed: ${e instanceof Error ? e.message : e}`);
   } finally { clearTimeout(t); }
 }
 
@@ -621,35 +635,43 @@ export async function refreshDeposit(relayBaseURL, accountHex, currency, timeout
  * POST `/api/v1/withdraw` with the signed WithdrawRequest → `{ok, status, body}`. Used by the
  * withdraw flow (15) to assert the route's error mapping on a below-min / wrong-sig rejection
  * directly (the app's own submit path is exercised through the UI).
+ *
+ * Returns `{ok, status, body}` for EVERY HTTP response (incl. non-2xx) so a flow can assert on the
+ * relay's rejection (e.g. a 422). A TRANSPORT failure (relay down, abort) is NOT a relay rejection
+ * — it is an infrastructure failure that would let a flow pass or fail opaquely, so it throws loudly
+ * with method + URL + the underlying error instead of returning a silent sentinel.
  */
 export async function postWithdraw(relayBaseURL, req, timeoutMs = 6000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  const url = `${relayBaseURL}/api/v1/withdraw`;
   try {
-    const r = await fetch(`${relayBaseURL}/api/v1/withdraw`, {
+    const r = await fetch(url, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(req), signal: ctrl.signal,
     });
     const body = await r.json().catch(() => ({}));
     return { ok: r.ok, status: r.status, body };
-  } catch {
-    return { ok: null, status: null, body: {} };
+  } catch (e) {
+    throw new Error(`POST ${url} failed (transport): ${e instanceof Error ? e.message : e}`);
   } finally { clearTimeout(t); }
 }
 
-/** POST `/api/v1/pay` with a `{qr}` body → `{ok, status, body}` (null `ok`/`status` on fetch throw). */
+/** POST `/api/v1/pay` with a `{qr}` body → `{ok, status, body}`. Throws on transport failure (see
+ *  `postWithdraw` for the rationale — a fetch rejection is infrastructure, not a relay response). */
 export async function postPay(relayBaseURL, qrCode, timeoutMs = 6000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  const url = `${relayBaseURL}/api/v1/pay`;
   try {
-    const r = await fetch(`${relayBaseURL}/api/v1/pay`, {
+    const r = await fetch(url, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ qr: qrCode }), signal: ctrl.signal,
     });
     const body = await r.json().catch(() => ({}));
     return { ok: r.ok, status: r.status, body };
-  } catch {
-    return { ok: null, status: null, body: {} };
+  } catch (e) {
+    throw new Error(`POST ${url} failed (transport): ${e instanceof Error ? e.message : e}`);
   } finally { clearTimeout(t); }
 }
 
@@ -657,19 +679,21 @@ export async function postPay(relayBaseURL, qrCode, timeoutMs = 6000) {
  * POST `/api/v1/faucet` `{account, amount}` → credits DEMO (currency 0) to an ARBITRARY account hex
  * (not just the browser-onboarded identity). Used by flows that need to fund a server-side keypair
  * (e.g. flow 50 funds a payer keypair B that settles a merchant request + shares the receipt back).
- * Returns `{ok, status, body}`; a non-2xx (e.g. cooldown) surfaces in `body.error`. Mirrors postPay.
+ * Returns `{ok, status, body}`; a non-2xx (e.g. cooldown) surfaces in `body.error`. Throws on
+ * transport failure (see `postWithdraw`). Mirrors postPay.
  */
 export async function faucetAccount(relayBaseURL, accountHex, amount, timeoutMs = 6000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  const url = `${relayBaseURL}/api/v1/faucet`;
   try {
-    const r = await fetch(`${relayBaseURL}/api/v1/faucet`, {
+    const r = await fetch(url, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ account: accountHex, amount }), signal: ctrl.signal,
     });
     const body = await r.json().catch(() => ({}));
     return { ok: r.ok, status: r.status, body };
-  } catch {
-    return { ok: null, status: null, body: {} };
+  } catch (e) {
+    throw new Error(`POST ${url} failed (transport): ${e instanceof Error ? e.message : e}`);
   } finally { clearTimeout(t); }
 }
