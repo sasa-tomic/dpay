@@ -1,6 +1,6 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **72 flows.**
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **73 flows.**
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay (FakeLedger, offline). No UI stubs. The only shimmed I/O boundary is
 > the camera scan (sanctioned smallest-boundary seam) and the NFC radio (physical-device gate).
@@ -17,7 +17,7 @@
 Flows grouped by user journey; within each table, every row lists what the flow **verifies** and
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`).
 
-wire (1) · onboard (7) · pay (20) · offline (7) · deposit (8) · withdraw (6) · nfc (5) · system (15) · tour (3)
+wire (1) · onboard (7) · pay (20) · offline (8) · deposit (8) · withdraw (6) · nfc (5) · system (15) · tour (3)
 
 ---
 
@@ -75,6 +75,7 @@ wire (1) · onboard (7) · pay (20) · offline (7) · deposit (8) · withdraw (6
 | 53 | sol-merchant-error | SOL v2 merchant broadcast error surfaces a friendly message (not raw RPC, not false Received). | sol-merchant, sol-error, sol-v2-rejected, friendly-error |
 | 67 | sol-setup-error | SOL v2: SolPayMode mounts in scan with no setup; valid req signs offline; expired req is rejected with a friendly error. | sol-no-setup, sol-expired-request, sol-v2-freshness |
 | 73 | sol-reclaim | Legacy durable-nonce reclaim: inspect → reclaimable → drain → reclaimed; absent path. | sol-reclaim, settings-legacy-funds, sol-slip10-parity |
+| 74 | sol-usdc-payment | USDC@Sol v2 full cycle: createSolPaymentRequest (USDC) → signSplPayment (TransferChecked) → broadcast → Received. | sol-usdc-payment, sol-spl-sign, sol-merchant, sol-broadcast, sol-v2-strict-verify |
 
 ### Deposits & onramp (ckBTC + ckUSDC + ckERC20)
 
