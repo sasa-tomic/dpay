@@ -285,7 +285,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
         setPhase('enter');
       }
     }
-  }, [account, params, amount, display.amountDecimals, identity.publicHex, nativeEth]);
+  }, [account, params, amount, decimals, identity.publicHex, nativeEth]);
 
   // MC8 U5 — "Start a new deposit" escape from a RESUMED watching state. A stuck watching key (a
   // deposit that never mints) would otherwise wedge the sheet in watching forever on every restart.
