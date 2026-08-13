@@ -409,6 +409,78 @@ export async function waitForScanner(driver, opts = {}) {
   assert(false, `QrScanner did not mount within ${timeoutMs}ms (listeners=0 throughout)`);
 }
 
+// --- NFC tap mount-asserts (mirrors the camera pair above) ---------------------------------------
+//
+// The IC + SOL NFC session seams (`__DPAY_TEST_NFC_SESSION` / `__DPAY_TEST_SOL_NFC_SESSION`) fail
+// LOUD when no listener is attached — but a cleaner pre-flight assertion + a race-free wait (for
+// flows that re-arm after a phase change) catch the "component never mounted" class BEFORE the
+// dispatch, with a precise message. The IC NFC seam is set to ready by the flow flipping
+// `window.__DPAY_TEST_NFC_STATUS = 'ready'`, which makes the Pay/Receive surface mount <NfcTap>;
+// this helper confirms the listener landed.
+
+/**
+ * Assert that an IC NFC tap listener (NfcTap / reader) is mounted. Catches the class of bug where
+ * the NFC view fails to render (nfcStatus gate, wrong tab, overlay) — the seam would throw an
+ * opaque error or the flow hangs. Call this BEFORE dispatching via `__DPAY_TEST_NFC_SESSION`.
+ */
+export async function assertNfcTapMounted(driver, label = 'NFC screen') {
+  const count = await driver.eval(() => (typeof window.__DPAY_TEST_NFC_COUNT === 'function' ? window.__DPAY_TEST_NFC_COUNT() : -1));
+  assert(count > 0, `IC NFC listener must be mounted on ${label} (listeners=${count}); the NfcTap/reader component failed to render — check nfcStatus is 'ready' and the screen arms the NFC view.`);
+}
+
+/**
+ * Poll until an IC NFC tap listener is mounted (count > 0). Use after arming the NFC view — the
+ * component needs a render tick to subscribe. The fail-loud seam catches a missing listener at
+ * injection time, but this avoids the race + gives a cleaner failure.
+ */
+export async function waitForNfcTap(driver, opts = {}) {
+  const timeoutMs = opts.timeoutMs ?? 5_000;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const count = await driver.eval(() => (typeof window.__DPAY_TEST_NFC_COUNT === 'function' ? window.__DPAY_TEST_NFC_COUNT() : -1));
+    if (count > 0) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  assert(false, `IC NFC listener did not mount within ${timeoutMs}ms (listeners=0 throughout)`);
+}
+
+/**
+ * Assert that a SOL NFC tap listener (SolNfcTap / reader) is mounted. SOL-flavored counterpart of
+ * `assertNfcTapMounted`. Call BEFORE dispatching via `__DPAY_TEST_SOL_NFC_SESSION`.
+ */
+export async function assertSolNfcTapMounted(driver, label = 'SOL NFC screen') {
+  const count = await driver.eval(() => (typeof window.__DPAY_TEST_SOL_NFC_COUNT === 'function' ? window.__DPAY_TEST_SOL_NFC_COUNT() : -1));
+  assert(count > 0, `SOL NFC listener must be mounted on ${label} (listeners=${count}); the SolNfcTap/reader component failed to render — check nfcStatus is 'ready' and the SOL screen arms the NFC view.`);
+}
+
+/**
+ * Poll until a SOL NFC tap listener is mounted (count > 0). SOL counterpart of `waitForNfcTap`.
+ */
+export async function waitForSolNfcTap(driver, opts = {}) {
+  const timeoutMs = opts.timeoutMs ?? 5_000;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const count = await driver.eval(() => (typeof window.__DPAY_TEST_SOL_NFC_COUNT === 'function' ? window.__DPAY_TEST_SOL_NFC_COUNT() : -1));
+    if (count > 0) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  assert(false, `SOL NFC listener did not mount within ${timeoutMs}ms (listeners=0 throughout)`);
+}
+
+/**
+ * Snapshot the live listener counts of every injection seam. Returns `{scan, nfc, solNfc}`. A
+ * non-injecting diagnostic (read-only) — useful for a flow that wants to assert NO leftover
+ * listener (a clean teardown) or to dump seam health on RED. Each count is -1 if the seam global
+ * is absent (app not yet bootstrapped).
+ */
+export async function seamHealth(driver) {
+  return await driver.eval(() => ({
+    scan: typeof window.__DPAY_TEST_SCAN_COUNT === 'function' ? window.__DPAY_TEST_SCAN_COUNT() : -1,
+    nfc: typeof window.__DPAY_TEST_NFC_COUNT === 'function' ? window.__DPAY_TEST_NFC_COUNT() : -1,
+    solNfc: typeof window.__DPAY_TEST_SOL_NFC_COUNT === 'function' ? window.__DPAY_TEST_SOL_NFC_COUNT() : -1,
+  }));
+}
+
 // --- relay-retarget / offline helpers -----------------------------------------------------------
 //
 // The "open Settings → type relay URL → Apply → close Settings" dance is repeated across the offline

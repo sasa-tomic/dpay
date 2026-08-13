@@ -70,7 +70,12 @@ export async function run() {
     const bob = await generateKeypair();
     const blob = buildRequestQR(bob.publicHex, PAY_CENTS, randNonceHex(), Math.floor(Date.now() / 1000) + 600, 0, 'Bob');
     await driver.eval(
-      (d) => { if (typeof window.__DPAY_TEST_DEEPLINK === 'function') window.__DPAY_TEST_DEEPLINK(d); },
+      (d) => {
+        if (typeof window.__DPAY_TEST_DEEPLINK !== 'function') {
+          throw new Error('__DPAY_TEST_DEEPLINK is not registered — Wallet did not mount or its deeplink effect (Wallet.tsx) did not fire');
+        }
+        window.__DPAY_TEST_DEEPLINK(d);
+      },
       { kind: 'req', blob },
     );
 

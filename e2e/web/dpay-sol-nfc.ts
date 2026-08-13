@@ -42,14 +42,31 @@ export const DpaySolNfc = {
 // are registered on. This is what makes a seam-dispatched event reach the real app.
 const solNfcBus = new NativeEventEmitter(DpaySolNfc as any);
 
+const SOL_NFC_EVENT = 'DpaySolNfcEvent';
+
 // Install the SOL NFC session seam. Idempotent — safe to call from shims.ts every boot. The seam
 // accepts either a single event object or an array, and emits each as a `DpaySolNfcEvent` on the
 // real bus.
+//
+// FAIL-LOUD: if no listener is attached (no <SolNfcTap>/reader mounted), the emit would be SILENTLY
+// LOST — the flow hangs and times out with an opaque error. Throwing here turns that into an
+// immediate, actionable RED. Mirrors the IC NFC seam (`dpay-nfc.ts`) and the camera shim. See that
+// file's comment for the RNW listenerCount rationale (web never sets `_nativeModule`).
 export function installSolNfcSeam(globalScope: any) {
   globalScope.__DPAY_TEST_SOL_NFC_SESSION = (events: unknown) => {
+    const count = solNfcBus.listenerCount(SOL_NFC_EVENT);
+    if (count === 0) {
+      throw new Error(
+        '__DPAY_TEST_SOL_NFC_SESSION called but no DpaySolNfcEvent listener is attached (listeners=0). ' +
+        'The SOL NFC tap component (SolNfcTap / reader) failed to mount — check that nfcStatus is ' +
+        'set to \'ready\' and the SOL Pay/Receive screen arms the NFC view before dispatching.',
+      );
+    }
     const list = Array.isArray(events) ? events : [events];
     for (const e of list) {
-      try { solNfcBus.emit('DpaySolNfcEvent', e); } catch { /* a bad payload must not break the seam */ }
+      solNfcBus.emit(SOL_NFC_EVENT, e);
     }
   };
+  // Test observability: the live count of DpaySolNfcEvent listeners.
+  globalScope.__DPAY_TEST_SOL_NFC_COUNT = () => solNfcBus.listenerCount(SOL_NFC_EVENT);
 }

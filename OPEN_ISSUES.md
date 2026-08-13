@@ -15,6 +15,40 @@
 > (`f665228`→`c74988b`, HEAD=`c74988b`). All cross-currency verification gaps closed.
 > Pick up new work only when a concrete next step is identified.
 
+## Session summary (2026-08-14): fail-loud injection seams — COMPLETE (e2e test radical improvement)
+
+> **Trigger:** the prior review was "objectively superficial" — the camera shim **silently dropped** scan
+> payloads when no `<QrScanner>` was mounted, and a SOL QR-scanner device-side bug (scanner not
+> activating on real phone) sailed through. The founder demanded: "we must RADICALLY IMPROVE E2E TESTS
+> to catch any even remotely similar classes of bugs." Commit `ed43734` fixed the camera seam; this
+> session eliminated the SAME silent-drop bug class from EVERY remaining injection seam.
+>
+> **The bug class:** a test injects a payload via a `__DPAY_TEST_*` seam; the target component isn't
+> mounted; the payload is SILENTLY LOST; the flow hangs/time-outs opaquely or passes on stale UI.
+>
+> **What landed (74/74 e2e GREEN, `just typecheck` clean):**
+> - **NFC seams fail-loud** — `e2e/web/dpay-nfc.ts` + `dpay-sol-nfc.ts`: before each emit, check
+>   `nfcBus.listenerCount(eventName)`; if 0, throw an actionable error naming the missing component.
+>   Removed the swallowing `try { emit } catch {}`. Exposed `__DPAY_TEST_NFC_COUNT()` /
+>   `__DPAY_TEST_SOL_NFC_COUNT()`. (RNW never sets `_nativeModule` on web, so native-module callbacks
+>   can't track listeners — `listenerCount` delegating to the global `RCTDeviceEventEmitter` singleton
+>   is the ONLY reliable signal.)
+> - **Deeplink seam fail-loud** — flow 70: throws if `__DPAY_TEST_DEEPLINK` is undefined (Wallet didn't
+>   mount / effect didn't fire) instead of silently no-op'ing.
+> - **Harness helpers** — `e2e/harness/lib.mjs`: `assertNfcTapMounted`/`waitForNfcTap` +
+>   `assertSolNfcTapMounted`/`waitForSolNfcTap` + unified `seamHealth(driver)` snapshot (mirrors the
+>   camera `assertScannerMounted`/`waitForScanner` pair).
+> - **Regression guard: flow 75 `seam-fail-loud`** — boots to Onboarding (no Wallet mounted), asserts
+>   ALL three shim seams throw with an actionable message. If anyone weakens a seam back to
+>   silent-drop, this flow goes RED.
+> - Plan: `2026-08-14-e2e-fail-loud-seams.md`. CODEBASE_ANALYSIS.md updated (fail-loud bullet).
+
+**Device-session follow-up (value 6 / effort S):** the SOL QR-scanner device-side bug (scanner not
+activating on a real phone) remains a device-session gate. The e2e seam is now fail-loud so the
+JS-plumbing layer is covered, but the real `react-native-vision-camera` activation on hardware needs
+`just app` + a physical-device scan to close. NOT a `just verify` blind spot (camera activation is
+inert/deferred on web by design); it is an outer-loop device gate.
+
 ## Session summary (2026-08-12): unified asset selection rewrite — COMPLETE (7 phases, all gates green)
 
 > Resolves the top-of-file work order above. The 4 competing asset-selection states

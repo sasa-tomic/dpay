@@ -40,13 +40,38 @@ export const DpayNfc = {
 // are registered on. This is what makes a seam-dispatched event reach the real app.
 const nfcBus = new NativeEventEmitter(DpayNfc as any);
 
+const NFC_EVENT = 'DpayNfcEvent';
+
 // Install the NFC session seam. Idempotent — safe to call from shims.ts every boot. The seam accepts
 // either a single event object or an array, and emits each as a `DpayNfcEvent` on the real bus.
+//
+// FAIL-LOUD: if no listener is attached (no <NfcTap>/reader mounted), the emit would be SILENTLY
+// LOST — the flow hangs and times out with an opaque error. Throwing here turns that into an
+// immediate, actionable RED: "no DpayNfcEvent listener — the NFC tap component failed to mount".
+// This is the same class of bug the camera shim guards against (`__DPAY_TEST_SCAN` listeners=0).
+//
+// listenerCount is the ONLY reliable signal on web: RNW never sets `_nativeModule` outside iOS
+// (NativeEventEmitter.js constructor is iOS-gated), so the native-module addListener/removeListeners
+// callbacks are never invoked on web. But `nfcBus.listenerCount` delegates to the global
+// RCTDeviceEventEmitter singleton, which the app's `new NativeEventEmitter(DpayNfc).addListener`
+// registers on — so the count is the real, live listener count.
 export function installNfcSeam(globalScope: any) {
   globalScope.__DPAY_TEST_NFC_SESSION = (events: unknown) => {
+    const count = nfcBus.listenerCount(NFC_EVENT);
+    if (count === 0) {
+      throw new Error(
+        '__DPAY_TEST_NFC_SESSION called but no DpayNfcEvent listener is attached (listeners=0). ' +
+        'The NFC tap component (NfcTap / reader) failed to mount — check that nfcStatus is set to ' +
+        '\'ready\' and the Pay/Receive screen arms the NFC view before dispatching.',
+      );
+    }
     const list = Array.isArray(events) ? events : [events];
     for (const e of list) {
-      try { nfcBus.emit('DpayNfcEvent', e); } catch { /* a bad payload must not break the seam */ }
+      nfcBus.emit(NFC_EVENT, e);
     }
   };
+  // Test observability: the live count of DpayNfcEvent listeners (mirrors the camera seam's
+  // __DPAY_TEST_SCAN_COUNT). A mount/unmount cycle of the NFC component must return to its prior
+  // count.
+  globalScope.__DPAY_TEST_NFC_COUNT = () => nfcBus.listenerCount(NFC_EVENT);
 }

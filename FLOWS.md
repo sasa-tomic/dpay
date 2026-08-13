@@ -1,6 +1,6 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **73 flows.**
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **74 flows.**
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay (FakeLedger, offline). No UI stubs. The only shimmed I/O boundary is
 > the camera scan (sanctioned smallest-boundary seam) and the NFC radio (physical-device gate).
@@ -17,7 +17,7 @@
 Flows grouped by user journey; within each table, every row lists what the flow **verifies** and
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`).
 
-wire (1) · onboard (7) · pay (20) · offline (8) · deposit (8) · withdraw (6) · nfc (5) · system (15) · tour (3)
+wire (1) · onboard (7) · pay (20) · offline (8) · deposit (8) · withdraw (6) · nfc (5) · system (16) · tour (3)
 
 ---
 
@@ -130,6 +130,7 @@ wire (1) · onboard (7) · pay (20) · offline (8) · deposit (8) · withdraw (6
 | 70 | deeplink-ic-routing | A dpay:req deeplink arriving while SOL is idle-selected routes to the IC Pay engine (PayMode review), not SolPayMode — the blob is never silently lost. | deeplink-routing, ic-engine-routing, solana-to-ic-handoff, prefill-preserve |
 | 71 | selection-lock | An in-flight pay review locks the idle asset selection: the Balances button is disabled + a no-op, and canceling the review re-enables it. | selection-lock, in-flight-preserve, balances-disable, nfc-arming-invariant |
 | 72 | sol-usdc-send | Solana USDC "Send to address" fails closed when the device ATA is absent (no doomed SPL send). | sol-usdc-send, spl-transfer, fail-closed-ata, asset-aware-send |
+| 75 | seam-fail-loud | Every injection seam (scan/NFC/SOL-NFC) throws when no listener is mounted — regression guard against silent-drop bugs. | seam-integrity, fail-loud, regression-guard |
 
 ### Visual capture (UX tour)
 
