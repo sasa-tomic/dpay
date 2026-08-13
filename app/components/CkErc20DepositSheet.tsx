@@ -26,10 +26,11 @@ import {useEscapeToClose} from '../hooks/useHotkeys';
 // by `nativeEth` (descriptor.token_contract == null):
 //  - ERC-20 (USDC/USDT/DAI): TWO txs — approve(helper, amount) on the ERC-20, then depositErc20(...).
 //  - native ETH: ONE payable tx — depositEth(principal, subaccount) carrying the ETH `value` (Wei).
-export function CkErc20DepositSheet({identity, relayUrl, currency, display, chainId, nativeEth, onClose}: {
+export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, display, chainId, nativeEth, onClose}: {
   identity: Identity;
   relayUrl: string;
   currency: number;
+  decimals: number;
   display: FamilyDisplay;
   chainId: number | null; // MC8 U3: the catalog's per-currency EVM chain id (ckUSDC = 1 = Ethereum mainnet)
   nativeEth: boolean; // true ⇒ native-ETH single-tx deposit (depositEth); false ⇒ ERC-20 two-tx (approve + depositErc20)
@@ -223,7 +224,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, display, chai
     if (!provider) { setErr('Wallet disconnected.'); return; }
     // Parse the human amount into the smallest units (USDC = 6 decimals). MC1 units 2-4: use the
     // exact BigInt parser — `parseFloat`/`Math.pow` are lossy above 2^53.
-    const parsed = parseDecimalToUnits(amount, display.amountDecimals);
+    const parsed = parseDecimalToUnits(amount, decimals);
     if (!parsed.ok || parsed.raw === '0') { setErr('Enter an amount greater than zero.'); return; }
     const unitBig = BigInt(parsed.raw);
     const principalWord = principalToBytes32(params.facade_principal);

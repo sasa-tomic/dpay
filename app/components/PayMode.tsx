@@ -325,6 +325,7 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
           identity={identity}
           relayUrl={relayUrl}
           currency={withdrawCurrency}
+          decimals={catalog.find(c => c.currency === withdrawCurrency)?.decimals ?? withdrawDisplay.amountDecimals}
           display={withdrawDisplay}
           family={withdrawFamily}
           tokenContract={withdrawTokenContract}

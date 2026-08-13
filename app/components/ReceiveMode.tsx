@@ -306,6 +306,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
             identity={identity}
             relayUrl={relayUrl}
             currency={depositCurrency}
+            decimals={catalog.find(c => c.currency === depositCurrency)?.decimals ?? depositDisplay.amountDecimals}
             display={depositDisplay}
             chainId={depositChainId}
             nativeEth={depositNativeEth}

@@ -32,7 +32,7 @@ import {withTimeout} from '../lib/timeout';
  * error). A partial-failure settlement surfaces "Gas was burned but the transfer may not have landed"
  * so the user checks their balance rather than assuming success.
  */
-export function WithdrawSheet({identity, relayUrl, currency, display, family, tokenContract, balance, onClose, onWithdrawn}: {identity: Identity; relayUrl: string; currency: number; display: FamilyDisplay; family: MinterFamily; tokenContract: string | null; balance: string; onClose: () => void; onWithdrawn: () => void}) {
+export function WithdrawSheet({identity, relayUrl, currency, decimals, display, family, tokenContract, balance, onClose, onWithdrawn}: {identity: Identity; relayUrl: string; currency: number; decimals: number; display: FamilyDisplay; family: MinterFamily; tokenContract: string | null; balance: string; onClose: () => void; onWithdrawn: () => void}) {
   const [address, setAddress] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
@@ -50,11 +50,10 @@ export function WithdrawSheet({identity, relayUrl, currency, display, family, to
     return () => { alive = false; };
   }, [currency]);
 
-  // Convert the entered amount to raw smallest-units at the family's decimal count (8 sats for BTC,
-  // 18 Wei for ETH). The on-device `WithdrawAuth.amount` is a u64 carrying these raw units; the FFI
-  // parses the decimal string. MC1 units 2-4: comparisons use `cmpRaw` (BigInt) — never `>` on
-  // strings (lexicographic trap).
-  const raw = toUnits(amountStr, display.amountDecimals);
+  // Convert the entered amount to raw smallest-units at the asset's PROTOCOL decimal count (8 sats
+  // for BTC, 18 Wei for ETH — NOT the display_decimals). The display precision (display.amountDecimals,
+  // e.g. 6 for ETH) only governs how many fractional places are SHOWN, not the raw encoding.
+  const raw = toUnits(amountStr, decimals);
   const belowMin = raw !== '0' && cmpRaw(raw, String(display.withdrawMinRaw)) < 0;
   const overBalance = cmpRaw(raw, balance) > 0;
   const addrEntered = address.trim().length > 0;
@@ -114,7 +113,7 @@ export function WithdrawSheet({identity, relayUrl, currency, display, family, to
         <View style={S.centerAll}>
           <View style={S.check}><Text style={S.checkMark}>✓</Text></View>
           <Text testID="withdraw-status" style={S.paidText}>Withdrawn ✓</Text>
-          <Text style={S.paidSub}>{fmtAsset(receipt.amount, display.amountDecimals, display.nativeAsset)}</Text>
+          <Text style={S.paidSub}>{fmtAsset(receipt.amount, decimals, display.nativeAsset, display.amountDecimals)}</Text>
           <Text style={S.dim2}>sent to</Text>
           <Text testID="withdraw-destination" selectable={true} style={S.sheetAddr}>{receipt.btcAddress}</Text>
           <Pressable testID="btn-copy-destination" style={S.primaryWide} onPress={copyDest} accessibilityRole="button" accessibilityLabel="Copy destination address" accessibilityState={{disabled: false}}>
@@ -126,12 +125,12 @@ export function WithdrawSheet({identity, relayUrl, currency, display, family, to
       ) : phase === 'submitting' ? (
         <View style={S.centerAll}>
           <ActivityIndicator color={C.brand} />
-          <Text style={S.dim2}>{`Withdrawing ${fmtAsset(raw, display.amountDecimals, display.nativeAsset)}…`}</Text>
+          <Text style={S.dim2}>{`Withdrawing ${fmtAsset(raw, decimals, display.nativeAsset, display.amountDecimals)}…`}</Text>
         </View>
       ) : (
         <>
           <Text style={S.label}>{`Send your ${display.networkLabel} to a native ${display.nativeAsset} address`}</Text>
-          <Text style={S.dim2}>{`Available: ${fmtAsset(balance, display.amountDecimals, display.nativeAsset)} · min ${fmtAsset(String(display.withdrawMinRaw), display.amountDecimals, display.nativeAsset)}`}</Text>
+          <Text style={S.dim2}>{`Available: ${fmtAsset(balance, decimals, display.nativeAsset, display.amountDecimals)} · min ${fmtAsset(String(display.withdrawMinRaw), decimals, display.nativeAsset, display.amountDecimals)}`}</Text>
 
           <Text style={S.inputLabel}>{`${display.nativeAsset} address`}</Text>
           {savedAddr && address.trim().length === 0 ? (
@@ -161,8 +160,8 @@ export function WithdrawSheet({identity, relayUrl, currency, display, family, to
             placeholderTextColor={C.sub2}
           />
 
-          {belowMin ? <Text style={S.warnNote}>{`Below the ${fmtAsset(String(display.withdrawMinRaw), display.amountDecimals, display.nativeAsset)} minimum withdrawal.`}</Text> : null}
-          {overBalance ? <Text style={S.warnNote}>{`More than your available ${fmtAsset(balance, display.amountDecimals, display.nativeAsset)}.`}</Text> : null}
+          {belowMin ? <Text style={S.warnNote}>{`Below the ${fmtAsset(String(display.withdrawMinRaw), decimals, display.nativeAsset, display.amountDecimals)} minimum withdrawal.`}</Text> : null}
+          {overBalance ? <Text style={S.warnNote}>{`More than your available ${fmtAsset(balance, decimals, display.nativeAsset, display.amountDecimals)}.`}</Text> : null}
           {badAddr ? <Text testID="withdraw-bad-addr" style={S.warnNote}>{`That doesn't look like a valid ${display.nativeAsset} address.`}</Text> : null}
 
           {isErc20 ? (
@@ -172,7 +171,7 @@ export function WithdrawSheet({identity, relayUrl, currency, display, family, to
           {(phase === 'form' || phase === 'error') && raw !== '0' ? (
             <View testID="withdraw-review" style={S.reviewCard}>
               <Text style={S.reviewLabel}>Review withdrawal</Text>
-              <Text testID="withdraw-review-amount" style={S.reviewAmount}>{`Withdraw ${fmtAsset(raw, display.amountDecimals, display.nativeAsset)}`}</Text>
+              <Text testID="withdraw-review-amount" style={S.reviewAmount}>{`Withdraw ${fmtAsset(raw, decimals, display.nativeAsset, display.amountDecimals)}`}</Text>
               <Text style={S.reviewTo}>{`to ${address.trim() || '—'}`}</Text>
             </View>
           ) : null}
@@ -187,7 +186,7 @@ export function WithdrawSheet({identity, relayUrl, currency, display, family, to
             accessibilityRole="button"
             accessibilityLabel="Confirm withdrawal"
             accessibilityState={{disabled: !canReview}}>
-            <Text style={S.primaryText}>{raw !== '0' ? `Withdraw ${fmtAsset(raw, display.amountDecimals, display.nativeAsset)}` : 'Enter an amount'}</Text>
+            <Text style={S.primaryText}>{raw !== '0' ? `Withdraw ${fmtAsset(raw, decimals, display.nativeAsset, display.amountDecimals)}` : 'Enter an amount'}</Text>
           </Pressable>
 
           {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
