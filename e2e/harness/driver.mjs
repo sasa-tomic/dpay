@@ -258,7 +258,13 @@ export class Driver {
     }
   }
 
-  /** Wait until `text` appears anywhere on the page (substring match). Returns true on success. */
+  /** Wait until `text` appears anywhere on the page (substring match). Returns true on success.
+   *
+   *  A TIMEOUT returns false (the documented soft-probe contract — callers may `if (await ...)`
+   *  or `.catch(() => {})`). But a NON-timeout rejection (page crash, protocol error, detached
+   *  target) is a real infrastructure failure, NOT a benign "text not found": returning false there
+   *  would let a flow continue on a dead page and pass/fail opaquely. So only a TimeoutError
+   *  resolves to false; every other error is rethrown loud with the waited-for text + cause. */
   async waitForText(text, opts = {}) {
     const timeoutMs = opts.timeoutMs ?? 5_000;
     try {
@@ -268,8 +274,11 @@ export class Driver {
         text,
       );
       return true;
-    } catch {
-      return false;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // Puppeteer names its wait timeout `TimeoutError`; fall back to the message shape for safety.
+      if (e?.name === 'TimeoutError' || /Waiting.*failed|timeout/i.test(msg)) return false;
+      throw new Error(`[driver] waitForText(${JSON.stringify(text)}) failed: ${msg}`);
     }
   }
 
