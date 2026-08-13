@@ -86,45 +86,6 @@ describe('solana seam — configured (RPC URL set) calls through to rpc', () => 
   });
 });
 
-// F4 — USDC ATA existence gate. The seam derives the device's USDC ATA (from the seed + USDC mint) and
-// checks on-chain existence via getAccountInfo. Offline (RPC URL empty) it MUST no-op → null (never
-// throws, never touches the network), mirroring getSolanaBalance. With a stub it returns the boolean.
-describe('solana seam — checkUsdcAta (F4 ATA gate)', () => {
-  test('returns null offline (no network) — mirrors getSolanaBalance', async () => {
-    let called = false;
-    (globalThis as unknown as {fetch: unknown}).fetch = jest.fn(() => {
-      called = true;
-      return Promise.resolve({});
-    });
-    const {checkUsdcAta} = require('../solana');
-    const result = await (checkUsdcAta as (s: string) => Promise<boolean | null>)(SEED_HEX);
-    expect(result).toBeNull();
-    expect(called).toBe(false);
-  });
-
-  test('returns true when the device ATA exists on-chain (stub)', async () => {
-    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
-      getAccountInfo: () => ({value: {data: ['', 'base64'], owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', lamports: 2039280}}),
-    };
-    const result = await withStubUrl(async () => {
-      const {checkUsdcAta} = require('../solana');
-      return (checkUsdcAta as (s: string) => Promise<boolean | null>)(SEED_HEX);
-    });
-    expect(result).toBe(true);
-  });
-
-  test('returns false when the device ATA does NOT exist on-chain (stub returns null)', async () => {
-    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
-      getAccountInfo: () => ({value: null}),
-    };
-    const result = await withStubUrl(async () => {
-      const {checkUsdcAta} = require('../solana');
-      return (checkUsdcAta as (s: string) => Promise<boolean | null>)(SEED_HEX);
-    });
-    expect(result).toBe(false);
-  });
-});
-
 // ============================================================================
 // Phase 2 — Solana USDC balance reader + RPC availability predicate.
 //

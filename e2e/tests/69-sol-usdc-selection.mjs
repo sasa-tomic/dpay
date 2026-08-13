@@ -9,24 +9,21 @@
 //   - Switching IC USDC ↔ Solana USDC changes the protocol/rail (ReceiveMode ↔ SolReceiveMode) and
 //     clears the old amount/memo (same-protocol switch clears inline; cross-protocol switch clears
 //     by unmount/remount — same observable: empty amount input after the switch).
-//   - The Solana-USDC request FAILS CLOSED when the destination ATA is absent: the inline warning
-//     renders + Request is disabled (a request can never promise an unfulfillable destination).
 //
 // Uses `setup({solStub: true})` so the Solana rail + Solana USDC row are coherent (the stub URL is
-// neither empty nor devnet → solanaUsdcCoherent → true). The stub's getAccountInfo returns
-// `{value: null}` so the device's USDC ATA is absent → the F4 gate blocks.
+// neither empty nor devnet → solanaUsdcCoherent → true). No broadcast happens here.
 //
 // Selector contract: asset-ckusdc-select, tab-receive, req-prefix, req-pick-ckusdc, req-pick-sol,
-// req-pick-sol-usdc, amount-input, memo-input, sol-req-prefix, sol-req-amount-input, sol-usdc-ata-warn,
+// req-pick-sol-usdc, amount-input, memo-input, sol-req-prefix, sol-req-amount-input,
 // btn-sol-req-make.
-import {setup, assert, assertEq, assertIncludes, assertDisabled, onboardWallet} from '../harness/lib.mjs';
+import {setup, assertEq, assertIncludes, onboardWallet} from '../harness/lib.mjs';
 
 export const meta = {
   id: '69',
   name: 'sol-usdc-selection',
   journey: 'system',
-  covers: ['asset-picker', 'ic-usdc', 'sol-usdc', 'rail-switch', 'amount-clear', 'fail-closed-ata'],
-  verifies: 'IC USDC ↔ Solana USDC: unified picker switches rail + clears amount; Solana USDC fails closed without ATA.',
+  covers: ['asset-picker', 'ic-usdc', 'sol-usdc', 'rail-switch', 'amount-clear'],
+  verifies: 'IC USDC ↔ Solana USDC: unified picker switches rail + clears amount (symmetric in both directions).',
   timeoutMs: 30000,
 };
 
@@ -40,8 +37,7 @@ export async function run() {
     console.log('[69-sol-usdc-selection] onboarding…');
     await onboardWallet(driver, 'e2e-usdc-x');
 
-    // Stub: funded SOL (getBalance) + ABSENT USDC ATA (getAccountInfo → null). The absent ATA drives
-    // the fail-closed assertion at the end. No broadcast happens here.
+    // Stub: funded SOL (getBalance). No broadcast happens here.
     await driver.eval(() => {
       globalThis.__DPAY_TEST_SOLANA_RPC_STUB = {
         getLatestBlockhash: () => ({value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
@@ -96,18 +92,7 @@ export async function run() {
     assertEq(solAmt, '', 'Solana USDC amount input must be empty after the rail switch (amount cleared)');
     console.log('[69-sol-usdc-selection] ✓ Solana USDC rail mounted + amount cleared');
 
-    // 6. FAIL-CLOSED: with the device's USDC ATA absent (stub getAccountInfo → null), the F4 gate
-    //    blocks the request. The inline warning renders + Request is disabled — a Solana-USDC
-    //    request can NEVER promise an unfulfillable destination silently. Asserted on the form
-    //    BEFORE re-opening the picker so the modal doesn't shadow the form's warning node.
-    console.log('[69-sol-usdc-selection] asserting fail-closed USDC ATA gate…');
-    const warnEl = await driver.findByTestID('sol-usdc-ata-warn', {timeoutMs: 8_000});
-    const warnTxt = await warnEl.evaluate((n) => (n.textContent ?? '').trim());
-    assertIncludes(warnTxt, 'USDC account', 'the fail-closed warning should mention "USDC account"');
-    await assertDisabled(driver, 'btn-sol-req-make', 'Solana-USDC Request must fail closed when the ATA is absent');
-    console.log('[69-sol-usdc-selection] ✓ Solana USDC fails closed (no ATA → blocked + honest copy)');
-
-    // 7. The Solana Receive picker (sol-req-prefix) opens the SAME complete list — proving both
+    // 6. The Solana Receive picker (sol-req-prefix) opens the SAME complete list — proving both
     //    Receive forms share one picker contract (no selector hides a row). Tapping req-pick-ckusdc
     //    both closes the picker AND flips the rail back to IC USDC (onSelect → onClose).
     console.log('[69-sol-usdc-selection] opening Solana Receive picker — asserting same complete list…');
@@ -117,7 +102,7 @@ export async function run() {
     await driver.findByTestID('req-pick-sol-usdc', {timeoutMs: 5_000});
     console.log('[69-sol-usdc-selection] ✓ Solana picker lists the same IC + Solana rows');
 
-    // 8. Switch back to IC USDC. The rail flips back to ReceiveMode; the amount is cleared again
+    // 7. Switch back to IC USDC. The rail flips back to ReceiveMode; the amount is cleared again
     //    (SolReceiveMode's picker onSelect ran setAmount('') before the up-call; ReceiveMode mounts
     //    fresh). Proves the rail-switch + amount-clear is symmetric in both directions.
     console.log('[69-sol-usdc-selection] switching Solana USDC → IC USDC via the picker…');

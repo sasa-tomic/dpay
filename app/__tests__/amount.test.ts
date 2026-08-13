@@ -47,6 +47,33 @@ describe('parseDecimalToUnits — exact BigInt (no Number loss)', () => {
   });
 });
 
+describe('parseDecimalToUnits — leading-dot + trailing-dot (calculator-style)', () => {
+  test('leading-dot ".5" at 2 decimals → 0.5 * 100 = 50', () => {
+    expect(parseDecimalToUnits('.5', 2)).toEqual({ ok: true, raw: '50' });
+  });
+  test('leading-dot ".5" at 6 decimals → 500000', () => {
+    expect(parseDecimalToUnits('.5', 6)).toEqual({ ok: true, raw: '500000' });
+  });
+  test('leading-dot ".1" at 18 decimals → 1e17', () => {
+    expect(parseDecimalToUnits('.1', 18)).toEqual({ ok: true, raw: '100000000000000000' });
+  });
+  test('leading-dot ".01" at 8 decimals → 1000000', () => {
+    expect(parseDecimalToUnits('.01', 8)).toEqual({ ok: true, raw: '1000000' });
+  });
+  test('trailing-dot "5." at 2 decimals → 5 * 100 = 500', () => {
+    expect(parseDecimalToUnits('5.', 2)).toEqual({ ok: true, raw: '500' });
+  });
+  test('trailing-dot "5." at 0 decimals → 5 (empty fraction is OK)', () => {
+    expect(parseDecimalToUnits('5.', 0)).toEqual({ ok: true, raw: '5' });
+  });
+  test('trailing-dot "0." at 6 decimals → 0', () => {
+    expect(parseDecimalToUnits('0.', 6)).toEqual({ ok: true, raw: '0' });
+  });
+  test('a bare "." with no digits anywhere → not_a_number', () => {
+    expect(parseDecimalToUnits('.', 2)).toEqual({ ok: false, err: 'not_a_number' });
+  });
+});
+
 describe('cmpRaw — BigInt compare (no lexicographic trap)', () => {
   test('"9" < "10" (lexicographic string compare would get this WRONG)', () => {
     expect(cmpRaw('9', '10')).toBe(-1);
@@ -127,8 +154,6 @@ describe('rejections — typed err codes matching Rust AmountError', () => {
     expect(parseDecimalToUnits('abc', 2)).toEqual({ ok: false, err: 'not_a_number' });
     expect(parseDecimalToUnits('1.2.3', 2)).toEqual({ ok: false, err: 'not_a_number' });
     expect(parseDecimalToUnits('.', 2)).toEqual({ ok: false, err: 'not_a_number' });
-    expect(parseDecimalToUnits('.5', 2)).toEqual({ ok: false, err: 'not_a_number' });
-    expect(parseDecimalToUnits('5.', 2)).toEqual({ ok: false, err: 'not_a_number' });
     expect(parseDecimalToUnits('+5', 2)).toEqual({ ok: false, err: 'not_a_number' });
   });
 

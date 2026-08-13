@@ -17,8 +17,8 @@
 //   1. Surrounding whitespace is trimmed.
 //   2. Empty (after trim) → `err: "empty"`.
 //   3. A leading `-` → `err: "negative"` (regardless of what follows; checked before shape).
-//   4. Must match `^\d+(\.\d+)?$` (a `.`-only / leading-`.` / trailing-`.` / multi-dot input is
-//      `"not_a_number"`); a leading `+` is NOT accepted.
+//   4. Must match `^(\d+\.?\d*|\.\d+)$` (a `.`-only / multi-dot input is `"not_a_number"`); a
+//      leading `.` (`.5`) and trailing `.` (`5.`) ARE accepted (calculator-style); a leading `+` is NOT.
 //   5. Fractional digits beyond `decimals` → `"too_many_decimals"`.
 //   6. `decimals > MAX_DECIMALS`, or the scaled value > u64::MAX → `"overflow"`.
 
@@ -52,8 +52,10 @@ export type AmountResult =
   | { ok: true; raw: string }
   | { ok: false; err: string };
 
-// `^\d+(\.\d+)?$` — require at least one digit before the dot; a dot requires ≥1 digit after.
-const RE_NUMERIC = /^\d+(\.\d+)?$/;
+// `^(\d+\.?\d*|\.\d+)$` — accepts a leading-dot (`.5` → 0.5) and trailing-dot (`5.` → 5.0) so the
+// amount input behaves like a calculator; requires at least one digit somewhere (a bare `.` is
+// `not_a_number`). A leading `+` is NOT accepted.
+const RE_NUMERIC = /^(\d+\.?\d*|\.\d+)$/;
 // A valid raw input is a non-empty run of decimal digits (no sign, no dot, no exponent).
 const RE_RAW_DIGITS = /^\d+$/;
 

@@ -303,7 +303,7 @@ export async function run() {
   //   UniFFI). So Rust core + Python-via-FFI + TS-logic all agree on these exact strings.
   const MAX_DECIMALS = 18;
   const U64_MAX = (1n << 64n) - 1n;
-  const RE_NUMERIC_AMOUNT = /^\d+(\.\d+)?$/;
+  const RE_NUMERIC_AMOUNT = /^(\d+\.?\d*|\.\d+)$/;
   function tsParseDecimalToUnits(human, decimals) {
     const s = String(human).trim();
     if (s.length === 0) return { ok: false, err: 'empty' };

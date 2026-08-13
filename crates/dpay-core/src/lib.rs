@@ -527,8 +527,8 @@ pub const MAX_DECIMALS: u8 = 18;
 pub enum AmountError {
     /// The input (after whitespace trim) was empty.
     Empty,
-    /// Not a valid decimal: non-digit chars, multiple dots, a bare `.`, a leading `.` with no whole
-    /// part (`.5`), or a trailing `.` with no fraction (`5.`).
+    /// Not a valid decimal: non-digit chars, multiple dots, or a bare `.` with no digits. A
+    /// leading-`.` (`.5` → 0.5) and trailing-`.` (`5.` → 5.0) ARE accepted (calculator-style).
     NotANumber,
     /// A leading `-`. Amounts are always non-negative, so any `-` (regardless of magnitude) is an
     /// error — checked before the rest of the shape so `-abc` is `Negative`, not `NotANumber`.
@@ -546,8 +546,9 @@ pub enum AmountError {
 ///   1. Surrounding ASCII whitespace is trimmed.
 ///   2. Empty (after trim) → [`AmountError::Empty`].
 ///   3. A leading `-` → [`AmountError::Negative`] (regardless of what follows).
-///   4. Must match `^\d+(\.\d+)?$` (a `.`-only, leading-`.`, trailing-`.`, or multi-dot input is
-///      [`AmountError::NotANumber`]); a leading `+` is NOT accepted.
+    ///   4. Must match `^(\d+\.?\d*|\.\d+)$` (a `.`-only or multi-dot input is
+    ///      [`AmountError::NotANumber`]); a leading `.` (`.5`) and trailing `.` (`5.`) ARE accepted
+    ///      (calculator-style); a leading `+` is NOT accepted.
 ///   5. Fractional digits beyond `decimals` → [`AmountError::TooManyDecimals`].
 ///   6. `decimals > MAX_DECIMALS`, or the scaled whole+fraction does not fit in `u64` →
 ///      [`AmountError::Overflow`].
@@ -568,15 +569,19 @@ pub fn parse_decimal_to_units(human: &str, decimals: u8) -> Result<u64, AmountEr
         Some((w, f)) => (w, Some(f)),
         None => (s, None),
     };
-    // Whole part: non-empty, all ASCII digits.
-    if whole_str.is_empty() || !whole_str.bytes().all(|b| b.is_ascii_digit()) {
+    // Whole part: if non-empty, must be all ASCII digits (empty whole is OK — `.5` → 0).
+    if !whole_str.is_empty() && !whole_str.bytes().all(|b| b.is_ascii_digit()) {
         return Err(AmountError::NotANumber);
     }
-    // Fractional part (if present): non-empty, all ASCII digits (rejects "5." and "1..2"/"1.2.3").
+    // Fractional part (if present): if non-empty, must be all ASCII digits (empty frac is OK — `5.` → 5).
     if let Some(frac) = frac_opt {
-        if frac.is_empty() || !frac.bytes().all(|b| b.is_ascii_digit()) {
+        if !frac.is_empty() && !frac.bytes().all(|b| b.is_ascii_digit()) {
             return Err(AmountError::NotANumber);
         }
+    }
+    // Require at least one digit somewhere (rejects a bare `.` with no whole and no fraction).
+    if whole_str.is_empty() && frac_opt.map_or(true, |f| f.is_empty()) {
+        return Err(AmountError::NotANumber);
     }
     // Bound precision: u64 holds ≤ 18 decimals for any meaningful whole unit.
     if decimals > MAX_DECIMALS {
@@ -989,6 +994,26 @@ mod tests {
     }
 
     #[test]
+    fn amount_parse_leading_and_trailing_dot() {
+        // Leading-dot ".5" at 2 decimals -> 0.5 * 100 = 50.
+        assert_eq!(parse_decimal_to_units(".5", 2), Ok(50));
+        // Leading-dot ".5" at 6 decimals -> 500000.
+        assert_eq!(parse_decimal_to_units(".5", 6), Ok(500_000));
+        // Leading-dot ".1" at 18 decimals -> 1e17.
+        assert_eq!(parse_decimal_to_units(".1", 18), Ok(100_000_000_000_000_000));
+        // Leading-dot ".01" at 8 decimals -> 1000000.
+        assert_eq!(parse_decimal_to_units(".01", 8), Ok(1_000_000));
+        // Trailing-dot "5." at 2 decimals -> 5 * 100 = 500 (empty fraction is OK).
+        assert_eq!(parse_decimal_to_units("5.", 2), Ok(500));
+        // Trailing-dot at 0 decimals -> whole number, empty fraction.
+        assert_eq!(parse_decimal_to_units("5.", 0), Ok(5));
+        // Trailing-dot "0." at 6 decimals -> 0.
+        assert_eq!(parse_decimal_to_units("0.", 6), Ok(0));
+        // A bare "." with no digits anywhere is still NotANumber.
+        assert_eq!(parse_decimal_to_units(".", 2), Err(AmountError::NotANumber));
+    }
+
+    #[test]
     fn amount_format_basic_vectors() {
         // Trim trailing fractional zeros; whole numbers render without a decimal point.
         assert_eq!(format_units_to_decimal(8400, 2), "84");
@@ -1012,8 +1037,6 @@ mod tests {
         assert_eq!(parse_decimal_to_units("abc", 2), Err(AmountError::NotANumber));
         assert_eq!(parse_decimal_to_units("1.2.3", 2), Err(AmountError::NotANumber));
         assert_eq!(parse_decimal_to_units(".", 2), Err(AmountError::NotANumber));
-        assert_eq!(parse_decimal_to_units(".5", 2), Err(AmountError::NotANumber));
-        assert_eq!(parse_decimal_to_units("5.", 2), Err(AmountError::NotANumber));
         assert_eq!(parse_decimal_to_units("+5", 2), Err(AmountError::NotANumber));
         // Negative: any leading `-` is Negative (checked before shape), regardless of magnitude.
         assert_eq!(parse_decimal_to_units("-1", 2), Err(AmountError::Negative));

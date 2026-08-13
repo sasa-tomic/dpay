@@ -93,23 +93,6 @@ export async function sendSpl(secretHex: string, destAddress: string, amount: bi
 
 // --- existing exports (unchanged) ----------------------------------------------
 
-/** F4 — whether THIS device has a USDC Associated Token Account. USDC offline-pay needs the device's
- *  ATA to pre-exist on-chain (the payer debits its source ATA; the merchant's request encodes its
- *  `toAta`). Without one the broadcast fails opaquely at the Token program; this gate surfaces the
- *  missing account BEFORE the user commits.
- *
- *  ONLINE — returns null (no throw, no network) when SOL is offline (`SOLANA_RPC_URL` empty), mirroring
- *  `getSolanaBalance`. Derives the device ATA from the seed + USDC mint and checks on-chain existence.
- *  Throws on a network error (the caller treats that as "couldn't verify" — non-blocking, since the
- *  on-chain broadcast is the authoritative gate). */
-export async function checkUsdcAta(secretHex: string, signal?: AbortSignal): Promise<boolean | null> {
-  if (!SOLANA_RPC_URL) return null;
-  const {accountExists} = await import('./solana/rpc');
-  const address = deriveSolanaAddress(secretHex);
-  const ataAddress = bs58.encode(deriveAta(address, USDC_MINT_ADDRESS));
-  return accountExists(SOLANA_RPC_URL, ataAddress, {signal});
-}
-
 // ============================================================================
 // Phase 2 — honest Solana SOL + USDC balances (2026-08-12 unified asset selection rewrite).
 //
@@ -137,14 +120,11 @@ export type SolanaUsdcBalanceResult =
   | {kind: 'balance'; amount: string; decimals: number}
   | {kind: 'error'};
 
-/** Read the device's USDC ATA balance as a discriminated result (the new balance path — replaces the
- *  boolean-only `checkUsdcAta` for BALANCE purposes; `checkUsdcAta` stays for the F4 ATA-existence
- *  gate in the receive flow).
+/** Read the device's USDC ATA balance as a discriminated result. Derives the device ATA from the
+ *  seed + USDC mint, checks on-chain existence, and if present reads the exact raw token balance.
  *
  *  ONLINE — returns `{kind:'offline'}` (no throw, no network) when `SOLANA_RPC_URL` is empty OR
- *  `solanaUsdcAvailable()` is false (mirroring `getSolanaBalance`'s offline no-op). Derives the
- *  device ATA from the seed + USDC mint, checks on-chain existence, and if present reads the exact
- *  token balance string via `getTokenAccountBalance`. On any RPC error returns `{kind:'error'}` and
+ *  `solanaUsdcAvailable()` is false (mirroring `getSolanaBalance`'s offline no-op). On any RPC error returns `{kind:'error'}` and
  *  logs the ATA + message at `console.warn` (debuggability — a silent error here would render as a
  *  stale balance forever). */
 export async function getSolanaUsdcBalance(

@@ -376,7 +376,8 @@ export function fmtCurrencyAmount(catalog: CurrencyDescriptor[], currency: numbe
   // cosmetic label only for a legacy descriptor without backing_symbol. An unknown family fail-closes.
   const unit = a?.backing_symbol ?? familyDisplay(catalog, currency)?.networkLabel;
   if (!unit) return 'Unsupported';
-  const decimals = a?.display_decimals ?? a?.decimals ?? null;
+  const decimals = a?.decimals ?? null;
   if (decimals == null) return 'Unsupported';
-  return fmtAsset(raw, decimals, unit);
+  const displayDecimals = a?.display_decimals ?? decimals;
+  return fmtAsset(raw, decimals, unit, displayDecimals);
 }

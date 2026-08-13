@@ -4,7 +4,7 @@ import QRCode from 'react-native-qrcode-svg';
 import bs58 from 'bs58';
 import {C} from '../config/palette';
 import {S} from '../styles';
-import {QR_SIZE_SMALL, SOL_BROADCAST_TIMEOUT_MS, SOL_ATA_CHECK_TIMEOUT_MS} from '../config/constants';
+import {QR_SIZE_SMALL, SOL_BROADCAST_TIMEOUT_MS} from '../config/constants';
 import {fmtAsset, toUnits} from '../lib/format';
 import {bytesToBase64Url, base64UrlToBytes} from '../lib/base64';
 import {type SelectableAsset} from '../config/assets';
@@ -14,9 +14,9 @@ import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {USDC_DECIMALS, USDC_MINT_ADDRESS, deriveAta} from '../solana/spl';
 import {decodeSolPay} from '../solana/qr';
 import type {SolReqV2, SolPayV2} from '../solana/qr';
-import {decideUsdcAtaGate, isSolReqV2Expired, type UsdcAtaStatus} from '../solana/payments';
+import {isSolReqV2Expired} from '../solana/payments';
 import {extractSignedTxParts} from '../solana/tx';
-import {createSolPaymentRequest, broadcastSolPayment, checkUsdcAta, isSolanaRpcAvailable} from '../solana';
+import {createSolPaymentRequest, broadcastSolPayment, isSolanaRpcAvailable} from '../solana';
 import {friendlySolError} from '../solana/errors';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED} from '../payments';
 import {loadSolMerchantState, saveSolMerchantState, clearSolMerchantState} from '../services/solMerchantPersist';
@@ -105,28 +105,6 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
     return () => { alive = false; };
   }, [identity.publicHex]);
 
-  // F4 USDC ATA gate (fail-closed). Check ONLY when USDC is selected AND Solana RPC is available.
-  const [usdcAta, setUsdcAta] = useState<UsdcAtaStatus>('unknown');
-  const [ataCheckTick, setAtaCheckTick] = useState(0);
-  useEffect(() => {
-    if (selectedToken !== 'USDC' || !solRpc) { setUsdcAta('unknown'); return; }
-    let alive = true;
-    setUsdcAta('checking');
-    const {signal, cancel} = withTimeout(SOL_ATA_CHECK_TIMEOUT_MS);
-    (async () => {
-      try {
-        const exists = await checkUsdcAta(identity.secretHex, signal);
-        if (alive) setUsdcAta(exists === true ? 'present' : exists === false ? 'absent' : 'unknown');
-      } catch (e: unknown) {
-        console.warn('SolReceiveMode: USDC ATA check failed', e);
-        if (alive) setUsdcAta('unknown');
-      } finally {
-        cancel();
-      }
-    })();
-    return () => { alive = false; cancel(); };
-  }, [selectedToken, solRpc, identity.secretHex, ataCheckTick]);
-
   const toggle = (
     <ModeToggle
       testID="receive-mode-toggle"
@@ -145,7 +123,7 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
         <SolanaReceiveSheet
           address={usdcAtaAddress}
           token={selectedToken}
-          ataReady={selectedToken === 'SOL' ? true : usdcAta === 'present'}
+          ataReady={true}
           onClose={() => onSubModeChange('request')}
         />
       </View>
@@ -408,34 +386,9 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
           <Text style={S.dim2}>Creating request…</Text>
         </>
       ) : null}
-      {(() => {
-        if (selectedToken !== 'USDC') return null;
-        const gate = decideUsdcAtaGate(usdcAta, solRpc);
-        if (gate.allowed) return null;
-        if (gate.reason === 'checking') return <Text style={S.dim2}>{gate.message}</Text>;
-        return (
-          <View>
-            <Text testID="sol-usdc-ata-warn" style={S.warnNote}>{gate.message}</Text>
-            {gate.retryable ? (
-              <Pressable
-                testID="btn-sol-usdc-ata-retry"
-                style={S.linkBtn}
-                onPress={() => setAtaCheckTick(t => t + 1)}
-                accessibilityRole="button"
-                accessibilityLabel="Retry USDC account check"
-                accessibilityState={{disabled: false}}>
-                <Text style={S.linkText}>Retry</Text>
-              </Pressable>
-            ) : null}
-          </View>
-        );
-      })()}
       {err ? <Text style={S.err}>{err}</Text> : null}
       {(() => {
-        const usdcGate = selectedToken === 'USDC' ? decideUsdcAtaGate(usdcAta, solRpc) : null;
-        const blockedReason = usdcGate !== null && !usdcGate.allowed ? usdcGate.reason : null;
-        const blocked = !solRpc || blockedReason !== null || busy;
-        const checking = blockedReason === 'checking';
+        const blocked = !solRpc || busy;
         return (
           <Pressable
             testID="btn-sol-req-make"
@@ -444,9 +397,9 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
             onPress={makeRequest}
             accessibilityRole="button"
             accessibilityLabel="Request"
-            accessibilityHint={blockedReason === 'absent' ? 'No USDC account on this device — set one up online first' : 'Show your QR code so the payer can scan it to pay you'}
+            accessibilityHint="Show your QR code so the payer can scan it to pay you"
             accessibilityState={{disabled: blocked}}>
-            <Text style={S.primaryText}>{checking ? 'Checking…' : busy ? 'Creating…' : 'Request'}</Text>
+            <Text style={S.primaryText}>{busy ? 'Creating…' : 'Request'}</Text>
           </Pressable>
         );
       })()}

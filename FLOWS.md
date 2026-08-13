@@ -70,11 +70,11 @@ wire (1) · onboard (7) · pay (20) · offline (7) · deposit (8) · withdraw (6
 |---|------|----------|--------|
 | 20 | offline-handoff | Payer signs offline → relay unreachable → signed QR → merchant settles → payer reconnects → 'Paid ✓'. | offline-sign, qr-handoff, settle, reconcile, round-trip |
 | 21 | receive-scan | Merchant 'Payer paid offline? Scan to settle' → scans the payer's signed QR → settles. | receive-scan, offline-settle |
-| 46 | sol-offline-handoff | SOL durable-nonce setup → scan solreq: → offline sign → solpay: QR → honest pending. | sol-offline-sign, sol-nonce-setup, qr-handoff, honest-pending |
-| 51 | sol-merchant-broadcast | SOL merchant: build solreq → scan matching solpay → broadcast (stub) → Received. | sol-merchant, sol-broadcast, solpay-match, qr-scan |
-| 53 | sol-merchant-error | SOL merchant broadcast error surfaces a friendly message (not raw RPC, not false Received). | sol-merchant, sol-error, solpay-match, friendly-error |
-| 62 | sol-usdc-ata-warning | USDC selection: no USDC ATA → inline warning + Request disabled; SOL clears it. | sol-merchant, sol-usdc, ata-gate, asset-picker, disabled-request |
-| 67 | sol-setup-error | SOL setup-nonce failure surfaces a friendly error (not raw RPC) + the unfunded escape hatch; the stale-nonce resync flips status back to ready so offline signing works again. | sol-setup-error, sol-nonce-resync, sol-friendly-error, sol-unfunded-hatch, sol-stale-recovery |
+| 46 | sol-offline-handoff | SOL v2 scan solreq:v2 → offline sign (no setup, no nonce) → solpay:v2 QR → honest pending. | sol-offline-sign, qr-handoff, honest-pending |
+| 51 | sol-merchant-broadcast | SOL v2 merchant: createSolPaymentRequest (ONLINE) → scan real signed solpay → broadcast → Received. | sol-merchant, sol-broadcast, sol-v2-strict-verify, qr-scan |
+| 53 | sol-merchant-error | SOL v2 merchant broadcast error surfaces a friendly message (not raw RPC, not false Received). | sol-merchant, sol-error, sol-v2-rejected, friendly-error |
+| 67 | sol-setup-error | SOL v2: SolPayMode mounts in scan with no setup; valid req signs offline; expired req is rejected with a friendly error. | sol-no-setup, sol-expired-request, sol-v2-freshness |
+| 73 | sol-reclaim | Legacy durable-nonce reclaim: inspect → reclaimable → drain → reclaimed; absent path. | sol-reclaim, settings-legacy-funds, sol-slip10-parity |
 
 ### Deposits & onramp (ckBTC + ckUSDC + ckERC20)
 
@@ -106,9 +106,9 @@ wire (1) · onboard (7) · pay (20) · offline (7) · deposit (8) · withdraw (6
 |---|------|----------|--------|
 | 11 | nfc | NFC phase transitions (Idle→Linking→Exchanging→Settling→Complete) render via the RNW event bus. | nfc-phases, event-bus |
 | 32 | nfc-disclosure | NFC asset disclosure: mid-tap the status shows honest asset name + network + '0.00050000 BTC' BEFORE success. | nfc-disclosure, consent, asset-name, network |
-| 47 | sol-nfc | SOL NFC tap: arm card → auto-sign → broadcast-stub → receipt → adopt nonce → Paid ✓ | sol-nfc, sol-nonce-relay, event-bus |
+| 47 | sol-nfc | SOL v2 NFC tap: arm card → auto-sign → receipt (rid+sig match) → Paid ✓ | sol-nfc, sol-v2-receipt, event-bus |
 | 60 | nfc-error | NFC tap failure modes: a mid-tap transport error surfaces honest "Tap failed" (not Paid ✓); a decline surfaces "Declined"; a late error after settling is ignored (no false failure over a decided outcome). | nfc-error, nfc-declined, nfc-phases, error-handling, no-fake-paid, terminal-escape |
-| 66 | sol-nfc-error | SOL NFC tap failure modes: an expired solreq autoSign decline surfaces honest "Declined" + "expired" (never Paid); a mid-tap transport error surfaces "Tap failed"; a late error after settling is ignored (no false failure over a decided outcome); the merchant reader sees the same decline. | sol-nfc-decline, sol-nfc-error, sol-nfc-receipt-unreachable, sol-nfc-phases, sol-nfc-reader-decline, no-fake-paid, terminal-escape |
+| 66 | sol-nfc-error | SOL v2 NFC tap failure modes: expired solreq → Declined + expired; transport error → Tap failed; late error after settling ignored; merchant reader sees the decline. | sol-nfc-decline, sol-nfc-error, sol-nfc-receipt-unreachable, sol-nfc-phases, sol-nfc-reader-decline, no-fake-paid, terminal-escape |
 
 ### Settings & system
 
@@ -125,7 +125,7 @@ wire (1) · onboard (7) · pay (20) · offline (7) · deposit (8) · withdraw (6
 | 57 | settings-seed-backup | Seed stays hidden behind a confirm gate; once revealed the 24 mnemonic words show by default, hex view toggles in and matches identity.secretHex; copy writes the seed to the real clipboard. | seed-backup, confirm-gate, secret-reveal, clipboard-copy, mnemonic-backup, mnemonic-word-{0..23}, btn-backup-show-hex, btn-copy-mnemonic, btn-copy-seed |
 | 63 | picker-sol-rail | SOL is selectable in the Receive currency picker → switches the active rail to SolReceiveMode. | receive-picker, sol-rail, currency-switch |
 | 64 | settings-restore | Settings → Restore replaces wallet identity from 64-hex seed (no wipe); username preserved. | restore-seed, settings-restore, identity-replace, keypair-from-secret |
-| 69 | sol-usdc-selection | IC USDC ↔ Solana USDC: unified picker switches rail + clears amount; Solana USDC fails closed without ATA. | asset-picker, ic-usdc, sol-usdc, rail-switch, amount-clear, fail-closed-ata |
+| 69 | sol-usdc-selection | IC USDC ↔ Solana USDC: unified picker switches rail + clears amount (symmetric in both directions). | asset-picker, ic-usdc, sol-usdc, rail-switch, amount-clear |
 | 70 | deeplink-ic-routing | A dpay:req deeplink arriving while SOL is idle-selected routes to the IC Pay engine (PayMode review), not SolPayMode — the blob is never silently lost. | deeplink-routing, ic-engine-routing, solana-to-ic-handoff, prefill-preserve |
 | 71 | selection-lock | An in-flight pay review locks the idle asset selection: the Balances button is disabled + a no-op, and canceling the review re-enables it. | selection-lock, in-flight-preserve, balances-disable, nfc-arming-invariant |
 | 72 | sol-usdc-send | Solana USDC "Send to address" fails closed when the device ATA is absent (no doomed SPL send). | sol-usdc-send, spl-transfer, fail-closed-ata, asset-aware-send |

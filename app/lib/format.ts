@@ -91,14 +91,17 @@ export function parseRequestQR(raw: string): string {
 // (the fixed-width display the wallet asserts — "0.00050000 BTC", never "0.0005 BTC"). This formatter
 // keeps the asset's full precision (a UI concern separate from the parser, per amount.ts's module
 // doc). Never `Math.floor`/`parseFloat` (lossy above 2^53).
-export function fmtAsset(raw: string, decimals: number, unit: string): string {
+export function fmtAsset(raw: string, decimals: number, unit: string, displayDecimals?: number): string {
   const n = BigInt(raw);
   if (n === 0n) return `0 ${unit}`; // a zero balance needs no precision padding ("0 BTC", not "0.00000000 BTC")
-  // `pow10` (multiplication loop) instead of `10n ** BigInt(d)` — see amount.ts; Babel's
-  // exponentiation-operator transform rewrites `**` to `Math.pow` which throws on BigInt operands.
+  const dd = displayDecimals != null && displayDecimals >= 0 && displayDecimals <= decimals ? displayDecimals : decimals;
   let scale = 1n;
   for (let i = 0; i < decimals; i++) scale *= 10n;
-  return `${(n / scale).toString()}.${(n % scale).toString().padStart(decimals, '0')} ${unit}`;
+  const wholePart = n / scale;
+  const fracPart = n % scale;
+  if (dd === 0) return `${wholePart.toString()} ${unit}`;
+  const fracStr = fracPart.toString().padStart(decimals, '0').slice(0, dd).padEnd(dd, '0');
+  return `${wholePart.toString()}.${fracStr} ${unit}`;
 }
 // Parse a user-entered amount (decimal string) into integer smallest-units at the given decimal
 // count, as a decimal-digit STRING. Drives the merchant's currency-aware request encoder (ReceiveMode
