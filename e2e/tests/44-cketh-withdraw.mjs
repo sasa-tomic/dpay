@@ -81,7 +81,7 @@ export async function run() {
     //    button — it lives in the Pay tab.
     console.log('[44-cketh-withdraw] opening Balances; waiting for the funded ckETH row…');
     await openBalances(driver);
-    await driver.waitForText('5.000000000000000000 ETH', { timeoutMs: 8_000 });
+    await driver.waitForText('5.000000 ETH', { timeoutMs: 8_000 });
 
     // 4. Select ckETH → Pay → "Send to address". The sheet title reads "Send Ethereum" (native-ETH).
     console.log('[44-cketh-withdraw] selecting ckETH → Pay → Send to address…');
@@ -93,10 +93,10 @@ export async function run() {
     await driver.type('withdraw-address-input', WITHDRAW_ADDR, { timeoutMs: 4_000 });
     await driver.type('withdraw-amount-input', WITHDRAW_ETH, { timeoutMs: 4_000 });
     // The review card appears once a valid amount is entered — proves the app parsed the ETH amount
-    // at 18-dec Wei precision. fmtAsset(1e18, 18, 'ETH') = "1.000000000000000000 ETH".
+    // at 18-dec Wei precision (display shows 6 fractional places via display_decimals).
     await driver.findByTestID('withdraw-review-amount', { timeoutMs: 4_000 });
     const reviewTxt = await driver.readText('withdraw-review-amount');
-    assert(reviewTxt.includes('1.000000000000000000 ETH'), `review should show the ETH amount at 18-dec precision, got: "${reviewTxt}"`);
+    assert(reviewTxt.includes('1.000000 ETH'), `review should show the ETH amount at 6-dec display precision, got: "${reviewTxt}"`);
 
     console.log('[44-cketh-withdraw] confirming (signs on-device + submits to /api/v1/withdraw)…');
     await driver.click('btn-withdraw-confirm', { timeoutMs: 5_000 });
@@ -131,14 +131,14 @@ export async function run() {
 
     // 9. UI balance delta (locks the UI↔ledger agreement): flip the toggle back to "Scan to pay"
     //    (hides the inline withdraw body), re-open the Balances hub, and assert the ETH row now shows
-    //    the REDUCED remaining balance (4.000000000000000000 ETH = 4e18 Wei), not the pre-withdraw 5 ETH.
+    //    the REDUCED remaining balance (4.000000 ETH = 4e18 Wei), not the pre-withdraw 5 ETH.
     await driver.click('btn-pay-scan', { timeoutMs: 5_000 });
     await openBalances(driver);
-    const reduced = await driver.waitForText('4.000000000000000000 ETH', { timeoutMs: 10_000 });
+    const reduced = await driver.waitForText('4.000000 ETH', { timeoutMs: 10_000 });
     const balBody = await driver.bodyText();
-    assert(reduced, `Balances ETH row should show the reduced 4.000000000000000000 ETH (4e18 Wei remaining) after the withdraw. body excerpt:\n${balBody.slice(0, 500)}`);
-    assert(!balBody.includes('5.000000000000000000 ETH'), 'Balances must NOT still show the pre-withdraw 5 ETH (stale facade cache?)');
-    console.log('[44-cketh-withdraw] ✓ UI native-ETH balance dropped to 4.000000000000000000 ETH (matches the ledger delta)');
+    assert(reduced, `Balances ETH row should show the reduced 4.000000 ETH (4e18 Wei remaining) after the withdraw. body excerpt:\n${balBody.slice(0, 500)}`);
+    assert(!balBody.includes('5.000000 ETH'), 'Balances must NOT still show the pre-withdraw 5 ETH (stale facade cache?)');
+    console.log('[44-cketh-withdraw] ✓ UI native-ETH balance dropped to 4.000000 ETH (matches the ledger delta)');
 
     const elapsed = ((Date.now() - start) / 1000).toFixed(2);
     console.log(`[44-cketh-withdraw] GREEN in ${elapsed}s`);

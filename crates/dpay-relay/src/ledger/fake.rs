@@ -297,7 +297,7 @@ fn fake_catalog() -> Vec<CurrencyDescriptor> {
             wrapper_name: Some("ckETH".into()),
             backing_symbol: Some("ETH".into()),
             network: Some("Ethereum".into()),
-            display_decimals: Some(18),
+            display_decimals: Some(6), // matches prod ckETH (display_decimals=6 ≠ decimals=18) — exercises the truncation codepath
             fee: Some(U64String(10_000_000_000_000_000)), // demo stand-in — 0.01 ETH at 18 dec = 1e16 raw
             cap: Some(U64String(100_000)),
             chain_id: Some(1), // Ethereum mainnet

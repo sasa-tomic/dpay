@@ -356,7 +356,7 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
           accessibilityHint="Choose which asset the payer will send you"
           accessibilityState={{disabled: false}}>
           <Text style={S.currency}>{selectedToken === 'SOL' ? '◎' : '$'}</Text>
-          <Text style={S.caret}>{selectedToken === 'SOL' ? 'SOL' : 'USDC'} ▾</Text>
+          <Text style={S.caret}>▾</Text>
         </Pressable>
         <TextInput
           testID="sol-req-amount-input"
