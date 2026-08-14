@@ -69,6 +69,11 @@ This is the documented resolution of OPEN_ISSUES #10 Layer 3 (the path-filtered 
 
 **`FLOWS.md`** is the authoritative manifest of every tested user flow (**62 flows**, organized by journey). Read it to see what's covered and how to add a new flow. Run `just e2e` (all) or `DPAY_E2E_FILTER=NN node e2e/run.mjs` (one flow). Inner-loop e2e recipes (all offline, seconds): `just e2e` (full suite, 62 flows); `just e2e-visual` (pixel-diff flow 40 standalone — for fast iteration after a UI tweak; flow 40 ALSO runs in the full `e2e` suite so `just verify` already covers it); `just e2e-visual-seed` (regenerate the visual baselines after an intentional UI change — commit the new baselines); `just e2e-watch` (file→journey re-run on save — the shared relay+web+browser session persists across re-runs for sub-5s feedback); `just e2e-watch-filter <token>` (watch mode pinned to a journey/id/name/covers slug).
 
+## Completion standard (hard rules, founder-set 2026-08-14)
+
+1. **Full-exercise rule.** An implementation is "complete" ONLY after every flow it touches has been fully exercised by the agent itself (real gate runs — jest, e2e, device gates where triggered — not static review), audited for ANY signs of gaps, bugs, or half-wired code (state-matrix walkthrough of every gate/branch), and found FULLY clean. Green gates on stale coverage do not count; if a path has no coverage, add it. Only then may completeness be claimed.
+2. **Autonomous iteration.** Work autonomously — no questions — until the work is completely prod-ready or a HARD FORK in the design or a HARD external blocker is hit (emulator/device unavailable, mainnet funds needed, founder-owned step). Anything short of a hard fork or a hard blocker is work to do, not work to ask about. Use subagents to preserve main-session context.
+
 ## Human expectations
 
 **`CLAUDE.md`** is the human-expectations document: the non-negotiables (non-custodial/no-swap/offline-dev-loop), the positioning/pitch, the monetization direction, and the scope boundaries. Keep it current when the founder provides guidance. Treat its constraints as hard requirements.
