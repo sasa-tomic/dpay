@@ -88,6 +88,11 @@ export const S = StyleSheet.create({
   // centering; `aspectRatio:1` keeps it square) so the primary scan surface uses the full usable
   // width instead of a 300px box floating in a ~358px column with dead space around it.
   camBox: {alignSelf: 'stretch', aspectRatio: 1, borderRadius: 22, overflow: 'hidden', backgroundColor: '#0a0d11', borderWidth: 1, borderColor: C.line},
+  // Wrapper for a scan phase's QrScanner + hint text. MUST be alignSelf:'stretch' (full width):
+  // camBox sizes itself by stretch + aspectRatio, so an unstyled/content-width wrapper leaves camBox
+  // with no resolvable width and it collapses to 0x0 (the 2026-08-14 SOL scan black-box bug —
+  // camera mounted and live but invisible; gated on-device by `just campreview`).
+  scanWrap: {alignSelf: 'stretch'},
   camPlaceholder: {flex: 1, alignItems: 'center', justifyContent: 'center'},
   reviewAmount: {fontSize: 30, fontWeight: '800', color: C.ink, textAlign: 'center'},
   reviewTo: {fontSize: 17, color: C.ink, marginTop: 6, textAlign: 'center'},

@@ -13,7 +13,7 @@ export function QrScanner({onScan}: {onScan: (v: string) => void}) {
   const fired = useRef(false);
   const codeScanner = useCodeScanner({codeTypes: ['qr'], onCodeScanned: codes => { const v = codes[0]?.value; if (v && !fired.current) { fired.current = true; onScan(v); } }});
   return (
-    <View style={S.camBox}>
+    <View testID="scan-cam-box" style={S.camBox}>
       {hasPermission && device ? (
         <Camera style={StyleSheet.absoluteFill} device={device} isActive={appActive} codeScanner={codeScanner} />
       ) : (

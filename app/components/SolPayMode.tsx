@@ -145,7 +145,7 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
         ) : null}
         {!nfcActive ? (
           <>
-            <View testID="sol-pay-scan">
+            <View testID="sol-pay-scan" style={S.scanWrap}>
               <Text style={S.dim2}>Scan the merchant's payment code to pay offline.</Text>
               <QrScanner onScan={onScan} />
             </View>
