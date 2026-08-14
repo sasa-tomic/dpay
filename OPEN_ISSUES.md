@@ -15,6 +15,49 @@
 > (`f665228`→`c74988b`, HEAD=`c74988b`). All cross-currency verification gaps closed.
 > Pick up new work only when a concrete next step is identified.
 
+## Session summary (2026-08-14): SOL camera 0×0 collapse fix + campreview gate + legacy-fund removal — COMPLETE
+
+> **Trigger:** founder inspected the latest APK: (1) "drop the legacy fund — I'm the only user";
+> (2) "QR scan for SOL and USDC-SOL doesn't work — camera doesn't turn on". Founder then demanded a
+> REAL (non-mock) regression test before any fix, and fresh-subagent verification.
+>
+> **Root cause (distinct from both earlier camera issues — AVD `hw.camera.front=none` and the
+> web-shim silent-drop):** `SolPayMode`'s scan phase wrapped `<QrScanner>` in an UNSTYLED
+> `<View testID="sol-pay-scan">` (content-sized). `S.camBox` resolves its width via
+> `alignSelf:'stretch'` + `aspectRatio:1`; inside a content-sized parent the stretch child has no
+> intrinsic width → the box rendered 0×0 (uiautomator: 5px-tall empty node; pixels: flat #0a0d11).
+> The camera actually MOUNTED and STREAMED (fps ticker live) but was invisible. IC `PayMode` renders
+> QrScanner directly under `S.center` (full-width) — that's why only SOL/USDC-SOL broke. Web e2e was
+> structurally blind (blind-spot class 2): the web camera shim renders the permission placeholder,
+> which has intrinsic content, so camBox never collapses in a browser.
+>
+> **What landed:**
+> - **Fix:** `app/styles.ts` new `S.scanWrap {alignSelf:'stretch'}`;
+> `SolPayMode.tsx` wrapper now `style={S.scanWrap}`; `QrScanner.tsx` root View gained
+> `testID="scan-cam-box"` (stable anchor).
+> - **`just campreview` (scripts/android-campreview.sh) — the REAL gate, zero mocks:** force-stop +
+> launch org.kalaj.dpay, wait for `DPAY_SELFCHECK PASS` in logcat; navigate via uiautomator
+> dump→bounds-parse→tap-center (balance → `asset-demo-select` / `asset-sol-select`, never hardcoded
+> pixels); crop the camera region from `adb exec-out screencap -p` via PIL+numpy; PASS ⟺
+> max per-channel stddev ≥ 10 AND mean luminance ≥ 60 (measured: healthy std ~80/lum ~194; broken
+> 0.0/7.0; permission-placeholder 2.5/~8 — ~8×/~3× margins). Region anchors on `scan-cam-box`
+> resource-id, falling back to the hint-text bottom (NEVER the sol-pay-scan container bottom — the
+> container is 73px when broken vs ~1100px healthy). IC/DEMO run is the positive control. Exit codes:
+> 0 green, 1 flat box (+ collapsed-container hint), 2 nav/anchor change, 3 device/self-check failure.
+> Run on ANY QrScanner/PayMode/SolPayMode/scan-layout change. Verified RED pre-fix, GREEN post-fix.
+> - **Legacy-fund removal (founder-directed, no user ever held v1 nonce funds):** deleted
+> `SolNonceReclaim.tsx`, `app/solana/reclaim.ts`, `app/services/solNoncePersist.ts`,
+> `app/__tests__/solana-reclaim.test.ts`, `app/__tests__/sol-nonce-persist.test.ts`,
+> `e2e/tests/73-sol-reclaim.mjs` (FLOWS.md regenerated: 74→73 flows); SettingsSheet mount + import
+> removed; `rpc.ts` reclaimed-only surface removed (getNonceAccount,
+> getMinimumBalanceForRentExemption, getAccountInfo, SolanaNonceAccount/SolanaAccountInfo, bs58 +
+> base64ToBytes imports); `solana-rpc.test.ts` reclaim describes + stub-seam test removed (kept
+> accountExists + live stub tests). Docs updated (CLAUDE.md, CODEBASE_ANALYSIS.md, solana.ts,
+> solMerchantPersist.ts comments).
+>
+> **Gates:** typecheck clean, jest 771/771, `just app` self-checks PASS, `just campreview` GREEN
+> both rails. Fresh-subagent verification with empty context per founder instruction.
+
 ## Session summary (2026-08-14): fail-loud injection seams — COMPLETE (e2e test radical improvement)
 
 > **Trigger:** the prior review was "objectively superficial" — the camera shim **silently dropped** scan
@@ -43,11 +86,12 @@
 >   silent-drop, this flow goes RED.
 > - Plan: `2026-08-14-e2e-fail-loud-seams.md`. CODEBASE_ANALYSIS.md updated (fail-loud bullet).
 
-**Device-session follow-up (value 6 / effort S):** the SOL QR-scanner device-side bug (scanner not
-activating on a real phone) remains a device-session gate. The e2e seam is now fail-loud so the
-JS-plumbing layer is covered, but the real `react-native-vision-camera` activation on hardware needs
-`just app` + a physical-device scan to close. NOT a `just verify` blind spot (camera activation is
-inert/deferred on web by design); it is an outer-loop device gate.
+**Device-session follow-up (value 6 / effort S): RESOLVED 2026-08-14 (see the campreview session
+summary below).** The founder-reported "SOL/USDC-SOL QR scan — camera doesn't turn on" was a THIRD,
+distinct root cause: the unstyled `<View testID="sol-pay-scan">` wrapper collapsed `camBox`
+(`alignSelf:'stretch'` + `aspectRatio:1`) to 0×0 inside a content-sized parent — camera mounted +
+streaming (fps ticker live) but invisible. Fixed + gated by `just campreview`. The physical two-phone
+radio hop (real NFC tap, real QR-in-view scan) remains founder outer-loop as before.
 
 ## Session summary (2026-08-14): QR-scanner emulator root cause + two new on-device gates — COMPLETE
 
