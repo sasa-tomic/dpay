@@ -6,10 +6,11 @@
  * isolated module registry (mirrors walletconnect.test.ts) with a mocked fetch.
  */
 import {describe, test, expect, jest, afterEach} from '@jest/globals';
+import bs58 from 'bs58';
 import {encodeSolReq, decodeSolReq} from '../solana/qr';
 import type {SolReqV2, SolPayV2} from '../solana/qr';
-import {buildCanonicalSolMessage, verifySolPayment} from '../solana/tx';
-import {buildCanonicalUsdcMessage} from '../solana/spl';
+import {buildCanonicalSolMessage, verifySolPayment, base58Decode32} from '../solana/tx';
+import {buildCanonicalUsdcMessage, deriveAta, ASSOCIATED_TOKEN_PROGRAM_ADDRESS} from '../solana/spl';
 import {deriveSolanaKeypair} from '../solana/identity';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from '../payments';
 import type {SolanaRpcStub} from '../solana/rpc';
@@ -26,6 +27,35 @@ const SEED_HEX = '4f66b8c0a9b6e1f2d3a4c5b6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5
 const MERCHANT_ADDRESS = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const MERCHANT_USDC_ATA = 'C9dhv75Qeu2NLrEprtNNMageKX6z2bsysrdRTNFB3nbk';
+
+// --- tx-bytes helpers (parse the legacy layout of a base64 signed tx: sig(64) + message) ---
+
+function readCompactU16(bytes: Uint8Array, off: number): {value: number; next: number} {
+  let value = 0, shift = 0, pos = off;
+  for (let i = 0; i < 3; i++) {
+    const b = bytes[pos];
+    pos++;
+    value |= (b & 0x7f) << shift;
+    if ((b & 0x80) === 0) return {value, next: pos};
+    shift += 7;
+  }
+  return {value, next: pos};
+}
+
+/** Instruction count of a signed legacy tx: skip sigCount(1) + sig(64) + header(3), read the account table. */
+function countInstructions(bytes: Uint8Array): number {
+  const keys = readCompactU16(bytes, 65 + 3);
+  const afterKeys = keys.next + keys.value * 32 + 32; // accounts + blockhash
+  return readCompactU16(bytes, afterKeys).value;
+}
+
+function indexOfBytes(hay: Uint8Array, needle: Uint8Array): number {
+  outer: for (let i = 0; i + needle.length <= hay.length; i++) {
+    for (let j = 0; j < needle.length; j++) if (hay[i + j] !== needle[j]) continue outer;
+    return i;
+  }
+  return -1;
+}
 
 // --- stub helpers ---
 
@@ -186,10 +216,14 @@ describe('solana seam — getSolanaUsdcBalance (Phase 2 honest balances)', () =>
 // ============================================================================
 // Phase 6 — sendSpl (USDC direct send). Mirrors sendSol's shape but builds an SPL
 // Token.transfer (single instruction, live blockhash) instead of a System Transfer.
-// Fail-closed: the device's source ATA + the recipient's ATA must BOTH exist on-chain
-// (the Token program rejects transfers to a non-existent account — pre-checking saves
-// the user a failed-fee confusion; a TOCTOU race is fine — the confirm path succeeds on
-// re-submit). Reuses the byte-exact buildSplTransferInstruction (proven in solana-spl.test.ts).
+// FAIL-CLOSED sender check: the device's source ATA must exist on-chain (you cannot
+// send USDC you don't hold an account for — the error names the sender, the first
+// check). RECIPIENT AUTO-CREATE (2026-08-14 founder-approved): a missing recipient
+// ATA is created in the SAME tx via AssociatedTokenProgram.createIdempotent BEFORE
+// the transfer (sender pays the one-time rent, disclosed on the review screen;
+// idempotent ⇒ a TOCTOU race with another creator is a harmless no-op).
+// Reuses the byte-exact buildSplTransferInstruction + buildCreateAtaIdempotentInstruction
+// (both proven in solana-spl.test.ts).
 // ============================================================================
 describe('solana seam — sendSpl (Phase 6 USDC direct send)', () => {
   test('throws offline error when SOLANA_RPC_URL is empty', async () => {
@@ -214,19 +248,34 @@ describe('solana seam — sendSpl (Phase 6 USDC direct send)', () => {
     })).rejects.toThrow(/USDC account/);
   });
 
-  test('throws a clear error when the recipient ATA is missing (fail-closed)', async () => {
+  test('auto-creates a missing recipient ATA in the SAME tx (real createIdempotent ix, no throw)', async () => {
     // First getAccountInfo call (sender ATA) returns funded; second (recipient ATA) returns null.
     let calls = 0;
+    const sent: string[] = [];
     (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
       getAccountInfo: () => {
         calls++;
         return calls === 1 ? {value: {data: ['', 'base64'], owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', lamports: 2039280}} : {value: null};
       },
+      getLatestBlockhash: () => ({context: {slot: 100}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
+      sendTransaction: (params: unknown[]) => { sent.push(params[0] as string); return 'SigSplBase58'; },
+      getSignatureStatuses: () => ({value: [{confirmationStatus: 'confirmed'}]}),
     };
-    await expect(withStubUrl(async () => {
+    const sig = await withStubUrl(async () => {
       const {sendSpl} = require('../solana');
       return (sendSpl as (s: string, d: string, a: bigint) => Promise<string>)(SEED_HEX, MERCHANT_ADDRESS, 1_000_000n);
-    })).rejects.toThrow(/recipient/i);
+    });
+    expect(sig).toBe('SigSplBase58');
+    // Exactly ONE broadcast — create + transfer ride the same signed transaction.
+    expect(sent.length).toBe(1);
+    const bytes = Uint8Array.from(Buffer.from(sent[0], 'base64'));
+    // The message carries 2 instructions (create ATA + transfer).
+    expect(countInstructions(bytes)).toBe(2);
+    // The recipient's ATA and the ATA PROGRAM are both addressed in the real tx bytes.
+    expect(indexOfBytes(bytes, deriveAta(MERCHANT_ADDRESS, USDC_MINT))).toBeGreaterThanOrEqual(0);
+    expect(indexOfBytes(bytes, base58Decode32(ASSOCIATED_TOKEN_PROGRAM_ADDRESS))).toBeGreaterThanOrEqual(0);
+    // The plain transfer already needs >120 chars; adding a 7-key create ix grows it further.
+    expect(sent[0].length).toBeGreaterThan(250);
   });
 
   test('builds + broadcasts the SPL transfer when both ATAs exist', async () => {
@@ -259,6 +308,64 @@ describe('solana seam — sendSpl (Phase 6 USDC direct send)', () => {
       const {sendSpl} = require('../solana');
       return (sendSpl as (s: string, d: string, a: bigint) => Promise<string>)(SEED_HEX, MERCHANT_ADDRESS, 1_000_000n);
     })).rejects.toThrow(/your wallet|USDC account/i); // not "recipient"
+  });
+});
+
+// ============================================================================
+// createUsdcAta — the receiver-side one-tap USDC account setup (2026-08-14). One
+// real AssociatedTokenProgram.createIdempotent instruction, signed LOCALLY with the
+// device key, paid by the device's own SOL (rent + fee pre-checked against the
+// ESTIMATE; the chain enforces the real value). Mirrors the sendSpl stub shape.
+// ============================================================================
+describe('solana seam — createUsdcAta (receiver-side one-tap setup)', () => {
+  test('throws offline when SOLANA_RPC_URL is empty (no network import)', async () => {
+    let called = false;
+    (globalThis as unknown as {fetch: unknown}).fetch = jest.fn(() => {
+      called = true;
+      return Promise.resolve({});
+    });
+    const {createUsdcAta} = require('../solana');
+    await expect((createUsdcAta as (s: string) => Promise<string>)(SEED_HEX)).rejects.toThrow('not available');
+    expect(called).toBe(false);
+  });
+
+  test('throws a friendly insufficient-SOL error (honest cost pre-check, no broadcast)', async () => {
+    let balanceCalls = 0;
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getBalance: () => { balanceCalls++; return {value: 1000000}; }, // 0.001 SOL < rent+fee
+      sendTransaction: () => { throw new Error('must not broadcast'); },
+    };
+    await expect(withStubUrl(async () => {
+      const {createUsdcAta} = require('../solana');
+      return (createUsdcAta as (s: string) => Promise<string>)(SEED_HEX);
+    })).rejects.toThrow(/one-time account rent|send a little SOL/i);
+    expect(balanceCalls).toBe(1);
+  });
+
+  test('builds + broadcasts ONE createIdempotent ix for the device ATA, signed by the device key', async () => {
+    const sent: string[] = [];
+    const kp = deriveSolanaKeypair(SEED_HEX);
+    const ownerAddress = bs58.encode(kp.publicKey);
+    const deviceAta = deriveAta(ownerAddress, USDC_MINT);
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getBalance: () => ({value: 1000000000}), // 1 SOL ≥ rent+fee
+      getLatestBlockhash: () => ({context: {slot: 100}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
+      sendTransaction: (params: unknown[]) => { sent.push(params[0] as string); return 'SigAtaBase58'; },
+      getSignatureStatuses: () => ({value: [{confirmationStatus: 'confirmed'}]}),
+    };
+    const sig = await withStubUrl(async () => {
+      const {createUsdcAta} = require('../solana');
+      return (createUsdcAta as (s: string) => Promise<string>)(SEED_HEX);
+    });
+    expect(sig).toBe('SigAtaBase58');
+    expect(sent.length).toBe(1);
+    const bytes = Uint8Array.from(Buffer.from(sent[0], 'base64'));
+    // Exactly ONE instruction in the message.
+    expect(countInstructions(bytes)).toBe(1);
+    // The ix addresses the DEVICE's ATA and the ATA program, and the tx carries the
+    // device key's signature over its own rent (payer = owner = device key).
+    expect(indexOfBytes(bytes, deviceAta)).toBeGreaterThanOrEqual(0);
+    expect(indexOfBytes(bytes, base58Decode32(ASSOCIATED_TOKEN_PROGRAM_ADDRESS))).toBeGreaterThanOrEqual(0);
   });
 });
 

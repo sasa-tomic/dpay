@@ -17,8 +17,10 @@ import bs58 from 'bs58';
 import {SOLANA_RPC_URL, SOL_GENESIS_HASH, SOL_PAYMENT_MAX_WINDOW_SECONDS, SOL_PAYMENT_COMMITMENT, SOL_BROADCAST_TIMEOUT_MS} from './config/constants';
 import {solanaUsdcAvailable} from './config/assets';
 import {deriveSolanaKeypair, deriveSolanaAddress} from './solana/identity';
-import {base58Decode32, buildSignedTransfer, signTransaction, assembleMessage, buildCanonicalSolMessage, verifySolPayment, extractSignedTxParts} from './solana/tx';
-import {buildSplTransferInstruction, buildCanonicalUsdcMessage, deriveAta, USDC_MINT_ADDRESS} from './solana/spl';
+import {SOL_DECIMALS, SOL_UNIT} from './solana/identity';
+import {fmtAsset} from './lib/format';
+import {base58Decode32, buildSignedTransfer, signTransaction, assembleMessage, buildCanonicalSolMessage, verifySolPayment, extractSignedTxParts, type Instruction} from './solana/tx';
+import {buildSplTransferInstruction, buildCreateAtaIdempotentInstruction, buildCanonicalUsdcMessage, deriveAta, USDC_MINT_ADDRESS, SOL_ATA_SETUP_MIN_LAMPORTS} from './solana/spl';
 import {encodeSolReq, generateRid} from './solana/qr';
 import type {SolReqV2, SolPayV2, SolReceiptV2, SolReqInput, SolPayInput} from './solana/qr';
 import type {SolanaSignatureStatus} from './solana/rpc';
@@ -55,15 +57,19 @@ export async function sendSol(secretHex: string, toAddress: string, lamports: bi
  *  send takes); the recipient's USDC Associated Token Account is DERIVED from it. Signs LOCALLY with
  *  the device-derived key (non-custodial — same shape as sendSol).
  *
- *  FAIL-CLOSED ATA checks (mirror Phase 4's principle): the device's source ATA + the recipient's ATA
- *  must BOTH exist on-chain. The Token program rejects transfers to a non-existent account, so
- *  pre-checking saves the user a failed-fee confusion. The sender check runs FIRST so the error names
- *  the right party. A TOCTOU race (an ATA created between check + submit) is fine — the confirm path
- *  succeeds on re-submit.
+ *  FAIL-CLOSED sender check: the device's source ATA must exist on-chain (you cannot send USDC you
+ *  don't hold an account for — the error names the sender, the first check).
  *
- *  Throws if SOL is offline, if either ATA is missing, on a network/RPC error, or if the on-chain tx
- *  fails. Returns the signature. Reuses the byte-exact `buildSplTransferInstruction` (Token program
- *  transfer ix — proven in solana-spl.test.ts). */
+ *  RECIPIENT AUTO-CREATE (2026-08-14 founder-approved): if the recipient's ATA is missing, the SAME
+ *  transaction carries an AssociatedTokenProgram.createIdempotent instruction BEFORE the transfer —
+ *  the sender pays the recipient's one-time account rent (≈0.002 SOL, disclosed on the review
+ *  screen). createIdempotent is a no-op when the ATA exists, so a TOCTOU race (created between
+ *  check + submit) is harmless. This is a real on-chain instruction in the real signed tx — nothing
+ *  simulated, nothing hidden.
+ *
+ *  Throws if SOL is offline, if the sender ATA is missing, on a network/RPC error, or if the
+ *  on-chain tx fails. Returns the signature. Reuses the byte-exact `buildSplTransferInstruction` +
+ *  `buildCreateAtaIdempotentInstruction` (proven in solana-spl.test.ts). */
 export async function sendSpl(secretHex: string, destAddress: string, amount: bigint, signal?: AbortSignal): Promise<string> {
   if (!SOLANA_RPC_URL) throw new Error('Solana is offline (no RPC endpoint configured)');
   const {seed, publicKey} = deriveSolanaKeypair(secretHex);
@@ -72,16 +78,49 @@ export async function sendSpl(secretHex: string, destAddress: string, amount: bi
   const recipientAta = deriveAta(destAddress, USDC_MINT_ADDRESS);
   const {accountExists, getLatestBlockhash, sendTransaction, confirmTransaction} = await import('./solana/rpc');
 
-  // Sender ATA first — the device must hold a USDC account to debit from.
+  // Sender ATA first — the device must hold a USDC account to debit from (fail-closed).
   if (!(await accountExists(SOLANA_RPC_URL, bs58.encode(senderAta), {signal}))) {
     throw new Error("Your wallet doesn't have a USDC account yet");
   }
-  // Recipient ATA second — the Token program would otherwise reject the transfer.
+  // Recipient ATA — if missing, create it in the same tx (sender pays the one-time rent, disclosed
+  // upstream on the review screen; idempotent so a race with another creator is harmless).
+  const ixs: Instruction[] = [];
   if (!(await accountExists(SOLANA_RPC_URL, bs58.encode(recipientAta), {signal}))) {
-    throw new Error("The recipient doesn't have a USDC account — they need to set one up first");
+    ixs.push(buildCreateAtaIdempotentInstruction(publicKey, recipientAta, base58Decode32(destAddress), base58Decode32(USDC_MINT_ADDRESS)));
+  }
+  ixs.push(buildSplTransferInstruction(senderAta, recipientAta, publicKey, amount));
+
+  const {blockhash} = await getLatestBlockhash(SOLANA_RPC_URL, {signal});
+  const message = assembleMessage(publicKey, ixs, base58Decode32(blockhash));
+  const raw = signTransaction(message, seed);
+  const signature = await sendTransaction(SOLANA_RPC_URL, raw, {signal});
+  await confirmTransaction(SOLANA_RPC_URL, signature, {signal});
+  return signature;
+}
+
+/** One-time USDC account (ATA) setup for THIS device's wallet — the receiver-side onboarding for
+ *  Solana USDC (2026-08-14). Builds, signs LOCALLY (device key), broadcasts, and confirms a single
+ *  AssociatedTokenProgram.createIdempotent instruction (payer = owner = the device key, mint =
+ *  USDC). Non-custodial: the device key signs; dpay never holds keys or funds.
+ *
+ *  Honest cost: the one-time account rent + transaction fee come out of the device's SOL balance.
+ *  Pre-checked with a friendly error when the balance can't cover the ESTIMATE (the chain enforces
+ *  the real value — the constant is display/pre-check only, never trust-bearing). Throws when SOL
+ *  is offline, when the rail is incoherent (mainnet mint on a non-mainnet RPC), on insufficient
+ *  SOL, or on any RPC/on-chain failure. Returns the transaction signature. */
+export async function createUsdcAta(secretHex: string, signal?: AbortSignal): Promise<string> {
+  if (!SOLANA_RPC_URL || !solanaUsdcAvailable()) throw new Error('Solana USDC is not available (no RPC endpoint configured)');
+  const {seed, publicKey} = deriveSolanaKeypair(secretHex);
+  const ownerAddress = bs58.encode(publicKey);
+  const ata = deriveAta(ownerAddress, USDC_MINT_ADDRESS);
+  const {getBalance, getLatestBlockhash, sendTransaction, confirmTransaction} = await import('./solana/rpc');
+
+  const lamports = await getBalance(SOLANA_RPC_URL, ownerAddress, {signal});
+  if (BigInt(lamports) < SOL_ATA_SETUP_MIN_LAMPORTS) {
+    throw new Error(`Creating your USDC account needs about ${fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT)} in this wallet (one-time account rent + fee) — send a little SOL here first`);
   }
 
-  const ix = buildSplTransferInstruction(senderAta, recipientAta, publicKey, amount);
+  const ix = buildCreateAtaIdempotentInstruction(publicKey, ata, publicKey, base58Decode32(USDC_MINT_ADDRESS));
   const {blockhash} = await getLatestBlockhash(SOLANA_RPC_URL, {signal});
   const message = assembleMessage(publicKey, [ix], base58Decode32(blockhash));
   const raw = signTransaction(message, seed);

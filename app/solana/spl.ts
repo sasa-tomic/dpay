@@ -32,6 +32,17 @@ export const ASSOCIATED_TOKEN_PROGRAM_ADDRESS = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH2
 export const USDC_MINT_ADDRESS = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 /** USDC has 6 decimals (1 USDC = 1_000_000 raw units). */
 export const USDC_DECIMALS = 6;
+/** System Program (account/rent machinery — a create-ATA account, not a signer here). */
+export const SYSTEM_PROGRAM_ADDRESS = '11111111111111111111111111111111';
+/** Rent sysvar (passed readonly to create-ATA; the chain charges real rent regardless). */
+export const RENT_SYSVAR_ADDRESS = 'SysvarRent111111111111111111111111111111111';
+/** Canonical mainnet rent for a 165-byte SPL token account (lamports). An ESTIMATE for display +
+ *  friendly pre-checks — the chain enforces the real value at execution; never trust-bearing. */
+export const SOL_ATA_RENT_LAMPORTS = 2_039_280n;
+/** One Solana transaction fee (lamports per signature — the long-stable default). */
+export const SOL_FEE_LAMPORTS = 5_000n;
+/** Minimum SOL a wallet needs to create its USDC ATA (rent + one fee). */
+export const SOL_ATA_SETUP_MIN_LAMPORTS = SOL_ATA_RENT_LAMPORTS + SOL_FEE_LAMPORTS;
 
 const TOKEN_PROGRAM_BYTES = base58Decode32(TOKEN_PROGRAM_ADDRESS);
 const ASSOCIATED_TOKEN_PROGRAM_BYTES = base58Decode32(ASSOCIATED_TOKEN_PROGRAM_ADDRESS);
@@ -100,6 +111,45 @@ export function deriveAta(walletAddress: string, mintAddress: string): Uint8Arra
     [wallet, TOKEN_PROGRAM_BYTES, mint],
     ASSOCIATED_TOKEN_PROGRAM_BYTES,
   ).pubkey;
+}
+
+// Associated Token Account Program `createIdempotent` instruction index — a SINGLE u8. Unlike
+// `create` (0), it succeeds as a no-op when the ATA already exists — safe against TOCTOU races
+// and safe to bundle into a send unconditionally-checked.
+const IX_ATA_CREATE_IDEMPOTENT = 1;
+
+/**
+ * Build an Associated Token Account Program `createIdempotent` instruction: creates the canonical
+ * ATA for (owner, mint) if (and only if) it does not already exist, funded by `payer`. Accounts
+ * (matching @solana/spl-token createAssociatedTokenAccountInstruction):
+ *   [0] payer          — writable, signer (pays the one-time account rent + fees)
+ *   [1] ata            — writable, nonsigner (the account being created)
+ *   [2] owner          — readonly, nonsigner (the wallet the ATA belongs to)
+ *   [3] mint           — readonly, nonsigner
+ *   [4] system program — readonly, nonsigner
+ *   [5] token program  — readonly, nonsigner
+ *   [6] rent sysvar    — readonly, nonsigner
+ * Data: u8(1). Honest by construction: an existing ATA is left untouched (no rent re-charged).
+ */
+export function buildCreateAtaIdempotentInstruction(
+  payer: Uint8Array,
+  ata: Uint8Array,
+  owner: Uint8Array,
+  mint: Uint8Array,
+): Instruction {
+  return {
+    programId: ASSOCIATED_TOKEN_PROGRAM_BYTES,
+    keys: [
+      {pubkey: payer, signer: true, writable: true},
+      {pubkey: ata, signer: false, writable: true},
+      {pubkey: owner, signer: false, writable: false},
+      {pubkey: mint, signer: false, writable: false},
+      {pubkey: base58Decode32(SYSTEM_PROGRAM_ADDRESS), signer: false, writable: false},
+      {pubkey: TOKEN_PROGRAM_BYTES, signer: false, writable: false},
+      {pubkey: base58Decode32(RENT_SYSVAR_ADDRESS), signer: false, writable: false},
+    ],
+    data: new Uint8Array([IX_ATA_CREATE_IDEMPOTENT]),
+  };
 }
 
 /**

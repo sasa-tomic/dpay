@@ -5,9 +5,13 @@ import {
   ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
   USDC_MINT_ADDRESS,
   USDC_DECIMALS,
+  SYSTEM_PROGRAM_ADDRESS,
+  RENT_SYSVAR_ADDRESS,
+  SOL_ATA_SETUP_MIN_LAMPORTS,
   deriveAta,
   buildSplTransferInstruction,
   buildTransferCheckedInstruction,
+  buildCreateAtaIdempotentInstruction,
   buildCanonicalUsdcMessage,
 } from '../solana/spl';
 import {
@@ -62,8 +66,7 @@ describe('solana/spl — constants', () => {
   });
 });
 
-describe('solana/spl — ATA PDA derivation', () => {
-  test('derives the authority USDC ATA byte-exact vs @solana/spl-token', () => {
+describe('solana/spl — ATA PDA derivation', () => {  test('derives the authority USDC ATA byte-exact vs @solana/spl-token', () => {
     expect(toHex(deriveAta(AUTHORITY_ADDRESS, USDC_MINT_ADDRESS))).toBe(SOURCE_ATA_HEX);
     expect(bs58.encode(deriveAta(AUTHORITY_ADDRESS, USDC_MINT_ADDRESS))).toBe(SOURCE_ATA);
   });
@@ -80,6 +83,40 @@ describe('solana/spl — ATA PDA derivation', () => {
   test('cross-check vs @solana/web3.js findProgramAddressSync (nonceAccount/USDC)', () => {
     const ata = deriveAta(NONCE_ACCOUNT_ADDRESS, USDC_MINT_ADDRESS);
     expect(bs58.encode(ata)).toBe('MFKqXc4dtK7pu1aRjwTEp3wHvF6z3FcwdyZbbWFshr5');
+  });
+});
+
+describe('solana/spl — ATA createIdempotent instruction (auto-ATA)', () => {
+  // Account order + flags mirror @solana/spl-token v0.4.9 createAssociatedTokenAccountInstruction
+  // (idempotent discriminator = 1): payer(w+s), ata(w), owner(ro), mint(ro), system(ro),
+  // token(ro), rent(ro).
+  test('builds the 7-key createIdempotent instruction byte-exact', () => {
+    const ata = deriveAta('Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r', USDC_MINT_ADDRESS);
+    const ix = buildCreateAtaIdempotentInstruction(
+      base58Decode32(AUTHORITY_ADDRESS), // payer
+      ata,
+      base58Decode32('Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r'), // owner
+      base58Decode32(USDC_MINT_ADDRESS),
+    );
+    expect(toHex(ix.programId)).toBe('8c97258f4e2489f1bb3d1029148e0d830b5a1399daff1084048e7bd8dbe9f859'); // ATA program
+    expect(ix.keys.length).toBe(7);
+    const expectKey = (i: number, address: string, signer: boolean, writable: boolean) => {
+      expect(toHex(ix.keys[i].pubkey)).toBe(toHex(base58Decode32(address)));
+      expect(ix.keys[i].signer).toBe(signer);
+      expect(ix.keys[i].writable).toBe(writable);
+    };
+    expectKey(0, AUTHORITY_ADDRESS, true, true);   // payer = sender, signs, debited rent
+    expectKey(1, bs58.encode(ata), false, true);   // the ATA being created
+    expectKey(2, 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r', false, false); // owner
+    expectKey(3, USDC_MINT_ADDRESS, false, false);
+    expectKey(4, SYSTEM_PROGRAM_ADDRESS, false, false);
+    expectKey(5, TOKEN_PROGRAM_ADDRESS, false, false);
+    expectKey(6, RENT_SYSVAR_ADDRESS, false, false);
+    expect(toHex(ix.data)).toBe('01'); // u8 createIdempotent discriminator
+  });
+
+  test('SOL_ATA_SETUP_MIN_LAMPORTS = canonical rent estimate + one signature fee', () => {
+    expect(SOL_ATA_SETUP_MIN_LAMPORTS).toBe(2_039_280n + 5_000n);
   });
 });
 
