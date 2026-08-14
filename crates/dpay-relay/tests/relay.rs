@@ -1470,7 +1470,7 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(cketh["mintable"], false);
     assert_eq!(cketh["symbol"], "Ξ");
     assert_eq!(cketh["decimals"], 18);
-    assert_eq!(cketh["display_decimals"], 18);
+    assert_eq!(cketh["display_decimals"], 6); // matches prod ckETH (truncation path, commit c74988b)
     assert_eq!(cketh["minter_family"], "CkEthErc20");
     assert_eq!(cketh["wrapper_name"], "ckETH");
     assert_eq!(cketh["backing_symbol"], "ETH");
