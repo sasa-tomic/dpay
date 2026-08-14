@@ -58,31 +58,35 @@ export function CurrencyRow({testId, name, subtitle, amount, active, onPress, ac
     );
   }
 
-  // Card variant (BalancesSheet): a container View (assetCard, optional assetCardActive) with an
-  // assetRow holding the select Pressable (dot + name + amount + ✓) and an optional actions sibling
-  // (the DEMO faucet button). The subtitle renders full-width below the row; children (topUpErr)
-  // below that. The container View keeps `asset-<key>`; the Pressable carries `asset-<key>-select`.
+  // Card variant (BalancesSheet): the WHOLE row block is the select hit target (founder fix
+  // 2026-08-14 — "click ANYWHERE on the row to select"; was only the tight inner row, so
+  // subtitle/padding taps fell through). The select Pressable (testID `asset-<key>-select`,
+  // flex:1) stacks the row content + full subtitle + children; the DEMO faucet `actions` stay a
+  // row SIBLING (never nested — RN-web renders Pressables as <button>, and a button cannot
+  // contain a button), so the faucet keeps its own taps and everything else selects.
   return (
     <View testID={testId} style={[S.assetCard, active && S.assetCardActive]}>
       <View style={S.assetRow}>
         <Pressable
           testID={`${testId}-select`}
-          style={S.assetSelect}
+          style={S.assetSelectBlock}
           onPress={onPress}
           accessibilityRole="button"
           accessibilityLabel={accessibilityLabel}
           accessibilityHint={accessibilityHint}
           accessibilityState={{disabled: false}}
         >
-          {dot}
-          <Text style={S.assetLabel}>{name}</Text>
-          {amount != null ? <Text style={[S.assetAmt, zero && S.assetCardZero]}>{amount}</Text> : null}
-          {check}
+          <View style={S.assetSelect}>
+            {dot}
+            <Text style={S.assetLabel}>{name}</Text>
+            {amount != null ? <Text style={[S.assetAmt, zero && S.assetCardZero]}>{amount}</Text> : null}
+            {check}
+          </View>
+          {subtitle ? <Text style={S.assetSub}>{subtitle}</Text> : null}
+          {children}
         </Pressable>
         {actions ? <View style={S.assetActions}>{actions}</View> : null}
       </View>
-      {subtitle ? <Text style={S.assetSub}>{subtitle}</Text> : null}
-      {children}
     </View>
   );
 }

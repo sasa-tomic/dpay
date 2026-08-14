@@ -175,6 +175,7 @@ export const S = StyleSheet.create({
   assetCardActive: {borderLeftColor: C.brand},
   assetRow: {flexDirection: 'row', alignItems: 'center'},
   assetSelect: {flex: 1, flexDirection: 'row', alignItems: 'baseline'},
+  assetSelectBlock: {flex: 1},
   assetLabel: {flex: 1, marginLeft: 8, fontSize: 16, fontWeight: '700', color: C.ink},
   assetAmt: {fontSize: 16, fontWeight: '700', color: C.brand, fontFamily: 'monospace'},
   assetSub: {fontSize: 12, color: C.sub2, marginTop: 6},
