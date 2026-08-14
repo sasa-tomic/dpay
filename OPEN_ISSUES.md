@@ -49,6 +49,40 @@ JS-plumbing layer is covered, but the real `react-native-vision-camera` activati
 `just app` + a physical-device scan to close. NOT a `just verify` blind spot (camera activation is
 inert/deferred on web by design); it is an outer-loop device gate.
 
+## Session summary (2026-08-14): QR-scanner emulator root cause + two new on-device gates — COMPLETE
+
+> **Trigger:** founder rebuilt+reinstalled the APK and the Pay scanner still showed "No camera found
+> on this device." Reproduced on the `dpay_api36` emulator: `useCameraDevice('back')` returned null.
+>
+> **Root cause (emulator):** the AVD had `hw.camera.front = none`. CameraX's CameraValidator logged
+> `LENS_FACING_FRONT verification failed … existing cameras: [id=1]` and vision-camera's device
+> enumeration came back empty → QrScanner placeholder branch. NOT an app bug — an AVD config bug.
+> Fix: `hw.camera.back = emulated` + `hw.camera.front = emulated` in
+> `~/.android/avd/dpay_api36.avd/config.ini` + emulator restart. After that the scanner mounts and
+> the preview streams (zai-vision confirmed live virtualscene/emulated feed). The
+> `invokeOnAverageFpsChanged(0.0)` log line is a RED HERRING: `FpsSampleCollector.onTick` fires only
+> from `CameraView.onFrame` (frame-processor path), never on the code-scanner path — 0.0 fps does
+> NOT mean the scanner gets no frames.
+>
+> **What landed (11/11 on-device tests green, commits `3d25006` + `ef8fc8f`):**
+> - **`DpayQrDecodeInstrumentedTest`** (MLKit decode gate): decodes a bundled QR bitmap with the
+>   exact MLKit api+version vision-camera ships (`barcode-scanning` 17.3.0 + play-services stub
+>   18.3.1, both on `implementation` AND `androidTestImplementation` — the AAR's MlKitInitProvider
+>   must merge into the target APK or `MlKitContext has not been initialized`; excluding the GMS
+>   artifact breaks compile since the public API classes live there).
+> - **`DpayCameraFrameInstrumentedTest`** (frame-flow gate): binds Preview+ImageAnalysis via the
+>   same CameraX 1.5.0-alpha03 stack vision-camera ships, asserts frames reach the analyzer in 15s.
+>   Harness needs CAMERA permission in the gate manifest + `adoptShellPermissionIdentity()` (runtime
+>   grant, no dialogs) + camera-camera2 on the target classpath + all lifecycle ops via
+>   `runOnMainSync`. Goes RED loud exactly on the "scanner opens but never scans" class.
+> - Both run in `just ondevice` (now 11 tests).
+>
+> **Dead ends documented:** `adb emu virtualscene-image wall/table <png>` returns OK but the image
+> NEVER renders into the headless (-no-window, swiftshader) virtualscene — no on-emulator
+> QR-in-camera-view e2e possible. The emulator ceiling is: scanner mounts + frames flow + MLKit
+> decodes (both now gated). The full camera→MLKit→`onCodeScanned`→UI transit still needs a physical
+> device (founder outer-loop: install release APK, scan a real Receive QR).
+
 ## Session summary (2026-08-12): unified asset selection rewrite — COMPLETE (7 phases, all gates green)
 
 > Resolves the top-of-file work order above. The 4 competing asset-selection states

@@ -57,7 +57,7 @@ The e2e harness drives the REAL app but against a **3-currency FakeLedger test r
 The gates:
 
 - **`just app`** (~1 min) — rebuilds the APK and launches it; assert `DPAY_SELFCHECK PASS` in logcat. Proves the full `NativeModules`→`@ReactMethod`→UniFFI→`.so` surface, incl. `wireLen`/`signWithdrawal`, AND that every autolinked native module (e.g. `RNGetRandomValues`) is present and callable.
-- **`just ondevice`** — 8 instrumented tests driving the real UniFFI binding + NFC framing on the emulator.
+- **`just ondevice`** — 11 instrumented tests driving the real UniFFI binding + NFC framing + the QR-scan halves (MLKit barcode decode of a bundled QR; CameraX frame-flow asserting ImageAnalysis frames arrive from the back camera) on the emulator. The camera gates require the AVD to expose BOTH lenses: `hw.camera.back = emulated` AND `hw.camera.front = emulated` in `~/.android/avd/dpay_api36.avd/config.ini` (front=`none` makes CameraX's lens-validation fail and vision-camera's `useCameraDevice('back')` returns null → "No camera found on this device" placeholder; `virtualscene-image` injection never renders headless, so no on-emulator QR-in-view e2e).
 
 This is the documented resolution of OPEN_ISSUES #10 Layer 3 (the path-filtered pre-merge gate) + the 2026-08-02 process fix (blind spots 1+2 added after a user-filed `---` balance / status-bar / self-check triple regression that sailed through `verify`). The gate code path is proven and green; the checklist keeps it from being skipped.
 
