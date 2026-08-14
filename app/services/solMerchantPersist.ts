@@ -19,7 +19,7 @@ import type {SolReqV2} from '../solana/qr';
 //   - broadcast UNREACHABLE → keep with outcome='unknown' (the tx MAY still land; preserve for
 //     reconciliation — invariant #12 never false-fails).
 //
-// Mirrors services/solNoncePersist.ts: a PURE AsyncStorage wrapper, best-effort (a malformed/corrupt
+// A PURE AsyncStorage wrapper, best-effort (a malformed/corrupt
 // value is swallowed — load → null, never thrown, so a storage glitch can never crash the resume path).
 
 /**

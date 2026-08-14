@@ -11,8 +11,7 @@
 //   createSolPaymentRequest — ONLINE merchant fetches genesis hash + fresh blockhash + builds SolReqV2.
 //   signSolPayment / signSplPayment — OFFLINE payer signs the canonical message (no network).
 //   broadcastSolPayment — ONLINE merchant strictly verifies, freshness-checks, broadcasts, confirms.
-// The only retained legacy capability is the isolated reclaim tool (app/solana/reclaim.ts), which
-// drains the deterministic nonce account back to the main wallet — not a payment path (invariant #15).
+// (The v1 durable-nonce reclaim tool was removed 2026-08-14: no user ever held v1 nonce funds.)
 
 import bs58 from 'bs58';
 import {SOLANA_RPC_URL, SOL_GENESIS_HASH, SOL_PAYMENT_MAX_WINDOW_SECONDS, SOL_PAYMENT_COMMITMENT, SOL_BROADCAST_TIMEOUT_MS} from './config/constants';
