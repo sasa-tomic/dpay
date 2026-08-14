@@ -11,7 +11,7 @@ import {type SelectableAsset} from '../config/assets';
 import {type BalanceView} from '../lib/assetBalances';
 import type {Identity, AssetId} from '../lib/types';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
-import {USDC_DECIMALS, USDC_MINT_ADDRESS, deriveAta} from '../solana/spl';
+import {USDC_DECIMALS, USDC_MINT_ADDRESS, deriveAta, SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
 import {decodeSolPay} from '../solana/qr';
 import type {SolReqV2, SolPayV2} from '../solana/qr';
 import {isSolReqV2Expired} from '../solana/payments';
@@ -20,12 +20,14 @@ import {createSolPaymentRequest, broadcastSolPayment, isSolanaRpcAvailable} from
 import {friendlySolError} from '../solana/errors';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED} from '../payments';
 import {loadSolMerchantState, saveSolMerchantState, clearSolMerchantState} from '../services/solMerchantPersist';
+import {type SolUsdcStatus} from '../hooks/useSolanaBalances';
 import {DpaySolNfc} from '../services/native';
 import {withTimeout} from '../lib/timeout';
 import {QrScanner} from './QrScanner';
 import {SolNfcTap} from './SolNfcTap';
 import {ModeToggle} from './ModeToggle';
 import {SolanaReceiveSheet} from './SolanaReceiveSheet';
+import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
 import {AssetPicker} from './AssetPicker';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {useReportLock} from '../hooks/useReportLock';
@@ -48,7 +50,7 @@ const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeigh
  * Mirrors ReceiveMode.tsx's form → reqQr → result phase machine, but settles directly on Solana
  * (no relay, no /receipt poll — `confirmTransaction` is the source of truth).
  */
-export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubModeChange, selectedToken, assets, selectedAssetId, balances, onSelectAsset, onLockChange}: {identity: Identity; online: boolean; nfcReady: boolean; solAddress: string; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; selectedToken: 'SOL' | 'USDC'; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; onLockChange?: (locked: boolean) => void}) {
+export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubModeChange, selectedToken, assets, selectedAssetId, balances, onSelectAsset, usdcAtaStatus = 'balance', solBalance = null, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onRefreshUsdc, onLockChange}: {identity: Identity; online: boolean; nfcReady: boolean; solAddress: string; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; selectedToken: 'SOL' | 'USDC'; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; usdcAtaStatus?: SolUsdcStatus; solBalance?: string | null; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onRefreshUsdc?: () => void; onLockChange?: (locked: boolean) => void}) {
   const solRpc = isSolanaRpcAvailable();
   const [amount, setAmount] = useState('');
   const [memo, setMemo] = useState('');
@@ -117,13 +119,27 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
 
   if (subMode === 'address') {
     const usdcAtaAddress = selectedToken === 'USDC' ? bs58.encode(deriveAta(solAddress, USDC_MINT_ADDRESS)) : solAddress;
+    // Map the USDC poll status onto the sheet's tri-state gate (2026-08-14 audit): only a KNOWN
+    // balance shows the QR; only KNOWN absence shows the setup card. checking/unverified never
+    // claim absence — fail-closed without a false "you don't have one" message.
+    const ataState = selectedToken !== 'USDC'
+      ? 'ready'
+      : usdcAtaStatus === 'balance' ? 'ready'
+      : usdcAtaStatus === 'absent' ? 'absent'
+      : usdcAtaStatus === 'loading' ? 'checking'
+      : 'unverified';
     return (
       <View style={S.center}>
         {toggle}
         <SolanaReceiveSheet
           address={usdcAtaAddress}
           token={selectedToken}
-          ataReady={true}
+          ataStatus={ataState}
+          solBalance={solBalance}
+          ataSetupBusy={ataSetupBusy}
+          ataSetupErr={ataSetupErr}
+          onCreateAta={onCreateAta}
+          onRetryAta={onRefreshUsdc}
           onClose={() => onSubModeChange('request')}
         />
       </View>
@@ -379,6 +395,22 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
         accessibilityLabel="Memo"
         maxLength={32}
       />
+      {/* 2026-08-14 audit: a USDC request whose settlement is doomed must not be creatable. If the
+          device's ATA is KNOWN absent, the payer would sign a transferChecked to a non-existent
+          account — broadcast fails AFTER they walked away. Inline the same one-tap setup card and
+          block Request (known-absent only; loading/error/unavailable do not block — the honest
+          unknown-handling the founder set when the dead-end gate was removed in 19c6e8f). */}
+      {selectedToken === 'USDC' && usdcAtaStatus === 'absent' ? (
+        <SolanaAtaSetupCard
+          instrTestID="sol-req-ata"
+          btnTestID="btn-sol-req-ata-create"
+          buttonLabel="Create my USDC account"
+          hasSol={solBalance != null && BigInt(solBalance) >= SOL_ATA_SETUP_MIN_LAMPORTS}
+          busy={ataSetupBusy}
+          err={ataSetupErr}
+          onCreateAta={onCreateAta}
+        />
+      ) : null}
       {!solRpc ? <Text style={S.warnNote}>Solana is offline — go online to create a payment request.</Text> : null}
       {busy ? (
         <>
@@ -388,7 +420,8 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
       ) : null}
       {err ? <Text style={S.err}>{err}</Text> : null}
       {(() => {
-        const blocked = !solRpc || busy;
+        const usdcAbsent = selectedToken === 'USDC' && usdcAtaStatus === 'absent';
+        const blocked = !solRpc || busy || usdcAbsent;
         return (
           <Pressable
             testID="btn-sol-req-make"

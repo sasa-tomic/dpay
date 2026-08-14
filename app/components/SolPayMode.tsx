@@ -35,7 +35,7 @@ import {useReportLock} from '../hooks/useReportLock';
  * NFC arming: this component mounts only while the SOL rail is selected. Switching the rail unmounts
  * it, whose `useNfcTapState` cleanup disarms the HCE card — no arm-leak.
  */
-export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAtaAbsent, selectedToken, onSent, onSentUsdc, subMode, onSubModeChange, onLockChange}: {identity: Identity; online: boolean; nfcReady: boolean; solBalance: string; usdcBalance: string; usdcAtaAbsent: boolean; selectedToken: 'SOL' | 'USDC'; onSent: () => void; onSentUsdc: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; onLockChange?: (locked: boolean) => void}) {
+export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAtaAbsent, selectedToken, onSent, onSentUsdc, ataSetupBusy = false, ataSetupErr = null, onCreateAta, subMode, onSubModeChange, onLockChange}: {identity: Identity; online: boolean; nfcReady: boolean; solBalance: string; usdcBalance: string; usdcAtaAbsent: boolean; selectedToken: 'SOL' | 'USDC'; onSent: () => void; onSentUsdc: () => void; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; onLockChange?: (locked: boolean) => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid'>('scan');
   const [req, setReq] = useState<SolReqV2 | null>(null);
   const [solpayUri, setSolpayUri] = useState<string | null>(null);
@@ -76,6 +76,10 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
           token={selectedToken}
           balance={sendBalance}
           usdcAtaAbsent={usdcAtaAbsent}
+          solBalance={solBalance}
+          ataSetupBusy={ataSetupBusy}
+          ataSetupErr={ataSetupErr}
+          onCreateAta={onCreateAta}
           onSent={sendOnSent}
           onClose={() => onSubModeChange('scan')}
         />

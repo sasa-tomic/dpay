@@ -2,17 +2,18 @@ import {useState} from 'react';
 import {View, Text, Pressable, TextInput, ActivityIndicator, Platform} from 'react-native';
 import {C} from '../config/palette';
 import {S} from '../styles';
-import {SOL_SEND_TIMEOUT_MS, IS_SOLANA_DEVNET} from '../config/constants';
+import {SOL_SEND_TIMEOUT_MS} from '../config/constants';
 import {fmtAsset, toUnits} from '../lib/format';
 import {cmpRaw} from '../lib/amount';
 import type {Identity} from '../lib/types';
 import {SOL_DECIMALS, SOL_UNIT, isValidSolanaAddress} from '../solana/identity';
-import {USDC_DECIMALS} from '../solana/spl';
+import {USDC_DECIMALS, SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
 import {sendSol, sendSpl} from '../solana';
 import {friendlySolError} from '../solana/errors';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {withTimeout} from '../lib/timeout';
+import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
 
 /**
  * Send SOL or USDC to a native Solana address (Phase 6 — asset-aware direct send). Mirrors
@@ -24,16 +25,18 @@ import {withTimeout} from '../lib/timeout';
  *   - 'SOL'  → System Program Transfer (sendSol). `balance` is lamports (9 decimals).
  *   - 'USDC' → SPL Token transfer (sendSpl). `balance` is USDC base units (6 decimals). The recipient
  *              is still a base58 Solana WALLET address — the recipient ATA is derived internally by
- *              sendSpl + checked fail-closed (the Token program rejects transfers to non-existent
- *              accounts). The device's source ATA is pre-checked here via `usdcAtaAbsent` (the honest
- *              fail-closed: you can't send USDC you don't have an account for — mirror Phase 4's
- *              receive-side ATA gate).
+ *              sendSpl. If the recipient has NO USDC account yet, sendSpl creates it IN THE SAME
+ *              transaction (real createIdempotent instruction; the sender pays the one-time rent,
+ *              disclosed on the review card via `sol-send-ata-note`). The device's source ATA is
+ *              pre-checked here via `usdcAtaAbsent` — when absent, the form is replaced by the
+ *              same one-tap "Create my USDC account" setup card the Receive tab has (2026-08-14;
+ *              was a dead-end "set one up elsewhere" message).
  *
  * Rendered inline in the Pay tab's "Send to address" sub-mode. The testIDs stay token-agnostic
  * (`sol-send-*`) — "send" applies to both SOL and SPL. The review-amount text carries the unit
  * (USDC vs SOL) so e2e can distinguish them.
  */
-export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, onSent, onClose}: {identity: Identity; token: 'SOL' | 'USDC'; balance: string; usdcAtaAbsent?: boolean; onSent: () => void; onClose: () => void}) {
+export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, solBalance = null, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onSent, onClose}: {identity: Identity; token: 'SOL' | 'USDC'; balance: string; usdcAtaAbsent?: boolean; solBalance?: string | null; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onSent: () => void; onClose: () => void}) {
   const [address, setAddress] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
@@ -84,18 +87,26 @@ export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, on
     if (signature) { await doCopy(signature); }
   };
 
-  // Phase 6 fail-closed: USDC send when the device's ATA is known absent → instruction card (mirror
-  // SolanaReceiveSheet). You can't send USDC you don't have an account for; surfacing this BEFORE the
-  // form saves a doomed submit. The user must receive USDC first (creating the ATA externally).
+  // Phase 6 fail-closed + 2026-08-14 setup action: USDC send when the device's ATA is KNOWN absent
+  // → the shared one-tap setup card (SolanaAtaSetupCard — same surface as the Receive tab). You
+  // can't send USDC you don't have an account for; the card offers the REAL one-tap create
+  // (device-key-signed createIdempotent tx) instead of a dead end. On success the parent's ATA
+  // refresh flips `usdcAtaAbsent` and the form appears. Only 'absent' gates — loading/error/
+  // unavailable states let the form through (the send itself fails honestly if the ATA is missing).
   if (isUsdc && usdcAtaAbsent) {
+    const hasSol = solBalance != null && BigInt(solBalance) >= SOL_ATA_SETUP_MIN_LAMPORTS;
     return (
       <View style={S.sheetBody}>
-        <View testID="sol-send-instructions" style={S.instrCard}>
-          <Text style={S.instrLine}>You don't have a USDC account on this device yet.</Text>
-          <Text style={S.instrCustody}>Solana USDC needs a one-time Associated Token Account setup. Set one up from a wallet that supports it, then come back to send USDC.</Text>
-          {IS_SOLANA_DEVNET ? <Text style={S.warnNote}>Devnet USDC — not real USDC.</Text> : null}
-        </View>
-        <Pressable testID="btn-sol-send-done" style={S.primaryWide} onPress={onClose} accessibilityRole="button" accessibilityLabel="Back to scan"><Text style={S.primaryText}>Back to scan</Text></Pressable>
+        <SolanaAtaSetupCard
+          instrTestID="sol-send-instructions"
+          btnTestID="btn-sol-send-ata-create"
+          buttonLabel="Create my USDC account"
+          hasSol={hasSol}
+          busy={ataSetupBusy}
+          err={ataSetupErr}
+          onCreateAta={onCreateAta}
+        />
+        <Pressable testID="btn-sol-send-done" style={[S.primaryWide, S.depositCopy]} onPress={onClose} accessibilityRole="button" accessibilityLabel="Back to scan"><Text style={S.primaryText}>Back to scan</Text></Pressable>
       </View>
     );
   }
@@ -157,6 +168,11 @@ export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, on
               <Text style={S.reviewLabel}>Review send</Text>
               <Text testID="sol-send-review-amount" style={S.reviewAmount}>{`Send ${fmtAsset(raw, decimals, unit)}`}</Text>
               <Text style={S.reviewTo}>{`to ${address.trim() || '—'}`}</Text>
+              {isUsdc ? (
+                <Text testID="sol-send-ata-note" style={S.dim2}>
+                  If they don't have a USDC account yet, this creates it for them (one-time ≈{fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT)} paid by you).
+                </Text>
+              ) : null}
             </View>
           ) : null}
 

@@ -3,10 +3,11 @@ import {SafeAreaView, StatusBar, View, Text, Pressable, ScrollView, AppState, Li
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {C} from '../config/palette';
 import {S} from '../styles';
-import {TOP_UP_CENTS, FAUCET_TIMEOUT_MS, SHOW_TESTNET_STORAGE_KEY} from '../config/constants';
+import {TOP_UP_CENTS, FAUCET_TIMEOUT_MS, SHOW_TESTNET_STORAGE_KEY, SOL_BROADCAST_TIMEOUT_MS} from '../config/constants';
 import {familyDisplay, isTestnetCurrency} from '../config/catalog';
 import {base} from '../lib/format';
 import {applyOffline} from '../lib/amount';
+import {withTimeout} from '../lib/timeout';
 import {buildSelectableAssets, chipLabel, reconcileSelectedAsset, routeDeeplinkToIc, shouldAllowUserSelect, solanaUsdcAvailable} from '../config/assets';
 import {buildAssetBalances} from '../lib/assetBalances';
 import type {AssetId, Identity, NfcStatus} from '../lib/types';
@@ -18,7 +19,8 @@ import {useCatalog} from '../hooks/useCatalog';
 import {useBalancePoll} from '../hooks/useBalancePoll';
 import {useSolanaBalances} from '../hooks/useSolanaBalances';
 import {useTransactionHistory} from '../hooks/useTransactionHistory';
-import {deriveSolanaAddress} from '../solana';
+import {deriveSolanaAddress, createUsdcAta} from '../solana';
+import {friendlySolError} from '../solana/errors';
 import {readDepositDeepLink, readRequestDeeplink, readPaymentDeeplink, decodeDeeplink, type DeeplinkKind} from '../lib/deepLink';
 import {Wordmark} from './Logo';
 import {HotkeyHint} from './HotkeyHint';
@@ -122,6 +124,32 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
   }, [identity.secretHex]);
   const {sol: solState, usdc: usdcState, refreshSol, refreshUsdc} = useSolanaBalances(identity.secretHex, solAddress);
   const solBalance = solState.balance;
+
+  // One-time USDC account (ATA) setup — Wallet-owned so BOTH entry surfaces (Receive "My address"
+  // gate + Pay "Send to address" gate) share one busy/err state + one handler. createUsdcAta signs
+  // a REAL AssociatedTokenProgram.createIdempotent tx with the device key (non-custodial — dpay
+  // never holds keys); the one-time rent + fee come out of the device's SOL balance and are
+  // disclosed in the setup-card copy. On success both balance rails refresh: SOL (rent debited)
+  // + USDC (status flips 'absent' → 'balance' with amount 0, which unhides the address QR).
+  const [ataSetupBusy, setAtaSetupBusy] = useState(false);
+  const [ataSetupErr, setAtaSetupErr] = useState<string | null>(null);
+  const createAta = useCallback(async () => {
+    if (ataSetupBusy) return;
+    setAtaSetupBusy(true);
+    setAtaSetupErr(null);
+    const {signal, cancel} = withTimeout(SOL_BROADCAST_TIMEOUT_MS);
+    try {
+      await createUsdcAta(identity.secretHex, signal);
+      refreshSol();
+      refreshUsdc();
+    } catch (e: unknown) {
+      console.warn('createUsdcAta failed:', e instanceof Error ? e.message : String(e));
+      setAtaSetupErr(friendlySolError(e instanceof Error ? e.message : String(e)));
+    } finally {
+      cancel();
+      setAtaSetupBusy(false);
+    }
+  }, [ataSetupBusy, identity.secretHex, refreshSol, refreshUsdc]);
 
   // --- Phase 3 selection layer --------------------------------------------------------------
   // The ONE complete visible asset list, rebuilt from the catalog + Solana config. Pure; rebuilt on
@@ -500,7 +528,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
       <ScrollView style={S.scroll} contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
         {mode === 'pay'
           ? (activeSol && solAddress
-              ? <SolPayMode identity={identity} online={online} nfcReady={nfc === 'ready'} solBalance={solBalance ?? '0'} usdcBalance={usdcState.amount ?? '0'} usdcAtaAbsent={usdcState.status === 'absent'} selectedToken={selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL'} onSent={refreshSol} onSentUsdc={refreshUsdc} subMode={paySubMode} onSubModeChange={setPaySubMode} onLockChange={setSelectionLocked} />
+              ? <SolPayMode identity={identity} online={online} nfcReady={nfc === 'ready'} solBalance={solBalance ?? '0'} usdcBalance={usdcState.amount ?? '0'} usdcAtaAbsent={usdcState.status === 'absent'} selectedToken={selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL'} onSent={refreshSol} onSentUsdc={refreshUsdc} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} onLockChange={setSelectionLocked} />
               : <PayMode
                   identity={identity} online={online} relayUrl={relayUrl} nfcStatus={nfc}
                   onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance}
@@ -524,6 +552,10 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
                   selectedAssetId={effectiveSelectedId}
                   balances={balances}
                   onSelectAsset={handleSelect}
+                  usdcAtaStatus={usdcState.status}
+                  solBalance={solBalance}
+                  ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta}
+                  onRefreshUsdc={refreshUsdc}
                   onLockChange={setSelectionLocked}
                 />
               : (

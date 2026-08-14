@@ -1,56 +1,100 @@
 import {useCallback} from 'react';
-import {View, Text, Pressable, Platform} from 'react-native';
+import {View, Text, Pressable, Platform, ActivityIndicator} from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import {S} from '../styles';
+import {C} from '../config/palette';
 import {QR_SIZE_SMALL, IS_SOLANA_DEVNET} from '../config/constants';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
+import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
 
 /**
  * Receive SOL or Solana-USDC — the device's native deposit address, rendered inline in the Receive
- * tab's "My address" sub-mode. Phase 4 (2026-08-12 unified asset selection rewrite) made this sheet
- * ASSET-AWARE: when `token === 'USDC'`, the displayed address is the device's derived USDC ATA
- * (Passed in by SolReceiveMode via `deriveAta(solAddress, USDC_MINT_ADDRESS)`), the instructions
- * describe USDC (not SOL), and a `ataReady === false` state replaces the QR with a "set up your
- * USDC account" message (honest — sending USDC to a non-existent ATA is unfulfillable).
+ * tab's "My address" sub-mode. Asset-aware: when `token === 'USDC'`, the displayed address is the
+ * device's derived USDC ATA (passed in by SolReceiveMode via `deriveAta(solAddress,
+ * USDC_MINT_ADDRESS)`), the instructions describe USDC (not SOL), and `ataStatus` gates what the
+ * user sees (2026-08-14 audit: tri-state, fail-closed, never a false claim):
  *
- * Native SOL (`token === 'SOL'`, the default) keeps the long-shipped behavior: the device's base58
- * SOL address + QR + "Send SOL to your Solana address below" copy. There is no relay/minter
- * round-trip for either token: the address is local + instant, the balance poll reflects a send on
- * confirmation. `onClose` is wired via the tab's toggle (no overlay ✕).
+ *   - 'ready'      → the address + QR (the ATA exists on-chain; USDC sent here can land).
+ *   - 'absent'     → the one-tap setup card (SolanaAtaSetupCard) INSTEAD of the QR — the user is
+ *                    not misled into sharing an address the Token program would reject.
+ *   - 'checking'   → an honest "Checking your USDC account…" state (first poll; never claims
+ *                    absence).
+ *   - 'unverified' → "Couldn't check" + Retry (RPC down/error) — fail-closed, no QR, but NO
+ *                    false "you don't have one" claim either.
  *
- * Readiness gating (USDC only): when the device has no on-chain USDC ATA, `ataReady === false`
- * surfaces a clear "set one up" message INSTEAD of the address QR — the user is not misled into
- * sharing an address the Token program would reject. The QR + copy button stay available for SOL
- * (always ready) and for USDC once the ATA exists.
+ * Native SOL (`token === 'SOL'`, the default) never gates — the device key IS the account; it
+ * always renders 'ready'. There is no relay/minter round-trip for either token: the address is
+ * local + instant, the balance poll reflects a send on confirmation. `onClose` is wired via the
+ * tab's toggle (no overlay ✕).
  */
-export function SolanaReceiveSheet({address, token = 'SOL', ataReady = true, onClose}: {address: string; token?: 'SOL' | 'USDC'; ataReady?: boolean; onClose: () => void}) {
+export function SolanaReceiveSheet({
+  address,
+  token = 'SOL',
+  ataStatus = 'ready',
+  ataSetupBusy = false,
+  ataSetupErr = null,
+  solBalance = null,
+  onCreateAta,
+  onRetryAta,
+  onClose,
+}: {
+  address: string;
+  token?: 'SOL' | 'USDC';
+  ataStatus?: 'ready' | 'absent' | 'checking' | 'unverified';
+  ataSetupBusy?: boolean;
+  ataSetupErr?: string | null;
+  solBalance?: string | null;
+  onCreateAta?: () => void;
+  onRetryAta?: () => void;
+  onClose: () => void;
+}) {
   const {copied, copy: doCopy} = useCopyFeedback();
   useEscapeToClose(onClose);
 
   const copy = useCallback(async () => { await doCopy(address); }, [address, doCopy]);
   const isUsdc = token === 'USDC';
+  const status = isUsdc ? ataStatus : 'ready';
+  const hasSol = solBalance != null && BigInt(solBalance) >= 2_039_280n + 5_000n; // SOL_ATA_SETUP_MIN_LAMPORTS
 
-  // USDC readiness gate: when the device has no on-chain USDC ATA, do NOT show the address QR —
-  // sending USDC to a non-existent ATA fails at the Token program. The user is told honestly to set
-  // one up first (a one-time on-chain operation outside this app's scope). SOL always renders the
-  // address (the device key IS the account; no ATA prerequisite).
-  if (isUsdc && !ataReady) {
+  // USDC readiness gate — see the doc comment. SOL always renders the address.
+  if (status !== 'ready') {
     return (
       <View style={S.sheetBody}>
-        <View testID="sol-receive-instructions" style={S.instrCard}>
-          <Text style={S.instrLine}>
-            You don't have a <Text style={S.instrAsset}>USDC</Text> account on this device yet.
-          </Text>
-          <Text style={S.instrCustody}>
-            Solana USDC needs a one-time Associated Token Account setup. Set one up from a wallet that supports it, then come back — your USDC address will appear here.
-          </Text>
-          {IS_SOLANA_DEVNET ? (
-            <Text testID="sol-devnet-warning" style={S.warnNote}>
-              ⚠ Connected to Solana devnet. Do NOT send mainnet USDC here — it will not appear. Use devnet USDC only.
+        {status === 'absent' ? (
+          <SolanaAtaSetupCard
+            instrTestID="sol-receive-instructions"
+            btnTestID="btn-sol-ata-create"
+            buttonLabel="Create USDC account"
+            hasSol={hasSol}
+            busy={ataSetupBusy}
+            err={ataSetupErr}
+            onCreateAta={onCreateAta}
+          />
+        ) : status === 'checking' ? (
+          <>
+            <ActivityIndicator style={{marginTop: 24}} color={C.brand} />
+            <Text testID="sol-ata-checking" style={S.dim2}>Checking your USDC account…</Text>
+          </>
+        ) : (
+          <View testID="sol-ata-unverified" style={S.instrCard}>
+            <Text style={S.instrLine}>Couldn't check your USDC account.</Text>
+            <Text style={S.instrCustody}>
+              Your address is fine — we just can't reach Solana right now to confirm your USDC account on-chain. Check your connection and try again.
             </Text>
-          ) : null}
-        </View>
+          </View>
+        )}
+        {status === 'unverified' && onRetryAta ? (
+          <Pressable
+            testID="btn-sol-ata-retry"
+            style={S.primaryWide}
+            onPress={onRetryAta}
+            accessibilityRole="button"
+            accessibilityLabel="Retry checking USDC account"
+            accessibilityHint="Re-check whether your USDC account exists on-chain">
+            <Text style={S.primaryText}>Check again</Text>
+          </Pressable>
+        ) : null}
         <Pressable
           testID="btn-sol-receive-copy"
           accessibilityRole="button"

@@ -29,7 +29,7 @@ export const meta = {
   name: 'sol-usdc-send',
   journey: 'system',
   covers: ['sol-usdc-send', 'spl-transfer', 'fail-closed-ata', 'asset-aware-send'],
-  verifies: 'Solana USDC "Send to address" fails closed when the device ATA is absent (no doomed SPL send).',
+  verifies: 'Solana USDC "Send to address" renders the one-tap device-ATA setup card when the ATA is absent (no doomed SPL send; the setup creates it on-chain for a disclosed one-time rent).',
   timeoutMs: 30000,
 };
 
