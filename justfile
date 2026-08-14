@@ -192,6 +192,10 @@ ndk:
 ondevice:
     bash scripts/android-ondevice.sh
 
+# device gate: assert REAL camera pixels render in the IC + SOL Pay scan boxes (no mocks)
+campreview:
+    bash scripts/android-campreview.sh
+
 # build + run the React Native app on the emulator/device; assert it signed via dpay-core
 app:
     bash scripts/rn-run.sh
