@@ -51,6 +51,19 @@ dependencies {
     androidTestImplementation 'com.google.mlkit:barcode-scanning:17.3.0'
     androidTestImplementation 'com.google.android.gms:play-services-mlkit-barcode-scanning:18.3.1'
 
+    // CameraX pinned to the SAME version react-native-vision-camera uses
+    // (app/node_modules/react-native-vision-camera/android/build.gradle:188) — the frame-flow
+    // device gate must exercise the exact ImageAnalysis stack the app ships. camera-camera2 must
+    // ALSO be a main `implementation` dep: CameraX resolves its default implementation in the
+    // TARGET process at runtime ("CameraX is not configured properly" if only in the test APK).
+    def camerax_version = '1.5.0-alpha03'
+    implementation "androidx.camera:camera-core:${camerax_version}"
+    implementation "androidx.camera:camera-camera2:${camerax_version}"
+    implementation "androidx.camera:camera-lifecycle:${camerax_version}"
+    androidTestImplementation "androidx.camera:camera-core:${camerax_version}"
+    androidTestImplementation "androidx.camera:camera-camera2:${camerax_version}"
+    androidTestImplementation "androidx.camera:camera-lifecycle:${camerax_version}"
+
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
     androidTestImplementation 'androidx.test:runner:1.6.2'
     androidTestImplementation 'androidx.test:core:1.6.1'
