@@ -783,6 +783,14 @@ async fn screenshots_served_as_png_and_unknown_is_404() {
             bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
             "{name} must be a PNG"
         );
+        // The CDN contract: bounded freshness + a validator keyed to the build, so a redeployed
+        // image revalidates at the edge instead of pinning stale shots (the Jul-26 era bug).
+        assert_eq!(
+            headers.get(header::CACHE_CONTROL).unwrap(),
+            "public, max-age=300"
+        );
+        let etag = headers.get(header::ETAG).unwrap().to_str().unwrap();
+        assert!(etag.starts_with("\"shots-"), "etag must be versioned: {etag}");
     }
 
     let (status, _h, _b) = call_raw(&state, get_req("/shots/nope.png")).await;

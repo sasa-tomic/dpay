@@ -780,7 +780,21 @@ async fn screenshot(Path(name): Path<String>) -> Response {
         "scanned.png" => include_bytes!("../assets/shot-scanned.png"),
         _ => return err(StatusCode::NOT_FOUND, "no such screenshot"),
     };
-    ([(header::CONTENT_TYPE, "image/png")], bytes).into_response()
+    // The shots are embedded via include_bytes! → they change only with the binary. A versioned
+    // ETag lets the CDN revalidate instead of heuristically caching a stale shot after a redeploy
+    // (the Jul-26 era shots stayed pinned at the edge for weeks before this header existed).
+    // The validator is the build's git commit — unique per deploy, already exported by build.rs
+    // for the /api/v1/version endpoint, and it changes exactly when the embedded shots can.
+    let etag = format!("\"shots-{}\"", env!("DPAY_BUILD_COMMIT"));
+    (
+        [
+            (header::CONTENT_TYPE, "image/png"),
+            (header::CACHE_CONTROL, "public, max-age=300"),
+            (header::ETAG, etag.as_str()),
+        ],
+        bytes,
+    )
+        .into_response()
 }
 
 /// `GET /qrcode.js` — the vendored QR *encoder* (for the merchant's request QR; offline, no CDN).
