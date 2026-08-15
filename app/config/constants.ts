@@ -61,10 +61,13 @@ export const POLL = (() => {
 // canister's `receipt_pubkey()` here (one-time per canister deploy; the key never rotates), which
 // closes the malicious-relay trust gap (MC4 U5 / OPEN_ISSUES #2): a relay can no longer fabricate a
 // key+sig+claim that passes the app's check, because the trusted key is sourced INDEPENDENTLY of the
-// receipt body. The e2e harness injects the FakeLedger's test key via `__DPAY_TEST_RECEIPT_PUBKEY`
-// before the bundle evaluates, exactly like `__DPAY_TEST_POLL` (driver.mjs evaluateOnNewDocument).
+// receipt body. The baked value below IS the prod mainnet facade's key (materialized 2026-08-15 via
+// `init_receipt_key`; re-bake only if the canister is ever redeployed from scratch). The e2e harness
+// injects the FakeLedger's test key via `__DPAY_TEST_RECEIPT_PUBKEY` before the bundle evaluates,
+// exactly like `__DPAY_TEST_POLL` (driver.mjs evaluateOnNewDocument).
 export const EXPECTED_RECEIPT_PUBKEY =
-  ((globalThis as unknown as {__DPAY_TEST_RECEIPT_PUBKEY?: string}).__DPAY_TEST_RECEIPT_PUBKEY ?? '');
+  ((globalThis as unknown as {__DPAY_TEST_RECEIPT_PUBKEY?: string}).__DPAY_TEST_RECEIPT_PUBKEY ??
+    '83c5c568ea4c0a65e72531b8958ce4e9721f54c980b01e9f0047a67d6e18c4a8');
 
 // WalletConnect v2 project id (from cloud.walletconnect.com, free). Required by the dApp-side
 // `EthereumProvider.init` for the native (Android) ckERC20 onramp — the only WalletConnect entry

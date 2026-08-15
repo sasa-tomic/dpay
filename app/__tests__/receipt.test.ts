@@ -29,11 +29,10 @@ beforeEach(() => { sigReturns = true; });
 function loadWithPin(pin: string): (receipt: any, auth?: any) => Promise<boolean> {
   let verifyOutcomeReceipt!: (receipt: any, auth?: any) => Promise<boolean>;
   jest.isolateModules(() => {
-    if (pin) {
-      (globalThis as any).__DPAY_TEST_RECEIPT_PUBKEY = pin;
-    } else {
-      delete (globalThis as any).__DPAY_TEST_RECEIPT_PUBKEY;
-    }
+    // Set unconditionally: an explicitly-EMPTY string must flow through the `??` seam as '' (the
+    // dev/unpinned fallback), whereas deleting the global would now fall through to the baked
+    // PROD key in constants.ts.
+    (globalThis as any).__DPAY_TEST_RECEIPT_PUBKEY = pin;
     // isolateModules gives the mock factory a fresh run → grab the fresh fn + wire its behavior.
     const native = require('../services/native');
     native.DpayCore.verifyReceiptSig = jest.fn().mockImplementation(() => Promise.resolve(sigReturns));
