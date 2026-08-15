@@ -21,6 +21,11 @@
 //   - w_verify_receipt_sig: the Rust-generated receipt golden (wire_layout.json `receipt` section —
 //     the same fixture wire.mjs treats as ground truth; wire.mjs has no receipt-signing export)
 //     verifies → 1; one flipped sig byte / wrong pubkey / bad claim_len → 0.
+//   - w_build_request: the merchant-side request ENCODER — golden + UTF-8 + 32-byte-truncation +
+//     u64::MAX requests must be byte-identical to wire.mjs buildRequestBytes (the trusted oracle).
+//   - w_receipt_claim: the payer/receipt-side claim assembler — the canonical golden hex (embedded
+//     below; produced by dpay-core's ReceiptClaim::signing_bytes via the crate's HOST test), a
+//     field-for-field rebuild of the wire_layout.json receipt golden, and u64 extremes.
 //
 // Usage: node scripts/check-wasm-core.mjs   (exit 0 = parity, exit 1 = drift; failures print hex diffs)
 import {readFileSync} from 'node:fs';
@@ -186,6 +191,31 @@ for (const c of CASES) {
     ex.w_sign_request(writeBytes(SEED), writeBytes(reqBytes), bad, 3, wire) === 2);
 }
 
+// --- w_build_request: the merchant-side encoder vs the trusted request oracle -------------------
+for (const c of CASES) {
+  const want = buildRequestBytes(c.to, c.amount, c.nonce, c.expiry, c.currency, c.toName, c.memo);
+  const [alo, ahi] = split64(c.amount), [elo, ehi] = split64(c.expiry);
+  const out = ex.w_alloc(REQUEST_LEN);
+  const rc = ex.w_build_request(
+    writeBytes(fromHex(c.to)), alo, ahi, writeBytes(fromHex(c.nonce)), elo, ehi, c.currency,
+    writeStr(c.toName), enc.encode(c.toName).length, writeStr(c.memo), enc.encode(c.memo).length, out);
+  const got = readBytes(out, REQUEST_LEN);
+  check(`w_build_request[${c.name}] byte-identical to oracle buildRequestBytes`,
+    rc === 0 && hexDiff('request', got, want) === undefined,
+    `rc=${rc} ${hexDiff('request', got, want)}`);
+}
+{
+  const out = ex.w_alloc(REQUEST_LEN);
+  const bad = writeBytes(new Uint8Array([0xff, 0xfe, 0xfd]));
+  const to = writeBytes(fromHex(L.golden.to_hex)), nonce = writeBytes(fromHex('cd'.repeat(16)));
+  check('w_build_request(bad UTF-8 toName) == BAD_UTF8(2)',
+    ex.w_build_request(to, 1, 0, nonce, 1, 0, 0, bad, 3, writeStr(''), 0, out) === 2);
+  check('w_build_request(bad UTF-8 memo) == BAD_UTF8(2)',
+    ex.w_build_request(to, 1, 0, nonce, 1, 0, 0, writeStr(''), 0, bad, 3, out) === 2);
+  check('w_build_request(out-of-bounds out_req_ptr) == BAD_LEN(1)',
+    ex.w_build_request(to, 1, 0, nonce, 1, 0, 0, writeStr(''), 0, writeStr(''), 0, 0xffff0000) === 1);
+}
+
 // --- w_sign_withdraw: u64 stress via lo/hi + empty/long destinations ---------------------------
 {
   const pubHex = hex(EXP_PUB);
@@ -227,10 +257,66 @@ for (const c of CASES) {
   check('w_verify_receipt_sig(bad claim_len) == 0', ex.w_verify_receipt_sig(writeBytes(pub), writeBytes(claim), claim.length - 1, writeBytes(sig)) === 0);
 }
 
+// --- w_receipt_claim: the frozen 108-byte canister-signed claim ---------------------------------
+// GOLDEN_CLAIM_HEX comes from dpay-core's ReceiptClaim::signing_bytes via the crate's HOST test
+// (crates/dpay-wasm/src/lib.rs, receipt_claim_matches_core_and_pins_golden_hex): nonce 'cd'×16,
+// from 'ab'×32, to 'ef'×32, amount 1234, currency 0, block_index 8168, settle_ts 1786815398.
+{
+  const GOLDEN_CLAIM_HEX = 'cd'.repeat(16) + 'ab'.repeat(32) + 'ef'.repeat(32)
+    + 'd204000000000000'   // amount 1234 le
+    + '00000000'           // currency 0 le
+    + 'e81f000000000000'   // block_index 8168 le
+    + 'a6a3806a00000000';  // settle_ts 1786815398 le
+  const buildClaim = (nonceHex, fromHexStr, toHexStr, amount, currency, blockIndex, settleTs) => {
+    const [alo, ahi] = split64(amount), [blo, bhi] = split64(blockIndex), [slo, shi] = split64(settleTs);
+    const out = ex.w_alloc(108);
+    const rc = ex.w_receipt_claim(writeBytes(fromHex(nonceHex)), writeBytes(fromHex(fromHexStr)),
+      writeBytes(fromHex(toHexStr)), alo, ahi, currency, blo, bhi, slo, shi, out);
+    return [rc, readBytes(out, 108)];
+  };
+  {
+    const [rc, got] = buildClaim('cd'.repeat(16), 'ab'.repeat(32), 'ef'.repeat(32), 1234n, 0, 8168n, 1786815398n);
+    check('w_receipt_claim(golden) == host-test golden hex (dpay-core signing_bytes)',
+      rc === 0 && hex(got) === GOLDEN_CLAIM_HEX,
+      `rc=${rc}\n    got:  ${hex(got)}\n    want: ${GOLDEN_CLAIM_HEX}`);
+  }
+  // Rebuild the wire_layout.json receipt golden field-for-field (Rust-emitted ground truth).
+  {
+    const G = L.receipt.golden;
+    const [rc, got] = buildClaim(G.nonce_hex, G.from_hex, G.to_hex, BigInt(G.amount), G.currency, BigInt(G.block_index), BigInt(G.settle_ts));
+    check('w_receipt_claim rebuilds wire_layout.json receipt golden',
+      rc === 0 && hexDiff('claim', got, fromHex(G.signing_hex)) === undefined,
+      `rc=${rc} ${hexDiff('claim', got, fromHex(G.signing_hex))}`);
+  }
+  // u64 extremes through the (lo, hi) halves vs an independent DataView assembly of the frozen layout.
+  for (const [name, amount, blockIndex, settleTs] of [
+    ['u64max', 18446744073709551615n, 18446744073709551615n, 18446744073709551615n],
+    ['hi-only', 0n, 0xdead000000000000n, 1n << 63n],
+    ['2^63+0xdead', (1n << 63n) + 0xdeadn, 2n ** 52n - 1n, 1700000120n],
+  ]) {
+    const currency = 0xffffffff;
+    const [rc, got] = buildClaim('2a'.repeat(16), 'ab'.repeat(32), 'ef'.repeat(32), amount, currency, blockIndex, settleTs);
+    const want = new Uint8Array(108);
+    const dv = new DataView(want.buffer);
+    want.set(fromHex('2a'.repeat(16)), 0);
+    want.set(fromHex('ab'.repeat(32)), 16);
+    want.set(fromHex('ef'.repeat(32)), 48);
+    dv.setBigUint64(80, amount, true);
+    dv.setUint32(88, currency, true);
+    dv.setBigUint64(92, blockIndex, true);
+    dv.setBigUint64(100, settleTs, true);
+    check(`w_receipt_claim[${name}] == DataView-assembled frozen layout`,
+      rc === 0 && hexDiff('claim', got, want) === undefined,
+      `rc=${rc} ${hexDiff('claim', got, want)}`);
+  }
+  check('w_receipt_claim(out-of-bounds out_claim_ptr) == BAD_LEN(1)',
+    ex.w_receipt_claim(writeBytes(fromHex('cd'.repeat(16))), writeBytes(fromHex('ab'.repeat(32))), writeBytes(fromHex('ef'.repeat(32))), 1, 0, 0, 1, 0, 1, 0, 0xffff0000) === 1);
+}
+
 // --- verdict ------------------------------------------------------------------------------------
 if (failures) {
   console.error(`\nFAIL: dpay-core.wasm drifted from the trusted oracle in ${failures}/${checks} check(s).`);
   console.error('The staged web core would NOT sign the same bytes as Android. Fix crates/dpay-wasm, then `just wasm`.');
   process.exit(1);
 }
-console.log(`wasm-core parity OK: staged dpay-core.wasm == e2e/harness/wire.mjs across ${checks} checks (layout, request build+decode, sign, withdraw u64-stress, receipt verify)`);
+console.log(`wasm-core parity OK: staged dpay-core.wasm == e2e/harness/wire.mjs across ${checks} checks (layout, request build+decode, sign, withdraw u64-stress, receipt verify, receipt-claim build)`);

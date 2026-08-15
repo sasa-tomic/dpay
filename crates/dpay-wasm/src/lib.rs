@@ -50,12 +50,24 @@
 //! | `w_decode_request` | `(req_ptr, out_json_ptr, cap) -> u32` | request → JSON `{toHex,amount,nonceHex,expiry,currency,toName,memo}`; `amount`/`expiry` are decimal strings (u64-exact); returns len, `0` on cap-too-small |
 //! | `w_sign_withdraw` | `(seed_ptr, dest_ptr, dest_len, amount_lo, amount_hi, nonce_ptr, expiry_lo, expiry_hi, currency, out_sig_ptr /*64*/) -> u32` | signs the `WithdrawAuth` layout; u64s passed as (lo, hi) u32 halves |
 //! | `w_verify_receipt_sig` | `(pub_ptr, claim_ptr, claim_len, sig_ptr) -> u32` | `1` = valid, `0` = invalid (any reason) |
+//! | `w_build_request` | `(to_ptr, amount_lo, amount_hi, nonce_ptr, expiry_lo, expiry_hi, currency, to_name_ptr, to_name_len, memo_ptr, memo_len, out_req_ptr /*132*/) -> u32` | builds the merchant's 132-byte request (`PaymentRequest::to_bytes`); u64s as (lo, hi) u32 halves; `to_name`/`memo` UTF-8, byte-truncated + NUL-padded to 32 |
+//! | `w_receipt_claim` | `(nonce_ptr, from_ptr, to_ptr, amount_lo, amount_hi, currency, block_index_lo, block_index_hi, settle_ts_lo, settle_ts_hi, out_claim_ptr /*108*/) -> u32` | builds the byte-exact 108-byte `ReceiptClaim::signing_bytes` the canister signs; u64s as (lo, hi) u32 halves |
 //!
 //! `w_sign_request` semantics: it builds the signed authorization from the request's own
 //! `to`/`amount`/`nonce`/`expiry`/`currency`/`to_name`/`memo` fields verbatim (the same
 //! `PaymentRequest::to_authorization` path the app uses), sets `from` to the seed's public key and
 //! `from_name` to the caller's UTF-8 name NUL-padded/truncated to 32 bytes (byte-truncation, the
 //! core's pad rule), then writes `signing|sig|from_pub` (292 bytes) and returns `OK`.
+//!
+//! ## ABI versioning — additive-only policy
+//!
+//! `w_abi_version` stays at `1` across purely ADDITIVE changes: new exports may appear at any time
+//! (web callers feature-detect by symbol presence before calling), but no existing export may ever
+//! change its signature, its status-code contract, or its byte semantics — the surface in the table
+//! above is FROZEN. A change that alters an existing export is what would bump the version to `2`.
+//! `w_build_request` and `w_receipt_claim` (the builder pair for the existing request decoder and
+//! receipt verifier — a web surface can now BUILD what it could previously only read/verify) are
+//! the first additions under this policy.
 //!
 //! ## Status codes
 //!
@@ -214,6 +226,12 @@ fn pad_name(utf8: &[u8]) -> [u8; NAME_LEN] {
     let n = utf8.len().min(NAME_LEN);
     b[..n].copy_from_slice(&utf8[..n]);
     b
+}
+
+/// Rejoin an ABI (lo, hi) u32 pair into the u64 it represents — the inverse of the JS side's
+/// BigInt split. The halves are little-endian: `lo` carries the low 32 bits.
+fn join_u64(lo: u32, hi: u32) -> u64 {
+    (u64::from(hi) << 32) | u64::from(lo)
 }
 
 /// Display rule for the fixed 32-byte name/memo fields: bytes up to the first NUL, decoded
@@ -447,6 +465,162 @@ fn parse_receipt_claim(b: &[u8]) -> ReceiptClaim {
     }
 }
 
+// --- additive builders (first additions under the ABI v1 additive-only policy) ------------------
+//
+// The decode/verify exports above let a web surface READ requests and CHECK receipt signatures;
+// these two let it BUILD them — the merchant-side encoder and the payer-side receipt-claim
+// assembler — through the same dpay-core builders everything else uses, so there is still no
+// second byte-layout implementation to drift.
+
+/// Pure request assembly (host-testable): pad/truncate the already-validated UTF-8 names to the
+/// frozen 32-byte fields, then delegate field placement to [`PaymentRequest::to_bytes`] — the same
+/// single source of truth `w_sign_request` round-trips through, so builder and signer cannot drift.
+fn build_request_bytes(
+    to: &[u8; PUBKEY_LEN],
+    amount: u64,
+    nonce: &[u8; NONCE_LEN],
+    expiry: u64,
+    currency: u32,
+    to_name: &str,
+    memo: &str,
+) -> [u8; REQUEST_LEN] {
+    PaymentRequest {
+        to: *to,
+        amount,
+        nonce: *nonce,
+        expiry,
+        currency,
+        to_name: pad_name(to_name.as_bytes()),
+        memo: pad_name(memo.as_bytes()),
+    }
+    .to_bytes()
+}
+
+/// Build the merchant's 132-byte payment request (the mirror of `w_sign_request`'s input): the
+/// frozen `to(32) | amount_le(8) | nonce(16) | expiry_le(8) | currency_le(4) | to_name(32) |
+/// memo(32)` layout, exactly `PaymentRequest::to_bytes`. The u64s arrive as (lo, hi) u32 halves
+/// (JS splits its BigInt, same ABI as `w_sign_withdraw`); `to_name`/`memo` are validated as UTF-8
+/// and then byte-truncated + NUL-padded to the fixed 32-byte fields (the core's pad rule, so a
+/// 33-byte name never errors — it truncates, exactly like the app-side builder). Writes
+/// `REQUEST_LEN` bytes to `out_req_ptr`.
+#[no_mangle]
+pub extern "C" fn w_build_request(
+    to_ptr: u32,
+    amount_lo: u32,
+    amount_hi: u32,
+    nonce_ptr: u32,
+    expiry_lo: u32,
+    expiry_hi: u32,
+    currency: u32,
+    to_name_ptr: u32,
+    to_name_len: u32,
+    memo_ptr: u32,
+    memo_len: u32,
+    out_req_ptr: u32,
+) -> u32 {
+    if !in_bounds(to_ptr, PUBKEY_LEN as u32) || !in_bounds(nonce_ptr, NONCE_LEN as u32) {
+        return BAD_LEN;
+    }
+    if !in_bounds(to_name_ptr, to_name_len) || !in_bounds(memo_ptr, memo_len) {
+        return BAD_LEN;
+    }
+    let to: [u8; PUBKEY_LEN] = unsafe { slice_at(to_ptr, PUBKEY_LEN as u32) }.try_into().unwrap();
+    let nonce: [u8; NONCE_LEN] =
+        unsafe { slice_at(nonce_ptr, NONCE_LEN as u32) }.try_into().unwrap();
+    let to_name = match std::str::from_utf8(unsafe { slice_at(to_name_ptr, to_name_len) }) {
+        Ok(s) => s,
+        Err(_) => return BAD_UTF8,
+    };
+    let memo = match std::str::from_utf8(unsafe { slice_at(memo_ptr, memo_len) }) {
+        Ok(s) => s,
+        Err(_) => return BAD_UTF8,
+    };
+    let bytes = build_request_bytes(
+        &to,
+        join_u64(amount_lo, amount_hi),
+        &nonce,
+        join_u64(expiry_lo, expiry_hi),
+        currency,
+        to_name,
+        memo,
+    );
+    if !in_bounds(out_req_ptr, REQUEST_LEN as u32) {
+        return BAD_LEN;
+    }
+    unsafe { write_at(out_req_ptr, &bytes) };
+    OK
+}
+
+/// Pure claim assembly (host-testable): delegates placement to [`ReceiptClaim::signing_bytes`] —
+/// the exact 108 bytes the canister signs and `w_verify_receipt_sig` consumes, so the builder and
+/// the verifier share one layout source.
+fn build_receipt_claim_bytes(
+    nonce: &[u8; NONCE_LEN],
+    from: &[u8; PUBKEY_LEN],
+    to: &[u8; PUBKEY_LEN],
+    amount: u64,
+    currency: u32,
+    block_index: u64,
+    settle_ts: u64,
+) -> [u8; RECEIPT_CLAIM_LEN] {
+    ReceiptClaim {
+        nonce: *nonce,
+        from: *from,
+        to: *to,
+        amount,
+        currency,
+        block_index,
+        settle_ts,
+    }
+    .signing_bytes()
+}
+
+/// Build the frozen 108-byte receipt claim the canister signs — byte-exact
+/// `dpay_core::ReceiptClaim::signing_bytes`: `nonce(16) | from(32) | to(32) | amount_le(8) |
+/// currency_le(4) | block_index_le(8) | settle_ts_le(8)` (`RECEIPT_CLAIM_LEN`, the same layout
+/// `w_verify_receipt_sig` verifies). The u64s arrive as (lo, hi) u32 halves. Writes
+/// `RECEIPT_CLAIM_LEN` bytes to `out_claim_ptr`.
+#[no_mangle]
+pub extern "C" fn w_receipt_claim(
+    nonce_ptr: u32,
+    from_ptr: u32,
+    to_ptr: u32,
+    amount_lo: u32,
+    amount_hi: u32,
+    currency: u32,
+    block_index_lo: u32,
+    block_index_hi: u32,
+    settle_ts_lo: u32,
+    settle_ts_hi: u32,
+    out_claim_ptr: u32,
+) -> u32 {
+    if !in_bounds(nonce_ptr, NONCE_LEN as u32)
+        || !in_bounds(from_ptr, PUBKEY_LEN as u32)
+        || !in_bounds(to_ptr, PUBKEY_LEN as u32)
+    {
+        return BAD_LEN;
+    }
+    let nonce: [u8; NONCE_LEN] =
+        unsafe { slice_at(nonce_ptr, NONCE_LEN as u32) }.try_into().unwrap();
+    let from: [u8; PUBKEY_LEN] =
+        unsafe { slice_at(from_ptr, PUBKEY_LEN as u32) }.try_into().unwrap();
+    let to: [u8; PUBKEY_LEN] = unsafe { slice_at(to_ptr, PUBKEY_LEN as u32) }.try_into().unwrap();
+    let bytes = build_receipt_claim_bytes(
+        &nonce,
+        &from,
+        &to,
+        join_u64(amount_lo, amount_hi),
+        currency,
+        join_u64(block_index_lo, block_index_hi),
+        join_u64(settle_ts_lo, settle_ts_hi),
+    );
+    if !in_bounds(out_claim_ptr, RECEIPT_CLAIM_LEN as u32) {
+        return BAD_LEN;
+    }
+    unsafe { write_at(out_claim_ptr, &bytes) };
+    OK
+}
+
 /// Write the core's wire layout as JSON — the same document `dfx/wire_layout.json` describes
 /// (generated by `dpay-fixture`, byte-validated by the e2e cross-val suite). Web pages parse this
 /// instead of hardcoding offsets, so a layout change travels with the binary that implements it.
@@ -675,4 +849,164 @@ fn layout_json() -> String {
     s.push_str("\"}}");
     s.push('}');
     s
+}
+
+// ---------------------------------------------------------------------------
+// Host-side parity tests (`cargo test -p dpay-wasm`): the pure builders vs dpay-core's OWN
+// builders. The extern wrappers themselves are memory-bound and only meaningful on wasm32 (host
+// memory reports empty by design — see the plumbing above, host builds are compile-check only);
+// their byte-parity against the JS oracle is pinned by scripts/check-wasm-core.mjs against the
+// STAGED artifact. The golden claim hex asserted below is the same string that script embeds —
+// its comment documents that the hex originates here, from dpay-core's signing_bytes.
+// ---------------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Independent pad (NOT the crate's `pad_name`): first 32 bytes, NUL-fill — mirrors the test
+    /// helper dpay-core itself uses, so a `pad_name` regression can't hide behind itself.
+    fn pad32(bytes: &[u8]) -> [u8; NAME_LEN] {
+        let mut b = [0u8; NAME_LEN];
+        let n = bytes.len().min(NAME_LEN);
+        b[..n].copy_from_slice(&bytes[..n]);
+        b
+    }
+
+    #[test]
+    fn join_u64_halves() {
+        assert_eq!(join_u64(0, 0), 0);
+        assert_eq!(join_u64(0x1122_3344, 0), 0x1122_3344);
+        assert_eq!(join_u64(0xdead_beef, 0x1122_3344), 0x1122_3344_dead_beef);
+        assert_eq!(join_u64(u32::MAX, u32::MAX), u64::MAX);
+        // `lo` is the LOW half: its bytes land first in the little-endian u64 field.
+        let mut le = [0u8; 8];
+        le[0] = 1;
+        assert_eq!(join_u64(1, 0).to_le_bytes(), le);
+    }
+
+    #[test]
+    fn build_request_matches_core_matrix() {
+        let x40 = "x".repeat(40);
+        let m40 = "m".repeat(40);
+        let a11 = "あ".repeat(11); // 33 UTF-8 bytes: byte-truncation cuts MID-codepoint at 32
+        let cases: Vec<(&str, [u8; 32], u64, [u8; 16], u64, u32, String, String)> = vec![
+            ("golden", [0xab; 32], 2500, [0xcd; 16], 0x1122_3344, 0, String::new(), String::new()),
+            (
+                "utf8",
+                [0xab; 32],
+                8_400_000_000_000_000_000,
+                [0xcd; 16],
+                1_700_000_120,
+                2,
+                "ünïcödé nàme 漢字 ok?".into(),
+                "café ☕".into(),
+            ),
+            ("trunc40", [0x11; 32], 1, [0xee; 16], 1, 0, x40, m40),
+            ("trunc-mid-codepoint", [0x11; 32], 7, [0x99; 16], 9, 3, a11.clone(), a11),
+            ("u64max", [0xab; 32], u64::MAX, [0x2a; 16], u64::MAX, u32::MAX, String::new(), String::new()),
+        ];
+        for (name, to, amount, nonce, expiry, currency, to_name, memo) in cases {
+            let want = PaymentRequest {
+                to,
+                amount,
+                nonce,
+                expiry,
+                currency,
+                to_name: pad32(to_name.as_bytes()),
+                memo: pad32(memo.as_bytes()),
+            }
+            .to_bytes();
+            let got = build_request_bytes(&to, amount, &nonce, expiry, currency, &to_name, &memo);
+            assert_eq!(got.len(), REQUEST_LEN, "[{name}] length");
+            assert_eq!(got, want, "[{name}] must equal PaymentRequest::to_bytes");
+            // The u64s land little-endian at their frozen offsets (32..40, 56..64).
+            assert_eq!(&got[32..40], amount.to_le_bytes().as_slice(), "[{name}] amount le");
+            assert_eq!(&got[56..64], expiry.to_le_bytes().as_slice(), "[{name}] expiry le");
+        }
+        // Explicit truncation probe: a 40-char name keeps exactly its first 32 BYTES (no NULs).
+        let got = build_request_bytes(&[0x11; 32], 1, &[0xee; 16], 1, 0, &"x".repeat(40), &"m".repeat(40));
+        assert_eq!(&got[68..100], b"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx".as_slice());
+        assert_eq!(&got[100..132], b"mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm".as_slice());
+        // The empty-names golden pads both fields to all-NUL.
+        let got = build_request_bytes(&[0xab; 32], 2500, &[0xcd; 16], 0x1122_3344, 0, "", "");
+        assert_eq!(&got[68..132], [0u8; 64].as_slice());
+    }
+
+    #[test]
+    fn receipt_claim_matches_core_and_pins_golden_hex() {
+        // The canonical golden claim — the exact field values scripts/check-wasm-core.mjs embeds.
+        let nonce = [0xcd; NONCE_LEN];
+        let from = [0xab; PUBKEY_LEN];
+        let to = [0xef; PUBKEY_LEN];
+        let (amount, currency, block_index, settle_ts) = (1234u64, 0u32, 8168u64, 1_786_815_398u64);
+        let want = ReceiptClaim { nonce, from, to, amount, currency, block_index, settle_ts }
+            .signing_bytes();
+        // Built through the export's own path: lo/hi joins + the pure builder.
+        let got = build_receipt_claim_bytes(
+            &nonce,
+            &from,
+            &to,
+            join_u64(1234, 0), // 1234 < 2^32 → all in lo
+            currency,
+            join_u64(8168, 0),
+            join_u64(0x6a80_a3a6, 0), // 1786815398 < 2^32 → all in lo
+        );
+        assert_eq!(got.len(), RECEIPT_CLAIM_LEN);
+        assert_eq!(got, want, "golden claim must equal ReceiptClaim::signing_bytes");
+        // Pin the golden hex the JS parity guard embeds (its comment points back to this test).
+        let golden = hex(&got);
+        assert_eq!(
+            golden,
+            "cd".repeat(16)
+                + &"ab".repeat(32)
+                + &"ef".repeat(32)
+                + "d204000000000000"   // amount 1234 le
+                + "00000000"           // currency 0 le
+                + "e81f000000000000"   // block_index 8168 le
+                + "a6a3806a00000000",  // settle_ts 1786815398 le
+            "the embedded JS golden must track dpay-core's signing_bytes"
+        );
+
+        // u64 extremes through the lo/hi joins: hi-set bits must land in the HIGH bytes.
+        let ext = ReceiptClaim {
+            nonce,
+            from,
+            to,
+            amount: u64::MAX,
+            currency: u32::MAX,
+            block_index: 0xdead_0000_0000_0000,
+            settle_ts: 1 << 63,
+        };
+        let got = build_receipt_claim_bytes(
+            &ext.nonce,
+            &ext.from,
+            &ext.to,
+            join_u64(u32::MAX, u32::MAX),
+            u32::MAX,
+            join_u64(0, 0xdead_0000),
+            join_u64(0, 0x8000_0000),
+        );
+        assert_eq!(got, ext.signing_bytes(), "u64-extreme claim must equal signing_bytes");
+
+        // A second extreme shape: 2^63+0xdead amount with u64::MAX outcome fields.
+        let ext2 = ReceiptClaim {
+            nonce,
+            from,
+            to,
+            amount: (1 << 63) + 0xdead,
+            currency: 7,
+            block_index: u64::MAX,
+            settle_ts: u64::MAX,
+        };
+        let got = build_receipt_claim_bytes(
+            &ext2.nonce,
+            &ext2.from,
+            &ext2.to,
+            join_u64(0x0000_dead, 0x8000_0000),
+            7,
+            join_u64(u32::MAX, u32::MAX),
+            join_u64(u32::MAX, u32::MAX),
+        );
+        assert_eq!(got, ext2.signing_bytes(), "2^63+0xdead claim must equal signing_bytes");
+    }
 }
