@@ -194,10 +194,11 @@ check: test-core test-canister test-relay test-live typecheck bridge-parity aid-
 merchant-wire:
     node scripts/check-merchant-wire.mjs
 
-# Browser-wallet wire parity: the guarded wallet-wire-v1 block in wallet.html (request/signing/
-# withdraw codec + BIP-39) must stay byte-identical to dpay-core + wire.mjs — and the same 24 words
-# must derive the same key as the Android app (restore-compat). Catches "web wallet signs garbage /
-# restores a different account" drift, the payer-side analog of merchant-wire.
+# Browser-wallet wire parity: the guarded wallet-wire-v2 block in wallet.html (wasm-core bindings
+# for request/signing/withdraw + pinned receipt verify + the JS BIP-39 codec) must stay byte-identical
+# to dpay-core + wire.mjs — and the same 24 words must derive the same key as the Android app
+# (restore-compat). Catches "web wallet signs garbage / restores a different account" drift, the
+# payer-side analog of merchant-wire.
 wallet-wire:
     node scripts/check-wallet-wire.mjs
 

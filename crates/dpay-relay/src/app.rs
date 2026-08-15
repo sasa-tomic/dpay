@@ -6,8 +6,9 @@
 //! - `GET /merchant` — the merchant terminal web page, driven by the merchant phone.
 //! - `GET /wallet` — the browser wallet (create/restore, balances, pay, receive, send, history).
 //! - `GET /privacy` — the public privacy policy for the app, website, and merchant terminal.
-//! - `GET /ed25519.js|/noble-hashes.js|/wordlist.js` — the wallet's vendored crypto scripts
-//!   (same-origin only; no CDN).
+//! - `GET /noble-hashes.js|/wordlist.js` — the wallet's vendored crypto scripts (the BIP-39
+//!   codec's sha256 + wordlist; same-origin only; no CDN). All wire math + ed25519 signing +
+//!   receipt verification live in `GET /dpay-core.wasm` (the shared core), not vendored JS.
 //! - `GET /shots/{name}` — the real app screenshots embedded in the landing page.
 //! - `POST /api/v1/pay` — hands the payer's signed-authorization QR to the ledger and returns a
 //!   receipt. Two properties matter for the demo and are enforced here (not in the ledger):
@@ -201,7 +202,6 @@ pub fn app(state: AppState) -> Router {
         .route("/jsqr.js", get(jsqr_js))
         .route("/dpay-core.wasm", get(dpay_core_wasm))
         .route("/qrcode.js", get(qrcode_js))
-        .route("/ed25519.js", get(ed25519_js))
         .route("/noble-hashes.js", get(noble_hashes_js))
         .route("/wordlist.js", get(wordlist_js))
         .route("/shots/{name}", get(screenshot))
@@ -767,8 +767,10 @@ async fn privacy_page() -> Response {
 
 /// `GET /wallet` — the browser wallet (create/restore mnemonic, balances, pay, receive, send,
 /// history) so merchants/payers can use dpay without installing the APK. Same-origin + vendored
-/// scripts only (jsQR/qrcode/noble/wordlist); the guarded wire/bip39 codec block inside the page is
-/// parity-checked against dpay-core by `scripts/check-wallet-wire.mjs` on every `just check`.
+/// scripts only (jsQR/qrcode/noble-hashes/wordlist); ALL wire math, ed25519 signing, and receipt
+/// verification run in the shared wasm core (`GET /dpay-core.wasm`) — the guarded wallet-wire-v2
+/// binding block inside the page is parity-checked against dpay-core by
+/// `scripts/check-wallet-wire.mjs` on every `just check`.
 async fn wallet_page() -> Response {
     (
         [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
@@ -777,19 +779,10 @@ async fn wallet_page() -> Response {
         .into_response()
 }
 
-/// `GET /ed25519.js` — vendored `@noble/ed25519` 2.3.0 (MIT), ESM→IIFE bundle assigning
-/// `globalThis.nobleEd25519` (offline; no CDN). The exact package e2e uses, cross-validated
-/// against the Rust core's ed25519-dalek.
-async fn ed25519_js() -> Response {
-    (
-        [(header::CONTENT_TYPE, "application/javascript; charset=utf-8")],
-        include_str!("../assets/ed25519.js"),
-    )
-        .into_response()
-}
-
-/// `GET /noble-hashes.js` — vendored `@noble/hashes` 1.6.0 (sha256 + sha512 + internals, MIT),
-/// ESM→IIFE bundle assigning `globalThis.nobleHashes` (offline; no CDN).
+/// `GET /noble-hashes.js` — vendored `@noble/hashes` 1.6.0 (sha256 + internals, MIT),
+/// ESM→IIFE bundle assigning `globalThis.nobleHashes` (offline; no CDN). The wallet page's
+/// remaining vendored-crypto use is the BIP-39 codec's sha256 checksum (ed25519 itself moved to
+/// /dpay-core.wasm).
 async fn noble_hashes_js() -> Response {
     (
         [(header::CONTENT_TYPE, "application/javascript; charset=utf-8")],

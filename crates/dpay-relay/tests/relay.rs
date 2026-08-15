@@ -2391,15 +2391,16 @@ async fn u4_receipt_pubkey_route_returns_ledger_test_key() {
 
 // --- Browser wallet (GET /wallet + its vendored scripts) --------------------------------------
 //
-// The wallet page is a full payer-side wallet in the browser: its guarded `wallet-wire-v1` block
-// (request/signing/withdraw codec + BIP-39) is parity-checked OFFLINE by
-// scripts/check-wallet-wire.mjs; these route tests pin the serving surface — the page itself and
-// the vendored noble/wordlist scripts it loads, all same-origin (the CSP in the page enforces
-// `default-src 'self'`; the routes must exist or the page 404s its own dependencies).
+// The wallet page is a full payer-side wallet in the browser: its guarded `wallet-wire-v2` block
+// (wasm-core bindings + request/signing/withdraw + BIP-39 codec) is parity-checked OFFLINE by
+// scripts/check-wallet-wire.mjs (which instantiates the staged dpay-core.wasm); these route tests
+// pin the serving surface — the page itself and the vendored noble/wordlist scripts it loads, all
+// same-origin (the CSP in the page enforces `default-src 'self'`; the routes must exist or the
+// page 404s its own dependencies).
 
 /// `GET /wallet` serves the browser wallet page: the brand, the onboarding + tab id markers the
-/// e2e/browser smoke anchors on, the guarded wire fence, and the vendored script tags (a missing
-/// tag = the page loads broken despite 200).
+/// e2e/browser smoke anchors on, the guarded wire fence, the wasm-core binding surface, and the
+/// vendored script tags (a missing tag = the page loads broken despite 200).
 #[tokio::test]
 async fn wallet_page_served_with_markers_and_scripts() {
     let payer = keypair();
@@ -2423,29 +2424,39 @@ async fn wallet_page_served_with_markers_and_scripts() {
         "id=\"tab-receive\"",
         "id=\"tab-send\"",
         "id=\"settings\"",
-        "wallet-wire-v1", // the parity-guarded codec fence
+        "wallet-wire-v2",   // the parity-guarded wasm-binding codec fence
+        "/dpay-core.wasm",  // the signing core the v2 fence loads
     ] {
         assert!(html.contains(marker), "/wallet must contain {marker}");
     }
-    // The vendored scripts + the CSP that pins the page same-origin.
-    for script in ["/jsqr.js", "/qrcode.js", "/ed25519.js", "/noble-hashes.js", "/wordlist.js"] {
+    // The vendored scripts + the CSP that pins the page same-origin. ed25519.js is GONE (the wasm
+    // core signs); the CSP must carry 'wasm-unsafe-eval' or the browser refuses to compile it.
+    for script in ["/jsqr.js", "/qrcode.js", "/noble-hashes.js", "/wordlist.js"] {
         assert!(html.contains(script), "/wallet must load {script}");
     }
     assert!(
         html.contains("Content-Security-Policy"),
         "/wallet must declare its CSP"
     );
+    assert!(
+        html.contains("'wasm-unsafe-eval'"),
+        "/wallet CSP must allow compiling /dpay-core.wasm"
+    );
+    assert!(
+        !html.contains("/ed25519.js"),
+        "/wallet must not reference the removed /ed25519.js"
+    );
 }
 
-/// Each vendored wallet script serves as JavaScript; an unknown path under those names is a clean
-/// 404 (mirrors the screenshots test — never a 200 with an empty body).
+/// Each vendored wallet script serves as JavaScript; the removed /ed25519.js and an unknown path
+/// under those names are a clean 404 (mirrors the screenshots test — never a 200 with an empty body).
 #[tokio::test]
 async fn wallet_scripts_served_and_unknown_path_is_404() {
     let payer = keypair();
     let merchant = keypair();
     let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
 
-    for path in ["/ed25519.js", "/noble-hashes.js", "/wordlist.js"] {
+    for path in ["/noble-hashes.js", "/wordlist.js"] {
         let (status, headers, bytes) = call_raw(&state, get_req(path)).await;
         assert_eq!(status, StatusCode::OK, "{path} must serve");
         assert_eq!(
@@ -2466,9 +2477,12 @@ async fn wallet_scripts_served_and_unknown_path_is_404() {
     assert!(js.contains("\"abandon"), "wordlist must start at 'abandon'");
     assert!(js.contains("zoo\""), "wordlist must end at 'zoo'");
 
-    // No catch-all: a near-miss asset path is a clean 404.
-    let (status, _h, _b) = call_raw(&state, get_req("/nope.js")).await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "unknown script path must 404");
+    // No catch-all: a near-miss asset path — including the REMOVED /ed25519.js (its route was
+    // deleted with the asset when the wasm core took over signing) — is a clean 404.
+    for path in ["/nope.js", "/ed25519.js"] {
+        let (status, _h, _b) = call_raw(&state, get_req(path)).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{path} must 404");
+    }
 }
 
 // --- Shared wasm core (GET /dpay-core.wasm) -----------------------------------------------------

@@ -6,8 +6,10 @@
 <!-- Same-origin only: page + vendored JS + the JSON API. This is a hand-rolled page with no build
      step, so the wire/codec block is an INLINE <script> — script-src needs 'unsafe-inline' (this is
      a CSP-source restriction, NOT a host-allowlist widening: no remote origin can load either way).
-     Inline <style> needs the same opt-in on style-src. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; style-src 'self' 'unsafe-inline'" />
+     Inline <style> needs the same opt-in on style-src. 'wasm-unsafe-eval' lets the page
+     WebAssembly.compile the same-origin /dpay-core.wasm signing core (CSP has no narrower key for
+     wasm; it does NOT open string-eval of JS). -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; img-src 'self' data:; style-src 'self' 'unsafe-inline'" />
 <title>dpay · Wallet</title>
 <style>
   /* Same design tokens as the landing page / merchant terminal (landing.html :root). */
@@ -92,6 +94,7 @@
   .payrow .v.bigamt { font-size:20px; color:var(--accent); }
   .result { margin-top:16px; text-align:center; min-height:24px; }
   .paid { color:var(--accent); font-size:30px; font-weight:800; }
+  .paidwarn { color:var(--warn); font-size:19px; font-weight:800; }
   .refused { color:var(--bad); font-size:22px; font-weight:800; }
   .unknownh { color:var(--warn); font-size:22px; font-weight:800; }
   .sub { color:var(--ink-2); font-size:14px; margin-top:6px; }
@@ -109,8 +112,8 @@
   <button class="gear" id="settingsBtn" title="Settings" style="display:none">⚙</button>
 </header>
 
-<!-- ============ onboarding (no key yet) ============ -->
-<main id="onboard">
+<!-- ============ onboarding (no key yet; shown once the signing core loads — see boot) ============ -->
+<main id="onboard" style="display:none">
   <div class="card">
     <h2>Create or restore</h2>
     <div class="step">A browser wallet for dpay — pay, get paid, and cash out without installing anything. Your key is generated here and never leaves this browser.</div>
@@ -244,48 +247,77 @@
   </div>
 </main>
 
+<!-- ============ signing-core failure (wallet-wire-v2 has NO fallback — fail loud) ============ -->
+<main id="coreFail" style="display:none">
+  <div class="card">
+    <h2>Signing core</h2>
+    <div class="warnmsg">Couldn’t load the signing core — refresh.</div>
+    <div class="step">The /dpay-core.wasm module that builds and signs every payment failed to load or start. This wallet signs with nothing else, so nothing is available until it loads. Refresh the page; if it keeps failing, the relay build is broken.</div>
+    <div class="row"><button class="ghost small" id="coreReload">Refresh</button></div>
+  </div>
+</main>
+
 <footer><a href="/">dpay home</a><a href="/merchant">Merchant terminal</a><a href="/privacy">Privacy policy</a></footer>
 
 <script src="/jsqr.js"></script>
 <script src="/qrcode.js"></script>
 <script src="/noble-hashes.js"></script>
-<script src="/ed25519.js"></script>
 <script src="/wordlist.js"></script>
 <script>
-// >>> wallet-wire-v1
-// GUARDED BLOCK — the wire + BIP-39 codec this wallet signs with. scripts/check-wallet-wire.mjs
-// extracts EXACTLY the region between the `>>> wallet-wire-v1` / `<<< wallet-wire-v1` fences and
-// asserts byte-parity against the Rust core (e2e/harness/wire.mjs + the golden vectors in
-// dfx/wire_layout.json). Pure functions only — no DOM, no fetch, no page state. The noble globals
-// (nobleEd25519 / nobleHashes / DPAY_WORDLIST) come from the vendored same-origin scripts above;
-// do not reference anything else from here.
+// >>> wallet-wire-v2
+// GUARDED BLOCK — the wasm-backed wire codec + BIP-39 this wallet signs with. scripts/
+// check-wallet-wire.mjs extracts EXACTLY the region between the `>>> wallet-wire-v2` /
+// `<<< wallet-wire-v2` fences and asserts byte-parity against the Rust core (e2e/harness/wire.mjs
+// + the goldens in dfx/wire_layout.json), injecting a node-instantiated copy of the STAGED
+// assets/dpay-core.wasm (the exact artifact /dpay-core.wasm serves). No DOM, no page state.
 //
-// Wire layout (FROZEN in crates/dpay-core/src/lib.rs; offsets from dfx/wire_layout.json):
-//   request 132: to(32)|amount u64le(8)@32|nonce(16)@40|expiry u64le(8)@56|currency u32le(4)@64|to_name(32)@68|memo(32)@100
-//   signing 196: from(32)|to(32)@32|amount u64le(8)@64|nonce(16)@72|expiry u64le(8)@88|currency u32le(4)@96|from_name(32)@100|to_name(32)@132|memo(32)@164
-//   wire 292   : signing(196)|sig(64)@196|from_pub(32)@260
-//   WithdrawAuth: from_pubkey(32)|amount u64le(8)@32|nonce(16)@40|expiry u64le(8)@56|currency u32le(4)@64|addr_len u32le(4)@68|addr utf8
+// v2: ALL wire math, ed25519 signing, and receipt verification are delegated to the shared wasm
+// core (crates/dpay-wasm — the SAME Rust core Android's UniFFI binding runs; its src/lib.rs doc
+// comments are the ABI spec). There is NO hand-rolled wire math and NO fallback JS signer: if the
+// module fails to load or instantiate, the page fails loud (full-page error, actions disabled).
+// Only the BIP-39 codec stays JS here (a standard, vector-guarded codec: sha256 via the vendored
+// /noble-hashes.js, words via /wordlist.js).
+//
+// ABI recap (u32 pointers into linear memory; u64s cross as lo/hi u32 halves; status codes
+// 0/1/2/3 = OK/BAD_LEN/BAD_UTF8/VERIFY_FAILED): w_alloc(size)->ptr is a bump allocator — an alloc
+// may GROW memory, so every Uint8Array view is derived AFTER the allocs that precede it. Exports:
+// w_pubkey(seed,out32), w_build_request(...)->132, w_decode_request(req,out,cap)->jsonLen (0 =
+// bad), w_sign_request(seed,req132,fromName,len,out292), w_sign_withdraw(...)->sig64,
+// w_receipt_claim(...)->claim108, w_verify_receipt_sig(pub,claim,len,sig)->1/0.
 
-// Inject the sync sha512 the noble ed25519 sync API needs (README wiring for @noble/ed25519 2.x).
-function wireNobleCrypto(){
-  if (!nobleEd25519.etc.sha512Sync) {
-    nobleEd25519.etc.sha512Sync = (...m) => nobleHashes.sha512(nobleEd25519.etc.concatBytes(...m));
-    nobleEd25519.etc.sha512Async = (...m) => Promise.resolve(nobleEd25519.etc.sha512Sync(...m));
+// The pinned receipt trust anchor: the prod mainnet facade's receipt pubkey (materialized
+// 2026-08-15 via init_receipt_key — the SAME constant as app/config/constants.ts
+// EXPECTED_RECEIPT_PUBKEY). e2e injects a FakeLedger test key via globalThis.
+// __DPAY_TEST_RECEIPT_PUBKEY before this script runs (the same seam the app uses); prod never
+// sets it. NEVER verify a receipt under a key the response itself supplies.
+const PINNED_RECEIPT_PUBKEY = (globalThis.__DPAY_TEST_RECEIPT_PUBKEY) ||
+  '83c5c568ea4c0a65e72531b8958ce4e9721f54c980b01e9f0047a67d6e18c4a8';
+
+// --- module init: fetch /dpay-core.wasm once at startup; tests inject an instance ------------
+let CORE = null; // the WebAssembly.Instance once initialized
+async function initWalletWire(injected){
+  if (CORE) return CORE;
+  let instance = null;
+  if (injected instanceof WebAssembly.Instance) instance = injected;
+  else if (injected) instance = (await WebAssembly.instantiate(injected)).instance; // a Module
+  else {
+    const r = await fetch('/dpay-core.wasm');
+    if (!r.ok) throw new Error('/dpay-core.wasm HTTP ' + r.status);
+    instance = (await WebAssembly.instantiate(await r.arrayBuffer(), {})).instance;
   }
+  const v = instance.exports.w_abi_version();
+  if (v !== 1) throw new Error('dpay-core.wasm ABI version ' + v + ' (expected 1)');
+  CORE = instance;
+  return CORE;
 }
 
+// --- hex / base64url glue --------------------------------------------------------------------
 function hexToBytes(h){
   const b = new Uint8Array(h.length >> 1);
   for (let i = 0; i < b.length; i++) b[i] = parseInt(h.substr(i * 2, 2), 16);
   return b;
 }
 function bytesToHex(b){ let s = ''; for (const x of b) s += x.toString(16).padStart(2, '0'); return s; }
-// u64 LE via BigInt — the FULL u64 range stays exact (never Math.floor/&0xff, lossy above 2^53).
-// Accepts number | decimal-string | BigInt; readU64Le returns an unsigned decimal STRING.
-function putU64Le(buf, off, val){ let v = BigInt(val); for (let i = 0; i < 8; i++) { buf[off + i] = Number(v & 0xffn); v >>= 8n; } }
-function readU64Le(buf, off){ let v = 0n; for (let i = 7; i >= 0; i--) v = (v << 8n) | BigInt(buf[off + i]); return v.toString(); }
-function putU32Le(buf, off, val){ let v = Math.floor(val); for (let i = 0; i < 4; i++) { buf[off + i] = v & 0xff; v = Math.floor(v / 0x100); } }
-function readU32Le(buf, off){ let v = 0; for (let i = 3; i >= 0; i--) v = v * 0x100 + buf[off + i]; return v; }
 
 // base64url (RFC 4648 §5, no padding) — mirrors the core's URL_SAFE_NO_PAD.
 const B64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
@@ -316,103 +348,120 @@ function b64urlDecode(s){
   return Uint8Array.from(bytes);
 }
 
-// NUL-padded UTF-8, truncated to 32 BYTES (not chars) — mirrors dpay_core::pad_name.
-const NAME_LEN = 32;
-function padName32(s){
-  const u = new TextEncoder().encode(String(s));
-  const buf = new Uint8Array(NAME_LEN);
-  buf.set(u.subarray(0, NAME_LEN), 0);
-  return buf;
+// --- tiny linear-memory helpers --------------------------------------------------------------
+// u64 -> (lo, hi) u32 halves for the wasm ABI. Accepts number | decimal-string | BigInt; the FULL
+// u64 range stays exact (never Math.floor/&0xff, lossy above 2^53).
+function split64(v){ const x = BigInt(v); return [Number(x & 0xffffffffn), Number(x >> 32n)]; }
+// Copy `bytes` into a fresh bump-allocation and return its pointer. The view is derived AFTER the
+// alloc (an alloc can grow memory and detach earlier views) and consumed before the next alloc.
+function coreIn(bytes){
+  const ex = CORE.exports;
+  const ptr = ex.w_alloc(bytes.length);
+  new Uint8Array(ex.memory.buffer, ptr, bytes.length).set(bytes);
+  return ptr;
 }
-function trimName32(bytes){
-  let end = bytes.indexOf(0);
-  if (end < 0) end = bytes.length;
-  try { return new TextDecoder().decode(bytes.subarray(0, end)); } catch { return ''; }
+// Copy `len` bytes out of linear memory (view derived after all allocs are done).
+function coreOut(ptr, len){ return new Uint8Array(CORE.exports.memory.buffer, ptr, len).slice(); }
+
+// --- page-facing codec + signing (same names as v1, now core-backed) ------------------------
+/** Ed25519 public key (hex) from a 32-byte seed (hex) — w_pubkey. */
+function pubkeyHex(secretHex){
+  const ex = CORE.exports;
+  const seedP = coreIn(hexToBytes(secretHex)), outP = ex.w_alloc(32);
+  if (ex.w_pubkey(seedP, outP) !== 0) throw new Error('w_pubkey failed');
+  return bytesToHex(coreOut(outP, 32));
 }
 
-// --- the 132-byte request QR (what the merchant terminal / Receive tab shows) ---------------
+/** The 132-byte request QR payload (what the merchant terminal / Receive tab shows) — w_build_request. */
 function buildRequestBytes(toHex, amount, nonceHex, expiry, currency, toName = '', memo = ''){
-  const buf = new Uint8Array(132);
-  buf.set(hexToBytes(toHex), 0);
-  putU64Le(buf, 32, amount);
-  buf.set(hexToBytes(nonceHex), 40);
-  putU64Le(buf, 56, expiry);
-  putU32Le(buf, 64, currency);
-  buf.set(padName32(toName), 68);
-  buf.set(padName32(memo), 100);
-  return buf;
+  const ex = CORE.exports;
+  const toNameB = new TextEncoder().encode(String(toName)), memoB = new TextEncoder().encode(String(memo));
+  const toP = coreIn(hexToBytes(toHex)), nonceP = coreIn(hexToBytes(nonceHex));
+  const tnP = coreIn(toNameB), mP = coreIn(memoB), outP = ex.w_alloc(132);
+  const [alo, ahi] = split64(amount), [elo, ehi] = split64(expiry);
+  const rc = ex.w_build_request(toP, alo, ahi, nonceP, elo, ehi, currency, tnP, toNameB.length, mP, memoB.length, outP);
+  if (rc !== 0) throw new Error('w_build_request failed: ' + rc);
+  return coreOut(outP, 132);
 }
 function buildRequestQR(toHex, amount, nonceHex, expiry, currency, toName = '', memo = ''){
   return b64urlEncode(buildRequestBytes(toHex, amount, nonceHex, expiry, currency, toName, memo));
 }
-/** Decode a 132-byte request (base64url). Tolerates a stray legacy `|name` suffix defensively. */
+/** Decode a 132-byte request (base64url) via w_decode_request. Tolerates a stray legacy `|name`
+ *  suffix defensively. Amount/expiry come back as decimal strings (full u64, no float loss). */
 function decodeRequest(b64OrQR){
   const b64 = b64OrQR.includes('|') ? b64OrQR.slice(0, b64OrQR.indexOf('|')) : b64OrQR;
   const bytes = b64urlDecode(b64);
   if (bytes.length !== 132) throw new Error('request length: expected 132, got ' + bytes.length);
+  const ex = CORE.exports;
+  const reqP = coreIn(bytes), outP = ex.w_alloc(512);
+  const len = ex.w_decode_request(reqP, outP, 512);
+  if (len === 0) throw new Error('w_decode_request failed');
+  const j = JSON.parse(new TextDecoder().decode(new Uint8Array(ex.memory.buffer, outP, len)));
   return {
-    toHex: bytesToHex(bytes.slice(0, 32)),
-    amount: readU64Le(bytes, 32),
-    nonceHex: bytesToHex(bytes.slice(40, 56)),
-    expiry: readU64Le(bytes, 56),
-    currency: readU32Le(bytes, 64),
-    toName: trimName32(bytes.slice(68, 100)),
-    memo: trimName32(bytes.slice(100, 132)),
+    toHex: j.toHex, amount: String(j.amount), nonceHex: j.nonceHex, expiry: String(j.expiry),
+    currency: Number(j.currency), toName: j.toName, memo: j.memo,
   };
 }
 
-// --- the 196-byte signing buffer + 292-byte wire (what /api/v1/pay takes) -------------------
-function buildSigningBytes(fromHex, toHex, amount, nonceHex, expiry, currency, fromName = '', toName = '', memo = ''){
-  const buf = new Uint8Array(196);
-  buf.set(hexToBytes(fromHex), 0);
-  buf.set(hexToBytes(toHex), 32);
-  putU64Le(buf, 64, amount);
-  buf.set(hexToBytes(nonceHex), 72);
-  putU64Le(buf, 88, expiry);
-  putU32Le(buf, 96, currency);
-  buf.set(padName32(fromName), 100);
-  buf.set(padName32(toName), 132);
-  buf.set(padName32(memo), 164);
-  return buf;
-}
-function buildWire(signing, sig, fromPub){
-  const wire = new Uint8Array(292);
-  wire.set(signing, 0);
-  wire.set(sig, 196);
-  wire.set(fromPub, 260);
-  return wire;
-}
 /** Sign an authorization with `secretHex`; returns the base64url wire code POST /api/v1/pay {qr}
- *  expects. Byte-identical to the Android app / wire.mjs (same seed ⇒ same sig). SYNC noble API. */
+ *  expects. Builds the 132-byte request with w_build_request, then w_sign_request (which derives
+ *  from_pub from the seed and signs the frozen 196-byte buffer). Byte-identical to the Android
+ *  app / wire.mjs (same seed ⇒ same sig) — proven by the guard against the oracle every check. */
 function signAuthorization(secretHex, toHex, amount, nonceHex, expiry, currency, fromName = '', toName = '', memo = ''){
-  const secret = hexToBytes(secretHex);
-  const pub = nobleEd25519.getPublicKey(secret);
-  const signing = buildSigningBytes(bytesToHex(pub), toHex, amount, nonceHex, expiry, currency, fromName, toName, memo);
-  const sig = nobleEd25519.sign(signing, secret);
-  return b64urlEncode(buildWire(signing, sig, pub));
+  const ex = CORE.exports;
+  const nameB = new TextEncoder().encode(String(fromName));
+  const reqP = coreIn(buildRequestBytes(toHex, amount, nonceHex, expiry, currency, toName, memo));
+  const seedP = coreIn(hexToBytes(secretHex)), fnP = coreIn(nameB), outP = ex.w_alloc(292);
+  const rc = ex.w_sign_request(seedP, reqP, fnP, nameB.length, outP);
+  if (rc !== 0) throw new Error('w_sign_request failed: ' + rc);
+  return b64urlEncode(coreOut(outP, 292));
 }
 
-// --- WithdrawAuth (POST /api/v1/withdraw) ----------------------------------------------------
-function buildWithdrawSigningBytes(fromHex, destination, amount, nonceHex, expiry, currency){
-  const addr = new TextEncoder().encode(String(destination));
-  const buf = new Uint8Array(68 + 4 + addr.length);
-  buf.set(hexToBytes(fromHex), 0);
-  putU64Le(buf, 32, amount);
-  buf.set(hexToBytes(nonceHex), 40);
-  putU64Le(buf, 56, expiry);
-  putU32Le(buf, 64, currency);
-  putU32Le(buf, 68, addr.length);
-  buf.set(addr, 72);
-  return buf;
-}
-/** Sign a WithdrawAuth; returns the 64-byte sig hex. Mirrors dpay_core::sign_withdraw byte-exact. */
-function signWithdrawalHex(secretHex, fromHex, destination, amount, nonceHex, expiry, currency){
-  return bytesToHex(nobleEd25519.sign(
-    buildWithdrawSigningBytes(fromHex, destination, amount, nonceHex, expiry, currency), hexToBytes(secretHex)));
+/** Sign a WithdrawAuth (POST /api/v1/withdraw); returns the 64-byte sig hex — w_sign_withdraw.
+ *  `fromHex` is kept for v1 call-site compat; the core derives the signer pubkey from the seed
+ *  (equal by construction for every caller). */
+function signWithdrawalHex(secretHex, _fromHex, destination, amount, nonceHex, expiry, currency){
+  const ex = CORE.exports;
+  const destB = new TextEncoder().encode(String(destination));
+  const seedP = coreIn(hexToBytes(secretHex)), destP = coreIn(destB), nonceP = coreIn(hexToBytes(nonceHex));
+  const outP = ex.w_alloc(64);
+  const [alo, ahi] = split64(amount), [elo, ehi] = split64(expiry);
+  const rc = ex.w_sign_withdraw(seedP, destP, destB.length, alo, ahi, nonceP, elo, ehi, currency, outP);
+  if (rc !== 0) throw new Error('w_sign_withdraw failed: ' + rc);
+  return bytesToHex(coreOut(outP, 64));
 }
 
 /** CSPRNG 16-byte nonce hex. */
 function randNonceHex(){ const a = new Uint8Array(16); crypto.getRandomValues(a); return bytesToHex(a); }
+
+// --- receipt verification (R2: verify the relay's signed outcome under the PIN) --------------
+// Claim layout (FROZEN 108 bytes = dpay_core::ReceiptClaim::signing_bytes):
+//   nonce(16)|from(32)|to(32)|amount u64le(8)|currency u32le(4)|block_index u64le(8)|settle_ts u64le(8)
+function buildReceiptClaim(nonceHex, fromHex, toHex, amount, currency, blockIndex, settleTs){
+  const ex = CORE.exports;
+  const nP = coreIn(hexToBytes(nonceHex)), fP = coreIn(hexToBytes(fromHex)), tP = coreIn(hexToBytes(toHex));
+  const outP = ex.w_alloc(108);
+  const [alo, ahi] = split64(amount), [blo, bhi] = split64(blockIndex), [slo, shi] = split64(settleTs);
+  const rc = ex.w_receipt_claim(nP, fP, tP, alo, ahi, currency, blo, bhi, slo, shi, outP);
+  if (rc !== 0) throw new Error('w_receipt_claim failed: ' + rc);
+  return coreOut(outP, 108);
+}
+/** Verify a /pay (or /api/v1/receipt) outcome. `r` is the relay's `receipt` JSON object
+ *  {nonce,from,to,amount,currency,block_index,settle_ts[,pubkey]}; `sigHex` its `receipt_sig`.
+ *  Builds the 108-byte claim via w_receipt_claim and checks it with w_verify_receipt_sig under
+ *  the PINNED key only — a `pubkey` field the response supplies is merely cross-checked AGAINST
+ *  the pin (hex-insensitively) and a mismatch fails verification outright. */
+function verifyReceipt(r, sigHex){
+  if (!r) return false;
+  const pin = String(PINNED_RECEIPT_PUBKEY).toLowerCase();
+  if (typeof r.pubkey === 'string' && r.pubkey.toLowerCase() !== pin) return false;
+  try {
+    const claim = buildReceiptClaim(r.nonce, r.from, r.to, r.amount, r.currency, r.block_index, r.settle_ts);
+    const ex = CORE.exports;
+    const pubP = coreIn(hexToBytes(pin)), clP = coreIn(claim), sigP = coreIn(hexToBytes(String(sigHex || '')));
+    return ex.w_verify_receipt_sig(pubP, clP, 108, sigP) === 1;
+  } catch { return false; }
+}
 
 // --- BIP-39 (256-bit) — identical codec to app/lib/bip39.ts --------------------------------
 // 24 words = a direct encoding of the 32-byte Ed25519 seed (SHA-256 checksum first 8 bits, MSB-first
@@ -465,13 +514,12 @@ function validateMnemonic(words){ try { mnemonicToEntropy(words); return true; }
 function stringToWords(s){ return String(s).trim().split(/\s+/).filter(w => w.length > 0); }
 function wordsToString(words){ return words.join(' '); }
 function hexToWords(hex){ return entropyToMnemonic(hexToBytes(hex)); }
-// <<< wallet-wire-v1
+// <<< wallet-wire-v2
 
 // ============================================================================================
 // Page code — everything below is UI only; the protocol lives in the guarded block above.
 // ============================================================================================
 const $ = id => document.getElementById(id);
-wireNobleCrypto();
 const STORE = 'dpay.wallet.v1';   // {secret: 64-hex, name} — browser-local, portable via the words
 const TOP_UP_CENTS = 10000;       // ∂100.00, mirrors the app's faucet body
 let id = null;                    // {secret, pub, name} once onboarded
@@ -526,7 +574,7 @@ async function health(){
 setInterval(health, 3000); health();
 
 // ---- identity / key store ------------------------------------------------------------------
-function derivePub(secretHex){ return bytesToHex(nobleEd25519.getPublicKey(hexToBytes(secretHex))); }
+function derivePub(secretHex){ return pubkeyHex(secretHex); } // wasm core derives the key
 function loadId(){
   try {
     const raw = localStorage.getItem(STORE);
@@ -845,11 +893,20 @@ async function submitWire(){
     if (r.ok) {
       const j = await r.json();
       clearInterval(expTimer); pending = null; $('review').style.display = 'none'; offline.style.display = 'none';
-      const d = document.createElement('div'); d.className = 'paid';
-      d.textContent = (j.replayed ? '↩ Paid ✓ ' : 'Paid ✓ ') + glyph(pendingCat(j)) + fmtAmount(j.receipt.amount, pendingCat(j));
+      // R2 pinning: verify the outcome receipt under the PINNED facade key before calling it Paid.
+      // A bad signature is shown honestly in amber (the settle may still be real — never fake
+      // "Refused"), and the balance refresh below is never blocked by verification.
+      const verified = verifyReceipt(j.receipt, j.receipt && j.receipt.receipt_sig);
+      if (!verified) console.warn('[dpay] receipt signature did not verify under the pinned key:', j.receipt);
+      const cat = pendingCat(j);
+      const d = document.createElement('div'); d.className = verified ? 'paid' : 'paidwarn';
+      d.textContent = verified
+        ? (j.replayed ? '↩ Paid ✓ ' : 'Paid ✓ ') + glyph(cat) + fmtAmount(j.receipt.amount, cat)
+        : (j.replayed ? '↩ ' : '') + 'Paid, but the receipt signature didn’t verify — treat with caution';
       res.appendChild(d);
       const s = document.createElement('div'); s.className = 'sub';
-      s.textContent = j.replayed ? 'already settled — not charged twice' : 'balance now ' + fmtAmount(j.receipt.new_from_balance, pendingCat(j));
+      s.textContent = (j.replayed ? 'already settled — not charged twice' : 'balance now ' + fmtAmount(j.receipt.new_from_balance, cat))
+        + (verified ? ' · receipt verified' : '');
       res.appendChild(s);
       tick();
     } else if (r.status >= 400 && r.status < 500) {
@@ -983,8 +1040,24 @@ $('sendBtn').onclick = async () => {
 };
 
 // ---- boot ----------------------------------------------------------------------------------
-id = loadId();
-if (id) enterWallet();
+// The signing core loads FIRST. wallet-wire-v2 has NO JS fallback: if /dpay-core.wasm fails to
+// load or instantiate the page fails loud (full-page error, every action disabled) — it never
+// silently signs with a second implementation. Until init resolves, all mains stay hidden, so no
+// handler can touch CORE before it exists.
+function fatalCore(err){
+  console.error('[dpay] Couldn’t load the signing core:', err);
+  for (const m of ['onboard', 'walletApp', 'settings']) $(m).style.display = 'none';
+  $('coreFail').style.display = '';
+  document.querySelectorAll('button').forEach(b => { b.disabled = true; });
+  const rb = $('coreReload'); rb.disabled = false; rb.onclick = () => location.reload();
+}
+(async () => {
+  try { await initWalletWire(); }
+  catch (e) { fatalCore(e); return; }
+  $('onboard').style.display = '';
+  id = loadId();
+  if (id) enterWallet();
+})();
 </script>
 </body>
 </html>
