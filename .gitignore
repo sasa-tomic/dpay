@@ -44,3 +44,4 @@ signing.properties
 # misc
 *.log
 .DS_Store
+dist-prod
