@@ -10,10 +10,13 @@
 
 ## NEXT SESSION — work order
 
-> **Empty / neutral.** All queued work is COMPLETE. The Solana recent-blockhash rewrite (Phases 1–7,
-> plan `2026-08-12-solana-recent-blockhash-rewrite-plan.md`) is fully landed
-> (`f665228`→`c74988b`, HEAD=`c74988b`). All cross-currency verification gaps closed.
-> Pick up new work only when a concrete next step is identified.
+> **Empty / neutral.** All queued work is COMPLETE. The 2026-08-15 session audited the unsummarized
+> ATA commits (b688817..3b20a9f), fixed all findings (sendSpl rent pre-check, constant import,
+> campreview wallet provisioning, wipe TOCTOU, doc truth, failure-path seam tests), verified the
+> untested device gates (`just app` self-checks PASS, `just campreview` GREEN both rails incl. the
+> fresh-onboarding provisioning path), and landed everything at HEAD=`51855d0` (inner loop green:
+> 74/74 e2e, 790/790 jest, typecheck clean). Pick up new work only when a concrete next step is
+> identified.
 
 ## Session summary (2026-08-14): SOL camera 0×0 collapse fix + campreview gate + legacy-fund removal — COMPLETE
 
