@@ -185,7 +185,7 @@ aid-parity:
 # path that test-relay's FakeLedger cannot (receipt recovery, TTL balance refresh, currency wiring).
 # Keeping it on the hot path closes the gap that once let a fail-closed-cap change break test-live
 # silently while `just verify` stayed green (MC2 U1 / OPEN_ISSUES #10 lesson).
-check: test-core test-canister test-relay test-live typecheck bridge-parity aid-parity merchant-wire wallet-wire
+check: test-core test-canister test-relay test-live typecheck bridge-parity aid-parity merchant-wire wallet-wire wasm-core
     @echo "rust inner loop green"
 
 # Merchant-terminal wire parity: the hand-rolled JS request encoder embedded in the served HTML
@@ -199,6 +199,12 @@ merchant-wire:
 # to dpay-core + wire.mjs — and the same 24 words must derive the same key as the Android app
 # (restore-compat). Catches "web wallet signs garbage / restores a different account" drift, the
 # payer-side analog of merchant-wire.
+# Wasm-core parity: proves the COMMITTED crates/dpay-relay/assets/dpay-core.wasm (the bytes every
+# web surface loads) signs/builds byte-identically to the JS oracle — catches a stale or corrupted
+# staged artifact even when `just wasm` (which runs this same guard after rebuilding) wasn't run.
+wasm-core:
+    node scripts/check-wasm-core.mjs
+
 wallet-wire:
     node scripts/check-wallet-wire.mjs
 
