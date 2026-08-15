@@ -160,7 +160,7 @@ async fn refresh_deposit(pubkey: Vec<u8>, currency: Currency) -> Result<DepositR
             if let Ok(bal) = ledger_balance_of(ledger, &account_of(&pk)).await {
                 write_cache(pk, currency, bal);
             } else {
-                ic_cdk::print("WARN refresh_deposit: post-mint cache refresh failed (display-only)");
+                crate::print_log("WARN refresh_deposit: post-mint cache refresh failed (display-only)");
             }
             Ok(DepositRefresh {
                 minted,
@@ -184,7 +184,7 @@ async fn refresh_deposit(pubkey: Vec<u8>, currency: Currency) -> Result<DepositR
             if let Ok(bal) = ledger_balance_of(ledger, &account_of(&pk)).await {
                 write_cache(pk, currency, bal);
             } else {
-                ic_cdk::print("WARN refresh_deposit: post-confirm cache refresh failed (display-only)");
+                crate::print_log("WARN refresh_deposit: post-confirm cache refresh failed (display-only)");
             }
             Ok(DepositRefresh {
                 minted: Vec::new(),
@@ -605,7 +605,7 @@ async fn withdraw(req: WithdrawRequest) -> Result<WithdrawReceipt, String> {
                 Ok(Err(e)) => {
                     // MalformedAddress / AmountTooLow / GenericError — permanent; settle the nonce so the
                     // dead auth can never replay. The user must sign a fresh authorization.
-                    ic_cdk::print(format!("withdraw btc: retrieve_btc permanent error variant {e:?} — nonce settled"));
+                    crate::print_log(format!("withdraw btc: retrieve_btc permanent error variant {e:?} — nonce settled"));
                     settle_withdraw_nonce(&wnonce);
                     return Err(format!("retrieve_btc: {e:?}"));
                 }
@@ -639,7 +639,7 @@ async fn withdraw(req: WithdrawRequest) -> Result<WithdrawReceipt, String> {
     if let Ok(bal) = ledger_balance_of(ledger, &from_acct).await {
         write_cache(from, req.currency, bal);
     } else {
-        ic_cdk::print("WARN withdraw: post-burn cache refresh failed (display-only)");
+        crate::print_log("WARN withdraw: post-burn cache refresh failed (display-only)");
     }
     Ok(WithdrawReceipt {
         from: from.to_vec(),
@@ -648,7 +648,7 @@ async fn withdraw(req: WithdrawRequest) -> Result<WithdrawReceipt, String> {
         nonce: nonce_bytes.to_vec(),
         currency: req.currency,
         block_index: nat_to_u64(&block_index_nat).unwrap_or_else(|e| {
-            ic_cdk::print(format!("WARN withdraw: block_index Nat overflow ({e}) — receipt block_index coerced to 0"));
+            crate::print_log(format!("WARN withdraw: block_index Nat overflow ({e}) — receipt block_index coerced to 0"));
             0
         }),
     })

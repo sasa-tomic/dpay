@@ -46,6 +46,12 @@ RELAY_PID=$!
 for _ in $(seq 1 30); do
   curl -fsS "http://127.0.0.1:$PORT/api/v1/health" >/dev/null 2>&1 && break || sleep 0.3
 done
+# The loop above falls through silently after 30 tries — fail loud here instead of printing the
+# "demo is up" banner for a relay that never started (the EXIT trap still tears everything down).
+curl -fsS -m 2 "http://127.0.0.1:$PORT/api/v1/health" >/dev/null || {
+  echo "relay did not come up" >&2
+  exit 1
+}
 
 TSIP="$(tailscale ip -4 2>/dev/null | head -1)"
 if [ -n "$TSIP" ]; then TS_URL="http://$TSIP:$PORT"; else TS_URL="http://<this-laptop-tailscale-ip>:$PORT"; fi

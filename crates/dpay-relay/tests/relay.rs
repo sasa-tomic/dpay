@@ -15,6 +15,7 @@ use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
 use serde_json::Value;
+use sha2::Digest;
 use tower::ServiceExt; // oneshot
 
 use async_trait::async_trait;
@@ -865,10 +866,73 @@ async fn apk_download_serves_configured_bytes() {
         headers.get(header::CONTENT_DISPOSITION).unwrap(),
         "attachment; filename=\"dpay.apk\""
     );
+    // Revalidation semantics, not the old year-long immutable: short max-age + a strong ETag so
+    // the CDN revalidates with cheap 304s and a fresh build reaches users within minutes.
+    assert_eq!(
+        headers.get(header::CACHE_CONTROL).unwrap(),
+        "public, max-age=300"
+    );
+    let expected_etag = format!("\"{}\"", hex::encode(sha2::Sha256::digest(&apk)));
+    assert_eq!(
+        headers.get(header::ETAG).unwrap(),
+        expected_etag.as_str(),
+        "strong etag must be the quoted sha256 of the served bytes"
+    );
     assert_eq!(
         bytes, apk,
         "served bytes must match the configured build verbatim"
     );
+}
+
+/// A matching `If-None-Match` must short-circuit to a bodyless 304 (the cheap CDN
+/// revalidation); a non-matching etag must return the full body.
+#[tokio::test]
+async fn apk_download_revalidates_with_304_on_if_none_match() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let apk = vec![0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02];
+    let state = state.with_apk(Some(apk.clone()));
+
+    let (_, headers, _) = call_raw(&state, get_req("/download/dpay.apk")).await;
+    let etag = headers.get(header::ETAG).unwrap().to_str().unwrap().to_owned();
+    assert!(
+        etag.starts_with('"') && etag.ends_with('"'),
+        "etag must be quoted (strong): {etag}"
+    );
+
+    let match_req = Request::builder()
+        .method("GET")
+        .uri("/download/dpay.apk")
+        .header(header::IF_NONE_MATCH, &etag)
+        .body(Body::empty())
+        .unwrap();
+    let (status, headers, bytes) = call_raw(&state, match_req).await;
+    assert_eq!(status, StatusCode::NOT_MODIFIED);
+    assert!(bytes.is_empty(), "304 must not carry a body");
+    assert_eq!(
+        headers.get(header::ETAG).unwrap(),
+        etag.as_str(),
+        "304 repeats the etag"
+    );
+    assert_eq!(
+        headers.get(header::CACHE_CONTROL).unwrap(),
+        "public, max-age=300",
+        "304 repeats the cache policy so the CDN re-arms its TTL"
+    );
+
+    let stale_req = Request::builder()
+        .method("GET")
+        .uri("/download/dpay.apk")
+        .header(header::IF_NONE_MATCH, "\"deadbeef\"")
+        .body(Body::empty())
+        .unwrap();
+    let (status, _, bytes) = call_raw(&state, stale_req).await;
+    assert_eq!(
+        status, StatusCode::OK,
+        "a non-matching etag returns the full body"
+    );
+    assert_eq!(bytes, apk);
 }
 
 // --- transaction history ---------------------------------------------------

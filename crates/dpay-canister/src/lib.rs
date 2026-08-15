@@ -75,6 +75,17 @@ mod types;
 use calls::*;
 use types::*;
 
+/// Fail-loud canister log line — the repo's WARN surface. `ic_cdk::print` is deprecated in
+/// ic-cdk 0.19 but is deliberately kept, NOT swapped for `debug_print`: debug output is
+/// suppressed on non-debug (prod mainnet) canisters, which would silence exactly the fail-loud
+/// WARN logging at every call site below (post-settle cache misses, Nat overflows, nonce-state
+/// repairs). The deprecation is acknowledged once, here at the wrapper — the calls stay
+/// prod-visible and the build stays warning-clean.
+#[allow(deprecated)]
+pub(crate) fn print_log(msg: impl AsRef<str>) {
+    ic_cdk::print(msg);
+}
+
 // --- spent-nonce set: nonce -> () -------------------------------------------------------------
 // A nonce in the map means "reserved or settled" — either way, a concurrent/replay `pay` with the
 // same nonce is rejected (`contains_key`). `reserve` inserts (synchronous, before any await);
@@ -575,7 +586,7 @@ async fn pay(signed: Vec<u8>) -> Result<PayReceipt, String> {
         sa.auth.memo,
     )?;
     let new_from_balance = ledger_balance_of(ledger, &from_acct).await.unwrap_or_else(|e| {
-        ic_cdk::print(format!("WARN pay: post-settle from_balance re-read failed ({e}) — receipt uses computed estimate"));
+        print_log(format!("WARN pay: post-settle from_balance re-read failed ({e}) — receipt uses computed estimate"));
         balance.saturating_sub(amount).saturating_sub(fee)
     });
     // Refresh the display cache for both sides (best-effort; never blocks settlement).
@@ -583,7 +594,7 @@ async fn pay(signed: Vec<u8>) -> Result<PayReceipt, String> {
     if let Ok(to_bal) = ledger_balance_of(ledger, &to_acct).await {
         write_cache(to, currency, to_bal);
     } else {
-        ic_cdk::print("WARN pay: post-settle payee cache refresh failed (display-only)");
+        print_log("WARN pay: post-settle payee cache refresh failed (display-only)");
     }
 
     // Sign the outcome receipt. The block index caps at u64 (the demo's ledgers never exceed it;
@@ -592,7 +603,7 @@ async fn pay(signed: Vec<u8>) -> Result<PayReceipt, String> {
     // receipt key was bound BEFORE the ledger commit (MC4 U1), so this is now a pure Ed25519 sign
     // with NO await — a post-commit key-gen failure can no longer orphan a settled payment.
     let block_index = nat_to_u64(&block_index_nat).unwrap_or_else(|e| {
-        ic_cdk::print(format!("WARN pay: block_index Nat overflow ({e}) — receipt block_index coerced to 0"));
+        print_log(format!("WARN pay: block_index Nat overflow ({e}) — receipt block_index coerced to 0"));
         0
     });
     let pubkey = receipt_sk.verifying_key().to_bytes();
@@ -713,7 +724,7 @@ async fn refresh_balances(
         let ledger = match ledger_for(currency) {
             Ok((l, _)) => l,
             Err(e) => {
-                ic_cdk::print(format!(
+                print_log(format!(
                     "WARN refresh_balances: currency {currency} skipped ({e}) — no live ledger"
                 ));
                 continue;
@@ -729,7 +740,7 @@ async fn refresh_balances(
                 // last-known cached value (display-only; settlement always reads the ledger
                 // directly — the money-safety invariant is unchanged) and log the error so it is
                 // observable, never silently swallowed.
-                ic_cdk::print(format!(
+                print_log(format!(
                     "WARN refresh_balances: currency {currency} read failed ({e}) — kept cached value"
                 ));
                 let cached = BAL_CACHE
@@ -896,7 +907,7 @@ async fn burn(from: Vec<u8>, currency: Currency, amount: u64) -> Result<u64, Str
     if let Ok(bal) = ledger_balance_of(ledger, &from_acct).await {
         write_cache(pk, currency, bal);
     } else {
-        ic_cdk::print("WARN burn: post-burn cache refresh failed (display-only)");
+        print_log("WARN burn: post-burn cache refresh failed (display-only)");
     }
     Ok(nat_to_u64(&block_index)?)
 }
@@ -1287,7 +1298,7 @@ async fn reconcile(currency: Currency) -> Result<ReconcileReport, String> {
         // back. Repair: mark the nonce spent (a retry is now a duplicate) + record the txn (history).
         let to_pk = t.to.subaccount.unwrap_or(MINT_ACCOUNT);
         let amount = nat_to_u64(&t.amount).unwrap_or_else(|e| {
-            ic_cdk::print(format!("WARN reconcile: orphaned-debit amount Nat overflow ({e}) — recorded as 0"));
+            print_log(format!("WARN reconcile: orphaned-debit amount Nat overflow ({e}) — recorded as 0"));
             0
         });
         settle_nonce(&nonce_key);
@@ -1309,12 +1320,12 @@ async fn reconcile(currency: Currency) -> Result<ReconcileReport, String> {
         if let Ok(bal) = ledger_balance_of(ledger, &account_of(&from_pk)).await {
             write_cache(from_pk, currency, bal);
         } else {
-            ic_cdk::print("WARN reconcile: from-side cache refresh failed (display-only)");
+            print_log("WARN reconcile: from-side cache refresh failed (display-only)");
         }
         if let Ok(bal) = ledger_balance_of(ledger, &account_of(&to_pk)).await {
             write_cache(to_pk, currency, bal);
         } else {
-            ic_cdk::print("WARN reconcile: to-side cache refresh failed (display-only)");
+            print_log("WARN reconcile: to-side cache refresh failed (display-only)");
         }
         // MC4 U2: reconstruct + sign + store a receipt for this orphan so `receipt(nonce)` returns a
         // verifiable canister-signed attestation for EVERY settled payment (a durable recovery

@@ -768,8 +768,14 @@ impl Ledger for AgentLedger {
         };
         let arg = encode_one(&mirror)
             .map_err(|e| LedgerError::Transient(format!("encode withdraw arg: {e}")))?;
+        // Minter-class budget, not the 10s poll default: the facade's `withdraw` update internally
+        // makes ≥2 minter round trips (burn/retrieve + send) plus 1-2 `icrc2_approve` calls — the
+        // same 7-15s mainnet latency class commit bdc9f3e bumped the deposit proxies for. A 10s
+        // cap makes the relay 503 while the canister still completes the burn+send; the user's
+        // retry then hits a spent WITHDRAW_NONCES and surfaces a false permanent 422 for a
+        // withdrawal that actually went through.
         let reply = tokio::time::timeout(
-            Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
+            Duration::from_secs(MINTER_CALL_TIMEOUT_SECS),
             self.agent
                 .update(&self.canister_id, "withdraw")
                 .with_arg(arg)
@@ -778,7 +784,7 @@ impl Ledger for AgentLedger {
         .await
         .map_err(|_| {
             LedgerError::Transient(format!(
-                "withdraw timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
+                "withdraw timed out after {MINTER_CALL_TIMEOUT_SECS}s"
             ))
         })?
         .map_err(|e| LedgerError::Transient(format!("withdraw update: {e}")))?;

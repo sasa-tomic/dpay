@@ -13,7 +13,10 @@ CF_API="https://api.cloudflare.com/client/v4"
 # cf METHOD PATH [JSON_BODY]  ->  prints the full JSON response on success, aborts on any failure.
 cf() {
   local method="$1" path="$2" body="${3:-}"
+  # Bounded like scripts/verify-relay-version.sh: a black-holed connection must fail (loudly,
+  # via --fail-with-body) within 30s, not hang tunnel-provision/destroy forever.
   local args=(--silent --show-error --fail-with-body --request "$method"
+              --max-time 30 --connect-timeout 10
               --header "Authorization: Bearer ${CF_API_TOKEN}"
               --header "Content-Type: application/json")
   [ -n "$body" ] && args+=(--data "$body")

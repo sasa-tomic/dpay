@@ -39,7 +39,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use axum::extract::{Path, Query, State};
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -98,8 +98,9 @@ pub struct AppState {
     /// The Android build served at `GET /download/dpay.apk`, when one is configured. `None` renders
     /// a "coming soon" CTA on the landing page and answers the download route with `404`.
     apk: Arc<Option<Vec<u8>>>,
-    /// Content hash of the APK bytes, used as a `?v=` cache-buster on the download link so a new
-    /// build invalidates the CDN cache immediately without manual cache purges.
+    /// sha256 of the APK bytes (computed once, in `with_apk`). Doubles as the `?v=` cache-buster
+    /// on the landing-page download link and the strong ETag on `/download/dpay.apk`, so the CDN
+    /// revalidates cheaply instead of pinning a stale build.
     apk_version: String,
 }
 
@@ -118,13 +119,13 @@ impl AppState {
     }
 
     /// Attach the Android build to serve at `GET /download/dpay.apk` (and light up the landing
-    /// page's download CTA). `None` leaves it disabled.
+    /// page's download CTA). `None` leaves it disabled. The sha256 is computed exactly once, here
+    /// (the binary has already read the whole file at startup; hashing 56MB once is nothing) and
+    /// feeds both the `?v=` cache-buster and the download route's strong ETag.
     pub fn with_apk(mut self, apk: Option<Vec<u8>>) -> Self {
         if let Some(ref bytes) = apk {
-            use std::hash::{Hash, Hasher};
-            let mut h = std::collections::hash_map::DefaultHasher::new();
-            bytes.hash(&mut h);
-            self.apk_version = format!("{:x}", h.finish());
+            use sha2::{Digest, Sha256};
+            self.apk_version = format!("{:x}", Sha256::digest(bytes));
         }
         self.apk = Arc::new(apk);
         self
@@ -688,27 +689,53 @@ async fn landing_page(State(state): State<AppState>) -> Response {
 }
 
 /// `GET /download/dpay.apk` — the configured Android build as an APK attachment, or `404` when none
-/// is configured.
-async fn apk_download(State(state): State<AppState>) -> Response {
-    match state.apk.as_ref() {
-        Some(bytes) => (
-            StatusCode::OK,
-            [
-                (
-                    header::CONTENT_TYPE,
-                    "application/vnd.android.package-archive",
-                ),
-                (
-                    header::CONTENT_DISPOSITION,
-                    "attachment; filename=\"dpay.apk\"",
-                ),
-                (header::CACHE_CONTROL, "public, max-age=31536000, immutable"),
-            ],
-            bytes.clone(),
+/// is configured. Served with REVALIDATION semantics, not `immutable`: the old year-long max-age
+/// let the Cloudflare edge pin a stale APK past every redeploy. A 5-minute `max-age` + a strong
+/// ETag (the sha256 from [`AppState::with_apk`]) makes the CDN come back with cheap
+/// `If-None-Match` revalidations (answered 304, bodyless), so a fresh build reaches users within
+/// 5 minutes of a deploy.
+async fn apk_download(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let Some(bytes) = state.apk.as_ref() else {
+        return (StatusCode::NOT_FOUND, "no build available").into_response();
+    };
+    let etag = format!("\"{}\"", state.apk_version);
+    // A matching If-None-Match — an exact strong-etag match anywhere in the (possibly list-valued)
+    // header, or `*` — short-circuits to a bodyless 304.
+    let not_modified = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.split(',').any(|t| { let t = t.trim(); t == etag || t == "*" }));
+    if not_modified {
+        return (
+            StatusCode::NOT_MODIFIED,
+            [(header::CACHE_CONTROL, "public, max-age=300"), (header::ETAG, etag.as_str())],
         )
-            .into_response(),
-        None => (StatusCode::NOT_FOUND, "no build available").into_response(),
+            .into_response();
     }
+    let mut resp = (
+        StatusCode::OK,
+        [
+            (
+                header::CONTENT_TYPE,
+                "application/vnd.android.package-archive",
+            ),
+            (
+                header::CONTENT_DISPOSITION,
+                "attachment; filename=\"dpay.apk\"",
+            ),
+            (header::CACHE_CONTROL, "public, max-age=300"),
+        ],
+        bytes.clone(),
+    )
+        .into_response();
+    // Inserted post-`into_response` because the tuple form needs uniform header-value types (the
+    // etag is owned, the rest are `&'static str`). Strong (no `W/` prefix) by construction: a
+    // given build's bytes never change, so a byte-identical revalidation can always skip the body.
+    resp.headers_mut().insert(
+        header::ETAG,
+        HeaderValue::from_str(&etag).expect("quoted hex sha256 is always a valid header value"),
+    );
+    resp
 }
 
 /// `GET /merchant` — the merchant terminal (webcam QR scan + paste fallback, submits to

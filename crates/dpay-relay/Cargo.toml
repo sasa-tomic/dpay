@@ -53,6 +53,9 @@ base64 = "0.22.1"
 # futures-core/-task/-util), so this adds no new build weight. Default features (std/async-await/alloc)
 # are exactly what `join_all` needs.
 futures-util = "0.3"
+# sha256 of the served APK — the strong ETag on /download/dpay.apk + the `?v=` cache-buster
+# (computed once in `AppState::with_apk`). Already in the dep tree (transitively locked at 0.10.9).
+sha2 = "0.10"
 
 # --- `agent` feature only ---
 # ic-agent 0.48.1 is the current crates.io release (2026-07-07); it depends on candid ^0.10.10,
