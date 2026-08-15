@@ -1,15 +1,33 @@
-//! Bake the current git commit into the relay binary at compile time so the live `/api/v1/version`
-//! endpoint can report EXACTLY which source the running image was built from. This is the
-//! deploy-fidelity primitive: comparing the live commit to `git rev-parse HEAD` catches a stale image
-//! shipping while `just check` is green (the bug class `verify-deploy.sh` closes for the canister).
+//! Build-time baking for dpay-relay:
 //!
-//! - Feature-unconditional: the prod image carries it too (the `agent` feature is not required).
-//! - Falls back to `"unknown"` if `git` is absent or this isn't a git checkout (e.g. a release
-//!   tarball), so the build never fails just because git isn't reachable.
-//! - Reruns when `.git/HEAD` changes (a new commit lands) so the baked commit is always current.
+//! 1. The current git commit (`DPAY_BUILD_COMMIT`) so the live `/api/v1/version` endpoint can
+//!    report EXACTLY which source the running image was built from. This is the deploy-fidelity
+//!    primitive: comparing the live commit to `git rev-parse HEAD` catches a stale image shipping
+//!    while `just check` is green (the bug class `verify-deploy.sh` closes for the canister).
+//!
+//! 2. The prod web build of the REAL app (`e2e/dist-prod`, produced by `just web` /
+//!    `vite build --mode web-prod`) → a generated `$OUT_DIR/web_assets.rs` static table the
+//!    `/wallet` + `/assets/*` routes serve from. Everything the relay serves is compiled in —
+//!    the Docker image ships the binary and nothing else. The dist is gitignored and built at
+//!    `just web` / image-build time, NEVER committed; if it is missing here the build FAILS
+//!    LOUD (no silent stub wallet — a stub could ship a broken /wallet while `just check` is
+//!    green).
+//!
+//! Both steps are feature-unconditional: the prod image carries them too (the `agent` feature is
+//! not required), and both fall back / fail deterministically when git or the dist is absent.
+use std::collections::BTreeMap;
+use std::env;
+use std::fs;
+use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
+    bake_commit();
+    embed_web_dist();
+}
+
+/// Bake the git commit (fallback `"unknown"` for release tarballs — the build never fails on git).
+fn bake_commit() {
     // Rerun when the ref moves (a commit advances HEAD). A missing .git/HEAD (release tarball) is
     // harmless — cargo simply never triggers the rerun on it, and the fallback below applies.
     println!("cargo:rerun-if-changed=.git/HEAD");
@@ -25,4 +43,88 @@ fn main() {
         .unwrap_or_else(|| "unknown".to_string());
 
     println!("cargo:rustc-env=DPAY_BUILD_COMMIT={commit}");
+}
+
+/// Map a dist filename to its HTTP content type (the closed set vite emits for this app).
+fn content_type(path: &str) -> &'static str {
+    match path.rsplit('.').next().unwrap_or("") {
+        "html" => "text/html; charset=utf-8",
+        "js" | "mjs" => "text/javascript; charset=utf-8",
+        "css" => "text/css; charset=utf-8",
+        "wasm" => "application/wasm",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "svg" => "image/svg+xml",
+        "ico" => "image/x-icon",
+        "json" | "map" => "application/json; charset=utf-8",
+        "txt" => "text/plain; charset=utf-8",
+        "woff2" => "font/woff2",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Walk `dir` recursively → sorted map of (route path → absolute file path). BTreeMap keeps the
+/// generated table byte-deterministic (same dist ⇒ same generated source ⇒ cache-friendly).
+fn walk(dir: &PathBuf, prefix: &str, out: &mut BTreeMap<String, PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(name) = entry.file_name().into_string() else { continue };
+        let route = format!("{prefix}/{name}");
+        if path.is_dir() {
+            walk(&path, &route, out);
+        } else {
+            out.insert(route, path);
+        }
+    }
+}
+
+/// Generate `$OUT_DIR/web_assets.rs` embedding every file of `e2e/dist-prod`.
+fn embed_web_dist() {
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let dist = manifest_dir.join("../../e2e/dist-prod");
+    // Rerun when the dist changes (vite rebuild) — a deleted dir also counts as a change, which
+    // re-triggers the loud failure below instead of silently serving a stale table.
+    println!("cargo:rerun-if-changed={}", dist.display());
+
+    let mut files: BTreeMap<String, PathBuf> = BTreeMap::new();
+    walk(&dist, "", &mut files);
+    if files.is_empty() {
+        panic!(
+            "e2e/dist-prod is missing or empty — the /wallet route embeds the prod web build of \
+             the real app. Run `just web` (vite --mode web-prod) before building dpay-relay. \
+             (deploy/build.sh does this automatically; every justfile recipe that builds the \
+             relay depends on `web`.)"
+        );
+    }
+
+    let mut rs = String::from(
+        "// @generated by crates/dpay-relay/build.rs from e2e/dist-prod — do not edit.\n\
+         /// One embedded file of the prod web build (see build.rs).\n\
+         pub struct WebAsset {\n\
+         \x20   pub route: &'static str,\n\
+         \x20   pub content_type: &'static str,\n\
+         \x20   /// Content-hashed filename under assets/ → served `immutable` (see wallet_page).\n\
+         \x20   pub immutable: bool,\n\
+         \x20   pub bytes: &'static [u8],\n\
+         }\n\n\
+         pub static WEB_ASSETS: &[WebAsset] = &[\n",
+    );
+    for (route, path) in &files {
+        // wallet.html is the /wallet entry page; everything else serves at its dist-relative path
+        // (assets/<hashed> under /assets/<hashed>). Only hashed assets/ files get `immutable`.
+        let served = if route == "/wallet.html" { "/wallet" } else { route.as_str() };
+        let immutable = route.starts_with("/assets/");
+        let abs = path.canonicalize().unwrap_or_else(|e| panic!("canonicalize {}: {e}", path.display()));
+        assert!(abs.is_absolute(), "{} must be absolute", abs.display());
+        rs.push_str(&format!(
+            "    WebAsset {{ route: {served:?}, content_type: {:?}, immutable: {immutable}, bytes: include_bytes!(r\"{}\") }},\n",
+            content_type(route),
+            abs.display()
+        ));
+    }
+    rs.push_str("];\n");
+
+    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
+    fs::write(out_dir.join("web_assets.rs"), rs).expect("write web_assets.rs");
 }

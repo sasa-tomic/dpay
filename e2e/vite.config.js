@@ -61,104 +61,124 @@ const rnExtensions = [
   '.json',
 ];
 
-export default defineConfig({
-  root: WEB,
-  plugins: [react()],
-  // Resolve the real app from the repo root (vite root is e2e/web; App.tsx lives at app/App.tsx).
-  resolve: {
-    alias: [
-      // EXACT bare-specifier match (regex-anchored) so `react-native-svg` etc. are NOT rewritten.
-      // Absolute path so node resolution doesn't need a react-native-web copy in app/node_modules.
-      { find: /^react-native$/, replacement: RN_WEB },
+// The ONE divergent shim between the two builds: the e2e harness uses the inject-only camera
+// (window.__DPAY_TEST_SCAN) because headless chrome has no lens to point at a printed QR; the
+// web-prod build (/wallet) uses the REAL getUserMedia + jsQR camera. Everything else — including
+// the money-critical wasm DpayCore — is the SAME code in both builds.
+export default defineConfig(({ mode }) => {
+  const webProd = mode === 'web-prod'; // `vite build --mode web-prod` → the dist the relay embeds
+  const camera = webProd ? join(WEB, 'camera-real.tsx') : join(WEB, 'camera.ts');
+  return {
+    root: WEB,
+    plugins: [react()],
+    // Resolve the real app from the repo root (vite root is e2e/web; App.tsx lives at app/App.tsx).
+    resolve: {
+      alias: [
+        // EXACT bare-specifier match (regex-anchored) so `react-native-svg` etc. are NOT rewritten.
+        // Absolute path so node resolution doesn't need a react-native-web copy in app/node_modules.
+        { find: /^react-native$/, replacement: RN_WEB },
 
-      // Force a single copy of react/react-dom across the graph (app/node_modules + e2e/node_modules
-      // both have copies; react-native-web + react-dom must share the same React instance).
-      { find: /^react$/, replacement: REACT },
-      { find: /^react-dom$/, replacement: REACT_DOM },
+        // Force a single copy of react/react-dom across the graph (app/node_modules + e2e/node_modules
+        // both have copies; react-native-web + react-dom must share the same React instance).
+        { find: /^react$/, replacement: REACT },
+        { find: /^react-dom$/, replacement: REACT_DOM },
 
-      // The real App.tsx does `import {RELAY_DEFAULT} from './relayConfig'`. Intercept that import
-      // and replace it with our web override module (reads ?relay= / window.__DPAY_RELAY / a default).
-      // Anchored regex so it matches the literal `./relayConfig` and `../relayConfig` only.
-      { find: /^\.\.?\/relayConfig$/, replacement: join(WEB, 'relay-config.ts') },
+        // The real App.tsx does `import {RELAY_DEFAULT} from './relayConfig'`. Intercept that import
+        // and replace it with our web override module (reads ?relay= / window.__DPAY_RELAY / a
+        // mode-aware default: same-origin for web-prod, 127.0.0.1:8787 for e2e).
+        // Anchored regex so it matches the literal `./relayConfig` and `../relayConfig` only.
+        { find: /^\.\.?\/relayConfig$/, replacement: join(WEB, 'relay-config.ts') },
 
-      // react-native-qrcode-svg ships only `src/index.js` with JSX-in-.js; rolldown's parser rejects
-      // it without a JSX hint. Replace it with our `.tsx` shim (same matrix→SVG path, same surface).
-      { find: /^react-native-qrcode-svg$/, replacement: join(WEB, 'qrcode.tsx') },
-      // The qrcode lib lives in app/node_modules; expose its absolute path so our shim resolves it
-      // without needing a second install in e2e/node_modules.
-      { find: /^qrcode$/, replacement: QRCODE },
-      // react-native-svg lives in app/node_modules too. Absolute path so both the real App.tsx and
-      // our qrcode.tsx shim resolve to the SAME copy (its `.web.js` build is what we want here; the
-      // extension precedence picks it up automatically once the package is found).
-      { find: /^react-native-svg$/, replacement: RN_SVG },
+        // react-native-qrcode-svg ships only `src/index.js` with JSX-in-.js; rolldown's parser rejects
+        // it without a JSX hint. Replace it with our `.tsx` shim (same matrix→SVG path, same surface).
+        { find: /^react-native-qrcode-svg$/, replacement: join(WEB, 'qrcode.tsx') },
+        // The qrcode lib lives in app/node_modules; expose its absolute path so our shim resolves it
+        // without needing a second install in e2e/node_modules.
+        { find: /^qrcode$/, replacement: QRCODE },
+        // react-native-svg lives in app/node_modules too. Absolute path so both the real App.tsx and
+        // our qrcode.tsx shim resolve to the SAME copy (its `.web.js` build is what we want here; the
+        // extension precedence picks it up automatically once the package is found).
+        { find: /^react-native-svg$/, replacement: RN_SVG },
 
-      // Native packages App.tsx imports that have no real web build usable by the harness. Each
-      // shim lives under e2e/web/ and is the smallest boundary (camera scan inject, NFC seam noop,
-      // ed25519 DpayCore over @noble/ed25519 reading dfx/wire_layout.json).
-      { find: /^react-native-vision-camera$/, replacement: join(WEB, 'camera.ts') },
+        // Native packages App.tsx imports that have no real web build usable by the harness. Each
+        // shim lives under e2e/web/ and is the smallest boundary (camera — see the note above —
+        // NFC seam noop, wasm DpayCore over crates/dpay-relay/assets/dpay-core.wasm).
+        { find: /^react-native-vision-camera$/, replacement: camera },
 
-      // MC8 U6.2 — WalletConnect isolation. wallet.ts's resolveOnrampProvider() is web-first and
-      // only dynamic-imports ./walletconnect on native, so the WC branch is unreachable in this
-      // build (Platform.OS === 'web' under react-native-web + no projectId). Alias BOTH WC
-      // specifiers (the static `EthereumProvider` import + the side-effect `react-native-compat`
-      // import inside walletconnect.ts) to a single noop shim so the bundle never executes real WC
-      // code nor pulls its heavy dep tree. Mirrors the react-native-vision-camera alias above.
-      { find: /^@walletconnect\/ethereum-provider$/, replacement: join(WEB, 'walletconnect-provider.ts') },
-      { find: /^@walletconnect\/react-native-compat$/, replacement: join(WEB, 'walletconnect-provider.ts') },
+        // MC8 U6.2 — WalletConnect isolation. wallet.ts's resolveOnrampProvider() is web-first and
+        // only dynamic-imports ./walletconnect on native, so the WC branch is unreachable in this
+        // build (Platform.OS === 'web' under react-native-web + no projectId). Alias BOTH WC
+        // specifiers (the static `EthereumProvider` import + the side-effect `react-native-compat`
+        // import inside walletconnect.ts) to a single noop shim so the bundle never executes real WC
+        // code nor pulls its heavy dep tree. Mirrors the react-native-vision-camera alias above.
+        { find: /^@walletconnect\/ethereum-provider$/, replacement: join(WEB, 'walletconnect-provider.ts') },
+        { find: /^@walletconnect\/react-native-compat$/, replacement: join(WEB, 'walletconnect-provider.ts') },
 
-      // qrcode-svg pokes `global.TextEncoder = require('text-encoding').TextEncoder` at the top of
-      // its index. The `text-encoding` polyfill package is in app/node_modules and resolves via node
-      // walk-up; alias it to a tiny shim that re-uses the BROWSER's native TextEncoder so we don't
-      // accidentally ship a polyfill that overwrites a working native global. (text-encoding is also
-      // missing from many thin caches; the alias removes a hidden dep.)
-      { find: /^text-encoding$/, replacement: join(WEB, 'text-encoding.ts') },
-    ],
-    extensions: rnExtensions,
-    // Belt-and-braces: even if a future alias misses, never pull in a second React.
-    dedupe: ['react', 'react-dom', 'react-native-web'],
-  },
-  define: {
-    global: 'window',
-    __DEV__: 'true', // use React's dev build for actionable error messages during e2e (the prod build
-                     // emits only minified error codes; __DEV__=true surfaces the full message)
-    'process.env.NODE_ENV': '"development"',
-  },
-  optimizeDeps: {
-    // Do NOT pre-bundle react-native-web — pre-bundling creates a separate module instance from
-    // the source-resolved one, which breaks the shims' mutation of `NativeModules` (the app reads a
-    // different instance than the shims mutated → DpayCore is undefined → DPAY_SELFCHECK FAIL).
-    // Letting vite resolve react-native-web naturally (no optimizeDeps pre-bundle) keeps a single
-    // instance shared between shims.ts and app/App.tsx.
-    include: ['@noble/ed25519', '@noble/hashes', 'qrcode'],
-    exclude: ['react-native-web'],
-    // NOTE: Vite 8 optimizes deps with Rolldown and prints a one-time deprecation notice for
-    // `esbuildOptions` (mirrored from ui/vite.config.js). It is honored and harmless — kept here so
-    // RN-ecosystem deps that ship raw JSX in .js files still prebundle.
-    esbuildOptions: {
-      loader: { '.js': 'jsx' },
-      resolveExtensions: rnExtensions,
-      jsx: 'automatic',
+        // qrcode-svg pokes `global.TextEncoder = require('text-encoding').TextEncoder` at the top of
+        // its index. The `text-encoding` polyfill package is in app/node_modules and resolves via node
+        // walk-up; alias it to a tiny shim that re-uses the BROWSER's native TextEncoder so we don't
+        // accidentally ship a polyfill that overwrites a working native global. (text-encoding is also
+        // missing from many thin caches; the alias removes a hidden dep.)
+        { find: /^text-encoding$/, replacement: join(WEB, 'text-encoding.ts') },
+      ],
+      extensions: rnExtensions,
+      // Belt-and-braces: even if a future alias misses, never pull in a second React.
+      dedupe: ['react', 'react-dom', 'react-native-web'],
     },
-  },
-  build: {
-    // Build at e2e/dist (NOT e2e/web/dist) so the harness's `serveWeb` finds it at a stable path.
-    // `root` is e2e/web; an absolute outDir overrides vite's default (root/dist).
-    outDir: join(__dirname, 'dist'),
-    emptyOutDir: true,
-    assetsInlineLimit: 0,
-    // Keep minification OFF during e2e so React/dev errors carry actionable stack traces + the
-    // word 'balance' etc. are searchable in the bundle. The bundle is re-generated only when source
-    // changes (cached otherwise), so the size cost is paid once.
-    minify: false,
-    // No rollupOptions.input — vite uses the root index.html as the entry by default (which is what
-    // we want: the HTML is the page; it loads entry.tsx, which is processed into dist/assets/).
-    rollupOptions: {
-      output: {
-        entryFileNames: 'assets/[name].js',
-        chunkFileNames: 'assets/[name].js',
-        assetFileNames: 'assets/[name][extname]',
+    define: {
+      global: 'window',
+      __DEV__: webProd ? 'false' : 'true', // e2e keeps React's dev build for actionable error
+                                     // messages; web-prod ships the minified production build.
+      'process.env.NODE_ENV': webProd ? '"production"' : '"development"',
+    },
+    optimizeDeps: {
+      // Do NOT pre-bundle react-native-web — pre-bundling creates a separate module instance from
+      // the source-resolved one, which breaks the shims' mutation of `NativeModules` (the app reads a
+      // different instance than the shims mutated → DpayCore is undefined → DPAY_SELFCHECK FAIL).
+      // Letting vite resolve react-native-web naturally (no optimizeDeps pre-bundle) keeps a single
+      // instance shared between shims.ts and app/App.tsx.
+      include: ['@noble/ed25519', '@noble/hashes', 'qrcode'],
+      exclude: ['react-native-web'],
+      // NOTE: Vite 8 optimizes deps with Rolldown and prints a one-time deprecation notice for
+      // `esbuildOptions` (mirrored from ui/vite.config.js). It is honored and harmless — kept here so
+      // RN-ecosystem deps that ship raw JSX in .js files still prebundle.
+      esbuildOptions: {
+        loader: { '.js': 'jsx' },
+        resolveExtensions: rnExtensions,
+        jsx: 'automatic',
       },
     },
-  },
-  server: { fs: { allow: [REPO_ROOT] } },
+    build: {
+      // e2e: outDir e2e/dist (the harness's `serveWeb` finds it there); web-prod: e2e/dist-prod
+      // (the dist `just web` builds and the relay's build.rs embeds — gitignored, built at deploy
+      // or test time, never committed).
+      outDir: webProd ? join(__dirname, 'dist-prod') : join(__dirname, 'dist'),
+      emptyOutDir: true,
+      assetsInlineLimit: 0,
+      // e2e keeps minification OFF so React/dev errors carry actionable stack traces and the word
+      // 'balance' etc. stay searchable in the bundle. web-prod minifies with Vite 8's built-in
+      // 'oxc' minifier (rolldown — no esbuild/terser package needed, which matters offline).
+      minify: webProd ? 'oxc' : false,
+      rollupOptions: webProd ? {
+        // The prod page: e2e/web/wallet.html → dist-prod/wallet.html (served by the relay at
+        // /wallet). Its hashed assets land in dist-prod/assets/ (served at /assets/<name> with
+        // immutable caching — the relay's build.rs-generated asset table drives the headers).
+        input: { wallet: join(WEB, 'wallet.html') },
+        output: {
+          entryFileNames: 'assets/[name]-[hash].js',
+          chunkFileNames: 'assets/[name]-[hash].js',
+          assetFileNames: 'assets/[name]-[hash][extname]',
+        },
+      } : {
+        // e2e: deterministic output filenames (no content hash) so screenshots/goldens are stable,
+        // and the root index.html is the entry by default.
+        output: {
+          entryFileNames: 'assets/[name].js',
+          chunkFileNames: 'assets/[name].js',
+          assetFileNames: 'assets/[name][extname]',
+        },
+      },
+    },
+    server: { fs: { allow: [REPO_ROOT] } },
+  };
 });

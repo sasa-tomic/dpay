@@ -36,11 +36,13 @@ test-canister: build-canister build-mock-minter
 # relay tests (native, in-memory FakeLedger — no network). Enables `test-helpers` so the
 # integration-test retry harness (`FlakyLedger`) is compiled in; that feature is OFF in the prod
 # image (`just image` never passes it), so FlakyLedger stays out of shipping binaries.
-test-relay:
+# Depends on `web`: dpay-relay's build.rs embeds e2e/dist-prod (the /wallet route serves the real
+# app from it) and FAILS LOUD when it's missing — this dependency keeps every relay build honest.
+test-relay: web
     cargo nextest run -p dpay-relay --features test-helpers
 
 # historical alias — now equivalent to `test-relay` (test-helpers is always on for tests).
-test-relay-test-helpers:
+test-relay-test-helpers: web
     cargo nextest run -p dpay-relay --features test-helpers
 
 # emit the wire-layout JSON (single source of truth for the JS ed25519 signing shim) from the real Rust core
@@ -123,8 +125,9 @@ e2e-live-testnet:
 sim: build-canister
     cargo run -q -p dpay-sim
 
-# relay <-> real canister over ic-agent against a live local IC (offline); feature-gated
-test-live:
+# relay <-> real canister over ic-agent against a live local IC (offline); feature-gated.
+# Depends on `web`: builds dpay-relay, whose build.rs embeds e2e/dist-prod (fail-loud without it).
+test-live: web
     CARGO_TARGET_DIR="{{root}}/.dev/target-relay" cargo build -p dpay-canister --target wasm32-unknown-unknown --release
     DPAY_CANISTER_WASM="{{root}}/.dev/target-relay/wasm32-unknown-unknown/release/dpay_canister.wasm" CARGO_TARGET_DIR="{{root}}/.dev/target-relay" cargo nextest run -p dpay-relay --features agent,test-helpers
 
@@ -185,7 +188,8 @@ aid-parity:
 # path that test-relay's FakeLedger cannot (receipt recovery, TTL balance refresh, currency wiring).
 # Keeping it on the hot path closes the gap that once let a fail-closed-cap change break test-live
 # silently while `just verify` stayed green (MC2 U1 / OPEN_ISSUES #10 lesson).
-check: test-core test-canister test-relay test-live typecheck bridge-parity aid-parity merchant-wire wallet-wire wasm-core
+# (wallet-wire is GONE: /wallet is the real app now — its parity IS wasm-core + the e2e suite.)
+check: test-core test-canister test-relay test-live typecheck bridge-parity aid-parity merchant-wire wasm-core
     @echo "rust inner loop green"
 
 # Merchant-terminal wire parity: the hand-rolled JS request encoder embedded in the served HTML
@@ -194,19 +198,26 @@ check: test-core test-canister test-relay test-live typecheck bridge-parity aid-
 merchant-wire:
     node scripts/check-merchant-wire.mjs
 
-# Browser-wallet wire parity: the guarded wallet-wire-v2 block in wallet.html (wasm-core bindings
-# for request/signing/withdraw + pinned receipt verify + the JS BIP-39 codec) must stay byte-identical
-# to dpay-core + wire.mjs — and the same 24 words must derive the same key as the Android app
-# (restore-compat). Catches "web wallet signs garbage / restores a different account" drift, the
-# payer-side analog of merchant-wire.
 # Wasm-core parity: proves the COMMITTED crates/dpay-relay/assets/dpay-core.wasm (the bytes every
 # web surface loads) signs/builds byte-identically to the JS oracle — catches a stale or corrupted
 # staged artifact even when `just wasm` (which runs this same guard after rebuilding) wasn't run.
 wasm-core:
     node scripts/check-wasm-core.mjs
 
-wallet-wire:
-    node scripts/check-wallet-wire.mjs
+# Build the prod WEB build of the REAL app (app/App.tsx via react-native-web) → e2e/dist-prod:
+# the dist dpay-relay's build.rs embeds and serves at GET /wallet (+ /assets/*, immutable).
+# Gitignored — built here / at image time, never committed. Same wasm-backed DpayCore shim the
+# e2e suite exercises; the ONE divergent shim is the camera (real getUserMedia+jsQR vs inject).
+web:
+    cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps)
+    cd e2e && node node_modules/vite/bin/vite.js build --mode web-prod
+
+# Acceptance gate for the prod web wallet: builds the dist (`web`), serves the EXACT bytes a
+# real relay would, and drives them in headless chrome — DPAY_SELFCHECK PASS (wasm core boots),
+# onboarding against a real relay, identity persists across reload, wallet chrome renders,
+# screenshot proves pixels, zero console errors. Run after any web-shim / wallet.html change.
+web-smoke: web
+    cd e2e && node web-wallet-smoke.mjs
 
 # Build the frozen wire core (crates/dpay-wasm) for wasm32-unknown-unknown and stage it as the
 # committed relay asset crates/dpay-relay/assets/dpay-core.wasm (served at GET /dpay-core.wasm —
@@ -253,7 +264,9 @@ play-upload:
 demo:
     bash scripts/demo.sh
 
-# build the relay container image (host-built binary --features agent -> slim runtime; verified)
+# build the relay container image (host-built binary --features agent -> slim runtime; verified).
+# build.sh FIRST runs the prod web build of the real app (vite --mode web-prod → e2e/dist-prod),
+# which the relay's build.rs embeds — /wallet ships inside the binary, nothing else to stage.
 image:
     bash deploy/build.sh
 

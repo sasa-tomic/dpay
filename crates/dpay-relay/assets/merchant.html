@@ -211,7 +211,6 @@ function createRequest(){
   $('collectCard').classList.remove('muted');
   $('result').innerHTML='<div class="sub">waiting for the payer…</div>';
   lastCode=null; settled=false;
-  startScan().catch(()=>{});          // offline fallback: merchant scans the payer's QR
   startPoll();                        // online path: payer paid directly → detect it on-chain
 }
 function newCharge(){ stopScan(); clearInterval(pollTimer); currentNonce=null; settled=false; $('reqArea').style.display='none'; $('collectCard').classList.add('muted'); $('result').innerHTML=''; }

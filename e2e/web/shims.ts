@@ -6,13 +6,14 @@
 //
 // After this file evaluates, the real App.tsx can do:
 //   const {DpayCore, DpayNfc} = NativeModules;        // ← our shims
-//   await DpayCore.generateKeypair();                  // ← real Ed25519 over @noble/ed25519
+//   await DpayCore.generateKeypair();                  // ← the SHARED wasm core (dpay-core.wasm)
 //   await Share.share({message: addr});                // ← resolves dismissedAction (no crash)
 //
-// The ed25519 DpayCore shim is the ONLY money-critical shim; it produces a real, verify-compatible
-// wire (cross-validated against the Rust core's golden bytes in tests/00-cross-val.mjs).
+// The wasm-backed DpayCore shim is the ONLY money-critical shim; every byte it signs/decodes/
+// verifies goes through the same Rust `dpay-core` the Android app and the relay use (its only
+// JS-side crypto is verifyWire via @noble/ed25519, cross-validated against the golden bytes).
 import { NativeModules, Share } from 'react-native-web';
-import { DpayCore } from './dpay-core';
+import { DpayCore } from './dpay-core-wasm';
 import { DpayNfc, installNfcSeam } from './dpay-nfc';
 import { DpaySolNfc, installSolNfcSeam } from './dpay-sol-nfc';
 

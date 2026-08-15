@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Build the dpay-relay container image.
 #
-#   host build (in-project toolchain, --features agent)  →  deploy/dist/dpay-relay  →  docker build
+#   web build of the real app (vite --mode web-prod)  →  e2e/dist-prod  ┐
+#   host build (in-project toolchain, --features agent) → deploy/dist/dpay-relay  →  docker build
 #
 # Why a host build rather than a builder stage: the toolchain, the cargo cache and the vendored
 # crates already live in-project (see CLAUDE.md), so this reuses the warm cache and takes seconds
@@ -28,6 +29,15 @@ IMAGE="${DPAY_IMAGE:-dpay-relay:latest}"
 TARGET_DIR="$ROOT/.dev/target-relay"
 
 command -v docker >/dev/null 2>&1 || { echo "docker not found on PATH" >&2; exit 1; }
+
+# --- prod web build of the REAL app (embedded by dpay-relay's build.rs, served at /wallet) ------
+# /wallet IS app/App.tsx built for the web (react-native-web + the wasm DpayCore) — there is no
+# hand-written wallet anymore. The dist is gitignored, so it MUST be built here, before cargo:
+# dpay-relay fails to compile without it (deliberately loud — no stub wallet can ever ship).
+echo "== web build (real app → e2e/dist-prod; embedded as /wallet) =="
+( cd e2e && \
+  { [ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps; } && \
+  node node_modules/vite/bin/vite.js build --mode web-prod )
 
 echo "== build dpay-relay (release, --features agent) =="
 CARGO_TARGET_DIR="$TARGET_DIR" cargo build -q --release --locked -p dpay-relay --features agent

@@ -4,11 +4,12 @@
 //! - `GET /` — the marketing landing page (with a download CTA when an APK is configured).
 //! - `GET /download/dpay.apk` — the Android build, when one is configured; else `404`.
 //! - `GET /merchant` — the merchant terminal web page, driven by the merchant phone.
-//! - `GET /wallet` — the browser wallet (create/restore, balances, pay, receive, send, history).
+//! - `GET /wallet` — the REAL app (`app/App.tsx`) built for the web (react-native-web, wasm
+//!   DpayCore), embedded at compile time from `e2e/dist-prod`. Same app the APK ships.
+//! - `GET /assets/{path}` — the wallet build's content-hashed assets (immutable caching).
 //! - `GET /privacy` — the public privacy policy for the app, website, and merchant terminal.
-//! - `GET /noble-hashes.js|/wordlist.js` — the wallet's vendored crypto scripts (the BIP-39
-//!   codec's sha256 + wordlist; same-origin only; no CDN). All wire math + ed25519 signing +
-//!   receipt verification live in `GET /dpay-core.wasm` (the shared core), not vendored JS.
+//! - `GET /dpay-core.wasm` — the shared wire core (still the merchant terminal's signer; the
+//!   wallet build carries its own hashed copy under /assets/).
 //! - `GET /shots/{name}` — the real app screenshots embedded in the landing page.
 //! - `POST /api/v1/pay` — hands the payer's signed-authorization QR to the ledger and returns a
 //!   receipt. Two properties matter for the demo and are enforced here (not in the ledger):
@@ -50,6 +51,12 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
 use dpay_core::{Currency, SignedAuthorization, DEMO_USD, NONCE_LEN, PUBKEY_LEN};
+
+/// The prod web build of the real app, embedded at compile time (see build.rs — generated from
+/// `e2e/dist-prod`, which `just web` / deploy/build.sh produce; the build fails loud without it).
+mod web_dist {
+    include!(concat!(env!("OUT_DIR"), "/web_assets.rs"));
+}
 
 use crate::ledger::{
     CurrencyDescriptor, DepositRefresh, Ledger, LedgerError, MintedUtxo, PendingUtxo, Receipt,
@@ -198,12 +205,11 @@ pub fn app(state: AppState) -> Router {
         .route("/download/dpay.apk", get(apk_download))
         .route("/merchant", get(merchant_page))
         .route("/wallet", get(wallet_page))
+        .route("/assets/{*path}", get(web_asset))
         .route("/privacy", get(privacy_page))
         .route("/jsqr.js", get(jsqr_js))
         .route("/dpay-core.wasm", get(dpay_core_wasm))
         .route("/qrcode.js", get(qrcode_js))
-        .route("/noble-hashes.js", get(noble_hashes_js))
-        .route("/wordlist.js", get(wordlist_js))
         .route("/shots/{name}", get(screenshot))
         .nest("/api/v1", api)
         .with_state(state);
@@ -765,40 +771,49 @@ async fn privacy_page() -> Response {
         .into_response()
 }
 
-/// `GET /wallet` — the browser wallet (create/restore mnemonic, balances, pay, receive, send,
-/// history) so merchants/payers can use dpay without installing the APK. Same-origin + vendored
-/// scripts only (jsQR/qrcode/noble-hashes/wordlist); ALL wire math, ed25519 signing, and receipt
-/// verification run in the shared wasm core (`GET /dpay-core.wasm`) — the guarded wallet-wire-v2
-/// binding block inside the page is parity-checked against dpay-core by
-/// `scripts/check-wallet-wire.mjs` on every `just check`.
+/// `GET /wallet` — the REAL app (app/App.tsx) built for the web (react-native-web; every signing
+/// path through the shared dpay-core wasm — the same core the APK and this relay use), embedded at
+/// compile time from e2e/dist-prod. The hand-written wallet.html is gone; this page IS the app.
+/// Served `no-cache` (the HTML references content-hashed assets, so freshness here is the only
+/// lever needed — an over-cached HTML is exactly the APK-cache incident's class). The page's CSP
+/// `<meta>` cannot carry `frame-ancestors` (browsers ignore it there — console error), so the
+/// no-framing guarantee ships as a REAL response header on this route.
 async fn wallet_page() -> Response {
-    (
-        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        include_str!("../assets/wallet.html"),
-    )
-        .into_response()
+    let mut resp = serve_dist_asset("/wallet");
+    resp.headers_mut().insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static("frame-ancestors 'none'"),
+    );
+    resp
 }
 
-/// `GET /noble-hashes.js` — vendored `@noble/hashes` 1.6.0 (sha256 + internals, MIT),
-/// ESM→IIFE bundle assigning `globalThis.nobleHashes` (offline; no CDN). The wallet page's
-/// remaining vendored-crypto use is the BIP-39 codec's sha256 checksum (ed25519 itself moved to
-/// /dpay-core.wasm).
-async fn noble_hashes_js() -> Response {
-    (
-        [(header::CONTENT_TYPE, "application/javascript; charset=utf-8")],
-        include_str!("../assets/noble-hashes.js"),
-    )
-        .into_response()
+/// `GET /assets/{path}` — the wallet build's content-hashed assets (immutable, cache-forever:
+/// the hash IS the version). Unknown names are a clean 404; there is no catch-all.
+async fn web_asset(Path(path): Path<String>) -> Response {
+    serve_dist_asset(&format!("/assets/{path}"))
 }
 
-/// `GET /wordlist.js` — the BIP-39 English wordlist (public domain), byte-exact from
-/// app/lib/bip39-wordlist.ts, assigning `globalThis.DPAY_WORDLIST`.
-async fn wordlist_js() -> Response {
-    (
-        [(header::CONTENT_TYPE, "application/javascript; charset=utf-8")],
-        include_str!("../assets/wordlist.js"),
-    )
-        .into_response()
+/// Serve one embedded dist file by route, or 404. Hashed `assets/` files are immutable; the
+/// entry HTML is no-cache (see wallet_page).
+fn serve_dist_asset(route: &str) -> Response {
+    match web_dist::WEB_ASSETS.iter().find(|a| a.route == route) {
+        Some(asset) => {
+            let cache = if asset.immutable {
+                "public, max-age=31536000, immutable"
+            } else {
+                "no-cache"
+            };
+            (
+                [
+                    (header::CONTENT_TYPE, HeaderValue::from_static(asset.content_type)),
+                    (header::CACHE_CONTROL, HeaderValue::from_static(cache)),
+                ],
+                asset.bytes,
+            )
+                .into_response()
+        }
+        None => err(StatusCode::NOT_FOUND, "not found"),
+    }
 }
 
 /// `GET /jsqr.js` — the vendored QR decoder the terminal loads (offline; no CDN).

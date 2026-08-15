@@ -5,7 +5,7 @@
 // via the SAME tab IA every IC currency uses (no per-currency exception): Balances → select SOL →
 // Receive tab → "My address" sub-mode (the receive-mode-toggle right segment). The address is derived
 // IN-BROWSER from the real onboarding seed via the same SLIP-10 m/44'/501'/0'/0' path the device uses
-// (e2e/web/dpay-core.ts provides a real noble generateKeypair), so this is a true end-to-end check of
+// (e2e/web/dpay-core-wasm.ts provides a real wasm-core generateKeypair), so this is a true end-to-end check of
 // the derivation + rendering, not a stub.
 //
 // RPC is DISABLED in e2e (`__DPAY_TEST_SOLANA_RPC_URL=''`) so the balance shows "—" and no devnet

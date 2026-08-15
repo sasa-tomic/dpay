@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- Phone-first viewport: the RN styles are designed for a phone screen. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+    <meta name="theme-color" content="#06070a" />
+    <meta name="description" content="dpay web wallet — the same app, in your browser. Non-custodial: your key never leaves this device." />
+    <link rel="icon" href="data:," />
+    <title>dpay · Wallet</title>
+    <!-- CSP: wasm-unsafe-eval is REQUIRED (the DpayCore shim compiles /assets/dpay-core-*.wasm).
+         connect-src allows any scheme so the ?relay=<url> override (a user-chosen relay endpoint)
+         keeps working. frame-ancestors is NOT here — it is ignored via <meta> (console error);
+         the relay sends it as a real header on /wallet. -->
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https: http:; base-uri 'none'; object-src 'none'" />
+    <style>
+      /* `#root` must be a bounded flex column (mirrors e2e/web/index.html — see the note there):
+       * react-native-web's root uses flex:1, which collapses under a display:block parent. */
+      html, body, #root { margin: 0; padding: 0; height: 100%; background: #06070a; }
+      #root { display: flex; flex-direction: column; }
+    </style>
+    <script type="module" crossorigin src="/assets/wallet-CMSrD0un.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

@@ -2389,20 +2389,19 @@ async fn u4_receipt_pubkey_route_returns_ledger_test_key() {
     assert_eq!(led_pk.len(), 32, "32-byte Ed25519 pubkey");
 }
 
-// --- Browser wallet (GET /wallet + its vendored scripts) --------------------------------------
+// --- Web wallet (GET /wallet + /assets/* — the embedded prod build of the REAL app) ------------
 //
-// The wallet page is a full payer-side wallet in the browser: its guarded `wallet-wire-v2` block
-// (wasm-core bindings + request/signing/withdraw + BIP-39 codec) is parity-checked OFFLINE by
-// scripts/check-wallet-wire.mjs (which instantiates the staged dpay-core.wasm); these route tests
-// pin the serving surface — the page itself and the vendored noble/wordlist scripts it loads, all
-// same-origin (the CSP in the page enforces `default-src 'self'`; the routes must exist or the
-// page 404s its own dependencies).
+// /wallet is no longer a hand-written page: build.rs embeds `e2e/dist-prod` (the REAL app/App.tsx
+// built via react-native-web + the wasm DpayCore — `just web` produces it). The money-critical
+// parity of that build is proven elsewhere (wasm-core guard + the 74-flow e2e suite drives this
+// exact DpayCore surface); these route tests pin the SERVING surface: the page, its hashed assets,
+// the cache policy, and the removed legacy routes.
 
-/// `GET /wallet` serves the browser wallet page: the brand, the onboarding + tab id markers the
-/// e2e/browser smoke anchors on, the guarded wire fence, the wasm-core binding surface, and the
-/// vendored script tags (a missing tag = the page loads broken despite 200).
+/// `GET /wallet` serves the real-app dist HTML: the React root, a reference to the content-hashed
+/// entry asset, and the CSP that lets the page compile the wasm core. A missing/renamed hashed
+/// asset reference = the page loads broken despite 200, so the referenced asset is fetched too.
 #[tokio::test]
-async fn wallet_page_served_with_markers_and_scripts() {
+async fn wallet_page_serves_embedded_real_app_dist() {
     let payer = keypair();
     let merchant = keypair();
     let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
@@ -2413,76 +2412,75 @@ async fn wallet_page_served_with_markers_and_scripts() {
         headers.get(header::CONTENT_TYPE).unwrap(),
         "text/html; charset=utf-8"
     );
+    assert_eq!(
+        headers.get(header::CACHE_CONTROL).map(|v| v.to_str().unwrap()),
+        Some("no-cache"),
+        "/wallet HTML must be no-cache (it pins the hashed assets; a stale HTML is the APK-cache bug)"
+    );
     let html = String::from_utf8(bytes).unwrap();
-    // Brand + the page's unique element ids (onboarding, the four tabs, settings).
-    assert!(html.contains("d<b>pay</b>."), "/wallet must carry the brand");
-    for marker in [
-        "id=\"onboard\"",
-        "id=\"walletApp\"",
-        "id=\"tab-balances\"",
-        "id=\"tab-pay\"",
-        "id=\"tab-receive\"",
-        "id=\"tab-send\"",
-        "id=\"settings\"",
-        "wallet-wire-v2",   // the parity-guarded wasm-binding codec fence
-        "/dpay-core.wasm",  // the signing core the v2 fence loads
-    ] {
-        assert!(html.contains(marker), "/wallet must contain {marker}");
+    assert!(html.contains("id=\"root\""), "/wallet must carry the React root");
+    assert!(
+        html.contains("assets/wallet-"),
+        "/wallet must reference the content-hashed entry bundle"
+    );
+    assert!(
+        html.contains("wasm-unsafe-eval"),
+        "/wallet CSP must allow compiling the wasm core (a stripped directive bricks the app in prod)"
+    );
+    // The hand-written page is gone — none of its markers may survive.
+    for stale in ["wallet-wire-v2", "noble-hashes", "wordlist", "/ed25519.js"] {
+        assert!(!html.contains(stale), "/wallet must not contain stale marker {stale}");
     }
-    // The vendored scripts + the CSP that pins the page same-origin. ed25519.js is GONE (the wasm
-    // core signs); the CSP must carry 'wasm-unsafe-eval' or the browser refuses to compile it.
-    for script in ["/jsqr.js", "/qrcode.js", "/noble-hashes.js", "/wordlist.js"] {
-        assert!(html.contains(script), "/wallet must load {script}");
-    }
-    assert!(
-        html.contains("Content-Security-Policy"),
-        "/wallet must declare its CSP"
+
+    // The referenced entry asset serves as JavaScript with the immutable cache policy. The src is
+    // an absolute path (/assets/wallet-<hash>.js) — use it verbatim as the request path.
+    let start = html.find("assets/wallet-").expect("hashed entry reference") - "/".len();
+    let end = html[start..].find('"').expect("closing quote") + start;
+    let entry = &html[start..end];
+    let (status, headers, bytes) = call_raw(&state, get_req(entry)).await;
+    assert_eq!(status, StatusCode::OK, "{entry} must serve");
+    assert_eq!(
+        headers.get(header::CONTENT_TYPE).unwrap(),
+        "text/javascript; charset=utf-8"
     );
-    assert!(
-        html.contains("'wasm-unsafe-eval'"),
-        "/wallet CSP must allow compiling /dpay-core.wasm"
+    assert_eq!(
+        headers.get(header::CACHE_CONTROL).map(|v| v.to_str().unwrap()),
+        Some("public, max-age=31536000, immutable"),
+        "hashed assets must be immutable (the hash IS the version)"
     );
-    assert!(
-        !html.contains("/ed25519.js"),
-        "/wallet must not reference the removed /ed25519.js"
-    );
+    assert!(!bytes.is_empty(), "the entry bundle must have a body");
 }
 
-/// Each vendored wallet script serves as JavaScript; the removed /ed25519.js and an unknown path
-/// under those names are a clean 404 (mirrors the screenshots test — never a 200 with an empty body).
+/// Unknown asset names and the REMOVED legacy routes (the hand-written wallet's vendored scripts)
+/// are a clean 404 — never a 200 with an empty body. /jsqr.js (the merchant terminal's decoder)
+/// still serves.
 #[tokio::test]
-async fn wallet_scripts_served_and_unknown_path_is_404() {
+async fn wallet_assets_404_cleanly_and_legacy_routes_are_gone() {
     let payer = keypair();
     let merchant = keypair();
     let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
 
-    for path in ["/noble-hashes.js", "/wordlist.js"] {
-        let (status, headers, bytes) = call_raw(&state, get_req(path)).await;
-        assert_eq!(status, StatusCode::OK, "{path} must serve");
-        assert_eq!(
-            headers.get(header::CONTENT_TYPE).unwrap(),
-            "application/javascript; charset=utf-8"
-        );
-        assert!(!bytes.is_empty(), "{path} must have a body");
-        assert!(
-            String::from_utf8(bytes[..80.min(bytes.len())].to_vec())
-                .map(|s| s.starts_with("/*!"))
-                .unwrap_or(false),
-            "{path} must keep the vendored license header"
-        );
-    }
-    // The wordlist must be the real 2048-word BIP-39 list (first/last word check on the body).
-    let (_s, _h, bytes) = call_raw(&state, get_req("/wordlist.js")).await;
-    let js = String::from_utf8(bytes).unwrap();
-    assert!(js.contains("\"abandon"), "wordlist must start at 'abandon'");
-    assert!(js.contains("zoo\""), "wordlist must end at 'zoo'");
-
-    // No catch-all: a near-miss asset path — including the REMOVED /ed25519.js (its route was
-    // deleted with the asset when the wasm core took over signing) — is a clean 404.
-    for path in ["/nope.js", "/ed25519.js"] {
+    // No catch-all: near-miss/unknown asset paths 404.
+    for path in [
+        "/assets/does-not-exist-JsFkQ0.js",
+        "/assets/",
+        "/wallet.html.extra",
+        "/noble-hashes.js", // removed with the hand-written wallet
+        "/wordlist.js",     // removed with the hand-written wallet
+        "/ed25519.js",      // never coming back — the wasm core signs
+    ] {
         let (status, _h, _b) = call_raw(&state, get_req(path)).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{path} must 404");
     }
+
+    // The merchant terminal's decoder is NOT part of the wallet dist — it must keep serving.
+    let (status, headers, bytes) = call_raw(&state, get_req("/jsqr.js")).await;
+    assert_eq!(status, StatusCode::OK, "/jsqr.js must keep serving (merchant terminal dep)");
+    assert_eq!(
+        headers.get(header::CONTENT_TYPE).unwrap(),
+        "application/javascript; charset=utf-8"
+    );
+    assert!(!bytes.is_empty(), "/jsqr.js must have a body");
 }
 
 // --- Shared wasm core (GET /dpay-core.wasm) -----------------------------------------------------
