@@ -65,7 +65,7 @@
   <div class="card" id="chargeCard">
     <h2>1 · Charge</h2>
     <div class="step">Enter what the customer owes, then show them the QR.</div>
-    <div class="amountRow"><span>$</span><input id="amt" value="25.00" inputmode="decimal" /></div>
+    <div class="amountRow"><span>∂</span><input id="amt" value="25.00" inputmode="decimal" /></div>
     <button class="primary" id="createBtn">Create request</button>
     <div id="reqArea" style="display:none">
       <div class="reqLabel">Show this to the payer’s phone</div>
@@ -104,7 +104,7 @@
 <script src="/qrcode.js"></script>
 <script>
 const $ = id => document.getElementById(id);
-const usd = c => '$' + Math.floor(c/100) + '.' + String(c%100).padStart(2,'0');
+const demoAmt = c => '∂' + Math.floor(c/100) + '.' + String(c%100).padStart(2,'0');
 // Bounded fetch: aborts after `ms` so a hung relay never leaves the UI in "settling…" forever.
 // A timed-out fetch rejects with an AbortError (`e.name === 'AbortError'`); `isTimeout` lets the
 // caller surface an honest "timed out" message instead of a generic error.
@@ -158,7 +158,7 @@ function createRequest(){
   const reqStr=encodeRequest(MERCHANT_HEX, cents, currentNonce, expiry);
   const qr=qrcode(0,'M'); qr.addData(reqStr); qr.make();
   $('reqQr').innerHTML=qr.createSvgTag({cellSize:6, margin:2});
-  $('reqAmt').textContent=usd(cents);
+  $('reqAmt').textContent=demoAmt(cents);
   $('reqPid').textContent='request '+currentNonce.slice(0,12)+'…';
   $('reqArea').style.display='block';
   $('collectCard').classList.remove('muted');
@@ -186,8 +186,8 @@ function handleSettled(j){
   if(settled) return; settled=true;
   stopScan(); clearInterval(pollTimer);
   const fromLabel=j.from_name || rc.from.slice(0,16)+'…';
-  $('result').innerHTML=`<div class="paid">Paid ✓ ${usd(rc.amount)}</div>`
-    +`<div class="sub">payer balance now ${usd(rc.new_from_balance)}</div>`
+  $('result').innerHTML=`<div class="paid">Paid ✓ ${demoAmt(rc.amount)}</div>`
+    +`<div class="sub">payer balance now ${demoAmt(rc.new_from_balance)}</div>`
     +`<div class="mono">from ${fromLabel} · request ${rc.nonce.slice(0,12)}…</div>`;
   txns.push({amount:rc.amount, from:rc.from, name:j.from_name, time:new Date().toLocaleTimeString()});
   renderTxns();
@@ -200,7 +200,7 @@ function renderTxns(){
   if(!txns.length){ ul.innerHTML='<li class="empty">No payments yet.</li>'; return; }
   ul.innerHTML=txns.slice().reverse().map(t=>{
     const fromLabel=t.name || t.from.slice(0,8)+'…';
-    return `<li><span class="amt">${usd(t.amount)}</span><span class="meta">${fromLabel} · ${t.time}</span></li>`;
+    return `<li><span class="amt">${demoAmt(t.amount)}</span><span class="meta">${fromLabel} · ${t.time}</span></li>`;
   }).join('');
 }
 
@@ -219,7 +219,7 @@ async function submit(qr){
     const r=await fetchWithTimeout('/api/v1/pay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({qr})}, 30000);
     const j=await r.json();
     if(r.ok){
-      if(settled){ res.innerHTML=`<div class="warnmsg">↩ Already paid</div><div class="sub">${usd(j.receipt.amount)} — not charged twice</div>`; }
+      if(settled){ res.innerHTML=`<div class="warnmsg">↩ Already paid</div><div class="sub">${demoAmt(j.receipt.amount)} — not charged twice</div>`; }
       else handleSettled(j);
     }else{
       res.innerHTML=`<div class="refused">Refused</div><div class="sub">${j.error||'rejected'}</div>`;

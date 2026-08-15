@@ -23,7 +23,9 @@
 - **Role:** a SEPARATE facade wired to IC's FREE testnet chain-key tokens (ckBTC Testnet on Bitcoin
   Testnet4, ckSepoliaUSDC, ckSepoliaETH on Sepolia) — the live testnet path that closes OPEN_ISSUES
   #1/#2/#8. Same wasm as the prod facade; differs only in its registered currencies (DEMO + the 3
-  testnet chain-key currencies vs prod's DEMO + ckBTC + ckUSDC). The e2e-live Tier 1 flow
+  testnet chain-key currencies vs prod's DEMO + ckBTC + ckUSDC + ckETH — the prod catalog also
+  carries the same 3 testnet variants, hidden in-app behind the testnet toggle). The e2e-live Tier 1
+  flow
   (`e2e-live/tests/01-testnet-wiring.mjs`, `just e2e-live-testnet`) drives it end-to-end.
 - **Provisioning:** `scripts/dfx-deploy-ic-staging.sh` provisions the facade (200 TC) + a staging DUSD
   ledger (20 TC) from `ssqti`'s cycle balance (the `dpay` identity is in `ADMIN_CALLERS`). The staging

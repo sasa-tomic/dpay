@@ -82,10 +82,10 @@ export const EXPECTED_RECEIPT_PUBKEY =
 export const WALLETCONNECT_PROJECT_ID =
   ((globalThis as unknown as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID ?? '648afbc757419fa381f77ba0c900bc85');
 
-// Solana RPC endpoint for the native device-key SOL rail (balance/send). Config-driven: the MVP
-// defaults to the public DEVNET endpoint (the PoC key on devnet is funded; no signup/key needed). An
-// operator switches to mainnet (api.mainnet-beta.solana.com) or a paid provider (Helius/QuickNode)
-// by editing this one line — no key is required for the public endpoints. The test override
+// Solana RPC endpoint for the native device-key SOL rail (balance/send). Config-driven: the baked
+// default is the MAINNET Helius endpoint (keyed; wired 2026-08-09 — before that the rail ran on the
+// public devnet endpoint). Devnet is selected by editing this one line; IS_SOLANA_DEVNET derives
+// from the URL and badges the SOL screens accordingly. The test override
 // `__DPAY_TEST_SOLANA_RPC_URL=''` DISABLES SOL for the offline inner loop (jest.setup.js sets it
 // globally; the e2e driver injects it via evaluateOnNewDocument): an empty URL makes the SOL balance
 // hook no-op and the SOL card render with `—`, so jest/e2e never touch real devnet. Mirrors the
@@ -96,8 +96,8 @@ export const SOLANA_RPC_URL =
 
 // Whether the configured SOL RPC is a devnet endpoint. Derived from the URL so it stays correct
 // when an operator flips SOLANA_RPC_URL. Used to badge SOL screens ("DEVNET") and warn on the
-// receive-address sheet that mainnet SOL sent here would be invisible — a real fund-loss risk while
-// the rail ships on devnet. A prod build that leaves this true is caught by scripts/check-prod-sol.mjs.
+// receive-address sheet while on devnet — mainnet SOL sent to a devnet key is a real fund-loss
+// risk. A prod build that leaves this true is caught by scripts/check-prod-sol.mjs.
 export const IS_SOLANA_DEVNET = /devnet|testnet/i.test(SOLANA_RPC_URL);
 
 export const WITHDRAW_TIMEOUT_MS = 8000; // bound the /withdraw POST (every new fetch has a timeout)

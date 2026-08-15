@@ -1,10 +1,10 @@
 # Positioning — the main pitch
 
-*This is dpay's primary go-to-market story. Lead with it in decks, demos, and marketing. Last updated 2026-07-20; asset-availability facts are dated and should be re-verified before any public promise.*
+*This is dpay's primary go-to-market story. Lead with it in decks, demos, and marketing. Last updated 2026-08-15; asset-availability facts are dated and should be re-verified before any public promise.*
 
 ## One-liner
 
-**Tap to pay abroad — even when your phone has no signal.** Hold dollars, euros, or crypto; pay a local merchant in seconds; your phone never needs a connection.
+**Tap to pay abroad — even when your phone has no signal.** Instant payments that work offline; hold dollars or crypto, pay a local merchant in seconds; your phone never needs a connection.
 
 ## Who / what
 
@@ -31,18 +31,18 @@ UI rule (extends the existing one): show the **currency** the user thinks in —
 
 ## Speed & finality
 
-The "seconds" promise comes from settling on the **Internet Computer**, where chain-key token transfers finalize in ~1–2s. Native layer-1 settlement can't match this — real Bitcoin mainnet blocks are ~10 minutes — so **"pay with BTC" means ckBTC on the IC**, not a mainnet Bitcoin transaction. The same holds for other assets: dpay's instant, final tap is an IC-ledger property.
+The "seconds" promise comes from settling on the **Internet Computer**, where chain-key token transfers finalize in ~1–2s. Native layer-1 settlement can't match this — real Bitcoin mainnet blocks are ~10 minutes — so **"pay with BTC" means ckBTC on the IC**, not a mainnet Bitcoin transaction. The same holds for other assets: dpay's instant, final tap is an IC-ledger property. (SOL is the exception: it settles natively on Solana, also ~1s, via the device-key rail.)
 
 ## Asset availability & roadmap (as of 2026-07)
 
 | Currency | Asset on IC | Status (Jul 2026) | Notes |
 |----------|-------------|-------------------|-------|
-| USD | ckUSDC (also ckUSDT) | **Live** — primary launch rail | The default; tourist lingua franca. |
+| USD | ckUSDC | **Live** — primary launch rail | The default; tourist lingua franca. (ckUSDT = future ckERC20 candidate.) |
 | BTC | ckBTC | **Live** | Fast & final on IC; not mainnet BTC. |
 | ETH | ckETH | **Live** | Same. |
-| ICP | native ICP | **Live** | Native IC ledger asset. |
+| ICP | — | **Not offered** | No ICP rail in the prod catalog (verified 2026-08-15); do not promise. |
 | EUR | EURC (→ chain-key ERC-20) | **Near-term** | EURC is EMI/MiCA-licensed and the dominant euro stablecoin. Since the MiCA transitional period closed 30 Jun 2026, only licensed euro stablecoins are legal to offer in the EU — EURC qualifies. Bringing it to the IC as a ck-ERC20 is feasible; **verify ckEURC minting/liquidity before promising**. |
-| SOL | ckSOL | **Roadmap** | Chain Fusion can interact with Solana (t-Ed25519 + SOL RPC canister), but a per-asset ckSOL minter is **not confirmed available** — do not promise SOL for launch. |
+| SOL | native rail (device-key, direct RPC) | **Shipped in-app** | SOL + USDC-on-Solana settle natively (~1s); mainnet RPC live in the shipped APK. ckSOL-on-IC: no minter exists — not available. |
 | CHF | (none on IC yet) | **Roadmap, nascent** | CHFAU (AllUnity, MiCA-compliant) launched ~Feb 2026 on Ethereum; Safirum CHF-S planned Q3 2026 on Solana; a UBS-led Swiss-bank sandbox runs on Ethereum through 2026 (institutional). No ckCHF exists; liquidity is thin. Treat CHF as "coming as issuance matures." |
 
 ## Why we win where it matters (abroad)
@@ -58,4 +58,4 @@ The "seconds" promise comes from settling on the **Internet Computer**, where ch
 
 ## Scope
 
-The **PoC stays single-`$` / ckUSDC** with the two-scan offline flow. Multi-currency, multi-crypto, and the tourist framing are the **pitch and roadmap** layered on top — the story we sell and build toward, not PoC work. Nothing here changes the non-custodial or no-swap non-negotiables; it operationalizes them for a multi-currency world.
+**Shipped today (2026-08-15):** DEMO $ + mainnet ckBTC/ckUSDC/ckETH + the native SOL rail; NFC tap-to-pay + QR offline fallback; multi-currency is the product, not the roadmap. Nothing here changes the non-custodial or no-swap non-negotiables; it operationalizes them for a multi-currency world.
