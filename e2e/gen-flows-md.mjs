@@ -21,7 +21,12 @@ function journeyTable(tests, journey) {
   const inJ = tests.filter((t) => t.meta.journey === journey);
   if (inJ.length === 0) return '';
   const rows = inJ
-    .map((t) => `| ${t.meta.id} | ${mdEscape(t.meta.name)} | ${mdEscape(t.meta.verifies ?? '')} | ${(t.meta.covers ?? []).map(mdEscape).join(', ')} |`)
+    .map((t) => {
+      // Optional flows stay cataloged (they exist + are runnable) but are marked: they are excluded
+      // from the default `just e2e` enumeration and run via their dedicated filter token instead.
+      const name = t.meta.optional ? `${mdEscape(t.meta.name)} — optional (\`just e2e-store\`)` : mdEscape(t.meta.name);
+      return `| ${t.meta.id} | ${name} | ${mdEscape(t.meta.verifies ?? '')} | ${(t.meta.covers ?? []).map(mdEscape).join(', ')} |`;
+    })
     .join('\n');
   return `### ${JOURNEY_TITLE[journey] ?? journey}\n\n| # | Flow | Verifies | Covers |\n|---|------|----------|--------|\n${rows}\n`;
 }
@@ -72,12 +77,15 @@ function howToAddSection() {
 async function main() {
   const tests = await loadTestsMeta();
   const count = tests.length;
+  const optionalCount = tests.filter((t) => t.meta.optional).length;
+  const defaultCount = count - optionalCount;
   const journeysUsed = JOURNEYS.filter((j) => tests.some((t) => t.meta.journey === j));
 
   const header = [
     '# E2E Test Flows — Manifest',
     '',
-    `> The authoritative catalog of every user flow tested by the e2e harness (\`e2e/\`). **${count} flows.**`,
+    `> The authoritative catalog of every user flow tested by the e2e harness (\`e2e/\`). **${count} flows**`,
+    `> (${defaultCount} in the default \`just e2e\` run${optionalCount > 0 ? `, ${optionalCount} optional capture-only flow${optionalCount === 1 ? '' : 's'} via the dedicated recipe` : ''}).`,
     '> Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome',
     '> against a real test relay (FakeLedger, offline). No UI stubs. The only shimmed I/O boundary is',
     '> the camera scan (sanctioned smallest-boundary seam) and the NFC radio (physical-device gate).',
@@ -86,13 +94,15 @@ async function main() {
     '> hand-edit the tables — edit the `meta` and re-run. Only the "Coverage gaps" / "How to add" prose',
     '> is hand-maintained (inside that script).',
     '>',
-    '> **Run:** `just e2e` (all flows, ~18s) · `DPAY_E2E_FILTER=07 node e2e/run.mjs` (one flow) ·',
-    '> `DPAY_E2E_FILTER=pay node e2e/run.mjs` (a whole journey) · `DPAY_E2E_FILTER=07,15 node e2e/run.mjs` (subset).',
+    '> **Run:** `just e2e` (all default flows, ~18s) · `DPAY_E2E_FILTER=07 node e2e/run.mjs` (one flow) ·',
+    '> `DPAY_E2E_FILTER=pay node e2e/run.mjs` (a whole journey) · `DPAY_E2E_FILTER=07,15 node e2e/run.mjs` (subset) ·',
+    '> `just e2e-store` (the optional Play Store capture flow).',
     '',
     '## Coverage matrix',
     '',
     'Flows grouped by user journey; within each table, every row lists what the flow **verifies** and',
-    'the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`).',
+    'the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked',
+    '`optional` are render-only capture harnesses excluded from the default run.',
     '',
     journeysUsed.map((j) => `${j} (${tests.filter((t) => t.meta.journey === j).length})`).join(' · '),
     '',
@@ -116,7 +126,7 @@ async function main() {
   ].join('\n');
 
   writeFileSync(OUT, out);
-  console.log(`[gen-flows-md] wrote ${OUT} (${count} flows across ${journeysUsed.length} journeys)`);
+  console.log(`[gen-flows-md] wrote ${OUT} (${count} flows across ${journeysUsed.length} journeys; ${optionalCount} optional, ${defaultCount} in the default run)`);
 }
 
 main().catch((e) => { console.error(`[gen-flows-md] FATAL: ${e.stack || e.message}`); process.exit(1); });

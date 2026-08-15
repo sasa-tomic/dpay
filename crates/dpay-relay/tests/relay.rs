@@ -2039,8 +2039,11 @@ async fn withdraw_wrong_sig_rejected_no_funds_move() {
     };
     let (status, body) = call(&state, withdraw_json(&req)).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    // "bad signature" is the FakeLedger's literal rejection string (fake.rs) — the same message the
+    // canister surfaces. Asserted verbatim (not merely "signature") so this relay-direct test is a
+    // lossless replacement for the browser flow-18 probe it absorbed on 2026-08-15.
     assert!(
-        body["error"].as_str().unwrap().contains("signature"),
+        body["error"].as_str().unwrap().contains("bad signature"),
         "error={body}"
     );
     assert_eq!(

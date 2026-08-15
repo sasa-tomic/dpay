@@ -4,6 +4,9 @@
 // This is a VISUAL capture harness (like flow 35), not a behavior test. Its GREEN contract is
 // "every screen rendered without throwing" — the screenshots are the product. The compose script
 // (`e2e/store-assets/compose.mjs`) turns these raw captures into 1080×1920 Play Store images.
+//
+// `optional: true` keeps this OFF the default `just e2e` path (~37s of render-only capture that is
+// not a behavior gate); `just e2e-store` runs it on demand (DPAY_E2E_FILTER=store-screens).
 import { setup, onboardWallet, accountOf, seedDeposit, refreshDeposit, postPay, assert, selectCurrency, openReceiveAddress } from '../harness/lib.mjs';
 import { decodeRequest } from '../harness/wire.mjs';
 
@@ -14,6 +17,7 @@ export const meta = {
   covers: ['visual-capture', 'store-screenshots'],
   verifies: 'Visual capture: 5 hero screenshots for Play Store compositing (wallet, request, balances, ledger, deposit).',
   timeoutMs: 45000,
+  optional: true,
 };
 
 export async function run() {

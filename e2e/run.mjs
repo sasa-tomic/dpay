@@ -99,11 +99,21 @@ function resolveConcurrency() {
  * Discover + filter the tests via the shared metadata loader. A token matches on filename (legacy),
  * meta.id, meta.name, meta.journey, or a covers slug — so `DPAY_E2E_FILTER=pay` runs the whole pay
  * journey, `=07` runs flow 07, `=scan-pay` runs by slug, `=receipt` runs every flow covering receipts.
- * Comma-separated for several. Empty = all. Returns objects with `{file, id, name, path, meta}`.
+ * Comma-separated for several. Empty = all (minus `meta.optional` flows — see below). Returns
+ * objects with `{file, id, name, path, meta}`.
+ *
+ * OPTIONAL flows: a flow marked `meta.optional = true` (e.g. 39-store-screens, a render-only
+ * capture harness with no behavior contract) is EXCLUDED from the default enumeration so `just e2e`
+ * is a pure behavior gate. It stays reachable via ANY explicit filter token that matches it
+ * (id/name/journey/covers/filename — e.g. `just e2e-store` filters on `store-screens`), so the
+ * optional flow is never orphaned. An explicit filter ALWAYS wins over the exclusion.
  */
 export async function loadTests() {
   const all = await loadTestsMeta();
-  return filterByToken(all, process.env.DPAY_E2E_FILTER ?? '');
+  const filterRaw = process.env.DPAY_E2E_FILTER ?? '';
+  const tokens = filterRaw.split(',').map((s) => s.trim()).filter(Boolean);
+  const pool = tokens.length === 0 ? all.filter((t) => !t.meta?.optional) : all;
+  return filterByToken(pool, filterRaw);
 }
 
 /** Race `promise` against a hard timeout; reject with a labeled, debuggable error on expiry. The

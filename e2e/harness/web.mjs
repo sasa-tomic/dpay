@@ -2,7 +2,7 @@
 // serves `e2e/dist` via sirv on a free port, offline, on 127.0.0.1. The relay URL is passed to the
 // app via the `?relay=` query param — see `e2e/web/relay-config.ts` (the entry the app's
 // `./relayConfig` import is aliased to).
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { createConnection } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -124,12 +124,46 @@ export async function pickFreePort() {
   });
 }
 
+/** Regex-escape a literal for use inside a `pkill -f` pattern (it is a POSIX ERE, not a plain
+ *  string). Escaping keeps the sweep TIGHT: the pattern must match the exact sirv invocation this
+ *  harness spawns for OUR dist root, never an unrelated node process that merely contains the
+ *  substring. */
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Reap ORPHANED sirv servers before spawning a fresh one. Killed harness runs (SIGKILL, a host OOM,
+ * a lost `kill -9` race) can leave the tracked sirv child reparented to PID 1, still bound to its
+ * free port forever — 22 had accumulated by 2026-08-15. The `process.on('exit')` SIGKILL net cannot
+ * fire when Node itself dies without an exit event, so this spawn-time sweep is the source fix: it
+ * kills every process whose command line is EXACTLY the harness's sirv invocation for this repo's
+ * e2e/dist root. Scoped so tightly (binary path + dist path + `--single`) that an unrelated node
+ * process cannot match. NOTE: parallel `run.mjs` invocations are already required to be serialized
+ * (the e2e/dist build cache is a shared path — see FLOWS.md conventions), so a LIVE sibling run's
+ * sirv is never a casualty under documented usage. `pkill` absence (non-Linux) is swallowed.
+ */
+function reapOrphanedSirv() {
+  const pattern = `sirv-cli/bin\\.js ${escapeRegex(DIST)} --single`;
+  try {
+    execFileSync('pkill', ['-f', pattern], { stdio: 'ignore' });
+    console.log('[web] reaped orphaned sirv server(s) serving this dist root');
+  } catch (e) {
+    // exit code 1 = no process matched (the common case); ENOENT = no pkill (non-Linux). Both fine.
+    const nomatch = typeof e.status === 'number';
+    if (!nomatch && e.code !== 'ENOENT') {
+      console.warn(`[web] sirv reap failed (continuing): ${e.message}`);
+    }
+  }
+}
+
 /**
  * Serve `e2e/dist` on a free port via sirv-cli. Returns `{ port, baseURL, stop }`. Throws (does not
  * hang) if sirv fails to start or the port never opens.
  */
 export async function serveWeb(opts = {}) {
   if (!existsSync(INDEX_HTML)) throw new Error(`serveWeb: ${INDEX_HTML} missing — call buildWeb first`);
+  reapOrphanedSirv(); // kill leftover servers from killed harness runs BEFORE binding our own
   const port = opts.port ?? await pickFreePort();
   const baseURL = `http://127.0.0.1:${port}`;
   const sirvBin = join(E2E_DIR, 'node_modules', 'sirv-cli', 'bin.js');

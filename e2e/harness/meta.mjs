@@ -6,6 +6,11 @@
 //     covers: ['scan', 'sign', ...],  // short slugs of the behaviors this flow verifies (filterable)
 //     verifies: 'Payer scans → ...',  // concise one-liner for the FLOWS.md catalog (human prose)
 //     timeoutMs: 20000,               // per-test timeout the orchestrator enforces (hang backstop)
+//     optional: true,                 // EXCLUDED from the default `just e2e` enumeration (run.mjs
+//                                      // drops it when DPAY_E2E_FILTER is empty); reachable only via
+//                                      // an explicit filter token (e.g. `just e2e-store`). For
+//                                      // non-gate flows (render-only capture harnesses). gen-flows-md
+//                                      // marks the FLOWS.md row accordingly.
 //   };
 //
 // This module is the SINGLE reader both `run.mjs` (filter + coverage matrix + per-test timeout) and

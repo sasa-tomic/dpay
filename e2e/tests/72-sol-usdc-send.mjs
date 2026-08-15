@@ -13,24 +13,33 @@
 //      instruction card renders (`sol-send-instructions`) — the form is suppressed so the user
 //      can never submit a doomed USDC send.
 //   4. The instruction text honestly explains the one-time ATA setup requirement.
+//   5. ONE-TAP CREATE (2026-08-14 send-side setup card — was a dead-end message): tapping
+//      `btn-sol-send-ata-create` runs the REAL createUsdcAta path through the stubbed seam —
+//      busy state (`sol-ata-busy`) while the create confirms, then the ATA flips to existing and
+//      the send form (`sol-send-address-input`) replaces the card.
+//   6. CREATE FAILURE: when the stub's broadcast rejects, `sol-ata-err` renders the (verbatim)
+//      error and the sheet stays usable — the create button returns, not busy, still tappable.
 //
-// The happy-path SPL send (both ATAs present → sign + broadcast) is proven in jest
-// (solana-seam.test.ts → "builds + broadcasts the SPL transfer when both ATAs exist"). This flow
-// covers the UI-visible fail-closed gate that jest structurally cannot see.
+// The happy-path SPL send (both ATAs present → sign + broadcast) is covered by flow 77; the jest
+// byte-exact tx proof lives in solana-seam.test.ts. This flow covers the UI-visible gate + the
+// one-tap setup lifecycle that jest structurally cannot see.
 //
 // Uses `setup({solStub: true})` so the Solana rail + Solana USDC row are coherent. The stub's
-// getAccountInfo returns `{value: null}` → the device's USDC ATA is absent → the gate blocks.
+// getAccountInfo is STATEFUL (mutable via `__DPAY_TEST_ATA_STATE`): it starts absent (the gate),
+// and the sendTransaction wrapper flips it on a successful create — exactly what the real chain
+// would do.
 //
-// Selector contract: `asset-sol-usdc-select`, `tab-pay`, `btn-pay-send`, `sol-send-instructions`.
+// Selector contract: `asset-sol-usdc-select`, `tab-pay`, `btn-pay-send`, `sol-send-instructions`,
+// `btn-sol-send-ata-create`, `sol-ata-busy`, `sol-ata-err`, `sol-send-address-input`.
 import {setup, assert, assertIncludes, onboardWallet, openBalances} from '../harness/lib.mjs';
 
 export const meta = {
   id: '72',
   name: 'sol-usdc-send',
   journey: 'system',
-  covers: ['sol-usdc-send', 'spl-transfer', 'fail-closed-ata', 'asset-aware-send'],
-  verifies: 'Solana USDC "Send to address" renders the one-tap device-ATA setup card when the ATA is absent (no doomed SPL send; the setup creates it on-chain for a disclosed one-time rent).',
-  timeoutMs: 30000,
+  covers: ['sol-usdc-send', 'spl-transfer', 'fail-closed-ata', 'asset-aware-send', 'ata-create-one-tap'],
+  verifies: 'Solana USDC "Send to address": fail-closed device-ATA gate → one-tap create (busy → form appears) and the create-failure leg (err shown, sheet stays usable).',
+  timeoutMs: 40000,
 };
 
 export async function run() {
@@ -43,16 +52,31 @@ export async function run() {
     console.log('[72-sol-usdc-send] onboarding…');
     await onboardWallet(driver, 'e2e-sol-usdc-send');
 
-    // Stub: funded SOL (getBalance) + ABSENT USDC ATA (getAccountInfo → null). The absent ATA drives
-    // the fail-closed assertion below. No broadcast happens in this flow.
+    // Stateful stub: funded SOL (getBalance) + a MUTABLE device-ATA existence flag. `ataExists`
+    // starts false (the fail-closed gate below); the sendTransaction wrapper models
+    // createUsdcAta's broadcast — it holds the busy window open long enough to observe
+    // `sol-ata-busy`, can be told to fail (the error leg), and flips the ATA to existing on
+    // success (what the real chain does). The post-create USDC poll then reads a known-zero
+    // token balance → status 'balance' → `usdcAtaAbsent` false → the form appears.
     await driver.eval(() => {
+      const st = {ataExists: false, createDelayMs: 2500, failCreate: false};
+      globalThis.__DPAY_TEST_ATA_STATE = st;
       globalThis.__DPAY_TEST_SOLANA_RPC_STUB = {
-        getLatestBlockhash: () => ({value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
+        getGenesisHash: () => '5eykt4UsFv8PJdTREpY1vzqKqZKvdpKuc147dw2N9d',
+        getLatestBlockhash: () => ({context: {slot: 250000000}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
         getMinimumBalanceForRentExemption: () => 1447680,
-        sendTransaction: () => 'sig_unused',
-        getSignatureStatuses: () => ({value: [{confirmationStatus: 'confirmed'}]}),
-        getAccountInfo: () => ({value: null}),
+        sendTransaction: async () => {
+          await new Promise((resolve) => setTimeout(resolve, st.createDelayMs));
+          if (st.failCreate) throw new Error('e2e stub: create ATA broadcast rejected');
+          st.ataExists = true;
+          return 'sig_ata_' + Math.random().toString(36).slice(2, 12);
+        },
+        getSignatureStatuses: () => ({context: {slot: 250000001}, value: [{confirmationStatus: 'confirmed'}]}),
+        getAccountInfo: () => (st.ataExists
+          ? {value: {data: ['', 'base64'], owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', lamports: 2039280}}
+          : {value: null}),
         getBalance: () => ({value: 5000000000}),
+        getTokenAccountBalance: () => ({value: {amount: '0', decimals: 6, uiAmount: 0, uiAmountString: '0'}}),
       };
     });
 
@@ -93,6 +117,57 @@ export async function run() {
     console.log('[72-sol-usdc-send] ✓ send form suppressed (no doomed submit possible)');
 
     await driver.screenshot('72-sol-usdc-send');
+
+    // 5. ONE-TAP CREATE — the happy lifecycle. The create button renders on the card (funded SOL →
+    //    enabled). Tap it: the REAL createUsdcAta runs (getBalance pre-check → blockhash → sign →
+    //    sendTransaction → confirm, all through the stub). While the stubbed broadcast holds, the
+    //    card is in its busy state; when it resolves, the ATA exists and the next USDC poll flips
+    //    `usdcAtaAbsent` → the form replaces the card.
+    console.log('[72-sol-usdc-send] tapping "Create my USDC account" (happy path)…');
+    const createBtn = await driver.findByTestID('btn-sol-send-ata-create', {timeoutMs: 8_000});
+    const createDisabled = await createBtn.evaluate((n) => n.getAttribute('aria-disabled') === 'true' || n.disabled === true);
+    assert(createDisabled === false, 'the create button must be enabled (SOL funded above the rent floor)');
+    await driver.click('btn-sol-send-ata-create', {timeoutMs: 5_000});
+
+    // Busy state: the stubbed broadcast holds ~2.5s, so `sol-ata-busy` (which REPLACES the button)
+    // is observable. If the create were instant, this would be a flaky race — the delay makes it
+    // deterministic.
+    await driver.findByTestID('sol-ata-busy', {timeoutMs: 2_000});
+    console.log('[72-sol-usdc-send] ✓ busy state rendered while the create confirms');
+
+    // Completion: the ATA now exists → the USDC poll reads a (known-zero) balance → the setup card
+    // unmounts and the REAL send form appears.
+    await driver.findByTestID('sol-send-address-input', {timeoutMs: 15_000});
+    console.log('[72-sol-usdc-send] ✓ create completed — the send form appeared');
+    await driver.screenshot('72-sol-usdc-send-created');
+
+    // 6. CREATE FAILURE — the sheet stays usable. Flip the ATA back to absent (the next USDC poll,
+    //    150ms fast-poll seam, re-mounts the gate) and make the stubbed broadcast REJECT. Tap
+    //    create again: `sol-ata-err` renders the error verbatim (friendlySolError passes an
+    //    unmatched stub message through), the busy state clears, and the create button returns —
+    //    the sheet is not bricked by a failed create.
+    console.log('[72-sol-usdc-send] re-gating + failing the create (error leg)…');
+    await driver.eval(() => {
+      const st = globalThis.__DPAY_TEST_ATA_STATE;
+      st.ataExists = false;
+      st.failCreate = true;
+      st.createDelayMs = 300;
+    });
+    await driver.waitGone('sol-send-address-input', {timeoutMs: 8_000});
+    await driver.findByTestID('btn-sol-send-ata-create', {timeoutMs: 8_000});
+    await driver.click('btn-sol-send-ata-create', {timeoutMs: 5_000});
+
+    const errEl = await driver.findByTestID('sol-ata-err', {timeoutMs: 8_000});
+    const errTxt = await errEl.evaluate((n) => (n.textContent ?? '').trim());
+    assertIncludes(errTxt, 'create ATA broadcast rejected', 'the setup card should surface the create failure verbatim');
+    console.log('[72-sol-usdc-send] ✓ create failure surfaced');
+
+    // Usable again: the button is back (not the busy indicator) and still tappable.
+    await driver.findByTestID('btn-sol-send-ata-create', {timeoutMs: 5_000});
+    const busyAfterErr = await driver.eval(() => !!document.querySelector('[data-testid="sol-ata-busy"]'));
+    assert(busyAfterErr === false, 'the busy indicator must clear after a failed create');
+    console.log('[72-sol-usdc-send] ✓ sheet usable after failure (create button returned, not busy)');
+    await driver.screenshot('72-sol-usdc-send-error');
 
     const elapsed = ((Date.now() - start) / 1000).toFixed(2);
     console.log(`[72-sol-usdc-send] GREEN in ${elapsed}s`);

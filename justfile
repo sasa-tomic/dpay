@@ -51,6 +51,8 @@ wire-layout:
 # browser (chrome-headless-shell), offline + seconds-fast. The inner-loop UI/flow gate — it BOTH
 # drives every flow through the real app AND screenshots each state (shots land in e2e/shots/),
 # superseding the old parallel-component ui/ harness (removed). Add a flow = add `e2e/tests/NN-name.mjs`.
+# Runs the DEFAULT enumeration: every flow except `meta.optional` render-only capture harnesses
+# (flow 39 runs via `just e2e-store`). 74 flows at the moment.
 e2e:
     cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps)
     cd e2e && node run.mjs
@@ -58,7 +60,7 @@ e2e:
 # visual-regression gate (fast iteration on flow 40 alone): re-capture the 5 primary surfaces and
 # pixel-diff each vs its committed baseline (e2e/shots/baselines/). Fails on drift >0.5%. Catches the
 # exact class of style/layout regression that sails through the testID+textContent e2e net. NOTE:
-# flow 40 IS part of the suite (00-43), so `just verify` → `check e2e` already runs the pixel-diff —
+# flow 40 IS part of the default suite (74 flows), so `just verify` → `check e2e` already runs the pixel-diff —
 # this standalone recipe re-runs ONLY flow 40 in isolation for fast feedback after a UI tweak (no
 # banner, no other flows). On an intentional UI change, regenerate the baselines via
 # `just e2e-visual-seed` and commit the new baselines (the diff is reviewable in the commit).
@@ -72,6 +74,14 @@ e2e-visual:
 e2e-visual-seed:
     cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps)
     cd e2e && DPAY_E2E_REGEN_BASELINES=1 DPAY_E2E_FILTER=40 node run.mjs
+
+# Play Store screenshot capture (flow 39) — an assert(true) render-only contract sweep, NOT a
+# behavior gate, so it is EXCLUDED from the default `just e2e` run (saves ~37s) via its
+# `meta.optional = true` marker. This recipe is its dedicated entry point; the raw captures feed
+# `e2e/store-assets/compose.mjs` for marketing compositing.
+e2e-store:
+    cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps)
+    cd e2e && DPAY_E2E_FILTER=store-screens node run.mjs
 
 # watch mode (Phase 3): a LONG-RUNNING dev loop that re-runs a SUBSET of flows on every change to
 # app/, e2e/, crates/dpay-core/src/, or crates/dpay-ffi/src/. The changed file is mapped to a journey
@@ -333,6 +343,16 @@ cleanup wipe='': stop
       echo "  ✓ app/shots/ cleared"
     else
       echo "  · app/shots: none"
+    fi
+
+    # orphaned e2e web-root servers: killed harness runs (SIGKILL'd before the async teardown)
+    # leave sirv reparented to PID 1, holding its port forever. The harness also self-reaps at
+    # spawn time (e2e/harness/web.mjs); this is the operator-side sweep for the backlog.
+    # Tightly scoped: the exact sirv-cli bin path + this repo's e2e/dist root + --single flag.
+    if pkill -f "sirv-cli/bin\\.js {{root}}/e2e/dist --single" 2>/dev/null; then
+      echo "  ✓ orphaned e2e sirv servers reaped"
+    else
+      echo "  · orphaned sirv: none"
     fi
 
     if [ "{{wipe}}" = "wipe" ]; then

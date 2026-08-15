@@ -1,6 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **74 flows.**
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **75 flows**
+> (74 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay (FakeLedger, offline). No UI stubs. The only shimmed I/O boundary is
 > the camera scan (sanctioned smallest-boundary seam) and the NFC radio (physical-device gate).
@@ -9,15 +10,17 @@
 > hand-edit the tables — edit the `meta` and re-run. Only the "Coverage gaps" / "How to add" prose
 > is hand-maintained (inside that script).
 >
-> **Run:** `just e2e` (all flows, ~18s) · `DPAY_E2E_FILTER=07 node e2e/run.mjs` (one flow) ·
-> `DPAY_E2E_FILTER=pay node e2e/run.mjs` (a whole journey) · `DPAY_E2E_FILTER=07,15 node e2e/run.mjs` (subset).
+> **Run:** `just e2e` (all default flows, ~18s) · `DPAY_E2E_FILTER=07 node e2e/run.mjs` (one flow) ·
+> `DPAY_E2E_FILTER=pay node e2e/run.mjs` (a whole journey) · `DPAY_E2E_FILTER=07,15 node e2e/run.mjs` (subset) ·
+> `just e2e-store` (the optional Play Store capture flow).
 
 ## Coverage matrix
 
 Flows grouped by user journey; within each table, every row lists what the flow **verifies** and
-the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`).
+the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
+`optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (7) · pay (20) · offline (7) · deposit (8) · withdraw (6) · nfc (5) · system (17) · tour (3)
+wire (1) · onboard (7) · pay (20) · offline (7) · deposit (8) · withdraw (7) · nfc (5) · system (17) · tour (3)
 
 ---
 
@@ -94,11 +97,12 @@ wire (1) · onboard (7) · pay (20) · offline (7) · deposit (8) · withdraw (6
 | # | Flow | Verifies | Covers |
 |---|------|----------|--------|
 | 15 | withdraw | Withdraw ckBTC: enter addr + amount → sign on-device → settle; success screen + Copy destination; balance debits at both the ledger AND the UI (Balances row drops to 0.00050000 BTC). | withdraw, sign, settle, clipboard, balance-delta, destination-copy, ui-balance-delta |
-| 18 | withdraw-errors | Withdraw errors: below-min / over-balance / bad-addr UI guards (confirm disabled) + relay 422 (bad-sig/insufficient). | withdraw-errors, below-min, over-balance, bad-sig, bad-addr |
+| 18 | withdraw-errors | Withdraw UI guards: below-min / over-balance / bad-addr warnings disable the confirm button (relay 4xx gates covered relay-direct in relay.rs). | withdraw-errors, below-min, over-balance, bad-addr |
 | 44 | cketh-withdraw | Withdraw native ckETH: Cash-out button renders for a CkEthErc20 + token_contract=null asset; enter 0x addr + ETH amount → sign on-device at 18-dec Wei → settle; balance debits at both the ledger AND the UI (family-dispatch UI path). | native-eth-withdraw, cketh, family-dispatch, withdraw, sign, settle, balance-delta, ui-balance-delta |
 | 48 | ckusdc-withdraw | ckUSDC Cash-out: the flipped cashable gate renders Cash-out for a ckERC20 token; enter 0x addr + USDC amount → gas-dependency note renders → sign on-device at 6-dec → settle; balance debits at both the ledger AND the UI. | ckerc20-offramp, cashable-gate, ckusdc, withdraw, sign, settle, balance-delta, ui-balance-delta, gas-note |
 | 52 | sol-withdraw | SOL withdraw: select SOL → Pay tab "Send to address" → enter addr+amount → sign+broadcast (stub) → Sent ✓. | sol-withdraw, sol-send, sol-tab-ia, sign |
 | 56 | withdraw-saved-addr | A successful withdraw persists the destination (AsyncStorage); reopening the sheet shows a "Use last" chip that pre-fills the address input. | saved-address, btn-withdraw-saved, withdraw-persist |
+| 77 | sol-usdc-withdraw | USDC send to address: happy path (USDC units + rent disclosure note → Sent ✓) and the below-rent pre-check failure (friendly error, no Sent). | sol-usdc-withdraw, spl-transfer, ata-note, rent-precheck, sol-send |
 
 ### NFC (tap-to-pay)
 
@@ -128,7 +132,7 @@ wire (1) · onboard (7) · pay (20) · offline (7) · deposit (8) · withdraw (6
 | 69 | sol-usdc-selection | IC USDC ↔ Solana USDC: unified picker switches rail + clears amount (symmetric in both directions). | asset-picker, ic-usdc, sol-usdc, rail-switch, amount-clear |
 | 70 | deeplink-ic-routing | A dpay:req deeplink arriving while SOL is idle-selected routes to the IC Pay engine (PayMode review), not SolPayMode — the blob is never silently lost. | deeplink-routing, ic-engine-routing, solana-to-ic-handoff, prefill-preserve |
 | 71 | selection-lock | An in-flight pay review locks the idle asset selection: the Balances button is disabled + a no-op, and canceling the review re-enables it. | selection-lock, in-flight-preserve, balances-disable, nfc-arming-invariant |
-| 72 | sol-usdc-send | Solana USDC "Send to address" renders the one-tap device-ATA setup card when the ATA is absent (no doomed SPL send; the setup creates it on-chain for a disclosed one-time rent). | sol-usdc-send, spl-transfer, fail-closed-ata, asset-aware-send |
+| 72 | sol-usdc-send | Solana USDC "Send to address": fail-closed device-ATA gate → one-tap create (busy → form appears) and the create-failure leg (err shown, sheet stays usable). | sol-usdc-send, spl-transfer, fail-closed-ata, asset-aware-send, ata-create-one-tap |
 | 75 | seam-fail-loud | Every injection seam (scan/NFC/SOL-NFC) throws when no listener is mounted — regression guard against silent-drop bugs. | seam-integrity, fail-loud, regression-guard |
 | 76 | sol-usdc-ata-gate | USDC receive gate: absent→setup card + Request blocked; insufficient→disabled; funded→one-tap create flips to the address QR; balance→direct address. | sol-usdc, ata-gate, tri-state, ata-setup-card, request-block, ata-create |
 
@@ -137,7 +141,7 @@ wire (1) · onboard (7) · pay (20) · offline (7) · deposit (8) · withdraw (6
 | # | Flow | Verifies | Covers |
 |---|------|----------|--------|
 | 35 | ux-tour | Visual capture: screenshots of every major screen (Pay, Receive+QR, Balances, Settings, Ledger) for review. | visual-capture, screen-census, screenshots |
-| 39 | store-screens | Visual capture: 5 hero screenshots for Play Store compositing (wallet, request, balances, ledger, deposit). | visual-capture, store-screenshots |
+| 39 | store-screens — optional (`just e2e-store`) | Visual capture: 5 hero screenshots for Play Store compositing (wallet, request, balances, ledger, deposit). | visual-capture, store-screenshots |
 | 40 | visual-regression | Pixel-diff the 5 primary surfaces (Pay, Receive+QR, Balances, Settings, Ledger) vs committed baselines; fails on drift >0.5%. | visual-regression, pixel-diff |
 
 ---

@@ -1,35 +1,33 @@
-// Flow 18 — Withdraw error paths (folded: below-min, over-balance, relay-level rejects).
+// Flow 18 — Withdraw error paths (folded: below-min, over-balance, bad-address UI guards).
 //
-// The withdrawal path has TWO layers of error handling, both exercised here against the REAL relay:
-//   1. APP-LEVEL UI GUARDS (the first line of defense): the WithdrawSheet gates `canReview` on
-//      `!belowMin && !overBalance`, so an invalid amount shows an inline warning + a DISABLED
-//      confirm button — the error never reaches the relay. Proven via the visible warning text.
-//   2. RELAY-LEVEL ENFORCEMENT (the API-level gate): POST /api/v1/withdraw verifies the Ed25519 sig
-//      under `from`, then rejects below-min / insufficient / wrong-sig / nonce-reused with HTTP 422.
-//      Driven DIRECTLY via postWithdraw (signed by the byte-exact wire.mjs helper), proving the
-//      relay is the authoritative gate the UI guards mirror. (Covered exhaustively in relay unit
-//      tests relay.rs; this proves the same gate live over HTTP.)
+// The withdrawal path has TWO layers of error handling:
+//   1. APP-LEVEL UI GUARDS (the first line of defense) — covered HERE, browser-driven through the
+//      REAL WithdrawSheet: the sheet gates `canReview` on `!belowMin && !overBalance && !badAddr`,
+//      so an invalid amount/address shows an inline warning + a DISABLED confirm button — the
+//      error never reaches the relay. Proven via the visible warning text.
+//   2. RELAY-LEVEL ENFORCEMENT (the API gate): POST /api/v1/withdraw's 4xx rejects (bad signature /
+//      insufficient funds / below-min / nonce reuse) need NO browser — they are covered
+//      exhaustively + money-safely by the relay-direct unit tests in crates/dpay-relay/tests/
+//      relay.rs (withdraw_wrong_sig_rejected_no_funds_move, withdraw_below_min_rejected,
+//      withdraw_insufficient_funds_releases_nonce_for_retry, …), which assert status + error code
+//      + no-debit against the same route the app calls. They were moved out of this flow on
+//      2026-08-15 (this flow previously POSTed them over HTTP — duplicating the relay tests while
+//      holding the browser open for cases that never touch it).
 //
-// Folds ALL three withdraw error scenarios into ONE test (speed: onboard once, reuse the sheet):
-//   - Below-min: 10_000 sats < the 50_000 retrieve_btc_min_amount → UI warning + relay 422.
-//   - Over-balance: 1_000_000 sats > the 100_000 balance → UI warning + relay InsufficientFunds.
-//   - Wrong-sig: a sig under a DIFFERENT key → relay 422 "bad signature" (no UI guard; only the
-//     relay catches this since the app always signs correctly).
+// Folds the three UI-guard scenarios into ONE test (speed: onboard once, reuse the sheet):
+//   - Below-min: 10_000 sats < the 50_000 retrieve_btc_min_amount → UI warning + confirm disabled.
+//   - Over-balance: 1_000_000 sats > the 100_000 balance → UI warning + confirm disabled.
+//   - Wrong-chain address (ETH 0x… in the BTC cash-out) → warning + confirm disabled (the
+//     documented invalid-address gap, closed).
 //
 // Selector contract: `balance` (header → Balances), `asset-ckbtc-select` (BTC row whole-row
 // select), `btn-pay-send` (Pay → "Send to address"), `withdraw-address-input`,
 // `withdraw-amount-input`, `btn-withdraw-confirm` (asserted disabled via the dim style / no review
 // card).
-//
-// Also covers INVALID-ADDRESS validation (the documented gap, now closed): the app validates the
-// destination format family-aware — a wrong-chain address (ETH 0x… in the BTC cash-out) shows a
-// warning + disables the confirm button.
-import { setup, assert, assertEq, seedDeposit, refreshDeposit, getBalance, postWithdraw, onboardWallet, accountOf, openBalances, selectCurrency, openPaySend, assertDisabled } from '../harness/lib.mjs';
-import { signWithdrawalHex, randNonceHex, generateKeypair } from '../harness/wire.mjs';
+import { setup, assert, seedDeposit, refreshDeposit, onboardWallet, openBalances, selectCurrency, openPaySend, assertDisabled, accountOf } from '../harness/lib.mjs';
 
 const DEPOSIT_CURRENCY = 1; // ckBTC — matches the CkBtcUtxo catalog entry
 const SEED_SATS = 100_000;   // 0.00100000 BTC — enough to withdraw but small enough to over-draw
-const MIN_SATS = 50_000;     // retrieve_btc_min_amount (mirrors the live minter + the relay constant)
 const DEST = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
@@ -39,8 +37,8 @@ export const meta = {
   id: '18',
   name: 'withdraw-errors',
   journey: 'withdraw',
-  covers: ['withdraw-errors', 'below-min', 'over-balance', 'bad-sig', 'bad-addr'],
-  verifies: 'Withdraw errors: below-min / over-balance / bad-addr UI guards (confirm disabled) + relay 422 (bad-sig/insufficient).',
+  covers: ['withdraw-errors', 'below-min', 'over-balance', 'bad-addr'],
+  verifies: 'Withdraw UI guards: below-min / over-balance / bad-addr warnings disable the confirm button (relay 4xx gates covered relay-direct in relay.rs).',
   timeoutMs: 20000,
 };
 
@@ -53,11 +51,9 @@ export async function run() {
 
     // Onboard + seed ckBTC so the WithdrawSheet has a balance to draw from + an asset card to open.
     await onboardWallet(driver, 'e2e-werr');
-    const identity = await accountOf(driver);
-    const accountHex = identity.publicHex;
+    const accountHex = (await accountOf(driver)).publicHex;
     await seedDeposit(relayBaseURL, accountHex, DEPOSIT_CURRENCY, SEED_SATS);
     await refreshDeposit(relayBaseURL, accountHex, DEPOSIT_CURRENCY);
-    assertEq(await getBalance(relayBaseURL, accountHex, DEPOSIT_CURRENCY), String(SEED_SATS), 'seeded ckBTC balance');
     // Open Balances; wait for the funded ckBTC row, then SELECT ckBTC → Pay → "Send to address".
     await openBalances(driver);
     await driver.waitForText('0.00100000 BTC', { timeoutMs: 8_000 });
@@ -95,59 +91,6 @@ export async function run() {
       `bad-addr warning should show. body excerpt:\n${bodyBad.slice(0, 500)}`);
     await assertDisabled(driver, 'btn-withdraw-confirm', 'confirm must be DISABLED for a wrong-chain address');
     console.log('[18-withdraw-errors] ✓ invalid-address warning + confirm disabled');
-
-    // Close the inline withdraw body so the relay-level checks below are a clean separate phase.
-    // Flipping the toggle back to "Scan to pay" unmounts the WithdrawSheet.
-    await driver.click('btn-pay-scan', { timeoutMs: 4_000 });
-    await driver.waitGone('withdraw-address-input', { timeoutMs: 4_000 });
-
-    // --- 3. RELAY-LEVEL enforcement (the API gate the UI mirrors): drive POST /api/v1/withdraw
-    //     directly with a REAL on-device-style signed request, one per rejection case. -------------
-    const exp = Math.floor(Date.now() / 1000) + 600;
-    const destWallet = { secretHex: identity.secretHex, publicHex: accountHex };
-
-    // 3a. Below-min: a properly-signed withdraw for 10_000 sats (< 50_000) → relay 422.
-    console.log('[18-withdraw-errors] relay: below-min rejection…');
-    {
-      const nonce = randNonceHex();
-      const sig = await signWithdrawalHex(destWallet.secretHex, accountHex, DEST, 10_000, nonce, exp, DEPOSIT_CURRENCY);
-      const r = await postWithdraw(relayBaseURL, { from: accountHex, destination: DEST, amount: 10_000, nonce, expiry: exp, currency: DEPOSIT_CURRENCY, sig });
-      assert(!r.ok && r.status === 422, `below-min withdraw must be 422, got status=${r.status} body=${JSON.stringify(r.body)}`);
-      assert(typeof r.body?.error === 'string' && /below.*retrieve_btc_min_amount/i.test(r.body.error),
-        `below-min error text should mention retrieve_btc_min_amount, got "${r.body?.error}"`);
-      console.log(`[18-withdraw-errors] ✓ relay rejected below-min (422): "${r.body.error}"`);
-    }
-
-    // 3b. Insufficient funds: a properly-signed withdraw for 1_000_000 sats (> 100_000 balance) → 422.
-    console.log('[18-withdraw-errors] relay: insufficient-funds rejection…');
-    {
-      const nonce = randNonceHex();
-      const sig = await signWithdrawalHex(destWallet.secretHex, accountHex, DEST, 1_000_000, nonce, exp, DEPOSIT_CURRENCY);
-      const r = await postWithdraw(relayBaseURL, { from: accountHex, destination: DEST, amount: 1_000_000, nonce, expiry: exp, currency: DEPOSIT_CURRENCY, sig });
-      assert(!r.ok && r.status === 422, `over-balance withdraw must be 422, got status=${r.status}`);
-      assert(typeof r.body?.error === 'string' && /InsufficientFunds/i.test(r.body.error),
-        `over-balance error text should mention InsufficientFunds, got "${r.body?.error}"`);
-      console.log(`[18-withdraw-errors] ✓ relay rejected insufficient (422): "${r.body.error}"`);
-    }
-
-    // 3c. Wrong signature: a sig under a DIFFERENT key (the app always signs correctly, so this is
-    //     only reachable via a malicious/buggy client — the relay is the sole gate) → 422.
-    console.log('[18-withdraw-errors] relay: bad-signature rejection…');
-    {
-      const attacker = await generateKeypair();
-      const nonce = randNonceHex();
-      // Sign under the ATTACKER's key but claim `from` = the real wallet → sig verify fails.
-      const sig = await signWithdrawalHex(attacker.secretHex, accountHex, DEST, MIN_SATS, nonce, exp, DEPOSIT_CURRENCY);
-      const r = await postWithdraw(relayBaseURL, { from: accountHex, destination: DEST, amount: MIN_SATS, nonce, expiry: exp, currency: DEPOSIT_CURRENCY, sig });
-      assert(!r.ok && r.status === 422, `wrong-sig withdraw must be 422, got status=${r.status}`);
-      assert(typeof r.body?.error === 'string' && /bad signature/i.test(r.body.error),
-        `wrong-sig error text should say "bad signature", got "${r.body?.error}"`);
-      console.log(`[18-withdraw-errors] ✓ relay rejected bad sig (422): "${r.body.error}"`);
-    }
-
-    // Money-safety: none of the rejected withdraws moved any funds (balance unchanged).
-    assertEq(await getBalance(relayBaseURL, accountHex, DEPOSIT_CURRENCY), String(SEED_SATS),
-      'ckBTC balance unchanged after all rejected withdraws (no funds moved)');
 
     await driver.screenshot('18-withdraw-errors');
 
