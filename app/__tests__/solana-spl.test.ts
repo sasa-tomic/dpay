@@ -5,7 +5,6 @@ import {
   ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
   USDC_MINT_ADDRESS,
   USDC_DECIMALS,
-  SYSTEM_PROGRAM_ADDRESS,
   RENT_SYSVAR_ADDRESS,
   SOL_ATA_SETUP_MIN_LAMPORTS,
   deriveAta,
@@ -14,6 +13,7 @@ import {
   buildCreateAtaIdempotentInstruction,
   buildCanonicalUsdcMessage,
 } from '../solana/spl';
+import {SYSTEM_PROGRAM_ADDRESS} from '../solana/constants';
 import {
   base58Decode32,
   signTransaction,

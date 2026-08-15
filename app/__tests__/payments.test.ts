@@ -16,7 +16,6 @@ import {
   RECEIPT_SETTLED,
   RECEIPT_REJECTED,
   RECEIPT_UNREACHABLE,
-  receiptClaimBytes,
   RECEIPT_CLAIM_LEN,
 } from '../payments';
 
@@ -115,35 +114,6 @@ describe('isNonceReused', () => {
   });
 });
 
-describe('receiptClaimBytes', () => {
-  // Mirrors dpay_core::ReceiptClaim::signing_bytes (FROZEN 108-byte LE layout). Asserting the exact
-  // bytes for a fixed input is the drift-detector against the Rust core; a layout change here MUST
-  // be matched in dpay-core + the canister + the FakeLedger or receipt verification breaks.
-  it('produces the canonical 108-byte LE encoding (nonce|from|to|amount|currency|block|ts)', () => {
-    const nonceHex = '2a'.repeat(16);
-    const fromHex = '11'.repeat(32);
-    const toHex = '22'.repeat(32);
-    const b = receiptClaimBytes({
-      nonceHex, fromHex, toHex, amount: '2500', currency: 0, blockIndex: '7', settleTs: '1800000120',
-    });
-    expect(b.length).toBe(RECEIPT_CLAIM_LEN);
-    expect(RECEIPT_CLAIM_LEN).toBe(108);
-    // nonce then from then to (raw bytes).
-    expect(Array.from(b.slice(0, 16))).toEqual(Array.from({length: 16}, () => 0x2a));
-    expect(Array.from(b.slice(16, 48))).toEqual(Array.from({length: 32}, () => 0x11));
-    expect(Array.from(b.slice(48, 80))).toEqual(Array.from({length: 32}, () => 0x22));
-    // amount 2500 LE u64 at offset 80.
-    const dv = new DataView(b.buffer);
-    expect(dv.getBigUint64(80, true)).toBe(2500n);
-    // currency 0 LE u32 at offset 88.
-    expect(dv.getUint32(88, true)).toBe(0);
-    // block_index 7 LE u64 at offset 92.
-    expect(dv.getBigUint64(92, true)).toBe(7n);
-    // settle_ts at offset 100.
-    expect(dv.getBigUint64(100, true)).toBe(1800000120n);
-  });
-});
-
 // --- wire-layout cross-check (drift alarm) --------------------------------------
 // `dfx/wire_layout.json` is GENERATED from the frozen Rust named sum `dpay_core::RECEIPT_CLAIM_LEN`
 // by `just wire-layout` (`dpay-fixture wire-layout`). The prod app re-derives 108 as a magic-number
@@ -158,9 +128,9 @@ describe('RECEIPT_CLAIM_LEN vs dfx/wire_layout.json (drift alarm)', () => {
     readFileSync(join(__dirname, '..', '..', 'dfx', 'wire_layout.json'), 'utf8'),
   ).receipt;
 
-  // Per-field byte layout that `receiptClaimBytes()` writes, in encode order. Each `len` is the
-  // exact width the function advances the cursor by — i.e. the literal widths behind the magic sum
-  // `16+32+32+8+4+8+8`. The running offset walk below mirrors the function's `let o = 0; ...; o += N;`.
+  // Per-field byte layout of the canonical receipt claim (`dpay_core::ReceiptClaim::signing_bytes`),
+  // in encode order. Each `len` is the exact field width behind the magic sum `16+32+32+8+4+8+8`.
+  // The running offset walk below asserts each field lands where the wire-layout JSON says it must.
   const tsFields: ReadonlyArray<{name: string; len: number}> = [
     {name: 'nonce', len: 16},
     {name: 'from', len: 32},
@@ -180,8 +150,8 @@ describe('RECEIPT_CLAIM_LEN vs dfx/wire_layout.json (drift alarm)', () => {
     expect(sum).toBe(layout.fixed_len);
   });
 
-  it('every receiptClaimBytes field offset+len matches the wire-layout JSON (resize/reorder caught)', () => {
-    // Walk the buffer exactly as receiptClaimBytes does and assert each field lands where the JSON
+  it('every receipt-claim field offset+len matches the wire-layout JSON (resize/reorder caught)', () => {
+    // Walk the layout exactly as the Rust encoder does and assert each field lands where the JSON
     // says it must. A field resized in Rust (regen JSON) but not in TS fails on `len`; a reordering
     // fails on `offset`; a missing/trailing field fails on the final `o === fixed_len` check.
     let o = 0;

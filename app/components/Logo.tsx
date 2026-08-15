@@ -1,5 +1,6 @@
 import {Text} from 'react-native';
 import Svg, {Defs, RadialGradient, Stop, Rect, Path} from 'react-native-svg';
+import {C} from '../config/palette';
 import {S} from '../styles';
 
 // The mint-green geometric "d" used by both the app icon and the in-app emblem. Bowl LEFT, ascender
@@ -15,13 +16,13 @@ export function Logo({size = 96}: {size?: number}) {
           <Stop offset="1" stopColor="#0a0c11" />
         </RadialGradient>
         <RadialGradient id="dphalo" cx="0.5" cy="0.4" r="0.5">
-          <Stop offset="0" stopColor="#3ee0ac" stopOpacity="0.32" />
-          <Stop offset="1" stopColor="#3ee0ac" stopOpacity="0" />
+          <Stop offset="0" stopColor={C.brand} stopOpacity="0.32" />
+          <Stop offset="1" stopColor={C.brand} stopOpacity="0" />
         </RadialGradient>
       </Defs>
       <Rect x="0" y="0" width="1024" height="1024" rx="228" fill="url(#dpbg)" />
       <Rect x="0" y="0" width="1024" height="1024" rx="228" fill="url(#dphalo)" />
-      <Path d={D_PATH} fill="#3ee0ac" />
+      <Path d={D_PATH} fill={C.brand} />
     </Svg>
   );
 }

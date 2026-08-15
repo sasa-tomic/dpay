@@ -528,7 +528,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
       <ScrollView style={S.scroll} contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
         {mode === 'pay'
           ? (activeSol && solAddress
-              ? <SolPayMode identity={identity} online={online} nfcReady={nfc === 'ready'} solBalance={solBalance ?? '0'} usdcBalance={usdcState.amount ?? '0'} usdcAtaAbsent={usdcState.status === 'absent'} selectedToken={selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL'} onSent={refreshSol} onSentUsdc={refreshUsdc} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} onLockChange={setSelectionLocked} />
+              ? <SolPayMode identity={identity} nfcReady={nfc === 'ready'} solBalance={solBalance ?? '0'} usdcBalance={usdcState.amount ?? '0'} usdcAtaAbsent={usdcState.status === 'absent'} selectedToken={selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL'} onSent={refreshSol} onSentUsdc={refreshUsdc} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} onLockChange={setSelectionLocked} />
               : <PayMode
                   identity={identity} online={online} relayUrl={relayUrl} nfcStatus={nfc}
                   onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance}
@@ -545,7 +545,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
           : mode === 'receive'
           ? (activeSol && solAddress
               ? <SolReceiveMode
-                  identity={identity} online={online} nfcReady={nfc === 'ready'} solAddress={solAddress}
+                  identity={identity} nfcReady={nfc === 'ready'} solAddress={solAddress}
                   subMode={receiveSubMode} onSubModeChange={setReceiveSubMode}
                   selectedToken={selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL'}
                   assets={assets}

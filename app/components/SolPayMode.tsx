@@ -35,7 +35,7 @@ import {useReportLock} from '../hooks/useReportLock';
  * NFC arming: this component mounts only while the SOL rail is selected. Switching the rail unmounts
  * it, whose `useNfcTapState` cleanup disarms the HCE card — no arm-leak.
  */
-export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAtaAbsent, selectedToken, onSent, onSentUsdc, ataSetupBusy = false, ataSetupErr = null, onCreateAta, subMode, onSubModeChange, onLockChange}: {identity: Identity; online: boolean; nfcReady: boolean; solBalance: string; usdcBalance: string; usdcAtaAbsent: boolean; selectedToken: 'SOL' | 'USDC'; onSent: () => void; onSentUsdc: () => void; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; onLockChange?: (locked: boolean) => void}) {
+export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAtaAbsent, selectedToken, onSent, onSentUsdc, ataSetupBusy = false, ataSetupErr = null, onCreateAta, subMode, onSubModeChange, onLockChange}: {identity: Identity; nfcReady: boolean; solBalance: string; usdcBalance: string; usdcAtaAbsent: boolean; selectedToken: 'SOL' | 'USDC'; onSent: () => void; onSentUsdc: () => void; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; onLockChange?: (locked: boolean) => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid'>('scan');
   const [req, setReq] = useState<SolReqV2 | null>(null);
   const [solpayUri, setSolpayUri] = useState<string | null>(null);
@@ -102,7 +102,10 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
       setErr(null);
       setPhase('review');
     } catch (e: unknown) {
-      setErr(`bad request QR: ${e instanceof Error ? e.message : String(e)}`);
+      // Same honest-contract split as PayMode's decode failure: the user gets friendly copy (never
+      // the raw codec error), the dev cause goes to the console.
+      console.warn('solpay decode failed:', e);
+      setErr('This isn\'t a dpay payment code');
     }
   }
 

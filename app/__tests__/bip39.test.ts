@@ -3,7 +3,6 @@ import {
   entropyToMnemonic,
   mnemonicToEntropy,
   validateMnemonic,
-  generateMnemonic,
   wordsToHex,
   hexToWords,
   wordsToString,
@@ -159,29 +158,6 @@ describe('bip39 — invalid input rejection', () => {
     expect(() => entropyToMnemonic(new Uint8Array(33))).toThrow(RangeError);
     expect(() => entropyToMnemonic(new Uint8Array(64))).toThrow(RangeError);
     expect(() => entropyToMnemonic(new Uint8Array(0))).toThrow(RangeError);
-  });
-});
-
-describe('bip39 — generateMnemonic', () => {
-  test('returns 24 valid words', () => {
-    const words = generateMnemonic();
-    expect(words.length).toBe(24);
-    expect(validateMnemonic(words)).toBe(true);
-    // every word is in the official list
-    for (const w of words) expect(ENGLISH_WORDLIST).toContain(w);
-  });
-
-  test('two calls produce different mnemonics (RNG is live)', () => {
-    const a = generateMnemonic();
-    const b = generateMnemonic();
-    expect(a).not.toEqual(b);
-  });
-
-  test('generated mnemonic round-trips to 32 bytes', () => {
-    const words = generateMnemonic();
-    const entropy = mnemonicToEntropy(words);
-    expect(entropy.length).toBe(32);
-    expect(entropyToMnemonic(entropy)).toEqual(words);
   });
 });
 

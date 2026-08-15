@@ -5,7 +5,6 @@ import {
   encodeCompactU16,
   decodeCompactU16,
   extractSignedTxParts,
-  verifySignedTransaction,
   assembleMessage,
   buildMemoInstruction,
   solreqMemoData,
@@ -114,12 +113,9 @@ describe('solana/tx — signed transfer', () => {
 });
 
 // ============================================================================
-// F3 — defense-in-depth merchant signature verify. The merchant extracts the fee-payer signature +
-// message from the raw signed tx bytes and verifies the ed25519 signature LOCALLY before broadcasting
-// (Solana rejects a bad sig anyway; this is the fast, local, pre-broadcast check that mirrors the IC
-// receipt-verify posture). The verify is PURE + TOTAL — a malformed tx returns false, never throws,
-// and callers treat false as NON-BLOCKING (log + still broadcast) so a parse edge case can never
-// strand a legitimate payment.
+// Legacy signed-tx parser primitives — the foundation verifySolPayment (below) builds on. The
+// merchant path extracts the fee-payer signature + message from the raw signed tx bytes. The parse
+// is PURE + TOTAL — a malformed tx returns null, never throws.
 // ============================================================================
 describe('decodeCompactU16 — varint decoder (inverse of encodeCompactU16)', () => {
   test('decodes single-byte values', () => {
@@ -160,39 +156,6 @@ describe('extractSignedTxParts — legacy signed-tx layout parse', () => {
   test('returns null (no throw) on garbage bytes — the e2e harness carries placeholder tx bytes', () => {
     const dummy = new Uint8Array(Array.from('dummy-signed-tx-bytes').map(c => c.charCodeAt(0)));
     expect(extractSignedTxParts(dummy)).toBeNull();
-  });
-});
-
-describe('verifySignedTransaction — F3 defense-in-depth merchant verify', () => {
-  test('returns true for a genuinely-signed transfer', () => {
-    const kp = deriveSolanaKeypair(SEED_HEX);
-    const wire = buildSignedTransfer(kp.seed, kp.publicKey, TO_ADDRESS, LAMPORTS, BLOCKHASH_ZEROS);
-    expect(verifySignedTransaction(wire)).toBe(true);
-  });
-
-  test('returns false when a signature byte is flipped (tampered sig)', () => {
-    const kp = deriveSolanaKeypair(SEED_HEX);
-    const wire = buildSignedTransfer(kp.seed, kp.publicKey, TO_ADDRESS, LAMPORTS, BLOCKHASH_ZEROS);
-    const tampered = Uint8Array.from(wire);
-    tampered[1] ^= 0x01; // flip a bit in the first signature byte
-    expect(verifySignedTransaction(tampered)).toBe(false);
-  });
-
-  test('returns false when a message byte is flipped (tampered amount/recipient)', () => {
-    const kp = deriveSolanaKeypair(SEED_HEX);
-    const wire = buildSignedTransfer(kp.seed, kp.publicKey, TO_ADDRESS, LAMPORTS, BLOCKHASH_ZEROS);
-    const tampered = Uint8Array.from(wire);
-    tampered[tampered.length - 1] ^= 0x01; // flip a byte in the message tail (a data byte)
-    expect(verifySignedTransaction(tampered)).toBe(false);
-  });
-
-  test('returns false (no throw) on an empty array', () => {
-    expect(verifySignedTransaction(new Uint8Array(0))).toBe(false);
-  });
-
-  test('returns false (no throw) on placeholder/garbage bytes (e2e harness dummy tx)', () => {
-    const dummy = new Uint8Array(Array.from('dummy-signed-tx-bytes').map(c => c.charCodeAt(0)));
-    expect(verifySignedTransaction(dummy)).toBe(false);
   });
 });
 

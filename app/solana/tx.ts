@@ -11,8 +11,8 @@ import { sha256 } from '@noble/hashes/sha256';
 import bs58 from 'bs58';
 import { utf8ToBytes } from '../lib/base64url';
 import { encodeSolReq, type SolReqV2 } from './qr';
+import { SYSTEM_PROGRAM_ADDRESS } from './constants';
 
-const SYSTEM_PROGRAM_ADDRESS = '11111111111111111111111111111111';
 // SystemInstruction::Transfer discriminator (bincode u32 LE = 2).
 const TRANSFER_DISCRIMINATOR = 2;
 
@@ -163,25 +163,6 @@ export function extractSignedTxParts(signedTx: Uint8Array): {
   if (message.length < firstKeyEnd) return null;
   const feePayer = message.subarray(firstKeyStart, firstKeyEnd);
   return {signature, message, feePayer};
-}
-
-/** F3 — defense-in-depth: verify the fee-payer's ed25519 signature over the signed message, locally,
- *  BEFORE broadcasting. Returns true on a valid signature; false on ANY parse failure or mismatch
- *  (never throws). The on-chain broadcast is the authoritative gate (Solana rejects a bad sig
- *  anyway); this is the fast, local, pre-broadcast check that mirrors the IC receipt-verify posture
- *  and gives an immediate debug signal for a tampered/garbage tx.
- *
- *  Callers MUST treat `false` as NON-BLOCKING (log + still attempt broadcast): a parse edge case
- *  (e.g. a future versioned-tx format, or an e2e harness carrying placeholder bytes) must never
- *  strand a legitimate payment. The real correctness gate stays on-chain. */
-export function verifySignedTransaction(signedTx: Uint8Array): boolean {
-  const parts = extractSignedTxParts(signedTx);
-  if (!parts) return false;
-  try {
-    return ed25519.verify(parts.signature, parts.message, parts.feePayer);
-  } catch {
-    return false;
-  }
 }
 
 // ============================================================================

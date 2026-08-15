@@ -23,6 +23,7 @@ import {
   type Instruction,
 } from './tx';
 import { encodeSolReq, type SolReqV2 } from './qr';
+import { SYSTEM_PROGRAM_ADDRESS } from './constants';
 
 /** SPL Token Program (the legacy TokenkegQ program that USDC/SPL fungibles use). */
 export const TOKEN_PROGRAM_ADDRESS = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
@@ -32,8 +33,6 @@ export const ASSOCIATED_TOKEN_PROGRAM_ADDRESS = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH2
 export const USDC_MINT_ADDRESS = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 /** USDC has 6 decimals (1 USDC = 1_000_000 raw units). */
 export const USDC_DECIMALS = 6;
-/** System Program (account/rent machinery — a create-ATA account, not a signer here). */
-export const SYSTEM_PROGRAM_ADDRESS = '11111111111111111111111111111111';
 /** Rent sysvar (passed readonly to create-ATA; the chain charges real rent regardless). */
 export const RENT_SYSVAR_ADDRESS = 'SysvarRent111111111111111111111111111111111';
 /** Canonical mainnet rent for a 165-byte SPL token account (lamports). An ESTIMATE for display +

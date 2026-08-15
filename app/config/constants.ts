@@ -107,9 +107,6 @@ export const SOL_SEND_TIMEOUT_MS = 60000;
 // broadcast path (solana.ts) and the merchant NFC path (SolNfcTap) reference this instead of
 // inlining SOL_SEND_TIMEOUT_MS * 2 at each site.
 export const SOL_BROADCAST_TIMEOUT_MS = SOL_SEND_TIMEOUT_MS * 2;
-// F4 — bounded timeout for the pre-request USDC ATA existence check (network I/O via getAccountInfo).
-// A single RPC call; 8s mirrors the rpc default and keeps a stalled node from wedging the form.
-export const SOL_ATA_CHECK_TIMEOUT_MS = 8000;
 
 // Phase 3 — Solana v2 recent-blockhash payment freshness constants. The merchant fetches a fresh
 // blockhash + cluster identity immediately before showing a request, then strictly verifies +
