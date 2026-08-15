@@ -1,0 +1,236 @@
+#!/usr/bin/env node
+// dpay-wasm core parity guard (the "every web surface signs the SAME bytes as Android" invariant).
+//
+// `crates/dpay-wasm` compiles the FROZEN Rust wire core to wasm32-unknown-unknown; the artifact is
+// staged at crates/dpay-relay/assets/dpay-core.wasm (committed, like shot-*.png) and served by the
+// relay at GET /dpay-core.wasm. Any browser surface (wallet/merchant terminals) that loads it signs
+// and builds the EXACT bytes the Android app's UniFFI core produces — one signing source.
+//
+// This script loads the STAGED artifact (not the build dir — it proves what would actually be
+// served), instantiates it with NO imports, exercises the FULL export surface, and asserts
+// byte-parity against the trusted JS oracle (e2e/harness/wire.mjs, itself byte-validated against
+// the Rust core by tests/00-cross-val):
+//   - w_abi_version == 1; w_error_message covers every code; w_alloc is a sane bump allocator.
+//   - w_layout_json deep-equals dfx/wire_layout.json (the Rust-emitted single source of truth).
+//   - w_pubkey('ab'×32) matches the from_pub the noble oracle derives.
+//   - golden + UTF-8 + 32-byte-truncation + u64-stress requests: w_decode_request JSON round-trips
+//     wire.mjs decodeRequest, and w_sign_request emits a 292-byte wire byte-identical to
+//     wire.mjs signAuthorizationCode (deterministic ed25519).
+//   - w_sign_withdraw sig hex == wire.mjs signWithdrawalHex across u64 stress (2^52-1, 2^63+0xdead,
+//     u64::MAX) and empty/long destinations.
+//   - w_verify_receipt_sig: the Rust-generated receipt golden (wire_layout.json `receipt` section —
+//     the same fixture wire.mjs treats as ground truth; wire.mjs has no receipt-signing export)
+//     verifies → 1; one flipped sig byte / wrong pubkey / bad claim_len → 0.
+//
+// Usage: node scripts/check-wasm-core.mjs   (exit 0 = parity, exit 1 = drift; failures print hex diffs)
+import {readFileSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
+import {
+  buildRequestBytes, decodeRequest, signAuthorizationCode, signWithdrawalHex,
+  b64urlEncode, b64urlDecode, REQUEST_LEN, WIRE_LEN,
+} from '../e2e/harness/wire.mjs';
+
+const ROOT = fileURLToPath(new URL('../', import.meta.url));
+const WASM = `${ROOT}crates/dpay-relay/assets/dpay-core.wasm`;
+const LAYOUT_PATH = `${ROOT}dfx/wire_layout.json`;
+
+// --- tiny assert harness (collect failures, print hex diffs, exit 1 on any) ---------------------
+let failures = 0, checks = 0;
+function check(name, ok, detail) {
+  checks++;
+  if (!ok) {
+    failures++;
+    console.error(`FAIL: ${name}`);
+    if (detail) console.error(`  ${detail}`);
+  }
+}
+function hex(b) { return Buffer.from(b).toString('hex'); }
+function fromHex(h) { return Uint8Array.from(Buffer.from(h, 'hex')); }
+function hexDiff(label, got, want) {
+  const g = hex(got), w = hex(want);
+  if (g === w) return undefined;
+  let i = 0; while (i < g.length && g[i] === w[i]) i++;
+  return `${label}: len got=${got.length} want=${want.length}, first diff at hex char ${i}\n    got:  ${g.slice(0, 320)}${g.length > 320 ? '…' : ''}\n    want: ${w.slice(0, 320)}${w.length > 320 ? '…' : ''}`;
+}
+function jsonDiff(label, got, want) {
+  if (got === want) return undefined;
+  return `${label}:\n    got:  ${got.slice(0, 400)}\n    want: ${want.slice(0, 400)}`;
+}
+// Order-insensitive canonical JSON compare (both sides are parsed JSON).
+function canon(x) {
+  if (Array.isArray(x)) return '[' + x.map(canon).join(',') + ']';
+  if (x !== null && typeof x === 'object')
+    return '{' + Object.keys(x).sort().map(k => JSON.stringify(k) + ':' + canon(x[k])).join(',') + '}';
+  return JSON.stringify(x);
+}
+
+// --- load + instantiate the staged wasm (no imports; the module owns its memory) ---------------
+let ex;
+try {
+  const bytes = readFileSync(WASM);
+  const {instance} = await WebAssembly.instantiate(bytes);
+  ex = instance.exports;
+} catch (e) {
+  console.error(`FAIL: could not load/instantiate ${WASM} (run \`just wasm\` to build + stage it): ${e.message}`);
+  process.exit(1);
+}
+const enc = new TextEncoder();
+const dec = new TextDecoder();
+// Write bytes into a fresh w_alloc region (re-derive the view AFTER alloc — growth detaches).
+function writeBytes(bytes) {
+  const p = ex.w_alloc(bytes.length);
+  new Uint8Array(ex.memory.buffer, p, bytes.length).set(bytes);
+  return p;
+}
+function writeStr(s) { return writeBytes(enc.encode(s)); }
+function readBytes(p, len) { return new Uint8Array(ex.memory.buffer.slice(p, p + len)); }
+function readStr(p, len) { return dec.decode(readBytes(p, len)); }
+// Split a BigInt u64 into (lo, hi) u32s — the ABI's answer to JS's missing u64.
+const split64 = v => { v = BigInt(v); return [Number(v & 0xffffffffn), Number((v >> 32n) & 0xffffffffn)]; };
+
+// --- ABI + alloc + error strings ---------------------------------------------------------------
+check('w_abi_version == 1', ex.w_abi_version() === 1, `got ${ex.w_abi_version()}`);
+{
+  const a = ex.w_alloc(64), b = ex.w_alloc(64), c = ex.w_alloc(0);
+  check('w_alloc returns nonzero, increasing, aligned ptrs',
+    a !== 0 && b === a + 64 && c >= b && a % 8 === 0, `a=${a} b=${b} c=${c}`);
+}
+{
+  const errors = {0: 'ok', 1: 'bad_len', 2: 'bad_utf8', 3: 'verify_failed'};
+  const p = ex.w_alloc(64);
+  for (const [code, want] of Object.entries(errors)) {
+    const n = ex.w_error_message(code, p, 64);
+    check(`w_error_message(${code}) == "${want}"`, n === want.length && readStr(p, n) === want,
+      `n=${n} str=${JSON.stringify(readStr(p, n))}`);
+  }
+  const n = ex.w_error_message(999, p, 64);
+  check('w_error_message(unknown) is a nonempty fallback', n > 0, `n=${n}`);
+  check('w_error_message(cap too small) == 0', ex.w_error_message(1, p, 2) === 0);
+}
+
+// --- w_layout_json deep-equals the Rust-emitted dfx/wire_layout.json ---------------------------
+{
+  const p = ex.w_alloc(32768);
+  const n = ex.w_layout_json(p, 32768);
+  check('w_layout_json writes a document', n > 0, `n=${n}`);
+  if (n > 0) {
+    const got = JSON.parse(readStr(p, n));
+    const want = JSON.parse(readFileSync(LAYOUT_PATH, 'utf8'));
+    check('w_layout_json deep-equals dfx/wire_layout.json',
+      canon(got) === canon(want),
+      jsonDiff('layout JSON drift', canon(got), canon(want)));
+  }
+  check('w_layout_json(cap too small) == 0', ex.w_layout_json(p, 8) === 0);
+}
+
+// --- fixture request matrix: golden + UTF-8 + 32-byte truncation + u64 stress -------------------
+const SEED_HEX = 'ab'.repeat(32);
+const SEED = fromHex(SEED_HEX);
+const L = JSON.parse(readFileSync(LAYOUT_PATH, 'utf8'));
+const CASES = [
+  {name: 'golden',  to: L.golden.to_hex, amount: 2500n, nonce: L.golden.nonce_hex, expiry: 4102444800n, currency: 0, toName: 'Bob', memo: 'coffee'},
+  {name: 'utf8',    to: L.golden.to_hex, amount: 8400000000000000000n, nonce: 'cd'.repeat(16), expiry: 1700000120n, currency: 2, toName: 'ünïcödé nàme 漢字 ok?', memo: 'café ☕'},
+  {name: 'trunc40', to: L.golden.to_hex, amount: 1n,    nonce: 'ee'.repeat(16), expiry: 1n, currency: 0, toName: 'x'.repeat(40), memo: 'm'.repeat(40)},
+  {name: 'u64max',  to: L.golden.to_hex, amount: 18446744073709551615n, nonce: '2a'.repeat(16), expiry: 18446744073709551615n, currency: 0xffffffff, toName: '', memo: ''},
+];
+
+// Expected payer pubkey under SEED (from_pub is the last 32 bytes of any oracle-signed wire).
+const EXP_PUB = b64urlDecode(await signAuthorizationCode(SEED_HEX, CASES[0].to, CASES[0].amount, CASES[0].nonce, CASES[0].expiry, CASES[0].currency)).slice(260, 292);
+
+// w_pubkey
+{
+  const out = ex.w_alloc(32);
+  const rc = ex.w_pubkey(writeBytes(SEED), out);
+  check('w_pubkey(seed ab×32) == noble-derived pubkey', rc === 0 && hexDiff('pubkey', readBytes(out, 32), EXP_PUB) === undefined,
+    `rc=${rc} ${hexDiff('pubkey', readBytes(out, 32), EXP_PUB)}`);
+}
+
+// per-case decode + sign
+const FROM_NAMES = ['Alice', '', 'ünïcödé nàme 漢字 ok?', 'y'.repeat(40)];
+for (const c of CASES) {
+  const reqBytes = buildRequestBytes(c.to, c.amount, c.nonce, c.expiry, c.currency, c.toName, c.memo);
+  check(`request[${c.name}] oracle builds 132 bytes`, reqBytes.length === REQUEST_LEN, `len=${reqBytes.length}`);
+
+  // w_decode_request == wire.mjs decodeRequest
+  {
+    const want = decodeRequest(b64urlEncode(reqBytes));
+    const out = ex.w_alloc(1024);
+    const n = ex.w_decode_request(writeBytes(reqBytes), out, 1024);
+    check(`w_decode_request[${c.name}] writes JSON`, n > 0, `n=${n}`);
+    if (n > 0) {
+      const got = JSON.parse(readStr(out, n));
+      const field = (k) => check(`decode[${c.name}].${k}`, got[k] === want[k], `got ${JSON.stringify(got[k])} want ${JSON.stringify(want[k])}`);
+      field('toHex'); field('amount'); field('nonceHex'); field('expiry'); field('currency'); field('toName'); field('memo');
+      check(`decode[${c.name}].amount is a decimal string`, typeof got.amount === 'string', `typeof=${typeof got.amount}`);
+    }
+    check(`w_decode_request[${c.name}] cap-too-small == 0`, ex.w_decode_request(writeBytes(reqBytes), out, 8) === 0);
+  }
+
+  // w_sign_request == wire.mjs signAuthorizationCode (byte-identical 292-byte wire)
+  for (const fromName of FROM_NAMES) {
+    const want = b64urlDecode(await signAuthorizationCode(SEED_HEX, c.to, c.amount, c.nonce, c.expiry, c.currency, fromName, c.toName, c.memo));
+    const wire = ex.w_alloc(292);
+    const rc = ex.w_sign_request(writeBytes(SEED), writeBytes(reqBytes), writeStr(fromName), enc.encode(fromName).length, wire);
+    const got = readBytes(wire, 292);
+    check(`w_sign_request[${c.name} from=${JSON.stringify(fromName).slice(0, 24)}] byte-identical to oracle`,
+      rc === 0 && got.length === WIRE_LEN && hexDiff('wire', got, want) === undefined,
+      `rc=${rc} ${hexDiff('wire', got, want)}`);
+  }
+}
+// w_sign_request rejects non-UTF-8 from_name
+{
+  const reqBytes = buildRequestBytes(CASES[0].to, CASES[0].amount, CASES[0].nonce, CASES[0].expiry, CASES[0].currency, 'Bob', 'coffee');
+  const wire = ex.w_alloc(292);
+  const bad = writeBytes(new Uint8Array([0xff, 0xfe, 0xfd]));
+  check('w_sign_request(bad UTF-8 from_name) == BAD_UTF8(2)',
+    ex.w_sign_request(writeBytes(SEED), writeBytes(reqBytes), bad, 3, wire) === 2);
+}
+
+// --- w_sign_withdraw: u64 stress via lo/hi + empty/long destinations ---------------------------
+{
+  const pubHex = hex(EXP_PUB);
+  const W = [
+    {dest: 'bc1qdpaygoldenwithdrawaladdress', amount: 50000n, expiry: 4102444800n, currency: 0},
+    {dest: '1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2', amount: 2n ** 52n - 1n, expiry: 1700000120n, currency: 1},
+    {dest: 'bc1q' + 'x'.repeat(80), amount: 2n ** 63n + 0xdeadn, expiry: 4102444800n, currency: 3},
+    {dest: '', amount: 18446744073709551615n, expiry: 18446744073709551615n, currency: 0xffffffff},
+  ];
+  for (const w of W) {
+    const nonceHex = '2a'.repeat(16);
+    const want = await signWithdrawalHex(SEED_HEX, pubHex, w.dest, w.amount, nonceHex, w.expiry, w.currency);
+    const [alo, ahi] = split64(w.amount), [elo, ehi] = split64(w.expiry);
+    const out = ex.w_alloc(64);
+    const rc = ex.w_sign_withdraw(writeBytes(SEED), writeStr(w.dest), enc.encode(w.dest).length, alo, ahi, writeBytes(fromHex(nonceHex)), elo, ehi, w.currency, out);
+    const got = hex(readBytes(out, 64));
+    check(`w_sign_withdraw[dest=${JSON.stringify(w.dest).slice(0, 20)} amount=${w.amount}] hex == oracle`,
+      rc === 0 && got === want, `rc=${rc}\n    got:  ${got}\n    want: ${want}`);
+  }
+  // non-UTF-8 destination
+  const out = ex.w_alloc(64);
+  const bad = writeBytes(new Uint8Array([0xff]));
+  check('w_sign_withdraw(bad UTF-8 dest) == BAD_UTF8(2)',
+    ex.w_sign_withdraw(writeBytes(SEED), bad, 1, 1, 0, writeBytes(fromHex('2a'.repeat(16))), 1, 0, 0, out) === 2);
+}
+
+// --- w_verify_receipt_sig: Rust-generated golden verifies; tamper fails ------------------------
+{
+  const G = L.receipt.golden;
+  const claim = fromHex(G.signing_hex); // the frozen 108-byte claim layout
+  const pub = fromHex(G.public_hex);
+  const sig = fromHex(G.sig_hex);
+  check('receipt golden claim is 108 bytes', claim.length === L.receipt.fixed_len, `len=${claim.length}`);
+  check('w_verify_receipt_sig(golden) == 1', ex.w_verify_receipt_sig(writeBytes(pub), writeBytes(claim), claim.length, writeBytes(sig)) === 1);
+
+  const badSig = sig.slice(); badSig[5] ^= 0x01;
+  check('w_verify_receipt_sig(flipped sig byte) == 0', ex.w_verify_receipt_sig(writeBytes(pub), writeBytes(claim), claim.length, writeBytes(badSig)) === 0);
+  check('w_verify_receipt_sig(wrong pubkey) == 0', ex.w_verify_receipt_sig(writeBytes(fromHex(G.to_hex)), writeBytes(claim), claim.length, writeBytes(sig)) === 0);
+  check('w_verify_receipt_sig(bad claim_len) == 0', ex.w_verify_receipt_sig(writeBytes(pub), writeBytes(claim), claim.length - 1, writeBytes(sig)) === 0);
+}
+
+// --- verdict ------------------------------------------------------------------------------------
+if (failures) {
+  console.error(`\nFAIL: dpay-core.wasm drifted from the trusted oracle in ${failures}/${checks} check(s).`);
+  console.error('The staged web core would NOT sign the same bytes as Android. Fix crates/dpay-wasm, then `just wasm`.');
+  process.exit(1);
+}
+console.log(`wasm-core parity OK: staged dpay-core.wasm == e2e/harness/wire.mjs across ${checks} checks (layout, request build+decode, sign, withdraw u64-stress, receipt verify)`);

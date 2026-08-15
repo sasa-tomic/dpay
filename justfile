@@ -201,6 +201,17 @@ merchant-wire:
 wallet-wire:
     node scripts/check-wallet-wire.mjs
 
+# Build the frozen wire core (crates/dpay-wasm) for wasm32-unknown-unknown and stage it as the
+# committed relay asset crates/dpay-relay/assets/dpay-core.wasm (served at GET /dpay-core.wasm —
+# "one signing source for every web surface"). The parity guard loads the STAGED artifact, so it
+# runs after the copy and proves the exact bytes that would be served sign identically to
+# e2e/harness/wire.mjs (the trusted JS oracle).
+wasm:
+    cargo build -p dpay-wasm --target wasm32-unknown-unknown --release
+    cp target/wasm32-unknown-unknown/release/dpay_wasm.wasm crates/dpay-relay/assets/dpay-core.wasm
+    node scripts/check-wasm-core.mjs
+    @echo "staged crates/dpay-relay/assets/dpay-core.wasm ($(stat -c%s crates/dpay-relay/assets/dpay-core.wasm) bytes)"
+
 # everything: rust loop + radical e2e (real app + real relay + real browser). The e2e harness
 # superseded the old ui/ parallel-component golden-shot harness (drives the REAL App.tsx +
 # screenshots every flow state), so `ui` is gone and `verify` runs `check e2e`.

@@ -1,0 +1,17 @@
+[package]
+name = "dpay-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The frozen dpay wire core compiled to wasm32-unknown-unknown: one signing source for every web surface (wallet/merchant terminals load it from the relay; byte-parity is pinned by scripts/check-wasm-core.mjs)."
+
+# cdylib only: the artifact IS the deliverable (dpay_wasm.wasm), staged to
+# crates/dpay-relay/assets/dpay-core.wasm by `just wasm`.
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+dpay-core = { path = "../dpay-core" }
+# Same workspace pin dpay-core uses; needed directly for SigningKey/VerifyingKey in w_pubkey.
+# Already in the dep tree, so the cdylib adds no new crates beyond the core's own.
+ed25519-dalek = { workspace = true }

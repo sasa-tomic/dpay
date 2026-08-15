@@ -2470,3 +2470,29 @@ async fn wallet_scripts_served_and_unknown_path_is_404() {
     let (status, _h, _b) = call_raw(&state, get_req("/nope.js")).await;
     assert_eq!(status, StatusCode::NOT_FOUND, "unknown script path must 404");
 }
+
+// --- Shared wasm core (GET /dpay-core.wasm) -----------------------------------------------------
+//
+// crates/dpay-wasm compiles the frozen Rust wire core to wasm32 so every web surface signs the
+// SAME bytes as Android. The artifact is staged at assets/dpay-core.wasm (committed) and its
+// byte-parity against the trusted JS oracle is enforced offline by scripts/check-wasm-core.mjs
+// (`just wasm`); this route test pins only the serving surface.
+
+/// `GET /dpay-core.wasm` serves the staged core as `application/wasm` starting with the wasm magic
+/// bytes; a near-miss vendored path stays a clean 404 (no catch-all).
+#[tokio::test]
+async fn wasm_core_served_and_unknown_path_is_404() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+
+    let (status, headers, bytes) = call_raw(&state, get_req("/dpay-core.wasm")).await;
+    assert_eq!(status, StatusCode::OK, "/dpay-core.wasm must serve");
+    assert_eq!(headers.get(header::CONTENT_TYPE).unwrap(), "application/wasm");
+    assert!(bytes.len() > 4, "the wasm body must not be empty");
+    assert_eq!(&bytes[..4], b"\0asm", "must start with the wasm magic bytes");
+
+    // No catch-all: a near-miss asset path is a clean 404.
+    let (status, _h, _b) = call_raw(&state, get_req("/dpay-core.wasi")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "unknown wasm-ish path must 404");
+}

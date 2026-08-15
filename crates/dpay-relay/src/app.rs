@@ -199,6 +199,7 @@ pub fn app(state: AppState) -> Router {
         .route("/wallet", get(wallet_page))
         .route("/privacy", get(privacy_page))
         .route("/jsqr.js", get(jsqr_js))
+        .route("/dpay-core.wasm", get(dpay_core_wasm))
         .route("/qrcode.js", get(qrcode_js))
         .route("/ed25519.js", get(ed25519_js))
         .route("/noble-hashes.js", get(noble_hashes_js))
@@ -812,6 +813,18 @@ async fn jsqr_js() -> Response {
     (
         [(header::CONTENT_TYPE, "application/javascript; charset=utf-8")],
         include_str!("../assets/jsQR.js"),
+    )
+        .into_response()
+}
+
+/// `GET /dpay-core.wasm` — the frozen wire core compiled to wasm32 (crates/dpay-wasm, staged by
+/// `just wasm`). This is the "one signing source for every web surface": a browser page loads it
+/// and signs/builds the EXACT bytes the Android app's UniFFI core produces. Byte-parity against
+/// the trusted JS oracle is enforced offline by scripts/check-wasm-core.mjs.
+async fn dpay_core_wasm() -> Response {
+    (
+        [(header::CONTENT_TYPE, "application/wasm")],
+        include_bytes!("../assets/dpay-core.wasm"),
     )
         .into_response()
 }

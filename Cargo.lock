@@ -893,6 +893,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "dpay-wasm"
+version = "0.1.0"
+dependencies = [
+ "dpay-core",
+ "ed25519-dalek",
+]
+
+[[package]]
 name = "dunce"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
