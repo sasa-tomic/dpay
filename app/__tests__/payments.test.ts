@@ -12,6 +12,7 @@ import {
   decidePayerReceipt,
   rejectionMessage,
   isNonceReused,
+  withdrawRejectionMessage,
   isReceiptForRequest,
   RECEIPT_SETTLED,
   RECEIPT_REJECTED,
@@ -111,6 +112,38 @@ describe('isNonceReused', () => {
     expect(isNonceReused('rejected: NonceReused')).toBe(true);
     expect(isNonceReused('InsufficientFunds')).toBe(false);
     expect(isNonceReused(null)).toBe(false);
+  });
+});
+
+// A8 — the withdraw-rejection mapper. WithdrawSheet surfaces relay/canister 4xx bodies via
+// `withdrawFunds`'s thrown Error message; these must NEVER render raw protocol strings
+// ("InsufficientFunds: balance 0", "nonce already used"). Every class below is a REAL body
+// string the FakeLedger (e2e) and the facade canister (prod) emit — sourced from
+// crates/dpay-relay/src/ledger/fake.rs + crates/dpay-canister/src/{lib,proxy}.rs.
+describe('withdrawRejectionMessage', () => {
+  it('maps the relay 422 bodies the sheet actually receives (FakeLedger verbatim)', () => {
+    expect(withdrawRejectionMessage('InsufficientFunds: balance 0')).toBe('Not enough balance for this withdrawal.');
+    expect(withdrawRejectionMessage('bad signature')).toBe('Withdrawal rejected — please try again.');
+    expect(withdrawRejectionMessage('nonce already used')).toBe('This withdrawal was already submitted — check your balance before retrying.');
+    expect(withdrawRejectionMessage('amount below retrieve_btc_min_amount (50000)')).toBe('Amount is below the minimum withdrawal.');
+    expect(withdrawRejectionMessage('expired')).toBe('The withdrawal request expired — please try again.');
+    expect(withdrawRejectionMessage('zero amount')).toBe('Enter an amount above zero.');
+  });
+
+  it('maps the canister 422 bodies (prod facade, incl. the ckETH/ckERC20 gas strings)', () => {
+    expect(withdrawRejectionMessage('withdraw_eth insufficient funds: balance 0')).toBe('Not enough balance for this withdrawal.');
+    expect(withdrawRejectionMessage('withdraw_erc20 cketh insufficient funds: you need ckETH for gas')).toBe('Not enough balance for this withdrawal.');
+    expect(withdrawRejectionMessage('retrieve_btc insufficient funds: balance 12345')).toBe('Not enough balance for this withdrawal.');
+    // An allowance failure reads as "not enough" to the user; malformed hex requests are a plain reject.
+    expect(withdrawRejectionMessage('withdraw_eth insufficient allowance: 0')).toBe('Not enough balance for this withdrawal.');
+    expect(withdrawRejectionMessage('bad nonce hex: invalid length')).toBe('Withdrawal rejected — please try again.');
+  });
+
+  it('falls back to a generic retry line on unknown strings (never leaks raw protocol text)', () => {
+    expect(withdrawRejectionMessage('transient: temporarily_unavailable')).toBe('Withdrawal failed — please try again');
+    expect(withdrawRejectionMessage('withdraw 503')).toBe('Withdrawal failed — please try again');
+    expect(withdrawRejectionMessage('')).toBe('Withdrawal failed — please try again');
+    expect(withdrawRejectionMessage('some novel future canister error')).toBe('Withdrawal failed — please try again');
   });
 });
 

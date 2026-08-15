@@ -34,3 +34,13 @@ export function friendlySolError(msg: string): string {
   }
   return msg;
 }
+
+/** NFC-tap variant of `friendlySolError`: NEVER returns the raw string. The tap status view
+ *  renders its sub-line verbatim, so an unrecognized exception must map to honest generic copy
+ *  (A2 — no raw `e.message` from NFC paths in the UI); the caller console.warn's the raw message
+ *  so the dev loop stays fail-loud. `fallback` lets outcome-unknown (pending) call sites use
+ *  check-your-balance copy instead of a retry instruction. */
+export function friendlySolTapError(msg: string, fallback = "Payment didn't complete — try again"): string {
+  const mapped = friendlySolError(msg);
+  return mapped !== msg ? mapped : fallback;
+}

@@ -281,7 +281,7 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
         {err ? <Text testID="review-err" style={S.err}>{err}</Text> : null}
         <Pressable
           testID="btn-approve"
-          style={[S.primary, approveDisabled && S.dim]}
+          style={[S.primary, approveDisabled && S.disabledFlat]}
           disabled={approveDisabled}
           accessibilityRole="button"
           accessibilityLabel="Approve payment"

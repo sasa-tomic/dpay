@@ -68,7 +68,7 @@ export function SolanaAtaSetupCard({
       ) : (
         <Pressable
           testID={btnTestID}
-          style={[S.primaryWide, !canCreate && S.dim]}
+          style={[S.primaryWide, !canCreate && S.disabledFlat]}
           disabled={!canCreate}
           onPress={onCreateAta}
           accessibilityRole="button"

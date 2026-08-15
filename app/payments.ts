@@ -127,6 +127,28 @@ export function isNonceReused(reason: string | null | undefined): boolean {
   return /nonce/i.test(reason || '');
 }
 
+/**
+ * Map a raw withdraw-rejection string (the relay/canister 422 body surfaced by `withdrawFunds`,
+ * e.g. `"InsufficientFunds: balance 0"`, `"nonce already used"`, `"bad signature"`, `"amount
+ * below retrieve_btc_min_amount (50000)"`) to friendly copy for the WithdrawSheet. Mirrors
+ * `rejectionMessage` (the /pay twin) with withdraw-specific guidance. Unknown strings fall back
+ * to a generic retry line — the caller ALWAYS console.warn's the raw body, so diagnosis stays
+ * possible without leaking protocol jargon into the UI.
+ */
+export function withdrawRejectionMessage(reason: string): string {
+  const r = reason.toLowerCase();
+  // Order matters: the hex-decode rejects ("bad from/nonce/sig hex: …") must not fall into the
+  // nonce-reserve branch below, and allowance failures read as "not enough" to the user.
+  if (r.includes('hex')) return 'Withdrawal rejected — please try again.';
+  if (r.includes('nonce')) return 'This withdrawal was already submitted — check your balance before retrying.';
+  if (r.includes('insufficient')) return 'Not enough balance for this withdrawal.';
+  if (r.includes('bad signature') || r.includes('bad_signature')) return 'Withdrawal rejected — please try again.';
+  if (r.includes('expired')) return 'The withdrawal request expired — please try again.';
+  if (r.includes('below') || r.includes('too low')) return 'Amount is below the minimum withdrawal.';
+  if (r.includes('zero amount')) return 'Enter an amount above zero.';
+  return 'Withdrawal failed — please try again';
+}
+
 // --- canister-signed receipt (R2 outcome attestation) ----------------------------------------
 // The ledger/canister signs a canonical encoding of the settled outcome; the app verifies that
 // signature (via DpayCore) before showing "Paid ✓" so the outcome rests on a canister/ledger-

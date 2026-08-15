@@ -176,7 +176,7 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
         {err ? <Text testID="sol-pay-err" style={S.err}>{err}</Text> : null}
         <Pressable
           testID="btn-sol-pay-approve"
-          style={[S.primaryWide, busy && S.dim]}
+          style={[S.primaryWide, busy && S.disabledFlat]}
           disabled={busy}
           onPress={approve}
           accessibilityRole="button"

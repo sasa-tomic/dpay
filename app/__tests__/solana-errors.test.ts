@@ -1,5 +1,5 @@
 import {describe, it, expect} from '@jest/globals';
-import {friendlySolError} from '../solana/errors';
+import {friendlySolError, friendlySolTapError} from '../solana/errors';
 
 // friendlySolError maps raw Solana RPC error strings to actionable human copy. The bug this guards:
 // a payer with no SOL hit "solana rpc: Transaction simulation failed: Attempt to debit on account
@@ -40,5 +40,28 @@ describe('friendlySolError — SOL RPC error → human copy', () => {
   it('passes through an unknown error verbatim (never hides)', () => {
     const raw = 'solana rpc: some novel future error code 0x99';
     expect(friendlySolError(raw)).toBe(raw);
+  });
+});
+
+// friendlySolTapError is the NFC-tap wrapper: unlike friendlySolError (diagnosis-friendly, raw
+// pass-through), the TAP path must NEVER render a raw exception string — unknown errors fall
+// back to the provided default copy instead. Used by SolNfcTap's JS-catch paths (A2).
+describe('friendlySolTapError — NFC tap errors never render raw', () => {
+  it('maps known Solana classes through friendlySolError', () => {
+    const out = friendlySolTapError(
+      'solana rpc: Transaction simulation failed: Attempt to debit on account but found no record of a prior credit',
+    );
+    expect(out).not.toContain('debit');
+    expect(out).not.toContain('prior credit');
+  });
+
+  it('falls back to the default copy on unknown errors (never the raw string)', () => {
+    const raw = 'some novel future error code 0x99';
+    expect(friendlySolTapError(raw)).toBe("Payment didn't complete — try again");
+    expect(raw).not.toBe("Payment didn't complete — try again");
+  });
+
+  it('accepts a custom fallback (the pending/confirm path)', () => {
+    expect(friendlySolTapError('mystery', 'Could not confirm — check your balance')).toBe('Could not confirm — check your balance');
   });
 });

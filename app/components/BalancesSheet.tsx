@@ -4,6 +4,7 @@ import {S} from '../styles';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {SheetOverlay} from './SheetOverlay';
 import {CurrencyRow} from './CurrencyRow';
+import {HotkeyHint} from './HotkeyHint';
 import {type SelectableAsset} from '../config/assets';
 import {type BalanceView} from '../lib/assetBalances';
 import type {AssetId} from '../lib/types';
@@ -72,6 +73,8 @@ export function BalancesSheet({assets, balances, selectedId, onSelect, hasTestne
             const isDemo = asset.protocol === 'ic' && asset.currency === 0;
             // The DEMO faucet button — the ONLY per-row action left (every on-chain send/receive
             // moved to the Pay/Receive tabs). Passed via `actions` so tapping it doesn't fire select.
+            // D5b: carries the T HotkeyHint (the web keyboard top-up) so the shortcut is
+            // discoverable — same badge pattern as the tab bar / header A badge.
             const faucet = isDemo ? (
               <Pressable
                 testID="btn-topup"
@@ -85,7 +88,7 @@ export function BalancesSheet({assets, balances, selectedId, onSelect, hasTestne
               >
                 {topUpBusy
                   ? <ActivityIndicator size="small" color={C.brand} />
-                  : <><Text style={S.assetActionPlus}>+</Text><Text style={S.assetActionText}>Demo funds</Text></>}
+                  : <><Text style={S.assetActionPlus}>+</Text><Text style={S.assetActionText}>Demo funds</Text><HotkeyHint k="T" /></>}
               </Pressable>
             ) : null;
             // The DEMO row's topUpErr line — rendered below the subtitle via `children`.

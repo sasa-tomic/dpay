@@ -49,12 +49,18 @@ export const S = StyleSheet.create({
   nfcTitle: {fontSize: 24, fontWeight: '800', color: C.ink, textAlign: 'center'},
   nfcSub: {fontSize: 15, color: C.sub, marginTop: 10, textAlign: 'center', paddingHorizontal: 20},
   balBox: {alignItems: 'flex-end'},
+  // D5a — the header balance pressable's outer row: the label+value column, then the A hotkey badge
+  // at the far right edge (DOM order label → value → badge, mirroring the tab-bar badge pattern).
+  balHeaderRow: {flexDirection: 'row', alignItems: 'center', gap: 10},
   balLabelRow: {flexDirection: 'row', alignItems: 'center', gap: 5},
   balAmtRow: {flexDirection: 'row', alignItems: 'center', gap: 8},
   topUpErr: {fontSize: 13, color: C.bad, marginTop: 8, textAlign: 'center'},
   dot: {width: 8, height: 8, borderRadius: 4},
   balLabel: {fontSize: 12, color: C.sub},
   balAmt: {fontSize: 26, fontWeight: '800', color: C.ink},
+  // D6 — the transient Android back-to-exit hint under the header balance (inline Text, not a
+  // toast — no native module, matches the dim2 caption tone but with a warn tint for visibility).
+  balBackHint: {fontSize: 12, color: C.warn, marginTop: 6},
   tabs: {flexDirection: 'row', paddingHorizontal: 16, gap: 8, marginTop: 6},
   tab: {flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 8, paddingHorizontal: 20, borderRadius: 999, backgroundColor: C.field, minHeight: 44},
   tabActive: {backgroundColor: C.brand},
@@ -83,6 +89,12 @@ export const S = StyleSheet.create({
   label: {fontSize: 15, color: C.sub, marginBottom: 10, textAlign: 'center'},
   err: {color: C.bad, fontSize: 14, textAlign: 'center', marginTop: 10},
   dim: {opacity: 0.6},
+  // D1 — disabled state for GLOWING primary buttons. `dim` (opacity 0.6) layered over the brand
+  // glow/elevation is indistinguishable from enabled on OLED, so a disabled money button reads as
+  // tappable. `disabledFlat` kills BOTH the Android elevation AND the iOS shadow (the glow dies on
+  // each platform where it lives) and drops opacity further. Used ONLY on primary/primaryWide
+  // sites; non-glow surfaces (balBox, bordered pills) keep `dim`.
+  disabledFlat: {opacity: 0.35, elevation: 0, shadowOpacity: 0},
   dim2: {fontSize: 13, color: C.sub, marginTop: 8, textAlign: 'center'},
   // Camera viewfinder — fills the content column (`alignSelf:'stretch'` overrides the parent's
   // centering; `aspectRatio:1` keeps it square) so the primary scan surface uses the full usable

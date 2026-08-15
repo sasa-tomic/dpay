@@ -134,7 +134,7 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
                 </View>
                 <Text style={{color: C.sub, fontSize: 15, flex: 1}}>I've written down all 24 words</Text>
               </Pressable>
-              <Pressable testID="btn-mnemonic-continue" style={[S.primary, !backupChecked && S.dim]} disabled={!backupChecked} onPress={finishCreate}
+              <Pressable testID="btn-mnemonic-continue" style={[S.primary, !backupChecked && S.disabledFlat]} disabled={!backupChecked} onPress={finishCreate}
                 accessibilityRole="button" accessibilityLabel="Continue" accessibilityState={{disabled: !backupChecked}}>
                 <Text style={S.primaryText}>Continue</Text>
               </Pressable>
@@ -169,7 +169,7 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
               <Text style={S.label}>Choose a username</Text>
               <TextInput testID="username-input" style={S.usernameInput} value={username} onChangeText={setUsername} placeholder="e.g. Alice" placeholderTextColor={C.sub2} autoCapitalize="words" autoCorrect={false} accessibilityLabel="Username" accessibilityHint="The name others see when you request or receive a payment" />
               {err ? <Text style={S.err}>{err}</Text> : null}
-              <Pressable testID="btn-restore-confirm" style={[S.primary, (busy || (restoreMode === 'mnemonic' ? mnemonicText : seed).trim() === '') && S.dim]} disabled={busy || (restoreMode === 'mnemonic' ? mnemonicText : seed).trim() === ''} onPress={restore}
+                  <Pressable testID="btn-restore-confirm" style={[S.primary, (busy || (restoreMode === 'mnemonic' ? mnemonicText : seed).trim() === '') && S.disabledFlat]} disabled={busy || (restoreMode === 'mnemonic' ? mnemonicText : seed).trim() === ''} onPress={restore}
                 accessibilityRole="button" accessibilityLabel="Restore wallet" accessibilityHint={restoreMode === 'mnemonic' ? 'Recover your wallet from your 24 recovery words' : 'Recover your wallet from the recovery seed'} accessibilityState={{disabled: busy || (restoreMode === 'mnemonic' ? mnemonicText : seed).trim() === ''}}>
                 <Text style={S.primaryText}>{busy ? 'Restoring…' : 'Restore wallet'}</Text>
               </Pressable>
@@ -183,7 +183,7 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
               <Text style={S.label}>Choose a username</Text>
               <TextInput testID="username-input" style={S.usernameInput} value={username} onChangeText={setUsername} placeholder="e.g. Alice" placeholderTextColor={C.sub2} autoCapitalize="words" autoCorrect={false} onSubmitEditing={busy ? undefined : create} accessibilityLabel="Username" accessibilityHint="The name others see when you request or receive a payment" />
               {err ? <Text style={S.err}>{err}</Text> : null}
-              <Pressable testID="btn-create" style={[S.primary, busy && S.dim]} disabled={busy} onPress={create}
+              <Pressable testID="btn-create" style={[S.primary, busy && S.disabledFlat]} disabled={busy} onPress={create}
                 accessibilityRole="button" accessibilityLabel="Create wallet" accessibilityHint="Generate your on-device key and add demo funds" accessibilityState={{disabled: busy}}>
                 <Text style={S.primaryText}>{busy ? 'Creating…' : 'Create wallet'}</Text>
               </Pressable>

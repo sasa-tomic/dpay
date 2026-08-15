@@ -9,6 +9,7 @@ import {decodeSolReq, decodeSolPay, encodeSolPay} from '../solana/qr';
 import type {SolReqV2, SolPayV2} from '../solana/qr';
 import {extractSignedTxParts} from '../solana/tx';
 import {signSolPayment, signSplPayment, broadcastSolPayment} from '../solana';
+import {friendlySolTapError} from '../solana/errors';
 import {decideSolPayerReceiptV2, isSolReqV2Expired} from '../solana/payments';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from '../payments';
 import {DpaySolNfc} from '../services/native';
@@ -70,7 +71,13 @@ export function SolNfcTap({role, identity, req, reqUri, onOutcome, onResult, onA
       expectedSigRef.current = parts ? bs58.encode(parts.signature) : '';
       const solpayUri = encodeSolPay(solpay);
       await DpaySolNfc.approveSolCard(solpayUri);
-    } catch (e: unknown) { ctx.finalize('error', e instanceof Error ? e.message : String(e)); }
+    } catch (e: unknown) {
+      // A2: map via friendlySolTapError (never the raw string — the status view renders it
+      // verbatim); the raw message is warn'd so the dev loop stays fail-loud.
+      const raw = e instanceof Error ? e.message : String(e);
+      console.warn('SolNfcTap autoSign failed:', raw);
+      ctx.finalize('error', friendlySolTapError(raw));
+    }
   }, [identity]);
 
   // Merchant (reader): decode the payer's solpay:v2, broadcast online (strict verify + freshness +
@@ -103,9 +110,14 @@ export function SolNfcTap({role, identity, req, reqUri, onOutcome, onResult, onA
       }
     } catch (e: unknown) {
       // A network/RPC throw is genuinely unknown — hand UNREACHABLE so the payer falls back to
-      // "couldn't confirm" honestly (never a false decline).
+      // "couldn't confirm" honestly (never a false decline). A2: the merchant's own sub-line maps
+      // via friendlySolTapError with check-your-balance fallback copy (an unknown outcome must not
+      // read as "try again" — the broadcast may still land); the raw message is warn'd for the
+      // dev loop.
+      const raw = e instanceof Error ? e.message : String(e);
+      console.warn('SolNfcTap submitPayment failed:', raw);
       try { await DpaySolNfc.confirmSolReceipt(RECEIPT_UNREACHABLE, '', ''); } catch (e2: unknown) { console.warn('DpaySolNfc.confirmSolReceipt failed (catch-all)', e2); }
-      ctx.finalize('pending', e instanceof Error ? e.message : String(e));
+      ctx.finalize('pending', friendlySolTapError(raw, 'Couldn’t confirm the payment — check your balance'));
     } finally {
       cancel();
     }

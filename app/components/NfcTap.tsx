@@ -159,7 +159,12 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
       if (!(await DpayCore.verifyWire(wireHex))) throw new Error('local verify failed');
       sentRef.current = {amount: req.amount, currency: req.currency, who: short(req.toHex), nonce: req.nonceHex};
       await DpayNfc.approveCard(wireHex);
-    } catch (e: unknown) { ctx.finalize('error', e instanceof Error ? e.message : String(e)); }
+    } catch (e: unknown) {
+      // A2: never render the raw exception in the tap status view — generic honest copy instead;
+      // the raw message is warn'd so the dev loop stays fail-loud.
+      console.warn('NfcTap autoSign failed:', e instanceof Error ? e.message : String(e));
+      ctx.finalize('error', "Payment didn't complete — try again");
+    }
   }, [identity, catalog]);
 
   // The wire has left the phone — optimistically deduct from the local balance. The real balance

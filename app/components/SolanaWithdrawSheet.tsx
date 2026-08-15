@@ -180,7 +180,7 @@ export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, so
 
           <Pressable
             testID="btn-sol-send-confirm"
-            style={[S.primaryWide, !canReview && S.dim]}
+            style={[S.primaryWide, !canReview && S.disabledFlat]}
             disabled={!canReview}
             onPress={confirm}
             accessibilityRole="button"

@@ -276,7 +276,7 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
                 {restoreErr ? <Text style={S.err}>{restoreErr}</Text> : null}
                 <Pressable
                   testID="btn-settings-restore-confirm"
-                  style={[S.primary, (restoreBusy || restoreSeed.trim() === '') && S.dim]}
+                  style={[S.primary, (restoreBusy || restoreSeed.trim() === '') && S.disabledFlat]}
                   disabled={restoreBusy || restoreSeed.trim() === ''}
                   onPress={doRestore}
                   accessibilityRole="button"

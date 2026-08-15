@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {SafeAreaView, StatusBar, View, Text, Pressable, ScrollView, AppState, Linking} from 'react-native';
+import {SafeAreaView, StatusBar, View, Text, Pressable, ScrollView, AppState, Linking, BackHandler, Platform} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {C} from '../config/palette';
 import {S} from '../styles';
@@ -443,6 +443,34 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
     l: () => setMode('ledger'),
   }, {ignoreIfInputFocused: true, enabled: !anySheetOpen});
 
+  // D6 — Android hardware BACK must not exit the app instantly from the home screen. The sheets
+  // register no BackHandler of their own, so back closes the open sheet first; otherwise the first
+  // press shows a transient inline "Press back again to exit" hint and only a second press within
+  // 2s calls BackHandler.exitApp(). The hint auto-hides after the same 2s window; the timer is
+  // cleared on unmount/re-press (no leaked timers).
+  const [backHint, setBackHint] = useState(false);
+  const lastBackRef = useRef(0);
+  const backHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    // Android-only (react-native-web's BackHandler stub console.error's on addEventListener, and the
+    // e2e driver treats unexpected console.error as RED).
+    if (Platform.OS !== 'android') return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (balancesOpen) { setBalancesOpen(false); return true; }
+      if (settingsOpen) { setSettingsOpen(false); return true; }
+      if (Date.now() - lastBackRef.current < 2000) { BackHandler.exitApp(); return true; }
+      lastBackRef.current = Date.now();
+      setBackHint(true);
+      if (backHintTimerRef.current) clearTimeout(backHintTimerRef.current);
+      backHintTimerRef.current = setTimeout(() => setBackHint(false), 2000);
+      return true;
+    });
+    return () => {
+      sub.remove();
+      if (backHintTimerRef.current) { clearTimeout(backHintTimerRef.current); backHintTimerRef.current = null; }
+    };
+  }, [balancesOpen, settingsOpen]);
+
   // The ONE selection setter. Setting the selection is a deliberate user action, so it dismisses the
   // Balances sheet AND resets the within-tab sub-modes + clears any idle draft (the scan/send +
   // request/address surfaces start fresh on the new asset). Money-critical review/sign flows are NOT
@@ -497,20 +525,30 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
           accessibilityHint={balancesDisabled ? 'Finish or cancel the current payment first' : 'Open the full asset list, switch the displayed currency, or receive'}
           accessibilityState={{disabled: balancesDisabled}}
         >
-          <View style={S.balLabelRow}>
-            <View style={[S.dot, {backgroundColor: online ? C.ok : C.sub2}]} />
-            {/* D3: the header label names the active asset in BOTH branches — online reads "X balance",
-                offline reads "~ X approx.". `activeAssetName` is the single source of truth for the
-                symbol (shared with the active-rail chip below). */}
-            <Text style={S.balLabel}>{online ? `${activeAssetName} balance` : `~ ${activeAssetName} approx.`}</Text>
+          <View style={S.balHeaderRow}>
+            <View>
+              <View style={S.balLabelRow}>
+                <View style={[S.dot, {backgroundColor: online ? C.ok : C.sub2}]} />
+                {/* D3: the header label names the active asset in BOTH branches — online reads "X balance",
+                    offline reads "~ X approx.". `activeAssetName` is the single source of truth for the
+                    symbol (shared with the active-rail chip below). */}
+                <Text style={S.balLabel}>{online ? `${activeAssetName} balance` : `~ ${activeAssetName} approx.`}</Text>
+              </View>
+              <View style={S.balAmtRow}>
+                {/* The header reads the selected asset's pre-formatted displayText from the ONE balance
+                    map. DEMO keeps its offline '~' prefix (baked into the map); an IC asset shows its
+                    polled native-units balance; SOL/USDC show '—' when the RPC is offline (jest/e2e). */}
+                <Text style={S.balAmt}>{selectedAsset ? (balances[selectedAsset.id]?.displayText ?? '—') : '—'}</Text>
+              </View>
+            </View>
+            {/* D5a: the A badge sits at the FAR RIGHT edge of the row (label+value column, then the
+                badge) matching the tab-bar pattern — it was inline after the label text, which read
+                as a keyboard glyph attached to the label, not the pressable. */}
             <HotkeyHint k="A" />
           </View>
-          <View style={S.balAmtRow}>
-            {/* The header reads the selected asset's pre-formatted displayText from the ONE balance
-                map. DEMO keeps its offline '~' prefix (baked into the map); an IC asset shows its
-                polled native-units balance; SOL/USDC show '—' when the RPC is offline (jest/e2e). */}
-            <Text style={S.balAmt}>{selectedAsset ? (balances[selectedAsset.id]?.displayText ?? '—') : '—'}</Text>
-          </View>
+          {backHint ? (
+            <Text testID="back-exit-hint" style={S.balBackHint}>Press back again to exit</Text>
+          ) : null}
         </Pressable>
       </View>
 

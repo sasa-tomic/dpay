@@ -9,6 +9,7 @@ import type {Identity} from '../lib/types';
 import type {FamilyDisplay, MinterFamily} from '../config/catalog';
 import {isValidDestinationAddress} from '../config/catalog';
 import {withdrawFunds} from '../services/relay';
+import {withdrawRejectionMessage} from '../payments';
 import {loadSavedWithdrawAddr, saveWithdrawAddr} from '../services/withdraw';
 import {DpayCore} from '../services/native';
 import {useEscapeToClose} from '../hooks/useHotkeys';
@@ -82,15 +83,19 @@ export function WithdrawSheet({identity, relayUrl, currency, decimals, display, 
       onWithdrawn(); // trigger a balance/history refresh
     } catch (e: unknown) {
       // A 422 policy error (bad sig / insufficient / below min / nonce) or a 503 transient / offline.
-      // Surface the reason; the user can correct + retry from the form. For a ckERC20 partial-failure
-      // settlement (the dual-ledger path burned ckETH gas but the ERC-20 transfer may not have
-      // landed — the canister RELEASES with an honest partial-failure marker), surface the specific
-      // "gas was burned" guidance so the user checks their balance instead of assuming success.
+      // A8: the raw relay/canister body (e.g. "InsufficientFunds: balance 0", "nonce already used")
+      // is protocol jargon to a user — mapped to friendly copy by `withdrawRejectionMessage` (pure,
+      // unit-tested in payments.test.ts). The raw reason is ALWAYS console.warn'd so the dev loop
+      // stays fail-loud. For a ckERC20 partial-failure settlement (the dual-ledger path burned ckETH
+      // gas but the ERC-20 transfer may not have landed — the canister RELEASES with an honest
+      // partial-failure marker), surface the specific "gas was burned" guidance so the user checks
+      // their balance instead of assuming success.
       const msg = e instanceof Error ? e.message : String(e);
+      console.warn('withdraw failed:', msg);
       if (/partial[ _-]?failure/i.test(msg)) {
         setErr('Gas was burned but the transfer may not have landed. Check your balance.');
       } else {
-        setErr(msg);
+        setErr(withdrawRejectionMessage(msg));
       }
       setPhase('error');
     } finally {
@@ -180,7 +185,7 @@ export function WithdrawSheet({identity, relayUrl, currency, decimals, display, 
 
           <Pressable
             testID="btn-withdraw-confirm"
-            style={[S.primaryWide, !canReview && S.dim]}
+            style={[S.primaryWide, !canReview && S.disabledFlat]}
             disabled={!canReview}
             onPress={confirm}
             accessibilityRole="button"

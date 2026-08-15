@@ -122,10 +122,11 @@ function solView(solState: SolStateInput): BalanceView {
 }
 
 // Solana USDC (an SPL token). 'balance' ⇒ a real amount (zero ⇒ 'zero', dims); 'absent' ⇒ the
-// device's USDC ATA does not exist on chain (a KNOWN zero-by-absence, distinct from a zero balance
-// and from offline — invariant #10); 'unavailable' ⇒ the rail is misconfigured/offline; 'error' ⇒
-// preserves the prior amount (never zeroes); 'loading' ⇒ first poll pending. The unit is always
-// 'USDC' (distinct from any IC USDC's "USDC · Ethereum" label — invariant #5).
+// device's USDC ATA does not exist on chain (a KNOWN zero-by-absence, rendered as "0 USDC" —
+// distinct from a zero balance only in status, and from offline — invariant #10); 'unavailable' ⇒
+// the rail is misconfigured/offline; 'error' ⇒ preserves the prior amount (never zeroes);
+// 'loading' ⇒ first poll pending. The unit is always 'USDC' (distinct from any IC USDC's
+// "USDC · Ethereum" label — invariant #5).
 function usdcView(usdcState: UsdcStateInput): BalanceView {
   const decimals = usdcState.decimals ?? USDC_DECIMALS;
   switch (usdcState.status) {
@@ -134,7 +135,11 @@ function usdcView(usdcState: UsdcStateInput): BalanceView {
       if (cmpRaw(usdcState.amount, '0') === 0) return {displayText: fmtAsset(usdcState.amount, decimals, 'USDC'), status: 'zero'};
       return {displayText: fmtAsset(usdcState.amount, decimals, 'USDC'), status: 'ok'};
     case 'absent':
-      return {displayText: '—', status: 'absent'};
+      // D3: a missing ATA is a KNOWN zero (the RPC answered — the account simply doesn't exist), so
+      // render a real "0 USDC" with normal formatting. The '—' placeholder is reserved strictly for
+      // unknown/unreachable states (offline / error / loading). Status stays 'absent' so the row
+      // still dims and the receive/send setup-gate surfaces keep their trigger.
+      return {displayText: fmtAsset('0', decimals, 'USDC'), status: 'absent'};
     case 'unavailable':
       return {displayText: '—', status: 'unavailable'};
     case 'error':

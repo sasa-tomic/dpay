@@ -121,7 +121,7 @@ describe('buildAssetBalances — per-asset balance map', () => {
     expect(m['solana:SOL'].status).toBe('error');
   });
 
-  it('Solana USDC: balance non-zero ⇒ ok; absent ⇒ "—" (no ATA); unavailable ⇒ "—"', () => {
+  it('Solana USDC: balance non-zero ⇒ ok; absent ⇒ "0 USDC" (no ATA = known zero, D3); unavailable ⇒ "—"', () => {
     const usdc = (
       amount: string | null, decimals: number | null,
       status: 'balance' | 'absent' | 'unavailable',
@@ -132,7 +132,9 @@ describe('buildAssetBalances — per-asset balance map', () => {
     })['solana:USDC'];
     expect(usdc('1500000', 6, 'balance')).toEqual({displayText: '1.500000 USDC', status: 'ok'});
     expect(usdc('0', 6, 'balance')).toEqual({displayText: '0 USDC', status: 'zero'});
-    expect(usdc(null, null, 'absent')).toEqual({displayText: '—', status: 'absent'});
+    // D3: a missing ATA is a KNOWN zero (RPC reachable) → "0 USDC", not "—"; "—" is reserved for
+    // offline/unknown (unavailable/error/loading below).
+    expect(usdc(null, null, 'absent')).toEqual({displayText: '0 USDC', status: 'absent'});
     expect(usdc(null, null, 'unavailable')).toEqual({displayText: '—', status: 'unavailable'});
   });
 

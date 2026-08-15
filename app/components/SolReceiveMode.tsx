@@ -425,7 +425,7 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
         return (
           <Pressable
             testID="btn-sol-req-make"
-            style={[S.primaryWide, blocked && S.dim]}
+            style={[S.primaryWide, blocked && S.disabledFlat]}
             disabled={blocked}
             onPress={makeRequest}
             accessibilityRole="button"
