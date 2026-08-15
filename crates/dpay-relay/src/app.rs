@@ -4,7 +4,10 @@
 //! - `GET /` — the marketing landing page (with a download CTA when an APK is configured).
 //! - `GET /download/dpay.apk` — the Android build, when one is configured; else `404`.
 //! - `GET /merchant` — the merchant terminal web page, driven by the merchant phone.
+//! - `GET /wallet` — the browser wallet (create/restore, balances, pay, receive, send, history).
 //! - `GET /privacy` — the public privacy policy for the app, website, and merchant terminal.
+//! - `GET /ed25519.js|/noble-hashes.js|/wordlist.js` — the wallet's vendored crypto scripts
+//!   (same-origin only; no CDN).
 //! - `GET /shots/{name}` — the real app screenshots embedded in the landing page.
 //! - `POST /api/v1/pay` — hands the payer's signed-authorization QR to the ledger and returns a
 //!   receipt. Two properties matter for the demo and are enforced here (not in the ledger):
@@ -193,9 +196,13 @@ pub fn app(state: AppState) -> Router {
         .route("/", get(landing_page))
         .route("/download/dpay.apk", get(apk_download))
         .route("/merchant", get(merchant_page))
+        .route("/wallet", get(wallet_page))
         .route("/privacy", get(privacy_page))
         .route("/jsqr.js", get(jsqr_js))
         .route("/qrcode.js", get(qrcode_js))
+        .route("/ed25519.js", get(ed25519_js))
+        .route("/noble-hashes.js", get(noble_hashes_js))
+        .route("/wordlist.js", get(wordlist_js))
         .route("/shots/{name}", get(screenshot))
         .nest("/api/v1", api)
         .with_state(state);
@@ -753,6 +760,49 @@ async fn privacy_page() -> Response {
     (
         [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
         include_str!("../assets/privacy.html"),
+    )
+        .into_response()
+}
+
+/// `GET /wallet` — the browser wallet (create/restore mnemonic, balances, pay, receive, send,
+/// history) so merchants/payers can use dpay without installing the APK. Same-origin + vendored
+/// scripts only (jsQR/qrcode/noble/wordlist); the guarded wire/bip39 codec block inside the page is
+/// parity-checked against dpay-core by `scripts/check-wallet-wire.mjs` on every `just check`.
+async fn wallet_page() -> Response {
+    (
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        include_str!("../assets/wallet.html"),
+    )
+        .into_response()
+}
+
+/// `GET /ed25519.js` — vendored `@noble/ed25519` 2.3.0 (MIT), ESM→IIFE bundle assigning
+/// `globalThis.nobleEd25519` (offline; no CDN). The exact package e2e uses, cross-validated
+/// against the Rust core's ed25519-dalek.
+async fn ed25519_js() -> Response {
+    (
+        [(header::CONTENT_TYPE, "application/javascript; charset=utf-8")],
+        include_str!("../assets/ed25519.js"),
+    )
+        .into_response()
+}
+
+/// `GET /noble-hashes.js` — vendored `@noble/hashes` 1.6.0 (sha256 + sha512 + internals, MIT),
+/// ESM→IIFE bundle assigning `globalThis.nobleHashes` (offline; no CDN).
+async fn noble_hashes_js() -> Response {
+    (
+        [(header::CONTENT_TYPE, "application/javascript; charset=utf-8")],
+        include_str!("../assets/noble-hashes.js"),
+    )
+        .into_response()
+}
+
+/// `GET /wordlist.js` — the BIP-39 English wordlist (public domain), byte-exact from
+/// app/lib/bip39-wordlist.ts, assigning `globalThis.DPAY_WORDLIST`.
+async fn wordlist_js() -> Response {
+    (
+        [(header::CONTENT_TYPE, "application/javascript; charset=utf-8")],
+        include_str!("../assets/wordlist.js"),
     )
         .into_response()
 }

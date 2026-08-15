@@ -2388,3 +2388,85 @@ async fn u4_receipt_pubkey_route_returns_ledger_test_key() {
     assert_eq!(pub_hex, hex::encode(&led_pk));
     assert_eq!(led_pk.len(), 32, "32-byte Ed25519 pubkey");
 }
+
+// --- Browser wallet (GET /wallet + its vendored scripts) --------------------------------------
+//
+// The wallet page is a full payer-side wallet in the browser: its guarded `wallet-wire-v1` block
+// (request/signing/withdraw codec + BIP-39) is parity-checked OFFLINE by
+// scripts/check-wallet-wire.mjs; these route tests pin the serving surface — the page itself and
+// the vendored noble/wordlist scripts it loads, all same-origin (the CSP in the page enforces
+// `default-src 'self'`; the routes must exist or the page 404s its own dependencies).
+
+/// `GET /wallet` serves the browser wallet page: the brand, the onboarding + tab id markers the
+/// e2e/browser smoke anchors on, the guarded wire fence, and the vendored script tags (a missing
+/// tag = the page loads broken despite 200).
+#[tokio::test]
+async fn wallet_page_served_with_markers_and_scripts() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+
+    let (status, headers, bytes) = call_raw(&state, get_req("/wallet")).await;
+    assert_eq!(status, StatusCode::OK, "/wallet must serve");
+    assert_eq!(
+        headers.get(header::CONTENT_TYPE).unwrap(),
+        "text/html; charset=utf-8"
+    );
+    let html = String::from_utf8(bytes).unwrap();
+    // Brand + the page's unique element ids (onboarding, the four tabs, settings).
+    assert!(html.contains("d<b>pay</b>."), "/wallet must carry the brand");
+    for marker in [
+        "id=\"onboard\"",
+        "id=\"walletApp\"",
+        "id=\"tab-balances\"",
+        "id=\"tab-pay\"",
+        "id=\"tab-receive\"",
+        "id=\"tab-send\"",
+        "id=\"settings\"",
+        "wallet-wire-v1", // the parity-guarded codec fence
+    ] {
+        assert!(html.contains(marker), "/wallet must contain {marker}");
+    }
+    // The vendored scripts + the CSP that pins the page same-origin.
+    for script in ["/jsqr.js", "/qrcode.js", "/ed25519.js", "/noble-hashes.js", "/wordlist.js"] {
+        assert!(html.contains(script), "/wallet must load {script}");
+    }
+    assert!(
+        html.contains("Content-Security-Policy"),
+        "/wallet must declare its CSP"
+    );
+}
+
+/// Each vendored wallet script serves as JavaScript; an unknown path under those names is a clean
+/// 404 (mirrors the screenshots test — never a 200 with an empty body).
+#[tokio::test]
+async fn wallet_scripts_served_and_unknown_path_is_404() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+
+    for path in ["/ed25519.js", "/noble-hashes.js", "/wordlist.js"] {
+        let (status, headers, bytes) = call_raw(&state, get_req(path)).await;
+        assert_eq!(status, StatusCode::OK, "{path} must serve");
+        assert_eq!(
+            headers.get(header::CONTENT_TYPE).unwrap(),
+            "application/javascript; charset=utf-8"
+        );
+        assert!(!bytes.is_empty(), "{path} must have a body");
+        assert!(
+            String::from_utf8(bytes[..80.min(bytes.len())].to_vec())
+                .map(|s| s.starts_with("/*!"))
+                .unwrap_or(false),
+            "{path} must keep the vendored license header"
+        );
+    }
+    // The wordlist must be the real 2048-word BIP-39 list (first/last word check on the body).
+    let (_s, _h, bytes) = call_raw(&state, get_req("/wordlist.js")).await;
+    let js = String::from_utf8(bytes).unwrap();
+    assert!(js.contains("\"abandon"), "wordlist must start at 'abandon'");
+    assert!(js.contains("zoo\""), "wordlist must end at 'zoo'");
+
+    // No catch-all: a near-miss asset path is a clean 404.
+    let (status, _h, _b) = call_raw(&state, get_req("/nope.js")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "unknown script path must 404");
+}
