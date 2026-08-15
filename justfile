@@ -185,8 +185,14 @@ aid-parity:
 # path that test-relay's FakeLedger cannot (receipt recovery, TTL balance refresh, currency wiring).
 # Keeping it on the hot path closes the gap that once let a fail-closed-cap change break test-live
 # silently while `just verify` stayed green (MC2 U1 / OPEN_ISSUES #10 lesson).
-check: test-core test-canister test-relay test-live typecheck bridge-parity aid-parity
+check: test-core test-canister test-relay test-live typecheck bridge-parity aid-parity merchant-wire
     @echo "rust inner loop green"
+
+# Merchant-terminal wire parity: the hand-rolled JS request encoder embedded in the served HTML
+# must stay byte-identical to the frozen dpay-core 132-byte request (wire v2). Catches the
+# "app can't pay the web terminal" drift class (a 68-byte v1 encoder survived every gate 2026-07-31→2026-08-15).
+merchant-wire:
+    node scripts/check-merchant-wire.mjs
 
 # everything: rust loop + radical e2e (real app + real relay + real browser). The e2e harness
 # superseded the old ui/ parallel-component golden-shot harness (drives the REAL App.tsx +

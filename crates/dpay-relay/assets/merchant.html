@@ -131,19 +131,24 @@ async function health(){
 }
 setInterval(health,3000); health();
 
-// --- request encoding (matches dpay_core::PaymentRequest: to|amount_le|nonce|expiry_le|currency_le) ---
+// --- request encoding (matches dpay_core::PaymentRequest v2, 132 bytes:
+//     to(32)|amount_le(8)|nonce(16)|expiry_le(8)|currency_le(4)|to_name(32)|memo(32)) ---
+// The layout is FROZEN in crates/dpay-core/src/lib.rs (REQUEST_LEN=132); scripts/check-merchant-wire.mjs
+// asserts this encoder against it byte-for-byte on every `just check` so the terminal can never drift again.
 function hexToBytes(hex,buf,off){ for(let i=0;i<hex.length/2;i++) buf[off+i]=parseInt(hex.substr(i*2,2),16); }
 function bytesToHex(b){ return [...b].map(x=>x.toString(16).padStart(2,'0')).join(''); }
 function writeU32LE(buf,off,n){ for(let i=0;i<4;i++){ buf[off+i]=n&0xff; n=Math.floor(n/256); } }
 function writeU64LE(buf,off,n){ for(let i=0;i<8;i++){ buf[off+i]=n&0xff; n=Math.floor(n/256); } }
+function writeName(buf,off,s){ const u=new TextEncoder().encode(s.slice(0,32)); buf.set(u,off); }
 function b64url(bytes){ let s=''; for(const b of bytes) s+=String.fromCharCode(b); return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
 function b64urlDecode(s){ s=s.replace(/-/g,'+').replace(/_/g,'/'); while(s.length%4)s+='='; const bin=atob(s); const b=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++)b[i]=bin.charCodeAt(i); return b; }
 function randNonceHex(){ const a=new Uint8Array(16); crypto.getRandomValues(a); return bytesToHex(a); }
 const DEMO_USD = 0;
-function encodeRequest(toHex, cents, nonceHex, expiry, currency){
+function encodeRequest(toHex, cents, nonceHex, expiry, currency, toName){
   const c = currency===undefined ? DEMO_USD : currency;
-  const b=new Uint8Array(68);
+  const b=new Uint8Array(132);
   hexToBytes(toHex,b,0); writeU64LE(b,32,cents); hexToBytes(nonceHex,b,40); writeU64LE(b,56,expiry); writeU32LE(b,64,c);
+  writeName(b,68, toName || 'Café Demo');
   return b64url(b);
 }
 // The signed wire is from(32)|to(32)|amount(8)|nonce(16)@72|expiry(8)|currency_le(4)|from_name(32)|to_name(32)|memo(32)|sig(64)|from_pub(32) = 292 bytes (wire-format v2).
