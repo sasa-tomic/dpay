@@ -257,6 +257,7 @@ describe('solana seam — sendSpl (Phase 6 USDC direct send)', () => {
         calls++;
         return calls === 1 ? {value: {data: ['', 'base64'], owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', lamports: 2039280}} : {value: null};
       },
+      getBalance: () => ({value: 1000000000}), // 1 SOL ≥ rent+fee — sender can fund the create
       getLatestBlockhash: () => ({context: {slot: 100}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
       sendTransaction: (params: unknown[]) => { sent.push(params[0] as string); return 'SigSplBase58'; },
       getSignatureStatuses: () => ({value: [{confirmationStatus: 'confirmed'}]}),
@@ -297,6 +298,30 @@ describe('solana seam — sendSpl (Phase 6 USDC direct send)', () => {
     // Exactly one broadcast, carrying a non-trivial signed transaction.
     expect(sent.length).toBe(1);
     expect(sent[0].length).toBeGreaterThan(120); // base64 of sig(64)+header+accounts+blockhash+ix
+  });
+
+  test('throws a friendly pre-check error (NO broadcast) when sender SOL cannot cover the recipient rent', async () => {
+    // Sender ATA funded, recipient ATA missing → the tx would carry createIdempotent. Sender SOL
+    // (0.001) < rent+fee → sendSpl must fail-closed BEFORE building/signing (finding from the
+    // 2026-08-15 audit: without this, the user passes review and hits a raw
+    // "custom program error: 0x1" at broadcast).
+    let calls = 0;
+    let broadcasts = 0;
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getAccountInfo: () => {
+        calls++;
+        return calls === 1 ? {value: {data: ['', 'base64'], owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', lamports: 2039280}} : {value: null};
+      },
+      getBalance: () => ({value: 1000000}), // 0.001 SOL < rent+fee
+      getLatestBlockhash: () => ({context: {slot: 100}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
+      sendTransaction: () => { broadcasts++; return 'SigSplBase58'; },
+      getSignatureStatuses: () => ({value: [{confirmationStatus: 'confirmed'}]}),
+    };
+    await expect(withStubUrl(async () => {
+      const {sendSpl} = require('../solana');
+      return (sendSpl as (s: string, d: string, a: bigint) => Promise<string>)(SEED_HEX, MERCHANT_ADDRESS, 1_000_000n);
+    })).rejects.toThrow(/SOL|rent/i);
+    expect(broadcasts).toBe(0); // fail-closed BEFORE any tx is signed or broadcast
   });
 
   test('checks the sender ATA BEFORE the recipient ATA (clear error attribution)', async () => {
@@ -366,6 +391,38 @@ describe('solana seam — createUsdcAta (receiver-side one-tap setup)', () => {
     // device key's signature over its own rent (payer = owner = device key).
     expect(indexOfBytes(bytes, deviceAta)).toBeGreaterThanOrEqual(0);
     expect(indexOfBytes(bytes, base58Decode32(ASSOCIATED_TOKEN_PROGRAM_ADDRESS))).toBeGreaterThanOrEqual(0);
+  });
+
+  test('surfaces an on-chain failure after broadcast (no false success)', async () => {
+    // Mid-flight failure: the tx was broadcast but FAILED on chain (e.g. rent changed). The
+    // promise must reject with the reported error — never return the signature as success.
+    let broadcasts = 0;
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getBalance: () => ({value: 1000000000}),
+      getLatestBlockhash: () => ({context: {slot: 100}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
+      sendTransaction: () => { broadcasts++; return 'SigAtaBase58'; },
+      getSignatureStatuses: () => ({value: [{err: {InstructionError: [0, {Custom: 1}]}, confirmationStatus: 'processed'}]}),
+    };
+    await expect(withStubUrl(async () => {
+      const {createUsdcAta} = require('../solana');
+      return (createUsdcAta as (s: string) => Promise<string>)(SEED_HEX);
+    })).rejects.toThrow(/transaction failed/i);
+    expect(broadcasts).toBe(1); // broadcast DID happen — the error is the honest outcome
+  });
+
+  test('propagates an RPC error during confirmation (never a false success)', async () => {
+    // Mid-flight failure: the RPC dies between broadcast and confirmation. The raw RPC error must
+    // propagate — the signature was broadcast, so swallowing it would hide a possibly-landed tx.
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getBalance: () => ({value: 1000000000}),
+      getLatestBlockhash: () => ({context: {slot: 100}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
+      sendTransaction: () => 'SigAtaBase58',
+      getSignatureStatuses: () => { throw new Error('rpc exploded mid-confirm'); },
+    };
+    await expect(withStubUrl(async () => {
+      const {createUsdcAta} = require('../solana');
+      return (createUsdcAta as (s: string) => Promise<string>)(SEED_HEX);
+    })).rejects.toThrow('rpc exploded mid-confirm');
   });
 });
 

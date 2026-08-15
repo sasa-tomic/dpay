@@ -195,9 +195,11 @@ radio hop (real NFC tap, real QR-in-view scan) remains founder outer-loop as bef
 > OPEN_ISSUES entry per the value≥4 rule.
 >
 > **Also closes** the F4 follow-up ("USDC toggle gating", 2026-08-09 SOL sweep deferred-items): the
-> Solana-USDC request now fail-closes via `decideUsdcAtaGate` when the destination ATA is
-> absent/unknown, and the direct-send path fail-closes on a missing sender ATA — so a USDC action can
-> never promise or submit an unfulfillable ATA silently.
+> Solana-USDC request then fail-closed via the (now-deleted) `decideUsdcAtaGate` when the destination
+> ATA was absent/unknown, and the direct-send path fail-closed on a missing sender ATA — so a USDC
+> action could never promise or submit an unfulfillable ATA silently. (Superseded 2026-08-14 by the
+> tri-state gate + in-tx recipient auto-create — see CODEBASE_ANALYSIS "Consistent fail-closed ATA
+> principle".)
 
 ## Session summary (2026-08-11, cont.): device gate + code review + PROD DEPLOYED to HEAD
 
@@ -639,7 +641,7 @@ details.
 
 **Items DEFERRED (optional Subagent D, not blocking):**
 - **F3 merchant ed25519.verify** — the payer's `solpay.tx` signature is currently only validated *implicitly* by Solana accepting/rejecting the broadcast. A merchant-side `ed25519.verify(sig, message, payerPubkey)` before broadcast would mirror the IC receipt-verify posture (defense-in-depth, not a funds risk — on-chain rejects a bad sig).
-- ~~**F4 USDC toggle gating** — the SOL/USDC toggle is offered in the UI but USDC offline-pay is non-functional without pre-existing ATAs (`sourceAta` must exist on-chain). Gating it behind an ATA-existence check is a documented follow-up.~~ **✅ DONE (2026-08-12, unified asset selection rewrite Phase 4 + Phase 6).** The binary SOL/USDC toggle is gone (replaced by the unified `AssetPicker` + one `selectedAssetId`). `decideUsdcAtaGate(status, online)` fail-closes Solana-USDC REQUEST creation when the destination ATA is absent/`'unknown'`/`'checking'` (only `'present'` allows); the Phase 6 direct-send path fail-closes on a missing SENDER ATA + a missing RECIPIENT ATA. So a USDC action can never promise or submit an unfulfillable ATA silently. See the 2026-08-12 session summary above.
+- ~~**F4 USDC toggle gating** — the SOL/USDC toggle is offered in the UI but USDC offline-pay is non-functional without pre-existing ATAs (`sourceAta` must exist on-chain). Gating it behind an ATA-existence check is a documented follow-up.~~ **✅ DONE (2026-08-12, unified asset selection rewrite Phase 4 + Phase 6; superseded 2026-08-14).** The binary SOL/USDC toggle is gone (replaced by the unified `AssetPicker` + one `selectedAssetId`). NOTE (2026-08-15 doc-truth pass): the `decideUsdcAtaGate(status, online)` design described here was SUPERSEDED when that function was deleted (zero code refs) — current semantics live in CODEBASE_ANALYSIS "Consistent fail-closed ATA principle": request creation blocks ONLY on KNOWN `'absent'` (one-tap `SolanaAtaSetupCard`); unknown/checking/unavailable pass through; missing sender ATA → setup card; missing recipient ATA → auto-created in-tx (rent disclosed + `SOL_ATA_SETUP_MIN_LAMPORTS` pre-check).
 - **Default-tab/first-impression UX** — the new user lands on the Pay scanner + "NFC not available" instead of a wallet overview. Requires coordinated e2e updates (any modal-sheet change blocks the keyboard hotkey flow). Deferred to a dedicated UX session.
 - ~~**Seed/backup affordance** — Settings has Reset + Privacy + relay URL but no way to view/export the seed phrase ("one backup recovers both rails" is a pitch point with no UI backing it).~~ **✅ DONE (2026-08-09, commit `2482500`).** See the Phase 2 summary below.
 

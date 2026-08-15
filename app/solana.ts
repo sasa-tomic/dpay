@@ -76,7 +76,7 @@ export async function sendSpl(secretHex: string, destAddress: string, amount: bi
   const senderAddress = bs58.encode(publicKey);
   const senderAta = deriveAta(senderAddress, USDC_MINT_ADDRESS);
   const recipientAta = deriveAta(destAddress, USDC_MINT_ADDRESS);
-  const {accountExists, getLatestBlockhash, sendTransaction, confirmTransaction} = await import('./solana/rpc');
+  const {accountExists, getBalance, getLatestBlockhash, sendTransaction, confirmTransaction} = await import('./solana/rpc');
 
   // Sender ATA first — the device must hold a USDC account to debit from (fail-closed).
   if (!(await accountExists(SOLANA_RPC_URL, bs58.encode(senderAta), {signal}))) {
@@ -86,6 +86,12 @@ export async function sendSpl(secretHex: string, destAddress: string, amount: bi
   // upstream on the review screen; idempotent so a race with another creator is harmless).
   const ixs: Instruction[] = [];
   if (!(await accountExists(SOLANA_RPC_URL, bs58.encode(recipientAta), {signal}))) {
+    // Honest cost pre-check (mirrors createUsdcAta): without it the send passes review and dies at
+    // broadcast with a raw "custom program error: 0x1" that no friendlySolError pattern matches.
+    const lamports = await getBalance(SOLANA_RPC_URL, senderAddress, {signal});
+    if (BigInt(lamports) < SOL_ATA_SETUP_MIN_LAMPORTS) {
+      throw new Error(`They don't have a USDC account yet — creating it needs about ${fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT)} of SOL in this wallet (one-time rent + fee, paid by you) — send a little SOL here first`);
+    }
     ixs.push(buildCreateAtaIdempotentInstruction(publicKey, recipientAta, base58Decode32(destAddress), base58Decode32(USDC_MINT_ADDRESS)));
   }
   ixs.push(buildSplTransferInstruction(senderAta, recipientAta, publicKey, amount));

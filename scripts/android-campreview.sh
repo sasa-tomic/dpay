@@ -181,6 +181,51 @@ PY
   exit 1
 }
 
+# ensure_wallet: fresh emulator data (read-only AVD) lands on Onboarding — create the demo
+# wallet so the Balances navigation below has its `balance` anchor. Idempotent: an existing
+# wallet skips this (Onboarding never renders). Drives the full onboarding progression
+# (create → 24-word backup checkbox → continue → optional faucet-fallback continue).
+ensure_wallet() {
+  dump_ui || { echo "FAIL nav: uiautomator dump failed"; exit 2; }
+  if grep -q 'resource-id="balance"' "$ART/ui.xml"; then
+    echo "   wallet present"
+    return 0
+  fi
+  echo "   no wallet (fresh emulator data) — creating demo wallet"
+  local ok=""
+  for _ in $(seq 1 60); do
+    dump_ui || { sleep 1; continue; }
+    if grep -q 'resource-id="balance"' "$ART/ui.xml"; then ok=1; break; fi
+    local step
+    step="$(python3 - "$ART/ui.xml" <<'PY'
+import sys, xml.etree.ElementTree as ET
+nodes = list(ET.parse(sys.argv[1]).getroot().iter('node'))
+rids = {n.get('resource-id'): n for n in nodes if n.get('resource-id')}
+# only ever tap the backup checkbox while UNTICKED (avoids toggle loops); tapping the
+# Continue button while still disabled is a harmless no-op, so no clickable check needed.
+if 'mnemonic-backup-checkbox' in rids:
+    cb = rids['mnemonic-backup-checkbox']
+    if cb.get('checked') != 'true':
+        print('mnemonic-backup-checkbox')
+    else:
+        print('btn-mnemonic-continue')
+elif 'btn-create' in rids:
+    print('btn-create')
+elif 'btn-onboard-continue' in rids:
+    print('btn-onboard-continue')
+PY
+)"
+    if [ -n "$step" ]; then
+      echo "   onboarding: tap $step"
+      tap_rid "$step" || true
+    fi
+    sleep 1
+  done
+  [ -n "$ok" ] || { echo "FAIL nav: wallet creation did not reach the Wallet surface (no 'balance' anchor); ui dump: $ART/ui.xml"; exit 2; }
+  echo "   demo wallet created"
+}
+ensure_wallet
+
 echo "== IC (DEMO asset) Pay scan screen — positive control =="
 check_screen demo asset-demo-select ic
 

@@ -4,6 +4,7 @@ import QRCode from 'react-native-qrcode-svg';
 import {S} from '../styles';
 import {C} from '../config/palette';
 import {QR_SIZE_SMALL, IS_SOLANA_DEVNET} from '../config/constants';
+import {SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
@@ -55,7 +56,7 @@ export function SolanaReceiveSheet({
   const copy = useCallback(async () => { await doCopy(address); }, [address, doCopy]);
   const isUsdc = token === 'USDC';
   const status = isUsdc ? ataStatus : 'ready';
-  const hasSol = solBalance != null && BigInt(solBalance) >= 2_039_280n + 5_000n; // SOL_ATA_SETUP_MIN_LAMPORTS
+  const hasSol = solBalance != null && BigInt(solBalance) >= SOL_ATA_SETUP_MIN_LAMPORTS;
 
   // USDC readiness gate — see the doc comment. SOL always renders the address.
   if (status !== 'ready') {

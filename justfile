@@ -346,8 +346,14 @@ cleanup wipe='': stop
           done
         done
         if [ "${#qc[@]}" -gt 0 ]; then
-          take "${qc[@]}"
-          echo "  ✓ AVD userdata/cache qcow2 reset (regenerated on next boot)"
+          # close the pgrep→rm TOCTOU window: an emulator started in between would have its live
+          # qcow2 deleted under it
+          if pgrep -f 'qemu-system-.*-avd' >/dev/null 2>&1; then
+            echo "  ! emulator started mid-cleanup — AVD wipe SKIPPED (rerun 'just cleanup wipe')"
+          else
+            take "${qc[@]}"
+            echo "  ✓ AVD userdata/cache qcow2 reset (regenerated on next boot)"
+          fi
         else
           echo "  · AVD qcow2: none"
         fi
