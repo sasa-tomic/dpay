@@ -37,6 +37,7 @@
   .amountRow span { font-size:30px; font-weight:800; color:var(--ink-2); }
   .amountRow input { border:0; background:transparent; font-size:30px; font-weight:800; width:100%; margin-left:6px; outline:none; color:var(--ink); }
   button { font:inherit; font-weight:600; border:0; border-radius:12px; padding:13px 20px; cursor:pointer; }
+  button:disabled { opacity:.45; cursor:default; }
   .primary { background:var(--accent); color:var(--accent-ink); font-size:16px; width:100%; margin-top:12px; }
   .primary:hover { background:var(--accent-2); }
   .ghost { background:transparent; color:var(--ink); border:1px solid var(--line); }
@@ -147,26 +148,51 @@ async function health(){
 }
 setInterval(health,3000); health();
 
-// --- request encoding (matches dpay_core::PaymentRequest v2, 132 bytes:
-//     to(32)|amount_le(8)|nonce(16)|expiry_le(8)|currency_le(4)|to_name(32)|memo(32)) ---
-// The layout is FROZEN in crates/dpay-core/src/lib.rs (REQUEST_LEN=132); scripts/check-merchant-wire.mjs
-// asserts this encoder against it byte-for-byte on every `just check` so the terminal can never drift again.
-function hexToBytes(hex,buf,off){ for(let i=0;i<hex.length/2;i++) buf[off+i]=parseInt(hex.substr(i*2,2),16); }
+// >>> merchant-wire-v2
+// --- request encoding: the wasm core (crates/dpay-wasm, served at /dpay-core.wasm) ---
+// ONE-ENCODER POLICY: the 132-byte wire-v2 request is built ONLY by dpay-core's w_build_request
+// (the same Rust builder the Android app, canister, and relay use). There is NO fallback JS
+// encoder — the v1/v2 drift class (2026-07-31: a 68-byte v1 encoder survived every gate) dies
+// only if this is the single implementation. If init fails, the terminal fails loud (disabled
+// Create button + error below); it must never fall back to hand-rolled bytes.
+// scripts/check-merchant-wire.mjs extracts exactly this fence, instantiates the STAGED
+// dpay-core.wasm, and asserts byte-parity with the core oracle on every `just check`.
+function b64url(bytes){ let s=''; for(const b of bytes) s+=String.fromCharCode(b); return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); } // display codec only (bytes→QR string) — not wire math
+const DEMO_USD = 0;
+let signerCore = null; // dpay-core.wasm exports; set once signerReady resolves
+const signerReady = (async () => {
+  const res = await fetch('/dpay-core.wasm');
+  if(!res.ok) throw new Error('GET /dpay-core.wasm → ' + res.status);
+  const {instance} = await WebAssembly.instantiate(await res.arrayBuffer());
+  const abi = instance.exports.w_abi_version();
+  if(abi !== 1) throw new Error('dpay-core.wasm ABI v' + abi + ' (expected 1)');
+  signerCore = instance.exports;
+  return true;
+})();
+globalThis.__signerReady = signerReady; // seam: smoke tests await window.__signerReady
+// Same signature the terminal has always called (call sites unchanged). u64s pass as (lo, hi)
+// u32 halves via BigInt so the full u64 range is exact; names are UTF-8 with the core's own
+// 32-BYTE truncate+NUL-pad rule (the old JS sliced 32 *chars* — wrong for multibyte names).
+function encodeRequest(toHex, cents, nonceHex, expiry, currency, toName){
+  if(!signerCore) throw new Error('signer core not loaded');
+  const ex = signerCore, enc = new TextEncoder();
+  const hexBytes = h => Uint8Array.from(h.match(/../g).map(x => parseInt(x, 16)));
+  const lo32 = n => Number(BigInt(n) & 0xffffffffn), hi32 = n => Number(BigInt(n) >> 32n);
+  const put = bytes => { const p = ex.w_alloc(bytes.length); new Uint8Array(ex.memory.buffer, p, bytes.length).set(bytes); return p; };
+  const name = enc.encode(String(toName || 'Café Demo')), memo = enc.encode('');
+  const out = ex.w_alloc(132); // view re-derived below: a put may grow memory and detach buffers
+  const rc = ex.w_build_request(
+    put(hexBytes(toHex)), lo32(cents), hi32(cents),
+    put(hexBytes(nonceHex)), lo32(expiry), hi32(expiry),
+    currency === undefined ? DEMO_USD : currency,
+    put(name), name.length, put(memo), memo.length, out);
+  if(rc !== 0) throw new Error('w_build_request failed: code ' + rc);
+  return b64url(new Uint8Array(ex.memory.buffer, out, 132));
+}
+// <<< merchant-wire-v2
 function bytesToHex(b){ return [...b].map(x=>x.toString(16).padStart(2,'0')).join(''); }
-function writeU32LE(buf,off,n){ for(let i=0;i<4;i++){ buf[off+i]=n&0xff; n=Math.floor(n/256); } }
-function writeU64LE(buf,off,n){ for(let i=0;i<8;i++){ buf[off+i]=n&0xff; n=Math.floor(n/256); } }
-function writeName(buf,off,s){ const u=new TextEncoder().encode(s.slice(0,32)); buf.set(u,off); }
-function b64url(bytes){ let s=''; for(const b of bytes) s+=String.fromCharCode(b); return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
 function b64urlDecode(s){ s=s.replace(/-/g,'+').replace(/_/g,'/'); while(s.length%4)s+='='; const bin=atob(s); const b=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++)b[i]=bin.charCodeAt(i); return b; }
 function randNonceHex(){ const a=new Uint8Array(16); crypto.getRandomValues(a); return bytesToHex(a); }
-const DEMO_USD = 0;
-function encodeRequest(toHex, cents, nonceHex, expiry, currency, toName){
-  const c = currency===undefined ? DEMO_USD : currency;
-  const b=new Uint8Array(132);
-  hexToBytes(toHex,b,0); writeU64LE(b,32,cents); hexToBytes(nonceHex,b,40); writeU64LE(b,56,expiry); writeU32LE(b,64,c);
-  writeName(b,68, toName || 'Café Demo');
-  return b64url(b);
-}
 // The signed wire is from(32)|to(32)|amount(8)|nonce(16)@72|expiry(8)|currency_le(4)|from_name(32)|to_name(32)|memo(32)|sig(64)|from_pub(32) = 292 bytes (wire-format v2).
 function nonceOfSigned(qr){ try { const w=b64urlDecode(qr.trim()); return w.length===292 ? bytesToHex(w.slice(72,88)) : null; } catch { return null; } }
 function toCents(s){ const n=Math.round(parseFloat(s||'0')*100); return Number.isFinite(n)&&n>0?n:0; }
@@ -215,6 +241,18 @@ function handleSettled(j){
 }
 $('createBtn').onclick=createRequest;
 $('newBtn').onclick=newCharge;
+// Gate Create on the signer core (honest disabled state; the local wasm is tiny — sub-second).
+// Init failure = FAIL LOUD: error in the charge card + console.error. No fallback encoder.
+$('createBtn').disabled = true; $('createBtn').textContent = 'loading signer…';
+signerReady.then(
+  () => { $('createBtn').disabled = false; $('createBtn').textContent = 'Create request'; },
+  e => {
+    console.error('dpay-core.wasm init failed:', e);
+    $('createBtn').textContent = 'signer unavailable';
+    $('chargeCard').querySelector('.step').insertAdjacentHTML('beforebegin',
+      '<div class="warnmsg" style="margin-bottom:10px">Request encoder failed to load (' + ((e && e.message) || e) + ') — reload the page.</div>');
+  }
+);
 
 function renderTxns(){
   const ul=$('txns');
