@@ -34,10 +34,13 @@
   (value 7 / effort S): the cached object predates the max-age=300 fix and carries
   `immutable, max-age=31536000`, so the edge will not refetch it for ~1 yr. The relay-side fix is
   live (new objects revalidate in ≤5 min via ETag/304; the landing page's Download button links the
-  `?v=<sha256>` URL, which serves the FRESH 6eb102a build — verified live). Remaining step needs a
+  `?v=<sha256>` URL, which serves the FRESH build — verified live). Remaining step needs a
   permission the repo's CF token lacks (it is Tunnel+DNS only): **purge the cached APK** — either
   dashboard → Caching → Purge Everything (or purge by URL), or create a token with
   *Zone · Cache Purge* and export it as `CF_PURGE_TOKEN` so `just up` can purge automatically.
+  (The `/shots/*.png` landing screenshots had the same class of stale edge objects; those carry a
+  plain 4h edge TTL and NO `immutable`, so they self-healed — no purge needed. Only the APK is
+  purge-required.)
 
 
 ## Session summary (2026-08-14): SOL camera 0×0 collapse fix + campreview gate + legacy-fund removal — COMPLETE

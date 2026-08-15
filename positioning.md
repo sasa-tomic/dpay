@@ -4,7 +4,7 @@
 
 ## One-liner
 
-**Tap to pay abroad — even when your phone has no signal.** Instant payments that work offline; hold dollars or crypto, pay a local merchant in seconds; your phone never needs a connection.
+**Tap to pay abroad — even when your phone has no signal.** Instant payments that work offline. Pay a local merchant in seconds; your phone never needs a connection.
 
 ## Who / what
 
