@@ -163,7 +163,7 @@ async fn call(state: &AppState, req: Request<Body>) -> (StatusCode, Value) {
     (status, json)
 }
 
-/// A bare GET request — for the non-JSON pages (landing, privacy, merchant, APK).
+/// A bare GET request — for the non-JSON pages (landing, privacy, wallet, APK).
 fn get_req(uri: &str) -> Request<Body> {
     Request::builder()
         .method("GET")
@@ -797,44 +797,20 @@ async fn screenshots_served_as_png_and_unknown_is_404() {
     assert_eq!(status, StatusCode::NOT_FOUND, "unknown screenshot must 404");
 }
 
-/// The merchant terminal moved off `/` to `/merchant`; `/` is now the landing page.
+/// 2026-08-16 merge: the hand-rolled merchant terminal is gone — `/merchant` is a permanent
+/// redirect to `/wallet` (the REAL app; its Receive tab is the merchant terminal), and the root
+/// stays the landing page.
 #[tokio::test]
-async fn merchant_terminal_served_at_merchant_not_root() {
+async fn merchant_redirects_to_wallet() {
     let payer = keypair();
     let merchant = keypair();
     let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
 
-    let (ms, mh, mbytes) = call_raw(&state, get_req("/merchant")).await;
-    assert_eq!(ms, StatusCode::OK);
-    assert_eq!(
-        mh.get(header::CONTENT_TYPE).unwrap(),
-        "text/html; charset=utf-8"
-    );
-    let merch = String::from_utf8(mbytes).unwrap();
-    // `id="merchId"` is unique to the merchant terminal (the landing page shares the words
-    // "Merchant terminal" in its nav link, so match on the terminal-only element instead).
-    assert!(
-        merch.contains("id=\"merchId\""),
-        "/merchant must serve the terminal"
-    );
-    // M2: the 3 served fetches (submit / health / receipt-poll) must be wired through
-    // `fetchWithTimeout` so a hung relay never leaves the merchant UI in "settling…" forever.
-    // Asserting the helper + its 3 call sites are present is the offline-testable proxy for
-    // "the timeouts are wired" — the JS itself runs only in the browser (manual verify).
-    assert!(
-        merch.contains("function fetchWithTimeout"),
-        "/merchant must serve the fetchWithTimeout helper (M2)"
-    );
-    assert!(
-        merch.contains("isTimeout(e) ? 'relay unreachable (timed out)'"),
-        "/merchant health fetch must surface a timed-out message (M2)"
-    );
-    assert!(
-        merch.contains("Settlement timed out"),
-        "/merchant submit fetch must surface a timed-out message (M2)"
-    );
+    let (ms, mh, _mbytes) = call_raw(&state, get_req("/merchant")).await;
+    assert_eq!(ms, StatusCode::PERMANENT_REDIRECT);
+    assert_eq!(mh.get(header::LOCATION).unwrap(), "/wallet");
 
-    // The root is the landing page, not the terminal.
+    // The root is the landing page, not a wallet/terminal page.
     let (_rs, _rh, rbytes) = call_raw(&state, get_req("/")).await;
     let root = String::from_utf8(rbytes).unwrap();
     assert!(
@@ -2451,9 +2427,9 @@ async fn wallet_page_serves_embedded_real_app_dist() {
     assert!(!bytes.is_empty(), "the entry bundle must have a body");
 }
 
-/// Unknown asset names and the REMOVED legacy routes (the hand-written wallet's vendored scripts)
-/// are a clean 404 — never a 200 with an empty body. /jsqr.js (the merchant terminal's decoder)
-/// still serves.
+/// Unknown asset names and the REMOVED legacy routes (the hand-written wallet's vendored scripts,
+/// and — since the 2026-08-16 merge — the hand-rolled merchant terminal's decoder/QR deps) are a
+/// clean 404 — never a 200 with an empty body.
 #[tokio::test]
 async fn wallet_assets_404_cleanly_and_legacy_routes_are_gone() {
     let payer = keypair();
@@ -2468,19 +2444,12 @@ async fn wallet_assets_404_cleanly_and_legacy_routes_are_gone() {
         "/noble-hashes.js", // removed with the hand-written wallet
         "/wordlist.js",     // removed with the hand-written wallet
         "/ed25519.js",      // never coming back — the wasm core signs
+        "/jsqr.js",         // removed with the hand-rolled merchant terminal (2026-08-16 merge)
+        "/qrcode.js",       // removed with the hand-rolled merchant terminal (2026-08-16 merge)
     ] {
         let (status, _h, _b) = call_raw(&state, get_req(path)).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{path} must 404");
     }
-
-    // The merchant terminal's decoder is NOT part of the wallet dist — it must keep serving.
-    let (status, headers, bytes) = call_raw(&state, get_req("/jsqr.js")).await;
-    assert_eq!(status, StatusCode::OK, "/jsqr.js must keep serving (merchant terminal dep)");
-    assert_eq!(
-        headers.get(header::CONTENT_TYPE).unwrap(),
-        "application/javascript; charset=utf-8"
-    );
-    assert!(!bytes.is_empty(), "/jsqr.js must have a body");
 }
 
 // --- Shared wasm core (GET /dpay-core.wasm) -----------------------------------------------------

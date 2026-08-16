@@ -33,10 +33,11 @@ just demo
 ```
 
 This boots a local IC replica, deploys the `dpay` canister (real ledger), and starts the relay +
-**merchant terminal**. It prints a URL. Open it **on the laptop**:
+**web wallet** (the real app in the browser — its **Receive** tab is the merchant terminal). It
+prints a URL. Open it **on the laptop**:
 
 ```
-http://localhost:8787/
+http://localhost:8787/wallet
 ```
 
 (Use `localhost` — browsers only allow the webcam on `localhost`/https.)
@@ -56,12 +57,13 @@ dot next to the balance means the wallet can see the ledger.
 
 ### 3. The flow (~15 seconds when online)
 
-1. **Laptop (1 · Charge):** enter the amount → **Create request** → a **request QR** appears
+1. **Laptop (Receive tab):** enter the amount → the **request QR** appears
    (it encodes *who to pay, how much, and a single-use request id*).
 2. **Phone:** point the camera at the request QR → **“Pay $X to Café Demo”** → **Approve**.
-   - **Online (normal):** the phone submits straight to the ledger; the laptop shows **Paid ✓**
-     within ~1s (it polls the chain), and the phone's balance drops. No second scan.
-   - **Offline / flaky link:** after 5s the phone shows a **signed QR**; the laptop's **2 · Collect**
+   - **Online (normal):** the phone submits straight to the ledger; the laptop shows
+     **“Received …”** within ~1s (it polls the chain), and the phone's balance drops. No second scan.
+   - **Offline / flaky link:** after 5s the phone shows a **signed QR**; the laptop's **Scan payer's
+     signed QR**
      camera scans it (or use the **Share auth code** button → paste box).
 3. Both **Recent** lists (phone + laptop) show the payment.
 4. **Settle the same request again** → **“Already paid — not charged twice.”** The merchant's
@@ -71,7 +73,8 @@ Amount + payee are chosen by the **merchant** (the request) and **bound by the p
 so neither side can alter them and the payer approves the exact amount before signing.
 
 ### Why this is the clean setup
-- The merchant is a laptop page + the relay — reliable, and big enough for a room to see.
+- The merchant side is the real app (web wallet) + the relay — one surface, reliable, and big
+  enough for a room to see.
 - It settles on a **real** local replica, not a mock — balances actually move on-chain, and the
   phone shows its **live** balance.
 - Online is a one-tap direct pay; the QR "dance" is the automatic offline fallback. A fussy camera

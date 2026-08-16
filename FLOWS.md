@@ -64,7 +64,7 @@ wire (1) · onboard (7) · pay (20) · offline (7) · deposit (8) · withdraw (7
 | 43 | decimal-edges | 8-dec (ckBTC) + 6-dec (ckUSDC) + 18-dec (ckDAI) amounts render with exact decimals on review (no rounding, no sci-notation, no trailing-zero drift). | decimal, format, ckbtc, ckerc20, 18-decimal |
 | 49 | deeplink-request | dpay:req deeplink opens the pay review screen pre-filled with the merchant request (no auto-approve). | deeplink, request-link, prefill, pay-review |
 | 50 | deeplink-receipt | merchant verifies a dpay:pay receipt (canister-signed) via the web ?pay= path + reconciles as Received. | deeplink, receipt-link, verify, receive, handback |
-| 59 | share-receipt | After an online settle, btn-share-receipt hands a dpay:pay/<base64url> receipt link to Share. | share-receipt, receipt-link, handback, online-settle, deeplink |
+| 59 | share-receipt | After an online settle, btn-share-receipt hands an openable /wallet?pay= receipt URL to Share. | share-receipt, receipt-link, handback, online-settle, deeplink |
 | 61 | merchant-received-name | Merchant's 'Received' confirmation shows the payer's friendly name (from_name) — not the raw short pubkey prefix — when the payer chose a name. | receive, settle, confirmation, from-name, wire-v2, friendly-counterparties |
 
 ### Offline hand-off (the signature feature)
@@ -128,7 +128,7 @@ wire (1) · onboard (7) · pay (20) · offline (7) · deposit (8) · withdraw (7
 | 55 | balances-select-asset | Selecting an asset in Balances binds the header: chip DEMO→ckBTC→SOL and the balance text follows the active-rail branch. | asset-select, header-balance-binding, active-rail-chip |
 | 57 | settings-seed-backup | Seed stays hidden behind a confirm gate; once revealed the 24 mnemonic words show by default, hex view toggles in and matches identity.secretHex; copy writes the seed to the real clipboard. | seed-backup, confirm-gate, secret-reveal, clipboard-copy, mnemonic-backup, mnemonic-word-{0..23}, btn-backup-show-hex, btn-copy-mnemonic, btn-copy-seed |
 | 63 | picker-sol-rail | SOL is selectable in the Receive currency picker → switches the active rail to SolReceiveMode. | receive-picker, sol-rail, currency-switch |
-| 64 | settings-restore | Settings → Restore replaces wallet identity from 64-hex seed (no wipe); username preserved. | restore-seed, settings-restore, identity-replace, keypair-from-secret |
+| 64 | settings-restore | Settings → Restore replaces wallet identity from 24 words OR 64-hex seed (no wipe); username preserved. | restore-seed, restore-mnemonic-words, settings-restore, identity-replace, keypair-from-secret |
 | 69 | sol-usdc-selection | IC USDC ↔ Solana USDC: unified picker switches rail + clears amount (symmetric in both directions). | asset-picker, ic-usdc, sol-usdc, rail-switch, amount-clear |
 | 70 | deeplink-ic-routing | A dpay:req deeplink arriving while SOL is idle-selected routes to the IC Pay engine (PayMode review), not SolPayMode — the blob is never silently lost. | deeplink-routing, ic-engine-routing, solana-to-ic-handoff, prefill-preserve |
 | 71 | selection-lock | An in-flight pay review locks the idle asset selection: the Balances button is disabled + a no-op, and canceling the review re-enables it. | selection-lock, in-flight-preserve, balances-disable, nfc-arming-invariant |

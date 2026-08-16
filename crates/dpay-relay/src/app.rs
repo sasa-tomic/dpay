@@ -3,13 +3,14 @@
 //! Public pages at the root, the JSON API under `/api/v1`:
 //! - `GET /` — the marketing landing page (with a download CTA when an APK is configured).
 //! - `GET /download/dpay.apk` — the Android build, when one is configured; else `404`.
-//! - `GET /merchant` — the merchant terminal web page, driven by the merchant phone.
+//! - `GET /merchant` — permanent redirect to `/wallet` (the hand-rolled terminal page is gone;
+//!   the REAL app's Receive tab IS the merchant terminal now).
 //! - `GET /wallet` — the REAL app (`app/App.tsx`) built for the web (react-native-web, wasm
 //!   DpayCore), embedded at compile time from `e2e/dist-prod`. Same app the APK ships.
 //! - `GET /assets/{path}` — the wallet build's content-hashed assets (immutable caching).
-//! - `GET /privacy` — the public privacy policy for the app, website, and merchant terminal.
-//! - `GET /dpay-core.wasm` — the shared wire core (still the merchant terminal's signer; the
-//!   wallet build carries its own hashed copy under /assets/).
+//! - `GET /privacy` — the public privacy policy for the app and website.
+//! - `GET /dpay-core.wasm` — the shared wire core (canonical same-origin URL for any web surface;
+//!   the wallet build carries its own hashed copy under /assets/).
 //! - `GET /shots/{name}` — the real app screenshots embedded in the landing page.
 //! - `POST /api/v1/pay` — hands the payer's signed-authorization QR to the ledger and returns a
 //!   receipt. Two properties matter for the demo and are enforced here (not in the ledger):
@@ -203,13 +204,14 @@ pub fn app(state: AppState) -> Router {
     let router = Router::new()
         .route("/", get(landing_page))
         .route("/download/dpay.apk", get(apk_download))
-        .route("/merchant", get(merchant_page))
+        // 2026-08-16 merge: /merchant (hand-rolled terminal page) is GONE — its capabilities live in
+        // the REAL app's Receive tab (request QR + poll + scan-the-payer), served at /wallet. The
+        // old URL permanently redirects so existing links/bookmarks land on the one web surface.
+        .route("/merchant", get(merchant_redirect))
         .route("/wallet", get(wallet_page))
         .route("/assets/{*path}", get(web_asset))
         .route("/privacy", get(privacy_page))
-        .route("/jsqr.js", get(jsqr_js))
         .route("/dpay-core.wasm", get(dpay_core_wasm))
-        .route("/qrcode.js", get(qrcode_js))
         .route("/shots/{name}", get(screenshot))
         .nest("/api/v1", api)
         .with_state(state);
@@ -752,12 +754,14 @@ async fn apk_download(State(state): State<AppState>, headers: HeaderMap) -> Resp
     resp
 }
 
-/// `GET /merchant` — the merchant terminal (webcam QR scan + paste fallback, submits to
-/// `/api/v1/pay`). Self-contained + same-origin, so no CORS and no external assets needed.
-async fn merchant_page() -> Response {
+/// `GET /merchant` — permanent redirect to `/wallet` (2026-08-16 merge). The hand-rolled merchant
+/// terminal page is gone; its capabilities (build a request QR, poll for settlement, scan the
+/// payer's signed QR / paste fallback) live in the REAL app's Receive tab served at `/wallet`.
+/// A 308 keeps bookmarks + old share links working by landing on the one web surface.
+async fn merchant_redirect() -> Response {
     (
-        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        include_str!("../assets/merchant.html"),
+        [(header::LOCATION, "/wallet")],
+        StatusCode::PERMANENT_REDIRECT,
     )
         .into_response()
 }
@@ -816,19 +820,12 @@ fn serve_dist_asset(route: &str) -> Response {
     }
 }
 
-/// `GET /jsqr.js` — the vendored QR decoder the terminal loads (offline; no CDN).
-async fn jsqr_js() -> Response {
-    (
-        [(header::CONTENT_TYPE, "application/javascript; charset=utf-8")],
-        include_str!("../assets/jsQR.js"),
-    )
-        .into_response()
-}
-
 /// `GET /dpay-core.wasm` — the frozen wire core compiled to wasm32 (crates/dpay-wasm, staged by
 /// `just wasm`). This is the "one signing source for every web surface": a browser page loads it
 /// and signs/builds the EXACT bytes the Android app's UniFFI core produces. Byte-parity against
-/// the trusted JS oracle is enforced offline by scripts/check-wasm-core.mjs.
+/// the trusted JS oracle is enforced offline by scripts/check-wasm-core.mjs. (The /wallet build
+/// bundles its own copy as a hashed asset; this route remains the canonical same-origin URL for
+/// any other web surface + direct downloads.)
 async fn dpay_core_wasm() -> Response {
     (
         [(header::CONTENT_TYPE, "application/wasm")],
@@ -864,15 +861,6 @@ async fn screenshot(Path(name): Path<String>) -> Response {
             (header::ETAG, etag.as_str()),
         ],
         bytes,
-    )
-        .into_response()
-}
-
-/// `GET /qrcode.js` — the vendored QR *encoder* (for the merchant's request QR; offline, no CDN).
-async fn qrcode_js() -> Response {
-    (
-        [(header::CONTENT_TYPE, "application/javascript; charset=utf-8")],
-        include_str!("../assets/qrcode.js"),
     )
         .into_response()
 }

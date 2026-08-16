@@ -33,7 +33,7 @@ RELAY_PID=""
 cleanup() { [ -n "$RELAY_PID" ] && kill "$RELAY_PID" 2>/dev/null || true; dfx stop >/dev/null 2>&1 || true; }
 trap cleanup EXIT INT TERM
 
-echo "== start relay + merchant terminal (settling on canister $CID) =="
+echo "== start relay + web wallet (merchant side = Receive tab; settling on canister $CID) =="
 # DPAY_ENABLE_FAUCET: the demo funds a freshly-generated phone account via POST /faucet, which
 # mints. It's off by default on the real-ledger path (an exposed faucet is an open money printer);
 # this is a throwaway local replica, so turn it on explicitly.
@@ -62,7 +62,9 @@ cat <<EOF
   └──────────────────────────────────────────────────────────────────────┘
 
   MERCHANT (this laptop)
-    Open  ▶  http://localhost:$PORT/merchant     (localhost is required for the webcam)
+    Open  ▶  http://localhost:$PORT/wallet     (localhost is required for the webcam)
+    Onboard once, then use the Receive tab: it builds the request QR, polls for
+    settlement, and its camera scans the payer's signed QR (offline fallback).
 
   PAYER (the phone)   —  just app  installs it (ledger URL baked to Tailscale)
     The wallet opens as "You" with \$100.00. It reaches the ledger over Tailscale

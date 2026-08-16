@@ -189,14 +189,11 @@ aid-parity:
 # Keeping it on the hot path closes the gap that once let a fail-closed-cap change break test-live
 # silently while `just verify` stayed green (MC2 U1 / OPEN_ISSUES #10 lesson).
 # (wallet-wire is GONE: /wallet is the real app now — its parity IS wasm-core + the e2e suite.)
-check: test-core test-canister test-relay test-live typecheck bridge-parity aid-parity merchant-wire wasm-core
+# (merchant-wire is GONE 2026-08-16: the hand-rolled /merchant page was merged into /wallet — the
+#  real app builds requests through its own wasm core, so the hand-rolled-encoder drift class it
+#  guarded against no longer has a surface to live on.)
+check: test-core test-canister test-relay test-live typecheck bridge-parity aid-parity wasm-core
     @echo "rust inner loop green"
-
-# Merchant-terminal wire parity: the hand-rolled JS request encoder embedded in the served HTML
-# must stay byte-identical to the frozen dpay-core 132-byte request (wire v2). Catches the
-# "app can't pay the web terminal" drift class (a 68-byte v1 encoder survived every gate 2026-07-31→2026-08-15).
-merchant-wire:
-    node scripts/check-merchant-wire.mjs
 
 # Wasm-core parity: proves the COMMITTED crates/dpay-relay/assets/dpay-core.wasm (the bytes every
 # web surface loads) signs/builds byte-identically to the JS oracle — catches a stale or corrupted
