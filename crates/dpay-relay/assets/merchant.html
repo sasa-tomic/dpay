@@ -90,6 +90,8 @@
       <div class="big" id="reqAmt"></div>
       <div class="pid" id="reqPid"></div>
       <div class="row"><button class="ghost" id="newBtn">New charge</button></div>
+      <div class="row"><a class="ghost" id="webPayBtn" href="/wallet" target="_blank" rel="noopener">Pay from this browser</a></div>
+      <div class="pid">no phone? the web wallet is the same app — it opens with this request pre-filled</div>
     </div>
   </div>
 
@@ -115,7 +117,7 @@
     <ul class="txns" id="txns"><li class="empty">No payments yet.</li></ul>
   </div>
 </main>
-<footer><a href="/">dpay home</a> · <a href="/privacy">Privacy policy</a></footer>
+<<footer><a href="/">dpay home</a> · <a href="/wallet">Web wallet</a> · <a href="/privacy">Privacy policy</a></footer>
 
 <script src="/jsqr.js"></script>
 <script src="/qrcode.js"></script>
@@ -208,6 +210,11 @@ function createRequest(){
   $('reqAmt').textContent=demoAmt(cents);
   $('reqPid').textContent='request '+currentNonce.slice(0,12)+'…';
   $('reqArea').style.display='block';
+  // Hand the EXACT request blob to the web wallet (/wallet is the REAL app — same App.tsx, same
+  // dpay-core wasm). `?req=` pre-fills its Pay review screen; the payer taps Approve there, the
+  // wallet settles directly with the relay, and the poll below marks this terminal Paid ✓.
+  // base64url is URL-safe, but encodeURIComponent keeps any future blob format honest.
+  $('webPayBtn').href = '/wallet?req=' + encodeURIComponent(reqStr);
   $('collectCard').classList.remove('muted');
   $('result').innerHTML='<div class="sub">waiting for the payer…</div>';
   lastCode=null; settled=false;
