@@ -97,6 +97,7 @@
   flagged by the harness itself.
 
 
+## Session summary (2026-08-16): merchant→web-wallet payment path + bridge toName crash + web Share parity — COMPLETE
 
 > **Trigger:** founder reported a device crash paying from app to website merchant:
 > `Exception in HostFunction Parameter specified as non-null is null ... signAuthorization, parameter toName`,
