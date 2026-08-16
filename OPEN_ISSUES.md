@@ -10,23 +10,19 @@
 
 ## NEXT SESSION — work order
 
-> **Empty / neutral** for agent-pickable work. The 2026-08-15 full review sweep (5 read-only
-> subagents: app, rust/scripts, e2e/jest, UX-real-app, prod-reconciliation) fixed ALL value≥4
-> findings and shipped prod: commits `0d504d6` (app hygiene: stale closure, dead exports/props,
-> Solana const dedupe, brand color, friendly QR errors), `f31783f` (relay withdraw minter-class
-> 30s timeout — kills the >10s false-503→spent-nonce→422 money path; print deprecation ×14 with
-> prod-visible print_log; bounded cf-lib curls; demo.sh fail-loud; APK cache revalidation
-> max-age=300 + sha256 ETag + 304 — the immutable 1-yr CDN pin is gone at the origin), `a0417f5`
-> (UX: disabled-button contrast `S.disabledFlat` opacity .35 + no glow, '0' vs '—' zero-balance
-> semantics, A/T hotkey badges, Android double-back-to-exit, friendly NFC + withdraw error copy),
-> `2261386` (e2e: send-side ATA lifecycle in 72, new flow 77 USDC send + rent pre-check, optional
-> store-screens via `just e2e-store`, sirv orphan reap; FLOWS.md = 75 flows / 74 default), and
-> `6eb102a` (**prod facade receipt key materialized via `init_receipt_key` and PINNED in the APK**
-> — the last MC4 "bake at deploy" follow-up; closes the malicious-relay self-sign gap in shipped
-> builds). Gates: `just verify` 74/74 + full check slice green, `just app` self-checks PASS,
-> `just campreview` GREEN both rails, double-back verified on-device, jest 787/787. **Prod shipped
-> to HEAD `6eb102a`** (relay live + healthy at that commit; APK fresh via the versioned landing
-> link; canister byte-fresh, unchanged, `verify-deploy` PASS).
+> **Empty / neutral** for agent-pickable work. The 2026-08-16/17 session completed the radical
+> visual overhaul (plan `2026-08-16-visual-overhaul.md`, commits `e3b6bd2`→`451384e`): lucide-style
+> SVG icon system (17 icons, `app/components/icons.tsx`), per-family asset monogram chips
+> (`AssetGlyph.tsx`), ghost-button action tiers, ledger direction icons, settings/onboarding polish,
+> dead-glyph-style + dead-icon + dead-palette-token + 13 pre-existing dead-style sweep, e2e flow-24
+> contract fix (strip decorative monogram prefix), visual baselines reseeded+committed (`f119bda`),
+> landing screenshots regenerated from the redesigned app via `e2e/stage-landing-shots.mjs`
+> (`17b3bee`), and an IMPORTANT-8 independent audit (clean; its findings fixed in `451384e`).
+> Gates at session end: `just verify` full GREEN (e2e 78/78), jest 40 suites 834/834, tsc clean,
+> `just app` both self-checks PASS, `just campreview` GREEN both rails, `just ondevice` 11/11.
+> NOTE: prod is now BEHIND HEAD by the overhaul commits (last prod ship = `df846f8`) — founder
+> may run `just deploy-ic && just apk && just up` to ship the new look; nothing in the overhaul
+> touches the canister, so `deploy-ic` is a no-op byte-refresh.
 
 ### FOUNDER-OWNED (DO NOT NAG — one dashboard click / one token edit)
 
@@ -124,11 +120,12 @@
   308→/wallet, landing serves the merchant rail, versioned APK sha `0a2d5380…` matches the
   staged build, `verify-deploy` + `verify-relay-version` PASS.
 
-**Verification note (IMPORTANT-8 record):** all commits `6eb102a..df846f8` audited by an
-independent read-only subagent (partially-wired/dead-code/duplicate/stale-doc classes): the arc
-is CLEAN — zero dead code, zero duplicates, zero unwired features, testID contract intact both
-directions, git hygiene clean. The only findings were the doc-drift + timeout + coverage items
-fixed above. Next session's sweep baseline: `df846f8`.
+**Verification note (IMPORTANT-8 record, 2026-08-16/17):** all commits `df846f8..451384e` (the
+visual-overhaul arc `e3b6bd2`→`451384e`) audited by an independent read-only subagent
+(orchestrator-verifier): no correctness bugs, no partially-wired UI, all gates green (tsc PASS,
+jest 40/834, e2e 78/78). Its findings — 11 dead icon exports, 4 dead palette tokens, 13
+pre-existing dead style keys, 1 glyph survivor — were ALL fixed in `451384e` (verified by grep +
+tsc + jest + flow-40 rerun GREEN). Next session's sweep baseline: `451384e`.
 - e2e suite time under sandbox load (230s vs 35-70s target) — load factor, not a regression;
   flagged by the harness itself.
 

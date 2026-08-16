@@ -1,5 +1,14 @@
 # 2026-08-16 — Radical visual overhaul (app + website)
 
+> **STATUS: COMPLETE (2026-08-17).** All phases P0–P8 done. Commits: `e3b6bd2` (P0 icons +
+> AssetGlyph + palette tokens), `aa3b0c6` (P1+P2 chrome + asset surfaces), `0dea358` (P3+P4 ghost
+> buttons, SVG marks, ledger/settings/onboarding), `8f5dd40` (P5 dead-style sweep), `f119bda`
+> (P5 flow-24 contract fix + baselines reseeded), `17b3bee` (P7 landing shots + staging tool),
+> `451384e` (P8 IMPORTANT-8 audit cleanup: dead icons/tokens/styles removed, last glyph converted).
+> Gates: `just verify` full GREEN (e2e 78/78), jest 834/834, `just app` + `just ondevice` +
+> `just campreview` all PASS. Palette soft-wash tokens were removed again (YAGNI — per-surface
+> alphas vary); final icon count 17 (all consumed). Landing palette was already in sync.
+
 Session focus (founder): "Radically improve the visual appearance of the app and the website. Everything FULLY overhauled: icons, color themes, layout, UX. Do NOT limit yourself to the current looks (stop-gap)."
 
 ## Evidence base
