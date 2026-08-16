@@ -1,6 +1,7 @@
 import {useCallback} from 'react';
 import {View, Text, Pressable, Platform, ActivityIndicator} from 'react-native';
 import {QrCode} from './QrCode';
+import {IconAlert} from './icons';
 import {S} from '../styles';
 import {C} from '../config/palette';
 import {QR_SIZE_SMALL, IS_SOLANA_DEVNET} from '../config/constants';
@@ -133,9 +134,12 @@ export function SolanaReceiveSheet({
           dpay never holds your keys — {isUsdc ? 'USDC' : 'SOL'} lands directly in your wallet on confirmation.
         </Text>
         {IS_SOLANA_DEVNET ? (
-          <Text testID="sol-devnet-warning" style={S.warnNote}>
-            ⚠ Connected to Solana devnet. Do NOT send mainnet {isUsdc ? 'USDC' : 'SOL'} here — it will not appear. Use devnet {isUsdc ? 'USDC' : 'SOL'} only.
-          </Text>
+          // P4 pattern — '⚠' text glyph is a leading IconAlert (mirrors SolanaAtaSetupCard's
+          // converted twin; testID on the wrapper).
+          <View testID="sol-devnet-warning" style={S.warnRow}>
+            <IconAlert size={14} color={C.warn} />
+            <Text style={S.warnRowText}>Connected to Solana devnet. Do NOT send mainnet {isUsdc ? 'USDC' : 'SOL'} here — it will not appear. Use devnet {isUsdc ? 'USDC' : 'SOL'} only.</Text>
+          </View>
         ) : null}
       </View>
 

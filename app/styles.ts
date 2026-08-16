@@ -177,7 +177,6 @@ export const S = StyleSheet.create({
   // by other Cancel/secondary CTAs that need parity with a primary button.
   secondaryBtn: {alignSelf: 'stretch', height: 56, borderRadius: 14, marginTop: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.line2, backgroundColor: C.field, minHeight: 44},
   secondaryBtnText: {color: C.sub, fontWeight: '700', fontSize: 17},
-  histCard: {marginTop: 20, borderTopWidth: 1, borderTopColor: C.line, paddingTop: 14},
   histTitle: {fontSize: 12, fontWeight: '700', color: C.sub2, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 6, fontFamily: 'monospace'},
   histRow: {flexDirection: 'row', alignItems: 'baseline', paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: C.line2},
   histWhoCol: {flex: 1},
@@ -221,7 +220,6 @@ export const S = StyleSheet.create({
   assetActions: {flexDirection: 'row', alignItems: 'center', gap: 8, marginLeft: 10},
   assetActionBtn: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: C.line2, minHeight: 44},
   assetActionText: {color: C.sub, fontWeight: '700', fontSize: 13},
-  assetsSectionTitle: {fontSize: 12, fontWeight: '700', color: C.sub2, textTransform: 'uppercase', letterSpacing: 1.2, marginTop: 22, marginBottom: 2, fontFamily: 'monospace'},
   assetCardZero: {color: C.sub2},
   // AssetGlyph monogram chips (AssetGlyph.tsx) — family-hued rounded squares carrying the native
   // symbol ($ ₿ Ξ ◎ ∂). Size comes in via inline style (width/height/radius/fontSize scale together);
@@ -229,9 +227,6 @@ export const S = StyleSheet.create({
   assetGlyph: {alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)'},
   assetGlyphLg: {alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)'},
   assetGlyphText: {fontWeight: '800'},
-  pickerRow: {alignSelf: 'stretch', paddingVertical: 16, paddingHorizontal: 16, borderRadius: 12, backgroundColor: C.card, borderWidth: 1, borderColor: C.line2, marginTop: 10},
-  pickerLabel: {fontSize: 16, fontWeight: '700', color: C.ink},
-  pickerSub: {fontSize: 12, color: C.sub2, marginTop: 4},
   settingsSection: {alignSelf: 'stretch', marginBottom: 28},
   relayInput: {alignSelf: 'stretch', backgroundColor: C.field, borderRadius: 12, height: 50, paddingHorizontal: 16, fontSize: 14, color: C.ink, fontFamily: 'monospace', borderWidth: 1, borderColor: C.line2},
   // Advanced relay section — the relay edit is demoted below consumer settings and applied EXPLICITLY
@@ -251,7 +246,6 @@ export const S = StyleSheet.create({
   applyBtnText: {color: C.brandInk, fontSize: 16, fontWeight: '700'},
   applyBtnDisabled: {opacity: 0.4, shadowOpacity: 0, elevation: 0},
   resetConfirmBox: {alignSelf: 'stretch', backgroundColor: 'rgba(248,113,113,0.06)', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: 'rgba(248,113,113,0.2)'},
-  resetLink: {fontSize: 15, color: C.bad, fontWeight: '600'},
   // Audit P2: Reset entry-point — a bordered red-outline button "Reset wallet…" with the ellipsis
   // signaling "opens a dialog". Visually distinct from the muted "Privacy policy" link above it (so
   // it no longer reads as the same chrome), but NOT a loud filled-red button (the actual destructive
@@ -277,13 +271,6 @@ export const S = StyleSheet.create({
   seedChip: {flexDirection: 'row', alignItems: 'baseline', backgroundColor: C.field, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, margin: 4, borderWidth: 1, borderColor: C.line2},
   seedChipIdx: {color: C.sub2, fontFamily: 'monospace', fontSize: 11, marginRight: 6},
   seedChipWord: {color: C.ink, fontFamily: 'monospace', fontSize: 15},
-  // The PRIMARY funding affordance in the balance header: a clear "Add money" brand button that
-  // opens the deposit sheet. Filled brand so it reads as primary; the DEMO_USD faucet (topUpBtn)
-  // is the secondary outline pill beside it. minHeight:44 meets the 44pt touch target; the shadow
-  // radius is kept tight (8) so the glow can't bleed past the header's right padding and read as
-  // clipped at the viewport edge (L1).
-  addMoneyBtn: {flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.brand, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7, minHeight: 44, shadowColor: C.brand, shadowOpacity: 0.35, shadowRadius: 8, shadowOffset: {width: 0, height: 6}, elevation: 6},
-  addMoneyBtnText: {fontSize: 13, fontWeight: '800', color: C.brandInk},
   // Keyboard-shortcut hint badge (web only — rendered by HotkeyHint). A visible "key cap": a
   // rounded square with a real border + subtle background and a 14px monospace letter, so the
   // shortcut it teaches is clearly legible (M3 — the prior 10px borderless badge was nearly
@@ -359,10 +346,6 @@ export const S = StyleSheet.create({
   // Manual "Check now" — secondary (outline brand), debounced + spinner while in-flight.
   checkBtn: {marginTop: 16, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 24, borderWidth: 1, borderColor: C.brand, alignItems: 'center', justifyContent: 'center', height: 46},
   checkBtnText: {color: C.brand, fontWeight: '700', fontSize: 15},
-  // Withdraw affordance on the ckBTC asset card — a small brand link, distinct from the deposit
-  // "Add money" flow (money OUT, not IN). Sits below the balance line.
-  withdrawLink: {paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: C.brand, minHeight: 44, justifyContent: 'center', alignItems: 'center'},
-  withdrawLinkText: {color: C.brand, fontWeight: '700', fontSize: 13},
   // Testnet show/hide toggle at the bottom of the Balances sheet — a subtle secondary affordance
   // (never the primary action). Muted text so it doesn't compete with the asset rows; full-width
   // 44pt touch target.
@@ -376,16 +359,9 @@ export const S = StyleSheet.create({
   withdrawAmtInput: {alignSelf: 'stretch', backgroundColor: C.field, borderRadius: 12, height: 56, paddingHorizontal: 16, fontSize: 22, fontWeight: '700', color: C.ink, borderWidth: 1, borderColor: C.line2},
   reviewCard: {alignSelf: 'stretch', marginTop: 20, backgroundColor: C.card, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: C.line2},
   reviewLabel: {fontSize: 12, fontWeight: '700', color: C.sub2, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 8, fontFamily: 'monospace'},
-  // SOL devnet indicator — a small warn-tinted pill badging every SOL screen while the configured
-  // RPC points at devnet/testnet (IS_SOLANA_DEVNET). Fund-loss safety: a user who sends mainnet SOL
-  // to a devnet address loses it. The badge is subtle but unmissable on the screens that handle money
-  // (Pay/Receive). Mirrors the `badgeOk` pill language (rounded, tinted wash) but warn-colored.
-  devnetBadge: {flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4, marginBottom: 10, paddingVertical: 5, paddingHorizontal: 12, borderRadius: 999, alignSelf: 'center', backgroundColor: 'rgba(240,196,106,0.12)', borderWidth: 1, borderColor: 'rgba(240,196,106,0.35)'},
-  // 'Needs setup' pill on the Balances USDC (Solana) row — mirrors devnetBadge metrics but sits
-  // left-aligned under the subtitle (a row annotation, not a centered banner).
+  // 'Needs setup' pill on the Balances USDC (Solana) row — a warn-tinted row annotation,
+  // left-aligned under the subtitle (not a centered banner).
   assetBadge: {alignSelf: 'flex-start', marginTop: 6, paddingVertical: 3, paddingHorizontal: 10, borderRadius: 999, backgroundColor: 'rgba(240,196,106,0.12)', borderWidth: 1, borderColor: 'rgba(240,196,106,0.35)', fontSize: 11, fontWeight: '800', color: C.warn, letterSpacing: 1.1, textTransform: 'uppercase', fontFamily: 'monospace', overflow: 'hidden'},
-  devnetBadgeDot: {width: 7, height: 7, borderRadius: 4, backgroundColor: C.warn},
-  devnetBadgeText: {fontSize: 11, fontWeight: '800', color: C.warn, letterSpacing: 1.1, textTransform: 'uppercase', fontFamily: 'monospace'},
   // Active-rail chip near the tabs — labels which asset's Pay/Receive flow is armed so a user who
   // switched to SOL in the Balances sheet doesn't get silently stuck in SOL mode (the IC ↔ SOL NFC
   // AIDs differ; the chip makes the current rail legible at a glance). Reuses `filterChip` chrome.

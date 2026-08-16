@@ -25,7 +25,6 @@ export type IconProps = {
 
 type Node = React.ReactElement | null;
 
-/** Shared chrome: 24×24 viewBox, stroke 2, round caps/joins, no fill. */
 function make(
   nodes: (props: {size: number; color: string}) => Node[],
 ): React.FC<IconProps & {testID?: string}> {
@@ -54,7 +53,6 @@ function withStroke(color: string) {
   return {p, c, l, r: r_, pl};
 }
 
-/** Gear (settings). */
 export const IconSettings = make(({color}) => {
   const {p, c} = withStroke(color);
   return [
@@ -63,64 +61,36 @@ export const IconSettings = make(({color}) => {
   ];
 });
 
-/** Close / dismiss (✕ replacement). */
 export const IconClose = make(({color}) => {
   const {l} = withStroke(color);
   return [l(18, 6, 6, 18), l(6, 6, 18, 18)];
 });
 
-/** Checkmark (✓ replacement). */
 export const IconCheck = make(({color}) => {
   const {p} = withStroke(color);
   return [p('M20 6 9 17l-5-5')];
 });
 
-/** Caret down (▾ replacement — pickers, expandable rows). */
 export const IconChevronDown = make(({color}) => {
   const {p} = withStroke(color);
   return [p('m6 9 6 6 6-6')];
 });
 
-/** Caret right — forward affordance (balance card → Balances). */
-export const IconChevronRight = make(({color}) => {
-  const {p} = withStroke(color);
-  return [p('m9 18 6-6-6-6')];
-});
-
-/** Caret left — back affordance. */
-export const IconChevronLeft = make(({color}) => {
-  const {p} = withStroke(color);
-  return [p('m15 18-6-6 6-6')];
-});
-
-/** Plus — add/deposit actions ('+' glyph replacement). */
 export const IconPlus = make(({color}) => {
   const {l} = withStroke(color);
   return [l(5, 12, 19, 12), l(12, 5, 12, 19)];
 });
 
-/** Send (paper plane) — Send-to-address mode + share/request-link semantics. */
-export const IconSend = make(({color}) => {
-  const {p} = withStroke(color);
-  return [
-    p('M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z'),
-    p('m21.854 2.147-10.94 10.939'),
-  ];
-});
-
-/** Arrow up-right — send/pay direction. */
 export const IconArrowUpRight = make(({color}) => {
   const {p} = withStroke(color);
   return [p('M7 7h10v10'), p('M7 17 17 7')];
 });
 
-/** Arrow down-left — receive direction. */
 export const IconArrowDownLeft = make(({color}) => {
   const {p} = withStroke(color);
   return [p('M17 7 7 17'), p('M17 17H7V7')];
 });
 
-/** QR code — scan-to-pay affordance. */
 export const IconQr = make(({color}) => {
   const {p, r} = withStroke(color);
   return [
@@ -139,7 +109,6 @@ export const IconQr = make(({color}) => {
   ];
 });
 
-/** Scan corners — the camera/scanner frame. */
 export const IconScan = make(({color}) => {
   const {p, l} = withStroke(color);
   return [
@@ -151,16 +120,6 @@ export const IconScan = make(({color}) => {
   ];
 });
 
-/** Camera — camera permission / enable affordance. */
-export const IconCamera = make(({color}) => {
-  const {p, c} = withStroke(color);
-  return [
-    p('M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z'),
-    c(12, 13, 3),
-  ];
-});
-
-/** Share — OS share sheet. */
 export const IconShare = make(({color}) => {
   const {c, p} = withStroke(color);
   return [
@@ -172,7 +131,6 @@ export const IconShare = make(({color}) => {
   ];
 });
 
-/** Copy — copy-to-clipboard. */
 export const IconCopy = make(({color}) => {
   const {p, r} = withStroke(color);
   return [
@@ -181,7 +139,6 @@ export const IconCopy = make(({color}) => {
   ];
 });
 
-/** Refresh — re-check / retry / re-poll. */
 export const IconRefresh = make(({color}) => {
   const {p} = withStroke(color);
   return [
@@ -192,19 +149,16 @@ export const IconRefresh = make(({color}) => {
   ];
 });
 
-/** Info ('ⓘ' replacement). */
 export const IconInfo = make(({color}) => {
   const {c, p} = withStroke(color);
   return [c(12, 12, 10), p('M12 16v-4'), p('M12 8h.01')];
 });
 
-/** Clock — expiry / validity windows. */
 export const IconClock = make(({color}) => {
   const {c, pl} = withStroke(color);
   return [c(12, 12, 10), pl('12 6 12 12 16 14')];
 });
 
-/** Wifi off — offline status (matches landing's offline badge language). */
 export const IconWifiOff = make(({color}) => {
   const {p, l} = withStroke(color);
   return [
@@ -219,7 +173,6 @@ export const IconWifiOff = make(({color}) => {
   ];
 });
 
-/** Warning triangle. */
 export const IconAlert = make(({color}) => {
   const {p} = withStroke(color);
   return [
@@ -229,84 +182,21 @@ export const IconAlert = make(({color}) => {
   ];
 });
 
-/** Success circle. */
-export const IconCheckCircle = make(({color}) => {
-  const {c, p} = withStroke(color);
-  return [c(12, 12, 10), p('m9 12 2 2 4-4')];
-});
-
-/** Failure circle. */
-export const IconXCircle = make(({color}) => {
-  const {c, p} = withStroke(color);
-  return [c(12, 12, 10), p('m15 9-6 6'), p('m9 9 6 6')];
-});
-
-/** Eye — reveal (seed phrase). */
-export const IconEye = make(({color}) => {
-  const {c, p} = withStroke(color);
-  return [
-    p('M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0'),
-    c(12, 12, 3),
-  ];
-});
-
-/** Eye off — conceal (seed phrase). */
-export const IconEyeOff = make(({color}) => {
-  const {p} = withStroke(color);
-  return [
-    p('M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49'),
-    p('M14.084 14.158a3 3 0 0 1-4.242-4.242'),
-    p('M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143'),
-    p('m2 2 20 20'),
-  ];
-});
-
-/** Shield — non-custodial / security messaging. */
-export const IconShield = make(({color}) => {
-  const {p} = withStroke(color);
-  return [
-    p('M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1 1 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z'),
-  ];
-});
-
-/** Lock — keyholder / custody language. */
-export const IconLock = make(({color}) => {
-  const {r, p} = withStroke(color);
-  return [r(3, 11, 18, 11, 2), p('M7 11V7a5 5 0 0 1 10 0v4')];
-});
-
-/** External link — opens outside the app. */
 export const IconExternalLink = make(({color}) => {
   const {p} = withStroke(color);
   return [p('M15 3h6v6'), p('M10 14 21 3'), p('M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6')];
 });
 
-/** Wallet — balance surfaces. */
-export const IconWallet = make(({color}) => {
-  const {p, r} = withStroke(color);
-  return [
-    p('M21 12V7H5a2 2 0 0 1 0-4h14v4'),
-    p('M3 5v14a2 2 0 0 0 2 2h16v-5'),
-    r(15, 12, 6, 4, 0.5),
-    p('M18 14h.01'),
-  ];
-});
-
-/** All icons in one registry — used by the jest smoke test to keep every icon render-covered. */
 export const ICONS = {
   settings: IconSettings,
   close: IconClose,
   check: IconCheck,
   chevronDown: IconChevronDown,
-  chevronRight: IconChevronRight,
-  chevronLeft: IconChevronLeft,
   plus: IconPlus,
-  send: IconSend,
   arrowUpRight: IconArrowUpRight,
   arrowDownLeft: IconArrowDownLeft,
   qr: IconQr,
   scan: IconScan,
-  camera: IconCamera,
   share: IconShare,
   copy: IconCopy,
   refresh: IconRefresh,
@@ -314,14 +204,7 @@ export const ICONS = {
   clock: IconClock,
   wifiOff: IconWifiOff,
   alert: IconAlert,
-  checkCircle: IconCheckCircle,
-  xCircle: IconXCircle,
-  eye: IconEye,
-  eyeOff: IconEyeOff,
-  shield: IconShield,
-  lock: IconLock,
   externalLink: IconExternalLink,
-  wallet: IconWallet,
 } as const;
 
 export type IconName = keyof typeof ICONS;
