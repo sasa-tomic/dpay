@@ -54,7 +54,7 @@ wire-layout:
 # drives every flow through the real app AND screenshots each state (shots land in e2e/shots/),
 # superseding the old parallel-component ui/ harness (removed). Add a flow = add `e2e/tests/NN-name.mjs`.
 # Runs the DEFAULT enumeration: every flow except `meta.optional` render-only capture harnesses
-# (flow 39 runs via `just e2e-store`). 74 flows at the moment.
+# (flow 39 runs via `just e2e-store`; the flow catalog lives in FLOWS.md — never hardcode a count here).
 e2e:
     cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps)
     cd e2e && node run.mjs

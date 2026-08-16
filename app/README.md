@@ -37,10 +37,10 @@ The inner loop is fully offline via `just` (from the repo root) and runs in seco
 
 ```
 just verify      # core + canister + relay + typecheck + bridge-parity + aid-parity + e2e
-just e2e         # the browser harness driving the REAL app via react-native-web (79 flows)
+just e2e         # the browser harness driving the REAL app via react-native-web (flows: ../FLOWS.md)
 just typecheck   # tsc --noEmit --noUnusedLocals --noUnusedParameters
 just app         # rebuild APK + launch on emulator (outer-loop device gate)
-just ondevice    # 11 instrumented tests on the emulator
+just ondevice    # instrumented tests on the emulator (device gate)
 ```
 
 See `../CLAUDE.md` for the full toolchain + non-negotiables (non-custodial, no-swap,
