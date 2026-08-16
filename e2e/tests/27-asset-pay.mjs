@@ -38,8 +38,8 @@ export const meta = {
   id: '27',
   name: 'asset-pay',
   journey: 'pay',
-  covers: ['asset-pay', 'ckbtc', 'per-asset-balance', 'locked-asset-display', 'ledger-units'],
-  verifies: 'ckBTC pay: review shows \'0.00050000 BTC\' (no $); per-asset balance gate (60000≥50000 sats) → settles on currency 1; Ledger row shows the exact ckBTC units.',
+  covers: ['asset-pay', 'ckbtc', 'per-asset-balance', 'locked-asset-display', 'ledger-units', 'review-short-payee'],
+  verifies: 'ckBTC pay: review shows \'0.00050000 BTC\' (no $) + short pubkey (U-F5); per-asset balance gate (60000≥50000 sats) → settles on currency 1; Ledger row shows the exact ckBTC units.',
   timeoutMs: 20000,
 };
 
@@ -90,9 +90,15 @@ export async function run() {
     const payAmt = await driver.readText('pay-amount');
     assertIncludes(payAmt, '0.00050000 BTC', `review should show "Pay 0.00050000 BTC" (locked-asset display), got "${payAmt}"`);
     assert(!payAmt.includes('$'), `review must NOT show a dollar amount for a ckBTC request, got "${payAmt}"`);
-    const reviewBody = await driver.bodyText();
-    assertIncludes(reviewBody, 'Bob', 'review should name the merchant (from the request bytes)');
-    console.log(`[27-asset-pay] ✓ review: ${payAmt} (no $) · names Bob`);
+  const reviewBody = await driver.bodyText();
+  assertIncludes(reviewBody, 'Bob', 'review should name the merchant (from the request bytes)');
+  // U-F5 (asset rail twin of flow 26): the dim short-payee line under the merchant name.
+  await driver.findByTestID('review-payee', { timeoutMs: 5_000 });
+  const reviewPayee = await driver.readText('review-payee');
+  if (reviewPayee !== `${bob.publicHex.slice(0, 8)}…`) {
+    throw new Error(`[assert] review short-payee line (U-F5): expected ${bob.publicHex.slice(0, 8)}…, got ${JSON.stringify(reviewPayee)}`);
+  }
+  console.log(`[27-asset-pay] ✓ review: ${payAmt} (no $) · names Bob · ${reviewPayee}`);
 
     // --- Approve is NOT disabled: the per-asset balance check (60000 sats >= 50000 sats) passes,
     //     even though the DEMO balance (10000 cents) would have FAILED the old cross-asset gate. The

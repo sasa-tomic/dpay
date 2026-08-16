@@ -30,8 +30,8 @@ export const meta = {
   id: '26',
   name: 'names-memo',
   journey: 'pay',
-  covers: ['names', 'memo', 'history', 'wire-v2', 'friendly-counterparties'],
-  verifies: 'Alice pays Bob with memo \'coffee\' → both histories show friendly names + memo (wire-format v2, no raw hex).',
+  covers: ['names', 'memo', 'history', 'wire-v2', 'friendly-counterparties', 'review-short-payee'],
+  verifies: 'Alice pays Bob with memo \'coffee\' → review shows the name + short pubkey + memo (U-F5), both histories show friendly names + memo (wire-format v2, no raw hex).',
   timeoutMs: 20000,
 };
 
@@ -69,11 +69,16 @@ export async function run() {
     assert(payAmt.includes('∂25.00'), `review should show "Pay ∂25.00", got "${payAmt}"`);
     const reviewBody = await driver.bodyText();
     assertIncludes(reviewBody, PAYEE_NAME, 'review should name the payee by display name (from the request bytes)');
-    // The memo the merchant attached is shown as a subtitle on the review screen.
-    await driver.findByTestID('review-memo', { timeoutMs: 5_000 });
-    const reviewMemo = await driver.readText('review-memo');
-    assert(reviewMemo === MEMO, `review memo should be "${MEMO}", got "${reviewMemo}"`);
-    console.log(`[26-names-memo] ✓ review: ${payAmt} to ${PAYEE_NAME} · memo "${reviewMemo}"`);
+  // The memo the merchant attached is shown as a subtitle on the review screen.
+  await driver.findByTestID('review-memo', { timeoutMs: 5_000 });
+  const reviewMemo = await driver.readText('review-memo');
+  assert(reviewMemo === MEMO, `review memo should be "${MEMO}", got "${reviewMemo}"`);
+  // U-F5: a name alone is not verifiable — the dim review-payee line carries the short pubkey
+  // (first 8 hex chars + '…') so the payer can eyeball it against the merchant's displayed one.
+  await driver.findByTestID('review-payee', { timeoutMs: 5_000 });
+  const reviewPayee = await driver.readText('review-payee');
+  assertEq(reviewPayee, `${bob.publicHex.slice(0, 8)}…`, 'review short-payee line (U-F5)');
+  console.log(`[26-names-memo] ✓ review: ${payAmt} to ${PAYEE_NAME} · ${reviewPayee} · memo "${reviewMemo}"`);
 
     // --- Approve → the app signs (from_name="Alice", to_name="Bob", memo="coffee") + settles. -
     console.log('[26-names-memo] clicking btn-approve (sign + pay)…');

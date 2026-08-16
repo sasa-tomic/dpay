@@ -30,7 +30,7 @@ const BLOCKHASH = 'GZXyfzSTCBmA7rpeDLrmUbiSA45H5EEwJhoBeR6ZNb3u';
 
 const shareSpy = jest.spyOn(Share, 'share');
 
-function solReqUri(): string {
+function solReqUri(name: string = 'Cafe Sol'): string {
   const iat = Math.floor(Date.now() / 1000) - 30;
   const input: SolReqInput = {
     rid: '0123456789abcdef0123456789abcdef',
@@ -45,7 +45,7 @@ function solReqUri(): string {
     cur: 'SOL',
     mint: null,
     toAta: null,
-    name: 'Cafe Sol',
+    name,
     memo: '',
   };
   return encodeSolReq(input);
@@ -176,6 +176,42 @@ describe('SolPayMode — share signed code feedback (U-F1)', () => {
     await pressByLabel(tree, 'Share signed payment');
     expect(texts(tree)).toContain('Share signed code');
     expect(texts(tree)).not.toContain('Copied ✓');
+    act(() => {
+      tree.unmount();
+    });
+  });
+});
+
+describe('SolPayMode — review shows the short destination under a merchant name (U-F5)', () => {
+  function textByTestID(tree: renderer.ReactTestRenderer, testID: string): string {
+    const node = tree.root.findAll(node => node.props && node.props.testID === testID)[0];
+    if (!node) throw new Error(`no node with testID=${testID}`);
+    return textOf(node.props.children);
+  }
+
+  test('named merchant: the dim sol-pay-payee line carries the short base58 address', async () => {
+    const tree = mountSolPay();
+    const scanner = tree.root.find(node => typeof node.props.onScan === 'function');
+    await act(async () => {
+      scanner.props.onScan(solReqUri('Cafe Sol'));
+    });
+    expect(texts(tree)).toContain('to Cafe Sol');
+    // short() = first 8 chars + '…' — MERCHANT starts 'Ecs89dz8'
+    expect(textByTestID(tree, 'sol-pay-payee')).toBe('Ecs89dz8…');
+    act(() => {
+      tree.unmount();
+    });
+  });
+
+  test('unnamed merchant: the primary line carries the FULL address, no duplicate short line', async () => {
+    const tree = mountSolPay();
+    const scanner = tree.root.find(node => typeof node.props.onScan === 'function');
+    await act(async () => {
+      scanner.props.onScan(solReqUri(''));
+    });
+    expect(texts(tree)).toContain(`to ${MERCHANT}`);
+    const payee = tree.root.findAll(node => node.props && node.props.testID === 'sol-pay-payee');
+    expect(payee).toHaveLength(0);
     act(() => {
       tree.unmount();
     });

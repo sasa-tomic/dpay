@@ -20,8 +20,8 @@ export const meta = {
   id: '46',
   name: 'sol-offline-handoff',
   journey: 'offline',
-  covers: ['sol-offline-sign', 'qr-handoff', 'honest-pending'],
-  verifies: 'SOL v2 scan solreq:v2 → offline sign (no setup, no nonce) → solpay:v2 QR → honest pending.',
+  covers: ['sol-offline-sign', 'qr-handoff', 'honest-pending', 'review-short-payee'],
+  verifies: 'SOL v2 scan solreq:v2 → review shows the short destination (U-F5) → offline sign (no setup, no nonce) → solpay:v2 QR → honest pending.',
   timeoutMs: 25000,
 };
 
@@ -83,7 +83,13 @@ export async function run() {
     const amount = await driver.findByTestID('sol-pay-amount', {timeoutMs: 5_000});
     const amountTxt = await amount.evaluate((n) => (n.textContent ?? '').trim());
     assert(/SOL/.test(amountTxt), `review should show the SOL amount, got: "${amountTxt}"`);
-    console.log(`[46-sol-offline-handoff] ✓ review: ${amountTxt}`);
+    // U-F5 (SOL twin of flows 26/27): the merchant name alone is not verifiable — the dim
+    // sol-pay-payee line carries the short base58 destination under the name.
+    const payee = await driver.findByTestID('sol-pay-payee', {timeoutMs: 5_000});
+    const payeeTxt = await payee.evaluate((n) => (n.textContent ?? '').trim());
+    assert(payeeTxt === `${MERCHANT_ADDR.slice(0, 8)}…`,
+      `review short-payee line (U-F5): expected ${MERCHANT_ADDR.slice(0, 8)}…, got "${payeeTxt}"`);
+    console.log(`[46-sol-offline-handoff] ✓ review: ${amountTxt} · ${payeeTxt}`);
 
     // 6. Approve → offline sign (PURE, no RPC) → solpay:v2 QR.
     console.log('[46-sol-offline-handoff] approving (offline sign)…');

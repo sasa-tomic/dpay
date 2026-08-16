@@ -7,7 +7,7 @@ import {S} from '../styles';
 import {QR_SIZE} from '../config/constants';
 import type {SolPayGate} from '../config/assets';
 import type {Identity} from '../lib/types';
-import {fmtAsset} from '../lib/format';
+import {fmtAsset, short} from '../lib/format';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {USDC_DECIMALS, SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
 import {decodeSolReq, encodeSolPay} from '../solana/qr';
@@ -254,6 +254,10 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
         <Text style={S.label}>Review payment</Text>
         <Text testID="sol-pay-amount" style={S.reviewAmount}>{`Pay ${fmtAsset(req.amt, decimals, unit)}`}</Text>
         <Text style={S.reviewTo}>{`to ${req.name || req.to}`}</Text>
+        {/* U-F5 twin of PayMode's review-payee: a merchant name alone is not verifiable — show the
+            short destination under it. Without a name the primary line already carries the full
+            base58 address (more precise than a short form), so no duplicate line. */}
+        {req.name ? <Text testID="sol-pay-payee" style={S.dim2}>{short(req.to)}</Text> : null}
         {req.memo ? <Text testID="sol-pay-memo" style={S.dim2}>{req.memo}</Text> : null}
         <Text style={S.badgeOk}>signed on this device ✓</Text>
         <Text style={S.dim2}>This signs offline — the merchant settles when they submit it.</Text>
