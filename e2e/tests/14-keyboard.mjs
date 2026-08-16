@@ -23,8 +23,8 @@ export const meta = {
   id: '14',
   name: 'keyboard',
   journey: 'system',
-  covers: ['keyboard-shortcuts', 'tabs', 'sheet-guard', 'input-guard'],
-  verifies: 'Single-key shortcuts (P/R/T/A/L/Esc) switch tabs / top-up / add-money / ledger / close sheet; input + sheet guards work.',
+  covers: ['keyboard-shortcuts', 'tabs', 'sheet-guard', 'input-guard', 'focus-visible'],
+  verifies: 'Single-key shortcuts (P/R/T/A/L/Esc) switch tabs / top-up / add-money / ledger / close sheet; input + sheet guards work; keyboard focus paints the brand :focus-visible ring (U-F4).',
   timeoutMs: 15000,
 };
 
@@ -110,6 +110,42 @@ export async function run() {
     await driver.pressKey('Escape');
     await driver.waitGone('deposit-address', { timeoutMs: 3_000 });
     console.log('[14-keyboard] ✓ Escape closed the inline deposit body');
+
+    // --- U-F4: keyboard focus paints a ring, pointer focus does not -------------------
+    // The web entries (e2e/web/index.html + wallet.html) inject a global `:focus-visible` rule
+    // (outline 2px solid #3ee0ac — the palette brand). Prove BOTH halves in the real DOM:
+    //   (a) a Tab keypress focuses the first focusable WITH the ring (computed outlineStyle
+    //       'solid' in the brand color) — keyboard users always see where they are;
+    //   (b) a real mouse click focuses a button WITHOUT the ring (outlineStyle 'none') — the
+    //       ring must not pollute every tap. Text inputs are exempt (they always match
+    //       :focus-visible per spec), so the pointer case uses a BUTTON (btn-settings).
+    await driver.eval(() => { (document.activeElement)?.blur?.(); });
+    await driver.pressKey('Tab');
+    const kb = await driver.eval(() => {
+      const el = document.activeElement;
+      const cs = el ? getComputedStyle(el) : null;
+      return {
+        tag: el ? el.tagName : '',
+        role: el ? (el.getAttribute('role') ?? '') : '',
+        outlineStyle: cs ? cs.outlineStyle : '',
+        outlineColor: cs ? cs.outlineColor : '',
+      };
+    });
+    assert(kb.tag !== 'BODY' && kb.tag !== '', `Tab should focus a real element, got activeElement=${kb.tag || 'none'}`);
+    assert(kb.outlineStyle === 'solid', `keyboard-focused <${kb.tag} role=${kb.role}> must paint the :focus-visible ring (outlineStyle "${kb.outlineStyle}")`);
+    assertIncludes(kb.outlineColor, '62, 224, 172', 'the focus ring must use the brand color #3ee0ac');
+    console.log(`[14-keyboard] ✓ Tab focuses <${kb.tag} role=${kb.role}> with the brand focus ring`);
+
+    await driver.eval(() => { (document.activeElement)?.blur?.(); });
+    await driver.click('btn-settings', { timeoutMs: 3_000 });
+    const ptr = await driver.eval(() => {
+      const el = document.querySelector('[data-testid="btn-settings"]'); // RNW maps testID → data-testid
+      return el ? getComputedStyle(el).outlineStyle : 'missing';
+    });
+    assert(ptr === 'none', `a mouse-clicked button must NOT paint the ring (outlineStyle "${ptr}")`);
+    console.log('[14-keyboard] ✓ mouse focus stays ring-free (:focus-visible only)');
+    await driver.pressKey('Escape'); // close the settings sheet the click opened (useEscapeToClose)
+    await driver.waitGone('btn-settings-close', { timeoutMs: 3_000 });
 
     await driver.screenshot('14-keyboard');
 
