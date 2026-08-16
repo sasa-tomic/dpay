@@ -36,9 +36,9 @@ export const meta = {
   id: '64',
   name: 'settings-restore',
   journey: 'system',
-  covers: ['restore-seed', 'settings-restore', 'identity-replace', 'keypair-from-secret'],
-  verifies: 'Settings → Restore replaces wallet identity from 64-hex seed (no wipe); username preserved.',
-  timeoutMs: 20_000,
+  covers: ['restore-seed', 'restore-mnemonic-words', 'settings-restore', 'identity-replace', 'keypair-from-secret'],
+  verifies: 'Settings → Restore replaces wallet identity from 24 words OR 64-hex seed (no wipe); username preserved.',
+  timeoutMs: 40_000,
 };
 
 export async function run() {
@@ -80,6 +80,31 @@ export async function run() {
     assertEq(idAfterSame.publicHex, pubA, 'same-seed restore: publicHex should be unchanged (deterministic derivation)');
     assertEq(idAfterSame.username, 'alice', 'same-seed restore: username preserved');
     console.log(`[64-settings-restore] ✓ same-seed restore → identity unchanged (${idAfterSame.secretHex.slice(0, 8)}…${idAfterSame.secretHex.slice(-4)}), username 'alice' preserved`);
+
+    // 3b. WORDS restore: Backup reveals the 24 BIP-39 words by default, so Settings → Restore
+    //     must accept them too (not just 64-hex — 2026-08-16 founder report). Read A's words
+    //     from the Backup screen, type THEM into the restore form, and expect identity A back
+    //     (words → validateMnemonic → wordsToHex → same deterministic keypair as seedA).
+    console.log('[64-settings-restore] words restore (A → A) via Settings…');
+    await driver.click('btn-settings', { timeoutMs: 5_000 });
+    await driver.click('btn-backup', { timeoutMs: 5_000 });
+    await driver.click('btn-backup-confirm', { timeoutMs: 5_000 });
+    await driver.findByTestID('mnemonic-words', { timeoutMs: 5_000 });
+    const wordsA = [];
+    for (let i = 0; i < 24; i++) {
+      const t = await driver.readText(`mnemonic-word-${i}`);
+      wordsA.push(t.replace(/^\d+\s*/, '').trim());
+    }
+    await driver.click('btn-settings-restore', { timeoutMs: 5_000 });
+    await driver.findByTestID('settings-restore-seed-input', { timeoutMs: 5_000 });
+    await driver.type('settings-restore-seed-input', wordsA.join(' '), { timeoutMs: 5_000 });
+    await driver.click('btn-settings-restore-confirm', { timeoutMs: 5_000 });
+    await driver.findByTestID('balance', { timeoutMs: 10_000 });
+    const idAfterWords = await accountOf(driver);
+    assertEq(idAfterWords?.secretHex, seedA, 'words restore: secretHex should round-trip to A\'s seed');
+    assertEq(idAfterWords?.publicHex, pubA, 'words restore: publicHex should equal A\'s (deterministic derivation)');
+    assertEq(idAfterWords?.username, 'alice', 'words restore: username preserved');
+    console.log('[64-settings-restore] ✓ words restore → identity A back, username preserved');
 
     // 3. DIFFERENT-SEED restore. Re-opens Settings + the restore form, types a DIFFERENT seed, and
     //    confirms. The wallet re-mounts with a NEW key (different secretHex + different publicHex),

@@ -4,7 +4,7 @@ import {C} from '../config/palette';
 import {PRIVACY_URL} from '../config/constants';
 import {S} from '../styles';
 import {validateSeed} from '../lib/format';
-import {hexToWords, wordsToString} from '../lib/bip39';
+import {hexToWords, stringToWords, wordsToHex, wordsToString, validateMnemonic} from '../lib/bip39';
 import type {Identity} from '../lib/types';
 import {DpayCore} from '../services/native';
 import {useEscapeToClose} from '../hooks/useHotkeys';
@@ -62,10 +62,13 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
   // back to it on Hide so re-revealing always starts at the words view (the friendlier default).
   const [seedFormat, setSeedFormat] = useState<'mnemonic' | 'hex'>('mnemonic');
   // Restore form state (mirrors the backup/reset confirm pattern): `confirmRestore` opens the inline
-  // seed-input form; `restoreSeed` holds the user-entered 64-hex; `restoreBusy` gates the confirm
-  // button during the keypairFromSecret FFI call; `restoreErr` surfaces a validation/derivation
-  // failure (bad seed shape, FFI throw). On a successful confirm the parent replaces the identity
-  // and this sheet unmounts (App.tsx setIdentity → wallet re-mounts under the new key).
+  // seed-input form; `restoreSeed` holds the user-entered seed (24 BIP-39 words OR 64-hex —
+  // auto-detected, since Backup reveals words by default and hex only behind a toggle, so a user
+  // who backed up the default way could not previously restore from Settings at all);
+  // `restoreBusy` gates the confirm button during the keypairFromSecret FFI call; `restoreErr`
+  // surfaces a validation/derivation failure (bad seed shape, FFI throw). On a successful confirm
+  // the parent replaces the identity and this sheet unmounts (App.tsx setIdentity → wallet
+  // re-mounts under the new key).
   const [confirmRestore, setConfirmRestore] = useState(false);
   const [restoreSeed, setRestoreSeed] = useState('');
   const [restoreBusy, setRestoreBusy] = useState(false);
@@ -95,19 +98,36 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
   const mnemonicString = useMemo(() => wordsToString(mnemonicWords), [mnemonicWords]);
   const copyMnemonic = () => { void doCopy(mnemonicString); };
 
-  // Validate + derive + replace the identity from a pasted 64-hex seed. Mirrors Onboarding.restore:
-  // validateSeed → keypairFromSecret → build Identity (username preserved) → hand to onRestore
+  // Validate + derive + replace the identity from a pasted seed — 24 BIP-39 words (the default
+  // Backup form) or 64-hex (the "Show as hex" form), auto-detected by shape. Mirrors
+  // Onboarding.restore's dual-path convergence: words → validateMnemonic → wordsToHex; hex →
+  // validateSeed. Then keypairFromSecret → build Identity (username preserved) → hand to onRestore
   // (App.tsx persists + setIdentity → wallet re-renders under the new key). On success we ALSO
   // dismiss the sheet: a Wallet re-render (not unmount) follows a non-null identity replace, so
   // without `onClose` the Settings sheet would stay open over the now-replaced wallet. Closing it
   // lands the user back at the wallet view (the natural "I just restored → show me my wallet"
   // expectation), and is symmetric with Reset (which makes the whole Wallet unmount). The form's
   // busy/error state stays co-located with the input (same idiom as Onboarding restore).
+  function parseRestoreSeed(text: string): {hex: string} | {err: string} {
+    const trimmed = text.trim();
+    if (trimmed === '') return {err: 'Enter your 24 recovery words or 64-hex seed.'};
+    // Hex shape: 64 chars, all hex digits. Everything else is treated as a word phrase.
+    if (/^[0-9a-fA-F]{64}$/.test(trimmed.replace(/\s+/g, ''))) {
+      const e = validateSeed(trimmed);
+      if (e) return {err: e};
+      return {hex: trimmed.toLowerCase()};
+    }
+    const words = stringToWords(trimmed);
+    if (!validateMnemonic(words)) {
+      return {err: 'Some words are wrong or missing. Check you have all 24 words spelled correctly — or paste the 64-hex seed instead.'};
+    }
+    return {hex: wordsToHex(words)};
+  }
   async function doRestore() {
     if (restoreBusy) return;
-    const e = validateSeed(restoreSeed);
-    if (e) { setRestoreErr(e); return; }
-    const seed = restoreSeed.trim().toLowerCase();
+    const parsed = parseRestoreSeed(restoreSeed);
+    if ('err' in parsed) { setRestoreErr(parsed.err); return; }
+    const seed = parsed.hex;
     setRestoreBusy(true); setRestoreErr(null);
     try {
       const kp = await DpayCore.keypairFromSecret(seed);
@@ -265,13 +285,13 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
                   style={S.seedInput}
                   value={restoreSeed}
                   onChangeText={setRestoreSeed}
-                  placeholder="64 hex characters"
+                  placeholder="24 recovery words or 64 hex characters"
                   placeholderTextColor={C.sub2}
                   autoCapitalize="none"
                   autoCorrect={false}
                   multiline
                   accessibilityLabel="Recovery seed"
-                  accessibilityHint="The 64-hex seed shown by Backup that recovers your wallet"
+                  accessibilityHint="Your 24 recovery words (or the 64-hex seed from Backup) that recover your wallet"
                 />
                 {restoreErr ? <Text style={S.err}>{restoreErr}</Text> : null}
                 <Pressable

@@ -5,10 +5,11 @@ import {C} from '../config/palette';
 import {S} from '../styles';
 import {STORAGE_KEY, BALANCE_TIMEOUT_MS} from '../config/constants';
 import {base, validateSeed} from '../lib/format';
-import {hexToWords, stringToWords, wordsToHex, validateMnemonic} from '../lib/bip39';
+import {hexToWords, stringToWords, wordsToHex, validateMnemonic, wordsToString} from '../lib/bip39';
 import type {Identity} from '../lib/types';
 import {DpayCore} from '../services/native';
 import {fetchWithTimeout} from '../services/relay';
+import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {Logo, Wordmark} from './Logo';
 
 export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: (id: Identity) => void}) {
@@ -28,6 +29,10 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
   // acknowledgement and taps Continue. `backupChecked` is a pure UX gate (not a security mechanism).
   const [backupMnemonic, setBackupMnemonic] = useState<string[] | null>(null);
   const [backupChecked, setBackupChecked] = useState(false);
+  // Copy feedback for the backup gate's "Copy words" button. Without it the only copy path was
+  // mouse-selecting the numbered chips — which drags the position numbers into the selection
+  // (the 2026-08-16 founder report). The button copies the PURE space-joined words.
+  const {copied, copy: doCopy} = useCopyFeedback();
 
   // Generate a fresh on-device Ed25519 keypair, persist it, then SHOW THE BIP-39 BACKUP before entering
   // the wallet. The faucet fund is DEFERRED to `finishCreate` (run after the user acknowledges the
@@ -127,6 +132,13 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
                   </View>
                 ))}
               </View>
+              <Pressable testID="btn-mnemonic-copy" style={S.linkBtn} onPress={() => { if (backupMnemonic) void doCopy(wordsToString(backupMnemonic)); }}
+                accessibilityRole="button"
+                accessibilityLabel={copied === 'clipboard' ? 'Words copied' : copied === 'shared' ? 'Words shared' : 'Copy words'}
+                accessibilityHint="Copies all 24 recovery words to the clipboard, without the position numbers"
+                accessibilityState={{disabled: false}}>
+                <Text style={S.linkText}>{copied === 'clipboard' ? 'Copied ✓' : copied === 'shared' ? 'Shared ✓' : 'Copy words'}</Text>
+              </Pressable>
               <Pressable testID="mnemonic-backup-checkbox" style={{flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch', marginTop: 4, marginBottom: 10, minHeight: 44}} onPress={() => setBackupChecked(!backupChecked)}
                 accessibilityRole="checkbox" accessibilityLabel="I've written down all 24 words" accessibilityState={{checked: backupChecked}}>
                 <View style={{width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: backupChecked ? C.brand : C.sub2, backgroundColor: backupChecked ? C.brand : 'transparent', alignItems: 'center', justifyContent: 'center', marginRight: 10}}>

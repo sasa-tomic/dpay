@@ -51,6 +51,15 @@ export async function run() {
     assert(blankIdx === -1, `all 24 mnemonic words should be non-empty (blank at index ${blankIdx})`);
     console.log(`[68-mnemonic-backup-restore] ✓ read 24 words (${words[0]} … ${words[23]})`);
 
+    // 2b. The Copy-words button must put the PURE space-joined words on the clipboard — no
+    //     position numbers (the rendered chips glue "{n}{word}" together, so a manual
+    //     select-all-copy drags the numbers along; 2026-08-16 founder report).
+    await driver.click('btn-mnemonic-copy', { timeoutMs: 4_000 });
+    const copiedWords = await driver.eval(() => window.__DPAY_TEST_CLIPBOARD);
+    assertEq(copiedWords, words.join(' '),
+      'btn-mnemonic-copy should copy the pure space-joined words (no position numbers)');
+    console.log('[68-mnemonic-backup-restore] ✓ Copy words → clipboard holds the pure 24 words');
+
     // 3. Dismiss the backup (checkbox + Continue) → the faucet runs + the wallet loads.
     await driver.click('mnemonic-backup-checkbox', { timeoutMs: 4_000 });
     await waitForEnabled(driver, 'btn-mnemonic-continue', { timeoutMs: 4_000 });
