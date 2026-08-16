@@ -197,6 +197,12 @@ export const S = StyleSheet.create({
   assetActionText: {color: C.sub, fontWeight: '700', fontSize: 13},
   assetsSectionTitle: {fontSize: 12, fontWeight: '700', color: C.sub2, textTransform: 'uppercase', letterSpacing: 1.2, marginTop: 22, marginBottom: 2, fontFamily: 'monospace'},
   assetCardZero: {color: C.sub2},
+  // AssetGlyph monogram chips (AssetGlyph.tsx) — family-hued rounded squares carrying the native
+  // symbol ($ ₿ Ξ ◎ ∂). Size comes in via inline style (width/height/radius/fontSize scale together);
+  // the base classes only pin the shared chrome (center, subtle ring) so chips stay crisp at any size.
+  assetGlyph: {alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)'},
+  assetGlyphLg: {alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)'},
+  assetGlyphText: {fontWeight: '800'},
   pickerRow: {alignSelf: 'stretch', paddingVertical: 16, paddingHorizontal: 16, borderRadius: 12, backgroundColor: C.card, borderWidth: 1, borderColor: C.line2, marginTop: 10},
   pickerLabel: {fontSize: 16, fontWeight: '700', color: C.ink},
   pickerSub: {fontSize: 12, color: C.sub2, marginTop: 4},
