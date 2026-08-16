@@ -63,9 +63,11 @@ export async function run() {
     // "BTC" (was "Bitcoin"); subtitle "Bitcoin".
     await openBalances(driver);
     const ckusdcRow = await driver.findByTestID('asset-ckusdc', { timeoutMs: 5_000 });
+    // Rows lead with the family monogram chip ($ ₿ Ξ …) — decorative, strip before the heading check.
+    const stripGlyph = (t) => t.replace(/^[^\w]+/, '');
     const ckusdcTxt = await ckusdcRow.evaluate((n) => (n.textContent ?? '').trim());
     assertIncludes(ckusdcTxt, 'USDC', 'USDC row must be labeled "USDC" (not "Ethereum")');
-    assert(ckusdcTxt.startsWith('USDC'), `USDC row primary heading should be "USDC", got "${ckusdcTxt}"`);
+    assert(stripGlyph(ckusdcTxt).startsWith('USDC'), `USDC row primary heading should be "USDC", got "${ckusdcTxt}"`);
     const ckbtcRow = await driver.findByTestID('asset-ckbtc', { timeoutMs: 3_000 });
     const ckbtcTxt = await ckbtcRow.evaluate((n) => (n.textContent ?? '').trim());
     assertIncludes(ckbtcTxt, 'BTC', 'BTC row must be labeled "BTC"');
