@@ -97,11 +97,35 @@ export function readPaymentDeeplink(): string | null {
 // merchant MUST verify it via `verifyOutcomeReceipt` before reconciling — these codec fns carry the
 // blob opaquely; they do NOT validate the signature (that is the consumer's security gate).
 
+/** The base64url blob a `pay` hand-off carries: base64url(JSON.stringify(receipt)). Shared by the
+ *  dpay: URI wrapper and the web /wallet?pay= URL so there is ONE receipt-blob codec. Pure + total. */
+export function receiptShareBlob(receipt: object): string {
+  return bytesToBase64Url(utf8ToBytes(JSON.stringify(receipt)));
+}
+
 /** Wrap a receipt object as a `dpay:pay/<base64url(JSON)>` URI for the NFC-less hand-back (payer
  *  shares this over a messaging app; the merchant opens it + verifies the signature). Pure + total. */
 export function encodeReceiptDeeplink(receipt: object): string {
-  const blob = bytesToBase64Url(utf8ToBytes(JSON.stringify(receipt)));
-  return encodeDeeplink('pay', blob);
+  return encodeDeeplink('pay', receiptShareBlob(receipt));
+}
+
+// --- share payloads: web links must OPEN, native keeps the dpay: scheme ------------------------
+// A browser cannot open a `dpay:` scheme URI, so a web Share carries an OPENABLE
+// `<origin>/wallet?req=…` / `?pay=…` URL instead — the wallet's own query-param mirrors
+// (readRequestDeeplink / readPaymentDeeplink) consume the EXACT same blob, so the recipient lands
+// on the pre-filled pay review (req) or the verified receipt hand-back (pay). On native the
+// canonical `dpay:` deeplink stays (the Android app owns the scheme; a URL would just open a
+// browser tab that cannot hand off to the app).
+
+/** Share payload for a req/pay hand-off: on web an OPENABLE /wallet?… URL, on native a dpay: URI.
+ *  `blob` is the same base64url payload encodeDeeplink wraps. */
+export function shareHandoff(kind: DeeplinkKind, blob: string): string {
+  if (Platform.OS === 'web') {
+    const w = globalThis as unknown as {location?: {origin?: string}};
+    const origin = w.location?.origin ?? '';
+    return `${origin}/wallet?${kind}=${encodeURIComponent(blob)}`;
+  }
+  return encodeDeeplink(kind, blob);
 }
 
 /** Decode the `<blob>` portion of a `dpay:pay/` URI back into the receipt object. Returns null on a

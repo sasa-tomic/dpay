@@ -11,7 +11,7 @@ import type {Identity, Req, NfcStatus} from '../lib/types';
 import {rejectionMessage, isNonceReused} from '../payments';
 import {verifyOutcomeReceipt} from '../services/receipt';
 import {fetchWithTimeout, payAndClassify, readJsonOrEmpty} from '../services/relay';
-import {encodeReceiptDeeplink} from '../lib/deepLink';
+import {shareHandoff, receiptShareBlob} from '../lib/deepLink';
 import {DpayCore, DpayNfc} from '../services/native';
 import {NfcTap} from './NfcTap';
 import {NfcIcon} from './NfcIcon';
@@ -191,7 +191,7 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
             testID="btn-share-receipt"
             style={S.linkBtn}
             onPress={() => {
-              Share.share({message: encodeReceiptDeeplink(paid.receipt!)}).catch(
+              Share.share({message: shareHandoff('pay', receiptShareBlob(paid.receipt!))}).catch(
                 (e: unknown) => { console.log(`[dpay] share receipt failed: ${e instanceof Error ? e.message : String(e)}`); },
               );
             }}

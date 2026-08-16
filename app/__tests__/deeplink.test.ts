@@ -18,6 +18,8 @@ import {
   decodeDeeplink,
   encodeReceiptDeeplink,
   decodeReceiptDeeplink,
+  receiptShareBlob,
+  shareHandoff,
   readRequestDeeplink,
   readPaymentDeeplink,
 } from '../lib/deepLink';
@@ -112,6 +114,43 @@ describe('encodeReceiptDeeplink', () => {
     const uri = encodeReceiptDeeplink(SAMPLE_RECEIPT);
     expect(uri).not.toContain(SAMPLE_RECEIPT.from);
     expect(uri).not.toContain('"amount"');
+  });
+});
+
+// --- shareHandoff: web shares an OPENABLE /wallet?… URL, native keeps the dpay: scheme ---------
+
+describe('shareHandoff', () => {
+  const withWebLocation = (origin: string, fn: () => void) => {
+    Platform.OS = 'web';
+    const w = globalThis as unknown as {location?: {origin?: string; search?: string}};
+    w.location = {origin, search: ''};
+    try { fn(); } finally { delete w.location; }
+  };
+  it('on web, builds an openable /wallet?req= URL (origin from location)', () => {
+    withWebLocation('https://dpay.kalaj.org', () => {
+      const s = shareHandoff('req', 'aB3-_xY9');
+      expect(s).toBe('https://dpay.kalaj.org/wallet?req=aB3-_xY9');
+      expect(new URL(s).searchParams.get('req')).toBe('aB3-_xY9');
+    });
+  });
+  it('on web, builds /wallet?pay=<blob> and the blob matches receiptShareBlob', () => {
+    withWebLocation('https://dpay.kalaj.org', () => {
+      const blob = receiptShareBlob(SAMPLE_RECEIPT);
+      const s = shareHandoff('pay', blob);
+      const u = new URL(s);
+      expect(u.pathname).toBe('/wallet');
+      expect(u.searchParams.get('pay')).toBe(blob);
+      expect(decodeReceiptDeeplink(u.searchParams.get('pay')!)).toEqual(SAMPLE_RECEIPT);
+    });
+  });
+  it('on web with no location, still emits a relative /wallet?… URL (openable same-origin)', () => {
+    Platform.OS = 'web';
+    expect(shareHandoff('req', 'abc')).toBe('/wallet?req=abc');
+  });
+  it('on native, keeps the canonical dpay: URI (the app owns the scheme)', () => {
+    Platform.OS = 'android';
+    expect(shareHandoff('req', 'abc')).toBe('dpay:req/abc');
+    expect(shareHandoff('pay', 'xyz')).toBe('dpay:pay/xyz');
   });
 });
 

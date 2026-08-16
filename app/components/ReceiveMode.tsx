@@ -5,7 +5,7 @@ import {C} from '../config/palette';
 import {S} from '../styles';
 import {EXPIRY_WINDOW, NFC_PAY_TIMEOUT_MS, POLL, BALANCE_TIMEOUT_MS, QR_SIZE} from '../config/constants';
 import {short, base, toUnits, randNonceHex, nowSecs} from '../lib/format';
-import {encodeDeeplink, decodeReceiptDeeplink} from '../lib/deepLink';
+import {shareHandoff, decodeReceiptDeeplink} from '../lib/deepLink';
 import {type CurrencyDescriptor, type FamilyDisplay, fmtCurrencyAmount, currencySymbol} from '../config/catalog';
 import {type SelectableAsset} from '../config/assets';
 import {type BalanceView} from '../lib/assetBalances';
@@ -260,7 +260,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
               testID="btn-share-request"
               style={S.linkBtn}
               onPress={() => {
-                Share.share({message: encodeDeeplink('req', reqQr.value)}).catch(
+                Share.share({message: shareHandoff('req', reqQr.value)}).catch(
                   (e: unknown) => { console.log(`[dpay] share request failed: ${e instanceof Error ? e.message : String(e)}`); },
                 );
               }}

@@ -2,12 +2,14 @@
 //
 // The NFC-less receipt hand-back button: when the payer settles ONLINE (NFC unavailable), they hold
 // the canister-signed receipt. PayMode.tsx renders a `btn-share-receipt` that calls
-// `Share.share({message: encodeReceiptDeeplink(paid.receipt!)})` so the payer can hand the receipt
-// back as a `dpay:pay/<base64url>` link for the merchant to verify + reconcile. This button had ZERO
-// e2e coverage (it only renders when `paid.receipt` is set, which happens exclusively on a fresh
-// online settle). This flow drives the EXACT path: onboard A (payer) → scan B's request → Approve →
-// online settle → "Paid" + receipt → btn-share-receipt renders → tap → assert the Share payload is a
-// `dpay:pay/<base64url>` link.
+// `Share.share({message: shareHandoff('pay', receiptShareBlob(paid.receipt!))})` so the payer can
+// hand the receipt back for the merchant to verify + reconcile. On web the payload is an OPENABLE
+// `<origin>/wallet?pay=<base64url>` URL (a browser cannot open the dpay: scheme); on native it is
+// the `dpay:pay/<base64url>` URI. This button had ZERO e2e coverage (it only renders when
+// `paid.receipt` is set, which happens exclusively on a fresh online settle). This flow drives the
+// EXACT path: onboard A (payer) → scan B's request → Approve → online settle → "Paid" + receipt →
+// btn-share-receipt renders → tap → assert the Share payload is a `/wallet?pay=` link whose blob is
+// the exact receipt.
 //
 // The Share.share call is captured by the `window.__DPAY_TEST_SHARE` seam (shims.ts wraps Share.share
 // to record the `message` field before resolving dismissedAction — mirrors the clipboard seam). This
@@ -29,7 +31,7 @@ export const meta = {
   name: 'share-receipt',
   journey: 'pay',
   covers: ['share-receipt', 'receipt-link', 'handback', 'online-settle', 'deeplink'],
-  verifies: 'After an online settle, btn-share-receipt hands a dpay:pay/<base64url> receipt link to Share.',
+  verifies: 'After an online settle, btn-share-receipt hands an openable /wallet?pay= receipt URL to Share.',
   timeoutMs: 20000,
 };
 
@@ -72,20 +74,23 @@ export async function run() {
     await driver.findByTestID('btn-share-receipt', { timeoutMs: 5_000 });
     console.log('[59-share-receipt] ✓ btn-share-receipt rendered (online settle captured a receipt)');
 
-    // --- Reset the Share seam, tap btn-share-receipt, assert the captured payload is a
-    //     dpay:pay/<base64url> link (the exact URI a merchant opens via flow 50's verify path). --
+    // --- Reset the Share seam, tap btn-share-receipt, assert the captured payload is an OPENABLE
+    //     /wallet?pay=<base64url> URL (web shareHandoff) — the wallet's own readPaymentDeeplink
+    //     consumes the same blob, so the merchant lands on the verified receipt hand-back. --------
     await driver.eval(() => { window.__DPAY_TEST_SHARE = ''; });
     console.log('[59-share-receipt] clicking btn-share-receipt…');
     await driver.click('btn-share-receipt', { timeoutMs: 5_000 });
 
     const shared = await driver.eval(() => window.__DPAY_TEST_SHARE);
     assert(typeof shared === 'string' && shared.length > 0, `Share.share should have captured a message, got ${JSON.stringify(shared)}`);
-    assert(shared.startsWith('dpay:pay/'), `the shared message should be a dpay:pay/ link, got "${String(shared).slice(0, 40)}…"`);
-    // The blob after the scheme is base64url(JSON.stringify(receipt)) — non-empty + URL-safe charset.
-    const blob = shared.slice('dpay:pay/'.length);
-    assert(blob.length > 0, 'the dpay:pay/ link must carry a non-empty receipt blob');
+    const url = new URL(shared);
+    assert(url.pathname === '/wallet', `the shared message should be a /wallet URL, got "${String(shared).slice(0, 40)}…"`);
+    assert(url.searchParams.has('pay'), 'the /wallet URL must carry ?pay=<blob>');
+    // The blob after the param is base64url(JSON.stringify(receipt)) — non-empty + URL-safe charset.
+    const blob = url.searchParams.get('pay');
+    assert(blob.length > 0, 'the ?pay= link must carry a non-empty receipt blob');
     assert(/^[A-Za-z0-9_-]+$/.test(blob), `the receipt blob must be base64url (no padding/specials), got "${blob.slice(0, 24)}…"`);
-    console.log(`[59-share-receipt] ✓ Share.share captured a dpay:pay/<base64url> link (${blob.length} chars)`);
+    console.log(`[59-share-receipt] ✓ Share.share captured a /wallet?pay=<base64url> URL (${blob.length}-char blob)`);
 
     // Belt-and-suspenders: the receipt blob JSON-decodes to an object carrying the matched nonce
     // (proves the shared link is the EXACT receipt this settle produced, not a stub).
