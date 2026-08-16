@@ -93,6 +93,42 @@
 - Receipt-poll 404 console lines (cosmetic; known).
 - Desktop-width sparseness of /wallet (value 5, effort M-L, design-level — intentionally NOT
   auto-fixed; a design pass would need founder input).
+
+## Session summary (2026-08-16, cont. 2): review sweep #2 tail — share-feedback polish, focus ring, SOL payee line, campreview ANR hardening, PROD AT HEAD df846f8
+
+> Same review sweep, second orchestrator pass (the earlier summary covered up to `3e5ccd1`).
+> Plan: `2026-08-16-review-sweep-2.md`.
+
+**Done (all committed; full `just verify` + device gates + prod ship at each milestone):**
+- `97092c8` (D3) — campreview survives System-UI ANR dialogs: every `dump_ui()` probes for a
+  "…isn't responding" alert and dismisses via **Wait** (text-exact → `aerr_wait`/`button2`,
+  never Close-app; max 3 per call; failure now honestly exit 3 env, not exit 2 nav). Probe
+  unit-tested offline; `just campreview` 3/3 GREEN after.
+- `9c796e7` (W2) + `3f9a97a` (U-F6) — landing "Take payments in minutes" 3-step merchant rail;
+  relay pin `landing_page_answers_the_merchant_path` asserts all 3 steps.
+- `3e5ccd1`/`b9870ef`/`5ffaee2` (D1 + docs) — flow-count drift killed at the ROOT: README/justfile
+  now point at FLOWS.md instead of hardcoded counts; CODEBASE_ANALYSIS timing note honest
+  (~30–75s load-dependent).
+- `4d5d14c` + `df846f8` (U-F1/U-F5 completion) — `useShareFeedback.shareConfirmLabel()`:
+  platform-aware labels (web "Copied ✓"/"Link copied ✓" — clipboard fallback IS the web share;
+  native "Shared ✓" — the OS sheet is the feedback); SOL review shows the short destination
+  (`sol-pay-payee`) under a named merchant. jest 12 platform-steered tests; flows 26/27/46/59
+  assert the new DOM.
+- `482e618` (U-F4 proof) — flow 14 asserts the `:focus-visible` ring (brand `rgb(62,224,172)`,
+  `outlineStyle: solid`) appears on Tab and does NOT appear on mouse click.
+- **Gates at final tree `df846f8`:** `just verify` fully GREEN (core 46, canister 86, relay 62,
+  typecheck + bridge/aid/wasm-core parity, e2e **78/78**), jest 826/826, `just app` both
+  self-checks PASS, `just campreview` GREEN both rails ×3.
+- **PROD SHIPPED to HEAD `df846f8`** (`just apk && just image && just up`; canister byte-identical
+  so `deploy-ic` correctly skipped): relay `/api/v1/version` == HEAD, `/wallet` 200, `/merchant`
+  308→/wallet, landing serves the merchant rail, versioned APK sha `0a2d5380…` matches the
+  staged build, `verify-deploy` + `verify-relay-version` PASS.
+
+**Verification note (IMPORTANT-8 record):** all commits `6eb102a..df846f8` audited by an
+independent read-only subagent (partially-wired/dead-code/duplicate/stale-doc classes): the arc
+is CLEAN — zero dead code, zero duplicates, zero unwired features, testID contract intact both
+directions, git hygiene clean. The only findings were the doc-drift + timeout + coverage items
+fixed above. Next session's sweep baseline: `df846f8`.
 - e2e suite time under sandbox load (230s vs 35-70s target) — load factor, not a regression;
   flagged by the harness itself.
 
