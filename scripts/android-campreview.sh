@@ -13,6 +13,10 @@
 # the placeholder branch, which has intrinsic width): a scan-screen layout change that collapses
 # the camera preview to 0×0 (e.g. an unstyled, content-sized wrapper around <QrScanner/>).
 #
+# SOL leg note: the SOL RPC endpoint is iptables-REJECTed on-device for the run so the fund-first
+# gate (known-zero mainnet SOL would replace the scanner with the FundFirstPanel) takes its
+# documented FAIL-OPEN path and renders the scanner — see the blackhole block below.
+#
 # Exit codes: 0 = green on both screens; 1 = camera preview not rendering (the regression);
 # 2 = UI navigation/anchor failure (app UI changed — fix the script's anchors); 3 = device/app
 # environment failure (no device, no self-check).
@@ -22,7 +26,15 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 PKG=org.kalaj.dpay
 ACT=org.kalaj.dpay/com.dpay.MainActivity
 ART="$(mktemp -d /tmp/opencode/campreview.XXXXXX)"
-trap 'echo "   artifacts: $ART" >&2' EXIT
+BLOCK_IPS=""
+cleanup() {
+  # remove any iptables REJECT rules this run added (idempotent — also drains leftovers)
+  for ip in ${BLOCK_IPS:-}; do
+    $ADB shell "while iptables -C OUTPUT -d $ip -j REJECT 2>/dev/null; do iptables -D OUTPUT -d $ip -j REJECT; done" >/dev/null 2>&1 || true
+  done
+  echo "   artifacts: $ART" >&2
+}
+trap cleanup EXIT
 
 export ANDROID_HOME="${ANDROID_HOME:-/home/sat/Android/Sdk}"
 export PATH="$ANDROID_HOME/platform-tools:$PATH"
@@ -40,6 +52,61 @@ echo "== require the app installed + camera permission granted =="
 $ADB shell pm list packages 2>/dev/null | tr -d '\r' | grep -q "^package:$PKG$" \
   || { echo "FAIL: $PKG not installed (run: just app)"; exit 3; }
 $ADB shell pm grant "$PKG" android.permission.CAMERA 2>/dev/null || true
+
+# ---- SOL-RPC blackhole (fund-first gate → documented fail-open path) --------
+# Since the zero-funds UX (2026-08-16), a wallet with KNOWN-zero mainnet SOL renders the
+# FundFirstPanel IN PLACE OF the SOL Pay scanner (solPayGate 'sol-zero') — correct product
+# behavior, but it leaves this gate no scan box to measure. The app state that renders the
+# scanner with SOL unreachable is the FAIL-OPEN path (RPC error → gate 'none'; e2e flow 79
+# step 4). This gate exercises exactly that: REJECT the SOL RPC endpoint's IPs at the device
+# network layer (adb-root iptables). Only the RPC I/O boundary is cut — the camera path stays
+# 100% real. Scoped to the endpoint's exact A records; the relay's IPs are asserted DISJOINT
+# first (both sit on Cloudflare) so the IC leg + faucet stay live. Rules are removed by the
+# EXIT trap. Hostnames are read from the app's own constants (single source of truth).
+echo "== blackhole the SOL RPC endpoint (fail-open path: known-zero would show the fund panel) =="
+sol_rpc_host() {
+  python3 - app/config/constants.ts <<'PY'
+import re, sys
+src = open(sys.argv[1]).read()
+m = re.search(r"SOLANA_RPC_URL.*?'https?://([^/']+)", src, re.S)
+print(m.group(1) if m else '')
+PY
+}
+relay_host() {
+  python3 - app/relayConfig.ts <<'PY'
+import re, sys
+src = open(sys.argv[1]).read()
+m = re.search(r"RELAY_DEFAULT\s*=\s*'https?://([^/']+)", src)
+print(m.group(1) if m else '')
+PY
+}
+collect_ips() { # <hostname>: unique IPv4s — union of host resolver (3 rounds) + device resolver (2)
+  local h="$1" ips="" ip
+  for _ in 1 2 3; do ips="$ips$(getent ahostsv4 "$h" 2>/dev/null | awk '{print $1}' || true)"$'\n'; done
+  for _ in 1 2; do
+    ip="$($ADB shell "ping -c1 -W2 $h" 2>/dev/null | grep -oE '\([0-9.]+\)' | head -1 | tr -d '()' || true)"
+    [ -n "$ip" ] && ips="$ips$ip"$'\n' || true
+  done
+  printf '%s\n' "$ips" | grep -v '^$' | sort -u || true
+}
+SOL_RPC_HOST="$(sol_rpc_host)"
+[ -n "$SOL_RPC_HOST" ] || { echo "FAIL: no SOL RPC URL literal in app/config/constants.ts — revisit this gate"; exit 3; }
+BLOCK_IPS="$(collect_ips "$SOL_RPC_HOST")"
+[ -n "$BLOCK_IPS" ] || { echo "FAIL: could not resolve $SOL_RPC_HOST (need its IPs to blackhole)"; exit 3; }
+RELAY_HOST="$(relay_host)"
+[ -n "$RELAY_HOST" ] || { echo "FAIL: no RELAY_DEFAULT literal in app/relayConfig.ts — revisit this gate"; exit 3; }
+RELAY_IPS="$(collect_ips "$RELAY_HOST")"
+COMMON="$(comm -12 <(printf '%s\n' "$BLOCK_IPS") <(printf '%s\n' "$RELAY_IPS"))"
+[ -z "$COMMON" ] || { echo "FAIL: $SOL_RPC_HOST and relay $RELAY_HOST share IPs ($COMMON) — refusing to block"; exit 3; }
+$ADB root >/dev/null 2>&1; $ADB wait-for-device
+for ip in $BLOCK_IPS; do
+  $ADB shell "iptables -C OUTPUT -d $ip -j REJECT 2>/dev/null || iptables -A OUTPUT -d $ip -j REJECT" >/dev/null
+done
+for ip in $BLOCK_IPS; do
+  $ADB shell "ping -c1 -W3 $ip" >/dev/null 2>&1 \
+    && { echo "FAIL: $ip still reachable after iptables REJECT"; exit 3; }
+done
+echo "   blocked: $SOL_RPC_HOST →$(printf ' %s' $BLOCK_IPS) (relay $RELAY_HOST unaffected)"
 
 echo "== (re)launch + wait for the on-device self-check =="
 $ADB shell am force-stop "$PKG"
