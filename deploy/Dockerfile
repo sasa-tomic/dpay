@@ -35,7 +35,7 @@ COPY dist/dpay.ap[k] /srv/dpay.apk
 ENV DPAY_APK_PATH=/srv/dpay.apk
 
 # Bind on all interfaces *inside the container* so the proxy (or a phone on the LAN) can reach it.
-# Everything the relay serves (merchant page, jsQR/qrcode assets) is compiled in — no asset files.
+# Everything the relay serves (landing page, web wallet, APK) is compiled in — no asset files.
 # Deliberately NO default ledger config: an unconfigured container exits rather than guess.
 ENV DPAY_RELAY_ADDR=0.0.0.0:8787
 

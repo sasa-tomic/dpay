@@ -1,9 +1,10 @@
 //! The relay binary — the merchant's submit-and-confirm service, and dpay's only online
-//! dependency. It also serves the marketing **landing page** (`GET /`) and the **merchant
-//! terminal** web page (`GET /merchant`), so the whole merchant side of the demo is one process:
-//! open the terminal on a laptop, scan the payer's QR, get "Paid ✓". The JSON API lives under
-//! `/api/v1` (e.g. `POST /api/v1/pay`, `GET /api/v1/health`); an Android build, when configured via
-//! `DPAY_APK_PATH`, is served at `GET /download/dpay.apk`.
+//! dependency. It also serves the marketing **landing page** (`GET /`) and the **web wallet**
+//! (`GET /wallet` — the real RN-web app; `/merchant` is a 308 redirect to it), so the whole
+//! merchant side of the demo is one process: open the terminal on a laptop, scan the payer's QR,
+//! get "Paid ✓". The JSON API lives under `/api/v1` (e.g. `POST /api/v1/pay`,
+//! `GET /api/v1/health`); an Android build, when configured via `DPAY_APK_PATH`, is served at
+//! `GET /download/dpay.apk`.
 //!
 //! Everything the relay needs is configured through the environment, so the *same* binary (and the
 //! same container image) runs the offline demo and a real deployment — only env differs.
