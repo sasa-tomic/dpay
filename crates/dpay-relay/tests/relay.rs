@@ -819,6 +819,37 @@ async fn merchant_redirects_to_wallet() {
     );
 }
 
+/// 2026-08-16 merge follow-up (U-F6): with no separate merchant product, the landing page itself
+/// must answer "how do I become a merchant?" — the Receive tab is the terminal, on any phone or
+/// in the browser, with no signup/terminal/fees, and the section links to the one web surface.
+#[tokio::test]
+async fn landing_page_answers_the_merchant_path() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+
+    let (status, _headers, bytes) = call_raw(&state, get_req("/")).await;
+    assert_eq!(status, StatusCode::OK);
+    let html = String::from_utf8(bytes).unwrap();
+    for required in [
+        "id=\"merchants\"",
+        "For merchants",
+        "choose Receive, and show your QR",
+        "No signup",
+        "No terminal",
+        "No fees",
+    ] {
+        assert!(
+            html.contains(required),
+            "landing page must contain {required:?}"
+        );
+    }
+    assert!(
+        html.contains("<a class=\"ghost\" href=\"/wallet\">Open the web wallet</a>"),
+        "merchant section must link the web wallet"
+    );
+}
+
 /// Without a configured APK the download route is a clean 404 — not an empty 200.
 #[tokio::test]
 async fn apk_download_absent_is_404() {
