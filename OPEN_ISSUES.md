@@ -43,7 +43,60 @@
   purge-required.)
 
 
-## Session summary (2026-08-16): merchant→web-wallet payment path + bridge toName crash + web Share parity — COMPLETE
+## Session summary (2026-08-16, cont.): review sweep #2 — fund-first gate + campreview SOL fix + UX findings U-F1..6/A-F1..4 — COMPLETE, PROD AT HEAD
+
+> **Trigger:** HEAD had 6 undocumented commits (229d1de..c25202d — BIP-39 restore UX, share
+> deeplinks, /merchant→/wallet merge, web QR scan, fund-first zero-funds UX). Plan:
+> `2026-08-16-review-sweep-2.md`.
+
+**Done (all committed, all gates green at each step):**
+- **campreview SOL-leg fix** (`2914467`): the 2026-08-16 fund-first gate (zero mainnet SOL →
+  FundFirstPanel replaces the scanner — correct product behavior) left the SOL leg with no scan
+  box to measure. The gate now blackholes the SOL RPC endpoint's exact A records via adb-root
+  iptables (hostnames read from `constants.ts` + `relayConfig.ts`, relay-IP disjointness asserted
+  — both are Cloudflare), so the gate takes its DOCUMENTED fail-open path (`solPayGate 'none'`,
+  e2e flow 79 step 4) and the scanner renders real pixels. EXIT-trap teardown; verified REJECT
+  count 0 after runs.
+- **Doc de-dangle** (`08aafe1`, + concurrent-session `3e5ccd1`): relay main.rs doc, Dockerfile,
+  deploy/README, AGENTS.md/app-README/CODEBASE_ANALYSIS flow counts (79 flows), dangling
+  "Web wallet" pointer.
+- **CODEBASE_ANALYSIS fund-first section** (`c4bc9a6`): the c25202d surface documented per the
+  maintenance contract (was missing — doc-gap found by review).
+- **UX review of the REAL /wallet** (parked e2e session, FakeLedger relay, zero mocks, 50+
+  screenshots + zai-vision): onboarding, mnemonic backup, all tabs, request QR + deeplink
+  payment round-trip (`?req=` → prefill → approve → balances ∂100→∂97), BTC fund-first both
+  branches, deposit, settings incl. advanced. Findings fixed:
+  - `88f375a` currency-picker caret was near-invisible (sub2 gray 13px next to a 36px glyph) →
+    C.sub 22px; zai-vision-confirmed.
+  - `d2de3f1` (U-F1/U-F3/U-F5): share feedback at all 4 share sites ('Link copied ✓'/'Copied ✓',
+    `useShareFeedback` mirrors `useCopyFeedback`, dismiss-honest); IC request TTL 5→15 min
+    (a NEW payer onboarding via 24 words outlived the old ~4-min window; SOL ≤90s untouched —
+    blockhash physics); payee short-pubkey line on Pay review (phishing surface).
+  - `8a429ab` (A-F3/U-F4): wasm-core fetch bounded (10s AbortController+setTimeout compose,
+    named-URL timeout error, timer cleared in finally, jest-pinned); `:focus-visible` keyboard
+    ring in C.brand on the web wallet + harness pages (web-only by construction).
+  - `3f9a97a` (U-F6): landing "For merchants" section (no signup/terminal/fees) + relay test
+    pin; REWORKED same-session by the concurrent session into a 3-step "Take payments in
+    minutes" rail (`9c796e7`) — final state is theirs, tests extended, verified live.
+  - `83061fc` (A-F1/F2/A-F4): doc drift + campreview device line honors ANDROID_SERIAL + jest
+    guards for `sol-send-needs-sol` / `sol-ata-checking-sol` (break-verified TDD).
+- **Gates at final tree:** jest 821/821, typecheck clean, bridge/aid/wasm-core parity OK, relay
+  60/60, e2e **78/78 GREEN** (one first-run RED on 03/04 was the documented vite-rebuild
+  timeout-artifact class — clean re-run + full-suite re-run green), `just app` (both self-checks
+  PASS), `just campreview` GREEN both rails (with the new blackhole), `just ondevice` 11/11.
+- **PROD SHIPPED to HEAD `3e5ccd1`** (`just deploy-ic && just apk && just up`): relay version
+  commit == HEAD (verified), /wallet 200, /merchant 308, landing carries the merchants section,
+  versioned APK serving. Concurrent-session commits (campreview ANR hardening D3, landing W2,
+  docs D1) were verified wired (relay 60/60, bash -n OK) before/at deploy.
+
+**Follow-ups (informational, below threshold or founder-owned):**
+- Receipt-poll 404 console lines (cosmetic; known).
+- Desktop-width sparseness of /wallet (value 5, effort M-L, design-level — intentionally NOT
+  auto-fixed; a design pass would need founder input).
+- e2e suite time under sandbox load (230s vs 35-70s target) — load factor, not a regression;
+  flagged by the harness itself.
+
+
 
 > **Trigger:** founder reported a device crash paying from app to website merchant:
 > `Exception in HostFunction Parameter specified as non-null is null ... signAuthorization, parameter toName`,

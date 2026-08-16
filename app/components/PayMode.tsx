@@ -21,7 +21,7 @@ import {ModeToggle} from './ModeToggle';
 import {WithdrawSheet} from './WithdrawSheet';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useReportLock} from '../hooks/useReportLock';
-import {useShareFeedback} from '../hooks/useShareFeedback';
+import {useShareFeedback, shareConfirmLabel} from '../hooks/useShareFeedback';
 import {withTimeout} from '../lib/timeout';
 
 // Plain-language per-reason text for the NFC-unavailable info popup. Each ends with the honest
@@ -204,7 +204,7 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
             accessibilityLabel="Share receipt"
             accessibilityHint="Share the canister-signed receipt as a link the merchant can open to confirm"
             accessibilityState={{disabled: false}}>
-            <Text style={S.linkText}>{shared ? 'Link copied ✓' : 'Share receipt'}</Text>
+            <Text style={S.linkText}>{shared ? shareConfirmLabel('Link copied ✓') : 'Share receipt'}</Text>
           </Pressable>
         ) : null}
         <Pressable testID="btn-new" style={S.linkBtn} onPress={reset} accessibilityRole="button" accessibilityLabel="New payment" accessibilityState={{disabled: false}}><Text style={S.linkText}>New payment</Text></Pressable>
@@ -233,7 +233,7 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
             </View>
           </>
         )}
-        <Pressable style={S.linkBtn} onPress={() => share(qr.code)} accessibilityRole="button" accessibilityLabel="Share auth code" accessibilityState={{disabled: false}}><Text style={S.linkText}>{shared ? 'Copied ✓' : 'Share auth code'}</Text></Pressable>
+        <Pressable style={S.linkBtn} onPress={() => share(qr.code)} accessibilityRole="button" accessibilityLabel="Share auth code" accessibilityState={{disabled: false}}><Text style={S.linkText}>{shared ? shareConfirmLabel('Copied ✓') : 'Share auth code'}</Text></Pressable>
       </View>
     );
   }

@@ -14,7 +14,7 @@
 import {describe, test, expect, jest, beforeEach, afterEach} from '@jest/globals';
 import React from 'react';
 import renderer, {act} from 'react-test-renderer';
-import {Share, Text} from 'react-native';
+import {Share, Platform, Text} from 'react-native';
 
 jest.mock('../services/native', () => ({
   DpayCore: {
@@ -118,10 +118,19 @@ beforeEach(() => {
 
 afterEach(() => {
   jest.useRealTimers(); // the 1s display clock + the share dwell would keep the worker alive
+  (Platform as {OS: string}).OS = 'ios'; // restore the jest-preset default (webLabel() tests mutate it)
 });
 
+// The jest preset pins Platform.OS to 'ios' (native). shareConfirmLabel: web says what the
+// fallback DID ('Link copied ✓' — the no-Web-Share path copies), native says 'Shared ✓' (the real
+// Share sheet was the feedback, nothing was copied). The flip test runs as WEB; native has its own.
+function asWeb() {
+  (Platform as {OS: string}).OS = 'web';
+}
+
 describe('ReceiveMode — share request feedback (U-F1)', () => {
-  test('"Share request link" flips to "Link copied ✓" after the share resolves (testID unchanged)', async () => {
+  test('(web) "Share request link" flips to "Link copied ✓" after the share resolves (testID unchanged)', async () => {
+    asWeb();
     const tree = mountReceive();
     await makeRequest(tree);
     expect(hasTestID(tree, 'btn-share-request')).toBe(true);
@@ -130,10 +139,29 @@ describe('ReceiveMode — share request feedback (U-F1)', () => {
     await act(async () => {
       btn.props.onPress();
     });
-    expect(shareSpy).toHaveBeenCalledWith({message: expect.stringContaining('dpay:req/')});
+    // web semantics (U-F1): the share payload is the /wallet?req= handoff URL — NOT the native
+    // dpay:req/ scheme (shareHandoff branches on Platform.OS; this test mounts as web).
+    expect(shareSpy).toHaveBeenCalledWith({message: '/wallet?req=REQB64VALUE'});
     expect(texts(tree)).toContain('Link copied ✓');
     expect(texts(tree)).not.toContain('Share request link');
     expect(hasTestID(tree, 'btn-share-request')).toBe(true);
+    act(() => {
+      tree.unmount();
+    });
+  });
+
+  test('native: a completed Share sheet flips to "Shared ✓" — never "Link copied ✓"', async () => {
+    const tree = mountReceive();
+    await makeRequest(tree);
+    const btn = tree.root.findAll(node => node.props && node.props.testID === 'btn-share-request')[0];
+    await act(async () => {
+      btn.props.onPress();
+    });
+    // native semantics (U-F1): the share payload is the dpay:req/ scheme URI (shareHandoff's
+    // other branch) — the web test above pins the /wallet?req= handoff URL.
+    expect(shareSpy).toHaveBeenCalledWith({message: expect.stringContaining('dpay:req/')});
+    expect(texts(tree)).toContain('Shared ✓');
+    expect(texts(tree)).not.toContain('Link copied ✓');
     act(() => {
       tree.unmount();
     });

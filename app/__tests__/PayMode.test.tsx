@@ -17,7 +17,7 @@
 import {describe, test, expect, jest, beforeEach, afterEach} from '@jest/globals';
 import React from 'react';
 import renderer, {act} from 'react-test-renderer';
-import {Share, Text} from 'react-native';
+import {Share, Platform, Text} from 'react-native';
 
 jest.mock('../services/native', () => ({
   DpayCore: {
@@ -150,7 +150,16 @@ beforeEach(() => {
 
 afterEach(() => {
   jest.useRealTimers(); // fake timers leak past suite end if left installed (force-exited worker)
+  (Platform as {OS: string}).OS = 'ios'; // restore the jest-preset default (webLabel() tests mutate it)
 });
+
+// The jest preset pins Platform.OS to 'ios' (native). The share confirmation label is
+// platform-aware (shareConfirmLabel): web says what the fallback DID ('Copied ✓' / 'Link copied
+// ✓' — the no-Web-Share path copies), native says 'Shared ✓' (the real Share sheet was the
+// feedback, nothing was copied). The flip tests below run as WEB; the native side has its own test.
+function asWeb() {
+  (Platform as {OS: string}).OS = 'web';
+}
 
 describe('PayMode — review short pubkey (U-F5)', () => {
   test('a named payee shows the short pubkey as a subdued second line under "to <name>"', async () => {
@@ -176,7 +185,8 @@ describe('PayMode — review short pubkey (U-F5)', () => {
 });
 
 describe('PayMode — share feedback (U-F1)', () => {
-  test('offline QR screen: "Share auth code" flips to "Copied ✓" after the share resolves', async () => {
+  test('offline QR screen (web): "Share auth code" flips to "Copied ✓" after the share resolves', async () => {
+    asWeb();
     jest.mocked(DpayCore.signAuthorization).mockResolvedValue('99'.repeat(162));
     jest.mocked(DpayCore.verifyWire).mockResolvedValue(true);
     jest.mocked(DpayCore.encodeQr).mockResolvedValue('SIGNEDQRCODE');
@@ -194,7 +204,8 @@ describe('PayMode — share feedback (U-F1)', () => {
     });
   });
 
-  test('paid screen: "Share receipt" flips to "Link copied ✓" after the share resolves (testID unchanged)', async () => {
+  test('paid screen (web): "Share receipt" flips to "Link copied ✓" after the share resolves (testID unchanged)', async () => {
+    asWeb();
     jest.mocked(DpayCore.signAuthorization).mockResolvedValue('99'.repeat(162));
     jest.mocked(DpayCore.verifyWire).mockResolvedValue(true);
     jest.mocked(DpayCore.encodeQr).mockResolvedValue('SIGNEDQRCODE');
@@ -208,6 +219,22 @@ describe('PayMode — share feedback (U-F1)', () => {
     await act(async () => {});
     expect(texts(tree)).toContain('Link copied ✓');
     expect(texts(tree)).not.toContain('Share receipt');
+    act(() => {
+      tree.unmount();
+    });
+  });
+
+  test('native: a completed Share sheet flips to "Shared ✓" — never "Copied ✓" (nothing was copied)', async () => {
+    jest.mocked(DpayCore.signAuthorization).mockResolvedValue('99'.repeat(162));
+    jest.mocked(DpayCore.verifyWire).mockResolvedValue(true);
+    jest.mocked(DpayCore.encodeQr).mockResolvedValue('SIGNEDQRCODE');
+    const tree = mountPay({online: false});
+    await scanToReview(tree, REQ);
+    pressByTestID(tree, 'btn-approve');
+    await act(async () => {});
+    await pressByLabel(tree, 'Share auth code');
+    expect(texts(tree)).toContain('Shared ✓');
+    expect(texts(tree)).not.toContain('Copied ✓');
     act(() => {
       tree.unmount();
     });

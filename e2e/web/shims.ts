@@ -1,13 +1,14 @@
 // Master shims installer — runs as the FIRST side-effect import in `entry.tsx`, BEFORE the real
 // `app/App.tsx` evaluates. It mutates `react-native-web`'s exported `NativeModules` (a plain object
-// singleton) to add `DpayCore` and `DpayNfc`, and replaces `Share.share` with a deterministic noop
-// (the browser's `navigator.share` rejects in headless chrome; the app's deposit/copy paths use
-// `Share.share` purely as a clipboard affordance, so the noop resolves `{action:'dismissedAction'}`).
+// singleton) to add `DpayCore` and `DpayNfc`, and replaces `Share.share` with a deterministic
+// fallback (the browser's `navigator.share` rejects in headless chrome; the app's share paths
+// need the clipboard-write fallback, so the shim resolves `{action:'sharedAction'}` — mirroring
+// prod-web's no-Web-Share behavior).
 //
 // After this file evaluates, the real App.tsx can do:
 //   const {DpayCore, DpayNfc} = NativeModules;        // ← our shims
 //   await DpayCore.generateKeypair();                  // ← the SHARED wasm core (dpay-core.wasm)
-//   await Share.share({message: addr});                // ← resolves dismissedAction (no crash)
+//   await Share.share({message: addr});                // ← clipboard fallback, sharedAction
 //
 // The wasm-backed DpayCore shim is the ONLY money-critical shim; every byte it signs/decodes/
 // verifies goes through the same Rust `dpay-core` the Android app and the relay use (its only
@@ -25,34 +26,51 @@ import { DpaySolNfc, installSolNfcSeam } from './dpay-sol-nfc';
 (NativeModules as any).DpayNfc = DpayNfc;
 (NativeModules as any).DpaySolNfc = DpaySolNfc;
 
-// Share.share in RNW calls navigator.share if defined, else REJECTS. The e2e build (any mode
-// except web-prod) replaces it with a deterministic noop: headless chrome has no useful share
-// target, the app's deposit "Copy address" and "Share auth code" paths use it as a clipboard
-// affordance, so the noop resolves `{action:'dismissedAction'}` (matching RNW's own
-// `Share.dismissedAction`). No silent error — the call returns a deterministic outcome the app
-// already handles. ALSO capture the share payload into `window.__DPAY_TEST_SHARE` (mirrors the
-// clipboard seam) so an e2e flow can assert the EXACT message handed to Share.share (e.g. the
-// dpay:pay/<base64url> receipt hand-back — flow 59).
+// Share.share in RNW calls navigator.share if defined, else REJECTS. Both shim branches below
+// mirror what a browser WITHOUT a usable Web Share target does (headless chrome: navigator.share
+// missing or rejected): the payload falls back to a clipboard write and the call resolves
+// `{action:'sharedAction'}` — the app's share affordances then flip their labels ('Link copied ✓'),
+// exactly the prod-web behavior a user without Web Share sees. No silent error — the call returns
+// a deterministic outcome the app already handles. ALSO capture the share payload into
+// `window.__DPAY_TEST_SHARE` (mirrors the clipboard seam) so an e2e flow can assert the EXACT
+// message handed to Share.share (e.g. the dpay:pay/<base64url> receipt hand-back — flow 59).
 //
-// The web-PROD build (/wallet) must NOT install that noop — it would silently kill the wallet's
-// 4 share affordances (request link / auth code / receipt link / signed SOL code) in EVERY
-// browser (2026-08-16 parity audit). Prod keeps RNW's real Share.share (navigator.share → OS
-// share sheet on mobile + most desktop browsers) and only patches the no-Web-Share fallback
-// (Firefox/Safari desktop): a clipboard write so the payload still leaves the app — mirroring
+// The web-PROD build (/wallet) keeps RNW's real Share.share as the FIRST choice (navigator.share →
+// OS share sheet on mobile + most desktop browsers) and only falls to the clipboard patch when the
+// browser has no Web Share or the call REJECTS without sharing (Firefox/Safari desktop, headless —
+// 2026-08-16 parity audit): a clipboard write so the payload still leaves the app — mirroring
 // `copyToClipboard`'s Android semantics ("the share sheet includes Copy").
 const shareNoop = (opts?: {message?: string; url?: string}) => {
+  const msg = opts && typeof opts.message === 'string' ? opts.message : (opts && opts.url) || '';
   if (typeof window !== 'undefined') {
-    (window as any).__DPAY_TEST_SHARE = opts && typeof opts.message === 'string' ? opts.message : '';
+    (window as any).__DPAY_TEST_SHARE = msg;
   }
-  return Promise.resolve({ action: 'dismissedAction' } as
+  // Mirror the prod fallback: no share target → the payload goes to the clipboard (the seam wrap
+  // below captures it into __DPAY_TEST_CLIPBOARD; the real write is best-effort headless) and the
+  // share resolves sharedAction so the tapped button's feedback label flips.
+  try {
+    const nav = typeof navigator !== 'undefined' ? (navigator as any) : undefined;
+    if (msg && nav?.clipboard && typeof nav.clipboard.writeText === 'function') {
+      const p = nav.clipboard.writeText(msg);
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    }
+  } catch { /* best-effort — the seam captured the payload */ }
+  return Promise.resolve({ action: 'sharedAction' } as
     { action: 'sharedAction' | 'dismissedAction' });
 };
 if (import.meta.env.MODE === 'web-prod') {
   const origShare = (Share as any).share?.bind(Share);
   (Share as any).share = async (opts?: {message?: string; url?: string}) => {
     const nav = typeof navigator !== 'undefined' ? (navigator as any) : undefined;
-    if (nav && typeof nav.share === 'function' && origShare) return origShare(opts); // real Web Share
     const msg = opts && typeof opts.message === 'string' ? opts.message : (opts && opts.url) || '';
+    // Real Web Share first — but a rejection (headless chrome's navigator.share needs a user
+    // gesture; some browsers expose it with no target) must not dead-end the affordance: fall
+    // through to the clipboard write so the user still sees the '…copied ✓' feedback.
+    if (nav && typeof nav.share === 'function' && origShare) {
+      try {
+        return await origShare(opts);
+      } catch { /* no usable share target — fall through to the clipboard */ }
+    }
     try {
       if (msg && nav?.clipboard && typeof nav.clipboard.writeText === 'function') {
         await nav.clipboard.writeText(msg);

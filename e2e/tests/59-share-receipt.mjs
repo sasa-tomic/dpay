@@ -12,9 +12,10 @@
 // the exact receipt.
 //
 // The Share.share call is captured by the `window.__DPAY_TEST_SHARE` seam (shims.ts wraps Share.share
-// to record the `message` field before resolving dismissedAction — mirrors the clipboard seam). This
-// proves the button hands encodeReceiptDeeplink's output to Share, byte-for-byte the URI scheme a
-// merchant opens via flow 50's verify path.
+// to record the `message` field before resolving the clipboard-fallback sharedAction — mirrors the
+// clipboard seam). This proves the button hands encodeReceiptDeeplink's output to Share, byte-for-byte
+// the URI scheme a merchant opens via flow 50's verify path. The sharedAction flip also drives the
+// in-DOM 'Link copied ✓' feedback label (asserted below).
 //
 // Selector contract: `pay-amount`, `btn-approve`, `btn-share-receipt`.
 import { setup, assert, assertIncludes, onboardWallet } from '../harness/lib.mjs';
@@ -31,7 +32,7 @@ export const meta = {
   name: 'share-receipt',
   journey: 'pay',
   covers: ['share-receipt', 'receipt-link', 'handback', 'online-settle', 'deeplink'],
-  verifies: 'After an online settle, btn-share-receipt hands an openable /wallet?pay= receipt URL to Share.',
+  verifies: 'After an online settle, btn-share-receipt hands an openable /wallet?pay= receipt URL to Share and flips to "Link copied ✓".',
   timeoutMs: 20000,
 };
 
@@ -80,6 +81,13 @@ export async function run() {
     await driver.eval(() => { window.__DPAY_TEST_SHARE = ''; });
     console.log('[59-share-receipt] clicking btn-share-receipt…');
     await driver.click('btn-share-receipt', { timeoutMs: 5_000 });
+
+    // U-F1: the tap must give IN-DOM feedback, not a dead fire-and-forget. The local-mode shim
+    // now mirrors prod-web's no-Web-Share behavior (clipboard-write fallback → sharedAction), so
+    // the button label flips to the web confirmation 'Link copied ✓' (the 1500ms dwell) — the
+    // exact state a headless/prod web user sees. Assert it lands in the DOM.
+    const flipped = await driver.waitForText('Link copied ✓', { timeoutMs: 4_000 });
+    assert(flipped, 'btn-share-receipt should flip its label to "Link copied ✓" after the share fallback copies');
 
     const shared = await driver.eval(() => window.__DPAY_TEST_SHARE);
     assert(typeof shared === 'string' && shared.length > 0, `Share.share should have captured a message, got ${JSON.stringify(shared)}`);

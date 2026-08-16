@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
-import {Share} from 'react-native';
+import {Platform, Share} from 'react-native';
 
 export type ShareState = 'shared' | null;
 
@@ -42,4 +42,18 @@ export function useShareFeedback(): {shared: ShareState; share: (message: string
   }, []);
 
   return {shared, share};
+}
+
+/**
+ * The confirmation label for a flipped share button — the platform-aware half of the pattern the
+ * copy buttons established ('Copied ✓' for a real clipboard write, 'Shared ✓' when the platform
+ * Share sheet handled it). On web a resolved share means the no-Web-Share fallback COPIED the
+ * payload (see e2e/web/shims.ts — navigator.share → clipboard write → sharedAction), so the
+ * caller's web label ('Link copied ✓' / 'Copied ✓') is honest. On native sharedAction means the
+ * user completed the REAL Share sheet — the sheet itself was the feedback and nothing was copied,
+ * so the label must say 'Shared ✓', never 'Copied ✓'. Single source so all 4 share sites stay in
+ * agreement (mirrors how useCopyFeedback's 'clipboard'/'shared' return drives the copy labels).
+ */
+export function shareConfirmLabel(webLabel: string): string {
+  return Platform.OS === 'web' ? webLabel : 'Shared ✓';
 }

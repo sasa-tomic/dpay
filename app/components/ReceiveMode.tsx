@@ -22,7 +22,7 @@ import {DepositSheet} from './DepositSheet';
 import {CkErc20DepositSheet} from './CkErc20DepositSheet';
 import {AssetPicker} from './AssetPicker';
 import {useReportLock} from '../hooks/useReportLock';
-import {useShareFeedback} from '../hooks/useShareFeedback';
+import {useShareFeedback, shareConfirmLabel} from '../hooks/useShareFeedback';
 import {withTimeout} from '../lib/timeout';
 
 // The optional merchant memo input — a real secondary field (not a bare text link), mirroring the
@@ -271,7 +271,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
               accessibilityLabel="Share request link"
               accessibilityHint="Share this request as a link the payer can open to pay"
               accessibilityState={{disabled: false}}>
-              <Text style={S.linkText}>{shared ? 'Link copied ✓' : 'Share request link'}</Text>
+              <Text style={S.linkText}>{shared ? shareConfirmLabel('Link copied ✓') : 'Share request link'}</Text>
             </Pressable>
             {scanning ? (
               <><QrScanner onScan={onSignedQr} /><Text style={S.dim2}>Scan the payer's signed QR</Text></>

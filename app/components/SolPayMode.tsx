@@ -20,7 +20,7 @@ import {SolNfcTap} from './SolNfcTap';
 import {ModeToggle} from './ModeToggle';
 import {SolanaWithdrawSheet} from './SolanaWithdrawSheet';
 import {useReportLock} from '../hooks/useReportLock';
-import {useShareFeedback} from '../hooks/useShareFeedback';
+import {useShareFeedback, shareConfirmLabel} from '../hooks/useShareFeedback';
 
 /**
  * SolPayMode — the payer-side offline-pay component for the v2 recent-blockhash SOL rail.
@@ -301,7 +301,7 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
           </Pressable>
         </View>
         <Pressable style={S.linkBtn} onPress={() => share(solpayUri)} accessibilityRole="button" accessibilityLabel="Share signed payment" accessibilityState={{disabled: false}}>
-          <Text style={S.linkText}>{shared ? 'Copied ✓' : 'Share signed code'}</Text>
+          <Text style={S.linkText}>{shared ? shareConfirmLabel('Copied ✓') : 'Share signed code'}</Text>
         </Pressable>
       </View>
     );
