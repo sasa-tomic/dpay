@@ -142,7 +142,6 @@ export const S = StyleSheet.create({
   notPaidText: {color: C.sub, fontWeight: '600', fontSize: 16},
   check: {width: 92, height: 92, borderRadius: 46, backgroundColor: C.ok, alignItems: 'center', justifyContent: 'center', marginBottom: 18, shadowColor: C.ok, shadowOpacity: 0.4, shadowRadius: 18, shadowOffset: {width: 0, height: 8}, elevation: 8},
   checkAlready: {backgroundColor: C.warn, shadowColor: C.warn},
-  checkMark: {color: C.brandInk, fontSize: 50, fontWeight: '700'},
   paidText: {fontSize: 30, fontWeight: '800', color: C.ok},
   alreadyText: {color: C.warn},
   paidSub: {fontSize: 16, color: C.sub, marginTop: 6},
@@ -152,7 +151,6 @@ export const S = StyleSheet.create({
   // Tappable amount-prefix (Receive): wraps the currency glyph + a ▾ caret that signals it opens the
   // currency picker. The right border separates it from the typed amount.
   prefixBtn: {flexDirection: 'row', alignItems: 'center', paddingRight: 12, borderRightWidth: 1, borderRightColor: C.line2},
-  caret: {color: C.sub, fontSize: 22, marginLeft: 3},
   linkBtn: {marginTop: 18, minHeight: 44, justifyContent: 'center'},
   linkText: {color: C.brand, fontWeight: '600', fontSize: 16},
   linkTextMuted: {color: C.sub, fontWeight: '600', fontSize: 15},
@@ -343,7 +341,6 @@ export const S = StyleSheet.create({
   nfcHintLabel: {fontSize: 15, color: C.sub, textAlign: 'center'},
   nfcInfoLink: {flexDirection: 'row', alignItems: 'center', gap: 5},
   nfcInfoLinkText: {fontSize: 18, fontWeight: '700', color: C.bad},
-  nfcInfoGlyph: {fontSize: 15, color: C.sub2},
   nfcInfoBody: {fontSize: 15, color: C.ink, lineHeight: 21, marginBottom: 16},
   nfcInfoClose: {alignSelf: 'flex-end', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 999, borderWidth: 1, borderColor: C.line2},
   nfcInfoCloseText: {fontSize: 15, fontWeight: '700', color: C.ink},
