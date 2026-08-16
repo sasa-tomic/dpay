@@ -32,6 +32,8 @@ import {SolPayMode} from './SolPayMode';
 import {SolReceiveMode} from './SolReceiveMode';
 import {SettingsSheet} from './SettingsSheet';
 import {BalancesSheet} from './BalancesSheet';
+import {IconArrowDownLeft, IconChevronDown, IconClock, IconQr, IconSettings} from './icons';
+import {glyphFor} from './AssetGlyph';
 
 export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {identity: Identity; relayUrl: string; setRelayUrl: (s: string) => void; onReset: () => void; onRestore: (id: Identity) => Promise<void>}) {
   const [mode, setMode] = useState<'pay' | 'receive' | 'ledger'>('pay');
@@ -558,7 +560,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
             accessibilityLabel="Settings"
             accessibilityHint="Open relay, reset, and advanced settings"
           >
-            <Text style={S.headerSettingsIcon}>⚙</Text>
+            <IconSettings size={20} color={C.sub} />
           </Pressable>
           <View>
             <Wordmark style={S.brand} />
@@ -596,6 +598,9 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
                     map. DEMO keeps its offline '~' prefix (baked into the map); an IC asset shows its
                     polled native-units balance; SOL/USDC show '—' when the RPC is offline (jest/e2e). */}
                 <Text style={S.balAmt}>{selectedAsset ? (balances[selectedAsset.id]?.displayText ?? '—') : '—'}</Text>
+                {/* P1 — chevron signals the balance pressable opens the Balances sheet (SVG: no textContent,
+                    so the e2e balance includes-matches are untouched). */}
+                <IconChevronDown size={16} color={C.sub2} />
               </View>
             </View>
             {/* D5a: the A badge sits at the FAR RIGHT edge of the row (label+value column, then the
@@ -610,12 +615,15 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
       </View>
 
       <View style={S.tabs}>
-        <Tab label="Pay" active={mode === 'pay'} onPress={() => setMode('pay')} hotkey="P" />
-        <Tab label="Receive" active={mode === 'receive'} onPress={() => setMode('receive')} hotkey="R" />
-        <Tab label="Transactions" active={mode === 'ledger'} onPress={() => setMode('ledger')} hotkey="L" />
+        <Tab label="Pay" active={mode === 'pay'} onPress={() => setMode('pay')} hotkey="P" icon={c => <IconQr size={16} color={c} />} />
+        <Tab label="Receive" active={mode === 'receive'} onPress={() => setMode('receive')} hotkey="R" icon={c => <IconArrowDownLeft size={16} color={c} />} />
+        <Tab label="Transactions" active={mode === 'ledger'} onPress={() => setMode('ledger')} hotkey="L" icon={c => <IconClock size={16} color={c} />} />
         {/* A6 — active-asset chip: labels which asset's Pay/Receive flow is armed so a user who
             switched assets doesn't get silently stuck on the wrong NFC AID (IC `…01` vs SOL `…02`). */}
         <View testID="active-rail-chip" style={S.activeRailChip}>
+          {/* P1 — family-hue dot; a View so the chip's e2e EXACT textContent match ('DEMO'/'BTC'/'SOL')
+              is untouched. DEMO's family color IS C.brand, hence the pre-reconcile fallback. */}
+          <View style={[S.activeRailChipDot, {backgroundColor: selectedAsset ? glyphFor(selectedAsset).color : C.brand}]} />
           <Text style={S.activeRailChipText}>{activeAssetName}</Text>
         </View>
       </View>

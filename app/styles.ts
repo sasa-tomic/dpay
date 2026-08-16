@@ -36,7 +36,6 @@ export const S = StyleSheet.create({
   header: {paddingTop: 14, paddingLeft: 16, paddingRight: 14, paddingBottom: 9, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', borderBottomWidth: 1, borderBottomColor: C.line},
   headerLeft: {flexDirection: 'row', alignItems: 'flex-start', gap: 4},
   headerSettingsBtn: {width: 40, height: 40, borderRadius: 20, backgroundColor: C.field, alignItems: 'center', justifyContent: 'center'},
-  headerSettingsIcon: {fontSize: 20, fontWeight: '600', color: C.sub},
   brand: {fontSize: 24},
   // Audit P1: a small ACCOUNT eyebrow above the username separates the wordmark "dpay" from the user
   // identity so the pair no longer reads as a single currency label. Mirrors the existing
@@ -183,17 +182,22 @@ export const S = StyleSheet.create({
   // Asset card. The brand-tinted left edge is now ACTIVE-ONLY (transparent/neutral when inactive,
   // brand-colored when the row is the selected currency) so the selected card visibly pops instead of
   // every card carrying an always-on brand edge that drowned out the active cue.
-  assetCard: {marginTop: 12, alignSelf: 'stretch', backgroundColor: C.card, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: C.line2, borderLeftColor: C.line2, borderLeftWidth: 3},
+  assetCard: {marginTop: 12, alignSelf: 'stretch', backgroundColor: C.card, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: C.line2, borderLeftColor: C.line2, borderLeftWidth: 3},
   assetCardActive: {borderLeftColor: C.brand},
   assetRow: {flexDirection: 'row', alignItems: 'center'},
-  assetSelect: {flex: 1, flexDirection: 'row', alignItems: 'baseline'},
+  // assetSelect — the glyph-led row inside a card: the 38px AssetGlyph chip against the text column,
+  // vertically CENTERED (the former baseline alignment matched text-to-text; a monogram chip reads
+  // correctly centered against the two-line column).
+  assetSelect: {flex: 1, flexDirection: 'row', alignItems: 'center'},
   assetSelectBlock: {flex: 1},
-  assetLabel: {flex: 1, marginLeft: 8, fontSize: 16, fontWeight: '700', color: C.ink},
-  assetAmt: {fontSize: 16, fontWeight: '700', color: C.brand, fontFamily: 'monospace'},
-  assetSub: {fontSize: 12, color: C.sub2, marginTop: 6},
+  // assetTitleRow — the name + trailing amount/check line at the top of a card row's text column.
+  // The label's flex:1 pushes the mono amount to the right edge; the check trails the amount.
+  assetTitleRow: {flexDirection: 'row', alignItems: 'center'},
+  assetLabel: {flex: 1, fontSize: 16, fontWeight: '700', color: C.ink},
+  assetAmt: {fontSize: 16, fontWeight: '700', color: C.brand, fontFamily: 'monospace', marginLeft: 10},
+  assetSub: {fontSize: 12, color: C.sub2, marginTop: 4},
   assetActions: {flexDirection: 'row', alignItems: 'center', gap: 8, marginLeft: 10},
   assetActionBtn: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: C.line2, minHeight: 44},
-  assetActionPlus: {fontSize: 19, fontWeight: '700', color: C.brand, lineHeight: 20, marginTop: -2},
   assetActionText: {color: C.sub, fontWeight: '700', fontSize: 13},
   assetsSectionTitle: {fontSize: 12, fontWeight: '700', color: C.sub2, textTransform: 'uppercase', letterSpacing: 1.2, marginTop: 22, marginBottom: 2, fontFamily: 'monospace'},
   assetCardZero: {color: C.sub2},
@@ -283,14 +287,16 @@ export const S = StyleSheet.create({
   pickBackdrop: {flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 28},
   pickCard: {alignSelf: 'stretch', backgroundColor: C.panel, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: C.line2},
   pickTitle: {fontSize: 13, fontWeight: '700', color: C.sub2, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 8, fontFamily: 'monospace'},
-  pickItem: {flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: C.line2},
-  pickGlyph: {fontSize: 22, fontWeight: '700', color: C.ink, width: 40},
+  pickItem: {flexDirection: 'row', alignItems: 'center', paddingVertical: 10, minHeight: 44, borderBottomWidth: 1, borderBottomColor: C.line2},
   pickName: {flex: 1, fontSize: 16, fontWeight: '700', color: C.ink},
-  pickCheck: {color: C.brand, fontSize: 18, fontWeight: '700'},
-  // pickTextCol — the name+subtitle column inside a plain-variant CurrencyRow (the Receive picker).
-  // Takes flex:1 so the trailing ✓ check pushes to the row's right edge; marginLeft matches assetLabel
-  // (8) so the name-to-dot gap is identical in both variants (unified visual language, Issue 3).
-  pickTextCol: {flex: 1, marginLeft: 8},
+  // pickCheck — the trailing active-check WRAPPER (the '✓' Text became IconCheck in the 2026-08-16
+  // overhaul); the margin keeps the icon clear of the amount/label it trails in either variant.
+  pickCheck: {marginLeft: 8},
+  // pickTextCol — the name+subtitle column right of the AssetGlyph chip, shared by BOTH CurrencyRow
+  // variants (the card's title-row/sub stack and the plain picker row). Takes flex:1 so the trailing
+  // check pushes to the row's right edge; the 10px marginLeft is the chip-to-text gap in both
+  // variants (unified visual language, Issue 3).
+  pickTextCol: {flex: 1, marginLeft: 10},
   // pickSubtitle — the chain-label line below the name in a plain-variant row. Same typography as
   // assetSub (the card variant's subtitle) for visual parity; a slightly tighter marginTop (3 vs 6)
   // suits the picker's denser row rhythm.
@@ -354,5 +360,8 @@ export const S = StyleSheet.create({
   // switched to SOL in the Balances sheet doesn't get silently stuck in SOL mode (the IC ↔ SOL NFC
   // AIDs differ; the chip makes the current rail legible at a glance). Reuses `filterChip` chrome.
   activeRailChip: {flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 5, paddingHorizontal: 11, borderRadius: 999, borderWidth: 1, borderColor: C.brand, backgroundColor: 'rgba(62,224,172,0.08)', marginLeft: 'auto', alignSelf: 'center'},
+  // P1 — 12px family-hue dot leading the chip (glyphFor color, set inline in Wallet). A View, so the
+  // chip's e2e EXACT textContent match reads only the symbol text.
+  activeRailChipDot: {width: 12, height: 12, borderRadius: 6},
   activeRailChipText: {fontSize: 11, fontWeight: '800', color: C.brand, letterSpacing: 0.8, fontFamily: 'monospace'},
 });

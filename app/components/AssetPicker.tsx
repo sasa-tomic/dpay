@@ -62,8 +62,7 @@ export function AssetPicker({open, assets, selectedId, balances, onSelect, onClo
               <CurrencyRow
                 key={asset.testKey}
                 testId={testId}
-                name={asset.symbol}
-                subtitle={asset.networkLabel}
+                asset={asset}
                 amount={showAmount ? view?.displayText : undefined}
                 active={asset.id === selectedId}
                 zero={view ? view.status !== 'ok' : undefined}

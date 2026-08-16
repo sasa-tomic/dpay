@@ -108,15 +108,38 @@ describe('AssetPicker', () => {
         />,
       );
     });
-    // CurrencyRow's `active` prop drives the ✓ check. Assert it's threaded correctly: SOL active,
-    // the other three not. We find each CurrencyRow by its testID and read the `active` prop the
-    // picker passes to it.
+    // CurrencyRow's `active` prop drives the trailing check. Assert it's threaded correctly: SOL
+    // active, the other three not. We find each CurrencyRow by its testID and read the `active`
+    // prop the picker passes to it.
     const solRow = tree.root.find(node => node.props && node.props.testId === 'req-pick-sol');
     expect(solRow.props.active).toBe(true);
     const demoRow = tree.root.find(node => node.props && node.props.testId === 'req-pick-demo');
     expect(demoRow.props.active).toBe(false);
     const usdcRow = tree.root.find(node => node.props && node.props.testId === 'req-pick-sol-usdc');
     expect(usdcRow.props.active).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
+  test('threads each SelectableAsset into its row (the AssetGlyph monogram + name/subtitle source)', () => {
+    // 2026-08-16 overhaul: rows lead with the family-hued AssetGlyph chip and derive name/subtitle
+    // from the asset itself — the picker must pass the FULL asset object per row (a dropped thread
+    // would render a glyph-less, name-less row on every selector surface).
+    let tree!: renderer.ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(
+        <AssetPicker
+          open={true}
+          assets={ASSETS}
+          selectedId={'ic:0'}
+          onSelect={() => {}}
+          onClose={() => {}}
+        />,
+      );
+    });
+    for (const asset of ASSETS) {
+      const row = tree.root.find(node => node.props && node.props.testId === `req-pick-${asset.testKey}`);
+      expect(row.props.asset).toBe(asset);
+    }
     act(() => { tree.unmount(); });
   });
 

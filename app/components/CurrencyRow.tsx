@@ -1,43 +1,51 @@
 import {View, Text, Pressable} from 'react-native';
 import {C} from '../config/palette';
 import {S} from '../styles';
+import {AssetGlyph} from './AssetGlyph';
+import {IconCheck} from './icons';
+import type {SelectableAsset} from '../config/assets';
 
 // Shared currency row — the single presentational component consumed by BOTH the BalancesSheet
-// (variant='card') and the ReceiveMode CurrencyPicker (variant='plain'). Closes founder issues #2
-// (unify IC + SOL in one list) + #3 (two selectors must look/work the same): one component, one
-// active indicator (brand dot + trailing ✓ check), one subtitle logic.
+// (variant='card') and the ReceiveMode CurrencyPicker via AssetPicker (variant='plain'). Closes
+// founder issues #2 (unify IC + SOL in one list) + #3 (two selectors must look/work the same):
+// one component, one active indicator (trailing IconCheck), one subtitle logic.
 //
 // testID contract (preserves the e2e net byte-for-byte):
 //   • variant='card': renders <View testID={testId}>…<Pressable testID={`${testId}-select`}>…</Pressable>…</View>
 //     → matches the existing `asset-<key>` (container) + `asset-<key>-select` (inner Pressable) pattern.
 //   • variant='plain': renders <Pressable testID={testId}>…</Pressable> → matches `req-pick-<key>`.
 //
-// Active indicator (UNIFIED across both variants): the `dot` turns C.brand when active AND a `✓`
-// check renders at the row's trailing edge. The card variant KEEPS its brand left-edge
-// (assetCardActive) as a card-level affordance — the dot+check is the primary shared cue.
+// Lead visual (2026-08-16 overhaul): every row leads with the family-hued AssetGlyph monogram
+// chip — the plain dot marker (card) and the raw symbol text (plain) are gone. The name/subtitle
+// derive from the `asset` itself (ONE source of truth — callers no longer re-pass symbol/networkLabel).
+//
+// Active indicator (UNIFIED across both variants): a trailing IconCheck in brand mint. The card
+// variant KEEPS its brand left-edge (assetCardActive) as a card-level affordance — the check is
+// the primary shared cue.
 export type CurrencyRowProps = {
   testId: string;                  // base testID — 'asset-ckbtc' (card) | 'req-pick-ckbtc' (plain)
-  name: string;                    // 'BTC' | 'USDC' | 'SOL' | 'DEMO'
-  subtitle?: string;               // chain label / curated description
+  asset: SelectableAsset;          // the row's asset — drives the glyph chip + name/subtitle
   amount?: string;                 // '0.00050000 BTC' (card); omit in plain (the picker is a selector)
-  active: boolean;                 // selects dot color + check mark + (card) left-edge
+  active: boolean;                 // selects the trailing check + (card) left-edge
   onPress: () => void;
   accessibilityLabel: string;
   accessibilityHint?: string;
   variant: 'card' | 'plain';       // card = Balances assetCard chrome; plain = picker pickItem
-  showCheck?: boolean;             // render ✓ when active (default true in BOTH → unified indicator)
+  showCheck?: boolean;             // render the check when active (default true in BOTH → unified indicator)
   zero?: boolean;                  // dim the amount (unfunded asset → assetCardZero); card variant only
   actions?: React.ReactNode;       // DEMO faucet button slot (card variant only)
   children?: React.ReactNode;      // extra nodes below the subtitle (topUpErr line; card variant only)
 };
 
-export function CurrencyRow({testId, name, subtitle, amount, active, onPress, accessibilityLabel, accessibilityHint, variant, showCheck = true, zero, actions, children}: CurrencyRowProps) {
-  const check = active && showCheck ? <Text style={S.pickCheck}>✓</Text> : null;
-  const dot = <View style={[S.dot, {backgroundColor: active ? C.brand : C.line}]} />;
+export function CurrencyRow({testId, asset, amount, active, onPress, accessibilityLabel, accessibilityHint, variant, showCheck = true, zero, actions, children}: CurrencyRowProps) {
+  const check = active && showCheck ? (
+    <View style={S.pickCheck}><IconCheck size={18} color={C.brand} /></View>
+  ) : null;
 
   if (variant === 'plain') {
-    // Plain variant (the Receive picker): a bare Pressable (no card chrome) — dot + name/subtitle
-    // column + trailing ✓. The amount is OMITTED (the picker is a selector, not a balance list).
+    // Plain variant (the Receive picker): a bare Pressable (no card chrome) — glyph chip +
+    // name/subtitle column + trailing check. The amount is OMITTED (the picker is a selector,
+    // not a balance list).
     return (
       <Pressable
         testID={testId}
@@ -48,10 +56,10 @@ export function CurrencyRow({testId, name, subtitle, amount, active, onPress, ac
         accessibilityHint={accessibilityHint}
         accessibilityState={{disabled: false}}
       >
-        {dot}
+        <AssetGlyph asset={asset} />
         <View style={S.pickTextCol}>
-          <Text style={S.pickName}>{name}</Text>
-          {subtitle ? <Text style={S.pickSubtitle}>{subtitle}</Text> : null}
+          <Text style={S.pickName}>{asset.symbol}</Text>
+          <Text style={S.pickSubtitle}>{asset.networkLabel}</Text>
         </View>
         {check}
       </Pressable>
@@ -61,9 +69,12 @@ export function CurrencyRow({testId, name, subtitle, amount, active, onPress, ac
   // Card variant (BalancesSheet): the WHOLE row block is the select hit target (founder fix
   // 2026-08-14 — "click ANYWHERE on the row to select"; was only the tight inner row, so
   // subtitle/padding taps fell through). The select Pressable (testID `asset-<key>-select`,
-  // flex:1) stacks the row content + full subtitle + children; the DEMO faucet `actions` stay a
+  // flex:1) stacks the glyph-led row content + children; the DEMO faucet `actions` stay a
   // row SIBLING (never nested — RN-web renders Pressables as <button>, and a button cannot
   // contain a button), so the faucet keeps its own taps and everything else selects.
+  // Inside the row, the text column (pickTextCol — shared with the plain variant) stacks the
+  // title line (name + right-aligned mono amount + trailing check) over the subtitle + children,
+  // so the sub/annotations align under the NAME, not under the glyph chip.
   return (
     <View testID={testId} style={[S.assetCard, active && S.assetCardActive]}>
       <View style={S.assetRow}>
@@ -77,13 +88,17 @@ export function CurrencyRow({testId, name, subtitle, amount, active, onPress, ac
           accessibilityState={{disabled: false}}
         >
           <View style={S.assetSelect}>
-            {dot}
-            <Text style={S.assetLabel}>{name}</Text>
-            {amount != null ? <Text style={[S.assetAmt, zero && S.assetCardZero]}>{amount}</Text> : null}
-            {check}
+            <AssetGlyph asset={asset} />
+            <View style={S.pickTextCol}>
+              <View style={S.assetTitleRow}>
+                <Text style={S.assetLabel}>{asset.symbol}</Text>
+                {amount != null ? <Text style={[S.assetAmt, zero && S.assetCardZero]}>{amount}</Text> : null}
+                {check}
+              </View>
+              <Text style={S.assetSub}>{asset.networkLabel}</Text>
+              {children}
+            </View>
           </View>
-          {subtitle ? <Text style={S.assetSub}>{subtitle}</Text> : null}
-          {children}
         </Pressable>
         {actions ? <View style={S.assetActions}>{actions}</View> : null}
       </View>

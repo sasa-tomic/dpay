@@ -5,6 +5,7 @@ import {useEscapeToClose} from '../hooks/useHotkeys';
 import {SheetOverlay} from './SheetOverlay';
 import {CurrencyRow} from './CurrencyRow';
 import {HotkeyHint} from './HotkeyHint';
+import {IconClose, IconPlus} from './icons';
 import {type SelectableAsset} from '../config/assets';
 import {type BalanceView} from '../lib/assetBalances';
 import type {AssetId} from '../lib/types';
@@ -60,7 +61,7 @@ export function BalancesSheet({assets, balances, selectedId, onSelect, hasTestne
             accessibilityRole="button"
             accessibilityLabel="Close balances"
           >
-            <Text style={S.sheetCloseX}>✕</Text>
+            <IconClose size={18} color={C.sub} />
           </Pressable>
         </View>
         <ScrollView contentContainerStyle={S.sheetCenter} keyboardShouldPersistTaps="handled">
@@ -88,7 +89,7 @@ export function BalancesSheet({assets, balances, selectedId, onSelect, hasTestne
               >
                 {topUpBusy
                   ? <ActivityIndicator size="small" color={C.brand} />
-                  : <><Text style={S.assetActionPlus}>+</Text><Text style={S.assetActionText}>Demo funds</Text><HotkeyHint k="T" /></>}
+                  : <><IconPlus size={16} color={C.brand} /><Text style={S.assetActionText}>Demo funds</Text><HotkeyHint k="T" /></>}
               </Pressable>
             ) : null;
             // The DEMO row's topUpErr line — rendered below the subtitle via `children`.
@@ -106,8 +107,7 @@ export function BalancesSheet({assets, balances, selectedId, onSelect, hasTestne
               <CurrencyRow
                 key={asset.testKey}
                 testId={`asset-${asset.testKey}`}
-                name={asset.symbol}
-                subtitle={asset.networkLabel}
+                asset={asset}
                 amount={view?.displayText}
                 active={asset.id === selectedId}
                 zero={view ? view.status !== 'ok' : true}
