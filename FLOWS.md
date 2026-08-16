@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **76 flows**
-> (75 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **79 flows**
+> (78 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay (FakeLedger, offline). No UI stubs. The only shimmed I/O boundary is
 > the camera scan (sanctioned smallest-boundary seam) and the NFC radio (physical-device gate).
@@ -20,7 +20,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (7) · pay (20) · offline (7) · deposit (8) · withdraw (7) · nfc (5) · system (17) · tour (4)
+wire (1) · onboard (7) · pay (20) · offline (7) · deposit (8) · withdraw (7) · nfc (5) · system (20) · tour (4)
 
 ---
 
@@ -135,6 +135,9 @@ wire (1) · onboard (7) · pay (20) · offline (7) · deposit (8) · withdraw (7
 | 72 | sol-usdc-send | Solana USDC "Send to address": fail-closed device-ATA gate → one-tap create (busy → form appears) and the create-failure leg (err shown, sheet stays usable). | sol-usdc-send, spl-transfer, fail-closed-ata, asset-aware-send, ata-create-one-tap |
 | 75 | seam-fail-loud | Every injection seam (scan/NFC/SOL-NFC) throws when no listener is mounted — regression guard against silent-drop bugs. | seam-integrity, fail-loud, regression-guard |
 | 76 | sol-usdc-ata-gate | USDC receive gate: absent→setup card + Request blocked; insufficient→disabled; funded→one-tap create flips to the address QR; balance→direct address. | sol-usdc, ata-gate, tri-state, ata-setup-card, request-block, ata-create |
+| 79 | sol-fund-first-pay | SOL Pay tab: known-zero → fund panel replaces scanner+NFC, 1-tap to deposit QR, auto-release on funding, fail-open on unknown. | sol-fund-first, pay-gate, nfc-disarm, fail-open, zero-funds |
+| 80 | sol-fund-funnel | SOL zero→pay journey: absent-ATA setup card with fund hatch (no dead-end copy), 1-tap to SOL address, funded unlock, one-tap create, badge truth. | sol-fund-funnel, ata-setup, needs-setup-badge, escape-hatch, zero-funds |
+| 81 | ic-fund-first-pay | the IC Pay tab shows the fund-first panel on a KNOWN-zero non-DEMO asset (online), routes to the deposit address in one tap, fails open offline, and gates the send sub-mode identically | ic-fund-first, pay-gate, fail-open, zero-funds, send-gate |
 
 ### Visual capture (UX tour)
 

@@ -1,12 +1,15 @@
 import {useState} from 'react';
 import {View, Text, Pressable, Share} from 'react-native';
 import {QrCode} from './QrCode';
+import {FundFirstPanel} from './FundFirstPanel';
+import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
 import {S} from '../styles';
 import {QR_SIZE} from '../config/constants';
-import {fmtAsset} from '../lib/format';
+import type {SolPayGate} from '../config/assets';
 import type {Identity} from '../lib/types';
+import {fmtAsset} from '../lib/format';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
-import {USDC_DECIMALS} from '../solana/spl';
+import {USDC_DECIMALS, SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
 import {decodeSolReq, encodeSolPay} from '../solana/qr';
 import type {SolReqV2} from '../solana/qr';
 import {isSolReqV2Expired} from '../solana/payments';
@@ -35,7 +38,7 @@ import {useReportLock} from '../hooks/useReportLock';
  * NFC arming: this component mounts only while the SOL rail is selected. Switching the rail unmounts
  * it, whose `useNfcTapState` cleanup disarms the HCE card — no arm-leak.
  */
-export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAtaAbsent, selectedToken, onSent, onSentUsdc, ataSetupBusy = false, ataSetupErr = null, onCreateAta, subMode, onSubModeChange, onLockChange}: {identity: Identity; nfcReady: boolean; solBalance: string; usdcBalance: string; usdcAtaAbsent: boolean; selectedToken: 'SOL' | 'USDC'; onSent: () => void; onSentUsdc: () => void; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; onLockChange?: (locked: boolean) => void}) {
+export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAtaAbsent, payGate = 'none', solZero = false, solChecking = false, selectedToken, onSent, onSentUsdc, onShowSolAddress, onShowUsdcAddress, onRecheckBalances, recheckBusy = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, subMode, onSubModeChange, onLockChange}: {identity: Identity; nfcReady: boolean; solBalance: string; usdcBalance: string; usdcAtaAbsent: boolean; payGate?: SolPayGate; solZero?: boolean; solChecking?: boolean; selectedToken: 'SOL' | 'USDC'; onSent: () => void; onSentUsdc: () => void; onShowSolAddress: () => void; onShowUsdcAddress: () => void; onRecheckBalances: () => void; recheckBusy?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; onLockChange?: (locked: boolean) => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid'>('scan');
   const [req, setReq] = useState<SolReqV2 | null>(null);
   const [solpayUri, setSolpayUri] = useState<string | null>(null);
@@ -68,6 +71,31 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
   if (subMode === 'send') {
     const sendBalance = selectedToken === 'SOL' ? solBalance : usdcBalance;
     const sendOnSent = selectedToken === 'SOL' ? onSent : onSentUsdc;
+    // Zero-funds gate (2026-08-16): the send form is replaced by the fund-first panel while the
+    // active token is KNOWN unfunded — no amount entry against a zero balance. Same panel, same
+    // copy family as the scan branch (only "…to send" instead of "…to pay"), per the spec.
+    if (payGate !== 'none' && payGate !== 'usdc-absent') {
+      const isSol = payGate === 'sol-zero';
+      return (
+        <View style={S.center}>
+          {toggle}
+          <FundFirstPanel
+            testID="sol-send-fund"
+            title={isSol ? 'Add SOL to send' : 'Add USDC to send'}
+            body={isSol
+              ? 'This wallet has no SOL yet. Send SOL to your address and you can send right away.'
+              : 'Send USDC (Solana) to your USDC address. Keep a little SOL in the wallet for network fees.'}
+            primaryLabel={isSol ? 'Show my SOL address' : 'Show my USDC address'}
+            onPrimary={isSol ? onShowSolAddress : onShowUsdcAddress}
+            secondaryLabel={!isSol && solZero ? 'Show my SOL address' : undefined}
+            onSecondary={!isSol && solZero ? onShowSolAddress : undefined}
+            onRecheck={onRecheckBalances}
+            recheckBusy={recheckBusy}
+          />
+          {err ? <Text testID="sol-pay-err" style={S.err}>{err}</Text> : null}
+        </View>
+      );
+    }
     return (
       <View style={S.center}>
         {toggle}
@@ -77,9 +105,11 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
           balance={sendBalance}
           usdcAtaAbsent={usdcAtaAbsent}
           solBalance={solBalance}
+          solChecking={solChecking}
           ataSetupBusy={ataSetupBusy}
           ataSetupErr={ataSetupErr}
           onCreateAta={onCreateAta}
+          onShowSolAddress={onShowSolAddress}
           onSent={sendOnSent}
           onClose={() => onSubModeChange('scan')}
         />
@@ -138,6 +168,55 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
   const unit = req?.cur === 'USDC' ? 'USDC' : SOL_UNIT;
 
   if (phase === 'scan') {
+    // Zero-funds gate (2026-08-16 UX): when the active asset is KNOWN unfunded the scanner is
+    // replaced by the fund-first panel. NFC does NOT arm while gated — a tap is auto-sign consent,
+    // and a zero balance would sign a payment the merchant can never settle (doomed signature).
+    // loading/error/unavailable NEVER reach here (the Wallet's gate fails OPEN to the scanner —
+    // offline-first rule; the honest backstop is the same review/RPC failure as before).
+    if (payGate === 'sol-zero' || payGate === 'usdc-zero') {
+      const isSol = payGate === 'sol-zero';
+      return (
+        <View style={S.center}>
+          {toggle}
+          <FundFirstPanel
+            testID="sol-pay-fund"
+            title={isSol ? 'Add SOL to pay' : 'Add USDC to pay'}
+            body={isSol
+              ? 'This wallet has no SOL yet. Send SOL to your address and you can pay right away.'
+              : 'Send USDC (Solana) to your USDC address. Keep a little SOL in the wallet for network fees.'}
+            primaryLabel={isSol ? 'Show my SOL address' : 'Show my USDC address'}
+            onPrimary={isSol ? onShowSolAddress : onShowUsdcAddress}
+            secondaryLabel={!isSol && solZero ? 'Show my SOL address' : undefined}
+            onSecondary={!isSol && solZero ? onShowSolAddress : undefined}
+            onRecheck={onRecheckBalances}
+            recheckBusy={recheckBusy}
+          />
+          {err ? <Text testID="sol-pay-err" style={S.err}>{err}</Text> : null}
+        </View>
+      );
+    }
+    if (payGate === 'usdc-absent') {
+      // USDC-selected + ATA KNOWN absent: the one-tap setup card (with the fund-SOL secondary when
+      // SOL is also zero) replaces the scanner. Setup first, then pay — never a doomed SPL sign.
+      const hasSol = BigInt(solBalance) >= SOL_ATA_SETUP_MIN_LAMPORTS;
+      return (
+        <View style={S.center}>
+          {toggle}
+          <SolanaAtaSetupCard
+            instrTestID="sol-pay-ata-instructions"
+            btnTestID="btn-sol-pay-ata-create"
+            buttonLabel="Create my USDC account"
+            hasSol={hasSol}
+            checkingSol={solChecking}
+            busy={ataSetupBusy}
+            err={ataSetupErr}
+            onCreateAta={onCreateAta}
+            onShowSolAddress={onShowSolAddress}
+          />
+          {err ? <Text testID="sol-pay-err" style={S.err}>{err}</Text> : null}
+        </View>
+      );
+    }
     return (
       <View style={S.center}>
         {toggle}

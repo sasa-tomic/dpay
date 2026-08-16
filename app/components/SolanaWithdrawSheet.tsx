@@ -36,7 +36,7 @@ import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
  * (`sol-send-*`) — "send" applies to both SOL and SPL. The review-amount text carries the unit
  * (USDC vs SOL) so e2e can distinguish them.
  */
-export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, solBalance = null, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onSent, onClose}: {identity: Identity; token: 'SOL' | 'USDC'; balance: string; usdcAtaAbsent?: boolean; solBalance?: string | null; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onSent: () => void; onClose: () => void}) {
+export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, solBalance = null, solChecking = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, onSent, onClose}: {identity: Identity; token: 'SOL' | 'USDC'; balance: string; usdcAtaAbsent?: boolean; solBalance?: string | null; solChecking?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; onSent: () => void; onClose: () => void}) {
   const [address, setAddress] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
@@ -95,6 +95,7 @@ export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, so
   // unavailable states let the form through (the send itself fails honestly if the ATA is missing).
   if (isUsdc && usdcAtaAbsent) {
     const hasSol = solBalance != null && BigInt(solBalance) >= SOL_ATA_SETUP_MIN_LAMPORTS;
+    const checkingSol = solBalance == null;
     return (
       <View style={S.sheetBody}>
         <SolanaAtaSetupCard
@@ -102,9 +103,11 @@ export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, so
           btnTestID="btn-sol-send-ata-create"
           buttonLabel="Create my USDC account"
           hasSol={hasSol}
+          checkingSol={checkingSol}
           busy={ataSetupBusy}
           err={ataSetupErr}
           onCreateAta={onCreateAta}
+          onShowSolAddress={onShowSolAddress}
         />
         <Pressable testID="btn-sol-send-done" style={[S.primaryWide, S.depositCopy]} onPress={onClose} accessibilityRole="button" accessibilityLabel="Back to scan"><Text style={S.primaryText}>Back to scan</Text></Pressable>
       </View>
@@ -162,6 +165,10 @@ export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, so
 
           {overBalance ? <Text style={S.warnNote}>{`More than your available ${fmtAsset(balance, decimals, unit)}.`}</Text> : null}
           {badAddr ? <Text testID="sol-send-bad-addr" style={S.warnNote}>That doesn't look like a valid Solana address.</Text> : null}
+          {/* Known-zero SOL while sending USDC (2026-08-16 UX review finding 13): fees + a possible
+              recipient-ATA creation are paid in SOL — say so BEFORE the user types an amount, so
+              a funded-USDC/zero-SOL wallet learns the real constraint up front (honest, no block). */}
+          {isUsdc && !solChecking && solBalance === '0' ? <Text testID="sol-send-needs-sol" style={S.warnNote}>Sending USDC needs a little SOL in the wallet for network fees — add some first.</Text> : null}
 
           {(phase === 'form' || phase === 'error') && raw !== '0' ? (
             <View testID="sol-send-review" style={S.reviewCard}>

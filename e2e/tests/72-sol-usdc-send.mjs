@@ -56,8 +56,8 @@ export async function run() {
     // starts false (the fail-closed gate below); the sendTransaction wrapper models
     // createUsdcAta's broadcast — it holds the busy window open long enough to observe
     // `sol-ata-busy`, can be told to fail (the error leg), and flips the ATA to existing on
-    // success (what the real chain does). The post-create USDC poll then reads a known-zero
-    // token balance → status 'balance' → `usdcAtaAbsent` false → the form appears.
+    // success (what the real chain does). The post-create USDC poll reads a funded token
+    // balance → status 'balance' → `usdcAtaAbsent` false → the form appears.
     await driver.eval(() => {
       const st = {ataExists: false, createDelayMs: 2500, failCreate: false};
       globalThis.__DPAY_TEST_ATA_STATE = st;
@@ -76,7 +76,13 @@ export async function run() {
           ? {value: {data: ['', 'base64'], owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', lamports: 2039280}}
           : {value: null}),
         getBalance: () => ({value: 5000000000}),
-        getTokenAccountBalance: () => ({value: {amount: '0', decimals: 6, uiAmount: 0, uiAmountString: '0'}}),
+        // Post-create the wallet HOLDS USDC (2.5) — the 2026-08-16 fund-first gate ('usdc-zero')
+        // correctly replaces the send form while the token balance is a KNOWN zero, so the send
+        // exercises here need a funded account for the form to appear (you cannot send USDC you
+        // don't hold — that gate is flow 79's subject, not this one's).
+        getTokenAccountBalance: () => (st.ataExists
+          ? {value: {amount: '2500000', decimals: 6, uiAmount: 2.5, uiAmountString: '2.5'}}
+          : {value: {amount: '0', decimals: 6, uiAmount: 0, uiAmountString: '0'}}),
       };
     });
 

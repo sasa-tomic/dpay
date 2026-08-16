@@ -135,3 +135,43 @@ describe('SolanaReceiveSheet — USDC tri-state gate', () => {
     act(() => { tree.unmount(); });
   });
 });
+
+describe('SolanaReceiveSheet — fund-first resume link + waiting cue (2026-08-16)', () => {
+  test('returnLabel + onReturn render btn-sol-receive-return; pressing fires onReturn (label iff props)', () => {
+    let returned = 0;
+    const tree = mount({token: 'SOL', ataStatus: 'ready', returnLabel: 'Back to paying USDC', onReturn: () => { returned += 1; }});
+    expect(has(tree, 'btn-sol-receive-return')).toBe(true);
+    pressByTestID(tree, 'btn-sol-receive-return');
+    expect(returned).toBe(1);
+    act(() => { tree.unmount(); });
+  });
+
+  test('no returnLabel → NO resume link (label is the only trigger)', () => {
+    const tree = mount({token: 'SOL', ataStatus: 'ready', onReturn: () => {}});
+    expect(has(tree, 'btn-sol-receive-return')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
+  test('no onReturn → NO resume link even with a label (never a dead button)', () => {
+    const tree = mount({token: 'SOL', ataStatus: 'ready', returnLabel: 'Back to paying USDC'});
+    expect(has(tree, 'btn-sol-receive-return')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
+  test('tokenZero (KNOWN zero) → the waiting cue + Check now fires onRetryAta', () => {
+    let checks = 0;
+    const tree = mount({token: 'SOL', ataStatus: 'ready', tokenZero: true, onRetryAta: () => { checks += 1; }});
+    expect(has(tree, 'sol-receive-waiting')).toBe(true);
+    expect(has(tree, 'btn-sol-receive-check')).toBe(true);
+    pressByTestID(tree, 'btn-sol-receive-check');
+    expect(checks).toBe(1);
+    act(() => { tree.unmount(); });
+  });
+
+  test('tokenZero=false (funded or unconfirmed) → NO waiting cue (known-zero only)', () => {
+    const tree = mount({token: 'SOL', ataStatus: 'ready', tokenZero: false, onRetryAta: () => {}});
+    expect(has(tree, 'sol-receive-waiting')).toBe(false);
+    expect(has(tree, 'btn-sol-receive-check')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+});

@@ -339,6 +339,9 @@ export const S = StyleSheet.create({
   // to a devnet address loses it. The badge is subtle but unmissable on the screens that handle money
   // (Pay/Receive). Mirrors the `badgeOk` pill language (rounded, tinted wash) but warn-colored.
   devnetBadge: {flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4, marginBottom: 10, paddingVertical: 5, paddingHorizontal: 12, borderRadius: 999, alignSelf: 'center', backgroundColor: 'rgba(240,196,106,0.12)', borderWidth: 1, borderColor: 'rgba(240,196,106,0.35)'},
+  // 'Needs setup' pill on the Balances USDC (Solana) row — mirrors devnetBadge metrics but sits
+  // left-aligned under the subtitle (a row annotation, not a centered banner).
+  assetBadge: {alignSelf: 'flex-start', marginTop: 6, paddingVertical: 3, paddingHorizontal: 10, borderRadius: 999, backgroundColor: 'rgba(240,196,106,0.12)', borderWidth: 1, borderColor: 'rgba(240,196,106,0.35)', fontSize: 11, fontWeight: '800', color: C.warn, letterSpacing: 1.1, textTransform: 'uppercase', fontFamily: 'monospace', overflow: 'hidden'},
   devnetBadgeDot: {width: 7, height: 7, borderRadius: 4, backgroundColor: C.warn},
   devnetBadgeText: {fontSize: 11, fontWeight: '800', color: C.warn, letterSpacing: 1.1, textTransform: 'uppercase', fontFamily: 'monospace'},
   // Active-rail chip near the tabs — labels which asset's Pay/Receive flow is armed so a user who

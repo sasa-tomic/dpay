@@ -36,8 +36,12 @@ export function SolanaReceiveSheet({
   ataSetupBusy = false,
   ataSetupErr = null,
   solBalance = null,
+  tokenZero = false,
   onCreateAta,
+  onShowSolAddress,
   onRetryAta,
+  returnLabel,
+  onReturn,
   onClose,
 }: {
   address: string;
@@ -46,8 +50,12 @@ export function SolanaReceiveSheet({
   ataSetupBusy?: boolean;
   ataSetupErr?: string | null;
   solBalance?: string | null;
+  tokenZero?: boolean;
   onCreateAta?: () => void;
+  onShowSolAddress?: () => void;
   onRetryAta?: () => void;
+  returnLabel?: string | null;
+  onReturn?: () => void;
   onClose: () => void;
 }) {
   const {copied, copy: doCopy} = useCopyFeedback();
@@ -57,6 +65,9 @@ export function SolanaReceiveSheet({
   const isUsdc = token === 'USDC';
   const status = isUsdc ? ataStatus : 'ready';
   const hasSol = solBalance != null && BigInt(solBalance) >= SOL_ATA_SETUP_MIN_LAMPORTS;
+  // SOL balance unconfirmed (loading/unavailable): the setup card says "checking", never claims
+  // insufficiency on an unknown state (2026-08-16 UX review finding 9).
+  const checkingSol = solBalance == null;
 
   // USDC readiness gate — see the doc comment. SOL always renders the address.
   if (status !== 'ready') {
@@ -68,9 +79,11 @@ export function SolanaReceiveSheet({
             btnTestID="btn-sol-ata-create"
             buttonLabel="Create USDC account"
             hasSol={hasSol}
+            checkingSol={checkingSol}
             busy={ataSetupBusy}
             err={ataSetupErr}
             onCreateAta={onCreateAta}
+            onShowSolAddress={onShowSolAddress}
           />
         ) : status === 'checking' ? (
           <>
@@ -129,6 +142,30 @@ export function SolanaReceiveSheet({
 
       <Text testID="sol-receive-address" style={S.sheetAddr} selectable={true}>{address}</Text>
 
+      {/* Zero-funds waiting cue (2026-08-16 UX): when the balance is a KNOWN zero, the user is
+          actively funding — say so honestly (the 2.5s poll IS the watcher) instead of the generic
+          "updates automatically" line. Flips to the deposit-received confirmation as soon as the
+          poll sees a positive balance. Known-zero only: loading/error/unavailable keep the generic
+          line (never claim "waiting" on an unconfirmed state). */}
+      {tokenZero ? (
+        <>
+          <Text testID="sol-receive-waiting" style={S.dim2}>Waiting for your deposit · checks every few seconds</Text>
+          {onRetryAta ? (
+            <Pressable
+              testID="btn-sol-receive-check"
+              style={S.linkBtn}
+              onPress={onRetryAta}
+              accessibilityRole="button"
+              accessibilityLabel="Check now"
+              accessibilityHint="Re-check your balance right now">
+              <Text style={S.linkText}>Check now</Text>
+            </Pressable>
+          ) : null}
+        </>
+      ) : (
+        <Text style={S.dim2}>Your balance updates automatically once the send confirms.</Text>
+      )}
+
       <Pressable
         testID="btn-sol-receive-copy"
         accessibilityRole="button"
@@ -138,7 +175,21 @@ export function SolanaReceiveSheet({
         <Text style={S.primaryText}>{copied === 'clipboard' ? 'Copied ✓' : copied === 'shared' ? 'Shared ✓' : 'Copy address'}</Text>
       </Pressable>
 
-      <Text style={S.dim2}>Your balance updates automatically once the send confirms.</Text>
+      {/* Return-to-pay link (2026-08-16 UX review): when the user landed here from a fund-first
+          prompt for ANOTHER asset (e.g. "Show my SOL address" while paying USDC) and that asset's
+          watched balance has since flipped positive, offer the one-tap way back to the Pay tab —
+          the guided resume of the interrupted funnel (in-place, never a modal). */}
+      {returnLabel && onReturn ? (
+        <Pressable
+          testID="btn-sol-receive-return"
+          style={S.linkBtn}
+          onPress={onReturn}
+          accessibilityRole="button"
+          accessibilityLabel={returnLabel}
+          accessibilityHint="Go back to the Pay tab with this asset selected">
+          <Text style={S.linkText}>{returnLabel}</Text>
+        </Pressable>
+      ) : null}
 
       {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
     </View>

@@ -283,3 +283,28 @@ export function chipLabel(asset: SelectableAsset, all: SelectableAsset[]): strin
   if (!collision) return asset.symbol;
   return `${asset.symbol}·${shortNetworkTag(asset)}`;
 }
+
+// The Solana Pay-tab gate (2026-08-16 zero-funds UX): when the active asset is KNOWN unfunded, the
+// payer should fund the wallet FIRST, not scan a doomed payment. Pure derivation from the
+// useSolanaBalances states — the Wallet computes it, SolPayMode renders it.
+//   'sol-zero'    — SOL selected, RPC confirmed balance === '0' (a KNOWN zero, not loading/missing)
+//   'usdc-absent' — USDC selected, the device's USDC token account (ATA) is KNOWN absent
+//   'usdc-zero'   — USDC selected, ATA exists, RPC confirmed amount === '0'
+//   'none'        — fundable as-is (OR any UNCONFIRMED state: loading / unavailable / error — the
+//                   gate FAILS OPEN to the live scanner per the offline-first rule; error preserves
+//                   the last amount by hook contract, so it is never a confident zero).
+// The NFC card must NOT arm while gated (a tap is auto-sign consent — a zero balance signs a
+// signature the merchant can never settle).
+export type SolPayGate = 'none' | 'sol-zero' | 'usdc-absent' | 'usdc-zero';
+export function solPayGate(
+  selectedToken: 'SOL' | 'USDC',
+  sol: {balance: string | null; status: string},
+  usdc: {amount: string | null; status: string},
+): SolPayGate {
+  if (selectedToken === 'SOL') {
+    return sol.status === 'ok' && sol.balance === '0' ? 'sol-zero' : 'none';
+  }
+  if (usdc.status === 'absent') return 'usdc-absent';
+  if (usdc.status === 'balance' && usdc.amount != null && usdc.amount === '0') return 'usdc-zero';
+  return 'none';
+}

@@ -50,7 +50,9 @@ const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeigh
  * Mirrors ReceiveMode.tsx's form → reqQr → result phase machine, but settles directly on Solana
  * (no relay, no /receipt poll — `confirmTransaction` is the source of truth).
  */
-export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubModeChange, selectedToken, assets, selectedAssetId, balances, onSelectAsset, usdcAtaStatus = 'balance', solBalance = null, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onRefreshUsdc, onLockChange}: {identity: Identity; nfcReady: boolean; solAddress: string; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; selectedToken: 'SOL' | 'USDC'; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; usdcAtaStatus?: SolUsdcStatus; solBalance?: string | null; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onRefreshUsdc?: () => void; onLockChange?: (locked: boolean) => void}) {
+export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubModeChange, selectedToken, assets, selectedAssetId, balances, onSelectAsset, usdcAtaStatus = 'balance', usdcAmount = null, solBalance = null, solOk = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, onRefreshUsdc, onRefreshSol, depositReturnLabel, onReturnFromDeposit, onLockChange}: {identity: Identity; nfcReady: boolean; solAddress: string; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; selectedToken: 'SOL' | 'USDC'; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; usdcAtaStatus?: SolUsdcStatus; usdcAmount?: string | null; solBalance?: string | null; solOk?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; onRefreshUsdc?: () => void; onRefreshSol?: () => void;   depositReturnLabel?: string | null;
+  onReturnFromDeposit?: () => void;
+  onLockChange?: (locked: boolean) => void}) {
   const solRpc = isSolanaRpcAvailable();
   const [amount, setAmount] = useState('');
   const [memo, setMemo] = useState('');
@@ -136,10 +138,14 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
           token={selectedToken}
           ataStatus={ataState}
           solBalance={solBalance}
+          tokenZero={(selectedToken === 'SOL' && solOk && solBalance === '0') || (selectedToken === 'USDC' && usdcAtaStatus === 'balance' && (usdcAmount ?? null) === '0')}
           ataSetupBusy={ataSetupBusy}
           ataSetupErr={ataSetupErr}
           onCreateAta={onCreateAta}
-          onRetryAta={onRefreshUsdc}
+          onShowSolAddress={onShowSolAddress}
+          onRetryAta={selectedToken === 'USDC' ? onRefreshUsdc : onRefreshSol}
+          returnLabel={depositReturnLabel}
+          onReturn={onReturnFromDeposit}
           onClose={() => onSubModeChange('request')}
         />
       </View>
@@ -406,9 +412,11 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
           btnTestID="btn-sol-req-ata-create"
           buttonLabel="Create my USDC account"
           hasSol={solBalance != null && BigInt(solBalance) >= SOL_ATA_SETUP_MIN_LAMPORTS}
+          checkingSol={solBalance == null}
           busy={ataSetupBusy}
           err={ataSetupErr}
           onCreateAta={onCreateAta}
+          onShowSolAddress={onShowSolAddress}
         />
       ) : null}
       {!solRpc ? <Text style={S.warnNote}>Solana is offline — go online to create a payment request.</Text> : null}

@@ -14,7 +14,7 @@
 import { strict as assert } from 'node:assert';
 import { PNG } from 'pngjs';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { setup, onboardWallet, openBalances, stopSession } from '../harness/lib.mjs';
+import { setup, onboardWallet, openBalances } from '../harness/lib.mjs';
 
 const jsqrMod = await import(new URL('../web/vendor/jsQR.js', import.meta.url).href);
 const jsQR = jsqrMod.default;
@@ -77,6 +77,5 @@ export async function run() {
     assert.equal(decodedAddr.trim(), addr, 'sol-receive-qr decode must equal the on-screen address');
   } finally {
     await env.stop();
-    await stopSession();
   }
 }

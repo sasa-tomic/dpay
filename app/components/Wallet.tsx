@@ -8,7 +8,7 @@ import {familyDisplay, isTestnetCurrency} from '../config/catalog';
 import {base} from '../lib/format';
 import {applyOffline} from '../lib/amount';
 import {withTimeout} from '../lib/timeout';
-import {buildSelectableAssets, chipLabel, reconcileSelectedAsset, routeDeeplinkToIc, shouldAllowUserSelect, solanaUsdcAvailable} from '../config/assets';
+import {buildSelectableAssets, chipLabel, reconcileSelectedAsset, routeDeeplinkToIc, shouldAllowUserSelect, solanaUsdcAvailable, solPayGate} from '../config/assets';
 import {buildAssetBalances} from '../lib/assetBalances';
 import type {AssetId, Identity, NfcStatus} from '../lib/types';
 import {DpayCore} from '../services/native';
@@ -62,6 +62,16 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
   // PROGRAMMATIC selection (deeplink routing — see the routing effect below) calls setSelectedAssetId
   // directly and bypasses this lock: an incoming request must always route to its engine.
   const [selectionLocked, setSelectionLocked] = useState(false);
+  // Fund-first funnel resume origin (UX review finding 8): the asset whose Pay tab spawned the
+  // goToDeposit trip, or null. Cleared on resume (returnFromDeposit) or a fresh funnel trip.
+  const [depositReturnTo, setDepositReturnTo] = useState<{id: AssetId; subMode: 'scan' | 'send'} | null>(null);
+  // Fund-first "Check again" busy flag (UX review r2 finding 1): self-clears after ~1.5s — the
+  // SOL/USDC polls are fire-and-forget (no completion signal), so this is a UI-level affordance
+  // (the button reads 'Checking…' + disables) rather than a poll-lifecycle tracker. The poll's
+  // own 2.5s cadence + generation gate remain the source of truth for the balance itself.
+  const [recheckBusy, setRecheckBusy] = useState(false);
+  const recheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (recheckTimer.current != null) clearTimeout(recheckTimer.current); }, []);
   // Within-tab sub-modes for the Receive/Pay IA: "request"/"address" (Receive) and "scan"/"send"
   // (Pay). The on-chain deposit + withdraw surfaces now live INLINE in these tabs (lifted out of the
   // Balances per-row buttons + the overlay sheets). Owned here so deeplinks (?screen=deposit, the
@@ -105,7 +115,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
   // waiting on the 2.5s poll).
   const {
     balance, online, assetBalances, offlineSpent,
-    markOfflinePaid, resetDeduction, setBalance, setOnline,
+    markOfflinePaid, resetDeduction, setBalance, setOnline, refresh: refreshBalances,
   } = useBalancePoll({relayUrl, publicHex: identity.publicHex, displayAssets, displayCurrencyIds});
   // Durable transaction history sourced from the ledger. Extracted verbatim into
   // hooks/useTransactionHistory.ts (Effect C): the per-currency fan-out + dedup-by-nonce + sort +
@@ -123,6 +133,24 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
     catch (e) { console.warn('deriveSolanaAddress failed:', e instanceof Error ? e.message : String(e)); return null; }
   }, [identity.secretHex]);
   const {sol: solState, usdc: usdcState, refreshSol, refreshUsdc} = useSolanaBalances(identity.secretHex, solAddress);
+  // Defined AFTER the destructure (TDZ): manual re-poll for the fund-first "Check again" —
+  // fire-and-forget polls get a self-clearing busy flag (UI affordance, not lifecycle tracking).
+  const recheckSolBalances = useCallback(() => {
+    refreshSol();
+    refreshUsdc();
+    setRecheckBusy(true);
+    if (recheckTimer.current != null) clearTimeout(recheckTimer.current);
+    recheckTimer.current = setTimeout(() => setRecheckBusy(false), 1500);
+  }, [refreshSol, refreshUsdc]);
+  // IC rail twin (UX review r3 MUST-1): same self-clearing busy affordance for the shared
+  // FundFirstPanel's "Check again" — without this, the IC panel's button gives zero feedback
+  // while the identical SOL panel spins (per-rail divergence in a shared surface).
+  const recheckIcBalances = useCallback(() => {
+    refreshBalances();
+    setRecheckBusy(true);
+    if (recheckTimer.current != null) clearTimeout(recheckTimer.current);
+    recheckTimer.current = setTimeout(() => setRecheckBusy(false), 1500);
+  }, [refreshBalances]);
   const solBalance = solState.balance;
 
   // One-time USDC account (ATA) setup — Wallet-owned so BOTH entry surfaces (Receive "My address"
@@ -486,7 +514,36 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
     setBalancesOpen(false);
     setReceiveSubMode('request');
     setPaySubMode('scan');
+    setDepositReturnTo(null); // a manual switch supersedes any fund-funnel resume origin
   }, [selectionLocked]);
+
+  // Zero-funds funnel (2026-08-16 UX): the ONE programmatic "show this asset's deposit address"
+  // action used by every fund-first surface (SolPayMode's FundFirstPanel + AtaSetupCard's
+  // fund-SOL secondary). Programmatic like the deeplink router — it bypasses the selection lock
+  // (a fund prompt is never in-flight money movement, and the lock only guards payer snapshots).
+  // Lands on the existing Receive → My-address surface (the ONE funding QR — no inline dupe).
+  //
+  // `returnTo` (UX review finding 8): when the prompt fired from ANOTHER asset's Pay tab (e.g.
+  // "Show my SOL address" while paying USDC), remember the origin so My-address can offer a
+  // one-tap "Back to paying <asset>" resume once the watched balance flips positive — closing
+  // the >2-tap round trip without a modal and without an inline duplicate QR.
+  const goToDeposit = useCallback((id: AssetId, returnTo?: AssetId) => {
+    setSelectedAssetId(id);
+    setMode('receive');
+    setReceiveSubMode('address');
+    setBalancesOpen(false);
+    // Remember the origin Pay sub-mode too, so the resume link returns to scan OR send exactly
+    // where the user was (UX review r2 finding 3) — not always the scanner.
+    setDepositReturnTo(returnTo ? {id: returnTo, subMode: paySubMode} : null);
+  }, [paySubMode]);
+  const returnFromDeposit = useCallback(() => {
+    if (!depositReturnTo) return;
+    setSelectedAssetId(depositReturnTo.id);
+    setPaySubMode(depositReturnTo.subMode);
+    setDepositReturnTo(null);
+    setMode('pay');
+    setBalancesOpen(false);
+  }, [depositReturnTo]);
 
   return (
     <SafeAreaView style={S.root}>
@@ -566,10 +623,13 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
       <ScrollView style={S.scroll} contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
         {mode === 'pay'
           ? (activeSol && solAddress
-              ? <SolPayMode identity={identity} nfcReady={nfc === 'ready'} solBalance={solBalance ?? '0'} usdcBalance={usdcState.amount ?? '0'} usdcAtaAbsent={usdcState.status === 'absent'} selectedToken={selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL'} onSent={refreshSol} onSentUsdc={refreshUsdc} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} onLockChange={setSelectionLocked} />
+              ? <SolPayMode identity={identity} nfcReady={nfc === 'ready'} solBalance={solBalance ?? '0'} usdcBalance={usdcState.amount ?? '0'} usdcAtaAbsent={usdcState.status === 'absent'} payGate={solPayGate(selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL', solState, usdcState)} solZero={solState.status === 'ok' && solState.balance === '0'} solChecking={solState.status === 'loading' || solState.balance == null} selectedToken={selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL'} onSent={refreshSol} onSentUsdc={refreshUsdc}                   onShowSolAddress={() => goToDeposit('solana:SOL', selectedAsset?.id === 'solana:USDC' ? 'solana:USDC' : undefined)} onShowUsdcAddress={() => goToDeposit('solana:USDC')} onRecheckBalances={recheckSolBalances} recheckBusy={recheckBusy} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} onLockChange={setSelectionLocked} />
               : <PayMode
                   identity={identity} online={online} relayUrl={relayUrl} nfcStatus={nfc}
                   onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance}
+                  onShowDepositAddress={() => goToDeposit(`ic:${selectedCurrency}`)}
+                  onRefreshBalances={recheckIcBalances}
+                  refreshBusy={recheckBusy}
                   catalog={catalog} assetBalances={displayAssetBalances}
                   withdrawCurrency={selectedCurrency}
                   withdrawDisplay={depositDisplay} withdrawFamily={depositFamily}
@@ -591,9 +651,20 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
                   balances={balances}
                   onSelectAsset={handleSelect}
                   usdcAtaStatus={usdcState.status}
+                  usdcAmount={usdcState.amount}
                   solBalance={solBalance}
+                  solOk={solState.status === 'ok'}
                   ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta}
+                  onShowSolAddress={() => goToDeposit('solana:SOL')}
                   onRefreshUsdc={refreshUsdc}
+                  onRefreshSol={refreshSol}
+                  depositReturnLabel={
+                    // Resume link fires ONLY when the deposit actually landed (known positive
+                    // balance on the watched asset) — never on loading/error/unconfirmed state.
+                    selectedAsset?.id === 'solana:SOL' && solState.status === 'ok' && solBalance != null && solBalance !== '0' && depositReturnTo
+                      ? `Back to paying ${depositReturnTo.id === 'solana:USDC' ? 'USDC' : 'SOL'}`
+                      : null}
+                  onReturnFromDeposit={returnFromDeposit}
                   onLockChange={setSelectionLocked}
                 />
               : (

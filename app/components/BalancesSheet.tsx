@@ -95,6 +95,13 @@ export function BalancesSheet({assets, balances, selectedId, onSelect, hasTestne
             const errLine = isDemo && topUpErr
               ? <Text testID="topup-err" style={S.topUpErr}>{topUpErr}</Text>
               : null;
+            // 'Needs setup' badge — Solana USDC with a KNOWN-absent token account ('absent' is a
+            // USDC-only status: no ATA on chain). One tap on the row selects it, and every USDC
+            // surface then offers the one-tap account create. Known-absent only: loading/error/
+            // unavailable never claim setup is needed (offline-first honesty rule).
+            const setupBadge = view?.status === 'absent'
+              ? <Text testID="asset-sol-usdc-badge" style={S.assetBadge}>Needs setup</Text>
+              : null;
             return (
               <CurrencyRow
                 key={asset.testKey}
@@ -113,6 +120,7 @@ export function BalancesSheet({assets, balances, selectedId, onSelect, hasTestne
                 actions={faucet}
               >
                 {errLine}
+                {setupBadge}
               </CurrencyRow>
             );
           })}

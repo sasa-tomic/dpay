@@ -45,6 +45,7 @@ export function useBalancePoll(args: Args): {
   resetDeduction: (currency: number) => void;
   setBalance: (b: string | null) => void;
   setOnline: (o: boolean) => void;
+  refresh: () => void;
 } {
   const {relayUrl, publicHex, displayAssets, displayCurrencyIds} = args;
   const [balance, setBalance] = useState<string | null>(null);
@@ -65,6 +66,8 @@ export function useBalancePoll(args: Args): {
   // scheduling between the old poll's `.then()` and React's commit phase, closing the window the
   // `alive` closure flag alone could not fully cover.
   const genRef = useRef(0);
+  // Latest poll of the CURRENT effect (null between effects) — the "Check again" escape hatch.
+  const pollRef = useRef<(() => Promise<void>) | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -155,7 +158,12 @@ export function useBalancePoll(args: Args): {
       } catch (e) { console.warn('balance poll failed:', e instanceof Error ? e.message : String(e)); if (fresh()) setOnline(false); }
     };
     poll(); const id = setInterval(poll, POLL.balance);
-    return () => { alive = false; clearInterval(id); ctrl.abort(); };
+    // Manual-refresh handle (2026-08-16 zero-funds UX): the fund-first panel's "Check again" re-fires
+    // the CURRENT poll immediately instead of waiting for the next POLL.tick. The ref always points at
+    // the live effect's poll (generation-gated by `fresh()` inside), so a stale relay's handle can
+    // never write after a retarget.
+    pollRef.current = poll;
+    return () => { alive = false; clearInterval(id); ctrl.abort(); pollRef.current = null; };
     // `displayAssets` is captured by closure but intentionally NOT a dep — it's a new array each
     // render; `displayCurrencyIds` (a stable string) is the signature that retriggers the poll only
     // when a currency is actually added/removed. Mirrors the original Wallet.tsx effect verbatim.
@@ -177,5 +185,9 @@ export function useBalancePoll(args: Args): {
   // needless new object → no spurious re-render of the derived displayAssetBalances memo).
   const resetDeduction = useCallback((currency: number) => setOfflineSpent(prev => prev[currency] != null && prev[currency] !== '0' ? {...prev, [currency]: '0'} : prev), []);
 
-  return {balance, online, assetBalances, offlineSpent, markOfflinePaid, resetDeduction, setBalance, setOnline};
+  // Manual refresh for the fund-first panel's "Check again" (same shape as the SOL rail's
+  // refreshSol — an immediate re-poll, generation-safe).
+  const refresh = useCallback(() => { pollRef.current?.(); }, []);
+
+  return {balance, online, assetBalances, offlineSpent, markOfflinePaid, resetDeduction, setBalance, setOnline, refresh};
 }

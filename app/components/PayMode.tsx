@@ -6,7 +6,7 @@ import {C} from '../config/palette';
 import {DIRECT_PAY_TIMEOUT_MS, POLL, BALANCE_TIMEOUT_MS, QR_SIZE} from '../config/constants';
 import {short, base, parseRequestQR} from '../lib/format';
 import {cmpRaw} from '../lib/amount';
-import {type CurrencyDescriptor, type FamilyDisplay, type MinterFamily, fmtCurrencyAmount, isPayableAsset} from '../config/catalog';
+import {type CurrencyDescriptor, type FamilyDisplay, type MinterFamily, fmtCurrencyAmount, isPayableAsset, displayName, isTestnetCurrency, testnetDisplayName} from '../config/catalog';
 import type {Identity, Req, NfcStatus} from '../lib/types';
 import {rejectionMessage, isNonceReused} from '../payments';
 import {verifyOutcomeReceipt} from '../services/receipt';
@@ -16,6 +16,7 @@ import {DpayCore, DpayNfc} from '../services/native';
 import {NfcTap} from './NfcTap';
 import {NfcIcon} from './NfcIcon';
 import {QrScanner} from './QrScanner';
+import {FundFirstPanel} from './FundFirstPanel';
 import {ModeToggle} from './ModeToggle';
 import {WithdrawSheet} from './WithdrawSheet';
 import {useEscapeToClose} from '../hooks/useHotkeys';
@@ -30,7 +31,7 @@ const NFC_REASON: Record<Exclude<NfcStatus, 'ready'>, string> = {
   unknown: "Couldn't check NFC status. Scan the QR code to pay.",
 };
 
-export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assetBalances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillRequest, onPrefillConsumed, onLockChange}: {identity: Identity; online: boolean; relayUrl: string; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assetBalances: Record<number, string>; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillRequest?: string | null; onPrefillConsumed?: () => void; onLockChange?: (locked: boolean) => void}) {
+export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assetBalances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillRequest, onPrefillConsumed, onShowDepositAddress, onRefreshBalances, refreshBusy = false, onLockChange}: {identity: Identity; online: boolean; relayUrl: string; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assetBalances: Record<number, string>; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillRequest?: string | null; onPrefillConsumed?: () => void; onShowDepositAddress: () => void; onRefreshBalances?: () => void; refreshBusy?: boolean; onLockChange?: (locked: boolean) => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid'>('scan');
   // The within-tab sub-mode is OWNED by Wallet. "scan" = the existing scan-to-pay flow; "send" = the
   // on-chain send-to-address flow (the WithdrawSheet body, lifted inline). The toggle renders only
@@ -307,10 +308,39 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
     );
   }
 
+  // IC fund-first gate (2026-08-16 zero-funds UX — same surface as the SOL rail, per the
+  // same-surfaces hard rule). Computed BEFORE both the send + scan branches so the WHOLE Pay tab
+  // gates uniformly. Balance is keyed to the SELECTED asset: currency 0 (DEMO) reads the primary
+  // poll; every other asset reads its own assetBalances entry (a missing entry → null → fail
+  // open). DEMO itself never gates (mintable — the faucet tops it up).
+  //   - ONLINE + KNOWN zero (non-DEMO) → the fund-first panel replaces the scanner + send form.
+  //   - Offline / loading / null FAIL OPEN to the live surfaces (offline-first rule — the
+  //     review-level lowbal backstop still catches a doomed payment at Approve).
+  //   - A no-onramp asset keeps the panel but omits the primary and says so honestly.
+  const gateDesc = catalog.find(c => c.currency === withdrawCurrency) ?? null;
+  const gateSymbol = gateDesc ? (isTestnetCurrency(gateDesc) ? testnetDisplayName(gateDesc) : displayName(gateDesc)) : 'funds';
+  const gateDepositable = !!gateDesc && !gateDesc.mintable && gateDesc.onramp !== 'Unavailable' && gateDesc.minter != null;
+  const gateBalance = withdrawCurrency === 0 ? shownBalance : (assetBalances[withdrawCurrency] ?? null);
+  const fundGate = online && gateBalance != null && cmpRaw(gateBalance, '0') === 0 && gateDesc != null && !gateDesc.mintable;
+  const fundPanel = fundGate ? (
+    <FundFirstPanel
+      testID="pay-fund"
+      title={`Add ${gateSymbol} to ${subMode === 'send' ? 'send' : 'pay'}`}
+      body={gateDepositable
+        ? `This wallet has no ${gateSymbol} yet. Send ${gateSymbol} to your address and you can ${subMode === 'send' ? 'send' : 'pay'} right away.`
+        : `This wallet has no ${gateSymbol} yet — and ${gateSymbol} isn't available for deposits yet. Fund another asset, or check back soon.`}
+      primaryLabel={gateDepositable ? `Show my ${gateSymbol} address` : undefined}
+      onPrimary={gateDepositable ? onShowDepositAddress : undefined}
+      onRecheck={onRefreshBalances}
+        recheckBusy={refreshBusy}
+    />
+  ) : null;
+
   // "Send to address" sub-mode: render the on-chain withdraw flow INLINE (the WithdrawSheet body) for
   // the active asset's family. The toggle above lets the user flip back to "Scan to pay". The sheet is
   // inline-only (no overlay chrome — the tab body provides the surface). Only reached when
-  // withdrawFamily is non-null (the toggle is gated).
+  // withdrawFamily is non-null (the toggle is gated). The fund-first gate applies HERE too (same
+  // surface as SOL's send branch — no amount entry against a known-zero balance).
   if (subMode === 'send' && withdrawFamily && withdrawDisplay) {
     return (
       <View style={S.center}>
@@ -321,18 +351,20 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
           left={{label: 'Scan to pay', value: 'scan', testID: 'btn-pay-scan'}}
           right={{label: 'Send to address', value: 'send', testID: 'btn-pay-send'}}
         />
-        <WithdrawSheet
-          identity={identity}
-          relayUrl={relayUrl}
-          currency={withdrawCurrency}
-          decimals={catalog.find(c => c.currency === withdrawCurrency)?.decimals ?? withdrawDisplay.amountDecimals}
-          display={withdrawDisplay}
-          family={withdrawFamily}
-          tokenContract={withdrawTokenContract}
-          balance={withdrawBalance}
-          onClose={() => onSubModeChange('scan')}
-          onWithdrawn={onSettled}
-        />
+        {fundPanel ?? (
+          <WithdrawSheet
+            identity={identity}
+            relayUrl={relayUrl}
+            currency={withdrawCurrency}
+            decimals={catalog.find(c => c.currency === withdrawCurrency)?.decimals ?? withdrawDisplay.amountDecimals}
+            display={withdrawDisplay}
+            family={withdrawFamily}
+            tokenContract={withdrawTokenContract}
+            balance={withdrawBalance}
+            onClose={() => onSubModeChange('scan')}
+            onWithdrawn={onSettled}
+          />
+        )}
       </View>
     );
   }
@@ -352,6 +384,8 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
           right={{label: 'Send to address', value: 'send', testID: 'btn-pay-send'}}
         />
       ) : null}
+      {fundPanel ?? (
+        <>
       {nfcReady && DpayNfc ? (
         <NfcTap
           key={nfcKey} role="card" identity={identity} relayUrl={relayUrl}
@@ -384,6 +418,8 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
           {err ? <Text style={S.err}>{err}</Text> : null}
         </>
       ) : null}
+        </>
+      )}
       <Modal visible={nfcInfoOpen} transparent animationType="fade" onRequestClose={() => setNfcInfoOpen(false)}>
         <Pressable style={S.pickBackdrop} onPress={() => setNfcInfoOpen(false)}>
           <View style={S.pickCard} onStartShouldSetResponder={() => true}>
