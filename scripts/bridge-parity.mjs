@@ -98,3 +98,54 @@ if (diffs.length > 0) {
 
 const count = (obj) => Object.keys(obj).filter(n => !LIFECYCLE.has(n)).length;
 console.log(`bridge-parity OK (${count(coreTs.methods) + count(nfcTs.methods) + count(solNfcTs.methods)} methods)`);
+
+// ----------------------------------------------------------------------------------------
+// Resolved-MAP KEY parity (added 2026-08-16, after the `signAuthorization toName` device crash).
+//
+// Arity alone can't see a Kotlin method that resolves a WritableMap MISSING a key the TS return
+// type documents: the missing key arrives as `undefined`, silently corrupts JS state, and HARD-
+// CRASHES when re-passed into any non-null Kotlin param (the exact `decodeRequest` → `Req.toName`
+// bug: web e2e green because the wasm shim returns the field; device dead). This asserts every
+// resolved-map method's `put*("key", ...)` set EQUALS the TS-documented object fields.
+const keyDiffs = [];
+
+// Kotlin side: keys a method resolves into its WritableMap (only methods that build one matter).
+function kotlinMapKeys(src, method) {
+  const m = src.match(new RegExp(`fun\\s+${method}\\s*\\([\\s\\S]*?\\)\\s*\\{([\\s\\S]*?)\\n    \\}`));
+  if (!m) return null;
+  const keys = new Set();
+  for (const km of m[1].matchAll(/\.put(?:String|Double|Int|Boolean|Null)\(\s*"(\w+)"/g)) keys.add(km[1]);
+  return keys;
+}
+
+// TS side A: a named `export type X = {field...}` literal's field names (comments stripped).
+function tsTypeFields(src, typeName) {
+  const m = src.match(new RegExp(`export\\s+type\\s+${typeName}\\s*=\\s*\\{([^}]*)\\}`));
+  if (!m) throw new Error(`TS type ${typeName} not found`);
+  return new Set([...m[1].replace(/\/\/[^\n]*/g, '').matchAll(/(\w+)\s*:/g)].map(x => x[1]));
+}
+
+// TS side B: the inline `Promise<{field...}>` return literal of a DpayCoreApi method.
+function tsReturnFields(src, method) {
+  const m = src.match(new RegExp(`${method}\\([^)]*\\)\\s*:\\s*Promise<\\{([^}]*)\\}`));
+  if (!m) throw new Error(`inline return object for ${method} not found`);
+  return new Set([...m[1].matchAll(/(\w+)\s*:/g)].map(x => x[1]));
+}
+
+const coreKtSrc = readFileSync(CORE_KT, 'utf8');
+// decodeRequest resolves the named `Req` type; the keypair methods resolve inline literals.
+for (const [method, tsFields] of [
+  ['decodeRequest', tsTypeFields(types, 'Req')],
+  ['generateKeypair', tsReturnFields(types, 'generateKeypair')],
+  ['keypairFromSecret', tsReturnFields(types, 'keypairFromSecret')],
+]) {
+  const ktKeys = kotlinMapKeys(coreKtSrc, method);
+  if (ktKeys === null) { keyDiffs.push(`- ${method}: no resolvable method body in Kotlin`); continue; }
+  for (const f of tsFields) if (!ktKeys.has(f)) keyDiffs.push(`- DpayCore.${method}: TS field "${f}" MISSING from Kotlin resolved map`);
+  for (const k of ktKeys) if (!tsFields.has(k)) keyDiffs.push(`- DpayCore.${method}: Kotlin map key "${k}" absent from TS type`);
+}
+if (keyDiffs.length > 0) {
+  console.error('bridge-parity FAIL — resolved-map keys disagree with TS types:\n' + keyDiffs.join('\n'));
+  process.exit(1);
+}
+console.log('bridge-parity map-keys OK (decodeRequest↔Req, keypair↔{secretHex,publicHex})');

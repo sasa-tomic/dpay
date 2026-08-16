@@ -230,7 +230,10 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         }
     }
 
-    /** Payer side: decode a scanned merchant request QR into {toHex, amount, nonceHex, expiry, currency}.
+    /** Payer side: decode a scanned merchant request QR into {toHex, amount, nonceHex, expiry,
+     *  currency, toName, memo} — the map keys MUST match the TS `Req` type field-for-field (the
+     *  bridge-parity guard asserts this; a dropped key surfaces as `undefined` in JS and, when
+     *  re-passed to a non-null Kotlin param, the 2026-08-16 `signAuthorization toName` hard crash).
      *  MC1 units 2-4: `amount` is emitted as an UNSIGNED decimal STRING (the full u64 range, never a
      *  lossy Double). */
     @ReactMethod
@@ -243,6 +246,8 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
             out.putString("nonceHex", hex(r.nonce))
             out.putDouble("expiry", r.expiry.toDouble())
             out.putInt("currency", r.currency.toInt())
+            out.putString("toName", r.toName)
+            out.putString("memo", r.memo)
             promise.resolve(out)
         } catch (e: Throwable) {
             promise.reject("dpay_core", e)
