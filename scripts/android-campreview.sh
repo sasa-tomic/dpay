@@ -122,12 +122,75 @@ echo "   DPAY_SELFCHECK PASS"
 
 # ---- helpers ---------------------------------------------------------------
 
-# dump_ui: fresh uiautomator XML at $ART/ui.xml (retries — dump occasionally misses idle state)
+# anr_wait_tap: probe $ART/ui.xml for a system "…isn't responding" ANR dialog covering the app
+# (headless emulator under load throws these over ANY app — observed 4× during ensure_wallet, where
+# it wedged the gate with a bogus exit-2 'anchor not found'). Prints:
+#   ""             no ANR dialog
+#   "TAP x y"      center of the dialog's Wait button — Wait keeps the app alive (NEVER 'Close app')
+#   "NONE <title>" dialog present but no findable Wait button (caller fails honestly, naming it)
+anr_wait_tap() {
+  python3 - "$ART/ui.xml" <<'PY'
+import sys, xml.etree.ElementTree as ET
+try:
+    nodes = list(ET.parse(sys.argv[1]).getroot().iter('node'))
+except Exception:
+    sys.exit(0)  # unparseable → empty probe; the caller's dump-validity retry owns that failure
+def center(n):
+    a, b = n.get('bounds').strip('[]').split('][')
+    x0, y0 = (int(v) for v in a.split(','))
+    x1, y1 = (int(v) for v in b.split(','))
+    return (x0 + x1) // 2, (y0 + y1) // 2
+title = ''
+for n in nodes:
+    t = n.get('text') or ''
+    if 'responding' in t and ("isn" in t or "is not" in t):
+        title = title or t
+if not title:
+    sys.exit(0)
+# dismiss with 'Wait' only: text-exact first (cannot hit 'Close app'), then the ANR wait id,
+# then generic button2 (= the negative 'Wait' button on AOSP ANR dialogs).
+for n in nodes:
+    if (n.get('text') or '').strip().lower() == 'wait':
+        print('TAP %d %d' % center(n)); sys.exit(0)
+for rid in ('android:id/aerr_wait', 'android:id/button2'):
+    for n in nodes:
+        if n.get('resource-id') == rid:
+            print('TAP %d %d' % center(n)); sys.exit(0)
+print('NONE ' + title)
+PY
+}
+
+# dump_ui: fresh uiautomator XML at $ART/ui.xml (retries — dump occasionally misses idle state).
+# ANR guard: after every good dump, probe for a covering ANR dialog, dismiss it via Wait (max 3
+# dismissals per call — self-limiting), and re-dump. More than 3 in one call, or a dialog with no
+# Wait button, is an environment failure (exit 3, dialog named) — never misreported as an app
+# navigation (exit 2) or camera (exit 1) regression.
 dump_ui() {
-  for _ in 1 2 3; do
+  local dismisses=0
+  for _ in 1 2 3 4 5 6; do
     if $ADB shell uiautomator dump /sdcard/campreview-ui.xml >/dev/null 2>&1; then
       $ADB shell cat /sdcard/campreview-ui.xml 2>/dev/null | tr -d '\r' > "$ART/ui.xml"
-      [ -s "$ART/ui.xml" ] && grep -q "</hierarchy>" "$ART/ui.xml" && return 0
+      if [ -s "$ART/ui.xml" ] && grep -q "</hierarchy>" "$ART/ui.xml"; then
+        local anr; anr="$(anr_wait_tap)"
+        if [ -z "$anr" ]; then
+          return 0
+        fi
+        case "$anr" in
+          TAP\ *)
+            dismisses=$((dismisses + 1))
+            if [ "$dismisses" -gt 3 ]; then
+              echo "FAIL env: an ANR dialog still covers the app after 3 'Wait' dismissals; ui dump: $ART/ui.xml" >&2
+              exit 3
+            fi
+            echo "   ANR dialog on top — tapping Wait (${anr#TAP }) [$dismisses/3]" >&2
+            $ADB shell input tap ${anr#TAP }
+            ;;
+          *)
+            echo "FAIL env: ANR dialog '${anr#NONE }' covers the app with no Wait button to dismiss; ui dump: $ART/ui.xml" >&2
+            exit 3
+            ;;
+        esac
+      fi
     fi
     sleep 1
   done
