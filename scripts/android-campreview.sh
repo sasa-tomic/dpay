@@ -46,7 +46,7 @@ echo "== require a booted device =="
 $ADB wait-for-device
 BOOTED="$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')"
 [ "$BOOTED" = "1" ] || { echo "FAIL: no fully-booted device (sys.boot_completed=$BOOTED)"; exit 3; }
-echo "   device: $($ADB devices | awk 'NR==2{print $1}')"
+echo "   device: ${ANDROID_SERIAL:-$($ADB devices | awk 'NR==2{print $1}')} (via $ADB)"
 
 echo "== require the app installed + camera permission granted =="
 $ADB shell pm list packages 2>/dev/null | tr -d '\r' | grep -q "^package:$PKG$" \

@@ -37,7 +37,7 @@ The inner loop is fully offline via `just` (from the repo root) and runs in seco
 
 ```
 just verify      # core + canister + relay + typecheck + bridge-parity + aid-parity + e2e
-just e2e         # the browser harness driving the REAL app via react-native-web (75 flows)
+just e2e         # the browser harness driving the REAL app via react-native-web (79 flows)
 just typecheck   # tsc --noEmit --noUnusedLocals --noUnusedParameters
 just app         # rebuild APK + launch on emulator (outer-loop device gate)
 just ondevice    # 11 instrumented tests on the emulator

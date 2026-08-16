@@ -10,6 +10,7 @@
  *
  * Also pins the setup-card contract the e2e net taps: sol-receive-instructions (instruction
  * card), btn-sol-ata-create (create action), sol-ata-insufficient (needs-SOL warning),
+ * sol-ata-checking-sol (SOL balance unconfirmed — "checking", never a false insufficiency),
  * sol-ata-busy, sol-ata-err, btn-sol-ata-retry.
  *
  * Uses react-test-renderer (the project's only renderer; no @testing-library). The sheet mounts
@@ -77,6 +78,13 @@ describe('SolanaReceiveSheet — USDC tri-state gate', () => {
     expect(has(tree, 'sol-ata-insufficient')).toBe(true);
     const btn = tree.root.findAll(node => node.props && node.props.testID === 'btn-sol-ata-create')[0];
     expect(btn.props.disabled).toBe(true);
+    act(() => { tree.unmount(); });
+  });
+
+  test("USDC 'absent' + SOL unconfirmed (solBalance null) → sol-ata-checking-sol, never a false insufficiency claim", () => {
+    const tree = mount({token: 'USDC', ataStatus: 'absent', solBalance: null});
+    expect(has(tree, 'sol-ata-checking-sol')).toBe(true);
+    expect(has(tree, 'sol-ata-insufficient')).toBe(false);
     act(() => { tree.unmount(); });
   });
 

@@ -28,7 +28,7 @@ Inner loop runs fully offline via `just` and completes in seconds (`just verify`
 
 ## Pre-merge gates off the hot verify path
 
-`just verify` (core + canister + relay + typecheck + bridge-parity + aid-parity + e2e) is fully offline and runs in seconds, but it does **not** exercise the real RN→Kotlin→`libdpay_ffi.so` bridge — that needs the Android emulator (outer-loop). A wire/bridge-arity regression (e.g. the 2026-07-31 wire-v2 launch crash) sails through `verify` and only explodes on a device. The static guards now in `check` (`typecheck` + `bridge-parity` + `aid-parity`, see `scripts/`) catch most of this class, but they are not exhaustive. (The old `wallet-wire` and `merchant-wire` guards are GONE — `/wallet` is the real app and the hand-rolled `/merchant` page was merged into it 2026-08-16; see "Web wallet" below.)
+`just verify` (core + canister + relay + typecheck + bridge-parity + aid-parity + e2e) is fully offline and runs in seconds, but it does **not** exercise the real RN→Kotlin→`libdpay_ffi.so` bridge — that needs the Android emulator (outer-loop). A wire/bridge-arity regression (e.g. the 2026-07-31 wire-v2 launch crash) sails through `verify` and only explodes on a device. The static guards now in `check` (`typecheck` + `bridge-parity` + `aid-parity`, see `scripts/`) catch most of this class, but they are not exhaustive. (The old `wallet-wire` and `merchant-wire` guards are GONE — `/wallet` is the real app and the hand-rolled `/merchant` page was merged into it 2026-08-16; /wallet IS the real RN-web app served by the relay.)
 
 ### Structural blind spots of browser e2e (the classes `just verify` CANNOT see)
 
