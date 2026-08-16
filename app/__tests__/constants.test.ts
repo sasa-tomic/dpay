@@ -50,3 +50,10 @@ describe('WALLETCONNECT_PROJECT_ID seam (MC8 U6.1 + U6 capstone)', () => {
     }
   });
 });
+
+describe('EXPIRY_WINDOW (U-F3 — payer-onboarding TTL)', () => {
+  test('the IC-rail request TTL is 15 min: a payer who onboards from a shared link lands on a live request', () => {
+    const {EXPIRY_WINDOW} = loadConstants();
+    expect(EXPIRY_WINDOW).toBe(900);
+  });
+});

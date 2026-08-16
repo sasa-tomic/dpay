@@ -1,5 +1,5 @@
 import {useState} from 'react';
-import {View, Text, Pressable, Share} from 'react-native';
+import {View, Text, Pressable} from 'react-native';
 import {QrCode} from './QrCode';
 import {FundFirstPanel} from './FundFirstPanel';
 import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
@@ -20,6 +20,7 @@ import {SolNfcTap} from './SolNfcTap';
 import {ModeToggle} from './ModeToggle';
 import {SolanaWithdrawSheet} from './SolanaWithdrawSheet';
 import {useReportLock} from '../hooks/useReportLock';
+import {useShareFeedback} from '../hooks/useShareFeedback';
 
 /**
  * SolPayMode — the payer-side offline-pay component for the v2 recent-blockhash SOL rail.
@@ -47,6 +48,10 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
   // A tap arriving on the always-armed card takes over the scan screen; nfcKey re-arms after each.
   const [nfcActive, setNfcActive] = useState(false);
   const [nfcKey, setNfcKey] = useState(0);
+
+  // U-F1 — visible confirmation after the share resolves (the DepositSheet copy pattern). Dismissed
+  // sheets leave the label honest.
+  const {shared, share} = useShareFeedback();
 
   // Lock the idle asset selection while a SOL payment is in flight. review/qr/paid hold the
   // captured, immutable SolReqV2 snapshot the user must not lose to an asset switch.
@@ -295,8 +300,8 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
             <Text style={S.notPaidText}>Cancel</Text>
           </Pressable>
         </View>
-        <Pressable style={S.linkBtn} onPress={() => Share.share({message: solpayUri})} accessibilityRole="button" accessibilityLabel="Share signed payment" accessibilityState={{disabled: false}}>
-          <Text style={S.linkText}>Share signed code</Text>
+        <Pressable style={S.linkBtn} onPress={() => share(solpayUri)} accessibilityRole="button" accessibilityLabel="Share signed payment" accessibilityState={{disabled: false}}>
+          <Text style={S.linkText}>{shared ? 'Copied ✓' : 'Share signed code'}</Text>
         </Pressable>
       </View>
     );

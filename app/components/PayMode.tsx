@@ -1,5 +1,5 @@
 import {useEffect, useState} from 'react';
-import {View, Text, Pressable, Share, Modal, Platform} from 'react-native';
+import {View, Text, Pressable, Modal, Platform} from 'react-native';
 import {QrCode} from './QrCode';
 import {S} from '../styles';
 import {C} from '../config/palette';
@@ -21,6 +21,7 @@ import {ModeToggle} from './ModeToggle';
 import {WithdrawSheet} from './WithdrawSheet';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useReportLock} from '../hooks/useReportLock';
+import {useShareFeedback} from '../hooks/useShareFeedback';
 import {withTimeout} from '../lib/timeout';
 
 // Plain-language per-reason text for the NFC-unavailable info popup. Each ends with the honest
@@ -55,6 +56,11 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
   const nfcReady = nfcStatus === 'ready';
   const [nfcInfoOpen, setNfcInfoOpen] = useState(false);
   useEscapeToClose(() => setNfcInfoOpen(false));
+
+  // U-F1 — visible confirmation after a share resolves, for this component's two Share affordances
+  // (the paid-screen receipt link + the offline-QR auth code — mutually exclusive phases, so one
+  // state serves both). Mirrors the DepositSheet copy pattern.
+  const {shared, share} = useShareFeedback();
 
   // Phase 5 — lock the idle asset selection while a payment is in flight. review/qr/paid each hold a
   // captured, immutable request snapshot the user must not lose to an asset switch (which would
@@ -192,15 +198,13 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
             testID="btn-share-receipt"
             style={S.linkBtn}
             onPress={() => {
-              Share.share({message: shareHandoff('pay', receiptShareBlob(paid.receipt!))}).catch(
-                (e: unknown) => { console.log(`[dpay] share receipt failed: ${e instanceof Error ? e.message : String(e)}`); },
-              );
+              share(shareHandoff('pay', receiptShareBlob(paid.receipt!)));
             }}
             accessibilityRole="button"
             accessibilityLabel="Share receipt"
             accessibilityHint="Share the canister-signed receipt as a link the merchant can open to confirm"
             accessibilityState={{disabled: false}}>
-            <Text style={S.linkText}>Share receipt</Text>
+            <Text style={S.linkText}>{shared ? 'Link copied ✓' : 'Share receipt'}</Text>
           </Pressable>
         ) : null}
         <Pressable testID="btn-new" style={S.linkBtn} onPress={reset} accessibilityRole="button" accessibilityLabel="New payment" accessibilityState={{disabled: false}}><Text style={S.linkText}>New payment</Text></Pressable>
@@ -229,7 +233,7 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
             </View>
           </>
         )}
-        <Pressable style={S.linkBtn} onPress={() => Share.share({message: qr.code})} accessibilityRole="button" accessibilityLabel="Share auth code" accessibilityState={{disabled: false}}><Text style={S.linkText}>Share auth code</Text></Pressable>
+        <Pressable style={S.linkBtn} onPress={() => share(qr.code)} accessibilityRole="button" accessibilityLabel="Share auth code" accessibilityState={{disabled: false}}><Text style={S.linkText}>{shared ? 'Copied ✓' : 'Share auth code'}</Text></Pressable>
       </View>
     );
   }
@@ -269,6 +273,10 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
         <Text style={S.label}>Review payment</Text>
         <Text testID="pay-amount" style={S.reviewAmount}>{`Pay ${fmtCurrencyAmount(catalog, req.currency, req.amount)}`}</Text>
         <Text style={S.reviewTo}>{`to ${req.toName || short(req.toHex)}`}</Text>
+        {/* U-F5 — the payee's short pubkey as a subdued second line when a display name is shown,
+            so the payer can verify the destination beyond a claimed name (phishing surface). The
+            no-name fallback already renders the short key as the primary "to" line. */}
+        {req.toName ? <Text testID="review-payee" style={S.dim2}>{short(req.toHex)}</Text> : null}
         {/* The merchant-set memo (if any) — shown as a small subtitle so the payer sees the note
             attached to this request before approving. Empty memo renders nothing. */}
         {req.memo ? <Text testID="review-memo" style={S.dim2}>{req.memo}</Text> : null}

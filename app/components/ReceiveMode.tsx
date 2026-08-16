@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useState} from 'react';
-import {View, Text, Pressable, TextInput, Share, type TextStyle} from 'react-native';
+import {View, Text, Pressable, TextInput, type TextStyle} from 'react-native';
 import {QrCode} from './QrCode';
 import {C} from '../config/palette';
 import {S} from '../styles';
@@ -22,6 +22,7 @@ import {DepositSheet} from './DepositSheet';
 import {CkErc20DepositSheet} from './CkErc20DepositSheet';
 import {AssetPicker} from './AssetPicker';
 import {useReportLock} from '../hooks/useReportLock';
+import {useShareFeedback} from '../hooks/useShareFeedback';
 import {withTimeout} from '../lib/timeout';
 
 // The optional merchant memo input — a real secondary field (not a bare text link), mirroring the
@@ -61,6 +62,10 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
   // forms + Balances consume, with Wallet's handleSelect as its onSelect. Esc/backdrop close it
   // (AssetPicker owns useEscapeToClose internally).
   const [pickOpen, setPickOpen] = useState(false);
+
+  // U-F1 — visible confirmation after the share resolves (the DepositSheet copy pattern, via the
+  // share sibling of useCopyFeedback). Dismissed sheets leave the label honest.
+  const {shared, share} = useShareFeedback();
 
   // Phase 5 — lock the idle asset selection while a request QR is showing or a settlement result is
   // displayed. Both hold an in-flight request the user must not lose to an asset switch (the QR is the
@@ -260,15 +265,13 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
               testID="btn-share-request"
               style={S.linkBtn}
               onPress={() => {
-                Share.share({message: shareHandoff('req', reqQr.value)}).catch(
-                  (e: unknown) => { console.log(`[dpay] share request failed: ${e instanceof Error ? e.message : String(e)}`); },
-                );
+                share(shareHandoff('req', reqQr.value));
               }}
               accessibilityRole="button"
               accessibilityLabel="Share request link"
               accessibilityHint="Share this request as a link the payer can open to pay"
               accessibilityState={{disabled: false}}>
-              <Text style={S.linkText}>Share request link</Text>
+              <Text style={S.linkText}>{shared ? 'Link copied ✓' : 'Share request link'}</Text>
             </Pressable>
             {scanning ? (
               <><QrScanner onScan={onSignedQr} /><Text style={S.dim2}>Scan the payer's signed QR</Text></>

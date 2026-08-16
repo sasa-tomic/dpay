@@ -1,4 +1,4 @@
-export const EXPIRY_WINDOW = 300; // request valid 5 min — kills stale replays
+export const EXPIRY_WINDOW = 900; // request valid 15 min (U-F3: a payer who opens a shared request link and creates a wallet — 24-word mnemonic entry — must not land on an expired request) — still kills stale replays
 export const DIRECT_PAY_TIMEOUT_MS = 5000;
 // Merchant NFC settlement: bound the /pay call, then reconcile the ambiguous case via the
 // idempotent /receipt/:nonce so a settled payment is never reported as failed.
