@@ -19,6 +19,15 @@
        * react-native-web's root uses flex:1, which collapses under a display:block parent. */
       html, body, #root { margin: 0; padding: 0; height: 100%; background: #06070a; }
       #root { display: flex; flex-direction: column; }
+      /* Keyboard focus ring (U-F4): :focus-visible paints ONLY for keyboard focus — pointer/touch
+       * focus never shows it (and the e2e visual flow screenshots unfocused elements, so baselines
+       * are unaffected). #3ee0ac is the palette brand green (app/config/palette.ts C.brand).
+       * HTML-only file: never ships to native Android, which has its own focus handling. */
+      button:focus-visible, [role='button']:focus-visible, a:focus-visible,
+      input:focus-visible, textarea:focus-visible {
+        outline: 2px solid #3ee0ac;
+        outline-offset: 2px;
+      }
     </style>
   </head>
   <body>

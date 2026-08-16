@@ -5,7 +5,9 @@ module.exports = {
   // async-storage v3 also ships its jest mock as ESM under lib/module — list it here so babel-jest
   // transforms the `export` syntax before jest's VM tries to evaluate it.
   transformIgnorePatterns: [
-    'node_modules/(?!(react-native|@react-native|react-native-qrcode-svg|react-native-vision-camera|@react-native-async-storage/async-storage)/)',
+    // @noble: the wasm-core shim (e2e/web/dpay-core-wasm.ts) imports @noble/ed25519 + hashes/utils
+    // from e2e/node_modules; ed25519 2.x ships ESM in its `main`, so babel must transform it.
+    'node_modules/(?!(react-native|@react-native|react-native-qrcode-svg|react-native-vision-camera|@react-native-async-storage/async-storage|@noble)/)',
   ],
   // MC8 U6.2 — WalletConnect isolation. `wallet.ts`'s `resolveOnrampProvider()` is web-first and
   // only dynamic-imports `./walletconnect` on native with a non-empty projectId, so jest never
@@ -17,6 +19,10 @@ module.exports = {
   // so type safety is unaffected.
   moduleNameMapper: {
     '^@walletconnect/.*': '<rootDir>/__stubs__/walletconnect-stub',
+    // vite `?url` asset imports (e.g. the wasm core in e2e/web/dpay-core-wasm.ts) never resolve
+    // under jest — the vite asset transform doesn't run. Map ANY `?url` specifier to a typed string
+    // stub (vite's semantics: the default export IS the asset's served URL).
+    '\\?url$': '<rootDir>/__stubs__/url-asset-stub',
   },
   // MC8 U6.2 hardening: `__tests__/walletconnect-fake.ts` is a typed test DOUBLE (exported +
   // consumed by the stub + the test), NOT a suite — it has no `test()` calls. Jest's default

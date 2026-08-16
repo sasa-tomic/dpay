@@ -97,6 +97,7 @@ const REQUEST_LEN = 132;
 const SIG_LEN = 64;
 const PUBKEY_LEN = 32;
 const NONCE_LEN = 16;
+const WASM_FETCH_TIMEOUT_MS = 10_000;
 
 let layout: Layout | null = null;
 let exports_: WasmExports | null = null;
@@ -140,9 +141,23 @@ async function loadBytes(): Promise<Uint8Array> {
   if (typeof fetch !== 'function') {
     throw new Error('DpayCore wasm: no __DPAY_WASM_BYTES seam and no fetch (Node?) — inject staged bytes');
   }
-  const r = await fetch(wasmUrl as string);
-  if (!r.ok) throw new Error(`DpayCore wasm: fetch ${wasmUrl} → HTTP ${r.status}`);
-  return new Uint8Array(await r.arrayBuffer());
+  // Bounded fetch (A-F3): a hung CDN/connection must never hang wallet boot. Manual AbortController
+  // + setTimeout compose — NOT AbortSignal.timeout/AbortSignal.any (absent from Hermes) — mirroring
+  // app/lib/timeout.ts / app/solana/rpc.ts.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), WASM_FETCH_TIMEOUT_MS);
+  try {
+    const r = await fetch(wasmUrl as string, {signal: ctrl.signal});
+    if (!r.ok) throw new Error(`DpayCore wasm: fetch ${wasmUrl} → HTTP ${r.status}`);
+    return new Uint8Array(await r.arrayBuffer());
+  } catch (e) {
+    if (ctrl.signal.aborted) {
+      throw new Error(`DpayCore wasm: fetch ${wasmUrl} timed out after ${WASM_FETCH_TIMEOUT_MS}ms`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function init(): Promise<WasmExports> {

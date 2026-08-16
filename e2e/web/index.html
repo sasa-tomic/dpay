@@ -17,6 +17,12 @@
          layout faithfully and e2e screenshots match device behavior. */
       html, body, #root { margin: 0; padding: 0; height: 100%; background: #06070a; }
       #root { display: flex; flex-direction: column; }
+      /* Keyboard focus ring (U-F4) — mirrors wallet.html (see the note there). */
+      button:focus-visible, [role='button']:focus-visible, a:focus-visible,
+      input:focus-visible, textarea:focus-visible {
+        outline: 2px solid #3ee0ac;
+        outline-offset: 2px;
+      }
     </style>
   </head>
   <body>
