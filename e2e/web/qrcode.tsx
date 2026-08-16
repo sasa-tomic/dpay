@@ -68,12 +68,14 @@ export default function QRCodeSvg({ value, size = 100, ecl = 'M', color = 'black
   if (typeof window !== 'undefined') {
     (window as any).__DPAY_QR_LAST = value;
   }
-  // A rounded cap joins adjacent cells into the QR's familiar solid blocks (matches upstream's
-  // visual: cells render as a single connected path, not a dot grid).
+  // A "butt" cap renders each row-segment as a crisp square-edged bar — byte-identical output to
+  // the upstream react-native-qrcode-svg the Android app renders (the 2026-08-16 "ugly web QR"
+  // regression was this cap set to "round", which blopped every module into dots; the shared
+  // app/components/QrCode.tsx wrapper assumes this exact upstream look on BOTH platforms).
   return (
     <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
       <Rect x={0} y={0} width={size} height={size} fill={backgroundColor} />
-      <Path d={path} stroke={stroke} strokeWidth={cellSize} strokeLinecap="round" fill="none" />
+      <Path d={path} stroke={stroke} strokeWidth={cellSize} strokeLinecap="butt" fill="none" />
     </Svg>
   );
 }

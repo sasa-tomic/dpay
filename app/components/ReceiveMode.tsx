@@ -1,6 +1,6 @@
 import {useEffect, useMemo, useState} from 'react';
 import {View, Text, Pressable, TextInput, Share, type TextStyle} from 'react-native';
-import QRCode from 'react-native-qrcode-svg';
+import {QrCode} from './QrCode';
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {EXPIRY_WINDOW, NFC_PAY_TIMEOUT_MS, POLL, BALANCE_TIMEOUT_MS, QR_SIZE} from '../config/constants';
@@ -231,7 +231,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
               {reqQr.nfcHex ? <NfcIcon color={C.brand} size={18} /> : null}
               <Text style={S.nfcHintLabel}>Show this to the payer{reqQr.nfcHex ? ' · or let them tap' : ''}</Text>
             </View>
-            <View testID="request-qr" style={S.qrCard}><QRCode value={reqQr.value} size={QR_SIZE} ecl="M" /></View>
+            <View testID="request-qr" style={S.qrCard}><QrCode value={reqQr.value} size={QR_SIZE} ecl="M" /></View>
         <Text style={S.amountBig}>{fmtCurrencyAmount(catalog, reqQr.currency, reqQr.rawAmount)}</Text>
         {(() => {
           const remaining = reqQr.expiry - now;

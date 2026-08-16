@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {View, Text, Pressable, TextInput, ActivityIndicator, Platform} from 'react-native';
-import QRCode from 'react-native-qrcode-svg';
+import {QrCode} from './QrCode';
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {POLL, DEPOSIT_TIMEOUT_MS, BALANCE_TIMEOUT_MS, QR_SIZE} from '../config/constants';
@@ -358,7 +358,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
         // (pairOnrampWallet is a no-op), so this branch is unreachable in the e2e harness.
         wcUri ? (
           <View style={S.centerAll}>
-            <View testID="wc-pair-qr" style={S.qrCard}><QRCode value={wcUri} size={QR_SIZE} ecl="M" /></View>
+            <View testID="wc-pair-qr" style={S.qrCard}><QrCode value={wcUri} size={QR_SIZE} ecl="M" /></View>
             <Text style={S.paidSub}>Scan with your wallet to pair</Text>
             {Platform.OS !== 'web' ? (
               <Pressable testID="btn-open-wallet" accessibilityRole="button" accessibilityHint="Open an installed wallet app on this device" style={[S.primaryWide, {marginTop: 12}]} onPress={openInWallet}>

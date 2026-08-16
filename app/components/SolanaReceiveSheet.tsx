@@ -1,6 +1,6 @@
 import {useCallback} from 'react';
 import {View, Text, Pressable, Platform, ActivityIndicator} from 'react-native';
-import QRCode from 'react-native-qrcode-svg';
+import {QrCode} from './QrCode';
 import {S} from '../styles';
 import {C} from '../config/palette';
 import {QR_SIZE_SMALL, IS_SOLANA_DEVNET} from '../config/constants';
@@ -125,7 +125,7 @@ export function SolanaReceiveSheet({
         ) : null}
       </View>
 
-      <View style={S.qrCard}><QRCode value={address} size={QR_SIZE_SMALL} ecl="L" /></View>
+      <View testID="sol-receive-qr" style={S.qrCard}><QrCode value={address} size={QR_SIZE_SMALL} ecl="L" /></View>
 
       <Text testID="sol-receive-address" style={S.sheetAddr} selectable={true}>{address}</Text>
 

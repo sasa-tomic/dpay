@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useState} from 'react';
 import {View, Text, Pressable, ActivityIndicator, Platform} from 'react-native';
-import QRCode from 'react-native-qrcode-svg';
+import {QrCode} from './QrCode';
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {POLL, DEPOSIT_TIMEOUT_MS, DEPOSIT_ADDRESS_TIMEOUT_MS, DEPOSIT_REFRESH_TIMEOUT_MS, QR_SIZE_SMALL} from '../config/constants';
@@ -183,7 +183,7 @@ export function DepositSheet({identity, relayUrl, currency, display, onClose}: {
             </Text>
           </View>
 
-          <View style={S.qrCard}><QRCode value={address} size={QR_SIZE_SMALL} ecl="L" /></View>
+          <View testID="deposit-qr" style={S.qrCard}><QrCode value={address} size={QR_SIZE_SMALL} ecl="L" /></View>
 
           <Text testID="deposit-address" style={S.sheetAddr} selectable={true}>{address}</Text>
 

@@ -1,6 +1,6 @@
 import {useState} from 'react';
 import {View, Text, Pressable, Share} from 'react-native';
-import QRCode from 'react-native-qrcode-svg';
+import {QrCode} from './QrCode';
 import {S} from '../styles';
 import {QR_SIZE} from '../config/constants';
 import {fmtAsset} from '../lib/format';
@@ -197,7 +197,7 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
       <View style={S.center}>
         {toggle}
         <Text style={S.label}>Show this to the merchant</Text>
-        <View testID="sol-pay-qr" style={S.qrCard}><QRCode value={solpayUri} size={QR_SIZE} ecl="L" /></View>
+        <View testID="sol-pay-qr" style={S.qrCard}><QrCode value={solpayUri} size={QR_SIZE} ecl="L" /></View>
         <Text style={S.amountBig}>{`${fmtAsset(req!.amt, decimals, unit)} to ${req!.name || req!.to}`}</Text>
         <Text style={S.badgeOk}>signed offline ✓</Text>
         <Text style={S.qrHint}>Offline — the merchant settles this when they submit it. You'll see it on your balance once it's confirmed.</Text>

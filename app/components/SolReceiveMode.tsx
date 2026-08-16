@@ -1,6 +1,6 @@
 import {useState, useEffect} from 'react';
 import {View, Text, Pressable, TextInput, ActivityIndicator, type TextStyle} from 'react-native';
-import QRCode from 'react-native-qrcode-svg';
+import {QrCode} from './QrCode';
 import bs58 from 'bs58';
 import {C} from '../config/palette';
 import {S} from '../styles';
@@ -317,7 +317,7 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
                 <View style={S.nfcHintRow}>
                   <Text style={S.nfcHintLabel}>Show this to the payer{nfcReady ? ' · or let them tap' : ''}</Text>
                 </View>
-                <View testID="sol-req-qr" style={S.qrCard}><QRCode value={reqUri} size={QR_SIZE_SMALL} ecl="M" /></View>
+                <View testID="sol-req-qr" style={S.qrCard}><QrCode value={reqUri} size={QR_SIZE_SMALL} ecl="M" /></View>
                 <Text style={S.amountBig}>{fmtAsset(reqSnapshot!.amt, decimals, unit)}</Text>
                 {(() => {
                   const remaining = (reqSnapshot?.exp ?? 0) - now;

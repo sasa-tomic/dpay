@@ -1,6 +1,6 @@
 import {useEffect, useState} from 'react';
 import {View, Text, Pressable, Share, Modal, Platform} from 'react-native';
-import QRCode from 'react-native-qrcode-svg';
+import {QrCode} from './QrCode';
 import {S} from '../styles';
 import {C} from '../config/palette';
 import {DIRECT_PAY_TIMEOUT_MS, POLL, BALANCE_TIMEOUT_MS, QR_SIZE} from '../config/constants';
@@ -211,7 +211,7 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
     return (
       <View style={S.center}>
         <Text style={S.label}>Show this to {qr.who}</Text>
-        <View style={S.qrCard}><QRCode value={qr.code} size={QR_SIZE} ecl="L" /></View>
+        <View style={S.qrCard}><QrCode value={qr.code} size={QR_SIZE} ecl="L" /></View>
         <Text style={S.amountBig}>{`${fmtCurrencyAmount(catalog, qr.currency, qr.amount)} to ${qr.who}`}</Text>
         <Text style={S.badgeOk}>signed on this device ✓</Text>
         {online ? <Text style={S.qrHint}>Waiting for {qr.who} to scan…</Text> : (

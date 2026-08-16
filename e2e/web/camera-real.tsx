@@ -5,7 +5,11 @@
 // runs verbatim against either. This variant drives the actual browser camera:
 //
 //   - getUserMedia({video: {facingMode: 'environment'}}) for the stream
-//   - jsQR (the relay's vendored /jsqr.js, loaded via a <script> tag on demand) for QR decode
+//   - jsQR (the VENDORED e2e/web/vendor/jsQR.js — the old /merchant terminal's copy, recovered
+//     from git history after the 2026-08-16 merge deleted the runtime /jsqr.js route) imported
+//     STATICALLY so the decoder is inside the hashed wallet bundle — no runtime route, no 404,
+//     no CSP dependence. This fixes the 2026-08-16 "scanning does not work on /wallet" regression
+//     (the shim silently loaded /jsqr.js which the relay no longer serves).
 //   - a requestAnimationFrame video→canvas→jsQR loop feeding onCodeScanned([{value}])
 //
 // FOUNDER RULE — the camera starts ONLY on the explicit "Allow camera scan" click. <QrScanner>
@@ -16,6 +20,9 @@
 // the scan screen re-acquires it silently since permission is already granted.
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { StyleSheet } from 'react-native';
+// The vendored UMD bundle (module.exports = jsQR factory) — vite's CJS interop gives the default
+// export. Self-contained: the decoder ships inside the wallet's hashed assets.
+import jsQR from './vendor/jsQR.js';
 
 // --- permission store (shared across every hook instance) ----------------------------------------
 let permGranted = false;
@@ -65,25 +72,8 @@ function releaseStream() {
   gumPromise = null;
 }
 
-// --- jsQR loader (vendored same-origin /jsqr.js; sets window.jsQR) --------------------------------
-type JsQr = (data: Uint8ClampedArray, width: number, height: number, opts?: { inversionAttempts?: string }) => { data: string } | null;
-declare global {
-  interface Window { jsQR?: JsQr }
-}
-let jsqrP: Promise<JsQr> | null = null;
-function loadJsQr(): Promise<JsQr> {
-  if (typeof window !== 'undefined' && window.jsQR) return Promise.resolve(window.jsQR);
-  if (!jsqrP) {
-    jsqrP = new Promise((resolve, reject) => {
-      const s = document.createElement('script');
-      s.src = '/jsqr.js'; // served same-origin by the relay (the terminal's vendored copy)
-      s.onload = () => (window.jsQR ? resolve(window.jsQR) : reject(new Error('jsQR loaded but window.jsQR is unset')));
-      s.onerror = () => { jsqrP = null; reject(new Error('failed to load /jsqr.js')); };
-      document.head.appendChild(s);
-    });
-  }
-  return jsqrP;
-}
+// --- jsQR (statically imported from vendor/jsQR.js — see header) ---------------------------------
+type JsQr = typeof jsQR;
 
 // --- exported hooks (same shapes the app already consumes) ---------------------------------------
 export function useCameraPermission() {
@@ -123,10 +113,16 @@ export function Camera(props: {
   style?: unknown;
   device?: { id: string } | undefined;
   isActive?: boolean;
-  codeScanner?: { codeTypes: string[]; onCodeScanned: (codes: { value?: string }[]) => void };
+  codeScanner?: { codeTypes: string[]; onCodeScanned: (codes: { value?: string }[]) => void } | { codeScannerOptions: { codeTypes: string[]; onCodeScanned: (codes: { value?: string }[]) => void } };
   enabled?: boolean;
 }) {
-  const { style, device, codeScanner } = props;
+  // Accept BOTH shapes: the upstream react-native-vision-camera scanner object ({codeTypes,
+  // onCodeScanned} directly) and the inject-shim's {codeScannerOptions: {...}} wrapper. The app's
+  // <QrScanner> passes whatever useCodeScanner returned; the two web shims historically disagreed
+  // (the inject shim wraps, upstream doesn't) — unwrapping here keeps <QrScanner> verbatim on both.
+  const raw = props.codeScanner as { codeScannerOptions?: { onCodeScanned: (codes: { value?: string }[]) => void } } | undefined;
+  const codeScanner = raw && raw.codeScannerOptions ? raw.codeScannerOptions : props.codeScanner as { onCodeScanned: (codes: { value?: string }[]) => void } | undefined;
+  const { style, device } = props;
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const activeRef = useRef(props.isActive !== false);
   activeRef.current = props.isActive !== false;
@@ -135,6 +131,8 @@ export function Camera(props: {
   // Per-mount dedupe: fire onCodeScanned for each NEW value; re-presenting the same QR within one
   // scan session is suppressed (QrScanner's own fired-ref handles the once-per-mount contract).
   const lastValue = useRef<string | null>(null);
+  // Alternating frame counter for the mirrored-frame retry (see the decode step).
+  const frameFlip = useRef(0);
 
   useEffect(() => {
     if (!device) return;
@@ -143,12 +141,7 @@ export function Camera(props: {
     let stream: MediaStream | null = null;
     const canvas = document.createElement('canvas');
     (async () => {
-      let jsqr: JsQr | null = null;
-      try {
-        jsqr = await loadJsQr();
-      } catch {
-        jsqr = null; // video still renders; scanning is simply unavailable
-      }
+      const jsqr: JsQr | null = jsQR;
       try {
         stream = await getStream();
       } catch {
@@ -172,7 +165,19 @@ export function Camera(props: {
             ctx.drawImage(v, 0, 0, w, h);
             const img = ctx.getImageData(0, 0, w, h);
             try {
-              const code = jsqr!(img.data, w, h, { inversionAttempts: 'dontInvert' });
+              let code = jsqr!(img.data, w, h, { inversionAttempts: 'dontInvert' });
+              // Some webcam drivers deliver horizontally-mirrored tracks (a QR is chiral — a
+              // mirrored frame is undecodable as-is, and the preview looks flipped). Rather than
+              // guess the polarity per device, decode BOTH: every other failing frame re-draws
+              // the video mirrored and tries again. Half-frames keeps the added cost bounded.
+              if (!code && (frameFlip.current++ & 1) === 1) {
+                ctx.save();
+                ctx.scale(-1, 1);
+                ctx.drawImage(v, -w, 0, w, h);
+                ctx.restore();
+                const mimg = ctx.getImageData(0, 0, w, h);
+                code = jsqr!(mimg.data, w, h, { inversionAttempts: 'dontInvert' });
+              }
               if (code && typeof code.data === 'string' && code.data.length > 0 && code.data !== lastValue.current) {
                 lastValue.current = code.data;
                 try { scanRef.current!.onCodeScanned([{ value: code.data }]); } catch { /* app-side */ }

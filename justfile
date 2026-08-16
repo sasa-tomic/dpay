@@ -216,6 +216,18 @@ web:
 web-smoke: web
     cd e2e && node web-wallet-smoke.mjs
 
+# Decode gate for the prod web wallet's camera scanner: regenerates the fake-camera QR video
+# (scripts/gen-scan-video.mjs → e2e/shots/scan-qr.y4m, a REAL 132-byte wire request rendered as a
+# QR via chrome --use-file-for-fake-video-capture), rebuilds the dist, and drives the shipped
+# bytes through the FULL pipeline: getUserMedia → <video> → rAF canvas → vendored jsQR →
+# onCodeScanned → PayMode review. Catches every layer of the 2026-08-16 scan regression class
+# (missing decoder bytes, UMD interop, codeScanner-shape mismatch) that web e2e (inject shim)
+# and web-smoke (no camera) are structurally blind to. Run after any camera-real.tsx / vendor
+# jsQR change.
+web-scan: web
+    node scripts/gen-scan-video.mjs
+    cd e2e && node web-scan-smoke.mjs
+
 # Build the frozen wire core (crates/dpay-wasm) for wasm32-unknown-unknown and stage it as the
 # committed relay asset crates/dpay-relay/assets/dpay-core.wasm (served at GET /dpay-core.wasm —
 # "one signing source for every web surface"). The parity guard loads the STAGED artifact, so it
