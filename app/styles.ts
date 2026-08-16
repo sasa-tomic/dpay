@@ -147,7 +147,7 @@ export const S = StyleSheet.create({
   // Tappable amount-prefix (Receive): wraps the currency glyph + a ▾ caret that signals it opens the
   // currency picker. The right border separates it from the typed amount.
   prefixBtn: {flexDirection: 'row', alignItems: 'center', paddingRight: 12, borderRightWidth: 1, borderRightColor: C.line2},
-  caret: {color: C.sub2, fontSize: 13, marginLeft: 3},
+  caret: {color: C.sub, fontSize: 22, marginLeft: 3},
   linkBtn: {marginTop: 18, minHeight: 44, justifyContent: 'center'},
   linkText: {color: C.brand, fontWeight: '600', fontSize: 16},
   linkTextMuted: {color: C.sub, fontWeight: '600', fontSize: 15},
