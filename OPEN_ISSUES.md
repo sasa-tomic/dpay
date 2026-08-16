@@ -43,6 +43,49 @@
   purge-required.)
 
 
+## Session summary (2026-08-16): merchant→web-wallet payment path + bridge toName crash + web Share parity — COMPLETE
+
+> **Trigger:** founder reported a device crash paying from app to website merchant:
+> `Exception in HostFunction Parameter specified as non-null is null ... signAuthorization, parameter toName`,
+> plus: "the web app must REUSE as much as possible (ideally everything) from the android app" and
+> "how do I set up a wallet in the merchant terminal (web app)?" with a demand to iterate until a
+> pedantic subagent confirms full feature parity, visually + UX.
+>
+> **Fixes shipped (all committed):**
+> - `7e249c9` — root cause: `DpayCoreModule.decodeRequest` resolved only
+>   toHex/amount/nonceHex/expiry/currency and DROPPED the `toName`/`memo` keys the FFI returns →
+>   `req.toName === undefined` → non-null Kotlin param hard-crash. The Kotlin map now carries both
+>   keys, and `scripts/bridge-parity.mjs` additionally asserts resolved-map KEY parity
+>   (decodeRequest↔`Req`, keypair methods↔inline returns) — verified RED on the old code, GREEN
+>   after. `just app` device gate: DPAY_SELFCHECK PASS.
+> - `ef69a40` — merchant terminal "Pay from this browser": the charge card links
+>   `/wallet?req=<blob>` once a request QR exists. `/wallet` IS the real app (same `App.tsx` +
+>   dpay-core wasm), and `?req=` already pre-filled its Pay review — zero new wallet-side code.
+>   Answer to "how do I set up a wallet on the merchant terminal": open `/wallet` (from that link
+>   or the footer), onboard (username → 24-word mnemonic → faucet), pay from the Review screen.
+> - `54fd579` — the ONLY real parity bug found by the audits: the prod web bundle shipped the e2e
+>   `shims.ts` `Share.share` silent noop, killing all 4 share affordances in every browser. Now
+>   mode-gated: web-prod keeps real Web Share with a clipboard fallback (Firefox/Safari desktop);
+>   e2e modes keep the noop + `__DPAY_TEST_SHARE` seam (flow 59). Gates: `just web` +
+>   `just web-smoke` + e2e 74/74 GREEN; pedantic verifier re-audit **PARITY: CONFIRMED** (share
+>   fix proven present in the served prod bundle: `__DPAY_TEST_SHARE` grep = 0; Paid screen +
+>   btn-share-receipt driven end-to-end in prod via the `__DPAY_TEST_RECEIPT_PUBKEY` seam;
+>   'Send to address' verified on ckBTC; console clean).
+>
+> **Inherently device-only (NOT gaps; web compensates):** NFC radio (QR + `?req=`/`?pay=` mirrors),
+> Android hardware back (web: Esc + hotkey badges), WalletConnect native pairing (web uses
+> `window.ethereum`), OS `dpay:` scheme (web query-param mirrors), logcat self-checks.
+>
+> **Informational follow-ups (cosmetic, non-blocking):**
+> - 'Share request link' / 'Share receipt' are fire-and-forget by design (`Share.share(...).catch`):
+>   on Web-Share-capable browsers the OS sheet is the feedback, but on no-Web-Share desktop
+>   (Firefox/Safari) the clipboard-fallback payload lands silently — no in-DOM "Copied ✓". Fixing
+>   means awaiting the share at 3 call sites and rendering transient feedback; skipped as scope
+>   creep beyond parity (pre-existing, identical on Android).
+> - A page waiting for settlement logs periodic `GET /api/v1/receipt/<nonce>` → 404 console lines
+>   (the by-design not-yet-settled poll; Chrome auto-logs non-2xx). Invisible to users.
+
+
 ## Session summary (2026-08-14): SOL camera 0×0 collapse fix + campreview gate + legacy-fund removal — COMPLETE
 
 > **Trigger:** founder inspected the latest APK: (1) "drop the legacy fund — I'm the only user";
