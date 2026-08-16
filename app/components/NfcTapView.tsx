@@ -2,18 +2,21 @@ import {View, Text, Pressable, ActivityIndicator} from 'react-native';
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {NfcIcon} from './NfcIcon';
+import {IconCheck, IconClose} from './icons';
 import type {NfcTapPhase} from '../hooks/useNfcTapState';
 
 // Phase → status-view presentation (mirrors ui/src/NfcSession.jsx). `spin` renders a spinner; `icon`
-// renders the NFC contactless mark (the listening/"armed" state) in place of a text glyph.
-const TAP_PHASES: Record<string, {tone: string; glyph?: string; spin?: boolean; icon?: 'nfc'; title: string; sub: string}> = {
+// renders the NFC contactless mark (the listening/"armed" state) or the P3 SVG outcome marks
+// (check = success, close = declined) in place of a text glyph; `glyph` remains for the textual
+// '?' (pending) and '!' (error) marks.
+const TAP_PHASES: Record<string, {tone: string; glyph?: string; spin?: boolean; icon?: 'nfc' | 'check' | 'close'; title: string; sub: string}> = {
   listening: {tone: C.brand, icon: 'nfc', title: 'Hold near the other phone', sub: 'dpay is listening for a tap'},
   linking: {tone: C.brand, spin: true, title: 'Connecting…', sub: 'Linking the two phones'},
   exchanging: {tone: C.brand, spin: true, title: 'Communicating…', sub: 'Keep the phones together'},
   awaitingApproval: {tone: C.brand, spin: true, title: 'Authorizing…', sub: 'Signing on the payer’s phone'},
   settling: {tone: C.brand, spin: true, title: 'Confirming…', sub: 'Keep the phones together while the merchant settles'},
-  success: {tone: C.ok, glyph: '✓', title: 'Done ✓', sub: ''},
-  declined: {tone: C.sub, glyph: '✕', title: 'Declined', sub: 'The payment was declined'},
+  success: {tone: C.ok, icon: 'check', title: 'Done ✓', sub: ''},
+  declined: {tone: C.sub, icon: 'close', title: 'Declined', sub: 'The payment was declined'},
   pending: {tone: C.warn, glyph: '?', title: 'Not confirmed', sub: 'Couldn’t reach the ledger'},
   error: {tone: C.bad, glyph: '!', title: 'Tap failed', sub: 'Move the phones together and try again'},
 };
@@ -62,11 +65,14 @@ export function NfcTapView({phase, reason, role, testID, formattedAmt, networkLa
   return (
     <View style={S.center} testID={testID}>
       <View style={[S.nfcBadge, {borderColor: m.tone}]}>
-        {m.icon === 'nfc' ? <NfcIcon color={m.tone} size={64} /> : m.spin ? <ActivityIndicator size="large" color={m.tone} /> : <Text style={[S.nfcGlyph, {color: m.tone}]}>{m.glyph}</Text>}
+        {m.icon === 'nfc' ? <NfcIcon color={m.tone} size={64} />
+          : m.icon === 'check' ? <IconCheck size={48} color={m.tone} />
+          : m.icon === 'close' ? <IconClose size={48} color={m.tone} />
+          : m.spin ? <ActivityIndicator size="large" color={m.tone} /> : <Text style={[S.nfcGlyph, {color: m.tone}]}>{m.glyph}</Text>}
       </View>
       <Text style={S.nfcTitle}>{title}</Text>
       {sub ? <Text style={S.nfcSub}>{sub}</Text> : null}
-      <Pressable style={S.linkBtn} accessibilityRole="button" accessibilityLabel={terminal ? 'Done' : 'Cancel'} accessibilityState={{disabled: false}} onPress={onClose}><Text style={S.linkText}>{terminal ? 'Done' : 'Cancel'}</Text></Pressable>
+      <Pressable style={S.ghostBtn} accessibilityRole="button" accessibilityLabel={terminal ? 'Done' : 'Cancel'} accessibilityState={{disabled: false}} onPress={onClose}>{terminal ? <IconCheck size={16} color={C.sub}/> : <IconClose size={16} color={C.sub}/>}<Text style={S.ghostBtnText}>{terminal ? 'Done' : 'Cancel'}</Text></Pressable>
     </View>
   );
 }

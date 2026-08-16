@@ -23,6 +23,7 @@ import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useReportLock} from '../hooks/useReportLock';
 import {useShareFeedback, shareConfirmLabel} from '../hooks/useShareFeedback';
 import {withTimeout} from '../lib/timeout';
+import {IconCheck, IconClock, IconInfo, IconShare} from './icons';
 
 // Plain-language per-reason text for the NFC-unavailable info popup. Each ends with the honest
 // fallback that QR always works, so the payer is never stuck.
@@ -176,7 +177,10 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
 
   if (phase === 'paid' && paid) {
     const warn = paid.already || paid.pending;
-    const glyph = paid.pending ? '⋯' : paid.already ? '↩' : '✓';
+    // P3 — the outcome mark is an SVG icon inside the S.check circle (was a text glyph): a fresh
+    // settle + an idempotent replay both show the checkmark; the honest pending hand-off shows a
+    // clock (awaiting the merchant's confirmation). Headline/sub labels are unchanged text.
+    const mark = paid.pending ? <IconClock size={44} color={C.brandInk}/> : <IconCheck size={44} color={C.brandInk}/>;
     const amt = fmtCurrencyAmount(catalog, paid.currency, paid.amount);
     const headline = paid.pending ? `Sent ${amt}` : paid.already ? 'Already paid' : `Paid ✓ ${amt}`;
     const sub = paid.pending ? `to ${paid.who} · awaiting the merchant’s confirmation`
@@ -184,7 +188,7 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
       : `to ${paid.who}`;
     return (
       <View style={S.center}>
-        <View style={[S.check, warn && S.checkAlready]}><Text style={S.checkMark}>{glyph}</Text></View>
+        <View style={[S.check, warn && S.checkAlready]}>{mark}</View>
         <Text style={[S.paidText, warn && S.alreadyText]}>{headline}</Text>
         <Text style={S.paidSub}>{sub}</Text>
         {/* NFC-less receipt hand-back: when the payer settled ONLINE (NFC unavailable) they hold the
@@ -196,7 +200,7 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
         {paid.receipt ? (
           <Pressable
             testID="btn-share-receipt"
-            style={S.linkBtn}
+            style={S.ghostBtn}
             onPress={() => {
               share(shareHandoff('pay', receiptShareBlob(paid.receipt!)));
             }}
@@ -204,10 +208,11 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
             accessibilityLabel="Share receipt"
             accessibilityHint="Share the canister-signed receipt as a link the merchant can open to confirm"
             accessibilityState={{disabled: false}}>
-            <Text style={S.linkText}>{shared ? shareConfirmLabel('Link copied ✓') : 'Share receipt'}</Text>
+            <IconShare size={16} color={C.sub}/>
+            <Text style={S.ghostBtnText}>{shared ? shareConfirmLabel('Link copied ✓') : 'Share receipt'}</Text>
           </Pressable>
         ) : null}
-        <Pressable testID="btn-new" style={S.linkBtn} onPress={reset} accessibilityRole="button" accessibilityLabel="New payment" accessibilityState={{disabled: false}}><Text style={S.linkText}>New payment</Text></Pressable>
+        <Pressable testID="btn-new" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={reset} accessibilityRole="button" accessibilityLabel="New payment" accessibilityState={{disabled: false}}><Text style={S.ghostBtnText}>New payment</Text></Pressable>
       </View>
     );
   }
@@ -233,7 +238,7 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
             </View>
           </>
         )}
-        <Pressable style={S.linkBtn} onPress={() => share(qr.code)} accessibilityRole="button" accessibilityLabel="Share auth code" accessibilityState={{disabled: false}}><Text style={S.linkText}>{shared ? shareConfirmLabel('Copied ✓') : 'Share auth code'}</Text></Pressable>
+        <Pressable style={S.ghostBtn} onPress={() => share(qr.code)} accessibilityRole="button" accessibilityLabel="Share auth code" accessibilityState={{disabled: false}}><IconShare size={16} color={C.sub}/><Text style={S.ghostBtnText}>{shared ? shareConfirmLabel('Copied ✓') : 'Share auth code'}</Text></Pressable>
       </View>
     );
   }
@@ -250,7 +255,7 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
         <View style={S.center}>
           <Text style={S.label}>Unsupported asset</Text>
           <Text testID="review-unsupported" style={S.warnNote}>This payment requests an asset this wallet can’t pay (currency {req.currency}). dpay never swaps, so there’s no fallback. Ask the merchant to request a supported asset.</Text>
-          <Pressable style={S.linkBtn} onPress={reset} accessibilityRole="button" accessibilityLabel="Cancel" accessibilityState={{disabled: false}}><Text style={S.linkTextMuted}>Cancel</Text></Pressable>
+          <Pressable style={[S.ghostBtn, S.ghostBtnMuted]} onPress={reset} accessibilityRole="button" accessibilityLabel="Cancel" accessibilityState={{disabled: false}}><Text style={S.ghostBtnText}>Cancel</Text></Pressable>
         </View>
       );
     }
@@ -415,7 +420,7 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
               <NfcIcon color={C.bad} size={34} off />
               <Pressable style={S.nfcInfoLink} onPress={() => setNfcInfoOpen(true)} accessibilityRole="button" accessibilityLabel="Why NFC is unavailable" accessibilityState={{disabled: false}}>
                 <Text style={S.nfcInfoLinkText}>NFC not available</Text>
-                <Text style={S.nfcInfoGlyph}>ⓘ</Text>
+                <IconInfo size={15} color={C.sub2}/>
               </Pressable>
             </View>
           ) : (

@@ -8,6 +8,7 @@ import {SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
+import {IconCopy, IconRefresh} from './icons';
 
 /**
  * Receive SOL or Solana-USDC — the device's native deposit address, rendered inline in the Receive
@@ -153,12 +154,13 @@ export function SolanaReceiveSheet({
           {onRetryAta ? (
             <Pressable
               testID="btn-sol-receive-check"
-              style={S.linkBtn}
+              style={S.ghostBtn}
               onPress={onRetryAta}
               accessibilityRole="button"
               accessibilityLabel="Check now"
               accessibilityHint="Re-check your balance right now">
-              <Text style={S.linkText}>Check now</Text>
+              <IconRefresh size={16} color={C.sub}/>
+              <Text style={S.ghostBtnText}>Check now</Text>
             </Pressable>
           ) : null}
         </>
@@ -172,6 +174,7 @@ export function SolanaReceiveSheet({
         accessibilityLabel={copied === 'clipboard' ? 'Address copied' : copied === 'shared' ? 'Address shared' : `Copy ${isUsdc ? 'USDC' : 'SOL'} address`}
         style={[S.primaryWide, S.depositCopy]}
         onPress={copy}>
+        <IconCopy size={18} color={C.brandInk}/>
         <Text style={S.primaryText}>{copied === 'clipboard' ? 'Copied ✓' : copied === 'shared' ? 'Shared ✓' : 'Copy address'}</Text>
       </Pressable>
 
@@ -182,12 +185,12 @@ export function SolanaReceiveSheet({
       {returnLabel && onReturn ? (
         <Pressable
           testID="btn-sol-receive-return"
-          style={S.linkBtn}
+          style={[S.ghostBtn, S.ghostBtnMuted]}
           onPress={onReturn}
           accessibilityRole="button"
           accessibilityLabel={returnLabel}
           accessibilityHint="Go back to the Pay tab with this asset selected">
-          <Text style={S.linkText}>{returnLabel}</Text>
+          <Text style={S.ghostBtnText}>{returnLabel}</Text>
         </Pressable>
       ) : null}
 

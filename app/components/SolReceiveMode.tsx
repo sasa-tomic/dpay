@@ -31,6 +31,7 @@ import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
 import {AssetPicker} from './AssetPicker';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {useReportLock} from '../hooks/useReportLock';
+import {IconCheck, IconChevronDown, IconClock, IconCopy, IconQr} from './icons';
 
 const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeight: 44, borderWidth: 1, borderColor: C.sub2, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink};
 
@@ -271,19 +272,20 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
     return (
       <View style={S.center}>
         {toggle}
-        <View style={S.check}><Text style={S.checkMark}>✓</Text></View>
+        <View style={S.check}><IconCheck size={44} color={C.brandInk}/></View>
         <Text testID="sol-req-status" style={S.paidText}>{`Received ${fmtAsset(result.amount, result.cur === 'USDC' ? USDC_DECIMALS : SOL_DECIMALS, result.cur === 'USDC' ? 'USDC' : SOL_UNIT)}`}</Text>
         {result.sig ? (
           <>
             <Text style={S.dim2}>transaction signature</Text>
             <Text testID="sol-req-sig" selectable={true} style={S.sheetAddr}>{result.sig}</Text>
             <Pressable testID="btn-sol-req-copy" style={S.primaryWide} onPress={copySig} accessibilityRole="button" accessibilityLabel="Copy transaction signature">
+              <IconCopy size={18} color={C.brandInk}/>
               <Text style={S.primaryText}>{copied === 'clipboard' ? 'Copied ✓' : copied === 'shared' ? 'Shared ✓' : 'Copy signature'}</Text>
             </Pressable>
           </>
         ) : null}
-        <Pressable testID="btn-sol-req-done" style={S.linkBtn} onPress={reset} accessibilityRole="button" accessibilityLabel="New request" accessibilityState={{disabled: false}}>
-          <Text style={S.linkText}>New request</Text>
+        <Pressable testID="btn-sol-req-done" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={reset} accessibilityRole="button" accessibilityLabel="New request" accessibilityState={{disabled: false}}>
+          <Text style={S.ghostBtnText}>New request</Text>
         </Pressable>
       </View>
     );
@@ -330,16 +332,23 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
                   if (remaining <= 0) return <Text style={S.qrExpired}>Expired — make a new request</Text>;
                   const m = Math.floor(remaining / 60);
                   const s = remaining % 60;
-                  if (m >= 1) return <Text style={S.qrExpiry}>Valid for ~{m} min</Text>;
+                  // P3 — a small clock icon leads the calm validity line (QR-card polish).
+                  if (m >= 1) return (
+                    <View style={{flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6}}>
+                      <IconClock size={14} color={C.sub}/>
+                      <Text style={[S.qrExpiry, {marginTop: 0}]}>Valid for ~{m} min</Text>
+                    </View>
+                  );
                   return <Text style={S.qrExpiryWarn}>Expires in 0:{s.toString().padStart(2, '0')}</Text>;
                 })()}
                 <Text style={S.qrHint}>Waiting for the payer to sign offline…</Text>
-                <Pressable style={S.linkBtn} onPress={() => setScanning(true)} accessibilityRole="button" accessibilityLabel="Scan the payer's signed code" accessibilityHint="Scan the payer's signed QR to submit their offline payment" accessibilityState={{disabled: false}}>
-                  <Text style={S.linkText}>Scan the payer's signed code</Text>
+                <Pressable style={S.ghostBtn} onPress={() => setScanning(true)} accessibilityRole="button" accessibilityLabel="Scan the payer's signed code" accessibilityHint="Scan the payer's signed QR to submit their offline payment" accessibilityState={{disabled: false}}>
+                  <IconQr size={16} color={C.sub}/>
+                  <Text style={S.ghostBtnText}>Scan the payer's signed code</Text>
                 </Pressable>
                 {err && !reconcile ? <Text testID="sol-req-err" style={S.err}>{err}</Text> : null}
-                <Pressable style={S.linkBtn} onPress={reset} accessibilityRole="button" accessibilityLabel="New request" accessibilityState={{disabled: false}}>
-                  <Text style={S.linkTextMuted}>New request</Text>
+                <Pressable style={[S.ghostBtn, S.ghostBtnMuted]} onPress={reset} accessibilityRole="button" accessibilityLabel="New request" accessibilityState={{disabled: false}}>
+                  <Text style={S.ghostBtnText}>New request</Text>
                 </Pressable>
               </>
             ) : busy ? (
@@ -352,8 +361,8 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
                 <QrScanner onScan={onSignedQr} />
                 <Text style={S.dim2}>Scan the payer's signed code</Text>
                 {err ? <Text testID="sol-req-err" style={S.err}>{err}</Text> : null}
-                <Pressable style={S.linkBtn} onPress={() => setScanning(false)} accessibilityRole="button" accessibilityLabel="Back" accessibilityState={{disabled: false}}>
-                  <Text style={S.linkTextMuted}>Back</Text>
+                <Pressable style={[S.ghostBtn, S.ghostBtnMuted]} onPress={() => setScanning(false)} accessibilityRole="button" accessibilityLabel="Back" accessibilityState={{disabled: false}}>
+                  <Text style={S.ghostBtnText}>Back</Text>
                 </Pressable>
               </>
             )}
@@ -378,7 +387,7 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
           accessibilityHint="Choose which asset the payer will send you"
           accessibilityState={{disabled: false}}>
           <Text style={S.currency}>{selectedToken === 'SOL' ? '◎' : '$'}</Text>
-          <Text style={S.caret}>▾</Text>
+          <IconChevronDown size={20} color={C.sub}/>
         </Pressable>
         <TextInput
           testID="sol-req-amount-input"

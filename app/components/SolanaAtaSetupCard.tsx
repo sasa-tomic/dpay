@@ -5,6 +5,7 @@ import {IS_SOLANA_DEVNET} from '../config/constants';
 import {fmtAsset} from '../lib/format';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
+import {IconAlert} from './icons';
 
 /**
  * The one-tap USDC-account (ATA) setup card — the SHARED surface for every place the device's
@@ -78,9 +79,12 @@ export function SolanaAtaSetupCard({
           </>
         ) : null}
         {IS_SOLANA_DEVNET ? (
-          <Text testID="sol-devnet-warning" style={S.warnNote}>
-            ⚠ Connected to Solana devnet. Do NOT send mainnet USDC here — it will not appear. Use devnet USDC only.
-          </Text>
+          // P4 — the '⚠' text glyph became a leading IconAlert (warnRow mirrors warnNote's
+          // sizing in row form). No e2e/jest asserts this text; the testID moves to the wrapper.
+          <View testID="sol-devnet-warning" style={S.warnRow}>
+            <IconAlert size={14} color={C.warn} />
+            <Text style={S.warnRowText}>Connected to Solana devnet. Do NOT send mainnet USDC here — it will not appear. Use devnet USDC only.</Text>
+          </View>
         ) : null}
       </View>
       {busy ? (

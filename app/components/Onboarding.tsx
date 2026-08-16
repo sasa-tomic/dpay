@@ -11,6 +11,7 @@ import {DpayCore} from '../services/native';
 import {fetchWithTimeout} from '../services/relay';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {Logo, Wordmark} from './Logo';
+import {IconCheck} from './icons';
 
 export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: (id: Identity) => void}) {
   const [username, setUsername] = useState('');
@@ -125,10 +126,12 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
               <Text style={S.wordmarkBig}>Back up your wallet</Text>
               <Text style={S.warnNote}>Write down these 24 words and store them safely. They're the ONLY way to recover your wallet if you lose this device.</Text>
               <View testID="mnemonic-backup" style={{flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignSelf: 'stretch', marginTop: 4, marginBottom: 8}}>
+                {/* P4 — chip look moved verbatim into styles.ts (seedChip*); the index Text stays
+                    FIRST inside each mnemonic-word-N testID'd View (e2e strips the leading number). */}
                 {backupMnemonic.map((w, i) => (
-                  <View key={i} testID={`mnemonic-word-${i}`} style={{flexDirection: 'row', alignItems: 'baseline', backgroundColor: C.field, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, margin: 4, borderWidth: 1, borderColor: C.line2}}>
-                    <Text style={{color: C.sub2, fontFamily: 'monospace', fontSize: 11, marginRight: 6}}>{i + 1}</Text>
-                    <Text style={{color: C.ink, fontFamily: 'monospace', fontSize: 15}}>{w}</Text>
+                  <View key={i} testID={`mnemonic-word-${i}`} style={S.seedChip}>
+                    <Text style={S.seedChipIdx}>{i + 1}</Text>
+                    <Text style={S.seedChipWord}>{w}</Text>
                   </View>
                 ))}
               </View>
@@ -142,7 +145,9 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
               <Pressable testID="mnemonic-backup-checkbox" style={{flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch', marginTop: 4, marginBottom: 10, minHeight: 44}} onPress={() => setBackupChecked(!backupChecked)}
                 accessibilityRole="checkbox" accessibilityLabel="I've written down all 24 words" accessibilityState={{checked: backupChecked}}>
                 <View style={{width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: backupChecked ? C.brand : C.sub2, backgroundColor: backupChecked ? C.brand : 'transparent', alignItems: 'center', justifyContent: 'center', marginRight: 10}}>
-                  {backupChecked ? <Text style={{color: C.brandInk, fontWeight: '800', fontSize: 14, lineHeight: 16}}>✓</Text> : null}
+                  {/* P4 — the '✓' glyph Text became IconCheck (the box's checked state is also
+                      conveyed by accessibilityState on the checkbox Pressable). */}
+                  {backupChecked ? <IconCheck size={14} color={C.brandInk} /> : null}
                 </View>
                 <Text style={{color: C.sub, fontSize: 15, flex: 1}}>I've written down all 24 words</Text>
               </Pressable>

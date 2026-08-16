@@ -14,6 +14,7 @@ import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {withTimeout} from '../lib/timeout';
 import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
+import {IconCheck, IconCopy} from './icons';
 
 /**
  * Send SOL or USDC to a native Solana address (Phase 6 — asset-aware direct send). Mirrors
@@ -118,16 +119,17 @@ export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, so
     <>
       {phase === 'done' && signature ? (
         <View style={S.centerAll}>
-          <View style={S.check}><Text style={S.checkMark}>✓</Text></View>
+          <View style={S.check}><IconCheck size={44} color={C.brandInk}/></View>
           <Text testID="sol-send-status" style={S.paidText}>Sent ✓</Text>
           <Text style={S.paidSub}>{fmtAsset(raw, decimals, unit)}</Text>
           <Text style={S.dim2}>transaction signature</Text>
           <Text testID="sol-send-signature" selectable={true} style={S.sheetAddr}>{signature}</Text>
           <Pressable testID="btn-sol-send-copy" style={S.primaryWide} onPress={copySig} accessibilityRole="button" accessibilityLabel="Copy transaction signature">
+            <IconCopy size={18} color={C.brandInk}/>
             <Text style={S.primaryText}>{copied === 'clipboard' ? 'Copied ✓' : copied === 'shared' ? 'Shared ✓' : 'Copy signature'}</Text>
           </Pressable>
           <Text style={S.dim2}>Your balance updates automatically.</Text>
-          <Pressable testID="btn-sol-send-done" style={S.linkBtn} onPress={onClose} accessibilityRole="button" accessibilityLabel="Done"><Text style={S.linkText}>Done</Text></Pressable>
+          <Pressable testID="btn-sol-send-done" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={onClose} accessibilityRole="button" accessibilityLabel="Done"><Text style={S.ghostBtnText}>Done</Text></Pressable>
         </View>
       ) : phase === 'submitting' ? (
         <View style={S.centerAll}>

@@ -108,11 +108,17 @@ export const S = StyleSheet.create({
   reviewAmount: {fontSize: 30, fontWeight: '800', color: C.ink, textAlign: 'center'},
   reviewTo: {fontSize: 17, color: C.ink, marginTop: 6, textAlign: 'center'},
   warnNote: {fontSize: 13, color: C.warn, textAlign: 'center', marginTop: -10, marginBottom: 18, paddingHorizontal: 8, lineHeight: 18},
+  // P4 — icon-led warning row: IconAlert + text where a warning previously LED with a '⚠' text
+  // glyph (SolanaAtaSetupCard's devnet notice). Mirrors warnNote's sizing/margins in row form;
+  // the icon tops the first line so a wrapped body doesn't drag it off-center.
+  warnRow: {flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: -10, marginBottom: 18, paddingHorizontal: 8},
+  warnRowText: {flex: 1, fontSize: 13, color: C.warn, lineHeight: 18},
   // Primary action button — stretched full-width (was a centered minWidth:240 pill that looked
   // narrow/floaty in the ~358px content column). Onboarding Create + Pay Approve now read as
   // substantial primary actions. `primaryWide` is kept for the Receive Request button (same chrome).
-  primary: {backgroundColor: C.brand, borderRadius: 14, height: 56, alignSelf: 'stretch', paddingHorizontal: 24, alignItems: 'center', justifyContent: 'center', marginTop: 14, shadowColor: C.brand, shadowOpacity: 0.4, shadowRadius: 16, shadowOffset: {width: 0, height: 8}, elevation: 8},
-  primaryWide: {backgroundColor: C.brand, borderRadius: 14, height: 56, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center', marginTop: 14, shadowColor: C.brand, shadowOpacity: 0.4, shadowRadius: 16, shadowOffset: {width: 0, height: 8}, elevation: 8},
+  // Row layout + gap so a leading icon (P3: IconCopy on the copy-address buttons) sits inline.
+  primary: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.brand, borderRadius: 14, height: 56, alignSelf: 'stretch', paddingHorizontal: 24, marginTop: 14, shadowColor: C.brand, shadowOpacity: 0.4, shadowRadius: 16, shadowOffset: {width: 0, height: 8}, elevation: 8},
+  primaryWide: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.brand, borderRadius: 14, height: 56, alignSelf: 'stretch', marginTop: 14, shadowColor: C.brand, shadowOpacity: 0.4, shadowRadius: 16, shadowOffset: {width: 0, height: 8}, elevation: 8},
   primaryText: {color: C.brandInk, fontSize: 18, fontWeight: '700'},
   qrCard: {backgroundColor: '#ffffff', padding: 18, borderRadius: 18, borderWidth: 1, borderColor: C.line, marginBottom: 14},
   amountBig: {fontSize: 24, fontWeight: '800', color: C.ink, textAlign: 'center'},
@@ -150,6 +156,20 @@ export const S = StyleSheet.create({
   linkBtn: {marginTop: 18, minHeight: 44, justifyContent: 'center'},
   linkText: {color: C.brand, fontWeight: '600', fontSize: 16},
   linkTextMuted: {color: C.sub, fontWeight: '600', fontSize: 15},
+  // P4 — icon+label row inside a `linkBtn` Pressable (Settings' Privacy policy carries the
+  // external-link glyph). The Pressable keeps the column linkBtn chrome (44pt target); this row
+  // lays a small icon against the label with a hairline gap.
+  linkRow: {flexDirection: 'row', alignItems: 'center', gap: 5},
+  // Ghost button tier (P3 2026-08-16 overhaul) — the affordance rule (every action = a button)
+  // applied to the Pay/Receive action rows that were bare brand text links. A bordered neutral
+  // pill with a leading icon (IconShare/IconQr/...): clearly tappable, but neutral chrome so the
+  // mint brand stays reserved for the primary CTA. `ghostBtnMuted` is the quieter variant for
+  // flow-reset actions ("New request"/"New payment"/"Back") — transparent bg + fainter border so
+  // it reads as tertiary next to a standard ghost. Same 44pt min + marginTop rhythm as linkBtn,
+  // which it replaces on these surfaces (linkBtn itself stays for P4 consumers).
+  ghostBtn: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 18, minHeight: 44, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: C.line, backgroundColor: C.card},
+  ghostBtnText: {color: C.sub, fontWeight: '600', fontSize: 15},
+  ghostBtnMuted: {backgroundColor: 'transparent', borderColor: C.line2},
   smallBtn: {backgroundColor: C.brand, borderRadius: 10, paddingHorizontal: 16, height: 44, alignItems: 'center', justifyContent: 'center', shadowColor: C.brand, shadowOpacity: 0.35, shadowRadius: 12, shadowOffset: {width: 0, height: 6}, elevation: 6},
   smallBtnText: {color: C.brandInk, fontWeight: '700'},
   // Audit P2: a bordered secondary button (Cancel/secondary action parity with the primary Approve).
@@ -167,6 +187,10 @@ export const S = StyleSheet.create({
   histMemo: {fontSize: 12, color: C.sub2, marginTop: 2, fontStyle: 'italic'},
   histAmt: {fontSize: 15, fontWeight: '700', marginRight: 12, fontFamily: 'monospace'},
   histTime: {fontSize: 12, color: C.sub2, fontFamily: 'monospace'},
+  // P4 — leading direction glyph on each Ledger row (IconArrowDownLeft in / IconArrowUpRight out;
+  // t.dir is the reliable 'out' | 'in' field on Txn). alignSelf:center overrides the row's
+  // baseline alignment — an Svg has no text baseline to align to.
+  histDirIcon: {marginRight: 8, alignSelf: 'center'},
   // Ledger page — the transaction list promoted to its own tab (was an inline card under Pay/Receive).
   // `ledgerWrap` is the page-level container (no top border — it is primary content now, not a footer
   // card); `ledgerEmpty` is the muted centered placeholder for a wallet with no transactions yet.
@@ -222,7 +246,9 @@ export const S = StyleSheet.create({
   // margin was zeroed above so the toggle controls its own vertical rhythm — the caret + label sit on
   // the same baseline inside the toggle, and the disclosure's body adds its own spacing below.
   advancedToggle: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', alignSelf: 'stretch', paddingVertical: 10, marginBottom: 4, minHeight: 44},
-  advancedCaret: {color: C.sub2, fontSize: 13, fontFamily: 'monospace'},
+  // P4 — the caret glyph ('▾'/'▸') became IconChevronDown; the wrapper only needs a style when
+  // COLLAPSED (rotate −90° so the chevron points right; expanded = the icon's natural down).
+  advancedCaretClosed: {transform: [{rotate: '-90deg'}]},
   applyBtn: {backgroundColor: C.brand, borderRadius: 14, height: 48, minHeight: 44, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center', marginTop: 16, shadowColor: C.brand, shadowOpacity: 0.35, shadowRadius: 12, shadowOffset: {width: 0, height: 6}, elevation: 6},
   applyBtnText: {color: C.brandInk, fontSize: 16, fontWeight: '700'},
   applyBtnDisabled: {opacity: 0.4, shadowOpacity: 0, elevation: 0},
@@ -246,6 +272,13 @@ export const S = StyleSheet.create({
   backupConfirmBox: {alignSelf: 'stretch', backgroundColor: C.field, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: C.line2},
   seedBox: {alignSelf: 'stretch', backgroundColor: C.bg, borderRadius: 10, padding: 14, borderWidth: 1, borderColor: C.line2, marginTop: 4},
   seedText: {color: C.ink, fontFamily: 'monospace', fontSize: 14, lineHeight: 20},
+  // P4 — numbered BIP-39 word chips (Onboarding backup gate; values moved VERBATIM from the
+  // component's inline styles so the chip look is styleable in ONE place). The chip View carries
+  // the mnemonic-word-N testID and e2e reads its textContent with the leading index stripped —
+  // the index Text must stay FIRST inside the chip.
+  seedChip: {flexDirection: 'row', alignItems: 'baseline', backgroundColor: C.field, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, margin: 4, borderWidth: 1, borderColor: C.line2},
+  seedChipIdx: {color: C.sub2, fontFamily: 'monospace', fontSize: 11, marginRight: 6},
+  seedChipWord: {color: C.ink, fontFamily: 'monospace', fontSize: 15},
   // The PRIMARY funding affordance in the balance header: a clear "Add money" brand button that
   // opens the deposit sheet. Filled brand so it reads as primary; the DEMO_USD faucet (topUpBtn)
   // is the secondary outline pill beside it. minHeight:44 meets the 44pt touch target; the shadow
@@ -268,8 +301,8 @@ export const S = StyleSheet.create({
   sheet: {flex: 1, backgroundColor: C.bg},
   sheetHead: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 20, paddingHorizontal: 22, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: C.line},
   sheetTitle: {fontSize: 20, fontWeight: '800', color: C.ink},
+  // P4 — the '✕' Text became IconClose (BalancesSheet + SettingsSheet); no text style needed.
   sheetClose: {width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: C.field},
-  sheetCloseX: {fontSize: 16, fontWeight: '700', color: C.sub},
   sheetBody: {flexGrow: 1, paddingHorizontal: 22, paddingTop: 22, alignItems: 'center'},
   // Same as sheetBody but vertically CENTERS short content so a sheet with few rows (the Balances hub
   // with 3 currencies, or a deposit sheet's connect state) doesn't pack at the top with a big dead

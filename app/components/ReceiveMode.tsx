@@ -24,6 +24,7 @@ import {AssetPicker} from './AssetPicker';
 import {useReportLock} from '../hooks/useReportLock';
 import {useShareFeedback, shareConfirmLabel} from '../hooks/useShareFeedback';
 import {withTimeout} from '../lib/timeout';
+import {IconCheck, IconChevronDown, IconClock, IconQr, IconShare, IconWifiOff} from './icons';
 
 // The optional merchant memo input — a real secondary field (not a bare text link), mirroring the
 // paste-button affordance pattern (44pt-min touch target + a visible border). Inline (Group E owns
@@ -209,10 +210,10 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
   if (result && !nfcActive) {
     return (
       <View style={S.center}>
-        <View style={S.check}><Text style={S.checkMark}>✓</Text></View>
+        <View style={S.check}><IconCheck size={44} color={C.brandInk}/></View>
         <Text style={S.paidText}>{`Received ${fmtCurrencyAmount(catalog, result.currency, result.amount)}`}</Text>
         <Text style={S.paidSub}>{`from ${result.from}`}</Text>
-        <Pressable style={S.linkBtn} onPress={reset} accessibilityRole="button" accessibilityLabel="New request" accessibilityState={{disabled: false}}><Text style={S.linkText}>New request</Text></Pressable>
+        <Pressable style={[S.ghostBtn, S.ghostBtnMuted]} onPress={reset} accessibilityRole="button" accessibilityLabel="New request" accessibilityState={{disabled: false}}><Text style={S.ghostBtnText}>New request</Text></Pressable>
       </View>
     );
   }
@@ -245,7 +246,14 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
           const s = remaining % 60;
           // While there's a minute+ of headroom, show the calm "~N min" form; under a minute, count
           // down seconds (and tint red) so the merchant knows to refresh before a payer scans a stale QR.
-          if (m >= 1) return <Text style={S.qrExpiry}>Valid for ~{m} min</Text>;
+          // P3 — a small clock icon leads the validity line (QR-card polish; no layout change near
+          // the QrCode itself — this sits below the amount, outside the white card).
+          if (m >= 1) return (
+            <View style={{flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6}}>
+              <IconClock size={14} color={C.sub}/>
+              <Text style={[S.qrExpiry, {marginTop: 0}]}>Valid for ~{m} min</Text>
+            </View>
+          );
           return <Text style={S.qrExpiryWarn}>Expires in 0:{s.toString().padStart(2, '0')}</Text>;
         })()}
         <Text style={S.qrHint}>Waiting for payment{online ? '…' : ' — reconnecting…'}</Text>
@@ -254,7 +262,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
             merchant knows incoming payments won't appear until reconnected (no false "still waiting"). */}
         {!online ? (
           <View style={S.qrOfflinePill}>
-            <View style={[S.dot, {backgroundColor: C.bad}]} />
+            <IconWifiOff size={14} color={C.bad}/>
             <Text style={S.qrOfflinePillText}>Offline — won't see payments until reconnected</Text>
           </View>
         ) : null}
@@ -263,7 +271,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
                 EXACT base64url the QR carries (no new codec); the payer still taps Approve. */}
             <Pressable
               testID="btn-share-request"
-              style={S.linkBtn}
+              style={S.ghostBtn}
               onPress={() => {
                 share(shareHandoff('req', reqQr.value));
               }}
@@ -271,18 +279,19 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
               accessibilityLabel="Share request link"
               accessibilityHint="Share this request as a link the payer can open to pay"
               accessibilityState={{disabled: false}}>
-              <Text style={S.linkText}>{shared ? shareConfirmLabel('Link copied ✓') : 'Share request link'}</Text>
+              <IconShare size={16} color={C.sub}/>
+              <Text style={S.ghostBtnText}>{shared ? shareConfirmLabel('Link copied ✓') : 'Share request link'}</Text>
             </Pressable>
             {scanning ? (
               <><QrScanner onScan={onSignedQr} /><Text style={S.dim2}>Scan the payer's signed QR</Text></>
             ) : (
               <>
-                <Pressable style={S.linkBtn} onPress={() => setScanning(true)} accessibilityRole="button" accessibilityLabel="Scan payer's signed QR" accessibilityHint="Scan the payer's signed QR to submit their offline payment" accessibilityState={{disabled: false}}><Text style={S.linkText}>Scan payer's signed QR</Text></Pressable>
+                <Pressable style={S.ghostBtn} onPress={() => setScanning(true)} accessibilityRole="button" accessibilityLabel="Scan payer's signed QR" accessibilityHint="Scan the payer's signed QR to submit their offline payment" accessibilityState={{disabled: false}}><IconQr size={16} color={C.sub}/><Text style={S.ghostBtnText}>Scan payer's signed QR</Text></Pressable>
                 <Text style={S.dim2}>If the payer paid without scanning your code, tap here to confirm with their phone.</Text>
               </>
             )}
             {err ? <Text style={S.err}>{err}</Text> : null}
-            <Pressable style={S.linkBtn} onPress={reset} accessibilityRole="button" accessibilityLabel="New request" accessibilityState={{disabled: false}}><Text style={S.linkTextMuted}>New request</Text></Pressable>
+            <Pressable style={[S.ghostBtn, S.ghostBtnMuted]} onPress={reset} accessibilityRole="button" accessibilityLabel="New request" accessibilityState={{disabled: false}}><Text style={S.ghostBtnText}>New request</Text></Pressable>
           </>
         ) : null}
       </View>
@@ -346,7 +355,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
             stale '25.00' is never reinterpreted as 25 BTC (8-decimal) on the new asset. */}
         <Pressable testID="req-prefix" style={S.prefixBtn} onPress={() => setPickOpen(true)} accessibilityRole="button" accessibilityLabel="Choose settlement currency" accessibilityHint="Pick which asset the payer will send you" accessibilityState={{disabled: false}}>
           <Text style={S.currency}>{reqPrefix}</Text>
-          <Text style={S.caret}>▾</Text>
+          <IconChevronDown size={20} color={C.sub}/>
         </Pressable>
         <TextInput testID="amount-input" style={S.amountInput} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={C.sub2} accessibilityLabel="Amount to receive" accessibilityHint="The amount the payer will send you" />
       </View>

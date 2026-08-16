@@ -3,6 +3,7 @@ import {View, Text, Pressable} from 'react-native';
 import {S} from '../styles';
 import {C} from '../config/palette';
 import {assetTestKey, displayName, fmtCurrencyAmount, type CurrencyDescriptor} from '../config/catalog';
+import {IconArrowDownLeft, IconArrowUpRight} from './icons';
 import type {Txn} from '../lib/types';
 
 // Filter-chip label for a currency. Currency 0 (DEMO_USD) has symbol '$' (length 1) so displayName
@@ -74,6 +75,12 @@ export function Ledger({history, catalog}: {history: Txn[]; catalog: CurrencyDes
         const amtTxt = fmtCurrencyAmount(catalog, t.currency, t.amount);
         return (
           <View key={t.nonce} style={S.histRow}>
+            {/* P4 — direction glyph leading each row (t.dir is Txn's reliable 'out' | 'in' field):
+                incoming = arrow-down-left in brand mint, outgoing = arrow-up-right neutral. The
+                icon renders no textContent, so the asserted amounts/memos are untouched. */}
+            <View style={S.histDirIcon}>
+              {t.dir === 'out' ? <IconArrowUpRight size={16} color={C.sub} /> : <IconArrowDownLeft size={16} color={C.brand} />}
+            </View>
             <View style={S.histWhoCol}>
               <Text style={S.histWho}>{t.dir === 'out' ? `to ${t.who || '—'}` : `from ${t.who || '—'}`}</Text>
               {t.memo ? <Text style={S.histMemo} testID={`hist-memo-${i}`}>{t.memo}</Text> : null}

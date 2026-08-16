@@ -14,6 +14,7 @@ import {resolveOnrampProvider, connectWallet, getChainId, sendTransaction, waitF
 import {loadDeposit, saveDeposit, clearDeposit} from '../services/ckerc20Persist';
 import {withTimeout} from '../lib/timeout';
 import {useEscapeToClose} from '../hooks/useHotkeys';
+import {IconCheck} from './icons';
 
 // ckERC20 (ckUSDC) / native ckETH direct onramp — a wallet-connect flow. The user connects their OWN
 // Ethereum wallet (MetaMask/Rabby; window.ethereum on web), dpay BUILDS the transaction(s), and the
@@ -439,11 +440,11 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
         </View>
       ) : (
         <View style={S.centerAll}>
-          <View style={S.check}><Text style={S.checkMark}>✓</Text></View>
+          <View style={S.check}><IconCheck size={44} color={C.brandInk}/></View>
           <Text style={S.paidText}>Deposited ✓</Text>
           <Text style={S.paidSub}>{`${display.nativeAsset} minted to your wallet.`}</Text>
           <Text style={S.dim2}>Your balance updates automatically.</Text>
-          <Pressable testID="btn-ckerc20-deposit-done" style={S.linkBtn} onPress={onClose} accessibilityRole="button" accessibilityLabel="Done" accessibilityState={{disabled: false}}><Text style={S.linkText}>Done</Text></Pressable>
+          <Pressable testID="btn-ckerc20-deposit-done" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={onClose} accessibilityRole="button" accessibilityLabel="Done" accessibilityState={{disabled: false}}><Text style={S.ghostBtnText}>Done</Text></Pressable>
         </View>
       )}
       {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}

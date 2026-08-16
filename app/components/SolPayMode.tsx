@@ -4,6 +4,8 @@ import {QrCode} from './QrCode';
 import {FundFirstPanel} from './FundFirstPanel';
 import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
 import {S} from '../styles';
+import {C} from '../config/palette';
+import {IconClock, IconScan, IconShare} from './icons';
 import {QR_SIZE} from '../config/constants';
 import type {SolPayGate} from '../config/assets';
 import type {Identity} from '../lib/types';
@@ -237,7 +239,12 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
         {!nfcActive ? (
           <>
             <View testID="sol-pay-scan" style={S.scanWrap}>
-              <Text style={S.dim2}>Scan the merchant's payment code to pay offline.</Text>
+              {/* P3 — a leading IconScan on the hint only; the camBox/scanWrap/center nesting is
+                  UNTOUCHED (the 0×0 camBox collapse class is gated by `just campreview`). */}
+              <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 8}}>
+                <IconScan size={18} color={C.sub}/>
+                <Text style={[S.dim2, {marginTop: 0}]}>Scan the merchant's payment code to pay offline.</Text>
+              </View>
               <QrScanner onScan={onScan} />
             </View>
             {err ? <Text testID="sol-pay-err" style={S.err}>{err}</Text> : null}
@@ -304,8 +311,9 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
             <Text style={S.notPaidText}>Cancel</Text>
           </Pressable>
         </View>
-        <Pressable style={S.linkBtn} onPress={() => share(solpayUri)} accessibilityRole="button" accessibilityLabel="Share signed payment" accessibilityState={{disabled: false}}>
-          <Text style={S.linkText}>{shared ? shareConfirmLabel('Copied ✓') : 'Share signed code'}</Text>
+        <Pressable style={S.ghostBtn} onPress={() => share(solpayUri)} accessibilityRole="button" accessibilityLabel="Share signed payment" accessibilityState={{disabled: false}}>
+          <IconShare size={16} color={C.sub}/>
+          <Text style={S.ghostBtnText}>{shared ? shareConfirmLabel('Copied ✓') : 'Share signed code'}</Text>
         </Pressable>
       </View>
     );
@@ -318,12 +326,14 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
   return (
     <View style={S.center}>
       {toggle}
-      <View style={[S.check, S.checkAlready]}><Text style={S.checkMark}>⋯</Text></View>
+      {/* P3 — SVG mark (was a '⋯' text glyph): the SOL pay outcome is ALWAYS the honest pending
+          hand-off, so the clock reads on the warn-tinted checkAlready circle. */}
+      <View style={[S.check, S.checkAlready]}><IconClock size={44} color={C.brandInk}/></View>
       <Text testID="sol-pay-status" style={[S.paidText, S.alreadyText]}>{paidAmt ? `Sent ${paidAmt}` : 'Sent'}</Text>
       <Text style={S.paidSub}>{`${paidTo}awaiting the merchant's confirmation`}</Text>
       <Text style={S.dim2}>Your balance updates when the merchant settles this on-chain.</Text>
-      <Pressable testID="btn-sol-pay-done" style={S.linkBtn} onPress={reset} accessibilityRole="button" accessibilityLabel="New payment" accessibilityState={{disabled: false}}>
-        <Text style={S.linkText}>New payment</Text>
+      <Pressable testID="btn-sol-pay-done" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={reset} accessibilityRole="button" accessibilityLabel="New payment" accessibilityState={{disabled: false}}>
+        <Text style={S.ghostBtnText}>New payment</Text>
       </Pressable>
     </View>
   );

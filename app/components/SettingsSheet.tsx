@@ -10,6 +10,7 @@ import {DpayCore} from '../services/native';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {SheetOverlay} from './SheetOverlay';
+import {IconChevronDown, IconClose, IconExternalLink} from './icons';
 
 /**
  * Settings sheet — server config + reset (app configuration only). Moved off the main wallet screen
@@ -148,7 +149,7 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
         <StatusBar barStyle="light-content" backgroundColor={C.bg} />
         <View style={S.sheetHead}>
           <Text style={S.sheetTitle}>Settings</Text>
-          <Pressable testID="btn-settings-close" style={S.sheetClose} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close settings" accessibilityState={{disabled: false}}><Text style={S.sheetCloseX}>✕</Text></Pressable>
+          <Pressable testID="btn-settings-close" style={S.sheetClose} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close settings" accessibilityState={{disabled: false}}><IconClose size={18} color={C.sub} /></Pressable>
         </View>
 
         <ScrollView contentContainerStyle={S.sheetCenter} keyboardShouldPersistTaps="handled">
@@ -358,7 +359,12 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
               onPress={() => Linking.openURL(PRIVACY_URL)}
               accessibilityRole="link"
               accessibilityLabel="Privacy policy">
-              <Text style={S.linkTextMuted}>Privacy policy</Text>
+              {/* P4 — external-link glyph signals the link opens outside the app (IconExternalLink
+                  renders no textContent, so the census/asserted label is untouched). */}
+              <View style={S.linkRow}>
+                <IconExternalLink size={12} color={C.sub2} />
+                <Text style={S.linkTextMuted}>Privacy policy</Text>
+              </View>
             </Pressable>
           </View>
 
@@ -376,7 +382,11 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
               accessibilityHint="Server configuration for the wallet's relay"
               accessibilityState={{disabled: false, expanded: advancedOpen}}>
               <Text style={S.advancedLabel}>Advanced</Text>
-              <Text style={S.advancedCaret}>{advancedOpen ? '▾' : '▸'}</Text>
+              {/* P4 — the '▾'/'▸' caret glyph became IconChevronDown; collapsed applies the −90°
+                  rotation so it points right (the toggle's accessibilityState carries expansion). */}
+              <View style={advancedOpen ? undefined : S.advancedCaretClosed}>
+                <IconChevronDown size={14} color={C.sub2} />
+              </View>
             </Pressable>
             {advancedOpen ? (
               <View>

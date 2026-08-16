@@ -15,6 +15,7 @@ import {DpayCore} from '../services/native';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {withTimeout} from '../lib/timeout';
+import {IconCheck, IconCopy} from './icons';
 
 /**
  * Withdraw a chain-key asset to a native address (ckBTC → BTC, native ckETH → ETH, ckERC20 tokens like
@@ -116,16 +117,17 @@ export function WithdrawSheet({identity, relayUrl, currency, decimals, display, 
     <>
       {phase === 'done' && receipt ? (
         <View style={S.centerAll}>
-          <View style={S.check}><Text style={S.checkMark}>✓</Text></View>
+          <View style={S.check}><IconCheck size={44} color={C.brandInk}/></View>
           <Text testID="withdraw-status" style={S.paidText}>Withdrawn ✓</Text>
           <Text style={S.paidSub}>{fmtAsset(receipt.amount, decimals, display.nativeAsset, display.amountDecimals)}</Text>
           <Text style={S.dim2}>sent to</Text>
           <Text testID="withdraw-destination" selectable={true} style={S.sheetAddr}>{receipt.btcAddress}</Text>
           <Pressable testID="btn-copy-destination" style={S.primaryWide} onPress={copyDest} accessibilityRole="button" accessibilityLabel="Copy destination address" accessibilityState={{disabled: false}}>
+            <IconCopy size={18} color={C.brandInk}/>
             <Text style={S.primaryText}>{copied === 'clipboard' ? 'Copied ✓' : copied === 'shared' ? 'Shared ✓' : 'Copy address'}</Text>
           </Pressable>
           <Text style={S.dim2}>Your balance updates automatically.</Text>
-          <Pressable testID="btn-withdraw-done" style={S.linkBtn} onPress={onClose} accessibilityRole="button" accessibilityLabel="Done" accessibilityState={{disabled: false}}><Text style={S.linkText}>Done</Text></Pressable>
+          <Pressable testID="btn-withdraw-done" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={onClose} accessibilityRole="button" accessibilityLabel="Done" accessibilityState={{disabled: false}}><Text style={S.ghostBtnText}>Done</Text></Pressable>
         </View>
       ) : phase === 'submitting' ? (
         <View style={S.centerAll}>
