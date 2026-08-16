@@ -848,6 +848,21 @@ async fn landing_page_answers_the_merchant_path() {
         html.contains("<a class=\"ghost\" href=\"/wallet\">Open the web wallet</a>"),
         "merchant section must link the web wallet"
     );
+    // the 3-step "Take payments in minutes" path (2026-08-16): the section must not just point at
+    // the wallet — it must walk the whole become-a-merchant path in three named steps.
+    for required in [
+        "Take payments in minutes",
+        "Open the web wallet",
+        "Create your wallet",
+        "backup words",
+        "Receive is your terminal",
+        "share the link",
+    ] {
+        assert!(
+            html.contains(required),
+            "merchant 3-step path must contain {required:?}"
+        );
+    }
 }
 
 /// Without a configured APK the download route is a clean 404 — not an empty 200.

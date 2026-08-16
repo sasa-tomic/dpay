@@ -413,6 +413,21 @@
   .merch-line a{color:var(--ink-2);font-weight:620;text-decoration:none;border-bottom:1px solid var(--line);padding-bottom:1px;transition:color .16s ease,border-color .16s ease}
   .merch-line a:hover{color:var(--accent);border-color:var(--accent)}
 
+  /* ---------- merchants: the 3-step path (compact, no images) ---------- */
+  .mlab{
+    display:block;margin-top:46px;
+    font-family:var(--mono);font-size:.72rem;font-weight:600;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-3);
+  }
+  .msteps{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:14px;max-width:880px}
+  .mstep{padding:20px 20px 22px;border-radius:16px;background:var(--card);border:1px solid var(--line)}
+  .mstep .n{
+    font-family:var(--mono);font-size:.62rem;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);
+  }
+  .mstep b{display:block;margin-top:9px;font-size:1.02rem;font-weight:720;letter-spacing:-.015em}
+  .mstep .d{display:block;margin-top:6px;color:var(--ink-2);font-size:.93rem;line-height:1.55}
+  .mstep .d a{color:var(--ink);font-weight:620;text-decoration:none;border-bottom:1px solid var(--line);padding-bottom:1px;transition:color .16s ease,border-color .16s ease}
+  .mstep .d a:hover{color:var(--accent);border-color:var(--accent)}
+
   .get-side{border-left:1px solid var(--line);padding-left:44px}
   .get-side .row{display:flex;gap:14px;padding:16px 0;border-bottom:1px solid var(--line-2)}
   .get-side .row:last-child{border-bottom:0}
@@ -442,6 +457,7 @@
     .rail .step .d{max-width:none}
     .rail .arrow{align-self:center;margin:0;transform:rotate(90deg)}
     .bento{grid-template-columns:1fr}
+    .msteps{grid-template-columns:1fr}
     .tile.big,.tile.wide{grid-column:auto;grid-row:auto}
     .tile.wide{flex-direction:column;align-items:flex-start;gap:14px}
     .get-grid{grid-template-columns:1fr;gap:32px}
@@ -668,6 +684,24 @@
     <span class="kicker">For merchants</span>
     <h2>Accept payments.</h2>
     <p class="sec-sub">The terminal is built in. Open dpay on any phone or in a browser, choose Receive, and show your QR — anyone with the app can pay you.</p>
+    <span class="mlab">Take payments in minutes</span>
+    <div class="msteps">
+      <div class="mstep">
+        <span class="n">Step 1</span>
+        <b>Open the web wallet</b>
+        <span class="d">In any browser, nothing to install. <a href="/wallet">dpay.kalaj.org/wallet</a>.</span>
+      </div>
+      <div class="mstep">
+        <span class="n">Step 2</span>
+        <b>Create your wallet</b>
+        <span class="d">Pick a username, write down your backup words. Your key stays on your device.</span>
+      </div>
+      <div class="mstep">
+        <span class="n">Step 3</span>
+        <b>Receive is your terminal</b>
+        <span class="d">Enter an amount, show the QR — or share the link. The customer scans and pays.</span>
+      </div>
+    </div>
     <div class="cta-row">
       <a class="ghost" href="/wallet">Open the web wallet</a>
     </div>
