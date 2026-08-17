@@ -200,9 +200,13 @@ dump_ui() {
 # tap_rid <resource-id>: tap the center of the first node carrying resource-id
 tap_rid() {
   local rid="$1"
-  dump_ui || { echo "FAIL nav: uiautomator dump failed"; exit 2; }
-  local xy
-  xy="$(python3 - "$ART/ui.xml" "$rid" <<'PY'
+  local xy="" attempt
+  # One bounded retry: onboarding transitions can retire an anchor between the caller's dump
+  # and ours (race window ~1s). Returning 1 (not exit) lets ensure_wallet's `|| true` absorb
+  # a vanished anchor while `set -e` keeps direct callers fail-loud.
+  for attempt in 1 2; do
+    dump_ui || { echo "FAIL nav: uiautomator dump failed"; exit 2; }
+    xy="$(python3 - "$ART/ui.xml" "$rid" <<'PY'
 import sys, xml.etree.ElementTree as ET
 xml, rid = sys.argv[1], sys.argv[2]
 for node in ET.parse(xml).getroot().iter('node'):
@@ -214,7 +218,10 @@ for node in ET.parse(xml).getroot().iter('node'):
         break
 PY
 )"
-  [ -n "$xy" ] || { echo "FAIL nav: anchor '$rid' not found; ui dump: $ART/ui.xml"; exit 2; }
+    [ -n "$xy" ] && break
+    [ "$attempt" = 2 ] || sleep 1
+  done
+  [ -n "$xy" ] || { echo "FAIL nav: anchor '$rid' not found; ui dump: $ART/ui.xml"; return 1; }
   $ADB shell input tap $xy
 }
 
