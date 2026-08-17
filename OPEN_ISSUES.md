@@ -20,16 +20,25 @@
 > there — zero work). Est. S / 1–2 h. Research artifacts: `third_party/wallet-core` clone (registry
 > analysis). Do NOT re-derive the research.
 >
-> Prior session context: the 2026-08-16/17 session completed the radical
-> visual overhaul (plan `2026-08-16-visual-overhaul.md`, commits `e3b6bd2`→`451384e`): lucide-style
-> SVG icon system (17 icons, `app/components/icons.tsx`), per-family asset monogram chips
-> (`AssetGlyph.tsx`), ghost-button action tiers, ledger direction icons, settings/onboarding polish,
-> dead-glyph-style + dead-icon + dead-palette-token + 13 pre-existing dead-style sweep, e2e flow-24
-> contract fix (strip decorative monogram prefix), visual baselines reseeded+committed (`f119bda`),
-> landing screenshots regenerated from the redesigned app via `e2e/stage-landing-shots.mjs`
-> (`17b3bee`), and an IMPORTANT-8 independent audit (clean; its findings fixed in `451384e`).
-> Gates at session end: `just verify` full GREEN (e2e 78/78), jest 40 suites 834/834, tsc clean,
-> `just app` both self-checks PASS, `just campreview` GREEN both rails, `just ondevice` 11/11.
+> Prior session context: the 2026-08-16/17 sessions delivered TWO design waves on top of `df846f8`.
+> (1) Visual overhaul (commits `e3b6bd2`→`451384e`): lucide-style SVG icon system (17 icons,
+> `app/components/icons.tsx`), per-family asset monogram chips (`AssetGlyph.tsx`), ghost-button
+> action tiers, dead-code sweeps, e2e flow-24 contract fix, baselines reseeded.
+> (2) COMPLETE REDESIGN "Traveler Paper" (plan `2026-08-17-complete-redesign.md`, commits
+> `56c66a9`→HEAD): the founder rejected the incremental pass and ordered a ground-up light
+> identity — porcelain bg / ink text / tangerine `#FF5A1F` brand / Space Grotesk + IBM Plex Mono
+> (font TTFs in `app/android res/font` + `e2e/web/fonts`, @font-face families MUST equal res/font
+> filenames), styles.ts full value rewrite (key names preserved), new Android launcher brand
+> (porcelain d on tangerine tile, all densities + monochrome + splash), full landing.html rewrite
+> (porcelain editorial, tilted phone stage, ink offline band — merchant-section copy is PINNED by
+> relay test `landing_page_answers_the_merchant_path`, update both together), privacy.html migrated,
+> StatusBar dark-content ×4, e2e flow-14 focus-ring + store-assets BRAND constants re-pinned,
+> landing shots re-staged + baselines reseeded. Gates at session end: `just verify` full GREEN
+> (e2e 78/78), jest 834/834, tsc clean, `just app` both self-checks PASS, `just campreview` GREEN
+> both rails (on a FRESH `dpay_api36` emulator — the external `nurbly2` AVD has a broken camera
+> HAL; `campreview` `tap_rid` hardened with bounded retry vs onboarding anchor races), `just
+> ondevice` 11/11. R6 IMPORTANT-8 audit: privacy dark remnant + dead plex_mono_600 payload fixed.
+> PROD IS BEHIND HEAD: ship via `just deploy-ic && just apk && just up`.
 > NOTE: prod is now BEHIND HEAD by the overhaul commits (last prod ship = `df846f8`) — founder
 > may run `just deploy-ic && just apk && just up` to ship the new look; nothing in the overhaul
 > touches the canister, so `deploy-ic` is a no-op byte-refresh.
