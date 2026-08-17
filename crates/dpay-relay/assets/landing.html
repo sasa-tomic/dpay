@@ -3,37 +3,46 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>dpay: pay anyone, online or offline</title>
-<meta name="description" content="Instant, offline payments. Tap or scan to pay. It clears in seconds. Your key stays on your phone." />
-<meta name="color-scheme" content="dark" />
+<title>dpay — pay anywhere, even offline</title>
+<meta name="description" content="Pocket money for travelers. Tap or scan to pay, online or offline — it clears in seconds and your key never leaves your phone." />
+<meta name="color-scheme" content="light" />
+<meta name="theme-color" content="#F4F1E8" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&amp;family=IBM+Plex+Mono:wght@500;600&amp;display=swap" rel="stylesheet" />
 <style>
+  /* ————————————————————————————————————————————————
+     dpay · "Traveler Paper" (2026-08-17)
+     One palette with the app (app/config/palette.ts) — keep in lockstep.
+     Brand discipline: tangerine is spent ONLY on CTAs, active marks, and the
+     logo. Body copy is always ink. Green is success-only, amber is caution.
+     ———————————————————————————————————————————————— */
   :root{
-    --bg:#06070a;
-    --bg-2:#080a0e;
-    --panel:#0c0f14;
-    --panel-2:#0e1218;
-    --card:rgba(255,255,255,.022);
-    --ink:#f1f4f7;
-    --ink-2:#a6afba;
-    --ink-3:#69727d;
-    --ink-4:#464e58;
-    --accent:#3ee0ac;
-    --accent-2:#22b98a;
-    --accent-soft:rgba(62,224,172,.12);
-    --accent-line:rgba(62,224,172,.28);
-    --accent-ink:#03170f;
-    --warn:#f0c46a;
-    --line:rgba(255,255,255,.075);
-    --line-2:rgba(255,255,255,.045);
-    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
-    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-    --shadow:0 40px 90px -44px rgba(0,0,0,.92);
+    --bg:#F4F1E8;          /* warm porcelain page */
+    --panel:#FDFCF9;       /* raised sheet */
+    --panel2:#F8F6F0;      /* inset wells */
+    --card:#FFFFFF;        /* white cards */
+    --ink:#1B1A17;
+    --sub:#676257;
+    --sub2:#A6A093;
+    --brand:#FF5A1F;       /* tangerine — CTA / active / logo ONLY */
+    --brand2:#E0480F;      /* pressed */
+    --ok:#0E9F6E;          /* success / online ONLY */
+    --warn:#B45309;
+    --line:#E5DFD1;        /* hairline on porcelain */
+    --line2:#EDE8DC;       /* softer hairline on cards */
+    --mono:'IBM Plex Mono',ui-monospace,'SF Mono',SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace;
+    --sans:'Space Grotesk',system-ui,-apple-system,'Segoe UI',sans-serif;
+    --sh-xl:0 44px 90px -46px rgba(27,26,23,.42), 0 16px 34px -22px rgba(27,26,23,.26);
+    --sh-lg:0 30px 60px -34px rgba(27,26,23,.30);
+    --sh-md:0 16px 36px -22px rgba(27,26,23,.22);
+    --sh-sm:0 8px 20px -12px rgba(27,26,23,.16);
   }
   *{box-sizing:border-box}
   html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
   body{
     margin:0;
-    font-family:var(--sans);
+    font-family:var(--sans);font-weight:500;
     color:var(--ink);
     background:var(--bg);
     line-height:1.55;
@@ -42,443 +51,498 @@
     overflow-x:hidden;
   }
   a{color:inherit}
-  /* film grain sits under everything; content lifts above it */
-  .grain{position:fixed;inset:0;width:100%;height:100%;opacity:.05;mix-blend-mode:overlay;pointer-events:none;z-index:0}
+  ::selection{background:rgba(255,90,31,.22)}
+  :focus-visible{outline:2px solid var(--brand);outline-offset:3px;border-radius:6px}
+
+  /* paper grain — a whisper of tooth on the porcelain */
+  .grain{position:fixed;inset:0;width:100%;height:100%;opacity:.04;mix-blend-mode:multiply;pointer-events:none;z-index:0}
   nav,header,main,footer{position:relative;z-index:1}
-  .wrap{max-width:1120px;margin:0 auto;padding:0 26px}
+  .wrap{max-width:1128px;margin:0 auto;padding:0 28px}
+  section{padding:104px 0;scroll-margin-top:76px}
 
+  /* eyebrows — the receipt voice */
   .kicker{
-    display:inline-flex;align-items:center;gap:9px;
-    font-family:var(--mono);font-size:.74rem;font-weight:600;
-    letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3);
+    display:inline-flex;align-items:center;gap:10px;
+    font-family:var(--mono);font-size:.72rem;font-weight:600;
+    letter-spacing:.2em;text-transform:uppercase;color:var(--sub);
   }
-  .kicker::before{content:"";width:22px;height:1px;background:var(--accent-line)}
+  .kicker::before{content:"";width:22px;height:2px;border-radius:2px;background:var(--brand)}
 
-  /* ---------- top bar ---------- */
-  nav{
-    display:flex;align-items:center;justify-content:space-between;
-    max-width:1120px;margin:0 auto;padding:24px 26px;
+  h2{
+    font-size:clamp(2.05rem,3.8vw,3rem);line-height:1.06;
+    letter-spacing:-.035em;font-weight:700;margin:18px 0 0;max-width:22ch;
   }
-  .word{font-size:1.3rem;font-weight:800;letter-spacing:-.03em}
-  .word b{color:var(--accent)}
-  .word .dot{color:var(--accent)}
-  .nav-right{display:flex;align-items:center;gap:8px}
+  h2 .dot{color:var(--brand);font-style:normal}
+  .sec-sub{color:var(--sub);margin:18px 0 0;font-size:1.08rem;line-height:1.68;max-width:58ch;font-weight:500}
+  .sec-sub b{color:var(--ink);font-weight:600}
+
+  /* ————— top bar ————— */
+  nav{
+    position:sticky;top:0;z-index:50;
+    display:flex;align-items:center;justify-content:space-between;
+    max-width:1128px;margin:0 auto;padding:16px 28px;
+    background:rgba(244,241,232,.82);
+    -webkit-backdrop-filter:blur(14px) saturate(1.15);
+            backdrop-filter:blur(14px) saturate(1.15);
+    border-bottom:1px solid transparent;
+    transition:border-color .25s ease;
+  }
+  nav.scrolled{border-bottom-color:var(--line)}
+  .brandmark{display:inline-flex;align-items:center;gap:11px;text-decoration:none}
+  .brandmark svg{width:34px;height:34px;display:block;border-radius:9px;box-shadow:var(--sh-sm)}
+  .word{font-size:1.32rem;font-weight:700;letter-spacing:-.03em;color:var(--ink)}
+  .word b{color:var(--brand);font-weight:700}
+  .nav-right{display:flex;align-items:center;gap:6px}
   .navlink{
-    color:var(--ink-2);text-decoration:none;font-size:.92rem;font-weight:600;letter-spacing:-.01em;
-    padding:9px 14px;border-radius:10px;
+    color:var(--sub);text-decoration:none;font-size:.95rem;font-weight:600;letter-spacing:-.01em;
+    padding:9px 14px;border-radius:11px;
     transition:color .16s ease,background .16s ease;
   }
-  .navlink:hover{color:var(--ink);background:rgba(255,255,255,.045)}
-  .navlink.ghost{border:1px solid var(--line)}
-
-  /* ---------- hero ---------- */
-  .hero{position:relative;padding:52px 0 92px;overflow:hidden}
-  .hero::before{
-    content:"";position:absolute;inset:-320px -10% auto -10%;height:820px;z-index:0;pointer-events:none;
-    background:
-      radial-gradient(720px 460px at 18% 4%, rgba(62,224,172,.15), transparent 60%),
-      radial-gradient(560px 420px at 96% -6%, rgba(62,224,172,.06), transparent 58%);
+  .navlink:hover{color:var(--ink);background:rgba(27,26,23,.055)}
+  .navlink.ghost{
+    color:var(--ink);border:1px solid var(--line);background:var(--card);
+    box-shadow:0 1px 2px rgba(27,26,23,.05);
+    display:inline-flex;align-items:center;gap:7px;
   }
-  .hero::after{
-    content:"";position:absolute;inset:0;z-index:0;pointer-events:none;opacity:.5;
-    -webkit-mask-image:radial-gradient(680px 520px at 20% 22%, #000, transparent 72%);
-            mask-image:radial-gradient(680px 520px at 20% 22%, #000, transparent 72%);
-    background-image:
-      linear-gradient(rgba(255,255,255,.028) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255,255,255,.028) 1px, transparent 1px);
-    background-size:52px 52px;
+  .navlink.ghost:hover{border-color:var(--sub2)}
+  .navlink.ghost svg{width:14px;height:14px;color:var(--sub)}
+
+  /* ————— hero ————— */
+  .hero{position:relative;padding:72px 0 118px;overflow:hidden}
+  .hero::before{ /* morning-light wash */
+    content:"";position:absolute;inset:-260px -8% auto -8%;height:880px;z-index:0;pointer-events:none;
+    background:
+      radial-gradient(860px 480px at 14% 0%, rgba(255,255,255,.9), transparent 62%),
+      radial-gradient(620px 420px at 96% 12%, rgba(255,255,255,.55), transparent 60%);
   }
   .hero-grid{
     position:relative;z-index:1;
-    display:grid;grid-template-columns:1.08fr .92fr;gap:64px;align-items:center;
+    display:grid;grid-template-columns:1.06fr .94fr;gap:56px;align-items:center;
   }
   h1{
-    font-size:clamp(2.9rem,7.6vw,5rem);
-    line-height:1.0;letter-spacing:-.04em;font-weight:820;
-    margin:22px 0 0;
+    font-size:clamp(2.85rem,6.6vw,4.9rem);
+    line-height:1.02;letter-spacing:-.045em;font-weight:700;
+    margin:24px 0 0;
   }
-  h1 em{font-style:normal;color:var(--accent)}
+  h1 em{font-style:normal;color:var(--brand)}
   .lede{
-    margin:26px 0 0;max-width:48ch;
-    font-size:clamp(1.04rem,1.5vw,1.18rem);color:var(--ink-2);line-height:1.62;
+    margin:26px 0 0;max-width:50ch;
+    font-size:clamp(1.06rem,1.5vw,1.2rem);color:var(--sub);line-height:1.66;
   }
-  .lede b{color:var(--ink);font-weight:640}
-  .cta-row{display:flex;align-items:center;gap:22px;margin-top:38px;flex-wrap:wrap}
+  .lede b{color:var(--ink);font-weight:600}
+  .cta-row{display:flex;align-items:center;gap:14px;margin-top:36px;flex-wrap:wrap}
   .primary{
     display:inline-flex;align-items:center;gap:10px;
-    padding:15px 26px;border-radius:13px;
-    background:var(--accent);color:var(--accent-ink);
-    font-size:1.01rem;font-weight:720;letter-spacing:-.01em;text-decoration:none;
-    box-shadow:inset 0 1px 0 rgba(255,255,255,.35), 0 18px 40px -18px rgba(62,224,172,.85);
-    transition:transform .16s ease,box-shadow .16s ease,filter .16s ease;
+    padding:15px 26px;border-radius:15px;
+    background:var(--brand);color:#fff;
+    font-size:1.02rem;font-weight:700;letter-spacing:-.01em;text-decoration:none;
+    box-shadow:0 14px 28px -13px rgba(255,90,31,.55);
+    transition:transform .16s ease,background .16s ease,box-shadow .16s ease;
   }
-  .primary:hover{transform:translateY(-2px);filter:brightness(1.04);
-    box-shadow:inset 0 1px 0 rgba(255,255,255,.4), 0 26px 52px -20px rgba(62,224,172,.95)}
+  .primary:hover{transform:translateY(-2px);background:var(--brand2);
+    box-shadow:0 20px 36px -14px rgba(224,72,15,.55)}
   .primary:active{transform:translateY(0)}
   .primary svg{width:17px;height:17px}
-  /* the secondary CTA — for the 60s YouTube demo. A panel button, not a full primary; gives the
-     video link presence without competing with "Get the app" (the main conversion target). */
   .ghost{
     display:inline-flex;align-items:center;gap:10px;
-    padding:13px 20px;border-radius:12px;
-    background:var(--panel);color:var(--ink);border:1px solid var(--line);
-    font-size:.98rem;font-weight:640;letter-spacing:-.01em;text-decoration:none;
-    transition:border-color .16s ease,color .16s ease,background .16s ease;
+    padding:13px 20px;border-radius:14px;
+    background:var(--card);color:var(--ink);border:1px solid var(--line);
+    font-size:.98rem;font-weight:600;letter-spacing:-.01em;text-decoration:none;
+    box-shadow:var(--sh-sm);
+    transition:border-color .16s ease,transform .16s ease;
   }
-  .ghost svg{width:16px;height:16px;color:var(--warn)}
-  .ghost:hover{color:var(--accent);border-color:var(--accent);background:var(--panel-2)}
+  .ghost:hover{border-color:var(--sub2);transform:translateY(-1px)}
+  .ghost svg{width:16px;height:16px;color:var(--sub)}
   .textlink{
-    color:var(--ink);text-decoration:none;font-weight:620;font-size:.98rem;letter-spacing:-.01em;
-    border-bottom:1px solid var(--line);padding-bottom:2px;
-    transition:border-color .16s ease,color .16s ease;
+    color:var(--ink);text-decoration:none;font-weight:600;font-size:.98rem;letter-spacing:-.01em;
+    border-bottom:1px solid var(--sub2);padding-bottom:2px;
+    transition:color .16s ease,border-color .16s ease;
   }
-  .textlink:hover{color:var(--accent);border-color:var(--accent)}
+  .textlink:hover{color:var(--brand2);border-color:var(--brand2)}
 
-  .trust{margin-top:40px;display:flex;gap:8px 22px;flex-wrap:wrap;align-items:center}
+  .trust{margin-top:42px;display:flex;gap:8px 24px;flex-wrap:wrap;align-items:center}
   .trust span{
     display:inline-flex;align-items:center;gap:8px;
-    font-family:var(--mono);font-size:.72rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;
-    color:var(--ink-3);
+    font-family:var(--mono);font-size:.7rem;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--sub);
   }
-  .trust span::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--accent);opacity:.85}
+  .trust span::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--brand)}
 
-  /* ---------- hero visual: a real phone ---------- */
-  .stage{position:relative;justify-self:center;width:100%;max-width:340px}
-  .pulse{position:absolute;top:-26px;right:-24px;width:150px;height:150px;pointer-events:none;z-index:0}
-  .pulse span{
-    position:absolute;inset:0;margin:auto;border-radius:50%;
-    border:1.5px solid var(--accent);opacity:0;
-    animation:ping 3.4s cubic-bezier(.2,.6,.3,1) infinite;
+  /* ————— hero visual: two floating phones on a dashed route ————— */
+  .stage{position:relative;justify-self:center;width:100%;max-width:440px;min-height:600px}
+  .route{position:absolute;left:-10%;top:-2%;width:116%;height:108%;z-index:0;pointer-events:none}
+  .route path{
+    fill:none;stroke:rgba(27,26,23,.22);stroke-width:1.6;stroke-linecap:round;stroke-dasharray:1 9;
+    animation:drift 42s linear infinite;
   }
-  .pulse span:nth-child(2){animation-delay:1.13s}
-  .pulse span:nth-child(3){animation-delay:2.26s}
+  .route circle{fill:var(--brand)}
+  @keyframes drift{to{stroke-dashoffset:-1000}}
+  .rings{position:absolute;top:0;right:4%;width:180px;height:180px;z-index:1;pointer-events:none}
+  .rings span{
+    position:absolute;inset:0;margin:auto;border-radius:50%;
+    border:1.5px solid rgba(255,90,31,.42);opacity:0;
+    animation:ping 3.8s cubic-bezier(.2,.6,.3,1) infinite;
+  }
+  .rings span:nth-child(2){animation-delay:1.27s}
+  .rings span:nth-child(3){animation-delay:2.53s}
   @keyframes ping{
-    0%{transform:scale(.28);opacity:.55}
-    70%{opacity:.12}
+    0%{transform:scale(.24);opacity:.6}
+    70%{opacity:.14}
     100%{transform:scale(1);opacity:0}
   }
-  .device{
-    position:relative;z-index:1;
-    border-radius:40px;padding:11px;
-    background:linear-gradient(168deg,#171c23,#0a0d11 78%);
-    border:1px solid var(--line);
-    box-shadow:var(--shadow), inset 0 1px 0 rgba(255,255,255,.07);
-    animation:rise .7s cubic-bezier(.2,.7,.2,1) both;
+  .phone{
+    position:relative;border-radius:44px;padding:10px;
+    background:linear-gradient(172deg,#282520,#141310 72%);
+    box-shadow:var(--sh-xl), inset 0 1px 0 rgba(255,255,255,.10);
   }
-  @keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
-  .device::before{
-    content:"";position:absolute;top:20px;left:50%;transform:translateX(-50%);
-    width:96px;height:6px;border-radius:99px;background:rgba(0,0,0,.35);z-index:2;
+  .phone::before{ /* speaker pill */
+    content:"";position:absolute;top:17px;left:50%;transform:translateX(-50%);
+    width:84px;height:5px;border-radius:99px;background:rgba(8,7,5,.9);z-index:2;
   }
-  .device img{display:block;width:100%;height:auto;border-radius:31px}
+  .phone img{display:block;width:100%;height:auto;border-radius:35px}
+  .phone.back{
+    position:absolute;z-index:1;left:-4px;top:64px;width:240px;padding:8px;border-radius:36px;
+    transform:rotate(-7deg);
+    box-shadow:0 34px 64px -40px rgba(27,26,23,.5), inset 0 1px 0 rgba(255,255,255,.08);
+  }
+  .phone.back::before{width:58px;top:13px}
+  .phone.back img{border-radius:29px}
+  .phone.front{z-index:2;width:296px;margin-left:auto;margin-right:14px;transform:rotate(3.5deg)}
   .badge{
-    position:absolute;left:-14px;bottom:44px;z-index:3;
+    position:absolute;z-index:3;left:-14px;bottom:58px;
     display:inline-flex;align-items:center;gap:9px;
-    padding:9px 14px;border-radius:13px;
-    background:rgba(9,17,14,.9);border:1px solid var(--accent-line);
-    backdrop-filter:blur(6px);
-    box-shadow:0 20px 44px -20px rgba(0,0,0,.9);
-    animation:stampin .5s .9s cubic-bezier(.2,1.5,.3,1) both;
+    padding:10px 15px;border-radius:13px;
+    background:var(--card);border:1px solid var(--line);
+    box-shadow:var(--sh-md);
+    animation:stampin .5s 1s cubic-bezier(.2,1.5,.3,1) both;
   }
-  @keyframes stampin{from{opacity:0;transform:scale(.85) translateY(6px)}to{opacity:1;transform:none}}
-  .badge svg{width:18px;height:18px;color:var(--accent);flex:none}
-  .badge .lbl{font-weight:700;font-size:.92rem;letter-spacing:-.01em}
+  .badge svg{width:17px;height:17px;color:var(--ink);flex:none}
+  .badge .lbl{font-weight:700;font-size:.9rem;letter-spacing:-.01em}
+  .badge small{display:block;font-family:var(--mono);font-size:.58rem;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--sub);margin-top:1px}
+  @keyframes stampin{from{opacity:0;transform:scale(.86) translateY(8px)}to{opacity:1;transform:none}}
+  .hero .kicker,.hero h1,.hero .lede,.hero .cta-row,.hero .trust{animation:rise .7s cubic-bezier(.2,.7,.2,1) both}
+  .hero h1{animation-delay:.06s}.hero .lede{animation-delay:.12s}
+  .hero .cta-row{animation-delay:.18s}.hero .trust{animation-delay:.24s}
+  .phone.back{animation:rise .7s .3s cubic-bezier(.2,.7,.2,1) both}
+  .phone.front,.rings{animation:rise .7s .45s cubic-bezier(.2,.7,.2,1) both}
+  @keyframes rise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+  .phone.front{animation-name:risetilt}
+  @keyframes risetilt{from{opacity:0;transform:translateY(16px) rotate(3.5deg)}to{opacity:1;transform:rotate(3.5deg)}}
+  .phone.back{animation-name:risetiltb}
+  @keyframes risetiltb{from{opacity:0;transform:translateY(16px) rotate(-7deg)}to{opacity:1;transform:rotate(-7deg)}}
 
-  /* ---------- section frame ---------- */
-  section{padding:74px 0;position:relative}
-  h2{font-size:clamp(1.9rem,3.7vw,2.6rem);line-height:1.08;letter-spacing:-.03em;font-weight:800;margin:16px 0 0;max-width:20ch}
-  .sec-sub{color:var(--ink-2);margin:16px 0 0;font-size:1.06rem;line-height:1.6;max-width:56ch}
-
-  /* ---------- how it works: two crafted payment flows ---------- */
-  .payways{display:flex;flex-direction:column;gap:20px;margin-top:50px}
+  /* ————— how it works: the two payment rails ————— */
+  .payways{display:flex;flex-direction:column;gap:22px;margin-top:56px}
   .payway{
-    position:relative;overflow:hidden;
-    padding:34px 34px 40px;border-radius:24px;
-    background:radial-gradient(760px 340px at 100% -12%, rgba(62,224,172,.055), transparent 58%), var(--card);
-    border:1px solid var(--line);
+    padding:38px 38px 44px;border-radius:26px;
+    background:var(--card);border:1px solid var(--line);
+    box-shadow:var(--sh-md);
   }
-  .pw-head{display:flex;align-items:center;gap:15px;margin-bottom:14px}
+  .pw-head{display:flex;align-items:center;gap:15px;margin-bottom:12px}
   .pw-head .ico{
-    width:50px;height:50px;border-radius:15px;flex:none;display:flex;align-items:center;justify-content:center;
-    color:var(--accent);background:var(--accent-soft);border:1px solid var(--accent-line);
-    box-shadow:inset 0 1px 0 rgba(255,255,255,.06);
+    width:52px;height:52px;border-radius:16px;flex:none;display:flex;align-items:center;justify-content:center;
+    color:var(--ink);background:var(--panel2);border:1px solid var(--line2);
   }
   .pw-head .ico svg{width:25px;height:25px}
-  .pw-head h3{margin:0;font-size:1.34rem;font-weight:760;letter-spacing:-.028em}
-  .pw-head .tag{
-    margin-left:auto;display:inline-flex;align-items:center;gap:8px;
-    font-family:var(--mono);font-size:.63rem;font-weight:600;letter-spacing:.13em;text-transform:uppercase;
-    color:var(--accent);background:var(--accent-soft);border:1px solid var(--accent-line);
+  .pw-head h3{margin:0;font-size:1.4rem;font-weight:700;letter-spacing:-.028em}
+  .tag{
+    display:inline-flex;align-items:center;gap:8px;
+    font-family:var(--mono);font-size:.62rem;font-weight:600;letter-spacing:.13em;text-transform:uppercase;
+    color:var(--sub);background:var(--panel2);border:1px solid var(--line2);
     border-radius:999px;padding:6px 13px;white-space:nowrap;
   }
-  .pw-head .tag .d{width:6px;height:6px;border-radius:50%;background:currentColor;box-shadow:0 0 0 3px rgba(62,224,172,.16)}
-  /* the "requirement" tag — amber, to read distinct from the green "capability" tag.
-     Mirrors the amber offline-QR rail's color language: amber = a constraint to note. */
-  .pw-head .tag.warn{
-    color:var(--warn);background:rgba(240,196,106,.08);border-color:rgba(240,196,106,.34);
-    margin-left:0;
-  }
-  .pw-head .tag.warn .d{background:currentColor;box-shadow:0 0 0 3px rgba(240,196,106,.16)}
-  .pw-lead{margin:0 0 34px;color:var(--ink-2);font-size:1.05rem;line-height:1.62;max-width:62ch}
-  .pw-lead b{color:var(--ink);font-weight:650}
+  .tag .d{width:6px;height:6px;border-radius:50%;background:var(--sub2)}
+  .tag.net{color:var(--ink)} .tag.net .d{background:var(--ok)}
+  .tag.how{margin-left:auto}
+  .pw-lead{margin:0 0 36px;color:var(--sub);font-size:1.04rem;line-height:1.66;max-width:64ch}
+  .pw-lead b{color:var(--ink);font-weight:600}
 
-  /* the step rail: real phone screens riding a signal track */
-  .rail{position:relative;display:flex;align-items:flex-start;gap:10px;padding-top:8px}
+  /* the rail: phone screens strung on a dashed metro line */
+  .rail{position:relative;display:flex;align-items:flex-start;gap:10px;padding-top:10px}
   .rail-track{
-    position:absolute;top:92px;left:11%;right:11%;height:2px;pointer-events:none;overflow:hidden;
-    background:linear-gradient(90deg,transparent,var(--accent-line) 12%,var(--accent-line) 88%,transparent);
+    position:absolute;top:110px;left:12%;right:12%;height:2px;pointer-events:none;overflow:hidden;
+    border-radius:2px;
+    background:repeating-linear-gradient(90deg,var(--line) 0 7px,transparent 7px 15px);
   }
   .rail-track i{
-    position:absolute;top:0;width:64px;height:100%;
-    background:linear-gradient(90deg,transparent,var(--accent),transparent);
-    animation:signal 3s cubic-bezier(.5,0,.5,1) infinite;
+    position:absolute;top:50%;left:0;width:9px;height:9px;margin-top:-4.5px;border-radius:50%;
+    background:var(--brand);
+    animation:signal 3.4s cubic-bezier(.5,0,.5,1) infinite;
   }
-  @keyframes signal{0%{left:-64px;opacity:0}12%{opacity:1}88%{opacity:1}100%{left:100%;opacity:0}}
-  .step{position:relative;flex:1;display:flex;flex-direction:column;align-items:center;text-align:center;gap:12px;z-index:1;min-width:0}
-  /* the phone-in-frame: a real app screenshot in a tiny device bezel, with the step number riding
-     its shoulder. The bezel reads as a phone without the size overhead of the hero device. */
+  @keyframes signal{0%{left:-4%;opacity:0}10%{opacity:1}90%{opacity:1}100%{left:100%;opacity:0}}
+  .step{position:relative;flex:1;display:flex;flex-direction:column;align-items:center;text-align:center;gap:13px;z-index:1;min-width:0}
   .ph{
-    position:relative;width:104px;flex:none;aspect-ratio:9/19;border-radius:18px;padding:4px;
-    background:linear-gradient(168deg,#171c23,#0a0d11 78%);
-    border:1px solid var(--accent-line);
-    box-shadow:inset 0 1px 0 rgba(255,255,255,.07), 0 18px 34px -22px rgba(62,224,172,.55);
+    position:relative;width:116px;flex:none;aspect-ratio:9/16;border-radius:20px;padding:5px;
+    background:linear-gradient(172deg,#282520,#141310 72%);
+    box-shadow:0 20px 36px -22px rgba(27,26,23,.45), inset 0 1px 0 rgba(255,255,255,.08);
   }
   .ph::before{
-    content:"";position:absolute;top:8px;left:50%;transform:translateX(-50%);
-    width:32px;height:4px;border-radius:99px;background:rgba(0,0,0,.4);z-index:2;
+    content:"";position:absolute;top:9px;left:50%;transform:translateX(-50%);
+    width:30px;height:4px;border-radius:99px;background:rgba(8,7,5,.9);z-index:2;
   }
-  .ph img{display:block;width:100%;height:100%;border-radius:14px;object-fit:cover;object-position:top}
+  .ph img{display:block;width:100%;height:100%;border-radius:15px;object-fit:cover;object-position:top}
   .ph .idx{
-    position:absolute;top:-7px;right:-7px;width:24px;height:24px;border-radius:50%;z-index:3;
+    position:absolute;top:-8px;right:-8px;width:25px;height:25px;border-radius:50%;z-index:3;
     display:flex;align-items:center;justify-content:center;
-    font-family:var(--mono);font-size:.7rem;font-weight:700;color:var(--accent-ink);background:var(--accent);
-    border:2.5px solid var(--bg);
+    font-family:var(--mono);font-size:.72rem;font-weight:600;color:#fff;background:var(--ink);
+    border:2.5px solid var(--card);
   }
-  /* the final step glows green — the rail's "done" */
-  .step.done .ph{
-    border-color:var(--accent);
-    box-shadow:inset 0 1px 0 rgba(255,255,255,.14), 0 22px 42px -20px rgba(62,224,172,.9);
-  }
-  .step.done .ph .idx{background:var(--bg);color:var(--accent)}
+  .step.done .ph .idx{background:var(--ok)}
   .step .body{display:flex;flex-direction:column;align-items:center;gap:5px;min-width:0}
-  .step .t{font-size:1.04rem;font-weight:720;letter-spacing:-.018em;color:var(--ink)}
-  .step .d{font-size:.87rem;color:var(--ink-2);line-height:1.46;max-width:20ch}
+  .step .t{font-size:1.05rem;font-weight:700;letter-spacing:-.018em;color:var(--ink)}
+  .step .d{font-size:.89rem;color:var(--sub);line-height:1.5;max-width:21ch}
   .step .off{
     display:inline-flex;align-items:center;gap:6px;margin-top:3px;
-    font-family:var(--mono);font-size:.6rem;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--accent);
+    font-family:var(--mono);font-size:.6rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--warn);
   }
-  .step .off svg{width:14px;height:14px}
-  .arrow{flex:none;align-self:flex-start;margin-top:74px;color:var(--accent);opacity:.45;z-index:1}
+  .step .off svg{width:13px;height:13px}
+  .arrow{flex:none;align-self:flex-start;margin-top:52px;color:var(--sub2);z-index:1}
   .arrow svg{width:22px;height:22px;display:block}
 
-  /* amber variant — the offline QR fallback (the Paid step stays green) */
-  .rail.amber .rail-track{background:linear-gradient(90deg,transparent,rgba(240,196,106,.34) 12%,rgba(240,196,106,.34) 88%,transparent)}
-  .rail.amber .rail-track i{display:none}
-  .rail.amber .ph{
-    border-color:rgba(240,196,106,.34);
-    box-shadow:inset 0 1px 0 rgba(255,255,255,.06), 0 18px 34px -22px rgba(240,196,106,.45);
+  /* ————— the offline story: an ink band ————— */
+  .band{background:var(--ink);padding:104px 0;scroll-margin-top:76px}
+  .band .kicker{color:var(--sub2)}
+  .band h2{color:var(--bg)}
+  .band .sec-sub{color:var(--sub2)}
+  .band .rail-track{background:repeating-linear-gradient(90deg,rgba(244,241,232,.2) 0 7px,transparent 7px 15px)}
+  .band .rail-track i{background:var(--brand)}
+  .band .ph{background:linear-gradient(172deg,#33302a,#1d1c19 72%);box-shadow:0 24px 40px -22px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.09);border:1px solid rgba(244,241,232,.13)}
+  .band .ph .idx{background:var(--brand);border-color:var(--ink)}
+  .band .step.done .ph .idx{background:var(--ok)}
+  .band .step .t{color:var(--bg)}
+  .band .step .d{color:var(--sub2)}
+  .band .arrow{color:rgba(244,241,232,.4)}
+  .band-note{
+    margin:44px auto 0;max-width:640px;text-align:center;
+    font-family:var(--mono);font-size:.78rem;font-weight:500;letter-spacing:.02em;color:var(--sub2);line-height:1.8;
   }
-  .rail.amber .ph .idx{background:var(--warn);color:#231a06}
-  .rail.amber .arrow{color:var(--warn)}
-  .rail.amber .step.done .ph{
-    border-color:var(--accent);
-    box-shadow:inset 0 1px 0 rgba(255,255,255,.14), 0 22px 42px -20px rgba(62,224,172,.9);
-  }
-  .rail.amber .step.done .ph .idx{background:var(--bg);color:var(--accent)}
+  .band-note b{color:var(--bg);font-weight:600}
 
-  /* the real app screens, shown together as a small gallery under the two flows */
-  .screens{margin-top:62px}
-  .screens .sec-sub{max-width:none;margin-top:14px}
-  .filmstrip{display:flex;align-items:flex-start;gap:20px;max-width:840px;margin:28px auto 0}
-  .fsp{flex:1;display:flex;flex-direction:column;align-items:center;gap:14px;min-width:0}
-  /* real screens have empty space below the content: anchor to the top and crop the dead white to a
-     tidy aspect so the QR (and its caption) stay whole while the row stays even */
-  .fsp .screen{width:100%;aspect-ratio:3/4;border-radius:16px;overflow:hidden;background:#fff;border:1px solid var(--line);box-shadow:0 30px 60px -34px rgba(0,0,0,.9)}
-  .fsp .screen img{display:block;width:100%;height:100%;object-fit:cover;object-position:top}
-  .fsp .cap{display:flex;flex-direction:column;align-items:center;gap:3px;text-align:center}
-  .fsp .cap b{font-size:.92rem;font-weight:660;color:var(--ink)}
-  .fsp .cap .who{font-family:var(--mono);font-size:.57rem;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-3)}
+  /* ————— merchants ————— */
+  .m-grid{display:grid;grid-template-columns:1.04fr .96fr;gap:60px;align-items:center}
+  .msteps{margin-top:42px;max-width:520px}
+  .mstep{display:grid;grid-template-columns:56px 1fr;gap:16px;padding:20px 0;border-top:1px solid var(--line)}
+  .mstep:last-of-type{border-bottom:1px solid var(--line)}
+  .mstep .n{font-family:var(--mono);font-size:1.05rem;font-weight:600;color:var(--sub2);letter-spacing:.02em;padding-top:2px}
+  .mstep b{display:block;font-size:1.12rem;font-weight:700;letter-spacing:-.02em}
+  .mstep .d{display:block;margin-top:6px;color:var(--sub);font-size:.96rem;line-height:1.62}
+  .mstep .d a{color:var(--ink);font-weight:600;text-decoration:none;border-bottom:1px solid var(--sub2);padding-bottom:1px;transition:color .16s ease,border-color .16s ease}
+  .mstep .d a:hover{color:var(--brand2);border-color:var(--brand2)}
+  .m-cta{margin-top:30px;display:flex;align-items:center;gap:18px;flex-wrap:wrap}
 
-  /* the offline-QR call-out: the one genuinely different case */
-  .offbox{
-    margin-top:32px;border-radius:20px;padding:26px 26px 34px;
-    background:radial-gradient(520px 220px at 0% 0%, rgba(240,196,106,.06), transparent 70%), rgba(255,255,255,.012);
-    border:1px solid rgba(240,196,106,.26);
+  /* the web wallet as a browser terminal */
+  .browser{
+    border-radius:20px;overflow:hidden;
+    background:var(--card);border:1px solid var(--line);
+    box-shadow:var(--sh-lg);
   }
-  .offbox .oh{display:flex;align-items:flex-start;gap:14px;margin-bottom:36px}
-  .offbox .oh .ico{
-    width:42px;height:42px;border-radius:12px;flex:none;display:flex;align-items:center;justify-content:center;
-    color:var(--warn);background:rgba(240,196,106,.1);border:1px solid rgba(240,196,106,.3);
+  .bbar{
+    display:flex;align-items:center;gap:14px;padding:12px 16px;
+    background:var(--panel);border-bottom:1px solid var(--line2);
   }
-  .offbox .oh .ico svg{width:21px;height:21px}
-  .offbox .oh .tx b{display:block;font-size:1.06rem;font-weight:720;letter-spacing:-.02em;color:var(--ink);margin-bottom:5px}
-  .offbox .oh .tx span{color:var(--ink-2);font-size:.97rem;line-height:1.55;max-width:66ch;display:block}
+  .bdots{display:inline-flex;gap:6px}
+  .bdots i{width:10px;height:10px;border-radius:50%;background:var(--line)}
+  .burl{
+    flex:1;display:flex;align-items:center;justify-content:center;gap:8px;
+    font-family:var(--mono);font-size:.72rem;font-weight:500;color:var(--sub);
+    background:var(--bg);border:1px solid var(--line2);border-radius:9px;padding:6px 14px;
+  }
+  .burl svg{width:12px;height:12px;color:var(--ok);flex:none}
+  .bview{
+    position:relative;display:flex;flex-direction:column;align-items:center;
+    background:var(--panel2);padding:38px 38px 26px;
+  }
+  .bview .shot{
+    width:262px;border-radius:26px;padding:7px;
+    background:linear-gradient(172deg,#282520,#141310 72%);
+    box-shadow:var(--sh-lg), inset 0 1px 0 rgba(255,255,255,.09);
+  }
+  .bview .shot img{display:block;width:100%;height:auto;border-radius:20px}
+  .bcap{
+    margin-top:22px;display:inline-flex;align-items:center;gap:8px;
+    font-family:var(--mono);font-size:.62rem;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--sub);
+  }
+  .bcap::before,.bcap::after{content:"";width:18px;height:1px;background:var(--line)}
 
-  /* ---------- benefits: bento ---------- */
-  .bento{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:52px}
+  /* ————— why dpay: bento ————— */
+  .bento{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:56px}
   .tile{
     position:relative;overflow:hidden;
-    padding:30px 28px;border-radius:20px;
+    padding:32px 30px;border-radius:22px;
     background:var(--card);border:1px solid var(--line);
-    transition:border-color .2s ease,transform .2s ease,background .2s ease;
+    box-shadow:var(--sh-sm);
+    transition:transform .22s ease,box-shadow .22s ease,border-color .22s ease;
   }
-  .tile:hover{border-color:var(--accent-line);transform:translateY(-3px);background:rgba(62,224,172,.03)}
+  .tile:hover{transform:translateY(-3px);box-shadow:var(--sh-md);border-color:var(--sub2)}
   .tile .ico{
-    width:46px;height:46px;border-radius:13px;display:flex;align-items:center;justify-content:center;
-    color:var(--accent);background:var(--accent-soft);border:1px solid var(--accent-line);
+    width:46px;height:46px;border-radius:14px;display:flex;align-items:center;justify-content:center;
+    color:var(--ink);background:var(--panel2);border:1px solid var(--line2);
   }
-  .tile .ico svg{width:23px;height:23px}
-  .tile h3{margin:20px 0 0;font-size:1.18rem;font-weight:700;letter-spacing:-.02em}
-  .tile p{margin:11px 0 0;color:var(--ink-2);font-size:.97rem;line-height:1.62}
-  .tile.big{grid-column:span 2;grid-row:span 2;display:flex;flex-direction:column}
-  .tile.big h3{font-size:1.5rem;margin-top:24px;letter-spacing:-.028em;line-height:1.14}
-  .tile.big p{font-size:1.05rem;max-width:46ch}
-  .tile.wide{grid-column:span 3;display:flex;gap:18px;align-items:center;background:transparent}
+  .tile .ico svg{width:22px;height:22px}
+  .tile h3{margin:20px 0 0;font-size:1.2rem;font-weight:700;letter-spacing:-.02em}
+  .tile p{margin:11px 0 0;color:var(--sub);font-size:.98rem;line-height:1.64}
+  .tile.big{grid-column:span 2;grid-row:span 2;display:flex;flex-direction:column;padding:38px 36px}
+  .tile.big h3{font-size:1.6rem;margin-top:24px;letter-spacing:-.03em;line-height:1.14;max-width:16ch}
+  .tile.big p{font-size:1.06rem;max-width:46ch}
+  .tile.wide{grid-column:span 3;display:flex;gap:18px;align-items:center;background:var(--panel)}
   .tile.wide .ico{flex:none}
-  .tile.wide p{margin:0;color:var(--ink-2);font-size:1.02rem;max-width:none}
-  .tile.wide b{color:var(--ink);font-weight:640}
-  /* big-tile diagram: when you are offline, only the shop needs a connection */
-  .asym{margin-top:auto;padding-top:38px;display:flex;align-items:center;gap:12px}
-  .node{flex:1;border-radius:15px;padding:15px 14px;text-align:center;border:1px solid var(--line);background:rgba(255,255,255,.015)}
-  .node b{display:block;font-size:1rem;font-weight:700;letter-spacing:-.01em;color:var(--ink)}
-  .node small{font-family:var(--mono);font-size:.64rem;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-4);margin-top:3px;display:block}
-  .node.off small::before{content:"○ "}
-  .node.on{border-color:var(--accent-line);background:var(--accent-soft)}
-  .node.on small{color:var(--accent)}
-  .node.on small::before{content:"● "}
-  .link{position:relative;flex:none;width:74px;height:26px;display:flex;align-items:center;justify-content:center}
-  .link::before{content:"";position:absolute;left:2px;right:2px;top:50%;border-top:1px dashed var(--accent-line)}
-  .link .tap{position:relative;width:30px;height:26px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:#0b0e13}
-  .link svg{width:19px;height:19px;color:var(--accent)}
-  .zero{font-size:3.2rem;font-weight:820;letter-spacing:-.04em;color:var(--accent);line-height:1}
-
-  /* ---------- download ---------- */
-  .get{
-    margin:0 0 8px;border-radius:26px;padding:56px 48px;position:relative;overflow:hidden;
-    background:
-      radial-gradient(520px 320px at 82% -20%, rgba(62,224,172,.13), transparent 62%),
-      linear-gradient(180deg,var(--panel-2),#080a0e);
-    border:1px solid var(--line);
+  .tile.wide p{margin:0;color:var(--sub);font-size:1.02rem;max-width:none}
+  .tile.wide b{color:var(--ink);font-weight:600}
+  /* the asymmetry diagram: when you're offline, only the shop needs a connection */
+  .asym{margin-top:auto;padding-top:44px;display:flex;align-items:center;gap:14px}
+  .node{flex:1;border-radius:16px;padding:16px 14px;text-align:center;border:1px solid var(--line2);background:var(--panel2)}
+  .node b{display:block;font-size:1.02rem;font-weight:700;letter-spacing:-.01em;color:var(--ink)}
+  .node small{
+    display:flex;align-items:center;justify-content:center;gap:6px;margin-top:5px;
+    font-family:var(--mono);font-size:.62rem;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--sub);
   }
-  .get::before{content:"";position:absolute;top:0;left:36px;right:36px;height:1px;
-    background:repeating-linear-gradient(90deg,var(--line) 0 7px, transparent 7px 14px)}
-  .get-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:44px;align-items:center}
-  .get h2{margin-top:14px}
-  .get p{color:var(--ink-2);max-width:42ch;margin:16px 0 0;font-size:1.05rem;line-height:1.62}
-  .stores{display:flex;flex-wrap:wrap;gap:14px;margin-top:26px}
+  .node small::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--sub2)}
+  .node.on small{color:var(--ok)} .node.on small::before{background:var(--ok)}
+  .node.on{border-color:rgba(14,159,110,.28);background:rgba(14,159,110,.05)}
+  .link{position:relative;flex:none;width:78px;height:40px;display:flex;align-items:center;justify-content:center}
+  .link::before{content:"";position:absolute;left:2px;right:2px;top:50%;border-top:2px dotted var(--line)}
+  .link .tap{position:relative;width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:var(--brand);box-shadow:0 10px 20px -10px rgba(255,90,31,.6)}
+  .link .tap svg{width:19px;height:19px;color:#fff}
+  .zero{font-size:4.4rem;font-weight:700;letter-spacing:-.05em;color:var(--brand);line-height:1}
 
-  /* the injected APK button (primary, filled) + its disabled variant */
+  /* ————— get the app ————— */
+  .get{
+    border-radius:30px;padding:64px 56px;position:relative;overflow:hidden;
+    background:var(--card);border:1px solid var(--line);
+    box-shadow:var(--sh-lg);
+  }
+  .get::before{ /* ticket perforation, a travel stub */
+    content:"";position:absolute;top:0;left:40px;right:40px;height:1px;
+    background:repeating-linear-gradient(90deg,var(--line) 0 7px,transparent 7px 14px);
+  }
+  .get-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:48px;align-items:center}
+  .get p{color:var(--sub);max-width:44ch;margin:16px 0 0;font-size:1.06rem;line-height:1.66}
+  .stores{display:flex;flex-wrap:wrap;gap:14px;margin-top:30px}
+
+  /* the injected APK button (primary, filled) + its disabled variant —
+     the relay swaps the download placeholder for one of these two */
   .btn,.play{
-    min-height:62px;min-width:224px;
+    min-height:64px;min-width:232px;
     display:inline-flex;align-items:center;justify-content:center;gap:3px;
-    padding:0 24px;border-radius:15px;text-decoration:none;cursor:pointer;
+    padding:0 26px;border-radius:16px;text-decoration:none;cursor:pointer;
     font-family:var(--sans);border:1px solid transparent;
   }
   .btn{
     flex-direction:column;flex:1;
-    background:var(--accent);color:var(--accent-ink);
-    font-size:1.04rem;font-weight:730;letter-spacing:-.012em;line-height:1.14;
-    box-shadow:inset 0 1px 0 rgba(255,255,255,.34), 0 18px 40px -18px rgba(62,224,172,.8);
-    transition:transform .16s ease,filter .16s ease,box-shadow .16s ease;
+    background:var(--brand);color:#fff;
+    font-size:1.05rem;font-weight:700;letter-spacing:-.012em;line-height:1.16;
+    box-shadow:0 14px 28px -13px rgba(255,90,31,.55);
+    transition:transform .16s ease,background .16s ease,box-shadow .16s ease;
   }
-  .btn:hover{transform:translateY(-2px);filter:brightness(1.04);
-    box-shadow:inset 0 1px 0 rgba(255,255,255,.4), 0 26px 52px -20px rgba(62,224,172,.92)}
+  .btn:hover{transform:translateY(-2px);background:var(--brand2);
+    box-shadow:0 20px 36px -14px rgba(224,72,15,.55)}
   .btn:active{transform:translateY(0)}
-  .apk-meta{font-family:var(--mono);font-size:.66rem;font-weight:600;letter-spacing:.14em;text-transform:uppercase;opacity:.72}
-  /* disabled variant, declared after .btn so it wins */
+  .apk-meta{font-family:var(--mono);font-size:.64rem;font-weight:600;letter-spacing:.14em;text-transform:uppercase;opacity:.82;margin-top:3px}
   .btn-disabled{
-    background:rgba(255,255,255,.035);color:var(--ink-2);
-    border:1px solid var(--line);box-shadow:none;cursor:default;font-weight:640;
+    background:var(--panel2);color:var(--sub);
+    border:1px solid var(--line);box-shadow:none;cursor:default;font-weight:600;
   }
-  .btn-disabled:hover{transform:none;filter:none;box-shadow:none}
+  .btn-disabled:hover{transform:none;background:var(--panel2);box-shadow:none}
 
   /* the self-built "Google Play" badge: secondary, outlined, not yet available */
   .play{
     flex:1;gap:13px;position:relative;
-    background:rgba(255,255,255,.02);border:1px solid var(--line);color:var(--ink-2);
-    transition:border-color .16s ease,color .16s ease;
+    background:var(--panel);border:1px solid var(--line);color:var(--sub);
+    transition:border-color .16s ease;
   }
-  .play:hover{border-color:var(--accent-line);color:var(--ink)}
-  .play .tri{width:22px;height:22px;flex:none;color:var(--accent);opacity:.9}
-  .play .txt{display:flex;flex-direction:column;line-height:1.05;text-align:left}
-  .play .txt small{font-family:var(--mono);font-size:.6rem;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3)}
+  .play:hover{border-color:var(--sub2)}
+  .play .tri{width:20px;height:20px;flex:none;color:var(--ink)}
+  .play .txt{display:flex;flex-direction:column;line-height:1.1;text-align:left}
+  .play .txt small{font-family:var(--mono);font-size:.58rem;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--sub2)}
   .play .txt strong{font-size:1.12rem;font-weight:700;letter-spacing:-.015em;color:var(--ink)}
   .play .soon{
-    position:absolute;top:-9px;right:12px;
-    font-family:var(--mono);font-size:.58rem;font-weight:700;letter-spacing:.16em;text-transform:uppercase;
-    color:var(--accent-ink);background:var(--accent);padding:2px 8px;border-radius:999px;
+    position:absolute;top:-9px;right:14px;
+    font-family:var(--mono);font-size:.56rem;font-weight:600;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--bg);background:var(--ink);padding:3px 9px;border-radius:999px;
   }
+  .merch-line{margin-top:24px;color:var(--sub);font-size:.95rem;line-height:1.7;max-width:52ch}
+  .merch-line a{color:var(--ink);font-weight:600;text-decoration:none;border-bottom:1px solid var(--sub2);padding-bottom:1px;transition:color .16s ease,border-color .16s ease}
+  .merch-line a:hover{color:var(--brand2);border-color:var(--brand2)}
 
-  .merch-line{margin-top:22px;color:var(--ink-3);font-size:.94rem}
-  .merch-line a{color:var(--ink-2);font-weight:620;text-decoration:none;border-bottom:1px solid var(--line);padding-bottom:1px;transition:color .16s ease,border-color .16s ease}
-  .merch-line a:hover{color:var(--accent);border-color:var(--accent)}
-
-  /* ---------- merchants: the 3-step path (compact, no images) ---------- */
-  .mlab{
-    display:block;margin-top:46px;
-    font-family:var(--mono);font-size:.72rem;font-weight:600;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-3);
-  }
-  .msteps{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:14px;max-width:880px}
-  .mstep{padding:20px 20px 22px;border-radius:16px;background:var(--card);border:1px solid var(--line)}
-  .mstep .n{
-    font-family:var(--mono);font-size:.62rem;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);
-  }
-  .mstep b{display:block;margin-top:9px;font-size:1.02rem;font-weight:720;letter-spacing:-.015em}
-  .mstep .d{display:block;margin-top:6px;color:var(--ink-2);font-size:.93rem;line-height:1.55}
-  .mstep .d a{color:var(--ink);font-weight:620;text-decoration:none;border-bottom:1px solid var(--line);padding-bottom:1px;transition:color .16s ease,border-color .16s ease}
-  .mstep .d a:hover{color:var(--accent);border-color:var(--accent)}
-
-  .get-side{border-left:1px solid var(--line);padding-left:44px}
-  .get-side .row{display:flex;gap:14px;padding:16px 0;border-bottom:1px solid var(--line-2)}
+  .get-side{border-left:1px solid var(--line);padding-left:48px}
+  .get-side .row{display:flex;gap:14px;padding:17px 0;border-bottom:1px solid var(--line2)}
   .get-side .row:last-child{border-bottom:0}
-  .get-side .row svg{width:19px;height:19px;color:var(--accent);flex:none;margin-top:2px}
-  .get-side .row b{display:block;font-weight:640;font-size:.98rem;color:var(--ink)}
-  .get-side .row span{color:var(--ink-3);font-size:.9rem}
+  .get-side .row svg{width:19px;height:19px;color:var(--ok);flex:none;margin-top:2px}
+  .get-side .row b{display:block;font-weight:600;font-size:1rem;color:var(--ink)}
+  .get-side .row span{color:var(--sub);font-size:.92rem}
 
-  /* ---------- footer ---------- */
-  footer{border-top:1px solid var(--line);margin-top:40px;padding:40px 0 56px}
-  .foot{display:flex;align-items:flex-start;justify-content:space-between;gap:28px;flex-wrap:wrap}
-  .foot .word{font-size:1.1rem}
-  .foot p{margin:0;color:var(--ink-3);font-size:.86rem;max-width:54ch;line-height:1.6}
-  .foot a{color:var(--ink-2);text-decoration:none;border-bottom:1px solid var(--line)}
-  .foot a:hover{color:var(--accent);border-color:var(--accent)}
+  /* ————— footer: an ink band ————— */
+  footer{background:var(--ink);margin-top:104px}
+  .foot{display:flex;align-items:flex-start;justify-content:space-between;gap:32px;flex-wrap:wrap;padding:64px 28px 72px}
+  .foot .brandmark svg{box-shadow:0 10px 24px -12px rgba(0,0,0,.6)}
+  .foot .word{color:var(--bg)}
+  .foot .word b{color:var(--brand)}
+  .foot-right{max-width:46ch}
+  .foot p{margin:0;color:var(--sub2);font-size:.9rem;line-height:1.75}
+  .foot p b{color:var(--bg);font-weight:600}
+  .foot a{color:var(--bg);text-decoration:none;border-bottom:1px solid rgba(244,241,232,.3);transition:border-color .16s ease,color .16s ease}
+  .foot a:hover{color:var(--brand);border-color:var(--brand)}
+  .foot-micro{
+    margin-top:22px;display:flex;gap:8px 20px;flex-wrap:wrap;
+    font-family:var(--mono);font-size:.62rem;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:rgba(244,241,232,.55);
+  }
 
-  /* ---------- responsive ---------- */
+  /* ————— scroll reveal ————— */
+  .rv{opacity:0;transform:translateY(18px);transition:opacity .7s ease,transform .7s cubic-bezier(.2,.7,.2,1);transition-delay:var(--d,0s)}
+  .rv.in{opacity:1;transform:none}
+
+  /* ————— responsive ————— */
   @media (max-width:920px){
-    .hero-grid{grid-template-columns:1fr;gap:52px}
-    .stage{grid-row:1;max-width:300px}
+    section{padding:80px 0}
+    .hero{padding:48px 0 88px}
+    .hero-grid{grid-template-columns:1fr;gap:64px}
+    .stage{max-width:400px;min-height:0;margin:0 auto}
     .lede{max-width:none}
-    .payway{padding:26px}
+    .payway{padding:28px 26px 34px}
     .rail{flex-direction:column;align-items:stretch;gap:0}
     .rail-track{display:none}
-    .rail .step{flex-direction:row;align-items:center;text-align:left;gap:16px;padding:13px 0}
-    .rail .step .ph{width:64px}
+    .rail .step{flex-direction:row;align-items:center;text-align:left;gap:18px;padding:14px 0}
+    .rail .step .ph{width:66px;border-radius:14px}
+    .rail .step .ph::before{display:none}
+    .rail .step .ph img{border-radius:10px}
+    .rail .step .ph .idx{width:21px;height:21px;top:-7px;right:-7px;font-size:.62rem}
     .rail .step .body{align-items:flex-start;text-align:left}
     .rail .step .d{max-width:none}
     .rail .arrow{align-self:center;margin:0;transform:rotate(90deg)}
+    .m-grid{grid-template-columns:1fr;gap:44px}
+    .browser{max-width:440px;margin:0 auto}
     .bento{grid-template-columns:1fr}
-    .msteps{grid-template-columns:1fr}
     .tile.big,.tile.wide{grid-column:auto;grid-row:auto}
+    .tile.big{padding:30px}
     .tile.wide{flex-direction:column;align-items:flex-start;gap:14px}
+    .get{padding:44px 32px}
     .get-grid{grid-template-columns:1fr;gap:32px}
-    .get-side{border-left:0;border-top:1px solid var(--line);padding-left:0;padding-top:12px}
+    .get-side{border-left:0;border-top:1px solid var(--line);padding-left:0;padding-top:8px}
   }
   @media (max-width:560px){
     .wrap{padding:0 20px}
-    nav{padding:20px}
-    .hero{padding:32px 0 64px}
-    section{padding:56px 0}
-    .get{padding:38px 24px}
+    nav{padding:12px 20px}
+    nav .navlink:not(.ghost){display:none}
+    .stage{max-width:330px}
+    .phone.front{width:252px;margin-right:0}
+    .phone.back{width:206px;left:-8px}
+    section{padding:64px 0}
+    .get{padding:36px 22px;border-radius:24px}
     .stores{flex-direction:column}
     .btn,.play{width:100%;flex:none}
-    .stage{max-width:280px}
-    /* let the status pill drop to its own line instead of squeezing the heading mid-word */
     .pw-head{flex-wrap:wrap}
+    .pw-head .tag.how{margin-left:0}
+    .bview{padding:26px 22px 20px}
+    .bview .shot{width:222px}
+    .asym{flex-wrap:wrap;gap:10px}
+    .link{width:100%;height:34px}
+    .link::before{display:none}
   }
 
   @media (prefers-reduced-motion:reduce){
     html{scroll-behavior:auto}
     *{animation:none!important;transition:none!important}
+    .rv{opacity:1;transform:none}
   }
 </style>
 </head>
@@ -489,21 +553,36 @@
   <rect width="100%" height="100%" filter="url(#g)"/>
 </svg>
 
-<nav>
-  <span class="word">d<b>pay</b></span>
+<nav id="nav" aria-label="Main">
+  <a class="brandmark" href="#top" aria-label="dpay home">
+    <svg viewBox="0 0 1024 1024" aria-hidden="true">
+      <defs>
+        <linearGradient id="dtile" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#FF6A2B"/><stop offset="1" stop-color="#FF5A1F"/>
+        </linearGradient>
+      </defs>
+      <rect width="1024" height="1024" rx="228" fill="url(#dtile)"/>
+      <path d="M622 276a52 52 0 0 1 52 52v348a52 52 0 0 1-52 52 52 52 0 0 1-52-52V328a52 52 0 0 1 52-52zM508 396a176 176 0 1 0 .1 0zM508 498a74 74 0 1 1-.1 0z" fill="#F4F1E8"/>
+    </svg>
+    <span class="word">d<b>pay</b></span>
+  </a>
   <span class="nav-right">
     <a class="navlink" href="#how">How it works</a>
     <a class="navlink" href="#merchants">For merchants</a>
-    <a class="navlink ghost" href="/wallet">Web wallet</a>
+    <a class="navlink" href="#why">Why dpay</a>
+    <a class="navlink ghost" href="/wallet">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>
+      Web wallet
+    </a>
   </span>
 </nav>
 
-<header class="hero">
+<header class="hero" id="top">
   <div class="wrap hero-grid">
     <div>
-      <span class="kicker">Tap. Pay. Done.</span>
-      <h1>Instant payments. <em>Even offline.</em></h1>
-      <p class="lede">dpay puts instant payments on your phone. Tap or scan to pay, online or offline. It clears in seconds.</p>
+      <span class="kicker">Pocket money for travelers</span>
+      <h1>Pay anywhere. <em>Even off the grid.</em></h1>
+      <p class="lede">dpay is the wallet for the road. <b>Tap or scan to pay</b> — a street café, a night market, a boat — and it clears in seconds, <b>with or without signal</b>. Your key never leaves your phone.</p>
       <div class="cta-row">
         <a class="primary" href="#get">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12M6 11l6 6 6-6M5 20h14"/></svg>
@@ -516,45 +595,53 @@
         <a class="textlink" href="#how">See how it works</a>
       </div>
       <div class="trust">
-        <span>Instant payments</span>
-        <span>Works offline</span>
         <span>Non-custodial</span>
+        <span>Works offline</span>
+        <span>$0 fees</span>
         <span>Android</span>
       </div>
     </div>
 
-    <div class="stage">
-      <div class="pulse" aria-hidden="true"><span></span><span></span><span></span></div>
-      <div class="device">
+    <div class="stage" aria-hidden="true">
+      <svg class="route" viewBox="0 0 440 360" preserveAspectRatio="xMidYMid meet">
+        <path d="M10 342 C 130 348, 92 214, 214 192 S 344 158, 372 58"/>
+        <circle cx="372" cy="58" r="5"/>
+      </svg>
+      <div class="rings"><span></span><span></span><span></span></div>
+      <div class="phone back">
+        <img src="/shots/request.png" width="780" height="1180" alt="" />
+      </div>
+      <div class="phone front">
         <img src="/shots/paid.png" width="780" height="1180" alt="The dpay app showing a completed payment: Paid, $5.00 to Café Demo." />
       </div>
-      <span class="badge" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.8a16 16 0 0 1 20 0"/><path d="M5.5 12.4a11 11 0 0 1 13 0"/><path d="M9 16a6 6 0 0 1 6 0"/><circle cx="12" cy="19.5" r="1"/><path d="M3 3 21 21" stroke-width="1.6"/></svg>
-        <span class="lbl">Works offline</span>
+      <span class="badge">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.8a16 16 0 0 1 20 0"/><path d="M5.5 12.4a11 11 0 0 1 13 0"/><path d="M9 16a6 6 0 0 1 6 0"/><circle cx="12" cy="19.5" r="1"/><path d="M3 3 21 21"/></svg>
+        <span><span class="lbl">Works offline</span><small>no signal needed</small></span>
       </span>
     </div>
   </div>
 </header>
 
 <main>
+  <!-- ————— how it works ————— -->
   <section id="how" class="wrap">
-    <span class="kicker">How it works</span>
-    <h2>Two ways to pay.</h2>
-    <p class="sec-sub">Your phone signs every payment offline. The only question is how it reaches the shop.</p>
+    <span class="kicker rv">How it works</span>
+    <h2 class="rv">Two ways to pay<i class="dot">.</i></h2>
+    <p class="sec-sub rv">Your phone signs every payment. The only question is how it reaches the shop.</p>
 
     <div class="payways">
 
-      <!-- NFC: tap, it signs, done — the same three steps online or off -->
-      <div class="payway">
+      <!-- NFC: tap, it signs, done — the same steps online or off -->
+      <div class="payway rv">
         <div class="pw-head">
           <span class="ico">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 8.5a7 7 0 0 1 0 7M10.5 6a11 11 0 0 1 0 12M14.5 4.2a15 15 0 0 1 0 15.6"/></svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 8.5a7 7 0 0 1 0 7M10.5 6a11 11 0 0 1 0 12M14.5 4.2a15 15 0 0 1 0 15.6"/></svg>
           </span>
           <h3>Tap to pay</h3>
-          <span class="tag warn"><span class="d"></span>With NFC</span>
-          <span class="tag"><span class="d"></span>online or offline</span>
+          <span class="tag how"><span class="d"></span>with NFC</span>
+          <span class="tag net"><span class="d"></span>online or offline</span>
         </div>
-        <p class="pw-lead">It signs the exact amount on contact. The shop's connection settles it. Same three steps, online or off.</p>
+        <p class="pw-lead">Hold your phone to the shop's. dpay signs the exact amount <b>on contact</b>, and the shop's connection settles it. Same three steps, online or off.</p>
         <div class="rail">
           <div class="rail-track"><i></i></div>
 
@@ -568,10 +655,10 @@
 
           <div class="step">
             <span class="ph"><span class="idx">2</span>
-              <img src="/shots/nfc-exchange.png" width="780" height="1180" alt="dpay NFC: phones communicating." />
+              <img src="/shots/nfc-exchange.png" width="780" height="1180" alt="dpay NFC: the two phones exchanging the payment." />
             </span>
             <span class="body"><b class="t">It signs</b><span class="d">Your on-device key authorizes the amount.</span>
-              <span class="off"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.8a16 16 0 0 1 20 0"/><path d="M5.5 12.4a11 11 0 0 1 13 0"/><path d="M9 16a6 6 0 0 1 6 0"/><circle cx="12" cy="19.5" r="1"/><path d="M3 3 21 21" stroke-width="1.6"/></svg>no signal needed</span>
+              <span class="off"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.8a16 16 0 0 1 20 0"/><path d="M5.5 12.4a11 11 0 0 1 13 0"/><path d="M9 16a6 6 0 0 1 6 0"/><circle cx="12" cy="19.5" r="1"/><path d="M3 3 21 21"/></svg>no signal needed</span>
             </span>
           </div>
           <span class="arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
@@ -585,17 +672,17 @@
         </div>
       </div>
 
-      <!-- QR: shop shows a code; you scan and approve. Online your phone sends it; offline it shows a QR back. -->
-      <div class="payway">
+      <!-- QR: shop shows a code, you scan and approve -->
+      <div class="payway rv">
         <div class="pw-head">
           <span class="ico">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3M20 14v3M14 20h3M20 20v.01"/></svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3M20 14v3M14 20h3M20 20v.01"/></svg>
           </span>
           <h3>Scan to pay</h3>
-          <span class="tag warn"><span class="d"></span>With QR</span>
-          <span class="tag"><span class="d"></span>one step online</span>
+          <span class="tag how"><span class="d"></span>with QR</span>
+          <span class="tag net"><span class="d"></span>one step online</span>
         </div>
-        <p class="pw-lead">Scan it, check the amount, and approve. Your phone sends it.</p>
+        <p class="pw-lead">Scan the shop's code, check the amount, and approve. Your phone sends it — <b>settled in seconds</b>.</p>
         <div class="rail">
           <div class="rail-track"><i></i></div>
 
@@ -622,143 +709,163 @@
             <span class="body"><b class="t">Paid</b><span class="d">Settled in seconds.</span></span>
           </div>
         </div>
-
-        <div class="offbox">
-          <div class="oh">
-            <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.8a16 16 0 0 1 20 0"/><path d="M5.5 12.4a11 11 0 0 1 13 0"/><path d="M9 16a6 6 0 0 1 6 0"/><circle cx="12" cy="19.5" r="1"/><path d="M3 3 21 21" stroke-width="1.5"/></svg></span>
-            <span class="tx"><b>No signal? Just one extra scan.</b><span>Offline, your phone shows your approval as a QR code. The shop scans it back. You still check the amount and approve.</span></span>
-          </div>
-          <div class="rail amber">
-            <div class="rail-track"><i></i></div>
-
-            <div class="step">
-              <span class="ph"><span class="idx">1</span>
-                <img src="/shots/approve.png" width="780" height="1180" alt="dpay Pay screen: Pay $5.00 to Café Demo, Approve button." />
-              </span>
-              <span class="body"><b class="t">Approve</b><span class="d">Check the amount and approve.</span></span>
-            </div>
-            <span class="arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
-
-            <div class="step">
-              <span class="ph"><span class="idx">2</span>
-                <img src="/shots/request.png" width="780" height="1180" alt="dpay: your phone shows a signed QR code." />
-              </span>
-              <span class="body"><b class="t">QR back</b><span class="d">Your phone shows a signed code.</span></span>
-            </div>
-            <span class="arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
-
-            <div class="step">
-              <span class="ph"><span class="idx">3</span>
-                <img src="/shots/scanned.png" width="780" height="1180" alt="dpay: shop reads the QR off your screen." />
-              </span>
-              <span class="body"><b class="t">Shop scans</b><span class="d">The shop reads it off your screen.</span></span>
-            </div>
-            <span class="arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
-
-            <div class="step done">
-            <span class="ph"><span class="idx">4</span>
-              <img src="/shots/paid.png" width="780" height="1180" alt="dpay: the signed payment hands off to the shop's connection." />
-            </span>
-              <span class="body"><b class="t">Handed off</b><span class="d">The shop settles it online. You're done.</span></span>
-            </div>
-          </div>
-        </div>
       </div>
 
-    </div>
-
-    <div class="screens">
-      <span class="kicker">The app</span>
-      <p class="sec-sub">One app for both sides of a payment: ask for money, or pay.</p>
-      <div class="filmstrip">
-        <div class="fsp"><span class="screen"><img src="/shots/request.png" width="780" height="1180" alt="dpay Receive screen: a $5.00 charge shown as a QR code." /></span><span class="cap"><b>Ask for an amount</b><span class="who">Receive</span></span></div>
-        <div class="fsp"><span class="screen"><img src="/shots/approve.png" width="780" height="1180" alt="dpay Pay screen: Pay $5.00 to Café Demo, with an Approve button." /></span><span class="cap"><b>Approve the payment</b><span class="who">Pay</span></span></div>
-        <div class="fsp"><span class="screen"><img src="/shots/paid.png" width="780" height="1180" alt="dpay Pay screen: Paid, $5.00 to Café Demo." /></span><span class="cap"><b>Paid</b><span class="who">Done</span></span></div>
-      </div>
     </div>
   </section>
 
-  <!-- merchants (2026-08-16 merge): no separate product to sign up for — the wallet's
-       Receive tab IS the terminal, on the phone or in the browser -->
+  <!-- ————— the offline story: two scans, zero signal ————— -->
+  <section class="band" aria-label="Paying offline">
+    <div class="wrap">
+      <span class="kicker rv">The offline story</span>
+      <h2 class="rv">No signal? One extra scan<i class="dot">.</i></h2>
+      <p class="sec-sub rv">When you're off the grid, your phone shows your approval as a QR code. The shop scans it back and settles it on <b>its</b> connection — you never need bars to pay.</p>
+
+      <div class="rail" style="margin-top:52px">
+        <div class="rail-track"><i></i></div>
+
+        <div class="step rv" style="--d:0s">
+          <span class="ph"><span class="idx">1</span>
+            <img src="/shots/approve.png" width="780" height="1180" alt="dpay Pay screen: check the amount and approve — offline." />
+          </span>
+          <span class="body"><b class="t">Approve</b><span class="d">Check the amount and approve, as always.</span></span>
+        </div>
+        <span class="arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+
+        <div class="step rv" style="--d:.08s">
+          <span class="ph"><span class="idx">2</span>
+            <img src="/shots/request.png" width="780" height="1180" alt="dpay: your phone shows your signed approval as a QR code." />
+          </span>
+          <span class="body"><b class="t">QR back</b><span class="d">Your phone shows a signed code.</span></span>
+        </div>
+        <span class="arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+
+        <div class="step rv" style="--d:.16s">
+          <span class="ph"><span class="idx">3</span>
+            <img src="/shots/scanned.png" width="780" height="1180" alt="dpay: the shop reads the QR off your screen." />
+          </span>
+          <span class="body"><b class="t">Shop scans</b><span class="d">The shop reads it off your screen.</span></span>
+        </div>
+        <span class="arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+
+        <div class="step done rv" style="--d:.24s">
+          <span class="ph"><span class="idx">4</span>
+            <img src="/shots/paid.png" width="780" height="1180" alt="dpay: the signed payment hands off to the shop's connection." />
+          </span>
+          <span class="body"><b class="t">Handed off</b><span class="d">The shop settles it online. You're done.</span></span>
+        </div>
+      </div>
+
+      <p class="band-note rv">Two scans instead of one network hop. <b>You still check the amount and approve</b> — nothing about the payment changes but the hand-off.</p>
+    </div>
+  </section>
+
+  <!-- ————— merchants: the web wallet is the terminal ————— -->
   <section id="merchants" class="wrap">
-    <span class="kicker">For merchants</span>
-    <h2>Accept payments.</h2>
-    <p class="sec-sub">The terminal is built in. Open dpay on any phone or in a browser, choose Receive, and show your QR — anyone with the app can pay you.</p>
-    <span class="mlab">Take payments in minutes</span>
-    <div class="msteps">
-      <div class="mstep">
-        <span class="n">Step 1</span>
-        <b>Open the web wallet</b>
-        <span class="d">In any browser, nothing to install. <a href="/wallet">dpay.kalaj.org/wallet</a>.</span>
+    <div class="m-grid">
+      <div>
+        <span class="kicker rv">For merchants</span>
+        <h2 class="rv">The terminal is already in your browser<i class="dot">.</i></h2>
+        <p class="sec-sub rv">No signups, no hardware, no fees. Open the dpay wallet on any phone or in any browser, choose <b>Receive</b>, and show your QR — anyone with the app can pay you.</p>
+
+        <div class="msteps">
+          <div class="mstep rv">
+            <span class="n">01</span>
+            <span><b>Open the web wallet</b>
+              <span class="d">In any browser, nothing to install — <a href="/wallet">dpay.kalaj.org/wallet</a>.</span></span>
+          </div>
+          <div class="mstep rv" style="--d:.08s">
+            <span class="n">02</span>
+            <span><b>Create your wallet</b>
+              <span class="d">Pick a username, write down your backup words. Your key stays on your device.</span></span>
+          </div>
+          <div class="mstep rv" style="--d:.16s">
+            <span class="n">03</span>
+            <span><b>Receive is your terminal</b>
+              <span class="d">Enter an amount, show the QR — or share the link. The customer scans and pays.</span></span>
+          </div>
+        </div>
+
+        <div class="m-cta rv">
+          <a class="ghost" href="/wallet">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>
+            Open the web wallet
+          </a>
+        </div>
+        <div class="trust rv">
+          <span>No signup</span>
+          <span>No terminal</span>
+          <span>$0 fees</span>
+        </div>
       </div>
-      <div class="mstep">
-        <span class="n">Step 2</span>
-        <b>Create your wallet</b>
-        <span class="d">Pick a username, write down your backup words. Your key stays on your device.</span>
+
+      <div class="browser rv" style="--d:.1s">
+        <div class="bbar" aria-hidden="true">
+          <span class="bdots"><i></i><i></i><i></i></span>
+          <span class="burl">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>
+            dpay.kalaj.org/wallet
+          </span>
+        </div>
+        <div class="bview">
+          <span class="shot">
+            <img src="/shots/request.png" width="780" height="1180" alt="The dpay web wallet's Receive tab: a $5.00 charge shown as a QR code — the merchant terminal." />
+          </span>
+          <span class="bcap">Receive — the terminal tab</span>
+        </div>
       </div>
-      <div class="mstep">
-        <span class="n">Step 3</span>
-        <b>Receive is your terminal</b>
-        <span class="d">Enter an amount, show the QR — or share the link. The customer scans and pays.</span>
-      </div>
-    </div>
-    <div class="cta-row">
-      <a class="ghost" href="/wallet">Open the web wallet</a>
-    </div>
-    <div class="trust">
-      <span>No signup</span>
-      <span>No terminal</span>
-      <span>No fees</span>
     </div>
   </section>
 
-  <section class="wrap">
-    <span class="kicker">Why dpay</span>
-    <h2>Fast. Offline. Yours.</h2>
-    <p class="sec-sub">Every payment, signed on your phone.</p>
+  <!-- ————— why dpay: bento ————— -->
+  <section id="why" class="wrap">
+    <span class="kicker rv">Why dpay</span>
+    <h2 class="rv">Fast. Offline. Yours<i class="dot">.</i></h2>
+    <p class="sec-sub rv">Every payment, signed on your phone.</p>
     <div class="bento">
-      <div class="tile big">
+      <div class="tile big rv">
         <div class="ico">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.8a16 16 0 0 1 20 0"/><path d="M5.5 12.4a11 11 0 0 1 13 0"/><path d="M9 16a6 6 0 0 1 6 0"/><circle cx="12" cy="19.5" r="1"/></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.8a16 16 0 0 1 20 0"/><path d="M5.5 12.4a11 11 0 0 1 13 0"/><path d="M9 16a6 6 0 0 1 6 0"/><circle cx="12" cy="19.5" r="1"/><path d="M3 3 21 21"/></svg>
         </div>
-        <h3>Works both online or offline.</h3>
-        <p>Your phone signs the payment. The shop's connection settles it. You can pay with zero signal.</p>
+        <h3>Works online or offline.</h3>
+        <p>Your phone signs the payment; the shop's connection settles it. You can pay with zero signal — that's the whole point.</p>
         <div class="asym" aria-hidden="true">
-          <div class="node off"><b>You</b><small>offline</small></div>
+          <div class="node"><b>You</b><small>offline</small></div>
           <div class="link"><span class="tap">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M6.5 8.5a7 7 0 0 1 0 7M10.5 6a11 11 0 0 1 0 12M14.5 4.2a15 15 0 0 1 0 15.6"/></svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6.5 8.5a7 7 0 0 1 0 7M10.5 6a11 11 0 0 1 0 12M14.5 4.2a15 15 0 0 1 0 15.6"/></svg>
           </span></div>
           <div class="node on"><b>The shop</b><small>online</small></div>
         </div>
       </div>
-      <div class="tile">
+      <div class="tile rv" style="--d:.06s">
         <div class="zero">$0</div>
         <h3>Zero fees</h3>
         <p>Tap, approve, done. The full amount arrives in seconds.</p>
       </div>
-      <div class="tile">
+      <div class="tile rv" style="--d:.12s">
         <div class="ico">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15" r="1.4"/></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15" r="1.4"/></svg>
         </div>
         <h3>Only you can move your money</h3>
-        <p>Your key lives on your phone. It signs every payment. Every move needs your tap.</p>
+        <p>Your key lives on your phone and signs every payment. Every move needs your tap.</p>
       </div>
-      <div class="tile wide">
+      <div class="tile wide rv" style="--d:.08s">
         <div class="ico">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.2c0-1.2 1.1-1.8 2.5-1.8s2.5.7 2.5 1.9c0 2.4-5 1.6-5 3.9 0 1.2 1.1 1.9 2.5 1.9s2.5-.6 2.5-1.8"/></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.2c0-1.2 1.1-1.8 2.5-1.8s2.5.7 2.5 1.9c0 2.4-5 1.6-5 3.9 0 1.2 1.1 1.9 2.5 1.9s2.5-.6 2.5-1.8"/></svg>
         </div>
-        <p><b>Clear currency symbols.</b> Balances show as plain $, ₿, Ξ, and ◎.</p>
+        <p><b>Clear currency symbols.</b> Balances show as plain $, ₿, Ξ, and ◎ — what you see is what you pay.</p>
       </div>
     </div>
   </section>
 
+  <!-- ————— get the app ————— -->
   <section id="get" class="wrap">
-    <div class="get">
+    <div class="get rv">
       <div class="get-grid">
         <div>
           <span class="kicker">Get it</span>
-          <h2>Get dpay.</h2>
-          <p>Install it, add money, you're set. Android for now, more later.</p>
+          <h2>Get dpay<i class="dot">.</i></h2>
+          <p>Install it, add money, you're set. Android for now — more soon.</p>
           <div class="stores">
             {{DOWNLOAD}}
             <span class="play" aria-disabled="true" title="Coming soon to Google Play">
@@ -767,20 +874,20 @@
               <span class="txt"><small>Get it on</small><strong>Google Play</strong></span>
             </span>
           </div>
-          <div class="merch-line">No phone handy? <a href="/wallet">Open the web wallet</a> — the same app, in your browser. Running a shop? Its <b>Receive</b> tab is the merchant terminal.</div>
+          <p class="merch-line">No phone handy? <a href="/wallet">Open the web wallet</a> — the same app, in your browser. Running a shop? Its <b>Receive</b> tab is the merchant terminal.</p>
         </div>
         <div class="get-side">
           <div class="row">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>
-            <span><b>Works online or offline</b>Signal or no signal.</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>
+            <span><b>Works online or offline</b><span>Signal or no signal.</span></span>
           </div>
           <div class="row">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>
-            <span><b>Settles in seconds</b>Tap, approve, done.</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>
+            <span><b>Settles in seconds</b><span>Tap, approve, done.</span></span>
           </div>
           <div class="row">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>
-            <span><b>Your key, your money</b>The key lives on your phone.</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>
+            <span><b>Your key, your money</b><span>The key lives on your phone.</span></span>
           </div>
         </div>
       </div>
@@ -790,10 +897,42 @@
 
 <footer>
   <div class="wrap foot">
-    <span class="word">d<b>pay</b><span class="dot">.</span></span>
-    <p>Instant payments, online or offline. Your key stays on your device — <a href="/wallet">use it on the web</a> too; the Receive tab is the merchant terminal. <a href="/privacy">Privacy policy</a>.</p>
+    <a class="brandmark" href="#top" aria-label="dpay home">
+      <svg viewBox="0 0 1024 1024" aria-hidden="true">
+        <rect width="1024" height="1024" rx="228" fill="url(#dtile)"/>
+        <path d="M622 276a52 52 0 0 1 52 52v348a52 52 0 0 1-52 52 52 52 0 0 1-52-52V328a52 52 0 0 1 52-52zM508 396a176 176 0 1 0 .1 0zM508 498a74 74 0 1 1-.1 0z" fill="#F4F1E8"/>
+      </svg>
+      <span class="word">d<b>pay</b></span>
+    </a>
+    <div class="foot-right">
+      <p>Instant payments, online or offline. <b>Your key stays on your device.</b> Use it <a href="/wallet">on the web</a> too — the Receive tab is the merchant terminal. <a href="/privacy">Privacy policy</a>.</p>
+      <div class="foot-micro">
+        <span>Non-custodial</span><span>Works offline</span><span>$0 fees</span>
+      </div>
+    </div>
   </div>
 </footer>
+
+<script>
+(function () {
+  var nav = document.getElementById('nav');
+  function onScroll() { nav.classList.toggle('scrolled', window.scrollY > 10); }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+
+  var els = document.querySelectorAll('.rv');
+  if ('IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+      });
+    }, { threshold: 0.15, rootMargin: '0px 0px -6% 0px' });
+    els.forEach(function (el) { io.observe(el); });
+  } else {
+    els.forEach(function (el) { el.classList.add('in'); });
+  }
+})();
+</script>
 
 </body>
 </html>
