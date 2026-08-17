@@ -113,7 +113,7 @@ export async function run() {
 
     // --- U-F4: keyboard focus paints a ring, pointer focus does not -------------------
     // The web entries (e2e/web/index.html + wallet.html) inject a global `:focus-visible` rule
-    // (outline 2px solid #3ee0ac — the palette brand). Prove BOTH halves in the real DOM:
+    // (outline 2px solid #FF5A1F — the palette brand). Prove BOTH halves in the real DOM:
     //   (a) a Tab keypress focuses the first focusable WITH the ring (computed outlineStyle
     //       'solid' in the brand color) — keyboard users always see where they are;
     //   (b) a real mouse click focuses a button WITHOUT the ring (outlineStyle 'none') — the
@@ -133,7 +133,7 @@ export async function run() {
     });
     assert(kb.tag !== 'BODY' && kb.tag !== '', `Tab should focus a real element, got activeElement=${kb.tag || 'none'}`);
     assert(kb.outlineStyle === 'solid', `keyboard-focused <${kb.tag} role=${kb.role}> must paint the :focus-visible ring (outlineStyle "${kb.outlineStyle}")`);
-    assertIncludes(kb.outlineColor, '62, 224, 172', 'the focus ring must use the brand color #3ee0ac');
+    assertIncludes(kb.outlineColor, '255, 90, 31', 'the focus ring must use the brand color #FF5A1F');
     console.log(`[14-keyboard] ✓ Tab focuses <${kb.tag} role=${kb.role}> with the brand focus ring`);
 
     await driver.eval(() => { (document.activeElement)?.blur?.(); });

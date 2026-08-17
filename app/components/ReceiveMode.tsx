@@ -1,7 +1,7 @@
 import {useEffect, useMemo, useState} from 'react';
 import {View, Text, Pressable, TextInput, type TextStyle} from 'react-native';
 import {QrCode} from './QrCode';
-import {C} from '../config/palette';
+import {C, FONT} from '../config/palette';
 import {S} from '../styles';
 import {EXPIRY_WINDOW, NFC_PAY_TIMEOUT_MS, POLL, BALANCE_TIMEOUT_MS, QR_SIZE} from '../config/constants';
 import {short, base, toUnits, randNonceHex, nowSecs} from '../lib/format';
@@ -28,10 +28,12 @@ import {IconCheck, IconChevronDown, IconClock, IconQr, IconShare, IconWifiOff} f
 
 // The optional merchant memo input — a real secondary field (not a bare text link), mirroring the
 // paste-button affordance pattern (44pt-min touch target + a visible border). Inline (Group E owns
-// styles.ts as ONE block): outline sub color on a subtle wash, full-width (alignSelf stretch so it
-// lines up with the amount row above and the Request button below — was a narrower maxWidth:320 that
+// styles.ts as ONE block): Traveler Paper input idiom — white field + hairline line2 border +
+// Space Grotesk, matching usernameInput/withdrawAddrInput (the old dark-theme transparent-bg +
+// heavy sub2 outline read as a stray box on porcelain). Full-width (alignSelf stretch so it lines
+// up with the amount row above and the Request button below — was a narrower maxWidth:320 that
 // left the field floating shorter than its neighbors), 44pt-min.
-const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeight: 44, borderWidth: 1, borderColor: C.sub2, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink};
+const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeight: 44, backgroundColor: C.card, borderWidth: 1, borderColor: C.line2, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink, fontFamily: FONT.sans};
 
 export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, catalog, depositCurrency, depositDisplay, depositChainId, depositNativeEth, depositFamily, subMode, onSubModeChange, prefillReceipt, onReceiptConsumed, selectedCurrency, assets, selectedAssetId, balances, onSelectAsset, onLockChange}: {identity: Identity; relayUrl: string; online: boolean; nfcReady: boolean; onReceived: () => void; catalog: CurrencyDescriptor[]; depositCurrency: number; depositDisplay: FamilyDisplay | null; depositChainId: number | null; depositNativeEth: boolean; depositFamily: 'CkBtcUtxo' | 'CkEthErc20' | null; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; prefillReceipt?: string | null; onReceiptConsumed?: () => void; selectedCurrency: number; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; onLockChange?: (locked: boolean) => void}) {
   // The within-tab sub-mode is OWNED by Wallet so deeplinks (?screen=deposit, auto-open-ckERC20) can

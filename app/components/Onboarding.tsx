@@ -106,7 +106,7 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
 
   return (
     <SafeAreaView style={S.root}>
-      <StatusBar barStyle="light-content" backgroundColor={C.bg} translucent={false} />
+      <StatusBar barStyle="dark-content" backgroundColor={C.bg} translucent={false} />
       {/* B1 — keep the CTA visible while the keyboard is up. `behavior="padding"` on iOS lifts the
           form above the keyboard (the username input + Create wallet CTA otherwise sit ~y1509-1656,
           fully under the ~y1200+ keyboard). Android already gets adjustResize from AndroidManifest

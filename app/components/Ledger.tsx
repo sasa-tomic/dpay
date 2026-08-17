@@ -76,10 +76,11 @@ export function Ledger({history, catalog}: {history: Txn[]; catalog: CurrencyDes
         return (
           <View key={t.nonce} style={S.histRow}>
             {/* P4 — direction glyph leading each row (t.dir is Txn's reliable 'out' | 'in' field):
-                incoming = arrow-down-left in brand mint, outgoing = arrow-up-right neutral. The
-                icon renders no textContent, so the asserted amounts/memos are untouched. */}
+                incoming = arrow-down-left in ok green (matching the credited amount; tangerine stays
+                reserved for CTA/active), outgoing = arrow-up-right neutral. The icon renders no
+                textContent, so the asserted amounts/memos are untouched. */}
             <View style={S.histDirIcon}>
-              {t.dir === 'out' ? <IconArrowUpRight size={16} color={C.sub} /> : <IconArrowDownLeft size={16} color={C.brand} />}
+              {t.dir === 'out' ? <IconArrowUpRight size={16} color={C.sub} /> : <IconArrowDownLeft size={16} color={C.ok} />}
             </View>
             <View style={S.histWhoCol}>
               <Text style={S.histWho}>{t.dir === 'out' ? `to ${t.who || '—'}` : `from ${t.who || '—'}`}</Text>

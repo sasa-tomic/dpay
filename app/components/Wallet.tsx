@@ -549,7 +549,9 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
 
   return (
     <SafeAreaView style={S.root}>
-      <StatusBar barStyle="light-content" backgroundColor={C.bg} translucent={false} />
+      {/* Traveler Paper: porcelain bg ⇒ DARK status-bar icons (light-content was the dark-theme
+          remnant — white icons on #F4F1E8 were near-invisible). */}
+      <StatusBar barStyle="dark-content" backgroundColor={C.bg} translucent={false} />
       <View style={S.header}>
         <View style={S.headerLeft}>
           <Pressable

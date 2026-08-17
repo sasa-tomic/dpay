@@ -51,7 +51,7 @@ export function BalancesSheet({assets, balances, selectedId, onSelect, hasTestne
   return (
     <SheetOverlay>
       <SafeAreaView style={S.sheet}>
-        <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+        <StatusBar barStyle="dark-content" backgroundColor={C.bg} />
         <View style={S.sheetHead}>
           <Text style={S.sheetTitle}>Balances</Text>
           <Pressable

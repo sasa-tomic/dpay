@@ -15,7 +15,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 W, H = 512, 512
 BG = (10, 12, 17)        # #0a0c11
-BRAND = (62, 224, 172)   # #3ee0ac
+BRAND = (255, 90, 31)    # #FF5A1F
 
 # Background with subtle radial glow
 img = Image.new('RGBA', (W, H), (*BG, 255))

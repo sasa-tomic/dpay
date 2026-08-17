@@ -2,7 +2,7 @@ import {useState, useEffect} from 'react';
 import {View, Text, Pressable, TextInput, ActivityIndicator, type TextStyle} from 'react-native';
 import {QrCode} from './QrCode';
 import bs58 from 'bs58';
-import {C} from '../config/palette';
+import {C, FONT} from '../config/palette';
 import {S} from '../styles';
 import {QR_SIZE_SMALL, SOL_BROADCAST_TIMEOUT_MS} from '../config/constants';
 import {fmtAsset, toUnits} from '../lib/format';
@@ -33,7 +33,9 @@ import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {useReportLock} from '../hooks/useReportLock';
 import {IconCheck, IconChevronDown, IconClock, IconCopy, IconQr} from './icons';
 
-const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeight: 44, borderWidth: 1, borderColor: C.sub2, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink};
+// Twin of ReceiveMode's memoInputStyle — Traveler Paper input idiom (white field, hairline border,
+// Space Grotesk), kept inline + identical so the IC and SOL Receive forms stay pixel-twins.
+const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeight: 44, backgroundColor: C.card, borderWidth: 1, borderColor: C.line2, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink, fontFamily: FONT.sans};
 
 /**
  * SolReceiveMode — the merchant-side payment component for the v2 recent-blockhash SOL rail.

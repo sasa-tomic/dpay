@@ -21,7 +21,7 @@ const OUT = join(__dirname, '..', '..', '.dev', 'store-assets');
 mkdirSync(OUT, { recursive: true });
 
 // Brand palette (app/config/palette.ts)
-const BRAND = '#3ee0ac';
+const BRAND = '#FF5A1F';
 const BG_DARK = '#06070a';
 const INK = '#f1f4f7';
 const SUB = '#a6afba';

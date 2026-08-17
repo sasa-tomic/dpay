@@ -146,7 +146,7 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
   return (
     <SheetOverlay>
       <SafeAreaView style={S.sheet}>
-        <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+        <StatusBar barStyle="dark-content" backgroundColor={C.bg} />
         <View style={S.sheetHead}>
           <Text style={S.sheetTitle}>Settings</Text>
           <Pressable testID="btn-settings-close" style={S.sheetClose} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close settings" accessibilityState={{disabled: false}}><IconClose size={18} color={C.sub} /></Pressable>
@@ -164,13 +164,13 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
                 {seedFormat === 'mnemonic' ? (
                   <>
                     <View testID="mnemonic-words" style={{flexDirection: 'row', flexWrap: 'wrap', marginTop: 4}}>
+                      {/* R3 — chip look now shares Onboarding's S.seedChip* styles (white card chip,
+                           IBM Plex Mono via FONT.mono). The index Text stays FIRST inside each
+                           mnemonic-word-N testID'd View (e2e strips the leading number). */}
                       {mnemonicWords.map((w, i) => (
-                        <View
-                          key={i}
-                          testID={`mnemonic-word-${i}`}
-                          style={{flexDirection: 'row', alignItems: 'center', backgroundColor: C.bg, borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, margin: 3, borderWidth: 1, borderColor: C.line2}}>
-                          <Text style={{color: C.sub2, fontFamily: 'monospace', fontSize: 12, marginRight: 6}}>{i + 1}</Text>
-                          <Text style={{color: C.ink, fontSize: 15}}>{w}</Text>
+                        <View key={i} testID={`mnemonic-word-${i}`} style={S.seedChip}>
+                          <Text style={S.seedChipIdx}>{i + 1}</Text>
+                          <Text style={S.seedChipWord}>{w}</Text>
                         </View>
                       ))}
                     </View>

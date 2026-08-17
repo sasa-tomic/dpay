@@ -13,7 +13,7 @@ const SHOTS = join(__dirname, '..', 'shots');
 const OUT = join(__dirname, '..', '..', '.dev', 'store-assets');
 mkdirSync(OUT, { recursive: true });
 
-const BRAND = '#3ee0ac';
+const BRAND = '#FF5A1F';
 const BG = '#06070a';
 const INK = '#f1f4f7';
 const SUB = '#a6afba';
