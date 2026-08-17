@@ -694,11 +694,11 @@ async fn privacy_policy_is_served_with_required_disclosures() {
     );
     let html = String::from_utf8(bytes).unwrap();
     for required in [
-        "<title>Privacy Policy | dpay</title>",
+        "<title>Privacy Policy | Different Pay</title>",
         "org.kalaj.dpay",
         "sato.dpay@kalaj.org",
         "Retention and deletion",
-        "cannot be changed or deleted by dpay",
+        "cannot be changed or deleted by us",
         "We do not sell personal or sensitive information",
     ] {
         assert!(
