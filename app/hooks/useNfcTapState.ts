@@ -64,6 +64,18 @@ export function useNfcTapState<E>(args: {
     eventName, nativeModule, armCard, disarmCard, startReader, stopReader,
     onSettling, onRequest, onSubmit, onReceipt,
   } = args;
+  // The adapter callbacks live in a ref, NOT in the effect deps. NfcTap/SolNfcTap pass inline
+  // arrows (`armCard: () => DpayNfc.armCard()`, `onRequest: (e, ctx) => …`) — fresh identity every
+  // render. Mid-tap re-renders are guaranteed (every phase event calls setPhase; the payer also
+  // setDisclosure in autoSign), so keying the effect on those identities re-ran it MID-TAP: the
+  // cleanup called disarmCard/stopReader while the phones were still coupled — disableReaderMode
+  // killed the RF field, IsoDep.transceive threw TagLostException ("Phones moved apart"), and the
+  // re-armed reader re-detected the still-present payer → every tap died at its first phase
+  // transition, over and over (the 2026-08-13 fcd2afd regression; invisible to e2e/jest/ondevice,
+  // which all bypass the live RN session). Reading through the ref keeps the LATEST callbacks
+  // without ever tearing the session down.
+  const adapterRef = useRef({armCard, disarmCard, startReader, stopReader, onSettling, onRequest, onSubmit, onReceipt});
+  adapterRef.current = {armCard, disarmCard, startReader, stopReader, onSettling, onRequest, onSubmit, onReceipt};
   const [phase, setPhase] = useState<NfcTapPhase>('listening');
   const [reason, setReason] = useState<string | null>(null);
   const finalized = useRef(false);
@@ -96,10 +108,10 @@ export function useNfcTapState<E>(args: {
   }, [clearSettleTimer]);
 
   useEffect(() => {
-    // Re-set on every effect re-run: a parent re-render can recreate an inline callback → the
-    // effect re-runs → the cleanup below sets aliveRef.current=false. Without resetting it here,
-    // finalize would be permanently blocked after the first parent re-render (the !aliveRef guard).
+    // Re-set on every effect re-run (readerPayload change / remount): the cleanup below sets
+    // aliveRef.current=false, and without resetting it here finalize would stay blocked forever.
     aliveRef.current = true;
+    const adapter = () => adapterRef.current;
     const ctx: TapCtx = {finalize};
     const emitter = new NativeEventEmitter(nativeModule as any);
     const sub = emitter.addListener(eventName, (e: any) => {
@@ -120,7 +132,7 @@ export function useNfcTapState<E>(args: {
         // Arm a timeout so we never spin on "Confirming…" forever if the receipt never arrives.
         if (role === 'card' && e.phase === 'settling') {
           committed.current = true;
-          onSettling?.();
+          adapterRef.current.onSettling?.();
           if (!settleTimer.current) {
             settleTimer.current = setTimeout(() => {
               finalize('pending', 'Couldn’t confirm — check your balance when back online');
@@ -131,31 +143,32 @@ export function useNfcTapState<E>(args: {
       } else if (e.type === 'request') {
         markActive();
         setPhase('exchanging');
-        onRequest(e as E, ctx);
+        adapterRef.current.onRequest(e as E, ctx);
       } else if (e.type === 'done' || e.type === 'payment') {
         markActive();
         committed.current = true;
-        onSubmit(e as E, ctx);
+        adapterRef.current.onSubmit(e as E, ctx);
       } else if (e.type === 'receipt') {
-        onReceipt(e as E, ctx);
+        adapterRef.current.onReceipt(e as E, ctx);
       }
       // 'confirmed' (reader): the receipt reached the payer; the merchant already finalized on submit.
     });
     if (role === 'card') {
-      armCard().catch((e: unknown) => finalize('error', e instanceof Error ? e.message : String(e)));
+      adapter().armCard().catch((e: unknown) => finalize('error', e instanceof Error ? e.message : String(e)));
     } else if (readerPayload) {
-      startReader(readerPayload).catch((e: unknown) => finalize('error', e instanceof Error ? e.message : String(e)));
+      adapter().startReader(readerPayload).catch((e: unknown) => finalize('error', e instanceof Error ? e.message : String(e)));
     }
     return () => {
       aliveRef.current = false;
       clearSettleTimer();
       sub.remove();
-      if (role === 'card') disarmCard().catch((e: unknown) => console.warn('disarmCard failed (cleanup)', e));
-      else stopReader().catch((e: unknown) => console.warn('stopReader failed (cleanup)', e));
+      if (role === 'card') adapter().disarmCard().catch((e: unknown) => console.warn('disarmCard failed (cleanup)', e));
+      else adapter().stopReader().catch((e: unknown) => console.warn('stopReader failed (cleanup)', e));
     };
+    // Adapter callbacks are deliberately ABSENT: they're read through adapterRef (see its comment),
+    // so inline-arrow identities from NfcTap/SolNfcTap can never re-run this effect mid-tap.
   }, [
-    role, readerPayload, eventName, nativeModule, armCard, disarmCard, startReader, stopReader,
-    onSettling, onRequest, onSubmit, onReceipt, finalize, markActive, clearSettleTimer,
+    role, readerPayload, eventName, nativeModule, finalize, markActive, clearSettleTimer,
   ]);
 
   return {phase, reason, activeRef};
