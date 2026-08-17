@@ -40,5 +40,4 @@ export const FONT = {
   sansMedium: 'space_grotesk_600',
   sansBold: 'space_grotesk_700',
   mono: 'plex_mono_500',
-  monoMedium: 'plex_mono_600',
 };
