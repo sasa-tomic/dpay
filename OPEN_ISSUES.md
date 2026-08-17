@@ -10,7 +10,17 @@
 
 ## NEXT SESSION — work order
 
-> **Empty / neutral** for agent-pickable work. The 2026-08-16/17 session completed the radical
+> **Agent-pickable work queued: the Trust Wallet fund-button** (set 2026-08-17). Full researched
+> plan: **`2026-08-17-trust-wallet-fund-button.md`** — read it first; it carries the verified
+> deep-link format, UAI asset ids (`c0`/`c501`/`c501_t<mint>`), per-rail fit table, and the
+> explicitly-rejected approaches. Summary: one-tap "Fund from Trust Wallet" deep link
+> (`https://link.trustwallet.com/send?asset=…&address=<deposit addr>`) on the native Add-money
+> surfaces (BTC mainnet DepositSheet + SOL/USDC My-address view), android-gated, mainnet-only,
+> jest-golden-tested; ckETH/ckUSDC stay on the existing WalletConnect path (Trust already pairs
+> there — zero work). Est. S / 1–2 h. Research artifacts: `third_party/wallet-core` clone (registry
+> analysis). Do NOT re-derive the research.
+>
+> Prior session context: the 2026-08-16/17 session completed the radical
 > visual overhaul (plan `2026-08-16-visual-overhaul.md`, commits `e3b6bd2`→`451384e`): lucide-style
 > SVG icon system (17 icons, `app/components/icons.tsx`), per-family asset monogram chips
 > (`AssetGlyph.tsx`), ghost-button action tiers, ledger direction icons, settings/onboarding polish,
