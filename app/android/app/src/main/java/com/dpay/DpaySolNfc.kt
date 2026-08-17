@@ -69,6 +69,8 @@ object DpaySolNfc {
 
     // ---- reader (merchant) state ----
     @Volatile private var readerIsoDep: IsoDep? = null
+    // The activity reader mode was enabled on (see DpayNfc.readerActivity — same teardown rationale).
+    private var readerActivity: Activity? = null
     // The 1-slot rendezvous JS offers the stamped receipt JSON into (after broadcasting online) for
     // the reader thread to deliver back to the payer. `pendingReceipt` caches it for the fast path.
     private var receiptSignal: ArrayBlockingQueue<String>? = null
@@ -297,18 +299,29 @@ object DpaySolNfc {
     fun startReader(activity: Activity, solreqUri: String) {
         val adapter = NfcAdapter.getDefaultAdapter(activity)
         when {
-            adapter == null -> { errorEvent("reader", "This phone has no NFC"); return }
-            !adapter.isEnabled -> { errorEvent("reader", "NFC is off — turn it on in Settings"); return }
+            adapter == null -> { android.util.Log.w("dpay", "sol startReader: no NFC adapter"); errorEvent("reader", "This phone has no NFC"); return }
+            !adapter.isEnabled -> { android.util.Log.w("dpay", "sol startReader: NFC disabled"); errorEvent("reader", "NFC is off — turn it on in Settings"); return }
         }
+        // Restart hygiene: tear down any stale session before re-enabling (see DpayNfc.startReader).
+        stopReader(activity)
+        readerActivity = activity
         receiptSignal = ArrayBlockingQueue(1)
         pendingReceipt = null
-        phaseEvent("reader", "listening")
-        adapter!!.enableReaderMode(
-            activity,
-            { tag -> runReader(tag, solreqUri) },
-            NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK,
-            null,
-        )
+        // OEM/older builds can throw from enableReaderMode — classify + log (see DpayNfc.startReader).
+        try {
+            adapter!!.enableReaderMode(
+                activity,
+                { tag -> runReader(tag, solreqUri) },
+                NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK,
+                null,
+            )
+            phaseEvent("reader", "listening")
+            android.util.Log.i("dpay", "sol startReader: reader mode enabled")
+        } catch (e: Throwable) {
+            android.util.Log.e("dpay", "sol enableReaderMode failed", e)
+            errorEvent("reader", "Couldn't start NFC (${e.javaClass.simpleName}) — try again")
+            stopReader(activity)
+        }
     }
 
     /** JS calls this after broadcasting online: stamp the receipt + wake the reader thread to send it. */
@@ -322,11 +335,19 @@ object DpaySolNfc {
         receiptSignal?.offer(json)
     }
 
-    fun stopReader(activity: Activity) {
-        try {
-            NfcAdapter.getDefaultAdapter(activity)?.disableReaderMode(activity)
-        } catch (_: Throwable) {
+    fun stopReader(activity: Activity?) {
+        // Prefer the activity reader mode was enabled on (see DpayNfc.stopReader).
+        val target = readerActivity ?: activity
+        if (target == null) {
+            android.util.Log.w("dpay", "sol stopReader: no activity reference — reader mode may stay on")
+        } else {
+            try {
+                NfcAdapter.getDefaultAdapter(target)?.disableReaderMode(target)
+            } catch (e: Throwable) {
+                android.util.Log.w("dpay", "sol disableReaderMode failed", e)
+            }
         }
+        readerActivity = null
         readerIsoDep = null
         receiptSignal = null
         pendingReceipt = null
@@ -339,7 +360,9 @@ object DpaySolNfc {
      */
     private fun runReader(tag: Tag, solreqUri: String) {
         val isoDep = IsoDep.get(tag)
+        android.util.Log.i("dpay", "sol onTag: techs=${tag.techList.joinToString(",")}")
         if (isoDep == null) {
+            android.util.Log.w("dpay", "sol onTag: no IsoDep tech on this tag")
             errorEvent("reader", "Not a dpay phone")
             return
         }
@@ -376,8 +399,10 @@ object DpaySolNfc {
             emitConfirmed()
             phaseEvent("reader", "success")
         } catch (e: TagLostException) {
+            android.util.Log.w("dpay", "sol onTag: tag lost mid-exchange", e)
             errorEvent("reader", "Phones moved apart — try again")
         } catch (e: Throwable) {
+            android.util.Log.w("dpay", "sol onTag: unexpected failure (${e.javaClass.simpleName})", e)
             errorEvent("reader", "Tap failed — try again")
         } finally {
             try { isoDep.close() } catch (_: Throwable) {}

@@ -151,7 +151,8 @@ class DpayNfcModule(reactContext: ReactApplicationContext) :
 
     @ReactMethod
     fun stopReader(promise: Promise) {
-        reactApplicationContext.currentActivity?.let { DpayNfc.stopReader(it) }
+        // Null is fine: DpayNfc.stopReader falls back to the activity reader mode was enabled on.
+        DpayNfc.stopReader(reactApplicationContext.currentActivity)
         promise.resolve(null)
     }
 }

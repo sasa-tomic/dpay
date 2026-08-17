@@ -207,32 +207,53 @@ object DpayNfc {
     }
 
     // ============================================================ merchant / reader
+    // The activity reader mode was enabled on. Android's disableReaderMode(activity) must be given
+    // an activity instance; if JS calls stopReader when reactContext.currentActivity is momentarily
+    // null (activity recreating), the stored reference still lets us tear the RF field down —
+    // otherwise reader mode stays ON at the OS level and poisons every later session.
+    private var readerActivity: Activity? = null
+
     /** Enter reader mode and drive the exchange when a payer's phone is tapped (Receive mode). */
     fun startReader(activity: Activity, request: ByteArray) {
         val adapter = NfcAdapter.getDefaultAdapter(activity)
         when {
             adapter == null -> {
+                android.util.Log.w("dpay", "startReader: no NFC adapter on this device")
                 errorEvent("reader", "This phone has no NFC")
                 return
             }
             !adapter.isEnabled -> {
+                android.util.Log.w("dpay", "startReader: NFC adapter present but disabled")
                 errorEvent("reader", "NFC is off — turn it on in Settings")
                 return
             }
         }
+        // Restart hygiene: if an earlier session left reader mode registered (stopReader with a
+        // null activity), tear it down before re-enabling on this activity.
+        stopReader(activity)
+        readerActivity = activity
         reader = FfiReaderConductor(request, maxChunk)
         // The nonce lives at request bytes [40, 56): to(32) | amount(8) | nonce(16) | expiry(8).
         readerNonce = if (request.size >= 56) request.copyOfRange(40, 56) else null
         receiptSignal = ArrayBlockingQueue(1)
         pendingReceipt = null
-        phaseEvent("reader", "listening")
-        // NFC-A / ISO-DEP, and skip the NDEF check (HCE cards are not NDEF tags).
-        adapter!!.enableReaderMode(
-            activity,
-            { tag -> onTag(tag) },
-            NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK,
-            null,
-        )
+        // NFC-A / ISO-DEP, and skip the NDEF check (HCE cards are not NDEF tags). Some OEM/older
+        // builds (e.g. LineageOS on older devices) throw from enableReaderMode — classify + log the
+        // stack so a physical re-test pinpoints it instead of a generic "Tap failed".
+        try {
+            adapter!!.enableReaderMode(
+                activity,
+                { tag -> onTag(tag) },
+                NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK,
+                null,
+            )
+            phaseEvent("reader", "listening")
+            android.util.Log.i("dpay", "startReader: reader mode enabled")
+        } catch (e: Throwable) {
+            android.util.Log.e("dpay", "enableReaderMode failed", e)
+            errorEvent("reader", "Couldn't start NFC (${e.javaClass.simpleName}) — try again")
+            stopReader(activity)
+        }
     }
 
     /** JS calls this after settling online with the outcome code (see the core receipt codes:
@@ -249,11 +270,20 @@ object DpayNfc {
         receiptSignal?.offer(receipt)
     }
 
-    fun stopReader(activity: Activity) {
-        try {
-            NfcAdapter.getDefaultAdapter(activity)?.disableReaderMode(activity)
-        } catch (_: Throwable) {
+    fun stopReader(activity: Activity?) {
+        // Prefer the activity reader mode was actually enabled on; the caller's currentActivity can
+        // be null at teardown while the OS-level reader mode is still polling.
+        val target = readerActivity ?: activity
+        if (target == null) {
+            android.util.Log.w("dpay", "stopReader: no activity reference — reader mode may stay on")
+        } else {
+            try {
+                NfcAdapter.getDefaultAdapter(target)?.disableReaderMode(target)
+            } catch (e: Throwable) {
+                android.util.Log.w("dpay", "disableReaderMode failed", e)
+            }
         }
+        readerActivity = null
         reader = null
         readerNonce = null
         receiptSignal = null
@@ -266,8 +296,10 @@ object DpayNfc {
      */
     private fun onTag(tag: Tag) {
         val r = reader ?: return
+        android.util.Log.i("dpay", "onTag: techs=${tag.techList.joinToString(",")}")
         val isoDep = IsoDep.get(tag)
         if (isoDep == null) {
+            android.util.Log.w("dpay", "onTag: no IsoDep tech on this tag")
             errorEvent("reader", "Not a dpay phone")
             return
         }
@@ -316,10 +348,13 @@ object DpayNfc {
                 }
             }
         } catch (e: TagLostException) {
+            android.util.Log.w("dpay", "onTag: tag lost mid-exchange", e)
             errorEvent("reader", "Phones moved apart — try again")
         } catch (e: DpayException) {
+            android.util.Log.w("dpay", "onTag: core protocol error", e)
             errorEvent("reader", "Communication error — try again")
         } catch (e: Throwable) {
+            android.util.Log.w("dpay", "onTag: unexpected failure (${e.javaClass.simpleName})", e)
             errorEvent("reader", "Tap failed — try again")
         } finally {
             try {

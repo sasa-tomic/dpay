@@ -68,7 +68,8 @@ class DpaySolNfcModule(reactContext: ReactApplicationContext) :
 
     @ReactMethod
     fun stopSolReader(promise: Promise) {
-        reactApplicationContext.currentActivity?.let { DpaySolNfc.stopReader(it) }
+        // Null is fine: DpaySolNfc.stopReader falls back to the activity reader mode was enabled on.
+        DpaySolNfc.stopReader(reactApplicationContext.currentActivity)
         promise.resolve(null)
     }
 }
