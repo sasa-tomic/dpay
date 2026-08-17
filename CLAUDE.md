@@ -2,7 +2,7 @@
 
 ## Me
 
-Solo founder & engineer building **dpay** (working name TBD). Contact: sato.dpay@kalaj.org.
+Solo founder & engineer building **∂ifferent Pay** (display: ∂pay / Different Pay; technical ASCII: dpay — name decided 2026-08-17, see `2026-08-17-name-decision.md`). Contact: sato.dpay@kalaj.org.
 Currently pre-seed: building the investor proof-of-concept, then a first pilot.
 
 ## CURRENT TOP PRIORITY — native-asset in/out (BTC / ETH / SOL)  (set 2026-08-06; status updated 2026-08-06)
