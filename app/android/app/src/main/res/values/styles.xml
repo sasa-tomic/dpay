@@ -13,7 +13,7 @@
         <item name="colorAccent">@color/accent</item>
     </style>
 
-    <!-- Cold-start splash: the tangerine 'd' tile on porcelain until RN renders. -->
+    <!-- Cold-start splash: the tangerine ∂ tile on porcelain until RN renders. -->
     <style name="SplashTheme" parent="AppTheme">
         <item name="android:windowBackground">@drawable/splash</item>
     </style>

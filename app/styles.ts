@@ -58,7 +58,7 @@ export const S = StyleSheet.create({
   headerLeft: {flexDirection: 'row', alignItems: 'flex-start', gap: 4},
   headerSettingsBtn: {width: 40, height: 40, borderRadius: 14, backgroundColor: C.card, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.line2},
   brand: {fontSize: 24},
-  // ACCOUNT eyebrow above the username separates the wordmark "dpay" from the user identity so
+  // ACCOUNT eyebrow above the username separates the wordmark "∂pay" from the user identity so
   // the pair no longer reads as a single currency label. Mono = the receipt voice. The `who` line
   // below stays the authoritative username text (e2e `header-who` reads it verbatim).
   whoLabel: {fontSize: 10, fontWeight: '600', color: C.sub2, marginTop: 6, letterSpacing: 1.2, textTransform: 'uppercase', fontFamily: FONT.mono},

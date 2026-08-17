@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Launcher foreground: the porcelain 'd' knocked out of the tangerine tile (same geometry as
-     app/components/Logo.tsx D_PATH, scaled 1024→108: bowl LEFT, ascender stem RIGHT). -->
+<!-- Launcher foreground: the porcelain ∂ knocked out of the tangerine tile (same geometry as
+     app/components/Logo.tsx D_PATH, scaled 1024→108: outer contour + bowl counter, even-odd). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
     <path android:fillColor="#FDFCF9" android:fillType="evenOdd"
-        android:pathData="M 61.232 38.485 h 0.000 a 3.419 3.419 0 0 1 3.419 3.419 v 22.878 a 3.419 3.419 0 0 1 -3.419 3.419 h -0.000 a 3.419 3.419 0 0 1 -3.419 -3.419 v -22.878 a 3.419 3.419 0 0 1 3.419 -3.419 z M 53.737 46.374 a 11.571 11.571 0 1 0 0.001 0 z  M 53.737 53.080 a 4.865 4.865 0 1 1 0.001 0 z"/>
+        android:pathData="M44.556 38.684V30.456Q50.017 29.109 53.981 29.109Q65.314 29.109 70.363 38.871Q72.607 43.209 72.607 50.054Q72.607 54.28 71.559 59.179Q68.941 71.409 61.873 77.281Q56.375 81.844 50.279 81.844Q43.921 81.844 40.031 78.44Q35.393 74.326 35.393 67.445Q35.393 59.815 39.545 53.831Q43.584 47.959 51.513 47.959Q55.627 47.959 59.517 50.54Q60.975 51.512 63.07 54.579Q63.406 52.148 63.406 49.418Q63.406 45.266 62.209 43.097Q58.656 36.702 52.41 36.702Q49.306 36.702 44.556 38.684ZM44.631 68.38Q44.631 71.11 46.127 72.793Q47.661 74.513 50.316 74.513Q52.485 74.513 54.393 73.167Q56.749 71.521 58.582 68.492Q60.003 66.136 60.826 63.405Q57.796 56.935 52.635 56.935Q47.773 56.935 45.865 62.171Q44.631 65.5 44.631 68.38Z"/>
 </vector>
