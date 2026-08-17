@@ -29,7 +29,7 @@ function make(
   nodes: (props: {size: number; color: string}) => Node[],
 ): React.FC<IconProps & {testID?: string}> {
   const Icon: React.FC<IconProps & {testID?: string}> = ({size = 24, color, testID}) => {
-    const stroke = color ?? '#9aa4b0';
+    const stroke = color ?? '#676257';
     return (
       <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" testID={testID}>
         {nodes({size, color: stroke}).map((n, i) =>

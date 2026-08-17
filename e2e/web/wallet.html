@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <!-- Phone-first viewport: the RN styles are designed for a phone screen. -->
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-    <meta name="theme-color" content="#06070a" />
+    <meta name="theme-color" content="#F4F1E8" />
     <meta name="description" content="dpay web wallet — the same app, in your browser. Non-custodial: your key never leaves this device." />
     <link rel="icon" href="data:," />
     <title>dpay · Wallet</title>
@@ -17,17 +17,25 @@
     <style>
       /* `#root` must be a bounded flex column (mirrors e2e/web/index.html — see the note there):
        * react-native-web's root uses flex:1, which collapses under a display:block parent. */
-      html, body, #root { margin: 0; padding: 0; height: 100%; background: #06070a; }
+      html, body, #root { margin: 0; padding: 0; height: 100%; background: #F4F1E8; }
       #root { display: flex; flex-direction: column; }
       /* Keyboard focus ring (U-F4): :focus-visible paints ONLY for keyboard focus — pointer/touch
        * focus never shows it (and the e2e visual flow screenshots unfocused elements, so baselines
-       * are unaffected). #3ee0ac is the palette brand green (app/config/palette.ts C.brand).
+       * are unaffected). #FF5A1F is the palette brand tangerine (app/config/palette.ts C.brand).
        * HTML-only file: never ships to native Android, which has its own focus handling. */
       button:focus-visible, [role='button']:focus-visible, a:focus-visible,
       input:focus-visible, textarea:focus-visible {
-        outline: 2px solid #3ee0ac;
+        outline: 2px solid #FF5A1F;
         outline-offset: 2px;
       }
+      /* Space Grotesk + IBM Plex Mono — same TTFs Android serves from res/font. Family names
+         match the RN res/font resource names (the ttf filenames) so ONE fontFamily string in
+         styles.ts resolves on both platforms. Served as hashed /assets/* by the vite build. */
+      @font-face { font-family: 'space_grotesk_500'; src: url('./fonts/space_grotesk_500.ttf') format('truetype'); font-weight: 500; font-display: swap; }
+      @font-face { font-family: 'space_grotesk_600'; src: url('./fonts/space_grotesk_600.ttf') format('truetype'); font-weight: 600; font-display: swap; }
+      @font-face { font-family: 'space_grotesk_700'; src: url('./fonts/space_grotesk_700.ttf') format('truetype'); font-weight: 700; font-display: swap; }
+      @font-face { font-family: 'plex_mono_500'; src: url('./fonts/plex_mono_500.ttf') format('truetype'); font-weight: 500; font-display: swap; }
+      @font-face { font-family: 'plex_mono_600'; src: url('./fonts/plex_mono_600.ttf') format('truetype'); font-weight: 600; font-display: swap; }
     </style>
   </head>
   <body>

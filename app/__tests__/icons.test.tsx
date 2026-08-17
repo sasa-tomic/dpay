@@ -67,10 +67,10 @@ const ASSETS: SelectableAsset[] = [
 ];
 
 describe('glyphFor', () => {
-  test('DEMO maps to the brand-mint ∂ chip', () => {
-    expect(glyphFor(ASSETS[0])).toEqual({glyph: '∂', color: '#3ee0ac', bg: 'rgba(62,224,172,0.13)'});
+  test('DEMO maps to the brand-tangerine ∂ chip', () => {
+    expect(glyphFor(ASSETS[0])).toEqual({glyph: '∂', color: '#D8450D', bg: 'rgba(255,90,31,0.10)'});
   });
-  test('ckBTC → ₿ orange, ckETH → Ξ lavender, ckUSDC → $ blue', () => {
+  test('ckBTC → ₿ amber, ckETH → Ξ indigo, ckUSDC → $ blue', () => {
     expect(glyphFor(ASSETS[1]).glyph).toBe('₿');
     expect(glyphFor(ASSETS[2]).glyph).toBe('Ξ');
     expect(glyphFor(ASSETS[3]).glyph).toBe('$');
@@ -82,7 +82,7 @@ describe('glyphFor', () => {
   test('unknown IC symbol falls back to first letter on brand hue', () => {
     const g = glyphFor(ASSETS[6]);
     expect(g.glyph).toBe('C');
-    expect(g.color).toBe('#3ee0ac');
+    expect(g.color).toBe('#D8450D');
   });
 });
 

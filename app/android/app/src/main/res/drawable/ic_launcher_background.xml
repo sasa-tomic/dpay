@@ -1,13 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher background: the tangerine tile, top-lit (sun over paper — the Traveler Paper mark).
+     Full-bleed 108×108; the foreground carries the porcelain 'd'. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#0a0c11" android:pathData="M0,0h108v108h-108z"/>
     <path android:pathData="M0,0h108v108h-108z">
         <aapt:attr xmlns:aapt="http://schemas.android.com/aapt" name="android:fillColor">
-            <gradient android:type="radial" android:gradientRadius="60" android:centerX="54" android:centerY="40">
-                <item android:offset="0" android:color="#FF3ee0ac"/>
-                <item android:offset="1" android:color="#003ee0ac"/>
+            <gradient android:type="linear" android:startX="54" android:startY="0" android:endX="54" android:endY="108">
+                <item android:offset="0" android:color="#FFFF6A2B"/>
+                <item android:offset="1" android:color="#FFFF5A1F"/>
             </gradient>
         </aapt:attr>
     </path>

@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Splash field: the same near-black as the site/app background, with a faint mint tint up top. -->
+<!-- Splash field: Traveler Paper porcelain (matches @color/bg the RN app renders on), soft
+     top-light gradient like the launcher tile. The centered logo bitmap is the porcelain 'd'
+     on tangerine (drawable-xxhdpi/splash_logo.png). -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape android:shape="rectangle">
             <gradient android:type="linear" android:angle="270"
-                android:startColor="#0E1419" android:endColor="@color/bg" />
+                android:startColor="#FDFCF9" android:endColor="@color/bg" />
         </shape>
     </item>
     <item>

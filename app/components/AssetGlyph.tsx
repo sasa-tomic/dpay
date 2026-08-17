@@ -22,15 +22,16 @@ export type FamilyGlyph = {
   bg: string;
 };
 
-// Family hues — recognizable per-chain colors, softened for the dark UI.
-// DEMO stays brand-mint (∂ is the dpay demo unit); BTC orange, ETH lavender, USDC blue,
+// Family hues — recognizable per-chain colors, deepened for the porcelain light UI (dark-on-tint
+// chips: hue text ~4.5:1 on the 8–10% tint over white).
+// DEMO ties to the brand (∂ = the dpay demo unit, tangerine); BTC amber, ETH indigo, USDC blue,
 // SOL purple. Testnet variants keep the family hue (the row label already says testnet).
 const FAMILIES: Record<string, FamilyGlyph> = {
-  demo: {glyph: '∂', color: '#3ee0ac', bg: 'rgba(62,224,172,0.13)'},
-  btc: {glyph: '₿', color: '#f7a54a', bg: 'rgba(247,165,74,0.13)'},
-  eth: {glyph: 'Ξ', color: '#a3adcf', bg: 'rgba(163,173,207,0.13)'},
-  usdc: {glyph: '$', color: '#5b9dff', bg: 'rgba(91,157,255,0.13)'},
-  sol: {glyph: '◎', color: '#a78bff', bg: 'rgba(167,139,255,0.14)'},
+  demo: {glyph: '∂', color: '#D8450D', bg: 'rgba(255,90,31,0.10)'},
+  btc: {glyph: '₿', color: '#92580B', bg: 'rgba(161,98,7,0.10)'},
+  eth: {glyph: 'Ξ', color: '#4338CA', bg: 'rgba(79,70,229,0.08)'},
+  usdc: {glyph: '$', color: '#1D4ED8', bg: 'rgba(29,78,216,0.08)'},
+  sol: {glyph: '◎', color: '#7E22CE', bg: 'rgba(147,51,234,0.08)'},
 };
 
 function familyKey(asset: SelectableAsset): keyof typeof FAMILIES | 'fallback' {
@@ -50,7 +51,7 @@ function familyKey(asset: SelectableAsset): keyof typeof FAMILIES | 'fallback' {
 export function glyphFor(asset: SelectableAsset): FamilyGlyph {
   const key = familyKey(asset);
   if (key !== 'fallback') return FAMILIES[key];
-  return {glyph: asset.symbol.charAt(0).toUpperCase(), color: '#3ee0ac', bg: 'rgba(62,224,172,0.13)'};
+  return {glyph: asset.symbol.charAt(0).toUpperCase(), color: '#D8450D', bg: 'rgba(255,90,31,0.10)'};
 }
 
 export function AssetGlyph({asset, size = 38}: {asset: SelectableAsset; size?: number}) {

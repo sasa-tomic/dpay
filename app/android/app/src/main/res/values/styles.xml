@@ -1,17 +1,19 @@
 <resources>
 
-    <!-- Base application theme — dark field, mint accent (matches the marketing site). -->
+    <!-- Base application theme — Traveler Paper: warm porcelain field, tangerine accent
+         (matches app/config/palette.ts + the marketing site CSS vars). Light status-bar
+         icons: dark ink glyphs on the porcelain field. -->
     <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
         <item name="android:windowBackground">@color/bg</item>
         <item name="android:statusBarColor">@color/bg</item>
         <item name="android:navigationBarColor">@color/bg</item>
-        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightStatusBar">true</item>
         <item name="colorPrimary">@color/accent</item>
         <item name="colorAccent">@color/accent</item>
     </style>
 
-    <!-- Cold-start splash: shows the mint 'd' on the dark field until RN renders. -->
+    <!-- Cold-start splash: the tangerine 'd' tile on porcelain until RN renders. -->
     <style name="SplashTheme" parent="AppTheme">
         <item name="android:windowBackground">@drawable/splash</item>
     </style>

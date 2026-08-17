@@ -28,7 +28,7 @@ export function QrCode({value, size, ecl = 'M', testID}: {value: string; size: n
   const mark = Math.round(plate * 0.14);
   return (
     <View testID={testID} style={{width: plate, height: plate, backgroundColor: '#ffffff', borderRadius: 8, alignItems: 'center', justifyContent: 'center'}}>
-      <QRCode value={value} size={size} ecl={ecl} color="#0b0e13" backgroundColor="#ffffff" />
+      <QRCode value={value} size={size} ecl={ecl} color="#1B1A17" backgroundColor="#ffffff" />
       <View style={{position: 'absolute', width: mark, height: mark, borderRadius: mark * 0.28, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.line}}>
         <Text style={{fontSize: Math.round(mark * 0.62), fontWeight: '700', color: C.brand2, lineHeight: Math.round(mark * 0.72)}}>∂</Text>
       </View>
