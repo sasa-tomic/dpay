@@ -9,13 +9,24 @@ export function QrScanner({onScan}: {onScan: (v: string) => void}) {
   const device = useCameraDevice('back');
   useEffect(() => { if (!hasPermission) requestPermission(); }, [hasPermission, requestPermission]);
   const [appActive, setAppActive] = useState(AppState.currentState === 'active');
-  useEffect(() => { const s = AppState.addEventListener('change', x => setAppActive(x === 'active')); return () => s.remove(); }, []);
+  const [epoch, setEpoch] = useState(0);
+  useEffect(() => {
+    const s = AppState.addEventListener('change', x => {
+      const active = x === 'active';
+      setAppActive(active);
+      // Suspend can kill the native camera session while isActive never dipped (JS frozen,
+      // event delivered only at thaw) or a false->true toggle alone doesn't restart it on some
+      // OEMs. Remounting the Camera on every resume re-creates the native session for sure.
+      if (active) setEpoch(e => e + 1);
+    });
+    return () => s.remove();
+  }, []);
   const fired = useRef(false);
   const codeScanner = useCodeScanner({codeTypes: ['qr'], onCodeScanned: codes => { const v = codes[0]?.value; if (v && !fired.current) { fired.current = true; onScan(v); } }});
   return (
     <View testID="scan-cam-box" style={S.camBox}>
       {hasPermission && device ? (
-        <Camera style={StyleSheet.absoluteFill} device={device} isActive={appActive} codeScanner={codeScanner} />
+        <Camera key={epoch} style={StyleSheet.absoluteFill} device={device} isActive={appActive} codeScanner={codeScanner} />
       ) : (
         <View style={S.camPlaceholder}>
           {hasPermission ? (

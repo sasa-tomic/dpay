@@ -49,7 +49,11 @@ BOOTED="$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')"
 echo "   device: ${ANDROID_SERIAL:-$($ADB devices | awk 'NR==2{print $1}')} (via $ADB)"
 
 echo "== require the app installed + camera permission granted =="
-$ADB shell pm list packages 2>/dev/null | tr -d '\r' | grep -q "^package:$PKG$" \
+# NOTE: drain adb output BEFORE grep -q — under `set -o pipefail`, grep -q exiting at its first
+# match EPIPEs a still-writing `adb shell` (a physical phone's 228+-package list; a big logcat
+# buffer), failing the pipeline despite the match. The emulator's small buffers never trip it.
+PKGS="$($ADB shell pm list packages 2>/dev/null | tr -d '\r')"
+grep -q "^package:$PKG$" <<<"$PKGS" \
   || { echo "FAIL: $PKG not installed (run: just app)"; exit 3; }
 $ADB shell pm grant "$PKG" android.permission.CAMERA 2>/dev/null || true
 
@@ -114,7 +118,8 @@ $ADB logcat -c 2>/dev/null || true
 $ADB shell am start -n "$ACT" >/dev/null
 SELFCHECK=""
 for _ in $(seq 1 30); do
-  if $ADB logcat -d -s ReactNativeJS:V 2>/dev/null | grep -q 'DPAY_SELFCHECK PASS'; then SELFCHECK=1; break; fi
+  LOGCAT_DUMP="$($ADB logcat -d -s ReactNativeJS:V 2>/dev/null)"   # drain before grep -q (pipefail/EPIPE — see PKGS note)
+  if grep -q 'DPAY_SELFCHECK PASS' <<<"$LOGCAT_DUMP"; then SELFCHECK=1; break; fi
   sleep 1
 done
 [ -n "$SELFCHECK" ] || { echo "FAIL: DPAY_SELFCHECK PASS not seen within 30s"; exit 3; }
@@ -340,19 +345,27 @@ nodes = list(ET.parse(sys.argv[1]).getroot().iter('node'))
 rids = {n.get('resource-id'): n for n in nodes if n.get('resource-id')}
 # only ever tap the backup checkbox while UNTICKED (avoids toggle loops); tapping the
 # Continue button while still disabled is a harmless no-op, so no clickable check needed.
+# The 24-word grid fills the viewport first — while the words are visible but the
+# checkbox is not, scroll down to reveal the checkbox + Continue (uiautomator only dumps
+# the visible viewport, so absent rids mean off-screen, not absent).
 if 'mnemonic-backup-checkbox' in rids:
     cb = rids['mnemonic-backup-checkbox']
     if cb.get('checked') != 'true':
         print('mnemonic-backup-checkbox')
     else:
         print('btn-mnemonic-continue')
+elif 'mnemonic-word-0' in rids:
+    print('SCROLL')
 elif 'btn-create' in rids:
     print('btn-create')
 elif 'btn-onboard-continue' in rids:
     print('btn-onboard-continue')
 PY
 )"
-    if [ -n "$step" ]; then
+    if [ "$step" = "SCROLL" ]; then
+      # swipe up (bottom-center → mid-center) to reveal the checkbox/continue under the word grid
+      $ADB shell input swipe 540 1900 540 800 300 || true
+    elif [ -n "$step" ]; then
       echo "   onboarding: tap $step"
       tap_rid "$step" || true
     fi
