@@ -1,4 +1,4 @@
-import {Text} from 'react-native';
+import {Platform, Pressable, Text} from 'react-native';
 import Svg, {Defs, LinearGradient, Stop, Rect, Path} from 'react-native-svg';
 import {C} from '../config/palette';
 import {S} from '../styles';
@@ -36,5 +36,28 @@ export function Wordmark({style}: {style?: object}) {
     <Text style={[S.wordmark, style]}>
       ∂<Text style={S.wordmarkPay}>pay</Text>
     </Text>
+  );
+}
+
+// Web-only back-link: the web wallet is served at /wallet by the relay, and the browser had no
+// way back to the site root (the landing page) short of editing the URL. On web the wordmark
+// becomes that link (the standard site-logo-goes-home convention); on native it stays inert
+// text — the Android app has no parent page. The globalThis cast mirrors wallet.ts (the RN TS
+// env has no DOM lib, so `window` needs a narrow local shape).
+export function WordmarkLink({style}: {style?: object}) {
+  if (Platform.OS !== 'web') return <Wordmark style={style} />;
+  const goToSiteHome = () => {
+    const w = (globalThis as {window?: {location?: {href: string}}}).window;
+    if (w?.location) w.location.href = '/';
+  };
+  return (
+    <Pressable
+      testID="link-home"
+      onPress={goToSiteHome}
+      accessibilityRole="link"
+      accessibilityLabel="dpay home"
+      accessibilityHint="Open the main dpay site">
+      <Wordmark style={style} />
+    </Pressable>
   );
 }

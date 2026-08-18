@@ -38,8 +38,10 @@ import { setup, onboardWallet, assert } from '../harness/lib.mjs';
 // buttons; an input's role-equivalent is its <input> tag (RNW renders bare <input> with no role
 // attribute).
 const SURFACES = {
-  // Always-present (header + tabbar) on every surface.
-  chrome: ['btn-settings', 'balance', 'tab-pay', 'tab-receive', 'tab-transactions'],
+  // Always-present (header + tabbar) on every surface. link-home is the web-only wordmark
+  // back-link to the site root (WordmarkLink in Logo.tsx) — on native it degrades to inert
+  // text, so the census (web) is its only role/label gate.
+  chrome: ['btn-settings', 'balance', 'link-home', 'tab-pay', 'tab-receive', 'tab-transactions'],
   // Wallet home (Pay tab) — only chrome is interactive (the scan card's QR scanner is a viewport,
   // not a Pressable; the pay-scan DIV is informational).
   home: [],

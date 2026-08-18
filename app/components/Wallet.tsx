@@ -22,7 +22,7 @@ import {useTransactionHistory} from '../hooks/useTransactionHistory';
 import {deriveSolanaAddress, createUsdcAta} from '../solana';
 import {friendlySolError} from '../solana/errors';
 import {readDepositDeepLink, readRequestDeeplink, readPaymentDeeplink, decodeDeeplink, type DeeplinkKind} from '../lib/deepLink';
-import {Wordmark} from './Logo';
+import {WordmarkLink} from './Logo';
 import {HotkeyHint} from './HotkeyHint';
 import {Tab} from './Tab';
 import {PayMode} from './PayMode';
@@ -564,7 +564,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
             <IconSettings size={20} color={C.sub} />
           </Pressable>
           <View>
-            <Wordmark style={S.brand} />
+            <WordmarkLink style={S.brand} />
             {/* H4 + audit P1: the header shows ONLY the username. The hex pubkey was developer-facing
                 protocol data ("Alice · 1b8a5ee7…") that made the header read like a debug panel; it's
                 removed from the main display. The short hex is no longer appended anywhere in the

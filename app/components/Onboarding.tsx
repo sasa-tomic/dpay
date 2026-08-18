@@ -10,7 +10,7 @@ import type {Identity} from '../lib/types';
 import {DpayCore} from '../services/native';
 import {fetchWithTimeout} from '../services/relay';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
-import {Logo, Wordmark} from './Logo';
+import {Logo, WordmarkLink} from './Logo';
 import {SeedWords} from './SeedWords';
 import {IconCheck} from './icons';
 
@@ -143,7 +143,7 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
         keyboardVerticalOffset={Platform.OS === 'android' ? StatusBar.currentHeight ?? 24 : 0}>
         <ScrollView style={{flex: 1}} contentContainerStyle={S.onboard} keyboardShouldPersistTaps="handled">
           <Logo size={104} />
-          <Wordmark style={S.wordmarkBig} />
+          <WordmarkLink style={S.wordmarkBig} />
           <Text style={S.onboardSub}>Tap or scan to pay — online or offline.</Text>
           {backupMnemonic ? (
             <>
