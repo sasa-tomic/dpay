@@ -150,6 +150,30 @@
 > instrumented APK re-staged (`deploy/dist/dpay.apk`, sha `2a6c650d…`). **Remaining step (founder
 > outer-loop): reinstall on the LineageOS phone and re-test the request flow — expect: sloppy
 > approaches now recover/keep scanning; a clean close tap settles as on the HyperOS phone.**
+>
+> **UPDATE 3 (2026-08-18) — ROOT CAUSE of "can't receive NFC payments" found + fixed: STALE OS HCE
+> ROUTING after APK reinstall.** Live capture on the payer (same Poco X3 NFC, now Android 12
+> MIUI): the merchant reader loop was working exactly as designed (`SELECT` issued, bounded
+> recovery, then terminal), but EVERY `SELECT` was answered `6A82` by the OS ITSELF — `dumpsys nfc`
+> showed both dpay HCE services REGISTERED while the NFCC dynamic routing table still carried only
+> Google's payment AIDs (dpay's were NOT committed after the 13:05 APK update). No APDU ever
+> reached dpay code; the UI's terminal copy was the misleading "Not a dpay phone". Proof:
+> `svc nfc disable && svc nfc enable` re-committed the routing table → both `F06470617901/02`
+> appeared → payments work. **NOT a protocol/refactoring regression** — the reader/card state
+> machines and the JS flow were functioning correctly throughout. **Fix (shipped, on-device
+> verified):** `app/android/.../DpayAidRouting.kt` — arm-time best-effort routing repair called
+> from BOTH rails' `armCard()` (`registerAidsForService` on API 34+ forces a routing re-commit;
+> `setPreferredService(currentActivity, service)` on ALL API levels bypasses the dynamic routing
+> table while the Pay screen is foreground), `unsetPreferredService` on `disarmCard()` (nothing
+> lingers). Reader terminal copy for 6A82-without-6210 is now "Couldn't reach a dpay wallet — ask
+> them to open dpay (or toggle NFC off and on), then try again". `scripts/aid-parity.mjs` extended
+> to 4 checks (byte literal + Kotlin hex const, both rails, vs the XML decodes) because
+> `registerAidsForService` REPLACES the manifest group. On-device proof after a fresh `just app`
+> reinstall (the historical trigger): `dumpsys nfc` shows both AIDs routed AND dpay bound as the
+> foreground-preferred service; both self-checks PASS. **Gate note:** `just ondevice` executes
+> ZERO tests on this physical MIUI device — Play Protect + MIUI `AdbInstallActivity` dialogs
+> silently block the UTP test-APK install (gradle reports SUCCESS with `tests=0`); that gate stays
+> emulator-only in practice. The REAL radio-hop validation is the founder two-phone live tap.
 
 ## Session summary (2026-08-16, cont.): review sweep #2 — fund-first gate + campreview SOL fix + UX findings U-F1..6/A-F1..4 — COMPLETE, PROD AT HEAD
 

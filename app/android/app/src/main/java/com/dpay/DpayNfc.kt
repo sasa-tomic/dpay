@@ -70,6 +70,14 @@ object DpayNfc {
     private val SW_NOT_READY = byteArrayOf(0x62, 0x10)
     private val SW_WRONG_LENGTH = byteArrayOf(0x67, 0x00)
 
+    // The IC rail's AID, hex-string form for the CardEmulation repair (must equal the manifest
+    // apduservice.xml filter and the core literal — `just aid-parity` checks all three).
+    private const val AID_HEX = "F06470617901"
+
+    // The Activity bound as the preferred card service while armed (see [DpayAidRouting]); the OS
+    // also drops the binding itself when it leaves the foreground.
+    private var preferredOn: Activity? = null
+
     fun attach(reactContext: ReactApplicationContext) {
         ctx = reactContext
     }
@@ -126,6 +134,9 @@ object DpayNfc {
         card = FfiCardSession(maxChunk)
         requestSent = false
         receiptSent = false
+        // Repair the OS AID routing if an app update left it stale (see [DpayAidRouting]) — the
+        // 6A82-from-the-OS failure mode that reads as "not a dpay phone" on the merchant side.
+        preferredOn = ctx?.let { DpayAidRouting.ensure(it, DpayHostApduService::class.java, AID_HEX) }
         phaseEvent("card", "listening")
     }
 
@@ -133,6 +144,8 @@ object DpayNfc {
         card = null
         requestSent = false
         receiptSent = false
+        DpayAidRouting.clear(preferredOn)
+        preferredOn = null
     }
 
     /** Called by [DpayHostApduService] for every command APDU. Total function — never throws. */
@@ -330,6 +343,7 @@ object DpayNfc {
             isoDep.timeout = 5000
             phaseEvent("reader", "linking")
             var recoveryStart = 0L // 0 = not in a recovery window (unarmed card / failing exchange)
+            var sawNotReady = false // a 6210 was seen at SELECT — the card IS a routed dpay phone
             while (true) {
                 val cmd = r.nextCommand()
                 if (cmd == null) {
@@ -358,7 +372,13 @@ object DpayNfc {
                     // margin, cold-starting HCE…). Early failures leave the conductor in NeedSelect,
                     // so re-SELECTing is protocol-safe. Recover while the field holds — the approach
                     // may simply be sloppy; expire into a terminal, classified error.
-                    if (e is DpayException.NfcNotDpay) throw e // a real non-dpay card (6A82) — terminal now
+                    //
+                    // 6A82 at SELECT (NfcNotDpay) is EITHER a genuine non-dpay card OR a dpay phone
+                    // whose OS isn't routing the AID to our HCE service right now (payer app killed
+                    // by aggressive battery management, screen off) — indistinguishable on the wire.
+                    // It therefore gets the SAME bounded recovery window as every other early
+                    // failure: a payer waking their phone mid-tap resumes seamlessly, and only a
+                    // card held uselessly for the full window terminates (with the precise copy).
                     if (wireInHand) {
                         // The wire is already with JS (it owns the outcome); only the best-effort
                         // receipt push failed. Not a merchant error — the payer independently falls
@@ -372,7 +392,20 @@ object DpayNfc {
                         android.util.Log.w("dpay", "onTag: exchange failed (${classify(e)}) — recovering while the field holds")
                         phaseEvent("reader", "linking")
                     } else if (now - recoveryStart > PAYER_ARM_WAIT_MS) {
-                        throw e // hopeless while coupled — terminal, classified by the outer catch
+                        android.util.Log.w("dpay", "onTag: no useful answer after ${PAYER_ARM_WAIT_MS}ms (${classify(e)})")
+                        if (sawNotReady) {
+                            // The card identified itself as dpay (6210) but the payer never armed.
+                            errorEvent("reader", "The payer’s dpay app isn’t open — ask them to open Pay, then try again")
+                        } else if (e is DpayException.NfcNotDpay) {
+                            // 6A82-only is EITHER a genuine non-dpay card OR a dpay phone whose OS
+                            // isn't routing (stale table on an old build, payer app killed). Copy
+                            // must stay honest + actionable for the routing case — it is the common
+                            // one among dpay users.
+                            errorEvent("reader", "Couldn’t reach a dpay wallet — ask them to open dpay (or toggle NFC off and on), then try again")
+                        } else {
+                            throw e // hopeless while coupled — terminal, classified by the outer catch
+                        }
+                        break
                     }
                     Thread.sleep(PAYER_ARM_POLL_MS)
                     continue
@@ -392,6 +425,7 @@ object DpayNfc {
                         // The dpay card is routed but unarmed (payer not in Pay mode). The core keeps
                         // the reader in NeedSelect — hold the field while the payer opens the app,
                         // then terminate with a precise message if they never do.
+                        sawNotReady = true
                         if (recoveryStart == 0L) {
                             recoveryStart = System.currentTimeMillis()
                             android.util.Log.w("dpay", "onTag: dpay card routed but payer session not armed")

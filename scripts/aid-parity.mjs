@@ -9,9 +9,13 @@
 // that sails through every headless gate (the radio hop is a device-only path). This script is the
 // static net: decode the XML hex and assert byte-equality against the literal, sub-second, no device.
 //
-// Sources (2 AIDs):
+// Sources (2 AIDs, each in up to 3 places):
 //   IC  AID: crates/dpay-core/src/nfc/mod.rs `pub const AID`          vs  res/xml/apduservice.xml
 //   SOL AID: app/android/.../DpaySolNfc.kt   `private val SOL_AID`    vs  res/xml/solapduservice.xml
+//   Both AIDs ALSO live as Kotlin hex-string consts (DpayNfc.kt `AID_HEX`, DpaySolNfc.kt
+//   `SOL_AID_HEX`) used by the DpayAidRouting runtime repair — a drifted one would REPLACE the
+//   good manifest AID group with a wrong AID via registerAidsForService, so they are checked
+//   against the same XML decodes.
 //
 // Usage: node scripts/aid-parity.mjs   (exit 0 = parity, exit 1 = drift)
 import {readFileSync} from 'node:fs';
@@ -19,6 +23,7 @@ import {fileURLToPath} from 'node:url';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const NFC_RS = `${ROOT}crates/dpay-core/src/nfc/mod.rs`;
+const IC_NFC_KT = `${ROOT}app/android/app/src/main/java/com/dpay/DpayNfc.kt`;
 const SOL_NFC_KT = `${ROOT}app/android/app/src/main/java/com/dpay/DpaySolNfc.kt`;
 const IC_XML = `${ROOT}app/android/app/src/main/res/xml/apduservice.xml`;
 const SOL_XML = `${ROOT}app/android/app/src/main/res/xml/solapduservice.xml`;
@@ -54,6 +59,18 @@ function solAidKt(src) {
   return m[1].split(',').map(parseByte);
 }
 
+// Pull a Kotlin hex-string AID const: `private const val AID_HEX = "F06470617901"` — the string
+// DpayAidRouting hands to CardEmulation.registerAidsForService.
+function aidHexConstKt(src, constName, path) {
+  const re = new RegExp(`(?:private\\s+)?const\\s+val\\s+${constName}\\s*=\\s*"([0-9A-Fa-f]+)"`);
+  const m = src.match(re);
+  if (!m) throw new Error(`${constName} const not found in ${path}`);
+  if (m[1].length % 2 !== 0) throw new Error(`odd-length AID hex '${m[1]}' in ${path}`);
+  const out = [];
+  for (let i = 0; i < m[1].length; i += 2) out.push(parseInt(m[1].slice(i, i + 2), 16));
+  return out;
+}
+
 // Pull the first <aid-filter android:name="HEX"/> from an XML service file.
 function aidFilterXml(src, path) {
   const m = src.match(/<aid-filter\s+android:name\s*=\s*"([0-9A-Fa-f]+)"/);
@@ -71,10 +88,14 @@ const icLit = icAidRust(readFileSync(NFC_RS, 'utf8'));
 const icXml = aidFilterXml(readFileSync(IC_XML, 'utf8'), IC_XML);
 const solLit = solAidKt(readFileSync(SOL_NFC_KT, 'utf8'));
 const solXml = aidFilterXml(readFileSync(SOL_XML, 'utf8'), SOL_XML);
+const icHexConst = aidHexConstKt(readFileSync(IC_NFC_KT, 'utf8'), 'AID_HEX', IC_NFC_KT);
+const solHexConst = aidHexConstKt(readFileSync(SOL_NFC_KT, 'utf8'), 'SOL_AID_HEX', SOL_NFC_KT);
 
 const checks = [
   {label: 'IC  AID', lit: icLit, xml: icXml, litSrc: 'nfc/mod.rs:const AID', xmlSrc: 'apduservice.xml'},
   {label: 'SOL AID', lit: solLit, xml: solXml, litSrc: 'DpaySolNfc.kt:SOL_AID', xmlSrc: 'solapduservice.xml'},
+  {label: 'IC  AID_HEX', lit: icHexConst, xml: icXml, litSrc: 'DpayNfc.kt:AID_HEX', xmlSrc: 'apduservice.xml'},
+  {label: 'SOL AID_HEX', lit: solHexConst, xml: solXml, litSrc: 'DpaySolNfc.kt:SOL_AID_HEX', xmlSrc: 'solapduservice.xml'},
 ];
 
 const diffs = [];

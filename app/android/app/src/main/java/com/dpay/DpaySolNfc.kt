@@ -44,6 +44,9 @@ object DpaySolNfc {
     // APDU protocol constants. PUT/GET carry a tag in P1 (REQUEST/PAYMENT/RECEIPT); the continuation
     // bit in P2 (1 = more frames follow for this tag) lets a variable-length string stream across.
     private val SOL_AID = byteArrayOf(0xF0.toByte(), 0x64, 0x70, 0x61, 0x79, 0x02)
+    // The same AID as a hex string for the CardEmulation routing repair (see [DpayAidRouting]) —
+    // parity-checked against solapduservice.xml by `just aid-parity`, like SOL_AID above.
+    private const val SOL_AID_HEX = "F06470617902"
     private val INS_PUT: Byte = 0xD0.toByte()
     private val INS_GET: Byte = 0xD1.toByte()
     private val TAG_REQUEST: Byte = 0x01
@@ -63,6 +66,9 @@ object DpaySolNfc {
     // ---- card (payer) state ----
     @Volatile private var cardArmed = false
     @Volatile private var cardPhase = CardPhase.IDLE
+    // The Activity bound as the preferred card service while armed (see [DpayAidRouting]); the OS
+    // also drops the binding itself when it leaves the foreground.
+    private var preferredOn: Activity? = null
     private var solpayUri: String? = null
     private var solpaySendCursor = 0
     // The 1-slot rendezvous JS offers the signed solpay: URI into (after autoSign) for the card to
@@ -164,6 +170,8 @@ object DpaySolNfc {
         pendingPayment = null
         requestBuffer.setLength(0)
         paymentSignal = ArrayBlockingQueue(1)
+        // Repair the OS AID routing if an app update left it stale (see [DpayAidRouting]).
+        preferredOn = ctx?.let { DpayAidRouting.ensure(it, DpaySolHostApduService::class.java, SOL_AID_HEX) }
         phaseEvent("card", "listening")
     }
 
@@ -175,6 +183,8 @@ object DpaySolNfc {
         pendingPayment = null
         requestBuffer.setLength(0)
         paymentSignal = null
+        DpayAidRouting.clear(preferredOn)
+        preferredOn = null
     }
 
     /** Called by [DpaySolHostApduService] for every command APDU. Total function — never throws. */
@@ -420,7 +430,10 @@ object DpaySolNfc {
                     errorEvent(
                         "reader",
                         if (sawNotReady) "The payer’s dpay app isn’t open — ask them to open Pay, then try again"
-                        else "Not a dpay phone"
+                        // 6A82-only is EITHER a genuine non-dpay card OR a dpay phone whose OS
+                        // isn't routing (stale table after an update, payer app killed) — the copy
+                        // stays honest + actionable for the routing case.
+                        else "Couldn’t reach a dpay wallet — ask them to open dpay (or toggle NFC off and on), then try again"
                     )
                     return
                 }
