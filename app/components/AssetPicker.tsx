@@ -17,7 +17,7 @@
 //
 // `showAmount` defaults false (the picker is a selector, not a balance list); Balances passes true.
 // `title` defaults "Receive in" (the picker copy the e2e net reads on the Receive prefix path).
-import {Modal, Pressable, View, Text} from 'react-native';
+import {Modal, Pressable, ScrollView, View, Text} from 'react-native';
 import {S} from '../styles';
 import {CurrencyRow} from './CurrencyRow';
 import {useEscapeToClose} from '../hooks/useHotkeys';
@@ -55,24 +55,28 @@ export function AssetPicker({open, assets, selectedId, balances, onSelect, onClo
             INNERMOST Pressable, so a row tap does NOT also trigger the backdrop's onClose. */}
         <View style={S.pickCard}>
           <Text style={S.pickTitle}>{title}</Text>
-          {assets.map(asset => {
-            const view = balances?.[asset.id];
-            const testId = variant === 'card' ? `asset-${asset.testKey}` : `req-pick-${asset.testKey}`;
-            return (
-              <CurrencyRow
-                key={asset.testKey}
-                testId={testId}
-                asset={asset}
-                amount={showAmount ? view?.displayText : undefined}
-                active={asset.id === selectedId}
-                zero={view ? view.status !== 'ok' : undefined}
-                onPress={() => { onSelect(asset.id); onClose(); }}
-                accessibilityLabel={`Receive in ${asset.symbol}`}
-                accessibilityHint={asset.protocol === 'solana' ? `Switch to the ${asset.symbol} rail` : `Receive in ${asset.networkLabel}`}
-                variant={variant}
-              />
-            );
-          })}
+          {/* Bounded scroller (S.pickScroll) — a Modal has no scroll surface, so a long catalog
+              would push the bottom rows off a small screen with no way to reach them. */}
+          <ScrollView style={S.pickScroll}>
+            {assets.map(asset => {
+              const view = balances?.[asset.id];
+              const testId = variant === 'card' ? `asset-${asset.testKey}` : `req-pick-${asset.testKey}`;
+              return (
+                <CurrencyRow
+                  key={asset.testKey}
+                  testId={testId}
+                  asset={asset}
+                  amount={showAmount ? view?.displayText : undefined}
+                  active={asset.id === selectedId}
+                  zero={view ? view.status !== 'ok' : undefined}
+                  onPress={() => { onSelect(asset.id); onClose(); }}
+                  accessibilityLabel={`Receive in ${asset.symbol}`}
+                  accessibilityHint={asset.protocol === 'solana' ? `Switch to the ${asset.symbol} rail` : `Receive in ${asset.networkLabel}`}
+                  variant={variant}
+                />
+              );
+            })}
+          </ScrollView>
         </View>
       </Pressable>
     </Modal>

@@ -11,6 +11,7 @@ import {DpayCore} from '../services/native';
 import {fetchWithTimeout} from '../services/relay';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {Logo, Wordmark} from './Logo';
+import {SeedWords} from './SeedWords';
 import {IconCheck} from './icons';
 
 export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: (id: Identity) => void}) {
@@ -125,16 +126,7 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
             <>
               <Text style={S.wordmarkBig}>Back up your wallet</Text>
               <Text style={S.warnNote}>Write down these 24 words and store them safely. They're the ONLY way to recover your wallet if you lose this device.</Text>
-              <View testID="mnemonic-backup" style={{flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignSelf: 'stretch', marginTop: 4, marginBottom: 8}}>
-                {/* P4 — chip look moved verbatim into styles.ts (seedChip*); the index Text stays
-                    FIRST inside each mnemonic-word-N testID'd View (e2e strips the leading number). */}
-                {backupMnemonic.map((w, i) => (
-                  <View key={i} testID={`mnemonic-word-${i}`} style={S.seedChip}>
-                    <Text style={S.seedChipIdx}>{i + 1}</Text>
-                    <Text style={S.seedChipWord}>{w}</Text>
-                  </View>
-                ))}
-              </View>
+              <SeedWords words={backupMnemonic} testID="mnemonic-backup" />
               <Pressable testID="btn-mnemonic-copy" style={S.linkBtn} onPress={() => { if (backupMnemonic) void doCopy(wordsToString(backupMnemonic)); }}
                 accessibilityRole="button"
                 accessibilityLabel={copied === 'clipboard' ? 'Words copied' : copied === 'shared' ? 'Words shared' : 'Copy words'}

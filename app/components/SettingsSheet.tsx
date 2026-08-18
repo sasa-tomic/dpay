@@ -10,6 +10,7 @@ import {DpayCore} from '../services/native';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {SheetOverlay} from './SheetOverlay';
+import {SeedWords} from './SeedWords';
 import {IconChevronDown, IconClose, IconExternalLink} from './icons';
 
 /**
@@ -163,17 +164,7 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
                 <Text style={S.warnNote}>This seed recovers BOTH your IC and Solana funds. Store it safely. Never share it.</Text>
                 {seedFormat === 'mnemonic' ? (
                   <>
-                    <View testID="mnemonic-words" style={{flexDirection: 'row', flexWrap: 'wrap', marginTop: 4}}>
-                      {/* R3 — chip look now shares Onboarding's S.seedChip* styles (white card chip,
-                           IBM Plex Mono via FONT.mono). The index Text stays FIRST inside each
-                           mnemonic-word-N testID'd View (e2e strips the leading number). */}
-                      {mnemonicWords.map((w, i) => (
-                        <View key={i} testID={`mnemonic-word-${i}`} style={S.seedChip}>
-                          <Text style={S.seedChipIdx}>{i + 1}</Text>
-                          <Text style={S.seedChipWord}>{w}</Text>
-                        </View>
-                      ))}
-                    </View>
+                    <SeedWords words={mnemonicWords} testID="mnemonic-words" />
                     <Pressable
                       testID="btn-copy-mnemonic"
                       style={[S.primaryWide, {marginTop: 16}]}

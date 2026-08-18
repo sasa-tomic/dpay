@@ -38,7 +38,11 @@ export const S = StyleSheet.create({
   // column. At <=480px it is a no-op (the column is already full-width).
   screenFrame: {flex: 1, backgroundColor: C.bg, alignItems: 'center'},
   centerAll: {alignItems: 'center', justifyContent: 'center'},
-  onboard: {flex: 1, padding: 24, justifyContent: 'center', alignItems: 'center'},
+  // Onboarding ScrollView contentContainer. `flexGrow` (NOT `flex:1`): flex clamps the content
+  // height to the scroll frame, which structurally DISABLES scrolling — on a small screen the
+  // seed-backup gate overflowed with the Continue button unreachable. flexGrow lets short content
+  // still fill + center the frame while tall content grows past it and scrolls.
+  onboard: {flexGrow: 1, padding: 24, justifyContent: 'center', alignItems: 'center'},
   wordmark: {fontSize: 27, fontWeight: '700', letterSpacing: -0.8, color: C.ink, fontFamily: FONT.sansBold},
   wordmarkPay: {color: C.brand},
   wordmarkBig: {fontSize: 36, marginTop: 14},
@@ -272,11 +276,17 @@ export const S = StyleSheet.create({
   backupConfirmBox: {alignSelf: 'stretch', backgroundColor: C.card, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: C.line2},
   seedBox: {alignSelf: 'stretch', backgroundColor: C.panel2, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: C.line2, marginTop: 4},
   seedText: {color: C.ink, fontFamily: FONT.mono, fontSize: 14, lineHeight: 20},
-  // Numbered BIP-39 word chips (Onboarding backup gate). The chip View carries the
-  // mnemonic-word-N testID and e2e reads its textContent with the leading index stripped —
-  // the index Text must stay FIRST inside the chip.
-  seedChip: {flexDirection: 'row', alignItems: 'baseline', backgroundColor: C.card, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7, margin: 4, borderWidth: 1, borderColor: C.line2},
-  seedChipIdx: {color: C.sub2, fontFamily: FONT.mono, fontSize: 11, marginRight: 6},
+  // Numbered BIP-39 word grid (SeedWords.tsx) — two columns, COLUMN-MAJOR (1-12 down the left,
+  // 13-24 down the right, the paper-backup reading order). `seedGrid` is the stretch container;
+  // each `seedGridRow` carries one (i, i+12) pair; `flex:1` on the chip keeps both columns
+  // equal-width so the grid stays aligned regardless of word length. The chip View carries the
+  // mnemonic-word-N testID and e2e reads its textContent with the leading index stripped — the
+  // index Text must stay FIRST inside the chip. `seedChipIdx` has a fixed width + right-align so
+  // the words of a column start at the same x.
+  seedGrid: {alignSelf: 'stretch', gap: 6, marginTop: 4, marginBottom: 8},
+  seedGridRow: {flexDirection: 'row', gap: 8},
+  seedChip: {flex: 1, flexDirection: 'row', alignItems: 'baseline', backgroundColor: C.card, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7, borderWidth: 1, borderColor: C.line2},
+  seedChipIdx: {color: C.sub2, fontFamily: FONT.mono, fontSize: 11, marginRight: 6, width: 16, textAlign: 'right'},
   seedChipWord: {color: C.ink, fontFamily: FONT.mono, fontSize: 15},
   // Keyboard-shortcut hint badge (web only — rendered by HotkeyHint). A visible "key cap": a
   // rounded square with a real border + subtle background and a mono letter. `kbdHint` is the
@@ -306,6 +316,11 @@ export const S = StyleSheet.create({
   pickBackdrop: {flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(27,26,23,0.45)', paddingHorizontal: 28},
   pickCard: {alignSelf: 'stretch', backgroundColor: C.panel, borderRadius: 20, padding: 16, borderWidth: 1, borderColor: C.line2, ...LIFT},
   pickTitle: {fontSize: 13, fontWeight: '600', color: C.sub2, textTransform: 'uppercase', letterSpacing: 1.4, marginBottom: 8, fontFamily: FONT.mono},
+  // Bounded scroller for the picker rows — the catalog grows (IC + SOL rails, testnet entries),
+  // and a Modal has no scroll surface, so an unbounded list would push the bottom rows off a
+  // small screen with no way to reach them. maxHeight only kicks in when the rows actually
+  // overflow; a short list renders identically to before.
+  pickScroll: {maxHeight: 420},
   pickItem: {flexDirection: 'row', alignItems: 'center', paddingVertical: 10, minHeight: 44, borderBottomWidth: 1, borderBottomColor: C.line2},
   pickName: {flex: 1, fontSize: 16, fontWeight: '700', color: C.ink, fontFamily: FONT.sansBold},
   // pickCheck — the trailing active-check wrapper; the margin keeps the icon clear of the
