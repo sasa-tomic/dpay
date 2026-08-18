@@ -17,12 +17,13 @@
 //      selectedAssetId is session-local, so a reload resets it to the IC default and the SOL→IC
 //      routing never fires. The seam is the documented foreground-deeplink path, mirroring the
 //      __DPAY_TEST_RECEIPT_PUBKEY / __DPAY_TEST_SCAN precedents.)
-//   3. The routing effect fires: selectedAssetId → ic:0, chip → 'DEMO', PayMode mounts, the prefill
-//      effect decodes the blob → review. Assert pay-amount (∂25.00, the EXACT requested amount) is
-//      showing and sol-pay-scan is GONE (SolPayMode unmounted).
+//   3. The routing effect fires: selectedAssetId → ic:0, header label → 'DEMO balance', PayMode
+//      mounts, the prefill effect decodes the blob → review. Assert pay-amount (∂25.00, the EXACT
+//      requested amount) is showing and sol-pay-scan is GONE (SolPayMode unmounted).
 //
-// Selector contract: `active-rail-chip` (header chip), `sol-pay-scan` (SolPayMode scan surface),
-// `pay-amount` (PayMode review amount), `btn-approve` (review → sign).
+// Selector contract: `active-asset-label` (header asset label; the former active-rail chip was
+// dropped 2026-08-18), `sol-pay-scan` (SolPayMode scan surface), `pay-amount` (PayMode review
+// amount), `btn-approve` (review → sign).
 import { setup, assert, assertEq, assertIncludes, onboardWallet, openBalances } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
@@ -47,7 +48,7 @@ export async function run() {
   try {
     const { driver } = env;
 
-    // 1. Onboard → wallet (DEMO seeded, chip 'DEMO').
+    // 1. Onboard → wallet (DEMO seeded, label 'DEMO balance').
     console.log('[70-deeplink-ic-routing] onboarding…');
     await onboardWallet(driver, 'e2e-ic-route');
 
@@ -56,7 +57,7 @@ export async function run() {
     await openBalances(driver);
     await driver.click('asset-sol-select', { timeoutMs: 5_000 });
     await driver.waitGone('btn-balances-close', { timeoutMs: 5_000 });
-    assertEq(await driver.readText('active-rail-chip'), 'SOL', 'SOL selected (chip "SOL")');
+    assertEq(await driver.readText('active-asset-label'), 'SOL balance', 'SOL selected (label "SOL balance")');
 
     // 3. The Pay tab now mounts SolPayMode (the SOL scan surface). This is the failure precondition:
     //    if a dpay:req blob arrived here without routing, SolPayMode would ignore it.
@@ -80,9 +81,9 @@ export async function run() {
     );
 
     // 5. ROUTING: the effect sees the pending prefill + a SOL selection → setSelectedAssetId('ic:0').
-    //    The chip flips to 'DEMO' and PayMode mounts in place of SolPayMode.
+    //    The header label flips to 'DEMO balance' and PayMode mounts in place of SolPayMode.
     await driver.findByTestID('pay-amount', { timeoutMs: 5_000 });
-    assertEq(await driver.readText('active-rail-chip'), 'DEMO', 'routing flipped the idle selection to the IC asset (chip "DEMO")');
+    assertEq(await driver.readText('active-asset-label'), 'DEMO balance', 'routing flipped the idle selection to the IC asset (label "DEMO balance")');
 
     // 6. PayMode decoded the blob and is in review with the EXACT requested amount. SolPayMode is gone.
     assertIncludes(await driver.readText('pay-amount'), '∂25.00', 'PayMode review shows the exact requested amount (immutable snapshot)');

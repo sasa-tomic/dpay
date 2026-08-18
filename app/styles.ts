@@ -374,12 +374,4 @@ export const S = StyleSheet.create({
   // 'Needs setup' pill on the Balances USDC (Solana) row — a warn-tinted row annotation,
   // left-aligned under the subtitle (not a centered banner).
   assetBadge: {alignSelf: 'flex-start', marginTop: 6, paddingVertical: 3, paddingHorizontal: 10, borderRadius: 999, backgroundColor: 'rgba(180,83,9,0.08)', borderWidth: 1, borderColor: 'rgba(180,83,9,0.35)', fontSize: 11, fontWeight: '700', color: C.warn, letterSpacing: 1.1, textTransform: 'uppercase', fontFamily: FONT.mono, overflow: 'hidden'},
-  // Active-rail chip near the tabs — labels which asset's Pay/Receive flow is armed so a user who
-  // switched to SOL in the Balances sheet doesn't get silently stuck in SOL mode (the IC ↔ SOL NFC
-  // AIDs differ; the chip makes the current rail legible at a glance).
-  activeRailChip: {flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 5, paddingHorizontal: 11, borderRadius: 999, borderWidth: 1, borderColor: C.brand, backgroundColor: 'rgba(255,90,31,0.07)', marginLeft: 'auto', alignSelf: 'center'},
-  // 12px family-hue dot leading the chip (glyphFor color, set inline in Wallet). A View, so the
-  // chip's e2e EXACT textContent match reads only the symbol text.
-  activeRailChipDot: {width: 12, height: 12, borderRadius: 6},
-  activeRailChipText: {fontSize: 11, fontWeight: '700', color: C.brand, letterSpacing: 0.8, fontFamily: FONT.mono},
 });

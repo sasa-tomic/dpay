@@ -10,8 +10,9 @@
 // Proves the two selectors (Balances + the Receive picker) share ONE entry path to every asset.
 //
 // Selector contract: `tab-receive`, `req-prefix` (amount glyph → opens AssetPicker), `req-pick-sol`
-// (the unified SOL row), `active-rail-chip` (the header chip — reads 'SOL' once the rail flips),
-// `sol-req-amount-input` (SolReceiveMode's amount input — proves the SOL receive form mounted).
+// (the unified SOL row), `active-asset-label` (the header asset label — reads 'SOL balance' once
+// the rail flips; the former active-rail chip was dropped 2026-08-18), `sol-req-amount-input`
+// (SolReceiveMode's amount input — proves the SOL receive form mounted).
 import {setup, assertEq, onboardWallet} from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
@@ -37,8 +38,8 @@ export async function run() {
     await onboardWallet(driver, 'e2e-picker-sol');
 
     // 1. Baseline: the active rail is DEMO (selectedAssetId reconciles to ic:0).
-    let chip = await driver.readText('active-rail-chip');
-    assertEq(chip, 'DEMO', 'baseline active-rail-chip (DEMO)');
+    let label = await driver.readText('active-asset-label');
+    assertEq(label, 'DEMO balance', 'baseline active-asset-label (DEMO)');
 
     // 2. Open the Receive tab + the compact currency picker (via the amount prefix glyph).
     console.log('[63-picker-sol-rail] opening the Receive currency picker…');
@@ -57,9 +58,9 @@ export async function run() {
     console.log('[63-picker-sol-rail] tapping SOL → switching rail…');
     await driver.click('req-pick-sol', {timeoutMs: 5_000});
 
-    // 5. The header chip flips to 'SOL' (selectedAsset.symbol — the rail switched).
-    chip = await driver.readText('active-rail-chip');
-    assertEq(chip, 'SOL', 'active-rail-chip after picking SOL in the Receive picker');
+    // 5. The header asset label flips to 'SOL balance' (selectedAsset.symbol — the rail switched).
+    label = await driver.readText('active-asset-label');
+    assertEq(label, 'SOL balance', 'active-asset-label after picking SOL in the Receive picker');
 
     // 6. SolReceiveMode mounted — its amount input is present (proves the SOL receive form is the
     //    active surface, not the IC ReceiveMode). Phase 4: this mount now happens via Wallet's

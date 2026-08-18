@@ -33,7 +33,6 @@ import {SolReceiveMode} from './SolReceiveMode';
 import {SettingsSheet} from './SettingsSheet';
 import {BalancesSheet} from './BalancesSheet';
 import {IconArrowDownLeft, IconChevronDown, IconClock, IconQr, IconSettings} from './icons';
-import {glyphFor} from './AssetGlyph';
 
 export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {identity: Identity; relayUrl: string; setRelayUrl: (s: string) => void; onReset: () => void; onRestore: (id: Identity) => Promise<void>}) {
   const [mode, setMode] = useState<'pay' | 'receive' | 'ledger'>('pay');
@@ -592,8 +591,8 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
                 <View style={[S.dot, {backgroundColor: online ? C.ok : C.sub2}]} />
                 {/* D3: the header label names the active asset in BOTH branches — online reads "X balance",
                     offline reads "~ X approx.". `activeAssetName` is the single source of truth for the
-                    symbol (shared with the active-rail chip below). */}
-                <Text style={S.balLabel}>{online ? `${activeAssetName} balance` : `~ ${activeAssetName} approx.`}</Text>
+                    symbol; e2e asserts the active rail via this label (testID active-asset-label). */}
+                <Text testID="active-asset-label" style={S.balLabel}>{online ? `${activeAssetName} balance` : `~ ${activeAssetName} approx.`}</Text>
               </View>
               <View style={S.balAmtRow}>
                 {/* The header reads the selected asset's pre-formatted displayText from the ONE balance
@@ -620,14 +619,6 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
         <Tab label="Pay" active={mode === 'pay'} onPress={() => setMode('pay')} hotkey="P" icon={c => <IconQr size={16} color={c} />} />
         <Tab label="Receive" active={mode === 'receive'} onPress={() => setMode('receive')} hotkey="R" icon={c => <IconArrowDownLeft size={16} color={c} />} />
         <Tab label="Transactions" active={mode === 'ledger'} onPress={() => setMode('ledger')} hotkey="L" icon={c => <IconClock size={16} color={c} />} />
-        {/* A6 — active-asset chip: labels which asset's Pay/Receive flow is armed so a user who
-            switched assets doesn't get silently stuck on the wrong NFC AID (IC `…01` vs SOL `…02`). */}
-        <View testID="active-rail-chip" style={S.activeRailChip}>
-          {/* P1 — family-hue dot; a View so the chip's e2e EXACT textContent match ('DEMO'/'BTC'/'SOL')
-              is untouched. DEMO's family color IS C.brand, hence the pre-reconcile fallback. */}
-          <View style={[S.activeRailChipDot, {backgroundColor: selectedAsset ? glyphFor(selectedAsset).color : C.brand}]} />
-          <Text style={S.activeRailChipText}>{activeAssetName}</Text>
-        </View>
       </View>
 
       <ScrollView style={S.scroll} contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
