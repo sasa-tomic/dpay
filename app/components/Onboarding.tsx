@@ -31,6 +31,12 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
   // acknowledgement and taps Continue. `backupChecked` is a pure UX gate (not a security mechanism).
   const [backupMnemonic, setBackupMnemonic] = useState<string[] | null>(null);
   const [backupChecked, setBackupChecked] = useState(false);
+  // Own-seed (create flow): ALTERNATIVE to the fresh random key — a returning user can paste the
+  // 24 words OR the 64-hex seed from an existing backup and create THIS device's wallet from it
+  // (same faucet + backup gate as a plain create — distinct from mode='restore', which skips both).
+  // `ownSeedOpen` toggles the input's visibility; empty input keeps the random-generate default.
+  const [ownSeedOpen, setOwnSeedOpen] = useState(false);
+  const [ownSeedText, setOwnSeedText] = useState('');
   // Copy feedback for the backup gate's "Copy words" button. Without it the only copy path was
   // mouse-selecting the numbered chips — which drags the position numbers into the selection
   // (the 2026-08-16 founder report). The button copies the PURE space-joined words.
@@ -42,9 +48,26 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
   // mnemonic is derived ON-DEMAND from secretHex via `hexToWords` — no storage change.
   async function create() {
     const name = username.trim() || 'me';
+    // Own-seed parse (auto-detected form): a bare 64-hex string is the raw seed; anything else is
+    // treated as the mnemonic. Invalid input stays on the form with an error — never a silent
+    // wrong-wallet. Empty input falls through to the fresh random generateKeypair default.
+    let hex: string | undefined;
+    const own = ownSeedText.trim();
+    if (own !== '') {
+      if (/^[0-9a-fA-F]{64}$/.test(own)) {
+        hex = own.toLowerCase();
+      } else {
+        const words = stringToWords(own);
+        if (!validateMnemonic(words)) {
+          setErr("That seed doesn't look right. Paste your 24 recovery words or the 64-hex seed exactly as you wrote it down.");
+          return;
+        }
+        hex = wordsToHex(words);
+      }
+    }
     setBusy(true); setErr(null);
     try {
-      const kp = await DpayCore.generateKeypair();
+      const kp = hex ? await DpayCore.keypairFromSecret(hex) : await DpayCore.generateKeypair();
       const id: Identity = {secretHex: kp.secretHex, publicHex: kp.publicHex, username: name};
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(id));
       const words = hexToWords(kp.secretHex);
@@ -191,6 +214,21 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
             <>
               <Text style={S.label}>Choose a username</Text>
               <TextInput testID="username-input" style={S.usernameInput} value={username} onChangeText={setUsername} placeholder="e.g. Alice" placeholderTextColor={C.sub2} autoCapitalize="words" autoCorrect={false} onSubmitEditing={busy ? undefined : create} accessibilityLabel="Username" accessibilityHint="The name others see when you request or receive a payment" />
+              {/* Own-seed alternative (2026-08-18): create from an EXISTING seed instead of the
+                  generated random one. Collapsed by default so first-time users see the plain
+                  create form; the link reveals the input. Same faucet + backup gate downstream. */}
+              <Pressable testID="btn-own-seed-toggle" style={S.linkBtn} onPress={() => { setOwnSeedOpen(!ownSeedOpen); setErr(null); }}
+                accessibilityRole="button"
+                accessibilityLabel={ownSeedOpen ? 'Generate a random seed instead' : 'Use my own seed instead'}
+                accessibilityHint="Show a field to paste the 24 recovery words or 64-hex seed of an existing wallet, instead of generating a fresh one">
+                <Text style={S.linkText}>{ownSeedOpen ? 'Generate a random seed instead' : 'Use my own seed instead'}</Text>
+              </Pressable>
+              {ownSeedOpen ? (
+                <>
+                  <TextInput testID="own-seed-input" style={S.seedInput} value={ownSeedText} onChangeText={setOwnSeedText} placeholder="Your 24 words or 64-hex seed" placeholderTextColor={C.sub2} autoCapitalize="none" autoCorrect={false} multiline accessibilityLabel="Own seed" accessibilityHint="Optional: the 24 recovery words or 64-hex seed to build this wallet from, instead of a new random one" />
+                  <Text style={S.dim2}>Leave empty to generate a fresh random seed.</Text>
+                </>
+              ) : null}
               {err ? <Text style={S.err}>{err}</Text> : null}
               <Pressable testID="btn-create" style={[S.primary, busy && S.disabledFlat]} disabled={busy} onPress={create}
                 accessibilityRole="button" accessibilityLabel="Create wallet" accessibilityHint="Generate your on-device key and add demo funds" accessibilityState={{disabled: busy}}>
