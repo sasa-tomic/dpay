@@ -297,7 +297,14 @@ export const S = StyleSheet.create({
   kbdHintOnBrand: {borderColor: 'rgba(255,255,255,0.45)', backgroundColor: 'rgba(0,0,0,0.14)'},
   kbdHintTextOnBrand: {color: C.brandInk},
   // Deposit sheet — a full-screen porcelain overlay above the wallet.
-  sheetOverlay: {position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: C.bg, zIndex: 10},
+  // elevation is REQUIRED alongside zIndex: on Android, sibling draw order follows elevation
+  // FIRST (zIndex only breaks ties within the same elevation). Without it, the elevated active
+  // tab (tabActive carries LIFT → elevation: 2) rendered ON TOP of this full-screen sheet —
+  // the active Pay/Receive/Transactions button visibly bleeding through the Balances/Settings
+  // overlays on device (web/iOS honor zIndex, so e2e never saw it). elevation: 10 matches the
+  // zIndex intent; the sheet is full-screen + opaque, so the elevation shadow is clipped
+  // off-viewport and invisible.
+  sheetOverlay: {position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: C.bg, zIndex: 10, elevation: 10},
   sheet: {flex: 1, backgroundColor: C.bg},
   sheetHead: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 20, paddingHorizontal: 22, paddingBottom: 14},
   sheetTitle: {fontSize: 20, fontWeight: '700', color: C.ink, fontFamily: FONT.sansBold, letterSpacing: -0.3},
