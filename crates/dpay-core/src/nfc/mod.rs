@@ -390,6 +390,7 @@ mod tests {
         step: ReaderStep,
         card_request: Option<Vec<u8>>,
         pending_seen: usize,
+        waiting_seen: usize,
     }
 
     /// Runs the whole exchange in memory: the reader's command → the card → the card's response →
@@ -406,6 +407,7 @@ mod tests {
         let mut card = CardSession::new(max_chunk);
         let mut reader = ReaderConductor::new(request, max_chunk)?;
         let mut pending_seen = 0usize;
+        let mut waiting_seen = 0usize;
         let mut card_request = None;
         let mut decided = false;
 
@@ -427,8 +429,9 @@ mod tests {
             match reader.handle_response(&resp)? {
                 ReaderStep::Continue => {}
                 ReaderStep::Pending => pending_seen += 1,
+                ReaderStep::WaitingForPayer => waiting_seen += 1,
                 step @ (ReaderStep::Done(_) | ReaderStep::Declined | ReaderStep::Confirmed) => {
-                    return Ok(Driven { step, card_request, pending_seen });
+                    return Ok(Driven { step, card_request, pending_seen, waiting_seen });
                 }
             }
         }
@@ -510,6 +513,49 @@ mod tests {
             let d = drive(&req, &wire, DEFAULT_MAX_CHUNK, Decision::Decline, after).unwrap();
             assert!(matches!(d.step, ReaderStep::Declined), "after={after}");
         }
+    }
+
+    #[test]
+    fn unarmed_card_at_select_reports_waiting_for_payer() {
+        // A dpay card is ROUTED (the OS answered our AID) but no payer session is armed — the
+        // platform HCE layer answers NOT_READY at SELECT (see DpayNfc.onCardApdu). The reader must
+        // treat this as "waiting for the payer", NOT a protocol violation, and a subsequent armed
+        // SELECT must still complete the exchange.
+        let req = sample_request();
+        let wire = vec![0x5Au8; WIRE_LEN];
+        let mut reader = ReaderConductor::new(&req, DEFAULT_MAX_CHUNK).unwrap();
+        let mut unarmed = CardSession::new(DEFAULT_MAX_CHUNK); // never SELECTed → wrong for direct use
+
+        // Simulate the platform layer: SELECT answered with bare NOT_READY (the unarmed response).
+        let select = reader.next_command().unwrap();
+        let plat_resp = ResponseApdu::status(Sw::NOT_READY).encode();
+        match reader.handle_response(&plat_resp).unwrap() {
+            ReaderStep::WaitingForPayer => {}
+            other => panic!("expected WaitingForPayer, got {other:?}"),
+        }
+        // The reader stays in NeedSelect: next_command re-SELECTs.
+        let select2 = reader.next_command().unwrap();
+        assert_eq!(select2, select, "re-SELECT must be byte-identical");
+
+        // Now a real armed card answers the re-SELECT and the full exchange completes.
+        let mut card = CardSession::new(DEFAULT_MAX_CHUNK);
+        let mut approved = false;
+        let mut delivered = None;
+        for _ in 0..(MAX_FRAMES * 8 + 128) {
+            let Some(cmd) = reader.next_command() else { break };
+            let resp = card.process(&cmd);
+            if card.awaiting_decision() && !approved {
+                card.provide_wire(&wire).unwrap();
+                approved = true;
+            }
+            match reader.handle_response(&resp).unwrap() {
+                ReaderStep::Done(w) => delivered = Some(w),
+                ReaderStep::Confirmed => break,
+                _ => {}
+            }
+        }
+        assert_eq!(delivered, Some(wire));
+        drop(unarmed);
     }
 
     proptest! {

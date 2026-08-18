@@ -58,6 +58,99 @@
   purge-required.)
 
 
+## OPEN BUG (2026-08-17): NFC request (reader role) fails on LineageOS/older Android — awaiting device logcat
+
+> **Founder report:** on a LineageOS phone (older Android), REQUESTING payment (reader mode)
+> surfaces a "Communication failed"-class error; the same phone PAYING (HCE card mode) works, and
+> both roles work on the primary phone (Android 16 / HyperOS 3.0.8.0.0).
+>
+> **State:** `dedf95b` (2026-08-17) hardened reader bring-up for exactly this class —
+> `enableReaderMode` wrapped + classified (`Couldn't start NFC (<Ex>) — try again`), stale-session
+> teardown before re-enable, `stopReader` prefers the stored `readerActivity`, and logcat
+> breadcrumbs at every hop (`startReader: reader mode enabled` / `enableReaderMode failed` + stack /
+> `onTag: techs=…`). **The APK on the LineageOS phone predates this** — the breadcrumbs have never
+> run on the failing device.
+>
+> **Emulator repro is STRUCTURALLY IMPOSSIBLE** (verified 2026-08-17 on `dpay_api36`): emulator
+> images ship no NFC HAL — `pm list features` has no `android.hardware.nfc` and `dumpsys nfc` →
+> "Can't find service: nfc" — on EVERY API level, so neither reader bring-up nor a tag exchange can
+> be entered. The radio hop is a physical-device gate by design (comment atop `DpayNfc.kt`).
+>
+> **Next step (founder outer-loop, needs the physical phone):** install the current HEAD APK
+> (`just apk` → `deploy/dist/dpay.apk`), enable USB debugging on the LineageOS phone, reproduce the
+> failing request, and capture `adb logcat -s dpay`. The failing catch site identifies itself:
+> `enableReaderMode failed` → bring-up (OEM stack rejects the flags); `onTag: core protocol error` →
+> mid-exchange `DpayException` (framing/MIU mismatch — UI shows "Communication error — try again");
+> `onTag: tag lost` → RF instability; `onTag: unexpected failure (<Ex>)` → transceive-level throw.
+> Exact UI-string → cause map: "Couldn't start NFC (…)" = bring-up; "Communication error — try
+> again" = IC mid-exchange; "Tap failed — try again" = unexpected; "Phones moved apart — try again"
+> = TagLost; "This phone has no NFC"/"NFC is off — turn it on in Settings" = adapter checks (SOL
+> rail mirrors these in `DpaySolNfc.kt`).
+>
+> **UPDATE (2026-08-17, later session) — root cause narrowed by on-device logcat + fix shipped:**
+> the phone WAS captured live (LineageOS 22.2 / Android 15, Poco X3 NFC, APK with `dedf95b`
+> breadcrumbs installed): 12/12 attempts, ALL deterministic — `reader mode enabled` →
+> `onTag: techs=IsoDep,NfcA` → `onTag: core protocol error` (empty-message `DpayException` through
+> uniffi `handleResponse`) within ~35 ms of tag discovery. Reader bring-up and tag discovery BOTH
+> work; the IC core reader state machine rejects the card's FIRST response bytes.
+>
+> **Prime suspect (cross-half protocol gap, now FIXED):** a ROUTED-BUT-UNARMED dpay card — the OS
+> bound our HCE service but the payer app isn't in Pay mode — answers bare `6210 NOT_READY` to the
+> reader's SELECT. The reader's `after_select` treated ANY non-OK/6A82/6985 SW (incl. 6210) as
+> `UnexpectedStatus` → `NfcProtocol` → "Communication error — try again". Deterministic, matches
+> the ~35 ms signature, and OEM-aggressive HCE binding (LineageOS keeps the service alive /
+> re-binds it where MIUI tears it down) makes the unarmed-card SELECT the FIRST thing the reader
+> sees on such phones. **Fix (core+FFI+Kotlin, both rails):**
+> - `dpay-core/nfc/reader.rs`: new `ReaderStep::WaitingForPayer` — `6210` at SELECT is no longer
+>   an error; the reader stays in `NeedSelect` so `next_command` re-SELECTs. Core test
+>   `unarmed_card_at_select_reports_waiting_for_payer` pins it (24/24 green).
+> - FFI `NfcStep::WaitingForPayer` added; Kotlin bindings regenerated + synced; `.so` rebuilt
+>   (arm64-v8a + x86_64, `ndk-build-ffi.sh`).
+> - `DpayNfc.kt` onTag: bounded re-SELECT poll (`PAYER_ARM_WAIT_MS=3000` / 250 ms interval) while
+>   `WAITING_FOR_PAYER` — gives the payer 3 s to open Pay, then a precise actionable message
+>   ("The payer's dpay app isn't open — ask them to open Pay, then try again") instead of a bogus
+>   "Communication error". Exhaustive `when` over `NfcStep` (unknown future variant = loud error,
+>   never silent).
+> - `DpaySolNfc.kt` runReader: same 3 s `6210`-at-SELECT retry loop (was: instant misdiagnosis
+>   "Not a dpay phone").
+> - **One-session diagnostic instrumentation** (stays): reader-side per-APDU hex exchange log
+>   (`onTag exchange: cmd=… resp=…`), card-side per-APDU hex log (IC + SOL, incl. UNARMED markers),
+>   `DpayException` subclass classification in the catch (`NfcProtocol`/`NfcNotDpay`/… — uniffi
+>   drops thiserror Display so `e.message` is always `""`), SOL select-response hex log. If the
+>   LineageOS failure is NOT the unarmed-card case, the next logcat pinpoints the exact rejected
+>   byte(s) in one repro.
+> - Pre-existing drift fixed en route: `test_ffi.py` still expected `.5`/`5.` to raise after
+>   `19c6e8f` made core accept calculator-style leading/trailing dots — test now asserts BOTH the
+>   acceptance and the bare-`.` rejection (FFI roundtrip 100/100 green).
+> All gates green: core 24/24, ffi 100 checks, typecheck, jest 838/838, e2e 78/78, `just verify`.
+>
+> **UPDATE 2 (same day) — founder field clue reshapes the failure model:** the SAME LineageOS phone
+> CAN complete a request-payment when the payer is already very close at start (one instance worked
+> flawlessly); it fails when the phones approach sloppily, and after a failure it "fails to keep
+> scanning". That is exactly the terminal-error design: ANY reader `error` event finalizes the JS
+> tap state machine (`useNfcTapState.finalize` is first-terminal-wins and then ignores ALL events)
+> while native reader mode stays enabled — one failed first exchange (RF margin, cold-starting HCE)
+> killed the whole merchant session and the screen stopped reacting. **Fix (both rails, shipped):**
+> transient reader failures are now NON-TERMINAL — (a) tag lost mid-exchange → back to `listening`
+> phase (reader mode stays on; the next physical coupling fires a fresh `onTag`; the tap view shows
+> "Hold near the other phone" again), (b) a `DpayException` from the first exchange(s) → in-loop
+> recovery: re-SELECT/re-poll with 250 ms throttle while the field holds, up to a 10 s window
+> (`PAYER_ARM_WAIT_MS`/`SOL_PAYER_ARM_WAIT_MS` raised 3 s→10 s), then a classified terminal error;
+> (c) a non-IsoDep tag (bank card, headphones) → logged and ignored, keep scanning (was terminal
+> "Not a dpay phone"); (d) post-wire/post-payment failures stay non-terminal (JS already owns the
+> outcome; the payer independently falls back to "couldn't confirm"). Terminal errors remain for:
+> bring-up failure, a coupled card that never answers usefully within 10 s (precise per-cause
+> message), an unarmed card that never arms (same message as before), unexpected throws, unknown
+> future `NfcStep` variants (loud exhaustiveness guard). A genuine non-dpay IsoDep card (6A82 →
+> `NfcNotDpay`) is STILL instantly terminal ("Not a dpay phone") — it never enters the recovery
+> window. Nothing is silently dropped. The decisive instrumentation (per-APDU hex both sides,
+> exception classification) stays for the on-device re-test.
+>
+> Gates re-run green after the policy change: `build-apk.sh` (verify + release build) succeeded;
+> instrumented APK re-staged (`deploy/dist/dpay.apk`, sha `2a6c650d…`). **Remaining step (founder
+> outer-loop): reinstall on the LineageOS phone and re-test the request flow — expect: sloppy
+> approaches now recover/keep scanning; a clean close tap settles as on the HyperOS phone.**
+
 ## Session summary (2026-08-16, cont.): review sweep #2 — fund-first gate + campreview SOL fix + UX findings U-F1..6/A-F1..4 — COMPLETE, PROD AT HEAD
 
 > **Trigger:** HEAD had 6 undocumented commits (229d1de..c25202d — BIP-39 restore UX, share

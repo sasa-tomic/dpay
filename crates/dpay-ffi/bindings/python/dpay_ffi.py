@@ -1987,6 +1987,14 @@ class NfcStep(enum.Enum):
     """
 
     
+    WAITING_FOR_PAYER = 5
+    """
+    The card answered NOT_READY at SELECT: a dpay card is routed but no payer session is armed
+    (the payer isn't in Pay mode). Keep polling / re-SELECT via `next_command`, or surface an
+    actionable message and stop.
+    """
+
+    
 
 
 class _UniffiConverterTypeNfcStep(_UniffiConverterRustBuffer):
@@ -2003,6 +2011,8 @@ class _UniffiConverterTypeNfcStep(_UniffiConverterRustBuffer):
             return NfcStep.CONFIRMED
         if variant == 5:
             return NfcStep.DECLINED
+        if variant == 6:
+            return NfcStep.WAITING_FOR_PAYER
         raise InternalError("Raw enum value doesn't match any cases")
 
     @staticmethod
@@ -2016,6 +2026,8 @@ class _UniffiConverterTypeNfcStep(_UniffiConverterRustBuffer):
         if value == NfcStep.CONFIRMED:
             return
         if value == NfcStep.DECLINED:
+            return
+        if value == NfcStep.WAITING_FOR_PAYER:
             return
         raise ValueError(value)
 
@@ -2031,6 +2043,8 @@ class _UniffiConverterTypeNfcStep(_UniffiConverterRustBuffer):
             buf.write_i32(4)
         if value == NfcStep.DECLINED:
             buf.write_i32(5)
+        if value == NfcStep.WAITING_FOR_PAYER:
+            buf.write_i32(6)
 
 
 

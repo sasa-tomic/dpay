@@ -2834,7 +2834,13 @@ enum class NfcStep {
     /**
      * The payer declined; abandon the sale.
      */
-    DECLINED;
+    DECLINED,
+    /**
+     * The card answered NOT_READY at SELECT: a dpay card is routed but no payer session is armed
+     * (the payer isn't in Pay mode). Keep polling / re-SELECT via `next_command`, or surface an
+     * actionable message and stop.
+     */
+    WAITING_FOR_PAYER;
     companion object
 }
 

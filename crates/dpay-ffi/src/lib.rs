@@ -517,6 +517,10 @@ pub enum NfcStep {
     Confirmed,
     /// The payer declined; abandon the sale.
     Declined,
+    /// The card answered NOT_READY at SELECT: a dpay card is routed but no payer session is armed
+    /// (the payer isn't in Pay mode). Keep polling / re-SELECT via `next_command`, or surface an
+    /// actionable message and stop.
+    WaitingForPayer,
 }
 
 /// Lock helper that tolerates a poisoned mutex (can only happen if a panic ever unwound while the
@@ -629,6 +633,7 @@ impl FfiReaderConductor {
             ReaderStep::Pending => Ok(NfcStep::Pending),
             ReaderStep::Declined => Ok(NfcStep::Declined),
             ReaderStep::Confirmed => Ok(NfcStep::Confirmed),
+            ReaderStep::WaitingForPayer => Ok(NfcStep::WaitingForPayer),
             ReaderStep::Done(w) => {
                 *lock(&self.wire) = Some(w);
                 Ok(NfcStep::Done)

@@ -348,14 +348,17 @@ expect_amount_err("", 2, "empty", "empty input")
 expect_amount_err("   ", 2, "empty", "whitespace-only input")
 expect_amount_err("abc", 2, "not_a_number", "non-numeric")
 expect_amount_err("1.2.3", 2, "not_a_number", "multiple dots")
-expect_amount_err(".5", 2, "not_a_number", "leading dot (no whole part)")
-expect_amount_err("5.", 2, "not_a_number", "trailing dot (no fraction)")
+expect_amount_err(".", 2, "not_a_number", "bare dot (no whole, no fraction)")
 expect_amount_err("-1", 2, "negative", "negative (-1)")
 expect_amount_err("-abc", 2, "negative", "leading minus (regardless of shape)")
 expect_amount_err("1.5", 0, "too_many_decimals", "1 fractional digit > decimals=0")
 expect_amount_err("0.1234567890123456789", 18, "too_many_decimals", "19 frac digits at decimals=18")
 expect_amount_err("99999999999999999999999999999", 0, "overflow", "29 nines > u64::MAX")
 expect_amount_err("1", 19, "overflow", "decimals > MAX_DECIMALS (18)")
+
+# Calculator-style shapes are ACCEPTED since 19c6e8f: leading dot `.5` → 0.5, trailing dot `5.` → 5.
+check(d.parse_amount(".5", 2) == 50, "parse_amount('.5', 2) == 50 (calculator-style leading dot)")
+check(d.parse_amount("5.", 2) == 500, "parse_amount('5.', 2) == 500 (calculator-style trailing dot)")
 
 
 print(f"\nALL {passed} FFI CHECKS PASSED — Python called the real dpay-core across UniFFI.")

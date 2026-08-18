@@ -40,6 +40,10 @@ pub enum ReaderStep {
     Confirmed,
     /// The payer declined; abandon the sale.
     Declined,
+    /// The card answered NOT_READY at SELECT: a dpay card is routed but no payer session is armed
+    /// (the payer isn't in Pay mode yet). Not a protocol violation — the caller should keep
+    /// polling (a held field) or surface an actionable message; `next_command` re-SELECTs.
+    WaitingForPayer,
 }
 
 /// The merchant-side (NFC reader) half. Owns the request to push and reassembles the returned wire.
@@ -171,6 +175,13 @@ impl ReaderConductor {
         if resp.sw == Sw::DECLINED {
             self.state = ReaderState::Declined;
             return Ok(ReaderStep::Declined);
+        }
+        // A routed-but-unarmed dpay card: its platform HCE layer answers NOT_READY at SELECT when
+        // no payer session is armed (the payer isn't in Pay mode). That's a defined "back off"
+        // signal from our own card app, not a protocol violation — stay in NeedSelect so the
+        // caller can keep polling via `next_command` (which re-SELECTs) or tell the user.
+        if resp.sw == Sw::NOT_READY {
+            return Ok(ReaderStep::WaitingForPayer);
         }
         if !resp.sw.is_ok() {
             return Err(NfcError::UnexpectedStatus(resp.sw.0));

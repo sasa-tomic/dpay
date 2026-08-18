@@ -57,6 +57,14 @@ object DpayNfc {
     // payer falls back to its own "couldn't confirm"), so on timeout we stop delivering *quietly*.
     private const val RECEIPT_CONFIRM_WAIT_SECS = 12L
 
+    // How long the reader holds the field and retries while a tapped dpay card isn't answering
+    // usefully yet — a routed-but-unarmed card (payer not in Pay mode; NOT_READY at SELECT while
+    // they open the app) or an exchange that keeps failing at the RF margin during a sloppy
+    // physical approach. Bounded so a hopeless tap terminates with a precise, actionable message
+    // instead of a generic "Communication error"; every outcome is reported, never silently dropped.
+    private const val PAYER_ARM_WAIT_MS = 10_000L
+    private const val PAYER_ARM_POLL_MS = 250L
+
     // dpay "not ready" warning SW (mirrors dpay_core::nfc Sw::NOT_READY) — returned when a reader
     // taps but no payer session is armed.
     private val SW_NOT_READY = byteArrayOf(0x62, 0x10)
@@ -129,9 +137,13 @@ object DpayNfc {
 
     /** Called by [DpayHostApduService] for every command APDU. Total function — never throws. */
     fun onCardApdu(command: ByteArray): ByteArray {
-        val c = card ?: return SW_NOT_READY // no payer session armed → tell the reader to back off
+        val c = card ?: run {
+            android.util.Log.w("dpay", "card apdu while UNARMED (${command.size}B) → NOT_READY")
+            return SW_NOT_READY // no payer session armed → tell the reader to back off
+        }
         return try {
             val resp = c.process(command)
+            android.util.Log.i("dpay", "card apdu: cmd=${hex(command)} resp=${hex(resp)}")
             // Surface the request for the payer to review the first time it is fully held.
             if (c.awaitingDecision() && !requestSent) {
                 requestSent = true
@@ -293,21 +305,31 @@ object DpayNfc {
     /**
      * Runs on a dedicated NFC binder thread (blocking `transceive` is fine here). Drives the reader
      * state machine over the tapped card until it terminates, emitting phases and the final wire.
+     *
+     * Error policy: a tap discovered during a sloppy physical approach often loses its first
+     * exchange at the RF margin — that is EXPECTED physics, not a merchant-flow failure, so it must
+     * never kill the session (the JS state machine treats an `error` event as terminal and stops
+     * reacting to everything, i.e. "stops scanning"). Transient failures (tag lost, failed
+     * exchange) therefore return to the `listening` phase — reader mode stays enabled and the next
+     * physical re-tap starts a fresh onTag. Only hopeless cases terminate with an error: bring-up
+     * failure, a recovery window that expired while the field still held, or an unexpected throw.
      */
     private fun onTag(tag: Tag) {
         val r = reader ?: return
         android.util.Log.i("dpay", "onTag: techs=${tag.techList.joinToString(",")}")
         val isoDep = IsoDep.get(tag)
         if (isoDep == null) {
-            android.util.Log.w("dpay", "onTag: no IsoDep tech on this tag")
-            errorEvent("reader", "Not a dpay phone")
+            // A non-IsoDep tag (bank card, headphones, passport…) answered the poll — not a dpay
+            // phone, but ALSO not a reason to kill the merchant session: log it and keep scanning.
+            android.util.Log.w("dpay", "onTag: no IsoDep tech on this tag — ignoring, still listening")
             return
         }
+        var wireInHand = false
         try {
             isoDep.connect()
             isoDep.timeout = 5000
             phaseEvent("reader", "linking")
-            var wireInHand = false
+            var recoveryStart = 0L // 0 = not in a recovery window (unarmed card / failing exchange)
             while (true) {
                 val cmd = r.nextCommand()
                 if (cmd == null) {
@@ -324,15 +346,65 @@ object DpayNfc {
                     r.provideReceipt(receipt)
                     continue // resume the loop to push the receipt back to the payer
                 }
-                val resp = isoDep.transceive(cmd)
-                when (r.handleResponse(resp)) {
-                    NfcStep.CONTINUE -> phaseEvent("reader", uiPhase(r.phase()))
+                val step = try {
+                    val resp = isoDep.transceive(cmd)
+                    android.util.Log.i(
+                        "dpay",
+                        "onTag exchange: cmd=${hex(cmd)} resp=${hex(resp ?: ByteArray(0))}"
+                    )
+                    r.handleResponse(resp)
+                } catch (e: DpayException) {
+                    // The core rejected the card's answer (bad status, short/garbled bytes at the RF
+                    // margin, cold-starting HCE…). Early failures leave the conductor in NeedSelect,
+                    // so re-SELECTing is protocol-safe. Recover while the field holds — the approach
+                    // may simply be sloppy; expire into a terminal, classified error.
+                    if (e is DpayException.NfcNotDpay) throw e // a real non-dpay card (6A82) — terminal now
+                    if (wireInHand) {
+                        // The wire is already with JS (it owns the outcome); only the best-effort
+                        // receipt push failed. Not a merchant error — the payer independently falls
+                        // back to "couldn't confirm".
+                        android.util.Log.w("dpay", "onTag: receipt push failed (${classify(e)}) — wire already delivered")
+                        break
+                    }
+                    val now = System.currentTimeMillis()
+                    if (recoveryStart == 0L) {
+                        recoveryStart = now
+                        android.util.Log.w("dpay", "onTag: exchange failed (${classify(e)}) — recovering while the field holds")
+                        phaseEvent("reader", "linking")
+                    } else if (now - recoveryStart > PAYER_ARM_WAIT_MS) {
+                        throw e // hopeless while coupled — terminal, classified by the outer catch
+                    }
+                    Thread.sleep(PAYER_ARM_POLL_MS)
+                    continue
+                }
+                when (step) {
+                    NfcStep.CONTINUE -> {
+                        recoveryStart = 0L // a real answer — leave the recovery window
+                        phaseEvent("reader", uiPhase(r.phase()))
+                    }
                     NfcStep.PENDING -> {
+                        recoveryStart = 0L
                         phaseEvent("reader", "awaitingApproval")
                         // The payer is still deciding; throttle the re-select poll over the radio.
                         Thread.sleep(120)
                     }
+                    NfcStep.WAITING_FOR_PAYER -> {
+                        // The dpay card is routed but unarmed (payer not in Pay mode). The core keeps
+                        // the reader in NeedSelect — hold the field while the payer opens the app,
+                        // then terminate with a precise message if they never do.
+                        if (recoveryStart == 0L) {
+                            recoveryStart = System.currentTimeMillis()
+                            android.util.Log.w("dpay", "onTag: dpay card routed but payer session not armed")
+                            phaseEvent("reader", "linking")
+                        } else if (System.currentTimeMillis() - recoveryStart > PAYER_ARM_WAIT_MS) {
+                            android.util.Log.w("dpay", "onTag: payer never armed after ${PAYER_ARM_WAIT_MS}ms")
+                            errorEvent("reader", "The payer’s dpay app isn’t open — ask them to open Pay, then try again")
+                            break
+                        }
+                        Thread.sleep(PAYER_ARM_POLL_MS)
+                    }
                     NfcStep.DONE -> {
+                        recoveryStart = 0L
                         // The signed wire is in hand → hand it to JS to submit online; keep the field.
                         wireInHand = true
                         emitDone(r.wire())
@@ -345,13 +417,26 @@ object DpayNfc {
                         phaseEvent("reader", "declined")
                         break
                     }
+                    else -> {
+                        // Exhaustiveness guard: a future NfcStep variant must be handled, not dropped.
+                        android.util.Log.w("dpay", "onTag: unhandled NfcStep ${step.javaClass.simpleName}")
+                        errorEvent("reader", "Communication error — try again")
+                        break
+                    }
                 }
             }
         } catch (e: TagLostException) {
-            android.util.Log.w("dpay", "onTag: tag lost mid-exchange", e)
-            errorEvent("reader", "Phones moved apart — try again")
+            // The field broke — expected during a physical approach. Before the wire is in hand this
+            // is pure physics: go back to listening (reader mode stays enabled; the next coupling
+            // fires a fresh onTag). After the wire is in hand JS already owns the outcome.
+            if (wireInHand) {
+                android.util.Log.w("dpay", "onTag: tag lost after wire delivered — receipt push abandoned")
+            } else {
+                android.util.Log.w("dpay", "onTag: tag lost mid-exchange — back to listening", e)
+                phaseEvent("reader", "listening")
+            }
         } catch (e: DpayException) {
-            android.util.Log.w("dpay", "onTag: core protocol error", e)
+            android.util.Log.w("dpay", "onTag: core protocol error (${classify(e)})", e)
             errorEvent("reader", "Communication error — try again")
         } catch (e: Throwable) {
             android.util.Log.w("dpay", "onTag: unexpected failure (${e.javaClass.simpleName})", e)
@@ -362,6 +447,18 @@ object DpayNfc {
             } catch (_: Throwable) {
             }
         }
+    }
+
+    /**
+     * uniffi drops the thiserror Display strings (the Kotlin exception message is always ""), so
+     * classify by the generated subclass — stable names, used for log breadcrumbs only.
+     */
+    private fun classify(e: DpayException): String = when (e) {
+        is DpayException.NfcProtocol -> "NfcProtocol"
+        is DpayException.NfcNotDpay -> "NfcNotDpay"
+        is DpayException.NfcWrongState -> "NfcWrongState"
+        is DpayException.BadInput -> "BadInput"
+        else -> e.javaClass.simpleName
     }
 
     private fun emitDone(wire: ByteArray?) {

@@ -35,6 +35,11 @@ object DpaySolNfc {
     private const val PAYMENT_WAIT_SECS = 8L
     // How long the reader holds the field waiting for JS to stamp + offer the receipt back.
     private const val RECEIPT_CONFIRM_WAIT_SECS = 12L
+    // How long the SOL reader holds the field and retries while the tapped dpay card isn't answering
+    // usefully yet — routed-but-unarmed (6210 at SELECT: payer hasn't opened Pay mode) or failing at
+    // the RF margin during a sloppy approach. Mirrors the IC rail's PAYER_ARM_WAIT_MS.
+    private const val SOL_PAYER_ARM_WAIT_MS = 10_000L
+    private const val SOL_PAYER_ARM_POLL_MS = 250L
 
     // APDU protocol constants. PUT/GET carry a tag in P1 (REQUEST/PAYMENT/RECEIPT); the continuation
     // bit in P2 (1 = more frames follow for this tag) lets a variable-length string stream across.
@@ -178,12 +183,17 @@ object DpaySolNfc {
         return try {
             val cla = command[0]; val ins = command[1]; val p1 = command[2]; val p2 = command[3]
             if (cla == 0x00.toByte() && ins == 0xA4.toByte()) return handleSelect(command)
-            if (!cardArmed) return SW_NOT_READY
-            when (ins) {
+            if (!cardArmed) {
+                android.util.Log.w("dpay", "sol card apdu while UNARMED (${command.size}B) → NOT_READY")
+                return SW_NOT_READY
+            }
+            val resp = when (ins) {
                 INS_PUT -> handlePut(p1, (p2.toInt() and 1) != 0, command.copyOfRange(4, command.size))
                 INS_GET -> handleGet(p1)
                 else -> SW_WRONG_LENGTH
             }
+            android.util.Log.i("dpay", "sol card apdu: cmd=${hex(command)} resp=${hex(resp)}")
+            resp
         } catch (_: Throwable) {
             // Never let an exception escape into the NFC stack.
             errorEvent("card", "Card error — try again")
@@ -192,7 +202,10 @@ object DpaySolNfc {
     }
 
     private fun handleSelect(command: ByteArray): ByteArray {
-        if (!cardArmed) return SW_NOT_READY
+        if (!cardArmed) {
+            android.util.Log.w("dpay", "sol card SELECT while UNARMED → NOT_READY")
+            return SW_NOT_READY
+        }
         // The AID rides in the data field (after the 4-byte header + Lc). Match against SOL_AID.
         val lc = if (command.size > 4) command[4].toInt() and 0xff else 0
         val dataStart = 5
@@ -357,25 +370,62 @@ object DpaySolNfc {
      * Runs on a dedicated NFC binder thread (blocking `transceive` is fine here). Sends the chunked
      * solreq:, polls for the chunked solpay:, then waits for JS to broadcast + confirm, and sends the
      * receipt back. Mirrors DpayNfc.onTag's structure but over the pure-Kotlin PUT/GET protocol.
+     *
+     * Error policy mirrors the IC rail: a tag discovered during a sloppy approach often fails its
+     * first exchange at the RF margin — expected physics, so it returns to `listening` (reader mode
+     * stays enabled; the next coupling fires a fresh onTag) instead of killing the merchant session
+     * with a terminal error. Only hopeless cases terminate: bring-up failure, a SELECT that never
+     * succeeded while the field held, or an unexpected throw.
      */
     private fun runReader(tag: Tag, solreqUri: String) {
         val isoDep = IsoDep.get(tag)
         android.util.Log.i("dpay", "sol onTag: techs=${tag.techList.joinToString(",")}")
         if (isoDep == null) {
-            android.util.Log.w("dpay", "sol onTag: no IsoDep tech on this tag")
-            errorEvent("reader", "Not a dpay phone")
+            // A non-IsoDep tag (bank card, headphones…) answered the poll — not a dpay phone, but
+            // not a reason to kill the merchant session either: log it and keep scanning.
+            android.util.Log.w("dpay", "sol onTag: no IsoDep tech on this tag — ignoring, still listening")
             return
         }
         readerIsoDep = isoDep
+        var gotPayment = false
         try {
             isoDep.connect()
             isoDep.timeout = 5000
             phaseEvent("reader", "linking")
-            // SELECT the SOL AID.
-            val selectResp = isoDep.transceive(byteArrayOf(*SELECT_HEADER, SOL_AID.size.toByte(), *SOL_AID))
-            if (!isOk(selectResp)) {
-                errorEvent("reader", "Not a dpay phone")
-                return
+            // SELECT the SOL AID. Retry a bounded time on ANY non-OK answer — 6210 means a routed
+            // but unarmed dpay card (payer not in Pay mode: "the payer isn't ready", NOT "not a
+            // dpay phone"); other statuses mean an HCE service still cold-starting or a non-dpay
+            // tag, which the window also tolerates before giving up.
+            var recoveryStart = 0L
+            var sawNotReady = false
+            var selectResp = isoDep.transceive(byteArrayOf(*SELECT_HEADER, SOL_AID.size.toByte(), *SOL_AID))
+            android.util.Log.i("dpay", "sol onTag select: resp=${hex(selectResp)}")
+            while (!isOk(selectResp)) {
+                val notReady = selectResp.size >= 2 &&
+                    selectResp[selectResp.size - 2] == SW_NOT_READY[0] &&
+                    selectResp[selectResp.size - 1] == SW_NOT_READY[1]
+                if (notReady) sawNotReady = true
+                val now = System.currentTimeMillis()
+                if (recoveryStart == 0L) {
+                    recoveryStart = now
+                    android.util.Log.w(
+                        "dpay",
+                        "sol onTag: SELECT not OK yet (${hex(selectResp)})" +
+                            (if (notReady) " — dpay card routed but payer session not armed" else "") +
+                            " — recovering while the field holds"
+                    )
+                    phaseEvent("reader", "linking")
+                } else if (now - recoveryStart > SOL_PAYER_ARM_WAIT_MS) {
+                    android.util.Log.w("dpay", "sol onTag: SELECT never OK after ${SOL_PAYER_ARM_WAIT_MS}ms (last=${hex(selectResp)})")
+                    errorEvent(
+                        "reader",
+                        if (sawNotReady) "The payer’s dpay app isn’t open — ask them to open Pay, then try again"
+                        else "Not a dpay phone"
+                    )
+                    return
+                }
+                Thread.sleep(SOL_PAYER_ARM_POLL_MS)
+                selectResp = isoDep.transceive(byteArrayOf(*SELECT_HEADER, SOL_AID.size.toByte(), *SOL_AID))
             }
             // PUSH the solreq: in MAX_CHUNK frames.
             chunkPut(isoDep, TAG_REQUEST, solreqUri)
@@ -386,6 +436,7 @@ object DpaySolNfc {
                 errorEvent("reader", "The payer declined the payment")
                 return
             }
+            gotPayment = true
             emitPayment(solpay)
             phaseEvent("reader", "settling")
             // JS broadcasts + confirms; hold the field a bounded time for the receipt.
@@ -399,8 +450,15 @@ object DpaySolNfc {
             emitConfirmed()
             phaseEvent("reader", "success")
         } catch (e: TagLostException) {
-            android.util.Log.w("dpay", "sol onTag: tag lost mid-exchange", e)
-            errorEvent("reader", "Phones moved apart — try again")
+            // The field broke — expected during a physical approach. Before the payment is in hand
+            // this is pure physics: back to listening (reader mode stays enabled; the next coupling
+            // fires a fresh onTag). After the payment JS already owns the outcome.
+            if (gotPayment) {
+                android.util.Log.w("dpay", "sol onTag: tag lost after payment received — receipt push abandoned")
+            } else {
+                android.util.Log.w("dpay", "sol onTag: tag lost mid-exchange — back to listening", e)
+                phaseEvent("reader", "listening")
+            }
         } catch (e: Throwable) {
             android.util.Log.w("dpay", "sol onTag: unexpected failure (${e.javaClass.simpleName})", e)
             errorEvent("reader", "Tap failed — try again")
@@ -411,6 +469,16 @@ object DpaySolNfc {
     }
 
     private fun isOk(resp: ByteArray): Boolean = resp.size >= 2 && resp[resp.size - 2] == 0x90.toByte() && resp[resp.size - 1] == 0x00.toByte()
+
+    private val HEXCH = "0123456789abcdef".toCharArray()
+    private fun hex(b: ByteArray): String {
+        val sb = StringBuilder(b.size * 2)
+        for (x in b) {
+            val v = x.toInt() and 0xff
+            sb.append(HEXCH[v ushr 4]).append(HEXCH[v and 0x0f])
+        }
+        return sb.toString()
+    }
 
     /** Send `data` as a series of PUT APDUs (P1=tag, P2 bit0 = continuation). */
     private fun chunkPut(isoDep: IsoDep, tag: Byte, data: String) {
