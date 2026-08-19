@@ -12,6 +12,9 @@ crate-type = ["cdylib"]
 
 [dependencies]
 dpay-core = { path = "../dpay-core" }
+# IC user-principal rail: envelope signing + /api/v2 response decoding (wasm32-safe, no
+# transport/clock — callers supply time via ingress_expiry(now_ns, ahead_s)).
+dpay-icp = { path = "../dpay-icp" }
 # Same workspace pin dpay-core uses; needed directly for SigningKey/VerifyingKey in w_pubkey.
 # Already in the dep tree, so the cdylib adds no new crates beyond the core's own.
 ed25519-dalek = { workspace = true }

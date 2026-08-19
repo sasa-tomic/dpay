@@ -80,6 +80,8 @@
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
+pub mod icp;
+
 use dpay_core::{
     Authorization, PaymentRequest, ReceiptClaim, SignedAuthorization, WithdrawAuth, DEMO_USD,
     MEMO_LEN, NAME_LEN, NONCE_LEN, PUBKEY_LEN, RECEIPT_CLAIM_LEN, REQUEST_LEN, SIG_LEN,

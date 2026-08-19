@@ -24,6 +24,8 @@ required-features = ["cli"]
 [dependencies]
 # The SAME core that the canister, relay, and sim link. `rng` for on-device keypair generation.
 dpay-core = { path = "../dpay-core", features = ["rng"] }
+# IC user-principal rail: envelope signing + /api/v2 response decoding (byte-identical to ic-agent).
+dpay-icp = { path = "../dpay-icp" }
 # Pinned exact: the bindgen CLI, the proc-macros, and the runtime scaffolding must all agree.
 uniffi = { version = "=0.29.5" }
 # Ed25519 key reconstruction from the on-device seed (host build; same version the core links).

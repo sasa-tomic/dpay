@@ -792,6 +792,32 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is 
 // rather `InterfaceTooLargeException`, caused by too many methods 
@@ -818,6 +844,32 @@ fun uniffi_dpay_ffi_checksum_func_encode_request(
 fun uniffi_dpay_ffi_checksum_func_format_amount(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_generate_keypair(
+): Short
+fun uniffi_dpay_ffi_checksum_func_icp_approve_arg(
+): Short
+fun uniffi_dpay_ffi_checksum_func_icp_balance_of_arg(
+): Short
+fun uniffi_dpay_ffi_checksum_func_icp_decode_int(
+): Short
+fun uniffi_dpay_ffi_checksum_func_icp_decode_query(
+): Short
+fun uniffi_dpay_ffi_checksum_func_icp_decode_read_state(
+): Short
+fun uniffi_dpay_ffi_checksum_func_icp_decode_transfer_result(
+): Short
+fun uniffi_dpay_ffi_checksum_func_icp_envelope_request_id(
+): Short
+fun uniffi_dpay_ffi_checksum_func_icp_ingress_expiry(
+): Short
+fun uniffi_dpay_ffi_checksum_func_icp_self_principal(
+): Short
+fun uniffi_dpay_ffi_checksum_func_icp_sign_query(
+): Short
+fun uniffi_dpay_ffi_checksum_func_icp_sign_read_state(
+): Short
+fun uniffi_dpay_ffi_checksum_func_icp_sign_update(
+): Short
+fun uniffi_dpay_ffi_checksum_func_icp_transfer_arg(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_keypair_from_secret(
 ): Short
@@ -983,6 +1035,32 @@ fun uniffi_dpay_ffi_fn_func_encode_request(`to`: RustBuffer.ByValue,`amount`: Lo
 fun uniffi_dpay_ffi_fn_func_format_amount(`raw`: Long,`decimals`: Byte,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_generate_keypair(uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_approve_arg(`spenderOwnerText`: RustBuffer.ByValue,`spenderSubaccountHex`: RustBuffer.ByValue,`fromSubaccountHex`: RustBuffer.ByValue,`amount`: RustBuffer.ByValue,`expectedAllowance`: RustBuffer.ByValue,`expiresAtNs`: RustBuffer.ByValue,`memoHex`: RustBuffer.ByValue,`fee`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_balance_of_arg(`ownerText`: RustBuffer.ByValue,`subaccountHex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_decode_int(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_decode_query(`body`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_decode_read_state(`body`: RustBuffer.ByValue,`requestIds`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_decode_transfer_result(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_envelope_request_id(`envelope`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_ingress_expiry(`nowNs`: RustBuffer.ByValue,`aheadS`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_self_principal(`secret`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_sign_query(`secret`: RustBuffer.ByValue,`canisterText`: RustBuffer.ByValue,`methodName`: RustBuffer.ByValue,`arg`: RustBuffer.ByValue,`ingressExpiryNs`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_sign_read_state(`secret`: RustBuffer.ByValue,`requestIds`: RustBuffer.ByValue,`wantTime`: Byte,`ingressExpiryNs`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_sign_update(`secret`: RustBuffer.ByValue,`canisterText`: RustBuffer.ByValue,`methodName`: RustBuffer.ByValue,`arg`: RustBuffer.ByValue,`ingressExpiryNs`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_transfer_arg(`toOwnerText`: RustBuffer.ByValue,`toSubaccountHex`: RustBuffer.ByValue,`fromSubaccountHex`: RustBuffer.ByValue,`amount`: RustBuffer.ByValue,`fee`: RustBuffer.ByValue,`memoHex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_keypair_from_secret(`secret`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1158,6 +1236,45 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_generate_keypair() != 36207.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_approve_arg() != 33903.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_balance_of_arg() != 1118.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_decode_int() != 39665.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_decode_query() != 64452.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_decode_read_state() != 56142.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_decode_transfer_result() != 49046.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_envelope_request_id() != 56521.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_ingress_expiry() != 40958.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_self_principal() != 30767.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_sign_query() != 9686.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_sign_read_state() != 25642.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_sign_update() != 3984.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_transfer_arg() != 12696.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_keypair_from_secret() != 64641.toShort()) {
@@ -2351,6 +2468,235 @@ public object FfiConverterTypeFfiReaderConductor: FfiConverter<FfiReaderConducto
 
 
 /**
+ * A decoded `/query` response: `replied` carries the candid reply arg; otherwise the rejection
+ * triple. Flat record (not an enum) for cheap Kotlin/JS marshaling.
+ */
+data class IcpQueryReply (
+    var `replied`: kotlin.Boolean, 
+    var `arg`: kotlin.ByteArray?, 
+    var `rejectCode`: kotlin.ULong, 
+    var `rejectMessage`: kotlin.String, 
+    var `errorCode`: kotlin.String?
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeIcpQueryReply: FfiConverterRustBuffer<IcpQueryReply> {
+    override fun read(buf: ByteBuffer): IcpQueryReply {
+        return IcpQueryReply(
+            FfiConverterBoolean.read(buf),
+            FfiConverterOptionalByteArray.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: IcpQueryReply) = (
+            FfiConverterBoolean.allocationSize(value.`replied`) +
+            FfiConverterOptionalByteArray.allocationSize(value.`arg`) +
+            FfiConverterULong.allocationSize(value.`rejectCode`) +
+            FfiConverterString.allocationSize(value.`rejectMessage`) +
+            FfiConverterOptionalString.allocationSize(value.`errorCode`)
+    )
+
+    override fun write(value: IcpQueryReply, buf: ByteBuffer) {
+            FfiConverterBoolean.write(value.`replied`, buf)
+            FfiConverterOptionalByteArray.write(value.`arg`, buf)
+            FfiConverterULong.write(value.`rejectCode`, buf)
+            FfiConverterString.write(value.`rejectMessage`, buf)
+            FfiConverterOptionalString.write(value.`errorCode`, buf)
+    }
+}
+
+
+
+/**
+ * One request's status read from a read_state certificate. `state` is one of
+ * `unknown|received|processing|replied|rejected|done`; `unknown`/`received`/`processing` mean
+ * keep polling (the 2–5 s consensus window); `replied` carries the reply arg.
+ */
+data class IcpRequestStatus (
+    var `requestId`: kotlin.ByteArray, 
+    var `state`: kotlin.String, 
+    var `replyArg`: kotlin.ByteArray?, 
+    var `rejectCode`: kotlin.ULong?, 
+    var `rejectMessage`: kotlin.String?, 
+    var `errorCode`: kotlin.String?
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeIcpRequestStatus: FfiConverterRustBuffer<IcpRequestStatus> {
+    override fun read(buf: ByteBuffer): IcpRequestStatus {
+        return IcpRequestStatus(
+            FfiConverterByteArray.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalByteArray.read(buf),
+            FfiConverterOptionalULong.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: IcpRequestStatus) = (
+            FfiConverterByteArray.allocationSize(value.`requestId`) +
+            FfiConverterString.allocationSize(value.`state`) +
+            FfiConverterOptionalByteArray.allocationSize(value.`replyArg`) +
+            FfiConverterOptionalULong.allocationSize(value.`rejectCode`) +
+            FfiConverterOptionalString.allocationSize(value.`rejectMessage`) +
+            FfiConverterOptionalString.allocationSize(value.`errorCode`)
+    )
+
+    override fun write(value: IcpRequestStatus, buf: ByteBuffer) {
+            FfiConverterByteArray.write(value.`requestId`, buf)
+            FfiConverterString.write(value.`state`, buf)
+            FfiConverterOptionalByteArray.write(value.`replyArg`, buf)
+            FfiConverterOptionalULong.write(value.`rejectCode`, buf)
+            FfiConverterOptionalString.write(value.`rejectMessage`, buf)
+            FfiConverterOptionalString.write(value.`errorCode`, buf)
+    }
+}
+
+
+
+/**
+ * A signed update call: the POST-able CBOR envelope plus its `request_id` (the read_state poll
+ * key). Both derived once, in Rust.
+ */
+data class IcpSignedUpdate (
+    /**
+     * Full signed envelope bytes — POST to `/api/v2/canister/<canister>/call`.
+     */
+    var `envelope`: kotlin.ByteArray, 
+    /**
+     * 32-byte request_id — poll `/read_state` under `request_status/<rid>`.
+     */
+    var `requestId`: kotlin.ByteArray
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeIcpSignedUpdate: FfiConverterRustBuffer<IcpSignedUpdate> {
+    override fun read(buf: ByteBuffer): IcpSignedUpdate {
+        return IcpSignedUpdate(
+            FfiConverterByteArray.read(buf),
+            FfiConverterByteArray.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: IcpSignedUpdate) = (
+            FfiConverterByteArray.allocationSize(value.`envelope`) +
+            FfiConverterByteArray.allocationSize(value.`requestId`)
+    )
+
+    override fun write(value: IcpSignedUpdate, buf: ByteBuffer) {
+            FfiConverterByteArray.write(value.`envelope`, buf)
+            FfiConverterByteArray.write(value.`requestId`, buf)
+    }
+}
+
+
+
+/**
+ * A decoded `/read_state` response: certified subnet time (None if the path wasn't requested /
+ * pruned) plus the per-request statuses.
+ */
+data class IcpStateRead (
+    var `timeNs`: kotlin.String?, 
+    var `statuses`: List<IcpRequestStatus>
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeIcpStateRead: FfiConverterRustBuffer<IcpStateRead> {
+    override fun read(buf: ByteBuffer): IcpStateRead {
+        return IcpStateRead(
+            FfiConverterOptionalString.read(buf),
+            FfiConverterSequenceTypeIcpRequestStatus.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: IcpStateRead) = (
+            FfiConverterOptionalString.allocationSize(value.`timeNs`) +
+            FfiConverterSequenceTypeIcpRequestStatus.allocationSize(value.`statuses`)
+    )
+
+    override fun write(value: IcpStateRead, buf: ByteBuffer) {
+            FfiConverterOptionalString.write(value.`timeNs`, buf)
+            FfiConverterSequenceTypeIcpRequestStatus.write(value.`statuses`, buf)
+    }
+}
+
+
+
+/**
+ * A decoded `icrc1_transfer` reply (the DIDL variant inside a `replied` arg): `ok` carries the
+ * ledger block index (decimal string); errors flatten to a variant tag + human detail.
+ */
+data class IcpTransferOutcome (
+    var `ok`: kotlin.Boolean, 
+    var `blockIndex`: kotlin.String?, 
+    /**
+     * e.g. `InsufficientFunds`, `BadFee`, `Duplicate`, `GenericError`, … empty when ok.
+     */
+    var `errVariant`: kotlin.String, 
+    /**
+     * Human-readable detail (e.g. "balance 0, need 10000").
+     */
+    var `errDetail`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeIcpTransferOutcome: FfiConverterRustBuffer<IcpTransferOutcome> {
+    override fun read(buf: ByteBuffer): IcpTransferOutcome {
+        return IcpTransferOutcome(
+            FfiConverterBoolean.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: IcpTransferOutcome) = (
+            FfiConverterBoolean.allocationSize(value.`ok`) +
+            FfiConverterOptionalString.allocationSize(value.`blockIndex`) +
+            FfiConverterString.allocationSize(value.`errVariant`) +
+            FfiConverterString.allocationSize(value.`errDetail`)
+    )
+
+    override fun write(value: IcpTransferOutcome, buf: ByteBuffer) {
+            FfiConverterBoolean.write(value.`ok`, buf)
+            FfiConverterOptionalString.write(value.`blockIndex`, buf)
+            FfiConverterString.write(value.`errVariant`, buf)
+            FfiConverterString.write(value.`errDetail`, buf)
+    }
+}
+
+
+
+/**
  * A signing key + its public key, as raw bytes.
  *
  * PoC choice: the 32-byte Ed25519 seed is returned to the caller so the app can persist it in
@@ -2870,6 +3216,38 @@ public object FfiConverterTypeNfcStep: FfiConverterRustBuffer<NfcStep> {
 /**
  * @suppress
  */
+public object FfiConverterOptionalULong: FfiConverterRustBuffer<kotlin.ULong?> {
+    override fun read(buf: ByteBuffer): kotlin.ULong? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterULong.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.ULong?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterULong.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.ULong?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterULong.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?> {
     override fun read(buf: ByteBuffer): kotlin.String? {
         if (buf.get().toInt() == 0) {
@@ -2924,6 +3302,62 @@ public object FfiConverterOptionalByteArray: FfiConverterRustBuffer<kotlin.ByteA
         } else {
             buf.put(1)
             FfiConverterByteArray.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceByteArray: FfiConverterRustBuffer<List<kotlin.ByteArray>> {
+    override fun read(buf: ByteBuffer): List<kotlin.ByteArray> {
+        val len = buf.getInt()
+        return List<kotlin.ByteArray>(len) {
+            FfiConverterByteArray.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<kotlin.ByteArray>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterByteArray.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<kotlin.ByteArray>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterByteArray.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<List<IcpRequestStatus>> {
+    override fun read(buf: ByteBuffer): List<IcpRequestStatus> {
+        val len = buf.getInt()
+        return List<IcpRequestStatus>(len) {
+            FfiConverterTypeIcpRequestStatus.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<IcpRequestStatus>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeIcpRequestStatus.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<IcpRequestStatus>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeIcpRequestStatus.write(it, buf)
         }
     }
 }
@@ -3007,6 +3441,171 @@ public object FfiConverterOptionalByteArray: FfiConverterRustBuffer<kotlin.ByteA
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_generate_keypair(
         _status)
+}
+    )
+    }
+    
+
+        /**
+         * `icrc2_approve` argument bytes: spender account, allowance amount (absent = revoke/0),
+         * optional expected_allowance/expires_at/memo/from_subaccount/fee.
+         */
+    @Throws(DpayException::class) fun `icpApproveArg`(`spenderOwnerText`: kotlin.String, `spenderSubaccountHex`: kotlin.String?, `fromSubaccountHex`: kotlin.String?, `amount`: kotlin.String?, `expectedAllowance`: kotlin.String?, `expiresAtNs`: kotlin.String?, `memoHex`: kotlin.String?, `fee`: kotlin.String?): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_approve_arg(
+        FfiConverterString.lower(`spenderOwnerText`),FfiConverterOptionalString.lower(`spenderSubaccountHex`),FfiConverterOptionalString.lower(`fromSubaccountHex`),FfiConverterOptionalString.lower(`amount`),FfiConverterOptionalString.lower(`expectedAllowance`),FfiConverterOptionalString.lower(`expiresAtNs`),FfiConverterOptionalString.lower(`memoHex`),FfiConverterOptionalString.lower(`fee`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * `icrc1_balance_of` argument bytes for the account.
+         */
+    @Throws(DpayException::class) fun `icpBalanceOfArg`(`ownerText`: kotlin.String, `subaccountHex`: kotlin.String?): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_balance_of_arg(
+        FfiConverterString.lower(`ownerText`),FfiConverterOptionalString.lower(`subaccountHex`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Decode a bare candid `int`/`nat` reply (e.g. `icrc1_balance_of`) to a decimal string.
+         */
+    @Throws(DpayException::class) fun `icpDecodeInt`(`arg`: kotlin.ByteArray): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_decode_int(
+        FfiConverterByteArray.lower(`arg`),_status)
+}
+    )
+    }
+    
+
+    @Throws(DpayException::class) fun `icpDecodeQuery`(`body`: kotlin.ByteArray): IcpQueryReply {
+            return FfiConverterTypeIcpQueryReply.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_decode_query(
+        FfiConverterByteArray.lower(`body`),_status)
+}
+    )
+    }
+    
+
+    @Throws(DpayException::class) fun `icpDecodeReadState`(`body`: kotlin.ByteArray, `requestIds`: List<kotlin.ByteArray>): IcpStateRead {
+            return FfiConverterTypeIcpStateRead.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_decode_read_state(
+        FfiConverterByteArray.lower(`body`),FfiConverterSequenceByteArray.lower(`requestIds`),_status)
+}
+    )
+    }
+    
+
+    @Throws(DpayException::class) fun `icpDecodeTransferResult`(`arg`: kotlin.ByteArray): IcpTransferOutcome {
+            return FfiConverterTypeIcpTransferOutcome.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_decode_transfer_result(
+        FfiConverterByteArray.lower(`arg`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The request_id of an already-signed envelope (the merchant side: rid of a payer-carried
+         * envelope, for read_state polling after submission).
+         */
+    @Throws(DpayException::class) fun `icpEnvelopeRequestId`(`envelope`: kotlin.ByteArray): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_envelope_request_id(
+        FfiConverterByteArray.lower(`envelope`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Ingress expiry stamp: `now_ns + ahead_s * 1e9`, as a decimal-ns string (see module docs on why
+         * strings). The submission window is measured `[now, now+5:30]` on the IC — callers pick
+         * `ahead_s` in 240–300 s.
+         */
+    @Throws(DpayException::class) fun `icpIngressExpiry`(`nowNs`: kotlin.String, `aheadS`: kotlin.ULong): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_ingress_expiry(
+        FfiConverterString.lower(`nowNs`),FfiConverterULong.lower(`aheadS`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The user's self-authenticating IC principal text for an Ed25519 seed — the account identity on
+         * the external ledgers (`Account{owner: self_principal(pk), subaccount: [0;32]}`).
+         */
+    @Throws(DpayException::class) fun `icpSelfPrincipal`(`secret`: kotlin.ByteArray): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_self_principal(
+        FfiConverterByteArray.lower(`secret`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * A signed query call: envelope bytes for `/api/v2/canister/<canister>/query`.
+         */
+    @Throws(DpayException::class) fun `icpSignQuery`(`secret`: kotlin.ByteArray, `canisterText`: kotlin.String, `methodName`: kotlin.String, `arg`: kotlin.ByteArray, `ingressExpiryNs`: kotlin.String): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_sign_query(
+        FfiConverterByteArray.lower(`secret`),FfiConverterString.lower(`canisterText`),FfiConverterString.lower(`methodName`),FfiConverterByteArray.lower(`arg`),FfiConverterString.lower(`ingressExpiryNs`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * A signed `read_state` call: envelope bytes for `/api/v2/canister/<canister>/read_state`,
+         * requesting the `request_status/<rid>` paths for each request_id plus (optionally) the
+         * certified subnet `time` leaf — the app's clock-sync source.
+         */
+    @Throws(DpayException::class) fun `icpSignReadState`(`secret`: kotlin.ByteArray, `requestIds`: List<kotlin.ByteArray>, `wantTime`: kotlin.Boolean, `ingressExpiryNs`: kotlin.String): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_sign_read_state(
+        FfiConverterByteArray.lower(`secret`),FfiConverterSequenceByteArray.lower(`requestIds`),FfiConverterBoolean.lower(`wantTime`),FfiConverterString.lower(`ingressExpiryNs`),_status)
+}
+    )
+    }
+    
+
+    @Throws(DpayException::class) fun `icpSignUpdate`(`secret`: kotlin.ByteArray, `canisterText`: kotlin.String, `methodName`: kotlin.String, `arg`: kotlin.ByteArray, `ingressExpiryNs`: kotlin.String): IcpSignedUpdate {
+            return FfiConverterTypeIcpSignedUpdate.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_sign_update(
+        FfiConverterByteArray.lower(`secret`),FfiConverterString.lower(`canisterText`),FfiConverterString.lower(`methodName`),FfiConverterByteArray.lower(`arg`),FfiConverterString.lower(`ingressExpiryNs`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * `icrc1_transfer` argument bytes (DIDL record): `to` account, amount, optional
+         * fee/memo/from_subaccount. `amount`/`fee` are decimal strings.
+         */
+    @Throws(DpayException::class) fun `icpTransferArg`(`toOwnerText`: kotlin.String, `toSubaccountHex`: kotlin.String?, `fromSubaccountHex`: kotlin.String?, `amount`: kotlin.String, `fee`: kotlin.String?, `memoHex`: kotlin.String?): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_transfer_arg(
+        FfiConverterString.lower(`toOwnerText`),FfiConverterOptionalString.lower(`toSubaccountHex`),FfiConverterOptionalString.lower(`fromSubaccountHex`),FfiConverterString.lower(`amount`),FfiConverterOptionalString.lower(`fee`),FfiConverterOptionalString.lower(`memoHex`),_status)
 }
     )
     }

@@ -87,6 +87,21 @@ type WasmExports = WebAssembly.Exports & {
   w_verify_receipt_sig(pubPtr: number, claimPtr: number, claimLen: number, sigPtr: number): number;
   w_build_request(toPtr: number, amountLo: number, amountHi: number, noncePtr: number, expiryLo: number, expiryHi: number, currency: number, toNamePtr: number, toNameLen: number, memoPtr: number, memoLen: number, outReqPtr: number): number;
   w_receipt_claim(noncePtr: number, fromPtr: number, toPtr: number, amountLo: number, amountHi: number, currency: number, blockLo: number, blockHi: number, tsLo: number, tsHi: number, outClaimPtr: number): number;
+  // IC user-principal rail (additive, ABI v1): all strings are ptr+len pairs; decimal-string
+  // numerics; structured results are compact JSON returned by length (0 = cap/bad input).
+  w_icp_self_principal(seedPtr: number, outPtr: number, cap: number): number;
+  w_icp_ingress_expiry(nowPtr: number, nowLen: number, aheadS: number, outPtr: number, cap: number): number;
+  w_icp_transfer_arg(toOwnerPtr: number, toOwnerLen: number, toSubPtr: number, toSubLen: number, fromSubPtr: number, fromSubLen: number, amountPtr: number, amountLen: number, feePtr: number, feeLen: number, memoPtr: number, memoLen: number, outPtr: number, cap: number): number;
+  w_icp_approve_arg(spenderOwnerPtr: number, spenderOwnerLen: number, spenderSubPtr: number, spenderSubLen: number, fromSubPtr: number, fromSubLen: number, amountPtr: number, amountLen: number, expectedPtr: number, expectedLen: number, expiresPtr: number, expiresLen: number, memoPtr: number, memoLen: number, feePtr: number, feeLen: number, outPtr: number, cap: number): number;
+  w_icp_balance_of_arg(ownerPtr: number, ownerLen: number, subPtr: number, subLen: number, outPtr: number, cap: number): number;
+  w_icp_sign_update(seedPtr: number, canisterPtr: number, canisterLen: number, methodPtr: number, methodLen: number, argPtr: number, argLen: number, expiryPtr: number, expiryLen: number, outPtr: number, cap: number): number;
+  w_icp_sign_query(seedPtr: number, canisterPtr: number, canisterLen: number, methodPtr: number, methodLen: number, argPtr: number, argLen: number, expiryPtr: number, expiryLen: number, outPtr: number, cap: number): number;
+  w_icp_sign_read_state(seedPtr: number, ridsPtr: number, nRids: number, wantTime: number, expiryPtr: number, expiryLen: number, outPtr: number, cap: number): number;
+  w_icp_envelope_request_id(envPtr: number, envLen: number, outPtr: number): number;
+  w_icp_decode_query(bodyPtr: number, bodyLen: number, outPtr: number, cap: number): number;
+  w_icp_decode_read_state(bodyPtr: number, bodyLen: number, ridsPtr: number, nRids: number, outPtr: number, cap: number): number;
+  w_icp_decode_transfer_result(argPtr: number, argLen: number, outPtr: number, cap: number): number;
+  w_icp_decode_int(argPtr: number, argLen: number, outPtr: number, cap: number): number;
   memory: WebAssembly.Memory;
 };
 
@@ -412,6 +427,218 @@ function seedP(ex: WasmExports, seed: Uint8Array): number {
   return put(ex, seed);
 }
 
+// --- IC user-principal rail (mirrors app/lib/types.ts DpayCoreApi icp* methods) -------------------
+//
+// Same money-critical rule as the rest of this shim: every envelope/arg byte is produced by the
+// shared Rust core (dpay-icp compiled into dpay-wasm); JS only marshals. Numbers that can exceed
+// 2^53 (ns timestamps, u128 amounts) cross as decimal STRINGS; bytes as lowercase hex; structured
+// results arrive as compact JSON from the wasm (0 = cap too small / bad input).
+
+export type IcpSignedUpdateOut = { envelopeHex: string; requestIdHex: string };
+export type IcpQueryReplyOut = {
+  replied: boolean; argHex?: string; rejectCode?: string; rejectMessage?: string; errorCode?: string | null;
+};
+export type IcpRequestStatusOut = {
+  requestIdHex: string;
+  state: 'unknown' | 'received' | 'processing' | 'replied' | 'rejected' | 'done';
+  replyArgHex?: string; rejectCode?: string; rejectMessage?: string; errorCode?: string | null;
+};
+export type IcpStateReadOut = { timeNs: string | null; statuses: IcpRequestStatusOut[] };
+export type IcpTransferOutcomeOut = { ok: boolean; blockIndex?: string; errVariant?: string; errDetail?: string };
+
+const ICP_JSON_CAP = 4096;
+const ICP_ENV_CAP = 2048; // envelopes are 388-398B; generous headroom
+
+/** Write a UTF-8 string into wasm memory, returning (ptr, len). */
+function putStr(ex: WasmExports, s: string): [number, number] {
+  const b = new TextEncoder().encode(s);
+  return [put(ex, b), b.length];
+}
+
+/** Allocate a `cap`-byte out buffer. Returns the pointer (0 = OOM, throws). */
+function outBuf(ex: WasmExports, cap: number, what: string): number {
+  const p = ex.w_alloc(cap);
+  if (p === 0) throw new Error(`DpayCore wasm: w_alloc OOM (${what})`);
+  return p;
+}
+
+/** Run a length-returning JSON export and parse the result. 0 → throw (mirrors bail()). */
+function jsonOut(ex: WasmExports, len: number, out: number, what: string): unknown {
+  if (len === 0 || len > ICP_JSON_CAP) throw new Error(`DpayCore wasm: ${what} failed (bad input or cap)`);
+  return JSON.parse(readStr(ex, out, len));
+}
+
+/** Run a length-returning BINARY export (arg/envelope bytes) and hex the result. */
+function binOutHex(ex: WasmExports, len: number, out: number, what: string): string {
+  if (len === 0) throw new Error(`DpayCore wasm: ${what} failed (bad input or cap)`);
+  return bytesToHex(readBytes(ex, out, len));
+}
+
+async function icpSelfPrincipal(secretHex: string): Promise<string> {
+  const ex = await core();
+  const seedP = put(ex, hex(secretHex));
+  const out = outBuf(ex, 128, 'icp_self_principal');
+  const len = ex.w_icp_self_principal(seedP, out, 128);
+  if (len === 0) throw new Error('DpayCore wasm: icp_self_principal failed');
+  return readStr(ex, out, len);
+}
+
+async function icpIngressExpiry(nowNs: string, aheadS: number): Promise<string> {
+  const ex = await core();
+  const [nowP, nowLen] = putStr(ex, nowNs);
+  const out = outBuf(ex, 32, 'icp_ingress_expiry');
+  const len = ex.w_icp_ingress_expiry(nowP, nowLen, aheadS, out, 32);
+  if (len === 0) throw new Error('DpayCore wasm: icp_ingress_expiry failed');
+  return readStr(ex, out, len);
+}
+
+async function icpTransferArg(
+  toOwnerText: string, toSubaccountHex: string, fromSubaccountHex: string,
+  amount: string, fee: string, memoHex: string,
+): Promise<string> {
+  const ex = await core();
+  const to = putStr(ex, toOwnerText);
+  const toSub = putStr(ex, toSubaccountHex);
+  const fromSub = putStr(ex, fromSubaccountHex);
+  const amt = putStr(ex, amount);
+  const feeP = putStr(ex, fee ?? '');
+  const memo = putStr(ex, memoHex ?? '');
+  const out = outBuf(ex, 512, 'icp_transfer_arg');
+  const len = ex.w_icp_transfer_arg(to[0], to[1], toSub[0], toSub[1], fromSub[0], fromSub[1], amt[0], amt[1], feeP[0], feeP[1], memo[0], memo[1], out, 512);
+  return binOutHex(ex, len, out, 'icp_transfer_arg');
+}
+
+async function icpApproveArg(
+  spenderOwnerText: string, spenderSubaccountHex: string, fromSubaccountHex: string,
+  amount: string, expectedAllowance: string, expiresAtNs: string, memoHex: string, fee: string,
+): Promise<string> {
+  const ex = await core();
+  const spender = putStr(ex, spenderOwnerText);
+  const spenderSub = putStr(ex, spenderSubaccountHex);
+  const fromSub = putStr(ex, fromSubaccountHex);
+  const amt = putStr(ex, amount ?? '');
+  const expected = putStr(ex, expectedAllowance ?? '');
+  const expires = putStr(ex, expiresAtNs ?? '');
+  const memo = putStr(ex, memoHex ?? '');
+  const feeP = putStr(ex, fee ?? '');
+  const out = outBuf(ex, 512, 'icp_approve_arg');
+  const len = ex.w_icp_approve_arg(spender[0], spender[1], spenderSub[0], spenderSub[1], fromSub[0], fromSub[1], amt[0], amt[1], expected[0], expected[1], expires[0], expires[1], memo[0], memo[1], feeP[0], feeP[1], out, 512);
+  return binOutHex(ex, len, out, 'icp_approve_arg');
+}
+
+async function icpBalanceOfArg(ownerText: string, subaccountHex: string): Promise<string> {
+  const ex = await core();
+  const owner = putStr(ex, ownerText);
+  const sub = putStr(ex, subaccountHex ?? '');
+  const out = outBuf(ex, 256, 'icp_balance_of_arg');
+  const len = ex.w_icp_balance_of_arg(owner[0], owner[1], sub[0], sub[1], out, 256);
+  return binOutHex(ex, len, out, 'icp_balance_of_arg');
+}
+
+async function icpSignUpdate(
+  secretHex: string, canisterText: string, methodName: string, argHex: string, ingressExpiryNs: string,
+): Promise<IcpSignedUpdateOut> {
+  const ex = await core();
+  const seedP = put(ex, hex(secretHex));
+  const canister = putStr(ex, canisterText);
+  const method = putStr(ex, methodName);
+  const arg = put(ex, hex(argHex));
+  const expiry = putStr(ex, ingressExpiryNs);
+  const out = outBuf(ex, ICP_ENV_CAP, 'icp_sign_update');
+  const len = ex.w_icp_sign_update(seedP, canister[0], canister[1], method[0], method[1], arg, argHex.length / 2, expiry[0], expiry[1], out, ICP_ENV_CAP);
+  const envelopeHex = binOutHex(ex, len, out, 'icp_sign_update');
+  const requestIdHex = await icpEnvelopeRequestId(envelopeHex);
+  return { envelopeHex, requestIdHex };
+}
+
+async function icpSignQuery(
+  secretHex: string, canisterText: string, methodName: string, argHex: string, ingressExpiryNs: string,
+): Promise<string> {
+  const ex = await core();
+  const seedP = put(ex, hex(secretHex));
+  const canister = putStr(ex, canisterText);
+  const method = putStr(ex, methodName);
+  const arg = put(ex, hex(argHex));
+  const expiry = putStr(ex, ingressExpiryNs);
+  const out = outBuf(ex, ICP_ENV_CAP, 'icp_sign_query');
+  const len = ex.w_icp_sign_query(seedP, canister[0], canister[1], method[0], method[1], arg, argHex.length / 2, expiry[0], expiry[1], out, ICP_ENV_CAP);
+  return binOutHex(ex, len, out, 'icp_sign_query');
+}
+
+async function icpSignReadState(
+  secretHex: string, requestIdsHex: string[], wantTime: boolean, ingressExpiryNs: string,
+): Promise<string> {
+  const ex = await core();
+  if (requestIdsHex.length > 8) throw new Error('Length');
+  const seedP = put(ex, hex(secretHex));
+  const rids = new Uint8Array(requestIdsHex.length * 32);
+  requestIdsHex.forEach((ridHex, i) => {
+    const rid = hex(ridHex);
+    if (rid.length !== 32) throw new Error(`request id length: ${rid.length}`);
+    rids.set(rid, i * 32);
+  });
+  const ridsP = put(ex, rids);
+  const expiry = putStr(ex, ingressExpiryNs);
+  const out = outBuf(ex, ICP_ENV_CAP, 'icp_sign_read_state');
+  const len = ex.w_icp_sign_read_state(seedP, ridsP, requestIdsHex.length, wantTime ? 1 : 0, expiry[0], expiry[1], out, ICP_ENV_CAP);
+  return binOutHex(ex, len, out, 'icp_sign_read_state');
+}
+
+async function icpEnvelopeRequestId(envelopeHex: string): Promise<string> {
+  const ex = await core();
+  const env = hex(envelopeHex);
+  const envP = put(ex, env);
+  const out = outBuf(ex, 32, 'icp_envelope_request_id');
+  const st = ex.w_icp_envelope_request_id(envP, env.length, out);
+  if (st !== 0) bail(st, 'w_icp_envelope_request_id');
+  return bytesToHex(readBytes(ex, out, 32));
+}
+
+async function icpDecodeQuery(bodyHex: string): Promise<IcpQueryReplyOut> {
+  const ex = await core();
+  const body = hex(bodyHex);
+  const bodyP = put(ex, body);
+  const out = outBuf(ex, ICP_JSON_CAP, 'icp_decode_query');
+  const len = ex.w_icp_decode_query(bodyP, body.length, out, ICP_JSON_CAP);
+  return jsonOut(ex, len, out, 'icp_decode_query') as IcpQueryReplyOut;
+}
+
+async function icpDecodeReadState(bodyHex: string, requestIdsHex: string[]): Promise<IcpStateReadOut> {
+  const ex = await core();
+  if (requestIdsHex.length > 8) throw new Error('Length');
+  const body = hex(bodyHex);
+  const bodyP = put(ex, body);
+  const rids = new Uint8Array(requestIdsHex.length * 32);
+  requestIdsHex.forEach((ridHex, i) => {
+    const rid = hex(ridHex);
+    if (rid.length !== 32) throw new Error(`request id length: ${rid.length}`);
+    rids.set(rid, i * 32);
+  });
+  const ridsP = put(ex, rids);
+  const out = outBuf(ex, ICP_JSON_CAP, 'icp_decode_read_state');
+  const len = ex.w_icp_decode_read_state(bodyP, body.length, ridsP, requestIdsHex.length, out, ICP_JSON_CAP);
+  return jsonOut(ex, len, out, 'icp_decode_read_state') as IcpStateReadOut;
+}
+
+async function icpDecodeTransferResult(argHex: string): Promise<IcpTransferOutcomeOut> {
+  const ex = await core();
+  const arg = hex(argHex);
+  const argP = put(ex, arg);
+  const out = outBuf(ex, ICP_JSON_CAP, 'icp_decode_transfer_result');
+  const len = ex.w_icp_decode_transfer_result(argP, arg.length, out, ICP_JSON_CAP);
+  return jsonOut(ex, len, out, 'icp_decode_transfer_result') as IcpTransferOutcomeOut;
+}
+
+async function icpDecodeInt(argHex: string): Promise<string> {
+  const ex = await core();
+  const arg = hex(argHex);
+  const argP = put(ex, arg);
+  const out = outBuf(ex, 64, 'icp_decode_int');
+  const len = ex.w_icp_decode_int(argP, arg.length, out, 64);
+  if (len === 0) throw new Error('DpayCore wasm: icp_decode_int failed');
+  return readStr(ex, out, len);
+}
+
 export const DpayCore = {
   generateKeypair,
   keypairFromSecret,
@@ -426,5 +653,18 @@ export const DpayCore = {
   verifyWire,
   verifyReceiptSig,
   nfcStatus,
+  icpSelfPrincipal,
+  icpIngressExpiry,
+  icpTransferArg,
+  icpApproveArg,
+  icpBalanceOfArg,
+  icpSignUpdate,
+  icpSignQuery,
+  icpSignReadState,
+  icpEnvelopeRequestId,
+  icpDecodeQuery,
+  icpDecodeReadState,
+  icpDecodeTransferResult,
+  icpDecodeInt,
 };
 export type DpayCoreShim = typeof DpayCore;

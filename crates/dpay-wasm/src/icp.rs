@@ -1,0 +1,536 @@
+//! IC user-principal rail exports (dpay-icp): envelope signing + /api/v2 response decoding,
+//! wasm32-safe, additive to the frozen ABI v1 table. Conventions mirror the Kotlin/UniFFI
+//! surface (`crates/dpay-ffi/src/icp.rs`) so the JS shim is a thin marshal:
+//!
+//! - ns timestamps + u128 amounts cross as decimal STRINGS (JS 2^53 safety);
+//! - principal owners cross as base32-CRC TEXT (validated in Rust), subaccounts/memos as hex
+//!   bytes (empty = None);
+//! - structured results are compact JSON (like `w_decode_request`), returned by
+//!   length; `0` = cap too small or bad input — no traps, no stderr.
+//!
+//! The decoders trust-decode the certificate (BLS chain verification is the W6 follow-up).
+
+use dpay_icp::envelope::{
+    ingress_expiry as icp_ingress_expiry, sign_query, sign_read_state, sign_update, CallRequest,
+};
+use dpay_icp::icrc::{
+    approve_arg as icrc_approve_arg, balance_of_arg as icrc_balance_of_arg,
+    decode_transfer_result as icrc_decode_transfer_result, transfer_arg as icrc_transfer_arg,
+    ApproveResult, TransferError, TransferResult,
+};
+use dpay_icp::principal::{Account, Principal};
+use dpay_icp::reply::{
+    decode_query_response, decode_read_state_tree, read_state_time, request_status,
+    QueryOutcome, RequestStatus as RailStatus,
+};
+
+use crate::{in_bounds, slice_at, write_at, write_str_out, BAD_LEN, BAD_UTF8, OK};
+
+const MAX_JSON: u32 = 4096;
+
+fn key_at(seed_ptr: u32) -> Result<ed25519_dalek::SigningKey, u32> {
+    if !in_bounds(seed_ptr, 32) {
+        return Err(BAD_LEN);
+    }
+    Ok(ed25519_dalek::SigningKey::from_bytes(unsafe { slice_at(seed_ptr, 32) }.try_into().unwrap()))
+}
+
+/// Read a NUL-free decimal u64 string from `[ptr, ptr+len)`.
+fn u64_str_at(ptr: u32, len: u32) -> Result<u64, u32> {
+    if !in_bounds(ptr, len) || len > 20 {
+        return Err(BAD_LEN);
+    }
+    let s = core::str::from_utf8(unsafe { slice_at(ptr, len) }).map_err(|_| BAD_UTF8)?;
+    s.parse::<u64>().map_err(|_| BAD_UTF8)
+}
+
+/// Read a decimal u128 string from `[ptr, ptr+len)` (`""` allowed for Option::None semantics).
+fn u128_opt_at(ptr: u32, len: u32) -> Result<Option<u128>, u32> {
+    if !in_bounds(ptr, len) || len > 40 {
+        return Err(BAD_LEN);
+    }
+    if len == 0 {
+        return Ok(None);
+    }
+    let s = core::str::from_utf8(unsafe { slice_at(ptr, len) }).map_err(|_| BAD_UTF8)?;
+    s.parse::<u128>().map(Some).map_err(|_| BAD_UTF8)
+}
+
+/// Read a NUL-free UTF-8 string (principal text / method name).
+fn text_at(ptr: u32, len: u32) -> Result<String, u32> {
+    if !in_bounds(ptr, len) || len > 512 {
+        return Err(BAD_LEN);
+    }
+    core::str::from_utf8(unsafe { slice_at(ptr, len) })
+        .map(|s| s.to_string())
+        .map_err(|_| BAD_UTF8)
+}
+
+/// Read hex bytes ("" = empty).
+fn hex_at(ptr: u32, len: u32) -> Result<Vec<u8>, u32> {
+    if !in_bounds(ptr, len) || len > 1024 || len % 2 != 0 {
+        return Err(BAD_LEN);
+    }
+    let s = core::str::from_utf8(unsafe { slice_at(ptr, len) }).map_err(|_| BAD_UTF8)?;
+    let mut out = Vec::with_capacity(s.len() / 2);
+    let b = s.as_bytes();
+    for pair in b.chunks(2) {
+        let hi = (pair[0] as char).to_digit(16).ok_or(BAD_UTF8)?;
+        let lo = (pair[1] as char).to_digit(16).ok_or(BAD_UTF8)?;
+        out.push(((hi << 4) | lo) as u8);
+    }
+    Ok(out)
+}
+
+fn push_hex(bytes: &[u8], out: &mut String) {
+    for b in bytes {
+        out.push(char::from_digit((b >> 4) as u32, 16).unwrap());
+        out.push(char::from_digit((b & 0xf) as u32, 16).unwrap());
+    }
+}
+
+/// JSON-escape a str (no control chars expected in these fields; escape anyway).
+fn push_json_str(s: &str, out: &mut String) {
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            c if (c as u32) < 0x20 => {
+                out.push_str(&format!("\\u{:04x}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+}
+
+fn opt_json_str(v: &Option<String>, out: &mut String) {
+    match v {
+        Some(s) => push_json_str(s, out),
+        None => out.push_str("null"),
+    }
+}
+
+/// Account{owner: text, subaccount: hex-or-default}.
+fn account_at(owner_ptr: u32, owner_len: u32, sub_ptr: u32, sub_len: u32) -> Result<Account, u32> {
+    let owner_text = text_at(owner_ptr, owner_len)?;
+    let owner = Principal::from_text(&owner_text).map_err(|_| BAD_UTF8)?;
+    let sub = hex_at(sub_ptr, sub_len)?;
+    let subaccount: [u8; 32] = match sub.len() {
+        0 => [0u8; 32],
+        32 => sub.as_slice().try_into().unwrap(),
+        _ => return Err(BAD_LEN),
+    };
+    Ok(Account { owner, subaccount })
+}
+
+// --- identity / clock ---------------------------------------------------------------------------
+
+/// `icp_self_principal`: write the self-authenticating principal TEXT of the seed key
+/// (SHA224(DER(pub)) | 0x02, base32-CRC) to `out_ptr` — same contract as the UniFFI surface.
+#[no_mangle]
+pub extern "C" fn w_icp_self_principal(seed_ptr: u32, out_ptr: u32, cap: u32) -> u32 {
+    let sk = match key_at(seed_ptr) {
+        Ok(k) => k,
+        Err(e) => return e,
+    };
+    let p = Principal::self_authenticating_ed25519(&sk.verifying_key().to_bytes());
+    let text = p.to_text();
+    write_str_out(text.as_bytes(), out_ptr, cap)
+}
+
+/// `icp_ingress_expiry`: `now_ns + ahead_s * 1e9` as a decimal string at `out_ptr`.
+#[no_mangle]
+pub extern "C" fn w_icp_ingress_expiry(now_ptr: u32, now_len: u32, ahead_s: u32, out_ptr: u32, cap: u32) -> u32 {
+    let now = match u64_str_at(now_ptr, now_len) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let text = icp_ingress_expiry(now, ahead_s as u64).to_string();
+    write_str_out(text.as_bytes(), out_ptr, cap)
+}
+
+// --- DIDL arg builders ---------------------------------------------------------------------------
+
+#[no_mangle]
+pub extern "C" fn w_icp_transfer_arg(
+    to_owner_ptr: u32, to_owner_len: u32, to_sub_ptr: u32, to_sub_len: u32,
+    from_sub_ptr: u32, from_sub_len: u32,
+    amount_ptr: u32, amount_len: u32,
+    fee_ptr: u32, fee_len: u32,
+    memo_ptr: u32, memo_len: u32,
+    out_ptr: u32, cap: u32,
+) -> u32 {
+    let to = match account_at(to_owner_ptr, to_owner_len, to_sub_ptr, to_sub_len) {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    let amount = match u128_opt_at(amount_ptr, amount_len) {
+        Ok(Some(v)) => v,
+        Ok(None) => return BAD_UTF8,
+        Err(e) => return e,
+    };
+    let fee = match u128_opt_at(fee_ptr, fee_len) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let memo = match hex_at(memo_ptr, memo_len) {
+        Ok(v) if v.is_empty() => None,
+        Ok(v) => Some(v),
+        Err(e) => return e,
+    };
+    let from_sub = match hex_at(from_sub_ptr, from_sub_len) {
+        Ok(v) if v.is_empty() => None,
+        Ok(v) => match <[u8; 32]>::try_from(v.as_slice()) {
+            Ok(a) => Some(a),
+            Err(_) => return BAD_LEN,
+        },
+        Err(e) => return e,
+    };
+    let arg = icrc_transfer_arg(&to, from_sub, amount, fee, memo, None);
+    write_str_out(&arg, out_ptr, cap) // binary out via write_str_out's byte-copy semantics
+}
+
+#[no_mangle]
+pub extern "C" fn w_icp_approve_arg(
+    spender_owner_ptr: u32, spender_owner_len: u32, spender_sub_ptr: u32, spender_sub_len: u32,
+    from_sub_ptr: u32, from_sub_len: u32,
+    amount_ptr: u32, amount_len: u32,
+    expected_ptr: u32, expected_len: u32,
+    expires_ptr: u32, expires_len: u32,
+    memo_ptr: u32, memo_len: u32,
+    fee_ptr: u32, fee_len: u32,
+    out_ptr: u32, cap: u32,
+) -> u32 {
+    let spender = match account_at(spender_owner_ptr, spender_owner_len, spender_sub_ptr, spender_sub_len) {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    let amount = match u128_opt_at(amount_ptr, amount_len) {
+        Ok(v) => v, // None encodes revoke (0)
+        Err(e) => return e,
+    };
+    let expected = match u128_opt_at(expected_ptr, expected_len) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let expires = match u128_opt_at(expires_ptr, expires_len) {
+        Ok(v) => v.map(|v| v as u64),
+        Err(e) => return e,
+    };
+    let memo = match hex_at(memo_ptr, memo_len) {
+        Ok(v) if v.is_empty() => None,
+        Ok(v) => Some(v),
+        Err(e) => return e,
+    };
+    let from_sub = match hex_at(from_sub_ptr, from_sub_len) {
+        Ok(v) if v.is_empty() => None,
+        Ok(v) => match <[u8; 32]>::try_from(v.as_slice()) {
+            Ok(a) => Some(a),
+            Err(_) => return BAD_LEN,
+        },
+        Err(e) => return e,
+    };
+    let fee = match u128_opt_at(fee_ptr, fee_len) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let arg = icrc_approve_arg(from_sub, &spender, amount, expected, expires, memo, None, fee);
+    write_str_out(&arg, out_ptr, cap)
+}
+
+#[no_mangle]
+pub extern "C" fn w_icp_balance_of_arg(
+    owner_ptr: u32, owner_len: u32, sub_ptr: u32, sub_len: u32,
+    out_ptr: u32, cap: u32,
+) -> u32 {
+    let account = match account_at(owner_ptr, owner_len, sub_ptr, sub_len) {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    let arg = icrc_balance_of_arg(&account);
+    write_str_out(&arg, out_ptr, cap)
+}
+
+// --- envelope signing ----------------------------------------------------------------------------
+
+#[no_mangle]
+pub extern "C" fn w_icp_sign_update(
+    seed_ptr: u32,
+    canister_ptr: u32, canister_len: u32,
+    method_ptr: u32, method_len: u32,
+    arg_ptr: u32, arg_len: u32,
+    expiry_ptr: u32, expiry_len: u32,
+    out_ptr: u32, cap: u32,
+) -> u32 {
+    let sk = match key_at(seed_ptr) {
+        Ok(k) => k,
+        Err(e) => return e,
+    };
+    let canister_text = match text_at(canister_ptr, canister_len) {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
+    let canister = match Principal::from_text(&canister_text) {
+        Ok(p) => p,
+        Err(_) => return BAD_UTF8,
+    };
+    let method = match text_at(method_ptr, method_len) {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
+    if !in_bounds(arg_ptr, arg_len) {
+        return BAD_LEN;
+    }
+    let arg = unsafe { slice_at(arg_ptr, arg_len) }.to_vec();
+    let expiry = match u64_str_at(expiry_ptr, expiry_len) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let req = CallRequest { canister, method_name: method, arg, ingress_expiry_ns: expiry, nonce: None };
+    let envelope = sign_update(&sk, &req);
+    write_str_out(&envelope, out_ptr, cap)
+}
+
+#[no_mangle]
+pub extern "C" fn w_icp_sign_query(
+    seed_ptr: u32,
+    canister_ptr: u32, canister_len: u32,
+    method_ptr: u32, method_len: u32,
+    arg_ptr: u32, arg_len: u32,
+    expiry_ptr: u32, expiry_len: u32,
+    out_ptr: u32, cap: u32,
+) -> u32 {
+    let sk = match key_at(seed_ptr) {
+        Ok(k) => k,
+        Err(e) => return e,
+    };
+    let canister_text = match text_at(canister_ptr, canister_len) {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
+    let canister = match Principal::from_text(&canister_text) {
+        Ok(p) => p,
+        Err(_) => return BAD_UTF8,
+    };
+    let method = match text_at(method_ptr, method_len) {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
+    if !in_bounds(arg_ptr, arg_len) {
+        return BAD_LEN;
+    }
+    let arg = unsafe { slice_at(arg_ptr, arg_len) }.to_vec();
+    let expiry = match u64_str_at(expiry_ptr, expiry_len) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let req = CallRequest { canister, method_name: method, arg, ingress_expiry_ns: expiry, nonce: None };
+    let envelope = sign_query(&sk, &req);
+    write_str_out(&envelope, out_ptr, cap)
+}
+
+/// Sign a read_state envelope polling up to 8 rids. `rids_ptr` = 8×32 bytes concatenated;
+/// `n_rids` = how many are live (0 = time-only poll). want_time adds the certified `time` path.
+#[no_mangle]
+pub extern "C" fn w_icp_sign_read_state(
+    seed_ptr: u32,
+    rids_ptr: u32, n_rids: u32,
+    want_time: u32,
+    expiry_ptr: u32, expiry_len: u32,
+    out_ptr: u32, cap: u32,
+) -> u32 {
+    let sk = match key_at(seed_ptr) {
+        Ok(k) => k,
+        Err(e) => return e,
+    };
+    if n_rids > 8 || !in_bounds(rids_ptr, n_rids * 32) {
+        return BAD_LEN;
+    }
+    let raw = unsafe { slice_at(rids_ptr, n_rids * 32) };
+    let rids: Vec<[u8; 32]> = raw.chunks_exact(32).map(|c| c.try_into().unwrap()).collect();
+    let expiry = match u64_str_at(expiry_ptr, expiry_len) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let mut paths: Vec<Vec<Vec<u8>>> = rids
+        .iter()
+        .map(|rid| vec![b"request_status".to_vec(), rid.to_vec()])
+        .collect();
+    if want_time != 0 {
+        paths.push(vec![b"time".to_vec()]);
+    }
+    let segs: Vec<Vec<&[u8]>> = paths.iter().map(|p| p.iter().map(|s| s.as_slice()).collect()).collect();
+    let refs: Vec<&[&[u8]]> = segs.iter().map(|v| v.as_slice()).collect();
+    let envelope = sign_read_state(&sk, &refs, expiry);
+    write_str_out(&envelope, out_ptr, cap)
+}
+
+#[no_mangle]
+pub extern "C" fn w_icp_envelope_request_id(env_ptr: u32, env_len: u32, out_ptr: u32) -> u32 {
+    if !in_bounds(env_ptr, env_len) || env_len > 2048 {
+        return BAD_LEN;
+    }
+    let env = unsafe { slice_at(env_ptr, env_len) };
+    let rid = match dpay_icp::envelope::envelope_request_id(env) {
+        Ok(r) => r,
+        Err(_) => return BAD_UTF8,
+    };
+    if !in_bounds(out_ptr, 32) {
+        return BAD_LEN;
+    }
+    unsafe { write_at(out_ptr, &rid) };
+    OK
+}
+
+// --- /api/v2 response decoders ---------------------------------------------------------------------
+
+#[no_mangle]
+pub extern "C" fn w_icp_decode_query(body_ptr: u32, body_len: u32, out_ptr: u32, cap: u32) -> u32 {
+    if !in_bounds(body_ptr, body_len) || body_len > 8192 {
+        return BAD_LEN;
+    }
+    let body = unsafe { slice_at(body_ptr, body_len) };
+    let outcome = match decode_query_response(body) {
+        Ok(o) => o,
+        Err(_) => return BAD_UTF8,
+    };
+    let mut json = String::with_capacity(128);
+    match outcome {
+        QueryOutcome::Replied(arg) => {
+            json.push_str("{\"replied\":true,\"argHex\":\"");
+            push_hex(&arg, &mut json);
+            json.push_str("\"}");
+        }
+        QueryOutcome::Rejected { reject_code, reject_message, error_code } => {
+            json.push_str(&format!("{{\"replied\":false,\"rejectCode\":\"{reject_code}\",\"rejectMessage\":"));
+            push_json_str(&reject_message, &mut json);
+            json.push_str(",\"errorCode\":");
+            opt_json_str(&error_code, &mut json);
+            json.push('}');
+        }
+    }
+    write_str_out(json.as_bytes(), out_ptr, cap)
+}
+
+#[no_mangle]
+pub extern "C" fn w_icp_decode_read_state(
+    body_ptr: u32, body_len: u32,
+    rids_ptr: u32, n_rids: u32,
+    out_ptr: u32, cap: u32,
+) -> u32 {
+    if !in_bounds(body_ptr, body_len) || body_len > 16384 {
+        return BAD_LEN;
+    }
+    if n_rids > 8 || !in_bounds(rids_ptr, n_rids * 32) {
+        return BAD_LEN;
+    }
+    let body = unsafe { slice_at(body_ptr, body_len) };
+    let raw = unsafe { slice_at(rids_ptr, n_rids * 32) };
+    let rids: Vec<[u8; 32]> = raw.chunks_exact(32).map(|c| c.try_into().unwrap()).collect();
+    let tree = match decode_read_state_tree(body) {
+        Ok(t) => t,
+        Err(_) => return BAD_UTF8,
+    };
+    let time_ns = read_state_time(&tree).unwrap_or(None);
+    let mut json = String::with_capacity(256);
+    json.push_str("{\"timeNs\":");
+    match time_ns {
+        Some(t) => json.push_str(&format!("\"{t}\"")),
+        None => json.push_str("null"),
+    }
+    json.push_str(",\"statuses\":[");
+    for (i, rid) in rids.iter().enumerate() {
+        if i > 0 {
+            json.push(',');
+        }
+        let st = request_status(&tree, rid).unwrap_or(RailStatus::Unknown);
+        json.push_str("{\"requestIdHex\":\"");
+        push_hex(rid, &mut json);
+        json.push_str("\",\"state\":");
+        match st {
+            RailStatus::Unknown => push_json_str("unknown", &mut json),
+            RailStatus::Received => push_json_str("received", &mut json),
+            RailStatus::Processing => push_json_str("processing", &mut json),
+            RailStatus::Done => push_json_str("done", &mut json),
+            RailStatus::Replied(arg) => {
+                json.push_str("\"replied\",\"replyArgHex\":\"");
+                push_hex(&arg, &mut json);
+                json.push('"');
+            }
+            RailStatus::Rejected { reject_code, reject_message, error_code } => {
+                json.push_str("\"rejected\",\"rejectCode\":\"");
+                // u64 as decimal string (exact for JS)
+                json.push_str(&reject_code.to_string());
+                json.push_str("\",\"rejectMessage\":");
+                push_json_str(&reject_message, &mut json);
+                json.push_str(",\"errorCode\":");
+                opt_json_str(&error_code, &mut json);
+            }
+        }
+        json.push('}');
+    }
+    json.push_str("]}");
+    if json.len() > MAX_JSON as usize {
+        return 0;
+    }
+    write_str_out(json.as_bytes(), out_ptr, cap)
+}
+
+#[no_mangle]
+pub extern "C" fn w_icp_decode_transfer_result(arg_ptr: u32, arg_len: u32, out_ptr: u32, cap: u32) -> u32 {
+    if !in_bounds(arg_ptr, arg_len) || arg_len > 512 {
+        return BAD_LEN;
+    }
+    let arg = unsafe { slice_at(arg_ptr, arg_len) };
+    let result = match icrc_decode_transfer_result(arg) {
+        Ok(r) => r,
+        Err(_) => return BAD_UTF8,
+    };
+    let mut json = String::with_capacity(96);
+    match result {
+        TransferResult::Ok(idx) => {
+            json.push_str(&format!("{{\"ok\":true,\"blockIndex\":\"{idx}\"}}"));
+        }
+        TransferResult::Err(e) => {
+            let (variant, detail) = transfer_error_parts(&e);
+            json.push_str("{\"ok\":false,\"errVariant\":");
+            push_json_str(variant, &mut json);
+            json.push_str(",\"errDetail\":");
+            push_json_str(&detail, &mut json);
+            json.push('}');
+        }
+    }
+    write_str_out(json.as_bytes(), out_ptr, cap)
+}
+
+fn transfer_error_parts(e: &TransferError) -> (&'static str, String) {
+    match e {
+        TransferError::BadFee { expected_fee } => ("BadFee", expected_fee.to_string()),
+        TransferError::BadBurn { min_burn_amount } => ("BadBurn", min_burn_amount.to_string()),
+        TransferError::InsufficientFunds { balance } => ("InsufficientFunds", balance.to_string()),
+        TransferError::TooOld => ("TooOld", String::new()),
+        TransferError::CreatedInFuture { ledger_time } => ("CreatedInFuture", ledger_time.to_string()),
+        TransferError::TemporarilyUnavailable => ("TemporarilyUnavailable", String::new()),
+        TransferError::Duplicate { duplicate_of } => ("Duplicate", duplicate_of.to_string()),
+        TransferError::GenericError { error_code, message } => {
+            ("GenericError", format!("{error_code}: {message}"))
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn w_icp_decode_int(arg_ptr: u32, arg_len: u32, out_ptr: u32, cap: u32) -> u32 {
+    if !in_bounds(arg_ptr, arg_len) || arg_len > 512 {
+        return BAD_LEN;
+    }
+    let arg = unsafe { slice_at(arg_ptr, arg_len) };
+    match dpay_icp::icrc::decode_int(arg) {
+        Ok(v) => write_str_out(v.to_string().as_bytes(), out_ptr, cap),
+        Err(_) => BAD_UTF8,
+    }
+}
+
+// keep the unused-approve plumbing referenced so the import list stays honest during W1
+const _: Option<ApproveResult> = None;

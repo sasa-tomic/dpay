@@ -107,6 +107,58 @@ export type DpayCoreApi = {
   // Device NFC radio state for the status chip: 'ready' | 'off' | 'unsupported' | 'unknown'.
   // Optional so an app built before the native method exists degrades to 'unknown' (chip hidden).
   nfcStatus?(): Promise<string>;
+  // --- IC user-principal rail (dpay-icp via UniFFI). Funds live at
+  // Account{owner: self_authenticating(device pubkey)} on the external ICRC ledgers; the app
+  // signs full /api/v2 envelopes locally and POSTs them (payer online) or hands them to the
+  // merchant (offline NFC/QR). ns-timestamps + amounts cross as decimal STRINGS (exact); bytes
+  // as lowercase hex; "" for an absent subaccount/memo. Retry = identical-byte resubmit ONLY.
+  icpSelfPrincipal(secretHex: string): Promise<string>;
+  icpIngressExpiry(nowNs: string, aheadS: number): Promise<string>;
+  icpTransferArg(toOwnerText: string, toSubaccountHex: string, fromSubaccountHex: string, amount: string, fee: string, memoHex: string): Promise<string>;
+  icpApproveArg(spenderOwnerText: string, spenderSubaccountHex: string, fromSubaccountHex: string, amount: string, expectedAllowance: string, expiresAtNs: string, memoHex: string, fee: string): Promise<string>;
+  icpBalanceOfArg(ownerText: string, subaccountHex: string): Promise<string>;
+  icpSignUpdate(secretHex: string, canisterText: string, methodName: string, argHex: string, ingressExpiryNs: string): Promise<IcpSignedUpdate>;
+  icpSignQuery(secretHex: string, canisterText: string, methodName: string, argHex: string, ingressExpiryNs: string): Promise<string>;
+  icpSignReadState(secretHex: string, requestIdsHex: string[], wantTime: boolean, ingressExpiryNs: string): Promise<string>;
+  icpEnvelopeRequestId(envelopeHex: string): Promise<string>;
+  icpDecodeQuery(bodyHex: string): Promise<IcpQueryReply>;
+  icpDecodeReadState(bodyHex: string, requestIdsHex: string[]): Promise<IcpStateRead>;
+  icpDecodeTransferResult(argHex: string): Promise<IcpTransferOutcome>;
+  icpDecodeInt(argHex: string): Promise<string>;
+};
+
+/** icpSignUpdate result: the POSTable /call envelope + its request_id (read_state poll key). */
+export type IcpSignedUpdate = { envelopeHex: string; requestIdHex: string };
+
+/** icpDecodeQuery result over a /query response body. */
+export type IcpQueryReply = {
+  replied: boolean;
+  argHex?: string;
+  rejectCode?: string;
+  rejectMessage?: string;
+  errorCode?: string;
+};
+
+/** One request_status entry in a decoded read_state certificate (state strings mirror the IC
+ *  spec; 'unknown' = keep polling). Certificate is DECODED not BLS-verified (W6 follow-up). */
+export type IcpRequestStatusOut = {
+  requestIdHex: string;
+  state: 'unknown' | 'received' | 'processing' | 'replied' | 'rejected' | 'done';
+  replyArgHex?: string;
+  rejectCode?: string;
+  rejectMessage?: string;
+  errorCode?: string;
+};
+
+/** icpDecodeReadState result: certified time (clock sync) + per-rid statuses. */
+export type IcpStateRead = { timeNs?: string; statuses: IcpRequestStatusOut[] };
+
+/** icpDecodeTransferResult over an icrc1_transfer reply (ok carries the block index). */
+export type IcpTransferOutcome = {
+  ok: boolean;
+  blockIndex?: string;
+  errVariant?: string;
+  errDetail?: string;
 };
 
 // MC4 U5: the signed authorization the payer holds, used to bind a relay-returned receipt to the

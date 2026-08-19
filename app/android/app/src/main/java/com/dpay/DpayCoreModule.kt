@@ -350,6 +350,261 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         }
     }
 
+    // --- IC user-principal rail (dpay-icp via UniFFI) ------------------------------------------------
+    //
+    // The rail moves funds at Account{owner: self_authenticating(user Ed25519 pubkey)} directly on
+    // the external ICRC ledgers: the app signs full IC update/query/read_state envelopes LOCALLY
+    // (byte-identical to ic-agent) and the bytes are POSTed to /api/v2/canister/<id>/<kind>.
+    // Bridge conventions: ns-timestamps and u128 amounts cross as decimal STRINGS (MC1-class
+    // exactness); envelope/arg/reply bytes cross as lowercase hex; subaccounts/memos as hex with
+    // "" == None. retry semantics: identical-byte resubmit ONLY (a re-sign = new request_id =
+    // double-pay) — the JS layer owns the envelope bytes and MUST reuse them verbatim.
+
+    /** The self-authenticating principal of the device key (SHA224(DER(pub)) | 0x02, base32-CRC
+     *  text) — the account owner on every external ledger. */
+    @ReactMethod
+    fun icpSelfPrincipal(secretHex: String, promise: Promise) {
+        try {
+            promise.resolve(uniffi.dpay_ffi.icpSelfPrincipal(unhex(secretHex)))
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    /** ingress expiry (ns) = now_ns + ahead_s * 1e9. The caller supplies `now_ns` from the
+     *  certified IC clock (read_state `time` leaf) — REFUSE to sign on large skew. */
+    @ReactMethod
+    fun icpIngressExpiry(nowNs: String, aheadS: Double, promise: Promise) {
+        try {
+            promise.resolve(uniffi.dpay_ffi.icpIngressExpiry(nowNs, aheadS.toULong()))
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    /** DIDL arg for icrc1_transfer. Amount/fee are raw-u128 decimal STRINGS. */
+    @ReactMethod
+    fun icpTransferArg(
+        toOwnerText: String,
+        toSubaccountHex: String,
+        fromSubaccountHex: String,
+        amount: String,
+        fee: String,
+        memoHex: String,
+        promise: Promise,
+    ) {
+        try {
+            val arg = uniffi.dpay_ffi.icpTransferArg(
+                toOwnerText,
+                toSubaccountHex,
+                fromSubaccountHex,
+                amount,
+                fee,
+                memoHex,
+            )
+            promise.resolve(hex(arg))
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    /** DIDL arg for icrc2_approve (offramp leg 1). amount="" encodes revoke(0). */
+    @ReactMethod
+    fun icpApproveArg(
+        spenderOwnerText: String,
+        spenderSubaccountHex: String,
+        fromSubaccountHex: String,
+        amount: String,
+        expectedAllowance: String,
+        expiresAtNs: String,
+        memoHex: String,
+        fee: String,
+        promise: Promise,
+    ) {
+        try {
+            val arg = uniffi.dpay_ffi.icpApproveArg(
+                spenderOwnerText,
+                spenderSubaccountHex,
+                fromSubaccountHex,
+                amount,
+                expectedAllowance,
+                expiresAtNs,
+                memoHex,
+                fee,
+            )
+            promise.resolve(hex(arg))
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    /** DIDL arg for icrc1_balance_of (signed-query balance rail). */
+    @ReactMethod
+    fun icpBalanceOfArg(ownerText: String, subaccountHex: String, promise: Promise) {
+        try {
+            promise.resolve(hex(uniffi.dpay_ffi.icpBalanceOfArg(ownerText, subaccountHex)))
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    /** Sign a full /call envelope (POST /api/v2/canister/<canister>/call). Returns
+     *  {envelopeHex, requestIdHex} — requestId is the read_state poll key; keep the envelope
+     *  bytes verbatim for any retry. */
+    @ReactMethod
+    fun icpSignUpdate(
+        secretHex: String,
+        canisterText: String,
+        methodName: String,
+        argHex: String,
+        ingressExpiryNs: String,
+        promise: Promise,
+    ) {
+        try {
+            val signed = uniffi.dpay_ffi.icpSignUpdate(
+                unhex(secretHex),
+                canisterText,
+                methodName,
+                unhex(argHex),
+                ingressExpiryNs,
+            )
+            val out = Arguments.createMap()
+            out.putString("envelopeHex", hex(signed.envelope))
+            out.putString("requestIdHex", hex(signed.requestId))
+            promise.resolve(out)
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    /** Sign a /query envelope (POST /api/v2/canister/<canister>/query). */
+    @ReactMethod
+    fun icpSignQuery(
+        secretHex: String,
+        canisterText: String,
+        methodName: String,
+        argHex: String,
+        ingressExpiryNs: String,
+        promise: Promise,
+    ) {
+        try {
+            val env = uniffi.dpay_ffi.icpSignQuery(
+                unhex(secretHex),
+                canisterText,
+                methodName,
+                unhex(argHex),
+                ingressExpiryNs,
+            )
+            promise.resolve(hex(env))
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    /** Sign a /read_state envelope (POST /api/v2/canister/<canister>/read_state) polling
+     *  request_status of `requestIdsHex` (+ the certified `time` leaf for clock sync). */
+    @ReactMethod
+    fun icpSignReadState(
+        secretHex: String,
+        requestIdsHex: com.facebook.react.bridge.ReadableArray,
+        wantTime: Boolean,
+        ingressExpiryNs: String,
+        promise: Promise,
+    ) {
+        try {
+            val rids = (0 until requestIdsHex.size()).map { unhex(requestIdsHex.getString(it)) }
+            val env = uniffi.dpay_ffi.icpSignReadState(unhex(secretHex), rids, wantTime, ingressExpiryNs)
+            promise.resolve(hex(env))
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    /** The request_id of an already-signed envelope (the merchant side: rid of a payer-carried
+     *  envelope, for read_state polling after submission). */
+    @ReactMethod
+    fun icpEnvelopeRequestId(envelopeHex: String, promise: Promise) {
+        try {
+            promise.resolve(hex(uniffi.dpay_ffi.icpEnvelopeRequestId(unhex(envelopeHex))))
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    /** Decode a /query response body: {replied, argHex?, rejectCode?, rejectMessage?, errorCode?}. */
+    @ReactMethod
+    fun icpDecodeQuery(bodyHex: String, promise: Promise) {
+        try {
+            val r = uniffi.dpay_ffi.icpDecodeQuery(unhex(bodyHex))
+            val out = Arguments.createMap()
+            out.putBoolean("replied", r.replied)
+            if (r.arg != null) out.putString("argHex", hex(r.arg))
+            val rc = r.rejectCode
+            if (rc != null) out.putString("rejectCode", rc)
+            if (r.rejectMessage != null) out.putString("rejectMessage", r.rejectMessage)
+            if (r.errorCode != null) out.putString("errorCode", r.errorCode)
+            promise.resolve(out)
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    /** Decode a /read_state body for `requestIdsHex`: {timeNs?, statuses: [{requestIdHex, state,
+     *  replyArgHex?, rejectCode?, rejectMessage?, errorCode?}]}. state ∈ unknown|received|
+     *  processing|replied|rejected|done. Certificate is DECODED not BLS-verified (W6 follow-up). */
+    @ReactMethod
+    fun icpDecodeReadState(bodyHex: String, requestIdsHex: com.facebook.react.bridge.ReadableArray, promise: Promise) {
+        try {
+            val rids = (0 until requestIdsHex.size()).map { unhex(requestIdsHex.getString(it)) }
+            val r = uniffi.dpay_ffi.icpDecodeReadState(unhex(bodyHex), rids)
+            val out = Arguments.createMap()
+            val t = r.timeNs
+            if (t != null) out.putString("timeNs", t)
+            val statuses = Arguments.createArray()
+            for (s in r.statuses) {
+                val m = Arguments.createMap()
+                m.putString("requestIdHex", hex(s.requestId))
+                m.putString("state", s.state)
+                if (s.replyArg != null) m.putString("replyArgHex", hex(s.replyArg))
+                val rc = s.rejectCode
+                if (rc != null) m.putString("rejectCode", rc)
+                if (s.rejectMessage != null) m.putString("rejectMessage", s.rejectMessage)
+                if (s.errorCode != null) m.putString("errorCode", s.errorCode)
+                statuses.pushMap(m)
+            }
+            out.putArray("statuses", statuses)
+            promise.resolve(out)
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    /** Decode an icrc1_transfer reply: {ok, blockIndex?, errVariant?, errDetail?}. */
+    @ReactMethod
+    fun icpDecodeTransferResult(argHex: String, promise: Promise) {
+        try {
+            val r = uniffi.dpay_ffi.icpDecodeTransferResult(unhex(argHex))
+            val out = Arguments.createMap()
+            out.putBoolean("ok", r.ok)
+            if (r.blockIndex != null) out.putString("blockIndex", r.blockIndex)
+            if (r.errVariant != null) out.putString("errVariant", r.errVariant)
+            if (r.errDetail != null) out.putString("errDetail", r.errDetail)
+            promise.resolve(out)
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    /** Decode a single-value integer reply (balance/fee/decimals class) to a decimal string. */
+    @ReactMethod
+    fun icpDecodeInt(argHex: String, promise: Promise) {
+        try {
+            promise.resolve(uniffi.dpay_ffi.icpDecodeInt(unhex(argHex)))
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
     /**
      * Report the device NFC radio state for the UI status chip: "ready" (adapter present + enabled),
      * "off" (present but disabled in system settings), or "unsupported" (no NFC hardware). This is

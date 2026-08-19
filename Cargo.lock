@@ -827,6 +827,7 @@ name = "dpay-ffi"
 version = "0.1.0"
 dependencies = [
  "dpay-core",
+ "dpay-icp",
  "ed25519-dalek",
  "thiserror 2.0.19",
  "uniffi",
@@ -930,6 +931,7 @@ name = "dpay-wasm"
 version = "0.1.0"
 dependencies = [
  "dpay-core",
+ "dpay-icp",
  "ed25519-dalek",
 ]
 

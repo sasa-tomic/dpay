@@ -13,6 +13,7 @@ pub mod cbor;
 pub mod envelope;
 pub mod icrc;
 pub mod principal;
+pub mod reply;
 pub mod request_id;
 
 pub use envelope::{ingress_expiry, sign_query, sign_read_state, sign_update, CallRequest};

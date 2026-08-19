@@ -42,6 +42,8 @@ fn decode_name_field(bytes: &[u8]) -> String {
 
 uniffi::setup_scaffolding!();
 
+pub mod icp;
+
 /// A signing key + its public key, as raw bytes.
 ///
 /// PoC choice: the 32-byte Ed25519 seed is returned to the caller so the app can persist it in

@@ -472,6 +472,32 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_generate_keypair() != 36207:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_approve_arg() != 33903:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_balance_of_arg() != 1118:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_decode_int() != 39665:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_decode_query() != 64452:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_decode_read_state() != 56142:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_decode_transfer_result() != 49046:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_envelope_request_id() != 56521:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_ingress_expiry() != 40958:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_self_principal() != 30767:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_sign_query() != 9686:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_sign_read_state() != 25642:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_sign_update() != 3984:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_transfer_arg() != 12696:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_keypair_from_secret() != 64641:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_nfc_decode_receipt() != 25249:
@@ -783,6 +809,97 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_generate_keypair.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_generate_keypair.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_approve_arg.argtypes = (
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_approve_arg.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_balance_of_arg.argtypes = (
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_balance_of_arg.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_int.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_int.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_query.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_query.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_read_state.argtypes = (
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_read_state.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_transfer_result.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_transfer_result.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_envelope_request_id.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_envelope_request_id.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_ingress_expiry.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.c_uint64,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_ingress_expiry.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_self_principal.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_self_principal.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_sign_query.argtypes = (
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_sign_query.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_sign_read_state.argtypes = (
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    ctypes.c_int8,
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_sign_read_state.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_sign_update.argtypes = (
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_sign_update.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_transfer_arg.argtypes = (
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_transfer_arg.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_func_keypair_from_secret.argtypes = (
     _UniffiRustBuffer,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -1179,6 +1296,45 @@ _UniffiLib.uniffi_dpay_ffi_checksum_func_format_amount.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_generate_keypair.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_generate_keypair.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_approve_arg.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_approve_arg.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_balance_of_arg.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_balance_of_arg.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_int.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_int.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_query.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_query.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_read_state.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_read_state.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_transfer_result.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_transfer_result.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_envelope_request_id.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_envelope_request_id.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_ingress_expiry.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_ingress_expiry.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_self_principal.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_self_principal.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_sign_query.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_sign_query.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_sign_read_state.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_sign_read_state.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_sign_update.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_sign_update.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_transfer_arg.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_transfer_arg.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_keypair_from_secret.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_keypair_from_secret.restype = ctypes.c_uint16
@@ -1400,6 +1556,291 @@ class _UniffiConverterBytes(_UniffiConverterRustBuffer):
 
 
 
+
+
+class IcpQueryReply:
+    """
+    A decoded `/query` response: `replied` carries the candid reply arg; otherwise the rejection
+    triple. Flat record (not an enum) for cheap Kotlin/JS marshaling.
+    """
+
+    replied: "bool"
+    arg: "typing.Optional[bytes]"
+    reject_code: "int"
+    reject_message: "str"
+    error_code: "typing.Optional[str]"
+    def __init__(self, *, replied: "bool", arg: "typing.Optional[bytes]", reject_code: "int", reject_message: "str", error_code: "typing.Optional[str]"):
+        self.replied = replied
+        self.arg = arg
+        self.reject_code = reject_code
+        self.reject_message = reject_message
+        self.error_code = error_code
+
+    def __str__(self):
+        return "IcpQueryReply(replied={}, arg={}, reject_code={}, reject_message={}, error_code={})".format(self.replied, self.arg, self.reject_code, self.reject_message, self.error_code)
+
+    def __eq__(self, other):
+        if self.replied != other.replied:
+            return False
+        if self.arg != other.arg:
+            return False
+        if self.reject_code != other.reject_code:
+            return False
+        if self.reject_message != other.reject_message:
+            return False
+        if self.error_code != other.error_code:
+            return False
+        return True
+
+class _UniffiConverterTypeIcpQueryReply(_UniffiConverterRustBuffer):
+    @staticmethod
+    def read(buf):
+        return IcpQueryReply(
+            replied=_UniffiConverterBool.read(buf),
+            arg=_UniffiConverterOptionalBytes.read(buf),
+            reject_code=_UniffiConverterUInt64.read(buf),
+            reject_message=_UniffiConverterString.read(buf),
+            error_code=_UniffiConverterOptionalString.read(buf),
+        )
+
+    @staticmethod
+    def check_lower(value):
+        _UniffiConverterBool.check_lower(value.replied)
+        _UniffiConverterOptionalBytes.check_lower(value.arg)
+        _UniffiConverterUInt64.check_lower(value.reject_code)
+        _UniffiConverterString.check_lower(value.reject_message)
+        _UniffiConverterOptionalString.check_lower(value.error_code)
+
+    @staticmethod
+    def write(value, buf):
+        _UniffiConverterBool.write(value.replied, buf)
+        _UniffiConverterOptionalBytes.write(value.arg, buf)
+        _UniffiConverterUInt64.write(value.reject_code, buf)
+        _UniffiConverterString.write(value.reject_message, buf)
+        _UniffiConverterOptionalString.write(value.error_code, buf)
+
+
+class IcpRequestStatus:
+    """
+    One request's status read from a read_state certificate. `state` is one of
+    `unknown|received|processing|replied|rejected|done`; `unknown`/`received`/`processing` mean
+    keep polling (the 2–5 s consensus window); `replied` carries the reply arg.
+    """
+
+    request_id: "bytes"
+    state: "str"
+    reply_arg: "typing.Optional[bytes]"
+    reject_code: "typing.Optional[int]"
+    reject_message: "typing.Optional[str]"
+    error_code: "typing.Optional[str]"
+    def __init__(self, *, request_id: "bytes", state: "str", reply_arg: "typing.Optional[bytes]", reject_code: "typing.Optional[int]", reject_message: "typing.Optional[str]", error_code: "typing.Optional[str]"):
+        self.request_id = request_id
+        self.state = state
+        self.reply_arg = reply_arg
+        self.reject_code = reject_code
+        self.reject_message = reject_message
+        self.error_code = error_code
+
+    def __str__(self):
+        return "IcpRequestStatus(request_id={}, state={}, reply_arg={}, reject_code={}, reject_message={}, error_code={})".format(self.request_id, self.state, self.reply_arg, self.reject_code, self.reject_message, self.error_code)
+
+    def __eq__(self, other):
+        if self.request_id != other.request_id:
+            return False
+        if self.state != other.state:
+            return False
+        if self.reply_arg != other.reply_arg:
+            return False
+        if self.reject_code != other.reject_code:
+            return False
+        if self.reject_message != other.reject_message:
+            return False
+        if self.error_code != other.error_code:
+            return False
+        return True
+
+class _UniffiConverterTypeIcpRequestStatus(_UniffiConverterRustBuffer):
+    @staticmethod
+    def read(buf):
+        return IcpRequestStatus(
+            request_id=_UniffiConverterBytes.read(buf),
+            state=_UniffiConverterString.read(buf),
+            reply_arg=_UniffiConverterOptionalBytes.read(buf),
+            reject_code=_UniffiConverterOptionalUInt64.read(buf),
+            reject_message=_UniffiConverterOptionalString.read(buf),
+            error_code=_UniffiConverterOptionalString.read(buf),
+        )
+
+    @staticmethod
+    def check_lower(value):
+        _UniffiConverterBytes.check_lower(value.request_id)
+        _UniffiConverterString.check_lower(value.state)
+        _UniffiConverterOptionalBytes.check_lower(value.reply_arg)
+        _UniffiConverterOptionalUInt64.check_lower(value.reject_code)
+        _UniffiConverterOptionalString.check_lower(value.reject_message)
+        _UniffiConverterOptionalString.check_lower(value.error_code)
+
+    @staticmethod
+    def write(value, buf):
+        _UniffiConverterBytes.write(value.request_id, buf)
+        _UniffiConverterString.write(value.state, buf)
+        _UniffiConverterOptionalBytes.write(value.reply_arg, buf)
+        _UniffiConverterOptionalUInt64.write(value.reject_code, buf)
+        _UniffiConverterOptionalString.write(value.reject_message, buf)
+        _UniffiConverterOptionalString.write(value.error_code, buf)
+
+
+class IcpSignedUpdate:
+    """
+    A signed update call: the POST-able CBOR envelope plus its `request_id` (the read_state poll
+    key). Both derived once, in Rust.
+    """
+
+    envelope: "bytes"
+    """
+    Full signed envelope bytes — POST to `/api/v2/canister/<canister>/call`.
+    """
+
+    request_id: "bytes"
+    """
+    32-byte request_id — poll `/read_state` under `request_status/<rid>`.
+    """
+
+    def __init__(self, *, envelope: "bytes", request_id: "bytes"):
+        self.envelope = envelope
+        self.request_id = request_id
+
+    def __str__(self):
+        return "IcpSignedUpdate(envelope={}, request_id={})".format(self.envelope, self.request_id)
+
+    def __eq__(self, other):
+        if self.envelope != other.envelope:
+            return False
+        if self.request_id != other.request_id:
+            return False
+        return True
+
+class _UniffiConverterTypeIcpSignedUpdate(_UniffiConverterRustBuffer):
+    @staticmethod
+    def read(buf):
+        return IcpSignedUpdate(
+            envelope=_UniffiConverterBytes.read(buf),
+            request_id=_UniffiConverterBytes.read(buf),
+        )
+
+    @staticmethod
+    def check_lower(value):
+        _UniffiConverterBytes.check_lower(value.envelope)
+        _UniffiConverterBytes.check_lower(value.request_id)
+
+    @staticmethod
+    def write(value, buf):
+        _UniffiConverterBytes.write(value.envelope, buf)
+        _UniffiConverterBytes.write(value.request_id, buf)
+
+
+class IcpStateRead:
+    """
+    A decoded `/read_state` response: certified subnet time (None if the path wasn't requested /
+    pruned) plus the per-request statuses.
+    """
+
+    time_ns: "typing.Optional[str]"
+    statuses: "typing.List[IcpRequestStatus]"
+    def __init__(self, *, time_ns: "typing.Optional[str]", statuses: "typing.List[IcpRequestStatus]"):
+        self.time_ns = time_ns
+        self.statuses = statuses
+
+    def __str__(self):
+        return "IcpStateRead(time_ns={}, statuses={})".format(self.time_ns, self.statuses)
+
+    def __eq__(self, other):
+        if self.time_ns != other.time_ns:
+            return False
+        if self.statuses != other.statuses:
+            return False
+        return True
+
+class _UniffiConverterTypeIcpStateRead(_UniffiConverterRustBuffer):
+    @staticmethod
+    def read(buf):
+        return IcpStateRead(
+            time_ns=_UniffiConverterOptionalString.read(buf),
+            statuses=_UniffiConverterSequenceTypeIcpRequestStatus.read(buf),
+        )
+
+    @staticmethod
+    def check_lower(value):
+        _UniffiConverterOptionalString.check_lower(value.time_ns)
+        _UniffiConverterSequenceTypeIcpRequestStatus.check_lower(value.statuses)
+
+    @staticmethod
+    def write(value, buf):
+        _UniffiConverterOptionalString.write(value.time_ns, buf)
+        _UniffiConverterSequenceTypeIcpRequestStatus.write(value.statuses, buf)
+
+
+class IcpTransferOutcome:
+    """
+    A decoded `icrc1_transfer` reply (the DIDL variant inside a `replied` arg): `ok` carries the
+    ledger block index (decimal string); errors flatten to a variant tag + human detail.
+    """
+
+    ok: "bool"
+    block_index: "typing.Optional[str]"
+    err_variant: "str"
+    """
+    e.g. `InsufficientFunds`, `BadFee`, `Duplicate`, `GenericError`, … empty when ok.
+    """
+
+    err_detail: "str"
+    """
+    Human-readable detail (e.g. "balance 0, need 10000").
+    """
+
+    def __init__(self, *, ok: "bool", block_index: "typing.Optional[str]", err_variant: "str", err_detail: "str"):
+        self.ok = ok
+        self.block_index = block_index
+        self.err_variant = err_variant
+        self.err_detail = err_detail
+
+    def __str__(self):
+        return "IcpTransferOutcome(ok={}, block_index={}, err_variant={}, err_detail={})".format(self.ok, self.block_index, self.err_variant, self.err_detail)
+
+    def __eq__(self, other):
+        if self.ok != other.ok:
+            return False
+        if self.block_index != other.block_index:
+            return False
+        if self.err_variant != other.err_variant:
+            return False
+        if self.err_detail != other.err_detail:
+            return False
+        return True
+
+class _UniffiConverterTypeIcpTransferOutcome(_UniffiConverterRustBuffer):
+    @staticmethod
+    def read(buf):
+        return IcpTransferOutcome(
+            ok=_UniffiConverterBool.read(buf),
+            block_index=_UniffiConverterOptionalString.read(buf),
+            err_variant=_UniffiConverterString.read(buf),
+            err_detail=_UniffiConverterString.read(buf),
+        )
+
+    @staticmethod
+    def check_lower(value):
+        _UniffiConverterBool.check_lower(value.ok)
+        _UniffiConverterOptionalString.check_lower(value.block_index)
+        _UniffiConverterString.check_lower(value.err_variant)
+        _UniffiConverterString.check_lower(value.err_detail)
+
+    @staticmethod
+    def write(value, buf):
+        _UniffiConverterBool.write(value.ok, buf)
+        _UniffiConverterOptionalString.write(value.block_index, buf)
+        _UniffiConverterString.write(value.err_variant, buf)
+        _UniffiConverterString.write(value.err_detail, buf)
 
 
 class KeyPair:
@@ -2050,6 +2491,33 @@ class _UniffiConverterTypeNfcStep(_UniffiConverterRustBuffer):
 
 
 
+class _UniffiConverterOptionalUInt64(_UniffiConverterRustBuffer):
+    @classmethod
+    def check_lower(cls, value):
+        if value is not None:
+            _UniffiConverterUInt64.check_lower(value)
+
+    @classmethod
+    def write(cls, value, buf):
+        if value is None:
+            buf.write_u8(0)
+            return
+
+        buf.write_u8(1)
+        _UniffiConverterUInt64.write(value, buf)
+
+    @classmethod
+    def read(cls, buf):
+        flag = buf.read_u8()
+        if flag == 0:
+            return None
+        elif flag == 1:
+            return _UniffiConverterUInt64.read(buf)
+        else:
+            raise InternalError("Unexpected flag byte for optional type")
+
+
+
 class _UniffiConverterOptionalString(_UniffiConverterRustBuffer):
     @classmethod
     def check_lower(cls, value):
@@ -2101,6 +2569,56 @@ class _UniffiConverterOptionalBytes(_UniffiConverterRustBuffer):
             return _UniffiConverterBytes.read(buf)
         else:
             raise InternalError("Unexpected flag byte for optional type")
+
+
+
+class _UniffiConverterSequenceBytes(_UniffiConverterRustBuffer):
+    @classmethod
+    def check_lower(cls, value):
+        for item in value:
+            _UniffiConverterBytes.check_lower(item)
+
+    @classmethod
+    def write(cls, value, buf):
+        items = len(value)
+        buf.write_i32(items)
+        for item in value:
+            _UniffiConverterBytes.write(item, buf)
+
+    @classmethod
+    def read(cls, buf):
+        count = buf.read_i32()
+        if count < 0:
+            raise InternalError("Unexpected negative sequence length")
+
+        return [
+            _UniffiConverterBytes.read(buf) for i in range(count)
+        ]
+
+
+
+class _UniffiConverterSequenceTypeIcpRequestStatus(_UniffiConverterRustBuffer):
+    @classmethod
+    def check_lower(cls, value):
+        for item in value:
+            _UniffiConverterTypeIcpRequestStatus.check_lower(item)
+
+    @classmethod
+    def write(cls, value, buf):
+        items = len(value)
+        buf.write_i32(items)
+        for item in value:
+            _UniffiConverterTypeIcpRequestStatus.write(item, buf)
+
+    @classmethod
+    def read(cls, buf):
+        count = buf.read_i32()
+        if count < 0:
+            raise InternalError("Unexpected negative sequence length")
+
+        return [
+            _UniffiConverterTypeIcpRequestStatus.read(buf) for i in range(count)
+        ]
 
 # objects.
 class FfiCardSessionProtocol(typing.Protocol):
@@ -2639,6 +3157,219 @@ def generate_keypair() -> "KeyPair":
     return _UniffiConverterTypeKeyPair.lift(_uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_func_generate_keypair,))
 
 
+def icp_approve_arg(spender_owner_text: "str",spender_subaccount_hex: "typing.Optional[str]",from_subaccount_hex: "typing.Optional[str]",amount: "typing.Optional[str]",expected_allowance: "typing.Optional[str]",expires_at_ns: "typing.Optional[str]",memo_hex: "typing.Optional[str]",fee: "typing.Optional[str]") -> "bytes":
+    """
+    `icrc2_approve` argument bytes: spender account, allowance amount (absent = revoke/0),
+    optional expected_allowance/expires_at/memo/from_subaccount/fee.
+    """
+
+    _UniffiConverterString.check_lower(spender_owner_text)
+    
+    _UniffiConverterOptionalString.check_lower(spender_subaccount_hex)
+    
+    _UniffiConverterOptionalString.check_lower(from_subaccount_hex)
+    
+    _UniffiConverterOptionalString.check_lower(amount)
+    
+    _UniffiConverterOptionalString.check_lower(expected_allowance)
+    
+    _UniffiConverterOptionalString.check_lower(expires_at_ns)
+    
+    _UniffiConverterOptionalString.check_lower(memo_hex)
+    
+    _UniffiConverterOptionalString.check_lower(fee)
+    
+    return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_approve_arg,
+        _UniffiConverterString.lower(spender_owner_text),
+        _UniffiConverterOptionalString.lower(spender_subaccount_hex),
+        _UniffiConverterOptionalString.lower(from_subaccount_hex),
+        _UniffiConverterOptionalString.lower(amount),
+        _UniffiConverterOptionalString.lower(expected_allowance),
+        _UniffiConverterOptionalString.lower(expires_at_ns),
+        _UniffiConverterOptionalString.lower(memo_hex),
+        _UniffiConverterOptionalString.lower(fee)))
+
+
+def icp_balance_of_arg(owner_text: "str",subaccount_hex: "typing.Optional[str]") -> "bytes":
+    """
+    `icrc1_balance_of` argument bytes for the account.
+    """
+
+    _UniffiConverterString.check_lower(owner_text)
+    
+    _UniffiConverterOptionalString.check_lower(subaccount_hex)
+    
+    return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_balance_of_arg,
+        _UniffiConverterString.lower(owner_text),
+        _UniffiConverterOptionalString.lower(subaccount_hex)))
+
+
+def icp_decode_int(arg: "bytes") -> "str":
+    """
+    Decode a bare candid `int`/`nat` reply (e.g. `icrc1_balance_of`) to a decimal string.
+    """
+
+    _UniffiConverterBytes.check_lower(arg)
+    
+    return _UniffiConverterString.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_int,
+        _UniffiConverterBytes.lower(arg)))
+
+
+def icp_decode_query(body: "bytes") -> "IcpQueryReply":
+    _UniffiConverterBytes.check_lower(body)
+    
+    return _UniffiConverterTypeIcpQueryReply.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_query,
+        _UniffiConverterBytes.lower(body)))
+
+
+def icp_decode_read_state(body: "bytes",request_ids: "typing.List[bytes]") -> "IcpStateRead":
+    _UniffiConverterBytes.check_lower(body)
+    
+    _UniffiConverterSequenceBytes.check_lower(request_ids)
+    
+    return _UniffiConverterTypeIcpStateRead.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_read_state,
+        _UniffiConverterBytes.lower(body),
+        _UniffiConverterSequenceBytes.lower(request_ids)))
+
+
+def icp_decode_transfer_result(arg: "bytes") -> "IcpTransferOutcome":
+    _UniffiConverterBytes.check_lower(arg)
+    
+    return _UniffiConverterTypeIcpTransferOutcome.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_transfer_result,
+        _UniffiConverterBytes.lower(arg)))
+
+
+def icp_envelope_request_id(envelope: "bytes") -> "bytes":
+    """
+    The request_id of an already-signed envelope (the merchant side: rid of a payer-carried
+    envelope, for read_state polling after submission).
+    """
+
+    _UniffiConverterBytes.check_lower(envelope)
+    
+    return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_envelope_request_id,
+        _UniffiConverterBytes.lower(envelope)))
+
+
+def icp_ingress_expiry(now_ns: "str",ahead_s: "int") -> "str":
+    """
+    Ingress expiry stamp: `now_ns + ahead_s * 1e9`, as a decimal-ns string (see module docs on why
+    strings). The submission window is measured `[now, now+5:30]` on the IC — callers pick
+    `ahead_s` in 240–300 s.
+    """
+
+    _UniffiConverterString.check_lower(now_ns)
+    
+    _UniffiConverterUInt64.check_lower(ahead_s)
+    
+    return _UniffiConverterString.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_ingress_expiry,
+        _UniffiConverterString.lower(now_ns),
+        _UniffiConverterUInt64.lower(ahead_s)))
+
+
+def icp_self_principal(secret: "bytes") -> "str":
+    """
+    The user's self-authenticating IC principal text for an Ed25519 seed — the account identity on
+    the external ledgers (`Account{owner: self_principal(pk), subaccount: [0;32]}`).
+    """
+
+    _UniffiConverterBytes.check_lower(secret)
+    
+    return _UniffiConverterString.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_self_principal,
+        _UniffiConverterBytes.lower(secret)))
+
+
+def icp_sign_query(secret: "bytes",canister_text: "str",method_name: "str",arg: "bytes",ingress_expiry_ns: "str") -> "bytes":
+    """
+    A signed query call: envelope bytes for `/api/v2/canister/<canister>/query`.
+    """
+
+    _UniffiConverterBytes.check_lower(secret)
+    
+    _UniffiConverterString.check_lower(canister_text)
+    
+    _UniffiConverterString.check_lower(method_name)
+    
+    _UniffiConverterBytes.check_lower(arg)
+    
+    _UniffiConverterString.check_lower(ingress_expiry_ns)
+    
+    return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_sign_query,
+        _UniffiConverterBytes.lower(secret),
+        _UniffiConverterString.lower(canister_text),
+        _UniffiConverterString.lower(method_name),
+        _UniffiConverterBytes.lower(arg),
+        _UniffiConverterString.lower(ingress_expiry_ns)))
+
+
+def icp_sign_read_state(secret: "bytes",request_ids: "typing.List[bytes]",want_time: "bool",ingress_expiry_ns: "str") -> "bytes":
+    """
+    A signed `read_state` call: envelope bytes for `/api/v2/canister/<canister>/read_state`,
+    requesting the `request_status/<rid>` paths for each request_id plus (optionally) the
+    certified subnet `time` leaf — the app's clock-sync source.
+    """
+
+    _UniffiConverterBytes.check_lower(secret)
+    
+    _UniffiConverterSequenceBytes.check_lower(request_ids)
+    
+    _UniffiConverterBool.check_lower(want_time)
+    
+    _UniffiConverterString.check_lower(ingress_expiry_ns)
+    
+    return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_sign_read_state,
+        _UniffiConverterBytes.lower(secret),
+        _UniffiConverterSequenceBytes.lower(request_ids),
+        _UniffiConverterBool.lower(want_time),
+        _UniffiConverterString.lower(ingress_expiry_ns)))
+
+
+def icp_sign_update(secret: "bytes",canister_text: "str",method_name: "str",arg: "bytes",ingress_expiry_ns: "str") -> "IcpSignedUpdate":
+    _UniffiConverterBytes.check_lower(secret)
+    
+    _UniffiConverterString.check_lower(canister_text)
+    
+    _UniffiConverterString.check_lower(method_name)
+    
+    _UniffiConverterBytes.check_lower(arg)
+    
+    _UniffiConverterString.check_lower(ingress_expiry_ns)
+    
+    return _UniffiConverterTypeIcpSignedUpdate.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_sign_update,
+        _UniffiConverterBytes.lower(secret),
+        _UniffiConverterString.lower(canister_text),
+        _UniffiConverterString.lower(method_name),
+        _UniffiConverterBytes.lower(arg),
+        _UniffiConverterString.lower(ingress_expiry_ns)))
+
+
+def icp_transfer_arg(to_owner_text: "str",to_subaccount_hex: "typing.Optional[str]",from_subaccount_hex: "typing.Optional[str]",amount: "str",fee: "typing.Optional[str]",memo_hex: "typing.Optional[str]") -> "bytes":
+    """
+    `icrc1_transfer` argument bytes (DIDL record): `to` account, amount, optional
+    fee/memo/from_subaccount. `amount`/`fee` are decimal strings.
+    """
+
+    _UniffiConverterString.check_lower(to_owner_text)
+    
+    _UniffiConverterOptionalString.check_lower(to_subaccount_hex)
+    
+    _UniffiConverterOptionalString.check_lower(from_subaccount_hex)
+    
+    _UniffiConverterString.check_lower(amount)
+    
+    _UniffiConverterOptionalString.check_lower(fee)
+    
+    _UniffiConverterOptionalString.check_lower(memo_hex)
+    
+    return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_transfer_arg,
+        _UniffiConverterString.lower(to_owner_text),
+        _UniffiConverterOptionalString.lower(to_subaccount_hex),
+        _UniffiConverterOptionalString.lower(from_subaccount_hex),
+        _UniffiConverterString.lower(amount),
+        _UniffiConverterOptionalString.lower(fee),
+        _UniffiConverterOptionalString.lower(memo_hex)))
+
+
 def keypair_from_secret(secret: "bytes") -> "KeyPair":
     """
     Derive the Ed25519 keypair from an existing 32-byte seed (the recovery seed Backup reveals).
@@ -2951,6 +3682,11 @@ __all__ = [
     "DpayError",
     "NfcPhase",
     "NfcStep",
+    "IcpQueryReply",
+    "IcpRequestStatus",
+    "IcpSignedUpdate",
+    "IcpStateRead",
+    "IcpTransferOutcome",
     "KeyPair",
     "PaymentRequestData",
     "ReceiptCodes",
@@ -2961,6 +3697,19 @@ __all__ = [
     "encode_request",
     "format_amount",
     "generate_keypair",
+    "icp_approve_arg",
+    "icp_balance_of_arg",
+    "icp_decode_int",
+    "icp_decode_query",
+    "icp_decode_read_state",
+    "icp_decode_transfer_result",
+    "icp_envelope_request_id",
+    "icp_ingress_expiry",
+    "icp_self_principal",
+    "icp_sign_query",
+    "icp_sign_read_state",
+    "icp_sign_update",
+    "icp_transfer_arg",
     "keypair_from_secret",
     "nfc_decode_receipt",
     "nfc_decode_request",
