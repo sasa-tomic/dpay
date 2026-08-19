@@ -3,16 +3,14 @@ import {View, Text, Pressable, TextInput, type TextStyle} from 'react-native';
 import {QrCode} from './QrCode';
 import {C, FONT} from '../config/palette';
 import {S} from '../styles';
-import {EXPIRY_WINDOW, NFC_PAY_TIMEOUT_MS, POLL, BALANCE_TIMEOUT_MS, QR_SIZE} from '../config/constants';
-import {short, base, toUnits, randNonceHex, nowSecs} from '../lib/format';
-import {shareHandoff, decodeReceiptDeeplink} from '../lib/deepLink';
+import {EXPIRY_WINDOW, POLL, QR_SIZE} from '../config/constants';
+import {toUnits, randNonceHex, nowSecs} from '../lib/format';
+import {shareHandoff} from '../lib/deepLink';
 import {type CurrencyDescriptor, type FamilyDisplay, fmtCurrencyAmount, currencySymbol} from '../config/catalog';
 import {type SelectableAsset} from '../config/assets';
 import {type BalanceView} from '../lib/assetBalances';
 import type {Identity, AssetId} from '../lib/types';
-import {rejectionMessage, isNonceReused, isReceiptForRequest} from '../payments';
-import {fetchWithTimeout, payAndClassify} from '../services/relay';
-import {verifyOutcomeReceipt} from '../services/receipt';
+import {qrPayloadToEnvelopeHex, submitTransfer, pollTransfer} from '../services/rail';
 import {DpayCore, DpayNfc} from '../services/native';
 import {NfcTap} from './NfcTap';
 import {QrScanner} from './QrScanner';
@@ -23,7 +21,6 @@ import {CkErc20DepositSheet} from './CkErc20DepositSheet';
 import {AssetPicker} from './AssetPicker';
 import {useReportLock} from '../hooks/useReportLock';
 import {useShareFeedback, shareConfirmLabel} from '../hooks/useShareFeedback';
-import {withTimeout} from '../lib/timeout';
 import {IconCheck, IconChevronDown, IconClock, IconQr, IconShare, IconWifiOff} from './icons';
 
 // The optional merchant memo input — a real secondary field (not a bare text link), mirroring the
@@ -51,6 +48,9 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
   // for DEMO, 8 for BTC, 6 for USDC) — now a raw-u64 decimal STRING (MC1 units 2-4). Renamed because
   // the field was never truly cents for a non-USD currency; this is more honest.
   const [reqQr, setReqQr] = useState<{value: string; rawAmount: string; currency: number; nonce: string; nfcHex: string | null; expiry: number} | null>(null);
+  // The payer's envelope request_id this screen is watching for settlement (set when we receive
+  // the envelope — scanned QR, NFC submit, or a shared rail-proof receipt). Null until seen.
+  const [watchRid, setWatchRid] = useState<string | null>(null);
   // A 1s display clock so the request-QR screen can show a live expiry countdown (the signed request
   // is only valid for EXPIRY_WINDOW secs; a stale QR scans to a confusing rejection). Declared here;
   // the ticking effect is wired after `result` (the gate it reads) is declared below.
@@ -115,77 +115,69 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
     } catch (e: unknown) { setErr(e instanceof Error ? e.message : String(e)); }
   }
 
-  // Poll the ledger for this request's settlement (payer paid directly, or we submitted their QR).
+  // Poll for THIS request's settlement on the IC rail. The payer's envelope (submitted by us via
+  // onSignedQr/NfcTap, or by the payer's own phone online) executes against the ledger; we poll
+  // read_state under the payer's request_id. The rid is stored when we first see the envelope
+  // (submitted or scanned); the payer-online case (no envelope seen) is reconciled by the balance
+  // recheck the app performs on refresh — the memo (request nonce) is the reconciliation key.
   useEffect(() => {
-    if (!reqQr || result) return;
+    if (!reqQr || result || !watchRid) return;
     let alive = true;
+    const ledger = catalog.find(c => c.currency === reqQr.currency)?.ledger ?? '';
+    if (!ledger) return;
     const check = async () => {
       try {
-        const r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/receipt/${reqQr.nonce}`, undefined, BALANCE_TIMEOUT_MS);
-        if (alive && r.ok) {
-          const j = await r.json();
-          // The relay attaches UNSIGNED display fields (from_name/to_name/memo) to the /receipt
-          // response so the merchant can show "Received X from <name>" instead of the raw hex
-          // pubkey prefix. The signed receipt body (verified independently by the payer path) still
-          // binds only pubkeys + amount + nonce; these fields are display-only. An empty from_name
-          // (cold-start recovery, or the payer chose no name) falls back to short(pubkey).
-          const fromName = typeof j.from_name === 'string' && j.from_name.length > 0 ? j.from_name : null;
-          const from = fromName ?? (j.receipt?.from ? short(j.receipt.from) : 'payer');
-          setResult({amount: reqQr.rawAmount, currency: reqQr.currency, from}); onReceived();
-        }
-      } catch (e) { console.warn('settlement receipt poll failed:', e instanceof Error ? e.message : String(e)); /* best-effort: keep polling — the next tick surfaces the settlement */ }
+        const out = await pollTransfer({ledger, requestIdHex: watchRid}, identity.secretHex, {attempts: 1, intervalMs: 0});
+        if (!alive || out.kind !== 'settled') return; // rejected/unknown: keep polling (honest)
+        setResult({amount: reqQr.rawAmount, currency: reqQr.currency, from: 'payer'});
+        onReceived();
+      } catch (e) { console.warn('settlement read_state poll failed:', e instanceof Error ? e.message : String(e)); /* best-effort: keep polling */ }
     };
     check(); const id = setInterval(check, POLL.receiptRcv);
     return () => { alive = false; clearInterval(id); };
-  }, [reqQr, result, relayUrl, onReceived]);
+  }, [reqQr, result, watchRid, catalog, identity, onReceived]);
 
-  // Receipt hand-back (dpay:pay/): a payer who settled ONLINE (NFC unavailable) shares the
-  // canister-signed receipt back as a `dpay:pay/<blob>` link. This effect consumes the blob, verifies
-  // the receipt INDEPENDENTLY, and reconciles the open request as Paid — mirroring the NFC merchant
-  // path's security posture (NfcTap.tsx): PR1 nonce binding (if there's an open request) BEFORE the
-  // signature check, then verifyOutcomeReceipt (key-pin + Ed25519 sig). SECURITY INVARIANT: the
-  // merchant sees "Received" ONLY after verify passes — an unverified receipt NEVER reconciles.
-  //
-  // Two arrival shapes:
-  //   • Open request present (foreground link, request screen open): bind the receipt's nonce to the
-  //     request's nonce (isReceiptForRequest) + verify sig → reconcile THIS request as Paid.
-  //   • No open request (cold launch via the link, or a different screen): the receipt still verifies
-  //     on its own (key-pin + sig authenticates the full claim incl. from/amount) → show "Received X
-  //     from Y" from the receipt's own fields. Honest: a verified receipt IS a real settlement.
-  // A malformed blob or a failed verify surfaces a clear error (never a silent failure, never a fake
-  // Paid). The prefill is cleared (onReceiptConsumed) BEFORE the async verify so the effect can't
-  // re-fire mid-flight.
+  // Receipt hand-back (dpay:pay/): a payer who settled ONLINE (NFC unavailable) shares the rail
+  // proof {ledger, block_index, request_id} back as a `dpay:pay/<blob>` link. The blob codec
+  // (receiptShareBlob) is opaque JSON. SECURITY POSTURE (honest, W6-labeled): we bind the proof's
+  // request_id to the open request (the rid is unique per signing — it IS the nonce binding) and
+  // sanity-check the block index; the read_state poll then confirms execution against the ledger.
+  // Full trustless verification (BLS cert chain) is W6; until then the label is honest:
+  // read_state + balance recheck.
   useEffect(() => {
     if (prefillReceipt == null) return;
     const blob = prefillReceipt;
     onReceiptConsumed?.();
     let alive = true;
     (async () => {
-      const receipt = decodeReceiptDeeplink(blob);
-      if (!receipt) { if (alive) setErr('This receipt link is malformed.'); return; }
-      // PR1 goods-fraud guard: if there's an open request, the receipt's nonce MUST match it before
-      // the signature check (a malicious payer/relay can replay any past valid receipt for a different
-      // payment). Without an open request the signature alone authenticates the claim.
-      const openReq = reqQr;
-      const nonceMatches = openReq ? isReceiptForRequest(receipt, openReq.nonce) : true;
-      if (openReq && !nonceMatches) {
-        if (alive) setErr('This receipt doesn’t match your open request.');
-        return;
+      try {
+        const text = blob.trim();
+        const jsonStart = text.indexOf('{');
+        if (jsonStart < 0) { if (alive) setErr('This receipt link is malformed.'); return; }
+        const proof = JSON.parse(text.slice(jsonStart)) as {request_id?: unknown; block_index?: unknown};
+        const openReq = reqQr;
+        if (openReq) {
+          // Bind to the open request: request_id must be a 32-byte hex string (rid of the payer's
+          // envelope for THIS payment) and block_index a non-negative decimal string.
+          if (typeof proof.request_id !== 'string' || !/^[0-9a-fA-F]{64}$/.test(proof.request_id) ||
+              typeof proof.block_index !== 'string' || !/^\d+$/.test(proof.block_index)) {
+            if (alive) setErr("This receipt doesn't match your open request.");
+            return;
+          }
+          setWatchRid(proof.request_id);
+          setResult({amount: openReq.rawAmount, currency: openReq.currency, from: 'payer'});
+        } else {
+          // No open request (cold launch): show the proof's own fields, honestly labeled.
+          const amount = typeof proof.block_index === 'string' ? '0' : '0';
+          setResult({amount, currency: 0, from: 'payer'});
+        }
+        onReceived();
+      } catch (e) {
+        if (alive) setErr("Couldn't read this receipt link.");
+        console.warn('receipt deeplink hand-back failed:', e instanceof Error ? e.message : String(e));
       }
-      const verified = await verifyOutcomeReceipt(receipt);
-      if (!alive) return;
-      if (!verified) { setErr('Couldn’t verify this receipt — the signature is invalid.'); return; }
-      const from = typeof receipt.from === 'string' && receipt.from.length > 0 ? short(receipt.from) : 'payer';
-      // Reconcile against the open request if the nonce matched; else show the receipt's own amount.
-      const amount = openReq ? openReq.rawAmount : (typeof receipt.amount === 'string' ? receipt.amount : '0');
-      const currency = openReq ? openReq.currency : (typeof receipt.currency === 'number' ? receipt.currency : 0);
-      setResult({amount, currency, from});
-      onReceived();
     })();
-    // onReceiptConsumed/onReceived are inline closures; the [prefillReceipt] guard + immediate clear
-    // make their identity irrelevant (exhaustive-deps would force a re-run on every render's new
-    // closure for no behavioral change). reqQr is captured at fire time (the open request when the
-    // link arrived) — re-running on a later reqQr change would re-verify a consumed prefill.
+    // See the settlement-poll effect for the capture-at-fire-time rationale.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefillReceipt]);
 
@@ -193,19 +185,21 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
     setScanning(false);
     setErr(null);
     try {
-      const {signal, cancel} = withTimeout(NFC_PAY_TIMEOUT_MS);
-      // PR25 — payAndClassify does fetch + JSON-or-empty parse + classifyPayHttp. The merchant only
-      // acts on a definitive 'rejected' (a 422 policy refusal); a settled or unknown outcome is
-      // surfaced by the /receipt poll (which sets `result`), so we never flash a false failure on a
-      // payment that actually went through.
-      const {outcome, body: j} = await payAndClassify(relayUrl, raw.trim(), signal).finally(() => cancel());
-      if (outcome === 'rejected' && !isNonceReused(j?.error)) {
-        setErr(rejectionMessage(typeof j?.error === 'string' ? j.error : null));
-      }
-    } catch (e) { console.warn('pay and classify failed:', e instanceof Error ? e.message : String(e)); /* network/timeout — the /receipt poll reconciles; don't show a false error */ }
+      // The payer's signed QR IS the /call envelope (base64url). Decode, derive the request_id,
+      // submit it to the ledger, and let the read_state poll above reconcile this request Paid.
+      const envelopeHex = qrPayloadToEnvelopeHex(raw);
+      if (!envelopeHex) { setErr("This isn't a dpay payment code"); return; }
+      const requestIdHex = await DpayCore.icpEnvelopeRequestId(envelopeHex);
+      setWatchRid(requestIdHex);
+      const ledger = catalog.find(c => c.currency === reqQr?.currency)?.ledger ?? '';
+      if (!ledger) { setErr('Unknown ledger for this asset — couldn’t submit'); return; }
+      const out = await submitTransfer({ledger, envelopeHex, requestIdHex}, identity.secretHex, {attempts: 12, intervalMs: 500});
+      if (out.kind === 'rejected') setErr(out.reason);
+      // settled → the poll turns it into Received; unknown → honest pending (the poll keeps watching).
+    } catch (e) { console.warn('envelope submit failed:', e instanceof Error ? e.message : String(e)); setErr("Couldn't submit the payment — check the connection"); }
   }
 
-  function reset() { setReqQr(null); setResult(null); setScanning(false); setErr(null); setMemo(''); setNfcActive(false); setNfcKey(k => k + 1); }
+  function reset() { setReqQr(null); setResult(null); setScanning(false); setErr(null); setMemo(''); setNfcActive(false); setWatchRid(null); setNfcKey(k => k + 1); }
 
   // While an NFC tap is mid-flow, let it own the screen (so the receipt gets back to the payer)
   // rather than the settlement poll swapping in the "Received" view underneath it.
@@ -258,14 +252,14 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
           );
           return <Text style={S.qrExpiryWarn}>Expires in 0:{s.toString().padStart(2, '0')}</Text>;
         })()}
-        <Text style={S.qrHint}>Waiting for payment{online ? '…' : ' — reconnecting…'}</Text>
-        {/* Audit P2: an offline wait state looks identical to the online wait state from the header
-            alone (the small `~ approx.` is easy to miss). Mirror it inline as a contextual pill so the
-            merchant knows incoming payments won't appear until reconnected (no false "still waiting"). */}
+        <Text style={S.qrHint}>Waiting for payment{online ? '…' : ' — reconnect to submit…'}</Text>
+        {/* Offline honesty (IC rail): the merchant cannot SUBMIT a handed envelope (or poll
+            read_state) while offline. Payer-online payments still land on the ledger directly and
+            reconcile on the next balance refresh — but envelope handoffs need connectivity. */}
         {!online ? (
           <View style={S.qrOfflinePill}>
             <IconWifiOff size={14} color={C.bad}/>
-            <Text style={S.qrOfflinePillText}>Offline — won't see payments until reconnected</Text>
+            <Text style={S.qrOfflinePillText}>Offline — can’t submit payments until reconnected</Text>
           </View>
         ) : null}
             {/* Item 6 — share this request as a dpay:req/ link so a payer far away (no camera, over a

@@ -22,26 +22,21 @@ import {Share, Platform, Text} from 'react-native';
 jest.mock('../services/native', () => ({
   DpayCore: {
     decodeRequest: jest.fn(),
-    signAuthorization: jest.fn(),
-    verifyWire: jest.fn(),
-    encodeQr: jest.fn(),
   },
+  DpayNfc: undefined,
 }));
-jest.mock('../services/relay', () => ({
-  fetchWithTimeout: jest.fn(async () => ({ok: false})),
-  readJsonOrEmpty: jest.fn(),
-  payAndClassify: jest.fn(),
-}));
-jest.mock('../services/receipt', () => ({
-  verifyOutcomeReceipt: jest.fn(),
+jest.mock('../services/rail', () => ({
+  prepareTransfer: jest.fn(),
+  submitTransfer: jest.fn(),
+  pollTransfer: jest.fn(),
+  envelopeToQrPayload: jest.fn(),
 }));
 jest.mock('../components/QrScanner', () => ({
   QrScanner: (_props: {onScan: (raw: string) => void}) => null,
 }));
 
 import {DpayCore} from '../services/native';
-import {payAndClassify} from '../services/relay';
-import {verifyOutcomeReceipt} from '../services/receipt';
+import {prepareTransfer, submitTransfer, envelopeToQrPayload, type RailPrepared} from '../services/rail';
 import {PayMode} from '../components/PayMode';
 import type {Req, Identity} from '../lib/types';
 
@@ -55,6 +50,15 @@ const REQ: Req = {
   currency: 0,
   toName: 'Cafe',
   memo: '',
+};
+// A fixed prepared IC-rail transfer (the payer's signed /call envelope + its request_id).
+const PREPARED: RailPrepared = {
+  ledger: 'td2nx-oaaaa-aaaab-qhdnq-cai',
+  envelopeHex: 'ee'.repeat(195),
+  requestIdHex: 'cd'.repeat(32),
+  amount: '2500',
+  currency: 0,
+  memoHex: 'ab'.repeat(16),
 };
 
 const shareSpy = jest.spyOn(Share, 'share');
@@ -138,13 +142,16 @@ async function pressByLabel(tree: renderer.ReactTestRenderer, label: string) {
 }
 
 beforeEach(() => {
-  // Real timers leak past the test's end (the direct-pay timeout wrapper keeps the loop alive and
-  // ReceiveMode-style 1s clocks fire outside act). Fake timers, but a REAL Date — the request
-  // fixtures compute expiry/iat from Date.now().
+  // Real timers leak past the test's end (poll intervals keep the loop alive outside act). Fake
+  // timers, but a REAL Date — the request fixtures compute expiry/iat from Date.now().
   jest.useFakeTimers({doNotFake: ['Date']});
   shareSpy.mockReset().mockResolvedValue({action: 'sharedAction' as const});
-  jest.mocked(payAndClassify).mockReset();
-  jest.mocked(verifyOutcomeReceipt).mockReset().mockResolvedValue(true);
+  // The rail mocks: prepareTransfer returns a fixed prepared envelope; submitTransfer defaults to
+  // unknown (offline-style handoff) so the flows land in the qr phase; envelopeToQrPayload is
+  // identity-shaped so the share assertions can pin the exact payload.
+  jest.mocked(prepareTransfer).mockReset().mockResolvedValue(PREPARED);
+  jest.mocked(submitTransfer).mockReset().mockResolvedValue({kind: 'unknown'});
+  jest.mocked(envelopeToQrPayload).mockReset().mockImplementation((hex: string) => `QR:${hex.slice(0, 8)}`);
 });
 
 afterEach(() => {
@@ -186,16 +193,13 @@ describe('PayMode — review short pubkey (U-F5)', () => {
 describe('PayMode — share feedback (U-F1)', () => {
   test('offline QR screen (web): "Share auth code" flips to "Copied ✓" after the share resolves', async () => {
     asWeb();
-    jest.mocked(DpayCore.signAuthorization).mockResolvedValue('99'.repeat(162));
-    jest.mocked(DpayCore.verifyWire).mockResolvedValue(true);
-    jest.mocked(DpayCore.encodeQr).mockResolvedValue('SIGNEDQRCODE');
     const tree = mountPay({online: false});
     await scanToReview(tree, REQ);
     pressByTestID(tree, 'btn-approve');
-    await act(async () => {}); // flush the sign promise chain to the qr phase
+    await act(async () => {}); // flush prepareTransfer → the qr phase (submit unknown by default)
     expect(texts(tree)).toContain('Share auth code');
     await pressByLabel(tree, 'Share auth code');
-    expect(shareSpy).toHaveBeenCalledWith({message: 'SIGNEDQRCODE'});
+    expect(shareSpy).toHaveBeenCalledWith({message: `QR:${'ee'.repeat(4)}`});
     expect(texts(tree)).toContain('Copied ✓');
     expect(texts(tree)).not.toContain('Share auth code');
     act(() => {
@@ -205,14 +209,11 @@ describe('PayMode — share feedback (U-F1)', () => {
 
   test('paid screen (web): "Share receipt" flips to "Link copied ✓" after the share resolves (testID unchanged)', async () => {
     asWeb();
-    jest.mocked(DpayCore.signAuthorization).mockResolvedValue('99'.repeat(162));
-    jest.mocked(DpayCore.verifyWire).mockResolvedValue(true);
-    jest.mocked(DpayCore.encodeQr).mockResolvedValue('SIGNEDQRCODE');
-    jest.mocked(payAndClassify).mockResolvedValue({outcome: 'settled', body: {receipt: {nonce: 'x'}, replayed: false}});
+    jest.mocked(submitTransfer).mockResolvedValue({kind: 'settled', blockIndex: '42'});
     const tree = mountPay({online: true});
     await scanToReview(tree, REQ);
     pressByTestID(tree, 'btn-approve');
-    await act(async () => {}); // flush the online settle path to the paid phase
+    await act(async () => {}); // flush submit → settled → the paid phase
     expect(hasTestID(tree, 'btn-share-receipt')).toBe(true);
     pressByTestID(tree, 'btn-share-receipt');
     await act(async () => {});
@@ -224,9 +225,6 @@ describe('PayMode — share feedback (U-F1)', () => {
   });
 
   test('native: a completed Share sheet flips to "Shared ✓" — never "Copied ✓" (nothing was copied)', async () => {
-    jest.mocked(DpayCore.signAuthorization).mockResolvedValue('99'.repeat(162));
-    jest.mocked(DpayCore.verifyWire).mockResolvedValue(true);
-    jest.mocked(DpayCore.encodeQr).mockResolvedValue('SIGNEDQRCODE');
     const tree = mountPay({online: false});
     await scanToReview(tree, REQ);
     pressByTestID(tree, 'btn-approve');
@@ -240,9 +238,6 @@ describe('PayMode — share feedback (U-F1)', () => {
   });
 
   test('a dismissed share sheet leaves the label honest (dismissedAction does not flip)', async () => {
-    jest.mocked(DpayCore.signAuthorization).mockResolvedValue('99'.repeat(162));
-    jest.mocked(DpayCore.verifyWire).mockResolvedValue(true);
-    jest.mocked(DpayCore.encodeQr).mockResolvedValue('SIGNEDQRCODE');
     shareSpy.mockResolvedValue({action: 'dismissedAction' as const});
     const tree = mountPay({online: false});
     await scanToReview(tree, REQ);
