@@ -477,3 +477,81 @@ fn golden_minter_args() {
     assert_eq!(price.max_transaction_fee, 78_000_000_000_000u128);
     assert_eq!(price.timestamp, Some(1_700_000_000));
 }
+
+#[test]
+fn gateway_codecs_round_trip() {
+    use dpay_icp::icrc::{
+        decode_account_arg, decode_approve_arg, decode_transfer_arg, encode_nat8_reply,
+        encode_nat_reply, encode_text_reply, encode_transfer_bad_fee, encode_transfer_duplicate,
+        encode_transfer_insufficient_funds, encode_transfer_ok, encode_transfer_too_old,
+    };
+    use dpay_icp::principal::Principal;
+
+    let owner = Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap();
+    let to = dpay_icp::principal::Account { owner: owner.clone(), subaccount: [0u8; 32] };
+    let memo = vec![0xabu8; 16];
+
+    // transfer arg round-trip (hash order to/fee/memo/from_subaccount/created_at/amount)
+    let arg = dpay_icp::icrc::transfer_arg(&to, None, 250_000, Some(10), Some(memo.clone()), None);
+    let d = decode_transfer_arg(&arg).unwrap();
+    assert_eq!(d.to, to);
+    assert_eq!(d.amount, 250_000);
+    assert_eq!(d.fee, Some(10));
+    assert_eq!(d.memo, Some(memo));
+    assert_eq!(d.from_subaccount, None);
+    assert_eq!(d.created_at_time_ns, None);
+
+    // approve arg round-trip
+    let arg = dpay_icp::icrc::approve_arg(None, &to, Some(1000), None, None, None, None, Some(10));
+    let d = decode_approve_arg(&arg).unwrap();
+    assert_eq!(d.spender, to);
+    assert_eq!(d.amount, Some(1000));
+    assert_eq!(d.fee, Some(10));
+
+    // balance_of arg round-trip
+    let arg = dpay_icp::icrc::balance_of_arg(&to);
+    assert_eq!(decode_account_arg(&arg).unwrap(), to);
+
+    // reply encoders decode through the production decoders
+    let ok = encode_transfer_ok(1234);
+    match dpay_icp::icrc::decode_transfer_result(&ok).unwrap() {
+        dpay_icp::icrc::TransferResult::Ok(b) => assert_eq!(b, 1234),
+        other => panic!("expected Ok, got {other:?}"),
+    }
+    match dpay_icp::icrc::decode_transfer_result(&encode_transfer_insufficient_funds(77)).unwrap() {
+        dpay_icp::icrc::TransferResult::Err(dpay_icp::icrc::TransferError::InsufficientFunds { balance }) => {
+            assert_eq!(balance, 77)
+        }
+        other => panic!("expected InsufficientFunds, got {other:?}"),
+    }
+    match dpay_icp::icrc::decode_transfer_result(&encode_transfer_bad_fee(10_000)).unwrap() {
+        dpay_icp::icrc::TransferResult::Err(dpay_icp::icrc::TransferError::BadFee { expected_fee }) => {
+            assert_eq!(expected_fee, 10_000)
+        }
+        other => panic!("expected BadFee, got {other:?}"),
+    }
+    assert!(matches!(
+        dpay_icp::icrc::decode_transfer_result(&encode_transfer_too_old()).unwrap(),
+        dpay_icp::icrc::TransferResult::Err(dpay_icp::icrc::TransferError::TooOld)
+    ));
+    match dpay_icp::icrc::decode_transfer_result(&encode_transfer_duplicate(42)).unwrap() {
+        dpay_icp::icrc::TransferResult::Err(dpay_icp::icrc::TransferError::Duplicate { duplicate_of }) => {
+            assert_eq!(duplicate_of, 42)
+        }
+        other => panic!("expected Duplicate, got {other:?}"),
+    }
+
+    // int / text replies round-trip through the live-captured golden decoders
+    assert_eq!(dpay_icp::icrc::decode_int(&encode_nat_reply(0)).unwrap(), 0);
+    assert_eq!(dpay_icp::icrc::decode_int(&encode_nat_reply(u64::MAX as u128 + 7)).unwrap(), u64::MAX as i128 + 7);
+    assert_eq!(dpay_icp::icrc::decode_int(&encode_nat8_reply(8)).unwrap(), 8);
+    assert_eq!(
+        dpay_icp::icrc::decode_text(&encode_text_reply("bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh")).unwrap(),
+        "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh"
+    );
+
+    // the encoder output is byte-identical to the live-captured Ok golden (block 1234)
+    let ok_golden = unhex(G_TR_OK);
+    let ours = encode_transfer_ok(1234);
+    assert_eq!(&ok_golden[..], &ours[..]);
+}

@@ -62,7 +62,17 @@ async fn main() {
 
     let ledger = build_ledger(&cfg).await;
     let apk = load_apk();
-    let state = AppState::new(ledger).with_apk(apk);
+    let state = AppState::new(ledger.clone()).with_apk(apk);
+    // IC-rail cutover (test-helpers / memory mode only): attach the fake-IC `/api/v2` gateway.
+    // The app signs envelopes and POSTs them HERE instead of icp-api.io; the gateway verifies the
+    // real envelope signature and moves principal-keyed balances. Prod (`agent` mode) never builds
+    // this — the app talks straight to icp-api.io there.
+    #[cfg(all(feature = "test-helpers", not(feature = "agent")))]
+    let state = {
+        let fake = dpay_relay::ic_gateway::FakeIc::from_catalog(&*ledger).await;
+        println!("fake-IC /api/v2 gateway ENABLED (test-helpers) — envelopes settle in-memory at user principals");
+        state.with_fake_ic(fake)
+    };
     state.set_faucet_enabled(cfg.faucet);
     if cfg.faucet {
         println!(

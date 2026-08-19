@@ -125,6 +125,17 @@ wasm version-identity vs the DFINITY deployments is unprovable offline (watch vi
 - **W6 Trustless receipts (M):** BLS threshold-sig verification of the read_state
   certificate vs pinned subnet pubkey, in dpay-icp (wasm-safe pairing crate — evaluate
   size; this is the only new crypto).
+  - **Upstream survey done (2026-08-19):** take DFINITY's own stack, don't hand-roll —
+    `dfinity/response-verification` (Apache-2.0, cloned at `third_party/response-verification`)
+    ships `ic-certificate-verification` (time-window check + root→subnet delegation incl. the
+    new `/canister_ranges/<subnet>/<range_key>` structure + DER-prefixed 96-B BLS key) on top of
+    `ic-verify-bls-signature` 0.6 (wraps `ic_bls12_381`, pure Rust; the repo's
+    `ic-response-verification-wasm` package proves the stack runs as wasm32). Crate pulls
+    `candid` as a dep — if that violates dpay-icp's minimal-deps invariant, port the ~200 LoC
+    verify logic over our existing hand-rolled CBOR/tree code and take ONLY
+    `ic-verify-bls-signature` as the new crypto dep (both options license-clean). Cross-compare
+    also confirmed: our request_id / hash-tree lookup_path semantics match agent-rs + response-verification
+    source exactly (beyond the existing byte goldens).
 - **W7 Facade + relay retirement (S):** delete settlement/receipt/mint surfaces from the
   product path (facade reduces to catalog/DUSD-faucet or retires; `/pay`,`/withdraw`,
   `/receipt*` relay routes die; `EXPECTED_RECEIPT_PUBKEY` retires). DUSD needs a faucet

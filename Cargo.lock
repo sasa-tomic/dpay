@@ -897,6 +897,8 @@ dependencies = [
  "base64 0.22.1",
  "candid",
  "dpay-core",
+ "dpay-icp",
+ "dpay-relay",
  "ed25519-dalek",
  "futures-util",
  "hex",

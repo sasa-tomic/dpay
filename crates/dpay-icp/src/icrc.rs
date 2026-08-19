@@ -574,6 +574,74 @@ impl<'a> Rd<'a> {
         }
     }
 
+    fn opt_blob(&mut self) -> Result<Option<Vec<u8>>, IcpError> {
+        let tag = self.take(1)?[0];
+        match tag {
+            0x00 => Ok(None),
+            0x01 => {
+                let n = self.uleb()? as usize;
+                if n > 1 << 16 {
+                    return Err(Self::err("blob length out of range"));
+                }
+                Ok(Some(self.take(n)?.to_vec()))
+            }
+            _ => Err(Self::err("bad opt tag")),
+        }
+    }
+
+    fn opt_nat(&mut self) -> Result<Option<u128>, IcpError> {
+        let tag = self.take(1)?[0];
+        match tag {
+            0x00 => Ok(None),
+            0x01 => Ok(Some(self.uleb()?)),
+            _ => Err(Self::err("bad opt tag")),
+        }
+    }
+
+    fn principal(&mut self) -> Result<crate::principal::Principal, IcpError> {
+        let tag = self.take(1)?[0];
+        if tag != 0x01 {
+            return Err(Self::err("bad principal class byte"));
+        }
+        let n = self.uleb()? as usize;
+        if n > 29 {
+            return Err(Self::err("principal too long"));
+        }
+        crate::principal::Principal::from_bytes(self.take(n)?)
+    }
+
+    fn opt_principal(&mut self) -> Result<Option<crate::principal::Principal>, IcpError> {
+        let tag = self.take(1)?[0];
+        match tag {
+            0x00 => Ok(None),
+            0x01 => Ok(Some(self.principal()?)),
+            _ => Err(Self::err("bad opt tag")),
+        }
+    }
+
+    /// Account value as put_account writes it: owner principal, then subaccount as
+    /// opt blob (zero-subaccount canonicalized to `none`).
+    fn account(&mut self) -> Result<Account, IcpError> {
+        let tag = self.take(1)?[0];
+        if tag != 0x01 {
+            return Err(Self::err("bad principal class byte"));
+        }
+        let n = self.uleb()? as usize;
+        if n > 29 {
+            return Err(Self::err("principal too long"));
+        }
+        let owner = crate::principal::Principal::from_bytes(self.take(n)?)?;
+        let sub = self.opt_blob()?;
+        let mut subaccount = [0u8; 32];
+        if let Some(b) = sub {
+            if b.len() != 32 {
+                return Err(Self::err("subaccount must be 32 bytes"));
+            }
+            subaccount.copy_from_slice(&b);
+        }
+        Ok(Account { owner, subaccount })
+    }
+
     fn text(&mut self) -> Result<String, IcpError> {
         let n = self.uleb()? as usize;
         if n > 1 << 20 {
@@ -593,6 +661,447 @@ impl<'a> Rd<'a> {
         }
         Ok(v[idx].clone())
     }
+}
+
+
+// --- gateway-side arg decoders + reply encoders (fake-IC /api/v2 test gateway) ---------------------
+//
+// These power the offline test relay's fake-IC gateway: decode the exact args the app
+// builds above, and re-encode replies byte-compatible with a real ledger. Production
+// surfaces (app/relay/canister) never call these; the real IC is the authority.
+
+/// Decoded `icrc1_transfer` argument.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TransferArg {
+    pub to: Account,
+    pub from_subaccount: Option<[u8; 32]>,
+    pub amount: u128,
+    pub fee: Option<u128>,
+    pub memo: Option<Vec<u8>>,
+    pub created_at_time_ns: Option<u64>,
+}
+
+/// Decode an `icrc1_transfer` argument built by [`transfer_arg`] (hash field order:
+/// to, fee, memo, from_subaccount, created_at_time, amount).
+pub fn decode_transfer_arg(arg: &[u8]) -> Result<TransferArg, IcpError> {
+    let mut rd = Rd { b: arg, i: 0 };
+    rd.message()?;
+    let to = rd.account()?;
+    let fee = rd.opt_nat()?;
+    let memo = rd.opt_blob()?;
+    let from_sub = rd.opt_blob()?;
+    let from_subaccount = match from_sub {
+        None => None,
+        Some(b) => {
+            let mut sa = [0u8; 32];
+            if b.len() != 32 {
+                return Err(IcpError::DidlDecode("from_subaccount must be 32 bytes".into()));
+            }
+            sa.copy_from_slice(&b);
+            Some(sa)
+        }
+    };
+    let created_at_time_ns = rd.opt_nat64()?;
+    let amount = rd.nat()?;
+    rd.finish()?;
+    Ok(TransferArg { to, from_subaccount, amount, fee, memo, created_at_time_ns })
+}
+
+/// Decoded `icrc2_approve` argument.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApproveArg {
+    pub from_subaccount: Option<[u8; 32]>,
+    pub spender: Account,
+    pub amount: Option<u128>,
+    pub expected_allowance: Option<u128>,
+    pub expires_at_ns: Option<u64>,
+    pub memo: Option<Vec<u8>>,
+    pub created_at_time_ns: Option<u64>,
+    pub fee: Option<u128>,
+}
+
+/// Decode an `icrc2_approve` argument built by [`approve_arg`] (hash field order:
+/// fee, memo, from_subaccount, created_at_time, amount, expected_allowance, expires_at, spender).
+#[allow(clippy::too_many_arguments)]
+pub fn decode_approve_arg(arg: &[u8]) -> Result<ApproveArg, IcpError> {
+    let mut rd = Rd { b: arg, i: 0 };
+    rd.message()?;
+    let fee = rd.opt_nat()?;
+    let memo = rd.opt_blob()?;
+    let from_sub = rd.opt_blob()?;
+    let from_subaccount = match from_sub {
+        None => None,
+        Some(b) => {
+            let mut sa = [0u8; 32];
+            if b.len() != 32 {
+                return Err(IcpError::DidlDecode("from_subaccount must be 32 bytes".into()));
+            }
+            sa.copy_from_slice(&b);
+            Some(sa)
+        }
+    };
+    let created_at_time_ns = rd.opt_nat64()?;
+    let amount = rd.nat()?;
+    let expected_allowance = rd.opt_nat()?;
+    let expires_at_ns = rd.opt_nat64()?;
+    let spender = rd.account()?;
+    rd.finish()?;
+    Ok(ApproveArg {
+        from_subaccount,
+        spender,
+        // candid encodes `amount: None` (the revoke value) as literal 0; both mean the
+        // same thing at the ledger, so normalize to None here.
+        amount: if amount == 0 { None } else { Some(amount) },
+        expected_allowance,
+        expires_at_ns,
+        memo,
+        created_at_time_ns,
+        fee,
+    })
+}
+
+/// Decoded `icrc1_balance_of` / `icrc2_allowance` account argument (balance_of takes one).
+pub fn decode_account_arg(arg: &[u8]) -> Result<Account, IcpError> {
+    let mut rd = Rd { b: arg, i: 0 };
+    rd.message()?;
+    let a = rd.account()?;
+    rd.finish()?;
+    Ok(a)
+}
+
+/// Decoded `retrieve_btc_with_approval` argument (hash order: from_subaccount, address, amount).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RetrieveBtcArg {
+    pub from_subaccount: Option<[u8; 32]>,
+    pub address: String,
+    pub amount: u64,
+}
+
+pub fn decode_retrieve_btc_arg(arg: &[u8]) -> Result<RetrieveBtcArg, IcpError> {
+    let mut rd = Rd { b: arg, i: 0 };
+    rd.message()?;
+    let from_sub = rd.opt_blob()?;
+    let from_subaccount = match from_sub {
+        None => None,
+        Some(b) => {
+            let mut sa = [0u8; 32];
+            if b.len() != 32 {
+                return Err(IcpError::DidlDecode("from_subaccount must be 32 bytes".into()));
+            }
+            sa.copy_from_slice(&b);
+            Some(sa)
+        }
+    };
+    let address = rd.text()?;
+    let amount = rd.nat64()?;
+    rd.finish()?;
+    Ok(RetrieveBtcArg { from_subaccount, address, amount })
+}
+
+/// Decoded `withdraw_eth` argument (hash order: from_subaccount, recipient, amount).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WithdrawEthArg {
+    pub from_subaccount: Option<[u8; 32]>,
+    pub recipient: String,
+    pub amount: u128,
+}
+
+pub fn decode_withdraw_eth_arg(arg: &[u8]) -> Result<WithdrawEthArg, IcpError> {
+    let mut rd = Rd { b: arg, i: 0 };
+    rd.message()?;
+    let from_sub = rd.opt_blob()?;
+    let from_subaccount = match from_sub {
+        None => None,
+        Some(b) => {
+            let mut sa = [0u8; 32];
+            if b.len() != 32 {
+                return Err(IcpError::DidlDecode("from_subaccount must be 32 bytes".into()));
+            }
+            sa.copy_from_slice(&b);
+            Some(sa)
+        }
+    };
+    let recipient = rd.text()?;
+    let amount = rd.nat()?;
+    rd.finish()?;
+    Ok(WithdrawEthArg { from_subaccount, recipient, amount })
+}
+
+
+/// Decoded `MinterAccount` (the ONE-record arg ckBTC `get_btc_address` takes).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MinterAccountArg {
+    pub owner: Option<crate::principal::Principal>,
+    pub subaccount: Option<[u8; 32]>,
+}
+
+/// Decode a [`minter_account_arg`] payload (hash order: owner opt-principal, subaccount opt-blob).
+pub fn decode_minter_account_arg(arg: &[u8]) -> Result<MinterAccountArg, IcpError> {
+    let mut rd = Rd { b: arg, i: 0 };
+    rd.message()?;
+    let owner = match rd.opt_principal()? {
+        Some(p) => Some(p),
+        None => None,
+    };
+    let sub = rd.opt_blob()?;
+    let subaccount = sub.map(|b| {
+        let mut a = [0u8; 32];
+        if b.len() == 32 {
+            a.copy_from_slice(&b);
+        }
+        a
+    });
+    rd.finish()?;
+    Ok(MinterAccountArg { owner, subaccount })
+}
+
+/// Decoded `withdraw_erc20` argument.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WithdrawErc20ArgDecoded {
+    pub amount: u128,
+    pub ckerc20_ledger_id: crate::principal::Principal,
+    pub recipient: String,
+    pub from_cketh_subaccount: Option<[u8; 32]>,
+    pub from_ckerc20_subaccount: Option<[u8; 32]>,
+}
+
+/// Decode a [`withdraw_erc20_arg`] payload (hash order: ledger principal, recipient text,
+/// cketh subaccount, ckerc20 subaccount, amount).
+pub fn decode_withdraw_erc20_arg(arg: &[u8]) -> Result<WithdrawErc20ArgDecoded, IcpError> {
+    let mut rd = Rd { b: arg, i: 0 };
+    rd.message()?;
+    let ckerc20_ledger_id = rd.principal()?;
+    let recipient = rd.text()?;
+    let eth_sub = rd.opt_blob()?;
+    let erc_sub = rd.opt_blob()?;
+    let amount = rd.nat()?;
+    rd.finish()?;
+    let to_arr = |b: Option<Vec<u8>>| -> Option<[u8; 32]> {
+        b.map(|v| {
+            let mut a = [0u8; 32];
+            if v.len() == 32 {
+                a.copy_from_slice(&v);
+            }
+            a
+        })
+    };
+    Ok(WithdrawErc20ArgDecoded {
+        amount,
+        ckerc20_ledger_id,
+        recipient,
+        from_cketh_subaccount: to_arr(eth_sub),
+        from_ckerc20_subaccount: to_arr(erc_sub),
+    })
+}
+
+// --- reply encoders (byte-compatible with the real ledgers; tables pinned to goldens) -------------
+
+/// The TransferResult reply type table (8 types), shared by every transfer reply —
+/// the exact bytes of the production-candid 0.10.22 golden prefix.
+const TRANSFER_REPLY_TABLE: &[u8] = &[
+    0x44, 0x49, 0x44, 0x4c, 0x08, 0x6b, 0x02, 0xbc, 0x8a, 0x01, 0x7d, 0xc5, 0xfe, 0xd2, 0x01,
+    0x01, 0x6b, 0x08, 0xd1, 0xc4, 0x98, 0x7c, 0x02, 0xc2, 0x91, 0xec, 0xb9, 0x02, 0x7f, 0x94,
+    0xc1, 0xc7, 0x89, 0x04, 0x03, 0xeb, 0x82, 0xa8, 0x97, 0x04, 0x04, 0xa1, 0xc3, 0xeb, 0xfd,
+    0x07, 0x05, 0xf0, 0x87, 0xe6, 0xdb, 0x09, 0x06, 0x93, 0xe5, 0xbe, 0xc8, 0x0c, 0x7f, 0xeb,
+    0x9c, 0xdb, 0xd5, 0x0f, 0x07, 0x6c, 0x02, 0xc7, 0xeb, 0xc4, 0xd0, 0x09, 0x71, 0xc4, 0x98,
+    0xb1, 0xb5, 0x0d, 0x7d, 0x6c, 0x01, 0x9b, 0xb3, 0xbe, 0xa6, 0x0a, 0x7d, 0x6c, 0x01, 0x8b,
+    0xbd, 0xf2, 0x9b, 0x01, 0x7d, 0x6c, 0x01, 0xbf, 0x9b, 0xb7, 0xf0, 0x0d, 0x7d, 0x6c, 0x01,
+    0xa3, 0xbb, 0x91, 0x8c, 0x0a, 0x78, 0x6c, 0x01, 0x9c, 0xba, 0xb6, 0x9c, 0x02, 0x7d,
+];
+
+fn transfer_reply(err_variant: Option<(u8, &[u8])>, ok_block: u64) -> Vec<u8> {
+    let mut out = TRANSFER_REPLY_TABLE.to_vec();
+    out.push(0x01); // nargs
+    out.push(0x00); // arg ref -> type 0 (variant)
+    match err_variant {
+        None => {
+            out.push(0x00); // Ok
+            let mut b = ok_block as u128;
+            loop {
+                let mut byte = (b & 0x7f) as u8;
+                b >>= 7;
+                if b != 0 {
+                    byte |= 0x80;
+                }
+                out.push(byte);
+                if b == 0 {
+                    break;
+                }
+            }
+        }
+        Some((idx, payload)) => {
+            out.push(0x01); // Err
+            out.push(idx);
+            out.extend_from_slice(payload);
+        }
+    }
+    out
+}
+
+/// Reply bytes for `Ok(block_index)`.
+pub fn encode_transfer_ok(block_index: u64) -> Vec<u8> {
+    transfer_reply(None, block_index)
+}
+
+/// Reply bytes for `Err(InsufficientFunds { balance })` (variant idx 7, hash order).
+pub fn encode_transfer_insufficient_funds(balance: u128) -> Vec<u8> {
+    let mut payload = Vec::new();
+    let mut b = balance;
+    loop {
+        let mut byte = (b & 0x7f) as u8;
+        b >>= 7;
+        if b != 0 {
+            byte |= 0x80;
+        }
+        payload.push(byte);
+        if b == 0 {
+            break;
+        }
+    }
+    transfer_reply(Some((7, &payload)), 0)
+}
+
+/// Reply bytes for `Err(BadFee { expected_fee })` (variant idx 4).
+pub fn encode_transfer_bad_fee(expected_fee: u128) -> Vec<u8> {
+    let mut payload = Vec::new();
+    let mut b = expected_fee;
+    loop {
+        let mut byte = (b & 0x7f) as u8;
+        b >>= 7;
+        if b != 0 {
+            byte |= 0x80;
+        }
+        payload.push(byte);
+        if b == 0 {
+            break;
+        }
+    }
+    transfer_reply(Some((4, &payload)), 0)
+}
+
+/// Reply bytes for `Err(TooOld)` (variant idx 6, no payload).
+pub fn encode_transfer_too_old() -> Vec<u8> {
+    transfer_reply(Some((6, &[])), 0)
+}
+
+/// Reply bytes for `Err(Duplicate { duplicate_of })` (variant idx 3).
+pub fn encode_transfer_duplicate(duplicate_of: u64) -> Vec<u8> {
+    let mut payload = Vec::new();
+    let mut b = duplicate_of as u128;
+    loop {
+        let mut byte = (b & 0x7f) as u8;
+        b >>= 7;
+        if b != 0 {
+            byte |= 0x80;
+        }
+        payload.push(byte);
+        if b == 0 {
+            break;
+        }
+    }
+    transfer_reply(Some((3, &payload)), 0)
+}
+
+
+/// The ApproveResult reply type table (production-candid 0.10.22 golden prefix).
+const APPROVE_REPLY_TABLE: &[u8] = &[
+    0x44, 0x49, 0x44, 0x4c, 0x08, 0x6b, 0x02, 0xbc, 0x8a, 0x01, 0x7d, 0xc5, 0xfe, 0xd2, 0x01,
+    0x01, 0x6b, 0x09, 0xd1, 0xc4, 0x98, 0x7c, 0x02, 0xc2, 0x91, 0xec, 0xb9, 0x02, 0x7f, 0xeb,
+    0x82, 0xa8, 0x97, 0x04, 0x03, 0xa1, 0xc3, 0xeb, 0xfd, 0x07, 0x04, 0x9c, 0x84, 0xe8, 0xfc,
+    0x08, 0x05, 0xf0, 0x87, 0xe6, 0xdb, 0x09, 0x06, 0x93, 0xe5, 0xbe, 0xc8, 0x0c, 0x7f, 0x85,
+    0x8f, 0xee, 0x95, 0x0f, 0x06, 0xeb, 0x9c, 0xdb, 0xd5, 0x0f, 0x07, 0x6c, 0x02, 0xc7, 0xeb,
+    0xc4, 0xd0, 0x09, 0x71, 0xc4, 0x98, 0xb1, 0xb5, 0x0d, 0x7d, 0x6c, 0x01, 0x8b, 0xbd, 0xf2,
+    0x9b, 0x01, 0x7d, 0x6c, 0x01, 0xbf, 0x9b, 0xb7, 0xf0, 0x0d, 0x7d, 0x6c, 0x01, 0x92, 0xae,
+    0xce, 0xe5, 0x0f, 0x7d, 0x6c, 0x01, 0xa3, 0xbb, 0x91, 0x8c, 0x0a, 0x78, 0x6c, 0x01, 0x9c,
+    0xba, 0xb6, 0x9c, 0x02, 0x7d,
+];
+
+fn uleb_bytes(mut b: u128) -> Vec<u8> {
+    let mut out = Vec::new();
+    loop {
+        let mut byte = (b & 0x7f) as u8;
+        b >>= 7;
+        if b != 0 {
+            byte |= 0x80;
+        }
+        out.push(byte);
+        if b == 0 {
+            return out;
+        }
+    }
+}
+
+/// Reply bytes for an approve `Ok(block_index)`.
+pub fn encode_approve_ok(block_index: u64) -> Vec<u8> {
+    let mut out = APPROVE_REPLY_TABLE.to_vec();
+    out.extend_from_slice(&[0x01, 0x00, 0x00]);
+    out.extend_from_slice(&uleb_bytes(block_index as u128));
+    out
+}
+
+/// Reply bytes for the minter retrieve/withdraw `Ok({block_index})` results — one shared
+/// table (production candid 0.10.22): variant Ok of a record with a nat64 block_index.
+pub fn encode_minter_ok(block_index: u64) -> Vec<u8> {
+    let mut out = vec![
+        0x44, 0x49, 0x44, 0x4c, 0x02, 0x6b, 0x01, 0xbc, 0x8a, 0x01, 0x01, 0x6c, 0x01, 0xe0,
+        0x9e, 0xcb, 0xa9, 0x02, 0x78, 0x01, 0x00, 0x00,
+    ];
+    out.extend_from_slice(&block_index.to_le_bytes());
+    out
+}
+
+/// Reply bytes for the ckETH minter `eip_1559_transaction_price` query — the production
+/// candid table followed by values in hash order: max_priority, max_fee, max_tx_fee,
+/// timestamp (opt nat64 LE), gas_limit.
+pub fn encode_eip1559_price(p: &Eip1559Price) -> Vec<u8> {
+    let mut out = vec![
+        0x44, 0x49, 0x44, 0x4c, 0x02, 0x6c, 0x05, 0xde, 0xd6, 0xac, 0xeb, 0x03, 0x7d, 0xe3,
+        0xeb, 0x88, 0xd2, 0x06, 0x7d, 0xca, 0x82, 0xb6, 0x83, 0x09, 0x7d, 0xd6, 0xa9, 0xbb,
+        0xae, 0x0a, 0x01, 0xd5, 0xf8, 0xac, 0xd2, 0x0a, 0x7d, 0x6e, 0x78, 0x01, 0x00,
+    ];
+    out.extend_from_slice(&uleb_bytes(p.max_priority_fee_per_gas));
+    out.extend_from_slice(&uleb_bytes(p.max_fee_per_gas));
+    out.extend_from_slice(&uleb_bytes(p.max_transaction_fee));
+    match p.timestamp {
+        Some(t) => {
+            out.push(0x01);
+            out.extend_from_slice(&t.to_le_bytes());
+        }
+        None => out.push(0x00),
+    }
+    out.extend_from_slice(&uleb_bytes(p.gas_limit));
+    out
+}
+
+/// Reply bytes for a bare `nat` (icrc1_balance_of, icrc1_decimals, …).
+pub fn encode_nat_reply(v: u128) -> Vec<u8> {
+    let mut out = vec![0x44, 0x49, 0x44, 0x4c, 0x00, 0x01, 0x7d];
+    let mut b = v;
+    loop {
+        let mut byte = (b & 0x7f) as u8;
+        b >>= 7;
+        if b != 0 {
+            byte |= 0x80;
+        }
+        out.push(byte);
+        if b == 0 {
+            break;
+        }
+    }
+    out
+}
+
+/// Reply bytes for a bare `text` (get_btc_address).
+pub fn encode_text_reply(t: &str) -> Vec<u8> {
+    let mut out = vec![0x44, 0x49, 0x44, 0x4c, 0x00, 0x01, 0x6a];
+    out.push(t.len() as u8);
+    out.extend_from_slice(t.as_bytes());
+    out
+}
+
+/// Reply bytes for a bare `nat8`.
+pub fn encode_nat8_reply(v: u8) -> Vec<u8> {
+    vec![0x44, 0x49, 0x44, 0x4c, 0x00, 0x01, 0x7b, v]
 }
 
 /// The reply arg must be the BARE result variant — this is the shape the real

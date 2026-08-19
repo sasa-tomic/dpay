@@ -114,6 +114,11 @@ pub struct AppState {
     /// on the landing-page download link and the strong ETag on `/download/dpay.apk`, so the CDN
     /// revalidates cheaply instead of pinning a stale build.
     apk_version: String,
+    /// Fake-IC gateway state (test-helpers only). When set, `/api/v2/canister/*` is served from
+    /// this relay and the value-path helpers below (faucet/balances/transactions) read the
+    /// gateway's principal-keyed ledgers instead of the facade-era `dyn Ledger`. `None` in prod.
+    #[cfg(feature = "test-helpers")]
+    pub fake_ic: Option<Arc<crate::ic_gateway::FakeIc>>,
 }
 
 impl AppState {
@@ -127,7 +132,16 @@ impl AppState {
             faucet_enabled: Arc::new(Mutex::new(true)),
             apk: Arc::new(None),
             apk_version: String::new(),
+            #[cfg(feature = "test-helpers")]
+            fake_ic: None,
         }
+    }
+
+    /// Attach the fake-IC `/api/v2` gateway (test-helpers only; see [`crate::ic_gateway`]).
+    #[cfg(feature = "test-helpers")]
+    pub fn with_fake_ic(mut self, fake_ic: Arc<crate::ic_gateway::FakeIc>) -> Self {
+        self.fake_ic = Some(fake_ic);
+        self
     }
 
     /// Attach the Android build to serve at `GET /download/dpay.apk` (and light up the landing
@@ -199,7 +213,8 @@ pub fn app(state: AppState) -> Router {
     // a confirmed ckBTC deposit landing; the prod image (`just image`) never enables the feature,
     // so the route is absent and unreachable.
     #[cfg(feature = "test-helpers")]
-    let api = api.route("/test/deposit/seed", post(test_deposit_seed));
+    let api = api
+        .route("/test/deposit/seed", post(test_deposit_seed));
 
     let router = Router::new()
         .route("/", get(landing_page))
@@ -213,8 +228,17 @@ pub fn app(state: AppState) -> Router {
         .route("/privacy", get(privacy_page))
         .route("/dpay-core.wasm", get(dpay_core_wasm))
         .route("/shots/{name}", get(screenshot))
-        .nest("/api/v1", api)
-        .with_state(state);
+        .nest("/api/v1", api);
+
+    // Test-only fake-IC /api/v2 gateway (test-helpers): the offline e2e stand-in for icp-api.io,
+    // mounted at the ROOT (the IC API is its own top-level namespace — NOT under /api/v1). Routed
+    // on the pre-state router so the submit handler's State<AppState> extractor resolves.
+    #[cfg(feature = "test-helpers")]
+    let router = router
+        .route("/api/v2/canister/{canister}/{kind}", post(crate::ic_gateway::submit))
+        .route("/api/v2/status", get(crate::ic_gateway::status));
+
+    let router = router.with_state(state);
 
     // Test-only CORS: allows the web build of the app (served by vite on a different port) to make
     // direct fetch() calls to the relay during e2e + UX review. Gated behind `test-helpers` so the
@@ -300,6 +324,16 @@ async fn faucet(State(state): State<AppState>, Json(req): Json<FaucetRequest>) -
     // amount is the demo's $100.00 top-up.
     let currency = req.currency.unwrap_or(DEMO_USD);
     let amount = req.amount.map(|x| x.0).unwrap_or(10_000);
+    #[cfg(feature = "test-helpers")]
+    if let Some(fake) = state.fake_ic.clone() {
+        // IC-rail cutover: the faucet credits the user PRINCIPAL on the gateway's DEMO ledger,
+        // exactly where a signed icrc1_transfer would move funds. The pk → principal mapping is
+        // self_authenticating(pk) — the same account the app derives from its device key.
+        use dpay_icp::principal::Principal as IcpPrincipal;
+        let owner = IcpPrincipal::self_authenticating_ed25519(&pk);
+        let bal = fake.faucet_credit(currency, &owner, u128::from(amount));
+        return (StatusCode::OK, Json(BalanceBody { balance: U64String(bal.min(u64::MAX as u128) as u64) })).into_response();
+    }
     match state.ledger.faucet(pk, currency, amount).await {
         Ok(bal) => (StatusCode::OK, Json(BalanceBody { balance: U64String(bal) })).into_response(),
         // Mirror `pay`: a permanent/`Rejected` error (e.g. "not mintable", "faucet cooldown" — a
@@ -395,6 +429,15 @@ async fn balance(
 ) -> Response {
     let pk = ok_or_bail!(parse_pubkey_hex(&hex_pk));
     let currency = qs.currency.unwrap_or(DEMO_USD);
+    #[cfg(feature = "test-helpers")]
+    if let Some(fake) = state.fake_ic.clone() {
+        // IC-rail cutover: read the gateway's principal-keyed balance (same mapping the faucet
+        // credits and signed transfers move — the pubkey's self_authenticating principal).
+        use dpay_icp::principal::Principal as IcpPrincipal;
+        let owner = IcpPrincipal::self_authenticating_ed25519(&pk);
+        let bal = fake.balance_for(currency, &owner);
+        return (StatusCode::OK, Json(BalanceBody { balance: U64String(bal) })).into_response();
+    }
     match state.ledger.balance(pk, currency).await {
         Ok(bal) => (StatusCode::OK, Json(BalanceBody { balance: U64String(bal) })).into_response(),
         Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
@@ -437,6 +480,18 @@ async fn balances(State(state): State<AppState>, Path(hex_pk): Path<String>) -> 
         Ok(c) => c,
         Err(e) => return err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
     };
+
+    // IC-rail cutover (test-helpers): with the fake-IC gateway attached, balances live in the
+    // gateway's PRINCIPAL-keyed ledgers — the app's pubkey maps to the same self_authenticating
+    // principal a signed icrc1_transfer would move. One snapshot under the gateway lock; no fan-out.
+    #[cfg(feature = "test-helpers")]
+    if let Some(fake) = state.fake_ic.clone() {
+        use dpay_icp::principal::Principal as IcpPrincipal;
+        let owner = IcpPrincipal::self_authenticating_ed25519(&pk);
+        let account = dpay_icp::principal::Account::new(owner);
+        let map = fake.balances_of(&catalog, &account);
+        return (StatusCode::OK, Json(map)).into_response();
+    }
 
     // Fan out one balance query per catalog currency, each under its own timeout. `join_all` polls
     // them concurrently (one relay→ledger round trip each, in flight together) so the batch returns

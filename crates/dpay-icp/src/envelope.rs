@@ -301,27 +301,133 @@ fn parse_content_map(envelope: &[u8]) -> Result<Vec<(String, RidValue)>, crate::
     };
     Ok(fields
         .iter()
-        .filter_map(|(k, v)| match v {
-            CborValue::Text(s) => Some((k.clone(), RidValue::Str(s.clone()))),
-            CborValue::Bytes(b) => Some((k.clone(), RidValue::Bytes(b.clone()))),
-            CborValue::Uint(n) => Some((k.clone(), RidValue::U64(*n))),
-            CborValue::Array(items) => Some((
-                k.clone(),
-                RidValue::Array(
-                    items
-                        .iter()
-                        .filter_map(|it| match it {
-                            CborValue::Bytes(b) => Some(RidValue::Bytes(b.clone())),
-                            CborValue::Text(s) => Some(RidValue::Str(s.clone())),
-                            CborValue::Uint(n) => Some(RidValue::U64(*n)),
-                            _ => None,
-                        })
-                        .collect(),
-                ),
-            )),
-            CborValue::Map(_) => None,
-        })
+        .filter_map(|(k, v)| Some((k.clone(), cbor_to_rid(v)?)))
         .collect())
+}
+
+/// Recursive CborValue → RidValue conversion. Critical for read_state envelopes whose
+/// `paths` value is a NESTED array (Array of Arrays of Bytes): a shallow conversion
+/// silently drops nested arrays, producing a different request_id than the signer used.
+fn cbor_to_rid(v: &CborValue) -> Option<RidValue> {
+    match v {
+        CborValue::Text(s) => Some(RidValue::Str(s.clone())),
+        CborValue::Bytes(b) => Some(RidValue::Bytes(b.clone())),
+        CborValue::Uint(n) => Some(RidValue::U64(*n)),
+        CborValue::Array(items) => Some(RidValue::Array(
+            items.iter().map(cbor_to_rid).collect::<Option<Vec<_>>>()?,
+        )),
+        CborValue::Map(_) => None,
+    }
+}
+
+// --- envelope verification (gateway-side) --------------------------------------------------------
+
+/// A fully verified /call or /query envelope: the signature checked out under the embedded
+/// sender pubkey, and the content map is exposed for the receiver to dispatch on.
+#[derive(Clone, Debug, PartialEq)]
+pub struct VerifiedEnvelope {
+    pub request_id: [u8; 32],
+    /// The self-authenticating principal derived from `sender_pubkey`.
+    pub sender: crate::principal::Principal,
+    /// `None` for read_state (its content map carries no canister_id — see `write_read_state`).
+    pub canister: Option<crate::principal::Principal>,
+    /// `None` for read_state.
+    pub method_name: Option<String>,
+    /// `None` for read_state.
+    pub arg: Option<Vec<u8>>,
+    pub ingress_expiry_ns: u64,
+}
+
+/// The fixed DER prefix the ic-transport-types serializer emits for an Ed25519 public key
+/// (SubjectPublicKeyInfo): `302a300506032b6570032100` + the raw 32 bytes.
+const ED25519_DER_PREFIX: [u8; 12] = [0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00];
+
+/// Verify a submitted envelope exactly as the IC boundary node does: recompute the
+/// `request_id` from the content map, then check the Ed25519 signature over
+/// `IC_REQUEST_DOMAIN_SEPARATOR ‖ request_id` under the embedded `sender_pubkey` (DER-wrapped).
+/// Returns the parsed content on success. Used by offline test gateways; the real IC does
+/// this at the boundary node.
+pub fn verify_envelope(envelope: &[u8]) -> Result<VerifiedEnvelope, crate::IcpError> {
+    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+
+    let err = |m: &str| crate::IcpError::CborDecode(m.to_string());
+    let mut i = 0;
+    let root = read_tagged(envelope, &mut i)?;
+    let CborValue::Map(pairs) = root else {
+        return Err(err("envelope root must be a map"));
+    };
+    let field = |name: &str| -> Option<&CborValue> {
+        pairs.iter().find(|(k, _)| k == name).map(|(_, v)| v)
+    };
+    let content = field("content").ok_or_else(|| err("envelope missing content"))?;
+    let sender_pub = field("sender_pubkey")
+        .ok_or_else(|| err("envelope missing sender_pubkey"))?;
+    let sender_sig = field("sender_sig").ok_or_else(|| err("envelope missing sender_sig"))?;
+    let (CborValue::Bytes(sig), CborValue::Bytes(der)) = (sender_sig, sender_pub) else {
+        return Err(err("sender_pubkey/sender_sig must be byte strings"));
+    };
+    if der.len() != 44 || der[..12] != ED25519_DER_PREFIX {
+        return Err(err("sender_pubkey must be a DER-wrapped Ed25519 key"));
+    }
+    let raw_pk: [u8; 32] = der[12..].try_into().expect("checked length");
+    let vk = VerifyingKey::from_bytes(&raw_pk)
+        .map_err(|_| err("invalid sender_pubkey"))?;
+
+    // request_id from the content map (same path envelope_request_id uses).
+    let rid = envelope_request_id(envelope)?;
+
+    let mut msg = Vec::with_capacity(11 + 32);
+    msg.extend_from_slice(crate::request_id::IC_REQUEST_DOMAIN_SEPARATOR);
+    msg.extend_from_slice(&rid);
+    vk.verify(&msg, &Signature::from_slice(sig).map_err(|_| err("bad sender_sig length"))?)
+        .map_err(|_| err("signature verification failed"))?;
+
+    // Dispatch fields out of the (now trusted) content map.
+    let CborValue::Map(fields) = content else {
+        return Err(err("content must be a map"));
+    };
+    let cfield = |name: &str| -> Option<&CborValue> {
+        fields.iter().find(|(k, _)| k == name).map(|(_, v)| v)
+    };
+    let expiry = match cfield("ingress_expiry") {
+        Some(CborValue::Uint(n)) => *n,
+        _ => return Err(err("content missing ingress_expiry")),
+    };
+    let sender = match cfield("sender") {
+        Some(CborValue::Bytes(b)) => {
+            let p = crate::principal::Principal::from_bytes(b)?;
+            // The sender MUST be the self-authenticating principal of the signing key.
+            if p != crate::principal::Principal::self_authenticating_ed25519(&raw_pk) {
+                return Err(err("sender does not match sender_pubkey"));
+            }
+            p
+        }
+        _ => return Err(err("content missing sender")),
+    };
+    // canister_id/method_name/arg are present on call+query but NOT read_state — optional.
+    let canister = match cfield("canister_id") {
+        Some(CborValue::Bytes(b)) => Some(crate::principal::Principal::from_bytes(b)?),
+        Some(_) => return Err(err("content canister_id must be bytes")),
+        None => None,
+    };
+    let method_name = match cfield("method_name") {
+        Some(CborValue::Text(t)) => Some(t.clone()),
+        Some(_) => return Err(err("content method_name must be text")),
+        None => None,
+    };
+    let arg = match cfield("arg") {
+        Some(CborValue::Bytes(b)) => Some(b.clone()),
+        Some(_) => return Err(err("content arg must be bytes")),
+        None => None,
+    };
+    Ok(VerifiedEnvelope {
+        request_id: rid,
+        sender,
+        canister,
+        method_name,
+        arg,
+        ingress_expiry_ns: expiry,
+    })
 }
 
 /// SHA-256 of anything (re-exported convenience for submitters hashing replies).

@@ -19,6 +19,10 @@ pub mod ledger;
 #[cfg(feature = "agent")]
 pub mod agent_ledger;
 
+/// Fake-IC `/api/v2` gateway (test-helpers only) — the offline e2e stand-in for icp-api.io.
+#[cfg(feature = "test-helpers")]
+pub mod ic_gateway;
+
 pub use app::{app, AppState};
 pub use ledger::{
     ckerc20_onramp_from_descriptor, Clock, CkErc20OnrampParams, CurrencyDescriptor, DepositInfo,

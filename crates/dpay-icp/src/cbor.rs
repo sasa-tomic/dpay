@@ -9,28 +9,36 @@ pub fn self_describe(out: &mut Vec<u8>) {
 }
 
 fn head(out: &mut Vec<u8>, major: u8, len: usize) {
+    // Widening cast: `len` is a `usize` but every length is < 2^53 in practice; `head_u64`
+    // owns the actual head encoding so integer VALUES never truncate on wasm32 either.
+    head_u64(out, major, len as u64);
+}
+
+/// Emit a CBOR head for `major` with an unsigned value taken as `u64` (a `usize` value would
+/// truncate to 32 bits on wasm32 — ingress_expiry ≈ 1.7e18 does not fit).
+fn head_u64(out: &mut Vec<u8>, major: u8, v: u64) {
     let m = major << 5;
-    let n = len as u64; // lengths here are always < 2^53 in practice
-    if n < 24 {
-        out.push(m | n as u8);
-    } else if n <= 0xff {
+    if v < 24 {
+        out.push(m | v as u8);
+    } else if v <= 0xff {
         out.push(m | 24);
-        out.push(n as u8);
-    } else if n <= 0xffff {
+        out.push(v as u8);
+    } else if v <= 0xffff {
         out.push(m | 25);
-        out.extend_from_slice(&(n as u16).to_be_bytes());
-    } else if n <= 0xffff_ffff {
+        out.extend_from_slice(&(v as u16).to_be_bytes());
+    } else if v <= 0xffff_ffff {
         out.push(m | 26);
-        out.extend_from_slice(&(n as u32).to_be_bytes());
+        out.extend_from_slice(&(v as u32).to_be_bytes());
     } else {
         out.push(m | 27);
-        out.extend_from_slice(&n.to_be_bytes());
+        out.extend_from_slice(&v.to_be_bytes());
     }
 }
 
 /// Unsigned integer (major 0), minimal length — ingress_expiry ≈ 1.7e18 → `1B` + 8B BE.
+/// `head` takes the value as u64: a `usize` cast would truncate to 32 bits on wasm32.
 pub fn uint(out: &mut Vec<u8>, v: u64) {
-    head(out, 0, v as usize);
+    head_u64(out, 0, v);
 }
 
 /// Byte string (major 2), definite length.
