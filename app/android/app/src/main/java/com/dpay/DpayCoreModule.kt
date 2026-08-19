@@ -99,103 +99,9 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         }
     }
 
-    /** Wire-format byte lengths from the core (single source of truth). Resolved as Double because
-     *  RN's bridge has no u64; values (292/196/132) are tiny. App.tsx derives its self-check expected
-     *  hex length from this so no magic literal can rot on a wire resize. */
-    @ReactMethod
-    fun wireLen(promise: Promise) {
-        try {
-            promise.resolve(uniffi.dpay_ffi.wireLen().toDouble())
-        } catch (e: Throwable) {
-            promise.reject("dpay_core", e)
-        }
-    }
-
-    @ReactMethod
-    fun signingLen(promise: Promise) {
-        try {
-            promise.resolve(uniffi.dpay_ffi.signingLen().toDouble())
-        } catch (e: Throwable) {
-            promise.reject("dpay_core", e)
-        }
-    }
-
-    @ReactMethod
-    fun requestLen(promise: Promise) {
-        try {
-            promise.resolve(uniffi.dpay_ffi.requestLen().toDouble())
-        } catch (e: Throwable) {
-            promise.reject("dpay_core", e)
-        }
-    }
-
-    /** Build + sign the authorization OFFLINE; returns the 292-byte wire as hex. */
-    @ReactMethod
-    fun signAuthorization(
-        secretHex: String,
-        toHex: String,
-        amount: String,
-        nonceHex: String,
-        expiry: Double,
-        currency: Double,
-        fromName: String,
-        toName: String,
-        memo: String,
-        promise: Promise,
-    ) {
-        // MC1 units 2-4: `amount` is a raw-u64 decimal STRING. `rawU64` is exact for the full u64
-        // bit-pattern and rejects the promise with a debuggable message on a malformed input.
-        val amountU = rawU64(amount, "amount", promise) ?: return
-        try {
-            val wire = uniffi.dpay_ffi.signAuthorization(
-                unhex(secretHex),
-                unhex(toHex),
-                amountU,
-                unhex(nonceHex),
-                expiry.toLong().toULong(),
-                currency.toInt().toUInt(),
-                fromName,
-                toName,
-                memo,
-            )
-            promise.resolve(hex(wire))
-        } catch (e: Throwable) {
-            promise.reject("dpay_core", e)
-        }
-    }
-
-    /**
-     * Sign a withdrawal authorization (ckBTC → native BTC out) OFFLINE; returns the 64-byte Ed25519
-     * signature as hex. This is the non-custodial withdrawal gate: the facade verifies this signature
-     * under `from_pubkey` (== the ckBTC debit subaccount) before moving funds. Mirrors `signAuthorization`
-     * — the canonical signing bytes come from the shared core (single source of truth).
-     */
-    @ReactMethod
-    fun signWithdrawal(
-        secretHex: String,
-        btcAddress: String,
-        amount: String,
-        nonceHex: String,
-        expiry: Double,
-        currency: Double,
-        promise: Promise,
-    ) {
-        val amountU = rawU64(amount, "amount", promise) ?: return
-        try {
-            val sig = uniffi.dpay_ffi.signWithdrawal(
-                unhex(secretHex),
-                btcAddress,
-                amountU,
-                unhex(nonceHex),
-                expiry.toLong().toULong(),
-                currency.toInt().toUInt(),
-            )
-            promise.resolve(hex(sig))
-        } catch (e: Throwable) {
-            promise.reject("dpay_core", e)
-        }
-    }
-
+    // (IC-rail cutover 2026-08-19: wireLen/signingLen/requestLen, signAuthorization, encodeQr,
+    // verifyWire, validate, signWithdrawal, verifyReceiptSig RETIRED — the facade wire left the
+    // value path; payments sign IC envelopes via the icp* methods above and outcomes ride read_state.)
     /**
      * Receiver side: encode a payment request {to, amount, nonce, expiry, currency, to_name, memo} to
      * a base64url string. `toName` is the merchant's own display name and `memo` an optional note;
@@ -255,101 +161,15 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
     }
 
     /** Compact base64url QR string carried to the merchant. */
-    @ReactMethod
-    fun encodeQr(wireHex: String, promise: Promise) {
-        try {
-            promise.resolve(uniffi.dpay_ffi.encodeQr(unhex(wireHex)))
-        } catch (e: Throwable) {
-            promise.reject("dpay_core", e)
-        }
-    }
-
     /** Verify the signature in a wire blob (what the merchant/relay/canister re-check). */
-    @ReactMethod
-    fun verifyWire(wireHex: String, promise: Promise) {
-        try {
-            promise.resolve(uniffi.dpay_ffi.verifyWire(unhex(wireHex)))
-        } catch (e: Throwable) {
-            promise.reject("dpay_core", e)
-        }
-    }
-
     /** Policy gate mirroring the canister; resolves null when acceptable, else the reason string.
      *  MC1 units 2-4: amount/cap/balance are raw-u64 decimal STRINGS (exact for the full range);
      *  now/expiry stay Double (unix-seconds time, a small bounded value). */
-    @ReactMethod
-    fun validate(
-        amount: String,
-        now: Double,
-        expiry: Double,
-        cap: String,
-        balance: String,
-        nonceSeen: Boolean,
-        sigOk: Boolean,
-        promise: Promise,
-    ) {
-        val amountU = rawU64(amount, "amount", promise) ?: return
-        val capU = rawU64(cap, "cap", promise) ?: return
-        val balanceU = rawU64(balance, "balance", promise) ?: return
-        try {
-            promise.resolve(
-                uniffi.dpay_ffi.validate(
-                    amountU,
-                    now.toLong().toULong(),
-                    expiry.toLong().toULong(),
-                    capU,
-                    balanceU,
-                    nonceSeen,
-                    sigOk,
-                ),
-            )
-        } catch (e: Throwable) {
-            promise.reject("dpay_core", e)
-        }
-    }
-
     /**
      * Verify a canister/ledger-signed receipt signature (R2 outcome attestation) before the app
      * shows "Paid ✓". Mirrors `dpay_ffi::verify_receipt_sig` (strict Ed25519 verify over the
      * canonical ReceiptClaim built inside the Rust core). Hex in, boolean out.
      */
-    @ReactMethod
-    fun verifyReceiptSig(
-        nonceHex: String,
-        fromHex: String,
-        toHex: String,
-        amount: String,
-        currency: Double,
-        blockIndex: String,
-        settleTs: String,
-        receiptSigHex: String,
-        pubkeyHex: String,
-        promise: Promise,
-    ) {
-        // MC1 units 2-4: amount/blockIndex/settleTs are raw-u64 decimal STRINGS (the claim carries
-        // them as u64 LE; exact transport closes the >2^53 loss surface). currency stays Double (u32).
-        val amountU = rawU64(amount, "amount", promise) ?: return
-        val blockIndexU = rawU64(blockIndex, "blockIndex", promise) ?: return
-        val settleTsU = rawU64(settleTs, "settleTs", promise) ?: return
-        try {
-            promise.resolve(
-                uniffi.dpay_ffi.verifyReceiptSig(
-                    unhex(nonceHex),
-                    unhex(fromHex),
-                    unhex(toHex),
-                    amountU,
-                    currency.toLong().toUInt(),
-                    blockIndexU,
-                    settleTsU,
-                    unhex(receiptSigHex),
-                    unhex(pubkeyHex),
-                ),
-            )
-        } catch (e: Throwable) {
-            promise.reject("dpay_core", e)
-        }
-    }
-
     // --- IC user-principal rail (dpay-icp via UniFFI) ------------------------------------------------
     //
     // The rail moves funds at Account{owner: self_authenticating(user Ed25519 pubkey)} directly on

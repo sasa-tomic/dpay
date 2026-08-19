@@ -26,7 +26,9 @@ describe('dpay-core-wasm — bounded wasm fetch (A-F3)', () => {
     (globalThis as unknown as {fetch: typeof mock}).fetch = mock;
     await jest.isolateModules(async () => {
       const {DpayCore} = require('../../e2e/web/dpay-core-wasm');
-      const p = DpayCore.wireLen();
+      // Any first method call warms the lazy init (which fetches the wasm); keypairFromSecret is
+      // a surviving surface method (the facade wireLen retired with the 2026-08-19 IC-rail cutover).
+      const p = DpayCore.keypairFromSecret('11'.repeat(32));
       expect(signal).toBeDefined();
       jest.advanceTimersByTime(9_999);
       expect(signal!.aborted).toBe(false);
@@ -44,7 +46,7 @@ describe('dpay-core-wasm — bounded wasm fetch (A-F3)', () => {
     (globalThis as unknown as {fetch: typeof mock}).fetch = mock;
     await jest.isolateModules(async () => {
       const {DpayCore} = require('../../e2e/web/dpay-core-wasm');
-      await expect(DpayCore.wireLen()).rejects.toThrow('HTTP 503');
+      await expect(DpayCore.keypairFromSecret('11'.repeat(32))).rejects.toThrow('HTTP 503');
       expect(jest.getTimerCount()).toBe(0);
     });
   });

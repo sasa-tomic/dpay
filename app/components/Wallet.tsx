@@ -43,7 +43,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
   const [prefillRequest, setPrefillRequest] = useState<string | null>(null);
   // The symmetric `dpay:pay/<blob>` (NFC-less receipt hand-back): a payer who settled online shares
   // the canister-signed receipt back to the merchant. This holds the raw blob; ReceiveMode consumes
-  // it via its verify effect (decode → verifyOutcomeReceipt → reconcile as Paid), then calls
+  // it via its verify effect (rail proof → request_id binding → reconcile as Paid), then calls
   // onReceiptConsumed to clear it. SECURITY: ReceiveMode verifies the signature BEFORE showing Paid.
   const [prefillReceipt, setPrefillReceipt] = useState<string | null>(null);
   // THE one user-selection state (Phase 3 — 2026-08-12 unified asset selection rewrite). A single

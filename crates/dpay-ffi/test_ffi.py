@@ -10,16 +10,11 @@ import sys
 import dpay_ffi as d
 
 # ---------------------------------------------------------------------------------------------
-# Wire layout (must match dpay_core::SignedAuthorization::to_wire): 292 bytes total (wire-format v2).
-#   [0..196)   signing_bytes = from(32) | to(32) | amount_le(8) | nonce(16) | expiry_le(8) |
-#               currency_le(4) | from_name(32) | to_name(32) | memo(32)
-#   [196..260) signature(64)
-#   [260..292) from_pub(32)
-SIG_OFF, SIG_END = 196, 260
-FROM_PUB_OFF = 260
-WIRE_LEN = 292
-# Name/memo field offsets inside the signing region (UTF-8, NUL-padded, truncate to 32).
-FROM_NAME_OFF, TO_NAME_OFF, MEMO_OFF = 100, 132, 164
+# IC user-principal rail (2026-08-19 cutover): the facade wire (292 B SignedAuthorization) left the
+# value path. The phone now signs full IC /call envelopes (byte-identical to ic-agent) via the
+# `icp_*` surface, and the NFC transport carries the ~390 B envelope (2 frames @ 240 B chunk).
+# The 132 B merchant request wire is FROZEN and unchanged.
+CKBTC_LEDGER = "mxzaz-hqaaa-aaaar-qaada-cai"   # real ckBTC ledger principal (CRC-valid)
 
 passed = 0
 def check(cond, label):
@@ -30,97 +25,77 @@ def check(cond, label):
     print(f"  ok  {label}")
 
 
-# 1) A device keypair signs an authorization ---------------------------------------------------
+# 1) Device keypair + IC principal identity -----------------------------------------------------
 kp = d.generate_keypair()
 check(len(kp.secret) == 32, "generate_keypair -> 32-byte secret seed")
 check(len(kp.public) == 32, "generate_keypair -> 32-byte public key")
 
 to_kp = d.generate_keypair()          # the merchant / payee identity
 amount = 1499                          # $14.99 in minor units
-nonce = bytes(range(16))              # stands in for the merchant's request_id
 expiry = 2_000_000_000                 # far-future unix seconds
-# Display names + memo (wire-format v2): all three ride inside the signed bytes so history is
-# self-describing on both sides. `from_name` is the payer's own; `to_name` + `memo` come from the
-# scanned merchant request. Both signing paths (this native FFI + the web TS shim) carry them.
-FROM_NAME, TO_NAME, MEMO = "Alice", "Bob", "coffee"
+TO_NAME, MEMO = "Bob", "coffee"        # carried by the 132 B request wire
 
-wire = d.sign_authorization(kp.secret, to_kp.public, amount, nonce, expiry, 0,
-                            FROM_NAME, TO_NAME, MEMO)
-check(len(wire) == WIRE_LEN, f"sign_authorization -> {WIRE_LEN}-byte wire blob")
-# The exported length accessors must agree with the real wire the core just produced (the App.tsx
-# self-check derives its expected hex length from `wireLen()` — a mismatch here would rot that check).
-check(d.wire_len() == WIRE_LEN, f"wire_len() == {WIRE_LEN} (matches the signed wire)")
-check(d.signing_len() == 196, "signing_len() == 196 (the 196-byte signed region)")
-check(d.request_len() == 132, "request_len() == 132 (the merchant request wire)")
-check(len(wire) == d.wire_len(), "signed wire length matches wire_len()")
-check(wire[0:32] == kp.public, "wire `from` == signer public key (consent bound to signer)")
-check(wire[FROM_PUB_OFF:WIRE_LEN] == kp.public, "wire carries payer pubkey for directory-free verify")
+# The self principal (derived from the seed) must equal the principal derived from the raw pubkey —
+# two routes to Account{owner: self_authenticating(pub)} on every external ledger.
+self_p = d.icp_self_principal(kp.secret)
+from_pub_p = d.icp_principal_from_pubkey(kp.public)
+check(isinstance(self_p, str) and len(self_p) == 63, "icp_self_principal -> 63-char principal text")
+check(self_p == from_pub_p, "icp_self_principal == icp_principal_from_pubkey (same account owner)")
+payee_p = d.icp_principal_from_pubkey(to_kp.public)
+check(payee_p != self_p, "payee principal differs from payer principal")
 
-# Names ride inside the signed region, NUL-padded to 32 bytes (positions 100..196). A byte-exact
-# check here is the native-path analogue of e2e cross-val for the web shim — both paths agree.
-check(wire[FROM_NAME_OFF:FROM_NAME_OFF + len(FROM_NAME)] == FROM_NAME.encode(),
-      "wire carries `from_name` (Alice) NUL-padded at offset 100")
-check(wire[TO_NAME_OFF:TO_NAME_OFF + len(TO_NAME)] == TO_NAME.encode(),
-      "wire carries `to_name` (Bob) NUL-padded at offset 132")
-check(wire[MEMO_OFF:MEMO_OFF + len(MEMO)] == MEMO.encode(),
-      "wire carries `memo` (coffee) NUL-padded at offset 164")
-check(wire[FROM_NAME_OFF + len(FROM_NAME)] == 0, "from_name is NUL-padded after the ASCII bytes")
-
-# A name-field tamper MUST invalidate the signature — names are authenticated, not advisory.
-name_tampered = bytearray(wire)
-name_tampered[FROM_NAME_OFF] ^= 0x01    # flip the first byte of from_name (inside signing_bytes)
-check(d.verify_wire(bytes(name_tampered)) is False, "verify_wire(from_name-tampered) == False")
+# Ingress expiry string math: ns timestamp + ahead_s seconds (decimal strings, exact u64).
+check(d.icp_ingress_expiry("1000000000000000000", 300) == "1000000300000000000",
+      "icp_ingress_expiry(1e18 ns, 300 s) == 1000000300000000000")
 
 
-# 2) Wire <-> base64url QR string round-trips exactly ------------------------------------------
-qr = d.encode_qr(wire)
-check(isinstance(qr, str) and len(qr) == 390, "encode_qr -> 390-char base64url (no pad; 292 B wire)")
-import base64
-check(base64.urlsafe_b64decode(qr + "==") == wire, "QR string is real base64url of the wire")
-back = d.decode_qr(qr)
-check(back == wire, "decode_qr(encode_qr(wire)) == wire  (roundtrip is lossless)")
+# 2) IC envelope round-trip: transfer arg -> signed /call envelope -> request_id ----------------
+nonce = bytes(range(16))                                # the merchant's request_id -> ledger nonce
+nonce_hex = nonce.hex()                                  # memo = reconciliation key (request nonce)
+arg = d.icp_transfer_arg(payee_p, "", "", str(amount), "", nonce_hex)
+check(len(arg) > 100, "icp_transfer_arg -> DIDL bytes")
+signed = d.icp_sign_update(kp.secret, CKBTC_LEDGER, "icrc1_transfer", arg,
+                           "1800000000000000000")
+env, rid = signed.envelope, signed.request_id
+check(len(env) > 350, f"icp_sign_update -> {len(env)}-byte envelope (mainnet-measured 388-398 B)")
+check(len(rid) == 32, "request_id is 32 bytes (read_state poll key)")
+check(d.icp_envelope_request_id(env) == rid,
+      "icp_envelope_request_id(envelope) == signed.request_id  (merchant-side rid derivation)")
 
 
-# 3) verify_wire: TRUE for a good sig, FALSE after flipping one signature byte -----------------
-check(d.verify_wire(wire) is True, "verify_wire(good) == True")
-
-tampered = bytearray(wire)
-tampered[SIG_OFF] ^= 0x01             # flip a bit inside the signature; from/from_pub stay equal
-check(bytes(tampered) != wire, "tamper actually changed the bytes")
-check(d.verify_wire(bytes(tampered)) is False, "verify_wire(sig-flipped) == False")
-
-# A payload-tamper (change the amount) must also fail the carried signature.
-amt_tampered = bytearray(wire)
-amt_tampered[64] ^= 0xFF              # first byte of amount_le
-check(d.verify_wire(bytes(amt_tampered)) is False, "verify_wire(amount-tampered) == False")
-
-
-# 4) validate: accepts a good payment, rejects expired / over-cap / etc. -----------------------
-NOW = 1_700_000_000
-GOOD_EXPIRY = NOW + 120               # ~2 min window, like the real short expiry
-check(d.validate(amount, NOW, GOOD_EXPIRY, 10_000, 50_000, False, True) is None,
-      "validate(good) == None  (accepted)")
-check(d.validate(amount, NOW, NOW - 1, 10_000, 50_000, False, True) == "expired",
-      "validate(expired) == 'expired'")
-check(d.validate(amount, NOW, GOOD_EXPIRY, 100, 50_000, False, True) == "over_cap",
-      "validate(amount>cap) == 'over_cap'")
-check(d.validate(amount, NOW, GOOD_EXPIRY, 10_000, 100, False, True) == "insufficient_funds",
-      "validate(amount>balance) == 'insufficient_funds'")
-check(d.validate(0, NOW, GOOD_EXPIRY, 10_000, 50_000, False, True) == "zero_amount",
-      "validate(zero) == 'zero_amount'")
-check(d.validate(amount, NOW, GOOD_EXPIRY, 10_000, 50_000, True, True) == "nonce_reused",
-      "validate(nonce seen) == 'nonce_reused'")
-check(d.validate(amount, NOW, GOOD_EXPIRY, 10_000, 50_000, False, False) == "bad_signature",
-      "validate(sig_ok=False) == 'bad_signature'")
+# 3) Reply decoding over live-captured golden bytes ---------------------------------------------
+# G_TR_OK: real ledger TransferResult Ok(block_index=2) captured on mainnet (goldens.rs).
+G_TR_OK = bytes.fromhex(
+    "4449444c086b02bc8a017dc5fed201016b08d1c4987c02c291ecb9027f94c1c7890403eb82a8970404a1c3ebfd"
+    "0705f087e6db090693e5bec80c7feb9cdbd50f076c02c7ebc4d00971c498b1b50d7d6c019bb3bea60a7d6c018b"
+    "bdf29b017d6c01bf9bb7f00d7d6c01a3bb918c0a786c019cbab69c027d01000002"
+)
+tr = d.icp_decode_transfer_result(G_TR_OK)
+check(tr.ok is True and tr.block_index == "2", "icp_decode_transfer_result(golden Ok) -> block_index 2")
+# G_TR_BADFEE tail: Err variant BadFee{expected_fee: 10000}.
+G_TR_BADFEE = bytes.fromhex(
+    "4449444c086b02bc8a017dc5fed201016b08d1c4987c02c291ecb9027f94c1c7890403eb82a8970404a1c3ebfd"
+    "0705f087e6db090693e5bec80c7feb9cdbd50f076c02c7ebc4d00971c498b1b50d7d6c019bb3bea60a7d6c018b"
+    "bdf29b017d6c01bf9bb7f00d7d6c01a3bb918c0a786c019cbab69c027d01000104904e"
+)
+tr2 = d.icp_decode_transfer_result(G_TR_BADFEE)
+check(tr2.ok is False and tr2.err_variant == "BadFee", "icp_decode_transfer_result(BadFee) -> err_variant")
+# DUSD icrc1_decimals reply (nat8 2), live-captured on mainnet.
+check(d.icp_decode_int(bytes.fromhex("4449444c00017b02")) == "2",
+      "icp_decode_int(nat8 golden) == '2'  (DUSD decimals)")
 
 
-# 5) Cross-language error mapping: malformed inputs raise typed DpayError -----------------------
+# 4) Cross-language error mapping: malformed inputs raise typed DpayError -----------------------
 try:
-    d.sign_authorization(b"\x00" * 31, to_kp.public, amount, nonce, expiry, 0,
-                         FROM_NAME, TO_NAME, MEMO)
+    d.keypair_from_secret(b"\x00" * 31)
     raise AssertionError("FAILED: short secret should have raised")
 except d.DpayError.BadSecretLength:
     check(True, "short secret -> DpayError.BadSecretLength")
+try:
+    d.icp_balance_of_arg("not-a-principal", "")
+    raise AssertionError("FAILED: bad principal should have raised")
+except d.DpayError.BadInput:
+    check(True, "invalid principal text -> DpayError.BadInput")
 
 # 5b) Merchant request QR (encode_request / decode_request) carries to_name + memo --------------
 # The merchant's to_name + memo live inside the 132-byte request bytes; decoding recovers them as
@@ -133,19 +108,10 @@ check(decoded.to_name == TO_NAME, "decode_request carries `to_name` (Bob)")
 check(decoded.memo == MEMO, "decode_request carries `memo` (coffee)")
 
 try:
-    d.decode_qr("!!!not-base64!!!")
+    d.decode_request("!!!not-base64!!!")
     raise AssertionError("FAILED: bad base64 should have raised")
 except d.DpayError.BadBase64:
-    check(True, "malformed QR -> DpayError.BadBase64")
-
-# A wire whose `from` disagrees with `from_pub` is rejected at parse time (not silently verified).
-mismatch = bytearray(wire)
-mismatch[FROM_PUB_OFF] ^= 0x01         # perturb from_pub only (first byte of the from_pub region)
-try:
-    d.verify_wire(bytes(mismatch))
-    raise AssertionError("FAILED: pubkey mismatch should have raised")
-except d.DpayError.PubkeyMismatch:
-    check(True, "from/from_pub mismatch -> DpayError.PubkeyMismatch")
+    check(True, "malformed request QR -> DpayError.BadBase64")
 
 
 # 6) NFC transport: drive the whole HCE card <-> reader exchange through the real core ---------
@@ -163,8 +129,11 @@ check(req_bytes[68:68 + len(REQ_TO_NAME)] == REQ_TO_NAME.encode(),
       "nfc_request_bytes carries `to_name` (Bob) at offset 68")
 check(req_bytes[100:100 + len(REQ_MEMO)] == REQ_MEMO.encode(),
       "nfc_request_bytes carries `memo` (tap-memo) at offset 100")
-nfc_wire = d.sign_authorization(kp.secret, to_kp.public, amount, req_nonce, expiry, 0,
-                                FROM_NAME, TO_NAME, MEMO)
+# The payer serves the signed IC /call envelope (the rail payload, ~390 B) over the transport.
+env_arg = d.icp_transfer_arg(payee_p, "", "", str(amount), "", req_nonce.hex())
+env_signed = d.icp_sign_update(kp.secret, CKBTC_LEDGER, "icrc1_transfer", env_arg,
+                               "1800000000000000000")
+nfc_env = env_signed.envelope
 
 
 def run_nfc(max_chunk, approve=True):
@@ -181,7 +150,7 @@ def run_nfc(max_chunk, approve=True):
             seen = d.nfc_decode_request(card.request())   # payer reviews "Pay $X to <to_name>"
             assert seen.amount == amount and seen.nonce == req_nonce
             assert seen.to_name == REQ_TO_NAME and seen.memo == REQ_MEMO  # names survived transport
-            (card.provide_wire(nfc_wire) if approve else card.decline())
+            (card.provide_wire(nfc_env) if approve else card.decline())
         step = reader.handle_response(resp)
         if step == d.NfcStep.DONE:
             return reader.wire()
@@ -202,14 +171,15 @@ def run_nfc(max_chunk, approve=True):
 # core Rust `signed_wire_survives_nfc_and_verifies` mc=1 rejection assertion).
 try:
     run_nfc(1)
-    raise AssertionError("FAILED: chunk=1 must be unrepresentable (292 frames > MAX_FRAMES=256)")
+    raise AssertionError("FAILED: chunk=1 must be unrepresentable (~390 frames > MAX_FRAMES=256)")
 except d.DpayError.NfcProtocol:
-    check(True, "chunk=1 on 292-byte wire -> DpayError.NfcProtocol (TooManyFrames; u8 seq ceiling)")
+    check(True, "chunk=1 on ~390-byte envelope -> DpayError.NfcProtocol (TooManyFrames; u8 seq ceiling)")
 
 for mc in (MAX_CHUNK, 2):
     got = run_nfc(mc)
-    check(got == nfc_wire, f"NFC exchange delivers byte-identical wire (chunk={mc})")
-    check(d.verify_wire(got) is True, f"reassembled wire still verifies (chunk={mc})")
+    check(got == nfc_env, f"NFC exchange delivers byte-identical envelope (chunk={mc})")
+    check(d.icp_envelope_request_id(got) == env_signed.request_id,
+          f"reassembled envelope still derives the same request_id (chunk={mc})")
 
 # The decline path surfaces as Declined — never a hang, never a bogus wire.
 check(run_nfc(MAX_CHUNK, approve=False) is None, "NFC decline -> reader sees Declined")
@@ -225,7 +195,7 @@ except d.DpayError.NfcNotDpay:
 
 # provide_wire out of turn is a typed state error, not a silent no-op.
 try:
-    d.FfiCardSession(MAX_CHUNK).provide_wire(nfc_wire)
+    d.FfiCardSession(MAX_CHUNK).provide_wire(nfc_env)
     raise AssertionError("FAILED: provide_wire before a request should have raised")
 except d.DpayError.NfcWrongState:
     check(True, "provide_wire with no request -> DpayError.NfcWrongState")
@@ -247,11 +217,11 @@ check(card.phase() == d.NfcPhase.AWAITING_APPROVAL, "card -> AwaitingApproval ho
 check(card.is_complete() is False, "card not complete before serving")
 reader.handle_response(ack)
 
-card.provide_wire(nfc_wire)                                           # payer approves
+card.provide_wire(nfc_env)                                           # payer approves (serves the envelope)
 check(card.phase() == d.NfcPhase.EXCHANGING, "card -> Exchanging while serving the wire")
 
-# The 292-byte wire (wire-format v2) spans 2 frames at MAX_CHUNK=240 (292 > 240); pull frames until
-# the reader reassembles the whole wire. Each frame but the last is Continue; the last is Done.
+# The ~390-byte envelope spans 2 frames at MAX_CHUNK=240; pull frames until the reader reassembles
+# the whole payload. Each frame but the last is Continue; the last is Done.
 step = None
 for _ in range(100):
     cmd = reader.next_command()
@@ -260,7 +230,7 @@ for _ in range(100):
     if step == d.NfcStep.DONE:
         break
     check(step == d.NfcStep.CONTINUE, "wire-pull frames are Continue until the last (Done)")
-check(step == d.NfcStep.DONE, "reader -> Done (has the wire)")
+check(step == d.NfcStep.DONE, "reader -> Done (has the envelope)")
 check(card.is_complete() and not card.is_confirmed(), "card: wire sent but not yet confirmed")
 check(card.phase() == d.NfcPhase.SETTLING, "card -> Settling (awaiting the receipt)")
 check(reader.phase() == d.NfcPhase.SETTLING, "reader -> Settling (about to settle online)")
@@ -291,7 +261,7 @@ while True:
         continue
     resp = c2.process(cmd)
     if c2.awaiting_decision():
-        c2.provide_wire(nfc_wire)
+        c2.provide_wire(nfc_env)
     s = r2.handle_response(resp)
     if s == d.NfcStep.CONFIRMED:
         break

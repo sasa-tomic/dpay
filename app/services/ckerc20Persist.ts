@@ -12,7 +12,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // ever persisted here; saving any other phase is a bug.
 //
 // This module is a PURE AsyncStorage wrapper — no @ReactMethod / NativeModules surface (mirrors
-// services/withdraw.ts + services/receipt.ts style). Best-effort: a malformed/corrupt value is
+// services/withdraw.ts style). Best-effort: a malformed/corrupt value is
 // swallowed (load → null), never thrown, so a storage glitch can never crash the resume path.
 
 /**

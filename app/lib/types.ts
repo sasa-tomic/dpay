@@ -71,39 +71,11 @@ export type DpayCoreApi = {
   // Derive the Ed25519 keypair from a 32-byte recovery seed (64 hex chars — the value Backup
   // reveals). Restores BOTH rails (IC Ed25519 + Solana SLIP-10 derivation) from one seed.
   keypairFromSecret(secretHex: string): Promise<{secretHex: string; publicHex: string}>;
-  // Wire-format byte lengths, single-sourced from the FFI (dpay_core consts). The App.tsx self-check
-  // derives the expected hex length from `wireLen()` so no magic literal can rot on a wire resize.
-  wireLen(): Promise<number>;
-  signingLen(): Promise<number>;
-  requestLen(): Promise<number>;
-  // `fromName` is the payer's own display name; `toName`/`memo` are copied from the scanned request
-  // (merchant-defined). All three are REQUIRED (empty = all-zero name bytes on the wire) so a call
-  // site that drops one is a compile error, not a silent native arity crash (device-bridge plan L1).
-  // `amount` is a decimal-digit STRING (raw u64 units) — MC1 units 2-4: protocol u64 amounts never
-  // travel as `number` (lossy above 2^53). `expiry`/`currency` stay `number` (small bounded values).
-  signAuthorization(secretHex: string, toHex: string, amount: string, nonceHex: string, expiry: number, currency: number, fromName: string, toName: string, memo: string): Promise<string>;
+  // (IC-rail cutover 2026-08-19: wireLen/signingLen/requestLen, signAuthorization, encodeQr,
+  // verifyWire, validate, signWithdrawal, verifyReceiptSig RETIRED — the facade wire is gone from
+  // the value path. Payments sign IC envelopes (icpSignUpdate); outcomes ride read_state.)
   encodeRequest(toHex: string, amount: string, nonceHex: string, expiry: number, currency: number, toName: string, memo: string): Promise<string>;
   decodeRequest(qr: string): Promise<Req>;
-  encodeQr(wireHex: string): Promise<string>;
-  verifyWire(wireHex: string): Promise<boolean>;
-  // Policy gate mirroring the canister: resolves null when the payment is acceptable, else the reason
-  // string ('expired', 'over_cap', 'insufficient_funds', 'nonce_reused', 'bad_signature', 'zero_amount').
-  // amount/cap/balance are decimal-digit STRINGS (raw u64); now/expiry stay `number` (time).
-  validate(amount: string, now: number, expiry: number, cap: string, balance: string, nonceSeen: boolean, sigOk: boolean): Promise<string | null>;
-  // Sign a withdrawal authorization (ckBTC → native BTC out). Returns the 64-byte Ed25519 sig as hex
-  // over the canonical WithdrawAuth signing bytes. The facade verifies this under from_pubkey (== the
-  // debit subaccount) before moving funds — the non-custodial withdrawal gate. `amount` is a raw-u64
-  // decimal string (MC1 units 2-4); `expiry`/`currency` stay `number`.
-  signWithdrawal(secretHex: string, btcAddress: string, amount: string, nonceHex: string, expiry: number, currency: number): Promise<string>;
-  // Verify a canister/ledger-signed receipt signature (R2). Returns true iff `receiptSig` (hex) is a
-  // valid Ed25519 signature over the canonical ReceiptClaim built from the claim fields, under
-  // `pubkey` (hex). The app gates "Paid ✓" on this so the outcome is canister/ledger-authenticated.
-  // amount/blockIndex/settleTs are raw-u64 decimal strings (the claim carries them as u64 LE; exact
-  // transport closes the >2^53 loss surface). currency stays `number` (a small u32).
-  verifyReceiptSig(
-    nonceHex: string, fromHex: string, toHex: string, amount: string, currency: number,
-    blockIndex: string, settleTs: string, receiptSigHex: string, pubkeyHex: string,
-  ): Promise<boolean>;
   // Device NFC radio state for the status chip: 'ready' | 'off' | 'unsupported' | 'unknown'.
   // Optional so an app built before the native method exists degrades to 'unknown' (chip hidden).
   nfcStatus?(): Promise<string>;
@@ -161,6 +133,9 @@ export type IcpRequestStatusOut = {
 /** icpDecodeReadState result: certified time (clock sync) + per-rid statuses. */
 export type IcpStateRead = { timeNs?: string; statuses: IcpRequestStatusOut[] };
 
+/** icpDecodeTransferResult outcome: ok carries the block index; err carries variant + detail. */
+export type IcpTransferOutcome = { ok: boolean; blockIndex?: string; errVariant?: string; errDetail?: string };
+
 export type IcpEip1559PriceOut = {
   gasLimit: string;
   maxFeePerGas: string;
@@ -169,26 +144,9 @@ export type IcpEip1559PriceOut = {
   timestampNs?: string;
 };
 
-/** icpDecodeTransferResult over an icrc1_transfer reply (ok carries the block index). */
-export type IcpTransferOutcome = {
-  ok: boolean;
-  blockIndex?: string;
-  errVariant?: string;
-  errDetail?: string;
-};
+// (ReceiptAuth retired with verifyOutcomeReceipt — outcome binding on the IC rail is the
+// request_id in the rail proof {ledger, block_index, request_id}.)
 
-// MC4 U5: the signed authorization the payer holds, used to bind a relay-returned receipt to the
-// EXACT payment (defense-in-depth against a stale/malicious relay returning a different settled
-// payment's receipt). Every field is the canonical signed value: `from`/`to` are pubkey hex strings;
-// `amount` is a raw-u64 decimal STRING (MC1 units 2-4 — never `number`, lossy above 2^53); `currency`
-// is the small u32; `nonce` is hex. `verifyOutcomeReceipt` compares each receipt field against these.
-export type ReceiptAuth = {
-  from: string;
-  to: string;
-  amount: string;
-  currency: number;
-  nonce: string;
-};
 
 export type NfcStatus = 'ready' | 'off' | 'unsupported' | 'unknown';
 

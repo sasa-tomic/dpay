@@ -55,19 +55,9 @@ export const POLL = (() => {
     receiptRcv: t?.receiptRcv ?? 1500,
   };
 })();
-// Expected canister receipt-signing pubkey (32-byte hex). Empty string = dev/unpinned fallback
-// (`verifyOutcomeReceipt` then trusts the receipt's embedded key — the e2e/dev path; a malicious
-// relay can still self-sign in this mode, so it is NOT production-safe). Production bakes the real
-// canister's `receipt_pubkey()` here (one-time per canister deploy; the key never rotates), which
-// closes the malicious-relay trust gap (MC4 U5 / OPEN_ISSUES #2): a relay can no longer fabricate a
-// key+sig+claim that passes the app's check, because the trusted key is sourced INDEPENDENTLY of the
-// receipt body. The baked value below IS the prod mainnet facade's key (materialized 2026-08-15 via
-// `init_receipt_key`; re-bake only if the canister is ever redeployed from scratch). The e2e harness
-// injects the FakeLedger's test key via `__DPAY_TEST_RECEIPT_PUBKEY` before the bundle evaluates,
-// exactly like `__DPAY_TEST_POLL` (driver.mjs evaluateOnNewDocument).
-export const EXPECTED_RECEIPT_PUBKEY =
-  ((globalThis as unknown as {__DPAY_TEST_RECEIPT_PUBKEY?: string}).__DPAY_TEST_RECEIPT_PUBKEY ??
-    '83c5c568ea4c0a65e72531b8958ce4e9721f54c980b01e9f0047a67d6e18c4a8');
+// (IC-rail cutover 2026-08-19: EXPECTED_RECEIPT_PUBKEY + the canister-signed receipt pin RETIRED —
+// outcomes are read_state request_status + balance recheck, honestly labeled; W6 upgrades to
+// on-device BLS cert-chain verification. The __DPAY_TEST_RECEIPT_PUBKEY seam died with it.)
 
 // WalletConnect v2 project id (from cloud.walletconnect.com, free). Required by the dApp-side
 // `EthereumProvider.init` for the native (Android) ckERC20 onramp — the only WalletConnect entry
@@ -78,7 +68,7 @@ export const EXPECTED_RECEIPT_PUBKEY =
 // `__DPAY_TEST_WALLETCONNECT_PROJECT_ID=''` DISABLES WC for the offline inner loop (e2e/jest/web):
 // jest.setup.js sets it globally to '' (so no jest test triggers WC); the e2e harness injects a
 // test id via driver.mjs; prod never sets the global → every `??` falls through to the baked id.
-// Mirrors the EXPECTED_RECEIPT_PUBKEY + POLL override seam exactly.
+// Mirrors the POLL override seam exactly.
 export const WALLETCONNECT_PROJECT_ID =
   ((globalThis as unknown as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID ?? '648afbc757419fa381f77ba0c900bc85');
 
@@ -89,7 +79,7 @@ export const WALLETCONNECT_PROJECT_ID =
 // `__DPAY_TEST_SOLANA_RPC_URL=''` DISABLES SOL for the offline inner loop (jest.setup.js sets it
 // globally; the e2e driver injects it via evaluateOnNewDocument): an empty URL makes the SOL balance
 // hook no-op and the SOL card render with `—`, so jest/e2e never touch real devnet. Mirrors the
-// WALLETCONNECT_PROJECT_ID + EXPECTED_RECEIPT_PUBKEY override seam exactly. Prod never sets the
+// WALLETCONNECT_PROJECT_ID + POLL override seam exactly. Prod never sets the
 // global → falls through to the baked default.
 export const SOLANA_RPC_URL =
   ((globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_URL?: string}).__DPAY_TEST_SOLANA_RPC_URL ?? 'https://mainnet.helius-rpc.com/?api-key=76929a9c-96d5-4866-9e71-f0e8a8930777');
@@ -100,7 +90,8 @@ export const SOLANA_RPC_URL =
 // risk. A prod build that leaves this true is caught by scripts/check-prod-sol.mjs.
 export const IS_SOLANA_DEVNET = /devnet|testnet/i.test(SOLANA_RPC_URL);
 
-export const WITHDRAW_TIMEOUT_MS = 8000; // bound the /withdraw POST (every new fetch has a timeout)
+// (WITHDRAW_TIMEOUT_MS + WITHDRAW_EXPIRY_WINDOW retired with the relay /withdraw path — the
+// user-principal offramp signs IC envelopes with an ingress expiry, no relay POST to bound.)
 // SOL native send: getLatestBlockhash + sendTransaction + confirmTransaction (which polls up to
 // CONFIRM_TIMEOUT_MS=30s). 60s gives headroom over the full confirm path so a slow-but-finalising
 // transfer is never reported as a false failure.
@@ -119,13 +110,12 @@ export const SOL_BROADCAST_TIMEOUT_MS = SOL_SEND_TIMEOUT_MS * 2;
 //   • SOL_GENESIS_HASH — the immutable mainnet-beta cluster id; mismatch fail-closes the request.
 //   • SOL_PAYMENT_MAX_WINDOW_SECONDS — the codec's frozen max request lifetime (iat..exp ≤ 90s).
 // The genesis hash accepts a `__DPAY_TEST_SOL_GENESIS_HASH` override so a unit test can mutate the
-// expected cluster identity (mirrors the SOLANA_RPC_URL + EXPECTED_RECEIPT_PUBKEY override seam).
+// expected cluster identity (mirrors the SOLANA_RPC_URL + POLL override seam).
 export const SOL_PAYMENT_COMMITMENT = 'confirmed' as const;
 export const SOL_GENESIS_HASH =
   ((globalThis as unknown as {__DPAY_TEST_SOL_GENESIS_HASH?: string}).__DPAY_TEST_SOL_GENESIS_HASH ??
     '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d');
 export const SOL_PAYMENT_MAX_WINDOW_SECONDS = 90;
-export const WITHDRAW_EXPIRY_WINDOW = 600; // the signed WithdrawAuth is valid 10 min
 // Mirrors the canister's fixed FAUCET_AMOUNT ($100.00 = 10_000 cents). The demo top-up POSTs this
 // amount to /api/v1/faucet; the real canister mints the fixed amount regardless of the request. MC1
 // units 2-4: a decimal-digit STRING (raw u64) — the relay accepts string-OR-number at the JSON seam.

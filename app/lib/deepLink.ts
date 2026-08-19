@@ -17,7 +17,7 @@ import {bytesToBase64Url, base64UrlToBytes, utf8ToBytes, bytesToUtf8} from './ba
 //     canister-signed receipt object the relay's POST /api/v1/pay returns. `decodeReceiptDeeplink`
 //     base64url-decodes THEN JSON.parses. (The receipt is JSON, not a fixed-width binary wire — so a
 //     JSON codec is the natural shape; the canister signature inside it is still verified byte-exact
-//     via verifyOutcomeReceipt before anything is marked Paid.)
+//     binding the rail proof's request_id to the open request before anything is marked Paid.)
 //
 // Slash-not-query (`/` not `?`) keeps the blob opaque to URL-parsing libs so they don't mangle
 // `+`/`%`. The codec is PURE (no React/native deps beyond the file's existing Platform import) so
@@ -77,7 +77,7 @@ export function readRequestDeeplink(): string | null {
 
 /** Web-only: read a `?pay=<base64url-blob>` query param from the page URL. Returns the raw blob
  *  (base64url of JSON.stringify(receipt)), or null on native / when no `?pay=` is present. The
- *  merchant's ReceiveMode consumes it via `decodeReceiptDeeplink` → `verifyOutcomeReceipt` (the
+ *  merchant's ReceiveMode consumes it via the shared rail-proof payload (the
  *  receipt is NEVER trusted unverified). Mirrors `readRequestDeeplink`. */
 export function readPaymentDeeplink(): string | null {
   if (Platform.OS !== 'web') return null;
@@ -94,7 +94,8 @@ export function readPaymentDeeplink(): string | null {
 // --- dpay:pay/ receipt-handback codec ---------------------------------------------------------
 // `<blob>` = base64url(JSON.stringify(receipt)) — DIFFERENT from `req`'s raw base64url. The receipt
 // is the canister-signed JSON object the relay's POST /api/v1/pay returns under `body.receipt`. The
-// merchant MUST verify it via `verifyOutcomeReceipt` before reconciling — these codec fns carry the
+// merchant MUST bind the proof's request_id to the open request before reconciling (W6 upgrades to
+// BLS cert verify) — these codec fns carry the
 // blob opaquely; they do NOT validate the signature (that is the consumer's security gate).
 
 /** The base64url blob a `pay` hand-off carries: base64url(JSON.stringify(receipt)). Shared by the
@@ -131,7 +132,7 @@ export function shareHandoff(kind: DeeplinkKind, blob: string): string {
 /** Decode the `<blob>` portion of a `dpay:pay/` URI back into the receipt object. Returns null on a
  *  malformed/empty blob or one that is not valid base64url/JSON — NEVER throws (the merchant's
  *  reconcile path treats null as "not a valid receipt" and surfaces an error, never a silent Paid).
- *  Does NOT verify the signature — the caller MUST run `verifyOutcomeReceipt` on the result. */
+ *  Carries the blob opaquely — the caller owns binding the rail proof to the open request. */
 export function decodeReceiptDeeplink(blob: string): Record<string, unknown> | null {
   if (typeof blob !== 'string' || blob.length === 0) return null;
   const bytes = base64UrlToBytes(blob);

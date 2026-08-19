@@ -202,17 +202,8 @@ describe('relay client surfaces JSON error body (M11)', () => {
     await expect(depositInfo('http://relay.example', 6)).rejects.toThrow('minter unreachable (currency 6)');
   });
 
-  test('depositAddress surfaces the body error on a 503', async () => {
-    installJsonResponse(503, {error: 'no minter registered for currency 6'});
-    const {depositAddress} = require('../services/relay');
-    await expect(depositAddress('http://relay.example', 'ab'.repeat(32), 6)).rejects.toThrow('no minter registered for currency 6');
-  });
-
-  test('depositRefresh surfaces the body error on a 503', async () => {
-    installJsonResponse(503, {error: 'update_balance transient error'});
-    const {depositRefresh} = require('../services/relay');
-    await expect(depositRefresh('http://relay.example', 'ab'.repeat(32), 1)).rejects.toThrow('update_balance transient error');
-  });
+  // (depositAddress + depositRefresh retired with the facade-subaccount deposit path — the deposit
+  // sheet queries the ckBTC minter at the user principal; see services/rail.ts.)
 
   test('ckerc20OnrampParams surfaces the body error on a 503', async () => {
     installJsonResponse(503, {error: 'no CkEthErc20 onramp for currency 6'});

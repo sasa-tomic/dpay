@@ -1,13 +1,10 @@
 import {base} from '../lib/format';
 import {composeTimeout} from '../lib/timeout';
-import {classifyPayHttp, type SettleOutcome} from '../payments';
-
 // --- ck-deposit (ckBTC-style top-up) response shapes -----------------------------------------
 // MC1 units 2-4: protocol u64 amounts cross the JSON boundary as decimal-digit STRINGS.
+// (IC-rail cutover 2026-08-19: DepositRefresh/MintedUtxo/PendingUtxo retired with the relay
+// deposit-refresh path — the deposit sheet polls the ledger balance directly.)
 export type DepositInfo = {min_confirmations: number; deposit_fee: string; deposit_min_amount: string | null};
-export type MintedUtxo = {block_index: string; amount: string};
-export type PendingUtxo = {value: string; confirmations: number};
-export type DepositRefresh = {minted_total: string; minted: MintedUtxo[]; pending: PendingUtxo[]; required_confirmations: number};
 
 // Safety-net default for every relay fetch — bounds a caller that omits its own signal so a hung
 // relay can't produce an infinite spinner. Callers that pass their own (typically shorter-timeout)
@@ -46,10 +43,9 @@ export async function fetchWithTimeout(url: string, init?: RequestInit, timeoutM
 }
 
 // PR26 — read a fetch Response's body as JSON, returning `{}` on any parse failure (a malformed
-// body, an empty 5xx, a non-JSON 422) instead of throwing. The relay's /pay and /withdraw bodies
-// are best-effort: callers want `body.receipt` / `body.error` if present and `{}` otherwise, never
-// a throw that masks the real HTTP outcome. Replaces the inline `r.json().catch(() => ({} as any))`
-// repeated across the pay/reconcile/withdraw paths.
+// body, an empty 5xx, a non-JSON body) instead of throwing. Relay bodies are best-effort: callers
+// want `body.error` / payload fields if present and `{}` otherwise, never a throw that masks the
+// real HTTP outcome.
 export async function readJsonOrEmpty(r: Response): Promise<any> {
   return r.json().catch(() => {
     console.warn('readJsonOrEmpty: body parse failed');
@@ -57,22 +53,8 @@ export async function readJsonOrEmpty(r: Response): Promise<any> {
   });
 }
 
-// PR25 — the shared `/pay` fetch+parse+classify helper. Three call sites (PayMode.approve,
-// ReceiveMode.onSignedQr, NfcTap.postPay) each used to duplicate the same pattern: POST /pay with
-// the caller's timeout-bound signal → parse the body JSON-or-empty → classifyPayHttp on the
-// `{ok,status}` (or `null` if fetch threw). The helper keeps the existing error handling: a fetch
-// throw (network/timeout/abort) returns outcome='unknown' + empty body — the caller still does its
-// own isNonceReused / verifyOutcomeReceipt / reconciliation on the returned body.
-export async function payAndClassify(relayUrl: string, code: string, signal?: AbortSignal): Promise<{outcome: SettleOutcome; body: any}> {
-  try {
-    const r = await fetch(`${base(relayUrl)}/api/v1/pay`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({qr: code}), signal: withDefaultTimeout(signal)});
-    const body = await readJsonOrEmpty(r);
-    return {outcome: classifyPayHttp({ok: r.ok, status: r.status}), body};
-  } catch (e) {
-    console.warn('payAndClassify fetch threw:', e);
-    return {outcome: classifyPayHttp(null), body: {} as Record<string, unknown>};
-  }
-}
+// (IC-rail cutover 2026-08-19: payAndClassify retired — payments POST signed envelopes straight
+// to /api/v2; there is no relay /pay. See services/icp.ts + services/rail.ts.)
 
 // Relay deposit client — same fetch style as the inline balance/faucet/pay calls (AbortController
 // optional, errors thrown to the caller). Co-located here to match the existing pattern. The default
@@ -83,18 +65,9 @@ export async function depositInfo(relayUrl: string, currency: number, signal?: A
   if (!r.ok) throw new Error(typeof j?.error === 'string' ? j.error : `deposit/info ${r.status}`);
   return j as DepositInfo;
 }
-export async function depositAddress(relayUrl: string, accountHex: string, currency: number, signal?: AbortSignal): Promise<string> {
-  const r = await fetch(`${base(relayUrl)}/api/v1/deposit/address/${accountHex}?currency=${currency}`, {signal: withDefaultTimeout(signal)});
-  const j = await readJsonOrEmpty(r);
-  if (!r.ok) throw new Error(typeof j?.error === 'string' ? j.error : `deposit/address ${r.status}`);
-  return j.address as string;
-}
-export async function depositRefresh(relayUrl: string, accountHex: string, currency: number, signal?: AbortSignal): Promise<DepositRefresh> {
-  const r = await fetch(`${base(relayUrl)}/api/v1/deposit/refresh/${accountHex}?currency=${currency}`, {method: 'POST', signal: withDefaultTimeout(signal)});
-  const j = await readJsonOrEmpty(r);
-  if (!r.ok) throw new Error(typeof j?.error === 'string' ? j.error : `deposit/refresh ${r.status}`);
-  return j as DepositRefresh;
-}
+// (depositAddress + depositRefresh retired with the facade-subaccount deposit path — the deposit
+// sheet queries the ckBTC minter at the user principal directly; see services/rail.ts
+// railBtcDepositAddress + railBalanceOf.)
 
 // ckERC-20 / native-ETH onramp params (helper contract, ERC-20 address, facade principal) for a
 // CkEthErc20-family currency. The app builds the user's Ethereum transaction(s) from these; the user
@@ -110,23 +83,5 @@ export async function ckerc20OnrampParams(relayUrl: string, currency: number, si
   return j as CkErc20OnrampParams;
 }
 
-// Withdraw a ckBTC balance to a native BTC address. The app signs the WithdrawAuth on-device (the
-// sig is the non-custodial gate); the relay forwards to the facade's `withdraw`. Returns the burn
-// receipt (block_index). Errors throw with the status so the sheet can surface a decline vs offline.
-// MC1 units 2-4: amount/block_index cross the JSON boundary as decimal-digit STRINGS (raw u64).
-export type WithdrawReceipt = {from: string; destination: string; amount: string; nonce: string; currency: number; block_index: string};
-
-export async function withdrawFunds(relayUrl: string, accountHex: string, btcAddress: string, amountSats: string, nonceHex: string, expiry: number, currency: number, sigHex: string, signal?: AbortSignal): Promise<WithdrawReceipt> {
-  const r = await fetch(`${base(relayUrl)}/api/v1/withdraw`, {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({from: accountHex, destination: btcAddress, amount: amountSats, nonce: nonceHex, expiry, currency, sig: sigHex}),
-    signal: withDefaultTimeout(signal),
-  });
-  const j = await readJsonOrEmpty(r);
-  if (r.ok && j?.receipt) {
-    return j.receipt as WithdrawReceipt;
-  }
-  // A 422 carries a policy error (bad sig / expired / below min / insufficient / nonce reused); a
-  // 503 is a transient ledger hiccup. Surface the body's error string so the sheet can show WHY.
-  throw new Error(typeof j?.error === 'string' ? j.error : `withdraw ${r.status}`);
-}
+// (WithdrawReceipt + withdrawFunds retired with the relay /withdraw path — the offramp signs
+// user-principal IC envelopes (icrc2_approve + minter call); see services/rail.ts.)
