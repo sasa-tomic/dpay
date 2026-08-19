@@ -236,3 +236,34 @@ export async function submitOfframpStep(
 ): Promise<RailOutcome> {
   return submitTransfer(step, secretHex, opts);
 }
+
+/** ckBTC deposit address at THIS user's principal — signed get_btc_address query against the
+ *  minter (arbitrary owners accepted; the address pays Account{owner: user principal}). Returns
+ *  null when unreachable or the query was rejected (caller shows a transient error). */
+export async function railBtcDepositAddress(secretHex: string, minter: string, signal?: AbortSignal): Promise<string | null> {
+  try {
+    const selfPrincipal = await DpayCore.icpSelfPrincipal(secretHex);
+    const argHex = await DpayCore.icpMinterAccountArg(selfPrincipal, '');
+    const replyArg = await icQuery(secretHex, minter, 'get_btc_address', argHex, signal);
+    if (replyArg == null || replyArg === '') return null;
+    return await DpayCore.icpDecodeText(replyArg);
+  } catch (e) {
+    console.warn('get_btc_address query failed:', e instanceof Error ? e.message : String(e));
+    return null;
+  }
+}
+
+/** Signed icrc1_balance_of for one's OWN principal on a ledger — the honest deposit-mint
+ *  recheck (baseline-delta detection). Returns the raw balance (decimal string) or null. */
+export async function railBalanceOf(secretHex: string, ledger: string, signal?: AbortSignal): Promise<string | null> {
+  try {
+    const selfPrincipal = await DpayCore.icpSelfPrincipal(secretHex);
+    const argHex = await DpayCore.icpBalanceOfArg(selfPrincipal, '');
+    const replyArg = await icQuery(secretHex, ledger, 'icrc1_balance_of', argHex, signal);
+    if (replyArg == null) return null;
+    return await DpayCore.icpDecodeInt(replyArg);
+  } catch (e) {
+    console.warn('icrc1_balance_of query failed:', e instanceof Error ? e.message : String(e));
+    return null;
+  }
+}

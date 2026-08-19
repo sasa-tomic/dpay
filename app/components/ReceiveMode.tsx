@@ -324,6 +324,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
           <DepositSheet
             identity={identity}
             relayUrl={relayUrl}
+            catalog={catalog}
             currency={depositCurrency}
             display={depositDisplay}
             onClose={() => onSubModeChange('request')}
