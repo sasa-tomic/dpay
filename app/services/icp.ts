@@ -12,8 +12,10 @@
 //    is an honest pending/unknown, never a failure claim.
 //  - Clock: GET /api/v2/status is unauthenticated but on icp-api.io does NOT carry ic:time
 //    (measured: root_key + replica_health_status only). The certified clock source is the
-//    `time` leaf of a signed read_state response — icNowNs() below. Value-envelope signing
-//    goes through icStampExpiry(), which REFUSES to stamp on unreachable clock or large skew.
+//    `time` leaf of a signed read_state response — icNowNs() below, whose sync round-trip is
+//    stamped with the DEVICE clock (requiring certified time to fetch certified time recurses
+//    forever). Value-envelope signing goes through icStampExpiry(), which REFUSES to stamp on
+//    unreachable clock or large skew.
 //  - Queries + read_state are free; updates cost only the ledger's icrc1_fee (reverse gas).
 //  - The read_state certificate is DECODED, not BLS-verified (W6 follow-up) — outcomes are
 //    honestly labeled as such in the UI.
@@ -126,6 +128,22 @@ export async function icReadState(
 ): Promise<IcpStateRead | null> {
   const expiry = await pollExpiry(secretHex, signal);
   if (expiry == null) return null;
+  return readStateWithExpiry(secretHex, canisterText, requestIdsHex, wantTime, expiry, signal);
+}
+
+/** The sign+POST+decode core of a read_state round-trip, with the expiry stamped by the CALLER.
+ * Split out so the certified-clock fetch (icNowNs) can sign with the DEVICE clock — requiring
+ * certified time to fetch certified time is an infinite recursion (pollExpiry → icStampExpiry →
+ * icNowNs → icReadState → pollExpiry → …): it never throws, so the device-clock fallback in
+ * pollExpiry is never reached, and the pending await hangs the caller forever. */
+async function readStateWithExpiry(
+  secretHex: string,
+  canisterText: string,
+  requestIdsHex: string[],
+  wantTime: boolean,
+  expiry: string,
+  signal?: AbortSignal,
+): Promise<IcpStateRead | null> {
   const envelopeHex = await DpayCore.icpSignReadState(secretHex, requestIdsHex, wantTime, expiry);
   const r = await postEnvelope(canisterText, 'read_state', envelopeHex, IC_READ_STATE_TIMEOUT_MS, signal);
   if (r == null || !r.ok) return null;
@@ -163,6 +181,14 @@ export async function icPollRequestStatus(
 
 let cachedIcNowNs: bigint | null = null;
 let cachedAtMs = 0;
+// One in-flight clock sync shared by every concurrent stamper (balance poll, history, deposit,
+// pay …). Certified time is subnet state, not caller-specific — joining the first key's fetch
+// is correct and stops a poll fan-out from becoming a read_state flood.
+let clockInFlight: Promise<bigint | null> | null = null;
+// The clock-sync round-trip stamps its envelope with the DEVICE clock at mid-window ahead
+// (measured ingress window [now, now+5:30]: 240s tolerates a device clock behind by up to
+// ~4 min / ahead by ~90s). Outside that the sync honestly fails → null → value signing refuses.
+const CLOCK_SYNC_AHEAD_S = 240;
 
 /** Certified IC time (ns): read_state over the [[time]] path with the user's key, decoded from
  * the certificate (read_state is free; the boundary node requires the signature). Cached and
@@ -173,13 +199,21 @@ export async function icNowNs(secretHex: string, force = false, signal?: AbortSi
   if (!force && cachedIcNowNs !== null && nowMs - cachedAtMs < CLOCK_FRESH_MS) {
     return cachedIcNowNs + BigInt(nowMs - cachedAtMs) * 1_000_000n;
   }
-  const state = await icReadState(secretHex, IC_MANAGEMENT_CANISTER, [], true, signal);
-  if (state?.timeNs != null) {
-    cachedIcNowNs = BigInt(state.timeNs);
-    cachedAtMs = nowMs;
-    return cachedIcNowNs;
-  }
-  return null;
+  clockInFlight ??= (async () => {
+    try {
+      const expiry = await DpayCore.icpIngressExpiry((BigInt(Date.now()) * 1_000_000n).toString(), CLOCK_SYNC_AHEAD_S);
+      const state = await readStateWithExpiry(secretHex, IC_MANAGEMENT_CANISTER, [], true, expiry, signal);
+      if (state?.timeNs != null) {
+        cachedIcNowNs = BigInt(state.timeNs);
+        cachedAtMs = Date.now();
+        return cachedIcNowNs;
+      }
+      return null;
+    } finally {
+      clockInFlight = null;
+    }
+  })();
+  return clockInFlight;
 }
 
 /** The clock-gated expiry stamp for signing VALUE envelopes. Throws when the certified time is
