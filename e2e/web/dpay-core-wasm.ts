@@ -3,10 +3,10 @@
 //
 // This is not a JS re-implementation: every byte the app signs, decodes, or verifies goes through
 // the SAME Rust `dpay-core` that the Android app's UniFFI binding and the relay/canister use.
-// The previous @noble/ed25519 JS shim (`dpay-core.ts`) was deleted; its only remaining JS-side
-// crypto is `verifyWire` (the wasm core deliberately exports no wire-verify — it has no way to
-// report WHY it failed), which parses the wire with the layout served by `w_layout_json` and
-// verifies via @noble/ed25519 (binary-compatible with dalek; cross-validated in 00-cross-val).
+// The previous @noble/ed25519 JS shim (`dpay-core.ts`) was deleted with the facade wire
+// (2026-08-19 IC-rail cutover): the retired JS-side `verifyWire` was its last consumer. The wasm
+// core keeps the frozen ABI v1 `w_sign_request`/`w_sign_withdraw`/`w_verify_receipt_sig` exports
+// (exercised by the wasm-core parity oracle), but the app surface no longer calls them.
 //
 // Loading: the wasm is a vite `?url` asset — hashed, same-origin, served straight from the dist
 // (both the e2e sirv server and the relay's embedded web build). A Node/CI consumer can inject
@@ -16,7 +16,6 @@
 // Memory discipline (frozen ABI v1): `w_alloc` is a bump allocator and wasm memory growth DETACHES
 // JS views. Every helper below re-derives its `Uint8Array` view immediately after ANY `w_alloc`,
 // and pointers are only ever written/read through fresh views.
-import * as ed from '@noble/ed25519';
 import { hexToBytes, bytesToHex } from '@noble/hashes/utils';
 // @ts-expect-error — vite asset URL import (no TS types; esbuild/vite handles it natively)
 import wasmUrl from '../../crates/dpay-relay/assets/dpay-core.wasm?url';
@@ -126,6 +125,12 @@ let layout: Layout | null = null;
 let exports_: WasmExports | null = null;
 let initP: Promise<WasmExports> | null = null;
 
+/** Idempotent lazy init of the wasm instance (first method call warms it). */
+function core(): Promise<WasmExports> {
+  if (!initP) initP = init().catch((e) => { initP = null; throw e; });
+  return initP;
+}
+
 /** u64 as a (lo, hi) u32 pair via BigInt — the full u64 range stays exact. */
 function splitU64(v: string | number | bigint): [number, number] {
   const n = BigInt(v);
@@ -212,61 +217,11 @@ async function init(): Promise<WasmExports> {
   return ex;
 }
 
-/** Idempotent lazy init — starts on the FIRST method call, not at import (so a Node consumer that
- *  never calls DpayCore never fetches). Every public method awaits this. */
-function core(): Promise<WasmExports> {
-  if (!initP) initP = init().catch((e) => { initP = null; throw e; });
-  return initP;
-}
+// (signAuthorization retired with the facade wire — payments sign IC /call envelopes via
+// icpSignUpdate; the wasm core keeps the frozen ABI v1 export w_sign_request, exercised by the
+// wasm-core parity oracle, but the app never calls it.)
 
-// --- the public DpayCore surface (mirrors app/lib/types.ts DpayCoreApi; all hex strings) --------
-
-async function generateKeypair(): Promise<{ secretHex: string; publicHex: string }> {
-  const ex = await core();
-  const seed = new Uint8Array(32);
-  globalThis.crypto.getRandomValues(seed);
-  return { secretHex: bytesToHex(seed), publicHex: derivePubHex(ex, seed) };
-}
-
-async function keypairFromSecret(secretHex: string): Promise<{ secretHex: string; publicHex: string }> {
-  const ex = await core();
-  const secret = hex(secretHex);
-  return { secretHex: bytesToHex(secret), publicHex: derivePubHex(ex, secret) };
-}
-
-function derivePubHex(ex: WasmExports, seed: Uint8Array): string {
-  const seedP = put(ex, seed);
-  const out = ex.w_alloc(PUBKEY_LEN);
-  if (out === 0) throw new Error('DpayCore wasm: w_alloc OOM (pubkey)');
-  const st = ex.w_pubkey(seedP, out);
-  if (st !== 0) bail(st, 'w_pubkey');
-  return bytesToHex(readBytes(ex, out, PUBKEY_LEN));
-}
-
-// Wire-format byte lengths from the wasm layout (asserted against the frozen sizes at init).
-async function wireLen(): Promise<number> { await core(); return WIRE_LEN; }
-async function signingLen(): Promise<number> { await core(); return SIGNING_LEN; }
-async function requestLen(): Promise<number> { await core(); return REQUEST_LEN; }
-
-async function signAuthorization(
-  secretHex: string, toHex: string, amount: string | number, nonceHex: string, expiry: number,
-  currency: number, fromName = '', toName = '', memo = '',
-): Promise<string> {
-  const ex = await core();
-  const seed = hex(secretHex);
-  if (seed.length !== PUBKEY_LEN) throw new Error('Length');
-  const req = await buildRequestBytes(ex, toHex, amount, nonceHex, expiry, currency, toName, memo);
-  const reqP = put(ex, req);
-  const fromNameB = new TextEncoder().encode(fromName);
-  const fnP = put(ex, fromNameB);
-  const out = ex.w_alloc(WIRE_LEN);
-  if (out === 0) throw new Error('DpayCore wasm: w_alloc OOM (wire)');
-  const st = ex.w_sign_request(seedP(ex, seed), reqP, fnP, fromNameB.length, out);
-  if (st !== 0) bail(st, 'w_sign_request');
-  return bytesToHex(readBytes(ex, out, WIRE_LEN));
-}
-
-/** Shared by signAuthorization + encodeRequest: the 132-byte request via w_build_request (the wasm
+/** encodeRequest: the 132-byte request via w_build_request (the wasm
  *  truncates + NUL-pads the display fields itself). */
 async function buildRequestBytes(
   ex: WasmExports, toHex: string, amount: string | number, nonceHex: string, expiry: number,
@@ -325,90 +280,12 @@ async function decodeRequest(
   return { toHex: j.toHex, amount: j.amount, nonceHex: j.nonceHex, expiry: j.expiry, currency: j.currency, toName: j.toName, memo: j.memo };
 }
 
-async function encodeQr(wireHex: string): Promise<string> {
-  await core();
-  return base64url.encode(hex(wireHex));
-}
+// (encodeQr / verifyWire retired with the 292-byte facade wire — the offline handoff QR
+// carries the base64url /call envelope; see services/rail.ts envelopeToQrPayload.)
 
-// verifyWire is the ONE method the wasm core does not export (no failure-reason reporting), so it
-// parses the wire with the wasm-served layout and verifies via @noble/ed25519 — binary-compatible
-// with dalek (proven by 00-cross-val against the golden bytes).
-async function verifyWire(wireHex: string): Promise<boolean> {
-  try {
-    const ex = await core();
-    const L = layout!;
-    const wire = hex(wireHex);
-    if (wire.length !== WIRE_LEN) return false;
-    const signing = wire.slice(L.wire_fields.signing.offset, L.wire_fields.signing.offset + L.wire_fields.signing.len);
-    const sig = wire.slice(L.wire_fields.sig.offset, L.wire_fields.sig.offset + L.wire_fields.sig.len);
-    const fromPub = wire.slice(L.wire_fields.from_pub.offset, L.wire_fields.from_pub.offset + L.wire_fields.from_pub.len);
-    const fromHex = bytesToHex(signing.slice(L.fields.from.offset, L.fields.from.offset + L.fields.from.len));
-    // from_pub MUST equal the `from` field embedded in the signing buffer (dpay_core::PubkeyMismatch).
-    if (fromHex !== bytesToHex(fromPub)) return false;
-    void ex;
-    return await ed.verifyAsync(sig, signing, fromPub);
-  } catch {
-    return false;
-  }
-}
+// (signWithdrawal retired — the offramp signs user-principal envelopes; verifyReceiptSig
+// retired with the canister-signed receipt.)
 
-async function signWithdrawal(
-  secretHex: string, btcAddress: string, amount: string | number, nonceHex: string, expiry: number, currency: number,
-): Promise<string> {
-  const ex = await core();
-  const seed = hex(secretHex);
-  if (seed.length !== PUBKEY_LEN) throw new Error('Length');
-  const nonce = hex(nonceHex);
-  if (nonce.length !== NONCE_LEN) throw new Error(`nonce length: ${nonce.length}`);
-  const dest = new TextEncoder().encode(btcAddress);
-  const seedP = put(ex, seed);
-  const destP = put(ex, dest);
-  const nonceP = put(ex, nonce);
-  const out = ex.w_alloc(SIG_LEN);
-  if (out === 0) throw new Error('DpayCore wasm: w_alloc OOM (withdraw sig)');
-  const [amtLo, amtHi] = splitU64(amount);
-  const [expLo, expHi] = splitU64(expiry);
-  const st = ex.w_sign_withdraw(seedP, destP, dest.length, amtLo, amtHi, nonceP, expLo, expHi, currency, out);
-  if (st !== 0) bail(st, 'w_sign_withdraw');
-  return bytesToHex(readBytes(ex, out, SIG_LEN));
-}
-
-async function verifyReceiptSig(
-  nonceHex: string, fromHex: string, toHex: string, amount: string | number, currency: number,
-  blockIndex: string | number, settleTs: string | number, receiptSigHex: string, pubkeyHex: string,
-): Promise<boolean> {
-  // Never throws (the app gates "Paid ✓" on a clean true).
-  try {
-    const ex = await core();
-    const nonce = hex(nonceHex);
-    const from = hex(fromHex);
-    const to = hex(toHex);
-    const sig = hex(receiptSigHex);
-    const pub = hex(pubkeyHex);
-    if (nonce.length !== NONCE_LEN) return false;
-    if (from.length !== PUBKEY_LEN) return false;
-    if (to.length !== PUBKEY_LEN) return false;
-    if (sig.length !== SIG_LEN) return false;
-    if (pub.length !== PUBKEY_LEN) return false;
-    const nonceP = put(ex, nonce);
-    const fromP = put(ex, from);
-    const toP = put(ex, to);
-    const out = ex.w_alloc(108);
-    if (out === 0) return false;
-    const [amtLo, amtHi] = splitU64(amount);
-    const [blkLo, blkHi] = splitU64(blockIndex);
-    const [tsLo, tsHi] = splitU64(settleTs);
-    const st = ex.w_receipt_claim(nonceP, fromP, toP, amtLo, amtHi, currency, blkLo, blkHi, tsLo, tsHi, out);
-    if (st !== 0) return false;
-    const pubP = put(ex, pub);
-    const sigP = put(ex, sig);
-    return ex.w_verify_receipt_sig(pubP, out, 108, sigP) === 1;
-  } catch {
-    return false;
-  }
-}
-
-/** Synchronous RNG-backed nonce (browser CSPRNG) — parity with the old shim's export. */
 export function randNonceHex(): string {
   const buf = new Uint8Array(NONCE_LEN);
   if (typeof globalThis.crypto?.getRandomValues === 'function') {
@@ -477,9 +354,13 @@ function outBuf(ex: WasmExports, cap: number, what: string): number {
   return p;
 }
 
-/** Run a length-returning JSON export and parse the result. 0 → throw (mirrors bail()). */
+/** Run a length-returning JSON export and parse the result. 0 → throw (mirrors bail()).
+ * Small returns (1–3) are the wasm error codes BAD_LEN/BAD_UTF8/VERIFY_FAILED (see the
+ * contract table in dpay-wasm lib.rs), never real JSON — reject them explicitly so an
+ * error is never read as a byte length (which yields garbage into JSON.parse). */
 function jsonOut(ex: WasmExports, len: number, out: number, what: string): unknown {
   if (len === 0 || len > ICP_JSON_CAP) throw new Error(`DpayCore wasm: ${what} failed (bad input or cap)`);
+  if (len <= 3) throw new Error(`DpayCore wasm: ${what} failed (wasm error code ${len})`);
   return JSON.parse(readStr(ex, out, len));
 }
 
@@ -621,7 +502,7 @@ async function icpDecodeText(argHex: string): Promise<string> {
   const ex = await core();
   const arg = put(ex, hexToBytes(argHex));
   const out = outBuf(ex, ICP_JSON_CAP, 'icp_decode_text');
-  const len = ex.w_icp_decode_text(arg[0], arg[1], out, ICP_JSON_CAP);
+  const len = ex.w_icp_decode_text(arg, argHex.length / 2, out, ICP_JSON_CAP);
   const j = jsonOut(ex, len, out, 'icp_decode_text') as {text: string};
   return j.text;
 }
@@ -630,7 +511,7 @@ async function icpDecodeEip1559Price(argHex: string): Promise<IcpEip1559PriceOut
   const ex = await core();
   const arg = put(ex, hexToBytes(argHex));
   const out = outBuf(ex, ICP_JSON_CAP, 'icp_decode_eip1559_price');
-  const len = ex.w_icp_decode_eip1559_price(arg[0], arg[1], out, ICP_JSON_CAP);
+  const len = ex.w_icp_decode_eip1559_price(arg, argHex.length / 2, out, ICP_JSON_CAP);
   return jsonOut(ex, len, out, 'icp_decode_eip1559_price') as IcpEip1559PriceOut;
 }
 
@@ -738,19 +619,33 @@ async function icpDecodeInt(argHex: string): Promise<string> {
   return readStr(ex, out, len);
 }
 
+async function generateKeypair(): Promise<{secretHex: string; publicHex: string}> {
+  const ex = await core();
+  const seed = new Uint8Array(32);
+  crypto.getRandomValues(seed);
+  const seedP = put(ex, seed);
+  const out = outBuf(ex, PUBKEY_LEN, 'generateKeypair');
+  const status = ex.w_pubkey(seedP, out);
+  if (status !== 0) bail(status, 'generateKeypair');
+  return {secretHex: bytesToHex(seed), publicHex: bytesToHex(readBytes(ex, out, PUBKEY_LEN))};
+}
+
+async function keypairFromSecret(secretHex: string): Promise<{secretHex: string; publicHex: string}> {
+  const ex = await core();
+  const seed = hex(secretHex);
+  if (seed.length !== 32) throw new Error('Length');
+  const seedP = put(ex, seed);
+  const out = outBuf(ex, PUBKEY_LEN, 'keypairFromSecret');
+  const status = ex.w_pubkey(seedP, out);
+  if (status !== 0) bail(status, 'keypairFromSecret');
+  return {secretHex: bytesToHex(seed), publicHex: bytesToHex(readBytes(ex, out, PUBKEY_LEN))};
+}
+
 export const DpayCore = {
   generateKeypair,
   keypairFromSecret,
-  wireLen,
-  signingLen,
-  requestLen,
-  signAuthorization,
-  signWithdrawal,
   encodeRequest,
   decodeRequest,
-  encodeQr,
-  verifyWire,
-  verifyReceiptSig,
   nfcStatus,
   icpSelfPrincipal,
   icpPrincipalFromPubkey,

@@ -205,3 +205,236 @@ export const SIGNING_LEN = L.signing_len;
 export const WIRE_LEN = L.wire_len;
 export const PUBKEY_LEN = L.pubkey_len;
 export const NONCE_LEN = L.nonce_len;
+
+// --- IC user-principal rail (2026-08-19 cutover): Node-side envelope builders ------------------
+// Byte-mirrors crates/dpay-icp (envelope.rs CBOR + request_id; icrc.rs DIDL args) so harness flows
+// settle on the fake-IC gateway exactly like the app does. Cross-validated against the wasm shim
+// in flow 00 (cross-val) — if these drift from Rust, every pay flow goes RED loudly.
+
+// Minimal CBOR encoder (definite-length, majors 0-5) matching dpay-icp's writer.
+function cborHead(major, val) {
+  const m = Number(major) << 5;
+  const v = BigInt(val);
+  if (v < 24n) return [m | Number(v)];
+  if (v < 256n) return [m | 24, Number(v)];
+  if (v < 65536n) return [m | 25, Number(v >> 8n), Number(v & 0xffn)];
+  if (v < 4294967296n) return [m | 26, Number(v >> 24n), Number((v >> 16n) & 0xffn), Number((v >> 8n) & 0xffn), Number(v & 0xffn)];
+  const out = [m | 27];
+  for (let i = 7n; i >= 0n; i--) out.push(Number((v >> (i * 8n)) & 0xffn));
+  return out;
+}
+function cborBytes(b) { return [...cborHead(2, b.length), ...b]; }
+function cborText(t) { const u = Array.from(Buffer.from(t, 'utf8')); return [...cborHead(3, u.length), ...u]; }
+function cborMap(pairs) { // pairs: [keyText, valueBytes][] — map(5-7 keys)
+  const out = [...cborHead(5, pairs.length)];
+  for (const [k, v] of pairs) out.push(...cborText(k), ...v);
+  return out;
+}
+
+// SHA224 (principal derivation) + SHA256 (request_id) via Node crypto.
+import { createHash } from 'node:crypto';
+function sha224(b) { return Uint8Array.from(createHash('sha224').update(b).digest()); }
+function sha256(b) { return Uint8Array.from(createHash('sha256').update(b).digest()); }
+
+/** DER-wrap a raw ed25519 pubkey (SubjectPublicKeyInfo): 302a300506032b6570032100 || raw32. */
+function derWrap(raw32) {
+  return Uint8Array.from(Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), Buffer.from(raw32)]));
+}
+
+const IC_DOMAIN = Buffer.from('\x0Aic-request', 'utf8');
+
+// uleb128 (u128 as BigInt)
+function uleb(v) {
+  let x = BigInt(v); const out = [];
+  do { let b = Number(x & 0x7fn); x >>= 7n; if (x > 0n) b |= 0x80; out.push(b); } while (x > 0n);
+  return out;
+}
+
+/** Principal (29-byte self-authenticating) from a raw 32B ed25519 pubkey: SHA224(DER(pub)) | 0x02. */
+export function icpPrincipalBytes(pubkey32) {
+  const h = sha224(derWrap(pubkey32));
+  return Uint8Array.from([...h, 0x02]);
+}
+
+/** request_id (SHA256-based) over the content fields — mirrors dpay_icp::request_id.
+ *  fields: {key: string, hashInput: bytes}[]; sorts by SHA256(key) (order-independent). */
+/** request_id per the IC spec (mirrors dpay_icp::request_id exactly): each value is HASHED to a
+ *  32-byte leaf (sha256 of str/bytes, sha256 of uleb for u64, concat of leaf hashes for arrays),
+ *  pairs sort by key hash, and the result is sha256 over the concatenated (keyHash ‖ leafHash) run
+ *  — NO domain prefix byte. */
+function ridLeaf(v) {
+  if (v.__ridArray) {
+    let h = Buffer.alloc(0);
+    for (const item of v.__ridArray) h = Buffer.concat([h, ridLeaf(item)]);
+    return sha256(h);
+  }
+  return sha256(v); // values arrive pre-encoded: str/bytes raw, u64 already uleb'd
+}
+function requestId(fields) {
+  const hashed = fields.map(([k, v]) => [sha256(Buffer.from(k, 'utf8')), ridLeaf(v)]);
+  hashed.sort((a, b) => Buffer.compare(a[0], b[0]) || Buffer.compare(a[1], b[1]));
+  let concat = Buffer.alloc(0);
+  for (const [kh, vh] of hashed) concat = Buffer.concat([concat, kh, vh]);
+  return sha256(concat);
+}
+function ridBytes(b) { return b; } // value = raw bytes (already hashed leaf form)
+function ridU64(v) { return Uint8Array.from(uleb(BigInt(v))); } // U64 → uleb of the value
+
+/** Sign a full /call envelope: CBOR {content:{...}, sender_pubkey: DER, sender_sig} (d9d9f7-tagged).
+ *  Mirrors dpay_icp::envelope::sign_update exactly (incl. the request_id the gateway will key on).
+ *  memoHex (the request nonce) is the reconciliation key inside the transfer arg. */
+export async function icpSignUpdate(secretHex, canisterText, methodName, argBytes, ingressExpiryNs, opts = {}) {
+  const secret = hexToBytes(secretHex);
+  const pub = await ed.getPublicKeyAsync(secret);
+  const der = derWrap(pub);
+  const sender = Uint8Array.from([...sha224(der), 0x02]);
+  const canister = canisterBytesFromText(canisterText);
+  const noncePairs = opts.nonce != null ? [['nonce', cborBytes(Uint8Array.from(uleb(BigInt(opts.nonce))))]] : [];
+  const contentPairs = [
+    ['request_type', cborText('call')],
+    ['ingress_expiry', Uint8Array.from(cborHead(0, BigInt(ingressExpiryNs)))],
+    ['sender', cborBytes(sender)],
+    ['canister_id', cborBytes(canister)],
+    ['method_name', cborText(methodName)],
+    ['arg', cborBytes(Uint8Array.from(argBytes))],
+    ...noncePairs,
+  ];
+  const rid = requestId([
+    ['request_type', ridBytes(Buffer.from('call', 'utf8'))],
+    ['ingress_expiry', ridU64(ingressExpiryNs)],
+    ['sender', ridBytes(sender)],
+    ['canister_id', ridBytes(canister)],
+    ['method_name', ridBytes(Buffer.from(methodName, 'utf8'))],
+    ['arg', ridBytes(Uint8Array.from(argBytes))],
+    ...(opts.nonce != null ? [['nonce', ridU64(opts.nonce)]] : []),
+  ]);
+  const sig = await ed.signAsync(Buffer.concat([IC_DOMAIN, rid]), secret);
+  const envelope = Uint8Array.from([
+    0xd9, 0xd9, 0xf7,
+    ...cborMap([
+      ['content', cborMap(contentPairs)],
+      ['sender_pubkey', cborBytes(der)],
+      ['sender_sig', cborBytes(Uint8Array.from(sig))],
+    ]),
+  ]);
+  return { envelopeHex: bytesToHex(envelope), requestIdHex: bytesToHex(rid) };
+}
+
+// Sign a read_state envelope (paths: array of byte-arrays; e.g. [[b'request_status', rid]] and/or [[b'time']]).
+// Mirrors dpay_icp::envelope::sign_read_state — content carries request_type/ingress_expiry/sender/paths (NO canister_id).
+export async function icpSignReadState(secretHex, paths, ingressExpiryNs) {
+  const secret = hexToBytes(secretHex);
+  const pub = await ed.getPublicKeyAsync(secret);
+  const der = derWrap(pub);
+  const sender = Uint8Array.from([...sha224(der), 0x02]);
+  // paths value: REAL CBOR array of arrays of byte strings (mirrors Rust cbor::array nesting)
+  const pathArrays = paths.map((p) => [...cborHead(4, p.length), ...p.map((seg) => cborBytes(Uint8Array.from(seg))).flat()]);
+  const pathsValue = [...cborHead(4, pathArrays.length), ...pathArrays.flat()];
+  const contentPairs = [
+    ['request_type', cborText('read_state')],
+    ['ingress_expiry', cborHead(0, BigInt(ingressExpiryNs))],
+    ['sender', cborBytes(sender)],
+    ['paths', pathsValue],
+  ];
+  const rid = requestId([
+    ['request_type', ridBytes(Buffer.from('read_state', 'utf8'))],
+    ['ingress_expiry', ridU64(ingressExpiryNs)],
+    ['sender', ridBytes(sender)],
+    // paths leaf = Array of paths; each path = Array of Bytes labels (hash_leaf concatenates per-item leaves)
+    ['paths', { __ridArray: paths.map((p) => ({ __ridArray: p.map((seg) => ridBytes(Buffer.from(seg))) })) }],
+  ]);
+  const sig = await ed.signAsync(Buffer.concat([Buffer.from(IC_DOMAIN, 'latin1'), Buffer.from(rid)]), secret);
+  const envelope = Uint8Array.from([
+    0xd9, 0xd9, 0xf7,
+    ...cborMap([
+      ['content', cborMap(contentPairs)],
+      ['sender_pubkey', cborBytes(der)],
+      ['sender_sig', cborBytes(Uint8Array.from(sig))],
+    ]),
+  ]);
+  return { envelopeHex: bytesToHex(envelope), requestIdHex: bytesToHex(rid) };
+}
+
+// --- principal text codec (base32-CRC32, RFC4648 A-Z2-7 no pad) --------------------------------
+const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+function crc32(b) {
+  let c; const table = [];
+  for (let n = 0; n < 256; n++) { c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; table[n] = c >>> 0; }
+  let crc = 0xffffffff;
+  for (const byte of b) crc = table[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+/** Canonical principal TEXT: base32(CRC32-BE4(payload) || payload), RFC4648 A-Z2-7 lowercased. */
+export function principalToText(bytes) {
+  const payload = Buffer.from(bytes);
+  const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(payload));
+  const all = Buffer.concat([crc, payload]);
+  let bits = 0, value = 0, out = '';
+  for (const byte of all) {
+    value = (value << 8) | byte; bits += 8;
+    while (bits >= 5) { out += B32[(value >>> (bits - 5)) & 31]; bits -= 5; }
+  }
+  if (bits > 0) out += B32[(value << (5 - bits)) & 31];
+  return out.toLowerCase().replace(/(.{5})/g, '$1-').replace(/-$/, '');
+}
+/** Raw principal bytes from canonical text (validates the CRC). */
+export function principalFromText(text) {
+  const clean = String(text).toLowerCase().replace(/-/g, '');
+  let bits = 0, value = 0; const out = [];
+  for (const ch of clean) {
+    const d = B32.indexOf(ch.toUpperCase());
+    if (d < 0) throw new Error('principal: bad char');
+    value = (value << 5) | d; bits += 5;
+    if (bits >= 8) { out.push((value >>> (bits - 8)) & 0xff); bits -= 8; }
+  }
+  const all = Buffer.from(out);
+  if (all.length < 4) throw new Error('principal: too short');
+  const payload = all.subarray(4); // CRC-first layout
+  if (all.readUInt32BE(0) !== crc32(payload)) throw new Error('principal: CRC mismatch');
+  return Uint8Array.from(payload);
+}
+function canisterBytesFromText(text) { return principalFromText(text); }
+
+// --- DIDL codecs (byte-mirrors the golden type tables in crates/dpay-icp) ----------------------
+// TRANSFER_PREFIX golden (64 bytes): DIDL + 2-record type table for icrc1_transfer_arg.
+const TRANSFER_PREFIX = Buffer.from(
+  '4449444c066c06fbca0101c6fcb60204ba89e5c20402a2de94eb060282f3f391' +
+  '0c05d8a38ca80d7d6c02b3b0dac30368ad86ca8305026e036d7b6e7d6e780100', 'hex'
+);
+// sanity: 64 bytes
+if (TRANSFER_PREFIX.length !== 64) throw new Error('TRANSFER_PREFIX golden length drift');
+
+function didlPutPrincipal(bytes) { return [0x01, ...uleb(bytes.length), ...bytes]; }
+function didlPutOptNat(v) { return v == null ? [0x00] : [0x01, ...uleb(BigInt(v))]; }
+function didlPutOptBlob(bytes) { return bytes == null ? [0x00] : [0x01, ...uleb(bytes.length), ...bytes]; }
+function didlPutOptNat64(v) {
+  if (v == null) return [0x00];
+  const out = [0x01]; let x = BigInt(v);
+  for (let i = 0; i < 8; i++) { out.push(Number(x & 0xffn)); x >>= 8n; }
+  return out;
+}
+function didlPutAccount(pBytes, subaccount) {
+  // owner principal + subaccount opt blob (all-zero canonicalized to none)
+  const sub = subaccount == null || subaccount.every(b => b === 0) ? null : subaccount;
+  return [...didlPutPrincipal(pBytes), ...didlPutOptBlob(sub)];
+}
+
+/** icrc1_transfer arg (hash field order to/fee/memo/from_subaccount/created_at_time/amount),
+ *  byte-mirrors dpay_icp::icrc::transfer_arg. memo = the 16B request nonce (reconciliation key). */
+export function icpTransferArgBytes(toPrincipalBytes, amount, { fee = null, memoHex = '' } = {}) {
+  const memo = memoHex ? hexToBytes(memoHex) : null;
+  const out = [...TRANSFER_PREFIX];
+  out.push(...didlPutAccount(toPrincipalBytes, null));
+  out.push(...didlPutOptNat(fee));
+  out.push(...didlPutOptBlob(memo));
+  out.push(...didlPutOptBlob(null)); // from_subaccount (default account)
+  out.push(...didlPutOptNat64(null)); // created_at_time
+  out.push(...uleb(BigInt(amount)));
+  return Uint8Array.from(out);
+}
+
+/** icrc1_balance_of arg (single account record), byte-mirrors ACCOUNT_PREFIX golden (25B incl trailing nargs=01 ref=00). */
+const ACCOUNT_PREFIX = Buffer.from('4449444c036c02b3b0dac30368ad86ca8305016e026d7b0100', 'hex');
+export function icpBalanceOfArgBytes(ownerPrincipalBytes) {
+  return Uint8Array.from([...ACCOUNT_PREFIX, ...didlPutAccount(ownerPrincipalBytes, null)]);
+}

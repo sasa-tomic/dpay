@@ -83,8 +83,9 @@ export async function run() {
       `deposit instructions must never show a raw zero amount like "0.00000000" (C3). instructions text:\n${instrTxt}`);
     console.log('[03-deposit-address] ✓ no raw zero amounts in instructions (fee/min show "—" when zero)');
 
-    // 5. The single linear progress cue is present (U2): "Waiting for your deposit" (no pending utxos).
-    assertIncludes(body, 'Waiting for your deposit', 'progress cue shows the waiting state');
+  // 5. The single linear progress cue is present (U2): "Watching for your deposit" — the honest
+  //    balance-watching copy of the user-principal rail (the facade per-UTXO cue died with custody).
+  assertIncludes(body, 'Watching for your deposit', 'progress cue shows the waiting state');
 
     await driver.screenshot('03-deposit-address');
 

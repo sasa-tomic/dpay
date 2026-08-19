@@ -19,6 +19,10 @@
     "react-native-web": "0.21.2"
   },
   "devDependencies": {
+    "@dfinity/agent": "^3.4.3",
+    "@dfinity/candid": "^3.4.3",
+    "@dfinity/cbor": "^0.2.3",
+    "@dfinity/principal": "^3.4.3",
     "@puppeteer/browsers": "3.0.6",
     "@vitejs/plugin-react": "6.0.2",
     "pngjs": "^7.0.0",

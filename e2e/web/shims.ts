@@ -122,3 +122,12 @@ if (typeof window !== 'undefined') {
 if (typeof window !== 'undefined') {
   (window as any).__DPAY_READY = true;
 }
+
+// IC-rail cutover: route the app's /api/v2 envelope transport at the SAME test relay that serves
+// this page (the relay's test-helpers build exposes the fake-IC gateway at /api/v2/canister/*).
+// Prod never sets the seam; the icp-api.io default in app/services/icp.ts stands.
+try {
+  const relay = new URLSearchParams(window.location.search).get('relay');
+  (globalThis as unknown as {__DPAY_TEST_IC_GATEWAY?: string}).__DPAY_TEST_IC_GATEWAY =
+    relay ?? window.location.origin;
+} catch { /* no window (SSR guard) */ }
