@@ -1,0 +1,16 @@
+[package]
+name = "dpay-icp-e2e"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Env-gated e2e proofs for the user-principal rail: dfx replica /api/v2 (offline) and opt-in mainnet read-only signed queries."
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+dpay-icp = { path = "../dpay-icp" }
+ed25519-dalek = { workspace = true }
+# Cached offline (0.12.28 already in Cargo.lock via pocket-ic); rustls only — no native-tls/openssl.
+# Pinned to the exact lock version so offline resolution never has to look at the network.
+reqwest = { version = "=0.12.28", default-features = false, features = ["blocking", "rustls-tls"] }

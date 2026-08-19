@@ -1,0 +1,24 @@
+[package]
+name = "dpay-icp-tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "PocketIC integration tests for the user-principal rail: signed envelopes through the real /api/v2 ingress (make_live gateway) driving the real ic-icrc1-ledger."
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+dpay-icp = { path = "../dpay-icp" }
+candid = { workspace = true }
+ed25519-dalek = { workspace = true }
+# cert-tree lookup for the read_state request_status leaves (already in the lockfile via pocket-ic)
+ic-certification = "3"
+icrc-ledger-types = { workspace = true }
+num-traits = "0.2"
+pocket-ic = { workspace = true }
+# plain-HTTP transport to the make_live gateway — same crate/feature set the lockfile already
+# resolves for pocket-ic (0.12.x), so no new network fetch is needed
+reqwest = { version = "0.12", default-features = false, features = ["blocking"] }
+serde = { version = "1", features = ["derive"] }
+serde_cbor = "0.11"

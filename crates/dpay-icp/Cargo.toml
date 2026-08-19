@@ -1,0 +1,13 @@
+[package]
+name = "dpay-icp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Pure IC user-principal rail: principal derivation, request-id hashing, envelope signing, ICRC-1/2 candid codecs. Alloc-only, wasm32-safe, transport-free."
+
+[dependencies]
+ed25519-dalek = { workspace = true }
+sha2 = { workspace = true }
+
+[dev-dependencies]
+ed25519-dalek = { workspace = true }

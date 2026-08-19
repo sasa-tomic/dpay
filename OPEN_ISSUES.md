@@ -10,6 +10,20 @@
 
 ## NEXT SESSION — work order
 
+> **THE switch: IC rail → user-principal (set 2026-08-18, founder-ordered).** The PoC is
+> BUILT, AUDITED, and MAINNET-PROVEN this session (see `CODEBASE_ANALYSIS.md` §"IC
+> user-principal rail" and the full plan: **`2026-08-18-user-principal-rail.md`** — read it
+> first; it carries the proven-evidence table, target architecture, measured semantics
+> (replay/dedup/expiry-window/fees), and workstreams W1–W8 with sizes). New crates:
+> `crates/dpay-icp` (pure signer/codec core, wasm32-safe), `dpay-icp-tests` (PocketIC
+> production-validator e2e — `just test-icp`, ON the check hot path), `dpay-icp-e2e`
+> (`just test-icp-replica` + opt-in `ic-mainnet-probe`/`ic-mainnet-update-probe`, never in
+> check). Next session = product cutover, starting W1 (app submission client: RN+wasm
+> `/api/v2` POST, NFC envelope chunking, `/api/v2/status` clock sync, catalog
+> ledger/fee/decimals) and W2 (payer flows rewire); W7 retires the facade's settlement
+> surface + relay `/pay`,`/withdraw`,`/receipt*` routes. NO feature flags, NO legacy, NO
+> migration (founder-set). Uncommitted at session end — commit as one unit.
+>
 > **Agent-pickable work queued: the Trust Wallet fund-button** (set 2026-08-17). Full researched
 > plan: **`2026-08-17-trust-wallet-fund-button.md`** — read it first; it carries the verified
 > deep-link format, UAI asset ids (`c0`/`c501`/`c501_t<mint>`), per-rail fit table, and the

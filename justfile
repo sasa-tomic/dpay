@@ -33,6 +33,15 @@ build-mock-minter:
 test-canister: build-canister build-mock-minter
     cargo nextest run -p dpay-canister-tests
 
+# user-principal rail tests on PocketIC's make_live() gateway (offline, deterministic, seconds):
+# raw-ed25519 device keys whose self-authenticating principals hold funds DIRECTLY on the REAL
+# ic-icrc1-ledger move them via dpay-icp-signed envelopes over the real /api/v2 ingress — the
+# PRODUCTION ic_validator checks every signature/expiry (bad sig → 400, expired → 400, replay
+# deduped). Proves the user_transfer / offramp approve→retrieve legs + the principal derivation
+# the app will use on mainnet, with envelope-only auth (funding is PocketIC-API scaffolding).
+test-icp: build-mock-minter
+    cargo nextest run -p dpay-icp-tests
+
 # relay tests (native, in-memory FakeLedger — no network). Enables `test-helpers` so the
 # integration-test retry harness (`FlakyLedger`) is compiled in; that feature is OFF in the prod
 # image (`just image` never passes it), so FlakyLedger stays out of shipping binaries.
@@ -152,6 +161,34 @@ deploy-ic:
 deploy-ic-staging:
     DPAY_DFX_NETWORK=local bash scripts/dfx-deploy-ic-staging.sh
 
+# OFFLINE dfx-replica proof for the user-principal IC rail (~30-60s): boots a clean replica, installs
+# the REAL ic-icrc1-ledger, funds the deterministic device principal P1, and drives the dpay-icp
+# signed envelopes through /api/v2 (202 → read_state poll → replied; signed query; bad-sig/expired
+# → 4xx). Second INDEPENDENT ingress implementation beyond the PocketIC gateway of test-live.
+test-icp-replica:
+    bash scripts/icp-replica-e2e.sh
+
+# OPT-IN mainnet read-only probe (NEEDS NETWORK, never in check/verify): signed queries only —
+# no cycles, no state change, throwaway fixed-seed key. Proves the envelope against the real
+# https://icp-api.io ingress on the DUSD ledger AND the DFINITY-operated ckBTC ledger, with a
+# bad-signature negative control. Asserts DUSD fee < 10^6 base units + decimals == 2
+# (live-measured), ckBTC decimals == 8.
+ic-mainnet-probe:
+    bash scripts/icp-mainnet-probe.sh
+
+# OPT-IN mainnet UPDATE probe (NEEDS NETWORK, never in check/verify): the state-changing twin of
+# ic-mainnet-probe — user-principal signed UPDATES (POST /api/v2/canister/<id>/call) with the full
+# read_state lifecycle, against OUR OWN canisters ONLY (facade ssqti + DUSD play-money ledger
+# td2nx, fee 0; NEVER DFINITY-operated ledgers/minters — hard constants, no env override).
+# Throwaway fixed-seed keys; play-money cents. Proves: bad-sig update → 4xx; facade faucet update
+# (real ledger state change) + IDENTICAL-envelope REPLAY dedup on mainnet; DUSD icrc1_transfer
+# P1→P2 (decoded InsufficientFunds — P1 unfunded by design; no operator hook funds a user
+# principal, see tests/mainnet_update.rs module docs); icrc2_approve (self-contained real
+# Ok(block_index) at fee 0); benign facade init_receipt_key bronze proof.
+ic-mainnet-update-probe:
+    bash scripts/icp-mainnet-update-probe.sh
+
+
 # OBJECTIVE deploy-fidelity gate: asserts the canister code RUNNING on mainnet is byte-identical to
 # the code built from the current source (compares the dfx-built artifact's sha256 to the live module
 # hash). Catches a stale WASM shipping while `just check` is green. Exit 1 = stale → `just deploy-ic`.
@@ -188,11 +225,15 @@ aid-parity:
 # path that test-relay's FakeLedger cannot (receipt recovery, TTL balance refresh, currency wiring).
 # Keeping it on the hot path closes the gap that once let a fail-closed-cap change break test-live
 # silently while `just verify` stayed green (MC2 U1 / OPEN_ISSUES #10 lesson).
+# test-icp is INCLUDED for the same reason: the user-principal IC rail e2e (dpay-icp envelopes
+# against the real ic-icrc1-ledger over a PocketIC make_live /api/v2 gateway) is offline ~7.5s —
+# same class as test-live — so the rail's decoders/goldens can't silently rot either.
+# (dfx-replica e2e + mainnet probe stay OFF the hot path: `just test-icp-replica` / `just ic-mainnet-probe`.)
 # (wallet-wire is GONE: /wallet is the real app now — its parity IS wasm-core + the e2e suite.)
 # (merchant-wire is GONE 2026-08-16: the hand-rolled /merchant page was merged into /wallet — the
 #  real app builds requests through its own wasm core, so the hand-rolled-encoder drift class it
 #  guarded against no longer has a surface to live on.)
-check: test-core test-canister test-relay test-live typecheck bridge-parity aid-parity wasm-core
+check: test-core test-canister test-relay test-live test-icp typecheck bridge-parity aid-parity wasm-core
     @echo "rust inner loop green"
 
 # Wasm-core parity: proves the COMMITTED crates/dpay-relay/assets/dpay-core.wasm (the bytes every

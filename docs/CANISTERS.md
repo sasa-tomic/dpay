@@ -58,7 +58,7 @@ They appear in the facade `currencies()` response but are deliberately absent fr
 
 | Currency | Role     | Principal                  |
 |----------|----------|----------------------------|
-| 1 ckBTC  | ledger   | `mxzaz-hqaa-aaaar-qaada-cai` |
+| 1 ckBTC  | ledger   | `mxzaz-hqaaa-aaaar-qaada-cai` |
 | 1 ckBTC  | minter   | `mqygn-kiaaa-aaaar-qaadq-cai` |
 | 2 ckUSDC | ledger   | `xevnm-gaaaa-aaaar-qafnq-cai` |
 | 2 ckUSDC | minter   | `sv3dd-oaaaa-aaaar-qacoa-cai` (the ckETH minter; ckERC20s share it) |

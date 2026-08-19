@@ -844,6 +844,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "dpay-icp"
+version = "0.1.0"
+dependencies = [
+ "ed25519-dalek",
+ "sha2 0.10.9",
+]
+
+[[package]]
+name = "dpay-icp-e2e"
+version = "0.1.0"
+dependencies = [
+ "dpay-icp",
+ "ed25519-dalek",
+ "reqwest 0.12.28",
+]
+
+[[package]]
+name = "dpay-icp-tests"
+version = "0.1.0"
+dependencies = [
+ "candid",
+ "dpay-icp",
+ "ed25519-dalek",
+ "ic-certification",
+ "icrc-ledger-types",
+ "num-traits",
+ "pocket-ic",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_cbor",
+]
+
+[[package]]
 name = "dpay-mock-minter"
 version = "0.1.0"
 dependencies = [
