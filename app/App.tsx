@@ -21,7 +21,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {RELAY_DEFAULT} from './relayConfig';
 import {C} from './config/palette';
 import {STORAGE_KEY, RELAY_STORAGE_KEY} from './config/constants';
-import {randNonceHex} from './lib/format';
 import {runSolSelfCheck} from './solana/selfcheck';
 import type {Identity} from './lib/types';
 import {DpayCore} from './services/native';
@@ -62,16 +61,21 @@ export default function App() {
   }, []);
 
   // On-device self-check → logcat (proves the running app calls dpay-core), independent of identity.
+  // 2026-08-19 IC-rail cutover: the old wire sign/verify round-trip retired with the facade rail; the
+  // check now proves the USER-PRINCIPAL RAIL surface end to end — self-principal derivation,
+  // transfer-arg build, envelope signing, and request_id round-trip (envelope → rid must equal the
+  // signer's rid). The device gate greps for `DPAY_SELFCHECK PASS`.
   useEffect(() => {
     (async () => {
       try {
         const kp = await DpayCore.generateKeypair();
-        const wire = await DpayCore.signAuthorization(kp.secretHex, kp.publicHex, '1', randNonceHex(), 4102444800, 0, '', '', '');
-        // wire is the authorization as lowercase hex; its byte length is `wireLen()` from the FFI, so the
-        // hex length is wireLen()*2. Deriving it from the core (not a literal) means a wire resize can't
-        // silently rot the self-check. verifyWire guards the signature round-trip; both must hold.
-        const expectedHexLen = (await DpayCore.wireLen()) * 2;
-        console.log(`DPAY_SELFCHECK ${(await DpayCore.verifyWire(wire)) && wire.length === expectedHexLen ? 'PASS' : 'FAIL'}`);
+        const principal = await DpayCore.icpSelfPrincipal(kp.secretHex);
+        const payee = await DpayCore.icpPrincipalFromPubkey(kp.publicHex);
+        const arg = await DpayCore.icpTransferArg(payee, '', '', '1', '', '');
+        const signed = await DpayCore.icpSignUpdate(kp.secretHex, 'mxzaz-hqaaa-aaaar-qaada-cai', 'icrc1_transfer', arg, '1800000000000000000');
+        const rid = await DpayCore.icpEnvelopeRequestId(signed.envelopeHex);
+        const ok = principal.length > 40 && payee.length > 40 && rid === signed.requestIdHex && signed.envelopeHex.length > 700;
+        console.log(`DPAY_SELFCHECK ${ok ? 'PASS' : 'FAIL'}`);
       } catch (e: unknown) { console.log(`DPAY_SELFCHECK FAIL ${e instanceof Error ? e.message : String(e)}`); }
     })();
   }, []);

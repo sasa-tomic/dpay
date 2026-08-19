@@ -2,39 +2,34 @@ import {useCallback, useEffect, useState} from 'react';
 import {View, Text, Pressable, TextInput, ActivityIndicator, Platform} from 'react-native';
 import {C} from '../config/palette';
 import {S} from '../styles';
-import {WITHDRAW_TIMEOUT_MS, WITHDRAW_EXPIRY_WINDOW} from '../config/constants';
-import {fmtAsset, toUnits, randNonceHex, nowSecs} from '../lib/format';
+import {fmtAsset, toUnits} from '../lib/format';
 import {cmpRaw} from '../lib/amount';
 import type {Identity} from '../lib/types';
-import type {FamilyDisplay, MinterFamily} from '../config/catalog';
+import type {CurrencyDescriptor, FamilyDisplay, MinterFamily} from '../config/catalog';
 import {isValidDestinationAddress} from '../config/catalog';
-import {withdrawFunds} from '../services/relay';
-import {withdrawRejectionMessage} from '../payments';
+import {prepareBtcWithdrawal, prepareEthWithdrawal, prepareErc20Withdrawal, submitOfframpStep, fetchGasFeeWei} from '../services/rail';
 import {loadSavedWithdrawAddr, saveWithdrawAddr} from '../services/withdraw';
-import {DpayCore} from '../services/native';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
-import {withTimeout} from '../lib/timeout';
 import {IconCheck, IconCopy} from './icons';
 
 /**
  * Withdraw a chain-key asset to a native address (ckBTC → BTC, native ckETH → ETH, ckERC20 tokens like
- * ckUSDC → USDC). The user enters a destination address + amount, reviews "Withdraw X <asset> to …",
- * then the app signs the WithdrawAuth ON-DEVICE (the non-custodial gate) and submits to the relay's
- * POST /api/v1/withdraw. The facade verifies the signature before moving funds. Amounts are converted
- * to raw smallest-units via the family's `amountDecimals` (8 for BTC sats, 18 for ETH Wei, 6 for
- * USDC micro-units); the on-device `WithdrawAuth.amount` is a u64 carrying those raw units. Escape
- * closes the sheet (web), matching DepositSheet.
+ * ckUSDC → USDC) over the IC user-principal rail. The user enters a destination + amount and the app
+ * signs EVERY envelope on-device: icrc2_approve(s) on the ledger(s) then the minter call
+ * (retrieve_btc_with_approval / withdraw_eth / withdraw_erc20) — all POSTed straight to /api/v2.
+ * There is no relay in the value path and no facade custody. Amounts convert to raw smallest-units
+ * via the family's `amountDecimals`. Escape closes the sheet (web), matching DepositSheet.
  *
- * ckERC20 gas dependency (Fork-C — no-swap): a ckERC20 withdraw (token_contract is Some) burns ckETH
- * for gas + the token amount from its own ledger (the dual-ledger `withdraw_erc20` path). dpay NEVER
- * converts ckUSDC→ckETH, so the user MUST independently hold ckETH for gas. The sheet shows an honest
- * "You need ckETH for gas" note when `tokenContract` is present; the real gas check happens at the
- * canister (the minter returns InsufficientFunds if the user has no ckETH gas → honest retryable
- * error). A partial-failure settlement surfaces "Gas was burned but the transfer may not have landed"
- * so the user checks their balance rather than assuming success.
+ * Retry discipline (rail-wide): every envelope is resubmitted VERBATIM — re-signing a submitted
+ * envelope is forbidden (new request_id = double-spend). An 'unknown' approve is honest pending —
+ * the minter call is NOT submitted blind after it.
+ *
+ * ckERC20 gas dependency (Fork-C — no-swap): a ckERC20 withdraw burns ckETH for gas + the token
+ * amount from its own ledger (dual-ledger withdraw_erc20). dpay NEVER converts ckUSDC→ckETH; the
+ * user MUST independently hold ckETH for gas (the minter fails closed otherwise — honest retryable).
  */
-export function WithdrawSheet({identity, relayUrl, currency, decimals, display, family, tokenContract, balance, onClose, onWithdrawn}: {identity: Identity; relayUrl: string; currency: number; decimals: number; display: FamilyDisplay; family: MinterFamily; tokenContract: string | null; balance: string; onClose: () => void; onWithdrawn: () => void}) {
+export function WithdrawSheet({identity, catalog, currency, decimals, display, family, tokenContract, balance, onClose, onWithdrawn}: {identity: Identity; catalog: CurrencyDescriptor[]; currency: number; decimals: number; display: FamilyDisplay; family: MinterFamily; tokenContract: string | null; balance: string; onClose: () => void; onWithdrawn: () => void}) {
   const [address, setAddress] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
@@ -71,36 +66,47 @@ export function WithdrawSheet({identity, relayUrl, currency, decimals, display, 
     }
     setPhase('submitting');
     setErr(null);
-    const {signal, cancel} = withTimeout(WITHDRAW_TIMEOUT_MS);
     try {
-      const nonce = randNonceHex();
-      const expiry = nowSecs() + WITHDRAW_EXPIRY_WINDOW;
-      // Sign the WithdrawAuth on-device (non-custodial gate). The facade verifies this exact sig.
-      const sigHex = await DpayCore.signWithdrawal(identity.secretHex, address.trim(), raw, nonce, expiry, currency);
-      const r = await withdrawFunds(relayUrl, identity.publicHex, address.trim(), raw, nonce, expiry, currency, sigHex, signal);
-      setReceipt({amount: r.amount, btcAddress: r.destination});
+      const desc = catalog.find(c => c.currency === currency);
+      const dest = address.trim();
+      // Family-dispatched, all-user-signed envelopes. gas_ledger carries the ckETH ledger for
+      // dual-ledger ckERC20; the minter principal comes from the catalog row.
+      const minter = desc?.minter ?? '';
+      const ledger = desc?.ledger ?? '';
+      const gasLedger = desc?.gas_ledger ?? '';
+      if (!ledger || !minter) throw new Error('This asset has no withdrawal rail configured');
+      let steps;
+      if (family === 'CkBtcUtxo') {
+        steps = await prepareBtcWithdrawal(identity.secretHex, ledger, minter, dest, raw);
+      } else if (family === 'CkEthErc20' && tokenContract != null) {
+        if (!gasLedger) throw new Error('This asset has no withdrawal rail configured');
+        const gas = await fetchGasFeeWei(identity.secretHex, minter, ledger);
+        if (gas == null) throw new Error("Couldn't fetch the live gas fee — check your connection");
+        steps = await prepareErc20Withdrawal(identity.secretHex, ledger, gasLedger, minter, dest, raw, gas);
+      } else {
+        const gas = await fetchGasFeeWei(identity.secretHex, minter, ledger);
+        if (gas == null) throw new Error("Couldn't fetch the live gas fee — check your connection");
+        steps = await prepareEthWithdrawal(identity.secretHex, ledger, minter, dest, raw, gas);
+      }
+      // Submit each step in order; STOP on anything but settled. Approve 'unknown' is honest
+      // pending — the minter call is never submitted blind after it.
+      for (let i = 0; i < steps.length; i++) {
+        const out = await submitOfframpStep(steps[i], identity.secretHex, {attempts: 12, intervalMs: 500});
+        if (out.kind === 'settled') continue;
+        if (out.kind === 'rejected') throw new Error(out.reason);
+        throw new Error(i === 0 && steps.length > 1
+          ? "Couldn't confirm the approval — check your balance when back online"
+          : "Couldn't confirm the withdrawal — it may still land; check your balance soon");
+      }
+      setReceipt({amount: raw, btcAddress: dest});
       setPhase('done');
-      void saveWithdrawAddr(currency, address.trim()); // remember for next cash-out (Fork-B)
+      void saveWithdrawAddr(currency, dest); // remember for next cash-out (Fork-B)
       onWithdrawn(); // trigger a balance/history refresh
     } catch (e: unknown) {
-      // A 422 policy error (bad sig / insufficient / below min / nonce) or a 503 transient / offline.
-      // A8: the raw relay/canister body (e.g. "InsufficientFunds: balance 0", "nonce already used")
-      // is protocol jargon to a user — mapped to friendly copy by `withdrawRejectionMessage` (pure,
-      // unit-tested in payments.test.ts). The raw reason is ALWAYS console.warn'd so the dev loop
-      // stays fail-loud. For a ckERC20 partial-failure settlement (the dual-ledger path burned ckETH
-      // gas but the ERC-20 transfer may not have landed — the canister RELEASES with an honest
-      // partial-failure marker), surface the specific "gas was burned" guidance so the user checks
-      // their balance instead of assuming success.
       const msg = e instanceof Error ? e.message : String(e);
       console.warn('withdraw failed:', msg);
-      if (/partial[ _-]?failure/i.test(msg)) {
-        setErr('Gas was burned but the transfer may not have landed. Check your balance.');
-      } else {
-        setErr(withdrawRejectionMessage(msg));
-      }
+      setErr(msg);
       setPhase('error');
-    } finally {
-      cancel();
     }
   }
 

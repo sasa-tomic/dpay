@@ -3,14 +3,12 @@ import {View, Text, Pressable, Modal, Platform} from 'react-native';
 import {QrCode} from './QrCode';
 import {S} from '../styles';
 import {C} from '../config/palette';
-import {DIRECT_PAY_TIMEOUT_MS, POLL, BALANCE_TIMEOUT_MS, QR_SIZE} from '../config/constants';
-import {short, base, parseRequestQR} from '../lib/format';
+import {POLL, QR_SIZE} from '../config/constants';
+import {short, parseRequestQR} from '../lib/format';
 import {cmpRaw} from '../lib/amount';
 import {type CurrencyDescriptor, type FamilyDisplay, type MinterFamily, fmtCurrencyAmount, isPayableAsset, displayName, isTestnetCurrency, testnetDisplayName} from '../config/catalog';
 import type {Identity, Req, NfcStatus} from '../lib/types';
-import {rejectionMessage, isNonceReused} from '../payments';
-import {verifyOutcomeReceipt} from '../services/receipt';
-import {fetchWithTimeout, payAndClassify, readJsonOrEmpty} from '../services/relay';
+import {prepareTransfer, submitTransfer, pollTransfer, envelopeToQrPayload, type RailPrepared} from '../services/rail';
 import {shareHandoff, receiptShareBlob} from '../lib/deepLink';
 import {DpayCore, DpayNfc} from '../services/native';
 import {NfcTap} from './NfcTap';
@@ -22,7 +20,6 @@ import {WithdrawSheet} from './WithdrawSheet';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useReportLock} from '../hooks/useReportLock';
 import {useShareFeedback, shareConfirmLabel} from '../hooks/useShareFeedback';
-import {withTimeout} from '../lib/timeout';
 import {IconCheck, IconClock, IconInfo, IconShare} from './icons';
 
 // Plain-language per-reason text for the NFC-unavailable info popup. Each ends with the honest
@@ -33,19 +30,21 @@ const NFC_REASON: Record<Exclude<NfcStatus, 'ready'>, string> = {
   unknown: "Couldn't check NFC status. Scan the QR code to pay.",
 };
 
-export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assetBalances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillRequest, onPrefillConsumed, onShowDepositAddress, onRefreshBalances, refreshBusy = false, onLockChange}: {identity: Identity; online: boolean; relayUrl: string; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assetBalances: Record<number, string>; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillRequest?: string | null; onPrefillConsumed?: () => void; onShowDepositAddress: () => void; onRefreshBalances?: () => void; refreshBusy?: boolean; onLockChange?: (locked: boolean) => void}) {
+export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assetBalances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillRequest, onPrefillConsumed, onShowDepositAddress, onRefreshBalances, refreshBusy = false, onLockChange}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assetBalances: Record<number, string>; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillRequest?: string | null; onPrefillConsumed?: () => void; onShowDepositAddress: () => void; onRefreshBalances?: () => void; refreshBusy?: boolean; onLockChange?: (locked: boolean) => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid'>('scan');
   // The within-tab sub-mode is OWNED by Wallet. "scan" = the existing scan-to-pay flow; "send" = the
   // on-chain send-to-address flow (the WithdrawSheet body, lifted inline). The toggle renders only
   // when withdrawFamily is non-null (an on-chain offramp family); DEMO hides it.
   const [req, setReq] = useState<Req | null>(null);
+  // The signed IC envelope handoff (offline QR / pending reconcile). `prepared` holds the
+  // VERBATIM envelope bytes — resubmission must reuse them (identical-byte retry only;
+  // re-signing = new request_id = double-pay).
+  const [prepared, setPrepared] = useState<RailPrepared | null>(null);
   const [qr, setQr] = useState<{code: string; amount: string; currency: number; who: string; nonce: string} | null>(null);
   // `pending` = handed to the merchant offline but NOT confirmed by the ledger (we can't claim it
-  // settled). `already` = the ledger reported this nonce was already settled (idempotent replay).
-  // `receipt` = the canister-signed receipt object captured on an ONLINE settle (so the payer can
-  // share it back as a `dpay:pay/` link when NFC is unavailable — the merchant verifies the signature
-  // + reconciles). Null/absent on the offline hand-off (the merchant settles that themselves) and on
-  // a replay (no fresh receipt body).
+  // settled). `already` = the rail reported this transfer already executed (idempotent replay).
+  // `receipt` = the settlement proof captured on an ONLINE settle: block index + request id (the
+  // read_state outcome — honest interim receipt per W3; W6 upgrades to BLS-verified certs).
   const [paid, setPaid] = useState<{amount: string; currency: number; who: string; already: boolean; pending?: boolean; receipt?: Record<string, unknown> | null} | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -99,81 +98,58 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefillRequest, phase]);
 
-  // Confirm an offline (QR-dance) settlement via the ledger, so it lands in Recent once, when settled.
+  // Reconcile an offline (QR-dance) settlement via the IC rail: poll read_state for the prepared
+  // envelope's request_id. Terminal replied → Paid (decoded TransferResult); rejected → surfaced
+  // honestly; still-pending → keep polling (the ~5.5-min ingress window is the deadline, and
+  // "not submitted in time" stays honest-pending, never a fake Paid).
   useEffect(() => {
-    if (phase !== 'qr' || !qr) return;
+    if (phase !== 'qr' || !prepared || !qr) return;
      let alive = true;
-    const check = async () => {
-      try {
-        const r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/receipt/${qr.nonce}`, undefined, BALANCE_TIMEOUT_MS);
-        // R2: only believe the reconciled receipt if its canister/ledger signature verifies.
-        // MC4 U5: full-auth binding — the receipt must answer the exact authorization the payer
-        // holds (same from/to/amount/currency/nonce), so a stale relay returning a different
-        // payment's receipt is rejected. `req` holds the payee + amount the payer signed for.
-        if (alive && r.ok) {
-          const j = await readJsonOrEmpty(r);
-          if (req && await verifyOutcomeReceipt(j.receipt, {from: identity.publicHex, to: req.toHex, amount: req.amount, currency: req.currency, nonce: req.nonceHex})) {
-            onSettled(); setPaid({amount: qr.amount, currency: qr.currency, who: qr.who, already: false}); setPhase('paid');
-          }
-        }
-      } catch (e) { console.warn('receipt reconcile poll failed:', e instanceof Error ? e.message : String(e)); /* best-effort: keep polling — the next tick reconciles if the ledger settled */ }
-    };
-    check(); const id = setInterval(check, POLL.receiptPay);
-    return () => { alive = false; clearInterval(id); };
-  }, [phase, qr, relayUrl, onSettled, identity, req]);
+     const check = async () => {
+       try {
+         const out = await pollTransfer(prepared, identity.secretHex, {attempts: 1, intervalMs: 0});
+         if (!alive) return;
+         if (out.kind === 'settled') {
+           onSettled(); setPaid({amount: qr.amount, currency: qr.currency, who: qr.who, already: false}); setPhase('paid');
+         }
+       } catch (e) { console.warn('rail reconcile poll failed:', e instanceof Error ? e.message : String(e)); /* best-effort: keep polling */ }
+     };
+     check(); const id = setInterval(check, POLL.receiptPay);
+     return () => { alive = false; clearInterval(id); };
+  }, [phase, prepared, qr, onSettled, identity]);
 
   async function approve() {
     if (!req) return;
     setBusy(true);
     try {
-      // The payer's own username rides as `from_name`; `to_name` + `memo` are copied verbatim from
-      // the scanned merchant request (so the signature binds exactly what was requested). The payee
-      // name no longer comes from a `|name` QR suffix — it's in the bytes (single source of truth).
-      const wireHex = await DpayCore.signAuthorization(identity.secretHex, req.toHex, req.amount, req.nonceHex, req.expiry, req.currency, identity.username, req.toName, req.memo);
-      if (!(await DpayCore.verifyWire(wireHex))) throw new Error('local verify failed');
-      const code = await DpayCore.encodeQr(wireHex);
+      // IC user-principal rail: build + sign the icrc1_transfer envelope LOCALLY (payee principal
+      // derived from the request's `to` pubkey; memo = the request nonce = reconciliation key).
+      // prepareTransfer refuses to sign on unreachable/skewed IC clock — surfaced as the error.
+      const p = await prepareTransfer(identity.secretHex, {currencies: catalog}, req);
       const who = req.toName || short(req.toHex);
-      const nonce = req.nonceHex;
+      setPrepared(p);
       if (online) {
-        const {signal, cancel} = withTimeout(DIRECT_PAY_TIMEOUT_MS);
-        // PR25 — payAndClassify does fetch + JSON-or-empty parse + classifyPayHttp, returning the
-        // authoritative outcome + the parsed body (so the caller can read `body.receipt` /
-        // `body.error` / `body.replayed`). A fetch throw collapses to outcome='unknown'.
-        const {outcome, body: j} = await payAndClassify(relayUrl, code, signal).finally(() => cancel());
-        if (outcome === 'settled') {
-          // R2: trust the outcome only if the receipt's canister/ledger signature verifies. A
-          // replay (replayed:true) returns the SAME cached receipt, which verifies identically.
-          // MC4 U5: full-auth binding — the receipt must match the signed authorization (same
-          // from/to/amount/currency/nonce) so a stale/different payment's receipt is rejected.
-          const verified = await verifyOutcomeReceipt(j.receipt, {from: identity.publicHex, to: req.toHex, amount: req.amount, currency: req.currency, nonce: req.nonceHex});
-          if (verified) {
-            if (!j.replayed) onSettled();
-            // Capture the verified receipt so the payer can share it back as a dpay:pay/ link (the
-            // NFC-less hand-back: the merchant opens the link + re-verifies + reconciles as Paid).
-            // Only set on a fresh settle (not a replay — the replay body carries the same cached
-            // receipt, but sharing it is redundant since it already settled).
-            const receipt = (!j.replayed && j.receipt && typeof j.receipt === 'object') ? j.receipt as Record<string, unknown> : null;
-            setPaid({amount: req.amount, currency: req.currency, who, already: !!j.replayed, receipt}); setPhase('paid'); return;
-          }
-          // Settled at the HTTP layer but the receipt did not verify — honest, never a fake Paid.
-          setErr('Couldn’t verify the payment — check the balance'); return;
+        const out = await submitTransfer(p, identity.secretHex, {attempts: 12, intervalMs: 500});
+        if (out.kind === 'settled') {
+          onSettled();
+          // Interim settlement proof (honest W3 receipt): ledger + block index + request id —
+          // certified read_state, not BLS-verified on-device (W6 upgrades).
+          setPaid({amount: req.amount, currency: req.currency, who, already: false, receipt: {ledger: p.ledger, block_index: out.blockIndex, request_id: p.requestIdHex}}); setPhase('paid'); return;
         }
-        if (outcome === 'rejected') {
-          // A definitive refusal: show WHY (e.g. "Not enough balance") rather than silently
-          // dropping to the QR screen, which reads as if the payment is fine. NonceReused is the
-          // exception — it means this exact payment already settled.
-          if (isNonceReused(j?.error)) { setPaid({amount: req.amount, currency: req.currency, who, already: true}); setPhase('paid'); return; }
-          setErr(rejectionMessage(typeof j?.error === 'string' ? j.error : null)); return;
+        if (out.kind === 'rejected') {
+          if (out.reason === 'Already paid') { setPaid({amount: req.amount, currency: req.currency, who, already: true}); setPhase('paid'); return; }
+          setErr(out.reason); return;
         }
-        // outcome === 'unknown': couldn't reach the ledger cleanly. Fall through to the offline QR
-        // hand-off (the merchant can still scan it) — the /receipt poll reconciles if it settles.
+        // unknown: not terminal within budget — fall through to the offline QR hand-off. The
+        // merchant can submit the SAME envelope within the ingress window; the reconcile poll
+        // (above) turns it into Paid when the rail reports it executed.
       }
-      setQr({code, amount: req.amount, currency: req.currency, who, nonce});
+      setQr({code: envelopeToQrPayload(p.envelopeHex), amount: req.amount, currency: req.currency, who, nonce: req.nonceHex});
       setPhase('qr');
     } catch (e: unknown) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   }
 
-  function reset() { setReq(null); setQr(null); setPaid(null); setErr(null); setPhase('scan'); }
+  function reset() { setReq(null); setPrepared(null); setQr(null); setPaid(null); setErr(null); setPhase('scan'); }
 
   if (phase === 'paid' && paid) {
     const warn = paid.already || paid.pending;
@@ -367,7 +343,7 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
         {fundPanel ?? (
           <WithdrawSheet
             identity={identity}
-            relayUrl={relayUrl}
+            catalog={catalog}
             currency={withdrawCurrency}
             decimals={catalog.find(c => c.currency === withdrawCurrency)?.decimals ?? withdrawDisplay.amountDecimals}
             display={withdrawDisplay}
@@ -401,7 +377,7 @@ export function PayMode({identity, online, relayUrl, nfcStatus, onSettled, onOff
         <>
       {nfcReady && DpayNfc ? (
         <NfcTap
-          key={nfcKey} role="card" identity={identity} relayUrl={relayUrl}
+          key={nfcKey} role="card" identity={identity}
           catalog={catalog}
           onSettled={onSettled} onOfflinePaid={onOfflinePaid}
           onActive={() => setNfcActive(true)}

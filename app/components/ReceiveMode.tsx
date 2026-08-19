@@ -226,7 +226,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
         {/* Reader mode runs in the background while the QR is shown: the payer taps OR scans. */}
         {reqQr.nfcHex && nfcReady && DpayNfc ? (
           <NfcTap
-            key={nfcKey} role="reader" identity={identity} relayUrl={relayUrl} requestHex={reqQr.nfcHex}
+            key={nfcKey} role="reader" identity={identity} requestHex={reqQr.nfcHex}
             reqInfo={readerReqInfo}
             catalog={catalog}
             onSettled={onReceived} onActive={() => setNfcActive(true)}

@@ -68,7 +68,6 @@ function mountPay(props: Partial<PayModeProps> = {}) {
       <PayMode
         identity={IDENTITY}
         online={false}
-        relayUrl="http://relay.test"
         nfcStatus="unknown"
         onSettled={() => {}}
         onOfflinePaid={() => {}}

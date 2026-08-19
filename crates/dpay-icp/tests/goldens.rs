@@ -416,3 +416,64 @@ fn golden_mainnet_dusd_principal_and_balance_arg() {
     // and the LIVE-CAPTURED mainnet decimals reply for this very canister decodes to 2
     assert_eq!(icrc::decode_int(&unhex(G_INT_NAT8)).unwrap(), 2);
 }
+
+// --- minter args (ckBTC get_btc_address/retrieve_btc_with_approval, ckETH withdraw_eth /
+// --- withdraw_erc20 / eip_1559_transaction_price) — regenerated with the cached production
+// --- candid 0.10.22 (same generator + versions as every other golden in this file) ---
+
+#[test]
+fn golden_minter_args() {
+    let owner = Principal::from_text("aaaaa-aa").unwrap(); // anonymous owner (probe shape)
+    // get_btc_address(MinterAccount{owner, subaccount: None})
+    assert_eq!(
+        icrc::minter_account_arg(&owner, None),
+        unhex("4449444c046c02b3b0dac30301ad86ca8305026e686e036d7b010001010000"),
+        "get_btc_address arg must be the exact 1-record DIDL (2-tuples trap IC0503 on the real minter)"
+    );
+    // retrieve_btc_with_approval({address, amount: 50_000 sats, from_subaccount: None})
+    assert_eq!(
+        icrc::retrieve_btc_arg("bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh", 50_000, None),
+        unhex("4449444c036c03a2de94eb0601b4e3ade80971d8a38ca80d786e026d7b0100002a626331717879326b676479676a727371747a71326e30797266323439337038336b6b666a687830776c6850c3000000000000"),
+        "retrieve_btc_with_approval arg (address, opt blob, nat64 amount)"
+    );
+    // withdraw_eth({recipient, amount: 1e18 Wei, from_subaccount: None})
+    assert_eq!(
+        icrc::withdraw_eth_arg("0x1234567890abcdef1234567890abcdef12345678", 1_000_000_000_000_000_000, None),
+        unhex("4449444c036c03d9f78b9a0571a2de94eb0601d8a38ca80d7d6e026d7b01002a30783132333435363738393061626364656631323334353637383930616263646566313233343536373800808090bbbad6adf00d"),
+        "withdraw_eth arg (opt blob, text recipient, nat amount)"
+    );
+    // withdraw_erc20({amount, ckerc20_ledger_id, recipient, from_cketh, from_ckerc20})
+    let ckusdc = Principal::from_text("xevnm-gaaaa-aaaar-qafnq-cai").unwrap();
+    assert_eq!(
+        icrc::withdraw_erc20_arg(1_000_000, &ckusdc, "0x1234567890abcdef1234567890abcdef12345678", None, None),
+        unhex("4449444c036c059ea7a9980268d9f78b9a0571b0b4dbff0801d597edb90a01d8a38ca80d7d6e026d7b0100010a000000000230015b01012a3078313233343536373839306162636465663132333435363738393061626364656631323334353637380000c0843d"),
+        "withdraw_erc20 dual-ledger arg (nat, principal, text, opt blob, opt blob)"
+    );
+    // eip_1559_transaction_price(opt {ckerc20_ledger_id})
+    assert_eq!(
+        icrc::eip1559_price_arg(&ckusdc),
+        unhex("4449444c026e016c019ea7a9980268010001010a000000000230015b0101"),
+        "gas-price query arg (opt record with ckerc20 ledger principal)"
+    );
+    // decode_text round-trip (get_btc_address reply shape): DIDL magic, empty type table,
+    // 1 arg of prim text (sleb -22), then the 49-char bech32 string.
+    let mut reply = unhex("4449444c00");
+    reply.extend_from_slice(&[0x01, 0x6a]);
+    let addr_bytes = b"bc1qxaqqw85nxuvst3q5kjkm5vxyz7mt2qlnjgvpmpx5l8895";
+    reply.push(addr_bytes.len() as u8);
+    reply.extend_from_slice(addr_bytes);
+    let addr = icrc::decode_text(&reply).expect("btc address reply decodes");
+    assert_eq!(addr, "bc1qxaqqw85nxuvst3q5kjkm5vxyz7mt2qlnjgvpmpx5l8895", "bare text reply (49-char bech32)");
+
+    // eip_1559_transaction_price reply (production candid 0.10.22): field-hash order
+    // max_priority_fee, max_fee, max_tx_fee, timestamp(opt), gas_limit.
+    let price = icrc::decode_eip1559_price(&unhex(
+        "4449444c026c05ded6aceb037de3eb88d2067dca82b683097dd6a9bbae0a01d5f8acd20a7d6e78010080c2d72f80d0f29ce14880c0abd28cde110100f1536500000000b0ea01",
+    ))
+    .expect("eip1559 reply decodes");
+    assert_eq!(price.gas_limit, 30_000);
+    assert_eq!(price.max_fee_per_gas, 2_500_000_000_000u128);
+    assert_eq!(price.max_priority_fee_per_gas, 100_000_000u128);
+    assert_eq!(price.max_transaction_fee, 78_000_000_000_000u128);
+    assert_eq!(price.timestamp, Some(1_700_000_000));
+}

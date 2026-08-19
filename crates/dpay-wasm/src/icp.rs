@@ -66,6 +66,18 @@ fn text_at(ptr: u32, len: u32) -> Result<String, u32> {
         .map_err(|_| BAD_UTF8)
 }
 
+/// Optional 32-byte subaccount (len 0 = None, 32 = Some; anything else = BAD_LEN).
+fn sub32_at(ptr: u32, len: u32) -> Result<Option<[u8; 32]>, u32> {
+    if len == 0 {
+        return Ok(None);
+    }
+    if !in_bounds(ptr, len) || len != 32 {
+        return Err(BAD_LEN);
+    }
+    let bytes = unsafe { slice_at(ptr, len) };
+    bytes.try_into().map(Some).map_err(|_| BAD_LEN)
+}
+
 /// Read hex bytes ("" = empty).
 fn hex_at(ptr: u32, len: u32) -> Result<Vec<u8>, u32> {
     if !in_bounds(ptr, len) || len > 1024 || len % 2 != 0 {
@@ -137,6 +149,21 @@ pub extern "C" fn w_icp_self_principal(seed_ptr: u32, out_ptr: u32, cap: u32) ->
     };
     let p = Principal::self_authenticating_ed25519(&sk.verifying_key().to_bytes());
     let text = p.to_text();
+    write_str_out(text.as_bytes(), out_ptr, cap)
+}
+
+/// `icp_principal_from_pubkey`: payee principal text for a 32-byte Ed25519 public key (the
+/// payment-request `to` field) — `self_authenticating(pub)`. Keeps the request format frozen.
+#[no_mangle]
+pub extern "C" fn w_icp_principal_from_pubkey(ptr: u32, len: u32, out_ptr: u32, cap: u32) -> u32 {
+    if !in_bounds(ptr, len) || len != 32 {
+        return BAD_LEN;
+    }
+    let pk: [u8; 32] = match unsafe { slice_at(ptr, len) }.try_into() {
+        Ok(p) => p,
+        Err(_) => return BAD_LEN,
+    };
+    let text = Principal::self_authenticating_ed25519(&pk).to_text();
     write_str_out(text.as_bytes(), out_ptr, cap)
 }
 
@@ -251,6 +278,129 @@ pub extern "C" fn w_icp_balance_of_arg(
     };
     let arg = icrc_balance_of_arg(&account);
     write_str_out(&arg, out_ptr, cap)
+}
+
+// --- minter calls (user-principal offramp + deposits) — golden-pinned builders ---------------------
+
+/// ckBTC minter `get_btc_address(MinterAccount)` — ONE record arg (2-tuples trap IC0503).
+#[no_mangle]
+pub extern "C" fn w_icp_minter_account_arg(
+    owner_ptr: u32, owner_len: u32, sub_ptr: u32, sub_len: u32,
+    out_ptr: u32, cap: u32,
+) -> u32 {
+    let account = match account_at(owner_ptr, owner_len, sub_ptr, sub_len) {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    let sub = if account.subaccount == [0u8; 32] { None } else { Some(account.subaccount) };
+    let arg = dpay_icp::icrc::minter_account_arg(&account.owner, sub);
+    write_str_out(&arg, out_ptr, cap)
+}
+
+/// ckBTC minter `retrieve_btc_with_approval` (address text, sats decimal string, opt sub hex).
+#[no_mangle]
+pub extern "C" fn w_icp_retrieve_btc_arg(
+    addr_ptr: u32, addr_len: u32, amount_ptr: u32, amount_len: u32,
+    sub_ptr: u32, sub_len: u32, out_ptr: u32, cap: u32,
+) -> u32 {
+    let addr = match text_at(addr_ptr, addr_len) { Ok(t) => t, Err(e) => return e };
+    let amount: u64 = match u64_str_at(amount_ptr, amount_len) { Ok(v) => v, Err(e) => return e };
+    let sub = match sub32_at(sub_ptr, sub_len) { Ok(s) => s, Err(e) => return e };
+    let arg = dpay_icp::icrc::retrieve_btc_arg(&addr, amount, sub);
+    write_str_out(&arg, out_ptr, cap)
+}
+
+/// ckETH minter `withdraw_eth` (recipient text, Wei decimal string, opt sub hex).
+#[no_mangle]
+pub extern "C" fn w_icp_withdraw_eth_arg(
+    recip_ptr: u32, recip_len: u32, amount_ptr: u32, amount_len: u32,
+    sub_ptr: u32, sub_len: u32, out_ptr: u32, cap: u32,
+) -> u32 {
+    let recip = match text_at(recip_ptr, recip_len) { Ok(t) => t, Err(e) => return e };
+    let amount: u128 = match u128_opt_at(amount_ptr, amount_len) {
+        Ok(Some(v)) => v,
+        Ok(None) => return BAD_UTF8, // empty amount is invalid here
+        Err(e) => return e,
+    };
+    let sub = match sub32_at(sub_ptr, sub_len) { Ok(s) => s, Err(e) => return e };
+    let arg = dpay_icp::icrc::withdraw_eth_arg(&recip, amount, sub);
+    write_str_out(&arg, out_ptr, cap)
+}
+
+/// ckETH minter `withdraw_erc20` — dual-ledger (amount, ckerc20 ledger, recipient, 2 opt subs).
+#[no_mangle]
+pub extern "C" fn w_icp_withdraw_erc20_arg(
+    amount_ptr: u32, amount_len: u32, ledger_ptr: u32, ledger_len: u32,
+    recip_ptr: u32, recip_len: u32, sub1_ptr: u32, sub1_len: u32,
+    sub2_ptr: u32, sub2_len: u32, out_ptr: u32, cap: u32,
+) -> u32 {
+    let amount: u128 = match u128_opt_at(amount_ptr, amount_len) {
+        Ok(Some(v)) => v,
+        Ok(None) => return BAD_UTF8,
+        Err(e) => return e,
+    };
+    let ledger_text = match text_at(ledger_ptr, ledger_len) { Ok(t) => t, Err(e) => return e };
+    let ledger = match Principal::from_text(&ledger_text) { Ok(p) => p, Err(_) => return BAD_UTF8 };
+    let recip = match text_at(recip_ptr, recip_len) { Ok(t) => t, Err(e) => return e };
+    let sub1 = match sub32_at(sub1_ptr, sub1_len) { Ok(s) => s, Err(e) => return e };
+    let sub2 = match sub32_at(sub2_ptr, sub2_len) { Ok(s) => s, Err(e) => return e };
+    let arg = dpay_icp::icrc::withdraw_erc20_arg(amount, &ledger, &recip, sub1, sub2);
+    write_str_out(&arg, out_ptr, cap)
+}
+
+/// ckETH minter `eip_1559_transaction_price` QUERY arg (ckerc20 ledger principal text).
+#[no_mangle]
+pub extern "C" fn w_icp_eip1559_price_arg(
+    ledger_ptr: u32, ledger_len: u32, out_ptr: u32, cap: u32,
+) -> u32 {
+    let ledger_text = match text_at(ledger_ptr, ledger_len) { Ok(t) => t, Err(e) => return e };
+    let ledger = match Principal::from_text(&ledger_text) { Ok(p) => p, Err(_) => return BAD_UTF8 };
+    let arg = dpay_icp::icrc::eip1559_price_arg(&ledger);
+    write_str_out(&arg, out_ptr, cap)
+}
+
+/// Decode a bare `text` reply (get_btc_address / any single-text query) into JSON {"text": "..."}.
+#[no_mangle]
+pub extern "C" fn w_icp_decode_text(arg_ptr: u32, arg_len: u32, out_ptr: u32, cap: u32) -> u32 {
+    if !in_bounds(arg_ptr, arg_len) || arg_len > 8192 {
+        return BAD_LEN;
+    }
+    let bytes = unsafe { slice_at(arg_ptr, arg_len) };
+    let text = match dpay_icp::icrc::decode_text(bytes) { Ok(t) => t, Err(_) => return BAD_UTF8 };
+    let mut json = String::from("{\"text\":");
+    push_json_str(&text, &mut json);
+    json.push('}');
+    write_str_out(json.as_bytes(), out_ptr, cap)
+}
+
+/// Decode an `eip_1559_transaction_price` reply into JSON (Wei decimal strings).
+#[no_mangle]
+pub extern "C" fn w_icp_decode_eip1559_price(arg_ptr: u32, arg_len: u32, out_ptr: u32, cap: u32) -> u32 {
+    if !in_bounds(arg_ptr, arg_len) || arg_len > 8192 {
+        return BAD_LEN;
+    }
+    let bytes = unsafe { slice_at(arg_ptr, arg_len) };
+    let p = match dpay_icp::icrc::decode_eip1559_price(bytes) { Ok(p) => p, Err(_) => return BAD_UTF8 };
+    let mut json = String::with_capacity(256);
+    json.push_str("{\"gasLimit\":\"");
+    json.push_str(&p.gas_limit.to_string());
+    json.push_str("\",\"maxFeePerGas\":\"");
+    json.push_str(&p.max_fee_per_gas.to_string());
+    json.push_str("\",\"maxPriorityFeePerGas\":\"");
+    json.push_str(&p.max_priority_fee_per_gas.to_string());
+    json.push_str("\",\"maxTransactionFee\":\"");
+    json.push_str(&p.max_transaction_fee.to_string());
+    json.push_str("\",\"timestampNs\":");
+    match p.timestamp {
+        Some(t) => {
+            json.push('"');
+            json.push_str(&t.to_string());
+            json.push('"');
+        }
+        None => json.push_str("null"),
+    }
+    json.push('}');
+    write_str_out(json.as_bytes(), out_ptr, cap)
 }
 
 // --- envelope signing ----------------------------------------------------------------------------

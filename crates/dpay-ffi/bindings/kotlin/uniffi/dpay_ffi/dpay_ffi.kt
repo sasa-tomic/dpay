@@ -818,6 +818,22 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is 
 // rather `InterfaceTooLargeException`, caused by too many methods 
@@ -849,17 +865,29 @@ fun uniffi_dpay_ffi_checksum_func_icp_approve_arg(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_icp_balance_of_arg(
 ): Short
+fun uniffi_dpay_ffi_checksum_func_icp_decode_eip1559_price(
+): Short
 fun uniffi_dpay_ffi_checksum_func_icp_decode_int(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_icp_decode_query(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_icp_decode_read_state(
 ): Short
+fun uniffi_dpay_ffi_checksum_func_icp_decode_text(
+): Short
 fun uniffi_dpay_ffi_checksum_func_icp_decode_transfer_result(
+): Short
+fun uniffi_dpay_ffi_checksum_func_icp_eip1559_price_arg(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_icp_envelope_request_id(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_icp_ingress_expiry(
+): Short
+fun uniffi_dpay_ffi_checksum_func_icp_minter_account_arg(
+): Short
+fun uniffi_dpay_ffi_checksum_func_icp_principal_from_pubkey(
+): Short
+fun uniffi_dpay_ffi_checksum_func_icp_retrieve_btc_arg(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_icp_self_principal(
 ): Short
@@ -870,6 +898,10 @@ fun uniffi_dpay_ffi_checksum_func_icp_sign_read_state(
 fun uniffi_dpay_ffi_checksum_func_icp_sign_update(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_icp_transfer_arg(
+): Short
+fun uniffi_dpay_ffi_checksum_func_icp_withdraw_erc20_arg(
+): Short
+fun uniffi_dpay_ffi_checksum_func_icp_withdraw_eth_arg(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_keypair_from_secret(
 ): Short
@@ -1040,17 +1072,29 @@ fun uniffi_dpay_ffi_fn_func_icp_approve_arg(`spenderOwnerText`: RustBuffer.ByVal
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_balance_of_arg(`ownerText`: RustBuffer.ByValue,`subaccountHex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_decode_eip1559_price(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_decode_int(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_decode_query(`body`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_decode_read_state(`body`: RustBuffer.ByValue,`requestIds`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_decode_text(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_decode_transfer_result(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_eip1559_price_arg(`ckerc20LedgerText`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_envelope_request_id(`envelope`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_ingress_expiry(`nowNs`: RustBuffer.ByValue,`aheadS`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_minter_account_arg(`ownerText`: RustBuffer.ByValue,`subaccountHex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_principal_from_pubkey(`pubkey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_retrieve_btc_arg(`address`: RustBuffer.ByValue,`amountSats`: RustBuffer.ByValue,`fromSubaccountHex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_self_principal(`secret`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1061,6 +1105,10 @@ fun uniffi_dpay_ffi_fn_func_icp_sign_read_state(`secret`: RustBuffer.ByValue,`re
 fun uniffi_dpay_ffi_fn_func_icp_sign_update(`secret`: RustBuffer.ByValue,`canisterText`: RustBuffer.ByValue,`methodName`: RustBuffer.ByValue,`arg`: RustBuffer.ByValue,`ingressExpiryNs`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_transfer_arg(`toOwnerText`: RustBuffer.ByValue,`toSubaccountHex`: RustBuffer.ByValue,`fromSubaccountHex`: RustBuffer.ByValue,`amount`: RustBuffer.ByValue,`fee`: RustBuffer.ByValue,`memoHex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_withdraw_erc20_arg(`amount`: RustBuffer.ByValue,`ckerc20LedgerText`: RustBuffer.ByValue,`recipient`: RustBuffer.ByValue,`fromCkethSubaccountHex`: RustBuffer.ByValue,`fromCkerc20SubaccountHex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_withdraw_eth_arg(`recipient`: RustBuffer.ByValue,`amountWei`: RustBuffer.ByValue,`fromSubaccountHex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_keypair_from_secret(`secret`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1244,6 +1292,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_dpay_ffi_checksum_func_icp_balance_of_arg() != 1118.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_decode_eip1559_price() != 39786.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_dpay_ffi_checksum_func_icp_decode_int() != 39665.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1253,13 +1304,28 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_dpay_ffi_checksum_func_icp_decode_read_state() != 56142.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_decode_text() != 30438.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_dpay_ffi_checksum_func_icp_decode_transfer_result() != 49046.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_eip1559_price_arg() != 924.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_icp_envelope_request_id() != 56521.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_icp_ingress_expiry() != 40958.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_minter_account_arg() != 4862.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_principal_from_pubkey() != 61592.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_retrieve_btc_arg() != 48055.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_icp_self_principal() != 30767.toShort()) {
@@ -1275,6 +1341,12 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_icp_transfer_arg() != 12696.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_withdraw_erc20_arg() != 8560.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_withdraw_eth_arg() != 22070.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_keypair_from_secret() != 64641.toShort()) {
@@ -2468,6 +2540,53 @@ public object FfiConverterTypeFfiReaderConductor: FfiConverter<FfiReaderConducto
 
 
 /**
+ * Decoded `eip_1559_transaction_price` reply — Wei figures as decimal strings.
+ */
+data class IcpEip1559Price (
+    var `gasLimit`: kotlin.String, 
+    var `maxFeePerGas`: kotlin.String, 
+    var `maxPriorityFeePerGas`: kotlin.String, 
+    var `maxTransactionFee`: kotlin.String, 
+    var `timestampNs`: kotlin.String?
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeIcpEip1559Price: FfiConverterRustBuffer<IcpEip1559Price> {
+    override fun read(buf: ByteBuffer): IcpEip1559Price {
+        return IcpEip1559Price(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: IcpEip1559Price) = (
+            FfiConverterString.allocationSize(value.`gasLimit`) +
+            FfiConverterString.allocationSize(value.`maxFeePerGas`) +
+            FfiConverterString.allocationSize(value.`maxPriorityFeePerGas`) +
+            FfiConverterString.allocationSize(value.`maxTransactionFee`) +
+            FfiConverterOptionalString.allocationSize(value.`timestampNs`)
+    )
+
+    override fun write(value: IcpEip1559Price, buf: ByteBuffer) {
+            FfiConverterString.write(value.`gasLimit`, buf)
+            FfiConverterString.write(value.`maxFeePerGas`, buf)
+            FfiConverterString.write(value.`maxPriorityFeePerGas`, buf)
+            FfiConverterString.write(value.`maxTransactionFee`, buf)
+            FfiConverterOptionalString.write(value.`timestampNs`, buf)
+    }
+}
+
+
+
+/**
  * A decoded `/query` response: `replied` carries the candid reply arg; otherwise the rejection
  * triple. Flat record (not an enum) for cheap Kotlin/JS marshaling.
  */
@@ -3473,6 +3592,16 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
     }
     
 
+    @Throws(DpayException::class) fun `icpDecodeEip1559Price`(`arg`: kotlin.ByteArray): IcpEip1559Price {
+            return FfiConverterTypeIcpEip1559Price.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_decode_eip1559_price(
+        FfiConverterByteArray.lower(`arg`),_status)
+}
+    )
+    }
+    
+
         /**
          * Decode a bare candid `int`/`nat` reply (e.g. `icrc1_balance_of`) to a decimal string.
          */
@@ -3506,11 +3635,38 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
     }
     
 
+        /**
+         * Decode a bare `text` reply (get_btc_address / any single-text query).
+         */
+    @Throws(DpayException::class) fun `icpDecodeText`(`arg`: kotlin.ByteArray): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_decode_text(
+        FfiConverterByteArray.lower(`arg`),_status)
+}
+    )
+    }
+    
+
     @Throws(DpayException::class) fun `icpDecodeTransferResult`(`arg`: kotlin.ByteArray): IcpTransferOutcome {
             return FfiConverterTypeIcpTransferOutcome.lift(
     uniffiRustCallWithError(DpayException) { _status ->
     UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_decode_transfer_result(
         FfiConverterByteArray.lower(`arg`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * ckETH minter `eip_1559_transaction_price` QUERY arg (opt record{ckerc20_ledger_id}) — the
+         * live gas estimate the app needs BEFORE approving ckETH for the gas leg.
+         */
+    @Throws(DpayException::class) fun `icpEip1559PriceArg`(`ckerc20LedgerText`: kotlin.String): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_eip1559_price_arg(
+        FfiConverterString.lower(`ckerc20LedgerText`),_status)
 }
     )
     }
@@ -3540,6 +3696,49 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
     uniffiRustCallWithError(DpayException) { _status ->
     UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_ingress_expiry(
         FfiConverterString.lower(`nowNs`),FfiConverterULong.lower(`aheadS`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * ckBTC minter `get_btc_address(MinterAccount)` — ONE record arg (2-tuples trap IC0503).
+         */
+    @Throws(DpayException::class) fun `icpMinterAccountArg`(`ownerText`: kotlin.String, `subaccountHex`: kotlin.String?): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_minter_account_arg(
+        FfiConverterString.lower(`ownerText`),FfiConverterOptionalString.lower(`subaccountHex`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Payee principal text derived from an Ed25519 PUBLIC KEY (32 bytes) — the payment-request
+         * `to` field carries the merchant's raw pubkey; the IC account owner is
+         * `self_authenticating(pub)` = SHA224(DER(pub)) | 0x02. Keeps the 132-byte request format
+         * frozen (no wire change) while the transfer targets the payee's user-principal account.
+         */
+    @Throws(DpayException::class) fun `icpPrincipalFromPubkey`(`pubkey`: kotlin.ByteArray): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_principal_from_pubkey(
+        FfiConverterByteArray.lower(`pubkey`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * ckBTC minter `retrieve_btc_with_approval({address, from_subaccount, amount})` (sats, after the
+         * user's `icrc2_approve` on the ledger for exactly this amount).
+         */
+    @Throws(DpayException::class) fun `icpRetrieveBtcArg`(`address`: kotlin.String, `amountSats`: kotlin.String, `fromSubaccountHex`: kotlin.String?): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_retrieve_btc_arg(
+        FfiConverterString.lower(`address`),FfiConverterString.lower(`amountSats`),FfiConverterOptionalString.lower(`fromSubaccountHex`),_status)
 }
     )
     }
@@ -3606,6 +3805,35 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
     uniffiRustCallWithError(DpayException) { _status ->
     UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_transfer_arg(
         FfiConverterString.lower(`toOwnerText`),FfiConverterOptionalString.lower(`toSubaccountHex`),FfiConverterOptionalString.lower(`fromSubaccountHex`),FfiConverterString.lower(`amount`),FfiConverterOptionalString.lower(`fee`),FfiConverterOptionalString.lower(`memoHex`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * ckETH minter `withdraw_erc20({ckerc20_ledger_id, recipient, from_cketh_subaccount,
+         * from_ckerc20_subaccount, amount})` — the dual-ledger path (gas approve on ckETH + amount
+         * approve on the ckERC20 ledger, both user-signed before this call).
+         */
+    @Throws(DpayException::class) fun `icpWithdrawErc20Arg`(`amount`: kotlin.String, `ckerc20LedgerText`: kotlin.String, `recipient`: kotlin.String, `fromCkethSubaccountHex`: kotlin.String?, `fromCkerc20SubaccountHex`: kotlin.String?): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_withdraw_erc20_arg(
+        FfiConverterString.lower(`amount`),FfiConverterString.lower(`ckerc20LedgerText`),FfiConverterString.lower(`recipient`),FfiConverterOptionalString.lower(`fromCkethSubaccountHex`),FfiConverterOptionalString.lower(`fromCkerc20SubaccountHex`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * ckETH minter `withdraw_eth({recipient, from_subaccount, amount})` (Wei, after `icrc2_approve`
+         * of amount + max_transaction_fee on the ckETH ledger).
+         */
+    @Throws(DpayException::class) fun `icpWithdrawEthArg`(`recipient`: kotlin.String, `amountWei`: kotlin.String, `fromSubaccountHex`: kotlin.String?): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_withdraw_eth_arg(
+        FfiConverterString.lower(`recipient`),FfiConverterString.lower(`amountWei`),FfiConverterOptionalString.lower(`fromSubaccountHex`),_status)
 }
     )
     }

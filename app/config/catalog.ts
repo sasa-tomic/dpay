@@ -62,10 +62,10 @@ export function catalogCacheKey(relayUrl: string): string {
 // ckBTC onramp=Direct/offramp=Direct; ckUSDC onramp=Direct/offramp=Direct (dual-ledger withdraw_erc20
 // cash-out, gated on the user holding ckETH for gas — the gas_ledger carries the ckETH principal).
 export const BUNDLED_CATALOG: CurrencyDescriptor[] = [
-  {currency: 0, ledger: '', mintable: true, minter: null, minter_family: null, symbol: '$', decimals: 2,
+  {currency: 0, ledger: 'td2nx-oaaaa-aaaab-qhdnq-cai', mintable: true, minter: null, minter_family: null, symbol: '$', decimals: 2,
     wrapper_name: null, backing_symbol: null, network: null, display_decimals: null, fee: null, cap: null,
     chain_id: null, token_contract: null, gas_ledger: null, onramp: 'Direct', offramp: 'Unavailable'},
-  {currency: 1, ledger: '', mintable: false, minter: 'mqygn-kiaaa-aaaar-qaadq-cai', minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8,
+  {currency: 1, ledger: 'mxzaz-hqaaa-aaaar-qaada-cai', mintable: false, minter: 'mqygn-kiaaa-aaaar-qaadq-cai', minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8,
     wrapper_name: 'ckBTC', backing_symbol: 'BTC', network: 'Bitcoin', display_decimals: 8, fee: null, cap: null,
     chain_id: null, token_contract: null, gas_ledger: null, onramp: 'Direct', offramp: 'Direct'},
   {currency: 2, ledger: 'xevnm-gaaaa-aaaar-qafnq-cai', mintable: false, minter: 'sv3dd-oaaaa-aaaar-qacoa-cai', minter_family: 'CkEthErc20', symbol: 'ckUSDC', decimals: 6,

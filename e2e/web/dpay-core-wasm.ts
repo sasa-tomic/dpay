@@ -90,10 +90,18 @@ type WasmExports = WebAssembly.Exports & {
   // IC user-principal rail (additive, ABI v1): all strings are ptr+len pairs; decimal-string
   // numerics; structured results are compact JSON returned by length (0 = cap/bad input).
   w_icp_self_principal(seedPtr: number, outPtr: number, cap: number): number;
+  w_icp_principal_from_pubkey(ptr: number, len: number, outPtr: number, cap: number): number;
   w_icp_ingress_expiry(nowPtr: number, nowLen: number, aheadS: number, outPtr: number, cap: number): number;
   w_icp_transfer_arg(toOwnerPtr: number, toOwnerLen: number, toSubPtr: number, toSubLen: number, fromSubPtr: number, fromSubLen: number, amountPtr: number, amountLen: number, feePtr: number, feeLen: number, memoPtr: number, memoLen: number, outPtr: number, cap: number): number;
   w_icp_approve_arg(spenderOwnerPtr: number, spenderOwnerLen: number, spenderSubPtr: number, spenderSubLen: number, fromSubPtr: number, fromSubLen: number, amountPtr: number, amountLen: number, expectedPtr: number, expectedLen: number, expiresPtr: number, expiresLen: number, memoPtr: number, memoLen: number, feePtr: number, feeLen: number, outPtr: number, cap: number): number;
   w_icp_balance_of_arg(ownerPtr: number, ownerLen: number, subPtr: number, subLen: number, outPtr: number, cap: number): number;
+  w_icp_minter_account_arg(ownerPtr: number, ownerLen: number, subPtr: number, subLen: number, outPtr: number, cap: number): number;
+  w_icp_retrieve_btc_arg(addrPtr: number, addrLen: number, amountPtr: number, amountLen: number, subPtr: number, subLen: number, outPtr: number, cap: number): number;
+  w_icp_withdraw_eth_arg(recipPtr: number, recipLen: number, amountPtr: number, amountLen: number, subPtr: number, subLen: number, outPtr: number, cap: number): number;
+  w_icp_withdraw_erc20_arg(amountPtr: number, amountLen: number, ledgerPtr: number, ledgerLen: number, recipPtr: number, recipLen: number, sub1Ptr: number, sub1Len: number, sub2Ptr: number, sub2Len: number, outPtr: number, cap: number): number;
+  w_icp_eip1559_price_arg(ledgerPtr: number, ledgerLen: number, outPtr: number, cap: number): number;
+  w_icp_decode_text(argPtr: number, argLen: number, outPtr: number, cap: number): number;
+  w_icp_decode_eip1559_price(argPtr: number, argLen: number, outPtr: number, cap: number): number;
   w_icp_sign_update(seedPtr: number, canisterPtr: number, canisterLen: number, methodPtr: number, methodLen: number, argPtr: number, argLen: number, expiryPtr: number, expiryLen: number, outPtr: number, cap: number): number;
   w_icp_sign_query(seedPtr: number, canisterPtr: number, canisterLen: number, methodPtr: number, methodLen: number, argPtr: number, argLen: number, expiryPtr: number, expiryLen: number, outPtr: number, cap: number): number;
   w_icp_sign_read_state(seedPtr: number, ridsPtr: number, nRids: number, wantTime: number, expiryPtr: number, expiryLen: number, outPtr: number, cap: number): number;
@@ -445,6 +453,13 @@ export type IcpRequestStatusOut = {
 };
 export type IcpStateReadOut = { timeNs: string | null; statuses: IcpRequestStatusOut[] };
 export type IcpTransferOutcomeOut = { ok: boolean; blockIndex?: string; errVariant?: string; errDetail?: string };
+export type IcpEip1559PriceOut = {
+  gasLimit: string;
+  maxFeePerGas: string;
+  maxPriorityFeePerGas: string;
+  maxTransactionFee: string;
+  timestampNs?: string;
+};
 
 const ICP_JSON_CAP = 4096;
 const ICP_ENV_CAP = 2048; // envelopes are 388-398B; generous headroom
@@ -480,6 +495,17 @@ async function icpSelfPrincipal(secretHex: string): Promise<string> {
   const out = outBuf(ex, 128, 'icp_self_principal');
   const len = ex.w_icp_self_principal(seedP, out, 128);
   if (len === 0) throw new Error('DpayCore wasm: icp_self_principal failed');
+  return readStr(ex, out, len);
+}
+
+async function icpPrincipalFromPubkey(pubkeyHex: string): Promise<string> {
+  const ex = await core();
+  const bytes = hex(pubkeyHex);
+  if (bytes.length !== 32) throw new Error('DpayCore wasm: pubkey must be 32 bytes');
+  const p = put(ex, bytes);
+  const out = outBuf(ex, 128, 'icp_principal_from_pubkey');
+  const len = ex.w_icp_principal_from_pubkey(p, 32, out, 128);
+  if (len === 0) throw new Error('DpayCore wasm: icp_principal_from_pubkey failed');
   return readStr(ex, out, len);
 }
 
@@ -533,6 +559,79 @@ async function icpBalanceOfArg(ownerText: string, subaccountHex: string): Promis
   const out = outBuf(ex, 256, 'icp_balance_of_arg');
   const len = ex.w_icp_balance_of_arg(owner[0], owner[1], sub[0], sub[1], out, 256);
   return binOutHex(ex, len, out, 'icp_balance_of_arg');
+}
+
+// --- minter calls (user-principal offramp + deposits) — golden-pinned builders ---
+
+async function icpMinterAccountArg(ownerText: string, subaccountHex: string): Promise<string> {
+  const ex = await core();
+  const owner = putStr(ex, ownerText);
+  const sub = putStr(ex, subaccountHex ?? '');
+  const out = outBuf(ex, 256, 'icp_minter_account_arg');
+  const len = ex.w_icp_minter_account_arg(owner[0], owner[1], sub[0], sub[1], out, 256);
+  return binOutHex(ex, len, out, 'icp_minter_account_arg');
+}
+
+async function icpRetrieveBtcArg(address: string, amountSats: string, fromSubaccountHex: string): Promise<string> {
+  const ex = await core();
+  const addr = putStr(ex, address);
+  const amt = putStr(ex, amountSats);
+  const sub = putStr(ex, fromSubaccountHex ?? '');
+  const out = outBuf(ex, 256, 'icp_retrieve_btc_arg');
+  const len = ex.w_icp_retrieve_btc_arg(addr[0], addr[1], amt[0], amt[1], sub[0], sub[1], out, 256);
+  return binOutHex(ex, len, out, 'icp_retrieve_btc_arg');
+}
+
+async function icpWithdrawEthArg(recipient: string, amountWei: string, fromSubaccountHex: string): Promise<string> {
+  const ex = await core();
+  const recip = putStr(ex, recipient);
+  const amt = putStr(ex, amountWei);
+  const sub = putStr(ex, fromSubaccountHex ?? '');
+  const out = outBuf(ex, 256, 'icp_withdraw_eth_arg');
+  const len = ex.w_icp_withdraw_eth_arg(recip[0], recip[1], amt[0], amt[1], sub[0], sub[1], out, 256);
+  return binOutHex(ex, len, out, 'icp_withdraw_eth_arg');
+}
+
+async function icpWithdrawErc20Arg(
+  amount: string, ckerc20LedgerText: string, recipient: string,
+  fromCkethSubaccountHex: string, fromCkerc20SubaccountHex: string,
+): Promise<string> {
+  const ex = await core();
+  const amt = putStr(ex, amount);
+  const ledger = putStr(ex, ckerc20LedgerText);
+  const recip = putStr(ex, recipient);
+  const sub1 = putStr(ex, fromCkethSubaccountHex ?? '');
+  const sub2 = putStr(ex, fromCkerc20SubaccountHex ?? '');
+  const out = outBuf(ex, 256, 'icp_withdraw_erc20_arg');
+  const len = ex.w_icp_withdraw_erc20_arg(
+    amt[0], amt[1], ledger[0], ledger[1], recip[0], recip[1], sub1[0], sub1[1], sub2[0], sub2[1], out, 256,
+  );
+  return binOutHex(ex, len, out, 'icp_withdraw_erc20_arg');
+}
+
+async function icpEip1559PriceArg(ckerc20LedgerText: string): Promise<string> {
+  const ex = await core();
+  const ledger = putStr(ex, ckerc20LedgerText);
+  const out = outBuf(ex, 256, 'icp_eip1559_price_arg');
+  const len = ex.w_icp_eip1559_price_arg(ledger[0], ledger[1], out, 256);
+  return binOutHex(ex, len, out, 'icp_eip1559_price_arg');
+}
+
+async function icpDecodeText(argHex: string): Promise<string> {
+  const ex = await core();
+  const arg = put(ex, hexToBytes(argHex));
+  const out = outBuf(ex, ICP_JSON_CAP, 'icp_decode_text');
+  const len = ex.w_icp_decode_text(arg[0], arg[1], out, ICP_JSON_CAP);
+  const j = jsonOut(ex, len, out, 'icp_decode_text') as {text: string};
+  return j.text;
+}
+
+async function icpDecodeEip1559Price(argHex: string): Promise<IcpEip1559PriceOut> {
+  const ex = await core();
+  const arg = put(ex, hexToBytes(argHex));
+  const out = outBuf(ex, ICP_JSON_CAP, 'icp_decode_eip1559_price');
+  const len = ex.w_icp_decode_eip1559_price(arg[0], arg[1], out, ICP_JSON_CAP);
+  return jsonOut(ex, len, out, 'icp_decode_eip1559_price') as IcpEip1559PriceOut;
 }
 
 async function icpSignUpdate(
@@ -654,10 +753,18 @@ export const DpayCore = {
   verifyReceiptSig,
   nfcStatus,
   icpSelfPrincipal,
+  icpPrincipalFromPubkey,
   icpIngressExpiry,
   icpTransferArg,
   icpApproveArg,
   icpBalanceOfArg,
+  icpMinterAccountArg,
+  icpRetrieveBtcArg,
+  icpWithdrawEthArg,
+  icpWithdrawErc20Arg,
+  icpEip1559PriceArg,
+  icpDecodeText,
+  icpDecodeEip1559Price,
   icpSignUpdate,
   icpSignQuery,
   icpSignReadState,

@@ -166,6 +166,138 @@ pub fn allowance_arg(account: &Account, spender: &Account) -> Vec<u8> {
     out
 }
 
+// --- ckBTC / ckETH minter args (types pinned from the real minter .did services; type tables
+// --- regenerated with the cached production candid 0.10.22 — same generator as the goldens) ---
+
+fn put_opt_principal(out: &mut Vec<u8>, p: Option<&crate::principal::Principal>) {
+    match p {
+        None => out.push(0x00),
+        Some(p) => {
+            out.push(0x01);
+            put_principal(out, p);
+        }
+    }
+}
+
+fn put_text(out: &mut Vec<u8>, s: &str) {
+    put_uleb(out, s.len() as u128);
+    out.extend_from_slice(s.as_bytes());
+}
+
+/// ckBTC minter `get_btc_address` argument: `(MinterAccount)` — ONE record arg (a 2-tuple traps
+/// IC0503 on the real minter). owner = the user's principal (arbitrary owners are accepted);
+/// subaccount is the payer's subaccount on the minter's ledger account.
+pub fn minter_account_arg(owner: &crate::principal::Principal, subaccount: Option<[u8; 32]>) -> Vec<u8> {
+    // type table: service get_btc_address: (MinterAccount) -> (text); arg = rec{owner, subaccount}
+    let mut out = vec![
+        0x44, 0x49, 0x44, 0x4c, 0x04, 0x6c, 0x02, 0xb3, 0xb0, 0xda, 0xc3, 0x03,
+        0x01, 0xad, 0x86, 0xca, 0x83, 0x05, 0x02, 0x6e, 0x68, 0x6e, 0x03, 0x6d,
+        0x7b, 0x01, 0x00,
+    ];
+    put_opt_principal(&mut out, Some(owner));
+    put_opt_blob(&mut out, subaccount.as_ref().map(|s| &s[..]));
+    out
+}
+
+/// ckBTC minter `retrieve_btc_with_approval` argument: address + amount (sats, nat64) +
+/// opt from_subaccount (the user's subaccount whose ledger account holds the approved ckBTC).
+pub fn retrieve_btc_arg(address: &str, amount: u64, from_subaccount: Option<[u8; 32]>) -> Vec<u8> {
+    let mut out = vec![
+        0x44, 0x49, 0x44, 0x4c, 0x03, 0x6c, 0x03, 0xa2, 0xde, 0x94, 0xeb, 0x06,
+        0x01, 0xb4, 0xe3, 0xad, 0xe8, 0x09, 0x71, 0xd8, 0xa3, 0x8c, 0xa8, 0x0d,
+        0x78, 0x6e, 0x02, 0x6d, 0x7b, 0x01, 0x00,
+    ];
+    // Value order per the candid-generated golden: from_subaccount (opt blob) first, then
+    // address (text), then amount (nat64 LE) — DIDL records serialize in field-hash order.
+    put_opt_blob(&mut out, from_subaccount.as_ref().map(|s| &s[..])); // from_subaccount
+    put_text(&mut out, address); // address
+    out.extend_from_slice(&amount.to_le_bytes()); // amount: nat64
+    out
+}
+
+/// ckETH minter `withdraw_eth` argument: recipient + amount (Wei, nat) + opt from_subaccount.
+pub fn withdraw_eth_arg(recipient: &str, amount: u128, from_subaccount: Option<[u8; 32]>) -> Vec<u8> {
+    let mut out = vec![
+        0x44, 0x49, 0x44, 0x4c, 0x03, 0x6c, 0x03, 0xd9, 0xf7, 0x8b, 0x9a, 0x05,
+        0x71, 0xa2, 0xde, 0x94, 0xeb, 0x06, 0x01, 0xd8, 0xa3, 0x8c, 0xa8, 0x0d,
+        0x7d, 0x6e, 0x02, 0x6d, 0x7b, 0x01, 0x00,
+    ];
+    put_text(&mut out, recipient); // recipient (text)
+    put_opt_blob(&mut out, from_subaccount.as_ref().map(|s| &s[..])); // from_subaccount
+    put_uleb(&mut out, amount); // amount: nat
+    out
+}
+
+/// ckETH minter `withdraw_erc20` argument (dual-ledger path): amount + ckerc20_ledger_id +
+/// recipient + from_cketh_subaccount + from_ckerc20_subaccount.
+#[allow(clippy::too_many_arguments)]
+pub fn withdraw_erc20_arg(
+    amount: u128,
+    ckerc20_ledger_id: &crate::principal::Principal,
+    recipient: &str,
+    from_cketh_subaccount: Option<[u8; 32]>,
+    from_ckerc20_subaccount: Option<[u8; 32]>,
+) -> Vec<u8> {
+    let mut out = vec![
+        0x44, 0x49, 0x44, 0x4c, 0x03, 0x6c, 0x05, 0x9e, 0xa7, 0xa9, 0x98, 0x02,
+        0x68, 0xd9, 0xf7, 0x8b, 0x9a, 0x05, 0x71, 0xb0, 0xb4, 0xdb, 0xff, 0x08,
+        0x01, 0xd5, 0x97, 0xed, 0xb9, 0x0a, 0x01, 0xd8, 0xa3, 0x8c, 0xa8, 0x0d,
+        0x7d, 0x6e, 0x02, 0x6d, 0x7b, 0x01, 0x00,
+    ];
+    put_principal(&mut out, ckerc20_ledger_id); // ckerc20_ledger_id
+    put_text(&mut out, recipient); // recipient
+    put_opt_blob(&mut out, from_cketh_subaccount.as_ref().map(|s| &s[..]));
+    put_opt_blob(&mut out, from_ckerc20_subaccount.as_ref().map(|s| &s[..]));
+    put_uleb(&mut out, amount); // amount: nat
+    out
+}
+
+/// ckETH minter `eip_1559_transaction_price` QUERY argument: opt record{ckerc20_ledger_id}.
+pub fn eip1559_price_arg(ckerc20_ledger_id: &crate::principal::Principal) -> Vec<u8> {
+    let mut out = vec![
+        0x44, 0x49, 0x44, 0x4c, 0x02, 0x6e, 0x01, 0x6c, 0x01, 0x9e, 0xa7, 0xa9,
+        0x98, 0x02, 0x68, 0x01, 0x00,
+    ];
+    out.push(0x01); // opt some
+    put_principal(&mut out, ckerc20_ledger_id);
+    out
+}
+
+/// Decode a `text` reply (get_btc_address) — bare DIDL string. Returns the UTF-8 address.
+pub fn decode_text(arg: &[u8]) -> Result<String, IcpError> {
+    let mut rd = Rd { b: arg, i: 0 };
+    rd.message()?;
+    let t = rd.text()?;
+    rd.finish()?;
+    Ok(t)
+}
+
+/// Decoded `eip_1559_transaction_price` reply (ckETH minter query) — Wei figures.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Eip1559Price {
+    pub gas_limit: u128,
+    pub max_fee_per_gas: u128,
+    pub max_priority_fee_per_gas: u128,
+    pub max_transaction_fee: u128,
+    pub timestamp: Option<u64>,
+}
+
+/// Decode the `Eip1559TransactionPrice` record reply. DIDL records serialize field values
+/// transparently (no tags) in label-HASH order — for this record that is:
+/// max_priority_fee_per_gas, max_fee_per_gas, max_transaction_fee, timestamp (opt nat64),
+/// gas_limit. The shape IS the validation (golden-pinned in tests/goldens.rs).
+pub fn decode_eip1559_price(arg: &[u8]) -> Result<Eip1559Price, IcpError> {
+    let mut rd = Rd { b: arg, i: 0 };
+    rd.message()?;
+    let max_priority_fee_per_gas = rd.nat()?;
+    let max_fee_per_gas = rd.nat()?;
+    let max_transaction_fee = rd.nat()?;
+    let timestamp = rd.opt_nat64()?;
+    let gas_limit = rd.nat()?;
+    rd.finish()?;
+    Ok(Eip1559Price { gas_limit, max_fee_per_gas, max_priority_fee_per_gas, max_transaction_fee, timestamp })
+}
+
 // --- results (variant tags per ledger.did; no GenericBatchError exists in the .did) -----------------
 
 /// `TransferError` from the ledger .did — payloads: nat → u128, nat64 timestamps → u64,
@@ -431,6 +563,15 @@ impl<'a> Rd<'a> {
         let mut v = [0u8; 8];
         v.copy_from_slice(s);
         Ok(u64::from_le_bytes(v))
+    }
+
+    fn opt_nat64(&mut self) -> Result<Option<u64>, IcpError> {
+        let tag = self.take(1)?[0];
+        match tag {
+            0x00 => Ok(None),
+            0x01 => Ok(Some(self.nat64()?)),
+            _ => Err(Self::err("bad opt tag")),
+        }
     }
 
     fn text(&mut self) -> Result<String, IcpError> {

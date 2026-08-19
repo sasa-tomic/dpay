@@ -63,6 +63,22 @@ fn u64_str(s: &str, what: &str) -> Result<u64, DpayError> {
     s.parse::<u64>().map_err(|_| DpayError::BadInput(format!("{what} must be a decimal integer string")))
 }
 
+fn bad_input(msg: &str) -> DpayError {
+    DpayError::BadInput(msg.into())
+}
+
+/// Optional 32-byte subaccount from hex (''/None = None).
+fn opt_sub32(subaccount_hex: &Option<String>) -> Result<Option<[u8; 32]>, DpayError> {
+    match subaccount_hex {
+        None => Ok(None),
+        Some(s) if s.is_empty() => Ok(None),
+        Some(s) => {
+            let bytes = opt_hex(&Some(s.clone()), "subaccount")?.unwrap_or_default();
+            bytes.try_into().map(Some).map_err(|_| DpayError::BadInput("subaccount must be 32 bytes".into()))
+        }
+    }
+}
+
 /// An `Account` from owner text + optional subaccount hex (empty/absent = the default all-zero
 /// subaccount, which icrc-ledger canonicalizes to `null`).
 fn account(owner_text: &str, subaccount_hex: &Option<String>) -> Result<Account, DpayError> {
@@ -85,6 +101,16 @@ fn account(owner_text: &str, subaccount_hex: &Option<String>) -> Result<Account,
 pub fn icp_self_principal(secret: Vec<u8>) -> Result<String, DpayError> {
     let k = key(&secret)?;
     Ok(Principal::self_authenticating_ed25519(&k.verifying_key().to_bytes()).to_text())
+}
+
+/// Payee principal text derived from an Ed25519 PUBLIC KEY (32 bytes) — the payment-request
+/// `to` field carries the merchant's raw pubkey; the IC account owner is
+/// `self_authenticating(pub)` = SHA224(DER(pub)) | 0x02. Keeps the 132-byte request format
+/// frozen (no wire change) while the transfer targets the payee's user-principal account.
+#[uniffi::export]
+pub fn icp_principal_from_pubkey(pubkey: Vec<u8>) -> Result<String, DpayError> {
+    let pk: [u8; 32] = pubkey.as_slice().try_into().map_err(|_| DpayError::BadPubkeyLength)?;
+    Ok(Principal::self_authenticating_ed25519(&pk).to_text())
 }
 
 /// Ingress expiry stamp: `now_ns + ahead_s * 1e9`, as a decimal-ns string (see module docs on why
@@ -166,6 +192,90 @@ pub fn icp_approve_arg(
 pub fn icp_balance_of_arg(owner_text: String, subaccount_hex: Option<String>) -> Result<Vec<u8>, DpayError> {
     let a = account(&owner_text, &subaccount_hex)?;
     Ok(icrc_balance_of_arg(&a))
+}
+
+// --- minter calls (user-principal offramp + deposits) ---------------------------------------------
+// Arg builders for the REAL ckBTC/ckETH minter services (types pinned from the minter .did;
+// tables regenerated with the cached production candid 0.10.22 — golden-pinned in dpay-icp).
+
+/// ckBTC minter `get_btc_address(MinterAccount)` — ONE record arg (2-tuples trap IC0503).
+#[uniffi::export]
+pub fn icp_minter_account_arg(owner_text: String, subaccount_hex: Option<String>) -> Result<Vec<u8>, DpayError> {
+    let a = account(&owner_text, &subaccount_hex)?;
+    let sub = if a.subaccount == [0u8; 32] { None } else { Some(a.subaccount) };
+    Ok(dpay_icp::icrc::minter_account_arg(&a.owner, sub))
+}
+
+/// ckBTC minter `retrieve_btc_with_approval({address, from_subaccount, amount})` (sats, after the
+/// user's `icrc2_approve` on the ledger for exactly this amount).
+#[uniffi::export]
+pub fn icp_retrieve_btc_arg(address: String, amount_sats: String, from_subaccount_hex: Option<String>) -> Result<Vec<u8>, DpayError> {
+    let amount: u64 = amount_sats.parse().map_err(|_| bad_input("amount_sats must be a u64 decimal string"))?;
+    let sub = opt_sub32(&from_subaccount_hex)?;
+    Ok(dpay_icp::icrc::retrieve_btc_arg(&address, amount, sub))
+}
+
+/// ckETH minter `withdraw_eth({recipient, from_subaccount, amount})` (Wei, after `icrc2_approve`
+/// of amount + max_transaction_fee on the ckETH ledger).
+#[uniffi::export]
+pub fn icp_withdraw_eth_arg(recipient: String, amount_wei: String, from_subaccount_hex: Option<String>) -> Result<Vec<u8>, DpayError> {
+    let amount: u128 = amount_wei.parse().map_err(|_| bad_input("amount_wei must be a u128 decimal string"))?;
+    let sub = opt_sub32(&from_subaccount_hex)?;
+    Ok(dpay_icp::icrc::withdraw_eth_arg(&recipient, amount, sub))
+}
+
+/// ckETH minter `withdraw_erc20({ckerc20_ledger_id, recipient, from_cketh_subaccount,
+/// from_ckerc20_subaccount, amount})` — the dual-ledger path (gas approve on ckETH + amount
+/// approve on the ckERC20 ledger, both user-signed before this call).
+#[uniffi::export]
+pub fn icp_withdraw_erc20_arg(
+    amount: String,
+    ckerc20_ledger_text: String,
+    recipient: String,
+    from_cketh_subaccount_hex: Option<String>,
+    from_ckerc20_subaccount_hex: Option<String>,
+) -> Result<Vec<u8>, DpayError> {
+    let amt: u128 = amount.parse().map_err(|_| bad_input("amount must be a u128 decimal string"))?;
+    let ledger = Principal::from_text(&ckerc20_ledger_text).map_err(bad)?;
+    let cketh_sub = opt_sub32(&from_cketh_subaccount_hex)?;
+    let erc20_sub = opt_sub32(&from_ckerc20_subaccount_hex)?;
+    Ok(dpay_icp::icrc::withdraw_erc20_arg(amt, &ledger, &recipient, cketh_sub, erc20_sub))
+}
+
+/// ckETH minter `eip_1559_transaction_price` QUERY arg (opt record{ckerc20_ledger_id}) — the
+/// live gas estimate the app needs BEFORE approving ckETH for the gas leg.
+#[uniffi::export]
+pub fn icp_eip1559_price_arg(ckerc20_ledger_text: String) -> Result<Vec<u8>, DpayError> {
+    let ledger = Principal::from_text(&ckerc20_ledger_text).map_err(bad)?;
+    Ok(dpay_icp::icrc::eip1559_price_arg(&ledger))
+}
+
+/// Decode a bare `text` reply (get_btc_address / any single-text query).
+#[uniffi::export]
+pub fn icp_decode_text(arg: Vec<u8>) -> Result<String, DpayError> {
+    dpay_icp::icrc::decode_text(&arg).map_err(bad)
+}
+
+/// Decoded `eip_1559_transaction_price` reply — Wei figures as decimal strings.
+#[derive(uniffi::Record, Clone)]
+pub struct IcpEip1559Price {
+    pub gas_limit: String,
+    pub max_fee_per_gas: String,
+    pub max_priority_fee_per_gas: String,
+    pub max_transaction_fee: String,
+    pub timestamp_ns: Option<String>,
+}
+
+#[uniffi::export]
+pub fn icp_decode_eip1559_price(arg: Vec<u8>) -> Result<IcpEip1559Price, DpayError> {
+    let p = dpay_icp::icrc::decode_eip1559_price(&arg).map_err(bad)?;
+    Ok(IcpEip1559Price {
+        gas_limit: p.gas_limit.to_string(),
+        max_fee_per_gas: p.max_fee_per_gas.to_string(),
+        max_priority_fee_per_gas: p.max_priority_fee_per_gas.to_string(),
+        max_transaction_fee: p.max_transaction_fee.to_string(),
+        timestamp_ns: p.timestamp.map(|t| t.to_string()),
+    })
 }
 
 // --- envelope signing -----------------------------------------------------------------------------

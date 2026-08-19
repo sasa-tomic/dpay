@@ -476,17 +476,29 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_balance_of_arg() != 1118:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_decode_eip1559_price() != 39786:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_decode_int() != 39665:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_decode_query() != 64452:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_decode_read_state() != 56142:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_decode_text() != 30438:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_decode_transfer_result() != 49046:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_eip1559_price_arg() != 924:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_envelope_request_id() != 56521:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_ingress_expiry() != 40958:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_minter_account_arg() != 4862:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_principal_from_pubkey() != 61592:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_retrieve_btc_arg() != 48055:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_self_principal() != 30767:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -497,6 +509,10 @@ def _uniffi_check_api_checksums(lib):
     if lib.uniffi_dpay_ffi_checksum_func_icp_sign_update() != 3984:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_transfer_arg() != 12696:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_withdraw_erc20_arg() != 8560:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_withdraw_eth_arg() != 22070:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_keypair_from_secret() != 64641:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -827,6 +843,11 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_icp_balance_of_arg.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_balance_of_arg.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_eip1559_price.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_eip1559_price.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_int.argtypes = (
     _UniffiRustBuffer,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -843,11 +864,21 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_read_state.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_read_state.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_text.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_text.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_transfer_result.argtypes = (
     _UniffiRustBuffer,
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_transfer_result.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_eip1559_price_arg.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_eip1559_price_arg.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_envelope_request_id.argtypes = (
     _UniffiRustBuffer,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -859,6 +890,24 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_icp_ingress_expiry.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_ingress_expiry.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_minter_account_arg.argtypes = (
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_minter_account_arg.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_principal_from_pubkey.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_principal_from_pubkey.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_retrieve_btc_arg.argtypes = (
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_retrieve_btc_arg.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_self_principal.argtypes = (
     _UniffiRustBuffer,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -900,6 +949,22 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_icp_transfer_arg.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_transfer_arg.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_withdraw_erc20_arg.argtypes = (
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_withdraw_erc20_arg.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_withdraw_eth_arg.argtypes = (
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_withdraw_eth_arg.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_func_keypair_from_secret.argtypes = (
     _UniffiRustBuffer,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -1302,6 +1367,9 @@ _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_approve_arg.restype = ctypes.c_uint
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_balance_of_arg.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_balance_of_arg.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_eip1559_price.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_eip1559_price.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_int.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_int.restype = ctypes.c_uint16
@@ -1311,15 +1379,30 @@ _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_query.restype = ctypes.c_uin
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_read_state.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_read_state.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_text.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_text.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_transfer_result.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_transfer_result.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_eip1559_price_arg.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_eip1559_price_arg.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_envelope_request_id.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_envelope_request_id.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_ingress_expiry.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_ingress_expiry.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_minter_account_arg.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_minter_account_arg.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_principal_from_pubkey.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_principal_from_pubkey.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_retrieve_btc_arg.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_retrieve_btc_arg.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_self_principal.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_self_principal.restype = ctypes.c_uint16
@@ -1335,6 +1418,12 @@ _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_sign_update.restype = ctypes.c_uint
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_transfer_arg.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_transfer_arg.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_withdraw_erc20_arg.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_withdraw_erc20_arg.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_withdraw_eth_arg.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_withdraw_eth_arg.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_keypair_from_secret.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_keypair_from_secret.restype = ctypes.c_uint16
@@ -1556,6 +1645,67 @@ class _UniffiConverterBytes(_UniffiConverterRustBuffer):
 
 
 
+
+
+class IcpEip1559Price:
+    """
+    Decoded `eip_1559_transaction_price` reply — Wei figures as decimal strings.
+    """
+
+    gas_limit: "str"
+    max_fee_per_gas: "str"
+    max_priority_fee_per_gas: "str"
+    max_transaction_fee: "str"
+    timestamp_ns: "typing.Optional[str]"
+    def __init__(self, *, gas_limit: "str", max_fee_per_gas: "str", max_priority_fee_per_gas: "str", max_transaction_fee: "str", timestamp_ns: "typing.Optional[str]"):
+        self.gas_limit = gas_limit
+        self.max_fee_per_gas = max_fee_per_gas
+        self.max_priority_fee_per_gas = max_priority_fee_per_gas
+        self.max_transaction_fee = max_transaction_fee
+        self.timestamp_ns = timestamp_ns
+
+    def __str__(self):
+        return "IcpEip1559Price(gas_limit={}, max_fee_per_gas={}, max_priority_fee_per_gas={}, max_transaction_fee={}, timestamp_ns={})".format(self.gas_limit, self.max_fee_per_gas, self.max_priority_fee_per_gas, self.max_transaction_fee, self.timestamp_ns)
+
+    def __eq__(self, other):
+        if self.gas_limit != other.gas_limit:
+            return False
+        if self.max_fee_per_gas != other.max_fee_per_gas:
+            return False
+        if self.max_priority_fee_per_gas != other.max_priority_fee_per_gas:
+            return False
+        if self.max_transaction_fee != other.max_transaction_fee:
+            return False
+        if self.timestamp_ns != other.timestamp_ns:
+            return False
+        return True
+
+class _UniffiConverterTypeIcpEip1559Price(_UniffiConverterRustBuffer):
+    @staticmethod
+    def read(buf):
+        return IcpEip1559Price(
+            gas_limit=_UniffiConverterString.read(buf),
+            max_fee_per_gas=_UniffiConverterString.read(buf),
+            max_priority_fee_per_gas=_UniffiConverterString.read(buf),
+            max_transaction_fee=_UniffiConverterString.read(buf),
+            timestamp_ns=_UniffiConverterOptionalString.read(buf),
+        )
+
+    @staticmethod
+    def check_lower(value):
+        _UniffiConverterString.check_lower(value.gas_limit)
+        _UniffiConverterString.check_lower(value.max_fee_per_gas)
+        _UniffiConverterString.check_lower(value.max_priority_fee_per_gas)
+        _UniffiConverterString.check_lower(value.max_transaction_fee)
+        _UniffiConverterOptionalString.check_lower(value.timestamp_ns)
+
+    @staticmethod
+    def write(value, buf):
+        _UniffiConverterString.write(value.gas_limit, buf)
+        _UniffiConverterString.write(value.max_fee_per_gas, buf)
+        _UniffiConverterString.write(value.max_priority_fee_per_gas, buf)
+        _UniffiConverterString.write(value.max_transaction_fee, buf)
+        _UniffiConverterOptionalString.write(value.timestamp_ns, buf)
 
 
 class IcpQueryReply:
@@ -3204,6 +3354,13 @@ def icp_balance_of_arg(owner_text: "str",subaccount_hex: "typing.Optional[str]")
         _UniffiConverterOptionalString.lower(subaccount_hex)))
 
 
+def icp_decode_eip1559_price(arg: "bytes") -> "IcpEip1559Price":
+    _UniffiConverterBytes.check_lower(arg)
+    
+    return _UniffiConverterTypeIcpEip1559Price.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_eip1559_price,
+        _UniffiConverterBytes.lower(arg)))
+
+
 def icp_decode_int(arg: "bytes") -> "str":
     """
     Decode a bare candid `int`/`nat` reply (e.g. `icrc1_balance_of`) to a decimal string.
@@ -3232,11 +3389,34 @@ def icp_decode_read_state(body: "bytes",request_ids: "typing.List[bytes]") -> "I
         _UniffiConverterSequenceBytes.lower(request_ids)))
 
 
+def icp_decode_text(arg: "bytes") -> "str":
+    """
+    Decode a bare `text` reply (get_btc_address / any single-text query).
+    """
+
+    _UniffiConverterBytes.check_lower(arg)
+    
+    return _UniffiConverterString.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_text,
+        _UniffiConverterBytes.lower(arg)))
+
+
 def icp_decode_transfer_result(arg: "bytes") -> "IcpTransferOutcome":
     _UniffiConverterBytes.check_lower(arg)
     
     return _UniffiConverterTypeIcpTransferOutcome.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_transfer_result,
         _UniffiConverterBytes.lower(arg)))
+
+
+def icp_eip1559_price_arg(ckerc20_ledger_text: "str") -> "bytes":
+    """
+    ckETH minter `eip_1559_transaction_price` QUERY arg (opt record{ckerc20_ledger_id}) — the
+    live gas estimate the app needs BEFORE approving ckETH for the gas leg.
+    """
+
+    _UniffiConverterString.check_lower(ckerc20_ledger_text)
+    
+    return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_eip1559_price_arg,
+        _UniffiConverterString.lower(ckerc20_ledger_text)))
 
 
 def icp_envelope_request_id(envelope: "bytes") -> "bytes":
@@ -3265,6 +3445,52 @@ def icp_ingress_expiry(now_ns: "str",ahead_s: "int") -> "str":
     return _UniffiConverterString.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_ingress_expiry,
         _UniffiConverterString.lower(now_ns),
         _UniffiConverterUInt64.lower(ahead_s)))
+
+
+def icp_minter_account_arg(owner_text: "str",subaccount_hex: "typing.Optional[str]") -> "bytes":
+    """
+    ckBTC minter `get_btc_address(MinterAccount)` — ONE record arg (2-tuples trap IC0503).
+    """
+
+    _UniffiConverterString.check_lower(owner_text)
+    
+    _UniffiConverterOptionalString.check_lower(subaccount_hex)
+    
+    return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_minter_account_arg,
+        _UniffiConverterString.lower(owner_text),
+        _UniffiConverterOptionalString.lower(subaccount_hex)))
+
+
+def icp_principal_from_pubkey(pubkey: "bytes") -> "str":
+    """
+    Payee principal text derived from an Ed25519 PUBLIC KEY (32 bytes) — the payment-request
+    `to` field carries the merchant's raw pubkey; the IC account owner is
+    `self_authenticating(pub)` = SHA224(DER(pub)) | 0x02. Keeps the 132-byte request format
+    frozen (no wire change) while the transfer targets the payee's user-principal account.
+    """
+
+    _UniffiConverterBytes.check_lower(pubkey)
+    
+    return _UniffiConverterString.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_principal_from_pubkey,
+        _UniffiConverterBytes.lower(pubkey)))
+
+
+def icp_retrieve_btc_arg(address: "str",amount_sats: "str",from_subaccount_hex: "typing.Optional[str]") -> "bytes":
+    """
+    ckBTC minter `retrieve_btc_with_approval({address, from_subaccount, amount})` (sats, after the
+    user's `icrc2_approve` on the ledger for exactly this amount).
+    """
+
+    _UniffiConverterString.check_lower(address)
+    
+    _UniffiConverterString.check_lower(amount_sats)
+    
+    _UniffiConverterOptionalString.check_lower(from_subaccount_hex)
+    
+    return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_retrieve_btc_arg,
+        _UniffiConverterString.lower(address),
+        _UniffiConverterString.lower(amount_sats),
+        _UniffiConverterOptionalString.lower(from_subaccount_hex)))
 
 
 def icp_self_principal(secret: "bytes") -> "str":
@@ -3368,6 +3594,49 @@ def icp_transfer_arg(to_owner_text: "str",to_subaccount_hex: "typing.Optional[st
         _UniffiConverterString.lower(amount),
         _UniffiConverterOptionalString.lower(fee),
         _UniffiConverterOptionalString.lower(memo_hex)))
+
+
+def icp_withdraw_erc20_arg(amount: "str",ckerc20_ledger_text: "str",recipient: "str",from_cketh_subaccount_hex: "typing.Optional[str]",from_ckerc20_subaccount_hex: "typing.Optional[str]") -> "bytes":
+    """
+    ckETH minter `withdraw_erc20({ckerc20_ledger_id, recipient, from_cketh_subaccount,
+    from_ckerc20_subaccount, amount})` — the dual-ledger path (gas approve on ckETH + amount
+    approve on the ckERC20 ledger, both user-signed before this call).
+    """
+
+    _UniffiConverterString.check_lower(amount)
+    
+    _UniffiConverterString.check_lower(ckerc20_ledger_text)
+    
+    _UniffiConverterString.check_lower(recipient)
+    
+    _UniffiConverterOptionalString.check_lower(from_cketh_subaccount_hex)
+    
+    _UniffiConverterOptionalString.check_lower(from_ckerc20_subaccount_hex)
+    
+    return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_withdraw_erc20_arg,
+        _UniffiConverterString.lower(amount),
+        _UniffiConverterString.lower(ckerc20_ledger_text),
+        _UniffiConverterString.lower(recipient),
+        _UniffiConverterOptionalString.lower(from_cketh_subaccount_hex),
+        _UniffiConverterOptionalString.lower(from_ckerc20_subaccount_hex)))
+
+
+def icp_withdraw_eth_arg(recipient: "str",amount_wei: "str",from_subaccount_hex: "typing.Optional[str]") -> "bytes":
+    """
+    ckETH minter `withdraw_eth({recipient, from_subaccount, amount})` (Wei, after `icrc2_approve`
+    of amount + max_transaction_fee on the ckETH ledger).
+    """
+
+    _UniffiConverterString.check_lower(recipient)
+    
+    _UniffiConverterString.check_lower(amount_wei)
+    
+    _UniffiConverterOptionalString.check_lower(from_subaccount_hex)
+    
+    return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_withdraw_eth_arg,
+        _UniffiConverterString.lower(recipient),
+        _UniffiConverterString.lower(amount_wei),
+        _UniffiConverterOptionalString.lower(from_subaccount_hex)))
 
 
 def keypair_from_secret(secret: "bytes") -> "KeyPair":
@@ -3682,6 +3951,7 @@ __all__ = [
     "DpayError",
     "NfcPhase",
     "NfcStep",
+    "IcpEip1559Price",
     "IcpQueryReply",
     "IcpRequestStatus",
     "IcpSignedUpdate",
@@ -3699,17 +3969,25 @@ __all__ = [
     "generate_keypair",
     "icp_approve_arg",
     "icp_balance_of_arg",
+    "icp_decode_eip1559_price",
     "icp_decode_int",
     "icp_decode_query",
     "icp_decode_read_state",
+    "icp_decode_text",
     "icp_decode_transfer_result",
+    "icp_eip1559_price_arg",
     "icp_envelope_request_id",
     "icp_ingress_expiry",
+    "icp_minter_account_arg",
+    "icp_principal_from_pubkey",
+    "icp_retrieve_btc_arg",
     "icp_self_principal",
     "icp_sign_query",
     "icp_sign_read_state",
     "icp_sign_update",
     "icp_transfer_arg",
+    "icp_withdraw_erc20_arg",
+    "icp_withdraw_eth_arg",
     "keypair_from_secret",
     "nfc_decode_receipt",
     "nfc_decode_request",

@@ -626,7 +626,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
           ? (activeSol && solAddress
               ? <SolPayMode identity={identity} nfcReady={nfc === 'ready'} solBalance={solBalance ?? '0'} usdcBalance={usdcState.amount ?? '0'} usdcAtaAbsent={usdcState.status === 'absent'} payGate={solPayGate(selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL', solState, usdcState)} solZero={solState.status === 'ok' && solState.balance === '0'} solChecking={solState.status === 'loading' || solState.balance == null} selectedToken={selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL'} onSent={refreshSol} onSentUsdc={refreshUsdc}                   onShowSolAddress={() => goToDeposit('solana:SOL', selectedAsset?.id === 'solana:USDC' ? 'solana:USDC' : undefined)} onShowUsdcAddress={() => goToDeposit('solana:USDC')} onRecheckBalances={recheckSolBalances} recheckBusy={recheckBusy} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} onLockChange={setSelectionLocked} />
               : <PayMode
-                  identity={identity} online={online} relayUrl={relayUrl} nfcStatus={nfc}
+                  identity={identity} online={online} nfcStatus={nfc}
                   onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance}
                   onShowDepositAddress={() => goToDeposit(`ic:${selectedCurrency}`)}
                   onRefreshBalances={recheckIcBalances}

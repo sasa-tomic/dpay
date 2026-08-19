@@ -113,10 +113,18 @@ export type DpayCoreApi = {
   // merchant (offline NFC/QR). ns-timestamps + amounts cross as decimal STRINGS (exact); bytes
   // as lowercase hex; "" for an absent subaccount/memo. Retry = identical-byte resubmit ONLY.
   icpSelfPrincipal(secretHex: string): Promise<string>;
+  icpPrincipalFromPubkey(pubkeyHex: string): Promise<string>;
   icpIngressExpiry(nowNs: string, aheadS: number): Promise<string>;
   icpTransferArg(toOwnerText: string, toSubaccountHex: string, fromSubaccountHex: string, amount: string, fee: string, memoHex: string): Promise<string>;
   icpApproveArg(spenderOwnerText: string, spenderSubaccountHex: string, fromSubaccountHex: string, amount: string, expectedAllowance: string, expiresAtNs: string, memoHex: string, fee: string): Promise<string>;
   icpBalanceOfArg(ownerText: string, subaccountHex: string): Promise<string>;
+  icpMinterAccountArg(ownerText: string, subaccountHex: string): Promise<string>;
+  icpRetrieveBtcArg(address: string, amountSats: string, fromSubaccountHex: string): Promise<string>;
+  icpWithdrawEthArg(recipient: string, amountWei: string, fromSubaccountHex: string): Promise<string>;
+  icpWithdrawErc20Arg(amount: string, ckerc20LedgerText: string, recipient: string, fromCkethSubaccountHex: string, fromCkerc20SubaccountHex: string): Promise<string>;
+  icpEip1559PriceArg(ckerc20LedgerText: string): Promise<string>;
+  icpDecodeText(argHex: string): Promise<string>;
+  icpDecodeEip1559Price(argHex: string): Promise<IcpEip1559PriceOut>;
   icpSignUpdate(secretHex: string, canisterText: string, methodName: string, argHex: string, ingressExpiryNs: string): Promise<IcpSignedUpdate>;
   icpSignQuery(secretHex: string, canisterText: string, methodName: string, argHex: string, ingressExpiryNs: string): Promise<string>;
   icpSignReadState(secretHex: string, requestIdsHex: string[], wantTime: boolean, ingressExpiryNs: string): Promise<string>;
@@ -152,6 +160,14 @@ export type IcpRequestStatusOut = {
 
 /** icpDecodeReadState result: certified time (clock sync) + per-rid statuses. */
 export type IcpStateRead = { timeNs?: string; statuses: IcpRequestStatusOut[] };
+
+export type IcpEip1559PriceOut = {
+  gasLimit: string;
+  maxFeePerGas: string;
+  maxPriorityFeePerGas: string;
+  maxTransactionFee: string;
+  timestampNs?: string;
+};
 
 /** icpDecodeTransferResult over an icrc1_transfer reply (ok carries the block index). */
 export type IcpTransferOutcome = {

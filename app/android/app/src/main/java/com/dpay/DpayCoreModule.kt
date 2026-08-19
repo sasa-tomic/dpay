@@ -371,6 +371,17 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         }
     }
 
+    /** Payee principal text from the merchant's 32-byte Ed25519 public key (the payment-request
+     *  `to` field) — SHA224(DER(pub)) | 0x02. Keeps the 132-byte request format frozen. */
+    @ReactMethod
+    fun icpPrincipalFromPubkey(pubkeyHex: String, promise: Promise) {
+        try {
+            promise.resolve(uniffi.dpay_ffi.icpPrincipalFromPubkey(unhex(pubkeyHex)))
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
     /** ingress expiry (ns) = now_ns + ahead_s * 1e9. The caller supplies `now_ns` from the
      *  certified IC clock (read_state `time` leaf) — REFUSE to sign on large skew. */
     @ReactMethod
@@ -443,6 +454,99 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
     fun icpBalanceOfArg(ownerText: String, subaccountHex: String, promise: Promise) {
         try {
             promise.resolve(hex(uniffi.dpay_ffi.icpBalanceOfArg(ownerText, subaccountHex)))
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    // --- minter calls (user-principal offramp + deposits) — golden-pinned arg builders ---
+
+    /** ckBTC minter get_btc_address(MinterAccount) — ONE record arg (2-tuples trap IC0503). */
+    @ReactMethod
+    fun icpMinterAccountArg(ownerText: String, subaccountHex: String, promise: Promise) {
+        try {
+            promise.resolve(hex(uniffi.dpay_ffi.icpMinterAccountArg(ownerText, subaccountHex)))
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    /** ckBTC minter retrieve_btc_with_approval arg (sats; after the user's icrc2_approve). */
+    @ReactMethod
+    fun icpRetrieveBtcArg(address: String, amountSats: String, fromSubaccountHex: String, promise: Promise) {
+        try {
+            promise.resolve(hex(uniffi.dpay_ffi.icpRetrieveBtcArg(address, amountSats, fromSubaccountHex)))
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    /** ckETH minter withdraw_eth arg (Wei; after approve of amount + max_transaction_fee). */
+    @ReactMethod
+    fun icpWithdrawEthArg(recipient: String, amountWei: String, fromSubaccountHex: String, promise: Promise) {
+        try {
+            promise.resolve(hex(uniffi.dpay_ffi.icpWithdrawEthArg(recipient, amountWei, fromSubaccountHex)))
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    /** ckETH minter withdraw_erc20 arg — dual-ledger path (gas approve on ckETH + amount approve
+     *  on the ckERC20 ledger, both user-signed before this call). */
+    @ReactMethod
+    fun icpWithdrawErc20Arg(
+        amount: String,
+        ckerc20LedgerText: String,
+        recipient: String,
+        fromCkethSubaccountHex: String,
+        fromCkerc20SubaccountHex: String,
+        promise: Promise
+    ) {
+        try {
+            promise.resolve(
+                hex(
+                    uniffi.dpay_ffi.icpWithdrawErc20Arg(
+                        amount, ckerc20LedgerText, recipient, fromCkethSubaccountHex, fromCkerc20SubaccountHex
+                    )
+                )
+            )
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    /** ckETH minter eip_1559_transaction_price QUERY arg — live gas estimate before approving. */
+    @ReactMethod
+    fun icpEip1559PriceArg(ckerc20LedgerText: String, promise: Promise) {
+        try {
+            promise.resolve(hex(uniffi.dpay_ffi.icpEip1559PriceArg(ckerc20LedgerText)))
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    /** Decode a bare text reply (get_btc_address / any single-text query). */
+    @ReactMethod
+    fun icpDecodeText(argHex: String, promise: Promise) {
+        try {
+            promise.resolve(uniffi.dpay_ffi.icpDecodeText(unhex(argHex)))
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    /** Decode an eip_1559_transaction_price reply (ckETH minter gas estimate) — Wei strings. */
+    @ReactMethod
+    fun icpDecodeEip1559Price(argHex: String, promise: Promise) {
+        try {
+            val p = uniffi.dpay_ffi.icpDecodeEip1559Price(unhex(argHex))
+            val map = Arguments.createMap()
+            map.putString("gasLimit", p.gasLimit)
+            map.putString("maxFeePerGas", p.maxFeePerGas)
+            map.putString("maxPriorityFeePerGas", p.maxPriorityFeePerGas)
+            map.putString("maxTransactionFee", p.maxTransactionFee)
+            if (p.timestampNs != null) map.putString("timestampNs", p.timestampNs) else map.putNull("timestampNs")
+            promise.resolve(map)
         } catch (e: Throwable) {
             promise.reject("dpay_core", e)
         }

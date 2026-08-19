@@ -1,20 +1,10 @@
 import {useCallback, useRef, useState} from 'react';
-import {
-  NFC_PAY_TIMEOUT_MS, RECONCILE_ATTEMPTS, RECONCILE_INTERVAL_MS,
-  RECONCILE_FETCH_TIMEOUT_MS,
-} from '../config/constants';
-import {short, base} from '../lib/format';
+import {short} from '../lib/format';
 import {type CurrencyDescriptor, type NfcDisclosure, isPayableAsset, resolveNfcDisclosure, fmtCurrencyAmount} from '../config/catalog';
 import type {NfcEvent, Identity} from '../lib/types';
-import {
-  receiptCodeFor, decidePayerReceipt, rejectionMessage, isNonceReused,
-  isReceiptForRequest,
-  type SettleOutcome,
-} from '../payments';
-import {verifyOutcomeReceipt} from '../services/receipt';
-import {fetchWithTimeout, payAndClassify, readJsonOrEmpty} from '../services/relay';
+import {receiptCodeFor, decidePayerReceipt, type SettleOutcome} from '../payments';
+import {prepareTransfer, submitTransfer} from '../services/rail';
 import {DpayCore, DpayNfc} from '../services/native';
-import {withTimeout} from '../lib/timeout';
 import {useNfcTapState, type TapCtx} from '../hooks/useNfcTapState';
 import {NfcTapView} from './NfcTapView';
 
@@ -23,13 +13,14 @@ import {NfcTapView} from './NfcTapView';
  * (payer is tapped), Receive mode runs the reader (merchant reads the tap). The **tap itself is the
  * consent** — when a request arrives the payer's phone signs and serves it immediately. The shared
  * lifecycle (phase state machine, finalize, settle timer, the subscribe→arm→cleanup effect) lives
- * in `useNfcTapState`; this adapter fills ONLY the IC protocol: `signAuthorization` + relay `/pay`
- * + nonce-reconcile + optimistic balance deduction + canister-signed receipt verification.
+ * in `useNfcTapState`; this adapter fills ONLY the IC user-principal rail: local envelope signing
+ * (dpay-icp, byte-identical to ic-agent) + direct /api/v2 submission + read_state reconciliation
+ * + optimistic balance deduction. The NFC framing carries the ~390-byte envelope in 2×240B frames
+ * (provide_wire/Done are payload-length-agnostic); the 17-byte outcome receipt stays byte-compatible.
  */
-export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, onSettled, onOfflinePaid, onActive, onClose}: {
+export function NfcTap({role, identity, requestHex, reqInfo, catalog, onSettled, onOfflinePaid, onActive, onClose}: {
   role: 'card' | 'reader';
   identity: Identity;
-  relayUrl: string;
   requestHex?: string;
   reqInfo?: {amount: string; nonce: string; who: string; currency: number};
   catalog: CurrencyDescriptor[];
@@ -44,7 +35,7 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
   const [disclosure, setDisclosure] = useState<NfcDisclosure | null>(null);
   const sentRef = useRef<{amount: string; currency: number; who: string; nonce: string} | null>(null);
   const recordedRef = useRef(false);
-  // True once we've optimistically deducted the payment from the local balance (when the wire
+  // True once we've optimistically deducted the payment from the local balance (when the envelope
   // leaves the phone). Prevents double-deduction if the receipt later arrives with success, and
   // enables undo if the receipt says declined.
   const deductedRef = useRef(false);
@@ -55,92 +46,43 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
     onSettled();
   }, [onSettled]);
 
-  // POST /pay once, bounded by a timeout. Returns the classified outcome + parsed body, or
-  // outcome='unknown' + empty body when fetch threw (network/timeout/abort) — which the caller
-  // treats as UNKNOWN, not failure. PR25 — delegates to the shared `payAndClassify` helper.
-  const postPay = useCallback(async (code: string) => {
-    const {signal, cancel} = withTimeout(NFC_PAY_TIMEOUT_MS);
+  // Merchant side: submit the payer's signed ENVELOPE (reassembled by the reader) straight to the
+  // IC boundary node and poll read_state to a terminal state. The envelope's request_id (content
+  // hash — derivable from the bytes alone) is the dedup/reconciliation key, so a re-tap or retry
+  // submits the SAME bytes and executes once. The ledger comes from THIS merchant's catalog for
+  // the request's currency; without it we can neither submit nor poll → honest pending.
+  const submitWire = useCallback(async (envelopeHex: string, ctx: TapCtx) => {
+    const nonceHex = reqInfo?.nonce ?? '';
+    const ledger = catalog.find(c => c.currency === reqInfo?.currency)?.ledger ?? '';
     try {
-      return await payAndClassify(relayUrl, code, signal);
-    } finally { cancel(); }
-  }, [relayUrl]);
-
-  // Reconcile an ambiguous outcome via the idempotent GET /receipt/:nonce. Returns the settled
-  // receipt (or null if not settled after a few polls). Safe by construction: the nonce is
-  // single-use, so this can never cause a second charge — it only *reads* whether it landed.
-  const reconcile = useCallback(async (nonceHex: string) => {
-    for (let i = 0; i < RECONCILE_ATTEMPTS; i++) {
-      try {
-        const r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/receipt/${nonceHex}`, undefined, RECONCILE_FETCH_TIMEOUT_MS);
-        if (r.ok) { const j = await readJsonOrEmpty(r); return j.receipt ?? {}; }
-      } catch (e) { console.warn('NFC receipt reconcile poll failed:', e instanceof Error ? e.message : String(e)); /* keep polling */ }
-      await new Promise(res => setTimeout(res, RECONCILE_INTERVAL_MS));
-    }
-    return null;
-  }, [relayUrl]);
-
-  // Merchant side: submit the reassembled wire, decide the authoritative outcome, then hand it back
-  // to the payer over the same tap. The ledger is the source of truth; an ambiguous transport/HTTP
-  // result is reconciled by nonce before we ever call a payment failed. R2: we verify the settled
-  // receipt's canister/ledger signature before finalizing success.
-  const submitWire = useCallback(async (wireHex: string, ctx: TapCtx) => {
-    const nonceHex = reqInfo?.nonce ?? null;
-    const code = await DpayCore.encodeQr(wireHex).catch((e: unknown) => { console.warn('encodeQr failed:', e instanceof Error ? e.message : String(e)); return null; });
-    if (!code) { ctx.finalize('error', 'Could not encode the authorization'); return; } // pre-settlement
-
-    const {outcome: payOutcome, body} = await postPay(code);
-    let outcome: SettleOutcome = payOutcome;
-    let settledNonceHex: string | null = nonceHex;
-    let settledReceipt: any = null;
-
-    if (outcome === 'settled') {
-      settledNonceHex = body?.receipt?.nonce ?? nonceHex;
-      settledReceipt = body?.receipt ?? null;
-    } else if (outcome === 'rejected') {
-      // "Nonce reused" is not a real refusal — it means this exact payment already settled.
-      // Reconcile to the real receipt instead of showing a scary (and false) decline.
-      if (isNonceReused(body?.error) && nonceHex) {
-        const rec = await reconcile(nonceHex);
-        if (rec) { outcome = 'settled'; settledNonceHex = rec.nonce ?? nonceHex; settledReceipt = rec; }
-      }
-    } else if (nonceHex) {
-      // UNKNOWN (network drop / timeout / 5xx): the ledger MAY have committed. Reconcile before
-      // deciding — this is the fix for "settled but reported as failed".
-      const rec = await reconcile(nonceHex);
-      if (rec) { outcome = 'settled'; settledNonceHex = rec.nonce ?? nonceHex; settledReceipt = rec; }
-    }
-
-    if (outcome === 'settled') {
-      // PR1 (goods-fraud guard): bind the receipt to THIS request's nonce BEFORE the signature
-      // check. A malicious relay can replay any past valid canister-signed receipt for a different
-      // payment — the key-pin + signature would pass on their own, so the nonce mismatch must
-      // reject it first. MC4 U5: the full-auth binding is intentionally NOT passed here (merchant
-      // path — the merchant forwards the payer's opaque signed wire but never decodes its `from`).
-      const nonceMatches = settledReceipt && reqInfo?.nonce
-        ? isReceiptForRequest(settledReceipt, reqInfo.nonce)
-        : true;
-      const verified = nonceMatches && settledReceipt ? await verifyOutcomeReceipt(settledReceipt) : false;
-      if (verified) {
+      if (!ledger) { ctx.finalize('pending', 'Unknown ledger for this asset — couldn’t submit'); return; }
+      const requestIdHex = await DpayCore.icpEnvelopeRequestId(envelopeHex);
+      const out = await submitTransfer({ledger, requestIdHex, envelopeHex}, identity.secretHex, {attempts: 12, intervalMs: 500});
+      if (out.kind === 'settled') {
         record();
         ctx.finalize('success');
+      } else if (out.kind === 'rejected') {
+        ctx.finalize('declined', out.reason === 'Already paid' ? 'Already paid' : out.reason);
       } else {
-        ctx.finalize('pending', 'Couldn’t verify the payment — check the balance');
+        // Not terminal within budget (2–5s consensus + poll budget) — truthful, never a fake
+        // success or failure. The payer's own balance reconciles when their phone next polls.
+        ctx.finalize('pending', 'Couldn’t confirm with the ledger — check the balance');
       }
-    } else if (outcome === 'rejected') {
-      ctx.finalize('declined', rejectionMessage(typeof body?.error === 'string' ? body.error : null));
-    } else {
-      // Genuinely unknown even after reconciliation — truthful, never a fake success or failure.
-      ctx.finalize('pending', 'Couldn’t confirm with the ledger — check the balance');
+      const settle: SettleOutcome = out.kind; // settled | rejected | unknown — 1:1 with receipt codes
+      try { await DpayNfc.confirmReceipt(receiptCodeFor(settle), nonceHex); } catch (e: unknown) { console.warn('DpayNfc.confirmReceipt failed (native-module regression?)', e); }
+    } catch (e: unknown) {
+      console.warn('NfcTap submitWire failed:', e instanceof Error ? e.message : String(e));
+      ctx.finalize('pending', 'Couldn’t submit the payment — check the balance');
+      try { await DpayNfc.confirmReceipt(receiptCodeFor('unknown'), nonceHex); } catch {/* best-effort */}
     }
-    // Best-effort: hand the outcome back to the payer, stamped with the authoritative nonce.
-    try { await DpayNfc.confirmReceipt(receiptCodeFor(outcome), settledNonceHex ?? nonceHex ?? ''); } catch (e: unknown) { console.warn('DpayNfc.confirmReceipt failed (native-module regression?)', e); }
-  }, [reqInfo, record, postPay, reconcile]);
+  }, [reqInfo, catalog, identity, record]);
 
   // Payer side: the tap is the consent — sign the incoming request and serve it right away.
   // MC5 — fail closed BEFORE signing: a request carrying an unknown/unsupported currency must NEVER
-  // reach signAuthorization. The tap is the consent, so we cannot surface an Approve button —
+  // reach the envelope signer. The tap is the consent, so we cannot surface an Approve button —
   // instead we cancel the tap with an honest "Unsupported asset" phase (never sign a garbage
-  // currency). A null disclosure is likewise a defense-in-depth decline.
+  // currency). A null disclosure is likewise a defense-in-depth decline. prepareTransfer refuses
+  // to sign on an unreachable/skewed IC clock — surfaced honestly as a tap error (nothing signed).
   const autoSign = useCallback(async (req: {toHex: string; amount: string; nonceHex: string; expiry: number; currency: number}, ctx: TapCtx) => {
     try {
       if (!isPayableAsset(catalog, req.currency)) {
@@ -155,14 +97,14 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
         return;
       }
       setDisclosure(disc);
-      const wireHex = await DpayCore.signAuthorization(identity.secretHex, req.toHex, req.amount, req.nonceHex, req.expiry, req.currency, identity.username, '', '');
-      if (!(await DpayCore.verifyWire(wireHex))) throw new Error('local verify failed');
+      const prepared = await prepareTransfer(identity.secretHex, {currencies: catalog}, req);
       sentRef.current = {amount: req.amount, currency: req.currency, who: short(req.toHex), nonce: req.nonceHex};
-      await DpayNfc.approveCard(wireHex);
+      await DpayNfc.approveCard(prepared.envelopeHex);
     } catch (e: unknown) {
       // A2: never render the raw exception in the tap status view — generic honest copy instead;
       // the raw message is warn'd so the dev loop stays fail-loud.
       console.warn('NfcTap autoSign failed:', e instanceof Error ? e.message : String(e));
+      try { await DpayNfc.declineCard(); } catch {/* best-effort */}
       ctx.finalize('error', "Payment didn't complete — try again");
     }
   }, [identity, catalog]);
