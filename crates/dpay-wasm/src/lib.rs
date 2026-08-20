@@ -16,6 +16,11 @@
 //! - **No framework.** Plain `#[no_mangle] pub extern "C"` exports; no wasm-bindgen, no serde, no
 //!   RNG, no wall-clock, no globals that mutate across calls (beyond the bump-allocator cursor).
 //!   All functions are pure/synchronous over the module's linear memory.
+//! - **One allocator.** Rust-side allocations and `w_alloc` share ONE bump cursor (the crate
+//!   registers it as the `#[global_allocator]`). Never reintroduce a second allocator over this
+//!   memory — Rust's default wasm allocator (dlmalloc) manages the same arena and the two hand
+//!   out overlapping regions (the 2026-08-20 dual-allocator corruption; repros:
+//!   `e2e/debug/wasm-alloc-collide.mjs`, `e2e/debug/wasm-hammer.mjs`).
 //! - **Deterministic.** Ed25519 signing with a caller-supplied seed is deterministic, so identical
 //!   inputs produce identical bytes on Android, on the canister, and here.
 //!
@@ -36,6 +41,9 @@
 //! instead of dereferencing. Allocations grow memory as needed; if growth fails, [`w_alloc`]
 //! returns `0` (treat as OOM). Input buffers must be fully written BEFORE calling; outputs are
 //! only valid after a success return.
+//!
+//! Rust-side temporaries (Strings/Vecs the exports build internally) ride the SAME bump cursor —
+//! allocated above every region `w_alloc` has handed out, never freed, never overlapping.
 //!
 //! ## Export interface (FROZEN — web integrations compile against these exact symbols)
 //!
@@ -146,7 +154,22 @@ unsafe fn write_at(off: u32, bytes: &[u8]) {
     (off as *mut u8).copy_from_nonoverlapping(bytes.as_ptr(), bytes.len());
 }
 
-// --- the bump allocator -----------------------------------------------------------------------
+// --- the ONE bump allocator -------------------------------------------------------------------
+//
+// INVARIANT (2026-08-20, the dual-allocator corruption fix): Rust-side allocations (every
+// String/Vec the exports build) and JS-side buffers (`w_alloc`) share this ONE cursor. Rust's
+// DEFAULT wasm32 allocator (dlmalloc, linked when no `#[global_allocator`] is declared) manages
+// the SAME linear memory via its own sbrk (memory.grow) and free-list reuse — the two handed out
+// OVERLAPPING regions, so a concurrent-in-time Rust allocation overwrote a LIVE `w_alloc` input
+// buffer mid-call (BAD_UTF8 on valid input; deterministic repro: e2e/debug/wasm-alloc-collide.mjs
+// + the browser hammer e2e/debug/wasm-hammer.mjs). NEVER reintroduce a second allocator over
+// this memory — that includes leaving the default linked (verified by symbol-absence on the
+// staged artifact; `wasm-objdump -x … | grep dlmalloc` must stay empty).
+
+/// The shared heap cursor (byte offset of the next free byte). `0` = not yet initialized; the
+/// first use snaps it to `heap_start()`. Monotonic for the instance's lifetime — nothing is ever
+/// freed (page-lifetime bump semantics, the frozen ABI v1 ownership contract).
+static HEAP: AtomicU32 = AtomicU32::new(0);
 
 #[cfg(target_arch = "wasm32")]
 extern "C" {
@@ -165,22 +188,29 @@ fn heap_start() -> u32 {
     1 << 20
 }
 
-/// Bump-allocate `size` bytes (rounded up to 8-byte alignment; `size 0` returns the current top).
-/// Grows linear memory on demand. Returns the offset, or `0` on growth failure / exhaustion.
-#[no_mangle]
-pub extern "C" fn w_alloc(size: u32) -> u32 {
-    static HEAP: AtomicU32 = AtomicU32::new(0);
-    let size = size.wrapping_add(7) & !7u32; // keep every future allocation 8-aligned
-    let mut pos = HEAP.load(Ordering::Relaxed);
-    if pos == 0 {
-        pos = heap_start();
-        HEAP.store(pos, Ordering::Relaxed);
+/// The current heap cursor, lazily initializing it to [`heap_start`] on first use.
+fn heap_cursor() -> u32 {
+    let pos = HEAP.load(Ordering::Relaxed);
+    if pos != 0 {
+        return pos;
     }
+    let start = heap_start();
+    HEAP.store(start, Ordering::Relaxed);
+    start
+}
+
+/// Reserve `size` bytes at an `align`-aligned cursor (align is rounded up to ≥ 8, keeping every
+/// future reservation 8-aligned), growing linear memory to cover the new top. Returns the
+/// reservation offset, or `0` on overflow / growth failure (OOM is terminal under page-lifetime
+/// semantics; the cursor stays advanced — a failed reservation is never re-handed).
+fn bump_reserve(size: u32, align: u32) -> u32 {
+    let align = align.max(8); // power of two by contract (Layout::align / literal 8)
+    let pos = (heap_cursor() + align - 1) & !(align - 1);
     let end = pos as u64 + size as u64;
     if end > u32::MAX as u64 {
         return 0;
     }
-    HEAP.store(pos + size, Ordering::Relaxed);
+    HEAP.store(end as u32, Ordering::Relaxed);
     if end > mem_bytes() {
         let delta = ((end - mem_bytes()) as usize + 65535) / 65536;
         if grow_pages(delta) == usize::MAX {
@@ -189,6 +219,40 @@ pub extern "C" fn w_alloc(size: u32) -> u32 {
     }
     pos
 }
+
+/// Bump-allocate `size` bytes (rounded up to 8-byte alignment; `size 0` returns the current top).
+/// Grows linear memory on demand. Returns the offset, or `0` on growth failure / exhaustion.
+#[no_mangle]
+pub extern "C" fn w_alloc(size: u32) -> u32 {
+    bump_reserve(size.wrapping_add(7) & !7u32, 8)
+}
+
+/// The module's ONE allocator, registered as the Rust `#[global_allocator]` so every Rust-side
+/// String/Vec allocation rides the SAME bump cursor `w_alloc` serves (see the invariant above).
+/// `dealloc` is a no-op — page-lifetime bump semantics are the frozen ownership contract; the
+/// module's Rust-side volume is bounded by its callers' per-call temporaries (envelope/JSON
+/// builders), never freed but never overlapping. Registered on wasm32 ONLY: host builds are
+/// compile-check-only and keep the platform allocator (their memory plumbing reports empty by
+/// design), and no other crate in the workspace declares a `#[global_allocator]`, so the
+/// Android/UniFFI path is untouched.
+#[cfg(target_arch = "wasm32")]
+mod global_alloc {
+    use super::bump_reserve;
+    use std::alloc::{GlobalAlloc, Layout};
+
+    pub struct Bump;
+
+    unsafe impl GlobalAlloc for Bump {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            bump_reserve(layout.size() as u32, layout.align() as u32) as *mut u8
+        }
+        unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {} // page lifetime: no free
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[global_allocator]
+static ALLOCATOR: global_alloc::Bump = global_alloc::Bump;
 
 /// ABI version of the export surface (see the table in the crate docs). Currently `1`.
 #[no_mangle]
