@@ -1,19 +1,31 @@
-//! LIVE integration test for the real settlement path (feature `agent`).
+//! LIVE integration test for the post-cutover READ surface (feature `agent`).
 //!
-//! Unlike `relay.rs` (fast, in-memory, offline inner loop), this stands up a **real local IC**
-//! via PocketIC's HTTP gateway, installs the REAL DFINITY ic-icrc1-ledger + the dpay FACADE
-//! canister wired to it, funds a demo payer through the facade, and drives a real payment end to
-//! end through the relay's axum app + `AgentLedger` + `ic-agent`. It proves the code that ships is
-//! the code we test: same wire format, same candid surface, same facade logic — and that the
-//! facade's cache-backed `balance_of` query reflects settles.
+//! 2026-08-19 IC user-principal-rail cutover: value movement LEFT the relay entirely — the app
+//! signs /api/v2 envelopes locally (dpay-icp) and POSTs them to boundary nodes. What the relay
+//! still owns in prod is the READ surface, and this test proves exactly that surface against a
+//! REAL local IC: PocketIC's HTTP gateway + the REAL DFINITY ic-icrc1-ledger + the dpay facade
+//! canister (which now only contributes the CATALOG — currencies/deposit metadata; it is no
+//! longer in the value path, so nothing here settles through it).
 //!
-//! Asserts:
-//!   1. a valid `POST /api/v1/pay` settles → 200, and balances actually move on the ledger (read
-//!      back through the facade's REAL `balance_of` query, which reads the display cache refreshed
-//!      post-settle);
-//!   2. relay idempotency — a 2nd identical HTTP submit returns the byte-identical receipt and
-//!      does NOT double-settle;
-//!   3. a *reused nonce with a fresh signature* is rejected by the facade (no double-spend).
+//! The money-critical assertion is the ACCOUNT SHAPE: funds are minted directly on the ledger at
+//! `Account{owner: self_authenticating_ed25519(payer pubkey), subaccount: None}` — the exact
+//! account the app's signed icrc1_transfer envelopes move — and `GET /api/v1/balances/{hex}` must
+//! read them back there (`AgentLedger::balance_on_ledger` derives the SAME owner via dpay-icp's
+//! golden-proven derivation). If the relay and the app ever disagreed on the account shape,
+//! balances would read 0 while funds sit "lost" at a different principal; this test is the live
+//! tripwire for exactly that regression class.
+//!
+//! Asserts, all THROUGH THE HTTP ROUTES (oneshot on the real axum app + `AgentLedger` + ic-agent;
+//! no direct trait calls — the prod wire surface is the thing under test):
+//!   1. `GET /api/v1/health` → 200 `{"status":"ok"}` (real replica `status` round-trip);
+//!   2. `GET /api/v1/currencies` → 200, the DUSD row present (currency code + ledger principal
+//!      TEXT matching the real ledger canister's canonical id — proves the catalog fan-out target);
+//!   3. `GET /api/v1/balances/{hex}` → the minted amount as a decimal STRING for DUSD; a SECOND
+//!      user principal minted a different amount reads independently; an UNFUNDED principal reads
+//!      "0" (batch map = exactly the catalog's one entry);
+//!   4. `GET /api/v1/transactions/{hex}?currency=N` → 200 with a well-formed rows array (shape
+//!      only — the facade's history records facade-settled ops, not rail transfers, so it is
+//!      honestly EMPTY here; asserted as JSON shape, not content).
 //!
 //! Prereqs (the justfile's `test-live` recipe wires these):
 //!   - build the wasm first:
@@ -27,10 +39,9 @@
 #![cfg(feature = "agent")]
 
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
-use axum::http::{header, Request, StatusCode};
+use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use serde_json::Value;
 use tower::ServiceExt; // oneshot
@@ -38,13 +49,14 @@ use tower::ServiceExt; // oneshot
 use candid::{decode_one, encode_args, encode_one, CandidType, Nat, Principal};
 use pocket_ic::PocketIc;
 
-use dpay_core::{generate_keypair, Authorization, SignedAuthorization, DEMO_USD};
-use dpay_relay::{app, AgentLedger, AppState, Ledger};
-use ed25519_dalek::SigningKey;
+use dpay_core::{generate_keypair, DEMO_USD};
+use dpay_relay::{app, AgentLedger, AppState};
 use icrc_ledger_types::icrc1::account::Account;
+use icrc_ledger_types::icrc1::transfer::{TransferArg, TransferError};
 
-const CAP: u64 = 100_000; // per-tx cap: $1,000.00
-const INIT_A: u64 = 10_000; // payer opens with $100.00 (minted through the facade)
+const CAP: u64 = 100_000; // per-tx cap: $1,000.00 (registered into CURRENCY_META below)
+const INIT_A: u64 = 10_000; // first user opens with $100.00 minted AT their principal
+const INIT_B: u64 = 3_333; // second user gets a DIFFERENT amount (balance-independence proof)
 
 // --- facade init payload -----------------------------------------------------------------------
 
@@ -104,9 +116,16 @@ enum LedgerArg {
 }
 
 /// Local candid mirrors of the canister's `MinterFamily` / `RampCapability` variants, for the
-/// `register_currency_meta` cap-registration args (MC2 U1: `pay` is fail-closed on the per-currency
-/// cap, so the live `pay` test must register a cap for DEMO_USD). Variant LABELS match the canister's
-/// `.did` exactly — candid serde hashes the label, so declaration order is irrelevant.
+/// `register_currency_meta` cap-registration args. Post-cutover this registration is catalog
+/// parity, not a pay gate (there is no pay): the prod register flow (`scripts/dfx-deploy-ic.sh`)
+/// seeds CURRENCY_META for every currency, so the live catalog proof mirrors prod by registering
+/// the DEMO cap too. Variant LABELS match the canister's `.did` exactly — candid serde hashes the
+/// label, so declaration order is irrelevant.
+// Complete candid mirrors of the canister's variants — every label must exist so the record
+// encodes against the real `.did`, but this test only ever constructs `Unavailable`, so the
+// unconstructed variants are `allow(dead_code)` by design (a partial mirror would silently
+// change the candid label hashing and corrupt the registration args).
+#[allow(dead_code)]
 #[derive(CandidType, serde::Serialize)]
 enum TestMinterFamily {
     CkBtcUtxo,
@@ -114,6 +133,7 @@ enum TestMinterFamily {
     CkSol,
 }
 
+#[allow(dead_code)]
 #[derive(CandidType, serde::Serialize)]
 enum TestRampCapability {
     Direct,
@@ -121,9 +141,9 @@ enum TestRampCapability {
     Unavailable,
 }
 
-/// Register a per-tx `cap` for `currency` (MC2 U1). Mirrors the canister test's
-/// `register_currency_meta_cap` — all other fields `None`/`Unavailable`. Called as the controller
-/// (the live test seeds `management_canister` as the controller so this admin op is permitted).
+/// Register a per-tx `cap` for `currency`. Mirrors the canister test's `register_currency_meta_cap`
+/// — all other fields `None`/`Unavailable`. Called as the controller (this live test seeds
+/// `management_canister` as the controller so this admin op is permitted).
 fn register_currency_meta_cap(
     pic: &PocketIc,
     dpay: Principal,
@@ -161,10 +181,6 @@ fn register_currency_meta_cap(
         .expect("register_currency_meta should succeed for the controller");
 }
 
-fn now_secs() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
-}
-
 fn workspace_root() -> std::path::PathBuf {
     // crates/dpay-relay -> workspace root
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -186,36 +202,9 @@ fn ledger_wasm() -> Vec<u8> {
     std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read ledger wasm at {}: {e}", path.display()))
 }
 
-fn signed(
-    sk: &SigningKey,
-    from: [u8; 32],
-    to: [u8; 32],
-    amount: u64,
-    nonce: [u8; 16],
-    expiry: u64,
-) -> SignedAuthorization {
-    let auth = Authorization {
-        from,
-        to,
-        amount,
-        nonce,
-        expiry,
-        currency: DEMO_USD,
-        from_name: [0u8; 32],
-        to_name: [0u8; 32],
-        memo: [0u8; 32],
-    };
-    SignedAuthorization::new(sk, auth)
-}
-
-/// POST /api/v1/pay with a raw wire-bytes body (the merchant's decoded signed-auth QR).
-fn pay_wire(wire: &[u8]) -> Request<Body> {
-    Request::builder()
-        .method("POST")
-        .uri("/api/v1/pay")
-        .header(header::CONTENT_TYPE, "application/octet-stream")
-        .body(Body::from(wire.to_vec()))
-        .unwrap()
+/// A plain GET request for `uri` (every assertion here is a read — the value-path routes are gone).
+fn get(uri: &str) -> Request<Body> {
+    Request::builder().method("GET").uri(uri).body(Body::empty()).unwrap()
 }
 
 async fn call(state: &AppState, req: Request<Body>) -> (StatusCode, Value) {
@@ -226,23 +215,73 @@ async fn call(state: &AppState, req: Request<Body>) -> (StatusCode, Value) {
     (status, json)
 }
 
+/// RAII ownership wrapper ensuring `stop_live()` runs on EVERY exit path. The historical failure
+/// mode was FAIL+LEAK: an assert panicked mid-test, the trailing `pic.stop_live()` never ran, and
+/// the PocketIC gateway process outlived the test. `Drop` runs during unwinding too, so the
+/// gateway always comes down — success, assert failure, or runtime error alike.
+struct LivePocketIc(PocketIc);
+
+impl Drop for LivePocketIc {
+    fn drop(&mut self) {
+        self.0.stop_live();
+    }
+}
+
+/// Mint `amount` minor units directly ON the real ledger, AT the user's self-authenticating
+/// principal — the rail-side funding shape post-cutover (NO facade custody hop, no faucet). The
+/// sender is the FACADE canister principal, which owns the ledger's minting account (a transfer
+/// out of the minting account IS the ICRC-1 mint path — the same move the facade's own
+/// controller-gated `mint` makes). The destination account is derived exactly the way the app's
+/// signer and `AgentLedger::balance_on_ledger` both derive it:
+/// `owner = self_authenticating_ed25519(pubkey), subaccount = None` — so whatever this mints MUST
+/// show up in the relay's balance batch, or the read path's account shape has regressed.
+fn mint_at_user_principal(
+    pic: &PocketIc,
+    ledger: Principal,
+    facade: Principal,
+    pubkey: &[u8; 32],
+    amount: u64,
+) {
+    let owner = dpay_icp::principal::Principal::self_authenticating_ed25519(pubkey);
+    let arg = TransferArg {
+        from_subaccount: None, // the minting account's default subaccount
+        to: Account { owner: Principal::from_slice(owner.as_slice()), subaccount: None },
+        fee: None, // transfer_fee is 0; mints carry no fee
+        created_at_time: None, // no dedup window wanted between distinct test mints
+        memo: None,
+        amount: Nat::from(amount),
+    };
+    let reply = pic
+        .update_call(ledger, facade, "icrc1_transfer", encode_one(&arg).unwrap())
+        .expect("icrc1_transfer update_call rejected");
+    match decode_one::<Result<Nat, TransferError>>(&reply).unwrap() {
+        Ok(_) => {}
+        Err(e) => panic!("ledger mint at user principal failed: {e:?}"),
+    }
+}
+
 #[test]
-fn live_settlement_end_to_end() {
+fn live_read_surface_at_user_principal() {
+    // PocketIC's server child must not inherit this test binary's stdio pipes (see the teardown
+    // comment at the bottom for the full why); the env var is read at server spawn, i.e. it MUST
+    // be set before the first PocketIc::new() — hence here, at the very top of the test.
+    std::env::set_var("POCKET_IC_MUTE_SERVER", "1");
+
     // --- 1. Stand up a real local IC with an HTTP gateway (blocking; own runtime). ---
     let mut pic = PocketIc::new();
     let gateway_url = pic.make_live(None).to_string();
+    let pic = LivePocketIc(pic); // from here, teardown is guaranteed on every exit path
 
-    // --- 2. Install a real ICRC ledger + the facade wired to it, then mint to the payer. ---
-    let payer_sk = generate_keypair();
-    let payer_pk = payer_sk.verifying_key().to_bytes();
-    let merch_pk = generate_keypair().verifying_key().to_bytes();
+    // --- 2. Install a real ICRC ledger + the facade (catalog) wired to it. ---
+    let payer_pk = generate_keypair().verifying_key().to_bytes();
+    let second_pk = generate_keypair().verifying_key().to_bytes();
 
     // Reserve the facade id first — the ledger's minting account owner must be the facade.
-    let dpay = pic.create_canister();
-    pic.add_cycles(dpay, 2_000_000_000_000);
+    let dpay = pic.0.create_canister();
+    pic.0.add_cycles(dpay, 2_000_000_000_000);
 
-    let ledger = pic.create_canister();
-    pic.add_cycles(ledger, 10_000_000_000_000);
+    let ledger = pic.0.create_canister();
+    pic.0.add_cycles(ledger, 10_000_000_000_000);
     let ledger_init = LedgerArg::Init(LedgerInitArgs {
         minting_account: Account { owner: dpay, subaccount: None },
         fee_collector_account: None,
@@ -266,42 +305,29 @@ fn live_settlement_end_to_end() {
         },
         index_principal: None,
     });
-    pic.install_canister(ledger, ledger_wasm(), encode_one(&ledger_init).unwrap(), None);
+    pic.0.install_canister(ledger, ledger_wasm(), encode_one(&ledger_init).unwrap(), None);
 
-    // Install the facade wired to the ledger (DUSD, mintable, seeded controller).
-    //
-    // MC2 U1 fallout: `pay` now reads the per-currency cap from `CURRENCY_META` (fail-closed — a
-    // cap-less currency rejects every non-zero pay). This live test exercises `pay`, so it must
-    // seed a controller (the management-canister principal) and register a DEMO cap. Pre-MC2 this
-    // test ran in open mode (controller=None); the cap registration restores the pre-MC2 settle
-    // behavior against the governed-cap gate.
+    // Install the facade wired to the ledger (DUSD, mintable, seeded controller). Post-cutover the
+    // facade's job in this test is the CATALOG: `currencies()` joins its LEDGERS registration with
+    // CURRENCY_META — that catalog row is what the balances batch fans out against and what the
+    // wallet renders. It is deliberately NOT used to move value anywhere in this test.
     let admin = Principal::management_canister();
     let dpay_init = DpayInitArg {
         ledgers: vec![LedgerConfig { currency: DEMO_USD, principal: ledger, mintable: true }],
         per_tx_cap: CAP,
         controller: Some(admin),
     };
-    pic.install_canister(dpay, facade_wasm(), encode_one(&dpay_init).unwrap(), None);
-    register_currency_meta_cap(&pic, dpay, admin, DEMO_USD, CAP);
-    let canister_id: Principal = dpay;
+    pic.0.install_canister(dpay, facade_wasm(), encode_one(&dpay_init).unwrap(), None);
+    // Prod register parity: seed the DEMO cap into CURRENCY_META exactly as dfx-deploy-ic does,
+    // so the catalog row this test asserts on mirrors the prod-registered shape.
+    register_currency_meta_cap(&pic.0, dpay, admin, DEMO_USD, CAP);
+    let ledger_text = ledger.to_text();
+    let canister_id = dpay;
 
-    // Fund the payer through the self-service FAUCET. Since R1 the privileged `mint` is
-    // controller-only (denied with controller=null); the faucet is the demo on-ramp and mints a
-    // FIXED amount (FAUCET_AMOUNT, == INIT_A here) — the relay's `/faucet` route calls it. The
-    // facade settles the mint on the ledger and refreshes the display cache; it returns the NEW
-    // BALANCE per the `Ledger::faucet` contract.
-    let mint_reply = pic
-        .update_call(
-            dpay,
-            Principal::anonymous(),
-            "faucet",
-            encode_args((payer_pk.to_vec(), DEMO_USD)).unwrap(),
-        )
-        .expect("faucet update rejected");
-    let mint_ret = decode_one::<Result<u64, String>>(&mint_reply)
-        .unwrap()
-        .expect("faucet must succeed");
-    assert_eq!(mint_ret, INIT_A, "facade faucet must return the post-mint balance");
+    // Fund TWO users at their own principals, directly on the rail. Different amounts so a
+    // balance cross-read between the two accounts cannot pass by accident.
+    mint_at_user_principal(&pic.0, ledger, dpay, &payer_pk, INIT_A);
+    mint_at_user_principal(&pic.0, ledger, dpay, &second_pk, INIT_B);
 
     // --- 3. Everything from here is async: AgentLedger (ic-agent) + the relay's axum app. ---
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -312,111 +338,93 @@ fn live_settlement_end_to_end() {
     rt.block_on(async move {
         // Point the real ledger at the live gateway + facade. `connect` fetches the root key
         // (required off mainnet) — if the gateway weren't truly live this would fail.
-        let ledger = AgentLedger::connect(&gateway_url, canister_id)
+        let agent = AgentLedger::connect(&gateway_url, canister_id)
             .await
             .expect("AgentLedger must connect to the live gateway");
-        let ledger = Arc::new(ledger);
-        let state = AppState::new(ledger.clone());
+        let state = AppState::new(Arc::new(agent));
+        let key = DEMO_USD.to_string(); // the batch map's JSON key: currency index as a string
 
-        // Sanity: opening balances read back through a REAL query (the cache, refreshed by the mint).
-        assert_eq!(ledger.balance_of(&payer_pk, DEMO_USD).await.unwrap(), INIT_A);
-        assert_eq!(ledger.balance_of(&merch_pk, DEMO_USD).await.unwrap(), 0);
-
-        // AgentLedger::faucet proxies the canister's self-service faucet and returns the NEW BALANCE
-        // (surfaced by the relay as `{balance}`). The canister mints its FIXED amount (== INIT_A) and
-        // ignores the requested amount; a fresh account therefore reports INIT_A.
-        let fresh_pk = generate_keypair().verifying_key().to_bytes();
-        let mint_bal = ledger
-            .faucet(fresh_pk, DEMO_USD, INIT_A)
-            .await
-            .expect("AgentLedger::faucet must succeed");
-        assert_eq!(mint_bal, INIT_A, "AgentLedger::faucet must return the post-mint balance");
-        assert_eq!(ledger.balance_of(&fresh_pk, DEMO_USD).await.unwrap(), INIT_A);
-
-        // Health goes through the real replica `status`.
-        let health = Request::builder()
-            .method("GET")
-            .uri("/api/v1/health")
-            .body(Body::empty())
-            .unwrap();
-        let (hs, hb) = call(&state, health).await;
+        // ---- (1) health: the real replica `status` round-trip ----
+        let (hs, hb) = call(&state, get("/api/v1/health")).await;
         assert_eq!(hs, StatusCode::OK, "health body={hb}");
         assert_eq!(hb["status"], "ok");
 
-        // ---- (1) valid pay settles, balances move on the real ledger ----
-        let expiry = now_secs() + 120;
-        let nonce = [11u8; 16];
-        let sa = signed(&payer_sk, payer_pk, merch_pk, 2_500, nonce, expiry);
+        // ---- (2) currencies: the DUSD row with the REAL ledger's canonical principal text ----
+        let (cs, cb) = call(&state, get("/api/v1/currencies")).await;
+        assert_eq!(cs, StatusCode::OK, "currencies body={cb}");
+        let rows = cb["currencies"]
+            .as_array()
+            .unwrap_or_else(|| panic!("currencies must be an array: {cb}"));
+        let dusd = rows
+            .iter()
+            .find(|d| d["currency"].as_u64() == Some(u64::from(DEMO_USD)))
+            .unwrap_or_else(|| panic!("catalog must contain the DUSD (currency {DEMO_USD}) row: {cb}"));
+        assert_eq!(
+            dusd["ledger"].as_str(),
+            Some(ledger_text.as_str()),
+            "DUSD row must name the real ledger's canonical principal text (row={dusd})"
+        );
 
-        let (s1, b1) = call(&state, pay_wire(&sa.to_wire())).await;
-        assert_eq!(s1, StatusCode::OK, "valid pay must settle: {b1}");
-        let r = &b1["receipt"];
-        // U64String (exact-amount transport): amounts cross the wire as JSON strings.
-        assert_eq!(r["amount"], "2500");
-        assert_eq!(r["from"], hex::encode(payer_pk));
-        assert_eq!(r["to"], hex::encode(merch_pk));
-        assert_eq!(r["nonce"], hex::encode(nonce));
-        assert_eq!(r["new_from_balance"], (INIT_A - 2_500).to_string());
+        // ---- (3) balances: the USER-PRINCIPAL account shape against the real ledger ----
+        // The mints in §2 landed at Account{owner: self_auth(pk), subaccount: None}; the batch
+        // route fans `balance_on_ledger` out per catalog currency with the SAME derivation. An
+        // account-shape regression on either side reads 0 here — that is the tripwire.
+        let (ps, pb) = call(&state, get(&format!("/api/v1/balances/{}", hex::encode(payer_pk)))).await;
+        assert_eq!(ps, StatusCode::OK, "payer balances body={pb}");
+        assert_eq!(pb[key.as_str()], INIT_A.to_string(), "payer DUSD must read the minted amount (body={pb})");
+        // The catalog has exactly one currency (DUSD), so the fan-out map has exactly one entry —
+        // no phantom rows, no dropped rows.
+        assert_eq!(
+            pb.as_object().map(|m| m.len()),
+            Some(1),
+            "the batch map must carry exactly the catalog's one entry (body={pb})"
+        );
 
-        // Read back through REAL balance_of queries — the cache was refreshed post-settle.
-        assert_eq!(ledger.balance_of(&payer_pk, DEMO_USD).await.unwrap(), INIT_A - 2_500);
-        assert_eq!(ledger.balance_of(&merch_pk, DEMO_USD).await.unwrap(), 2_500);
+        // Second user: independent balance (different amount, different principal).
+        let (ss, sb) = call(&state, get(&format!("/api/v1/balances/{}", hex::encode(second_pk)))).await;
+        assert_eq!(ss, StatusCode::OK, "second-user balances body={sb}");
+        assert_eq!(sb[key.as_str()], INIT_B.to_string(), "second user must read their OWN mint (body={sb})");
 
-        // ---- MC4 U3: AgentLedger::receipt(nonce) recovers the signed receipt from the canister ----
-        // The canister stores a signed receipt per nonce (MC4 U1+U2); the relay's durable-recovery
-        // seam queries it via `receipt(blob) -> opt ReceiptView`. Round-trip the just-settled nonce
-        // and assert the recovered receipt matches the settle receipt on every outcome-attestation
-        // field (the ReceiptView carries no new_from_balance — that surfaces as 0 on recovery).
-        let recovered = ledger
-            .receipt(nonce)
-            .await
-            .expect("AgentLedger::receipt query")
-            .expect("receipt(nonce) must be Some for a settled nonce");
-        assert_eq!(recovered.from, hex::encode(payer_pk));
-        assert_eq!(recovered.to, hex::encode(merch_pk));
-        assert_eq!(recovered.amount, dpay_relay::U64String(2_500));
-        assert_eq!(recovered.nonce, hex::encode(nonce));
-        assert_eq!(recovered.currency, DEMO_USD);
-        assert_eq!(recovered.new_from_balance, dpay_relay::U64String(0)); // not in ReceiptView
-        assert!(!recovered.receipt_sig.is_empty(), "canister-signed sig present");
-        assert!(!recovered.pubkey.is_empty(), "canister receipt pubkey present");
-        // An unsettled nonce is a clean None (never a false Some).
-        let miss = ledger
-            .receipt([0xAAu8; 16])
-            .await
-            .expect("AgentLedger::receipt query for unsettled nonce");
-        assert!(miss.is_none(), "an unsettled nonce must return None");
+        // Independence cross-check: the second mint must not have touched the first user.
+        let (rs, rb) = call(&state, get(&format!("/api/v1/balances/{}", hex::encode(payer_pk)))).await;
+        assert_eq!(rs, StatusCode::OK, "payer re-read body={rb}");
+        assert_eq!(rb[key.as_str()], INIT_A.to_string(), "payer balance must be unchanged by the second mint (body={rb})");
 
-        // ---- (2) relay idempotency: same submission → identical receipt, no double-settle ----
-        let (s2, b2) = call(&state, pay_wire(&sa.to_wire())).await;
-        assert_eq!(s2, StatusCode::OK);
-        assert_eq!(b1["receipt"], b2["receipt"], "duplicate submit must replay the identical cached receipt");
-        assert_eq!(b1["replayed"], false, "first settle is a fresh charge, not a replay");
-        assert_eq!(b2["replayed"], true, "second identical submit must be flagged as replayed");
-        assert_eq!(ledger.balance_of(&payer_pk, DEMO_USD).await.unwrap(), INIT_A - 2_500);
-        assert_eq!(ledger.balance_of(&merch_pk, DEMO_USD).await.unwrap(), 2_500);
+        // An UNFUNDED principal reads a clean "0" — not an error, not a missing key.
+        let unfunded_pk = generate_keypair().verifying_key().to_bytes();
+        let (us, ub) = call(&state, get(&format!("/api/v1/balances/{}", hex::encode(unfunded_pk)))).await;
+        assert_eq!(us, StatusCode::OK, "unfunded balances body={ub}");
+        assert_eq!(ub[key.as_str()], "0", "an unfunded principal must read \"0\" (body={ub})");
 
-        // ---- (3) reused nonce must be rejected by the FACADE (no double-spend at the ledger) ----
-        // The relay's HTTP idempotency (proven in (2)) caches by nonce, so a 2nd submit never reaches
-        // the ledger. To prove the facade's own spent-nonce guard — the real double-spend defense that
-        // holds even if the relay's cache were bypassed/restarted — drive `AgentLedger::pay` directly
-        // with a freshly-signed authorization reusing the same nonce for a DIFFERENT amount.
-        let dup = signed(&payer_sk, payer_pk, merch_pk, 1_000, nonce, now_secs() + 120);
-        let err = ledger
-            .pay(dup.to_wire().to_vec())
-            .await
-            .expect_err("facade must reject a reused nonce");
-        match err {
-            dpay_relay::LedgerError::Rejected(msg) => {
-                assert!(msg.contains("nonce"), "expected a nonce-reuse rejection, got: {msg}");
-            }
-            other => panic!("expected a Rejected(nonce reuse), got {other:?}"),
-        }
-        // Still exactly one settlement — no double-spend on the real ledger.
-        assert_eq!(ledger.balance_of(&payer_pk, DEMO_USD).await.unwrap(), INIT_A - 2_500);
-        assert_eq!(ledger.balance_of(&merch_pk, DEMO_USD).await.unwrap(), 2_500);
+        // ---- (4) transactions: JSON shape only (honestly) ----
+        // The facade's `transactions_of` reads its ACCOUNT_TXNS history, which only facade-settled
+        // ops (pay/mint/faucet) ever wrote — rail transfers like the mints above do NOT flow into
+        // it, and there were no facade-settled ops in this test. So the honest assertion is the
+        // wire SHAPE (a rows array the wallet can render), not the content.
+        let (ts, tb) = call(
+            &state,
+            get(&format!(
+                "/api/v1/transactions/{}?currency={}&limit=10",
+                hex::encode(payer_pk),
+                DEMO_USD
+            )),
+        )
+        .await;
+        assert_eq!(ts, StatusCode::OK, "transactions body={tb}");
+        assert!(tb["transactions"].is_array(), "transactions must carry a rows array (body={tb})");
     });
 
-    // Tear down the gateway + replica explicitly (also happens on drop).
-    pic.stop_live();
+    // --- 4. Leak-proof teardown ---
+    // pocket-ic spawns `pocket-ic-server` as a child process in its own process group and NEVER
+    // kills or reaps it client-side (upstream TODO SDK-1936): `stop_live()` + Drop's instance
+    // DELETE tear down OUR instance, but the server process itself deliberately outlives it
+    // (TTL-based lifetime, shared-server design). A child that inherits the test process's
+    // stdout/stderr keeps those pipes open after the test binary exits — nextest's leak detector
+    // waits for pipe EOF and flags exactly that (we reproduced it: PASS under --no-capture,
+    // LEAK under capture, identical code). The client library's own escape hatch is
+    // POCKET_IC_MUTE_SERVER (checked at server spawn): it redirects the child's stdio to null so
+    // the pipes close at test exit. Set BEFORE the first PocketIc::new() above; safe here because
+    // this binary runs a single test and no pocket-ic threads exist yet at that point.
+    // LivePocketIc::drop → stop_live() + instance DELETE still runs on every exit path (incl.
+    // panic) — that frees the instance's server-side state; only the server PROCESS lingers.
 }
