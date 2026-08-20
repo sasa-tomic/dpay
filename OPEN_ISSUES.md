@@ -21,11 +21,16 @@
 > **REMAINING (in order):**
 > 1. ~~**The wasm dual-allocator bug**~~ ✅ **RESOLVED (2026-08-20, `32ebf21`) — see the CLOSED
 >    section below.** Full-suite e2e unblocked.
-> 2. **Device gates** (never ran on this cutover): `just app` (DPAY_SELFCHECK PASS), `just
->    ondevice`, `just campreview` — trigger paths (dpay-ffi/app-services/android) all fired.
->    NOTE: the allocator fix touches only `crates/dpay-wasm` (the `#[global_allocator]` lives in
->    the wasm crate alone; no other crate declares one), so the Android/UniFFI path is untouched —
->    but the W7-relay/W8 cutover itself still warrants the device gates.
+> 2. ~~**Device gates**~~ ✅ **RESOLVED (2026-08-20, review-fix session ending `1db1d53`)**: all
+>    three gates now PASS on the cutover surface — `just app` DPAY_SELFCHECK + DPAY_SOL_SELFCHECK
+>    PASS (physical 9cdf67b8 + emulator), `just ondevice` 11/11 (emulator), `just campreview`
+>    GREEN both rails (demo 81/197, sol 81/199). The gates had NEVER compiled since the cutover:
+>    `DpayCoreModule.kt` carried 6 latent Kotlin errors against the regenerated UniFFI binding
+>    (nullable `getString`, non-optional `reject_code`/`reject_message`, mutable-property
+>    smart-casts) and the instrumented tests still imported the retired wire-era ffi exports —
+>    both fixed + tests re-scoped to the icp-rail surface in `1db1d53`. Reminder from that run:
+>    `just ondevice` on the physical MIUI device reports BUILD SUCCESSFUL with `tests=0`
+>    (Play-Protect install block) — that gate is emulator-only in practice.
 > 3. **Full-suite e2e green** ✅ (2026-08-20, post-fix): `just e2e` **77/77 GREEN** in ~70 s
 >    (plus optional flow 39 via `just e2e-store`, 78/78 total). Two stale-premise flows surfaced
 >    once the wasm flake stopped masking them and were fixed (`76de37d` flow 22 — kill the IC
