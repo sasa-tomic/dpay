@@ -809,6 +809,9 @@ pub struct WithdrawEthArg {
 pub fn decode_withdraw_eth_arg(arg: &[u8]) -> Result<WithdrawEthArg, IcpError> {
     let mut rd = Rd { b: arg, i: 0 };
     rd.message()?;
+    // Field-hash order matches the encoder + production-candid golden: recipient (text)
+    // first, then from_subaccount (opt blob), then amount (nat).
+    let recipient = rd.text()?;
     let from_sub = rd.opt_blob()?;
     let from_subaccount = match from_sub {
         None => None,
@@ -821,7 +824,6 @@ pub fn decode_withdraw_eth_arg(arg: &[u8]) -> Result<WithdrawEthArg, IcpError> {
             Some(sa)
         }
     };
-    let recipient = rd.text()?;
     let amount = rd.nat()?;
     rd.finish()?;
     Ok(WithdrawEthArg { from_subaccount, recipient, amount })

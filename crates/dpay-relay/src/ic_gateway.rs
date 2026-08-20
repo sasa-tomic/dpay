@@ -69,8 +69,13 @@ struct FakeIcState {
     ledgers: HashMap<String, FakeLedgerState>,
     /// canister text → minter of (ledger text) — retrieve/withdraw burn their home ledger.
     minters: HashMap<String, String>,
-    balances: HashMap<(String, [u8; 32]), u128>,
-    allowances: HashMap<((String, [u8; 32]), (String, [u8; 32])), u128>,
+    /// Balances are PER-LEDGER: `((ledger text), (owner text, subaccount)) → e8s`. Real ICRC
+    /// semantics — the same principal holds independent balances on each ledger; a shared
+    /// per-principal pot would cross-contaminate currencies (fauceting ckBTC would inflate
+    /// ckUSDC).
+    balances: HashMap<(String, (String, [u8; 32])), u128>,
+    /// Allowances, likewise scoped to the ledger they were granted on.
+    allowances: HashMap<((String, (String, [u8; 32])), (String, [u8; 32])), u128>,
     requests: HashMap<[u8; 32], RequestState>,
     txns: Vec<FakeTxn>,
     next_block: u64,
@@ -105,6 +110,16 @@ fn account_owner(a: &Account) -> (String, [u8; 32]) {
     (a.owner.to_text(), a.subaccount)
 }
 
+/// Balance-map key for `owner` (default subaccount) on `ledger`.
+fn bal_key(ledger: &str, owner: &Principal) -> (String, (String, [u8; 32])) {
+    (ledger.to_string(), owner_key(owner))
+}
+
+/// Balance-map key for an explicit `Account` on `ledger`.
+fn acct_key(ledger: &str, a: &Account) -> (String, (String, [u8; 32])) {
+    (ledger.to_string(), account_owner(a))
+}
+
 impl FakeIc {
     /// Build the gateway over the relay's catalog: every currency row with a non-empty
     /// `ledger` becomes a fake ledger keyed by that principal text; rows with a `minter`
@@ -132,19 +147,18 @@ impl FakeIc {
     /// Credit a fake ledger at the user principal (faucet / test seeding).
     pub fn credit(&self, ledger_text: &str, owner: &Principal, amount: u128) {
         let mut s = self.state.lock().unwrap();
-        if !s.ledgers.contains_key(ledger_text) {
+        let Some(l) = s.ledgers.get(ledger_text).cloned() else {
             return;
-        }
-        let currency = s.ledgers.get(ledger_text).map(|l| l.currency).unwrap_or(0);
-        let k = owner_key(owner);
-        let to = k.0.clone();
+        };
+        let k = bal_key(ledger_text, owner);
+        let to = k.1 .0.clone();
         *s.balances.entry(k).or_insert(0) += amount;
         s.txns.push(FakeTxn {
             kind: "mint",
             from: String::new(),
             to,
             amount,
-            currency,
+            currency: l.currency,
             memo_hex: String::new(),
             timestamp: now_ns() / 1_000_000_000,
         });
@@ -157,8 +171,8 @@ impl FakeIc {
         let Some(ledger_text) = s.ledgers.iter().find(|(_, l)| l.currency == currency).map(|(t, _)| t.clone()) else {
             return 0;
         };
-        let k = owner_key(owner);
-        let to = k.0.clone();
+        let k = bal_key(&ledger_text, owner);
+        let to = k.1 .0.clone();
         let bal = *s.balances.get(&k).unwrap_or(&0) + amount;
         *s.balances.entry(k).or_insert(0) += amount;
         s.txns.push(FakeTxn {
@@ -170,7 +184,6 @@ impl FakeIc {
             memo_hex: String::new(),
             timestamp: now_ns() / 1_000_000_000,
         });
-        let _ = ledger_text;
         bal
     }
 
@@ -179,9 +192,9 @@ impl FakeIc {
     /// gateway twin. Returns 0 for unregistered currencies/fresh accounts (ICRC semantics).
     pub fn balance_for(&self, currency: Currency, owner: &Principal) -> u64 {
         let s = self.state.lock().unwrap();
-        for st in s.ledgers.values() {
+        for (text, st) in &s.ledgers {
             if st.currency == currency {
-                return s.balances.get(&owner_key(owner)).copied().unwrap_or(0).min(u64::MAX as u128) as u64;
+                return s.balances.get(&bal_key(text, owner)).copied().unwrap_or(0).min(u64::MAX as u128) as u64;
             }
         }
         0
@@ -199,7 +212,7 @@ impl FakeIc {
             if l.currency != d.currency {
                 continue;
             }
-            let bal = *s.balances.get(&account_owner(account)).unwrap_or(&0);
+            let bal = *s.balances.get(&acct_key(&d.ledger, account)).unwrap_or(&0);
             map.insert(d.currency.to_string(), crate::ledger::U64String(bal.min(u64::MAX as u128) as u64));
         }
         map
@@ -211,7 +224,7 @@ impl FakeIc {
         if !s.ledgers.contains_key(ledger_text) {
             return 0;
         }
-        *s.balances.get(&account_owner(account)).unwrap_or(&0)
+        *s.balances.get(&acct_key(ledger_text, account)).unwrap_or(&0)
     }
 
     /// Newest-first transaction rows for an owner (relay `/transactions` test path).
@@ -246,6 +259,8 @@ impl FakeIc {
         let canister = canister_p.to_text();
         let arg: &[u8] = arg;
         let sender = account_owner(&Account { owner: env.sender.clone(), subaccount: [0u8; 32] });
+        // All balance touches below are scoped to THIS ledger canister (per-ledger balances).
+        let from_key = (canister.clone(), sender.clone());
         let mut s = self.state.lock().unwrap();
         let block = s.next_block;
         s.next_block += 1;
@@ -279,21 +294,23 @@ impl FakeIc {
                 let Ok(arg) = decode_transfer_arg(&arg) else {
                     return RequestState::Rejected { code: 5, message: "malformed icrc1_transfer arg".into() };
                 };
-                let to = account_owner(&arg.to);
+                let to = (canister.clone(), account_owner(&arg.to));
                 if let Some(expected) = cfg.fee {
                     if arg.fee != Some(expected) {
                         return RequestState::Replied(encode_transfer_bad_fee(expected));
                     }
                 }
-                let bal = *s.balances.get(&sender).unwrap_or(&0);
+                let bal = *s.balances.get(&from_key).unwrap_or(&0);
                 let spend = arg.amount + arg.fee.unwrap_or(0);
                 if bal < spend {
                     return RequestState::Replied(encode_transfer_insufficient_funds(bal));
                 }
-                *s.balances.entry(sender.clone()).or_insert(0) -= spend;
+                *s.balances.entry(from_key.clone()).or_insert(0) -= spend;
                 *s.balances.entry(to.clone()).or_insert(0) += arg.amount;
                 let memo_hex = arg.memo.clone().map(|m| m.iter().map(|b| format!("{b:02x}")).collect::<String>()).unwrap_or_default();
-                txn!("transfer", sender.0, to.0, arg.amount, memo_hex);
+                // `to` is the per-ledger balance key (canister, account); the txn row wants the
+                // PAYEE PRINCIPAL TEXT (to.1.0), not the canister id (to.0).
+                txn!("transfer", sender.0, to.1 .0, arg.amount, memo_hex);
                 RequestState::Replied(encode_transfer_ok(block))
             }
             "icrc2_approve" => {
@@ -306,8 +323,11 @@ impl FakeIc {
                 let fee = arg.fee.unwrap_or(0);
                 let ApproveArg { from_subaccount, spender, amount, .. } = arg;
                 let from = (
-                    env.sender.to_text(),
-                    from_subaccount.unwrap_or([0u8; 32]),
+                    canister.clone(),
+                    (
+                        env.sender.to_text(),
+                        from_subaccount.unwrap_or([0u8; 32]),
+                    ),
                 );
                 if let Some(expected) = cfg.fee {
                     if arg.fee != Some(expected) {
@@ -329,7 +349,10 @@ impl FakeIc {
                     return RequestState::Rejected { code: 5, message: "malformed retrieve arg".into() };
                 };
                 let RetrieveBtcArg { from_subaccount, amount, .. } = arg;
-                match burn_approved(&mut s, &canister, &env.sender, from_subaccount, u128::from(amount)) {
+                let Some(home) = s.minters.get(&canister).cloned() else {
+                    return RequestState::Rejected { code: 3, message: format!("canister {canister} is not a minter") };
+                };
+                match burn_approved(&mut s, &home, &canister, &env.sender, from_subaccount, u128::from(amount)) {
                     Ok(()) => RequestState::Replied(encode_minter_ok(block)),
                     Err(msg) => RequestState::Rejected { code: 5, message: msg },
                 }
@@ -339,7 +362,10 @@ impl FakeIc {
                     return RequestState::Rejected { code: 5, message: "malformed withdraw_eth arg".into() };
                 };
                 let WithdrawEthArg { from_subaccount, amount, .. } = arg;
-                match burn_approved(&mut s, &canister, &env.sender, from_subaccount, u128::from(amount)) {
+                let Some(home) = s.minters.get(&canister).cloned() else {
+                    return RequestState::Rejected { code: 3, message: format!("canister {canister} is not a minter") };
+                };
+                match burn_approved(&mut s, &home, &canister, &env.sender, from_subaccount, u128::from(amount)) {
                     Ok(()) => RequestState::Replied(encode_minter_ok(block)),
                     Err(msg) => RequestState::Rejected { code: 5, message: msg },
                 }
@@ -355,11 +381,13 @@ impl FakeIc {
                     return RequestState::Rejected { code: 3, message: format!("canister {canister} is not a minter") };
                 }
                 let amount_ledger = arg.ckerc20_ledger_id.to_text();
-                match burn_approved(&mut s, &amount_ledger, &env.sender, arg.from_ckerc20_subaccount, arg.amount) {
+                // Amount leg: the ckERC20 ledger itself, spent by the minter.
+                match burn_approved(&mut s, &amount_ledger, &canister, &env.sender, arg.from_ckerc20_subaccount, arg.amount) {
                     Ok(()) => {}
                     Err(msg) => return RequestState::Rejected { code: 5, message: msg },
                 }
-                match burn_approved(&mut s, &home, &env.sender, arg.from_cketh_subaccount, GAS_FEE_WEI) {
+                // Gas leg: the minter's home (ckETH) ledger, spent by the minter.
+                match burn_approved(&mut s, &home, &canister, &env.sender, arg.from_cketh_subaccount, GAS_FEE_WEI) {
                     Ok(()) => {}
                     Err(msg) => return RequestState::Rejected { code: 5, message: msg },
                 }
@@ -381,7 +409,7 @@ impl FakeIc {
                 let Ok(a) = decode_account_arg(&arg) else {
                     return Err((5, "malformed icrc1_balance_of arg".into()));
                 };
-                Ok(encode_nat_reply(*s.balances.get(&account_owner(&a)).unwrap_or(&0)))
+                Ok(encode_nat_reply(*s.balances.get(&acct_key(&canister, &a)).unwrap_or(&0)))
             }
             "icrc1_decimals" => {
                 let d = s.ledgers.get(&canister).map(|l| l.decimals).unwrap_or(2);
@@ -421,18 +449,21 @@ impl FakeIc {
 /// Fixed gas price the gateway quotes + charges on the dual-ledger path.
 const GAS_FEE_WEI: u128 = 78_000_000_000_000;
 
+/// Burn `amount` of the user's pre-approved funds on `ledger_text`, spent by `spender_text`
+/// (the minter the icrc2_approve named). The allowance+balance keys are PER-LEDGER; the spender
+/// is the minter principal — for the dual-ledger withdraw_erc20 amount leg these are DIFFERENT
+/// canisters (ckERC20 ledger ≠ minter home ledger), so they cannot be conflated.
+#[allow(clippy::too_many_arguments)]
 fn burn_approved(
     s: &mut FakeIcState,
-    minter_text: &str,
+    ledger_text: &str,
+    spender_text: &str,
     sender: &Principal,
     from_subaccount: Option<[u8; 32]>,
     amount: u128,
 ) -> Result<(), String> {
-    let Some(home) = s.minters.get(minter_text).cloned() else {
-        return Err(format!("canister {minter_text} is not a minter"));
-    };
-    let from = (sender.to_text(), from_subaccount.unwrap_or([0u8; 32]));
-    let spender = (minter_text.to_string(), [0u8; 32]);
+    let from = (ledger_text.to_string(), (sender.to_text(), from_subaccount.unwrap_or([0u8; 32])));
+    let spender = (spender_text.to_string(), [0u8; 32]);
     let allowed = *s.allowances.get(&(from.clone(), spender.clone())).unwrap_or(&0);
     if allowed < amount {
         return Err(format!("insufficient allowance: {allowed} < {amount}"));
@@ -445,10 +476,10 @@ fn burn_approved(
     *s.balances.entry(from.clone()).or_insert(0) -= amount;
     s.txns.push(FakeTxn {
         kind: "burn",
-        from: from.0,
+        from: from.1 .0,
         to: String::new(),
         amount,
-        currency: s.ledgers.get(&home).map(|l| l.currency).unwrap_or(0),
+        currency: s.ledgers.get(ledger_text).map(|l| l.currency).unwrap_or(0),
         memo_hex: String::new(),
         timestamp: now_ns() / 1_000_000_000,
     });
