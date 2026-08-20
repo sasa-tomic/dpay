@@ -82,6 +82,14 @@ struct MinterInfo {
     retrieve_btc_min_amount: u64,
     kyt_fee: u64,
     deposit_btc_min_amount: Option<u64>,
+    /// The ckETH-family CkDeposit helper-contract address (`opt text` on the REAL ckETH minter's
+    /// `MinterInfo`, verified against the live `sv3dd-oaaaa-aaaar-qacoa-cai` candid:service). The
+    /// real ckBTC minter's `MinterInfo` has NO such field, and the facade's BTC-shaped decode
+    /// DROPS unknown fields (candid record subtyping), so adding it here is wire-compatible with
+    /// every existing consumer. `None` by default (the BTC-shaped default); the
+    /// `set_deposit_helper_address` test hook sets it so the relay's live
+    /// runtime-helper-read test (`dpay-relay/tests/live.rs`) has a sentinel to observe.
+    deposit_with_subaccount_helper_contract_address: Option<String>,
 }
 
 /// `RetrieveBtcWithApprovalArgs` — the EXACT argument record the REAL ckBTC minter's
@@ -167,6 +175,13 @@ thread_local! {
     /// returns `CkErc20LedgerError` (partial failure → minter schedules reimbursement). Cleared after
     /// one call. Models the real minter's "gas burned, amount burn failed" terminal state.
     static FORCE_NEXT_ERC20_PARTIAL: RefCell<bool> = RefCell::new(false);
+
+    /// Test-only hook: the `deposit_with_subaccount_helper_contract_address` served by
+    /// `get_minter_info` (None by default). Set via `set_deposit_helper_address` — mirrors the
+    /// real ckETH minter, whose live `get_minter_info` carries the CURRENT CkDeposit helper
+    /// address (it changes on minter/helper upgrades). Lets the relay's live test prove the
+    /// runtime read with a sentinel that exists nowhere in the relay's compiled constants.
+    static DEPOSIT_HELPER_ADDRESS: RefCell<Option<String>> = RefCell::new(None);
 }
 
 #[init]
@@ -285,7 +300,18 @@ fn get_minter_info() -> MinterInfo {
         retrieve_btc_min_amount: 50_000,
         kyt_fee: 0,
         deposit_btc_min_amount: Some(0),
+        deposit_with_subaccount_helper_contract_address: DEPOSIT_HELPER_ADDRESS
+            .with(|h| h.borrow().clone()),
     }
+}
+
+/// Test-only hook: set the `deposit_with_subaccount_helper_contract_address` served by
+/// `get_minter_info`. The relay's agent-path ckERC20 onramp reads this field at RUNTIME from the
+/// currency's registered minter; this hook gives the PocketIC live test a sentinel value that
+/// provably arrives from the wire (it matches no compiled-in constant).
+#[update]
+fn set_deposit_helper_address(address: String) {
+    DEPOSIT_HELPER_ADDRESS.with(|h| *h.borrow_mut() = Some(address));
 }
 
 /// The minimal withdrawal amount this mock will honor, in sats. Mirrors the LIVE ckBTC minter's

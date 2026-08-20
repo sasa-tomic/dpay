@@ -9,12 +9,17 @@
 //!   - each ledger's own ICRC-1/ICRC-3 endpoints (free queries, no facade hop, no consensus):
 //!     `icrc1_balance_of` for balances and `get_transactions` for history, read at the USER's
 //!     principal (the 2026-08-19 IC-rail cutover shape).
-//!   - facade `deposit_info(nat32)` (update) — static deposit metadata for the "Add money" sheet.
+//!   - facade `deposit_info(nat32)` (update, ~60s-TTL cached on the relay — see the method) —
+//!     static deposit metadata for the "Add money" sheet.
+//!   - the ckETH-family MINTER's `get_minter_info` (query) — the runtime source for the ckERC20
+//!     onramp's CkDeposit `helper_address` (falls back to the verified constants, logged).
 //!
 //! History does NOT come from a facade-maintained index: `transactions_on_ledger` walks the ledger's
 //! own transaction log (icrc3-style `get_transactions`) backwards from `log_length` — see the
 //! walk's doc below for the budget + archived-blocks semantics.
 
+use std::collections::HashMap;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -48,6 +53,15 @@ const CANISTER_CALL_TIMEOUT_SECS: u64 = 10;
 /// the slowest healthy minter round-trip.
 const MINTER_CALL_TIMEOUT_SECS: u64 = 30;
 
+/// TTL of the [`AgentLedger::deposit_info`] cache. The facade's `deposit_info` MUST stay a
+/// consensus UPDATE (it `await`s two inter-canister minter calls — `get_minter_info` +
+/// `get_deposit_fee` — which is impossible in query context, and the replica rejects a query call
+/// to an update endpoint), yet the sheet opens on every "Add money" tap. The cache bounds that
+/// cost to ONE update call per currency per TTL while keeping the metadata fresh enough (it is
+/// effectively static: min-confirmations/fee/min-amount change on minter upgrades, not per call).
+/// 60s ≪ the minter's 7–15s round-trip cadence the app polls at, and ≫ a sheet-open burst.
+const DEPOSIT_INFO_CACHE_TTL_SECS: u64 = 60;
+
 /// Timeout for the `agent.status()` liveness probe behind [`Ledger::healthy`]. The wallet polls
 /// `/api/v1/health`, so a hung replica would otherwise wedge the connectivity dot for ic-agent's
 /// full ~5min expiry before flipping it red. 5s comfortably covers a healthy replica's status
@@ -71,6 +85,26 @@ struct DepositInfoMirror {
     min_confirmations: u32,
     deposit_fee: u64,
     deposit_min_amount: Option<u64>,
+}
+
+/// Minimal candid mirror of the ckETH-family minter's `get_minter_info` reply. The REAL minter's
+/// `MinterInfo` (verified against the live `sv3dd-oaaaa-aaaar-qacoa-cai` `candid:service`) carries
+/// ~a dozen fields, ALL optional; candid record subtyping ignores wire fields absent from the
+/// mirror, and the one load-bearing label here is
+/// `deposit_with_subaccount_helper_contract_address` — the CkDeposit helper the user's
+/// approve+depositErc20 / depositEth txs target. `None` on the wire = the minter has no
+/// subaccount helper configured (the pre-2024 shape) → the caller falls back to the verified
+/// constants.
+#[derive(CandidType, Deserialize, Debug)]
+struct CkEthMinterInfoMirror {
+    deposit_with_subaccount_helper_contract_address: Option<String>,
+}
+
+/// One [`AgentLedger::deposit_info`] cache entry: the reply plus the instant it was fetched.
+/// `std::time::Instant` is a monotonic clock, so TTL checks are immune to wall-clock jumps.
+struct DepositInfoCacheEntry {
+    fetched_at: std::time::Instant,
+    info: DepositInfo,
 }
 
 
@@ -132,6 +166,10 @@ struct CurrencyDescriptorMirror {
 pub struct AgentLedger {
     agent: Agent,
     canister_id: Principal,
+    /// TTL cache for the facade `deposit_info` UPDATE (see [`DEPOSIT_INFO_CACHE_TTL_SECS`]) —
+    /// keyed by currency id. `std::sync::Mutex` (the relay's established interior-mutability
+    /// pattern): the lock is only held for a HashMap get/insert, never across an await.
+    deposit_info_cache: Mutex<HashMap<Currency, DepositInfoCacheEntry>>,
 }
 
 impl AgentLedger {
@@ -180,7 +218,11 @@ impl AgentLedger {
             })?
             .map_err(|e| LedgerError::Transient(format!("fetch_root_key: {e}")))?;
         }
-        Ok(AgentLedger { agent, canister_id })
+        Ok(AgentLedger {
+            agent,
+            canister_id,
+            deposit_info_cache: Mutex::new(HashMap::new()),
+        })
     }
 
 }
@@ -357,8 +399,21 @@ impl Ledger for AgentLedger {
 
     async fn deposit_info(&self, currency: Currency) -> Result<DepositInfo, LedgerError> {
         // facade `deposit_info(nat32) -> Result<DepositInfo, text>` (update) → proxies the minter's
-        // `get_minter_info` + `get_deposit_fee`. All mirror fields are primitives, so this is a
-        // straight copy. Any `Err(String)` → `Transient` (§0).
+        // `get_minter_info` + `get_deposit_fee`. Any `Err(String)` → `Transient` (§0).
+        //
+        // The facade method MUST be an update (it `await`s two inter-canister minter calls —
+        // `Call::bounded_wait`, impossible in query context), so a query call here is a wire
+        // contract the replica rejects. Instead of paying the 7–15s consensus round trip on every
+        // "Add money" sheet open, cache each currency's reply for [`DEPOSIT_INFO_CACHE_TTL_SECS`]
+        // — the payload is effectively static (min-confirmations/fee/min-amount change on minter
+        // UPGRADES, not per call), so 60s staleness is safe while cutting steady-state cost to
+        // one update per TTL. A failed fetch does NOT poison the cache: the entry is only
+        // inserted on success, so the next caller retries immediately.
+        if let Some(entry) = self.deposit_info_cache.lock().unwrap_or_else(|p| p.into_inner()).get(&currency) {
+            if entry.fetched_at.elapsed() < Duration::from_secs(DEPOSIT_INFO_CACHE_TTL_SECS) {
+                return Ok(entry.info.clone());
+            }
+        }
         let arg = encode_args((currency,))
             .map_err(|e| LedgerError::Transient(format!("encode deposit_info arg: {e}")))?;
         let reply = tokio::time::timeout(
@@ -378,11 +433,16 @@ impl Ledger for AgentLedger {
         let result: Result<DepositInfoMirror, String> = decode_one(&reply)
             .map_err(|e| LedgerError::Transient(format!("decode deposit_info reply: {e}")))?;
         let m = result.map_err(LedgerError::Transient)?;
-        Ok(DepositInfo {
+        let info = DepositInfo {
             min_confirmations: m.min_confirmations,
             deposit_fee: U64String(m.deposit_fee),
             deposit_min_amount: m.deposit_min_amount.map(U64String),
-        })
+        };
+        self.deposit_info_cache.lock().unwrap_or_else(|p| p.into_inner()).insert(
+            currency,
+            DepositInfoCacheEntry { fetched_at: std::time::Instant::now(), info: info.clone() },
+        );
+        Ok(info)
     }
 
     async fn currencies(&self) -> Result<Vec<CurrencyDescriptor>, LedgerError> {
@@ -445,16 +505,65 @@ impl Ledger for AgentLedger {
     async fn ckerc20_onramp_params(&self, currency: Currency) -> Result<CkErc20OnrampParams, LedgerError> {
         // MC8 U2: resolve the onramp from the CATALOG descriptor (the live `currencies()` query),
         // not a hardcoded `currency == 2` guard. The descriptor's per-token `token_contract` is the
-        // authoritative ERC-20 address; the `helper_address` is the verified mainnet ckETH deposit
-        // helper (minter-scoped — ONE constant for ALL ckERC20 tokens). The deposit `principal` arg
-        // is the USER's own IC principal (derived in-app), so no principal is served here. The
-        // pure resolver (`ckerc20_onramp_from_descriptor`) is shared with the FakeLedger so the
-        // fail-closed gate (no token_contract ⇒ 503, never a USDC fallback) is single-sourced.
+        // authoritative ERC-20 address; the deposit `principal` arg is the USER's own IC principal
+        // (derived in-app), so no principal is served here.
+        //
+        // The `helper_address` is read at RUNTIME from the descriptor's minter
+        // (`minter_helper_address` below — a direct `get_minter_info` query), because the helper
+        // is NETWORK-scoped deploy state that a ckETH-minter upgrade can change; the verified
+        // constants (via `ckerc20_onramp_from_descriptor`) are only the FALLBACK, served when the
+        // runtime read fails or the minter doesn't configure the field. Fail-closed gate
+        // (family, chain_id, token discrimination) stays single-sourced in the pure resolver.
         let catalog = self.currencies().await?;
         let desc = catalog.iter().find(|d| d.currency == currency);
-        ckerc20_onramp_from_descriptor(desc)
+        let mut params = ckerc20_onramp_from_descriptor(desc)?;
+        if let Some(minter_text) = desc.and_then(|d| d.minter.as_deref()) {
+            match self.minter_helper_address(minter_text).await {
+                Ok(Some(helper)) => params.helper_address = helper,
+                Ok(None) => {} // field unset on the minter — keep the verified-constant fallback
+                Err(e) => eprintln!(
+                    "dpay: ckerc20 onramp helper read from minter {minter_text} failed ({e}); \
+                     falling back to the verified compile-time constant"
+                ),
+            }
+        }
+        Ok(params)
     }
 
+}
+
+impl AgentLedger {
+    /// Runtime CkDeposit-helper read: `get_minter_info()` on the ckETH-family minter, returning
+    /// `Ok(Some(address))` when the minter configures
+    /// `deposit_with_subaccount_helper_contract_address`. The live ckETH minter exposes it as a
+    /// QUERY (verified against the `sv3dd-oaaaa-aaaar-qacoa-cai` candid:service), so this is a
+    /// free replica read — no consensus, no `MINTER_CALL_TIMEOUT_SECS`. Decode uses a minimal
+    /// candid mirror (record subtyping drops the minter's other ~a dozen optional fields). Any
+    /// transport/decode failure is the CALLER's fallback signal (logged there), never a user-facing
+    /// 503: a momentarily unreachable minter must not break the onramp sheet when the verified
+    /// constants are still correct.
+    async fn minter_helper_address(&self, minter_text: &str) -> Result<Option<String>, LedgerError> {
+        let minter = Principal::from_text(minter_text).map_err(|e| {
+            LedgerError::Transient(format!("parse minter principal '{minter_text}': {e}"))
+        })?;
+        let reply = tokio::time::timeout(
+            Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
+            self.agent
+                .query(&minter, "get_minter_info")
+                .with_arg(encode_args(()).map_err(|e| LedgerError::Transient(format!("encode get_minter_info: {e}")))?)
+                .call(),
+        )
+        .await
+        .map_err(|_| {
+            LedgerError::Transient(format!(
+                "get_minter_info timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
+            ))
+        })?
+        .map_err(|e| LedgerError::Transient(format!("get_minter_info query: {e}")))?;
+        let info: CkEthMinterInfoMirror = decode_one(&reply)
+            .map_err(|e| LedgerError::Transient(format!("decode get_minter_info reply: {e}")))?;
+        Ok(info.deposit_with_subaccount_helper_contract_address)
+    }
 }
 
 // ---- icrc3 history helpers --------------------------------------------------------------------

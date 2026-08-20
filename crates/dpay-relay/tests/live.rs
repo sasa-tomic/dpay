@@ -26,12 +26,19 @@
 //!   4. `GET /api/v1/transactions/{hex}?currency=N` → 200 with a well-formed rows array (the
 //!      facade-history era is over; see `live_icrc3_history_walks_the_real_ledger_log` below for
 //!      the CONTENT assertions — this one only proves the shape for an account with no rows).
+//!   5. `GET /api/v1/onramp/ckerc20?currency=N` → the CkDeposit `helper_address` read at RUNTIME
+//!      from the currency's registered minter (`get_minter_info`), with the verified compile-time
+//!      constant served only on logged fallback (see
+//!      `live_ckerc20_onramp_helper_read_at_runtime_with_constant_fallback` below).
 //!
 //! Prereqs (the justfile's `test-live` recipe wires these):
 //!   - build the wasm first:
 //!       CARGO_TARGET_DIR=.dev/target-relay cargo build -p dpay-canister \
 //!           --target wasm32-unknown-unknown --release
-//!   - `DPAY_CANISTER_WASM` → that wasm; `POCKET_IC_BIN` → the vendored pocket-ic server;
+//!       CARGO_TARGET_DIR=.dev/target-relay cargo build -p dpay-mock-minter \
+//!           --target wasm32-unknown-unknown --release
+//!   - `DPAY_CANISTER_WASM` → that wasm; `DPAY_MOCK_MINTER_WASM` → the mock-minter wasm;
+//!     `POCKET_IC_BIN` → the vendored pocket-ic server;
 //!     `third_party/ic-icrc1-ledger/ic-icrc1-ledger.wasm` present (the real ledger wasm).
 //!
 //! Run: `cargo nextest run -p dpay-relay --features agent`.
@@ -585,4 +592,346 @@ fn live_icrc3_history_walks_the_real_ledger_log() {
             "no ledger rows for this account ⇒ empty array (body={sb})"
         );
     });
+}
+
+// --- WAVE 5: runtime ckERC20-helper read ---------------------------------------------------------
+//
+// The ckERC20/native-ETH onramp's CkDeposit `helper_address` is deploy state the ckETH-minter
+// operator can MOVE (a helper/minter upgrade deploys a new contract). Serving the compile-time
+// constants unconditionally would silently strand deposits after such an upgrade; the agent path
+// therefore reads the CURRENT address from the currency's registered minter at request time
+// (`get_minter_info.deposit_with_subaccount_helper_contract_address`, a query) and falls back to
+// the verified constants only when that read fails or the minter leaves the field unset (logged).
+// This test proves BOTH halves live through the HTTP route:
+//   - a minter configured with a sentinel address that exists nowhere in the relay's compiled
+//     constants must be surfaced VERBATIM (the runtime read wins, and a second call after the
+//     minter changes its address must reflect the change — not a cache);
+//   - a same-family currency whose minter leaves the field unset must serve the chain_id-scoped
+//     verified constant (the fallback path).
+//
+// Fixture: TWO instances of the test-only mock-minter canister (`dpay-mock-minter`, never
+// shipped to mainnet). The mock's `MinterInfo` extends the real ckBTC shape with the ckETH
+// minter's `deposit_with_subaccount_helper_contract_address: opt text` field (candid record
+// subtyping keeps the facade's BTC-shaped decode working) plus a `set_deposit_helper_address`
+// test hook. Minter A gets the sentinel set (and later changed); minter B stays at the None
+// default.
+
+/// The mock-minter canister's init payload (mirrors `dpay-mock-minter`'s `InitArg`).
+#[derive(CandidType, serde::Serialize)]
+struct MockMinterInit {
+    amount_ledger: Principal,
+    gas_ledger: Option<Principal>,
+}
+
+/// Env-var-driven wasm path for the mock minter (mirrors `DPAY_CANISTER_WASM`'s pattern).
+fn mock_minter_wasm() -> Vec<u8> {
+    let path = std::env::var("DPAY_MOCK_MINTER_WASM").unwrap_or_else(|_| {
+        ".dev/target-relay/wasm32-unknown-unknown/release/dpay_mock_minter.wasm".into()
+    });
+    std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read mock-minter wasm at {path}: {e}"))
+}
+
+/// Sentinel helper addresses that exist NOWHERE in the relay's compiled constants — if either
+/// shows up in a response, it can only have arrived via the runtime minter read over the wire.
+const RUNTIME_HELPER_SENTINEL_A: &str = "0x5E71A00000000000000000000000000000000A71A";
+const RUNTIME_HELPER_SENTINEL_B: &str = "0x5E71B00000000000000000000000000000000B71B";
+
+/// The verified mainnet constant, duplicated here ONLY to assert the fallback outcome — the
+/// assertion documents WHAT the fallback serves (kept in sync with
+/// `ledger::ckerc20::CKERC20_HELPER_ADDRESS_MAINNET`, `pub(crate)` so not importable).
+const EXPECTED_FALLBACK_HELPER_MAINNET: &str = "0x18901044688D3756C35Ed2b36D93e6a5B8e00E68";
+
+/// Currency ids used only by this test: `register_ledger`/`register_minter`/
+/// `register_currency_meta` are controller-gated with arbitrary ids allowed, and no value path
+/// touches these rows (the onramp route only reads catalog metadata + the minter query).
+const ONRAMP_SENTINEL_CURRENCY: u32 = 4; // CkEthErc20, mainnet chain_id, minter A (sentinel)
+const ONRAMP_FALLBACK_CURRENCY: u32 = 2; // CkEthErc20, mainnet chain_id, minter B (field unset)
+
+/// The ckETH-minter fixture proved live: the onramp's `helper_address` is the address the
+/// currency's registered MINTER serves (runtime `get_minter_info` read — minter B proves the
+/// logged-constant fallback), and a minter-side change is reflected on the very next request
+/// (no caching). Proves the whole WAVE-5 agent-path contract through the HTTP route.
+#[test]
+fn live_ckerc20_onramp_helper_read_at_runtime_with_constant_fallback() {
+    std::env::set_var("POCKET_IC_MUTE_SERVER", "1");
+    let mut pic = PocketIc::new();
+    let gateway_url = pic.make_live(None).to_string();
+    let pic = LivePocketIc(pic);
+
+    // Controller + facade + a real ICRC ledger for the two descriptors. The ledger principal is
+    // catalog metadata here — no balances move — but registering the real wasm keeps the rows
+    // honest and reuses `stand_up`'s proven init shape.
+    let admin = Principal::management_canister();
+    let dpay = pic.0.create_canister();
+    pic.0.add_cycles(dpay, 2_000_000_000_000);
+    let ledger = pic.0.create_canister();
+    pic.0.add_cycles(ledger, 10_000_000_000_000);
+    let ledger_init = LedgerArg::Init(LedgerInitArgs {
+        minting_account: Account { owner: dpay, subaccount: None },
+        fee_collector_account: None,
+        transfer_fee: Nat::from(0u64),
+        decimals: Some(6),
+        max_memo_length: None,
+        token_symbol: "CKE".into(),
+        token_name: "ckE test".into(),
+        metadata: vec![],
+        initial_balances: vec![],
+        feature_flags: Some(FeatureFlags { icrc2: false, icrc152: false }),
+        archive_options: ArchiveOptions {
+            num_blocks_to_archive: 10_000,
+            max_transactions_per_response: None,
+            trigger_threshold: 10_000_000,
+            max_message_size_bytes: None,
+            cycles_for_archive_creation: None,
+            node_max_memory_size_bytes: None,
+            controller_id: dpay,
+            more_controller_ids: None,
+        },
+        index_principal: None,
+    });
+    pic.0.install_canister(ledger, ledger_wasm(), encode_one(&ledger_init).unwrap(), None);
+
+    let dpay_init = DpayInitArg {
+        ledgers: vec![
+            LedgerConfig { currency: ONRAMP_SENTINEL_CURRENCY, principal: ledger, mintable: false },
+            LedgerConfig { currency: ONRAMP_FALLBACK_CURRENCY, principal: ledger, mintable: false },
+        ],
+        per_tx_cap: CAP,
+        controller: Some(admin),
+    };
+    pic.0.install_canister(dpay, facade_wasm(), encode_one(&dpay_init).unwrap(), None);
+
+    // Minter A (sentinel set post-install, the way an upgraded minter carries its own
+    // configured helper) + minter B (field never set → `None` on the wire → fallback).
+    let install_minter = |pic: &LivePocketIc| -> Principal {
+        let m = pic.0.create_canister();
+        pic.0.add_cycles(m, 2_000_000_000_000);
+        pic.0.install_canister(
+            m,
+            mock_minter_wasm(),
+            encode_one(&MockMinterInit { amount_ledger: ledger, gas_ledger: None }).unwrap(),
+            None,
+        );
+        m
+    };
+    let minter_a = install_minter(&pic);
+    let minter_b = install_minter(&pic);
+    pic.0
+        .update_call(
+            minter_a,
+            Principal::anonymous(),
+            "set_deposit_helper_address",
+            encode_one(RUNTIME_HELPER_SENTINEL_A).unwrap(),
+        )
+        .expect("set_deposit_helper_address update_call rejected");
+
+    // Wire the catalog: ledger + minter + CkEthErc20 metadata per currency. Both carry mainnet
+    // chain_id so the ONE differentiator is minter state (sentinel vs unset), not chain scoping
+    // (the chain-id gate is covered exhaustively by the unit tests on the pure resolver).
+    for (currency, minter) in [
+        (ONRAMP_SENTINEL_CURRENCY, minter_a),
+        (ONRAMP_FALLBACK_CURRENCY, minter_b),
+    ] {
+        let reg = |method: &str, args: Vec<u8>| {
+            let reply = pic.0.update_call(dpay, admin, method, args).unwrap_or_else(|e| {
+                panic!("{method} update_call rejected for currency {currency}: {e:?}")
+            });
+            decode_one::<Result<(), String>>(&reply)
+                .unwrap()
+                .unwrap_or_else(|e| panic!("{method} must succeed for the controller: {e}"));
+        };
+        reg("register_minter", encode_args((currency, minter)).unwrap());
+        reg(
+            "register_currency_meta",
+            encode_args((
+                currency,
+                None::<String>,                     // symbol
+                None::<u8>,                         // decimals
+                Some(TestMinterFamily::CkEthErc20), // minter_family
+                None::<String>,                     // wrapper_name
+                None::<String>,                     // backing_symbol
+                None::<String>,                     // network
+                None::<u8>,                         // display_decimals
+                None::<u64>,                        // fee
+                None::<u64>,                        // cap
+                Some(1u32),                         // chain_id (mainnet)
+                Some("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".to_string()), // token (USDC)
+                TestRampCapability::Direct,         // onramp
+                TestRampCapability::Direct,         // offramp
+                None::<Principal>,                  // gas_ledger
+            ))
+            .unwrap(),
+        );
+    }
+
+    let canister_id = dpay;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime");
+
+    let state = rt.block_on(async move {
+        let agent = AgentLedger::connect(&gateway_url, canister_id)
+            .await
+            .expect("AgentLedger must connect to the live gateway");
+        AppState::new(Arc::new(agent))
+    });
+
+    // ---- (1) runtime read wins: minter A's sentinel (≠ every compiled constant) ----
+    let (s, b) = rt
+        .block_on(call(
+            &state,
+            get(&format!("/api/v1/onramp/ckerc20?currency={ONRAMP_SENTINEL_CURRENCY}")),
+        ));
+    assert_eq!(s, StatusCode::OK, "onramp sentinel body={b}");
+    assert_eq!(
+        b["helper_address"].as_str(),
+        Some(RUNTIME_HELPER_SENTINEL_A),
+        "helper MUST be the minter's CURRENT address (runtime get_minter_info read), \
+         not any compiled constant (body={b})"
+    );
+    assert_eq!(
+        b["erc20_address"].as_str(),
+        Some("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
+        "ERC-20 address stays the descriptor's per-token contract (body={b})"
+    );
+    assert_eq!(
+        b["kind"].as_str(),
+        Some("erc20"),
+        "token_contract present ⇒ erc20 kind (body={b})"
+    );
+
+    // ---- (2) minter-side change reflected on the NEXT request (no caching) ----
+    // (fixture mutation happens on the PocketIC client thread, BETWEEN tokio block_ons —
+    // pocket-ic's update_call internally block_ons and panics if nested inside our runtime)
+    pic.0
+        .update_call(
+            minter_a,
+            Principal::anonymous(),
+            "set_deposit_helper_address",
+            encode_one(RUNTIME_HELPER_SENTINEL_B).unwrap(),
+        )
+        .expect("set_deposit_helper_address (B) update_call rejected");
+    let (s, b) = rt
+        .block_on(call(
+            &state,
+            get(&format!("/api/v1/onramp/ckerc20?currency={ONRAMP_SENTINEL_CURRENCY}")),
+        ));
+    assert_eq!(s, StatusCode::OK, "onramp sentinel-B body={b}");
+    assert_eq!(
+        b["helper_address"].as_str(),
+        Some(RUNTIME_HELPER_SENTINEL_B),
+        "a helper address the minter changed BETWEEN requests must be surfaced on the very \
+         next request — the runtime read must not be cached (body={b})"
+    );
+
+    // ---- (3) fallback: minter B leaves the field unset ⇒ verified mainnet constant ----
+    let (s, b) = rt
+        .block_on(call(
+            &state,
+            get(&format!("/api/v1/onramp/ckerc20?currency={ONRAMP_FALLBACK_CURRENCY}")),
+        ));
+    assert_eq!(s, StatusCode::OK, "onramp fallback body={b}");
+    assert_eq!(
+        b["helper_address"].as_str(),
+        Some(EXPECTED_FALLBACK_HELPER_MAINNET),
+        "minter with the field unset ⇒ logged fallback to the verified constant (body={b})"
+    );
+}
+
+/// Currency id for the deposit_info cache test — registered with a minter but NO family meta,
+/// which the facade's family resolver defaults to CkBtcUtxo (legacy compat), the ONLY family
+/// `deposit_info` serves.
+const DEPOSIT_CACHE_CURRENCY: u32 = 5;
+
+/// WAVE 5 item 2: `/api/v1/deposit/info` MUST stay a consensus UPDATE (the facade `await`s two
+/// inter-canister minter calls), so the relay serves it from a ~60s TTL cache instead of paying
+/// the round trip on every sheet open. Proves BOTH observable cache paths live through the HTTP
+/// route: (1) cache MISS — the first call drives the real facade update against the mock minter
+/// and returns its BTC-shaped info; (2) cache HIT — after the minter is UNINSTALLED (any fresh
+/// facade call would now fail → 503), a second call within the TTL still answers 200 with the
+/// byte-identical body, which is only possible if the relay served the cached entry without
+/// touching the canister. (TTL expiry is the same `elapsed() < TTL` comparison as the miss path
+/// with no entry; exercising it live would need a 60s sleep.)
+#[test]
+fn live_deposit_info_is_ttl_cached_not_recalled_per_request() {
+    std::env::set_var("POCKET_IC_MUTE_SERVER", "1");
+    let mut pic = PocketIc::new();
+    let gateway_url = pic.make_live(None).to_string();
+    let pic = LivePocketIc(pic);
+
+    let admin = Principal::management_canister();
+    let dpay = pic.0.create_canister();
+    pic.0.add_cycles(dpay, 2_000_000_000_000);
+    // Catalog ledger row only — `deposit_info` never touches the ledger (it calls the minter),
+    // so an empty canister id suffices; installing the full ICRC wasm would prove nothing here.
+    let ledger = pic.0.create_canister();
+    pic.0.add_cycles(ledger, 1_000_000_000_000);
+
+    let dpay_init = DpayInitArg {
+        ledgers: vec![LedgerConfig {
+            currency: DEPOSIT_CACHE_CURRENCY,
+            principal: ledger,
+            mintable: false,
+        }],
+        per_tx_cap: CAP,
+        controller: Some(admin),
+    };
+    pic.0.install_canister(dpay, facade_wasm(), encode_one(&dpay_init).unwrap(), None);
+
+    // The mock ckBTC-shaped minter — its `get_minter_info`/`get_deposit_fee` are what the facade
+    // update proxies. (This also proves the mock's WAVE-5 MinterInfo extension — the added
+    // `deposit_with_subaccount_helper_contract_address` field — stays wire-compatible with the
+    // facade's BTC-shaped decode via candid record subtyping.)
+    let minter = pic.0.create_canister();
+    pic.0.add_cycles(minter, 2_000_000_000_000);
+    pic.0.install_canister(
+        minter,
+        mock_minter_wasm(),
+        encode_one(&MockMinterInit { amount_ledger: ledger, gas_ledger: None }).unwrap(),
+        None,
+    );
+    let reply = pic
+        .0
+        .update_call(dpay, admin, "register_minter", encode_args((DEPOSIT_CACHE_CURRENCY, minter)).unwrap())
+        .expect("register_minter update_call rejected");
+    decode_one::<Result<(), String>>(&reply)
+        .unwrap()
+        .unwrap_or_else(|e| panic!("register_minter must succeed for the controller: {e}"));
+
+    let canister_id = dpay;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime");
+    let state = rt.block_on(async {
+        let agent = AgentLedger::connect(&gateway_url, canister_id)
+            .await
+            .expect("AgentLedger must connect to the live gateway");
+        AppState::new(Arc::new(agent))
+    });
+
+    // ---- (1) cache MISS: real facade update through the minter → the mock's BTC-shaped info ----
+    let (s, b) = rt.block_on(call(
+        &state,
+        get(&format!("/api/v1/deposit/info?currency={DEPOSIT_CACHE_CURRENCY}")),
+    ));
+    assert_eq!(s, StatusCode::OK, "first deposit_info call body={b}");
+    assert_eq!(b["min_confirmations"], 1, "mock minter min_confirmations=1 (body={b})");
+    assert_eq!(b["deposit_fee"], "0", "mock get_deposit_fee=0, U64String-rendered (body={b})");
+    assert_eq!(b["deposit_min_amount"], "0", "mock deposit_btc_min_amount=Some(0) (body={b})");
+
+    // ---- (2) cache HIT: minter UNINSTALLED — only the relay's TTL cache can still answer ----
+    pic.0.uninstall_canister(minter, None).expect("uninstall_canister rejected");
+    let (s2, b2) = rt.block_on(call(
+        &state,
+        get(&format!("/api/v1/deposit/info?currency={DEPOSIT_CACHE_CURRENCY}")),
+    ));
+    assert_eq!(
+        s2,
+        StatusCode::OK,
+        "second call within the TTL must be served from the relay cache — the minter is GONE, \
+         a fresh facade update would fail 503 (body={b2})"
+    );
+    assert_eq!(b2, b, "cached body must be byte-identical to the fresh one");
 }

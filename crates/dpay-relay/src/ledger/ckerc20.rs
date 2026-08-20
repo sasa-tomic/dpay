@@ -1,6 +1,8 @@
 //! ckERC-20 / ckETH / ckBTC / ckUSDC constants and the pure onramp resolver
 //! (`ckerc20_onramp_from_descriptor`). Single-sourced verified values shared by the
-//! [`FakeLedger`](super::fake::FakeLedger) catalog and the `AgentLedger`.
+//! [`FakeLedger`](super::fake::FakeLedger) catalog and the `AgentLedger`. On the agent path the
+//! helper address is resolved at RUNTIME from the minter (see the helper-constant doc below);
+//! the resolver here supplies the verified FALLBACK and the fail-closed family/chain gates.
 
 use serde::Serialize;
 
@@ -9,18 +11,24 @@ use super::types::{CurrencyDescriptor, LedgerError, MinterFamily};
 /// Verified constants for the ckUSDC onramp (ckERC-20 family). ckUSDC has NO per-principal IC deposit
 /// address and NO user-callable mint — the user performs two Ethereum transactions from their own
 /// wallet (approve + depositErc20); the relay only surfaces these so the app can build the calldata
-/// (see OPEN_ISSUES.md O6 + `app/cketh.ts`). In production these are read at runtime from the ckETH
-/// minter's `get_minter_info`; the constants below are the authoritative values
-/// (verified 2026-07-31 — do not re-derive). Single-sourced here so the FakeLedger + AgentLedger
-/// impls can't drift from the verified addresses.
+/// (see OPEN_ISSUES.md O6 + `app/cketh.ts`).
+///
+/// RUNTIME-FIRST with constant FALLBACK (WAVE 5, 2026-08-20): the `AgentLedger`'s
+/// `ckerc20_onramp_params` reads the CURRENT helper from the currency's registered minter
+/// (`get_minter_info.deposit_with_subaccount_helper_contract_address`, a free query) and falls
+/// back to these constants ONLY when that read fails or the minter leaves the field unset (the
+/// fallback is logged) — a helper/minter upgrade can move the CkDeposit contract, and a stale
+/// constant would silently strand deposits. The offline FakeLedger (test-helpers path) serves
+/// these constants directly. Values verified 2026-07-31 — do not re-derive; single-sourced here
+/// so the FakeLedger + AgentLedger fallbacks can't drift from the verified addresses.
 ///
 /// The `helper_address` is NETWORK-scoped, not minter-scoped: Ethereum mainnet and Sepolia testnet
 /// each deploy their own CkDeposit helper contract under the same ckETH minter. The chain-id gate in
-/// [`ckerc20_onramp_from_descriptor`] selects the right one from the descriptor's `chain_id`. The
-/// drift-free source for either value is the minter's
-/// `get_minter_info.deposit_with_subaccount_helper_contract_address` (OPEN_ISSUES #1/#2 testnet
-/// wiring). `CKUSDC_ERC20_ADDRESS` is the token contract (USDC), NOT the helper — kept separate so a
-/// per-token descriptor's `token_contract` stays the source of truth for the ERC-20 address.
+/// [`ckerc20_onramp_from_descriptor`] selects the right one from the descriptor's `chain_id`; on
+/// the agent path the runtime read supersedes the selection (the minter's configured helper is
+/// authoritative for whichever network it serves). `CKUSDC_ERC20_ADDRESS` is the token contract
+/// (USDC), NOT the helper — kept separate so a per-token descriptor's `token_contract` stays the
+/// source of truth for the ERC-20 address.
 pub(crate) const CKERC20_HELPER_ADDRESS_MAINNET: &str =
     "0x18901044688D3756C35Ed2b36D93e6a5B8e00E68";
 pub(crate) const CKERC20_HELPER_ADDRESS_SEPOLIA: &str =
@@ -62,8 +70,9 @@ pub(crate) const CKUSDC_LEDGER_PRINCIPAL: &str = "xevnm-gaaaa-aaaar-qafnq-cai";
 /// Onramp parameters for a CkEthErc20-family currency (ckUSDC etc. OR native ckETH). The app builds
 /// the user's Ethereum transaction(s) from these; the user signs in their own wallet (non-custodial).
 /// The deposit `principal` arg is the USER's own IC principal (derived in-app from their key); the
-/// subaccount is omitted (ICRC-1 default). In production these come from the ckETH minter's
-/// `get_minter_info`; the offline FakeLedger returns the verified mainnet constants.
+/// subaccount is omitted (ICRC-1 default). The `helper_address` comes from the ckETH minter's
+/// `get_minter_info` on the agent path (runtime read, verified-constant fallback on failure);
+/// the offline FakeLedger returns the verified mainnet constants via the shared resolver.
 ///
 /// `kind` discriminates the two deposit shapes sharing the CkEthErc20 family + the SAME helper:
 ///  - `"erc20"`: two txs (approve the ERC-20, then `depositErc20`) — `erc20_address` is `Some`.
@@ -97,7 +106,9 @@ pub struct CkErc20OnrampParams {
 ///
 /// The `helper_address` is NETWORK-scoped (Ethereum mainnet vs Sepolia testnet each deploy their own
 /// CkDeposit helper under the same ckETH minter); the descriptor's `chain_id` selects which verified
-/// constant to surface. The match is EXPLICIT and FAIL-CLOSED on an unknown chain_id: a future
+/// FALLBACK constant to surface — on the agent path the runtime minter read (see the constants' doc
+/// above) supersedes this selection when it succeeds. The match is EXPLICIT and FAIL-CLOSED on an
+/// unknown chain_id: a future
 /// ckERC20 deployed on, say, Polygon (chain_id 137) that hasn't been wired into the relay must NOT
 /// silently mis-route to the mainnet helper (the user's deposit would never arrive). Known chains:
 /// mainnet (`Some(1)`) and Sepolia (`Some(11155111)`). `None` is treated as mainnet — a CkEthErc20
@@ -112,9 +123,12 @@ pub fn ckerc20_onramp_from_descriptor(
         return Err(LedgerError::Transient("no ckERC-20 onramp for currency".into()));
     }
     // Network-scoped helper, EXPLICIT + fail-closed: known chain_ids resolve to their verified
-    // helper; an UNKNOWN chain_id returns Err (Transient → HTTP 503) instead of silently mis-routing
-    // to the mainnet helper. `None` falls through to mainnet — the cold-start metadata-gap default.
-    // The SAME helper contract serves native ETH (depositEth) and ERC-20 (depositErc20).
+    // FALLBACK helper; an UNKNOWN chain_id returns Err (Transient → HTTP 503) instead of silently
+    // mis-routing to the mainnet helper. `None` falls through to mainnet — the cold-start
+    // metadata-gap default. The SAME helper contract serves native ETH (depositEth) and ERC-20
+    // (depositErc20). On the agent path a SUCCESSFUL runtime minter read supersedes this selection
+    // (`AgentLedger::ckerc20_onramp_params`); this match is what both paths serve when the runtime
+    // read is absent, unset, or failed (FakeLedger always; AgentLedger on logged fallback).
     let helper_address = match d.chain_id {
         Some(1) | None => CKERC20_HELPER_ADDRESS_MAINNET,
         Some(11155111) => CKERC20_HELPER_ADDRESS_SEPOLIA,

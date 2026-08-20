@@ -25,8 +25,11 @@
     **not** write this index (see `CODEBASE_ANALYSIS.md`).
   - `deposit_info(currency)` (update; proxies the minter's static instructions) → relay
     `GET /api/v1/deposit/info`.
-  - The ckERC20/ckETH onramp params (relay `GET /onramp/ckerc20`) resolve from that catalog;
-    `facade_principal` (this canister's id) is still embedded in the helper-contract `depositErc20`/
+  - The ckERC20/ckETH onramp params (relay `GET /onramp/ckerc20`) resolve from that catalog; the
+    CkDeposit `helper_address` is read at RUNTIME from the currency's registered minter
+    (`get_minter_info`), falling back to the verified compile-time constants when the minter
+    leaves the field unset or the read fails. `facade_principal` (this canister's id) is still
+    embedded in the helper-contract `depositErc20`/
     `depositEth` calldata as the deposit `principal` arg (user pubkey = subaccount) — a pre-cutover
     residue: ETH-side deposits mint at a facade-owned subaccount, not the user principal, and are
     therefore not visible to the user-principal balance read path (flagged as a risk in

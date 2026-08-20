@@ -135,9 +135,12 @@ sim: build-canister
 
 # relay <-> real canister over ic-agent against a live local IC (offline); feature-gated.
 # Depends on `web`: builds dpay-relay, whose build.rs embeds e2e/dist-prod (fail-loud without it).
+# Also builds the mock-minter wasm — the WAVE-5 live test drives TWO mock minters to prove the
+# ckERC20 onramp's runtime `get_minter_info` helper read + its logged-constant fallback.
 test-live: web
     CARGO_TARGET_DIR="{{root}}/.dev/target-relay" cargo build -p dpay-canister --target wasm32-unknown-unknown --release
-    DPAY_CANISTER_WASM="{{root}}/.dev/target-relay/wasm32-unknown-unknown/release/dpay_canister.wasm" CARGO_TARGET_DIR="{{root}}/.dev/target-relay" cargo nextest run -p dpay-relay --features agent,test-helpers
+    CARGO_TARGET_DIR="{{root}}/.dev/target-relay" cargo build -p dpay-mock-minter --target wasm32-unknown-unknown --release
+    DPAY_CANISTER_WASM="{{root}}/.dev/target-relay/wasm32-unknown-unknown/release/dpay_canister.wasm" DPAY_MOCK_MINTER_WASM="{{root}}/.dev/target-relay/wasm32-unknown-unknown/release/dpay_mock_minter.wasm" CARGO_TARGET_DIR="{{root}}/.dev/target-relay" cargo nextest run -p dpay-relay --features agent,test-helpers
 
 # UniFFI shared-core binding: build host lib, generate bindings, run the language roundtrip test
 ffi:
