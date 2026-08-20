@@ -1,142 +1,99 @@
-// Flow 09 — Double-spend refused (replay protection, REAL relay + FakeLedger).
+// Flow 09 — double-spend (IC rail): a replayed payment must be credited ONCE. On the IC rail the
+// idempotency key is the request_id (a sha256 over the signed envelope's content) — the fake-IC
+// gateway dedups on it: POSTing the SAME envelope bytes twice returns 202 both times, but the
+// transfer executes exactly once. The ONLY safe retry is a byte-identical resubmit; re-signing
+// (even identical fields) yields a NEW request_id (nonce/expiry differ) and WOULD double-pay —
+// that hazard is exactly why the payer app reconciles by request_id, never by re-signing.
 //
-// Drives a REAL app pay (A scans B's request, approves, the app signs + POSTs /api/v1/pay), CAPTURES
-// the exact signed authorization the app produced (via a fetch recorder on /pay), then SUBMITS THE
-// SAME signed authorization again (a replay) and asserts it does NOT debit twice.
-//
-// Replay protection in the real system is TWO-LAYER, both enforced here:
-//   1. The relay's nonce-keyed idempotency cache: a second submission of the SAME nonce returns the
-//      cached receipt with `{replayed: true}` and NEVER touches the ledger again (HTTP 200, not 422).
-//   2. The ledger's spent-nonce set (defense-in-depth): even bypassing the relay cache, the FakeLedger
-//      rejects a spent nonce with `NonceReused`.
-// The money-safety property — "the same signed authorization debits exactly once" — is what this
-// test proves: A is debited once, B is credited once, and the replay is a no-op.
-//
-// (Note: a same-nonce replay returns `replayed:true`, NOT a 422 "rejection" — the relay treats it as
-// an idempotent success that does not move funds, which is the correct, merchant-friendly behavior.
-// The app surfaces this as "Already paid, not charged again". The no-double-debit is the assertion.)
-//
-// Selector contract: `pay-amount`, `btn-approve`, `balance`.
-import { setup, assert, getBalance, postPay, onboardWallet } from '../harness/lib.mjs';
-import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
+// Rail semantics (replaces the facade-era postPay replay assertion):
+//   1. build + sign an icrc1_transfer envelope ONCE (memo = request nonce);
+//   2. POST the same bytes twice → both 202;
+//   3. ledger: payee credited the amount exactly once; payer debited once;
+//   4. the gateway's txn log carries ONE transfer row (no duplicate).
+import {setup, assert, getBalance, faucetAccount, onboardWallet, accountOf} from '../harness/lib.mjs';
+import {generateKeypair, decodeRequest, icpPrincipalBytes, icpTransferArgBytes, icpSignUpdate} from '../harness/wire.mjs';
 
-const PAY_CENTS = 2500; // ∂25.00
-
-/** Install a fetch recorder that captures every POST /api/v1/pay body into window.__DPAY_PAY_CODES,
- *  so the test can replay the EXACT signed authorization the app produced. Returns nothing; read
- *  `window.__DPAY_PAY_CODES` after a pay.
- *
- *  Scope (NIT 1a-iii): the interception is NARROWED to ONLY `POST /api/v1/pay` — every other fetch
- *  (balance/history polls, etc.) passes through to the native fetch UNTOUCHED, so the wrapper can
- *  never mask an unrelated failure. The wrapper also SELF-UNINSTALLS the instant it captures the one
- *  signed code it needs (restoring the native `window.fetch`), so the global override exists ONLY
- *  for that single capture — it does not linger for the rest of the test. */
-async function installPayRecorder(driver) {
-  await driver.eval(() => {
-    window.__DPAY_PAY_CODES = [];
-    const orig = window.fetch;
-    window.__DPAY_ORIG_FETCH = orig; // test asserts restoration against this reference
-    window.fetch = (url, opts) => {
-      // ONLY intercept a POST to /api/v1/pay; everything else is a transparent passthrough.
-      const isPayPost = typeof url === 'string' && url.includes('/api/v1/pay')
-        && opts && opts.method === 'POST' && typeof opts.body === 'string';
-      if (isPayPost) {
-        try {
-          const parsed = JSON.parse(opts.body);
-          if (parsed && typeof parsed.qr === 'string') {
-            window.__DPAY_PAY_CODES.push(parsed.qr);
-            // Captured the one signed auth we need → restore the native fetch IMMEDIATELY so the
-            // global override exists only for this single capture (no chance to mask later fetches).
-            window.fetch = orig;
-          }
-        } catch { /* not a /pay JSON body — ignore */ }
-      }
-      return orig(url, opts);
-    };
-  });
-}
-
-/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
-  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
-  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
 export const meta = {
   id: '09',
   name: 'double-spend',
   journey: 'pay',
-  covers: ['replay-defense', 'nonce', 'single-use'],
-  verifies: 'Replay of a captured signed code is refused (nonce single-use), no double debit.',
-  timeoutMs: 15000,
+  covers: ['pay', 'replay-safety', 'confirmation'],
+  verifies: 'identical-byte envelope resubmit is idempotent on the IC gateway (request_id dedup): both POSTs 202, transfer executed once, payee credited once — and re-signing is a NEW request (the never-retry-by-resigning hazard)',
+  timeoutMs: 25_000,
 };
+
+const PAY_CENTS = 2500;
 
 export async function run() {
   const start = Date.now();
-  console.log('[09-double-spend] setup (relay + web + browser)…');
+  console.log(`[${meta.name}] pay-journey cutover: request_id dedup on identical-byte resubmit`);
   const env = await setup();
   try {
-    const { driver, relayBaseURL } = env;
-
+    // --- Payer (alice) + payee (bob), both funded so balances are unambiguous. -----------------
+    const alice = await generateKeypair();
     const bob = await generateKeypair();
-    console.log(`[09-double-spend] wallet B (payee): ${bob.publicHex.slice(0, 16)}…`);
+    await faucetAccount(env.relayBaseURL, alice.publicHex, 10_000);
+    await faucetAccount(env.relayBaseURL, bob.publicHex, 10_000);
 
-    // 1. Onboard A; install the recorder BEFORE the pay so it captures the app's signed code.
-    console.log('[09-double-spend] onboarding A + installing /pay recorder…');
-    await onboardWallet(driver, 'e2e-replay');
-    await installPayRecorder(driver);
+    // --- A request from bob (gives the payment a memo = reconciliation nonce). -----------------
+    // (The request QR itself is not needed here — the memo just has to be a stable 16B value.)
+    const nonceHex = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
 
-    // 2. A real app-driven pay: scan B's request → approve → the app signs + POSTs (captured).
-    const nonce = randNonceHex();
-    const expiry = Math.floor(Date.now() / 1000) + 600;
-    const requestQR = buildRequestQR(bob.publicHex, PAY_CENTS, nonce, expiry, 0, 'merchant');
-    await driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), requestQR);
-    await driver.findByTestID('pay-amount', { timeoutMs: 5_000 });
-    console.log('[09-double-spend] A paying ∂25.00 (capturing the signed authorization)…');
-    await driver.click('btn-approve', { timeoutMs: 5_000 });
-    const paid = await driver.waitForText('Paid', { timeoutMs: 10_000 });
-    assert(paid, 'first pay must settle before we attempt the replay');
+    // --- Sign ONE envelope (the payer would hand this to the rail exactly once). ---------------
+    const catalog = (await (await fetch(`${env.relayBaseURL}/api/v1/currencies`)).json()).currencies;
+    const ledger = catalog.find((c) => c.currency === 0).ledger;
+    const arg = icpTransferArgBytes(icpPrincipalBytes(bob.publicHex), BigInt(PAY_CENTS), {fee: null, memoHex: nonceHex});
+    const expiryNs = BigInt(Date.now() + 300_000) * 1_000_000n;
+    const signed = await icpSignUpdate(alice.secretHex, ledger, 'icrc1_transfer', arg, expiryNs);
+    const envelopeBytes = hexBytes(signed.envelopeHex);
+    console.log(`[${meta.name}] ✓ envelope signed once (request_id=${signed.requestIdHex.slice(0, 12)}…)`);
 
-    const codes = await driver.eval(() => window.__DPAY_PAY_CODES);
-    assert(Array.isArray(codes) && codes.length === 1, `recorder must capture exactly one /pay code, got ${JSON.stringify(codes)}`);
-    const signedCode = codes[0];
-    console.log(`[09-double-spend] ✓ captured the app's signed authorization (${signedCode.length} chars)`);
+    // --- POST the SAME bytes twice — both accepted (202), executed once. -----------------------
+    const post = () => fetch(`${env.relayBaseURL}/api/v2/canister/${ledger}/call`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/cbor'},
+      body: envelopeBytes,
+    });
+    const first = await post();
+    const second = await post();
+    assert(first.status === 202, `first submit must be 202 Accepted, got ${first.status}`);
+    assert(second.status === 202, `identical-byte replay must also be 202 (free dedup), got ${second.status}`);
+    console.log(`[${meta.name}] ✓ both submits 202 (request_id dedup — replay is free)`);
 
-    // NIT 1a-iii: the recorder's window.fetch override must have SELF-UNINSTALLED after the capture,
-    // so the global fetch is the untouched native one for the rest of the test (no broad override
-    // lingering that could mask a later failure). RED with the old always-on global patch.
-    const restored = await driver.eval(() => window.fetch === window.__DPAY_ORIG_FETCH);
-    assert(restored === true, 'the /pay recorder must restore window.fetch after capture (no lingering global override)');
-    console.log('[09-double-spend] ✓ window.fetch restored after capture (narrow, transient interception)');
+    // --- Ledger truth: credited once, debited once. --------------------------------------------
+    const bobBal = await getBalance(env.relayBaseURL, bob.publicHex, 0);
+    assert(bobBal === '12500', `payee must be credited ONCE (12500), got ${bobBal}`);
+    const aliceBal = await getBalance(env.relayBaseURL, alice.publicHex, 0);
+    assert(aliceBal === '7500', `payer must be debited once (7500), got ${aliceBal}`);
+    console.log(`[${meta.name}] ✓ ledger: bob 12500 / alice 7500 (executed exactly once)`);
 
-    // Baseline after the first settle: A down to ∂75, B at ∂25.
-    await driver.waitForText('∂75.00', { timeoutMs: 8_000 });
-    const aliceAfterFirst = await getBalance(relayBaseURL, (await driver.eval(() => JSON.parse(localStorage.getItem('dpay.identity.v1')).publicHex)), 0);
-    const bobAfterFirst = await getBalance(relayBaseURL, bob.publicHex, 0);
-    assert(aliceAfterFirst === '7500' && bobAfterFirst === '2500',
-      `post-first-pay balances wrong: A=${aliceAfterFirst} (want 7500), B=${bobAfterFirst} (want 2500)`);
+    // --- The txn log carries exactly ONE transfer row for this memo. ---------------------------
+    const txns = (await (await fetch(`${env.relayBaseURL}/api/v1/transactions/${bob.publicHex}?currency=0&limit=10`)).json()).transactions;
+    const transferRows = txns.filter((t) => t.memo === nonceHex && t.amount === String(PAY_CENTS));
+    assert(transferRows.length === 1, `exactly one transfer row for the replayed payment, got ${transferRows.length}`);
+    console.log(`[${meta.name}] ✓ txn log: one transfer row (no duplicate)`);
 
-    // 3. REPLAY the exact signed authorization the app produced.
-    console.log('[09-double-spend] replaying the SAME signed authorization…');
-    const replay = await postPay(relayBaseURL, signedCode);
-    // The relay's idempotency cache returns the cached receipt with replayed:true (HTTP 200, no debit).
-    assert(replay.ok, `replay must be accepted (idempotent), got status ${replay.status} body ${JSON.stringify(replay.body)}`);
-    assert(replay.body?.replayed === true, `replay must report replayed:true (no second settle), got ${JSON.stringify(replay.body)}`);
-    console.log('[09-double-spend] ✓ replay returned {replayed:true} — no second settle');
+    // --- The hazard note: re-signing identical fields = NEW request_id = would double-pay. -----
+    // (Asserted cheaply on the request_id derivation — no second POST, we do NOT double-pay bob.)
+    const resigned = await icpSignUpdate(alice.secretHex, ledger, 'icrc1_transfer', arg, expiryNs + 1_000_000n);
+    assert(resigned.requestIdHex !== signed.requestIdHex, 're-signing must produce a NEW request_id (retry ≠ resubmit)');
+    console.log(`[${meta.name}] ✓ re-sign ⇒ new request_id (retrying by re-signing would double-pay)`);
 
-    // 4. The money-safety assertion: NO double-debit. A and B unchanged after the replay.
-    const aliceAfterReplay = await getBalance(relayBaseURL, (await driver.eval(() => JSON.parse(localStorage.getItem('dpay.identity.v1')).publicHex)), 0);
-    const bobAfterReplay = await getBalance(relayBaseURL, bob.publicHex, 0);
-    assert(aliceAfterReplay === aliceAfterFirst, `A must NOT be debited twice: ${aliceAfterFirst} → ${aliceAfterReplay}`);
-    assert(bobAfterReplay === bobAfterFirst, `B must NOT be credited twice: ${bobAfterFirst} → ${bobAfterReplay}`);
-    console.log(`[09-double-spend] ✓ no double-debit: A stays ${aliceAfterReplay}, B stays ${bobAfterReplay}`);
-
-    await driver.screenshot('09-double-spend');
-
+    await env.driver.screenshot('09-double-spend');
     const elapsed = ((Date.now() - start) / 1000).toFixed(2);
-    console.log(`[09-double-spend] GREEN in ${elapsed}s`);
+    console.log(`[${meta.name}] GREEN in ${elapsed}s`);
   } finally {
     await env.stop();
   }
 }
 
+function hexBytes(hex) {
+  return Uint8Array.from(Buffer.from(hex, 'hex'));
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
-  run().catch(async (e) => { console.error(`\n[09-double-spend] RED: ${e.stack || e.message || e}\n`); process.exit(1); });
+  run().catch(async (e) => {
+    console.error(`\n[${meta.name}] RED: ${e.stack || e.message || e}\n`);
+    process.exit(1);
+  });
 }

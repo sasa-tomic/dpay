@@ -1,34 +1,38 @@
-// Flow 05 — Deposit credited end-to-end (BTC top-up through the REAL relay + FakeLedger).
+// Flow 05 — Deposit credited end-to-end (BTC top-up through the REAL relay + fake-IC gateway).
 //
 // Proves the CREDITED deposit path — the money-in proof — not just the address/instructions (flows
-// 03/04). The harness seeds a pending BTC deposit via the feature-gated `POST /api/v1/test/deposit/
-// seed` route (currency 1 = BTC), then the app's OWN deposit sheet polls/refreshes (currency 1) →
-// the FakeLedger drains + credits → the sheet flips to "Deposited ✓". The credit is then verified
-// DIRECTLY against the real relay's currency-1 balance for this wallet's account.
+// 03/04). On the IC user-principal rail (2026-08-19 cutover) a deposit = funds landing at
+// Account{owner: the user's principal} on the currency's ledger. The harness simulates the
+// Bitcoin-side leg by crediting fake-IC ckBTC (currency 1) at THIS wallet's principal via
+// `POST /api/v1/faucet {account, currency: 1, amount}` — the documented deposit-simulation seam.
+// Detection is the app's OWN honest mechanism: DepositSheet captures a railBalanceOf baseline on
+// its first successful ledger read, then rechecks (150ms poll in the harness, 10s in prod + the
+// "Check now" button) — any strictly-higher read is the minted delta, shown as "Deposited ✓" +
+// "<amount> minted". No per-UTXO confirmations exist at the user principal (that view died with
+// facade custody); the sheet reports a BALANCE DELTA, and this flow asserts exactly that contract.
 //
-// SEAMLESSNESS PROOF (the user's primary goal): after the sheet closes, the credited BTC must
-// remain VISIBLE in the wallet — the F1 fix surfaces currency 1 as a clearly-labeled "Bitcoin"
-// asset card (testID `asset-ckbtc`) on the same balance poll. So this test closes the sheet and
-// asserts `asset-ckbtc` is present + shows the minted BTC amount. A top-up that credits an INVISIBLE
-// balance is broken UX; this guards exactly that regression.
+// SEAMLESSNESS PROOF (the user's primary goal): after the deposit completes, the credited BTC must
+// remain VISIBLE in the wallet — the Balances sheet surfaces currency 1 as a clearly-labeled BTC
+// asset row (testID `asset-ckbtc`) on the same balance poll. So this test flips back to "Request
+// payment", re-opens Balances, and asserts `asset-ckbtc` shows the minted BTC amount. A top-up
+// that credits an INVISIBLE balance is broken UX; this guards exactly that regression.
 //
-// IMPORTANT — asset segregation (documented, by design): the wallet HEADER balance shows `$` =
-// DEMO_USD (currency 0); the deposit + the visible asset card operate on BTC (currency 1,
-// DEPOSIT_CURRENCY). Per the canister's per-currency segregation (a CODEBASE_ANALYSIS strength), a
-// currency-1 deposit credits the currency-1 balance — NOT the `$` header. So this test asserts the
-// credited path on the DEPOSIT ASSET: (a) the sheet shows "Deposited ✓" + minted BTC, (b) the
-// relay's currency-1 balance grew, and (c) the wallet's `asset-ckbtc` card shows the minted BTC
-// after the sheet closes. The `$` header is a different asset (DEMO_USD) and deliberately does not
-// move — merging them would blur the non-custodial, no-swap line.
+// IMPORTANT — asset segregation (documented, by design): the wallet HEADER balance shows `∂` =
+// DEMO_USD (currency 0); the deposit + the visible asset row operate on BTC (currency 1,
+// DEPOSIT_CURRENCY). A currency-1 faucet credit lands on the currency-1 rail — NOT the `∂` header.
+// So this test asserts the credited path on the DEPOSIT ASSET: (a) the sheet shows "Deposited ✓" +
+// minted BTC, (b) the relay's currency-1 balance grew, and (c) the wallet's `asset-ckbtc` row shows
+// the minted BTC. The `∂` header is a different asset (DEMO_USD) and deliberately does not move —
+// merging them would blur the non-custodial, no-swap line.
 //
 // Selector contract: `balance` (header → Balances), `asset-ckbtc` (the BTC row in the Balances
-// sheet — still the container testID), `asset-ckbtc-select` (the whole-row select Pressable),
-// `btn-receive-address` (Receive → "My address"), `deposit-address`, `btn-deposit-check`
-// (manual refresh), `deposit-status`. Seed route: POST /api/v1/test/deposit/seed
+// sheet), `asset-ckbtc-select` (the whole-row select Pressable), `btn-receive-address`
+// (Receive → "My address"), `deposit-address`, `btn-deposit-check` (manual "Check now"),
+// `deposit-status` (the "Watching for your deposit" cue). Value seam: POST /api/v1/faucet
 // {account, currency, amount}.
-import { setup, assert, assertIncludes, seedDeposit, getBalance, onboardWallet, accountOf, openBalances, selectCurrency, openReceiveAddress } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf, openBalances, selectCurrency, openReceiveAddress, railPrincipalText } from '../harness/lib.mjs';
 
-const DEPOSIT_CURRENCY = 1; // BTC — matches App.tsx DEPOSIT_CURRENCY (the deposit asset)
+const DEPOSIT_CURRENCY = 1; // ckBTC — the Balances row selected for the deposit flow
 const SEED_SATS = 50_000;   // 0.00050000 BTC
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
@@ -38,8 +42,8 @@ export const meta = {
   id: '05',
   name: 'deposit-credited',
   journey: 'deposit',
-  covers: ['deposit-credit', 'mint', 'asset-card', 'balance-update'],
-  verifies: 'ckBTC deposit lands via test-helpers seed → \'Deposited ✓\', balance updates, asset card appears.',
+  covers: ['deposit-credit', 'mint-delta', 'asset-card', 'balance-update'],
+  verifies: 'ckBTC deposit lands via faucet-at-principal → balance-recheck delta "Deposited ✓", relay balance grows, asset row appears.',
   timeoutMs: 20000,
 };
 
@@ -51,7 +55,7 @@ export async function run() {
     const { driver, relayBaseURL } = env;
 
     // 1. Onboard → wallet, and capture THIS wallet's account (its pubkey hex) from localStorage. The
-    //    deposit address + the seed target are both keyed off this account.
+    //    deposit address + the faucet target are both keyed off this account's PRINCIPAL.
     console.log('[05-deposit-credited] onboarding…');
     await onboardWallet(driver, 'e2e-deposit');
     const identity = await accountOf(driver);
@@ -61,8 +65,8 @@ export async function run() {
 
     // Before any top-up, open the Balances sheet. The BTC row is ALWAYS visible there — asset rows
     // render at every balance (including zero). Assert it reads the zero balance in BTC units + carries
-    // the BTC label (MC5: cards always visible, clearly labeled, never merged). The sheet stays open
-    // long enough to read the row; we then SELECT ckBTC so the Receive "My address" sub-mode keys off it.
+    // the BTC label. The sheet stays open long enough to read the row; we then SELECT ckBTC so the
+    // Receive "My address" sub-mode keys off it.
     console.log('[05-deposit-credited] opening Balances…');
     await openBalances(driver);
     const zeroCard = await driver.findByTestID('asset-ckbtc', { timeoutMs: 5_000 });
@@ -71,9 +75,9 @@ export async function run() {
     assertIncludes(zeroTxt, 'BTC', `the BTC card should be clearly labeled "BTC". card text:\n${zeroTxt}`);
     console.log(`[05-deposit-credited] BTC card visible at zero balance: "${zeroTxt}"`);
 
-    // 2. Pre-credit: the BTC (currency 1) balance for this account is zero (only DEMO_USD funded).
+    // 2. Pre-credit: the ckBTC (currency 1) rail balance for this account is zero (only DEMO_USD funded).
     const before = await getBalance(relayBaseURL, accountHex, DEPOSIT_CURRENCY);
-    assert(before === '0', `pre-seed BTC balance must be 0, got ${before}`);
+    assert(before === '0', `pre-fund ckBTC balance must be 0, got ${before}`);
 
     // 3. Select ckBTC (makes it the active asset) → Receive → "My address" (the inline deposit body).
     console.log('[05-deposit-credited] selecting ckBTC → Receive → My address…');
@@ -81,42 +85,65 @@ export async function run() {
     await openReceiveAddress(driver);
     await driver.findByTestID('deposit-address', { timeoutMs: 10_000 });
 
-    // 4. Seed a pending BTC deposit for THIS account via the test-helpers route. The balance is NOT
-    //    credited yet — a real mint lands only after the next /deposit/refresh drains it (mirrors the
-    //    ck minter minting after confirmations). This is the honesty property: no false "Deposited ✓".
-    //    (The pre-credit `=== '0'` assertion was removed: the app's 150ms auto-poll can fire between
-    //    the seed and the relay read, legitimately crediting the balance and false-firing the race.)
-    console.log(`[05-deposit-credited] seeding ${SEED_SATS} sats BTC via test/deposit/seed…`);
-    const seeded = await seedDeposit(relayBaseURL, accountHex, DEPOSIT_CURRENCY, SEED_SATS);
-    assert(seeded?.seeded === true, `seed must return {seeded:true}, got ${JSON.stringify(seeded)}`);
+    // 3b. The deposit address is derived by the minter query at THIS user's principal — assert it
+    //     matches the gateway's documented derivation 'bc1qdpay' + hex(principal[:8]) (16 hex
+    //     chars), tying the address to the principal the faucet credits. hex() lowercases, so the
+    //     trailing 16 chars are strictly [0-9a-f].
+    const address = await driver.readText('deposit-address');
+    const principalText = await railPrincipalText(accountHex);
+    assert(/^bc1qdpay[0-9a-f]{16}$/.test(address), `deposit address should look like a bc1qdpay… address, got "${address}"`);
+    console.log(`[05-deposit-credited] address ${address} (derived at principal ${principalText.slice(0, 12)}…)`);
 
-    // 5. The deposit sheet's own auto-poll (refreshNow, the app's real code path) drains the seeded
-    //    pending deposit and credits currency 1; minted_total > 0 flips the sheet to "Deposited ✓".
-    //    (The manual "Check now" button calls the same refreshNow — under the fast-poll harness the
-    //    auto-poll credits within ~150ms, so the manual nudge is racy and redundant here.)
-    console.log('[05-deposit-credited] waiting for the auto-poll to credit the deposit…');
+    // 4. Let the sheet's balance recheck capture its WATCHING BASELINE before any funds move. The
+    //    sheet polls railBalanceOf every POLL.deposit (150ms in the harness); its first successful
+    //    read is the baseline, and only a strictly-higher LATER read counts as the mint. Waiting out
+    //    several poll ticks here (address visible ⇒ the gateway is answering queries) guarantees the
+    //    baseline is the pre-fund zero — otherwise the credit could be swallowed into the baseline
+    //    and the delta never fires. The "Watching for your deposit" cue confirms the watching state.
+    await new Promise((r) => setTimeout(r, 700));
+    const watching = await driver.bodyText();
+    assertIncludes(watching, 'Watching for your deposit', 'the sheet should be in the honest watching state before funding (baseline captured)');
+
+    // 5. Fund the deposit: credit fake-IC ckBTC at THIS wallet's principal via the faucet (the
+    //    documented deposit-simulation seam — the stand-in for the Bitcoin leg landing at the
+    //    minter + minting 1:1 at the owner's account).
+    console.log(`[05-deposit-credited] crediting ${SEED_SATS} sats ckBTC at the wallet's principal via faucet…`);
+    const funded = await faucetAccount(relayBaseURL, accountHex, SEED_SATS, { currency: DEPOSIT_CURRENCY });
+    assert(funded.ok, `faucet credit should succeed, got status ${funded.status}: ${JSON.stringify(funded.body)}`);
+
+    // 6. Click the manual "Check now" button — the app's own refreshNow recheck (the same function
+    //    the 150ms auto-poll runs). Honest semantics: strictly-higher-than-baseline = minted delta.
+    //    The 150ms auto-poll can legitimately win this race (same code path, same outcome); if the
+    //    button already unmounted because the sheet flipped to "Deposited ✓", that IS the credited
+    //    state — only a flip that never happens is a failure (asserted next).
+    console.log('[05-deposit-credited] clicking btn-deposit-check (Check now)…');
+    await driver.click('btn-deposit-check', { timeoutMs: 3_000 }).catch(async (e) => {
+      const already = await driver.waitForText('Deposited', { timeoutMs: 2_000 });
+      if (!already) throw e;
+    });
+
+    // 7. The sheet flips to "Deposited ✓" + the minted delta ("0.00050000 BTC minted" via
+    //    fmtAsset(delta, 8, 'BTC')). This is the honest balance-delta report — no per-UTXO cues.
+    console.log('[05-deposit-credited] waiting for the deposit to be detected…');
     const credited = await driver.waitForText('Deposited', { timeoutMs: 8_000 });
     const body = await driver.bodyText();
-    assert(credited, `deposit sheet should show "Deposited ✓" after the refresh. body excerpt:\n${body.slice(0, 600)}`);
-    // The minted amount renders via btc(minted_total) → "0.00050000 BTC minted".
-    assertIncludes(body, '0.00050000 BTC', 'sheet should show the minted BTC amount');
-    console.log('[05-deposit-credited] ✓ sheet shows "Deposited ✓" + minted amount');
+    assert(credited, `deposit sheet should show "Deposited ✓" after the recheck. body excerpt:\n${body.slice(0, 600)}`);
+    assertIncludes(body, '0.00050000 BTC', 'sheet should show the minted BTC delta');
+    console.log('[05-deposit-credited] ✓ sheet shows "Deposited ✓" + minted delta');
 
-    // 6. The credited path proven directly on the real ledger: the currency-1 balance grew by the
-    //    seeded amount. (The `$` wallet header is currency 0 — a separate asset; see file header.)
+    // 8. The credited path proven directly on the rail: the currency-1 balance grew by the funded
+    //    amount. (The `∂` wallet header is currency 0 — a separate asset; see file header.)
     const after = await getBalance(relayBaseURL, accountHex, DEPOSIT_CURRENCY);
-    assert(after === String(SEED_SATS), `credited BTC balance must equal the seed (${SEED_SATS}), got ${after}`);
-    console.log(`[05-deposit-credited] ✓ BTC balance 0 → ${after} sats (credited through the REAL relay+FakeLedger)`);
+    assert(after === String(SEED_SATS), `credited ckBTC balance must equal the faucet amount (${SEED_SATS}), got ${after}`);
+    console.log(`[05-deposit-credited] ✓ ckBTC rail balance 0 → ${after} sats (credited at the user principal)`);
 
-    // 7. SEAMLESSNESS: flip the toggle back to "Request payment" (hides the inline deposit body) and
-    //    prove the credited BTC stays VISIBLE. The wallet's balance poll (every 2.5s) fetches currency
-    //    1; re-open the Balances hub and the BTC row re-renders with the minted amount. A top-up whose
-    //    balance vanishes when the deposit closes is the bug this guards.
+    // 9. SEAMLESSNESS: flip the toggle back to "Request payment" (hides the inline deposit body) and
+    //    prove the credited ckBTC stays VISIBLE. The wallet's balance poll fetches every catalog
+    //    currency; re-open the Balances hub and the BTC row re-renders with the minted amount. A
+    //    top-up whose balance vanishes when the deposit closes is the bug this guards.
     console.log('[05-deposit-credited] toggle to "Request payment" — asserting the balance stays visible…');
     await driver.click('btn-receive-request', { timeoutMs: 5_000 });
     await driver.waitGone('deposit-address', { timeoutMs: 4_000 });
-    // Re-open Balances (selecting ckBTC auto-closed it). The BTC row re-renders with the minted
-    // amount on the next currency-1 poll (≤2.5s).
     await openBalances(driver);
     const assetEl = await driver.findByTestID('asset-ckbtc', { timeoutMs: 8_000 });
     const assetTxt = await assetEl.evaluate((n) => (n.textContent ?? '').trim());

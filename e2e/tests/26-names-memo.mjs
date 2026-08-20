@@ -15,7 +15,7 @@
 //     memo="coffee" — the PAYEE sees the PAYER's name (N6/H3 core fix).
 //
 // Selector contract: `pay-amount`, `review-memo`, `btn-approve`, `balance`.
-import { setup, assert, assertIncludes, getBalance, onboardWallet } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, getBalance, onboardWallet, railPrincipalText } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
 const PAY_CENTS = 2500; // ∂25.00 (DEMO_USD = currency 0, the wallet asset)
@@ -93,25 +93,31 @@ export async function run() {
     const aliceDown = await driver.waitForText('∂75.00', { timeoutMs: 10_000 });
     assert(aliceDown, `payer A balance should be ∂75.00 (∂100 − ∂25) after the settle`);
 
-    // --- A's Recent history: shows the payee NAME + the memo, NOT a raw hex pubkey. -----------
-    // This is the payer side of N6/H3: the counterparty is now a name, not 64 hex chars.
+    // --- A's Recent history: short principal + the memo NONCE (the reconciliation key). ------
+    // IC rail: names died with facade settlement — the history row carries no name, only the
+    // payee's short PRINCIPAL text. The merchant's "coffee" note never rides the rail either: the
+    // memo slot IS the request nonce (the reconciliation key binding this payment to B's request).
+    // Flow 61 pins the same convention from the receive side.
+    const bobPrincipal = await railPrincipalText(bob.publicHex);
     await driver.click('tab-transactions', { timeoutMs: 4_000 });
     const hasHistory = await driver.waitForText('RECENT', { timeoutMs: 8_000 });
     assert(hasHistory, 'the Recent card should render once the payment lands in history');
     const histBody = await driver.bodyText();
-    assertIncludes(histBody, PAYEE_NAME, 'A history row should name the payee by display name (N6/H3 payer side)');
-    assertIncludes(histBody, MEMO, 'A history row should show the memo subtitle');
-    assert(!histBody.includes(bob.publicHex), 'A history must NOT dump the raw 64-char payee pubkey (N6/H3)');
-    console.log(`[26-names-memo] ✓ A history: "to ${PAYEE_NAME}" + memo "${MEMO}" (no raw hex)`);
+    assertIncludes(histBody, bobPrincipal.slice(0, 8), 'A history row should show the payee short principal text');
+    assertIncludes(histBody, nonce.slice(0, 8), 'A history row should show the memo nonce prefix (reconciliation key)');
+    assert(!histBody.includes(bobPrincipal), 'A history must NOT dump the full principal');
+    assert(!histBody.includes(bob.publicHex), 'A history must NOT dump the raw 64-char payee pubkey');
+    console.log(`[26-names-memo] ✓ A history: short principal + memo nonce (names died with the facade; the nonce reconciles)`);
 
     // --- B was credited. ---------------------------------------------------------------------
     const bobAfter = await getBalance(relayBaseURL, bob.publicHex, 0);
     assert(bobAfter === String(PAY_CENTS), `payee B balance after the settle: expected ${PAY_CENTS}, got ${bobAfter}`);
 
-    // --- B's ledger history (direct relay query): the PAYEE sees the PAYER's name. ------------
-    // This is the core N6/H3 fix — before the wire change, the payee could only see the payer's raw
-    // pubkey (the payer's name was carried NOWHERE on the wire). Now from_name="Alice" rides the
-    // signed bytes + is returned per row by the relay, so Bob's incoming row names "Alice" + memo.
+    // --- B's ledger history (direct relay query): the PAYEE reconciles by the memo NONCE. -----
+    // IC rail: rows are NAME-LESS (from_name/to_name are empty — names died with facade
+    // settlement; the payer's "Alice" only ever lived in the request QR bytes the payer saw). What
+    // the payee CAN do — the load-bearing replacement for names — is bind the incoming transfer to
+    // their open request by the memo: the row's memo is the request nonce hex, verbatim.
     const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 5000);
     let bobRows = null;
     try {
@@ -120,14 +126,15 @@ export async function run() {
       if (r.ok && j && Array.isArray(j.transactions)) bobRows = j.transactions;
     } catch { /* fall through to the assertion below */ } finally { clearTimeout(t); }
     assert(Array.isArray(bobRows) && bobRows.length > 0, `B's ledger history should have the incoming payment row, got ${JSON.stringify(bobRows)}`);
-    // The incoming row (B is `to`): from_name should be the PAYER's name ("Alice"), to_name the
-    // payee's ("Bob"), and memo the merchant-set note ("coffee").
-    const inRow = bobRows.find((row) => row.to && row.to.toLowerCase() === bob.publicHex.toLowerCase());
-    assert(inRow, `B's history should contain the incoming row (to == B), got ${JSON.stringify(bobRows)}`);
-    assertEq(inRow.from_name, PAYER_NAME, `B history row.from_name == "${PAYER_NAME}" (payee sees the payer's name — N6/H3)`);
-    assertEq(inRow.to_name, PAYEE_NAME, `B history row.to_name == "${PAYEE_NAME}"`);
-    assertEq(inRow.memo, MEMO, `B history row.memo == "${MEMO}"`);
-    console.log(`[26-names-memo] ✓ B ledger history: from_name="${inRow.from_name}" to_name="${inRow.to_name}" memo="${inRow.memo}" (payee sees the payer's name — N6/H3 closed)`);
+    // The incoming row (B is `to`): names empty (honestly asserted, not silently dropped) and the
+    // memo == the request nonce — the reconciliation key B's ReceiveMode matches against its open
+    // request (the same binding prefillReceipt/onSignedQr reconcile by).
+    const inRow = bobRows.find((row) => row.to && row.to.toLowerCase() === bobPrincipal.toLowerCase());
+    assert(inRow, `B's history should contain the incoming row (to == B's principal), got ${JSON.stringify(bobRows)}`);
+    assertEq(inRow.from_name ?? '', '', `B history from_name is EMPTY on the rail (names died with the facade; got "${inRow.from_name}")`);
+    assertEq(inRow.to_name ?? '', '', `B history to_name is EMPTY on the rail (got "${inRow.to_name}")`);
+    assertEq(inRow.memo, nonce, `B history row.memo == the request nonce (the reconciliation key), got "${inRow.memo}"`);
+    console.log(`[26-names-memo] ✓ B ledger history: name-less rows, memo == request nonce (the payee reconciles by nonce — the rail's answer to N6/H3)`);
 
     await driver.screenshot('26-names-memo');
 

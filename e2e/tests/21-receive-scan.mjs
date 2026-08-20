@@ -1,129 +1,121 @@
-// Flow 21 — Receive-side "confirm with the payer's phone" (offline-payer scan) path.
+// Flow 21 — receive-scan (IC rail): the MERCHANT confirms a payer's offline hand-off by scanning
+// the payer's signed QR. Alice (an offline payer) signs a REAL icrc1_transfer envelope whose memo
+// is the REQUEST's nonce (the reconciliation key binding payment→request), base64url-wraps it, and
+// we inject it through the camera seam into the merchant B's "Scan payer's signed QR" affordance.
+// B's app derives the request_id from the envelope, SUBMITS it to the fake-IC /api/v2 gateway
+// (POST /call), then polls read_state until replied — the "Received" flip is ledger-sourced
+// (submitted by B's own app), exactly the production confirm path.
 //
-// The Receive screen's offline-payer affordance: after the merchant generates a request QR, if the
-// PAYER is the offline party (the signature feature inverted — merchant online, payer offline), the
-// merchant can SCAN the payer's signed QR instead of waiting for the payer to submit online. The
-// merchant's app POSTs the scanned signed auth to /api/v1/pay → the FakeLedger verifies the payer's
-// on-device sig + settles → the merchant's /receipt poll confirms → "Received $X".
-//
-// Proves the full path through the REAL app + REAL relay:
-//   1. Merchant B onboards, requests ∂25 → the request QR screen renders with the
-//      "Scan payer's signed QR" affordance button (D5: concise label + help-text below).
-//   2. Click it → the QrScanner mounts (scanning=true); the help-text swaps to
-//      "Scan the payer's signed QR".
-//   3. The payer (generated in-test, faucet-funded) signs an authorization for B's EXACT request
-//      (byte-exact wire via wire.mjs) and the test injects the signed code via the camera seam.
-//   4. B's onSignedQr POSTs /api/v1/pay → FakeLedger verifies the sig + settles (credits B).
-//   5. B's /receipt poll reconciles → "Received ∂25.00" + B's balance grows to ∂125.
-//
-// This mirrors flow 08 (merchant-settle) but drives the SETTLE through the app's OWN scan→submit
-// path (onSignedQr), not a direct postPay — proving the offline-payer confirm affordance is wired
-// end-to-end. The signing is REAL (byte-exact vs Rust, cross-validated in 00).
-//
-// Selector contract: `tab-receive`, `amount-input`, `btn-request`, `request-qr`, `balance`.
-import { setup, assert, getBalance, onboardWallet, accountOf } from '../harness/lib.mjs';
-import { generateKeypair, decodeRequest, signAuthorizationCode } from '../harness/wire.mjs';
+// This is the envelope-twin of flow 08 (which drives the same settle from a fresh request).
+import {setup, assert, assertIncludes, getBalance, faucetAccount, onboardWallet, accountOf} from '../harness/lib.mjs';
+import {generateKeypair, decodeRequest, icpPrincipalBytes, icpTransferArgBytes, icpSignUpdate, b64urlEncode} from '../harness/wire.mjs';
+import {railPrincipalText} from '../harness/lib.mjs';
 
-const PAY_CENTS = 2500; // ∂25.00
-
-/** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
-  * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
-  * id/name; journey/covers/verifies/timeoutMs are the authored intent. */
 export const meta = {
   id: '21',
   name: 'receive-scan',
   journey: 'offline',
   covers: ['receive-scan', 'offline-settle'],
-  verifies: 'Merchant \'Payer paid offline? Scan to settle\' → scans the payer\'s signed QR → settles.',
-  timeoutMs: 20000,
+  verifies: 'merchant scans a base64url icrc1_transfer envelope (memo = request nonce) via the camera seam → app submits it to the IC gateway → read_state poll flips "Received"; balance + history follow from the ledger',
+  timeoutMs: 25_000,
 };
+
+const PAY_CENTS = 2500n;
 
 export async function run() {
   const start = Date.now();
-  console.log('[21-receive-scan] setup (relay + web + browser)…');
+  console.log(`[${meta.name}] pay-journey cutover: merchant-side envelope scan-confirm`);
   const env = await setup();
   try {
-    const { driver, relayBaseURL } = env;
-
-    // The payer (offline party): generated + faucet-funded in-test. Signs B's request offline.
+    // --- Payer: a funded offline wallet (keys only — the payer's phone never talks to the relay). -
     const alice = await generateKeypair();
-    const fundA = await fetch(`${relayBaseURL}/api/v1/faucet`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ account: alice.publicHex, amount: 10_000 }),
-    });
-    assert(fundA.ok, `payer faucet funding must succeed, got ${fundA.status}`);
-    console.log(`[21-receive-scan] payer A (funded ∂100): ${alice.publicHex.slice(0, 16)}…`);
+    await faucetAccount(env.relayBaseURL, alice.publicHex, 10_000);
+    const alicePrincipal = await railPrincipalText(alice.publicHex);
 
-    // Merchant B onboards in the browser.
-    console.log('[21-receive-scan] onboarding merchant B…');
-    await onboardWallet(driver, 'e2e-merchant-scan');
-    const bob = await accountOf(driver);
+    // --- Merchant B: onboarded, with an OPEN ∂25 request. --------------------------------------
+    await onboardWallet(env.driver, 'e2e-merchant');
+    const bob = await accountOf(env.driver);
     const bobHex = bob.publicHex;
-
-    // B requests ∂25 → the request QR screen renders.
-    console.log('[21-receive-scan] B requesting ∂25.00…');
-    await driver.click('tab-receive', { timeoutMs: 4_000 });
-    await driver.type('amount-input', '25.00', { timeoutMs: 4_000 });
-    await driver.click('btn-request', { timeoutMs: 4_000 });
-    await driver.findByTestID('request-qr', { timeoutMs: 5_000 });
-
-    // Decode B's request to get the exact nonce/expiry A must sign over.
-    const requestQR = await driver.eval(() => window.__DPAY_QR_LAST);
+    await env.driver.click('tab-receive', {timeoutMs: 4_000});
+    await env.driver.typeByPlaceholder('0.00', '25.00');
+    await env.driver.click('btn-request', {timeoutMs: 4_000});
+    const requestQR = await env.driver.eval(() => window.__DPAY_QR_LAST);
     const req = decodeRequest(requestQR);
-    assert(req.toHex.toLowerCase() === bobHex.toLowerCase(), 'B request.to == B account');
+    assertEqHex(req.toHex, bobHex, 'request QR payee must be merchant B');
+    assertEq(req.amount, '2500', 'request QR amount must be ∂25.00');
 
-    // L4 + D5: the offline-payer affordance is a CONCISE button label ("Scan payer's signed QR")
-    // with the explanatory sentence as smaller help-text below it. Both must be present.
-    const beforeScan = await driver.bodyText();
-    assert(/Scan payer's signed QR/i.test(beforeScan),
-      `the request screen should show the concise affordance button label (D5). body excerpt:\n${beforeScan.slice(0, 500)}`);
-    assert(/paid without scanning/i.test(beforeScan) && /confirm with their phone/i.test(beforeScan),
-      `the request screen should show the explanatory help-text below the affordance (D5). body excerpt:\n${beforeScan.slice(0, 500)}`);
-    console.log('[21-receive-scan] ✓ concise offline-payer affordance + help-text (L4 + D5)');
+    // --- Payer signs an icrc1_transfer envelope bound to the request (memo = nonce). -----------
+    const catalog = (await (await fetch(`${env.relayBaseURL}/api/v1/currencies`)).json()).currencies;
+    const ledger = catalog.find((c) => c.currency === 0).ledger;
+    const arg = icpTransferArgBytes(icpPrincipalBytes(bobHex), PAY_CENTS, {fee: null, memoHex: req.nonceHex});
+    const expiryNs = BigInt(Date.now() + 300_000) * 1_000_000n;
+    const signed = await icpSignUpdate(alice.secretHex, ledger, 'icrc1_transfer', arg, expiryNs);
+    console.log(`[${meta.name}] ✓ envelope signed (request_id=${signed.requestIdHex.slice(0, 12)}…)`);
+    const envelopeB64 = b64urlEncode(hexBytes(signed.envelopeHex));
 
-    // Click it → the scanner mounts. The affordance button label is "Scan payer's signed QR";
-    // find that text node and walk up to the Pressable wrapper (RNW renders Pressables as plain
-    // elements, not <button>).
-    await driver.eval(() => {
-      const nodes = Array.from(document.querySelectorAll('text, span, div, a, button, [role]'));
-      const target = nodes.find(e => (e.textContent || '').trim() === "Scan payer's signed QR" && e.children.length === 0);
-      if (!target) throw new Error('affordance button label node not found');
-      let el = target;
-      for (let i = 0; i < 5 && el; i++) {
-        el.click?.();
-        el = el.parentElement;
-      }
-    });
-    const scanning = await driver.waitForText("Scan the payer's signed QR", { timeoutMs: 5_000 });
-    assert(scanning, 'clicking the affordance should mount the scanner (label swaps)');
-    console.log('[21-receive-scan] ✓ scanner mounted (scanning for the payer’s signed QR)');
+    // --- B opens the scan affordance and receives the payer's hand-off QR. ---------------------
+    await openPayerScan(env.driver);
+    await env.driver.eval((payload) => window.__DPAY_TEST_SCAN(payload), envelopeB64);
 
-    // A signs B's request offline (byte-exact wire) → inject via the camera seam → B submits it.
-    console.log('[21-receive-scan] A signing offline + injecting the signed QR…');
-    const code = await signAuthorizationCode(alice.secretHex, bobHex, PAY_CENTS, req.nonceHex, req.expiry, 0);
-    await driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), code);
+    // --- The Received flip — B's app submitted + reconciled the transfer via read_state. -------
+    const received = await env.driver.waitForText('Received ∂25.00', {timeoutMs: 12_000});
+    assert(received, 'B should reach the "Received ∂25.00" screen after scanning the payer\'s envelope');
+    console.log(`[${meta.name}] ✓ B app shows "Received ∂25.00" (B submitted + reconciled)`);
 
-    // B's onSignedQr POSTs /pay → FakeLedger settles → /receipt poll confirms → "Received ∂25".
-    const received = await driver.waitForText('Received', { timeoutMs: 12_000 });
-    assert(received, 'merchant B should reach "Received ∂25.00" after scanning the payer’s signed QR');
-    console.log('[21-receive-scan] ✓ B received (app scanned + submitted the payer’s signed QR)');
-
-    // B's balance grew by ∂25 (ledger-sourced — the FakeLedger credited B's subaccount).
-    const bobUp = await driver.waitForText('∂125.00', { timeoutMs: 10_000 });
-    assert(bobUp, 'merchant B balance should be ∂125.00 (∂100 + ∂25)');
-    const bobLedger = await getBalance(relayBaseURL, bobHex, 0);
+    // --- Ledger truth: B credited, alice debited once. -----------------------------------------
+    const bobLedger = await getBalance(env.relayBaseURL, bobHex, 0);
     assert(bobLedger === '12500', `B ledger balance must be 12500 cents, got ${bobLedger}`);
-    console.log('[21-receive-scan] ✓ B balance ∂100.00 → ∂125.00 (credited through the scan→submit path)');
+    const aliceLedger = await getBalance(env.relayBaseURL, alice.publicHex, 0);
+    assert(aliceLedger === '7500', `alice ledger balance must be 7500 cents (10000 − 2500), got ${aliceLedger}`);
+    console.log(`[${meta.name}] ✓ ledger: B 12500 / alice 7500`);
 
-    await driver.screenshot('21-receive-scan');
+    // --- B's on-screen balance picked up the credit (poll-driven). -----------------------------
+    const bobUp = await env.driver.waitForText('∂125.00', {timeoutMs: 10_000});
+    assert(bobUp, 'B on-screen balance should be ∂125.00 after the scan-settle');
 
+    await env.driver.screenshot('21-receive-scan');
     const elapsed = ((Date.now() - start) / 1000).toFixed(2);
-    console.log(`[21-receive-scan] GREEN in ${elapsed}s`);
+    console.log(`[${meta.name}] GREEN in ${elapsed}s`);
   } finally {
     await env.stop();
   }
 }
 
+/** Open ReceiveMode's "Scan payer's signed QR" affordance (the offline-payer confirm path). The
+ *  button has no testID — find the exact label text node and walk up, clicking each wrapper (RNW
+ *  renders Pressables as plain elements). */
+async function openPayerScan(driver) {
+  await driver.eval(() => {
+    const nodes = Array.from(document.querySelectorAll('text, span, div, a, button, [role]'));
+    const target = nodes.find((e) => (e.textContent || '').trim() === "Scan payer's signed QR" && e.children.length === 0);
+    if (!target) throw new Error('affordance button label node not found');
+    let el = target;
+    for (let i = 0; i < 5 && el; i++) {
+      el.click?.();
+      el = el.parentElement;
+    }
+  });
+  const scanning = await driver.waitForText("Scan the payer's signed QR", {timeoutMs: 5_000});
+  assert(scanning, 'B should mount the payer-QR scanner after the affordance tap');
+}
+
+function hexBytes(hex) {
+  return Uint8Array.from(Buffer.from(hex, 'hex'));
+}
+
+function assertEq(got, want, msg) {
+  if (got !== want) throw new Error(`[assert] ${msg}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+}
+
+function assertEqHex(got, want, msg) {
+  if (String(got).toLowerCase() !== String(want).toLowerCase()) {
+    throw new Error(`[assert] ${msg}: got ${got}, want ${want}`);
+  }
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
-  run().catch(async (e) => { console.error(`\n[21-receive-scan] RED: ${e.stack || e.message || e}\n`); process.exit(1); });
+  run().catch(async (e) => {
+    console.error(`\n[${meta.name}] RED: ${e.stack || e.message || e}\n`);
+    process.exit(1);
+  });
 }

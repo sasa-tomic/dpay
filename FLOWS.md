@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **80 flows**
-> (79 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **78 flows**
+> (77 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay (FakeLedger, offline). No UI stubs. The only shimmed I/O boundary is
 > the camera scan (sanctioned smallest-boundary seam) and the NFC radio (physical-device gate).
@@ -20,7 +20,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (8) · pay (20) · offline (7) · deposit (8) · withdraw (7) · nfc (5) · system (20) · tour (4)
+wire (1) · onboard (8) · pay (18) · offline (7) · deposit (8) · withdraw (7) · nfc (5) · system (20) · tour (4)
 
 ---
 
@@ -49,31 +49,29 @@ wire (1) · onboard (8) · pay (20) · offline (7) · deposit (8) · withdraw (7
 |---|------|----------|--------|
 | 06 | request-qr | Merchant enters amount → request QR renders AND decodes to a valid 132-byte request (to_name + memo). | request-qr, encode, merchant, to-name, memo |
 | 07 | scan-pay | Payer scans → reviews → approves: two-wallet real ed25519 sign + relay settle → 'Paid ✓', balances correct. | scan, sign, settle, receipt, history, recipient-name |
-| 08 | merchant-settle | Merchant side sees the incoming payment settle → recipient 'Received $X' confirmation. | receive, settle, confirmation |
-| 09 | double-spend | Replay of a captured signed code is refused (nonce single-use), no double debit. | replay-defense, nonce, single-use |
+| 08 | merchant-settle | Merchant scans the payer's signed icrc1_transfer envelope, submits it to the IC gateway → recipient 'Received' confirmation. | receive, settle, confirmation |
+| 09 | double-spend | identical-byte envelope resubmit is idempotent on the IC gateway (request_id dedup): both POSTs 202, transfer executed once, payee credited once — and re-signing is a NEW request (the never-retry-by-resigning hazard) | pay, replay-safety, confirmation |
 | 10 | expired | Payer scans an already-expired request → refused, Approve disabled, no leaked nonce. | expiry, disabled-approve |
 | 19 | low-balance | Insufficient funds: offline review-lowbal warning; online Approve disabled, 'Not enough balance'. | low-balance, insufficient, disabled-approve |
 | 25 | asset-request | ckBTC chip + BTC amount → request QR encodes RUNTIME currency 1 + 50000 sats; readout '0.00050000 BTC' (no $). | asset-request, ckbtc, currency-id, encode, btc-units |
 | 26 | names-memo | Alice pays Bob with memo 'coffee' → review shows the name + short pubkey + memo (U-F5), both histories show friendly names + memo (wire-format v2, no raw hex). | names, memo, history, wire-v2, friendly-counterparties, review-short-payee |
-| 27 | asset-pay | ckBTC pay: review shows '0.00050000 BTC' (no $) + short pubkey (U-F5); per-asset balance gate (60000≥50000 sats) → settles on currency 1; Ledger row shows the exact ckBTC units. | asset-pay, ckbtc, per-asset-balance, locked-asset-display, ledger-units, review-short-payee |
+| 27 | asset-pay | ckBTC pay (faucet-funded at principal): review '0.00050000 BTC' (no $) + short pubkey (U-F5); per-asset balance gate (60000≥50000 sats) → app-signed icrc1_transfer settles on currency 1; Ledger row shows the exact ckBTC units. | asset-pay, ckbtc, per-asset-balance, locked-asset-display, ledger-units, review-short-payee |
 | 28 | ckusdc-request | ckUSDC chip + 0.05 amount → request QR encodes currency 2 + 50000 raw (6-dec); readout '0.050000 USDC' (no $0.05). | ckusdc-merchant-create, request-asset-picker, multi-currency, 6-decimal, byte-exact |
-| 29 | exact-amount | Raw amount > 2^53 round-trips byte-exact through faucet/request-wire/sign/settle (BigInt codec, u64 LE). | exact-amount, decimal-transport, u64, bigint-codec |
-| 30 | trusted-receipt | Malicious relay returns a wrong-key receipt → app's key-pin rejects it → honest 'Couldn't verify', no debit. | receipt-key-pin, malicious-relay, honest-error |
-| 31 | ckusdc-pay | ckUSDC (currency 2, 6-decimal) pay end-to-end: review '0.050000 USDC', byte-exact raw, settles on currency 2. | ckusdc-pay, multi-currency, 6-decimal, byte-exact |
+| 29 | exact-amount | Raw amount > 2^53 round-trips byte-exact through faucet/request-wire/signed-envelope/ledger-settle on the IC rail (BigInt codec, uleb128 + u128 ledger, decimal strings). | exact-amount, decimal-transport, u64, bigint-codec |
+| 31 | ckusdc-pay | ckUSDC (currency 2, 6-decimal) pay end-to-end (faucet-funded at principal): review '0.050000 USDC', byte-exact raw, app-signed icrc1_transfer settles on currency 2. | ckusdc-pay, multi-currency, 6-decimal, byte-exact |
 | 36 | bad-qr | Scanning/pasting garbage (non-base64 + wrong-length) surfaces a friendly 'This isn't't a dpay payment code' error; review never mounts; scan surface re-arms. | bad-qr, malformed, error-handling, input-validation |
-| 42 | receipt-reject | Tampered receipt (wrong pubkey / flipped sig) → verifyOutcomeReceipt rejects → honest "Couldn't verify", no fake Paid ✓, no debit. | receipt, receipt-reject, malicious-relay, verifyOutcomeReceipt |
 | 43 | decimal-edges | 8-dec (ckBTC) + 6-dec (ckUSDC) + 18-dec (ckDAI) amounts render with exact decimals on review (no rounding, no sci-notation, no trailing-zero drift). | decimal, format, ckbtc, ckerc20, 18-decimal |
 | 49 | deeplink-request | dpay:req deeplink opens the pay review screen pre-filled with the merchant request (no auto-approve). | deeplink, request-link, prefill, pay-review |
-| 50 | deeplink-receipt | merchant verifies a dpay:pay receipt (canister-signed) via the web ?pay= path + reconciles as Received. | deeplink, receipt-link, verify, receive, handback |
+| 50 | deeplink-receipt | merchant binds a dpay:pay rail-proof blob (base64url JSON, memo-keyed railTransfer settle) to the open request → Received ∂25.00; never routes to Pay. | deeplink, receipt-link, rail-proof, receive, handback |
 | 59 | share-receipt | After an online settle, btn-share-receipt hands an openable /wallet?pay= receipt URL to Share and flips to "Link copied ✓". | share-receipt, receipt-link, handback, online-settle, deeplink |
-| 61 | merchant-received-name | Merchant's 'Received' confirmation shows the payer's friendly name (from_name) — not the raw short pubkey prefix — when the payer chose a name. | receive, settle, confirmation, from-name, wire-v2, friendly-counterparties |
+| 61 | merchant-received-name | IC-rail counterparty rendering: history shows the short PRINCIPAL TEXT (not full principal, not hex pubkey) and the memo (reconciliation key) is visible; friendly names died with the facade settlement. | receive, settle, confirmation, counterparty-rendering, memo-reconciliation |
 
 ### Offline hand-off (the signature feature)
 
 | # | Flow | Verifies | Covers |
 |---|------|----------|--------|
-| 20 | offline-handoff | Payer signs offline → relay unreachable → signed QR → merchant settles → payer reconnects → 'Paid ✓'. | offline-sign, qr-handoff, settle, reconcile, round-trip |
-| 21 | receive-scan | Merchant 'Payer paid offline? Scan to settle' → scans the payer's signed QR → settles. | receive-scan, offline-settle |
+| 20 | offline-handoff | offline payer signs an icrc1_transfer envelope QR (base64url, memo = request nonce); counterparty submits it to the IC gateway; payer reconnects and reconciles to Paid by request_id (read_state); payee balance grows | offline-pay, hand-off, reconcile |
+| 21 | receive-scan | merchant scans a base64url icrc1_transfer envelope (memo = request nonce) via the camera seam → app submits it to the IC gateway → read_state poll flips "Received"; balance + history follow from the ledger | receive-scan, offline-settle |
 | 46 | sol-offline-handoff | SOL v2 scan solreq:v2 → review shows the short destination (U-F5) → offline sign (no setup, no nonce) → solpay:v2 QR → honest pending. | sol-offline-sign, qr-handoff, honest-pending, review-short-payee |
 | 51 | sol-merchant-broadcast | SOL v2 merchant: createSolPaymentRequest (ONLINE) → scan real signed solpay → broadcast → Received. | sol-merchant, sol-broadcast, sol-v2-strict-verify, qr-scan |
 | 53 | sol-merchant-error | SOL v2 merchant broadcast error surfaces a friendly message (not raw RPC, not false Received). | sol-merchant, sol-error, sol-v2-rejected, friendly-error |
@@ -86,7 +84,7 @@ wire (1) · onboard (8) · pay (20) · offline (7) · deposit (8) · withdraw (7
 |---|------|----------|--------|
 | 03 | deposit-address | ckBTC deposit sheet: address + QR + instructions + fee/min; deep-link ?screen=deposit works. | deposit-address, qr, instructions, fee-min, deep-link |
 | 04 | deposit-copy | 'Copy address' writes the REAL address to the clipboard (not the Share noop). | deposit-address, clipboard |
-| 05 | deposit-credited | ckBTC deposit lands via test-helpers seed → 'Deposited ✓', balance updates, asset card appears. | deposit-credit, mint, asset-card, balance-update |
+| 05 | deposit-credited | ckBTC deposit lands via faucet-at-principal → balance-recheck delta "Deposited ✓", relay balance grows, asset row appears. | deposit-credit, mint-delta, asset-card, balance-update |
 | 16 | ckusdc-onramp | ckUSDC onramp: connect wallet → enter USDC → approve+deposit (EIP-1193 seam, byte-exact calldata, ETH gas note). | ckusdc, onramp, eip-1193, calldata, eth-gas |
 | 22 | deposit-error | Relay unreachable when opening the deposit sheet → honest error ('Check connection'), no spinner-forever. | deposit-error, offline, graceful |
 | 33 | ckerc20-persist | ckERC20 deposit watching PERSISTS across restart: reload rehydrates watching (no reconnect), resumed notice shown. | ckerc20, persist, restart, watching-resume |
@@ -97,12 +95,12 @@ wire (1) · onboard (8) · pay (20) · offline (7) · deposit (8) · withdraw (7
 
 | # | Flow | Verifies | Covers |
 |---|------|----------|--------|
-| 15 | withdraw | Withdraw ckBTC: enter addr + amount → sign on-device → settle; success screen + Copy destination; balance debits at both the ledger AND the UI (Balances row drops to 0.00050000 BTC). | withdraw, sign, settle, clipboard, balance-delta, destination-copy, ui-balance-delta |
-| 18 | withdraw-errors | Withdraw UI guards: below-min / over-balance / bad-addr warnings disable the confirm button (relay 4xx gates covered relay-direct in relay.rs). | withdraw-errors, below-min, over-balance, bad-addr |
-| 44 | cketh-withdraw | Withdraw native ckETH: Cash-out button renders for a CkEthErc20 + token_contract=null asset; enter 0x addr + ETH amount → sign on-device at 18-dec Wei → settle; balance debits at both the ledger AND the UI (family-dispatch UI path). | native-eth-withdraw, cketh, family-dispatch, withdraw, sign, settle, balance-delta, ui-balance-delta |
-| 48 | ckusdc-withdraw | ckUSDC Cash-out: the flipped cashable gate renders Cash-out for a ckERC20 token; enter 0x addr + USDC amount → gas-dependency note renders → sign on-device at 6-dec → settle; balance debits at both the ledger AND the UI. | ckerc20-offramp, cashable-gate, ckusdc, withdraw, sign, settle, balance-delta, ui-balance-delta, gas-note |
+| 15 | withdraw | Withdraw ckBTC: faucet-fund at the principal → enter addr + amount → sign approve + retrieve on-device → gateway burns → "Withdrawn ✓" + Copy destination; balance debits at both the gateway AND the UI (row drops to 0.00050000 BTC). | withdraw, icrc2-approve, retrieve_btc_with_approval, sign, settle, clipboard, balance-delta, destination-copy, ui-balance-delta |
+| 18 | withdraw-errors | Withdraw error paths: below-min / over-balance / bad-addr warnings disable the confirm button; a minter-refused full-balance withdraw surfaces the "insufficient funds" reject in withdraw-err with a fee-only debit. | withdraw-errors, below-min, over-balance, bad-addr, rail-rejection, money-safe |
+| 44 | cketh-withdraw | Withdraw native ckETH: faucet-fund at the principal → enter 0x addr + ETH amount → query the minter gas price + sign approve + withdraw_eth on-device → gateway burns → "Withdrawn ✓"; balance debits fee+amount at both the gateway AND the UI (row drops to 3.990000 ETH). | native-eth-withdraw, cketh, family-dispatch, withdraw, icrc2-approve, withdraw_eth, gas-quote, sign, settle, balance-delta, ui-balance-delta |
+| 48 | ckusdc-withdraw | ckUSDC Send-to-address: gas-dependency note renders (no-swap honesty) → enter 0x addr + USDC amount → query gas + sign gas-approve + amount-approve + withdraw_erc20 on-device → gateway burns BOTH ledgers → "Withdrawn ✓"; ckUSDC debits fee+amount, ckETH debits gas-fee + gas at the gateway AND the UI row drops to 998.990000 USDC. | ckerc20-offramp, ckusdc, withdraw, icrc2-approve, withdraw_erc20, dual-ledger-gas, gas-note, sign, settle, balance-delta, ui-balance-delta |
 | 52 | sol-withdraw | SOL withdraw: select SOL → Pay tab "Send to address" → enter addr+amount → sign+broadcast (stub) → Sent ✓. | sol-withdraw, sol-send, sol-tab-ia, sign |
-| 56 | withdraw-saved-addr | A successful withdraw persists the destination (AsyncStorage); reopening the sheet shows a "Use last" chip that pre-fills the address input. | saved-address, btn-withdraw-saved, withdraw-persist |
+| 56 | withdraw-saved-addr | A successful rail withdraw (approve + retrieve settled on /api/v2) persists the destination (AsyncStorage); reopening the sheet shows a "Use last" chip that pre-fills the address input. | saved-address, btn-withdraw-saved, withdraw-persist |
 | 77 | sol-usdc-withdraw | USDC send to address: happy path (USDC units + rent disclosure note → Sent ✓) and the below-rent pre-check failure (friendly error, no Sent). | sol-usdc-withdraw, spl-transfer, ata-note, rent-precheck, sol-send |
 
 ### NFC (tap-to-pay)
@@ -123,8 +121,8 @@ wire (1) · onboard (8) · pay (20) · offline (7) · deposit (8) · withdraw (7
 | 13 | offline | Relay down → faucet top-up surfaces honest 'Offline' (ECONNREFUSED, not unsafe-port), no crash; retry path. | offline, econnrefused, graceful, retry, right-reason |
 | 14 | keyboard | Single-key shortcuts (P/R/T/A/L/Esc) switch tabs / top-up / add-money / ledger / close sheet; input + sheet guards work; keyboard focus paints the brand :focus-visible ring (U-F4). | keyboard-shortcuts, tabs, sheet-guard, input-guard, focus-visible |
 | 17 | scan-cleanup | Switch Pay→Receive→Pay: QrScanner listeners tear down cleanly (no leak across unmount/remount). | qr-scanner, teardown, unmount, listener-leak |
-| 24 | wallet-cleanup | Seeded non-dollar balances/history render as asset cards/rows with known symbols (presence, not exact units). | asset-cards, labels, symbols |
-| 38 | relay-retarget | Settings relay-switch retargets the LIVE balance poll: header changes from A's ∂100.00 to B's ∂500.00. | relay-retarget, settings-relay-switch, live-poll |
+| 24 | wallet-cleanup | Funded non-dollar balances/history (rail faucet + icrc1_transfer on currency 1) render as asset cards/rows with known symbols and short principal-text counterparties. | asset-cards, labels, symbols |
+| 38 | relay-retarget | Settings relay-switch retargets the LIVE balance poll: header changes from A's ∂100.00 to B's faucet-funded ∂500.00 (B's fresh per-process gateway). | relay-retarget, settings-relay-switch, live-poll |
 | 41 | a11y-census | Every interactive element (btn-*/tab-*/inputs/picker rows) carries a non-empty aria-label + role on every primary surface. | a11y, accessibility, aria |
 | 55 | balances-select-asset | Selecting an asset in Balances binds the header: label DEMO→ckBTC→SOL and the balance text follows the active-rail branch. | asset-select, header-balance-binding, active-asset-label |
 | 57 | settings-seed-backup | Seed stays hidden behind a confirm gate; once revealed the 24 mnemonic words show by default, hex view toggles in and matches identity.secretHex; copy writes the seed to the real clipboard. | seed-backup, confirm-gate, secret-reveal, clipboard-copy, mnemonic-backup, mnemonic-word-{0..23}, btn-backup-show-hex, btn-copy-mnemonic, btn-copy-seed |
@@ -145,7 +143,7 @@ wire (1) · onboard (8) · pay (20) · offline (7) · deposit (8) · withdraw (7
 | # | Flow | Verifies | Covers |
 |---|------|----------|--------|
 | 35 | ux-tour | Visual capture: screenshots of every major screen (Pay, Receive+QR, Balances, Settings, Ledger) for review. | visual-capture, screen-census, screenshots |
-| 39 | store-screens — optional (`just e2e-store`) | Visual capture: 5 hero screenshots for Play Store compositing (wallet, request, balances, ledger, deposit). | visual-capture, store-screenshots |
+| 39 | store-screens — optional (`just e2e-store`) | Visual capture: 5 hero screenshots for Play Store compositing (wallet, request, balances, ledger, deposit), rail-funded. | visual-capture, store-screenshots |
 | 40 | visual-regression | Pixel-diff the 5 primary surfaces (Pay, Receive+QR, Balances, Settings, Ledger) vs committed baselines; fails on drift >0.5%. | visual-regression, pixel-diff |
 | 78 | qr-scannable | every rendered <QrCode> stays machine-decodable: request-qr (244/M + brand mark) decodes to the exact encoded value (__DPAY_QR_LAST byte-for-byte) and sol-receive-qr (200/L, base58 address) decodes to the on-screen address — rasterized pixels through the same vendored jsQR the prod web wallet ships | qr-scannable, qr-brand-mark, quiet-zone |
 

@@ -15,7 +15,7 @@
 // spent, atomic debit/credit). B needs no browser: its balance is read straight off the ledger.
 //
 // Selector contract: `tab-pay` (default), `pay-amount`, `btn-approve`, `btn-new`, `balance`.
-import { setup, assert, assertIncludes, getBalance, onboardWallet } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, getBalance, onboardWallet, railPrincipalText } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
 const PAY_CENTS = 2500; // ∂25.00 (DEMO_USD = currency 0, the wallet asset)
@@ -92,15 +92,19 @@ export async function run() {
     console.log(`[07-scan-pay] ✓ B credited: 0 → $${(Number(bobAfter) / 100).toFixed(2)}`);
 
     // --- A's Recent history lists the outgoing payment to B (refreshHistory fired on settle). --
-    // The to_name "Bob" now rides the signed wire + the relay's history rows, so the row shows
-    // "to Bob" (N6/H3) — NOT a raw hex pubkey. Assert the NAME appears and the full hex does not.
+    // IC rail: history rows are name-less (names died with facade settlement — only the payer's
+    // REVIEW knew the name, from the request QR bytes); the row shows the payee's short PRINCIPAL
+    // text (61-merchant-received-name pins the same convention). Assert the short principal is
+    // rendered and neither the full principal nor the raw hex pubkey leaks.
+    const bobPrincipal = await railPrincipalText(bob.publicHex);
     await driver.click('tab-transactions', { timeoutMs: 4_000 });
     const hasHistory = await driver.waitForText('RECENT', { timeoutMs: 8_000 });
     assert(hasHistory, 'the Recent card should render once the payment lands in history');
     const histBody = await driver.bodyText();
-    assertIncludes(histBody, MERCHANT_NAME, 'history row should name the recipient by display name (N6/H3)');
-    assert(!histBody.includes(bob.publicHex), 'history must NOT dump the raw 64-char recipient pubkey now that names ride the wire');
-    console.log('[07-scan-pay] ✓ A history shows the outgoing payment to Bob (by name)');
+    assertIncludes(histBody, bobPrincipal.slice(0, 8), 'history row should show the payee short principal text');
+    assert(!histBody.includes(bobPrincipal), 'history must NOT dump the full principal');
+    assert(!histBody.includes(bob.publicHex), 'history must NOT dump the raw 64-char recipient pubkey');
+    console.log('[07-scan-pay] ✓ A history shows the outgoing payment (short principal; names died with the facade)');
 
     await driver.screenshot('07-scan-pay');
 

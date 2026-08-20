@@ -1,21 +1,25 @@
 // Flow 08 — Merchant receive → settle (the RECIPIENT side, explicitly).
 //
-// The mirror of flow 07 from the recipient's perspective. Wallet B (the merchant) is onboarded in
-// the browser; wallet A (the payer) is generated + faucet-funded in-test, then signs an
-// authorization for B's request and submits it directly via /api/v1/pay (A is the online payer). B's
-// app polls /api/v1/receipt/<nonce> and flips to "Received $X". Asserts the recipient-side state
-// EXPLICITLY:
-//   - B's app reaches "Received ∂30.00".
-//   - B's `$` balance grew by the amount (currency 0).
-//   - B's Recent history shows the INCOMING payment from A (the recipient row, not the payer row).
-// This is the "merchant online-confirm" half of the two-phone flow: the recipient learns the
-// payment settled through the ledger-sourced receipt poll, not a payer-presented claim.
+// The mirror of flow 07 from the recipient's perspective, on the IC rail. Wallet B (the merchant)
+// is onboarded in the browser and requests ∂30; wallet A (the payer) is generated + faucet-funded
+// in-test. A signs a REAL icrc1_transfer envelope for B's request (wire.mjs golden oracle,
+// byte-identical to the app's wasm signer; memo = the request nonce) and hands the base64url
+// envelope to B's app through the offline-payer scan affordance. B's app decodes it, submits it to
+// the fake-IC /api/v2 gateway, and its read_state poll reconciles the request → "Received". This is
+// the "merchant online-confirm" half of the two-phone flow: the recipient learns the payment settled
+// through ITS OWN submission + ledger-sourced poll, not a payer-presented claim. Asserts the
+// recipient-side state EXPLICITLY:
+//   - B's app reaches "Received ∂30.00" (B submitted the payer's envelope itself).
+//   - B's `$` balance grew by the amount (currency 0, fake-IC ledger).
+//   - B's Recent history shows the INCOMING payment from A — as A's short PRINCIPAL text (rail rows
+//     are name-less; memo is the reconciliation key).
 //
 // Selector contract: `tab-receive`, `amount-input`, `btn-request`, `request-qr`, `balance`.
-import { setup, assert, assertIncludes, getBalance, postPay, onboardWallet, accountOf } from '../harness/lib.mjs';
-import { generateKeypair, randNonceHex, decodeRequest, signAuthorizationCode } from '../harness/wire.mjs';
+import { setup, assert, assertIncludes, getBalance, faucetAccount, railPrincipalText, onboardWallet, accountOf } from '../harness/lib.mjs';
+import { generateKeypair, decodeRequest, icpPrincipalBytes, icpTransferArgBytes, icpSignUpdate, b64urlEncode } from '../harness/wire.mjs';
 
 const PAY_CENTS = 3000; // ∂30.00
+const DEMO_LEDGER = 'aaaaa-aa'; // fake-IC ledger for catalog currency 0 (asserted against the catalog below)
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -25,8 +29,8 @@ export const meta = {
   name: 'merchant-settle',
   journey: 'pay',
   covers: ['receive', 'settle', 'confirmation'],
-  verifies: 'Merchant side sees the incoming payment settle → recipient \'Received $X\' confirmation.',
-  timeoutMs: 15000,
+  verifies: 'Merchant scans the payer\'s signed icrc1_transfer envelope, submits it to the IC gateway → recipient \'Received\' confirmation.',
+  timeoutMs: 25000,
 };
 
 export async function run() {
@@ -36,15 +40,12 @@ export async function run() {
   try {
     const { driver, relayBaseURL } = env;
 
-    // --- wallet A (payer): generated + faucet-funded in-test (the online payer). ----------------
+    // --- wallet A (payer): generated + faucet-funded in-test (the offline-style payer). ----------
     const alice = await generateKeypair();
-    // Fund A via the faucet so it can pay (mirrors onboarding's faucet POST).
-    const fundA = await fetch(`${relayBaseURL}/api/v1/faucet`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ account: alice.publicHex, amount: 10_000 }),
-    });
+    const fundA = await faucetAccount(relayBaseURL, alice.publicHex, 10_000);
     assert(fundA.ok, `payer A faucet funding must succeed, got ${fundA.status}`);
-    console.log(`[08-merchant-settle] wallet A (payer, funded ∂100): ${alice.publicHex.slice(0, 16)}…`);
+    const alicePrincipal = await railPrincipalText(alice.publicHex);
+    console.log(`[08-merchant-settle] wallet A (payer, funded ∂100): ${alicePrincipal.slice(0, 10)}…`);
 
     // --- wallet B (merchant): onboarded in the browser. ---------------------------------------
     console.log('[08-merchant-settle] onboarding wallet B (merchant)…');
@@ -64,35 +65,57 @@ export async function run() {
     assertEq(req.amount, String(PAY_CENTS), 'B request.amount == ∂30.00');
     console.log(`[08-merchant-settle] B request nonce=${req.nonceHex.slice(0, 12)}…`);
 
-    // --- A (online payer) signs an authorization for B's request and submits it directly. -----
-    // The signed wire is byte-exact vs the app (cross-validated in test 00), so the FakeLedger
-    // verifies A's sig + settles: debit A, credit B.
-    console.log('[08-merchant-settle] A signing + submitting the authorization…');
-    const code = await signAuthorizationCode(alice.secretHex, bobHex, PAY_CENTS, req.nonceHex, req.expiry, 0);
-    const pay = await postPay(relayBaseURL, code);
-    assert(pay.ok && pay.body?.receipt, `A's /pay must settle, got status=${pay.status} body=${JSON.stringify(pay.body)}`);
-    assert(pay.body.replayed === false, 'first pay must not be a replay');
-    console.log('[08-merchant-settle] ✓ A settled (FakeLedger verified + debited A, credited B)');
+    // --- A signs a REAL icrc1_transfer envelope for B's request (memo = the request nonce). -----
+    // Byte-identical to the app's wasm signer (cross-validated in flow 00), so the fake-IC gateway
+    // verifies A's signature and executes the transfer when B's app submits it.
+    console.log('[08-merchant-settle] A signing the icrc1_transfer envelope…');
+    const catalog = (await (await fetch(`${relayBaseURL}/api/v1/currencies`)).json()).currencies;
+    const ledger = catalog.find(c => c.currency === 0)?.ledger;
+    assertEq(ledger, DEMO_LEDGER, 'catalog currency 0 ledger');
+    const arg = icpTransferArgBytes(icpPrincipalBytes(bobHex), BigInt(PAY_CENTS), {fee: null, memoHex: req.nonceHex});
+    const expiryNs = BigInt(Date.now() + 300_000) * 1_000_000n;
+    const signed = await icpSignUpdate(alice.secretHex, ledger, 'icrc1_transfer', arg, expiryNs);
+    const envelopeB64 = b64urlEncode(hexBytes(signed.envelopeHex));
+    console.log('[08-merchant-settle] ✓ envelope signed (request_id=' + signed.requestIdHex.slice(0, 12) + '…)');
 
-    // --- B's app confirms receipt via its /receipt poll → "Received ∂30.00". -------------------
-    const received = await driver.waitForText('Received', { timeoutMs: 10_000 });
-    assert(received, 'merchant B should reach the "Received" screen via the receipt poll');
-    console.log('[08-merchant-settle] ✓ B app shows "Received" (ledger-sourced confirmation)');
+    // --- Hand the envelope to B's app through the offline-payer scan affordance. ----------------
+    // B scans A's signed QR (injected via the camera seam) → onSignedQr decodes + submits it to
+    // /api/v2/canister/<ledger>/call → the gateway verifies + executes → B's read_state poll
+    // reconciles the open request → "Received".
+    await openPayerScan(driver);
+    await driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), envelopeB64);
+    console.log('[08-merchant-settle] B scanned the payer\'s envelope — app submitting to the IC gateway…');
+
+    // --- B's app confirms receipt via its read_state poll → "Received ∂30.00". -----------------
+    const received = await driver.waitForText('Received ∂30.00', { timeoutMs: 12_000 });
+    assert(received, 'merchant B should reach the "Received ∂30.00" screen after submitting the payer\'s envelope');
+    console.log('[08-merchant-settle] ✓ B app shows "Received ∂30.00" (ledger-sourced confirmation)');
 
     // --- B's `$` balance grew by the amount. --------------------------------------------------
-    const bobUp = await driver.waitForText('∂130.00', { timeoutMs: 10_000 });
+    const bobUp = await driver.waitForText('∂130.00', { timeoutMs: 10_000});
     assert(bobUp, `merchant B balance should be ∂130.00 (∂100 + ∂30) after the settle`);
     const bobLedger = await getBalance(relayBaseURL, bobHex, 0);
     assert(bobLedger === '13000', `B ledger balance must be 13000 cents, got ${bobLedger}`);
-    console.log('[08-merchant-settle] ✓ B balance ∂100.00 → ∂130.00');
+    const aliceLedger = await getBalance(relayBaseURL, alice.publicHex, 0);
+    assert(aliceLedger === '7000', `A ledger balance must be 7000 cents (10000 − 3000), got ${aliceLedger}`);
+    console.log('[08-merchant-settle] ✓ B balance ∂100.00 → ∂130.00 (A debited once)');
 
-    // --- B's Recent history shows the INCOMING payment from A (recipient row). ----------------
+    // --- B's Recent history shows the INCOMING payment from A (recipient row, short principal). -
     await driver.click('tab-transactions', { timeoutMs: 4_000 });
     const hasHistory = await driver.waitForText('RECENT', { timeoutMs: 8_000 });
     assert(hasHistory, 'B history should render the incoming payment');
-    const histBody = await driver.bodyText();
-    assertIncludes(histBody, alice.publicHex.slice(0, 8), 'B history row should name the payer (short pubkey)');
-    console.log('[08-merchant-settle] ✓ B history shows the incoming payment from A');
+    // The history hook polls (POLL.history); the transfer row may land after RECENT first paints.
+    // Poll for the payer's short principal rather than snapshotting once.
+    const shortPayer = alicePrincipal.slice(0, 8);
+    let histBody = '';
+    for (let i = 0; i < 20; i++) {
+      histBody = await driver.bodyText();
+      if (histBody.includes(shortPayer)) break;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    assertIncludes(histBody, shortPayer, 'B history row should name the payer (short principal text)');
+    assert(!histBody.includes(alicePrincipal), 'B history must not dump A\'s full principal text');
+    console.log('[08-merchant-settle] ✓ B history shows the incoming payment from A (short principal)');
 
     await driver.screenshot('08-merchant-settle');
 
@@ -101,6 +124,28 @@ export async function run() {
   } finally {
     await env.stop();
   }
+}
+
+/** Open ReceiveMode's "Scan payer's signed QR" affordance (the offline-payer confirm path). The
+ *  button has no testID — find the exact label text node and walk up, clicking each wrapper (RNW
+ *  renders Pressables as plain elements). Same pattern as flow 21. */
+async function openPayerScan(driver) {
+  await driver.eval(() => {
+    const nodes = Array.from(document.querySelectorAll('text, span, div, a, button, [role]'));
+    const target = nodes.find(e => (e.textContent || '').trim() === "Scan payer's signed QR" && e.children.length === 0);
+    if (!target) throw new Error('affordance button label node not found');
+    let el = target;
+    for (let i = 0; i < 5 && el; i++) {
+      el.click?.();
+      el = el.parentElement;
+    }
+  });
+  const scanning = await driver.waitForText("Scan the payer's signed QR", { timeoutMs: 5_000 });
+  assert(scanning, 'clicking the affordance should mount the scanner (label swaps)');
+}
+
+function hexBytes(hex) {
+  return Uint8Array.from(hex.match(/../g).map((h) => parseInt(h, 16)));
 }
 
 function assertEq(actual, expected, label) {

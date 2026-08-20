@@ -2,7 +2,7 @@
 //
 // Mirrors `27-asset-pay.mjs` (ckBTC) but for currency 2 (CkEthErc20 / ckUSDC, 6 decimals). Proves
 // the FULL multi-currency pay path for a 6-decimal asset end-to-end through the REAL app + relay:
-//   - A (payer) onboards + is SEEDED ckUSDC via the test-helpers deposit route (currency 2).
+//   - A (payer) onboards + is funded ckUSDC at her PRINCIPAL via the faucet (currency 2).
 //   - B (payee, in-test keypair) builds a ckUSDC request: 0.050000 USDC = 50_000 raw 6-decimal units.
 //   - A scans B's request via the camera seam. The KEY assertions:
 //       * The review's pay-amount reads "Pay 0.050000 USDC" (the catalog's display_decimals=6 +
@@ -13,27 +13,28 @@
 //         amount discipline applied at 6 decimals — and it distinguishes from DEMO's 2-dec space
 //         (a 2-dec path would render 50000 raw as ∂500.00, NOT 0.050000 USDC).
 //       * btn-approve is NOT disabled (the per-asset balance gate: 60_000 ≥ 50_000) → click lands
-//         on Paid.
-//       * The receipt verifies (canister-signed, R2) → "Paid ✓ 0.050000 USDC".
+//         on Paid. A's app signs the icrc1_transfer with the catalog fee (10_000 raw) + submits it
+//         to the fake-IC gateway.
 //       * B's ckUSDC balance (currency 2) grew by exactly 50_000 raw units (correct ledger
-//         settlement, no float artifacts).
+//         settlement at the principal, no float artifacts; the fee is charged to the sender).
 //
-// Amount choice: 50_000 raw mirrors flow 27's ckBTC PAY_SATS shape (an obvious parallel), stays
-// under the FakeLedger's default 100_000 raw per-tx cap (single global, documented simplification),
-// and exercises 6-decimal precision meaningfully (0.050000 USDC — the trailing zeros are the display
-// contract assertion; a 2-dec path could NOT render this).
+// Amount choice: 50_000 raw mirrors flow 27's ckBTC PAY_SATS shape (an obvious parallel) and
+// exercises 6-decimal precision meaningfully (0.050000 USDC — the trailing zeros are the display
+// contract assertion; a 2-dec path could NOT render this). The fake catalog carries a 10_000-raw
+// fee on ckUSDC, so the 60_000 seed covers the 50_000 payment + the fee exactly.
 //
 // This flow exercises ITEM 1 (per-currency balance, though online not offline) + ITEM 2 (a known
 // asset passes the isPayableAsset gate end-to-end) — the integrated MC5 multi-currency proof at
 // 6-decimal precision.
 //
-// Selector contract: `balance` (header → Balances), `asset-ckusdc` (the USDC row), `btn-balances-
-// close`, `pay-amount`, `btn-approve`. Camera seam: `window.__DPAY_TEST_SCAN(qr)`.
-import { setup, assert, assertIncludes, getBalance, onboardWallet, accountOf, seedDeposit, refreshDeposit, openBalances } from '../harness/lib.mjs';
+// Selector contract: `balance` (header → Balances), `asset-ckusdc` (the USDC row),
+// `btn-balances-close`, `pay-amount`, `btn-approve`. Camera seam: `window.__DPAY_TEST_SCAN(qr)`.
+// Value seam: POST /api/v1/faucet {account, currency: 2, amount}.
+import { setup, assert, assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf, openBalances } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR, decodeRequest } from '../harness/wire.mjs';
 
 const CKUSDC_CURRENCY = 2;
-const SEED_RAW = 60_000;        // 0.060000 USDC (6-decimal)
+const SEED_RAW = 60_000;        // 0.060000 USDC (6-decimal) — covers 50_000 pay + 10_000 fee
 const PAY_RAW = 50_000;         // 0.050000 USDC (6-decimal) — mirrors flow 27's PAY_SATS shape
 const EXPECTED_DISPLAY = '0.050000 USDC'; // fmtCurrencyAmount output for 6-dec USDC
 
@@ -45,7 +46,7 @@ export const meta = {
   name: 'ckusdc-pay',
   journey: 'pay',
   covers: ['ckusdc-pay', 'multi-currency', '6-decimal', 'byte-exact'],
-  verifies: 'ckUSDC (currency 2, 6-decimal) pay end-to-end: review \'0.050000 USDC\', byte-exact raw, settles on currency 2.',
+  verifies: 'ckUSDC (currency 2, 6-decimal) pay end-to-end (faucet-funded at principal): review \'0.050000 USDC\', byte-exact raw, app-signed icrc1_transfer settles on currency 2.',
   timeoutMs: 20000,
 };
 
@@ -56,17 +57,18 @@ export async function run() {
   try {
     const { driver, relayBaseURL } = env;
 
-    // --- A onboards (funded $100 DEMO by the faucet; will also be seeded ckUSDC). ----------------
+    // --- A onboards (funded ∂100 DEMO by the faucet; will also be funded ckUSDC). ----------------
     console.log('[31-ckusdc-pay] onboarding A (payer)…');
     await onboardWallet(driver, 'e2e-alice');
     const identity = await accountOf(driver);
     const accountHex = identity.publicHex;
 
-    // --- Seed ckUSDC for A so assetBalances[2] is non-zero. The refresh drains + credits; the app's
-    //     next balance poll (150ms in the harness) surfaces it as `asset-ckusdc` "0.060000 USDC". ----
-    console.log(`[31-ckusdc-pay] seeding ${SEED_RAW} raw (${(SEED_RAW / 1e6).toFixed(6)} USDC) ckUSDC for A…`);
-    await seedDeposit(relayBaseURL, accountHex, CKUSDC_CURRENCY, SEED_RAW);
-    await refreshDeposit(relayBaseURL, accountHex, CKUSDC_CURRENCY);
+    // --- Fund ckUSDC for A at her principal so assetBalances[2] is non-zero. The credit is
+    //     immediate; the app's next balance poll (150ms in the harness) surfaces it as
+    //     `asset-ckusdc` "0.060000 USDC". ----------------------------------------------------------
+    console.log(`[31-ckusdc-pay] funding ${SEED_RAW} raw (${(SEED_RAW / 1e6).toFixed(6)} USDC) ckUSDC for A via faucet…`);
+    const funded = await faucetAccount(relayBaseURL, accountHex, SEED_RAW, { currency: CKUSDC_CURRENCY });
+    assert(funded.ok, `faucet ckUSDC funding should succeed, got status ${funded.status}: ${JSON.stringify(funded.body)}`);
 
     // Wait for A's app poll to show the ckUSDC balance in the Balances USDC row — this PROVES
     // assetBalances[2] is populated (the wallet's parallel per-currency balance poll wrote it;
@@ -74,7 +76,7 @@ export async function run() {
     console.log('[31-ckusdc-pay] opening Balances; waiting for A’s ckUSDC balance to render…');
     await openBalances(driver);
     const seededShown = await driver.waitForText('0.060000 USDC', { timeoutMs: 10_000 });
-    assert(seededShown, 'A should render 0.060000 USDC in the Balances USDC row after seeding (assetBalances[2] populated)');
+    assert(seededShown, 'A should render 0.060000 USDC in the Balances USDC row after funding (assetBalances[2] populated)');
     console.log('[31-ckusdc-pay] ✓ A’s ckUSDC balance visible (assetBalances[2] populated)');
     // Close Balances so the Pay tab's QrScanner is the top surface again before the camera scan.
     await driver.click('btn-balances-close', { timeoutMs: 5_000 });
@@ -107,9 +109,9 @@ export async function run() {
     // The display is "Pay 0.050000 USDC" — driven by fmtCurrencyAmount(catalog, 2, "50000"):
     //   decimals = display_decimals=6 from the descriptor; unit = backing_symbol="USDC".
     //   fmtAsset("50000", 6, "USDC") = "0.050000 USDC" (zero-padded to 6 fractional places).
-    // NOT "$0.05" — fmtCurrencyAmount uses backing_symbol as the suffix, not currencySymbol's glyph.
-    // A 2-decimal (DEMO) mis-encode would render 50000 raw as ∂500.00 — the 6-dec display is the
-    // precision contract proof.
+    // NOT "$0.05" — fmtCurrencyAmount uses backing_symbol as the unit suffix, not currencySymbol's
+    // glyph. A 2-decimal (DEMO) mis-encode would render 50000 raw as ∂500.00 — the 6-dec display is
+    // the precision contract proof.
     await driver.findByTestID('pay-amount', { timeoutMs: 5_000 });
     const payAmt = await driver.readText('pay-amount');
     assertIncludes(payAmt, EXPECTED_DISPLAY, `review should show "Pay ${EXPECTED_DISPLAY}" (locked-asset display at 6 decimals), got "${payAmt}"`);
@@ -122,6 +124,8 @@ export async function run() {
     //     The click landing on Paid is the proof; a disabled button would time out. This is the
     //     isPayableAsset gate (ITEM 2) passing for a known asset — currency 2 is CkEthErc20, a
     //     payable family, so the review renders the sign button (not the fail-closed branch).
+    //     A's app signs the icrc1_transfer with the catalog fee (10_000 raw) — the gateway's fee
+    //     check passes and 50_000 lands at B's principal (the fee is charged to the sender).
     console.log('[31-ckusdc-pay] clicking btn-approve (sign + settle on currency 2)…');
     await driver.click('btn-approve', { timeoutMs: 5_000 });
     const paid = await driver.waitForText('Paid', { timeoutMs: 10_000 });
@@ -131,8 +135,9 @@ export async function run() {
     assertIncludes(paidBody, EXPECTED_DISPLAY, `Paid screen should show "${EXPECTED_DISPLAY}" (6-decimal ckUSDC amount), got body:\n${paidBody.slice(0, 400)}`);
     console.log(`[31-ckusdc-pay] ✓ Paid reached: ${EXPECTED_DISPLAY}`);
 
-    // --- B was credited on currency 2 (the request's exact asset — no substitution). -------------
-    // Assert the raw amount is byte-exact: 50_000 raw 6-decimal units credited (no float loss).
+    // --- B was credited on currency 2 at her principal (the request's exact asset — no
+    //     substitution). Assert the raw amount is byte-exact: 50_000 raw 6-decimal units credited
+    //     (no float loss; the 10_000 fee came out of A's side).
     const bobAfter = await getBalance(relayBaseURL, bob.publicHex, CKUSDC_CURRENCY);
     assertEqMoney(bobAfter, PAY_RAW, 'payee B ckUSDC balance after settle');
     console.log(`[31-ckusdc-pay] ✓ B credited ${bobAfter} raw ckUSDC on currency 2 (= 0.050000 USDC, byte-exact)`);
@@ -155,4 +160,3 @@ function assertEqMoney(actual, expected, label) {
 if (import.meta.url === `file://${process.argv[1]}`) {
   run().catch(async (e) => { console.error(`\n[31-ckusdc-pay] RED: ${e.stack || e.message || e}\n`); process.exit(1); });
 }
-

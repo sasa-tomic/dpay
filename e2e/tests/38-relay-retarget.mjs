@@ -6,21 +6,26 @@
 // never proves the poll actually retargets mid-session. This flow does.
 //
 // Gold-standard proof (second-relay variant): onboard on relay A (∂100.00 from the faucet) → spawn a
-// SECOND independent relay B → seed a DISTINCT DEMO balance on B (∂500.00) for the SAME account →
-// switch the app to relay B via Settings (btn-relay-apply) → assert the header balance changes from
-// ∂100.00 to ∂500.00. This proves the poll BOTH stopped hitting A AND started hitting B (the full
-// retarget contract). The dead-relay variant would only prove the poll stopped hitting A.
+// SECOND independent relay B → fund a DISTINCT DEMO balance on B (∂500.00) for the SAME account via
+// B's own faucet → switch the app to relay B via Settings (btn-relay-apply) → assert the header
+// balance changes from ∂100.00 to ∂500.00. This proves the poll BOTH stopped hitting A AND started
+// hitting B (the full retarget contract). The dead-relay variant would only prove the poll stopped
+// hitting A.
 //
-// seedDeposit/refreshDeposit take the relay URL as an explicit parameter (a direct HTTP POST), so
-// there is no seed-targeting ambiguity: we seed B directly without switching the app first. The
-// relay-switch propagates LIVE: SettingsSheet.applyRelay → setRelayUrl → App state → Wallet prop →
-// the balance-poll effect re-runs on the new relayUrl (no reload needed).
+// IC-rail note (2026-08-19 cutover): gateway state is PER-RELAY-PROCESS. Relay B's fake-IC gateway
+// starts EMPTY — crediting it via B's own `/api/v1/faucet` (which mints at the account's principal
+// on B's gateway) is exactly the honest "the new relay sees a different position" scenario the
+// retarget must surface. The faucet helper takes the relay URL as an explicit parameter, so there is
+// no fund-targeting ambiguity: we fund B directly without switching the app first. The relay-switch
+// propagates LIVE: SettingsSheet.applyRelay → setRelayUrl → App state → Wallet prop → the
+// balance-poll effect re-runs on the new relayUrl (no reload needed).
 //
-// Selector contract: `btn-settings`, `settings-relay`, `btn-relay-apply`, `btn-settings-close`.
-import { setup, assert, onboardWallet, accountOf, seedDeposit, refreshDeposit } from '../harness/lib.mjs';
+// Selector contract: `btn-settings`, `btn-advanced-toggle`, `settings-relay`, `btn-relay-apply`,
+// `btn-settings-close`.
+import { setup, assert, faucetAccount, onboardWallet, accountOf } from '../harness/lib.mjs';
 import { startRelay } from '../harness/relay.mjs';
 
-const SEED_RAW_DEMO_B = 50_000; // ∂500.00 on relay B (distinct from A's ∂100.00 faucet)
+const FUND_RAW_DEMO_B = 50_000; // ∂500.00 on relay B (distinct from A's ∂100.00 faucet)
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -30,7 +35,7 @@ export const meta = {
   name: 'relay-retarget',
   journey: 'system',
   covers: ['relay-retarget', 'settings-relay-switch', 'live-poll'],
-  verifies: 'Settings relay-switch retargets the LIVE balance poll: header changes from A\'s ∂100.00 to B\'s ∂500.00.',
+  verifies: 'Settings relay-switch retargets the LIVE balance poll: header changes from A\'s ∂100.00 to B\'s faucet-funded ∂500.00 (B\'s fresh per-process gateway).',
   timeoutMs: 20000,
 };
 
@@ -38,8 +43,8 @@ export async function run() {
   const start = Date.now();
   console.log('[38-relay-retarget] setup…');
   const env = await setup();
-  // Independent second relay (own FakeLedger + free port). Seeded with a distinct balance so a
-  // retarget is observable as a balance CHANGE, not just an offline flip.
+  // Independent second relay (own fake-IC gateway + free port). Starts EMPTY; funded with a distinct
+  // balance so a retarget is observable as a balance CHANGE, not just an offline flip.
   const r2 = await startRelay();
   try {
     const { driver } = env;
@@ -49,12 +54,12 @@ export async function run() {
     const identity = await accountOf(driver);
     const accountHex = identity.publicHex;
 
-    // Seed a DISTINCT DEMO balance on relay B (∂500.00). Relay A holds ∂100.00 from the faucet, so
-    // after retarget the header MUST change if the poll followed the switch. Direct HTTP POSTs to r2
-    // — no app switch needed (the helper takes the relay URL explicitly).
-    console.log(`[38-relay-retarget] seeding ${SEED_RAW_DEMO_B} raw (∂500.00) on relay B (${r2.baseURL})…`);
-    await seedDeposit(r2.baseURL, accountHex, 0, SEED_RAW_DEMO_B);
-    await refreshDeposit(r2.baseURL, accountHex, 0);
+    // Fund a DISTINCT DEMO balance on relay B (∂500.00). Relay A's gateway holds ∂100.00 from the
+    // faucet, so after retarget the header MUST change if the poll followed the switch. Direct POST
+    // to B's faucet — no app switch needed (the helper takes the relay URL explicitly).
+    console.log(`[38-relay-retarget] funding ${FUND_RAW_DEMO_B} raw (∂500.00) on relay B (${r2.baseURL})…`);
+    const funded = await faucetAccount(r2.baseURL, accountHex, FUND_RAW_DEMO_B);
+    assert(funded.ok, `relay-B faucet should succeed, got status ${funded.status}: ${JSON.stringify(funded.body)}`);
 
     // Switch the app to relay B via Settings. The polls retarget LIVE (SettingsSheet.applyRelay →
     // setRelayUrl → Wallet prop → poll effect re-runs) — no reload needed. The balance-poll hook now

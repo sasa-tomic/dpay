@@ -1,39 +1,38 @@
-// Flow 44 — Withdraw native ckETH to a native ETH address (the family-dispatch UI path).
+// Flow 44 — Withdraw native ckETH to a native ETH address over the IC user-principal rail (W2).
 //
-// Proves the NATIVE-ETH send path end-to-end through the REAL app + relay + FakeLedger: the
-// wallet's native-ETH asset card (currency 5, CkEthErc20 family with token_contract == null) exposes
-// a "Send" affordance (the no-swap offramp gate — `offramp !== Unavailable` AND the family's
-// native-ETH discriminator); opening it signs a WithdrawAuth ON-DEVICE at 18-dec Wei precision and
-// submits to POST /api/v1/withdraw; the FakeLedger's family-aware `withdraw` verifies the signature
-// and debits ckETH from the subaccount (the BTC-family retrieve_btc_min_amount floor does NOT apply —
-// the ckETH minter enforces its own governed minimum). The credited balance is verified DIRECTLY
-// against the real relay's currency-5 balance before + after, AND the UI Balances row drops.
+// Proves the NATIVE-ETH send path end-to-end through the REAL app + fake-IC gateway: the wallet's
+// native-ETH asset (currency 5, CkEthErc20 family with token_contract == null) reaches the SAME
+// "Send to address" sheet, family-dispatched to the ETH branch — the app queries the minter's
+// eip_1559_transaction_price for the live gas quote, signs BOTH envelopes ON-DEVICE (the DpayCore
+// wasm shim — byte-exact vs the Rust core, proven in 00-cross-val): icrc2_approve(spender=minter)
+// for amount+gas on the ckETH ledger (carrying the live icrc1_fee), then withdraw_eth on the
+// minter — each POSTed straight to /api/v2/canister/<canister>/call with a read_state poll
+// reconciling the outcome (the minter's Ok(record{block_index}) reply decoded by rail.ts's
+// frozen-shape parser). Because token_contract is null the sheet shows NO "ckETH for gas" note
+// (that hint is the ckERC20 discriminator — asserted here to lock the family dispatch).
 //
-// This is the browser-driven proof of the canister's family dispatch (CkBtcUtxo vs native-ETH
-// CkEthErc20) that the PocketIC canister tests (73) prove at the settlement layer and the jest
-// golden UI tests prove at the render layer — but NO prior browser flow exercised, because the
-// FakeLedger catalog had no native-ETH currency. Flow 15 (BTC) + flow 44 (native ETH) now cover both
-// family branches of the withdraw surface.
+// Balances are PER-LEDGER on the fake gateway (real ICRC semantics): funding currency 5 credits
+// the ckETH ledger at the wallet principal only. The fake ckETH ledger carries a 1e16 Wei
+// icrc1_fee: the APPROVE step debits that fee, and the minter burn debits the withdrawn Wei, so
+// the honest post-withdraw expectation is SEED − fee − amount (3.99e18 Wei = '3.990000 ETH').
 //
-// Parallel-safe + isolated: a FRESH incognito context (distinct random pubkey) seeded with its own
-// ckETH; the withdraw nonce is app-generated (random 16 bytes, collision-free). Follows flow 15's
-// pattern (seed → refresh → assert balance) but at 18-dec Wei precision (BigInt — the raw values
-// exceed 2^53, so plain JS number arithmetic would lose precision).
+// BigInt discipline: 18-dec Wei exceeds 2^53, so raw values are BigInt and every amount that
+// crosses an HTTP boundary is a decimal STRING (the relay's U64String parses it losslessly).
 //
-// Selector contract: `asset-cketh-select` (the native-ETH row whole-row select — only ONE on-chain
-// asset is funded in this flow so the select is unambiguous), `btn-pay-send` (Pay → "Send to
-// address"), `withdraw-address-input`, `withdraw-amount-input`, `btn-withdraw-confirm`,
-// `withdraw-status`, `btn-copy-destination`, `btn-pay-scan` (flip back to scan). Asset segregation
-// note: native ETH is currency 5, a SEPARATE asset from the `$` DEMO_USD header (currency 0) — the
-// withdraw debits currency 5.
-import { setup, assert, assertEq, seedDeposit, refreshDeposit, getBalance, onboardWallet, accountOf, openBalances, selectCurrency, openPaySend } from '../harness/lib.mjs';
+// Selector contract: `asset-cketh-select` (the native-ETH row whole-row select), `btn-pay-send`
+// (Pay → "Send to address"), `withdraw-address-input`, `withdraw-amount-input`,
+// `btn-withdraw-confirm`, `withdraw-status`, `btn-copy-destination`, `btn-pay-scan` (flip back
+// to scan). Asset segregation note: native ETH is currency 5, a SEPARATE asset from the `$`
+// DEMO_USD header (currency 0) — the withdraw debits currency 5 only.
+import { setup, assert, assertEq, faucetAccount, getBalance, onboardWallet, accountOf, openBalances, selectCurrency, openPaySend } from '../harness/lib.mjs';
 
-const NATIVE_ETH_CURRENCY = 5; // native ckETH — CkEthErc20 + token_contract == null (matches App catalog)
+const NATIVE_ETH_CURRENCY = 5; // native ckETH — CkEthErc20 + token_contract == null (family dispatch)
 // 18-dec Wei. Plain JS numbers lose precision above 2^53 (~9e15), so every raw value is a BigInt and
-// every amount that crosses an HTTP boundary is a decimal STRING (the relay's U64String accepts both).
+// every amount that crosses an HTTP boundary is a decimal STRING.
 const SEED_WEI = 5_000_000_000_000_000_000n; // 5 ETH
+const APPROVE_FEE_WEI = 10_000_000_000_000_000n; // the fake ckETH ledger's icrc1_fee (0.01 ETH)
 const WITHDRAW_ETH = '1'; // user enters "1" (ETH) — the app converts to 1e18 Wei via toUnits(_, 18)
-const WITHDRAW_WEI = 1_000_000_000_000_000_000n; // 1 ETH = 1e18 Wei
+const WITHDRAW_WEI = 1_000_000_000_000_000_000n; // 1 ETH = 1e18 Wei (the minter burn amount)
 // A valid native-ETH destination: 0x + 40 hex (the app's isValidDestinationAddress regex for CkEthErc20).
 const WITHDRAW_ADDR = '0x000000000000000000000000000000000000dead';
 
@@ -44,9 +43,9 @@ export const meta = {
   id: '44',
   name: 'cketh-withdraw',
   journey: 'withdraw',
-  covers: ['native-eth-withdraw', 'cketh', 'family-dispatch', 'withdraw', 'sign', 'settle', 'balance-delta', 'ui-balance-delta'],
-  verifies: 'Withdraw native ckETH: Cash-out button renders for a CkEthErc20 + token_contract=null asset; enter 0x addr + ETH amount → sign on-device at 18-dec Wei → settle; balance debits at both the ledger AND the UI (family-dispatch UI path).',
-  timeoutMs: 20000,
+  covers: ['native-eth-withdraw', 'cketh', 'family-dispatch', 'withdraw', 'icrc2-approve', 'withdraw_eth', 'gas-quote', 'sign', 'settle', 'balance-delta', 'ui-balance-delta'],
+  verifies: 'Withdraw native ckETH: faucet-fund at the principal → enter 0x addr + ETH amount → query the minter gas price + sign approve + withdraw_eth on-device → gateway burns → "Withdrawn ✓"; balance debits fee+amount at both the gateway AND the UI (row drops to 3.990000 ETH).',
+  timeoutMs: 25000,
 };
 
 export async function run() {
@@ -56,7 +55,8 @@ export async function run() {
   try {
     const { driver, relayBaseURL } = env;
 
-    // 1. Onboard → wallet + capture this wallet's account.
+    // 1. Onboard → wallet + capture this wallet's account (pubkey hex → self-authenticating
+    //    principal — the key the fake-IC gateway balances are recorded under).
     console.log('[44-cketh-withdraw] onboarding…');
     await onboardWallet(driver, 'e2e-cketh');
     const identity = await accountOf(driver);
@@ -64,32 +64,34 @@ export async function run() {
     assert(typeof accountHex === 'string' && accountHex.length === 64, `wallet account must be a 32-byte hex pubkey, got "${accountHex}"`);
     console.log(`[44-cketh-withdraw] wallet account: ${accountHex.slice(0, 16)}…`);
 
-    // 2. Seed + credit native ETH (currency 5) WITHOUT opening the deposit sheet: seed via the
-    //    test-helpers route, then drain+credit via /deposit/refresh. The amount is an 18-dec Wei
-    //    decimal STRING (exceeds 2^53 — the U64String deserializer parses it; a raw JSON number would
-    //    lose precision in JS before the request body was even built). The wallet's own balance poll
-    //    then picks up the credited currency-5 balance and renders the native-ETH asset card.
-    console.log(`[44-cketh-withdraw] seeding + crediting ${SEED_WEI} Wei (${Number(SEED_WEI / WITHDRAW_WEI)} ETH)…`);
-    await seedDeposit(relayBaseURL, accountHex, NATIVE_ETH_CURRENCY, String(SEED_WEI));
-    await refreshDeposit(relayBaseURL, accountHex, NATIVE_ETH_CURRENCY);
+    // 2. Fund the ckETH rail at the wallet's PRINCIPAL via the faucet (test-helpers). The amount
+    //    is an 18-dec Wei decimal STRING (exceeds 2^53 — a raw JSON number would lose precision in
+    //    JS before the request body was even built). Per-ledger buckets make it read back EXACTLY.
+    console.log(`[44-cketh-withdraw] faucet-funding ${SEED_WEI} Wei (currency ${NATIVE_ETH_CURRENCY})…`);
+    const fund = await faucetAccount(relayBaseURL, accountHex, String(SEED_WEI), { currency: NATIVE_ETH_CURRENCY });
+    assert(fund.ok, `faucet funding must succeed, got HTTP ${fund.status}: ${JSON.stringify(fund.body)}`);
     const before = await getBalance(relayBaseURL, accountHex, NATIVE_ETH_CURRENCY);
-    assertEq(before, String(SEED_WEI), 'pre-withdraw native-ETH balance');
+    assertEq(before, String(SEED_WEI), 'pre-withdraw native-ETH balance at the principal (per-ledger bucket)');
 
     // 3. Open the Balances sheet; wait for the native-ETH row to appear funded (the balance poll
-    //    credits currency 5), then SELECT ckETH → Pay → "Send to address" (the inline withdraw body,
-    //    family-dispatched to native-ETH withdraw_eth). The send is no longer a per-row Balances
-    //    button — it lives in the Pay tab.
+    //    picks up the faucet credit), then SELECT ckETH (makes it the active asset).
     console.log('[44-cketh-withdraw] opening Balances; waiting for the funded ckETH row…');
     await openBalances(driver);
     await driver.waitForText('5.000000 ETH', { timeoutMs: 8_000 });
 
-    // 4. Select ckETH → Pay → "Send to address". The sheet title reads "Send Ethereum" (native-ETH).
+    // 4. Select ckETH → Pay → "Send to address" (the inline WithdrawSheet body, family-dispatched
+    //    to the native-ETH withdraw_eth branch).
     console.log('[44-cketh-withdraw] selecting ckETH → Pay → Send to address…');
     await selectCurrency(driver, 'cketh');
     await openPaySend(driver);
     await driver.findByTestID('withdraw-address-input', { timeoutMs: 5_000 });
 
-    // 5. Enter the ETH destination + amount (in ETH, >= the 0.001 ETH local floor), then confirm.
+    // 4b. Family-dispatch discriminator: token_contract == null → NO "ckETH for gas" hint (that
+    //     note only renders for ckERC20 sends — flow 48 asserts its presence there).
+    const gasNotePresent = await driver.isPresent('withdraw-gas-note');
+    assert(!gasNotePresent, 'native-ETH sheet must NOT show the ckERC20 "ckETH for gas" note (family dispatch)');
+
+    // 5. Enter the ETH destination + amount (in ETH, >= the 0.01 ETH local floor), then confirm.
     await driver.type('withdraw-address-input', WITHDRAW_ADDR, { timeoutMs: 4_000 });
     await driver.type('withdraw-amount-input', WITHDRAW_ETH, { timeoutMs: 4_000 });
     // The review card appears once a valid amount is entered — proves the app parsed the ETH amount
@@ -98,20 +100,22 @@ export async function run() {
     const reviewTxt = await driver.readText('withdraw-review-amount');
     assert(reviewTxt.includes('1.000000 ETH'), `review should show the ETH amount at 6-dec display precision, got: "${reviewTxt}"`);
 
-    console.log('[44-cketh-withdraw] confirming (signs on-device + submits to /api/v1/withdraw)…');
+    console.log('[44-cketh-withdraw] confirming (gas query + signs approve + withdraw_eth on-device, POSTs to /api/v2)…');
     await driver.click('btn-withdraw-confirm', { timeoutMs: 5_000 });
 
-    // 6. Assert "Withdrawn ✓" — the app signed, submitted, the FakeLedger verified + debited.
-    const ok = await driver.waitForText('Withdrawn', { timeoutMs: 10_000 });
+    // 6. Assert "Withdrawn ✓" — the app fetched the certified IC clock, the minter's gas quote,
+    //    the ledger's icrc1_fee, signed both envelopes, and the gateway executed the approve + burn.
+    const ok = await driver.waitForText('Withdrawn', { timeoutMs: 15_000 });
     const body = await driver.bodyText();
     assert(ok, `withdraw sheet should show "Withdrawn ✓". body excerpt:\n${body.slice(0, 600)}`);
 
-    // 7. The credited path proven directly on the real ledger: the currency-5 balance dropped by the
-    //    withdrawn Wei. BigInt arithmetic — the raw values exceed 2^53 (the DEMO `$` header is
-    //    currency 0, a separate asset; deliberately unmoved).
+    // 7. The debited path proven directly on the fake-IC gateway: the currency-5 balance dropped by
+    //    the APPROVE FEE (the ckETH ledger's icrc1_fee, charged on the approve call) + the
+    //    withdrawn Wei (the minter burn). BigInt arithmetic — the raw values exceed 2^53 (the
+    //    DEMO `$` header is currency 0, a separate per-ledger bucket; deliberately unmoved).
     const after = await getBalance(relayBaseURL, accountHex, NATIVE_ETH_CURRENCY);
-    assertEq(after, String(SEED_WEI - WITHDRAW_WEI), 'post-withdraw native-ETH balance (debited)');
-    console.log(`[44-cketh-withdraw] ✓ native-ETH balance ${SEED_WEI} → ${after} Wei (debited through the REAL app+relay+FakeLedger)`);
+    assertEq(after, String(SEED_WEI - APPROVE_FEE_WEI - WITHDRAW_WEI), 'post-withdraw native-ETH balance (approve fee + minter burn)');
+    console.log(`[44-cketh-withdraw] ✓ native-ETH balance ${before} → ${after} Wei (approve + withdraw_eth through the REAL app+gateway)`);
 
     await driver.screenshot('44-cketh-withdraw');
 
@@ -129,16 +133,17 @@ export async function run() {
     assertEq(clipAfter, WITHDRAW_ADDR, 'clipboard seam holds the destination after copy');
     console.log(`[44-cketh-withdraw] ✓ Copy destination wrote "${WITHDRAW_ADDR}" to the clipboard`);
 
-    // 9. UI balance delta (locks the UI↔ledger agreement): flip the toggle back to "Scan to pay"
-    //    (hides the inline withdraw body), re-open the Balances hub, and assert the ETH row now shows
-    //    the REDUCED remaining balance (4.000000 ETH = 4e18 Wei), not the pre-withdraw 5 ETH.
+    // 9. UI balance delta (locks the UI↔gateway agreement): flip the toggle back to "Scan to pay"
+    //    (hides the inline withdraw body), re-open the Balances hub, and assert the ETH row now
+    //    shows the REDUCED remaining balance (3.990000 ETH = 3.99e18 Wei), not the pre-withdraw
+    //    5 ETH. A stale balance cache would fail here.
     await driver.click('btn-pay-scan', { timeoutMs: 5_000 });
     await openBalances(driver);
-    const reduced = await driver.waitForText('4.000000 ETH', { timeoutMs: 10_000 });
+    const reduced = await driver.waitForText('3.990000 ETH', { timeoutMs: 10_000 });
     const balBody = await driver.bodyText();
-    assert(reduced, `Balances ETH row should show the reduced 4.000000 ETH (4e18 Wei remaining) after the withdraw. body excerpt:\n${balBody.slice(0, 500)}`);
-    assert(!balBody.includes('5.000000 ETH'), 'Balances must NOT still show the pre-withdraw 5 ETH (stale facade cache?)');
-    console.log('[44-cketh-withdraw] ✓ UI native-ETH balance dropped to 4.000000 ETH (matches the ledger delta)');
+    assert(reduced, `Balances ETH row should show the reduced 3.990000 ETH (${SEED_WEI - APPROVE_FEE_WEI - WITHDRAW_WEI} Wei remaining) after the withdraw. body excerpt:\n${balBody.slice(0, 500)}`);
+    assert(!balBody.includes('5.000000 ETH'), 'Balances must NOT still show the pre-withdraw 5 ETH (stale balance cache?)');
+    console.log('[44-cketh-withdraw] ✓ UI native-ETH balance dropped to 3.990000 ETH (matches the gateway delta)');
 
     const elapsed = ((Date.now() - start) / 1000).toFixed(2);
     console.log(`[44-cketh-withdraw] GREEN in ${elapsed}s`);

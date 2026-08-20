@@ -2,29 +2,33 @@
 // (MC5: the payer sees + pays the EXACT requested asset; the balance check uses ONLY that asset's
 // balance; dpay never swaps).
 //
-// Wallet A "e2e-alice" onboards (faucet-funded $100 DEMO = 10000 cents) and is then SEEDED ckBTC
-// (currency 1) via the test-helpers deposit/seed route + a refresh (mirrors flow 24). A's app poll
-// surfaces the seeded ckBTC balance as `asset-ckbtc` "0.00060000 BTC" — this PROVES assetBalances[1]
-// is populated + flows into PayMode's review gate.
+// Wallet A "e2e-alice" onboards (faucet-funded ∂100 DEMO = 10000 cents) and is then funded ckBTC
+// (currency 1) at her PRINCIPAL via the faucet `{account, currency: 1, amount}` — the IC-rail
+// deposit-simulation seam (the test/deposit/seed route died with the facade). A's app poll surfaces
+// the funded ckBTC balance as `asset-ckbtc` "0.00060000 BTC" — this PROVES assetBalances[1] is
+// populated + flows into PayMode's review gate.
 //
 // Then wallet B "Bob" (in-test keypair) builds a ckBTC request: 50000 sats (0.00050000 BTC). A
 // scans it via the camera seam. The KEY assertion: the OLD code would gate Approve as insufficient
 // because `req.amount (50000) > shownBalance (10000 cents)` — a cross-asset comparison that is
 // nonsense (sats vs cents). The NEW code (MC5) checks `assetBalances[1] (60000 sats) >= req.amount
-// (50000 sats)` → sufficient → Approve is ENABLED → the click succeeds → settlement lands on
-// currency 1's ledger (B credited 50000 ckBTC sats). The review also displays "0.00050000 BTC" (NOT
-// a misleading "$500.00") — the locked-asset display.
+// (50000 sats)` → sufficient → Approve is ENABLED → the click succeeds → A's app signs an
+// icrc1_transfer envelope (payee = B's principal, memo = the request nonce) + submits it to the
+// fake-IC gateway → settlement lands on currency 1's ledger (B credited 50000 ckBTC sats). The
+// review also displays "0.00050000 BTC" (NOT a misleading "$500.00") — the locked-asset display.
 //
 // Asserts:
-//   - After seeding, A's app shows `0.00060000 BTC` (assetBalances[1] populated through the poll).
+//   - After funding, A's app shows `0.00060000 BTC` (assetBalances[1] populated through the poll).
 //   - The review's pay-amount reads "Pay 0.00050000 BTC" (locked-asset display, no `$`).
 //   - The review names the merchant "Bob" (from the request bytes).
 //   - btn-approve is NOT disabled (the per-asset balance gate passes), clicking it lands on Paid.
-//   - B's ckBTC balance (currency 1) grew by 50000 sats (correct ledger settlement).
+//   - B's ckBTC balance (currency 1) grew by 50000 sats (correct ledger settlement at the principal).
+//   - The payer's Ledger row renders the EXACT ckBTC units ("0.00050000 BTC", no `$`).
 //
 // Selector contract: `balance` (header → Balances), `asset-ckbtc` (the BTC row in Balances),
 // `btn-balances-close`, `pay-amount`, `btn-approve`. Camera seam: `window.__DPAY_TEST_SCAN(qr)`.
-import { setup, assert, assertIncludes, getBalance, onboardWallet, accountOf, seedDeposit, refreshDeposit, openBalances } from '../harness/lib.mjs';
+// Value seam: POST /api/v1/faucet {account, currency: 1, amount}.
+import { setup, assert, assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf, openBalances } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
 const CKBTC_CURRENCY = 1;
@@ -39,7 +43,7 @@ export const meta = {
   name: 'asset-pay',
   journey: 'pay',
   covers: ['asset-pay', 'ckbtc', 'per-asset-balance', 'locked-asset-display', 'ledger-units', 'review-short-payee'],
-  verifies: 'ckBTC pay: review shows \'0.00050000 BTC\' (no $) + short pubkey (U-F5); per-asset balance gate (60000≥50000 sats) → settles on currency 1; Ledger row shows the exact ckBTC units.',
+  verifies: 'ckBTC pay (faucet-funded at principal): review \'0.00050000 BTC\' (no $) + short pubkey (U-F5); per-asset balance gate (60000≥50000 sats) → app-signed icrc1_transfer settles on currency 1; Ledger row shows the exact ckBTC units.',
   timeoutMs: 20000,
 };
 
@@ -50,26 +54,27 @@ export async function run() {
   try {
     const { driver, relayBaseURL } = env;
 
-    // --- A onboards (funded $100 DEMO by the faucet; will also be seeded ckBTC). ----------------
+    // --- A onboards (funded ∂100 DEMO by the faucet; will also be funded ckBTC). ----------------
     console.log('[27-asset-pay] onboarding A (payer)…');
     await onboardWallet(driver, 'e2e-alice');
     const identity = await accountOf(driver);
     const accountHex = identity.publicHex;
 
-    // --- Seed ckBTC for A so assetBalances[1] is non-zero. The refresh drains + credits; the app's
-    //     next balance poll (150ms in the harness) surfaces it as `asset-ckbtc` "0.00060000 BTC". ----
-    console.log(`[27-asset-pay] seeding ${SEED_SATS} sats ckBTC for A…`);
-    await seedDeposit(relayBaseURL, accountHex, CKBTC_CURRENCY, SEED_SATS);
-    await refreshDeposit(relayBaseURL, accountHex, CKBTC_CURRENCY);
+    // --- Fund ckBTC for A at her principal so assetBalances[1] is non-zero. The credit is
+    //     immediate (the faucet credits the fake-IC gateway's principal-keyed ledger); the app's
+    //     next balance poll (150ms in the harness) surfaces it as `asset-ckbtc` "0.00060000 BTC". --
+    console.log(`[27-asset-pay] funding ${SEED_SATS} sats ckBTC for A via faucet…`);
+    const funded = await faucetAccount(relayBaseURL, accountHex, SEED_SATS, { currency: CKBTC_CURRENCY });
+    assert(funded.ok, `faucet ckBTC funding should succeed, got status ${funded.status}: ${JSON.stringify(funded.body)}`);
 
     // Wait for A's app poll to show the ckBTC balance in the Balances BTC row — this PROVES
     // assetBalances[1] is populated (the wallet's parallel per-currency balance poll wrote it;
     // PayMode's review gate reads it). The asset rail no longer lives on the main screen, so the
-    // seeded amount is verified in the Balances sheet (the money hub).
+    // funded amount is verified in the Balances sheet (the money hub).
     console.log('[27-asset-pay] opening Balances; waiting for A’s ckBTC balance to render…');
     await openBalances(driver);
     const seededShown = await driver.waitForText('0.00060000 BTC', { timeoutMs: 10_000 });
-    assert(seededShown, 'A should render 0.00060000 BTC in the Balances BTC row after seeding (assetBalances[1] populated)');
+    assert(seededShown, 'A should render 0.00060000 BTC in the Balances BTC row after funding (assetBalances[1] populated)');
     console.log('[27-asset-pay] ✓ A’s ckBTC balance visible (assetBalances[1] populated)');
     // Close Balances so the Pay tab's QrScanner is the top surface again before the camera scan.
     await driver.click('btn-balances-close', { timeoutMs: 5_000 });
@@ -90,36 +95,39 @@ export async function run() {
     const payAmt = await driver.readText('pay-amount');
     assertIncludes(payAmt, '0.00050000 BTC', `review should show "Pay 0.00050000 BTC" (locked-asset display), got "${payAmt}"`);
     assert(!payAmt.includes('$'), `review must NOT show a dollar amount for a ckBTC request, got "${payAmt}"`);
-  const reviewBody = await driver.bodyText();
-  assertIncludes(reviewBody, 'Bob', 'review should name the merchant (from the request bytes)');
-  // U-F5 (asset rail twin of flow 26): the dim short-payee line under the merchant name.
-  await driver.findByTestID('review-payee', { timeoutMs: 5_000 });
-  const reviewPayee = await driver.readText('review-payee');
-  if (reviewPayee !== `${bob.publicHex.slice(0, 8)}…`) {
-    throw new Error(`[assert] review short-payee line (U-F5): expected ${bob.publicHex.slice(0, 8)}…, got ${JSON.stringify(reviewPayee)}`);
-  }
-  console.log(`[27-asset-pay] ✓ review: ${payAmt} (no $) · names Bob · ${reviewPayee}`);
+    const reviewBody = await driver.bodyText();
+    assertIncludes(reviewBody, 'Bob', 'review should name the merchant (from the request bytes)');
+    // U-F5 (asset rail twin of flow 26): the dim short-payee line under the merchant name.
+    await driver.findByTestID('review-payee', { timeoutMs: 5_000 });
+    const reviewPayee = await driver.readText('review-payee');
+    if (reviewPayee !== `${bob.publicHex.slice(0, 8)}…`) {
+      throw new Error(`[assert] review short-payee line (U-F5): expected ${bob.publicHex.slice(0, 8)}…, got ${JSON.stringify(reviewPayee)}`);
+    }
+    console.log(`[27-asset-pay] ✓ review: ${payAmt} (no $) · names Bob · ${reviewPayee}`);
 
     // --- Approve is NOT disabled: the per-asset balance check (60000 sats >= 50000 sats) passes,
     //     even though the DEMO balance (10000 cents) would have FAILED the old cross-asset gate. The
-    //     click landing on Paid is the proof; a disabled button would time out.
+    //     click landing on Paid is the proof; a disabled button would time out. A's app signs the
+    //     icrc1_transfer envelope itself (payee = B's principal, memo = the request nonce) and
+    //     submits it to the fake-IC gateway — the real app-driven rail path.
     console.log('[27-asset-pay] clicking btn-approve (sign + settle on currency 1)…');
     await driver.click('btn-approve', { timeoutMs: 5_000 });
     const paid = await driver.waitForText('Paid', { timeoutMs: 10_000 });
     assert(paid, 'payer should reach Paid after settling the ckBTC payment');
     console.log('[27-asset-pay] ✓ Paid reached (per-asset balance gate let the ckBTC payment through)');
 
-    // --- B was credited on currency 1 (the request's exact asset — no substitution). -------------
+    // --- B was credited on currency 1 at her principal (the request's exact asset — no
+    //     substitution). ckBTC carries no fee on the fake catalog → the full 50000 lands.
     const bobAfter = await getBalance(relayBaseURL, bob.publicHex, CKBTC_CURRENCY);
     assertEqMoney(bobAfter, PAY_SATS, 'payee B ckBTC balance after settle');
     console.log(`[27-asset-pay] ✓ B credited ${bobAfter} ckBTC sats on currency 1`);
 
     // --- Ledger row exact units (closes the MC5 coverage gap): the payer's transaction history row
     //     must render the ckBTC payment in its OWN asset's units — "−0.00050000 BTC" (Ledger.tsx
-    //     composes the U+2212 minus + fmtCurrencyAmount) — NOT a misleading dollar amount. The OLD
-    //     familyDisplay() path would have NPE'd or shown `$`; fmtCurrencyAmount is fail-closed. This
-    //     is the assertion FLOWS.md documented as missing (the row's exact units post multi-currency
-    //     settle). 'RECENT' is uppercased via CSS text-transform (matches flow 07's anchor). ---------
+    //     composes the U+2212 minus + fmtCurrencyAmount) — NOT a misleading dollar amount. The
+    //     history hook fetches EVERY catalog currency, so the currency-1 rail row lands regardless
+    //     of the active asset. 'RECENT' is uppercased via CSS text-transform (matches flow 07's
+    //     anchor).
     await driver.click('tab-transactions', { timeoutMs: 5_000 });
     const hasRecent = await driver.waitForText('RECENT', { timeoutMs: 8_000 });
     assert(hasRecent, 'the Ledger should render the ckBTC payment row once it lands in history');

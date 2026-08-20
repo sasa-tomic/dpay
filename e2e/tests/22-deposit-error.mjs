@@ -32,7 +32,7 @@ export const meta = {
   journey: 'deposit',
   covers: ['deposit-error', 'offline', 'graceful'],
   verifies: 'Relay unreachable when opening the deposit sheet → honest error (\'Check connection\'), no spinner-forever.',
-  timeoutMs: 15000,
+  timeoutMs: 25000,
 };
 
 export async function run() {

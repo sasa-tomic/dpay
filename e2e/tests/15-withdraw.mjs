@@ -1,24 +1,39 @@
-// Flow 15 — Withdraw ckBTC to a native BTC address (W2) end-to-end through the REAL app + relay.
+// Flow 15 — Withdraw ckBTC to a native BTC address over the IC user-principal rail (W2).
 //
-// Proves the WITHDRAWAL path (the one-way valve's other direction): the wallet's ckBTC asset card
-// exposes a "Withdraw" affordance; opening it signs a WithdrawAuth ON-DEVICE (the DpayCore shim —
-// byte-exact vs the Rust core, proven in 00-cross-val) and submits to POST /api/v1/withdraw; the
-// FakeLedger verifies the signature and debits ckBTC from the subaccount. The credited balance is
-// verified DIRECTLY against the real relay's currency-1 balance before + after.
+// Proves the WITHDRAWAL path (the one-way valve's other direction) end-to-end through the REAL
+// app + fake-IC gateway: the "Send to address" sheet signs BOTH envelopes ON-DEVICE (the DpayCore
+// wasm shim — byte-exact vs the Rust core, proven in 00-cross-val): icrc2_approve(spender=minter)
+// for the EXACT amount on the ckBTC ledger (carrying the live icrc1_fee), then
+// retrieve_btc_with_approval on the minter — each POSTed straight to
+// /api/v2/canister/<canister>/call with a read_state poll reconciling the outcome (the minter's
+// Ok(record{block_index}) reply decoded by rail.ts's frozen-shape parser). The gateway burns the
+// approved amount at the user's PRINCIPAL; the debit is verified DIRECTLY against the relay's
+// balance route before + after, AND the UI Balances row drops.
 //
-// Parallel-safe + isolated: a FRESH incognito context (distinct random pubkey) seeded with its own
-// ckBTC; the withdraw nonce is app-generated (random 16 bytes, collision-free). Follows flow 05's
-// pattern (seed → refresh → assert balance).
+// Balances are PER-LEDGER on the fake gateway (real ICRC semantics): funding a currency credits
+// ITS ledger at the wallet principal only — the onboarding ∂100 DEMO credit (currency 0) does not
+// touch it. This fake's ckTESTBTC has no ledger fee (fee None), so the debit is EXACTLY the
+// withdrawn amount.
 //
-// Selector contract: `balance` (header → Balances), `asset-ckbtc-select` (the BTC row whole-row
-// select), `btn-pay-send` (Pay → "Send to address"), `withdraw-address-input`,
-// `withdraw-amount-input`, `btn-withdraw-confirm`, `withdraw-status`, `btn-copy-destination` (L3),
-// `btn-withdraw-done` (success-screen Done). Asset segregation note (same as flow 05): ckBTC is
-// currency 1, a SEPARATE asset from the `$` DEMO_USD header — the withdraw debits currency 1.
-import { setup, assert, assertEq, seedDeposit, refreshDeposit, getBalance, onboardWallet, accountOf, openBalances, selectCurrency, openPaySend } from '../harness/lib.mjs';
+// WHY currency 6 (ckTESTBTC), not 1 (ckBTC): the fake catalog gives ckTESTBTC its OWN ledger but
+// the SAME CKBTC minter text — and the gateway's minter→home-ledger map is keyed by MINTER TEXT
+// (last catalog row wins), so minters[CKBTC] points at ckTESTBTC's ledger. A currency-1 approve
+// therefore lands on '2vxsx-fae' while the minter's burn looks under ckTESTBTC's ledger →
+// "insufficient allowance" on the FAKE only (a fake-fidelity gap, not an app bug). Currency 6
+// drives the byte-identical app path (CkBtcUtxo family, the SAME minter principal, approve +
+// retrieve_btc_with_approval, retrieve floor 50_000 sats) with the consistent fake wiring. When
+// the fake gives ckTESTBTC a distinct minter principal, flip BTC_CURRENCY to 1 + 'ckbtc'.
+//
+// Selector contract: `balance` (header → Balances), `btn-toggle-testnet` (reveal the testnet
+// row), `asset-ckbtc-testnet-select` (the row whole-row select), `btn-pay-send` (Pay →
+// "Send to address"), `withdraw-address-input`, `withdraw-amount-input`, `btn-withdraw-confirm`,
+// `withdraw-status`, `btn-copy-destination` (L3), `btn-withdraw-done` (success-screen Done),
+// `btn-pay-scan` (flip back to scan).
+import { setup, assert, assertEq, assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf, openBalances, selectCurrency, openPaySend } from '../harness/lib.mjs';
 
-const DEPOSIT_CURRENCY = 1; // ckBTC — matches App.tsx DEPOSIT_CURRENCY
-const SEED_SATS = 100_000;   // 0.00100000 BTC
+const BTC_CURRENCY = 6; // ckTESTBTC — the CkBtcUtxo withdraw path (see the header note)
+const BTC_ASSET_KEY = 'ckbtc-testnet';
+const SEED_SATS = 100_000;   // = 0.00100000 BTC
 const WITHDRAW_BTC = '0.00050000'; // 50_000 sats == retrieve_btc_min_amount
 const WITHDRAW_SATS = 50_000;
 const WITHDRAW_ADDR = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
@@ -30,9 +45,9 @@ export const meta = {
   id: '15',
   name: 'withdraw',
   journey: 'withdraw',
-  covers: ['withdraw', 'sign', 'settle', 'clipboard', 'balance-delta', 'destination-copy', 'ui-balance-delta'],
-  verifies: 'Withdraw ckBTC: enter addr + amount → sign on-device → settle; success screen + Copy destination; balance debits at both the ledger AND the UI (Balances row drops to 0.00050000 BTC).',
-  timeoutMs: 20000,
+  covers: ['withdraw', 'icrc2-approve', 'retrieve_btc_with_approval', 'sign', 'settle', 'clipboard', 'balance-delta', 'destination-copy', 'ui-balance-delta'],
+  verifies: 'Withdraw ckBTC: faucet-fund at the principal → enter addr + amount → sign approve + retrieve on-device → gateway burns → "Withdrawn ✓" + Copy destination; balance debits at both the gateway AND the UI (row drops to 0.00050000 BTC).',
+  timeoutMs: 25000,
 };
 
 export async function run() {
@@ -42,7 +57,8 @@ export async function run() {
   try {
     const { driver, relayBaseURL } = env;
 
-    // 1. Onboard → wallet + capture this wallet's account.
+    // 1. Onboard → wallet + capture this wallet's account (pubkey hex → self-authenticating
+    //    principal — the key the fake-IC gateway balances are recorded under).
     console.log('[15-withdraw] onboarding…');
     await onboardWallet(driver, 'e2e-withdraw');
     const identity = await accountOf(driver);
@@ -50,27 +66,28 @@ export async function run() {
     assert(typeof accountHex === 'string' && accountHex.length === 64, `wallet account must be a 32-byte hex pubkey, got "${accountHex}"`);
     console.log(`[15-withdraw] wallet account: ${accountHex.slice(0, 16)}…`);
 
-    // 2. Seed + credit ckBTC (currency 1) WITHOUT opening the deposit sheet: seed via the
-    //    test-helpers route, then drain+credit via /deposit/refresh. The wallet's own 2.5s balance
-    //    poll then picks up the credited currency-1 balance and renders the asset card.
-    console.log(`[15-withdraw] seeding + crediting ${SEED_SATS} sats ckBTC…`);
-    await seedDeposit(relayBaseURL, accountHex, DEPOSIT_CURRENCY, SEED_SATS);
-    await refreshDeposit(relayBaseURL, accountHex, DEPOSIT_CURRENCY);
-    const before = await getBalance(relayBaseURL, accountHex, DEPOSIT_CURRENCY);
-    assertEq(before, String(SEED_SATS), 'pre-withdraw ckBTC balance');
+    // 2. Fund the ckBTC rail at the wallet's PRINCIPAL via the faucet (test-helpers). The ckBTC
+    //    ledger is fee-free on this fake, so the bucket reads back EXACTLY the seeded sats.
+    console.log(`[15-withdraw] faucet-funding ${SEED_SATS} sats (currency ${BTC_CURRENCY})…`);
+    const fund = await faucetAccount(relayBaseURL, accountHex, SEED_SATS, { currency: BTC_CURRENCY });
+    assert(fund.ok, `faucet funding must succeed, got HTTP ${fund.status}: ${JSON.stringify(fund.body)}`);
+    const before = await getBalance(relayBaseURL, accountHex, BTC_CURRENCY);
+    assertEq(before, String(SEED_SATS), 'pre-withdraw ckBTC balance at the principal (per-ledger bucket)');
 
-    // 3. Open the Balances sheet; wait for the BTC row to appear funded (the balance poll credits
-    //    currency 1), then SELECT ckBTC (makes it the active asset) → Pay → "Send to address" (the
-    //    inline WithdrawSheet body). The on-chain send moved out of Balances into the Pay tab.
-    console.log('[15-withdraw] opening Balances; waiting for the funded ckBTC row…');
+    // 3. Open the Balances sheet, reveal the testnet row, wait for it to appear FUNDED (the
+    //    balance poll picks up the faucet credit), then SELECT it (makes it the active asset).
+    console.log('[15-withdraw] opening Balances; revealing the funded testnet BTC row…');
     await openBalances(driver);
+    await driver.click('btn-toggle-testnet', { timeoutMs: 4_000 });
     await driver.waitForText('0.00100000 BTC', { timeoutMs: 8_000 });
 
-    // 4. Select ckBTC → Pay → "Send to address" (the inline withdraw body).
-    console.log('[15-withdraw] selecting ckBTC → Pay → Send to address…');
-    await selectCurrency(driver, 'ckbtc');
+    // 4. Select the testnet BTC asset → Pay → "Send to address" (the inline WithdrawSheet body).
+    console.log('[15-withdraw] selecting testnet BTC → Pay → Send to address…');
+    await selectCurrency(driver, BTC_ASSET_KEY);
     await openPaySend(driver);
     await driver.findByTestID('withdraw-address-input', { timeoutMs: 5_000 });
+    const sheetBody = await driver.bodyText();
+    assertIncludes(sheetBody, 'native BTC address', 'the withdraw sheet presents the BTC destination surface');
 
     // 5. Enter the BTC destination + amount (in BTC, >= the 0.0005 min), then confirm.
     await driver.type('withdraw-address-input', WITHDRAW_ADDR, { timeoutMs: 4_000 });
@@ -80,26 +97,27 @@ export async function run() {
     const reviewTxt = await driver.readText('withdraw-review-amount');
     assert(reviewTxt.includes('0.00050000 BTC'), `review should show the BTC amount, got: "${reviewTxt}"`);
 
-    console.log('[15-withdraw] confirming (signs on-device + submits to /api/v1/withdraw)…');
+    console.log('[15-withdraw] confirming (signs approve + retrieve on-device, POSTs to /api/v2)…');
     await driver.click('btn-withdraw-confirm', { timeoutMs: 5_000 });
 
-    // 6. Assert "Withdrawn ✓" — the app signed, submitted, the FakeLedger verified + debited.
-    const ok = await driver.waitForText('Withdrawn', { timeoutMs: 10_000 });
+    // 6. Assert "Withdrawn ✓" — the app signed both envelopes, the gateway executed the approve +
+    //    burn. The submit path fetches the certified IC clock (read_state), fetches the ledger's
+    //    icrc1_fee, submits each envelope, and polls read_state to terminal state.
+    const ok = await driver.waitForText('Withdrawn', { timeoutMs: 15_000 });
     const body = await driver.bodyText();
     assert(ok, `withdraw sheet should show "Withdrawn ✓". body excerpt:\n${body.slice(0, 600)}`);
 
-    // 7. The credited path proven directly on the real ledger: the currency-1 balance dropped by the
-    //    withdrawn amount. (The `$` header is currency 0 — a separate asset; deliberately unmoved.)
-    const after = await getBalance(relayBaseURL, accountHex, DEPOSIT_CURRENCY);
-    assertEq(after, String(SEED_SATS - WITHDRAW_SATS), 'post-withdraw ckBTC balance (debited)');
-    console.log(`[15-withdraw] ✓ ckBTC balance ${SEED_SATS} → ${after} sats (debited through the REAL app+relay+FakeLedger)`);
+    // 7. The debited path proven directly on the fake-IC gateway: the ckBTC balance dropped by
+    //    EXACTLY the withdrawn amount (approve == burn amount; no ledger fee on this fake).
+    const after = await getBalance(relayBaseURL, accountHex, BTC_CURRENCY);
+    assertEq(after, String(SEED_SATS - WITHDRAW_SATS), 'post-withdraw ckBTC balance (burned at the principal)');
+    console.log(`[15-withdraw] ✓ ckBTC balance ${before} → ${after} sats (approve + retrieve_btc_with_approval through the REAL app+gateway)`);
 
     await driver.screenshot('15-withdraw');
 
-    // 8. L3 — the success screen exposes a Copy affordance for the destination address (previously a
-    //    raw, long, un-copyable string). Prove the button exists, reads the shown address, and that
-    //    clicking it writes the EXACT destination to the clipboard seam (real navigator.clipboard,
-    //    not the Share noop — same regression surface as flow 04-deposit-copy).
+    // 8. L3 — the success screen exposes a Copy affordance for the destination address. Prove the
+    //    button exists, reads the shown address, and that clicking it writes the EXACT destination
+    //    to the clipboard seam (real navigator.clipboard, not the Share noop).
     await driver.findByTestID('btn-copy-destination', { timeoutMs: 4_000 });
     const dest = await driver.readText('withdraw-destination');
     assertEq(dest, WITHDRAW_ADDR, 'destination address rendered on the success screen');
@@ -111,19 +129,19 @@ export async function run() {
     assertEq(clipAfter, WITHDRAW_ADDR, 'clipboard seam holds the destination after copy');
     console.log(`[15-withdraw] ✓ Copy destination wrote "${WITHDRAW_ADDR}" to the clipboard`);
 
-    // 9. UI balance delta (closes the withdraw coverage gap): the relay-level delta is already proven
-    //    in step 7 (after === SEED_SATS − WITHDRAW_SATS). This step proves the wallet SURFACE reflects
-    //    the debit too — flip the toggle back to "Scan to pay" (hides the inline withdraw body), open
-    //    the Balances hub, and assert the BTC row now shows the REDUCED remaining balance
-    //    (0.00050000 BTC = 50000 sats), not the pre-withdraw 0.00100000 BTC. This locks the UI↔ledger
-    //    agreement (a stale facade `BAL_CACHE` would fail here, showing the old amount).
+    // 9. UI balance delta (closes the withdraw coverage gap): the gateway-level delta is already
+    //    proven in step 7. This step proves the wallet SURFACE reflects the debit too — flip the
+    //    toggle back to "Scan to pay" (hides the inline withdraw body), open the Balances hub,
+    //    and assert the ckBTC row now shows the REDUCED remaining balance (0.00050000 BTC =
+    //    50000 sats), not the pre-withdraw 0.00100000 BTC. This locks the UI↔gateway agreement
+    //    (a stale balance cache would fail here).
     await driver.click('btn-pay-scan', { timeoutMs: 5_000 });
     await openBalances(driver);
     const reduced = await driver.waitForText('0.00050000 BTC', { timeoutMs: 10_000 });
     const balBody = await driver.bodyText();
-    assert(reduced, `Balances BTC row should show the reduced 0.00050000 BTC (50000 sats remaining) after the withdraw. body excerpt:\n${balBody.slice(0, 500)}`);
-    assert(!balBody.includes('0.00100000 BTC'), 'Balances must NOT still show the pre-withdraw 0.00100000 BTC (stale facade cache?)');
-    console.log('[15-withdraw] ✓ UI ckBTC balance dropped to 0.00050000 BTC (matches the ledger delta)');
+    assert(reduced, `Balances ckBTC row should show the reduced 0.00050000 BTC (50000 sats remaining) after the withdraw. body excerpt:\n${balBody.slice(0, 500)}`);
+    assert(!balBody.includes('0.00100000 BTC'), 'Balances must NOT still show the pre-withdraw 0.00100000 BTC (stale balance cache?)');
+    console.log('[15-withdraw] ✓ UI ckBTC balance dropped to 0.00050000 BTC (matches the gateway delta)');
 
     const elapsed = ((Date.now() - start) / 1000).toFixed(2);
     console.log(`[15-withdraw] GREEN in ${elapsed}s`);
