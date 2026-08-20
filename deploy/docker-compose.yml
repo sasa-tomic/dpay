@@ -45,6 +45,13 @@ services:
       # only ever turn it on against a throwaway replica.
       DPAY_ENABLE_FAUCET: ${DPAY_ENABLE_FAUCET:-false}
 
+      # The faucet (agent build): hex Ed25519 seed of the canister CONTROLLER key (the same key
+      # material as DPAY_DFX_IDENTITY's identity.pem). Set → the relay signs its faucet `mint`
+      # calls and POST /api/v1/faucet works (relay-side cooldown + authenticated mint, crediting
+      # the user principal). Unset → the agent is anonymous and the mint is refused by the
+      # canister's require_admin (read-only relay). SECRET: treat like the PEM itself.
+      DPAY_CONTROLLER_SEED: ${DPAY_CONTROLLER_SEED:-}
+
     # Lets DPAY_IC_URL point at a dfx replica running on the host (http://host.docker.internal:4943)
     # — the pre-mainnet rehearsal: the real container, the real agent path, a replica you own.
     extra_hosts:

@@ -8,8 +8,9 @@
 //!   the in-memory [`FakeLedger`] demo catalog.
 //! - [`app`] — the axum HTTP surface: `/api/v1` read routes (`balances`, `transactions`,
 //!   `deposit/info`, `currencies`, `onramp/ckerc20`, `health`, `version`), the ckERC-20 onramp
-//!   metadata, and static hosting (landing page, `/wallet` web app, APK + screenshots,
-//!   `/dpay-core.wasm`).
+//!   metadata, the production faucet (`POST /faucet` — test-helpers: fake-IC credit; agent:
+//!   relay-side [`faucet`] cooldown + authenticated controller-driven canister mint), and static
+//!   hosting (landing page, `/wallet` web app, APK + screenshots, `/dpay-core.wasm`).
 //! - Under `test-helpers`: a fake-IC `/api/v2` gateway — the offline e2e stand-in for icp-api.io
 //!   (never compiled into the prod image).
 //!
@@ -17,6 +18,14 @@
 
 pub mod app;
 pub mod ledger;
+
+/// The agent-build faucet's relay-side cooldown — the resurrection of the old canister faucet's
+/// rate limit (window, granularity and verbatim error text). Compiled whenever the PRODUCTION
+/// faucet route exists (agent — including with test-helpers co-enabled, the live-test config;
+/// the test-helpers-only e2e build's faucet serves the fake-IC gateway instead). Pure logic +
+/// its own unit tests.
+#[cfg(feature = "agent")]
+pub mod faucet;
 
 /// The real ic-agent read path (talks to a live IC — the facade catalog + ICRC ledgers). Behind
 /// the `agent` feature so the fast in-memory inner loop stays offline; slots in behind the same

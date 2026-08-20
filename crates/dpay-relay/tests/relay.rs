@@ -71,6 +71,7 @@ async fn state_with_fake(ledger: FakeLedger) -> (AppState, Arc<FakeLedger>, Arc<
 /// POST /api/v1/faucet — the demo on-ramp (test-helpers). `amount_json` is a pre-rendered JSON
 /// value for the amount (quoted decimal string OR raw number — the deserializer takes both);
 /// `None` omits the field (the faucet's default top-up).
+#[cfg(not(feature = "agent"))]
 fn faucet_json(account_hex: &str, amount_json: Option<&str>) -> Request<Body> {
     let body = match amount_json {
         Some(a) => format!("{{\"account\":\"{account_hex}\",\"amount\":{a}}}"),
@@ -162,9 +163,16 @@ async fn version_route_reports_baked_commit() {
 }
 
 // --- faucet + balance (test-helpers fixtures over the fake-IC gateway) ------
+//
+// These pin the FAKE-IC /faucet branch, which serves the route only when `agent` is NOT compiled
+// in (the offline e2e/test-relay build). With both features on — the live-test config — the
+// PRODUCTION agent branch owns POST /faucet (relay-side cooldown + authenticated canister mint,
+// covered by live.rs `live_faucet_mints_at_user_principal_with_relay_side_cooldown`), so these
+// fake-gateway assertions don't apply there and are compiled out.
 
 /// The faucet still MINTS, so on any real ledger the relay disables it. Disabled means the route
 /// is *gone* (404) and, crucially, no money is created at the user's principal on the gateway.
+#[cfg(not(feature = "agent"))]
 #[tokio::test]
 async fn faucet_disabled_mints_nothing() {
     let merchant = keypair();
@@ -190,6 +198,7 @@ async fn faucet_disabled_mints_nothing() {
 /// where a signed icrc1_transfer spends from. The response balance and GET /api/v1/balance/{hex}
 /// agree, and the amount is the requested one; an omitted amount is the demo's default 10_000
 /// ($100.00 in minor units).
+#[cfg(not(feature = "agent"))]
 #[tokio::test]
 async fn faucet_enabled_mints() {
     let merchant = keypair();
@@ -219,6 +228,7 @@ async fn faucet_enabled_mints() {
 /// zone the old `number`/`Double` path collapsed). A faucet credit of 2^53+1 — the canonical probe,
 /// `Number(9007199254740993) === 9007199254740992` is lossy via `number` — must return as the EXACT
 /// decimal string, and the (string-OR-number-accepting) deserializer must parse a quoted amount.
+#[cfg(not(feature = "agent"))]
 #[tokio::test]
 async fn amounts_serialize_as_decimal_string_above_2p53() {
     let merchant = keypair();
@@ -256,6 +266,7 @@ async fn amounts_serialize_as_decimal_string_above_2p53() {
 /// healthy CBOR, a garbage envelope on `call` is a clean 400 (signature verification failed), and
 /// without the gateway attached the whole namespace is a 404 — as is each test-only fixture route
 /// that needs it (faucet → 503 "not attached" contract instead, since the route exists).
+#[cfg(not(feature = "agent"))]
 #[tokio::test]
 async fn api_v2_gateway_mounting_pinned() {
     let merchant = keypair();

@@ -28,6 +28,7 @@ use dpay_core::{
 };
 use ed25519_dalek::SigningKey;
 use icrc_ledger_types::icrc1::account::Account;
+use icrc_ledger_types::icrc1::transfer::{TransferArg, TransferError};
 use icrc_ledger_types::icrc3::blocks::{GetBlocksRequest, GetBlocksResult};
 use pocket_ic::{PocketIc, Time};
 use serde::Deserialize;
@@ -429,8 +430,69 @@ fn ledger_balance(pic: &PocketIc, ledger: Principal, dpay: Principal, pk: [u8; 3
     nat_to_u64(&nat)
 }
 
-fn ledger_chain_len(pic: &PocketIc, ledger: Principal) -> u64 {
+/// RFC 8410 DER prefix for an Ed25519 SubjectPublicKeyInfo — byte-identical to the canister's
+/// `calls::ED25519_DER_PREFIX` and `dpay_icp::principal::DER_PREFIX` (kept inline here because this
+/// crate deliberately does not depend on dpay-icp).
+const ED25519_DER_PREFIX: [u8; 12] = [48, 42, 48, 5, 6, 3, 43, 101, 112, 3, 33, 0];
+
+/// The USER-principal ICRC account for a pubkey — `owner = Principal::self_authenticating(DER(pk))`
+/// (the user's own principal), `subaccount = None`. This is the rail's addressing shape since the
+/// 2026-08-19 user-principal cutover and, since the 2026-08-20 faucet re-target, the account the
+/// facade's `mint` credits (mirrors `calls::user_account_of` in the canister).
+fn user_account(pk: [u8; 32]) -> Account {
+    let mut der = [0u8; 44];
+    der[..12].copy_from_slice(&ED25519_DER_PREFIX);
+    der[12..].copy_from_slice(&pk);
+    Account { owner: Principal::self_authenticating(&der), subaccount: None }
+}
+
+/// Balance read DIRECTLY from an ICRC ledger at the USER-principal account — the shape the app
+/// reads (`icpSelfPrincipal()`, default subaccount) and the shape `mint` credits post-2026-08-20.
+fn user_ledger_balance(pic: &PocketIc, ledger: Principal, pk: [u8; 32]) -> u64 {
+    let acct = user_account(pk);
     let reply = pic
+        .query_call(
+            ledger,
+            Principal::anonymous(),
+            "icrc1_balance_of",
+            encode_one(&acct).unwrap(),
+        )
+        .expect("icrc1_balance_of (user principal) query rejected");
+    let nat: Nat = decode_one(&reply).unwrap();
+    nat_to_u64(&nat)
+}
+
+/// Fund a user's FACADE-CUSTODY account (`{owner: dpay, subaccount: pk}`) with a RAW
+/// `icrc1_transfer` from the ledger's minting account, sent AS the facade principal (which owns
+/// the minting account). Since the 2026-08-20 mint re-target, `mint` credits the USER principal —
+/// so pay/burn-flow tests (which spend from the custody shape) fund via THIS helper instead of the
+/// facade's `mint`. One call = one ledger block (fee-free: transfers from the minting account are
+/// mints, and ICRC-1 does not fee mints). The block carries no nonce memo and debits the minting
+/// account's DEFAULT subaccount, so `reconcile`'s orphan filter (from-subaccount + memo-as-nonce)
+/// skips it.
+fn fund_custody(pic: &PocketIc, ledger: Principal, dpay: Principal, pk: [u8; 32], amount: u64) {
+    let reply = pic
+        .update_call(
+            ledger,
+            dpay, // sender = the facade = the minting-account owner
+            "icrc1_transfer",
+            encode_one(&TransferArg {
+                from_subaccount: None,
+                to: Account { owner: dpay, subaccount: Some(pk) },
+                amount: Nat::from(amount),
+                fee: None,
+                memo: None,
+                created_at_time: None,
+            })
+            .unwrap(),
+        )
+        .expect("custody-funding icrc1_transfer rejected at IC level");
+    decode_one::<Result<Nat, TransferError>>(&reply)
+        .unwrap()
+        .expect("custody-funding transfer ok");
+}
+
+fn ledger_chain_len(pic: &PocketIc, ledger: Principal) -> u64 {    let reply = pic
         .query_call(
             ledger,
             Principal::anonymous(),
@@ -443,11 +505,14 @@ fn ledger_chain_len(pic: &PocketIc, ledger: Principal) -> u64 {
     nat_to_u64(&res.log_length)
 }
 
-/// Fund a user on a MINTABLE currency through the facade (transfers from the ledger's minting
-/// account, which it owns). Returns the facade's `mint` return value — which per the `Ledger` trait
-/// contract is the NEW BALANCE (not the ledger block index). Called as the seeded controller
-/// (`pic_admin`): the privileged `mint` is controller-only (R1), so a test funds accounts by acting
-/// as the controller, exactly as an operator would in production.
+/// Controller `mint` through the facade (transfers from the ledger's minting account, which it
+/// owns). Since the 2026-08-20 faucet re-target this credits the USER-principal account
+/// (`user_account(pk)`), NOT the facade-custody subaccount — so pay/burn-flow tests (which spend
+/// from the custody shape) fund via [`fund_custody`] instead; this helper is for mint-semantics
+/// tests. Returns the facade's `mint` return value — which per the `Ledger` trait contract is the
+/// NEW BALANCE at the user principal (not the ledger block index). Called as the seeded controller
+/// (`pic_admin`): the privileged `mint` is controller-only (R1), exactly as the relay's production
+/// faucet drives it with an authenticated controller identity.
 fn mint(pic: &PocketIc, dpay: Principal, to: [u8; 32], currency: Currency, amount: u64) -> u64 {
     let reply = pic
         .update_call(
@@ -607,11 +672,9 @@ fn pic_admin() -> Principal {
 fn offline_sign_settles_on_demo_currency() {
     let (pic, ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
 
-    // Fund the payer through the facade -> DUSD ledger mint. The facade's `mint` returns the NEW
-    // BALANCE per the `Ledger` trait contract (not the ledger block index) — a fresh account minted
-    // INIT_A therefore reports INIT_A.
-    let minted = mint(&pic, dpay, payer, DEMO_USD, INIT_A);
-    assert_eq!(minted, INIT_A, "facade mint must return the post-mint balance");
+    // Fund the payer's FACADE-CUSTODY account with a raw minting-account transfer (the 2026-08-20
+    // mint re-target moved facade `mint` to the user principal, so custody funding is raw).
+    fund_custody(&pic, ledger_dusd, dpay, payer, INIT_A);
 
     // The funds really live on the DUSD ledger under {owner: dpay, subaccount: payer}.
     assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, payer), INIT_A);
@@ -638,7 +701,7 @@ fn offline_sign_settles_on_demo_currency() {
 #[test]
 fn replay_is_rejected_and_ledger_unchanged() {
     let (pic, ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
-    mint(&pic, dpay, payer, DEMO_USD, INIT_A);
+    fund_custody(&pic, ledger_dusd, dpay, payer, INIT_A);
     let expiry = T0_SECS + 120;
     let nonce = [7u8; 16];
 
@@ -652,7 +715,7 @@ fn replay_is_rejected_and_ledger_unchanged() {
     assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, payer), 9_000);
     assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, merch), 1_000);
     // Only one transfer block ever landed on the ledger.
-    assert_eq!(ledger_chain_len(&pic, ledger_dusd), 2); // mint + 1 transfer
+    assert_eq!(ledger_chain_len(&pic, ledger_dusd), 2); // custody fund + 1 transfer
 }
 
 /// R2 (CRITICAL): a successful `pay` yields a CANISTER-SIGNED receipt whose Ed25519 signature
@@ -663,8 +726,8 @@ fn replay_is_rejected_and_ledger_unchanged() {
 /// the receipt secret.
 #[test]
 fn pay_yields_canister_signed_verifiable_receipt() {
-    let (pic, _ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
-    mint(&pic, dpay, payer, DEMO_USD, INIT_A);
+    let (pic, ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
+    fund_custody(&pic, ledger_dusd, dpay, payer, INIT_A);
     let expiry = T0_SECS + 120;
     let nonce = [0x2a; 16];
 
@@ -689,7 +752,7 @@ fn pay_yields_canister_signed_verifiable_receipt() {
         .expect("pay should succeed");
     assert_eq!(r.receipt_sig.len(), SIG_LEN, "64-byte Ed25519 sig");
     assert_eq!(r.pubkey.len(), PUBKEY_LEN, "32-byte pubkey");
-    assert_eq!(r.block_index, 1, "block index of the transfer (mint was block 0)");
+    assert_eq!(r.block_index, 1, "block index of the transfer (custody fund was block 0)");
 
     // The canister's receipt_pubkey query now returns the same key the receipt carries.
     let reply = pic
@@ -774,8 +837,9 @@ fn pay_yields_canister_signed_verifiable_receipt() {
 /// and the key is unchanged (never rotated) by the successful pay.
 #[test]
 fn receipt_key_generated_before_ledger_commit() {
-    let (pic, _ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
-    // NO mint (payer balance = 0) and NO init_receipt_key — the receipt key does not exist yet.
+    let (pic, ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
+    // NO custody funding (payer balance = 0) and NO init_receipt_key — the receipt key does not
+    // exist yet.
     assert!(receipt_pubkey(&pic, dpay).is_none(), "no receipt key before any pay");
 
     // A pay that fails for insufficient balance. The reject happens after the balance await, before
@@ -796,7 +860,7 @@ fn receipt_key_generated_before_ledger_commit() {
 
     // Happy-path corollary: the first SUCCESSFUL pay's receipt verifies under that exact pre-commit
     // key, and the key is unchanged by the successful pay (generated once, never rotated).
-    mint(&pic, dpay, payer, DEMO_USD, INIT_A);
+    fund_custody(&pic, ledger_dusd, dpay, payer, INIT_A);
     let nonce = [0x22; 16];
     let r = pay(&pic, dpay, signed(&sk, payer, merch, 2_500, nonce, expiry, DEMO_USD))
         .expect("pay should succeed now");
@@ -851,7 +915,7 @@ fn currencies_cannot_cross() {
     // A fresh sender that holds DUSD but NO ckX (setup only pre-funds the original payer on ckX).
     let sender_sk = generate_keypair();
     let sender = sender_sk.verifying_key().to_bytes();
-    mint(&pic, dpay, sender, DEMO_USD, INIT_A);
+    fund_custody(&pic, ledger_dusd, dpay, sender, INIT_A);
     assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, sender), INIT_A);
     assert_eq!(ledger_balance(&pic, ledger_ckx, dpay, sender), 0);
 
@@ -871,7 +935,7 @@ fn currencies_cannot_cross() {
 fn burn_destroys_demo_currency() {
     let (pic, ledger_dusd, _ledger_ckx, dpay, _sk, payer, _merch) = setup();
 
-    mint(&pic, dpay, payer, DEMO_USD, INIT_A);
+    fund_custody(&pic, ledger_dusd, dpay, payer, INIT_A);
     assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, payer), INIT_A);
 
     // Burn half back to the minting account (ICRC convention: transfer to minting account = burn).
@@ -897,7 +961,7 @@ fn burn_destroys_demo_currency() {
 #[test]
 fn over_cap_is_rejected() {
     let (pic, ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
-    mint(&pic, dpay, payer, DEMO_USD, INIT_A);
+    fund_custody(&pic, ledger_dusd, dpay, payer, INIT_A);
     let expiry = T0_SECS + 120;
     let res = pay(&pic, dpay, signed(&sk, payer, merch, CAP + 1, [3u8; 16], expiry, DEMO_USD));
     assert!(res.is_err(), "over-cap must be rejected: {res:?}");
@@ -971,8 +1035,9 @@ fn fail_closed_currency_with_no_cap_rejects_every_pay() {
         controller: Some(pic_admin()),
     };
     pic.install_canister(dpay, dpay_wasm(), encode_one(&dpay_init).unwrap(), None);
-    // Deliberately NO register_currency_meta for FRESH → no cap → fail-closed.
-    mint(&pic, dpay, payer, FRESH, FUND);
+    // Deliberately NO register_currency_meta for FRESH → no cap → fail-closed. Fund the payer's
+    // custody account raw (from the minting account the facade owns).
+    fund_custody(&pic, ledger, dpay, payer, FUND);
     assert_eq!(ledger_balance(&pic, ledger, dpay, payer), FUND);
     let expiry = T0_SECS + 120;
     let res = pay(&pic, dpay, signed(&payer_sk, payer, merch, PAY_AMOUNT, [23u8; 16], expiry, FRESH));
@@ -986,7 +1051,7 @@ fn fail_closed_currency_with_no_cap_rejects_every_pay() {
 #[test]
 fn insufficient_balance_is_rejected() {
     let (pic, ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
-    mint(&pic, dpay, payer, DEMO_USD, INIT_A);
+    fund_custody(&pic, ledger_dusd, dpay, payer, INIT_A);
     let expiry = T0_SECS + 120;
     let res = pay(&pic, dpay, signed(&sk, payer, merch, INIT_A + 1, [4u8; 16], expiry, DEMO_USD));
     assert!(res.is_err(), "insufficient balance must be rejected: {res:?}");
@@ -997,7 +1062,7 @@ fn insufficient_balance_is_rejected() {
 #[test]
 fn expired_auth_is_rejected() {
     let (pic, ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
-    mint(&pic, dpay, payer, DEMO_USD, INIT_A);
+    fund_custody(&pic, ledger_dusd, dpay, payer, INIT_A);
     let expiry = T0_SECS + 30;
     let wire = signed(&sk, payer, merch, 1_000, [9u8; 16], expiry, DEMO_USD);
     pic.advance_time(Duration::from_secs(31));
@@ -1016,7 +1081,7 @@ fn expired_auth_is_rejected() {
 #[test]
 fn pay_to_mint_sentinel_is_rejected() {
     let (pic, ledger_dusd, _ledger_ckx, dpay, sk, payer, _merch) = setup();
-    mint(&pic, dpay, payer, DEMO_USD, INIT_A);
+    fund_custody(&pic, ledger_dusd, dpay, payer, INIT_A);
 
     let expiry = T0_SECS + 120;
     let res = pay(&pic, dpay, signed(&sk, payer, [0xFFu8; 32], 1_000, [13u8; 16], expiry, DEMO_USD));
@@ -1032,7 +1097,7 @@ fn pay_to_mint_sentinel_is_rejected() {
 #[test]
 fn concurrent_pay_same_nonce_settles_once() {
     let (pic, ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
-    mint(&pic, dpay, payer, DEMO_USD, INIT_A);
+    fund_custody(&pic, ledger_dusd, dpay, payer, INIT_A);
 
     let expiry = T0_SECS + 120;
     let nonce = [42u8; 16];
@@ -1065,7 +1130,7 @@ fn concurrent_pay_same_nonce_settles_once() {
 
     // The payer is debited exactly once: INIT_A - 2_500 (fee is 0 on DUSD). No double-spend.
     assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, payer), INIT_A - 2_500);
-    // Exactly one transfer block landed (plus the mint).
+    // Exactly one transfer block landed (plus the custody fund).
     assert_eq!(ledger_chain_len(&pic, ledger_dusd), 2);
 }
 
@@ -1104,8 +1169,9 @@ fn non_zero_fee_settles_with_fee_deducted() {
     // MC2 U1: register a per-currency cap for FEE_CUR so its pays settle (fail-closed otherwise).
     register_currency_meta_cap(&pic, dpay, pic_admin(), FEE_CUR, CAP);
 
-    // Fund the payer (minting is fee-free).
-    mint(&pic, dpay, payer, FEE_CUR, INIT_A);
+    // Fund the payer's custody account raw (minting-account transfer: fee-free even on this
+    // fee-charging ledger, and the custody credit is a MINT-shaped transfer so no fee applies).
+    fund_custody(&pic, ledger, dpay, payer, INIT_A);
     assert_eq!(ledger_balance(&pic, ledger, dpay, payer), INIT_A);
 
     // Pay 2_500: sender loses amount+fee, recipient gains amount.
@@ -1124,7 +1190,11 @@ fn non_zero_fee_settles_with_fee_deducted() {
 }
 
 /// CRITICAL: with a controller set, admin ops (mint/burn/register_ledger) must refuse any other
-/// caller. With no controller (the demo default) they remain open.
+/// caller. With no controller (the demo default) they remain open. Since the 2026-08-20 faucet
+/// re-target, a controller `mint` credits the USER-principal account (`self_authenticating(DER(pk))`,
+/// no subaccount) — the account the app reads — NOT the facade-custody subaccount; this is the
+/// shape the production relay faucet relies on when it drives `mint` with an authenticated
+/// controller identity.
 #[test]
 fn admin_ops_are_gated_by_controller() {
     let admin = pic_admin();
@@ -1142,8 +1212,10 @@ fn admin_ops_are_gated_by_controller() {
     let res: Result<u64, String> = decode_one(&reply).unwrap();
     assert!(res.is_err(), "anonymous mint must be refused when a controller is set: {res:?}");
     assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, payer), 0);
+    assert_eq!(user_ledger_balance(&pic, ledger_dusd, payer), 0, "no user-principal credit either");
 
-    // The controller principal mints successfully.
+    // The controller principal mints successfully — at the USER principal (read directly off the
+    // ledger via icrc1_balance_of on Account{self_authenticating(DER(payer)), None}).
     let reply = pic
         .update_call(
             dpay,
@@ -1153,15 +1225,20 @@ fn admin_ops_are_gated_by_controller() {
         )
         .expect("mint update rejected");
     let res: Result<u64, String> = decode_one(&reply).unwrap();
-    assert!(res.is_ok(), "controller mint must succeed: {res:?}");
-    assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, payer), INIT_A);
+    let new_balance = res.expect("controller mint must succeed");
+    assert_eq!(new_balance, INIT_A, "mint returns the post-mint balance at the user principal");
+    assert_eq!(user_ledger_balance(&pic, ledger_dusd, payer), INIT_A, "credit landed at the user principal");
+    assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, payer), 0, "custody subaccount untouched");
 }
 
 /// MED: mint, pay, and burn all appear in `transactions_of`. Newest-first; O(limit) read.
 #[test]
 fn transactions_of_records_mint_pay_burn() {
-    let (pic, _ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
+    let (pic, ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
+    // The facade mint writes the mint HISTORY row (and credits the user principal); the pay/burn
+    // below spend from the CUSTODY shape, so fund that raw too.
     mint(&pic, dpay, payer, DEMO_USD, INIT_A);
+    fund_custody(&pic, ledger_dusd, dpay, payer, INIT_A);
 
     let expiry = T0_SECS + 120;
     pay(&pic, dpay, signed(&sk, payer, merch, 2_500, [1u8; 16], expiry, DEMO_USD)).unwrap();
@@ -1196,8 +1273,11 @@ fn transactions_of_records_mint_pay_burn() {
 /// decoding for zero-padded fields.
 #[test]
 fn names_and_memo_round_trip_through_history() {
-    let (pic, _ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
+    let (pic, ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
+    // The facade mint writes the mint HISTORY row (asserted below); the named pay spends from the
+    // CUSTODY shape, so fund that raw too.
     mint(&pic, dpay, payer, DEMO_USD, INIT_A);
+    fund_custody(&pic, ledger_dusd, dpay, payer, INIT_A);
 
     let expiry = T0_SECS + 120;
     let nonce = [0x4eu8; 16];
@@ -1289,6 +1369,7 @@ fn open_mode_denies_admin_but_faucet_and_lockdown_work() {
         "open-mode mint must be denied: {err}"
     );
     assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, payer), 0);
+    assert_eq!(user_ledger_balance(&pic, ledger_dusd, payer), 0, "no user-principal credit either");
 
     // register_ledger / register_minter are likewise denied (no anonymous repoint of a currency).
     let reply = pic
@@ -1336,11 +1417,18 @@ fn open_mode_denies_admin_but_faucet_and_lockdown_work() {
         "open mode: one-time lockdown (set_controller) must succeed"
     );
 
-    // Now locked: the controller can mint again (privileged path), anon still cannot.
+    // Now locked: the controller can mint again (privileged path — credits the USER principal
+    // since the 2026-08-20 re-target), anon still cannot.
     assert_eq!(
         mint(&pic, dpay, payer, DEMO_USD, 1u64),
-        FAUCET_AMOUNT + 1,
-        "controller mint ok after lockdown"
+        1,
+        "controller mint ok after lockdown (returns the post-mint USER-principal balance)"
+    );
+    assert_eq!(user_ledger_balance(&pic, ledger_dusd, payer), 1, "credit at the user principal");
+    assert_eq!(
+        ledger_balance(&pic, ledger_dusd, dpay, payer),
+        FAUCET_AMOUNT,
+        "faucet credit (custody shape) untouched by the controller mint"
     );
     let reply = pic
         .update_call(
@@ -1365,7 +1453,8 @@ fn controller_rotation_is_two_step() {
     let next_gov = Principal::self_authenticating(&[7u8; 29]);
     let (pic, ledger_dusd, _ledger_ckx, dpay, _sk, payer, _merch) = setup_with(Some(admin));
 
-    // Seeded controller can mint; anon cannot.
+    // Seeded controller can mint (credits the USER principal — return = post-mint balance there);
+    // anon cannot.
     assert_eq!(mint(&pic, dpay, payer, DEMO_USD, INIT_A), INIT_A);
     let reply = pic
         .update_call(
@@ -1409,9 +1498,12 @@ fn controller_rotation_is_two_step() {
     };
     assert!(!mint_ok(admin), "old controller now refused");
     assert!(mint_ok(next_gov), "new controller mint ok");
-    // Ledger reflects only the successful controller mints: the initial INIT_A fund + the single
-    // post-rotation mint_ok(next_gov) of 1 (the anon + old-controller mint_ok calls were refused).
-    assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, payer), INIT_A + 1);
+    // The ledger reflects only the successful controller mints — at the USER principal since the
+    // 2026-08-20 re-target: the initial INIT_A fund + the single post-rotation mint_ok(next_gov)
+    // of 1 (the anon + old-controller mint_ok calls were refused). The custody subaccount was
+    // never touched.
+    assert_eq!(user_ledger_balance(&pic, ledger_dusd, payer), INIT_A + 1);
+    assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, payer), 0);
 }
 
 /// R1: the self-service faucet mints the FIXED amount and is RATE-LIMITED per (account, currency).
@@ -1491,7 +1583,11 @@ fn register_ledger_is_gated_by_controller() {
 #[test]
 fn upgrade_preserves_nonces_and_history() {
     let (pic, ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
+    // The facade mint writes the mint HISTORY row (asserted below); the pay spends from the CUSTODY
+    // shape, so fund that raw too (the 2026-08-20 mint re-target moved facade mint to the user
+    // principal; the display-cache + history assertions below are unaffected).
     mint(&pic, dpay, payer, DEMO_USD, INIT_A);
+    fund_custody(&pic, ledger_dusd, dpay, payer, INIT_A);
     let expiry = T0_SECS + 120;
     let nonce = [11u8; 16];
     pay(&pic, dpay, signed(&sk, payer, merch, 3_000, nonce, expiry, DEMO_USD)).expect("pay ok");
@@ -1609,7 +1705,9 @@ fn transfer_cycles_rebalances_between_canisters() {
 #[test]
 fn trap_window_lets_a_retry_double_debit_without_reconcile() {
     let (pic, ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
-    mint(&pic, dpay, payer, DEMO_USD, INIT_A);
+    // Fund the payer's CUSTODY account raw (mint re-target: facade mint credits the user principal
+    // now; the pay below spends from custody).
+    fund_custody(&pic, ledger_dusd, dpay, payer, INIT_A);
     let expiry = T0_SECS + 120;
     let nonce = [0x31; 16];
     const AMOUNT: u64 = 2_500;
@@ -1618,7 +1716,7 @@ fn trap_window_lets_a_retry_double_debit_without_reconcile() {
     pay(&pic, dpay, signed(&sk, payer, merch, AMOUNT, nonce, expiry, DEMO_USD)).expect("first pay ok");
     assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, payer), INIT_A - AMOUNT);
     assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, merch), AMOUNT);
-    assert_eq!(ledger_chain_len(&pic, ledger_dusd), 2); // mint + 1 transfer
+    assert_eq!(ledger_chain_len(&pic, ledger_dusd), 2); // custody fund + 1 transfer
 
     // 2. Simulate the trap: reinstall the facade, wiping its SPENT set (the IC would have rolled
     //    back the reservation). The ledger keeps the debit. Re-attach the SAME ledgers + controller.
@@ -1659,7 +1757,8 @@ fn trap_window_lets_a_retry_double_debit_without_reconcile() {
 #[test]
 fn reconcile_repairs_trap_orphan_and_blocks_double_debit() {
     let (pic, ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
-    mint(&pic, dpay, payer, DEMO_USD, INIT_A);
+    // Fund the payer's CUSTODY account raw (mint re-target — see trap_window test note).
+    fund_custody(&pic, ledger_dusd, dpay, payer, INIT_A);
     let expiry = T0_SECS + 120;
     let nonce = [0x32; 16];
     const AMOUNT: u64 = 2_500;
@@ -1708,7 +1807,7 @@ fn reconcile_repairs_trap_orphan_and_blocks_double_debit() {
     assert_eq!(rcp.from, payer.to_vec(), "receipt from matches the orphaned debit");
     assert_eq!(rcp.to, merch.to_vec(), "receipt to matches the orphaned debit");
     assert_eq!(rcp.currency, DEMO_USD, "receipt currency matches");
-    assert_eq!(rcp.block_index, 1, "block_index = start(0) + loop index(1) — mint=0, transfer=1");
+    assert_eq!(rcp.block_index, 1, "block_index = start(0) + loop index(1) — custody fund=0, transfer=1");
     assert_eq!(rcp.receipt_sig.len(), SIG_LEN, "64-byte Ed25519 sig");
     // The signature verifies under the canister's receipt pubkey over the reconstructed claim.
     let qpk = receipt_pubkey(&pic, dpay).expect("receipt key regenerated by reconcile");
@@ -1781,9 +1880,9 @@ fn retired_currency_rejects_pay() {
     // After retire, `pay` on that currency is rejected — `ledger_for(currency)` honors RETIRED and
     // returns Err before any cross-canister transfer. The signed authorization is otherwise valid
     // (in-cap, in-expiry, good signature), so the ONLY thing that can reject it is the retire gate.
-    let (pic, _ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
-    // Fund the payer so balance is not the reject reason.
-    mint(&pic, dpay, payer, DEMO_USD, INIT_A);
+    let (pic, ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
+    // Fund the payer's CUSTODY account raw (mint re-target) so balance is not the reject reason.
+    fund_custody(&pic, ledger_dusd, dpay, payer, INIT_A);
 
     let expiry = T0_SECS + 120;
     // A pay on DEMO_USD succeeds BEFORE retire (sanity: the path works).
@@ -1805,8 +1904,11 @@ fn retire_preserves_transaction_history() {
     // Retire is history-preserving by construction: it marks the id RETIRED but does NOT delete any
     // LEDGERS/MINTERS/CURRENCY_META/ACCOUNT_TXNS rows. A retired currency's prior transactions are
     // still returned by `transactions_of` (the audit trail survives).
-    let (pic, _ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
+    let (pic, ledger_dusd, _ledger_ckx, dpay, sk, payer, merch) = setup();
+    // The facade mint writes the mint HISTORY row (asserted below); the pay spends from the CUSTODY
+    // shape, so fund that raw too (2026-08-20 mint re-target).
     mint(&pic, dpay, payer, DEMO_USD, INIT_A);
+    fund_custody(&pic, ledger_dusd, dpay, payer, INIT_A);
 
     let expiry = T0_SECS + 120;
     let nonce = [0x77u8; 16];

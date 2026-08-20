@@ -13,6 +13,11 @@
 //!     static deposit metadata for the "Add money" sheet.
 //!   - the ckETH-family MINTER's `get_minter_info` (query) — the runtime source for the ckERC20
 //!     onramp's CkDeposit `helper_address` (falls back to the verified constants, logged).
+//!   - the facade's CONTROLLER-GATED `mint` UPDATE, signed with the agent's authenticated
+//!     identity when one is installed ([`AgentLedger::connect_with_identity`] — the
+//!     `DPAY_CONTROLLER_SEED` production faucet, 2026-08-20). Without an identity the agent is
+//!     ANONYMOUS: every method above still works (they are queries / anonymous-safe updates),
+//!     only `faucet_mint` will be refused by the canister's `require_admin`.
 //!
 //! History does NOT come from a facade-maintained index: `transactions_on_ledger` walks the ledger's
 //! own transaction log (icrc3-style `get_transactions`) backwards from `log_length` — see the
@@ -24,6 +29,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use candid::{decode_one, encode_args, encode_one, CandidType, Principal, Nat};
+use ic_agent::identity::BasicIdentity;
 use ic_agent::Agent;
 use icrc_ledger_types::icrc1::account::Account;
 use icrc_ledger_types::icrc3::blocks::GetBlocksRequest;
@@ -201,8 +207,46 @@ impl AgentLedger {
         canister_id: Principal,
         fetch_root_key: bool,
     ) -> Result<Self, LedgerError> {
-        let agent = Agent::builder()
-            .with_url(url)
+        Self::connect_inner(url, canister_id, fetch_root_key, None).await
+    }
+
+    /// [`connect_with`](Self::connect_with) + an AUTHENTICATED identity built from `seed` — the
+    /// raw 32-byte ed25519 seed (RFC 8032 5.1.5) behind the production faucet's controller key
+    /// (`DPAY_CONTROLLER_SEED`, hex; the SAME key material the founder's dfx/`icp-cli` deploy
+    /// identity used, which made it the canister controller). The derived self-authenticating
+    /// principal is what the facade's `require_admin` checks on `mint`.
+    ///
+    /// This is the founder-approved 2026-08-20 trade-off, accepted on the rationale that the
+    /// facade is OUT of the value path post-cutover: a relay-held controller key only exposes
+    /// play-money DEMO minting + canister governance (already founder-managed), while keeping the
+    /// cooldown logic in the relay (cheap to test/tune/redeploy, no canister upgrade cycle).
+    ///
+    /// Test-friendly: live PocketIC tests install the facade with the controller set to this
+    /// seed's self-authenticating principal, then drive the faucet through this constructor.
+    pub async fn connect_with_identity(
+        url: &str,
+        canister_id: Principal,
+        fetch_root_key: bool,
+        seed: [u8; 32],
+    ) -> Result<Self, LedgerError> {
+        Self::connect_inner(url, canister_id, fetch_root_key, Some(seed)).await
+    }
+
+    /// Shared connect: anonymous unless `seed` is given. The anonymous build is the read-only
+    /// default — balance/history/catalog/deposit queries are all unsigned, so the whole read
+    /// surface is unaffected by the identity choice; only the authenticated `mint` (faucet) needs
+    /// the controller key.
+    async fn connect_inner(
+        url: &str,
+        canister_id: Principal,
+        fetch_root_key: bool,
+        seed: Option<[u8; 32]>,
+    ) -> Result<Self, LedgerError> {
+        let mut builder = Agent::builder().with_url(url);
+        if let Some(seed) = seed {
+            builder = builder.with_identity(BasicIdentity::from_raw_key(&seed));
+        }
+        let agent = builder
             .build()
             .map_err(|e| LedgerError::Transient(format!("agent build: {e}")))?;
         if fetch_root_key {
@@ -281,29 +325,49 @@ impl Ledger for AgentLedger {
             .map_err(|_| LedgerError::Transient("icrc1_balance_of result exceeds u64".into()))
     }
 
-    /// History = the ledger's OWN transaction log, walked backwards from `log_length` with
-    /// `get_transactions` (the typed ICRC-3 read exposed by every ic-icrc1-ledger; a free query,
-    /// no facade index involved). Rows are mapped newest-first into the existing [`TxnRecord`]
-    /// shape — the app/hooks/jest/e2e contract is unchanged.
+    /// History = the ledger's OWN transaction log, walked BACKWARDS (newest first) from the
+    /// response's `log_length` snapshot with `get_transactions` (the typed ICRC-3 read exposed by
+    /// every ic-icrc1-ledger; a free query, no facade index involved). Rows are mapped newest-first
+    /// into the existing [`TxnRecord`] shape — the app/hooks/jest/e2e contract is unchanged.
+    ///
+    /// Why backwards: a user's recent transactions live at the log's TAIL. A mature mainnet ledger
+    /// archives its OLDEST blocks (the local log holds only the newest ones), so a forward walk
+    /// from block 0 hits the archived boundary immediately and the user's recent rows are silently
+    /// absent. The walk therefore:
+    ///   1. **Probes** with one `(start=0, length=PAGE)` round trip — every reply carries
+    ///      `log_length`, and for a short log (≤ PAGE blocks) the probe's page IS the whole live
+    ///      log: one round trip total, served reversed. For a longer log the probe's rows (the
+    ///      OLDEST blocks — usually the archived/empty ones) are discarded and only its
+    ///      `log_length` snapshot is used.
+    ///   2. **Walks backwards** in [`HISTORY_PAGE_BLOCKS`] pages from that snapshot: page
+    ///      `[end-PAGE, end)`, rows consumed newest→oldest, so `rows` is globally newest-first
+    ///      with no final reversal. Stops as soon as `limit` matching rows are collected.
+    ///   3. **Terminates** on any of: block 0 reached; an EMPTY page; or a page whose response
+    ///      marks the archived boundary (`archived_transactions` non-empty) — that page serves
+    ///      what it can and ENDS the walk: archived blocks need a per-archive callback fetch this
+    ///      endpoint doesn't do, so history is RECENT-BLOCKS-ONLY — documented behavior, not a
+    ///      silent gap (PocketIC tests never archive, so tests see the full log).
+    ///
+    /// Drift safety: every page anchors on the response's `first_index` (the ACTUAL first block
+    /// index of the returned range — NOT necessarily the requested `start` once archiving is in
+    /// play), the same datum the canister's reconcile walk relies on (`calls.rs`
+    /// `ledger_get_transactions`): block indices are derived as `first_index + i`, and the next
+    /// page's `end` is set to the CURRENT page's `first_index`, so a ledger that serves a
+    /// shifted/short range is re-asked from where it actually served — never skipping or
+    /// double-counting blocks. New blocks landing while the walk runs are simply absent from the
+    /// stale `log_length` snapshot — they appear on the NEXT request (the drift-tolerance
+    /// property the live icrc3 test pins).
+    ///
+    /// Budget: pages of [`HISTORY_PAGE_BLOCKS`] and at most [`HISTORY_MAX_ROUND_TRIPS`] round
+    /// trips total (probe included) — mirroring the canister's reconcile budget
+    /// (RECONCILE_MAX_BLOCKS) so a huge ledger can't wedge the relay; the walk simply stops
+    /// (older rows exist but aren't served).
     ///
     /// Filtering: a row renders when `from` or `to` is the user's account (default subaccount
     /// only — subaccount-keyed flows never show, matching what the app can sign). Kinds:
     /// `Transfer` always; `Mint` always (a mint TO the user renders `in`, with the empty `from`
     /// the app shows as its mint sentinel); `Burn` only when the user is the `from`; `Approve`
     /// never (not a value movement the wallet displays).
-    ///
-    /// Budget: pages of [`HISTORY_PAGE_BLOCKS`] and at most [`HISTORY_MAX_ROUND_TRIPS`] round
-    /// trips — mirroring the canister's reconcile budget (RECONCILE_MAX_BLOCKS) so a huge ledger
-    /// can't wedge the relay; the walk simply stops (older rows exist but aren't served). The
-    /// walk ALSO stops early at the first page whose response marks the start of the archived
-    /// range (`archived_transactions` non-empty): archived blocks need a per-archive callback
-    /// fetch this endpoint doesn't serve, so history is RECENT-BLOCKS-ONLY — documented
-    /// behavior, not a silent gap (PocketIC tests never archive, so tests see the full log).
-    ///
-    /// Drift safety: the walk uses the response's `first_index` (not the requested `start`) as
-    /// the block index base — once a ledger archives, the reply can begin earlier/later than
-    /// asked, and `first_index + i` is the actual block index of row `i` (the canister's
-    /// reconcile walk does the same).
     async fn transactions_on_ledger(
         &self,
         ledger_text: &str,
@@ -315,16 +379,12 @@ impl Ledger for AgentLedger {
             LedgerError::Transient(format!("parse ledger principal '{ledger_text}': {e}"))
         })?;
         let me = user_account(&pubkey);
+        let limit = limit.max(1) as usize;
 
-        // Walk backwards from the newest block. Page 0 uses `start = 0, length = PAGE` as a
-        // log_length probe: every reply carries `log_length`, so one round trip both sizes the
-        // walk and returns the OLDEST page (which for a short log is the whole thing).
-        let mut rows: Vec<TxnRecord> = Vec::new();
-        let mut next_start: u64 = 0; // requested start of the NEXT page (ascending walk, reversed at the end)
-        for _ in 0..HISTORY_MAX_ROUND_TRIPS {
+        let fetch_page = |start: u64, length: u64| async move {
             let arg = encode_args((GetBlocksRequest {
-                start: Nat::from(next_start),
-                length: Nat::from(HISTORY_PAGE_BLOCKS as u64),
+                start: Nat::from(start),
+                length: Nat::from(length),
             },))
             .map_err(|e| LedgerError::Transient(format!("encode get_transactions arg: {e}")))?;
             let reply = tokio::time::timeout(
@@ -341,44 +401,65 @@ impl Ledger for AgentLedger {
                 ))
             })?
             .map_err(|e| LedgerError::Transient(format!("get_transactions query: {e}")))?;
-            let page: GetTransactionsResponse = decode_one(&reply).map_err(|e| {
-                LedgerError::Transient(format!("decode get_transactions reply: {e}"))
-            })?;
-            let page_len = page.transactions.len() as u64;
-            // Drift-safe block index base (see method doc); PocketIC never archives, so this
-            // equals the requested start there — the capture is what makes it prod-safe.
-            let _first_index = page.first_index.0;
-            let total = nat_to_u64(&page.log_length, "log_length")?;
+            decode_one::<GetTransactionsResponse>(&reply)
+                .map_err(|e| LedgerError::Transient(format!("decode get_transactions reply: {e}")))
+        };
 
-            // Rows render oldest→newest within a page (block index = first_index + i). Match,
-            // map, push — `rows` stays ascending across pages, reversed once at the end.
-            for txn in page.transactions.iter() {
+        // 1. Probe: (start=0, length=PAGE). For a short log this page IS the whole live log
+        //    (ascending) — serve it reversed and done in one round trip.
+        let probe = fetch_page(0, HISTORY_PAGE_BLOCKS as u64).await?;
+        let probe_len = probe.transactions.len() as u64;
+        let total = nat_to_u64(&probe.log_length, "log_length")?;
+        let mut rows: Vec<TxnRecord> = Vec::new();
+        let probe_served_upto = nat_to_u64(&Nat(probe.first_index.0.clone()), "first_index")?
+            .saturating_add(probe_len);
+        if probe_served_upto >= total {
+            for txn in probe.transactions.iter().rev() {
                 if let Some(record) = map_icrc_txn(txn, &me, currency) {
                     rows.push(record);
                 }
             }
+            rows.truncate(limit); // newest-first already
+            return Ok(rows);
+        }
 
-            // End-of-walk conditions (checked AFTER consuming the page):
-            //  - served the newest block (start+length reached log_length), or
-            //  - the page is empty (ledger returned nothing for the range), or
-            //  - this page revealed the archived boundary — older blocks live in archives this
-            //    endpoint can't serve, so history is recent-blocks-only.
-            let served_upto = next_start + HISTORY_PAGE_BLOCKS;
-            let archived_boundary = !page.archived_transactions.is_empty();
-            if served_upto >= total || page_len == 0 || archived_boundary {
+        // 2. Long log: DISCARD the probe's rows (the OLDEST live blocks — the user's recent txns
+        //    are at the tail) and walk BACKWARDS from the probe's log_length snapshot.
+        let mut end = total; // exclusive upper block index of the next page
+        for _ in 1..HISTORY_MAX_ROUND_TRIPS {
+            let start = end.saturating_sub(HISTORY_PAGE_BLOCKS);
+            let page = fetch_page(start, end - start).await?;
+            let page_len = page.transactions.len() as u64;
+            // Drift datum: the ACTUAL first block index of the served range (never assume the
+            // requested `start` — the canister reconcile pattern).
+            let first_index = nat_to_u64(&Nat(page.first_index.0.clone()), "first_index")?;
+
+            // Serve this page newest→oldest; across pages `rows` stays globally newest-first.
+            for txn in page.transactions.iter().rev() {
+                if let Some(record) = map_icrc_txn(txn, &me, currency) {
+                    rows.push(record);
+                }
+            }
+            if rows.len() >= limit {
+                break; // enough NEWEST rows — older pages can't add anything the caller renders
+            }
+
+            // Archived boundary: this response could not serve (part of) the asked range from the
+            // local log — the walk stops here (recent-blocks-only; see method doc).
+            if !page.archived_transactions.is_empty() {
                 break;
             }
-            next_start = served_upto;
+            // Empty page or block 0 reached: nothing older exists to ask for.
+            if page_len == 0 || first_index == 0 {
+                break;
+            }
+            // Drift-safe anchor: continue from where the ledger ACTUALLY served, not from the
+            // requested `start` (a shifted/short range is re-asked from its true front; blocks
+            // are never skipped or double-counted).
+            end = first_index;
         }
 
-        // Ascending → newest-first, clamp to the caller's limit. If we exhausted the round-trip
-        // budget before reaching log_length, `rows` simply holds the oldest of what was walked —
-        // but the caller (the /transactions handler) never asks for more than it renders.
-        let limit = limit.max(1) as usize;
-        if rows.len() > limit {
-            rows.drain(..rows.len() - limit);
-        }
-        rows.reverse();
+        rows.truncate(limit);
         Ok(rows)
     }
 
@@ -395,6 +476,17 @@ impl Ledger for AgentLedger {
         .await
         .map(|status_result| status_result.is_ok())
         .unwrap_or(false)
+    }
+
+    async fn faucet_mint(
+        &self,
+        pubkey: &[u8; PUBKEY_LEN],
+        currency: Currency,
+        amount: u64,
+    ) -> Result<u64, LedgerError> {
+        // The trait method is just the seam — the real call + its docs live on the inherent
+        // [`AgentLedger::faucet_mint`](Self::faucet_mint) (same receiver, zero indirection).
+        Self::faucet_mint(self, pubkey, currency, amount).await
     }
 
     async fn deposit_info(&self, currency: Currency) -> Result<DepositInfo, LedgerError> {
@@ -563,6 +655,43 @@ impl AgentLedger {
         let info: CkEthMinterInfoMirror = decode_one(&reply)
             .map_err(|e| LedgerError::Transient(format!("decode get_minter_info reply: {e}")))?;
         Ok(info.deposit_with_subaccount_helper_contract_address)
+    }
+
+    /// The relay faucet's settlement leg: the facade's CONTROLLER-GATED `mint` UPDATE
+    /// `mint(blob pubkey, nat32 currency, nat64 amount) -> Result<nat64, text>`, signed with the
+    /// agent's identity (only [`connect_with_identity`](Self::connect_with_identity) installs
+    /// one; an anonymous agent is REFUSED by the canister's `require_admin`). Since the
+    /// 2026-08-20 re-target the canister credits the USER-principal account
+    /// (`Account{self_authenticating(DER(pubkey)), None}`) — the account the app reads.
+    ///
+    /// A canister `Err(text)` is passed through VERBATIM as `LedgerError::Rejected(text)` (the
+    /// 422 app.rs mapping keeps the body `{error: text}` intact) — the app's Wallet surfaces the
+    /// reason string as-is (N5), so any mint failure text reaches the user unaltered. On success
+    /// returns the NEW post-mint balance at the user principal (the canister's return contract).
+    pub async fn faucet_mint(
+        &self,
+        pubkey: &[u8; PUBKEY_LEN],
+        currency: Currency,
+        amount: u64,
+    ) -> Result<u64, LedgerError> {
+        let arg = encode_args((pubkey.to_vec(), currency, amount))
+            .map_err(|e| LedgerError::Transient(format!("encode mint arg: {e}")))?;
+        let reply = tokio::time::timeout(
+            Duration::from_secs(MINTER_CALL_TIMEOUT_SECS),
+            self.agent
+                .update(&self.canister_id, "mint")
+                .with_arg(arg)
+                .call_and_wait(),
+        )
+        .await
+        .map_err(|_| {
+            LedgerError::Transient(format!("mint timed out after {MINTER_CALL_TIMEOUT_SECS}s"))
+        })?
+        .map_err(|e| LedgerError::Transient(format!("mint update: {e}")))?;
+        decode_one::<Result<u64, String>>(&reply).map_err(|e| {
+            LedgerError::Transient(format!("decode mint reply: {e}"))
+        })?
+        .map_err(|text| LedgerError::Rejected(text))
     }
 }
 

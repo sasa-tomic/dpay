@@ -27,6 +27,20 @@
 //!                           DPAY_IC_URL is a loopback/local address. See `AgentLedger::connect_with`.
 //!   DPAY_ENABLE_FAUCET      (test-helpers build only) serve `POST /api/v1/faucet`, which mints
 //!                           demo funds on the fake-IC gateway (default: true on `memory`)
+//!   DPAY_CONTROLLER_SEED    (ic, agent build) hex-encoded 32-byte Ed25519 seed of the facade
+//!                           canister's CONTROLLER key. When set, the relay's agent signs its
+//!                           calls with this identity and `POST /api/v1/faucet` is served: the
+//!                           relay enforces the cooldown locally and drives the canister's
+//!                           admin-gated `mint`, crediting the USER principal (the 2026-08-20
+//!                           founder-approved faucet design). When unset the agent stays
+//!                           ANONYMOUS — read-only routes are unaffected, but the faucet's mint
+//!                           is refused by the canister's `require_admin` (the route answers
+//!                           422 "unauthorized: admin ops require the controller principal").
+//!                           The seed must be the SAME key material that deployed the canister
+//!                           (`DPAY_DFX_IDENTITY`'s identity.pem): export it with
+//!                           `openssl ec -in identity.pem -text -noout` (the `priv:` half) or
+//!                           `icp-cli identity export-seed` if available; hex, 64 chars. Treat
+//!                           it as a secret (same sensitivity as the PEM itself).
 //!   DPAY_APK_PATH           path to an Android build to serve at `GET /download/dpay.apk` and light
 //!                           up the landing page's download button. Unset → downloads disabled.
 
@@ -274,11 +288,27 @@ async fn connect_ic(url: &str, canister_id: &str, fetch_root_key: bool) -> Arc<d
         eprintln!("dpay-relay: DPAY_CANISTER_ID={canister_id:?} is not a principal: {e}");
         process::exit(EXIT_CONFIG);
     });
-    match dpay_relay::AgentLedger::connect_with(url, principal, fetch_root_key).await {
+    // Optional authenticated identity (the production faucet's controller key, hex Ed25519
+    // seed). Unset → anonymous agent (read-only); set-but-malformed is a CONFIG error, not a
+    // silent anonymous downgrade — an operator who deployed the faucet must not quietly lose it.
+    let seed = parse_controller_seed();
+    let connected = match seed {
+        Some(seed) => {
+            dpay_relay::AgentLedger::connect_with_identity(url, principal, fetch_root_key, seed)
+                .await
+        }
+        None => dpay_relay::AgentLedger::connect_with(url, principal, fetch_root_key).await,
+    };
+    match connected {
         Ok(l) => {
             println!(
-                "reading facade {canister_id} via {url} (root key: {})",
-                if fetch_root_key { "fetched — local replica" } else { "pinned — mainnet" }
+                "reading facade {canister_id} via {url} (root key: {}, identity: {})",
+                if fetch_root_key { "fetched — local replica" } else { "pinned — mainnet" },
+                if seed.is_some() {
+                    "controller — faucet ENABLED (authenticated mint)"
+                } else {
+                    "anonymous — read-only (faucet mint will be refused by the canister)"
+                }
             );
             Arc::new(l)
         }
@@ -287,6 +317,36 @@ async fn connect_ic(url: &str, canister_id: &str, fetch_root_key: bool) -> Arc<d
         Err(e) => {
             eprintln!("dpay-relay: cannot reach the IC ({canister_id} via {url}): {e}");
             process::exit(1);
+        }
+    }
+}
+
+/// Parse `DPAY_CONTROLLER_SEED` (hex Ed25519 seed) into the 32 bytes `BasicIdentity::from_raw_key`
+/// consumes. Accepts an optional `0x` prefix and surrounding whitespace; any other shape is a
+/// config error.
+#[cfg(feature = "agent")]
+fn parse_controller_seed() -> Option<[u8; 32]> {
+    let raw = non_empty("DPAY_CONTROLLER_SEED")?;
+    let hex = raw.strip_prefix("0x").unwrap_or(&raw);
+    let mut seed = [0u8; 32];
+    match hex::decode(hex.trim()) {
+        Ok(bytes) if bytes.len() == 32 => {
+            seed.copy_from_slice(&bytes);
+            Some(seed)
+        }
+        Ok(len) => {
+            eprintln!(
+                "dpay-relay: DPAY_CONTROLLER_SEED must be 64 hex chars (32 bytes), got {len:?} bytes — \
+                 treating it as UNSET (anonymous, faucet mint refused). Fix it to enable the faucet."
+            );
+            None
+        }
+        Err(e) => {
+            eprintln!(
+                "dpay-relay: DPAY_CONTROLLER_SEED is not valid hex ({e}) — treating it as UNSET \
+                 (anonymous, faucet mint refused). Fix it to enable the faucet."
+            );
+            None
         }
     }
 }

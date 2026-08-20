@@ -362,6 +362,75 @@ fn stand_up() -> (LivePocketIc, Principal, Principal, String) {
     (pic, ledger, dpay, gateway_url)
 }
 
+/// The faucet variant: same topology as [`stand_up`] but the controller is the SELF-AUTHENTICATING
+/// principal of a known Ed25519 seed (not the management canister) — exactly prod's shape, where
+/// the founder's `DPAY_DFX_IDENTITY` key is the controller and the relay borrows the same seed via
+/// `DPAY_CONTROLLER_SEED` to sign the faucet's `mint`. Returns the seed too, so the test can
+/// construct the relay-side agent with that identity.
+fn stand_up_with_controller_seed()
+-> (LivePocketIc, Principal, Principal, String, [u8; 32]) {
+    std::env::set_var("POCKET_IC_MUTE_SERVER", "1");
+
+    // Fixed test seed — NOT secret; any 32 bytes work for Ed25519.
+    let seed: [u8; 32] = core::array::from_fn(|i| (i as u8).wrapping_mul(7).wrapping_add(3));
+    // The canister-side controller principal. CAREFUL: self_authenticating_ed25519 takes the
+    // PUBLIC key — the seed is private. The relay agent (BasicIdentity::from_raw_key(seed)) derives
+    // its sender from the seed's verifying key, so the fixture must derive the same public key here
+    // (ed25519-dalek, the same curve library the identity path uses) or the agent authenticates as
+    // a NON-controller and mint is refused. Note dpay_icp::Principal (29-byte) vs candid Principal
+    // — convert via as_slice/from_slice like the rest of this file.
+    let verifying = ed25519_dalek::SigningKey::from_bytes(&seed).verifying_key();
+    let controller = Principal::from_slice(
+        dpay_icp::principal::Principal::self_authenticating_ed25519(&verifying.to_bytes())
+            .as_slice(),
+    );
+
+    let mut pic = PocketIc::new();
+    let gateway_url = pic.make_live(None).to_string();
+    let pic = LivePocketIc(pic);
+
+    let dpay = pic.0.create_canister();
+    pic.0.add_cycles(dpay, 2_000_000_000_000);
+    let ledger = pic.0.create_canister();
+    pic.0.add_cycles(ledger, 10_000_000_000_000);
+    let ledger_init = LedgerArg::Init(LedgerInitArgs {
+        minting_account: Account { owner: dpay, subaccount: None },
+        fee_collector_account: None,
+        transfer_fee: Nat::from(0u64),
+        decimals: Some(2),
+        max_memo_length: None,
+        token_symbol: "DUSD".into(),
+        token_name: "dpay demo USD".into(),
+        metadata: vec![],
+        initial_balances: vec![],
+        feature_flags: Some(FeatureFlags { icrc2: true, icrc152: false }),
+        archive_options: ArchiveOptions {
+            num_blocks_to_archive: 10_000,
+            max_transactions_per_response: None,
+            trigger_threshold: 10_000_000,
+            max_message_size_bytes: None,
+            cycles_for_archive_creation: None,
+            node_max_memory_size_bytes: None,
+            controller_id: dpay,
+            more_controller_ids: None,
+        },
+        index_principal: None,
+    });
+    pic.0.install_canister(ledger, ledger_wasm(), encode_one(&ledger_init).unwrap(), None);
+
+    let dpay_init = DpayInitArg {
+        ledgers: vec![LedgerConfig { currency: DEMO_USD, principal: ledger, mintable: true }],
+        per_tx_cap: CAP,
+        controller: Some(controller),
+    };
+    pic.0.install_canister(dpay, facade_wasm(), encode_one(&dpay_init).unwrap(), None);
+    // Catalog row (DEMO cap) — registered BY the controller now, matching how the relay-authed
+    // admin path works in prod (dfx-deploy-ic registers as the same identity).
+    register_currency_meta_cap(&pic.0, dpay, controller, DEMO_USD, CAP);
+
+    (pic, ledger, dpay, gateway_url, seed)
+}
+
 #[test]
 fn live_read_surface_at_user_principal() {
     // --- 1. Stand up a real local IC with an HTTP gateway (blocking; own runtime). ---
@@ -512,12 +581,11 @@ fn live_icrc3_history_walks_the_real_ledger_log() {
         .build()
         .expect("tokio runtime");
 
-    rt.block_on(async move {
+    let state = rt.block_on(async move {
         let agent = AgentLedger::connect(&gateway_url, canister_id)
             .await
             .expect("AgentLedger must connect to the live gateway");
         let state = AppState::new(Arc::new(agent));
-
         // ---- (1) the payer's history: 3 rows, newest-first, direction+amount+counterparty ----
         let (s, b) = call(
             &state,
@@ -591,7 +659,199 @@ fn live_icrc3_history_walks_the_real_ledger_log() {
             Some(0),
             "no ledger rows for this account ⇒ empty array (body={sb})"
         );
+
+        state
     });
+
+    // ---- (4) DRIFT: a transfer seeded AFTER the first call must appear on a subsequent call. ----
+    // The walk anchors on each response's OWN log_length snapshot; blocks committed between
+    // requests extend the log and the NEXT request simply sees them — the descending-anchor
+    // rewrite (2026-08-20) must not cache or clamp to a stale length. The seed runs OUTSIDE the
+    // tokio runtime (pocket-ic update_call block_ons internally and panics if nested).
+    let late_pk = generate_keypair().verifying_key().to_bytes();
+    let late_owner = Principal::from_slice(
+        dpay_icp::principal::Principal::self_authenticating_ed25519(&late_pk).as_slice(),
+    );
+    rt.block_on(async {
+        let (s, b) = call(
+            &state,
+            get(&format!(
+                "/api/v1/transactions/{}?currency={}&limit=30",
+                hex::encode(late_pk),
+                DEMO_USD
+            )),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "late-user pre-seed body={b}");
+        assert_eq!(
+            b["transactions"].as_array().map(Vec::len),
+            Some(0),
+            "late user must start with an EMPTY history (body={b})"
+        );
+    });
+    rail_transfer(&pic.0, ledger, &payer_pk, &late_pk, 777, b"late-drift");
+    rt.block_on(async {
+        let (s, b) = call(
+            &state,
+            get(&format!(
+                "/api/v1/transactions/{}?currency={}&limit=30",
+                hex::encode(late_pk),
+                DEMO_USD
+            )),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "late-user post-seed body={b}");
+        let rows = b["transactions"].as_array().unwrap();
+        assert_eq!(rows.len(), 1, "the post-call transfer must be visible (body={b})");
+        assert_eq!(rows[0]["amount"].as_str(), Some("777"));
+        assert_eq!(rows[0]["from"].as_str(), Some(payer_owner.to_text().as_str()));
+        assert_eq!(rows[0]["to"].as_str(), Some(late_owner.to_text().as_str()));
+        assert_eq!(rows[0]["memo"].as_str(), Some(hex::encode("late-drift").as_str()));
+    });
+
+    // And the ORIGINAL account's re-read must now show 4 rows with the late transfer newest.
+    rt.block_on(async {
+        let (s, b) = call(
+            &state,
+            get(&format!(
+                "/api/v1/transactions/{}?currency={}&limit=30",
+                hex::encode(payer_pk),
+                DEMO_USD
+            )),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "payer re-read body={b}");
+        let rows = b["transactions"].as_array().unwrap();
+        assert_eq!(rows.len(), 4, "3 original rows + the late out-transfer (body={b})");
+        assert_eq!(rows[0]["amount"].as_str(), Some("777"), "late transfer is the NEWEST row");
+        assert_eq!(rows[0]["to"].as_str(), Some(late_owner.to_text().as_str()));
+    });
+}
+
+// --- WAVE 6: the production faucet through the HTTP route -----------------------------------------
+//
+// The founder-approved faucet design (2026-08-20): the relay owns the cooldown and drives the
+// facade's CONTROLLER-GATED `mint` with an authenticated agent identity, crediting the USER
+// principal — the same Account{owner: self_authenticating(pk), subaccount: None} the app reads.
+// This test proves the whole chain live: a facade whose controller is a known Ed25519 seed, a
+// relay agent constructed with that seed, and the route's contract —
+//   - first call: 200 {balance} and the credit is visible via icrc1_balance_of at the USER
+//     principal (NOT any facade-owned subaccount);
+//   - second immediate call: the relay-side cooldown's verbatim old-canon text;
+//   - after a test-shrunk window: allowed again;
+//   - the amounts are pinned (the app sends TOP_UP_CENTS = 10_000; anything else is refused).
+#[test]
+fn live_faucet_mints_at_user_principal_with_relay_side_cooldown() {
+    let (pic, ledger, dpay, gateway_url, seed) = stand_up_with_controller_seed();
+    let user_pk = generate_keypair().verifying_key().to_bytes();
+    let user_owner = Principal::from_slice(
+        dpay_icp::principal::Principal::self_authenticating_ed25519(&user_pk).as_slice(),
+    );
+    let canister_id = dpay;
+
+    // Direct rail read for ground truth (query; safe outside the runtime).
+    let user_balance = |pic: &PocketIc, ledger: &Principal| -> u64 {
+        let res = pic.query_call(
+            *ledger,
+            Principal::anonymous(),
+            "icrc1_balance_of",
+            encode_one(Account { owner: user_owner, subaccount: None }).unwrap(),
+        )
+        .expect("icrc1_balance_of query must succeed");
+        decode_one::<Nat>(&res)
+            .expect("balance decodes as Nat")
+            .0
+            .try_into()
+            .expect("test balance fits u64")
+    };
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime");
+
+    // The relay-side agent WITH the controller identity (the DPAY_CONTROLLER_SEED path),
+    // constructed once and shared across the block_on segments below.
+    let state = rt.block_on(async {
+        let agent = AgentLedger::connect_with_identity(&gateway_url, canister_id, true, seed)
+            .await
+            .expect("AgentLedger must connect with the controller identity");
+        let state = AppState::new(Arc::new(agent));
+        // Test seam: shrink the 1h production window to 2s so the rollover is observable.
+        state.set_faucet_cooldown_window(2);
+        state
+    });
+
+    let faucet_req = |account: &str, amount: &str| {
+        let body = serde_json::json!({ "account": account, "amount": amount });
+        axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/faucet")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(body.to_string()))
+            .unwrap()
+    };
+
+    // ---- (1) first call: 200 {balance} + the credit at the USER principal ----
+    let hex_pk = hex::encode(user_pk);
+    rt.block_on(async {
+        let (s, b) = call(&state, faucet_req(&hex_pk, "10000")).await;
+        assert_eq!(
+            s,
+            StatusCode::OK,
+            "faucet body={b}"
+        );
+        assert_eq!(
+            b["balance"].as_str(),
+            Some("10000"),
+            "the canister's mint return (new USER-principal balance) surfaces as {{balance}} (body={b})"
+        );
+    });
+
+    // Ground truth OUTSIDE the runtime: the ledger itself credits the USER principal (NOT the
+    // retired facade-custody subaccount).
+    assert_eq!(
+        user_balance(&pic.0, &ledger),
+        10_000u64,
+        "the faucet mint must land at Account{{owner: self_authenticating(pk), subaccount: None}}"
+    );
+
+    // ---- (2) immediate second call: the relay-side cooldown's verbatim old-canon text ----
+    rt.block_on(async {
+        let (s, b) = call(&state, faucet_req(&hex_pk, "10000")).await;
+        assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "cooldown body={b}");
+        let reason = b["error"].as_str().unwrap_or_else(|| panic!("cooldown error must be a string (body={b})"));
+        assert!(
+            reason.starts_with("faucet cooldown: try again in ~") && reason.ends_with(" s"),
+            "verbatim old-canon cooldown text, not {reason:?}"
+        );
+    });
+
+    // ---- (3) a DIFFERENT account is NOT blocked (per-account independence) ----
+    let other_pk = generate_keypair().verifying_key().to_bytes();
+    let other_hex = hex::encode(other_pk);
+    rt.block_on(async {
+        let (s, b) = call(&state, faucet_req(&other_hex, "10000")).await;
+        assert_eq!(s, StatusCode::OK, "other-account faucet body={b}");
+        assert_eq!(b["balance"].as_str(), Some("10000"));
+    });
+
+    // ---- (4) wrong amount is refused BEFORE any mint (fixed-denomination policy) ----
+    rt.block_on(async {
+        let (s, b) = call(&state, faucet_req(&hex_pk, "500")).await;
+        assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "amount-pinning body={b}");
+        let reason = b["error"].as_str().unwrap_or_else(|| panic!("error must be a string (body={b})"));
+        assert!(reason.contains("faucet amount is fixed"), "got {reason:?}");
+    });
+
+    // ---- (5) after the test-shrunk window: the original account may top up again ----
+    std::thread::sleep(std::time::Duration::from_secs(3));
+    rt.block_on(async {
+        let (s, b) = call(&state, faucet_req(&hex_pk, "10000")).await;
+        assert_eq!(s, StatusCode::OK, "post-window faucet body={b}");
+        assert_eq!(b["balance"].as_str(), Some("20000"), "second top-up stacks (body={b})");
+    });
+    assert_eq!(user_balance(&pic.0, &ledger), 20_000u64);
 }
 
 // --- WAVE 5: runtime ckERC20-helper read ---------------------------------------------------------

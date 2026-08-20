@@ -94,6 +94,7 @@ in `docker-compose.yml`.
 | `DPAY_IC_URL` | `https://icp-api.io` | Mainnet, or `http://host.docker.internal:4943` for a `dfx` replica on the host |
 | `DPAY_IC_FETCH_ROOT_KEY` | auto | `true` for a local replica, `false` on mainnet — see below |
 | `DPAY_ENABLE_FAUCET` | `false` | (test-helpers build only) Serve `POST /api/v1/faucet`, which credits demo funds |
+| `DPAY_CONTROLLER_SEED` | — | (prod faucet) Hex Ed25519 seed of the controller key — same key as `DPAY_DFX_IDENTITY`'s `identity.pem`. Set → faucet live (relay-side cooldown + authenticated `mint` at the user principal); unset → relay anonymous, faucet refused by the canister. **Secret** |
 | `CF_TUNNEL_TOKEN` | — | **Required.** Secret token copied from the Cloudflare tunnel install command |
 | `DPAY_CLOUDFLARED_IMAGE` | `cloudflare/cloudflared:2026.7.1` | Pinned tunnel image; override only if needed |
 
@@ -116,12 +117,14 @@ visible crash loop — which is the correct failure mode. `/api/v1/health` is li
 canister is unreachable, not merely when the socket is open. (cloudflared `depends_on` the relay being
 *healthy*, so the tunnel doesn't even come up until the relay can actually settle.)
 
-**3. The faucet mints.** `POST /api/v1/faucet` calls the canister's `mint`, which is **unauthenticated** in
-the current canister. Exposed on a real ledger that is an open money printer, so it is off unless
-`DPAY_ENABLE_FAUCET=true`. Turn it on only against a throwaway replica. (Gating `mint` on the
-canister side — issuer-only — is still to do; the relay flag does not fix the canister. It's an
-accepted gap for the current demo phase — there is no real money on the canister — and a hard gate
-before the pilot.)
+**3. The faucet mints — play money only, cooldown-gated.** `POST /api/v1/faucet` (agent build)
+drives the canister's `mint`, which is **controller-gated** (`require_admin`): it only works when
+`DPAY_CONTROLLER_SEED` is set — the relay signs the mint with the controller key it holds. The
+relay enforces the cooldown itself (per-account, 1h window) and the canister credits the USER's
+principal. What the key exposes is bounded: the facade is out of the value path post-cutover (the
+app settles its own /api/v2 envelopes), so a leaked seed prints demo DUSD and touches canister
+governance — ugly, but not user funds. Accepted founder decision (2026-08-20); before a pilot,
+move minting under governance or an explicit minter allowance.
 
 ## Rehearse against a local replica before mainnet
 
@@ -168,8 +171,10 @@ resulting `DPAY_CANISTER_ID` back into `deploy/.env` for you. Re-running it is a
 this demo canister has **no stable memory**, it makes you choose `DPAY_DEPLOY_MODE=reinstall` (wipe +
 re-fund) or `=upgrade` (push code, lose all balances) rather than silently wiping state. Two hard gates
 before a pilot: give the controller to NNS/SNS governance (or blackhole it), and add stable storage so
-upgrades preserve balances. The relay needs **no** identity — it settles anonymously; the payer's
-Ed25519 signature is the authority (the caller principal is irrelevant to `pay`).
+upgrades preserve balances. The relay holds **one** identity — the controller seed
+(`DPAY_CONTROLLER_SEED`) — used only for the faucet's `mint`; every read route works anonymously, and
+settlement authority is the payer's Ed25519 signature in the app's own /api/v2 envelopes (the caller
+principal is irrelevant to `pay`).
 
 ## Why the binary is built on the host
 

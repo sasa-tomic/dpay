@@ -22,10 +22,17 @@
 //! - `GET  /api/v1/balances/{hex}` — ALL currency balances in ONE response (a flat map
 //!   `{currency: minor-units}`), replacing the wallet's old N+1 per-poll fetch loop (1 primary +
 //!   1 per-asset, each a relay→IC round trip) with a single request.
+//! - `POST /api/v1/faucet` — the demo top-up. TWO builds, ONE route shape (`{account: hex,
+//!   currency?, amount?}` → `{balance}`; refusals → 422 `{error: <verbatim reason>}`):
+//!   test-helpers credits the fake-IC gateway (gated by `DPAY_ENABLE_FAUCET`); the agent build
+//!   (production) enforces the relay-side cooldown ([`crate::faucet`]) and drives the facade's
+//!   controller-gated `mint` through the authenticated agent, crediting the USER principal.
+//!   With BOTH features (the live-test config) the test-helpers branch owns the route.
 //!
-//! Read-only by construction: there is no value-moving route left on this crate (the 2026-08-19
-//! IC-rail cutover moved settlement to the app's own signed /api/v2 envelopes; the test-helpers
-//! fake-IC gateway is the offline e2e stand-in for that surface).
+//! Read-only by construction apart from the play-money faucet: there is no value-moving route
+//! left on this crate (the 2026-08-19 IC-rail cutover moved settlement to the app's own signed
+//! /api/v2 envelopes; the test-helpers fake-IC gateway is the offline e2e stand-in for that
+//! surface).
 
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -52,9 +59,16 @@ use crate::ledger::{CurrencyDescriptor, Ledger, LedgerError, TxnRecord, U64Strin
 #[derive(Clone)]
 pub struct AppState {
     pub ledger: Arc<dyn Ledger>,
-    /// Whether `POST /api/v1/faucet` (which *mints*) is served. Test-helpers-only surface;
-    /// defaults to `true` — harmless against the offline fixtures it ships with.
+    /// Whether `POST /api/v1/faucet` (which *mints*) is served. Gates the test-helpers faucet
+    /// (`DPAY_ENABLE_FAUCET`); defaults to `true` — harmless against the offline fixtures it
+    /// ships with. The agent-build faucet is NOT gated by this flag: its rate limit is the
+    /// relay-side [`crate::faucet`] cooldown, and its mint is already canister-gated
+    /// (`require_admin` refuses the anonymous agent).
     faucet_enabled: Arc<Mutex<bool>>,
+    /// The agent-build faucet's per-account cooldown map (see [`crate::faucet`]). Guarded by
+    /// the repo's poison-tolerant lock convention and never held across an await.
+    #[cfg(feature = "agent")]
+    faucet_cooldown: Arc<Mutex<crate::faucet::FaucetCooldown>>,
     /// The Android build served at `GET /download/dpay.apk`, when one is configured. `None` renders
     /// a "coming soon" CTA on the landing page and answers the download route with `404`.
     apk: Arc<Option<Vec<u8>>>,
@@ -74,6 +88,10 @@ impl AppState {
         AppState {
             ledger,
             faucet_enabled: Arc::new(Mutex::new(true)),
+            #[cfg(feature = "agent")]
+            faucet_cooldown: Arc::new(Mutex::new(crate::faucet::FaucetCooldown::with_window(
+                crate::faucet::FAUCET_COOLDOWN_SECS,
+            ))),
             apk: Arc::new(None),
             apk_version: String::new(),
             #[cfg(feature = "test-helpers")]
@@ -105,6 +123,14 @@ impl AppState {
         *self.faucet_enabled.lock().unwrap_or_else(|p| p.into_inner()) = on;
     }
 
+    /// Replace the faucet cooldown's window (agent build). Test seam ONLY: the live tests shrink
+    /// the 1h production window to seconds so the rollover is observable; prod never calls this.
+    #[cfg(feature = "agent")]
+    pub fn set_faucet_cooldown_window(&self, window_secs: u64) {
+        *self.faucet_cooldown.lock().unwrap_or_else(|p| p.into_inner()) =
+            crate::faucet::FaucetCooldown::with_window(window_secs);
+    }
+
     pub fn faucet_enabled(&self) -> bool {
         *self.faucet_enabled.lock().unwrap_or_else(|p| p.into_inner())
     }
@@ -128,14 +154,24 @@ pub fn app(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/version", get(version));
 
-    // Test-only value fixtures (test-helpers): the faucet credits the fake-IC gateway at the
-    // user's principal, and the single-currency /balance reads it back — e2e assertion sugar.
-    // Prod gets balances through the batch route above (direct ledger reads); these do not exist
-    // in the prod image.
+    // Test-only value fixtures (test-helpers, WITHOUT agent — the e2e/test-relay build): the
+    // faucet credits the fake-IC gateway at the user's principal, and the single-currency
+    // /balance reads it back — e2e assertion sugar. Prod gets balances through the batch route
+    // above (direct ledger reads). When BOTH features are on (the live-test config) the AGENT
+    // faucet below owns the route instead, so the live tests drive the production branch.
+    #[cfg(all(feature = "test-helpers", not(feature = "agent")))]
+    let api = api.route("/faucet", axum::routing::post(faucet));
     #[cfg(feature = "test-helpers")]
-    let api = api
-        .route("/faucet", axum::routing::post(faucet))
-        .route("/balance/{hex}", get(balance));
+    let api = api.route("/balance/{hex}", get(balance));
+
+    // The PRODUCTION faucet (agent build — also the owner when test-helpers is co-enabled for
+    // the live tests; the offline e2e image above keeps the fake-IC branch): the relay enforces
+    // the cooldown locally (per-account, 1h window, old-canon error text) and drives the
+    // facade's controller-gated `mint` with the authenticated agent identity, crediting the
+    // USER principal. Requires DPAY_CONTROLLER_SEED at startup (main.rs) — without it the
+    // canister's `require_admin` refuses the anonymous agent (422, reason surfaced verbatim).
+    #[cfg(feature = "agent")]
+    let api = api.route("/faucet", axum::routing::post(faucet_agent));
 
     let router = Router::new()
         .route("/", get(landing_page))
@@ -201,11 +237,12 @@ async fn test_cors_middleware(req: axum::extract::Request, next: axum::middlewar
 }
 
 /// `POST /api/v1/faucet` JSON `{account: <hex>, currency?, amount?}` → `{balance}`. Demo on-ramp
-/// (test-helpers only — the prod image does not compile this route). Credits the user PRINCIPAL
-/// on the fake-IC gateway's ledger for `currency`, exactly where a signed icrc1_transfer would
-/// move funds; the pk → principal mapping is self_authenticating(pk) — the account the app
-/// derives from its device key. Defaults: `currency = DEMO_USD` (0), `amount = 10_000`.
-#[cfg(feature = "test-helpers")]
+/// (test-helpers WITHOUT agent — the e2e/test-relay build; the agent build serves the production
+/// branch below). Credits the user PRINCIPAL on the fake-IC gateway's ledger for `currency`,
+/// exactly where a signed icrc1_transfer would move funds; the pk → principal mapping is
+/// self_authenticating(pk) — the account the app derives from its device key. Defaults:
+/// `currency = DEMO_USD` (0), `amount = 10_000`.
+#[cfg(all(feature = "test-helpers", not(feature = "agent")))]
 async fn faucet(State(state): State<AppState>, Json(req): Json<FaucetRequest>) -> Response {
     if !state.faucet_enabled() {
         return err(StatusCode::NOT_FOUND, "faucet disabled");
@@ -222,6 +259,60 @@ async fn faucet(State(state): State<AppState>, Json(req): Json<FaucetRequest>) -
     let owner = IcpPrincipal::self_authenticating_ed25519(&pk);
     let bal = fake.faucet_credit(currency, &owner, u128::from(amount));
     (StatusCode::OK, Json(BalanceBody { balance: U64String(bal.min(u64::MAX as u128) as u64) })).into_response()
+}
+
+/// `POST /api/v1/faucet` JSON `{account: <hex>, currency?, amount?}` → `{balance}` — the
+/// PRODUCTION top-up (agent build; also compiled with BOTH features so the live tests drive
+/// this branch against a real PocketIC replica — the offline e2e build serves the fake-IC
+/// credit above). Founder-approved design (2026-08-20): the cooldown lives HERE (relay-side,
+/// per-account hex pubkey × currency, 1h window, byte-identical old-canon error text — cheap to
+/// tune/redeploy, no canister upgrade cycle) and the mint itself is an AUTHENTICATED call to the
+/// facade's controller-gated `mint`, crediting the USER principal (`self_authenticating(pk)`) —
+/// exactly the account the app reads. The relay holds the controller key: acceptable because
+/// the facade is out of the value path post-cutover, so the key only exposes play-money minting
+/// + canister governance (already founder-managed).
+///
+/// Amount is PINNED to the canonical $100.00 top-up (`FAUCET_AMOUNT` = 10_000 cents — what the
+/// app's TOP_UP_CENTS sends): a client-supplied `amount` is accepted only when it matches, so
+/// the request shape stays forward-compatible while the self-service surface cannot print an
+/// arbitrary amount. Canister refusals surface VERBATIM (`{error: text}`, 422) — the app's
+/// Wallet shows the reason as-is (N5); transport failures answer 503.
+#[cfg(feature = "agent")]
+async fn faucet_agent(State(state): State<AppState>, Json(req): Json<FaucetRequest>) -> Response {
+    let pk = ok_or_bail!(parse_hex_array(&req.account, "account"));
+    let currency = req.currency.unwrap_or(DEMO_USD);
+    let amount = req.amount.map(|x| x.0).unwrap_or(crate::faucet::FAUCET_AMOUNT);
+    if amount != crate::faucet::FAUCET_AMOUNT {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("faucet amount is fixed at {} (minor units)", crate::faucet::FAUCET_AMOUNT),
+        );
+    }
+    // Relay-side rate limit. The lock is NEVER held across the mint await below (check-and-mark
+    // completes synchronously) and is poison-tolerant like every lock in this crate.
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    if let Err(reason) = state
+        .faucet_cooldown
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .check_and_mark(&pk, currency as u32, now_secs)
+    {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, reason);
+    }
+    match state.ledger.faucet_mint(&pk, currency, amount).await {
+        Ok(balance) => {
+            (StatusCode::OK, Json(BalanceBody { balance: U64String(balance) })).into_response()
+        }
+        // The canister's own refusal text (e.g. "currency 0 is not mintable", or an
+        // unauthorized-controllership change) — surfaced verbatim per the app's N5 contract.
+        Err(LedgerError::Rejected(msg)) => err(StatusCode::UNPROCESSABLE_ENTITY, msg),
+        Err(LedgerError::Transient(msg)) => {
+            err(StatusCode::SERVICE_UNAVAILABLE, format!("ledger unavailable: {msg}"))
+        }
+    }
 }
 
 /// `GET /api/v1/balance/{hex}?currency=<u32>` → `{"balance": <minor units>}` for a 32-byte
@@ -630,7 +721,9 @@ async fn screenshot(Path(name): Path<String>) -> Response {
 
 // ---- request / response bodies ----
 
-#[cfg(feature = "test-helpers")]
+// Parsed by BOTH faucet builds: the test-helpers fake-IC credit AND the agent-build production
+// route (relay-side cooldown + authenticated canister mint).
+#[cfg(any(feature = "test-helpers", feature = "agent"))]
 #[derive(Deserialize)]
 struct FaucetRequest {
     account: String,
@@ -680,7 +773,9 @@ struct VersionBody {
     commit: &'static str,
 }
 
-#[cfg(feature = "test-helpers")]
+/// Response of BOTH faucet builds (test-helpers fake credit + agent canister mint):
+/// `{balance: <new minor-unit balance>}` — the shape Wallet.tsx's `topUp` reads.
+#[cfg(any(feature = "test-helpers", feature = "agent"))]
 #[derive(Serialize)]
 struct BalanceBody {
     balance: U64String,

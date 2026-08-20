@@ -74,3 +74,6 @@ dpay-relay = { path = ".", features = ["test-helpers"] }
 ed25519-dalek = { workspace = true }
 tower = { version = "0.5.3", features = ["util"] }
 http-body-util = "0.1.4"
+# Live tests derive the controller's self-authenticating principal from a known Ed25519 seed
+# (the same computation the canister's `user_account_of` and the app's icpSelfPrincipal do).
+dpay-icp = { path = "../dpay-icp" }

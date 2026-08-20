@@ -28,16 +28,23 @@
   - The ckERC20/ckETH onramp params (relay `GET /onramp/ckerc20`) resolve from that catalog; the
     CkDeposit `helper_address` is read at RUNTIME from the currency's registered minter
     (`get_minter_info`), falling back to the verified compile-time constants when the minter
-    leaves the field unset or the read fails. `facade_principal` (this canister's id) is still
-    embedded in the helper-contract `depositErc20`/
-    `depositEth` calldata as the deposit `principal` arg (user pubkey = subaccount) — a pre-cutover
-    residue: ETH-side deposits mint at a facade-owned subaccount, not the user principal, and are
-    therefore not visible to the user-principal balance read path (flagged as a risk in
-    `CODEBASE_ANALYSIS.md`).
-- **Settlement kernel: still in the wasm, no production caller.** The deployed canister still
+    leaves the field unset or the read fails. ~~`facade_principal` (this canister's id) is still
+    embedded in the helper-contract `depositErc20`/`depositEth` calldata…~~ — **struck 2026-08-20
+    (commit 82377e4)**: the onramp calldata no longer carries any facade principal. The relay
+    serves helper/chain constants only (pinned by `relay.rs` + `relay.test.ts`), and the app
+    encodes the deposit owner itself as `principalToBytes32(icpSelfPrincipal())` with the default
+    subaccount — ETH-side deposits mint at the USER's own principal, exactly where the
+    user-principal balance read path looks. No invisible-deposit residue remains on this surface.
+- **Settlement kernel: still in the wasm, one play-money production caller.** The deployed canister
+  still
   carries `pay`/`withdraw`/`faucet`/`mint`/`burn`/`reconcile`/`refresh_balances`/`deposit_address`/
   `refresh_deposit` + the canister-signed-receipt machinery (the crate, its 81+ PocketIC tests, and
-  `dpay-sim` still exercise them), but nothing on the value path calls them: the app signs envelopes
+  `dpay-sim` still exercise them), but nothing on the value path calls them EXCEPT `mint` — the
+  production faucet (2026-08-20, founder-approved): the relay's agent-build
+  `POST /api/v1/faucet` rate-limits per account relay-side (1h window, old canister canon's exact
+  error text) and drives the controller-gated `mint` authenticated via `DPAY_CONTROLLER_SEED`;
+  `mint` credits the USER principal (`calls::user_account_of`), so the top-up lands exactly where
+  the app's balance reads look. Everything else stays dormant: the app signs envelopes
   itself, balances are read directly off each ledger (`icrc1_balance_of` at the user principal — the
   relay no longer touches `BAL_CACHE`/`refresh_balances`), BTC deposit addresses come from a
   user-signed minter query (`get_btc_address` at the user principal), and offramps are user-signed
@@ -78,11 +85,14 @@
 ### `icrc_ledger` — the DUSD ICRC-3 ledger
 - **Mainnet id:** `td2nx-oaaaa-aaaab-qhdnq-cai`
 - **Role at HEAD:** backs the **DEMO currency** (currency `0`, token symbol `DUSD`, 2 decimals) as
-  its catalog ledger. Post-cutover nothing in prod touches it on the value path: the prod relay image
-  has no faucet (the `/api/v1/faucet` route is `test-helpers`-only and credits the in-process fake-IC
-  gateway, never `td2nx`), and a DEMO payment — if anyone held DUSD — would be an ordinary
-  user-principal `icrc1_transfer` on this ledger. Pre-cutover faucet/settlement flows through
-  `facade.mint()` are retired. `minting_account.owner = ssqti` (only the facade may mint).
+  its catalog ledger. Post-cutover nothing in prod touches it on the value path: the prod relay
+  image's faucet (`POST /api/v1/faucet`, agent build — 2026-08-20) drives the FACADE's
+  controller-gated `mint()` (with the relay-held `DPAY_CONTROLLER_SEED`), which in turn mints on
+  this ledger via its `minting_account`; the cooldown lives relay-side. A DEMO payment — if anyone
+  held DUSD — is an ordinary user-principal `icrc1_transfer` on this ledger. Pre-cutover
+  settlement flows through `facade.mint()`'s custody shape are retired (the 2026-08-20 re-target
+  points `mint()` at the USER principal). `minting_account.owner = ssqti` (only the facade may
+  mint).
 - **Standard:** a modern ICRC ledger built from `third_party/ic-icrc1-ledger/ic-icrc1-ledger.wasm`. It
   advertises **ICRC-1, ICRC-2, ICRC-3** (plus 10/21/103/106). This single ledger **is** the ICRC-3
   ledger; there is no separate one.

@@ -58,4 +58,23 @@ pub trait Ledger: Send + Sync {
 
     /// Liveness for `/health` (the wallet's connectivity pre-flight).
     async fn healthy(&self) -> bool;
+
+    /// The faucet's settlement leg (2026-08-20 relay faucet): mint play money for `pubkey` on
+    /// `currency`. This is the ONE non-read method — the founder-approved production faucet lives
+    /// in the relay, which rate-limits locally and drives the facade canister's controller-gated
+    /// `mint` through the agent build's authenticated identity (crediting the USER principal).
+    /// The default impl is "not supported" — [`FakeLedger`](super::FakeLedger) and test fakes
+    /// inherit it (the test-helpers faucet route serves the fake-IC gateway instead);
+    /// [`AgentLedger`](crate::agent_ledger::AgentLedger) overrides it with the real call. A
+    /// canister refusal comes back as `Rejected(text)` with the reason VERBATIM (the app surfaces
+    /// it as-is); transport failures as `Transient`.
+    async fn faucet_mint(
+        &self,
+        pubkey: &[u8; PUBKEY_LEN],
+        currency: Currency,
+        amount: u64,
+    ) -> Result<u64, LedgerError> {
+        let _ = (pubkey, currency, amount);
+        Err(LedgerError::Transient("faucet unavailable: this ledger cannot mint".to_string()))
+    }
 }

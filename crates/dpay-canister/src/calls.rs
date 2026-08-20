@@ -291,6 +291,26 @@ pub(crate) fn account_of(pk: &[u8; PUBKEY_LEN]) -> Account {
     Account { owner: canister_self(), subaccount: Some(*pk) }
 }
 
+/// RFC 8410 DER prefix for an Ed25519 public key (SubjectPublicKeyInfo): 12 bytes, followed by
+/// the 32-byte key = the 44-byte DER blob that `Principal::self_authenticating` hashes. Byte-
+/// identical to `dpay_icp::principal::DER_PREFIX` — the golden-proven derivation shared with the
+/// app's wasm signer and the relay's `AgentLedger::user_account` (kept inline here because the
+/// canister deliberately does not depend on `dpay-icp`).
+const ED25519_DER_PREFIX: [u8; 12] = [48, 42, 48, 5, 6, 3, 43, 101, 112, 3, 33, 0];
+
+/// The USER's own ICRC-1 account for a pubkey — the rail's addressing shape since the 2026-08-19
+/// user-principal cutover (and, since the 2026-08-20 faucet re-target, the account `mint` credits):
+/// `owner = self_authenticating(DER(pubkey))` (the user's principal), `subaccount = None`. This is
+/// the account the app reads balances against; the facade-custody [`account_of`] shape remains
+/// the `pay`/`burn` settlement surface. Derivation is byte-identical to the app's
+/// `icpSelfPrincipal()` / the relay's `AgentLedger::user_account`.
+pub(crate) fn user_account_of(pk: &[u8; PUBKEY_LEN]) -> Account {
+    let mut der = [0u8; 44];
+    der[..12].copy_from_slice(&ED25519_DER_PREFIX);
+    der[12..].copy_from_slice(pk);
+    Account { owner: Principal::self_authenticating(&der), subaccount: None }
+}
+
 pub(crate) fn to_pubkey(v: &[u8]) -> Result<[u8; PUBKEY_LEN], String> {
     v.try_into().map_err(|_| "bad pubkey length".to_string())
 }

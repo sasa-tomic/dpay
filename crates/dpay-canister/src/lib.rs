@@ -756,6 +756,13 @@ async fn refresh_balances(
 /// transferring from the ledger's minting account (which this canister owns). Real ck currencies are
 /// not mintable. Refreshes the display cache from the authoritative ledger post-settle. Gated to the
 /// controller in production (open only when `controller` is unset, i.e. the demo).
+///
+/// Settlement target (2026-08-20 faucet re-target): the USER's own principal —
+/// [`calls::user_account_of`] (`self_authenticating(DER(pubkey))`, no subaccount), the account the
+/// app reads. Before the re-target `mint` credited the facade-custody `account_of` subaccount,
+/// which the app cannot see — that made even a controller-run mint invisible post-cutover. The
+/// production faucet is the RELAY (founder-approved 2026-08-20): it rate-limits locally and drives
+/// THIS admin-gated `mint` with an authenticated controller identity.
 #[update]
 async fn mint(to: Vec<u8>, currency: Currency, amount: u64) -> Result<u64, String> {
     require_admin()?;
@@ -766,7 +773,7 @@ async fn mint(to: Vec<u8>, currency: Currency, amount: u64) -> Result<u64, Strin
     }
     let arg = TransferArg {
         from_subaccount: None, // the minting account's default subaccount
-        to: account_of(&pk),
+        to: user_account_of(&pk),
         amount: Nat::from(amount),
         fee: None, // mints carry no fee
         created_at_time: Some(time()),
@@ -788,7 +795,7 @@ async fn mint(to: Vec<u8>, currency: Currency, amount: u64) -> Result<u64, Strin
     // Re-read the authoritative post-mint balance: refresh the display cache AND return it. The
     // `Ledger` trait contract is that `mint` returns the NEW BALANCE (FakeLedger honors this; the
     // relay faucet surfaces the return directly as `{balance}`), NOT the ledger's block index.
-    let new_balance = ledger_balance_of(ledger, &account_of(&pk))
+    let new_balance = ledger_balance_of(ledger, &user_account_of(&pk))
         .await
         .map_err(|e| format!("mint settled but post-mint balance read failed: {e}"))?;
     write_cache(pk, currency, new_balance);
@@ -798,11 +805,14 @@ async fn mint(to: Vec<u8>, currency: Currency, amount: u64) -> Result<u64, Strin
 /// `(blob account, nat32 currency) -> Result<nat64, text>` — the self-service demo on-ramp. Mints
 /// a FIXED [`FAUCET_AMOUNT`] ($100.00) of a mintable currency to `account`, rate-limited per
 /// (account, currency) via [`FAUCET_COOLDOWN`] (one mint per [`FAUCET_COOLDOWN_SECS`] window). No
-/// admin gate — this is the path the relay's `/faucet` route calls so a freshly-onboarded wallet can
-/// fund itself without the controller. The privileged [`mint`] (arbitrary amount) stays
-/// controller-only; the faucet always mints the fixed constant, so a client cannot print unbounded
-/// funds. Refreshes the display cache from the authoritative ledger post-mint and returns the new
-/// balance (matching the `Ledger::faucet` contract the relay surfaces as `{balance}`).
+/// admin gate. Refreshes the display cache from the authoritative ledger post-mint and returns the
+/// new balance (matching the `Ledger::faucet` contract the relay surfaces as `{balance}`).
+///
+/// SUPERSEDED (2026-08-20): the production faucet is the RELAY (founder-approved design) — it
+/// owns the cooldown and drives the controller-gated [`mint`] with an authenticated identity, so
+/// the on-ramp credits the USER principal (see [`calls::user_account_of`]). This endpoint remains
+/// as the direct-canister self-service surface (open mode / no relay); note it still credits the
+/// facade-custody [`calls::account_of`] shape, which the post-cutover app does not read.
 #[update]
 async fn faucet(account: Vec<u8>, currency: Currency) -> Result<u64, String> {
     let pk = to_pubkey(&account)?;
