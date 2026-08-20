@@ -5,19 +5,20 @@ import {bytesToBase64Url, base64UrlToBytes, utf8ToBytes, bytesToUtf8} from './ba
 // A merchant's Request QR carries a raw base64url blob. The deeplink wraps it as `dpay:req/<blob>`
 // so it can be shared over a messaging app and opened on the payer's phone to PRE-FILL the pay
 // review screen (the payer still taps Approve — a deeplink NEVER auto-signs/auto-approves). The
-// symmetric `dpay:pay/<blob>` carries a CANISTER-SIGNED receipt for the NFC-less hand-back: when NFC
-// is unavailable the payer (online) settles directly + shares the verified receipt back to the
-// merchant, whose request screen verifies the signature + reconciles as Paid.
+// symmetric `dpay:pay/<blob>` carries the rail proof for the NFC-less hand-back: when NFC is
+// unavailable the payer (online) settles directly on the IC ledger + shares the rail proof back
+// to the merchant, whose request screen format-checks it and confirms ON-CHAIN via read_state
+// before reconciling as Paid (never trusts the blob alone — see parseRailProof).
 //
 // The two kinds carry DIFFERENT blob payloads:
 //   • `req` — the blob is the EXACT raw base64url the request QR carries (the 132-byte wire request,
 //     base64url-encoded by DpayCore.encodeRequest). No new codec; handed straight to PayMode's
 //     camera-scan decode path.
-//   • `pay` — the blob is base64url(JSON.stringify(receipt)), i.e. base64url of the UTF-8 JSON of the
-//     canister-signed receipt object the relay's POST /api/v1/pay returns. `decodeReceiptDeeplink`
-//     base64url-decodes THEN JSON.parses. (The receipt is JSON, not a fixed-width binary wire — so a
-//     JSON codec is the natural shape; the canister signature inside it is still verified byte-exact
-//     binding the rail proof's request_id to the open request before anything is marked Paid.)
+//   • `pay` — the blob is base64url(JSON.stringify(proof)), i.e. base64url of the UTF-8 JSON of the
+//     rail proof `{ledger, block_index, request_id}`. `decodeReceiptDeeplink` base64url-decodes THEN
+//     JSON.parses. (The proof is JSON, not a fixed-width binary wire — so a JSON codec is the natural
+//     shape; the merchant binds the proof's request_id to the open request and the read_state poll
+//     confirms settlement on the ledger before anything is marked Paid.)
 //
 // Slash-not-query (`/` not `?`) keeps the blob opaque to URL-parsing libs so they don't mangle
 // `+`/`%`. The codec is PURE (no React/native deps beyond the file's existing Platform import) so
@@ -91,12 +92,13 @@ export function readPaymentDeeplink(): string | null {
   }
 }
 
-// --- dpay:pay/ receipt-handback codec ---------------------------------------------------------
-// `<blob>` = base64url(JSON.stringify(receipt)) — DIFFERENT from `req`'s raw base64url. The receipt
-// is the canister-signed JSON object the relay's POST /api/v1/pay returns under `body.receipt`. The
-// merchant MUST bind the proof's request_id to the open request before reconciling (W6 upgrades to
-// BLS cert verify) — these codec fns carry the
-// blob opaquely; they do NOT validate the signature (that is the consumer's security gate).
+// --- dpay:pay/ rail-proof hand-back codec -----------------------------------------------------
+// `<blob>` = base64url(JSON.stringify(proof)) — DIFFERENT from `req`'s raw base64url. The proof is
+// the rail proof `{ledger, block_index, request_id}` the payer's own phone derives after its signed
+// envelope settles on the IC ledger (read_state request_status). The merchant MUST bind the proof's
+// request_id to the open request and confirm settlement on-chain before reconciling (parseRailProof
+// does the format check; W6 upgrades to on-device BLS cert verification) — these codec fns carry the
+// blob opaquely; they do NOT validate anything money-critical (that is the consumer's security gate).
 
 /** The base64url blob a `pay` hand-off carries: base64url(JSON.stringify(receipt)). Shared by the
  *  dpay: URI wrapper and the web /wallet?pay= URL so there is ONE receipt-blob codec. Pure + total. */
@@ -145,6 +147,36 @@ export function decodeReceiptDeeplink(blob: string): Record<string, unknown> | n
   } catch {
     return null;
   }
+}
+
+// --- rail-proof FORMAT check (the deeplink trust model) ----------------------------------------
+// DEEPLINK TRUST MODEL (2026-08-20, review F2/F6): the `dpay:pay/` blob is an UNTRUSTED, FORGEABLE
+// string — a well-formed blob proves NOTHING by itself. The merchant's screen must (1) format-check
+// the proof (below — pure, jest-covered), (2) bind it to the OPEN request (watch that request_id on
+// the settlement poll), and (3) let the ON-CHAIN read_state confirmation — never the blob — flip
+// the UI to Received. Previously the handler trusted a format-valid blob outright (instant
+// "Received" on a forged 64-hex request_id); this pure fn is the format gate of that fixed flow.
+
+/** A format-valid rail proof: `request_id` is a 32-byte hex string (the payer envelope's request_id
+ *  for THIS payment — unique per signing, so it IS the nonce binding) and `block_index` is a
+ *  non-negative decimal string. */
+export interface RailProof {
+  request_id: string;
+  block_index: string;
+  ledger?: unknown;
+}
+
+/** Format-check a decoded `dpay:pay/` payload as a rail proof. Returns the proof's
+ *  `{request_id, block_index}` when well-formed, else null. Pure + total; NEVER throws. This is a
+ *  FORMAT gate only — a `null` return means "malformed", a non-null return means "well-formed,
+ *  still unverified" (the consumer must confirm settlement on-chain before trusting it). */
+export function parseRailProof(proof: Record<string, unknown> | null): RailProof | null {
+  if (proof === null || typeof proof !== 'object') return null;
+  const rid = proof.request_id;
+  const blk = proof.block_index;
+  if (typeof rid !== 'string' || !/^[0-9a-fA-F]{64}$/.test(rid)) return null;
+  if (typeof blk !== 'string' || !/^\d+$/.test(blk)) return null;
+  return {request_id: rid, block_index: blk, ledger: proof.ledger};
 }
 
 // --- existing web deposit deep link ----------------------------------------------------------

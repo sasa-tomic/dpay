@@ -3,9 +3,9 @@ import {View, Text, Pressable, TextInput, type TextStyle} from 'react-native';
 import {QrCode} from './QrCode';
 import {C, FONT} from '../config/palette';
 import {S} from '../styles';
-import {EXPIRY_WINDOW, POLL, QR_SIZE} from '../config/constants';
+import {EXPIRY_WINDOW, POLL, PROOF_POLL_BUDGET, QR_SIZE} from '../config/constants';
 import {toUnits, randNonceHex, nowSecs} from '../lib/format';
-import {shareHandoff, decodeReceiptDeeplink} from '../lib/deepLink';
+import {shareHandoff, decodeReceiptDeeplink, parseRailProof} from '../lib/deepLink';
 import {type CurrencyDescriptor, type FamilyDisplay, fmtCurrencyAmount, currencySymbol} from '../config/catalog';
 import {type SelectableAsset} from '../config/assets';
 import {type BalanceView} from '../lib/assetBalances';
@@ -120,18 +120,47 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
   // read_state under the payer's request_id. The rid is stored when we first see the envelope
   // (submitted or scanned); the payer-online case (no envelope seen) is reconciled by the balance
   // recheck the app performs on refresh — the memo (request nonce) is the reconciliation key.
+  //
+  // Honesty (F2, 2026-08-20): 'rejected' is terminal — surface it as an error (stop polling);
+  // 'unknown' keeps polling but not forever — after PROOF_POLL_BUDGET attempts (~45s at prod
+  // cadence, ~4.5s under the e2e POLL override) we stop with actionable copy instead of hanging
+  // silently on a request_id that will never confirm (e.g. a forged/never-submitted rid).
   useEffect(() => {
     if (!reqQr || result || !watchRid) return;
     let alive = true;
+    let attempts = 0;
     const ledger = catalog.find(c => c.currency === reqQr.currency)?.ledger ?? '';
     if (!ledger) return;
     const check = async () => {
+      attempts += 1;
       try {
         const out = await pollTransfer({ledger, requestIdHex: watchRid}, identity.secretHex, {attempts: 1, intervalMs: 0});
-        if (!alive || out.kind !== 'settled') return; // rejected/unknown: keep polling (honest)
-        setResult({amount: reqQr.rawAmount, currency: reqQr.currency, from: 'payer'});
-        onReceived();
-      } catch (e) { console.warn('settlement read_state poll failed:', e instanceof Error ? e.message : String(e)); /* best-effort: keep polling */ }
+        if (!alive) return;
+        if (out.kind === 'settled') {
+          setResult({amount: reqQr.rawAmount, currency: reqQr.currency, from: 'payer'});
+          onReceived();
+          return;
+        }
+        if (out.kind === 'rejected') {
+          setErr(out.reason); // definitive ledger refusal — stop polling, show why
+          setWatchRid(null);
+          return;
+        }
+        if (attempts >= PROOF_POLL_BUDGET) {
+          // Unknown-but-watchable rid that never confirmed within the budget. Actionable copy:
+          // the request stays open, the merchant can re-try via the payer's phone (scan QR /
+          // fresh proof) or wait for the balance recheck — but the poll stops hanging forever.
+          setErr('Couldn’t confirm this payment yet — if the payer paid, it lands with the next balance refresh. Tap their phone or scan their code to retry.');
+          setWatchRid(null);
+        }
+      } catch (e) {
+        console.warn('settlement read_state poll failed:', e instanceof Error ? e.message : String(e));
+        // best-effort network error: counts against the budget so a dead gateway also terminates
+        if (alive && attempts >= PROOF_POLL_BUDGET) {
+          setErr('Couldn’t confirm this payment yet — if the payer paid, it lands with the next balance refresh. Tap their phone or scan their code to retry.');
+          setWatchRid(null);
+        }
+      }
     };
     check(); const id = setInterval(check, POLL.receiptRcv);
     return () => { alive = false; clearInterval(id); };
@@ -139,11 +168,13 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
 
   // Receipt hand-back (dpay:pay/): a payer who settled ONLINE (NFC unavailable) shares the rail
   // proof {ledger, block_index, request_id} back as a `dpay:pay/<blob>` link. The blob codec
-  // (receiptShareBlob) is opaque JSON. SECURITY POSTURE (honest, W6-labeled): we bind the proof's
-  // request_id to the open request (the rid is unique per signing — it IS the nonce binding) and
-  // sanity-check the block index; the read_state poll then confirms execution against the ledger.
-  // Full trustless verification (BLS cert chain) is W6; until then the label is honest:
-  // read_state + balance recheck.
+  // (receiptShareBlob) is opaque JSON. DEEPLINK TRUST MODEL (F2/F6, 2026-08-20 — was: the blob was
+  // trusted after format validation, rendering instant "Received"): the proof is an UNTRUSTED,
+  // FORGEABLE string. We now FORMAT-check it (parseRailProof), bind its request_id to the open
+  // request by setting watchRid ONLY, and let the settlement poll above confirm ON-CHAIN
+  // (read_state) before the UI flips to Received — a forged-but-well-formed proof proves nothing
+  // and can no longer fabricate a settlement. 'rejected' surfaces as an error; an unknown rid
+  // stops after a bounded budget with actionable copy (see the poll effect).
   useEffect(() => {
     if (prefillReceipt == null) return;
     const blob = prefillReceipt;
@@ -159,23 +190,18 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
           ? (JSON.parse(text.slice(text.indexOf('{'))) as {request_id?: unknown; block_index?: unknown})
           : null);
         if (!proof) { if (alive) setErr('This receipt link is malformed.'); return; }
-        const openReq = reqQr;
-        if (openReq) {
-          // Bind to the open request: request_id must be a 32-byte hex string (rid of the payer's
-          // envelope for THIS payment) and block_index a non-negative decimal string.
-          if (typeof proof.request_id !== 'string' || !/^[0-9a-fA-F]{64}$/.test(proof.request_id) ||
-              typeof proof.block_index !== 'string' || !/^\d+$/.test(proof.block_index)) {
-            if (alive) setErr("This receipt doesn't match your open request.");
-            return;
-          }
-          setWatchRid(proof.request_id);
-          setResult({amount: openReq.rawAmount, currency: openReq.currency, from: 'payer'});
-        } else {
-          // No open request (cold launch): show the proof's own fields, honestly labeled.
-          const amount = typeof proof.block_index === 'string' ? '0' : '0';
-          setResult({amount, currency: 0, from: 'payer'});
+        if (!reqQr) {
+          // No open request to bind against (cold launch): the proof is unverifiable HERE — there
+          // is no request whose settlement this screen could confirm, and no honest amount to
+          // show. Never fabricate a "Received", never fire onReceived (nothing was verified).
+          // Log it; if a request screen is open elsewhere it stays untouched.
+          console.warn('rail-proof deeplink ignored: no open request to verify it against');
+          return;
         }
-        onReceived();
+        const parsed = parseRailProof(proof);
+        if (!parsed) { if (alive) setErr("This receipt doesn't match your open request."); return; }
+        // Format-valid: watch the rid — ONLY the on-chain read_state confirmation flips result.
+        setWatchRid(parsed.request_id);
       } catch (e) {
         if (alive) setErr("Couldn't read this receipt link.");
         console.warn('receipt deeplink hand-back failed:', e instanceof Error ? e.message : String(e));

@@ -42,9 +42,10 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
   // pre-fills review — it never auto-signs/approves.
   const [prefillRequest, setPrefillRequest] = useState<string | null>(null);
   // The symmetric `dpay:pay/<blob>` (NFC-less receipt hand-back): a payer who settled online shares
-  // the canister-signed receipt back to the merchant. This holds the raw blob; ReceiveMode consumes
-  // it via its verify effect (rail proof → request_id binding → reconcile as Paid), then calls
-  // onReceiptConsumed to clear it. SECURITY: ReceiveMode verifies the signature BEFORE showing Paid.
+  // the rail proof {ledger, block_index, request_id} back to the merchant. This holds the raw blob;
+  // ReceiveMode consumes it via its verify effect (format-check → request_id binding → on-chain
+  // read_state confirmation → reconcile as Paid), then calls onReceiptConsumed to clear it.
+  // SECURITY: ReceiveMode never trusts the blob alone — the settlement poll confirms on-chain.
   const [prefillReceipt, setPrefillReceipt] = useState<string | null>(null);
   // THE one user-selection state (Phase 3 — 2026-08-12 unified asset selection rewrite). A single
   // stable `AssetId` (`ic:${currency}` | 'solana:SOL' | 'solana:USDC') is the SOLE idle selection
@@ -265,7 +266,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
   }, []);
 
   // Deeplink routing (item 6 + receipt hand-back): a `dpay:req/<blob>` arriving at launch pre-fills
-  // the Pay review screen; a `dpay:pay/<blob>` carries a canister-signed receipt to the merchant's
+  // the Pay review screen; a `dpay:pay/<blob>` carries the rail proof to the merchant's
   // Receive screen. Two receive paths each, both bounded + best-effort (a failure just doesn't
   // prefill — but it's logged, never swallowed):
   //   • Web: readRequestDeeplink()/readPaymentDeeplink() read `?req=`/`?pay=` from the page URL (the

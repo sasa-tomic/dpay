@@ -22,6 +22,7 @@ import {
   shareHandoff,
   readRequestDeeplink,
   readPaymentDeeplink,
+  parseRailProof,
 } from '../lib/deepLink';
 
 // A realistic canister-signed receipt object (the shape the relay's POST /api/v1/pay returns under
@@ -36,6 +37,14 @@ const SAMPLE_RECEIPT = {
   settle_ts: '1700000000',
   receipt_sig: 'ff'.repeat(64),
   pubkey: 'ee'.repeat(32),
+};
+
+// A realistic rail proof (the post-cutover dpay:pay/ payload — {ledger, block_index, request_id},
+// derived by the payer's phone after read_state confirms its envelope settled).
+const SAMPLE_PROOF = {
+  ledger: 'w7x7r-c3z3l-…', // principal text (abridged in tests — the format gate doesn't check it)
+  block_index: '123456',
+  request_id: 'ab'.repeat(32), // 64-hex = the 32-byte request_id of the payer's envelope
 };
 
 describe('encodeDeeplink', () => {
@@ -187,6 +196,69 @@ describe('decodeReceiptDeeplink', () => {
   it('returns null on base64url that is not valid JSON', () => {
     // "abc" is valid base64url but decodes to non-JSON bytes.
     expect(decodeReceiptDeeplink('abc')).toBeNull();
+  });
+});
+
+// --- rail-proof FORMAT gate (parseRailProof — F2/F6, 2026-08-20) ------------------------------
+// The dpay:pay/ blob is UNTRUSTED: parseRailProof is the pure format gate the merchant's screen
+// applies BEFORE binding the proof to its open request. A non-null result means "well-formed,
+// still unverified" — the settlement poll confirms on-chain. This is the forgery surface: a
+// random-but-well-formed request_id must pass the FORMAT gate (that is correct — the point is
+// that format alone can no longer flip the UI to Received; only read_state can).
+
+describe('parseRailProof (format gate of the dpay:pay hand-back)', () => {
+  it('accepts a well-formed proof and echoes request_id/block_index', () => {
+    expect(parseRailProof(SAMPLE_PROOF)).toEqual({
+      request_id: 'ab'.repeat(32),
+      block_index: '123456',
+      ledger: 'w7x7r-c3z3l-…',
+    });
+  });
+  it('accepts a FORGED-but-well-formed proof (random rid) — format-valid ≠ verified', () => {
+    const forged = {request_id: '00ff'.repeat(16), block_index: '0', ledger: 'x'};
+    // The format gate passes it; the COMPONENT test (ReceiveMode) proves it can't flip the UI.
+    expect(parseRailProof(forged)).not.toBeNull();
+  });
+  it('round-trips through the full codec: encodeReceiptDeeplink → decodeReceiptDeeplink → parseRailProof', () => {
+    const blob = encodeReceiptDeeplink(SAMPLE_PROOF).slice('dpay:pay/'.length);
+    expect(parseRailProof(decodeReceiptDeeplink(blob))).toEqual({
+      request_id: SAMPLE_PROOF.request_id,
+      block_index: SAMPLE_PROOF.block_index,
+      ledger: SAMPLE_PROOF.ledger,
+    });
+  });
+  it('null on null / non-object input', () => {
+    expect(parseRailProof(null)).toBeNull();
+  });
+  it('null when request_id is not 64-hex (too short)', () => {
+    expect(parseRailProof({...SAMPLE_PROOF, request_id: 'ab'.repeat(31)})).toBeNull();
+  });
+  it('null when request_id is not hex', () => {
+    expect(parseRailProof({...SAMPLE_PROOF, request_id: 'zz'.repeat(32)})).toBeNull();
+  });
+  it('null when request_id is not a string (a number is malformed)', () => {
+    expect(parseRailProof({...SAMPLE_PROOF, request_id: 123} as unknown as Record<string, unknown>)).toBeNull();
+  });
+  it('null when block_index is missing', () => {
+    expect(parseRailProof({request_id: 'ab'.repeat(32)})).toBeNull();
+  });
+  it('null when block_index is not digits (hex/negative/float rejected)', () => {
+    expect(parseRailProof({...SAMPLE_PROOF, block_index: '12ab'})).toBeNull();
+    expect(parseRailProof({...SAMPLE_PROOF, block_index: '-1'})).toBeNull();
+    expect(parseRailProof({...SAMPLE_PROOF, block_index: '1.5'})).toBeNull();
+  });
+  it('null when block_index is a number, not a decimal string', () => {
+    expect(parseRailProof({...SAMPLE_PROOF, block_index: 42} as unknown as Record<string, unknown>)).toBeNull();
+  });
+  it('accepts block_index 0 (the ledger genesis edge — digits-only is the contract)', () => {
+    expect(parseRailProof({...SAMPLE_PROOF, block_index: '0'})?.block_index).toBe('0');
+  });
+  it('ledger is optional (absent ledger still parses — the open request owns routing)', () => {
+    const {ledger, ...noLedger} = SAMPLE_PROOF;
+    void ledger;
+    const out = parseRailProof(noLedger);
+    expect(out?.request_id).toBe(SAMPLE_PROOF.request_id);
+    expect(out?.ledger).toBeUndefined();
   });
 });
 

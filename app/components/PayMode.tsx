@@ -175,11 +175,12 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
         <Text style={[S.paidText, warn && S.alreadyText]}>{headline}</Text>
         <Text style={S.paidSub}>{sub}</Text>
         {/* NFC-less receipt hand-back: when the payer settled ONLINE (NFC unavailable) they hold the
-            canister-signed receipt. Offer to share it back as a dpay:pay/ link so the merchant can
-            open it + verify + reconcile as Paid without waiting for the request poll (or for the
-            async case where the receipt travels over a messaging app). Only shown when a verified
-            receipt was captured (a fresh online settle) — not on the offline hand-off (the merchant
-            settles that themselves) nor on a replay (no fresh receipt). Mirrors btn-share-request. */}
+            rail proof {ledger, block_index, request_id}. Offer to share it back as a dpay:pay/ link
+            so the merchant can open it — format-check it against their open request and confirm
+            settlement on-chain — without waiting for the request poll (or for the async case where
+            the proof travels over a messaging app). Only shown when a fresh proof was captured (a
+            fresh online settle) — not on the offline hand-off (the merchant settles that
+            themselves) nor on a replay (no fresh proof). Mirrors btn-share-request. */}
         {paid.receipt ? (
           <Pressable
             testID="btn-share-receipt"
@@ -189,7 +190,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
             }}
             accessibilityRole="button"
             accessibilityLabel="Share receipt"
-            accessibilityHint="Share the canister-signed receipt as a link the merchant can open to confirm"
+            accessibilityHint="Share the payment proof as a link the merchant can open to confirm"
             accessibilityState={{disabled: false}}>
             <IconShare size={16} color={C.sub}/>
             <Text style={S.ghostBtnText}>{shared ? shareConfirmLabel('Link copied ✓') : 'Share receipt'}</Text>

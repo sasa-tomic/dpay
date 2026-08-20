@@ -55,6 +55,11 @@ export const POLL = (() => {
     receiptRcv: t?.receiptRcv ?? 1500,
   };
 })();
+// Bounded unknown-budget for the Receive settlement poll (F2, 2026-08-20): how many 'unknown'
+// read_state results we accept before stopping with actionable copy. NOT poll-interval-scaled —
+// a count budget keeps the wall-clock bound proportional to POLL.receiptRcv (45s at prod cadence,
+// ~4.5s under the e2e POLL override) so the offline suite stays fast.
+export const PROOF_POLL_BUDGET = 30;
 // (IC-rail cutover 2026-08-19: EXPECTED_RECEIPT_PUBKEY + the canister-signed receipt pin RETIRED —
 // outcomes are read_state request_status + balance recheck, honestly labeled; W6 upgrades to
 // on-device BLS cert-chain verification. The __DPAY_TEST_RECEIPT_PUBKEY seam died with it.)
