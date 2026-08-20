@@ -8,6 +8,20 @@
 <meta name="color-scheme" content="light dark" />
 <meta name="theme-color" content="#F4F1E8" />
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141210" />
+<script>
+/* Theme override (Wave 7): 'auto' follows the OS scheme; 'light'/'dark' pin it. Runs pre-paint
+   (before <body>) so the correct theme applies with no flash; the toggle at the end of <body>
+   cycles + persists the same key. The .dark class on <html> is what the CSS keys on. */
+(function () {
+  try {
+    var m = localStorage.getItem('dpay-theme');
+    var dark = m === 'dark' || (m !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    var root = document.documentElement;
+    root.classList.toggle('dark', dark);
+    root.setAttribute('data-theme-mode', m === 'light' || m === 'dark' ? m : 'auto');
+  } catch (e) {}
+})();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&amp;family=IBM+Plex+Mono:wght@500;600&amp;display=swap" rel="stylesheet" />
@@ -580,15 +594,19 @@
     .rv{opacity:1;transform:none}
   }
 
-  /* ── Dark theme (Wave 4, 2026-08-20) ────────────────────────────────────────────────────
-     Auto-only: activates at OS/browser dark via prefers-color-scheme. The warm near-black
-     reading of the same Traveler Paper identity (mirrors app/config/palette.ts DARK — keep in
-     lockstep). Vars carry most of the page; the remaining hardcoded porcelain literals (nav,
-     grain, shadows) get scoped overrides. The .band showcase sections are ALREADY dark on a
-     porcelain page — in dark mode they sit on the page's own near-black, so their inner
-     light-alpha chrome (rail-track/arrow/phone-frame borders) stays legible unchanged. */
-  @media (prefers-color-scheme: dark) {
-    :root{
+  /* ── Dark theme (Wave 4, 2026-08-20 · Wave 7 manual toggle) ─────────────────────────────
+     The warm near-black reading of the same Traveler Paper identity (mirrors
+     app/config/palette.ts DARK — keep in lockstep). Vars carry most of the page; the remaining
+     hardcoded porcelain literals (nav, grain, shadows) get scoped overrides. The .band showcase
+     sections are ALREADY dark on a porcelain page — in dark mode they sit on the page's own
+     near-black, so their inner light-alpha chrome (rail-track/arrow/phone-frame borders) stays
+     legible unchanged.
+     Wave 7: keyed on `html.dark` (set by the pre-paint head script + the fixed toggle below)
+     instead of a bare @media — 'auto' follows the OS scheme via matchMedia; 'light'/'dark' pin
+     it. color-scheme follows the class so scrollbars/native controls match. */
+  html{color-scheme:light}
+  html.dark{color-scheme:dark}
+  html.dark{
       --bg:#141210;
       --panel:#1D1A16;
       --panel2:#24211C;
@@ -607,23 +625,52 @@
       --sh-md:0 16px 36px -22px rgba(0,0,0,.4);
       --sh-sm:0 8px 20px -12px rgba(0,0,0,.35);
     }
-    .grain{opacity:.06;mix-blend-mode:screen}
-    nav{background:rgba(20,18,16,.82)}
+    html.dark .grain{opacity:.06;mix-blend-mode:screen}
+    html.dark nav{background:rgba(20,18,16,.82)}
+    html.dark .navlink:hover{background:rgba(242,238,230,.06)}
+    /* Wave 7 contrast fixes: the .band/.ticker showcase sections key their text off var(--bg) and
+       their strips off var(--ink) — both flip in dark, leaving near-black-on-near-black text and
+       a cream-on-cream ticker. The floor overrides below keep the showcase rhythm readable. */
+    html.dark .band h2,
+    html.dark .band .step .t,
+    html.dark .band-note b,
+    html.dark .band .sec-sub b,
+    html.dark .mline{color:#F2EEE6}
+    html.dark .ticker{background:#0E0D0B}
+    html.dark .ph .idx{background:#1B1A17;border-color:rgba(242,238,230,.25)}
+    html.dark .node.on small{color:#34C48E}
+    html.dark .route path{stroke:rgba(242,238,230,.22)}
     /* .band + .foot key off --ink/--bg which now flip (near-black band bg becomes near-black on
-       near-black — indistinct): give them a slightly lifted floor + cream text so the showcase
-       rhythm survives, and re-point the porcelain-tinted accents inside them. */
-    .band{background:#0E0D0B}
-    .band .rail-track{background:repeating-linear-gradient(90deg,rgba(242,238,230,.14) 0 7px,transparent 7px 15px)}
-    .band .arrow{color:rgba(242,238,230,.4)}
-    .band .ph{border-color:rgba(242,238,230,.13)}
-    .band .ghost{color:#F2EEE6;border-color:rgba(242,238,230,.4)}
-    footer{background:#0E0D0B}
-    .foot .word,
-    .foot p b,
-    .foot a{color:#F2EEE6}
-    .foot a{border-bottom-color:rgba(242,238,230,.3)}
-    .foot-micro{color:rgba(242,238,230,.55)}
+        near-black — indistinct): give them a slightly lifted floor + cream text so the showcase
+        rhythm survives, and re-point the porcelain-tinted accents inside them. */
+    html.dark .band{background:#0E0D0B}
+    html.dark .band .rail-track{background:repeating-linear-gradient(90deg,rgba(242,238,230,.14) 0 7px,transparent 7px 15px)}
+    html.dark .band .arrow{color:rgba(242,238,230,.4)}
+    html.dark .band .ph{border-color:rgba(242,238,230,.13)}
+    html.dark .band .ghost{color:#F2EEE6;border-color:rgba(242,238,230,.4)}
+    html.dark footer{background:#0E0D0B}
+    html.dark .foot .word,
+    html.dark .foot p b,
+    html.dark .foot a{color:#F2EEE6}
+    html.dark .foot a{border-bottom-color:rgba(242,238,230,.3)}
+    html.dark .foot-micro{color:rgba(242,238,230,.55)}
+
+  /* Wave 7 — fixed theme toggle (Auto → Light → Dark cycle), bottom-right. A panel chip on a
+     hairline border with the site's soft shadow; the icon follows html[data-theme-mode]. */
+  .theme-toggle{
+    position:fixed;right:18px;bottom:18px;z-index:80;width:44px;height:44px;border-radius:999px;
+    border:1px solid var(--line);background:var(--panel);color:var(--sub);display:flex;
+    align-items:center;justify-content:center;cursor:pointer;box-shadow:var(--sh-sm);
+    -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
+    transition:color .15s ease,border-color .15s ease;padding:0;
   }
+  .theme-toggle:hover{color:var(--ink);border-color:var(--sub2)}
+  .theme-toggle:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+  .theme-toggle svg{display:none}
+  html[data-theme-mode="auto"] .theme-toggle .tt-auto,
+  html[data-theme-mode="light"] .theme-toggle .tt-light,
+  html[data-theme-mode="dark"] .theme-toggle .tt-dark{display:block}
+  @media (max-width:560px){.theme-toggle{right:14px;bottom:14px}}
 </style>
 </head>
 <body>
@@ -1031,6 +1078,37 @@
   } else {
     els.forEach(function (el) { el.classList.add('in'); });
   }
+})();
+</script>
+
+<!-- Wave 7 — theme toggle: cycles Auto → Light → Dark → Auto; persists 'dpay-theme' and keys
+     the html.dark class set by the pre-paint head script (no flash on reload). -->
+<button type="button" class="theme-toggle" id="theme-toggle" aria-label="Theme: Auto. Switches between auto, light, and dark theme.">
+  <svg class="tt-light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+  <svg class="tt-dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+  <svg class="tt-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor" stroke="none"/></svg>
+</button>
+<script>
+(function () {
+  var btn = document.getElementById('theme-toggle');
+  var MODES = ['auto', 'light', 'dark'];
+  var LABEL = { auto: 'Auto', light: 'Light', dark: 'Dark' };
+  function mode() {
+    try { var m = localStorage.getItem('dpay-theme'); return MODES.indexOf(m) >= 0 ? m : 'auto'; } catch (e) { return 'auto'; }
+  }
+  function apply(m, persist) {
+    var dark = m === 'dark' || (m === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    var root = document.documentElement;
+    root.classList.toggle('dark', dark);
+    root.setAttribute('data-theme-mode', m);
+    if (btn) btn.setAttribute('aria-label', 'Theme: ' + LABEL[m] + '. Switches between auto, light, and dark theme.');
+    if (persist) { try { localStorage.setItem('dpay-theme', m); } catch (e) {} }
+  }
+  // Follow the OS scheme while in auto (a scheme change re-resolves immediately).
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () { apply(mode(), false); });
+  if (btn) btn.addEventListener('click', function () { apply(MODES[(MODES.indexOf(mode()) + 1) % MODES.length], true); });
+  // Re-sync in case the head script ran before <html> classes were available (defensive no-op).
+  apply(mode(), false);
 })();
 </script>
 

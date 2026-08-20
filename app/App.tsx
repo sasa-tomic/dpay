@@ -20,7 +20,8 @@ import {SafeAreaView, ActivityIndicator, View, useColorScheme} from 'react-nativ
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {RELAY_DEFAULT} from './relayConfig';
 import {C, DARK, LIGHT} from './config/palette';
-import {STORAGE_KEY, RELAY_STORAGE_KEY} from './config/constants';
+import {STORAGE_KEY, RELAY_STORAGE_KEY, THEME_STORAGE_KEY} from './config/constants';
+import {parseTheme, resolveTheme, type ThemeOverride} from './config/theme';
 import {runSolSelfCheck} from './solana/selfcheck';
 import type {Identity} from './lib/types';
 import {DpayCore} from './services/native';
@@ -31,34 +32,41 @@ import {Wallet} from './components/Wallet';
 export default function App() {
   const [identity, setIdentity] = useState<Identity | null | undefined>(undefined); // undefined = loading
   const [relayUrl, setRelayUrl] = useState(RELAY_DEFAULT);
+  // Wave 7 manual theme override ('auto' = follow the OS scheme, the Wave-4 default). 'auto' until
+  // the persisted choice hydrates (below) — the module-load probe in styles.ts keeps first paint
+  // correct in the meantime; once hydrated the override wins via the resolved palette below.
+  const [themeOverride, setThemeOverride] = useState<ThemeOverride>('auto');
 
-  // Wave-4 dual theme, AUTO ONLY (no manual override): follow the OS color scheme. styles.ts
-  // already resolved the OS theme at module load (synchronous Appearance probe → first paint is
-  // correct, no light-flash); this keeps the live palette in sync when the scheme CHANGES at
-  // runtime (Android dark-mode toggle, browser devtools emulation — RNW's useColorScheme is
-  // matchMedia-backed). Calling applyPalette in the render body (not an effect) means the
-  // palette is applied BEFORE this render's children read S/C — no stale frame. It is idempotent
-  // and guarded, so the per-render call is a no-op after the first. useColorScheme() re-renders
-  // App on change; nothing below is memoized, so the whole tree re-reads S/C (verified: no
-  // React.memo in the app tree).
+  // Wave-4 dual theme + Wave-7 manual override: resolve override + OS scheme → the palette.
+  // styles.ts already resolved the OS theme at module load (synchronous Appearance probe → first
+  // paint is correct, no light-flash); this keeps the live palette in sync when the scheme CHANGES
+  // at runtime (Android dark-mode toggle, browser devtools emulation — RNW's useColorScheme is
+  // matchMedia-backed) or when the user cycles the override. Calling applyPalette in the render
+  // body (not an effect) means the palette is applied BEFORE this render's children read S/C — no
+  // stale frame. It is idempotent and guarded, so the per-render call is a no-op after the first.
+  // useColorScheme() re-renders App on change; nothing below is memoized, so the whole tree
+  // re-reads S/C (verified: no React.memo in the app tree).
   const scheme = useColorScheme();
-  applyPalette(scheme === 'dark' ? DARK : LIGHT);
+  applyPalette(resolveTheme(themeOverride, scheme) === 'dark' ? DARK : LIGHT);
 
-  // Load identity + the persisted relay URL on mount. Both live in AsyncStorage; the relay URL
-  // defaults to `relayConfig`'s value (the ?relay= override in the harness, or the codegen'd prod
-  // URL) when no persisted choice exists yet.
+  // Load identity + the persisted relay URL + the persisted theme override on mount. All live in
+  // AsyncStorage; the relay URL defaults to `relayConfig`'s value (the ?relay= override in the
+  // harness, or the codegen'd prod URL) and the theme to 'auto' when no persisted choice exists.
   useEffect(() => {
     Promise.all([
       AsyncStorage.getItem(STORAGE_KEY),
       AsyncStorage.getItem(RELAY_STORAGE_KEY),
+      AsyncStorage.getItem(THEME_STORAGE_KEY),
     ])
-      .then(([idV, relayV]) => {
+      .then(([idV, relayV, themeV]) => {
         setIdentity(idV ? JSON.parse(idV) : null);
         if (typeof relayV === 'string' && relayV.length > 0) setRelayUrl(relayV);
+        const t = parseTheme(themeV);
+        if (t !== 'auto') setThemeOverride(t);
       })
       .catch((e: unknown) => {
         // No silent errors: log with context, then fall back to a safe empty identity.
-        console.log(`[dpay] failed to load identity/relay: ${e instanceof Error ? e.message : String(e)}`);
+        console.log(`[dpay] failed to load identity/relay/theme: ${e instanceof Error ? e.message : String(e)}`);
         setIdentity(null);
       });
   }, []);
@@ -69,6 +77,15 @@ export default function App() {
     setRelayUrl(url);
     AsyncStorage.setItem(RELAY_STORAGE_KEY, url).catch((e: unknown) => {
       console.log(`[dpay] failed to persist relay URL: ${e instanceof Error ? e.message : String(e)}`);
+    });
+  }, []);
+
+  // Wave 7: set the theme override AND persist it — same best-effort pattern as persistRelay. The
+  // single mutator both toggle controls (wallet header + Settings) cycle through.
+  const persistTheme = useCallback((t: ThemeOverride) => {
+    setThemeOverride(t);
+    AsyncStorage.setItem(THEME_STORAGE_KEY, t).catch((e: unknown) => {
+      console.log(`[dpay] failed to persist theme override: ${e instanceof Error ? e.message : String(e)}`);
     });
   }, []);
 
@@ -122,5 +139,5 @@ export default function App() {
   if (identity === null) {
     return <View style={S.screenFrame}><Onboarding relayUrl={relayUrl} onCreated={setIdentity} /></View>;
   }
-  return <View style={S.screenFrame}><Wallet identity={identity} relayUrl={relayUrl} setRelayUrl={persistRelay} onReset={onReset} onRestore={onRestore} /></View>;
+  return <View style={S.screenFrame}><Wallet identity={identity} relayUrl={relayUrl} setRelayUrl={persistRelay} onReset={onReset} onRestore={onRestore} themeOverride={themeOverride} onCycleTheme={persistTheme} /></View>;
 }

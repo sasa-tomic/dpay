@@ -32,9 +32,10 @@ import {SolPayMode} from './SolPayMode';
 import {SolReceiveMode} from './SolReceiveMode';
 import {SettingsSheet} from './SettingsSheet';
 import {BalancesSheet} from './BalancesSheet';
-import {IconArrowDownLeft, IconChevronDown, IconClock, IconQr, IconSettings} from './icons';
+import {IconArrowDownLeft, IconChevronDown, IconClock, IconMoon, IconQr, IconSettings, IconSun, IconAuto} from './icons';
+import {nextTheme, themeLabel, type ThemeOverride} from '../config/theme';
 
-export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {identity: Identity; relayUrl: string; setRelayUrl: (s: string) => void; onReset: () => void; onRestore: (id: Identity) => Promise<void>}) {
+export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, themeOverride, onCycleTheme}: {identity: Identity; relayUrl: string; setRelayUrl: (s: string) => void; onReset: () => void; onRestore: (id: Identity) => Promise<void>; themeOverride: ThemeOverride; onCycleTheme: (t: ThemeOverride) => void}) {
   const [mode, setMode] = useState<'pay' | 'receive' | 'ledger'>('pay');
   // Deeplink prefill (item 6): a `dpay:req/<blob>` (or the web `?req=<blob>` mirror) sets the raw
   // base64url blob + flips mode to 'pay'; PayMode consumes it via its prefill effect (which reuses
@@ -72,6 +73,9 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
   // (the button reads 'Checking…' + disables) rather than a poll-lifecycle tracker. The poll's
   // own 2.5s cadence + generation gate remain the source of truth for the balance itself.
   const [recheckBusy, setRecheckBusy] = useState(false);
+  // Wave 7: cycle the theme override (Auto → Light → Dark → Auto) — App.tsx owns the state +
+  // AsyncStorage persistence; this is the single mutator both toggle controls call.
+  const cycleTheme = useCallback(() => onCycleTheme(nextTheme(themeOverride)), [onCycleTheme, themeOverride]);
   const recheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (recheckTimer.current != null) clearTimeout(recheckTimer.current); }, []);
   // Within-tab sub-modes for the Receive/Pay IA: "request"/"address" (Receive) and "scan"/"send"
@@ -585,6 +589,16 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
           </View>
         </View>
         <Pressable
+          testID="btn-theme"
+          style={S.headerSettingsBtn}
+          onPress={cycleTheme}
+          accessibilityRole="button"
+          accessibilityLabel={`Theme: ${themeLabel(themeOverride)}`}
+          accessibilityHint="Cycle the theme between Auto, Light, and Dark"
+        >
+          {themeOverride === 'light' ? <IconSun size={20} color={C.sub} /> : themeOverride === 'dark' ? <IconMoon size={20} color={C.sub} /> : <IconAuto size={20} color={C.sub} />}
+        </Pressable>
+        <Pressable
           testID="balance"
           style={[S.balBox, balancesDisabled && S.dim]}
           disabled={balancesDisabled}
@@ -727,9 +741,11 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
           onClose={() => setSettingsOpen(false)}
           onReset={onReset}
           onRestore={onRestore}
-          secretHex={identity.secretHex}
-          username={identity.username}
-        />
+           secretHex={identity.secretHex}
+           username={identity.username}
+           themeOverride={themeOverride}
+           onCycleTheme={cycleTheme}
+         />
       ) : null}
     </SafeAreaView>
   );

@@ -7,3 +7,5 @@ dist/
 shots/*
 !shots/baselines/
 !shots/baselines/**
+!shots/baselines-dark/
+!shots/baselines-dark/**

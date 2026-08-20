@@ -38,7 +38,7 @@ const SURFACES = [
   { capture: '40-vr-receive-request', baseline: 'receive-request', masksFromTestID: 'request-qr' },
   { capture: '40-vr-balances', baseline: 'balances' },
   { capture: '40-vr-settings', baseline: 'settings' },
-  { capture: '40-vr-ledger', baseline: 'ledger' },
+  { capture: '40-vr-ledger', baseline: 'ledger', masksFromTestID: 'hist-time-0' },
 ];
 
 const REGEN = process.env.DPAY_E2E_REGEN_BASELINES === '1';
@@ -102,9 +102,15 @@ export async function run() {
     await driver.screenshot(SURFACES[3].capture);
     await driver.click('btn-settings-close', { timeoutMs: 4_000 });
 
-    // 6. Ledger (transaction history — empty initially for a fresh wallet).
+    // 6. Ledger (transaction history — one faucet row for a fresh wallet). The row's TIMESTAMP is
+    //    inherently time-varying (minute digits + 1↔2-digit hour width flips the changed-pixel
+    //    count), so mask it (same mechanism as the request QR) — an unmasked diff was a standing
+    //    flake riding just under the 0.5% tolerance.
     await driver.click('tab-transactions', { timeoutMs: 5_000 });
     await driver.waitForText('No payments yet', { timeoutMs: 3_000 }).catch(() => {});
+    if (await driver.isPresent('hist-time-0')) {
+      masks['hist-time-0'] = await getTestIDRectDevicePx(driver, 'hist-time-0');
+    }
     await driver.screenshot(SURFACES[4].capture);
 
     // 7. Diff each capture against its baseline (or seed if missing + REGEN).

@@ -10,6 +10,7 @@
 import {describe, test, expect, afterEach} from '@jest/globals';
 import {C, DARK, LIGHT} from '../config/palette';
 import {S, applyPalette, isDark} from '../styles';
+import {nextTheme, resolveTheme, parseTheme, themeLabel} from '../config/theme';
 
 describe('dual theme: applyPalette', () => {
   afterEach(() => {
@@ -98,5 +99,66 @@ describe('dual theme: applyPalette', () => {
     const g = glyphFor(demo);
     expect(g.color).toBe('#FF7A45');
     expect(g.bg).toBe('rgba(255,122,69,0.14)');
+  });
+});
+
+describe('Wave 7: manual theme override model (config/theme.ts)', () => {
+  afterEach(() => {
+    applyPalette(LIGHT);
+  });
+
+  test('cycle order is Auto → Light → Dark → Auto', () => {
+    expect(nextTheme('auto')).toBe('light');
+    expect(nextTheme('light')).toBe('dark');
+    expect(nextTheme('dark')).toBe('auto');
+  });
+
+  test('resolveTheme: auto follows the OS scheme; light/dark pin regardless of scheme', () => {
+    // auto delegates to the scheme (scheme null — mocked Appearance — resolves light, like App boot).
+    expect(resolveTheme('auto', 'dark')).toBe('dark');
+    expect(resolveTheme('auto', 'light')).toBe('light');
+    expect(resolveTheme('auto', null)).toBe('light');
+    // The override WINS over any scheme — the whole point of the manual toggle.
+    expect(resolveTheme('dark', 'light')).toBe('dark');
+    expect(resolveTheme('light', 'dark')).toBe('light');
+  });
+
+  test('parseTheme coerces unknown/garbage stored values to auto', () => {
+    expect(parseTheme('light')).toBe('light');
+    expect(parseTheme('dark')).toBe('dark');
+    expect(parseTheme('auto')).toBe('auto');
+    expect(parseTheme(null)).toBe('auto');
+    expect(parseTheme(undefined)).toBe('auto');
+    expect(parseTheme('')).toBe('auto');
+    expect(parseTheme('blue')).toBe('auto'); // legacy/garbage keys never crash the app
+  });
+
+  test('themeLabel renders the Settings/a11y display name', () => {
+    expect(themeLabel('auto')).toBe('Auto');
+    expect(themeLabel('light')).toBe('Light');
+    expect(themeLabel('dark')).toBe('Dark');
+  });
+
+  test('the override drives the applied palette (App.tsx contract: resolveTheme → applyPalette)', () => {
+    // Light override under a DARK scheme must still apply LIGHT — the pin beats the OS.
+    let resolved: 'light' | 'dark' = resolveTheme('light', 'dark');
+    applyPalette(resolved === 'dark' ? DARK : LIGHT);
+    expect(isDark()).toBe(false);
+    expect(S.root.backgroundColor).toBe(LIGHT.bg);
+    // Dark override under a LIGHT/null scheme must apply DARK.
+    resolved = resolveTheme('dark', undefined);
+    applyPalette(resolved === 'dark' ? DARK : LIGHT);
+    expect(isDark()).toBe(true);
+    expect(S.root.backgroundColor).toBe(DARK.bg);
+    // The StatusBar barStyle sites read isDark() — the override (not the scheme) must drive it:
+    // a 'light' override keeps dark-content bars even when the OS is dark, and vice versa.
+    expect(isDark()).toBe(resolveTheme('dark', 'light') === 'dark');
+  });
+
+  test('persistence key round-trips through parseTheme (dpay.theme.v1 contract)', () => {
+    // What App.tsx writes is what parseTheme reads back — the storage contract.
+    for (const t of ['auto', 'light', 'dark'] as const) {
+      expect(parseTheme(t)).toBe(t);
+    }
   });
 });

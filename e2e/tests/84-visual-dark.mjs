@@ -32,7 +32,7 @@ const SURFACES = [
   { capture: '84-vr-dark-receive-request', baseline: 'receive-request', masksFromTestID: 'request-qr' },
   { capture: '84-vr-dark-balances', baseline: 'balances' },
   { capture: '84-vr-dark-settings', baseline: 'settings' },
-  { capture: '84-vr-dark-ledger', baseline: 'ledger' },
+  { capture: '84-vr-dark-ledger', baseline: 'ledger', masksFromTestID: 'hist-time-0' },
 ];
 
 const REGEN = process.env.DPAY_E2E_REGEN_BASELINES === '1';
@@ -105,9 +105,13 @@ export async function run() {
     await driver.screenshot(SURFACES[3].capture);
     await driver.click('btn-settings-close', { timeoutMs: 4_000 });
 
-    // 6. Ledger (empty for a fresh wallet).
+    // 6. Ledger (one faucet row for a fresh wallet). Mask the row TIMESTAMP — same time-varying
+    //    flake fix as flow 40's ledger surface.
     await driver.click('tab-transactions', { timeoutMs: 5_000 });
     await driver.waitForText('No payments yet', { timeoutMs: 3_000 }).catch(() => {});
+    if (await driver.isPresent('hist-time-0')) {
+      masks['hist-time-0'] = await getTestIDRectDevicePx(driver, 'hist-time-0');
+    }
     await driver.screenshot(SURFACES[4].capture);
 
     // 7. Diff each capture against its dark baseline (or seed if missing + REGEN).

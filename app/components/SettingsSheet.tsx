@@ -11,7 +11,8 @@ import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {SheetOverlay} from './SheetOverlay';
 import {SeedWords} from './SeedWords';
-import {IconChevronDown, IconClose, IconExternalLink} from './icons';
+import {IconAuto, IconChevronDown, IconClose, IconExternalLink, IconMoon, IconSun} from './icons';
+import {nextTheme, themeLabel, type ThemeOverride} from '../config/theme';
 
 /**
  * Settings sheet — server config + reset (app configuration only). Moved off the main wallet screen
@@ -34,7 +35,7 @@ import {IconChevronDown, IconClose, IconExternalLink} from './icons';
  *    the action opens a confirmation dialog (the destructive gate stays in place). Visually distinct
  *    from the "Privacy policy" link above it (which previously shared the same link chrome).
  */
-export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestore, secretHex, username}: {
+export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestore, secretHex, username, themeOverride, onCycleTheme}: {
   relayUrl: string;
   setRelayUrl: (s: string) => void;
   onClose: () => void;
@@ -50,6 +51,10 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
   // The current wallet's username — PRESERVED across a restore (the seed recovers keys, not local
   // display metadata). Passed to the rebuilt Identity so the user keeps their display name.
   username: string;
+  // Wave 7 theme override — the resolved override ('auto' follows the OS scheme) + the single
+  // cycle mutator (Auto → Light → Dark → Auto). App.tsx owns the state + AsyncStorage persistence.
+  themeOverride: ThemeOverride;
+  onCycleTheme: (t: ThemeOverride) => void;
 }) {
   useEscapeToClose(onClose);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -355,6 +360,26 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
               <View style={S.linkRow}>
                 <IconExternalLink size={12} color={C.sub2} />
                 <Text style={S.linkTextMuted}>Privacy policy</Text>
+              </View>
+            </Pressable>
+          </View>
+
+          {/* Wave 7 — Theme: the explicit Light/Dark/Auto control (one tap cycles; the label always
+              names the CURRENT mode). 'Auto' follows the OS/browser scheme (the Wave-4 default);
+              Light/Dark pin the palette regardless of scheme. Persisted by App.tsx. */}
+          <View style={S.settingsSection}>
+            <Text style={S.inputLabel}>Theme</Text>
+            <Pressable
+              testID="btn-theme-mode"
+              style={S.secondaryBtn}
+              onPress={() => onCycleTheme(nextTheme(themeOverride))}
+              accessibilityRole="button"
+              accessibilityLabel={`Theme: ${themeLabel(themeOverride)} — cycle theme`}
+              accessibilityHint="Switches between Auto (follow your device), Light, and Dark"
+              accessibilityState={{disabled: false}}>
+              <View style={S.linkRow}>
+                {themeOverride === 'light' ? <IconSun size={14} color={C.sub} /> : themeOverride === 'dark' ? <IconMoon size={14} color={C.sub} /> : <IconAuto size={14} color={C.sub} />}
+                <Text style={S.secondaryBtnText}>Theme: {themeLabel(themeOverride)}</Text>
               </View>
             </Pressable>
           </View>

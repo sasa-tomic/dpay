@@ -91,7 +91,10 @@ export function Ledger({history, catalog}: {history: Txn[]; catalog: CurrencyDes
               {t.memo ? <Text style={S.histMemo} testID={`hist-memo-${i}`}>{t.memo}</Text> : null}
             </View>
             <Text style={[S.histAmt, {color: t.dir === 'out' ? C.ink : C.ok}]}>{`${t.dir === 'out' ? '−' : '+'}${amtTxt}`}</Text>
-            <Text style={S.histTime}>{t.time}</Text>
+            {/* testID: the visual flows (40/84) MASK this element — the rendered time is
+                inherently time-varying (minute digits + 1↔2-digit hour width), so an unmasked
+                diff is a standing flake riding just under the 0.5% tolerance. */}
+            <Text style={S.histTime} testID={`hist-time-${i}`}>{t.time}</Text>
           </View>
         );
       })}

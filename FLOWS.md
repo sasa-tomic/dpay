@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **80 flows**
-> (79 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **81 flows**
+> (80 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (8) · pay (18) · offline (7) · deposit (8) · withdraw (7) · nfc (5) · system (21) · tour (5)
+wire (1) · onboard (8) · pay (18) · offline (7) · deposit (8) · withdraw (7) · nfc (5) · system (21) · tour (6)
 
 ---
 
@@ -151,6 +151,7 @@ wire (1) · onboard (8) · pay (18) · offline (7) · deposit (8) · withdraw (7
 | 40 | visual-regression | Pixel-diff the 5 primary surfaces (Pay, Receive+QR, Balances, Settings, Ledger) vs committed baselines; fails on drift >0.5%. | visual-regression, pixel-diff |
 | 78 | qr-scannable | every rendered <QrCode> stays machine-decodable: request-qr (244/M + brand mark) decodes to the exact encoded value (__DPAY_QR_LAST byte-for-byte) and sol-receive-qr (200/L, base58 address) decodes to the on-screen address — rasterized pixels through the same vendored jsQR the prod web wallet ships | qr-scannable, qr-brand-mark, quiet-zone |
 | 84 | visual-dark | Pixel-diff the 5 primary surfaces under an emulated OS dark scheme (prefers-color-scheme: dark) vs the dark-theme baselines in shots/baselines-dark/; the gate that the DARK palette renders on every surface the light flow walks. | visual-regression, pixel-diff, dark-theme |
+| 85 | theme-toggle | Manual theme override: header + Settings toggles cycle Auto/Light/Dark, root bg flips, choice survives reload, Auto follows the OS scheme. | theme-toggle, dark-theme, persistence, settings |
 
 ---
 

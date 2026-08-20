@@ -41,7 +41,7 @@ const SURFACES = {
   // Always-present (header + tabbar) on every surface. link-home is the web-only wordmark
   // back-link to the site root (WordmarkLink in Logo.tsx) — on native it degrades to inert
   // text, so the census (web) is its only role/label gate.
-  chrome: ['btn-settings', 'balance', 'link-home', 'tab-pay', 'tab-receive', 'tab-transactions'],
+  chrome: ['btn-settings', 'btn-theme', 'balance', 'link-home', 'tab-pay', 'tab-receive', 'tab-transactions'],
   // Wallet home (Pay tab) — only chrome is interactive (the scan card's QR scanner is a viewport,
   // not a Pressable; the pay-scan DIV is informational).
   home: [],
@@ -61,7 +61,7 @@ const SURFACES = {
   // surface at first open. btn-backup + btn-settings-restore are the always-visible section entries
   // (Backup and Restore); their confirm-gate children are censused separately (settingsBackupConfirm
   // is covered inline by the Backup flow's own census path; settingsRestoreConfirm below).
-  settings: ['btn-settings-close', 'settings-relay', 'btn-relay-apply', 'btn-backup', 'btn-reset', 'btn-settings-restore', 'privacy-policy'],
+  settings: ['btn-settings-close', 'btn-theme-mode', 'settings-relay', 'btn-relay-apply', 'btn-backup', 'btn-reset', 'btn-settings-restore', 'privacy-policy'],
   // Settings → Reset confirmation (btn-reset was tapped). Surface = the dialog above.
   settingsResetConfirm: ['btn-reset-confirm', 'btn-reset-cancel'],
   // Settings → Restore confirmation (btn-settings-restore was tapped). Surface = the inline seed
