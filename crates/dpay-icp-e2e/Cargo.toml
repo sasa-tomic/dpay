@@ -14,3 +14,8 @@ ed25519-dalek = { workspace = true }
 # Cached offline (0.12.28 already in Cargo.lock via pocket-ic); rustls only — no native-tls/openssl.
 # Pinned to the exact lock version so offline resolution never has to look at the network.
 reqwest = { version = "=0.12.28", default-features = false, features = ["blocking", "rustls-tls"] }
+
+[dev-dependencies]
+# Mainnet probe only (tests/mainnet.rs): reference DIDL encoding of the ckETH minter's
+# eip_1559_transaction_price arg — already in Cargo.lock via dpay-mock-minter, cached offline.
+candid = { workspace = true }

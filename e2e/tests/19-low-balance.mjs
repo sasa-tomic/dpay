@@ -32,7 +32,9 @@ export const meta = {
   journey: 'pay',
   covers: ['low-balance', 'insufficient', 'disabled-approve'],
   verifies: 'Insufficient funds: offline review-lowbal warning; online Approve disabled, \'Not enough balance\'.',
-  timeoutMs: 15000,
+  timeoutMs: 25000, // was 15s: full-suite 10-way parallel browser load runs this at ~15.1s (all
+                    // assertions GREEN, backstop false-fired 0.09s past budget — flow-41 precedent
+                    // class: host-load spikes uncompensated by the one-shot load factor)
 };
 
 export async function run() {

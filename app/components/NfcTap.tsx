@@ -62,7 +62,9 @@ export function NfcTap({role, identity, requestHex, reqInfo, catalog, onSettled,
         record();
         ctx.finalize('success');
       } else if (out.kind === 'rejected') {
-        ctx.finalize('declined', out.reason === 'Already paid' ? 'Already paid' : out.reason);
+        // Structured-tag branch (not human-message matching): Duplicate = already executed —
+        // same friendly copy either way, but the decision keys on the decoded ICRC variant.
+        ctx.finalize('declined', out.variant === 'Duplicate' ? 'Already paid' : out.reason);
       } else {
         // Not terminal within budget (2–5s consensus + poll budget) — truthful, never a fake
         // success or failure. The payer's own balance reconciles when their phone next polls.
@@ -85,6 +87,15 @@ export function NfcTap({role, identity, requestHex, reqInfo, catalog, onSettled,
   // to sign on an unreachable/skewed IC clock — surfaced honestly as a tap error (nothing signed).
   const autoSign = useCallback(async (req: {toHex: string; amount: string; nonceHex: string; expiry: number; currency: number}, ctx: TapCtx) => {
     try {
+      // Request-expiry gate (mirrors PayMode.approve): prepareTransfer stamps a FRESH ingress
+      // expiry on the envelope it signs, so a STALE REQUEST would otherwise sail through — the
+      // ledger never sees the request's own expiry. The tap is the consent, so decline the card
+      // with an honest message instead of signing an expired request.
+      if (req.expiry * 1000 <= Date.now()) {
+        try { await DpayNfc.declineCard(); } catch (e: unknown) { console.warn('DpayNfc.declineCard failed (expired request)', e); }
+        ctx.finalize('declined', 'request expired — ask for a fresh tap');
+        return;
+      }
       if (!isPayableAsset(catalog, req.currency)) {
         try { await DpayNfc.declineCard(); } catch (e: unknown) { console.warn('DpayNfc.declineCard failed (unsupported asset)', e); }
         ctx.finalize('declined', `Unsupported asset (currency ${req.currency}) — tap cancelled`);

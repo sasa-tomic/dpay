@@ -1022,10 +1022,11 @@ async fn balances_route_rejects_bad_pubkey() {
 // --- ckERC-20 onramp surface (ckUSDC; M2) -------------------------------------
 //
 // Covers GET /api/v1/onramp/ckerc20 — surfaces the runtime parameters (helper contract, ERC-20
-// address, facade principal) the app needs to build the user's two Ethereum transactions for a
-// ckERC-20 onramp. ckUSDC is a ckERC-20 token handled by the ckETH minter; it has NO per-principal IC
-// address and NO user-callable mint (the user signs both ETH txs in their own wallet). Only the
-// CkEthErc20-family currencies have an onramp; a non-ckERC-20 currency → 503.
+// address) the app needs to build the user's two Ethereum transactions for a ckERC-20 onramp. The
+// deposit `principal` arg is the user's OWN IC principal (derived in-app; ICRC-1 default subaccount),
+// so the relay serves no principal field. ckUSDC is a ckERC-20 token handled by the ckETH minter; it
+// has NO per-principal IC address and NO user-callable mint (the user signs both ETH txs in their own
+// wallet). Only the CkEthErc20-family currencies have an onramp; a non-ckERC-20 currency → 503.
 
 /// `GET /api/v1/onramp/ckerc20?currency=2` (ckUSDC) → `200` with the verified mainnet onramp
 /// constants. `?currency=0` (DEMO_USD, not a ckERC-20 currency) → `503` (no onramp configured).
@@ -1046,9 +1047,12 @@ async fn ckerc20_onramp_returns_params_for_ckusdc() {
         body["erc20_address"],
         "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
     );
+    // No principal is served — the deposit `principal` arg is the user's own IC principal, derived
+    // in-app. (Regression-pins the field removal: the facade-era `facade_principal` minted at the
+    // FACADE principal, invisible to user-principal balance reads.)
     assert!(
-        !body["facade_principal"].as_str().unwrap().is_empty(),
-        "facade principal present: {body}"
+        body.get("facade_principal").is_none(),
+        "facade_principal must be gone from the onramp body: {body}"
     );
 
     // currency 0 (DEMO_USD) → 503: DEMO_USD has no ckERC-20 onramp configured.
@@ -1144,7 +1148,7 @@ async fn ckerc20_onramp_native_eth_without_token_contract() {
         onramp: dpay_relay::RampCapability::Direct,
         offramp: dpay_relay::RampCapability::Direct,
     };
-    let r = dpay_relay::ckerc20_onramp_from_descriptor(Some(&native), "aaaaa-aa".to_string())
+    let r = dpay_relay::ckerc20_onramp_from_descriptor(Some(&native))
         .expect("a CkEthErc20 with no token_contract must resolve a NATIVE-ETH onramp");
     assert_eq!(
         r.kind, "native_eth",
@@ -1180,9 +1184,9 @@ async fn ckerc20_onramp_native_eth_without_token_contract() {
         offramp: dpay_relay::RampCapability::Direct,
     };
     assert!(
-        dpay_relay::ckerc20_onramp_from_descriptor(Some(&ckbtc), "aaaaa-aa".to_string()).is_err()
+        dpay_relay::ckerc20_onramp_from_descriptor(Some(&ckbtc)).is_err()
     );
-    assert!(dpay_relay::ckerc20_onramp_from_descriptor(None, "aaaaa-aa".to_string()).is_err());
+    assert!(dpay_relay::ckerc20_onramp_from_descriptor(None).is_err());
 }
 
 /// OPEN_ISSUES #1/#2 — the `helper_address` is NETWORK-scoped, not a single mainnet constant. The
@@ -1215,7 +1219,7 @@ async fn ckerc20_onramp_helper_is_chain_scoped() {
         onramp: dpay_relay::RampCapability::Direct,
         offramp: dpay_relay::RampCapability::Unavailable,
     };
-    let r_sep = dpay_relay::ckerc20_onramp_from_descriptor(Some(&sepolia), "aaaaa-aa".to_string())
+    let r_sep = dpay_relay::ckerc20_onramp_from_descriptor(Some(&sepolia))
         .expect("Sepolia ckERC20 must resolve an onramp");
     assert_eq!(
         r_sep.helper_address, "0x2D39863d30716aaf2B7fFFd85Dd03Dda2BFC2E38",
@@ -1231,7 +1235,7 @@ async fn ckerc20_onramp_helper_is_chain_scoped() {
     // Same family + token on MAINNET (chain_id 1) → mainnet helper.
     let mut mainnet = sepolia.clone();
     mainnet.chain_id = Some(1);
-    let r_main = dpay_relay::ckerc20_onramp_from_descriptor(Some(&mainnet), "aaaaa-aa".to_string())
+    let r_main = dpay_relay::ckerc20_onramp_from_descriptor(Some(&mainnet))
         .expect("mainnet ckERC20 must resolve an onramp");
     assert_eq!(
         r_main.helper_address, "0x18901044688D3756C35Ed2b36D93e6a5B8e00E68",
@@ -1247,7 +1251,7 @@ async fn ckerc20_onramp_helper_is_chain_scoped() {
     // (the safe default — the existing verified value, never a silent None/panic).
     let mut no_chain = sepolia.clone();
     no_chain.chain_id = None;
-    let r_none = dpay_relay::ckerc20_onramp_from_descriptor(Some(&no_chain), "aaaaa-aa".to_string())
+    let r_none = dpay_relay::ckerc20_onramp_from_descriptor(Some(&no_chain))
         .expect("a chain_id-less ckERC20 must still resolve an onramp (mainnet default)");
     assert_eq!(
         r_none.helper_address, "0x18901044688D3756C35Ed2b36D93e6a5B8e00E68",

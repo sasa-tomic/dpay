@@ -856,6 +856,7 @@ dependencies = [
 name = "dpay-icp-e2e"
 version = "0.1.0"
 dependencies = [
+ "candid",
  "dpay-icp",
  "ed25519-dalek",
  "reqwest 0.12.28",

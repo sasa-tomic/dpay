@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **78 flows**
-> (77 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **79 flows**
+> (78 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (8) · pay (18) · offline (7) · deposit (8) · withdraw (7) · nfc (5) · system (20) · tour (4)
+wire (1) · onboard (8) · pay (18) · offline (7) · deposit (8) · withdraw (7) · nfc (5) · system (21) · tour (4)
 
 ---
 
@@ -140,6 +140,7 @@ wire (1) · onboard (8) · pay (18) · offline (7) · deposit (8) · withdraw (7
 | 79 | sol-fund-first-pay | SOL Pay tab: known-zero → fund panel replaces scanner+NFC, 1-tap to deposit QR, auto-release on funding, fail-open on unknown. | sol-fund-first, pay-gate, nfc-disarm, fail-open, zero-funds |
 | 80 | sol-fund-funnel | SOL zero→pay journey: absent-ATA setup card with fund hatch (no dead-end copy), 1-tap to SOL address, funded unlock, one-tap create, badge truth. | sol-fund-funnel, ata-setup, needs-setup-badge, escape-hatch, zero-funds |
 | 81 | ic-fund-first-pay | the IC Pay tab shows the fund-first panel on a KNOWN-zero non-DEMO asset (online), routes to the deposit address in one tap, fails open offline, and gates the send sub-mode identically | ic-fund-first, pay-gate, fail-open, zero-funds, send-gate |
+| 83 | mobile-viewport | On a 390px mobile-web viewport the tab row fits: no horizontal document overflow and the Transactions tab renders fully inside the viewport. | layout, viewport |
 
 ### Visual capture (UX tour)
 

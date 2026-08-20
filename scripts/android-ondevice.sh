@@ -33,6 +33,14 @@ BOOTED="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')"
 [ "$BOOTED" = "1" ] || { echo "FAIL: no fully-booted device (sys.boot_completed=$BOOTED)"; exit 1; }
 echo "   device: $(adb devices | awk 'NR==2{print $1}')  abi=$(adb shell getprop ro.product.cpu.abi | tr -d '\r')"
 
+# A leftover foreground app instance (e.g. a prior `just app` gate launch) holds the back camera
+# as a HIGHER-priority client, so the camera-frame instrumented test in its own test process gets
+# REJECTED by the camera service ("Higher-priority client using camera") and fails with 0 frames.
+# Force-stop the app so the gate is deterministic regardless of gate ordering.
+if adb shell am force-stop org.kalaj.dpay 2>/dev/null; then
+  echo "   force-stopped org.kalaj.dpay (releases any held camera)"
+fi
+
 echo "== build NDK .so for both ABIs =="
 bash scripts/ndk-build-ffi.sh >/tmp/ndk-build.log 2>&1 || { echo "FAIL: ndk build"; tail -20 /tmp/ndk-build.log; exit 1; }
 echo "   jniLibs: $(cd android/app/src/main/jniLibs && ls -1 | tr '\n' ' ')"

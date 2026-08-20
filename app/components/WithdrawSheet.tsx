@@ -8,6 +8,9 @@ import type {Identity} from '../lib/types';
 import type {CurrencyDescriptor, FamilyDisplay, MinterFamily} from '../config/catalog';
 import {isValidDestinationAddress} from '../config/catalog';
 import {prepareBtcWithdrawal, prepareEthWithdrawal, prepareErc20Withdrawal, submitOfframpStep, fetchGasFeeWei} from '../services/rail';
+import type {OfframpStep} from '../services/rail';
+import {planOfframpConfirm, type RetainedOfframp} from '../services/offrampRetry';
+import {loadOfframp, saveOfframp, clearOfframp} from '../services/offrampPersist';
 import {loadSavedWithdrawAddr, saveWithdrawAddr} from '../services/withdraw';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
@@ -22,8 +25,13 @@ import {IconCheck, IconCopy} from './icons';
  * via the family's `amountDecimals`. Escape closes the sheet (web), matching DepositSheet.
  *
  * Retry discipline (rail-wide): every envelope is resubmitted VERBATIM — re-signing a submitted
- * envelope is forbidden (new request_id = double-spend). An 'unknown' approve is honest pending —
- * the minter call is NOT submitted blind after it.
+ * envelope is forbidden (new request_id = double-spend). Once a sequence is prepared the steps are
+ * RETAINED (component state + AsyncStorage), so a Confirm-after-error or an app-restart-mid-sequence
+ * RESUMES from the first unsettled step with the SAME bytes; only a clean pre-submit failure (e.g.
+ * the gas-fee fetch throwing before anything is signed) re-prepares. Deliberately editing the
+ * destination/amount drops the retained steps — that is a NEW withdrawal intent; any in-flight old
+ * envelopes settle independently (visible via the balance refresh). An 'unknown' approve is honest
+ * pending — the minter call is NOT submitted blind after it.
  *
  * ckERC20 gas dependency (Fork-C — no-swap): a ckERC20 withdraw burns ckETH for gas + the token
  * amount from its own ledger (dual-ledger withdraw_erc20). dpay NEVER converts ckUSDC→ckETH; the
@@ -36,6 +44,9 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
   const [err, setErr] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<{amount: string; btcAddress: string} | null>(null);
   const [savedAddr, setSavedAddr] = useState<string | null>(null);
+  // The prepared offramp retained across retries and restarts (double-burn guard — see header).
+  // null ⇒ the next Confirm PREPARES fresh envelopes; non-null ⇒ Confirm RESUMES the SAME bytes.
+  const [retained, setRetained] = useState<RetainedOfframp | null>(null);
   const {copied, copy: doCopy} = useCopyFeedback();
 
   useEscapeToClose(onClose);
@@ -46,6 +57,33 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
     loadSavedWithdrawAddr(currency).then(a => { if (alive && a) { setSavedAddr(a); } });
     return () => { alive = false; };
   }, [currency]);
+
+  // RESUME an offramp persisted by a previous session (app died mid-sequence). Re-preparing would
+  // mint fresh request_ids for a withdrawal that may already be in flight (double-burn); instead
+  // hydrate the retained envelopes + the first unsettled step. The form pre-fills the in-flight
+  // destination and Confirm resumes verbatim — never re-signs.
+  useEffect(() => {
+    let alive = true;
+    loadOfframp(identity.publicHex, currency).then(rec => {
+      if (!alive || !rec) return;
+      setRetained({steps: rec.steps, nextIdx: rec.nextIdx, destination: rec.destination, amountRaw: rec.amountRaw});
+      setAddress(rec.destination);
+      setErr('A withdrawal was in progress when the app closed. Retry re-sends the same envelopes — it cannot double-spend.');
+    });
+    return () => { alive = false; };
+  }, [identity.publicHex, currency]);
+
+  // Editing the form = a NEW withdrawal intent: drop the retained envelopes (any in-flight ones
+  // settle independently — honest, visible via the balance refresh). Routed through wrappers so
+  // every input path (typing, the saved-address chip) invalidates.
+  const editAddress = useCallback((t: string) => {
+    setAddress(t);
+    if (retained) setRetained(null);
+  }, [retained]);
+  const editAmount = useCallback((t: string) => {
+    setAmountStr(t);
+    if (retained) setRetained(null);
+  }, [retained]);
 
   // Convert the entered amount to raw smallest-units at the asset's PROTOCOL decimal count (8 sats
   // for BTC, 18 Wei for ETH — NOT the display_decimals). The display precision (display.amountDecimals,
@@ -60,22 +98,57 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
   // ETH (token_contract None) and BTC are NOT affected — they don't carry a separate gas ledger.
   const isErc20 = family === 'CkEthErc20' && tokenContract != null;
 
+  // Submit the prepared steps in order from `fromIdx`; STOP on anything but settled. Approve
+  // 'unknown' is honest pending — the minter call is never submitted blind after it. The record is
+  // persisted BEFORE each submission (a crash mid-submit resumes that step verbatim) and CLEARED
+  // only when the whole sequence settles.
+  async function runOfframp(steps: OfframpStep[], fromIdx: number, dest: string, amountRawArg: string) {
+    for (let i = fromIdx; i < steps.length; i++) {
+      await saveOfframp(identity.publicHex, {currency, destination: dest, amountRaw: amountRawArg, steps, nextIdx: i});
+      const out = await submitOfframpStep(steps[i], identity.secretHex, {attempts: 12, intervalMs: 500});
+      if (out.kind === 'settled') {
+        if (i + 1 < steps.length) setRetained({steps, nextIdx: i + 1, destination: dest, amountRaw: amountRawArg});
+        continue;
+      }
+      if (out.kind === 'rejected') throw new Error(out.reason);
+      throw new Error(i === 0 && steps.length > 1
+        ? "Couldn't confirm the approval — check your balance when back online"
+        : "Couldn't confirm the withdrawal — it may still land; check your balance soon");
+    }
+    await clearOfframp(identity.publicHex, currency);
+    setRetained(null);
+    setReceipt({amount: amountRawArg, btcAddress: dest});
+    setPhase('done');
+    void saveWithdrawAddr(currency, dest); // remember for next cash-out (Fork-B)
+    onWithdrawn(); // trigger a balance/history refresh
+  }
+
   async function confirm() {
-    if (!canReview) {
+    if (phase === 'submitting') return;
+    // Double-burn guard: with a retained offramp, Confirm RESUMES the SAME envelope bytes — only a
+    // null retained state (first attempt, or a clean pre-submit failure) prepares fresh envelopes.
+    const plan = planOfframpConfirm(retained);
+    if (plan.kind === 'prepare' && !canReview) {
       return;
     }
     setPhase('submitting');
     setErr(null);
     try {
+      if (plan.kind === 'resume') {
+        await runOfframp(plan.record.steps, plan.from, plan.record.destination, plan.record.amountRaw);
+        return;
+      }
       const desc = catalog.find(c => c.currency === currency);
       const dest = address.trim();
       // Family-dispatched, all-user-signed envelopes. gas_ledger carries the ckETH ledger for
-      // dual-ledger ckERC20; the minter principal comes from the catalog row.
+      // dual-ledger ckERC20; the minter principal comes from the catalog row. Anything thrown in
+      // here (rail misconfig, gas-fee fetch) is a CLEAN PRE-SUBMIT failure — no envelope was
+      // signed or submitted, so a retry may safely re-prepare.
       const minter = desc?.minter ?? '';
       const ledger = desc?.ledger ?? '';
       const gasLedger = desc?.gas_ledger ?? '';
       if (!ledger || !minter) throw new Error('This asset has no withdrawal rail configured');
-      let steps;
+      let steps: OfframpStep[];
       if (family === 'CkBtcUtxo') {
         steps = await prepareBtcWithdrawal(identity.secretHex, ledger, minter, dest, raw);
       } else if (family === 'CkEthErc20' && tokenContract != null) {
@@ -84,24 +157,20 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
         if (gas == null) throw new Error("Couldn't fetch the live gas fee — check your connection");
         steps = await prepareErc20Withdrawal(identity.secretHex, ledger, gasLedger, minter, dest, raw, gas);
       } else {
+        // Native ETH: passes the ckETH AMOUNT ledger as the eip_1559_transaction_price arg.
+        // Semantically the minter wants None here (facade-era kernel sent None), but MEASURED LIVE
+        // 2026-08-20 the mainnet minter TOLERATES an unregistered ledger and returns the identical
+        // native price (gas_limit 21000) — see OPEN_ISSUES.md ckETH-minter block + the
+        // mainnet_cketh_minter_eip1559_price_args probe. No observable difference; revisit only if
+        // the minter ever starts rejecting it.
         const gas = await fetchGasFeeWei(identity.secretHex, minter, ledger);
         if (gas == null) throw new Error("Couldn't fetch the live gas fee — check your connection");
         steps = await prepareEthWithdrawal(identity.secretHex, ledger, minter, dest, raw, gas);
       }
-      // Submit each step in order; STOP on anything but settled. Approve 'unknown' is honest
-      // pending — the minter call is never submitted blind after it.
-      for (let i = 0; i < steps.length; i++) {
-        const out = await submitOfframpStep(steps[i], identity.secretHex, {attempts: 12, intervalMs: 500});
-        if (out.kind === 'settled') continue;
-        if (out.kind === 'rejected') throw new Error(out.reason);
-        throw new Error(i === 0 && steps.length > 1
-          ? "Couldn't confirm the approval — check your balance when back online"
-          : "Couldn't confirm the withdrawal — it may still land; check your balance soon");
-      }
-      setReceipt({amount: raw, btcAddress: dest});
-      setPhase('done');
-      void saveWithdrawAddr(currency, dest); // remember for next cash-out (Fork-B)
-      onWithdrawn(); // trigger a balance/history refresh
+      // Retain the prepared steps BEFORE the first submission so every subsequent retry (or an app
+      // restart) resumes these exact bytes instead of re-signing.
+      setRetained({steps, nextIdx: 0, destination: dest, amountRaw: raw});
+      await runOfframp(steps, 0, dest, raw);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       console.warn('withdraw failed:', msg);
@@ -147,7 +216,7 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
 
           <Text style={S.inputLabel}>{`${display.nativeAsset} address`}</Text>
           {savedAddr && address.trim().length === 0 ? (
-            <Pressable testID="btn-withdraw-saved" style={S.savedAddrChip} onPress={() => setAddress(savedAddr)} accessibilityRole="button" accessibilityLabel="Use last saved address" accessibilityState={{disabled: false}}>
+            <Pressable testID="btn-withdraw-saved" style={S.savedAddrChip} onPress={() => editAddress(savedAddr)} accessibilityRole="button" accessibilityLabel="Use last saved address" accessibilityState={{disabled: false}}>
               <Text style={S.savedAddrText}>{`Use last: ${savedAddr.length > 28 ? savedAddr.slice(0, 14) + '…' + savedAddr.slice(-12) : savedAddr}`}</Text>
             </Pressable>
           ) : null}
@@ -155,7 +224,7 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
             testID="withdraw-address-input"
             style={S.withdrawAddrInput}
             value={address}
-            onChangeText={setAddress}
+            onChangeText={editAddress}
             placeholder={display.addressPlaceholder}
             placeholderTextColor={C.sub2}
             autoCapitalize="none"
@@ -167,7 +236,7 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
             testID="withdraw-amount-input"
             style={S.withdrawAmtInput}
             value={amountStr}
-            onChangeText={setAmountStr}
+            onChangeText={editAmount}
             keyboardType="decimal-pad"
             placeholder="0.00050000"
             placeholderTextColor={C.sub2}
@@ -181,7 +250,17 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
             <Text testID="withdraw-gas-note" style={S.warnNote}>You need ckETH for gas. Add ckETH first if you don't have any.</Text>
           ) : null}
 
-          {(phase === 'form' || phase === 'error') && raw !== '0' ? (
+          {retained ? (
+            // An in-flight offramp is retained (failure mid-sequence, or resumed after an app
+            // restart): show WHAT is in flight instead of the form-derived review — the envelopes
+            // are already signed for this destination/amount.
+            <View testID="withdraw-resume" style={S.reviewCard}>
+              <Text style={S.reviewLabel}>Withdrawal in progress</Text>
+              <Text testID="withdraw-resume-amount" style={S.reviewAmount}>{`Withdraw ${fmtAsset(retained.amountRaw, decimals, display.nativeAsset, display.amountDecimals)}`}</Text>
+              <Text style={S.reviewTo}>{`to ${retained.destination}`}</Text>
+              <Text style={S.dim2}>Already signed — Retry re-sends the same envelopes (it cannot double-spend). Editing the form starts a fresh withdrawal instead.</Text>
+            </View>
+          ) : (phase === 'form' || phase === 'error') && raw !== '0' ? (
             <View testID="withdraw-review" style={S.reviewCard}>
               <Text style={S.reviewLabel}>Review withdrawal</Text>
               <Text testID="withdraw-review-amount" style={S.reviewAmount}>{`Withdraw ${fmtAsset(raw, decimals, display.nativeAsset, display.amountDecimals)}`}</Text>
@@ -193,13 +272,13 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
 
           <Pressable
             testID="btn-withdraw-confirm"
-            style={[S.primaryWide, !canReview && S.disabledFlat]}
-            disabled={!canReview}
+            style={[S.primaryWide, !canReview && !retained && S.disabledFlat]}
+            disabled={!canReview && !retained}
             onPress={confirm}
             accessibilityRole="button"
             accessibilityLabel="Confirm withdrawal"
-            accessibilityState={{disabled: !canReview}}>
-            <Text style={S.primaryText}>{raw !== '0' ? `Withdraw ${fmtAsset(raw, decimals, display.nativeAsset, display.amountDecimals)}` : 'Enter an amount'}</Text>
+            accessibilityState={{disabled: !canReview && !retained}}>
+            <Text style={S.primaryText}>{retained ? 'Retry withdrawal' : raw !== '0' ? `Withdraw ${fmtAsset(raw, decimals, display.nativeAsset, display.amountDecimals)}` : 'Enter an amount'}</Text>
           </Pressable>
 
           {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}

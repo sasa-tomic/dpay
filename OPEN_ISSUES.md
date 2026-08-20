@@ -45,12 +45,19 @@
 > **Prod at HEAD `d740379`** — shipped 2026-08-20 via `just deploy-ic && just apk && just up`
 > (evidence in the PROD SHIPPED block at the end of the 2026-08-20 session summary below).
 >
-> **Residual (documented, non-blocking):** flow-41's 20 s authored timeout can trip on host-load
-> spikes (census of 8 surfaces; 12.4 s standalone vs 20 s budget — host contention, not the app);
-> the e2e `goOffline` helper kills the relay only, but flows 13/19/20 asserts don't depend on
-> IC-gateway death (flow 22 kills the gateway itself); `icGatewayBase` is read per-call in the
-> app vs the shims' one-time `?relay=` capture — an e2e-only concern, no prod surface; MIUI
-> physical device blocks test-APK installs (`just ondevice` stays emulator-only).
+> **Residual (documented, non-blocking; updated 2026-08-20 harness-debt pass):** flow-41's timeout
+> is now 30 s authored (was 20 s — host-load spikes uncompensated by the one-shot load factor
+> false-fired the backstop); `goOffline` now kills the IC gateway too (retargets the page's
+> `__DPAY_TEST_IC_GATEWAY` at a unique dead origin, flow-22 pattern; flow 20 + stage-landing-shots
+> use the `{keepGateway:true}` relay-dead-only variant their designs require, and flows 13/19/81
+> asserts were audited relay-driven — they hold with the gateway dead); the shims still bootstrap
+> `__DPAY_TEST_IC_GATEWAY` one-time at page load while `icGatewayBase` is read per-call — an
+> e2e-only asymmetry, now bridged mid-session by `setRelay` re-pointing the seam (no prod surface);
+> **the e2e suite rides the relay's test-helpers-only `GET /api/v1/balance/{hex}` route**
+> (`getBalance` in `e2e/harness/lib.mjs`, 30+ flows; the app itself uses the batch
+> `/api/v1/balances`) — deleting that helpers route later requires migrating the helper to
+> `/balances` or the gateway first; MIUI physical device blocks test-APK installs (`just ondevice`
+> stays emulator-only).
 >
 > **Agent-pickable work queued: the Trust Wallet fund-button** (set 2026-08-17). Full researched
 > plan: **`2026-08-17-trust-wallet-fund-button.md`** — read it first; it carries the verified
@@ -98,6 +105,32 @@
   (The `/shots/*.png` landing screenshots had the same class of stale edge objects; those carry a
   plain 4h edge TTL and NO `immutable`, so they self-healed — no purge needed. Only the APK is
   purge-required.)
+
+
+### DOCUMENTED (2026-08-20): ckETH minter eip_1559_transaction_price arg for native-ETH withdrawals — MEASURED LIVE, no code change needed
+
+The app's WithdrawSheet passes the ckETH **amount** ledger to `eip_1559_transaction_price(Some(ledger))`
+for **native-ETH** withdrawals (`fetchGasFeeWei(secret, minter, ledger)` → `icpEip1559PriceArg` always
+encodes `Some`); the facade-era kernel passed `None` for native. Question: does the live minter reject
+`Some(ckETH ledger)`?
+
+**Measured live 2026-08-20** (read-only signed query against `https://icp-api.io`, throwaway key —
+`mainnet_cketh_minter_eip1559_price_args` in `crates/dpay-icp-e2e/tests/mainnet.rs`, runnable via
+`just ic-mainnet-probe`):
+
+- `None` → gas_limit 21000, max_transaction_fee 39841045734000 (native path)
+- `Some(ckUSDC ledger)` → gas_limit 65000 (registered ckERC-20 path — proves arg encoding + dispatch)
+- `Some(ckETH amount ledger)` → **TOLERATED**: returns byte-identical numbers to `None`
+  (21000 / 39841045734000). The minter falls back to the native price for unregistered ledgers.
+
+**Decision: no code change.** The current app path is functionally correct against prod — it gets the
+exact same estimate the semantically-pure `None` call returns. Sending `None` for native would require
+either a frozen-ABI FFI change (`icp_eip1559_price_arg` takes a non-optional principal) or a JS-side
+byte constant duplicating the DIDL encoding — both cost more than they buy. The probe test stays as a
+regression tripwire: if the minter ever starts rejecting unregistered ledgers (assert-printed
+`MEASURED:` line flips), flip `fetchGasFeeWei`'s native call site to the `None` arg. Launch check:
+if a native-ETH withdrawal ever fails on prod with a minter reject mentioning
+`eip_1559_transaction_price`, this is the first place to look.
 
 
 ## CLOSED BUG (2026-08-20): wasm dual-allocator corruption under browser concurrency — RESOLVED (`32ebf21`)

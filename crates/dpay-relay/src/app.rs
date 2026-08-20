@@ -426,13 +426,14 @@ async fn currencies(State(state): State<AppState>) -> Response {
     }
 }
 
-/// `GET /api/v1/onramp/ckerc20?currency=N` → `200 {"helper_address","erc20_address",
-/// "facade_principal","kind"}`. Surfaces the runtime parameters the app needs to build the user's
-/// Ethereum transaction(s) for a CkEthErc20-family onramp. For an ERC-20 token (`kind="erc20"`,
-/// `erc20_address` set) the app builds two txs (approve + depositErc20); for native ETH
-/// (`kind="native_eth"`, `erc20_address=null`) it builds ONE payable tx (depositEth, ETH value in
-/// the tx). Only meaningful for CkEthErc20-family currencies (e.g. ckUSDC = currency 2, native
-/// ckETH = a CkEthErc20 currency with token_contract null); a non-CkEthErc20 currency is a
+/// `GET /api/v1/onramp/ckerc20?currency=N` → `200 {"helper_address","erc20_address","kind"}`.
+/// Surfaces the runtime parameters the app needs to build the user's Ethereum transaction(s) for a
+/// CkEthErc20-family onramp. The deposit `principal` arg is the USER's own IC principal (derived
+/// in-app from their key; ICRC-1 default subaccount) — the relay serves no principal. For an ERC-20
+/// token (`kind="erc20"`, `erc20_address` set) the app builds two txs (approve + depositErc20); for
+/// native ETH (`kind="native_eth"`, `erc20_address=null`) it builds ONE payable tx (depositEth, ETH
+/// value in the tx). Only meaningful for CkEthErc20-family currencies (e.g. ckUSDC = currency 2,
+/// native ckETH = a CkEthErc20 currency with token_contract null); a non-CkEthErc20 currency is a
 /// `Transient` (no onramp configured) → 503. Error mapping mirrors `withdraw`/`faucet`: Rejected →
 /// 422, Transient → 503.
 async fn ckerc20_onramp(
@@ -446,7 +447,6 @@ async fn ckerc20_onramp(
             Json(CkErc20OnrampBody {
                 helper_address: p.helper_address,
                 erc20_address: p.erc20_address,
-                facade_principal: p.facade_principal,
                 kind: p.kind,
             }),
         )
@@ -721,14 +721,14 @@ struct CurrenciesBody {
 }
 
 /// `GET /api/v1/onramp/ckerc20` response body — the CkEthErc20-family onramp params the app needs to
-/// build the user's Ethereum transaction(s). `kind` discriminates the two deposit shapes
-/// ("erc20" = two txs approve+depositErc20 with `erc20_address` set; "native_eth" = one payable
-/// depositEth tx with `erc20_address` null and the ETH amount in the tx `value`).
+/// build the user's Ethereum transaction(s). The deposit `principal` arg is the user's own IC
+/// principal (derived in-app), so no principal field is served. `kind` discriminates the two deposit
+/// shapes ("erc20" = two txs approve+depositErc20 with `erc20_address` set; "native_eth" = one
+/// payable depositEth tx with `erc20_address` null and the ETH amount in the tx `value`).
 #[derive(Serialize)]
 struct CkErc20OnrampBody {
     helper_address: String,
     erc20_address: Option<String>,
-    facade_principal: String,
     kind: String,
 }
 

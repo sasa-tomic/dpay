@@ -53,13 +53,6 @@ export function _registerDriver(file, driver) {
   if (file) _drivers.set(file, driver);
 }
 
-/** Drop a driver from the registry. NOT called from the per-test `stop()` closure (the dump fires
- *  AFTER stop() — see setup()), but exported for explicit cleanup by long-lived callers (e.g. a
- *  future watch-mode exit hook) that want to free entries proactively. */
-export function _unregisterDriver(file) {
-  if (file) _drivers.delete(file);
-}
-
 /**
  * Dump diagnostics for the named test file's driver. Returns the dump directory path (or null if no
  * driver is registered for that file, e.g. a standalone run). The dump itself is best-effort; any
@@ -409,78 +402,6 @@ export async function waitForScanner(driver, opts = {}) {
   assert(false, `QrScanner did not mount within ${timeoutMs}ms (listeners=0 throughout)`);
 }
 
-// --- NFC tap mount-asserts (mirrors the camera pair above) ---------------------------------------
-//
-// The IC + SOL NFC session seams (`__DPAY_TEST_NFC_SESSION` / `__DPAY_TEST_SOL_NFC_SESSION`) fail
-// LOUD when no listener is attached — but a cleaner pre-flight assertion + a race-free wait (for
-// flows that re-arm after a phase change) catch the "component never mounted" class BEFORE the
-// dispatch, with a precise message. The IC NFC seam is set to ready by the flow flipping
-// `window.__DPAY_TEST_NFC_STATUS = 'ready'`, which makes the Pay/Receive surface mount <NfcTap>;
-// this helper confirms the listener landed.
-
-/**
- * Assert that an IC NFC tap listener (NfcTap / reader) is mounted. Catches the class of bug where
- * the NFC view fails to render (nfcStatus gate, wrong tab, overlay) — the seam would throw an
- * opaque error or the flow hangs. Call this BEFORE dispatching via `__DPAY_TEST_NFC_SESSION`.
- */
-export async function assertNfcTapMounted(driver, label = 'NFC screen') {
-  const count = await driver.eval(() => (typeof window.__DPAY_TEST_NFC_COUNT === 'function' ? window.__DPAY_TEST_NFC_COUNT() : -1));
-  assert(count > 0, `IC NFC listener must be mounted on ${label} (listeners=${count}); the NfcTap/reader component failed to render — check nfcStatus is 'ready' and the screen arms the NFC view.`);
-}
-
-/**
- * Poll until an IC NFC tap listener is mounted (count > 0). Use after arming the NFC view — the
- * component needs a render tick to subscribe. The fail-loud seam catches a missing listener at
- * injection time, but this avoids the race + gives a cleaner failure.
- */
-export async function waitForNfcTap(driver, opts = {}) {
-  const timeoutMs = opts.timeoutMs ?? 5_000;
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const count = await driver.eval(() => (typeof window.__DPAY_TEST_NFC_COUNT === 'function' ? window.__DPAY_TEST_NFC_COUNT() : -1));
-    if (count > 0) return;
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  assert(false, `IC NFC listener did not mount within ${timeoutMs}ms (listeners=0 throughout)`);
-}
-
-/**
- * Assert that a SOL NFC tap listener (SolNfcTap / reader) is mounted. SOL-flavored counterpart of
- * `assertNfcTapMounted`. Call BEFORE dispatching via `__DPAY_TEST_SOL_NFC_SESSION`.
- */
-export async function assertSolNfcTapMounted(driver, label = 'SOL NFC screen') {
-  const count = await driver.eval(() => (typeof window.__DPAY_TEST_SOL_NFC_COUNT === 'function' ? window.__DPAY_TEST_SOL_NFC_COUNT() : -1));
-  assert(count > 0, `SOL NFC listener must be mounted on ${label} (listeners=${count}); the SolNfcTap/reader component failed to render — check nfcStatus is 'ready' and the SOL screen arms the NFC view.`);
-}
-
-/**
- * Poll until a SOL NFC tap listener is mounted (count > 0). SOL counterpart of `waitForNfcTap`.
- */
-export async function waitForSolNfcTap(driver, opts = {}) {
-  const timeoutMs = opts.timeoutMs ?? 5_000;
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const count = await driver.eval(() => (typeof window.__DPAY_TEST_SOL_NFC_COUNT === 'function' ? window.__DPAY_TEST_SOL_NFC_COUNT() : -1));
-    if (count > 0) return;
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  assert(false, `SOL NFC listener did not mount within ${timeoutMs}ms (listeners=0 throughout)`);
-}
-
-/**
- * Snapshot the live listener counts of every injection seam. Returns `{scan, nfc, solNfc}`. A
- * non-injecting diagnostic (read-only) — useful for a flow that wants to assert NO leftover
- * listener (a clean teardown) or to dump seam health on RED. Each count is -1 if the seam global
- * is absent (app not yet bootstrapped).
- */
-export async function seamHealth(driver) {
-  return await driver.eval(() => ({
-    scan: typeof window.__DPAY_TEST_SCAN_COUNT === 'function' ? window.__DPAY_TEST_SCAN_COUNT() : -1,
-    nfc: typeof window.__DPAY_TEST_NFC_COUNT === 'function' ? window.__DPAY_TEST_NFC_COUNT() : -1,
-    solNfc: typeof window.__DPAY_TEST_SOL_NFC_COUNT === 'function' ? window.__DPAY_TEST_SOL_NFC_COUNT() : -1,
-  }));
-}
-
 // --- relay-retarget / offline helpers -----------------------------------------------------------
 //
 // The "open Settings → type relay URL → Apply → close Settings" dance is repeated across the offline
@@ -503,24 +424,68 @@ export async function setRelay(driver, url, opts = {}) {
   await driver.type('settings-relay', url, { timeoutMs: t });
   await driver.click('btn-relay-apply', { timeoutMs: t });
   await driver.click('btn-settings-close', { timeoutMs: t });
+  // The fake-IC /api/v2 gateway rides the SAME origin as the relay in this harness (shims.ts
+  // bootstraps `__DPAY_TEST_IC_GATEWAY` from `?relay=` ONCE at page load). A mid-session retarget
+  // must re-point the seam too, or the app's value path keeps submitting at the bootstrap origin —
+  // e.g. coming back "online" would leave a dead gateway behind while the relay is alive.
+  // `app/services/icp.ts` reads the seam PER CALL (load-bearing: that per-call read is what makes
+  // runtime retargeting work at all — do NOT "align" the app to a one-time capture). Only re-point
+  // when the seam already exists (local e2e builds); live mode serves the web-prod bundle where the
+  // seam is compiled out and icp.ts defaults to icp-api.io — never create the global on a prod page.
+  await driver.eval((u) => {
+    if (typeof globalThis.__DPAY_TEST_IC_GATEWAY === 'string') globalThis.__DPAY_TEST_IC_GATEWAY = u;
+  }, url);
 }
 
 /**
  * Point the app at a GENUINELY-DEAD relay (a port nothing listens on → ECONNREFUSED, the real
  * "relay unreachable" failure mode — NOT Chrome's ERR_UNSAFE_PORT artifact). Picks a free port,
  * registers it with `driver.allowRequestFailuresFrom` (so the dead-relay connection refusals don't
- * fail-closed the flow at teardown), and retargets the app via `setRelay`. Returns `{deadRelay}` so
- * the caller can reference the origin (e.g. to filter `recordRequestFailures()` by URL) if needed.
+ * fail-closed the flow at teardown), and retargets the app via `setRelay`. Returns `{deadRelay,
+ * deadGateway}` so the caller can reference the origins (e.g. to filter `recordRequestFailures()`
+ * by URL) if needed.
+ *
+ * Full offline premise (2026-08-20): by default this ALSO kills the IC gateway transport — the
+ * fake-IC gateway lives INSIDE the shared relay process, so a per-flow "kill" is retargeting THIS
+ * page's `__DPAY_TEST_IC_GATEWAY` seam at a UNIQUE dead origin via `driver.eval` (the flow-22
+ * pattern). A unique port (not the deadRelay origin) keeps concurrent offline flows' gateway
+ * refusals disjoint when filtering `recordRequestFailures()` by URL. The balance/history polls hit
+ * the RELAY (`/api/v1/balances` etc.), so `online` still flips false from the relay death alone —
+ * the gateway kill adds the /api/v2 value path (signed queries, read_state) to the dead set.
+ *
+ * `{keepGateway: true}` is the offline-BY-RELAY-ONLY variant for flows whose design REQUIRES a
+ * live gateway (flow 20's offline hand-off: the payer signs an icrc1_transfer envelope — the rail
+ * submits envelopes to IC, not to the relay — and the counterparty POSTs to the gateway). It
+ * snapshots the seam before `setRelay` re-points it and restores it after.
  *
  * The reverse (coming back online) is just `setRelay(driver, goodRelayUrl)` — no port/allowance
- * needed for a live relay.
+ * needed for a live relay; it re-points the gateway seam back at the live origin too.
  */
 export async function goOffline(driver, opts = {}) {
   const deadPort = await pickFreePort();
   const deadRelay = `http://127.0.0.1:${deadPort}`;
   driver.allowRequestFailuresFrom(deadRelay);
+  // Pick + allowlist BOTH dead origins BEFORE retargeting anything, so no in-flight poll can hit
+  // a dead-but-not-yet-allowed origin in the window between the retarget steps.
+  const gwPort = await pickFreePort();
+  const deadGateway = `http://127.0.0.1:${gwPort}`;
+  driver.allowRequestFailuresFrom(deadGateway);
+  const keepGateway = opts.keepGateway === true;
+  const prevGateway = keepGateway
+    ? await driver.eval(() => (typeof globalThis.__DPAY_TEST_IC_GATEWAY === 'string' ? globalThis.__DPAY_TEST_IC_GATEWAY : null))
+    : null;
   await setRelay(driver, deadRelay, opts);
-  return { deadRelay };
+  if (keepGateway) {
+    if (prevGateway) {
+      await driver.eval((gw) => { globalThis.__DPAY_TEST_IC_GATEWAY = gw; }, prevGateway);
+    }
+  } else {
+    // Same exists-check as setRelay: never CREATE the seam on a prod-shaped (live-mode) page.
+    await driver.eval((gw) => {
+      if (typeof globalThis.__DPAY_TEST_IC_GATEWAY === 'string') globalThis.__DPAY_TEST_IC_GATEWAY = gw;
+    }, deadGateway);
+  }
+  return { deadRelay, deadGateway };
 }
 
 // --- disabled-state helpers --------------------------------------------------------------------
@@ -567,7 +532,12 @@ export async function assertDisabled(driver, testID, label) {
 // credited/settled path end-to-end rather than mocking it.
 
 /** GET `/api/v1/balance/<hex>?currency=N` → the balance in minor units. MC1 units 2-4: the relay
- *  serializes the balance as a DECIMAL STRING (raw u64), so the helper returns a string. */
+ *  serializes the balance as a DECIMAL STRING (raw u64), so the helper returns a string.
+ *
+ *  DEPENDENCE NOTE: this route lives on the relay's TEST-HELPERS-ONLY router (alongside /faucet) —
+ *  it is NOT part of the prod API surface (the app itself reads balances via the batch
+ *  `/api/v1/balances/<hex>`). 30+ flows ride this sugar. Deleting the helpers route later requires
+ *  migrating this helper to `/balances` (or the gateway directly) first — see OPEN_ISSUES residuals. */
 export async function getBalance(relayBaseURL, accountHex, currency = 0, timeoutMs = 4000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);

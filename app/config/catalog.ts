@@ -193,8 +193,8 @@ export function familyDisplay(catalog: CurrencyDescriptor[], currency: number): 
     addressPlaceholder: base.addressPlaceholder,
   };
 }
-// MC8 U1 — NFC asset disclosure resolver. The blind-tap bug: NfcTap.autoSign fired
-// `await signAuthorization` and only set the amount disclosure AFTER the await, so during signing the
+// MC8 U1 — NFC asset disclosure resolver. The blind-tap bug: NfcTap.autoSign awaited the envelope
+// signer and only set the amount disclosure AFTER the await, so during signing the
 // payer saw a generic "Communicating…" with NO asset name / amount / network. This PURE resolver
 // returns the honest asset name + network + asset-correct amount so the caller (autoSign) can set
 // the disclosure state SYNCHRONOUSLY BEFORE the first await — React then renders
@@ -236,9 +236,9 @@ export function resolveNfcDisclosure(
 
 // MC5 — the "is this currency a PAYABLE asset" predicate. Used as the defense-in-depth gate BEFORE
 // the payer signs: a request carrying an unknown/unsupported currency (a garbage/retired id, or a
-// CkSol-family currency with no ramp config) must NEVER reach signAuthorization. The canister also
-// rejects retired/unknown currencies, but the app should fail closed FIRST — never let the user
-// Approve a sign for an unsupported asset.
+// CkSol-family currency with no ramp config) must NEVER reach the envelope signer (prepareTransfer).
+// The ledger also rejects retired/unknown currencies, but the app should fail closed FIRST — never
+// let the user Approve a sign for an unsupported asset.
 //
 // "Supported" ≠ "familyDisplay non-null": DEMO (currency 0) has minter_family null → familyDisplay
 // returns null, BUT DEMO IS payable (the faucet funds it; its display never depended on

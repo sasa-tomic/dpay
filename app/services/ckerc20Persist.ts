@@ -3,13 +3,19 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // MC8 U5 — persist the ckERC20 deposit's WATCHING phase across app restart.
 //
 // The ckERC20 deposit is a ~20-minute watch: the user connects an Ethereum wallet (MetaMask via
-// EIP-1193), approves + deposits via two `sendTransaction` calls, then the sheet polls the RELAY's
-// `/api/v1/balance` (NOT Ethereum) until the ckETH minter's heartbeat mints the ckERC20 to their
-// account. KEY LEVERAGE: the watching poll hits the RELAY, not Ethereum, so the watching phase is
-// RESUMABLE ACROSS RESTART WITHOUT re-connecting the wallet — the ETH session is only needed for
-// connect/enter/sending. EIP-1193 sessions do NOT survive restart, so the wallet-bound phases are
-// ephemeral and MUST be discarded on restart (with an honest notice). Only `phase: 'watching'` is
-// ever persisted here; saving any other phase is a bug.
+// EIP-1193), approves + deposits via two `sendTransaction` calls, then the sheet polls the ICRC-1
+// ledger directly (`railBalanceOf` at the USER's own principal — a signed /api/v2 read_state query,
+// NOT a relay route and NOT Ethereum) until the ckETH minter's heartbeat mints the ckERC20 to
+// their account. KEY LEVERAGE: the watching poll needs only the user's IC key, so the watching
+// phase is RESUMABLE ACROSS RESTART WITHOUT re-connecting the wallet — the ETH session is only
+// needed for connect/enter/sending. EIP-1193 sessions do NOT survive restart, so the wallet-bound
+// phases are ephemeral and MUST be discarded on restart (with an honest notice). Only
+// `phase: 'watching'` is ever persisted here; saving any other phase is a bug.
+//
+// Version note: the record carries `target: 'user'` (v2 of the shape). Pre-fix (facade-era) records
+// lack the field — they polled a relay balance for a FACADE-owned account that will never move, so
+// `hydrateWatch` treats them as NOT resumable (null → the sheet starts fresh). v2 records watch the
+// user's own principal and resume normally.
 //
 // This module is a PURE AsyncStorage wrapper — no @ReactMethod / NativeModules surface (mirrors
 // services/withdraw.ts style). Best-effort: a malformed/corrupt value is
@@ -24,9 +30,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
  *   - `amount`: the human amount string the user entered (display only; the poll uses startBal).
  *   - `account`: the ETH account that signed (informational — surfaced so the resumed UI can name it
  *     even though the session is gone; never used to send).
- *   - `startBal`: the relay balance snapshot taken at connect. The watching poll detects the mint as
- *     a GROWTH from this value (a positive balance when startBal is null also counts).
+ *   - `startBal`: the ledger balance snapshot taken at connect (at the USER principal). The watching
+ *     poll detects the mint as a GROWTH from this value (a positive balance when startBal is null
+ *     also counts).
  *   - `txHashes`: the two ETH tx hashes (approve + deposit). Informational for the resumed UI.
+ *   - `target`: always `'user'` — the v2 shape marker. The watch target is the user's own IC
+ *     principal (default subaccount) on the ICRC-1 ledger.
  *   - `phase`: always `'watching'`. Any other value here is a bug → hydrateWatch discards it.
  */
 export type Ckerc20DepositState = {
@@ -35,6 +44,7 @@ export type Ckerc20DepositState = {
   account: string;
   startBal: string;
   txHashes: string[];
+  target: 'user';
   phase: 'watching';
 };
 
@@ -111,6 +121,10 @@ export async function clearDeposit(pubkeyHex: string, currency: number): Promise
 export function hydrateWatch(state: unknown): Ckerc20DepositState | null {
   if (!state || typeof state !== 'object') return null;
   const s = state as Record<string, unknown>;
+  // v2 shape marker: the record must target the USER's own principal. A record without it is a
+  // facade-era watch (polling a relay balance for a facade-owned account that will never move) —
+  // treat it as NOT resumable so the sheet starts fresh instead of resurrecting a dead watch.
+  if (s.target !== 'user') return null;
   if (s.phase !== 'watching') return null;
   if (typeof s.amount !== 'string') return null;
   if (typeof s.account !== 'string') return null;
@@ -125,6 +139,7 @@ export function hydrateWatch(state: unknown): Ckerc20DepositState | null {
     account: s.account,
     startBal: s.startBal,
     txHashes,
+    target: 'user',
     phase: 'watching',
   };
 }

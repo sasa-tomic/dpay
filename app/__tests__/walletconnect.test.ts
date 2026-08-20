@@ -18,9 +18,8 @@
  * `{request} as unknown as Eip1193Provider` shape that could drift undetected. `init` is the typed
  * `FAKE_INIT` (its arg is the genuine `EthereumProviderOptions`).
  *
- * `WALLETCONNECT_PROJECT_ID` is a module-load const (mirrors `EXPECTED_RECEIPT_PUBKEY`), so each
- * case re-evaluates `walletconnect.ts` inside `jest.isolateModules` with the desired override — the
- * same pattern `receipt.test.ts` uses. `@walletconnect/ethereum-provider` resolves to the typed
+ * `WALLETCONNECT_PROJECT_ID` is a module-load const, so each case re-evaluates `walletconnect.ts`
+ * inside `jest.isolateModules` with the desired override. `@walletconnect/ethereum-provider` resolves to the typed
  * `__stubs__/walletconnect-stub.ts` (jest.config.js moduleNameMapper), whose `EthereumProvider.init`
  * IS `FAKE_INIT`, so NO real WalletConnect code executes and the test asserts on the same typed
  * `jest.fn` instance `walletconnect.ts` captured at import time.

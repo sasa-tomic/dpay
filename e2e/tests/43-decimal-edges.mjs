@@ -44,9 +44,10 @@
 // Approach: build a request QR per case via buildRequestQR (encoding the raw amount + currency),
 // inject it via the camera seam (`window.__DPAY_TEST_SCAN`), then read the review screen's pay-amount
 // testID + assert it contains the EXACT expected decimal string. Cancel between cases via the
-// review screen's aria-label="Cancel" link (no reload needed; mirrors flow 42's pattern). No balance
-// seeding needed — the review screen formats the amount from the request bytes alone, before any
-// balance check (we only assert the format, not the settle).
+// review screen's aria-label="Cancel" link — no reload needed (a reload would require re-threading
+// the ?relay= param), and each case re-enters via a fresh scan. No balance seeding needed — the
+// review screen formats the amount from the request bytes alone, before any balance check (we only
+// assert the format, not the settle).
 //
 // Selector contract: `pay-amount` (PayMode's review header). Camera seam: window.__DPAY_TEST_SCAN.
 import { setup, assert, assertIncludes, onboardWallet } from '../harness/lib.mjs';
@@ -131,9 +132,9 @@ export async function run() {
       assert(!/\de[+-]\d/i.test(payAmt), `case "${c.label}": pay-amount must NOT use scientific notation, got "${payAmt}"`);
       console.log(`[43-decimal-edges] ✓ ${c.label}: "${payAmt}" includes "${c.expected}"`);
 
-      // Reset PayMode for the next case via the review screen's Cancel link (aria-label="Cancel";
-      // same approach as flow 42 — avoids a reload + the ?relay= re-thread). Skip on the last case
-      // (no next iteration to reset for).
+      // Reset PayMode for the next case via the review screen's Cancel link (aria-label="Cancel"
+      // — avoids a reload + the ?relay= re-thread; a fresh scan re-enters review cleanly). Skip on
+      // the last case (no next iteration to reset for).
       if (i < CASES.length - 1) {
         const canceled = await driver.eval(() => {
           const btn = document.querySelector('button[aria-label="Cancel"]');

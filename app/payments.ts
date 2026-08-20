@@ -74,14 +74,3 @@ export function decidePayerReceipt(
   }
 }
 
-// (isReceiptForRequest retired with the canister-signed receipt: goods-binding on the IC rail is
-// the request_id carried in the envelope the merchant itself submitted — a replayed proof for a
-// different payment has a different request_id and never matches the watched one.)
-
-// (rejectionMessage / isNonceReused / withdrawRejectionMessage retired with the relay surface —
-// the IC rail classifies rejections from decoded transfer errors; see transferRejectionMessage +
-// ingressRejectMessage in services/rail.ts.)
-
-// (RECEIPT_CLAIM_LEN retired with the canister-signed receipt — the wire drift pin pointed at the
-// facade's 108-byte signed claim, which no longer exists. Outcomes ride read_state + the 17-byte
-// NFC receipt codes above.)

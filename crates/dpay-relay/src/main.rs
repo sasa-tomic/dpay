@@ -78,7 +78,7 @@ async fn main() {
     let bound = listener.local_addr().unwrap_or(cfg.addr);
     println!(
         "dpay relay:  landing http://{bound}/  ·  wallet http://{bound}/wallet  ·  \
-         API http://{bound}/api/v1  (POST /api/v1/pay, GET /api/v1/health)  ·  \
+         API http://{bound}/api/v1  (GET /api/v1/health)  ·  IC gateway http://{bound}/api/v2  ·  \
          APK http://{bound}/download/dpay.apk"
     );
 

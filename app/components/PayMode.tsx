@@ -40,7 +40,14 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   // VERBATIM envelope bytes — resubmission must reuse them (identical-byte retry only;
   // re-signing = new request_id = double-pay).
   const [prepared, setPrepared] = useState<RailPrepared | null>(null);
-  const [qr, setQr] = useState<{code: string; amount: string; currency: number; who: string; nonce: string} | null>(null);
+  const [qr, setQr] = useState<{code: string; amount: string; currency: number; who: string} | null>(null);
+  // Item 4 (double-pay guard): an envelope we SUBMITTED online whose outcome stayed UNKNOWN. The
+  // in-flight ambiguity never resolves app-side, so a re-approve of the SAME request (match: the
+  // request nonce — the reconciliation key) must re-display THAT envelope's QR — re-signing would
+  // mint a fresh request_id and, if the merchant scanned the first QR, BOTH envelopes can settle.
+  // Survives reset()/Cancel deliberately; replaced by the next fresh prepare, dropped with the
+  // component, and cleared by a terminal rejection of that envelope.
+  const [submittedEnv, setSubmittedEnv] = useState<{prepared: RailPrepared; nonce: string; who: string} | null>(null);
   // `pending` = handed to the merchant offline but NOT confirmed by the ledger (we can't claim it
   // settled). `already` = the rail reported this transfer already executed (idempotent replay).
   // `receipt` = the settlement proof captured on an ONLINE settle: block index + request id (the
@@ -100,10 +107,12 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
 
   // Reconcile an offline (QR-dance) settlement via the IC rail: poll read_state for the prepared
   // envelope's request_id. Terminal replied → Paid (decoded TransferResult); rejected → surfaced
-  // honestly; still-pending → keep polling (the ~5.5-min ingress window is the deadline, and
-  // "not submitted in time" stays honest-pending, never a fake Paid).
+  // honestly and the poll STOPS (a ledger rejection is terminal — the same request_id can never
+  // settle later; mirrors the ReceiveMode settlement-poll behavior); still-pending → keep polling
+  // (the ~5.5-min ingress window is the deadline, and "not submitted in time" stays honest-pending,
+  // never a fake Paid).
   useEffect(() => {
-    if (phase !== 'qr' || !prepared || !qr) return;
+    if (phase !== 'qr' || !prepared || !qr || err) return;
      let alive = true;
      const check = async () => {
        try {
@@ -112,11 +121,19 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
          if (out.kind === 'settled') {
            onSettled(); setPaid({amount: qr.amount, currency: qr.currency, who: qr.who, already: false}); setPhase('paid');
          }
+         if (out.kind === 'rejected') {
+           // Terminal refusal (e.g. the ledger rejected the merchant's submission): surface the
+           // reason on the QR screen and stop polling — spinning silently would leave the payer
+           // showing a dead QR forever. A rejected envelope can never settle, so its retained
+           // submitted-env copy is dead too — drop it (a re-approve may safely prepare fresh).
+           setErr(out.reason);
+           setSubmittedEnv(s => (s && s.prepared.requestIdHex === prepared.requestIdHex ? null : s));
+         }
        } catch (e) { console.warn('rail reconcile poll failed:', e instanceof Error ? e.message : String(e)); /* best-effort: keep polling */ }
      };
      check(); const id = setInterval(check, POLL.receiptPay);
      return () => { alive = false; clearInterval(id); };
-  }, [phase, prepared, qr, onSettled, identity]);
+  }, [phase, prepared, qr, err, onSettled, identity]);
 
   async function approve() {
     if (!req) return;
@@ -125,6 +142,15 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     // sees fresh transfers), with copy that explains the expiry and disables Approve (C1).
     if (req.expiry * 1000 <= Date.now()) {
       setErr('This request expired — ask the merchant for a fresh QR');
+      return;
+    }
+    // Item 4: this request's envelope was already submitted and its outcome stayed unknown —
+    // re-display THAT QR (the req.expiry gate above already ran, so it's unexpired). NEVER
+    // re-sign a submitted envelope: a fresh signature = fresh request_id = a second payment.
+    if (submittedEnv && submittedEnv.nonce === req.nonceHex) {
+      setPrepared(submittedEnv.prepared);
+      setQr({code: envelopeToQrPayload(submittedEnv.prepared.envelopeHex), amount: req.amount, currency: req.currency, who: submittedEnv.who});
+      setPhase('qr');
       return;
     }
     setBusy(true);
@@ -144,14 +170,20 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
           setPaid({amount: req.amount, currency: req.currency, who, already: false, receipt: {ledger: p.ledger, block_index: out.blockIndex, request_id: p.requestIdHex}}); setPhase('paid'); return;
         }
         if (out.kind === 'rejected') {
-          if (out.reason === 'Already paid') { setPaid({amount: req.amount, currency: req.currency, who, already: true}); setPhase('paid'); return; }
+          // Structured-tag branch (not human-message matching): Duplicate = this payee already
+          // landed this exact memo'd transfer — the request is PAID, show the already-paid state.
+          if (out.variant === 'Duplicate') { setPaid({amount: req.amount, currency: req.currency, who, already: true}); setPhase('paid'); return; }
           setErr(out.reason); return;
         }
         // unknown: not terminal within budget — fall through to the offline QR hand-off. The
         // merchant can submit the SAME envelope within the ingress window; the reconcile poll
         // (above) turns it into Paid when the rail reports it executed.
       }
-      setQr({code: envelopeToQrPayload(p.envelopeHex), amount: req.amount, currency: req.currency, who, nonce: req.nonceHex});
+      // Item 4: this envelope is now SUBMITTED-or-handed-off (online unknown, or the offline QR
+      // the merchant may settle themselves). RETAIN it: a later re-approve of this request must
+      // re-display these exact bytes — a fresh signature = fresh request_id = a second payment.
+      setSubmittedEnv({prepared: p, nonce: req.nonceHex, who});
+      setQr({code: envelopeToQrPayload(p.envelopeHex), amount: req.amount, currency: req.currency, who});
       setPhase('qr');
     } catch (e: unknown) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   }
@@ -208,6 +240,10 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
         <View style={S.qrCard}><QrCode value={qr.code} size={QR_SIZE} ecl="L" /></View>
         <Text style={S.amountBig}>{`${fmtCurrencyAmount(catalog, qr.currency, qr.amount)} to ${qr.who}`}</Text>
         <Text style={S.badgeOk}>signed on this device ✓</Text>
+        {/* The reconcile poll surfaced a TERMINAL ledger rejection of this envelope (item 3): the
+            QR is dead — the merchant's submission was refused. Show why + stop polling; the payer
+            can Cancel and start over. Not shown for still-pending (unknown) — that stays honest. */}
+        {err ? <Text testID="qr-err" style={S.err}>{err}</Text> : null}
         {online ? <Text style={S.qrHint}>Waiting for {qr.who} to scan…</Text> : (
           <>
             <Text style={S.qrHint}>Offline — {qr.who} settles this when they submit it. You’ll see it on your balance once you’re back online.</Text>
@@ -230,8 +266,8 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   if (phase === 'review' && req) {
     // MC5 — fail closed BEFORE signing: a request carrying an unknown/unsupported currency (a
     // garbage/retired id, or a CkSol-family currency with no ramp config) must NEVER reach the
-    // signAuthorization call. The canister also rejects these, but the app should never let the user
-    // Approve a sign for an unsupported asset. Mirror the BalancesSheet "Unsupported asset" pattern:
+    // envelope signer (prepareTransfer). The ledger also rejects these, but the app should never
+    // let the user Approve a sign for an unsupported asset. Mirror the BalancesSheet "Unsupported asset" pattern:
     // honest copy + NO sign button + a back-to-scan affordance. dpay never swaps, so we do NOT
     // offer to substitute another asset — the request is for this asset or none.
     if (!isPayableAsset(catalog, req.currency)) {

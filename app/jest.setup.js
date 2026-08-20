@@ -14,8 +14,8 @@ jest.mock('@react-native-async-storage/async-storage', () =>
 // triggers the WC code path. The resolver's WC branch is gated by Platform.OS; in jest the RN
 // preset defaults Platform.OS to 'ios', so without this override a non-empty projectId would make
 // resolveOnrampProvider() reach the WC dynamic import in any test that calls it. Tests that need
-// WC ENABLED (walletconnect.test.ts) set the override inside jest.isolateModules. Mirrors the
-// EXPECTED_RECEIPT_PUBKEY seam exactly.
+// WC ENABLED (walletconnect.test.ts) set the override inside jest.isolateModules. Same
+// __DPAY_TEST_* override-seam pattern as the SOLANA_RPC_URL line below.
 globalThis.__DPAY_TEST_WALLETCONNECT_PROJECT_ID = '';
 // SOL native device-key rail: DISABLE for the offline jest inner loop so no test hits real devnet.
 // An empty SOLANA_RPC_URL makes useSolanaBalance no-op and the SOL card render with `—`. Mirrors

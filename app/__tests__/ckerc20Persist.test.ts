@@ -8,11 +8,14 @@ import {
   type Ckerc20DepositState,
 } from '../services/ckerc20Persist';
 
-// MC8 U5 — persist the ckERC20 deposit's WATCHING phase across app restart. The watching poll hits
-// the RELAY balance (NOT Ethereum), so it is resumable WITHOUT the wallet session: an app restart
-// mid-watch rehydrates amount/account/startBal/txHashes and the relay balance poll picks back up,
-// while the ephemeral wallet-bound phases (connect/enter/sending) are honestly discarded (an EIP-1193
-// session does NOT survive restart). Only `phase: 'watching'` is ever persisted.
+// MC8 U5 — persist the ckERC20 deposit's WATCHING phase across app restart. The watching poll is a
+// SIGNED icrc1_balance_of at the user's own principal (NOT a relay route, NOT Ethereum), so it is
+// resumable WITHOUT the wallet session: an app restart mid-watch rehydrates
+// amount/account/startBal/txHashes and the ledger poll picks back up, while the ephemeral
+// wallet-bound phases (connect/enter/sending) are honestly discarded (an EIP-1193 session does NOT
+// survive restart). Only `phase: 'watching'` is ever persisted, and every record carries
+// `target: 'user'` (the v2 shape marker — a facade-era v1 record polled a target that will never
+// move and is treated as NOT resumable).
 //
 // These tests exercise the pure AsyncStorage wrapper (load/save/clear round-trip, malformed-JSON →
 // null, clear removes the key) AND the pure `hydrateWatch` reducer (the sheet's resume logic).
@@ -26,6 +29,7 @@ const WATCHING: Ckerc20DepositState = {
   account: '0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
   startBal: '0',
   txHashes: ['0x' + 'aa'.repeat(32), '0x' + 'bb'.repeat(32)],
+  target: 'user',
   phase: 'watching',
 };
 
@@ -121,11 +125,32 @@ describe('hydrateWatch — pure resume reducer', () => {
   it('returns null when phase is missing or not "watching" (ephemeral phases are NEVER resumed)', () => {
     // connect/enter/sending are wallet-bound; an EIP-1193 session does not survive restart, so a
     // persisted state in any of those phases is stale → discard. Only 'watching' is resumable
-    // (the relay poll needs no wallet session).
+    // (the ledger poll needs no wallet session).
     expect(hydrateWatch({...WATCHING, phase: 'connect'})).toBeNull();
     expect(hydrateWatch({...WATCHING, phase: 'enter'})).toBeNull();
     expect(hydrateWatch({...WATCHING, phase: 'sending'})).toBeNull();
     expect(hydrateWatch({...WATCHING, phase: undefined})).toBeNull();
+  });
+
+  // v2 shape marker — a record WITHOUT `target: 'user'` is a facade-era watch (it polled a relay
+  // balance for a facade-owned account that will never move). It must be treated as done/expired,
+  // NOT resumed, so the sheet starts fresh instead of resurrecting a dead watch.
+  it('returns null for a pre-fix (facade-era) record without target (v1 → NOT resumable)', () => {
+    const v1 = {...WATCHING} as Record<string, unknown>;
+    delete v1.target;
+    expect(hydrateWatch(v1)).toBeNull();
+  });
+
+  it('returns null when target is present but not "user"', () => {
+    expect(hydrateWatch({...WATCHING, target: 'facade'})).toBeNull();
+    expect(hydrateWatch({...WATCHING, target: 1})).toBeNull();
+  });
+
+  it('a v1 record in storage → load returns null (the sheet starts fresh, never resumes a dead watch)', async () => {
+    const key = `dpay.ckerc20.deposit.${PUBKEY}.${CURRENCY}`;
+    const {target: _dropped, ...v1} = WATCHING;
+    await AsyncStorage.setItem(key, JSON.stringify(v1));
+    expect(await loadDeposit(PUBKEY, CURRENCY)).toBeNull();
   });
 
   it('returns null when a required field is missing', () => {

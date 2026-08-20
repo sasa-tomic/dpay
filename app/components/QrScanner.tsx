@@ -7,7 +7,11 @@ import {S} from '../styles';
 export function QrScanner({onScan}: {onScan: (v: string) => void}) {
   const {hasPermission, requestPermission} = useCameraPermission();
   const device = useCameraDevice('back');
-  useEffect(() => { if (!hasPermission) requestPermission(); }, [hasPermission, requestPermission]);
+  // NO mount-effect permission request: the camera permission is asked for only on the explicit
+  // scan intent (tapping the camera box / the "Allow camera scan" button below). Auto-requesting
+  // on mount made every fresh wallet-open fire a getUserMedia/vision-camera permission prompt the
+  // user never asked for (web-prod: the onboarding tap still satisfies the gesture heuristic, so
+  // the prompt appeared on first open; native: the OS dialog on every fresh install).
   const [appActive, setAppActive] = useState(AppState.currentState === 'active');
   const [epoch, setEpoch] = useState(0);
   useEffect(() => {
@@ -27,18 +31,24 @@ export function QrScanner({onScan}: {onScan: (v: string) => void}) {
     <View testID="scan-cam-box" style={S.camBox}>
       {hasPermission && device ? (
         <Camera key={epoch} style={StyleSheet.absoluteFill} device={device} isActive={appActive} codeScanner={codeScanner} />
-      ) : (
+      ) : hasPermission ? (
         <View style={S.camPlaceholder}>
-          {hasPermission ? (
-            <Text style={S.dim2}>No camera found on this device.</Text>
-          ) : (
-            <>
-              <Text style={S.reviewTo}>Point your camera at a payment code to pay</Text>
-              <Text style={S.dim2}>dpay uses your camera only to scan codes — never records or uploads.</Text>
-              <Pressable style={S.smallBtn} onPress={requestPermission} accessibilityRole="button" accessibilityLabel="Allow camera scan" accessibilityHint="Permission to use your camera so you can scan payment codes" accessibilityState={{disabled: false}}><Text style={S.smallBtnText}>Allow camera scan</Text></Pressable>
-            </>
-          )}
+          <Text style={S.dim2}>No camera found on this device.</Text>
         </View>
+      ) : (
+        // The WHOLE camera box is the tap target while permission is absent (defer-to-intent:
+        // nothing asks for the camera until the user taps here). Deliberately NOT a
+        // role="button": the real "Allow camera scan" button inside keeps the button semantics
+        // for a11y, and RNW would otherwise render a nested <button> (invalid HTML + hydration
+        // error). A web tap on the inner button bubbles to this wrapper — both call the same
+        // requestPermission, deduped by the shim's in-flight stream promise; on native the
+        // deepest touchable (the button) wins. S.camPlaceholder keeps flex:1 so the box layout
+        // is unchanged.
+        <Pressable style={S.camPlaceholder} onPress={requestPermission}>
+          <Text style={S.reviewTo}>Point your camera at a payment code to pay</Text>
+          <Text style={S.dim2}>dpay uses your camera only to scan codes — never records or uploads.</Text>
+          <Pressable style={S.smallBtn} onPress={requestPermission} accessibilityRole="button" accessibilityLabel="Allow camera scan" accessibilityHint="Permission to use your camera so you can scan payment codes" accessibilityState={{disabled: false}}><Text style={S.smallBtnText}>Allow camera scan</Text></Pressable>
+        </Pressable>
       )}
     </View>
   );

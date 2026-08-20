@@ -540,7 +540,7 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_method_fficardsession_process() != 33759:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_dpay_ffi_checksum_method_fficardsession_provide_wire() != 26646:
+    if lib.uniffi_dpay_ffi_checksum_method_fficardsession_provide_wire() != 64820:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_method_fficardsession_receipt() != 54809:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -554,7 +554,7 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_provide_receipt() != 18499:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_wire() != 42538:
+    if lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_wire() != 55269:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_constructor_fficardsession_new() != 58439:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -2702,8 +2702,9 @@ class FfiCardSessionProtocol(typing.Protocol):
         raise NotImplementedError
     def provide_wire(self, wire: "bytes"):
         """
-        Approve: supply the offline-signed 292-byte wire to serve. Errors (`NfcWrongState`) unless a
-        request is held and no decision has been made; the wire is validated as it is framed.
+        Approve: supply the offline-signed payload to serve — an opaque signed-payload handoff
+        (IC envelope post-cutover). Errors (`NfcWrongState`) unless a request is held and no
+        decision has been made; the payload is validated as it is framed.
         """
 
         raise NotImplementedError
@@ -2843,8 +2844,9 @@ class FfiCardSession():
 
     def provide_wire(self, wire: "bytes") -> None:
         """
-        Approve: supply the offline-signed 292-byte wire to serve. Errors (`NfcWrongState`) unless a
-        request is held and no decision has been made; the wire is validated as it is framed.
+        Approve: supply the offline-signed payload to serve — an opaque signed-payload handoff
+        (IC envelope post-cutover). Errors (`NfcWrongState`) unless a request is held and no
+        decision has been made; the payload is validated as it is framed.
         """
 
         _UniffiConverterBytes.check_lower(wire)
@@ -2950,7 +2952,8 @@ class FfiReaderConductorProtocol(typing.Protocol):
         raise NotImplementedError
     def wire(self, ):
         """
-        The reassembled 292-byte wire once the exchange reached `Done`, else `None`.
+        The reassembled payload once the exchange reached `Done`, else `None` — an opaque
+        signed-payload handoff (IC envelope post-cutover).
         """
 
         raise NotImplementedError
@@ -3058,7 +3061,8 @@ class FfiReaderConductor():
 
     def wire(self, ) -> "typing.Optional[bytes]":
         """
-        The reassembled 292-byte wire once the exchange reached `Done`, else `None`.
+        The reassembled payload once the exchange reached `Done`, else `None` — an opaque
+        signed-payload handoff (IC envelope post-cutover).
         """
 
         return _UniffiConverterOptionalBytes.lift(

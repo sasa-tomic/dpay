@@ -27,7 +27,9 @@
 // Selector contract: `balance` (header → Balances), `asset-ckusdc-select` (USDC row whole-row
 // select), `btn-receive-address` (Receive → "My address"), `ckerc20-deposit`, `btn-connect-wallet`,
 // `ckerc20-amount`, `btn-approve`, `ckerc20-status`.
-import { setup, assert, assertIncludes, onboardWallet, openBalances, selectCurrency, openReceiveAddress } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, onboardWallet, openBalances, selectCurrency, openReceiveAddress, accountOf } from '../harness/lib.mjs';
+import { icpPrincipalBytes, principalToText } from '../harness/wire.mjs';
+import { principalToBytes32 } from '../../app/cketh.ts';
 
 const USDC_ADDR = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
 const HELPER_ADDR = '0x18901044688D3756C35Ed2b36D93e6a5B8e00E68';
@@ -150,6 +152,23 @@ export async function run() {
     // depositErc20 calldata = 4-byte selector + 4×32-byte words = 132 bytes = 264 hex chars (0x + 264).
     assert(deposit.data.length === 2 + 264, `deposit calldata should be 132 bytes, got ${(deposit.data.length - 2) / 2}`);
     console.log('[16-ckusdc-onramp] ✓ approve→USDC(sel 095ea7b3) + depositErc20→helper(sel db9751af, 132 bytes)');
+
+    // === Deposit TARGET: the user's OWN IC principal, default subaccount ======================
+    // (Facade-era regression guard: the deposit used to mint at the FACADE principal + pubkey
+    // subaccount — funds invisible to every user-principal balance read.) decode calldata words:
+    // selector[0:10], w1=erc20 [10:74], w2=amount [74:138], w3=principal [138:202], w4=subaccount
+    // [202:266]. w3 must be the onboarded identity's IC principal (derived from its pubkey — the
+    // same self-authenticating derivation the wasm core uses); w4 must be all zeros (ICRC-1
+    // default subaccount, i.e. the subaccount arg omitted).
+    const acct = await accountOf(driver);
+    assert(!!acct?.publicHex, 'accountOf must return the onboarded identity publicHex');
+    const expectedPrincipal = principalToText(icpPrincipalBytes(acct.publicHex));
+    const word3 = deposit.data.slice(138, 202);
+    const word4 = deposit.data.slice(202, 266);
+    assert(word3 === principalToBytes32(expectedPrincipal),
+      `deposit principal word must be the USER principal ${principalToBytes32(expectedPrincipal)}, got ${word3}`);
+    assert(word4 === '0'.repeat(64), `deposit subaccount word must be all-zero (ICRC-1 default), got ${word4}`);
+    console.log('[16-ckusdc-onramp] ✓ depositErc20 targets the USER principal + default subaccount');
 
     console.log(`[16-ckusdc-onramp] GREEN in ${((Date.now() - start) / 1000).toFixed(2)}s`);
   } finally {

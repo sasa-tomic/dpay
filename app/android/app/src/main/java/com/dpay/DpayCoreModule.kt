@@ -167,16 +167,6 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         }
     }
 
-    /** Compact base64url QR string carried to the merchant. */
-    /** Verify the signature in a wire blob (what the merchant/relay/canister re-check). */
-    /** Policy gate mirroring the canister; resolves null when acceptable, else the reason string.
-     *  MC1 units 2-4: amount/cap/balance are raw-u64 decimal STRINGS (exact for the full range);
-     *  now/expiry stay Double (unix-seconds time, a small bounded value). */
-    /**
-     * Verify a canister/ledger-signed receipt signature (R2 outcome attestation) before the app
-     * shows "Paid ✓". Mirrors `dpay_ffi::verify_receipt_sig` (strict Ed25519 verify over the
-     * canonical ReceiptClaim built inside the Rust core). Hex in, boolean out.
-     */
     // --- IC user-principal rail (dpay-icp via UniFFI) ------------------------------------------------
     //
     // The rail moves funds at Account{owner: self_authenticating(user Ed25519 pubkey)} directly on

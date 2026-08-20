@@ -63,6 +63,13 @@ export function hexToBytes(hex: string): Uint8Array {
   }
   return out;
 }
+// Encode bytes as canonical lowercase hex — the inverse of hexToBytes and the app-wide single
+// source (services/icp.ts + services/rail.ts previously carried private copies).
+export function bytesToHex(bytes: Uint8Array): string {
+  let out = '';
+  for (const b of bytes) out += b.toString(16).padStart(2, '0');
+  return out;
+}
 export const base = (u: string) => u.replace(/\/$/, '');
 
 // Validate a 64-hex recovery seed (the value Backup reveals). Returns null when valid, else a

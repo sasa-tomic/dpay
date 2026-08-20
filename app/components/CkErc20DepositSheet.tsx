@@ -3,15 +3,16 @@ import {View, Text, Pressable, TextInput, ActivityIndicator, Platform} from 'rea
 import {QrCode} from './QrCode';
 import {C} from '../config/palette';
 import {S} from '../styles';
-import {POLL, DEPOSIT_TIMEOUT_MS, BALANCE_TIMEOUT_MS, QR_SIZE} from '../config/constants';
-import {base} from '../lib/format';
+import {POLL, DEPOSIT_TIMEOUT_MS, QR_SIZE} from '../config/constants';
 import {parseDecimalToUnits, cmpRaw} from '../lib/amount';
 import type {Identity} from '../lib/types';
 import type {FamilyDisplay} from '../config/catalog';
-import {type CkErc20OnrampParams, ckerc20OnrampParams, fetchWithTimeout, readJsonOrEmpty} from '../services/relay';
+import {type CkErc20OnrampParams, ckerc20OnrampParams} from '../services/relay';
 import {encodeApprove, encodeDepositErc20, encodeDepositEth, principalToBytes32} from '../cketh';
 import {resolveOnrampProvider, connectWallet, getChainId, sendTransaction, waitForReceipt, ReceiptReverted, ReceiptTimeout, pairOnrampWallet, openWalletApp} from '../wallet';
 import {loadDeposit, saveDeposit, clearDeposit} from '../services/ckerc20Persist';
+import {railBalanceOf} from '../services/rail';
+import {DpayCore} from '../services/native';
 import {withTimeout} from '../lib/timeout';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {IconCheck} from './icons';
@@ -19,15 +20,16 @@ import {IconCheck} from './icons';
 // ckERC20 (ckUSDC) / native ckETH direct onramp — a wallet-connect flow. The user connects their OWN
 // Ethereum wallet (MetaMask/Rabby; window.ethereum on web), dpay BUILDS the transaction(s), and the
 // wallet SIGNS + broadcasts. dpay never sees the ETH key — non-custodial. The ckETH minter scrapes
-// Ethereum logs on a ~3min heartbeat and mints the chain-key asset to the user's subaccount (~20min);
-// dpay just polls the balance. The calldata is built by cketh.ts (byte-exact vs the real
+// Ethereum logs on a ~3min heartbeat and mints the chain-key asset to the USER'S OWN IC PRINCIPAL
+// (ICRC-1 default subaccount — the same account every balance read + payment targets) (~20min);
+// dpay just polls the ledger balance. The calldata is built by cketh.ts (byte-exact vs the real
 // helper-contract ABI; pinned by goldens).
 //
 // Two deposit shapes share this sheet (the CkEthErc20 family + the SAME helper contract), discriminated
 // by `nativeEth` (descriptor.token_contract == null):
 //  - ERC-20 (USDC/USDT/DAI): TWO txs — approve(helper, amount) on the ERC-20, then depositErc20(...).
-//  - native ETH: ONE payable tx — depositEth(principal, subaccount) carrying the ETH `value` (Wei).
-export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, display, chainId, nativeEth, onClose}: {
+//  - native ETH: ONE payable tx — depositEth(principal) carrying the ETH `value` (Wei).
+export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, display, chainId, nativeEth, ledger, onClose}: {
   identity: Identity;
   relayUrl: string;
   currency: number;
@@ -35,21 +37,28 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
   display: FamilyDisplay;
   chainId: number | null; // MC8 U3: the catalog's per-currency EVM chain id (ckUSDC = 1 = Ethereum mainnet)
   nativeEth: boolean; // true ⇒ native-ETH single-tx deposit (depositEth); false ⇒ ERC-20 two-tx (approve + depositErc20)
+  ledger: string; // the ICRC-1 ledger principal for this currency — the WATCH target (signed icrc1_balance_of at the user principal)
   onClose: () => void;
 }) {
   // phase: 'connect' (no wallet yet) → 'enter' (wallet connected, enter amount) → 'sending' (txs
   // submitted, waiting on the user's wallet to sign) → 'watching' (txs mined, waiting for the mint)
   // → 'done' (balance grew).
   //
-  // MC8 U5 — the WATCHING phase is RESUMABLE across app restart because the watching poll hits the
-  // RELAY balance (not Ethereum), so it needs NO wallet session. `resumed` is true iff phase==
-  // 'watching' was hydrated from AsyncStorage on mount (vs reached naturally via submit). The
-  // ephemeral wallet-bound phases (connect/enter/sending) are NEVER persisted — an EIP-1193 session
-  // does not survive restart, so resuming them would lie.
+  // MC8 U5 — the WATCHING phase is RESUMABLE across app restart because the watching poll is a
+  // SIGNED /api/v2 ledger query at the user's own principal (not Ethereum), so it needs NO wallet
+  // session. `resumed` is true iff phase=='watching' was hydrated from AsyncStorage on mount (vs
+  // reached naturally via submit). The ephemeral wallet-bound phases (connect/enter/sending) are
+  // NEVER persisted — an EIP-1193 session does not survive restart, so resuming them would lie.
   const [phase, setPhase] = useState<'connect' | 'enter' | 'sending' | 'watching' | 'done'>('connect');
   const [account, setAccount] = useState<string | null>(null);
   const [amount, setAmount] = useState('');
   const [err, setErr] = useState<string | null>(null);
+  // The user's own IC principal (resolved once on open; pure derivation off the identity key — the
+  // SAME self principal every /api/v2 envelope targets). The deposit calldata's `principal` arg is
+  // THIS principal with the subaccount omitted (ICRC-1 default) — a facade principal here would
+  // mint invisible-to-the-wallet funds. null = not resolved yet (or derivation failed — submit
+  // gates on it and fails honestly, never sends).
+  const [selfPrincipal, setSelfPrincipal] = useState<string | null>(null);
   // MC8 U6 capstone — the WalletConnect pairing URI. Non-null while the user should see the pairing
   // QR (between display_uri and the connect event). On web this is ALWAYS null (pairOnrampWallet is
   // a no-op that returns false without ever calling onUri), so the QR never renders in the e2e flow.
@@ -88,11 +97,13 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
     };
   }, []);
 
-  // MC8 U5 — RESUME on mount. The watching poll is relay-bound (not Ethereum), so a watching deposit
-  // survives an app restart WITHOUT a wallet reconnect: hydrate amount/account/startBal/txHashes and
-  // set phase='watching' + resumed=true. The relay balance poll effect re-runs and picks up where it
-  // left off. loadDeposit returns null for any non-watching/malformed value (hydrateWatch filters),
-  // so a stale/corrupt key degrades to a fresh 'connect' sheet — never a crash, never a false resume.
+  // MC8 U5 — RESUME on mount. The watching poll is a signed ledger query at the user principal (not
+  // Ethereum), so a watching deposit survives an app restart WITHOUT a wallet reconnect: hydrate
+  // amount/account/startBal/txHashes and set phase='watching' + resumed=true. The balance poll
+  // effect re-runs and picks up where it left off. loadDeposit returns null for any
+  // non-watching/malformed/pre-v2 value (hydrateWatch filters — a facade-era record polled a
+  // target that will never move), so a stale/corrupt key degrades to a fresh 'connect' sheet —
+  // never a crash, never a false resume.
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -119,7 +130,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
     if (phase === 'watching') {
       if (account && startBal != null) {
         saveDeposit(identity.publicHex, currency, {
-          currency, amount, account, startBal, txHashes, phase: 'watching',
+          currency, amount, account, startBal, txHashes, target: 'user', phase: 'watching',
         });
       }
     } else if (phase === 'done') {
@@ -127,7 +138,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
     }
   }, [phase, account, amount, startBal, txHashes, identity.publicHex, currency]);
 
-  // Load the onramp params (helper address, ERC-20 address, facade principal) once on open.
+  // Load the onramp params (helper address, ERC-20 address) once on open.
   useEffect(() => {
     let alive = true;
     const {signal, cancel} = withTimeout(DEPOSIT_TIMEOUT_MS);
@@ -144,6 +155,22 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
     })();
     return () => { alive = false; };
   }, [relayUrl, currency]);
+
+  // Resolve the user's own IC principal once on open (pure derivation off the identity key — the
+  // same self principal every /api/v2 envelope targets). The deposit calldata's `principal` arg is
+  // THIS principal, so the mint lands at the account the wallet actually reads. A null/failed
+  // resolve leaves submit gated off (honest error, never send).
+  useEffect(() => {
+    let alive = true;
+    DpayCore.icpSelfPrincipal(identity.secretHex).then(
+      (p) => { if (alive) setSelfPrincipal(p); },
+      (e) => {
+        console.warn('icpSelfPrincipal failed:', e instanceof Error ? e.message : String(e));
+        if (alive) setErr("Couldn't derive your deposit address — try reopening the sheet.");
+      },
+    );
+    return () => { alive = false; };
+  }, [identity.secretHex]);
 
   const connect = useCallback(async () => {
     setErr(null);
@@ -191,21 +218,21 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
         }
       }
       setAccount(acct);
-      // Snapshot the starting balance so the watching poll can detect the mint (a GROWTH from here).
+      // Snapshot the starting ledger balance (signed icrc1_balance_of at the USER principal) so the
+      // watching poll can detect the mint (a GROWTH from here).
       try {
-        const r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/balance/${identity.publicHex}?currency=${currency}`, undefined, BALANCE_TIMEOUT_MS);
-        const j = await readJsonOrEmpty(r);
-        if (typeof j.balance === 'string') setStartBal(j.balance);
+        const bal = await railBalanceOf(identity.secretHex, ledger);
+        if (bal != null) setStartBal(bal);
       } catch (e) {
-        // Best-effort: watching falls back to any-positive. Still log the cause so a relay 5xx or a
-        // recurring timeout on the balance endpoint is visible during a deposit debugging session.
+        // Best-effort: watching falls back to any-positive. Still log the cause so a query failure
+        // is visible during a deposit debugging session.
         console.warn('ckERC20 startBal snapshot failed:', e instanceof Error ? e.message : String(e));
       }
       setPhase('enter');
     } catch (e: unknown) {
       setErr((e instanceof Error ? e.message : String(e)) || 'Could not connect to your wallet.');
     }
-  }, [relayUrl, currency, identity.publicHex, chainId, display.networkLabel]);
+  }, [relayUrl, currency, ledger, identity.secretHex, identity.publicHex, chainId, display.networkLabel]);
 
   // Same-device pairing — open the OS wallet app with the WC pairing URI (alternative to scanning
   // the QR with a second device). The URI is non-null only while the pairing QR is shown. On web
@@ -218,6 +245,10 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
 
   const submit = useCallback(async () => {
     if (!account || !params) return;
+    // The deposit `principal` arg MUST be the user's own IC principal. If derivation somehow failed
+    // (selfPrincipal null), fail honestly — a deposit to any other principal would mint funds the
+    // wallet can never see. Never send.
+    if (!selfPrincipal) { setErr("Couldn't derive your deposit address — try reopening the sheet."); return; }
     // MC8 U6.3 — same web-first resolver as connect(). On submit the provider was non-null at connect
     // time; if it has since vanished (the EIP-1193 session dropped), this surfaces an honest error
     // rather than sending calldata into the void.
@@ -228,10 +259,13 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
     const parsed = parseDecimalToUnits(amount, decimals);
     if (!parsed.ok || parsed.raw === '0') { setErr('Enter an amount greater than zero.'); return; }
     const unitBig = BigInt(parsed.raw);
-    const principalWord = principalToBytes32(params.facade_principal);
-    // The user's ckUSDC subaccount is their 32-byte Ed25519 pubkey (the same subaccount the balance
-    // poll + pay path read), so the mint lands at the account the wallet already shows.
-    const subaccount = identity.publicHex;
+    // The deposit lands at the USER's own IC principal with the subaccount OMITTED (all-zeros =
+    // ICRC-1 default subaccount) — the same Account{owner: user, subaccount: None} every signed
+    // envelope and balance read targets. Omitting the arg is load-bearing: the facade-era code
+    // passed a facade principal + pubkey subaccount, minting funds invisible to user-principal
+    // reads. Both cketh.ts builders default a missing subaccount to the 32-zero-byte word (pinned
+    // by the default-subaccount goldens in __tests__/cketh.test.ts).
+    const principalWord = principalToBytes32(selfPrincipal);
     setErr(null);
     setPhase('sending');
     // MC8 U5 — accumulate the tx hashes as they're produced so a timeout (soft → watching) still
@@ -240,9 +274,9 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
     const hashes: string[] = [];
     try {
       if (nativeEth) {
-        // Native ETH — ONE payable tx: depositEth(principal, subaccount) with the ETH `value` (Wei).
-        // No approve step (ETH is native, not an ERC-20 allowance). The amount is the tx `value`.
-        const depositData = encodeDepositEth(principalWord, subaccount);
+        // Native ETH — ONE payable tx: depositEth(principal) with the ETH `value` (Wei). No approve
+        // step (ETH is native, not an ERC-20 allowance). The amount is the tx `value`.
+        const depositData = encodeDepositEth(principalWord);
         const depositHash = await sendTransaction(provider, account, {to: params.helper_address, data: depositData, value: unitBig});
         hashes.push(depositHash);
         await waitForReceipt(provider, depositHash);
@@ -258,8 +292,9 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
         // only means the wallet accepted it, NOT that it succeeded. A reverted approve must surface an
         // honest error here, not a false "watching for the mint".
         await waitForReceipt(provider, approveHash);
-        // 2. depositErc20(usdc, amount, principal, subaccount) on the helper contract.
-        const depositData = encodeDepositErc20(erc20Address, unitBig, principalWord, subaccount);
+        // 2. depositErc20(usdc, amount, principal) on the helper contract (subaccount omitted =
+        //    ICRC-1 default — the mint lands at the user's own default account).
+        const depositData = encodeDepositErc20(erc20Address, unitBig, principalWord);
         const depositHash = await sendTransaction(provider, account, {to: params.helper_address, data: depositData});
         hashes.push(depositHash);
         await waitForReceipt(provider, depositHash);
@@ -286,7 +321,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
         setPhase('enter');
       }
     }
-  }, [account, params, amount, decimals, identity.publicHex, nativeEth, chainId]);
+  }, [account, params, amount, decimals, selfPrincipal, nativeEth, chainId]);
 
   // MC8 U5 — "Start a new deposit" escape from a RESUMED watching state. A stuck watching key (a
   // deposit that never mints) would otherwise wedge the sheet in watching forever on every restart.
@@ -304,19 +339,20 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
     setPhase('connect');
   }, [identity.publicHex, currency]);
 
-  // Watching: poll the ckUSDC balance for the mint. The minter scrapes ETH logs on a ~3min heartbeat;
-  // credit typically lands within ~20min. Any growth from the snapshot (or a positive balance when no
-  // snapshot) means the mint landed.
+  // Watching: poll the ledger balance for the mint — a SIGNED icrc1_balance_of at the user's own
+  // principal (services/rail.ts), NOT a relay route (the old /api/v1/balance poll was
+  // test-helpers-only and 404s in prod, so the mint was never detected). The minter scrapes ETH
+  // logs on a ~3min heartbeat; credit typically lands within ~20min. Any growth from the snapshot
+  // (or a positive balance when no snapshot) means the mint landed.
   useEffect(() => {
     if (phase !== 'watching') return;
     let alive = true;
     const poll = async () => {
       try {
-        const r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/balance/${identity.publicHex}?currency=${currency}`, undefined, BALANCE_TIMEOUT_MS);
-        const j = await readJsonOrEmpty(r);
-        if (alive && r.ok && typeof j.balance === 'string') {
+        const bal = await railBalanceOf(identity.secretHex, ledger);
+        if (alive && bal != null) {
           // MC1 units 2-4: balance presence/growth via `cmpRaw` (BigInt) — never `>` on strings.
-          const grew = startBal == null ? j.balance !== '0' : cmpRaw(j.balance, startBal) > 0;
+          const grew = startBal == null ? bal !== '0' : cmpRaw(bal, startBal) > 0;
           if (grew) setPhase('done');
         }
       } catch (e) { console.warn('ckERC20 balance poll failed:', e instanceof Error ? e.message : String(e)); /* keep watching */ }
@@ -324,7 +360,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
     poll();
     const id = setInterval(poll, POLL.deposit);
     return () => { alive = false; clearInterval(id); };
-  }, [phase, relayUrl, identity.publicHex, currency, startBal]);
+  }, [phase, identity.secretHex, ledger, startBal]);
 
   // The body content is rendered inline in the Receive tab's "My address" sub-mode (the tab body
   // already provides the scroll surface + the overlay chrome).

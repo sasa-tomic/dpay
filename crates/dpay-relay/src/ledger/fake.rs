@@ -323,11 +323,11 @@ impl Ledger for FakeLedger {
         // MC8 U2: resolve the onramp from the CATALOG descriptor, not a hardcoded `currency == 2`
         // guard. Reads `self.currencies()` (the same `fake_catalog()` the wallet sees) so the
         // descriptor is the single source of truth, then delegates to the shared pure resolver.
-        // `facade_principal` is the demo stand-in (offline mode never broadcasts — the calldata
-        // encoding is shape-correct regardless; in production this is the facade canister id).
+        // The deposit `principal` arg is the USER's own IC principal (derived in-app) — the relay
+        // serves no principal here.
         let catalog = self.currencies().await?;
         let desc = catalog.iter().find(|d| d.currency == currency);
-        ckerc20_onramp_from_descriptor(desc, "aaaaa-aa".to_string())
+        ckerc20_onramp_from_descriptor(desc)
     }
 
     /// Direct balance read for the batch `/balances` handler. The in-memory map is permanently

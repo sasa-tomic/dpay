@@ -94,7 +94,9 @@ try {
   await driver.click('btn-new', {timeoutMs: 4000});
 
   // --- offline hand-off: scanned (the signed QR the payer shows the merchant) --------------------
-  await goOffline(driver);
+  // keepGateway: same premise as flow 20 — the "offline" narrative is relay-dead-only; signing the
+  // hand-off envelope is the rail's IC path (the QR IS the payment, no reconcile asserted here).
+  await goOffline(driver, {keepGateway: true});
   const offlineReq = buildRequestQR(cafe.publicHex, PAY_CENTS, randNonceHex(), nowSecs + 900, 0, 'Café Demo');
   await driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), offlineReq);
   await driver.findByTestID('pay-amount', {timeoutMs: 5000});

@@ -39,7 +39,11 @@ test-canister: build-canister build-mock-minter
 # PRODUCTION ic_validator checks every signature/expiry (bad sig → 400, expired → 400, replay
 # deduped). Proves the user_transfer / offramp approve→retrieve legs + the principal derivation
 # the app will use on mainnet, with envelope-only auth (funding is PocketIC-API scaffolding).
+# ALSO runs the dpay-icp wire-contract goldens (byte-parity vs the cached production crates —
+# seconds-fast, was previously on no recipe) and the dpay-wasm host tests (icp goldens).
 test-icp: build-mock-minter
+    cargo nextest run -p dpay-icp
+    cargo nextest run -p dpay-wasm
     cargo nextest run -p dpay-icp-tests
 
 # relay tests (native, in-memory — no network). `test-helpers` also compiles the fake-IC /api/v2

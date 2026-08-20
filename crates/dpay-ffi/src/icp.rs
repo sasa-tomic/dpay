@@ -16,7 +16,7 @@ use crate::DpayError;
 use dpay_icp::envelope::{ingress_expiry as icp_ingress_expiry_ns, sign_query, sign_read_state, sign_update, CallRequest};
 use dpay_icp::icrc::{
     approve_arg as icrc_approve_arg, balance_of_arg as icrc_balance_of_arg,
-    decode_transfer_result as icrc_decode_transfer_result, transfer_arg as icrc_transfer_arg, ApproveResult,
+    decode_transfer_result as icrc_decode_transfer_result, transfer_arg as icrc_transfer_arg,
     TransferError, TransferResult,
 };
 use dpay_icp::principal::{Account, Principal};
@@ -487,9 +487,6 @@ pub fn icp_decode_int(arg: Vec<u8>) -> Result<String, DpayError> {
     Ok(n.to_string())
 }
 
-// Keep the ApproveResult import used (approve decoding lands with the offramp workstream).
-const _: Option<ApproveResult> = None;
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -526,7 +523,7 @@ mod tests {
 
     #[test]
     fn read_state_roundtrip_decodes_time_and_status() {
-        use dpay_icp::reply::{cbor_encode, Cbor, Tree};
+        use dpay_icp::reply::{cbor_encode, tree_to_cbor, Cbor, Tree};
         let rid = [7u8; 32];
         let reply_leaf = {
             let mut out = Vec::new();
@@ -558,16 +555,6 @@ mod tests {
         assert_eq!(read.statuses.len(), 1);
         assert_eq!(read.statuses[0].state, "replied");
         assert_eq!(read.statuses[0].reply_arg.as_deref(), Some(b"ok".as_slice()));
-
-        fn tree_to_cbor(t: &Tree) -> Cbor {
-            match t {
-                Tree::Empty => Cbor::Array(vec![Cbor::Uint(0)]),
-                Tree::Fork(l, r) => Cbor::Array(vec![Cbor::Uint(1), tree_to_cbor(l), tree_to_cbor(r)]),
-                Tree::Labeled(l, sub) => Cbor::Array(vec![Cbor::Uint(2), Cbor::Bytes(l.clone()), tree_to_cbor(sub)]),
-                Tree::Leaf(v) => Cbor::Array(vec![Cbor::Uint(3), Cbor::Bytes(v.clone())]),
-                Tree::Pruned(d) => Cbor::Array(vec![Cbor::Uint(4), Cbor::Bytes(d.to_vec())]),
-            }
-        }
     }
 
     #[test]

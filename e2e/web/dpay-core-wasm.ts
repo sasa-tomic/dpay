@@ -218,10 +218,6 @@ async function init(): Promise<WasmExports> {
   return ex;
 }
 
-// (signAuthorization retired with the facade wire — payments sign IC /call envelopes via
-// icpSignUpdate; the wasm core keeps the frozen ABI v1 export w_sign_request, exercised by the
-// wasm-core parity oracle, but the app never calls it.)
-
 /** encodeRequest: the 132-byte request via w_build_request (the wasm
  *  truncates + NUL-pads the display fields itself). */
 async function buildRequestBytes(
@@ -281,11 +277,9 @@ async function decodeRequest(
   return { toHex: j.toHex, amount: j.amount, nonceHex: j.nonceHex, expiry: j.expiry, currency: j.currency, toName: j.toName, memo: j.memo };
 }
 
-// (encodeQr / verifyWire retired with the 292-byte facade wire — the offline handoff QR
-// carries the base64url /call envelope; see services/rail.ts envelopeToQrPayload.)
-
-// (signWithdrawal retired — the offramp signs user-principal envelopes; verifyReceiptSig
-// retired with the canister-signed receipt.)
+// (encodeQr / verifyWire retired with the 292-byte facade wire; signWithdrawal / verifyReceiptSig
+// retired with the offramp/user-principal cutover — the offramp signs user-principal envelopes and
+// receipts are canister-signed no longer. Frozen ABI v1 exports stay compiled for the parity oracle.)
 
 export function randNonceHex(): string {
   const buf = new Uint8Array(NONCE_LEN);
@@ -306,11 +300,6 @@ async function nfcStatus(): Promise<string> {
     if (typeof v === 'string' && v.length > 0) return v;
   }
   return 'unknown';
-}
-
-// put() re-export used by signAuthorization's seed pointer (kept tiny to avoid double-deriving).
-function seedP(ex: WasmExports, seed: Uint8Array): number {
-  return put(ex, seed);
 }
 
 // --- IC user-principal rail (mirrors app/lib/types.ts DpayCoreApi icp* methods) -------------------

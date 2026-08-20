@@ -315,7 +315,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
     // session-local, so a reload resets it to the IC default and the SOL→IC routing never fires. The
     // harness injects `dpay:req`/`dpay:pay` via this hook instead of a real OS intent — it drives the
     // SAME applyBlob path as the web readers + getInitialURL + the foreground listener above.
-    // Mirrors the __DPAY_TEST_RECEIPT_PUBKEY precedent (a test global read in prod code).
+    // (Test-only hook: prod code never reads it; harmless if unset.)
     if (typeof globalThis !== 'undefined') {
       (globalThis as unknown as {__DPAY_TEST_DEEPLINK?: (d: {kind: DeeplinkKind; blob: string}) => void}).__DPAY_TEST_DEEPLINK = (d) => applyBlob(d.kind, d.blob);
     }
@@ -422,8 +422,16 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
 
   // Demo top-up: POST /api/v1/faucet {account, amount}. Uses the response balance directly for an
   // immediate refresh (no waiting on the 2.5s poll). Errors are surfaced inline under the button.
+  // Gated on DEMO (currency 0) being in the LIVE catalog: the faucet is a test-helpers-only relay
+  // route (404s in prod), so when the live catalog carries no DEMO row the button is dead weight
+  // that can only ever error — fail honestly BEFORE the POST instead of after.
+  const faucetAvailable = catalog.some(c => c.currency === 0);
   const topUp = useCallback(async () => {
     if (topUpBusy) return;
+    if (!faucetAvailable) {
+      setTopUpErr('Demo top-up isn’t available on this relay');
+      return;
+    }
     setTopUpBusy(true); setTopUpErr(null);
     try {
       const r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/faucet`, {
@@ -449,7 +457,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
     } finally {
       setTopUpBusy(false);
     }
-  }, [topUpBusy, relayUrl, identity.publicHex, setBalance, setOnline, resetDeduction]);
+  }, [topUpBusy, faucetAvailable, relayUrl, identity.publicHex, setBalance, setOnline, resetDeduction]);
 
   // Web keyboard shortcuts (plan 1b / UX-V5): the first letters of the main actions —
   // P=Pay, R=Receive, T=Top-up (demo money), A=Balances (the asset hub), L=Ledger (transactions). Active ONLY on the wallet

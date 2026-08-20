@@ -9,11 +9,13 @@
 //    ICRC-1 semantics; no stale-fee pinning).
 //  - Outcome honesty: 'unknown' means NOT TERMINAL within budget (may still execute) — never
 //    render it as failure. 'rejected' is a decoded, definitive ledger refusal.
-//  - Duplicate{duplicate_of} maps to SETTLED — the ledger telling us this exact transfer already
-//    executed (same result, different block).
+//  - Duplicate{duplicate_of} maps to REJECTED with variant 'Duplicate' (reason 'Already paid') —
+//    the ledger refusing a SECOND execution of an already-executed transfer (distinct request_id,
+//    e.g. a re-signed envelope). It is NOT a settle-confirmation: a genuine settle reports
+//    ok=true + blockIndex.
 import {DpayCore} from './native';
 import {icStampExpiry, icSubmit, icPollRequestStatus, icQuery, IC_SUBMIT_TIMEOUT_MS} from './icp';
-import {hexToBytes} from '../lib/format';
+import {hexToBytes, bytesToHex} from '../lib/format';
 import {bytesToBase64Url, base64UrlToBytes} from '../lib/base64url';
 
 export type RailPrepared = {
@@ -31,7 +33,7 @@ type RailReplyOutcome = {ok: boolean; blockIndex?: string; errVariant?: string; 
 
 export type RailOutcome =
   | {kind: 'settled'; blockIndex: string}
-  | {kind: 'rejected'; reason: string} // definitive (decoded TransferError / canister reject)
+  | {kind: 'rejected'; reason: string; variant?: string} // definitive refusal; variant = the structured ICRC TransferError tag (e.g. 'Duplicate') when one was decoded — branch on it, not on the human message
   | {kind: 'unknown'}; // not terminal in budget / unreachable — honest pending
 
 /** Build + sign the icrc1_transfer envelope from a scanned request. Throws with a user-presentable
@@ -86,7 +88,7 @@ export async function pollTransfer(
     const decode = decodeReply ?? ((hex: string) => DpayCore.icpDecodeTransferResult(hex));
     const tr = await decode(st.replyArgHex);
     if (tr.ok) return {kind: 'settled', blockIndex: tr.blockIndex ?? ''};
-    return {kind: 'rejected', reason: transferRejectionMessage(tr.errVariant ?? '', tr.errDetail ?? '')};
+    return {kind: 'rejected', reason: transferRejectionMessage(tr.errVariant ?? '', tr.errDetail ?? ''), variant: tr.errVariant || undefined};
   }
   if (st.state === 'rejected') {
     return {kind: 'rejected', reason: st.rejectMessage || 'The ledger declined the payment'};
@@ -95,7 +97,7 @@ export async function pollTransfer(
   return {kind: 'unknown'};
 }
 
-/** Friendly text for a decoded ICRC TransferError. Mirrors payments.rejectionMessage's voice. */
+/** Friendly text for a decoded ICRC TransferError (the structured `variant` — not a parsed message). */
 export function transferRejectionMessage(variant: string, detail: string): string {
   switch (variant) {
     case 'InsufficientFunds': return 'Not enough balance';
@@ -120,16 +122,14 @@ export function envelopeToQrPayload(envelopeHex: string): string {
   return bytesToBase64Url(hexToBytes(envelopeHex));
 }
 
+// Minimum plausible signed-envelope size — the garbage gate for decoded QR payloads. Real
+// envelopes are ~390B; anything below this is not an envelope (a stray base64url blob, a shard).
+const MIN_ENVELOPE_BYTES = 64;
+
 export function qrPayloadToEnvelopeHex(payload: string): string | null {
   const bytes = base64UrlToBytes(payload.trim());
-  if (bytes == null || bytes.length < 64) return null; // envelopes are ~390B; anything tiny is garbage
+  if (bytes == null || bytes.length < MIN_ENVELOPE_BYTES) return null;
   return bytesToHex(bytes);
-}
-
-function bytesToHex(b: Uint8Array): string {
-  let out = '';
-  for (const v of b) out += v.toString(16).padStart(2, '0');
-  return out;
 }
 
 // --- user-principal offramp ---------------------------------------------------------------------------
@@ -146,8 +146,11 @@ export type OfframpStep = {ledger: string; envelopeHex: string; requestIdHex: st
  * `variant { Ok(nat) }`. Decoded by the platform core (dpay-icp `decode_minter_ok`, single
  * source — the same Rust knowledge that ENCODES the frozen reply shape in the e2e fake gateway
  * via `encode_minter_ok`), exposed as DpayCore.icpDecodeMinterOk on BOTH rails (UniFFI on
- * Android, wasm on web). The approve steps on the LEDGERS stay transfer-shaped and go through
- * `icpDecodeTransferResult`; a reply that matches NEITHER shape throws (caller surfaces it). */
+ * Android, wasm on web). The approve steps on the LEDGERS are DELIBERATELY decoded
+ * transfer-shaped and go through `icpDecodeTransferResult` (dpay-icp's dedicated
+ * `decode_approve_result` intentionally does not cross the bridge — smaller ABI surface, and
+ * the ledger's approve replies carry the same variant names); a reply that matches NEITHER
+ * shape throws (caller surfaces it). */
 async function decodeMinterReply(replyArgHex: string): Promise<RailReplyOutcome> {
   return DpayCore.icpDecodeMinterOk(replyArgHex);
 }

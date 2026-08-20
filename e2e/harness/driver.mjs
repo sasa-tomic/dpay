@@ -596,17 +596,6 @@ function injectFreezeCss(css) {
  * `globalThis.__DPAY_TEST_POLL` at MODULE-LOAD time (the POLL const IIFE), and evaluateOnNewDocument
  * runs before any bundle script → the shortened intervals take effect. Prod never sets this global.
  *
- * MC4 U5: also inject the pinned expected receipt-signing pubkey (`__DPAY_TEST_RECEIPT_PUBKEY`). The
- * app's `verifyOutcomeReceipt` now REQUIRES `receipt.pubkey === EXPECTED_RECEIPT_PUBKEY` (the
- * malicious-relay close), so every e2e flow that produces a receipt must have the pin set to the
- * FakeLedger's receipt key for that receipt to verify. The FakeLedger's key is DETERMINISTIC — seeded
- * from `SigningKey::from_bytes(&[0xf5; 32])` at `crates/dpay-relay/src/ledger.rs` (FakeLedger::with_clock)
- * — so its public half is a fixed constant computed once via @noble/ed25519. Hardcoding it (rather
- * than runtime-fetching `/receipt_pubkey`) avoids a fetch-before-navigate timing dependency and keeps
- * the override a pure page-start injection identical to `__DPAY_TEST_POLL`. If the FakeLedger seed
- * ever changes, this constant breaks loudly on the next `just e2e` (every pay flow goes RED) and the
- * comment points the maintainer at the source.
- *
  * MC8 U6.7: also inject a test WalletConnect project id (`__DPAY_TEST_WALLETCONNECT_PROJECT_ID`) so
  * the resolver's WalletConnect branch is "configured" across every flow. This is SAFE: the resolver
  * is web-first — `resolveOnrampProvider()` returns `window.ethereum` before ever reaching the WC
@@ -620,8 +609,6 @@ function injectTestGlobals() {
   globalThis.__DPAY_TEST_POLL = {
     balance: 150, history: 150, deposit: 150, receiptPay: 150, receiptRcv: 150,
   };
-  // FakeLedger receipt pubkey for secret = [0xf5; 32] (ed25519-dalek, the same lib the relay uses).
-  globalThis.__DPAY_TEST_RECEIPT_PUBKEY = '379bd5b7d1494939afe9f87b3587a50a96bde608f695e759daf3a3f106173e76';
   // MC8 U6.7 — a non-empty test project id so WALLETCONNECT_PROJECT_ID is "configured" app-wide.
   globalThis.__DPAY_TEST_WALLETCONNECT_PROJECT_ID = 'e2e-test-project-id';
   // SOL rail: DISABLE so the offline e2e suite never hits real Solana devnet. An empty URL makes

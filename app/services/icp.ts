@@ -21,6 +21,7 @@
 //    honestly labeled as such in the UI.
 import {DpayCore} from './native';
 import {fetchWithTimeout} from './relay';
+import {hexToBytes, bytesToHex} from '../lib/format';
 import type {IcpStateRead} from '../lib/types';
 
 export const IC_GATEWAY_DEFAULT = 'https://icp-api.io';
@@ -44,6 +45,14 @@ export const INGRESS_AHEAD_S = 300;
 // Poll envelopes get a short ahead window; their exact expiry never affects correctness (dedup
 // is on request_id; a rejected POLL is simply retried).
 const POLL_AHEAD_S = 60;
+// Device-clock fallback ahead window for poll envelopes when the certified clock is unavailable.
+// Deliberately DOUBLE POLL_AHEAD_S: the fallback path only runs after the certified fetch already
+// failed (network down / clock skew), so the extra headroom absorbs the longer real-world latency
+// before the retry that will follow; a poll rejected for staleness is retried, never lost.
+const POLL_FALLBACK_AHEAD_S = 120;
+// The IC management canister — read_state target for the certified [[time]] leaf. Its exact id is
+// irrelevant for the subnet query itself; it must merely be a valid principal.
+const IC_MANAGEMENT_CANISTER = 'aaaaa-aa';
 // REFUSE to sign value envelopes when the device clock and certified IC time disagree beyond
 // this — a badly skewed stamp can land outside the ingress window and silently never execute.
 export const MAX_CLOCK_SKEW_NS = 60n * 1_000_000_000n; // 60s in ns
@@ -196,9 +205,9 @@ const CLOCK_SYNC_AHEAD_S = 240;
  * the certificate (read_state is free; the boundary node requires the signature). Cached and
  * extrapolated for CLOCK_FRESH_MS. Returns null when unreachable — see icStampExpiry for the
  * signer-side gate. */
-export async function icNowNs(secretHex: string, force = false, signal?: AbortSignal): Promise<bigint | null> {
+export async function icNowNs(secretHex: string, signal?: AbortSignal): Promise<bigint | null> {
   const nowMs = Date.now();
-  if (!force && cachedIcNowNs !== null && nowMs - cachedAtMs < CLOCK_FRESH_MS) {
+  if (cachedIcNowNs !== null && nowMs - cachedAtMs < CLOCK_FRESH_MS) {
     return cachedIcNowNs + BigInt(nowMs - cachedAtMs) * 1_000_000n;
   }
   clockInFlight ??= (async () => {
@@ -226,16 +235,13 @@ export async function icStampExpiry(
   aheadS = INGRESS_AHEAD_S,
   signal?: AbortSignal,
 ): Promise<string> {
-  const icNs = await icNowNs(secretHex, false, signal);
+  const icNs = await icNowNs(secretHex, signal);
   if (icNs == null) throw new Error('IC clock unreachable');
   const deviceNs = BigInt(Date.now()) * 1_000_000n;
   const skew = icNs > deviceNs ? icNs - deviceNs : deviceNs - icNs;
   if (skew > MAX_CLOCK_SKEW_NS) throw new Error('IC clock skew too large');
   return DpayCore.icpIngressExpiry(icNs.toString(), aheadS);
 }
-
-// read_state path segment (irrelevant for the subnet query itself; must be a valid principal).
-const IC_MANAGEMENT_CANISTER = 'aaaaa-aa';
 
 /** Poll-envelope expiry: certified clock when cheap (cached), device-clock fallback otherwise —
  * a poll's exact stamp never affects correctness, only whether the boundary node accepts the
@@ -245,7 +251,7 @@ async function pollExpiry(secretHex: string, signal?: AbortSignal): Promise<stri
     return await icStampExpiry(secretHex, POLL_AHEAD_S, signal);
   } catch {
     try {
-      return await DpayCore.icpIngressExpiry((BigInt(Date.now()) * 1_000_000n).toString(), 120);
+      return await DpayCore.icpIngressExpiry((BigInt(Date.now()) * 1_000_000n).toString(), POLL_FALLBACK_AHEAD_S);
     } catch {
       return null;
     }
@@ -273,16 +279,4 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
     }
     signal?.addEventListener('abort', finish);
   });
-}
-
-function hexToBytes(h: string): Uint8Array {
-  const out = new Uint8Array(h.length / 2);
-  for (let i = 0; i < out.length; i++) out[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
-  return out;
-}
-
-function bytesToHex(b: Uint8Array): string {
-  let out = '';
-  for (const v of b) out += v.toString(16).padStart(2, '0');
-  return out;
 }

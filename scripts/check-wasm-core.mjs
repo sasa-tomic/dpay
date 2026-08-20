@@ -26,6 +26,12 @@
 //   - w_receipt_claim: the payer/receipt-side claim assembler — the canonical golden hex (embedded
 //     below; produced by dpay-core's ReceiptClaim::signing_bytes via the crate's HOST test), a
 //     field-for-field rebuild of the wire_layout.json receipt golden, and u64 extremes.
+//   - w_icp_* (IC user-principal rail): the additive-only export census, the minter_ok reply
+//     golden, and ARG-BUILD/SIGN GOLDENS — w_icp_transfer_arg / w_icp_approve_arg DIDL bytes and
+//     the w_icp_sign_update envelope + request_id, pinned against hex produced by the dpay-wasm
+//     HOST test (icp::goldens, the Rust single source). Plus the error contract: an expires
+//     value above u64::MAX must return BAD_UTF8 (never silently wrap — the 2026-08-20 u128→u64
+//     truncation bug) and a malformed read_state cert must ERROR, not fabricate unknown-pending.
 //
 // Usage: node scripts/check-wasm-core.mjs   (exit 0 = parity, exit 1 = drift; failures print hex diffs)
 import {readFileSync} from 'node:fs';
@@ -388,10 +394,103 @@ for (const c of CASES) {
   }
 }
 
+// --- w_icp arg-build + sign goldens (byte-parity with the Rust single source) ---------------------
+// Fixed inputs mirrored in the dpay-wasm HOST test (crates/dpay-wasm/src/icp.rs icp::goldens),
+// which pins the SAME hex straight from the dpay-icp builders/signer — the sanctioned golden
+// generation path. These prove the wasm marshaling layer (string parse → builder → bytes)
+// returns byte-identical DIDL/CBOR to Rust, and the error-contract checks pin the two
+// 2026-08-20 correctness fixes (u128→u64 expires wrap; swallowed read_state decode errors).
+{
+  const OWNER = 'mxzaz-hqaaa-aaaar-qaada-cai'; // real ckBTC ledger principal (stable)
+  const TRANSFER_ARG_HEX = '4449444c066c06fbca0101c6fcb60204ba89e5c20402a2de94eb060282f3f3910c05d8a38ca80d7d6c02b3b0dac30368ad86ca8305026e036d7b6e7d6e780100010a000000000230000601010120abababababababababababababababababababababababababababababababab01904e0104deadbeef0120cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd00d295fcf1e49df8b9c3edbfc8ee31';
+  const APPROVE_ARG_HEX = '4449444c066c08c6fcb60201ba89e5c20402a2de94eb060282f3f3910c04d8a38ca80d7d919c9cbf0d01dea7f7da0d04cb96dcb40e056e7d6e036d7b6e786c02b3b0dac30368ad86ca8305020100010a000120cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd00ffffffffffffffffffffffffffffffffffff03012a0100b8186dbce2fa18010a000000000230000601010120efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef';
+  const SIGN_ENV_HEX = 'd9d9f7a367636f6e74656e74a66c726571756573745f747970656463616c6c6e696e67726573735f6578706972791b18fae2bc6d18b8006673656e646572581d8063a4d954534c765fe2ffc1a1eca87da3a49ecef29d774aef160a31026b63616e69737465725f69644a000000000230000601016b6d6574686f645f6e616d656e69637263315f7472616e736665726361726758a84449444c066c06fbca0101c6fcb60204ba89e5c20402a2de94eb060282f3f3910c05d8a38ca80d7d6c02b3b0dac30368ad86ca8305026e036d7b6e7d6e780100010a000000000230000601010120abababababababababababababababababababababababababababababababab01904e0104deadbeef0120cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd00d295fcf1e49df8b9c3edbfc8ee316d73656e6465725f7075626b6579582c302a300506032b6570032100248acbdbaf9e050196de704bea2d68770e519150d103b587dae2d9cad53dd9306a73656e6465725f73696758406b4449e37093d8d16926035cbdf2e6f0b2d47ed422684ae1274ebafb97ccfeb6bddead475e5a5939bf66164798a159da1b843950644f847f73f3e99e4c45930c';
+  const SIGN_RID_HEX = '3d83e7a3f67257803e762223224a95d6e3e15191876ebd29a37202a7c4f18ddb';
+  const CAP = 4096;
+  const sl = s => enc.encode(s).length;
+
+  // w_icp_transfer_arg: to = OWNER+'ab'×32, from_sub = 'cd'×32, u128-scale amount, fee, memo.
+  // (subaccounts/memo cross the wire as hex TEXT — the export's hex_at parses them.)
+  {
+    const out = ex.w_alloc(CAP);
+    const n = ex.w_icp_transfer_arg(
+      writeStr(OWNER), sl(OWNER),
+      writeStr('ab'.repeat(32)), sl('ab'.repeat(32)),
+      writeStr('cd'.repeat(32)), sl('cd'.repeat(32)),
+      writeStr('123456789012345678901234567890'), sl('123456789012345678901234567890'),
+      writeStr('10000'), sl('10000'),
+      writeStr('deadbeef'), sl('deadbeef'),
+      out, CAP);
+    const got = n > 0 ? hex(readBytes(out, n)) : '';
+    check('w_icp_transfer_arg(golden inputs) == dpay-icp transfer_arg hex',
+      n > 0 && got === TRANSFER_ARG_HEX,
+      `n=${n}\n    got:  ${got}\n    want: ${TRANSFER_ARG_HEX}`);
+  }
+
+  // w_icp_approve_arg: spender = OWNER+'ef'×32, from_sub = 'cd'×32, amount = u128::MAX,
+  // expected = 42, expires fixed, memo none, fee 10.
+  const approveCall = (amount, expected, expires, fee) => {
+    const out = ex.w_alloc(CAP);
+    const n = ex.w_icp_approve_arg(
+      writeStr(OWNER), sl(OWNER),
+      writeStr('ef'.repeat(32)), sl('ef'.repeat(32)),
+      writeStr('cd'.repeat(32)), sl('cd'.repeat(32)),
+      writeStr(amount), sl(amount),
+      writeStr(expected), sl(expected),
+      writeStr(expires), sl(expires),
+      writeStr(''), 0,
+      writeStr(fee), sl(fee),
+      out, CAP);
+    return [n, out];
+  };
+  {
+    const [n, out] = approveCall('340282366920938463463374607431768211455', '42', '1800000300000000000', '10');
+    const got = n > 0 ? hex(readBytes(out, n)) : '';
+    check('w_icp_approve_arg(golden inputs) == dpay-icp approve_arg hex',
+      n > 0 && got === APPROVE_ARG_HEX,
+      `n=${n}\n    got:  ${got}\n    want: ${APPROVE_ARG_HEX}`);
+    // THE u128→u64 wrap regression (2026-08-20): 2^64 must ERROR, never wrap mod 2^64.
+    check('w_icp_approve_arg(expires = 2^64) == BAD_UTF8(2) — no silent u64 wrap',
+      approveCall('1', '', '18446744073709551616', '')[0] === 2);
+    // Boundary: u64::MAX is the largest LEGAL expiry and still builds (returns arg length,
+    // not an error status — statuses are 0..3, real args here are 150+ bytes).
+    check('w_icp_approve_arg(expires = u64::MAX) still builds',
+      approveCall('1', '', '18446744073709551615', '')[0] > 3);
+  }
+
+  // w_icp_sign_update over the transfer-arg golden bytes → exact envelope hex; the envelope's
+  // request_id (via w_icp_envelope_request_id) must equal the Rust-derived golden rid.
+  {
+    const out = ex.w_alloc(CAP);
+    const n = ex.w_icp_sign_update(
+      writeBytes(SEED),
+      writeStr(OWNER), sl(OWNER),
+      writeStr('icrc1_transfer'), sl('icrc1_transfer'),
+      writeBytes(fromHex(TRANSFER_ARG_HEX)), TRANSFER_ARG_HEX.length / 2,
+      writeStr('1800000300000000000'), sl('1800000300000000000'),
+      out, CAP);
+    const env = n > 0 ? readBytes(out, n) : new Uint8Array();
+    check('w_icp_sign_update(golden inputs) == dpay-icp sign_update envelope hex',
+      n > 0 && hex(env) === SIGN_ENV_HEX,
+      `n=${n}\n    got:  ${hex(env).slice(0, 320)}${hex(env).length > 320 ? '…' : ''}\n    want: ${SIGN_ENV_HEX.slice(0, 320)}…`);
+    const rid = ex.w_alloc(32);
+    const rc = ex.w_icp_envelope_request_id(writeBytes(env), n, rid);
+    check('w_icp_envelope_request_id(signed envelope) == golden request_id hex',
+      rc === 0 && hex(readBytes(rid, 32)) === SIGN_RID_HEX,
+      `rc=${rc} got=${hex(readBytes(rid, 32))}`);
+  }
+
+  // Malformed read_state cert must ERROR (BAD_UTF8), never a fabricated unknown-pending JSON
+  // (the 2026-08-20 swallowed-decode-error fix — the web wallet surfaces the poll error).
+  check('w_icp_decode_read_state(malformed cert) == BAD_UTF8(2)',
+    ex.w_icp_decode_read_state(writeBytes(new Uint8Array([0xde, 0xad, 0xbe, 0xef])), 4,
+      ex.w_alloc(32 * 8), 0, ex.w_alloc(CAP), CAP) === 2);
+}
+
 // --- verdict ------------------------------------------------------------------------------------
 if (failures) {
   console.error(`\nFAIL: dpay-core.wasm drifted from the trusted oracle in ${failures}/${checks} check(s).`);
   console.error('The staged web core would NOT sign the same bytes as Android. Fix crates/dpay-wasm, then `just wasm`.');
   process.exit(1);
 }
-console.log(`wasm-core parity OK: staged dpay-core.wasm == e2e/harness/wire.mjs across ${checks} checks (layout, request build+decode, sign, withdraw u64-stress, receipt verify, receipt-claim build)`);
+console.log(`wasm-core parity OK: staged dpay-core.wasm == e2e/harness/wire.mjs across ${checks} checks (layout, request build+decode, sign, withdraw u64-stress, receipt verify, receipt-claim build, icp census+arg/sign goldens)`);

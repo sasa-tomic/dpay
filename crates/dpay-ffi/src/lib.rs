@@ -400,8 +400,9 @@ impl FfiCardSession {
         lock(&self.inner).is_confirmed()
     }
 
-    /// Approve: supply the offline-signed 292-byte wire to serve. Errors (`NfcWrongState`) unless a
-    /// request is held and no decision has been made; the wire is validated as it is framed.
+    /// Approve: supply the offline-signed payload to serve — an opaque signed-payload handoff
+    /// (IC envelope post-cutover). Errors (`NfcWrongState`) unless a request is held and no
+    /// decision has been made; the payload is validated as it is framed.
     pub fn provide_wire(&self, wire: Vec<u8>) -> Result<(), DpayError> {
         Ok(lock(&self.inner).provide_wire(&wire)?)
     }
@@ -457,7 +458,8 @@ impl FfiReaderConductor {
         }
     }
 
-    /// The reassembled 292-byte wire once the exchange reached `Done`, else `None`.
+    /// The reassembled payload once the exchange reached `Done`, else `None` — an opaque
+    /// signed-payload handoff (IC envelope post-cutover).
     pub fn wire(&self) -> Option<Vec<u8>> {
         lock(&self.wire).clone()
     }

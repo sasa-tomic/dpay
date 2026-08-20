@@ -1,6 +1,7 @@
 //! Minimal CBOR writer emitting exactly the serde_cbor 0.11.2 subset the IC envelope uses
-//! (major types 0-5 + the 55799 self-describe tag), plus a small definite-length reader
-//! used by tests and future response handling. This is NOT a general CBOR codec.
+//! (major types 0-5 + the 55799 self-describe tag). Writer-only by design: the definite-length
+//! readers live beside their consumers — `envelope.rs` (`read_value`, the verification side)
+//! and `reply.rs` (`cbor_read`, the response side). This is NOT a general CBOR codec.
 
 /// Emit the self-describe tag header `D9 D9 F7` (tag 55799) — ic-agent always prefixes
 /// envelopes with it.

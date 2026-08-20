@@ -35,15 +35,11 @@ use dpay_icp::icrc::{
     decode_transfer_arg, decode_withdraw_erc20_arg, decode_withdraw_eth_arg, encode_approve_ok,
     encode_eip1559_price, encode_minter_ok, encode_nat8_reply, encode_nat_reply,
     encode_text_reply, encode_transfer_bad_fee, encode_transfer_insufficient_funds,
-    encode_transfer_ok, Eip1559Price, RetrieveBtcArg, WithdrawEthArg,
+    encode_transfer_ok, uleb_bytes, Eip1559Price, RetrieveBtcArg, WithdrawEthArg,
 };
 use dpay_icp::principal::{Account, Principal};
-use dpay_icp::reply::{cbor_encode, Cbor, Tree};
+use dpay_icp::reply::{cbor_encode, tree_to_cbor, Cbor, Tree};
 
-use crate::ledger::ckerc20::{
-    CKBTC_MINTER_PRINCIPAL, CKETH_LEDGER_PRINCIPAL, CKETH_MINTER_PRINCIPAL,
-    CKUSDC_LEDGER_PRINCIPAL,
-};
 use crate::ledger::Ledger;
 use crate::AppState;
 use dpay_core::Currency;
@@ -429,7 +425,13 @@ impl FakeIc {
                     return Err((5, "malformed get_btc_address arg".into()));
                 };
                 let owner = a.owner.unwrap_or_else(Principal::anonymous);
-                let addr = format!("bc1qdpay{}", hex::encode(&owner.as_slice()[..8]));
+                // Slice defensively: a decoded principal shorter than 8 bytes (e.g. the
+                // anonymous one this fallback can substitute) used to panic on `&slice[..8]`
+                // — a hostile `get_btc_address` arg must be a typed reject, not a crash.
+                let Some(owner_prefix) = owner.as_slice().get(..8) else {
+                    return Err((5, "owner principal too short for the fake btc address".into()));
+                };
+                let addr = format!("bc1qdpay{}", hex::encode(owner_prefix));
                 Ok(encode_text_reply(&addr))
             }
             "eip_1559_transaction_price" => {
@@ -595,7 +597,7 @@ pub async fn submit(
                             Box::new(Tree::Fork(
                                 Box::new(Tree::Labeled(
                                     b"reject_code".to_vec(),
-                                    Box::new(Tree::Leaf(uleb_bytes_local(code))),
+                                    Box::new(Tree::Leaf(uleb_bytes(u128::from(code)))),
                                 )),
                                 Box::new(Tree::Labeled(
                                     b"reject_message".to_vec(),
@@ -611,7 +613,7 @@ pub async fn submit(
                     status_branch = Tree::Fork(Box::new(t), Box::new(status_branch));
                 }
                 let rs = Tree::Labeled(b"request_status".to_vec(), Box::new(status_branch));
-                let time_leaf = Tree::Labeled(b"time".to_vec(), Box::new(Tree::Leaf(uleb_bytes_local(now))));
+                let time_leaf = Tree::Labeled(b"time".to_vec(), Box::new(Tree::Leaf(uleb_bytes(u128::from(now)))));
                 Tree::Fork(Box::new(rs), Box::new(time_leaf))
             };
             let tree_cbor = tree_to_cbor(&tree);
@@ -651,34 +653,3 @@ pub async fn status() -> Response {
     cbor_response(StatusCode::OK, body)
 }
 
-fn tree_to_cbor(t: &Tree) -> Cbor {
-    match t {
-        Tree::Empty => Cbor::Array(vec![Cbor::Uint(0)]),
-        Tree::Fork(l, r) => Cbor::Array(vec![Cbor::Uint(1), tree_to_cbor(l), tree_to_cbor(r)]),
-        Tree::Labeled(l, sub) => {
-            Cbor::Array(vec![Cbor::Uint(2), Cbor::Bytes(l.to_vec()), tree_to_cbor(sub)])
-        }
-        Tree::Leaf(v) => Cbor::Array(vec![Cbor::Uint(3), Cbor::Bytes(v.to_vec())]),
-        Tree::Pruned(h) => Cbor::Array(vec![Cbor::Uint(4), Cbor::Bytes(h.to_vec())]),
-    }
-}
-
-fn uleb_bytes_local(mut b: u64) -> Vec<u8> {
-    let mut out = Vec::new();
-    loop {
-        let mut byte = (b & 0x7f) as u8;
-        b >>= 7;
-        if b != 0 {
-            byte |= 0x80;
-        }
-        out.push(byte);
-        if b == 0 {
-            return out;
-        }
-    }
-}
-
-// The gateway registers these ledger/minter texts as a safety net for catalogs that omit
-// them; FakeIc::from_catalog already picks the values out of the live catalog.
-pub const GATEWAY_KNOWN_LEDGERS: &[&str] = &[CKUSDC_LEDGER_PRINCIPAL, CKETH_LEDGER_PRINCIPAL];
-pub const GATEWAY_KNOWN_MINTERS: &[&str] = &[CKBTC_MINTER_PRINCIPAL, CKETH_MINTER_PRINCIPAL];

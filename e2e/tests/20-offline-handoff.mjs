@@ -32,9 +32,13 @@ export async function run() {
     await faucetAccount(env.relayBaseURL, bob.publicHex, 10_000);
 
     // --- Payer A: onboarded wallet, then OFFLINE before the payment. ---------------------------
+    // keepGateway: this flow's DESIGN requires a live IC gateway — the rail submits envelopes to
+    // IC (/api/v2), not to the relay, and the counterparty below POSTs the captured envelope at
+    // the live gateway. Offline here means relay-dead-only (balance/history polls fail → online
+    // flips false → the approx. banner + the offline sign branch); the value path stays up.
     await onboardWallet(env.driver, 'e2e-alice');
     const alice = await accountOf(env.driver);
-    await goOffline(env.driver);
+    await goOffline(env.driver, {keepGateway: true});
     const offlineShown = await env.driver.waitForText('approx.', {timeoutMs: 8_000});
     assert(offlineShown, 'A should show the offline approx. balance banner');
     console.log(`[${meta.name}] ✓ A is offline (~ approx. balance shown)`);

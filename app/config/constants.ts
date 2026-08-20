@@ -1,15 +1,9 @@
 export const EXPIRY_WINDOW = 900; // request valid 15 min (U-F3: a payer who opens a shared request link and creates a wallet — 24-word mnemonic entry — must not land on an expired request) — still kills stale replays
-export const DIRECT_PAY_TIMEOUT_MS = 5000;
-// Merchant NFC settlement: bound the /pay call, then reconcile the ambiguous case via the
-// idempotent /receipt/:nonce so a settled payment is never reported as failed.
-export const NFC_PAY_TIMEOUT_MS = 8000;
 // PR23 — named timeouts for the remaining bare fetch literals. The value is the SAME the inline
 // constants carried; only the name is new. BALANCE_TIMEOUT_MS bounds every "fast read" poll
 // (balance/history/receipt/catalog + the onboarding best-effort fund). FAUCET_TIMEOUT_MS bounds
-// the user-initiated top-up. DEPOSIT_TIMEOUT_MS bounds the initial deposit-info/address load +
-// the ckERC20 onramp-params fetch; DEPOSIT_REFRESH_TIMEOUT_MS bounds the deposit-status refresh
-// (manual "Check now" + the 10s poll). RECONCILE_FETCH_TIMEOUT_MS bounds a single /receipt fetch
-// inside the NFC reconcile loop (distinct from RECONCILE_INTERVAL_MS, the poll spacing).
+// the user-initiated top-up. DEPOSIT_TIMEOUT_MS bounds the initial deposit-info load +
+// the ckERC20 onramp-params fetch.
 export const BALANCE_TIMEOUT_MS = 4000;
 export const FAUCET_TIMEOUT_MS = 6000;
 // DEPOSIT_TIMEOUT_MS bounds the best-effort deposit-info load + the ckERC20 onramp-params fetch.
@@ -20,10 +14,6 @@ export const FAUCET_TIMEOUT_MS = 6000;
 // the ready address at 8s → "Couldn't load your deposit address." (fixed 2026-08-03).
 export const DEPOSIT_TIMEOUT_MS = 20000;
 export const DEPOSIT_ADDRESS_TIMEOUT_MS = 20000;
-export const DEPOSIT_REFRESH_TIMEOUT_MS = 30000;
-export const RECONCILE_FETCH_TIMEOUT_MS = 3000;
-export const RECONCILE_ATTEMPTS = 4;
-export const RECONCILE_INTERVAL_MS = 1200;
 // Payer NFC: how long to wait for the merchant's receipt before falling back to a truthful
 // "couldn't confirm" (never a false success or a false failure). Must exceed the merchant's worst
 // case (pay timeout + reconciliation) so a slow-but-successful settle still delivers its receipt.
@@ -60,10 +50,6 @@ export const POLL = (() => {
 // a count budget keeps the wall-clock bound proportional to POLL.receiptRcv (45s at prod cadence,
 // ~4.5s under the e2e POLL override) so the offline suite stays fast.
 export const PROOF_POLL_BUDGET = 30;
-// (IC-rail cutover 2026-08-19: EXPECTED_RECEIPT_PUBKEY + the canister-signed receipt pin RETIRED —
-// outcomes are read_state request_status + balance recheck, honestly labeled; W6 upgrades to
-// on-device BLS cert-chain verification. The __DPAY_TEST_RECEIPT_PUBKEY seam died with it.)
-
 // WalletConnect v2 project id (from cloud.walletconnect.com, free). Required by the dApp-side
 // `EthereumProvider.init` for the native (Android) ckERC20 onramp — the only WalletConnect entry
 // point in dpay. PRODUCTION ID IS BAKED HERE: the capstone (showQrModal:false + display_uri QR)
@@ -95,8 +81,6 @@ export const SOLANA_RPC_URL =
 // risk. A prod build that leaves this true is caught by scripts/check-prod-sol.mjs.
 export const IS_SOLANA_DEVNET = /devnet|testnet/i.test(SOLANA_RPC_URL);
 
-// (WITHDRAW_TIMEOUT_MS + WITHDRAW_EXPIRY_WINDOW retired with the relay /withdraw path — the
-// user-principal offramp signs IC envelopes with an ingress expiry, no relay POST to bound.)
 // SOL native send: getLatestBlockhash + sendTransaction + confirmTransaction (which polls up to
 // CONFIRM_TIMEOUT_MS=30s). 60s gives headroom over the full confirm path so a slow-but-finalising
 // transfer is never reported as a false failure.

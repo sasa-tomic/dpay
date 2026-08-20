@@ -138,7 +138,19 @@ pub fn cbor_encode(v: &Cbor, out: &mut Vec<u8>) {
     }
 }
 
+/// Maximum CBOR nesting depth (mirrors the DIDL reader's `resolve_depth` cap): hostile
+/// deeply-nested arrays/maps/tags must hit a typed `CborDecode` error, not stack-overflow the
+/// recursion.
+const MAX_CBOR_DEPTH: u32 = 128;
+
 fn cbor_read(data: &[u8]) -> Result<(Cbor, &[u8]), IcpError> {
+    cbor_read_d(data, 0)
+}
+
+fn cbor_read_d(data: &[u8], depth: u32) -> Result<(Cbor, &[u8]), IcpError> {
+    if depth > MAX_CBOR_DEPTH {
+        return err("CBOR nesting too deep");
+    }
     let (&head, rest) = match data.split_first() {
         Some(x) => x,
         None => return err("empty CBOR input"),
@@ -158,7 +170,7 @@ fn cbor_read(data: &[u8]) -> Result<(Cbor, &[u8]), IcpError> {
                         rest = &rest[1..];
                         break;
                     }
-                    let (chunk, r) = cbor_read(rest)?;
+                    let (chunk, r) = cbor_read_d(rest, depth + 1)?;
                     match (major, chunk) {
                         (2, Cbor::Bytes(b)) => buf.extend_from_slice(&b),
                         (3, Cbor::Text(t)) => buf.extend_from_slice(t.as_bytes()),
@@ -183,7 +195,7 @@ fn cbor_read(data: &[u8]) -> Result<(Cbor, &[u8]), IcpError> {
                         rest = &rest[1..];
                         break;
                     }
-                    let (v, r) = cbor_read(rest)?;
+                    let (v, r) = cbor_read_d(rest, depth + 1)?;
                     items.push(v);
                     rest = r;
                 }
@@ -197,8 +209,8 @@ fn cbor_read(data: &[u8]) -> Result<(Cbor, &[u8]), IcpError> {
                         rest = &rest[1..];
                         break;
                     }
-                    let (k, r) = cbor_read(rest)?;
-                    let (v, r) = cbor_read(r)?;
+                    let (k, r) = cbor_read_d(rest, depth + 1)?;
+                    let (v, r) = cbor_read_d(r, depth + 1)?;
                     pairs.push((k, v));
                     rest = r;
                 }
@@ -227,7 +239,7 @@ fn cbor_read(data: &[u8]) -> Result<(Cbor, &[u8]), IcpError> {
             (Cbor::Text(text), tail)
         }
         4 => {
-            let (items, tail) = read_seq(rest, arg, "array")?;
+            let (items, tail) = read_seq(rest, arg, "array", depth)?;
             (Cbor::Array(items), tail)
         }
         5 => {
@@ -235,14 +247,14 @@ fn cbor_read(data: &[u8]) -> Result<(Cbor, &[u8]), IcpError> {
             let mut pairs = Vec::with_capacity(n.min(1024));
             let mut rest = rest;
             for i in 0..n {
-                let (k, r) = cbor_read(rest).map_err(|e| map_ctx(e, format!("map key {i}")))?;
-                let (v, r) = cbor_read(r).map_err(|e| map_ctx(e, format!("map value {i}")))?;
+                let (k, r) = cbor_read_d(rest, depth + 1).map_err(|e| map_ctx(e, format!("map key {i}")))?;
+                let (v, r) = cbor_read_d(r, depth + 1).map_err(|e| map_ctx(e, format!("map value {i}")))?;
                 pairs.push((k, v));
                 rest = r;
             }
             (Cbor::Map(pairs), rest)
         }
-        6 => cbor_read(rest)?, // tag header — skip, keep the tagged value
+        6 => cbor_read_d(rest, depth + 1)?, // tag header — skip, keep the tagged value
         _ => return err("floats/simple values are not emitted by the IC API"),
     })
 }
@@ -290,12 +302,17 @@ fn take(len: u64, data: &[u8]) -> Result<(&[u8], &[u8]), IcpError> {
     Ok((&data[..len], &data[len..]))
 }
 
-fn read_seq<'a>(data: &'a [u8], n: u64, what: &str) -> Result<(Vec<Cbor>, &'a [u8]), IcpError> {
+fn read_seq<'a>(
+    data: &'a [u8],
+    n: u64,
+    what: &str,
+    depth: u32,
+) -> Result<(Vec<Cbor>, &'a [u8]), IcpError> {
     let n = usize::try_from(n).map_err(|_| IcpError::CborDecode(format!("{what} length exceeds usize")))?;
     let mut items = Vec::with_capacity(n.min(1024));
     let mut rest = data;
     for i in 0..n {
-        let (v, r) = cbor_read(rest).map_err(|e| map_ctx(e, format!("{what} item {i}")))?;
+        let (v, r) = cbor_read_d(rest, depth + 1).map_err(|e| map_ctx(e, format!("{what} item {i}")))?;
         items.push(v);
         rest = r;
     }
@@ -418,6 +435,21 @@ fn tree_from_cbor(v: &Cbor) -> Result<Tree, IcpError> {
         }
         _ => return err(format!("malformed hashtree node: tag {tag}, {len} items", len = items.len())),
     })
+}
+
+/// Encode a [`Tree`] back to CBOR (definite lengths) — the inverse of [`tree_from_cbor`].
+/// Test-harness territory (the fake-IC gateway builds read_state certificates with it); the
+/// recursion is bounded by the reader's depth cap on the way in.
+pub fn tree_to_cbor(t: &Tree) -> Cbor {
+    match t {
+        Tree::Empty => Cbor::Array(vec![Cbor::Uint(0)]),
+        Tree::Fork(l, r) => Cbor::Array(vec![Cbor::Uint(1), tree_to_cbor(l), tree_to_cbor(r)]),
+        Tree::Labeled(l, sub) => {
+            Cbor::Array(vec![Cbor::Uint(2), Cbor::Bytes(l.clone()), tree_to_cbor(sub)])
+        }
+        Tree::Leaf(v) => Cbor::Array(vec![Cbor::Uint(3), Cbor::Bytes(v.clone())]),
+        Tree::Pruned(d) => Cbor::Array(vec![Cbor::Uint(4), Cbor::Bytes(d.to_vec())]),
+    }
 }
 
 /// Result of a hashtree path lookup (IC certification semantics).
@@ -601,6 +633,35 @@ mod tests {
         let mut out = Vec::new();
         cbor_encode(&Cbor::Text("hi".into()), &mut out);
         assert_eq!(out, vec![0x62, b'h', b'i']);
+    }
+
+    #[test]
+    fn cbor_rejects_hostile_deep_nesting() {
+        // Hostile nesting must hit the depth cap as a TYPED CborDecode error, never a stack
+        // overflow (at 100k levels the pre-fix recursion would blow the test-thread stack).
+        // Definite 1-element arrays (0x81…) are the reported class; indefinite arrays (0x9f…
+        // closed by 0xff) and indefinite maps (0xbf…) recurse per level too.
+        let mut definite = vec![0x81; 100_000];
+        definite.push(0x01);
+        let e = cbor_parse(&definite).unwrap_err();
+        assert!(matches!(e, IcpError::CborDecode(_)), "definite arrays: {e}");
+
+        let mut indef = vec![0x9f; 100_000];
+        indef.push(0x01);
+        indef.extend(vec![0xff; 100_000]);
+        let e = cbor_parse(&indef).unwrap_err();
+        assert!(matches!(e, IcpError::CborDecode(_)), "indefinite arrays: {e}");
+
+        let mut indef_map = vec![0xbf; 100_000];
+        indef_map.extend_from_slice(&[0x01, 0x01]); // innermost key/value
+        indef_map.extend(vec![0xff; 100_000]);
+        let e = cbor_parse(&indef_map).unwrap_err();
+        assert!(matches!(e, IcpError::CborDecode(_)), "indefinite maps: {e}");
+
+        // Below the cap, honest deep nesting still parses.
+        let mut ok = vec![0x81; 100];
+        ok.push(0x01);
+        assert!(cbor_parse(&ok).is_ok());
     }
 
     #[test]

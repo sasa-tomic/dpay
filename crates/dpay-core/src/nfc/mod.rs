@@ -1,12 +1,13 @@
 //! nfc — NFC (ISO 7816-4 / ISO-DEP) transport framing for dpay.
 //!
 //! This module is a **pure, panic-free byte codec**. It carries the *exact same bytes* the QR path
-//! already moves — the 132-byte [`PaymentRequest`](crate::PaymentRequest) and the 292-byte signed
-//! wire ([`SignedAuthorization::to_wire`](crate::SignedAuthorization::to_wire)) — over the APDU
-//! exchange an Android **HCE** card (the offline payer) and an NFC **reader** (the online merchant)
-//! use. No crypto or policy lives here: the payer still signs with [`crate::sign`] and the merchant
-//! still verifies with [`crate::verify`]; NFC only replaces the *transport*, so every byte that
-//! survives this module is re-checked by the same core the canister runs.
+//! already moves — the 132-byte [`PaymentRequest`](crate::PaymentRequest) and the opaque
+//! signed-payload handoff ([`SignedAuthorization::to_wire`] bytes today, the IC envelope
+//! post-cutover) — over the APDU exchange an Android **HCE** card (the offline payer) and an NFC
+//! **reader** (the online merchant) use. No crypto or policy lives here: the payer still signs
+//! with [`crate::sign`] and the merchant still verifies with [`crate::verify`]; NFC only replaces
+//! the *transport*, so every byte that survives this module is re-checked by the same core the
+//! canister runs.
 //!
 //! ## Why a state machine and not I/O
 //!
@@ -26,9 +27,9 @@
 //!
 //! Payloads larger than one APDU are split into **frames** with a 4-byte header
 //! `seq(1) | flags(1) | total_len(2, big-endian)`. The request fits in a single frame; the signed
-//! wire now spans **two** frames (292 B > `DEFAULT_MAX_CHUNK` of 240), so the chunking path is
-//! exercised on every live wire — which is why it was built and tested up front (Android's `IsoDep`
-//! max-transceive length can be as low as ~253 bytes on some stacks).
+//! payload now spans **two** frames (292 B > `DEFAULT_MAX_CHUNK` of 240), so the chunking path is
+//! exercised on every live handoff — which is why it was built and tested up front (Android's
+//! `IsoDep` max-transceive length can be as low as ~253 bytes on some stacks).
 //!
 //! ## No collision with Google Wallet
 //!
@@ -66,8 +67,8 @@ pub const PROTO_VERSION: u8 = 1;
 
 /// Default max dpay-payload bytes per frame (excludes the 4-byte frame header and APDU overhead).
 /// Chosen conservatively so a frame + header + APDU framing stays under Android's smallest realistic
-/// `IsoDep` max-transceive length. The 132 B request fits in one frame; the 292 B signed wire spans
-/// two frames (240 + 52).
+/// `IsoDep` max-transceive length. The 132 B request fits in one frame; the 292 B signed payload
+/// spans two frames (240 + 52).
 pub const DEFAULT_MAX_CHUNK: usize = 240;
 
 /// Hard ceiling on a reassembled payload — the `total_len` header is a `u16`, and this also bounds

@@ -1334,7 +1334,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_dpay_ffi_checksum_method_fficardsession_process() != 33759.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_dpay_ffi_checksum_method_fficardsession_provide_wire() != 26646.toShort()) {
+    if (lib.uniffi_dpay_ffi_checksum_method_fficardsession_provide_wire() != 64820.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_method_fficardsession_receipt() != 54809.toShort()) {
@@ -1355,7 +1355,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_provide_receipt() != 18499.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_wire() != 42538.toShort()) {
+    if (lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_wire() != 55269.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_constructor_fficardsession_new() != 58439.toShort()) {
@@ -1812,8 +1812,9 @@ public interface FfiCardSessionInterface {
     fun `process`(`command`: kotlin.ByteArray): kotlin.ByteArray
     
     /**
-     * Approve: supply the offline-signed 292-byte wire to serve. Errors (`NfcWrongState`) unless a
-     * request is held and no decision has been made; the wire is validated as it is framed.
+     * Approve: supply the offline-signed payload to serve — an opaque signed-payload handoff
+     * (IC envelope post-cutover). Errors (`NfcWrongState`) unless a request is held and no
+     * decision has been made; the payload is validated as it is framed.
      */
     fun `provideWire`(`wire`: kotlin.ByteArray)
     
@@ -2023,8 +2024,9 @@ open class FfiCardSession: Disposable, AutoCloseable, FfiCardSessionInterface
 
     
     /**
-     * Approve: supply the offline-signed 292-byte wire to serve. Errors (`NfcWrongState`) unless a
-     * request is held and no decision has been made; the wire is validated as it is framed.
+     * Approve: supply the offline-signed payload to serve — an opaque signed-payload handoff
+     * (IC envelope post-cutover). Errors (`NfcWrongState`) unless a request is held and no
+     * decision has been made; the payload is validated as it is framed.
      */
     @Throws(DpayException::class)override fun `provideWire`(`wire`: kotlin.ByteArray)
         = 
@@ -2236,7 +2238,8 @@ public interface FfiReaderConductorInterface {
     fun `provideReceipt`(`receipt`: kotlin.ByteArray)
     
     /**
-     * The reassembled 292-byte wire once the exchange reached `Done`, else `None`.
+     * The reassembled payload once the exchange reached `Done`, else `None` — an opaque
+     * signed-payload handoff (IC envelope post-cutover).
      */
     fun `wire`(): kotlin.ByteArray?
     
@@ -2407,7 +2410,8 @@ open class FfiReaderConductor: Disposable, AutoCloseable, FfiReaderConductorInte
 
     
     /**
-     * The reassembled 292-byte wire once the exchange reached `Done`, else `None`.
+     * The reassembled payload once the exchange reached `Done`, else `None` — an opaque
+     * signed-payload handoff (IC envelope post-cutover).
      */override fun `wire`(): kotlin.ByteArray? {
             return FfiConverterOptionalByteArray.lift(
     callWithPointer {

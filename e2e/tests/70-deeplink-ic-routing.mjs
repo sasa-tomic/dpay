@@ -16,7 +16,7 @@
 //      applyBlob path the OS intent listener + web readers drive. (Web reload can't reproduce this:
 //      selectedAssetId is session-local, so a reload resets it to the IC default and the SOL→IC
 //      routing never fires. The seam is the documented foreground-deeplink path, mirroring the
-//      __DPAY_TEST_RECEIPT_PUBKEY / __DPAY_TEST_SCAN precedents.)
+//      __DPAY_TEST_SCAN / __DPAY_TEST_SOLANA_RPC_URL precedents.)
 //   3. The routing effect fires: selectedAssetId → ic:0, header label → 'DEMO balance', PayMode
 //      mounts, the prefill effect decodes the blob → review. Assert pay-amount (∂25.00, the EXACT
 //      requested amount) is showing and sol-pay-scan is GONE (SolPayMode unmounted).

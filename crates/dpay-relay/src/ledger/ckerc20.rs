@@ -61,9 +61,9 @@ pub(crate) const CKUSDC_LEDGER_PRINCIPAL: &str = "xevnm-gaaaa-aaaar-qafnq-cai";
 
 /// Onramp parameters for a CkEthErc20-family currency (ckUSDC etc. OR native ckETH). The app builds
 /// the user's Ethereum transaction(s) from these; the user signs in their own wallet (non-custodial).
-/// `facade_principal` is the canister id encoded as the deposit `principal` arg; the user's pubkey is
-/// the subaccount. In production these come from the ckETH minter's `get_minter_info`; the offline
-/// FakeLedger returns the verified mainnet constants.
+/// The deposit `principal` arg is the USER's own IC principal (derived in-app from their key); the
+/// subaccount is omitted (ICRC-1 default). In production these come from the ckETH minter's
+/// `get_minter_info`; the offline FakeLedger returns the verified mainnet constants.
 ///
 /// `kind` discriminates the two deposit shapes sharing the CkEthErc20 family + the SAME helper:
 ///  - `"erc20"`: two txs (approve the ERC-20, then `depositErc20`) — `erc20_address` is `Some`.
@@ -74,7 +74,6 @@ pub(crate) const CKUSDC_LEDGER_PRINCIPAL: &str = "xevnm-gaaaa-aaaar-qafnq-cai";
 pub struct CkErc20OnrampParams {
     pub helper_address: String,             // the CkDeposit helper contract (0x…) — shared by both kinds
     pub erc20_address: Option<String>,      // Some(addr) for erc20; None for native_eth
-    pub facade_principal: String,           // the facade canister principal (text) — the deposit `principal` arg
     pub kind: String,                       // "erc20" | "native_eth"
 }
 
@@ -105,11 +104,8 @@ pub struct CkErc20OnrampParams {
 /// currency with no `chain_id` is a metadata gap (the cold-start fallback before the catalog
 /// populated chain_id), and the mainnet helper is the safe default. The SAME helper serves both
 /// `depositEth` and `depositErc20` (see DFINITY `DepositHelperWithSubaccount.sol` `CkDeposit`).
-/// `facade_principal` is passed in (the FakeLedger uses a demo stand-in; the AgentLedger uses the
-/// live canister id it is pointed at).
 pub fn ckerc20_onramp_from_descriptor(
     desc: Option<&CurrencyDescriptor>,
-    facade_principal: String,
 ) -> Result<CkErc20OnrampParams, LedgerError> {
     let d = desc.ok_or_else(|| LedgerError::Transient("no ckERC-20 onramp for currency".into()))?;
     if d.minter_family != Some(MinterFamily::CkEthErc20) {
@@ -136,7 +132,6 @@ pub fn ckerc20_onramp_from_descriptor(
     Ok(CkErc20OnrampParams {
         helper_address: helper_address.to_string(),
         erc20_address,
-        facade_principal,
         kind: kind.to_string(),
     })
 }
@@ -180,7 +175,7 @@ mod ckerc20_onramp_chain_id_tests {
     #[test]
     fn unknown_chain_id_is_rejected_not_silently_mainnet_routed() {
         let desc = cketh_descriptor(Some(999));
-        let res = ckerc20_onramp_from_descriptor(Some(&desc), "aaaaa-aa".to_string());
+        let res = ckerc20_onramp_from_descriptor(Some(&desc));
         assert!(
             res.is_err(),
             "an unknown chain_id must fail-closed, not silently route to the mainnet helper"
@@ -190,16 +185,14 @@ mod ckerc20_onramp_chain_id_tests {
     #[test]
     fn mainnet_chain_id_resolves_to_mainnet_helper() {
         let desc = cketh_descriptor(Some(1));
-        let onramp =
-            ckerc20_onramp_from_descriptor(Some(&desc), "aaaaa-aa".to_string()).expect("mainnet ok");
+        let onramp = ckerc20_onramp_from_descriptor(Some(&desc)).expect("mainnet ok");
         assert_eq!(onramp.helper_address, CKERC20_HELPER_ADDRESS_MAINNET);
     }
 
     #[test]
     fn sepolia_chain_id_resolves_to_sepolia_helper() {
         let desc = cketh_descriptor(Some(11155111));
-        let onramp =
-            ckerc20_onramp_from_descriptor(Some(&desc), "aaaaa-aa".to_string()).expect("sepolia ok");
+        let onramp = ckerc20_onramp_from_descriptor(Some(&desc)).expect("sepolia ok");
         assert_eq!(onramp.helper_address, CKERC20_HELPER_ADDRESS_SEPOLIA);
     }
 }

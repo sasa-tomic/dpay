@@ -329,7 +329,7 @@ pub struct VerifiedEnvelope {
     pub request_id: [u8; 32],
     /// The self-authenticating principal derived from `sender_pubkey`.
     pub sender: crate::principal::Principal,
-    /// `None` for read_state (its content map carries no canister_id — see `write_read_state`).
+    /// `None` for read_state (its content map carries no canister_id — see `sign_read_state`).
     pub canister: Option<crate::principal::Principal>,
     /// `None` for read_state.
     pub method_name: Option<String>,

@@ -86,8 +86,10 @@ export const S = StyleSheet.create({
   // toast — no native module, matches the caption tone but with a warn tint for visibility).
   balBackHint: {fontSize: 12, color: C.warn, marginTop: 6, fontFamily: FONT.sansMedium},
   // Tabs — primary nav: inactive = white card pills with hairlines; active = tangerine fill.
-  tabs: {flexDirection: 'row', paddingHorizontal: 16, gap: 8, marginTop: 4, marginBottom: 6},
-  tab: {flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 8, paddingHorizontal: 20, borderRadius: 999, backgroundColor: C.card, minHeight: 44, borderWidth: 1, borderColor: C.line2},
+  // `flexWrap` is the safety valve: if a long-locale label (or a future 4th tab) ever outgrows a
+  // 390px row, the overflow pill drops to a second row instead of clipping off-screen right.
+  tabs: {flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 12, gap: 6, marginTop: 4, marginBottom: 6},
+  tab: {flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 999, backgroundColor: C.card, minHeight: 44, borderWidth: 1, borderColor: C.line2},
   tabActive: {backgroundColor: C.brand, borderColor: C.brand, ...LIFT},
   tabText: {color: C.sub, fontWeight: '600', fontFamily: FONT.sansMedium},
   tabTextActive: {color: C.brandInk, fontFamily: FONT.sansBold},

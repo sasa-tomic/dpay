@@ -23,7 +23,6 @@ jest.mock('../services/native', () => ({
 }));
 jest.mock('../services/relay', () => ({
   fetchWithTimeout: jest.fn(async () => ({ok: false})),
-  payAndClassify: jest.fn(),
 }));
 jest.mock('../services/rail', () => ({
   pollTransfer: jest.fn(),

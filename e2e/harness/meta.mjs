@@ -64,7 +64,9 @@ export async function loadTestsMeta() {
     // IC-rail cutover (2026-08-19): flows still importing retired helpers (postPay/seedDeposit/…)
     // fail their module import — that must not hard-crash the WHOLE run while the suite is
     // mid-migration. Mark them broken; the runner skips them with a loud warning (and a filtered
-    // run targeting one surfaces the import error verbatim).
+    // run targeting one surfaces the import error verbatim). DORMANT INSURANCE post-cutover: the
+    // migration completed 2026-08-20 (0 broken flows), but the machinery is kept so a future
+    // helper-retirement wave degrades loudly per-flow instead of crashing the run.
     let mod;
     try {
       mod = await import(`file://${path}`);

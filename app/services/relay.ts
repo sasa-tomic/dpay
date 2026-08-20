@@ -2,8 +2,6 @@ import {base} from '../lib/format';
 import {composeTimeout} from '../lib/timeout';
 // --- ck-deposit (ckBTC-style top-up) response shapes -----------------------------------------
 // MC1 units 2-4: protocol u64 amounts cross the JSON boundary as decimal-digit STRINGS.
-// (IC-rail cutover 2026-08-19: DepositRefresh/MintedUtxo/PendingUtxo retired with the relay
-// deposit-refresh path — the deposit sheet polls the ledger balance directly.)
 export type DepositInfo = {min_confirmations: number; deposit_fee: string; deposit_min_amount: string | null};
 
 // Safety-net default for every relay fetch — bounds a caller that omits its own signal so a hung
@@ -53,9 +51,6 @@ export async function readJsonOrEmpty(r: Response): Promise<any> {
   });
 }
 
-// (IC-rail cutover 2026-08-19: payAndClassify retired — payments POST signed envelopes straight
-// to /api/v2; there is no relay /pay. See services/icp.ts + services/rail.ts.)
-
 // Relay deposit client — same fetch style as the inline balance/faucet/pay calls (AbortController
 // optional, errors thrown to the caller). Co-located here to match the existing pattern. The default
 // timeout above is a backstop only — every existing caller passes its own shorter-timeout signal.
@@ -65,17 +60,15 @@ export async function depositInfo(relayUrl: string, currency: number, signal?: A
   if (!r.ok) throw new Error(typeof j?.error === 'string' ? j.error : `deposit/info ${r.status}`);
   return j as DepositInfo;
 }
-// (depositAddress + depositRefresh retired with the facade-subaccount deposit path — the deposit
-// sheet queries the ckBTC minter at the user principal directly; see services/rail.ts
-// railBtcDepositAddress + railBalanceOf.)
-
-// ckERC-20 / native-ETH onramp params (helper contract, ERC-20 address, facade principal) for a
-// CkEthErc20-family currency. The app builds the user's Ethereum transaction(s) from these; the user
-// signs in their own wallet (non-custodial). `kind` discriminates the deposit shape:
+// ckERC-20 / native-ETH onramp params (helper contract, ERC-20 address) for a CkEthErc20-family
+// currency. The app builds the user's Ethereum transaction(s) from these; the user signs in their
+// own wallet (non-custodial). The deposit `principal` arg is the user's OWN IC principal (derived
+// in-app via DpayCore.icpSelfPrincipal; ICRC-1 default subaccount) — the relay serves no principal.
+// `kind` discriminates the deposit shape:
 //  - "erc20": two txs (approve the ERC-20, then depositErc20); `erc20_address` is the token contract.
 //  - "native_eth": ONE payable tx (depositEth) carrying the ETH `value`; `erc20_address` is null.
 // Errors throw with the status (503 = no CkEthErc20 onramp for the currency / relay unreachable).
-export type CkErc20OnrampParams = {helper_address: string; erc20_address: string | null; facade_principal: string; kind: 'erc20' | 'native_eth'};
+export type CkErc20OnrampParams = {helper_address: string; erc20_address: string | null; kind: 'erc20' | 'native_eth'};
 export async function ckerc20OnrampParams(relayUrl: string, currency: number, signal?: AbortSignal): Promise<CkErc20OnrampParams> {
   const r = await fetch(`${base(relayUrl)}/api/v1/onramp/ckerc20?currency=${currency}`, {signal: withDefaultTimeout(signal)});
   const j = await readJsonOrEmpty(r);
@@ -83,5 +76,3 @@ export async function ckerc20OnrampParams(relayUrl: string, currency: number, si
   return j as CkErc20OnrampParams;
 }
 
-// (WithdrawReceipt + withdrawFunds retired with the relay /withdraw path — the offramp signs
-// user-principal IC envelopes (icrc2_approve + minter call); see services/rail.ts.)

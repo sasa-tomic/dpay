@@ -86,7 +86,10 @@ export const meta = {
   journey: 'system',
   covers: ['a11y', 'accessibility', 'aria'],
   verifies: 'Every interactive element (btn-*/tab-*/inputs/picker rows) carries a non-empty aria-label + role on every primary surface.',
-  timeoutMs: 20000,
+  timeoutMs: 30000, // 12.4s standalone census of 8 surfaces vs 20s was too tight: mid-run host-load
+  // spikes (parallel pool contention) are NOT compensated by the one-shot load factor measured at
+  // run start, so a spike after the factor is fixed false-fires the backstop. 30s keeps the
+  // hang-backstop meaningfully above the real (load-inflated) census cost.
 };
 
 export async function run() {

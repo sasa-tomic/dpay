@@ -406,13 +406,13 @@ impl Ledger for AgentLedger {
         // MC8 U2: resolve the onramp from the CATALOG descriptor (the live `currencies()` query),
         // not a hardcoded `currency == 2` guard. The descriptor's per-token `token_contract` is the
         // authoritative ERC-20 address; the `helper_address` is the verified mainnet ckETH deposit
-        // helper (minter-scoped — ONE constant for ALL ckERC20 tokens). `facade_principal` is the
-        // canister this AgentLedger is already pointed at (the depositErc20 `principal` arg). The
+        // helper (minter-scoped — ONE constant for ALL ckERC20 tokens). The deposit `principal` arg
+        // is the USER's own IC principal (derived in-app), so no principal is served here. The
         // pure resolver (`ckerc20_onramp_from_descriptor`) is shared with the FakeLedger so the
         // fail-closed gate (no token_contract ⇒ 503, never a USDC fallback) is single-sourced.
         let catalog = self.currencies().await?;
         let desc = catalog.iter().find(|d| d.currency == currency);
-        ckerc20_onramp_from_descriptor(desc, self.canister_id.to_text())
+        ckerc20_onramp_from_descriptor(desc)
     }
 
 }

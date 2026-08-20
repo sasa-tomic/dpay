@@ -173,7 +173,9 @@ async function runPool(tests, concurrency, timeoutScale) {
     const key = test.file;
     // A flow whose module import failed (retired-helper imports mid-cutover) is skipped LOUDLY —
     // never silently dropped, never counted as passed, and does NOT trip fail-fast (it needs its
-    // own rewrite wave, not this run's diagnostics). The final verdict still fails on it.
+    // own rewrite wave, not this run's diagnostics). The final verdict still fails on it. (Dormant
+    // insurance post-cutover: the suite currently has zero broken flows; the machinery stays so a
+    // future retirement wave degrades loudly instead of hard-crashing the run.)
     if (test.broken) {
       results.set(key, { ok: false, ms: 0, err: new Error(`BROKEN (import failed): ${test.broken}`), broken: true });
       console.error(`  ⚠ ${key}  SKIPPED — module import failed: ${test.broken}`);
@@ -289,6 +291,8 @@ export async function runTestsSubset(tests, opts = {}) {
   } else {
     const brokenCount = [...results.values()].filter((r) => r.broken).length;
     if (brokenCount > 0) {
+      // (Dormant insurance post-cutover — see the `test.broken` note in runPool. Kept so a future
+      // helper-retirement wave surfaces here instead of crashing the run outright.)
       console.error(`\n[run] ${passed}/${total} GREEN in ${elapsed}s — but ${brokenCount} flow(s) SKIPPED (module import failed; pending IC-rail rewrite)`);
     } else {
       console.log(`\n[run] ${passed}/${total} GREEN in ${elapsed}s`);
@@ -344,7 +348,8 @@ async function main() {
 
   const { firstFailure, results } = await runTestsSubset(tests, { concurrency, timeoutScale });
   // Broken (import-failed, pending-rewrite) flows don't trip fail-fast, but they must still fail
-  // the run — a suite with silently-skipped flows is a false green.
+  // the run — a suite with silently-skipped flows is a false green. (The broken path is dormant
+  // insurance post-cutover; see runPool's `test.broken` note.)
   if (firstFailure || [...results.values()].some((r) => r.broken)) process.exit(1);
 }
 

@@ -845,14 +845,19 @@ pub fn decode_minter_account_arg(arg: &[u8]) -> Result<MinterAccountArg, IcpErro
         Some(p) => Some(p),
         None => None,
     };
-    let sub = rd.opt_blob()?;
-    let subaccount = sub.map(|b| {
-        let mut a = [0u8; 32];
-        if b.len() == 32 {
+    let subaccount = match rd.opt_blob()? {
+        None => None,
+        Some(b) => {
+            if b.len() != 32 {
+                return Err(IcpError::DidlDecode(
+                    "minter_account subaccount must be 32 bytes".into(),
+                ));
+            }
+            let mut a = [0u8; 32];
             a.copy_from_slice(&b);
+            Some(a)
         }
-        a
-    });
+    };
     rd.finish()?;
     Ok(MinterAccountArg { owner, subaccount })
 }
@@ -878,21 +883,25 @@ pub fn decode_withdraw_erc20_arg(arg: &[u8]) -> Result<WithdrawErc20ArgDecoded, 
     let erc_sub = rd.opt_blob()?;
     let amount = rd.nat()?;
     rd.finish()?;
-    let to_arr = |b: Option<Vec<u8>>| -> Option<[u8; 32]> {
-        b.map(|v| {
-            let mut a = [0u8; 32];
-            if v.len() == 32 {
+    let to_arr = |b: Option<Vec<u8>>, what: &str| -> Result<Option<[u8; 32]>, IcpError> {
+        match b {
+            None => Ok(None),
+            Some(v) => {
+                if v.len() != 32 {
+                    return Err(IcpError::DidlDecode(format!("{what} subaccount must be 32 bytes")));
+                }
+                let mut a = [0u8; 32];
                 a.copy_from_slice(&v);
+                Ok(Some(a))
             }
-            a
-        })
+        }
     };
     Ok(WithdrawErc20ArgDecoded {
         amount,
         ckerc20_ledger_id,
         recipient,
-        from_cketh_subaccount: to_arr(eth_sub),
-        from_ckerc20_subaccount: to_arr(erc_sub),
+        from_cketh_subaccount: to_arr(eth_sub, "withdraw_erc20 from_cketh_subaccount")?,
+        from_ckerc20_subaccount: to_arr(erc_sub, "withdraw_erc20 from_ckerc20_subaccount")?,
     })
 }
 
@@ -1018,7 +1027,9 @@ const APPROVE_REPLY_TABLE: &[u8] = &[
     0xba, 0xb6, 0x9c, 0x02, 0x7d,
 ];
 
-fn uleb_bytes(mut b: u128) -> Vec<u8> {
+/// Unsigned LEB128 bytes for a `u128` — shared by the reply encoders here and by the fake-IC
+/// gateway (DIDL text/nat lengths and values are uleb128; a `as u8` length byte would truncate).
+pub fn uleb_bytes(mut b: u128) -> Vec<u8> {
     let mut out = Vec::new();
     loop {
         let mut byte = (b & 0x7f) as u8;
@@ -1093,10 +1104,11 @@ pub fn encode_nat_reply(v: u128) -> Vec<u8> {
     out
 }
 
-/// Reply bytes for a bare `text` (get_btc_address).
+/// Reply bytes for a bare `text` (get_btc_address). The length is uleb128 (DIDL text), never a
+/// single truncated byte.
 pub fn encode_text_reply(t: &str) -> Vec<u8> {
     let mut out = vec![0x44, 0x49, 0x44, 0x4c, 0x00, 0x01, 0x6a];
-    out.push(t.len() as u8);
+    out.extend_from_slice(&uleb_bytes(t.len() as u128));
     out.extend_from_slice(t.as_bytes());
     out
 }

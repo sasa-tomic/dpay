@@ -211,6 +211,29 @@ describe('relay client surfaces JSON error body (M11)', () => {
     await expect(ckerc20OnrampParams('http://relay.example', 6)).rejects.toThrow('no CkEthErc20 onramp for currency 6');
   });
 
+  // (IC-rail cutover fix 2026-08-20: `facade_principal` was REMOVED from the onramp params. The
+  // deposit `principal` arg is the user's OWN IC principal, derived in-app via
+  // DpayCore.icpSelfPrincipal — the facade-era field minted deposits at the FACADE principal,
+  // invisible to user-principal balance reads. Pins the client shape so the field can't creep back.)
+  test('ckerc20OnrampParams success shape carries NO facade_principal (the deposit principal is derived in-app)', async () => {
+    (globalThis as unknown as {fetch: unknown}).fetch = jest.fn((_url: string, _init?: RequestInit) =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({
+          helper_address: '0x18901044688D3756C35Ed2b36D93e6a5B8e00E68',
+          erc20_address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+          kind: 'erc20',
+        }),
+      } as unknown as Response),
+    );
+    const {ckerc20OnrampParams} = require('../services/relay');
+    const p = await ckerc20OnrampParams('http://relay.example', 2);
+    expect(p.helper_address).toBe('0x18901044688D3756C35Ed2b36D93e6a5B8e00E68');
+    expect(p.kind).toBe('erc20');
+    expect((p as Record<string, unknown>).facade_principal).toBeUndefined();
+  });
+
   test('depositInfo falls back to "<path> <status>" when the body has no string error', async () => {
     installJsonResponse(503, {});
     const {depositInfo} = require('../services/relay');

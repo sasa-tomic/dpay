@@ -21,7 +21,8 @@ export type TapCtx = {
  * `markActive`, the subscribe→arm→cleanup effect, and the `error`/`phase`/`request`/`done`/
  * `payment` event skeleton); the adapter owns ONLY the money-moving logic that genuinely differs
  * per rail and MUST stay separate:
- *   - IC:  `signAuthorization` + relay `/pay` + nonce-reconcile + optimistic balance deduction
+ *   - IC:  prepareTransfer (envelope sign) + /api/v2 submitTransfer + read_state poll + optimistic
+ *          balance deduction
  *   - SOL: `signSolPayment`/`signSplPayment` (offline) + RPC broadcast + rid/sig receipt matching
  *
  * `onSubmit` covers BOTH the IC `'done'` event (merchant reassembles + submits the wire) and the

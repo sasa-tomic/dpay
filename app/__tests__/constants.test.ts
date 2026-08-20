@@ -1,11 +1,10 @@
 /**
  * MC8 U6.1 / U6 capstone — the `WALLETCONNECT_PROJECT_ID` seam.
  *
- * Mirrors `EXPECTED_RECEIPT_PUBKEY` exactly: a module-load const read from
- * `__DPAY_TEST_WALLETCONNECT_PROJECT_ID` (the production id is the default; setting the override to
- * '' DISABLES WalletConnect for the offline inner loop). The constant is captured at module-load
- * time, so each case re-evaluates `config/constants.ts` inside `jest.isolateModules` with the
- * desired global set — the same pattern `receipt.test.ts` uses for `EXPECTED_RECEIPT_PUBKEY`.
+ * A module-load const read from `__DPAY_TEST_WALLETCONNECT_PROJECT_ID` (the production id is the
+ * default; setting the override to '' DISABLES WalletConnect for the offline inner loop). The
+ * constant is captured at module-load time, so each case re-evaluates `config/constants.ts` inside
+ * `jest.isolateModules` with the desired global set.
  */
 import {describe, test, expect, jest} from '@jest/globals';
 
@@ -39,7 +38,7 @@ describe('WALLETCONNECT_PROJECT_ID seam (MC8 U6.1 + U6 capstone)', () => {
     }
   });
 
-  test('honors the __DPAY_TEST_WALLETCONNECT_PROJECT_ID override (mirrors EXPECTED_RECEIPT_PUBKEY)', () => {
+  test('honors the __DPAY_TEST_WALLETCONNECT_PROJECT_ID override (module-load const capture)', () => {
     (globalThis as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID =
       'test-project-id';
     try {

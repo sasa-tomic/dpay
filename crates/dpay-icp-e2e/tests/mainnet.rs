@@ -9,10 +9,15 @@
 //! * ckBTC ledger (DFINITY-operated): icrc1_decimals == 8 — proves the envelope is accepted by
 //!   ledgers we do not operate, not just our own.
 //! * bad-signature control: 4xx (ingress rejects before execution).
+//! * ckETH minter eip_1559_transaction_price arg behaviour: `None` (native-ETH path) vs
+//!   `Some(ckERC20 ledger)` vs `Some(ckETH AMOUNT ledger)` — measures whether the live minter
+//!   accepts the arg the app's native-ETH withdrawal path sends (WithdrawSheet passes the ckETH
+//!   amount ledger; the facade-era kernel passed `None`). Read-only query, throwaway key.
 //!
 //! Without the env gate every test prints `skipped` and passes (offline `check` unaffected).
 
-use dpay_icp::icrc::decode_int;
+use candid::{Encode, Principal as CandidPrincipal};
+use dpay_icp::icrc::{decode_eip1559_price, decode_int};
 use dpay_icp::{ingress_expiry, sign_query, CallRequest, Principal};
 use dpay_icp_e2e::{corrupt_sender_sig, decode_query_response, dev_key, QueryOutcome, Result};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -24,8 +29,22 @@ const DUSD_LEDGER: &str = "td2nx-oaaaa-aaaab-qhdnq-cai";
 /// NOTE: the shorter form `mxzaz-hqaa-aaaar-qaada-cai` (22 chars) that docs/CANISTERS.md carried
 /// is structurally-invalid base32 (valid ≡ mod 8 ∈ {0,2,4,5,7}); this form is canonical.
 const CKBTC_LEDGER: &str = "mxzaz-hqaaa-aaaar-qaada-cai";
+/// Mainnet ckETH minter (DFINITY-operated) — eip_1559_transaction_price target (docs/CANISTERS.md).
+const CKETH_MINTER: &str = "sv3dd-oaaaa-aaaar-qacoa-cai";
+/// Mainnet ckETH AMOUNT ledger (what the app's native-ETH withdrawal path passes today as the
+/// eip_1559_transaction_price arg — the question this probe answers).
+const CKETH_LEDGER: &str = "ss2fx-dyaaa-aaaar-qacoq-cai";
+/// Mainnet ckUSDC ledger — a REGISTERED ckERC20 (the control for the Some-arg ERC-20 path).
+const CKUSDC_LEDGER: &str = "xevnm-gaaaa-aaaar-qafnq-cai";
 /// Candid encoding of ZERO method arguments: `DIDL` magic + empty type table + no values.
 const NO_ARGS: &[u8] = b"DIDL\x00\x00";
+
+/// `Eip1559TransactionPriceArg` — record { ckerc20_ledger_id : principal } (minter .did).
+/// `Deserialize` not needed: the probe only ENCODES this type (reference DIDL via candid).
+#[derive(candid::CandidType)]
+struct Eip1559Arg {
+    ckerc20_ledger_id: candid::Principal,
+}
 
 fn expiry() -> u64 {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64;
@@ -145,6 +164,72 @@ fn mainnet_second_throwaway_key_also_works() -> Result<()> {
         QueryOutcome::Replied(arg) => println!("PASS: second throwaway key accepted ({} reply bytes)", arg.len()),
         QueryOutcome::Rejected { reject_code, reject_message, error_code } => {
             panic!("second-key query rejected: {reject_code} {reject_message} {error_code:?}")
+        }
+    }
+    Ok(())
+}
+
+/// ckETH minter `eip_1559_transaction_price` arg behaviour (2026-08-20 launch check):
+/// the app's WithdrawSheet passes the ckETH AMOUNT ledger for native-ETH withdrawals while the
+/// facade-era kernel passed `None`. This probe MEASURES what the live minter does with each arg
+/// (read-only query, throwaway key, never an update):
+///
+/// * `None` → the native-ETH price path (a plain ETH send, 21k gas) — MUST reply.
+/// * `Some(ckUSDC ledger)` → a registered ckERC20 (60k-ish gas) — MUST reply; proves the arg
+///   encoding is right and `Some` is the ERC-20 path.
+/// * `Some(ckETH AMOUNT ledger)` → what the app sends for native today. Informational: printed,
+///   not asserted — the minter either tolerates it (app path works, semantically impure) or
+///   rejects it (app's native path is broken against prod → rail.ts must send the None arg).
+#[test]
+fn mainnet_cketh_minter_eip1559_price_args() -> Result<()> {
+    if !gated() {
+        return Ok(());
+    }
+    let http = dpay_icp_e2e::IcHttp::new(MAINNET_URL)?;
+    let minter = Principal::from_text(CKETH_MINTER)?;
+    let cketh_amount_ledger = CandidPrincipal::from_text(CKETH_LEDGER)?;
+    let ckusdc_ledger = CandidPrincipal::from_text(CKUSDC_LEDGER)?;
+
+    // Reference DIDL encodings straight from the candid crate (the .did shape the minter serves).
+    let none_arg = Encode!(&Option::<Eip1559Arg>::None)?;
+    let some_ckusdc = Encode!(&Some(Eip1559Arg { ckerc20_ledger_id: ckusdc_ledger }))?;
+    let some_cketh = Encode!(&Some(Eip1559Arg { ckerc20_ledger_id: cketh_amount_ledger }))?;
+
+    // 1. None — the native-ETH path (what the facade-era kernel sent; semantically correct for a
+    //    plain ETH send: there IS no ckERC20 whose transfer needs gas).
+    let none_price = decode_eip1559_price(&query(&http, &minter, "eip_1559_transaction_price", &none_arg)?)?;
+    assert!(none_price.gas_limit >= 21_000, "None price gas_limit {} < 21k", none_price.gas_limit);
+    println!(
+        "PASS: ckETH minter eip_1559_transaction_price(None) → gas_limit {}, max_transaction_fee {}",
+        none_price.gas_limit, none_price.max_transaction_fee
+    );
+
+    // 2. Some(registered ckERC20 ledger) — the ERC-20 path; gas_limit must be ≥ None's
+    //    (an ERC-20 transfer costs more than a plain ETH send).
+    let erc20_price = decode_eip1559_price(&query(&http, &minter, "eip_1559_transaction_price", &some_ckusdc)?)?;
+    assert!(
+        erc20_price.gas_limit >= none_price.gas_limit,
+        "Some(ckUSDC) gas_limit {} < None gas_limit {} — arg dispatch inverted?",
+        erc20_price.gas_limit, none_price.gas_limit
+    );
+    println!(
+        "PASS: ckETH minter eip_1559_transaction_price(Some(ckUSDC)) → gas_limit {}, max_transaction_fee {}",
+        erc20_price.gas_limit, erc20_price.max_transaction_fee
+    );
+
+    // 3. Some(ckETH AMOUNT ledger) — what the app's native path sends today. MEASURED, not
+    //    asserted: either outcome is a stable minter behaviour; the app-side decision (send None
+    //    for native) keys off this measurement, documented in OPEN_ISSUES.md.
+    match query(&http, &minter, "eip_1559_transaction_price", &some_cketh) {
+        Ok(reply) => {
+            let price = decode_eip1559_price(&reply)?;
+            println!(
+                "MEASURED: ckETH minter TOLERATES Some(ckETH amount ledger) for native → gas_limit {}, max_transaction_fee {}",
+                price.gas_limit, price.max_transaction_fee
+            );
+        }
+        Err(e) => {
+            println!("MEASURED: ckETH minter REJECTS Some(ckETH amount ledger) for native → {e}");
         }
     }
     Ok(())

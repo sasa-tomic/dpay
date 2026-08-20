@@ -1,4 +1,4 @@
-import {Text, View, Platform} from 'react-native';
+import {Text, View, Platform, useWindowDimensions} from 'react-native';
 import {S} from '../styles';
 
 /**
@@ -8,9 +8,14 @@ import {S} from '../styles';
  * `tone='onBrand'` flips to a white-on-tangerine variant for badges that sit on the filled brand
  * surface (active tab). The pattern (a letter in a box) stays recognisable across targets, so a
  * user who learns one shortcut infers the rest.
+ *
+ * Also hidden on NARROW web viewports (<700px): keyboard hints are meaningless on touch (mobile
+ * browsers / narrow desktop windows), and each badge's 24px footprint is what made the tab row
+ * overflow a 390px phone screen. `useWindowDimensions` is an RN core hook — no new dependency.
  */
 export function HotkeyHint({k, tone = 'muted'}: {k: string; tone?: 'muted' | 'onBrand'}) {
-  if (Platform.OS !== 'web') {
+  const {width} = useWindowDimensions();
+  if (Platform.OS !== 'web' || width < 700) {
     return null;
   }
   const onBrand = tone === 'onBrand';

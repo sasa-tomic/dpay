@@ -36,8 +36,9 @@ jest.mock('../components/QrScanner', () => ({
 }));
 
 import {DpayCore} from '../services/native';
-import {prepareTransfer, submitTransfer, envelopeToQrPayload, type RailPrepared} from '../services/rail';
+import {prepareTransfer, submitTransfer, pollTransfer, envelopeToQrPayload, type RailPrepared} from '../services/rail';
 import {PayMode} from '../components/PayMode';
+import {POLL} from '../config/constants';
 import type {Req, Identity} from '../lib/types';
 
 const IDENTITY: Identity = {secretHex: '11'.repeat(32), publicHex: '22'.repeat(32), username: 'Alice'};
@@ -246,6 +247,140 @@ describe('PayMode — share feedback (U-F1)', () => {
     await pressByLabel(tree, 'Share auth code');
     expect(texts(tree)).toContain('Share auth code');
     expect(texts(tree)).not.toContain('Copied ✓');
+    act(() => {
+      tree.unmount();
+    });
+  });
+});
+
+// Double-pay / silent-spin guards (post-cutover audit 2026-08-20, items 3+4).
+//
+// Item 3 — the offline-QR reconcile poll treated ONLY 'settled' as actionable; a terminal ledger
+// REJECTION of the envelope spun silently forever (the payer kept showing a dead QR). Fix: mirror
+// the ReceiveMode settlement poll — surface the reason (qr-err testID) + stop polling; 'unknown'
+// stays honest-pending.
+//
+// Item 4 — after an online submit ended 'unknown' the envelope fell to the QR hand-off (correct),
+// but reset() + re-scan + Approve RE-SIGNED a fresh envelope (new request_id). If the merchant
+// scanned the first QR, both could settle. Fix: retain the submitted envelope; a re-approve of the
+// SAME request (nonce match) re-displays THAT envelope's QR — prepareTransfer never runs again.
+describe('PayMode — offline-QR reconcile + re-approve guards', () => {
+  async function approveToQr(tree: renderer.ReactTestRenderer, req: Req) {
+    await scanToReview(tree, req);
+    await act(async () => {
+      pressByTestID(tree, 'btn-approve');
+    });
+    // one macrotask drain: submitTransfer + the first reconcile poll fire on approve
+    await act(async () => {
+      jest.advanceTimersByTime(0);
+    });
+  }
+
+  test('a TERMINAL rejection in the QR reconcile poll surfaces the reason and STOPS polling', async () => {
+    jest.mocked(pollTransfer).mockReset().mockResolvedValue({kind: 'rejected', reason: 'Not enough balance'});
+    const tree = mountPay({online: false});
+    await approveToQr(tree, REQ);
+    expect(hasTestID(tree, 'qr-err')).toBe(true);
+    expect(textByTestID(tree, 'qr-err')).toBe('Not enough balance');
+    const calls = jest.mocked(pollTransfer).mock.calls.length;
+    // the effect re-runs on the err state change (err gates the poll off); no further ticks fire
+    jest.advanceTimersByTime(POLL.receiptPay * 3);
+    await act(async () => {});
+    expect(jest.mocked(pollTransfer).mock.calls.length).toBe(calls);
+    act(() => {
+      tree.unmount();
+    });
+  });
+
+  test("'unknown' in the reconcile poll stays honest-pending — no qr-err, polling continues", async () => {
+    jest.mocked(pollTransfer).mockReset().mockResolvedValue({kind: 'unknown'});
+    const tree = mountPay({online: false});
+    await approveToQr(tree, REQ);
+    expect(hasTestID(tree, 'qr-err')).toBe(false);
+    jest.advanceTimersByTime(POLL.receiptPay * 2);
+    await act(async () => {});
+    expect(jest.mocked(pollTransfer).mock.calls.length).toBeGreaterThan(1);
+    act(() => {
+      tree.unmount();
+    });
+  });
+
+  test('re-approve after an online UNKNOWN re-displays the SAME envelope — prepareTransfer never re-signs', async () => {
+    // online submit ends unknown → the envelope falls to the QR hand-off and is retained.
+    const tree = mountPay({online: true});
+    await approveToQr(tree, REQ);
+    expect(jest.mocked(prepareTransfer).mock.calls.length).toBe(1);
+    expect(texts(tree)).toContain('Waiting for Cafe to scan…'); // online waiting copy, no Cancel
+    // The payer can only back out once the connection drops (the offline variant shows Cancel).
+    act(() => {
+      tree.update(
+        <PayMode
+          identity={IDENTITY}
+          online={false}
+          nfcStatus="unknown"
+          onSettled={() => {}}
+          onOfflinePaid={() => {}}
+          shownBalance="10000"
+          catalog={[]}
+          assetBalances={{}}
+          withdrawCurrency={0}
+          withdrawDisplay={null}
+          withdrawFamily={null}
+          withdrawTokenContract={null}
+          withdrawBalance="10000"
+          subMode="scan"
+          onSubModeChange={() => {}}
+          onShowDepositAddress={() => {}}
+        />,
+      );
+    });
+    // reset via Cancel — then re-scan the SAME request + re-approve → the SAME envelope's QR,
+    // no fresh signature (the merchant may already have scanned the first QR).
+    pressByTestID(tree, 'btn-notpaid');
+    await scanToReview(tree, REQ);
+    await act(async () => {
+      pressByTestID(tree, 'btn-approve');
+    });
+    await act(async () => {});
+    expect(jest.mocked(prepareTransfer).mock.calls.length).toBe(1); // NEVER re-signed
+    expect(jest.mocked(submitTransfer).mock.calls.length).toBe(1); // not re-submitted either
+    expect(jest.mocked(envelopeToQrPayload).mock.calls.length).toBe(2);
+    expect(jest.mocked(envelopeToQrPayload).mock.calls[1][0]).toBe(PREPARED.envelopeHex); // same bytes
+    expect(hasTestID(tree, 'btn-notpaid')).toBe(true); // QR phase re-displayed
+    act(() => {
+      tree.unmount();
+    });
+  });
+
+  test('an offline QR hand-off is retained too — Cancel + re-approve re-displays the same bytes', async () => {
+    const tree = mountPay({online: false});
+    await approveToQr(tree, REQ);
+    expect(jest.mocked(prepareTransfer).mock.calls.length).toBe(1);
+    pressByTestID(tree, 'btn-notpaid'); // Cancel after the merchant may have scanned
+    await scanToReview(tree, REQ);
+    await act(async () => {
+      pressByTestID(tree, 'btn-approve');
+    });
+    await act(async () => {});
+    expect(jest.mocked(prepareTransfer).mock.calls.length).toBe(1); // NEVER re-signed
+    expect(jest.mocked(envelopeToQrPayload).mock.calls[1][0]).toBe(PREPARED.envelopeHex);
+    act(() => {
+      tree.unmount();
+    });
+  });
+
+  test('a FRESH request after reset prepares a fresh envelope (retention is nonce-scoped, not global)', async () => {
+    const tree = mountPay({online: false});
+    await approveToQr(tree, REQ);
+    expect(jest.mocked(prepareTransfer).mock.calls.length).toBe(1);
+    pressByTestID(tree, 'btn-notpaid');
+    const FRESH: Req = {...REQ, nonceHex: 'cd'.repeat(16)};
+    await scanToReview(tree, FRESH);
+    await act(async () => {
+      pressByTestID(tree, 'btn-approve');
+    });
+    await act(async () => {});
+    expect(jest.mocked(prepareTransfer).mock.calls.length).toBe(2); // fresh signature allowed
     act(() => {
       tree.unmount();
     });

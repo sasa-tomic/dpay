@@ -6,7 +6,12 @@
 //! - principal owners cross as base32-CRC TEXT (validated in Rust), subaccounts/memos as hex
 //!   bytes (empty = None);
 //! - structured results are compact JSON (like `w_decode_request`), returned by
-//!   length; `0` = cap too small or bad input — no traps, no stderr.
+//!   length; `0` = cap too small or bad input — no traps, no stderr. Decode FAILURES
+//!   return the typed status codes (`BAD_UTF8`), never a misleading JSON: the
+//!   2026-08-20 correctness fix to `w_icp_decode_read_state` (a malformed-cert leaf
+//!   used to decode as `unknown`/null-time, making a dead poll look alive — the JS
+//!   shim throws on these codes, so the web wallet surfaces the poll error).
+//!   Signatures and success-path bytes are unchanged (ABI v1 stays additive-only).
 //!
 //! The decoders trust-decode the certificate (BLS chain verification is the W6 follow-up).
 
@@ -17,7 +22,7 @@ use dpay_icp::icrc::{
     approve_arg as icrc_approve_arg, balance_of_arg as icrc_balance_of_arg,
     decode_minter_ok as icrc_decode_minter_ok,
     decode_transfer_result as icrc_decode_transfer_result, transfer_arg as icrc_transfer_arg,
-    ApproveResult, TransferError, TransferResult,
+    TransferError, TransferResult,
 };
 use dpay_icp::principal::{Account, Principal};
 use dpay_icp::reply::{
@@ -244,7 +249,14 @@ pub extern "C" fn w_icp_approve_arg(
         Err(e) => return e,
     };
     let expires = match u128_opt_at(expires_ptr, expires_len) {
-        Ok(v) => v.map(|v| v as u64),
+        Ok(None) => None,
+        // Expiry is a u64 ns stamp; a u128 that doesn't fit must ERROR (the FFI counterpart
+        // rejects it too) — the old `v as u64` wrapped mod 2^64 and silently built an
+        // envelope the boundary node rejects at ingress.
+        Ok(Some(v)) => match u64::try_from(v) {
+            Ok(e) => Some(e),
+            Err(_) => return BAD_UTF8,
+        },
         Err(e) => return e,
     };
     let memo = match hex_at(memo_ptr, memo_len) {
@@ -584,7 +596,13 @@ pub extern "C" fn w_icp_decode_read_state(
         Ok(t) => t,
         Err(_) => return BAD_UTF8,
     };
-    let time_ns = read_state_time(&tree).unwrap_or(None);
+    // Malformed cert leaves propagate as an error status (the shim throws, the poll loop
+    // surfaces it) — matching dpay-ffi's icp_decode_read_state. A decoded `None` is the
+    // honest "no time leaf in this certificate".
+    let time_ns = match read_state_time(&tree) {
+        Ok(t) => t,
+        Err(_) => return BAD_UTF8,
+    };
     let mut json = String::with_capacity(256);
     json.push_str("{\"timeNs\":");
     match time_ns {
@@ -596,7 +614,12 @@ pub extern "C" fn w_icp_decode_read_state(
         if i > 0 {
             json.push(',');
         }
-        let st = request_status(&tree, rid).unwrap_or(RailStatus::Unknown);
+        let st = match request_status(&tree, rid) {
+            Ok(s) => s,
+            // Malformed status leaf: error out — never fabricate `unknown` (that turns a
+            // decode failure into an endless "keep polling").
+            Err(_) => return BAD_UTF8,
+        };
         json.push_str("{\"requestIdHex\":\"");
         push_hex(rid, &mut json);
         json.push_str("\",\"state\":");
@@ -714,5 +737,69 @@ pub extern "C" fn w_icp_decode_int(arg_ptr: u32, arg_len: u32, out_ptr: u32, cap
     }
 }
 
-// keep the unused-approve plumbing referenced so the import list stays honest during W1
-const _: Option<ApproveResult> = None;
+#[cfg(test)]
+mod goldens {
+    //! Fixed-vector goldens for the wasm parity guard (`scripts/check-wasm-core.mjs` drives the
+    //! SAME inputs through the real `w_icp_*` exports and pins the SAME hex). Bytes are produced
+    //! by the Rust single source (dpay-icp builders + signer) — generated here, never hand-edited.
+    use dpay_icp::envelope::{envelope_request_id, sign_update, CallRequest};
+    use dpay_icp::icrc::{approve_arg, transfer_arg};
+    use dpay_icp::principal::{Account, Principal};
+
+    /// Real ckBTC ledger principal (CRC-valid, stable).
+    const OWNER: &str = "mxzaz-hqaaa-aaaar-qaada-cai";
+    const EXPIRY: u64 = 1_800_000_300_000_000_000;
+
+    // Pins (regenerate by reverting these consts, running with --nocapture, re-pinning —
+    // the hexes below ARE the current dpay-icp single-source output for the fixed inputs).
+    const TRANSFER_ARG_HEX: &str = "4449444c066c06fbca0101c6fcb60204ba89e5c20402a2de94eb060282f3f3910c05d8a38ca80d7d6c02b3b0dac30368ad86ca8305026e036d7b6e7d6e780100010a000000000230000601010120abababababababababababababababababababababababababababababababab01904e0104deadbeef0120cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd00d295fcf1e49df8b9c3edbfc8ee31";
+    const APPROVE_ARG_HEX: &str = "4449444c066c08c6fcb60201ba89e5c20402a2de94eb060282f3f3910c04d8a38ca80d7d919c9cbf0d01dea7f7da0d04cb96dcb40e056e7d6e036d7b6e786c02b3b0dac30368ad86ca8305020100010a000120cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd00ffffffffffffffffffffffffffffffffffff03012a0100b8186dbce2fa18010a000000000230000601010120efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef";
+    const SIGN_ENV_HEX: &str = "d9d9f7a367636f6e74656e74a66c726571756573745f747970656463616c6c6e696e67726573735f6578706972791b18fae2bc6d18b8006673656e646572581d8063a4d954534c765fe2ffc1a1eca87da3a49ecef29d774aef160a31026b63616e69737465725f69644a000000000230000601016b6d6574686f645f6e616d656e69637263315f7472616e736665726361726758a84449444c066c06fbca0101c6fcb60204ba89e5c20402a2de94eb060282f3f3910c05d8a38ca80d7d6c02b3b0dac30368ad86ca8305026e036d7b6e7d6e780100010a000000000230000601010120abababababababababababababababababababababababababababababababab01904e0104deadbeef0120cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd00d295fcf1e49df8b9c3edbfc8ee316d73656e6465725f7075626b6579582c302a300506032b6570032100248acbdbaf9e050196de704bea2d68770e519150d103b587dae2d9cad53dd9306a73656e6465725f73696758406b4449e37093d8d16926035cbdf2e6f0b2d47ed422684ae1274ebafb97ccfeb6bddead475e5a5939bf66164798a159da1b843950644f847f73f3e99e4c45930c";
+    const SIGN_RID_HEX: &str = "3d83e7a3f67257803e762223224a95d6e3e15191876ebd29a37202a7c4f18ddb";
+
+    fn acct(sub: [u8; 32]) -> Account {
+        Account { owner: Principal::from_text(OWNER).unwrap(), subaccount: sub }
+    }
+
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    #[test]
+    fn icp_arg_and_sign_goldens() {
+        // transfer: to = OWNER+'ab'×32, from_sub = 'cd'×32, u128-scale amount, fee, memo.
+        let t = transfer_arg(
+            &acct([0xab; 32]),
+            Some([0xcd; 32]),
+            123456789012345678901234567890,
+            Some(10000),
+            Some(vec![0xde, 0xad, 0xbe, 0xef]),
+            None,
+        );
+        // approve: spender = OWNER+'ef'×32, amount = u128::MAX, expected 42, fixed expiry.
+        let a = approve_arg(
+            Some([0xcd; 32]),
+            &acct([0xef; 32]),
+            Some(u128::MAX),
+            Some(42),
+            Some(EXPIRY),
+            None,
+            None,
+            Some(10),
+        );
+        let sk = ed25519_dalek::SigningKey::from_bytes(&[0xab; 32]);
+        let req = CallRequest {
+            canister: Principal::from_text(OWNER).unwrap(),
+            method_name: "icrc1_transfer".into(),
+            arg: t.clone(),
+            ingress_expiry_ns: EXPIRY,
+            nonce: None,
+        };
+        let env = sign_update(&sk, &req);
+        let rid = envelope_request_id(&env).unwrap();
+        assert_eq!(hex(&t), TRANSFER_ARG_HEX);
+        assert_eq!(hex(&a), APPROVE_ARG_HEX);
+        assert_eq!(hex(&env), SIGN_ENV_HEX);
+        assert_eq!(hex(&rid), SIGN_RID_HEX);
+    }
+}

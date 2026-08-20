@@ -3,7 +3,9 @@
 export type DpayNfcApi = {
   armCard(): Promise<void>;
   disarmCard(): Promise<void>;
-  approveCard(wireHex: string): Promise<void>;
+  // The signed IC envelope bytes (hex) the payer's card serves to the merchant reader. Param name
+  // is cosmetic TS-side only — the Kotlin bridge method takes it positionally.
+  approveCard(envelopeHex: string): Promise<void>;
   declineCard(): Promise<void>;
   buildRequest(toHex: string, amount: string, nonceHex: string, expiry: number, currency: number, toName: string, memo: string): Promise<string>;
   startReader(requestHex: string): Promise<void>;
@@ -19,6 +21,9 @@ export type DpayNfcApi = {
 export type NfcEvent =
   | {type: 'phase'; role: 'card' | 'reader'; phase: NfcPhaseName}
   | {type: 'request'; role: 'card'; toHex: string; amount: string; nonceHex: string; expiry: number; currency: number}
+  // NOTE: the runtime payload key stays 'wireHex' — Kotlin DpayNfc.kt puts that exact key in the
+  // event map and the e2e web shim emits it; only the semantic content changed (it now carries the
+  // signed IC envelope hex, not the retired facade wire). Do not rename the KEY.
   | {type: 'done'; role: 'reader'; wireHex: string}
   | {type: 'receipt'; role: 'card'; settled: boolean; status: number; nonceHex: string}
   | {type: 'confirmed'; role: 'reader'}
@@ -71,9 +76,6 @@ export type DpayCoreApi = {
   // Derive the Ed25519 keypair from a 32-byte recovery seed (64 hex chars — the value Backup
   // reveals). Restores BOTH rails (IC Ed25519 + Solana SLIP-10 derivation) from one seed.
   keypairFromSecret(secretHex: string): Promise<{secretHex: string; publicHex: string}>;
-  // (IC-rail cutover 2026-08-19: wireLen/signingLen/requestLen, signAuthorization, encodeQr,
-  // verifyWire, validate, signWithdrawal, verifyReceiptSig RETIRED — the facade wire is gone from
-  // the value path. Payments sign IC envelopes (icpSignUpdate); outcomes ride read_state.)
   encodeRequest(toHex: string, amount: string, nonceHex: string, expiry: number, currency: number, toName: string, memo: string): Promise<string>;
   decodeRequest(qr: string): Promise<Req>;
   // Device NFC radio state for the status chip: 'ready' | 'off' | 'unsupported' | 'unknown'.
@@ -145,9 +147,6 @@ export type IcpEip1559PriceOut = {
   maxTransactionFee: string;
   timestampNs?: string;
 };
-
-// (ReceiptAuth retired with verifyOutcomeReceipt — outcome binding on the IC rail is the
-// request_id in the rail proof {ledger, block_index, request_id}.)
 
 
 export type NfcStatus = 'ready' | 'off' | 'unsupported' | 'unknown';

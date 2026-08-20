@@ -1,4 +1,4 @@
-// FIXME: build-time-only Metro satisfier for `@reown/appkit/core` (MC8 U6 capstone).
+// NOTE: closed-by-design, build-time-only Metro satisfier for `@reown/appkit/core` (MC8 U6 capstone).
 //
 // `@walletconnect/ethereum-provider@2.23.10` STATICALLY references `@reown/appkit/core` (the built-in
 // QR modal). The installed `@reown/appkit@1.8.19` has no `./core` export subpath and is web-only
@@ -13,8 +13,10 @@
 // completely bypassing the appkit modal. If reached anyway, this stub throws with a clear message
 // rather than silently returning undefined.
 //
-// Retire when ethereum-provider drops the static `@reown/appkit/core` reference OR dpay pins a
-// version that doesn't import it. Removing the shim WITHOUT that would re-break release bundling.
+// Closed by design: dpay deliberately keeps showQrModal:false (its own pairing QR is the product
+// surface). Revisit only if ethereum-provider drops the static `@reown/appkit/core` reference OR
+// dpay pins a version that doesn't import it — removing the shim WITHOUT that would re-break
+// release bundling.
 
 module.exports = {
   createAppKit() {

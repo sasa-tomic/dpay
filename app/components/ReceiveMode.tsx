@@ -348,6 +348,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
             display={depositDisplay}
             chainId={depositChainId}
             nativeEth={depositNativeEth}
+            ledger={catalog.find(c => c.currency === depositCurrency)?.ledger ?? ''}
             onClose={() => onSubModeChange('request')}
           />
         ) : (
