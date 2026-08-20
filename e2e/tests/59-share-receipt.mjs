@@ -18,7 +18,7 @@
 // in-DOM 'Link copied ✓' feedback label (asserted below).
 //
 // Selector contract: `pay-amount`, `btn-approve`, `btn-share-receipt`.
-import { setup, assert, assertIncludes, onboardWallet } from '../harness/lib.mjs';
+import { setup, assert, onboardWallet } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
 const PAY_CENTS = 2500; // ∂25.00 (DEMO_USD = currency 0, the wallet asset)
@@ -41,7 +41,7 @@ export async function run() {
   console.log('[59-share-receipt] setup (relay + web + browser)…');
   const env = await setup();
   try {
-    const { driver } = env;
+    const { driver, relayBaseURL } = env;
 
     // --- wallet B: a fresh keypair generated in-test (the payee/merchant). ------------------
     const bob = await generateKeypair();
@@ -100,13 +100,20 @@ export async function run() {
     assert(/^[A-Za-z0-9_-]+$/.test(blob), `the receipt blob must be base64url (no padding/specials), got "${blob.slice(0, 24)}…"`);
     console.log(`[59-share-receipt] ✓ Share.share captured a /wallet?pay=<base64url> URL (${blob.length}-char blob)`);
 
-    // Belt-and-suspenders: the receipt blob JSON-decodes to an object carrying the matched nonce
-    // (proves the shared link is the EXACT receipt this settle produced, not a stub).
+    // Belt-and-suspenders: the blob JSON-decodes to the post-W8 rail proof {ledger, block_index,
+    // request_id} (the interim settlement receipt: certified read_state, not BLS-verified
+    // on-device — chain-key receipts are the documented OPEN_ISSUES follow-up). The request_id
+    // (the signed envelope's hash) IS the nonce binding — unique per signing; the merchant's
+    // verify path (ReceiveMode) binds exactly this rid to the open request via read_state. The
+    // old facade receipt fields (nonce + canister sig) are gone with the cutover.
     const decoded = JSON.parse(Buffer.from(blob, 'base64url').toString('utf8'));
     assert(typeof decoded === 'object' && decoded !== null, 'the receipt blob must decode to a JSON object');
-    assert(String(decoded.nonce) === nonce, 'the shared receipt must answer the request nonce');
-    assertIncludes(JSON.stringify(decoded), 'sig', 'the receipt must carry a signature field');
-    console.log('[59-share-receipt] ✓ shared receipt decodes + answers the request nonce');
+    assert(/^[0-9a-f]{64}$/.test(String(decoded.request_id)), `the receipt must carry a 32-byte hex request_id (the merchant binding key), got ${JSON.stringify(decoded)}`);
+    const catalog = (await (await fetch(`${relayBaseURL}/api/v1/currencies`)).json()).currencies;
+    const ledger0 = catalog.find((c) => c.currency === 0).ledger;
+    assert(String(decoded.ledger) === ledger0, `the receipt ledger must be this settle's target (currency-0 ledger ${ledger0}), got ${decoded.ledger}`);
+    assert(/^\d+$/.test(String(decoded.block_index)), `block_index must be a u64 decimal string, got ${decoded.block_index}`);
+    console.log('[59-share-receipt] ✓ shared receipt decodes to the rail proof {ledger, block_index, request_id}');
 
     await driver.screenshot('59-share-receipt');
 
