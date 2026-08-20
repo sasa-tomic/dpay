@@ -13,7 +13,7 @@
 // Node-side interleaved repro of the same shape PASSES — browser-only.
 //
 // Run: node e2e/debug/wasm-hammer.mjs
-import { setup, onboardWallet } from '../harness/lib.mjs';
+import { setup, onboardWallet, stopSession } from '../harness/lib.mjs';
 import { generateKeypair, icpPrincipalBytes, icpTransferArgBytes, icpSignUpdate } from '../harness/wire.mjs';
 
 const env = await setup();
@@ -66,4 +66,9 @@ try {
   console.log(JSON.stringify(res, null, 1));
   if (res.fails?.length) { console.error('HAMMER: FAIL — wasm corruption reproduced'); process.exitCode = 1; }
   else console.error('HAMMER: PASS');
-} finally { await env.stop(); }
+} finally {
+  await env.stop();
+  await stopSession(); // env.stop() closes only this test's context; the shared relay/web/browser
+                       // session (which keeps the process alive) is torn down here — without this
+                       // the script hangs forever after printing its verdict.
+}

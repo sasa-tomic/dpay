@@ -36,9 +36,12 @@ const APP_SKIP_DIRS = new Set(['node_modules', 'android', 'ios', '__tests__', '_
  * Newest mtime (ms) across every SOURCE that feeds the vite build: the real app sources
  * (walked so an edit anywhere in app/ — components, styles, config, lib, hooks, services —
  * invalidates the cache), the e2e/web shims/entry/html (walked so a newly added shim is picked up
- * automatically), and the vite config itself. Missing files are skipped (a deleted file is not a
- * build input). This is the SOURCE-change gate; vite's own incremental cache still handles
- * dependency changes.
+ * automatically), the vite config itself, and the staged wasm core (imported by the
+ * dpay-core-wasm shim via `?url`, so vite copies it into dist/assets at BUILD time — a `just wasm`
+ * restage with no .ts edit must still invalidate the cache, else the harness tests the OLD core:
+ * the exact stale-build false-confidence class this gate exists to prevent). Missing files are
+ * skipped (a deleted file is not a build input). This is the SOURCE-change gate; vite's own
+ * incremental cache still handles dependency changes.
  */
 function newestSourceMtimeMs() {
   let newest = 0;
@@ -67,6 +70,7 @@ function newestSourceMtimeMs() {
     }
   } catch {}
   touch(join(E2E_DIR, 'vite.config.js'));
+  touch(join(REPO_ROOT, 'crates', 'dpay-relay', 'assets', 'dpay-core.wasm'));
   return newest;
 }
 
