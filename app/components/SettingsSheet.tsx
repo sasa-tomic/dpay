@@ -1,8 +1,8 @@
 import {useEffect, useMemo, useState} from 'react';
-import {View, Text, Pressable, TextInput, ScrollView, SafeAreaView, StatusBar, Platform, Linking} from 'react-native';
+import {Linking, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, Text, TextInput, View} from 'react-native';
 import {C} from '../config/palette';
 import {PRIVACY_URL} from '../config/constants';
-import {S} from '../styles';
+import {S, isDark} from '../styles';
 import {validateSeed} from '../lib/format';
 import {hexToWords, stringToWords, wordsToHex, wordsToString, validateMnemonic} from '../lib/bip39';
 import type {Identity} from '../lib/types';
@@ -147,7 +147,7 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
   return (
     <SheetOverlay>
       <SafeAreaView style={S.sheet}>
-        <StatusBar barStyle="dark-content" backgroundColor={C.bg} />
+        <StatusBar barStyle={isDark() ? 'light-content' : 'dark-content'} backgroundColor={C.bg} />
         <View style={S.sheetHead}>
           <Text style={S.sheetTitle}>Settings</Text>
           <Pressable testID="btn-settings-close" style={S.sheetClose} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close settings" accessibilityState={{disabled: false}}><IconClose size={18} color={C.sub} /></Pressable>

@@ -11,7 +11,7 @@
 import React from 'react';
 import {Text, View} from 'react-native';
 import type {SelectableAsset} from '../config/assets';
-import {S} from '../styles';
+import {S, isDark} from '../styles';
 
 export type FamilyGlyph = {
   /** The native currency symbol rendered inside the chip. */
@@ -22,16 +22,33 @@ export type FamilyGlyph = {
   bg: string;
 };
 
-// Family hues — recognizable per-chain colors, deepened for the porcelain light UI (dark-on-tint
-// chips: hue text ~4.5:1 on the 8–10% tint over white).
+// Family hues — recognizable per-chain colors. LIGHT variants are deepened for the porcelain UI
+// (dark-on-tint chips: hue text ~4.5:1 on the 8–10% tint over white). DARK variants are LIFTED
+// (light-on-tint over the #2A2620 card: lifted hue text 4.1–5.3:1 on the 14% tint over card —
+// glyphs render 700-weight, comfortably past the 3:1 large-text bar).
 // DEMO ties to the brand (∂ = the dpay demo unit, tangerine); BTC amber, ETH indigo, USDC blue,
 // SOL purple. Testnet variants keep the family hue (the row label already says testnet).
-const FAMILIES: Record<string, FamilyGlyph> = {
-  demo: {glyph: '∂', color: '#D8450D', bg: 'rgba(255,90,31,0.10)'},
-  btc: {glyph: '₿', color: '#92580B', bg: 'rgba(161,98,7,0.10)'},
-  eth: {glyph: 'Ξ', color: '#4338CA', bg: 'rgba(79,70,229,0.08)'},
-  usdc: {glyph: '$', color: '#1D4ED8', bg: 'rgba(29,78,216,0.08)'},
-  sol: {glyph: '◎', color: '#7E22CE', bg: 'rgba(147,51,234,0.08)'},
+const FAMILIES: Record<string, Record<'light' | 'dark', FamilyGlyph>> = {
+  demo: {
+    light: {glyph: '∂', color: '#D8450D', bg: 'rgba(255,90,31,0.10)'},
+    dark: {glyph: '∂', color: '#FF7A45', bg: 'rgba(255,122,69,0.14)'},
+  },
+  btc: {
+    light: {glyph: '₿', color: '#92580B', bg: 'rgba(161,98,7,0.10)'},
+    dark: {glyph: '₿', color: '#E8A33D', bg: 'rgba(232,163,61,0.14)'},
+  },
+  eth: {
+    light: {glyph: 'Ξ', color: '#4338CA', bg: 'rgba(79,70,229,0.08)'},
+    dark: {glyph: 'Ξ', color: '#8B93F8', bg: 'rgba(139,147,248,0.14)'},
+  },
+  usdc: {
+    light: {glyph: '$', color: '#1D4ED8', bg: 'rgba(29,78,216,0.08)'},
+    dark: {glyph: '$', color: '#6E9BFF', bg: 'rgba(110,155,255,0.14)'},
+  },
+  sol: {
+    light: {glyph: '◎', color: '#7E22CE', bg: 'rgba(147,51,234,0.08)'},
+    dark: {glyph: '◎', color: '#B57AEE', bg: 'rgba(181,122,238,0.14)'},
+  },
 };
 
 function familyKey(asset: SelectableAsset): keyof typeof FAMILIES | 'fallback' {
@@ -47,11 +64,16 @@ function familyKey(asset: SelectableAsset): keyof typeof FAMILIES | 'fallback' {
   return 'fallback';
 }
 
-/** Pure: family chip spec for any SelectableAsset. Fallback = first letter, brand hue. */
+/** Pure: family chip spec for any SelectableAsset. Fallback = first letter, brand hue. The
+ *  returned spec reflects the CURRENTLY APPLIED theme (light/deepened vs dark/lifted); the
+ *  theme cannot change between two calls in one render pass. */
 export function glyphFor(asset: SelectableAsset): FamilyGlyph {
   const key = familyKey(asset);
-  if (key !== 'fallback') return FAMILIES[key];
-  return {glyph: asset.symbol.charAt(0).toUpperCase(), color: '#D8450D', bg: 'rgba(255,90,31,0.10)'};
+  const mode = isDark() ? 'dark' : 'light';
+  if (key !== 'fallback') return FAMILIES[key][mode];
+  return mode === 'dark'
+    ? {glyph: asset.symbol.charAt(0).toUpperCase(), color: '#FF7A45', bg: 'rgba(255,122,69,0.14)'}
+    : {glyph: asset.symbol.charAt(0).toUpperCase(), color: '#D8450D', bg: 'rgba(255,90,31,0.10)'};
 }
 
 export function AssetGlyph({asset, size = 38}: {asset: SelectableAsset; size?: number}) {

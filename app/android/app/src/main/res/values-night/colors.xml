@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Night variant (uiMode=night) of the identity palette — Wave 4 dual theme. Android
+         switches automatically with the OS dark toggle; the RN app resolves the same scheme via
+         Appearance and applies the matching in-app palette (app/config/palette.ts DARK). Values
+         mirror palette.ts DARK: warm near-black family, NO pure #000. `white` stays #FFFFFF
+         (it is the tangerine-tile glyph ink in the launcher/splash, not a surface). -->
+    <color name="bg">#141210</color>
+    <color name="panel">#1D1A16</color>
+    <color name="ink">#F2EEE6</color>
+    <color name="accent">#FF5A1F</color>
+    <color name="accent_ink">#FFFFFF</color>
+    <color name="white">#FFFFFF</color>
+    <color name="black">#F2EEE6</color>
+</resources>

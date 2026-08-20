@@ -16,21 +16,33 @@
  * lives under `./{config,lib,hooks,services,styles.ts,components}`. See `2026-07-31-app-split-plan.md`.
  */
 import {useCallback, useEffect, useState} from 'react';
-import {SafeAreaView, ActivityIndicator, View} from 'react-native';
+import {SafeAreaView, ActivityIndicator, View, useColorScheme} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {RELAY_DEFAULT} from './relayConfig';
-import {C} from './config/palette';
+import {C, DARK, LIGHT} from './config/palette';
 import {STORAGE_KEY, RELAY_STORAGE_KEY} from './config/constants';
 import {runSolSelfCheck} from './solana/selfcheck';
 import type {Identity} from './lib/types';
 import {DpayCore} from './services/native';
-import {S} from './styles';
+import {S, applyPalette} from './styles';
 import {Onboarding} from './components/Onboarding';
 import {Wallet} from './components/Wallet';
 
 export default function App() {
   const [identity, setIdentity] = useState<Identity | null | undefined>(undefined); // undefined = loading
   const [relayUrl, setRelayUrl] = useState(RELAY_DEFAULT);
+
+  // Wave-4 dual theme, AUTO ONLY (no manual override): follow the OS color scheme. styles.ts
+  // already resolved the OS theme at module load (synchronous Appearance probe → first paint is
+  // correct, no light-flash); this keeps the live palette in sync when the scheme CHANGES at
+  // runtime (Android dark-mode toggle, browser devtools emulation — RNW's useColorScheme is
+  // matchMedia-backed). Calling applyPalette in the render body (not an effect) means the
+  // palette is applied BEFORE this render's children read S/C — no stale frame. It is idempotent
+  // and guarded, so the per-render call is a no-op after the first. useColorScheme() re-renders
+  // App on change; nothing below is memoized, so the whole tree re-reads S/C (verified: no
+  // React.memo in the app tree).
+  const scheme = useColorScheme();
+  applyPalette(scheme === 'dark' ? DARK : LIGHT);
 
   // Load identity + the persisted relay URL on mount. Both live in AsyncStorage; the relay URL
   // defaults to `relayConfig`'s value (the ?relay= override in the harness, or the codegen'd prod

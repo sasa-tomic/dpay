@@ -5,8 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>∂pay · Pay differently</title>
 <meta name="description" content="A new way to pay. Simple to use. Fast everywhere. Works if you have no internet. Free to pay. Your money stays yours. Join the movement." />
-<meta name="color-scheme" content="light" />
+<meta name="color-scheme" content="light dark" />
 <meta name="theme-color" content="#F4F1E8" />
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141210" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&amp;family=IBM+Plex+Mono:wght@500;600&amp;display=swap" rel="stylesheet" />
@@ -577,6 +578,51 @@
     html{scroll-behavior:auto}
     *{animation:none!important;transition:none!important}
     .rv{opacity:1;transform:none}
+  }
+
+  /* ── Dark theme (Wave 4, 2026-08-20) ────────────────────────────────────────────────────
+     Auto-only: activates at OS/browser dark via prefers-color-scheme. The warm near-black
+     reading of the same Traveler Paper identity (mirrors app/config/palette.ts DARK — keep in
+     lockstep). Vars carry most of the page; the remaining hardcoded porcelain literals (nav,
+     grain, shadows) get scoped overrides. The .band showcase sections are ALREADY dark on a
+     porcelain page — in dark mode they sit on the page's own near-black, so their inner
+     light-alpha chrome (rail-track/arrow/phone-frame borders) stays legible unchanged. */
+  @media (prefers-color-scheme: dark) {
+    :root{
+      --bg:#141210;
+      --panel:#1D1A16;
+      --panel2:#24211C;
+      --card:#2A2620;
+      --ink:#F2EEE6;
+      --sub:#A8A094;
+      --sub2:#8A8274;
+      --brand:#FF5A1F;
+      --brand2:#E0480F;
+      --ok:#0E9F6E;
+      --warn:#E9A23B;
+      --line:#3B362D;
+      --line2:#34302A;
+      --sh-xl:0 44px 90px -46px rgba(0,0,0,.6), 0 16px 34px -22px rgba(0,0,0,.45);
+      --sh-lg:0 30px 60px -34px rgba(0,0,0,.5);
+      --sh-md:0 16px 36px -22px rgba(0,0,0,.4);
+      --sh-sm:0 8px 20px -12px rgba(0,0,0,.35);
+    }
+    .grain{opacity:.06;mix-blend-mode:screen}
+    nav{background:rgba(20,18,16,.82)}
+    /* .band + .foot key off --ink/--bg which now flip (near-black band bg becomes near-black on
+       near-black — indistinct): give them a slightly lifted floor + cream text so the showcase
+       rhythm survives, and re-point the porcelain-tinted accents inside them. */
+    .band{background:#0E0D0B}
+    .band .rail-track{background:repeating-linear-gradient(90deg,rgba(242,238,230,.14) 0 7px,transparent 7px 15px)}
+    .band .arrow{color:rgba(242,238,230,.4)}
+    .band .ph{border-color:rgba(242,238,230,.13)}
+    .band .ghost{color:#F2EEE6;border-color:rgba(242,238,230,.4)}
+    footer{background:#0E0D0B}
+    .foot .word,
+    .foot p b,
+    .foot a{color:#F2EEE6}
+    .foot a{border-bottom-color:rgba(242,238,230,.3)}
+    .foot-micro{color:rgba(242,238,230,.55)}
   }
 </style>
 </head>

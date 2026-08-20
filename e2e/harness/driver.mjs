@@ -132,6 +132,12 @@ export class Driver {
     const page = await context.newPage();
     await page.setViewport({ ...VIEWPORT, width: o.width ?? VIEWPORT.width, height: o.height ?? VIEWPORT.height });
     if (o.timezone !== undefined) await page.emulateTimezone(o.timezone);
+    // Wave-4 dual theme: emulate an OS dark scheme (flows pass opts.dark). Applied at the PAGE
+    // level so window.matchMedia('(prefers-color-scheme: dark)') — which RNW's Appearance/useColorScheme
+    // and the hosts' CSS @media blocks key on — reports dark BEFORE any page script runs.
+    if (o.dark) {
+      await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'dark' }]);
+    }
     await page.evaluateOnNewDocument(injectFreezeCss, FREEZE_CSS);
     await page.evaluateOnNewDocument(injectTestGlobals);
     // SOL stub RPC: when a flow requests it (opts.solStub), override the SOLANA_RPC_URL disable so

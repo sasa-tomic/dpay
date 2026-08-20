@@ -5,6 +5,8 @@
     <!-- Phone-first viewport: the RN styles are designed for a phone screen. -->
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
     <meta name="theme-color" content="#F4F1E8" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141210" />
+    <meta name="color-scheme" content="light dark" />
     <meta name="description" content="dpay web wallet — the same app, in your browser. Non-custodial: your key never leaves this device." />
     <link rel="icon" href="data:," />
     <title>dpay · Wallet</title>
@@ -18,6 +20,13 @@
       /* `#root` must be a bounded flex column (mirrors e2e/web/index.html — see the note there):
        * react-native-web's root uses flex:1, which collapses under a display:block parent. */
       html, body, #root { margin: 0; padding: 0; height: 100%; background: #F4F1E8; }
+      /* Wave-4 dual theme: the page bg (behind the RN tree) follows the OS scheme so the
+         first paint — before the bundle applies its palette — is already dark on a dark OS
+         (no light flash). Mirrors palette.ts DARK.bg (#141210, warm near-black). The RN
+         root itself re-paints with the same value via S.root/screenFrame. */
+      @media (prefers-color-scheme: dark) {
+        html, body, #root { background: #141210; }
+      }
       #root { display: flex; flex-direction: column; }
       /* Keyboard focus ring (U-F4): :focus-visible paints ONLY for keyboard focus — pointer/touch
        * focus never shows it (and the e2e visual flow screenshots unfocused elements, so baselines

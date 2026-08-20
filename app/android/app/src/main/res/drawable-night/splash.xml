@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Night splash (uiMode=night) — same structure as drawable/splash.xml but on the DARK field:
+     warm near-black gradient (never #000) with the SAME porcelain-'d'-on-tangerine logo bitmap.
+     The logo tile is opaque tangerine, so its glyph stays porcelain in both themes. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <gradient android:type="linear" android:angle="270"
+                android:startColor="#1D1A16" android:endColor="#141210" />
+        </shape>
+    </item>
+    <item>
+        <bitmap android:gravity="center" android:src="@drawable/splash_logo" />
+    </item>
+</layer-list>

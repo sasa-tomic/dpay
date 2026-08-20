@@ -1,0 +1,21 @@
+<resources>
+
+    <!-- Night variant (uiMode=night) — Wave 4 dual theme. Same structure as values/styles.xml;
+         only the theme-derived bits flip: light status-bar icons (cream on near-black) and the
+         night splash drawable. Surface colors come from values-night/colors.xml automatically. -->
+    <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:statusBarColor">@color/bg</item>
+        <item name="android:navigationBarColor">@color/bg</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="colorPrimary">@color/accent</item>
+        <item name="colorAccent">@color/accent</item>
+    </style>
+
+    <!-- Cold-start splash in night mode: the tangerine ∂ tile on the warm near-black field. -->
+    <style name="SplashTheme" parent="AppTheme">
+        <item name="android:windowBackground">@drawable/splash</item>
+    </style>
+
+</resources>

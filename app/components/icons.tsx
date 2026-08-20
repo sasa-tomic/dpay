@@ -15,6 +15,7 @@
  */
 import React from 'react';
 import Svg, {Circle, Line, Path, Polyline, Rect} from 'react-native-svg';
+import {C} from '../config/palette';
 
 export type IconProps = {
   /** Rendered width/height in dp (default 24 = the design grid). */
@@ -29,7 +30,7 @@ function make(
   nodes: (props: {size: number; color: string}) => Node[],
 ): React.FC<IconProps & {testID?: string}> {
   const Icon: React.FC<IconProps & {testID?: string}> = ({size = 24, color, testID}) => {
-    const stroke = color ?? '#676257';
+    const stroke = color ?? C.sub; // themed default (sub) — every current call site passes color explicitly
     return (
       <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" testID={testID}>
         {nodes({size, color: stroke}).map((n, i) =>

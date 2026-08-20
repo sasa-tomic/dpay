@@ -1,8 +1,8 @@
 import {useState} from 'react';
-import {KeyboardAvoidingView, Platform, SafeAreaView, ScrollView, StatusBar, Text, Pressable, TextInput, View} from 'react-native';
+import {KeyboardAvoidingView, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, Text, TextInput, View} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {C} from '../config/palette';
-import {S} from '../styles';
+import {S, isDark} from '../styles';
 import {STORAGE_KEY, BALANCE_TIMEOUT_MS} from '../config/constants';
 import {base, validateSeed} from '../lib/format';
 import {hexToWords, stringToWords, wordsToHex, validateMnemonic, wordsToString} from '../lib/bip39';
@@ -130,7 +130,7 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
 
   return (
     <SafeAreaView style={S.root}>
-      <StatusBar barStyle="dark-content" backgroundColor={C.bg} translucent={false} />
+      <StatusBar barStyle={isDark() ? 'light-content' : 'dark-content'} backgroundColor={C.bg} translucent={false} />
       {/* B1 — keep the CTA visible while the keyboard is up. `behavior="padding"` on iOS lifts the
           form above the keyboard (the username input + Create wallet CTA otherwise sit ~y1509-1656,
           fully under the ~y1200+ keyboard). Android already gets adjustResize from AndroidManifest

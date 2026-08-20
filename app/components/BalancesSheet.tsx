@@ -1,6 +1,6 @@
-import {View, Text, Pressable, ScrollView, SafeAreaView, StatusBar, ActivityIndicator, Platform} from 'react-native';
+import {ActivityIndicator, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, Text, View} from 'react-native';
 import {C} from '../config/palette';
-import {S} from '../styles';
+import {S, isDark} from '../styles';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {SheetOverlay} from './SheetOverlay';
 import {CurrencyRow} from './CurrencyRow';
@@ -51,7 +51,7 @@ export function BalancesSheet({assets, balances, selectedId, onSelect, hasTestne
   return (
     <SheetOverlay>
       <SafeAreaView style={S.sheet}>
-        <StatusBar barStyle="dark-content" backgroundColor={C.bg} />
+        <StatusBar barStyle={isDark() ? 'light-content' : 'dark-content'} backgroundColor={C.bg} />
         <View style={S.sheetHead}>
           <Text style={S.sheetTitle}>Balances</Text>
           <Pressable

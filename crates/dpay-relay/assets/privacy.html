@@ -5,8 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Privacy Policy | Different Pay</title>
 <meta name="description" content="Privacy Policy for the Different Pay Android wallet, website, and merchant terminal." />
-<meta name="color-scheme" content="light" />
+<meta name="color-scheme" content="light dark" />
 <meta name="theme-color" content="#F4F1E8" />
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141210" />
 <style>
   :root{
     --bg:#F4F1E8;
@@ -93,6 +94,29 @@
     section{padding:24px 0}
   }
   @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+
+  /* ── Dark theme (Wave 4, 2026-08-20) ────────────────────────────────────────────────────
+     Auto-only: activates at OS/browser dark via prefers-color-scheme. The warm near-black
+     reading of the same Traveler Paper identity (mirrors app/config/palette.ts DARK — keep in
+     lockstep). Vars first; the handful of hardcoded porcelain literals get scoped overrides. */
+  @media (prefers-color-scheme: dark) {
+    :root{
+      --bg:#141210;
+      --panel:#1D1A16;
+      --ink:#F2EEE6;
+      --ink-2:#A8A094;
+      --ink-3:#8A8274;
+      --brand:#FF5A1F;
+      --brand-deep:#FF7A45;
+      --brand-soft:rgba(255,122,69,.10);
+      --brand-line:rgba(255,122,69,.32);
+      --line:#3B362D;
+      --line-2:#34302A;
+      --ok:#34C48E;
+    }
+    body::before{opacity:.07}
+    nav{background:rgba(20,18,16,.86)}
+  }
 </style>
 </head>
 <body>

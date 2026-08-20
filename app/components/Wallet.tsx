@@ -1,8 +1,8 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {SafeAreaView, StatusBar, View, Text, Pressable, ScrollView, AppState, Linking, BackHandler, Platform} from 'react-native';
+import {AppState, BackHandler, Linking, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, Text, View} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {C} from '../config/palette';
-import {S} from '../styles';
+import {S, isDark} from '../styles';
 import {TOP_UP_CENTS, FAUCET_TIMEOUT_MS, SHOW_TESTNET_STORAGE_KEY, SOL_BROADCAST_TIMEOUT_MS} from '../config/constants';
 import {familyDisplay, isTestnetCurrency} from '../config/catalog';
 import {base} from '../lib/format';
@@ -559,7 +559,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore}: {i
     <SafeAreaView style={S.root}>
       {/* Traveler Paper: porcelain bg ⇒ DARK status-bar icons (light-content was the dark-theme
           remnant — white icons on #F4F1E8 were near-invisible). */}
-      <StatusBar barStyle="dark-content" backgroundColor={C.bg} translucent={false} />
+      <StatusBar barStyle={isDark() ? 'light-content' : 'dark-content'} backgroundColor={C.bg} translucent={false} />
       <View style={S.header}>
         <View style={S.headerLeft}>
           <Pressable
