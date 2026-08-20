@@ -27,7 +27,16 @@ import { DpaySolNfc, installSolNfcSeam } from './dpay-sol-nfc';
 // (window.__DPAY_TEST_CORE) so a flow can drive/inspect the wasm surface directly — same
 // philosophy as __DPAY_TEST_SCAN. Used by e2e/debug/wasm-hammer.mjs (allocator-corruption
 // repro; see OPEN_ISSUES "wasm dual-allocator corruption").
-(typeof globalThis !== 'undefined' ? (globalThis as any) : ({} as any)).__DPAY_TEST_CORE = DpayCore;
+//
+// TEST SEAMS NEVER SHIP: this is one of the __DPAY_TEST_* seams mode-gated out of the web-PROD
+// bundle (vite statically replaces import.meta.env.MODE in a `--mode web-prod` build, so the
+// gate constant-folds and rollup dead-code-eliminates the assignment — same mechanism as the
+// 2026-08-16 __DPAY_TEST_SHARE fix). On prod /wallet an exposed core handle is a driver-grade
+// punch-out no shipping page should carry. scripts/check-web-prod-seams.mjs (wired into
+// `just web`) greps the built dist so a seam that leaks back in FAILS the build.
+if (import.meta.env.MODE !== 'web-prod') {
+  (typeof globalThis !== 'undefined' ? (globalThis as any) : ({} as any)).__DPAY_TEST_CORE = DpayCore;
+}
 (NativeModules as any).DpayNfc = DpayNfc;
 (NativeModules as any).DpaySolNfc = DpaySolNfc;
 
@@ -92,7 +101,11 @@ if (import.meta.env.MODE === 'web-prod') {
 // (in the e2e test) that the copy button put the address on the real clipboard rather than the Share
 // noop above. The wrapper resolves even if headless chrome rejects the underlying write without a
 // gesture, so the app's "Copied ✓" path is deterministic; the seam value is the assertion target.
-if (typeof window !== 'undefined') {
+//
+// TEST SEAM NEVER SHIPS: web-prod keeps the browser's REAL clipboard untouched (the gate
+// constant-folds out of the prod bundle — see the __DPAY_TEST_CORE note above); the capture
+// wrapper is e2e-build-only.
+if (import.meta.env.MODE !== 'web-prod' && typeof window !== 'undefined') {
   (window as any).__DPAY_TEST_CLIPBOARD = '';
   const nav = (window as any).navigator;
   if (nav) {
@@ -130,9 +143,16 @@ if (typeof window !== 'undefined') {
 
 // IC-rail cutover: route the app's /api/v2 envelope transport at the SAME test relay that serves
 // this page (the relay's test-helpers build exposes the fake-IC gateway at /api/v2/canister/*).
-// Prod never sets the seam; the icp-api.io default in app/services/icp.ts stands.
-try {
-  const relay = new URLSearchParams(window.location.search).get('relay');
-  (globalThis as unknown as {__DPAY_TEST_IC_GATEWAY?: string}).__DPAY_TEST_IC_GATEWAY =
-    relay ?? window.location.origin;
-} catch { /* no window (SSR guard) */ }
+// e2e-BUILD-ONLY: on web-prod this seam must NEVER exist — app/services/icp.ts reads it on every
+// call, so a prod-side assignment would either point the prod wallet's whole IC value path at the
+// relay origin (which has no /api/v2 outside test-helpers → every pay/deposit/withdraw 404s and
+// gets classified 'rejected') or, worse, let `?relay=<evil>` on the prod page retarget envelope
+// submission to an arbitrary origin. Prod uses the icp-api.io default hardcoded in icp.ts; the
+// gate constant-folds this block out of the web-prod bundle (see __DPAY_TEST_CORE above).
+if (import.meta.env.MODE !== 'web-prod') {
+  try {
+    const relay = new URLSearchParams(window.location.search).get('relay');
+    (globalThis as unknown as {__DPAY_TEST_IC_GATEWAY?: string}).__DPAY_TEST_IC_GATEWAY =
+      relay ?? window.location.origin;
+  } catch { /* no window (SSR guard) */ }
+}

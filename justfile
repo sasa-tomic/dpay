@@ -42,9 +42,8 @@ test-canister: build-canister build-mock-minter
 test-icp: build-mock-minter
     cargo nextest run -p dpay-icp-tests
 
-# relay tests (native, in-memory FakeLedger — no network). Enables `test-helpers` so the
-# integration-test retry harness (`FlakyLedger`) is compiled in; that feature is OFF in the prod
-# image (`just image` never passes it), so FlakyLedger stays out of shipping binaries.
+# relay tests (native, in-memory — no network). `test-helpers` also compiles the fake-IC /api/v2
+# gateway the e2e web harness points the app at (the seam is e2e-build-only — see shims.ts).
 # Depends on `web`: dpay-relay's build.rs embeds e2e/dist-prod (the /wallet route serves the real
 # app from it) and FAILS LOUD when it's missing — this dependency keeps every relay build honest.
 test-relay: web
@@ -246,9 +245,12 @@ wasm-core:
 # the dist dpay-relay's build.rs embeds and serves at GET /wallet (+ /assets/*, immutable).
 # Gitignored — built here / at image time, never committed. Same wasm-backed DpayCore shim the
 # e2e suite exercises; the ONE divergent shim is the camera (real getUserMedia+jsQR vs inject).
+# The seam guard FAILS the build if any __DPAY_TEST_* seam leaks into the prod bundle (they are
+# mode-gated in e2e/web/shims.ts; `test-relay` depends on this, so `just check` enforces it too).
 web:
     cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps)
     cd e2e && node node_modules/vite/bin/vite.js build --mode web-prod
+    node scripts/check-web-prod-seams.mjs
 
 # Acceptance gate for the prod web wallet: builds the dist (`web`), serves the EXACT bytes a
 # real relay would, and drives them in headless chrome — DPAY_SELFCHECK PASS (wasm core boots),
