@@ -50,7 +50,7 @@ fn user_principal(pk: &[u8; 32]) -> Principal {
 
 /// A bare FakeLedger (read-surface catalog only — balances live on the fake-IC gateway at
 /// user principals, so there is nothing to pre-fund here).
-fn ledger(_a: [u8; 32], _b: [u8; 32]) -> FakeLedger {
+fn ledger() -> FakeLedger {
     FakeLedger::new()
 }
 
@@ -123,9 +123,7 @@ async fn call_raw(
 
 #[tokio::test]
 async fn health_ok() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let (state, _led) = state_from(ledger());
 
     let req = Request::builder()
         .method("GET")
@@ -143,9 +141,7 @@ async fn health_ok() {
 /// drops the build.rs wiring surfaces here.
 #[tokio::test]
 async fn version_route_reports_baked_commit() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let (state, _led) = state_from(ledger());
 
     let (status, body) = call(&state, get_req("/api/v1/version")).await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -171,9 +167,8 @@ async fn version_route_reports_baked_commit() {
 /// is *gone* (404) and, crucially, no money is created at the user's principal on the gateway.
 #[tokio::test]
 async fn faucet_disabled_mints_nothing() {
-    let payer = keypair();
     let merchant = keypair();
-    let (state, _led, fake) = state_with_fake(ledger(pubkey(&payer), pubkey(&merchant))).await;
+    let (state, _led, fake) = state_with_fake(ledger()).await;
     state.set_faucet_enabled(false);
     let merch_owner = user_principal(&pubkey(&merchant));
 
@@ -197,9 +192,8 @@ async fn faucet_disabled_mints_nothing() {
 /// ($100.00 in minor units).
 #[tokio::test]
 async fn faucet_enabled_mints() {
-    let payer = keypair();
     let merchant = keypair();
-    let (state, _led, fake) = state_with_fake(ledger(pubkey(&payer), pubkey(&merchant))).await;
+    let (state, _led, fake) = state_with_fake(ledger()).await;
     let merch_hex = hex::encode(pubkey(&merchant));
     let merch_owner = user_principal(&pubkey(&merchant));
 
@@ -227,9 +221,8 @@ async fn faucet_enabled_mints() {
 /// decimal string, and the (string-OR-number-accepting) deserializer must parse a quoted amount.
 #[tokio::test]
 async fn amounts_serialize_as_decimal_string_above_2p53() {
-    let payer = keypair();
     let merchant = keypair();
-    let (state, _led, fake) = state_with_fake(ledger(pubkey(&payer), pubkey(&merchant))).await;
+    let (state, _led, fake) = state_with_fake(ledger()).await;
     let merch_hex = hex::encode(pubkey(&merchant));
     let merch_owner = user_principal(&pubkey(&merchant));
     const BIG: u64 = 9_007_199_254_740_993; // 2^53 + 1 — lossy through JS `number`, exact as a string
@@ -265,9 +258,8 @@ async fn amounts_serialize_as_decimal_string_above_2p53() {
 /// that needs it (faucet → 503 "not attached" contract instead, since the route exists).
 #[tokio::test]
 async fn api_v2_gateway_mounting_pinned() {
-    let payer = keypair();
     let merchant = keypair();
-    let (state, _led, _fake) = state_with_fake(ledger(pubkey(&payer), pubkey(&merchant))).await;
+    let (state, _led, _fake) = state_with_fake(ledger()).await;
 
     // Status: 200, CBOR, non-empty (the app's gateway pre-flight).
     let (status, headers, bytes) = call_raw(&state, get_req("/api/v2/status")).await;
@@ -285,7 +277,7 @@ async fn api_v2_gateway_mounting_pinned() {
     assert_eq!(status, StatusCode::BAD_REQUEST, "garbage envelope must 400");
 
     // Without the gateway attached the /api/v2 namespace is gone (404)…
-    let (bare_state, _led2) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let (bare_state, _led2) = state_from(ledger());
     let garbage_bare = Request::builder()
         .method("POST")
         .uri("/api/v2/canister/aaaaa-aa/call")
@@ -312,7 +304,7 @@ async fn api_v2_gateway_mounting_pinned() {
 async fn signed_transfer_through_api_v2_moves_funds_and_lands_in_history() {
     let payer = keypair();
     let merchant = keypair();
-    let (state, _led, fake) = state_with_fake(ledger(pubkey(&payer), pubkey(&merchant))).await;
+    let (state, _led, fake) = state_with_fake(ledger()).await;
     let payer_owner = user_principal(&pubkey(&payer));
     let merch_owner = user_principal(&pubkey(&merchant));
 
@@ -400,8 +392,7 @@ async fn signed_transfer_through_api_v2_moves_funds_and_lands_in_history() {
 #[tokio::test]
 async fn transactions_endpoint_returns_history_newest_first() {
     let payer = keypair();
-    let merchant = keypair();
-    let (state, _led, fake) = state_with_fake(ledger(pubkey(&payer), pubkey(&merchant))).await;
+    let (state, _led, fake) = state_with_fake(ledger()).await;
     let payer_owner = user_principal(&pubkey(&payer));
 
     // Two credits at the payer's principal, in sequence.
@@ -446,9 +437,7 @@ async fn transactions_endpoint_returns_history_newest_first() {
 /// download link that would 404.
 #[tokio::test]
 async fn landing_page_without_apk_shows_coming_soon() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let (state, _led) = state_from(ledger());
 
     let (status, headers, bytes) = call_raw(&state, get_req("/")).await;
     assert_eq!(status, StatusCode::OK);
@@ -481,9 +470,7 @@ async fn landing_page_without_apk_shows_coming_soon() {
 /// app/developer identification, contact, retention disclosure, and distributed-ledger limitation.
 #[tokio::test]
 async fn privacy_policy_is_served_with_required_disclosures() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let (state, _led) = state_from(ledger());
 
     let (status, headers, bytes) = call_raw(&state, get_req("/privacy")).await;
     assert_eq!(status, StatusCode::OK);
@@ -511,9 +498,7 @@ async fn privacy_policy_is_served_with_required_disclosures() {
 /// build's rounded size, and drops the disabled chip. A tiny build still reads "1 MB" (min floor).
 #[tokio::test]
 async fn landing_page_with_apk_shows_download_button() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let (state, _led) = state_from(ledger());
     let state = state.with_apk(Some(vec![0u8; 100])); // <0.5 MB → rounds to the 1 MB floor
 
     let (status, _headers, bytes) = call_raw(&state, get_req("/")).await;
@@ -541,9 +526,7 @@ async fn landing_page_with_apk_shows_download_button() {
 /// screen appears where the old faux barcode used to be.
 #[tokio::test]
 async fn landing_page_embeds_app_screenshots() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let (state, _led) = state_from(ledger());
 
     let (status, _headers, bytes) = call_raw(&state, get_req("/")).await;
     assert_eq!(status, StatusCode::OK);
@@ -561,9 +544,7 @@ async fn landing_page_embeds_app_screenshots() {
 /// an empty body.
 #[tokio::test]
 async fn screenshots_served_as_png_and_unknown_is_404() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let (state, _led) = state_from(ledger());
 
     let names = [
         "request.png",
@@ -601,9 +582,7 @@ async fn screenshots_served_as_png_and_unknown_is_404() {
 /// stays the landing page.
 #[tokio::test]
 async fn merchant_redirects_to_wallet() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let (state, _led) = state_from(ledger());
 
     let (ms, mh, _mbytes) = call_raw(&state, get_req("/merchant")).await;
     assert_eq!(ms, StatusCode::PERMANENT_REDIRECT);
@@ -623,9 +602,7 @@ async fn merchant_redirects_to_wallet() {
 /// in the browser, with no signup/terminal/fees, and the section links to the one web surface.
 #[tokio::test]
 async fn landing_page_answers_the_merchant_path() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let (state, _led) = state_from(ledger());
 
     let (status, _headers, bytes) = call_raw(&state, get_req("/")).await;
     assert_eq!(status, StatusCode::OK);
@@ -667,9 +644,7 @@ async fn landing_page_answers_the_merchant_path() {
 /// Without a configured APK the download route is a clean 404 — not an empty 200.
 #[tokio::test]
 async fn apk_download_absent_is_404() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let (state, _led) = state_from(ledger());
 
     let (status, _headers, bytes) = call_raw(&state, get_req("/download/dpay.apk")).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
@@ -679,9 +654,7 @@ async fn apk_download_absent_is_404() {
 /// With an APK configured the route serves the exact bytes as an APK attachment.
 #[tokio::test]
 async fn apk_download_serves_configured_bytes() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let (state, _led) = state_from(ledger());
     let apk = vec![0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02];
     let state = state.with_apk(Some(apk.clone()));
 
@@ -717,9 +690,7 @@ async fn apk_download_serves_configured_bytes() {
 /// revalidation); a non-matching etag must return the full body.
 #[tokio::test]
 async fn apk_download_revalidates_with_304_on_if_none_match() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let (state, _led) = state_from(ledger());
     let apk = vec![0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02];
     let state = state.with_apk(Some(apk.clone()));
 
@@ -777,9 +748,7 @@ async fn apk_download_revalidates_with_304_on_if_none_match() {
 /// ledger/minter/display metadata. Mirrors how the wallet consumes the catalog on load.
 #[tokio::test]
 async fn currencies_route_returns_demo_catalog() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let (state, _led) = state_from(ledger());
 
     let (status, body) = call(&state, get_req("/api/v1/currencies")).await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -973,7 +942,7 @@ async fn currencies_route_returns_demo_catalog() {
 async fn balances_route_returns_all_currencies_in_one_response() {
     let payer = keypair();
     let merchant = keypair();
-    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let (state, _led) = state_from(ledger());
 
     let (status, body) =
         call(&state, get_req(&format!("/api/v1/balances/{}", hex::encode(pubkey(&payer))))).await;
@@ -1007,13 +976,35 @@ async fn balances_route_returns_all_currencies_in_one_response() {
     assert_eq!(body_m["0"], "0", "merchant primary unfunded: {body_m}");
 }
 
+/// The settlement-era routes stay DEAD (2026-08-19 cutover): everything value-bearing left the
+/// relay for the app's own signed /api/v2 envelopes. This pins the tombstone — a reintroduced
+/// route here would silently put the relay back in the value path. Note /api/v1/faucet and
+/// /api/v1/balance/{hex} legitimately exist under test-helpers (fixture routes, separately
+/// tested); everything below must 404 in EVERY build.
+#[tokio::test]
+async fn settlement_era_routes_stay_404() {
+    let (state, _led) = state_from(ledger());
+    let gone = [
+        "/api/v1/pay",
+        "/api/v1/withdraw",
+        "/api/v1/receipt/00",
+        "/api/v1/receipt_pubkey",
+        "/api/v1/deposit/address/00",
+        "/api/v1/deposit/refresh/00",
+        "/api/v1/test/deposit/seed",
+    ];
+    for path in gone {
+        // call_raw, not call: a 404 carries no JSON body to parse.
+        let (status, _h, _b) = call_raw(&state, get_req(path)).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{path} must stay 404");
+    }
+}
+
 /// A bad account (not 32 bytes hex) is a clean `400` — matches the single `/balance` endpoint's
 /// parsing contract (the batch route shares the same hex-decode path).
 #[tokio::test]
 async fn balances_route_rejects_bad_pubkey() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let (state, _led) = state_from(ledger());
 
     let (status, body) = call(&state, get_req("/api/v1/balances/deadbeef")).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
@@ -1032,9 +1023,7 @@ async fn balances_route_rejects_bad_pubkey() {
 /// constants. `?currency=0` (DEMO_USD, not a ckERC-20 currency) → `503` (no onramp configured).
 #[tokio::test]
 async fn ckerc20_onramp_returns_params_for_ckusdc() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let (state, _led) = state_from(ledger());
 
     // currency 2 (ckUSDC) → 200 with the verified mainnet onramp constants.
     let (status, body) = call(&state, get_req("/api/v1/onramp/ckerc20?currency=2")).await;
@@ -1073,9 +1062,7 @@ async fn ckerc20_onramp_returns_params_for_ckusdc() {
 /// stays unchanged; only the `erc20_address` source moves to the catalog.
 #[tokio::test]
 async fn ckerc20_onramp_is_token_specific() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let (state, _led) = state_from(ledger());
 
     // ckUSDC (currency 2) → 200 with the USDC ERC-20 address (NO regression — same as the golden above).
     let (s_usdc, body_usdc) = call(&state, get_req("/api/v1/onramp/ckerc20?currency=2")).await;
@@ -1272,9 +1259,7 @@ async fn ckerc20_onramp_helper_is_chain_scoped() {
 /// asset reference = the page loads broken despite 200, so the referenced asset is fetched too.
 #[tokio::test]
 async fn wallet_page_serves_embedded_real_app_dist() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let (state, _led) = state_from(ledger());
 
     let (status, headers, bytes) = call_raw(&state, get_req("/wallet")).await;
     assert_eq!(status, StatusCode::OK, "/wallet must serve");
@@ -1326,9 +1311,7 @@ async fn wallet_page_serves_embedded_real_app_dist() {
 /// clean 404 — never a 200 with an empty body.
 #[tokio::test]
 async fn wallet_assets_404_cleanly_and_legacy_routes_are_gone() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let (state, _led) = state_from(ledger());
 
     // No catch-all: near-miss/unknown asset paths 404.
     for path in [
@@ -1357,9 +1340,7 @@ async fn wallet_assets_404_cleanly_and_legacy_routes_are_gone() {
 /// bytes; a near-miss vendored path stays a clean 404 (no catch-all).
 #[tokio::test]
 async fn wasm_core_served_and_unknown_path_is_404() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let (state, _led) = state_from(ledger());
 
     let (status, headers, bytes) = call_raw(&state, get_req("/dpay-core.wasm")).await;
     assert_eq!(status, StatusCode::OK, "/dpay-core.wasm must serve");

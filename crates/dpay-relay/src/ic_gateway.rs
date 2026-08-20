@@ -98,6 +98,12 @@ fn now_ns() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0)
 }
 
+/// Whole seconds since the epoch — the resolution the fake ledger's txn log and the eip-1559
+/// quote carry (matching what the app renders).
+fn now_secs() -> u64 {
+    now_ns() / 1_000_000_000
+}
+
 fn owner_key(owner: &Principal) -> (String, [u8; 32]) {
     (owner.to_text(), [0u8; 32])
 }
@@ -140,34 +146,12 @@ impl FakeIc {
         Arc::new(FakeIc { state: Mutex::new(st) })
     }
 
-    /// Credit a fake ledger at the user principal (faucet / test seeding).
-    pub fn credit(&self, ledger_text: &str, owner: &Principal, amount: u128) {
-        let mut s = self.state.lock().unwrap();
-        let Some(l) = s.ledgers.get(ledger_text).cloned() else {
-            return;
-        };
+    /// Credit a fake ledger at the user principal (faucet / test seeding) and record a mint
+    /// row in the txn log; returns the resulting balance. Mirrors the relay-era faucet contract
+    /// (credit + return balance) on principal-keyed state.
+    fn credit_and_log(&self, s: &mut FakeIcState, ledger_text: &str, owner: &Principal, amount: u128) -> u128 {
+        let currency = s.ledgers.get(ledger_text).map(|l| l.currency).unwrap_or(0);
         let k = bal_key(ledger_text, owner);
-        let to = k.1 .0.clone();
-        *s.balances.entry(k).or_insert(0) += amount;
-        s.txns.push(FakeTxn {
-            kind: "mint",
-            from: String::new(),
-            to,
-            amount,
-            currency: l.currency,
-            memo_hex: String::new(),
-            timestamp: now_ns() / 1_000_000_000,
-        });
-    }
-
-    /// Faucet: credit the ledger registered for `currency` at `owner`; returns the new balance.
-    /// Mirrors the relay-era faucet contract (credit + return balance) on principal-keyed state.
-    pub fn faucet_credit(&self, currency: Currency, owner: &Principal, amount: u128) -> u128 {
-        let mut s = self.state.lock().unwrap();
-        let Some(ledger_text) = s.ledgers.iter().find(|(_, l)| l.currency == currency).map(|(t, _)| t.clone()) else {
-            return 0;
-        };
-        let k = bal_key(&ledger_text, owner);
         let to = k.1 .0.clone();
         let bal = *s.balances.get(&k).unwrap_or(&0) + amount;
         *s.balances.entry(k).or_insert(0) += amount;
@@ -178,16 +162,26 @@ impl FakeIc {
             amount,
             currency,
             memo_hex: String::new(),
-            timestamp: now_ns() / 1_000_000_000,
+            timestamp: now_secs(),
         });
         bal
+    }
+
+    /// Faucet: credit the ledger registered for `currency` at `owner`; returns the new balance,
+    /// or 0 when no ledger is registered for the currency.
+    pub fn faucet_credit(&self, currency: Currency, owner: &Principal, amount: u128) -> u128 {
+        let mut s = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        let Some(ledger_text) = s.ledgers.iter().find(|(_, l)| l.currency == currency).map(|(t, _)| t.clone()) else {
+            return 0;
+        };
+        self.credit_and_log(&mut s, &ledger_text, owner, amount)
     }
 
     /// Per-currency balance map for an account across the catalog's ledgers (relay `/balances`).
     /// Balance of a currency's home ledger at `owner` (principal-keyed) — the /balance route's
     /// gateway twin. Returns 0 for unregistered currencies/fresh accounts (ICRC semantics).
     pub fn balance_for(&self, currency: Currency, owner: &Principal) -> u64 {
-        let s = self.state.lock().unwrap();
+        let s = self.state.lock().unwrap_or_else(|p| p.into_inner());
         for (text, st) in &s.ledgers {
             if st.currency == currency {
                 return s.balances.get(&bal_key(text, owner)).copied().unwrap_or(0).min(u64::MAX as u128) as u64;
@@ -201,7 +195,7 @@ impl FakeIc {
         catalog: &[crate::ledger::CurrencyDescriptor],
         account: &Account,
     ) -> std::collections::BTreeMap<String, crate::ledger::U64String> {
-        let s = self.state.lock().unwrap();
+        let s = self.state.lock().unwrap_or_else(|p| p.into_inner());
         let mut map = std::collections::BTreeMap::new();
         for d in catalog {
             let Some(l) = s.ledgers.get(&d.ledger) else { continue };
@@ -214,18 +208,9 @@ impl FakeIc {
         map
     }
 
-    /// Balance of an account on a fake ledger (relay `/balances` test path).
-    pub fn balance(&self, ledger_text: &str, account: &Account) -> u128 {
-        let s = self.state.lock().unwrap();
-        if !s.ledgers.contains_key(ledger_text) {
-            return 0;
-        }
-        *s.balances.get(&acct_key(ledger_text, account)).unwrap_or(&0)
-    }
-
     /// Newest-first transaction rows for an owner (relay `/transactions` test path).
     pub fn transactions(&self, owner: &Principal, currency: Currency, limit: usize) -> Vec<crate::ledger::TxnRecord> {
-        let s = self.state.lock().unwrap();
+        let s = self.state.lock().unwrap_or_else(|p| p.into_inner());
         let me = owner.to_text();
         let mut rows: Vec<crate::ledger::TxnRecord> = s
             .txns
@@ -248,7 +233,9 @@ impl FakeIc {
         rows
     }
 
-    fn execute_call(&self, env: &dpay_icp::envelope::VerifiedEnvelope) -> RequestState {
+    /// Execute a `call` envelope against the fake ledgers. The caller MUST hold the state lock
+    /// (single critical section with the dedup check + outcome insert — see [`submit`]).
+    fn execute_call(&self, s: &mut FakeIcState, env: &dpay_icp::envelope::VerifiedEnvelope) -> RequestState {
         let (Some(canister_p), Some(method), Some(arg)) = (&env.canister, &env.method_name, &env.arg) else {
             return RequestState::Rejected { code: 5, message: "call content missing canister/method/arg".into() };
         };
@@ -257,140 +244,168 @@ impl FakeIc {
         let sender = account_owner(&Account { owner: env.sender.clone(), subaccount: [0u8; 32] });
         // All balance touches below are scoped to THIS ledger canister (per-ledger balances).
         let from_key = (canister.clone(), sender.clone());
-        let mut s = self.state.lock().unwrap();
         let block = s.next_block;
         s.next_block += 1;
-        let ts = now_ns() / 1_000_000_000;
 
-        macro_rules! txn {
-            ($kind:expr, $from:expr, $to:expr, $amount:expr, $memo:expr) => {{
-                let currency = s
-                    .ledgers
-                    .get(&canister)
-                    .map(|l| l.currency)
-                    .unwrap_or(0);
-                s.txns.push(FakeTxn {
-                    kind: $kind,
-                    from: $from,
-                    to: $to,
-                    amount: $amount,
-                    currency,
-                    memo_hex: $memo,
-                    timestamp: ts,
-                });
-            }};
-        }
-
-        let method_name = method.as_str();
-        match method_name {
-            "icrc1_transfer" => {
-                let Some(cfg) = s.ledgers.get(&canister).cloned() else {
-                    return RequestState::Rejected { code: 3, message: format!("canister {canister} not found") };
-                };
-                let Ok(arg) = decode_transfer_arg(&arg) else {
-                    return RequestState::Rejected { code: 5, message: "malformed icrc1_transfer arg".into() };
-                };
-                let to = (canister.clone(), account_owner(&arg.to));
-                if let Some(expected) = cfg.fee {
-                    if arg.fee != Some(expected) {
-                        return RequestState::Replied(encode_transfer_bad_fee(expected));
-                    }
-                }
-                let bal = *s.balances.get(&from_key).unwrap_or(&0);
-                let spend = arg.amount + arg.fee.unwrap_or(0);
-                if bal < spend {
-                    return RequestState::Replied(encode_transfer_insufficient_funds(bal));
-                }
-                *s.balances.entry(from_key.clone()).or_insert(0) -= spend;
-                *s.balances.entry(to.clone()).or_insert(0) += arg.amount;
-                let memo_hex = arg.memo.clone().map(|m| m.iter().map(|b| format!("{b:02x}")).collect::<String>()).unwrap_or_default();
-                // `to` is the per-ledger balance key (canister, account); the txn row wants the
-                // PAYEE PRINCIPAL TEXT (to.1.0), not the canister id (to.0).
-                txn!("transfer", sender.0, to.1 .0, arg.amount, memo_hex);
-                RequestState::Replied(encode_transfer_ok(block))
-            }
-            "icrc2_approve" => {
-                let Some(cfg) = s.ledgers.get(&canister).cloned() else {
-                    return RequestState::Rejected { code: 3, message: format!("canister {canister} not found") };
-                };
-                let Ok(arg) = decode_approve_arg(&arg) else {
-                    return RequestState::Rejected { code: 5, message: "malformed icrc2_approve arg".into() };
-                };
-                let fee = arg.fee.unwrap_or(0);
-                let ApproveArg { from_subaccount, spender, amount, .. } = arg;
-                let from = (
-                    canister.clone(),
-                    (
-                        env.sender.to_text(),
-                        from_subaccount.unwrap_or([0u8; 32]),
-                    ),
-                );
-                if let Some(expected) = cfg.fee {
-                    if arg.fee != Some(expected) {
-                        return RequestState::Replied(encode_transfer_bad_fee(expected));
-                    }
-                }
-                let bal = *s.balances.get(&from).unwrap_or(&0);
-                if bal < fee {
-                    return RequestState::Replied(encode_transfer_insufficient_funds(bal));
-                }
-                if fee > 0 {
-                    *s.balances.entry(from.clone()).or_insert(0) -= fee;
-                }
-                s.allowances.insert((from, account_owner(&spender)), amount.unwrap_or(0));
-                RequestState::Replied(encode_approve_ok(block))
-            }
+        match method.as_str() {
+            "icrc1_transfer" => Self::icrc1_transfer(s, &canister, &from_key, &sender, arg, block),
+            "icrc2_approve" => Self::icrc2_approve(s, &canister, &env.sender, arg, block),
             "retrieve_btc_with_approval" => {
-                let Ok(arg) = decode_retrieve_btc_arg(&arg) else {
+                Self::burn_via_minter(s, &canister, &env.sender, "retrieve_btc_with_approval", arg, block)
+            }
+            "withdraw_eth" => Self::burn_via_minter(s, &canister, &env.sender, "withdraw_eth", arg, block),
+            "withdraw_erc20" => Self::withdraw_erc20(s, &canister, &env.sender, arg, block),
+            other => RequestState::Rejected { code: 3, message: format!("method {other:?} not available on the gateway") },
+        }
+    }
+
+    /// `icrc1_transfer`: fee check → funds check → move → reply with the block index.
+    fn icrc1_transfer(
+        s: &mut FakeIcState,
+        canister: &str,
+        from_key: &(String, (String, [u8; 32])),
+        sender: &(String, [u8; 32]),
+        arg: &[u8],
+        block: u64,
+    ) -> RequestState {
+        let Some(cfg) = s.ledgers.get(canister).cloned() else {
+            return RequestState::Rejected { code: 3, message: format!("canister {canister} not found") };
+        };
+        let Ok(arg) = decode_transfer_arg(arg) else {
+            return RequestState::Rejected { code: 5, message: "malformed icrc1_transfer arg".into() };
+        };
+        let to = (canister.to_string(), account_owner(&arg.to));
+        if let Some(expected) = cfg.fee {
+            if arg.fee != Some(expected) {
+                return RequestState::Replied(encode_transfer_bad_fee(expected));
+            }
+        }
+        let bal = *s.balances.get(from_key).unwrap_or(&0);
+        let spend = arg.amount + arg.fee.unwrap_or(0);
+        if bal < spend {
+            return RequestState::Replied(encode_transfer_insufficient_funds(bal));
+        }
+        *s.balances.entry(from_key.clone()).or_insert(0) -= spend;
+        *s.balances.entry(to.clone()).or_insert(0) += arg.amount;
+        let memo_hex = arg.memo.clone().map(|m| m.iter().map(|b| format!("{b:02x}")).collect::<String>()).unwrap_or_default();
+        // `to` is the per-ledger balance key (canister, account); the txn row wants the
+        // PAYEE PRINCIPAL TEXT (to.1.0), not the canister id (to.0).
+        let ts = now_secs();
+        let currency = s.ledgers.get(canister).map(|l| l.currency).unwrap_or(0);
+        s.txns.push(FakeTxn {
+            kind: "transfer",
+            from: sender.0.clone(),
+            to: to.1 .0.clone(),
+            amount: arg.amount,
+            currency,
+            memo_hex,
+            timestamp: ts,
+        });
+        RequestState::Replied(encode_transfer_ok(block))
+    }
+
+    /// `icrc2_approve`: pay the (optional) fee, record the allowance for the named spender.
+    fn icrc2_approve(
+        s: &mut FakeIcState,
+        canister: &str,
+        sender: &Principal,
+        arg: &[u8],
+        block: u64,
+    ) -> RequestState {
+        let Some(cfg) = s.ledgers.get(canister).cloned() else {
+            return RequestState::Rejected { code: 3, message: format!("canister {canister} not found") };
+        };
+        let Ok(arg) = decode_approve_arg(arg) else {
+            return RequestState::Rejected { code: 5, message: "malformed icrc2_approve arg".into() };
+        };
+        let fee = arg.fee.unwrap_or(0);
+        let ApproveArg { from_subaccount, spender, amount, .. } = arg;
+        let from = (
+            canister.to_string(),
+            (
+                sender.to_text(),
+                from_subaccount.unwrap_or([0u8; 32]),
+            ),
+        );
+        if let Some(expected) = cfg.fee {
+            if arg.fee != Some(expected) {
+                return RequestState::Replied(encode_transfer_bad_fee(expected));
+            }
+        }
+        let bal = *s.balances.get(&from).unwrap_or(&0);
+        if bal < fee {
+            return RequestState::Replied(encode_transfer_insufficient_funds(bal));
+        }
+        if fee > 0 {
+            *s.balances.entry(from.clone()).or_insert(0) -= fee;
+        }
+        s.allowances.insert((from, account_owner(&spender)), amount.unwrap_or(0));
+        RequestState::Replied(encode_approve_ok(block))
+    }
+
+    /// `retrieve_btc_with_approval` / `withdraw_eth`: burn the user's pre-approved funds on the
+    /// minter's home ledger.
+    fn burn_via_minter(
+        s: &mut FakeIcState,
+        canister: &str,
+        sender: &Principal,
+        method: &str,
+        arg: &[u8],
+        block: u64,
+    ) -> RequestState {
+        let (from_subaccount, amount) = match method {
+            "retrieve_btc_with_approval" => {
+                let Ok(arg) = decode_retrieve_btc_arg(arg) else {
                     return RequestState::Rejected { code: 5, message: "malformed retrieve arg".into() };
                 };
                 let RetrieveBtcArg { from_subaccount, amount, .. } = arg;
-                let Some(home) = s.minters.get(&canister).cloned() else {
-                    return RequestState::Rejected { code: 3, message: format!("canister {canister} is not a minter") };
-                };
-                match burn_approved(&mut s, &home, &canister, &env.sender, from_subaccount, u128::from(amount)) {
-                    Ok(()) => RequestState::Replied(encode_minter_ok(block)),
-                    Err(msg) => RequestState::Rejected { code: 5, message: msg },
-                }
+                (from_subaccount, u128::from(amount))
             }
-            "withdraw_eth" => {
-                let Ok(arg) = decode_withdraw_eth_arg(&arg) else {
+            _ => {
+                let Ok(arg) = decode_withdraw_eth_arg(arg) else {
                     return RequestState::Rejected { code: 5, message: "malformed withdraw_eth arg".into() };
                 };
                 let WithdrawEthArg { from_subaccount, amount, .. } = arg;
-                let Some(home) = s.minters.get(&canister).cloned() else {
-                    return RequestState::Rejected { code: 3, message: format!("canister {canister} is not a minter") };
-                };
-                match burn_approved(&mut s, &home, &canister, &env.sender, from_subaccount, u128::from(amount)) {
-                    Ok(()) => RequestState::Replied(encode_minter_ok(block)),
-                    Err(msg) => RequestState::Rejected { code: 5, message: msg },
-                }
+                (from_subaccount, u128::from(amount))
             }
-            "withdraw_erc20" => {
-                // Dual-ledger: gas (ckETH) + amount (ckERC20), both pre-approved to the minter.
-                // The arg names the ckERC20 ledger; the gas ledger is the minter's home ledger.
-                let Ok(arg) = decode_withdraw_erc20_arg(&arg) else {
-                    return RequestState::Rejected { code: 5, message: "malformed withdraw_erc20 arg".into() };
-                };
-                let home = s.minters.get(&canister).cloned().unwrap_or_default();
-                if home.is_empty() {
-                    return RequestState::Rejected { code: 3, message: format!("canister {canister} is not a minter") };
-                }
-                let amount_ledger = arg.ckerc20_ledger_id.to_text();
-                // Amount leg: the ckERC20 ledger itself, spent by the minter.
-                match burn_approved(&mut s, &amount_ledger, &canister, &env.sender, arg.from_ckerc20_subaccount, arg.amount) {
-                    Ok(()) => {}
-                    Err(msg) => return RequestState::Rejected { code: 5, message: msg },
-                }
-                // Gas leg: the minter's home (ckETH) ledger, spent by the minter.
-                match burn_approved(&mut s, &home, &canister, &env.sender, arg.from_cketh_subaccount, GAS_FEE_WEI) {
-                    Ok(()) => {}
-                    Err(msg) => return RequestState::Rejected { code: 5, message: msg },
-                }
-                RequestState::Replied(encode_minter_ok(block))
-            }
-            other => RequestState::Rejected { code: 3, message: format!("method {other:?} not available on the gateway") },
+        };
+        let Some(home) = s.minters.get(canister).cloned() else {
+            return RequestState::Rejected { code: 3, message: format!("canister {canister} is not a minter") };
+        };
+        match burn_approved(s, &home, canister, sender, from_subaccount, amount) {
+            Ok(()) => RequestState::Replied(encode_minter_ok(block)),
+            Err(msg) => RequestState::Rejected { code: 5, message: msg },
         }
+    }
+
+    /// `withdraw_erc20` — dual-ledger: gas (ckETH) + amount (ckERC20), both pre-approved to the
+    /// minter. The arg names the ckERC20 ledger; the gas ledger is the minter's home ledger.
+    fn withdraw_erc20(
+        s: &mut FakeIcState,
+        canister: &str,
+        sender: &Principal,
+        arg: &[u8],
+        block: u64,
+    ) -> RequestState {
+        let Ok(arg) = decode_withdraw_erc20_arg(arg) else {
+            return RequestState::Rejected { code: 5, message: "malformed withdraw_erc20 arg".into() };
+        };
+        let home = s.minters.get(canister).cloned().unwrap_or_default();
+        if home.is_empty() {
+            return RequestState::Rejected { code: 3, message: format!("canister {canister} is not a minter") };
+        }
+        let amount_ledger = arg.ckerc20_ledger_id.to_text();
+        // Amount leg: the ckERC20 ledger itself, spent by the minter.
+        match burn_approved(s, &amount_ledger, canister, sender, arg.from_ckerc20_subaccount, arg.amount) {
+            Ok(()) => {}
+            Err(msg) => return RequestState::Rejected { code: 5, message: msg },
+        }
+        // Gas leg: the minter's home (ckETH) ledger, spent by the minter.
+        match burn_approved(s, &home, canister, sender, arg.from_cketh_subaccount, GAS_FEE_WEI) {
+            Ok(()) => {}
+            Err(msg) => return RequestState::Rejected { code: 5, message: msg },
+        }
+        RequestState::Replied(encode_minter_ok(block))
     }
 
     fn execute_query(&self, env: &dpay_icp::envelope::VerifiedEnvelope) -> Result<Vec<u8>, (u64, String)> {
@@ -399,7 +414,7 @@ impl FakeIc {
         };
         let canister = canister_p.to_text();
         let arg: &[u8] = arg;
-        let s = self.state.lock().unwrap();
+        let s = self.state.lock().unwrap_or_else(|p| p.into_inner());
         match method.as_str() {
             "icrc1_balance_of" => {
                 let Ok(a) = decode_account_arg(&arg) else {
@@ -436,11 +451,11 @@ impl FakeIc {
             }
             "eip_1559_transaction_price" => {
                 Ok(encode_eip1559_price(&Eip1559Price {
-                    gas_limit: 30_000,
-                    max_fee_per_gas: 2_500_000_000_000,
-                    max_priority_fee_per_gas: 100_000_000,
+                    gas_limit: EIP1559_GAS_LIMIT,
+                    max_fee_per_gas: EIP1559_MAX_FEE_PER_GAS,
+                    max_priority_fee_per_gas: EIP1559_MAX_PRIORITY_FEE_PER_GAS,
                     max_transaction_fee: GAS_FEE_WEI,
-                    timestamp: Some(now_ns() / 1_000_000_000),
+                    timestamp: Some(now_secs()),
                 }))
             }
             other => Err((3, format!("query {other:?} not available on the gateway"))),
@@ -450,6 +465,10 @@ impl FakeIc {
 
 /// Fixed gas price the gateway quotes + charges on the dual-ledger path.
 const GAS_FEE_WEI: u128 = 78_000_000_000_000;
+/// eip-1559 quote constants (the fixed price curve the gateway models):
+const EIP1559_GAS_LIMIT: u128 = 30_000;
+const EIP1559_MAX_FEE_PER_GAS: u128 = 2_500_000_000_000; // 2.5 kgwei
+const EIP1559_MAX_PRIORITY_FEE_PER_GAS: u128 = 100_000_000; // 0.1 gwei
 
 /// Burn `amount` of the user's pre-approved funds on `ledger_text`, spent by `spender_text`
 /// (the minter the icrc2_approve named). The allowance+balance keys are PER-LEDGER; the spender
@@ -483,7 +502,7 @@ fn burn_approved(
         amount,
         currency: s.ledgers.get(ledger_text).map(|l| l.currency).unwrap_or(0),
         memo_hex: String::new(),
-        timestamp: now_ns() / 1_000_000_000,
+        timestamp: now_secs(),
     });
     Ok(())
 }
@@ -530,110 +549,119 @@ pub async fn submit(
     }
 
     match kind.as_str() {
-        "call" => {
-            let rid = env.request_id;
-            {
-                let s = fake.state.lock().unwrap();
-                if let Some(existing) = s.requests.get(&rid) {
-                    // Identical-byte resubmit (same rid) — executed once, replay is free.
-                    let _ = existing;
-                    return cbor_response(StatusCode::ACCEPTED, Vec::new());
-                }
-            }
-            let outcome = fake.execute_call(&env);
-            let mut s = fake.state.lock().unwrap();
-            s.requests.insert(rid, outcome);
-            cbor_response(StatusCode::ACCEPTED, Vec::new())
-        }
-        "query" => match fake.execute_query(&env) {
-            Ok(arg) => {
-                let reply = Cbor::Map(vec![
-                    (Cbor::Text("status".into()), Cbor::Text("replied".into())),
-                    (
-                        Cbor::Text("reply".into()),
-                        Cbor::Map(vec![(Cbor::Text("arg".into()), Cbor::Bytes(arg))]),
-                    ),
-                ]);
-                cbor_response(StatusCode::OK, { let mut b = Vec::new(); cbor_encode(&reply, &mut b); b })
-            }
-            Err((code, message)) => {
-                let reply = Cbor::Map(vec![
-                    (Cbor::Text("status".into()), Cbor::Text("rejected".into())),
-                    (Cbor::Text("reject_code".into()), Cbor::Uint(code)),
-                    (Cbor::Text("reject_message".into()), Cbor::Text(message)),
-                ]);
-                cbor_response(StatusCode::OK, { let mut b = Vec::new(); cbor_encode(&reply, &mut b); b })
-            }
-        },
-        "read_state" => {
-            // The app's read_state envelope asks for request_status/<rid> paths (+ time). We
-            // cannot see the paths without decoding them (they live in the signed content);
-            // simplest faithful behavior: return a cert covering ALL known request_status
-            // entries + the certified time leaf. The tree lookup prunes to what the caller
-            // asked for.
-            let tree = {
-                let s = fake.state.lock().unwrap();
-                let now = now_ns();
-                let mut req_trees: Vec<Tree> = Vec::new();
-                // (no public iteration over requests without exposing rid keys — build below)
-                let entries: Vec<([u8; 32], RequestState)> = s
-                    .requests
-                    .iter()
-                    .map(|(k, v)| (*k, v.clone()))
-                    .collect();
-                for (rid, st) in entries {
-                    let inner = match st {
-                        RequestState::Replied(arg) => {
-                            let reply_leaf = Cbor::Map(vec![(Cbor::Text("arg".into()), Cbor::Bytes(arg))]);
-                            let mut enc = Vec::new();
-                            cbor_encode(&reply_leaf, &mut enc);
-                            Tree::Fork(
-                                Box::new(Tree::Labeled(b"status".to_vec(), Box::new(Tree::Leaf(b"replied".to_vec())))),
-                                Box::new(Tree::Labeled(b"reply".to_vec(), Box::new(Tree::Leaf(enc)))),
-                            )
-                        }
-                        RequestState::Rejected { code, message } => Tree::Fork(
-                            Box::new(Tree::Labeled(b"status".to_vec(), Box::new(Tree::Leaf(b"rejected".to_vec())))),
-                            Box::new(Tree::Fork(
-                                Box::new(Tree::Labeled(
-                                    b"reject_code".to_vec(),
-                                    Box::new(Tree::Leaf(uleb_bytes(u128::from(code)))),
-                                )),
-                                Box::new(Tree::Labeled(
-                                    b"reject_message".to_vec(),
-                                    Box::new(Tree::Leaf(message.into_bytes())),
-                                )),
-                            )),
-                        ),
-                    };
-                    req_trees.push(Tree::Labeled(rid.to_vec(), Box::new(inner)));
-                }
-                let mut status_branch = req_trees.pop().unwrap_or(Tree::Empty);
-                while let Some(t) = req_trees.pop() {
-                    status_branch = Tree::Fork(Box::new(t), Box::new(status_branch));
-                }
-                let rs = Tree::Labeled(b"request_status".to_vec(), Box::new(status_branch));
-                let time_leaf = Tree::Labeled(b"time".to_vec(), Box::new(Tree::Leaf(uleb_bytes(u128::from(now)))));
-                Tree::Fork(Box::new(rs), Box::new(time_leaf))
-            };
-            let tree_cbor = tree_to_cbor(&tree);
-            let mut cert = Vec::new();
-            cbor_encode(
-                &Cbor::Map(vec![
-                    (Cbor::Text("tree".into()), tree_cbor),
-                    (Cbor::Text("signature".into()), Cbor::Bytes(vec![0u8; 64])),
-                ]),
-                &mut cert,
-            );
-            let mut body = Vec::new();
-            cbor_encode(
-                &Cbor::Map(vec![(Cbor::Text("certificate".into()), Cbor::Bytes(cert))]),
-                &mut body,
-            );
-            cbor_response(StatusCode::OK, body)
-        }
+        "call" => submit_call(&fake, &env),
+        "query" => submit_query(&fake, &env),
+        "read_state" => submit_read_state(&fake),
         other => err_text(StatusCode::NOT_FOUND, &format!("unknown /api/v2 kind {other:?}")),
     }
+}
+
+/// The `call` branch: check → execute → insert under ONE lock acquisition (see the dedup
+/// invariant note on the `requests` map).
+fn submit_call(fake: &Arc<FakeIc>, env: &dpay_icp::envelope::VerifiedEnvelope) -> Response {
+    // Dedup invariant (flow 09 relies on it): an identical-byte resubmit of a request_id
+    // must NEVER execute twice. The check → execute → insert sequence runs under ONE
+    // lock acquisition — the execute helpers take `&mut FakeIcState` — so two concurrent
+    // identical submits cannot interleave (previously the check dropped the lock before
+    // execute re-acquired it, racing a double execution).
+    let rid = env.request_id;
+    let mut s = fake.state.lock().unwrap_or_else(|p| p.into_inner());
+    if s.requests.get(&rid).is_some() {
+        // Identical-byte resubmit (same rid) — executed once, replay is free.
+        return cbor_response(StatusCode::ACCEPTED, Vec::new());
+    }
+    let outcome = fake.execute_call(&mut s, env);
+    s.requests.insert(rid, outcome);
+    cbor_response(StatusCode::ACCEPTED, Vec::new())
+}
+
+/// The `query` branch: execute immediately, reply replied/rejected CBOR.
+fn submit_query(fake: &Arc<FakeIc>, env: &dpay_icp::envelope::VerifiedEnvelope) -> Response {
+    match fake.execute_query(env) {
+        Ok(arg) => {
+            let reply = Cbor::Map(vec![
+                (Cbor::Text("status".into()), Cbor::Text("replied".into())),
+                (
+                    Cbor::Text("reply".into()),
+                    Cbor::Map(vec![(Cbor::Text("arg".into()), Cbor::Bytes(arg))]),
+                ),
+            ]);
+            cbor_response(StatusCode::OK, { let mut b = Vec::new(); cbor_encode(&reply, &mut b); b })
+        }
+        Err((code, message)) => {
+            let reply = Cbor::Map(vec![
+                (Cbor::Text("status".into()), Cbor::Text("rejected".into())),
+                (Cbor::Text("reject_code".into()), Cbor::Uint(code)),
+                (Cbor::Text("reject_message".into()), Cbor::Text(message)),
+            ]);
+            cbor_response(StatusCode::OK, { let mut b = Vec::new(); cbor_encode(&reply, &mut b); b })
+        }
+    }
+}
+
+/// The `read_state` branch: a cert covering ALL known request_status entries + the certified
+/// time leaf. The app's read_state envelope asks for request_status/<rid> paths (+ time); we
+/// cannot see the paths without decoding them (they live in the signed content), so the
+/// simplest faithful behavior is the full tree — the client-side lookup prunes to what the
+/// caller asked for.
+fn submit_read_state(fake: &Arc<FakeIc>) -> Response {
+    let tree = {
+        let s = fake.state.lock().unwrap_or_else(|p| p.into_inner());
+        let now = now_ns();
+        let entries: Vec<([u8; 32], RequestState)> =
+            s.requests.iter().map(|(k, v)| (*k, v.clone())).collect();
+        drop(s);
+        let mut req_trees: Vec<Tree> = Vec::new();
+        for (rid, st) in entries {
+            let inner = match st {
+                RequestState::Replied(arg) => {
+                    let reply_leaf = Cbor::Map(vec![(Cbor::Text("arg".into()), Cbor::Bytes(arg))]);
+                    let mut enc = Vec::new();
+                    cbor_encode(&reply_leaf, &mut enc);
+                    Tree::Fork(
+                        Box::new(Tree::Labeled(b"status".to_vec(), Box::new(Tree::Leaf(b"replied".to_vec())))),
+                        Box::new(Tree::Labeled(b"reply".to_vec(), Box::new(Tree::Leaf(enc)))),
+                    )
+                }
+                RequestState::Rejected { code, message } => Tree::Fork(
+                    Box::new(Tree::Labeled(b"status".to_vec(), Box::new(Tree::Leaf(b"rejected".to_vec())))),
+                    Box::new(Tree::Fork(
+                        Box::new(Tree::Labeled(
+                            b"reject_code".to_vec(),
+                            Box::new(Tree::Leaf(uleb_bytes(u128::from(code)))),
+                        )),
+                        Box::new(Tree::Labeled(
+                            b"reject_message".to_vec(),
+                            Box::new(Tree::Leaf(message.into_bytes())),
+                        )),
+                    )),
+                ),
+            };
+            req_trees.push(Tree::Labeled(rid.to_vec(), Box::new(inner)));
+        }
+        let mut status_branch = req_trees.pop().unwrap_or(Tree::Empty);
+        while let Some(t) = req_trees.pop() {
+            status_branch = Tree::Fork(Box::new(t), Box::new(status_branch));
+        }
+        let rs = Tree::Labeled(b"request_status".to_vec(), Box::new(status_branch));
+        let time_leaf = Tree::Labeled(b"time".to_vec(), Box::new(Tree::Leaf(uleb_bytes(u128::from(now)))));
+        Tree::Fork(Box::new(rs), Box::new(time_leaf))
+    };
+    let tree_cbor = tree_to_cbor(&tree);
+    let mut cert = Vec::new();
+    cbor_encode(
+        &Cbor::Map(vec![
+            (Cbor::Text("tree".into()), tree_cbor),
+            (Cbor::Text("signature".into()), Cbor::Bytes(vec![0u8; 64])),
+        ]),
+        &mut cert,
+    );
+    let mut body = Vec::new();
+    cbor_encode(
+        &Cbor::Map(vec![(Cbor::Text("certificate".into()), Cbor::Bytes(cert))]),
+        &mut body,
+    );
+    cbor_response(StatusCode::OK, body)
 }
 
 /// GET `/api/v2/status` — minimal healthy response (the app only needs 200; ic:time comes

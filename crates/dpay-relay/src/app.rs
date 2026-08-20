@@ -12,32 +12,20 @@
 //! - `GET /dpay-core.wasm` — the shared wire core (canonical same-origin URL for any web surface;
 //!   the wallet build carries its own hashed copy under /assets/).
 //! - `GET /shots/{name}` — the real app screenshots embedded in the landing page.
-//! - `POST /api/v1/pay` — hands the payer's signed-authorization QR to the ledger and returns a
-//!   receipt. Two properties matter for the demo and are enforced here (not in the ledger):
-//!   * **Idempotency** — keyed by the authorization nonce (the merchant's `request_id`). A repeat
-//!     submission returns the *same cached receipt* and never settles twice. This makes the
-//!     merchant's "scan → submit" safe to mash / auto-retry.
-//!   * **Retries** — a `LedgerError::Transient` is retried a few times with small backoff;
-//!     a `Rejected` is final and becomes `422`.
-//! - `GET /api/v1/health` — the merchant's pre-flight green dot; consults `ledger.healthy()`.
+//! - `GET /api/v1/health` — liveness pre-flight; consults `ledger.healthy()`.
 //! - `GET /api/v1/transactions/{hex}?currency=N&limit=30` — the wallet's durable transaction list,
-//!   sourced from the ledger (newest-first); replaces the ephemeral in-memory UI list.
-//! - `GET  /api/v1/deposit/address/{hex}?currency=N` — ckBTC-style deposit address for the wallet's
-//!   "Add money" sheet (proxies the facade → ck minter `get_btc_address`).
-//! - `POST /api/v1/deposit/refresh/{hex}?currency=N` — mint any now-confirmed UTXOs and report
-//!   what landed + what's still pending (proxies the facade → ck minter `update_balance`).
+//!   newest-first, read off the ICRC ledger's own transaction log at the user's principal.
 //! - `GET  /api/v1/deposit/info?currency=N` — static deposit instructions (min confirmations, fee,
-//!   min amount) so the sheet can render before showing the address.
-//! - `GET /api/v1/currencies` — the wallet's runtime asset catalog (closes issue #7): every
+//!   min amount) so the "Add money" sheet can render them.
+//! - `GET  /api/v1/currencies` — the wallet's runtime asset catalog (closes issue #7): every
 //!   registered currency with its ledger/minter/display metadata; read once on wallet load.
 //! - `GET  /api/v1/balances/{hex}` — ALL currency balances in ONE response (a flat map
 //!   `{currency: minor-units}`), replacing the wallet's old N+1 per-poll fetch loop (1 primary +
 //!   1 per-asset, each a relay→IC round trip) with a single request.
 //!
-//! The three deposit routes map **any** `LedgerError` to `503` — there is no `422` path, because the
-//! deposit proxy has no permanent-policy failure (no sig, no cap, no replay); see deposit plan §0.
-//!
-//! `safe_mode` is a wired-but-inert flag: the seam the demo flips to fall back to a degraded path.
+//! Read-only by construction: there is no value-moving route left on this crate (the 2026-08-19
+//! IC-rail cutover moved settlement to the app's own signed /api/v2 envelopes; the test-helpers
+//! fake-IC gateway is the offline e2e stand-in for that surface).
 
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -60,17 +48,12 @@ mod web_dist {
 
 use crate::ledger::{CurrencyDescriptor, Ledger, LedgerError, TxnRecord, U64String};
 
-/// Shared relay state. `Arc<dyn Ledger>` is the settlement seam; `idempotency` caches receipts by
-/// nonce so a duplicate submission is answered from cache and never re-settled.
+/// Shared relay state. `Arc<dyn Ledger>` is the read seam (catalog, balances, history).
 #[derive(Clone)]
 pub struct AppState {
     pub ledger: Arc<dyn Ledger>,
-    /// Seam for the demo's degraded fallback. Wiring only for now.
-    pub safe_mode: Arc<Mutex<bool>>,
-    /// Whether `POST /api/v1/faucet` (which *mints*) is served. Defaults to `true` — harmless
-    /// against the in-memory demo ledger this crate is normally exercised with. The binary turns it
-    /// **off** whenever it settles on a real ledger unless `DPAY_ENABLE_FAUCET` says otherwise:
-    /// against a canister with an open `mint`, an exposed faucet is an open money printer.
+    /// Whether `POST /api/v1/faucet` (which *mints*) is served. Test-helpers-only surface;
+    /// defaults to `true` — harmless against the offline fixtures it ships with.
     faucet_enabled: Arc<Mutex<bool>>,
     /// The Android build served at `GET /download/dpay.apk`, when one is configured. `None` renders
     /// a "coming soon" CTA on the landing page and answers the download route with `404`.
@@ -90,7 +73,6 @@ impl AppState {
     pub fn new(ledger: Arc<dyn Ledger>) -> Self {
         AppState {
             ledger,
-            safe_mode: Arc::new(Mutex::new(false)),
             faucet_enabled: Arc::new(Mutex::new(true)),
             apk: Arc::new(None),
             apk_version: String::new(),
@@ -117,14 +99,6 @@ impl AppState {
         }
         self.apk = Arc::new(apk);
         self
-    }
-
-    pub fn set_safe_mode(&self, on: bool) {
-        *self.safe_mode.lock().unwrap_or_else(|p| p.into_inner()) = on;
-    }
-
-    pub fn safe_mode(&self) -> bool {
-        *self.safe_mode.lock().unwrap_or_else(|p| p.into_inner())
     }
 
     pub fn set_faucet_enabled(&self, on: bool) {
@@ -383,8 +357,9 @@ async fn transactions(
     let currency = qs.currency.unwrap_or(DEMO_USD);
     let limit = qs.limit.unwrap_or(30).min(100);
     // With the fake-IC gateway attached (test-helpers), history reads the gateway's principal-keyed
-    // txn log — the same records signed transfers append. Prod reads `transactions_of` off the
-    // `dyn Ledger` (IC ledger icrc3 blocks via the ledger impl).
+    // txn log — the same records signed transfers append. Prod reads `transactions_on_ledger` off
+    // the `dyn Ledger`, which walks the ICRC ledger's own transaction log (icrc3) at the user's
+    // principal — see `AgentLedger::transactions_on_ledger`.
     #[cfg(feature = "test-helpers")]
     if let Some(fake) = state.fake_ic.clone() {
         use dpay_icp::principal::Principal as IcpPrincipal;
@@ -392,7 +367,20 @@ async fn transactions(
         let rows = fake.transactions(&owner, currency, limit as usize);
         return (StatusCode::OK, Json(TransactionsBody { transactions: rows })).into_response();
     }
-    match state.ledger.transactions_of(pk, currency, limit).await {
+    // History needs the currency's LEDGER principal — resolve it from the catalog (the same
+    // source /balances fans out over), then walk that ledger's own transaction log.
+    let catalog = match state.ledger.currencies().await {
+        Ok(c) => c,
+        Err(e) => return err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
+    };
+    let Some(desc) = catalog.iter().find(|d| d.currency == currency) else {
+        return err(StatusCode::BAD_REQUEST, format!("unknown currency {currency}"));
+    };
+    match state
+        .ledger
+        .transactions_on_ledger(&desc.ledger, pk, currency, limit)
+        .await
+    {
         Ok(rows) => (StatusCode::OK, Json(TransactionsBody { transactions: rows })).into_response(),
         Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
     }
@@ -434,8 +422,7 @@ async fn currencies(State(state): State<AppState>) -> Response {
 /// native ETH (`kind="native_eth"`, `erc20_address=null`) it builds ONE payable tx (depositEth, ETH
 /// value in the tx). Only meaningful for CkEthErc20-family currencies (e.g. ckUSDC = currency 2,
 /// native ckETH = a CkEthErc20 currency with token_contract null); a non-CkEthErc20 currency is a
-/// `Transient` (no onramp configured) → 503. Error mapping mirrors `withdraw`/`faucet`: Rejected →
-/// 422, Transient → 503.
+/// `Transient` (no onramp configured) → 503. Error mapping: Rejected → 422, Transient → 503.
 async fn ckerc20_onramp(
     State(state): State<AppState>,
     Query(qs): Query<CkErc20Query>,

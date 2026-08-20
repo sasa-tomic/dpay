@@ -11,7 +11,7 @@ use dpay_core::{Currency, PUBKEY_LEN};
 use super::ckerc20::CkErc20OnrampParams;
 use super::types::{CurrencyDescriptor, DepositInfo, LedgerError, TxnRecord};
 
-/// The settlement seam. `async_trait` keeps it dyn-compatible so `Arc<dyn Ledger>` works.
+/// The ledger read seam. `async_trait` keeps it dyn-compatible so `Arc<dyn Ledger>` works.
 #[async_trait]
 pub trait Ledger: Send + Sync {
     /// Read a balance by querying the ICRC-1 ledger `icrc1_balance_of` DIRECTLY on `ledger`.
@@ -27,11 +27,15 @@ pub trait Ledger: Send + Sync {
         currency: Currency,
     ) -> Result<u64, LedgerError>;
 
-    /// List this account's settled transactions in `currency`, newest-first, up to `limit`. Lets a
-    /// wallet render a durable history sourced from the ledger (the in-memory UI list is gone on
-    /// restart; this is the source of truth).
-    async fn transactions_of(
+    /// List this account's transactions in `currency`, newest-first, up to `limit` — the wallet's
+    /// durable history (the in-memory UI list is gone on restart; the ledger is the source of
+    /// truth). History is read off the ICRC ledger named by `ledger` (the catalog's Principal
+    /// text) — its OWN transaction log walked backwards, not a facade-maintained index.
+    /// [`AgentLedger`](crate::agent_ledger::AgentLedger) implements the real icrc3 walk;
+    /// [`FakeLedger`](super::FakeLedger) serves its in-memory log and ignores `ledger`.
+    async fn transactions_on_ledger(
         &self,
+        ledger: &str,
         pubkey: [u8; PUBKEY_LEN],
         currency: Currency,
         limit: u32,
@@ -46,33 +50,12 @@ pub trait Ledger: Send + Sync {
     /// Impl errors are `Transient` (an unreachable canister); there is no permanent-policy failure.
     async fn currencies(&self) -> Result<Vec<CurrencyDescriptor>, LedgerError>;
 
-    /// ckERC-20 onramp parameters (helper contract, ERC-20 address, facade principal) for the given
-    /// currency. Only meaningful for CkEthErc20-family currencies. Returns Transient(503) if the
-    /// currency has no ckERC-20 onramp configured.
+    /// ckERC-20 onramp parameters (helper contract, ERC-20 address) for the given currency — pure
+    /// display/config metadata for the app's own two Ethereum transactions (the user deposits at
+    /// their OWN principal). Only meaningful for CkEthErc20-family currencies. Returns
+    /// Transient(503) if the currency has no ckERC-20 onramp configured.
     async fn ckerc20_onramp_params(&self, currency: Currency) -> Result<CkErc20OnrampParams, LedgerError>;
 
-    /// Seed a pending deposit for `pubkey`/`currency` (the test-helpers hook a browser e2e harness
-    /// uses to simulate a confirmed ckBTC deposit landing). Mirrors `FakeLedger::register_deposit`:
-    /// the next `deposit_status` drains it and credits the balance.
-    ///
-    /// **Test-only.** Feature-gated behind `test-helpers` so the method — and the HTTP route that
-    /// calls it (`POST /api/v1/test/deposit/seed`) — do not compile into the prod image. Only
-    /// [`crate::FakeLedger`] implements this for real; the default returns a permanent `Rejected` so any
-    /// other ledger (e.g. the real `AgentLedger`) refuses rather than silently no-ops. The route is
-    /// only ever wired against a `FakeLedger` in the local e2e harness.
-    #[cfg(feature = "test-helpers")]
-    async fn seed_deposit(
-        &self,
-        pubkey: [u8; PUBKEY_LEN],
-        currency: Currency,
-        amount: u64,
-    ) -> Result<(), LedgerError> {
-        // Deliberately consume the args so unused-variable lints stay clean on impls that take the
-        // default (every real impl overrides this).
-        let _ = (pubkey, currency, amount);
-        Err(LedgerError::Rejected("seed_deposit not supported on this ledger".into()))
-    }
-
-    /// Liveness for the merchant's pre-flight green dot.
+    /// Liveness for `/health` (the wallet's connectivity pre-flight).
     async fn healthy(&self) -> bool;
 }

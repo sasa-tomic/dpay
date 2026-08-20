@@ -3,7 +3,7 @@ name = "dpay-relay"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "dpay relay: submits the payer's offline-signed authorization to the ledger; idempotent, retrying, health-checked. The only online dependency in the PoC."
+description = "dpay relay: the read-and-host surface around the dpay IC rails — currency catalog, balances/history at the user's principal, onramp metadata, the web wallet, and APK hosting. Value never moves through it (the app signs /api/v2 envelopes itself)."
 
 [lib]
 path = "src/lib.rs"
@@ -24,21 +24,17 @@ path = "src/main.rs"
 # `tests/live.rs` integration test.
 agent = ["dep:ic-agent", "dep:candid", "dep:pocket-ic", "dep:icrc-ledger-types", "dep:num-traits", "dpay-core/rng"]
 
-# Test-only HTTP surface for the e2e harness: adds `POST /api/v1/test/deposit/seed` so a browser
-# harness can simulate a confirmed ckBTC deposit landing on the FakeLedger (mirrors
-# `FakeLedger::register_deposit` — drain-on-next-refresh). OFF by default and **MUST NOT** be
-# enabled in the prod image (`just image` never passes it): the route + the trait method it calls
-# are both `#[cfg(feature = "test-helpers")]`, so they do not compile into the prod binary. The
-# local e2e harness builds the relay with `--features test-helpers`.
+# Test-only HTTP surface for the e2e harness: the fake-IC `/api/v2` gateway (the offline
+# stand-in for icp-api.io — the app signs envelopes and POSTs them HERE), plus the `POST /api/v1/faucet`
+# + `GET /api/v1/balance/{hex}` fixture routes the 78-flow suite rides. OFF by default and
+# **MUST NOT** be enabled in the prod image (`just image` never passes it): everything it gates is
+# `#[cfg(feature = "test-helpers")]`, so it does not compile into the prod binary. The local e2e
+# harness and the relay test suite build with `--features test-helpers`.
 test-helpers = []
 
 [dependencies]
 dpay-core = { path = "../dpay-core" }
 dpay-icp = { path = "../dpay-icp" }
-# Ed25519 for FakeLedger's receipt signing (the offline demo ledger signs the outcome receipt with a
-# stable test key — the real canister's equivalent comes from raw_rand). Already in the dep tree via
-# dpay-core; declared directly so the relay can `use ed25519_dalek::SigningKey`.
-ed25519-dalek = { workspace = true }
 axum = "0.8.9"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "signal", "time"] }
 tower = "0.5.3"
@@ -66,8 +62,9 @@ sha2 = "0.10"
 ic-agent = { version = "=0.48.1", optional = true }
 candid = { workspace = true, optional = true }
 pocket-ic = { workspace = true, optional = true }
-# icrc-ledger-types + num-traits: only needed by the `agent`-feature live test, which installs a real
-# ICRC ledger + the facade canister end-to-end (mirrors dpay-canister-tests).
+# icrc-ledger-types (ICRC-1/3 account + transaction types) is used by `AgentLedger` itself —
+# the icrc3 history walk — and by the `agent`-feature live test; num-traits converts candid Nat
+# amounts to u64 on the same path.
 icrc-ledger-types = { workspace = true, optional = true }
 num-traits = { version = "0.2", optional = true }
 

@@ -53,10 +53,6 @@ test-icp: build-mock-minter
 test-relay: web
     cargo nextest run -p dpay-relay --features test-helpers
 
-# historical alias — now equivalent to `test-relay` (test-helpers is always on for tests).
-test-relay-test-helpers: web
-    cargo nextest run -p dpay-relay --features test-helpers
-
 # emit the wire-layout JSON (single source of truth for the JS ed25519 signing shim) from the real Rust core
 wire-layout:
     cargo run -p dpay-fixture --release -- wire-layout dfx/wire_layout.json

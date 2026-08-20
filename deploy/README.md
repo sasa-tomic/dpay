@@ -89,12 +89,11 @@ in `docker-compose.yml`.
 
 | Var | Default | Meaning |
 |-----|---------|---------|
-| `DPAY_LEDGER` | `ic` | `ic` = real canister via ic-agent · `memory` = in-memory demo ledger |
-| `DPAY_CANISTER_ID` | — | **Required on `ic`.** The canister to settle on |
+| `DPAY_LEDGER` | `ic` | `ic` = real facade + ICRC ledgers via ic-agent · `memory` = in-memory demo catalog |
+| `DPAY_CANISTER_ID` | — | **Required on `ic`.** The facade canister (the catalog source) |
 | `DPAY_IC_URL` | `https://icp-api.io` | Mainnet, or `http://host.docker.internal:4943` for a `dfx` replica on the host |
 | `DPAY_IC_FETCH_ROOT_KEY` | auto | `true` for a local replica, `false` on mainnet — see below |
-| `DPAY_ENABLE_FAUCET` | `false` | Serve `POST /api/v1/faucet`, which **mints** |
-| `DPAY_PER_TX_CAP` | `100000` | Per-tx cap, minor units. `memory` only (on `ic` the canister enforces its own) |
+| `DPAY_ENABLE_FAUCET` | `false` | (test-helpers build only) Serve `POST /api/v1/faucet`, which credits demo funds |
 | `CF_TUNNEL_TOKEN` | — | **Required.** Secret token copied from the Cloudflare tunnel install command |
 | `DPAY_CLOUDFLARED_IMAGE` | `cloudflare/cloudflared:2026.7.1` | Pinned tunnel image; override only if needed |
 
@@ -186,11 +185,12 @@ a `scratch`/`distroless` base — same Dockerfile shape, one more toolchain targ
 
 ## Is the relay stateless?
 
-**Effectively yes — treat it as stateless.** Its only in-process state is an idempotency cache
-(receipts keyed by payment nonce) and an inert `safe_mode` flag; neither is persisted. The durable
-source of truth — balances and single-use nonces — lives in the **ledger** (the canister). The
-canister independently refuses a replayed nonce, so a relay restart can never cause a double-charge.
-It runs with a read-only root filesystem and no capabilities.
+**Yes — it is stateless (and value-blind by design since the 2026-08-19 cutover).** The relay has
+NO settlement surface at all: it serves the read-only catalog/balances/history routes and hosts the
+web wallet + APK. Its only in-process state is the test-helpers-only fake-IC gateway (absent from
+the prod image). No value can move through it — the app signs `/api/v2` envelopes itself and the
+IC (canisters + ICRC ledgers) is the sole mover and durable source of truth. It runs with a
+read-only root filesystem and no capabilities.
 
 Consequences:
 

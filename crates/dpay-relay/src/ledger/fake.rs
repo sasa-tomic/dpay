@@ -24,19 +24,14 @@ struct FakeState {
     /// Composite key `(pubkey, currency)` → balance in minor units. A single account may hold
     /// multiple currencies independently — they're different assets, not one pool.
     balances: HashMap<([u8; PUBKEY_LEN], Currency), u64>,
-    /// Settled transactions, oldest-first (the order they were pushed). `transactions_of` reverses
+    /// Settled transactions, oldest-first (the order they were pushed). `transactions_on_ledger` reverses
     /// to newest-first and filters by (currency, account). Mirrors the canister's ACCOUNT_TXNS so
     /// the relay's inner loop is canister-faithful on history too.
     txns: Vec<TxnRecord>,
-    /// Test/demo seeding for the deposit path: a pending (unconfirmed) inbound UTXO per
-    /// `(pubkey, currency)`. `deposit_status` drains this and credits `balances`, mirroring the
-    /// minter's `update_balance` mint-after-confirmation. Lets the offline inner loop prove the
-    /// deposit→mint→balance flow without a real ckBTC minter.
-    pending_deposits: HashMap<([u8; PUBKEY_LEN], Currency), u64>,
 }
 
-/// In-memory ledger. Balances + spent-nonces behind one `Mutex` so the read-check-write is
-/// atomic (the real canister is single-threaded, giving the same guarantee for free).
+/// In-memory demo ledger behind one `Mutex` (the real canister is single-threaded, giving the
+/// same atomicity guarantee for free).
 pub struct FakeLedger {
     state: Mutex<FakeState>,
 }
@@ -50,7 +45,6 @@ impl FakeLedger {
             state: Mutex::new(FakeState {
                 balances: HashMap::new(),
                 txns: Vec::new(),
-                pending_deposits: HashMap::new(),
             }),
         }
     }
@@ -61,14 +55,6 @@ impl FakeLedger {
     pub fn balance_of(&self, pubkey: &[u8; PUBKEY_LEN], currency: Currency) -> u64 {
         let s = self.state.lock().unwrap_or_else(|p| p.into_inner());
         *s.balances.get(&(*pubkey, currency)).unwrap_or(&0)
-    }
-
-    /// Seed a pending deposit for `pubkey`/`currency` (test/demo hook). The next `deposit_status`
-    /// call drains it and credits the balance, mirroring the ck minter minting after confirmations.
-    /// Multiple seeds for the same `(pubkey, currency)` accumulate.
-    pub fn register_deposit(&self, pubkey: [u8; PUBKEY_LEN], currency: Currency, amount: u64) {
-        let mut s = self.state.lock().unwrap_or_else(|p| p.into_inner());
-        *s.pending_deposits.entry((pubkey, currency)).or_insert(0) += amount;
     }
 }
 
@@ -278,9 +264,9 @@ fn fake_catalog() -> Vec<CurrencyDescriptor> {
 
 #[async_trait]
 impl Ledger for FakeLedger {
-
-    async fn transactions_of(
+    async fn transactions_on_ledger(
         &self,
+        _ledger: &str,
         pubkey: [u8; PUBKEY_LEN],
         currency: Currency,
         limit: u32,
@@ -288,6 +274,8 @@ impl Ledger for FakeLedger {
         let s = self.state.lock().unwrap_or_else(|p| p.into_inner());
         let pk_hex = hex::encode(pubkey);
         // FakeState pushes oldest-first; filter to this (currency, account) and reverse to newest.
+        // `_ledger` is ignored — the fake has one log, not per-ledger logs (the test-helpers
+        // gateway path serves the gateway's principal-keyed rows instead; see app.rs).
         let mut rows: Vec<TxnRecord> = s
             .txns
             .iter()
@@ -302,7 +290,6 @@ impl Ledger for FakeLedger {
         // In-memory ledger is healthy iff its mutex isn't poisoned.
         self.state.lock().is_ok()
     }
-
 
 
     async fn deposit_info(&self, _currency: Currency) -> Result<DepositInfo, LedgerError> {

@@ -1,34 +1,32 @@
-//! The relay binary — the merchant's submit-and-confirm service, and dpay's only online
-//! dependency. It also serves the marketing **landing page** (`GET /`) and the **web wallet**
-//! (`GET /wallet` — the real RN-web app; `/merchant` is a 308 redirect to it), so the whole
-//! merchant side of the demo is one process: open the terminal on a laptop, scan the payer's QR,
-//! get "Paid ✓". The JSON API lives under `/api/v1` (e.g. `POST /api/v1/pay`,
-//! `GET /api/v1/health`); an Android build, when configured via `DPAY_APK_PATH`, is served at
-//! `GET /download/dpay.apk`.
+//! The relay binary — dpay's read-and-host surface, and the only online dependency the app
+//! has that we run. Since the 2026-08-19 IC-rail cutover value never flows through it: the
+//! app signs `/api/v2` envelopes locally and submits them straight to boundary nodes. What
+//! this process serves is the marketing **landing page** (`GET /`), the **web wallet**
+//! (`GET /wallet` — the real RN-web app; `/merchant` is a 308 redirect to it), the APK
+//! download, and the READ-ONLY JSON API under `/api/v1` (balances, transactions, currencies,
+//! deposit info, onramp metadata, `GET /api/v1/health`).
 //!
 //! Everything the relay needs is configured through the environment, so the *same* binary (and the
 //! same container image) runs the offline demo and a real deployment — only env differs.
 //!
-//! Settlement seam (same `Ledger` trait either way), chosen by `DPAY_LEDGER`:
-//!   * `ic`     — a real canister on a real IC network via ic-agent (`--features agent`).
-//!                **Never silently degrades**: if the ledger can't be reached, the relay exits
-//!                rather than come up on a pretend ledger and hand out receipts for payments that
-//!                did not settle.
-//!   * `memory` — an in-memory `FakeLedger` pre-funded with the demo accounts. Offline, no replica.
+//! Read backend (same `Ledger` trait either way), chosen by `DPAY_LEDGER`:
+//!   * `ic`     — the real facade catalog + ICRC ledgers via ic-agent (`--features agent`).
+//!                **Never silently degrades**: if the IC can't be reached, the relay exits
+//!                rather than come up on a pretend backend and serve zeros.
+//!   * `memory` — the in-memory `FakeLedger` catalog (balances read 0; value only exists on
+//!                the rail or the test-helpers fake-IC gateway). Offline, no replica.
 //!
 //! Env:
 //!   DPAY_LEDGER             `ic` | `memory`  (default: `ic` if DPAY_CANISTER_ID is set, else `memory`)
 //!   DPAY_RELAY_ADDR         bind address (default 0.0.0.0:8787 — a phone/LAN/container can reach it)
-//!   DPAY_PER_TX_CAP         per-transaction cap, minor units (default 100000 = $1000.00).
-//!                           `memory` ledger only — on `ic` the canister enforces its own cap.
-//!   DPAY_CANISTER_ID        (ic) canister principal to settle on — required
+//!   DPAY_CANISTER_ID        (ic) facade canister principal (the catalog source) — required
 //!   DPAY_IC_URL             (ic) replica / boundary-node URL (default http://127.0.0.1:4943)
 //!   DPAY_IC_FETCH_ROOT_KEY  (ic) fetch the replica's root key. Required for a local replica
 //!                           (each has its own key); MUST be false on mainnet, where it would mean
 //!                           trusting whatever key the endpoint returns. Default: true only when
 //!                           DPAY_IC_URL is a loopback/local address. See `AgentLedger::connect_with`.
-//!   DPAY_ENABLE_FAUCET      serve `POST /api/v1/faucet`, which mints (default: true on `memory`,
-//!                           false on `ic` — an exposed faucet on a real ledger is an open money printer)
+//!   DPAY_ENABLE_FAUCET      (test-helpers build only) serve `POST /api/v1/faucet`, which mints
+//!                           demo funds on the fake-IC gateway (default: true on `memory`)
 //!   DPAY_APK_PATH           path to an Android build to serve at `GET /download/dpay.apk` and light
 //!                           up the landing page's download button. Unset → downloads disabled.
 
@@ -64,9 +62,13 @@ async fn main() {
     };
     state.set_faucet_enabled(cfg.faucet);
     if cfg.faucet {
+        // The faucet only exists in the test-helpers build (it credits the fake-IC gateway).
+        #[cfg(feature = "test-helpers")]
         println!(
-            "! POST /api/v1/faucet is ENABLED — it mints. Never expose this on a real deployment."
+            "! POST /api/v1/faucet is ENABLED — it credits the fake-IC gateway (test-helpers only)."
         );
+        #[cfg(not(feature = "test-helpers"))]
+        eprintln!("dpay-relay: warn: DPAY_ENABLE_FAUCET is set, but the faucet route only exists in the test-helpers build.");
     }
 
     let listener = tokio::net::TcpListener::bind(cfg.addr)
@@ -76,9 +78,12 @@ async fn main() {
             process::exit(1);
         });
     let bound = listener.local_addr().unwrap_or(cfg.addr);
+    // Honest banner: only the surfaces this build actually serves. The /api/v2 gateway line is
+    // printed by the test-helpers block above when it is attached; prod has no /api/v2 at all
+    // (the app talks to icp-api.io directly).
     println!(
         "dpay relay:  landing http://{bound}/  ·  wallet http://{bound}/wallet  ·  \
-         API http://{bound}/api/v1  (GET /api/v1/health)  ·  IC gateway http://{bound}/api/v2  ·  \
+         read API http://{bound}/api/v1  (GET /api/v1/health)  ·  \
          APK http://{bound}/download/dpay.apk"
     );
 
@@ -244,10 +249,11 @@ fn is_mainnet_url(url: &str) -> bool {
         .any(|h| u.contains(h))
 }
 
-// ---- settlement backend ----
+// ---- read backend ----
 
-/// Build the settlement backend. On the `ic` path a failure to connect is **fatal**: coming up on
-/// the in-memory ledger instead would mean handing out receipts for payments that never happened.
+/// Build the read backend. On the `ic` path a failure to connect is **fatal**: coming up on
+/// the in-memory catalog instead would silently serve a demo catalog and zero balances as if
+/// they were real.
 async fn build_ledger(cfg: &Config) -> Arc<dyn Ledger> {
     match &cfg.ledger {
         LedgerCfg::Ic {
@@ -256,7 +262,7 @@ async fn build_ledger(cfg: &Config) -> Arc<dyn Ledger> {
             fetch_root_key,
         } => connect_ic(url, canister_id, *fetch_root_key).await,
         LedgerCfg::Memory => {
-            println!("settling on the in-memory demo ledger (payer pre-funded $5000.00)");
+            println!("read surface on the in-memory demo catalog (balances are always 0 — value lives on the IC rail)");
             Arc::new(FakeLedger::new())
         }
     }
@@ -271,15 +277,15 @@ async fn connect_ic(url: &str, canister_id: &str, fetch_root_key: bool) -> Arc<d
     match dpay_relay::AgentLedger::connect_with(url, principal, fetch_root_key).await {
         Ok(l) => {
             println!(
-                "settling on canister {canister_id} via {url} (root key: {})",
+                "reading facade {canister_id} via {url} (root key: {})",
                 if fetch_root_key { "fetched — local replica" } else { "pinned — mainnet" }
             );
             Arc::new(l)
         }
-        // Exit rather than degrade. A relay that can't reach the ledger must fail loudly; the
-        // orchestrator restarts it, and no payment is ever reported settled when it wasn't.
+        // Exit rather than degrade. A relay that can't reach the catalog/ledgers must fail loudly;
+        // the orchestrator restarts it, and no stale demo data is ever served as real.
         Err(e) => {
-            eprintln!("dpay-relay: cannot reach the ledger ({canister_id} via {url}): {e}");
+            eprintln!("dpay-relay: cannot reach the IC ({canister_id} via {url}): {e}");
             process::exit(1);
         }
     }

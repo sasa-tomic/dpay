@@ -1,8 +1,8 @@
 //! Ledger data types: the serde structs/enums that cross the JSON boundary, plus the
-//! marshalling helpers (`U64String`, `display_field_to_string`, `decode_hex_array`).
+//! `U64String` marshalling wrapper (decimal-string `u64` transport).
 
 use dpay_core::Currency;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use thiserror::Error;
 
 /// A `u64` carried across the JSON boundary as a DECIMAL STRING (never a raw JSON number), so the
@@ -53,57 +53,14 @@ impl<'de> serde::Deserialize<'de> for U64String {
     }
 }
 
-/// The minimal withdrawal amount the facade honors, in sats. Mirrors the LIVE ckBTC minter's
-/// `retrieve_btc_min_amount` (= 50_000, returned by `get_minter_info` on `mqygn-kiaaa-aaaar-qaadq-cai`
-/// and confirmed in OPEN_ISSUES.md) and the canister's `RETRIEVE_BTC_MIN_AMOUNT`. Single-sourced here
-/// Decode a fixed-width NUL-padded UTF-8 name/memo field (32 bytes on the wire, single-sourced as
-/// [`NAME_LEN`]/[`MEMO_LEN`] in core) into the display `String` the relay's JSON history carries.
-/// Trims trailing NULs (the builder's padding) and decodes lossily, so a malformed buffer is never a
-/// silent error or panic — the core stores/signs/verifies raw bytes; the relay only renders them.
-
-/// Decode a hex string into a fixed-size byte array, surfacing a `Rejected` (→ HTTP 422) on any
-/// decode or length failure. Mirrors [`parse_hex_array`](crate::app) on the app side but for
-/// ledger-trait callers (the FakeLedger withdrawal path) whose error type is [`LedgerError`] not an
-/// HTTP [`Response`](axum::response::Response). `field` labels the bytes in the message so the
-/// client can tell `from` from `nonce` from `sig` apart. Byte-identical to the prior inline blocks
-/// (two distinct messages per field: `bad {field} hex: {e}` for a hex-decode failure, `{field} must
-
-/// What the merchant sees on success. Byte fields are hex so the JSON is a plain string map.
-/// Mirrors the canister's `PayReceipt` (which returns the same fields as candid `blob`s).
-///
-/// `receipt_sig` + `pubkey` (R2) carry the canister's Ed25519 signature over the canonical
-/// `ReceiptClaim` and the canister's public key — the payer verifies `receipt_sig` over the claim
-/// built from `{nonce, from, to, amount, currency, block_index, settle_ts}` under `pubkey` before
-/// trusting the outcome. `block_index`/`settle_ts`/`currency` are the remaining claim fields.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Receipt {
-    pub from: String,
-    pub to: String,
-    pub amount: U64String,
-    pub nonce: String,
-    pub new_from_balance: U64String,
-    pub currency: Currency,
-    pub block_index: U64String,
-    /// Unix-seconds settlement time. NOTE the principled JSON-boundary split (applies here + to the
-    /// other bounded non-money `u64` fields below — `TxnRecord.timestamp`, `PendingUtxo.confirmations`,
-    /// `WithdrawRequest.expiry`): MONEY `u64` fields cross JSON as [`U64String`] (a decimal string) so
-    /// the full u64 range round-trips without precision loss above 2^53; these NON-MONEY fields (a
-    /// unix-seconds time, a block-confirmation count) are bounded ≪ 2^53 by construction and so cross
-    /// as a RAW JSON number by design — `serde_json`'s default `u64` → bare number. This is
-    /// intentional, not an oversight; do NOT change the types (a wire change). Money stays `U64String`.
-    pub settle_ts: u64,
-    /// Hex-encoded 64-byte Ed25519 signature over the canonical ReceiptClaim.
-    pub receipt_sig: String,
-    /// Hex-encoded 32-byte receipt public key (the signer's). Verify the sig under this.
-    pub pubkey: String,
-}
-
-/// One settled transaction, as the wallet's history list shows it. `from`/`to`/`nonce` are hex
-/// (matches [`Receipt`]); `from_name`/`to_name`/`memo` are the UTF-8 display strings decoded
-/// (NUL-trimmed, lossy) from the signed authorization's 32-byte name/memo fields — so history is
-/// self-describing on both sides (the payee sees the payer's name, not a raw pubkey; closes N6/H3).
-/// `timestamp` is unix seconds. Direction (in/out) is derived by the caller comparing the queried
-/// account's pubkey to `from`. Mirrors the canister's `TxnView`.
+/// One transaction row, as the wallet's history list shows it. `from`/`to` are PRINCIPAL TEXTS
+/// (each side's self-authenticating principal; the empty string for mint/burn sentinel rows —
+/// the app renders those with its "Demo funds" label instead of a counterparty). `nonce` is hex,
+/// empty on IC-rail rows (which carry no nonce — the app dedups via a composite key).
+/// `from_name`/`to_name`/`memo` are display strings, always present and empty when unset (never
+/// null); `memo` carries hex-encoded bytes when a memo rode the transfer. `timestamp` is unix
+/// seconds. Direction (in/out) is derived by the caller comparing the queried account's principal
+/// to `from`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct TxnRecord {
     pub from: String,
@@ -111,7 +68,8 @@ pub struct TxnRecord {
     pub amount: U64String,
     pub nonce: String,
     pub currency: Currency,
-    /// Unix seconds. Bounded ≪ 2^53 → raw JSON number by design (see `Receipt.settle_ts`).
+    /// Unix seconds. Bounded ≪ 2^53 → crosses JSON as a RAW number by design (MONEY `u64` fields
+    /// cross as [`U64String`] decimal strings so the full range round-trips above 2^53).
     pub timestamp: u64,
     /// The payer's display name (decoded from the signed 32-byte `from_name` field). Empty string
     /// for synthesized mint/burn sentinel rows (the app special-cases those).
@@ -123,41 +81,6 @@ pub struct TxnRecord {
     pub memo: String,
 }
 
-// ---------------------------------------------------------------------------
-// Deposit surface (ckBTC-style top-up). These mirror the canister's deposit
-// types (§3.1 of the deposit-integration plan) but live here as serde structs
-// so the relay's HTTP layer speaks plain JSON. The agent impl (feature
-// `agent`) translates between these and the candid `Nat`-bearing mirrors.
-// ---------------------------------------------------------------------------
-
-/// One UTXO the minter has *already* minted in this refresh call. `block_index` is the ckBTC
-/// ledger's block index — a candid `nat` on the wire, so it is carried as a `String` (a `Nat` /
-/// `u128` doesn't round-trip cleanly in JSON). Mirrors the canister's `MintedUtxo`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct MintedUtxo {
-    pub block_index: String,
-    pub amount: U64String,
-}
-
-/// One UTXO seen on-chain but not yet confirmed enough to mint. Mirrors the canister's `PendingUtxo`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct PendingUtxo {
-    pub value: U64String,
-    /// Block-confirmation count. Bounded ≪ 2^53 → raw JSON number by design (see `Receipt.settle_ts`).
-    pub confirmations: u64,
-}
-
-/// Result of a deposit refresh — what the wallet's "Add money" sheet polls. `minted_total > 0`
-/// means real ck-asset was just credited to the user's subaccount; the wallet then re-reads its
-/// balance. Mirrors the canister's `DepositRefresh`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct DepositRefresh {
-    pub minted: Vec<MintedUtxo>,
-    pub minted_total: U64String,
-    pub pending: Vec<PendingUtxo>,
-    pub required_confirmations: u32,
-}
-
 /// Static instructions for a currency's deposit path (min confirmations, fee, min amount). Lets the
 /// wallet render "Send BTC here · ~N confirmations · min X sats" before showing the address. Mirrors
 /// the canister's `DepositInfo`.
@@ -166,41 +89,6 @@ pub struct DepositInfo {
     pub min_confirmations: u32,
     pub deposit_fee: U64String,
     pub deposit_min_amount: Option<U64String>,
-}
-
-// ---------------------------------------------------------------------------
-// Withdrawal surface (ckBTC → native BTC out). These mirror the canister's
-// `WithdrawRequest` / `WithdrawReceipt` (§W2) but live here as serde structs so the relay's HTTP
-// layer speaks plain JSON (byte fields are hex, matching [`Receipt`]). The agent impl (feature
-// `agent`) translates these to/from the canister's candid `blob` fields.
-// ---------------------------------------------------------------------------
-
-/// Request body for `POST /api/v1/withdraw`: the user's signed withdrawal authorization. `from` is
-/// the hex Ed25519 pubkey (the debit subaccount), `nonce`/`sig` are hex (16/64 bytes), `amount` is
-/// satoshis. The facade verifies `sig` over the canonical [`WithdrawAuth`] signing bytes under
-/// `from` before moving any funds (non-custodial).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WithdrawRequest {
-    pub from: String,
-    pub destination: String,
-    pub amount: U64String,
-    pub nonce: String,
-    /// Unix-seconds expiry. Bounded ≪ 2^53 → raw JSON number by design (see `Receipt.settle_ts`).
-    pub expiry: u64,
-    pub currency: Currency,
-    pub sig: String,
-}
-
-/// Settlement receipt for a successful withdrawal: echoes the authorization + the ckBTC ledger's burn
-/// block index. Mirrors the canister's `WithdrawReceipt`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct WithdrawReceipt {
-    pub from: String,
-    pub destination: String,
-    pub amount: U64String,
-    pub nonce: String,
-    pub currency: Currency,
-    pub block_index: U64String,
 }
 
 // ---------------------------------------------------------------------------
@@ -284,10 +172,10 @@ pub struct CurrencyDescriptor {
     pub offramp: RampCapability,
 }
 
-/// Settlement outcome. `Rejected` is a permanent policy failure (bad sig, expired, over cap,
-/// insufficient funds, reused nonce, malformed wire) — the relay must NOT retry it and surfaces
-/// it as `422`. `Transient` is an infrastructure hiccup (e.g. the agent/canister was briefly
-/// unreachable) — the relay retries it a bounded number of times.
+/// Ledger call outcome. `Rejected` is a permanent failure (unknown currency, no onramp
+/// configured for the family, malformed request) — surfaced as `422` on the route that carries
+/// it. `Transient` is an infrastructure hiccup (the canister/ledger briefly unreachable) —
+/// surfaced as `503`, or the entry is silently omitted from the batch balances fan-out.
 #[derive(Clone, Debug, Error)]
 pub enum LedgerError {
     #[error("rejected: {0}")]

@@ -45,6 +45,19 @@
 > **Prod at HEAD `d740379`** — shipped 2026-08-20 via `just deploy-ic && just apk && just up`
 > (evidence in the PROD SHIPPED block at the end of the 2026-08-20 session summary below).
 >
+> **Relay wave 2/3 (2026-08-20, post-`82377e4`):** dead-surface deletion + honesty pass landed —
+> `Ledger::seed_deposit`/`register_deposit`/`pending_deposits`, dead serde types (`Receipt`,
+> `MintedUtxo`, `PendingUtxo`, `DepositRefresh`, `WithdrawRequest`, `WithdrawReceipt`), the whole
+> `Clock` surface, `AppState::safe_mode`, the dead `ed25519-dalek` regular dep, `DPAY_PER_TX_CAP`
+> docs, and the doubly-dead `test_helpers_absent.rs` are all GONE; the fake-IC gateway's submit
+> dedup is a single critical section (TOCTOU double-execution fix — flow 09's invariant);
+> `/api/v1/transactions/{hex}` now serves REAL history: `AgentLedger` walks each ICRC ledger's
+> own `get_transactions` log at the user principal (ascending 1_000-block pages, ≤10 round
+> trips, first_index drift-safe, newest-first; **documented boundary: archived blocks END the
+> walk — relay history is recent-blocks-only**, full history would need the archive-canister
+> query path). Deleted routes are pinned 404 by `settlement_era_routes_stay_404`; the justfile
+> `test-relay-test-helpers` alias was removed (byte-identical to `test-relay`).
+>
 > **Residual (documented, non-blocking; updated 2026-08-20 harness-debt pass):** flow-41's timeout
 > is now 30 s authored (was 20 s — host-load spikes uncompensated by the one-shot load factor
 > false-fired the backstop); `goOffline` now kills the IC gateway too (retargets the page's

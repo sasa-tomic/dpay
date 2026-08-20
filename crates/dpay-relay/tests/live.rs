@@ -23,9 +23,9 @@
 //!   3. `GET /api/v1/balances/{hex}` → the minted amount as a decimal STRING for DUSD; a SECOND
 //!      user principal minted a different amount reads independently; an UNFUNDED principal reads
 //!      "0" (batch map = exactly the catalog's one entry);
-//!   4. `GET /api/v1/transactions/{hex}?currency=N` → 200 with a well-formed rows array (shape
-//!      only — the facade's history records facade-settled ops, not rail transfers, so it is
-//!      honestly EMPTY here; asserted as JSON shape, not content).
+//!   4. `GET /api/v1/transactions/{hex}?currency=N` → 200 with a well-formed rows array (the
+//!      facade-history era is over; see `live_icrc3_history_walks_the_real_ledger_log` below for
+//!      the CONTENT assertions — this one only proves the shape for an account with no rows).
 //!
 //! Prereqs (the justfile's `test-live` recipe wires these):
 //!   - build the wasm first:
@@ -260,21 +260,50 @@ fn mint_at_user_principal(
     }
 }
 
-#[test]
-fn live_read_surface_at_user_principal() {
+/// A user→user `icrc1_transfer` on the real ledger, sent BY the payer's own principal (the
+/// rail-side move the app's signed envelopes make). Distinct memos make the transfers
+/// ledger-distinct (the ICRC ledger dedups identical `(from_subaccount, to, amount, fee,
+/// created_at_time, memo)` tuples within its dedup window).
+fn rail_transfer(
+    pic: &PocketIc,
+    ledger: Principal,
+    sender_pk: &[u8; 32],
+    to_pk: &[u8; 32],
+    amount: u64,
+    memo: &[u8],
+) {
+    let sender = dpay_icp::principal::Principal::self_authenticating_ed25519(sender_pk);
+    let to_owner = dpay_icp::principal::Principal::self_authenticating_ed25519(to_pk);
+    let arg = TransferArg {
+        from_subaccount: None,
+        to: Account { owner: Principal::from_slice(to_owner.as_slice()), subaccount: None },
+        fee: None,
+        created_at_time: None,
+        memo: Some(icrc_ledger_types::icrc1::transfer::Memo::from(memo.to_vec())),
+        amount: Nat::from(amount),
+    };
+    let reply = pic
+        .update_call(ledger, Principal::from_slice(sender.as_slice()), "icrc1_transfer", encode_one(&arg).unwrap())
+        .expect("icrc1_transfer update_call rejected");
+    match decode_one::<Result<Nat, TransferError>>(&reply).unwrap() {
+        Ok(_) => {}
+        Err(e) => panic!("rail transfer failed: {e:?}"),
+    }
+}
+
+/// Stand up the live IC + real ICRC ledger + facade catalog — the shared fixture of both tests
+/// below. Returns the RAII-guarded PocketIC (keep it alive for the test's duration), the ledger
+/// canister, and the facade canister. The ledger's minting account is owned by the FACADE, so
+/// `mint_at_user_principal` (sent as the facade) is the ICRC-1 mint path.
+fn stand_up() -> (LivePocketIc, Principal, Principal, String) {
     // PocketIC's server child must not inherit this test binary's stdio pipes (see the teardown
     // comment at the bottom for the full why); the env var is read at server spawn, i.e. it MUST
-    // be set before the first PocketIc::new() — hence here, at the very top of the test.
+    // be set before the first PocketIc::new().
     std::env::set_var("POCKET_IC_MUTE_SERVER", "1");
 
-    // --- 1. Stand up a real local IC with an HTTP gateway (blocking; own runtime). ---
     let mut pic = PocketIc::new();
     let gateway_url = pic.make_live(None).to_string();
     let pic = LivePocketIc(pic); // from here, teardown is guaranteed on every exit path
-
-    // --- 2. Install a real ICRC ledger + the facade (catalog) wired to it. ---
-    let payer_pk = generate_keypair().verifying_key().to_bytes();
-    let second_pk = generate_keypair().verifying_key().to_bytes();
 
     // Reserve the facade id first — the ledger's minting account owner must be the facade.
     let dpay = pic.0.create_canister();
@@ -308,9 +337,10 @@ fn live_read_surface_at_user_principal() {
     pic.0.install_canister(ledger, ledger_wasm(), encode_one(&ledger_init).unwrap(), None);
 
     // Install the facade wired to the ledger (DUSD, mintable, seeded controller). Post-cutover the
-    // facade's job in this test is the CATALOG: `currencies()` joins its LEDGERS registration with
-    // CURRENCY_META — that catalog row is what the balances batch fans out against and what the
-    // wallet renders. It is deliberately NOT used to move value anywhere in this test.
+    // facade's job here is the CATALOG: `currencies()` joins its LEDGERS registration with
+    // CURRENCY_META — that catalog row is what the balances batch fans out against, what the
+    // transactions handler resolves the ledger principal from, and what the wallet renders. It is
+    // deliberately NOT used to move value anywhere in these tests.
     let admin = Principal::management_canister();
     let dpay_init = DpayInitArg {
         ledgers: vec![LedgerConfig { currency: DEMO_USD, principal: ledger, mintable: true }],
@@ -319,15 +349,25 @@ fn live_read_surface_at_user_principal() {
     };
     pic.0.install_canister(dpay, facade_wasm(), encode_one(&dpay_init).unwrap(), None);
     // Prod register parity: seed the DEMO cap into CURRENCY_META exactly as dfx-deploy-ic does,
-    // so the catalog row this test asserts on mirrors the prod-registered shape.
+    // so the catalog row these tests assert on mirrors the prod-registered shape.
     register_currency_meta_cap(&pic.0, dpay, admin, DEMO_USD, CAP);
-    let ledger_text = ledger.to_text();
-    let canister_id = dpay;
 
-    // Fund TWO users at their own principals, directly on the rail. Different amounts so a
-    // balance cross-read between the two accounts cannot pass by accident.
+    (pic, ledger, dpay, gateway_url)
+}
+
+#[test]
+fn live_read_surface_at_user_principal() {
+    // --- 1. Stand up a real local IC with an HTTP gateway (blocking; own runtime). ---
+    let (pic, ledger, dpay, gateway_url) = stand_up();
+
+    // --- 2. Fund TWO users at their own principals, directly on the rail. ---
+    let payer_pk = generate_keypair().verifying_key().to_bytes();
+    let second_pk = generate_keypair().verifying_key().to_bytes();
     mint_at_user_principal(&pic.0, ledger, dpay, &payer_pk, INIT_A);
     mint_at_user_principal(&pic.0, ledger, dpay, &second_pk, INIT_B);
+
+    let ledger_text = ledger.to_text();
+    let canister_id = dpay;
 
     // --- 3. Everything from here is async: AgentLedger (ic-agent) + the relay's axum app. ---
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -396,22 +436,27 @@ fn live_read_surface_at_user_principal() {
         assert_eq!(us, StatusCode::OK, "unfunded balances body={ub}");
         assert_eq!(ub[key.as_str()], "0", "an unfunded principal must read \"0\" (body={ub})");
 
-        // ---- (4) transactions: JSON shape only (honestly) ----
-        // The facade's `transactions_of` reads its ACCOUNT_TXNS history, which only facade-settled
-        // ops (pay/mint/faucet) ever wrote — rail transfers like the mints above do NOT flow into
-        // it, and there were no facade-settled ops in this test. So the honest assertion is the
-        // wire SHAPE (a rows array the wallet can render), not the content.
-        let (ts, tb) = call(
+        // ---- (4) transactions: shape for an account with no DUSD rows ----
+        // The payer HAS history rows now (the mints above — see the icrc3 test below for the
+        // content assertions); this read uses a currency whose log exists but has no rows for
+        // this user… except DUSD is the only currency, and the mints DID touch the payer. So the
+        // honest shape-only read here is the UNFUNDED principal: rows exist on the ledger, just
+        // none concerning this account — the response must be 200 with an EMPTY array.
+        let (us, ub) = call(
             &state,
             get(&format!(
                 "/api/v1/transactions/{}?currency={}&limit=10",
-                hex::encode(payer_pk),
+                hex::encode(unfunded_pk),
                 DEMO_USD
             )),
         )
         .await;
-        assert_eq!(ts, StatusCode::OK, "transactions body={tb}");
-        assert!(tb["transactions"].is_array(), "transactions must carry a rows array (body={tb})");
+        assert_eq!(us, StatusCode::OK, "unfunded transactions body={ub}");
+        assert_eq!(
+            ub["transactions"].as_array().map(Vec::len),
+            Some(0),
+            "an account with no ledger rows must read an EMPTY array, not an error (body={ub})"
+        );
     });
 
     // --- 4. Leak-proof teardown ---
@@ -424,7 +469,120 @@ fn live_read_surface_at_user_principal() {
     // LEAK under capture, identical code). The client library's own escape hatch is
     // POCKET_IC_MUTE_SERVER (checked at server spawn): it redirects the child's stdio to null so
     // the pipes close at test exit. Set BEFORE the first PocketIc::new() above; safe here because
-    // this binary runs a single test and no pocket-ic threads exist yet at that point.
-    // LivePocketIc::drop → stop_live() + instance DELETE still runs on every exit path (incl.
-    // panic) — that frees the instance's server-side state; only the server PROCESS lingers.
+    // each test sets it before spawning its own instance and no pocket-ic threads exist yet at
+    // that point. LivePocketIc::drop → stop_live() + instance DELETE still runs on every exit
+    // path (incl. panic) — that frees the instance's server-side state; only the server PROCESS
+    // lingers.
+}
+
+/// WAVE 3 — the real icrc3 history walk. `GET /api/v1/transactions/{hex}` must serve the LEDGER's
+/// own transaction log (walked via `get_transactions`), not a facade index: seeding a mint, two
+/// user→user transfers, and a burn-free mix on the REAL ic-icrc1-ledger, the relay must return
+/// the payer's rows newest-first with correct direction, amount, principal-text counterparties,
+/// memo hex, a clamped limit, and an empty array for a no-match account.
+#[test]
+fn live_icrc3_history_walks_the_real_ledger_log() {
+    let (pic, ledger, dpay, gateway_url) = stand_up();
+
+    // Payer: mint (in) → transfer OUT to merchant → transfer IN back. Distinct memos keep the
+    // two transfers ledger-distinct inside the dedup window.
+    let payer_pk = generate_keypair().verifying_key().to_bytes();
+    let merchant_pk = generate_keypair().verifying_key().to_bytes();
+    mint_at_user_principal(&pic.0, ledger, dpay, &payer_pk, 10_000);
+    rail_transfer(&pic.0, ledger, &payer_pk, &merchant_pk, 250, b"coffee");
+    rail_transfer(&pic.0, ledger, &merchant_pk, &payer_pk, 100, b"change");
+
+    let payer_owner = Principal::from_slice(
+        dpay_icp::principal::Principal::self_authenticating_ed25519(&payer_pk).as_slice(),
+    );
+    let merchant_owner = Principal::from_slice(
+        dpay_icp::principal::Principal::self_authenticating_ed25519(&merchant_pk).as_slice(),
+    );
+    let canister_id = dpay;
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime");
+
+    rt.block_on(async move {
+        let agent = AgentLedger::connect(&gateway_url, canister_id)
+            .await
+            .expect("AgentLedger must connect to the live gateway");
+        let state = AppState::new(Arc::new(agent));
+
+        // ---- (1) the payer's history: 3 rows, newest-first, direction+amount+counterparty ----
+        let (s, b) = call(
+            &state,
+            get(&format!(
+                "/api/v1/transactions/{}?currency={}&limit=30",
+                hex::encode(payer_pk),
+                DEMO_USD
+            )),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "transactions body={b}");
+        let rows = b["transactions"]
+            .as_array()
+            .unwrap_or_else(|| panic!("transactions must be an array: {b}"));
+        assert_eq!(rows.len(), 3, "mint + out-transfer + in-transfer (body={b})");
+
+        // Newest-first: the in-transfer (100) landed last.
+        let r0 = &rows[0];
+        assert_eq!(r0["amount"].as_str(), Some("100"), "newest row is the 100 in-transfer");
+        assert_eq!(r0["from"].as_str(), Some(merchant_owner.to_text().as_str()));
+        assert_eq!(r0["to"].as_str(), Some(payer_owner.to_text().as_str()));
+        assert_eq!(
+            r0["memo"].as_str(),
+            Some(hex::encode("change").as_str()),
+            "memo renders as hex bytes"
+        );
+        assert_eq!(r0["currency"].as_u64(), Some(u64::from(DEMO_USD)));
+        assert!(r0["timestamp"].as_u64().is_some(), "timestamp is a unix-seconds number");
+
+        // Middle: the out-transfer (250) — from = payer.
+        let r1 = &rows[1];
+        assert_eq!(r1["amount"].as_str(), Some("250"));
+        assert_eq!(r1["from"].as_str(), Some(payer_owner.to_text().as_str()));
+        assert_eq!(r1["to"].as_str(), Some(merchant_owner.to_text().as_str()));
+
+        // Oldest: the mint (10_000) — `from` is the empty mint sentinel, `to` = payer.
+        let r2 = &rows[2];
+        assert_eq!(r2["amount"].as_str(), Some("10000"));
+        assert_eq!(r2["from"].as_str(), Some(""), "mint renders the empty-from sentinel");
+        assert_eq!(r2["to"].as_str(), Some(payer_owner.to_text().as_str()));
+
+        // ---- (2) limit clamp: ?limit=1 keeps exactly the NEWEST row ----
+        let (ls, lb) = call(
+            &state,
+            get(&format!(
+                "/api/v1/transactions/{}?currency={}&limit=1",
+                hex::encode(payer_pk),
+                DEMO_USD
+            )),
+        )
+        .await;
+        assert_eq!(ls, StatusCode::OK, "limit body={lb}");
+        let lrows = lb["transactions"].as_array().unwrap();
+        assert_eq!(lrows.len(), 1, "limit=1 clamps to one row");
+        assert_eq!(lrows[0]["amount"].as_str(), Some("100"), "the kept row is the NEWEST");
+
+        // ---- (3) no-match account: 200 + empty array (not 404, not an error) ----
+        let stranger_pk = generate_keypair().verifying_key().to_bytes();
+        let (ss, sb) = call(
+            &state,
+            get(&format!(
+                "/api/v1/transactions/{}?currency={}&limit=30",
+                hex::encode(stranger_pk),
+                DEMO_USD
+            )),
+        )
+        .await;
+        assert_eq!(ss, StatusCode::OK, "stranger body={sb}");
+        assert_eq!(
+            sb["transactions"].as_array().map(Vec::len),
+            Some(0),
+            "no ledger rows for this account ⇒ empty array (body={sb})"
+        );
+    });
 }

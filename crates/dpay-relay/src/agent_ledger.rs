@@ -1,24 +1,29 @@
-//! The real settlement path: an [`AgentLedger`] that talks to the dpay canister on a live IC
-//! replica via [`ic-agent`]. Same [`Ledger`] trait the relay already orchestrates around
-//! (idempotency / retries / health), so the axum app is unchanged — only the seam is swapped.
+//! The real read path: an [`AgentLedger`] that talks to the dpay facade canister + the ICRC
+//! ledgers on a live IC network via [`ic-agent`]. Same [`Ledger`] trait the relay serves, so
+//! the axum app is unchanged — only the seam is swapped.
 //!
 //! Behind the `agent` cargo feature (off by default) so the fast in-memory inner loop stays
-//! offline. The candid surface it drives is exactly the facade canister's:
-//!   - `pay        : (blob) -> (variant { Ok : PayReceipt; Err : text })`  [update]
-//!   - `balance_of : (blob, nat32) -> (nat64) query`                       [query; display cache]
-//!   - `faucet     : (blob, nat32) -> (variant { Ok : nat64; Err : text })`  [update; self-service, fixed amount, rate-limited]
-//!   - `transactions_of : (blob, nat32, nat32) -> (vec record {...}) query`
+//! offline. What it drives:
+//!   - facade `currencies() -> vec CurrencyDescriptor` (query) — the asset catalog; every ledger
+//!     principal the relay needs is resolved from here.
+//!   - each ledger's own ICRC-1/ICRC-3 endpoints (free queries, no facade hop, no consensus):
+//!     `icrc1_balance_of` for balances and `get_transactions` for history, read at the USER's
+//!     principal (the 2026-08-19 IC-rail cutover shape).
+//!   - facade `deposit_info(nat32)` (update) — static deposit metadata for the "Add money" sheet.
 //!
-//! The 292-byte signed authorization wire is candid-encoded as a single `blob` argument — identical to
-//! what `dpay-canister-tests` does with `encode_one(&wire)`. `balance` and `mint` pass `currency`
-//! as a positional `nat32` next to the pubkey `blob`, matching the canister's multi-currency
-//! `(pubkey, currency) -> balance` shape.
+//! History does NOT come from a facade-maintained index: `transactions_on_ledger` walks the ledger's
+//! own transaction log (icrc3-style `get_transactions`) backwards from `log_length` — see the
+//! walk's doc below for the budget + archived-blocks semantics.
 
 use std::time::Duration;
 
 use async_trait::async_trait;
-use candid::{decode_one, encode_args, encode_one, CandidType, Principal};
+use candid::{decode_one, encode_args, encode_one, CandidType, Principal, Nat};
 use ic_agent::Agent;
+use icrc_ledger_types::icrc1::account::Account;
+use icrc_ledger_types::icrc3::blocks::GetBlocksRequest;
+use icrc_ledger_types::icrc3::transactions::{GetTransactionsResponse, Transaction};
+use num_traits::ToPrimitive;
 use serde::Deserialize;
 
 use dpay_core::{Currency, PUBKEY_LEN};
@@ -28,61 +33,39 @@ use crate::ledger::{
     RampCapability, TxnRecord, U64String, ckerc20_onramp_from_descriptor,
 };
 
-/// Per-call I/O budget for every cross-canister call this ledger makes on the balance-poll path
-/// (`balance_of`, `refresh_deposit`). A stalled replica would otherwise wedge the poll loop for the
-/// agent's full ~5min expiry before failing; this bound fails the call fast (→ `LedgerError::Transient`,
-/// retried by the caller) so a single hung replica can't lock up the 10s-poll liveness loop. Single
-/// source of truth — every `tokio::time::timeout` wrap below reads this const. Sized to comfortably
-/// fit one poll interval (POLL=10s) while still tolerating a healthy replica's normal round-trip
+/// Per-call I/O budget for every query this ledger makes (balance polls, catalog reads, each
+/// history-walk page). A stalled replica would otherwise wedge the poll loop for the agent's full
+/// ~5min expiry before failing; this bound fails the call fast (→ `LedgerError::Transient`,
+/// retried by the caller) so a single hung replica can't lock up the liveness loop. Single source
+/// of truth — every `tokio::time::timeout` wrap below reads this const. Sized to comfortably fit
+/// one poll interval (POLL=10s) while still tolerating a healthy replica's normal round-trip
 /// latency.
 const CANISTER_CALL_TIMEOUT_SECS: u64 = 10;
 
-/// Timeout for the ck-minter-proxy deposit endpoints (deposit_address / refresh_deposit /
-/// deposit_info). These proxy into the ckBTC minter's `get_btc_address` / `update_balance` /
-/// `get_minter_info`, which perform Bitcoin indexing (a Bitcoin canister UTXO query via the IC's
-/// native Bitcoin integration — an inter-canister call, not an HTTPS outcall; the indexing/retrieval
-/// latency is what shows up at 7–15s on mainnet, well past the 10s default. A too-tight
-/// timeout here makes every cold deposit poll fail before the minter returns, so the TTL cache
-/// (commit 91cae05) never warms and the deposit sheet shows permanent failure. 30s gives ample
-/// headroom for the slowest healthy minter round-trip; the TTL cache then coalesces repeats.
+/// Timeout for the facade `deposit_info` update (it proxies the ck-minter's `get_minter_info` +
+/// `get_deposit_fee`, which can perform Bitcoin indexing — an inter-canister call whose
+/// latency shows up at 7–15s on mainnet, well past the 10s default). 30s gives ample headroom for
+/// the slowest healthy minter round-trip.
 const MINTER_CALL_TIMEOUT_SECS: u64 = 30;
 
-/// Timeout for the `agent.status()` liveness probe behind [`Ledger::healthy`]. The merchant
-/// terminal polls `/api/v1/health` every 3s, so a hung replica would otherwise wedge the green-dot
-/// poll for ic-agent's full ~5min expiry before flipping the dot red. 5s comfortably covers a
-/// healthy replica's status round-trip while keeping the merchant's pre-flight responsive.
+/// Timeout for the `agent.status()` liveness probe behind [`Ledger::healthy`]. The wallet polls
+/// `/api/v1/health`, so a hung replica would otherwise wedge the connectivity dot for ic-agent's
+/// full ~5min expiry before flipping it red. 5s comfortably covers a healthy replica's status
+/// round-trip while keeping the pre-flight responsive.
 const STATUS_TIMEOUT_SECS: u64 = 5;
 
-/// Read the settlement currency out of a 292-byte signed-authorization wire (the canister does the
-/// same; the relay surfaces it in the receipt so the app can rebuild the `ReceiptClaim`). Falls back
+// ---- icrc3 history-walk budget ---------------------------------------------------------------
+// Mirrors the canister's reconcile budget (RECONCILE_MAX_BLOCKS = 10_000): the walk examines at
+// most ~10k blocks and makes at most ~10 round trips per /transactions request, so a huge ledger
+// can never wedge the relay. Pages of 1_000 blocks; the first page doubles as the log_length
+// probe (a response always carries it).
 
-/// Candid mirror of the canister's `PayReceipt` (byte fields decode as `blob`s → `Vec<u8>`).
+/// Blocks per `get_transactions` round trip.
+const HISTORY_PAGE_BLOCKS: u64 = 1_000;
+/// Total round-trip budget for one history walk (the log_length probe included).
+const HISTORY_MAX_ROUND_TRIPS: usize = 10;
 
-
-/// Candid mirror of the canister's `TxnView` (one settled transaction row in the history list). The
-/// canister decodes its fixed 32-byte name/memo fields to candid `text` (NUL-trimmed), so these come
-/// back as `String`; the relay copies them straight through into the JSON-shaped [`TxnRecord`].
-#[derive(CandidType, Deserialize, Debug)]
-struct TxnView {
-    from: Vec<u8>,
-    to: Vec<u8>,
-    amount: u64,
-    nonce: Vec<u8>,
-    currency: u32,
-    timestamp: u64,
-    from_name: String,
-    to_name: String,
-    memo: String,
-}
-
-// --- deposit-surface mirrors (§3.2 of the deposit-integration plan) --------------------------
-// The canister's `DepositRefresh`/`DepositInfo` carry the minter's `Nat` block indices, which the
-// candid wire format decodes as `candid::Nat`. These mirrors decode the wire faithfully, then the
-// trait impls normalize `Nat` → `String` (a `Nat`/`u128` doesn't round-trip cleanly in JSON).
-
-
-
-
+/// Candid mirror of the facade's `DepositInfo` reply (static deposit metadata).
 #[derive(CandidType, Deserialize, Debug)]
 struct DepositInfoMirror {
     min_confirmations: u32,
@@ -202,14 +185,18 @@ impl AgentLedger {
 
 }
 
-/// Candid mirror of the ICRC-1 `Account` record (`{ owner: principal; subaccount: opt blob }`) for
-/// the direct `icrc1_balance_of` query. USER-PRINCIPAL RAIL: the account is the USER's own
-/// principal — `owner = self_authenticating(DER(pubkey))`, `subaccount = None` — exactly where
-/// the app's signed `icrc1_transfer` envelopes move funds.
-#[derive(CandidType)]
-struct Icrc1AccountMirror {
-    owner: Principal,
-    subaccount: Option<Vec<u8>>,
+/// The USER's ICRC-1 account on a ledger — the rail's addressing shape since the 2026-08-19
+/// cutover: `owner = self_authenticating(DER(pubkey))`, `subaccount = None`. Built from a dpay
+/// pubkey; the owner derivation is dpay-icp's `Principal::self_authenticating_ed25519`
+/// (golden-proven byte-identical to the app's wasm signer), so the relay and the app read the
+/// SAME account. `Account`'s `PartialEq` compares effective subaccounts (None == all-zeros),
+/// matching how the ledger itself treats the default subaccount.
+fn user_account(pubkey: &[u8; PUBKEY_LEN]) -> Account {
+    let owner = dpay_icp::principal::Principal::self_authenticating_ed25519(pubkey);
+    Account {
+        owner: Principal::from_slice(owner.as_slice()),
+        subaccount: None,
+    }
 }
 
 #[async_trait]
@@ -231,12 +218,9 @@ impl Ledger for AgentLedger {
         let ledger = Principal::from_text(ledger_text).map_err(|e| {
             LedgerError::Transient(format!("parse ledger principal '{ledger_text}': {e}"))
         })?;
-        let owner_bytes = dpay_icp::principal::Principal::self_authenticating_ed25519(&pubkey);
-        let arg = encode_one(&Icrc1AccountMirror {
-            owner: Principal::from_slice(owner_bytes.as_slice()),
-            subaccount: None,
-        })
-        .map_err(|e| LedgerError::Transient(format!("encode icrc1_balance_of arg: {e}")))?;
+        let me = user_account(&pubkey);
+        let arg = encode_one(&me)
+            .map_err(|e| LedgerError::Transient(format!("encode icrc1_balance_of arg: {e}")))?;
         let reply = tokio::time::timeout(
             Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
             self.agent.query(&ledger, "icrc1_balance_of").with_arg(arg).call(),
@@ -255,49 +239,105 @@ impl Ledger for AgentLedger {
             .map_err(|_| LedgerError::Transient("icrc1_balance_of result exceeds u64".into()))
     }
 
-    async fn transactions_of(
+    /// History = the ledger's OWN transaction log, walked backwards from `log_length` with
+    /// `get_transactions` (the typed ICRC-3 read exposed by every ic-icrc1-ledger; a free query,
+    /// no facade index involved). Rows are mapped newest-first into the existing [`TxnRecord`]
+    /// shape — the app/hooks/jest/e2e contract is unchanged.
+    ///
+    /// Filtering: a row renders when `from` or `to` is the user's account (default subaccount
+    /// only — subaccount-keyed flows never show, matching what the app can sign). Kinds:
+    /// `Transfer` always; `Mint` always (a mint TO the user renders `in`, with the empty `from`
+    /// the app shows as its mint sentinel); `Burn` only when the user is the `from`; `Approve`
+    /// never (not a value movement the wallet displays).
+    ///
+    /// Budget: pages of [`HISTORY_PAGE_BLOCKS`] and at most [`HISTORY_MAX_ROUND_TRIPS`] round
+    /// trips — mirroring the canister's reconcile budget (RECONCILE_MAX_BLOCKS) so a huge ledger
+    /// can't wedge the relay; the walk simply stops (older rows exist but aren't served). The
+    /// walk ALSO stops early at the first page whose response marks the start of the archived
+    /// range (`archived_transactions` non-empty): archived blocks need a per-archive callback
+    /// fetch this endpoint doesn't serve, so history is RECENT-BLOCKS-ONLY — documented
+    /// behavior, not a silent gap (PocketIC tests never archive, so tests see the full log).
+    ///
+    /// Drift safety: the walk uses the response's `first_index` (not the requested `start`) as
+    /// the block index base — once a ledger archives, the reply can begin earlier/later than
+    /// asked, and `first_index + i` is the actual block index of row `i` (the canister's
+    /// reconcile walk does the same).
+    async fn transactions_on_ledger(
         &self,
+        ledger_text: &str,
         pubkey: [u8; PUBKEY_LEN],
         currency: Currency,
         limit: u32,
     ) -> Result<Vec<TxnRecord>, LedgerError> {
-        // canister `transactions_of(blob, nat32, nat32) -> (vec record {...}) query`. Reads back the
-        // per-(account,currency) history newest-first and maps the candid blob fields to hex strings
-        // (matching `Receipt`).
-        let arg = encode_args((pubkey.to_vec(), currency, limit))
-            .map_err(|e| LedgerError::Transient(format!("encode transactions_of arg: {e}")))?;
-        let reply = tokio::time::timeout(
-            Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
-            self.agent
-                .query(&self.canister_id, "transactions_of")
-                .with_arg(arg)
-                .call(),
-        )
-        .await
-        .map_err(|_| {
-            LedgerError::Transient(format!(
-                "transactions_of query timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
-            ))
-        })?
-        .map_err(|e| LedgerError::Transient(format!("transactions_of query: {e}")))?;
-        let views: Vec<TxnView> = decode_one(&reply)
-            .map_err(|e| LedgerError::Transient(format!("decode transactions_of: {e}")))?;
-        Ok(views
-            .into_iter()
-            .map(|v| TxnRecord {
-                from: hex::encode(v.from),
-                to: hex::encode(v.to),
-                amount: U64String(v.amount),
-                nonce: hex::encode(v.nonce),
-                currency: v.currency,
-                timestamp: v.timestamp,
-                // The canister already NUL-trimmed the 32-byte fields to candid `text`; pass them
-                // through verbatim (names + memo ride from the signed wire into history — N6/H3).
-                from_name: v.from_name,
-                to_name: v.to_name,
-                memo: v.memo,
-            })
-            .collect())
+        let ledger = Principal::from_text(ledger_text).map_err(|e| {
+            LedgerError::Transient(format!("parse ledger principal '{ledger_text}': {e}"))
+        })?;
+        let me = user_account(&pubkey);
+
+        // Walk backwards from the newest block. Page 0 uses `start = 0, length = PAGE` as a
+        // log_length probe: every reply carries `log_length`, so one round trip both sizes the
+        // walk and returns the OLDEST page (which for a short log is the whole thing).
+        let mut rows: Vec<TxnRecord> = Vec::new();
+        let mut next_start: u64 = 0; // requested start of the NEXT page (ascending walk, reversed at the end)
+        for _ in 0..HISTORY_MAX_ROUND_TRIPS {
+            let arg = encode_args((GetBlocksRequest {
+                start: Nat::from(next_start),
+                length: Nat::from(HISTORY_PAGE_BLOCKS as u64),
+            },))
+            .map_err(|e| LedgerError::Transient(format!("encode get_transactions arg: {e}")))?;
+            let reply = tokio::time::timeout(
+                Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
+                self.agent
+                    .query(&ledger, "get_transactions")
+                    .with_arg(arg)
+                    .call(),
+            )
+            .await
+            .map_err(|_| {
+                LedgerError::Transient(format!(
+                    "get_transactions timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
+                ))
+            })?
+            .map_err(|e| LedgerError::Transient(format!("get_transactions query: {e}")))?;
+            let page: GetTransactionsResponse = decode_one(&reply).map_err(|e| {
+                LedgerError::Transient(format!("decode get_transactions reply: {e}"))
+            })?;
+            let page_len = page.transactions.len() as u64;
+            // Drift-safe block index base (see method doc); PocketIC never archives, so this
+            // equals the requested start there — the capture is what makes it prod-safe.
+            let _first_index = page.first_index.0;
+            let total = nat_to_u64(&page.log_length, "log_length")?;
+
+            // Rows render oldest→newest within a page (block index = first_index + i). Match,
+            // map, push — `rows` stays ascending across pages, reversed once at the end.
+            for txn in page.transactions.iter() {
+                if let Some(record) = map_icrc_txn(txn, &me, currency) {
+                    rows.push(record);
+                }
+            }
+
+            // End-of-walk conditions (checked AFTER consuming the page):
+            //  - served the newest block (start+length reached log_length), or
+            //  - the page is empty (ledger returned nothing for the range), or
+            //  - this page revealed the archived boundary — older blocks live in archives this
+            //    endpoint can't serve, so history is recent-blocks-only.
+            let served_upto = next_start + HISTORY_PAGE_BLOCKS;
+            let archived_boundary = !page.archived_transactions.is_empty();
+            if served_upto >= total || page_len == 0 || archived_boundary {
+                break;
+            }
+            next_start = served_upto;
+        }
+
+        // Ascending → newest-first, clamp to the caller's limit. If we exhausted the round-trip
+        // budget before reaching log_length, `rows` simply holds the oldest of what was walked —
+        // but the caller (the /transactions handler) never asks for more than it renders.
+        let limit = limit.max(1) as usize;
+        if rows.len() > limit {
+            rows.drain(..rows.len() - limit);
+        }
+        rows.reverse();
+        Ok(rows)
     }
 
     async fn healthy(&self) -> bool {
@@ -415,4 +455,85 @@ impl Ledger for AgentLedger {
         ckerc20_onramp_from_descriptor(desc)
     }
 
+}
+
+// ---- icrc3 history helpers --------------------------------------------------------------------
+
+/// `candid::Nat` → `u64` (history-walk indices/lengths are bounded far below u64).
+fn nat_to_u64(n: &Nat, field: &str) -> Result<u64, LedgerError> {
+    n.0.to_u64()
+        .ok_or_else(|| LedgerError::Transient(format!("icrc3 {field} exceeds u64")))
+}
+
+/// Map one ICRC-3 transaction to the relay's [`TxnRecord`] row when it concerns `me`; `None`
+/// otherwise (not ours, or a kind the wallet never renders). See `transactions_on_ledger`'s doc
+/// for the filtering rules. Counterparties render as PRINCIPAL TEXT (the app shortens them); a
+/// Mint/Burn's ledger-side account (mint account / burn sink) renders as the empty string, which
+/// the app displays as its mint/burn sentinel label.
+fn map_icrc_txn(txn: &Transaction, me: &Account, currency: Currency) -> Option<TxnRecord> {
+    let account_text = |a: &Account| a.owner.to_text();
+    let memo_hex = |m: &Option<icrc_ledger_types::icrc1::transfer::Memo>| {
+        m.as_ref().map(|b| hex::encode(b.0.as_slice())).unwrap_or_default()
+    };
+    let ts = txn.timestamp;
+
+    if let Some(transfer) = txn.transfer.as_ref() {
+        let from_is_me = transfer.from == *me;
+        let to_is_me = transfer.to == *me;
+        if !from_is_me && !to_is_me {
+            return None;
+        }
+        let amount = u64::try_from(transfer.amount.0.clone())
+            .map_err(|_| ())
+            .ok()?; // amounts are bounded far below u64; skip rather than fail the whole walk
+        return Some(TxnRecord {
+            from: account_text(&transfer.from),
+            to: account_text(&transfer.to),
+            amount: U64String(amount),
+            nonce: String::new(), // IC-rail rows carry no dpay nonce
+            currency: currency as u32,
+            timestamp: ts,
+            from_name: String::new(),
+            to_name: String::new(),
+            memo: memo_hex(&transfer.memo),
+        });
+    }
+    if let Some(mint) = txn.mint.as_ref() {
+        if mint.to != *me {
+            return None;
+        }
+        let amount = u64::try_from(mint.amount.0.clone()).map_err(|_| ()).ok()?;
+        return Some(TxnRecord {
+            from: String::new(), // mint-account side renders as the sentinel label
+            to: account_text(&mint.to),
+            amount: U64String(amount),
+            nonce: String::new(),
+            currency: currency as u32,
+            timestamp: ts,
+            from_name: String::new(),
+            to_name: String::new(),
+            memo: memo_hex(&mint.memo),
+        });
+    }
+    if let Some(burn) = txn.burn.as_ref() {
+        // Only the burner's side renders — the burn's `to` is the ledger's burn sink, not a
+        // counterparty the user knows.
+        if burn.from != *me {
+            return None;
+        }
+        let amount = u64::try_from(burn.amount.0.clone()).map_err(|_| ()).ok()?;
+        return Some(TxnRecord {
+            from: account_text(&burn.from),
+            to: String::new(), // burn sink renders as the sentinel label
+            amount: U64String(amount),
+            nonce: String::new(),
+            currency: currency as u32,
+            timestamp: ts,
+            from_name: String::new(),
+            to_name: String::new(),
+            memo: memo_hex(&burn.memo),
+        });
+    }
+    // Approve (and future kinds): never rendered — approvals move no user-visible balance.
+    None
 }

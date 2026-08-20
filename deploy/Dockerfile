@@ -1,17 +1,20 @@
 # syntax=docker/dockerfile:1
 #
-# dpay-relay container — the merchant's submit-and-confirm service, dpay's only online piece.
+# dpay-relay container — dpay's read-and-host surface (catalog, balances/history, web wallet, APK
+# hosting); the only online piece we run. Value never moves through it — the app signs /api/v2
+# envelopes itself.
 #
 # Runtime-only image: the binary is built on the host by `deploy/build.sh` (with `--features agent`,
-# so it can settle on a real canister) and copied in from `deploy/dist/`. The build context is this
+# so it can read a real IC) and copied in from `deploy/dist/`. The build context is this
 # directory, not the repo root — nothing but the binary goes into the image.
 #
 # The binary is dynamically linked against the *host's* glibc, so RUNTIME_BASE must ship a glibc at
 # least as new. build.sh picks a matching base automatically and then proves it by running the
 # binary inside the image; don't build this Dockerfile by hand unless you know the pairing is right.
 #
-# The image is configuration-free: which ledger it settles on (a real canister on a real IC network,
-# or the in-memory demo one) is entirely env — see crates/dpay-relay/src/main.rs.
+# The image is configuration-free: which read backend it uses (the real facade catalog + ICRC
+# ledgers on a real IC network, or the in-memory demo catalog) is entirely env — see
+# crates/dpay-relay/src/main.rs.
 
 ARG RUNTIME_BASE=ubuntu:24.04
 FROM ${RUNTIME_BASE} AS runtime
