@@ -185,7 +185,7 @@ describe('WithdrawSheet retry-after-unknown (double-burn guard)', () => {
     // Settled end-to-end: done screen, retention cleared (no resume card), record removed.
     expect(root.root.findByProps({testID: 'withdraw-status'}).props.children).toBe('Withdrawn ✓');
     expect(await AsyncStorage.getItem(offrampKey(IDENTITY.publicHex, 4))).toBeNull();
-    root.unmount();
+    act(() => { root.unmount(); });
   });
 
   test('restart-mid-offramp: a persisted record resumes the SAME bytes without re-preparing', async () => {
@@ -204,7 +204,7 @@ describe('WithdrawSheet retry-after-unknown (double-burn guard)', () => {
     });
     await driveConfirm(first);
     expect(jest.mocked(submitOfframpStep).mock.calls).toHaveLength(2);
-    first.unmount();
+    act(() => { first.unmount(); });
 
     // Fresh mount (restart): the resume effect hydrates the record; Confirm resumes verbatim.
     const second = await renderSheet();
@@ -215,7 +215,7 @@ describe('WithdrawSheet retry-after-unknown (double-burn guard)', () => {
     const calls = jest.mocked(submitOfframpStep).mock.calls;
     expect(calls).toHaveLength(3);
     expect(calls[2][0].envelopeHex).toBe(STEPS[1].envelopeHex);
-    second.unmount();
+    act(() => { second.unmount(); });
   });
 
   test('editing the form = a NEW withdrawal intent: retention dropped, fresh prepare allowed', async () => {
@@ -245,7 +245,7 @@ describe('WithdrawSheet retry-after-unknown (double-burn guard)', () => {
     expect(prepareEthWithdrawal).toHaveBeenCalledTimes(2);
     // prepareEthWithdrawal(secretHex, ckethLedger, minter, recipient, amountWei, gasFeeWei)
     expect(jest.mocked(prepareEthWithdrawal).mock.calls[1][3]).toBe(NEW_DEST);
-    root.unmount();
+    act(() => { root.unmount(); });
   });
 
   test('clean pre-submit failure (gas fetch null) re-prepares on retry — nothing was signed', async () => {
@@ -272,6 +272,6 @@ describe('WithdrawSheet retry-after-unknown (double-burn guard)', () => {
     expect(prepareEthWithdrawal).toHaveBeenCalledTimes(1);
     expect(jest.mocked(submitOfframpStep).mock.calls.length).toBeGreaterThanOrEqual(1);
     expect(root.root.findByProps({testID: 'withdraw-status'}).props.children).toBe('Withdrawn ✓');
-    root.unmount();
+    act(() => { root.unmount(); });
   });
 });

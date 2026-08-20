@@ -224,8 +224,9 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
         const bal = await railBalanceOf(identity.secretHex, ledger);
         if (bal != null) setStartBal(bal);
       } catch (e) {
-        // Best-effort: watching falls back to any-positive. Still log the cause so a query failure
-        // is visible during a deposit debugging session.
+        // Best-effort: a failed snapshot leaves startBal null — the watching poll's first
+        // successful read then SETS the baseline (watch honesty, P2#5). Still log the cause so a
+        // query failure is visible during a deposit debugging session.
         console.warn('ckERC20 startBal snapshot failed:', e instanceof Error ? e.message : String(e));
       }
       setPhase('enter');
@@ -342,8 +343,9 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
   // Watching: poll the ledger balance for the mint — a SIGNED icrc1_balance_of at the user's own
   // principal (services/rail.ts), NOT a relay route (the old /api/v1/balance poll was
   // test-helpers-only and 404s in prod, so the mint was never detected). The minter scrapes ETH
-  // logs on a ~3min heartbeat; credit typically lands within ~20min. Any growth from the snapshot
-  // (or a positive balance when no snapshot) means the mint landed.
+  // logs on a ~3min heartbeat; credit typically lands within ~20min. Done requires OBSERVED GROWTH
+  // from a real baseline: if the connect-time snapshot failed (null startBal), the first successful
+  // read SETS the baseline instead of comparing — a pre-existing balance never false-positives done.
   useEffect(() => {
     if (phase !== 'watching') return;
     let alive = true;
@@ -351,9 +353,16 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
       try {
         const bal = await railBalanceOf(identity.secretHex, ledger);
         if (alive && bal != null) {
-          // MC1 units 2-4: balance presence/growth via `cmpRaw` (BigInt) — never `>` on strings.
-          const grew = startBal == null ? bal !== '0' : cmpRaw(bal, startBal) > 0;
-          if (grew) setPhase('done');
+          if (startBal == null) {
+            // Watch honesty (P2#5): a missing baseline (the connect-time snapshot failed) must
+            // never declare done off a balance the wallet may have had all along. The first
+            // successful read SETS the baseline; the effect re-runs on the new startBal and the
+            // next cadence poll compares against it.
+            setStartBal(bal);
+          } else if (cmpRaw(bal, startBal) > 0) {
+            // MC1 units 2-4: growth via `cmpRaw` (BigInt) — never `>` on strings.
+            setPhase('done');
+          }
         }
       } catch (e) { console.warn('ckERC20 balance poll failed:', e instanceof Error ? e.message : String(e)); /* keep watching */ }
     };
