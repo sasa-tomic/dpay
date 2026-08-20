@@ -18,29 +18,40 @@
 > trait retirement, live.rs rewrite, e2e flow rewrite to the rail). The facade and relay are
 > OUT of the value path; the app signs /api/v2 envelopes locally.
 >
-> **REMAINING (in order):**
-> 1. ~~**The wasm dual-allocator bug**~~ ✅ **RESOLVED (2026-08-20, `32ebf21`) — see the CLOSED
->    section below.** Full-suite e2e unblocked.
-> 2. ~~**Device gates**~~ ✅ **RESOLVED (2026-08-20, review-fix session ending `1db1d53`)**: all
->    three gates now PASS on the cutover surface — `just app` DPAY_SELFCHECK + DPAY_SOL_SELFCHECK
->    PASS (physical 9cdf67b8 + emulator), `just ondevice` 11/11 (emulator), `just campreview`
->    GREEN both rails (demo 81/197, sol 81/199). The gates had NEVER compiled since the cutover:
+> **REMAINING — CLOSED OUT (2026-08-20 final verification; prod ship is the only step left):**
+> 1. ~~**The wasm dual-allocator bug**~~ ✅ RESOLVED (`32ebf21`) — see the CLOSED section below.
+> 2. ~~**Device gates**~~ ✅ RESOLVED (`1db1d53`): the gates had NEVER compiled since the cutover —
 >    `DpayCoreModule.kt` carried 6 latent Kotlin errors against the regenerated UniFFI binding
 >    (nullable `getString`, non-optional `reject_code`/`reject_message`, mutable-property
->    smart-casts) and the instrumented tests still imported the retired wire-era ffi exports —
->    both fixed + tests re-scoped to the icp-rail surface in `1db1d53`. Reminder from that run:
->    `just ondevice` on the physical MIUI device reports BUILD SUCCESSFUL with `tests=0`
->    (Play-Protect install block) — that gate is emulator-only in practice.
-> 3. **Full-suite e2e green** ✅ (2026-08-20, post-fix): `just e2e` **77/77 GREEN** in ~70 s
->    (plus optional flow 39 via `just e2e-store`, 78/78 total). Two stale-premise flows surfaced
->    once the wasm flake stopped masking them and were fixed (`76de37d` flow 22 — kill the IC
->    gateway, not just the relay; `e35c188` flow 59 — pin the post-W8 rail-proof receipt shape).
->    Residual: `41-a11y-census` (20 s authored timeout, census of 8 surfaces) can trip its
->    per-test timeout on a heavily-loaded shared host (12.4 s standalone vs 20 s budget; the
->    harness's load-scaling covers the machine's average, not spikes). If it recurs, that is
->    host contention, not the app.
-> 4. `test-icp-replica` is green; keep it on any rail change. Prod ship (`just deploy-ic &&
->    just apk && just up`) AFTER all gates — prod is behind head.
+>    smart-casts) and the instrumented tests still imported the retired wire-era ffi exports.
+>    Both fixed + tests re-scoped to the icp-rail surface: `just app` DPAY_SELFCHECK +
+>    DPAY_SOL_SELFCHECK PASS (physical 9cdf67b8 + emulator), `just ondevice` 11/11 (emulator),
+>    `just campreview` GREEN both rails (demo 81/197, sol 81/199). The physical MIUI device
+>    blocks test-APK installs (Play-Protect `tests=0`) — that gate is emulator-only in practice.
+> 3. ~~**Full-suite e2e**~~ ✅ `just e2e` **77/77 GREEN** (+ optional flow 39 via `just
+>    e2e-store` → **78/78**; FLOWS.md is canonical). Two stale-premise flows surfaced once the
+>    wasm flake stopped masking them and were fixed (`76de37d` flow 22 — kill the IC gateway,
+>    not just the relay; `e35c188` flow 59 — pin the post-W8 rail-proof receipt shape).
+> 4. ~~**Replica gate on rail changes**~~ ✅ re-run on the integrated tree after this session's
+>    rail changes: `just test-icp-replica` **18/18 PASS**.
+>
+> **Final integrated verification (2026-08-20 close-out, real runs):** `just verify` fully GREEN
+> — core 47 · canister 86 · icp 6 · relay 33 · live 34 · typecheck · bridge-parity 42 methods ·
+> aid-parity 4 AIDs · wasm-core parity 124 checks · e2e **77/77** (216 s at ×3.48 host load —
+> the harness flagged its load-adjusted time target; documented host-contention class, zero
+> flakes) · `just e2e-store` 1/1 · jest **819/819** (40 suites) · wasm hammer
+> `node e2e/debug/wasm-hammer.mjs` **PASS ×2** (320 calls, 0 fails each).
+>
+> **PROD SHIP FOLLOWS THIS SESSION** (`just deploy-ic && just apk && just up`): prod is behind
+> HEAD by the user-principal cutover + the fix arc — everything from the W1–W8 cutover through
+> `f03434a` is committed but unshipped.
+>
+> **Residual (documented, non-blocking):** flow-41's 20 s authored timeout can trip on host-load
+> spikes (census of 8 surfaces; 12.4 s standalone vs 20 s budget — host contention, not the app);
+> the e2e `goOffline` helper kills the relay only, but flows 13/19/20 asserts don't depend on
+> IC-gateway death (flow 22 kills the gateway itself); `icGatewayBase` is read per-call in the
+> app vs the shims' one-time `?relay=` capture — an e2e-only concern, no prod surface; MIUI
+> physical device blocks test-APK installs (`just ondevice` stays emulator-only).
 >
 > **Agent-pickable work queued: the Trust Wallet fund-button** (set 2026-08-17). Full researched
 > plan: **`2026-08-17-trust-wallet-fund-button.md`** — read it first; it carries the verified
@@ -280,6 +291,62 @@
 > ZERO tests on this physical MIUI device — Play Protect + MIUI `AdbInstallActivity` dialogs
 > silently block the UTP test-APK install (gradle reports SUCCESS with `tests=0`); that gate stays
 > emulator-only in practice. The REAL radio-hop validation is the founder two-phone live tap.
+
+## Session summary (2026-08-20): rail-switch completion — wasm dual-allocator fix + review-fix arc
+
+> **Context:** the user-principal IC-rail cutover (W1–W8) was committed but its fix arc was not:
+> a deterministic wasm corruption bug red-flagged the full e2e suite, an independent review of
+> the cutover arc returned 15 findings, and the device gates turned out to have never compiled
+> post-cutover. This session (12 commits, `32ebf21`→`f03434a` on `15777c5`) closed all three and
+> refreshed the living docs; a final-verification pass then re-ran every gate on the INTEGRATED
+> tree (numbers below).
+
+**Done (all committed, all gates green at each step):**
+- **Wasm dual-allocator bug root-caused + fixed** (`32ebf21`): `crates/dpay-wasm` declared NO
+  `#[global_allocator]`, so the toolchain-default **dlmalloc** served every Rust-side
+  String/Vec from the SAME linear-memory frontier `w_alloc` hands to JS — two allocators, one
+  arena → deterministic overlap at cumulative volume (browser hammer failed at exactly call
+  #281 / 18 pages). Fix: ONE allocator — a wasm32-only `#[global_allocator]` routed through
+  the `w_alloc` bump cursor (shared `heap_cursor()`/`bump_reserve()`); frozen ABI v1 unchanged;
+  host/Android builds keep the platform allocator. Proof: `wasm-objdump -x` shows zero dlmalloc
+  symbols in the new artifact; pure-Node repro `e2e/debug/wasm-alloc-collide.mjs` (OLD artifact
+  FAILS round 0 at the production-neighborhood offset; NEW passes 200 rounds, 512 KB of
+  patterns intact). Harness dist-cache now watches the staged wasm (`a25d71d` — the first
+  post-fix hammer run had driven a stale cached web build); stale-premise flows fixed
+  (`76de37d` flow 22 — kill the IC gateway, not just the relay; `e35c188` flow 59 — pin the
+  post-W8 rail-proof receipt shape). Full root cause + evidence: the CLOSED BUG section above.
+- **Independent review of the cutover arc** (read-only verifier) → **15 findings**; code fixes
+  landed: prod web bundle seam gating (`0ceb252` — `__DPAY_TEST_*` seams mode-gated out of
+  web-prod; new standing guard `scripts/check-web-prod-seams.mjs` wired into `just web` →
+  `check`); a forged `dpay:pay` rail-proof deeplink can no longer fabricate "Received" — the
+  settlement poll is the only path that flips the result, bounded budget + rejected error path
+  (`0e81100`, jest +18); minter-ok reply decoding single-sourced in the Rust core across
+  ffi+wasm (`918ff85` — wasm parity census grew 96→124 checks); flow 00 re-scoped to the icp
+  surface (`75c3bf1`).
+- **Device gates had never compiled post-cutover** — `DpayCoreModule.kt` carried 6 latent
+  Kotlin errors against the regenerated UniFFI binding and the instrumented tests still
+  imported retired wire-era ffi exports; both fixed + re-scoped (`1db1d53`): `just app` both
+  self-checks PASS, `just ondevice` 11/11, `just campreview` GREEN both rails.
+- **Living docs aligned** (`9a8d25b`, `f03434a`): CANISTERS.md rewritten post-cutover,
+  CODEBASE_ANALYSIS.md refreshed (new surfaces + struck resolved risks), AGENTS.md/CLAUDE.md
+  factual drift fixed; flow counts canonical everywhere (**78 = 77 default + 1 optional**,
+  FLOWS.md generated). This close-out also fixed the last count drift (justfile "74 flows" /
+  "16 pay flows" comments, CODEBASE_ANALYSIS "bridge-parity now 29 methods").
+
+**Final integrated gates (this close-out, real runs):** `just verify` GREEN — core 47 ·
+canister 86 · icp 6 · relay 33 · live 34 · typecheck · bridge-parity 42 methods · aid-parity
+4 AIDs · wasm-core parity 124 checks · e2e **77/77** (216 s at ×3.48 host load — documented
+contention class, zero flakes) · `just e2e-store` 1/1 (**78/78** total) · jest **819/819**
+(40 suites) · wasm hammer **PASS ×2** · `just test-icp-replica` **18/18** (rail code changed
+this session — the work-order requirement).
+
+**Residual documented (keep visible):** flow-41 20 s authored timeout vs host-load spikes;
+`goOffline` helper kills relay only (flows 13/19/20 asserts don't depend on gateway death);
+`icGatewayBase` per-call read vs shims' one-time `?relay=` capture (e2e-only concern); MIUI
+physical device blocks test-APK installs (ondevice stays emulator-only); CF edge bare-URL APK
+purge (founder-owned — DO NOT NAG section).
+
+**PROD SHIP FOLLOWS THIS SESSION** — prod is behind HEAD by the cutover + fix arc.
 
 ## Session summary (2026-08-16, cont.): review sweep #2 — fund-first gate + campreview SOL fix + UX findings U-F1..6/A-F1..4 — COMPLETE, PROD AT HEAD
 

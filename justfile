@@ -70,7 +70,7 @@ e2e:
 # visual-regression gate (fast iteration on flow 40 alone): re-capture the 5 primary surfaces and
 # pixel-diff each vs its committed baseline (e2e/shots/baselines/). Fails on drift >0.5%. Catches the
 # exact class of style/layout regression that sails through the testID+textContent e2e net. NOTE:
-# flow 40 IS part of the default suite (74 flows), so `just verify` → `check e2e` already runs the pixel-diff —
+# flow 40 IS part of the default suite (see FLOWS.md for the canonical count), so `just verify` → `check e2e` already runs the pixel-diff —
 # this standalone recipe re-runs ONLY flow 40 in isolation for fast feedback after a UI tweak (no
 # banner, no other flows). On an intentional UI change, regenerate the baselines via
 # `just e2e-visual-seed` and commit the new baselines (the diff is reviewable in the commit).
@@ -95,7 +95,7 @@ e2e-store:
 
 # watch mode (Phase 3): a LONG-RUNNING dev loop that re-runs a SUBSET of flows on every change to
 # app/, e2e/, crates/dpay-core/src/, or crates/dpay-ffi/src/. The changed file is mapped to a journey
-# (e.g. app/components/PayMode.tsx → the `pay` journey, 16 flows) and only that subset re-runs —
+# (e.g. app/components/PayMode.tsx → the `pay` journey) and only that subset re-runs —
 # sub-second-to-~5s feedback while iterating instead of the full ~23s suite. The shared relay+web+
 # browser session PERSISTS across re-runs (only per-test contexts churn). Ctrl-C tears it down.
 # Shared-infra changes (App.tsx, styles.ts, services/native.ts, harness/*, crates/**) re-run ALL.
