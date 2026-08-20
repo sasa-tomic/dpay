@@ -138,19 +138,35 @@ function escapeRegex(s) {
  * free port forever — 22 had accumulated by 2026-08-15. The `process.on('exit')` SIGKILL net cannot
  * fire when Node itself dies without an exit event, so this spawn-time sweep is the source fix: it
  * kills every process whose command line is EXACTLY the harness's sirv invocation for this repo's
- * e2e/dist root. Scoped so tightly (binary path + dist path + `--single`) that an unrelated node
- * process cannot match. NOTE: parallel `run.mjs` invocations are already required to be serialized
- * (the e2e/dist build cache is a shared path — see FLOWS.md conventions), so a LIVE sibling run's
- * sirv is never a casualty under documented usage. `pkill` absence (non-Linux) is swallowed.
+ * e2e/dist root.
+ *
+ * ORPHAN-ONLY (2026-08-19): a bare `pkill -f` also killed LIVE sibling runs' sirv servers — under
+ * parallel `run.mjs` invocations (concurrent agents on disjoint flows) one run's sweep severed the
+ * other run's web origin mid-test, surfacing as a spurious `requestfailed: …/assets/*.ttf —
+ * ERR_CONNECTION_REFUSED` at teardown. A true orphan is reparented to PID 1; a live sibling's sirv
+ * still has its spawning `run.mjs` as parent. So: kill only matching processes with ppid == 1.
+ * (The e2e/dist build cache remains a shared path — runs must still not build concurrently — but
+ * the stateless serve+test phase is now safe to overlap.)
  */
 function reapOrphanedSirv() {
   const pattern = `sirv-cli/bin\\.js ${escapeRegex(DIST)} --single`;
   try {
-    execFileSync('pkill', ['-f', pattern], { stdio: 'ignore' });
-    console.log('[web] reaped orphaned sirv server(s) serving this dist root');
+    const pids = execFileSync('pgrep', ['-f', pattern], { encoding: 'utf8' })
+      .split('\n').map((s) => s.trim()).filter(Boolean).map(Number);
+    const orphans = [];
+    for (const pid of pids) {
+      try {
+        const ppid = Number(execFileSync('ps', ['-o', 'ppid=', '-p', String(pid)], { encoding: 'utf8' }).trim());
+        if (ppid === 1) orphans.push(pid);
+      } catch {} // process vanished mid-sweep — already dead, nothing to do
+    }
+    if (orphans.length > 0) {
+      try { execFileSync('kill', ['-9', ...orphans.map(String)], { stdio: 'ignore' }); } catch {}
+      console.log(`[web] reaped ${orphans.length} orphaned sirv server(s) serving this dist root`);
+    }
   } catch (e) {
-    // exit code 1 = no process matched (the common case); ENOENT = no pkill (non-Linux). Both fine.
-    const nomatch = typeof e.status === 'number';
+    // pgrep exit 1 = no process matched (the common case); ENOENT = no pgrep/ps (non-Linux). Both fine.
+    const nomatch = typeof e.status === 'number' && e.status === 1;
     if (!nomatch && e.code !== 'ENOENT') {
       console.warn(`[web] sirv reap failed (continuing): ${e.message}`);
     }

@@ -61,7 +61,17 @@ export async function loadTestsMeta() {
   const out = [];
   for (const f of files) {
     const path = join(TESTS_DIR, f);
-    const mod = await import(`file://${path}`);
+    // IC-rail cutover (2026-08-19): flows still importing retired helpers (postPay/seedDeposit/…)
+    // fail their module import — that must not hard-crash the WHOLE run while the suite is
+    // mid-migration. Mark them broken; the runner skips them with a loud warning (and a filtered
+    // run targeting one surfaces the import error verbatim).
+    let mod;
+    try {
+      mod = await import(`file://${path}`);
+    } catch (e) {
+      out.push({ file: f, id: f.slice(0, 2), name: basename(f, '.mjs').slice(3), path, broken: String(e?.message ?? e), meta: { id: f.slice(0, 2), name: basename(f, '.mjs').slice(3), journey: 'uncategorized', covers: [], timeoutMs: FALLBACK_TIMEOUT_MS } });
+      continue;
+    }
     const id = f.slice(0, 2);
     const name = basename(f, '.mjs').slice(3);
     const meta = mod.meta

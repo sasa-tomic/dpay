@@ -23,6 +23,11 @@ import { DpaySolNfc, installSolNfcSeam } from './dpay-sol-nfc';
 // visible to App.tsx. (NativeModules in RNW is a mutable shared object — see
 // react-native-web/dist/exports/NativeModules/index.js.)
 (NativeModules as any).DpayCore = DpayCore;
+// Test seam: expose the same wasm-backed DpayCore instance to the e2e driver
+// (window.__DPAY_TEST_CORE) so a flow can drive/inspect the wasm surface directly — same
+// philosophy as __DPAY_TEST_SCAN. Used by e2e/debug/wasm-hammer.mjs (allocator-corruption
+// repro; see OPEN_ISSUES "wasm dual-allocator corruption").
+(typeof globalThis !== 'undefined' ? (globalThis as any) : ({} as any)).__DPAY_TEST_CORE = DpayCore;
 (NativeModules as any).DpayNfc = DpayNfc;
 (NativeModules as any).DpaySolNfc = DpaySolNfc;
 

@@ -250,9 +250,14 @@ function uleb(v) {
   return out;
 }
 
-/** Principal (29-byte self-authenticating) from a raw 32B ed25519 pubkey: SHA224(DER(pub)) | 0x02. */
+/** Principal (29-byte self-authenticating) from a raw 32B ed25519 pubkey: SHA224(DER(pub)) | 0x02.
+ *  `pubkey32` is the pubkey as a 64-char HEX STRING (the convention at every call site —
+ *  railTransfer, railPrincipalText, the pay flows). Mirrors Rust's
+ *  Principal::self_authenticating_ed25519 byte-for-byte; passing the hex through un-decoded
+ *  hashes 64 ASCII chars instead of the 32 raw bytes and produces a WRONG (phantom) principal. */
 export function icpPrincipalBytes(pubkey32) {
-  const h = sha224(derWrap(pubkey32));
+  const raw = typeof pubkey32 === 'string' ? hexToBytes(pubkey32) : pubkey32;
+  const h = sha224(derWrap(raw));
   return Uint8Array.from([...h, 0x02]);
 }
 

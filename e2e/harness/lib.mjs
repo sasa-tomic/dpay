@@ -587,109 +587,72 @@ export async function getBalance(relayBaseURL, accountHex, currency = 0, timeout
 }
 
 /**
- * POST `/api/v1/test/deposit/seed` (feature `test-helpers` ONLY — the harness builds the relay with
- * `--features test-helpers`, the prod image never does). Seeds a pending deposit of `amount` minor
- * units for `accountHex` in `currency`; the NEXT `/deposit/refresh` drains + credits it (mirrors a
- * confirmed ckBTC mint). Used by flow 05 to prove the credited path through the real relay+FakeLedger.
- */
-export async function seedDeposit(relayBaseURL, accountHex, currency, amount, timeoutMs = 4000) {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), timeoutMs);
-  const url = `${relayBaseURL}/api/v1/test/deposit/seed`;
-  try {
-    const r = await fetch(url, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ account: accountHex, currency, amount }), signal: ctrl.signal,
-    });
-    if (!r.ok) throw new Error(`POST ${url} → HTTP ${r.status}: ${(await r.text().catch(() => '')).slice(0, 500)}`);
-    return r.json();
-  } catch (e) {
-    if (e instanceof Error && /^POST /.test(e.message)) throw e;
-    throw new Error(`POST ${url} failed: ${e instanceof Error ? e.message : e}`);
-  } finally { clearTimeout(t); }
-}
-
-/**
- * POST `/api/v1/deposit/refresh/{hex}?currency=N` — drains a seeded pending deposit and credits the
- * balance (mirrors the ck minter minting after confirmations). Used by the withdraw flow (15) to
- * credit ckBTC to the wallet's subaccount WITHOUT opening the deposit sheet, so the asset card
- * appears and the withdraw path has a balance to draw from. Returns the refreshed `minted_total`.
- */
-export async function refreshDeposit(relayBaseURL, accountHex, currency, timeoutMs = 4000) {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), timeoutMs);
-  const url = `${relayBaseURL}/api/v1/deposit/refresh/${accountHex}?currency=${currency}`;
-  try {
-    const r = await fetch(url, {
-      method: 'POST', signal: ctrl.signal,
-    });
-    if (!r.ok) throw new Error(`POST ${url} → HTTP ${r.status}: ${(await r.text().catch(() => '')).slice(0, 500)}`);
-    return r.json();
-  } catch (e) {
-    if (e instanceof Error && /^POST /.test(e.message)) throw e;
-    throw new Error(`POST ${url} failed: ${e instanceof Error ? e.message : e}`);
-  } finally { clearTimeout(t); }
-}
-
-/**
- * POST `/api/v1/withdraw` with the signed WithdrawRequest → `{ok, status, body}`. Used by the
- * withdraw flow (15) to assert the route's error mapping on a below-min / wrong-sig rejection
- * directly (the app's own submit path is exercised through the UI).
+ * IC-rail transfer (2026-08-19 cutover): sign an icrc1_transfer update envelope as a HARNESS-side
+ * payer (the stand-in for "the payer's own phone submitted it online") and POST it straight to the
+ * fake-IC /api/v2 gateway the test relay mounts. Byte-identical to what the app's wasm core signs
+ * (wire.mjs is the golden oracle). The request memo (nonce hex) is the reconciliation key.
  *
- * Returns `{ok, status, body}` for EVERY HTTP response (incl. non-2xx) so a flow can assert on the
- * relay's rejection (e.g. a 422). A TRANSPORT failure (relay down, abort) is NOT a relay rejection
- * — it is an infrastructure failure that would let a flow pass or fail opaquely, so it throws loudly
- * with method + URL + the underlying error instead of returning a silent sentinel.
+ * `desc` (optional) is a catalog row; when omitted it is fetched from /api/v1/currencies.
+ * Returns `{ok, status, requestIdHex, bodyText}` — a 202 means accepted (dedup keyed request_id;
+ * identical-byte resubmit is free and settles once).
  */
-export async function postWithdraw(relayBaseURL, req, timeoutMs = 6000) {
+export async function railTransfer(relayBaseURL, payerSecretHex, payeePubHex, amountMinor, { currency = 0, memoHex = '', desc = null, timeoutMs = 8000 } = {}) {
+  if (desc == null) {
+    const r = await fetch(`${relayBaseURL}/api/v1/currencies`);
+    if (!r.ok) throw new Error(`catalog fetch failed: HTTP ${r.status}`);
+    // The relay wraps the catalog array: 200 {"currencies":[…]}.
+    const j = await r.json();
+    const catalog = Array.isArray(j) ? j : j.currencies;
+    desc = catalog.find((c) => c.currency === currency);
+  }
+  if (!desc?.ledger) throw new Error(`railTransfer: no ledger for currency ${currency}`);
+  const { icpPrincipalBytes, icpTransferArgBytes, icpSignUpdate } = await import('./wire.mjs');
+  const arg = icpTransferArgBytes(icpPrincipalBytes(payeePubHex), BigInt(amountMinor), {
+    fee: desc.fee != null ? BigInt(desc.fee) : null,
+    memoHex,
+  });
+  const expiry = BigInt(Date.now() + 300_000) * 1_000_000n;
+  const signed = await icpSignUpdate(payerSecretHex, desc.ledger, 'icrc1_transfer', arg, expiry);
+  const url = `${relayBaseURL}/api/v2/canister/${desc.ledger}/call`;
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
-  const url = `${relayBaseURL}/api/v1/withdraw`;
   try {
-    const r = await fetch(url, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req), signal: ctrl.signal,
-    });
-    const body = await r.json().catch(() => ({}));
-    return { ok: r.ok, status: r.status, body };
-  } catch (e) {
-    throw new Error(`POST ${url} failed (transport): ${e instanceof Error ? e.message : e}`);
-  } finally { clearTimeout(t); }
-}
-
-/** POST `/api/v1/pay` with a `{qr}` body → `{ok, status, body}`. Throws on transport failure (see
- *  `postWithdraw` for the rationale — a fetch rejection is infrastructure, not a relay response). */
-export async function postPay(relayBaseURL, qrCode, timeoutMs = 6000) {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), timeoutMs);
-  const url = `${relayBaseURL}/api/v1/pay`;
-  try {
-    const r = await fetch(url, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ qr: qrCode }), signal: ctrl.signal,
-    });
-    const body = await r.json().catch(() => ({}));
-    return { ok: r.ok, status: r.status, body };
+    const bytes = new Uint8Array(signed.envelopeHex.match(/../g).map((h) => parseInt(h, 16)));
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/cbor' }, body: bytes, signal: ctrl.signal });
+    const bodyText = await r.text().catch(() => '');
+    return { ok: r.ok, status: r.status, requestIdHex: signed.requestIdHex, bodyText };
   } catch (e) {
     throw new Error(`POST ${url} failed (transport): ${e instanceof Error ? e.message : e}`);
   } finally { clearTimeout(t); }
 }
 
 /**
- * POST `/api/v1/faucet` `{account, amount}` → credits DEMO (currency 0) to an ARBITRARY account hex
- * (not just the browser-onboarded identity). Used by flows that need to fund a server-side keypair
- * (e.g. flow 50 funds a payer keypair B that settles a merchant request + shares the receipt back).
- * Returns `{ok, status, body}`; a non-2xx (e.g. cooldown) surfaces in `body.error`. Throws on
- * transport failure (see `postWithdraw`). Mirrors postPay.
+ * The payee/payer PRINCIPAL TEXT (self_authenticating of the app pubkey) — what the fake-IC
+ * gateway keys balances/txns on and what /api/v1/transactions rows carry in from/to. Flows assert
+ * on this text (the pubkey-hex history rows of the facade era are gone).
  */
-export async function faucetAccount(relayBaseURL, accountHex, amount, timeoutMs = 6000) {
+export async function railPrincipalText(pubHex) {
+  const { icpPrincipalBytes, principalToText } = await import('./wire.mjs');
+  return principalToText(icpPrincipalBytes(pubHex));
+}
+
+/**
+ * POST `/api/v1/faucet` `{account, currency?, amount?}` → credits fake-IC at the ARBITRARY
+ * account hex's PRINCIPAL (self_authenticating of the pubkey — exactly where the rail keys
+ * balances). `currency` defaults to the relay's DEMO (0); pass `{currency: N}` to fund a
+ * multi-asset flow (ckBTC=1, ckUSDC=2, …) the way the old test/deposit/seed route used to.
+ * Returns `{ok, status, body}`; a non-2xx (e.g. cooldown) surfaces in `body.error`. Throws on
+ * transport failure (see `railTransfer`).
+ */
+export async function faucetAccount(relayBaseURL, accountHex, amount, opts = {}) {
+  const { currency, timeoutMs = 6000 } = opts;
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   const url = `${relayBaseURL}/api/v1/faucet`;
   try {
     const r = await fetch(url, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ account: accountHex, amount }), signal: ctrl.signal,
+      body: JSON.stringify({ account: accountHex, amount, ...(currency != null ? { currency } : {}) }), signal: ctrl.signal,
     });
     const body = await r.json().catch(() => ({}));
     return { ok: r.ok, status: r.status, body };

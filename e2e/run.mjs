@@ -171,6 +171,15 @@ async function runPool(tests, concurrency, timeoutScale) {
     if (idx >= tests.length) return;
     const test = tests[idx];
     const key = test.file;
+    // A flow whose module import failed (retired-helper imports mid-cutover) is skipped LOUDLY —
+    // never silently dropped, never counted as passed, and does NOT trip fail-fast (it needs its
+    // own rewrite wave, not this run's diagnostics). The final verdict still fails on it.
+    if (test.broken) {
+      results.set(key, { ok: false, ms: 0, err: new Error(`BROKEN (import failed): ${test.broken}`), broken: true });
+      console.error(`  ⚠ ${key}  SKIPPED — module import failed: ${test.broken}`);
+      void startOne(); // keep the worker chain alive (this slot is done instantly)
+      return;
+    }
     activeWorkers++;
     const tStart = Date.now();
     try {
@@ -278,7 +287,12 @@ export async function runTestsSubset(tests, opts = {}) {
   if (firstFailure) {
     console.error(`\n[run] FAILED in ${elapsed}s (first RED: ${firstFailure.key})`);
   } else {
-    console.log(`\n[run] ${passed}/${total} GREEN in ${elapsed}s`);
+    const brokenCount = [...results.values()].filter((r) => r.broken).length;
+    if (brokenCount > 0) {
+      console.error(`\n[run] ${passed}/${total} GREEN in ${elapsed}s — but ${brokenCount} flow(s) SKIPPED (module import failed; pending IC-rail rewrite)`);
+    } else {
+      console.log(`\n[run] ${passed}/${total} GREEN in ${elapsed}s`);
+    }
     // The target scales with suite size: 18 flows → 15s; the Wave-E expansion to 24 flows → 20s; wire-
     // format v2 (flow 26 + per-payment name encoding) → 22s; the Phase-4 coverage expansion to 44 flows
     // (00-43, incl. visual-regression + a11y census + receipt-reject + decimal-edges) → ~30s. The suite
@@ -296,7 +310,7 @@ export async function runTestsSubset(tests, opts = {}) {
     }
   }
 
-  return { passed, total, elapsed, firstFailure, timeoutScale };
+  return { passed, total, elapsed, firstFailure, results, timeoutScale };
 }
 
 /**
@@ -328,8 +342,10 @@ async function main() {
     `${noFailFast ? ' [NO-FAILFAST: every flow attempts; first RED still sets exit 1]' : ''}\n`,
   );
 
-  const { firstFailure } = await runTestsSubset(tests, { concurrency, timeoutScale });
-  if (firstFailure) process.exit(1);
+  const { firstFailure, results } = await runTestsSubset(tests, { concurrency, timeoutScale });
+  // Broken (import-failed, pending-rewrite) flows don't trip fail-fast, but they must still fail
+  // the run — a suite with silently-skipped flows is a false green.
+  if (firstFailure || [...results.values()].some((r) => r.broken)) process.exit(1);
 }
 
 // --- process-level safety net (prevent orphaned child processes) ---------------------------------

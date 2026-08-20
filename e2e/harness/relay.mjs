@@ -1,12 +1,13 @@
 // Relay spawner — builds (if missing) and runs the REAL dpay-relay (FakeLedger, offline) built WITH
-// `--features test-helpers` so the harness can drive the deposit-seed route too.
-//
-// The relay is the ONLY online dependency in the demo; in local mode we run it against the
-// in-memory FakeLedger so the whole suite stays offline + seconds-fast. In live mode (DPAY_E2E_MODE
-// =live) this spawner is NOT used — the harness points the app at $DPAY_E2E_BASE instead.
+// `--features test-helpers` so the harness can drive the faucet + fake-IC gateway routes too.
+// Hosts the page over 127.0.0.1 so sandboxed browser WebSocket CDP connections work.
+//! The relay is the ONLY online dependency in the demo; in local mode we run it against the
+//! in-memory fake-IC gateway so the whole suite stays offline + seconds-fast. In live mode
+//! (DPAY_E2E_MODE=live) this spawner is NOT used — the harness points the app at $DPAY_E2E_BASE.
 //
 // --- Why a DEDICATED cargo target dir (the root fix for the "rebuild on every run" workaround) ---
-// The e2e relay MUST be built with `--features test-helpers` (the `/api/v1/test/deposit/seed` route),
+// The e2e relay MUST be built with `--features test-helpers` (the `/api/v1/faucet` +
+// `/api/v2/canister/*` fake-IC gateway routes),
 // but `just check` / `just test-relay` build the SAME crate WITHOUT the feature into the SHARED
 // `target/debug/dpay-relay`. Same output path → a plain `cargo build -p dpay-relay` CLOBBERS the
 // feature-bearing binary, and a "binary exists" probe cannot tell the two apart. The old harness
@@ -15,7 +16,7 @@
 // gitignored) so nothing else ever writes the e2e binary — cargo's own fingerprinting within that
 // isolated dir is now authoritative, and a missing-binary probe is sufficient. The deps cache stays
 // shared (`.dev/cargo` as CARGO_HOME), so a cold build is no slower than before. A post-spawn
-// `/test/deposit/seed` reachability probe is a SAFETY NET (defense against a future regression),
+// `/api/v1/faucet` reachability probe is a SAFETY NET (defense against a future regression),
 // NOT the primary mechanism — the isolated dir is.
 //
 // Hard rules honored:
@@ -119,22 +120,26 @@ function runCargo(args, timeoutMs) {
 }
 
 /**
- * Probe that the feature-gated `/api/v1/test/deposit/seed` route actually exists on the RUNNING
- * relay. SAFETY NET for the isolated-target-dir root fix: with the isolated dir a featureless
- * clobber is impossible, but this guard turns a silent future regression (route 404) into a loud
- * error + one forced rebuild, instead of a confusing flow-05 failure.
+ * Probe that the feature-gated test-helpers surface actually exists on the RUNNING relay. SAFETY
+ * NET for the isolated-target-dir root fix: with the isolated dir a featureless clobber is
+ * impossible, but this guard turns a silent future regression (route 404) into a loud error + one
+ * forced rebuild, instead of a confusing flow failure.
+ *
+ * (2026-08-19 IC-rail cutover: the old probe hit `/api/v1/test/deposit/seed`, which was DELETED
+ * with the relay settlement surface. The probe now hits `POST /api/v1/faucet` — the surviving
+ * test-helpers funding route — with the same stateless trick.)
  *
  * Stateless by design: POSTs a deliberately-invalid account (4 hex bytes, not 32) so the route
  * returns `400 "account must be 32 bytes hex"` WITHOUT touching the ledger. A `404` means the route
  * is absent → the binary lacks `test-helpers`. Returns true iff the route is present.
  */
-async function probeSeedRoute(baseURL, timeoutMs = 3_000) {
+async function probeFaucetRoute(baseURL, timeoutMs = 3_000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const r = await fetch(`${baseURL}/api/v1/test/deposit/seed`, {
+    const r = await fetch(`${baseURL}/api/v1/faucet`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      // 4-byte hex → rejected at hex::decode length check BEFORE any ledger mutation. Stateless.
+      // 4-byte hex → rejected at parse_hex_array's length check BEFORE any ledger mutation. Stateless.
       body: JSON.stringify({ account: 'deadbeef', currency: 0, amount: 0 }), signal: ctrl.signal,
     });
     // 400 (bad account) = route present + feature compiled in; 404 = route absent (featureless).
@@ -151,10 +156,10 @@ async function probeSeedRoute(baseURL, timeoutMs = 3_000) {
  * `DPAY_RELAY_ADDR=127.0.0.1:PORT` and settles on the in-memory FakeLedger (DPAY_LEDGER=memory),
  * with the faucet ENABLED so the onboarding flow's `/api/v1/faucet` POST funds the new account.
  *
- * After health, probes the feature-gated `/test/deposit/seed` route (SAFETY NET). If it 404s — which
- * the isolated target dir makes impossible, but a future regression could — forces ONE rebuild into
- * the isolated dir and respawns, then re-probes. A second 404 is a hard, loud error (never silent).
- */
+  * After health, probes the feature-gated `/api/v1/faucet` route (SAFETY NET). If it 404s — which
+   * the isolated target dir makes impossible, but a future regression could — forces ONE rebuild into
+   * the isolated dir and respawns, then re-probes. A second 404 is a hard, loud error (never silent).
+   */
 export async function startRelay(opts = {}) {
   await ensureRelayBuilt();
   let attempt = 0;
@@ -165,19 +170,19 @@ export async function startRelay(opts = {}) {
     try {
       await waitForHealth(baseURL, opts.readyTimeoutMs ?? READY_TIMEOUT_MS);
       // Safety-net probe: confirm the feature-gated route is live.
-      if (await probeSeedRoute(baseURL)) {
+      if (await probeFaucetRoute(baseURL)) {
         return { port, baseURL, stop };
       }
       // Route absent (404) — a featureless clobber SHOULD be impossible with the isolated dir, but
       // rebuild once + respawn before giving up, so a transient/regressed build can't silently fail.
       await stop();
       if (attempt === 1) {
-        console.warn('[relay] /test/deposit/seed returned 404 (feature missing) — forcing a rebuild into the isolated dir…');
+        console.warn('[relay] /api/v1/faucet returned 404 (feature missing) — forcing a rebuild into the isolated dir…');
         await ensureRelayBuilt({ force: true });
         continue; // respawn + re-probe
       }
       throw new Error(
-        `/api/v1/test/deposit/seed still 404 after a forced rebuild — the relay binary lacks --features test-helpers.\n` +
+        `/api/v1/faucet still 404 after a forced rebuild — the relay binary lacks --features test-helpers.\n` +
         `  binary: ${RELAY_BIN}\n` +
         `  target dir: ${E2E_TARGET_DIR}`
       );
