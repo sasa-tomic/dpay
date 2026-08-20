@@ -42,9 +42,8 @@
 > flakes) · `just e2e-store` 1/1 · jest **819/819** (40 suites) · wasm hammer
 > `node e2e/debug/wasm-hammer.mjs` **PASS ×2** (320 calls, 0 fails each).
 >
-> **PROD SHIP FOLLOWS THIS SESSION** (`just deploy-ic && just apk && just up`): prod is behind
-> HEAD by the user-principal cutover + the fix arc — everything from the W1–W8 cutover through
-> `f03434a` is committed but unshipped.
+> **Prod at HEAD `d740379`** — shipped 2026-08-20 via `just deploy-ic && just apk && just up`
+> (evidence in the PROD SHIPPED block at the end of the 2026-08-20 session summary below).
 >
 > **Residual (documented, non-blocking):** flow-41's 20 s authored timeout can trip on host-load
 > spikes (census of 8 surfaces; 12.4 s standalone vs 20 s budget — host contention, not the app);
@@ -346,7 +345,22 @@ this session — the work-order requirement).
 physical device blocks test-APK installs (ondevice stays emulator-only); CF edge bare-URL APK
 purge (founder-owned — DO NOT NAG section).
 
-**PROD SHIP FOLLOWS THIS SESSION** — prod is behind HEAD by the cutover + fix arc.
+**PROD SHIPPED (2026-08-20, this session)** — `just deploy-ic && just apk && just up` from HEAD
+`d740379`. Evidence: live `/api/v1/version` == `d740379f6d0c371c8a3f904090d527f4ada5bf48`
+(`just verify-relay` PASS); `just verify-deploy` PASS (source wasm `03888df9…` byte-identical to
+the live ssqti module hash; mode=upgrade preserved state — opening balances payer 7500 /
+merchant 2750 cents conserved, `register_ledger(0)`→td2nx + currency meta re-registered Ok,
+ckETH(6) skipped idempotently); APK sha256
+`521eb2bc923616d8854e07557f2962568fcf544f4f668af79fc0e476cce429f3` — the landing Download
+button links the matching `?v=` URL and it serves byte-identical bytes (56,955,787 B; the
+bare-URL edge cache remains the known founder-owned DO-NOT-NAG item); `/wallet` 200,
+`/merchant` 308→`/wallet`, landing 200; the served /wallet JS bundle is hash-identical to the
+guarded dist (`71d6f89d…`) and `check-web-prod-seams` PASSes on those bytes — 0 writer-forms of
+`__DPAY_TEST_IC_GATEWAY`/`__DPAY_TEST_CORE` (CORE absent entirely; IC_GATEWAY present only as
+the sanctioned read-default `?? 'https://icp-api.io'`; NFC/SOL-NFC/DEEPLINK driver hooks ship by
+design, outside the guard's FORBIDDEN list); prod catalog reconciles — 7 rows = 4 mainnet IC
+(DEMO/ckBTC/ckUSDC/ckETH) + 3 testnet ids (3/4/5) hidden by the app's default
+`showTestnet=false` filter, no duplicates, SOL app-scoped as designed.
 
 ## Session summary (2026-08-16, cont.): review sweep #2 — fund-first gate + campreview SOL fix + UX findings U-F1..6/A-F1..4 — COMPLETE, PROD AT HEAD
 
