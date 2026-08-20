@@ -43,6 +43,13 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
             ((Character.digit(s[it * 2], 16) shl 4) + Character.digit(s[it * 2 + 1], 16)).toByte()
         }
 
+    /** ReadableArray.getString is @Nullable in Kotlin — the JS bridge always passes hex
+     *  strings, but fail loud (not NPE) if a slot is ever missing. */
+    private fun ridsFrom(arr: com.facebook.react.bridge.ReadableArray): List<ByteArray> =
+        (0 until arr.size()).map { i ->
+            unhex(arr.getString(i) ?: throw IllegalArgumentException("requestIdsHex[$i] must be a hex string"))
+        }
+
     /**
      * Parse a raw-u64 decimal STRING (from the JS bridge) into a ULong for the UniFFI binding.
      * MC1 units 2-4: for any value in `[0, 2^64)`, `toLong().toULong()` reproduces the exact u64
@@ -436,8 +443,7 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         promise: Promise,
     ) {
         try {
-            val rids = (0 until requestIdsHex.size()).map { unhex(requestIdsHex.getString(it)) }
-            val env = uniffi.dpay_ffi.icpSignReadState(unhex(secretHex), rids, wantTime, ingressExpiryNs)
+            val env = uniffi.dpay_ffi.icpSignReadState(unhex(secretHex), ridsFrom(requestIdsHex), wantTime, ingressExpiryNs)
             promise.resolve(hex(env))
         } catch (e: Throwable) {
             promise.reject("dpay_core", e)
@@ -462,11 +468,14 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
             val r = uniffi.dpay_ffi.icpDecodeQuery(unhex(bodyHex))
             val out = Arguments.createMap()
             out.putBoolean("replied", r.replied)
-            if (r.arg != null) out.putString("argHex", hex(r.arg))
-            val rc = r.rejectCode
-            if (rc != null) out.putString("rejectCode", rc)
-            if (r.rejectMessage != null) out.putString("rejectMessage", r.rejectMessage)
-            if (r.errorCode != null) out.putString("errorCode", r.errorCode)
+            r.arg?.let { out.putString("argHex", hex(it)) }
+            // The Rust record keeps reject_code/reject_message non-optional (0/"" on replies);
+            // marshal them only for actual rejections — byte-parity with the wasm bridge JSON.
+            if (!r.replied) {
+                out.putString("rejectCode", r.rejectCode.toString())
+                out.putString("rejectMessage", r.rejectMessage)
+            }
+            r.errorCode?.let { out.putString("errorCode", it) }
             promise.resolve(out)
         } catch (e: Throwable) {
             promise.reject("dpay_core", e)
@@ -479,8 +488,7 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
     @ReactMethod
     fun icpDecodeReadState(bodyHex: String, requestIdsHex: com.facebook.react.bridge.ReadableArray, promise: Promise) {
         try {
-            val rids = (0 until requestIdsHex.size()).map { unhex(requestIdsHex.getString(it)) }
-            val r = uniffi.dpay_ffi.icpDecodeReadState(unhex(bodyHex), rids)
+            val r = uniffi.dpay_ffi.icpDecodeReadState(unhex(bodyHex), ridsFrom(requestIdsHex))
             val out = Arguments.createMap()
             val t = r.timeNs
             if (t != null) out.putString("timeNs", t)
@@ -489,11 +497,10 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
                 val m = Arguments.createMap()
                 m.putString("requestIdHex", hex(s.requestId))
                 m.putString("state", s.state)
-                if (s.replyArg != null) m.putString("replyArgHex", hex(s.replyArg))
-                val rc = s.rejectCode
-                if (rc != null) m.putString("rejectCode", rc)
-                if (s.rejectMessage != null) m.putString("rejectMessage", s.rejectMessage)
-                if (s.errorCode != null) m.putString("errorCode", s.errorCode)
+                s.replyArg?.let { m.putString("replyArgHex", hex(it)) }
+                s.rejectCode?.let { m.putString("rejectCode", it.toString()) }
+                s.rejectMessage?.let { m.putString("rejectMessage", it) }
+                s.errorCode?.let { m.putString("errorCode", it) }
                 statuses.pushMap(m)
             }
             out.putArray("statuses", statuses)

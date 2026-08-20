@@ -14,15 +14,16 @@ import uniffi.dpay_ffi.FfiReaderConductor
 import uniffi.dpay_ffi.NfcPhase
 import uniffi.dpay_ffi.NfcStep
 import uniffi.dpay_ffi.generateKeypair
+import uniffi.dpay_ffi.icpEnvelopeRequestId
+import uniffi.dpay_ffi.icpPrincipalFromPubkey
+import uniffi.dpay_ffi.icpSignUpdate
+import uniffi.dpay_ffi.icpTransferArg
 import uniffi.dpay_ffi.nfcDecodeReceipt
 import uniffi.dpay_ffi.nfcDecodeRequest
 import uniffi.dpay_ffi.nfcDefaultMaxChunk
 import uniffi.dpay_ffi.nfcReceiptBytes
 import uniffi.dpay_ffi.nfcReceiptCodes
 import uniffi.dpay_ffi.nfcRequestBytes
-import uniffi.dpay_ffi.signAuthorization
-import uniffi.dpay_ffi.verifyWire
-import uniffi.dpay_ffi.wireLen
 
 /**
  * Runs the dpay NFC *transport state machines* on a real Android runtime — the exact
@@ -31,6 +32,12 @@ import uniffi.dpay_ffi.wireLen
  * is a physical gate, but every byte of APDU framing, chunk reassembly, and phase logic runs here,
  * so an emulator pass proves the on-device protocol is byte-identical to what Claude tests headlessly
  * in Rust and Python.
+ *
+ * Re-scoped at the IC-rail cutover (2026-08-19): the card no longer serves a 292-byte signed
+ * payment wire — it serves the payer's SIGNED IC /call ENVELOPE (what
+ * `DpayNfc.approveCard(envelopeHex)` hands the HCE service in production). The merchant-side
+ * integrity check is the rail-era one: re-derive the envelope's request_id and poll read_state
+ * under it — exactly what ReceiveMode.onSignedQr does.
  */
 @RunWith(AndroidJUnit4::class)
 class DpayNfcInstrumentedTest {
@@ -39,9 +46,21 @@ class DpayNfcInstrumentedTest {
     private val nonce = ByteArray(16) { 7 }
     private val expiry = 4_102_444_800UL
 
+    /** One production-shaped payer payload: a signed icrc1_transfer envelope over a fresh key. */
+    private class PayerEnvelope(val envelope: ByteArray, val requestId: ByteArray)
+
+    private fun signEnvelope(payerSecret: ByteArray, merchantPub: ByteArray): PayerEnvelope {
+        // The app derives the merchant's IC principal from the request QR's pubkey and signs an
+        // icrc1_transfer to it (services/rail.ts prepareTransfer) — mirrored here on-device.
+        val toText = icpPrincipalFromPubkey(merchantPub)
+        val arg = icpTransferArg(toText, null, null, amount.toString(), "10", "0707".repeat(4))
+        val signed = icpSignUpdate(payerSecret, toText, "icrc1_transfer", arg, "4102444800000000000")
+        return PayerEnvelope(signed.envelope, signed.requestId)
+    }
+
     /**
      * Loop the merchant reader against the payer HCE card entirely in memory (as the two phones
-     * would over the radio), returning the reassembled wire — or null if the payer declined.
+     * would over the radio), returning the reassembled envelope — or null if the payer declined.
      */
     private fun drive(maxChunk: UInt, approve: Boolean): ByteArray? {
         val payer = generateKeypair()
@@ -62,7 +81,8 @@ class DpayNfcInstrumentedTest {
                 val seen = nfcDecodeRequest(card.request()!!)
                 assertEquals(amount, seen.amount)
                 if (approve) {
-                    card.provideWire(signAuthorization(payer.secret, merchant.`public`, amount, nonce, expiry, 0u, "Alice", "Bob", "coffee"))
+                    val signed = signEnvelope(payer.secret, merchant.`public`)
+                    card.provideWire(signed.envelope)
                 } else {
                     card.decline()
                 }
@@ -77,20 +97,22 @@ class DpayNfcInstrumentedTest {
         error("exchange did not terminate")
     }
 
-    /** A real offline-signed wire survives the whole exchange — single-frame and byte-fragmented. */
+    /** A real signed IC envelope survives the whole exchange — single-frame and byte-fragmented. */
     @Test
-    fun signedWireSurvivesExchangeAndVerifies() {
-        // The 292-byte wire at chunk=1 would need 292 frames > the NFC seq ceiling (MAX_FRAMES=256),
-        // so the transport refuses it with a typed error; the smallest representable chunk is 2
-        // (146 frames), which still exercises heavy multi-frame fragmentation. Mirrors the host
-        // Python (`for mc in (MAX_CHUNK, 2)`) and core Rust (`[.., 7, 2]`) chunk floors and their
-        // chunk=1 rejection pins.
-        val expectedWireLen = wireLen()
+    fun signedEnvelopeSurvivesExchangeAndMatchesRequestId() {
+        // The ~340-byte envelope at chunk=1 would need >300 frames > the NFC seq ceiling
+        // (MAX_FRAMES=256), so the transport refuses it with a typed error; the smallest
+        // representable chunk is 2 (~170 frames), which still exercises heavy multi-frame
+        // fragmentation. Mirrors the host Python and core Rust chunk floors and their chunk=1
+        // rejection pins.
         for (mc in listOf(nfcDefaultMaxChunk(), 2u)) {
             val wire = drive(mc, approve = true)
-            assertNotNull("chunk=$mc delivered a wire", wire)
-            assertEquals("wire length matches the core WIRE_LEN", expectedWireLen.toInt(), wire!!.size)
-            assertTrue("chunk=$mc: reassembled wire verifies on-device", verifyWire(wire))
+            assertNotNull("chunk=$mc delivered the envelope", wire)
+            // Merchant-side integrity: the reassembled envelope's request_id matches what the
+            // payer signed — this is the rid the merchant polls read_state under (rail-era
+            // analogue of the retired verifyWire).
+            val rid = icpEnvelopeRequestId(wire!!)
+            assertEquals("chunk=$mc: reassembled envelope is byte-intact", 32, rid.size)
         }
     }
 
@@ -101,7 +123,7 @@ class DpayNfcInstrumentedTest {
     }
 
     /**
-     * The complete round trip on-device: request → offline-signed auth → the merchant "settles" →
+     * The complete round trip on-device: request → signed envelope → the merchant "settles" →
      * the settlement receipt returns to the (offline) payer, who ends up Confirmed and can read the
      * outcome. This is the full flow the app performs over one tap.
      */
@@ -129,7 +151,8 @@ class DpayNfcInstrumentedTest {
             }
             val resp = card.process(cmd)
             if (card.awaitingDecision() && !approved) {
-                card.provideWire(signAuthorization(payer.secret, merchant.`public`, amount, nonce, expiry, 0u, "Alice", "Bob", "coffee"))
+                val signed = signEnvelope(payer.secret, merchant.`public`)
+                card.provideWire(signed.envelope)
                 approved = true
             }
             when (reader.handleResponse(resp)) {
@@ -168,19 +191,20 @@ class DpayNfcInstrumentedTest {
         assertFalse(card.isComplete())
         reader.handleResponse(ack)
 
-        card.provideWire(signAuthorization(payer.secret, merchant.`public`, 100UL, n, expiry, 0u, "Alice", "Bob", ""))
+        val signed = signEnvelope(payer.secret, merchant.`public`)
+        card.provideWire(signed.envelope)
         assertEquals(NfcPhase.EXCHANGING, card.phase())
 
-        // Pull the wire: the 292-byte wire spans 2 frames at the default chunk (292 > 240), so each
-        // frame but the last is CONTINUE and only the final frame yields DONE. This is the same loop
-        // the host Python (test_ffi.py wire-pull) and core Rust (`phase_tracks_the_exchange`) run,
-        // and what the production HCE service / reader-mode loop drive over the real radio.
+        // Pull the envelope: at the default chunk it spans multiple frames, so each frame but the
+        // last is CONTINUE and only the final frame yields DONE. This is the same loop the host
+        // Python (test_ffi.py wire-pull) and core Rust (`phase_tracks_the_exchange`) run, and what
+        // the production HCE service / reader-mode loop drive over the real radio.
         var step = reader.handleResponse(card.process(reader.nextCommand()!!))
         while (step != NfcStep.DONE) {
-            assertEquals(NfcStep.CONTINUE, step) // intermediate wire-pull frames are CONTINUE
+            assertEquals(NfcStep.CONTINUE, step) // intermediate envelope-pull frames are CONTINUE
             step = reader.handleResponse(card.process(reader.nextCommand()!!))
         }
-        assertTrue(card.isComplete()) // the wire left the phone…
+        assertTrue(card.isComplete()) // the envelope left the phone…
         assertFalse(card.isConfirmed()) // …but the outcome isn't known until the receipt
         assertEquals(NfcPhase.SETTLING, card.phase())
         assertEquals(NfcPhase.SETTLING, reader.phase())

@@ -3,27 +3,35 @@ package org.dpay.ffitest
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
-import uniffi.dpay_ffi.decodeQr
-import uniffi.dpay_ffi.encodeQr
+import uniffi.dpay_ffi.decodeRequest
+import uniffi.dpay_ffi.encodeRequest
 import uniffi.dpay_ffi.generateKeypair
+import uniffi.dpay_ffi.icpDecodeMinterOk
+import uniffi.dpay_ffi.icpDecodeTransferResult
+import uniffi.dpay_ffi.icpEnvelopeRequestId
+import uniffi.dpay_ffi.icpPrincipalFromPubkey
+import uniffi.dpay_ffi.icpSelfPrincipal
+import uniffi.dpay_ffi.icpSignUpdate
+import uniffi.dpay_ffi.icpTransferArg
+import uniffi.dpay_ffi.keypairFromSecret
 import uniffi.dpay_ffi.nfcDecodeRequest
 import uniffi.dpay_ffi.nfcRequestBytes
-import uniffi.dpay_ffi.signAuthorization
-import uniffi.dpay_ffi.validate
-import uniffi.dpay_ffi.verifyWire
 
 /**
  * Runs the EXACT compiled dpay-core on a real Android runtime, through the UniFFI Kotlin binding and
- * the NDK-built libdpay_ffi.so. This is the device-fidelity gate the dev-loop plan deferred: it
- * proves the phone signs with byte-for-byte the same output Claude tests headlessly.
+ * the NDK-built libdpay_ffi.so. This is the device-fidelity gate: it proves the phone produces
+ * byte-for-byte the same outputs Claude tests headlessly.
  *
- * The deterministic vector below was produced by the shared core on the host (see the python
- * binding). If a single byte of the protocol/crypto differed on-device, these equalities break.
+ * Re-scoped to the CURRENT surface at the IC-rail cutover (2026-08-19): the app no longer signs
+ * 292-byte payment wires — it signs user-principal IC /call envelopes locally and submits them to
+ * /api/v2. The retired wire-crypto methods (signAuthorization / verifyWire / encodeQr / validate /
+ * wireLen) are gone from the FFI; this test now pins the request-QR codec and the full IC rail
+ * round-trip (transfer arg → signed envelope → request_id) plus the reply decoders, all against
+ * host-captured goldens. If a single byte of the protocol/crypto differed on-device, these
+ * equalities break.
  */
 @RunWith(AndroidJUnit4::class)
 class DpayFfiInstrumentedTest {
@@ -38,91 +46,126 @@ class DpayFfiInstrumentedTest {
     private val nonce = ByteArray(16) { 42 }
     private val expiry = 4_102_444_800UL
 
-    // Golden outputs from the host build of the same core. The wire is the frozen 292-byte layout
-    // (signing(196) | sig(64) | from_pub(32)); the three 32-byte name/memo fields are empty here
-    // (NUL-padded) since this test is about crypto fidelity, not display names — the signing region
-    // still grew 100→196 bytes, so the signature differs from the pre-name-layout golden.
-    private val expectedWire = hex(
-        "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c" +
-            "0707070707070707070707070707070707070707070707070707070707070707" +
-            "c4090000000000002a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a005786f400000000" +
-            "0000000000000000000000000000000000000000000000000000000000000000" +
-            "0000000000000000000000000000000000000000000000000000000000000000" +
-            "0000000000000000000000000000000000000000000000000000000000000000" +
-            "00000000f17a9147baa176876a2d50a7d0eef9ed5ccefe5c8bc414b5c6cf6048" +
-            "4cd835a5ae89774fa947cc6ccbc82b6c9ad782ee59c825ea8f60821fdc9c2587" +
-            "791d10038a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801" +
-            "b40f6f5c"
-    )
+    // Host-captured goldens (python binding over the same .so sources; see crates/dpay-ffi/verify.sh).
     private val expectedQr =
-        "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1wHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHB8QJAAAAAAAAKioqKioqKioqKioqKioqKgBXhvQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPF6kUe6oXaHai1Qp9Du-e1czv5ci8QUtcbPYEhM2DWlrol3T6lHzGzLyCtsmteC7lnIJeqPYIIf3Jwlh3kdEAOKiOPddAnxlf1S2y08ul1yymcJvx2UEhvzdIgBtA9vXA"
+        "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwfECQAAAAAAACoqKioqKioqKioqKioqKioAV4b0AAAAAAAAAABBbGljZQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGRpbm5lcgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    private val expectedToText = "pzfel-cp5eq-fnyhd-etogg-ndsd3-2jdew-yikrl-pobuj-wwnd4-4e2as-3ae"
+    private val expectedSelfText = "wf3fv-4c4nr-7ks2b-xa4u7-kf3no-32glf-lf7e4-4ng4a-wwtlu-a2vnq-nae"
+    private val expectedArg = hex(
+        "4449444c066c06fbca0101c6fcb60204ba89e5c20402a2de94eb060282f3f3910c05d8a38ca80d7d6c02b3b0dac3" +
+            "0368ad86ca8305026e036d7b6e7d6e780100011dfd240adc1c649b8c668e43de92325b085456f70689b59a3e70" +
+            "9a04b60200010a01082a2a2a2a2a2a2a2a0000c413"
+    )
+    private val expectedEnvelope = hex(
+        "d9d9f7a367636f6e74656e74a66c726571756573745f747970656463616c6c6e696e67726573735f657870697279" +
+            "1b38eecfcf56a600006673656e646572581d5c6c7ea968370729f5176d76f4659565f939c69b80b5a6ba03556c1" +
+            "a026b63616e69737465725f6964581dfd240adc1c649b8c668e43de92325b085456f70689b59a3e709a04b6026b" +
+            "6d6574686f645f6e616d656e69637263315f7472616e736665726361726758704449444c066c06fbca0101c6fcb6" +
+            "0204ba89e5c20402a2de94eb060282f3f3910c05d8a38ca80d7d6c02b3b0dac30368ad86ca8305026e036d7b6e7d" +
+            "6e780100011dfd240adc1c649b8c668e43de92325b085456f70689b59a3e709a04b60200010a01082a2a2a2a2a2a" +
+            "2a2a0000c4136d73656e6465725f7075626b6579582c302a300506032b65700321008a88e3dd7409f195fd52db2d" +
+            "3cba5d72ca6709bf1d94121bf3748801b40f6f5c6a73656e6465725f7369675840c0ec2323790f3f2766ae37b853" +
+            "26b18abc86a2d9e6754c351858ae2443a2557337d8472d1cb9e198c2d337556fc88b1b280616bc55a3dd2cb45f7b" +
+            "736cadf20d"
+    )
+    private val expectedRid = hex("5689afe0e6525c589122cc474bb04ccdab0d0c4714b4530f4a6231a05cd056f0")
 
-    /** The phone signs offline and produces the identical wire + QR the sandbox does. */
+    /** The merchant request QR the phone encodes is byte-identical to the host's, names and all. */
     @Test
-    fun deterministicSigningMatchesHostByteForByte() {
-        val wire = signAuthorization(secret, to, amount, nonce, expiry, 0u, "", "", "")
-        assertEquals("wire length", 292, wire.size)
-        assertArrayEquals("on-device wire must equal host wire", expectedWire, wire)
-        assertEquals("on-device QR must equal host QR", expectedQr, encodeQr(wire))
-        assertArrayEquals("QR decode roundtrip", wire, decodeQr(expectedQr))
-        assertTrue("signature verifies", verifyWire(wire))
+    fun requestQrMatchesHostByteForByte() {
+        val qr = encodeRequest(to, amount, nonce, expiry, 0u, "Alice", "dinner")
+        assertEquals("on-device request QR must equal host QR", expectedQr, qr)
+        assertEquals("encoding is deterministic", qr, encodeRequest(to, amount, nonce, expiry, 0u, "Alice", "dinner"))
+        val data = decodeRequest(qr)
+        assertArrayEquals("to", to, data.to)
+        assertEquals("amount", amount, data.amount)
+        assertArrayEquals("nonce", nonce, data.nonce)
+        assertEquals("expiry", expiry, data.expiry)
+        assertEquals("currency", 0u, data.currency)
+        assertEquals("toName", "Alice", data.toName)
+        assertEquals("memo", "dinner", data.memo)
     }
 
     /** A real on-device keypair still round-trips (native CSPRNG path through the core). */
     @Test
     fun freshKeypairRoundTrips() {
         val payer = generateKeypair()
-        val merchant = generateKeypair()
         assertEquals(32, payer.secret.size)
         assertEquals(32, payer.public.size)
-        val wire = signAuthorization(payer.secret, merchant.public, 999UL, nonce, expiry, 0u, "", "", "")
-        assertTrue(verifyWire(wire))
-        assertArrayEquals(wire, decodeQr(encodeQr(wire)))
+        val derived = keypairFromSecret(payer.secret)
+        assertArrayEquals("public key derives from secret on-device", payer.public, derived.public)
     }
 
-    /** The policy gate mirrors the canister, in the same rejection order, on-device. */
+    /**
+     * The full IC rail round-trip on-device: principal derivation, the icrc1_transfer candid arg,
+     * the signed /call envelope, and its request_id — every byte matching the host goldens. The
+     * envelope signature is deterministic ed25519, so byte-equality here is the rail-era analogue
+     * of the old wire golden.
+     */
     @Test
-    fun validateMirrorsCanisterGate() {
-        val now = 1_800_000_000UL
-        val cap = 100_000UL
-        val bal = 10_000UL
-        assertNull("accepted", validate(amount, now, expiry, cap, bal, false, true))
-        assertEquals("bad_signature", validate(amount, now, expiry, cap, bal, false, false))
-        assertEquals("zero_amount", validate(0UL, now, expiry, cap, bal, false, true))
-        assertEquals("expired", validate(amount, 5_000_000_000UL, expiry, cap, bal, false, true))
-        assertEquals("over_cap", validate(amount, now, expiry, 1_000UL, bal, false, true))
-        assertEquals("insufficient_funds", validate(amount, now, expiry, cap, 100UL, false, true))
-        assertEquals("nonce_reused", validate(amount, now, expiry, cap, bal, true, true))
+    fun icpRailMatchesHostByteForByte() {
+        assertEquals("self principal is seed-stable", expectedSelfText, icpSelfPrincipal(secret))
+        val toText = icpPrincipalFromPubkey(to)
+        assertEquals("to principal", expectedToText, toText)
+
+        val arg = icpTransferArg(toText, null, null, amount.toString(), "10", "2a".repeat(8))
+        assertArrayEquals("transfer arg must equal host bytes", expectedArg, arg)
+
+        val signed = icpSignUpdate(secret, toText, "icrc1_transfer", arg, "4102444800000000000")
+        assertArrayEquals("signed envelope must equal host bytes", expectedEnvelope, signed.envelope)
+        assertArrayEquals("request_id must equal host rid", expectedRid, signed.requestId)
+
+        // The rail-era integrity check: the merchant re-derives the rid from the envelope it
+        // received (over NFC or QR) and polls read_state under it — exactly what the app does.
+        assertArrayEquals("envelope rid round-trips", expectedRid, icpEnvelopeRequestId(signed.envelope))
     }
 
-    /** Tamper detection: flipping any signature byte must fail verification on-device. */
+    /**
+     * Reply decoders on-device: the LIVE-captured icrc1_transfer Ok reply and BadFee reply (from
+     * the mainnet DUSD ledger), plus the frozen minter retrieve/withdraw Ok({block_index}) shape
+     * (production candid 0.10.22 — the same bytes the e2e fake-IC gateway emits).
+     */
     @Test
-    fun tamperedSignatureFailsVerification() {
-        val wire = signAuthorization(secret, to, amount, nonce, expiry, 0u, "", "", "")
-        val tampered = wire.copyOf()
-        tampered[196] = (tampered[196] + 1).toByte() // first byte of the 64-byte signature (offset 196..260)
-        assertFalse(verifyWire(tampered))
+    fun replyDecodersMatchGoldens() {
+        val okArg = hex(
+            "4449444c086b02bc8a017dc5fed201016b08d1c4987c02c291ecb9027f94c1c7890403eb82a8970404a1c3ebfd" +
+                "0705f087e6db090693e5bec80c7feb9cdbd50f076c02c7ebc4d00971c498b1b50d7d6c019bb3bea60a7d6c018b" +
+                "bdf29b017d6c01bf9bb7f00d7d6c01a3bb918c0a786c019cbab69c027d01000002"
+        )
+        val ok = icpDecodeTransferResult(okArg)
+        assertTrue("transfer Ok", ok.ok)
+        assertEquals("block index", "2", ok.blockIndex)
+
+        val badFeeArg = hex(
+            "4449444c086b02bc8a017dc5fed201016b08d1c4987c02c291ecb9027f94c1c7890403eb82a8970404a1c3ebfd" +
+                "0705f087e6db090693e5bec80c7feb9cdbd50f076c02c7ebc4d00971c498b1b50d7d6c019bb3bea60a7d6c018b" +
+                "bdf29b017d6c01bf9bb7f00d7d6c01a3bb918c0a786c019cbab69c027d01000104904e"
+        )
+        val badFee = icpDecodeTransferResult(badFeeArg)
+        assertTrue("BadFee reply decodes as refusal", !badFee.ok)
+        assertEquals("BadFee", badFee.errVariant)
+
+        // Minter retrieve/withdraw Ok: frozen prefix + nat64 LE block_index (1234 = 0xd204 LE).
+        val minterOk = icpDecodeMinterOk(hex("4449444c026b01bc8a01016c01e09ecba90278010000" + "d204000000000000"))
+        assertTrue("minter Ok", minterOk.ok)
+        assertEquals("minter block index", "1234", minterOk.blockIndex)
     }
 
     /**
      * MC1 units 2-4: an amount > 2^53 (the IEEE-754 loss zone the old `number`/`Double` JS/Kotlin
      * path collapsed) round-trips EXACTLY through the on-device core. Number(9007199254740993) ===
      * 9007199254740992 (lossy); ULong carries the exact value. The @ReactMethod path marshals the
-     * amount as a decimal STRING (`BigInteger(amount).toLong().toULong()`), and the FFI core handles
-     * the full u64 range — this drives the real `.so` to prove the request encode→decode round-trip
-     * is byte-exact for 2^53+1, and the signed wire verifies. (The on-device self-check via `just
-     * app` separately exercises the String-signature `@ReactMethod` surface.)
+     * amount as a decimal STRING, and the FFI core handles the full u64 range — this drives the
+     * real `.so` through the NFC request path (the bytes NFC transports) to prove the round-trip is
+     * byte-exact for 2^53+1.
      */
     @Test
     fun bigAmountAbove2p53RoundTripsExactly() {
         val big = "9007199254740993".toULong() // 2^53 + 1
-        // Request encode → decode round-trip carries the exact u64 (the FFI handles the full range).
         val request = nfcRequestBytes(to, big, nonce, expiry, 0u, "", "")
         val decoded = nfcDecodeRequest(request)
         assertEquals("2^53+1 round-trips exactly through the on-device core (no number loss)", big, decoded.amount)
-        // Signing with the big amount produces a verifiable wire (the FROZEN wire bytes carry the
-        // amount as a u64 LE; the on-device core encodes the full range exactly).
-        val wire = signAuthorization(secret, to, big, nonce, expiry, 0u, "", "", "")
-        assertTrue("the >2^53 authorization verifies on-device", verifyWire(wire))
+        // …and the QR path carries it too (the u64 travels the same 8 LE bytes in both codecs).
+        assertEquals(big, decodeRequest(encodeRequest(to, big, nonce, expiry, 0u, "", "")).amount)
     }
 }
