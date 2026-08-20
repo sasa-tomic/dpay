@@ -4,29 +4,64 @@
 > map of which canisters exist on mainnet (`ic`), who owns them, and what each is for. The tracked
 > `canister_ids.json` (repo root) holds the durable mainnet ids of the two owned canisters; the
 > per-replica local ids live in the gitignored `.dfx/local/canister_ids.json`.
+>
+> **Post-cutover reality (2026-08-19/20, the "IC rail → user-principal" switch W1–W8):** user funds
+> live at **user principals directly on the external ICRC ledgers**
+> (`Account { owner: <self-authenticating(device ed25519 pubkey)>, subaccount: None }`). The app
+> signs full IC `/api/v2` request envelopes locally (`crates/dpay-icp` via the FFI/wasm core) and
+> submits them to the IC boundary nodes (`icp-api.io` in prod; the relay's in-process fake-IC gateway
+> in tests). **Neither owned canister is on the value-movement path anymore.** Pre-cutover
+> facade-subaccount balances were not migrated (no prod users; DEMO play money only).
 
 ## Owned canisters (dfx-managed, in `dfx.json`)
 
-### `dpay_canister` — the facade / settlement gateway
+### `dpay_canister` — the facade (read-side residual; settlement kernel dormant)
 - **Mainnet id:** `ssqti-wiaaa-aaaab-qhdia-cai`
-- **Role:** the core. Settlement kernel, canister-signed receipts, multi-currency catalog
-  (`currencies()`), per-currency caps, DEMO faucet entrypoint (`mint`), `reconcile`, `refresh_balances`.
-  All user funds live at `{ owner: facade, subaccount: <ed25519 pubkey> }`.
+- **Role at HEAD — catalog + display read surface, consumed via the relay (`AgentLedger`, cargo
+  feature `agent`):**
+  - `currencies()` (query) — the multi-currency catalog of record → relay `GET /api/v1/currencies`.
+  - `transactions_of(pubkey, currency, limit)` (query) — the durable per-account history index →
+    relay `GET /api/v1/transactions/{hex}`. Facade-era rows only: user-principal rail transfers do
+    **not** write this index (see `CODEBASE_ANALYSIS.md`).
+  - `deposit_info(currency)` (update; proxies the minter's static instructions) → relay
+    `GET /api/v1/deposit/info`.
+  - The ckERC20/ckETH onramp params (relay `GET /onramp/ckerc20`) resolve from that catalog;
+    `facade_principal` (this canister's id) is still embedded in the helper-contract `depositErc20`/
+    `depositEth` calldata as the deposit `principal` arg (user pubkey = subaccount) — a pre-cutover
+    residue: ETH-side deposits mint at a facade-owned subaccount, not the user principal, and are
+    therefore not visible to the user-principal balance read path (flagged as a risk in
+    `CODEBASE_ANALYSIS.md`).
+- **Settlement kernel: still in the wasm, no production caller.** The deployed canister still
+  carries `pay`/`withdraw`/`faucet`/`mint`/`burn`/`reconcile`/`refresh_balances`/`deposit_address`/
+  `refresh_deposit` + the canister-signed-receipt machinery (the crate, its 81+ PocketIC tests, and
+  `dpay-sim` still exercise them), but nothing on the value path calls them: the app signs envelopes
+  itself, balances are read directly off each ledger (`icrc1_balance_of` at the user principal — the
+  relay no longer touches `BAL_CACHE`/`refresh_balances`), BTC deposit addresses come from a
+  user-signed minter query (`get_btc_address` at the user principal), and offramps are user-signed
+  `icrc2_approve` + minter calls. The relay routes that used to front these (`/pay`, `/withdraw`,
+  `/receipt/{nonce}`, `/receipt_pubkey`, `/deposit/address`, `/deposit/refresh`) are deleted.
+- **Why `just deploy-ic` still ships it:** it remains the canonical currency registry (the deploy
+  script's `register_ledger`/`register_currency`/`register_currency_meta` calls are the only way
+  currencies are activated; idempotent re-runs), the history/deposit-info read surface, and the
+  staging provisioning vehicle (`provision_ledger_canister`). An evil upgrade can no longer *move*
+  user funds — but it can still misreport catalog/history/display info and mint DEMO, so the
+  governance hand-off below remains real.
 - **Source:** `crates/dpay-canister` → `target/wasm32-unknown-unknown/release/dpay_canister.wasm`;
   candid `dfx/dpay_canister.did`.
-- **Control:** currently the deploy identity (founder). Admin methods are denied once `controller == null`
-  (R1/R4). The hand-off to an SNS / blackhole is an external operator step — see `docs/GOVERNANCE.md`.
+- **Control:** currently the deploy identity (founder). Admin methods are denied once
+  `controller == null` (R1/R4). The hand-off to an SNS / blackhole is an external operator step —
+  see `docs/GOVERNANCE.md`.
 
 ### `dpay_canister_staging` — the staging facade (testnet chain-key wiring)
 - **Mainnet id:** provisioned on first deploy via `provision_ledger_canister` on `ssqti` (id lands in
   `canister_ids.json` under `dpay_canister_staging.ic` + `deploy/.env` as `DPAY_STAGING_CANISTER_ID`).
 - **Role:** a SEPARATE facade wired to IC's FREE testnet chain-key tokens (ckBTC Testnet on Bitcoin
-  Testnet4, ckSepoliaUSDC, ckSepoliaETH on Sepolia) — the live testnet path that closes OPEN_ISSUES
-  #1/#2/#8. Same wasm as the prod facade; differs only in its registered currencies (DEMO + the 3
-  testnet chain-key currencies vs prod's DEMO + ckBTC + ckUSDC + ckETH — the prod catalog also
-  carries the same 3 testnet variants, hidden in-app behind the testnet toggle). The e2e-live Tier 1
-  flow
-  (`e2e-live/tests/01-testnet-wiring.mjs`, `just e2e-live-testnet`) drives it end-to-end.
+  Testnet4, ckSepoliaUSDC, ckSepoliaETH on Sepolia). Same wasm as the prod facade; differs only in
+  its registered currencies (DEMO + the 3 testnet chain-key currencies vs prod's DEMO + ckBTC +
+  ckUSDC + ckETH — the prod catalog also carries the same 3 testnet variants, hidden in-app behind
+  the testnet toggle). The e2e-live Tier 1 flow (`e2e-live/tests/01-testnet-wiring.mjs`,
+  `just e2e-live-testnet`) drives its read surface end-to-end (dormant until the staging path is
+  chosen; the deposit/withdraw entry points are post-cutover dormant like prod's).
 - **Provisioning:** `scripts/dfx-deploy-ic-staging.sh` provisions the facade (200 TC) + a staging DUSD
   ledger (20 TC) from `ssqti`'s cycle balance (the `dpay` identity is in `ADMIN_CALLERS`). The staging
   DUSD ledger is staging-owned (NOT prod `td2nx` — whose minting_account.owner is `ssqti`, so the
@@ -39,10 +74,12 @@
 
 ### `icrc_ledger` — the DUSD ICRC-3 ledger
 - **Mainnet id:** `td2nx-oaaaa-aaaab-qhdnq-cai`
-- **Role:** backs the **DEMO currency** (currency `0`, token symbol `DUSD`, 2 decimals). Every new
-  wallet's `∂100` faucet mints here (`facade.mint()` → `icrc1_transfer`); every `∂` payment settles
-  here as a cross-canister `icrc1_transfer`. `minting_account.owner = ssqti` (the facade) — only the
-  facade may mint.
+- **Role at HEAD:** backs the **DEMO currency** (currency `0`, token symbol `DUSD`, 2 decimals) as
+  its catalog ledger. Post-cutover nothing in prod touches it on the value path: the prod relay image
+  has no faucet (the `/api/v1/faucet` route is `test-helpers`-only and credits the in-process fake-IC
+  gateway, never `td2nx`), and a DEMO payment — if anyone held DUSD — would be an ordinary
+  user-principal `icrc1_transfer` on this ledger. Pre-cutover faucet/settlement flows through
+  `facade.mint()` are retired. `minting_account.owner = ssqti` (only the facade may mint).
 - **Standard:** a modern ICRC ledger built from `third_party/ic-icrc1-ledger/ic-icrc1-ledger.wasm`. It
   advertises **ICRC-1, ICRC-2, ICRC-3** (plus 10/21/103/106). This single ledger **is** the ICRC-3
   ledger; there is no separate one.
@@ -51,10 +88,13 @@
 
 ## External IC chain-key dependencies (NOT owned)
 
-These are Internet Computer chain-key canisters operated by DFINITY / the chain. dpay reads balances
-and triggers deposits/withdrawals cross-canister; **dpay cannot upgrade or otherwise manage them.**
-They appear in the facade `currencies()` response but are deliberately absent from `canister_ids.json`
-(dfx must not treat them as build/install targets).
+These are Internet Computer chain-key canisters operated by DFINITY / the chain. **dpay cannot
+upgrade or otherwise manage them.** Post-cutover these ledgers (not any dpay canister) are where
+user funds actually live: the app reads balances via signed `icrc1_balance_of` queries at the user
+principal, drives deposits via user-signed minter queries/calls, and offramps via user-signed
+`icrc2_approve` + `retrieve_btc_with_approval` / `withdraw_eth` / `withdraw_erc20`. They appear in
+the facade `currencies()` response but are deliberately absent from `canister_ids.json` (dfx must
+not treat them as build/install targets).
 
 | Currency | Role     | Principal                  |
 |----------|----------|----------------------------|
