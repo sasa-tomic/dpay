@@ -270,6 +270,35 @@ fn golden_decode_transfer_results() {
 }
 
 #[test]
+fn golden_decode_minter_ok() {
+    use TransferError::*;
+    // The frozen production shape encode_minter_ok emits — round-trip plus LIVE-style edges.
+    // encode_minter_ok's table is hand-frozen (production candid 0.10.22): these asserts pin the
+    // DECODER against it, and pin the ENCODER against a u64 extreme + the byte-for-byte prefix.
+    assert_eq!(icrc::decode_minter_ok(&icrc::encode_minter_ok(1234)).unwrap(), Ok(1234));
+    assert_eq!(icrc::decode_minter_ok(&icrc::encode_minter_ok(0)).unwrap(), Ok(0));
+    assert_eq!(icrc::decode_minter_ok(&icrc::encode_minter_ok(u64::MAX)).unwrap(), Ok(u64::MAX));
+    // frozen prefix: DIDL magic + table (variant Ok of record{block_index: nat64}) + 0x00 0x00 pad
+    let bytes = icrc::encode_minter_ok(7);
+    assert_eq!(&bytes[..22], &unhex("4449444c026b01bc8a01016c01e09ecba90278010000")[..22]);
+    assert_eq!(&bytes[22..], &7u64.to_le_bytes());
+
+    // The Err side: minter rejects reuse the transfer-error shape (observed live) — the shared
+    // transfer_error table decodes them. (encode_* for the minter table's Err variants don't
+    // exist — the fake gateway only ever replies Ok — so pin the contract via the transfer-table
+    // golden: a transfer-shaped TooOld reply is an Err variant and must decode the same way.)
+    assert_eq!(
+        icrc::decode_minter_ok(&unhex(G_TR_TOOOLD)).unwrap(),
+        Err(TooOld),
+        "a transfer-shaped TooOld reply must decode via the shared error table"
+    );
+    // trailing bytes are fatal (same strictness as the other decoders)
+    let mut trailing = icrc::encode_minter_ok(9);
+    trailing.push(0x00);
+    assert!(icrc::decode_minter_ok(&trailing).is_err());
+}
+
+#[test]
 fn golden_decode_approve_results() {
     use ApproveError::*;
     use ApproveResult::*;

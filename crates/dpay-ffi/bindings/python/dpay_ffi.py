@@ -476,6 +476,8 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_decode_int() != 39665:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_decode_minter_ok() != 52523:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_decode_query() != 64452:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_decode_read_state() != 56142:
@@ -823,6 +825,11 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_int.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_int.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_minter_ok.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_minter_ok.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_query.argtypes = (
     _UniffiRustBuffer,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -1273,6 +1280,9 @@ _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_eip1559_price.restype = ctyp
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_int.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_int.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_minter_ok.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_minter_ok.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_query.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_query.restype = ctypes.c_uint16
@@ -3226,6 +3236,20 @@ def icp_decode_int(arg: "bytes") -> "str":
         _UniffiConverterBytes.lower(arg)))
 
 
+def icp_decode_minter_ok(arg: "bytes") -> "IcpTransferOutcome":
+    """
+    Decode the minter retrieve/withdraw Ok({block_index}) reply (single source `dpay-icp`
+    `decode_minter_ok` — the same bytes the e2e fake-IC gateway emits via `encode_minter_ok`).
+    Mirrors the wasm `w_icp_decode_minter_ok` export; the Err side reuses the transfer-error
+    variant names (minter rejects observed live are ICRC-1 transfer-error names).
+    """
+
+    _UniffiConverterBytes.check_lower(arg)
+    
+    return _UniffiConverterTypeIcpTransferOutcome.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_minter_ok,
+        _UniffiConverterBytes.lower(arg)))
+
+
 def icp_decode_query(body: "bytes") -> "IcpQueryReply":
     _UniffiConverterBytes.check_lower(body)
     
@@ -3632,6 +3656,7 @@ __all__ = [
     "icp_balance_of_arg",
     "icp_decode_eip1559_price",
     "icp_decode_int",
+    "icp_decode_minter_ok",
     "icp_decode_query",
     "icp_decode_read_state",
     "icp_decode_text",

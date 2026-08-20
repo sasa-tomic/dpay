@@ -814,6 +814,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is 
 // rather `InterfaceTooLargeException`, caused by too many methods 
@@ -844,6 +846,8 @@ fun uniffi_dpay_ffi_checksum_func_icp_balance_of_arg(
 fun uniffi_dpay_ffi_checksum_func_icp_decode_eip1559_price(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_icp_decode_int(
+): Short
+fun uniffi_dpay_ffi_checksum_func_icp_decode_minter_ok(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_icp_decode_query(
 ): Short
@@ -1031,6 +1035,8 @@ fun uniffi_dpay_ffi_fn_func_icp_balance_of_arg(`ownerText`: RustBuffer.ByValue,`
 fun uniffi_dpay_ffi_fn_func_icp_decode_eip1559_price(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_decode_int(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_decode_minter_ok(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_decode_query(`body`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1230,6 +1236,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_icp_decode_int() != 39665.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_decode_minter_ok() != 52523.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_icp_decode_query() != 64452.toShort()) {
@@ -3493,6 +3502,22 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
             return FfiConverterString.lift(
     uniffiRustCallWithError(DpayException) { _status ->
     UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_decode_int(
+        FfiConverterByteArray.lower(`arg`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Decode the minter retrieve/withdraw Ok({block_index}) reply (single source `dpay-icp`
+         * `decode_minter_ok` — the same bytes the e2e fake-IC gateway emits via `encode_minter_ok`).
+         * Mirrors the wasm `w_icp_decode_minter_ok` export; the Err side reuses the transfer-error
+         * variant names (minter rejects observed live are ICRC-1 transfer-error names).
+         */
+    @Throws(DpayException::class) fun `icpDecodeMinterOk`(`arg`: kotlin.ByteArray): IcpTransferOutcome {
+            return FfiConverterTypeIcpTransferOutcome.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_decode_minter_ok(
         FfiConverterByteArray.lower(`arg`),_status)
 }
     )

@@ -15,6 +15,7 @@ use dpay_icp::envelope::{
 };
 use dpay_icp::icrc::{
     approve_arg as icrc_approve_arg, balance_of_arg as icrc_balance_of_arg,
+    decode_minter_ok as icrc_decode_minter_ok,
     decode_transfer_result as icrc_decode_transfer_result, transfer_arg as icrc_transfer_arg,
     ApproveResult, TransferError, TransferResult,
 };
@@ -668,6 +669,37 @@ fn transfer_error_parts(e: &TransferError) -> (&'static str, String) {
             ("GenericError", format!("{error_code}: {message}"))
         }
     }
+}
+
+/// Decode the minter retrieve/withdraw Ok({block_index}) reply (the shape `encode_minter_ok`
+/// emits — single source `dpay-icp`). Same compact-JSON shape as `w_icp_decode_transfer_result`
+/// so the JS shim marshals both identically; the Err side reuses the transfer-error variant
+/// names (minter rejects observed live are ICRC-1 transfer-error names).
+#[no_mangle]
+pub extern "C" fn w_icp_decode_minter_ok(arg_ptr: u32, arg_len: u32, out_ptr: u32, cap: u32) -> u32 {
+    if !in_bounds(arg_ptr, arg_len) || arg_len > 512 {
+        return BAD_LEN;
+    }
+    let arg = unsafe { slice_at(arg_ptr, arg_len) };
+    let result = match icrc_decode_minter_ok(arg) {
+        Ok(r) => r,
+        Err(_) => return BAD_UTF8,
+    };
+    let mut json = String::with_capacity(96);
+    match result {
+        Ok(idx) => {
+            json.push_str(&format!("{{\"ok\":true,\"blockIndex\":\"{idx}\"}}"));
+        }
+        Err(e) => {
+            let (variant, detail) = transfer_error_parts(&e);
+            json.push_str("{\"ok\":false,\"errVariant\":");
+            push_json_str(variant, &mut json);
+            json.push_str(",\"errDetail\":");
+            push_json_str(&detail, &mut json);
+            json.push('}');
+        }
+    }
+    write_str_out(json.as_bytes(), out_ptr, cap)
 }
 
 #[no_mangle]

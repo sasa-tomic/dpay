@@ -108,6 +108,7 @@ type WasmExports = WebAssembly.Exports & {
   w_icp_decode_query(bodyPtr: number, bodyLen: number, outPtr: number, cap: number): number;
   w_icp_decode_read_state(bodyPtr: number, bodyLen: number, ridsPtr: number, nRids: number, outPtr: number, cap: number): number;
   w_icp_decode_transfer_result(argPtr: number, argLen: number, outPtr: number, cap: number): number;
+  w_icp_decode_minter_ok(argPtr: number, argLen: number, outPtr: number, cap: number): number;
   w_icp_decode_int(argPtr: number, argLen: number, outPtr: number, cap: number): number;
   memory: WebAssembly.Memory;
 };
@@ -609,6 +610,16 @@ async function icpDecodeTransferResult(argHex: string): Promise<IcpTransferOutco
   return jsonOut(ex, len, out, 'icp_decode_transfer_result') as IcpTransferOutcomeOut;
 }
 
+/** Minter retrieve/withdraw Ok({block_index}) reply — mirrors icpDecodeTransferResult. */
+async function icpDecodeMinterOk(argHex: string): Promise<IcpTransferOutcomeOut> {
+  const ex = await core();
+  const arg = hex(argHex);
+  const argP = put(ex, arg);
+  const out = outBuf(ex, ICP_JSON_CAP, 'icp_decode_minter_ok');
+  const len = ex.w_icp_decode_minter_ok(argP, arg.length, out, ICP_JSON_CAP);
+  return jsonOut(ex, len, out, 'icp_decode_minter_ok') as IcpTransferOutcomeOut;
+}
+
 async function icpDecodeInt(argHex: string): Promise<string> {
   const ex = await core();
   const arg = hex(argHex);
@@ -667,6 +678,7 @@ export const DpayCore = {
   icpDecodeQuery,
   icpDecodeReadState,
   icpDecodeTransferResult,
+  icpDecodeMinterOk,
   icpDecodeInt,
 };
 export type DpayCoreShim = typeof DpayCore;

@@ -143,28 +143,13 @@ export type OfframpStep = {ledger: string; envelopeHex: string; requestIdHex: st
 
 /** Decode a MINTER call reply (retrieve_btc_with_approval / withdraw_eth / withdraw_erc20):
  * `variant { Ok(record {block_index: nat64}) }` — a DIFFERENT candid shape from the ledger's
- * `variant { Ok(nat) }`, so `icpDecodeTransferResult` can't parse it. The minter reply bytes are
- * FROZEN (production ckBTC/ckETH minters, mirrored byte-for-byte by the e2e fake gateway — see
- * dpay-icp `encode_minter_ok`), so this is a targeted parser, not a general candid decoder:
- *   DIDL | type-table… | 01 (Ok) | record head | 78 01 00 00 | block_index as 8 LE bytes
- * The approve steps on the LEDGERS stay transfer-shaped and go through the wasm decoder; a reply
- * that matches NEITHER shape is treated as a parse failure (thrown → caller surfaces it). */
+ * `variant { Ok(nat) }`. Decoded by the platform core (dpay-icp `decode_minter_ok`, single
+ * source — the same Rust knowledge that ENCODES the frozen reply shape in the e2e fake gateway
+ * via `encode_minter_ok`), exposed as DpayCore.icpDecodeMinterOk on BOTH rails (UniFFI on
+ * Android, wasm on web). The approve steps on the LEDGERS stay transfer-shaped and go through
+ * `icpDecodeTransferResult`; a reply that matches NEITHER shape throws (caller surfaces it). */
 async function decodeMinterReply(replyArgHex: string): Promise<RailReplyOutcome> {
-  try {
-    return await DpayCore.icpDecodeTransferResult(replyArgHex); // Err variants share the shape
-  } catch {
-    // Fall through to the frozen minter-ok parse below.
-  }
-  const b = hexToBytes(replyArgHex);
-  // encode_minter_ok tail: variant tag 0x01, record length 0x01, field id hash, 0x00 0x00, then
-  // the nat64 payload. Anchor on the LAST 12 bytes to sidestep any type-table length drift.
-  if (b.length >= 12 && b[b.length - 12] === 0x78 && b[b.length - 11] === 0x01) {
-    const tail = b.slice(b.length - 8);
-    let le = 0n;
-    for (let i = 7; i >= 0; i--) le = (le << 8n) | BigInt(tail[i]);
-    return {ok: true, blockIndex: le.toString()};
-  }
-  throw new Error('Unrecognized minter reply');
+  return DpayCore.icpDecodeMinterOk(replyArgHex);
 }
 
 /** Live gas estimate for a ckERC20 withdrawal (Wei) — signed query to the ckETH minter. */

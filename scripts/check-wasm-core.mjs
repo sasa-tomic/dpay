@@ -313,6 +313,81 @@ for (const c of CASES) {
     ex.w_receipt_claim(writeBytes(fromHex('cd'.repeat(16))), writeBytes(fromHex('ab'.repeat(32))), writeBytes(fromHex('ef'.repeat(32))), 1, 0, 0, 1, 0, 1, 0, 0xffff0000) === 1);
 }
 
+// --- IC user-principal rail export census (additive-only, ABI v1) --------------------------------
+// The IC-rail cutover made the wasm core the ENTIRE /api/v2 rail (envelope signing + reply
+// decoding) — a dropped or renamed w_icp_* export would silently break the web wallet's value
+// path while `just check` stayed green. Mirror the export table in crates/dpay-wasm/src/icp.rs
+// as a pinned list: every entry MUST be present (additive-only policy — new exports extend this
+// list; a rename/removal is an ABI break and fails here).
+{
+  const PINNED_ICP_EXPORTS = [
+    'w_icp_self_principal', 'w_icp_principal_from_pubkey', 'w_icp_ingress_expiry',
+    'w_icp_transfer_arg', 'w_icp_approve_arg', 'w_icp_balance_of_arg',
+    'w_icp_minter_account_arg', 'w_icp_retrieve_btc_arg', 'w_icp_withdraw_eth_arg',
+    'w_icp_withdraw_erc20_arg', 'w_icp_eip1559_price_arg',
+    'w_icp_decode_text', 'w_icp_decode_eip1559_price',
+    'w_icp_sign_update', 'w_icp_sign_query', 'w_icp_sign_read_state',
+    'w_icp_envelope_request_id', 'w_icp_decode_query', 'w_icp_decode_read_state',
+    'w_icp_decode_transfer_result', 'w_icp_decode_minter_ok', 'w_icp_decode_int',
+  ];
+  for (const name of PINNED_ICP_EXPORTS) {
+    check(`icp export present: ${name}`, typeof ex[name] === 'function',
+      'missing/renamed w_icp_* export — ABI break; fix crates/dpay-wasm/src/icp.rs (or update the pinned census)');
+  }
+  // Guard the guard: unknown w_icp_* exports appearing in the artifact without being pinned
+  // (the additive-only policy expects this list to be EXTENDED in the same change).
+  const present = Object.keys(ex).filter(k => k.startsWith('w_icp_'));
+  const unpinned = present.filter(k => !PINNED_ICP_EXPORTS.includes(k));
+  check('no unpinned w_icp_* exports (extend the census when adding one)',
+    unpinned.length === 0, `unpinned: ${unpinned.join(', ')}`);
+}
+
+// --- w_icp_decode_minter_ok golden (single-source minter reply decoder) --------------------------
+// The minter retrieve/withdraw Ok({block_index: nat64}) reply shape is frozen in dpay-icp
+// (`encode_minter_ok` — also what the e2e fake-IC gateway emits). This golden pins the WASM
+// decoder against a hand-encoded reply + the shared transfer-error Err side, so the web rail's
+// offramp outcome decoding can never silently drift from the Rust single source.
+{
+  const CAP = 256;
+  // encode_minter_ok(1234): frozen 22-byte prefix + 1234 as 8 LE bytes.
+  const MINTER_OK_1234 =
+    '4449444c026b01bc8a01016c01e09ecba90278010000' + // DIDL + table + 0x00 0x00 pad
+    'd204000000000000';                               // 1234 LE u64
+  const decodeMinter = (hexStr) => {
+    const arg = writeBytes(fromHex(hexStr));
+    const out = ex.w_alloc(CAP);
+    const n = ex.w_icp_decode_minter_ok(arg, fromHex(hexStr).length, out, CAP);
+    return [n, n > 0 ? readStr(out, n) : ''];
+  };
+  {
+    const [n, s] = decodeMinter(MINTER_OK_1234);
+    check('w_icp_decode_minter_ok(encode_minter_ok(1234)) == {"ok":true,"blockIndex":"1234"}',
+      n > 0 && canon(JSON.parse(s)) === canon({ok: true, blockIndex: '1234'}), `n=${n} s=${s}`);
+  }
+  {
+    // u64 extreme round-trip: u64::MAX
+    const [n, s] = decodeMinter('4449444c026b01bc8a01016c01e09ecba90278010000ffffffffffffffff');
+    check('w_icp_decode_minter_ok(u64::MAX block) == {"ok":true,"blockIndex":"18446744073709551615"}',
+      n > 0 && canon(JSON.parse(s)) === canon({ok: true, blockIndex: '18446744073709551615'}), `n=${n} s=${s}`);
+  }
+  {
+    // Err side shares the transfer-error table: a transfer-shaped TooOld reply decodes as Err.
+    const [n, s] = decodeMinter('4449444c086b02bc8a017dc5fed201016b08d1c4987c02c291ecb9027f94c1c7890403eb82a8970404a1c3ebfd0705f087e6db090693e5bec80c7feb9cdbd50f076c02c7ebc4d00971c498b1b50d7d6c019bb3bea60a7d6c018bbdf29b017d6c01bf9bb7f00d7d6c01a3bb918c0a786c019cbab69c027d01000106');
+    check('w_icp_decode_minter_ok(TooOld Err reply) == {"ok":false,"errVariant":"TooOld",…}',
+      n > 0 && canon(JSON.parse(s)) === canon({ok: false, errVariant: 'TooOld', errDetail: ''}), `n=${n} s=${s}`);
+  }
+  {
+    // BAD_LEN on out-of-bounds arg ptr (same guard as the other decoders).
+    check('w_icp_decode_minter_ok(oob arg_ptr) == BAD_LEN(1)',
+      ex.w_icp_decode_minter_ok(0xffff0000, 32, ex.w_alloc(CAP), CAP) === 1);
+    // 0 (bad input) on garbage that is not a DIDL message.
+    // (Non-DIDL bytes fail Rd::message() → IcpError → the export's Err(_) arm returns BAD_UTF8(2),
+    //  the decoder-family convention for "reply didn't parse".)
+    const [n] = decodeMinter('deadbeef');
+    check('w_icp_decode_minter_ok(non-DIDL garbage) == BAD_UTF8(2)', n === 2, `n=${n}`);
+  }
+}
+
 // --- verdict ------------------------------------------------------------------------------------
 if (failures) {
   console.error(`\nFAIL: dpay-core.wasm drifted from the trusted oracle in ${failures}/${checks} check(s).`);

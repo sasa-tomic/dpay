@@ -519,6 +519,26 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         }
     }
 
+    /**
+     * Decode a minter retrieve/withdraw Ok({block_index}) reply (same wire shape the e2e fake-IC
+     * gateway emits): {ok, blockIndex?, errVariant?, errDetail?} — mirrors icpDecodeTransferResult;
+     * the Err side reuses the transfer-error variant names.
+     */
+    @ReactMethod
+    fun icpDecodeMinterOk(argHex: String, promise: Promise) {
+        try {
+            val r = uniffi.dpay_ffi.icpDecodeMinterOk(unhex(argHex))
+            val out = Arguments.createMap()
+            out.putBoolean("ok", r.ok)
+            if (r.blockIndex != null) out.putString("blockIndex", r.blockIndex)
+            if (r.errVariant != null) out.putString("errVariant", r.errVariant)
+            if (r.errDetail != null) out.putString("errDetail", r.errDetail)
+            promise.resolve(out)
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
     /** Decode a single-value integer reply (balance/fee/decimals class) to a decimal string. */
     @ReactMethod
     fun icpDecodeInt(argHex: String, promise: Promise) {

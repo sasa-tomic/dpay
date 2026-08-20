@@ -189,6 +189,11 @@ fn heap_start() -> u32 {
 }
 
 /// The current heap cursor, lazily initializing it to [`heap_start`] on first use.
+///
+/// The non-CAS `Relaxed` load/store is safe today: wasm execution in this module is
+/// single-threaded (no shared-memory threads / `atomics.wait` in the build), so no other
+/// agent can interleave between the load and the store. Revisit (CAS loop or lock) if
+/// threads ever arrive.
 fn heap_cursor() -> u32 {
     let pos = HEAP.load(Ordering::Relaxed);
     if pos != 0 {

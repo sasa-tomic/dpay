@@ -468,6 +468,18 @@ pub fn icp_decode_transfer_result(arg: Vec<u8>) -> Result<IcpTransferOutcome, Dp
     }
 }
 
+/// Decode the minter retrieve/withdraw Ok({block_index}) reply (single source `dpay-icp`
+/// `decode_minter_ok` — the same bytes the e2e fake-IC gateway emits via `encode_minter_ok`).
+/// Mirrors the wasm `w_icp_decode_minter_ok` export; the Err side reuses the transfer-error
+/// variant names (minter rejects observed live are ICRC-1 transfer-error names).
+#[uniffi::export]
+pub fn icp_decode_minter_ok(arg: Vec<u8>) -> Result<IcpTransferOutcome, DpayError> {
+    match dpay_icp::icrc::decode_minter_ok(&arg).map_err(bad)? {
+        Ok(idx) => Ok(IcpTransferOutcome { ok: true, block_index: Some(idx.to_string()), err_variant: String::new(), err_detail: String::new() }),
+        Err(e) => Ok(transfer_err(e)),
+    }
+}
+
 /// Decode a bare candid `int`/`nat` reply (e.g. `icrc1_balance_of`) to a decimal string.
 #[uniffi::export]
 pub fn icp_decode_int(arg: Vec<u8>) -> Result<String, DpayError> {
@@ -573,6 +585,22 @@ mod tests {
         assert_eq!(out.err_variant, "BadFee");
         // decode_int over a golden nat reply (mainnet DUSD decimals = 2)
         assert_eq!(icp_decode_int(unhex("4449444c00017b02")).unwrap(), "2");
+    }
+
+    #[test]
+    fn minter_ok_decodes_via_shared_source() {
+        // Round-trip through dpay-icp's frozen encoder (the same bytes the e2e fake-IC
+        // gateway emits for minter retrieve/withdraw Ok replies).
+        let bytes = dpay_icp::icrc::encode_minter_ok(1234);
+        let out = icp_decode_minter_ok(bytes).unwrap();
+        assert!(out.ok);
+        assert_eq!(out.block_index.as_deref(), Some("1234"));
+        assert_eq!(out.err_variant, "");
+        // Err side: a transfer-shaped TooOld reply decodes via the shared error table.
+        let too_old = unhex("4449444c086b02bc8a017dc5fed201016b08d1c4987c02c291ecb9027f94c1c7890403eb82a8970404a1c3ebfd0705f087e6db090693e5bec80c7feb9cdbd50f076c02c7ebc4d00971c498b1b50d7d6c019bb3bea60a7d6c018bbdf29b017d6c01bf9bb7f00d7d6c01a3bb918c0a786c019cbab69c027d01000106");
+        let out = icp_decode_minter_ok(too_old).unwrap();
+        assert!(!out.ok);
+        assert_eq!(out.err_variant, "TooOld");
     }
 
     #[test]

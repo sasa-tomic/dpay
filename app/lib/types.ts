@@ -104,6 +104,8 @@ export type DpayCoreApi = {
   icpDecodeQuery(bodyHex: string): Promise<IcpQueryReply>;
   icpDecodeReadState(bodyHex: string, requestIdsHex: string[]): Promise<IcpStateRead>;
   icpDecodeTransferResult(argHex: string): Promise<IcpTransferOutcome>;
+  /** Minter retrieve/withdraw Ok({block_index}) reply — same shape as icpDecodeTransferResult. */
+  icpDecodeMinterOk(argHex: string): Promise<IcpTransferOutcome>;
   icpDecodeInt(argHex: string): Promise<string>;
 };
 

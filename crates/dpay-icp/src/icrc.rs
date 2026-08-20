@@ -1141,6 +1141,42 @@ pub fn decode_transfer_result(bytes: &[u8]) -> Result<TransferResult, IcpError> 
     Ok(result)
 }
 
+/// A minter retrieve/withdraw reply: the shared `Ok({block_index: nat64})` shape, or the minter's
+/// reject. The `Err` side reuses `TransferError` — the minter reply variants are the ICRC-1
+/// transfer-error names (observed live on the production minters), and the callers (ffi/wasm
+/// bridges) map them with the same tables as `decode_transfer_result`.
+pub type MinterResult = Result<u64, TransferError>;
+
+/// Decode a minter retrieve/withdraw reply (`Ok({block_index: nat64})` — the exact shape
+/// [`encode_minter_ok`] produces). This is the SINGLE source for the minter-ok reply: the e2e
+/// fake-IC gateway encodes it, the ffi (Kotlin/UniFFI) and wasm (web) bridges decode it.
+pub fn decode_minter_ok(bytes: &[u8]) -> Result<MinterResult, IcpError> {
+    let mut rd = Rd { b: bytes, i: 0 };
+    let (_, _, arg0) = rd.message()?;
+    let outer = bare_variant(&arg0)?;
+    let (label, payload) = rd.variant(outer)?;
+    let result = match label {
+        l if l == idl_hash("Ok") => {
+            // the Ok payload is a record with the single field `block_index` (nat64)
+            let Ty::Rec(fs) = payload else {
+                return Err(IcpError::DidlType("minter Ok payload must be a record".into()));
+            };
+            let block_index = u64_of(num_field(&mut rd, &fs, "minter Ok")?, "block index")?;
+            Ok(block_index)
+        }
+        l if l == idl_hash("Err") => {
+            let Ty::Var(inner) = payload else {
+                return Err(IcpError::DidlType("Err payload must be a variant".into()));
+            };
+            let (elabel, epayload) = rd.variant(&inner)?;
+            Err(transfer_error(&mut rd, elabel, &epayload)?)
+        }
+        l => return Err(IcpError::DidlType(format!("unknown minter result label {l:#x}"))),
+    };
+    rd.finish()?;
+    Ok(result)
+}
+
 /// single numeric record field: nat (uleb) or nat64 (8B LE).
 fn num_field(rd: &mut Rd, fs: &[(u32, Ty)], what: &str) -> Result<u128, IcpError> {
     if fs.len() != 1 {
