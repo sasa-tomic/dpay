@@ -5,7 +5,7 @@ import {C, FONT} from '../config/palette';
 import {S} from '../styles';
 import {EXPIRY_WINDOW, POLL, QR_SIZE} from '../config/constants';
 import {toUnits, randNonceHex, nowSecs} from '../lib/format';
-import {shareHandoff} from '../lib/deepLink';
+import {shareHandoff, decodeReceiptDeeplink} from '../lib/deepLink';
 import {type CurrencyDescriptor, type FamilyDisplay, fmtCurrencyAmount, currencySymbol} from '../config/catalog';
 import {type SelectableAsset} from '../config/assets';
 import {type BalanceView} from '../lib/assetBalances';
@@ -152,9 +152,13 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
     (async () => {
       try {
         const text = blob.trim();
-        const jsonStart = text.indexOf('{');
-        if (jsonStart < 0) { if (alive) setErr('This receipt link is malformed.'); return; }
-        const proof = JSON.parse(text.slice(jsonStart)) as {request_id?: unknown; block_index?: unknown};
+        // The payer's share is base64url(JSON) (receiptShareBlob — what Share actually hands
+        // over); a raw-JSON blob is still accepted for hand-typed/legacy links. The codec never
+        // throws; null on both paths = malformed.
+        const proof = decodeReceiptDeeplink(text) ?? (text.includes('{')
+          ? (JSON.parse(text.slice(text.indexOf('{'))) as {request_id?: unknown; block_index?: unknown})
+          : null);
+        if (!proof) { if (alive) setErr('This receipt link is malformed.'); return; }
         const openReq = reqQr;
         if (openReq) {
           // Bind to the open request: request_id must be a 32-byte hex string (rid of the payer's

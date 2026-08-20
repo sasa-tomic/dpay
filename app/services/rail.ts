@@ -25,6 +25,10 @@ export type RailPrepared = {
   memoHex: string; // the request nonce — reconciliation key
 };
 
+/** What one signed reply decodes to — shared by the transfer (wasm) and minter (frozen-shape)
+ * decoders below so `pollTransfer` treats them identically. */
+type RailReplyOutcome = {ok: boolean; blockIndex?: string; errVariant?: string; errDetail?: string};
+
 export type RailOutcome =
   | {kind: 'settled'; blockIndex: string}
   | {kind: 'rejected'; reason: string} // definitive (decoded TransferError / canister reject)
@@ -50,11 +54,13 @@ export async function prepareTransfer(
 
 /** Submit the prepared envelope (verbatim bytes) and poll read_state to a terminal state.
  *  `pollerSecret` signs the read_state polls — any principal may read request_status; the
- *  merchant's own key polls in the handoff case. Budget-exhaustion → 'unknown' (honest pending). */
+ *  merchant's own key polls in the handoff case. Budget-exhaustion → 'unknown' (honest pending).
+ *  `decodeReply` overrides the reply decoder (minter calls reply a different candid shape). */
 export async function submitTransfer(
   prepared: {ledger: string; envelopeHex: string; requestIdHex: string},
   pollerSecret: string,
   opts: {attempts: number; intervalMs: number},
+  decodeReply?: (replyArgHex: string) => Promise<RailReplyOutcome>,
 ): Promise<RailOutcome> {
   const out = await icSubmit(prepared.ledger, 'call', prepared.envelopeHex, IC_SUBMIT_TIMEOUT_MS);
   if (out.kind === 'rejected') {
@@ -63,7 +69,7 @@ export async function submitTransfer(
     return {kind: 'rejected', reason: ingressRejectMessage(out.status, out.bodyText)};
   }
   if (out.kind === 'unknown') return {kind: 'unknown'}; // resubmit the SAME bytes later
-  return await pollTransfer(prepared, pollerSecret, opts);
+  return await pollTransfer(prepared, pollerSecret, opts, decodeReply);
 }
 
 /** Poll read_state for the prepared request_id to a terminal state (already-submitted case —
@@ -72,11 +78,13 @@ export async function pollTransfer(
   prepared: {ledger: string; requestIdHex: string},
   pollerSecret: string,
   opts: {attempts: number; intervalMs: number},
+  decodeReply?: (replyArgHex: string) => Promise<RailReplyOutcome>,
 ): Promise<RailOutcome> {
   const st = await icPollRequestStatus(pollerSecret, prepared.ledger, prepared.requestIdHex, opts);
   if (st == null) return {kind: 'unknown'};
   if (st.state === 'replied' && st.replyArgHex != null) {
-    const tr = await DpayCore.icpDecodeTransferResult(st.replyArgHex);
+    const decode = decodeReply ?? ((hex: string) => DpayCore.icpDecodeTransferResult(hex));
+    const tr = await decode(st.replyArgHex);
     if (tr.ok) return {kind: 'settled', blockIndex: tr.blockIndex ?? ''};
     return {kind: 'rejected', reason: transferRejectionMessage(tr.errVariant ?? '', tr.errDetail ?? '')};
   }
@@ -133,6 +141,32 @@ function bytesToHex(b: Uint8Array): string {
 
 export type OfframpStep = {ledger: string; envelopeHex: string; requestIdHex: string; label: string};
 
+/** Decode a MINTER call reply (retrieve_btc_with_approval / withdraw_eth / withdraw_erc20):
+ * `variant { Ok(record {block_index: nat64}) }` — a DIFFERENT candid shape from the ledger's
+ * `variant { Ok(nat) }`, so `icpDecodeTransferResult` can't parse it. The minter reply bytes are
+ * FROZEN (production ckBTC/ckETH minters, mirrored byte-for-byte by the e2e fake gateway — see
+ * dpay-icp `encode_minter_ok`), so this is a targeted parser, not a general candid decoder:
+ *   DIDL | type-table… | 01 (Ok) | record head | 78 01 00 00 | block_index as 8 LE bytes
+ * The approve steps on the LEDGERS stay transfer-shaped and go through the wasm decoder; a reply
+ * that matches NEITHER shape is treated as a parse failure (thrown → caller surfaces it). */
+async function decodeMinterReply(replyArgHex: string): Promise<RailReplyOutcome> {
+  try {
+    return await DpayCore.icpDecodeTransferResult(replyArgHex); // Err variants share the shape
+  } catch {
+    // Fall through to the frozen minter-ok parse below.
+  }
+  const b = hexToBytes(replyArgHex);
+  // encode_minter_ok tail: variant tag 0x01, record length 0x01, field id hash, 0x00 0x00, then
+  // the nat64 payload. Anchor on the LAST 12 bytes to sidestep any type-table length drift.
+  if (b.length >= 12 && b[b.length - 12] === 0x78 && b[b.length - 11] === 0x01) {
+    const tail = b.slice(b.length - 8);
+    let le = 0n;
+    for (let i = 7; i >= 0; i--) le = (le << 8n) | BigInt(tail[i]);
+    return {ok: true, blockIndex: le.toString()};
+  }
+  throw new Error('Unrecognized minter reply');
+}
+
 /** Live gas estimate for a ckERC20 withdrawal (Wei) — signed query to the ckETH minter. */
 export async function fetchGasFeeWei(
   secretHex: string,
@@ -147,6 +181,18 @@ export async function fetchGasFeeWei(
   return p.maxTransactionFee;
 }
 
+/** Empty DIDL argument (`icrc1_fee` takes no parameters). */
+const EMPTY_DIDL_ARG_HEX = '4449444c0000';
+
+/** The ledger's icrc1_fee — ICRC-2 `approve` MUST carry it verbatim (a wrong/absent fee is
+ * rejected with BadFee, exactly like a transfer). Fetched live per ledger: the catalog's fee
+ * field is display metadata; the ledger is authoritative. */
+async function fetchApproveFee(secretHex: string, ledger: string): Promise<string> {
+  const reply = await icQuery(secretHex, ledger, 'icrc1_fee', EMPTY_DIDL_ARG_HEX);
+  if (reply == null) throw new Error("Couldn't fetch the ledger fee — check your connection");
+  return await DpayCore.icpDecodeInt(reply);
+}
+
 /** ckBTC offramp: approve(spender=minter, amount) on the ckBTC ledger, then retrieve from the minter. */
 export async function prepareBtcWithdrawal(
   secretHex: string,
@@ -156,9 +202,10 @@ export async function prepareBtcWithdrawal(
   amountSats: string,
 ): Promise<OfframpStep[]> {
   const expiry = await icStampExpiry(secretHex);
+  const fee = await fetchApproveFee(secretHex, ledger);
   const steps: OfframpStep[] = [];
   {
-    const argHex = await DpayCore.icpApproveArg(minter, '', '', amountSats, '', '', '', '');
+    const argHex = await DpayCore.icpApproveArg(minter, '', '', amountSats, '', '', '', fee);
     const signed = await DpayCore.icpSignUpdate(secretHex, ledger, 'icrc2_approve', argHex, expiry);
     steps.push({ledger, envelopeHex: signed.envelopeHex, requestIdHex: signed.requestIdHex, label: 'approve'});
   }
@@ -180,10 +227,11 @@ export async function prepareEthWithdrawal(
   gasFeeWei: string,
 ): Promise<OfframpStep[]> {
   const expiry = await icStampExpiry(secretHex);
+  const fee = await fetchApproveFee(secretHex, ckethLedger);
   const steps: OfframpStep[] = [];
   const totalApprove = (BigInt(amountWei) + BigInt(gasFeeWei)).toString();
   {
-    const argHex = await DpayCore.icpApproveArg(minter, '', '', totalApprove, '', '', '', '');
+    const argHex = await DpayCore.icpApproveArg(minter, '', '', totalApprove, '', '', '', fee);
     const signed = await DpayCore.icpSignUpdate(secretHex, ckethLedger, 'icrc2_approve', argHex, expiry);
     steps.push({ledger: ckethLedger, envelopeHex: signed.envelopeHex, requestIdHex: signed.requestIdHex, label: 'approve'});
   }
@@ -207,14 +255,16 @@ export async function prepareErc20Withdrawal(
   gasFeeWei: string,
 ): Promise<OfframpStep[]> {
   const expiry = await icStampExpiry(secretHex);
+  const gasLedgerFee = await fetchApproveFee(secretHex, ckethLedger);
+  const erc20LedgerFee = await fetchApproveFee(secretHex, ckerc20Ledger);
   const steps: OfframpStep[] = [];
   {
-    const argHex = await DpayCore.icpApproveArg(minter, '', '', gasFeeWei, '', '', '', '');
+    const argHex = await DpayCore.icpApproveArg(minter, '', '', gasFeeWei, '', '', '', gasLedgerFee);
     const signed = await DpayCore.icpSignUpdate(secretHex, ckethLedger, 'icrc2_approve', argHex, expiry);
     steps.push({ledger: ckethLedger, envelopeHex: signed.envelopeHex, requestIdHex: signed.requestIdHex, label: 'approve-gas'});
   }
   {
-    const argHex = await DpayCore.icpApproveArg(minter, '', '', amount, '', '', '', '');
+    const argHex = await DpayCore.icpApproveArg(minter, '', '', amount, '', '', '', erc20LedgerFee);
     const signed = await DpayCore.icpSignUpdate(secretHex, ckerc20Ledger, 'icrc2_approve', argHex, expiry);
     steps.push({ledger: ckerc20Ledger, envelopeHex: signed.envelopeHex, requestIdHex: signed.requestIdHex, label: 'approve-amount'});
   }
@@ -228,13 +278,16 @@ export async function prepareErc20Withdrawal(
 
 /** Submit + poll one offramp step to a terminal state. Each step is its own /call; sequence
  *  callers submit in order and STOP on anything but settled (approve failures make the follow-up
- *  meaningless; 'unknown' on approve = honest pending — do NOT submit the minter call blind). */
+ *  meaningless; 'unknown' on approve = honest pending — do NOT submit the minter call blind).
+ *  The minter steps (retrieve/withdraw) reply a different candid shape than the ledger steps —
+ *  routed through `decodeMinterReply`. */
 export async function submitOfframpStep(
   step: OfframpStep,
   secretHex: string,
   opts: {attempts: number; intervalMs: number},
 ): Promise<RailOutcome> {
-  return submitTransfer(step, secretHex, opts);
+  const decode = step.label === 'retrieve' || step.label === 'withdraw' ? decodeMinterReply : undefined;
+  return submitTransfer(step, secretHex, opts, decode);
 }
 
 /** ckBTC deposit address at THIS user's principal — signed get_btc_address query against the

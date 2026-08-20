@@ -74,7 +74,11 @@ export function Ledger({history, catalog}: {history: Txn[]; catalog: CurrencyDes
         // would have NPE'd on a null family display.
         const amtTxt = fmtCurrencyAmount(catalog, t.currency, t.amount);
         return (
-          <View key={t.nonce} style={S.histRow}>
+          // IC-rail rows carry an EMPTY nonce (memo is the reconciliation key), so the raw nonce
+          // alone is no longer unique (mint + transfer rows collide). Composite key: index pins
+          // positional identity; the nonce keeps facade-era rows (which had unique nonces) stable
+          // across refreshes when the list head shifts.
+          <View key={`${i}-${t.nonce}`} style={S.histRow}>
             {/* P4 — direction glyph leading each row (t.dir is Txn's reliable 'out' | 'in' field):
                 incoming = arrow-down-left in ok green (matching the credited amount; tangerine stays
                 reserved for CTA/active), outgoing = arrow-up-right neutral. The icon renders no

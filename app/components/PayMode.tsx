@@ -120,6 +120,13 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
 
   async function approve() {
     if (!req) return;
+    // The IC rail has no server-side dpay-request expiry — the payer's app IS the gate. A stale
+    // request QR must die here, before any envelope is built (memo/nonce reconciliation only ever
+    // sees fresh transfers), with copy that explains the expiry and disables Approve (C1).
+    if (req.expiry * 1000 <= Date.now()) {
+      setErr('This request expired — ask the merchant for a fresh QR');
+      return;
+    }
     setBusy(true);
     try {
       // IC user-principal rail: build + sign the icrc1_transfer envelope LOCALLY (payee principal

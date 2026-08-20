@@ -1,8 +1,9 @@
 import {useCallback, useEffect, useMemo, useState} from 'react';
 import {type CurrencyDescriptor} from '../config/catalog';
 import {POLL, BALANCE_TIMEOUT_MS} from '../config/constants';
-import {short, isMintSentinel, fmtTime, base} from '../lib/format';
+import {short, fmtTime, base} from '../lib/format';
 import {fetchWithTimeout} from '../services/relay';
+import {DpayCore} from '../services/native';
 import type {Txn, TransactionsRow} from '../lib/types';
 
 type Args = {
@@ -49,16 +50,21 @@ export function useTransactionHistory(args: Args): {history: Txn[]; refreshHisto
       } catch (e) { console.warn(`useTransactionHistory fetch failed for currency ${currency}: `, e); return []; }
     }));
     if (!anySucceeded) return; // offline / all failed: keep the existing list
-    const me = publicHex.toLowerCase();
-    // Dedup by nonce (a payment id is globally unique) across currencies, then sort the UNION
-    // newest-first by raw timestamp — each per-currency fetch is already newest-first within its own
-    // currency, but mixed currencies must interleave by time.
+    // IC rail rows carry from/to as PRINCIPAL TEXT (self_authenticating of the ed25519 pubkey), so
+    // direction is keyed on THIS wallet's principal text (derived via the same core call the pay
+    // path uses), not the raw pubkey hex. Facade-era rows carried hex; the cutover replaced them.
+    let me = publicHex.toLowerCase();
+    try { me = (await DpayCore.icpPrincipalFromPubkey(publicHex)).toLowerCase(); } catch { /* fall back to hex compare */ }
+    // Dedup across currencies. A facade-era nonce was globally unique; the IC-rail rows carry an
+    // EMPTY nonce (memo is the reconciliation key), so fall back to a composite key (currency +
+    // timestamp + endpoints + amount) — still unique per on-chain transfer, never collapses rows.
     const seen = new Set<string>();
     const all: TransactionsRow[] = [];
     for (const rows of perCurrency) {
       for (const rec of rows) {
-        if (seen.has(rec.nonce)) continue;
-        seen.add(rec.nonce);
+        const key = rec.nonce || `${rec.currency}:${rec.timestamp}:${rec.from}:${rec.to}:${rec.amount}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
         all.push(rec);
       }
     }
@@ -69,12 +75,12 @@ export function useTransactionHistory(args: Args): {history: Txn[]; refreshHisto
       const fromName = rec.from_name ?? '';
       const toName = rec.to_name ?? '';
       const memo = rec.memo ?? '';
-      // N6/H3 RESOLVED: the counterparty's display name now rides the signed wire (from_name/to_name)
-      // and is returned per row by the relay. For an OUT row (I am `from`) the counterparty is `to`
-      // → show to_name; for an IN row the counterparty is `from` → show from_name. Fall back to the
-      // short hex ONLY when no name was signed (unnamed payment); the mint sentinel keeps its label.
-      const who = isMintSentinel(counterparty)
-        ? (dir === 'in' ? 'Demo funds' : 'Withdrawal')
+      // Counterparty naming on the IC rail: gateway rows are name-less (from_name/to_name are
+      // empty — names died with facade settlement; the memo nonce is the reconciliation key), so
+      // the row shows the counterparty's short PRINCIPAL text. A mint's empty `from` keeps the
+      // friendly "Demo funds" label (the facade sentinel was 64 f's; the gateway uses "").
+      const who = (dir === 'in' && !counterparty)
+        ? 'Demo funds'
         : (dir === 'out' ? (toName || short(rec.to)) : (fromName || short(rec.from)));
       return {nonce: rec.nonce, amount: rec.amount, who, memo, time: fmtTime(rec.timestamp), dir, currency: rec.currency};
     }));

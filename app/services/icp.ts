@@ -25,9 +25,11 @@ import type {IcpStateRead} from '../lib/types';
 
 export const IC_GATEWAY_DEFAULT = 'https://icp-api.io';
 // Test/harness override seam (same pattern as SOLANA_RPC_URL): the e2e fake-IC gateway and the
-// dfx replica suite inject their base URL before the bundle evaluates; prod never sets it.
-const GATEWAY_SEAM = (globalThis as unknown as {__DPAY_TEST_IC_GATEWAY?: string}).__DPAY_TEST_IC_GATEWAY;
-export const IC_GATEWAY: string = GATEWAY_SEAM ?? IC_GATEWAY_DEFAULT;
+// dfx replica suite inject its base URL before the bundle evaluates; prod never sets it. Read
+// PER CALL (not at module load) so a test can flip the gateway at runtime — the only way the
+// harness can simulate an IC-unreachable (airplane-mode) payer for the offline handoff flow.
+const icGatewayBase = (): string =>
+  (globalThis as unknown as {__DPAY_TEST_IC_GATEWAY?: string}).__DPAY_TEST_IC_GATEWAY ?? IC_GATEWAY_DEFAULT;
 
 // Timeout budget: the boundary node answers a call POST with 202 quickly, but a cold or far
 // replica can take a few seconds. 8s bounds every submit; read_state polls use 5s.
@@ -83,7 +85,7 @@ async function postEnvelope(
 ): Promise<Response | null> {
   try {
     return await fetchWithTimeout(
-      `${IC_GATEWAY}/api/v2/canister/${canisterText}/${kind}`,
+      `${icGatewayBase()}/api/v2/canister/${canisterText}/${kind}`,
       {method: 'POST', headers: {'Content-Type': 'application/cbor'}, body: hexToBytes(envelopeHex).buffer, signal},
       timeoutMs,
     );
