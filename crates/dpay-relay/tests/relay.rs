@@ -1,13 +1,19 @@
 //! End-to-end relay tests — the fast, in-memory inner loop. No socket is bound: we drive the
-//! axum `Router` directly with `tower::ServiceExt::oneshot`, and pin the clock so expiry is
-//! deterministic.
+//! axum `Router` directly with `tower::ServiceExt::oneshot`.
 //!
-//! Covered:
-//! - valid pay → 200, receipt correct, balances moved;
-//! - duplicate nonce → 200, identical receipt, merchant credited only once;
-//! - bad signature / expired / over-cap / insufficient funds → 422 each, no state change;
-//! - health → 200;
-//! - transient-then-success (FlakyLedger) → eventually 200.
+//! 2026-08-19 IC-rail cutover: the relay's settlement surface (/pay, /withdraw, /receipt,
+//! /deposit/address, /deposit/refresh) is GONE — value moves on the IC rail, with the app
+//! signing /api/v2 envelopes locally and submitting them to the boundary nodes (icp-api.io in
+//! prod; this relay's fake-IC gateway under `test-helpers` in tests). What the relay still
+//! serves, covered here:
+//! - read surfaces: /balances (batch), /transactions (history), /currencies, /deposit/info,
+//!   /onramp/ckerc20, /health, /version;
+//! - test-only value fixtures against the fake-IC gateway: POST /faucet + GET /balance
+//!   (principal-keyed, exactly where a signed icrc1_transfer moves funds);
+//! - the fake-IC /api/v2 boundary itself: mounting, garbage-envelope rejection, and a REAL
+//!   signed icrc1_transfer executed by the gateway (verify → dedup → execute → history);
+//! - the public root: landing page, privacy, /wallet (the real app), APK download, screenshots,
+//!   /dpay-core.wasm.
 
 use std::sync::Arc;
 
@@ -18,22 +24,13 @@ use serde_json::Value;
 use sha2::Digest;
 use tower::ServiceExt; // oneshot
 
-use async_trait::async_trait;
-
-use dpay_core::{Authorization, Currency, SignedAuthorization, DEMO_USD};
-use dpay_relay::{
-    app, AppState, DepositInfo, DepositRefresh, FakeLedger, FixedClock, FlakyLedger, Ledger,
-    LedgerError, Receipt, TxnRecord, U64String,
-};
+use dpay_core::DEMO_USD;
+use dpay_icp::envelope::{ingress_expiry, sign_update, CallRequest};
+use dpay_icp::icrc::transfer_arg;
+use dpay_icp::principal::{Account, Principal};
+use dpay_relay::{app, ic_gateway::FakeIc, AppState, FakeLedger};
 use ed25519_dalek::SigningKey;
 
-// A fixed "now" and an expiry comfortably ahead of it, so valid auths don't expire.
-const NOW: u64 = 1_700_000_000;
-const FUTURE: u64 = NOW + 120;
-
-const CAP: u64 = 1_000; // per-transaction cap (minor units)
-const BAL_A: u64 = 5_000; // payer opening balance
-const BAL_B: u64 = 0; // merchant opening balance
 
 // --- helpers -------------------------------------------------------------
 
@@ -45,9 +42,16 @@ fn pubkey(sk: &SigningKey) -> [u8; 32] {
     sk.verifying_key().to_bytes()
 }
 
-/// A FakeLedger pinned to NOW, funding `a`→BAL_A and `b`→BAL_B, cap = CAP.
-fn ledger(a: [u8; 32], b: [u8; 32]) -> FakeLedger {
-    FakeLedger::with_clock(a, BAL_A, b, BAL_B, CAP, Box::new(FixedClock(NOW)))
+/// The IC account owner a device pubkey maps to — the self-authenticating principal the
+/// fake-IC gateway keys balances/txns by (the same account a signed icrc1_transfer moves).
+fn user_principal(pk: &[u8; 32]) -> Principal {
+    Principal::self_authenticating_ed25519(pk)
+}
+
+/// A bare FakeLedger (read-surface catalog only — balances live on the fake-IC gateway at
+/// user principals, so there is nothing to pre-fund here).
+fn ledger(_a: [u8; 32], _b: [u8; 32]) -> FakeLedger {
+    FakeLedger::new()
 }
 
 fn state_from(ledger: FakeLedger) -> (AppState, Arc<FakeLedger>) {
@@ -55,103 +59,28 @@ fn state_from(ledger: FakeLedger) -> (AppState, Arc<FakeLedger>) {
     (AppState::new(arc.clone()), arc)
 }
 
-fn signed(
-    sk: &SigningKey,
-    to: [u8; 32],
-    amount: u64,
-    nonce: [u8; 16],
-    expiry: u64,
-) -> SignedAuthorization {
-    let auth = Authorization {
-        from: pubkey(sk),
-        to,
-        amount,
-        nonce,
-        expiry,
-        currency: DEMO_USD,
-        // No display names / memo on the legacy test auths (empty buffers == empty strings in history).
-        from_name: [0u8; 32],
-        to_name: [0u8; 32],
-        memo: [0u8; 32],
+/// A state with the fake-IC gateway attached (test-helpers): `/api/v2/canister/*` is served and
+/// the faucet/balance/transactions fixtures read the gateway's principal-keyed ledgers.
+async fn state_with_fake(ledger: FakeLedger) -> (AppState, Arc<FakeLedger>, Arc<FakeIc>) {
+    let arc = Arc::new(ledger);
+    let fake = FakeIc::from_catalog(&*arc).await;
+    let state = AppState::new(arc.clone()).with_fake_ic(fake.clone());
+    (state, arc, fake)
+}
+
+/// POST /api/v1/faucet — the demo on-ramp (test-helpers). `amount_json` is a pre-rendered JSON
+/// value for the amount (quoted decimal string OR raw number — the deserializer takes both);
+/// `None` omits the field (the faucet's default top-up).
+fn faucet_json(account_hex: &str, amount_json: Option<&str>) -> Request<Body> {
+    let body = match amount_json {
+        Some(a) => format!("{{\"account\":\"{account_hex}\",\"amount\":{a}}}"),
+        None => format!("{{\"account\":\"{account_hex}\"}}"),
     };
-    SignedAuthorization::new(sk, auth)
-}
-
-/// Like [`signed`] but also sets the payer's `from_name`, the payee's `to_name`, and the `memo` on
-/// the authorization (NUL-padded to 32 bytes, mirroring what the app builder does before signing).
-/// Used to prove the names ride inside the signed wire through the relay into history (N6/H3).
-fn signed_named(
-    sk: &SigningKey,
-    to: [u8; 32],
-    amount: u64,
-    nonce: [u8; 16],
-    expiry: u64,
-    from_name: &str,
-    to_name: &str,
-    memo: &str,
-) -> SignedAuthorization {
-    let mut fn_buf = [0u8; 32];
-    let n = from_name.len().min(32);
-    fn_buf[..n].copy_from_slice(&from_name.as_bytes()[..n]);
-    let mut tn_buf = [0u8; 32];
-    let n = to_name.len().min(32);
-    tn_buf[..n].copy_from_slice(&to_name.as_bytes()[..n]);
-    let mut m_buf = [0u8; 32];
-    let n = memo.len().min(32);
-    m_buf[..n].copy_from_slice(&memo.as_bytes()[..n]);
-    let auth = Authorization {
-        from: pubkey(sk),
-        to,
-        amount,
-        nonce,
-        expiry,
-        currency: DEMO_USD,
-        from_name: fn_buf,
-        to_name: tn_buf,
-        memo: m_buf,
-    };
-    SignedAuthorization::new(sk, auth)
-}
-
-/// POST /api/v1/pay with a JSON `{"qr": ...}` body.
-fn pay_json(qr: &str) -> Request<Body> {
-    Request::builder()
-        .method("POST")
-        .uri("/api/v1/pay")
-        .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(format!("{{\"qr\":\"{qr}\"}}")))
-        .unwrap()
-}
-
-/// POST /api/v1/pay with a raw wire-bytes body.
-fn pay_wire(wire: &[u8]) -> Request<Body> {
-    Request::builder()
-        .method("POST")
-        .uri("/api/v1/pay")
-        .header(header::CONTENT_TYPE, "application/octet-stream")
-        .body(Body::from(wire.to_vec()))
-        .unwrap()
-}
-
-/// POST /api/v1/faucet — the demo on-ramp, which mints. Gated by `AppState::set_faucet_enabled`.
-fn faucet_json(account_hex: &str, amount: u64) -> Request<Body> {
     Request::builder()
         .method("POST")
         .uri("/api/v1/faucet")
         .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(format!(
-            "{{\"account\":\"{account_hex}\",\"amount\":{amount}}}"
-        )))
-        .unwrap()
-}
-
-/// GET /api/v1/receipt/{nonce_hex} — the idempotent reconciliation lookup the merchant app falls
-/// back to when a /api/v1/pay response is lost, so a settled payment is never reported as failed.
-fn get_receipt(nonce: [u8; 16]) -> Request<Body> {
-    Request::builder()
-        .method("GET")
-        .uri(format!("/api/v1/receipt/{}", hex::encode(nonce)))
-        .body(Body::empty())
+        .body(Body::from(body))
         .unwrap()
 }
 
@@ -172,7 +101,7 @@ fn get_req(uri: &str) -> Request<Body> {
         .unwrap()
 }
 
-/// Like `call`, but returns the raw status/headers/bytes (the pages aren't JSON).
+/// Like `call`, but returns the raw status/headers/bytes (the pages and /api/v2 aren't JSON).
 async fn call_raw(
     state: &AppState,
     req: Request<Body>,
@@ -190,270 +119,7 @@ async fn call_raw(
     (status, headers, bytes)
 }
 
-// --- tests ---------------------------------------------------------------
-
-#[tokio::test]
-async fn valid_pay_moves_funds() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
-
-    let sa = signed(&payer, pubkey(&merchant), 250, [1u8; 16], FUTURE);
-    let (status, body) = call(&state, pay_json(&sa.encode())).await;
-
-    assert_eq!(status, StatusCode::OK, "body={body}");
-    let r = &body["receipt"];
-    assert_eq!(r["amount"], "250");
-    assert_eq!(r["from"], hex::encode(pubkey(&payer)));
-    assert_eq!(r["to"], hex::encode(pubkey(&merchant)));
-    assert_eq!(r["nonce"], hex::encode([1u8; 16]));
-    assert_eq!(r["new_from_balance"], (BAL_A - 250).to_string());
-
-    // Balances actually moved on the ledger.
-    assert_eq!(led.balance_of(&pubkey(&payer), DEMO_USD), BAL_A - 250);
-    assert_eq!(led.balance_of(&pubkey(&merchant), DEMO_USD), BAL_B + 250);
-}
-
-#[tokio::test]
-async fn raw_wire_body_also_works() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
-
-    let sa = signed(&payer, pubkey(&merchant), 100, [2u8; 16], FUTURE);
-    let (status, body) = call(&state, pay_wire(&sa.to_wire())).await;
-
-    assert_eq!(status, StatusCode::OK, "body={body}");
-    assert_eq!(body["receipt"]["amount"], "100");
-    assert_eq!(led.balance_of(&pubkey(&merchant), DEMO_USD), 100);
-}
-
-/// R2: a settled pay returns a CANISTER/LEDGER-SIGNED receipt (FakeLedger signs with its stable test
-/// key) whose Ed25519 signature verifies under the receipt's embedded `pubkey` (== the ledger's
-/// `receipt_pubkey`). The app does exactly this before showing "Paid ✓". Tampering the amount breaks
-/// verification. Proves the receipt-verification wiring through the real axum router.
-#[tokio::test]
-async fn pay_returns_signed_receipt_that_verifies() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
-
-    let sa = signed(&payer, pubkey(&merchant), 250, [3u8; 16], FUTURE);
-    let (status, body) = call(&state, pay_json(&sa.encode())).await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    let r = &body["receipt"];
-    assert_eq!(r["amount"], "250");
-
-    // The receipt carries the hex sig + pubkey + the claim fields (block_index/settle_ts/currency).
-    let sig_hex = r["receipt_sig"].as_str().expect("receipt_sig present");
-    let pub_hex = r["pubkey"].as_str().expect("pubkey present");
-    let sig = hex::decode(sig_hex).unwrap();
-    let pk = hex::decode(pub_hex).unwrap();
-    assert_eq!(sig.len(), 64, "64-byte Ed25519 sig");
-    assert_eq!(pk.len(), 32, "32-byte pubkey");
-
-    // The ledger's receipt_pubkey matches the pubkey embedded in the receipt (cross-check).
-    let ledger_pk = led.receipt_pubkey().await.unwrap();
-    assert_eq!(ledger_pk, pk);
-
-    // Verify the signature over the canonical ReceiptClaim built from the receipt's fields.
-    let mut pkb = [0u8; 32];
-    pkb.copy_from_slice(&pk);
-    let mut sgb = [0u8; 64];
-    sgb.copy_from_slice(&sig);
-    let claim = dpay_core::ReceiptClaim {
-        nonce: [3u8; 16],
-        from: pubkey(&payer),
-        to: pubkey(&merchant),
-        amount: 250,
-        currency: DEMO_USD,
-        block_index: r["block_index"].as_str().unwrap().parse::<u64>().unwrap(),
-        settle_ts: r["settle_ts"].as_u64().unwrap(),
-    };
-    assert!(
-        dpay_core::verify_receipt(&pkb, &claim, &sgb),
-        "FakeLedger receipt signature must verify under its pubkey"
-    );
-
-    // Tampering the amount (a lying merchant) breaks verification.
-    let mut tampered = claim;
-    tampered.amount = 251;
-    assert!(
-        !dpay_core::verify_receipt(&pkb, &tampered, &sgb),
-        "tampered amount must fail verify"
-    );
-}
-
-#[tokio::test]
-async fn duplicate_nonce_is_idempotent_and_credits_once() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
-
-    let sa = signed(&payer, pubkey(&merchant), 400, [7u8; 16], FUTURE);
-
-    // First submission settles.
-    let (s1, b1) = call(&state, pay_json(&sa.encode())).await;
-    assert_eq!(s1, StatusCode::OK);
-
-    // Second submission of the SAME nonce: 200, identical receipt, flagged as a replay, no re-settle.
-    let (s2, b2) = call(&state, pay_json(&sa.encode())).await;
-    assert_eq!(s2, StatusCode::OK);
-    assert_eq!(
-        b1["receipt"], b2["receipt"],
-        "duplicate must return identical receipt"
-    );
-    assert_eq!(
-        b1["replayed"],
-        serde_json::json!(false),
-        "first settle is not a replay"
-    );
-    assert_eq!(
-        b2["replayed"],
-        serde_json::json!(true),
-        "duplicate is flagged as a replay"
-    );
-
-    // Merchant credited exactly once; payer debited exactly once.
-    assert_eq!(
-        led.balance_of(&pubkey(&merchant), DEMO_USD),
-        400,
-        "credited once only"
-    );
-    assert_eq!(
-        led.balance_of(&pubkey(&payer), DEMO_USD),
-        BAL_A - 400,
-        "debited once only"
-    );
-}
-
-/// Reconciliation contract the merchant app depends on: once a payment settles, its nonce is
-/// retrievable via GET /api/v1/receipt/{nonce} with the identical receipt — so a merchant whose
-/// /api/v1/pay response was lost (network drop after commit) can confirm it settled instead of reporting a
-/// false failure. Also proves an unsettled nonce is a clean 404 (not settled), never a false 200.
-#[tokio::test]
-async fn settled_receipt_is_retrievable_by_nonce_for_reconciliation() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
-    let nonce = [42u8; 16];
-
-    // Before settlement: the merchant's reconciliation lookup must say "not settled" (404), so an
-    // in-flight-but-not-yet-committed payment is never mistaken for a completed one.
-    let (pre, _b) = call(&state, get_receipt(nonce)).await;
-    assert_eq!(pre, StatusCode::NOT_FOUND);
-
-    // Settle.
-    let sa = signed(&payer, pubkey(&merchant), 250, nonce, FUTURE);
-    let (s1, b1) = call(&state, pay_json(&sa.encode())).await;
-    assert_eq!(s1, StatusCode::OK);
-
-    // Now the same nonce reconciles to the identical receipt, flagged as a replay (already settled).
-    let (s2, b2) = call(&state, get_receipt(nonce)).await;
-    assert_eq!(
-        s2,
-        StatusCode::OK,
-        "settled nonce must be retrievable: {b2}"
-    );
-    assert_eq!(
-        b2["receipt"], b1["receipt"],
-        "reconciled receipt is identical to the settle receipt"
-    );
-    assert_eq!(b2["replayed"], serde_json::json!(true));
-}
-
-#[tokio::test]
-async fn bad_signature_rejected_422_no_state_change() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
-
-    // Build a valid signed auth, then corrupt bytes in the wire form. The 292-byte wire is
-    // `signing(196) | sig(64) | from_pub(32)`; byte[100] falls inside the signing region (the
-    // from_name field), so flipping it breaks the signature the verifier recomputes.
-    let sa = signed(&payer, pubkey(&merchant), 100, [3u8; 16], FUTURE);
-    let mut wire = sa.to_wire();
-    wire[100] ^= 0xFF; // flip a byte inside the signing region (breaks the recomputed signature)
-
-    let (status, body) = call(&state, pay_wire(&wire)).await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert!(
-        body["error"].as_str().unwrap().contains("BadSignature"),
-        "error={body}"
-    );
-
-    // Nothing moved.
-    assert_eq!(led.balance_of(&pubkey(&payer), DEMO_USD), BAL_A);
-    assert_eq!(led.balance_of(&pubkey(&merchant), DEMO_USD), BAL_B);
-}
-
-#[tokio::test]
-async fn expired_rejected_422() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
-
-    // expiry == NOW → `now >= expiry` → Expired.
-    let sa = signed(&payer, pubkey(&merchant), 100, [4u8; 16], NOW);
-    let (status, body) = call(&state, pay_json(&sa.encode())).await;
-
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert!(
-        body["error"].as_str().unwrap().contains("Expired"),
-        "error={body}"
-    );
-    assert_eq!(led.balance_of(&pubkey(&merchant), DEMO_USD), BAL_B);
-}
-
-#[tokio::test]
-async fn over_cap_rejected_422() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
-
-    // amount > CAP but <= balance → OverCap (validate checks cap before balance).
-    let sa = signed(&payer, pubkey(&merchant), CAP + 1, [5u8; 16], FUTURE);
-    let (status, body) = call(&state, pay_json(&sa.encode())).await;
-
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert!(
-        body["error"].as_str().unwrap().contains("OverCap"),
-        "error={body}"
-    );
-    assert_eq!(led.balance_of(&pubkey(&payer), DEMO_USD), BAL_A);
-    assert_eq!(led.balance_of(&pubkey(&merchant), DEMO_USD), BAL_B);
-}
-
-#[tokio::test]
-async fn insufficient_funds_rejected_422() {
-    let payer = keypair();
-    let merchant = keypair();
-    // Give the payer a balance BELOW the cap so an amount can exceed balance without hitting cap.
-    let led = FakeLedger::with_clock(
-        pubkey(&payer),
-        200, // balance
-        pubkey(&merchant),
-        0,
-        CAP, // cap 1000
-        Box::new(FixedClock(NOW)),
-    );
-    let (state, ledarc) = state_from(led);
-
-    // 500: <= cap(1000) but > balance(200) → InsufficientFunds.
-    let sa = signed(&payer, pubkey(&merchant), 500, [6u8; 16], FUTURE);
-    let (status, body) = call(&state, pay_json(&sa.encode())).await;
-
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert!(
-        body["error"]
-            .as_str()
-            .unwrap()
-            .contains("InsufficientFunds"),
-        "error={body}"
-    );
-    assert_eq!(ledarc.balance_of(&pubkey(&payer), DEMO_USD), 200);
-    assert_eq!(ledarc.balance_of(&pubkey(&merchant), DEMO_USD), 0);
-}
+// --- health / version ------------------------------------------------------
 
 #[tokio::test]
 async fn health_ok() {
@@ -499,37 +165,59 @@ async fn version_route_reports_baked_commit() {
     );
 }
 
-/// The faucet MINTS, and the canister's `mint` is unauthenticated — so on any real ledger the relay
-/// disables it. Disabled means the route is *gone* (404) and, crucially, no money is created.
+// --- faucet + balance (test-helpers fixtures over the fake-IC gateway) ------
+
+/// The faucet still MINTS, so on any real ledger the relay disables it. Disabled means the route
+/// is *gone* (404) and, crucially, no money is created at the user's principal on the gateway.
 #[tokio::test]
 async fn faucet_disabled_mints_nothing() {
     let payer = keypair();
     let merchant = keypair();
-    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let (state, _led, fake) = state_with_fake(ledger(pubkey(&payer), pubkey(&merchant))).await;
     state.set_faucet_enabled(false);
+    let merch_owner = user_principal(&pubkey(&merchant));
 
-    let (status, body) = call(&state, faucet_json(&hex::encode(pubkey(&merchant)), 999)).await;
+    let (status, body) = call(
+        &state,
+        faucet_json(&hex::encode(pubkey(&merchant)), Some("999")),
+    )
+    .await;
 
     assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
     assert_eq!(
-        led.balance_of(&pubkey(&merchant), DEMO_USD),
-        BAL_B,
+        fake.balance_for(DEMO_USD, &merch_owner),
+        0,
         "a disabled faucet must not create funds"
     );
 }
 
-/// …and enabled (the demo default) it still works, so the demo on-ramp is unaffected.
+/// …and enabled (the demo default) it credits the USER PRINCIPAL on the fake-IC gateway — exactly
+/// where a signed icrc1_transfer spends from. The response balance and GET /api/v1/balance/{hex}
+/// agree, and the amount is the requested one; an omitted amount is the demo's default 10_000
+/// ($100.00 in minor units).
 #[tokio::test]
 async fn faucet_enabled_mints() {
     let payer = keypair();
     let merchant = keypair();
-    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let (state, _led, fake) = state_with_fake(ledger(pubkey(&payer), pubkey(&merchant))).await;
+    let merch_hex = hex::encode(pubkey(&merchant));
+    let merch_owner = user_principal(&pubkey(&merchant));
 
-    let (status, body) = call(&state, faucet_json(&hex::encode(pubkey(&merchant)), 999)).await;
-
+    let (status, body) = call(&state, faucet_json(&merch_hex, Some("999"))).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["balance"], (BAL_B + 999).to_string());
-    assert_eq!(led.balance_of(&pubkey(&merchant), DEMO_USD), BAL_B + 999);
+    assert_eq!(body["balance"], "999", "{body}");
+    assert_eq!(fake.balance_for(DEMO_USD, &merch_owner), 999);
+
+    // The test-only read-back route agrees (same principal mapping), explicit currency included.
+    let (bs, bb) = call(&state, get_req(&format!("/api/v1/balance/{merch_hex}?currency=0"))).await;
+    assert_eq!(bs, StatusCode::OK, "{bb}");
+    assert_eq!(bb["balance"], "999", "{bb}");
+
+    // An omitted amount is the demo's default top-up: +10_000 on the same principal.
+    let (ds, db) = call(&state, faucet_json(&merch_hex, None)).await;
+    assert_eq!(ds, StatusCode::OK, "{db}");
+    assert_eq!(db["balance"], (999 + 10_000).to_string(), "{db}");
+    assert_eq!(fake.balance_for(DEMO_USD, &merch_owner), 999 + 10_000);
 }
 
 /// MC1 units 2-4: protocol `u64` amounts cross the JSON boundary as DECIMAL STRINGS (never raw JSON
@@ -541,103 +229,214 @@ async fn faucet_enabled_mints() {
 async fn amounts_serialize_as_decimal_string_above_2p53() {
     let payer = keypair();
     let merchant = keypair();
-    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let (state, _led, fake) = state_with_fake(ledger(pubkey(&payer), pubkey(&merchant))).await;
+    let merch_hex = hex::encode(pubkey(&merchant));
+    let merch_owner = user_principal(&pubkey(&merchant));
     const BIG: u64 = 9_007_199_254_740_993; // 2^53 + 1 — lossy through JS `number`, exact as a string
 
-    // POST a QUOTED decimal amount — the new wire shape. The deserializer accepts both shapes, but
-    // the canonical form is a string; this asserts it parses + the response balance is the EXACT
-    // string back.
-    let req = Request::builder()
-        .method("POST")
-        .uri("/api/v1/faucet")
-        .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(format!(
-            "{{\"account\":\"{}\",\"amount\":\"{}\"}}",
-            hex::encode(pubkey(&merchant)),
-            BIG,
-        )))
-        .unwrap();
-    let (status, body) = call(&state, req).await;
+    // POST a QUOTED decimal amount — the canonical wire shape. The deserializer accepts both
+    // shapes, but the canonical form is a string; this asserts it parses + the response balance is
+    // the EXACT string back.
+    let (status, body) = call(&state, faucet_json(&merch_hex, Some(&format!("\"{BIG}\"")))).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    // The balance serializes as a QUOTED decimal string (not a JSON number) — the MC1 units 2-4 shape.
+    // The balance serializes as a QUOTED decimal string (not a JSON number) — the MC1 units 2-4
+    // shape.
     assert!(
         body["balance"].is_string(),
         "balance must be a JSON string: {body}"
     );
     assert_eq!(body["balance"], BIG.to_string().as_str());
-    // The exact value round-trips on the ledger (FakeLedger honors the requested amount).
-    assert_eq!(led.balance_of(&pubkey(&merchant), DEMO_USD), BIG);
+    // The exact value round-trips on the gateway (the faucet honors the requested amount).
+    assert_eq!(fake.balance_for(DEMO_USD, &merch_owner), BIG);
 
     // The deserializer ALSO accepts a raw JSON number (smooth cutover for older callers). The
     // response shape is unchanged (always a string).
-    let req_num = Request::builder()
-        .method("POST")
-        .uri("/api/v1/faucet")
-        .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(format!(
-            "{{\"account\":\"{}\",\"amount\":2500}}",
-            hex::encode(pubkey(&merchant)),
-        )))
-        .unwrap();
-    let (status2, body2) = call(&state, req_num).await;
+    let (status2, body2) = call(&state, faucet_json(&merch_hex, Some("2500"))).await;
     assert_eq!(status2, StatusCode::OK, "{body2}");
     assert_eq!(body2["balance"], (BIG + 2500).to_string().as_str());
-    assert_eq!(led.balance_of(&pubkey(&merchant), DEMO_USD), BIG + 2500);
+    assert_eq!(fake.balance_for(DEMO_USD, &merch_owner), BIG + 2500);
 }
 
+// --- fake-IC /api/v2 gateway (test-helpers) ---------------------------------
+
+/// The /api/v2 boundary is MOUNTED (it is the offline stand-in for icp-api.io): status answers
+/// healthy CBOR, a garbage envelope on `call` is a clean 400 (signature verification failed), and
+/// without the gateway attached the whole namespace is a 404 — as is each test-only fixture route
+/// that needs it (faucet → 503 "not attached" contract instead, since the route exists).
 #[tokio::test]
-async fn transient_then_success_retries_to_200() {
+async fn api_v2_gateway_mounting_pinned() {
     let payer = keypair();
     let merchant = keypair();
+    let (state, _led, _fake) = state_with_fake(ledger(pubkey(&payer), pubkey(&merchant))).await;
 
-    // Fail the first 2 pay() calls transiently; the relay's 3-attempt retry means attempt #3
-    // (the delegate) succeeds.
-    let base = ledger(pubkey(&payer), pubkey(&merchant));
-    let flaky = FlakyLedger::new(base, 2);
-    let state = AppState::new(Arc::new(flaky));
+    // Status: 200, CBOR, non-empty (the app's gateway pre-flight).
+    let (status, headers, bytes) = call_raw(&state, get_req("/api/v2/status")).await;
+    assert_eq!(status, StatusCode::OK, "/api/v2/status must serve");
+    assert_eq!(headers.get(header::CONTENT_TYPE).unwrap(), "application/cbor");
+    assert!(!bytes.is_empty(), "status carries a CBOR body");
 
-    let sa = signed(&payer, pubkey(&merchant), 300, [8u8; 16], FUTURE);
-    let (status, body) = call(&state, pay_json(&sa.encode())).await;
+    // A garbage envelope on call: 400 (verify_envelope fails) — never a 500, never executed.
+    let garbage = Request::builder()
+        .method("POST")
+        .uri("/api/v2/canister/aaaaa-aa/call")
+        .body(Body::from("definitely not a signed envelope"))
+        .unwrap();
+    let (status, _headers, _bytes) = call_raw(&state, garbage).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "garbage envelope must 400");
 
-    assert_eq!(
-        status,
-        StatusCode::OK,
-        "should have retried through transients: {body}"
-    );
-    assert_eq!(body["receipt"]["amount"], "300");
-    assert_eq!(
-        body["receipt"]["new_from_balance"],
-        (BAL_A - 300).to_string()
-    );
+    // Without the gateway attached the /api/v2 namespace is gone (404)…
+    let (bare_state, _led2) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let garbage_bare = Request::builder()
+        .method("POST")
+        .uri("/api/v2/canister/aaaaa-aa/call")
+        .body(Body::from("definitely not a signed envelope"))
+        .unwrap();
+    let (status, _h, _b) = call_raw(&bare_state, garbage_bare).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "no gateway → 404");
+
+    // …and the faucet (which needs the gateway's ledgers) reports 503 not-attached, not a crash.
+    let (fs, fb) = call(
+        &bare_state,
+        faucet_json(&hex::encode(pubkey(&merchant)), Some("999")),
+    )
+    .await;
+    assert_eq!(fs, StatusCode::SERVICE_UNAVAILABLE, "{fb}");
 }
 
+/// A REAL signed icrc1_transfer through POST /api/v2/canister/{ledger}/call — the rail the app
+/// actually moves money on post-cutover. Proves the whole gateway path end-to-end: envelope
+/// verification (the sender principal is the self-authenticating principal of the signing key),
+/// request_id dedup (an identical resubmit is 202 again but executes ONCE), execution (funds move
+/// principal→principal), and the memo riding the signed arg into /api/v1/transactions history.
 #[tokio::test]
-async fn transient_exhausted_returns_503() {
+async fn signed_transfer_through_api_v2_moves_funds_and_lands_in_history() {
     let payer = keypair();
     let merchant = keypair();
+    let (state, _led, fake) = state_with_fake(ledger(pubkey(&payer), pubkey(&merchant))).await;
+    let payer_owner = user_principal(&pubkey(&payer));
+    let merch_owner = user_principal(&pubkey(&merchant));
 
-    // Fail more times than we retry → never settles → 503, and no state change.
-    let base = ledger(pubkey(&payer), pubkey(&merchant));
-    let flaky = Arc::new(FlakyLedger::new(base, 10));
-    let state = AppState::new(flaky);
+    // Fund the payer's principal (the faucet fixture credits exactly where the transfer spends).
+    fake.faucet_credit(DEMO_USD, &payer_owner, 10_000);
 
-    let sa = signed(&payer, pubkey(&merchant), 300, [9u8; 16], FUTURE);
-    let (status, _body) = call(&state, pay_json(&sa.encode())).await;
-    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    let now_ns = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos() as u64;
+    let arg = transfer_arg(
+        &Account::new(merch_owner.clone()),
+        None,
+        250,
+        None,
+        Some(b"coffee".to_vec()),
+        None,
+    );
+    let req = CallRequest {
+        canister: Principal::management_canister(), // the DEMO_USD catalog ledger ("aaaaa-aa")
+        method_name: "icrc1_transfer".to_string(),
+        arg,
+        ingress_expiry_ns: ingress_expiry(now_ns, 300),
+        nonce: None,
+    };
+    let envelope = sign_update(&payer, &req);
+    let post = || {
+        Request::builder()
+            .method("POST")
+            .uri("/api/v2/canister/aaaaa-aa/call")
+            .body(Body::from(envelope.clone()))
+            .unwrap()
+    };
+
+    // First submission: 202 (accepted, executed — outcome rides read_state on the real rail).
+    let (s1, _h1, b1) = call_raw(&state, post()).await;
+    assert_eq!(s1, StatusCode::ACCEPTED, "signed transfer must be accepted");
+    assert!(b1.is_empty(), "call replies with an empty 202 body");
+
+    // Funds moved principal → principal.
+    assert_eq!(fake.balance_for(DEMO_USD, &merch_owner), 250);
+    assert_eq!(fake.balance_for(DEMO_USD, &payer_owner), 10_000 - 250);
+
+    // Identical resubmit (same request_id): 202 again, but executed ONCE — no double credit.
+    let (s2, _h2, _b2) = call_raw(&state, post()).await;
+    assert_eq!(s2, StatusCode::ACCEPTED, "dedup resubmit is also 202");
+    assert_eq!(fake.balance_for(DEMO_USD, &merch_owner), 250, "credited once");
+
+    // History carries the transfer with the memo (hex of the signed arg's memo bytes) + the mint
+    // that funded it, newest-first, on BOTH sides of the payment.
+    let payer_hex = hex::encode(pubkey(&payer));
+    let merch_hex = hex::encode(pubkey(&merchant));
+    let (ps, pb) = call(&state, get_req(&format!("/api/v1/transactions/{payer_hex}"))).await;
+    assert_eq!(ps, StatusCode::OK, "{pb}");
+    let rows = pb["transactions"].as_array().unwrap();
+    assert_eq!(rows.len(), 2, "mint + transfer: {pb}");
+    // Newest first: the outgoing transfer, then the funding mint.
+    assert_eq!(rows[0]["amount"], "250", "{pb}");
+    assert_eq!(rows[0]["from"], payer_owner.to_text(), "{pb}");
+    assert_eq!(rows[0]["to"], merch_owner.to_text(), "{pb}");
+    assert_eq!(rows[0]["memo"], hex::encode("coffee"), "memo rides the signed arg: {pb}");
+    assert_eq!(rows[0]["currency"], 0); // DEMO_USD
+    // Display names don't exist on the IC rail — the fields stay stable empty strings (never
+    // null, never leaked bytes).
+    assert_eq!(rows[0]["from_name"], "");
+    assert_eq!(rows[0]["to_name"], "");
+    assert_eq!(rows[1]["amount"], "10000", "the funding mint: {pb}");
+    assert_eq!(rows[1]["from"], "", "mint rows carry no sender");
+
+    // The payee sees the same transfer as incoming (from == the payer's principal).
+    let (ms, mb) = call(&state, get_req(&format!("/api/v1/transactions/{merch_hex}"))).await;
+    assert_eq!(ms, StatusCode::OK, "{mb}");
+    let m_rows = mb["transactions"].as_array().unwrap();
+    assert_eq!(m_rows.len(), 1, "{mb}");
+    assert_eq!(m_rows[0]["from"], payer_owner.to_text(), "{mb}");
+    assert_eq!(m_rows[0]["to"], merch_owner.to_text(), "{mb}");
+    assert_eq!(m_rows[0]["memo"], hex::encode("coffee"), "{mb}");
 }
 
+// --- transaction history ------------------------------------------------------
+
+/// `GET /api/v1/transactions/{hex}` returns the wallet's durable history from the fake-IC gateway's
+/// txn log (the same records signed transfers append), newest-first with enough fields to derive
+/// direction. Seeded directly through the gateway's faucet fixture.
 #[tokio::test]
-async fn malformed_qr_rejected_422() {
+async fn transactions_endpoint_returns_history_newest_first() {
     let payer = keypair();
     let merchant = keypair();
-    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
+    let (state, _led, fake) = state_with_fake(ledger(pubkey(&payer), pubkey(&merchant))).await;
+    let payer_owner = user_principal(&pubkey(&payer));
 
-    let (status, body) = call(&state, pay_json("not-valid-base64url!!!")).await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert!(
-        body["error"].as_str().unwrap().contains("qr"),
-        "error={body}"
-    );
+    // Two credits at the payer's principal, in sequence.
+    fake.faucet_credit(DEMO_USD, &payer_owner, 250);
+    fake.faucet_credit(DEMO_USD, &payer_owner, 100);
+
+    let payer_hex = hex::encode(pubkey(&payer));
+
+    // Newest-first => the 100 credit, then the 250. Mint rows: to == the owner, from == "".
+    let (status, body) = call(
+        &state,
+        get_req(&format!("/api/v1/transactions/{payer_hex}")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let rows = body["transactions"].as_array().unwrap();
+    assert_eq!(rows.len(), 2, "both credits recorded: {body}");
+    assert_eq!(rows[0]["amount"], "100", "newest first: {body}");
+    assert_eq!(rows[0]["to"], payer_owner.to_text(), "{body}");
+    assert_eq!(rows[0]["from"], "", "mint rows carry no sender: {body}");
+    assert_eq!(rows[0]["currency"], 0); // DEMO_USD
+    assert_eq!(rows[1]["amount"], "250");
+
+    // limit is honored.
+    let (l_status, l_body) = call(
+        &state,
+        get_req(&format!("/api/v1/transactions/{payer_hex}?limit=1")),
+    )
+    .await;
+    assert_eq!(l_status, StatusCode::OK, "{l_body}");
+    assert_eq!(l_body["transactions"].as_array().unwrap().len(), 1);
+
+    // A bad pubkey (not 32 bytes hex) is a clean 400, not a 500.
+    let (bad_status, _bad_body) = call(&state, get_req("/api/v1/transactions/deadbeef")).await;
+    assert_eq!(bad_status, StatusCode::BAD_REQUEST);
 }
 
 // --- landing page + APK download (the public root) -----------------------
@@ -965,431 +764,6 @@ async fn apk_download_revalidates_with_304_on_if_none_match() {
     assert_eq!(bytes, apk);
 }
 
-// --- transaction history ---------------------------------------------------
-
-/// `GET /api/v1/transactions/{hex}` returns the wallet's durable transaction list, sourced from the
-/// ledger (not an ephemeral UI state). Settled payments appear newest-first with enough fields to
-/// derive direction (compare the queried account to `from`). Rejected payments don't appear.
-#[tokio::test]
-async fn transactions_endpoint_returns_history_newest_first() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
-
-    // Two payer -> merchant payments, in sequence.
-    let sa1 = signed(&payer, pubkey(&merchant), 250, [1u8; 16], FUTURE);
-    let (s1, _b1) = call(&state, pay_json(&sa1.encode())).await;
-    assert_eq!(s1, StatusCode::OK);
-    let sa2 = signed(&payer, pubkey(&merchant), 100, [2u8; 16], FUTURE);
-    let (s2, _b2) = call(&state, pay_json(&sa2.encode())).await;
-    assert_eq!(s2, StatusCode::OK);
-
-    let payer_hex = hex::encode(pubkey(&payer));
-    let merch_hex = hex::encode(pubkey(&merchant));
-
-    // Payer's history: newest-first => the $1.00 outgoing, then the $2.50 outgoing. `from == payer`
-    // for both (outgoing); direction is derivable from the from/to fields.
-    let (status, body) = call(
-        &state,
-        get_req(&format!("/api/v1/transactions/{payer_hex}")),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    let rows = body["transactions"].as_array().unwrap();
-    assert_eq!(rows.len(), 2, "both payments recorded: {body}");
-    assert_eq!(rows[0]["amount"], "100", "newest first: {body}");
-    assert_eq!(rows[0]["from"], payer_hex);
-    assert_eq!(rows[0]["to"], merch_hex);
-    assert_eq!(rows[0]["nonce"], hex::encode([2u8; 16]));
-    assert_eq!(rows[0]["currency"], 0); // DEMO_USD
-    assert_eq!(rows[1]["amount"], "250");
-    assert_eq!(rows[1]["nonce"], hex::encode([1u8; 16]));
-
-    // Merchant sees the same two as incoming (from == payer).
-    let (m_status, m_body) = call(
-        &state,
-        get_req(&format!("/api/v1/transactions/{merch_hex}")),
-    )
-    .await;
-    assert_eq!(m_status, StatusCode::OK, "{m_body}");
-    let m_rows = m_body["transactions"].as_array().unwrap();
-    assert_eq!(m_rows.len(), 2);
-    assert_eq!(m_rows[0]["from"], payer_hex, "incoming: from == payer");
-    assert_eq!(m_rows[0]["to"], merch_hex);
-
-    // limit is honored.
-    let (l_status, l_body) = call(
-        &state,
-        get_req(&format!("/api/v1/transactions/{payer_hex}?limit=1")),
-    )
-    .await;
-    assert_eq!(l_status, StatusCode::OK, "{l_body}");
-    assert_eq!(l_body["transactions"].as_array().unwrap().len(), 1);
-
-    // A bad pubkey (not 32 bytes hex) is a clean 400, not a 500.
-    let (bad_status, _bad_body) = call(&state, get_req("/api/v1/transactions/deadbeef")).await;
-    assert_eq!(bad_status, StatusCode::BAD_REQUEST);
-}
-
-/// N6/H3: display names + memo ride inside the SIGNED wire into the relay's history, so the wallet
-/// renders friendly counterparties instead of raw pubkeys. Pays "Alice" → "Bob" with memo "coffee"
-/// through the real `/api/v1/pay` route, then asserts `/api/v1/transactions/{hex}` carries the
-/// decoded `from_name`/`to_name`/`memo` strings on BOTH sides (payer's outgoing + payee's incoming).
-/// Also proves a names-less legacy auth (`signed`) yields empty strings (no crash, no leaked bytes).
-#[tokio::test]
-async fn names_and_memo_flow_from_signed_wire_into_history() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, _led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
-
-    // A named payment: Alice pays Bob with memo "coffee".
-    let sa_named = signed_named(
-        &payer,
-        pubkey(&merchant),
-        250,
-        [42u8; 16],
-        FUTURE,
-        "Alice",
-        "Bob",
-        "coffee",
-    );
-    let (status, body) = call(&state, pay_json(&sa_named.encode())).await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-
-    // A legacy (names-less) payment right after, so the same history has a mixed row to disambiguate.
-    let sa_plain = signed(&payer, pubkey(&merchant), 100, [43u8; 16], FUTURE);
-    let (status, body) = call(&state, pay_json(&sa_plain.encode())).await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-
-    let payer_hex = hex::encode(pubkey(&payer));
-    let merch_hex = hex::encode(pubkey(&merchant));
-
-    // Payer's outgoing history: newest-first => the names-less $1.00 row, then the named $2.50 row.
-    let (s, body) = call(
-        &state,
-        get_req(&format!("/api/v1/transactions/{payer_hex}")),
-    )
-    .await;
-    assert_eq!(s, StatusCode::OK, "{body}");
-    let rows = body["transactions"].as_array().unwrap();
-    assert_eq!(rows.len(), 2, "{body}");
-
-    // Newest (names-less): empty strings, never null / never leaked buffer bytes.
-    assert_eq!(rows[0]["amount"], "100");
-    assert_eq!(rows[0]["from_name"], "");
-    assert_eq!(rows[0]["to_name"], "");
-    assert_eq!(rows[0]["memo"], "");
-
-    // Oldest (named): the signed names + memo decoded cleanly.
-    assert_eq!(rows[1]["amount"], "250");
-    assert_eq!(
-        rows[1]["from_name"], "Alice",
-        "payer's own from_name: {body}"
-    );
-    assert_eq!(
-        rows[1]["to_name"], "Bob",
-        "payer's counterparty to_name: {body}"
-    );
-    assert_eq!(rows[1]["memo"], "coffee", "memo: {body}");
-
-    // Payee's incoming history: the payer's name is the friendly counterparty (closes N6/H3 — the
-    // payee no longer sees a raw hex `from`).
-    let (s, body) = call(
-        &state,
-        get_req(&format!("/api/v1/transactions/{merch_hex}")),
-    )
-    .await;
-    assert_eq!(s, StatusCode::OK, "{body}");
-    let rows = body["transactions"].as_array().unwrap();
-    assert_eq!(rows.len(), 2, "{body}");
-    let named = rows
-        .iter()
-        .find(|r| r["amount"] == "250")
-        .expect("named row present");
-    assert_eq!(
-        named["from_name"], "Alice",
-        "payee sees payer's name, not a raw pubkey: {body}"
-    );
-    assert_eq!(named["to_name"], "Bob");
-    assert_eq!(named["memo"], "coffee");
-}
-
-// --- deposit surface (ckBTC-style top-up) ----------------------------------
-//
-// Covers the three new ledger methods + REST routes (deposit-integration plan §3).
-// The deposit endpoints map *any* `LedgerError` → 503 (no 422 — deposit plan §0).
-
-/// `deposit_address` is deterministic (same pubkey → same address, every call) and distinct per
-/// pubkey. The offline FakeLedger derives a recognizable `bc1qdpay` + first-8-pubkey-bytes address.
-#[tokio::test]
-async fn fake_deposit_address_is_deterministic_and_distinct_per_pubkey() {
-    let a = pubkey(&keypair());
-    let b = pubkey(&keypair());
-    let led = ledger(a, b);
-
-    // Deterministic: same pubkey → same address, every call.
-    let addr_a1 = led.deposit_address(a, DEMO_USD).await.unwrap();
-    let addr_a2 = led.deposit_address(a, DEMO_USD).await.unwrap();
-    assert_eq!(addr_a1, addr_a2, "must be stable across calls");
-    // Recognizable fake prefix + the first 8 pubkey bytes (hex) of `a`.
-    assert_eq!(addr_a1, format!("bc1qdpay{}", hex::encode(&a[..8])));
-
-    // Distinct per pubkey.
-    let addr_b = led.deposit_address(b, DEMO_USD).await.unwrap();
-    assert_ne!(addr_a1, addr_b, "different pubkeys get different addresses");
-}
-
-/// `deposit_status` drains a seeded pending deposit and credits the balance (mirroring the ck
-/// minter's mint-after-confirmation); a second call finds nothing pending → minted_total = 0 and no
-/// further credit. This is the offline proof of deposit → mint → balance.
-#[tokio::test]
-async fn deposit_status_credits_balance_and_drains_pending() {
-    let a = pubkey(&keypair());
-    let b = pubkey(&keypair());
-    let led = ledger(a, b);
-
-    // Seed a pending deposit of 5000 minor units for account `b`.
-    led.register_deposit(b, DEMO_USD, 5000);
-    assert_eq!(
-        led.balance_of(&b, DEMO_USD),
-        BAL_B,
-        "no credit before refresh"
-    );
-
-    // First refresh: mints the pending deposit, credits the balance.
-    let r1 = led.deposit_status(b, DEMO_USD).await.unwrap();
-    assert_eq!(r1.minted_total, U64String(5000));
-    assert_eq!(r1.minted.len(), 1);
-    assert_eq!(r1.minted[0].amount, U64String(5000));
-    assert_eq!(r1.minted[0].block_index, "0");
-    assert!(r1.pending.is_empty(), "nothing pending after a full drain");
-    assert_eq!(r1.required_confirmations, 1);
-    assert_eq!(
-        led.balance_of(&b, DEMO_USD),
-        BAL_B + 5000,
-        "credited after refresh"
-    );
-
-    // Second refresh: pending is drained → minted_total = 0, no double-credit.
-    let r2 = led.deposit_status(b, DEMO_USD).await.unwrap();
-    assert_eq!(
-        r2.minted_total,
-        U64String(0),
-        "pending drained: nothing more to mint"
-    );
-    assert!(r2.minted.is_empty());
-    assert_eq!(
-        led.balance_of(&b, DEMO_USD),
-        BAL_B + 5000,
-        "no double-credit on re-refresh"
-    );
-}
-
-/// The three deposit REST routes return the correct JSON shapes via the axum router (driven with
-/// `tower::ServiceExt::oneshot`, matching the rest of this file). Mirrors how the wallet's "Add
-/// money" sheet will consume them.
-#[tokio::test]
-async fn deposit_routes_return_correct_shapes() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
-    let merch_hex = hex::encode(pubkey(&merchant));
-
-    // GET /deposit/address/{hex} → {"address": "bc1qdpay..."}.
-    let (s_addr, b_addr) = call(
-        &state,
-        get_req(&format!("/api/v1/deposit/address/{merch_hex}")),
-    )
-    .await;
-    assert_eq!(s_addr, StatusCode::OK, "{b_addr}");
-    let expected_addr = format!("bc1qdpay{}", hex::encode(&pubkey(&merchant)[..8]));
-    assert_eq!(b_addr["address"], expected_addr);
-
-    // Seed a deposit so refresh has something to mint.
-    led.register_deposit(pubkey(&merchant), DEMO_USD, 1234);
-
-    // POST /deposit/refresh/{hex} → {minted_total, minted[], pending[], required_confirmations}.
-    let refresh_req = Request::builder()
-        .method("POST")
-        .uri(format!("/api/v1/deposit/refresh/{merch_hex}"))
-        .body(Body::empty())
-        .unwrap();
-    let (s_r, b_r) = call(&state, refresh_req).await;
-    assert_eq!(s_r, StatusCode::OK, "{b_r}");
-    assert_eq!(b_r["minted_total"], "1234");
-    assert_eq!(b_r["minted"][0]["amount"], "1234");
-    assert_eq!(b_r["minted"][0]["block_index"], "0");
-    assert!(b_r["pending"].as_array().unwrap().is_empty());
-    assert_eq!(b_r["required_confirmations"], 1);
-    // The balance actually moved on the ledger.
-    assert_eq!(led.balance_of(&pubkey(&merchant), DEMO_USD), BAL_B + 1234);
-
-    // GET /deposit/info?currency=0 → static instructions.
-    let (s_i, b_i) = call(&state, get_req("/api/v1/deposit/info")).await;
-    assert_eq!(s_i, StatusCode::OK, "{b_i}");
-    assert_eq!(b_i["min_confirmations"], 1);
-    assert_eq!(b_i["deposit_fee"], "0");
-    assert_eq!(b_i["deposit_min_amount"], "0");
-
-    // A bad pubkey (not 32 bytes hex) on the address route is a clean 400, never a 500.
-    let (bad_status, _bad_body) = call(&state, get_req("/api/v1/deposit/address/deadbeef")).await;
-    assert_eq!(bad_status, StatusCode::BAD_REQUEST);
-    // And on the refresh route.
-    let bad_refresh = Request::builder()
-        .method("POST")
-        .uri("/api/v1/deposit/refresh/deadbeef")
-        .body(Body::empty())
-        .unwrap();
-    let (bad_refresh_status, _) = call(&state, bad_refresh).await;
-    assert_eq!(bad_refresh_status, StatusCode::BAD_REQUEST);
-}
-
-/// A ledger stub whose deposit methods always fail transiently. Proves the deposit routes map ANY
-/// `LedgerError` → 503 (deposit plan §0: there is no permanent-policy failure on the deposit
-/// surface, so no 422 path). Non-deposit methods delegate to an inner FakeLedger so the stub is a
-/// drop-in for `AppState`.
-struct DepositFailingLedger {
-    inner: Arc<FakeLedger>,
-}
-
-#[async_trait]
-impl Ledger for DepositFailingLedger {
-    async fn pay(&self, wire: Vec<u8>) -> Result<Receipt, LedgerError> {
-        self.inner.pay(wire).await
-    }
-    async fn balance(&self, pk: [u8; 32], c: Currency) -> Result<u64, LedgerError> {
-        self.inner.balance(pk, c).await
-    }
-    async fn faucet(&self, to: [u8; 32], c: Currency, a: u64) -> Result<u64, LedgerError> {
-        self.inner.faucet(to, c, a).await
-    }
-    async fn transactions_of(
-        &self,
-        pk: [u8; 32],
-        c: Currency,
-        l: u32,
-    ) -> Result<Vec<TxnRecord>, LedgerError> {
-        self.inner.transactions_of(pk, c, l).await
-    }
-    async fn healthy(&self) -> bool {
-        true
-    }
-    async fn deposit_address(&self, _pk: [u8; 32], _c: Currency) -> Result<String, LedgerError> {
-        Err(LedgerError::Transient("injected deposit failure".into()))
-    }
-    async fn deposit_status(
-        &self,
-        _pk: [u8; 32],
-        _c: Currency,
-    ) -> Result<DepositRefresh, LedgerError> {
-        Err(LedgerError::Transient("injected deposit failure".into()))
-    }
-    async fn deposit_info(&self, _c: Currency) -> Result<DepositInfo, LedgerError> {
-        Err(LedgerError::Transient("injected deposit failure".into()))
-    }
-    async fn currencies(&self) -> Result<Vec<dpay_relay::CurrencyDescriptor>, LedgerError> {
-        self.inner.currencies().await
-    }
-    async fn ckerc20_onramp_params(
-        &self,
-        currency: u32,
-    ) -> Result<dpay_relay::CkErc20OnrampParams, LedgerError> {
-        self.inner.ckerc20_onramp_params(currency).await
-    }
-    async fn receipt_pubkey(&self) -> Result<Vec<u8>, LedgerError> {
-        self.inner.receipt_pubkey().await
-    }
-}
-
-/// All three deposit routes surface a ledger `Transient` as `503` (never `422`), and crucially the
-/// failing path never credits a balance — the deposit endpoints are value-creating only on success.
-#[tokio::test]
-async fn deposit_routes_map_ledger_transient_to_503() {
-    let a = pubkey(&keypair());
-    let b = pubkey(&keypair());
-    let inner = Arc::new(ledger(a, b));
-    let state = AppState::new(Arc::new(DepositFailingLedger {
-        inner: inner.clone(),
-    }));
-    let hex_b = hex::encode(b);
-
-    // GET /deposit/address/{hex} → 503.
-    let (s1, body1) = call(&state, get_req(&format!("/api/v1/deposit/address/{hex_b}"))).await;
-    assert_eq!(s1, StatusCode::SERVICE_UNAVAILABLE, "{body1}");
-
-    // POST /deposit/refresh/{hex} → 503.
-    let refresh_req = Request::builder()
-        .method("POST")
-        .uri(format!("/api/v1/deposit/refresh/{hex_b}"))
-        .body(Body::empty())
-        .unwrap();
-    let (s2, body2) = call(&state, refresh_req).await;
-    assert_eq!(s2, StatusCode::SERVICE_UNAVAILABLE, "{body2}");
-
-    // GET /deposit/info → 503.
-    let (s3, body3) = call(&state, get_req("/api/v1/deposit/info")).await;
-    assert_eq!(s3, StatusCode::SERVICE_UNAVAILABLE, "{body3}");
-
-    // No deposit was credited — a failing refresh mints nothing.
-    assert_eq!(
-        inner.balance_of(&b, DEMO_USD),
-        BAL_B,
-        "transient refresh must not mint"
-    );
-}
-
-/// `deposit_refresh` TTL-caches a successful result per `(pubkey, currency)`, so a second call within
-/// the TTL window is served from cache with ZERO ledger calls — the fix for the 2026-08-09 cycles
-/// drain (an open deposit sheet polled the ckBTC minter's `update_balance` every 10s ≈ 1.47 TC/day).
-///
-/// The proof exploits FakeLedger's DRAIN semantics: `deposit_status` drains a pending deposit on the
-/// FIRST call (returns `minted_total = amount`) and returns `minted_total = 0` on the second —
-/// UNLESS the relay serves the second call from the cache (returning the first's result verbatim).
-/// This test seeds via the FakeLedger's `register_deposit` DIRECTLY (not the test/seed route, which
-/// would invalidate the cache), then fires two identical POSTs and asserts the second response's
-/// `minted_total` EQUALS the first's (both non-zero). Without the cache the second drains to 0.
-#[tokio::test]
-async fn deposit_refresh_ttl_cache_serves_second_call_from_cache() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
-    let merch_hex = hex::encode(pubkey(&merchant));
-
-    // Seed a pending deposit DIRECTLY on the FakeLedger (bypassing the /test/deposit/seed route,
-    // which invalidates the cache — we want the cache to be the only thing standing between the
-    // second call and a drained minted_total=0).
-    led.register_deposit(pubkey(&merchant), DEMO_USD, 5000);
-
-    let build_req = || {
-        Request::builder()
-            .method("POST")
-            .uri(format!("/api/v1/deposit/refresh/{merch_hex}"))
-            .body(Body::empty())
-            .unwrap()
-    };
-
-    // First call: cache MISS → drains the pending deposit, mints 5000, stores it in the cache.
-    let (s1, b1) = call(&state, build_req()).await;
-    assert_eq!(s1, StatusCode::OK, "{b1}");
-    assert_eq!(b1["minted_total"], "5000", "first call mints the seeded deposit");
-
-    // Second call within the TTL: WITHOUT a cache this drains to minted_total=0 (FakeLedger
-    // semantics). WITH the cache it returns the cached first result (minted_total=5000).
-    let (s2, b2) = call(&state, build_req()).await;
-    assert_eq!(s2, StatusCode::OK, "{b2}");
-    assert_eq!(
-        b2["minted_total"], "5000",
-        "second call within TTL must be served from cache (same minted_total as first): {b2}"
-    );
-
-    // The ledger was credited exactly once (the cache served the second call, no re-mint).
-    assert_eq!(
-        led.balance_of(&pubkey(&merchant), DEMO_USD),
-        BAL_B + 5000,
-        "cache must not double-credit"
-    );
-}
-
 // --- currency catalog (M0) ---------------------------------------------------
 //
 // Covers GET /api/v1/currencies — the wallet's runtime asset catalog (closes issue #7). The
@@ -1586,7 +960,7 @@ async fn currencies_route_returns_demo_catalog() {
 //
 // Covers GET /api/v1/balances/{hex} (PLURAL) — the single-fetch batch endpoint that returns EVERY
 // currency's balance in one response, replacing the wallet's old N+1 per-poll loop (1 primary fetch
-// + 1 per-asset, each a relay→IC round trip). With the 6-currency demo catalog this is 1 HTTP request
+// + 1 per-asset fetch, each a relay→IC round trip). With the 6-currency demo catalog this is 1 HTTP request
 // instead of 6. Response shape: a flat map `{<currency>: <minor-units-string>}`, currency index as a
 // decimal-string key, balance as a U64String (decimal string). Mirrors how the wallet consumes it.
 
@@ -1613,15 +987,9 @@ async fn balances_route_returns_all_currencies_in_one_response() {
         "demo catalog = 7 currencies, all present in one batch: {body}"
     );
 
-    // The funded primary (currency 0) reads its real balance as a DECIMAL STRING.
-    assert!(
-        body["0"].is_string(),
-        "balance must be a JSON string (MC1 units 2-4): {body}"
-    );
-    assert_eq!(body["0"], BAL_A.to_string().as_str());
-
-    // Every non-primary catalog currency is present and unfunded → "0" (the FakeLedger default).
-    for c in 1..=5u32 {
+    // Every catalog currency is present and unfunded → "0" (nothing pre-funds the
+    // FakeLedger anymore — balances live at user principals on the fake-IC gateway).
+    for c in 0..=6u32 {
         assert_eq!(
             body[c.to_string()], "0",
             "currency {c} present + unfunded (FakeLedger default 0): {body}"
@@ -1885,530 +1253,6 @@ async fn ckerc20_onramp_helper_is_chain_scoped() {
         r_none.helper_address, "0x18901044688D3756C35Ed2b36D93e6a5B8e00E68",
         "chain_id=None falls through to the mainnet helper (safe default)",
     );
-}
-
-// --- withdrawal surface (ckBTC → native BTC out; W2) -----------------------------------------
-//
-// Covers the new Ledger::withdraw trait method + the POST /api/v1/withdraw route. The FakeLedger
-// simulates the burn as a direct debit (mirrors the canister's net ledger effect), and its
-// accept/reject matches the canister's `withdraw` gate (sig / expiry / min / funds / nonce).
-
-use dpay_core::WithdrawAuth;
-use dpay_relay::WithdrawRequest;
-
-/// A second currency standing in for ckBTC (the withdraw asset). Matches the canister test's CKX/CKBTC
-/// tag — distinct from DEMO_USD so the withdraw debit lands on a separate (account, currency) key.
-const CKBTC: Currency = 1;
-/// Mirrors the live minter's `retrieve_btc_min_amount` + the relay/canister `RETRIEVE_BTC_MIN_AMOUNT`.
-const MIN_WITHDRAW: u64 = 50_000;
-
-/// Build a signed WithdrawRequest (hex fields) from a signing key. The signature is over the canonical
-/// `WithdrawAuth::signing_bytes()` (single source of truth in dpay-core), so the FakeLedger's verify
-/// accepts it exactly like the canister.
-fn withdraw_req(
-    sk: &SigningKey,
-    destination: &str,
-    amount: u64,
-    nonce: [u8; 16],
-    expiry: u64,
-    currency: Currency,
-) -> WithdrawRequest {
-    let from = pubkey(sk);
-    let auth = WithdrawAuth {
-        from_pubkey: from,
-        destination: destination.to_string(),
-        amount,
-        nonce,
-        expiry,
-        currency,
-    };
-    let sig = dpay_core::sign_withdraw(sk, &auth).to_bytes();
-    WithdrawRequest {
-        from: hex::encode(from),
-        destination: destination.to_string(),
-        amount: U64String(amount),
-        nonce: hex::encode(nonce),
-        expiry,
-        currency,
-        sig: hex::encode(sig),
-    }
-}
-
-/// POST /api/v1/withdraw with a JSON body.
-fn withdraw_json(req: &WithdrawRequest) -> Request<Body> {
-    let body = serde_json::json!({
-        "from": req.from,
-        "destination": req.destination,
-        "amount": req.amount,
-        "nonce": req.nonce,
-        "expiry": req.expiry,
-        "currency": req.currency,
-        "sig": req.sig,
-    });
-    Request::builder()
-        .method("POST")
-        .uri("/api/v1/withdraw")
-        .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(body.to_string()))
-        .unwrap()
-}
-
-/// Pre-fund an account with ckBTC directly on the FakeLedger (the deposit path's net effect), so a
-/// withdraw test starts with a known balance. Uses the public `register_deposit`+`deposit_status`
-/// path to credit through the real seam.
-async fn fund_ckbtc(state: &AppState, led: &FakeLedger, pk: [u8; 32], amount: u64) {
-    led.register_deposit(pk, CKBTC, amount);
-    let _ = state
-        .ledger
-        .deposit_status(pk, CKBTC)
-        .await
-        .expect("deposit_status credits");
-    assert_eq!(led.balance_of(&pk, CKBTC), amount, "pre-fund credited");
-}
-
-/// A verified withdrawal debits ckBTC from the user's subaccount and returns the burn block index.
-#[tokio::test]
-async fn withdraw_debits_ckbtc_from_subaccount() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
-    const FUND: u64 = 100_000;
-    fund_ckbtc(&state, &led, pubkey(&payer), FUND).await;
-
-    let req = withdraw_req(
-        &payer,
-        "bc1qdestination",
-        MIN_WITHDRAW,
-        [1u8; 16],
-        FUTURE,
-        CKBTC,
-    );
-    let r = state.ledger.withdraw(req).await.expect("withdraw ok");
-    assert_eq!(r.amount, U64String(MIN_WITHDRAW));
-    assert_eq!(r.destination, "bc1qdestination");
-    assert_eq!(r.currency, CKBTC);
-    // Debited by the withdrawn amount.
-    assert_eq!(led.balance_of(&pubkey(&payer), CKBTC), FUND - MIN_WITHDRAW);
-}
-
-/// The POST /api/v1/withdraw route returns 200 + the receipt JSON on success.
-#[tokio::test]
-async fn withdraw_route_returns_receipt_on_success() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
-    fund_ckbtc(&state, &led, pubkey(&payer), 100_000).await;
-
-    let req = withdraw_req(&payer, "bc1qroute", MIN_WITHDRAW, [2u8; 16], FUTURE, CKBTC);
-    let (status, body) = call(&state, withdraw_json(&req)).await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["receipt"]["amount"], MIN_WITHDRAW.to_string().as_str());
-    assert_eq!(body["receipt"]["destination"], "bc1qroute");
-    assert_eq!(
-        led.balance_of(&pubkey(&payer), CKBTC),
-        100_000 - MIN_WITHDRAW
-    );
-}
-
-/// A replay with the SAME nonce is rejected (422) — no double-burn. Mirrors the canister.
-#[tokio::test]
-async fn withdraw_double_withdraw_same_nonce_rejected() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
-    fund_ckbtc(&state, &led, pubkey(&payer), 200_000).await;
-
-    let req = withdraw_req(&payer, "bc1qfirst", MIN_WITHDRAW, [3u8; 16], FUTURE, CKBTC);
-    let (s1, _b1) = call(&state, withdraw_json(&req)).await;
-    assert_eq!(s1, StatusCode::OK);
-    assert_eq!(
-        led.balance_of(&pubkey(&payer), CKBTC),
-        200_000 - MIN_WITHDRAW
-    );
-
-    // Same nonce again → 422, no second debit.
-    let (s2, b2) = call(&state, withdraw_json(&req)).await;
-    assert_eq!(s2, StatusCode::UNPROCESSABLE_ENTITY, "{b2}");
-    assert!(
-        b2["error"].as_str().unwrap().contains("nonce"),
-        "error={b2}"
-    );
-    assert_eq!(
-        led.balance_of(&pubkey(&payer), CKBTC),
-        200_000 - MIN_WITHDRAW
-    );
-}
-
-/// A wrong signature is rejected (422) and moves no funds.
-#[tokio::test]
-async fn withdraw_wrong_sig_rejected_no_funds_move() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
-    fund_ckbtc(&state, &led, pubkey(&payer), 100_000).await;
-
-    // Sign with a DIFFERENT key but present from = payer — verify under payer fails.
-    let other = keypair();
-    let auth = WithdrawAuth {
-        from_pubkey: pubkey(&payer),
-        destination: "bc1qattacker".to_string(),
-        amount: MIN_WITHDRAW,
-        nonce: [4u8; 16],
-        expiry: FUTURE,
-        currency: CKBTC,
-    };
-    let wrong_sig = dpay_core::sign_withdraw(&other, &auth).to_bytes();
-    let req = WithdrawRequest {
-        from: hex::encode(pubkey(&payer)),
-        destination: "bc1qattacker".to_string(),
-        amount: U64String(MIN_WITHDRAW),
-        nonce: hex::encode([4u8; 16]),
-        expiry: FUTURE,
-        currency: CKBTC,
-        sig: hex::encode(wrong_sig),
-    };
-    let (status, body) = call(&state, withdraw_json(&req)).await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
-    // "bad signature" is the FakeLedger's literal rejection string (fake.rs) — the same message the
-    // canister surfaces. Asserted verbatim (not merely "signature") so this relay-direct test is a
-    // lossless replacement for the browser flow-18 probe it absorbed on 2026-08-15.
-    assert!(
-        body["error"].as_str().unwrap().contains("bad signature"),
-        "error={body}"
-    );
-    assert_eq!(
-        led.balance_of(&pubkey(&payer), CKBTC),
-        100_000,
-        "no debit on a bad sig"
-    );
-}
-
-/// A below-min withdrawal is rejected (422) and moves no funds. Mirrors the canister's local floor.
-#[tokio::test]
-async fn withdraw_below_min_rejected() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
-    fund_ckbtc(&state, &led, pubkey(&payer), 100_000).await;
-
-    let req = withdraw_req(
-        &payer,
-        "bc1qtoosmall",
-        MIN_WITHDRAW - 1,
-        [5u8; 16],
-        FUTURE,
-        CKBTC,
-    );
-    let (status, body) = call(&state, withdraw_json(&req)).await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
-    assert!(
-        body["error"]
-            .as_str()
-            .unwrap()
-            .contains("retrieve_btc_min_amount"),
-        "error={body}"
-    );
-    assert_eq!(
-        led.balance_of(&pubkey(&payer), CKBTC),
-        100_000,
-        "no debit on a below-min withdraw"
-    );
-}
-
-/// Insufficient funds is rejected (422) and the nonce is RELEASED (a later deposit + same-auth retry
-/// can succeed within the expiry window — mirrors the canister's release-on-pre-burn-failure).
-#[tokio::test]
-async fn withdraw_insufficient_funds_releases_nonce_for_retry() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
-    fund_ckbtc(&state, &led, pubkey(&payer), 30_000).await; // < MIN_WITHDRAW (50_000)
-
-    let req = withdraw_req(
-        &payer,
-        "bc1qnotenough",
-        MIN_WITHDRAW,
-        [6u8; 16],
-        FUTURE,
-        CKBTC,
-    );
-    let (status, body) = call(&state, withdraw_json(&req)).await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
-    assert!(
-        body["error"]
-            .as_str()
-            .unwrap()
-            .contains("InsufficientFunds"),
-        "error={body}"
-    );
-    assert_eq!(led.balance_of(&pubkey(&payer), CKBTC), 30_000, "no debit");
-
-    // Now top up to 100_000 and retry the SAME nonce — it must succeed (nonce was released, not
-    // burned). register_deposit + deposit_status credit through the real seam.
-    led.register_deposit(pubkey(&payer), CKBTC, 70_000);
-    let _ = state
-        .ledger
-        .deposit_status(pubkey(&payer), CKBTC)
-        .await
-        .expect("deposit_status credits");
-    assert_eq!(
-        led.balance_of(&pubkey(&payer), CKBTC),
-        100_000,
-        "topped up to 100_000"
-    );
-
-    let (status2, body2) = call(&state, withdraw_json(&req)).await;
-    assert_eq!(
-        status2,
-        StatusCode::OK,
-        "same-nonce retry must succeed after funding: {body2}"
-    );
-    assert_eq!(
-        led.balance_of(&pubkey(&payer), CKBTC),
-        100_000 - MIN_WITHDRAW
-    );
-}
-
-// --- W3 audit: FakeLedger.pay must mirror the canister's hard rejects -------------------------
-//
-// The canister's `pay` rejects a self-transfer (`from == to`) and a payment to the mint sentinel
-// (`to == [0xFF;32]`) before reserving the nonce. The FakeLedger MUST reject the same (the
-// mock-mirrors-real-counterparty lesson: a divergence where the FakeLedger accepts what the canister
-// rejects would let a bug ship green). These tests pin the FakeLedger to the canister's behavior.
-
-#[tokio::test]
-async fn w3_fakeledger_rejects_self_transfer_like_canister() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
-
-    // from == to == payer. The canister rejects this ("self transfer"); the FakeLedger must too.
-    let sa = signed(&payer, pubkey(&payer), 100, [7u8; 16], FUTURE);
-    let (status, body) = call(&state, pay_json(&sa.encode())).await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
-    assert!(
-        body["error"].as_str().unwrap().contains("self transfer"),
-        "error={body}"
-    );
-    // Nothing moved + the nonce was NOT burned (no state change).
-    assert_eq!(led.balance_of(&pubkey(&payer), DEMO_USD), BAL_A);
-}
-
-#[tokio::test]
-async fn w3_fakeledger_rejects_pay_to_mint_sentinel_like_canister() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
-
-    // to == [0xFF;32] (the mint sentinel). The canister rejects this; the FakeLedger must too.
-    let sa = signed(&payer, [0xFF; 32], 100, [8u8; 16], FUTURE);
-    let (status, body) = call(&state, pay_json(&sa.encode())).await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
-    assert!(
-        body["error"].as_str().unwrap().contains("mint sentinel"),
-        "error={body}"
-    );
-    assert_eq!(led.balance_of(&pubkey(&payer), DEMO_USD), BAL_A);
-    // The sentinel subaccount was NOT credited (the canister would have rejected before any move).
-    assert_eq!(led.balance_of(&[0xFF; 32], DEMO_USD), 0);
-}
-
-// --- MC4 U3: durable receipt recovery (restart-safe /receipt + /pay Transient fallback) ----------
-//
-// The canister now stores a signed receipt per nonce (MC4 U1+U2 landed on the canister). These tests
-// prove the RELAY uses that durable source so a settled payment is recoverable even when the relay's
-// own process-local idempotency cache is gone (restart) or the settle reply was lost (Transient
-// exhaustion). The FakeLedger mirrors the canister's per-nonce receipt store; the relay falls back to
-// `Ledger::receipt(nonce)` on an idempotency-cache miss.
-
-/// `/receipt/{nonce}` is RESTART-SAFE: after a relay restart the process-local idempotency cache is
-/// gone, but a settled payment's receipt is still recoverable from the DURABLE ledger (the canister
-/// stores signed receipts per nonce; the FakeLedger mirrors that). So a fresh `AppState` over the SAME
-/// ledger must reconcile the nonce to the identical receipt — not 404. This is the durable-recovery
-/// contract that holds across relay restarts (the process cache is an optimization, not the source of
-/// truth).
-#[tokio::test]
-async fn u3_receipt_route_recovers_from_ledger_after_restart() {
-    let payer = keypair();
-    let merchant = keypair();
-    let led = ledger(pubkey(&payer), pubkey(&merchant));
-    let led_arc = Arc::new(led);
-    let nonce = [77u8; 16];
-
-    // Settle under the first AppState (populates both the process cache and the durable ledger store).
-    let state1 = AppState::new(led_arc.clone());
-    let sa = signed(&payer, pubkey(&merchant), 250, nonce, FUTURE);
-    let (s1, b1) = call(&state1, pay_json(&sa.encode())).await;
-    assert_eq!(s1, StatusCode::OK, "{b1}");
-
-    // Simulate a restart: a FRESH AppState over the SAME ledger (empty process-local idempotency
-    // cache). The receipt must be recoverable from the durable ledger, not the (now-gone) process
-    // cache — else this would be a 404 "not settled" false-negative.
-    let state2 = AppState::new(led_arc.clone());
-    let (s2, b2) = call(&state2, get_receipt(nonce)).await;
-    assert_eq!(
-        s2,
-        StatusCode::OK,
-        "durable receipt must be recoverable after restart: {b2}"
-    );
-    assert_eq!(
-        b2["receipt"], b1["receipt"],
-        "recovered receipt identical to the settle receipt"
-    );
-    assert_eq!(
-        b2["replayed"],
-        serde_json::json!(true),
-        "a recovery is always a replay"
-    );
-}
-
-/// A test-only ledger that simulates "canister settled but the reply was lost" — `pay` settles on
-/// the inner FakeLedger exactly ONCE (so the receipt is durably stored), then ALWAYS returns a
-/// `Transient` error so the relay's `settle_with_retry` exhausts its attempts. Models the real
-/// failure mode MC4 U3 fixes: the update trapped AFTER the ledger commit (canister settled, reply
-/// lost), and during the retry window the relay can't get a clean reply back. The inner's
-/// `receipt(nonce)` remains queryable, so the `/pay` Transient-exhausted branch recovers the settled
-/// receipt instead of returning a 503 false-negative.
-struct SettlesButLosesReply {
-    inner: Arc<FakeLedger>,
-    settled: std::sync::Mutex<bool>,
-}
-
-#[async_trait]
-impl Ledger for SettlesButLosesReply {
-    async fn pay(&self, wire: Vec<u8>) -> Result<Receipt, LedgerError> {
-        // Settle exactly once on the first call (the canister committed + recorded the receipt).
-        // Subsequent retries must NOT re-settle (the nonce is now spent → would NonceReused); they
-        // just "lose the reply" like the first call did.
-        let already = {
-            let mut g = self.settled.lock().unwrap();
-            let was = *g;
-            *g = true;
-            was
-        };
-        if !already {
-            let _ = self.inner.pay(wire).await?;
-        }
-        // …the reply is always "lost" (Transient) — the relay never sees the receipt from `pay()`.
-        Err(LedgerError::Transient("reply lost after settle".into()))
-    }
-    async fn receipt(&self, nonce: [u8; 16]) -> Result<Option<Receipt>, LedgerError> {
-        self.inner.receipt(nonce).await
-    }
-    async fn balance(&self, pk: [u8; 32], c: Currency) -> Result<u64, LedgerError> {
-        self.inner.balance(pk, c).await
-    }
-    async fn faucet(&self, to: [u8; 32], c: Currency, a: u64) -> Result<u64, LedgerError> {
-        self.inner.faucet(to, c, a).await
-    }
-    async fn transactions_of(
-        &self,
-        pk: [u8; 32],
-        c: Currency,
-        l: u32,
-    ) -> Result<Vec<TxnRecord>, LedgerError> {
-        self.inner.transactions_of(pk, c, l).await
-    }
-    async fn healthy(&self) -> bool {
-        true
-    }
-    async fn deposit_address(&self, pk: [u8; 32], c: Currency) -> Result<String, LedgerError> {
-        self.inner.deposit_address(pk, c).await
-    }
-    async fn deposit_status(
-        &self,
-        pk: [u8; 32],
-        c: Currency,
-    ) -> Result<DepositRefresh, LedgerError> {
-        self.inner.deposit_status(pk, c).await
-    }
-    async fn deposit_info(&self, c: Currency) -> Result<DepositInfo, LedgerError> {
-        self.inner.deposit_info(c).await
-    }
-    async fn currencies(&self) -> Result<Vec<dpay_relay::CurrencyDescriptor>, LedgerError> {
-        self.inner.currencies().await
-    }
-    async fn ckerc20_onramp_params(
-        &self,
-        currency: u32,
-    ) -> Result<dpay_relay::CkErc20OnrampParams, LedgerError> {
-        self.inner.ckerc20_onramp_params(currency).await
-    }
-    async fn receipt_pubkey(&self) -> Result<Vec<u8>, LedgerError> {
-        self.inner.receipt_pubkey().await
-    }
-}
-
-/// `/pay`'s Transient-exhausted branch recovers a settled-but-lost-reply payment: when
-/// `settle_with_retry` exhausts its retries (all Transient), the relay queries `Ledger::receipt(nonce)`
-/// BEFORE returning 503. If the canister actually settled (reply lost), the receipt is returned as a
-/// 200 `replayed: true` — never a false-negative 503 for a payment that landed.
-#[tokio::test]
-async fn u3_pay_transient_exhausted_recovers_settled_receipt() {
-    let payer = keypair();
-    let merchant = keypair();
-    let inner = Arc::new(ledger(pubkey(&payer), pubkey(&merchant)));
-    // Every `pay` settles on the inner ledger (once) but returns Transient → the relay's 3 attempts
-    // all fail, yet the receipt is durably stored and recoverable.
-    let state = AppState::new(Arc::new(SettlesButLosesReply {
-        inner: inner.clone(),
-        settled: std::sync::Mutex::new(false),
-    }));
-    let nonce = [88u8; 16];
-
-    let sa = signed(&payer, pubkey(&merchant), 300, nonce, FUTURE);
-    let (status, body) = call(&state, pay_json(&sa.encode())).await;
-
-    // The canister settled (the inner ledger committed); the reply was lost. The relay recovers the
-    // receipt via `Ledger::receipt(nonce)` instead of misreporting a 503.
-    assert_eq!(
-        status,
-        StatusCode::OK,
-        "settled-but-lost-reply must recover, not 503: {body}"
-    );
-    assert_eq!(
-        body["receipt"]["amount"], "300",
-        "recovered the settled receipt"
-    );
-    assert_eq!(body["receipt"]["nonce"], hex::encode(nonce));
-    assert_eq!(
-        body["replayed"],
-        serde_json::json!(true),
-        "a recovery is always a replay"
-    );
-    // The ledger actually settled (the inner committed despite the lost reply).
-    assert_eq!(
-        inner.balance_of(&pubkey(&merchant), DEMO_USD),
-        300,
-        "the inner ledger settled"
-    );
-}
-
-// --- MC4 U4: GET /api/v1/receipt_pubkey discovery route ----------------------------------------
-//
-// The receipt-verification pubkey, surfaced as a discovery/diagnostic endpoint. This is the e2e
-// harness's key source, but it is explicitly NOT the app's trust anchor — a malicious relay could
-// lie here as easily as on any other route. The app pins the key in config (U5) and verifies the
-// receipt signature under the PIN; this route is a convenience for the harness + a diagnostic.
-
-/// `GET /api/v1/receipt_pubkey` → `200 {"pubkey": "<hex>"}` — the ledger's receipt Ed25519 public
-/// key. Unauthenticated (read-only diagnostic; revealing a public key moves no funds). The FakeLedger
-/// returns its stable test key. The route does NOT exist as the app's trust anchor (a malicious relay
-/// could lie); the app pins the key in config.
-#[tokio::test]
-async fn u4_receipt_pubkey_route_returns_ledger_test_key() {
-    let payer = keypair();
-    let merchant = keypair();
-    let (state, led) = state_from(ledger(pubkey(&payer), pubkey(&merchant)));
-
-    // The route returns the ledger's receipt pubkey (the same key FakeLedger signs receipts with).
-    let (status, body) = call(&state, get_req("/api/v1/receipt_pubkey")).await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    let pub_hex = body["pubkey"].as_str().expect("pubkey field present");
-    // Matches the ledger's actual receipt_pubkey (cross-check via the trait method).
-    let led_pk = led.receipt_pubkey().await.unwrap();
-    assert_eq!(pub_hex, hex::encode(&led_pk));
-    assert_eq!(led_pk.len(), 32, "32-byte Ed25519 pubkey");
 }
 
 // --- Web wallet (GET /wallet + /assets/* — the embedded prod build of the REAL app) ------------

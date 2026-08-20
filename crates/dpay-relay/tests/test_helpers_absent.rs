@@ -33,7 +33,7 @@ async fn test_deposit_seed_route_is_absent_in_default_build() {
     // Any two pubkeys suffice — we never reach the ledger.
     let a = pubkey(&keypair());
     let b = pubkey(&keypair());
-    let ledger = FakeLedger::with_clock(a, 0, b, 0, CAP, Box::new(FixedClock(NOW)));
+    let ledger = FakeLedger::new();
     let state = AppState::new(Arc::new(ledger));
 
     let req = Request::builder()

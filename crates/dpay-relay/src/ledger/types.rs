@@ -1,7 +1,7 @@
 //! Ledger data types: the serde structs/enums that cross the JSON boundary, plus the
 //! marshalling helpers (`U64String`, `display_field_to_string`, `decode_hex_array`).
 
-use dpay_core::{Currency, NAME_LEN};
+use dpay_core::Currency;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -56,20 +56,10 @@ impl<'de> serde::Deserialize<'de> for U64String {
 /// The minimal withdrawal amount the facade honors, in sats. Mirrors the LIVE ckBTC minter's
 /// `retrieve_btc_min_amount` (= 50_000, returned by `get_minter_info` on `mqygn-kiaaa-aaaar-qaadq-cai`
 /// and confirmed in OPEN_ISSUES.md) and the canister's `RETRIEVE_BTC_MIN_AMOUNT`. Single-sourced here
-/// so the relay's local pre-check + the FakeLedger simulation can't drift from the real floor.
-pub(crate) const RETRIEVE_BTC_MIN_AMOUNT: u64 = 50_000;
-
 /// Decode a fixed-width NUL-padded UTF-8 name/memo field (32 bytes on the wire, single-sourced as
 /// [`NAME_LEN`]/[`MEMO_LEN`] in core) into the display `String` the relay's JSON history carries.
 /// Trims trailing NULs (the builder's padding) and decodes lossily, so a malformed buffer is never a
 /// silent error or panic — the core stores/signs/verifies raw bytes; the relay only renders them.
-/// `NAME_LEN == MEMO_LEN`, so the same helper covers `from_name`/`to_name` and `memo`.
-pub(crate) fn display_field_to_string(buf: &[u8; NAME_LEN]) -> String {
-    // Trim trailing NULs (the builder's padding): take through the last non-zero byte. `[u8]` has no
-    // `trim_end_matches` (that's a `str` method), so find the boundary by hand, then decode lossily.
-    let end = buf.iter().rposition(|&b| b != 0).map_or(0, |i| i + 1);
-    String::from_utf8_lossy(&buf[..end]).into_owned()
-}
 
 /// Decode a hex string into a fixed-size byte array, surfacing a `Rejected` (→ HTTP 422) on any
 /// decode or length failure. Mirrors [`parse_hex_array`](crate::app) on the app side but for
@@ -77,13 +67,6 @@ pub(crate) fn display_field_to_string(buf: &[u8; NAME_LEN]) -> String {
 /// HTTP [`Response`](axum::response::Response). `field` labels the bytes in the message so the
 /// client can tell `from` from `nonce` from `sig` apart. Byte-identical to the prior inline blocks
 /// (two distinct messages per field: `bad {field} hex: {e}` for a hex-decode failure, `{field} must
-/// be {N} bytes` for a length mismatch — both surfaced as `Rejected`).
-pub(crate) fn decode_hex_array<const N: usize>(s: &str, field: &str) -> Result<[u8; N], LedgerError> {
-    let bytes = hex::decode(s)
-        .map_err(|e| LedgerError::Rejected(format!("bad {field} hex: {e}")))?;
-    <[u8; N]>::try_from(bytes)
-        .map_err(|_| LedgerError::Rejected(format!("{field} must be {N} bytes")))
-}
 
 /// What the merchant sees on success. Byte fields are hex so the JSON is a plain string map.
 /// Mirrors the canister's `PayReceipt` (which returns the same fields as candid `blob`s).

@@ -39,19 +39,18 @@
 //!
 //! `safe_mode` is a wired-but-inert flag: the seam the demo flips to fall back to a degraded path.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::get;
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
-use dpay_core::{Currency, SignedAuthorization, DEMO_USD, NONCE_LEN, PUBKEY_LEN};
+use dpay_core::{Currency, DEMO_USD, PUBKEY_LEN};
 
 /// The prod web build of the real app, embedded at compile time (see build.rs — generated from
 /// `e2e/dist-prod`, which `just web` / deploy/build.sh produce; the build fails loud without it).
@@ -59,47 +58,13 @@ mod web_dist {
     include!(concat!(env!("OUT_DIR"), "/web_assets.rs"));
 }
 
-use crate::ledger::{
-    CurrencyDescriptor, DepositRefresh, Ledger, LedgerError, MintedUtxo, PendingUtxo, Receipt,
-    TxnRecord, U64String, WithdrawReceipt, display_field_to_string,
-};
-
-/// Retry policy for transient ledger errors (idempotency makes retries safe).
-const MAX_ATTEMPTS: u32 = 3;
-const BACKOFF: Duration = Duration::from_millis(20);
-
-/// TTL for the `deposit_refresh` per-`(pubkey, currency)` cache. The ckBTC minter's `update_balance`
-/// (the inter-canister Bitcoin canister call `deposit_refresh` proxies via the facade) costs ~170M cycles
-/// and only needs to run ~once per the minter's own ~3min heartbeat — Bitcoin confirmations take
-/// minutes either way. WITHOUT this cache, the wallet's "Add money" sheet polled the route every
-/// `POLL.deposit` (10s in prod) = ~8,640 minter calls/day × 170M ≈ **1.47 TC/day** — the 2026-08-09
-/// cycles drain. The endpoint is also unauthenticated with no other throttle, so the same leak
-/// applies to arbitrary bot traffic. A cache HIT returns the prior result with ZERO ledger/canister
-/// calls; 120s gives a 12× reduction from the 10s poll while keeping the sheet responsive (the user
-/// is waiting on multi-minute confirmations anyway). Errors are NOT cached (a transient ledger
-/// failure stays retryable).
-const DEPOSIT_REFRESH_TTL: Duration = Duration::from_secs(120);
+use crate::ledger::{CurrencyDescriptor, Ledger, LedgerError, TxnRecord, U64String};
 
 /// Shared relay state. `Arc<dyn Ledger>` is the settlement seam; `idempotency` caches receipts by
 /// nonce so a duplicate submission is answered from cache and never re-settled.
 #[derive(Clone)]
 pub struct AppState {
     pub ledger: Arc<dyn Ledger>,
-    idempotency: Arc<Mutex<HashMap<[u8; NONCE_LEN], Receipt>>>,
-    /// Per-nonce UNSIGNED display metadata (from_name/to_name/memo decoded from the signed
-    /// authorization at /pay time). Sibling to `idempotency` so `/receipt/:nonce` can return the
-    /// payer's friendly name alongside the signed receipt body (which carries only the raw pubkey).
-    /// Empty on cold-start recovery (the Ledger::receipt fallback path has no display fields); the
-    /// app falls back to `short(pubkey)` in that case — same as the pre-fix behavior.
-    idempotency_display: Arc<Mutex<HashMap<[u8; NONCE_LEN], PaymentDisplay>>>,
-    /// Per-`(pubkey, currency)` TTL cache for `deposit_refresh` results — the fix for the 2026-08-09
-    /// cycles drain (see [`DEPOSIT_REFRESH_TTL`]). On a HIT (within the TTL) the handler returns the
-    /// cached [`DepositRefresh`] with ZERO ledger/canister calls; the minter `update_balance`
-    /// inter-canister Bitcoin canister call (not an HTTPS outcall) only fires on a MISS or a stale entry. Mirrors the `idempotency` field's `Arc<Mutex<HashMap>>`
-    /// shape. The value is cloned out of the lock before responding (the lock is held only for the
-    /// read/insert, never across the ledger await).
-    deposit_refresh_cache:
-        Arc<Mutex<HashMap<([u8; PUBKEY_LEN], Currency), (Instant, DepositRefresh)>>>,
     /// Seam for the demo's degraded fallback. Wiring only for now.
     pub safe_mode: Arc<Mutex<bool>>,
     /// Whether `POST /api/v1/faucet` (which *mints*) is served. Defaults to `true` — harmless
@@ -125,9 +90,6 @@ impl AppState {
     pub fn new(ledger: Arc<dyn Ledger>) -> Self {
         AppState {
             ledger,
-            idempotency: Arc::new(Mutex::new(HashMap::new())),
-            idempotency_display: Arc::new(Mutex::new(HashMap::new())),
-            deposit_refresh_cache: Arc::new(Mutex::new(HashMap::new())),
             safe_mode: Arc::new(Mutex::new(false)),
             faucet_enabled: Arc::new(Mutex::new(true)),
             apk: Arc::new(None),
@@ -172,49 +134,34 @@ impl AppState {
     pub fn faucet_enabled(&self) -> bool {
         *self.faucet_enabled.lock().unwrap_or_else(|p| p.into_inner())
     }
-
-    /// Invalidate the `deposit_refresh` cache entry for `(pubkey, currency)`. Called by the
-    /// test-helpers seed route ([`test_deposit_seed`]) because seeding CHANGES the ledger's deposit
-    /// state (adds a pending UTXO), making any cached `deposit_status` stale — without this, the
-    /// wallet's pre-seed auto-poll would mask a freshly-seeded deposit behind a cached zero for the
-    /// whole TTL window. Feature-gated `test-helpers` only (never in prod: there a real deposit
-    /// confirms asynchronously over minutes and the TTL naturally expires first).
-    #[cfg(feature = "test-helpers")]
-    fn invalidate_deposit_refresh(&self, pubkey: [u8; PUBKEY_LEN], currency: Currency) {
-        self.deposit_refresh_cache
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .remove(&(pubkey, currency));
-    }
 }
 
 /// Build the router. No socket is bound here — tests drive it via `tower::ServiceExt::oneshot`,
 /// `main` wraps it with a listener.
 pub fn app(state: AppState) -> Router {
+    // 2026-08-19 IC-rail cutover (W7): the settlement/receipt surface is GONE — /pay, /withdraw,
+    // /receipt/{nonce}, /receipt_pubkey, /deposit/address, /deposit/refresh. Value moves on the
+    // IC rail: the app signs /api/v2 envelopes locally and submits them to the boundary nodes
+    // (icp-api.io in prod; the fake-IC gateway in tests). What remains is read-only: config/display
+    // surfaces + the balance batch + history (both read the ledgers directly, never the facade's
+    // settlement state).
     let api: Router<AppState> = Router::new()
-        .route("/pay", post(pay))
-        .route("/withdraw", post(withdraw))
-        .route("/faucet", post(faucet))
-        .route("/balance/{hex}", get(balance))
         .route("/balances/{hex}", get(balances))
         .route("/transactions/{hex}", get(transactions))
-        .route("/receipt/{nonce}", get(receipt))
-        .route("/receipt_pubkey", get(receipt_pubkey))
-        .route("/deposit/address/{hex}", get(deposit_address))
-        .route("/deposit/refresh/{hex}", post(deposit_refresh))
         .route("/deposit/info", get(deposit_info))
         .route("/currencies", get(currencies))
         .route("/onramp/ckerc20", get(ckerc20_onramp))
         .route("/health", get(health))
         .route("/version", get(version));
 
-    // Test-only deposit-seed route (feature-gated so it CANNOT compile into the prod image). The
-    // local e2e harness builds the relay with `--features test-helpers` and POSTs here to simulate
-    // a confirmed ckBTC deposit landing; the prod image (`just image`) never enables the feature,
-    // so the route is absent and unreachable.
+    // Test-only value fixtures (test-helpers): the faucet credits the fake-IC gateway at the
+    // user's principal, and the single-currency /balance reads it back — e2e assertion sugar.
+    // Prod gets balances through the batch route above (direct ledger reads); these do not exist
+    // in the prod image.
     #[cfg(feature = "test-helpers")]
     let api = api
-        .route("/test/deposit/seed", post(test_deposit_seed));
+        .route("/faucet", axum::routing::post(faucet))
+        .route("/balance/{hex}", get(balance));
 
     let router = Router::new()
         .route("/", get(landing_page))
@@ -235,7 +182,7 @@ pub fn app(state: AppState) -> Router {
     // on the pre-state router so the submit handler's State<AppState> extractor resolves.
     #[cfg(feature = "test-helpers")]
     let router = router
-        .route("/api/v2/canister/{canister}/{kind}", post(crate::ic_gateway::submit))
+        .route("/api/v2/canister/{canister}/{kind}", axum::routing::post(crate::ic_gateway::submit))
         .route("/api/v2/status", get(crate::ic_gateway::status));
 
     let router = router.with_state(state);
@@ -279,42 +226,12 @@ async fn test_cors_middleware(req: axum::extract::Request, next: axum::middlewar
     resp
 }
 
-/// `POST /api/v1/withdraw` JSON `{from, destination, amount, nonce, expiry, currency, sig}` (the
-/// user's signed [`WithdrawRequest`]) → `200 {receipt}` on success. Error mapping mirrors `pay`:
-/// a permanent policy failure (`Rejected` — bad sig / expired / below min / insufficient / nonce
-/// reused / malformed) is `422`; only a genuine `Transient` (the facade/minter unreachable) is `503`.
-/// Every fallible step surfaces status + body; nothing is swallowed.
-async fn withdraw(
-    State(state): State<AppState>,
-    Json(req): Json<crate::ledger::WithdrawRequest>,
-) -> Response {
-    match state.ledger.withdraw(req).await {
-        Ok(r) => (StatusCode::OK, Json(WithdrawReceiptBody { receipt: r })).into_response(),
-        Err(LedgerError::Rejected(msg)) => {
-            // A policy rejection is final — the relay must not signal "retry" (the wallet surfaces it
-            // as a decline, not a transient blip).
-            tracing_deposit_error("withdraw rejected", &msg);
-            err(StatusCode::UNPROCESSABLE_ENTITY, msg)
-        }
-        Err(LedgerError::Transient(msg)) => {
-            tracing_deposit_error("withdraw transient", &msg);
-            err(StatusCode::SERVICE_UNAVAILABLE, format!("ledger unavailable: {msg}"))
-        }
-    }
-}
-
-/// Log a withdrawal/deposit-path error with its context (no silent errors — plan §0). Kept tiny so
-/// every fallible I/O site reads the same shape.
-fn tracing_deposit_error(kind: &str, msg: &str) {
-    eprintln!("dpay-relay: {kind}: {msg}");
-}
-
-/// `GET /api/v1/faucet` JSON `{account: <hex>, currency?, amount?}` → `{balance}`. Demo on-ramp:
-/// funds a phone's freshly-generated account so it can pay. Defaults: `currency = DEMO_USD` (0),
-/// `amount = 10_000` ($100.00) when either is omitted.
-///
-/// **Mints.** Served only when [`AppState::faucet_enabled`]; otherwise `404`, as if the route did
-/// not exist. The relay binary disables it by default on the real-ledger path.
+/// `POST /api/v1/faucet` JSON `{account: <hex>, currency?, amount?}` → `{balance}`. Demo on-ramp
+/// (test-helpers only — the prod image does not compile this route). Credits the user PRINCIPAL
+/// on the fake-IC gateway's ledger for `currency`, exactly where a signed icrc1_transfer would
+/// move funds; the pk → principal mapping is self_authenticating(pk) — the account the app
+/// derives from its device key. Defaults: `currency = DEMO_USD` (0), `amount = 10_000`.
+#[cfg(feature = "test-helpers")]
 async fn faucet(State(state): State<AppState>, Json(req): Json<FaucetRequest>) -> Response {
     if !state.faucet_enabled() {
         return err(StatusCode::NOT_FOUND, "faucet disabled");
@@ -324,104 +241,20 @@ async fn faucet(State(state): State<AppState>, Json(req): Json<FaucetRequest>) -
     // amount is the demo's $100.00 top-up.
     let currency = req.currency.unwrap_or(DEMO_USD);
     let amount = req.amount.map(|x| x.0).unwrap_or(10_000);
-    #[cfg(feature = "test-helpers")]
-    if let Some(fake) = state.fake_ic.clone() {
-        // IC-rail cutover: the faucet credits the user PRINCIPAL on the gateway's DEMO ledger,
-        // exactly where a signed icrc1_transfer would move funds. The pk → principal mapping is
-        // self_authenticating(pk) — the same account the app derives from its device key.
-        use dpay_icp::principal::Principal as IcpPrincipal;
-        let owner = IcpPrincipal::self_authenticating_ed25519(&pk);
-        let bal = fake.faucet_credit(currency, &owner, u128::from(amount));
-        return (StatusCode::OK, Json(BalanceBody { balance: U64String(bal.min(u64::MAX as u128) as u64) })).into_response();
-    }
-    match state.ledger.faucet(pk, currency, amount).await {
-        Ok(bal) => (StatusCode::OK, Json(BalanceBody { balance: U64String(bal) })).into_response(),
-        // Mirror `pay`: a permanent/`Rejected` error (e.g. "not mintable", "faucet cooldown" — a
-        // policy failure, not a transient infra hiccup) is `422`; only a genuine `Transient` is
-        // `503`. The relay must not signal "try again" for a rejection that will never succeed.
-        Err(LedgerError::Rejected(msg)) => err(StatusCode::UNPROCESSABLE_ENTITY, msg),
-        Err(LedgerError::Transient(msg)) => {
-            err(StatusCode::SERVICE_UNAVAILABLE, format!("ledger unavailable: {msg}"))
-        }
-    }
-}
-
-/// `GET /api/v1/receipt/{nonce}` → `200 {receipt, replayed}` if that request_id (nonce) has
-/// settled, else `404`. Lets the merchant terminal poll for an on-chain completion when the payer paid directly
-/// (online), instead of scanning the payer's QR.
-///
-/// **Durable recovery (MC4 U3).** The process-local idempotency cache is checked first (the fast
-/// path), but on a miss the route falls back to `Ledger::receipt(nonce)` — the canister's durable
-/// per-nonce receipt store. This makes the route RESTART-SAFE: after a relay restart the process
-/// cache is gone, yet a settled payment's receipt is still recoverable from the ledger. The canister
-/// enforces a single-use nonce, so the recovered receipt is authoritative (two authorizations can
-/// never both settle under one nonce).
-async fn receipt(State(state): State<AppState>, Path(nonce_hex): Path<String>) -> Response {
-    let nonce = ok_or_bail!(parse_hex_array(&nonce_hex, "nonce"));
-    // Fast path: the process-local idempotency cache (fresh settle this process). Pull the display
-    // fields from the sibling cache so the merchant gets the payer's friendly name alongside the
-    // signed receipt body.
-    if let Some(rc) = state.idempotency.lock().unwrap_or_else(|p| p.into_inner()).get(&nonce).cloned() {
-        let d = state.idempotency_display.lock().unwrap_or_else(|p| p.into_inner()).get(&nonce).cloned().unwrap_or_default();
-        return (StatusCode::OK, Json(PayOk {
-            receipt: rc,
-            replayed: true,
-            from_name: d.from_name,
-            to_name: d.to_name,
-            memo: d.memo,
-        })).into_response();
-    }
-    // Durable fallback: the ledger's per-nonce receipt store (survives a relay restart). The canister
-    // records a signed receipt for every settled pay, so a cache miss here does NOT mean "not
-    // settled" — it may just mean the process restarted. `replayed: true` flags a recovered receipt.
-    // NOTE: the display fields (from_name/to_name/memo) are NOT durable across a relay restart
-    // (they live in the process-local display cache); the app falls back to `short(pubkey)` — same
-    // as the pre-fix behavior, no regression.
-    match state.ledger.receipt(nonce).await {
-        Ok(Some(rc)) => (StatusCode::OK, Json(PayOk {
-            receipt: rc,
-            replayed: true,
-            from_name: String::new(),
-            to_name: String::new(),
-            memo: String::new(),
-        })).into_response(),
-        Ok(None) => err(StatusCode::NOT_FOUND, "not settled"),
-        Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("ledger unavailable: {e}")),
-    }
-}
-
-/// `GET /api/v1/receipt_pubkey` → `200 {"pubkey": "<hex>"}` — the ledger/canister's receipt Ed25519
-/// public key (32 bytes, hex). Unauthenticated (read-only diagnostic; revealing a *public* key moves
-/// no funds and lets no one forge a signature).
-///
-/// **⚠️ This is a discovery/diagnostic aid + the e2e harness's key source — NOT the app's trust
-/// anchor.** A malicious relay could lie on this route as easily as on any other. The app does NOT
-/// trust the pubkey reported here: it PINs the receipt key in config (U5) and verifies each receipt's
-/// signature under the pin. This route exists so the harness can fetch the key for offline test
-/// verification, and so an operator can diagnose "has the canister generated its receipt key yet?".
-/// An empty string means the canister/FakeLedger hasn't generated a key yet (no successful `pay` and
-/// no `init_receipt_key`); a `Transient` ledger error → `503`.
-async fn receipt_pubkey(State(state): State<AppState>) -> Response {
-    match state.ledger.receipt_pubkey().await {
-        Ok(pk) => (StatusCode::OK, Json(ReceiptPubkeyBody { pubkey: hex::encode(&pk) }))
-            .into_response(),
-        Err(LedgerError::Transient(msg)) => {
-            err(StatusCode::SERVICE_UNAVAILABLE, format!("ledger unavailable: {msg}"))
-        }
-        // receipt_pubkey has no permanent-policy failure (it reads a public key), but surface a
-        // Rejected honestly rather than swallowing it.
-        Err(LedgerError::Rejected(msg)) => {
-            err(StatusCode::SERVICE_UNAVAILABLE, format!("ledger unavailable: {msg}"))
-        }
-    }
+    let Some(fake) = state.fake_ic.clone() else {
+        return err(StatusCode::SERVICE_UNAVAILABLE, "fake-IC gateway not attached");
+    };
+    use dpay_icp::principal::Principal as IcpPrincipal;
+    let owner = IcpPrincipal::self_authenticating_ed25519(&pk);
+    let bal = fake.faucet_credit(currency, &owner, u128::from(amount));
+    (StatusCode::OK, Json(BalanceBody { balance: U64String(bal.min(u64::MAX as u128) as u64) })).into_response()
 }
 
 /// `GET /api/v1/balance/{hex}?currency=<u32>` → `{"balance": <minor units>}` for a 32-byte
-/// pubkey (hex). Lets the payer's wallet show its live balance when it can reach the relay.
-///
-/// `currency` is an optional query param defaulting to `DEMO_USD` (0) — the demo's only asset — so
-/// existing callers that don't name a currency keep working unchanged. A wallet holding multiple
-/// assets asks once per currency.
+/// pubkey (hex). Test fixture (test-helpers only): reads the fake-IC gateway's principal-keyed
+/// ledger so e2e assertions can check where funds landed. Prod reads balances through the app's
+/// own signed icrc1_balance_of queries — this route does not exist there.
+#[cfg(feature = "test-helpers")]
 async fn balance(
     State(state): State<AppState>,
     Path(hex_pk): Path<String>,
@@ -429,19 +262,15 @@ async fn balance(
 ) -> Response {
     let pk = ok_or_bail!(parse_pubkey_hex(&hex_pk));
     let currency = qs.currency.unwrap_or(DEMO_USD);
-    #[cfg(feature = "test-helpers")]
-    if let Some(fake) = state.fake_ic.clone() {
-        // IC-rail cutover: read the gateway's principal-keyed balance (same mapping the faucet
-        // credits and signed transfers move — the pubkey's self_authenticating principal).
-        use dpay_icp::principal::Principal as IcpPrincipal;
-        let owner = IcpPrincipal::self_authenticating_ed25519(&pk);
-        let bal = fake.balance_for(currency, &owner);
-        return (StatusCode::OK, Json(BalanceBody { balance: U64String(bal) })).into_response();
-    }
-    match state.ledger.balance(pk, currency).await {
-        Ok(bal) => (StatusCode::OK, Json(BalanceBody { balance: U64String(bal) })).into_response(),
-        Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
-    }
+    // Read the gateway's principal-keyed balance (same mapping the faucet credits and signed
+    // transfers move — the pubkey's self_authenticating principal).
+    let Some(fake) = state.fake_ic.clone() else {
+        return err(StatusCode::SERVICE_UNAVAILABLE, "fake-IC gateway not attached");
+    };
+    use dpay_icp::principal::Principal as IcpPrincipal;
+    let owner = IcpPrincipal::self_authenticating_ed25519(&pk);
+    let bal = fake.balance_for(currency, &owner);
+    (StatusCode::OK, Json(BalanceBody { balance: U64String(bal) })).into_response()
 }
 
 /// Per-currency balance-query timeout for the batch endpoint. Bounds a SINGLE ledger query inside
@@ -553,94 +382,18 @@ async fn transactions(
     let pk = ok_or_bail!(parse_pubkey_hex(&hex_pk));
     let currency = qs.currency.unwrap_or(DEMO_USD);
     let limit = qs.limit.unwrap_or(30).min(100);
+    // With the fake-IC gateway attached (test-helpers), history reads the gateway's principal-keyed
+    // txn log — the same records signed transfers append. Prod reads `transactions_of` off the
+    // `dyn Ledger` (IC ledger icrc3 blocks via the ledger impl).
+    #[cfg(feature = "test-helpers")]
+    if let Some(fake) = state.fake_ic.clone() {
+        use dpay_icp::principal::Principal as IcpPrincipal;
+        let owner = IcpPrincipal::self_authenticating_ed25519(&pk);
+        let rows = fake.transactions(&owner, currency, limit as usize);
+        return (StatusCode::OK, Json(TransactionsBody { transactions: rows })).into_response();
+    }
     match state.ledger.transactions_of(pk, currency, limit).await {
         Ok(rows) => (StatusCode::OK, Json(TransactionsBody { transactions: rows })).into_response(),
-        Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
-    }
-}
-
-/// `GET /api/v1/deposit/address/{hex}?currency=N` → `200 {"address": "..."}` for a 32-byte pubkey
-/// (hex). The ckBTC-style deposit address the user sends native BTC to (the facade proxies the ck
-/// minter's per-principal `get_btc_address`). `currency` defaults to `DEMO_USD` for the same reason
-/// `balance` does: callers that don't name one keep working. A ledger error → `503` (no `422`; the
-/// deposit surface has no permanent-policy failure — deposit plan §0).
-async fn deposit_address(
-    State(state): State<AppState>,
-    Path(hex_pk): Path<String>,
-    Query(qs): Query<BalanceQuery>,
-) -> Response {
-    let pk = ok_or_bail!(parse_pubkey_hex(&hex_pk));
-    let currency = qs.currency.unwrap_or(DEMO_USD);
-    match state.ledger.deposit_address(pk, currency).await {
-        Ok(addr) => (StatusCode::OK, Json(DepositAddressBody { address: addr })).into_response(),
-        Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
-    }
-}
-
-/// `POST /api/v1/deposit/refresh/{hex}?currency=N` → `200 {"minted":[...],"minted_total":N,
-/// "pending":[...],"required_confirmations":N}`. Mints any now-confirmed UTXOs for the account
-/// (proxies the facade → ck minter `update_balance`); the wallet polls this from the "Add money"
-/// sheet and re-reads its balance when `minted_total > 0`. Path/query parsing mirrors `balance`;
-/// any ledger error → `503` (deposit plan §0).
-///
-/// **TTL cache.** A successful result is cached per `(pubkey, currency)` for [`DEPOSIT_REFRESH_TTL`]
-/// (120s). A HIT within the window returns the prior result with ZERO ledger/canister calls — the
-/// fix for the 2026-08-09 cycles drain, where an open sheet polled the ~170M-cycle `update_balance`
-/// inter-canister call every 10s (≈ 1.47 TC/day). Errors (`503`) are NOT cached so a transient failure stays
-/// retryable. The wallet's own auto-poll is the only thing that can warm this cache in prod; the
-/// test-helpers seed route ([`test_deposit_seed`]) invalidates its key so a freshly-seeded deposit
-/// is drained on the next refresh instead of being masked by a stale zero.
-async fn deposit_refresh(
-    State(state): State<AppState>,
-    Path(hex_pk): Path<String>,
-    Query(qs): Query<BalanceQuery>,
-) -> Response {
-    let pk = ok_or_bail!(parse_pubkey_hex(&hex_pk));
-    let currency = qs.currency.unwrap_or(DEMO_USD);
-    let key = (pk, currency);
-
-    // Cache HIT (within TTL): return the prior result with ZERO ledger/canister calls — the cycles
-    // drain fix (see DEPOSIT_REFRESH_TTL). The lock is held only for the read; the cached value is
-    // cloned out before responding. On a MISS or stale entry, fall through to the ledger call below.
-    {
-        let cache = state
-            .deposit_refresh_cache
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        if let Some((at, cached)) = cache.get(&key) {
-            if at.elapsed() < DEPOSIT_REFRESH_TTL {
-                let r = cached.clone();
-                return (StatusCode::OK, Json(DepositRefreshBody {
-                    minted: r.minted,
-                    minted_total: r.minted_total,
-                    pending: r.pending,
-                    required_confirmations: r.required_confirmations,
-                }))
-                    .into_response();
-            }
-        }
-    }
-
-    // Cache MISS / stale: ask the ledger (→ facade → ck minter `update_balance`). This is the ONLY
-    // path that performs the ~170M-cycle inter-canister Bitcoin canister call; the cache above coalesces the 10s poll into ≤1
-    // call per TTL window per (pubkey, currency).
-    match state.ledger.deposit_status(pk, currency).await {
-        Ok(r) => {
-            // Cache the fresh result BEFORE responding so a rapid retry hits the cache. Errors are
-            // deliberately NOT cached (a transient failure stays retryable).
-            state
-                .deposit_refresh_cache
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .insert(key, (Instant::now(), r.clone()));
-            (StatusCode::OK, Json(DepositRefreshBody {
-                minted: r.minted,
-                minted_total: r.minted_total,
-                pending: r.pending,
-                required_confirmations: r.required_confirmations,
-            }))
-                .into_response()
-        }
         Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
     }
 }
@@ -702,38 +455,6 @@ async fn ckerc20_onramp(
         Err(LedgerError::Transient(msg)) => {
             err(StatusCode::SERVICE_UNAVAILABLE, format!("ledger unavailable: {msg}"))
         }
-    }
-}
-
-/// `POST /api/v1/test/deposit/seed` (feature `test-helpers` ONLY — never in the prod image).
-///
-/// JSON `{account: <hex>, currency?: N, amount: U64}` → seeds a pending deposit on the FakeLedger
-/// (mirrors `register_deposit` — drain-on-next-`deposit_status`). Lets a browser e2e harness
-/// simulate a confirmed ckBTC deposit landing and then assert the credited path through the REAL
-/// relay + REAL FakeLedger settlement. Path/account parsing mirrors `balance`/`faucet`; any ledger
-/// error → `503` (like the other deposit routes — no `422` path, deposit plan §0). Returns `200
-/// {"seeded": true}` on success.
-#[cfg(feature = "test-helpers")]
-async fn test_deposit_seed(
-    State(state): State<AppState>,
-    Json(req): Json<DepositSeedRequest>,
-) -> Response {
-    let pk = ok_or_bail!(parse_hex_array(&req.account, "account"));
-    let currency = req.currency.unwrap_or(DEMO_USD);
-    match state.ledger.seed_deposit(pk, currency, req.amount.0).await {
-        Ok(()) => {
-            // Seeding changes the ledger's deposit state (adds a pending UTXO), so any cached
-            // `deposit_status` for this key is now stale — drop it so the next `deposit_refresh`
-            // actually hits the ledger and drains the seed (mirrors how a real confirmation lands
-            // outside the TTL in prod). Without this the wallet's pre-seed auto-poll would mask the
-            // seed behind a cached zero for the whole TTL window (the e2e deposit-credited flow).
-            state.invalidate_deposit_refresh(pk, currency);
-            (StatusCode::OK, Json(DepositSeedBody { seeded: true })).into_response()
-        }
-        // Mirror the deposit routes: any LedgerError → 503. seed_deposit on FakeLedger is infallible
-        // in practice, but the default trait impl returns Rejected — surface it honestly rather than
-        // swallowing.
-        Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
     }
 }
 
@@ -922,13 +643,7 @@ async fn screenshot(Path(name): Path<String>) -> Response {
 
 // ---- request / response bodies ----
 
-/// `POST /api/v1/pay` JSON body: the QR string. We also accept raw wire bytes (see `pay`), so this
-/// is only used on the JSON path.
-#[derive(Deserialize)]
-struct PayRequest {
-    qr: String,
-}
-
+#[cfg(feature = "test-helpers")]
 #[derive(Deserialize)]
 struct FaucetRequest {
     account: String,
@@ -959,42 +674,6 @@ struct CkErc20Query {
     currency: Option<Currency>,
 }
 
-/// UNSIGNED display metadata for a settled payment — the friendly names + memo the signed
-/// `Receipt` body doesn't carry (the signed claim binds only pubkeys + amount + nonce). Decoded
-/// from the signed authorization's 32-byte UTF-8 fields at /pay time and cached alongside the
-/// receipt so `/receipt/:nonce` can return them as additive display fields. The app uses them for
-/// the "Received ∂X from <name>" rendering; a verified receipt still MUST verify the signature
-/// under the pinned key — these fields are display-only, never trust-bearing.
-#[derive(Clone, Default, Serialize)]
-pub struct PaymentDisplay {
-    pub from_name: String,
-    pub to_name: String,
-    pub memo: String,
-}
-
-#[derive(Serialize)]
-struct PayOk {
-    receipt: Receipt,
-    /// True when this nonce was already settled and the receipt came from the idempotency cache —
-    /// lets the terminal say "already paid, not charged twice" instead of a second "Paid ✓".
-    replayed: bool,
-    /// UNSIGNED display fields (additive over the signed receipt body; default empty when the
-    /// relay restarted after the settle and only the durable receipt was recovered). The app uses
-    /// `from_name` for the "Received X from <name>" rendering, falling back to `short(receipt.from)`
-    /// when empty. Never trust-bearing — verify the receipt signature independently.
-    #[serde(default)] from_name: String,
-    #[serde(default)] to_name: String,
-    #[serde(default)] memo: String,
-}
-
-/// `GET /api/v1/receipt_pubkey` response body — the ledger's receipt Ed25519 public key (hex). Empty
-/// string when the canister hasn't generated a key yet. See [`receipt_pubkey`] for the trust-anchor
-/// caveat (this route is a diagnostic, NOT the app's pinned trust source).
-#[derive(Serialize)]
-struct ReceiptPubkeyBody {
-    pubkey: String,
-}
-
 #[derive(Serialize)]
 struct ErrorBody {
     error: String,
@@ -1014,6 +693,7 @@ struct VersionBody {
     commit: &'static str,
 }
 
+#[cfg(feature = "test-helpers")]
 #[derive(Serialize)]
 struct BalanceBody {
     balance: U64String,
@@ -1024,22 +704,6 @@ struct BalanceBody {
 #[derive(Serialize)]
 struct TransactionsBody {
     transactions: Vec<TxnRecord>,
-}
-
-/// `GET /api/v1/deposit/address/{hex}` response body — the native-chain deposit address.
-#[derive(Serialize)]
-struct DepositAddressBody {
-    address: String,
-}
-
-/// `POST /api/v1/deposit/refresh/{hex}` response body — mirrors [`crate::ledger::DepositRefresh`].
-/// `minted_total > 0` means ck-asset was just credited; the wallet then re-reads its balance.
-#[derive(Serialize)]
-struct DepositRefreshBody {
-    minted: Vec<MintedUtxo>,
-    minted_total: U64String,
-    pending: Vec<PendingUtxo>,
-    required_confirmations: u32,
 }
 
 /// `GET /api/v1/deposit/info` response body — static deposit instructions.
@@ -1066,31 +730,6 @@ struct CkErc20OnrampBody {
     erc20_address: Option<String>,
     facade_principal: String,
     kind: String,
-}
-
-/// `POST /api/v1/withdraw` response body — the withdrawal receipt (echoes the authorization + the
-/// burn block index). Mirrors the canister's `WithdrawReceipt` (via the ledger seam).
-#[derive(Serialize)]
-struct WithdrawReceiptBody {
-    receipt: WithdrawReceipt,
-}
-
-/// `POST /api/v1/test/deposit/seed` request body (feature `test-helpers` ONLY). `currency` defaults
-/// to `DEMO_USD` when absent, matching `balance`/`faucet`.
-#[cfg(feature = "test-helpers")]
-#[derive(Deserialize)]
-struct DepositSeedRequest {
-    account: String,
-    #[serde(default)]
-    currency: Option<Currency>,
-    amount: U64String,
-}
-
-/// `POST /api/v1/test/deposit/seed` response body.
-#[cfg(feature = "test-helpers")]
-#[derive(Serialize)]
-struct DepositSeedBody {
-    seeded: bool,
 }
 
 fn err(status: StatusCode, msg: impl Into<String>) -> Response {
@@ -1163,131 +802,3 @@ async fn version() -> Response {
         .into_response()
 }
 
-/// `POST /api/v1/pay`. Body is either JSON `{"qr":"<base64url>"}` or the raw 292-byte wire form
-/// (any non-JSON content type). Returns `200 {"receipt":...}` or `422 {"error":"..."}`.
-async fn pay(State(state): State<AppState>, headers: HeaderMap, body: axum::body::Bytes) -> Response {
-    // 1. Get the wire bytes from whichever encoding the merchant sent.
-    let sa = match decode_body(&headers, &body) {
-        Ok(sa) => sa,
-        Err(e) => return err(StatusCode::UNPROCESSABLE_ENTITY, e),
-    };
-    let nonce = sa.auth.nonce;
-    let wire = sa.to_wire().to_vec();
-
-    // Decode the UNSIGNED display fields (from_name/to_name/memo) ONCE from the signed auth bytes
-    // so every receipt-returning path can surface them without re-decoding. Empty for the
-    // mint-sentinel / faucet path (no payer-chosen name); the app falls back to short(pubkey).
-    let display = PaymentDisplay {
-        from_name: display_field_to_string(&sa.auth.from_name),
-        to_name: display_field_to_string(&sa.auth.to_name),
-        memo: display_field_to_string(&sa.auth.memo),
-    };
-
-    // 2. Idempotency: if we've already settled this nonce, replay the cached receipt verbatim.
-    //    Never touch the ledger again.
-    if let Some(cached) = state.idempotency.lock().unwrap_or_else(|p| p.into_inner()).get(&nonce).cloned() {
-        return (StatusCode::OK, Json(PayOk {
-            receipt: cached,
-            replayed: true,
-            from_name: display.from_name,
-            to_name: display.to_name,
-            memo: display.memo,
-        })).into_response();
-    }
-
-    // 3. Settle, retrying transient failures with small backoff. (Idempotency at the ledger — the
-    //    single-use nonce — means a retry can never double-charge even if a prior attempt partly
-    //    landed; here it can't, since Transient is returned before any commit.)
-    let receipt = match settle_with_retry(&state, wire).await {
-        Ok(r) => r,
-        Err(LedgerError::Rejected(msg)) => return err(StatusCode::UNPROCESSABLE_ENTITY, msg),
-        Err(LedgerError::Transient(msg)) => {
-            // Exhausted retries. Before reporting 503, attempt a DURABLE recovery: a Transient can
-            // mean the update trapped AFTER the ledger commit (the canister settled but the reply was
-            // lost). MC4 U1+U2 guarantee the canister stored a signed receipt for that settle, so a
-            // `receipt(nonce)` lookup that returns `Some` proves it landed — recover it as a 200
-            // `replayed: true` instead of a false-negative 503. Only if the ledger has no receipt do
-            // we honestly report the payment as not-confirmed (503).
-            match state.ledger.receipt(nonce).await {
-                Ok(Some(rc)) => {
-                    // Recovered a settled-but-lost-reply payment. Cache it under the nonce so a
-                    // subsequent duplicate /pay or /receipt hits the fast path.
-                    {
-                        let mut idem = state.idempotency.lock().unwrap_or_else(|p| p.into_inner());
-                        idem.entry(nonce).or_insert_with(|| rc.clone());
-                    }
-                    state.idempotency_display.lock().unwrap_or_else(|p| p.into_inner()).entry(nonce).or_insert_with(|| display.clone());
-                    return (StatusCode::OK, Json(PayOk {
-                        receipt: rc,
-                        replayed: true,
-                        from_name: display.from_name,
-                        to_name: display.to_name,
-                        memo: display.memo,
-                    })).into_response();
-                }
-                Ok(None) => {
-                    return err(StatusCode::SERVICE_UNAVAILABLE, format!("ledger unavailable: {msg}"));
-                }
-                Err(e) => {
-                    return err(
-                        StatusCode::SERVICE_UNAVAILABLE,
-                        format!("ledger unavailable: {msg} (receipt lookup also failed: {e})"),
-                    );
-                }
-            }
-        }
-    };
-
-    // 4. Cache under the nonce (guard against a race that settled the same nonce concurrently:
-    //    keep whatever landed first).
-    {
-        let mut idem = state.idempotency.lock().unwrap_or_else(|p| p.into_inner());
-        let stored = idem.entry(nonce).or_insert_with(|| receipt.clone()).clone();
-        state.idempotency_display.lock().unwrap_or_else(|p| p.into_inner()).entry(nonce).or_insert_with(|| display.clone());
-        return (StatusCode::OK, Json(PayOk {
-            receipt: stored,
-            replayed: false,
-            from_name: display.from_name,
-            to_name: display.to_name,
-            memo: display.memo,
-        })).into_response();
-    }
-}
-
-/// Decode the body to a `SignedAuthorization`. JSON content type → `{"qr": ...}` (base64url);
-/// anything else → raw wire bytes. Errors are human-readable strings for the `422` body.
-fn decode_body(headers: &HeaderMap, body: &[u8]) -> Result<SignedAuthorization, String> {
-    let is_json = headers
-        .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .map(|ct| ct.starts_with("application/json"))
-        .unwrap_or(false);
-
-    if is_json {
-        let req: PayRequest =
-            serde_json::from_slice(body).map_err(|e| format!("bad JSON body: {e}"))?;
-        SignedAuthorization::decode(&req.qr).map_err(|e| format!("bad qr: {e:?}"))
-    } else {
-        SignedAuthorization::from_wire(body).map_err(|e| format!("bad wire body: {e:?}"))
-    }
-}
-
-/// Call `ledger.pay`, retrying only `Transient` errors up to `MAX_ATTEMPTS` with a small backoff.
-/// `Rejected` and success short-circuit immediately.
-async fn settle_with_retry(state: &AppState, wire: Vec<u8>) -> Result<Receipt, LedgerError> {
-    let mut last: Option<LedgerError> = None;
-    for attempt in 0..MAX_ATTEMPTS {
-        match state.ledger.pay(wire.clone()).await {
-            Ok(r) => return Ok(r),
-            Err(LedgerError::Rejected(m)) => return Err(LedgerError::Rejected(m)),
-            Err(t @ LedgerError::Transient(_)) => {
-                last = Some(t);
-                // Don't sleep after the final attempt.
-                if attempt + 1 < MAX_ATTEMPTS {
-                    tokio::time::sleep(BACKOFF).await;
-                }
-            }
-        }
-    }
-    Err(last.unwrap_or_else(|| LedgerError::Transient("no attempts".into())))
-}

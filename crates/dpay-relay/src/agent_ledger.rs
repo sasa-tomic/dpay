@@ -17,17 +17,15 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
-use candid::{decode_one, encode_args, encode_one, CandidType, Nat, Principal};
+use candid::{decode_one, encode_args, encode_one, CandidType, Principal};
 use ic_agent::Agent;
 use serde::Deserialize;
 
-use dpay_core::{Currency, NONCE_LEN, PUBKEY_LEN, SignedAuthorization};
+use dpay_core::{Currency, PUBKEY_LEN};
 
 use crate::ledger::{
-    CkErc20OnrampParams, CurrencyDescriptor, DepositInfo,
-    DepositRefresh, Ledger, LedgerError, MinterFamily, MintedUtxo, PendingUtxo, RampCapability,
-    Receipt, TxnRecord, U64String, WithdrawReceipt, WithdrawRequest,
-    ckerc20_onramp_from_descriptor,
+    CkErc20OnrampParams, CurrencyDescriptor, DepositInfo, Ledger, LedgerError, MinterFamily,
+    RampCapability, TxnRecord, U64String, ckerc20_onramp_from_descriptor,
 };
 
 /// Per-call I/O budget for every cross-canister call this ledger makes on the balance-poll path
@@ -57,42 +55,9 @@ const STATUS_TIMEOUT_SECS: u64 = 5;
 
 /// Read the settlement currency out of a 292-byte signed-authorization wire (the canister does the
 /// same; the relay surfaces it in the receipt so the app can rebuild the `ReceiptClaim`). Falls back
-/// to `DEMO_USD` on a malformed wire (which the canister would already have rejected).
-fn currency_of_wire(wire: &[u8]) -> Currency {
-    SignedAuthorization::from_wire(wire).map(|sa| sa.auth.currency).unwrap_or(dpay_core::DEMO_USD)
-}
 
 /// Candid mirror of the canister's `PayReceipt` (byte fields decode as `blob`s → `Vec<u8>`).
-/// `block_index`/`settle_ts`/`receipt_sig`/`pubkey` (R2) carry the canister-signed receipt.
-#[derive(CandidType, Deserialize, Debug)]
-struct PayReceipt {
-    from: Vec<u8>,
-    to: Vec<u8>,
-    amount: u64,
-    nonce: Vec<u8>,
-    new_from_balance: u64,
-    block_index: u64,
-    settle_ts: u64,
-    receipt_sig: Vec<u8>,
-    pubkey: Vec<u8>,
-}
 
-/// Candid mirror of the canister's `ReceiptView` (the `receipt(nonce)` query return). Same shape as
-/// `PayReceipt` MINUS `new_from_balance` (the durable receipt store records the outcome-attestation
-/// fields, not the post-settle display balance — that's recoverable via a separate `balance` query).
-/// `receipt_sig`/`pubkey` carry the canister-signed outcome so a payer verifies it under `pubkey`.
-#[derive(CandidType, Deserialize, Debug)]
-struct ReceiptView {
-    from: Vec<u8>,
-    to: Vec<u8>,
-    amount: u64,
-    nonce: Vec<u8>,
-    currency: u32,
-    block_index: u64,
-    settle_ts: u64,
-    receipt_sig: Vec<u8>,
-    pubkey: Vec<u8>,
-}
 
 /// Candid mirror of the canister's `TxnView` (one settled transaction row in the history list). The
 /// canister decodes its fixed 32-byte name/memo fields to candid `text` (NUL-trimmed), so these come
@@ -115,25 +80,8 @@ struct TxnView {
 // candid wire format decodes as `candid::Nat`. These mirrors decode the wire faithfully, then the
 // trait impls normalize `Nat` → `String` (a `Nat`/`u128` doesn't round-trip cleanly in JSON).
 
-#[derive(CandidType, Deserialize, Debug)]
-struct MintedUtxoMirror {
-    block_index: Nat,
-    amount: u64,
-}
 
-#[derive(CandidType, Deserialize, Debug)]
-struct PendingUtxoMirror {
-    value: u64,
-    confirmations: u64,
-}
 
-#[derive(CandidType, Deserialize, Debug)]
-struct DepositRefreshMirror {
-    minted: Vec<MintedUtxoMirror>,
-    minted_total: u64,
-    pending: Vec<PendingUtxoMirror>,
-    required_confirmations: u32,
-}
 
 #[derive(CandidType, Deserialize, Debug)]
 struct DepositInfoMirror {
@@ -142,31 +90,7 @@ struct DepositInfoMirror {
     deposit_min_amount: Option<u64>,
 }
 
-/// Candid mirror of the canister's `WithdrawRequest` (the W2 withdrawal endpoint). Byte fields are
-/// `blob`s on the wire; the relay's JSON `WithdrawRequest` carries them as hex, so the trait impl
-/// decodes hex → bytes here. Field labels match the canister's struct exactly.
-#[derive(CandidType, serde::Serialize)]
-struct WithdrawRequestMirror {
-    from_pubkey: Vec<u8>,
-    destination: String,
-    amount: u64,
-    nonce: Vec<u8>,
-    expiry: u64,
-    currency: Currency,
-    sig: Vec<u8>,
-}
 
-/// Candid mirror of the canister's `WithdrawReceipt` (the burn outcome). `block_index` is the ckBTC
-/// ledger's burn transaction index.
-#[derive(CandidType, Deserialize, Debug)]
-struct WithdrawReceiptMirror {
-    from: Vec<u8>,
-    destination: String,
-    amount: u64,
-    nonce: Vec<u8>,
-    currency: Currency,
-    block_index: u64,
-}
 
 /// Candid mirror of the canister's `MinterFamily` variant (M0 catalog). The variant labels match the
 /// relay's serde [`MinterFamily`] verbatim; the trait impl maps each candid variant to the relay's
@@ -276,38 +200,12 @@ impl AgentLedger {
         Ok(AgentLedger { agent, canister_id })
     }
 
-    /// Read a balance via a real `balance_of(blob, nat32)` query. Test/demo introspection (mirrors
-    /// [`crate::FakeLedger::balance_of`]); not part of the [`Ledger`] trait.
-    pub async fn balance_of(
-        &self,
-        pubkey: &[u8; PUBKEY_LEN],
-        currency: Currency,
-    ) -> Result<u64, LedgerError> {
-        // Two positional args: the pubkey as a `blob`, the currency tag as a `nat32`. `currency`
-        // is `u32` (the `Currency` alias), so `encode_args` emits `nat32` automatically.
-        let arg = encode_args((pubkey.to_vec(), currency))
-            .map_err(|e| LedgerError::Transient(format!("encode balance arg: {e}")))?;
-        let reply = tokio::time::timeout(
-            Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
-            self.agent.query(&self.canister_id, "balance_of").with_arg(arg).call(),
-        )
-        .await
-        .map_err(|_| {
-            LedgerError::Transient(format!(
-                "balance_of timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
-            ))
-        })?
-        .map_err(|e| LedgerError::Transient(format!("balance_of query: {e}")))?;
-        decode_one::<u64>(&reply)
-            .map_err(|e| LedgerError::Transient(format!("decode balance: {e}")))
-    }
 }
 
 /// Candid mirror of the ICRC-1 `Account` record (`{ owner: principal; subaccount: opt blob }`) for
-/// the direct `icrc1_balance_of` query. The `subaccount` is the raw 32-byte pubkey — identical to
-/// the canister's `account_of(pk) = Account { owner: canister_self(), subaccount: Some(pk) }`, so a
-/// direct ledger query sees the exact account the facade mints into (and the facade's `pay`/`mint`
-/// credit). `owner` is THIS facade (`self.canister_id`).
+/// the direct `icrc1_balance_of` query. USER-PRINCIPAL RAIL: the account is the USER's own
+/// principal — `owner = self_authenticating(DER(pubkey))`, `subaccount = None` — exactly where
+/// the app's signed `icrc1_transfer` envelopes move funds.
 #[derive(CandidType)]
 struct Icrc1AccountMirror {
     owner: Principal,
@@ -316,69 +214,14 @@ struct Icrc1AccountMirror {
 
 #[async_trait]
 impl Ledger for AgentLedger {
-    async fn pay(&self, wire: Vec<u8>) -> Result<Receipt, LedgerError> {
-        // Candid-encode the 292-byte wire as a single `blob` arg (== canister's `pay(blob)`). The
-        // currency is read out of the wire by the canister — same as FakeLedger.
-        let arg = encode_one(&wire)
-            .map_err(|e| LedgerError::Transient(format!("encode pay arg: {e}")))?;
-
-        // Update call, waited to completion. A transport/replica failure is a *transient*
-        // infrastructure hiccup — the relay may retry it (the canister's single-use nonce keeps a
-        // retry from double-spending even if a prior attempt landed). A canister-level `Err(text)`
-        // is a *permanent* policy rejection (bad sig / expired / over-cap / insufficient / nonce
-        // reused / malformed) — never retried.
-        let reply = tokio::time::timeout(
-            Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
-            self.agent
-                .update(&self.canister_id, "pay")
-                .with_arg(arg)
-                .call_and_wait(),
-        )
-        .await
-        .map_err(|_| {
-            LedgerError::Transient(format!(
-                "pay timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
-            ))
-        })?
-        .map_err(|e| LedgerError::Transient(format!("pay update: {e}")))?;
-
-        let result: Result<PayReceipt, String> = decode_one(&reply)
-            .map_err(|e| LedgerError::Transient(format!("decode pay reply: {e}")))?;
-
-        match result {
-            Ok(r) => Ok(Receipt {
-                from: hex::encode(r.from),
-                to: hex::encode(r.to),
-                amount: U64String(r.amount),
-                nonce: hex::encode(r.nonce),
-                new_from_balance: U64String(r.new_from_balance),
-                // The currency is read out of the wire by the canister; the relay re-decodes the
-                // wire to surface it in the receipt (the app needs it to rebuild the claim). Cheap
-                // pure decode, already done by the route — but the agent path decodes here.
-                currency: currency_of_wire(&wire),
-                block_index: U64String(r.block_index),
-                settle_ts: r.settle_ts,
-                receipt_sig: hex::encode(r.receipt_sig),
-                pubkey: hex::encode(r.pubkey),
-            }),
-            Err(msg) => Err(LedgerError::Rejected(msg)),
-        }
-    }
-
-    async fn balance(&self, pubkey: [u8; PUBKEY_LEN], currency: Currency) -> Result<u64, LedgerError> {
-        // Single-currency fallback used by the legacy `/balance/{hex}` route. The batch `/balances`
-        // handler reads DIRECTLY from each ledger via [`Ledger::balance_on_ledger`] (no facade hop,
-        // no `BAL_CACHE`); this path delegates to the facade's cached `balance_of` query.
-        self.balance_of(&pubkey, currency).await
-    }
-
-    /// Direct `icrc1_balance_of(account) -> nat` QUERY on the currency's ledger — free, always-live,
-    /// and one hop fewer than the facade's cached `balance_of` (no consensus, no `BAL_CACHE`). The
-    /// batch `/balances` handler fans this out per catalog currency, so the relay no longer routes
-    /// balance reads through the facade at all. The account is the SAME subaccount the facade mints
-    /// into (`Account{owner: <this facade>, subaccount: pubkey}`), so a direct query sees exactly
-    /// what the facade would. `ledger_text` is the catalog's text Principal; `_currency` is unused
-    /// (the ledger IS the right one for that currency).
+    /// Direct `icrc1_balance_of(account) -> nat` QUERY on the currency's ledger — free, always-live.
+    /// The batch `/balances` handler fans this out per catalog currency. USER-PRINCIPAL RAIL
+    /// (2026-08-19 cutover): funds live at `Account{owner: self_authenticating(DER(pubkey)),
+    /// subaccount: None}` on the external ledgers — the facade-custody subaccount shape is GONE.
+    /// The owner derivation is dpay-icp's `Principal::self_authenticating_ed25519` (golden-proven
+    /// byte-identical to the app's wasm signer), so the relay and the app read the SAME account.
+    /// `ledger_text` is the catalog's text Principal; `_currency` is unused (the ledger IS the
+    /// right one for that currency).
     async fn balance_on_ledger(
         &self,
         ledger_text: &str,
@@ -388,9 +231,10 @@ impl Ledger for AgentLedger {
         let ledger = Principal::from_text(ledger_text).map_err(|e| {
             LedgerError::Transient(format!("parse ledger principal '{ledger_text}': {e}"))
         })?;
+        let owner_bytes = dpay_icp::principal::Principal::self_authenticating_ed25519(&pubkey);
         let arg = encode_one(&Icrc1AccountMirror {
-            owner: self.canister_id,
-            subaccount: Some(pubkey.to_vec()),
+            owner: Principal::from_slice(owner_bytes.as_slice()),
+            subaccount: None,
         })
         .map_err(|e| LedgerError::Transient(format!("encode icrc1_balance_of arg: {e}")))?;
         let reply = tokio::time::timeout(
@@ -409,104 +253,6 @@ impl Ledger for AgentLedger {
             .map_err(|e| LedgerError::Transient(format!("decode icrc1_balance_of reply: {e}")))?;
         u64::try_from(bal)
             .map_err(|_| LedgerError::Transient("icrc1_balance_of result exceeds u64".into()))
-    }
-
-    async fn receipt_pubkey(&self) -> Result<Vec<u8>, LedgerError> {
-        // facade `receipt_pubkey() -> opt blob` (query). `null` (key not yet generated) → empty vec
-        // (the relay treats an absent pubkey as "no receipts verifiable yet").
-        let reply = tokio::time::timeout(
-            Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
-            self.agent
-                .query(&self.canister_id, "receipt_pubkey")
-                .with_arg(encode_args(()).map_err(|e| LedgerError::Transient(format!("encode pubkey: {e}")))?)
-                .call(),
-        )
-        .await
-        .map_err(|_| {
-            LedgerError::Transient(format!(
-                "receipt_pubkey timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
-            ))
-        })?
-        .map_err(|e| LedgerError::Transient(format!("receipt_pubkey query: {e}")))?;
-        let pk: Option<Vec<u8>> = decode_one(&reply)
-            .map_err(|e| LedgerError::Transient(format!("decode receipt_pubkey: {e}")))?;
-        Ok(pk.unwrap_or_default())
-    }
-
-    /// Durable per-nonce receipt lookup via the facade's `receipt(blob) -> opt ReceiptView` query
-    /// (MC4 U3). The canister stores a signed receipt per nonce (MC4 U1+U2 ensure one exists for every
-    /// settled pay), so this returns `Some` for any nonce that settled — the durable source the relay
-    /// falls back to when its process-local idempotency cache can't answer (restart / lost reply).
-    ///
-    /// `new_from_balance` is NOT carried by `ReceiptView` (the durable store records the outcome
-    /// attestation, not the post-settle display balance); it surfaces as `0` on a recovered receipt.
-    /// The app re-reads the live balance separately, so this loses no information the payer needs.
-    async fn receipt(&self, nonce: [u8; NONCE_LEN]) -> Result<Option<Receipt>, LedgerError> {
-        let arg = encode_one(nonce.to_vec())
-            .map_err(|e| LedgerError::Transient(format!("encode receipt arg: {e}")))?;
-        let reply = tokio::time::timeout(
-            Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
-            self.agent
-                .query(&self.canister_id, "receipt")
-                .with_arg(arg)
-                .call(),
-        )
-        .await
-        .map_err(|_| {
-            LedgerError::Transient(format!(
-                "receipt query timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
-            ))
-        })?
-        .map_err(|e| LedgerError::Transient(format!("receipt query: {e}")))?;
-        let view: Option<ReceiptView> = decode_one(&reply)
-            .map_err(|e| LedgerError::Transient(format!("decode receipt: {e}")))?;
-        Ok(view.map(|v| Receipt {
-            from: hex::encode(v.from),
-            to: hex::encode(v.to),
-            amount: U64String(v.amount),
-            nonce: hex::encode(v.nonce),
-            // ReceiptView carries no post-settle balance; 0 is the honest "unknown on recovery" value.
-            new_from_balance: U64String(0),
-            currency: v.currency,
-            block_index: U64String(v.block_index),
-            settle_ts: v.settle_ts,
-            receipt_sig: hex::encode(v.receipt_sig),
-            pubkey: hex::encode(v.pubkey),
-        }))
-    }
-
-    async fn faucet(
-        &self,
-        to: [u8; PUBKEY_LEN],
-        currency: Currency,
-        // The real canister's `faucet` mints a FIXED constants-sourced amount and ignores this; it
-        // is kept in the trait signature so the permissive FakeLedger (demo) can honor it.
-        _amount: u64,
-    ) -> Result<u64, LedgerError> {
-        // facade `faucet(blob, nat32) -> Result<nat64, text>` (update) — the self-service demo
-        // on-ramp. No admin gate (the privileged `mint` is controller-only); the canister mints its
-        // fixed amount and rate-limits per (account, currency). A canister-level `Err(text)` is a
-        // permanent policy rejection ("not mintable", "faucet cooldown") → `Rejected` (422); a
-        // transport/replica failure is `Transient` (503, retried).
-        let arg = encode_args((to.to_vec(), currency))
-            .map_err(|e| LedgerError::Transient(format!("encode faucet args: {e}")))?;
-        let reply = tokio::time::timeout(
-            Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
-            self.agent
-                .update(&self.canister_id, "faucet")
-                .with_arg(arg)
-                .call_and_wait(),
-        )
-        .await
-        .map_err(|_| {
-            LedgerError::Transient(format!(
-                "faucet timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
-            ))
-        })?
-        .map_err(|e| LedgerError::Transient(format!("faucet update: {e}")))?;
-        let result: Result<u64, String> = decode_one(&reply)
-            .map_err(|e| LedgerError::Transient(format!("decode faucet reply: {e}")))?;
-        result.map_err(LedgerError::Rejected)
     }
 
     async fn transactions_of(
@@ -567,82 +313,6 @@ impl Ledger for AgentLedger {
         .await
         .map(|status_result| status_result.is_ok())
         .unwrap_or(false)
-    }
-
-    async fn deposit_address(
-        &self,
-        pubkey: [u8; PUBKEY_LEN],
-        currency: Currency,
-    ) -> Result<String, LedgerError> {
-        // facade `deposit_address(blob, nat32) -> Result<text, text>` (update). Per the deposit
-        // plan's §0 error rule, *any* facade `Err(String)` maps to `Transient` — the deposit
-        // endpoints have no permanent-policy failure (no sig, no cap, no replay). The only "config"
-        // failure ("no minter for currency") is a deploy-time invariant that also surfaces as 503.
-        let arg = encode_args((pubkey.to_vec(), currency))
-            .map_err(|e| LedgerError::Transient(format!("encode deposit_address arg: {e}")))?;
-        let reply = tokio::time::timeout(
-            Duration::from_secs(MINTER_CALL_TIMEOUT_SECS),
-            self.agent
-                .update(&self.canister_id, "deposit_address")
-                .with_arg(arg)
-                .call_and_wait(),
-        )
-        .await
-        .map_err(|_| {
-            LedgerError::Transient(format!(
-                "deposit_address timed out after {MINTER_CALL_TIMEOUT_SECS}s"
-            ))
-        })?
-        .map_err(|e| LedgerError::Transient(format!("deposit_address update: {e}")))?;
-        let result: Result<String, String> = decode_one(&reply)
-            .map_err(|e| LedgerError::Transient(format!("decode deposit_address reply: {e}")))?;
-        result.map_err(LedgerError::Transient)
-    }
-
-    async fn deposit_status(
-        &self,
-        pubkey: [u8; PUBKEY_LEN],
-        currency: Currency,
-    ) -> Result<DepositRefresh, LedgerError> {
-        // facade `refresh_deposit(blob, nat32) -> Result<DepositRefresh, text>` (update) → proxies
-        // the ck minter's `update_balance`. Decode the candid `Nat` block_index into a `String`
-        // (JSON-safe). Any `Err(String)` → `Transient` (§0).
-        let arg = encode_args((pubkey.to_vec(), currency))
-            .map_err(|e| LedgerError::Transient(format!("encode refresh_deposit arg: {e}")))?;
-        let reply = tokio::time::timeout(
-            Duration::from_secs(MINTER_CALL_TIMEOUT_SECS),
-            self.agent
-                .update(&self.canister_id, "refresh_deposit")
-                .with_arg(arg)
-                .call_and_wait(),
-        )
-        .await
-        .map_err(|_| {
-            LedgerError::Transient(format!(
-                "refresh_deposit timed out after {MINTER_CALL_TIMEOUT_SECS}s"
-            ))
-        })?
-        .map_err(|e| LedgerError::Transient(format!("refresh_deposit update: {e}")))?;
-        let result: Result<DepositRefreshMirror, String> = decode_one(&reply)
-            .map_err(|e| LedgerError::Transient(format!("decode refresh_deposit reply: {e}")))?;
-        let m = result.map_err(LedgerError::Transient)?;
-        Ok(DepositRefresh {
-            minted: m
-                .minted
-                .into_iter()
-                .map(|u| MintedUtxo {
-                    block_index: u.block_index.to_string(),
-                    amount: U64String(u.amount),
-                })
-                .collect(),
-            minted_total: U64String(m.minted_total),
-            pending: m
-                .pending
-                .into_iter()
-                .map(|p| PendingUtxo { value: U64String(p.value), confirmations: p.confirmations })
-                .collect(),
-            required_confirmations: m.required_confirmations,
-        })
     }
 
     async fn deposit_info(&self, currency: Currency) -> Result<DepositInfo, LedgerError> {
@@ -745,61 +415,4 @@ impl Ledger for AgentLedger {
         ckerc20_onramp_from_descriptor(desc, self.canister_id.to_text())
     }
 
-    async fn withdraw(&self, req: WithdrawRequest) -> Result<WithdrawReceipt, LedgerError> {
-        // facade `withdraw(WithdrawRequest) -> Result<WithdrawReceipt, text>` (update). Decode the
-        // JSON request's hex fields → candid `blob`s, matching the canister's struct. A transport /
-        // replica failure is `Transient` (503, retried); a canister-level `Err(String)` is a
-        // permanent policy rejection (bad sig / expired / below min / insufficient / nonce reused) →
-        // `Rejected` (422), mirroring `pay`'s error mapping.
-        let from = hex::decode(&req.from)
-            .map_err(|e| LedgerError::Rejected(format!("bad from hex: {e}")))?;
-        let nonce = hex::decode(&req.nonce)
-            .map_err(|e| LedgerError::Rejected(format!("bad nonce hex: {e}")))?;
-        let sig = hex::decode(&req.sig)
-            .map_err(|e| LedgerError::Rejected(format!("bad sig hex: {e}")))?;
-        let mirror = WithdrawRequestMirror {
-            from_pubkey: from,
-            destination: req.destination,
-            amount: req.amount.0,
-            nonce,
-            expiry: req.expiry,
-            currency: req.currency,
-            sig,
-        };
-        let arg = encode_one(&mirror)
-            .map_err(|e| LedgerError::Transient(format!("encode withdraw arg: {e}")))?;
-        // Minter-class budget, not the 10s poll default: the facade's `withdraw` update internally
-        // makes ≥2 minter round trips (burn/retrieve + send) plus 1-2 `icrc2_approve` calls — the
-        // same 7-15s mainnet latency class commit bdc9f3e bumped the deposit proxies for. A 10s
-        // cap makes the relay 503 while the canister still completes the burn+send; the user's
-        // retry then hits a spent WITHDRAW_NONCES and surfaces a false permanent 422 for a
-        // withdrawal that actually went through.
-        let reply = tokio::time::timeout(
-            Duration::from_secs(MINTER_CALL_TIMEOUT_SECS),
-            self.agent
-                .update(&self.canister_id, "withdraw")
-                .with_arg(arg)
-                .call_and_wait(),
-        )
-        .await
-        .map_err(|_| {
-            LedgerError::Transient(format!(
-                "withdraw timed out after {MINTER_CALL_TIMEOUT_SECS}s"
-            ))
-        })?
-        .map_err(|e| LedgerError::Transient(format!("withdraw update: {e}")))?;
-        let result: Result<WithdrawReceiptMirror, String> = decode_one(&reply)
-            .map_err(|e| LedgerError::Transient(format!("decode withdraw reply: {e}")))?;
-        match result {
-            Ok(m) => Ok(WithdrawReceipt {
-                from: hex::encode(m.from),
-                destination: m.destination,
-                amount: U64String(m.amount),
-                nonce: hex::encode(m.nonce),
-                currency: m.currency,
-                block_index: U64String(m.block_index),
-            }),
-            Err(msg) => Err(LedgerError::Rejected(msg)),
-        }
-    }
 }

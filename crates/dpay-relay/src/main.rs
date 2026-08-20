@@ -38,17 +38,6 @@ use std::sync::Arc;
 
 use dpay_relay::{app, AppState, FakeLedger, Ledger};
 
-// The SAME deterministic demo accounts the phone app + dpay-fixture use, so a payment the phone
-// signs (from PAYER) settles here. PAYER = Ed25519 pubkey of seed [1;32]; MERCHANT = seed [2;32].
-const PAYER: [u8; 32] = [
-    0x8a, 0x88, 0xe3, 0xdd, 0x74, 0x09, 0xf1, 0x95, 0xfd, 0x52, 0xdb, 0x2d, 0x3c, 0xba, 0x5d, 0x72,
-    0xca, 0x67, 0x09, 0xbf, 0x1d, 0x94, 0x12, 0x1b, 0xf3, 0x74, 0x88, 0x01, 0xb4, 0x0f, 0x6f, 0x5c,
-];
-const MERCHANT: [u8; 32] = [
-    0x81, 0x39, 0x77, 0x0e, 0xa8, 0x7d, 0x17, 0x5f, 0x56, 0xa3, 0x54, 0x66, 0xc3, 0x4c, 0x7e, 0xcc,
-    0xcb, 0x8d, 0x8a, 0x91, 0xb4, 0xee, 0x37, 0xa2, 0x5d, 0xf6, 0x0f, 0x5b, 0x8f, 0xc9, 0xb3, 0x94,
-];
-
 /// Exit code for a bad/unsafe configuration — distinct from a runtime failure (1), so an
 /// orchestrator restarting the container can tell "operator error" from "ledger was down".
 const EXIT_CONFIG: i32 = 2;
@@ -131,21 +120,18 @@ fn load_apk() -> Option<Vec<u8>> {
 
 // ---- configuration ----
 
-/// Which ledger the relay settles on, and everything needed to reach it.
+/// Which settlement backend to build: the in-memory demo ledger or a real IC replica.
 enum LedgerCfg {
-    /// In-memory demo ledger. Offline; pre-funds the demo payer.
-    Memory,
-    /// A real canister on a real IC network.
     Ic {
         url: String,
         canister_id: String,
         fetch_root_key: bool,
     },
+    Memory,
 }
 
 struct Config {
     addr: SocketAddr,
-    per_tx_cap: u64,
     ledger: LedgerCfg,
     faucet: bool,
 }
@@ -157,13 +143,6 @@ impl Config {
                 .parse()
                 .map_err(|e| format!("DPAY_RELAY_ADDR={s:?} is not a socket address: {e}"))?,
             None => SocketAddr::from(([0, 0, 0, 0], 8787)),
-        };
-
-        let per_tx_cap: u64 = match non_empty("DPAY_PER_TX_CAP") {
-            Some(s) => s
-                .parse()
-                .map_err(|e| format!("DPAY_PER_TX_CAP={s:?} is not a number: {e}"))?,
-            None => 100_000,
         };
 
         let canister_id = non_empty("DPAY_CANISTER_ID");
@@ -224,7 +203,6 @@ impl Config {
 
         Ok(Config {
             addr,
-            per_tx_cap,
             ledger,
             faucet,
         })
@@ -279,7 +257,7 @@ async fn build_ledger(cfg: &Config) -> Arc<dyn Ledger> {
         } => connect_ic(url, canister_id, *fetch_root_key).await,
         LedgerCfg::Memory => {
             println!("settling on the in-memory demo ledger (payer pre-funded $5000.00)");
-            Arc::new(FakeLedger::new(PAYER, 500_000, MERCHANT, 0, cfg.per_tx_cap))
+            Arc::new(FakeLedger::new())
         }
     }
 }
