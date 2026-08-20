@@ -19,12 +19,21 @@
 > OUT of the value path; the app signs /api/v2 envelopes locally.
 >
 > **REMAINING (in order):**
-> 1. **The wasm dual-allocator bug** (see OPEN BUG below) — blocks full-suite `just e2e`
->    green. Repro `e2e/debug/wasm-hammer.mjs`, deterministic. This is THE next work item.
+> 1. ~~**The wasm dual-allocator bug**~~ ✅ **RESOLVED (2026-08-20, `32ebf21`) — see the CLOSED
+>    section below.** Full-suite e2e unblocked.
 > 2. **Device gates** (never ran on this cutover): `just app` (DPAY_SELFCHECK PASS), `just
 >    ondevice`, `just campreview` — trigger paths (dpay-ffi/app-services/android) all fired.
-> 3. **Full-suite e2e green** after (1) (last runs: 3-5 flows red under load, all green
->    standalone; flows 30/42 deleted as retired-surface, 22's timeout bumped to 25s).
+>    NOTE: the allocator fix touches only `crates/dpay-wasm` (the `#[global_allocator]` lives in
+>    the wasm crate alone; no other crate declares one), so the Android/UniFFI path is untouched —
+>    but the W7-relay/W8 cutover itself still warrants the device gates.
+> 3. **Full-suite e2e green** ✅ (2026-08-20, post-fix): `just e2e` **77/77 GREEN** in ~70 s
+>    (plus optional flow 39 via `just e2e-store`, 78/78 total). Two stale-premise flows surfaced
+>    once the wasm flake stopped masking them and were fixed (`76de37d` flow 22 — kill the IC
+>    gateway, not just the relay; `e35c188` flow 59 — pin the post-W8 rail-proof receipt shape).
+>    Residual: `41-a11y-census` (20 s authored timeout, census of 8 surfaces) can trip its
+>    per-test timeout on a heavily-loaded shared host (12.4 s standalone vs 20 s budget; the
+>    harness's load-scaling covers the machine's average, not spikes). If it recurs, that is
+>    host contention, not the app.
 > 4. `test-icp-replica` is green; keep it on any rail change. Prod ship (`just deploy-ic &&
 >    just apk && just up`) AFTER all gates — prod is behind head.
 >
@@ -76,8 +85,44 @@
   purge-required.)
 
 
-## OPEN BUG (2026-08-20): wasm dual-allocator corruption under browser concurrency — blocks full-suite e2e green
+## CLOSED BUG (2026-08-20): wasm dual-allocator corruption under browser concurrency — RESOLVED (`32ebf21`)
 
+> **RESOLUTION — root cause confirmed, fixed, gated.** The working hypothesis below ("two w_alloc
+> callers overlap") was WRONG — `w_alloc` was innocent. The REAL mechanism: `crates/dpay-wasm`
+> declared NO `#[global_allocator]`, so the Rust toolchain linked its DEFAULT wasm allocator
+> (**dlmalloc**) for every Rust-side String/Vec the exports build (envelope CBOR, arg CBOR,
+> principal text, `layout_json`). dlmalloc manages the SAME linear memory `w_alloc` bumps from
+> `__heap_base` (both grow via `memory.grow`) — TWO allocators, ONE arena. After enough cumulative
+> allocation volume the cursors overlap and dlmalloc hands a Rust-side temporary (a concurrent
+> sign_update's envelope String) a region `w_alloc` had already handed JS as a live input buffer.
+> This fits every symptom: input overwritten mid-export by envelope-shaped CBOR; one-shot
+> collision (retry allocates elsewhere and recovers); deterministic threshold (#281 / 18 pages =
+> cumulative volume); failures move under suite load; JS concurrency irrelevant (single-threaded
+> instantiations hit it too).
+>
+> **Proof:** (1) `wasm-objdump -x` on the OLD committed artifact showed the dlmalloc symbols
+> (`Dlmalloc::malloc/free/memalign`, `unlink_chunk`, …, `__rust_alloc` forwarding) — 10+ symbols;
+> the NEW artifact has ZERO. (2) New deterministic pure-Node repro `e2e/debug/wasm-alloc-collide.mjs`
+> (interleave `w_alloc`'d fill-pattern buffers with allocating exports, NO browser, NO JS
+> concurrency): OLD artifact FAILS at round 0, offset 1114120 (envelope CBOR bytes inside a
+> reserved pattern buffer — same neighborhood as the production envP=1114280), 3/3 identical;
+> NEW artifact PASSES 200 rounds, 512 KB of patterns intact, 109 pages.
+>
+> **Fix (`32ebf21`, crates/dpay-wasm/src/lib.rs):** ONE allocator — the heap cursor + growth
+> logic refactored into shared `heap_cursor()`/`bump_reserve()`; a wasm32-only
+> `#[global_allocator]` (Bump, dealloc = no-op per the frozen page-lifetime contract) routes ALL
+> Rust-side allocations through the SAME cursor `w_alloc` serves. `w_alloc`'s frozen ABI v1
+> signature/semantics unchanged (bump, 0=OOM, `w_alloc(0)`=current top; no version bump — the fix
+> is invisible to the contract). Host builds keep the platform allocator; no other crate declares
+> a `global_allocator`, so Android/UniFFI is untouched. The "Design rules" docs in the crate now
+> pin the invariant: never reintroduce a second allocator over this memory.
+>
+> **Gates:** `cargo test -p dpay-wasm` 3/3 · `just wasm` staged + parity 96/96 · browser hammer
+> `node e2e/debug/wasm-hammer.mjs` 3/3 PASS (was deterministic FAIL at #281 — note the first
+> post-fix hammer run drove a STALE cached web build: `a25d71d` fixed the harness dist-cache gate
+> to watch the staged wasm artifact) · `just check` fully green · jest 801/801 · `just e2e`
+> 77/77 GREEN (+ optional flow 39 → 78/78). Historical record of the bug follows.
+>
 > **Symptom:** under e2e suite load (≥6 parallel browser flows), app-side wasm calls fail
 > transiently: `w_icp_envelope_request_id` returns BAD_UTF8 on VALID input (`envelope submit
 > failed (Utf8)` in flows 08/21), and deposit queries trap with `memory access out of bounds`
@@ -99,18 +144,20 @@
 > section: initial 0 pages, NO max, module owns its memory; `w_alloc` = AtomicU32 monotonic
 > bump (non-CAS load/store), grows on demand.
 >
-> **Working hypothesis:** two callers receive overlapping `w_alloc` regions (a concurrent sign
-> call's output landed on the failing call's input). Mechanism unclear — JS sync blocks after
-> `await core()` should be atomic; second-instance theory contradicted by envP being deep in
-> the heap (a fresh instance would allocate near `__heap_base`). Next steps: instrument
-> `w_alloc` with a JS-visible monotonicity probe (`w_alloc(0)` returns current top — a backward
-> jump or repeated pointer proves overlap), check V8's instantiate-into-existing-memory
-> behavior, consider making the JS side serialize wasm calls through one promise queue as a
-> workaround.
+> **Working hypothesis (at the time — DISPROVEN by the fix; kept for the record):** two callers
+> receive overlapping `w_alloc` regions (a concurrent sign call's output landed on the failing
+> call's input). Mechanism unclear — JS sync blocks after `await core()` should be atomic;
+> second-instance theory contradicted by envP being deep in the heap (a fresh instance would
+> allocate near `__heap_base`). Next steps: instrument `w_alloc` with a JS-visible monotonicity
+> probe (`w_alloc(0)` returns current top — a backward jump or repeated pointer proves overlap),
+> check V8's instantiate-into-existing-memory behavior, consider making the JS side serialize
+> wasm calls through one promise queue as a workaround.
 >
-> **Impact:** full `just e2e` suite red under load (3-5 flows per run, all green standalone);
-> inner-loop gates (`just check`, jest, replica, individual flows) all green. Not believed
-> reachable on Android (UniFFI path is properly threaded) — unverified.
+> **Impact (at the time):** full `just e2e` suite red under load (3-5 flows per run, all green
+> standalone); inner-loop gates (`just check`, jest, replica, individual flows) all green. Not
+> believed reachable on Android (UniFFI path is properly threaded) — **CONFIRMED unreachable by
+> the fix's audit: the `#[global_allocator]` lives only in the wasm crate; the FFI/Android build
+> uses the platform allocator over its own heap, no shared arena.**
 
 ## OPEN BUG (2026-08-17): NFC request (reader role) fails on LineageOS/older Android — awaiting device logcat
 
