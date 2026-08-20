@@ -1,17 +1,30 @@
-// Flow 22 — Deposit unreachable/error state (relay down → honest error, no spinner-forever/crash).
+// Flow 22 — Deposit unreachable/error state (gateway down → honest error, no spinner-forever/crash).
 //
-// When the relay is unreachable, the DepositSheet's address/info fetch fails fast (ECONNREFUSED —
-// the REAL "relay down" failure mode, not a synthetic stub). The sheet must surface a clear, honest
-// error + a retry hint — NOT spin forever, NOT crash, NOT show a fake address. This flow pins that:
-//   1. Onboard online (good relay), then switch to a genuinely-dead relay (closed port).
+// When the IC gateway is unreachable, the DepositSheet's address query fails fast (ECONNREFUSED —
+// the REAL "network down" failure mode, not a synthetic stub). The sheet must surface a clear,
+// honest error + a retry hint — NOT spin forever, NOT crash, NOT show a fake address. This flow
+// pins that:
+//   1. Onboard online (good relay), then kill BOTH transports the sheet depends on:
+//      the IC /api/v2 gateway (the address critical path since the W8 user-principal cutover —
+//      `railBtcDepositAddress` is a signed get_btc_address query straight to the gateway, NOT a
+//      relay fetch) AND the relay (the supplementary depositInfo fetch + the offline wallet
+//      surface).
 //   2. Open the deposit sheet (via the asset picker → ckBTC). The sheet mounts and immediately
-//      tries to fetch depositAddress + depositInfo from the dead relay.
-//   3. Both fetches fail fast → `loading` flips false, `err` is set to the plain-language transient
+//      signs + POSTs get_btc_address at the dead gateway.
+//   3. The POST fails fast → `loading` flips false, `err` is set to the plain-language transient
 //      message "Couldn't load your deposit address. Check your connection and try again." (H5: no
 //      "relay" / "reopen the sheet" dev jargon — just a clear retry hint in user language).
 //   4. Assert the error text shows AND the spinner is gone (loading=false) — the sheet reached a
 //      terminal error state, not a stuck loading state. The wallet surface is still intact (balance
 //      still rendered; no crash).
+//
+// NOTE (premise fix, 2026-08-20): this flow originally killed ONLY the relay — valid before the
+// cutover, when the sheet fetched the address from the relay. Since W8 the address is a signed
+// query against the IC gateway (e2e routes it at the test relay via the `__DPAY_TEST_IC_GATEWAY`
+// seam, set once from `?relay=` at page load), so a dead relay alone left the address path alive
+// and the flow deterministically RED (a real address rendered). The gateway seam is re-read on
+// every call by `icGatewayBase()`, so retargeting it mid-session to a genuinely-dead port
+// reproduces the real ECONNREFUSED failure mode through the REAL transport.
 //
 // This is the H5 path: the deposit error must be plain-language + distinguish the transient
 // (reachability) case from the distinct "no minter" 503 case (which surfaces "This asset isn't
@@ -21,7 +34,7 @@
 // Selector contract: `btn-settings`, `settings-relay`, `btn-settings-close`, `balance` (header →
 // Balances), `asset-ckbtc-select` (BTC row whole-row select), `btn-receive-address` (Receive → "My
 // address"), `deposit-status` (absent — no address fetched).
-import { setup, assert, assertIncludes, onboardWallet, goOffline, openBalances, selectCurrency, openReceiveAddress } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, onboardWallet, goOffline, openBalances, selectCurrency, openReceiveAddress, pickFreePort } from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -31,7 +44,7 @@ export const meta = {
   name: 'deposit-error',
   journey: 'deposit',
   covers: ['deposit-error', 'offline', 'graceful'],
-  verifies: 'Relay unreachable when opening the deposit sheet → honest error (\'Check connection\'), no spinner-forever.',
+  verifies: 'IC gateway unreachable when opening the deposit sheet → honest error (\'Check connection\'), no spinner-forever.',
   timeoutMs: 25000,
 };
 
@@ -42,24 +55,36 @@ export async function run() {
   try {
     const { driver } = env;
 
-    // Onboard online ($100 funded — proves the wallet works before we break the relay).
+    // Onboard online ($100 funded — proves the wallet works before we break the network).
     console.log('[22-deposit-error] onboarding…');
     await onboardWallet(driver, 'e2e-deposit-err');
 
-    // Switch to a genuinely-dead relay (closed port → ECONNREFUSED, the real failure mode).
-    console.log('[22-deposit-error] going offline…');
+    // Kill the IC gateway transport (the deposit ADDRESS critical path since W8): retarget the
+    // e2e seam at a genuinely-dead port → the signed get_btc_address POST gets ECONNREFUSED, the
+    // real "gateway unreachable" failure mode. pollExpiry falls back to the device clock, so the
+    // POST itself is what dies — immediately (closed local port).
+    const deadGwPort = await pickFreePort();
+    const deadGateway = `http://127.0.0.1:${deadGwPort}`;
+    driver.allowRequestFailuresFrom(deadGateway);
+    await driver.eval((gw) => {
+      globalThis.__DPAY_TEST_IC_GATEWAY = gw;
+    }, deadGateway);
+
+    // Also kill the relay (the supplementary depositInfo fetch degrades to "none"/"no minimum",
+    // and the wallet surface must stay intact offline — as before the cutover).
+    console.log('[22-deposit-error] going offline (IC gateway + relay)…');
     await goOffline(driver);
 
     // Open Balances → select ckBTC → Receive → "My address" (the inline deposit body). The
-    // DepositSheet mounts against the dead relay. `asset-ckbtc-select` is always present (selectable
-    // at any balance); the dead-relay failure surfaces in the inline deposit body.
-    console.log('[22-deposit-error] Balances → select ckBTC → Receive → My address (dead relay)…');
+    // DepositSheet mounts against the dead gateway. `asset-ckbtc-select` is always present
+    // (selectable at any balance); the dead-gateway failure surfaces in the inline deposit body.
+    console.log('[22-deposit-error] Balances → select ckBTC → Receive → My address (dead gateway)…');
     await openBalances(driver);
     await selectCurrency(driver, 'ckbtc');
     await openReceiveAddress(driver);
 
-    // The sheet's fetch fails fast → the error state renders. H5: plain-language transient copy
-    // (dead relay = ECONNREFUSED → transient). The fetch has an 8s AbortController ceiling, but
+    // The sheet's query fails fast → the error state renders. H5: plain-language transient copy
+    // (dead gateway = ECONNREFUSED → transient). The fetch has an 8s AbortController ceiling, but
     // ECONNREFUSED returns immediately.
     const errShown = await driver.waitForText("Couldn't load your deposit address", { timeoutMs: 10_000 });
     const body = await driver.bodyText();
