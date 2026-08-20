@@ -1,21 +1,32 @@
-// Cross-validation test (RED first → GREEN) — proves the JS ed25519 DpayCore shim produces a
-// byte-identical sig + wire to the Rust core, so every local pay flow that uses this shim will
-// settle on the real FakeLedger (which calls `sa.verify()` via ed25519-dalek `verify_strict`).
+// Cross-validation test — proves the JS byte builders the e2e harness uses are byte-identical to
+// the Rust core, so every local pay flow that uses them settles on the real fake-IC /api/v2 gateway
+// (which verifies envelopes with the same rules as the replica).
 //
 // This test is the FIRST thing that runs in the suite (`00-` prefix). It does NOT need a browser or
-// a relay — it loads the wire_layout.json golden bytes and the shim's pure builders, then asserts:
+// a relay — it loads the wire_layout.json golden bytes and the harness's pure builders
+// (e2e/harness/wire.mjs), then asserts:
 //   1. Re-signing the golden Authorization produces the golden sig (byte-exact).
 //   2. Re-assembling the wire produces the golden wire (byte-exact).
-//   3. verifyWire(golden.wire_hex) returns true.
-//   4. The golden QR round-trips: encodeRequest → decodeRequest recovers the original fields.
+//   3. The golden sig verifies under the golden key (ed25519 parity with dalek verify_strict).
+//   4. The golden QR round-trips: build → decode recovers the original fields.
+//   5. The TS BigInt amount parser matches the Rust parser goldens (incl. > 2^53).
+//   6. The icp builders (transfer arg / balance_of arg / call request_id) match the dpay-icp
+//      production-encoder goldens (the IC rail the whole suite now settles over).
+//
+// Retired surfaces (withdraw signing buffer, canister-signed receipt claim) were dropped at the
+// IC-rail cutover (user-principal envelopes, rail proofs) — their layout JSON survives ONLY as a
+// static-layout guard in scripts/check-wasm-core.mjs (w_layout_json pins the file byte-for-byte),
+// so no golden here needs to re-pin them.
 //
 // If this test fails, do NOT proceed to the flow tests — the local pay path is broken. That is the
-// "no silent errors" guarantee: a stale wire_layout.json or a bug in the shim surfaces HERE, not as
-// a mysterious 422 from the relay two flows later.
+// "no silent errors" guarantee: a stale wire_layout.json or a bug in the builders surfaces HERE,
+// not as a mysterious 422 from the gateway two flows later.
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { createHash as cryptoCreateHash } from 'node:crypto';
 import { assert, assertEq } from '../harness/lib.mjs';
+import { icpTransferArgBytes, icpBalanceOfArgBytes, uleb } from '../harness/wire.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const WIRE_LAYOUT = join(__dirname, '..', '..', 'dfx', 'wire_layout.json');
@@ -124,8 +135,8 @@ export const meta = {
   id: '00',
   name: 'cross-val',
   journey: 'wire',
-  covers: ['wire-format', 'ed25519-parity', 'golden-bytes', 'receipt-claim'],
-  verifies: 'JS ed25519 shim is byte-exact vs the Rust core (withdraw sig, pay golden, receipt-claim golden) — no browser, ~0.1s.',
+  covers: ['wire-format', 'ed25519-parity', 'golden-bytes', 'icp-builders'],
+  verifies: 'JS byte builders (pay wire, request QR, amount parser, icp transfer/balance/rid) are byte-exact vs the Rust core goldens — no browser, ~0.1s.',
   timeoutMs: 5000,
 };
 
@@ -226,68 +237,64 @@ export async function run() {
   assertEq(dMemo, 'coffee', 'decoded request.memo == "coffee"');
   console.log('[00-cross-val] ✓ request QR round-trips byte-exact (to_name + memo in bytes)');
 
-  // --- (6) withdraw shim byte-exactness: re-signing the golden WithdrawAuth produces the golden
-  //   sig (mirrors `dpay_core::WithdrawAuth::signing_bytes`). If the shim's `buildWithdrawSigningBytes`
-  //   diverges from the Rust core, the FakeLedger/canister verify rejects the sig and the e2e
-  //   withdraw flow (15-withdraw) goes RED. The withdraw layout is variable-length (address last).
-  const wg = layout.withdraw.golden;
-  const W = layout.withdraw;
-  const wAddr = Buffer.from(wg.destination, 'utf8');
-  const wSigning = Buffer.alloc(W.fixed_len + W.addr_len_bytes + wAddr.length);
-  wSigning.set(hex(wg.public_hex), W.fields.from_pubkey.offset);
-  putU64Le(wSigning, W.fields.amount.offset, wg.amount);
-  wSigning.set(hex(wg.nonce_hex), W.fields.nonce.offset);
-  putU64Le(wSigning, W.fields.expiry.offset, wg.expiry);
-  putU32Le(wSigning, W.fields.currency.offset, wg.currency);
-  putU32Le(wSigning, W.fields.address_len.offset, wAddr.length);
-  wSigning.set(wAddr, W.fields.address_len.offset + W.addr_len_bytes);
-  assertEq(bytesToHex(new Uint8Array(wSigning)), wg.signing_hex, 'withdraw signing buffer (golden layout vs shim builder)');
-  const wSig = await ed.signAsync(new Uint8Array(wSigning), hex(wg.secret_hex));
-  if (bytesToHex(wSig) !== wg.sig_hex) {
-    throw new Error(
-      `[00-cross-val] WITHDRAW SIG MISMATCH — the JS shim's withdraw sig differs from the Rust core's.\n` +
-      `  rust : ${wg.sig_hex}\n  js   : ${bytesToHex(wSig)}\n` +
-      `  Local withdraw flows will NOT settle (FakeLedger/canister verify fails).`
-    );
-  }
-  console.log('[00-cross-val] ✓ withdraw sig matches Rust core byte-for-byte');
+  // --- (6) icp builders byte-exactness: the JS harness builders (e2e/harness/wire.mjs) must
+  //   produce the SAME bytes as the dpay-icp production encoder (ic-transport-types + candid
+  //   0.10.22 stack). These are the bytes the whole suite now settles over — the fake-IC /api/v2
+  //   gateway keys envelopes by request_id and decodes args with the real candid rules, so any
+  //   divergence here 4xxes every rail flow. Goldens TRIPLE-pinned: dpay-icp goldens.rs (the
+  //   source of truth, generated from the production encoder) + this cross-val + the wasm core
+  //   census (scripts/check-wasm-core.mjs pins the w_icp_* export surface that compiles the same
+  //   Rust into the web bundle).
+  const ICP = {
+    // goldens.rs EXPIRY: 1_685_570_400_000_000_000 (ns)
+    expiry: 1_685_570_400_000_000_000n,
+    // goldens.rs selfauth(): 3d9bdaa3…0202 — also the ed25519-derived sender of sk() below.
+    selfauthHex: '3d9bdaa34fe81df16699403f3e17d6030488fc8c9e37ab61036482d202',
+    // goldens.rs to_principal(): b56bf994…3c02 (k2t6j-2nvnp-…-6ae)
+    toPrincipalHex: 'b56bf994b37ae8e79f5ce000be1727a6060ae4eef24736b7cc999c3c02',
+    // goldens.rs G_TRANSFER_APP_SHAPE — app-shape transfer arg (default account, fee + 8B memo,
+    // no created_at_time): the ONLY shape icpTransferArgBytes can emit.
+    transferAppShape:
+      '4449444c066c06fbca0101c6fcb60204ba89e5c20402a2de94eb060282f3f391' +
+      '0c05d8a38ca80d7d6c02b3b0dac30368ad86ca8305026e036d7b6e7d6e780100' +
+      '011db56bf994b37ae8e79f5ce000be1727a6060ae4eef24736b7cc999c3c0200' +
+      '01904e0108aaaaaaaaaaaaaaaa0000959aef3a',
+    // goldens.rs G_BALANCE_OF_DEFAULT — balance_of arg over the DEFAULT account (all-zero
+    // subaccount canonicalized to none).
+    balanceOfDefault:
+      '4449444c036c02b3b0dac30368ad86ca8305016e026d7b0100011d3d9bdaa34fe' +
+      '81df16699403f3e17d6030488fc8c9e37ab61036482d20200',
+    // goldens.rs G_RID_NO_NONCE — request_id of the six-field no-nonce call over the app-shape
+    // transfer arg (pins the JS requestId leaf-hash/sort/concat math).
+    ridNoNonce: 'f1cd3d27b03b1505edb95e4e8f87e7c7491b80d1bc5d04f181c518fb7a1b74e7',
+  };
 
-  // --- (7) receipt shim byte-exactness: re-signing the golden ReceiptClaim produces the golden
-  //   sig, and the sig verifies under the golden receipt public key (mirrors
-  //   `dpay_core::ReceiptClaim::signing_bytes` + `verify_receipt`). The receipt is signed by the
-  //   CANISTER receipt key (`public_hex`), NOT by the payment's `from` — so the verify key is the
-  //   golden `public_hex`, while `from_hex`/`to_hex` are the payment's two pubkeys baked into the
-  //   claim. FIXED-length 108 bytes (unlike the variable-length withdraw). If this diverges from the
-  //   Rust core, the app's verify_receipt before "Paid ✓" rejects a real canister receipt.
-  const rg = layout.receipt.golden;
-  const R = layout.receipt;
-  assertEq(R.fixed_len, 108, 'receipt.fixed_len == 108 (RECEIPT_CLAIM_LEN)');
-  const rSigning = Buffer.alloc(R.fixed_len);
-  rSigning.set(hex(rg.nonce_hex), R.fields.nonce.offset);
-  rSigning.set(hex(rg.from_hex), R.fields.from.offset);
-  rSigning.set(hex(rg.to_hex), R.fields.to.offset);
-  putU64Le(rSigning, R.fields.amount.offset, rg.amount);
-  putU32Le(rSigning, R.fields.currency.offset, rg.currency);
-  putU64Le(rSigning, R.fields.block_index.offset, rg.block_index);
-  putU64Le(rSigning, R.fields.settle_ts.offset, rg.settle_ts);
-  assertEq(bytesToHex(new Uint8Array(rSigning)), rg.signing_hex, 'receipt signing buffer (golden layout vs shim builder)');
-  const rSig = await ed.signAsync(new Uint8Array(rSigning), hex(rg.secret_hex));
-  if (bytesToHex(rSig) !== rg.sig_hex) {
-    throw new Error(
-      `[00-cross-val] RECEIPT SIG MISMATCH — the JS shim's receipt sig differs from the Rust core's.\n` +
-      `  rust : ${rg.sig_hex}\n  js   : ${bytesToHex(rSig)}\n` +
-      `  The app's verify_receipt would reject a real canister-signed receipt.`
-    );
-  }
-  // The golden receipt sig verifies under the golden receipt public key (mirrors verify_receipt's
-  // verify_strict over the claim's signing_bytes).
-  const rOk = await ed.verifyAsync(
-    hex(rg.sig_hex),
-    new Uint8Array(rSigning),
-    hex(rg.public_hex),
-  );
-  assert(rOk, 'verifyAsync(receipt golden sig, signing, receipt public_hex) must be true (mirrors verify_receipt)');
-  console.log('[00-cross-val] ✓ receipt sig matches Rust core byte-for-byte + verifies');
+  // icpTransferArgBytes(to, amount, {fee, memoHex}) == G_TRANSFER_APP_SHAPE.
+  const transferArg = icpTransferArgBytes(hex(ICP.toPrincipalHex), 123_456_789n, { fee: 10_000n, memoHex: 'aa'.repeat(8) });
+  assertEq(bytesToHex(transferArg), ICP.transferAppShape, 'icp transfer arg (app shape) == dpay-icp golden');
+  // icpBalanceOfArgBytes(owner) == G_BALANCE_OF_DEFAULT.
+  const balanceArg = icpBalanceOfArgBytes(hex(ICP.selfauthHex));
+  assertEq(bytesToHex(balanceArg), ICP.balanceOfDefault, 'icp balance_of arg (default account) == dpay-icp golden');
+
+  // requestId() six-field math == G_RID_NO_NONCE. The harness requestId fn is module-private, so
+  // mirror its leaf/sort/concat logic here (same discipline as the wire builders above — the
+  // mirror reads the same spec the harness implements; a divergence fails THIS assert).
+  const ridFields = [
+    ['request_type', Buffer.from('call', 'utf8')],
+    ['ingress_expiry', Uint8Array.from(uleb(ICP.expiry))],
+    ['sender', hex(ICP.selfauthHex)],
+    ['canister_id', hex('000000000000000002')],
+    ['method_name', Buffer.from('icrc1_transfer', 'utf8')],
+    ['arg', Uint8Array.from(transferArg)],
+  ];
+  const sha256 = (b) => cryptoCreateHash('sha256').update(b).digest();
+  const ridLeaf = (v) => (v.__ridArray ? sha256(Buffer.concat(v.__ridArray.map(ridLeaf))) : sha256(v));
+  const ridHashed = ridFields.map(([k, v]) => [sha256(Buffer.from(k, 'utf8')), ridLeaf(v)]);
+  ridHashed.sort((a, b) => Buffer.compare(a[0], b[0]) || Buffer.compare(a[1], b[1]));
+  let ridConcat = Buffer.alloc(0);
+  for (const [kh, vh] of ridHashed) ridConcat = Buffer.concat([ridConcat, kh, vh]);
+  assertEq(bytesToHex(sha256(ridConcat)), ICP.ridNoNonce, 'icp request_id (no-nonce call) == dpay-icp golden');
+  console.log('[00-cross-val] ✓ icp builders match dpay-icp production goldens (transfer arg, balance_of arg, request_id)');
 
   // --- (8) amount parser cross-val: TS BigInt parser == fixed Rust goldens --------------------
   //   MC1 unit 1. The canonical parser is `dpay_core::{parse_decimal_to_units,
@@ -370,7 +377,7 @@ export async function run() {
   assertEq(JSON.stringify(tsParseDecimalToUnits('99999999999999999999999999999', 0)), JSON.stringify({ ok: false, err: 'overflow' }), 'TS reject overflow');
   console.log('[00-cross-val] ✓ TS BigInt amount parser matches Rust goldens (incl. > 2^53, u64::MAX, rejections)');
 
-  console.log('[00-cross-val] ALL CHECKS GREEN — local pay + withdraw + receipt + amount flows byte-exact vs the Rust core');
+  console.log('[00-cross-val] ALL CHECKS GREEN — pay wire + request QR + amount parser + icp builders byte-exact vs the Rust core');
 }
 
 // Allow `node tests/00-cross-val.mjs` to run standalone (the orchestrator imports `run`).

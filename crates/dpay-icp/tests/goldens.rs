@@ -66,6 +66,17 @@ const G_INT_INT_BIG: &str = "4449444c00017c8180808080808080808080808080808080807
 const G_INT_INT_POS_LEB: &str = "4449444c00017ce807"; // int 1000 (positive sleb)
 const G_RID_REAL_TRANSFER: &str = "775c99aa0766bd8890e7784dd5081104195302f7d7029e47421c4d4e60585a54";
 const G_RID_SPEC_CALL: &str = "1d1091364d6bb8a6c16b203ee75467d59ead468f523eb058880ae8ec80e2b101";
+
+// The exact shapes the e2e JS harness builders produce (e2e/harness/wire.mjs
+// `icpTransferArgBytes`/`icpBalanceOfArgBytes`): DEFAULT accounts (all-zero subaccount
+// canonicalized to none), fee + 8-byte memo set, NO created_at_time. Pinned so
+// `e2e/tests/00-cross-val.mjs` can cross-val the JS builders against production bytes
+// (the same discipline the wire-format goldens below already follow).
+const G_TRANSFER_APP_SHAPE: &str = "4449444c066c06fbca0101c6fcb60204ba89e5c20402a2de94eb060282f3f3910c05d8a38ca80d7d6c02b3b0dac30368ad86ca8305026e036d7b6e7d6e780100011db56bf994b37ae8e79f5ce000be1727a6060ae4eef24736b7cc999c3c020001904e0108aaaaaaaaaaaaaaaa0000959aef3a";
+const G_BALANCE_OF_DEFAULT: &str = "4449444c036c02b3b0dac30368ad86ca8305016e026d7b0100011d3d9bdaa34fe81df16699403f3e17d6030488fc8c9e37ab61036482d20200";
+// request_id of the JS-harness-reachable NO-nonce call (six CallRequest fields only, arg = the
+// app-shape transfer arg above) — pins the e2e JS requestId() leaf/sort/concat math.
+const G_RID_NO_NONCE: &str = "f1cd3d27b03b1505edb95e4e8f87e7c7491b80d1bc5d04f181c518fb7a1b74e7";
 // --- TransferResult replies: the REAL ic-icrc1-ledger shape (bare variant; Ok : nat,
 // Err → the TransferError variant) regenerated with candid 0.10.22 from ledger.did types.
 const G_TR_OK: &str = "4449444c086b02bc8a017dc5fed201016b08d1c4987c02c291ecb9027f94c1c7890403eb82a8970404a1c3ebfd0705f087e6db090693e5bec80c7feb9cdbd50f076c02c7ebc4d00971c498b1b50d7d6c019bb3bea60a7d6c018bbdf29b017d6c01bf9bb7f00d7d6c01a3bb918c0a786c019cbab69c027d010000d209";
@@ -180,6 +191,33 @@ fn golden_transfer_arg_minimal() {
     let to = Account { owner: to_principal(), subaccount: [0u8; 32] };
     let b = icrc::transfer_arg(&to, Some([0u8; 32]), 0, None, None, None);
     assert_eq_hex(&b, G_TRANSFER_MINIMAL, "transfer arg (minimal)");
+}
+
+#[test]
+fn golden_app_shape_transfer_and_balance() {
+    // JS-harness-reachable shapes (see the consts' doc above) — the app/e2e builders can
+    // ONLY produce these, so they are the bytes tests/00-cross-val.mjs pins against.
+    let to = Account { owner: to_principal(), subaccount: [0u8; 32] };
+    let b = icrc::transfer_arg(&to, None, 123_456_789, Some(10_000), Some(vec![0xAA; 8]), None);
+    assert_eq_hex(&b, G_TRANSFER_APP_SHAPE, "transfer arg (app shape)");
+    let bal = icrc::balance_of_arg(&Account { owner: selfauth(), subaccount: [0u8; 32] });
+    assert_eq_hex(&bal, G_BALANCE_OF_DEFAULT, "balance_of arg (default account)");
+}
+
+#[test]
+fn golden_no_nonce_call_request_id() {
+    // The JS-harness-reachable rid field set (icpSignUpdate with no opts.nonce): the six
+    // CallRequest fields over the app-shape transfer arg. The e2e JS requestId() mirror is
+    // cross-val'd against THIS golden in tests/00-cross-val.mjs §9.
+    let rid = request_id(&[
+        ("request_type", RidValue::Str("call".into())),
+        ("ingress_expiry", RidValue::U64(EXPIRY)),
+        ("sender", RidValue::Bytes(selfauth().as_slice().to_vec())),
+        ("canister_id", RidValue::Bytes(vec![0, 0, 0, 0, 0, 0, 0, 0, 2])),
+        ("method_name", RidValue::Str("icrc1_transfer".into())),
+        ("arg", RidValue::Bytes(unhex(G_TRANSFER_APP_SHAPE))),
+    ]);
+    assert_eq_hex(&rid, G_RID_NO_NONCE, "no-nonce call request_id");
 }
 
 #[test]

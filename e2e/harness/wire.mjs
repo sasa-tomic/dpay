@@ -243,8 +243,8 @@ function derWrap(raw32) {
 
 const IC_DOMAIN = Buffer.from('\x0Aic-request', 'utf8');
 
-// uleb128 (u128 as BigInt)
-function uleb(v) {
+// uleb128 (u128 as BigInt) — exported for tests/00-cross-val.mjs's request_id mirror.
+export function uleb(v) {
   let x = BigInt(v); const out = [];
   do { let b = Number(x & 0x7fn); x >>= 7n; if (x > 0n) b |= 0x80; out.push(b); } while (x > 0n);
   return out;
@@ -295,14 +295,16 @@ export async function icpSignUpdate(secretHex, canisterText, methodName, argByte
   const sender = Uint8Array.from([...sha224(der), 0x02]);
   const canister = canisterBytesFromText(canisterText);
   const noncePairs = opts.nonce != null ? [['nonce', cborBytes(Uint8Array.from(uleb(BigInt(opts.nonce))))]] : [];
+  // Field order mirrors the Rust CallRequest struct EXACTLY (nonce after request_type) — the
+  // envelope CBOR is byte-compared against the Rust goldens in tests/00-cross-val.mjs §9.
   const contentPairs = [
     ['request_type', cborText('call')],
+    ...noncePairs,
     ['ingress_expiry', Uint8Array.from(cborHead(0, BigInt(ingressExpiryNs)))],
     ['sender', cborBytes(sender)],
     ['canister_id', cborBytes(canister)],
     ['method_name', cborText(methodName)],
     ['arg', cborBytes(Uint8Array.from(argBytes))],
-    ...noncePairs,
   ];
   const rid = requestId([
     ['request_type', ridBytes(Buffer.from('call', 'utf8'))],

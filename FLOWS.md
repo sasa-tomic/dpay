@@ -3,8 +3,11 @@
 > The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **78 flows**
 > (77 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
-> against a real test relay (FakeLedger, offline). No UI stubs. The only shimmed I/O boundary is
-> the camera scan (sanctioned smallest-boundary seam) and the NFC radio (physical-device gate).
+> against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
+> real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
+> boundary nodes would (the relay's catalog/faucet sugar persists around it). No UI stubs. The
+> only shimmed I/O boundary is the camera scan (sanctioned smallest-boundary seam) and the NFC
+> radio (physical-device gate).
 >
 > **This file is GENERATED** by `node e2e/gen-flows-md.mjs` from each flow's `meta` export. Never
 > hand-edit the tables — edit the `meta` and re-run. Only the "Coverage gaps" / "How to add" prose
@@ -28,7 +31,7 @@ wire (1) · onboard (8) · pay (18) · offline (7) · deposit (8) · withdraw (7
 
 | # | Flow | Verifies | Covers |
 |---|------|----------|--------|
-| 00 | cross-val | JS ed25519 shim is byte-exact vs the Rust core (withdraw sig, pay golden, receipt-claim golden) — no browser, ~0.1s. | wire-format, ed25519-parity, golden-bytes, receipt-claim |
+| 00 | cross-val | JS byte builders (pay wire, request QR, amount parser, icp transfer/balance/rid) are byte-exact vs the Rust core goldens — no browser, ~0.1s. | wire-format, ed25519-parity, golden-bytes, icp-builders |
 
 ### Onboarding & funding
 
@@ -62,7 +65,7 @@ wire (1) · onboard (8) · pay (18) · offline (7) · deposit (8) · withdraw (7
 | 36 | bad-qr | Scanning/pasting garbage (non-base64 + wrong-length) surfaces a friendly 'This isn't't a dpay payment code' error; review never mounts; scan surface re-arms. | bad-qr, malformed, error-handling, input-validation |
 | 43 | decimal-edges | 8-dec (ckBTC) + 6-dec (ckUSDC) + 18-dec (ckDAI) amounts render with exact decimals on review (no rounding, no sci-notation, no trailing-zero drift). | decimal, format, ckbtc, ckerc20, 18-decimal |
 | 49 | deeplink-request | dpay:req deeplink opens the pay review screen pre-filled with the merchant request (no auto-approve). | deeplink, request-link, prefill, pay-review |
-| 50 | deeplink-receipt | merchant binds a dpay:pay rail-proof blob (base64url JSON, memo-keyed railTransfer settle) to the open request → Received ∂25.00; never routes to Pay. | deeplink, receipt-link, rail-proof, receive, handback |
+| 50 | deeplink-receipt | merchant binds a dpay:pay rail-proof blob to the open request; a forged well-formed proof (random rid) never flips to Received (poll-gated) — only the real pre-settled proof does; never routes to Pay. | deeplink, receipt-link, rail-proof, receive, handback, forgery |
 | 59 | share-receipt | After an online settle, btn-share-receipt hands an openable /wallet?pay= receipt URL to Share and flips to "Link copied ✓". | share-receipt, receipt-link, handback, online-settle, deeplink |
 | 61 | merchant-received-name | IC-rail counterparty rendering: history shows the short PRINCIPAL TEXT (not full principal, not hex pubkey) and the memo (reconciliation key) is visible; friendly names died with the facade settlement. | receive, settle, confirmation, counterparty-rendering, memo-reconciliation |
 
