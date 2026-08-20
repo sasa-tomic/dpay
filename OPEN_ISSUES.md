@@ -10,19 +10,23 @@
 
 ## NEXT SESSION — work order
 
-> **THE switch: IC rail → user-principal (set 2026-08-18, founder-ordered).** The PoC is
-> BUILT, AUDITED, and MAINNET-PROVEN this session (see `CODEBASE_ANALYSIS.md` §"IC
-> user-principal rail" and the full plan: **`2026-08-18-user-principal-rail.md`** — read it
-> first; it carries the proven-evidence table, target architecture, measured semantics
-> (replay/dedup/expiry-window/fees), and workstreams W1–W8 with sizes). New crates:
-> `crates/dpay-icp` (pure signer/codec core, wasm32-safe), `dpay-icp-tests` (PocketIC
-> production-validator e2e — `just test-icp`, ON the check hot path), `dpay-icp-e2e`
-> (`just test-icp-replica` + opt-in `ic-mainnet-probe`/`ic-mainnet-update-probe`, never in
-> check). Next session = product cutover, starting W1 (app submission client: RN+wasm
-> `/api/v2` POST, NFC envelope chunking, `/api/v2/status` clock sync, catalog
-> ledger/fee/decimals) and W2 (payer flows rewire); W7 retires the facade's settlement
-> surface + relay `/pay`,`/withdraw`,`/receipt*` routes. NO feature flags, NO legacy, NO
-> migration (founder-set). Uncommitted at session end — commit as one unit.
+> **THE switch: IC rail → user-principal (set 2026-08-18, founder-ordered).** W1–W7 ARE
+> COMMITTED (2026-08-19/20, on top of PoC `288c14d`): `74d3587` W1 rail client, `04bb2b4` W2
+> payer flows, `80a2415` W3 merchant flows, `6bc026e` W4 deposits, `70c72ca` fake-IC gateway +
+> dpay-icp gateway codecs, `f02a0f6` icNowNs recursion fix, `b064462` W7 app/ffi custody
+> retirement, `43e4e9a` e2e seams — plus this session's W7-relay + W8 commits (relay route/
+> trait retirement, live.rs rewrite, e2e flow rewrite to the rail). The facade and relay are
+> OUT of the value path; the app signs /api/v2 envelopes locally.
+>
+> **REMAINING (in order):**
+> 1. **The wasm dual-allocator bug** (see OPEN BUG below) — blocks full-suite `just e2e`
+>    green. Repro `e2e/debug/wasm-hammer.mjs`, deterministic. This is THE next work item.
+> 2. **Device gates** (never ran on this cutover): `just app` (DPAY_SELFCHECK PASS), `just
+>    ondevice`, `just campreview` — trigger paths (dpay-ffi/app-services/android) all fired.
+> 3. **Full-suite e2e green** after (1) (last runs: 3-5 flows red under load, all green
+>    standalone; flows 30/42 deleted as retired-surface, 22's timeout bumped to 25s).
+> 4. `test-icp-replica` is green; keep it on any rail change. Prod ship (`just deploy-ic &&
+>    just apk && just up`) AFTER all gates — prod is behind head.
 >
 > **Agent-pickable work queued: the Trust Wallet fund-button** (set 2026-08-17). Full researched
 > plan: **`2026-08-17-trust-wallet-fund-button.md`** — read it first; it carries the verified
@@ -71,6 +75,42 @@
   plain 4h edge TTL and NO `immutable`, so they self-healed — no purge needed. Only the APK is
   purge-required.)
 
+
+## OPEN BUG (2026-08-20): wasm dual-allocator corruption under browser concurrency — blocks full-suite e2e green
+
+> **Symptom:** under e2e suite load (≥6 parallel browser flows), app-side wasm calls fail
+> transiently: `w_icp_envelope_request_id` returns BAD_UTF8 on VALID input (`envelope submit
+> failed (Utf8)` in flows 08/21), and deposit queries trap with `memory access out of bounds`
+> (flow 05/22: `icrc1_balance_of/get_btc_address query failed`). All affected flows pass
+> standalone; failures move around run to run but the repro trigger is deterministic.
+
+> **Repro (committed):** `node e2e/debug/wasm-hammer.mjs` — drives the REAL app's wasm-backed
+> DpayCore (via the `window.__DPAY_TEST_CORE` seam in `e2e/web/shims.ts`) with 8 concurrent
+> workers × 40 × (icpEnvelopeRequestId + icpSelfPrincipal). Fails at exactly call #281, memory
+> exactly 18 pages, every run.
+>
+> **Evidence (from the in-shim diag, since reverted):** at failure `preMatchesInput=true`
+> (input bytes verified correct immediately before the export), export still returned BAD_UTF8,
+> and `postMatchesInput=false` — the input region was overwritten DURING the export call with
+> envelope-shaped CBOR (`a6` map(6) + `request_type` text fragment = a sign_update output
+> layout). `envP=1114280`, `out=1114680` (no overlap with the 395B input). Retrying the same
+> call alone immediately after RECOVERS. Node-side interleaved repro of the same call shape
+> (with jitter awaits, 4 workers, growth pressure) PASSES — browser-only. The wasm memory
+> section: initial 0 pages, NO max, module owns its memory; `w_alloc` = AtomicU32 monotonic
+> bump (non-CAS load/store), grows on demand.
+>
+> **Working hypothesis:** two callers receive overlapping `w_alloc` regions (a concurrent sign
+> call's output landed on the failing call's input). Mechanism unclear — JS sync blocks after
+> `await core()` should be atomic; second-instance theory contradicted by envP being deep in
+> the heap (a fresh instance would allocate near `__heap_base`). Next steps: instrument
+> `w_alloc` with a JS-visible monotonicity probe (`w_alloc(0)` returns current top — a backward
+> jump or repeated pointer proves overlap), check V8's instantiate-into-existing-memory
+> behavior, consider making the JS side serialize wasm calls through one promise queue as a
+> workaround.
+>
+> **Impact:** full `just e2e` suite red under load (3-5 flows per run, all green standalone);
+> inner-loop gates (`just check`, jest, replica, individual flows) all green. Not believed
+> reachable on Android (UniFFI path is properly threaded) — unverified.
 
 ## OPEN BUG (2026-08-17): NFC request (reader role) fails on LineageOS/older Android — awaiting device logcat
 
