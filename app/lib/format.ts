@@ -28,7 +28,12 @@ const _MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 
 const _isSameCalendarDay = (a: Date, b: Date) =>
   a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 export const fmtTime = (ts: number) => {
+  // Non-finite guard: a row with a missing/garbage timestamp (or a unit regression — ICRC-3
+  // nanoseconds instead of seconds) must render a stable placeholder, not leak
+  // "undefined NaN, NaN" into the history list (2026-08-21 field bug).
+  if (!Number.isFinite(ts)) return '—';
   const d = new Date(ts * 1000);
+  if (isNaN(d.getTime())) return '—';
   const now = new Date();
   const hh12 = ((d.getHours() + 11) % 12) + 1; // 1..12
   const mm = String(d.getMinutes()).padStart(2, '0');

@@ -1,5 +1,5 @@
 import { describe, test, expect } from '@jest/globals';
-import { parseRequestQR, usd, short } from '../lib/format';
+import { parseRequestQR, usd, short, fmtTime } from '../lib/format';
 
 describe('parseRequestQR', () => {
   test('plain base64url passes through (no |name suffix anymore)', () => {
@@ -27,4 +27,24 @@ describe('parseRequestQR', () => {
 describe('format helpers (unchanged shape)', () => {
   test('usd formats a raw-cent string', () => { expect(usd('2500')).toBe('∂25.00'); });
   test('short truncates hex', () => { expect(short('0123456789abcdef')).toBe('01234567…'); });
+});
+
+// 2026-08-21: history rows rendered 'undefined NaN, NaN' when a timestamp was missing or in the
+// WRONG UNIT (the relay shipped ICRC-3 nanoseconds into a seconds contract). fmtTime now guards
+// non-finite inputs and out-of-range dates instead of leaking _MONTHS[NaN].
+describe('fmtTime — bad timestamps render an honest dash, never NaN text', () => {
+  test('NaN / non-finite → dash', () => {
+    expect(fmtTime(Number.NaN)).toBe('—');
+    expect(fmtTime(Infinity)).toBe('—');
+  });
+  test('nanosecond-unit leak (1.78e18 ns) overflows Date → dash', () => {
+    // The exact prod shape: ICRC-3 ns passed where seconds were promised.
+    expect(fmtTime(1787293294089299225)).toBe('—');
+  });
+  test('a real seconds timestamp renders a real date label (not NaN)', () => {
+    const out = fmtTime(Math.floor(Date.now() / 1000));
+    expect(out).not.toContain('NaN');
+    expect(out).not.toContain('undefined');
+    expect(out.length).toBeGreaterThan(0);
+  });
 });

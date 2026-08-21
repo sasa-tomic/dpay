@@ -84,6 +84,21 @@ const STATUS_TIMEOUT_SECS: u64 = 5;
 const HISTORY_PAGE_BLOCKS: u64 = 1_000;
 /// Total round-trip budget for one history walk (the log_length probe included).
 const HISTORY_MAX_ROUND_TRIPS: usize = 10;
+/// Wall-clock budget for one whole history walk (probe + pages). The per-call
+/// CANISTER_CALL_TIMEOUT_SECS bounds a single hung replica round trip, but a healthy-yet-slow
+/// ledger (mature mainnet logs, archived-boundary pages) could still burn the FULL round-trip
+/// budget serially — tens of seconds per request. History is a "recent blocks" read polled
+/// every few seconds per client: returning what was collected when the budget expires keeps the
+/// documented recent-blocks-only semantic (older rows simply aren't served) and the relay
+/// responsive under load (2026-08-21 fix: unbounded walks saturated the relay → edge 502s and
+/// client aborts on currencies whose logs walk slowly).
+const HISTORY_WALK_TIMEOUT_SECS: u64 = 4;
+/// Consecutive zero-match TAIL pages after which the walk stops early. A user with no rows in
+/// the newest 2×1_000 blocks has no "recent" history by definition — walking 8 more pages of
+/// a mature ledger to confirm that is pure load (the row-limit early-break never fires when
+/// nothing matches).
+const HISTORY_EMPTY_PAGE_STOP: usize = 2;
+/// TTL of the per-(ledger, account, currency) history cache. The wallet re-polls /transactions
 
 /// Candid mirror of the facade's `DepositInfo` reply (static deposit metadata).
 #[derive(CandidType, Deserialize, Debug)]
@@ -112,6 +127,7 @@ struct DepositInfoCacheEntry {
     fetched_at: std::time::Instant,
     info: DepositInfo,
 }
+
 
 
 
@@ -381,86 +397,19 @@ impl Ledger for AgentLedger {
         let me = user_account(&pubkey);
         let limit = limit.max(1) as usize;
 
-        let fetch_page = |start: u64, length: u64| async move {
-            let arg = encode_args((GetBlocksRequest {
-                start: Nat::from(start),
-                length: Nat::from(length),
-            },))
-            .map_err(|e| LedgerError::Transient(format!("encode get_transactions arg: {e}")))?;
-            let reply = tokio::time::timeout(
-                Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
-                self.agent
-                    .query(&ledger, "get_transactions")
-                    .with_arg(arg)
-                    .call(),
-            )
-            .await
-            .map_err(|_| {
-                LedgerError::Transient(format!(
-                    "get_transactions timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
-                ))
-            })?
-            .map_err(|e| LedgerError::Transient(format!("get_transactions query: {e}")))?;
-            decode_one::<GetTransactionsResponse>(&reply)
-                .map_err(|e| LedgerError::Transient(format!("decode get_transactions reply: {e}")))
-        };
-
-        // 1. Probe: (start=0, length=PAGE). For a short log this page IS the whole live log
-        //    (ascending) — serve it reversed and done in one round trip.
-        let probe = fetch_page(0, HISTORY_PAGE_BLOCKS as u64).await?;
-        let probe_len = probe.transactions.len() as u64;
-        let total = nat_to_u64(&probe.log_length, "log_length")?;
-        let mut rows: Vec<TxnRecord> = Vec::new();
-        let probe_served_upto = nat_to_u64(&Nat(probe.first_index.0.clone()), "first_index")?
-            .saturating_add(probe_len);
-        if probe_served_upto >= total {
-            for txn in probe.transactions.iter().rev() {
-                if let Some(record) = map_icrc_txn(txn, &me, currency) {
-                    rows.push(record);
-                }
-            }
-            rows.truncate(limit); // newest-first already
-            return Ok(rows);
+        // NO result cache, deliberately: a just-settled payment must be visible to the payer's
+        // VERY NEXT history poll (a freshness contract the live tests pin). The walk itself is
+        // bounded — HISTORY_WALK_TIMEOUT_SECS overall deadline + the zero-match early-stop —
+        // so serving every poll directly stays cheap even for no-history accounts.
+        let deadline = std::time::Instant::now() + Duration::from_secs(HISTORY_WALK_TIMEOUT_SECS);
+        let rows = self
+            .transactions_walk(&ledger, &me, currency, limit, deadline)
+            .await;
+        if let Ok(rows) = rows {
+            Ok(rows)
+        } else {
+            rows
         }
-
-        // 2. Long log: DISCARD the probe's rows (the OLDEST live blocks — the user's recent txns
-        //    are at the tail) and walk BACKWARDS from the probe's log_length snapshot.
-        let mut end = total; // exclusive upper block index of the next page
-        for _ in 1..HISTORY_MAX_ROUND_TRIPS {
-            let start = end.saturating_sub(HISTORY_PAGE_BLOCKS);
-            let page = fetch_page(start, end - start).await?;
-            let page_len = page.transactions.len() as u64;
-            // Drift datum: the ACTUAL first block index of the served range (never assume the
-            // requested `start` — the canister reconcile pattern).
-            let first_index = nat_to_u64(&Nat(page.first_index.0.clone()), "first_index")?;
-
-            // Serve this page newest→oldest; across pages `rows` stays globally newest-first.
-            for txn in page.transactions.iter().rev() {
-                if let Some(record) = map_icrc_txn(txn, &me, currency) {
-                    rows.push(record);
-                }
-            }
-            if rows.len() >= limit {
-                break; // enough NEWEST rows — older pages can't add anything the caller renders
-            }
-
-            // Archived boundary: this response could not serve (part of) the asked range from the
-            // local log — the walk stops here (recent-blocks-only; see method doc).
-            if !page.archived_transactions.is_empty() {
-                break;
-            }
-            // Empty page or block 0 reached: nothing older exists to ask for.
-            if page_len == 0 || first_index == 0 {
-                break;
-            }
-            // Drift-safe anchor: continue from where the ledger ACTUALLY served, not from the
-            // requested `start` (a shifted/short range is re-asked from its true front; blocks
-            // are never skipped or double-counted).
-            end = first_index;
-        }
-
-        rows.truncate(limit);
-        Ok(rows)
     }
 
     async fn healthy(&self) -> bool {
@@ -625,6 +574,118 @@ impl Ledger for AgentLedger {
 }
 
 impl AgentLedger {
+    /// The icrc3 walk itself (probe + backwards pages), bounded by `deadline`. Split from
+    /// [`AgentLedger::transactions_on_ledger`] so the cache wrapper stays readable.
+    async fn transactions_walk(
+        &self,
+        ledger: &Principal,
+        me: &Account,
+        currency: Currency,
+        limit: usize,
+        deadline: std::time::Instant,
+    ) -> Result<Vec<TxnRecord>, LedgerError> {
+        let ledger = *ledger;
+
+        let fetch_page = |start: u64, length: u64| async move {
+            let arg = encode_args((GetBlocksRequest {
+                start: Nat::from(start),
+                length: Nat::from(length),
+            },))
+            .map_err(|e| LedgerError::Transient(format!("encode get_transactions arg: {e}")))?;
+            let reply = tokio::time::timeout(
+                Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
+                self.agent
+                    .query(&ledger, "get_transactions")
+                    .with_arg(arg)
+                    .call(),
+            )
+            .await
+            .map_err(|_| {
+                LedgerError::Transient(format!(
+                    "get_transactions timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
+                ))
+            })?
+            .map_err(|e| LedgerError::Transient(format!("get_transactions query: {e}")))?;
+            decode_one::<GetTransactionsResponse>(&reply)
+                .map_err(|e| LedgerError::Transient(format!("decode get_transactions reply: {e}")))
+        };
+
+        // 1. Probe: (start=0, length=PAGE). For a short log this page IS the whole live log
+        //    (ascending) — serve it reversed and done in one round trip.
+        let probe = fetch_page(0, HISTORY_PAGE_BLOCKS as u64).await?;
+        let probe_len = probe.transactions.len() as u64;
+        let total = nat_to_u64(&probe.log_length, "log_length")?;
+        let mut rows: Vec<TxnRecord> = Vec::new();
+        let probe_served_upto = nat_to_u64(&Nat(probe.first_index.0.clone()), "first_index")?
+            .saturating_add(probe_len);
+        if probe_served_upto >= total {
+            for txn in probe.transactions.iter().rev() {
+                if let Some(record) = map_icrc_txn(txn, &me, currency) {
+                    rows.push(record);
+                }
+            }
+            rows.truncate(limit); // newest-first already
+            return Ok(rows);
+        }
+
+        // 2. Long log: DISCARD the probe's rows (the OLDEST live blocks — the user's recent txns
+        //    are at the tail) and walk BACKWARDS from the probe's log_length snapshot.
+        let mut end = total; // exclusive upper block index of the next page
+        let mut empty_pages = 0usize; // consecutive tail pages with ZERO rows for this user
+        for _ in 1..HISTORY_MAX_ROUND_TRIPS {
+            // Wall-clock budget: serve what we have (recent-blocks-only semantic) instead of
+            // burning the full round-trip budget on a slow/archived ledger.
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+            let start = end.saturating_sub(HISTORY_PAGE_BLOCKS);
+            let page = fetch_page(start, end - start).await?;
+            let page_len = page.transactions.len() as u64;
+            // Drift datum: the ACTUAL first block index of the served range (never assume the
+            // requested `start` — the canister reconcile pattern).
+            let first_index = nat_to_u64(&Nat(page.first_index.0.clone()), "first_index")?;
+
+            let before = rows.len();
+            // Serve this page newest→oldest; across pages `rows` stays globally newest-first.
+            for txn in page.transactions.iter().rev() {
+                if let Some(record) = map_icrc_txn(txn, &me, currency) {
+                    rows.push(record);
+                }
+            }
+            if rows.len() >= limit {
+                break; // enough NEWEST rows — older pages can't add anything the caller renders
+            }
+            // Zero-match early stop: a user absent from the newest empty_pages×1_000 blocks has
+            // no "recent" history — walking a mature ledger further is pure load (the limit
+            // break above can never fire when nothing matches).
+            if rows.len() == before {
+                empty_pages += 1;
+                if empty_pages >= HISTORY_EMPTY_PAGE_STOP {
+                    break;
+                }
+            } else {
+                empty_pages = 0;
+            }
+
+            // Archived boundary: this response could not serve (part of) the asked range from the
+            // local log — the walk stops here (recent-blocks-only; see method doc).
+            if !page.archived_transactions.is_empty() {
+                break;
+            }
+            // Empty page or block 0 reached: nothing older exists to ask for.
+            if page_len == 0 || first_index == 0 {
+                break;
+            }
+            // Drift-safe anchor: continue from where the ledger ACTUALLY served, not from the
+            // requested `start` (a shifted/short range is re-asked from its true front; blocks
+            // are never skipped or double-counted).
+            end = first_index;
+        }
+
+        rows.truncate(limit);
+        Ok(rows)
+    }
+
     /// Runtime CkDeposit-helper read: `get_minter_info()` on the ckETH-family minter, returning
     /// `Ok(Some(address))` when the minter configures
     /// `deposit_with_subaccount_helper_contract_address`. The live ckETH minter exposes it as a
@@ -713,7 +774,7 @@ fn map_icrc_txn(txn: &Transaction, me: &Account, currency: Currency) -> Option<T
     let memo_hex = |m: &Option<icrc_ledger_types::icrc1::transfer::Memo>| {
         m.as_ref().map(|b| hex::encode(b.0.as_slice())).unwrap_or_default()
     };
-    let ts = txn.timestamp;
+    let ts = txn.timestamp / 1_000_000_000; // ICRC-3 timestamps are NANOSECONDS; rows contract is unix SECONDS
 
     if let Some(transfer) = txn.transfer.as_ref() {
         let from_is_me = transfer.from == *me;

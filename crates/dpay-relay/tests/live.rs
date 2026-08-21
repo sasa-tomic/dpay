@@ -613,7 +613,15 @@ fn live_icrc3_history_walks_the_real_ledger_log() {
             "memo renders as hex bytes"
         );
         assert_eq!(r0["currency"].as_u64(), Some(u64::from(DEMO_USD)));
-        assert!(r0["timestamp"].as_u64().is_some(), "timestamp is a unix-seconds number");
+        // Magnitude pin, not just type: ICRC-3 blocks carry NANOSECOND timestamps and the rows
+        // contract is unix SECONDS — a raw-ns leak here renders as "undefined NaN, NaN" in the
+        // app's history rows (2026-08-21 field bug). Pin the seconds range so the ns→s division
+        // can never silently regress.
+        let ts0 = r0["timestamp"].as_u64().expect("timestamp is a number");
+        assert!(
+            ts0 > 1_500_000_000 && ts0 < 3_000_000_000,
+            "timestamp {ts0} must be unix SECONDS (got ns?)"
+        );
 
         // Middle: the out-transfer (250) — from = payer.
         let r1 = &rows[1];
@@ -852,6 +860,54 @@ fn live_faucet_mints_at_user_principal_with_relay_side_cooldown() {
         assert_eq!(b["balance"].as_str(), Some("20000"), "second top-up stacks (body={b})");
     });
     assert_eq!(user_balance(&pic.0, &ledger), 20_000u64);
+}
+
+// The REFUSAL side of the faucet's money-safety gate, pinned verbatim: an agent that is NOT the
+// canister's controller is refused by `require_admin` and the relay surfaces the canister's text
+// 1:1 as the 422 {error} the app shows. Two shapes, both the exact prod failure class reported
+// 2026-08-20 ("Faucet top up fails: unauthorized: admin ops require the controller principal"):
+//   - ANONYMOUS — DPAY_CONTROLLER_SEED unset (the relay's default without deploy-side wiring);
+//   - WRONG SEED — a set-but-different key (an operator pasting the wrong half / wrong identity).
+// The mirror of the happy path above; if the canister's gate wording or the relay's verbatim
+// mapping ever drifts, this test is what catches it.
+#[test]
+fn live_faucet_refuses_non_controller_identities_verbatim() {
+    let (_pic, _ledger, dpay, gateway_url, _seed) = stand_up_with_controller_seed();
+    let hex_pk = hex::encode(generate_keypair().verifying_key().to_bytes());
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime");
+
+    // (a) anonymous agent — exactly `AgentLedger::connect` with no DPAY_CONTROLLER_SEED;
+    // (b) an agent holding a DIFFERENT seed — self-authenticates as a non-controller principal.
+    let anonymous = rt
+        .block_on(AgentLedger::connect(&gateway_url, dpay))
+        .expect("anonymous agent connects");
+    let wrong_seed = rt
+        .block_on(AgentLedger::connect_with_identity(&gateway_url, dpay, true, [9u8; 32]))
+        .expect("wrong-seed agent connects");
+
+    for (name, ledger) in [("anonymous", anonymous), ("wrong seed", wrong_seed)] {
+        let state = AppState::new(Arc::new(ledger));
+        let body = serde_json::json!({ "account": hex_pk, "amount": "10000" });
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/faucet")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        rt.block_on(async {
+            let (s, b) = call(&state, req).await;
+            assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{name}: faucet body={b}");
+            assert_eq!(
+                b["error"].as_str(),
+                Some("unauthorized: admin ops require the controller principal"),
+                "{name}: the canister's verbatim refusal must surface 1:1 (body={b})"
+            );
+        });
+    }
 }
 
 // --- WAVE 5: runtime ckERC20-helper read ---------------------------------------------------------
