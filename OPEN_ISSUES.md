@@ -35,8 +35,7 @@
 > 4. ~~**Replica gate on rail changes**~~ ✅ re-run on the integrated tree after this session's
 >    rail changes: `just test-icp-replica` **18/18 PASS**.
 >
-> **2026-08-21 two-physical-phone NFC field session — THREE prod bugs found & fixed in-tree
-> (all verified, all awaiting one founder ship):**
+> **2026-08-21 two-physical-phone NFC field session — the first three fixes did not close the tap:**
 >
 > 1. ~~Payer-side auto-decline~~ ✅ ROOT CAUSE: the app's certified-clock sync (`icNowNs` →
 >    read_state `[[time]]`) was routed at the MANAGEMENT canister `aaaaa-aa`, but icp-api.io
@@ -72,11 +71,31 @@
 >    `fmtTime` non-finite guard → '—'. Names in history stay PRINCIPAL-prefix by design
 >    post-cutover (ledger memo is the frozen 16-byte nonce reconciliation key — extending it
 >    was considered and REJECTED; a signed name registry is a founder follow-up, NOT in-tree).
+> 4. **REOPENED physical NFC false-failure — rewritten, awaiting two-phone re-test.** A fresh APK containing fixes
+>    1–3 still produced receiver "payment was declined" + payer "payment didn't complete" while
+>    the transfer settled. Receiver logcat proved the signed envelope arrived and the old 17-byte
+>    receipt write returned `9000`; its status was `UNREACHABLE`, so transport, receipt, and UI told
+>    three different stories. Root design failure: settlement was owned independently by Rust
+>    receipt states, a blocking Kotlin receipt queue, `NfcTap`'s short poll, and `ReceiveMode`'s
+>    second poll. The first rewrite removed that duplicate ownership, but a later physical test found
+>    the remaining offline-payer bug: `prepareTransfer` still fetched certified IC time on the payer,
+>    so airplane mode produced C4 `6210` then sticky decline `6985` before any update existed.
+>    **Current v2 rewrite:** the online merchant stamps a short certified expiry into the NFC request;
+>    the offline payer signs both the update and a reusable sender-authorized read_state envelope;
+>    the merchant alone submits/polls, exact-history-binds any success, then signs and returns status
+>    over C6. The payer core verifies merchant key + nonce + request ID. Result-only re-tap is supported;
+>    completed sessions cannot replay a bundle. HTTP status alone cannot decline, Duplicate is settled,
+>    and an unverified read_state rejection without exact history is returned as honest unknown. Short
+>    expiry blocks new taps without tearing down an active result-return session; JS/native session
+>    identity plus request nonce/ID binding prevents stale work touching a replacement. SOL's independent
+>    protocol remains unchanged.
 >
-> Gates after the fixes: `just verify` **81/81 GREEN** (incl. new flow 86; one load flake on
-> 41-a11y-census re-ran green), jest **876/876** (45 suites), relay live **40/40** (incl. the
-> pinned-seconds + late-visibility assertions), fresh APK built + installed on the receiver
-> (DPAY_SELFCHECK PASS). **Prod is BEHIND these fixes — founder ship: `just deploy-ic && just
+> Current v2 gates: core **55/55**, FFI Rust **12/12**, UniFFI Python **103/103**, focused app Jest
+> **31/31**, full `just verify` GREEN (**82/82 e2e**), receiver/payer NFC flows 86+87 GREEN,
+> Android instrumented **10/10**, and a release
+> APK built + installed on receiver `9cdf67b8` with `DPAY_SELFCHECK PASS` +
+> `DPAY_SOL_SELFCHECK PASS`. The physical airplane-mode two-phone retest is still required.
+> **Prod is BEHIND these fixes — founder ship: `just deploy-ic && just
 > apk && just up`** (also still carries the 2026-08-20 faucet-422 fix below).
 >
 > **Final integrated verification (2026-08-20 close-out, real runs):** `just verify` fully GREEN

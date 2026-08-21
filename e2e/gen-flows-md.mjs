@@ -41,7 +41,7 @@ function coverageGapsSection() {
     '- **Non-dollar NFC consent over the radio** — `11-nfc` + `32-nfc-disclosure` inject JS phase/request events; they do not carry a real nonzero-currency request over the actual ISO-DEP radio (physical-device gate).',
     '- **Android React Native bridge parity** — instrumented tests mostly exercise UniFFI directly, not the full `NativeModules` argument/return surface.',
     '- **External-credit balance freshness** — deposit tests assert direct ledger/FakeLedger credit while missing stale facade `BAL_CACHE` behavior.',
-    '- **NFC radio round trip** (two phones, HCE↔reader, full wire transit over ISO-DEP) — physical-device gate; the web NFC shim\'s `approveCard(wireHex)` is a no-op, so driving the full round trip would inject the wire the test built itself (false confidence). Signing/settlement are byte-exact in `00`; phase plumbing in `11`.',
+    '- **NFC radio round trip** (two phones, HCE↔reader, full DPN2 + signed-result transit over ISO-DEP) — physical-device gate. Flows 86/87 prove the merchant and offline-payer ownership halves; `just ondevice` proves request→fragmented bundle→authenticated C6 result through the real core/UniFFI state machines. Only antenna coupling and Android AID routing between two physical phones remain.',
     '- **ckUSDC onramp final ETH hop** (wallet signs → tx mined → minter scrapes ~20min) — inherent outer-loop gate; offline e2e proves the calldata wiring + byte-exactness.',
     '- **ckBTC live deposit/withdrawal with real BTC** — requires real mainnet funds; offline path proven via FakeLedger seed (issues 1/8 in OPEN_ISSUES.md).',
     '',
