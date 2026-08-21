@@ -39,6 +39,7 @@ pub trait Ledger: Send + Sync {
         pubkey: [u8; PUBKEY_LEN],
         currency: Currency,
         limit: u32,
+        memo: Option<&str>,
     ) -> Result<Vec<TxnRecord>, LedgerError>;
 
     /// Static deposit instructions for `currency` (min confirmations, fee, min amount).

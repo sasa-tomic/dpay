@@ -270,6 +270,7 @@ impl Ledger for FakeLedger {
         pubkey: [u8; PUBKEY_LEN],
         currency: Currency,
         limit: u32,
+        memo: Option<&str>,
     ) -> Result<Vec<TxnRecord>, LedgerError> {
         let s = self.state.lock().unwrap_or_else(|p| p.into_inner());
         let pk_hex = hex::encode(pubkey);
@@ -280,6 +281,7 @@ impl Ledger for FakeLedger {
             .txns
             .iter()
             .filter(|t| t.currency == currency && (t.from == pk_hex || t.to == pk_hex))
+            .filter(|t| memo.is_none_or(|m| t.memo.eq_ignore_ascii_case(m)))
             .cloned()
             .collect();
         rows.reverse();

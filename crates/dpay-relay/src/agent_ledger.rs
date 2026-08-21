@@ -390,6 +390,7 @@ impl Ledger for AgentLedger {
         pubkey: [u8; PUBKEY_LEN],
         currency: Currency,
         limit: u32,
+        memo: Option<&str>,
     ) -> Result<Vec<TxnRecord>, LedgerError> {
         let ledger = Principal::from_text(ledger_text).map_err(|e| {
             LedgerError::Transient(format!("parse ledger principal '{ledger_text}': {e}"))
@@ -403,7 +404,7 @@ impl Ledger for AgentLedger {
         // so serving every poll directly stays cheap even for no-history accounts.
         let deadline = std::time::Instant::now() + Duration::from_secs(HISTORY_WALK_TIMEOUT_SECS);
         let rows = self
-            .transactions_walk(&ledger, &me, currency, limit, deadline)
+            .transactions_walk(&ledger, &me, currency, limit, memo, deadline)
             .await;
         if let Ok(rows) = rows {
             Ok(rows)
@@ -582,6 +583,7 @@ impl AgentLedger {
         me: &Account,
         currency: Currency,
         limit: usize,
+        memo: Option<&str>,
         deadline: std::time::Instant,
     ) -> Result<Vec<TxnRecord>, LedgerError> {
         let ledger = *ledger;
@@ -620,7 +622,9 @@ impl AgentLedger {
             .saturating_add(probe_len);
         if probe_served_upto >= total {
             for txn in probe.transactions.iter().rev() {
-                if let Some(record) = map_icrc_txn(txn, &me, currency) {
+                if let Some(record) = map_icrc_txn(txn, &me, currency)
+                    .filter(|r| memo.is_none_or(|m| r.memo.eq_ignore_ascii_case(m)))
+                {
                     rows.push(record);
                 }
             }
@@ -648,7 +652,9 @@ impl AgentLedger {
             let before = rows.len();
             // Serve this page newest→oldest; across pages `rows` stays globally newest-first.
             for txn in page.transactions.iter().rev() {
-                if let Some(record) = map_icrc_txn(txn, &me, currency) {
+                if let Some(record) = map_icrc_txn(txn, &me, currency)
+                    .filter(|r| memo.is_none_or(|m| r.memo.eq_ignore_ascii_case(m)))
+                {
                     rows.push(record);
                 }
             }
@@ -658,7 +664,7 @@ impl AgentLedger {
             // Zero-match early stop: a user absent from the newest empty_pages×1_000 blocks has
             // no "recent" history — walking a mature ledger further is pure load (the limit
             // break above can never fire when nothing matches).
-            if rows.len() == before {
+            if memo.is_none() && rows.len() == before {
                 empty_pages += 1;
                 if empty_pages >= HISTORY_EMPTY_PAGE_STOP {
                     break;

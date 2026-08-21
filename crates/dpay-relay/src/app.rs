@@ -461,7 +461,7 @@ async fn balances(State(state): State<AppState>, Path(hex_pk): Path<String>) -> 
     (StatusCode::OK, Json(map)).into_response()
 }
 
-/// `GET /api/v1/transactions/{hex}?currency=N&limit=30` → `{"transactions": [...]}` newest-first.
+/// `GET /api/v1/transactions/{hex}?currency=N&limit=30&memo=HEX` → newest-first rows.
 /// Lets the wallet render a durable transaction list sourced from the ledger (the in-memory UI list
 /// is gone on restart; this is the source of truth). `limit` defaults to 30 and is capped at 100.
 async fn transactions(
@@ -472,6 +472,11 @@ async fn transactions(
     let pk = ok_or_bail!(parse_pubkey_hex(&hex_pk));
     let currency = qs.currency.unwrap_or(DEMO_USD);
     let limit = qs.limit.unwrap_or(30).min(100);
+    let memo = match qs.memo.as_deref() {
+        Some(m) if m.len() == 32 && m.bytes().all(|b| b.is_ascii_hexdigit()) => Some(m),
+        Some(_) => return err(StatusCode::BAD_REQUEST, "memo must be exactly 32 hex characters"),
+        None => None,
+    };
     // With the fake-IC gateway attached (test-helpers), history reads the gateway's principal-keyed
     // txn log — the same records signed transfers append. Prod reads `transactions_on_ledger` off
     // the `dyn Ledger`, which walks the ICRC ledger's own transaction log (icrc3) at the user's
@@ -480,7 +485,7 @@ async fn transactions(
     if let Some(fake) = state.fake_ic.clone() {
         use dpay_icp::principal::Principal as IcpPrincipal;
         let owner = IcpPrincipal::self_authenticating_ed25519(&pk);
-        let rows = fake.transactions(&owner, currency, limit as usize);
+        let rows = fake.transactions(&owner, currency, limit as usize, memo);
         return (StatusCode::OK, Json(TransactionsBody { transactions: rows })).into_response();
     }
     // History needs the currency's LEDGER principal — resolve it from the catalog (the same
@@ -494,7 +499,7 @@ async fn transactions(
     };
     match state
         .ledger
-        .transactions_on_ledger(&desc.ledger, pk, currency, limit)
+        .transactions_on_ledger(&desc.ledger, pk, currency, limit, memo)
         .await
     {
         Ok(rows) => (StatusCode::OK, Json(TransactionsBody { transactions: rows })).into_response(),
@@ -775,12 +780,13 @@ struct BalanceQuery {
     currency: Option<Currency>,
 }
 
-/// `?currency=N&limit=30` for `GET /api/v1/transactions/{hex}`. Absent currency → `DEMO_USD`;
-/// absent limit → 30 (capped at 100 server-side).
+/// Optional `memo` is an exact 16-byte hex settlement nonce; filtering occurs during the ledger
+/// walk, before `limit`, so a busy account cannot push a just-settled request out of the window.
 #[derive(Deserialize)]
 struct TransactionsQuery {
     currency: Option<Currency>,
     limit: Option<u32>,
+    memo: Option<String>,
 }
 
 /// `?currency=N` for `GET /api/v1/onramp/ckerc20`. Absent → `DEMO_USD` (which has no ckERC-20
@@ -919,4 +925,3 @@ async fn version() -> Response {
     }))
         .into_response()
 }
-

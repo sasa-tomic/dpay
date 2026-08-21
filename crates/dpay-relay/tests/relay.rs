@@ -326,12 +326,13 @@ async fn signed_transfer_through_api_v2_moves_funds_and_lands_in_history() {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos() as u64;
+    let settlement_memo = b"0123456789abcdef";
     let arg = transfer_arg(
         &Account::new(merch_owner.clone()),
         None,
         250,
         None,
-        Some(b"coffee".to_vec()),
+        Some(settlement_memo.to_vec()),
         None,
     );
     let req = CallRequest {
@@ -376,7 +377,7 @@ async fn signed_transfer_through_api_v2_moves_funds_and_lands_in_history() {
     assert_eq!(rows[0]["amount"], "250", "{pb}");
     assert_eq!(rows[0]["from"], payer_owner.to_text(), "{pb}");
     assert_eq!(rows[0]["to"], merch_owner.to_text(), "{pb}");
-    assert_eq!(rows[0]["memo"], hex::encode("coffee"), "memo rides the signed arg: {pb}");
+    assert_eq!(rows[0]["memo"], hex::encode(settlement_memo), "memo rides the signed arg: {pb}");
     assert_eq!(rows[0]["currency"], 0); // DEMO_USD
     // Display names don't exist on the IC rail — the fields stay stable empty strings (never
     // null, never leaked bytes).
@@ -392,7 +393,40 @@ async fn signed_transfer_through_api_v2_moves_funds_and_lands_in_history() {
     assert_eq!(m_rows.len(), 1, "{mb}");
     assert_eq!(m_rows[0]["from"], payer_owner.to_text(), "{mb}");
     assert_eq!(m_rows[0]["to"], merch_owner.to_text(), "{mb}");
-    assert_eq!(m_rows[0]["memo"], hex::encode("coffee"), "{mb}");
+    assert_eq!(m_rows[0]["memo"], hex::encode(settlement_memo), "{mb}");
+
+    // Busy-account regression: 31 newer rows push the payment beyond a normal limit=30 response,
+    // but an exact memo query filters the full log BEFORE limiting and still finds it.
+    for _ in 0..31 {
+        fake.faucet_credit(DEMO_USD, &merch_owner, 1);
+    }
+    let (recent_s, recent_b) = call(
+        &state,
+        get_req(&format!("/api/v1/transactions/{merch_hex}?limit=30")),
+    )
+    .await;
+    assert_eq!(recent_s, StatusCode::OK, "{recent_b}");
+    assert!(
+        recent_b["transactions"].as_array().unwrap().iter().all(|r| r["memo"] != hex::encode(settlement_memo)),
+        "target must genuinely be outside the newest-30 window: {recent_b}",
+    );
+    let memo_hex = hex::encode(settlement_memo);
+    let (memo_s, memo_b) = call(
+        &state,
+        get_req(&format!("/api/v1/transactions/{merch_hex}?limit=1&memo={memo_hex}")),
+    )
+    .await;
+    assert_eq!(memo_s, StatusCode::OK, "{memo_b}");
+    let memo_rows = memo_b["transactions"].as_array().unwrap();
+    assert_eq!(memo_rows.len(), 1, "{memo_b}");
+    assert_eq!(memo_rows[0]["memo"], memo_hex, "{memo_b}");
+
+    let (bad_s, _) = call(
+        &state,
+        get_req(&format!("/api/v1/transactions/{merch_hex}?memo=abcd")),
+    )
+    .await;
+    assert_eq!(bad_s, StatusCode::BAD_REQUEST, "short memo filters must fail closed");
 }
 
 // --- transaction history ------------------------------------------------------

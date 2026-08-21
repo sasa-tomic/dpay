@@ -231,13 +231,14 @@ impl FakeIc {
     }
 
     /// Newest-first transaction rows for an owner (relay `/transactions` test path).
-    pub fn transactions(&self, owner: &Principal, currency: Currency, limit: usize) -> Vec<crate::ledger::TxnRecord> {
+    pub fn transactions(&self, owner: &Principal, currency: Currency, limit: usize, memo: Option<&str>) -> Vec<crate::ledger::TxnRecord> {
         let s = self.state.lock().unwrap_or_else(|p| p.into_inner());
         let me = owner.to_text();
         let mut rows: Vec<crate::ledger::TxnRecord> = s
             .txns
             .iter()
             .filter(|t| (t.from == me || t.to == me) && t.currency == currency)
+            .filter(|t| memo.is_none_or(|m| t.memo_hex.eq_ignore_ascii_case(m)))
             .map(|t| crate::ledger::TxnRecord {
                 from: t.from.clone(),
                 to: t.to.clone(),
@@ -720,4 +721,3 @@ pub async fn status() -> Response {
     };
     cbor_response(StatusCode::OK, body)
 }
-

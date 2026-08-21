@@ -565,7 +565,8 @@ fn live_icrc3_history_walks_the_real_ledger_log() {
     let payer_pk = generate_keypair().verifying_key().to_bytes();
     let merchant_pk = generate_keypair().verifying_key().to_bytes();
     mint_at_user_principal(&pic.0, ledger, dpay, &payer_pk, 10_000);
-    rail_transfer(&pic.0, ledger, &payer_pk, &merchant_pk, 250, b"coffee");
+    let settlement_memo = b"0123456789abcdef";
+    rail_transfer(&pic.0, ledger, &payer_pk, &merchant_pk, 250, settlement_memo);
     rail_transfer(&pic.0, ledger, &merchant_pk, &payer_pk, 100, b"change");
 
     let payer_owner = Principal::from_slice(
@@ -628,6 +629,7 @@ fn live_icrc3_history_walks_the_real_ledger_log() {
         assert_eq!(r1["amount"].as_str(), Some("250"));
         assert_eq!(r1["from"].as_str(), Some(payer_owner.to_text().as_str()));
         assert_eq!(r1["to"].as_str(), Some(merchant_owner.to_text().as_str()));
+        assert_eq!(r1["memo"].as_str(), Some(hex::encode(settlement_memo).as_str()));
 
         // Oldest: the mint (10_000) — `from` is the empty mint sentinel, `to` = payer.
         let r2 = &rows[2];
@@ -650,7 +652,25 @@ fn live_icrc3_history_walks_the_real_ledger_log() {
         assert_eq!(lrows.len(), 1, "limit=1 clamps to one row");
         assert_eq!(lrows[0]["amount"].as_str(), Some("100"), "the kept row is the NEWEST");
 
-        // ---- (3) no-match account: 200 + empty array (not 404, not an error) ----
+        // ---- (3) exact settlement memo: production AgentLedger filters DURING its ICRC-3 walk,
+        // before limit, so the older 250 row survives limit=1 despite a newer 100 row. ----
+        let memo_hex = hex::encode(settlement_memo);
+        let (ms, mb) = call(
+            &state,
+            get(&format!(
+                "/api/v1/transactions/{}?currency={}&limit=1&memo={memo_hex}",
+                hex::encode(payer_pk),
+                DEMO_USD
+            )),
+        )
+        .await;
+        assert_eq!(ms, StatusCode::OK, "exact memo body={mb}");
+        let mrows = mb["transactions"].as_array().unwrap();
+        assert_eq!(mrows.len(), 1, "exact memo returns one row: {mb}");
+        assert_eq!(mrows[0]["amount"].as_str(), Some("250"));
+        assert_eq!(mrows[0]["memo"].as_str(), Some(memo_hex.as_str()));
+
+        // ---- (4) no-match account: 200 + empty array (not 404, not an error) ----
         let stranger_pk = generate_keypair().verifying_key().to_bytes();
         let (ss, sb) = call(
             &state,
