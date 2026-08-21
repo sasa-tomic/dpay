@@ -63,6 +63,28 @@ describe('pollTransfer — rejected outcomes thread the structured errVariant', 
     const out = await pollTransfer(PREPARED, '11'.repeat(32), {attempts: 1, intervalMs: 0});
     expect(out).toEqual({kind: 'settled', blockIndex: '77'});
   });
+
+  // 2026-08-21 mainnet NFC failure: the in-tap poll budget ran out before the ledger's read_state
+  // showed the outcome (mobile RTT pushes 12×500ms past the mainnet tail) — icPollRequestStatus
+  // returns null and the caller MUST treat that as unknown (never a decline), so the reader's
+  // background reconciler can finish the verdict later.
+  test('poll budget exhausted (null status) → unknown, never a false decline', async () => {
+    jest.mocked(icPollRequestStatus).mockResolvedValue(null as never);
+    const out = await pollTransfer(PREPARED, '11'.repeat(32), {attempts: 1, intervalMs: 0});
+    expect(out).toEqual({kind: 'unknown'});
+  });
+
+  test('terminal-but-opaque state (done, no reply) → unknown', async () => {
+    jest.mocked(icPollRequestStatus).mockResolvedValue({state: 'done'} as never);
+    const out = await pollTransfer(PREPARED, '11'.repeat(32), {attempts: 1, intervalMs: 0});
+    expect(out).toEqual({kind: 'unknown'});
+  });
+
+  test('non-terminal statuses (processing) → unknown after the budget', async () => {
+    jest.mocked(icPollRequestStatus).mockResolvedValue({state: 'processing'} as never);
+    const out = await pollTransfer(PREPARED, '11'.repeat(32), {attempts: 1, intervalMs: 0});
+    expect(out).toEqual({kind: 'unknown'});
+  });
 });
 
 describe('transferRejectionMessage — Duplicate maps to a REJECTED reason, never a settle', () => {

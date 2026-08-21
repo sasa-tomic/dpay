@@ -18,7 +18,7 @@ import {NfcTapView} from './NfcTapView';
  * + optimistic balance deduction. The NFC framing carries the ~390-byte envelope in 2×240B frames
  * (provide_wire/Done are payload-length-agnostic); the 17-byte outcome receipt stays byte-compatible.
  */
-export function NfcTap({role, identity, requestHex, reqInfo, catalog, onSettled, onOfflinePaid, onActive, onClose}: {
+export function NfcTap({role, identity, requestHex, reqInfo, catalog, onSettled, onOfflinePaid, onActive, onUnknown, onClose}: {
   role: 'card' | 'reader';
   identity: Identity;
   requestHex?: string;
@@ -27,6 +27,12 @@ export function NfcTap({role, identity, requestHex, reqInfo, catalog, onSettled,
   onSettled?: () => void;
   onOfflinePaid?: (amount: string, currency: number) => void;
   onActive?: () => void;
+  /** Merchant-side unknown-verdict hook (2026-08-21): submitTransfer exhausted its poll budget
+   * without a terminal read_state (mainnet latency tail > 12×500ms). The merchant's background
+   * reconciliation loop (ReceiveMode's watchRid — the flow-50-proven machinery) keeps polling for
+   * ~45s and flips to Received on its own, instead of the pre-fix dead end where both phones
+   * rendered a not-confirmed verdict over a payment that settled seconds later. */
+  onUnknown?: (requestIdHex: string) => void;
   onClose: () => void;
 }) {
   // MC8 U1 — the asset-correct disclosure (asset name + network + formatted amount), resolved and
@@ -57,7 +63,12 @@ export function NfcTap({role, identity, requestHex, reqInfo, catalog, onSettled,
     try {
       if (!ledger) { ctx.finalize('pending', 'Unknown ledger for this asset — couldn’t submit'); return; }
       const requestIdHex = await DpayCore.icpEnvelopeRequestId(envelopeHex);
-      const out = await submitTransfer({ledger, requestIdHex, envelopeHex}, identity.secretHex, {attempts: 12, intervalMs: 500});
+      // 14×500ms poll budget: the in-tap terminal window. Mainnet DUSD consensus + read_state
+      // observation tails past 6s from mobile RTTs; 14 keeps headroom over the tail while staying
+      // under the payer's 20s RECEIPT_WAIT_MS (the receipt is confirmed right after this loop).
+      // A verdict STILL unknown here is not a failure — onUnknown hands the requestId to the
+      // merchant's background reconciliation loop.
+      const out = await submitTransfer({ledger, requestIdHex, envelopeHex}, identity.secretHex, {attempts: 14, intervalMs: 500});
       if (out.kind === 'settled') {
         record();
         ctx.finalize('success');
@@ -66,9 +77,11 @@ export function NfcTap({role, identity, requestHex, reqInfo, catalog, onSettled,
         // same friendly copy either way, but the decision keys on the decoded ICRC variant.
         ctx.finalize('declined', out.variant === 'Duplicate' ? 'Already paid' : out.reason);
       } else {
-        // Not terminal within budget (2–5s consensus + poll budget) — truthful, never a fake
-        // success or failure. The payer's own balance reconciles when their phone next polls.
-        ctx.finalize('pending', 'Couldn’t confirm with the ledger — check the balance');
+        // Not terminal within budget — truthful, never a fake success or failure. Hand the
+        // requestId to the merchant's background reconciler (onUnknown) so the Received flip
+        // still happens when the settle lands; the payer's balance reconciles on its next poll.
+        onUnknown?.(requestIdHex);
+        ctx.finalize('pending', 'Confirming with the ledger — this can take a minute');
       }
       const settle: SettleOutcome = out.kind; // settled | rejected | unknown — 1:1 with receipt codes
       try { await DpayNfc.confirmReceipt(receiptCodeFor(settle), nonceHex); } catch (e: unknown) { console.warn('DpayNfc.confirmReceipt failed (native-module regression?)', e); }
@@ -77,7 +90,7 @@ export function NfcTap({role, identity, requestHex, reqInfo, catalog, onSettled,
       ctx.finalize('pending', 'Couldn’t submit the payment — check the balance');
       try { await DpayNfc.confirmReceipt(receiptCodeFor('unknown'), nonceHex); } catch {/* best-effort */}
     }
-  }, [reqInfo, catalog, identity, record]);
+  }, [reqInfo, catalog, identity, record, onUnknown]);
 
   // Payer side: the tap is the consent — sign the incoming request and serve it right away.
   // MC5 — fail closed BEFORE signing: a request carrying an unknown/unsupported currency must NEVER

@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useState} from 'react';
-import {View, Text, Pressable, TextInput, type TextStyle} from 'react-native';
+import {View, Text, Pressable, TextInput, ActivityIndicator, type TextStyle} from 'react-native';
 import {QrCode} from './QrCode';
 import {C, FONT} from '../config/palette';
 import {S} from '../styles';
@@ -60,6 +60,13 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
   const [err, setErr] = useState<string | null>(null);
   const [nfcActive, setNfcActive] = useState(false);
   const [nfcKey, setNfcKey] = useState(0);
+  // NFC-unknown handoff (2026-08-21): set when the reader tap ended UNKNOWN (in-tap poll budget
+  // exhausted — mainnet latency tail) and the background settlement poll (watchRid) now owns the
+  // outcome. While set, the tap component itself is unmounted (the NFC session is over — the
+  // reader stops) and this screen renders its own reconcile status instead, whose text the
+  // background poll CAN update (settled → the Received view flips in; rejected/budget-out → the
+  // err line). Cleared by reset().
+  const [tapHandoff, setTapHandoff] = useState(false);
   // The unified asset picker (opened by tapping the amount prefix). Phase 4: replaced the old
   // local CurrencyPicker + the SOL-onSelectSol bridge — AssetPicker is the ONE picker both Receive
   // forms + Balances consume, with Wallet's handleSelect as its onSelect. Esc/backdrop close it
@@ -138,6 +145,12 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
         if (!alive) return;
         if (out.kind === 'settled') {
           setResult({amount: reqQr.rawAmount, currency: reqQr.currency, from: 'payer'});
+          // NFC-unknown recovery (2026-08-21): when this poll is the BACKGROUND reconciler
+          // (armed by NfcTap's onUnknown after the in-tap budget ran out), the tap view is
+          // still up in its terminal pending state with nfcActive=true — clearing it here is
+          // what lets the 'Received ✓' result view render WITHOUT waiting for the merchant to
+          // tap Done. A no-op on the scan/deeplink paths (nfcActive already false there).
+          setNfcActive(false);
           onReceived();
           return;
         }
@@ -229,7 +242,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
     } catch (e) { console.warn('envelope submit failed:', e instanceof Error ? e.message : String(e)); setErr("Couldn't submit the payment — check the connection"); }
   }
 
-  function reset() { setReqQr(null); setResult(null); setScanning(false); setErr(null); setMemo(''); setNfcActive(false); setWatchRid(null); setNfcKey(k => k + 1); }
+  function reset() { setReqQr(null); setResult(null); setScanning(false); setErr(null); setMemo(''); setNfcActive(false); setWatchRid(null); setTapHandoff(false); setNfcKey(k => k + 1); }
 
   // While an NFC tap is mid-flow, let it own the screen (so the receipt gets back to the payer)
   // rather than the settlement poll swapping in the "Received" view underneath it.
@@ -247,17 +260,31 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
   if (reqQr) {
     return (
       <View style={S.center}>
-        {/* Reader mode runs in the background while the QR is shown: the payer taps OR scans. */}
-        {reqQr.nfcHex && nfcReady && DpayNfc ? (
+        {/* Reader mode runs in the background while the QR is shown: the payer taps OR scans.
+            tapHandoff: the tap ended unknown and the background poll owns the outcome — the tap
+            component is unmounted (NFC session over) and the reconcile view below takes over. */}
+        {reqQr.nfcHex && nfcReady && DpayNfc && !tapHandoff ? (
           <NfcTap
             key={nfcKey} role="reader" identity={identity} requestHex={reqQr.nfcHex}
             reqInfo={readerReqInfo}
             catalog={catalog}
             onSettled={onReceived} onActive={() => setNfcActive(true)}
+            onUnknown={(rid) => { setTapHandoff(true); setWatchRid(rid); }}
             onClose={() => { setNfcActive(false); reset(); }}
           />
         ) : null}
-        {!nfcActive ? (
+        {tapHandoff ? (
+          <View style={S.center} testID="nfc-reconcile">
+            <View style={[S.nfcBadge, {borderColor: err ? C.sub : C.warn}]}>
+              {err ? <Text style={[S.nfcGlyph, {color: C.sub}]}>?</Text> : <ActivityIndicator size="large" color={C.warn}/>}
+            </View>
+            <Text style={S.nfcTitle}>{err ? 'Not confirmed yet' : 'Confirming…'}</Text>
+            <Text style={S.nfcSub}>{err ?? 'Settling with the ledger — this updates when it lands'}</Text>
+            {err ? null : <Text style={S.dim2}>You can wait here or check Transactions in a minute</Text>}
+            <Pressable style={S.ghostBtn} onPress={reset} accessibilityRole="button" accessibilityLabel="Done" accessibilityState={{disabled: false}}><Text style={S.ghostBtnText}>Done</Text></Pressable>
+          </View>
+        ) : null}
+        {!nfcActive && !tapHandoff ? (
           <>
             <View style={S.nfcHintRow}>
               {reqQr.nfcHex ? <NfcIcon color={C.brand} size={18} /> : null}
