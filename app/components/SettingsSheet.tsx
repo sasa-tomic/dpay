@@ -11,8 +11,8 @@ import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {SheetOverlay} from './SheetOverlay';
 import {SeedWords} from './SeedWords';
-import {IconChevronDown, IconClose, IconExternalLink, IconMoon, IconSun} from './icons';
-import {nextTheme, themeLabel, type ThemeOverride} from '../config/theme';
+import {IconAuto, IconChevronDown, IconClose, IconExternalLink, IconMoon, IconSun} from './icons';
+import {choiceLabel, type ThemeOverride} from '../config/theme';
 
 /**
  * Settings sheet — server config + reset (app configuration only). Moved off the main wallet screen
@@ -35,7 +35,7 @@ import {nextTheme, themeLabel, type ThemeOverride} from '../config/theme';
  *    the action opens a confirmation dialog (the destructive gate stays in place). Visually distinct
  *    from the "Privacy policy" link above it (which previously shared the same link chrome).
  */
-export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestore, secretHex, username, themeOverride, onCycleTheme}: {
+export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestore, secretHex, username, themeChoice, onSetTheme}: {
   relayUrl: string;
   setRelayUrl: (s: string) => void;
   onClose: () => void;
@@ -51,10 +51,11 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
   // The current wallet's username — PRESERVED across a restore (the seed recovers keys, not local
   // display metadata). Passed to the rebuilt Identity so the user keeps their display name.
   username: string;
-  // Wave 7 theme — the resolved mode (Light/Dark; null-choice follows the OS scheme) + the single
-  // flip mutator (Light ↔ Dark). App.tsx owns the state + AsyncStorage persistence.
-  themeOverride: ThemeOverride;
-  onCycleTheme: (t: ThemeOverride) => void;
+  // Wave 8 theme — the stored CHOICE (null = Auto/follow the OS scheme) + the single mutator.
+  // The header offers the quick Light↔Dark flip; this sheet's segmented control is the full
+  // three-way choice (Light / Dark / Auto). App.tsx owns the state + AsyncStorage persistence.
+  themeChoice: ThemeOverride | null;
+  onSetTheme: (t: ThemeOverride | null) => void;
 }) {
   useEscapeToClose(onClose);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -364,24 +365,33 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
             </Pressable>
           </View>
 
-          {/* Wave 7 — Theme: the explicit Light/Dark control (one tap flips; the label always
-              names the CURRENT mode). The initial state seeds from the OS/browser scheme; Light/
-              Dark pin the palette regardless of scheme. Persisted by App.tsx. */}
+          {/* Wave 8 — Theme: the full three-way choice as a segmented control (the header keeps
+              the quick Light↔Dark flip; Auto here returns control to the OS/browser scheme —
+              the explicit way back after any pinned choice, on web AND native). */}
           <View style={S.settingsSection}>
             <Text style={S.inputLabel}>Theme</Text>
-            <Pressable
-              testID="btn-theme-mode"
-              style={S.secondaryBtn}
-              onPress={() => onCycleTheme(nextTheme(themeOverride))}
-              accessibilityRole="button"
-              accessibilityLabel={`Theme: ${themeLabel(themeOverride)} — toggle theme`}
-              accessibilityHint="Switches between Light and Dark"
-              accessibilityState={{disabled: false}}>
-              <View style={S.linkRow}>
-                {themeOverride === 'light' ? <IconSun size={14} color={C.sub} /> : <IconMoon size={14} color={C.sub} />}
-                <Text style={S.secondaryBtnText}>Theme: {themeLabel(themeOverride)}</Text>
-              </View>
-            </Pressable>
+            <View style={S.railRow} role="radiogroup" accessibilityLabel="Theme">
+              {([null, 'light', 'dark'] as const).map((choice) => {
+                const active = themeChoice === choice;
+                const label = choiceLabel(choice);
+                return (
+                  <Pressable
+                    key={label}
+                    testID={choice === null ? 'btn-theme-auto' : `btn-theme-${choice}`}
+                    style={[S.railPill, active && S.railPillActive]}
+                    onPress={() => onSetTheme(choice)}
+                    accessibilityRole="radio"
+                    accessibilityLabel={`Theme: ${label}`}
+                    accessibilityState={{checked: active, disabled: false}}
+                  >
+                    <View style={S.linkRow}>
+                      {choice === 'light' ? <IconSun size={14} color={C.sub} /> : choice === 'dark' ? <IconMoon size={14} color={C.sub} /> : <IconAuto size={14} color={C.sub} />}
+                      <Text style={active ? S.railPillTextActive : S.railPillText}>{label}</Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
           </View>
 
           {/* Advanced: Server (the relay URL) — disclosure COLLAPSES by default so a curious

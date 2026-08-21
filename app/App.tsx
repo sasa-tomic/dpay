@@ -21,7 +21,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {RELAY_DEFAULT} from './relayConfig';
 import {C, DARK, LIGHT} from './config/palette';
 import {STORAGE_KEY, RELAY_STORAGE_KEY, THEME_STORAGE_KEY} from './config/constants';
-import {parseTheme, resolveTheme, type ThemeOverride} from './config/theme';
+import {parseTheme, resolveTheme, themePersistValue, type ThemeOverride} from './config/theme';
 import {runSolSelfCheck} from './solana/selfcheck';
 import type {Identity} from './lib/types';
 import {DpayCore} from './services/native';
@@ -32,9 +32,9 @@ import {Wallet} from './components/Wallet';
 export default function App() {
   const [identity, setIdentity] = useState<Identity | null | undefined>(undefined); // undefined = loading
   const [relayUrl, setRelayUrl] = useState(RELAY_DEFAULT);
-  // Wave 7 manual theme (two-state Light/Dark): `null` = no explicit choice yet → the resolved
-  // theme follows the OS scheme live (the styles.ts module-load probe keeps first paint correct
-  // in the meantime); the first user click pins an explicit value that wins from then on.
+  // Wave 8 two-tier theme: `null` = Auto (follow the OS scheme live — the styles.ts module-load
+  // probe keeps first paint correct in the meantime); an explicit choice pins the palette and
+  // wins from then on. The header flip pins Light/Dark; Settings offers the full 3-way choice.
   const [themeChoice, setThemeChoice] = useState<ThemeOverride | null>(null);
 
   // Wave-4 dual theme + Wave-7 manual override: resolve stored choice + OS scheme → the palette.
@@ -81,11 +81,12 @@ export default function App() {
     });
   }, []);
 
-  // Wave 7: set the theme choice AND persist it — same best-effort pattern as persistRelay. The
-  // single mutator both toggle controls (wallet header + Settings) flip through.
-  const persistTheme = useCallback((t: ThemeOverride) => {
+  // Wave 8: set the theme choice AND persist it — same best-effort pattern as persistRelay.
+  // The single mutator both controls drive (header flip → explicit choice; Settings segment →
+  // choice or null=Auto). Auto persists as 'system'.
+  const persistTheme = useCallback((t: ThemeOverride | null) => {
     setThemeChoice(t);
-    AsyncStorage.setItem(THEME_STORAGE_KEY, t).catch((e: unknown) => {
+    AsyncStorage.setItem(THEME_STORAGE_KEY, themePersistValue(t)).catch((e: unknown) => {
       console.log(`[dpay] failed to persist theme override: ${e instanceof Error ? e.message : String(e)}`);
     });
   }, []);
@@ -140,5 +141,5 @@ export default function App() {
   if (identity === null) {
     return <View style={S.screenFrame}><Onboarding relayUrl={relayUrl} onCreated={setIdentity} /></View>;
   }
-  return <View style={S.screenFrame}><Wallet identity={identity} relayUrl={relayUrl} setRelayUrl={persistRelay} onReset={onReset} onRestore={onRestore} themeOverride={themeOverride} onCycleTheme={persistTheme} /></View>;
+  return <View style={S.screenFrame}><Wallet identity={identity} relayUrl={relayUrl} setRelayUrl={persistRelay} onReset={onReset} onRestore={onRestore} resolvedTheme={themeOverride} themeChoice={themeChoice} onSetTheme={persistTheme} /></View>;
 }

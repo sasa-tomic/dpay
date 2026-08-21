@@ -209,6 +209,12 @@ export const IconMoon = make(({color}) => {
   return [p('M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z')];
 });
 
+// Wave 8 theme "Auto" (follow system) — lucide `monitor`.
+export const IconAuto = make(({color}) => {
+  const {l, p} = withStroke(color);
+  return [p('M4 5h16v11H4z'), l(8, 20, 16, 20), l(12, 16, 12, 20)];
+});
+
 export const ICONS = {
   settings: IconSettings,
   close: IconClose,
@@ -229,6 +235,7 @@ export const ICONS = {
   externalLink: IconExternalLink,
   sun: IconSun,
   moon: IconMoon,
+  auto: IconAuto,
 } as const;
 
 export type IconName = keyof typeof ICONS;

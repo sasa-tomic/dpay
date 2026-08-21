@@ -35,7 +35,7 @@ import {BalancesSheet} from './BalancesSheet';
 import {IconArrowDownLeft, IconChevronDown, IconClock, IconMoon, IconQr, IconSettings, IconSun} from './icons';
 import {nextTheme, themeLabel, type ThemeOverride} from '../config/theme';
 
-export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, themeOverride, onCycleTheme}: {identity: Identity; relayUrl: string; setRelayUrl: (s: string) => void; onReset: () => void; onRestore: (id: Identity) => Promise<void>; themeOverride: ThemeOverride; onCycleTheme: (t: ThemeOverride) => void}) {
+export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, resolvedTheme, themeChoice, onSetTheme}: {identity: Identity; relayUrl: string; setRelayUrl: (s: string) => void; onReset: () => void; onRestore: (id: Identity) => Promise<void>; resolvedTheme: ThemeOverride; themeChoice: ThemeOverride | null; onSetTheme: (t: ThemeOverride | null) => void}) {
   const [mode, setMode] = useState<'pay' | 'receive' | 'ledger'>('pay');
   // Deeplink prefill (item 6): a `dpay:req/<blob>` (or the web `?req=<blob>` mirror) sets the raw
   // base64url blob + flips mode to 'pay'; PayMode consumes it via its prefill effect (which reuses
@@ -73,9 +73,10 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, the
   // (the button reads 'Checking…' + disables) rather than a poll-lifecycle tracker. The poll's
   // own 2.5s cadence + generation gate remain the source of truth for the balance itself.
   const [recheckBusy, setRecheckBusy] = useState(false);
-  // Wave 7: flip the theme (Light ↔ Dark) — App.tsx owns the state + AsyncStorage persistence;
-  // this is the single mutator both toggle controls call.
-  const cycleTheme = useCallback(() => onCycleTheme(nextTheme(themeOverride)), [onCycleTheme, themeOverride]);
+  // Wave 8: the header flip pins the OPPOSITE of the resolved mode (Light ↔ Dark). App.tsx owns
+  // the state + AsyncStorage persistence; onSetTheme is the single mutator (Settings segments call
+  // it directly with an explicit choice or null=Auto).
+  const cycleTheme = useCallback(() => onSetTheme(nextTheme(resolvedTheme)), [onSetTheme, resolvedTheme]);
   const recheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (recheckTimer.current != null) clearTimeout(recheckTimer.current); }, []);
   // Within-tab sub-modes for the Receive/Pay IA: "request"/"address" (Receive) and "scan"/"send"
@@ -583,6 +584,19 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, the
           >
             <IconSettings size={20} color={C.sub} />
           </Pressable>
+          {/* Wave 8: the theme flip joins the gear in the header's utility cluster (left). The
+              icon names the TARGET — the mode one tap lands in (moon in Light = "switch to Dark")
+              — and the a11y label carries the same target-state semantics. */}
+          <Pressable
+            testID="btn-theme"
+            style={S.headerSettingsBtn}
+            onPress={cycleTheme}
+            accessibilityRole="button"
+            accessibilityLabel={`Switch theme to ${themeLabel(nextTheme(resolvedTheme))}`}
+            accessibilityHint="Toggles the theme between Light and Dark; set Auto in Settings"
+          >
+            {nextTheme(resolvedTheme) === 'dark' ? <IconMoon size={20} color={C.sub} /> : <IconSun size={20} color={C.sub} />}
+          </Pressable>
           <View>
             <WordmarkLink style={S.brand} />
             {/* H4 + audit P1: the header shows ONLY the username. The hex pubkey was developer-facing
@@ -595,16 +609,6 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, the
             <Text style={S.who} testID="header-who">{identity.username}</Text>
           </View>
         </View>
-        <Pressable
-          testID="btn-theme"
-          style={S.headerSettingsBtn}
-          onPress={cycleTheme}
-          accessibilityRole="button"
-          accessibilityLabel={`Theme: ${themeLabel(themeOverride)}`}
-          accessibilityHint="Switch the theme between Light and Dark"
-        >
-          {themeOverride === 'light' ? <IconSun size={20} color={C.sub} /> : <IconMoon size={20} color={C.sub} />}
-        </Pressable>
         <Pressable
           testID="balance"
           style={[S.balBox, balancesDisabled && S.dim]}
@@ -750,8 +754,8 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, the
           onRestore={onRestore}
            secretHex={identity.secretHex}
            username={identity.username}
-           themeOverride={themeOverride}
-           onCycleTheme={cycleTheme}
+            themeChoice={themeChoice}
+            onSetTheme={onSetTheme}
          />
       ) : null}
     </SafeAreaView>
