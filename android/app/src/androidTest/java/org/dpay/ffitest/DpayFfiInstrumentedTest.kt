@@ -115,8 +115,8 @@ class DpayFfiInstrumentedTest {
         assertArrayEquals("signed envelope must equal host bytes", expectedEnvelope, signed.envelope)
         assertArrayEquals("request_id must equal host rid", expectedRid, signed.requestId)
 
-        // The rail-era integrity check: the merchant re-derives the rid from the envelope it
-        // received (over NFC or QR) and polls read_state under it — exactly what the app does.
+        // Transport integrity: either side can re-derive the same request id from the immutable
+        // envelope; only the sender is authorized to poll its request_status on the IC.
         assertArrayEquals("envelope rid round-trips", expectedRid, icpEnvelopeRequestId(signed.envelope))
     }
 

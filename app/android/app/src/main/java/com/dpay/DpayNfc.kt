@@ -9,17 +9,17 @@ import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.WritableMap
 import com.facebook.react.modules.core.DeviceEventManagerModule.RCTDeviceEventEmitter
-import java.util.concurrent.ArrayBlockingQueue
-import java.util.concurrent.TimeUnit
 import uniffi.dpay_ffi.DpayException
 import uniffi.dpay_ffi.FfiCardSession
 import uniffi.dpay_ffi.FfiReaderConductor
 import uniffi.dpay_ffi.NfcPhase
+import uniffi.dpay_ffi.NfcResultStatus
 import uniffi.dpay_ffi.NfcStep
-import uniffi.dpay_ffi.nfcDecodeReceipt
+import uniffi.dpay_ffi.nfcBundleBytes
+import uniffi.dpay_ffi.nfcDecodeBundle
 import uniffi.dpay_ffi.nfcDecodeRequest
 import uniffi.dpay_ffi.nfcDefaultMaxChunk
-import uniffi.dpay_ffi.nfcReceiptBytes
+import uniffi.dpay_ffi.nfcResultBytes
 
 /**
  * Rendezvous between the app's JS layer and the two NFC roles' state machines from the shared core:
@@ -36,26 +36,29 @@ import uniffi.dpay_ffi.nfcReceiptBytes
 object DpayNfc {
     const val EVENT = "DpayNfcEvent"
 
-    // A dpay tap moves ~256 bytes, single-frame at this size — near-instant.
+    // The request and opaque signed envelope are fragmented at this payload size.
     private val maxChunk: UInt = nfcDefaultMaxChunk()
 
     private var ctx: ReactApplicationContext? = null
+    private val cardLock = Any()
     private var card: FfiCardSession? = null
-    private var reader: FfiReaderConductor? = null
     private var requestSent = false
-    private var receiptSent = false
-    // Merchant side: the request nonce (a fallback for stamping the receipt) and a 1-slot rendezvous
-    // the reader thread waits on while JS settles online, then delivers the fully-built receipt bytes
-    // (see `confirmReceipt`). `pendingReceipt` caches the built receipt so a fast JS confirm that
-    // races ahead of the reader thread is not lost.
-    private var readerNonce: ByteArray? = null
-    private var receiptSignal: ArrayBlockingQueue<ByteArray>? = null
-    @Volatile private var pendingReceipt: ByteArray? = null
+    private var wireDelivered = false
+    private var resultDelivered = false
 
-    // How long the reader holds the field waiting for JS to settle + confirm. Comfortably covers the
-    // common fast settle; a timeout is NOT a merchant failure (JS owns the merchant's outcome and the
-    // payer falls back to its own "couldn't confirm"), so on timeout we stop delivering *quietly*.
-    private const val RECEIPT_CONFIRM_WAIT_SECS = 12L
+    // Reader callbacks outlive the JS call that created them and may still be unwinding when a
+    // replacement session starts. Keep the conductor + Activity behind one identity token so an
+    // old onTag thread can only touch its captured conductor, and can never emit for or tear down
+    // the replacement. All current-session checks and reader-mode lifecycle changes are serialized
+    // on readerLock; holding the lock through an emit makes the check + emit atomic vs replacement.
+    private val readerLock = Any()
+    private var readerGeneration = 0L
+    private data class ReaderSession(
+        val generation: Long,
+        val conductor: FfiReaderConductor,
+        val activity: Activity,
+    )
+    private var readerSession: ReaderSession? = null
 
     // How long the reader holds the field and retries while a tapped dpay card isn't answering
     // usefully yet — a routed-but-unarmed card (payer not in Pay mode; NOT_READY at SELECT while
@@ -64,6 +67,8 @@ object DpayNfc {
     // instead of a generic "Communication error"; every outcome is reported, never silently dropped.
     private const val PAYER_ARM_WAIT_MS = 10_000L
     private const val PAYER_ARM_POLL_MS = 250L
+    private const val RESULT_WAIT_MS = 35_000L
+    private const val RESULT_POLL_MS = 25L
 
     // dpay "not ready" warning SW (mirrors dpay_core::nfc Sw::NOT_READY) — returned when a reader
     // taps but no payer session is armed.
@@ -107,6 +112,25 @@ object DpayNfc {
         emit(m)
     }
 
+    private fun isCurrentReaderLocked(session: ReaderSession): Boolean =
+        readerSession === session && readerGeneration == session.generation
+
+    private fun isCurrentReader(session: ReaderSession): Boolean = synchronized(readerLock) {
+        isCurrentReaderLocked(session)
+    }
+
+    private fun readerPhaseEvent(session: ReaderSession, phase: String) {
+        synchronized(readerLock) {
+            if (isCurrentReaderLocked(session)) phaseEvent("reader", phase)
+        }
+    }
+
+    private fun readerErrorEvent(session: ReaderSession, reason: String) {
+        synchronized(readerLock) {
+            if (isCurrentReaderLocked(session)) errorEvent("reader", reason)
+        }
+    }
+
     /** Map the core lifecycle phase to the UI status string (see the RN NfcSession view). */
     private fun uiPhase(p: NfcPhase): String = when (p) {
         NfcPhase.IDLE -> "listening"
@@ -131,9 +155,12 @@ object DpayNfc {
     // ============================================================ payer / HCE card
     /** Ready the phone to be tapped as a payment card (Pay mode). */
     fun armCard() {
-        card = FfiCardSession(maxChunk)
-        requestSent = false
-        receiptSent = false
+        synchronized(cardLock) {
+            card = FfiCardSession(maxChunk)
+            requestSent = false
+            wireDelivered = false
+            resultDelivered = false
+        }
         // Repair the OS AID routing if an app update left it stale (see [DpayAidRouting]) — the
         // 6A82-from-the-OS failure mode that reads as "not a dpay phone" on the merchant side.
         preferredOn = ctx?.let { DpayAidRouting.ensure(it, DpayHostApduService::class.java, AID_HEX) }
@@ -141,18 +168,21 @@ object DpayNfc {
     }
 
     fun disarmCard() {
-        card = null
-        requestSent = false
-        receiptSent = false
+        synchronized(cardLock) {
+            card = null
+            requestSent = false
+            wireDelivered = false
+            resultDelivered = false
+        }
         DpayAidRouting.clear(preferredOn)
         preferredOn = null
     }
 
     /** Called by [DpayHostApduService] for every command APDU. Total function — never throws. */
-    fun onCardApdu(command: ByteArray): ByteArray {
+    fun onCardApdu(command: ByteArray): ByteArray = synchronized(cardLock) {
         val c = card ?: run {
             android.util.Log.w("dpay", "card apdu while UNARMED (${command.size}B) → NOT_READY")
-            return SW_NOT_READY // no payer session armed → tell the reader to back off
+            return@synchronized SW_NOT_READY // no payer session armed → tell the reader to back off
         }
         return try {
             val resp = c.process(command)
@@ -162,12 +192,18 @@ object DpayNfc {
                 requestSent = true
                 emitRequest(c.request())
             }
-            // The merchant's receipt has arrived — the offline payer now learns the outcome.
-            if (c.isConfirmed() && !receiptSent) {
-                receiptSent = true
-                emitReceipt(c.receipt())
+            if (c.wireDelivered() && !wireDelivered) {
+                wireDelivered = true
+                phaseEvent("card", "settling")
+                emitCardDelivered()
             }
-            phaseEvent("card", uiPhase(c.phase()))
+            if (c.isComplete() && !resultDelivered) {
+                resultDelivered = true
+                emitResult(c.result())
+                phaseEvent("card", "success")
+            } else if (!c.isComplete()) {
+                phaseEvent("card", uiPhase(c.phase()))
+            }
             resp
         } catch (e: Throwable) {
             // The core never panics, but never let an exception escape into the NFC stack.
@@ -176,26 +212,31 @@ object DpayNfc {
         }
     }
 
-    private fun emitReceipt(receiptBytes: ByteArray?) {
-        val bytes = receiptBytes ?: return
-        try {
-            val r = nfcDecodeReceipt(bytes)
-            val m = Arguments.createMap()
-            m.putString("type", "receipt")
-            m.putString("role", "card")
-            m.putBoolean("settled", r.settled)
-            m.putInt("status", r.status.toInt())
-            m.putString("nonceHex", hex(r.nonce))
-            emit(m)
-        } catch (e: Throwable) {
-            errorEvent("card", "Received a malformed receipt")
-        }
-    }
-
     /** Field dropped between taps. The armed session (and any approval) survives a re-tap. */
     fun onCardDeactivated() {
-        val c = card ?: return
-        if (c.isComplete()) phaseEvent("card", "success")
+        card ?: return
+    }
+
+    private fun emitCardDelivered() {
+        val m = Arguments.createMap()
+        m.putString("type", "done")
+        m.putString("role", "card")
+        emit(m)
+    }
+
+    private fun emitResult(result: uniffi.dpay_ffi.NfcCardResult?) {
+        val r = result ?: return
+        val m = Arguments.createMap()
+        m.putString("type", "result")
+        m.putString("role", "card")
+        m.putInt("status", when (r.status) {
+            NfcResultStatus.SETTLED -> 0
+            NfcResultStatus.REJECTED -> 1
+            NfcResultStatus.UNKNOWN -> 2
+        })
+        m.putString("nonceHex", hex(r.nonce))
+        m.putString("requestIdHex", hex(r.requestId))
+        emit(m)
     }
 
     private fun emitRequest(reqBytes: ByteArray?) {
@@ -219,24 +260,48 @@ object DpayNfc {
     }
 
     /** Approve: the app has signed the wire; serve it to the reader. */
-    fun approveCard(wire: ByteArray) {
-        val c = card ?: return
-        c.provideWire(wire)
+    fun approveCard(update: ByteArray, readState: ByteArray, nonce: ByteArray) = synchronized(cardLock) {
+        val c = card ?: throw IllegalStateException("no active NFC card")
+        val activeNonce = nfcDecodeRequest(c.request() ?: throw IllegalStateException("NFC card has no request")).nonce
+        require(activeNonce.contentEquals(nonce)) { "NFC approval does not match the active request" }
+        c.provideWire(nfcBundleBytes(update, readState))
         phaseEvent("card", uiPhase(c.phase()))
     }
 
-    fun declineCard() {
-        val c = card ?: return
+    fun declineCard(nonce: ByteArray) = synchronized(cardLock) {
+        val c = card ?: throw IllegalStateException("no active NFC card")
+        val activeNonce = nfcDecodeRequest(c.request() ?: throw IllegalStateException("NFC card has no request")).nonce
+        require(activeNonce.contentEquals(nonce)) { "NFC decline does not match the active request" }
         c.decline()
         phaseEvent("card", "declined")
     }
 
+    /** Merchant settlement owner: sign and queue exactly one nonce/request-id-bound result. */
+    fun confirmResult(status: Int, nonce: ByteArray, requestId: ByteArray, merchantSecret: ByteArray) {
+        val mapped = when (status) {
+            0 -> NfcResultStatus.SETTLED
+            1 -> NfcResultStatus.REJECTED
+            else -> NfcResultStatus.UNKNOWN
+        }
+        val bytes = nfcResultBytes(merchantSecret, mapped, nonce, requestId)
+        synchronized(readerLock) {
+            val session = readerSession ?: throw IllegalStateException("no active NFC reader")
+            // A JS settlement may finish after its native session was replaced. Only the session
+            // that actually delivered this DPN2 bundle may receive its result.
+            val delivered = session.conductor.wire()
+                ?: throw IllegalStateException("active NFC reader has not delivered a payment bundle")
+            val deliveredRequestId = nfcDecodeBundle(delivered).requestId
+            if (!deliveredRequestId.contentEquals(requestId)) {
+                throw IllegalArgumentException("NFC result request ID does not match the active reader bundle")
+            }
+            session.conductor.provideResult(bytes)
+            phaseEvent("reader", "exchanging")
+        }
+    }
+
     // ============================================================ merchant / reader
-    // The activity reader mode was enabled on. Android's disableReaderMode(activity) must be given
-    // an activity instance; if JS calls stopReader when reactContext.currentActivity is momentarily
-    // null (activity recreating), the stored reference still lets us tear the RF field down —
-    // otherwise reader mode stays ON at the OS level and poisons every later session.
-    private var readerActivity: Activity? = null
+    // Android's disableReaderMode(activity) must receive the Activity reader mode was enabled on.
+    // ReaderSession retains that exact instance even while currentActivity is momentarily null.
 
     /** Enter reader mode and drive the exchange when a payer's phone is tapped (Receive mode). */
     fun startReader(activity: Activity, request: ByteArray) {
@@ -253,52 +318,67 @@ object DpayNfc {
                 return
             }
         }
-        // Restart hygiene: if an earlier session left reader mode registered (stopReader with a
-        // null activity), tear it down before re-enabling on this activity.
-        stopReader(activity)
-        readerActivity = activity
-        reader = FfiReaderConductor(request, maxChunk)
-        // The nonce lives at request bytes [40, 56): to(32) | amount(8) | nonce(16) | expiry(8).
-        readerNonce = if (request.size >= 56) request.copyOfRange(40, 56) else null
-        receiptSignal = ArrayBlockingQueue(1)
-        pendingReceipt = null
+        // Preserve the existing fail-loud contract for malformed requests: conductor creation
+        // throws to DpayNfcModule before the current native reader is disturbed.
+        val conductor = FfiReaderConductor(request, maxChunk)
+        var attemptedSession: ReaderSession? = null
         // NFC-A / ISO-DEP, and skip the NDEF check (HCE cards are not NDEF tags). Some OEM/older
         // builds (e.g. LineageOS on older devices) throw from enableReaderMode — classify + log the
         // stack so a physical re-test pinpoints it instead of a generic "Tap failed".
         try {
-            adapter!!.enableReaderMode(
-                activity,
-                { tag -> onTag(tag) },
-                NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK,
-                null,
-            )
-            phaseEvent("reader", "listening")
+            synchronized(readerLock) {
+                // Restart hygiene and atomic replacement: invalidate + disable the prior session
+                // before publishing or enabling the new callback.
+                stopCurrentReaderLocked(activity)
+                readerGeneration += 1
+                val session = ReaderSession(
+                    readerGeneration,
+                    conductor,
+                    activity,
+                )
+                attemptedSession = session
+                readerSession = session
+                adapter!!.enableReaderMode(
+                    activity,
+                    { tag -> onTag(tag, session) },
+                    NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK,
+                    null,
+                )
+            }
+            val session = checkNotNull(attemptedSession)
+            readerPhaseEvent(session, "listening")
             android.util.Log.i("dpay", "startReader: reader mode enabled")
         } catch (e: Throwable) {
             android.util.Log.e("dpay", "enableReaderMode failed", e)
-            errorEvent("reader", "Couldn't start NFC (${e.javaClass.simpleName}) — try again")
-            stopReader(activity)
+            // If a concurrent start already replaced this failed attempt, neither the error nor
+            // teardown belongs to that replacement.
+            val failed = attemptedSession
+            if (failed != null) {
+                readerErrorEvent(failed, "Couldn't start NFC (${e.javaClass.simpleName}) — try again")
+                stopReaderIfCurrent(failed)
+            }
         }
-    }
-
-    /** JS calls this after settling online with the outcome code (see the core receipt codes:
-     *  0 settled, 1 rejected, 2 unreachable) and the authoritative payment nonce (32 hex chars, or
-     *  empty to fall back to the request nonce). Builds the receipt and wakes the reader thread. */
-    fun confirmReceipt(status: Int, nonce: ByteArray) {
-        val stampNonce = if (nonce.size == 16) nonce else (readerNonce ?: ByteArray(16))
-        val receipt = try {
-            nfcReceiptBytes(stampNonce, status.toUByte())
-        } catch (_: Throwable) {
-            return // a bad status/nonce can't be a receipt; the payer will time out to "pending"
-        }
-        pendingReceipt = receipt
-        receiptSignal?.offer(receipt)
     }
 
     fun stopReader(activity: Activity?) {
-        // Prefer the activity reader mode was actually enabled on; the caller's currentActivity can
-        // be null at teardown while the OS-level reader mode is still polling.
-        val target = readerActivity ?: activity
+        synchronized(readerLock) {
+            stopCurrentReaderLocked(activity)
+        }
+    }
+
+    /** Stop only [session]; a stale onTag callback must never disable or clear its replacement. */
+    private fun stopReaderIfCurrent(session: ReaderSession): Boolean = synchronized(readerLock) {
+        if (!isCurrentReaderLocked(session)) return@synchronized false
+        stopCurrentReaderLocked(session.activity)
+        true
+    }
+
+    /** readerLock must be held. Invalidates the current identity before touching Android reader mode. */
+    private fun stopCurrentReaderLocked(fallbackActivity: Activity?) {
+        val current = readerSession
+        val target = current?.activity ?: fallbackActivity
+        readerSession = null
+        readerGeneration += 1
         if (target == null) {
             android.util.Log.w("dpay", "stopReader: no activity reference — reader mode may stay on")
         } else {
@@ -308,11 +388,6 @@ object DpayNfc {
                 android.util.Log.w("dpay", "disableReaderMode failed", e)
             }
         }
-        readerActivity = null
-        reader = null
-        readerNonce = null
-        receiptSignal = null
-        pendingReceipt = null
     }
 
     /**
@@ -327,8 +402,9 @@ object DpayNfc {
      * physical re-tap starts a fresh onTag. Only hopeless cases terminate with an error: bring-up
      * failure, a recovery window that expired while the field still held, or an unexpected throw.
      */
-    private fun onTag(tag: Tag) {
-        val r = reader ?: return
+    private fun onTag(tag: Tag, session: ReaderSession) {
+        if (!isCurrentReader(session)) return
+        val r = session.conductor
         android.util.Log.i("dpay", "onTag: techs=${tag.techList.joinToString(",")}")
         val isoDep = IsoDep.get(tag)
         if (isoDep == null) {
@@ -338,27 +414,22 @@ object DpayNfc {
             return
         }
         var wireInHand = false
+        var resultWaitStart = 0L
         try {
             isoDep.connect()
             isoDep.timeout = 5000
-            phaseEvent("reader", "linking")
+            readerPhaseEvent(session, "linking")
             var recoveryStart = 0L // 0 = not in a recovery window (unarmed card / failing exchange)
             var sawNotReady = false // a 6210 was seen at SELECT — the card IS a routed dpay phone
             while (true) {
+                if (!isCurrentReader(session)) break
                 val cmd = r.nextCommand()
                 if (cmd == null) {
-                    // The reader is at Done, waiting for the merchant to settle online and confirm.
-                    if (!wireInHand) break
-                    phaseEvent("reader", "settling")
-                    // Deliver the receipt if JS already settled (fast path), else hold the field a
-                    // bounded time for it. A timeout is NOT a merchant error: JS has already decided
-                    // and reported the merchant's outcome, and the offline payer independently falls
-                    // back to "couldn't confirm". So on timeout we simply stop delivering — quietly,
-                    // never a false "Tap failed".
-                    val receipt = pendingReceipt ?: receiptSignal?.poll(RECEIPT_CONFIRM_WAIT_SECS, TimeUnit.SECONDS)
-                    if (receipt == null) break
-                    r.provideReceipt(receipt)
-                    continue // resume the loop to push the receipt back to the payer
+                    if (wireInHand && System.currentTimeMillis() - resultWaitStart < RESULT_WAIT_MS) {
+                        Thread.sleep(RESULT_POLL_MS)
+                        continue
+                    }
+                    break
                 }
                 val step = try {
                     val resp = isoDep.transceive(cmd)
@@ -369,9 +440,8 @@ object DpayNfc {
                     r.handleResponse(resp)
                 } catch (e: DpayException) {
                     // The core rejected the card's answer (bad status, short/garbled bytes at the RF
-                    // margin, cold-starting HCE…). Early failures leave the conductor in NeedSelect,
-                    // so re-SELECTing is protocol-safe. Recover while the field holds — the approach
-                    // may simply be sloppy; expire into a terminal, classified error.
+                    // margin, cold-starting HCE…). Recover while the field holds — the approach may
+                    // simply be sloppy; expire into a terminal, classified error.
                     //
                     // 6A82 at SELECT (NfcNotDpay) is EITHER a genuine non-dpay card OR a dpay phone
                     // whose OS isn't routing the AID to our HCE service right now (payer app killed
@@ -379,29 +449,30 @@ object DpayNfc {
                     // It therefore gets the SAME bounded recovery window as every other early
                     // failure: a payer waking their phone mid-tap resumes seamlessly, and only a
                     // card held uselessly for the full window terminates (with the precise copy).
+                    // A failed response can leave the conductor midway through request push,
+                    // bundle pull, or result push. Explicitly abandon that RF link so every retry
+                    // starts with SELECT and both peers restart framing from zero.
+                    r.resetLink()
                     if (wireInHand) {
-                        // The wire is already with JS (it owns the outcome); only the best-effort
-                        // receipt push failed. Not a merchant error — the payer independently falls
-                        // back to "couldn't confirm".
-                        android.util.Log.w("dpay", "onTag: receipt push failed (${classify(e)}) — wire already delivered")
+                        android.util.Log.w("dpay", "onTag: protocol error after wire delivered (${classify(e)})")
                         break
                     }
                     val now = System.currentTimeMillis()
                     if (recoveryStart == 0L) {
                         recoveryStart = now
                         android.util.Log.w("dpay", "onTag: exchange failed (${classify(e)}) — recovering while the field holds")
-                        phaseEvent("reader", "linking")
+                        readerPhaseEvent(session, "linking")
                     } else if (now - recoveryStart > PAYER_ARM_WAIT_MS) {
                         android.util.Log.w("dpay", "onTag: no useful answer after ${PAYER_ARM_WAIT_MS}ms (${classify(e)})")
                         if (sawNotReady) {
                             // The card identified itself as dpay (6210) but the payer never armed.
-                            errorEvent("reader", "The payer’s dpay app isn’t open — ask them to open Pay, then try again")
+                            readerErrorEvent(session, "The payer’s dpay app isn’t open — ask them to open Pay, then try again")
                         } else if (e is DpayException.NfcNotDpay) {
                             // 6A82-only is EITHER a genuine non-dpay card OR a dpay phone whose OS
                             // isn't routing (stale table on an old build, payer app killed). Copy
                             // must stay honest + actionable for the routing case — it is the common
                             // one among dpay users.
-                            errorEvent("reader", "Couldn’t reach a dpay wallet — ask them to open dpay (or toggle NFC off and on), then try again")
+                            readerErrorEvent(session, "Couldn’t reach a dpay wallet — ask them to open dpay (or toggle NFC off and on), then try again")
                         } else {
                             throw e // hopeless while coupled — terminal, classified by the outer catch
                         }
@@ -413,11 +484,11 @@ object DpayNfc {
                 when (step) {
                     NfcStep.CONTINUE -> {
                         recoveryStart = 0L // a real answer — leave the recovery window
-                        phaseEvent("reader", uiPhase(r.phase()))
+                        readerPhaseEvent(session, uiPhase(r.phase()))
                     }
                     NfcStep.PENDING -> {
                         recoveryStart = 0L
-                        phaseEvent("reader", "awaitingApproval")
+                        readerPhaseEvent(session, "awaitingApproval")
                         // The payer is still deciding; throttle the re-select poll over the radio.
                         Thread.sleep(120)
                     }
@@ -429,32 +500,34 @@ object DpayNfc {
                         if (recoveryStart == 0L) {
                             recoveryStart = System.currentTimeMillis()
                             android.util.Log.w("dpay", "onTag: dpay card routed but payer session not armed")
-                            phaseEvent("reader", "linking")
+                            readerPhaseEvent(session, "linking")
                         } else if (System.currentTimeMillis() - recoveryStart > PAYER_ARM_WAIT_MS) {
                             android.util.Log.w("dpay", "onTag: payer never armed after ${PAYER_ARM_WAIT_MS}ms")
-                            errorEvent("reader", "The payer’s dpay app isn’t open — ask them to open Pay, then try again")
+                            readerErrorEvent(session, "The payer’s dpay app isn’t open — ask them to open Pay, then try again")
                             break
                         }
                         Thread.sleep(PAYER_ARM_POLL_MS)
                     }
                     NfcStep.DONE -> {
                         recoveryStart = 0L
-                        // The signed wire is in hand → hand it to JS to submit online; keep the field.
                         wireInHand = true
-                        emitDone(r.wire())
+                        readerPhaseEvent(session, "settling")
+                        emitDone(session, r.wire())
+                        resultWaitStart = System.currentTimeMillis()
+                    }
+                    NfcStep.AWAITING_RESULT -> {
+                        wireInHand = true
+                        resultWaitStart = System.currentTimeMillis()
+                        readerPhaseEvent(session, "settling")
                     }
                     NfcStep.CONFIRMED -> {
-                        emitConfirmed()
+                        readerPhaseEvent(session, "success")
+                        emitConfirmed(session)
+                        stopReaderIfCurrent(session)
                         break
                     }
                     NfcStep.DECLINED -> {
-                        phaseEvent("reader", "declined")
-                        break
-                    }
-                    else -> {
-                        // Exhaustiveness guard: a future NfcStep variant must be handled, not dropped.
-                        android.util.Log.w("dpay", "onTag: unhandled NfcStep ${step.javaClass.simpleName}")
-                        errorEvent("reader", "Communication error — try again")
+                        readerPhaseEvent(session, "declined")
                         break
                     }
                 }
@@ -463,18 +536,20 @@ object DpayNfc {
             // The field broke — expected during a physical approach. Before the wire is in hand this
             // is pure physics: go back to listening (reader mode stays enabled; the next coupling
             // fires a fresh onTag). After the wire is in hand JS already owns the outcome.
+            r.resetLink()
             if (wireInHand) {
-                android.util.Log.w("dpay", "onTag: tag lost after wire delivered — receipt push abandoned")
+                android.util.Log.w("dpay", "onTag: tag lost after wire delivered")
             } else {
                 android.util.Log.w("dpay", "onTag: tag lost mid-exchange — back to listening", e)
-                phaseEvent("reader", "listening")
+                readerPhaseEvent(session, "listening")
             }
         } catch (e: DpayException) {
+            r.resetLink()
             android.util.Log.w("dpay", "onTag: core protocol error (${classify(e)})", e)
-            errorEvent("reader", "Communication error — try again")
+            readerErrorEvent(session, "Communication error — try again")
         } catch (e: Throwable) {
             android.util.Log.w("dpay", "onTag: unexpected failure (${e.javaClass.simpleName})", e)
-            errorEvent("reader", "Tap failed — try again")
+            readerErrorEvent(session, "Tap failed — try again")
         } finally {
             try {
                 isoDep.close()
@@ -495,23 +570,34 @@ object DpayNfc {
         else -> e.javaClass.simpleName
     }
 
-    private fun emitDone(wire: ByteArray?) {
+    private fun emitDone(session: ReaderSession, wire: ByteArray?) {
         if (wire == null) {
-            errorEvent("reader", "No authorization received")
+            readerErrorEvent(session, "No authorization received")
             return
         }
-        val m = Arguments.createMap()
-        m.putString("type", "done")
-        m.putString("role", "reader")
-        m.putString("wireHex", hex(wire))
-        emit(m)
+        try {
+            val bundle = nfcDecodeBundle(wire)
+            val m = Arguments.createMap()
+            m.putString("type", "done")
+            m.putString("role", "reader")
+            m.putString("envelopeHex", hex(bundle.update))
+            m.putString("readStateEnvelopeHex", hex(bundle.readState))
+            m.putString("requestIdHex", hex(bundle.requestId))
+            synchronized(readerLock) {
+                if (isCurrentReaderLocked(session)) emit(m)
+            }
+        } catch (e: Throwable) {
+            readerErrorEvent(session, "Received a malformed payment bundle")
+        }
     }
 
-    /** The receipt was delivered to the payer — the tap is fully complete on the merchant side. */
-    private fun emitConfirmed() {
+    private fun emitConfirmed(session: ReaderSession) {
         val m = Arguments.createMap()
         m.putString("type", "confirmed")
         m.putString("role", "reader")
-        emit(m)
+        synchronized(readerLock) {
+            if (isCurrentReaderLocked(session)) emit(m)
+        }
     }
+
 }

@@ -79,15 +79,15 @@ class DpayNfcModule(reactContext: ReactApplicationContext) :
         DpayNfc.disarmCard(); promise.resolve(null)
     }
 
-    /** Approve: pass the offline-signed 292-byte wire (hex) for the card to serve. */
+    /** Approve offline: bundle the signed update + reusable signed read_state for the reader. */
     @ReactMethod
-    fun approveCard(wireHex: String, promise: Promise) {
-        try { DpayNfc.approveCard(unhex(wireHex)); promise.resolve(null) } catch (e: Throwable) { promise.reject("dpay_nfc", e) }
+    fun approveCard(updateHex: String, readStateHex: String, nonceHex: String, promise: Promise) {
+        try { DpayNfc.approveCard(unhex(updateHex), unhex(readStateHex), unhex(nonceHex)); promise.resolve(null) } catch (e: Throwable) { promise.reject("dpay_nfc", e) }
     }
 
     @ReactMethod
-    fun declineCard(promise: Promise) {
-        DpayNfc.declineCard(); promise.resolve(null)
+    fun declineCard(nonceHex: String, promise: Promise) {
+        try { DpayNfc.declineCard(unhex(nonceHex)); promise.resolve(null) } catch (e: Throwable) { promise.reject("dpay_nfc", e) }
     }
 
     // ---------------------------------------------------------------- merchant / reader (Receive)
@@ -138,21 +138,21 @@ class DpayNfcModule(reactContext: ReactApplicationContext) :
         try { DpayNfc.startReader(act, unhex(requestHex)); promise.resolve(null) } catch (e: Throwable) { promise.reject("dpay_nfc", e) }
     }
 
-    /** After settling online, hand the outcome back to the payer over the same tap. `status`:
-     *  0 = settled, 1 = ledger rejected, 2 = ledger unreachable. `nonceHex` is the authoritative
-     *  payment nonce (32 hex chars) the ledger settled, so the payer can match it to what it signed;
-     *  an empty/short value falls back to the request nonce natively. */
-    @ReactMethod
-    fun confirmReceipt(status: Double, nonceHex: String, promise: Promise) {
-        val nonce = if (nonceHex.length == 32) unhex(nonceHex) else ByteArray(0)
-        DpayNfc.confirmReceipt(status.toInt(), nonce)
-        promise.resolve(null)
-    }
-
     @ReactMethod
     fun stopReader(promise: Promise) {
         // Null is fine: DpayNfc.stopReader falls back to the activity reader mode was enabled on.
         DpayNfc.stopReader(reactApplicationContext.currentActivity)
         promise.resolve(null)
+    }
+
+    /** Return the merchant-signed settlement result to the offline payer over the active/re-tapped field. */
+    @ReactMethod
+    fun confirmResult(status: Double, nonceHex: String, requestIdHex: String, merchantSecretHex: String, promise: Promise) {
+        try {
+            DpayNfc.confirmResult(status.toInt(), unhex(nonceHex), unhex(requestIdHex), unhex(merchantSecretHex))
+            promise.resolve(null)
+        } catch (e: Throwable) {
+            promise.reject("dpay_nfc", e)
+        }
     }
 }
