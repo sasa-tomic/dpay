@@ -162,10 +162,18 @@ pub(crate) fn release_withdraw_nonce(nonce: &Nonce) {
 }
 
 /// Returns `Ok(())` if the caller may perform **value-moving / config** governance admin ops
-/// (`mint`/`burn`/`register_ledger`/`register_minter`/`reconcile`). With **no controller set** the
-/// call is REJECTED — the open-admin default is closed, so a deployment that forgets to seed a
-/// governed controller cannot have its currency repointed or its demo currency printed by any
-/// caller. With a controller set, only that principal is admitted.
+/// (`mint`/`burn`/`register_ledger`/`register_minter`/`reconcile`). Two admission classes:
+/// - **No controller set** → REJECTED. The open-admin default is closed, so a deployment that
+///   forgets to seed a governed controller cannot have its currency repointed or its demo
+///   currency printed by any caller.
+/// - **The controller principal** → admitted. In production this is the relay's DEDICATED
+///   Ed25519 faucet key (`DPAY_CONTROLLER_SEED` — see scripts/dfx-deploy-ic.sh), NOT the dfx
+///   deploy identity (dfx identities are secp256k1; the relay's agent signs Ed25519).
+/// - **An [`ADMIN_CALLERS`] operator** → admitted. The operator identities are the founder's
+///   deploy keys, which ALSO hold IC-level canister control (upgrade/stop) — refusing them here
+///   would be security theater, and they are what lets dfx-driven ops (deploy-time
+///   `register_currency`, the `just mint` hook) keep working while the CONTROLLER cell holds the
+///   relay's key.
 ///
 /// This is the money-safety flip: the demo's self-service on-ramp is the separate [`faucet`]
 /// method (fixed amount, rate-limited, no admin gate); the privileged `mint`/`burn`/`register_*`
@@ -178,6 +186,7 @@ fn require_admin() -> Result<(), String> {
         None => Err("admin ops disabled: no controller set (seed one at init or via set_controller)"
             .to_string()),
         Some(a) if msg_caller() == a => Ok(()),
+        Some(_) if is_operator(&msg_caller()) => Ok(()),
         Some(_) => Err("unauthorized: admin ops require the controller principal".to_string()),
     }
 }
@@ -210,15 +219,17 @@ const ADMIN_CALLERS: &[&str] = &[
     "fa3em-tedlx-wlrze-3q7nk-lx4l5-vomns-qdkcm-i6r5f-3pttd-xxwfu-jae", // historical deploy controller
 ];
 
-fn require_operator() -> Result<(), String> {
-    let caller = msg_caller();
-    let ok = ADMIN_CALLERS
+fn is_operator(caller: &Principal) -> bool {
+    ADMIN_CALLERS
         .iter()
-        .any(|t| Principal::from_text(t).map(|p| p == caller).unwrap_or(false));
-    if ok {
+        .any(|t| Principal::from_text(t).map(|p| p == *caller).unwrap_or(false))
+}
+
+fn require_operator() -> Result<(), String> {
+    if is_operator(&msg_caller()) {
         Ok(())
     } else {
-        Err(format!("unauthorized operator caller: {caller}"))
+        Err(format!("unauthorized operator caller: {}", msg_caller()))
     }
 }
 
@@ -1399,6 +1410,17 @@ fn set_controller(new: Option<Principal>) -> Result<(), String> {
         // rejects this admin call, not a money/settlement path.
         .with(|c| c.borrow_mut().set(ControllerStorable(new)).expect("set controller"));
     Ok(())
+}
+
+/// Readback of the governance controller cell — the wiring check behind `just faucet-verify`
+/// (leg 3) and the deploy script's idempotent arming step. Public and side-effect-free on
+/// purpose: a principal is not a secret (the IC-level controllers are equally public via
+/// `dfx canister info`), and scripts need it to distinguish "already armed with the relay's key"
+/// (skip) from "null" (arm) from "governed by another principal" (loud, do-not-touch) without
+/// side-effecting into `set_controller`. `None` = open/demo mode.
+#[query]
+fn admin_controller() -> Option<Principal> {
+    CONTROLLER.with(|c| c.borrow().get().0)
 }
 
 #[query]

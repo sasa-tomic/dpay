@@ -11,6 +11,9 @@ path = "src/lib.rs"
 [dependencies]
 dpay-icp = { path = "../dpay-icp" }
 ed25519-dalek = { workspace = true }
+# dev-pubkey helper prints a seed's verifying key as hex (faucet-verify --mint burner account).
+# Same pin as dpay-relay's (already in the offline cache via that crate).
+hex = "0.4.3"
 # Cached offline (0.12.28 already in Cargo.lock via pocket-ic); rustls only — no native-tls/openssl.
 # Pinned to the exact lock version so offline resolution never has to look at the network.
 reqwest = { version = "=0.12.28", default-features = false, features = ["blocking", "rustls-tls"] }

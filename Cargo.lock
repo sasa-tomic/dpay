@@ -859,6 +859,7 @@ dependencies = [
  "candid",
  "dpay-icp",
  "ed25519-dalek",
+ "hex",
  "reqwest 0.12.28",
 ]
 

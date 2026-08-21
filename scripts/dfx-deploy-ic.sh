@@ -30,8 +30,10 @@
 #     `install` is for an empty canister. ONE-TIME MIGRATION: upgrading from the original
 #     pre-stable-memory build finds empty stable memory → starts with an EMPTY ledger; reinstall once
 #     to re-fund, after which upgrades preserve state.
-#   * UNHARDENED. `mint` is unauthenticated and the controller is your own key (not blackholed /
-#     not SNS-governed). Accepted only while there is no real money on the canister.
+#   * DEMO-PHASE HARDENING LEVEL: `mint` is CONTROLLER-gated (require_admin; only the facade's
+#     internal CONTROLLER key can mint — normally the relay's DPAY_CONTROLLER_SEED identity), but
+#     the controller is your own key (not blackholed / not SNS-governed). Accepted only while
+#     there is no real money on the canister.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -143,6 +145,65 @@ PA0="$(dfx_i canister call "$CANISTER" balance_of --network "$NETWORK" --query -
 MB0="$(dfx_i canister call "$CANISTER" balance_of --network "$NETWORK" --query --argument-file dfx/args/merchant.arg | nat)" || { echo "readback failed: merchant balance query" >&2; exit 1; }
 echo "   cap: $CAP   opening balances: payer=$PA0  merchant=$MB0"
 
+# --- arm the admin gate with the relay's DEDICATED Ed25519 faucet key ---------------------------
+# `require_admin` reads the canister's INTERNAL CONTROLLER stable cell (NOT the dfx-level canister
+# controller). The production controller is NOT the deploy identity: dfx identities are secp256k1
+# while the relay's agent can only sign Ed25519 (ic-agent BasicIdentity), so the controller key can
+# never be the identity's PEM material. Instead the relay owns a DEDICATED 32-byte Ed25519 key —
+# DPAY_CONTROLLER_SEED — and this step arms the cell with that key's derived principal
+# (self_authenticating over its verifying key). The dfx deploy identity keeps running admin ops via
+# the ADMIN_CALLERS operator allowlist (the register_* below, `just mint`) and stays the IC-level
+# controller (upgrade authority). Blast radius of the dedicated key: demo-$ mint + catalog config
+# only; rotation = set_controller + seed swap (docs/GOVERNANCE.md, govern-in-place pillar 2).
+# Idempotent by design: an existing DPAY_CONTROLLER_SEED in deploy/.env is REUSED (never regenerated
+# — regenerating would orphan the armed controller), and a cell already holding the derived
+# principal is left alone (free admin_controller readback instead of a set_controller tx).
+echo "== arm the admin gate: CONTROLLER cell ← relay's dedicated Ed25519 faucet key =="
+SEED_HEX="${DPAY_CONTROLLER_SEED:-$(env_get DPAY_CONTROLLER_SEED deploy/.env)}"
+if [ -n "$SEED_HEX" ] && [[ "$SEED_HEX" =~ ^[0-9a-fA-F]{64}$ ]]; then
+  echo "   faucet key: reusing DPAY_CONTROLLER_SEED from deploy/.env (rotation-stable)"
+else
+  SEED_HEX="$(openssl rand -hex 32)"
+  echo "   faucet key: generated a NEW dedicated Ed25519 seed"
+fi
+RELAY_PRINCIPAL="$(cargo run -q -p dpay-icp-e2e --bin dev-principal -- "$SEED_HEX")" \
+  || { echo "could not derive the faucet key's principal (cargo run -p dpay-icp-e2e --bin dev-principal)" >&2; exit 1; }
+CUR_CONTROLLER="$(dfx_i canister call "$CANISTER" admin_controller --network "$NETWORK" --query 2>/dev/null \
+  | tr -d '\n' | sed -n 's/.*opt principal "\([^"]*\)".*/\1/p')"
+if [ "$CUR_CONTROLLER" = "$RELAY_PRINCIPAL" ]; then
+  echo "   CONTROLLER already = relay faucet key — armed (no set_controller needed)"
+elif [ -n "$CUR_CONTROLLER" ]; then
+  # Readback resolved but differs: still attempt the rotation (only the CURRENT controller can
+  # perform it — a deploy identity that is the current controller legitimately rotates; anything
+  # else fails loudly below and we do NOT touch that canister's governance).
+  case "$(dfx_i canister call "$CANISTER" set_controller "(opt principal \"$RELAY_PRINCIPAL\")" --network "$NETWORK" 2>&1)" in
+    *Ok*) echo "   CONTROLLER rotated: $CUR_CONTROLLER → $RELAY_PRINCIPAL (relay faucet key armed)" ;;
+    *) echo "WARN: set_controller refused — the internal controller is governed by $CUR_CONTROLLER," >&2
+       echo "      not '$IDENT'. The relay's faucet mint will 422 'unauthorized' until THAT key" >&2
+       echo "      rotates the cell. (Governed canister? See docs/GOVERNANCE.md.)" >&2 ;;
+  esac
+else
+  # Fresh canister (or one predating the admin_controller query): null cell → open-mode lockdown
+  # lets ANY caller arm it once; an older locked cell surfaces as an honest set_controller failure.
+  case "$(dfx_i canister call "$CANISTER" set_controller "(opt principal \"$RELAY_PRINCIPAL\")" --network "$NETWORK" 2>&1)" in
+    *Ok*) echo "   CONTROLLER = $RELAY_PRINCIPAL (admin gate armed; faucet + register_* enabled)" ;;
+    *) echo "WARN: set_controller did not return Ok — the internal controller is governed by ANOTHER" >&2
+       echo "      principal (readback was empty but the cell is locked). register_*/faucet mint as" >&2
+       echo "      '$IDENT' will be refused until that key rotates the cell. To fix: have the CURRENT" >&2
+       echo "      controller run" >&2
+       echo "        dfx canister call $CANISTER set_controller '(opt principal \"$RELAY_PRINCIPAL\")' --network $NETWORK" >&2
+       echo "      (the relay's key cannot sign dfx calls; DPAY_CONTROLLER_SEED below is the target)" >&2
+       echo "      (Governed canister? See docs/GOVERNANCE.md.)" >&2 ;;
+  esac
+fi
+# Persist the seed for the relay container (compose reads deploy/.env). Written even if arming WARNed
+# — it is still the key the relay must sign with once governance is resolved. Local rehearsals never
+# touch deploy/.env (same discipline as DPAY_CANISTER_ID).
+if [ "$NETWORK" != "local" ]; then
+  env_set DPAY_CONTROLLER_SEED "$SEED_HEX" deploy/.env
+  echo "   wrote DPAY_CONTROLLER_SEED (relay's dedicated faucet key) to deploy/.env"
+fi
+
 # --- register the DUSD ledger + currency metadata (idempotent config; folds in the former
 # icrc-deploy-mainnet setup so ONE deploy leaves the canister correctly configured) ----------------
 # register_ledger(0) points DEMO at the DUSD ICRC-3 ledger (icrc_ledger); register_currency_meta sets
@@ -217,5 +278,7 @@ else
 fi
 
 echo
-echo "next: deploy/.env now carries the canister id. Confirm DPAY_LEDGER=ic, DPAY_IC_URL=https://icp-api.io,"
-echo "      and DPAY_IC_FETCH_ROOT_KEY=false there, then set up the tunnel (just tunnel-provision) and: just up"
+echo "next: deploy/.env now carries the canister id (and, on ic, the controller seed). Confirm"
+echo "      DPAY_LEDGER=ic, DPAY_IC_URL=https://icp-api.io, and DPAY_IC_FETCH_ROOT_KEY=false"
+echo "      there, optionally run 'just faucet-verify' (asserts seed↔controller wiring — needs"
+echo "      the relay up: 'just up'), then set up the tunnel (just tunnel-provision) and: just up"

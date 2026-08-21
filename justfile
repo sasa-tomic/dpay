@@ -207,6 +207,16 @@ verify-relay:
 mint account amount currency='0':
     bash scripts/mint.sh {{account}} {{amount}} {{currency}}
 
+# faucet WIRING gate: asserts the relay's DPAY_CONTROLLER_SEED, the canister's IC-level
+# controllers, and the facade's internal CONTROLLER cell all refer to the deploy identity —
+# the three-party agreement the authenticated faucet needs (else every top-up 422s
+# "unauthorized: admin ops require the controller principal"). Read-only unless args given:
+# `just faucet-verify --mint` additionally POSTs the LIVE relay for a throwaway burner account
+# (end-to-end proof; mints fixed play-DUSD to a burner, never a real account). Extra args pass
+# through to scripts/faucet-verify.sh (e.g. --relay https://staging.example.com --mint).
+faucet-verify *args:
+    bash scripts/faucet-verify.sh {{args}}
+
 # typecheck the RN app — catches bridge arity drift against the TS interfaces (tsc --noEmit, ~2s, no device)
 typecheck:
     cd app && npm run typecheck

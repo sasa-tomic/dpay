@@ -1189,18 +1189,31 @@ fn non_zero_fee_settles_with_fee_deducted() {
     assert_eq!(ledger_balance(&pic, ledger, dpay, payer), barely);
 }
 
-/// CRITICAL: with a controller set, admin ops (mint/burn/register_ledger) must refuse any other
-/// caller. With no controller (the demo default) they remain open. Since the 2026-08-20 faucet
-/// re-target, a controller `mint` credits the USER-principal account (`self_authenticating(DER(pk))`,
-/// no subaccount) — the account the app reads — NOT the facade-custody subaccount; this is the
-/// shape the production relay faucet relies on when it drives `mint` with an authenticated
-/// controller identity.
+/// CRITICAL: with a controller set, admin ops (mint/burn/register_ledger) must refuse any caller
+/// that is neither the controller nor an [`ADMIN_CALLERS`] operator. With no controller (the demo
+/// default) they remain open. Since the 2026-08-20 faucet re-target, a controller `mint` credits
+/// the USER-principal account (`self_authenticating(DER(pk))`, no subaccount) — the account the
+/// app reads — NOT the facade-custody subaccount; this is the shape the production relay faucet
+/// relies on when it drives `mint` with an authenticated controller identity.
+///
+/// The 2026-08-20 secp256k1 discovery reshaped the prod wiring: dfx identities are secp256k1 but
+/// the relay's agent signs Ed25519, so the CONTROLLER cell holds the relay's DEDICATED Ed25519 key
+/// while the dfx deploy identity (an IC-level controller + ADMIN_CALLERS operator) keeps dfx-side
+/// ops working. This test pins BOTH admission classes and the exact refusal wording the relay
+/// surfaces verbatim as the app's 422.
 #[test]
 fn admin_ops_are_gated_by_controller() {
     let admin = pic_admin();
     let (pic, ledger_dusd, _ledger_ckx, dpay, _sk, payer, _merch) = setup_with(Some(admin));
 
-    // Anonymous caller must be refused.
+    // Readback (the `just faucet-verify` leg-3 probe): admin_controller returns the live cell.
+    let reply = pic
+        .query_call(dpay, Principal::anonymous(), "admin_controller", encode_args(()).unwrap())
+        .expect("admin_controller query rejected");
+    let controller: Option<Principal> = decode_one(&reply).unwrap();
+    assert_eq!(controller, Some(admin), "admin_controller readback must mirror the cell");
+
+    // Anonymous caller must be refused — with the exact wording the relay maps to the app's 422.
     let reply = pic
         .update_call(
             dpay,
@@ -1210,9 +1223,30 @@ fn admin_ops_are_gated_by_controller() {
         )
         .expect("mint update rejected");
     let res: Result<u64, String> = decode_one(&reply).unwrap();
-    assert!(res.is_err(), "anonymous mint must be refused when a controller is set: {res:?}");
+    assert_eq!(
+        res,
+        Err("unauthorized: admin ops require the controller principal".to_string()),
+        "anonymous mint must be refused with the verbatim gate text"
+    );
     assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, payer), 0);
     assert_eq!(user_ledger_balance(&pic, ledger_dusd, payer), 0, "no user-principal credit either");
+
+    // An arbitrary non-controller principal must be refused identically (the wrong-seed shape).
+    let nobody = Principal::from_slice(&[9u8; 29]);
+    let reply = pic
+        .update_call(
+            dpay,
+            nobody,
+            "mint",
+            encode_args((payer.to_vec(), DEMO_USD, INIT_A)).unwrap(),
+        )
+        .expect("mint update rejected");
+    let res: Result<u64, String> = decode_one(&reply).unwrap();
+    assert_eq!(
+        res,
+        Err("unauthorized: admin ops require the controller principal".to_string()),
+        "non-controller mint must be refused with the verbatim gate text"
+    );
 
     // The controller principal mints successfully — at the USER principal (read directly off the
     // ledger via icrc1_balance_of on Account{self_authenticating(DER(payer)), None}).
@@ -1229,6 +1263,33 @@ fn admin_ops_are_gated_by_controller() {
     assert_eq!(new_balance, INIT_A, "mint returns the post-mint balance at the user principal");
     assert_eq!(user_ledger_balance(&pic, ledger_dusd, payer), INIT_A, "credit landed at the user principal");
     assert_eq!(ledger_balance(&pic, ledger_dusd, dpay, payer), 0, "custody subaccount untouched");
+}
+
+/// The 2026-08-20 prod wiring: the CONTROLLER cell holds the relay's Ed25519 key while the dfx
+/// deploy identity (an ADMIN_CALLERS operator that also holds IC-level canister control) stays
+/// able to run admin ops — deploy-time `register_currency_meta`, the `just mint` operator hook.
+/// An operator that is NOT the controller must pass `require_admin` and mint at the user
+/// principal, exactly like the controller does.
+#[test]
+fn admin_ops_admit_operators_alongside_the_controller() {
+    let admin = pic_admin();
+    let (pic, ledger_dusd, _ledger_ckx, dpay, _sk, payer, _merch) = setup_with(Some(admin));
+    let operator =
+        Principal::from_text("hhwti-hb7f7-4ojco-uvazw-vcwr7-fqd6o-3oljb-aezpo-iheay-3gxmx-rqe")
+            .expect("dfx identity `dpay` principal is valid");
+
+    let reply = pic
+        .update_call(
+            dpay,
+            operator,
+            "mint",
+            encode_args((payer.to_vec(), DEMO_USD, INIT_A)).unwrap(),
+        )
+        .expect("mint update rejected");
+    let res: Result<u64, String> = decode_one(&reply).unwrap();
+    let new_balance = res.expect("ADMIN_CALLERS operator mint must pass require_admin");
+    assert_eq!(new_balance, INIT_A);
+    assert_eq!(user_ledger_balance(&pic, ledger_dusd, payer), INIT_A, "operator mint credits the user principal");
 }
 
 /// MED: mint, pay, and burn all appear in `transactions_of`. Newest-first; O(limit) read.
