@@ -25,6 +25,11 @@ The BTC/ETH rails layer on the existing facade (minter-family-agnostic; dispatch
 
 When in doubt about sequencing, **pick the work that gets a user real native BTC/ETH/SOL into or out of the wallet fastest.** Reference: `OPEN_ISSUES.md` "NEXT SESSION — work order".
 
+## Non-negotiable: governance posture (set 2026-08-20)
+
+- **No NNS/SNS handoff.** Moving the canister(s) or the relay under NNS/SNS control is **not realistic until critical mass** — we will not ask the general ICP community to vote on our upgrades. Treat "hand the controller to an SNS/blackhole" as a **deferred end-state**, never a near-term plan item or a blocking gate.
+- **Highest architectural objective: safe WITHOUT governance handoff.** The system must be as safe as we can make it while the founder still holds the canister and relay keys. Concretely: least-authority in code (per-op exact-amount approvals, bounded mint, one-way catalog locks), small rotatable scoped keys (faucet controller seed ≠ root keys), cold-storage discipline for the deploy/controller keys, and public verifiability (pinned module hashes) so upgrades are at least *detectable*. Full strategy: `docs/GOVERNANCE.md`.
+
 ## Non-negotiable: how Claude must be able to iterate
 
 These are hard requirements, **not preferences**. Do not accept a design that violates them — restructure the design instead.

@@ -60,8 +60,9 @@ const SURFACES = {
   // (the confirmation dialog); listed separately below to keep this census aligned with the visible
   // surface at first open. btn-backup + btn-settings-restore are the always-visible section entries
   // (Backup and Restore); their confirm-gate children are censused separately (settingsBackupConfirm
-  // is covered inline by the Backup flow's own census path; settingsRestoreConfirm below).
-  settings: ['btn-settings-close', 'btn-theme-mode', 'settings-relay', 'btn-relay-apply', 'btn-backup', 'btn-reset', 'btn-settings-restore', 'privacy-policy'],
+  // is covered inline by the Backup flow's own census path; settingsRestoreConfirm below). The theme
+  // control is the Wave-8 three-way segmented control (Light / Dark / Auto radio segments).
+  settings: ['btn-settings-close', 'btn-theme-auto', 'btn-theme-light', 'btn-theme-dark', 'settings-relay', 'btn-relay-apply', 'btn-backup', 'btn-reset', 'btn-settings-restore', 'privacy-policy'],
   // Settings → Reset confirmation (btn-reset was tapped). Surface = the dialog above.
   settingsResetConfirm: ['btn-reset-confirm', 'btn-reset-cancel'],
   // Settings → Restore confirmation (btn-settings-restore was tapped). Surface = the inline seed

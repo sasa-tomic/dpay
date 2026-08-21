@@ -35,6 +35,50 @@
 > 4. ~~**Replica gate on rail changes**~~ ✅ re-run on the integrated tree after this session's
 >    rail changes: `just test-icp-replica` **18/18 PASS**.
 >
+> **2026-08-21 two-physical-phone NFC field session — THREE prod bugs found & fixed in-tree
+> (all verified, all awaiting one founder ship):**
+>
+> 1. ~~Payer-side auto-decline~~ ✅ ROOT CAUSE: the app's certified-clock sync (`icNowNs` →
+>    read_state `[[time]]`) was routed at the MANAGEMENT canister `aaaaa-aa`, but icp-api.io
+>    only routes read_state to REGISTERED canister ids → deterministic 400 `canister_not_found`
+>    → `icStampExpiry` threw "IC clock unreachable" → payer `autoSign` catch → `declineCard` →
+>    receiver saw sticky `6985` "payment was declined" while balances kept working (poll
+>    envelopes fall back to device clock — the asymmetry that hid the bug; offline suites blind:
+>    the fake gateway skips canister-known validation for read_state). Fix:
+>    `IC_TIME_ROUTING_CANISTER = 'td2nx-oaaaa-aaaab-qhdnq-cai'` (the prod DUSD ledger — the
+>    time leaf is in every subnet's certified tree). Proven live 3/3 via a Node probe driving
+>    the app's real `icp.ts` against prod.
+> 2. ~~"Confirming… → error, failed" (payment actually SETTLED)~~ ✅ ROOT CAUSE: real-mainnet
+>    outcome latency exceeded the payer's in-tap poll budget (12 × 500 ms) — the transfer
+>    settled moments after budget-out; both phones honestly rendered the UNKNOWN, which reads
+>    as failure. Fix: `NfcTap` unknown branch → `onUnknown(requestIdHex)` → `ReceiveMode`
+>    `tapHandoff` (tap unmounts, `nfc-reconcile` "Confirming…" view) + the existing background
+>    reconciler (`watchRid`) flips it to "Received ✓" when the outcome lands; in-tap budget
+>    12→14. Offline coverage: RID-scoped `hidden_outcomes` seam on the fake-IC gateway
+>    (test-helpers `POST /api/v1/test/hide_outcome`) + e2e flow 86 (full recovery path) +
+>    `rail.test.ts` unknown-pins. The web `DpayNfc.buildRequest` shim now returns the real
+>    132-byte request hex (`DpayCore.buildRequestHex`) so reader mode actually mounts in e2e.
+> 3. ~~History rows "undefined NaN, NaN" + relay 502s + per-currency AbortError spam~~ ✅
+>    ROOT CAUSE (three stacked): `map_icrc_txn` passed ICRC-3 NANOSECOND timestamps through
+>    undivided (contract is unix SECONDS; `fmtTime(ts*1000)` overflowed `Date` → Invalid Date
+>    → "undefined NaN, NaN"); the icrc3 walk had NO overall deadline and NO zero-match
+>    early-stop (no-history accounts burned 10 × 10 s round trips per currency per poll,
+>    saturating the relay behind Cloudflare — the "balances 502"); the app fanned history
+>    fetches at ALL catalog currencies (incl. hidden testnet) with the 4 s balance timeout.
+>    Fixes: ns→s division (+ live-test magnitude pin 1.5e9<ts<3e9), walk deadline +
+>    2-empty-tail-pages early-stop, deliberately NO result cache (just-settled payment must be
+>    visible next poll — a TTL cache broke the live freshness pin and was removed),
+>    `HISTORY_TIMEOUT_MS` 10 s + `POLL.history` 15 s + `histCatalog` displayed-only filter,
+>    `fmtTime` non-finite guard → '—'. Names in history stay PRINCIPAL-prefix by design
+>    post-cutover (ledger memo is the frozen 16-byte nonce reconciliation key — extending it
+>    was considered and REJECTED; a signed name registry is a founder follow-up, NOT in-tree).
+>
+> Gates after the fixes: `just verify` **81/81 GREEN** (incl. new flow 86; one load flake on
+> 41-a11y-census re-ran green), jest **876/876** (45 suites), relay live **40/40** (incl. the
+> pinned-seconds + late-visibility assertions), fresh APK built + installed on the receiver
+> (DPAY_SELFCHECK PASS). **Prod is BEHIND these fixes — founder ship: `just deploy-ic && just
+> apk && just up`** (also still carries the 2026-08-20 faucet-422 fix below).
+>
 > **Final integrated verification (2026-08-20 close-out, real runs):** `just verify` fully GREEN
 > — core 47 · canister 86 · icp 6 · relay 33 · live 34 · typecheck · bridge-parity 42 methods ·
 > aid-parity 4 AIDs · wasm-core parity 124 checks · e2e **77/77** (216 s at ×3.48 host load —
@@ -44,6 +88,30 @@
 >
 > **Prod at HEAD `d740379`** — shipped 2026-08-20 via `just deploy-ic && just apk && just up`
 > (evidence in the PROD SHIPPED block at the end of the 2026-08-20 session summary below).
+>
+> **Prod faucet 422 — FIXED in-tree (2026-08-20 late session), needs one founder ship.** User hit
+> `Faucet top up fails: unauthorized: admin ops require the controller principal` on prod: the
+> facade's CONTROLLER cell was armed with the dfx deploy principal (secp256k1 — the relay's
+> Ed25519 agent can NEVER authenticate as it; discovered via `openssl asn1parse`, the PEM is PKCS#8
+> secp256k1), so every relay mint was refused. Fix (committed in working tree): (a) canister
+> `require_admin` now admits ADMIN_CALLERS operators alongside the controller, and gained the
+> `admin_controller()` readback query (did in sync); (b) `scripts/dfx-deploy-ic.sh` arms the cell
+> with a DEDICATED Ed25519 faucet key — generates (or reuses) `DPAY_CONTROLLER_SEED`, derives its
+> principal via `dev-principal`, `set_controller`s it (idempotent: already-armed→skip,
+> governed→loud WARN + no clobber), persists the seed to deploy/.env on ic only; (c) new
+> `just faucet-verify` (scripts/faucet-verify.sh, 5 legs: seed present → derives principal →
+> cell readback matches → deploy identity is IC-level controller → `--mint` live proof to a
+> throwaway burner); (d) test coverage: `admin_ops_are_gated_by_controller` (verbatim refusal
+> text, both wrong-caller shapes) + `admin_ops_admit_operators_alongside_the_controller` (canister
+> suite 87/87) + `live_faucet_refuses_non_controller_identities_verbatim` (live suite 40/40); the
+> whole flow ALSO drilled on a local replica: deploy-ic arming branches, faucet-verify legs 1–5
+> PASS with a live relay mint (200 `{"balance":"10000"}` at the burner's user principal), and the
+> anonymous relay reproduces the user's verbatim 422. **Founder ship: `just deploy-ic && just up`
+> (rotates the prod cell to a fresh dedicated key — the dfx identity signs the rotation as both
+> caller and current cell holder), then `just faucet-verify --mint`.** Docs: deploy/.env.example
+> rewritten for the dedicated key; docs/GOVERNANCE.md govern-in-place plan records the key-scoping
+> rationale; the secp256k1 dfx PEM scalar that briefly sat in deploy/.env during debugging is
+> PURGED.
 >
 > **Relay wave 2/3 (2026-08-20, post-`82377e4`):** dead-surface deletion + honesty pass landed —
 > `Ledger::seed_deposit`/`register_deposit`/`pending_deposits`, dead serde types (`Receipt`,
@@ -1808,18 +1876,19 @@ Milestone acceptance: a fresh install visibly exposes configured assets; a merch
 - **Resolution (MC4 U1–U5).** **U5 (app-side pin, the client trust anchor):** `verifyOutcomeReceipt` now requires `receipt.pubkey === EXPECTED_RECEIPT_PUBKEY` (pinned in `app/config/constants.ts` via the `__DPAY_TEST_RECEIPT_PUBKEY` override seam; production bakes the real canister's `receipt_pubkey()`), rejecting a fabricated key even when its signature is internally valid — the malicious-relay close. It also runs a full-auth binding (receipt fields vs the signed authorization; `amount` via `cmpRaw`). **U1–U4 (canister/relay):** the receipt key is ensured before the ledger commit (U1), reconcile reconstructs signed receipts for trap orphans (U2), `/receipt/:nonce` is canister-backed + restart-safe (U3), and `/receipt_pubkey` is the discovery route (U4).
 - **Next step (stronger, not a blocker).** Migrate to **IC chain-key** (`sign_with_schnorr` / `sign_with_ecdsa`) before pilot so no exportable secret lives in canister state. ~~Bake the real canister's `receipt_pubkey()` into the prod build's `EXPECTED_RECEIPT_PUBKEY` at deploy~~ — **✅ DONE 2026-08-15** (prod key materialized + pinned + shipped).
 
-### 3. (launch-time, founder-owned) R4 external governance hand-off
+### 3. (founder-set stance 2026-08-20) R4 governance — REFRAMED: govern IN PLACE, no NNS/SNS hand-off
 
-- **What/why.** The IC-level *code controller* of the facade canister has not yet been handed to an SNS root or a blackhole. The code fully supports a governed controller end-to-end (R1/R4: admin methods denied when `controller == null`, `InitArg.controller` seeds a governed principal at deploy, `set_controller` is two-step rotation) and `docs/GOVERNANCE.md` documents the exact operator steps. Until that external transfer lands, "we can't touch your funds" is a promise, not an enforced property — whoever holds the deploy key can still upgrade the wasm.
-- **Owner / timing — DO NOT NAG.** **The founder will perform this at launch, not before.** This is a launch-time operator task, NOT an active blocker. Do NOT re-raise it in session summaries, do NOT list it under "next steps" or "reminders", and do NOT flag it during normal dev work. The code side is complete; the operator step is calendared to launch. Leave this item alone unless the founder explicitly raises governance.
-- **Current mitigation.** Controller currently locked to the `dpay` deploy identity; in-canister admin surface is closed. Two distinct layers documented in `docs/GOVERNANCE.md` (in-canister `CONTROLLER` gates admin *methods*; IC-level code controller gates *upgrades* — both must be governed).
-- **Reference.** `docs/GOVERNANCE.md` launch checklist (the exact operator steps, when the time comes).
+- **What/why.** The founder has ruled out moving the canister or relay under NNS/SNS control until critical mass: the general ICP community will not vote on our upgrades. The old plan (hand the IC-level code controller to an SNS root / blackhole before pilot) is OFF the table as a gate. The replacement objective: an architecture that is **safe without governance hand-off**.
+- **The plan (authoritative).** `docs/GOVERNANCE.md` — stance, objectives O1–O5, and the phased plan (P0 foundations incl. the dedicated Ed25519 faucet key; P1 cold root key + module-hash pinning + `lock_catalog` ratchet + ops runbooks; P2 pre-real-money timelock controller, still no NNS). Read that before touching anything governance-adjacent.
+- **Honest residual.** Upgrade authority stays founder-held: a malicious upgrade remains possible; the plan makes it bounded (value at user principals, per-op approvals), scoped (separated rotatable keys), cold (root key offline), and *detectable* (pinned module hashes) — not impossible. Accepted trade until critical mass.
+- **Owner / timing — DO NOT NAG.** The stance is settled and documented; SNS/blackhole mechanics remain reference-only in `docs/GOVERNANCE.md`. Do NOT re-raise governance hand-off in session summaries, next steps, or reminders unless the founder explicitly raises governance.
+- **Agent-pickable pieces of P1/P2** (NOT founder-owned): `lock_catalog` one-way ratchet (canister code + tests), module-hash pinning/publishing (relay health surface + changelog convention), reconcile runbook wiring. Cold-storage discipline for the root key is founder-owned.
 
-### 4. (medium) `ADMIN_CALLERS` operator allowlist is the fixed deploy identity
+### 4. (medium) `ADMIN_CALLERS` operator allowlist is the fixed deploy identity — accepted under govern-in-place
 
-- **What/why.** Cycles/admin operations (`provision_ledger_canister`, `transfer_cycles`) are gated to a hardcoded `ADMIN_CALLERS` operator allowlist — the fixed deploy identity, not a governed/rotatable principal.
-- **Current mitigation.** These are ops/cycles functions only (not money-movement of user funds); bounded blast radius. Documented in `docs/GOVERNANCE.md`.
-- **Next step.** Rotate `ADMIN_CALLERS` to a governed principal before pilot (`docs/GOVERNANCE.md` checklist).
+- **What/why.** Cycles/admin operations (`provision_ledger_canister`, `transfer_cycles`) are gated to a hardcoded `ADMIN_CALLERS` operator allowlist — the fixed deploy identity, not a governed/rotatable principal. Additionally, since 2026-08-20 `require_admin` admits `ADMIN_CALLERS` operators alongside the controller (dfx identities are secp256k1 while the relay signs Ed25519, so the CONTROLLER cell holds the relay's dedicated key and the operator allowlist keeps dfx-driven ops — deploy-time `register_currency_meta`, `just mint` — working).
+- **Current mitigation.** These are ops/cycles functions + deploy-time config only (not movement of user funds); bounded blast radius; operators also hold IC-level canister control so refusing them in-canister would be security theater. Documented in `docs/GOVERNANCE.md`.
+- **Next step.** Under the govern-in-place plan (`docs/GOVERNANCE.md` P1 item 8): the `lock_catalog` ratchet closes the config-repoint vector a leaked operator/faucet key could otherwise exploit; rotating the allowlist itself is only revisited if the deploy identity changes.
 
 ### 5. (medium) R3 reconcile is bounded
 

@@ -5,9 +5,92 @@
 > future version, the fee schedule), so "we can't touch your funds" is only a *property* (not a
 > promise) when control is governed. This doc is the operator-facing path to make it one.
 
+## Stance (founder-set 2026-08-20): govern IN PLACE, no NNS/SNS handoff
+
+**We are not moving the canister or relay under NNS/SNS control.** Convincing the general ICP
+community to vote on our upgrades is unrealistic until critical mass. Therefore:
+
+- The founder keys (IC-level controller + in-canister controller/operator) are the **permanent root
+  of trust for the foreseeable future**, not a transitional state. The strategy is to make that
+  acceptable — **safe without governance** — via least-authority, scoping, and verifiability, not via
+  a hand-off we can't get.
+- The SNS/blackhole mechanics below stay as **reference for the eventual critical-mass end-state**
+  (blackholing also remains a per-canister freeze option if a surface is ever feature-complete).
+  They are explicitly **not** pre-pilot gates.
+
+## Objectives (the plan's acceptance bars)
+
+- **O1 — Bounded blast radius.** Compromise of ANY single online component (relay box, faucet seed,
+  relay image) must be unable to (a) move resting user balances, (b) hold standing sweep rights over
+  user ck-assets, or (c) upgrade canister code.
+- **O2 — Cheap, independent rotation.** Every scoped key must rotate without touching any other
+  (faucet seed swap ≠ root key ≠ IC controller), in minutes, with no canister data migration.
+- **O3 — Detectability.** Any code upgrade of a money-path canister must be independently
+  discoverable by a user/app even though it is not preventable.
+- **O4 — No custodial drift.** No architecture change may quietly move authority over user funds
+  toward the operator (standing approvals, relay-held sweep keys, custody subaccounts). The
+  non-custodial hard rule in `CLAUDE.md` is the boundary; this plan only works *inside* it.
+- **O5 — Realism.** No plan item may depend on NNS/SNS adoption, a token, or community votes.
+
+## The govern-in-place plan
+
+### P0 — Foundations (DONE or in flight, 2026-08-20)
+
+| # | Item | Status |
+|---|------|--------|
+| 1 | Value at USER principals, facade out of the value path (post-cutover) | ✅ done (2026-08-19) |
+| 2 | Per-op exact-amount minter approvals; no standing approvals ever | ✅ done (withdraw paths) |
+| 3 | Faucet mint fixed-amount + rate-limited; admin ops denied without controller (R1) | ✅ done |
+| 4 | **Dedicated Ed25519 faucet controller key** (`DPAY_CONTROLLER_SEED`) ≠ dfx root ≠ IC controller; deploy script arms it; `just faucet-verify` proves the wiring (seed↔controller↔IC-controller legs + optional live mint) | 🔄 in flight (2026-08-20 session) |
+| 5 | Refusal surface pinned verbatim in tests (`live_faucet_refuses_non_controller_identities_verbatim`, `admin_ops_are_gated_by_controller`, `admin_ops_admit_operators_alongside_the_controller`) | 🔄 in flight (2026-08-20 session) |
+
+### P1 — Hardening the online surface (next, pre-pilot)
+
+| # | Item | Closes |
+|---|------|--------|
+| 6 | **Cold storage for the IC-level controller identity** (upgrade authority): PEM offline, imported only at deliberate deploys, never on the relay box | O1(c) |
+| 7 | **Module-hash pinning/publishing**: relay `/api/v1/health` (or a `/api/v1/integrity`) reports the live facade module hash (read_state); changelog per upgrade | O3 |
+| 8 | **`lock_catalog` one-way ratchet** (canister): after lock, `register_ledger`/`register_currency_meta` refuse changes (or require a timelocked path) — closes the ledger-repoint phishing vector from a leaked faucet key | O1 |
+| 9 | Ops runbook: `reconcile` on a schedule + after any suspected trap; key-rotation runbook for each scoped key | O2 |
+
+### P2 — Pre-real-money (when real value flows, still no NNS)
+
+| # | Item | Closes |
+|---|------|--------|
+| 10 | **Timelock canister as IC-level controller** (self-governance, "poor man's DAO"): upgrades execute only after a public delay — users get exit time; no community vote needed | O1(c), O3 |
+| 11 | Receipt/audit hardening: app verifies canister-signed receipts (R2) before "Paid ✓" | O3 |
+| 12 | Optional per-surface blackholing once a canister surface is feature-complete forever | O1 |
+
+### Honest residual (accepted, revisit at critical mass)
+
+Without governance, upgrade authority is irreducibly founder-held. This plan makes compromise
+harder, slower to exploit, cheaper to recover from, and visible — not impossible. Items 10+ are the
+bridge; the SNS reference below is the end-state if critical mass ever makes it realistic.
+
+### Strategy pillars behind the plan
+
+1. **Least authority in code (structural).** The operator's worst case must be bounded by the code
+   they *can't* quietly change users' exposure to: value sits at USER principals (post-2026-08-19
+   cutover); minter approvals are per-op exact-amount (never standing); faucet mint is fixed-amount +
+   rate-limited; admin ops are denied without a controller.
+2. **Scope and separate keys.** The relay's faucet key (`DPAY_CONTROLLER_SEED`, Ed25519) is a
+   DEDICATED key that gates only play-money DUSD mint + config — it is not the deploy identity
+   (dfx identities are secp256k1; the relay agent signs Ed25519) and not an IC-level controller. A
+   leaked seed's blast radius: unlimited demo-$ mint + catalog repoint — rotatable via
+   `set_controller` + seed swap without touching the root keys.
+3. **Cold-storage discipline for the root keys.** The IC-level controller identity (upgrade
+   authority — the one power that supersedes everything) lives offline; it is used only during
+   deliberate deploys, never on the always-on relay box.
+4. **Verifiability without governance.** Publish/pin the canister module hash; the relay exposes it
+   and the app can check it (read_state) so an unexpected upgrade is *detectable* by users even
+   though it isn't preventable. Upgrades get a public changelog.
+5. **Optional future hardening (no NNS needed):** a timelock/self-governance canister as IC-level
+   controller (upgrades execute only after a delay, giving users exit time) — the "poor man's DAO";
+   defer until real value flows. Blackhole a surface only when it is feature-complete forever.
+
 This is a **code-level** governance guide. The canister code (after R1) supports a governed
-controller out of the box; the actual hand-off to an SNS / NNS / blackhole is an **external, human
-step** the operator performs at deploy — it cannot be faked in code, and it is not done here.
+controller out of the box; any hand-off remains an **external, human step** the operator performs at
+deploy — it cannot be faked in code, and it is deliberately not done in this repo.
 
 ## Two layers of control (both must be governed)
 
@@ -105,13 +188,20 @@ dfx canister update-settings dpay_canister --controller $BLACKHOLE --network ic
 dfx canister status dpay_canister --network ic | grep controller
 ```
 
-## Checklist before any pilot
+## Checklist before any pilot (govern-in-place edition)
 
-- [ ] Layer 1: `init` seeds a governed `controller` (never ship `controller = null` to production).
-- [ ] Layer 2: the IC-level code controller is an SNS root or a blackhole (not your deploy key).
-- [ ] `ADMIN_CALLERS` (the cycles operator allowlist in `lib.rs`) is rotated to a governed principal.
+- [ ] Layer 1: `init` seeds a `controller` (never ship `controller = null` to production); the
+      relay's faucet key is the DEDICATED Ed25519 seed (not the dfx identity's key material).
+- [ ] Layer 2: the IC-level code controller identity lives in **cold storage** (offline PEM, used
+      only at deliberate deploys; never on the relay box).
+- [ ] Blast-radius review: no standing approvals (per-op exact-amount only), faucet fixed-amount +
+      cooldown, `register_ledger`-repoint residual documented (lock_catalog when built).
+- [ ] Module hash of the deployed facade is pinned/published (relay health surface) so upgrades are
+      user-detectable; upgrades ship with a changelog.
 - [ ] `receipt_pubkey()` is fetched and the app verifies receipt signatures (R2) before "Paid ✓".
 - [ ] `reconcile(currency)` is wired into ops runbooks (run after any suspected trap / on a schedule).
+
+## Reference: the eventual governed end-state (NOT a near-term gate)
 
 ## Non-custodial invariant (unchanged)
 

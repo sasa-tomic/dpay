@@ -1,27 +1,30 @@
-// Flow 85 — Manual theme toggle (Wave 7, two-state): Light/Dark flip, persistence, OS seeding.
+// Flow 85 — Two-tier theme controls (Wave 8): header flip + Settings 3-way segmented control.
 //
-// Proves the two-state manual toggle (2026-08-21: the tri-state Auto cycle retired):
+// Proves:
 //   1. With no stored choice the theme SEEDS from the OS scheme — under the default emulated-light
-//      browser the app boots Light and the header reports 'Theme: Light' (not 'Auto').
-//   2. The wallet-header toggle (btn-theme) flips Light ↔ Dark with a single click and the
-//      rendered root background flips between the light (#F4F1E8) and dark (#141210) palette
-//      values — the same computed-style probe flow 84 uses, so a broken applyPalette shows up
-//      as a bg that never flips.
+//      browser the app boots Light and the header toggle names the TARGET ('Switch theme to Dark',
+//      the moon glyph — Wave-8 target-state semantics, not current-state).
+//   2. The wallet-header toggle (btn-theme, grouped beside the settings gear) flips Light ↔ Dark
+//      with a single click and the rendered root background flips between the light (#F4F1E8) and
+//      dark (#141210) palette values — the same computed-style probe flow 84 uses, so a broken
+//      applyPalette shows up as a bg that never flips.
 //   3. The choice PERSISTS: after a reload (fresh JS context, localStorage-backed AsyncStorage
 //      rehydrating App.tsx's themeChoice) the dark palette is still applied pre-assertion.
-//   4. The Settings sheet toggle (btn-theme-mode) drives the SAME state (label + bg flip).
+//   4. The Settings sheet's three-way segmented control (btn-theme-light/dark/auto radio segments)
+//      drives the SAME state: picking Light flips the bg, and picking AUTO returns control to the
+//      OS scheme (null choice) — the explicit way back to follow-the-system.
 //
 // Default setup runs under the browser's light scheme (only flow 84 opts into dark emulation),
-// so the seeded state resolves light here — the persistence + pinning semantics are the point;
-// the dark-scheme rendering itself is flow 84's job.
+// so the seeded/Auto state resolves light here — the persistence + pinning semantics are the
+// point; the dark-scheme rendering itself is flow 84's job.
 import { setup, assert, assertEq, onboardWallet } from '../harness/lib.mjs';
 
 export const meta = {
   id: '85',
   name: 'theme-toggle',
   journey: 'tour',
-  covers: ['theme-toggle', 'dark-theme', 'persistence', 'settings'],
-  verifies: 'Two-state theme toggle: seeds from the OS scheme, header + Settings flip Light↔Dark on a single click, root bg flips, choice survives reload.',
+  covers: ['theme-toggle', 'dark-theme', 'persistence', 'settings', 'auto-theme'],
+  verifies: 'Two-tier theme: header flip toggles Light↔Dark on a single click (target-state label), root bg flips, choice survives reload; Settings 3-way control (Light/Dark/Auto) drives the same state and Auto returns to the OS scheme.',
   timeoutMs: 25_000,
 };
 
@@ -39,6 +42,12 @@ export async function run() {
       driver.eval(() => getComputedStyle(document.querySelector('#root > div')).backgroundColor);
     const headerLabel = () =>
       driver.eval(() => document.querySelector('[data-testid="btn-theme"]')?.getAttribute('aria-label') ?? '');
+    // RNW (this version) does not project accessibilityState → aria-checked, so the active
+    // segment is probed by its computed background: railPillActive paints the palette `card`
+    // (#FFFFFF light / #2A2620 dark) inside the panel2 well.
+    const segBg = (id) =>
+      driver.eval((tid) => getComputedStyle(document.querySelector(`[data-testid="${tid}"]`)).backgroundColor, id);
+    const ACTIVE_LIGHT_CARD = 'rgb(255, 255, 255)';
 
     // 1. Onboard to reach the Wallet (the header toggle only exists there).
     console.log('[85-theme-toggle] onboarding…');
@@ -49,14 +58,14 @@ export async function run() {
     const emulatedDark = await driver.eval(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
     assert(!emulatedDark, 'flow 85 expects the default (light) emulated scheme — flow 84 covers dark');
     assertEq(await rootBg(), LIGHT_BG, 'no stored choice + light scheme → seeded light root bg');
-    assertEq(await headerLabel(), 'Theme: Light', 'header reports the seeded Light (no Auto state)');
+    assertEq(await headerLabel(), 'Switch theme to Dark', 'header names the TARGET (Dark), not the current mode');
 
     // 2. Header flip: Light → Dark (bg flips) → Light (bg flips back).
     await driver.click('btn-theme');
-    assertEq(await headerLabel(), 'Theme: Dark', 'click 1 → Dark');
+    assertEq(await headerLabel(), 'Switch theme to Light', 'click 1 → Dark (label now targets Light)');
     assertEq(await rootBg(), DARK_BG, 'dark flips the root bg');
     await driver.click('btn-theme');
-    assertEq(await headerLabel(), 'Theme: Light', 'click 2 → back to Light');
+    assertEq(await headerLabel(), 'Switch theme to Dark', 'click 2 → back to Light');
     assertEq(await rootBg(), LIGHT_BG, 'light flips the root bg back');
     console.log('[85-theme-toggle] ✓ header flips Light↔Dark on a single click');
 
@@ -64,7 +73,7 @@ export async function run() {
     //    choice from storage and apply it before these assertions run (domcontentloaded;
     //    polls stall networkidle0).
     await driver.click('btn-theme');
-    assertEq(await headerLabel(), 'Theme: Dark', 're-pin Dark for the reload leg');
+    assertEq(await headerLabel(), 'Switch theme to Light', 're-pin Dark for the reload leg');
     await driver.navigate(webBaseURL, `/?relay=${encodeURIComponent(relayBaseURL)}`, {
       waitUntil: 'domcontentloaded',
       timeoutMs: 8_000,
@@ -72,20 +81,23 @@ export async function run() {
     await driver.waitReady({ timeoutMs: 10_000 });
     await driver.waitForText('∂100.00');
     assertEq(await rootBg(), DARK_BG, 'dark survives a reload (persisted choice rehydrates)');
-    assertEq(await headerLabel(), 'Theme: Dark', 'header still reports Dark after reload');
+    assertEq(await headerLabel(), 'Switch theme to Light', 'header still targets Light after reload');
     console.log('[85-theme-toggle] ✓ Dark choice persisted across reload');
 
-    // 4. Settings sheet drives the same state: Dark → Light via the sheet's toggle.
+    // 4. Settings sheet drives the same state: Dark → Light via the segmented control, then
+    //    Auto returns the choice to null (follow the OS scheme → light under this session).
     await driver.click('btn-settings');
-    const settingsBtn = await driver.findByTestID('btn-theme-mode');
-    const settingsLabel = await settingsBtn.evaluate((n) => n.getAttribute('aria-label') ?? '');
-    assert(settingsLabel.startsWith('Theme: Dark'),
-      `Settings theme entry should report Dark, got "${settingsLabel}"`);
-    await driver.click('btn-theme-mode');
-    assertEq(await rootBg(), LIGHT_BG, 'Settings flip Dark→Light under the emulated light scheme');
+    const lightSeg = await driver.findByTestID('btn-theme-light');
+    const lightLabel = await lightSeg.evaluate((n) => n.getAttribute('aria-label') ?? '');
+    assertEq(lightLabel, 'Theme: Light', 'Light segment carries its label');
+    await driver.click('btn-theme-light');
+    assertEq(await rootBg(), LIGHT_BG, 'Settings Light segment flips Dark→Light');
+    await driver.click('btn-theme-auto');
+    assertEq(await rootBg(), LIGHT_BG, 'Auto returns to the OS scheme (light here)');
+    assertEq(await segBg('btn-theme-auto'), ACTIVE_LIGHT_CARD, 'Auto is the active segment after picking it');
     await driver.click('btn-settings-close');
-    assertEq(await headerLabel(), 'Theme: Light', 'header reflects the Light choice driven from Settings');
-    console.log('[85-theme-toggle] ✓ Settings toggle flips the same state');
+    assertEq(await headerLabel(), 'Switch theme to Dark', 'header reflects Auto→light resolved state');
+    console.log('[85-theme-toggle] ✓ Settings 3-way control drives the same state; Auto follows the OS');
 
     await driver.screenshot('85-theme-toggle');
 
