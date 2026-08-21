@@ -50,9 +50,15 @@ const POLL_AHEAD_S = 60;
 // failed (network down / clock skew), so the extra headroom absorbs the longer real-world latency
 // before the retry that will follow; a poll rejected for staleness is retried, never lost.
 const POLL_FALLBACK_AHEAD_S = 120;
-// The IC management canister — read_state target for the certified [[time]] leaf. Its exact id is
-// irrelevant for the subnet query itself; it must merely be a valid principal.
-const IC_MANAGEMENT_CANISTER = 'aaaaa-aa';
+// read_state routing target for the certified [[time]] leaf. The time leaf lives in EVERY
+// subnet's certified tree, so any ROUTABLE canister works — but it must actually route:
+// icp-api.io 400s read_state at the management canister ('aaaaa-aa' → canister_not_found,
+// measured 2026-08-21 3/3) because the gateway only routes registered canister ids to
+// subnets. The prod DUSD ledger (canister_ids.json icrc_ledger.ic) is an always-there
+// canister the app talks to anyway (balance /query). The offline fake gateway skips
+// canister-known validation for read_state (relay ic_gateway.rs), so the offline suites
+// are agnostic to this id.
+const IC_TIME_ROUTING_CANISTER = 'td2nx-oaaaa-aaaab-qhdnq-cai';
 // REFUSE to sign value envelopes when the device clock and certified IC time disagree beyond
 // this — a badly skewed stamp can land outside the ingress window and silently never execute.
 export const MAX_CLOCK_SKEW_NS = 60n * 1_000_000_000n; // 60s in ns
@@ -213,7 +219,7 @@ export async function icNowNs(secretHex: string, signal?: AbortSignal): Promise<
   clockInFlight ??= (async () => {
     try {
       const expiry = await DpayCore.icpIngressExpiry((BigInt(Date.now()) * 1_000_000n).toString(), CLOCK_SYNC_AHEAD_S);
-      const state = await readStateWithExpiry(secretHex, IC_MANAGEMENT_CANISTER, [], true, expiry, signal);
+      const state = await readStateWithExpiry(secretHex, IC_TIME_ROUTING_CANISTER, [], true, expiry, signal);
       if (state?.timeNs != null) {
         cachedIcNowNs = BigInt(state.timeNs);
         cachedAtMs = Date.now();
