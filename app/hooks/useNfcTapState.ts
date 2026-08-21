@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {NativeEventEmitter} from 'react-native';
-import {RECEIPT_WAIT_MS} from '../config/constants';
+import {SOL_RECEIPT_WAIT_MS} from '../config/constants';
 
 // The terminal + transitional phases both NFC tap components track. Structurally identical to
 // NfcPhaseName / SolNfcPhaseName (plus 'error') — the IC and SOL transports share the same
@@ -14,6 +14,7 @@ export type NfcTapPhase =
 // the first-terminal-wins + teardown guards so an adapter never has to reimplement them.
 export type TapCtx = {
   finalize: (phase: NfcTapPhase, reason?: string) => void;
+  isCurrent: () => boolean;
 };
 
 /**
@@ -37,10 +38,13 @@ export type NfcTapAdapter<E> = {
   disarmCard: () => Promise<void>;
   startReader: (payload: string) => Promise<void>;
   stopReader: () => Promise<void>;
+  waitsForReceipt?: boolean;
+  receiptWaitMs?: number;
   onSettling?: () => void;
   onRequest: (e: E, ctx: TapCtx) => void;
   onSubmit: (e: E, ctx: TapCtx) => void;
-  onReceipt: (e: E, ctx: TapCtx) => void;
+  onReceipt?: (e: E, ctx: TapCtx) => void;
+  onConfirmed?: (e: E, ctx: TapCtx) => void;
 };
 
 /**
@@ -63,7 +67,7 @@ export function useNfcTapState<E>(args: {
   const {
     role, readerPayload, onActive,
     eventName, nativeModule, armCard, disarmCard, startReader, stopReader,
-    onSettling, onRequest, onSubmit, onReceipt,
+    waitsForReceipt = true, receiptWaitMs = SOL_RECEIPT_WAIT_MS, onSettling, onRequest, onSubmit, onReceipt, onConfirmed,
   } = args;
   // The adapter callbacks live in a ref, NOT in the effect deps. NfcTap/SolNfcTap pass inline
   // arrows (`armCard: () => DpayNfc.armCard()`, `onRequest: (e, ctx) => …`) — fresh identity every
@@ -75,14 +79,15 @@ export function useNfcTapState<E>(args: {
   // transition, over and over (the 2026-08-13 fcd2afd regression; invisible to e2e/jest/ondevice,
   // which all bypass the live RN session). Reading through the ref keeps the LATEST callbacks
   // without ever tearing the session down.
-  const adapterRef = useRef({armCard, disarmCard, startReader, stopReader, onSettling, onRequest, onSubmit, onReceipt});
-  adapterRef.current = {armCard, disarmCard, startReader, stopReader, onSettling, onRequest, onSubmit, onReceipt};
+  const adapterRef = useRef({armCard, disarmCard, startReader, stopReader, onSettling, onRequest, onSubmit, onReceipt, onConfirmed});
+  adapterRef.current = {armCard, disarmCard, startReader, stopReader, onSettling, onRequest, onSubmit, onReceipt, onConfirmed};
   const [phase, setPhase] = useState<NfcTapPhase>('listening');
   const [reason, setReason] = useState<string | null>(null);
   const finalized = useRef(false);
   const activeRef = useRef(false);
   const committed = useRef(false);
   const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const generationRef = useRef(0);
   // False once the tap view is torn down (user hit Cancel/Done). An in-flight submit/sign promise
   // that resolves after that must not touch state — it would warn and, worse, could flip a screen
   // the user already left.
@@ -112,16 +117,22 @@ export function useNfcTapState<E>(args: {
     // Re-set on every effect re-run (readerPayload change / remount): the cleanup below sets
     // aliveRef.current=false, and without resetting it here finalize would stay blocked forever.
     aliveRef.current = true;
+    const generation = ++generationRef.current;
     const adapter = () => adapterRef.current;
-    const ctx: TapCtx = {finalize};
+    const isCurrent = () => aliveRef.current && generationRef.current === generation;
+    const ctx: TapCtx = {
+      finalize: (p, r) => { if (isCurrent()) finalize(p, r); },
+      isCurrent,
+    };
     const emitter = new NativeEventEmitter(nativeModule as any);
     const sub = emitter.addListener(eventName, (e: any) => {
+      if (!isCurrent()) return;
       if (e.role !== role) return;
       if (e.type === 'error') {
         markActive();
         // Once the payment is in flight to settlement, a transport error says nothing about whether
-        // the ledger settled — the outcome is owned by onSubmit / the receipt path. Don't let it
-        // overwrite a decided (or about-to-be-decided) outcome with a false failure.
+        // the ledger settled — the outcome is owned by the adapter's submit/poll or receipt path.
+        // Don't overwrite a decided (or about-to-be-decided) outcome with a false failure.
         if (finalized.current || committed.current) return;
         finalize('error', e.reason);
         return;
@@ -129,15 +140,15 @@ export function useNfcTapState<E>(args: {
       if (finalized.current) return; // terminal reached; ignore late phase/confirmed events
       if (e.type === 'phase') {
         if (e.phase !== 'listening') markActive();
-        // The payer's wire/solpay has left the phone: from here the outcome depends on the receipt.
-        // Arm a timeout so we never spin on "Confirming…" forever if the receipt never arrives.
+        // The payer's wire/solpay has left the phone: from here settlement owns the outcome.
+        // Receipt-based adapters (currently SOL) arm a timeout so they cannot spin forever.
         if (role === 'card' && e.phase === 'settling') {
           committed.current = true;
           adapterRef.current.onSettling?.();
-          if (!settleTimer.current) {
+          if (waitsForReceipt && !settleTimer.current) {
             settleTimer.current = setTimeout(() => {
               finalize('pending', 'Couldn’t confirm — check your balance when back online');
-            }, RECEIPT_WAIT_MS);
+            }, receiptWaitMs);
           }
         }
         setPhase(e.phase);
@@ -149,15 +160,16 @@ export function useNfcTapState<E>(args: {
         markActive();
         committed.current = true;
         adapterRef.current.onSubmit(e as E, ctx);
-      } else if (e.type === 'receipt') {
-        adapterRef.current.onReceipt(e as E, ctx);
+      } else if (e.type === 'receipt' || e.type === 'result') {
+        adapterRef.current.onReceipt?.(e as E, ctx);
+      } else if (e.type === 'confirmed') {
+        adapterRef.current.onConfirmed?.(e as E, ctx);
       }
-      // 'confirmed' (reader): the receipt reached the payer; the merchant already finalized on submit.
     });
     if (role === 'card') {
-      adapter().armCard().catch((e: unknown) => finalize('error', e instanceof Error ? e.message : String(e)));
+      adapter().armCard().catch((e: unknown) => ctx.finalize('error', e instanceof Error ? e.message : String(e)));
     } else if (readerPayload) {
-      adapter().startReader(readerPayload).catch((e: unknown) => finalize('error', e instanceof Error ? e.message : String(e)));
+      adapter().startReader(readerPayload).catch((e: unknown) => ctx.finalize('error', e instanceof Error ? e.message : String(e)));
     }
     return () => {
       aliveRef.current = false;
@@ -169,7 +181,7 @@ export function useNfcTapState<E>(args: {
     // Adapter callbacks are deliberately ABSENT: they're read through adapterRef (see its comment),
     // so inline-arrow identities from NfcTap/SolNfcTap can never re-run this effect mid-tap.
   }, [
-    role, readerPayload, eventName, nativeModule, finalize, markActive, clearSettleTimer,
+    role, readerPayload, eventName, nativeModule, waitsForReceipt, receiptWaitMs, finalize, markActive, clearSettleTimer,
   ]);
 
   return {phase, reason, activeRef};

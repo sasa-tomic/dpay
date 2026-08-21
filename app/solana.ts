@@ -24,7 +24,7 @@ import {buildSplTransferInstruction, buildCreateAtaIdempotentInstruction, buildC
 import {encodeSolReq, generateRid} from './solana/qr';
 import type {SolReqV2, SolPayV2, SolReceiptV2, SolReqInput, SolPayInput} from './solana/qr';
 import type {SolanaSignatureStatus} from './solana/rpc';
-import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from './payments';
+import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from './solana/payments';
 
 export {deriveSolanaAddress};
 

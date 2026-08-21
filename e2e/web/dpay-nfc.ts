@@ -22,10 +22,16 @@ import { DpayCore } from './dpay-core-wasm';
 // move real bytes over the radio are no-op resolves; the NFC-flow test injects the corresponding
 // DpayNfcEvents through `__DPAY_TEST_NFC_SESSION` instead (the real bus the app listens on).
 export const DpayNfc = {
-  armCard: () => Promise.resolve(),
+  armCard: () => {
+    (globalThis as any).__DPAY_TEST_NFC_APPROVED_WIRE = null;
+    return Promise.resolve();
+  },
   disarmCard: () => Promise.resolve(),
-  approveCard: (_wireHex: string) => Promise.resolve(),
-  declineCard: () => Promise.resolve(),
+  approveCard: async (envelopeHex: string, readStateEnvelopeHex: string, _nonceHex: string) => {
+    const requestIdHex = await DpayCore.icpEnvelopeRequestId(envelopeHex);
+    (globalThis as any).__DPAY_TEST_NFC_APPROVED_WIRE = {envelopeHex, readStateEnvelopeHex, requestIdHex};
+  },
+  declineCard: (_nonceHex: string) => Promise.resolve(),
   // REAL 132-byte request hex via the shared wasm core (2026-08-21) — mirrors Android's
   // `nfcRequestBytes` → hex exactly (same Rust builder), so the Receive screen arms reader mode on
   // web too and the NFC e2e flows exercise the real reader path (mount + submit + handoff). Before
@@ -34,7 +40,10 @@ export const DpayNfc = {
     DpayCore.buildRequestHex(toHex, amount, nonceHex, expiry, currency, toName, memo),
   startReader: (_requestHex: string) => Promise.resolve(),
   stopReader: () => Promise.resolve(),
-  confirmReceipt: (_status: number, _nonceHex: string) => Promise.resolve(),
+  confirmResult: (status: number, nonceHex: string, requestIdHex: string, _merchantSecretHex: string) => {
+    (globalThis as any).__DPAY_TEST_NFC_RESULT = {status, nonceHex, requestIdHex};
+    return Promise.resolve();
+  },
   // The NativeEventEmitter constructor calls these on subscribe/unsubscribe; no-op on web.
   addListener: (_eventName: string) => {},
   removeListeners: (_count: number) => {},

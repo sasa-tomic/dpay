@@ -1,33 +1,25 @@
-// Flow 86 — NFC tap settles but the read_state outcome is delayed past the in-tap poll budget
-// (the 2026-08-21 mainnet bug class, reproduced offline).
+// Flow 86 — receiver settles an offline-payer NFC bundle and returns a result.
 //
-// The fake-IC gateway normally settles SYNCHRONOUSLY (the RequestState is inserted before the
-// /call 202 even returns), so the "payment submitted but outcome unknown" window structurally
-// never exists offline — the exact class that failed on mainnet, where the payer's 12×500ms
-// in-tap poll budget ran out before the ledger's outcome landed in state certification. This
-// flow arms the relay's test-helpers seam `POST /api/v1/test/hide_outcome` for the SIGNED
-// envelope's request_id, hiding the outcome from more read_states than the in-tap budget can
-// cover, and asserts the honest-unknown recovery path END TO END:
-//   - the merchant's in-tap poll exhausts its budget → NOT a false decline: the tap ends
-//     "Not confirmed" (pending) and the reader hands off to the background reconcile view
-//     (`nfc-reconcile`), keeping the NFC session torn down while the poll owns the outcome;
-//   - the background settlement poll (watchRid) keeps polling past the tap budget and, once the
-//     hidden outcome is served again, reconciles to "Received" — the ledger-sourced truth;
+// The receiver is not authorized to read the payer-owned request_status on the real IC. This flow
+// therefore asserts the actual receiver contract end to end:
+//   - the payer bundle contains the update plus a reusable payer-signed read_state envelope;
+//   - the receiver alone submits/polls, then matches recipient + currency + amount + memo nonce;
+//   - that exact match resolves to "Received" and queues the merchant-signed NFC result;
 //   - the merchant's balance reflects the settled transfer exactly once.
 //
 // Prerequisites proven elsewhere: envelope signing parity (flow 00), the merchant submit+poll
 // happy path (flow 08), the reader-side NFC protocol phases (flow 11).
 import { setup, assert, assertIncludes, getBalance, faucetAccount, onboardWallet, accountOf } from '../harness/lib.mjs';
-import { generateKeypair, decodeRequest, icpPrincipalBytes, icpTransferArgBytes, icpSignUpdate, b64urlEncode, randNonceHex } from '../harness/wire.mjs';
+import { generateKeypair, decodeRequest, icpPrincipalBytes, icpTransferArgBytes, icpSignUpdate, icpSignReadState, b64urlEncode, randNonceHex } from '../harness/wire.mjs';
 
 const PAY_CENTS = 1000; // ∂10.00 — the exact amount of the 2026-08-21 field failure
 
 export const meta = {
   id: '86',
-  name: 'nfc-unknown-reconcile',
+  name: 'nfc-history-confirmation',
   journey: 'nfc',
-  covers: ['nfc', 'settle', 'unknown', 'reconcile'],
-  verifies: 'NFC tap whose read_state outcome is delayed past the in-tap poll budget ends honest-pending (never a false decline) and the background poll reconciles to Received.',
+  covers: ['nfc', 'settle', 'history', 'reconcile'],
+  verifies: 'Offline payer supplies update + signed read_state; receiver alone settles, exact-history binds success, and queues the returned result.',
   timeoutMs: 40000,
 };
 
@@ -68,34 +60,42 @@ export async function run() {
     const catalog = (await (await fetch(`${relayBaseURL}/api/v1/currencies`)).json()).currencies;
     const ledger = catalog.find(c => c.currency === 0)?.ledger;
     const arg = icpTransferArgBytes(icpPrincipalBytes(bobHex), BigInt(PAY_CENTS), {fee: null, memoHex: req.nonceHex});
-    const expiryNs = BigInt(Date.now() + 300_000) * 1_000_000n;
+    const expiryNs = BigInt(Date.now() + 240_000) * 1_000_000n;
     const signed = await icpSignUpdate(alice.secretHex, ledger, 'icrc1_transfer', arg, expiryNs);
-    const wireHex = signed.envelopeHex; // NFC 'done' event payload: the raw envelope hex
+    const readState = await icpSignReadState(alice.secretHex, [
+      [Buffer.from('request_status'), Buffer.from(signed.requestIdHex, 'hex')],
+    ], expiryNs + 60_000_000_000n);
     console.log('[86-nfc-unknown-reconcile] A signed (request_id=' + signed.requestIdHex.slice(0, 12) + '…)');
 
-    // --- Arm the outcome-latency seam BEFORE the tap: hide this rid's outcome for MORE polls
-    //     than the in-tap budget (12) — the background reconcile poll then recovers it. ----------
-    const arm = await fetch(`${relayBaseURL}/api/v1/test/hide_outcome`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ request_id: signed.requestIdHex, polls: 20 }),
-    });
-    assert(arm.ok, `hide_outcome seam must arm, got HTTP ${arm.status}`);
+    // --- Mirror native ordering: transport reaches Settling, then delivers the immutable wire. ---
+    await driver.eval(() => window.__DPAY_TEST_NFC_SESSION({ type: 'phase', role: 'reader', phase: 'settling' }));
+    await driver.eval((bundle) => window.__DPAY_TEST_NFC_SESSION({
+      type: 'done', role: 'reader',
+      envelopeHex: bundle.envelopeHex,
+      readStateEnvelopeHex: bundle.readStateEnvelopeHex,
+      requestIdHex: bundle.requestIdHex,
+    }), {envelopeHex: signed.envelopeHex, readStateEnvelopeHex: readState.envelopeHex, requestIdHex: signed.requestIdHex});
+    const status = await driver.findByTestID('nfc-status', { timeoutMs: 5_000 });
+    assert(status, 'the single NFC settlement view must remain mounted after envelope delivery');
+    console.log('[86-nfc-unknown-reconcile] ✓ offline bundle handed to sole merchant settlement owner');
 
-    // --- The tap: payer wire arrives (reader 'done') → merchant submits → in-tap poll budget
-    //     exhausted → honest pending + handoff to the background reconcile view. ------------------
-    await driver.eval((wire) => window.__DPAY_TEST_NFC_SESSION({ type: 'done', role: 'reader', wireHex: wire }), wireHex);
-    const reconcile = await driver.findByTestID('nfc-reconcile', { timeoutMs: 10_000 });
-    assert(reconcile, 'reader must hand off to the reconcile view (nfc-reconcile) after an unknown tap outcome');
-    const pendingText = await driver.waitForText('Confirming', { timeoutMs: 4_000 });
-    assert(pendingText, 'reconcile view should show the honest pending state (Confirming…)');
-    console.log('[86-nfc-unknown-reconcile] ✓ in-tap budget exhausted → honest pending handoff (no false decline)');
+    // Settlement queues the signed result, but merchant UI stays nonterminal until the payer
+    // accepts it. This prevents Done from tearing down reader mode before a result-only re-tap.
+    let queued = null;
+    for (let i = 0; i < 200 && !queued; i++) {
+      queued = await driver.eval(() => window.__DPAY_TEST_NFC_RESULT ?? null);
+      if (!queued) await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    assert(queued?.status === 0, `merchant must queue settled result, got ${JSON.stringify(queued)}`);
+    assert(queued.requestIdHex === signed.requestIdHex, 'returned result must bind the update request id');
+    const beforeAck = await status.evaluate(node => node.textContent ?? '');
+    assert(!beforeAck.includes('Received'), 'merchant must wait for payer result acknowledgement');
+    await driver.eval(() => window.__DPAY_TEST_NFC_SESSION({type: 'confirmed', role: 'reader'}));
 
-    // --- The background poll owns the outcome: once the hidden polls are served, it reconciles
-    //     to Received — ledger-sourced, without any payer-presented claim. ------------------------
-    const received = await driver.waitForText('Received ∂10.00', { timeoutMs: 20_000 });
-    assert(received, 'background reconcile poll should reach "Received ∂10.00" once the outcome is visible');
-    console.log('[86-nfc-unknown-reconcile] ✓ background poll reconciled to Received');
+    // --- The receiver reaches success only after exact history + result delivery. -----------------
+    const received = await driver.waitForText('Received ✓ ∂10.00', { timeoutMs: 20_000 });
+    assert(received, 'the receiver should reach "Received ✓ ∂10.00" from exact ledger history');
+    console.log('[86-nfc-unknown-reconcile] ✓ exact ledger row resolved to Received');
 
     // --- The transfer settled EXACTLY ONCE: B's ledger balance is ∂100 + ∂10. --------------------
     const bobLedger = await getBalance(relayBaseURL, bobHex, 0);

@@ -7,8 +7,8 @@
  * 'Link copied ✓' for the 1500ms dwell. The testID stays `btn-share-request` (the e2e contract)
  * and a dismissal leaves the label honest.
  *
- * Uses react-test-renderer (the project's only renderer). The native encode + the settlement
- * poll are mocked at their module boundaries; QrScanner is stubbed (the camera never opens —
+ * Uses react-test-renderer (the project's only renderer). The native encode + ledger-history
+ * confirmation are mocked at their module boundaries; QrScanner is stubbed (the camera never opens —
  * the request-QR branch only mounts it while scanning, which this flow never enters).
  */
 import {describe, test, expect, jest, beforeEach, afterEach} from '@jest/globals';
@@ -20,24 +20,30 @@ jest.mock('../services/native', () => ({
   DpayCore: {
     encodeRequest: jest.fn(),
   },
+  DpayNfc: {
+    buildRequest: jest.fn(),
+  },
 }));
+jest.mock('../services/icp', () => ({icStampExpiry: jest.fn()}));
 jest.mock('../services/relay', () => ({
   fetchWithTimeout: jest.fn(async () => ({ok: false})),
 }));
 jest.mock('../services/rail', () => ({
-  pollTransfer: jest.fn(),
-  submitTransfer: jest.fn(),
+  confirmIncomingTransfer: jest.fn(),
+  submitAndConfirmIncomingTransfer: jest.fn(),
   qrPayloadToEnvelopeHex: jest.fn(),
 }));
 jest.mock('../components/QrScanner', () => ({
   QrScanner: (_props: {onScan: (raw: string) => void}) => null,
 }));
+jest.mock('../components/NfcTap', () => ({NfcTap: jest.fn(() => null)}));
 
-import {DpayCore} from '../services/native';
-import {pollTransfer} from '../services/rail';
+import {DpayCore, DpayNfc} from '../services/native';
+import {icStampExpiry} from '../services/icp';
+import {confirmIncomingTransfer} from '../services/rail';
 import {ReceiveMode} from '../components/ReceiveMode';
+import {NfcTap} from '../components/NfcTap';
 import {receiptShareBlob} from '../lib/deepLink';
-import {POLL, PROOF_POLL_BUDGET} from '../config/constants';
 import type {CurrencyDescriptor} from '../config/catalog';
 import type {AssetId} from '../lib/types';
 import type {BalanceView} from '../lib/assetBalances';
@@ -53,10 +59,6 @@ const BALANCES: Record<AssetId, BalanceView> = {
 };
 
 const shareSpy = jest.spyOn(Share, 'share');
-
-// The settlement poll fires at POLL.receiptRcv — under fake timers this is the REAL 1500ms (the
-// __DPAY_TEST_POLL override is an e2e-driver injection, not set here).
-const POLL_TIME = POLL.receiptRcv;
 
 type ReceiveModeProps = Parameters<typeof ReceiveMode>[0];
 
@@ -150,6 +152,56 @@ function asWeb() {
 }
 
 describe('ReceiveMode — share request feedback (U-F1)', () => {
+  test('NFC request uses a certified short ingress expiry while QR keeps its 15-minute expiry', async () => {
+    jest.mocked(icStampExpiry).mockResolvedValue('1800000240123456789');
+    jest.mocked(DpayNfc.buildRequest).mockResolvedValue('nfc-request');
+    const tree = mountReceive({nfcReady: true});
+    await makeRequest(tree);
+    expect(DpayNfc.buildRequest).toHaveBeenCalledWith(
+      IDENTITY.publicHex, '2500', expect.any(String), 1_800_000_240, 0, IDENTITY.username, '',
+    );
+    const qrExpiry = jest.mocked(DpayCore.encodeRequest).mock.calls[0][3];
+    expect(qrExpiry).not.toBe(1_800_000_240);
+    expect(qrExpiry).toBeGreaterThan(Math.floor(Date.now() / 1000) + 800);
+  });
+
+  test('expired short NFC request is no longer advertised while the QR remains valid', async () => {
+    let nowMs = 1_800_000_000_000;
+    const dateSpy = jest.spyOn(Date, 'now').mockImplementation(() => nowMs);
+    jest.mocked(icStampExpiry).mockResolvedValue('1800000002000000000');
+    jest.mocked(DpayNfc.buildRequest).mockResolvedValue('nfc-request');
+    const tree = mountReceive({nfcReady: true});
+    await makeRequest(tree);
+    expect(texts(tree).join(' ')).toContain('or let them tap');
+
+    nowMs += 3_000;
+    act(() => jest.advanceTimersByTime(1_000));
+    const visible = texts(tree).join(' ');
+    expect(visible).toContain('NFC tap expired');
+    expect(visible).not.toContain('or let them tap');
+    expect(hasTestID(tree, 'request-qr')).toBe(true);
+    dateSpy.mockRestore();
+  });
+
+  test('an active NFC settlement survives request expiry for a result-only re-tap', async () => {
+    let nowMs = 1_800_000_000_000;
+    const dateSpy = jest.spyOn(Date, 'now').mockImplementation(() => nowMs);
+    jest.mocked(icStampExpiry).mockResolvedValue('1800000002000000000');
+    jest.mocked(DpayNfc.buildRequest).mockResolvedValue('nfc-request');
+    const tree = mountReceive({nfcReady: true});
+    await makeRequest(tree);
+
+    const props = jest.mocked(NfcTap).mock.calls.at(-1)?.[0];
+    expect(props).toBeDefined();
+    act(() => props?.onActive?.());
+    const callsBeforeExpiry = jest.mocked(NfcTap).mock.calls.length;
+    nowMs += 3_000;
+    act(() => jest.advanceTimersByTime(1_000));
+    expect(jest.mocked(NfcTap).mock.calls.length).toBeGreaterThan(callsBeforeExpiry);
+    expect(texts(tree).join(' ')).not.toContain('NFC tap expired');
+    dateSpy.mockRestore();
+  });
+
   test('(web) "Share request link" flips to "Link copied ✓" after the share resolves (testID unchanged)', async () => {
     asWeb();
     const tree = mountReceive();
@@ -204,17 +256,8 @@ describe('ReceiveMode — share request feedback (U-F1)', () => {
   });
 });
 
-// --- F2/F6 (2026-08-20): the dpay:pay rail-proof deeplink NEVER flips the UI to Received ----------
-// Trust model: the proof blob is UNTRUSTED. The handler format-checks it (parseRailProof), binds
-// its request_id to the open request by setting watchRid ONLY, and lets the settlement poll flip
-// the result from ON-CHAIN read_state. The pollTransfer mock IS the read_state oracle in tests:
-//   unknown  → stays on the request-QR view (never Received), bounded attempts, actionable copy
-//   settled  → Received (the only path), onReceived fires ONCE (from the poll, not the handler)
-//   rejected → error row with the ledger reason, polling stops
-//   no open request (cold launch) → ignored entirely (no fabricated ∂0.00, no onReceived)
-
-describe('ReceiveMode — rail-proof deeplink is poll-gated (F2), never fabricated (F6)', () => {
-  // Minimal honest catalog: currency 0 must resolve a ledger principal or the poll effect no-ops.
+// --- F2/F6: a rail-proof deeplink is only a trigger; exact ledger history is authoritative --------
+describe('ReceiveMode — rail-proof deeplink is history-gated, never fabricated', () => {
   const CATALOG: CurrencyDescriptor[] = [{
     currency: 0, ledger: 'td2nx-oaaaa-aaaab-qhdnq-cai', mintable: true, minter: null,
     minter_family: null, symbol: null, decimals: 2, wrapper_name: null, backing_symbol: null,
@@ -224,92 +267,44 @@ describe('ReceiveMode — rail-proof deeplink is poll-gated (F2), never fabricat
   const FORGED = receiptShareBlob({request_id: '00'.repeat(32), block_index: '7', ledger: 'x'});
 
   beforeEach(() => {
-    jest.mocked(pollTransfer).mockReset();
+    jest.mocked(confirmIncomingTransfer).mockReset();
   });
 
-  test('F2: a forged-but-well-formed proof does NOT render Received — only read_state may flip it', async () => {
+  test('a forged-but-well-formed proof cannot render Received without an exact history match', async () => {
     const onReceived = jest.fn();
     const tree = mountReceive({catalog: CATALOG, onReceived});
     await makeRequest(tree);
     expect(hasTestID(tree, 'request-qr')).toBe(true);
-
-    // The forged proof lands (as Wallet delivers it: a rerender with prefillReceipt set).
+    jest.mocked(confirmIncomingTransfer).mockResolvedValue(false);
     rerenderReceive(tree, {catalog: CATALOG, onReceived, prefillReceipt: FORGED});
-
-    // read_state says UNKNOWN — the honest verdict for a rid that never settles.
-    jest.mocked(pollTransfer).mockResolvedValue({kind: 'unknown'});
-    await act(async () => {
-      await jest.advanceTimersByTimeAsync(POLL_TIME * 3);
-    });
-
-    expect(pollTransfer).toHaveBeenCalled();
+    await act(async () => {});
+    expect(confirmIncomingTransfer).toHaveBeenCalledWith(expect.objectContaining({
+      receiverPublicHex: IDENTITY.publicHex, currency: 0, amount: '2500',
+    }), expect.any(Object));
     expect(texts(tree).join(' ')).not.toContain('Received'); // the F2 invariant
     expect(onReceived).not.toHaveBeenCalled();
     act(() => { tree.unmount(); });
   });
 
-  test('F2: the SAME proof flips to Received once read_state says settled (the real path)', async () => {
+  test('the same proof flips to Received only when exact ledger history confirms the open request', async () => {
     const onReceived = jest.fn();
     const tree = mountReceive({catalog: CATALOG, onReceived});
     await makeRequest(tree);
-    jest.mocked(pollTransfer).mockResolvedValue({kind: 'unknown'});
+    jest.mocked(confirmIncomingTransfer).mockResolvedValue(true);
     rerenderReceive(tree, {catalog: CATALOG, onReceived, prefillReceipt: FORGED});
-    await act(async () => { await jest.advanceTimersByTimeAsync(POLL_TIME); });
-
-    // Settlement lands on the ledger (a real pre-settled proof polls settled immediately).
-    jest.mocked(pollTransfer).mockResolvedValue({kind: 'settled', blockIndex: '42'});
-    await act(async () => { await jest.advanceTimersByTimeAsync(POLL_TIME); });
-
+    await act(async () => {});
     expect(texts(tree).join(' ')).toContain('Received');
-    expect(onReceived).toHaveBeenCalledTimes(1); // fired by the poll — never by the handler
+    expect(onReceived).toHaveBeenCalledTimes(1);
     act(() => { tree.unmount(); });
   });
 
-  test('F2: a rejected read_state surfaces the ledger reason and stops polling', async () => {
-    const tree = mountReceive({catalog: CATALOG});
-    await makeRequest(tree);
-    jest.mocked(pollTransfer).mockResolvedValue({kind: 'rejected', reason: 'Insufficient funds'});
-    rerenderReceive(tree, {catalog: CATALOG, prefillReceipt: FORGED});
-    await act(async () => { await jest.advanceTimersByTimeAsync(POLL_TIME); });
-
-    expect(texts(tree)).toContain('Insufficient funds');
-    expect(texts(tree).join(' ')).not.toContain('Received');
-    const calls = jest.mocked(pollTransfer).mock.calls.length;
-    await act(async () => { await jest.advanceTimersByTimeAsync(POLL_TIME * 3); });
-    expect(jest.mocked(pollTransfer).mock.calls.length).toBe(calls); // stopped
-    act(() => { tree.unmount(); });
-  });
-
-  test('F2: an unknown rid stops after a bounded budget with actionable copy (no infinite hang)', async () => {
-    const tree = mountReceive({catalog: CATALOG});
-    await makeRequest(tree);
-    jest.mocked(pollTransfer).mockResolvedValue({kind: 'unknown'});
-    rerenderReceive(tree, {catalog: CATALOG, prefillReceipt: FORGED});
-
-    // The budget (PROOF_POLL_BUDGET) counts attempts; poll fires at POLL_TIME per tick.
-    await act(async () => { await jest.advanceTimersByTimeAsync(POLL_TIME * (PROOF_POLL_BUDGET + 2)); });
-
-    const joined = texts(tree).join(' ');
-    expect(joined).not.toContain('Received');
-    expect(joined).toContain("Couldn’t confirm this payment yet");
-    // Bounded, not one-poll-per-tick-forever (React clears the interval a few ticks after the
-    // budget trips — the exact tail depends on the act flush, so allow a small margin).
-    const calls = jest.mocked(pollTransfer).mock.calls.length;
-    expect(calls).toBeLessThanOrEqual(PROOF_POLL_BUDGET + 4);
-    // …and it STAYS stopped: more wall-clock, zero new polls.
-    await act(async () => { await jest.advanceTimersByTimeAsync(POLL_TIME * 5); });
-    expect(jest.mocked(pollTransfer).mock.calls.length).toBe(calls);
-    act(() => { tree.unmount(); });
-  });
-
-  test('F6: a proof with NO open request is ignored — no "Received ∂0.00", no onReceived', async () => {
+  test('a proof with no open request is ignored — no fabricated amount or settlement', async () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     const onReceived = jest.fn();
     try {
       const tree = mountReceive({catalog: CATALOG, onReceived, prefillReceipt: FORGED});
-      await act(async () => { await jest.advanceTimersByTimeAsync(POLL_TIME * 3); });
-
-      expect(pollTransfer).not.toHaveBeenCalled(); // nothing to confirm against
+      await act(async () => {});
+      expect(confirmIncomingTransfer).not.toHaveBeenCalled();
       expect(texts(tree).join(' ')).not.toContain('Received');
       expect(onReceived).not.toHaveBeenCalled();
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('no open request'));
@@ -319,16 +314,16 @@ describe('ReceiveMode — rail-proof deeplink is poll-gated (F2), never fabricat
     }
   });
 
-  test('F2: a malformed proof (bad request_id) is refused with honest copy, never Received', async () => {
+  test('a malformed proof is refused before any history lookup', async () => {
     const tree = mountReceive({catalog: CATALOG});
     await makeRequest(tree);
     const bad = receiptShareBlob({request_id: 'zz', block_index: '7'}); // fails the 64-hex gate
     rerenderReceive(tree, {catalog: CATALOG, prefillReceipt: bad});
-    await act(async () => { await jest.advanceTimersByTimeAsync(POLL_TIME); });
+    await act(async () => {});
 
     expect(texts(tree).join(' ')).toContain("This receipt doesn't match your open request.");
     expect(texts(tree).join(' ')).not.toContain('Received');
-    expect(pollTransfer).not.toHaveBeenCalled(); // never even watched
+    expect(confirmIncomingTransfer).not.toHaveBeenCalled();
     act(() => { tree.unmount(); });
   });
 });

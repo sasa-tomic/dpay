@@ -71,6 +71,7 @@ function Harness(props: {
   const state = useNfcTapState<Ev>({
     role,
     readerPayload,
+    waitsForReceipt: false,
     onActive: adapter.onActive,
     eventName: adapter.eventName,
     nativeModule: adapter.nativeModule,
@@ -82,6 +83,7 @@ function Harness(props: {
     onRequest: (e, ctx) => adapter.onRequest(e, ctx),
     onSubmit: (e, ctx) => adapter.onSubmit(e, ctx),
     onReceipt: (e, ctx) => adapter.onReceipt(e, ctx),
+    onConfirmed: (e, ctx) => adapter.onConfirmed(e, ctx),
   });
   void tick; // read so the prop drives re-renders without a typecheck complaint
   void state.phase; // the harness re-renders when the hook's phase state changes
@@ -103,6 +105,7 @@ function makeAdapter(nativeModule?: {addListener: jest.Mock; removeListeners: je
     onRequest: handler<(e: Ev, ctx: unknown) => void>(),
     onSubmit: handler<(e: Ev, ctx: unknown) => void>(),
     onReceipt: handler<(e: Ev, ctx: unknown) => void>(),
+    onConfirmed: handler<(e: Ev, ctx: unknown) => void>(),
   } satisfies Omit<NfcTapAdapter<Ev>, 'onActive'> & {onActive: (e: Ev) => void};
 }
 
@@ -199,5 +202,26 @@ describe('useNfcTapState — session survives re-renders (fcd2afd regression)', 
     act(() => {
       tree.unmount();
     });
+  });
+
+  test('confirmed reaches the current reader callback', () => {
+    const {tree} = mount('reader', 'aabb');
+    emit({role: 'reader', type: 'confirmed'});
+    expect(adapter.onConfirmed).toHaveBeenCalledTimes(1);
+    act(() => tree.unmount());
+  });
+
+  test('a context captured by replaced native session becomes stale', () => {
+    let oldCtx: {isCurrent(): boolean} | undefined;
+    adapter.onSubmit.mockImplementation((_e, ctx) => { oldCtx = ctx as {isCurrent(): boolean}; });
+    const {tree} = mount('reader', 'aabb');
+    emit({role: 'reader', type: 'done'});
+    expect(oldCtx?.isCurrent()).toBe(true);
+
+    act(() => {
+      tree.update(<Harness role="reader" readerPayload="ccdd" tick={1} adapter={adapter} />);
+    });
+    expect(oldCtx?.isCurrent()).toBe(false);
+    act(() => tree.unmount());
   });
 });

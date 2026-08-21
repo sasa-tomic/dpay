@@ -5,15 +5,14 @@
 // the merchant as a `dpay:pay/<blob>` link. The blob is base64url(JSON.stringify(proof)) — the
 // receiptShareBlob codec (what the payer's Paid screen Share button actually produces; flow 59
 // asserts that side). The merchant's app binds the proof to the OPEN request: parseRailProof
-// format-checks (request_id 64-hex + block_index decimal), then sets the settlement watch rid ONLY
-// — the "Received ∂25.00 from payer" flip comes from the read_state poll confirming execution
-// UNDER THAT RID on the ledger, never from the blob itself.
+// format-checks (request_id 64-hex + block_index decimal), then treats it only as a trigger. The
+// "Received ∂25.00 from payer" flip comes from an exact recipient/currency/amount/memo match in
+// durable ledger history, never from the blob itself.
 //
 // FORGERY LEG (F2, 2026-08-20): a well-formed proof with a RANDOM request_id (never signed —
-// read_state can never confirm it) is injected FIRST. It must NOT flip the screen to Received:
+// no matching ledger transaction exists) is injected FIRST. It must NOT flip the screen to Received:
 // the pre-fix bug rendered "Received" in the same tick after only format validation, letting a
-// forged proof release goods for free. The fixed handler is poll-gated: unknown rid → keep
-// watching the open request (bounded budget, then actionable copy). Only the REAL pre-settled
+// forged proof release goods for free. The fixed handler is history-gated and bounded. Only the REAL pre-settled
 // proof (injected second) completes to Received.
 //
 // block_index honesty: TxnRecord carries no block index, and decoding the gateway's CBOR
@@ -32,8 +31,8 @@
 // SAME applyBlob path as the web ?pay= reader + the native foreground url listener; a page reload
 // would work too but wipes the open request, which is the thing the proof binds to).
 //
-// SECURITY assertion: the merchant sees "Received ∂25.00" ONLY after the on-chain read_state poll
-// confirms under the proof's request_id (the forged random-rid leg above stays on the open request;
+// SECURITY assertion: the merchant sees "Received ∂25.00" ONLY after exact ledger history
+// confirms the open request tuple (the forged random-rid leg above stays on the open request;
 // a malformed proof errors — never a silent Received). The merchant also lands on RECEIVE — a
 // dpay:pay never routes to the Pay review.
 //
@@ -53,8 +52,8 @@ export const meta = {
   name: 'deeplink-receipt',
   journey: 'pay',
   covers: ['deeplink', 'receipt-link', 'rail-proof', 'receive', 'handback', 'forgery'],
-  verifies: 'merchant binds a dpay:pay rail-proof blob to the open request; a forged well-formed proof (random rid) never flips to Received (poll-gated) — only the real pre-settled proof does; never routes to Pay.',
-  timeoutMs: 20000,
+  verifies: 'merchant treats dpay:pay as a trigger; a forged proof before settlement never flips Received — only the exact nonce-bound ledger row does; never routes to Pay.',
+  timeoutMs: 30000,
 };
 
 export async function run() {
@@ -99,6 +98,26 @@ export async function run() {
     const bobBal = await getBalance(relayBaseURL, bob.publicHex, 0);
     assert(String(bobBal) === '10000', `payer B must be fauceted to 10000, got ${bobBal}`);
 
+    // Catalog: the DEMO ledger principal carried as a format-checked proof hint.
+    const catR = await fetch(`${relayBaseURL}/api/v1/currencies`);
+    assert(catR.ok, `catalog fetch should be 200, got ${catR.status}`);
+    const catJ = await catR.json();
+    const catalog = Array.isArray(catJ) ? catJ : catJ.currencies;
+    const ledger = catalog.find((c) => c.currency === 0)?.ledger;
+    assert(typeof ledger === 'string' && ledger.length > 0, 'catalog must carry the DEMO ledger id');
+
+    // Forgery comes BEFORE settlement. With no exact ledger row, a well-formed random proof cannot
+    // release goods. Wait through the bounded history budget before creating the real transfer.
+    console.log('[50-deeplink-receipt] injecting a FORGED proof before payment — must NOT flip to Received…');
+    const forgedRid = randomBytes(32).toString('hex');
+    const forgedBlob = b64urlEncode(Buffer.from(JSON.stringify({ledger, block_index: '0', request_id: forgedRid}), 'utf8'));
+    await driver.eval((b) => window.__DPAY_TEST_DEEPLINK({kind: 'pay', blob: b}), forgedBlob);
+    await new Promise((r) => setTimeout(r, 6000));
+    const body0 = await driver.bodyText();
+    assert(!body0.includes('Received'), `a forged proof without a matching ledger row must not show Received; page: ${body0.slice(0, 200)}`);
+    assert((await driver.eval(() => !!document.querySelector('[data-testid="request-qr"]'))), 'the open request must still be showing');
+    console.log('[50-deeplink-receipt] ✓ forged proof stayed honest: no matching history row');
+
     // --- B settles: sign an icrc1_transfer (payee = A's principal, memo = the request nonce) and
     //     POST it to the fake-IC /api/v2 gateway — byte-identical to the payer app's own submit.
     //     202 = accepted (the gateway executes synchronously; dedup keyed on the request_id).
@@ -122,34 +141,6 @@ assert(String(row.amount) === String(PAY_UNITS), `txn row amount must be ${PAY_U
 const aliceAfter = await getBalance(relayBaseURL, alicePub, 0);
 assert(String(aliceAfter) === '12500', `merchant balance must be 12500 (10000 faucet + 2500 paid), got ${aliceAfter}`);
 console.log('[50-deeplink-receipt] ✓ rail state confirms: memo row B→A + merchant balance 12500');
-
-// --- Catalog: the DEMO ledger principal (proof.ledger — the payer's app carries it too).
-const catR = await fetch(`${relayBaseURL}/api/v1/currencies`);
-assert(catR.ok, `catalog fetch should be 200, got ${catR.status}`);
-// The relay wraps the catalog array: 200 {"currencies":[…]} (same unwrap as lib.mjs railTransfer).
-const catJ = await catR.json();
-const catalog = Array.isArray(catJ) ? catJ : catJ.currencies;
-const ledger = catalog.find((c) => c.currency === 0)?.ledger;
-assert(typeof ledger === 'string' && ledger.length > 0, 'catalog must carry the DEMO ledger id');
-
-// --- FORGERY LEG (F2, 2026-08-20): a well-formed proof with a random request_id (never signed,
-//     never submitted — read_state can never confirm it) must NOT flip the UI to Received. The
-//     handler format-checks the blob then binds it by setting watchRid ONLY; the screen stays on
-//     the open request until the settlement poll confirms ON-CHAIN. Wait long enough for the
-//     pre-fix instant-flip class (the bug rendered 'Received' in the same tick) + several poll
-//     cadences, then assert the request QR is still up and no 'Received' is anywhere on the page.
-console.log('[50-deeplink-receipt] injecting a FORGED (well-formed, random-rid) proof — must NOT flip to Received…');
-const forgedRid = randomBytes(32).toString('hex');
-const forgedBlob = b64urlEncode(Buffer.from(JSON.stringify({ledger, block_index: '0', request_id: forgedRid}), 'utf8'));
-await driver.eval((b) => {
-  if (typeof window.__DPAY_TEST_DEEPLINK !== 'function') throw new Error('__DPAY_TEST_DEEPLINK seam not mounted (Wallet deeplink effect missing)');
-  window.__DPAY_TEST_DEEPLINK({kind: 'pay', blob: b});
-}, forgedBlob);
-await new Promise((r) => setTimeout(r, 1200)); // several poll ticks (150ms e2e cadence) — no settle can occur
-let body0 = await driver.bodyText();
-assert(!body0.includes('Received'), `a FORGED proof must not flip the screen to Received (poll-gated only); page: ${body0.slice(0, 200)}`);
-assert((await driver.eval(() => !!document.querySelector('[data-testid="request-qr"]'))), 'the open request must still be showing (nothing was confirmed)');
-console.log('[50-deeplink-receipt] ✓ forged proof stayed honest: still waiting on the open request');
 
 // --- The REAL rail proof the payer's app shares: base64url(JSON {ledger, block_index,
 //     request_id}) — the receiptShareBlob codec (the harness b64urlEncode is the same RFC 4648

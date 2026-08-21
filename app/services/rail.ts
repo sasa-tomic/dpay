@@ -9,14 +9,15 @@
 //    ICRC-1 semantics; no stale-fee pinning).
 //  - Outcome honesty: 'unknown' means NOT TERMINAL within budget (may still execute) — never
 //    render it as failure. 'rejected' is a decoded, definitive ledger refusal.
-//  - Duplicate{duplicate_of} maps to REJECTED with variant 'Duplicate' (reason 'Already paid') —
-//    the ledger refusing a SECOND execution of an already-executed transfer (distinct request_id,
-//    e.g. a re-signed envelope). It is NOT a settle-confirmation: a genuine settle reports
-//    ok=true + blockIndex.
+//  - Duplicate{duplicate_of} is settled: the ledger identifies the block that already executed
+//    these exact transfer arguments. It must never be rendered as a decline.
 import {DpayCore} from './native';
-import {icStampExpiry, icSubmit, icPollRequestStatus, icQuery, IC_SUBMIT_TIMEOUT_MS} from './icp';
-import {hexToBytes, bytesToHex} from '../lib/format';
+import {icStampExpiry, icSubmit, icPollRequestStatus, icPollSignedRequestStatus, icQuery, IC_SUBMIT_TIMEOUT_MS} from './icp';
+import {hexToBytes, bytesToHex, base} from '../lib/format';
 import {bytesToBase64Url, base64UrlToBytes} from '../lib/base64url';
+import {fetchWithTimeout} from './relay';
+import {HISTORY_TIMEOUT_MS} from '../config/constants';
+import type {TransactionsRow} from '../lib/types';
 
 export type RailPrepared = {
   ledger: string; // ledger principal text (submission target + read_state path)
@@ -25,6 +26,7 @@ export type RailPrepared = {
   amount: string; // raw u64 decimal string
   currency: number;
   memoHex: string; // the request nonce — reconciliation key
+  readStateEnvelopeHex?: string; // NFC only: payer-signed reusable request_status capability
 };
 
 /** What one signed reply decodes to — shared by the transfer (wasm) and minter (frozen-shape)
@@ -54,9 +56,36 @@ export async function prepareTransfer(
   return {ledger: desc.ledger, envelopeHex: signed.envelopeHex, requestIdHex: signed.requestIdHex, amount: req.amount, currency: req.currency, memoHex: req.nonceHex};
 }
 
+/** NFC payer preparation performs no network call. The online merchant stamped `req.expiry` from
+ * certified IC time; the payer signs the update at that expiry and a reusable request-status read
+ * with 60 seconds more headroom, then hands both envelopes to the merchant. */
+export async function prepareNfcTransfer(
+  secretHex: string,
+  catalog: {currencies: Array<{currency: number; ledger: string; fee: string | null}>},
+  req: {toHex: string; amount: string; currency: number; nonceHex: string; expiry: number},
+): Promise<RailPrepared & {readStateEnvelopeHex: string}> {
+  const desc = catalog.currencies.find(c => c.currency === req.currency);
+  if (!desc || !desc.ledger) throw new Error('Unsupported asset — no ledger for this currency');
+  const toPrincipal = await DpayCore.icpPrincipalFromPubkey(req.toHex);
+  const argHex = await DpayCore.icpTransferArg(toPrincipal, '', '', req.amount, desc.fee ?? '', req.nonceHex);
+  const updateExpiryNs = (BigInt(req.expiry) * 1_000_000_000n).toString();
+  const signed = await DpayCore.icpSignUpdate(secretHex, desc.ledger, 'icrc1_transfer', argHex, updateExpiryNs);
+  const readExpiryNs = (BigInt(req.expiry + 60) * 1_000_000_000n).toString();
+  const readStateEnvelopeHex = await DpayCore.icpSignReadState(secretHex, [signed.requestIdHex], false, readExpiryNs);
+  return {
+    ledger: desc.ledger,
+    envelopeHex: signed.envelopeHex,
+    requestIdHex: signed.requestIdHex,
+    amount: req.amount,
+    currency: req.currency,
+    memoHex: req.nonceHex,
+    readStateEnvelopeHex,
+  };
+}
+
 /** Submit the prepared envelope (verbatim bytes) and poll read_state to a terminal state.
- *  `pollerSecret` signs the read_state polls — any principal may read request_status; the
- *  merchant's own key polls in the handoff case. Budget-exhaustion → 'unknown' (honest pending).
+ *  `pollerSecret` MUST belong to the update sender; the IC does not authorize another principal to
+ *  read this request_status. Budget-exhaustion → 'unknown' (honest pending).
  *  `decodeReply` overrides the reply decoder (minter calls reply a different candid shape). */
 export async function submitTransfer(
   prepared: {ledger: string; envelopeHex: string; requestIdHex: string},
@@ -64,13 +93,10 @@ export async function submitTransfer(
   opts: {attempts: number; intervalMs: number},
   decodeReply?: (replyArgHex: string) => Promise<RailReplyOutcome>,
 ): Promise<RailOutcome> {
-  const out = await icSubmit(prepared.ledger, 'call', prepared.envelopeHex, IC_SUBMIT_TIMEOUT_MS);
-  if (out.kind === 'rejected') {
-    // Definitive at the boundary node (malformed envelope / bad signature / expired ingress).
-    // The transfer did NOT execute; the user can start a fresh payment.
-    return {kind: 'rejected', reason: ingressRejectMessage(out.status, out.bodyText)};
-  }
-  if (out.kind === 'unknown') return {kind: 'unknown'}; // resubmit the SAME bytes later
+  // HTTP only says what THIS POST observed. An identical peer submission may already have entered
+  // consensus, so even 4xx/429 cannot safely produce a decline. The sender-authorized request_status
+  // is the sole terminal verdict.
+  await icSubmit(prepared.ledger, 'call', prepared.envelopeHex, IC_SUBMIT_TIMEOUT_MS);
   return await pollTransfer(prepared, pollerSecret, opts, decodeReply);
 }
 
@@ -83,11 +109,37 @@ export async function pollTransfer(
   decodeReply?: (replyArgHex: string) => Promise<RailReplyOutcome>,
 ): Promise<RailOutcome> {
   const st = await icPollRequestStatus(pollerSecret, prepared.ledger, prepared.requestIdHex, opts);
+  return decodeTransferStatus(st, decodeReply);
+}
+
+/** Merchant-only NFC settlement: submit the offline payer's immutable update and poll with the
+ * payer-signed read_state envelope that arrived in the same DPN2 bundle. */
+export async function submitNfcTransfer(
+  prepared: {ledger: string; envelopeHex: string; requestIdHex: string; readStateEnvelopeHex: string},
+  opts: {attempts: number; intervalMs: number},
+): Promise<RailOutcome> {
+  await icSubmit(prepared.ledger, 'call', prepared.envelopeHex, IC_SUBMIT_TIMEOUT_MS);
+  const st = await icPollSignedRequestStatus(
+    prepared.ledger,
+    prepared.requestIdHex,
+    prepared.readStateEnvelopeHex,
+    opts,
+  );
+  return decodeTransferStatus(st);
+}
+
+async function decodeTransferStatus(
+  st: Awaited<ReturnType<typeof icPollRequestStatus>>,
+  decodeReply?: (replyArgHex: string) => Promise<RailReplyOutcome>,
+): Promise<RailOutcome> {
   if (st == null) return {kind: 'unknown'};
   if (st.state === 'replied' && st.replyArgHex != null) {
     const decode = decodeReply ?? ((hex: string) => DpayCore.icpDecodeTransferResult(hex));
     const tr = await decode(st.replyArgHex);
     if (tr.ok) return {kind: 'settled', blockIndex: tr.blockIndex ?? ''};
+    if (tr.errVariant === 'Duplicate') {
+      return {kind: 'settled', blockIndex: tr.errDetail?.match(/\d+$/)?.[0] ?? ''};
+    }
     return {kind: 'rejected', reason: transferRejectionMessage(tr.errVariant ?? '', tr.errDetail ?? ''), variant: tr.errVariant || undefined};
   }
   if (st.state === 'rejected') {
@@ -111,9 +163,57 @@ export function transferRejectionMessage(variant: string, detail: string): strin
   }
 }
 
-function ingressRejectMessage(status: number, bodyText: string): string {
-  if (bodyText.includes('expired')) return 'The payment window closed — try again';
-  return `The IC gateway refused the payment (${status})`;
+export type IncomingTransfer = {
+  relayUrl: string;
+  receiverPublicHex: string;
+  currency: number;
+  amount: string;
+  memoHex: string;
+};
+
+/** Receiver-side proof for a payer-owned update. The receiver cannot read the payer's request_status
+ * on the real IC, so it confirms the exact open request from the ledger's durable transaction log.
+ * Matching recipient + currency + amount + random 16-byte memo binds success to this request. */
+export async function confirmIncomingTransfer(
+  expected: IncomingTransfer,
+  opts: {attempts: number; intervalMs: number},
+): Promise<boolean> {
+  const me = (await DpayCore.icpPrincipalFromPubkey(expected.receiverPublicHex)).toLowerCase();
+  const memo = expected.memoHex.toLowerCase();
+  for (let attempt = 0; attempt < opts.attempts; attempt += 1) {
+    try {
+      const r = await fetchWithTimeout(
+        `${base(expected.relayUrl)}/api/v1/transactions/${expected.receiverPublicHex}?currency=${expected.currency}&limit=1&memo=${memo}`,
+        undefined,
+        HISTORY_TIMEOUT_MS,
+      );
+      const body = await r.json().catch(() => null) as {transactions?: TransactionsRow[]} | null;
+      if (r.ok && body?.transactions?.some(row =>
+        row.currency === expected.currency
+        && row.to.toLowerCase() === me
+        && row.amount === expected.amount
+        && row.memo.toLowerCase() === memo
+      )) return true;
+    } catch (e) {
+      console.warn('incoming transfer history poll failed:', e instanceof Error ? e.message : String(e));
+    }
+    if (attempt + 1 < opts.attempts && opts.intervalMs > 0) {
+      await new Promise<void>(resolve => setTimeout(resolve, opts.intervalMs));
+    }
+  }
+  return false;
+}
+
+/** Submit a payer-owned envelope verbatim, then prove the receiver's exact request in ledger history.
+ * HTTP rejection is not a verdict: the payer may have submitted the same request concurrently. */
+export async function submitAndConfirmIncomingTransfer(
+  ledger: string,
+  envelopeHex: string,
+  expected: IncomingTransfer,
+  opts: {attempts: number; intervalMs: number},
+): Promise<boolean> {
+  await icSubmit(ledger, 'call', envelopeHex, IC_SUBMIT_TIMEOUT_MS);
+  return await confirmIncomingTransfer(expected, opts);
 }
 
 /** Envelope → QR payload (base64url of the envelope bytes — same codec family as every other

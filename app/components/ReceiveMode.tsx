@@ -1,17 +1,18 @@
 import {useEffect, useMemo, useState} from 'react';
-import {View, Text, Pressable, TextInput, ActivityIndicator, type TextStyle} from 'react-native';
+import {View, Text, Pressable, TextInput, type TextStyle} from 'react-native';
 import {QrCode} from './QrCode';
 import {C, FONT} from '../config/palette';
 import {S} from '../styles';
-import {EXPIRY_WINDOW, POLL, PROOF_POLL_BUDGET, QR_SIZE} from '../config/constants';
+import {EXPIRY_WINDOW, NFC_UPDATE_AHEAD_S, POLL, PROOF_POLL_BUDGET, QR_SIZE} from '../config/constants';
 import {toUnits, randNonceHex, nowSecs} from '../lib/format';
 import {shareHandoff, decodeReceiptDeeplink, parseRailProof} from '../lib/deepLink';
 import {type CurrencyDescriptor, type FamilyDisplay, fmtCurrencyAmount, currencySymbol} from '../config/catalog';
 import {type SelectableAsset} from '../config/assets';
 import {type BalanceView} from '../lib/assetBalances';
 import type {Identity, AssetId} from '../lib/types';
-import {qrPayloadToEnvelopeHex, submitTransfer, pollTransfer} from '../services/rail';
+import {qrPayloadToEnvelopeHex, submitAndConfirmIncomingTransfer, confirmIncomingTransfer} from '../services/rail';
 import {DpayCore, DpayNfc} from '../services/native';
+import {icStampExpiry} from '../services/icp';
 import {NfcTap} from './NfcTap';
 import {QrScanner} from './QrScanner';
 import {NfcIcon} from './NfcIcon';
@@ -47,10 +48,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
   // `rawAmount` (was `cents`) is the integer smallest-units the encoded request carries (2-decimal
   // for DEMO, 8 for BTC, 6 for USDC) — now a raw-u64 decimal STRING (MC1 units 2-4). Renamed because
   // the field was never truly cents for a non-USD currency; this is more honest.
-  const [reqQr, setReqQr] = useState<{value: string; rawAmount: string; currency: number; nonce: string; nfcHex: string | null; expiry: number} | null>(null);
-  // The payer's envelope request_id this screen is watching for settlement (set when we receive
-  // the envelope — scanned QR, NFC submit, or a shared rail-proof receipt). Null until seen.
-  const [watchRid, setWatchRid] = useState<string | null>(null);
+  const [reqQr, setReqQr] = useState<{value: string; rawAmount: string; currency: number; nonce: string; nfcHex: string | null; nfcExpiry: number | null; expiry: number} | null>(null);
   // A 1s display clock so the request-QR screen can show a live expiry countdown (the signed request
   // is only valid for EXPIRY_WINDOW secs; a stale QR scans to a confusing rejection). Declared here;
   // the ticking effect is wired after `result` (the gate it reads) is declared below.
@@ -60,13 +58,6 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
   const [err, setErr] = useState<string | null>(null);
   const [nfcActive, setNfcActive] = useState(false);
   const [nfcKey, setNfcKey] = useState(0);
-  // NFC-unknown handoff (2026-08-21): set when the reader tap ended UNKNOWN (in-tap poll budget
-  // exhausted — mainnet latency tail) and the background settlement poll (watchRid) now owns the
-  // outcome. While set, the tap component itself is unmounted (the NFC session is over — the
-  // reader stops) and this screen renders its own reconcile status instead, whose text the
-  // background poll CAN update (settled → the Received view flips in; rejected/budget-out → the
-  // err line). Cleared by reset().
-  const [tapHandoff, setTapHandoff] = useState(false);
   // The unified asset picker (opened by tapping the amount prefix). Phase 4: replaced the old
   // local CurrencyPicker + the SOL-onSelectSol bridge — AssetPicker is the ONE picker both Receive
   // forms + Balances consume, with Wallet's handleSelect as its onSelect. Esc/backdrop close it
@@ -116,78 +107,27 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
       // Build the NFC request too so reader mode can start alongside the QR (best-effort). The
       // merchant's username + memo ride as to_name/memo in the request bytes, same as the QR path.
       let nfcHex: string | null = null;
-      if (nfcReady && DpayNfc) { try { nfcHex = await DpayNfc.buildRequest(identity.publicHex, rawAmount, nonce, expiry, selectedCurrency, identity.username, memoVal); } catch (e) { console.warn('NFC buildRequest failed (best-effort, QR still works):', e instanceof Error ? e.message : String(e)); } }
-      setReqQr({value: reqB64, rawAmount, currency: selectedCurrency, nonce, nfcHex, expiry});
+      let nfcExpiry: number | null = null;
+      if (nfcReady && DpayNfc) {
+        try {
+          const nfcExpiryNs = await icStampExpiry(identity.secretHex, NFC_UPDATE_AHEAD_S);
+          nfcExpiry = Number(BigInt(nfcExpiryNs) / 1_000_000_000n);
+          nfcHex = await DpayNfc.buildRequest(identity.publicHex, rawAmount, nonce, nfcExpiry, selectedCurrency, identity.username, memoVal);
+        } catch (e) {
+          console.warn('NFC certified expiry unavailable (QR still works):', e instanceof Error ? e.message : String(e));
+        }
+      }
+      setReqQr({value: reqB64, rawAmount, currency: selectedCurrency, nonce, nfcHex, nfcExpiry, expiry});
       setResult(null); setErr(null);
     } catch (e: unknown) { setErr(e instanceof Error ? e.message : String(e)); }
   }
-
-  // Poll for THIS request's settlement on the IC rail. The payer's envelope (submitted by us via
-  // onSignedQr/NfcTap, or by the payer's own phone online) executes against the ledger; we poll
-  // read_state under the payer's request_id. The rid is stored when we first see the envelope
-  // (submitted or scanned); the payer-online case (no envelope seen) is reconciled by the balance
-  // recheck the app performs on refresh — the memo (request nonce) is the reconciliation key.
-  //
-  // Honesty (F2, 2026-08-20): 'rejected' is terminal — surface it as an error (stop polling);
-  // 'unknown' keeps polling but not forever — after PROOF_POLL_BUDGET attempts (~45s at prod
-  // cadence, ~4.5s under the e2e POLL override) we stop with actionable copy instead of hanging
-  // silently on a request_id that will never confirm (e.g. a forged/never-submitted rid).
-  useEffect(() => {
-    if (!reqQr || result || !watchRid) return;
-    let alive = true;
-    let attempts = 0;
-    const ledger = catalog.find(c => c.currency === reqQr.currency)?.ledger ?? '';
-    if (!ledger) return;
-    const check = async () => {
-      attempts += 1;
-      try {
-        const out = await pollTransfer({ledger, requestIdHex: watchRid}, identity.secretHex, {attempts: 1, intervalMs: 0});
-        if (!alive) return;
-        if (out.kind === 'settled') {
-          setResult({amount: reqQr.rawAmount, currency: reqQr.currency, from: 'payer'});
-          // NFC-unknown recovery (2026-08-21): when this poll is the BACKGROUND reconciler
-          // (armed by NfcTap's onUnknown after the in-tap budget ran out), the tap view is
-          // still up in its terminal pending state with nfcActive=true — clearing it here is
-          // what lets the 'Received ✓' result view render WITHOUT waiting for the merchant to
-          // tap Done. A no-op on the scan/deeplink paths (nfcActive already false there).
-          setNfcActive(false);
-          onReceived();
-          return;
-        }
-        if (out.kind === 'rejected') {
-          setErr(out.reason); // definitive ledger refusal — stop polling, show why
-          setWatchRid(null);
-          return;
-        }
-        if (attempts >= PROOF_POLL_BUDGET) {
-          // Unknown-but-watchable rid that never confirmed within the budget. Actionable copy:
-          // the request stays open, the merchant can re-try via the payer's phone (scan QR /
-          // fresh proof) or wait for the balance recheck — but the poll stops hanging forever.
-          setErr('Couldn’t confirm this payment yet — if the payer paid, it lands with the next balance refresh. Tap their phone or scan their code to retry.');
-          setWatchRid(null);
-        }
-      } catch (e) {
-        console.warn('settlement read_state poll failed:', e instanceof Error ? e.message : String(e));
-        // best-effort network error: counts against the budget so a dead gateway also terminates
-        if (alive && attempts >= PROOF_POLL_BUDGET) {
-          setErr('Couldn’t confirm this payment yet — if the payer paid, it lands with the next balance refresh. Tap their phone or scan their code to retry.');
-          setWatchRid(null);
-        }
-      }
-    };
-    check(); const id = setInterval(check, POLL.receiptRcv);
-    return () => { alive = false; clearInterval(id); };
-  }, [reqQr, result, watchRid, catalog, identity, onReceived]);
 
   // Receipt hand-back (dpay:pay/): a payer who settled ONLINE (NFC unavailable) shares the rail
   // proof {ledger, block_index, request_id} back as a `dpay:pay/<blob>` link. The blob codec
   // (receiptShareBlob) is opaque JSON. DEEPLINK TRUST MODEL (F2/F6, 2026-08-20 — was: the blob was
   // trusted after format validation, rendering instant "Received"): the proof is an UNTRUSTED,
-  // FORGEABLE string. We now FORMAT-check it (parseRailProof), bind its request_id to the open
-  // request by setting watchRid ONLY, and let the settlement poll above confirm ON-CHAIN
-  // (read_state) before the UI flips to Received — a forged-but-well-formed proof proves nothing
-  // and can no longer fabricate a settlement. 'rejected' surfaces as an error; an unknown rid
-  // stops after a bounded budget with actionable copy (see the poll effect).
+  // FORGEABLE string. Format-check it, then confirm the exact open request by recipient + currency +
+  // amount + nonce in durable ledger history. The proof itself can never fabricate settlement.
   useEffect(() => {
     if (prefillReceipt == null) return;
     const blob = prefillReceipt;
@@ -213,8 +153,20 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
         }
         const parsed = parseRailProof(proof);
         if (!parsed) { if (alive) setErr("This receipt doesn't match your open request."); return; }
-        // Format-valid: watch the rid — ONLY the on-chain read_state confirmation flips result.
-        setWatchRid(parsed.request_id);
+        const settled = await confirmIncomingTransfer({
+          relayUrl,
+          receiverPublicHex: identity.publicHex,
+          currency: reqQr.currency,
+          amount: reqQr.rawAmount,
+          memoHex: reqQr.nonce,
+        }, {attempts: PROOF_POLL_BUDGET, intervalMs: POLL.receiptRcv});
+        if (!alive) return;
+        if (settled) {
+          setResult({amount: reqQr.rawAmount, currency: reqQr.currency, from: 'payer'});
+          onReceived();
+        } else {
+          setErr('Couldn’t confirm this payment yet — if the payer paid, it lands with the next balance refresh.');
+        }
       } catch (e) {
         if (alive) setErr("Couldn't read this receipt link.");
         console.warn('receipt deeplink hand-back failed:', e instanceof Error ? e.message : String(e));
@@ -228,24 +180,32 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
     setScanning(false);
     setErr(null);
     try {
-      // The payer's signed QR IS the /call envelope (base64url). Decode, derive the request_id,
-      // submit it to the ledger, and let the read_state poll above reconcile this request Paid.
+      // The payer's signed QR IS the /call envelope (base64url). Submit the immutable bytes, then
+      // prove this exact request from the receiver's durable ledger history.
       const envelopeHex = qrPayloadToEnvelopeHex(raw);
       if (!envelopeHex) { setErr("This isn't a dpay payment code"); return; }
-      const requestIdHex = await DpayCore.icpEnvelopeRequestId(envelopeHex);
-      setWatchRid(requestIdHex);
       const ledger = catalog.find(c => c.currency === reqQr?.currency)?.ledger ?? '';
-      if (!ledger) { setErr('Unknown ledger for this asset — couldn’t submit'); return; }
-      const out = await submitTransfer({ledger, envelopeHex, requestIdHex}, identity.secretHex, {attempts: 12, intervalMs: 500});
-      if (out.kind === 'rejected') setErr(out.reason);
-      // settled → the poll turns it into Received; unknown → honest pending (the poll keeps watching).
+      if (!ledger || !reqQr) { setErr('Unknown ledger for this asset — couldn’t submit'); return; }
+      const settled = await submitAndConfirmIncomingTransfer(ledger, envelopeHex, {
+        relayUrl,
+        receiverPublicHex: identity.publicHex,
+        currency: reqQr.currency,
+        amount: reqQr.rawAmount,
+        memoHex: reqQr.nonce,
+      }, {attempts: PROOF_POLL_BUDGET, intervalMs: POLL.receiptRcv});
+      if (settled) {
+        setResult({amount: reqQr.rawAmount, currency: reqQr.currency, from: 'payer'});
+        onReceived();
+      } else {
+        setErr('Couldn’t confirm this payment yet — if the payer paid, it lands with the next balance refresh.');
+      }
     } catch (e) { console.warn('envelope submit failed:', e instanceof Error ? e.message : String(e)); setErr("Couldn't submit the payment — check the connection"); }
   }
 
-  function reset() { setReqQr(null); setResult(null); setScanning(false); setErr(null); setMemo(''); setNfcActive(false); setWatchRid(null); setTapHandoff(false); setNfcKey(k => k + 1); }
+  function reset() { setReqQr(null); setResult(null); setScanning(false); setErr(null); setMemo(''); setNfcActive(false); setNfcKey(k => k + 1); }
 
-  // While an NFC tap is mid-flow, let it own the screen (so the receipt gets back to the payer)
-  // rather than the settlement poll swapping in the "Received" view underneath it.
+  // While an NFC tap is mid-flow, let its exact history check own the screen rather than swapping
+  // in the generic result view underneath it.
   if (result && !nfcActive) {
     return (
       <View style={S.center}>
@@ -258,37 +218,27 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
   }
 
   if (reqQr) {
+    const nfcUsable = !!reqQr.nfcHex && reqQr.nfcExpiry !== null && now < reqQr.nfcExpiry;
+    // Expiry prevents NEW taps, but an exchange that already delivered its bundle must stay mounted
+    // until the merchant returns the authenticated result (including a result-only re-tap).
+    const nfcSessionOpen = nfcUsable || nfcActive;
     return (
       <View style={S.center}>
-        {/* Reader mode runs in the background while the QR is shown: the payer taps OR scans.
-            tapHandoff: the tap ended unknown and the background poll owns the outcome — the tap
-            component is unmounted (NFC session over) and the reconcile view below takes over. */}
-        {reqQr.nfcHex && nfcReady && DpayNfc && !tapHandoff ? (
+        {/* Reader mode runs in the background while the QR is shown: the payer taps OR scans. */}
+        {nfcSessionOpen && reqQr.nfcHex && nfcReady && DpayNfc ? (
           <NfcTap
-            key={nfcKey} role="reader" identity={identity} requestHex={reqQr.nfcHex}
+            key={nfcKey} role="reader" identity={identity} relayUrl={relayUrl} requestHex={reqQr.nfcHex!}
             reqInfo={readerReqInfo}
             catalog={catalog}
             onSettled={onReceived} onActive={() => setNfcActive(true)}
-            onUnknown={(rid) => { setTapHandoff(true); setWatchRid(rid); }}
             onClose={() => { setNfcActive(false); reset(); }}
           />
         ) : null}
-        {tapHandoff ? (
-          <View style={S.center} testID="nfc-reconcile">
-            <View style={[S.nfcBadge, {borderColor: err ? C.sub : C.warn}]}>
-              {err ? <Text style={[S.nfcGlyph, {color: C.sub}]}>?</Text> : <ActivityIndicator size="large" color={C.warn}/>}
-            </View>
-            <Text style={S.nfcTitle}>{err ? 'Not confirmed yet' : 'Confirming…'}</Text>
-            <Text style={S.nfcSub}>{err ?? 'Settling with the ledger — this updates when it lands'}</Text>
-            {err ? null : <Text style={S.dim2}>You can wait here or check Transactions in a minute</Text>}
-            <Pressable style={S.ghostBtn} onPress={reset} accessibilityRole="button" accessibilityLabel="Done" accessibilityState={{disabled: false}}><Text style={S.ghostBtnText}>Done</Text></Pressable>
-          </View>
-        ) : null}
-        {!nfcActive && !tapHandoff ? (
+        {!nfcActive ? (
           <>
             <View style={S.nfcHintRow}>
-              {reqQr.nfcHex ? <NfcIcon color={C.brand} size={18} /> : null}
-              <Text style={S.nfcHintLabel}>Show this to the payer{reqQr.nfcHex ? ' · or let them tap' : ''}</Text>
+              {nfcUsable ? <NfcIcon color={C.brand} size={18} /> : null}
+              <Text style={S.nfcHintLabel}>Show this to the payer{nfcUsable ? ' · or let them tap' : reqQr.nfcHex ? ' · NFC tap expired' : ''}</Text>
             </View>
             <View testID="request-qr" style={S.qrCard}><QrCode value={reqQr.value} size={QR_SIZE} ecl="M" /></View>
         <Text style={S.amountBig}>{fmtCurrencyAmount(catalog, reqQr.currency, reqQr.rawAmount)}</Text>
@@ -310,9 +260,9 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
           return <Text style={S.qrExpiryWarn}>Expires in 0:{s.toString().padStart(2, '0')}</Text>;
         })()}
         <Text style={S.qrHint}>Waiting for payment{online ? '…' : ' — reconnect to submit…'}</Text>
-        {/* Offline honesty (IC rail): the merchant cannot SUBMIT a handed envelope (or poll
-            read_state) while offline. Payer-online payments still land on the ledger directly and
-            reconcile on the next balance refresh — but envelope handoffs need connectivity. */}
+        {/* Offline honesty (IC rail): the merchant cannot submit a handed envelope or check ledger
+            history while offline. Payer-online payments still land directly and reconcile on the
+            next balance refresh — but envelope handoffs need connectivity. */}
         {!online ? (
           <View style={S.qrOfflinePill}>
             <IconWifiOff size={14} color={C.bad}/>

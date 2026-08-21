@@ -12,10 +12,11 @@
  *   failure).
  *
  * Dependency-free (no react-native, no fetch, no globals) so it runs under jest on the fast inner
- * loop. Receipt codes are imported from payments.ts (single source of truth — RECEIPT_SETTLED etc.
- * are the SAME codes the merchant's broadcastSolPayment emits).
+ * loop. These receipt codes belong only to the SOL transport; IC settlement is polled directly.
  */
-import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from '../payments';
+export const RECEIPT_SETTLED = 0;
+export const RECEIPT_REJECTED = 1;
+export const RECEIPT_UNREACHABLE = 2;
 
 /**
  * The payer's terminal state, derived from a SolReceiptV2 received over QR/NFC from the merchant:
@@ -38,7 +39,7 @@ export type SolPayerOutcomeV2 =
 
 /**
  * The v2 receipt shape the merchant hands back. `status` is a ReceiptCode (0=settled, 1=rejected,
- * 2=unreachable — the SAME codes payments.ts defines). `rid` echoes the solreq:v2 request id;
+ * 2=unreachable). `rid` echoes the solreq:v2 request id;
  * `sig` is the on-chain transaction signature (base58). Neither is a trusted claim — both must
  * match what the payer signed.
  */

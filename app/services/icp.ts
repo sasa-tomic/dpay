@@ -132,8 +132,8 @@ export async function icQuery(
 }
 
 /** One read_state round-trip over the given request_ids (+ certified time when wantTime).
- * Returns the decoded state, or null when unreachable. Uses the caller's own key — read_state
- * must be signed by SOME principal; any key sees request_status records (they are not secret).
+ * Returns the decoded state, or null when unreachable. Request-status paths are sender-authorized:
+ * the signing key must belong to the original update sender. Certified-time-only reads are separate.
  * The canister path segment is irrelevant for read_state (it targets the subnet); the PoC's
  * IcHttp always passed the ledger principal, so we do too. */
 export async function icReadState(
@@ -189,6 +189,33 @@ export async function icPollRequestStatus(
     const state = await icReadState(secretHex, canisterText, [requestIdHex], i === 0, opts.signal);
     const st = state?.statuses?.[0];
     if (st && st.state !== 'unknown' && st.state !== 'received' && st.state !== 'processing') return st;
+    if (i < opts.attempts - 1) await sleep(opts.intervalMs, opts.signal);
+  }
+  return null;
+}
+
+/** Poll request_status using one payer-signed read_state envelope supplied over NFC. Reposting the
+ * identical read-only envelope is valid until its own ingress expiry and lets an online merchant
+ * observe an offline payer's update without possessing the payer key. */
+export async function icPollSignedRequestStatus(
+  canisterText: string,
+  requestIdHex: string,
+  readStateEnvelopeHex: string,
+  opts: {attempts: number; intervalMs: number; signal?: AbortSignal},
+): Promise<RailStatusOut | null> {
+  for (let i = 0; i < opts.attempts; i++) {
+    if (opts.signal?.aborted) return null;
+    const r = await postEnvelope(canisterText, 'read_state', readStateEnvelopeHex, IC_READ_STATE_TIMEOUT_MS, opts.signal);
+    if (r?.ok) {
+      const rawHex = await bodyHex(r);
+      if (rawHex != null) {
+        try {
+          const state = await DpayCore.icpDecodeReadState(rawHex, [requestIdHex]);
+          const st = state.statuses?.[0];
+          if (st && st.state !== 'unknown' && st.state !== 'received' && st.state !== 'processing') return st;
+        } catch {/* malformed/unavailable stays unknown and is retried */}
+      }
+    }
     if (i < opts.attempts - 1) await sleep(opts.intervalMs, opts.signal);
   }
   return null;

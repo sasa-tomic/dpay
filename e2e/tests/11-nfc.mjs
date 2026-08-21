@@ -12,7 +12,7 @@
 //                 the QR scanner stays live so the payer taps OR scans with no mode switch).
 //   - linking   : "Connecting…"  (the tap started; NfcTap takes over the screen)
 //   - exchanging: "Communicating…"
-//   - success   : "Paid ✓"  (the terminal phase)
+//   - settling  : "Confirming…" (the signed envelope left the NFC transport)
 // No real signing fires (no 'request' event dispatched), so this is a pure UI-phase proof — the
 // radio hop itself stays a physical-device gate, exactly as designed.
 //
@@ -27,7 +27,7 @@ export const meta = {
   name: 'nfc',
   journey: 'nfc',
   covers: ['nfc-phases', 'event-bus'],
-  verifies: 'NFC phase transitions (Idle→Linking→Exchanging→Settling→Complete) render via the RNW event bus.',
+  verifies: 'NFC transport phases (Idle→Linking→Exchanging→Settling) render via the RNW event bus.',
   timeoutMs: 15000,
 };
 
@@ -65,10 +65,10 @@ export async function run() {
     assert(await driver.waitForText('Communicating', { timeoutMs: 4_000 }), 'exchanging should show "Communicating…"');
     console.log('[11-nfc] ✓ exchanging → "Communicating…"');
 
-    // success → "Paid ✓" (terminal).
-    await dispatch({ type: 'phase', role: 'card', phase: 'success' });
-    assert(await driver.waitForText('Paid', { timeoutMs: 4_000 }), 'success should show "Paid ✓"');
-    console.log('[11-nfc] ✓ success → "Paid ✓"');
+    // settling → the envelope has left the NFC transport; ledger polling now owns the outcome.
+    await dispatch({ type: 'phase', role: 'card', phase: 'settling' });
+    assert(await driver.waitForText('Confirming', { timeoutMs: 4_000 }), 'settling should show "Confirming…"');
+    console.log('[11-nfc] ✓ settling → "Confirming…"');
 
     await driver.screenshot('11-nfc');
 

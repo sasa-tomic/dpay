@@ -12,7 +12,7 @@ import type {SolReqV2, SolPayV2} from '../solana/qr';
 import {buildCanonicalSolMessage, verifySolPayment, base58Decode32} from '../solana/tx';
 import {buildCanonicalUsdcMessage, deriveAta, ASSOCIATED_TOKEN_PROGRAM_ADDRESS} from '../solana/spl';
 import {deriveSolanaKeypair} from '../solana/identity';
-import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from '../payments';
+import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from '../solana/payments';
 import type {SolanaRpcStub} from '../solana/rpc';
 
 const realFetch = globalThis.fetch;

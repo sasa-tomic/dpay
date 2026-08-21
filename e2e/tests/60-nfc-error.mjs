@@ -8,8 +8,6 @@
 //                  error after the wire left the phone says nothing about whether the ledger settled;
 //                  the hook deliberately does NOT overwrite a decided outcome with a false failure).
 //   - `declined` : the payer (card side) declined the tap.
-//   - `pending`  : the receipt never arrived within RECEIPT_WAIT_MS after `settling` → honest
-//                  "Couldn't confirm — check your balance when back online" (NOT a fake Paid).
 //
 // This flow drives the REAL NfcTap state machine (via the same `__DPAY_TEST_NFC_SESSION` seam flow
 // 11 uses) through `error` and `declined`, asserting for each:
@@ -20,7 +18,7 @@
 //
 // The `error`-after-`settling` guard (the "don't overwrite a decided outcome" rule, line 112 of
 // useNfcTapState) is also asserted: once `settling` fired (committed=true), a late `error` event is
-// IGNORED — the phase stays on the receipt path, not a false failure. This is the subtle correctness
+// IGNORED — the phase stays on the settlement path, not a false failure. This is the subtle correctness
 // property that separates an honest transport glitch from a real funds loss.
 //
 // Selector contract: `nfc-status` (the NfcTapView surface), `balance` (unchanged), the Done link
@@ -101,8 +99,7 @@ export async function run() {
     // Once the wire left the phone (settling → committed=true), a transport error says nothing about
     // whether the ledger settled. useNfcTapState (line 112) deliberately IGNORES a late `error` so a
     // radio glitch can't mask a real success. We drive settling, fire a late error, and assert the
-    // phase does NOT flip to 'error' (it stays on the receipt path). A real receipt would then
-    // resolve it; here the RECEIPT_WAIT_MS timer eventually surfaces 'pending' (honest "not confirmed").
+// phase does NOT flip to 'error' (settlement owns the outcome after envelope delivery).
     console.log('[60-nfc-error] case 3: late error after settling is ignored (no false failure)…');
     await dispatch({type: 'phase', role: 'card', phase: 'linking'});
     await driver.findByTestID('nfc-status', {timeoutMs: 4_000});
@@ -117,13 +114,11 @@ export async function run() {
     // bug existed (error overwrites the decided phase), "Confirming" would be gone after the flush.
     await new Promise((r) => setTimeout(r, 500));
     const bodyAfterLate = await driver.bodyText();
-    assert(bodyAfterLate.includes('Confirming'), 'a late error after settling must NOT overwrite the receipt path (no false "Tap failed")');
+    assert(bodyAfterLate.includes('Confirming'), 'a late error after settling must NOT overwrite the settlement path (no false "Tap failed")');
     assert(!bodyAfterLate.includes('should be ignored'), 'the late-error reason must NOT render (the error was ignored)');
     assert(!/Tap failed/.test(bodyAfterLate), 'a late error must NOT flip the status to "Tap failed"');
-    console.log('[60-nfc-error] ✓ late error after settling ignored — phase stays on the receipt path');
-    // Escape the receipt path (the button is "Cancel" mid-flow, not the terminal "Done"). The
-    // settling timer would eventually time out to 'pending' on its own; we cancel to move on.
-    assert((await clickNfcButton()) === 'Cancel', 'the Cancel button should be reachable on the receipt path');
+    console.log('[60-nfc-error] ✓ late error after settling ignored — settlement remains authoritative');
+    assert((await clickNfcButton()) === 'Cancel', 'the Cancel button should be reachable while settling');
 
     await driver.screenshot('60-nfc-error');
 

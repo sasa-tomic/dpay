@@ -1,4 +1,8 @@
 export const EXPIRY_WINDOW = 900; // request valid 15 min (U-F3: a payer who opens a shared request link and creates a wallet — 24-word mnemonic entry — must not land on an expired request) — still kills stale replays
+// NFC is an immediate physical exchange. The online merchant stamps its request from certified IC
+// time so an offline payer can sign without a clock/network call. The paired read_state envelope gets
+// another 60s in prepareNfcTransfer, remaining inside the IC ingress window.
+export const NFC_UPDATE_AHEAD_S = 240;
 // PR23 — named timeouts for the remaining bare fetch literals. The value is the SAME the inline
 // constants carried; only the name is new. BALANCE_TIMEOUT_MS bounds every "fast read" poll
 // (balance/history/receipt/catalog + the onboarding best-effort fund). FAUCET_TIMEOUT_MS bounds
@@ -20,10 +24,8 @@ export const FAUCET_TIMEOUT_MS = 6000;
 // the ready address at 8s → "Couldn't load your deposit address." (fixed 2026-08-03).
 export const DEPOSIT_TIMEOUT_MS = 20000;
 export const DEPOSIT_ADDRESS_TIMEOUT_MS = 20000;
-// Payer NFC: how long to wait for the merchant's receipt before falling back to a truthful
-// "couldn't confirm" (never a false success or a false failure). Must exceed the merchant's worst
-// case (pay timeout + reconciliation) so a slow-but-successful settle still delivers its receipt.
-export const RECEIPT_WAIT_MS = 20000;
+// SOL payer NFC: maximum wait for the merchant's broadcast receipt.
+export const SOL_RECEIPT_WAIT_MS = 20000;
 export const STORAGE_KEY = 'dpay.identity.v1';
 // The user-chosen relay URL persists across reloads (AsyncStorage, like identity + the currency
 // catalog) so changing networks in Settings survives an app restart. Default is `relayConfig`'s

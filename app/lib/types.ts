@@ -3,17 +3,13 @@
 export type DpayNfcApi = {
   armCard(): Promise<void>;
   disarmCard(): Promise<void>;
-  // The signed IC envelope bytes (hex) the payer's card serves to the merchant reader. Param name
-  // is cosmetic TS-side only — the Kotlin bridge method takes it positionally.
-  approveCard(envelopeHex: string): Promise<void>;
-  declineCard(): Promise<void>;
+  // The payer serves these two signed envelopes as one core-framed DPN2 bundle.
+  approveCard(envelopeHex: string, readStateEnvelopeHex: string, nonceHex: string): Promise<void>;
+  declineCard(nonceHex: string): Promise<void>;
   buildRequest(toHex: string, amount: string, nonceHex: string, expiry: number, currency: number, toName: string, memo: string): Promise<string>;
   startReader(requestHex: string): Promise<void>;
   stopReader(): Promise<void>;
-  // Merchant: after settling online, hand the outcome back to the payer. `status` is the receipt
-  // code (0 settled, 1 rejected, 2 unreachable); `nonceHex` is the authoritative payment nonce so
-  // the payer can confirm the receipt answers the exact payment it signed.
-  confirmReceipt(status: number, nonceHex: string): Promise<void>;
+  confirmResult(status: number, nonceHex: string, requestIdHex: string, merchantSecretHex: string): Promise<void>;
   addListener(eventName: string): void;
   removeListeners(count: number): void;
 };
@@ -21,11 +17,9 @@ export type DpayNfcApi = {
 export type NfcEvent =
   | {type: 'phase'; role: 'card' | 'reader'; phase: NfcPhaseName}
   | {type: 'request'; role: 'card'; toHex: string; amount: string; nonceHex: string; expiry: number; currency: number}
-  // NOTE: the runtime payload key stays 'wireHex' — Kotlin DpayNfc.kt puts that exact key in the
-  // event map and the e2e web shim emits it; only the semantic content changed (it now carries the
-  // signed IC envelope hex, not the retired facade wire). Do not rename the KEY.
-  | {type: 'done'; role: 'reader'; wireHex: string}
-  | {type: 'receipt'; role: 'card'; settled: boolean; status: number; nonceHex: string}
+  | {type: 'done'; role: 'reader'; envelopeHex: string; readStateEnvelopeHex: string; requestIdHex: string}
+  | {type: 'done'; role: 'card'}
+  | {type: 'result'; role: 'card'; status: number; nonceHex: string; requestIdHex: string}
   | {type: 'confirmed'; role: 'reader'}
   | {type: 'error'; role: 'card' | 'reader'; reason: string};
 

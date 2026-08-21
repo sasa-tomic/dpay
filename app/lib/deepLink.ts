@@ -7,8 +7,8 @@ import {bytesToBase64Url, base64UrlToBytes, utf8ToBytes, bytesToUtf8} from './ba
 // review screen (the payer still taps Approve — a deeplink NEVER auto-signs/auto-approves). The
 // symmetric `dpay:pay/<blob>` carries the rail proof for the NFC-less hand-back: when NFC is
 // unavailable the payer (online) settles directly on the IC ledger + shares the rail proof back
-// to the merchant, whose request screen format-checks it and confirms ON-CHAIN via read_state
-// before reconciling as Paid (never trusts the blob alone — see parseRailProof).
+// to the merchant, whose request screen format-checks it and confirms the exact open request in
+// durable ledger history before reconciling as Paid (never trusts the blob alone).
 //
 // The two kinds carry DIFFERENT blob payloads:
 //   • `req` — the blob is the EXACT raw base64url the request QR carries (the 132-byte wire request,
@@ -17,8 +17,8 @@ import {bytesToBase64Url, base64UrlToBytes, utf8ToBytes, bytesToUtf8} from './ba
 //   • `pay` — the blob is base64url(JSON.stringify(proof)), i.e. base64url of the UTF-8 JSON of the
 //     rail proof `{ledger, block_index, request_id}`. `decodeReceiptDeeplink` base64url-decodes THEN
 //     JSON.parses. (The proof is JSON, not a fixed-width binary wire — so a JSON codec is the natural
-//     shape; the merchant binds the proof's request_id to the open request and the read_state poll
-//     confirms settlement on the ledger before anything is marked Paid.)
+//     shape; the proof is only a trigger — recipient/currency/amount/memo must match ledger history
+//     before anything is marked Paid.)
 //
 // Slash-not-query (`/` not `?`) keeps the blob opaque to URL-parsing libs so they don't mangle
 // `+`/`%`. The codec is PURE (no React/native deps beyond the file's existing Platform import) so
