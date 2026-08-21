@@ -3,252 +3,288 @@
 use super::apdu::{CommandApdu, ResponseApdu, Sw};
 use super::frame::{self, Reassembler};
 use super::{
-    build_select, CardPhase, CLA_PROP, INS_GET_WIRE, INS_PUT_RECEIPT, INS_PUT_REQUEST, NfcError,
-    PROTO_VERSION, SessionPhase,
+    build_select, CardPhase, NfcError, NfcResult, SessionPhase, CLA_PROP, INS_GET_WIRE,
+    INS_PUT_REQUEST, INS_PUT_RESULT, PROTO_VERSION,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum ReaderState {
-    /// Need to (re)send SELECT.
     NeedSelect,
-    /// Pushing request frames; `push_idx` is the next to send.
-    Pushing,
-    /// Pulling wire frames.
-    Pulling,
-    /// The wire is in hand; the merchant settles online, then calls `provide_receipt`.
-    Done,
-    /// Pushing the settlement receipt back to the payer.
-    PushingReceipt,
-    /// The receipt was delivered — the payer has been told the outcome.
+    PushingRequest,
+    PullingWire,
+    AwaitingResult,
+    NeedAwaitingResultSelect,
+    NeedResultSelect,
+    PushingResult,
     Confirmed,
-    /// The payer declined.
     Declined,
 }
 
-/// What the reader should do after a response is fed in.
+/// What the merchant should do after a response.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum ReaderStep {
-    /// Send the next command from [`ReaderConductor::next_command`].
     Continue,
-    /// The card is holding the request but the payer hasn't decided yet. The caller should keep
-    /// polling (a held field) or wait and re-tap; `next_command` re-SELECTs so a re-tap resumes.
     Pending,
-    /// The full signed wire — verify it and submit to the relay/canister. The merchant then settles
-    /// online and calls [`ReaderConductor::provide_receipt`] to hand the outcome back to the payer.
+    /// The full DPN2 bundle. Submit its update and poll with its read_state envelope.
     Done(Vec<u8>),
-    /// The settlement receipt was delivered to the payer — the tap is fully complete.
+    /// A re-tapped card already received its bundle and is waiting only for the result.
+    AwaitingResult,
+    /// The signed result reached the payer and was verified there.
     Confirmed,
-    /// The payer declined; abandon the sale.
     Declined,
-    /// The card answered NOT_READY at SELECT: a dpay card is routed but no payer session is armed
-    /// (the payer isn't in Pay mode yet). Not a protocol violation — the caller should keep
-    /// polling (a held field) or surface an actionable message; `next_command` re-SELECTs.
     WaitingForPayer,
 }
 
-/// The merchant-side (NFC reader) half. Owns the request to push and reassembles the returned wire.
-/// The platform loop is: `while let Some(cmd) = c.next_command() { step = c.handle_response(transceive(cmd))?; ... }`.
+/// Merchant-side conductor: request in, DPN2 bundle out, signed result back in.
 #[derive(Clone, Debug)]
 pub struct ReaderConductor {
     state: ReaderState,
-    req_frames: Vec<Vec<u8>>,
-    push_idx: usize,
-    reasm: Reassembler,
     max_chunk: usize,
-    receipt_frames: Vec<Vec<u8>>,
-    receipt_idx: usize,
+    request_frames: Vec<Vec<u8>>,
+    request_idx: usize,
+    wire_reasm: Reassembler,
+    result_frames: Vec<Vec<u8>>,
+    result_idx: usize,
 }
 
 impl ReaderConductor {
-    /// Prepare to push `request` (the merchant's [`PaymentRequest`](crate::PaymentRequest) bytes) and
-    /// pull the payer's wire, fragmenting outgoing/incoming payloads at `max_chunk`. Errors if the
-    /// request can't be framed.
     pub fn new(request: &[u8], max_chunk: usize) -> Result<Self, NfcError> {
-        let req_frames = frame::fragment(request, max_chunk)?;
         Ok(ReaderConductor {
             state: ReaderState::NeedSelect,
-            req_frames,
-            push_idx: 0,
-            reasm: Reassembler::new(),
             max_chunk: max_chunk.max(1),
-            receipt_frames: Vec::new(),
-            receipt_idx: 0,
+            request_frames: frame::fragment(request, max_chunk)?,
+            request_idx: 0,
+            wire_reasm: Reassembler::new(),
+            result_frames: Vec::new(),
+            result_idx: 0,
         })
     }
 
-    /// Lifecycle phase for the merchant-side UI status indicator. Note the reader cannot itself see
-    /// `AwaitingApproval` as a *state* (after a NOT_READY it re-selects); the app derives that from
-    /// a [`ReaderStep::Pending`] return instead. The other phases map directly.
     pub fn phase(&self) -> SessionPhase {
         match self.state {
-            ReaderState::NeedSelect => SessionPhase::Linking,
-            ReaderState::Pushing | ReaderState::Pulling => SessionPhase::Exchanging,
-            ReaderState::Done | ReaderState::PushingReceipt => SessionPhase::Settling,
+            ReaderState::NeedSelect
+            | ReaderState::NeedAwaitingResultSelect
+            | ReaderState::NeedResultSelect => SessionPhase::Linking,
+            ReaderState::PushingRequest | ReaderState::PullingWire | ReaderState::PushingResult => {
+                SessionPhase::Exchanging
+            }
+            ReaderState::AwaitingResult => SessionPhase::Settling,
             ReaderState::Confirmed => SessionPhase::Complete,
             ReaderState::Declined => SessionPhase::Declined,
         }
     }
 
-    /// After a [`ReaderStep::Done`], the merchant settles online and then calls this with the
-    /// settlement `receipt` bytes ([`crate::Receipt::to_bytes`]) to hand the outcome back to the
-    /// payer over the same tap. Resume the transceive loop afterwards. Valid only in the `Done`
-    /// state; errors if the receipt can't be framed.
-    pub fn provide_receipt(&mut self, receipt: &[u8]) -> Result<(), NfcError> {
-        if self.state != ReaderState::Done {
-            return Err(NfcError::WrongState);
-        }
-        self.receipt_frames = frame::fragment(receipt, self.max_chunk)?;
-        self.receipt_idx = 0;
-        self.state = ReaderState::PushingReceipt;
-        Ok(())
-    }
-
-    /// The next command APDU to transceive, or `None` when the caller must act: at `Done` (settle
-    /// online, then [`provide_receipt`](Self::provide_receipt)) or when the exchange is terminal
-    /// (`Confirmed`/`Declined`).
     pub fn next_command(&self) -> Option<Vec<u8>> {
         match self.state {
-            ReaderState::NeedSelect => Some(build_select()),
-            ReaderState::Pushing => Some(
-                CommandApdu::with_data(
-                    CLA_PROP,
-                    INS_PUT_REQUEST,
-                    0,
-                    0,
-                    self.req_frames[self.push_idx].clone(),
-                    None,
-                )
-                .encode(),
-            ),
-            ReaderState::Pulling => {
+            ReaderState::NeedSelect
+            | ReaderState::NeedAwaitingResultSelect
+            | ReaderState::NeedResultSelect => Some(build_select()),
+            ReaderState::PushingRequest => self.request_frames.get(self.request_idx).map(|frame| {
+                CommandApdu::with_data(CLA_PROP, INS_PUT_REQUEST, 0, 0, frame.clone(), None)
+                    .encode()
+            }),
+            ReaderState::PullingWire => {
                 Some(CommandApdu::expecting(CLA_PROP, INS_GET_WIRE, 0, 0, 256).encode())
             }
-            ReaderState::PushingReceipt => Some(
-                CommandApdu::with_data(
-                    CLA_PROP,
-                    INS_PUT_RECEIPT,
-                    0,
-                    0,
-                    self.receipt_frames[self.receipt_idx].clone(),
-                    None,
-                )
-                .encode(),
-            ),
-            ReaderState::Done | ReaderState::Confirmed | ReaderState::Declined => None,
+            ReaderState::PushingResult => self.result_frames.get(self.result_idx).map(|frame| {
+                CommandApdu::with_data(CLA_PROP, INS_PUT_RESULT, 0, 0, frame.clone(), None).encode()
+            }),
+            ReaderState::AwaitingResult | ReaderState::Confirmed | ReaderState::Declined => None,
         }
     }
 
-    /// Feed the response to the command `next_command` returned. Advances the state machine and
-    /// says what to do next. Errors on a malformed response or a status word invalid for this step.
     pub fn handle_response(&mut self, response: &[u8]) -> Result<ReaderStep, NfcError> {
-        let resp = ResponseApdu::parse(response)?;
+        let response = ResponseApdu::parse(response)?;
         match self.state {
-            ReaderState::NeedSelect => self.after_select(&resp),
-            ReaderState::Pushing => self.after_push(&resp),
-            ReaderState::Pulling => self.after_pull(&resp),
-            ReaderState::PushingReceipt => self.after_receipt_push(&resp),
-            // Terminal, or waiting for the app to settle + provide_receipt: no response expected.
-            ReaderState::Done | ReaderState::Confirmed | ReaderState::Declined => {
+            ReaderState::NeedSelect => self.after_initial_select(&response),
+            ReaderState::PushingRequest => self.after_request_frame(&response),
+            ReaderState::PullingWire => self.after_wire_frame(&response),
+            ReaderState::NeedAwaitingResultSelect => {
+                self.after_awaiting_result_select(&response)
+            }
+            ReaderState::NeedResultSelect => self.after_result_select(&response),
+            ReaderState::PushingResult => self.after_result_frame(&response),
+            ReaderState::AwaitingResult | ReaderState::Confirmed | ReaderState::Declined => {
                 Err(NfcError::WrongState)
             }
         }
     }
 
-    fn after_receipt_push(&mut self, resp: &ResponseApdu) -> Result<ReaderStep, NfcError> {
-        if !resp.sw.is_ok() {
-            return Err(NfcError::UnexpectedStatus(resp.sw.0));
+    /// Tell the conductor that the RF link was lost and the next command will run on a fresh link.
+    ///
+    /// Every non-terminal exchange restarts with SELECT. Request/result frames are retained but
+    /// restart at frame zero, and a partial bundle reassembly is discarded because SELECT also
+    /// makes the card restart bundle serving at frame zero. A completed bundle remains available to
+    /// the caller while an outstanding merchant result is preserved. Terminal states stay terminal.
+    pub fn reset_link(&mut self) {
+        match self.state {
+            ReaderState::NeedSelect
+            | ReaderState::PushingRequest
+            | ReaderState::PullingWire => {
+                self.request_idx = 0;
+                self.wire_reasm = Reassembler::new();
+                self.state = ReaderState::NeedSelect;
+            }
+            ReaderState::AwaitingResult | ReaderState::NeedAwaitingResultSelect => {
+                self.state = ReaderState::NeedAwaitingResultSelect;
+            }
+            ReaderState::NeedResultSelect | ReaderState::PushingResult => {
+                self.result_idx = 0;
+                self.state = ReaderState::NeedResultSelect;
+            }
+            ReaderState::Confirmed | ReaderState::Declined => {}
         }
-        self.receipt_idx += 1;
-        if self.receipt_idx == self.receipt_frames.len() {
+    }
+
+    /// Supply the merchant-signed fixed result after `Done`, or after a fresh conductor discovers an
+    /// `AwaitingResult` card. Structural validation happens here; the card verifies signature and
+    /// request binding.
+    pub fn provide_result(&mut self, result: &[u8]) -> Result<(), NfcError> {
+        if !matches!(
+            self.state,
+            ReaderState::AwaitingResult | ReaderState::NeedAwaitingResultSelect
+        ) {
+            return Err(NfcError::WrongState);
+        }
+        NfcResult::from_bytes(result)?;
+        self.result_frames = frame::fragment(result, self.max_chunk)?;
+        self.result_idx = 0;
+        self.state = ReaderState::NeedResultSelect;
+        Ok(())
+    }
+
+    fn status_before_select(response: &ResponseApdu) -> Result<Option<ReaderStep>, NfcError> {
+        if response.sw == Sw::NOT_FOUND {
+            return Err(NfcError::NotDpay);
+        }
+        if response.sw == Sw::DECLINED {
+            return Ok(Some(ReaderStep::Declined));
+        }
+        if response.sw == Sw::NOT_READY {
+            return Ok(Some(ReaderStep::WaitingForPayer));
+        }
+        if !response.sw.is_ok() {
+            return Err(NfcError::UnexpectedStatus(response.sw.0));
+        }
+        Ok(None)
+    }
+
+    fn selected_phase(response: &ResponseApdu) -> Result<CardPhase, NfcError> {
+        if response.data.len() < 2 {
+            return Err(NfcError::ShortGreeting);
+        }
+        if response.data[0] != PROTO_VERSION {
+            return Err(NfcError::UnsupportedVersion(response.data[0]));
+        }
+        CardPhase::from_byte(response.data[1]).ok_or(NfcError::NotDpay)
+    }
+
+    fn after_initial_select(&mut self, response: &ResponseApdu) -> Result<ReaderStep, NfcError> {
+        if let Some(step) = Self::status_before_select(response)? {
+            if step == ReaderStep::Declined {
+                self.state = ReaderState::Declined;
+            }
+            return Ok(step);
+        }
+        match Self::selected_phase(response)? {
+            CardPhase::Collecting => {
+                self.request_idx = 0;
+                self.wire_reasm = Reassembler::new();
+                self.state = ReaderState::PushingRequest;
+            }
+            CardPhase::HasRequest | CardPhase::Serving => {
+                self.wire_reasm = Reassembler::new();
+                self.state = ReaderState::PullingWire;
+            }
+            CardPhase::AwaitingResult => {
+                self.state = ReaderState::AwaitingResult;
+                return Ok(ReaderStep::AwaitingResult);
+            }
+        }
+        Ok(ReaderStep::Continue)
+    }
+
+    fn after_result_select(&mut self, response: &ResponseApdu) -> Result<ReaderStep, NfcError> {
+        if let Some(step) = Self::status_before_select(response)? {
+            if step == ReaderStep::Declined {
+                self.state = ReaderState::Declined;
+            }
+            return Ok(step);
+        }
+        if Self::selected_phase(response)? != CardPhase::AwaitingResult {
+            return Err(NfcError::WrongState);
+        }
+        self.result_idx = 0;
+        self.state = ReaderState::PushingResult;
+        Ok(ReaderStep::Continue)
+    }
+
+    fn after_awaiting_result_select(
+        &mut self,
+        response: &ResponseApdu,
+    ) -> Result<ReaderStep, NfcError> {
+        if let Some(step) = Self::status_before_select(response)? {
+            if step == ReaderStep::Declined {
+                self.state = ReaderState::Declined;
+            }
+            return Ok(step);
+        }
+        if Self::selected_phase(response)? != CardPhase::AwaitingResult {
+            return Err(NfcError::WrongState);
+        }
+        self.state = ReaderState::AwaitingResult;
+        Ok(ReaderStep::AwaitingResult)
+    }
+
+    fn after_request_frame(&mut self, response: &ResponseApdu) -> Result<ReaderStep, NfcError> {
+        if !response.sw.is_ok() {
+            self.state = ReaderState::NeedSelect;
+            return Err(NfcError::UnexpectedStatus(response.sw.0));
+        }
+        self.request_idx += 1;
+        if self.request_idx == self.request_frames.len() {
+            self.state = ReaderState::PullingWire;
+        }
+        Ok(ReaderStep::Continue)
+    }
+
+    fn after_wire_frame(&mut self, response: &ResponseApdu) -> Result<ReaderStep, NfcError> {
+        if response.sw == Sw::NOT_READY {
+            self.state = ReaderState::NeedSelect;
+            return Ok(ReaderStep::Pending);
+        }
+        if response.sw == Sw::DECLINED {
+            self.state = ReaderState::Declined;
+            return Ok(ReaderStep::Declined);
+        }
+        let last_expected = response.sw.is_ok();
+        if !last_expected && !response.sw.is_more() {
+            return Err(NfcError::UnexpectedStatus(response.sw.0));
+        }
+        let frame = frame::Frame::parse(&response.data)?;
+        if frame.last != last_expected {
+            return Err(NfcError::UnexpectedStatus(response.sw.0));
+        }
+        match self.wire_reasm.accept(&frame)? {
+            Some(wire) => {
+                self.state = ReaderState::AwaitingResult;
+                Ok(ReaderStep::Done(wire))
+            }
+            None => Ok(ReaderStep::Continue),
+        }
+    }
+
+    fn after_result_frame(&mut self, response: &ResponseApdu) -> Result<ReaderStep, NfcError> {
+        if !response.sw.is_ok() {
+            self.state = ReaderState::NeedResultSelect;
+            return Err(NfcError::UnexpectedStatus(response.sw.0));
+        }
+        self.result_idx += 1;
+        if self.result_idx == self.result_frames.len() {
             self.state = ReaderState::Confirmed;
             Ok(ReaderStep::Confirmed)
         } else {
             Ok(ReaderStep::Continue)
-        }
-    }
-
-    fn after_select(&mut self, resp: &ResponseApdu) -> Result<ReaderStep, NfcError> {
-        if resp.sw == Sw::NOT_FOUND {
-            return Err(NfcError::NotDpay);
-        }
-        // A sticky decline can surface on (re-)SELECT if the payer rejected during the poll window.
-        if resp.sw == Sw::DECLINED {
-            self.state = ReaderState::Declined;
-            return Ok(ReaderStep::Declined);
-        }
-        // A routed-but-unarmed dpay card: its platform HCE layer answers NOT_READY at SELECT when
-        // no payer session is armed (the payer isn't in Pay mode). That's a defined "back off"
-        // signal from our own card app, not a protocol violation — stay in NeedSelect so the
-        // caller can keep polling via `next_command` (which re-SELECTs) or tell the user.
-        if resp.sw == Sw::NOT_READY {
-            return Ok(ReaderStep::WaitingForPayer);
-        }
-        if !resp.sw.is_ok() {
-            return Err(NfcError::UnexpectedStatus(resp.sw.0));
-        }
-        if resp.data.len() < 2 {
-            return Err(NfcError::ShortGreeting);
-        }
-        let version = resp.data[0];
-        if version != PROTO_VERSION {
-            return Err(NfcError::UnsupportedVersion(version));
-        }
-        let phase = CardPhase::from_byte(resp.data[1]).ok_or(NfcError::NotDpay)?;
-        match phase {
-            // The card has no request — push ours from the start (re-fragment idempotently).
-            CardPhase::Collecting => {
-                self.push_idx = 0;
-                self.reasm = Reassembler::new();
-                self.state = ReaderState::Pushing;
-            }
-            // The card already holds our request (re-tap after a push) — skip straight to pulling.
-            CardPhase::HasRequest | CardPhase::Serving => {
-                self.reasm = Reassembler::new();
-                self.state = ReaderState::Pulling;
-            }
-        }
-        Ok(ReaderStep::Continue)
-    }
-
-    fn after_push(&mut self, resp: &ResponseApdu) -> Result<ReaderStep, NfcError> {
-        if !resp.sw.is_ok() {
-            // The card rejected a frame (e.g. BAD_DATA). Restart cleanly with a fresh SELECT.
-            self.state = ReaderState::NeedSelect;
-            return Err(NfcError::UnexpectedStatus(resp.sw.0));
-        }
-        self.push_idx += 1;
-        if self.push_idx == self.req_frames.len() {
-            self.state = ReaderState::Pulling;
-        }
-        Ok(ReaderStep::Continue)
-    }
-
-    fn after_pull(&mut self, resp: &ResponseApdu) -> Result<ReaderStep, NfcError> {
-        if resp.sw == Sw::NOT_READY {
-            // Card holds the request but the payer hasn't decided. Re-SELECT on the next command so
-            // a physical re-tap resumes exactly where we left off.
-            self.state = ReaderState::NeedSelect;
-            return Ok(ReaderStep::Pending);
-        }
-        if resp.sw == Sw::DECLINED {
-            self.state = ReaderState::Declined;
-            return Ok(ReaderStep::Declined);
-        }
-        let last_expected = resp.sw.is_ok();
-        if !last_expected && !resp.sw.is_more() {
-            return Err(NfcError::UnexpectedStatus(resp.sw.0));
-        }
-        let frame = frame::Frame::parse(&resp.data)?;
-        // The status word and the frame's LAST flag must agree: OK ⇔ last, 61xx ⇔ more.
-        if frame.last != last_expected {
-            return Err(NfcError::UnexpectedStatus(resp.sw.0));
-        }
-        match self.reasm.accept(&frame)? {
-            Some(wire) => {
-                self.state = ReaderState::Done;
-                Ok(ReaderStep::Done(wire))
-            }
-            None => Ok(ReaderStep::Continue),
         }
     }
 }

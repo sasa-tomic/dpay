@@ -39,17 +39,19 @@
 //! so the OS never routes a POS tap to dpay nor a dpay tap to Wallet. Routing is by AID, and this one
 //! is dpay's alone.
 
-use crate::{PaymentRequest, Receipt, SignedAuthorization, RECEIPT_LEN, REQUEST_LEN, WIRE_LEN};
+use crate::{PaymentRequest, SignedAuthorization, REQUEST_LEN, WIRE_LEN};
 use apdu::CommandApdu;
 use frame::FrameError;
 
 pub mod apdu;
 pub mod card;
 pub mod frame;
+pub mod message;
 pub mod reader;
 
 // Re-export the public session/conductor types so the flat `dpay_core::nfc::Foo` paths are stable.
 pub use card::CardSession;
+pub use message::{NfcBundle, NfcResult, NfcResultStatus, NFC_RESULT_LEN};
 pub use reader::{ReaderConductor, ReaderStep};
 
 // ===========================================================================
@@ -63,7 +65,7 @@ pub use reader::{ReaderConductor, ReaderStep};
 pub const AID: [u8; 6] = [0xF0, 0x64, 0x70, 0x61, 0x79, 0x01];
 
 /// Protocol version echoed in the SELECT greeting, so the reader can refuse an incompatible card.
-pub const PROTO_VERSION: u8 = 1;
+pub const PROTO_VERSION: u8 = 2;
 
 /// Default max dpay-payload bytes per frame (excludes the 4-byte frame header and APDU overhead).
 /// Chosen conservatively so a frame + header + APDU framing stays under Android's smallest realistic
@@ -82,14 +84,13 @@ pub const MAX_FRAMES: usize = 256;
 // Protocol layer (dpay HCE ↔ reader)
 // ===========================================================================
 
-// Instruction bytes. SELECT is the standard ISO instruction (CLA 0x00); the two dpay-specific
-// commands use the proprietary class 0x80.
+// SELECT is the standard ISO instruction (CLA 0x00); dpay's request/wire commands use 0x80.
 const CLA_ISO: u8 = 0x00;
 const CLA_PROP: u8 = 0x80;
 const INS_SELECT: u8 = 0xA4;
 const INS_PUT_REQUEST: u8 = 0xC2; // reader → card: one request frame
 const INS_GET_WIRE: u8 = 0xC4; // reader → card: pull one wire frame
-const INS_PUT_RECEIPT: u8 = 0xC6; // reader → card: the settlement outcome (after the merchant settles)
+const INS_PUT_RESULT: u8 = 0xC6; // reader → card: one signed-result frame
 
 // SELECT-by-name parameters (P1=0x04 "select by DF name", P2=0x00 "first or only occurrence").
 const P1_SELECT_BY_NAME: u8 = 0x04;
@@ -105,6 +106,8 @@ pub enum CardPhase {
     HasRequest = 1,
     /// A signed wire is ready — the reader should pull it.
     Serving = 2,
+    /// The wire was delivered; only the merchant result may be pushed now.
+    AwaitingResult = 3,
 }
 
 impl CardPhase {
@@ -116,6 +119,7 @@ impl CardPhase {
             0 => Some(CardPhase::Collecting),
             1 => Some(CardPhase::HasRequest),
             2 => Some(CardPhase::Serving),
+            3 => Some(CardPhase::AwaitingResult),
             _ => None,
         }
     }
@@ -139,6 +143,8 @@ pub enum NfcError {
     UnexpectedStatus(u16),
     /// The card's greeting was too short to contain `[version, phase]`.
     ShortGreeting,
+    /// An NFC v2 bundle or signed result was malformed, unbound, or unauthentic.
+    BadMessage,
 }
 
 impl From<apdu::ApduError> for NfcError {
@@ -171,10 +177,9 @@ pub enum SessionPhase {
     Exchanging,
     /// The payer is holding the request, deciding whether to approve.
     AwaitingApproval,
-    /// The signed wire was transferred; the merchant is settling online and the payer awaits the
-    /// receipt (both sides are here between the wire leaving and the outcome coming back).
+    /// The signed wire was transferred. NFC is over; settlement continues independently online.
     Settling,
-    /// The exchange finished — the payer has the merchant's receipt (settled or not).
+    /// The merchant's signed result was delivered and verified.
     Complete,
     /// The payer declined.
     Declined,
@@ -182,8 +187,15 @@ pub enum SessionPhase {
 
 /// Build the SELECT-by-AID command the reader sends first.
 pub fn build_select() -> Vec<u8> {
-    CommandApdu::with_data(CLA_ISO, INS_SELECT, P1_SELECT_BY_NAME, P2_FIRST, AID.to_vec(), Some(256))
-        .encode()
+    CommandApdu::with_data(
+        CLA_ISO,
+        INS_SELECT,
+        P1_SELECT_BY_NAME,
+        P2_FIRST,
+        AID.to_vec(),
+        Some(256),
+    )
+    .encode()
 }
 
 // ---------------------------------------------------------------------------
@@ -208,15 +220,6 @@ pub fn request_from_transport(bytes: &[u8]) -> Result<PaymentRequest, NfcError> 
     PaymentRequest::from_bytes(bytes).map_err(|_| NfcError::Frame(FrameError::ShortPayload))
 }
 
-/// Decode the settlement receipt bytes the payer's card received back into a [`Receipt`], with a
-/// length guard, so the (offline) payer can show the outcome and match the nonce.
-pub fn receipt_from_transport(bytes: &[u8]) -> Result<Receipt, NfcError> {
-    if bytes.len() != RECEIPT_LEN {
-        return Err(NfcError::Frame(FrameError::ShortPayload));
-    }
-    Receipt::from_bytes(bytes).map_err(|_| NfcError::Frame(FrameError::ShortPayload))
-}
-
 // ===========================================================================
 // Tests — all headless, offline, deterministic. Run via `just test-core`
 // (`cargo nextest run -p dpay-core --features rng`). The `rng`-gated tests build a real
@@ -227,7 +230,6 @@ mod tests {
     use super::apdu::{ApduError, CommandApdu, ResponseApdu, Sw};
     use super::frame::{self, Frame, FrameError, Reassembler, FLAG_LAST};
     use super::*;
-    use crate::{RECEIPT_REJECTED, RECEIPT_SETTLED, RECEIPT_UNREACHABLE};
     use proptest::prelude::*;
 
     // ---- APDU layer -------------------------------------------------------
@@ -252,11 +254,20 @@ mod tests {
 
     #[test]
     fn apdu_parse_rejects_malformed() {
-        assert_eq!(CommandApdu::parse(&[0x00, 0xA4, 0x04]), Err(ApduError::Short));
+        assert_eq!(
+            CommandApdu::parse(&[0x00, 0xA4, 0x04]),
+            Err(ApduError::Short)
+        );
         // Lc says 5 data bytes but only 2 present.
-        assert_eq!(CommandApdu::parse(&[0x80, 0xC2, 0, 0, 5, 1, 2]), Err(ApduError::BadLc));
+        assert_eq!(
+            CommandApdu::parse(&[0x80, 0xC2, 0, 0, 5, 1, 2]),
+            Err(ApduError::BadLc)
+        );
         // Lc == 0 with a trailing body is the extended-length marker: refused, not mis-parsed.
-        assert_eq!(CommandApdu::parse(&[0x80, 0xC2, 0, 0, 0, 1, 2, 3]), Err(ApduError::Unsupported));
+        assert_eq!(
+            CommandApdu::parse(&[0x80, 0xC2, 0, 0, 0, 1, 2, 3]),
+            Err(ApduError::Unsupported)
+        );
         // Response trailer must be at least the 2 status bytes.
         assert_eq!(ResponseApdu::parse(&[0x90]), Err(ApduError::Short));
     }
@@ -320,7 +331,10 @@ mod tests {
     #[test]
     fn frame_parse_guards() {
         assert_eq!(Frame::parse(&[0, 0, 0]), Err(FrameError::Short)); // header truncated
-        assert_eq!(Frame::parse(&[0, FLAG_LAST, 0, 5]), Err(FrameError::EmptyChunk)); // no chunk
+        assert_eq!(
+            Frame::parse(&[0, FLAG_LAST, 0, 5]),
+            Err(FrameError::EmptyChunk)
+        ); // no chunk
     }
 
     /// Parse `frame::encode(..)` bytes into a `Frame`, keeping the backing bytes alive in the caller.
@@ -334,35 +348,59 @@ mod tests {
         let (a, b) = (enc(0, false, 4, &[1, 2]), enc(2, true, 4, &[3, 4]));
         let mut r = Reassembler::new();
         r.accept(&Frame::parse(&a).unwrap()).unwrap();
-        assert_eq!(r.accept(&Frame::parse(&b).unwrap()), Err(FrameError::BadSequence));
+        assert_eq!(
+            r.accept(&Frame::parse(&b).unwrap()),
+            Err(FrameError::BadSequence)
+        );
 
         // Inconsistent total across frames.
         let (a, b) = (enc(0, false, 4, &[1, 2]), enc(1, true, 9, &[3, 4]));
         let mut r = Reassembler::new();
         r.accept(&Frame::parse(&a).unwrap()).unwrap();
-        assert_eq!(r.accept(&Frame::parse(&b).unwrap()), Err(FrameError::InconsistentTotal));
+        assert_eq!(
+            r.accept(&Frame::parse(&b).unwrap()),
+            Err(FrameError::InconsistentTotal)
+        );
 
         // Overflow: more bytes than declared.
         let a = enc(0, true, 2, &[1, 2, 3]);
-        assert_eq!(Reassembler::new().accept(&Frame::parse(&a).unwrap()), Err(FrameError::Overflow));
+        assert_eq!(
+            Reassembler::new().accept(&Frame::parse(&a).unwrap()),
+            Err(FrameError::Overflow)
+        );
 
         // LAST flag but short of the declared total.
         let a = enc(0, true, 8, &[1, 2]);
-        assert_eq!(Reassembler::new().accept(&Frame::parse(&a).unwrap()), Err(FrameError::ShortPayload));
+        assert_eq!(
+            Reassembler::new().accept(&Frame::parse(&a).unwrap()),
+            Err(FrameError::ShortPayload)
+        );
 
         // All bytes arrived but the final frame wasn't flagged LAST.
         let a = enc(0, false, 2, &[1, 2]);
-        assert_eq!(Reassembler::new().accept(&Frame::parse(&a).unwrap()), Err(FrameError::MissingLast));
+        assert_eq!(
+            Reassembler::new().accept(&Frame::parse(&a).unwrap()),
+            Err(FrameError::MissingLast)
+        );
 
         // total_len == 0 (declared empty) is rejected up front as Empty.
         let a = enc(0, true, 0, &[1]);
-        assert_eq!(Reassembler::new().accept(&Frame::parse(&a).unwrap()), Err(FrameError::Empty));
+        assert_eq!(
+            Reassembler::new().accept(&Frame::parse(&a).unwrap()),
+            Err(FrameError::Empty)
+        );
 
         // A frame after completion.
         let (a, b) = (enc(0, true, 2, &[1, 2]), enc(1, true, 2, &[3, 4]));
         let mut r = Reassembler::new();
-        assert_eq!(r.accept(&Frame::parse(&a).unwrap()).unwrap(), Some(vec![1, 2]));
-        assert_eq!(r.accept(&Frame::parse(&b).unwrap()), Err(FrameError::AlreadyComplete));
+        assert_eq!(
+            r.accept(&Frame::parse(&a).unwrap()).unwrap(),
+            Some(vec![1, 2])
+        );
+        assert_eq!(
+            r.accept(&Frame::parse(&b).unwrap()),
+            Err(FrameError::AlreadyComplete)
+        );
     }
 
     // fragment() → Reassembler is a lossless roundtrip for any non-empty payload / chunk size.
@@ -391,7 +429,6 @@ mod tests {
         step: ReaderStep,
         card_request: Option<Vec<u8>>,
         pending_seen: usize,
-        waiting_seen: usize,
     }
 
     /// Runs the whole exchange in memory: the reader's command → the card → the card's response →
@@ -408,7 +445,6 @@ mod tests {
         let mut card = CardSession::new(max_chunk);
         let mut reader = ReaderConductor::new(request, max_chunk)?;
         let mut pending_seen = 0usize;
-        let mut waiting_seen = 0usize;
         let mut card_request = None;
         let mut decided = false;
 
@@ -430,63 +466,58 @@ mod tests {
             match reader.handle_response(&resp)? {
                 ReaderStep::Continue => {}
                 ReaderStep::Pending => pending_seen += 1,
-                ReaderStep::WaitingForPayer => waiting_seen += 1,
-                step @ (ReaderStep::Done(_) | ReaderStep::Declined | ReaderStep::Confirmed) => {
-                    return Ok(Driven { step, card_request, pending_seen, waiting_seen });
+                ReaderStep::WaitingForPayer => {}
+                step @ (ReaderStep::Done(_) | ReaderStep::Declined) => {
+                    return Ok(Driven {
+                        step,
+                        card_request,
+                        pending_seen,
+                    });
+                }
+                ReaderStep::AwaitingResult | ReaderStep::Confirmed => {
+                    return Err(NfcError::WrongState);
                 }
             }
         }
         Err(NfcError::WrongState) // exceeded the loop bound → would-be hang, surfaced as a failure
     }
 
-    /// The full tap including the receipt-return: run to `Done`, hand the reader a receipt (as the
-    /// merchant would after settling online), then pump the loop until the payer's card is
-    /// `Confirmed`. Returns the wire the merchant reassembled and the receipt the card received.
-    fn drive_full(request: &[u8], wire: &[u8], receipt: &[u8], max_chunk: usize) -> (Vec<u8>, Vec<u8>) {
-        let mut card = CardSession::new(max_chunk);
-        let mut reader = ReaderConductor::new(request, max_chunk).unwrap();
-        let mut approved = false;
-        let mut delivered: Option<Vec<u8>> = None;
-        let mut receipted = false;
-
-        for _ in 0..(MAX_FRAMES * 16 + 256) {
-            let Some(cmd) = reader.next_command() else {
-                // The reader is at `Done` waiting for the merchant to settle + provide the receipt.
-                assert!(delivered.is_some() && !receipted, "unexpected terminal");
-                reader.provide_receipt(receipt).unwrap();
-                receipted = true;
-                continue;
-            };
-            let resp = card.process(&cmd);
-            if card.awaiting_decision() && !approved {
-                card.provide_wire(wire).unwrap();
-                approved = true;
-            }
-            match reader.handle_response(&resp).unwrap() {
-                ReaderStep::Done(w) => delivered = Some(w),
-                ReaderStep::Confirmed => {
-                    assert!(card.is_confirmed(), "card must be confirmed once the reader is");
-                    return (delivered.unwrap(), card.receipt().unwrap().to_vec());
-                }
-                _ => {}
-            }
+    fn sample_request() -> Vec<u8> {
+        let merchant = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+        PaymentRequest {
+            to: merchant.verifying_key().to_bytes(),
+            amount: 4200,
+            nonce: [9u8; 16],
+            expiry: 4102444800,
+            currency: crate::DEMO_USD,
+            to_name: [0u8; crate::NAME_LEN],
+            memo: [0u8; crate::MEMO_LEN],
         }
-        panic!("full exchange did not terminate");
+        .to_bytes()
+        .to_vec()
     }
 
-    fn sample_request() -> Vec<u8> {
-        PaymentRequest { to: [7u8; 32], amount: 4200, nonce: [9u8; 16], expiry: 4102444800, currency: crate::DEMO_USD, to_name: [0u8; crate::NAME_LEN], memo: [0u8; crate::MEMO_LEN] }
-            .to_bytes()
-            .to_vec()
+    fn bundle(update: &[u8]) -> Vec<u8> {
+        NfcBundle {
+            request_id: [3u8; 32],
+            update: update.to_vec(),
+            read_state: vec![0x55, 0x66],
+        }
+        .encode()
+        .unwrap()
     }
 
     #[test]
     fn happy_path_single_frame() {
         let req = sample_request();
-        let wire = vec![0xABu8; WIRE_LEN];
+        let wire = bundle(&vec![0xABu8; WIRE_LEN]);
         let d = drive(&req, &wire, DEFAULT_MAX_CHUNK, Decision::Approve, 0).unwrap();
         assert_eq!(d.pending_seen, 0, "single tap: no polling expected");
-        assert_eq!(d.card_request.unwrap(), req, "request round-trips to the card");
+        assert_eq!(
+            d.card_request.unwrap(),
+            req,
+            "request round-trips to the card"
+        );
         match d.step {
             ReaderStep::Done(w) => assert_eq!(w, wire),
             other => panic!("expected Done, got {other:?}"),
@@ -496,10 +527,13 @@ mod tests {
     #[test]
     fn approval_after_polling_resumes_on_retap() {
         let req = sample_request();
-        let wire = vec![0x5Au8; WIRE_LEN];
+        let wire = bundle(&vec![0x5Au8; WIRE_LEN]);
         // Force three NOT_READY poll cycles before the payer approves.
         let d = drive(&req, &wire, DEFAULT_MAX_CHUNK, Decision::Approve, 3).unwrap();
-        assert!(d.pending_seen >= 3, "should have polled while awaiting approval");
+        assert!(
+            d.pending_seen >= 3,
+            "should have polled while awaiting approval"
+        );
         match d.step {
             ReaderStep::Done(w) => assert_eq!(w, wire),
             other => panic!("expected Done, got {other:?}"),
@@ -509,7 +543,7 @@ mod tests {
     #[test]
     fn decline_immediate_and_after_polling() {
         let req = sample_request();
-        let wire = vec![0u8; WIRE_LEN];
+        let wire = bundle(&vec![0u8; WIRE_LEN]);
         for after in [0usize, 2] {
             let d = drive(&req, &wire, DEFAULT_MAX_CHUNK, Decision::Decline, after).unwrap();
             assert!(matches!(d.step, ReaderStep::Declined), "after={after}");
@@ -523,10 +557,8 @@ mod tests {
         // treat this as "waiting for the payer", NOT a protocol violation, and a subsequent armed
         // SELECT must still complete the exchange.
         let req = sample_request();
-        let wire = vec![0x5Au8; WIRE_LEN];
+        let wire = bundle(&vec![0x5Au8; WIRE_LEN]);
         let mut reader = ReaderConductor::new(&req, DEFAULT_MAX_CHUNK).unwrap();
-        let mut unarmed = CardSession::new(DEFAULT_MAX_CHUNK); // never SELECTed → wrong for direct use
-
         // Simulate the platform layer: SELECT answered with bare NOT_READY (the unarmed response).
         let select = reader.next_command().unwrap();
         let plat_resp = ResponseApdu::status(Sw::NOT_READY).encode();
@@ -543,7 +575,9 @@ mod tests {
         let mut approved = false;
         let mut delivered = None;
         for _ in 0..(MAX_FRAMES * 8 + 128) {
-            let Some(cmd) = reader.next_command() else { break };
+            let Some(cmd) = reader.next_command() else {
+                break;
+            };
             let resp = card.process(&cmd);
             if card.awaiting_decision() && !approved {
                 card.provide_wire(&wire).unwrap();
@@ -551,12 +585,10 @@ mod tests {
             }
             match reader.handle_response(&resp).unwrap() {
                 ReaderStep::Done(w) => delivered = Some(w),
-                ReaderStep::Confirmed => break,
                 _ => {}
             }
         }
         assert_eq!(delivered, Some(wire));
-        drop(unarmed);
     }
 
     proptest! {
@@ -564,11 +596,12 @@ mod tests {
         // multi-frame, whether or not the payer polls first.
         #[test]
         fn end_to_end_prop(
-            wire in prop::collection::vec(any::<u8>(), 1..=256),
-            max_chunk in 1usize..=256,
+            update in prop::collection::vec(any::<u8>(), 1..=256),
+            max_chunk in 2usize..=256,
             approve_after in 0usize..3,
         ) {
             let req = sample_request();
+            let wire = bundle(&update);
             let d = drive(&req, &wire, max_chunk, Decision::Approve, approve_after)
                 .expect("exchange completes without protocol error");
             prop_assert_eq!(d.card_request.unwrap(), req);
@@ -592,7 +625,10 @@ mod tests {
         // A reader driving against a non-dpay card surfaces NotDpay, not a silent stall.
         let mut reader = ReaderConductor::new(&sample_request(), DEFAULT_MAX_CHUNK).unwrap();
         let _ = reader.next_command().unwrap();
-        assert_eq!(reader.handle_response(&resp.encode()), Err(NfcError::NotDpay));
+        assert_eq!(
+            reader.handle_response(&resp.encode()),
+            Err(NfcError::NotDpay)
+        );
     }
 
     #[test]
@@ -600,25 +636,40 @@ mod tests {
         let mut card = CardSession::new(DEFAULT_MAX_CHUNK);
         // GET WIRE before any SELECT/request.
         let get = CommandApdu::expecting(0x80, 0xC4, 0, 0, 256).encode();
-        assert_eq!(ResponseApdu::parse(&card.process(&get)).unwrap().sw, Sw::NOT_READY);
+        assert_eq!(
+            ResponseApdu::parse(&card.process(&get)).unwrap().sw,
+            Sw::NOT_READY
+        );
     }
 
     #[test]
     fn unknown_cla_and_ins_are_reported() {
         let mut card = CardSession::new(DEFAULT_MAX_CHUNK);
         let bad_cla = CommandApdu::with_data(0x11, 0x22, 0, 0, vec![], None).encode();
-        assert_eq!(ResponseApdu::parse(&card.process(&bad_cla)).unwrap().sw, Sw::CLA_NOT_SUPPORTED);
+        assert_eq!(
+            ResponseApdu::parse(&card.process(&bad_cla)).unwrap().sw,
+            Sw::CLA_NOT_SUPPORTED
+        );
         let bad_ins = CommandApdu::with_data(0x80, 0x99, 0, 0, vec![], None).encode();
-        assert_eq!(ResponseApdu::parse(&card.process(&bad_ins)).unwrap().sw, Sw::INS_NOT_SUPPORTED);
+        assert_eq!(
+            ResponseApdu::parse(&card.process(&bad_ins)).unwrap().sw,
+            Sw::INS_NOT_SUPPORTED
+        );
         // Non-APDU garbage → a length error, never a panic.
-        assert_eq!(ResponseApdu::parse(&card.process(&[0x00])).unwrap().sw, Sw::WRONG_LENGTH);
+        assert_eq!(
+            ResponseApdu::parse(&card.process(&[0x00])).unwrap().sw,
+            Sw::WRONG_LENGTH
+        );
     }
 
     #[test]
     fn provide_wire_wrong_state_is_typed_error() {
         let mut card = CardSession::new(DEFAULT_MAX_CHUNK);
         // No request held yet.
-        assert_eq!(card.provide_wire(&[0u8; WIRE_LEN]), Err(NfcError::WrongState));
+        assert_eq!(
+            card.provide_wire(&[0u8; WIRE_LEN]),
+            Err(NfcError::WrongState)
+        );
         assert_eq!(card.decline(), Err(NfcError::WrongState));
     }
 
@@ -626,12 +677,12 @@ mod tests {
     fn reselect_midserve_restarts_pull_from_zero() {
         // Drive the card by hand to Serving with a 3-frame wire, pull one frame, then re-SELECT and
         // confirm it serves from frame 0 again (a re-tap must not deliver a truncated wire).
-        let mut card = CardSession::new(2); // 5-byte wire -> 3 frames
-        let wire = vec![10, 20, 30, 40, 50];
+        let mut card = CardSession::new(2);
+        let wire = bundle(&[10, 20, 30, 40, 50]);
         card.process(&build_select());
-        // push a 1-frame request (5 bytes at chunk 2 would be 3 frames; keep request tiny -> 1 frame)
-        let reqf = frame::fragment(&[1, 2], 2).unwrap();
-        card.process(&CommandApdu::with_data(0x80, 0xC2, 0, 0, reqf[0].clone(), None).encode());
+        for reqf in frame::fragment(&sample_request(), 2).unwrap() {
+            card.process(&CommandApdu::with_data(0x80, 0xC2, 0, 0, reqf, None).encode());
+        }
         assert!(card.awaiting_decision());
         card.provide_wire(&wire).unwrap();
 
@@ -644,13 +695,183 @@ mod tests {
         assert_eq!(greet.data[1], CardPhase::Serving.byte());
         // Now pulling should start again at frame 0.
         let again = ResponseApdu::parse(&card.process(&get)).unwrap();
-        assert_eq!(again.data, f0.data, "re-tap must resume from the first frame");
+        assert_eq!(
+            again.data, f0.data,
+            "re-tap must resume from the first frame"
+        );
+    }
+
+    #[test]
+    fn reader_reset_link_reselects_and_restarts_request_push() {
+        let request = sample_request();
+        let wire = bundle(&[0x31; 180]);
+        let mut card = CardSession::new(32);
+        let mut reader = ReaderConductor::new(&request, 32).unwrap();
+
+        let select = reader.next_command().unwrap();
+        reader.handle_response(&card.process(&select)).unwrap();
+        let first_request_frame = reader.next_command().unwrap();
+        assert_eq!(CommandApdu::parse(&first_request_frame).unwrap().ins, INS_PUT_REQUEST);
+        reader
+            .handle_response(&card.process(&first_request_frame))
+            .unwrap();
+
+        reader.reset_link();
+        let reselect = reader.next_command().unwrap();
+        assert_eq!(CommandApdu::parse(&reselect).unwrap().ins, INS_SELECT);
+        assert_eq!(
+            reader.handle_response(&card.process(&reselect)).unwrap(),
+            ReaderStep::Continue
+        );
+
+        let mut delivered = None;
+        for _ in 0..128 {
+            let command = reader.next_command().unwrap();
+            let response = card.process(&command);
+            if card.awaiting_decision() {
+                card.provide_wire(&wire).unwrap();
+            }
+            if let ReaderStep::Done(bytes) = reader.handle_response(&response).unwrap() {
+                delivered = Some(bytes);
+                break;
+            }
+        }
+        assert_eq!(delivered, Some(wire));
+    }
+
+    #[test]
+    fn reader_reset_link_reselects_and_reassembles_bundle_from_zero() {
+        let request = sample_request();
+        let wire = bundle(&[0x42; 180]);
+        let mut card = CardSession::new(32);
+        let mut reader = ReaderConductor::new(&request, 32).unwrap();
+
+        loop {
+            let command = reader.next_command().unwrap();
+            let response = card.process(&command);
+            if card.awaiting_decision() {
+                card.provide_wire(&wire).unwrap();
+            }
+            let step = reader.handle_response(&response).unwrap();
+            if CommandApdu::parse(&command).unwrap().ins == INS_GET_WIRE {
+                assert_eq!(step, ReaderStep::Continue, "first bundle frame is partial");
+                break;
+            }
+        }
+
+        reader.reset_link();
+        let reselect = reader.next_command().unwrap();
+        assert_eq!(CommandApdu::parse(&reselect).unwrap().ins, INS_SELECT);
+        reader.handle_response(&card.process(&reselect)).unwrap();
+
+        let mut delivered = None;
+        for _ in 0..128 {
+            let command = reader.next_command().unwrap();
+            match reader.handle_response(&card.process(&command)).unwrap() {
+                ReaderStep::Done(bytes) => {
+                    delivered = Some(bytes);
+                    break;
+                }
+                ReaderStep::Continue => {}
+                other => panic!("unexpected recovery step {other:?}"),
+            }
+        }
+        assert_eq!(delivered, Some(wire));
+    }
+
+    #[test]
+    fn reader_reset_link_reselects_and_restarts_result_push() {
+        let request = sample_request();
+        let wire = bundle(&[0x53; 180]);
+        let mut card = CardSession::new(32);
+        let mut reader = ReaderConductor::new(&request, 32).unwrap();
+
+        loop {
+            let command = reader.next_command().unwrap();
+            let response = card.process(&command);
+            if card.awaiting_decision() {
+                card.provide_wire(&wire).unwrap();
+            }
+            if matches!(
+                reader.handle_response(&response).unwrap(),
+                ReaderStep::Done(_)
+            ) {
+                break;
+            }
+        }
+
+        // Link loss while online settlement is pending still re-SELECTs, without replaying the
+        // request or bundle. A result may race with that reconnect and must remain queueable.
+        reader.reset_link();
+        let awaiting_reselect = reader.next_command().unwrap();
+        assert_eq!(CommandApdu::parse(&awaiting_reselect).unwrap().ins, INS_SELECT);
+        assert_eq!(
+            reader
+                .handle_response(&card.process(&awaiting_reselect))
+                .unwrap(),
+            ReaderStep::AwaitingResult
+        );
+        reader.reset_link();
+        let merchant = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+        let result =
+            NfcResult::sign(&merchant, NfcResultStatus::Settled, [9; 16], [3; 32]).to_bytes();
+        reader
+            .provide_result(&result)
+            .expect("result remains queueable during reconnect");
+
+        let result_select = reader.next_command().unwrap();
+        reader
+            .handle_response(&card.process(&result_select))
+            .unwrap();
+        let first_result_frame = reader.next_command().unwrap();
+        assert_eq!(CommandApdu::parse(&first_result_frame).unwrap().ins, INS_PUT_RESULT);
+        assert_eq!(
+            reader
+                .handle_response(&card.process(&first_result_frame))
+                .unwrap(),
+            ReaderStep::Continue
+        );
+
+        reader.reset_link();
+        let reselect = reader.next_command().unwrap();
+        assert_eq!(CommandApdu::parse(&reselect).unwrap().ins, INS_SELECT);
+        reader.handle_response(&card.process(&reselect)).unwrap();
+        loop {
+            let command = reader.next_command().unwrap();
+            if reader.handle_response(&card.process(&command)).unwrap() == ReaderStep::Confirmed {
+                break;
+            }
+        }
+        assert!(card.is_complete());
+        assert_eq!(card.result().unwrap().status, NfcResultStatus::Settled);
+
+        // A late deactivation callback must not reopen a completed session.
+        reader.reset_link();
+        assert!(reader.next_command().is_none());
+    }
+
+    #[test]
+    fn reader_reset_link_keeps_decline_terminal() {
+        let mut card = CardSession::new(DEFAULT_MAX_CHUNK);
+        let mut reader = ReaderConductor::new(&sample_request(), DEFAULT_MAX_CHUNK).unwrap();
+        loop {
+            let command = reader.next_command().unwrap();
+            let response = card.process(&command);
+            if card.awaiting_decision() {
+                card.decline().unwrap();
+            }
+            if reader.handle_response(&response).unwrap() == ReaderStep::Declined {
+                break;
+            }
+        }
+        reader.reset_link();
+        assert!(reader.next_command().is_none());
     }
 
     #[test]
     fn phase_tracks_the_exchange() {
         let req = sample_request();
-        let wire = vec![0xABu8; WIRE_LEN];
+        let wire = bundle(&vec![0xABu8; WIRE_LEN]);
         let mut card = CardSession::new(DEFAULT_MAX_CHUNK);
         let mut reader = ReaderConductor::new(&req, DEFAULT_MAX_CHUNK).unwrap();
 
@@ -675,76 +896,133 @@ mod tests {
         card.provide_wire(&wire).unwrap();
         assert_eq!(card.phase(), SessionPhase::Exchanging);
 
-        // Pull the wire (292 B at DEFAULT_MAX_CHUNK spans 2 frames). The card stays Serving
-        // (Exchanging) until the final frame leaves; only then does it flip to Done (Settling).
+        // Pull the bundle. The card stays Serving until the final frame leaves, then waits for the
+        // authenticated merchant result.
         let mut delivered = None;
-        for _ in 0..WIRE_LEN.div_ceil(DEFAULT_MAX_CHUNK) {
-            assert_eq!(card.phase(), SessionPhase::Exchanging, "still serving wire frames");
+        for _ in 0..wire.len().div_ceil(DEFAULT_MAX_CHUNK) {
+            assert_eq!(
+                card.phase(),
+                SessionPhase::Exchanging,
+                "still serving wire frames"
+            );
             let resp = card.process(&reader.next_command().unwrap());
             match reader.handle_response(&resp).unwrap() {
-                ReaderStep::Continue => {}          // an intermediate frame
+                ReaderStep::Continue => {}                  // an intermediate frame
                 ReaderStep::Done(w) => delivered = Some(w), // the final frame
                 other => panic!("unexpected step {other:?}"),
             }
         }
-        // The last frame has left the payer → the wire is out, outcome unknown (Settling).
+        // The last frame has left the payer. NFC transport is complete.
         assert_eq!(card.phase(), SessionPhase::Settling);
-        assert!(card.is_complete()); // the wire is out…
-        assert!(!card.is_confirmed()); // …but not yet confirmed
-        let _delivered = delivered.expect("wire delivered");
+        assert!(card.wire_delivered());
+        assert!(!card.is_complete());
+        let delivered = delivered.expect("wire delivered");
+        assert_eq!(delivered, wire);
         assert_eq!(reader.phase(), SessionPhase::Settling);
-        assert!(reader.next_command().is_none(), "reader waits for the merchant to settle online");
+        assert!(
+            reader.next_command().is_none(),
+            "reader waits for online settlement"
+        );
 
-        // Merchant settles online, then hands the receipt back over the same tap.
-        let receipt = Receipt { nonce: [9u8; 16], status: RECEIPT_SETTLED }.to_bytes();
-        reader.provide_receipt(&receipt).unwrap();
-        let rframe = card.process(&reader.next_command().unwrap());
+        let merchant = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+        let result =
+            NfcResult::sign(&merchant, NfcResultStatus::Settled, [9u8; 16], [3u8; 32]).to_bytes();
+        reader.provide_result(&result).unwrap();
+        let select = reader.next_command().unwrap();
+        let greeting = card.process(&select);
+        assert_eq!(
+            reader.handle_response(&greeting).unwrap(),
+            ReaderStep::Continue
+        );
+        let put = reader.next_command().unwrap();
+        let ack = card.process(&put);
+        assert_eq!(reader.handle_response(&ack).unwrap(), ReaderStep::Confirmed);
+        assert!(card.is_complete());
         assert_eq!(card.phase(), SessionPhase::Complete);
-        assert!(card.is_confirmed());
-        assert_eq!(card.receipt().unwrap(), receipt);
-        assert!(matches!(reader.handle_response(&rframe).unwrap(), ReaderStep::Confirmed));
         assert_eq!(reader.phase(), SessionPhase::Complete);
-
-        // The payer decodes the outcome.
-        let decoded = receipt_from_transport(card.receipt().unwrap()).unwrap();
-        assert!(decoded.settled());
-        assert_eq!(decoded.nonce, [9u8; 16]);
+        assert_eq!(card.result().unwrap().status, NfcResultStatus::Settled);
+        let replay = ResponseApdu::parse(&card.process(&build_select())).unwrap();
+        assert_eq!(
+            replay.sw,
+            Sw::NOT_READY,
+            "a completed card must never replay either payload"
+        );
     }
 
     #[test]
-    fn receipt_returns_to_the_payer() {
-        let req = sample_request(); // nonce = [9; 16]
-        let wire = vec![0xABu8; WIRE_LEN];
-        for status in [RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE] {
-            let receipt = Receipt { nonce: [9u8; 16], status }.to_bytes().to_vec();
-            // Single-frame and byte-fragmented (tiny chunk splits even the 17-byte receipt).
-            for mc in [DEFAULT_MAX_CHUNK, 3] {
-                let (delivered, got) = drive_full(&req, &wire, &receipt, mc);
-                assert_eq!(delivered, wire, "status={status} chunk={mc}");
-                assert_eq!(got, receipt, "status={status} chunk={mc}");
-                let r = receipt_from_transport(&got).unwrap();
-                assert_eq!(r.status, status);
-                assert_eq!(r.settled(), status == RECEIPT_SETTLED);
+    fn result_only_retap_never_resends_request_or_bundle() {
+        let request = sample_request();
+        let wire = bundle(&[0xAB; 300]);
+        let mut card = CardSession::new(DEFAULT_MAX_CHUNK);
+        let mut first_reader = ReaderConductor::new(&request, DEFAULT_MAX_CHUNK).unwrap();
+
+        loop {
+            let command = first_reader.next_command().unwrap();
+            let response = card.process(&command);
+            if card.awaiting_decision() {
+                card.provide_wire(&wire).unwrap();
+            }
+            if matches!(
+                first_reader.handle_response(&response).unwrap(),
+                ReaderStep::Done(_)
+            ) {
+                break;
             }
         }
+        assert!(card.wire_delivered());
+        assert!(!card.is_complete());
+
+        // A new merchant conductor learns that only C6 remains. It has neither a bundle pull nor a
+        // request push command until a result is supplied.
+        let mut resumed = ReaderConductor::new(&request, DEFAULT_MAX_CHUNK).unwrap();
+        let select = resumed.next_command().unwrap();
+        assert_eq!(
+            resumed.handle_response(&card.process(&select)).unwrap(),
+            ReaderStep::AwaitingResult
+        );
+        assert_eq!(resumed.phase(), SessionPhase::Settling);
+        assert!(resumed.next_command().is_none());
+        assert_eq!(
+            resumed.provide_result(&[0; NFC_RESULT_LEN]),
+            Err(NfcError::BadMessage)
+        );
+
+        let merchant = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+        let result =
+            NfcResult::sign(&merchant, NfcResultStatus::Unknown, [9; 16], [3; 32]).to_bytes();
+        resumed.provide_result(&result).unwrap();
+        let result_select = resumed.next_command().unwrap();
+        assert_eq!(CommandApdu::parse(&result_select).unwrap().ins, INS_SELECT);
+        assert_eq!(
+            resumed
+                .handle_response(&card.process(&result_select))
+                .unwrap(),
+            ReaderStep::Continue
+        );
+        let put_result = resumed.next_command().unwrap();
+        assert_eq!(CommandApdu::parse(&put_result).unwrap().ins, INS_PUT_RESULT);
+        assert_eq!(
+            resumed.handle_response(&card.process(&put_result)).unwrap(),
+            ReaderStep::Confirmed
+        );
+        assert_eq!(card.result().unwrap().status, NfcResultStatus::Unknown);
     }
 
     #[test]
-    fn provide_receipt_wrong_state_is_typed_error() {
-        // Before the wire is served, there's nothing to receipt.
-        let mut reader = ReaderConductor::new(&sample_request(), DEFAULT_MAX_CHUNK).unwrap();
-        let receipt = Receipt { nonce: [9u8; 16], status: RECEIPT_SETTLED }.to_bytes();
-        assert_eq!(reader.provide_receipt(&receipt), Err(NfcError::WrongState));
-        // On the card, a receipt before the wire is served is out of sequence (NOT_READY).
+    fn put_result_is_rejected_before_bundle_delivery() {
+        let merchant = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+        let result =
+            NfcResult::sign(&merchant, NfcResultStatus::Settled, [9; 16], [3; 32]).to_bytes();
+        let frame = frame::fragment(&result, DEFAULT_MAX_CHUNK)
+            .unwrap()
+            .remove(0);
+        let command = CommandApdu::with_data(CLA_PROP, INS_PUT_RESULT, 0, 0, frame, None).encode();
         let mut card = CardSession::new(DEFAULT_MAX_CHUNK);
-        card.process(&build_select());
-        let frame = frame::fragment(&receipt, DEFAULT_MAX_CHUNK).unwrap();
-        let resp = ResponseApdu::parse(
-            &card.process(&CommandApdu::with_data(0x80, 0xC6, 0, 0, frame[0].clone(), None).encode()),
-        )
-        .unwrap();
-        assert_eq!(resp.sw, Sw::NOT_READY);
-        assert!(card.receipt().is_none());
+        let response = ResponseApdu::parse(&card.process(&command)).unwrap();
+        assert_eq!(response.sw, Sw::NOT_READY);
+
+        let mut reader = ReaderConductor::new(&sample_request(), DEFAULT_MAX_CHUNK).unwrap();
+        assert_eq!(reader.provide_result(&result), Err(NfcError::WrongState));
     }
 
     #[test]
@@ -770,7 +1048,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(resp.sw, Sw::BAD_DATA);
-        assert!(card.request().is_none(), "a rejected frame must not yield a request");
+        assert!(
+            card.request().is_none(),
+            "a rejected frame must not yield a request"
+        );
     }
 }
 
@@ -783,7 +1064,17 @@ mod signed_tests {
     fn real_signed_wire() -> (Vec<u8>, SignedAuthorization) {
         let sk = generate_keypair();
         let from = sk.verifying_key().to_bytes();
-        let auth = Authorization { from, to: [7u8; 32], amount: 4200, nonce: [1u8; 16], expiry: 4102444800, currency: crate::DEMO_USD, from_name: [0u8; crate::NAME_LEN], to_name: [0u8; crate::NAME_LEN], memo: [0u8; crate::MEMO_LEN] };
+        let auth = Authorization {
+            from,
+            to: [7u8; 32],
+            amount: 4200,
+            nonce: [1u8; 16],
+            expiry: 4102444800,
+            currency: crate::DEMO_USD,
+            from_name: [0u8; crate::NAME_LEN],
+            to_name: [0u8; crate::NAME_LEN],
+            memo: [0u8; crate::MEMO_LEN],
+        };
         let se = SignedAuthorization::new(&sk, auth);
         (se.to_wire().to_vec(), se)
     }
@@ -793,9 +1084,24 @@ mod signed_tests {
     #[test]
     fn signed_wire_survives_nfc_and_verifies() {
         let (wire, se) = real_signed_wire();
-        let req = PaymentRequest { to: se.auth.to, amount: se.auth.amount, nonce: se.auth.nonce, expiry: se.auth.expiry, currency: se.auth.currency, to_name: se.auth.to_name, memo: se.auth.memo }
-            .to_bytes()
-            .to_vec();
+        let bundle = NfcBundle {
+            request_id: [3u8; 32],
+            update: wire.clone(),
+            read_state: vec![1],
+        }
+        .encode()
+        .unwrap();
+        let req = PaymentRequest {
+            to: se.auth.to,
+            amount: se.auth.amount,
+            nonce: se.auth.nonce,
+            expiry: se.auth.expiry,
+            currency: se.auth.currency,
+            to_name: se.auth.to_name,
+            memo: se.auth.memo,
+        }
+        .to_bytes()
+        .to_vec();
 
         // The NFC frame `seq` is one byte, so a payload is capped at MAX_FRAMES (256) frames. The
         // 292-byte wire at chunk=1 needs 292 frames (> 256) — an unrepresentable configuration the
@@ -808,7 +1114,7 @@ mod signed_tests {
             "292-byte wire at chunk=1 must exceed the frame ceiling"
         );
         assert_eq!(
-            super::frame::fragment(&wire, 1),
+            super::frame::fragment(&bundle, 1),
             Err(super::frame::FrameError::TooManyFrames),
             "chunk=1 on the 292-byte wire is unrepresentable (u8 seq) -> typed rejection"
         );
@@ -826,7 +1132,7 @@ mod signed_tests {
                     // The payer decodes the request, sees the amount, and approves.
                     let seen = request_from_transport(card.request().unwrap()).unwrap();
                     assert_eq!(seen.amount, se.auth.amount);
-                    card.provide_wire(&wire).unwrap();
+                    card.provide_wire(&bundle).unwrap();
                     approved = true;
                 }
                 match reader.handle_response(&resp).unwrap() {
@@ -839,9 +1145,13 @@ mod signed_tests {
                 }
             }
             let delivered = delivered.expect("wire delivered");
-            assert_eq!(delivered, wire, "chunk={max_chunk}: byte-identical");
-            let recovered = wire_from_transport(&delivered).unwrap();
-            assert!(recovered.verify(), "chunk={max_chunk}: signature verifies after transport");
+            assert_eq!(delivered, bundle, "chunk={max_chunk}: byte-identical");
+            let recovered_bundle = NfcBundle::decode(&delivered).unwrap();
+            let recovered = wire_from_transport(&recovered_bundle.update).unwrap();
+            assert!(
+                recovered.verify(),
+                "chunk={max_chunk}: signature verifies after transport"
+            );
             assert_eq!(recovered, se);
         }
     }
@@ -867,10 +1177,20 @@ mod signed_tests {
     #[test]
     fn signed_wire_spans_two_frames_and_round_trips() {
         let (wire, se) = real_signed_wire();
+        let bundle = NfcBundle {
+            request_id: [3u8; 32],
+            update: wire.clone(),
+            read_state: vec![1],
+        }
+        .encode()
+        .unwrap();
 
         // Sanity: the wire really is 292 bytes and really needs 2 frames at the production chunk.
         assert_eq!(wire.len(), WIRE_LEN);
-        assert!(WIRE_LEN > super::DEFAULT_MAX_CHUNK, "wire must exceed one frame");
+        assert!(
+            WIRE_LEN > super::DEFAULT_MAX_CHUNK,
+            "wire must exceed one frame"
+        );
         let nframes = WIRE_LEN.div_ceil(super::DEFAULT_MAX_CHUNK);
         assert_eq!(nframes, 2, "292 B / 240 B-per-frame = 2 frames");
 
@@ -883,14 +1203,22 @@ mod signed_tests {
         for f in &frames {
             reassembled = r.accept(&super::frame::Frame::parse(f).unwrap()).unwrap();
         }
-        assert_eq!(reassembled.unwrap(), wire, "reassembled wire is byte-identical");
+        assert_eq!(
+            reassembled.unwrap(),
+            wire,
+            "reassembled wire is byte-identical"
+        );
 
         // Full conductor: the 2-frame wire moves card → reader at the production chunk size and what
         // the reader reassembles verifies as the identical authorization.
         let req = PaymentRequest {
-            to: se.auth.to, amount: se.auth.amount, nonce: se.auth.nonce,
-            expiry: se.auth.expiry, currency: se.auth.currency,
-            to_name: se.auth.to_name, memo: se.auth.memo,
+            to: se.auth.to,
+            amount: se.auth.amount,
+            nonce: se.auth.nonce,
+            expiry: se.auth.expiry,
+            currency: se.auth.currency,
+            to_name: se.auth.to_name,
+            memo: se.auth.memo,
         }
         .to_bytes()
         .to_vec();
@@ -902,7 +1230,7 @@ mod signed_tests {
             let cmd = reader.next_command().expect("reader has a command");
             let resp = card.process(&cmd);
             if card.awaiting_decision() && !approved {
-                card.provide_wire(&wire).unwrap();
+                card.provide_wire(&bundle).unwrap();
                 approved = true;
             }
             match reader.handle_response(&resp).unwrap() {
@@ -915,9 +1243,13 @@ mod signed_tests {
             }
         }
         let delivered = delivered.expect("2-frame wire delivered");
-        assert_eq!(delivered, wire, "byte-identical through the conductor");
-        let recovered = wire_from_transport(&delivered).unwrap();
-        assert!(recovered.verify(), "signature verifies after the 2-frame transport");
+        assert_eq!(delivered, bundle, "byte-identical through the conductor");
+        let recovered_bundle = NfcBundle::decode(&delivered).unwrap();
+        let recovered = wire_from_transport(&recovered_bundle.update).unwrap();
+        assert!(
+            recovered.verify(),
+            "signature verifies after the 2-frame transport"
+        );
         assert_eq!(recovered, se);
     }
 

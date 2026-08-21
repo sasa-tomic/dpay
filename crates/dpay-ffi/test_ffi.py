@@ -129,14 +129,34 @@ check(req_bytes[68:68 + len(REQ_TO_NAME)] == REQ_TO_NAME.encode(),
       "nfc_request_bytes carries `to_name` (Bob) at offset 68")
 check(req_bytes[100:100 + len(REQ_MEMO)] == REQ_MEMO.encode(),
       "nfc_request_bytes carries `memo` (tap-memo) at offset 100")
-# The payer serves the signed IC /call envelope (the rail payload, ~390 B) over the transport.
+
+# A dropped RF link is explicit at the FFI boundary: even midway through request push, the next
+# command is the original SELECT rather than a stale C2/C4/C6 command.
+reset_card = d.FfiCardSession(MAX_CHUNK)
+reset_reader = d.FfiReaderConductor(req_bytes, MAX_CHUNK)
+first_select = reset_reader.next_command()
+reset_reader.handle_response(reset_card.process(first_select))
+check(reset_reader.next_command()[1] == 0xC2, "reader advances to request push before reset")
+reset_reader.reset_link()
+check(reset_reader.next_command() == first_select, "reader.reset_link -> byte-identical SELECT first")
+
+# The payer serves a DPN2 bundle containing the signed /call update and its signed /read_state poll.
 env_arg = d.icp_transfer_arg(payee_p, "", "", str(amount), "", req_nonce.hex())
 env_signed = d.icp_sign_update(kp.secret, CKBTC_LEDGER, "icrc1_transfer", env_arg,
                                "1800000000000000000")
 nfc_env = env_signed.envelope
+read_state_env = d.icp_sign_read_state(kp.secret, [env_signed.request_id], True,
+                                       "1800000000000000000")
+nfc_bundle = d.nfc_bundle_bytes(nfc_env, read_state_env)
+decoded_bundle = d.nfc_decode_bundle(nfc_bundle)
+check(decoded_bundle.request_id == env_signed.request_id,
+      "nfc_bundle_bytes derives the update envelope request_id")
+check(decoded_bundle.update == nfc_env and decoded_bundle.read_state == read_state_env,
+      "nfc_decode_bundle returns both envelopes byte-identically")
+check(nfc_bundle[:4] == b"DPN2", "NFC bundle starts with DPN2 magic")
 
 
-def run_nfc(max_chunk, approve=True):
+def run_nfc(max_chunk, approve=True, result_status=d.NfcResultStatus.SETTLED):
     """Loop the merchant reader against the payer's HCE card entirely in memory, returning the wire
     the reader reassembled (or None if the payer declined). Bounded so a stuck machine can't hang."""
     card = d.FfiCardSession(max_chunk)
@@ -150,20 +170,29 @@ def run_nfc(max_chunk, approve=True):
             seen = d.nfc_decode_request(card.request())   # payer reviews "Pay $X to <to_name>"
             assert seen.amount == amount and seen.nonce == req_nonce
             assert seen.to_name == REQ_TO_NAME and seen.memo == REQ_MEMO  # names survived transport
-            (card.provide_wire(nfc_env) if approve else card.decline())
+            (card.provide_wire(nfc_bundle) if approve else card.decline())
         step = reader.handle_response(resp)
         if step == d.NfcStep.DONE:
+            check(reader.wire() == nfc_bundle, "reader.wire returns the byte-identical DPN2 bundle")
+            result = d.nfc_result_bytes(to_kp.secret, result_status, req_nonce,
+                                        decoded_bundle.request_id)
+            check(len(result) == 114, "nfc_result_bytes -> fixed 114-byte signed result")
+            reader.provide_result(result)
+        if step == d.NfcStep.CONFIRMED:
+            received = card.result()
+            assert received is not None
+            assert received.status == result_status
+            assert received.nonce == req_nonce
+            assert received.request_id == decoded_bundle.request_id
+            assert card.wire_delivered() and card.is_complete()
             return reader.wire()
         if step == d.NfcStep.DECLINED:
             return None
     raise AssertionError("NFC exchange did not terminate")
 
 
-# Production single-frame path and the most-aggressive still-valid fragmentation both deliver the
-# exact signed wire — and it still verifies under the same crypto the canister enforces. The wire is
-# 292 B (wire-format v2); the NFC `seq` byte caps a payload at MAX_FRAMES=256 frames, so 1 byte/frame
-# (292 frames) is no longer representable. The smallest chunk that keeps the wire under the ceiling
-# is 2 (→ 146 frames), which still exercises heavy multi-frame fragmentation.
+# Production and the most-aggressive still-valid fragmentation both deliver the exact bundle and
+# complete the merchant-result return. The u8 frame sequence caps every payload at 256 frames.
 #
 # chunk=1 on the 292-byte wire is therefore an unrepresentable configuration: the transport must
 # refuse it with a typed error (NfcProtocol = Frame(TooManyFrames)) rather than silently truncate.
@@ -171,15 +200,19 @@ def run_nfc(max_chunk, approve=True):
 # core Rust `signed_wire_survives_nfc_and_verifies` mc=1 rejection assertion).
 try:
     run_nfc(1)
-    raise AssertionError("FAILED: chunk=1 must be unrepresentable (~390 frames > MAX_FRAMES=256)")
+    raise AssertionError("FAILED: chunk=1 must be unrepresentable (bundle > MAX_FRAMES=256)")
 except d.DpayError.NfcProtocol:
-    check(True, "chunk=1 on ~390-byte envelope -> DpayError.NfcProtocol (TooManyFrames; u8 seq ceiling)")
+    check(True, "chunk=1 on DPN2 bundle -> DpayError.NfcProtocol (u8 seq ceiling)")
 
-for mc in (MAX_CHUNK, 2):
+MIN_CHUNK = (len(nfc_bundle) + 255) // 256
+for mc in (MAX_CHUNK, MIN_CHUNK):
     got = run_nfc(mc)
-    check(got == nfc_env, f"NFC exchange delivers byte-identical envelope (chunk={mc})")
-    check(d.icp_envelope_request_id(got) == env_signed.request_id,
-          f"reassembled envelope still derives the same request_id (chunk={mc})")
+    check(got == nfc_bundle, f"NFC exchange delivers byte-identical bundle + result (chunk={mc})")
+
+# All three authenticated result statuses survive the FFI lifecycle and decode on the card.
+for status in (d.NfcResultStatus.REJECTED, d.NfcResultStatus.UNKNOWN):
+    check(run_nfc(MAX_CHUNK, result_status=status) == nfc_bundle,
+          f"NFC result status {status} reaches Confirmed")
 
 # The decline path surfaces as Declined — never a hang, never a bogus wire.
 check(run_nfc(MAX_CHUNK, approve=False) is None, "NFC decline -> reader sees Declined")
@@ -195,15 +228,15 @@ except d.DpayError.NfcNotDpay:
 
 # provide_wire out of turn is a typed state error, not a silent no-op.
 try:
-    d.FfiCardSession(MAX_CHUNK).provide_wire(nfc_env)
+    d.FfiCardSession(MAX_CHUNK).provide_wire(nfc_bundle)
     raise AssertionError("FAILED: provide_wire before a request should have raised")
 except d.DpayError.NfcWrongState:
     check(True, "provide_wire with no request -> DpayError.NfcWrongState")
 
 
 # 7) NFC lifecycle phase: the live status the UI renders, read straight from the core machine -----
-# The app maps these to a spinner (Linking/Exchanging), a review prompt (AwaitingApproval), and a
-# terminal ✓/declined mark (Complete/Declined). Here we step one exchange and assert each transition.
+# The app maps these to transport progress. Settling means the immutable signed envelope has left
+# NFC; ledger submission and polling continue independently on both phones.
 card = d.FfiCardSession(MAX_CHUNK)
 reader = d.FfiReaderConductor(req_bytes, MAX_CHUNK)
 check(card.phase() == d.NfcPhase.IDLE, "card phase starts Idle")
@@ -217,7 +250,7 @@ check(card.phase() == d.NfcPhase.AWAITING_APPROVAL, "card -> AwaitingApproval ho
 check(card.is_complete() is False, "card not complete before serving")
 reader.handle_response(ack)
 
-card.provide_wire(nfc_env)                                           # payer approves (serves the envelope)
+card.provide_wire(nfc_bundle)                                        # payer approves (serves the bundle)
 check(card.phase() == d.NfcPhase.EXCHANGING, "card -> Exchanging while serving the wire")
 
 # The ~390-byte envelope spans 2 frames at MAX_CHUNK=240; pull frames until the reader reassembles
@@ -231,44 +264,53 @@ for _ in range(100):
         break
     check(step == d.NfcStep.CONTINUE, "wire-pull frames are Continue until the last (Done)")
 check(step == d.NfcStep.DONE, "reader -> Done (has the envelope)")
-check(card.is_complete() and not card.is_confirmed(), "card: wire sent but not yet confirmed")
-check(card.phase() == d.NfcPhase.SETTLING, "card -> Settling (awaiting the receipt)")
-check(reader.phase() == d.NfcPhase.SETTLING, "reader -> Settling (about to settle online)")
-check(reader.next_command() is None, "reader waits for the merchant to settle online")
+check(card.wire_delivered(), "card records the bundle was fully served")
+check(card.is_complete() is False, "card is not complete before merchant result")
+check(card.phase() == d.NfcPhase.SETTLING, "card -> Settling (awaiting merchant result)")
+check(reader.phase() == d.NfcPhase.SETTLING, "reader -> Settling (has immutable bundle)")
+check(reader.next_command() is None, "reader pauses commands while settling online")
 
+settled_result = d.nfc_result_bytes(to_kp.secret, d.NfcResultStatus.SETTLED,
+                                    req_nonce, decoded_bundle.request_id)
+reader.provide_result(settled_result)
+check(reader.phase() == d.NfcPhase.LINKING, "reader re-links before returning result")
+check(reader.handle_response(card.process(reader.next_command())) == d.NfcStep.CONTINUE,
+      "result return SELECT sees AwaitingResult")
+check(reader.handle_response(card.process(reader.next_command())) == d.NfcStep.CONFIRMED,
+      "PUT_RESULT -> Confirmed")
+check(card.is_complete() and card.phase() == d.NfcPhase.COMPLETE,
+      "card -> Complete only after verified result")
+check(reader.phase() == d.NfcPhase.COMPLETE, "reader -> Complete after result acknowledgement")
+card_result = card.result()
+check(card_result.status == d.NfcResultStatus.SETTLED and card_result.nonce == req_nonce,
+      "card.result returns verified status and nonce")
+check(card_result.request_id == decoded_bundle.request_id,
+      "card.result returns the bundle request_id")
 
-# 8) Receipt-return: the (online) merchant hands the settlement outcome back to the offline payer ---
-codes = d.nfc_receipt_codes()
-check(codes.settled == 0, "receipt code: settled == 0")
-receipt = d.nfc_receipt_bytes(req_nonce, codes.settled)          # merchant settled → build receipt
-reader.provide_receipt(receipt)
-rstep = reader.handle_response(card.process(reader.next_command()))  # push receipt (1 frame)
-check(rstep == d.NfcStep.CONFIRMED, "reader -> Confirmed after delivering the receipt")
-check(card.is_confirmed() and card.phase() == d.NfcPhase.COMPLETE, "card -> Confirmed / Complete")
-
-# The offline payer decodes the outcome and matches it to the payment it signed (by nonce).
-got = d.nfc_decode_receipt(card.receipt())
-check(got.settled is True, "payer sees: settled")
-check(got.nonce == req_nonce, "receipt nonce matches the signed payment")
-
-# A rejected settlement is carried back just as faithfully.
-c2 = d.FfiCardSession(MAX_CHUNK)
-r2 = d.FfiReaderConductor(req_bytes, MAX_CHUNK)
+# A structurally valid result signed by the wrong key is rejected by the card and never stored.
+bad_card = d.FfiCardSession(MAX_CHUNK)
+bad_reader = d.FfiReaderConductor(req_bytes, MAX_CHUNK)
+bad_reader.handle_response(bad_card.process(bad_reader.next_command()))
+bad_resp = bad_card.process(bad_reader.next_command())
+bad_card.provide_wire(nfc_bundle)
+bad_reader.handle_response(bad_resp)
 while True:
-    cmd = r2.next_command()
-    if cmd is None:
-        r2.provide_receipt(d.nfc_receipt_bytes(req_nonce, codes.rejected))
-        continue
-    resp = c2.process(cmd)
-    if c2.awaiting_decision():
-        c2.provide_wire(nfc_env)
-    s = r2.handle_response(resp)
-    if s == d.NfcStep.CONFIRMED:
+    bad_step = bad_reader.handle_response(bad_card.process(bad_reader.next_command()))
+    if bad_step == d.NfcStep.DONE:
         break
-check(d.nfc_decode_receipt(c2.receipt()).settled is False, "payer sees: rejected (settled == False)")
+bad_result = d.nfc_result_bytes(kp.secret, d.NfcResultStatus.SETTLED,
+                                req_nonce, decoded_bundle.request_id)
+bad_reader.provide_result(bad_result)
+bad_reader.handle_response(bad_card.process(bad_reader.next_command()))
+try:
+    bad_reader.handle_response(bad_card.process(bad_reader.next_command()))
+    raise AssertionError("FAILED: wrong merchant signature should have raised")
+except d.DpayError.NfcProtocol:
+    check(bad_card.is_complete() is False and bad_card.result() is None,
+          "wrong merchant signature -> NfcProtocol and no card result")
 
 
-# 9) Exact decimal <-> u64 amount parser (MC1 unit 1) ------------------------------------------
+# 8) Exact decimal <-> u64 amount parser (MC1 unit 1) ------------------------------------------
 # parse_amount / format_amount call the SAME compiled dpay-core parser the canister/relay link.
 # This is the human↔u64 boundary that retires the lossy number/Double amount path: a green run here
 # proves the app's languages parse amounts with the real core, exact (no float), at up to 18 decimals.

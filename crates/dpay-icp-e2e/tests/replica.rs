@@ -100,19 +100,36 @@ fn balance(http: &IcHttp, ledger: &Principal, key: &ed25519_dalek::SigningKey, w
     Ok(u64::try_from(decode_int(&reply)?)?)
 }
 
-/// Poll read_state for the request's terminal status (replied/rejected/done), 30s budget.
-fn poll_request_status(http: &IcHttp, ledger: &Principal, key: &ed25519_dalek::SigningKey, rid: &[u8; 32]) -> Result<RequestStatus> {
+/// Re-post one pre-signed read_state envelope until it observes a terminal status. Requiring at
+/// least two successful posts makes the NFC capability's byte-identical reuse objective explicit,
+/// even when the update has already executed before the first poll reaches the replica.
+fn poll_request_status_with_signed_capability(
+    http: &IcHttp,
+    ledger: &Principal,
+    envelope: &[u8],
+    rid: &[u8; 32],
+) -> Result<(RequestStatus, usize)> {
     let deadline = Instant::now() + Duration::from_secs(30);
-    let path: [&[u8]; 2] = [b"request_status", rid];
-    let paths: [&[&[u8]]; 1] = [&path[..]];
+    let mut posts = 0;
+    let mut terminal = None;
     loop {
-        let envelope = sign_read_state(key, &paths, expiry());
-        let response = http.submit(&ledger.to_text(), "read_state", &envelope)?;
+        // Deliberately submit this exact caller-provided byte slice on every iteration. There is
+        // no re-signing here: this is the immutable envelope handed to the online merchant over
+        // NFC by the offline payer.
+        let response = http.submit(&ledger.to_text(), "read_state", envelope)?;
+        posts += 1;
         assert_eq!(response.status, 200, "read_state: status {}", response.status);
         let tree = decode_read_state_tree(&response.body)?;
-        match request_status(&tree, rid)? {
+        let status = request_status(&tree, rid)?;
+        match status {
             RequestStatus::Unknown | RequestStatus::Received | RequestStatus::Processing => {}
-            terminal => return Ok(terminal),
+            status if terminal.is_none() => terminal = Some(status),
+            _ => {}
+        }
+        if posts >= 2 {
+            if let Some(status) = terminal.take() {
+                return Ok((status, posts));
+            }
         }
         if Instant::now() > deadline {
             return Err("read_state did not reach a terminal status within 30s".into());
@@ -122,7 +139,7 @@ fn poll_request_status(http: &IcHttp, ledger: &Principal, key: &ed25519_dalek::S
 }
 
 #[test]
-fn signed_update_202_then_read_state_replied_ok() -> Result<()> {
+fn offline_payer_update_and_reusable_read_state_capability_are_sender_bound() -> Result<()> {
     let (http, ledger) = match setup() {
         Ok(pair) => pair,
         Err(e) if e.is::<Skip>() => return Ok(()),
@@ -134,21 +151,40 @@ fn signed_update_202_then_read_state_replied_ok() -> Result<()> {
     let p1_before = balance(&http, &ledger, &key, &p1())?;
     assert_eq!(p1_before, FUND_E8S, "P1 must be funded by the script before this test runs");
 
-    // Signed UPDATE: icrc1_transfer P1 → P2.
+    // Build both immutable envelopes before submission, exactly as the offline NFC payer does.
+    // The update's ingress caller is P1, so the ledger debits P1's principal-owned account.
+    let ingress_expiry_ns = expiry();
     let request = CallRequest {
         canister: ledger.clone(),
         method_name: "icrc1_transfer".to_string(),
         arg: transfer_arg(&Account::new(p2()), None, AMOUNT_E8S as u128, None, None, None),
-        ingress_expiry_ns: expiry(),
+        ingress_expiry_ns,
         nonce: Some(0xD1D1D1D1),
     };
-    let envelope = sign_update(&key, &request);
-    let response = http.submit(&ledger.to_text(), "call", &envelope)?;
+    let update_envelope = sign_update(&key, &request);
+    let rid = envelope_request_id(&update_envelope)?;
+    let path: [&[u8]; 2] = [b"request_status", &rid];
+    let paths: [&[&[u8]]; 1] = [&path];
+    let read_state_envelope = sign_read_state(&key, &paths, ingress_expiry_ns);
+    let read_state_envelope_snapshot = read_state_envelope.clone();
+
+    // Negative capability signed by another principal for the exact same payer-owned request ID.
+    let other_key = dev_key(&[0x02; 32]);
+    let other_principal_envelope = sign_read_state(&other_key, &paths, ingress_expiry_ns);
+
+    // Submit the actual payer-signed update through the real replica ingress.
+    let response = http.submit(&ledger.to_text(), "call", &update_envelope)?;
     assert_eq!(response.status, 202, "update: status {}, body {}", response.status, response.body_preview(200));
 
-    // read_state poll → replied → decode the transfer result (rail decoder: bare variant).
-    let rid = envelope_request_id(&envelope)?;
-    match poll_request_status(&http, &ledger, &key, &rid)? {
+    // Re-post the ONE payer-signed read_state envelope byte-for-byte until terminal. The helper
+    // forces at least two HTTP posts even if the first response is already terminal.
+    let (terminal, identical_posts) =
+        poll_request_status_with_signed_capability(&http, &ledger, &read_state_envelope, &rid)?;
+    assert_eq!(
+        read_state_envelope, read_state_envelope_snapshot,
+        "the repeatedly-posted payer capability must remain byte-identical"
+    );
+    match terminal {
         RequestStatus::Replied(reply_arg) => {
             match decode_transfer_result(&reply_arg)? {
                 TransferResult::Ok(tx) => println!("   transfer Ok, tx index {tx}"),
@@ -158,12 +194,40 @@ fn signed_update_202_then_read_state_replied_ok() -> Result<()> {
         other => panic!("expected replied, got {other:?}"),
     }
 
+    // The same request_status path under a different self-authenticating principal must not
+    // disclose P1's status. Replica versions may express this either as an HTTP 4xx denial or a
+    // 200 certificate in which the requested path is absent/pruned (`Unknown`). Both are the IC's
+    // documented non-disclosure semantics; any terminal status here is an authorization failure.
+    let wrong_response = http.submit(&ledger.to_text(), "read_state", &other_principal_envelope)?;
+    let wrong_principal_semantics = if (400..500).contains(&wrong_response.status) {
+        format!("HTTP {} denial", wrong_response.status)
+    } else if wrong_response.status == 200 {
+        let tree = decode_read_state_tree(&wrong_response.body)?;
+        let status = request_status(&tree, &rid)?;
+        assert_eq!(
+            status,
+            RequestStatus::Unknown,
+            "a different principal must not read the payer-owned terminal request status"
+        );
+        "certified absence/pruned path".to_string()
+    } else {
+        panic!(
+            "wrong-principal read_state must be denied or omit the status, got {}: {}",
+            wrong_response.status,
+            wrong_response.body_preview(200)
+        );
+    };
+
     // Balances moved exactly as signed: P2 +AMOUNT, P1 -AMOUNT (fee=0).
     let p2_after = balance(&http, &ledger, &key, &p2())?;
     let p1_after = balance(&http, &ledger, &key, &p1())?;
     assert_eq!(p2_after, AMOUNT_E8S, "P2 balance after transfer");
     assert_eq!(p1_after, FUND_E8S - AMOUNT_E8S, "P1 balance after transfer");
-    println!("PASS: signed update accepted (202) by the dfx webserver ingress, settled P1→P2 {AMOUNT_E8S} e8s");
+    println!(
+        "PASS: payer-signed update accepted (202), request_id={}, one {}-byte payer read_state envelope reached terminal after {identical_posts} byte-identical posts, wrong principal saw {wrong_principal_semantics}, settled P1→P2 {AMOUNT_E8S} e8s",
+        hex::encode(rid),
+        read_state_envelope.len()
+    );
     Ok(())
 }
 

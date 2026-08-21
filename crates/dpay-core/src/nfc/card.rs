@@ -1,129 +1,117 @@
 //! Card side (the offline payer's HCE service).
 
+use crate::PaymentRequest;
+
 use super::apdu::{CommandApdu, ResponseApdu, Sw};
 use super::frame::{self, Reassembler};
 use super::{
-    AID, CardPhase, CLA_ISO, CLA_PROP, INS_GET_WIRE, INS_PUT_RECEIPT, INS_PUT_REQUEST,
-    INS_SELECT, NfcError, P1_SELECT_BY_NAME, PROTO_VERSION, SessionPhase,
+    request_from_transport, CardPhase, NfcBundle, NfcError, NfcResult, SessionPhase, AID, CLA_ISO,
+    CLA_PROP, INS_GET_WIRE, INS_PUT_REQUEST, INS_PUT_RESULT, INS_SELECT, P1_SELECT_BY_NAME,
+    PROTO_VERSION,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum CardState {
-    /// Waiting for the initial SELECT.
     AwaitingSelect,
-    /// SELECTed; receiving request frames.
     Collecting,
-    /// The full request is held; waiting for the app to approve (`provide_wire`) or `decline`.
     RequestReady,
-    /// A signed wire is fragmented and being served frame by frame.
     Serving,
-    /// The payer declined; every pull returns `DECLINED`.
+    AwaitingResult,
+    Complete,
     Declined,
-    /// The wire was fully served; the merchant is settling online (payer awaits the receipt).
-    Done,
-    /// The merchant's settlement receipt arrived — the payer knows the outcome.
-    Confirmed,
 }
 
-/// The payer-side (HCE card) half of the exchange. Drop-in for Android's
-/// `HostApduService.processCommandApdu`: hand it each command APDU's bytes, send back the bytes it
-/// returns. It never panics and never ignores a bad input — every malformed or out-of-sequence
-/// command yields a defined error status word, and the app-facing calls return typed errors.
-///
-/// Lifecycle: `process` a SELECT, then `process` the reader's request frames until [`request`]
-/// returns the bytes; show the payer "Pay $X to <merchant>"; then either [`provide_wire`] (approve)
-/// or [`decline`]. Re-tapping (a fresh SELECT) is handled without losing an approved wire.
+/// Payer-side HCE state machine. It receives a request, serves one validated DPN2 bundle, then
+/// accepts exactly one merchant-signed result bound to that request. Completed sessions never replay
+/// the bundle.
 #[derive(Clone, Debug)]
 pub struct CardSession {
     state: CardState,
     max_chunk: usize,
-    reasm: Reassembler,
+    request_reasm: Reassembler,
+    result_reasm: Reassembler,
     request: Vec<u8>,
+    parsed_request: Option<PaymentRequest>,
+    request_id: Option<[u8; 32]>,
     wire_frames: Vec<Vec<u8>>,
     send_idx: usize,
-    receipt_reasm: Reassembler,
-    receipt: Vec<u8>,
+    result: Option<NfcResult>,
 }
 
 impl CardSession {
-    /// Create a session that will fragment its outgoing wire into `max_chunk`-byte frames. Pass
-    /// [`DEFAULT_MAX_CHUNK`](super::DEFAULT_MAX_CHUNK) in production; tests use small values to force
-    /// multi-frame paths.
     pub fn new(max_chunk: usize) -> Self {
         CardSession {
             state: CardState::AwaitingSelect,
             max_chunk: max_chunk.max(1),
-            reasm: Reassembler::new(),
+            request_reasm: Reassembler::new(),
+            result_reasm: Reassembler::new(),
             request: Vec::new(),
+            parsed_request: None,
+            request_id: None,
             wire_frames: Vec::new(),
             send_idx: 0,
-            receipt_reasm: Reassembler::new(),
-            receipt: Vec::new(),
+            result: None,
         }
     }
 
-    /// The received payment request, once fully collected (and until the session is reset by a
-    /// SELECT that restarts collection). This is what the app decodes to show the payer.
     pub fn request(&self) -> Option<&[u8]> {
         match self.state {
-            CardState::RequestReady | CardState::Serving | CardState::Done | CardState::Confirmed => {
-                Some(&self.request)
-            }
+            CardState::RequestReady
+            | CardState::Serving
+            | CardState::AwaitingResult
+            | CardState::Complete => Some(&self.request),
             _ => None,
         }
     }
 
-    /// True exactly when the app must make a decision: a request is held and no wire is provided yet.
     pub fn awaiting_decision(&self) -> bool {
         self.state == CardState::RequestReady
     }
 
-    /// Lifecycle phase for the payer-side UI status indicator.
     pub fn phase(&self) -> SessionPhase {
         match self.state {
             CardState::AwaitingSelect => SessionPhase::Idle,
             CardState::Collecting => SessionPhase::Linking,
             CardState::RequestReady => SessionPhase::AwaitingApproval,
             CardState::Serving => SessionPhase::Exchanging,
-            CardState::Done => SessionPhase::Settling,
-            CardState::Confirmed => SessionPhase::Complete,
+            CardState::AwaitingResult => SessionPhase::Settling,
+            CardState::Complete => SessionPhase::Complete,
             CardState::Declined => SessionPhase::Declined,
         }
     }
 
-    /// True once the merchant has pulled the entire signed wire (the wire left the phone). The final
-    /// outcome is not known until [`receipt`](Self::receipt) arrives.
+    /// True after the final bundle frame left the payer, including after the result completes.
+    pub fn wire_delivered(&self) -> bool {
+        matches!(self.state, CardState::AwaitingResult | CardState::Complete)
+    }
+
+    /// True only after a valid merchant result was received and verified.
     pub fn is_complete(&self) -> bool {
-        matches!(self.state, CardState::Done | CardState::Confirmed)
+        self.state == CardState::Complete
     }
 
-    /// The merchant's settlement receipt bytes, once it has arrived (decode with
-    /// [`crate::Receipt::from_bytes`]). `None` until then. This is how the *offline* payer learns
-    /// whether the payment settled.
-    pub fn receipt(&self) -> Option<&[u8]> {
-        if self.state == CardState::Confirmed { Some(&self.receipt) } else { None }
+    pub fn result(&self) -> Option<&NfcResult> {
+        self.result.as_ref()
     }
 
-    /// True once the receipt has arrived (the tap is fully complete).
-    pub fn is_confirmed(&self) -> bool {
-        self.state == CardState::Confirmed
-    }
-
-    /// Approve: supply the offline-signed wire to serve to the reader. Must be called in the
-    /// `RequestReady` state (there is a held request and no decision yet); otherwise `WrongState`.
-    /// The wire is validated by fragmenting it — an empty or over-large wire is a typed error.
+    /// Approve with a DPN2 bundle. The envelope payloads remain opaque, but the bundle framing is
+    /// validated and its request id is retained to bind the later merchant result.
     pub fn provide_wire(&mut self, wire: &[u8]) -> Result<(), NfcError> {
         if self.state != CardState::RequestReady {
             return Err(NfcError::WrongState);
         }
-        self.wire_frames = frame::fragment(wire, self.max_chunk)?;
+        let request = request_from_transport(&self.request)?;
+        let bundle = NfcBundle::decode(wire)?;
+        let frames = frame::fragment(wire, self.max_chunk)?;
+
+        self.parsed_request = Some(request);
+        self.request_id = Some(bundle.request_id);
+        self.wire_frames = frames;
         self.send_idx = 0;
         self.state = CardState::Serving;
         Ok(())
     }
 
-    /// Decline: the payer rejected the payment. Every subsequent pull returns `DECLINED`. Valid from
-    /// `Collecting`/`RequestReady`; a no-op-safe `WrongState` otherwise.
     pub fn decline(&mut self) -> Result<(), NfcError> {
         match self.state {
             CardState::Collecting | CardState::RequestReady => {
@@ -134,29 +122,27 @@ impl CardSession {
         }
     }
 
-    /// The on-the-wire phase byte reported in the SELECT greeting (distinct from the UI-facing
-    /// [`SessionPhase`](super::SessionPhase) returned by [`phase`](Self::phase)).
     fn wire_phase(&self) -> CardPhase {
         match self.state {
             CardState::RequestReady => CardPhase::HasRequest,
-            CardState::Serving | CardState::Done => CardPhase::Serving,
+            CardState::Serving => CardPhase::Serving,
+            CardState::AwaitingResult => CardPhase::AwaitingResult,
             _ => CardPhase::Collecting,
         }
     }
 
-    /// Process one command APDU and return the response APDU bytes. Total function: any error maps to
-    /// a status word, never a panic.
+    /// Total function over arbitrary command bytes: malformed/out-of-state commands become status
+    /// words and never panic.
     pub fn process(&mut self, command: &[u8]) -> Vec<u8> {
         let cmd = match CommandApdu::parse(command) {
             Ok(c) => c,
-            // A frame that doesn't even parse as an APDU: report a length error and hold state.
             Err(_) => return ResponseApdu::status(Sw::WRONG_LENGTH).encode(),
         };
         let resp = match (cmd.cla, cmd.ins) {
             (CLA_ISO, INS_SELECT) => self.on_select(&cmd),
             (CLA_PROP, INS_PUT_REQUEST) => self.on_put_request(&cmd),
             (CLA_PROP, INS_GET_WIRE) => self.on_get_wire(),
-            (CLA_PROP, INS_PUT_RECEIPT) => self.on_put_receipt(&cmd),
+            (CLA_PROP, INS_PUT_RESULT) => self.on_put_result(&cmd),
             (CLA_PROP, _) => ResponseApdu::status(Sw::INS_NOT_SUPPORTED),
             _ => ResponseApdu::status(Sw::CLA_NOT_SUPPORTED),
         };
@@ -167,40 +153,29 @@ impl CardSession {
         if cmd.p1 != P1_SELECT_BY_NAME || cmd.data != AID {
             return ResponseApdu::status(Sw::NOT_FOUND);
         }
-        // A SELECT (re)starts the channel. Preserve an approved wire or a held request across a
-        // re-tap; a decline is sticky (the merchant must learn it even if it re-taps before pulling);
-        // otherwise (fresh, or fully served) begin collection anew.
         match self.state {
-            // Sticky decline: refuse selection so a re-tapping reader gets the DECLINED verdict
-            // instead of silently restarting collection.
             CardState::Declined => return ResponseApdu::status(Sw::DECLINED),
-            CardState::Serving | CardState::Done | CardState::Confirmed => {
-                self.send_idx = 0;
-                self.state = CardState::Serving;
-            }
-            CardState::RequestReady => { /* keep the held request; still awaiting a decision */ }
-            _ => {
-                self.reasm = Reassembler::new();
-                self.request.clear();
-                self.state = CardState::Collecting;
-            }
+            CardState::Serving => self.send_idx = 0,
+            CardState::AwaitingResult => self.result_reasm = Reassembler::new(),
+            CardState::Complete => return ResponseApdu::status(Sw::NOT_READY),
+            CardState::RequestReady => {}
+            CardState::AwaitingSelect | CardState::Collecting => self.reset_collection(),
         }
         ResponseApdu::new(vec![PROTO_VERSION, self.wire_phase().byte()], Sw::OK)
     }
 
     fn on_put_request(&mut self, cmd: &CommandApdu) -> ResponseApdu {
         if self.state != CardState::Collecting {
-            // Request pushed before SELECT, or after we already have one: out of sequence.
             return ResponseApdu::status(Sw::NOT_READY);
         }
         let frame = match frame::Frame::parse(&cmd.data) {
-            Ok(f) => f,
+            Ok(frame) => frame,
             Err(_) => {
                 self.reset_collection();
                 return ResponseApdu::status(Sw::BAD_DATA);
             }
         };
-        match self.reasm.accept(&frame) {
+        match self.request_reasm.accept(&frame) {
             Ok(Some(payload)) => {
                 self.request = payload;
                 self.state = CardState::RequestReady;
@@ -208,8 +183,6 @@ impl CardSession {
             }
             Ok(None) => ResponseApdu::status(Sw::OK),
             Err(_) => {
-                // A framing violation mid-transfer aborts this attempt; the reader must re-SELECT
-                // and start over (which is exactly what it does on seeing a non-OK status here).
                 self.reset_collection();
                 ResponseApdu::status(Sw::BAD_DATA)
             }
@@ -217,52 +190,78 @@ impl CardSession {
     }
 
     fn reset_collection(&mut self) {
-        self.reasm = Reassembler::new();
+        self.request_reasm = Reassembler::new();
         self.request.clear();
+        self.parsed_request = None;
+        self.request_id = None;
+        self.wire_frames.clear();
+        self.send_idx = 0;
+        self.result_reasm = Reassembler::new();
+        self.result = None;
         self.state = CardState::Collecting;
     }
 
     fn on_get_wire(&mut self) -> ResponseApdu {
         match self.state {
             CardState::Declined => ResponseApdu::status(Sw::DECLINED),
-            // Awaiting a decision, or no request context at all: not ready to serve yet.
             CardState::RequestReady | CardState::AwaitingSelect | CardState::Collecting => {
                 ResponseApdu::status(Sw::NOT_READY)
             }
             CardState::Serving => {
-                let frame = self.wire_frames[self.send_idx].clone();
+                let Some(frame) = self.wire_frames.get(self.send_idx).cloned() else {
+                    return ResponseApdu::status(Sw::BAD_DATA);
+                };
                 self.send_idx += 1;
                 if self.send_idx == self.wire_frames.len() {
-                    self.state = CardState::Done;
+                    self.state = CardState::AwaitingResult;
                     ResponseApdu::new(frame, Sw::OK)
                 } else {
                     let remaining = (self.wire_frames.len() - self.send_idx).min(0xff) as u8;
                     ResponseApdu::new(frame, Sw::more(remaining))
                 }
             }
-            // Fully served already; a stray pull after completion is benign — nothing more to send.
-            CardState::Done | CardState::Confirmed => ResponseApdu::status(Sw::OK),
+            CardState::AwaitingResult | CardState::Complete => ResponseApdu::status(Sw::NOT_READY),
         }
     }
 
-    /// Accept the merchant's settlement receipt (sent after it settles online, over the same tap).
-    /// Valid only once the wire has been fully served (state `Done`); otherwise it's out of sequence.
-    fn on_put_receipt(&mut self, cmd: &CommandApdu) -> ResponseApdu {
-        if self.state != CardState::Done {
+    fn on_put_result(&mut self, cmd: &CommandApdu) -> ResponseApdu {
+        if self.state != CardState::AwaitingResult {
             return ResponseApdu::status(Sw::NOT_READY);
         }
         let frame = match frame::Frame::parse(&cmd.data) {
-            Ok(f) => f,
-            Err(_) => return ResponseApdu::status(Sw::BAD_DATA),
+            Ok(frame) => frame,
+            Err(_) => {
+                self.result_reasm = Reassembler::new();
+                return ResponseApdu::status(Sw::BAD_DATA);
+            }
         };
-        match self.receipt_reasm.accept(&frame) {
-            Ok(Some(payload)) => {
-                self.receipt = payload;
-                self.state = CardState::Confirmed;
-                ResponseApdu::status(Sw::OK)
+        match self.result_reasm.accept(&frame) {
+            Ok(Some(bytes)) => {
+                let verified = self
+                    .parsed_request
+                    .as_ref()
+                    .zip(self.request_id.as_ref())
+                    .ok_or(NfcError::BadMessage)
+                    .and_then(|(request, request_id)| {
+                        NfcResult::parse_and_verify(&bytes, &request.to, &request.nonce, request_id)
+                    });
+                match verified {
+                    Ok(result) => {
+                        self.result = Some(result);
+                        self.state = CardState::Complete;
+                        ResponseApdu::status(Sw::OK)
+                    }
+                    Err(_) => {
+                        self.result_reasm = Reassembler::new();
+                        ResponseApdu::status(Sw::BAD_DATA)
+                    }
+                }
             }
             Ok(None) => ResponseApdu::status(Sw::OK),
-            Err(_) => ResponseApdu::status(Sw::BAD_DATA),
+            Err(_) => {
+                self.result_reasm = Reassembler::new();
+                ResponseApdu::status(Sw::BAD_DATA)
+            }
         }
     }
 }

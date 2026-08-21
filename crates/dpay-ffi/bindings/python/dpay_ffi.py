@@ -514,17 +514,17 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_keypair_from_secret() != 64641:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_dpay_ffi_checksum_func_nfc_decode_receipt() != 25249:
+    if lib.uniffi_dpay_ffi_checksum_func_nfc_bundle_bytes() != 31882:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_nfc_decode_bundle() != 4067:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_nfc_decode_request() != 42034:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_nfc_default_max_chunk() != 39928:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_dpay_ffi_checksum_func_nfc_receipt_bytes() != 22674:
-        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_dpay_ffi_checksum_func_nfc_receipt_codes() != 63617:
-        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_nfc_request_bytes() != 53714:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_nfc_result_bytes() != 64123:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_parse_amount() != 56752:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -532,19 +532,19 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_method_fficardsession_decline() != 61902:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_dpay_ffi_checksum_method_fficardsession_is_complete() != 56233:
-        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_dpay_ffi_checksum_method_fficardsession_is_confirmed() != 18987:
+    if lib.uniffi_dpay_ffi_checksum_method_fficardsession_is_complete() != 29064:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_method_fficardsession_phase() != 35411:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_method_fficardsession_process() != 33759:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_dpay_ffi_checksum_method_fficardsession_provide_wire() != 64820:
-        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_dpay_ffi_checksum_method_fficardsession_receipt() != 54809:
+    if lib.uniffi_dpay_ffi_checksum_method_fficardsession_provide_wire() != 22071:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_method_fficardsession_request() != 31957:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_method_fficardsession_result() != 6358:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_method_fficardsession_wire_delivered() != 13127:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_handle_response() != 18693:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -552,9 +552,11 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_phase() != 45891:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_provide_receipt() != 18499:
+    if lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_provide_result() != 38131:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_wire() != 55269:
+    if lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_reset_link() != 55156:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_wire() != 58726:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_constructor_fficardsession_new() != 58439:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -696,11 +698,6 @@ _UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_is_complete.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_is_complete.restype = ctypes.c_int8
-_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_is_confirmed.argtypes = (
-    ctypes.c_void_p,
-    ctypes.POINTER(_UniffiRustCallStatus),
-)
-_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_is_confirmed.restype = ctypes.c_int8
 _UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_phase.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -718,16 +715,21 @@ _UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_provide_wire.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_provide_wire.restype = None
-_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_receipt.argtypes = (
-    ctypes.c_void_p,
-    ctypes.POINTER(_UniffiRustCallStatus),
-)
-_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_receipt.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_request.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_request.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_result.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_result.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_wire_delivered.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_wire_delivered.restype = ctypes.c_int8
 _UniffiLib.uniffi_dpay_ffi_fn_clone_ffireaderconductor.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -760,12 +762,17 @@ _UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_phase.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_phase.restype = _UniffiRustBuffer
-_UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_provide_receipt.argtypes = (
+_UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_provide_result.argtypes = (
     ctypes.c_void_p,
     _UniffiRustBuffer,
     ctypes.POINTER(_UniffiRustCallStatus),
 )
-_UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_provide_receipt.restype = None
+_UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_provide_result.restype = None
+_UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_reset_link.argtypes = (
+    ctypes.c_void_p,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_reset_link.restype = None
 _UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_wire.argtypes = (
     ctypes.c_void_p,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -947,11 +954,17 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_keypair_from_secret.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_keypair_from_secret.restype = _UniffiRustBuffer
-_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_decode_receipt.argtypes = (
+_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_bundle_bytes.argtypes = (
+    _UniffiRustBuffer,
     _UniffiRustBuffer,
     ctypes.POINTER(_UniffiRustCallStatus),
 )
-_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_decode_receipt.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_bundle_bytes.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_decode_bundle.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_decode_bundle.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_func_nfc_decode_request.argtypes = (
     _UniffiRustBuffer,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -961,16 +974,6 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_nfc_default_max_chunk.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_nfc_default_max_chunk.restype = ctypes.c_uint32
-_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_receipt_bytes.argtypes = (
-    _UniffiRustBuffer,
-    ctypes.c_uint8,
-    ctypes.POINTER(_UniffiRustCallStatus),
-)
-_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_receipt_bytes.restype = _UniffiRustBuffer
-_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_receipt_codes.argtypes = (
-    ctypes.POINTER(_UniffiRustCallStatus),
-)
-_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_receipt_codes.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_func_nfc_request_bytes.argtypes = (
     _UniffiRustBuffer,
     ctypes.c_uint64,
@@ -982,6 +985,14 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_nfc_request_bytes.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_nfc_request_bytes.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_result_bytes.argtypes = (
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_result_bytes.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_func_parse_amount.argtypes = (
     _UniffiRustBuffer,
     ctypes.c_uint8,
@@ -1337,24 +1348,24 @@ _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_withdraw_eth_arg.restype = ctypes.c
 _UniffiLib.uniffi_dpay_ffi_checksum_func_keypair_from_secret.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_keypair_from_secret.restype = ctypes.c_uint16
-_UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_decode_receipt.argtypes = (
+_UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_bundle_bytes.argtypes = (
 )
-_UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_decode_receipt.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_bundle_bytes.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_decode_bundle.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_decode_bundle.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_decode_request.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_decode_request.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_default_max_chunk.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_default_max_chunk.restype = ctypes.c_uint16
-_UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_receipt_bytes.argtypes = (
-)
-_UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_receipt_bytes.restype = ctypes.c_uint16
-_UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_receipt_codes.argtypes = (
-)
-_UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_receipt_codes.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_request_bytes.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_request_bytes.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_result_bytes.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_result_bytes.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_parse_amount.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_parse_amount.restype = ctypes.c_uint16
@@ -1367,9 +1378,6 @@ _UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_decline.restype = ctyp
 _UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_is_complete.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_is_complete.restype = ctypes.c_uint16
-_UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_is_confirmed.argtypes = (
-)
-_UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_is_confirmed.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_phase.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_phase.restype = ctypes.c_uint16
@@ -1379,12 +1387,15 @@ _UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_process.restype = ctyp
 _UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_provide_wire.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_provide_wire.restype = ctypes.c_uint16
-_UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_receipt.argtypes = (
-)
-_UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_receipt.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_request.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_request.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_result.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_result.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_wire_delivered.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_wire_delivered.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_handle_response.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_handle_response.restype = ctypes.c_uint16
@@ -1394,9 +1405,12 @@ _UniffiLib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_next_command.resty
 _UniffiLib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_phase.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_phase.restype = ctypes.c_uint16
-_UniffiLib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_provide_receipt.argtypes = (
+_UniffiLib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_provide_result.argtypes = (
 )
-_UniffiLib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_provide_receipt.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_provide_result.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_reset_link.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_reset_link.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_wire.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_method_ffireaderconductor_wire.restype = ctypes.c_uint16
@@ -1931,6 +1945,100 @@ class _UniffiConverterTypeKeyPair(_UniffiConverterRustBuffer):
         _UniffiConverterBytes.write(value.public, buf)
 
 
+class NfcBundleData:
+    """
+    Decoded DPN2 envelope bundle. `request_id` is the update envelope's IC request id.
+    """
+
+    request_id: "bytes"
+    update: "bytes"
+    read_state: "bytes"
+    def __init__(self, *, request_id: "bytes", update: "bytes", read_state: "bytes"):
+        self.request_id = request_id
+        self.update = update
+        self.read_state = read_state
+
+    def __str__(self):
+        return "NfcBundleData(request_id={}, update={}, read_state={})".format(self.request_id, self.update, self.read_state)
+
+    def __eq__(self, other):
+        if self.request_id != other.request_id:
+            return False
+        if self.update != other.update:
+            return False
+        if self.read_state != other.read_state:
+            return False
+        return True
+
+class _UniffiConverterTypeNfcBundleData(_UniffiConverterRustBuffer):
+    @staticmethod
+    def read(buf):
+        return NfcBundleData(
+            request_id=_UniffiConverterBytes.read(buf),
+            update=_UniffiConverterBytes.read(buf),
+            read_state=_UniffiConverterBytes.read(buf),
+        )
+
+    @staticmethod
+    def check_lower(value):
+        _UniffiConverterBytes.check_lower(value.request_id)
+        _UniffiConverterBytes.check_lower(value.update)
+        _UniffiConverterBytes.check_lower(value.read_state)
+
+    @staticmethod
+    def write(value, buf):
+        _UniffiConverterBytes.write(value.request_id, buf)
+        _UniffiConverterBytes.write(value.update, buf)
+        _UniffiConverterBytes.write(value.read_state, buf)
+
+
+class NfcCardResult:
+    """
+    The verified result retained by the payer card session.
+    """
+
+    status: "NfcResultStatus"
+    nonce: "bytes"
+    request_id: "bytes"
+    def __init__(self, *, status: "NfcResultStatus", nonce: "bytes", request_id: "bytes"):
+        self.status = status
+        self.nonce = nonce
+        self.request_id = request_id
+
+    def __str__(self):
+        return "NfcCardResult(status={}, nonce={}, request_id={})".format(self.status, self.nonce, self.request_id)
+
+    def __eq__(self, other):
+        if self.status != other.status:
+            return False
+        if self.nonce != other.nonce:
+            return False
+        if self.request_id != other.request_id:
+            return False
+        return True
+
+class _UniffiConverterTypeNfcCardResult(_UniffiConverterRustBuffer):
+    @staticmethod
+    def read(buf):
+        return NfcCardResult(
+            status=_UniffiConverterTypeNfcResultStatus.read(buf),
+            nonce=_UniffiConverterBytes.read(buf),
+            request_id=_UniffiConverterBytes.read(buf),
+        )
+
+    @staticmethod
+    def check_lower(value):
+        _UniffiConverterTypeNfcResultStatus.check_lower(value.status)
+        _UniffiConverterBytes.check_lower(value.nonce)
+        _UniffiConverterBytes.check_lower(value.request_id)
+
+    @staticmethod
+    def write(value, buf):
+        _UniffiConverterTypeNfcResultStatus.write(value.status, buf)
+        _UniffiConverterBytes.write(value.nonce, buf)
+        _UniffiConverterBytes.write(value.request_id, buf)
+
+
 class PaymentRequestData:
     """
     The merchant's request, as scanned by the payer. Mirrors [`dpay_core::PaymentRequest`]: who to
@@ -2015,101 +2123,6 @@ class _UniffiConverterTypePaymentRequestData(_UniffiConverterRustBuffer):
         _UniffiConverterUInt32.write(value.currency, buf)
         _UniffiConverterString.write(value.to_name, buf)
         _UniffiConverterString.write(value.memo, buf)
-
-
-class ReceiptCodes:
-    """
-    The receipt status codes from the core, so callers don't hard-code them.
-    """
-
-    settled: "int"
-    rejected: "int"
-    unreachable: "int"
-    def __init__(self, *, settled: "int", rejected: "int", unreachable: "int"):
-        self.settled = settled
-        self.rejected = rejected
-        self.unreachable = unreachable
-
-    def __str__(self):
-        return "ReceiptCodes(settled={}, rejected={}, unreachable={})".format(self.settled, self.rejected, self.unreachable)
-
-    def __eq__(self, other):
-        if self.settled != other.settled:
-            return False
-        if self.rejected != other.rejected:
-            return False
-        if self.unreachable != other.unreachable:
-            return False
-        return True
-
-class _UniffiConverterTypeReceiptCodes(_UniffiConverterRustBuffer):
-    @staticmethod
-    def read(buf):
-        return ReceiptCodes(
-            settled=_UniffiConverterUInt8.read(buf),
-            rejected=_UniffiConverterUInt8.read(buf),
-            unreachable=_UniffiConverterUInt8.read(buf),
-        )
-
-    @staticmethod
-    def check_lower(value):
-        _UniffiConverterUInt8.check_lower(value.settled)
-        _UniffiConverterUInt8.check_lower(value.rejected)
-        _UniffiConverterUInt8.check_lower(value.unreachable)
-
-    @staticmethod
-    def write(value, buf):
-        _UniffiConverterUInt8.write(value.settled, buf)
-        _UniffiConverterUInt8.write(value.rejected, buf)
-        _UniffiConverterUInt8.write(value.unreachable, buf)
-
-
-class ReceiptData:
-    """
-    A settlement receipt as fields. `status`: 0 = settled, 1 = the ledger rejected it, 2 = the
-    merchant couldn't reach the ledger (see [`nfc_receipt_codes`]); `settled` == (status == 0).
-    """
-
-    nonce: "bytes"
-    status: "int"
-    settled: "bool"
-    def __init__(self, *, nonce: "bytes", status: "int", settled: "bool"):
-        self.nonce = nonce
-        self.status = status
-        self.settled = settled
-
-    def __str__(self):
-        return "ReceiptData(nonce={}, status={}, settled={})".format(self.nonce, self.status, self.settled)
-
-    def __eq__(self, other):
-        if self.nonce != other.nonce:
-            return False
-        if self.status != other.status:
-            return False
-        if self.settled != other.settled:
-            return False
-        return True
-
-class _UniffiConverterTypeReceiptData(_UniffiConverterRustBuffer):
-    @staticmethod
-    def read(buf):
-        return ReceiptData(
-            nonce=_UniffiConverterBytes.read(buf),
-            status=_UniffiConverterUInt8.read(buf),
-            settled=_UniffiConverterBool.read(buf),
-        )
-
-    @staticmethod
-    def check_lower(value):
-        _UniffiConverterBytes.check_lower(value.nonce)
-        _UniffiConverterUInt8.check_lower(value.status)
-        _UniffiConverterBool.check_lower(value.settled)
-
-    @staticmethod
-    def write(value, buf):
-        _UniffiConverterBytes.write(value.nonce, buf)
-        _UniffiConverterUInt8.write(value.status, buf)
-        _UniffiConverterBool.write(value.settled, buf)
 
 
 # DpayError
@@ -2342,27 +2355,31 @@ class NfcPhase(enum.Enum):
     Lifecycle phase of a tap, for a live UI status indicator. Mirrors [`dpay_core::nfc::SessionPhase`]
     (lifecycle only — failures surface as thrown `DpayError`s / a platform tag-loss, never as a
     phase). The app renders a spinner on `Linking`/`Exchanging`, a review prompt on
-    `AwaitingApproval`, and a terminal mark on `Complete` / `Declined`.
+    `AwaitingApproval`, and then settles online after `Settling` / stops on `Declined`.
     """
 
     IDLE = 0
-    
+
     LINKING = 1
-    
+
     EXCHANGING = 2
-    
+
     AWAITING_APPROVAL = 3
-    
+
     SETTLING = 4
     """
-    The wire was transferred; the merchant is settling online and the payer awaits the receipt.
+    The bundle was transferred; the merchant is settling it before returning a signed result.
     """
 
-    
+
     COMPLETE = 5
-    
+    """
+    The payer verified the merchant-signed result.
+    """
+
+
     DECLINED = 6
-    
+
 
 
 class _UniffiConverterTypeNfcPhase(_UniffiConverterRustBuffer):
@@ -2426,6 +2443,56 @@ class _UniffiConverterTypeNfcPhase(_UniffiConverterRustBuffer):
 
 
 
+class NfcResultStatus(enum.Enum):
+    """
+    Merchant settlement outcome returned to the offline payer.
+    """
+
+    SETTLED = 0
+
+    REJECTED = 1
+
+    UNKNOWN = 2
+
+
+
+class _UniffiConverterTypeNfcResultStatus(_UniffiConverterRustBuffer):
+    @staticmethod
+    def read(buf):
+        variant = buf.read_i32()
+        if variant == 1:
+            return NfcResultStatus.SETTLED
+        if variant == 2:
+            return NfcResultStatus.REJECTED
+        if variant == 3:
+            return NfcResultStatus.UNKNOWN
+        raise InternalError("Raw enum value doesn't match any cases")
+
+    @staticmethod
+    def check_lower(value):
+        if value == NfcResultStatus.SETTLED:
+            return
+        if value == NfcResultStatus.REJECTED:
+            return
+        if value == NfcResultStatus.UNKNOWN:
+            return
+        raise ValueError(value)
+
+    @staticmethod
+    def write(value, buf):
+        if value == NfcResultStatus.SETTLED:
+            buf.write_i32(1)
+        if value == NfcResultStatus.REJECTED:
+            buf.write_i32(2)
+        if value == NfcResultStatus.UNKNOWN:
+            buf.write_i32(3)
+
+
+
+
+
+
+
 class NfcStep(enum.Enum):
     """
     What the merchant reader should do after feeding a card response — a flat enum (no associated
@@ -2438,40 +2505,45 @@ class NfcStep(enum.Enum):
     Send the next command from `next_command`.
     """
 
-    
+
     PENDING = 1
     """
     The payer is still deciding — keep polling / re-tap (`next_command` re-SELECTs).
     """
 
-    
+
     DONE = 2
     """
-    The signed wire is ready; fetch it with `wire()`, then verify + submit online. Afterwards
-    call `provideReceipt` to hand the outcome back to the payer over the same tap.
+    The signed DPN2 bundle is ready; fetch it with `wire()`, settle, then provide a result.
     """
 
-    
-    CONFIRMED = 3
+
+    AWAITING_RESULT = 3
     """
-    The settlement receipt was delivered to the payer — the tap is fully complete.
+    A re-tapped payer already received the bundle; provide and return only the result.
     """
 
-    
-    DECLINED = 4
+
+    CONFIRMED = 4
+    """
+    The payer accepted and verified the merchant-signed result.
+    """
+
+
+    DECLINED = 5
     """
     The payer declined; abandon the sale.
     """
 
-    
-    WAITING_FOR_PAYER = 5
+
+    WAITING_FOR_PAYER = 6
     """
     The card answered NOT_READY at SELECT: a dpay card is routed but no payer session is armed
     (the payer isn't in Pay mode). Keep polling / re-SELECT via `next_command`, or surface an
     actionable message and stop.
     """
 
-    
+
 
 
 class _UniffiConverterTypeNfcStep(_UniffiConverterRustBuffer):
@@ -2485,10 +2557,12 @@ class _UniffiConverterTypeNfcStep(_UniffiConverterRustBuffer):
         if variant == 3:
             return NfcStep.DONE
         if variant == 4:
-            return NfcStep.CONFIRMED
+            return NfcStep.AWAITING_RESULT
         if variant == 5:
-            return NfcStep.DECLINED
+            return NfcStep.CONFIRMED
         if variant == 6:
+            return NfcStep.DECLINED
+        if variant == 7:
             return NfcStep.WAITING_FOR_PAYER
         raise InternalError("Raw enum value doesn't match any cases")
 
@@ -2499,6 +2573,8 @@ class _UniffiConverterTypeNfcStep(_UniffiConverterRustBuffer):
         if value == NfcStep.PENDING:
             return
         if value == NfcStep.DONE:
+            return
+        if value == NfcStep.AWAITING_RESULT:
             return
         if value == NfcStep.CONFIRMED:
             return
@@ -2516,12 +2592,14 @@ class _UniffiConverterTypeNfcStep(_UniffiConverterRustBuffer):
             buf.write_i32(2)
         if value == NfcStep.DONE:
             buf.write_i32(3)
-        if value == NfcStep.CONFIRMED:
+        if value == NfcStep.AWAITING_RESULT:
             buf.write_i32(4)
-        if value == NfcStep.DECLINED:
+        if value == NfcStep.CONFIRMED:
             buf.write_i32(5)
-        if value == NfcStep.WAITING_FOR_PAYER:
+        if value == NfcStep.DECLINED:
             buf.write_i32(6)
+        if value == NfcStep.WAITING_FOR_PAYER:
+            buf.write_i32(7)
 
 
 
@@ -2608,6 +2686,33 @@ class _UniffiConverterOptionalBytes(_UniffiConverterRustBuffer):
 
 
 
+class _UniffiConverterOptionalTypeNfcCardResult(_UniffiConverterRustBuffer):
+    @classmethod
+    def check_lower(cls, value):
+        if value is not None:
+            _UniffiConverterTypeNfcCardResult.check_lower(value)
+
+    @classmethod
+    def write(cls, value, buf):
+        if value is None:
+            buf.write_u8(0)
+            return
+
+        buf.write_u8(1)
+        _UniffiConverterTypeNfcCardResult.write(value, buf)
+
+    @classmethod
+    def read(cls, buf):
+        flag = buf.read_u8()
+        if flag == 0:
+            return None
+        elif flag == 1:
+            return _UniffiConverterTypeNfcCardResult.read(buf)
+        else:
+            raise InternalError("Unexpected flag byte for optional type")
+
+
+
 class _UniffiConverterSequenceBytes(_UniffiConverterRustBuffer):
     @classmethod
     def check_lower(cls, value):
@@ -2678,13 +2783,7 @@ class FfiCardSessionProtocol(typing.Protocol):
         raise NotImplementedError
     def is_complete(self, ):
         """
-        True once the merchant has pulled the entire signed wire (the wire has left the phone).
-        """
-
-        raise NotImplementedError
-    def is_confirmed(self, ):
-        """
-        True once the receipt has arrived (the tap is fully complete).
+        True only after the merchant's signed result was verified by the payer.
         """
 
         raise NotImplementedError
@@ -2702,17 +2801,8 @@ class FfiCardSessionProtocol(typing.Protocol):
         raise NotImplementedError
     def provide_wire(self, wire: "bytes"):
         """
-        Approve: supply the offline-signed payload to serve — an opaque signed-payload handoff
-        (IC envelope post-cutover). Errors (`NfcWrongState`) unless a request is held and no
-        decision has been made; the payload is validated as it is framed.
-        """
-
-        raise NotImplementedError
-    def receipt(self, ):
-        """
-        The merchant's settlement receipt bytes once it arrives over the tap (decode with
-        [`nfc_decode_receipt`]) — how the *offline* payer learns whether the payment settled. `None`
-        until it arrives.
+        Approve: supply the DPN2 update/read_state bundle to serve. Errors (`NfcWrongState`) unless
+        a request is held and no decision has been made; the bundle and framing are validated.
         """
 
         raise NotImplementedError
@@ -2720,6 +2810,18 @@ class FfiCardSessionProtocol(typing.Protocol):
         """
         The full received request bytes, once collected (decode with [`decode_request`] shifted — see
         [`nfc_decode_request`]), or `None` while still collecting.
+        """
+
+        raise NotImplementedError
+    def result(self, ):
+        """
+        The verified merchant result, available only after `is_complete()` becomes true.
+        """
+
+        raise NotImplementedError
+    def wire_delivered(self, ):
+        """
+        True once the complete DPN2 bundle has left the payer, even while the result is pending.
         """
 
         raise NotImplementedError
@@ -2739,7 +2841,7 @@ class FfiCardSession():
         """
 
         _UniffiConverterUInt32.check_lower(max_chunk)
-        
+
         self._pointer = _uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_constructor_fficardsession_new,
         _UniffiConverterUInt32.lower(max_chunk))
 
@@ -2789,24 +2891,11 @@ class FfiCardSession():
 
     def is_complete(self, ) -> "bool":
         """
-        True once the merchant has pulled the entire signed wire (the wire has left the phone).
+        True only after the merchant's signed result was verified by the payer.
         """
 
         return _UniffiConverterBool.lift(
             _uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_is_complete,self._uniffi_clone_pointer(),)
-        )
-
-
-
-
-
-    def is_confirmed(self, ) -> "bool":
-        """
-        True once the receipt has arrived (the tap is fully complete).
-        """
-
-        return _UniffiConverterBool.lift(
-            _uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_is_confirmed,self._uniffi_clone_pointer(),)
         )
 
 
@@ -2832,7 +2921,7 @@ class FfiCardSession():
         """
 
         _UniffiConverterBytes.check_lower(command)
-        
+
         return _UniffiConverterBytes.lift(
             _uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_process,self._uniffi_clone_pointer(),
         _UniffiConverterBytes.lower(command))
@@ -2844,31 +2933,15 @@ class FfiCardSession():
 
     def provide_wire(self, wire: "bytes") -> None:
         """
-        Approve: supply the offline-signed payload to serve — an opaque signed-payload handoff
-        (IC envelope post-cutover). Errors (`NfcWrongState`) unless a request is held and no
-        decision has been made; the payload is validated as it is framed.
+        Approve: supply the DPN2 update/read_state bundle to serve. Errors (`NfcWrongState`) unless
+        a request is held and no decision has been made; the bundle and framing are validated.
         """
 
         _UniffiConverterBytes.check_lower(wire)
-        
+
         _uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_provide_wire,self._uniffi_clone_pointer(),
         _UniffiConverterBytes.lower(wire))
 
-
-
-
-
-
-    def receipt(self, ) -> "typing.Optional[bytes]":
-        """
-        The merchant's settlement receipt bytes once it arrives over the tap (decode with
-        [`nfc_decode_receipt`]) — how the *offline* payer learns whether the payment settled. `None`
-        until it arrives.
-        """
-
-        return _UniffiConverterOptionalBytes.lift(
-            _uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_receipt,self._uniffi_clone_pointer(),)
-        )
 
 
 
@@ -2882,6 +2955,32 @@ class FfiCardSession():
 
         return _UniffiConverterOptionalBytes.lift(
             _uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_request,self._uniffi_clone_pointer(),)
+        )
+
+
+
+
+
+    def result(self, ) -> "typing.Optional[NfcCardResult]":
+        """
+        The verified merchant result, available only after `is_complete()` becomes true.
+        """
+
+        return _UniffiConverterOptionalTypeNfcCardResult.lift(
+            _uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_result,self._uniffi_clone_pointer(),)
+        )
+
+
+
+
+
+    def wire_delivered(self, ) -> "bool":
+        """
+        True once the complete DPN2 bundle has left the payer, even while the result is pending.
+        """
+
+        return _UniffiConverterBool.lift(
+            _uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_wire_delivered,self._uniffi_clone_pointer(),)
         )
 
 
@@ -2942,18 +3041,22 @@ class FfiReaderConductorProtocol(typing.Protocol):
         """
 
         raise NotImplementedError
-    def provide_receipt(self, receipt: "bytes"):
+    def provide_result(self, result: "bytes"):
         """
-        After `Done` and settling online, hand back the settlement receipt (build it with
-        [`nfc_receipt_bytes`]) so the offline payer learns the outcome. Then resume the loop:
-        `next_command` yields the receipt push, ending in a `Confirmed` step.
+        Supply the fixed merchant-signed result after `Done` (or `AwaitingResult` on a re-tap).
+        """
+
+        raise NotImplementedError
+    def reset_link(self, ):
+        """
+        Reset an interrupted RF link. The next command re-SELECTs and restarts any partial frame
+        transfer without discarding the request, completed bundle, or queued result.
         """
 
         raise NotImplementedError
     def wire(self, ):
         """
-        The reassembled payload once the exchange reached `Done`, else `None` — an opaque
-        signed-payload handoff (IC envelope post-cutover).
+        The byte-identical DPN2 bundle once the exchange reached `Done`, else `None`.
         """
 
         raise NotImplementedError
@@ -2972,9 +3075,9 @@ class FfiReaderConductor():
         """
 
         _UniffiConverterBytes.check_lower(request)
-        
+
         _UniffiConverterUInt32.check_lower(max_chunk)
-        
+
         self._pointer = _uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_constructor_ffireaderconductor_new,
         _UniffiConverterBytes.lower(request),
         _UniffiConverterUInt32.lower(max_chunk))
@@ -3005,7 +3108,7 @@ class FfiReaderConductor():
         """
 
         _UniffiConverterBytes.check_lower(response)
-        
+
         return _UniffiConverterTypeNfcStep.lift(
             _uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_handle_response,self._uniffi_clone_pointer(),
         _UniffiConverterBytes.lower(response))
@@ -3042,17 +3145,28 @@ class FfiReaderConductor():
 
 
 
-    def provide_receipt(self, receipt: "bytes") -> None:
+    def provide_result(self, result: "bytes") -> None:
         """
-        After `Done` and settling online, hand back the settlement receipt (build it with
-        [`nfc_receipt_bytes`]) so the offline payer learns the outcome. Then resume the loop:
-        `next_command` yields the receipt push, ending in a `Confirmed` step.
+        Supply the fixed merchant-signed result after `Done` (or `AwaitingResult` on a re-tap).
         """
 
-        _UniffiConverterBytes.check_lower(receipt)
-        
-        _uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_provide_receipt,self._uniffi_clone_pointer(),
-        _UniffiConverterBytes.lower(receipt))
+        _UniffiConverterBytes.check_lower(result)
+
+        _uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_provide_result,self._uniffi_clone_pointer(),
+        _UniffiConverterBytes.lower(result))
+
+
+
+
+
+
+    def reset_link(self, ) -> None:
+        """
+        Reset an interrupted RF link. The next command re-SELECTs and restarts any partial frame
+        transfer without discarding the request, completed bundle, or queued result.
+        """
+
+        _uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_reset_link,self._uniffi_clone_pointer(),)
 
 
 
@@ -3061,8 +3175,7 @@ class FfiReaderConductor():
 
     def wire(self, ) -> "typing.Optional[bytes]":
         """
-        The reassembled payload once the exchange reached `Done`, else `None` — an opaque
-        signed-payload handoff (IC envelope post-cutover).
+        The byte-identical DPN2 bundle once the exchange reached `Done`, else `None`.
         """
 
         return _UniffiConverterOptionalBytes.lift(
@@ -3111,7 +3224,7 @@ def decode_request(qr: "str") -> "PaymentRequestData":
     """
 
     _UniffiConverterString.check_lower(qr)
-    
+
     return _UniffiConverterTypePaymentRequestData.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_decode_request,
         _UniffiConverterString.lower(qr)))
 
@@ -3127,19 +3240,19 @@ def encode_request(to: "bytes",amount: "int",nonce: "bytes",expiry: "int",curren
     """
 
     _UniffiConverterBytes.check_lower(to)
-    
+
     _UniffiConverterUInt64.check_lower(amount)
-    
+
     _UniffiConverterBytes.check_lower(nonce)
-    
+
     _UniffiConverterUInt64.check_lower(expiry)
-    
+
     _UniffiConverterUInt32.check_lower(currency)
-    
+
     _UniffiConverterString.check_lower(to_name)
-    
+
     _UniffiConverterString.check_lower(memo)
-    
+
     return _UniffiConverterString.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_encode_request,
         _UniffiConverterBytes.lower(to),
         _UniffiConverterUInt64.lower(amount),
@@ -3159,9 +3272,9 @@ def format_amount(raw: "int",decimals: "int") -> "str":
     """
 
     _UniffiConverterUInt64.check_lower(raw)
-    
+
     _UniffiConverterUInt8.check_lower(decimals)
-    
+
     return _UniffiConverterString.lift(_uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_func_format_amount,
         _UniffiConverterUInt64.lower(raw),
         _UniffiConverterUInt8.lower(decimals)))
@@ -3182,21 +3295,21 @@ def icp_approve_arg(spender_owner_text: "str",spender_subaccount_hex: "typing.Op
     """
 
     _UniffiConverterString.check_lower(spender_owner_text)
-    
+
     _UniffiConverterOptionalString.check_lower(spender_subaccount_hex)
-    
+
     _UniffiConverterOptionalString.check_lower(from_subaccount_hex)
-    
+
     _UniffiConverterOptionalString.check_lower(amount)
-    
+
     _UniffiConverterOptionalString.check_lower(expected_allowance)
-    
+
     _UniffiConverterOptionalString.check_lower(expires_at_ns)
-    
+
     _UniffiConverterOptionalString.check_lower(memo_hex)
-    
+
     _UniffiConverterOptionalString.check_lower(fee)
-    
+
     return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_approve_arg,
         _UniffiConverterString.lower(spender_owner_text),
         _UniffiConverterOptionalString.lower(spender_subaccount_hex),
@@ -3214,9 +3327,9 @@ def icp_balance_of_arg(owner_text: "str",subaccount_hex: "typing.Optional[str]")
     """
 
     _UniffiConverterString.check_lower(owner_text)
-    
+
     _UniffiConverterOptionalString.check_lower(subaccount_hex)
-    
+
     return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_balance_of_arg,
         _UniffiConverterString.lower(owner_text),
         _UniffiConverterOptionalString.lower(subaccount_hex)))
@@ -3224,7 +3337,7 @@ def icp_balance_of_arg(owner_text: "str",subaccount_hex: "typing.Optional[str]")
 
 def icp_decode_eip1559_price(arg: "bytes") -> "IcpEip1559Price":
     _UniffiConverterBytes.check_lower(arg)
-    
+
     return _UniffiConverterTypeIcpEip1559Price.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_eip1559_price,
         _UniffiConverterBytes.lower(arg)))
 
@@ -3235,7 +3348,7 @@ def icp_decode_int(arg: "bytes") -> "str":
     """
 
     _UniffiConverterBytes.check_lower(arg)
-    
+
     return _UniffiConverterString.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_int,
         _UniffiConverterBytes.lower(arg)))
 
@@ -3249,23 +3362,23 @@ def icp_decode_minter_ok(arg: "bytes") -> "IcpTransferOutcome":
     """
 
     _UniffiConverterBytes.check_lower(arg)
-    
+
     return _UniffiConverterTypeIcpTransferOutcome.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_minter_ok,
         _UniffiConverterBytes.lower(arg)))
 
 
 def icp_decode_query(body: "bytes") -> "IcpQueryReply":
     _UniffiConverterBytes.check_lower(body)
-    
+
     return _UniffiConverterTypeIcpQueryReply.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_query,
         _UniffiConverterBytes.lower(body)))
 
 
 def icp_decode_read_state(body: "bytes",request_ids: "typing.List[bytes]") -> "IcpStateRead":
     _UniffiConverterBytes.check_lower(body)
-    
+
     _UniffiConverterSequenceBytes.check_lower(request_ids)
-    
+
     return _UniffiConverterTypeIcpStateRead.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_read_state,
         _UniffiConverterBytes.lower(body),
         _UniffiConverterSequenceBytes.lower(request_ids)))
@@ -3277,14 +3390,14 @@ def icp_decode_text(arg: "bytes") -> "str":
     """
 
     _UniffiConverterBytes.check_lower(arg)
-    
+
     return _UniffiConverterString.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_text,
         _UniffiConverterBytes.lower(arg)))
 
 
 def icp_decode_transfer_result(arg: "bytes") -> "IcpTransferOutcome":
     _UniffiConverterBytes.check_lower(arg)
-    
+
     return _UniffiConverterTypeIcpTransferOutcome.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_transfer_result,
         _UniffiConverterBytes.lower(arg)))
 
@@ -3296,7 +3409,7 @@ def icp_eip1559_price_arg(ckerc20_ledger_text: "str") -> "bytes":
     """
 
     _UniffiConverterString.check_lower(ckerc20_ledger_text)
-    
+
     return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_eip1559_price_arg,
         _UniffiConverterString.lower(ckerc20_ledger_text)))
 
@@ -3308,7 +3421,7 @@ def icp_envelope_request_id(envelope: "bytes") -> "bytes":
     """
 
     _UniffiConverterBytes.check_lower(envelope)
-    
+
     return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_envelope_request_id,
         _UniffiConverterBytes.lower(envelope)))
 
@@ -3321,9 +3434,9 @@ def icp_ingress_expiry(now_ns: "str",ahead_s: "int") -> "str":
     """
 
     _UniffiConverterString.check_lower(now_ns)
-    
+
     _UniffiConverterUInt64.check_lower(ahead_s)
-    
+
     return _UniffiConverterString.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_ingress_expiry,
         _UniffiConverterString.lower(now_ns),
         _UniffiConverterUInt64.lower(ahead_s)))
@@ -3335,9 +3448,9 @@ def icp_minter_account_arg(owner_text: "str",subaccount_hex: "typing.Optional[st
     """
 
     _UniffiConverterString.check_lower(owner_text)
-    
+
     _UniffiConverterOptionalString.check_lower(subaccount_hex)
-    
+
     return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_minter_account_arg,
         _UniffiConverterString.lower(owner_text),
         _UniffiConverterOptionalString.lower(subaccount_hex)))
@@ -3352,7 +3465,7 @@ def icp_principal_from_pubkey(pubkey: "bytes") -> "str":
     """
 
     _UniffiConverterBytes.check_lower(pubkey)
-    
+
     return _UniffiConverterString.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_principal_from_pubkey,
         _UniffiConverterBytes.lower(pubkey)))
 
@@ -3364,11 +3477,11 @@ def icp_retrieve_btc_arg(address: "str",amount_sats: "str",from_subaccount_hex: 
     """
 
     _UniffiConverterString.check_lower(address)
-    
+
     _UniffiConverterString.check_lower(amount_sats)
-    
+
     _UniffiConverterOptionalString.check_lower(from_subaccount_hex)
-    
+
     return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_retrieve_btc_arg,
         _UniffiConverterString.lower(address),
         _UniffiConverterString.lower(amount_sats),
@@ -3382,7 +3495,7 @@ def icp_self_principal(secret: "bytes") -> "str":
     """
 
     _UniffiConverterBytes.check_lower(secret)
-    
+
     return _UniffiConverterString.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_self_principal,
         _UniffiConverterBytes.lower(secret)))
 
@@ -3393,15 +3506,15 @@ def icp_sign_query(secret: "bytes",canister_text: "str",method_name: "str",arg: 
     """
 
     _UniffiConverterBytes.check_lower(secret)
-    
+
     _UniffiConverterString.check_lower(canister_text)
-    
+
     _UniffiConverterString.check_lower(method_name)
-    
+
     _UniffiConverterBytes.check_lower(arg)
-    
+
     _UniffiConverterString.check_lower(ingress_expiry_ns)
-    
+
     return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_sign_query,
         _UniffiConverterBytes.lower(secret),
         _UniffiConverterString.lower(canister_text),
@@ -3418,13 +3531,13 @@ def icp_sign_read_state(secret: "bytes",request_ids: "typing.List[bytes]",want_t
     """
 
     _UniffiConverterBytes.check_lower(secret)
-    
+
     _UniffiConverterSequenceBytes.check_lower(request_ids)
-    
+
     _UniffiConverterBool.check_lower(want_time)
-    
+
     _UniffiConverterString.check_lower(ingress_expiry_ns)
-    
+
     return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_sign_read_state,
         _UniffiConverterBytes.lower(secret),
         _UniffiConverterSequenceBytes.lower(request_ids),
@@ -3434,15 +3547,15 @@ def icp_sign_read_state(secret: "bytes",request_ids: "typing.List[bytes]",want_t
 
 def icp_sign_update(secret: "bytes",canister_text: "str",method_name: "str",arg: "bytes",ingress_expiry_ns: "str") -> "IcpSignedUpdate":
     _UniffiConverterBytes.check_lower(secret)
-    
+
     _UniffiConverterString.check_lower(canister_text)
-    
+
     _UniffiConverterString.check_lower(method_name)
-    
+
     _UniffiConverterBytes.check_lower(arg)
-    
+
     _UniffiConverterString.check_lower(ingress_expiry_ns)
-    
+
     return _UniffiConverterTypeIcpSignedUpdate.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_sign_update,
         _UniffiConverterBytes.lower(secret),
         _UniffiConverterString.lower(canister_text),
@@ -3458,17 +3571,17 @@ def icp_transfer_arg(to_owner_text: "str",to_subaccount_hex: "typing.Optional[st
     """
 
     _UniffiConverterString.check_lower(to_owner_text)
-    
+
     _UniffiConverterOptionalString.check_lower(to_subaccount_hex)
-    
+
     _UniffiConverterOptionalString.check_lower(from_subaccount_hex)
-    
+
     _UniffiConverterString.check_lower(amount)
-    
+
     _UniffiConverterOptionalString.check_lower(fee)
-    
+
     _UniffiConverterOptionalString.check_lower(memo_hex)
-    
+
     return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_transfer_arg,
         _UniffiConverterString.lower(to_owner_text),
         _UniffiConverterOptionalString.lower(to_subaccount_hex),
@@ -3486,15 +3599,15 @@ def icp_withdraw_erc20_arg(amount: "str",ckerc20_ledger_text: "str",recipient: "
     """
 
     _UniffiConverterString.check_lower(amount)
-    
+
     _UniffiConverterString.check_lower(ckerc20_ledger_text)
-    
+
     _UniffiConverterString.check_lower(recipient)
-    
+
     _UniffiConverterOptionalString.check_lower(from_cketh_subaccount_hex)
-    
+
     _UniffiConverterOptionalString.check_lower(from_ckerc20_subaccount_hex)
-    
+
     return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_withdraw_erc20_arg,
         _UniffiConverterString.lower(amount),
         _UniffiConverterString.lower(ckerc20_ledger_text),
@@ -3510,11 +3623,11 @@ def icp_withdraw_eth_arg(recipient: "str",amount_wei: "str",from_subaccount_hex:
     """
 
     _UniffiConverterString.check_lower(recipient)
-    
+
     _UniffiConverterString.check_lower(amount_wei)
-    
+
     _UniffiConverterOptionalString.check_lower(from_subaccount_hex)
-    
+
     return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_withdraw_eth_arg,
         _UniffiConverterString.lower(recipient),
         _UniffiConverterString.lower(amount_wei),
@@ -3530,20 +3643,33 @@ def keypair_from_secret(secret: "bytes") -> "KeyPair":
     """
 
     _UniffiConverterBytes.check_lower(secret)
-    
+
     return _UniffiConverterTypeKeyPair.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_keypair_from_secret,
         _UniffiConverterBytes.lower(secret)))
 
 
-def nfc_decode_receipt(bytes: "bytes") -> "ReceiptData":
+def nfc_bundle_bytes(update: "bytes",read_state: "bytes") -> "bytes":
     """
-    Payer side: decode the receipt the card received, so the offline payer shows the outcome and can
-    confirm it matches the payment they signed (by nonce). Length-guarded.
+    Build a DPN2 bundle and derive its request id from the exact signed update envelope.
+    """
+
+    _UniffiConverterBytes.check_lower(update)
+
+    _UniffiConverterBytes.check_lower(read_state)
+
+    return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_bundle_bytes,
+        _UniffiConverterBytes.lower(update),
+        _UniffiConverterBytes.lower(read_state)))
+
+
+def nfc_decode_bundle(bytes: "bytes") -> "NfcBundleData":
+    """
+    Decode and validate a DPN2 bundle byte-exactly.
     """
 
     _UniffiConverterBytes.check_lower(bytes)
-    
-    return _UniffiConverterTypeReceiptData.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_decode_receipt,
+
+    return _UniffiConverterTypeNfcBundleData.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_decode_bundle,
         _UniffiConverterBytes.lower(bytes)))
 
 
@@ -3555,7 +3681,7 @@ def nfc_decode_request(bytes: "bytes") -> "PaymentRequestData":
     """
 
     _UniffiConverterBytes.check_lower(bytes)
-    
+
     return _UniffiConverterTypePaymentRequestData.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_decode_request,
         _UniffiConverterBytes.lower(bytes)))
 
@@ -3568,25 +3694,6 @@ def nfc_default_max_chunk() -> "int":
     return _UniffiConverterUInt32.lift(_uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_default_max_chunk,))
 
 
-def nfc_receipt_bytes(nonce: "bytes",status: "int") -> "bytes":
-    """
-    Merchant side: build the settlement receipt to hand back to the payer over the tap after settling
-    online. `nonce` is the payment's nonce (so the payer can match it); `status` per [`nfc_receipt_codes`].
-    """
-
-    _UniffiConverterBytes.check_lower(nonce)
-    
-    _UniffiConverterUInt8.check_lower(status)
-    
-    return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_receipt_bytes,
-        _UniffiConverterBytes.lower(nonce),
-        _UniffiConverterUInt8.lower(status)))
-
-
-def nfc_receipt_codes() -> "ReceiptCodes":
-    return _UniffiConverterTypeReceiptCodes.lift(_uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_receipt_codes,))
-
-
 def nfc_request_bytes(to: "bytes",amount: "int",nonce: "bytes",expiry: "int",currency: "int",to_name: "str",memo: "str") -> "bytes":
     """
     Merchant side: the raw 132-byte request wire the reader will push over NFC (the same bytes the
@@ -3596,19 +3703,19 @@ def nfc_request_bytes(to: "bytes",amount: "int",nonce: "bytes",expiry: "int",cur
     """
 
     _UniffiConverterBytes.check_lower(to)
-    
+
     _UniffiConverterUInt64.check_lower(amount)
-    
+
     _UniffiConverterBytes.check_lower(nonce)
-    
+
     _UniffiConverterUInt64.check_lower(expiry)
-    
+
     _UniffiConverterUInt32.check_lower(currency)
-    
+
     _UniffiConverterString.check_lower(to_name)
-    
+
     _UniffiConverterString.check_lower(memo)
-    
+
     return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_request_bytes,
         _UniffiConverterBytes.lower(to),
         _UniffiConverterUInt64.lower(amount),
@@ -3617,6 +3724,26 @@ def nfc_request_bytes(to: "bytes",amount: "int",nonce: "bytes",expiry: "int",cur
         _UniffiConverterUInt32.lower(currency),
         _UniffiConverterString.lower(to_name),
         _UniffiConverterString.lower(memo)))
+
+
+def nfc_result_bytes(secret: "bytes",status: "NfcResultStatus",nonce: "bytes",request_id: "bytes") -> "bytes":
+    """
+    Build the fixed 114-byte merchant-signed result bound to a request nonce and IC request id.
+    """
+
+    _UniffiConverterBytes.check_lower(secret)
+
+    _UniffiConverterTypeNfcResultStatus.check_lower(status)
+
+    _UniffiConverterBytes.check_lower(nonce)
+
+    _UniffiConverterBytes.check_lower(request_id)
+
+    return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_result_bytes,
+        _UniffiConverterBytes.lower(secret),
+        _UniffiConverterTypeNfcResultStatus.lower(status),
+        _UniffiConverterBytes.lower(nonce),
+        _UniffiConverterBytes.lower(request_id)))
 
 
 def parse_amount(human: "str",decimals: "int") -> "int":
@@ -3629,9 +3756,9 @@ def parse_amount(human: "str",decimals: "int") -> "int":
     """
 
     _UniffiConverterString.check_lower(human)
-    
+
     _UniffiConverterUInt8.check_lower(decimals)
-    
+
     return _UniffiConverterUInt64.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_parse_amount,
         _UniffiConverterString.lower(human),
         _UniffiConverterUInt8.lower(decimals)))
@@ -3641,6 +3768,7 @@ __all__ = [
     "InternalError",
     "DpayError",
     "NfcPhase",
+    "NfcResultStatus",
     "NfcStep",
     "IcpEip1559Price",
     "IcpQueryReply",
@@ -3649,9 +3777,9 @@ __all__ = [
     "IcpStateRead",
     "IcpTransferOutcome",
     "KeyPair",
+    "NfcBundleData",
+    "NfcCardResult",
     "PaymentRequestData",
-    "ReceiptCodes",
-    "ReceiptData",
     "decode_request",
     "encode_request",
     "format_amount",
@@ -3679,12 +3807,12 @@ __all__ = [
     "icp_withdraw_erc20_arg",
     "icp_withdraw_eth_arg",
     "keypair_from_secret",
-    "nfc_decode_receipt",
+    "nfc_bundle_bytes",
+    "nfc_decode_bundle",
     "nfc_decode_request",
     "nfc_default_max_chunk",
-    "nfc_receipt_bytes",
-    "nfc_receipt_codes",
     "nfc_request_bytes",
+    "nfc_result_bytes",
     "parse_amount",
     "FfiCardSession",
     "FfiReaderConductor",

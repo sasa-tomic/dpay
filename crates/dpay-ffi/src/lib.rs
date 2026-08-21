@@ -11,8 +11,8 @@
 //! (cents); the UI only ever renders `$`. `expiry`/`now` are unix seconds.
 
 use dpay_core::{
-    generate_keypair as core_generate_keypair, CodecError, Currency, NAME_LEN,
-    PaymentRequest, AmountError, NONCE_LEN, PUBKEY_LEN,
+    generate_keypair as core_generate_keypair, AmountError, CodecError, Currency, PaymentRequest,
+    NAME_LEN, NONCE_LEN, PUBKEY_LEN,
 };
 use ed25519_dalek::SigningKey;
 
@@ -97,6 +97,7 @@ impl From<dpay_core::nfc::NfcError> for DpayError {
             // point of view: abort this tap and (for the merchant) re-tap or fall back to QR.
             N::Apdu(_)
             | N::Frame(_)
+            | N::BadMessage
             | N::UnsupportedVersion(_)
             | N::UnexpectedStatus(_)
             | N::ShortGreeting => DpayError::NfcProtocol,
@@ -290,15 +291,16 @@ use std::sync::{Arc, Mutex, MutexGuard};
 /// Lifecycle phase of a tap, for a live UI status indicator. Mirrors [`dpay_core::nfc::SessionPhase`]
 /// (lifecycle only — failures surface as thrown `DpayError`s / a platform tag-loss, never as a
 /// phase). The app renders a spinner on `Linking`/`Exchanging`, a review prompt on
-/// `AwaitingApproval`, and a terminal mark on `Complete` / `Declined`.
+/// `AwaitingApproval`, and then settles online after `Settling` / stops on `Declined`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, uniffi::Enum)]
 pub enum NfcPhase {
     Idle,
     Linking,
     Exchanging,
     AwaitingApproval,
-    /// The wire was transferred; the merchant is settling online and the payer awaits the receipt.
+    /// The bundle was transferred; the merchant is settling it before returning a signed result.
     Settling,
+    /// The payer verified the merchant-signed result.
     Complete,
     Declined,
 }
@@ -326,10 +328,11 @@ pub enum NfcStep {
     Continue,
     /// The payer is still deciding — keep polling / re-tap (`next_command` re-SELECTs).
     Pending,
-    /// The signed wire is ready; fetch it with `wire()`, then verify + submit online. Afterwards
-    /// call `provideReceipt` to hand the outcome back to the payer over the same tap.
+    /// The signed DPN2 bundle is ready; fetch it with `wire()`, settle, then provide a result.
     Done,
-    /// The settlement receipt was delivered to the payer — the tap is fully complete.
+    /// A re-tapped payer already received the bundle; provide and return only the result.
+    AwaitingResult,
+    /// The payer accepted and verified the merchant-signed result.
     Confirmed,
     /// The payer declined; abandon the sale.
     Declined,
@@ -359,7 +362,9 @@ impl FfiCardSession {
     /// [`nfc_default_max_chunk`]'s value in production.
     #[uniffi::constructor]
     pub fn new(max_chunk: u32) -> Arc<Self> {
-        Arc::new(FfiCardSession { inner: Mutex::new(CardSession::new(max_chunk as usize)) })
+        Arc::new(FfiCardSession {
+            inner: Mutex::new(CardSession::new(max_chunk as usize)),
+        })
     }
 
     /// Process one command APDU; returns the response APDU bytes. Total function — never throws.
@@ -383,26 +388,27 @@ impl FfiCardSession {
         lock(&self.inner).phase().into()
     }
 
-    /// True once the merchant has pulled the entire signed wire (the wire has left the phone).
+    /// True only after the merchant's signed result was verified by the payer.
     pub fn is_complete(&self) -> bool {
         lock(&self.inner).is_complete()
     }
 
-    /// The merchant's settlement receipt bytes once it arrives over the tap (decode with
-    /// [`nfc_decode_receipt`]) — how the *offline* payer learns whether the payment settled. `None`
-    /// until it arrives.
-    pub fn receipt(&self) -> Option<Vec<u8>> {
-        lock(&self.inner).receipt().map(|r| r.to_vec())
+    /// True once the complete DPN2 bundle has left the payer, even while the result is pending.
+    pub fn wire_delivered(&self) -> bool {
+        lock(&self.inner).wire_delivered()
     }
 
-    /// True once the receipt has arrived (the tap is fully complete).
-    pub fn is_confirmed(&self) -> bool {
-        lock(&self.inner).is_confirmed()
+    /// The verified merchant result, available only after `is_complete()` becomes true.
+    pub fn result(&self) -> Option<NfcCardResult> {
+        lock(&self.inner).result().map(|result| NfcCardResult {
+            status: result.status.into(),
+            nonce: result.nonce.to_vec(),
+            request_id: result.request_id.to_vec(),
+        })
     }
 
-    /// Approve: supply the offline-signed payload to serve — an opaque signed-payload handoff
-    /// (IC envelope post-cutover). Errors (`NfcWrongState`) unless a request is held and no
-    /// decision has been made; the payload is validated as it is framed.
+    /// Approve: supply the DPN2 update/read_state bundle to serve. Errors (`NfcWrongState`) unless
+    /// a request is held and no decision has been made; the bundle and framing are validated.
     pub fn provide_wire(&self, wire: Vec<u8>) -> Result<(), DpayError> {
         Ok(lock(&self.inner).provide_wire(&wire)?)
     }
@@ -428,7 +434,10 @@ impl FfiReaderConductor {
     #[uniffi::constructor]
     pub fn new(request: Vec<u8>, max_chunk: u32) -> Result<Arc<Self>, DpayError> {
         let inner = ReaderConductor::new(&request, max_chunk as usize)?;
-        Ok(Arc::new(FfiReaderConductor { inner: Mutex::new(inner), wire: Mutex::new(None) }))
+        Ok(Arc::new(FfiReaderConductor {
+            inner: Mutex::new(inner),
+            wire: Mutex::new(None),
+        }))
     }
 
     /// The next command APDU to transceive, or `None` once the exchange is terminal.
@@ -442,6 +451,12 @@ impl FfiReaderConductor {
         lock(&self.inner).phase().into()
     }
 
+    /// Reset an interrupted RF link. The next command re-SELECTs and restarts any partial frame
+    /// transfer without discarding the request, completed bundle, or queued result.
+    pub fn reset_link(&self) {
+        lock(&self.inner).reset_link();
+    }
+
     /// Feed the response to the last command; advance the state machine. On `Done` the wire is
     /// captured (fetch via [`wire`](Self::wire)). Errors on a malformed/unexpected response.
     pub fn handle_response(&self, response: Vec<u8>) -> Result<NfcStep, DpayError> {
@@ -449,8 +464,9 @@ impl FfiReaderConductor {
             ReaderStep::Continue => Ok(NfcStep::Continue),
             ReaderStep::Pending => Ok(NfcStep::Pending),
             ReaderStep::Declined => Ok(NfcStep::Declined),
-            ReaderStep::Confirmed => Ok(NfcStep::Confirmed),
             ReaderStep::WaitingForPayer => Ok(NfcStep::WaitingForPayer),
+            ReaderStep::AwaitingResult => Ok(NfcStep::AwaitingResult),
+            ReaderStep::Confirmed => Ok(NfcStep::Confirmed),
             ReaderStep::Done(w) => {
                 *lock(&self.wire) = Some(w);
                 Ok(NfcStep::Done)
@@ -458,17 +474,14 @@ impl FfiReaderConductor {
         }
     }
 
-    /// The reassembled payload once the exchange reached `Done`, else `None` — an opaque
-    /// signed-payload handoff (IC envelope post-cutover).
+    /// The byte-identical DPN2 bundle once the exchange reached `Done`, else `None`.
     pub fn wire(&self) -> Option<Vec<u8>> {
         lock(&self.wire).clone()
     }
 
-    /// After `Done` and settling online, hand back the settlement receipt (build it with
-    /// [`nfc_receipt_bytes`]) so the offline payer learns the outcome. Then resume the loop:
-    /// `next_command` yields the receipt push, ending in a `Confirmed` step.
-    pub fn provide_receipt(&self, receipt: Vec<u8>) -> Result<(), DpayError> {
-        Ok(lock(&self.inner).provide_receipt(&receipt)?)
+    /// Supply the fixed merchant-signed result after `Done` (or `AwaitingResult` on a re-tap).
+    pub fn provide_result(&self, result: Vec<u8>) -> Result<(), DpayError> {
+        Ok(lock(&self.inner).provide_result(&result)?)
     }
 }
 
@@ -524,46 +537,98 @@ pub fn nfc_decode_request(bytes: &[u8]) -> Result<PaymentRequestData, DpayError>
     })
 }
 
-/// A settlement receipt as fields. `status`: 0 = settled, 1 = the ledger rejected it, 2 = the
-/// merchant couldn't reach the ledger (see [`nfc_receipt_codes`]); `settled` == (status == 0).
+/// Decoded DPN2 envelope bundle. `request_id` is the update envelope's IC request id.
 #[derive(uniffi::Record, Clone)]
-pub struct ReceiptData {
-    pub nonce: Vec<u8>,
-    pub status: u8,
-    pub settled: bool,
+pub struct NfcBundleData {
+    pub request_id: Vec<u8>,
+    pub update: Vec<u8>,
+    pub read_state: Vec<u8>,
 }
 
-/// The receipt status codes from the core, so callers don't hard-code them.
-#[derive(uniffi::Record, Clone)]
-pub struct ReceiptCodes {
-    pub settled: u8,
-    pub rejected: u8,
-    pub unreachable: u8,
+/// Merchant settlement outcome returned to the offline payer.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, uniffi::Enum)]
+pub enum NfcResultStatus {
+    Settled,
+    Rejected,
+    Unknown,
 }
 
-#[uniffi::export]
-pub fn nfc_receipt_codes() -> ReceiptCodes {
-    ReceiptCodes {
-        settled: dpay_core::RECEIPT_SETTLED,
-        rejected: dpay_core::RECEIPT_REJECTED,
-        unreachable: dpay_core::RECEIPT_UNREACHABLE,
+impl From<NfcResultStatus> for nfc::NfcResultStatus {
+    fn from(status: NfcResultStatus) -> Self {
+        match status {
+            NfcResultStatus::Settled => nfc::NfcResultStatus::Settled,
+            NfcResultStatus::Rejected => nfc::NfcResultStatus::Rejected,
+            NfcResultStatus::Unknown => nfc::NfcResultStatus::Unknown,
+        }
     }
 }
 
-/// Merchant side: build the settlement receipt to hand back to the payer over the tap after settling
-/// online. `nonce` is the payment's nonce (so the payer can match it); `status` per [`nfc_receipt_codes`].
-#[uniffi::export]
-pub fn nfc_receipt_bytes(nonce: &[u8], status: u8) -> Result<Vec<u8>, DpayError> {
-    let nonce = fixed_nonce(nonce)?;
-    Ok(dpay_core::Receipt { nonce, status }.to_bytes().to_vec())
+impl From<nfc::NfcResultStatus> for NfcResultStatus {
+    fn from(status: nfc::NfcResultStatus) -> Self {
+        match status {
+            nfc::NfcResultStatus::Settled => NfcResultStatus::Settled,
+            nfc::NfcResultStatus::Rejected => NfcResultStatus::Rejected,
+            nfc::NfcResultStatus::Unknown => NfcResultStatus::Unknown,
+        }
+    }
 }
 
-/// Payer side: decode the receipt the card received, so the offline payer shows the outcome and can
-/// confirm it matches the payment they signed (by nonce). Length-guarded.
+/// The verified result retained by the payer card session.
+#[derive(uniffi::Record, Clone)]
+pub struct NfcCardResult {
+    pub status: NfcResultStatus,
+    pub nonce: Vec<u8>,
+    pub request_id: Vec<u8>,
+}
+
+/// Build a DPN2 bundle and derive its request id from the exact signed update envelope.
 #[uniffi::export]
-pub fn nfc_decode_receipt(bytes: &[u8]) -> Result<ReceiptData, DpayError> {
-    let r = nfc::receipt_from_transport(bytes)?;
-    Ok(ReceiptData { nonce: r.nonce.to_vec(), status: r.status, settled: r.settled() })
+pub fn nfc_bundle_bytes(update: Vec<u8>, read_state: Vec<u8>) -> Result<Vec<u8>, DpayError> {
+    let request_id = dpay_icp::envelope::envelope_request_id(&update)
+        .map_err(|e| DpayError::BadInput(e.to_string()))?;
+    Ok(nfc::NfcBundle {
+        request_id,
+        update,
+        read_state,
+    }
+    .encode()?)
+}
+
+/// Decode and validate a DPN2 bundle byte-exactly.
+#[uniffi::export]
+pub fn nfc_decode_bundle(bytes: &[u8]) -> Result<NfcBundleData, DpayError> {
+    let bundle = nfc::NfcBundle::decode(bytes)?;
+    let canonical = dpay_icp::envelope::envelope_request_id(&bundle.update)
+        .map_err(|e| DpayError::BadInput(e.to_string()))?;
+    if canonical != bundle.request_id {
+        return Err(DpayError::BadInput(
+            "NFC bundle request id does not match its signed update".into(),
+        ));
+    }
+    Ok(NfcBundleData {
+        request_id: bundle.request_id.to_vec(),
+        update: bundle.update,
+        read_state: bundle.read_state,
+    })
+}
+
+/// Build the fixed 114-byte merchant-signed result bound to a request nonce and IC request id.
+#[uniffi::export]
+pub fn nfc_result_bytes(
+    secret: Vec<u8>,
+    status: NfcResultStatus,
+    nonce: Vec<u8>,
+    request_id: Vec<u8>,
+) -> Result<Vec<u8>, DpayError> {
+    let key = signing_key_from_seed(&secret)?;
+    let nonce = fixed_nonce(&nonce)?;
+    let request_id: [u8; 32] = request_id
+        .as_slice()
+        .try_into()
+        .map_err(|_| DpayError::BadInput("request id must be exactly 32 bytes".into()))?;
+    Ok(nfc::NfcResult::sign(&key, status.into(), nonce, request_id)
+        .to_bytes()
+        .to_vec())
 }
 
 // =============================================================================================
@@ -580,11 +645,6 @@ pub fn nfc_decode_receipt(bytes: &[u8]) -> Result<ReceiptData, DpayError> {
 mod tests {
     use super::*;
     use dpay_core::REQUEST_LEN;
-
-    /// A deterministic signing key from a fixed seed (no RNG needed; stable golden).
-    fn test_key() -> SigningKey {
-        SigningKey::from_bytes(&[0x42; 32])
-    }
 
     fn test_to() -> [u8; PUBKEY_LEN] {
         [0xab; PUBKEY_LEN]
@@ -626,7 +686,10 @@ mod tests {
         assert_eq!(decode_name_field(&name_field("coffee")), "coffee");
         // A field with no NUL terminator decodes in full.
         let no_nul = [b'z'; NAME_LEN];
-        assert_eq!(decode_name_field(&no_nul), std::str::from_utf8(&[b'z'; NAME_LEN]).unwrap());
+        assert_eq!(
+            decode_name_field(&no_nul),
+            std::str::from_utf8(&[b'z'; NAME_LEN]).unwrap()
+        );
     }
 
     /// `encode_request` + `decode_request` round-trip the merchant request with `to_name` + `memo`.
