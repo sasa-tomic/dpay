@@ -251,6 +251,20 @@ async function encodeRequest(
   return base64url.encode(await buildRequestBytes(ex, toHex, amount, nonceHex, expiry, currency, toName, memo));
 }
 
+/** Hex of the raw 132-byte request — the `DpayNfc.buildRequest` contract (mirrors Android's
+ *  `nfcRequestBytes` → hex, same Rust builder through the shared wasm core). Exported so the web
+ *  NFC shim can arm reader mode in e2e exactly like the device does. */
+async function buildRequestHex(
+  toHex: string, amount: string | number, nonceHex: string, expiry: number, currency: number,
+  toName = '', memo = '',
+): Promise<string> {
+  const ex = await core();
+  const bytes = await buildRequestBytes(ex, toHex, amount, nonceHex, expiry, currency, toName, memo);
+  let out = '';
+  for (const b of bytes) out += b.toString(16).padStart(2, '0');
+  return out;
+}
+
 async function decodeRequest(
   qr: string,
 ): Promise<{ toHex: string; amount: string; nonceHex: string; expiry: number; currency: number; toName: string; memo: string }> {
@@ -645,6 +659,7 @@ export const DpayCore = {
   generateKeypair,
   keypairFromSecret,
   encodeRequest,
+  buildRequestHex,
   decodeRequest,
   nfcStatus,
   icpSelfPrincipal,

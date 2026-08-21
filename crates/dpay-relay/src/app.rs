@@ -163,6 +163,12 @@ pub fn app(state: AppState) -> Router {
     let api = api.route("/faucet", axum::routing::post(faucet));
     #[cfg(feature = "test-helpers")]
     let api = api.route("/balance/{hex}", get(balance));
+    // Test seam for the honest-unknown recovery flow (2026-08-21 mainnet NFC bug): arm
+    // "hide this request_id's outcome for the next N read_states" on the fake-IC gateway —
+    // see `FakeIc::hidden_outcomes`. RID-scoped, so concurrent flows on the shared relay are
+    // unaffected.
+    #[cfg(feature = "test-helpers")]
+    let api = api.route("/test/hide_outcome", axum::routing::post(hide_outcome));
 
     // The PRODUCTION faucet (agent build — also the owner when test-helpers is co-enabled for
     // the live tests; the offline e2e image above keeps the fake-IC branch): the relay enforces
@@ -336,6 +342,25 @@ async fn balance(
     let owner = IcpPrincipal::self_authenticating_ed25519(&pk);
     let bal = fake.balance_for(currency, &owner);
     (StatusCode::OK, Json(BalanceBody { balance: U64String(bal) })).into_response()
+}
+
+/// `POST /api/v1/test/hide_outcome` JSON `{request_id: <32-byte hex>, polls: <u32>}` → `{ok: true}`
+/// (test-helpers only). Arms the fake-IC gateway's outcome-latency seam for THAT request id: the
+/// next `polls` read_state certs omit the rid's `request_status` entry. Drives the honest-unknown
+/// recovery flow (in-tap poll budget exhaustion → reader handoff → background reconcile) — see
+/// `FakeIc::hidden_outcomes`.
+#[cfg(feature = "test-helpers")]
+async fn hide_outcome(
+    State(state): State<AppState>,
+    Json(req): Json<HideOutcomeRequest>,
+) -> Response {
+    let Some(fake) = state.fake_ic.clone() else {
+        return err(StatusCode::SERVICE_UNAVAILABLE, "fake-IC gateway not attached");
+    };
+    let rid: [u8; 32] = ok_or_bail!(parse_hex_array(&req.request_id, "request_id"));
+    let polls = req.polls.unwrap_or(1).min(64) as usize;
+    fake.arm_hidden_outcome(rid, polls);
+    (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
 }
 
 /// Per-currency balance-query timeout for the batch endpoint. Bounds a SINGLE ledger query inside
@@ -731,6 +756,17 @@ struct FaucetRequest {
     #[serde(default)]
     currency: Option<Currency>,
     amount: Option<U64String>,
+}
+
+/// Body for `POST /api/v1/test/hide_outcome` (test-helpers only).
+#[cfg(feature = "test-helpers")]
+#[derive(Deserialize)]
+struct HideOutcomeRequest {
+    request_id: String,
+    /// How many subsequent read_state certs omit this rid's outcome. Default 1, capped at 64 —
+    /// enough to exhaust any in-tap poll budget without pinning a relay-wide global.
+    #[serde(default)]
+    polls: Option<u32>,
 }
 
 /// `?currency=N` for `GET /api/v1/balance/{hex}`. Absent → `DEMO_USD`.

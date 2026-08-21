@@ -92,6 +92,16 @@ struct FakeTxn {
 /// The gateway. Shared into relay `AppState` under `test-helpers` only.
 pub struct FakeIc {
     state: Mutex<FakeIcState>,
+    /// Test seam (2026-08-21): `POST /api/v1/test/hide_outcome` arms "hide THIS request_id's
+    /// outcome for the next N `read_state`s" — those certs omit the rid's `request_status`
+    /// entry, simulating the real boundary node's outcome latency: the app's in-tap poller
+    /// sees a non-terminal state, its budget runs out, and the honest-unknown recovery path
+    /// (reader handoff → background reconcile) gets exercised end to end. Without this seam
+    /// the fake settles SYNCHRONOUSLY (the RequestState is inserted before the /call 202
+    /// returns), so the non-terminal window — exactly the 2026-08-21 mainnet NFC
+    /// false-pending bug — structurally never exists offline. RID-SCOPED so concurrent e2e
+    /// flows against the SHARED relay are unaffected (each flow hides only its own rid).
+    hidden_outcomes: Mutex<std::collections::HashMap<[u8; 32], usize>>,
 }
 
 fn now_ns() -> u64 {
@@ -143,7 +153,10 @@ impl FakeIc {
                 }
             }
         }
-        Arc::new(FakeIc { state: Mutex::new(st) })
+        Arc::new(FakeIc {
+            state: Mutex::new(st),
+            hidden_outcomes: Mutex::new(std::collections::HashMap::new()),
+        })
     }
 
     /// Credit a fake ledger at the user principal (faucet / test seeding) and record a mint
@@ -175,6 +188,15 @@ impl FakeIc {
             return 0;
         };
         self.credit_and_log(&mut s, &ledger_text, owner, amount)
+    }
+
+    /// Test seam armer (see `FakeIc::hidden_outcomes`): hide `rid`'s outcome for the next
+    /// `polls` read_states. Called by the test-helpers-only `POST /api/v1/test/hide_outcome`.
+    pub fn arm_hidden_outcome(&self, rid: [u8; 32], polls: usize) {
+        self.hidden_outcomes
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(rid, polls);
     }
 
     /// Per-currency balance map for an account across the catalog's ledgers (relay `/balances`).
@@ -608,8 +630,26 @@ fn submit_read_state(fake: &Arc<FakeIc>) -> Response {
     let tree = {
         let s = fake.state.lock().unwrap_or_else(|p| p.into_inner());
         let now = now_ns();
-        let entries: Vec<([u8; 32], RequestState)> =
-            s.requests.iter().map(|(k, v)| (*k, v.clone())).collect();
+        let mut hidden = fake.hidden_outcomes.lock().unwrap_or_else(|p| p.into_inner());
+        // Test seam (see FakeIc::hidden_outcomes): a hidden rid's entry is OMITTED from the
+        // cert and its counter decremented — the client-side lookup finds nothing, exactly
+        // like a real boundary node before the outcome has landed in state certification.
+        // Counters at 0 are dropped so the map never grows.
+        hidden.retain(|_, left| *left > 0);
+        let entries: Vec<([u8; 32], RequestState)> = s
+            .requests
+            .iter()
+            .filter(|(rid, _)| {
+                match hidden.get_mut(*rid) {
+                    Some(left) => {
+                        *left -= 1;
+                        false
+                    }
+                    None => true,
+                }
+            })
+            .map(|(k, v)| (*k, v.clone()))
+            .collect();
         drop(s);
         let mut req_trees: Vec<Tree> = Vec::new();
         for (rid, st) in entries {
