@@ -102,62 +102,60 @@ describe('dual theme: applyPalette', () => {
   });
 });
 
-describe('Wave 7: manual theme override model (config/theme.ts)', () => {
+describe('Wave 7: manual theme model (config/theme.ts, two-state Light/Dark)', () => {
   afterEach(() => {
     applyPalette(LIGHT);
   });
 
-  test('cycle order is Auto → Light → Dark → Auto', () => {
-    expect(nextTheme('auto')).toBe('light');
+  test('toggle order is Light ↔ Dark', () => {
     expect(nextTheme('light')).toBe('dark');
-    expect(nextTheme('dark')).toBe('auto');
+    expect(nextTheme('dark')).toBe('light');
   });
 
-  test('resolveTheme: auto follows the OS scheme; light/dark pin regardless of scheme', () => {
-    // auto delegates to the scheme (scheme null — mocked Appearance — resolves light, like App boot).
-    expect(resolveTheme('auto', 'dark')).toBe('dark');
-    expect(resolveTheme('auto', 'light')).toBe('light');
-    expect(resolveTheme('auto', null)).toBe('light');
-    // The override WINS over any scheme — the whole point of the manual toggle.
+  test('resolveTheme: no stored choice follows the OS scheme; light/dark pin regardless of scheme', () => {
+    // null choice delegates to the scheme (scheme null — mocked Appearance — resolves light, like App boot).
+    expect(resolveTheme(null, 'dark')).toBe('dark');
+    expect(resolveTheme(null, 'light')).toBe('light');
+    expect(resolveTheme(null, null)).toBe('light');
+    // The stored choice WINS over any scheme — the whole point of the manual toggle.
     expect(resolveTheme('dark', 'light')).toBe('dark');
     expect(resolveTheme('light', 'dark')).toBe('light');
   });
 
-  test('parseTheme coerces unknown/garbage stored values to auto', () => {
+  test('parseTheme coerces unknown/garbage stored values (incl. legacy tri-state "auto") to null', () => {
     expect(parseTheme('light')).toBe('light');
     expect(parseTheme('dark')).toBe('dark');
-    expect(parseTheme('auto')).toBe('auto');
-    expect(parseTheme(null)).toBe('auto');
-    expect(parseTheme(undefined)).toBe('auto');
-    expect(parseTheme('')).toBe('auto');
-    expect(parseTheme('blue')).toBe('auto'); // legacy/garbage keys never crash the app
+    expect(parseTheme('auto')).toBeNull(); // legacy tri-state value → follow the OS scheme again
+    expect(parseTheme(null)).toBeNull();
+    expect(parseTheme(undefined)).toBeNull();
+    expect(parseTheme('')).toBeNull();
+    expect(parseTheme('blue')).toBeNull(); // legacy/garbage keys never crash the app
   });
 
   test('themeLabel renders the Settings/a11y display name', () => {
-    expect(themeLabel('auto')).toBe('Auto');
     expect(themeLabel('light')).toBe('Light');
     expect(themeLabel('dark')).toBe('Dark');
   });
 
-  test('the override drives the applied palette (App.tsx contract: resolveTheme → applyPalette)', () => {
-    // Light override under a DARK scheme must still apply LIGHT — the pin beats the OS.
+  test('the choice drives the applied palette (App.tsx contract: resolveTheme → applyPalette)', () => {
+    // Light choice under a DARK scheme must still apply LIGHT — the pin beats the OS.
     let resolved: 'light' | 'dark' = resolveTheme('light', 'dark');
     applyPalette(resolved === 'dark' ? DARK : LIGHT);
     expect(isDark()).toBe(false);
     expect(S.root.backgroundColor).toBe(LIGHT.bg);
-    // Dark override under a LIGHT/null scheme must apply DARK.
+    // Dark choice under a LIGHT/null scheme must apply DARK.
     resolved = resolveTheme('dark', undefined);
     applyPalette(resolved === 'dark' ? DARK : LIGHT);
     expect(isDark()).toBe(true);
     expect(S.root.backgroundColor).toBe(DARK.bg);
-    // The StatusBar barStyle sites read isDark() — the override (not the scheme) must drive it:
-    // a 'light' override keeps dark-content bars even when the OS is dark, and vice versa.
+    // The StatusBar barStyle sites read isDark() — the choice (not the scheme) must drive it:
+    // a 'light' choice keeps dark-content bars even when the OS is dark, and vice versa.
     expect(isDark()).toBe(resolveTheme('dark', 'light') === 'dark');
   });
 
   test('persistence key round-trips through parseTheme (dpay.theme.v1 contract)', () => {
     // What App.tsx writes is what parseTheme reads back — the storage contract.
-    for (const t of ['auto', 'light', 'dark'] as const) {
+    for (const t of ['light', 'dark'] as const) {
       expect(parseTheme(t)).toBe(t);
     }
   });

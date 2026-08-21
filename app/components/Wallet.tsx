@@ -32,7 +32,7 @@ import {SolPayMode} from './SolPayMode';
 import {SolReceiveMode} from './SolReceiveMode';
 import {SettingsSheet} from './SettingsSheet';
 import {BalancesSheet} from './BalancesSheet';
-import {IconArrowDownLeft, IconChevronDown, IconClock, IconMoon, IconQr, IconSettings, IconSun, IconAuto} from './icons';
+import {IconArrowDownLeft, IconChevronDown, IconClock, IconMoon, IconQr, IconSettings, IconSun} from './icons';
 import {nextTheme, themeLabel, type ThemeOverride} from '../config/theme';
 
 export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, themeOverride, onCycleTheme}: {identity: Identity; relayUrl: string; setRelayUrl: (s: string) => void; onReset: () => void; onRestore: (id: Identity) => Promise<void>; themeOverride: ThemeOverride; onCycleTheme: (t: ThemeOverride) => void}) {
@@ -73,8 +73,8 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, the
   // (the button reads 'Checking…' + disables) rather than a poll-lifecycle tracker. The poll's
   // own 2.5s cadence + generation gate remain the source of truth for the balance itself.
   const [recheckBusy, setRecheckBusy] = useState(false);
-  // Wave 7: cycle the theme override (Auto → Light → Dark → Auto) — App.tsx owns the state +
-  // AsyncStorage persistence; this is the single mutator both toggle controls call.
+  // Wave 7: flip the theme (Light ↔ Dark) — App.tsx owns the state + AsyncStorage persistence;
+  // this is the single mutator both toggle controls call.
   const cycleTheme = useCallback(() => onCycleTheme(nextTheme(themeOverride)), [onCycleTheme, themeOverride]);
   const recheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (recheckTimer.current != null) clearTimeout(recheckTimer.current); }, []);
@@ -127,7 +127,14 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, the
   // hooks/useTransactionHistory.ts (Effect C): the per-currency fan-out + dedup-by-nonce + sort +
   // direction-derivation all move in. catalogCurrencyIds (the stable dep signature) is now internal
   // to the hook (computed from `catalog`). `onActivity` below still calls refreshHistory.
-  const {history, refreshHistory} = useTransactionHistory({relayUrl, publicHex: identity.publicHex, catalog});
+  // History respects the testnet toggle (2026-08-21): hidden testnet currencies are not WALKED at
+  // all — each hidden currency was a full icrc3 page-walk on the relay every poll cycle, pure
+  // load for rows the user cannot see.
+  const histCatalog = useMemo(
+    () => catalog.filter(c => showTestnet || !isTestnetCurrency(c)),
+    [catalog, showTestnet],
+  );
+  const {history, refreshHistory} = useTransactionHistory({relayUrl, publicHex: identity.publicHex, catalog: histCatalog});
 
   // Native SOL rail — a device-derived Solana key (SLIP-10 m/44'/501'/0'/0') from the SAME IC identity
   // seed, so one backup recovers both rails. The address is derived once (pure; stable per identity).
@@ -594,9 +601,9 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, the
           onPress={cycleTheme}
           accessibilityRole="button"
           accessibilityLabel={`Theme: ${themeLabel(themeOverride)}`}
-          accessibilityHint="Cycle the theme between Auto, Light, and Dark"
+          accessibilityHint="Switch the theme between Light and Dark"
         >
-          {themeOverride === 'light' ? <IconSun size={20} color={C.sub} /> : themeOverride === 'dark' ? <IconMoon size={20} color={C.sub} /> : <IconAuto size={20} color={C.sub} />}
+          {themeOverride === 'light' ? <IconSun size={20} color={C.sub} /> : <IconMoon size={20} color={C.sub} />}
         </Pressable>
         <Pressable
           testID="balance"

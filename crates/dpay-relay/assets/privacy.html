@@ -9,16 +9,17 @@
 <meta name="theme-color" content="#F4F1E8" />
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141210" />
 <script>
-/* Theme override (Wave 7): 'auto' follows the OS scheme; 'light'/'dark' pin it. Runs pre-paint
+/* Theme choice (Wave 7, two-state since 2026-08-21): a stored 'light'/'dark' pins the theme;
+   anything else (absent, legacy 'auto', garbage) follows the OS scheme. Runs pre-paint
    (before <body>) so the correct theme applies with no flash; the fixed toggle at the end of
-   <body> cycles + persists the same key. The .dark class on <html> is what the CSS keys on. */
+   <body> flips + persists the same key. The .dark class on <html> is what the CSS keys on. */
 (function () {
   try {
     var m = localStorage.getItem('dpay-theme');
     var dark = m === 'dark' || (m !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
     var root = document.documentElement;
     root.classList.toggle('dark', dark);
-    root.setAttribute('data-theme-mode', m === 'light' || m === 'dark' ? m : 'auto');
+    root.setAttribute('data-theme-mode', dark ? 'dark' : 'light');
   } catch (e) {}
 })();
 </script>
@@ -114,7 +115,8 @@
      app/config/palette.ts DARK — keep in lockstep). Vars first; the handful of hardcoded
      porcelain literals get scoped overrides.
      Wave 7: keyed on `html.dark` (set by the pre-paint head script + the fixed toggle) instead
-     of a bare @media — 'auto' follows the OS scheme via matchMedia, 'light'/'dark' pin it. */
+     of a bare @media — with no stored choice the OS scheme seeds it via matchMedia, a stored
+     'light'/'dark' pins it. */
   html{color-scheme:light}
   html.dark{color-scheme:dark}
   html.dark{
@@ -134,7 +136,7 @@
     html.dark body::before{opacity:.07}
     html.dark nav{background:rgba(20,18,16,.86)}
 
-  /* Wave 7 — fixed theme toggle (Auto → Light → Dark cycle), bottom-right; mirrors the
+  /* Wave 7 — fixed theme toggle (Light ↔ Dark flip), bottom-right; mirrors the
      landing's chip (shared 'dpay-theme' localStorage key so both pages agree). */
   .theme-toggle{
     position:fixed;right:18px;bottom:18px;z-index:80;width:44px;height:44px;border-radius:999px;
@@ -145,7 +147,6 @@
   .theme-toggle:hover,.theme-toggle:focus-visible{outline:none;color:var(--ink);border-color:var(--ink-3)}
   .theme-toggle:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
   .theme-toggle svg{display:none}
-  html[data-theme-mode="auto"] .theme-toggle .tt-auto,
   html[data-theme-mode="light"] .theme-toggle .tt-light,
   html[data-theme-mode="dark"] .theme-toggle .tt-dark{display:block}
 </style>
@@ -279,32 +280,38 @@
 <footer>
   <div class="wrap"><span>Different Pay Privacy Policy</span><a href="/">∂pay home</a></div>
 </footer>
-<!-- Wave 7 — theme toggle: cycles Auto → Light → Dark → Auto; persists 'dpay-theme' (shared
-     with the landing page) and keys the html.dark class set by the pre-paint head script. -->
-<button type="button" class="theme-toggle" id="theme-toggle" aria-label="Theme: Auto. Switches between auto, light, and dark theme.">
+<!-- Wave 7 — theme toggle (two-state): one click flips Light ↔ Dark; persists 'dpay-theme'
+     (shared with the landing page) and keys the html.dark class set by the pre-paint head
+     script. Before the first click the theme seeds from the OS scheme. -->
+<button type="button" class="theme-toggle" id="theme-toggle" aria-label="Theme: Light. Switches between light and dark theme.">
   <svg class="tt-light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
   <svg class="tt-dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
-  <svg class="tt-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor" stroke="none"/></svg>
 </button>
 <script>
 (function () {
   var btn = document.getElementById('theme-toggle');
-  var MODES = ['auto', 'light', 'dark'];
-  var LABEL = { auto: 'Auto', light: 'Light', dark: 'Dark' };
-  function mode() {
-    try { var m = localStorage.getItem('dpay-theme'); return MODES.indexOf(m) >= 0 ? m : 'auto'; } catch (e) { return 'auto'; }
+  var LABEL = { light: 'Light', dark: 'Dark' };
+  // Stored choice: 'light'/'dark' pin; null (absent, legacy 'auto', garbage) = follow the OS scheme.
+  function stored() {
+    try { var m = localStorage.getItem('dpay-theme'); return m === 'light' || m === 'dark' ? m : null; } catch (e) { return null; }
   }
+  function schemeDark() {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  function current() { return stored() || (schemeDark() ? 'dark' : 'light'); }
   function apply(m, persist) {
-    var dark = m === 'dark' || (m === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
     var root = document.documentElement;
-    root.classList.toggle('dark', dark);
+    root.classList.toggle('dark', m === 'dark');
     root.setAttribute('data-theme-mode', m);
-    if (btn) btn.setAttribute('aria-label', 'Theme: ' + LABEL[m] + '. Switches between auto, light, and dark theme.');
+    if (btn) btn.setAttribute('aria-label', 'Theme: ' + LABEL[m] + '. Switches between light and dark theme.');
     if (persist) { try { localStorage.setItem('dpay-theme', m); } catch (e) {} }
   }
-  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () { apply(mode(), false); });
-  if (btn) btn.addEventListener('click', function () { apply(MODES[(MODES.indexOf(mode()) + 1) % MODES.length], true); });
-  apply(mode(), false);
+  // Follow the OS scheme while no choice is stored (a scheme change re-resolves immediately).
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () {
+    if (!stored()) apply(schemeDark() ? 'dark' : 'light', false);
+  });
+  if (btn) btn.addEventListener('click', function () { apply(current() === 'dark' ? 'light' : 'dark', true); });
+  apply(current(), false);
 })();
 </script>
 </body>

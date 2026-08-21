@@ -5,6 +5,12 @@ export const EXPIRY_WINDOW = 900; // request valid 15 min (U-F3: a payer who ope
 // the user-initiated top-up. DEPOSIT_TIMEOUT_MS bounds the initial deposit-info load +
 // the ckERC20 onramp-params fetch.
 export const BALANCE_TIMEOUT_MS = 4000;
+// History walks are the relay's SLOWEST read (icrc3 probe + backwards page walk per currency,
+// bounded server-side by its own walk deadline). The 4s fast-read timeout aborted every slow
+// currency on mainnet (the "AbortError: Aborted" fan-out noise, 2026-08-21); history gets its
+// own ample bound so a full-but-slow page still lands. The interval below is also lengthened —
+// history changes only when a payment settles, and the relay now TTL-caches walks anyway.
+export const HISTORY_TIMEOUT_MS = 10000;
 export const FAUCET_TIMEOUT_MS = 6000;
 // DEPOSIT_TIMEOUT_MS bounds the best-effort deposit-info load + the ckERC20 onramp-params fetch.
 // DEPOSIT_ADDRESS_TIMEOUT_MS bounds the CRITICAL deposit-address fetch on its OWN controller: the
@@ -27,8 +33,8 @@ export const RELAY_STORAGE_KEY = 'dpay.relay.v1';
 // assets are hidden by default per the founder decision); persisted so the choice survives a
 // restart. Mirrors the identity/relay AsyncStorage pattern.
 export const SHOW_TESTNET_STORAGE_KEY = 'dpay.showTestnet';
-// Wave 7 — manual theme override ('auto' | 'light' | 'dark', default 'auto') so the user can pin
-// light/dark regardless of the OS scheme. Same AsyncStorage pattern as identity/relay/showTestnet.
+// Wave 7 — manual theme choice ('light' | 'dark'; absent = follow the OS scheme) so the user can
+// pin light/dark regardless of the OS scheme. Same AsyncStorage pattern as identity/relay/showTestnet.
 export const THEME_STORAGE_KEY = 'dpay.theme.v1';
 // Google Play requires the public privacy policy to be reachable from inside the app as well as the
 // store listing. This is the stable website URL, independent of the user-editable relay endpoint.
@@ -42,7 +48,7 @@ export const POLL = (() => {
   const t = (globalThis as unknown as {__DPAY_TEST_POLL?: Record<string, number>}).__DPAY_TEST_POLL;
   return {
     balance:    t?.balance    ?? 2500,
-    history:    t?.history    ?? 5000,
+    history:    t?.history    ?? 15000,
     deposit:    t?.deposit    ?? 10000,
     receiptPay: t?.receiptPay ?? 2500,
     receiptRcv: t?.receiptRcv ?? 1500,

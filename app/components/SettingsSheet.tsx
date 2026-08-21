@@ -11,7 +11,7 @@ import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {SheetOverlay} from './SheetOverlay';
 import {SeedWords} from './SeedWords';
-import {IconAuto, IconChevronDown, IconClose, IconExternalLink, IconMoon, IconSun} from './icons';
+import {IconChevronDown, IconClose, IconExternalLink, IconMoon, IconSun} from './icons';
 import {nextTheme, themeLabel, type ThemeOverride} from '../config/theme';
 
 /**
@@ -51,8 +51,8 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
   // The current wallet's username — PRESERVED across a restore (the seed recovers keys, not local
   // display metadata). Passed to the rebuilt Identity so the user keeps their display name.
   username: string;
-  // Wave 7 theme override — the resolved override ('auto' follows the OS scheme) + the single
-  // cycle mutator (Auto → Light → Dark → Auto). App.tsx owns the state + AsyncStorage persistence.
+  // Wave 7 theme — the resolved mode (Light/Dark; null-choice follows the OS scheme) + the single
+  // flip mutator (Light ↔ Dark). App.tsx owns the state + AsyncStorage persistence.
   themeOverride: ThemeOverride;
   onCycleTheme: (t: ThemeOverride) => void;
 }) {
@@ -364,9 +364,9 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
             </Pressable>
           </View>
 
-          {/* Wave 7 — Theme: the explicit Light/Dark/Auto control (one tap cycles; the label always
-              names the CURRENT mode). 'Auto' follows the OS/browser scheme (the Wave-4 default);
-              Light/Dark pin the palette regardless of scheme. Persisted by App.tsx. */}
+          {/* Wave 7 — Theme: the explicit Light/Dark control (one tap flips; the label always
+              names the CURRENT mode). The initial state seeds from the OS/browser scheme; Light/
+              Dark pin the palette regardless of scheme. Persisted by App.tsx. */}
           <View style={S.settingsSection}>
             <Text style={S.inputLabel}>Theme</Text>
             <Pressable
@@ -374,11 +374,11 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
               style={S.secondaryBtn}
               onPress={() => onCycleTheme(nextTheme(themeOverride))}
               accessibilityRole="button"
-              accessibilityLabel={`Theme: ${themeLabel(themeOverride)} — cycle theme`}
-              accessibilityHint="Switches between Auto (follow your device), Light, and Dark"
+              accessibilityLabel={`Theme: ${themeLabel(themeOverride)} — toggle theme`}
+              accessibilityHint="Switches between Light and Dark"
               accessibilityState={{disabled: false}}>
               <View style={S.linkRow}>
-                {themeOverride === 'light' ? <IconSun size={14} color={C.sub} /> : themeOverride === 'dark' ? <IconMoon size={14} color={C.sub} /> : <IconAuto size={14} color={C.sub} />}
+                {themeOverride === 'light' ? <IconSun size={14} color={C.sub} /> : <IconMoon size={14} color={C.sub} />}
                 <Text style={S.secondaryBtnText}>Theme: {themeLabel(themeOverride)}</Text>
               </View>
             </Pressable>

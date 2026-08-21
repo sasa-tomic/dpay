@@ -151,7 +151,7 @@ wire (1) · onboard (8) · pay (18) · offline (7) · deposit (8) · withdraw (7
 | 40 | visual-regression | Pixel-diff the 5 primary surfaces (Pay, Receive+QR, Balances, Settings, Ledger) vs committed baselines; fails on drift >0.5%. | visual-regression, pixel-diff |
 | 78 | qr-scannable | every rendered <QrCode> stays machine-decodable: request-qr (244/M + brand mark) decodes to the exact encoded value (__DPAY_QR_LAST byte-for-byte) and sol-receive-qr (200/L, base58 address) decodes to the on-screen address — rasterized pixels through the same vendored jsQR the prod web wallet ships | qr-scannable, qr-brand-mark, quiet-zone |
 | 84 | visual-dark | Pixel-diff the 5 primary surfaces under an emulated OS dark scheme (prefers-color-scheme: dark) vs the dark-theme baselines in shots/baselines-dark/; the gate that the DARK palette renders on every surface the light flow walks. | visual-regression, pixel-diff, dark-theme |
-| 85 | theme-toggle | Manual theme override: header + Settings toggles cycle Auto/Light/Dark, root bg flips, choice survives reload, Auto follows the OS scheme. | theme-toggle, dark-theme, persistence, settings |
+| 85 | theme-toggle | Two-state theme toggle: seeds from the OS scheme, header + Settings toggles flip Light↔Dark on a single click, root bg flips, choice survives reload. | theme-toggle, dark-theme, persistence, settings |
 
 ---
 

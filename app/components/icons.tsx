@@ -188,8 +188,7 @@ export const IconExternalLink = make(({color}) => {
   return [p('M15 3h6v6'), p('M10 14 21 3'), p('M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6')];
 });
 
-// Wave 7 theme toggle (Light / Dark / Auto cycle) — lucide `sun`, `moon`, and a half-filled
-// "contrast" disc for Auto (follows the OS scheme).
+// Wave 7 theme toggle (Light / Dark flip) — lucide `sun` and `moon`.
 export const IconSun = make(({color}) => {
   const {c, l} = withStroke(color);
   return [
@@ -208,11 +207,6 @@ export const IconSun = make(({color}) => {
 export const IconMoon = make(({color}) => {
   const {p} = withStroke(color);
   return [p('M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z')];
-});
-
-export const IconAuto = make(({color}) => {
-  const {c, p} = withStroke(color);
-  return [c(12, 12, 9), p('M12 3a9 9 0 0 1 0 18Z')];
 });
 
 export const ICONS = {
@@ -235,7 +229,6 @@ export const ICONS = {
   externalLink: IconExternalLink,
   sun: IconSun,
   moon: IconMoon,
-  auto: IconAuto,
 } as const;
 
 export type IconName = keyof typeof ICONS;
