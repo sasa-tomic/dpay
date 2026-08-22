@@ -303,6 +303,27 @@ export async function skipWalkthroughIfPresent(driver, opts = {}) {
 }
 
 /**
+ * Dismiss the payment rehearsal if it is showing (Trip Ready J3). On the create path the
+ * RECOVERY SAVED stamp beat plays first (~750ms) before the rehearsal mounts, so poll for the
+ * rehearsal's Explore-wallet exit OR the wallet balance — one of the two appears on every path
+ * (restore path + faucet-failed continue skip the beats entirely and land on the wallet).
+ * A no-op when absent; onboardWallet calls this after the backup ack, and flows that tap
+ * btn-mnemonic-continue manually (01, 23, 37, 68, 82, 88) call it explicitly.
+ */
+export async function skipRehearsalIfPresent(driver, opts = {}) {
+  const timeoutMs = opts.timeoutMs ?? 15_000;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await driver.isPresent('btn-rehearsal-skip')) {
+      await driver.click('btn-rehearsal-skip', {timeoutMs});
+      return;
+    }
+    if (await driver.isPresent('balance')) return;
+    await new Promise(r => setTimeout(r, 100));
+  }
+}
+
+/**
  * Onboard a fresh wallet: type the username, click create, dismiss the BIP-39 mnemonic backup screen,
  * wait for the funded balance. This is the shared preamble every browser test used to copy-paste
  * (4 lines × 15 files). Returns the driver for chaining.
@@ -313,6 +334,9 @@ export async function skipWalkthroughIfPresent(driver, opts = {}) {
  * React re-renders after the checkbox tap — a bare `click` could land before the re-render and be a
  * silent no-op. The faucet funds synchronously in finishCreate(); the balance poll (fast-poll seam =
  * 150ms in test, 2.5s in prod) reflects it on the next tick, so waitForText('∂100.00') lands quickly.
+ *
+ * Trip Ready J2B/J3: after the backup ack the RECOVERY SAVED beat plays (~750ms) and then the
+ * payment rehearsal mounts — skipRehearsalIfPresent dismisses it (restore paths never see it).
  */
 export async function onboardWallet(driver, name = 'e2e', opts = {}) {
   const timeoutMs = opts.timeoutMs ?? 15_000;
@@ -325,6 +349,7 @@ export async function onboardWallet(driver, name = 'e2e', opts = {}) {
   await driver.click('mnemonic-backup-checkbox', { timeoutMs: 4_000 });
   await waitForEnabled(driver, 'btn-mnemonic-continue', { timeoutMs: 4_000 });
   await driver.click('btn-mnemonic-continue', { timeoutMs: 4_000 });
+  await skipRehearsalIfPresent(driver);
   await driver.findByTestID('balance', { timeoutMs: 10_000 });
   await driver.waitForText('∂100.00', { timeoutMs });
   return driver;

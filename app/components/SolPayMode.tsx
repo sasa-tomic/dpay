@@ -23,6 +23,7 @@ import {ModeToggle} from './ModeToggle';
 import {SolanaWithdrawSheet} from './SolanaWithdrawSheet';
 import {useReportLock} from '../hooks/useReportLock';
 import {useShareFeedback, shareConfirmLabel} from '../hooks/useShareFeedback';
+import {CoachTip} from './CoachTip';
 
 /**
  * SolPayMode — the payer-side offline-pay component for the v2 recent-blockhash SOL rail.
@@ -266,6 +267,10 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
             base58 address (more precise than a short form), so no duplicate line. */}
         {req.name ? <Text testID="sol-pay-payee" style={S.dim2}>{short(req.to)}</Text> : null}
         {req.memo ? <Text testID="sol-pay-memo" style={S.dim2}>{req.memo}</Text> : null}
+        {/* Trip Ready J4 — same payReview truth as the IC rail (the copy is rail-agnostic: exact
+            asset + amount, your key). Reading-zone mount (under the amount/payee block it
+            explains). Same seen-key: one dismissal covers both rails. */}
+        <CoachTip tipKey="payReview" />
         <Text style={S.badgeOk}>signed on this device ✓</Text>
         <Text style={S.dim2}>This signs offline — the merchant settles when they submit it.</Text>
         {err ? <Text testID="sol-pay-err" style={S.err}>{err}</Text> : null}
@@ -296,6 +301,11 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
         <Text style={S.amountBig}>{`${fmtAsset(req!.amt, decimals, unit)} to ${req!.name || req!.to}`}</Text>
         <Text style={S.badgeOk}>signed offline ✓</Text>
         <Text style={S.qrHint}>Offline — the merchant settles this when they submit it. You'll see it on your balance once it's confirmed.</Text>
+        {/* Trip Ready J4 — the SOL QR hand-off is ALWAYS offline-pending (no online branch), and
+            the offlineQr truth ("the receiver's connection settles it") is exactly what this
+            phase already says. Reading-zone mount (under the status line, above the confirm row).
+            Same seen-key as the IC offline branch. */}
+        <CoachTip tipKey="offlineQr" />
         <View style={S.confirmRow}>
           <Pressable
             testID="btn-sol-pay-handed"
@@ -331,6 +341,10 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
       <View style={[S.check, S.checkAlready]}><IconClock size={44} color={C.brandInk}/></View>
       <Text testID="sol-pay-status" style={[S.paidText, S.alreadyText]}>{paidAmt ? `Sent ${paidAmt}` : 'Sent'}</Text>
       <Text style={S.paidSub}>{`${paidTo}awaiting the merchant's confirmation`}</Text>
+      {/* Trip Ready J4 — the SOL paid phase is ALWAYS the honest pending hand-off, so the
+          pendingOutcome truth applies on every visit until dismissed. Reading-zone mount (under
+          the headline it explains). Same seen-key as IC. */}
+      <CoachTip tipKey="pendingOutcome" />
       <Text style={S.dim2}>Your balance updates when the merchant settles this on-chain.</Text>
       <Pressable testID="btn-sol-pay-done" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={reset} accessibilityRole="button" accessibilityLabel="New payment" accessibilityState={{disabled: false}}>
         <Text style={S.ghostBtnText}>New payment</Text>

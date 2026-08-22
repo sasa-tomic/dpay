@@ -81,6 +81,11 @@ export async function run() {
     await driver.type('amount-input', '42.50', { timeoutMs: 4_000 });
     await driver.click('btn-request', { timeoutMs: 4_000 });
     await driver.findByTestID('request-qr', { timeoutMs: 5_000 });
+    // Trip Ready J4: the first-use receiveRequest coach card mounts with this screen and plays a
+    // ~480ms rise+fade entrance. Capturing mid-animation is nondeterministic frame-to-frame (the
+    // original 3.7%→12% "drift" was just animation state, not layout). Let it settle to rest so
+    // the capture — and the baseline contract — are deterministic.
+    await new Promise((r) => setTimeout(r, 800));
     // Collect the QR's device-pixel rect for the post-capture mask BEFORE screenshotting (the rect
     // is stable while the element is mounted; capturing then querying in either order is fine, but
     // doing it before keeps the masking self-contained per surface).

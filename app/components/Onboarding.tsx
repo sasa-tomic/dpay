@@ -1,5 +1,5 @@
-import {useEffect, useState} from 'react';
-import {KeyboardAvoidingView, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, Text, TextInput, View} from 'react-native';
+import {useEffect, useRef, useState} from 'react';
+import {Animated, Easing, KeyboardAvoidingView, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, Text, TextInput, View} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {C} from '../config/palette';
 import {S, isDark} from '../styles';
@@ -11,10 +11,12 @@ import type {Identity} from '../lib/types';
 import {DpayCore} from '../services/native';
 import {fetchWithTimeout} from '../services/relay';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
+import {useReducedMotion} from '../hooks/useReducedMotion';
 import {Logo, WordmarkLink} from './Logo';
 import {SeedWords} from './SeedWords';
 import {IconCheck} from './icons';
 import {Walkthrough} from './Walkthrough';
+import {Rehearsal} from './Rehearsal';
 
 export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: (id: Identity) => void}) {
   // Trip Ready J1 — the first-run walkthrough gate. `walkthrough` is a tri-state:
@@ -59,6 +61,20 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
   // (the 2026-08-16 founder report). The button copies the PURE space-joined words.
   const {copied, copy: doCopy} = useCopyFeedback();
 
+  // Trip Ready J2B — the create path's post-backup sequence, in-memory only (deliberately NO
+  // persisted "must show" state: an app killed mid-sequence simply lands in the wallet next
+  // launch — accepted by the spec). States:
+  //   'recoverySaved' → the RECOVERY SAVED passport-stamp beat (~750ms, auto-advances; zero
+  //                     extra mandatory taps — it plays while the faucet request is already
+  //                     done); then the rehearsal.
+  //   'rehearsal'     → the 3-beat payment rehearsal (Rehearsal.tsx); exits call onCreated.
+  //   null            → no sequence (restore path + relaunch never enter it).
+  // The flowUnderstood stamp is awarded by Rehearsal itself (on reaching beat 3); recoverySaved
+  // is awarded here the moment the beat starts (the acknowledgment IS the save — the words were
+  // written down at the gate; the beat only marks it).
+  const [beat, setBeat] = useState<'recoverySaved' | 'rehearsal' | null>(null);
+  const reducedMotion = useReducedMotion();
+
   // Generate a fresh on-device Ed25519 keypair, persist it, then SHOW THE BIP-39 BACKUP before entering
   // the wallet. The faucet fund is DEFERRED to `finishCreate` (run after the user acknowledges the
   // backup) so the wallet is never entered without the user having seen their 24 recovery words. The
@@ -98,6 +114,11 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
   // faucet (best-effort — works when the ledger is reachable; bounded by a 4s timeout so a hanging/
   // dead relay can't stall onboarding — fail fast → $0, fund later), then enter the wallet. On faucet
   // failure, `pendingId` is already set so the existing faucet-failed screen renders with Continue.
+  //
+  // Trip Ready J2B: on faucet success the create path now plays the in-memory beat sequence
+  // (RECOVERY SAVED stamp → rehearsal → onCreated) instead of calling onCreated directly. The
+  // faucet-failed path is UNCHANGED (btn-onboard-continue → onCreated — no beat, no rehearsal:
+  // the moment reads as recovery-from-a-hiccup, not celebration).
   async function finishCreate() {
     if (!pendingId) return;
     const id = pendingId;
@@ -106,12 +127,33 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
     setBusy(true);
     try {
       await fetchWithTimeout(`${base(relayUrl)}/api/v1/faucet`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({account: id.publicHex})}, BALANCE_TIMEOUT_MS);
-      onCreated(id);
+      void awardStamp(JOURNEY_STAMPS.recoverySaved);
+      setBeat('recoverySaved');
     } catch (e) {
       console.warn('faucet fetch failed:', e instanceof Error ? e.message : String(e));
       setBusy(false);
     }
   }
+
+  // The RECOVERY SAVED stamp choreography: a passport-stamp landing (tangerine ring, slight
+  // overshoot, resting -3° tilt) that holds a beat then auto-advances to the rehearsal. Reduced
+  // motion → simple fade, same timing. The alive-ref makes the unmount case safe.
+  const beatAlive = useRef(true);
+  useEffect(() => { beatAlive.current = true; return () => { beatAlive.current = false; }; }, []);
+  const stampSc = useRef(new Animated.Value(reducedMotion ? 1 : 0)).current;
+  const stampOp = useRef(new Animated.Value(reducedMotion ? 1 : 0)).current;
+  useEffect(() => {
+    if (beat !== 'recoverySaved') return;
+    if (!reducedMotion) {
+      Animated.parallel([
+        Animated.spring(stampSc, {toValue: 1, friction: 4.5, tension: 64, delay: 90, useNativeDriver: false}),
+        Animated.timing(stampOp, {toValue: 1, duration: 180, delay: 90, easing: Easing.out(Easing.cubic), useNativeDriver: false}),
+      ]).start();
+    }
+    const t = setTimeout(() => { if (beatAlive.current) setBeat('rehearsal'); }, 750);
+    return () => { clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [beat]);
 
   // Restore a wallet from EITHER the 24-word BIP-39 mnemonic (default) OR the 64-hex recovery seed
   // (legacy/advanced fallback). Both paths converge on `keypairFromSecret(hex)` — the mnemonic is
@@ -157,6 +199,28 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
           onDone={() => { void awardStamp(JOURNEY_STAMPS.walkthroughDone).then(() => setWalkthrough(false)); }}
           onSkip={() => { void awardStamp(JOURNEY_STAMPS.walkthroughDone).then(() => setWalkthrough(false)); }}
         />
+      ) : beat === 'rehearsal' ? (
+        /* Trip Ready J3 — the payment rehearsal. Both exits enter the wallet (default Pay tab
+           is exactly what "Try with demo funds" wants; Explore wallet is the same entry, the
+           label difference is about intent, not destination). */
+        <Rehearsal
+          onTry={() => { if (pendingId) onCreated(pendingId); }}
+          onSkip={() => { if (pendingId) onCreated(pendingId); }}
+        />
+      ) : beat === 'recoverySaved' ? (
+        /* Trip Ready J2 — the RECOVERY SAVED beat: a passport-stamp chip lands (slight
+           overshoot, resting -3° tilt), holds a moment, auto-advances to the rehearsal.
+           Zero extra mandatory taps. */
+        /* flex:1 (centerAll alone wraps content height) — the stamp lands mid-page like a
+           passport stamp on a visa page, not pinned under the status bar. */
+        <View style={[S.centerAll, {flex: 1}]}>
+          {/* The inline transform REPLACES stampChip's (style arrays override whole keys, not
+              merge) — so the resting -3deg tilt rides WITH the spring scale. */}
+          <Animated.View testID="recovery-saved-stamp" style={[S.stampChip, {opacity: stampOp, transform: [{scale: stampSc}, {rotate: '-3deg'}]}]}>
+            <IconCheck size={13} color={C.brand} />
+            <Text style={S.stampChipText}>Recovery saved</Text>
+          </Animated.View>
+        </View>
       ) : (
       <KeyboardAvoidingView
         style={{flex: 1}}
@@ -170,6 +234,9 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
           {backupMnemonic ? (
             <>
               <Text style={S.wordmarkBig}>Back up your wallet</Text>
+              {/* Trip Ready J2 — the ownership ritual line. ABOVE the warning, in ink: the moment
+                  reads as ownership first, risk second. The gate below stays EXACTLY as strong. */}
+              <Text style={S.backupRitualNote}>This is the moment your wallet becomes truly yours — only these words can bring your money back.</Text>
               <Text style={S.warnNote}>Write down these 24 words and store them safely. They're the ONLY way to recover your wallet if you lose this device. There is no dpay account to sign back into. Lose these words and this phone, and your money is gone. Not even we can recover it.</Text>
               <SeedWords words={backupMnemonic} testID="mnemonic-backup" />
               <Pressable testID="btn-mnemonic-copy" style={S.linkBtn} onPress={() => { if (backupMnemonic) void doCopy(wordsToString(backupMnemonic)); }}

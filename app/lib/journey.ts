@@ -46,31 +46,45 @@ export type Journey = {
   stamps: string[];
   /** Wall-clock ms when each stamp was awarded. */
   at: Record<string, number>;
+  /**
+   * One-time coaching "seen" markers (Trip Ready J2B, 2026-08-22). NOT achievement stamps —
+   * a seen marker only records that a first-use explanation was shown+dismissed, so the
+   * mature product stays quiet. Keys are free-form surface ids (`COACHING_TIPS` keys).
+   * Absent in pre-2B payloads → parsed as [].
+   */
+  seen: string[];
 };
 
-export const EMPTY_JOURNEY: Journey = {stamps: [], at: {}};
+export const EMPTY_JOURNEY: Journey = {stamps: [], at: {}, seen: []};
 
 /** Pure: whether `j` carries `key`. The only read path — never `.includes` ad hoc. */
 export function hasStamp(j: Journey, key: StampKey): boolean {
   return j.stamps.includes(JOURNEY_STAMPS[key]);
 }
 
+/** Pure: whether the one-time coaching marker `key` was already seen. */
+export function hasSeen(j: Journey, key: string): boolean {
+  return j.seen.includes(key);
+}
+
 /** Parse a persisted payload defensively: any non-object shape or corrupt JSON → empty. */
 export function parseJourney(raw: string | null): Journey {
   if (raw == null) return EMPTY_JOURNEY;
   try {
-    const v = JSON.parse(raw) as {stamps?: unknown; at?: unknown};
+    const v = JSON.parse(raw) as {stamps?: unknown; at?: unknown; seen?: unknown};
     if (v == null || typeof v !== 'object' || !Array.isArray(v.stamps) || v.at == null || typeof v.at !== 'object') {
       return EMPTY_JOURNEY;
     }
     // Keep only well-formed entries (string stamps + numeric at-times); unknown future
-    // stamps survive a round-trip so an app downgrade never wipes a journey.
+    // stamps survive a round-trip so an app downgrade never wipes a journey. `seen` is
+    // optional (pre-2B payloads) — a missing or malformed value yields [].
     const stamps = v.stamps.filter((s): s is string => typeof s === 'string');
     const at: Record<string, number> = {};
     for (const [k, t] of Object.entries(v.at as Record<string, unknown>)) {
       if (typeof t === 'number' && Number.isFinite(t)) at[k] = t;
     }
-    return {stamps, at};
+    const seen = Array.isArray(v.seen) ? v.seen.filter((s): s is string => typeof s === 'string') : [];
+    return {stamps, at, seen};
   } catch (e) {
     console.warn('journey: corrupt payload, starting empty:', e instanceof Error ? e.message : String(e));
     return EMPTY_JOURNEY;
@@ -105,7 +119,21 @@ export async function awardStamp(key: StampKey): Promise<Journey> {
   const stamp = JOURNEY_STAMPS[key];
   const current = await loadJourney();
   if (current.stamps.includes(stamp)) return current;
-  const updated: Journey = {stamps: [...current.stamps, stamp], at: {...current.at, [stamp]: Date.now()}};
+  const updated: Journey = {stamps: [...current.stamps, stamp], at: {...current.at, [stamp]: Date.now()}, seen: current.seen};
+  await persistJourney(updated);
+  return updated;
+}
+
+/**
+ * Mark a one-time coaching surface as seen: idempotent (an already-seen key is a no-op
+ * returning the current journey unchanged, without a redundant write), persists, and
+ * returns the updated journey. The seen-list rides along on every stamp write and
+ * vice-versa — neither dimension ever clobbers the other.
+ */
+export async function markSeen(key: string): Promise<Journey> {
+  const current = await loadJourney();
+  if (current.seen.includes(key)) return current;
+  const updated: Journey = {...current, seen: [...current.seen, key]};
   await persistJourney(updated);
   return updated;
 }
@@ -126,9 +154,10 @@ export function useJourney(): {journey: Journey; award: (key: StampKey) => void}
   const award = useCallback((key: StampKey) => {
     // Fail-soft optimistic update: state moves immediately; the persisted store is
     // the source of truth on next mount (awardStamp re-checks idempotency anyway).
+    // Spread-first so the seen-markers dimension rides along untouched.
     setJourney(j => j.stamps.includes(JOURNEY_STAMPS[key])
       ? j
-      : {stamps: [...j.stamps, JOURNEY_STAMPS[key]], at: {...j.at, [JOURNEY_STAMPS[key]]: Date.now()}});
+      : {...j, stamps: [...j.stamps, JOURNEY_STAMPS[key]], at: {...j.at, [JOURNEY_STAMPS[key]]: Date.now()}});
     void awardStamp(key);
   }, []);
   return {journey, award};

@@ -441,6 +441,32 @@ function buildStyles(p: Palette) {
   // The tangerine "reviewed" stamp badge (in-scene accent; real confirmed-success green stays
   // reserved for actual settlement states).
   walkStampBadge: {width: 26, height: 26, borderRadius: 13, backgroundColor: p.brand, alignItems: 'center', justifyContent: 'center', marginLeft: 10, shadowColor: p.brand2, shadowOpacity: 0.3, shadowRadius: 8, shadowOffset: {width: 0, height: 3}, elevation: 3},
+
+  // ─── Trip Ready J2B (2026-08-22): recovery ritual, rehearsal, first-use coaching ──────────
+  // The backup screen's ownership line — the ritual sentence ABOVE the warning. Slightly larger
+  // than the warning, ink (not warn-tinted): the moment reads as ownership first, risk second.
+  backupRitualNote: {fontSize: 15, color: p.ink, textAlign: 'center', marginTop: -8, marginBottom: 14, paddingHorizontal: 8, lineHeight: 21, fontFamily: FONT.sansMedium},
+  // The RECOVERY SAVED passport-stamp chip (the post-faucet beat): tangerine ring, mono
+  // letterspaced caps, a kept -3° tilt (the stamp lands slightly crooked — passport-stamp
+  // aesthetic; the tilt itself is animated, this is the resting angle).
+  stampChip: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 999, borderWidth: 1.5, borderColor: p.brand, backgroundColor: 'transparent', transform: [{rotate: '-3deg'}]},
+  stampChipText: {color: p.brand, fontFamily: FONT.mono, fontSize: 12, fontWeight: '600', letterSpacing: 2.4, textTransform: 'uppercase'},
+  // Rehearsal additions: the auto-advance hairline (a 2px progress rail above the dots — the
+  // affordance that the beat advances itself) + the offline punchline (same strip grammar as the
+  // walkthrough campaign line, so the two documents feel like one family).
+  rehProgressRail: {height: 2, borderRadius: 1, backgroundColor: p.line2, overflow: 'hidden', marginBottom: 12, marginTop: 4},
+  rehProgressFill: {height: 2, backgroundColor: p.brand, alignSelf: 'stretch', transformOrigin: 'left'},
+  // CoachTip — the one-time contextual card. Small paper panel (panel, not card: it sits ON the
+  // surface, quieter than the QR card), hairline + soft lift; icon chip echoes walkAssetChip so
+  // the coaching voice matches the walkthrough's. NEVER fixed/overlay — inline, so it can never
+  // block the primary action.
+  coachCard: {alignSelf: 'stretch', backgroundColor: p.panel, borderRadius: 14, borderWidth: 1, borderColor: p.line2, padding: 12, marginTop: 14, ...LIFT_SM},
+  coachRow: {flexDirection: 'row', alignItems: 'flex-start', gap: 10},
+  coachIcon: {width: 30, height: 30, borderRadius: 10, borderWidth: 1, borderColor: p.glyphBorder, backgroundColor: p.panel2, alignItems: 'center', justifyContent: 'center'},
+  coachText: {flex: 1, minWidth: 0},
+  coachTitle: {fontSize: 13, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold},
+  coachBody: {fontSize: 12.5, color: p.sub, lineHeight: 17.5, marginTop: 2, fontFamily: FONT.sans},
+  coachDismiss: {width: 32, height: 32, alignItems: 'center', justifyContent: 'center', marginLeft: -4},
   });
 }
 

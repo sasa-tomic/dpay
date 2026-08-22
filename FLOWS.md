@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **85 flows**
-> (84 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **87 flows**
+> (86 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (10) · pay (18) · offline (7) · deposit (8) · withdraw (7) · nfc (7) · system (21) · tour (6)
+wire (1) · onboard (12) · pay (18) · offline (7) · deposit (8) · withdraw (7) · nfc (7) · system (21) · tour (6)
 
 ---
 
@@ -47,6 +47,8 @@ wire (1) · onboard (10) · pay (18) · offline (7) · deposit (8) · withdraw (
 | 82 | own-seed-create | Create a wallet from a pasted seed (words OR hex) instead of a random one; invalid seed is rejected on the form. | own-seed, btn-own-seed-toggle, own-seed-input, create-from-seed, faucet, mnemonic-backup |
 | 88 | walkthrough | a fresh boot shows the walkthrough instead of the create form,scenes advance via Next; only the active scene is mounted,each scene body carries its comprehension-critical truth,the final Next reads "Get started" and reveals the create form unchanged,creating from there lands in the funded Wallet,walkthroughDone is persisted in the journey store | walkthrough, education, first-run-gate, journey-stamps |
 | 89 | walkthrough-skip-replay | Skip dismisses the walkthrough instantly and reveals the create form,Skip also persists walkthroughDone,a pre-seeded walkthroughDone stamp suppresses the walkthrough on the next boot,Settings → How dpay works replays the walkthrough with a close affordance and no Skip,the replay leaves the journey store unchanged | walkthrough, education, settings-replay, journey-stamps, skip-path |
+| 90 | rehearsal | the backup gate stays MANDATORY (ritual sentence reframes, never weakens: checkbox + disabled Continue),RECOVERY SAVED stamp beat plays after the faucet and auto-advances (no extra tap),the rehearsal walks all 3 beats with verbatim education copy + the offline punchline,Try with demo funds lands on the funded Pay surface,recoverySaved + flowUnderstood persist in dpay.journey.v1 | recovery-ritual-sentence, mnemonic-backup-checkbox, btn-mnemonic-continue, recovery-saved-stamp, rehearsal, rehearsal-step-{1..3}, rehearsal-body-{1..3}, rehearsal-punchline, btn-rehearsal-next, btn-rehearsal-skip, flowUnderstood-stamp, recoverySaved-stamp, pay-tab-default-landing |
+| 91 | coach-tips | each coaching tip mounts on its surface exactly once per identity: presence, dismiss, re-entry → absent; pendingOutcome never appears on a confirmed Paid screen; the offline hand-off still settles (counterparty submit + reconcile) | coach-payReview, coach-receiveRequest, coach-offlineQr, coach-pendingOutcome, btn-coach-*-dismiss, journey-seen-markers, one-time-coaching |
 
 ### Payments (the core offline-pay flow)
 

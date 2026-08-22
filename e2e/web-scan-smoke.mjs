@@ -103,6 +103,15 @@ try {
     await sleep(50);
   }
   await page.click('[data-testid="btn-mnemonic-continue"]');
+  // Trip Ready J2B/J3 — the create path plays the RECOVERY SAVED beat (~750ms) then the payment
+  // rehearsal. Dismiss the rehearsal when present (restore paths never see it); landing on the
+  // wallet balance either way is the outcome we want.
+  for (let i = 0; i < 150; i++) {
+    const skip = await page.$('[data-testid="btn-rehearsal-skip"]');
+    if (skip) { await skip.click(); break; }
+    if (await page.$('[data-testid="balance"]')) break;
+    await sleep(100);
+  }
   await page.waitForSelector('[data-testid="balance"]', { timeout: 10000 });
   await sleep(2500);
   const walletUp = await page.$('[data-testid="btn-settings"]');

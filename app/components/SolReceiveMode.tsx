@@ -31,6 +31,7 @@ import {AssetPicker} from './AssetPicker';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {useReportLock} from '../hooks/useReportLock';
 import {IconCheck, IconChevronDown, IconClock, IconCopy, IconQr} from './icons';
+import {CoachTip} from './CoachTip';
 
 // Twin of ReceiveMode's memoInputStyle — Traveler Paper input idiom (white field, hairline border,
 // Space Grotesk), kept inline + identical so the IC and SOL Receive forms stay pixel-twins.
@@ -343,6 +344,11 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
                   return <Text style={S.qrExpiryWarn}>Expires in 0:{s.toString().padStart(2, '0')}</Text>;
                 })()}
                 <Text style={S.qrHint}>Waiting for the payer to sign offline…</Text>
+                {/* Trip Ready J4 — the same receiveRequest truth ("your connection confirms"):
+                    the merchant's own connection scans + settles the payer's signed payment.
+                    Reading-zone mount (after the status line, before the action cluster) — same
+                    placement decision as the IC ReceiveMode. */}
+                <CoachTip tipKey="receiveRequest" />
                 <Pressable style={S.ghostBtn} onPress={() => setScanning(true)} accessibilityRole="button" accessibilityLabel="Scan the payer's signed code" accessibilityHint="Scan the payer's signed QR to submit their offline payment" accessibilityState={{disabled: false}}>
                   <IconQr size={16} color={C.sub}/>
                   <Text style={S.ghostBtnText}>Scan the payer's signed code</Text>

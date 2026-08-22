@@ -12,7 +12,7 @@
 // require a username fails THIS test loudly, forcing a conscious update rather than silent drift.
 //
 // Selector contract: `username-input` (M6), `btn-create`, `balance`.
-import { setup, assert, assertEq, accountOf, waitForEnabled, skipWalkthroughIfPresent } from '../harness/lib.mjs';
+import { setup, assert, assertEq, accountOf, waitForEnabled, skipWalkthroughIfPresent, skipRehearsalIfPresent } from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -50,6 +50,8 @@ export async function run() {
     await driver.click('mnemonic-backup-checkbox', { timeoutMs: 4_000 });
     await waitForEnabled(driver, 'btn-mnemonic-continue', { timeoutMs: 4_000 });
     await driver.click('btn-mnemonic-continue', { timeoutMs: 4_000 });
+    // Trip Ready J2B/J3 — dismiss the recovery-beat + rehearsal interstitial (create path only).
+    await skipRehearsalIfPresent(driver);
 
     // The wallet mounts + the faucet funds ∂100 (the real relay path, same as flow 01).
     await driver.findByTestID('balance', { timeoutMs: 10_000 });

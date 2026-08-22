@@ -22,6 +22,7 @@ import {CkErc20DepositSheet} from './CkErc20DepositSheet';
 import {AssetPicker} from './AssetPicker';
 import {useReportLock} from '../hooks/useReportLock';
 import {useShareFeedback, shareConfirmLabel} from '../hooks/useShareFeedback';
+import {CoachTip} from './CoachTip';
 import {IconCheck, IconChevronDown, IconClock, IconQr, IconShare, IconWifiOff} from './icons';
 
 // The optional merchant memo input — a real secondary field (not a bare text link), mirroring the
@@ -269,6 +270,11 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
             <Text style={S.qrOfflinePillText}>Offline — can’t submit payments until reconnected</Text>
           </View>
         ) : null}
+            {/* Trip Ready J4 — the request-QR first-use tip: what this code is and who settles it.
+                Mounted in the reading zone (right after the status lines, before the action
+                cluster) so it is seen without scrolling on a phone viewport; inline, never blocks
+                the QR or the scan path. */}
+            <CoachTip tipKey="receiveRequest" />
             {/* Item 6 — share this request as a dpay:req/ link so a payer far away (no camera, over a
                 messaging app) can open it and have the pay review screen pre-filled. The blob is the
                 EXACT base64url the QR carries (no new codec); the payer still taps Approve. */}

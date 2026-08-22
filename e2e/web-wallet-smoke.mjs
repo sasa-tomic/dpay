@@ -75,12 +75,35 @@ try {
   selfcheck ? ok('DPAY_SELFCHECK PASS (wasm DpayCore boots, signs, verifies)') : bad('no DPAY_SELFCHECK PASS in console');
 
   await page.waitForSelector('[data-testid="btn-create"], input[placeholder*="name" i]', { timeout: 15000 }).catch(() => {});
+  // Trip Ready J1 — skip the first-run walkthrough if it gates this fresh boot.
+  {
+    const skip = await page.waitForSelector('[data-testid="btn-walkthrough-skip"]', { timeout: 2000 }).catch(() => null);
+    if (skip) await skip.click();
+  }
   // Onboarding: create identity (the flow the e2e suite drives; anchors on the same testIDs).
   const typed = await page.evaluate(() => !!document.querySelector('input'));
   if (typed) {
     await page.type('input', 'SmokeTester');
     const btn = await page.$('[data-testid="btn-create"]');
     if (btn) await btn.click();
+    // Trip Ready J2B/J3 — the create path plays the RECOVERY SAVED beat + payment rehearsal
+    // before the wallet; dismiss the rehearsal so the wallet chrome check below is meaningful.
+    const mnemonic = await page.waitForSelector('[data-testid="mnemonic-backup-checkbox"]', { timeout: 8000 }).catch(() => null);
+    if (mnemonic) {
+      await mnemonic.click();
+      for (let i = 0; i < 100; i++) {
+        const dis = await page.$eval('[data-testid="btn-mnemonic-continue"]', (n) => n.disabled || n.getAttribute('aria-disabled') === 'true').catch(() => true);
+        if (!dis) break;
+        await sleep(50);
+      }
+      await page.click('[data-testid="btn-mnemonic-continue"]');
+      for (let i = 0; i < 150; i++) {
+        const skip = await page.$('[data-testid="btn-rehearsal-skip"]');
+        if (skip) { await skip.click(); break; }
+        if (await page.$('[data-testid="balance"]')) break;
+        await sleep(100);
+      }
+    }
   }
   await sleep(2500);
 

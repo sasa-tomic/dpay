@@ -13,7 +13,7 @@
 // Selector contract: `walkthrough`, `walkthrough-scene-1|2|3`, `walkthrough-body-1|2|3`,
 // `walkthrough-dots`, `btn-walkthrough-next`, `btn-walkthrough-skip`, then the existing onboarding
 // + wallet net (`username-input` by placeholder, `btn-create`, `mnemonic-backup`, `balance`).
-import { setup, assert, assertIncludes, waitForEnabled } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, waitForEnabled, skipRehearsalIfPresent } from '../harness/lib.mjs';
 
 export const meta = {
   id: 88,
@@ -85,12 +85,15 @@ export async function run() {
     assertIncludes(formText, 'No account', 'create form custody line unchanged');
     console.log('[88-walkthrough] ✓ Get started reveals the create form');
 
-    // 6. Create → backup gate → funded Wallet (the shared happy path).
+    // 6. Create → backup gate → recovery beat + rehearsal (dismissed) → funded Wallet.
     await driver.click('btn-create', { timeoutMs: 4_000 });
     await driver.findByTestID('mnemonic-backup', { timeoutMs: 8_000 });
     await driver.click('mnemonic-backup-checkbox', { timeoutMs: 4_000 });
     await waitForEnabled(driver, 'btn-mnemonic-continue', { timeoutMs: 4_000 });
     await driver.click('btn-mnemonic-continue', { timeoutMs: 4_000 });
+    // Trip Ready J2B/J3 — the RECOVERY SAVED beat + payment rehearsal play here; flow 90 pins
+    // them in full, this flow just needs the funded wallet behind them.
+    await skipRehearsalIfPresent(driver);
     await driver.findByTestID('balance', { timeoutMs: 10_000 });
     await driver.waitForText('∂100.00', { timeoutMs: 15_000 });
     await driver.waitForText('wlk', { timeoutMs: 5_000 });

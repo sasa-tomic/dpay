@@ -90,6 +90,9 @@ export async function run() {
     await driver.type('amount-input', '42.50', { timeoutMs: 4_000 });
     await driver.click('btn-request', { timeoutMs: 4_000 });
     await driver.findByTestID('request-qr', { timeoutMs: 5_000 });
+    // Trip Ready J4: let the receiveRequest coach card's ~480ms rise+fade entrance settle to rest
+    // so the capture (and the baseline contract) are deterministic — mirrors flow 40.
+    await new Promise((r) => setTimeout(r, 800));
     masks['request-qr'] = await getTestIDRectDevicePx(driver, 'request-qr');
     await driver.screenshot(SURFACES[1].capture);
 

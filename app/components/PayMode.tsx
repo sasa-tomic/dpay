@@ -20,6 +20,7 @@ import {WithdrawSheet} from './WithdrawSheet';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useReportLock} from '../hooks/useReportLock';
 import {useShareFeedback, shareConfirmLabel} from '../hooks/useShareFeedback';
+import {CoachTip} from './CoachTip';
 import {IconCheck, IconClock, IconInfo, IconShare} from './icons';
 
 // Plain-language per-reason text for the NFC-unavailable info popup. Each ends with the honest
@@ -206,6 +207,11 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
         <View style={[S.check, warn && S.checkAlready]}>{mark}</View>
         <Text style={[S.paidText, warn && S.alreadyText]}>{headline}</Text>
         <Text style={S.paidSub}>{sub}</Text>
+        {/* Trip Ready J4 — the honest-pending first-use tip: ONLY on the unresolved outcome view
+            (paid.pending — the offline hand-off state), never on a confirmed settle. Mounted in
+            the reading zone (right under the headline it explains); pending is quiet and
+            unresolved; this teaches exactly that, once. */}
+        {paid.pending ? <CoachTip tipKey="pendingOutcome" /> : null}
         {/* NFC-less receipt hand-back: when the payer settled ONLINE (NFC unavailable) they hold the
             rail proof {ledger, block_index, request_id}. Offer to share it back as a dpay:pay/ link
             so the merchant can open it — format-check it against their open request and confirm
@@ -247,6 +253,10 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
         {online ? <Text style={S.qrHint}>Waiting for {qr.who} to scan…</Text> : (
           <>
             <Text style={S.qrHint}>Offline — {qr.who} settles this when they submit it. You’ll see it on your balance once you’re back online.</Text>
+            {/* Trip Ready J4 — the offline hand-off first-use tip (offline branch only: the online
+                branch's QR is scanned within seconds, nothing to teach). Mounted right under the
+                status line it explains, above the confirm row; inline, never blocks. */}
+            <CoachTip tipKey="offlineQr" />
             <View style={S.confirmRow}>
               {/* Offline we CANNOT know the ledger settled it, so this is an honest "handed off",
                   not "Paid ✓". It optimistically reduces the local balance; the real balance
@@ -305,6 +315,10 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
         {/* The merchant-set memo (if any) — shown as a small subtitle so the payer sees the note
             attached to this request before approving. Empty memo renders nothing. */}
         {req.memo ? <Text testID="review-memo" style={S.dim2}>{req.memo}</Text> : null}
+        {/* Trip Ready J4 — one-time first-use coaching, mounted in the reading zone (right under
+            the amount/payee block it explains) so it is seen without scrolling; inline, never
+            covers the buttons. Shows until dismissed; dismissal persists via journey seen-markers. */}
+        <CoachTip tipKey="payReview" />
         {/* C1/C2 + L5: the warning + any error render ABOVE the button (not below) so they're seen
             first; the raw request nonce is no longer surfaced (internal protocol data). */}
         {insufficient ? (

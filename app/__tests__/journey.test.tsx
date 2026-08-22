@@ -6,7 +6,7 @@ import {describe, expect, test, beforeEach} from '@jest/globals';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {JOURNEY_STORAGE_KEY} from '../config/constants';
 import {
-  EMPTY_JOURNEY, JOURNEY_STAMPS, awardStamp, hasStamp, loadJourney, parseJourney,
+  EMPTY_JOURNEY, JOURNEY_STAMPS, awardStamp, hasStamp, hasSeen, loadJourney, markSeen, parseJourney,
 } from '../lib/journey';
 
 describe('journey store', () => {
@@ -27,7 +27,7 @@ describe('journey store', () => {
     expect(reloaded.at.walkthroughDone).toBe(updated.at.walkthroughDone);
     // The persisted shape is the documented JSON contract.
     const raw = await AsyncStorage.getItem(JOURNEY_STORAGE_KEY);
-    expect(JSON.parse(raw as string)).toEqual({stamps: ['walkthroughDone'], at: {walkthroughDone: updated.at.walkthroughDone}});
+    expect(JSON.parse(raw as string)).toEqual({stamps: ['walkthroughDone'], at: {walkthroughDone: updated.at.walkthroughDone}, seen: []});
   });
 
   test('awardStamp is idempotent (no duplicate, no rewrite, same journey back)', async () => {
@@ -66,12 +66,50 @@ describe('journey store', () => {
     expect(parseJourney('{"stamps":[],"at":[]}')).toEqual(EMPTY_JOURNEY);
     // Unknown future stamps + numeric at-times survive a downgrade round-trip…
     expect(parseJourney('{"stamps":["futureThing"],"at":{"futureThing":123}}')).toEqual({
-      stamps: ['futureThing'], at: {futureThing: 123},
+      stamps: ['futureThing'], at: {futureThing: 123}, seen: [],
     });
     // …but malformed entries are dropped (string stamps + finite at-times only).
     expect(parseJourney('{"stamps":[42,"ok"],"at":{"ok":1,"bad":"x"}}')).toEqual({
-      stamps: ['ok'], at: {ok: 1},
+      stamps: ['ok'], at: {ok: 1}, seen: [],
     });
+  });
+
+  // ─── Trip Ready J2B — one-time coaching seen-markers (Journey.seen) ────────────────────────
+
+  test('seen-markers: missing in pre-2B payloads parses as [] (backward compatible)', () => {
+    expect(parseJourney('{"stamps":[],"at":{}}').seen).toEqual([]);
+    expect(parseJourney('{"stamps":[],"at":{},"seen":"nope"}').seen).toEqual([]); // malformed → []
+  });
+
+  test('markSeen persists, is idempotent, and never clobbers stamps/at', async () => {
+    await awardStamp('walkthroughDone');
+    await markSeen('payReview');
+    await markSeen('receiveRequest');
+    await markSeen('payReview'); // second call: no-op, no duplicate
+    const j = await loadJourney();
+    expect(j.seen).toEqual(['payReview', 'receiveRequest']);
+    expect(hasSeen(j, 'payReview')).toBe(true);
+    expect(hasSeen(j, 'offlineQr')).toBe(false);
+    expect(hasSeen(EMPTY_JOURNEY, 'payReview')).toBe(false);
+    // Stamps + at-times rode along untouched.
+    expect(j.stamps).toEqual(['walkthroughDone']);
+    expect(typeof j.at.walkthroughDone).toBe('number');
+  });
+
+  test('awardStamp after markSeen preserves the seen list (dimensions never clobber)', async () => {
+    await markSeen('payReview');
+    await awardStamp('fundsReady');
+    const j = await loadJourney();
+    expect(j.seen).toEqual(['payReview']);
+    expect(j.stamps).toEqual(['fundsReady']);
+    // And the reverse order.
+    await awardStamp('recoverySaved');
+    await markSeen('pendingOutcome');
+    expect((await loadJourney()).seen).toEqual(['payReview', 'pendingOutcome']);
+  });
+
+  test('seen-markers survive a downgrade round-trip; malformed entries dropped', () => {
+    expect(parseJourney('{"stamps":[],"at":{},"seen":["futureTip","ok",17]}').seen).toEqual(['futureTip', 'ok']);
   });
 
   test('useJourney: loads on mount, award updates state + persists', async () => {
