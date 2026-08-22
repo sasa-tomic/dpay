@@ -170,15 +170,22 @@
 > `/balances` or the gateway first; MIUI physical device blocks test-APK installs (`just ondevice`
 > stays emulator-only).
 >
-> **Agent-pickable work queued: the Trust Wallet fund-button** (set 2026-08-17). Full researched
+> ~~**Agent-pickable work queued: the Trust Wallet fund-button** (set 2026-08-17). Full researched
 > plan: **`2026-08-17-trust-wallet-fund-button.md`** — read it first; it carries the verified
 > deep-link format, UAI asset ids (`c0`/`c501`/`c501_t<mint>`), per-rail fit table, and the
-> explicitly-rejected approaches. Summary: one-tap "Fund from Trust Wallet" deep link
-> (`https://link.trustwallet.com/send?asset=…&address=<deposit addr>`) on the native Add-money
-> surfaces (BTC mainnet DepositSheet + SOL/USDC My-address view), android-gated, mainnet-only,
-> jest-golden-tested; ckETH/ckUSDC stay on the existing WalletConnect path (Trust already pairs
-> there — zero work). Est. S / 1–2 h. Research artifacts: `third_party/wallet-core` clone (registry
-> analysis). Do NOT re-derive the research.
+> explicitly-rejected approaches.~~ **✅ DONE (2026-08-22/23, commit `43b1f09`)** — shipped per the
+> researched plan: `app/trustwallet.ts` pure https-form deeplink builder (`https://link.trustwallet.com/send?asset=…&address=<deposit addr>`,
+> never `trust://`, no amount/memo), android-gated ghost button on the BTC mainnet DepositSheet +
+> SOL receive sheet; jest 983/983, `just verify` green, `just app` PASS on a physical device.
+> Details in the session summary below.
+>
+> **Found + fixed mid-arc (commit `4c8ccfd`):** REAL prod bug on the deposit surface — the mainnet
+> ckBTC minter exposes `get_btc_address` as an UPDATE only, so the app's signed-QUERY form failed
+> on mainnet with `Canister has no query method 'get_btc_address'` (a prod-only blind spot: the
+> offline fake gateway had accepted the query form). Fix: sign one update envelope → `/api/v2/call`
+> → `request_status` poll → `icpDecodeText` (existing FFI, zero bridge change); the fake gateway now
+> mirrors the mainnet rejection. LIVE mainnet verified. CODEBASE_ANALYSIS.md + docs/CANISTERS.md
+> were updated in-commit.
 >
 > Prior session context: the 2026-08-16/17 sessions delivered TWO design waves on top of `df846f8`.
 > (1) Visual overhaul (commits `e3b6bd2`→`451384e`): lucide-style SVG icon system (17 icons,
@@ -434,6 +441,30 @@ if a native-ETH withdrawal ever fails on prod with a minter reject mentioning
 > ZERO tests on this physical MIUI device — Play Protect + MIUI `AdbInstallActivity` dialogs
 > silently block the UTP test-APK install (gradle reports SUCCESS with `tests=0`); that gate stays
 > emulator-only in practice. The REAL radio-hop validation is the founder two-phone live tap.
+
+## Session summary (2026-08-22/23): Trip Ready delight arc — onboarding, coaching, motion, passport — COMPLETE
+
+> **Context:** founder directive to make dpay genuinely delightful through a quick first-time
+> walkthrough, capability education, non-custodial clarity, achievements, and honest motion —
+> behavioral rationale required, "fabulous" creative bar non-negotiable. Plan:
+> **`docs/specs/2026-08-22-trip-ready-delight-plan-IMPLEMENTED.md`** (renamed from
+> `…-plan.md` at arc close, with the status block above). 7 commits on main, every gate green at each step.
+
+**Done (all committed, all gates green at each step):**
+- **`1ad750c`** — first-run walkthrough (J1): new `app/lib/journey.ts` (stamp store `dpay.journey.v1`, idempotent awards), `app/config/education.ts` (SINGLE copy source for walkthrough/rehearsal/coaching + `CAMPAIGN_LINE`), `app/hooks/useReducedMotion.ts`, `app/components/Walkthrough.tsx` (3 scenes: pay-without-signal / key-stays-on-device / exact-asset; skippable, replayable from Settings); Onboarding gates on `walkthroughDone`; e2e flows 88–89. Gates: typecheck, jest 898/898, e2e 84/84, visual baselines 40/84 reseeded, FLOWS.md regen.
+- **`2f7a969`** — recovery ritual + payment rehearsal + first-use coaching (J2–J4): the backup gate gains ritual copy + a `recoverySaved` stamp chip (the MANDATORY gate is reframed, never weakened); `Rehearsal.tsx` 3-beat auto storyboard (awards `flowUnderstood`); `CoachTip.tsx` one-time tips on IC+SOL pay/receive/offline-QR/pending surfaces via journey `seen` keys; flows 90–91. jest 921/921, e2e 86/86.
+- **`0aa0b50`** — landing tells the offline-payment story (J6): hero "Roaming off. Payment on." byte-identical to education.ts (pinned by the new relay test `landing_page_tells_the_offline_payment_story`), #proof 4-beat airplane-mode storyboard, #how 3-step payment story, honesty fixes. test-relay 36/36.
+- **`8f130ba`** — functional motion system (J5): `app/hooks/useMotionPref.ts` + `app/config/motion.ts` (single-source tokens, reduced-motion); reanimated shared transitions mapped to REAL NFC/QR protocol phases — no fake progress, pending carries no stamp/campaign line. jest 937/937, e2e 88/88.
+- **`73b32a7`** — Trip Readiness passport (J7): `PassportSheet.tsx` in Settings, stamps = the journey keys, completion state "Trip Ready"; the first-confirmed-offline-payment peak moment awards `firstOfflinePayment`. jest 962/962, e2e 89/89, balances baselines reseeded, FLOWS.md at 90 flows.
+- **`43b1f09`** — Trust Wallet fund button (fund-first funnel; the top agent-pickable work-order item, plan `2026-08-17-trust-wallet-fund-button.md`): `app/trustwallet.ts` pure https-form deeplink builder (never `trust://`, no amount/memo), android-gated ghost button on the BTC mainnet DepositSheet + SOL receive sheet. jest 983/983, `just verify` green, `just app` PASS on a physical device.
+- **`4c8ccfd`** — REAL prod bug fix: mainnet ckBTC minter exposes `get_btc_address` as UPDATE only → app signs an update → `/api/v2/call` → `request_status` poll → `icpDecodeText` (existing FFI, zero bridge change); the fake-IC gateway now mirrors the mainnet query-form rejection (code 5) so the prod-only blind spot is closed offline; LIVE mainnet verified (real bc1… address). jest 988/988, e2e 89/89, test-relay 36/36, dpay-icp-e2e 21/21, `just check` OK. (CODEBASE_ANALYSIS.md + docs/CANISTERS.md updated in-commit.)
+
+**Final gates at HEAD `4c8ccfd`:** `ANDROID_SERIAL=emulator-5554 just app` PASS (DPAY_SELFCHECK + DPAY_SOL_SELFCHECK), `just ondevice` PASSED, `just campreview` GREEN both rails (demo 78.76/195.5, sol 81.53/195.8). Full `just verify` + prod catalog curl re-run by the orchestrator at HEAD — green.
+
+**Residual documented (keep visible):**
+- **PROD IS BEHIND HEAD** — the whole arc (walkthrough → passport, landing, Trust Wallet button, get_btc_address fix) is committed but UNshipped; founder ships via `just deploy-ic && just apk && just up`.
+- The campaign line is single-sourced in `app/config/education.ts`, but `landing.html` carries the literal — pinned byte-identical by relay test `landing_page_tells_the_offline_payment_story`; edit both together.
+- The deferred default-tab/first-impression item (below, 2026-08-10) is only partially addressed: the walkthrough now shapes the first run, but the post-onboarding landing on the Pay scanner remains the intended default (flow 90 pins `pay-tab-default-landing`) — still deferred as a deliberate choice, not an oversight.
 
 ## Session summary (2026-08-20): rail-switch completion — wasm dual-allocator fix + review-fix arc
 

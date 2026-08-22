@@ -1,6 +1,18 @@
 # 2026-08-22 - Trip Ready: onboarding, delight, and marketing plan
 
-> **STATUS: PROPOSED. NO IMPLEMENTATION YET.**
+> **STATUS: FULLY IMPLEMENTED (2026-08-22…23).** Every journey below shipped on main, all gates
+> green at each step — full record in `OPEN_ISSUES.md` → "Session summary (2026-08-22/23)".
+> Journey → commit map:
+>
+> - **Journey 1** (first-run story / walkthrough) → `1ad750c` (journey store + education.ts; e2e flows 88–89)
+> - **Journey 2–4** (recovery ritual, payment rehearsal, in-context coaching) → `2f7a969` (e2e flows 90–91)
+> - **Journey 5** (capability passport) → `73b32a7` (PassportSheet + `firstOfflinePayment`; e2e flow 94), building on the peak/motion substrate of `8f130ba`
+> - **Motion & visual art direction** (protocol-phase transitions, reduced-motion, offline peak) → `8f130ba` (e2e flows 92–93)
+> - **Marketing system** (landing tells the offline-payment story, campaign hero) → `0aa0b50` (byte-pinned to `CAMPAIGN_LINE` by relay test)
+> - Related fund-first funnel: **Trust Wallet fund button** → `43b1f09`
+> - Related prod fix found during the arc: **ckBTC `get_btc_address` update-call** → `4c8ccfd`
+>
+> The remainder of this document is the original approved plan, kept verbatim for reference.
 >
 > Founder directive: make dpay more fun to use through a quick first-time walkthrough,
 > capability education, clear non-custodial explanations, achievements, animations, and any
