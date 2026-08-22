@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (8) · pay (18) · offline (7) · deposit (8) · withdraw (7) · nfc (6) · system (21) · tour (6)
+wire (1) · onboard (8) · pay (18) · offline (7) · deposit (8) · withdraw (7) · nfc (7) · system (21) · tour (6)
 
 ---
 
@@ -37,7 +37,7 @@ wire (1) · onboard (8) · pay (18) · offline (7) · deposit (8) · withdraw (7
 
 | # | Flow | Verifies | Covers |
 |---|------|----------|--------|
-| 01 | onboard | New user enters a name → wallet created, faucet funds ∂100, balance + empty history render. | onboard, faucet, first-balance, empty-history |
+| 01 | onboard | New user enters a name → wallet created, faucet funds ∂100, balance + empty history render; custody honesty copy present at create + backup. | onboard, faucet, first-balance, empty-history, non-custodial |
 | 02 | faucet | Returning user taps 'Add demo money' → faucet top-up works, balance increases. | faucet, topup, balance-delta |
 | 23 | username-default | New user leaves name empty → creates → defaults to 'me', onboards + funds. | onboard, default-username |
 | 37 | onboard-no-faucet | Onboard against a dead relay → faucet failure surfaces an honest "Continue" prompt (not a silent $0 transition), wallet created with $0 (∂100 never shown), honest "~ DEMO approx." offline indicator, faucet fails with ECONNREFUSED. | onboard, faucet-failure, offline, dead-relay, right-reason, zero-balance |
@@ -65,7 +65,7 @@ wire (1) · onboard (8) · pay (18) · offline (7) · deposit (8) · withdraw (7
 | 36 | bad-qr | Scanning/pasting garbage (non-base64 + wrong-length) surfaces a friendly 'This isn't't a dpay payment code' error; review never mounts; scan surface re-arms. | bad-qr, malformed, error-handling, input-validation |
 | 43 | decimal-edges | 8-dec (ckBTC) + 6-dec (ckUSDC) + 18-dec (ckDAI) amounts render with exact decimals on review (no rounding, no sci-notation, no trailing-zero drift). | decimal, format, ckbtc, ckerc20, 18-decimal |
 | 49 | deeplink-request | dpay:req deeplink opens the pay review screen pre-filled with the merchant request (no auto-approve). | deeplink, request-link, prefill, pay-review |
-| 50 | deeplink-receipt | merchant treats a dpay:pay rail-proof blob only as a trigger; a forged well-formed proof never flips to Received — only the exact nonce-bound ledger-history row does; never routes to Pay. | deeplink, receipt-link, rail-proof, receive, handback, forgery |
+| 50 | deeplink-receipt | merchant treats dpay:pay as a trigger; a forged proof before settlement never flips Received — only the exact nonce-bound ledger row does; never routes to Pay. | deeplink, receipt-link, rail-proof, receive, handback, forgery |
 | 59 | share-receipt | After an online settle, btn-share-receipt hands an openable /wallet?pay= receipt URL to Share and flips to "Link copied ✓". | share-receipt, receipt-link, handback, online-settle, deeplink |
 | 61 | merchant-received-name | IC-rail counterparty rendering: history shows the short PRINCIPAL TEXT (not full principal, not hex pubkey) and the memo (reconciliation key) is visible; friendly names died with the facade settlement. | receive, settle, confirmation, counterparty-rendering, memo-reconciliation |
 
@@ -74,7 +74,7 @@ wire (1) · onboard (8) · pay (18) · offline (7) · deposit (8) · withdraw (7
 | # | Flow | Verifies | Covers |
 |---|------|----------|--------|
 | 20 | offline-handoff | offline payer signs an icrc1_transfer envelope QR (base64url, memo = request nonce); counterparty submits it to the IC gateway; payer reconnects and reconciles to Paid by request_id (read_state); payee balance grows | offline-pay, hand-off, reconcile |
-| 21 | receive-scan | merchant scans a base64url icrc1_transfer envelope (memo = request nonce) via the camera seam → app submits it to the IC gateway → exact recipient/currency/amount/memo history match flips "Received" | receive-scan, offline-settle, history-confirmation |
+| 21 | receive-scan | merchant scans a base64url icrc1_transfer envelope (memo = request nonce) via the camera seam → app submits it to the IC gateway → read_state poll flips "Received"; balance + history follow from the ledger | receive-scan, offline-settle |
 | 46 | sol-offline-handoff | SOL v2 scan solreq:v2 → review shows the short destination (U-F5) → offline sign (no setup, no nonce) → solpay:v2 QR → honest pending. | sol-offline-sign, qr-handoff, honest-pending, review-short-payee |
 | 51 | sol-merchant-broadcast | SOL v2 merchant: createSolPaymentRequest (ONLINE) → scan real signed solpay → broadcast → Received. | sol-merchant, sol-broadcast, sol-v2-strict-verify, qr-scan |
 | 53 | sol-merchant-error | SOL v2 merchant broadcast error surfaces a friendly message (not raw RPC, not false Received). | sol-merchant, sol-error, sol-v2-rejected, friendly-error |
@@ -110,19 +110,19 @@ wire (1) · onboard (8) · pay (18) · offline (7) · deposit (8) · withdraw (7
 
 | # | Flow | Verifies | Covers |
 |---|------|----------|--------|
-| 11 | nfc | NFC transport phases (Idle→Linking→Exchanging→Settling) render via the RNW event bus; settlement continues after radio teardown. | nfc-phases, event-bus |
+| 11 | nfc | NFC transport phases (Idle→Linking→Exchanging→Settling) render via the RNW event bus. | nfc-phases, event-bus |
 | 32 | nfc-disclosure | NFC asset disclosure: mid-tap the status shows honest asset name + network + '0.00050000 BTC' BEFORE success. | nfc-disclosure, consent, asset-name, network |
 | 47 | sol-nfc | SOL v2 NFC tap: arm card → auto-sign → receipt (rid+sig match) → Paid ✓ | sol-nfc, sol-v2-receipt, event-bus |
 | 60 | nfc-error | NFC tap failure modes: a mid-tap transport error surfaces honest "Tap failed" (not Paid ✓); a decline surfaces "Declined"; a late error after settling is ignored (no false failure over a decided outcome). | nfc-error, nfc-declined, nfc-phases, error-handling, no-fake-paid, terminal-escape |
 | 66 | sol-nfc-error | SOL v2 NFC tap failure modes: expired solreq → Declined + expired; transport error → Tap failed; late error after settling ignored; merchant reader sees the decline. | sol-nfc-decline, sol-nfc-error, sol-nfc-receipt-unreachable, sol-nfc-phases, sol-nfc-reader-decline, no-fake-paid, terminal-escape |
-| 86 | nfc-history-confirmation | Offline payer supplies update + reusable signed read_state; receiver is the sole submit/poll owner, resolves Received only after the exact nonce-bound ledger row appears, and stays nonterminal until native confirms the signed result reached the payer. | nfc, offline-payer, settle, read-state, history, result-confirmed |
-| 87 | nfc-payer-settle | Payer card bundle delivery does not submit; merchant submits the exact update and a nonce/request-ID-bound verified result completes payer UI as Paid. | nfc, offline-payer, result-return, exact-once |
+| 86 | nfc-unknown-reconcile | Offline payer supplies update + signed read_state; receiver alone settles, exact-history binds success, and queues the returned result. | nfc, settle, history, reconcile |
+| 87 | nfc-payer-settle | Offline card prepares update+read_state, never submits, and only a nonce/rid-bound merchant result resolves Paid. | nfc, payer, offline, returned-result, exact-once |
 
 ### Settings & system
 
 | # | Flow | Verifies | Covers |
 |---|------|----------|--------|
-| 12 | settings | Settings: privacy policy is reachable, relay URL persists, and reset wallet wipes identity. | settings, relay-config, privacy-policy, reset, persist |
+| 12 | settings | Settings: privacy policy is reachable, the non-custodial statement is present, relay URL persists, and reset wallet wipes identity. | settings, relay-config, privacy-policy, non-custodial, reset, persist |
 | 13 | offline | Relay down → faucet top-up surfaces honest 'Offline' (ECONNREFUSED, not unsafe-port), no crash; retry path. | offline, econnrefused, graceful, retry, right-reason |
 | 14 | keyboard | Single-key shortcuts (P/R/T/A/L/Esc) switch tabs / top-up / add-money / ledger / close sheet; input + sheet guards work; keyboard focus paints the brand :focus-visible ring (U-F4). | keyboard-shortcuts, tabs, sheet-guard, input-guard, focus-visible |
 | 17 | scan-cleanup | Switch Pay→Receive→Pay: QrScanner listeners tear down cleanly (no leak across unmount/remount). | qr-scanner, teardown, unmount, listener-leak |
@@ -165,7 +165,7 @@ These flows are **not** covered and why:
 - **Non-dollar NFC consent over the radio** — `11-nfc` + `32-nfc-disclosure` inject JS phase/request events; they do not carry a real nonzero-currency request over the actual ISO-DEP radio (physical-device gate).
 - **Android React Native bridge parity** — instrumented tests mostly exercise UniFFI directly, not the full `NativeModules` argument/return surface.
 - **External-credit balance freshness** — deposit tests assert direct ledger/FakeLedger credit while missing stale facade `BAL_CACHE` behavior.
-- **NFC radio round trip** (two phones, HCE↔reader, DPN2 bundle + result C6 over ISO-DEP) — physical-device gate. Flows 86/87 prove the two ownership halves with real signatures/ledger effects; `just ondevice` proves the complete APDU/core lifecycle; antenna coupling and OS routing still require two phones.
+- **NFC radio round trip** (two phones, HCE↔reader, full DPN2 + signed-result transit over ISO-DEP) — physical-device gate. Flows 86/87 prove the merchant and offline-payer ownership halves; `just ondevice` proves request→fragmented bundle→authenticated C6 result through the real core/UniFFI state machines. Only antenna coupling and Android AID routing between two physical phones remain.
 - **ckUSDC onramp final ETH hop** (wallet signs → tx mined → minter scrapes ~20min) — inherent outer-loop gate; offline e2e proves the calldata wiring + byte-exactness.
 - **ckBTC live deposit/withdrawal with real BTC** — requires real mainnet funds; offline path proven via FakeLedger seed (issues 1/8 in OPEN_ISSUES.md).
 

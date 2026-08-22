@@ -686,6 +686,42 @@ async fn landing_page_answers_the_merchant_path() {
     }
 }
 
+/// Non-custodial honesty (2026-08-22, from a friend report that the site read as custodial): the
+/// landing must say the word "non-custodial" where people who know the term look (hero trust row,
+/// footer), AND carry the concrete consequences for everyone else in an on-demand fold — no dpay
+/// account, key only on the phone, cannot move/freeze/recover. The fold is a <details> so nothing
+/// is forced on skimmers.
+#[tokio::test]
+async fn landing_page_states_non_custodial_honestly() {
+    let (state, _led) = state_from(ledger());
+
+    let (status, _headers, bytes) = call_raw(&state, get_req("/")).await;
+    assert_eq!(status, StatusCode::OK);
+    let html = String::from_utf8(bytes).unwrap();
+    // The explicit term, in the two high-signal spots (hero trust row + footer line).
+    assert!(
+        html.contains("Non-custodial. We can't move your money"),
+        "hero trust row must carry the explicit non-custodial claim"
+    );
+    assert!(
+        html.contains("Non-custodial. Your key stays on your phone"),
+        "footer must carry the explicit non-custodial claim"
+    );
+    // The on-demand fold: concrete implications, not jargon.
+    for required in [
+        "<details class=\"custody\">",
+        "What does \"non-custodial\" mean?",
+        "There is no dpay account",
+        "We can't move, freeze, or recover your money",
+        "That's what owning it means",
+    ] {
+        assert!(
+            html.contains(required),
+            "custody fold must contain {required:?}"
+        );
+    }
+}
+
 /// Without a configured APK the download route is a clean 404 — not an empty 200.
 #[tokio::test]
 async fn apk_download_absent_is_404() {

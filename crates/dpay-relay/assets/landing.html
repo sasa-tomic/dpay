@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>∂pay · Pay differently</title>
-<meta name="description" content="A new way to pay. Simple to use. Fast everywhere. Works if you have no internet. Free to pay. Your money stays yours. Join the movement." />
+<meta name="description" content="A new way to pay. Simple to use. Fast everywhere. Works if you have no internet. Free to pay. Non-custodial. Your money stays yours." />
 <meta name="color-scheme" content="light dark" />
 <meta name="theme-color" content="#F4F1E8" />
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141210" />
@@ -486,6 +486,14 @@
   .get-side .row svg{width:19px;height:19px;color:var(--ok);flex:none;margin-top:2px}
   .get-side .row b{display:block;font-weight:600;font-size:1rem;color:var(--ink)}
   .get-side .row span{color:var(--sub);font-size:.92rem}
+  details.custody{margin-top:12px;border-top:1px solid var(--line2);padding-top:10px}
+  details.custody summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:7px;color:var(--sub);font-size:.9rem;font-weight:600}
+  details.custody summary::-webkit-details-marker{display:none}
+  details.custody summary::after{content:"";width:7px;height:7px;border:solid var(--brand);border-width:0 1.5px 1.5px 0;transform:rotate(45deg);transition:transform .2s;flex:none}
+  details.custody[open] summary::after{transform:rotate(-135deg)}
+  details.custody ul{margin:10px 0 0;list-style:none;display:grid;gap:8px}
+  details.custody li{color:var(--sub);font-size:.88rem;line-height:1.5;padding-left:15px;position:relative}
+  details.custody li::before{content:"";position:absolute;left:0;top:.55em;width:5px;height:5px;border-radius:50%;background:var(--brand)}
 
   /* ————— footer: an ink band ————— */
   footer{background:var(--ink);margin-top:104px}
@@ -725,7 +733,7 @@
       <div class="trust">
         <span>No payment fees</span>
         <span>Works offline as well</span>
-        <span>Safe. Signed by your key, on your phone</span>
+        <span>Non-custodial. We can't move your money</span>
         <span>Android app, iOS coming soon</span>
       </div>
     </div>
@@ -853,7 +861,7 @@
     <div class="wrap">
       <span class="kicker rv">Works offline</span>
       <h2 class="rv">No internet? One extra scan<i class="dot">.</i></h2>
-      <p class="sec-sub rv">Approve as always. Your phone shows a QR code that confirms the payment. The shop scans it with <b>their</b> phone. Done. You just paid. While offline. It's like magic!</p>
+      <p class="sec-sub rv">Approve as always. Your phone shows a QR code that confirms the payment. The shop scans it with <b>their</b> phone. Done. You just paid. While offline. Really.</p>
 
       <div class="rail" style="margin-top:52px">
         <div class="rail-track"><i></i></div>
@@ -979,6 +987,14 @@
         </div>
         <h3>Only you can move your money</h3>
         <p>Your money moves only when you say so. Your key never leaves your phone. Nobody else can touch it. Not even us.</p>
+        <details class="custody">
+          <summary>What does "non-custodial" mean?</summary>
+          <ul>
+            <li>There is no dpay account. We hold no balances. Your money lives on public networks (Internet Computer, Solana).</li>
+            <li>It moves only with a key created on your phone. The key never touches our servers.</li>
+            <li>We can't move, freeze, or recover your money. Lose your phone and your backup words, and it's gone for us too. That's what owning it means.</li>
+          </ul>
+        </details>
       </div>
       <div class="tile wide rv" style="--d:.08s">
         <div class="ico">
@@ -997,7 +1013,7 @@
         <div class="mline rv"><span class="n">01</span><span>Managing money should be <em>easy.</em> Even fun.</span></div>
         <div class="mline rv" style="--d:.06s"><span class="n">02</span><span>Payments should be <em>quick and free.</em> Home or abroad. Online or offline.</span></div>
         <div class="mline rv" style="--d:.12s"><span class="n">03</span><span>Your money, controlled by <em>you alone.</em> Only you hold the signing keys.</span></div>
-        <div class="mline final rv" style="--d:.18s"><span class="n">04</span><span>Convenience and safety for everyone. <em>Effortless.</em> Anywhere.</span></div>
+        <div class="mline final rv" style="--d:.18s"><span class="n">04</span><span>Convenience and safety for <em>everyone.</em> Anywhere.</span></div>
       </div>
       <div class="cta-row">
         <a class="primary" href="#get">Get the app</a>
@@ -1035,7 +1051,7 @@
           </div>
           <div class="row">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>
-            <span><b>Your key, your money</b><span>The key lives on your phone.</span></span>
+            <span><b>Your key, your money</b><span>Your key lives on this phone, not on our servers.</span></span>
           </div>
         </div>
       </div>
@@ -1053,7 +1069,7 @@
       <span class="word">∂<b>pay</b></span>
     </a>
     <div class="foot-right">
-      <p>Fast payments. Online or offline. Your key stays on your phone. <a href="/wallet">Use it on the web</a> too. <a href="/privacy">Privacy policy</a>.</p>
+      <p>Fast payments. Online or offline. Non-custodial. Your key stays on your phone. <a href="/wallet">Use it on the web</a> too. <a href="/privacy">Privacy policy</a>.</p>
       <div class="foot-micro">
         <span>Free to pay</span><span>Works offline</span><span>Your key, your phone</span>
       </div>

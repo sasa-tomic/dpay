@@ -22,8 +22,8 @@ export const meta = {
   id: '12',
   name: 'settings',
   journey: 'system',
-  covers: ['settings', 'relay-config', 'privacy-policy', 'reset', 'persist'],
-  verifies: 'Settings: privacy policy is reachable, relay URL persists, and reset wallet wipes identity.',
+  covers: ['settings', 'relay-config', 'privacy-policy', 'non-custodial', 'reset', 'persist'],
+  verifies: 'Settings: privacy policy is reachable, the non-custodial statement is present, relay URL persists, and reset wallet wipes identity.',
   timeoutMs: 20000,
 };
 
@@ -57,6 +57,13 @@ export async function run() {
     const relayVal = await driver.readInputValue('settings-relay', { timeoutMs: 4_000 });
     assertEq(relayVal, relayBaseURL, 'settings-relay should hold the active relay URL');
     await driver.findByTestID('privacy-policy', { timeoutMs: 4_000 });
+    // 3b. Custody honesty (2026-08-22): Settings About carries the full explicit statement — the
+    //     word "non-custodial" plus the concrete capabilities dpay does NOT have. On-demand surface:
+    //     nobody must read it unless they open Settings.
+    const aboutText = await driver.readText('about-custody', { timeoutMs: 4_000 });
+    assertIncludes(aboutText, 'non-custodial', 'Settings About must use the explicit term');
+    assertIncludes(aboutText, 'cannot move, freeze, or recover your funds', 'Settings About must state the concrete limits');
+    console.log('[12-settings] ✓ About states the non-custodial model explicitly');
     console.log(`[12-settings] ✓ relay input holds ${relayVal}`);
 
     // 4. Editing the relay input updates it (component state; the polls retarget to the new URL).

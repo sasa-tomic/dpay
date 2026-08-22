@@ -27,8 +27,8 @@ export const meta = {
   id: '01',
   name: 'onboard',
   journey: 'onboard',
-  covers: ['onboard', 'faucet', 'first-balance', 'empty-history'],
-  verifies: 'New user enters a name → wallet created, faucet funds ∂100, balance + empty history render.',
+  covers: ['onboard', 'faucet', 'first-balance', 'empty-history', 'non-custodial'],
+  verifies: 'New user enters a name → wallet created, faucet funds ∂100, balance + empty history render; custody honesty copy present at create + backup.',
   timeoutMs: 20000,
 };
 
@@ -49,12 +49,23 @@ export async function run() {
     const onboardBody = await driver.bodyText();
     assertIncludes(onboardBody, 'demo funds to get started', 'onboarding subtext is user-benefit language (M7)');
 
+    // 1c. Custody honesty (2026-08-22): the create form states the implicit model in plain words —
+    //     no account, key never leaves the phone, dpay cannot move the money. The explicit term
+    //     "non-custodial" lives in Settings/landing; onboarding carries the consequence language.
+    assertIncludes(onboardBody, 'No account', 'onboarding must state there is no dpay account');
+    assertIncludes(onboardBody, 'never leaves this phone', 'onboarding must state the key stays on-device');
+    console.log('[01-onboard] ✓ create form carries the non-custodial consequence copy');
+
     // 2. Click btn-create. The button transitions to "Creating…" then the mnemonic backup screen shows.
     console.log('[01-onboard] clicking btn-create…');
     await driver.click('btn-create', { timeoutMs: 4_000 });
 
     // D4-B: dismiss the mnemonic backup screen (checkbox + Continue) so the faucet runs.
     await driver.findByTestID('mnemonic-backup', { timeoutMs: 8_000 });
+    // D4-c: the backup gate explains WHY the words matter — no account to sign back into, and not
+    // even dpay can recover the funds. This is the implicit-custody moment (2026-08-22).
+    const backupBody = await driver.bodyText();
+    assertIncludes(backupBody, 'Not even we can recover it', 'backup screen must state recovery is impossible without the words');
     await driver.click('mnemonic-backup-checkbox', { timeoutMs: 4_000 });
     await waitForEnabled(driver, 'btn-mnemonic-continue', { timeoutMs: 4_000 });
     await driver.click('btn-mnemonic-continue', { timeoutMs: 4_000 });

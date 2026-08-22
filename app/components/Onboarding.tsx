@@ -145,10 +145,11 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
           <Logo size={104} />
           <WordmarkLink style={S.wordmarkBig} />
           <Text style={S.onboardSub}>Tap or scan to pay — online or offline.</Text>
+          <Text style={S.dim2}>No account. Your key never leaves this phone. Not even dpay can move your money.</Text>
           {backupMnemonic ? (
             <>
               <Text style={S.wordmarkBig}>Back up your wallet</Text>
-              <Text style={S.warnNote}>Write down these 24 words and store them safely. They're the ONLY way to recover your wallet if you lose this device.</Text>
+              <Text style={S.warnNote}>Write down these 24 words and store them safely. They're the ONLY way to recover your wallet if you lose this device. There is no dpay account to sign back into. Lose these words and this phone, and your money is gone. Not even we can recover it.</Text>
               <SeedWords words={backupMnemonic} testID="mnemonic-backup" />
               <Pressable testID="btn-mnemonic-copy" style={S.linkBtn} onPress={() => { if (backupMnemonic) void doCopy(wordsToString(backupMnemonic)); }}
                 accessibilityRole="button"

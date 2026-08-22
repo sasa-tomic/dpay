@@ -350,6 +350,10 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
 
           <View style={S.settingsSection}>
             <Text style={S.inputLabel}>About</Text>
+            {/* Non-custodial statement (2026-08-22): plain words for the custody model — dpay
+                cannot move, freeze, or recover funds, and there is no dpay account. Settings is
+                the on-demand surface: nobody has to read this unless they go looking. */}
+            <Text style={S.dim2} testID="about-custody">dpay is non-custodial. Your money is controlled only by the key on this device. There is no dpay account, and dpay cannot move, freeze, or recover your funds. Your 24 backup words are the only recovery.</Text>
             <Pressable
               testID="privacy-policy"
               style={S.linkBtn}
