@@ -95,6 +95,17 @@
 > Android instrumented **10/10**, and a release
 > APK built + installed on receiver `9cdf67b8` with `DPAY_SELFCHECK PASS` +
 > `DPAY_SOL_SELFCHECK PASS`. The physical airplane-mode two-phone retest is still required.
+> **Android post-payment chooser (2026-08-22, resolved):** live Poco X3 logs proved the IC exchange and C6
+> result completed, then `NfcStep.CONFIRMED` eagerly called `disableReaderMode` while the phones were
+> still coupled; Android immediately logged a second generic `Tag detected, notifying applications`
+> and showed an unrelated resolver. The resolver labels (for example, `Embedded tag` and X) were a
+> symptom of generic NFC dispatch, not an intentional dpay-to-X handoff.
+> Fixed by retaining reader mode through the terminal result screen and relying on the existing
+> `useNfcTapState` unmount cleanup when the user taps Done/leaves. SOL already had this lifecycle.
+> The first retest still reproduced because the ADB cable reconnected mid-tap, HyperOS launched USB
+> Settings, and that system Activity forced dpay's Activity-scoped reader mode off. A device-local
+> trace of two subsequent cable-free payments showed C6 confirmation, reader mode retained until tag
+> loss/UI teardown, `Skipping NDEF detection in reader mode`, and no resolver on either payment.
 > **Prod is BEHIND these fixes — founder ship: `just deploy-ic && just
 > apk && just up`** (also still carries the 2026-08-20 faucet-422 fix below).
 >

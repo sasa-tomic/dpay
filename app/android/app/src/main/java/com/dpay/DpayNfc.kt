@@ -523,7 +523,9 @@ object DpayNfc {
                     NfcStep.CONFIRMED -> {
                         readerPhaseEvent(session, "success")
                         emitConfirmed(session)
-                        stopReaderIfCurrent(session)
+                        // Keep reader mode through the terminal view. Disabling it while the phones
+                        // are coupled lets Android rediscover the payer as an unrelated generic tag.
+                        android.util.Log.i("dpay", "onTag: confirmed; retaining reader mode until UI teardown")
                         break
                     }
                     NfcStep.DECLINED -> {
