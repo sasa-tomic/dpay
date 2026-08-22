@@ -39,12 +39,11 @@ use dpay_icp::icrc::{
     approve_arg, balance_of_arg, decode_approve_result, decode_int, decode_transfer_result, transfer_arg,
     ApproveResult, TransferError, TransferResult,
 };
-use dpay_icp::{ingress_expiry, sign_query, sign_read_state, sign_update, Account, CallRequest, Principal};
+use dpay_icp::{ingress_expiry, sign_query, sign_update, Account, CallRequest, Principal};
 use dpay_icp_e2e::{
-    corrupt_sender_sig, decode_query_response, decode_read_state_tree, dev_key, request_status, IcHttp,
-    QueryOutcome, RequestStatus, Result,
+    corrupt_sender_sig, decode_query_response, dev_key, IcHttp, QueryOutcome, RequestStatus, Result,
 };
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAINNET_URL: &str = "https://icp-api.io";
 /// dpay facade (OURS — updates allowed). Hard constant: no env override, never a DFINITY canister.
@@ -136,33 +135,10 @@ fn dusd_balance(http: &IcHttp, account: &Account) -> Result<u64> {
     Ok(u64::try_from(decode_int(&reply)?)?)
 }
 
-/// Poll read_state (against the canister the update was submitted to) for the request's terminal
-/// status. Mainnet finality for these canisters is a few seconds; 60s budget.
+/// Poll read_state for the request's terminal status — the shared harness tail
+/// (`dpay_icp_e2e::poll_request_status`, also used by the ckBTC deposit-address probe).
 fn poll_request_status(http: &IcHttp, canister: &Principal, rid: &[u8; 32]) -> Result<RequestStatus> {
-    let deadline = Instant::now() + Duration::from_secs(60);
-    let path: [&[u8]; 2] = [b"request_status", rid];
-    let paths: [&[&[u8]]; 1] = [&path[..]];
-    let key = dev_key(&U1_SEED);
-    let mut observed: Vec<&'static str> = Vec::new();
-    loop {
-        let envelope = sign_read_state(&key, &paths, expiry());
-        let response = http.submit(&canister.to_text(), "read_state", &envelope)?;
-        assert_eq!(response.status, 200, "read_state: status {}, body {}", response.status, response.body_preview(200));
-        let tree = decode_read_state_tree(&response.body)?;
-        match request_status(&tree, rid)? {
-            RequestStatus::Unknown => observed.push("unknown"),
-            RequestStatus::Received => observed.push("received"),
-            RequestStatus::Processing => observed.push("processing"),
-            terminal => {
-                println!("   read_state status sequence: {:?}", observed);
-                return Ok(terminal);
-            }
-        }
-        if Instant::now() > deadline {
-            return Err(format!("read_state not terminal within 60s (last: {:?})", observed).into());
-        }
-        std::thread::sleep(Duration::from_millis(400));
-    }
+    dpay_icp_e2e::poll_request_status(http, &dev_key(&U1_SEED), canister, rid)
 }
 
 /// Signed update → assert 202 → return (request_id, envelope bytes).

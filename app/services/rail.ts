@@ -12,7 +12,7 @@
 //  - Duplicate{duplicate_of} is settled: the ledger identifies the block that already executed
 //    these exact transfer arguments. It must never be rendered as a decline.
 import {DpayCore} from './native';
-import {icStampExpiry, icSubmit, icPollRequestStatus, icPollSignedRequestStatus, icQuery, IC_SUBMIT_TIMEOUT_MS} from './icp';
+import {icStampExpiry, icSubmit, icPollRequestStatus, icPollSignedRequestStatus, icQuery, IC_SUBMIT_TIMEOUT_MS, INGRESS_AHEAD_S} from './icp';
 import {hexToBytes, bytesToHex, base} from '../lib/format';
 import {bytesToBase64Url, base64UrlToBytes} from '../lib/base64url';
 import {fetchWithTimeout} from './relay';
@@ -378,18 +378,28 @@ export async function submitOfframpStep(
   return submitTransfer(step, secretHex, opts, decode);
 }
 
-/** ckBTC deposit address at THIS user's principal — signed get_btc_address query against the
- *  minter (arbitrary owners accepted; the address pays Account{owner: user principal}). Returns
- *  null when unreachable or the query was rejected (caller shows a transient error). */
+/** ckBTC deposit address at THIS user's principal — a signed get_btc_address UPDATE against the
+ *  minter (arbitrary owners accepted; the address pays Account{owner: user principal}). The real
+ *  minter exposes get_btc_address as an update method ONLY — the query form dies on mainnet with
+ *  "Canister has no query method 'get_btc_address'" (found on a physical device 2026-08-23; the
+ *  offline fake gateway used to accept the query form, which is why every inner-loop gate was
+ *  green). Same rail discipline as a transfer: sign ONCE (certified-clock expiry), POST the exact
+ *  bytes to /api/v2/call, poll the request_id to a terminal state — a call that times out
+ *  mid-poll is re-polled on the next sheet open, never re-signed blind. Returns the address, or
+ *  null when unreachable/rejected/not-terminal-in-budget (caller shows the transient state). */
 export async function railBtcDepositAddress(secretHex: string, minter: string, signal?: AbortSignal): Promise<string | null> {
   try {
     const selfPrincipal = await DpayCore.icpSelfPrincipal(secretHex);
     const argHex = await DpayCore.icpMinterAccountArg(selfPrincipal, '');
-    const replyArg = await icQuery(secretHex, minter, 'get_btc_address', argHex, signal);
-    if (replyArg == null || replyArg === '') return null;
-    return await DpayCore.icpDecodeText(replyArg);
+    const expiry = await icStampExpiry(secretHex, INGRESS_AHEAD_S, signal);
+    const signed = await DpayCore.icpSignUpdate(secretHex, minter, 'get_btc_address', argHex, expiry);
+    await icSubmit(minter, 'call', signed.envelopeHex, IC_SUBMIT_TIMEOUT_MS, signal);
+    const st = await icPollRequestStatus(secretHex, minter, signed.requestIdHex, {attempts: 12, intervalMs: 500, signal});
+    if (st == null || st.state !== 'replied' || st.replyArgHex == null) return null;
+    const addr = await DpayCore.icpDecodeText(st.replyArgHex);
+    return addr === '' ? null : addr;
   } catch (e) {
-    console.warn('get_btc_address query failed:', e instanceof Error ? e.message : String(e));
+    console.warn('get_btc_address update failed:', e instanceof Error ? e.message : String(e));
     return null;
   }
 }

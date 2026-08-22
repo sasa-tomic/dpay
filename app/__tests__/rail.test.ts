@@ -9,7 +9,7 @@
  * icp.ts is mocked at its module boundary; DpayCore (services/native) is mocked so
  * icpDecodeTransferResult replies are scriptable.
  */
-import {describe, expect, jest, test} from '@jest/globals';
+import {beforeEach, describe, expect, jest, test} from '@jest/globals';
 
 jest.mock('../services/native', () => ({
   DpayCore: {
@@ -19,19 +19,24 @@ jest.mock('../services/native', () => ({
     icpTransferArg: jest.fn(),
     icpSignUpdate: jest.fn(),
     icpSignReadState: jest.fn(),
+    icpSelfPrincipal: jest.fn(),
+    icpMinterAccountArg: jest.fn(),
+    icpDecodeText: jest.fn(),
   },
 }));
 jest.mock('../services/icp', () => ({
   icSubmit: jest.fn(),
   icPollRequestStatus: jest.fn(),
   icPollSignedRequestStatus: jest.fn(),
+  icStampExpiry: jest.fn(),
   IC_SUBMIT_TIMEOUT_MS: 8000,
+  INGRESS_AHEAD_S: 300,
 }));
 jest.mock('../services/relay', () => ({fetchWithTimeout: jest.fn()}));
 
-import {confirmIncomingTransfer, pollTransfer, prepareNfcTransfer, submitAndConfirmIncomingTransfer, submitNfcTransfer, submitTransfer, transferRejectionMessage} from '../services/rail';
+import {confirmIncomingTransfer, pollTransfer, prepareNfcTransfer, railBtcDepositAddress, submitAndConfirmIncomingTransfer, submitNfcTransfer, submitTransfer, transferRejectionMessage} from '../services/rail';
 import {DpayCore} from '../services/native';
-import {icPollRequestStatus, icPollSignedRequestStatus, icSubmit} from '../services/icp';
+import {icPollRequestStatus, icPollSignedRequestStatus, icStampExpiry, icSubmit} from '../services/icp';
 import {fetchWithTimeout} from '../services/relay';
 
 const PREPARED = {ledger: 'td2nx-oaaaa-aaaab-qhdnq-cai', requestIdHex: 'cd'.repeat(32)};
@@ -186,5 +191,61 @@ describe('transferRejectionMessage', () => {
     expect(transferRejectionMessage('InsufficientFunds', '')).toBe('Not enough balance');
     expect(transferRejectionMessage('BadFee', 'x')).toContain('fee');
     expect(transferRejectionMessage('SomethingNew', 'raw detail')).toContain('raw detail');
+  });
+});
+
+// 2026-08-23 prod bug (physical device): the real ckBTC minter exposes get_btc_address as an
+// UPDATE only — the signed QUERY died on mainnet with "Canister has no query method
+// 'get_btc_address'" while the offline fake gateway accepted it (prod-only blind spot). These
+// pin the update-call contract: sign ONCE with a certified-clock expiry, POST the exact bytes,
+// poll the immutable request_id, decode the text reply — null on anything short of `replied`.
+describe('railBtcDepositAddress — get_btc_address as an UPDATE call', () => {
+  const SECRET = '11'.repeat(32);
+  const MINTER = 'mqygn-kiaaa-aaaar-qaadq-cai';
+  const RID = 'cd'.repeat(32);
+
+  beforeEach(() => {
+    jest.clearAllMocks(); // call-count assertions need a clean slate (counts, not implementations)
+    jest.mocked(DpayCore.icpSelfPrincipal).mockResolvedValue('owner-principal' as never);
+    jest.mocked(DpayCore.icpMinterAccountArg).mockResolvedValue('acct-arg' as never);
+    jest.mocked(icStampExpiry).mockResolvedValue('1800000240000000000' as never);
+    jest.mocked(DpayCore.icpSignUpdate).mockResolvedValue({envelopeHex: 'env', requestIdHex: RID} as never);
+    jest.mocked(icSubmit).mockResolvedValue({kind: 'accepted'} as never);
+  });
+
+  test('signs once with the stamped expiry, submits the exact bytes, polls the request_id, decodes the text', async () => {
+    jest.mocked(icPollRequestStatus).mockResolvedValue({state: 'replied', replyArgHex: 'reply'} as never);
+    jest.mocked(DpayCore.icpDecodeText).mockResolvedValue('bc1qdpay0011ccdd22' as never);
+    await expect(railBtcDepositAddress(SECRET, MINTER)).resolves.toBe('bc1qdpay0011ccdd22');
+    expect(icStampExpiry).toHaveBeenCalledWith(SECRET, 300, undefined);
+    expect(DpayCore.icpSignUpdate).toHaveBeenCalledTimes(1);
+    expect(DpayCore.icpSignUpdate).toHaveBeenCalledWith(SECRET, MINTER, 'get_btc_address', 'acct-arg', '1800000240000000000');
+    expect(icSubmit).toHaveBeenCalledWith(MINTER, 'call', 'env', 8000, undefined);
+    expect(icPollRequestStatus).toHaveBeenCalledWith(SECRET, MINTER, RID, {attempts: 12, intervalMs: 500, signal: undefined});
+    expect(DpayCore.icpDecodeText).toHaveBeenCalledWith('reply');
+  });
+
+  test('an unreachable clock (icStampExpiry throws) → null, nothing signed', async () => {
+    jest.mocked(icStampExpiry).mockRejectedValue(new Error('IC clock unreachable') as never);
+    await expect(railBtcDepositAddress(SECRET, MINTER)).resolves.toBeNull();
+    expect(DpayCore.icpSignUpdate).not.toHaveBeenCalled();
+  });
+
+  test('a rejected request_status → null', async () => {
+    jest.mocked(icPollRequestStatus).mockResolvedValue({state: 'rejected', rejectMessage: 'nope'} as never);
+    await expect(railBtcDepositAddress(SECRET, MINTER)).resolves.toBeNull();
+  });
+
+  test('poll budget exhausted (null status) → null — no re-sign, no second submit', async () => {
+    jest.mocked(icPollRequestStatus).mockResolvedValue(null as never);
+    await expect(railBtcDepositAddress(SECRET, MINTER)).resolves.toBeNull();
+    expect(DpayCore.icpSignUpdate).toHaveBeenCalledTimes(1);
+    expect(icSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  test('terminal-but-opaque state (done, no reply arg) → null', async () => {
+    jest.mocked(icPollRequestStatus).mockResolvedValue({state: 'done'} as never);
+    await expect(railBtcDepositAddress(SECRET, MINTER)).resolves.toBeNull();
+    expect(DpayCore.icpDecodeText).not.toHaveBeenCalled();
   });
 });

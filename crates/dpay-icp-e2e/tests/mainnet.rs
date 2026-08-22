@@ -13,13 +13,21 @@
 //!   `Some(ckERC20 ledger)` vs `Some(ckETH AMOUNT ledger)` — measures whether the live minter
 //!   accepts the arg the app's native-ETH withdrawal path sends (WithdrawSheet passes the ckETH
 //!   amount ledger; the facade-era kernel passed `None`). Read-only query, throwaway key.
+//! * ckBTC minter `get_btc_address` (prod bug 2026-08-23, found on a physical device): the
+//!   signed QUERY form is REJECTED by mainnet with 5 "Canister has no query method
+//!   'get_btc_address'" (pinned below), and the signed UPDATE form — the exact app path after
+//!   the fix — replies a real mainnet bech32 `bc1…` address at the throwaway principal. The
+//!   method is effectively read-only (derives/returns the principal's deposit address; the
+//!   minter is permissionless GeneralAvailability, no KYC) but is EXPOSED as an update only,
+//!   so this one probe step is state-visible-by-name only, from a throwaway key.
 //!
 //! Without the env gate every test prints `skipped` and passes (offline `check` unaffected).
 
 use candid::{Encode, Principal as CandidPrincipal};
-use dpay_icp::icrc::{decode_eip1559_price, decode_int};
-use dpay_icp::{ingress_expiry, sign_query, CallRequest, Principal};
-use dpay_icp_e2e::{corrupt_sender_sig, decode_query_response, dev_key, QueryOutcome, Result};
+use dpay_icp::icrc::{decode_eip1559_price, decode_int, decode_text, minter_account_arg};
+use dpay_icp::{ingress_expiry, sign_query, sign_update, CallRequest, Principal};
+use dpay_icp::envelope::envelope_request_id;
+use dpay_icp_e2e::{corrupt_sender_sig, decode_query_response, dev_key, poll_request_status, QueryOutcome, RequestStatus, Result};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAINNET_URL: &str = "https://icp-api.io";
@@ -36,6 +44,11 @@ const CKETH_MINTER: &str = "sv3dd-oaaaa-aaaar-qacoa-cai";
 const CKETH_LEDGER: &str = "ss2fx-dyaaa-aaaar-qacoq-cai";
 /// Mainnet ckUSDC ledger — a REGISTERED ckERC20 (the control for the Some-arg ERC-20 path).
 const CKUSDC_LEDGER: &str = "xevnm-gaaaa-aaaar-qafnq-cai";
+/// Mainnet ckBTC minter (DFINITY-operated) — the deposit-address target (docs/CANISTERS.md:
+/// `dfx/catalog_truth.json` ckbtc_minter). `get_btc_address` is EXPOSED AS AN UPDATE ONLY —
+/// verified against its served candid (`dfx canister metadata mqygn-kiaaa-aaaar-qaadq-cai
+/// candid:service --network ic` carries no `query` modifier on it).
+const CKBTC_MINTER: &str = "mqygn-kiaaa-aaaar-qaadq-cai";
 /// Candid encoding of ZERO method arguments: `DIDL` magic + empty type table + no values.
 const NO_ARGS: &[u8] = b"DIDL\x00\x00";
 
@@ -231,6 +244,94 @@ fn mainnet_cketh_minter_eip1559_price_args() -> Result<()> {
         Err(e) => {
             println!("MEASURED: ckETH minter REJECTS Some(ckETH amount ledger) for native → {e}");
         }
+    }
+    Ok(())
+}
+
+// PINNED ROOT CAUSE of the 2026-08-23 physical-device prod bug: the ckBTC minter exposes
+// `get_btc_address` as an UPDATE ONLY, so the signed QUERY form the app used to send dies with
+// canister rejection 5 "Canister has no query method 'get_btc_address'" (live-measured: the
+// method-not-found execution error rides reject code 5, not 3). The offline fake-IC gateway
+// used to accept the query form — the prod-only blind spot — and now mirrors this exact
+// rejection; this probe pins the LIVE behaviour so the fake's mirror can never drift.
+#[test]
+fn mainnet_ckbtc_minter_get_btc_address_query_form_is_rejected() -> Result<()> {
+    if !gated() {
+        return Ok(());
+    }
+    let http = dpay_icp_e2e::IcHttp::new(MAINNET_URL)?;
+    let minter = Principal::from_text(CKBTC_MINTER)?;
+    let key = dev_key(&dpay_icp_e2e::PROBE_SEED);
+    let owner = Principal::self_authenticating_ed25519(&key.verifying_key().to_bytes());
+    let envelope = sign_query(
+        &key,
+        &CallRequest {
+            canister: minter.clone(),
+            method_name: "get_btc_address".to_string(),
+            arg: minter_account_arg(&owner, None),
+            ingress_expiry_ns: expiry(),
+            nonce: None,
+        },
+    );
+    let response = http.submit(&minter.to_text(), "query", &envelope)?;
+    assert_eq!(response.status, 200, "query get_btc_address: status {}, body {}", response.status, response.body_preview(200));
+    match decode_query_response(&response.body)? {
+        QueryOutcome::Rejected { reject_code, reject_message, .. } => {
+            assert_eq!(reject_code, 5, "expected method-not-found code 5, got {reject_code}: {reject_message}");
+            assert!(
+                reject_message.contains("Canister has no query method 'get_btc_address'"),
+                "unexpected rejection message: {reject_message}"
+            );
+            println!("PASS (pinned root cause): get_btc_address QUERY form rejected by mainnet minter: 3 {reject_message}");
+        }
+        QueryOutcome::Replied(_) => panic!("mainnet minter ACCEPTED the get_btc_address query form — the 2026-08-23 prod-bug premise is stale, re-check the fix"),
+    }
+    Ok(())
+}
+
+// THE FIXED APP PATH, live: sign an UPDATE `get_btc_address {owner: self principal, subaccount:
+// None}` (the exact envelope `railBtcDepositAddress` builds — same arg encoder, same expiry
+// stamping discipline) → POST /call → 202 → poll read_state request_status to terminal → decode
+// the bare `text` reply → a real mainnet bech32 address. The method only derives/returns the
+// caller-principal's deposit address (permissionless minter, no KYC, no funds moved), so this is
+// the minimal state-visible hop the app itself performs on every deposit-sheet open.
+#[test]
+fn mainnet_ckbtc_minter_get_btc_address_update_path() -> Result<()> {
+    if !gated() {
+        return Ok(());
+    }
+    let http = dpay_icp_e2e::IcHttp::new(MAINNET_URL)?;
+    let minter = Principal::from_text(CKBTC_MINTER)?;
+    let key = dev_key(&dpay_icp_e2e::PROBE_SEED);
+    let owner = Principal::self_authenticating_ed25519(&key.verifying_key().to_bytes());
+
+    let envelope = sign_update(
+        &key,
+        &CallRequest {
+            canister: minter.clone(),
+            method_name: "get_btc_address".to_string(),
+            arg: minter_account_arg(&owner, None),
+            ingress_expiry_ns: expiry(),
+            nonce: None,
+        },
+    );
+    let response = http.submit(&minter.to_text(), "call", &envelope)?;
+    assert_eq!(response.status, 202, "update get_btc_address: status {}, body {}", response.status, response.body_preview(200));
+    let rid = envelope_request_id(&envelope)?;
+    println!("   POST /call ckbtc-minter.get_btc_address -> 202, request_id {}", rid.iter().map(|b| format!("{b:02x}")).collect::<String>());
+
+    match poll_request_status(&http, &key, &minter, &rid)? {
+        RequestStatus::Replied(arg) => {
+            let addr = decode_text(&arg)?;
+            println!("   request_status: replied, deposit address {addr}");
+            assert!(addr.starts_with("bc1"), "mainnet bech32 address must start with bc1, got {addr:?}");
+            assert!(
+                addr.len() >= 14 && addr.len() <= 90 && addr.chars().all(|c| c.is_ascii_alphanumeric()),
+                "implausible btc address: {addr:?}"
+            );
+            println!("PASS (fixed app path, live): get_btc_address UPDATE → 202 → read_state replied → {addr}");
+        }
+        other => panic!("get_btc_address update: expected replied, got {other:?}"),
     }
     Ok(())
 }

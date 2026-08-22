@@ -6,11 +6,11 @@
 // pins that:
 //   1. Onboard online (good relay), then kill BOTH transports the sheet depends on:
 //      the IC /api/v2 gateway (the address critical path since the W8 user-principal cutover —
-//      `railBtcDepositAddress` is a signed get_btc_address query straight to the gateway, NOT a
-//      relay fetch) AND the relay (the supplementary depositInfo fetch + the offline wallet
-//      surface).
+//      `railBtcDepositAddress` is a signed get_btc_address UPDATE (call + request_status poll)
+//      straight to the gateway, NOT a relay fetch) AND the relay (the supplementary depositInfo
+//      fetch + the offline wallet surface).
 //   2. Open the deposit sheet (via the asset picker → ckBTC). The sheet mounts and immediately
-//      signs + POSTs get_btc_address at the dead gateway.
+//      signs + POSTs the get_btc_address update at the dead gateway.
 //   3. The POST fails fast → `loading` flips false, `err` is set to the plain-language transient
 //      message "Couldn't load your deposit address. Check your connection and try again." (H5: no
 //      "relay" / "reopen the sheet" dev jargon — just a clear retry hint in user language).
@@ -61,8 +61,9 @@ export async function run() {
 
     // Kill the IC gateway transport (the deposit ADDRESS critical path since W8): retarget the
     // e2e seam at a genuinely-dead port → the signed get_btc_address POST gets ECONNREFUSED, the
-    // real "gateway unreachable" failure mode. pollExpiry falls back to the device clock, so the
-    // POST itself is what dies — immediately (closed local port).
+    // real "gateway unreachable" failure mode. The certified clock for the update expiry comes
+    // from the same dead gateway (icStampExpiry throws) and pollExpiry falls back to the device
+    // clock — either way the path dies fast at the closed port.
     const deadGwPort = await pickFreePort();
     const deadGateway = `http://127.0.0.1:${deadGwPort}`;
     driver.allowRequestFailuresFrom(deadGateway);

@@ -47,9 +47,11 @@
   the app's balance reads look. Everything else stays dormant: the app signs envelopes
   itself, balances are read directly off each ledger (`icrc1_balance_of` at the user principal — the
   relay no longer touches `BAL_CACHE`/`refresh_balances`), BTC deposit addresses come from a
-  user-signed minter query (`get_btc_address` at the user principal), and offramps are user-signed
-  `icrc2_approve` + minter calls. The relay routes that used to front these (`/pay`, `/withdraw`,
-  `/receipt/{nonce}`, `/receipt_pubkey`, `/deposit/address`, `/deposit/refresh`) are deleted.
+  user-signed minter UPDATE (`get_btc_address` at the user principal — an update method only on the
+  real minter, polled via `request_status`; the signed-query form fails on mainnet), and offramps
+  are user-signed `icrc2_approve` + minter calls. The relay routes that used to front these
+  (`/pay`, `/withdraw`, `/receipt/{nonce}`, `/receipt_pubkey`, `/deposit/address`,
+  `/deposit/refresh`) are deleted.
 - **Why `just deploy-ic` still ships it:** it remains the canonical currency registry (the deploy
   script's `register_ledger`/`register_currency`/`register_currency_meta` calls are the only way
   currencies are activated; idempotent re-runs), the history/deposit-info read surface, and the

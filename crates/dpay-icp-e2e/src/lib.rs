@@ -11,8 +11,10 @@
 //!   change) from a throwaway fixed-seed key against `https://icp-api.io` (`DPAY_IC_MAINNET=1`),
 //!   driven by `scripts/icp-mainnet-probe.sh`. NEVER part of `check`/`verify`.
 //!
-//! This lib holds the harness halves that do not depend on `dpay_icp`: a reqwest transport and a
-//! minimal definite-length CBOR + IC certificate/hashtree decoder. The env-gated tests in
+//! This lib holds the harness halves shared by the env-gated tests: a reqwest transport, a
+//! minimal definite-length CBOR + IC certificate/hashtree decoder (re-exported from
+//! `dpay_icp::reply` so there is a single decoder implementation everywhere), and the
+//! read_state poll tail shared by the mainnet update probes. The env-gated tests in
 //! `tests/` early-return "skipped" (and pass) unless their env gate is set, so
 //! `cargo nextest run -p dpay-icp-e2e` is green with no replica and no network.
 
@@ -119,6 +121,53 @@ impl IcHttp {
         let status = response.status().as_u16();
         let body = response.bytes()?.to_vec();
         Ok(HttpResponse { status, body })
+    }
+}
+
+// --- read_state poll tail (shared by the mainnet update proofs) -----------------------------------
+
+/// Poll `read_state` (against the canister the update was submitted to) for a request's terminal
+/// status. Mainnet finality for these canisters is a few seconds; 60s budget. Used by both the
+/// facade/DUSD update probe (tests/mainnet_update.rs) and the ckBTC-minter deposit-address probe
+/// (tests/mainnet.rs) — one poll implementation, not per-file copies.
+pub fn poll_request_status(
+    http: &IcHttp,
+    key: &ed25519_dalek::SigningKey,
+    canister: &dpay_icp::Principal,
+    rid: &[u8; 32],
+) -> Result<RequestStatus> {
+    use std::time::{Duration, Instant};
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let expiry = dpay_icp::ingress_expiry(
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() as u64,
+        300,
+    );
+    let path: [&[u8]; 2] = [b"request_status", rid];
+    let paths: [&[&[u8]]; 1] = [&path[..]];
+    let mut observed: Vec<&'static str> = Vec::new();
+    loop {
+        let envelope = dpay_icp::sign_read_state(key, &paths, expiry);
+        let response = http.submit(&canister.to_text(), "read_state", &envelope)?;
+        assert_eq!(
+            response.status, 200,
+            "read_state: status {}, body {}",
+            response.status,
+            response.body_preview(200)
+        );
+        let tree = decode_read_state_tree(&response.body)?;
+        match request_status(&tree, rid)? {
+            RequestStatus::Unknown => observed.push("unknown"),
+            RequestStatus::Received => observed.push("received"),
+            RequestStatus::Processing => observed.push("processing"),
+            terminal => {
+                eprintln!("   read_state status sequence: {:?}", observed);
+                return Ok(terminal);
+            }
+        }
+        if Instant::now() > deadline {
+            return Err(format!("read_state not terminal within 60s (last: {:?})", observed).into());
+        }
+        std::thread::sleep(Duration::from_millis(400));
     }
 }
 

@@ -9,6 +9,9 @@
 //! - `call`: verify envelope (bad sig → 400, body echoes why) → ingress-window check
 //!   (expired → 400 with 'expired' in the body) → request_id dedup (identical-byte resubmit
 //!   → 202, executed ONCE) → execute → 202 empty body; outcome rides `read_state`.
+//!   `get_btc_address` lives HERE: the real ckBTC minter exposes it as an UPDATE ONLY —
+//!   the query form is rejected with 5 "Canister has no query method 'get_btc_address'"
+//!   (prod bug 2026-08-23; the fake mirrors the rejection so the class can't recur).
 //! - `query`: verify → execute → 200 CBOR `{status: replied, reply: {arg}}`; canister reject →
 //!   `{status: rejected, reject_code, reject_message}`; bad sig → 400.
 //! - `read_state`: verify → 200 CBOR `{certificate: {tree, signature}}` carrying
@@ -278,6 +281,7 @@ impl FakeIc {
             }
             "withdraw_eth" => Self::burn_via_minter(s, &canister, &env.sender, "withdraw_eth", arg, block),
             "withdraw_erc20" => Self::withdraw_erc20(s, &canister, &env.sender, arg, block),
+            "get_btc_address" => Self::get_btc_address(s, &canister, arg),
             other => RequestState::Rejected { code: 3, message: format!("method {other:?} not available on the gateway") },
         }
     }
@@ -431,6 +435,35 @@ impl FakeIc {
         RequestState::Replied(encode_minter_ok(block))
     }
 
+    /// `get_btc_address` — an UPDATE-only method on the real ckBTC minter (mainnet rejects the
+    /// query form with "Canister has no query method 'get_btc_address'"; found on a physical
+    /// device 2026-08-23 — the fake used to accept the query form, which is exactly the
+    /// prod-only blind spot this mirroring closes). Deterministic fake address keyed by the
+    /// OWNER principal — the deposit address pays Account{owner: user principal} (never facade
+    /// custody). Shape mirrors the relay-era FakeLedger (`bc1qdpay` + 16 hex chars) so the
+    /// deposit flows assert the same recognizable contract; the keyed bytes are the principal,
+    /// not a facade pubkey.
+    fn get_btc_address(s: &mut FakeIcState, canister: &str, arg: &[u8]) -> RequestState {
+        if !s.minters.contains_key(canister) {
+            return RequestState::Rejected {
+                code: 3,
+                message: "method \"get_btc_address\" not available on the gateway".into(),
+            };
+        }
+        let Ok(a) = decode_minter_account_arg(arg) else {
+            return RequestState::Rejected { code: 5, message: "malformed get_btc_address arg".into() };
+        };
+        let owner = a.owner.unwrap_or_else(Principal::anonymous);
+        // Slice defensively: a decoded principal shorter than 8 bytes (e.g. the anonymous one
+        // this fallback can substitute) used to panic on `&slice[..8]` — a hostile
+        // `get_btc_address` arg must be a typed reject, not a crash.
+        let Some(owner_prefix) = owner.as_slice().get(..8) else {
+            return RequestState::Rejected { code: 5, message: "owner principal too short for the fake btc address".into() };
+        };
+        let addr = format!("bc1qdpay{}", hex::encode(owner_prefix));
+        RequestState::Replied(encode_text_reply(&addr))
+    }
+
     fn execute_query(&self, env: &dpay_icp::envelope::VerifiedEnvelope) -> Result<Vec<u8>, (u64, String)> {
         let (Some(canister_p), Some(method), Some(arg)) = (&env.canister, &env.method_name, &env.arg) else {
             return Err((5, "query content missing canister/method/arg".into()));
@@ -454,23 +487,12 @@ impl FakeIc {
                 Ok(encode_nat_reply(f))
             }
             "get_btc_address" => {
-                // Deterministic fake address keyed by the OWNER principal — the deposit address
-                // pays Account{owner: user principal} (never facade custody). Shape mirrors the
-                // relay-era FakeLedger (`bc1qdpay` + 16 hex chars) so the deposit flows assert
-                // the same recognizable contract; the keyed bytes are the principal, not a
-                // facade pubkey.
-                let Ok(a) = decode_minter_account_arg(&arg) else {
-                    return Err((5, "malformed get_btc_address arg".into()));
-                };
-                let owner = a.owner.unwrap_or_else(Principal::anonymous);
-                // Slice defensively: a decoded principal shorter than 8 bytes (e.g. the
-                // anonymous one this fallback can substitute) used to panic on `&slice[..8]`
-                // — a hostile `get_btc_address` arg must be a typed reject, not a crash.
-                let Some(owner_prefix) = owner.as_slice().get(..8) else {
-                    return Err((5, "owner principal too short for the fake btc address".into()));
-                };
-                let addr = format!("bc1qdpay{}", hex::encode(owner_prefix));
-                Ok(encode_text_reply(&addr))
+                // Mainnet-true: the real ckBTC minter exposes get_btc_address as an UPDATE
+                // only (verified against its candid) — the signed QUERY dies on prod with
+                // exactly this message (found on a physical device 2026-08-23). The fake must
+                // reject it identically so this class of bug can never sail through the
+                // offline suite again.
+                Err((5, "Canister has no query method 'get_btc_address'".into()))
             }
             "eip_1559_transaction_price" => {
                 Ok(encode_eip1559_price(&Eip1559Price {
