@@ -9,6 +9,7 @@ import {SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
+import {TrustWalletFundButton} from './TrustWalletFundButton';
 import {IconCopy, IconRefresh} from './icons';
 
 /**
@@ -181,6 +182,14 @@ export function SolanaReceiveSheet({
         <IconCopy size={18} color={C.brandInk}/>
         <Text style={S.primaryText}>{copied === 'clipboard' ? 'Copied ✓' : copied === 'shared' ? 'Shared ✓' : 'Copy address'}</Text>
       </Pressable>
+
+      {/* Trust Wallet send deep link (2026-08-17 plan): mainnet only — devnet has no Trust
+          asset id (copy/QR status quo). USDC links the SPL asset id (send to this ATA); the
+          sheet only renders the address branch when the account exists ('ready'), so the
+          button inherits the same can-receive gate. */}
+      {!IS_SOLANA_DEVNET ? (
+        <TrustWalletFundButton asset={isUsdc ? 'SOL-USDC' : 'SOL'} address={address} />
+      ) : null}
 
       {/* Return-to-pay link (2026-08-16 UX review): when the user landed here from a fund-first
           prompt for ANOTHER asset (e.g. "Show my SOL address" while paying USDC) and that asset's
