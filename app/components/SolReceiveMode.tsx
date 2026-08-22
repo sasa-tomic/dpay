@@ -1,4 +1,4 @@
-import {useState, useEffect} from 'react';
+import {useState, useEffect, useRef} from 'react';
 import {View, Text, Pressable, TextInput, ActivityIndicator, type TextStyle} from 'react-native';
 import {QrCode} from './QrCode';
 import bs58 from 'bs58';
@@ -28,6 +28,8 @@ import {ModeToggle} from './ModeToggle';
 import {SolanaReceiveSheet} from './SolanaReceiveSheet';
 import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
 import {AssetPicker} from './AssetPicker';
+import {useJourney} from '../lib/journey';
+import {awardPaymentTested} from '../lib/readiness';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {useReportLock} from '../hooks/useReportLock';
 import {IconCheck, IconChevronDown, IconClock, IconCopy, IconQr} from './icons';
@@ -60,6 +62,11 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
   const [amount, setAmount] = useState('');
   const [memo, setMemo] = useState('');
   const [phase, setPhase] = useState<'form' | 'reqQr' | 'result'>('form');
+  // Trip Ready J5b — paymentTested: awarded once at the FIRST confirmed SOL Received (the three
+  // confirmed setResult branches only — never the honest-pending UNREACHABLE paths).
+  const {journey} = useJourney();
+  const journeyRef = useRef(journey);
+  journeyRef.current = journey;
   const [reqUri, setReqUri] = useState<string | null>(null);
   const [reqSnapshot, setReqSnapshot] = useState<SolReqV2 | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -204,6 +211,7 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
       const receipt = await broadcastSolPayment(reqSnapshot, reqUri, solpay, signal);
       if (receipt.status === RECEIPT_SETTLED) {
         setResult({amount: reqSnapshot.amt, cur: reqSnapshot.cur, sig: receipt.sig});
+        awardPaymentTested(journeyRef.current);
         await clearSolMerchantState(identity.publicHex);
         setReconcile(null);
         setPhase('result');
@@ -229,6 +237,7 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
   function onNfcResult(r: {amount: string; cur: 'SOL' | 'USDC'; sig: string} | null) {
     if (!r) return;
     setResult({amount: r.amount, cur: r.cur, sig: r.sig});
+    awardPaymentTested(journeyRef.current);
     setReconcile(null);
     clearSolMerchantState(identity.publicHex);
     setPhase('result');
@@ -246,6 +255,7 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
       const receipt = await broadcastSolPayment(reqSnapshot, reqUri, solpay, signal);
       if (receipt.status === RECEIPT_SETTLED) {
         setResult({amount: reqSnapshot.amt, cur: reqSnapshot.cur, sig: receipt.sig});
+        awardPaymentTested(journeyRef.current);
         await clearSolMerchantState(identity.publicHex);
         setReconcile(null);
         setPhase('result');

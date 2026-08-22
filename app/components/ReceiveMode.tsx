@@ -1,4 +1,4 @@
-import {useEffect, useMemo, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
 import {View, Text, Pressable, TextInput, type TextStyle} from 'react-native';
 import {QrCode} from './QrCode';
 import {C, FONT} from '../config/palette';
@@ -22,6 +22,8 @@ import {CkErc20DepositSheet} from './CkErc20DepositSheet';
 import {AssetPicker} from './AssetPicker';
 import {useReportLock} from '../hooks/useReportLock';
 import {useShareFeedback, shareConfirmLabel} from '../hooks/useShareFeedback';
+import {useJourney} from '../lib/journey';
+import {awardPaymentTested} from '../lib/readiness';
 import {CoachTip} from './CoachTip';
 import {IconCheck, IconChevronDown, IconClock, IconQr, IconShare, IconWifiOff} from './icons';
 
@@ -45,6 +47,12 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
   // whose `onSelect(id)` is Wallet's `handleSelect` (the same dispatch Balances uses). Selecting a
   // SOL/USDC asset flips the rail via Wallet's reconcileSelectedAsset + re-mounts SolReceiveMode.
   const [amount, setAmount] = useState('');
+  // Trip Ready J5b — paymentTested: awarded once at the FIRST confirmed Received (either
+  // confirmed setResult branch). journeyRef keeps the award reading the FRESH journey without
+  // re-subscribing the effects below (same pattern as PayMode).
+  const {journey} = useJourney();
+  const journeyRef = useRef(journey);
+  journeyRef.current = journey;
   const [memo, setMemo] = useState('');
   // `rawAmount` (was `cents`) is the integer smallest-units the encoded request carries (2-decimal
   // for DEMO, 8 for BTC, 6 for USDC) — now a raw-u64 decimal STRING (MC1 units 2-4). Renamed because
@@ -165,6 +173,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
         if (settled) {
           setResult({amount: reqQr.rawAmount, currency: reqQr.currency, from: 'payer'});
           onReceived();
+          awardPaymentTested(journeyRef.current);
         } else {
           setErr('Couldn’t confirm this payment yet — if the payer paid, it lands with the next balance refresh.');
         }
@@ -197,6 +206,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
       if (settled) {
         setResult({amount: reqQr.rawAmount, currency: reqQr.currency, from: 'payer'});
         onReceived();
+        awardPaymentTested(journeyRef.current);
       } else {
         setErr('Couldn’t confirm this payment yet — if the payer paid, it lands with the next balance refresh.');
       }

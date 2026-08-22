@@ -139,16 +139,19 @@ export async function markSeen(key: string): Promise<Journey> {
 }
 
 /**
- * React seam: loads the journey once on mount and exposes `{journey, award}` where
+ * React seam: loads the journey once on mount and exposes `{journey, award, loaded}` where
  * `award(key)` updates local state AND persists (idempotent). For Wave 1A only the
  * Onboarding gate needs `hasStamp`-style reads; the hook is the seam later waves
  * (recovery moment, passport) consume so they never re-implement load/persist.
+ * `loaded` (Trip Ready J5b) lets first-paint-dependent surfaces (the passport card) hold
+ * their render until the real journey arrives — no empty→filled flash mid-frame.
  */
-export function useJourney(): {journey: Journey; award: (key: StampKey) => void} {
+export function useJourney(): {journey: Journey; award: (key: StampKey) => void; loaded: boolean} {
   const [journey, setJourney] = useState<Journey>(EMPTY_JOURNEY);
+  const [loaded, setLoaded] = useState(false);
   useEffect(() => {
     let alive = true;
-    loadJourney().then(j => { if (alive) setJourney(j); }).catch(() => {});
+    loadJourney().then(j => { if (alive) { setJourney(j); setLoaded(true); } }).catch(() => {});
     return () => { alive = false; };
   }, []);
   const award = useCallback((key: StampKey) => {
@@ -160,5 +163,5 @@ export function useJourney(): {journey: Journey; award: (key: StampKey) => void}
       : {...j, stamps: [...j.stamps, JOURNEY_STAMPS[key]], at: {...j.at, [JOURNEY_STAMPS[key]]: Date.now()}});
     void awardStamp(key);
   }, []);
-  return {journey, award};
+  return {journey, award, loaded};
 }

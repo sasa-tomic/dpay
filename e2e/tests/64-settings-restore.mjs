@@ -38,7 +38,7 @@ export const meta = {
   journey: 'system',
   covers: ['restore-seed', 'restore-mnemonic-words', 'settings-restore', 'identity-replace', 'keypair-from-secret'],
   verifies: 'Settings → Restore replaces wallet identity from 24 words OR 64-hex seed (no wipe); username preserved.',
-  timeoutMs: 40_000,
+  timeoutMs: 60_000, // 2026-08-22: ~27s solo, ~45s under full-suite load on a busy shared host (measured at HEAD too) — 40s budget tipped over deterministically; raised with margin.
 };
 
 export async function run() {

@@ -19,6 +19,7 @@ import {useCatalog} from '../hooks/useCatalog';
 import {useBalancePoll} from '../hooks/useBalancePoll';
 import {useSolanaBalances} from '../hooks/useSolanaBalances';
 import {useTransactionHistory} from '../hooks/useTransactionHistory';
+import {useFundsReady} from '../hooks/useFundsReady';
 import {deriveSolanaAddress, createUsdcAta} from '../solana';
 import {friendlySolError} from '../solana/errors';
 import {readDepositDeepLink, readRequestDeeplink, readPaymentDeeplink, decodeDeeplink, type DeeplinkKind} from '../lib/deepLink';
@@ -427,6 +428,9 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
     }),
     [catalog, assets, displayAssetBalances, shownBalance, online, solState, usdcState],
   );
+  // Trip Ready J5b — fundsReady: awarded ONCE at the first sight of any spendable balance
+  // (DEMO counts; `—` unknowns do not). Reads the memo above; ref-guarded against poll spam.
+  useFundsReady(balances);
   // Solana-USDC refresh is consumed by the balance map (status/amount drive the USDC row) AND by the
   // Phase 6 USDC send path (SolPayMode's onSentUsdc refreshes USDC only after a confirmed SPL send).
   // The SOL send path refreshes SOL only via `refreshSol`, so a confirmed native-SOL send does NOT

@@ -14,6 +14,8 @@ import {SheetOverlay} from './SheetOverlay';
 import {SeedWords} from './SeedWords';
 import {IconAuto, IconChevronDown, IconClose, IconExternalLink, IconInfo, IconMoon, IconSun} from './icons';
 import {Walkthrough} from './Walkthrough';
+import {PassportArchive} from './TripPassport';
+import {PASSPORT_TITLE} from '../lib/readiness';
 import {choiceLabel, type ThemeOverride} from '../config/theme';
 
 /**
@@ -62,7 +64,11 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
   // Esc closes the sheet — EXCEPT while the "How dpay works" replay Modal is open, when the
   // Modal's own Walkthrough escape handler owns the key (otherwise one Esc would close both).
   const [howItWorks, setHowItWorks] = useState(false);
-  useHotkeys({escape: onClose}, {enabled: !howItWorks});
+  // Trip Ready J5b — the read-only passport archive modal (the permanent home after the
+  // Balances card collapses). Joins the howItWorks escape gate: while open, the Modal's own
+  // escape owns the key (one Esc closes one thing).
+  const [tripReadyOpen, setTripReadyOpen] = useState(false);
+  useHotkeys({escape: onClose}, {enabled: !howItWorks && !tripReadyOpen});
   const [confirmReset, setConfirmReset] = useState(false);
   // Backup reveal is a TWO-step gate (mirrors the reset confirm idiom): `confirmBackup` opens the
   // warning + btn-backup-confirm; `backupRevealed` (set only after confirming) shows the seed. This
@@ -422,6 +428,23 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
                 <Text style={S.linkText}>{JourneyHowItWorksTitle}</Text>
               </View>
             </Pressable>
+            {/* Trip Ready J5b — the passport archive: the permanent read-only home of the
+                Trip Readiness page (after the Balances card collapses on completion, this is
+                where it lives; before completion it shows the same view — what's left). The
+                ring glyph echoes the passport's stamp slots. Private + local, like the journey. */}
+            <Pressable
+              testID="btn-trip-readiness"
+              style={S.linkBtn}
+              onPress={() => setTripReadyOpen(true)}
+              accessibilityRole="button"
+              accessibilityLabel={PASSPORT_TITLE}
+              accessibilityHint="Shows your trip readiness passport — the four capability stamps"
+              accessibilityState={{disabled: false}}>
+              <View style={S.linkRow}>
+                <View style={{width: 14, height: 14, borderRadius: 7, borderWidth: 1.5, borderColor: C.brand}} />
+                <Text style={S.linkText}>{PASSPORT_TITLE}</Text>
+              </View>
+            </Pressable>
           </View>
 
           {/* Advanced: Server (the relay URL) — disclosure COLLAPSES by default so a curious
@@ -491,6 +514,15 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
             onClose={() => setHowItWorks(false)}
             onDone={() => setHowItWorks(false)}
           />
+        </Modal>
+      ) : null}
+
+      {/* Trip Ready J5b — the passport archive: same full-mount/unmount Modal discipline as
+          the walkthrough replay above. Renders the SAME TripPassport component in read-only
+          archive mode (no capstone, no Done — complete shows the TRIP READY mark statically). */}
+      {tripReadyOpen ? (
+        <Modal visible animationType="slide" onRequestClose={() => setTripReadyOpen(false)}>
+          <PassportArchive onClose={() => setTripReadyOpen(false)} />
         </Modal>
       ) : null}
     </SheetOverlay>

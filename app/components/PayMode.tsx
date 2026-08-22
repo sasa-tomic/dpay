@@ -21,6 +21,7 @@ import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useReportLock} from '../hooks/useReportLock';
 import {useShareFeedback, shareConfirmLabel} from '../hooks/useShareFeedback';
 import {useJourney, JOURNEY_STAMPS} from '../lib/journey';
+import {awardPaymentTested} from '../lib/readiness';
 import {shouldShowOfflinePeak} from '../lib/peak';
 import {CoachTip} from './CoachTip';
 import {OfflinePeak} from './OfflinePeak';
@@ -138,6 +139,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
           if (!alive) return;
           if (out.kind === 'settled') {
             onSettled(); setPaid({amount: qr.amount, currency: qr.currency, who: qr.who, already: false}); setPhase('paid');
+            awardPaymentTested(journeyRef.current);
             // Trip Ready J5 — CONFIRMED via reconcile after a TRULY offline handoff (the payer
             // approved with no reachable gateway; the merchant's connection settled it): the
             // truthful offlineQr peak path. Award exactly once (idempotent — the stamp IS the
@@ -196,12 +198,13 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
           onSettled();
           // Interim settlement proof (honest W3 receipt): ledger + block index + request id —
           // certified read_state, not BLS-verified on-device (W6 upgrades).
-          setPaid({amount: req.amount, currency: req.currency, who, already: false, receipt: {ledger: p.ledger, block_index: out.blockIndex, request_id: p.requestIdHex}}); setPhase('paid'); return;
+          setPaid({amount: req.amount, currency: req.currency, who, already: false, receipt: {ledger: p.ledger, block_index: out.blockIndex, request_id: p.requestIdHex}}); setPhase('paid');
+          awardPaymentTested(journeyRef.current); return;
         }
         if (out.kind === 'rejected') {
           // Structured-tag branch (not human-message matching): Duplicate = this payee already
           // landed this exact memo'd transfer — the request is PAID, show the already-paid state.
-          if (out.variant === 'Duplicate') { setPaid({amount: req.amount, currency: req.currency, who, already: true}); setPhase('paid'); return; }
+          if (out.variant === 'Duplicate') { setPaid({amount: req.amount, currency: req.currency, who, already: true}); setPhase('paid'); awardPaymentTested(journeyRef.current); return; }
           setErr(out.reason); return;
         }
         // unknown: not terminal within budget — fall through to the offline QR hand-off. The

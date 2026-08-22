@@ -115,6 +115,35 @@ function buildStyles(p: Palette) {
   // settles — the durable "this was the first offline one" mark (e2e testID `first-offline-stamp`).
   peakSettled: {marginTop: 16, flexDirection: 'row', alignItems: 'center', gap: 6},
   peakSettledText: {fontSize: 11, fontWeight: '600', color: p.sub2, letterSpacing: 2.0, textTransform: 'uppercase', fontFamily: FONT.mono},
+  // ── The Trip Readiness passport (J5b) ────────────────────────────────────────────────────
+  // A travel-credential PAGE, not a dashboard: porcelain card + fine rule, the eyebrow row
+  // ("TRIP READINESS · 3 OF 4" mono caps), and the 2×2 stamp grid. Empty positions read as
+  // debossed dashes on the page (a place NOT yet stamped); filled positions are inked rings
+  // (brand, 2px) with the two-line caps label INSIDE the ring — the stampChip grammar at slot
+  // scale, each with its own slight rotation so the set reads hand-stamped, never a checklist.
+  passportCard: {alignSelf: 'stretch', marginTop: 2, backgroundColor: p.card, borderWidth: 1, borderColor: p.line2, borderRadius: 18, paddingHorizontal: 18, paddingVertical: 16},
+  passportHead: {flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'},
+  passportRule: {height: 1, backgroundColor: p.line, marginTop: 10},
+  passportGrid: {flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginTop: 18, rowGap: 14},
+  passportSlot: {width: 88, height: 88, borderRadius: 44, borderWidth: 1.5, borderColor: p.line2, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5},
+  passportSlotFilled: {width: 88, height: 88, borderRadius: 44, borderWidth: 2, borderColor: p.brand, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5},
+  passportSlotText: {color: p.sub2, fontFamily: FONT.mono, fontSize: 9, fontWeight: '600', letterSpacing: 0.8, textTransform: 'uppercase', textAlign: 'center', lineHeight: 12},
+  passportSlotTextFilled: {color: p.brand, fontFamily: FONT.mono, fontSize: 9, fontWeight: '600', letterSpacing: 0.8, textTransform: 'uppercase', textAlign: 'center', lineHeight: 12},
+  // The ONE contextual next-step line (incomplete only): a quiet "NEXT" tag + active-voice
+  // sans hint. Non-interactive by design — the passport never invents navigation.
+  passportHint: {marginTop: 18, flexDirection: 'row', alignItems: 'baseline', gap: 8},
+  passportHintTag: {color: p.sub2, fontFamily: FONT.mono, fontSize: 10, fontWeight: '600', letterSpacing: 1.6, textTransform: 'uppercase'},
+  passportHintText: {flexShrink: 1, fontSize: 13, color: p.sub, fontFamily: FONT.sans},
+  // The completed card's durable mark: the stampChip grammar ("TRIP READY") + the promise
+  // line. Quiet ink, no counters — the capstone moment above is the ONLY loud beat.
+  passportReadyWrap: {marginTop: 16, alignItems: 'center'},
+  passportReadyLine: {fontSize: 13, color: p.sub, textAlign: 'center', marginTop: 10, fontFamily: FONT.sans},
+  // The capstone overlay: the full-card TRIP READY stamp press (~1s) — the peakStamp grammar
+  // (118 ring, spring + tilt) pressed across the finished page, then it lifts to reveal the
+  // static completed card + Done.
+  passportCapstone: {position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 18, backgroundColor: p.card, alignItems: 'center', justifyContent: 'center'},
+  passportCapstoneText: {color: p.brand, fontFamily: FONT.mono, fontSize: 15, fontWeight: '600', letterSpacing: 2.2, textTransform: 'uppercase', textAlign: 'center', lineHeight: 20},
+  passportCapstoneMicro: {fontSize: 14, color: p.sub, marginTop: 14, textAlign: 'center', fontFamily: FONT.sans},
   balBox: {alignItems: 'flex-end'},
   // The header balance pressable's outer row: the label+value column, then the A hotkey badge
   // at the far right edge (DOM order label → value → badge, mirroring the tab-bar badge pattern).
