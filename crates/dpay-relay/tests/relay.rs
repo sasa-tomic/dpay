@@ -722,6 +722,67 @@ async fn landing_page_states_non_custodial_honestly() {
     }
 }
 
+/// Trip Ready Wave 2E (2026-08-22 spec): the landing tells the offline-payment story. The
+/// campaign line is byte-identical to the app's single source (app/config/education.ts
+/// CAMPAIGN_LINE — the hero carries the pointer comment, mirroring the palette/fonts
+/// 3-homes pattern), the hero states the asymmetry plainly (payer offline, merchant online,
+/// the shop's connection settles it), and the eight-second proof strip renders the four
+/// beats: airplane mode → tap → the split → settled. Honesty pins: the banned-claims sweep —
+/// no "conversion" family, no "anywhere", no "works with any currency", no "nobody needs
+/// internet" (the merchant DOES need its connection) — and proof motion must keep the
+/// reduced-motion kill switch.
+#[tokio::test]
+async fn landing_page_tells_the_offline_payment_story() {
+    let (state, _led) = state_from(ledger());
+
+    let (status, _headers, bytes) = call_raw(&state, get_req("/")).await;
+    assert_eq!(status, StatusCode::OK);
+    let html = String::from_utf8(bytes).unwrap();
+    // The campaign line — byte-identical to the app's single source — plus the pointer
+    // comment that keeps the two homes honest.
+    assert!(
+        html.contains("Roaming off. Payment on."),
+        "the campaign line must appear byte-identical to app/config/education.ts"
+    );
+    assert!(
+        html.contains("<!-- single source: app/config/education.ts CAMPAIGN_LINE -->"),
+        "the hero must carry the single-source pointer comment"
+    );
+    // The asymmetry, said plainly: the payer may be offline, the merchant is online, and the
+    // shop's connection settles it (hero lede + the proof strip's four beats).
+    for required in [
+        "id=\"proof\"",
+        "Traveler: offline",
+        "Merchant: online",
+        "Settled in seconds",
+        "The shop's connection settles it",
+    ] {
+        assert!(
+            html.contains(required),
+            "the offline story must contain {required:?}"
+        );
+    }
+    // Banned claims (spec exclusions). "onvert" covers convert/converts/conversion;
+    // "nywhere" covers anywhere/Anywhere — payments work where the shop is online, not
+    // "anywhere"; the merchant's connectivity is never hand-waved away.
+    for banned in [
+        "onvert",
+        "nywhere",
+        "works with any currency",
+        "nobody needs internet",
+    ] {
+        assert!(
+            !html.contains(banned),
+            "landing must not carry the banned claim {banned:?}"
+        );
+    }
+    // Proof-strip motion must have a reduced-motion answer (the global kill switch).
+    assert!(
+        html.contains("prefers-reduced-motion"),
+        "proof motion must respect prefers-reduced-motion"
+    );
+}
+
 /// Without a configured APK the download route is a clean 404 — not an empty 200.
 #[tokio::test]
 async fn apk_download_absent_is_404() {

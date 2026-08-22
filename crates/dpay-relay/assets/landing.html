@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>∂pay · Pay differently</title>
-<meta name="description" content="A new way to pay. Simple to use. Fast everywhere. Works if you have no internet. Free to pay. Non-custodial. Your money stays yours." />
+<title>∂pay · Roaming off. Payment on.</title>
+<meta name="description" content="Roaming off. Payment on. Tap to pay abroad even when your phone has no signal: you approve on your phone, the shop's online terminal settles the payment. Non-custodial. Free to pay." />
 <meta name="color-scheme" content="light dark" />
 <meta name="theme-color" content="#F4F1E8" />
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141210" />
@@ -545,6 +545,72 @@
   .band .ghost{background:transparent;box-shadow:none;color:var(--bg);border-color:rgba(244,241,232,.4)}
   .band .ghost:hover{border-color:var(--bg)}
 
+  /* ————— the eight-second proof: airplane mode → tap → the split → settled (Trip Ready J6) ————— */
+  .proof-beats{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;margin-top:56px}
+  .beat{
+    position:relative;display:flex;flex-direction:column;align-items:center;text-align:center;gap:13px;
+    padding:32px 20px 28px;border-radius:22px;
+    background:var(--card);border:1px solid var(--line);box-shadow:var(--sh-sm);
+    transition:transform .22s ease,box-shadow .22s ease,border-color .22s ease;
+  }
+  .beat:hover{transform:translateY(-3px);box-shadow:var(--sh-md);border-color:var(--sub2)}
+  .beat .n{
+    position:absolute;top:-11px;left:50%;transform:translateX(-50%);white-space:nowrap;
+    font-family:var(--mono);font-size:.6rem;font-weight:600;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--bg);background:var(--ink);padding:5px 13px;border-radius:999px;
+  }
+  .beat .frame{width:100%;display:flex;align-items:center;justify-content:center;min-height:118px}
+  .beat .frame svg{width:100%;max-width:200px;height:auto;display:block}
+  .beat .t{font-size:1.02rem;font-weight:700;letter-spacing:-.018em;color:var(--ink)}
+  .beat .d{font-size:.87rem;color:var(--sub);line-height:1.5;max-width:24ch}
+  /* beat 3 — the split card: who is offline, who is online */
+  .pv-split{display:flex;flex-direction:column;gap:8px;width:100%;max-width:200px}
+  .pv-row{
+    display:inline-flex;align-items:center;justify-content:center;gap:9px;
+    border:1px solid var(--line2);background:var(--panel2);border-radius:12px;padding:11px 12px;
+    font-family:var(--mono);font-size:.66rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+  }
+  .pv-row::before{content:"";width:7px;height:7px;border-radius:50%;flex:none}
+  .pv-row.off{color:var(--warn)} .pv-row.off::before{background:var(--warn);animation:pvblink 2.6s ease infinite}
+  .pv-row.on{color:#0B7A55;border-color:rgba(14,159,110,.28);background:rgba(14,159,110,.05)}
+  .pv-row.on::before{background:var(--ok);animation:pvblink 2.6s ease infinite .4s}
+  @keyframes pvblink{0%,100%{opacity:1}50%{opacity:.35}}
+  /* beat 4 — the settled stamp */
+  .pv-stamp{
+    display:inline-flex;align-items:center;justify-content:center;text-align:center;
+    border:2.5px solid var(--brand);color:var(--brand);border-radius:12px;
+    font-size:1.04rem;font-weight:700;letter-spacing:-.01em;line-height:1.2;
+    padding:16px 18px;transform:rotate(-6deg);
+    box-shadow:inset 0 0 0 2px var(--card), inset 0 0 0 3.5px var(--brand);
+    animation:pvpress 3.8s cubic-bezier(.2,.7,.2,1) infinite;
+  }
+  @keyframes pvpress{0%,16%,100%{transform:rotate(-6deg) scale(1)}8%{transform:rotate(-6deg) scale(.93)}}
+  .proof-note{
+    margin:36px auto 0;max-width:640px;text-align:center;
+    font-family:var(--mono);font-size:.78rem;font-weight:500;letter-spacing:.02em;color:var(--sub);line-height:1.8;
+  }
+  .proof-note b{color:var(--ink);font-weight:600}
+  html.dark .pv-row.on{color:#34C48E}
+  @media (max-width:920px){
+    .proof-beats{grid-template-columns:1fr 1fr;gap:16px;margin-top:48px}
+    .beat{padding:30px 16px 24px}
+  }
+  @media (max-width:560px){
+    .proof-beats{grid-template-columns:1fr}
+    .beat{flex-direction:row;text-align:left;gap:18px;padding:20px 18px}
+    .beat .frame{flex:none;width:118px;min-height:0}
+    .beat .frame svg{max-width:118px}
+    .beat .t,.beat .d{max-width:none}
+    .pv-stamp{font-size:.92rem;padding:12px 13px}
+  }
+
+  /* ————— how it works: storyboard + the two starting rails ————— */
+  .pw-group{
+    display:flex;align-items:center;gap:16px;margin:64px 0 0;
+    font-family:var(--mono);font-size:.72rem;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--sub);
+  }
+  .pw-group::after{content:"";flex:1;border-top:1px dashed var(--line)}
+
   /* ————— scroll reveal ————— */
   .rv{opacity:0;transform:translateY(18px);transition:opacity .7s ease,transform .7s cubic-bezier(.2,.7,.2,1);transition-delay:var(--d,0s)}
   .rv.in{opacity:1;transform:none}
@@ -704,6 +770,7 @@
   </a>
   <span class="nav-right">
     <a class="navlink" href="#how">How it works</a>
+    <a class="navlink" href="#proof">The proof</a>
     <a class="navlink" href="#merchants">For merchants</a>
     <a class="navlink" href="#why">Why ∂pay</a>
     <a class="navlink ghost" href="/wallet">
@@ -716,9 +783,10 @@
 <header class="hero" id="top">
   <div class="wrap hero-grid">
     <div>
-      <span class="kicker">A new way to pay</span>
-      <h1>Pay <em>differently.</em></h1>
-      <p class="lede">∂pay is a new wallet for your phone. <b>Simple to use. Fast everywhere.</b> It even works if you have <b>no internet</b>. <b>Only you</b> control your money.</p>
+      <span class="kicker">Tap to pay abroad</span>
+      <!-- single source: app/config/education.ts CAMPAIGN_LINE -->
+      <h1>Roaming off. Payment on.</h1>
+      <p class="lede">Abroad, your phone has <b>no signal</b>. The shop's terminal <b>is online</b>. ∂pay closes that gap: <b>you approve on your phone</b>, and the shop's connection settles the payment.</p>
       <div class="cta-row">
         <a class="primary" href="#get">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12M6 11l6 6 6-6M5 20h14"/></svg>
@@ -728,11 +796,11 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10,8 16,12 10,16" fill="currentColor" stroke="none"/></svg>
           Watch 60 seconds
         </a>
-        <a class="textlink" href="#how">See how it works</a>
+        <a class="textlink" href="#how">See the three steps</a>
       </div>
       <div class="trust">
         <span>No payment fees</span>
-        <span>Works offline as well</span>
+        <span>Works with no signal</span>
         <span>Non-custodial. We can't move your money</span>
         <span>Android app, iOS coming soon</span>
       </div>
@@ -752,7 +820,7 @@
       </div>
       <span class="badge">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.8a16 16 0 0 1 20 0"/><path d="M5.5 12.4a11 11 0 0 1 13 0"/><path d="M9 16a6 6 0 0 1 6 0"/><circle cx="12" cy="19.5" r="1"/><path d="M3 3 21 21"/></svg>
-        <span><span class="lbl">Also if you are offline</span></span>
+        <span><span class="lbl">Airplane mode. Still paid.</span><small>Traveler: offline · shop online</small></span>
       </span>
     </div>
   </div>
@@ -760,17 +828,119 @@
 
 <div class="ticker" aria-hidden="true">
   <div class="ticker-track">
-    <div class="tgroup"><span>Pay differently</span><span>Simple to use</span><span>Fast everywhere</span><span>Works offline</span><span>Free to pay</span><span>Your money is only yours</span></div>
-    <div class="tgroup"><span>Pay differently</span><span>Simple to use</span><span>Fast everywhere</span><span>Works offline</span><span>Free to pay</span><span>Your money is only yours</span></div>
+    <div class="tgroup"><span>Roaming off. Payment on.</span><span>Tap to pay abroad</span><span>Works offline</span><span>Free to pay</span><span>Your key stays on your phone</span><span>Non-custodial</span></div>
+    <div class="tgroup"><span>Roaming off. Payment on.</span><span>Tap to pay abroad</span><span>Works offline</span><span>Free to pay</span><span>Your key stays on your phone</span><span>Non-custodial</span></div>
   </div>
 </div>
 
 <main>
+  <!-- ————— the eight-second proof: airplane mode → tap → the split → settled ————— -->
+  <section id="proof" class="wrap">
+    <span class="kicker rv">The eight-second proof</span>
+    <h2 class="rv">Airplane mode on. Payment done<i class="dot">.</i></h2>
+    <p class="sec-sub rv">The whole trick in four beats: your phone approves with <b>no signal</b>, and the shop's online terminal does the sending.</p>
+
+    <div class="proof-beats">
+      <div class="beat rv">
+        <span class="n">beat 1 · the traveler</span>
+        <span class="frame" aria-hidden="true">
+          <svg viewBox="0 0 200 120" fill="none" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="79" y="8" width="42" height="104" rx="10" stroke="currentColor" stroke-width="2.4"/>
+            <path d="M93.5 16h13" stroke="currentColor" stroke-width="2.4"/>
+            <g stroke="var(--warn)" stroke-width="2.2">
+              <path d="M91 45a13 13 0 0 1 18 0"/>
+              <path d="M95.5 40a6.5 6.5 0 0 1 9 0"/>
+              <circle cx="100" cy="50" r="1.6" fill="var(--warn)" stroke="none"/>
+              <path d="M84 34 116 58"/>
+            </g>
+            <path d="M116 74 82 88l14 5 5 14z" fill="var(--brand)" stroke="none"/>
+            <path d="M95.5 93.5 116 74" stroke="var(--card)" stroke-width="1.6"/>
+          </svg>
+        </span>
+        <b class="t">Airplane mode on</b>
+        <span class="d">The traveler's phone has no signal. None.</span>
+      </div>
+
+      <div class="beat rv" style="--d:.08s">
+        <span class="n">beat 2 · the tap</span>
+        <span class="frame" aria-hidden="true">
+          <svg viewBox="0 0 200 120" fill="none" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="28" y="16" width="40" height="90" rx="10" stroke="currentColor" stroke-width="2.4" transform="rotate(-9 48 61)"/>
+            <path d="M40 22.5h13" stroke="currentColor" stroke-width="2.2" transform="rotate(-9 48 61)"/>
+            <rect x="132" y="16" width="40" height="90" rx="10" stroke="currentColor" stroke-width="2.4" transform="rotate(9 152 61)"/>
+            <path d="M147 22.5h13" stroke="currentColor" stroke-width="2.2" transform="rotate(9 152 61)"/>
+            <g stroke="var(--brand)" stroke-width="2.4">
+              <path d="M90 48a17 17 0 0 1 0 26"/>
+              <path d="M100 41a27 27 0 0 1 0 40"/>
+            </g>
+            <circle cx="84" cy="61" r="3.6" fill="var(--brand)" stroke="none"/>
+          </svg>
+        </span>
+        <b class="t">Tap</b>
+        <span class="d">The traveler taps the shop's phone.</span>
+      </div>
+
+      <div class="beat rv" style="--d:.16s">
+        <span class="n">beat 3 · the split</span>
+        <span class="frame">
+          <span class="pv-split">
+            <span class="pv-row off">Traveler: offline</span>
+            <span class="pv-row on">Merchant: online</span>
+          </span>
+        </span>
+        <b class="t">Only the shop is online</b>
+        <span class="d">The traveler approves offline. The merchant's terminal sends.</span>
+      </div>
+
+      <div class="beat rv" style="--d:.24s">
+        <span class="n">beat 4 · the receipt</span>
+        <span class="frame">
+          <span class="pv-stamp">Settled in seconds</span>
+        </span>
+        <b class="t">Both phones agree</b>
+        <span class="d">The shop sees it arrive. The traveler sees Paid.</span>
+      </div>
+    </div>
+
+    <p class="proof-note rv">The real thing on a real phone: <b>the traveler's phone stays offline the whole time.</b> The shop's terminal needs its connection. That's the honest deal.</p>
+  </section>
+
   <!-- ————— how it works ————— -->
   <section id="how" class="wrap">
     <span class="kicker rv">How it works</span>
-    <h2 class="rv">Two ways to pay<i class="dot">.</i></h2>
-    <p class="sec-sub rv">Easy. Done in seconds.</p>
+    <h2 class="rv">Three steps, start to settled<i class="dot">.</i></h2>
+    <p class="sec-sub rv">The shop asks for <b>one exact asset</b>. You review it and approve on your phone. The shop's connection sends it. The same three steps online or off.</p>
+
+    <div class="rail" style="margin-top:52px">
+      <div class="rail-track"><i></i></div>
+
+      <div class="step rv">
+        <span class="ph"><span class="idx">1</span>
+          <img src="/shots/request.png" width="780" height="1180" alt="The shop's request: an exact amount and asset, shown as a QR code." />
+        </span>
+        <span class="body"><b class="t">The shop asks</b><span class="d">An exact amount, an exact asset. By tap or by code.</span></span>
+      </div>
+      <span class="arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+
+      <div class="step rv" style="--d:.08s">
+        <span class="ph"><span class="idx">2</span>
+          <img src="/shots/approve.png" width="780" height="1180" alt="Different Pay: review the amount, the asset, the shop, and approve." />
+        </span>
+        <span class="body"><b class="t">You review and approve</b><span class="d">The amount, the asset, the shop. Nothing moves until you approve.</span>
+          <span class="off"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.8a16 16 0 0 1 20 0"/><path d="M5.5 12.4a11 11 0 0 1 13 0"/><path d="M9 16a6 6 0 0 1 6 0"/><circle cx="12" cy="19.5" r="1"/><path d="M3 3 21 21"/></svg>no internet needed</span>
+        </span>
+      </div>
+      <span class="arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+
+      <div class="step done rv" style="--d:.16s">
+        <span class="ph"><span class="idx">3</span>
+          <img src="/shots/paid.png" width="780" height="1180" alt="Different Pay: Paid, $5.00 to Café Demo, settled by the shop's connection." />
+        </span>
+        <span class="body"><b class="t">The shop settles</b><span class="d">The shop's connection settles it. Both phones show it done.</span></span>
+      </div>
+    </div>
+
+    <h3 class="pw-group rv">Two ways to start it</h3>
 
     <div class="payways">
 
@@ -1000,7 +1170,7 @@
         <div class="ico">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.2c0-1.2 1.1-1.8 2.5-1.8s2.5.7 2.5 1.9c0 2.4-5 1.6-5 3.9 0 1.2 1.1 1.9 2.5 1.9s2.5-.6 2.5-1.8"/></svg>
         </div>
-        <p><b>Money you already know.</b> Your balance shows as $, ₿, Ξ and ◎. What you see is what you pay.</p>
+        <p><b>Money you already know.</b> $, ₿, Ξ and ◎ ride as parallel rails in one wallet. The shop asks for one exact asset, you approve that asset, and nothing gets swapped behind your back.</p>
       </div>
     </div>
   </section>
@@ -1013,7 +1183,7 @@
         <div class="mline rv"><span class="n">01</span><span>Managing money should be <em>easy.</em> Even fun.</span></div>
         <div class="mline rv" style="--d:.06s"><span class="n">02</span><span>Payments should be <em>quick and free.</em> Home or abroad. Online or offline.</span></div>
         <div class="mline rv" style="--d:.12s"><span class="n">03</span><span>Your money, controlled by <em>you alone.</em> Only you hold the signing keys.</span></div>
-        <div class="mline final rv" style="--d:.18s"><span class="n">04</span><span>Convenience and safety for <em>everyone.</em> Anywhere.</span></div>
+        <div class="mline final rv" style="--d:.18s"><span class="n">04</span><span>Roaming <em>off.</em> Payment <em>on.</em></span></div>
       </div>
       <div class="cta-row">
         <a class="primary" href="#get">Get the app</a>
@@ -1071,7 +1241,7 @@
     <div class="foot-right">
       <p>Fast payments. Online or offline. Non-custodial. Your key stays on your phone. <a href="/wallet">Use it on the web</a> too. <a href="/privacy">Privacy policy</a>.</p>
       <div class="foot-micro">
-        <span>Free to pay</span><span>Works offline</span><span>Your key, your phone</span>
+        <span>Roaming off. Payment on.</span><span>Free to pay</span><span>Works offline</span><span>Your key, your phone</span>
       </div>
     </div>
   </div>
