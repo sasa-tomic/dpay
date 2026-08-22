@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **87 flows**
-> (86 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **89 flows**
+> (88 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (12) · pay (18) · offline (7) · deposit (8) · withdraw (7) · nfc (7) · system (21) · tour (6)
+wire (1) · onboard (12) · pay (18) · offline (8) · deposit (8) · withdraw (7) · nfc (8) · system (21) · tour (6)
 
 ---
 
@@ -84,6 +84,7 @@ wire (1) · onboard (12) · pay (18) · offline (7) · deposit (8) · withdraw (
 | 53 | sol-merchant-error | SOL v2 merchant broadcast error surfaces a friendly message (not raw RPC, not false Received). | sol-merchant, sol-error, sol-v2-rejected, friendly-error |
 | 67 | sol-setup-error | SOL v2: SolPayMode mounts in scan with no setup; valid req signs offline; expired req is rejected with a friendly error. | sol-no-setup, sol-expired-request, sol-v2-freshness |
 | 74 | sol-usdc-payment | USDC@Sol v2 full cycle: createSolPaymentRequest (USDC) → signSplPayment (TransferChecked) → broadcast → Received. | sol-usdc-payment, sol-spl-sign, sol-merchant, sol-broadcast, sol-v2-strict-verify |
+| 92 | offline-peak | first OFFLINE confirmed payment plays the one-shot campaign peak (offline-peak + campaign line → settles to first-offline-stamp remnant); second offline payment and online paid show NO peak; pending hand-off never shows peak or stamp | offline-pay, hand-off, reconcile, delight-peak, journey-stamps |
 
 ### Deposits & onramp (ckBTC + ckUSDC + ckERC20)
 
@@ -121,6 +122,7 @@ wire (1) · onboard (12) · pay (18) · offline (7) · deposit (8) · withdraw (
 | 66 | sol-nfc-error | SOL v2 NFC tap failure modes: expired solreq → Declined + expired; transport error → Tap failed; late error after settling ignored; merchant reader sees the decline. | sol-nfc-decline, sol-nfc-error, sol-nfc-receipt-unreachable, sol-nfc-phases, sol-nfc-reader-decline, no-fake-paid, terminal-escape |
 | 86 | nfc-unknown-reconcile | Offline payer supplies update + signed read_state; receiver alone settles, exact-history binds success, and queues the returned result. | nfc, settle, history, reconcile |
 | 87 | nfc-payer-settle | Offline card prepares update+read_state, never submits, and only a nonce/rid-bound merchant result resolves Paid. | nfc, payer, offline, returned-result, exact-once |
+| 93 | tap-motion | every NFC phase renders its pinned textContent + its own motion beat (breath/segments/key/stamp/ellipsis/shake); pending carries no stamp mark and no campaign line (honesty) | nfc-phases, event-bus, delight-motion, honesty-guard |
 
 ### Settings & system
 

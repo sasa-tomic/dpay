@@ -83,6 +83,38 @@ function buildStyles(p: Palette) {
   nfcGlyph: {fontSize: 54, fontWeight: '700', lineHeight: 62},
   nfcTitle: {fontSize: 24, fontWeight: '700', color: p.ink, textAlign: 'center', fontFamily: FONT.sansBold, letterSpacing: -0.4},
   nfcSub: {fontSize: 15, color: p.sub, marginTop: 10, textAlign: 'center', paddingHorizontal: 20, fontFamily: FONT.sans},
+  // ── Trip Ready J5 motion system (additive) ──────────────────────────────────────────────
+  // The breathing ring around the listening badge (renders BEHIND S.nfcBadge; only scale +
+  // opacity animate — both non-layout props, so parent layout never re-flows mid-breath).
+  nfcBreath: {position: 'absolute', width: 108, height: 108, borderRadius: 54, borderWidth: 1.5, borderColor: p.brand},
+  // The itinerary-line strip: two phone marks + the segments that light as the protocol
+  // advances (linking → exchanging → awaitingApproval → settling). Sits between the badge and
+  // the title; static SVG geometry, only opacities animate.
+  nfcLineRow: {flexDirection: 'row', alignItems: 'center', marginTop: 20, marginBottom: 4, height: 34},
+  nfcLineTrack: {flex: 1, height: 2, borderRadius: 1, backgroundColor: p.line},
+  // The success stamp mark — a tangerine passport-stamp ring pressed behind the badge. The
+  // stampChip grammar (border brand, tilt −3°) scaled up to the badge's footprint.
+  nfcStamp: {position: 'absolute', width: 148, height: 148, borderRadius: 74, borderWidth: 2.5, borderColor: p.brand, alignItems: 'center', justifyContent: 'center'},
+  // The pending stillness: an unhurried ellipsis pulse (the OPPOSITE of the success stamp —
+  // warn tone, no rotation, no scale press, deliberately slow).
+  nfcEllipsis: {flexDirection: 'row', gap: 7, marginTop: 20, alignItems: 'center'},
+  nfcEllipsisDot: {width: 6, height: 6, borderRadius: 3, backgroundColor: p.warn},
+  // The paid-card stamp chip — the same stampChip language, compact + calm, additive to the
+  // existing Paid view (never replaces the check/paidText marks).
+  paidStamp: {marginTop: 18, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 999, borderWidth: 1.5, borderColor: p.brand, backgroundColor: 'transparent'},
+  paidStampText: {color: p.brand, fontFamily: FONT.mono, fontSize: 12, fontWeight: '600', letterSpacing: 2.4, textTransform: 'uppercase'},
+  // ── The one-shot offline peak (J5) ───────────────────────────────────────────────────────
+  // Full-width moment ABOVE the paid card: the campaign line as a strong editorial line, the
+  // stamp press, and the "no signal the whole time" microcopy. Settles INTO the card (~2s).
+  peakWrap: {alignSelf: 'stretch', alignItems: 'center', marginBottom: 18},
+  peakCampaign: {fontSize: 24, fontWeight: '700', color: p.ink, textAlign: 'center', fontFamily: FONT.sansBold, letterSpacing: -0.3, marginBottom: 12},
+  peakStamp: {width: 118, height: 118, borderRadius: 59, borderWidth: 2.5, borderColor: p.brand, alignItems: 'center', justifyContent: 'center'},
+  peakStampText: {color: p.brand, fontFamily: FONT.mono, fontSize: 13, fontWeight: '600', letterSpacing: 2.2, textTransform: 'uppercase'},
+  peakMicro: {fontSize: 14, color: p.sub, marginTop: 12, textAlign: 'center', fontFamily: FONT.sans},
+  // The settled remnant: the quiet mono line that stays on the paid card after the peak
+  // settles — the durable "this was the first offline one" mark (e2e testID `first-offline-stamp`).
+  peakSettled: {marginTop: 16, flexDirection: 'row', alignItems: 'center', gap: 6},
+  peakSettledText: {fontSize: 11, fontWeight: '600', color: p.sub2, letterSpacing: 2.0, textTransform: 'uppercase', fontFamily: FONT.mono},
   balBox: {alignItems: 'flex-end'},
   // The header balance pressable's outer row: the label+value column, then the A hotkey badge
   // at the far right edge (DOM order label → value → badge, mirroring the tab-bar badge pattern).

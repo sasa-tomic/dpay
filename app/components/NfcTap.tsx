@@ -23,7 +23,7 @@ const RESULT_UNKNOWN = 2;
  * envelope and serves that DPN2 bundle. The online merchant submits/polls it, signs one nonce-bound
  * result, and returns the result over the still-open NFC channel. The payer never needs a network.
  */
-export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, onSettled, onOfflinePaid, onActive, onClose}: {
+export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, onSettled, onOfflinePaid, onActive, onClose, offlinePeak, onConfirmed}: {
   role: 'card' | 'reader';
   identity: Identity;
   relayUrl?: string;
@@ -34,6 +34,10 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
   onOfflinePaid?: (amount: string, currency: number) => void;
   onActive?: () => void;
   onClose: () => void;
+  /** Trip Ready J5 — mount the one-shot offline peak on this tap's success phase (payer card, merchant-settled-while-offline story). */
+  offlinePeak?: boolean;
+  /** Trip Ready J5 — card side reached a CONFIRMED settled outcome (the merchant settled; the payer never submitted). */
+  onConfirmed?: () => void;
 }) {
   const [disclosure, setDisclosure] = useState<NfcDisclosure | null>(null);
   const preparedRef = useRef<(RailPrepared & {readStateEnvelopeHex: string}) | null>(null);
@@ -160,6 +164,7 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
     if (!prepared || event.nonceHex !== prepared.memoHex || event.requestIdHex !== prepared.requestIdHex) return;
     if (event.status === RESULT_SETTLED) {
       record();
+      onConfirmed?.();
       ctx.finalize('success');
     } else if (event.status === RESULT_REJECTED) {
       if (deductedRef.current) onOfflinePaid?.(`-${prepared.amount}`, prepared.currency);
@@ -167,7 +172,7 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
     } else {
       ctx.finalize('pending', 'Couldn’t confirm — check your balance when back online');
     }
-  }, [onOfflinePaid, record]);
+  }, [onConfirmed, onOfflinePaid, record]);
 
   const {phase, reason, activeRef} = useNfcTapState<NfcEvent>({
     role,
@@ -209,6 +214,7 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
     <NfcTapView
       phase={phase} reason={reason} role={role} testID="nfc-status"
       formattedAmt={formattedAmt} networkLabel={networkLabel} onClose={onClose}
+      offlinePeak={offlinePeak}
     />
   );
 }

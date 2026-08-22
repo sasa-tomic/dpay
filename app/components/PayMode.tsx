@@ -1,4 +1,4 @@
-import {useEffect, useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import {View, Text, Pressable, Modal, Platform} from 'react-native';
 import {QrCode} from './QrCode';
 import {S} from '../styles';
@@ -20,7 +20,11 @@ import {WithdrawSheet} from './WithdrawSheet';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useReportLock} from '../hooks/useReportLock';
 import {useShareFeedback, shareConfirmLabel} from '../hooks/useShareFeedback';
+import {useJourney, JOURNEY_STAMPS} from '../lib/journey';
+import {shouldShowOfflinePeak} from '../lib/peak';
 import {CoachTip} from './CoachTip';
+import {OfflinePeak} from './OfflinePeak';
+import {PaidStamp} from './tapMotion';
 import {IconCheck, IconClock, IconInfo, IconShare} from './icons';
 
 // Plain-language per-reason text for the NFC-unavailable info popup. Each ends with the honest
@@ -70,6 +74,19 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   // state serves both). Mirrors the DepositSheet copy pattern.
   const {shared, share} = useShareFeedback();
 
+  // Trip Ready J5 — the one-shot offline peak. `peakShown` latches for THIS mount so the
+  // OfflinePeak moment renders once and its settled remnant survives every later re-render of
+  // the paid card (balance polls re-render; the remnant must persist). The journey stamp is
+  // the cross-mount one-shot; award happens at the CONFIRMED moment only (never at handoff).
+  // `handedOffline` captures at handoff time whether the gateway was truly unreachable (an
+  // online submit with unknown outcome falls to the same QR screen but is NOT the offline
+  // story); journeyRef lets the settle path read the FRESH journey without re-arming the poll.
+  const {award, journey} = useJourney();
+  const [peakShown, setPeakShown] = useState(false);
+  const [handedOffline, setHandedOffline] = useState(false);
+  const journeyRef = useRef(journey);
+  journeyRef.current = journey;
+
   // Phase 5 — lock the idle asset selection while a payment is in flight. review/qr/paid each hold a
   // captured, immutable request snapshot the user must not lose to an asset switch (which would
   // unmount this component). 'scan' (incl. the 'send' sub-mode) leaves the selection free.
@@ -117,11 +134,21 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
      let alive = true;
      const check = async () => {
        try {
-         const out = await pollTransfer(prepared, identity.secretHex, {attempts: 1, intervalMs: 0});
-         if (!alive) return;
-         if (out.kind === 'settled') {
-           onSettled(); setPaid({amount: qr.amount, currency: qr.currency, who: qr.who, already: false}); setPhase('paid');
-         }
+          const out = await pollTransfer(prepared, identity.secretHex, {attempts: 1, intervalMs: 0});
+          if (!alive) return;
+          if (out.kind === 'settled') {
+            onSettled(); setPaid({amount: qr.amount, currency: qr.currency, who: qr.who, already: false}); setPhase('paid');
+            // Trip Ready J5 — CONFIRMED via reconcile after a TRULY offline handoff (the payer
+            // approved with no reachable gateway; the merchant's connection settled it): the
+            // truthful offlineQr peak path. Award exactly once (idempotent — the stamp IS the
+            // one-shot gate, read FRESH via journeyRef); never at handoff time — only at proof.
+            // An online submit that fell through with unknown outcome never peaks (handedOffline
+            // is false) — the honest distinction between "no signal" and "couldn't hear back".
+            if (handedOffline && shouldShowOfflinePeak(journeyRef.current, 'offlineQr')) {
+              setPeakShown(true);
+              award(JOURNEY_STAMPS.firstOfflinePayment);
+            }
+          }
          if (out.kind === 'rejected') {
            // Terminal refusal (e.g. the ledger rejected the merchant's submission): surface the
            // reason on the QR screen and stop polling — spinning silently would leave the payer
@@ -151,6 +178,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     if (submittedEnv && submittedEnv.nonce === req.nonceHex) {
       setPrepared(submittedEnv.prepared);
       setQr({code: envelopeToQrPayload(submittedEnv.prepared.envelopeHex), amount: req.amount, currency: req.currency, who: submittedEnv.who});
+      setHandedOffline(online === false);
       setPhase('qr');
       return;
     }
@@ -185,11 +213,12 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
       // re-display these exact bytes — a fresh signature = fresh request_id = a second payment.
       setSubmittedEnv({prepared: p, nonce: req.nonceHex, who});
       setQr({code: envelopeToQrPayload(p.envelopeHex), amount: req.amount, currency: req.currency, who});
+      setHandedOffline(online === false);
       setPhase('qr');
     } catch (e: unknown) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   }
 
-  function reset() { setReq(null); setPrepared(null); setQr(null); setPaid(null); setErr(null); setPhase('scan'); }
+  function reset() { setReq(null); setPrepared(null); setQr(null); setPaid(null); setErr(null); setPeakShown(false); setHandedOffline(false); setPhase('scan'); }
 
   if (phase === 'paid' && paid) {
     const warn = paid.already || paid.pending;
@@ -204,9 +233,18 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
       : `to ${paid.who}`;
     return (
       <View style={S.center}>
+        {/* Trip Ready J5 — the one-shot offline peak (first OFFLINE confirmed payment only).
+            Above the paid card; auto-settles into the quiet remnant; never blocks Done. The
+            one-shot gate is the journey stamp (shouldShowOfflinePeak), latched per-mount by
+            peakShown so the remnant survives balance-poll re-renders. */}
+        {peakShown && !warn ? <OfflinePeak /> : null}
         <View style={[S.check, warn && S.checkAlready]}>{mark}</View>
         <Text style={[S.paidText, warn && S.alreadyText]}>{headline}</Text>
         <Text style={S.paidSub}>{sub}</Text>
+        {/* Trip Ready J5 — the compact calm stamp: ONLY on the CONFIRMED fresh settle (never on
+            pending/already — the honest-money rule keeps the stamp mark off unresolved states).
+            One quiet fade-in, consistent with the tap success stamp; additive to the check. */}
+        {!warn ? <PaidStamp /> : null}
         {/* Trip Ready J4 — the honest-pending first-use tip: ONLY on the unresolved outcome view
             (paid.pending — the offline hand-off state), never on a confirmed settle. Mounted in
             the reading zone (right under the headline it explains); pending is quiet and
@@ -440,6 +478,8 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
           onSettled={onSettled} onOfflinePaid={onOfflinePaid}
           onActive={() => setNfcActive(true)}
           onClose={() => { setNfcActive(false); setNfcKey(k => k + 1); }}
+          offlinePeak={!online && shouldShowOfflinePeak(journey, 'nfcMerchantSettled')}
+          onConfirmed={() => { if (!online) award(JOURNEY_STAMPS.firstOfflinePayment); }}
         />
       ) : null}
       {!nfcActive ? (
