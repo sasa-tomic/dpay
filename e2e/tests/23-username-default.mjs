@@ -12,7 +12,7 @@
 // require a username fails THIS test loudly, forcing a conscious update rather than silent drift.
 //
 // Selector contract: `username-input` (M6), `btn-create`, `balance`.
-import { setup, assert, assertEq, accountOf, waitForEnabled } from '../harness/lib.mjs';
+import { setup, assert, assertEq, accountOf, waitForEnabled, skipWalkthroughIfPresent } from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -34,6 +34,8 @@ export async function run() {
     const { driver } = env;
 
     // The onboarding screen renders (no identity yet). DO NOT type a username.
+    console.log('[23-username-default] skipping first-run walkthrough if present…');
+    await skipWalkthroughIfPresent(driver);
     console.log('[23-username-default] waiting for the onboarding screen (no username typed)…');
     // M6 — the username input carries a testID (the pre-split audit reported it missing). Prove it.
     await driver.findByTestID('username-input', { timeoutMs: 8_000 });

@@ -15,7 +15,7 @@
 // reads ∂100.00 — NOT ∂0.00. Asserting ∂0.00 would require disabling the faucet, which would break
 // the "use the REAL relay + REAL FakeLedger" rule. We assert ∂100.00 (proves faucet→balance
 // end-to-end) and note this deviation. Empty history is asserted verbatim (no payments settled yet).
-import { setup, assert, assertIncludes, waitForEnabled } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, waitForEnabled, skipWalkthroughIfPresent } from '../harness/lib.mjs';
 
 const ONBOARD_USERNAME = 'e2e-alice';
 const ONBOARD_PLACEHOLDER = 'e.g. Alice';
@@ -39,8 +39,13 @@ export async function run() {
   try {
     const { driver } = env;
 
-    // 1. The onboarding screen rendered. The username input has no testID — find it by placeholder.
-    //    (If this fails, the app shims aren't loading or Onboarding didn't mount.)
+    // 1. The onboarding screen rendered. Trip Ready J1: a fresh boot shows the walkthrough first —
+    //    skip it (awards walkthroughDone) so the create form is reachable.
+    console.log('[01-onboard] skipping first-run walkthrough if present…');
+    await skipWalkthroughIfPresent(driver);
+
+    // 1a. The username input has no testID — find it by placeholder.
+    //     (If this fails, the app shims aren't loading or Onboarding didn't mount.)
     console.log('[01-onboard] onboarding screen — waiting for username input…');
     await driver.typeByPlaceholder(ONBOARD_PLACEHOLDER, ONBOARD_USERNAME, { timeoutMs: 8_000 });
 

@@ -19,7 +19,7 @@
 //
 // Selector contract: `balance` (header balance Pressable), `header-who` (username), the offline
 // label "~ DEMO approx." (Wallet.tsx renders it when `online === false`; asset-name-prefixed after D3).
-import { setup, assert, pickFreePort, getBalance, accountOf, waitForEnabled } from '../harness/lib.mjs';
+import { setup, assert, pickFreePort, getBalance, accountOf, waitForEnabled, skipWalkthroughIfPresent } from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -57,6 +57,8 @@ export async function run() {
     const failures = driver.recordRequestFailures();
 
     // Onboard: type a username + tap Create. create() fires the best-effort faucet (which must fail).
+    console.log('[37-onboard-no-faucet] skipping first-run walkthrough if present…');
+    await skipWalkthroughIfPresent(driver);
     console.log('[37-onboard-no-faucet] onboarding (faucet will fail)…');
     await driver.typeByPlaceholder('e.g. Alice', 'e2e-nofaucet', { timeoutMs: 8_000 });
     await driver.click('btn-create', { timeoutMs: 4_000 });

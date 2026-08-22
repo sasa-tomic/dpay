@@ -16,7 +16,7 @@
 // The fixed seed is 0x22 × 32 (flow 58's SEED) so the hex-equality assertion is meaningful; its
 // mnemonic (precomputed from the same codec app/lib/bip39.ts implements) is
 // "captain baby mass dust" ×5 + "captain baby mass fault".
-import { setup, assert, assertEq, accountOf } from '../harness/lib.mjs';
+import { setup, assert, assertEq, accountOf, skipWalkthroughIfPresent } from '../harness/lib.mjs';
 
 const SEED = '22'.repeat(32);
 const WORDS = `${'captain baby mass dust '.repeat(5).trim()} captain baby mass fault`.replace(/\s+/g, ' ').trim();
@@ -40,7 +40,9 @@ export async function run() {
   try {
     const { driver, webBaseURL, relayBaseURL } = env;
 
-    // 0. The onboarding screen rendered (create mode).
+    // 0. The onboarding screen rendered (create mode). Trip Ready J1: skip the first-run
+    //    walkthrough so the create form is reachable.
+    await skipWalkthroughIfPresent(driver);
     await driver.findByTestID('username-input', { timeoutMs: 8_000 });
 
     // 1. INVALID seed → error copy, still on the form.
@@ -82,6 +84,9 @@ export async function run() {
     //    app falls back to the default relay URL and the faucet POST dies ERR_CONNECTION_REFUSED).
     await driver.clearStorage();
     await driver.navigate(webBaseURL, `/?relay=${encodeURIComponent(relayBaseURL)}`, { waitUntil: 'domcontentloaded', timeoutMs: 8_000 });
+    // clearStorage() also wiped the journey store → the first-run walkthrough gates this fresh
+    // boot; skip past it (educational, not a barrier) to reach the create form.
+    await skipWalkthroughIfPresent(driver);
     await driver.findByTestID('username-input', { timeoutMs: 8_000 });
     await driver.click('btn-own-seed-toggle', { timeoutMs: 5_000 });
     await driver.type('own-seed-input', SEED.toUpperCase(), { timeoutMs: 5_000 }); // uppercase → normalized

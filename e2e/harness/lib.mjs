@@ -280,6 +280,29 @@ export function assertIncludes(actual, substring, label) {
 // --- onboarding + identity helpers (shared across every browser flow) --------------------------
 
 /**
+ * Dismiss the first-run walkthrough if it is showing (Trip Ready J1). A no-op when absent —
+ * `isPresent` never throws — so flows can call it defensively before any onboarding interaction.
+ * onboardWallet calls this at its start; flows that tap btn-create/username-input manually
+ * (01, 23, 37, 58, 68, 82, stage-landing-shots) call it explicitly.
+ */
+export async function skipWalkthroughIfPresent(driver, opts = {}) {
+  const timeoutMs = opts.timeoutMs ?? 4_000;
+  // The app resolves the first-run gate asynchronously (identity + journey are read from storage
+  // before Onboarding decides walkthrough-vs-form), so a single instantaneous isPresent can race
+  // the boot and miss the Skip button. Poll until the Skip button OR the create form's username
+  // field is in the DOM — one of the two appears on every onboarding path — then skip if seen.
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await driver.isPresent('btn-walkthrough-skip')) {
+      await driver.click('btn-walkthrough-skip', {timeoutMs});
+      return;
+    }
+    if (await driver.isPresent('username-input')) return;
+    await new Promise(r => setTimeout(r, 100));
+  }
+}
+
+/**
  * Onboard a fresh wallet: type the username, click create, dismiss the BIP-39 mnemonic backup screen,
  * wait for the funded balance. This is the shared preamble every browser test used to copy-paste
  * (4 lines × 15 files). Returns the driver for chaining.
@@ -293,6 +316,9 @@ export function assertIncludes(actual, substring, label) {
  */
 export async function onboardWallet(driver, name = 'e2e', opts = {}) {
   const timeoutMs = opts.timeoutMs ?? 15_000;
+  // Trip Ready J1 — a fresh context boots into the walkthrough before the create form. Skip it
+  // (no-op if already dismissed — e.g. a flow that skipped it manually first).
+  await skipWalkthroughIfPresent(driver);
   await driver.typeByPlaceholder('e.g. Alice', name, { timeoutMs: 8_000 });
   await driver.click('btn-create', { timeoutMs: 4_000 });
   await driver.findByTestID('mnemonic-backup', { timeoutMs: 8_000 });

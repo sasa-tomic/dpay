@@ -13,7 +13,7 @@
 // Selector contract: `btn-create`, `mnemonic-backup`, `mnemonic-word-{0..23}`,
 // `mnemonic-backup-checkbox`, `btn-mnemonic-continue`, `btn-settings`, `btn-reset`,
 // `btn-reset-confirm`, `btn-restore`, `restore-mnemonic-input`, `btn-restore-confirm`, `balance`.
-import { setup, assert, assertEq, accountOf, waitForEnabled } from '../harness/lib.mjs';
+import { setup, assert, assertEq, accountOf, waitForEnabled, skipWalkthroughIfPresent } from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -34,7 +34,9 @@ export async function run() {
   try {
     const { driver } = env;
 
-    // 1. Fresh onboarding: type username + tap Create.
+    // 1. Fresh onboarding: skip the first-run walkthrough (Trip Ready J1), type username + tap Create.
+    console.log('[68-mnemonic-backup-restore] skipping first-run walkthrough if present…');
+    await skipWalkthroughIfPresent(driver);
     console.log('[68-mnemonic-backup-restore] onboarding (create)…');
     await driver.typeByPlaceholder('e.g. Alice', 'MnemonicTester', { timeoutMs: 8_000 });
     await driver.click('btn-create', { timeoutMs: 4_000 });

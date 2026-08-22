@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **83 flows**
-> (82 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **85 flows**
+> (84 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (8) · pay (18) · offline (7) · deposit (8) · withdraw (7) · nfc (7) · system (21) · tour (6)
+wire (1) · onboard (10) · pay (18) · offline (7) · deposit (8) · withdraw (7) · nfc (7) · system (21) · tour (6)
 
 ---
 
@@ -45,6 +45,8 @@ wire (1) · onboard (8) · pay (18) · offline (7) · deposit (8) · withdraw (7
 | 58 | restore-wallet | A wallet can be restored from the 64-hex recovery seed (toggle to hex mode; no faucet; secretHex matches). | restore-seed, keypair-from-secret, both-rails-recovery, btn-restore-mode-toggle |
 | 68 | mnemonic-backup-restore | The 24 mnemonic words shown at create time recover the exact same wallet keypair (publicHex match) when entered on restore. | mnemonic-backup, mnemonic-word-{0..23}, mnemonic-backup-checkbox, btn-mnemonic-continue, restore-mnemonic-input, bip39-round-trip, restore-via-mnemonic |
 | 82 | own-seed-create | Create a wallet from a pasted seed (words OR hex) instead of a random one; invalid seed is rejected on the form. | own-seed, btn-own-seed-toggle, own-seed-input, create-from-seed, faucet, mnemonic-backup |
+| 88 | walkthrough | a fresh boot shows the walkthrough instead of the create form,scenes advance via Next; only the active scene is mounted,each scene body carries its comprehension-critical truth,the final Next reads "Get started" and reveals the create form unchanged,creating from there lands in the funded Wallet,walkthroughDone is persisted in the journey store | walkthrough, education, first-run-gate, journey-stamps |
+| 89 | walkthrough-skip-replay | Skip dismisses the walkthrough instantly and reveals the create form,Skip also persists walkthroughDone,a pre-seeded walkthroughDone stamp suppresses the walkthrough on the next boot,Settings → How dpay works replays the walkthrough with a close affordance and no Skip,the replay leaves the journey store unchanged | walkthrough, education, settings-replay, journey-stamps, skip-path |
 
 ### Payments (the core offline-pay flow)
 

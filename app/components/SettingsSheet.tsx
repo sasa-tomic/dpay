@@ -1,17 +1,19 @@
 import {useEffect, useMemo, useState} from 'react';
-import {Linking, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, Text, TextInput, View} from 'react-native';
+import {Linking, Modal, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, Text, TextInput, View} from 'react-native';
 import {C} from '../config/palette';
 import {PRIVACY_URL} from '../config/constants';
+import {JourneyHowItWorksTitle} from '../config/education';
 import {S, isDark} from '../styles';
 import {validateSeed} from '../lib/format';
 import {hexToWords, stringToWords, wordsToHex, wordsToString, validateMnemonic} from '../lib/bip39';
 import type {Identity} from '../lib/types';
 import {DpayCore} from '../services/native';
-import {useEscapeToClose} from '../hooks/useHotkeys';
+import {useHotkeys} from '../hooks/useHotkeys';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {SheetOverlay} from './SheetOverlay';
 import {SeedWords} from './SeedWords';
-import {IconAuto, IconChevronDown, IconClose, IconExternalLink, IconMoon, IconSun} from './icons';
+import {IconAuto, IconChevronDown, IconClose, IconExternalLink, IconInfo, IconMoon, IconSun} from './icons';
+import {Walkthrough} from './Walkthrough';
 import {choiceLabel, type ThemeOverride} from '../config/theme';
 
 /**
@@ -57,7 +59,10 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
   themeChoice: ThemeOverride | null;
   onSetTheme: (t: ThemeOverride | null) => void;
 }) {
-  useEscapeToClose(onClose);
+  // Esc closes the sheet — EXCEPT while the "How dpay works" replay Modal is open, when the
+  // Modal's own Walkthrough escape handler owns the key (otherwise one Esc would close both).
+  const [howItWorks, setHowItWorks] = useState(false);
+  useHotkeys({escape: onClose}, {enabled: !howItWorks});
   const [confirmReset, setConfirmReset] = useState(false);
   // Backup reveal is a TWO-step gate (mirrors the reset confirm idiom): `confirmBackup` opens the
   // warning + btn-backup-confirm; `backupRevealed` (set only after confirming) shows the seed. This
@@ -398,6 +403,27 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
             </View>
           </View>
 
+          {/* Trip Ready J1 — "How dpay works": the walkthrough replay. Educational ONLY — it
+              never awards or changes journey stamps (replay mode passes just onClose; no Skip,
+              a top-left close affordance instead). The MODEL story lives here; the About section
+              above keeps the custody statement — no duplication. */}
+          <View style={S.settingsSection}>
+            <Text style={S.inputLabel}>Learn</Text>
+            <Pressable
+              testID="btn-how-it-works"
+              style={S.linkBtn}
+              onPress={() => setHowItWorks(true)}
+              accessibilityRole="button"
+              accessibilityLabel={JourneyHowItWorksTitle}
+              accessibilityHint="Replays the three-scene walkthrough of how dpay pays"
+              accessibilityState={{disabled: false}}>
+              <View style={S.linkRow}>
+                <IconInfo size={16} color={C.sub} />
+                <Text style={S.linkText}>{JourneyHowItWorksTitle}</Text>
+              </View>
+            </Pressable>
+          </View>
+
           {/* Advanced: Server (the relay URL) — disclosure COLLAPSES by default so a curious
               consumer doesn't see the relay URL input + a one-paste-away brick on first open.
               The header is the toggle; testID `btn-advanced-toggle` is the expansion step the e2e
@@ -452,6 +478,21 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
           {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
         </ScrollView>
       </SafeAreaView>
+
+      {/* The replay — a full-screen Modal rendering the SAME Walkthrough the first-run gate
+          shows, in replay mode: onClose only (btn-walkthrough-close top-left, no Skip). "Get
+          started" on the final scene ALSO closes (onDone wired to the same exit). Like the
+          AssetPicker, the WHOLE Modal subtree is conditionally mounted/unmounted (never
+          visible=false + animate-out — RN-web keeps the hidden children in the DOM when the
+          animationend never fires, e.g. under the e2e harness's animation-freeze CSS). */}
+      {howItWorks ? (
+        <Modal visible animationType="slide" onRequestClose={() => setHowItWorks(false)}>
+          <Walkthrough
+            onClose={() => setHowItWorks(false)}
+            onDone={() => setHowItWorks(false)}
+          />
+        </Modal>
+      ) : null}
     </SheetOverlay>
   );
 }

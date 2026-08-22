@@ -1,4 +1,4 @@
-import {useState} from 'react';
+import {useEffect, useState} from 'react';
 import {KeyboardAvoidingView, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, Text, TextInput, View} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {C} from '../config/palette';
@@ -6,6 +6,7 @@ import {S, isDark} from '../styles';
 import {STORAGE_KEY, BALANCE_TIMEOUT_MS} from '../config/constants';
 import {base, validateSeed} from '../lib/format';
 import {hexToWords, stringToWords, wordsToHex, validateMnemonic, wordsToString} from '../lib/bip39';
+import {JOURNEY_STAMPS, hasStamp, loadJourney, awardStamp} from '../lib/journey';
 import type {Identity} from '../lib/types';
 import {DpayCore} from '../services/native';
 import {fetchWithTimeout} from '../services/relay';
@@ -13,8 +14,24 @@ import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {Logo, WordmarkLink} from './Logo';
 import {SeedWords} from './SeedWords';
 import {IconCheck} from './icons';
+import {Walkthrough} from './Walkthrough';
 
 export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: (id: Identity) => void}) {
+  // Trip Ready J1 — the first-run walkthrough gate. `walkthrough` is a tri-state:
+  //   'checking' → the journey store hasn't loaded yet (render nothing; a flash of the create
+  //                form before the walkthrough mounts would read as a glitch);
+  //   true       → the walkthrough shows INSTEAD of the header+form (same SafeAreaView shell);
+  //   false      → the create/restore screen, unchanged.
+  // Done (Get started) OR Skip awards `walkthroughDone` — persisted, so the walkthrough never
+  // shows again on relaunch (restore users see it too; it is educational, not a gate — they can
+  // skip instantly). The gate reads the store once on mount; the award path is idempotent.
+  const [walkthrough, setWalkthrough] = useState<'checking' | boolean>('checking');
+  useEffect(() => {
+    let alive = true;
+    loadJourney().then(j => { if (alive) setWalkthrough(!hasStamp(j, JOURNEY_STAMPS.walkthroughDone)); }).catch(() => { if (alive) setWalkthrough(false); });
+    return () => { alive = false; };
+  }, []);
+
   const [username, setUsername] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -131,12 +148,16 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
   return (
     <SafeAreaView style={S.root}>
       <StatusBar barStyle={isDark() ? 'light-content' : 'dark-content'} backgroundColor={C.bg} translucent={false} />
-      {/* B1 — keep the CTA visible while the keyboard is up. `behavior="padding"` on iOS lifts the
-          form above the keyboard (the username input + Create wallet CTA otherwise sit ~y1509-1656,
-          fully under the ~y1200+ keyboard). Android already gets adjustResize from AndroidManifest
-          (the system resizes the window), so `behavior` is undefined there and we only apply a small
-          `keyboardVerticalOffset` to absorb the status-bar height. The ScrollView lets the column
-          scroll if the keyboard still crowds it on a small device. */}
+      {/* Trip Ready J1 — the walkthrough renders in the SAME shell (SafeAreaView + StatusBar)
+          instead of the header+form. Exit paths (Get started or Skip) award `walkthroughDone`
+          and reveal the existing create/restore screen unchanged below. 'checking' renders
+          nothing but the shell so the create form never flashes before the gate resolves. */}
+      {walkthrough === 'checking' ? null : walkthrough ? (
+        <Walkthrough
+          onDone={() => { void awardStamp(JOURNEY_STAMPS.walkthroughDone).then(() => setWalkthrough(false)); }}
+          onSkip={() => { void awardStamp(JOURNEY_STAMPS.walkthroughDone).then(() => setWalkthrough(false)); }}
+        />
+      ) : (
       <KeyboardAvoidingView
         style={{flex: 1}}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -252,6 +273,7 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
           )}
         </ScrollView>
       </KeyboardAvoidingView>
+      )}
     </SafeAreaView>
   );
 }

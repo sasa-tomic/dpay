@@ -16,7 +16,7 @@
 // Selector contract: `btn-restore`, `btn-restore-mode-toggle`, `restore-seed-input`, `username-input`,
 // `btn-restore-confirm`, `balance`. The secretHex-equality gate is the proof: a fresh generateKeypair() would never yield
 // this exact seed.
-import { setup, assert, assertEq, accountOf } from '../harness/lib.mjs';
+import { setup, assert, assertEq, accountOf, skipWalkthroughIfPresent } from '../harness/lib.mjs';
 
 // Fixed 32-byte seed (64 hex chars, all 0x22). Deterministic so the secretHex-equality assertion
 // is meaningful. Same seed the FFI roundtrip proves derives a matching keypair.
@@ -41,7 +41,10 @@ export async function run() {
   try {
     const { driver } = env;
 
-    // 1. The onboarding screen rendered (create mode). The username input is shared with create.
+    // 1. The onboarding screen rendered (create mode). Trip Ready J1: skip the first-run
+    //    walkthrough (restore users see it too; it is educational, not a gate).
+    console.log('[58-restore-wallet] skipping first-run walkthrough if present…');
+    await skipWalkthroughIfPresent(driver);
     console.log('[58-restore-wallet] onboarding screen — waiting for username input…');
     await driver.findByTestID('username-input', { timeoutMs: 8_000 });
 

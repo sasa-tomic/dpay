@@ -396,6 +396,51 @@ function buildStyles(p: Palette) {
   // 'Needs setup' pill on the Balances USDC (Solana) row — a warn-tinted row annotation,
   // left-aligned under the subtitle (not a centered banner).
   assetBadge: {alignSelf: 'flex-start', marginTop: 6, paddingVertical: 3, paddingHorizontal: 10, borderRadius: 999, backgroundColor: `rgba(${p.warnRGB},0.08)`, borderWidth: 1, borderColor: `rgba(${p.warnRGB},0.35)`, fontSize: 11, fontWeight: '700', color: p.warn, letterSpacing: 1.1, textTransform: 'uppercase', fontFamily: FONT.mono, overflow: 'hidden'},
+  // ─── Walkthrough (Trip Ready J1, 2026-08-22) ────────────────────────────────────────────────
+  // The first-run 3-scene pager + its Settings replay. Editorial travel-document layout: a
+  // left-aligned eyebrow/title/body block over a "paper plate" illustration stage, then a footer
+  // with progress dots + the primary Next. Tangerine stays reserved for Next, the active dot, and
+  // the in-scene stamp accents (brand discipline is unchanged).
+  walkRoot: {flex: 1, backgroundColor: p.bg},
+  // Top bar: [close (replay only)] · campaign-corner spacer · [Skip (first-run only)]. Both
+  // affordances are 44pt targets.
+  walkTop: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 6, minHeight: 52},
+  walkSkipBtn: {minHeight: 44, paddingHorizontal: 14, justifyContent: 'center'},
+  walkSkipText: {color: p.sub, fontSize: 15, fontWeight: '600', fontFamily: FONT.sansMedium},
+  walkBackBtn: {minHeight: 44, paddingHorizontal: 12, justifyContent: 'center'},
+  walkBackText: {color: p.sub, fontSize: 15, fontWeight: '600', fontFamily: FONT.sansMedium},
+  // Text block — LEFT-aligned (the editorial reading; centered stacks read as generic onboarding,
+  // which the spec bans). Title is one size down from wordmarkBig so the wordmark stays loudest.
+  walkBody: {paddingHorizontal: 28, paddingTop: 6},
+  walkEyebrow: {fontSize: 11, fontWeight: '600', color: p.sub2, letterSpacing: 1.8, textTransform: 'uppercase', fontFamily: FONT.mono},
+  walkTitle: {fontSize: 29, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.7, lineHeight: 33, marginTop: 12},
+  walkText: {fontSize: 16, color: p.sub, lineHeight: 23, marginTop: 12, fontFamily: FONT.sans},
+  // The illustration stage — a "paper plate": raised panel + hairline, fixed aspect so every
+  // scene's illustration occupies the same stage (visual continuity across the pager).
+  walkStage: {alignSelf: 'stretch', backgroundColor: p.panel, borderRadius: 22, borderWidth: 1, borderColor: p.line2, overflow: 'hidden', marginTop: 26, aspectRatio: 1.32, ...LIFT_SM},
+  // Corner marker on the plate — the travel-document detail ("01 — SIGNAL"): mono, top-right.
+  walkStageTag: {position: 'absolute', top: 12, right: 16, fontSize: 10, fontWeight: '600', color: p.sub2, letterSpacing: 1.4, fontFamily: FONT.mono},
+  walkFooter: {paddingHorizontal: 24, paddingBottom: 14, paddingTop: 18},
+  // Dots row: relative so the Back link can sit absolutely at the left while the dots center.
+  walkNavRow: {position: 'relative', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 12, minHeight: 34},
+  walkDot: {height: 6, borderRadius: 3, backgroundColor: p.line},
+  walkDotOn: {backgroundColor: p.brand},
+  // The campaign send-off strip (final scene): fine rules flank the mono line.
+  walkCampaign: {flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16, marginTop: 2},
+  walkCampaignRule: {flex: 1, height: 1, backgroundColor: p.line},
+  walkCampaignText: {fontSize: 11, fontWeight: '600', color: p.sub, letterSpacing: 2.2, textTransform: 'uppercase', fontFamily: FONT.mono},
+  // Scene 3 illustration — the request card with ONE exact asset + ghost rows that stay put.
+  walkReqCard: {alignSelf: 'stretch', backgroundColor: p.card, borderRadius: 16, borderWidth: 1, borderColor: p.line2, padding: 14},
+  walkReqEyebrow: {fontSize: 10, fontWeight: '600', color: p.sub2, letterSpacing: 1.6, textTransform: 'uppercase', fontFamily: FONT.mono},
+  walkAssetRow: {flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 7, marginTop: 6},
+  walkAssetChip: {width: 34, height: 34, borderRadius: 11, borderWidth: 1, borderColor: p.glyphBorder, backgroundColor: p.panel2, alignItems: 'center', justifyContent: 'center'},
+  walkAssetChipText: {fontSize: 15, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold},
+  walkAssetName: {fontSize: 16, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold},
+  walkAssetSub: {fontSize: 11, color: p.sub2, marginTop: 2, fontFamily: FONT.sans},
+  walkAssetAmt: {fontSize: 16, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, marginLeft: 'auto'},
+  // The tangerine "reviewed" stamp badge (in-scene accent; real confirmed-success green stays
+  // reserved for actual settlement states).
+  walkStampBadge: {width: 26, height: 26, borderRadius: 13, backgroundColor: p.brand, alignItems: 'center', justifyContent: 'center', marginLeft: 10, shadowColor: p.brand2, shadowOpacity: 0.3, shadowRadius: 8, shadowOffset: {width: 0, height: 3}, elevation: 3},
   });
 }
 
