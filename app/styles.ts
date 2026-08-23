@@ -161,6 +161,15 @@ function buildStyles(p: Palette) {
   // `flexWrap` is the safety valve: if a long-locale label (or a future 4th tab) ever outgrows a
   // 390px row, the overflow pill drops to a second row instead of clipping off-screen right.
   tabs: {flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 12, gap: 6, marginTop: 4, marginBottom: 6},
+  // TripStrip (UX hardening 2026-08-23) — the home-surface readiness line: one slim pill row
+  // between the header and the tabs. 4 stamp-dots (filled = brand ring + deterministic tilt,
+  // echoing the passport's slots) + a mono progress phrase. Quiet by design (panel2, hairline)
+  // — it informs, never shouts; retires itself once readiness is complete + seen.
+  tripStrip: {flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 12, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, backgroundColor: p.panel2, borderWidth: 1, borderColor: p.line},
+  tripStripDots: {flexDirection: 'row', gap: 6, alignItems: 'center'},
+  tripStripDot: {width: 10, height: 10, borderRadius: 5, borderWidth: 1.5, borderColor: p.line2},
+  tripStripDotFilled: {borderColor: p.brand, backgroundColor: 'transparent'},
+  tripStripText: {fontFamily: FONT.mono, fontSize: 11, fontWeight: '600', letterSpacing: 1.2, textTransform: 'uppercase', color: p.sub, flexShrink: 1},
   tab: {flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 999, backgroundColor: p.card, minHeight: 44, borderWidth: 1, borderColor: p.line2},
   tabActive: {backgroundColor: p.brand, borderColor: p.brand, ...LIFT},
   tabText: {color: p.sub, fontWeight: '600', fontFamily: FONT.sansMedium},

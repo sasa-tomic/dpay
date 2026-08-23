@@ -21,15 +21,17 @@ export type ReadinessKey =
 
 /** One passport stamp: the two-line caps label rendered INSIDE the ring, + the active-voice
   * next-step hint shown while it is missing. `label` uses an explicit \n so every stamp reads
-  * as two inked lines like a real passport stamp (never a checklist ✓). */
-export type PassportStamp = {key: ReadinessKey; label: string; hint: string};
+  * as two inked lines like a real passport stamp (never a checklist ✓). `short` is the
+  * home TripStrip's one-line phrase ("one payment to go") — the humanized, jargon-free name
+  * (the M2 fix: "FLOW UNDERSTOOD" is system-speak; the strip speaks people-speak). */
+export type PassportStamp = {key: ReadinessKey; label: string; hint: string; short: string};
 
 /** The passport's stamps + copy. Order = display order AND "next step" order (first missing wins). */
 export const PASSPORT_STAMPS: readonly PassportStamp[] = [
-  {key: 'recoverySaved', label: 'RECOVERY\nSAVED', hint: 'Back up your wallet in Settings'},
-  {key: 'flowUnderstood', label: 'FLOW\nUNDERSTOOD', hint: 'Watch the 3-step rehearsal when creating a wallet'},
-  {key: 'fundsReady', label: 'FUNDS\nREADY', hint: 'Add any funds — demo funds count'},
-  {key: 'paymentTested', label: 'PAYMENT\nTESTED', hint: 'Complete a payment — pay or receive'},
+  {key: 'recoverySaved', label: 'RECOVERY\nSAVED', hint: 'Back up your wallet in Settings', short: 'back up to go'},
+  {key: 'flowUnderstood', label: 'FLOW\nUNDERSTOOD', hint: 'Watch the 3-step rehearsal when creating a wallet', short: 'see how it works to go'},
+  {key: 'fundsReady', label: 'FUNDS\nREADY', hint: 'Add any funds — demo funds count', short: 'add funds to go'},
+  {key: 'paymentTested', label: 'PAYMENT\nTESTED', hint: 'Complete a payment — pay or receive', short: 'one payment to go'},
 ];
 
 /** Ordered readiness keys (derived — PASSPORT_STAMPS is the single source of order). */
@@ -48,8 +50,8 @@ export type Readiness = {
   missing: ReadinessKey[];
   /** True iff all four are filled (the capstone condition). */
   complete: boolean;
-  /** The FIRST missing stamp + its hint (undefined when complete). */
-  next?: {key: ReadinessKey; hint: string};
+  /** The FIRST missing stamp + its hint/short (undefined when complete). */
+  next?: {key: ReadinessKey; hint: string; short: string};
 };
 
 /** Pure readiness projection of a journey (fail-soft: EMPTY journeys read as 0/4). */
@@ -64,7 +66,7 @@ export function computeReadiness(journey: Journey): Readiness {
     filled,
     missing,
     complete: missing.length === 0,
-    next: nextKey ? {key: nextKey, hint: PASSPORT_STAMPS.find(s => s.key === nextKey)!.hint} : undefined,
+    next: nextKey ? PASSPORT_STAMPS.find(s => s.key === nextKey)! : undefined,
   };
 }
 

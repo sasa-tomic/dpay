@@ -20,6 +20,7 @@ import {useBalancePoll} from '../hooks/useBalancePoll';
 import {useSolanaBalances} from '../hooks/useSolanaBalances';
 import {useTransactionHistory} from '../hooks/useTransactionHistory';
 import {useFundsReady} from '../hooks/useFundsReady';
+import {TripStrip} from './TripStrip';
 import {deriveSolanaAddress, createUsdcAta} from '../solana';
 import {friendlySolError} from '../solana/errors';
 import {readDepositDeepLink, readRequestDeeplink, readPaymentDeeplink, decodeDeeplink, type DeeplinkKind} from '../lib/deepLink';
@@ -652,6 +653,11 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
           ) : null}
         </Pressable>
       </View>
+
+      {/* Trip Ready J5b (UX hardening 2026-08-23) — the home-surface readiness line. The passport
+          lived only inside Balances/Settings ("hard to find"); this slim strip shows live progress
+          on the home screen and taps straight into the passport card. Retires itself when done. */}
+      <TripStrip onOpen={() => setBalancesOpen(true)} />
 
       <View style={S.tabs}>
         <Tab label="Pay" active={mode === 'pay'} onPress={() => setMode('pay')} hotkey="P" icon={c => <IconQr size={16} color={c} />} />
