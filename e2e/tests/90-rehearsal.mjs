@@ -61,7 +61,7 @@ export async function run() {
     await driver.click('btn-mnemonic-continue', { timeoutMs: 4_000 });
     console.log('[90-rehearsal] ✓ backup gate: ritual sentence + unchanged mandatory strength');
 
-    // 3. The RECOVERY SAVED stamp beat — a transient ink-stamp chip between gate and rehearsal.
+    // 3. The RECOVERY SAVED ink beat — a transient ink-stamp chip between gate and rehearsal.
     //    The beat plays for ~750ms then auto-advances, so poll for it (bounded; absence here is
     //    not fatal in a pathologically slow environment, but it SHOULD be caught).
     let stamped = false;
@@ -74,39 +74,30 @@ export async function run() {
     await driver.findByTestID('rehearsal', { timeoutMs: 15_000 });
     console.log('[90-rehearsal] ✓ rehearsal mounted (auto-advanced past the stamp, zero extra taps)');
 
-    // 4. Beat 1 mounts alone; the body is the verbatim education copy.
+    // 4. The ONE-page rehearsal: all three steps mount together, bodies verbatim (mounting the
+    //    page IS seeing the flow — the whole settle truth is visible at a glance).
     await driver.findByTestID('rehearsal-step-1', { timeoutMs: 8_000 });
-    assertEq(await driver.readText('rehearsal-body-1'), REHEARSAL_STEPS[0].body, 'beat 1 body verbatim');
-    await new Promise(r => setTimeout(r, 900)); // entrance + request-chip spring finish
-    await driver.screenshot('90-rehearsal-beat-1');
-    // Explore wallet is available from the very first beat.
+    await driver.findByTestID('rehearsal-step-2', { timeoutMs: 4_000 });
+    await driver.findByTestID('rehearsal-step-3', { timeoutMs: 4_000 });
+    assertEq(await driver.readText('rehearsal-body-1'), REHEARSAL_STEPS[0].body, 'step 1 body verbatim');
+    assertEq(await driver.readText('rehearsal-body-2'), REHEARSAL_STEPS[1].body, 'step 2 body verbatim');
+    assertEq(await driver.readText('rehearsal-body-3'), REHEARSAL_STEPS[2].body, 'step 3 body verbatim');
+    await new Promise(r => setTimeout(r, 900)); // entrance rise finish
+    await driver.screenshot('90-rehearsal-page');
+    // Explore wallet is available on the page.
     await driver.findByTestID('btn-rehearsal-skip', { timeoutMs: 4_000 });
-
-    // 5. Advance through the beats: 2, then 3 (the offline punchline pins beat 3).
-    await driver.click('btn-rehearsal-next', { timeoutMs: 4_000 });
-    await driver.findByTestID('rehearsal-step-2', { timeoutMs: 8_000 });
-    await driver.waitGone('rehearsal-step-1', { timeoutMs: 4_000 }).catch(() => {});
-    assertEq(await driver.readText('rehearsal-body-2'), REHEARSAL_STEPS[1].body, 'beat 2 body verbatim');
-    await new Promise(r => setTimeout(r, 900)); // card-rise + key spring finish
-    await driver.screenshot('90-rehearsal-beat-2');
-
-    await driver.click('btn-rehearsal-next', { timeoutMs: 4_000 });
-    await driver.findByTestID('rehearsal-step-3', { timeoutMs: 8_000 });
-    assertEq(await driver.readText('rehearsal-body-3'), REHEARSAL_STEPS[2].body, 'beat 3 body verbatim');
-    await new Promise(r => setTimeout(r, 900)); // receipt-rise + settle-stamp spring finish
-    await driver.screenshot('90-rehearsal-beat-3');
     const punch = await driver.readText('rehearsal-punchline');
     assertIncludes(punch, 'offline', 'the punchline names the offline truth');
     assertEq(punch, REHEARSAL_PUNCHLINE, 'punchline verbatim');
-    console.log('[90-rehearsal] ✓ 3 beats + offline punchline pinned');
+    console.log('[90-rehearsal] ✓ one page: 3 steps + offline punchline pinned');
 
-    // 6. Beat 3 award: flowUnderstood persists (idempotent, once).
-    await driver.waitForText('Try with demo funds', { timeoutMs: 4_000 });
+    // 5. Page-mount award: flowUnderstood persists (idempotent, once).
     const journeyMid = await driver.eval(() => localStorage.getItem('dpay.journey.v1'));
-    assertIncludes(journeyMid, 'flowUnderstood', 'reaching beat 3 awards flowUnderstood');
+    assertIncludes(journeyMid, 'flowUnderstood', 'mounting the rehearsal page awards flowUnderstood');
     assertIncludes(journeyMid, 'recoverySaved', 'the recovery beat awarded recoverySaved');
 
-    // 7. Try with demo funds → the wallet lands FUNDED on the Pay surface (default tab).
+    // 6. Try with demo funds → the wallet lands FUNDED on the Pay surface (default tab).
+    await driver.waitForText('Try with demo funds', { timeoutMs: 4_000 });
     await driver.click('btn-rehearsal-next', { timeoutMs: 4_000 });
     await driver.waitGone('rehearsal', { timeoutMs: 8_000 });
     await driver.findByTestID('balance', { timeoutMs: 10_000 });
@@ -115,7 +106,7 @@ export async function run() {
     assert(payScan, 'wallet chrome present (Pay surface is the default landing tab)');
     console.log('[90-rehearsal] ✓ Try with demo funds → funded wallet on Pay');
 
-    // 8. Both stamps persisted through the transition into the wallet.
+    // 7. Both stamps persisted through the transition into the wallet.
     const journey = await driver.eval(() => localStorage.getItem('dpay.journey.v1'));
     assertIncludes(journey, 'recoverySaved', 'recoverySaved stamp persisted');
     assertIncludes(journey, 'flowUnderstood', 'flowUnderstood stamp persisted');

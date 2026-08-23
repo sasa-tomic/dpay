@@ -74,6 +74,8 @@ export const JourneyHowItWorksTitle = 'How dpay works';
  * connection settles — the payer's phone never needs signal for steps 2 and 3.
  */
 export type RehearsalVisual = 'shopRequest' | 'payerReview' | 'shopSettles';
+/** The one-page rehearsal's title line (mounting the page IS seeing the flow). */
+export const REHEARSAL_TITLE = 'One honest payment';
 export type RehearsalStep = {id: 'request' | 'approve' | 'settle'; title: string; body: string; visual: RehearsalVisual};
 export const REHEARSAL_STEPS: readonly RehearsalStep[] = [
   {

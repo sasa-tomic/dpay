@@ -539,11 +539,15 @@ function buildStyles(p: Palette) {
   inkStampText: {color: p.bg, fontFamily: FONT.mono, fontSize: 14, fontWeight: '600', letterSpacing: 3, textTransform: 'uppercase'},
   inkBeatLine: {color: p.bg, fontSize: 16, fontWeight: '600', textAlign: 'center', marginTop: 34, lineHeight: 22, fontFamily: FONT.sansMedium},
   inkBeatSub: {color: p.brand, fontSize: 13, textAlign: 'center', marginTop: 8, fontFamily: FONT.mono, letterSpacing: 0.4},
-  // Rehearsal additions: the auto-advance hairline (a 2px progress rail above the dots — the
-  // affordance that the beat advances itself) + the offline punchline (same strip grammar as the
-  // walkthrough campaign line, so the two documents feel like one family).
-  rehProgressRail: {height: 2, borderRadius: 1, backgroundColor: p.line2, overflow: 'hidden', marginBottom: 12, marginTop: 4},
-  rehProgressFill: {height: 2, backgroundColor: p.brand, alignSelf: 'stretch', transformOrigin: 'left'},
+  // Rehearsal, re-paged to ONE screen (UX hardening 2026-08-23): scroll container + three
+  // badge/line rows in the walkthrough's postage-mark grammar (tangerine mono tag, hairline
+  // border, slight tilt) — the old auto-advance rail died with the pager.
+  walkScroll: {flex: 1},
+  rehStep: {marginTop: 18},
+  rehBadge: {alignSelf: 'flex-start', borderWidth: 1, borderColor: p.line2, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3, marginBottom: 7, transform: [{rotate: '-2deg'}]},
+  rehBadgeText: {color: p.brand, fontSize: 10, fontWeight: '600', letterSpacing: 1.4, textTransform: 'uppercase', fontFamily: FONT.mono},
+  rehStepTitle: {color: p.ink, fontSize: 17, fontWeight: '700', fontFamily: FONT.sansBold},
+  rehStepBody: {color: p.sub, fontSize: 14.5, lineHeight: 21, marginTop: 4, fontFamily: FONT.sans},
   // CoachTip — the one-time contextual card. Small paper panel (panel, not card: it sits ON the
   // surface, quieter than the QR card), hairline + soft lift; icon chip echoes walkAssetChip so
   // the coaching voice matches the walkthrough's. NEVER fixed/overlay — inline, so it can never

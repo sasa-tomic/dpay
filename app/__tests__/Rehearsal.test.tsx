@@ -1,13 +1,12 @@
 /**
- * Rehearsal render smoke (Trip Ready J3) — the 3-beat pager mechanics under
- * react-test-renderer: beat mounting (only the active beat), Next advancing to
- * "Try with demo funds" (onTry), "Explore wallet" (onSkip) available at every beat,
- * the offline punchline appearing on the final beat, the flowUnderstood stamp award
- * on reaching beat 3, and the reduced-motion path (no auto-advance timing).
+ * Rehearsal render smoke (Trip Ready J3, re-paged 2026-08-23) — the ONE-page rehearsal under
+ * react-test-renderer: all three steps mount together (the whole flow is visible at a glance),
+ * the bodies render the education copy verbatim (the comprehension contract), the punchline is
+ * pinned, mounting the page awards the flowUnderstood stamp exactly once (seeing the page IS
+ * seeing the flow), onTry/onSkip fire, and the reduced-motion path renders entrances at rest.
  *
- * Fake timers own the choreography (Walkthrough.test.tsx pattern): the settle beat
- * breathes on an infinite Animated.loop and auto-advance runs a 6s linear timing, so
- * the fake clock keeps act() deterministic and leak-free.
+ * Fake timers own the entrance choreography (Walkthrough.test.tsx pattern) so act() stays
+ * deterministic and leak-free.
  */
 import 'react-native';
 import React from 'react';
@@ -32,77 +31,54 @@ async function render(props: Parameters<typeof Rehearsal>[0]): Promise<Tree> {
   return tree;
 }
 
-/** Tap a control and run the (fake-clock) entrance choreography to its end inside act. */
-async function tap(tree: Tree, id: string): Promise<void> {
-  await act(async () => {
-    findByTestID(tree, id).props.onPress();
-    jest.advanceTimersByTime(1_500);
-  });
+/** Run the (fake-clock) entrance choreography to its end inside act(). */
+async function settle(tree: Tree): Promise<void> {
+  await act(async () => { jest.advanceTimersByTime(1_500); });
 }
 
-function mountedBeats(tree: Tree): string[] {
-  const seen = new Set<string>();
-  for (const node of tree.root.findAll(inst => typeof inst.props?.testID === 'string' && /^rehearsal-step-\d$/.test(inst.props.testID))) {
-    seen.add(node.props.testID);
-  }
-  return [...seen].sort();
-}
-
-describe('Rehearsal', () => {
+describe('Rehearsal (one page)', () => {
   beforeEach(() => {
     jest.useFakeTimers();
     return AsyncStorage.clear();
   });
   afterEach(() => { jest.useRealTimers(); });
 
-  test('renders beat 1 only; Next advances through all beats to "Try with demo funds"', async () => {
+  test('renders all three steps on one page; "Try with demo funds" fires onTry', async () => {
     const onTry = jest.fn();
-    const onSkip = jest.fn();
-    const tree = await render({onTry, onSkip});
-    expect(mountedBeats(tree)).toEqual(['rehearsal-step-1']);
-    expect(findByTestID(tree, 'btn-rehearsal-next').props.accessibilityLabel).toBe('Next rehearsal step');
-
-    await tap(tree, 'btn-rehearsal-next');
-    expect(mountedBeats(tree)).toEqual(['rehearsal-step-2']);
-    expect(() => findByTestID(tree, 'rehearsal-step-1')).toThrow();
-
-    await tap(tree, 'btn-rehearsal-next');
-    expect(mountedBeats(tree)).toEqual(['rehearsal-step-3']);
-    // The final label fires onTry (not an advance).
+    const tree = await render({onTry, onSkip: () => {}});
+    const ids = new Set<string>(
+      tree.root.findAll(
+        inst => typeof inst.props?.testID === 'string' && /^rehearsal-step-\d$/.test(inst.props.testID),
+      ).map(s => s.props.testID),
+    );
+    expect([...ids].sort()).toEqual(['rehearsal-step-1', 'rehearsal-step-2', 'rehearsal-step-3']);
     expect(findByTestID(tree, 'btn-rehearsal-next').props.accessibilityLabel).toBe('Try with demo funds');
-    expect(onTry).not.toHaveBeenCalled();
-    await tap(tree, 'btn-rehearsal-next');
+    await settle(tree);
+    act(() => { findByTestID(tree, 'btn-rehearsal-next').props.onPress(); });
     expect(onTry).toHaveBeenCalledTimes(1);
     act(() => { tree.unmount(); });
   });
 
-  test('beat bodies render the education copy verbatim (the comprehension contract)', async () => {
+  test('bodies render the education copy verbatim + the punchline is pinned (comprehension contract)', async () => {
     const tree = await render({onTry: () => {}, onSkip: () => {}});
     expect(findByTestID(tree, 'rehearsal-body-1').props.children).toBe(REHEARSAL_STEPS[0].body);
-    await tap(tree, 'btn-rehearsal-next');
     expect(findByTestID(tree, 'rehearsal-body-2').props.children).toBe(REHEARSAL_STEPS[1].body);
-    await tap(tree, 'btn-rehearsal-next');
     expect(findByTestID(tree, 'rehearsal-body-3').props.children).toBe(REHEARSAL_STEPS[2].body);
-    // The punchline mounts ONLY on the final beat.
     expect(findByTestID(tree, 'rehearsal-punchline').props.children).toBe(REHEARSAL_PUNCHLINE);
     act(() => { tree.unmount(); });
   });
 
-  test('"Explore wallet" (onSkip) fires from every beat — always-available exit', async () => {
+  test('"Explore wallet" (onSkip) fires — always-available exit', async () => {
     const onSkip = jest.fn();
     const tree = await render({onTry: () => {}, onSkip});
-    await tap(tree, 'btn-rehearsal-skip');
+    await settle(tree);
+    act(() => { findByTestID(tree, 'btn-rehearsal-skip').props.onPress(); });
     expect(onSkip).toHaveBeenCalledTimes(1);
-    await tap(tree, 'btn-rehearsal-next');
-    await tap(tree, 'btn-rehearsal-skip');
-    expect(onSkip).toHaveBeenCalledTimes(2);
     act(() => { tree.unmount(); });
   });
 
-  test('reaching beat 3 awards the flowUnderstood stamp exactly once (persisted)', async () => {
+  test('mounting the page awards the flowUnderstood stamp exactly once (persisted)', async () => {
     const tree = await render({onTry: () => {}, onSkip: () => {}});
-    await tap(tree, 'btn-rehearsal-next');
-    await tap(tree, 'btn-rehearsal-next');
     // Let the award effect's async persist settle on the fake clock.
     await act(async () => { jest.advanceTimersByTime(300); });
     const raw = await AsyncStorage.getItem(JOURNEY_STORAGE_KEY);
@@ -112,27 +88,12 @@ describe('Rehearsal', () => {
     act(() => { tree.unmount(); });
   });
 
-  test('auto-advance: with real-motion timing the beat walks forward on its own (fake clock)', async () => {
-    const tree = await render({onTry: () => {}, onSkip: () => {}});
-    expect(mountedBeats(tree)).toEqual(['rehearsal-step-1']);
-    await act(async () => { jest.advanceTimersByTime(6_100); });
-    expect(mountedBeats(tree)).toEqual(['rehearsal-step-2']);
-    // The final beat stays put — auto-advance never exits the rehearsal on its own.
-    await act(async () => { jest.advanceTimersByTime(6_100); });
-    expect(mountedBeats(tree)).toEqual(['rehearsal-step-3']);
-    await act(async () => { jest.advanceTimersByTime(6_100); });
-    expect(mountedBeats(tree)).toEqual(['rehearsal-step-3']);
-    act(() => { tree.unmount(); });
-  });
-
-  test('reduced-motion path: renders instantly, no auto-advance, manual Next still works', async () => {
+  test('reduced-motion path: entrances render at rest, page complete, stamp still awarded', async () => {
     const tree = await render({onTry: () => {}, onSkip: () => {}, reducedMotion: true});
-    expect(mountedBeats(tree)).toEqual(['rehearsal-step-1']);
-    // No auto-advance under reduced motion — the clock passing must not move the beat.
-    await act(async () => { jest.advanceTimersByTime(20_000); });
-    expect(mountedBeats(tree)).toEqual(['rehearsal-step-1']);
-    await tap(tree, 'btn-rehearsal-next');
-    expect(mountedBeats(tree)).toEqual(['rehearsal-step-2']);
+    expect(findByTestID(tree, 'rehearsal-body-3')).toBeTruthy();
+    await act(async () => { jest.advanceTimersByTime(300); });
+    const raw = await AsyncStorage.getItem(JOURNEY_STORAGE_KEY);
+    expect(raw && JSON.parse(raw).stamps).toEqual(['flowUnderstood']);
     act(() => { tree.unmount(); });
   });
 });
