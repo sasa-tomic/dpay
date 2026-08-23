@@ -62,7 +62,7 @@ async function run() {
     await shoot(driver, 'A09-phone-rehearsal-beat3');
     await driver.click('btn-rehearsal-next'); // "Try with demo funds"
     await driver.findByTestID('balance', { timeoutMs: 15_000 });
-    await driver.waitForText('∂100.00', { timeoutMs: 15_000 });
+    await driver.waitForText('Đ100.00', { timeoutMs: 15_000 });
     await sleep(600);
     await shoot(driver, 'A10-phone-wallet-pay');
 

@@ -74,7 +74,7 @@ export async function run() {
     assert(errBody.includes('Lost the radio link'), `the error reason should render as the sub-line. body excerpt:\n${errBody.slice(0, 400)}`);
     // The payer's balance is UNCHANGED — no money moved on a failed tap.
     const balAfterErr = await driver.readText('balance');
-    assert(balAfterErr.includes('∂100.00'), `balance must be unchanged after a failed tap, got "${balAfterErr}"`);
+    assert(balAfterErr.includes('Đ100.00'), `balance must be unchanged after a failed tap, got "${balAfterErr}"`);
     console.log('[60-nfc-error] ✓ transport error → "Tap failed" + reason, no debit, no fake Paid');
     // Escape the terminal view so the next case starts clean (Done re-arms the card).
     assert((await clickNfcButton()) === 'Done', 'the Done button should be reachable after a terminal error');
@@ -90,7 +90,7 @@ export async function run() {
     const declBody = await driver.bodyText();
     assert(!/\bPaid\b/.test(declBody), 'a declined tap must NEVER show "Paid ✓"');
     const balAfterDecl = await driver.readText('balance');
-    assert(balAfterDecl.includes('∂100.00'), `balance must be unchanged after a declined tap, got "${balAfterDecl}"`);
+    assert(balAfterDecl.includes('Đ100.00'), `balance must be unchanged after a declined tap, got "${balAfterDecl}"`);
     console.log('[60-nfc-error] ✓ declined → "Declined", no debit, no fake Paid');
     assert((await clickNfcButton()) === 'Done', 'the Done button should be reachable after a decline');
     await driver.waitGone('nfc-status', {timeoutMs: 5_000});

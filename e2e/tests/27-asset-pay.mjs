@@ -2,7 +2,7 @@
 // (MC5: the payer sees + pays the EXACT requested asset; the balance check uses ONLY that asset's
 // balance; dpay never swaps).
 //
-// Wallet A "e2e-alice" onboards (faucet-funded ∂100 DEMO = 10000 cents) and is then funded ckBTC
+// Wallet A "e2e-alice" onboards (faucet-funded Đ100 DEMO = 10000 cents) and is then funded ckBTC
 // (currency 1) at her PRINCIPAL via the faucet `{account, currency: 1, amount}` — the IC-rail
 // deposit-simulation seam (the test/deposit/seed route died with the facade). A's app poll surfaces
 // the funded ckBTC balance as `asset-ckbtc` "0.00060000 BTC" — this PROVES assetBalances[1] is
@@ -54,7 +54,7 @@ export async function run() {
   try {
     const { driver, relayBaseURL } = env;
 
-    // --- A onboards (funded ∂100 DEMO by the faucet; will also be funded ckBTC). ----------------
+    // --- A onboards (funded Đ100 DEMO by the faucet; will also be funded ckBTC). ----------------
     console.log('[27-asset-pay] onboarding A (payer)…');
     await onboardWallet(driver, 'e2e-alice');
     const identity = await accountOf(driver);

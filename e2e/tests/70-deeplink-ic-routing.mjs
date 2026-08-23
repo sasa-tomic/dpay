@@ -18,7 +18,7 @@
 //      routing never fires. The seam is the documented foreground-deeplink path, mirroring the
 //      __DPAY_TEST_SCAN / __DPAY_TEST_SOLANA_RPC_URL precedents.)
 //   3. The routing effect fires: selectedAssetId → ic:0, header label → 'DEMO balance', PayMode
-//      mounts, the prefill effect decodes the blob → review. Assert pay-amount (∂25.00, the EXACT
+//      mounts, the prefill effect decodes the blob → review. Assert pay-amount (Đ25.00, the EXACT
 //      requested amount) is showing and sol-pay-scan is GONE (SolPayMode unmounted).
 //
 // Selector contract: `active-asset-label` (header asset label; the former active-rail chip was
@@ -39,7 +39,7 @@ export const meta = {
   timeoutMs: 20000,
 };
 
-const PAY_CENTS = 2500; // ∂25.00 DEMO (currency 0).
+const PAY_CENTS = 2500; // Đ25.00 DEMO (currency 0).
 
 export async function run() {
   const start = Date.now();
@@ -65,7 +65,7 @@ export async function run() {
     await driver.findByTestID('sol-pay-scan', { timeoutMs: 5_000 });
     console.log('[70-deeplink-ic-routing] ✓ SOL idle-selected; SolPayMode mounted (failure precondition)');
 
-    // 4. Fire the foreground-deeplink seam with a ∂25.00 DEMO request blob. This is the SAME applyBlob
+    // 4. Fire the foreground-deeplink seam with a Đ25.00 DEMO request blob. This is the SAME applyBlob
     //    path the OS intent listener and the web ?req= reader drive — it sets prefillRequest + mode
     //    'pay'. The blob is a real buildRequestQR output (the exact bytes PayMode will decode).
     const bob = await generateKeypair();
@@ -86,7 +86,7 @@ export async function run() {
     assertEq(await driver.readText('active-asset-label'), 'DEMO balance', 'routing flipped the idle selection to the IC asset (label "DEMO balance")');
 
     // 6. PayMode decoded the blob and is in review with the EXACT requested amount. SolPayMode is gone.
-    assertIncludes(await driver.readText('pay-amount'), '∂25.00', 'PayMode review shows the exact requested amount (immutable snapshot)');
+    assertIncludes(await driver.readText('pay-amount'), 'Đ25.00', 'PayMode review shows the exact requested amount (immutable snapshot)');
     const body = await driver.eval(() => document.body?.innerText ?? '');
     assertIncludes(body, 'Bob', 'review shows the merchant name from the decoded request');
     const solPayGone = await driver.eval((id) => !document.querySelector(`[data-testid="${id}"]`), 'sol-pay-scan');

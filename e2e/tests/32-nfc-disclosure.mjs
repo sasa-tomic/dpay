@@ -7,7 +7,7 @@
 // The blind-tap bug this pins: NfcTap.autoSign previously set the amount disclosure AFTER
 // `await signAuthorization`, so during signing the payer saw a generic "Communicating…" with NO
 // asset name / amount / network, and the post-sign line rendered the DEMO `usd()` formatter even
-// for ckBTC → a misleading "∂0.00050000". The fix resolves the disclosure SYNCHRONOUSLY before the
+// for ckBTC → a misleading "Đ0.00050000". The fix resolves the disclosure SYNCHRONOUSLY before the
 // first await. This flow dispatches a real `request` event (which triggers autoSign → real
 // signAuthorization in the e2e shim), then reads back the live status text to prove the honest
 // asset/network/amount are visible while the tap is mid-flight.
@@ -77,7 +77,7 @@ export async function run() {
       assert(body.includes('Bitcoin'), 'NFC status should disclose the network "Bitcoin"');
       assert(body.includes('0.00050000'), 'NFC status should disclose the asset-correct amount "0.00050000"');
       // The blind-tap bug rendered the DEMO ∂ formatter for ckBTC — assert it is NOT present.
-      assert(!/∂0\.00050000/.test(body), 'NFC status must NOT render the DEMO ∂ formatter for a ckBTC amount');
+      assert(!/Đ0\.00050000/.test(body), 'NFC status must NOT render the DEMO ∂ formatter for a ckBTC amount');
       console.log('[32-nfc-disclosure] ✓ disclosure visible: BTC + Bitcoin + "0.00050000 BTC" (no ∂ formatter)');
     }
 

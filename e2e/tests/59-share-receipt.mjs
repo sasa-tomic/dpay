@@ -21,7 +21,7 @@
 import { setup, assert, onboardWallet } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
-const PAY_CENTS = 2500; // ∂25.00 (DEMO_USD = currency 0, the wallet asset)
+const PAY_CENTS = 2500; // Đ25.00 (DEMO_USD = currency 0, the wallet asset)
 const MERCHANT_NAME = 'Bob';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
@@ -47,11 +47,11 @@ export async function run() {
     const bob = await generateKeypair();
     console.log(`[59-share-receipt] wallet B (payee): ${bob.publicHex.slice(0, 16)}…`);
 
-    // --- wallet A: onboarded in the browser (the payer, funded ∂100 by the faucet). ---------
+    // --- wallet A: onboarded in the browser (the payer, funded Đ100 by the faucet). ---------
     console.log('[59-share-receipt] onboarding wallet A (payer)…');
     await onboardWallet(driver, 'e2e-alice');
 
-    // --- B's request QR: to=B, amount=∂25, fresh nonce, +10min expiry, currency 0 (DEMO_USD).
+    // --- B's request QR: to=B, amount=Đ25, fresh nonce, +10min expiry, currency 0 (DEMO_USD).
     const nonce = randNonceHex();
     const expiry = Math.floor(Date.now() / 1000) + 600;
     const requestQR = buildRequestQR(bob.publicHex, PAY_CENTS, nonce, expiry, 0, MERCHANT_NAME);
@@ -61,7 +61,7 @@ export async function run() {
     await driver.eval((qr) => { if (typeof window.__DPAY_TEST_SCAN === 'function') window.__DPAY_TEST_SCAN(qr); }, requestQR);
     await driver.findByTestID('pay-amount', { timeoutMs: 5_000 });
     const payAmt = await driver.readText('pay-amount');
-    assert(payAmt.includes('∂25.00'), `review should show "Pay ∂25.00", got "${payAmt}"`);
+    assert(payAmt.includes('Đ25.00'), `review should show "Pay Đ25.00", got "${payAmt}"`);
 
     // --- Approve → online settle (relay reachable) → "Paid" with a fresh receipt. ------------
     // The online path sets paid.receipt (only on a fresh, non-replayed settle), which gates the

@@ -48,8 +48,8 @@ export async function run() {
     const expiry = Math.floor(Date.now() / 1000) + 600;
     const requestQR = buildRequestQR(bob.publicHex, PAY_CENTS, nonce, expiry, 0, 'bob');
     await env.driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), requestQR);
-    const reviewShown = await env.driver.waitForText('Pay ∂25.00', {timeoutMs: 6_000});
-    assert(reviewShown, 'A should reach the Pay ∂25.00 review after scanning the request QR');
+    const reviewShown = await env.driver.waitForText('Pay Đ25.00', {timeoutMs: 6_000});
+    assert(reviewShown, 'A should reach the Pay Đ25.00 review after scanning the request QR');
 
     // --- Approve while OFFLINE → the hand-off QR (the envelope, base64url). --------------------
     await env.driver.click('btn-approve', {timeoutMs: 4_000});
@@ -82,14 +82,14 @@ export async function run() {
     const paidShown = await env.driver.waitForText('Paid', {timeoutMs: 12_000});
     assert(paidShown, 'A back online should reconcile the hand-off to Paid');
     const body = await env.driver.bodyText();
-    assertIncludes(body, '∂25.00', 'A Paid screen should carry the amount');
+    assertIncludes(body, 'Đ25.00', 'A Paid screen should carry the amount');
     console.log(`[${meta.name}] ✓ A reconnected → Paid (reconciled by request_id)`);
 
     // --- A's balance reflects the debit (100 − 25). --------------------------------------------
     const aliceBal = await getBalance(env.relayBaseURL, alice.publicHex, 0);
     assert(aliceBal === '7500', `A ledger balance must be 7500 after the offline pay, got ${aliceBal}`);
-    const shown = await env.driver.waitForText('∂75.00', {timeoutMs: 10_000});
-    assert(shown, 'A on-screen balance should show ∂75.00');
+    const shown = await env.driver.waitForText('Đ75.00', {timeoutMs: 10_000});
+    assert(shown, 'A on-screen balance should show Đ75.00');
 
     await env.driver.screenshot('20-offline-handoff');
     const elapsed = ((Date.now() - start) / 1000).toFixed(2);

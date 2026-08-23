@@ -7,7 +7,7 @@
 // former active-rail chip was dropped 2026-08-18, this label is the active-asset signal). The
 // whole-row select Pressable carries `asset-<key>-select`, so the flow drives it directly.
 //
-// Onboarding seeds DEMO (selectedAssetId reconciles to ic:0 → header ∂100.00, label 'DEMO
+// Onboarding seeds DEMO (selectedAssetId reconciles to ic:0 → header Đ100.00, label 'DEMO
 // balance'). The flow selects ckBTC (testKey 'ckbtc' → asset-ckbtc-select) — handleSelect('ic:1')
 // sets selectedAssetId, the header reads balances['ic:1'] = "0 BTC" (unfunded), and the label
 // switches to the catalog backing_symbol 'BTC balance'. Then it selects SOL (testKey 'sol' →
@@ -38,7 +38,7 @@ export async function run() {
   try {
     const { driver } = env;
 
-    // 1. Onboard → wallet (DEMO seeded: header ∂100.00, label 'DEMO balance').
+    // 1. Onboard → wallet (DEMO seeded: header Đ100.00, label 'DEMO balance').
     console.log('[55-balances-select-asset] onboarding…');
     await onboardWallet(driver, 'e2e-select');
 

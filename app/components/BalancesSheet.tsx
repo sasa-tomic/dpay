@@ -90,7 +90,7 @@ export function BalancesSheet({assets, balances, selectedId, onSelect, hasTestne
                 onPress={onTopUp}
                 accessibilityRole="button"
                 accessibilityLabel={`Get demo funds`}
-                accessibilityHint="Add ∂100 of demo money to this wallet"
+                accessibilityHint="Add Đ100 of demo money to this wallet"
                 accessibilityState={{disabled: topUpBusy}}
               >
                 {topUpBusy

@@ -5,7 +5,7 @@ import {S} from '../styles';
 
 // The 2026-08-17 "∂ifferent Pay" mark: the same tangerine tile as the Traveler Paper identity,
 // now carrying the porcelain ∂ (U+2202) — the brand glyph AND the app's demo-dollar symbol
-// (onboarding: "∂1 = $1"). Glyph outline extracted from DejaVu Sans Bold (public-domain shapes),
+// (onboarding: "Đ1 = $1"). Glyph outline extracted from DejaVu Sans Bold (public-domain shapes),
 // re-fit to the tile (height 500/1024, optical center 526/1024) — the same slot the old "d" held,
 // so the mark stays recognizably the same product, one glyph swapped. This one geometry drives
 // the in-app emblem AND the Android adaptive launcher (res/drawable vectors mirror these paths

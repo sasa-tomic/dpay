@@ -65,7 +65,7 @@ export async function run() {
     await waitForScanner(env.driver);
     const req1 = buildRequestQR(bob.publicHex, PAY_CENTS, randNonceHex(), Math.floor(Date.now() / 1000) + 600, 0, 'bob');
     await env.driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), req1);
-    await env.driver.waitForText('Pay ∂25.00', {timeoutMs: 6_000});
+    await env.driver.waitForText('Pay Đ25.00', {timeoutMs: 6_000});
     await env.driver.findByTestID('coach-payReview', {timeoutMs: 6_000});
     // The tip must never block the primary action.
     const approveEnabled = await env.driver.eval(() => {
@@ -82,7 +82,7 @@ export async function run() {
     const req2 = buildRequestQR(bob.publicHex, PAY_CENTS, randNonceHex(), Math.floor(Date.now() / 1000) + 600, 0, 'bob');
     await waitForScanner(env.driver);
     await env.driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), req2);
-    await env.driver.waitForText('Pay ∂25.00', {timeoutMs: 6_000});
+    await env.driver.waitForText('Pay Đ25.00', {timeoutMs: 6_000});
     assert(!(await env.driver.isPresent('coach-payReview')), 'payReview tip must not re-show after dismissal');
     await env.driver.click('btn-review-cancel', {timeoutMs: 4_000});
     console.log(`[${meta.name}] ✓ payReview: shown once, never blocks approve, remembered`);
@@ -93,7 +93,7 @@ export async function run() {
     const req3 = buildRequestQR(bob.publicHex, PAY_CENTS, randNonceHex(), Math.floor(Date.now() / 1000) + 600, 0, 'bob');
     await waitForScanner(env.driver);
     await env.driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), req3);
-    await env.driver.waitForText('Pay ∂25.00', {timeoutMs: 6_000});
+    await env.driver.waitForText('Pay Đ25.00', {timeoutMs: 6_000});
     assert(!(await env.driver.isPresent('coach-payReview')), 'payReview stays dismissed even offline');
     await env.driver.click('btn-approve', {timeoutMs: 4_000});
     await env.driver.waitForText('signed on this device ✓', {timeoutMs: 8_000});
@@ -108,7 +108,7 @@ export async function run() {
 
     // Hand to the merchant → the honest-pending view carries pendingOutcome.
     await env.driver.click('btn-paid', {timeoutMs: 4_000});
-    await env.driver.waitForText('Sent ∂25.00', {timeoutMs: 8_000});
+    await env.driver.waitForText('Sent Đ25.00', {timeoutMs: 8_000});
     await env.driver.findByTestID('coach-pendingOutcome', {timeoutMs: 6_000});
     await settle(); // entrance finish before the shot
     await env.driver.screenshot('91-coach-pending');
@@ -130,7 +130,7 @@ export async function run() {
     await setRelay(env.driver, env.relayBaseURL);
     await env.driver.waitForText('Paid', {timeoutMs: 12_000});
     assert(!(await env.driver.isPresent('coach-pendingOutcome')), 'confirmed Paid screen never carries the pending tip');
-    await env.driver.waitForText('∂75.00', {timeoutMs: 10_000});
+    await env.driver.waitForText('Đ75.00', {timeoutMs: 10_000});
     console.log(`[${meta.name}] ✓ hand-off settled + reconciled — coaching never blocked the money path`);
 
     // --- all four seen-markers persisted on this identity. -------------------------------------

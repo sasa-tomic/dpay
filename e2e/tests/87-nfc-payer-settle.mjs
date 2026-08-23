@@ -50,7 +50,7 @@ export async function run() {
     });
     assert(submit.ok, `merchant submission must be accepted, got ${submit.status}`);
     await dispatch({type: 'result', role: 'card', status: 0, nonceHex, requestIdHex: approved.requestIdHex});
-    assert(await driver.waitForText('Paid ✓ ∂10.00', {timeoutMs: 15000}), 'payer should resolve Paid only from the returned result');
+    assert(await driver.waitForText('Paid ✓ Đ10.00', {timeoutMs: 15000}), 'payer should resolve Paid only from the returned result');
 
     const payerAfter = BigInt(await getBalance(relayBaseURL, payer.publicHex, 0));
     const merchantAfter = BigInt(await getBalance(relayBaseURL, merchant.publicHex, 0));

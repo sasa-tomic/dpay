@@ -1,16 +1,18 @@
 // Formats an integer cent amount as the DEMO currency's amount string. The DEMO currency (currency
-// 0) uses the '∂' prefix (partial-differential sign, chosen as a D-like glyph distinct from BTC's ₿);
-// '$' is reserved for USDC. Despite the historical name `usd`, this formats DEMO amounts only; other
-// currencies render via fmtAsset in their family unit.
+// 0) uses the 'Đ' prefix (U+0110, D-with-stroke — a D-like glyph distinct from BTC's ₿, present IN
+// both app fonts' Latin Extended-A coverage; the old '∂' U+2202 math symbol fell back to a system
+// font and rendered unstably at small sizes — UX round-2, 2026-08-23). '$' is reserved for USDC.
+// Despite the historical name `usd`, this formats DEMO amounts only; other currencies render via
+// fmtAsset in their family unit.
 //
 // MC1 units 2-4: `c` is a raw-u64 decimal STRING (2-decimal DEMO cents), formatted via exact BigInt
 // math PADDED to 2 fractional places (the currency-style fixed-width display the wallet asserts —
-// `∂25.00`, never `∂25`). Never `Math.floor`/`parseFloat` (lossy above 2^53). The DEMO display stays
+// `Đ25.00`, never `Đ25`). Never `Math.floor`/`parseFloat` (lossy above 2^53). The DEMO display stays
 // fixed-width, so this is a separate UI concern (per amount.ts's module doc).
 import {parseDecimalToUnits} from './amount';
 export const usd = (c: string) => {
   const n = BigInt(c);
-  return `∂${(n / 100n).toString()}.${(n % 100n).toString().padStart(2, '0')}`;
+  return `Đ${(n / 100n).toString()}.${(n % 100n).toString().padStart(2, '0')}`;
 };
 export const short = (h: string) => `${h.slice(0, 8)}…`;
 // The MINT_ACCOUNT sentinel — 32 bytes of 0xFF, hex-encoded as 64 `f`s. The canister records faucet

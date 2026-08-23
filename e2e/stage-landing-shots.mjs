@@ -5,7 +5,7 @@
 // captures the seven landing states at 780×1688:
 //   request (Receive request-QR), approve (review), scanned (offline hand-off QR), paid (success),
 //   nfc-listen, nfc-exchange, nfc-paid.
-// Payment narrative: Alex pays Café Demo ∂5.00 (currency 0 DEMO).
+// Payment narrative: Alex pays Café Demo Đ5.00 (currency 0 DEMO).
 // Output: e2e/shots/staging/*.png (copied into crates/dpay-relay/assets/shot-*.png by hand after
 // visual review — NOT automatic, so a bad capture never ships).
 import {setup, onboardWallet, goOffline} from './harness/lib.mjs';
@@ -13,7 +13,7 @@ import {generateKeypair, randNonceHex, buildRequestQR} from './harness/wire.mjs'
 import {mkdirSync} from 'node:fs';
 
 const OUT = 'staging'; // driver.screenshot prefixes e2e/shots/
-const PAY_CENTS = 500; // ∂5.00
+const PAY_CENTS = 500; // Đ5.00
 
 const env = await setup();
 mkdirSync('e2e/shots/staging', {recursive: true});
@@ -24,7 +24,7 @@ try {
   // Arm the NFC seam BEFORE the wallet mounts (same ordering as flow 11).
   await driver.eval(() => { window.__DPAY_TEST_NFC_STATUS = 'ready'; });
 
-  // 1. Onboard Alex (online, ∂100 funded).
+  // 1. Onboard Alex (online, Đ100 funded).
   await onboardWallet(driver, 'Alex');
 
   // --- request: merchant-side Receive request-QR (Alex's own request for the narrative shots) ----
@@ -33,7 +33,7 @@ try {
   await driver.click('btn-request', {timeoutMs: 4000});
   await driver.findByTestID('request-qr', {timeoutMs: 5000});
   await driver.screenshot(`${OUT}/shot-request`);
-  console.log('✓ shot-request (Alex request ∂5.00)');
+  console.log('✓ shot-request (Alex request Đ5.00)');
 
   // Back to Pay mode for the payment narrative.
   await driver.click('tab-pay', {timeoutMs: 4000});
@@ -63,7 +63,7 @@ try {
   await driver.findByTestID('nfc-status', {timeoutMs: 5000});
   await driver.waitForText('Communicating', {timeoutMs: 5000});
   await driver.screenshot(`${OUT}/shot-nfc-exchange`);
-  console.log('✓ shot-nfc-exchange (Communicating… Paying ∂5.00)');
+  console.log('✓ shot-nfc-exchange (Communicating… Paying Đ5.00)');
 
   // paid: success phase → "Paid ✓".
   await dispatch({type: 'phase', role: 'card', phase: 'success'});
@@ -86,7 +86,7 @@ try {
   await driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), onlineReq);
   await driver.findByTestID('pay-amount', {timeoutMs: 5000});
   await driver.screenshot(`${OUT}/shot-approve`);
-  console.log('✓ shot-approve (Review payment ∂5.00 to Café Demo)');
+  console.log('✓ shot-approve (Review payment Đ5.00 to Café Demo)');
   await driver.click('btn-approve', {timeoutMs: 5000});
   await driver.waitForText('Paid ✓', {timeoutMs: 10_000});
   await driver.screenshot(`${OUT}/shot-paid`);

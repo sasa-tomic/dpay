@@ -54,17 +54,13 @@ export async function run() {
     // (The RECOVERY SAVED ink-stamp beat auto-advances to the rehearsal — zero extra taps.)
     await driver.findByTestID('rehearsal', { timeoutMs: 15_000 });
     await driver.findByTestID('rehearsal-step-1', { timeoutMs: 8_000 });
-    await new Promise(r => setTimeout(r, 900)); // entrance spring finish
-    await driver.click('btn-rehearsal-next', { timeoutMs: 4_000 });
-    await driver.findByTestID('rehearsal-step-2', { timeoutMs: 8_000 });
-    await new Promise(r => setTimeout(r, 900));
-    await driver.click('btn-rehearsal-next', { timeoutMs: 4_000 });
-    await driver.findByTestID('rehearsal-step-3', { timeoutMs: 8_000 }); // ← awards flowUnderstood
+    await new Promise(r => setTimeout(r, 900)); // entrance rise finish
+    // (One-page rehearsal: all 3 steps mounted together — mounting awards flowUnderstood.)
     await driver.waitForText('Try with demo funds', { timeoutMs: 4_000 });
     await driver.click('btn-rehearsal-next', { timeoutMs: 4_000 }); // "Try with demo funds"
     await driver.waitGone('rehearsal', { timeoutMs: 8_000 });
     await driver.findByTestID('balance', { timeoutMs: 10_000 });
-    await driver.waitForText('∂100.00', { timeoutMs: 15_000 }); // faucet funded → fundsReady
+    await driver.waitForText('Đ100.00', { timeoutMs: 15_000 }); // faucet funded → fundsReady
 
     const j1 = await readJourney(driver);
     assert(j1, 'journey store must exist after onboarding');

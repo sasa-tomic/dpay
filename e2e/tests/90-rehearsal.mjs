@@ -101,7 +101,7 @@ export async function run() {
     await driver.click('btn-rehearsal-next', { timeoutMs: 4_000 });
     await driver.waitGone('rehearsal', { timeoutMs: 8_000 });
     await driver.findByTestID('balance', { timeoutMs: 10_000 });
-    await driver.waitForText('∂100.00', { timeoutMs: 15_000 });
+    await driver.waitForText('Đ100.00', { timeoutMs: 15_000 });
     const payScan = await driver.eval(() => !!document.querySelector('[data-testid="btn-settings"]'));
     assert(payScan, 'wallet chrome present (Pay surface is the default landing tab)');
     console.log('[90-rehearsal] ✓ Try with demo funds → funded wallet on Pay');

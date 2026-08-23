@@ -35,7 +35,7 @@ const ASSETS: SelectableAsset[] = [
 ];
 
 const BALANCES: Record<AssetId, BalanceView> = {
-  'ic:0': {displayText: '∂100.00', status: 'ok'},
+  'ic:0': {displayText: 'Đ100.00', status: 'ok'},
   'ic:2': {displayText: '$0.00', status: 'zero'},
   'solana:SOL': {displayText: '◎0.025', status: 'ok'},
   'solana:USDC': {displayText: '—', status: 'absent'},

@@ -80,7 +80,7 @@ export async function run() {
     // 1. Onboard a funded wallet ($100 demo). Lands on the Pay tab.
     console.log('[84-visual-dark] onboarding…');
     await onboardWallet(driver, 'e2e-visual-dark');
-    await driver.waitForText('∂100.00', { timeoutMs: 5_000 });
+    await driver.waitForText('Đ100.00', { timeoutMs: 5_000 });
 
     // 2. Capture wallet-Pay surface.
     await driver.screenshot(SURFACES[0].capture);

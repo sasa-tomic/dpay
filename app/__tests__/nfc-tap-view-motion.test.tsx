@@ -22,7 +22,7 @@ const mount = async (phase: NfcTapPhase, props: Partial<Parameters<typeof NfcTap
   await act(async () => {
     tree = renderer.create(
       <NfcTapView phase={phase} reason={null} role="card" testID="nfc-status"
-        formattedAmt="∂25.00" networkLabel="IC" onClose={() => {}} {...props} />,
+        formattedAmt="Đ25.00" networkLabel="IC" onClose={() => {}} {...props} />,
     );
   });
 };
@@ -50,13 +50,13 @@ describe('NfcTapView J5 motion — one beat per phase', () => {
     expect(find('tap-breath')).toHaveLength(0);
     expect(find('tap-success-stamp')).toHaveLength(0);
 
-    await act(async () => { tree.update(<NfcTapView phase="exchanging" reason={null} role="card" testID="nfc-status" formattedAmt="∂25.00" networkLabel="IC" onClose={() => {}} />); });
+    await act(async () => { tree.update(<NfcTapView phase="exchanging" reason={null} role="card" testID="nfc-status" formattedAmt="Đ25.00" networkLabel="IC" onClose={() => {}} />); });
     expect(find('tap-progress')).toHaveLength(1);
     expect(find('tap-progress-seg-1')).toHaveLength(1);
     expect(find('tap-progress-seg-2')).toHaveLength(1);
     expect(find('tap-progress-seg-3')).toHaveLength(0);
 
-    await act(async () => { tree.update(<NfcTapView phase="settling" reason={null} role="card" testID="nfc-status" formattedAmt="∂25.00" networkLabel="IC" onClose={() => {}} />); });
+    await act(async () => { tree.update(<NfcTapView phase="settling" reason={null} role="card" testID="nfc-status" formattedAmt="Đ25.00" networkLabel="IC" onClose={() => {}} />); });
     expect(find('tap-progress-seg-1')).toHaveLength(1);
     expect(find('tap-progress-seg-2')).toHaveLength(1);
     expect(find('tap-progress-seg-3')).toHaveLength(1);
@@ -79,13 +79,13 @@ describe('NfcTapView J5 motion — one beat per phase', () => {
     expect(find('tap-ellipsis')).toHaveLength(0);
     // The confirmed amount rides the title (byte-stable contract).
     const title = tree.root.findAllByType(Text).map(t => t.props.children).join(' ');
-    expect(title).toContain('Paid ✓ ∂25.00');
+    expect(title).toContain('Paid ✓ Đ25.00');
   });
 
   test('HONESTY: pending/declined/error carry NO stamp mark and NO campaign line — ever', async () => {
     await mount('pending');
     for (const phase of ['pending', 'declined', 'error'] as NfcTapPhase[]) {
-      await act(async () => { tree.update(<NfcTapView phase={phase} reason={null} role="card" testID="nfc-status" formattedAmt="∂25.00" networkLabel="IC" onClose={() => {}} />); });
+      await act(async () => { tree.update(<NfcTapView phase={phase} reason={null} role="card" testID="nfc-status" formattedAmt="Đ25.00" networkLabel="IC" onClose={() => {}} />); });
       expect(find('tap-success-stamp')).toHaveLength(0);
       expect(find('offline-peak')).toHaveLength(0);
       const text = tree.root.findAllByType(Text).map(t => String(t.props.children)).join(' ');
@@ -105,7 +105,7 @@ describe('NfcTapView J5 motion — one beat per phase', () => {
   test('declined/error: the restrained shake-settle wraps the badge, then stillness', async () => {
     await mount('declined');
     expect(find('tap-shake')).toHaveLength(1);
-    await act(async () => { tree.update(<NfcTapView phase="error" reason={null} role="card" testID="nfc-status" formattedAmt="∂25.00" networkLabel="IC" onClose={() => {}} />); });
+    await act(async () => { tree.update(<NfcTapView phase="error" reason={null} role="card" testID="nfc-status" formattedAmt="Đ25.00" networkLabel="IC" onClose={() => {}} />); });
     expect(find('tap-shake')).toHaveLength(1);
   });
 

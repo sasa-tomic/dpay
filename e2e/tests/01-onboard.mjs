@@ -6,14 +6,14 @@
 //   2. Type a username into the field (no testID — find by placeholder "e.g. Alice").
 //   3. Click btn-create. The app calls DpayCore.generateKeypair (our @noble/ed25519 shim), saves the
 //      identity to AsyncStorage, and best-effort funds the account via POST /api/v1/faucet.
-//   4. The Wallet screen renders with: balance (the faucet funds ∂100.00 in DEMO_USD), empty history.
+//   4. The Wallet screen renders with: balance (the faucet funds Đ100.00 in DEMO_USD), empty history.
 //   5. Screenshot to e2e/shots/01-onboard.png.
 //
-// Note on the asserted balance: the brief said "∂0.00", but the REAL app's `create()` does a
+// Note on the asserted balance: the brief said "Đ0.00", but the REAL app's `create()` does a
 // best-effort faucet POST on onboarding (see App.tsx:233-235). With the REAL relay up (the whole
-// point of the harness), that POST succeeds and funds ∂100.00, so the wallet's first balance poll
-// reads ∂100.00 — NOT ∂0.00. Asserting ∂0.00 would require disabling the faucet, which would break
-// the "use the REAL relay + REAL FakeLedger" rule. We assert ∂100.00 (proves faucet→balance
+// point of the harness), that POST succeeds and funds Đ100.00, so the wallet's first balance poll
+// reads Đ100.00 — NOT Đ0.00. Asserting Đ0.00 would require disabling the faucet, which would break
+// the "use the REAL relay + REAL FakeLedger" rule. We assert Đ100.00 (proves faucet→balance
 // end-to-end) and note this deviation. Empty history is asserted verbatim (no payments settled yet).
 import { setup, assert, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipRehearsalIfPresent } from '../harness/lib.mjs';
 
@@ -28,7 +28,7 @@ export const meta = {
   name: 'onboard',
   journey: 'onboard',
   covers: ['onboard', 'faucet', 'first-balance', 'empty-history', 'non-custodial'],
-  verifies: 'New user enters a name → wallet created, faucet funds ∂100, balance + empty history render; custody honesty copy present at create + backup.',
+  verifies: 'New user enters a name → wallet created, faucet funds Đ100, balance + empty history render; custody honesty copy present at create + backup.',
   timeoutMs: 20000,
 };
 
@@ -80,17 +80,17 @@ export async function run() {
 
     // 3. The Wallet screen mounts. The balance Text (testID="balance") is the gate. The app polls
     //    /api/v1/balance every 2.5s; the faucet funds the account synchronously in create(), so by
-    //    the time the Wallet mounts the balance is ∂100.00 (the brief's ∂0.00 is wrong with a working
+    //    the time the Wallet mounts the balance is Đ100.00 (the brief's Đ0.00 is wrong with a working
     //    relay — see file header).
     console.log('[01-onboard] wallet screen — waiting for balance…');
     // The balance element appears once the wallet mounts (the app's first state is balance=null →
-    // shows '—'; once the first poll completes it reads the faucet-funded ∂100.00).
+    // shows '—'; once the first poll completes it reads the faucet-funded Đ100.00).
     await driver.findByTestID('balance', { timeoutMs: 10_000 });
-    // The poll runs every 2.5s; allow up to 12s for the first successful poll to land on ∂100.00.
-    const got = await driver.waitForText('∂100.00', { timeoutMs: 12_000 });
+    // The poll runs every 2.5s; allow up to 12s for the first successful poll to land on Đ100.00.
+    const got = await driver.waitForText('Đ100.00', { timeoutMs: 12_000 });
     const body = await driver.bodyText();
-    assert(got, `wallet balance should read ∂100.00 (faucet-funded on onboarding). body excerpt:\n${body.slice(0, 500)}`);
-    console.log('[01-onboard] ✓ balance shows ∂100.00 (faucet-funded through the REAL relay)');
+    assert(got, `wallet balance should read Đ100.00 (faucet-funded on onboarding). body excerpt:\n${body.slice(0, 500)}`);
+    console.log('[01-onboard] ✓ balance shows Đ100.00 (faucet-funded through the REAL relay)');
 
     // 4. The username from onboarding shows in the wallet header.
     assertIncludes(body, ONBOARD_USERNAME, 'wallet header shows the onboarded username');

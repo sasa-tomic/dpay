@@ -35,7 +35,7 @@ export async function run() {
     // 1. Onboard a funded wallet ($100 demo). Lands on the Pay tab.
     console.log('[35-ux-tour] onboarding…');
     await onboardWallet(driver, 'e2e-tour');
-    await driver.waitForText('∂100.00', { timeoutMs: 5_000 });
+    await driver.waitForText('Đ100.00', { timeoutMs: 5_000 });
     await driver.screenshot('35-tour-wallet-pay');
     console.log('[35-ux-tour] ✓ shot: onboarded wallet (Pay tab)');
 

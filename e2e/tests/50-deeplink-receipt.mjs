@@ -6,7 +6,7 @@
 // receiptShareBlob codec (what the payer's Paid screen Share button actually produces; flow 59
 // asserts that side). The merchant's app binds the proof to the OPEN request: parseRailProof
 // format-checks (request_id 64-hex + block_index decimal), then treats it only as a trigger. The
-// "Received ∂25.00 from payer" flip comes from an exact recipient/currency/amount/memo match in
+// "Received Đ25.00 from payer" flip comes from an exact recipient/currency/amount/memo match in
 // durable ledger history, never from the blob itself.
 //
 // FORGERY LEG (F2, 2026-08-20): a well-formed proof with a RANDOM request_id (never signed —
@@ -25,13 +25,13 @@
 // Approach: A (merchant) is onboarded in the browser and builds a REAL request through the app UI
 // (amount 25.00 → Request) — the QR payload is read via the __DPAY_QR_LAST seam and decoded, so the
 // nonce/amount/to paid are the app's own bytes, not a synthetic request. B (payer) is a harness
-// keypair fauceted ∂100 that settles via railTransfer (a signed icrc1_update envelope POSTed to the
+// keypair fauceted Đ100 that settles via railTransfer (a signed icrc1_update envelope POSTed to the
 // fake-IC /api/v2 gateway — byte-identical to what the payer's app signs). The hand-back is injected
 // via the __DPAY_TEST_DEEPLINK foreground seam (Wallet registers it for exactly this: it drives the
 // SAME applyBlob path as the web ?pay= reader + the native foreground url listener; a page reload
 // would work too but wipes the open request, which is the thing the proof binds to).
 //
-// SECURITY assertion: the merchant sees "Received ∂25.00" ONLY after exact ledger history
+// SECURITY assertion: the merchant sees "Received Đ25.00" ONLY after exact ledger history
 // confirms the open request tuple (the forged random-rid leg above stays on the open request;
 // a malformed proof errors — never a silent Received). The merchant also lands on RECEIVE — a
 // dpay:pay never routes to the Pay review.
@@ -42,7 +42,7 @@ import { randomBytes } from 'node:crypto';
 import { setup, assert, assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf, railTransfer, railPrincipalText } from '../harness/lib.mjs';
 import { generateKeypair, decodeRequest, b64urlEncode } from '../harness/wire.mjs';
 
-const PAY_UNITS = 2500; // ∂25.00 (DEMO_USD = currency 0)
+const PAY_UNITS = 2500; // Đ25.00 (DEMO_USD = currency 0)
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -73,7 +73,7 @@ export async function run() {
     // --- A builds a REAL request through the app UI: Receive → 25.00 → Request. The QR payload is
     //     read via the __DPAY_QR_LAST seam (the exact bytes a payer would scan) and decoded — the
     //     nonce the payer must memo, the amount the bind will display, and `to` == A's account.
-    console.log('[50-deeplink-receipt] A builds a ∂25.00 request via the app…');
+    console.log('[50-deeplink-receipt] A builds a Đ25.00 request via the app…');
     await driver.click('tab-receive', { timeoutMs: 4_000 });
     await driver.type('amount-input', '25.00', { timeoutMs: 4_000 });
     await driver.click('btn-request', { timeoutMs: 4_000 });
@@ -82,12 +82,12 @@ export async function run() {
     assert(typeof qrValue === 'string' && qrValue.length > 0, `__DPAY_QR_LAST should hold the request QR value, got "${qrValue}"`);
     const req = decodeRequest(qrValue);
     assert(req.toHex === alicePub, `request.to must be the merchant's account, got ${req.toHex}`);
-    assert(req.amount === String(PAY_UNITS), `request.amount must be ${PAY_UNITS} (∂25.00), got ${req.amount}`);
+    assert(req.amount === String(PAY_UNITS), `request.amount must be ${PAY_UNITS} (Đ25.00), got ${req.amount}`);
     assert(req.currency === 0, `request.currency must be 0 (DEMO), got ${req.currency}`);
     const nonce = req.nonceHex;
     console.log(`[50-deeplink-receipt] ✓ real request decoded: to=A amount=${req.amount} nonce=${nonce.slice(0, 8)}…`);
 
-    // --- wallet B: a fresh keypair generated in-test (the PAYER), fauceted ∂100. -------------
+    // --- wallet B: a fresh keypair generated in-test (the PAYER), fauceted Đ100. -------------
     // B settles A's request directly on the rail (online icrc1_transfer, memo = the request nonce)
     // — the NFC-unavailable scenario where the payer settles their own payment + hands the proof
     // back. Funded via the faucet at B's principal (arbitrary account).
@@ -164,12 +164,12 @@ const blob = b64urlEncode(Buffer.from(JSON.stringify(proof), 'utf8'));
     const received = await driver.waitForText('Received', { timeoutMs: 8_000 });
     assert(received, 'merchant should see "Received" after the dpay:pay proof bound to the open request');
     const body = await driver.bodyText();
-    assertIncludes(body, '∂25.00', 'the Received screen should show the open request amount ∂25.00');
+    assertIncludes(body, 'Đ25.00', 'the Received screen should show the open request amount Đ25.00');
     assertIncludes(body, 'from ', 'the Received screen should name the payer (from …)');
     // SECURITY INVARIANT: the merchant is NOT on the Pay review screen (a req deeplink would land
     // there; a pay deeplink must route to Receive). Asserts the kind routing is correct.
-    assert(!/\bPay ∂25\.00\b/.test(body), 'a dpay:pay receipt must route to Receive, not the Pay review screen');
-    console.log('[50-deeplink-receipt] ✓ merchant bound the rail proof + shows Received ∂25.00 from payer');
+    assert(!/\bPay Đ25\.00\b/.test(body), 'a dpay:pay receipt must route to Receive, not the Pay review screen');
+    console.log('[50-deeplink-receipt] ✓ merchant bound the rail proof + shows Received Đ25.00 from payer');
 
     await driver.screenshot('50-deeplink-receipt');
 

@@ -18,7 +18,7 @@
 import { setup, assert, assertIncludes, getBalance, onboardWallet, railPrincipalText } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
-const PAY_CENTS = 2500; // ∂25.00 (DEMO_USD = currency 0, the wallet asset)
+const PAY_CENTS = 2500; // Đ25.00 (DEMO_USD = currency 0, the wallet asset)
 const PAYEE_NAME = 'Bob';
 const PAYER_NAME = 'Alice';
 const MEMO = 'coffee';
@@ -48,7 +48,7 @@ export async function run() {
     const bobBefore = await getBalance(relayBaseURL, bob.publicHex, 0);
     assert(bobBefore === '0', `payee B must start at 0, got ${bobBefore}`);
 
-    // --- wallet A "Alice" (payer): onboarded in the browser (funded ∂100 by the faucet). -----
+    // --- wallet A "Alice" (payer): onboarded in the browser (funded Đ100 by the faucet). -----
     console.log(`[26-names-memo] onboarding wallet A "${PAYER_NAME}" (payer)…`);
     await onboardWallet(driver, PAYER_NAME);
 
@@ -66,7 +66,7 @@ export async function run() {
     // --- Review screen: exact amount + the payee NAME + the memo. ----------------------------
     await driver.findByTestID('pay-amount', { timeoutMs: 5_000 });
     const payAmt = await driver.readText('pay-amount');
-    assert(payAmt.includes('∂25.00'), `review should show "Pay ∂25.00", got "${payAmt}"`);
+    assert(payAmt.includes('Đ25.00'), `review should show "Pay Đ25.00", got "${payAmt}"`);
     const reviewBody = await driver.bodyText();
     assertIncludes(reviewBody, PAYEE_NAME, 'review should name the payee by display name (from the request bytes)');
   // The memo the merchant attached is shown as a subtitle on the review screen.
@@ -90,8 +90,8 @@ export async function run() {
     console.log(`[26-names-memo] ✓ A reached "Paid ✓" to ${PAYEE_NAME}`);
 
     // --- A's balance decreased by the amount. ------------------------------------------------
-    const aliceDown = await driver.waitForText('∂75.00', { timeoutMs: 10_000 });
-    assert(aliceDown, `payer A balance should be ∂75.00 (∂100 − ∂25) after the settle`);
+    const aliceDown = await driver.waitForText('Đ75.00', { timeoutMs: 10_000 });
+    assert(aliceDown, `payer A balance should be Đ75.00 (Đ100 − Đ25) after the settle`);
 
     // --- A's Recent history: short principal + the memo NONCE (the reconciliation key). ------
     // IC rail: names died with facade settlement — the history row carries no name, only the

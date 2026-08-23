@@ -37,7 +37,7 @@ export async function run() {
 
     console.log('[14-keyboard] onboarding…');
     await onboardWallet(driver, 'e2e-keyboard');
-    // Onboard lands on the wallet in Pay mode (the default). Demo balance is ∂100.00.
+    // Onboard lands on the wallet in Pay mode (the default). Demo balance is Đ100.00.
 
     // --- P / R : single-key tab switching -------------------------------------------
     console.log('[14-keyboard] pressing R (→ Receive)…');
@@ -61,10 +61,10 @@ export async function run() {
     await driver.findByTestID('pay-scan', { timeoutMs: 3_000 });
 
     // --- T : single-key top-up (demo money) -----------------------------------------
-    console.log('[14-keyboard] pressing T (→ top-up +∂100 demo money)…');
+    console.log('[14-keyboard] pressing T (→ top-up +Đ100 demo money)…');
     await driver.pressKey('t');
-    const topped = await driver.waitForText('∂200.00', { timeoutMs: 6_000 });
-    assert(topped, 'T should add demo money (balance ∂100.00 → ∂200.00)');
+    const topped = await driver.waitForText('Đ200.00', { timeoutMs: 6_000 });
+    assert(topped, 'T should add demo money (balance Đ100.00 → Đ200.00)');
     console.log('[14-keyboard] ✓ T triggered the top-up');
 
     // --- A : single-key Balances (the money hub) + Esc closes it -------------------

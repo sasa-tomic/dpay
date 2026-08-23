@@ -11,7 +11,7 @@
 // balance route before + after, AND the UI Balances row drops.
 //
 // Balances are PER-LEDGER on the fake gateway (real ICRC semantics): funding a currency credits
-// ITS ledger at the wallet principal only — the onboarding ∂100 DEMO credit (currency 0) does not
+// ITS ledger at the wallet principal only — the onboarding Đ100 DEMO credit (currency 0) does not
 // touch it. This fake's ckTESTBTC has no ledger fee (fee None), so the debit is EXACTLY the
 // withdrawn amount.
 //

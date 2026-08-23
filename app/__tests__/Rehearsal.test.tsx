@@ -32,7 +32,7 @@ async function render(props: Parameters<typeof Rehearsal>[0]): Promise<Tree> {
 }
 
 /** Run the (fake-clock) entrance choreography to its end inside act(). */
-async function settle(tree: Tree): Promise<void> {
+async function settle(_tree: Tree): Promise<void> {
   await act(async () => { jest.advanceTimersByTime(1_500); });
 }
 
