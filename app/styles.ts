@@ -140,10 +140,16 @@ function buildStyles(p: Palette) {
   passportReadyLine: {fontSize: 13, color: p.sub, textAlign: 'center', marginTop: 10, fontFamily: FONT.sans},
   // The capstone overlay: the full-card TRIP READY stamp press (~1s) — the peakStamp grammar
   // (118 ring, spring + tilt) pressed across the finished page, then it lifts to reveal the
-  // static completed card + Done.
-  passportCapstone: {position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 18, backgroundColor: p.card, alignItems: 'center', justifyContent: 'center'},
+  // static completed card + Done. UX hardening 2026-08-23 (M3): the overlay INVERTS to ink —
+  // the one full-bleed dark beat of the wallet (matches the RECOVERY SAVED ink beat) — with
+  // the four stamp labels inking in sequence, then the tangerine TRIP READY band. Uses ink/bg
+  // semantics (dark-theme-safe, never #000 — palette discipline holds).
+  passportCapstoneInk: {position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 18, backgroundColor: p.ink, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18},
+  passportCapStamps: {alignItems: 'center', gap: 4, marginBottom: 18},
+  passportCapStampText: {color: p.bg, fontFamily: FONT.mono, fontSize: 10, fontWeight: '600', letterSpacing: 1.6, textTransform: 'uppercase', textAlign: 'center', lineHeight: 13},
+  passportSlotDate: {color: p.sub, fontFamily: FONT.mono, fontSize: 8, letterSpacing: 1, marginTop: 3, textTransform: 'uppercase', textAlign: 'center'},
   passportCapstoneText: {color: p.brand, fontFamily: FONT.mono, fontSize: 15, fontWeight: '600', letterSpacing: 2.2, textTransform: 'uppercase', textAlign: 'center', lineHeight: 20},
-  passportCapstoneMicro: {fontSize: 14, color: p.sub, marginTop: 14, textAlign: 'center', fontFamily: FONT.sans},
+  passportCapstoneMicro: {fontSize: 13, color: p.bg, marginTop: 14, textAlign: 'center', fontFamily: FONT.sans, opacity: 0.85},
   balBox: {alignItems: 'flex-end'},
   // The header balance pressable's outer row: the label+value column, then the A hotkey badge
   // at the far right edge (DOM order label → value → badge, mirroring the tab-bar badge pattern).

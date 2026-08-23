@@ -41,10 +41,18 @@ import {IconClose} from './icons';
 
 const EASE_OUT = Easing.out(Easing.cubic);
 const EASE_PLATE = Easing.bezier(0.22, 1, 0.36, 1);
-const CAPSTONE_MS = 1400;
+const CAPSTONE_MS = 2200;
 
 /** Fixed per-slot rotations (deterministic — a stamped set never re-shuffles on re-render). */
 const SLOT_TILT = [-4, 3, -2, 5] as const;
+
+/** The archive's stamp date ('AUG 23') from the journey's wall-clock award time. Local, tiny,
+ *  single-use — a real passport page shows WHEN each stamp landed. */
+const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+function stampDate(at: number): string {
+  const d = new Date(at);
+  return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
+}
 
 export type TripPassportVariant = 'card' | 'archive';
 
@@ -85,16 +93,21 @@ export function TripPassport({variant = 'card', reducedMotion}: {variant?: TripP
   }, [shouldCelebrate, loaded]);
   useEffect(() => () => { if (capTimerRef.current) clearTimeout(capTimerRef.current); }, []);
 
-  // ── Capstone motion (the passport-stamp grammar: op + spring press + plate tilt) ─────────
+  // ── Capstone motion (UX hardening 2026-08-23: the ink moment) ────────────────────────────
+  // One driver `capSeq` 0→1 over the beat; each of the four stamps inks in on its own SLICE of
+  // the timeline (interpolated, clamped) — one animation, four staggered landings (DRY: no
+  // per-stamp timers). The plate press/tilt lands the whole page at the end.
   const capOp = useRef(new Animated.Value(reduced ? 1 : 0)).current;
   const capScale = useRef(new Animated.Value(reduced ? 1 : 1.5)).current;
   const capTilt = useRef(new Animated.Value(reduced ? 1 : 0)).current; // 0→1 maps −2°→−7°
+  const capSeq = useRef(new Animated.Value(reduced ? 1 : 0)).current;
   useEffect(() => {
     if (!capstonePlaying || reduced) return;
     const press = Animated.parallel([
       Animated.timing(capOp, {toValue: 1, duration: 160, delay: 90, easing: EASE_OUT, useNativeDriver: false}),
       Animated.spring(capScale, {toValue: 1, friction: 5, tension: 64, delay: 110, useNativeDriver: false}),
       Animated.timing(capTilt, {toValue: 1, duration: 420, delay: 150, easing: EASE_PLATE, useNativeDriver: false}),
+      Animated.timing(capSeq, {toValue: 1, duration: 1200, delay: 240, easing: EASE_OUT, useNativeDriver: false}),
     ]);
     press.start();
     return () => { press.stop(); };
@@ -130,7 +143,8 @@ export function TripPassport({variant = 'card', reducedMotion}: {variant?: TripP
       <View style={S.passportRule} />
 
       {/* The stamp page: 2×2. Filled = inked ring + label at its own tilt; empty = debossed
-          dashed slot + sub2 label (a place not yet stamped). */}
+          dashed slot + sub2 label (a place not yet stamped). The ARCHIVE adds the award date
+          under each inked stamp — the record-ness of a real passport page (card stays clean). */}
       <View style={S.passportGrid}>
         {PASSPORT_STAMPS.map((s, i) => {
           const filled = readiness.filled.includes(s.key);
@@ -143,6 +157,9 @@ export function TripPassport({variant = 'card', reducedMotion}: {variant?: TripP
               <Text style={filled ? [S.passportSlotTextFilled, tilt] : S.passportSlotText}>
                 {s.label}
               </Text>
+              {filled && variant === 'archive' && journey.at[s.key] ? (
+                <Text style={[S.passportSlotDate, tilt]}>{stampDate(journey.at[s.key])}</Text>
+              ) : null}
             </View>
           );
         })}
@@ -178,12 +195,13 @@ export function TripPassport({variant = 'card', reducedMotion}: {variant?: TripP
         </Pressable>
       ) : null}
 
-      {/* The capstone overlay (card variant, live 4th-stamp transition only): the finished
-          page pressed with the full-card TRIP READY stamp, ~1.4s, then it lifts to Done. */}
+      {/* The capstone overlay (card variant, live 4th-stamp transition only): the card INVERTS
+          to ink for ~2.2s — the four stamps ink in sequence (one timeline, sliced), then the
+          TRIP READY band lands — then it lifts to the durable mark + Done. */}
       {showCapstone ? (
         <Animated.View
           testID="trip-ready-capstone"
-          style={[S.passportCapstone, {
+          style={[S.passportCapstoneInk, {
             opacity: capOp,
             transform: [
               {scale: capScale},
@@ -191,8 +209,20 @@ export function TripPassport({variant = 'card', reducedMotion}: {variant?: TripP
             ],
           }]}
           pointerEvents="none">
+          <View style={S.passportCapStamps}>
+            {PASSPORT_STAMPS.map((s, i) => {
+              // Slice i of 4 on the 0→1 capSeq timeline: each stamp lands ~300ms after the last.
+              const start = i * 0.22;
+              const op = capSeq.interpolate({inputRange: [start, Math.min(start + 0.16, 1)], outputRange: [0, 1], extrapolate: 'clamp'});
+              return (
+                <Animated.Text key={s.key} style={[S.passportCapStampText, {opacity: op}]}>
+                  {s.label}
+                </Animated.Text>
+              );
+            })}
+          </View>
           <Text style={S.passportCapstoneText}>Trip{'\n'}Ready</Text>
-          <Text style={S.passportCapstoneMicro}>You can pay even when your phone has no signal.</Text>
+          <Text style={S.passportCapstoneMicro}>Nothing left to set up. Go have the trip.</Text>
         </Animated.View>
       ) : null}
     </View>

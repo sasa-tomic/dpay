@@ -99,7 +99,7 @@ describe('TripPassport (card variant)', () => {
     expect(hasTestID(tree, 'btn-passport-done')).toBe(false);
 
     // The press runs its full clock, then lifts to reveal the static page + Done.
-    await act(async () => { jest.advanceTimersByTime(2_000); });
+    await act(async () => { jest.advanceTimersByTime(2_400); });
     expect(hasTestID(tree, 'trip-ready-capstone')).toBe(false);
     expect(hasTestID(tree, 'btn-passport-done')).toBe(true);
 

@@ -26,12 +26,15 @@ export type ReadinessKey =
   * (the M2 fix: "FLOW UNDERSTOOD" is system-speak; the strip speaks people-speak). */
 export type PassportStamp = {key: ReadinessKey; label: string; hint: string; short: string};
 
-/** The passport's stamps + copy. Order = display order AND "next step" order (first missing wins). */
+/** The passport's stamps + copy. Order = display order AND "next step" order (first missing wins).
+ *  Labels are HUMAN (UX hardening 2026-08-23): the stamps read as capabilities a traveler
+ *  earned, not system states the app tracked ("FLOW UNDERSTOOD" was system-speak). Two-line
+ *  caps (explicit \n) so every stamp reads like inked lines in a real passport. */
 export const PASSPORT_STAMPS: readonly PassportStamp[] = [
-  {key: 'recoverySaved', label: 'RECOVERY\nSAVED', hint: 'Back up your wallet in Settings', short: 'back up to go'},
-  {key: 'flowUnderstood', label: 'FLOW\nUNDERSTOOD', hint: 'Watch the 3-step rehearsal when creating a wallet', short: 'see how it works to go'},
-  {key: 'fundsReady', label: 'FUNDS\nREADY', hint: 'Add any funds — demo funds count', short: 'add funds to go'},
-  {key: 'paymentTested', label: 'PAYMENT\nTESTED', hint: 'Complete a payment — pay or receive', short: 'one payment to go'},
+  {key: 'recoverySaved', label: 'BACKED\nUP', hint: 'Back up your wallet in Settings', short: 'back up to go'},
+  {key: 'flowUnderstood', label: 'SAW THE\nFLOW', hint: 'Watch the 3-step rehearsal when creating a wallet', short: 'see how it works to go'},
+  {key: 'fundsReady', label: 'FUNDS\nLOADED', hint: 'Add any funds — demo funds count', short: 'add funds to go'},
+  {key: 'paymentTested', label: 'FIRST\nPAYMENT', hint: 'Complete a payment — pay or receive', short: 'one payment to go'},
 ];
 
 /** Ordered readiness keys (derived — PASSPORT_STAMPS is the single source of order). */
