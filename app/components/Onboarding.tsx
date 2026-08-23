@@ -335,8 +335,8 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
                 accessibilityRole="button" accessibilityLabel="Restore wallet" accessibilityHint="Recover a wallet from your 24-word recovery phrase">
                 <Text style={S.secondaryBtnText}>Restore wallet</Text>
               </Pressable>
-              <Text style={S.dim2}>Creates your wallet and adds Đ100 in demo funds to get started.</Text>
-              <Text style={S.dpayGlyphNote}><Text style={S.dpayGlyph}>Đ</Text> is the demo-dollar symbol — play money, Đ1 = $1.</Text>
+              <Text style={S.dim2}>Creates your wallet and adds ∂100 in demo funds to get started.</Text>
+              <Text style={S.dpayGlyphNote}><Text style={S.dpayGlyph}>∂</Text> is the demo-dollar symbol — play money, ∂1 = $1.</Text>
             </>
           )}
         </ScrollView>

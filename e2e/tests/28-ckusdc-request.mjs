@@ -9,7 +9,7 @@
 //     float drift, no '.' artifact).
 //   - The amount-big readout shows "0.050000 USDC" (6-decimal zero-padded, backing_symbol suffix).
 //   - No "$0.05" appears (fmtCurrencyAmount uses backing_symbol as the unit suffix, NOT the $ glyph;
-//     a 2-decimal DEMO mis-encode would render 50000 raw as Đ500.00, not 0.050000 USDC).
+//     a 2-decimal DEMO mis-encode would render 50000 raw as ∂500.00, not 0.050000 USDC).
 //
 // Selector contract: `tab-receive`, `req-prefix` (amount glyph → opens picker),
 // `req-pick-ckusdc` (assetTestKey → 'ckusdc' for the CkEthErc20 descriptor), `amount-input`,

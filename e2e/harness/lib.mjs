@@ -333,7 +333,7 @@ export async function skipRehearsalIfPresent(driver, opts = {}) {
  * checkbox→Continue pair uses `waitForEnabled` because btn-mnemonic-continue is `disabled` until
  * React re-renders after the checkbox tap — a bare `click` could land before the re-render and be a
  * silent no-op. The faucet funds synchronously in finishCreate(); the balance poll (fast-poll seam =
- * 150ms in test, 2.5s in prod) reflects it on the next tick, so waitForText('Đ100.00') lands quickly.
+ * 150ms in test, 2.5s in prod) reflects it on the next tick, so waitForText('∂100.00') lands quickly.
  *
  * Trip Ready J2B/J3: after the backup ack the RECOVERY SAVED beat plays (~750ms) and then the
  * payment rehearsal mounts — skipRehearsalIfPresent dismisses it (restore paths never see it).
@@ -351,7 +351,7 @@ export async function onboardWallet(driver, name = 'e2e', opts = {}) {
   await driver.click('btn-mnemonic-continue', { timeoutMs: 4_000 });
   await skipRehearsalIfPresent(driver);
   await driver.findByTestID('balance', { timeoutMs: 10_000 });
-  await driver.waitForText('Đ100.00', { timeoutMs });
+  await driver.waitForText('∂100.00', { timeoutMs });
   return driver;
 }
 

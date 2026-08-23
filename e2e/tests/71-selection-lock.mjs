@@ -33,7 +33,7 @@ export const meta = {
   timeoutMs: 20000,
 };
 
-const PAY_CENTS = 2500; // Đ25.00 DEMO (currency 0).
+const PAY_CENTS = 2500; // ∂25.00 DEMO (currency 0).
 
 export async function run() {
   const start = Date.now();
@@ -48,7 +48,7 @@ export async function run() {
     await driver.click('tab-pay', { timeoutMs: 5_000 });
     await driver.findByTestID('pay-scan', { timeoutMs: 5_000 });
 
-    // 2. Build a merchant request for Đ25.00 DEMO (currency 0) and deliver it via the camera scan
+    // 2. Build a merchant request for ∂25.00 DEMO (currency 0) and deliver it via the camera scan
     //    seam — the same path flow 27 uses. onRequestString decodes → setReq + setPhase('review').
     const bob = await generateKeypair();
     const reqQr = buildRequestQR(bob.publicHex, PAY_CENTS, randNonceHex(), Math.floor(Date.now() / 1000) + 600, 0, 'Bob');
@@ -56,8 +56,8 @@ export async function run() {
 
     // 3. Review is showing — pay-amount renders the locked amount; the selection is now LOCKED.
     await driver.findByTestID('pay-amount', { timeoutMs: 5_000 });
-    assertIncludes(await driver.readText('pay-amount'), 'Đ25.00', 'review shows the scanned amount (immutable snapshot)');
-    console.log('[71-selection-lock] ✓ entered PayMode review (Đ25.00)');
+    assertIncludes(await driver.readText('pay-amount'), '∂25.00', 'review shows the scanned amount (immutable snapshot)');
+    console.log('[71-selection-lock] ✓ entered PayMode review (∂25.00)');
 
     // 4. LOCKED (assertion 1): the header Balances button reports a disabled state.
     await assertDisabled(driver, 'balance', 'Balances button disabled while PayMode review is in flight');

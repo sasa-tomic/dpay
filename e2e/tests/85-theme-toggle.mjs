@@ -52,7 +52,7 @@ export async function run() {
     // 1. Onboard to reach the Wallet (the header toggle only exists there).
     console.log('[85-theme-toggle] onboarding…');
     await onboardWallet(driver, 'e2e-theme');
-    await driver.waitForText('Đ100.00');
+    await driver.waitForText('∂100.00');
 
     // Sanity: the browser session is emulated light, so the seeded theme boots Light.
     const emulatedDark = await driver.eval(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
@@ -79,7 +79,7 @@ export async function run() {
       timeoutMs: 8_000,
     });
     await driver.waitReady({ timeoutMs: 10_000 });
-    await driver.waitForText('Đ100.00');
+    await driver.waitForText('∂100.00');
     assertEq(await rootBg(), DARK_BG, 'dark survives a reload (persisted choice rehydrates)');
     assertEq(await headerLabel(), 'Switch theme to Light', 'header still targets Light after reload');
     console.log('[85-theme-toggle] ✓ Dark choice persisted across reload');

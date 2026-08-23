@@ -10,7 +10,7 @@
 // not Chrome's ERR_UNSAFE_PORT artifact):
 //   - the wallet IS created (identity persisted, header username renders, balance element mounts);
 //   - the faucet request fails for the RIGHT reason (a connection refusal);
-//   - the header NEVER shows Đ100.00 (the funded happy path) — it shows the honest offline state
+//   - the header NEVER shows ∂100.00 (the funded happy path) — it shows the honest offline state
 //     ("~ DEMO approx." label + "—" amount, because the balance poll also can't reach the dead relay);
 //   - the account genuinely holds $0 on the real ledger (it was never funded anywhere).
 //
@@ -29,7 +29,7 @@ export const meta = {
   name: 'onboard-no-faucet',
   journey: 'onboard',
   covers: ['onboard', 'faucet-failure', 'offline', 'dead-relay', 'right-reason', 'zero-balance'],
-  verifies: 'Onboard against a dead relay → faucet failure surfaces an honest "Continue" prompt (not a silent $0 transition), wallet created with $0 (Đ100 never shown), honest "~ DEMO approx." offline indicator, faucet fails with ECONNREFUSED.',
+  verifies: 'Onboard against a dead relay → faucet failure surfaces an honest "Continue" prompt (not a silent $0 transition), wallet created with $0 (∂100 never shown), honest "~ DEMO approx." offline indicator, faucet fails with ECONNREFUSED.',
   timeoutMs: 20000,
 };
 
@@ -84,21 +84,21 @@ export async function run() {
       `wallet identity must be persisted (32-byte hex pubkey), got ${JSON.stringify(identity?.publicHex)}`);
     console.log(`[37-onboard-no-faucet] ✓ wallet created + identity persisted (${identity.publicHex.slice(0, 16)}…)`);
 
-    // Đ100.00 (the faucet-funded happy path) must NEVER appear — the faucet failed.
+    // ∂100.00 (the faucet-funded happy path) must NEVER appear — the faucet failed.
     // Give the (failing) balance poll a moment, then assert the funded amount is absent.
-    await driver.waitForText('Đ100.00', { timeoutMs: 1_500 }).catch(() => {}); // returns false (expected); bounded wait
+    await driver.waitForText('∂100.00', { timeoutMs: 1_500 }).catch(() => {}); // returns false (expected); bounded wait
     const body = await driver.bodyText();
-    assert(!body.includes('Đ100.00'),
-      `wallet must NOT show the faucet-funded Đ100.00 against a dead relay. body excerpt:\n${body.slice(0, 500)}`);
+    assert(!body.includes('∂100.00'),
+      `wallet must NOT show the faucet-funded ∂100.00 against a dead relay. body excerpt:\n${body.slice(0, 500)}`);
 
     // The HONEST offline indicator: the balance poll can't reach the dead relay → online=false → the
     // header label reads "~ DEMO approx." (Wallet.tsx; asset-name-prefixed after D3). This is the
-    // app's honest "I can't confirm a balance" signal — NOT a fabricated Đ0.00 and NOT a crash. The
+    // app's honest "I can't confirm a balance" signal — NOT a fabricated ∂0.00 and NOT a crash. The
     // assertion matches the substring 'approx.'.
     const approx = await driver.waitForText('approx.', { timeoutMs: 6_000 });
     assert(approx,
       `wallet should show the honest "~ DEMO approx." offline indicator (balance poll unreachable). body excerpt:\n${body.slice(0, 500)}`);
-    console.log('[37-onboard-no-faucet] ✓ no Đ100.00 + honest "~ DEMO approx." offline indicator (no fake funding)');
+    console.log('[37-onboard-no-faucet] ✓ no ∂100.00 + honest "~ DEMO approx." offline indicator (no fake funding)');
 
     // The account genuinely holds $0 on the REAL ledger: the faucet POST went to the dead relay and
     // failed, so this account was never funded anywhere. Querying the shared FakeLedger confirms $0.

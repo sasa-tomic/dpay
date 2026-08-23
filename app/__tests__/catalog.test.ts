@@ -123,11 +123,11 @@ describe('DEMO (currency 0) display never depended on the Bitcoin fallback', () 
   it('displayName(DEMO) === "DEMO"', () => {
     expect(displayName(DEMO_DESC)).toBe('DEMO');
   });
-  it('currencySymbol(DEMO) === "Đ"', () => {
-    expect(currencySymbol(KNOWN_CATALOG, 0)).toBe('Đ');
+  it('currencySymbol(DEMO) === "∂"', () => {
+    expect(currencySymbol(KNOWN_CATALOG, 0)).toBe('∂');
   });
-  it('fmtCurrencyAmount(DEMO, 5000) === "Đ50.00" (not BTC, not $)', () => {
-    expect(fmtCurrencyAmount(KNOWN_CATALOG, 0, '5000')).toBe('Đ50.00');
+  it('fmtCurrencyAmount(DEMO, 5000) === "∂50.00" (not BTC, not $)', () => {
+    expect(fmtCurrencyAmount(KNOWN_CATALOG, 0, '5000')).toBe('∂50.00');
   });
 });
 

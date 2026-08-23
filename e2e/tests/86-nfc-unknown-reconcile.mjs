@@ -12,7 +12,7 @@
 import { setup, assert, assertIncludes, getBalance, faucetAccount, onboardWallet, accountOf } from '../harness/lib.mjs';
 import { generateKeypair, decodeRequest, icpPrincipalBytes, icpTransferArgBytes, icpSignUpdate, icpSignReadState, b64urlEncode, randNonceHex } from '../harness/wire.mjs';
 
-const PAY_CENTS = 1000; // Đ10.00 — the exact amount of the 2026-08-21 field failure
+const PAY_CENTS = 1000; // ∂10.00 — the exact amount of the 2026-08-21 field failure
 
 export const meta = {
   id: '86',
@@ -43,7 +43,7 @@ export async function run() {
     const bob = await accountOf(driver);
     const bobHex = bob.publicHex;
 
-    // --- B requests Đ10.00; the REAL reader mode must arm (buildRequest now returns real hex). ---
+    // --- B requests ∂10.00; the REAL reader mode must arm (buildRequest now returns real hex). ---
     await driver.click('tab-receive', { timeoutMs: 4_000 });
     await driver.type('amount-input', '10.00', { timeoutMs: 4_000 });
     await driver.click('btn-request', { timeoutMs: 4_000 });
@@ -93,11 +93,11 @@ export async function run() {
     await driver.eval(() => window.__DPAY_TEST_NFC_SESSION({type: 'confirmed', role: 'reader'}));
 
     // --- The receiver reaches success only after exact history + result delivery. -----------------
-    const received = await driver.waitForText('Received ✓ Đ10.00', { timeoutMs: 20_000 });
-    assert(received, 'the receiver should reach "Received ✓ Đ10.00" from exact ledger history');
+    const received = await driver.waitForText('Received ✓ ∂10.00', { timeoutMs: 20_000 });
+    assert(received, 'the receiver should reach "Received ✓ ∂10.00" from exact ledger history');
     console.log('[86-nfc-unknown-reconcile] ✓ exact ledger row resolved to Received');
 
-    // --- The transfer settled EXACTLY ONCE: B's ledger balance is Đ100 + Đ10. --------------------
+    // --- The transfer settled EXACTLY ONCE: B's ledger balance is ∂100 + ∂10. --------------------
     const bobLedger = await getBalance(relayBaseURL, bobHex, 0);
     assert(bobLedger === '11000', `B ledger balance must be 11000 cents, got ${bobLedger}`);
     const aliceLedger = await getBalance(relayBaseURL, alice.publicHex, 0);

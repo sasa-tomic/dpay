@@ -36,8 +36,8 @@ import type {AssetId} from './types';
 export type BalanceStatus = 'ok' | 'zero' | 'absent' | 'unavailable' | 'error' | 'loading';
 
 // One asset's rendered amount + status. `displayText` is the fully-formatted amount string the UI
-// shows verbatim (e.g. "Đ100.00", "0 BTC", "—", "1.50 USDC"). It already includes any offline
-// approximation prefix for DEMO ("~Đ91.00") so the header and the sheet read byte-identical text.
+// shows verbatim (e.g. "∂100.00", "0 BTC", "—", "1.50 USDC"). It already includes any offline
+// approximation prefix for DEMO ("~∂91.00") so the header and the sheet read byte-identical text.
 export type BalanceView = {displayText: string; status: BalanceStatus};
 
 // The SOL hook status union (mirrors `SolBalanceStatus` from hooks/useSolanaBalances.ts without a

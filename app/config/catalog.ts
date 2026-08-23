@@ -208,7 +208,7 @@ export function familyDisplay(catalog: CurrencyDescriptor[], currency: number): 
 export type NfcDisclosure = {
   assetName: string;        // the honest asset NAME (BTC/USDC/DEMO) — never a raw ledger id
   networkLabel: string | null; // the native settlement network (Bitcoin/Ethereum); null for DEMO
-  formattedAmount: string;  // asset-correct amount ("0.00050000 BTC"), never the DEMO Đ formatter
+  formattedAmount: string;  // asset-correct amount ("0.00050000 BTC"), never the DEMO ∂ formatter
 };
 export function resolveNfcDisclosure(
   catalog: CurrencyDescriptor[],
@@ -216,7 +216,7 @@ export function resolveNfcDisclosure(
 ): NfcDisclosure | null {
   const {currency, amount} = req;
   // DEMO (currency 0): internal play money. No external network to disclose, but the amount is
-  // always formattable via the DEMO Đ formatter. DEMO is the one payable asset whose display never
+  // always formattable via the DEMO ∂ formatter. DEMO is the one payable asset whose display never
   // depended on familyDisplay, so it gets an early return (mirrors every other display helper).
   if (currency === 0) {
     return {assetName: 'DEMO', networkLabel: null, formattedAmount: usd(amount)};
@@ -316,7 +316,7 @@ export function isValidDestinationAddress(family: MinterFamily, addr: string): b
 // The primary ASSET NAME shown as the heading on the asset card + picker rows (H1). MC1 unit 5:
 // prefers the per-currency `backing_symbol` (authoritative) over the family-level assumption, so
 // every CkEthErc20 no longer inherits "USDC" — a future ckUSDT renders as "USDT". DISTINCT from
-// `currencySymbol` (the amount-prefix glyph: Đ/₿/$) and from `wrapper_name` (the IC token id like
+// `currencySymbol` (the amount-prefix glyph: ∂/₿/$) and from `wrapper_name` (the IC token id like
 // "ckUSDC"). So a user scanning for an asset sees its NAME (BTC/USDC/DEMO), not the chain it rides.
 export function displayName(a: CurrencyDescriptor): string {
   if (a.currency === 0) return 'DEMO';
@@ -336,10 +336,10 @@ export function displayName(a: CurrencyDescriptor): string {
 
 // The amount-prefix glyph for a currency (shown before a typed amount in Receive + as the prefix of
 // a DEMO amount string). MC1 unit 5: a `$`-style stablecoin glyph is NOT assumed by family — only
-// when the descriptor's backing_symbol/symbol indicates a USD-like asset. DEMO→'Đ', BTC→'₿',
+// when the descriptor's backing_symbol/symbol indicates a USD-like asset. DEMO→'∂', BTC→'₿',
 // USDC→'$'. Distinct from displayName (the NAME) and from the raw-amount unit suffix.
 export function currencySymbol(catalog: CurrencyDescriptor[], currency: number): string {
-  if (currency === 0) return 'Đ';
+  if (currency === 0) return '∂';
   const a = catalog.find(c => c.currency === currency);
   // A USDC/USD backing (or the legacy CkEthErc20 + USDC symbol) renders the $ glyph.
   const backing = a?.backing_symbol;
@@ -357,7 +357,7 @@ export function currencySymbol(catalog: CurrencyDescriptor[], currency: number):
 }
 
 // Format a raw smallest-units amount for display in its OWN currency's units. Currency 0 (DEMO_USD)
-// renders as `Đ`; any other currency renders via its catalog descriptor's decimals + the
+// renders as `∂`; any other currency renders via its catalog descriptor's decimals + the
 // per-currency backing symbol (MC1 unit 5: `descriptor.backing_symbol` instead of a family-level
 // nativeAsset assumption, so a future ckUSDT no longer renders "… USDC"). e.g. "50000" raw @
 // currency 1 → "0.00050000 BTC". Used by ReceiveMode + PayMode so a ckBTC request/review reads

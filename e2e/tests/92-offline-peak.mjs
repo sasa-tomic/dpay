@@ -70,7 +70,7 @@ export async function run() {
     let expiry = Math.floor(Date.now() / 1000) + 600;
     let requestQR = buildRequestQR(bob.publicHex, PAY_CENTS, nonce, expiry, 0, 'bob');
     await driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), requestQR);
-    assert(await driver.waitForText('Pay Đ25.00', {timeoutMs: 6_000}), 'A should reach the Pay Đ25.00 review');
+    assert(await driver.waitForText('Pay ∂25.00', {timeoutMs: 6_000}), 'A should reach the Pay ∂25.00 review');
 
     await driver.click('btn-approve', {timeoutMs: 4_000});
     assert(await driver.waitForText('signed on this device ✓', {timeoutMs: 8_000}), 'offline approval should show the envelope QR');
@@ -120,7 +120,7 @@ export async function run() {
     expiry = Math.floor(Date.now() / 1000) + 600;
     requestQR = buildRequestQR(bob.publicHex, PAY_CENTS, nonce, expiry, 0, 'bob');
     await driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), requestQR);
-    assert(await driver.waitForText('Pay Đ25.00', {timeoutMs: 6_000}), 'second payment review');
+    assert(await driver.waitForText('Pay ∂25.00', {timeoutMs: 6_000}), 'second payment review');
     await driver.click('btn-approve', {timeoutMs: 4_000});
     assert(await driver.waitForText('signed on this device ✓', {timeoutMs: 8_000}), 'second offline approval shows the envelope QR');
     const payload2 = await driver.eval(() => window.__DPAY_QR_LAST);
@@ -141,12 +141,12 @@ export async function run() {
 
     // --- The ONLINE paid path never peaks — but the calm stamp rides the confirmed card. -------
     await driver.click('btn-new', {timeoutMs: 4_000});
-    assert(await driver.waitForText('Đ50.00', {timeoutMs: 10_000}), 'A is back online (live balance Đ50.00)');
+    assert(await driver.waitForText('∂50.00', {timeoutMs: 10_000}), 'A is back online (live balance ∂50.00)');
     nonce = randNonceHex();
     expiry = Math.floor(Date.now() / 1000) + 600;
     requestQR = buildRequestQR(bob.publicHex, PAY_CENTS, nonce, expiry, 0, 'bob');
     await driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), requestQR);
-    assert(await driver.waitForText('Pay Đ25.00', {timeoutMs: 6_000}), 'online payment review');
+    assert(await driver.waitForText('Pay ∂25.00', {timeoutMs: 6_000}), 'online payment review');
     await driver.click('btn-approve', {timeoutMs: 4_000});
     assert(await driver.waitForText('Paid ✓', {timeoutMs: 12_000}), 'online payment settles to Paid ✓ (flow 03-style)');
     await absent(driver, 'offline-peak');

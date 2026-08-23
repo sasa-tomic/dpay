@@ -6,7 +6,7 @@
  * fund panel INSTEAD of the scanner + NFC card — prompting the deposit funnel at the moment of
  * intent. Offline / loading / missing-entry FAIL OPEN to the live scanner (offline-first rule).
  *
- * Invariants exercised here (fresh FakeLedger wallet: DEMO Đ100 from faucet, ckBTC 0):
+ * Invariants exercised here (fresh FakeLedger wallet: DEMO ∂100 from faucet, ckBTC 0):
  *   1. ckBTC selected + ONLINE + known zero → `pay-fund` panel shows 'Add BTC to pay',
  *      the scanner surface (`pay-scan` status row / QrScanner box) is NOT in the DOM,
  *      and the primary `pay-fund-go` ('Show my BTC address') is present (ckBTC IS depositable:
@@ -36,7 +36,7 @@ export async function run() {
   try {
     await onboardWallet(driver, 'e2e-ic-fund');
 
-    // Select ckBTC (a fresh wallet holds DEMO Đ100 from the faucet but zero ckBTC).
+    // Select ckBTC (a fresh wallet holds DEMO ∂100 from the faucet but zero ckBTC).
     await openBalances(driver);
     await driver.click('asset-ckbtc-select');
     await driver.waitGone('btn-balances-close');

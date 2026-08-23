@@ -59,7 +59,7 @@ async function run() {
     await shoot(driver, 'A07-phone-rehearsal-page');
     await driver.click('btn-rehearsal-next'); // "Try with demo funds"
     await driver.findByTestID('balance', { timeoutMs: 15_000 });
-    await driver.waitForText('Đ100.00', { timeoutMs: 15_000 });
+    await driver.waitForText('∂100.00', { timeoutMs: 15_000 });
     await sleep(600);
     await shoot(driver, 'A10-phone-wallet-pay');
 
@@ -69,12 +69,21 @@ async function run() {
     await sleep(1200);
     await shoot(driver, 'A11-phone-receive-coach');
 
-    // Balances → TripPassport card (3/4 stamps after onboarding).
+    // Balances (UX round 4: passport card GONE — the sheet is the asset list only).
     await driver.click('tab-pay');
     await openBalances(driver);
     await sleep(700);
-    await shoot(driver, 'A12-phone-balances-passport-card');
+    await shoot(driver, 'A12-phone-balances-sheet');
     await driver.click('btn-balances-close');
+
+    // TripStrip (home) → the archive (the strip is the live entry; the archive the record).
+    await driver.findByTestID('trip-strip', { timeoutMs: 5_000 });
+    await shoot(driver, 'A12b-phone-trip-strip');
+    await driver.click('btn-trip-strip');
+    await driver.findByTestID('passport-archive', { timeoutMs: 8_000 });
+    await sleep(800);
+    await shoot(driver, 'A15-phone-passport-archive');
+    await driver.click('btn-passport-close');
 
     // Settings → sheet, How-it-works replay, Trip readiness archive.
     await driver.click('btn-settings');
@@ -105,13 +114,13 @@ async function run() {
     await driver.click('btn-how-it-works');
     await driver.findByTestID('walkthrough', { timeoutMs: 8_000 });
     await sleep(1000);
-    await shoot(driver, 'B03-desktop-settings-replay-ESCAPED');
+    await shoot(driver, 'B03-desktop-settings-replay');
     await driver.click('btn-walkthrough-close');
     await driver.findByTestID('btn-trip-readiness', { timeoutMs: 5_000 });
     await driver.click('btn-trip-readiness');
     await driver.findByTestID('passport-archive', { timeoutMs: 8_000 });
     await sleep(800);
-    await shoot(driver, 'B04-desktop-passport-archive-ESCAPED');
+    await shoot(driver, 'B04-desktop-passport-archive');
     await driver.click('btn-passport-close');
     // Balances sheet at desktop for comparison (another Modal).
     await driver.click('btn-settings-close');

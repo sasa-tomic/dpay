@@ -67,8 +67,8 @@ const ASSETS: SelectableAsset[] = [
 ];
 
 describe('glyphFor', () => {
-  test('DEMO maps to the brand-tangerine Đ chip', () => {
-    expect(glyphFor(ASSETS[0])).toEqual({glyph: 'Đ', color: '#D8450D', bg: 'rgba(255,90,31,0.10)'});
+  test('DEMO maps to the brand-tangerine ∂ chip', () => {
+    expect(glyphFor(ASSETS[0])).toEqual({glyph: '∂', color: '#D8450D', bg: 'rgba(255,90,31,0.10)'});
   });
   test('ckBTC → ₿ amber, ckETH → Ξ indigo, ckUSDC → $ blue', () => {
     expect(glyphFor(ASSETS[1]).glyph).toBe('₿');
@@ -93,7 +93,7 @@ describe('AssetGlyph component', () => {
       tree = renderer.create(<AssetGlyph asset={ASSETS[0]} />);
     });
     const texts = tree.root.findAll(node => typeof node.props.children === 'string');
-    expect(texts.some(t => t.props.children === 'Đ')).toBe(true);
+    expect(texts.some(t => t.props.children === '∂')).toBe(true);
     act(() => {
       tree.unmount();
     });

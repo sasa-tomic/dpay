@@ -72,7 +72,7 @@ describe('buildAssetBalances — per-asset balance map', () => {
       solState: {balance: null, status: 'unavailable'},
       usdcState: {amount: null, decimals: null, status: 'unavailable'},
     });
-    expect(online['ic:0'].displayText).toBe('Đ100.00');
+    expect(online['ic:0'].displayText).toBe('∂100.00');
     expect(online['ic:0'].status).toBe('ok');
 
     const offline = buildAssetBalances({
@@ -80,7 +80,7 @@ describe('buildAssetBalances — per-asset balance map', () => {
       solState: {balance: null, status: 'unavailable'},
       usdcState: {amount: null, decimals: null, status: 'unavailable'},
     });
-    expect(offline['ic:0'].displayText).toBe('~Đ91.00');
+    expect(offline['ic:0'].displayText).toBe('~∂91.00');
     expect(offline['ic:0'].status).toBe('ok'); // DEMO never dims, even offline
   });
 

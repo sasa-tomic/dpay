@@ -95,7 +95,7 @@ export async function run() {
     // them in full, this flow just needs the funded wallet behind them.
     await skipRehearsalIfPresent(driver);
     await driver.findByTestID('balance', { timeoutMs: 10_000 });
-    await driver.waitForText('Đ100.00', { timeoutMs: 15_000 });
+    await driver.waitForText('∂100.00', { timeoutMs: 15_000 });
     await driver.waitForText('wlk', { timeoutMs: 5_000 });
     console.log('[88-walkthrough] ✓ wallet created + funded (Pay surface)');
 

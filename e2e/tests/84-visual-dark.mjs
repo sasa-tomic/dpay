@@ -80,7 +80,10 @@ export async function run() {
     // 1. Onboard a funded wallet ($100 demo). Lands on the Pay tab.
     console.log('[84-visual-dark] onboarding…');
     await onboardWallet(driver, 'e2e-visual-dark');
-    await driver.waitForText('Đ100.00', { timeoutMs: 5_000 });
+    await driver.waitForText('∂100.00', { timeoutMs: 5_000 });
+    // Determinism: the home TripStrip flips live when the fundsReady stamp's notify lands
+    // (the journey live seam) — wait for the settled 3-of-4 state before pixel capture.
+    await driver.findByTestID('trip-strip-dot-fundsReady-filled', { timeoutMs: 5_000 });
 
     // 2. Capture wallet-Pay surface.
     await driver.screenshot(SURFACES[0].capture);

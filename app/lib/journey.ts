@@ -105,9 +105,28 @@ export async function loadJourney(): Promise<Journey> {
 async function persistJourney(j: Journey): Promise<void> {
   try {
     await AsyncStorage.setItem(JOURNEY_STORAGE_KEY, JSON.stringify(j));
+    notify(j);
   } catch (e) {
     console.warn('journey: persist failed (ignored):', e instanceof Error ? e.message : String(e));
   }
+}
+
+/**
+ * Live subscription seam (2026-08-23 founder review: "4 trip readiness objectives
+ * that don't complete/close"). `useJourney` loads ONCE on mount — a stamp awarded
+ * by ANOTHER mounted surface (paymentTested in PayMode, fundsReady via
+ * useFundsReady, tripReady by the passport capstone) never reached the TripStrip /
+ * passport card until a full remount, so readiness visibly stalled. Every persist
+ * now notifies every live subscriber: one store, many live readers, zero staleness.
+ */
+type Sub = (j: Journey) => void;
+const subs = new Set<Sub>();
+function notify(j: Journey): void {
+  for (const s of subs) s(j);
+}
+function subscribe(fn: Sub): () => void {
+  subs.add(fn);
+  return () => { subs.delete(fn); };
 }
 
 /**
@@ -152,7 +171,10 @@ export function useJourney(): {journey: Journey; award: (key: StampKey) => void;
   useEffect(() => {
     let alive = true;
     loadJourney().then(j => { if (alive) { setJourney(j); setLoaded(true); } }).catch(() => {});
-    return () => { alive = false; };
+    // Live seam: any persist from ANY surface (awardStamp/markSeen elsewhere) pushes
+    // the fresh journey here — stamps complete on screen, no remount needed.
+    const unsub = subscribe(j => { if (alive) setJourney(j); });
+    return () => { alive = false; unsub(); };
   }, []);
   const award = useCallback((key: StampKey) => {
     // Fail-soft optimistic update: state moves immediately; the persisted store is

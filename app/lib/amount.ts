@@ -136,7 +136,7 @@ export function cmpRaw(a: string, b: string): -1 | 0 | 1 {
  *   so a wayward refund that over-subtracts never renders a negative raw string.
  *
  * MC5 KEY INVARIANT: the map is KEYED BY CURRENCY — a currency-1 (ckBTC) offline spend MUST NOT
- * reduce the DEMO (currency-0) Đ balance. The lookup is `offlineMap[currency]`, so cross-currency
+ * reduce the DEMO (currency-0) ∂ balance. The lookup is `offlineMap[currency]`, so cross-currency
  * isolation is structural. Mirrors the canister's per-currency ledger segregation (dpay never
  * swaps): each asset's display lives independently. Used by Wallet for both the DEMO header
  * (`currency=0`) and every per-asset card / balance gate (`currency=1..N`).

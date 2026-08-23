@@ -32,7 +32,7 @@ export async function run() {
     await faucetAccount(env.relayBaseURL, alice.publicHex, 10_000);
     const alicePrincipal = await railPrincipalText(alice.publicHex);
 
-    // --- Merchant B: onboarded, with an OPEN Đ25 request. --------------------------------------
+    // --- Merchant B: onboarded, with an OPEN ∂25 request. --------------------------------------
     await onboardWallet(env.driver, 'e2e-merchant');
     const bob = await accountOf(env.driver);
     const bobHex = bob.publicHex;
@@ -42,7 +42,7 @@ export async function run() {
     const requestQR = await env.driver.eval(() => window.__DPAY_QR_LAST);
     const req = decodeRequest(requestQR);
     assertEqHex(req.toHex, bobHex, 'request QR payee must be merchant B');
-    assertEq(req.amount, '2500', 'request QR amount must be Đ25.00');
+    assertEq(req.amount, '2500', 'request QR amount must be ∂25.00');
 
     // --- Payer signs an icrc1_transfer envelope bound to the request (memo = nonce). -----------
     const catalog = (await (await fetch(`${env.relayBaseURL}/api/v1/currencies`)).json()).currencies;
@@ -58,9 +58,9 @@ export async function run() {
     await env.driver.eval((payload) => window.__DPAY_TEST_SCAN(payload), envelopeB64);
 
     // --- The Received flip — B's app submitted + reconciled the transfer via read_state. -------
-    const received = await env.driver.waitForText('Received Đ25.00', {timeoutMs: 12_000});
-    assert(received, 'B should reach the "Received Đ25.00" screen after scanning the payer\'s envelope');
-    console.log(`[${meta.name}] ✓ B app shows "Received Đ25.00" (B submitted + reconciled)`);
+    const received = await env.driver.waitForText('Received ∂25.00', {timeoutMs: 12_000});
+    assert(received, 'B should reach the "Received ∂25.00" screen after scanning the payer\'s envelope');
+    console.log(`[${meta.name}] ✓ B app shows "Received ∂25.00" (B submitted + reconciled)`);
 
     // --- Ledger truth: B credited, alice debited once. -----------------------------------------
     const bobLedger = await getBalance(env.relayBaseURL, bobHex, 0);
@@ -70,8 +70,8 @@ export async function run() {
     console.log(`[${meta.name}] ✓ ledger: B 12500 / alice 7500`);
 
     // --- B's on-screen balance picked up the credit (poll-driven). -----------------------------
-    const bobUp = await env.driver.waitForText('Đ125.00', {timeoutMs: 10_000});
-    assert(bobUp, 'B on-screen balance should be Đ125.00 after the scan-settle');
+    const bobUp = await env.driver.waitForText('∂125.00', {timeoutMs: 10_000});
+    assert(bobUp, 'B on-screen balance should be ∂125.00 after the scan-settle');
 
     await env.driver.screenshot('21-receive-scan');
     const elapsed = ((Date.now() - start) / 1000).toFixed(2);

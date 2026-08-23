@@ -20,7 +20,7 @@
 import { setup, assert, assertIncludes, getBalance, onboardWallet } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
-const PAY_CENTS = 2500; // Đ25.00 (DEMO_USD = currency 0, the wallet asset)
+const PAY_CENTS = 2500; // ∂25.00 (DEMO_USD = currency 0, the wallet asset)
 const MERCHANT_NAME = 'Bob';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
@@ -48,11 +48,11 @@ export async function run() {
     const bobBefore = await getBalance(relayBaseURL, bob.publicHex, 0);
     assert(bobBefore === '0', `payee B must start at 0, got ${bobBefore}`);
 
-    // --- wallet A: onboarded in the browser (the payer, funded Đ100 by the faucet). -----------
+    // --- wallet A: onboarded in the browser (the payer, funded ∂100 by the faucet). -----------
     console.log('[49-deeplink-request] onboarding wallet A (payer)…');
     await onboardWallet(driver, 'e2e-deeplink');
 
-    // --- B's request blob: to=B, amount=Đ25, fresh nonce, +10min expiry, currency 0, name 'Bob'.
+    // --- B's request blob: to=B, amount=∂25, fresh nonce, +10min expiry, currency 0, name 'Bob'.
     //     This is the EXACT base64url blob the merchant's QR carries (buildRequestQR) — the deeplink
     //     wraps it in `dpay:req/<blob>`; on web it rides as `?req=<blob>`. ----------------------
     const nonce = randNonceHex();
@@ -74,7 +74,7 @@ export async function run() {
     //     payer must be ON the review screen (btn-approve visible) and NOT on the Paid screen. -----
     await driver.findByTestID('pay-amount', { timeoutMs: 6_000 });
     const payAmt = await driver.readText('pay-amount');
-    assert(payAmt.includes('Đ25.00'), `review should show "Pay Đ25.00", got "${payAmt}"`);
+    assert(payAmt.includes('∂25.00'), `review should show "Pay ∂25.00", got "${payAmt}"`);
     const reviewBody = await driver.bodyText();
     assertIncludes(reviewBody, MERCHANT_NAME, 'review should name the merchant from the deeplink');
     // SECURITY INVARIANT: the deeplink prefilled review only — it must NOT have reached Paid.
@@ -89,11 +89,11 @@ export async function run() {
     await driver.click('btn-approve', { timeoutMs: 5_000 });
     const paid = await driver.waitForText('Paid', { timeoutMs: 10_000 });
     assert(paid, 'payer should reach the Paid screen after the relay settles the prefilled request');
-    const aliceDown = await driver.waitForText('Đ75.00', { timeoutMs: 10_000 });
-    assert(aliceDown, 'payer A balance should be Đ75.00 (Đ100 − Đ25) after the settle');
+    const aliceDown = await driver.waitForText('∂75.00', { timeoutMs: 10_000 });
+    assert(aliceDown, 'payer A balance should be ∂75.00 (∂100 − ∂25) after the settle');
     const bobAfter = await getBalance(relayBaseURL, bob.publicHex, 0);
     assert(String(bobAfter) === String(PAY_CENTS), `payee B balance after settle: expected ${PAY_CENTS}, got ${bobAfter}`);
-    console.log(`[49-deeplink-request] ✓ settled: A Đ100→Đ75, B 0→Đ25 (real FakeLedger settle of the deeplink blob)`);
+    console.log(`[49-deeplink-request] ✓ settled: A ∂100→∂75, B 0→∂25 (real FakeLedger settle of the deeplink blob)`);
 
     await driver.screenshot('49-deeplink-request');
 

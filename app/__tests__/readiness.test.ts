@@ -88,19 +88,19 @@ describe('decideFundsReady', () => {
   });
 
   test('DEMO funded (status ok, real text): ready', () => {
-    expect(decideFundsReady({demo: view('Đ100.00', 'ok')})).toBe(true);
+    expect(decideFundsReady({demo: view('∂100.00', 'ok')})).toBe(true);
   });
 
   test('DEMO null balance ("—" but status ok): NOT ready — no displayable money', () => {
     expect(decideFundsReady({demo: view('—', 'ok')})).toBe(false);
   });
 
-  test('offline approx value (~Đ91.00): ready — approximations come from funded reality', () => {
-    expect(decideFundsReady({demo: view('~Đ91.00', 'ok')})).toBe(true);
+  test('offline approx value (~∂91.00): ready — approximations come from funded reality', () => {
+    expect(decideFundsReady({demo: view('~∂91.00', 'ok')})).toBe(true);
   });
 
   test('zero / unavailable / error / loading / absent never count', () => {
-    expect(decideFundsReady({a: view('Đ0.00', 'zero')})).toBe(false);
+    expect(decideFundsReady({a: view('∂0.00', 'zero')})).toBe(false);
     expect(decideFundsReady({a: view('—', 'unavailable')})).toBe(false);
     expect(decideFundsReady({a: view('—', 'error')})).toBe(false);
     expect(decideFundsReady({a: view('…', 'loading')})).toBe(false);

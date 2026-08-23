@@ -41,7 +41,7 @@ export async function run() {
   try {
     const { driver, relayBaseURL } = env;
 
-    // Onboard A (funded Đ100 DEMO by the faucet). Capture its identity (pubkey + secret) so the
+    // Onboard A (funded ∂100 DEMO by the faucet). Capture its identity (pubkey + secret) so the
     // currency-1 transfer can be signed Node-side with A's real on-device key.
     await onboardWallet(driver, 'e2e-alice');
     const identity = await accountOf(driver);

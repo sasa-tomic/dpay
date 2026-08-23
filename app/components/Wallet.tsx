@@ -34,6 +34,8 @@ import {SolPayMode} from './SolPayMode';
 import {SolReceiveMode} from './SolReceiveMode';
 import {SettingsSheet} from './SettingsSheet';
 import {BalancesSheet} from './BalancesSheet';
+import {PassportArchive} from './TripPassport';
+import {AppModal} from './AppModal';
 import {IconArrowDownLeft, IconChevronDown, IconClock, IconMoon, IconQr, IconSettings, IconSun} from './icons';
 import {nextTheme, themeLabel, type ThemeOverride} from '../config/theme';
 
@@ -59,6 +61,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
   // reconcile runs; `effectiveSelectedId` (the reconciled value) is what every render reads.
   const [selectedAssetId, setSelectedAssetId] = useState<AssetId | null>(null);
   const [balancesOpen, setBalancesOpen] = useState(false);
+  const [passportOpen, setPassportOpen] = useState(false);
   // Phase 5 — selection lock. While the mounted Pay/Receive engine is mid-flight (a pay review/qr/
   // paid, or a receive request-QR/result), it reports `true` via `onLockChange`. A USER-initiated
   // asset switch (Balances button, AssetPicker) is then suppressed so the active engine is not
@@ -480,7 +483,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
   // P=Pay, R=Receive, T=Top-up (demo money), A=Balances (the asset hub), L=Ledger (transactions). Active ONLY on the wallet
   // main view with no text input focused and no sheet/overlay open (Esc is handled per-sheet by
   // useEscapeToClose). Native (no physical keyboard) is a no-op; the on-UI hints are web-only too.
-  const anySheetOpen = balancesOpen || settingsOpen;
+  const anySheetOpen = balancesOpen || settingsOpen || passportOpen;
   // Phase 5 (concern B) — the Balances header button is disabled only while a PAY engine holds the
   // lock (review/QR/paid = money-critical mid-transaction; opening the sheet over a review is a
   // distraction and tapping a row would be a no-op anyway). During a RECEIVE lock (request QR shown /
@@ -656,8 +659,10 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
 
       {/* Trip Ready J5b (UX hardening 2026-08-23) — the home-surface readiness line. The passport
           lived only inside Balances/Settings ("hard to find"); this slim strip shows live progress
-          on the home screen and taps straight into the passport card. Retires itself when done. */}
-      <TripStrip onOpen={() => setBalancesOpen(true)} />
+          on the home screen and taps straight into the passport ARCHIVE (the permanent record —
+          Balances keeps only the asset list; one fact, two surfaces: strip = live entry,
+          archive = record). Retires itself when done. */}
+      <TripStrip onOpen={() => setPassportOpen(true)} />
 
       <View style={S.tabs}>
         <Tab label="Pay" active={mode === 'pay'} onPress={() => setMode('pay')} hotkey="P" icon={c => <IconQr size={16} color={c} />} />
@@ -767,6 +772,11 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
             themeChoice={themeChoice}
             onSetTheme={onSetTheme}
          />
+      ) : null}
+      {passportOpen ? (
+        <AppModal onRequestClose={() => setPassportOpen(false)}>
+          <PassportArchive onClose={() => setPassportOpen(false)} />
+        </AppModal>
       ) : null}
     </SafeAreaView>
   );

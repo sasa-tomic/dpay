@@ -13,7 +13,7 @@ import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {SheetOverlay} from './SheetOverlay';
 import {AppModal} from './AppModal';
 import {SeedWords} from './SeedWords';
-import {IconAuto, IconChevronDown, IconClose, IconExternalLink, IconInfo, IconMoon, IconSun} from './icons';
+import {IconAuto, IconCheck, IconChevronDown, IconClose, IconExternalLink, IconInfo, IconMoon, IconSun} from './icons';
 import {Walkthrough} from './Walkthrough';
 import {PassportArchive} from './TripPassport';
 import {PASSPORT_TITLE} from '../lib/readiness';
@@ -394,7 +394,7 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
               accessibilityHint="Shows your trip readiness passport — the four capability stamps"
               accessibilityState={{disabled: false}}>
               <View style={S.linkRow}>
-                <View style={{width: 14, height: 14, borderRadius: 7, borderWidth: 1.5, borderColor: C.brand}} />
+                <IconCheck size={16} color={C.sub} />
                 <Text style={S.linkText}>{PASSPORT_TITLE}</Text>
               </View>
             </Pressable>

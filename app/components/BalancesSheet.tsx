@@ -5,7 +5,6 @@ import {useEscapeToClose} from '../hooks/useHotkeys';
 import {SheetOverlay} from './SheetOverlay';
 import {CurrencyRow} from './CurrencyRow';
 import {HotkeyHint} from './HotkeyHint';
-import {TripPassport} from './TripPassport';
 import {IconClose, IconPlus} from './icons';
 import {type SelectableAsset} from '../config/assets';
 import {type BalanceView} from '../lib/assetBalances';
@@ -66,11 +65,12 @@ export function BalancesSheet({assets, balances, selectedId, onSelect, hasTestne
           </Pressable>
         </View>
         <ScrollView contentContainerStyle={S.sheetCenter} keyboardShouldPersistTaps="handled">
-          {/* Trip Ready J5b — the Trip Readiness passport page. Top of the sheet, above the
-              asset list: four finite capability stamps (private, local — no counters beyond
-              n/4, no amounts). Renders null when collapsed/completed-and-Done; never animates
-              on first paint (visual baselines capture this sheet immediately on open). */}
-          <TripPassport />
+          {/* UX hardening round 4 (2026-08-23): the Trip Readiness passport card is GONE from
+              Balances — the same 4 stamps rendered on three surfaces (home strip, this card,
+              Settings archive) was founder-flagged redundancy ("widgets that don't serve any
+              purpose") and it pushed the asset list (this sheet's ONE job) below the fold.
+              Readiness now lives in exactly two surfaces: the home TripStrip (live entry,
+              taps into the archive) and the Settings/strip archive (the permanent record). */}
           <Text style={S.dim2}>Tap a currency to show it on your home screen. Receive or send it from the Receive and Pay tabs.</Text>
           {assets.map(asset => {
             // The pre-resolved balance view for this row. The displayText is the fully-formatted
@@ -90,7 +90,7 @@ export function BalancesSheet({assets, balances, selectedId, onSelect, hasTestne
                 onPress={onTopUp}
                 accessibilityRole="button"
                 accessibilityLabel={`Get demo funds`}
-                accessibilityHint="Add Đ100 of demo money to this wallet"
+                accessibilityHint="Add ∂100 of demo money to this wallet"
                 accessibilityState={{disabled: topUpBusy}}
               >
                 {topUpBusy

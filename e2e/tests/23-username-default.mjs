@@ -3,7 +3,7 @@
 // A quick positive path: the Onboarding screen defaults an empty username to 'me' (N8's documented
 // behavior — `const name = username.trim() || 'me'` in create()). This flow proves a user can onboard
 // WITHOUT typing a username and still get a working funded wallet: the wallet mounts and the faucet
-// funds Đ100. Kept SHORT — it's a fast gate.
+// funds ∂100. Kept SHORT — it's a fast gate.
 //
 // M6 proof: (1) the username input carries `testID="username-input"` (the pre-split audit reported it
 // missing); (2) the empty-username default resolves to 'me' — verified DIRECTLY against the stored
@@ -53,17 +53,17 @@ export async function run() {
     // Trip Ready J2B/J3 — dismiss the recovery-beat + rehearsal interstitial (create path only).
     await skipRehearsalIfPresent(driver);
 
-    // The wallet mounts + the faucet funds Đ100 (the real relay path, same as flow 01).
+    // The wallet mounts + the faucet funds ∂100 (the real relay path, same as flow 01).
     await driver.findByTestID('balance', { timeoutMs: 10_000 });
-    const funded = await driver.waitForText('Đ100.00', { timeoutMs: 12_000 });
+    const funded = await driver.waitForText('∂100.00', { timeoutMs: 12_000 });
     const body = await driver.bodyText();
-    assert(funded, `wallet should fund Đ100 with the default username. body excerpt:\n${body.slice(0, 500)}`);
+    assert(funded, `wallet should fund ∂100 with the default username. body excerpt:\n${body.slice(0, 500)}`);
 
     // M6 — the default 'me' username was persisted to the stored identity. Verified directly (not via
     // the header text) so the assertion holds regardless of how the header renders the name (H4).
     const identity = await accountOf(driver);
     assertEq(identity?.username, 'me', 'the empty-username default should resolve to "me" in the stored identity');
-    console.log('[23-username-default] ✓ onboarded with default "me" + funded Đ100.00');
+    console.log('[23-username-default] ✓ onboarded with default "me" + funded ∂100.00');
 
     await driver.screenshot('23-username-default');
 

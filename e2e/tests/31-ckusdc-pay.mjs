@@ -11,7 +11,7 @@
 //       * The raw amount encoded in the request QR is byte-exact: "50000" (NOT a float-rounded
 //         "50000.0" or a 2-decimal "500" mis-encoded at DEMO's precision). This is the MC1 exact-
 //         amount discipline applied at 6 decimals — and it distinguishes from DEMO's 2-dec space
-//         (a 2-dec path would render 50000 raw as Đ500.00, NOT 0.050000 USDC).
+//         (a 2-dec path would render 50000 raw as ∂500.00, NOT 0.050000 USDC).
 //       * btn-approve is NOT disabled (the per-asset balance gate: 60_000 ≥ 50_000) → click lands
 //         on Paid. A's app signs the icrc1_transfer with the catalog fee (10_000 raw) + submits it
 //         to the fake-IC gateway.
@@ -57,7 +57,7 @@ export async function run() {
   try {
     const { driver, relayBaseURL } = env;
 
-    // --- A onboards (funded Đ100 DEMO by the faucet; will also be funded ckUSDC). ----------------
+    // --- A onboards (funded ∂100 DEMO by the faucet; will also be funded ckUSDC). ----------------
     console.log('[31-ckusdc-pay] onboarding A (payer)…');
     await onboardWallet(driver, 'e2e-alice');
     const identity = await accountOf(driver);
@@ -85,7 +85,7 @@ export async function run() {
     // --- B (the payee) builds a ckUSDC request: 0.050000 USDC = 50_000 raw 6-decimal units. -------
     // The raw amount is byte-exact: 0.05 × 10^6 = 50_000 (well below 2^53; no float loss). The
     // merchant's `toUnits("0.05", 6)` produces this same raw value via the BigInt parser. NOTE: a
-    // 2-decimal (DEMO) path would render 50_000 raw as Đ500.00 — the 6-decimal expansion to
+    // 2-decimal (DEMO) path would render 50_000 raw as ∂500.00 — the 6-decimal expansion to
     // "0.050000 USDC" is the precision contract this flow asserts.
     const bob = await generateKeypair();
     const nonce = randNonceHex();
@@ -110,7 +110,7 @@ export async function run() {
     //   decimals = display_decimals=6 from the descriptor; unit = backing_symbol="USDC".
     //   fmtAsset("50000", 6, "USDC") = "0.050000 USDC" (zero-padded to 6 fractional places).
     // NOT "$0.05" — fmtCurrencyAmount uses backing_symbol as the unit suffix, not currencySymbol's
-    // glyph. A 2-decimal (DEMO) mis-encode would render 50000 raw as Đ500.00 — the 6-dec display is
+    // glyph. A 2-decimal (DEMO) mis-encode would render 50000 raw as ∂500.00 — the 6-dec display is
     // the precision contract proof.
     await driver.findByTestID('pay-amount', { timeoutMs: 5_000 });
     const payAmt = await driver.readText('pay-amount');

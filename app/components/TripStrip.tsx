@@ -29,9 +29,9 @@ export function TripStrip({onOpen}: {onOpen: () => void}) {
   }, [loaded, reducedMotion, op]);
 
   const readiness = useMemo(() => computeReadiness(journey), [journey]);
-  // Retire: completed AND the user has seen the completion (the Balances capstone collapse marks
-  // PASSPORT_COLLAPSED_KEY). Until then the strip keeps showing "TRIP READY" — honest, and it
-  // disappears as soon as the passport's collapse fires.
+  // Retire: completed AND the user pressed Done on the archive page once (that marks
+  // PASSPORT_COLLAPSED_KEY). Until then the strip keeps showing "TRIP READY" — one tap leads
+  // to the record, Done closes the loop; the strip then never renders again.
   const retired = readiness.complete && hasSeen(journey, PASSPORT_COLLAPSED_KEY);
   if (!loaded || retired) return null;
 
@@ -62,10 +62,10 @@ export function TripStrip({onOpen}: {onOpen: () => void}) {
             );
           })}
         </View>
+        {/* UX round 4: the dots already encode n-of-4 — the phrase alone is warmer and shorter
+            (was "3 OF 4 · one payment to go": the count twice in one slim line). */}
         <Text style={S.tripStripText} numberOfLines={1}>
-          {readiness.complete
-            ? 'TRIP READY'
-            : `${readiness.filled.length} OF 4 · ${next ? next.short : ''}`}
+          {readiness.complete ? 'TRIP READY' : next ? next.short.toUpperCase() : ''}
         </Text>
       </Pressable>
     </Animated.View>

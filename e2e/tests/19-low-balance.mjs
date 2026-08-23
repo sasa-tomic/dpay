@@ -21,7 +21,7 @@
 import { setup, assert, onboardWallet, goOffline, setRelay, assertDisabled, waitForScanner } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
-const OVER_CENTS = 20_000; // Đ200.00 — exceeds the Đ100.00 faucet-funded balance
+const OVER_CENTS = 20_000; // ∂200.00 — exceeds the ∂100.00 faucet-funded balance
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -53,7 +53,7 @@ export async function run() {
     };
 
     // --- 1. OFFLINE review-lowbal: payer offline, amount > local balance → warning shows. --------
-    // Onboard against the GOOD relay (Đ100 funded → balance known, online=true initially).
+    // Onboard against the GOOD relay (∂100 funded → balance known, online=true initially).
     console.log('[19-low-balance] onboarding…');
     await onboardWallet(driver, 'e2e-lowbal');
 
@@ -65,8 +65,8 @@ export async function run() {
     const approx = await driver.waitForText('approx.', { timeoutMs: 8_000 });
     assert(approx, 'the header should show the offline indicator ("~ DEMO approx.") once offline');
 
-    // Scan a Đ200 request (> the ~Đ100 local balance) → review screen renders the low-balance warning.
-    console.log('[19-low-balance] scanning a Đ200 request while offline…');
+    // Scan a ∂200 request (> the ~∂100 local balance) → review screen renders the low-balance warning.
+    console.log('[19-low-balance] scanning a ∂200 request while offline…');
     const offlineReq = buildReq();
     await driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), offlineReq);
     await driver.findByTestID('pay-amount', { timeoutMs: 5_000 });
@@ -84,7 +84,7 @@ export async function run() {
     // Wait for the header to drop the offline indicator (online=true) before scanning.
     await driver.waitForText('balance', { timeoutMs: 8_000 });
 
-    // Scan a Đ200 request while ONLINE + Đ100 balance. We KNOW online the balance can't cover it,
+    // Scan a ∂200 request while ONLINE + ∂100 balance. We KNOW online the balance can't cover it,
     // so the app now gates PRE-SUBMIT (no doomed /pay): it shows a balance warning above the button
     // AND disables btn-approve. (The relay's InsufficientFunds→"Not enough balance" surfacing stays
     // unit-tested in payments.ts; the C1 "any error disables the button" pattern is proven in 10.)

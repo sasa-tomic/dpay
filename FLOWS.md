@@ -37,10 +37,10 @@ wire (1) · onboard (13) · pay (18) · offline (8) · deposit (8) · withdraw (
 
 | # | Flow | Verifies | Covers |
 |---|------|----------|--------|
-| 01 | onboard | New user enters a name → wallet created, faucet funds Đ100, balance + empty history render; custody honesty copy present at create + backup. | onboard, faucet, first-balance, empty-history, non-custodial |
+| 01 | onboard | New user enters a name → wallet created, faucet funds ∂100, balance + empty history render; custody honesty copy present at create + backup. | onboard, faucet, first-balance, empty-history, non-custodial |
 | 02 | faucet | Returning user taps 'Add demo money' → faucet top-up works, balance increases. | faucet, topup, balance-delta |
 | 23 | username-default | New user leaves name empty → creates → defaults to 'me', onboards + funds. | onboard, default-username |
-| 37 | onboard-no-faucet | Onboard against a dead relay → faucet failure surfaces an honest "Continue" prompt (not a silent $0 transition), wallet created with $0 (Đ100 never shown), honest "~ DEMO approx." offline indicator, faucet fails with ECONNREFUSED. | onboard, faucet-failure, offline, dead-relay, right-reason, zero-balance |
+| 37 | onboard-no-faucet | Onboard against a dead relay → faucet failure surfaces an honest "Continue" prompt (not a silent $0 transition), wallet created with $0 (∂100 never shown), honest "~ DEMO approx." offline indicator, faucet fails with ECONNREFUSED. | onboard, faucet-failure, offline, dead-relay, right-reason, zero-balance |
 | 54 | testnet-toggle | Balances testnet toggle reveals + hides a "BTC testnet" row (catalog-driven testnet detection). | testnet, catalog, toggle, balances |
 | 58 | restore-wallet | A wallet can be restored from the 64-hex recovery seed (toggle to hex mode; no faucet; secretHex matches). | restore-seed, keypair-from-secret, both-rails-recovery, btn-restore-mode-toggle |
 | 68 | mnemonic-backup-restore | The 24 mnemonic words shown at create time recover the exact same wallet keypair (publicHex match) when entered on restore. | mnemonic-backup, mnemonic-word-{0..23}, mnemonic-backup-checkbox, btn-mnemonic-continue, restore-mnemonic-input, bip39-round-trip, restore-via-mnemonic |
@@ -134,7 +134,7 @@ wire (1) · onboard (13) · pay (18) · offline (8) · deposit (8) · withdraw (
 | 14 | keyboard | Single-key shortcuts (P/R/T/A/L/Esc) switch tabs / top-up / add-money / ledger / close sheet; input + sheet guards work; keyboard focus paints the brand :focus-visible ring (U-F4). | keyboard-shortcuts, tabs, sheet-guard, input-guard, focus-visible |
 | 17 | scan-cleanup | Switch Pay→Receive→Pay: QrScanner listeners tear down cleanly (no leak across unmount/remount). | qr-scanner, teardown, unmount, listener-leak |
 | 24 | wallet-cleanup | Funded non-dollar balances/history (rail faucet + icrc1_transfer on currency 1) render as asset cards/rows with known symbols and short principal-text counterparties. | asset-cards, labels, symbols |
-| 38 | relay-retarget | Settings relay-switch retargets the LIVE balance poll: header changes from A's Đ100.00 to B's faucet-funded Đ500.00 (B's fresh per-process gateway). | relay-retarget, settings-relay-switch, live-poll |
+| 38 | relay-retarget | Settings relay-switch retargets the LIVE balance poll: header changes from A's ∂100.00 to B's faucet-funded ∂500.00 (B's fresh per-process gateway). | relay-retarget, settings-relay-switch, live-poll |
 | 41 | a11y-census | Every interactive element (btn-*/tab-*/inputs/picker rows) carries a non-empty aria-label + role on every primary surface. | a11y, accessibility, aria |
 | 55 | balances-select-asset | Selecting an asset in Balances binds the header: label DEMO→ckBTC→SOL and the balance text follows the active-rail branch. | asset-select, header-balance-binding, active-asset-label |
 | 57 | settings-seed-backup | Seed stays hidden behind a confirm gate; once revealed the 24 mnemonic words show by default, hex view toggles in and matches identity.secretHex; copy writes the seed to the real clipboard. | seed-backup, confirm-gate, secret-reveal, clipboard-copy, mnemonic-backup, mnemonic-word-{0..23}, btn-backup-show-hex, btn-copy-mnemonic, btn-copy-seed |

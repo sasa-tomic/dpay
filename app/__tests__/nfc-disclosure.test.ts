@@ -38,7 +38,7 @@ describe('resolveNfcDisclosure — ckBTC (currency 1) honest disclosure', () => 
 
   it('NEVER returns a DEMO/∂ formatted amount for ckBTC (the blind-tap bug)', () => {
     const d = resolveNfcDisclosure(KNOWN_CATALOG, {currency: 1, amount: '50000'});
-    expect(d!.formattedAmount).not.toMatch(/^Đ/);
+    expect(d!.formattedAmount).not.toMatch(/^∂/);
     expect(d!.formattedAmount).not.toMatch(/^\$/);
   });
 });
@@ -54,19 +54,19 @@ describe('resolveNfcDisclosure — ckUSDC (currency 2) honest disclosure', () =>
 });
 
 describe('resolveNfcDisclosure — DEMO (currency 0) internal play money', () => {
-  it('returns {DEMO, null network, "Đ50.00"} — DEMO has no external network to disclose', () => {
+  it('returns {DEMO, null network, "∂50.00"} — DEMO has no external network to disclose', () => {
     const d = resolveNfcDisclosure(KNOWN_CATALOG, {currency: 0, amount: '5000'});
     expect(d).not.toBeNull();
     expect(d!.assetName).toBe('DEMO');
     expect(d!.networkLabel).toBeNull();
-    expect(d!.formattedAmount).toBe('Đ50.00');
+    expect(d!.formattedAmount).toBe('∂50.00');
   });
 
   it('DEMO resolves even against an empty catalog (always payable, amount always formattable)', () => {
     const d = resolveNfcDisclosure([], {currency: 0, amount: '10000'});
     expect(d).not.toBeNull();
     expect(d!.assetName).toBe('DEMO');
-    expect(d!.formattedAmount).toBe('Đ100.00');
+    expect(d!.formattedAmount).toBe('∂100.00');
   });
 });
 
@@ -105,6 +105,6 @@ describe('resolveNfcDisclosure — BUNDLED_CATALOG real values', () => {
   });
   it('DEMO in the bundled catalog resolves exactly', () => {
     const d = resolveNfcDisclosure(BUNDLED_CATALOG, {currency: 0, amount: '5000'});
-    expect(d).toEqual({assetName: 'DEMO', networkLabel: null, formattedAmount: 'Đ50.00'});
+    expect(d).toEqual({assetName: 'DEMO', networkLabel: null, formattedAmount: '∂50.00'});
   });
 });

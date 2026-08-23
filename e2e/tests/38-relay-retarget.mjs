@@ -5,10 +5,10 @@
 // that no longer reflects their position). Flow 12 only proves the relay URL EDITS + PERSISTS; it
 // never proves the poll actually retargets mid-session. This flow does.
 //
-// Gold-standard proof (second-relay variant): onboard on relay A (Đ100.00 from the faucet) → spawn a
-// SECOND independent relay B → fund a DISTINCT DEMO balance on B (Đ500.00) for the SAME account via
+// Gold-standard proof (second-relay variant): onboard on relay A (∂100.00 from the faucet) → spawn a
+// SECOND independent relay B → fund a DISTINCT DEMO balance on B (∂500.00) for the SAME account via
 // B's own faucet → switch the app to relay B via Settings (btn-relay-apply) → assert the header
-// balance changes from Đ100.00 to Đ500.00. This proves the poll BOTH stopped hitting A AND started
+// balance changes from ∂100.00 to ∂500.00. This proves the poll BOTH stopped hitting A AND started
 // hitting B (the full retarget contract). The dead-relay variant would only prove the poll stopped
 // hitting A.
 //
@@ -25,7 +25,7 @@
 import { setup, assert, faucetAccount, onboardWallet, accountOf } from '../harness/lib.mjs';
 import { startRelay } from '../harness/relay.mjs';
 
-const FUND_RAW_DEMO_B = 50_000; // Đ500.00 on relay B (distinct from A's Đ100.00 faucet)
+const FUND_RAW_DEMO_B = 50_000; // ∂500.00 on relay B (distinct from A's ∂100.00 faucet)
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -35,7 +35,7 @@ export const meta = {
   name: 'relay-retarget',
   journey: 'system',
   covers: ['relay-retarget', 'settings-relay-switch', 'live-poll'],
-  verifies: 'Settings relay-switch retargets the LIVE balance poll: header changes from A\'s Đ100.00 to B\'s faucet-funded Đ500.00 (B\'s fresh per-process gateway).',
+  verifies: 'Settings relay-switch retargets the LIVE balance poll: header changes from A\'s ∂100.00 to B\'s faucet-funded ∂500.00 (B\'s fresh per-process gateway).',
   timeoutMs: 20000,
 };
 
@@ -49,22 +49,22 @@ export async function run() {
   try {
     const { driver } = env;
 
-    console.log('[38-relay-retarget] onboarding on relay A (funds Đ100.00)…');
+    console.log('[38-relay-retarget] onboarding on relay A (funds ∂100.00)…');
     await onboardWallet(driver, 'e2e-retarget');
     const identity = await accountOf(driver);
     const accountHex = identity.publicHex;
 
-    // Fund a DISTINCT DEMO balance on relay B (Đ500.00). Relay A's gateway holds Đ100.00 from the
+    // Fund a DISTINCT DEMO balance on relay B (∂500.00). Relay A's gateway holds ∂100.00 from the
     // faucet, so after retarget the header MUST change if the poll followed the switch. Direct POST
     // to B's faucet — no app switch needed (the helper takes the relay URL explicitly).
-    console.log(`[38-relay-retarget] funding ${FUND_RAW_DEMO_B} raw (Đ500.00) on relay B (${r2.baseURL})…`);
+    console.log(`[38-relay-retarget] funding ${FUND_RAW_DEMO_B} raw (∂500.00) on relay B (${r2.baseURL})…`);
     const funded = await faucetAccount(r2.baseURL, accountHex, FUND_RAW_DEMO_B);
     assert(funded.ok, `relay-B faucet should succeed, got status ${funded.status}: ${JSON.stringify(funded.body)}`);
 
     // Switch the app to relay B via Settings. The polls retarget LIVE (SettingsSheet.applyRelay →
     // setRelayUrl → Wallet prop → poll effect re-runs) — no reload needed. The balance-poll hook now
     // aborts in-flight fetches from relay A on the relayUrl change + rejects stale results via a
-    // generation ref (OPEN_ISSUES #6), so the header reflects relay B's Đ500.00 promptly.
+    // generation ref (OPEN_ISSUES #6), so the header reflects relay B's ∂500.00 promptly.
     //
     // NOTE: W1.B's "Advanced" disclosure (btn-advanced-toggle) wraps the relay section and now
     // DEFAULTS COLLAPSED (the founder-directed consumer posture). The flow expands it before typing
@@ -76,12 +76,12 @@ export async function run() {
     await driver.click('btn-relay-apply', { timeoutMs: 4_000 });
     await driver.click('btn-settings-close', { timeoutMs: 4_000 });
 
-    // The header balance must change to relay B's Đ500.00 — proving the poll now hits B (not A's
-    // Đ100.00). The fast-poll seam (150ms) surfaces the new value within ~1s.
-    console.log('[38-relay-retarget] waiting for the balance to retarget to B (Đ500.00)…');
-    const retargeted = await driver.waitForText('Đ500.00', { timeoutMs: 9_000 });
-    assert(retargeted, 'balance should retarget to relay B\'s Đ500.00 after the relay switch (poll must follow the live URL)');
-    console.log('[38-relay-retarget] ✓ balance now reflects relay B (Đ500.00) — poll retargeted');
+    // The header balance must change to relay B's ∂500.00 — proving the poll now hits B (not A's
+    // ∂100.00). The fast-poll seam (150ms) surfaces the new value within ~1s.
+    console.log('[38-relay-retarget] waiting for the balance to retarget to B (∂500.00)…');
+    const retargeted = await driver.waitForText('∂500.00', { timeoutMs: 9_000 });
+    assert(retargeted, 'balance should retarget to relay B\'s ∂500.00 after the relay switch (poll must follow the live URL)');
+    console.log('[38-relay-retarget] ✓ balance now reflects relay B (∂500.00) — poll retargeted');
 
     await driver.screenshot('38-relay-retarget');
 

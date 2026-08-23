@@ -31,10 +31,10 @@ export async function run() {
   try {
     const { driver, relayBaseURL } = env;
 
-    // 1. Onboard a funded wallet (Đ100 DEMO via the onboarding faucet).
+    // 1. Onboard a funded wallet (∂100 DEMO via the onboarding faucet).
     console.log('[39-store-screens] onboarding…');
     await onboardWallet(driver, 'Alex');
-    await driver.waitForText('Đ100.00', { timeoutMs: 5_000 });
+    await driver.waitForText('∂100.00', { timeoutMs: 5_000 });
 
     const account = await accountOf(driver);
     const hex = account.publicHex;
@@ -48,7 +48,7 @@ export async function run() {
     // Wait for the balance poll to reflect funded amounts.
     await driver.waitForText('0.05000', { timeoutMs: 8_000 }).catch(() => {});
 
-    // 3. Do a payment so the Ledger has history: Alex requests Đ12.50, an in-test payer wallet
+    // 3. Do a payment so the Ledger has history: Alex requests ∂12.50, an in-test payer wallet
     // settles it on the rail (icrc1_transfer with memo = request nonce).
     await driver.click('tab-receive', { timeoutMs: 4_000 });
     await driver.type('amount-input', '12.50', { timeoutMs: 4_000 });
@@ -59,12 +59,12 @@ export async function run() {
     const payer = await generateKeypair();
     await faucetCurrency(relayBaseURL, payer.publicHex, 0, 10_000);
     const pay = await railTransfer(relayBaseURL, payer.secretHex, hex, 1250n, {memoHex: req.nonceHex});
-    assert(pay.ok === true && pay.status === 202, `the Đ12.50 rail payment must be accepted (202), got ${JSON.stringify(pay)}`);
+    assert(pay.ok === true && pay.status === 202, `the ∂12.50 rail payment must be accepted (202), got ${JSON.stringify(pay)}`);
 
     // === CAPTURE 1: Wallet home (Pay tab) — the hero shot with multi-asset balances ============
-    // (Đ100 onboarding + Đ12.50 received = Đ112.50 once the balance poll lands.)
+    // (∂100 onboarding + ∂12.50 received = ∂112.50 once the balance poll lands.)
     await driver.click('tab-pay', { timeoutMs: 4_000 });
-    await driver.waitForText('Đ112.50', { timeoutMs: 8_000 });
+    await driver.waitForText('∂112.50', { timeoutMs: 8_000 });
     await driver.screenshot('39-store-wallet');
     console.log('[39-store-screens] ✓ wallet home');
 

@@ -17,7 +17,7 @@
 import { setup, assert, assertIncludes, getBalance, onboardWallet, accountOf, railTransfer, railPrincipalText, faucetAccount } from '../harness/lib.mjs';
 import { generateKeypair } from '../harness/wire.mjs';
 
-const PAY_CENTS = 2500; // Đ25.00
+const PAY_CENTS = 2500; // ∂25.00
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -43,13 +43,13 @@ export async function run() {
     const alice = await accountOf(driver);
     const alicePub = alice.publicHex;
 
-    // --- wallet B (payer): generated in-test, fauceted Đ100, pays the request on the rail. -----
+    // --- wallet B (payer): generated in-test, fauceted ∂100, pays the request on the rail. -----
     const bob = await generateKeypair();
     const bobPrincipal = await railPrincipalText(bob.publicHex);
     const fund = await faucetAccount(relayBaseURL, bob.publicHex, 10000);
     assert(fund.ok, `payer B faucet should succeed, got status ${fund.status}: ${JSON.stringify(fund.body)}`);
 
-    // --- A creates a Đ25 receive request; read the QR the app rendered (nonce = memo). --------
+    // --- A creates a ∂25 receive request; read the QR the app rendered (nonce = memo). --------
     await driver.click('tab-receive', { timeoutMs: 4_000 });
     await driver.type('amount-input', '25.00', { timeoutMs: 4_000 });
     await driver.click('btn-request', { timeoutMs: 4_000 });
