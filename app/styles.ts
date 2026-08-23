@@ -495,7 +495,7 @@ function buildStyles(p: Palette) {
   // scene's illustration occupies the same stage (visual continuity across the pager).
   walkStage: {alignSelf: 'stretch', backgroundColor: p.panel, borderRadius: 22, borderWidth: 1, borderColor: p.line2, overflow: 'hidden', marginTop: 26, aspectRatio: 1.32, ...LIFT_SM},
   // Corner marker on the plate — the travel-document detail ("01 — SIGNAL"): mono, top-right.
-  walkStageTag: {position: 'absolute', top: 12, right: 16, fontSize: 10, fontWeight: '600', color: p.sub2, letterSpacing: 1.4, fontFamily: FONT.mono},
+  walkStageTag: {position: 'absolute', top: 12, right: 16, fontSize: 10, fontWeight: '600', color: p.brand, letterSpacing: 1.4, fontFamily: FONT.mono, borderWidth: 1, borderColor: p.line2, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3, transform: [{rotate: '3deg'}], opacity: 0.9},
   walkFooter: {paddingHorizontal: 24, paddingBottom: 14, paddingTop: 18},
   // Dots row: relative so the Back link can sit absolutely at the left while the dots center.
   walkNavRow: {position: 'relative', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 12, minHeight: 34},

@@ -496,9 +496,11 @@ export function Walkthrough({onDone, onSkip, onClose, reducedMotion}: Walkthroug
         {WALKTHROUGH_SCENES.map((_scene, k) => (k === i ? <Scene key={k} index={k} reduced={reduced} /> : null))}
       </View>
 
-      {/* Footer: campaign send-off (final scene) · Back + dots · Next/Get started */}
+      {/* Footer: the campaign line runs under EVERY scene (UX hardening 2026-08-23: was
+          final-scene-only — the message the whole walkthrough exists for wasn't visible until
+          the last tap) · Back + dots · Next/Get started */}
       <View style={S.walkFooter}>
-        {last ? <CampaignStrip reduced={reduced} /> : null}
+        <CampaignStrip reduced={reduced} />
         <View style={S.walkNavRow}>
           {i > 0 ? (
             <Pressable
