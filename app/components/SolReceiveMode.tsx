@@ -393,6 +393,9 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
   return (
     <View style={S.center}>
       {toggle}
+      {/* Trip Ready J4 (UX hardening 2026-08-23) — entry-form mount, same one-time marker as the
+          IC ReceiveMode (was: only visible after pressing Request). */}
+      <CoachTip tipKey="receiveRequest" />
       <Text style={S.label}>Amount to receive</Text>
       <View style={S.amountRow}>
         <Pressable

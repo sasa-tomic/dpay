@@ -369,6 +369,10 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
           right={{label: 'My address', value: 'address', testID: 'btn-receive-address'}}
         />
       ) : null}
+      {/* Trip Ready J4 (UX hardening 2026-08-23) — the coach card ALSO mounts at the ENTRY form
+          (was: only after pressing Request, so first-time receivers never saw it). Same one-time
+          seen marker — whichever surface shows it first wins; the card never returns after. */}
+      <CoachTip tipKey="receiveRequest" />
       <Text style={S.label}>Amount to receive</Text>
       <View style={S.amountRow}>
         {/* MC5: the merchant selects the EXACT settlement asset by tapping the amount prefix (glyph +

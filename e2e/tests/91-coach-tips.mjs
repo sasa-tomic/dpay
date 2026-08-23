@@ -39,12 +39,14 @@ export async function run() {
     const bob = await generateKeypair();
     await faucetAccount(env.relayBaseURL, bob.publicHex, 10_000);
 
-    // --- receiveRequest: mounts on the request-QR phase, dismiss persists across remounts. -----
+    // --- receiveRequest: mounts at the Receive ENTRY form (UX hardening 2026-08-23: was
+    // post-Request-only, so first-time receivers never saw it), dismiss persists across
+    // remounts AND the request-QR phase. -------------------------------------------------------
     await env.driver.click('tab-receive', {timeoutMs: 4_000});
+    await env.driver.findByTestID('coach-receiveRequest', {timeoutMs: 6_000});
     await env.driver.type('amount-input', '42.50', {timeoutMs: 4_000});
     await env.driver.click('btn-request', {timeoutMs: 4_000});
     await env.driver.findByTestID('request-qr', {timeoutMs: 8_000});
-    await env.driver.findByTestID('coach-receiveRequest', {timeoutMs: 6_000});
     await settle(); // entrance finish before the shot
     await env.driver.screenshot('91-coach-receive');
     await env.driver.click('btn-coach-receiveRequest-dismiss', {timeoutMs: 4_000});
