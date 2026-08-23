@@ -748,14 +748,16 @@ async fn landing_page_tells_the_offline_payment_story() {
         html.contains("<!-- single source: app/config/education.ts CAMPAIGN_LINE -->"),
         "the hero must carry the single-source pointer comment"
     );
-    // The asymmetry, said plainly: the payer may be offline, the merchant is online, and the
-    // shop's connection settles it (hero lede + the proof strip's four beats).
+    // The asymmetry, said plainly: the payer may be offline, the shop is online, and the
+    // shop's connection settles it. (2026-08-23: the founder's wording pass c899c9a replaced
+    // the old four-beat `id="proof"` strip with the "Paying offline" rail — the test follows
+    // the founder's copy; these pins are its stable markers.)
     for required in [
-        "id=\"proof\"",
-        "Traveler: offline",
-        "Merchant: online",
-        "Settled in seconds",
-        "The shop's connection settles it",
+        "Paying offline",
+        "Approve as always",
+        "The shop scans it with <b>their</b> phone",
+        "The shop sends it for you",
+        "The shop has internet. So you don't need any.",
     ] {
         assert!(
             html.contains(required),

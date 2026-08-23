@@ -97,9 +97,12 @@ export async function run() {
     assert(await driver.waitForText('Paid ✓', {timeoutMs: 12_000}), 'A back online should reconcile to Paid ✓');
 
     // --- THE PEAK: campaign moment on the first offline confirmed payment. ---------------------
+    // (Race-hardened 2026-08-23: the peak auto-settles in ~2s and the old find-then-read pair
+    // burned 3 CDP roundtrips after Paid ✓ — under full-pool load that gap exceeded the window
+    // and the line had settled away. The campaign text mounts in the SAME render as Paid, so a
+    // single waitForText started now catches it within one poll of mount, well inside 2s.)
+    assert(await driver.waitForText('Roaming off. Payment on.', {timeoutMs: 6_000}), 'the peak must carry the single-sourced campaign line');
     await driver.findByTestID('offline-peak', {timeoutMs: 3_000});
-    const peakBody = await driver.bodyText();
-    assertIncludes(peakBody, 'Roaming off. Payment on.', 'the peak must carry the single-sourced campaign line');
     await driver.screenshot('92-offline-peak-moment');
     console.log(`[${meta.name}] ✓ PEAK visible: campaign line + stamp moment`);
 
