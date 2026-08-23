@@ -367,18 +367,21 @@ function buildStyles(p: Palette) {
   backupConfirmBox: {alignSelf: 'stretch', backgroundColor: p.card, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: p.line2},
   seedBox: {alignSelf: 'stretch', backgroundColor: p.panel2, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: p.line2, marginTop: 4},
   seedText: {color: p.ink, fontFamily: FONT.mono, fontSize: 14, lineHeight: 20},
-  // Numbered BIP-39 word grid (SeedWords.tsx) — two columns, COLUMN-MAJOR (1-12 down the left,
-  // 13-24 down the right, the paper-backup reading order). `seedGrid` is the stretch container;
-  // each `seedGridRow` carries one (i, i+12) pair; `flex:1` on the chip keeps both columns
-  // equal-width so the grid stays aligned regardless of word length. The chip View carries the
-  // mnemonic-word-N testID and e2e reads its textContent with the leading index stripped — the
-  // index Text must stay FIRST inside the chip. `seedChipIdx` has a fixed width + right-align so
-  // the words of a column start at the same x.
-  seedGrid: {alignSelf: 'stretch', gap: 6, marginTop: 4, marginBottom: 8},
-  seedGridRow: {flexDirection: 'row', gap: 8},
-  seedChip: {flex: 1, flexDirection: 'row', alignItems: 'baseline', backgroundColor: p.card, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7, borderWidth: 1, borderColor: p.line2},
-  seedChipIdx: {color: p.sub2, fontFamily: FONT.mono, fontSize: 11, marginRight: 6, width: 16, textAlign: 'right'},
-  seedChipWord: {color: p.ink, fontFamily: FONT.mono, fontSize: 15},
+  // Numbered BIP-39 word grid (SeedWords.tsx) — three columns, ROW-MAJOR (1-2-3 across, 4-5-6
+  // across, …) chunked into 1-12 / 13-24 blocks by a hairline rule under the 4th row; the scan
+  // direction IS the transcription order, and the compact metrics keep all 24 words + the
+  // confirm CTA above the fold at 390×844 (UX hardening 2026-08-23, round-2 audit — was
+  // column-major (i, i+12) pairs, whose fold cut made 9-12 look missing). `seedGrid` is the
+  // stretch container; `flex:1` on the chip keeps the three columns equal-width. The chip View
+  // carries the mnemonic-word-N testID and e2e reads its textContent with the leading index
+  // stripped — the index Text must stay FIRST inside the chip. `seedChipIdx` has a fixed width +
+  // right-align so the words of a column start at the same x. BIP-39 words are ≤8 chars.
+  seedGrid: {alignSelf: 'stretch', gap: 5, marginTop: 4, marginBottom: 8},
+  seedGridRow: {flexDirection: 'row', gap: 5},
+  seedGridRule: {height: 1, backgroundColor: p.line, marginVertical: 3},
+  seedChip: {flex: 1, flexDirection: 'row', alignItems: 'baseline', backgroundColor: p.card, borderRadius: 8, paddingHorizontal: 7, paddingVertical: 5, borderWidth: 1, borderColor: p.line2},
+  seedChipIdx: {color: p.sub2, fontFamily: FONT.mono, fontSize: 10, marginRight: 4, width: 14, textAlign: 'right'},
+  seedChipWord: {color: p.ink, fontFamily: FONT.mono, fontSize: 13},
   // Keyboard-shortcut hint badge (web only — rendered by HotkeyHint). A visible "key cap": a
   // rounded square with a real border + subtle background and a mono letter. `kbdHint` is the
   // light-on-porcelain variant; `kbdHintOnBrand` flips to a white-on-tangerine variant for badges
