@@ -94,7 +94,7 @@ describe('dual theme: applyPalette', () => {
       decimals: 2, visible: true, capabilities: {onramp: 'Direct', offramp: 'Unavailable'}, testKey: 'demo',
     } as const;
     applyPalette(LIGHT);
-    expect(glyphFor(demo)).toEqual({glyph: '∂', color: '#D8450D', bg: 'rgba(255,90,31,0.10)'});
+    expect(glyphFor(demo)).toEqual({glyph: 'Đ', color: '#D8450D', bg: 'rgba(255,90,31,0.10)'});
     applyPalette(DARK);
     const g = glyphFor(demo);
     expect(g.color).toBe('#FF7A45');

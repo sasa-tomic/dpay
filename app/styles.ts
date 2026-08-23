@@ -58,7 +58,7 @@ function buildStyles(p: Palette) {
   wordmarkPay: {color: p.brand},
   wordmarkBig: {fontSize: 36, marginTop: 14},
   onboardSub: {fontSize: 15, color: p.sub, textAlign: 'center', marginTop: 8, marginBottom: 28, paddingHorizontal: 12, lineHeight: 22, fontFamily: FONT.sans},
-  // ∂ is the demo-dollar symbol — unfamiliar on first glance. The onboarding one-liner explains
+  // Đ is the demo-dollar symbol — unfamiliar on first glance. The onboarding one-liner explains
   // it inline next to the demo funds note so a first-time user has the mapping before they see
   // their balance. `dpayGlyph` carries the glyph in ink; `dpayGlyphNote` is the surrounding line.
   dpayGlyph: {color: p.ink, fontWeight: '700', fontFamily: FONT.sansBold},

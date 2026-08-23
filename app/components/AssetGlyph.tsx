@@ -30,8 +30,8 @@ export type FamilyGlyph = {
 // SOL purple. Testnet variants keep the family hue (the row label already says testnet).
 const FAMILIES: Record<string, Record<'light' | 'dark', FamilyGlyph>> = {
   demo: {
-    light: {glyph: '∂', color: '#D8450D', bg: 'rgba(255,90,31,0.10)'},
-    dark: {glyph: '∂', color: '#FF7A45', bg: 'rgba(255,122,69,0.14)'},
+    light: {glyph: 'Đ', color: '#D8450D', bg: 'rgba(255,90,31,0.10)'},
+    dark: {glyph: 'Đ', color: '#FF7A45', bg: 'rgba(255,122,69,0.14)'},
   },
   btc: {
     light: {glyph: '₿', color: '#92580B', bg: 'rgba(161,98,7,0.10)'},
