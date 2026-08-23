@@ -1,6 +1,6 @@
 // readiness.ts — the Trip Readiness passport's PURE logic (Trip Ready J5b, 2026-08-22).
 //
-// The passport is a PRIVATE capability card (spec: docs/specs/2026-08-22-trip-ready-delight-plan-IMPLEMENTED.md
+// The passport is a PRIVATE capability card (spec: docs/specs/2026-08-22-trip-ready-delight-plan-IMPLEMENTED-UX-HARDENED.md
 // Journey 5): four FINITE capability stamps — recovery saved, flow understood, funds ready,
 // payment tested. All four ⇒ TRIP READY, then the card collapses into Settings (archived, never
 // a dashboard). No counters beyond n/4, no amounts, no streaks, nothing public.

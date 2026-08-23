@@ -447,8 +447,20 @@ if a native-ETH withdrawal ever fails on prod with a minter reject mentioning
 > **Context:** founder directive to make dpay genuinely delightful through a quick first-time
 > walkthrough, capability education, non-custodial clarity, achievements, and honest motion —
 > behavioral rationale required, "fabulous" creative bar non-negotiable. Plan:
-> **`docs/specs/2026-08-22-trip-ready-delight-plan-IMPLEMENTED.md`** (renamed from
+> **`docs/specs/2026-08-22-trip-ready-delight-plan-IMPLEMENTED-UX-HARDENED.md`** (renamed from
 > `…-plan.md` at arc close, with the status block above). 7 commits on main, every gate green at each step.
+>
+> **UX-hardening pass (2026-08-23, same day):** founder review found the new surfaces "hard to
+> find" and "showing up outside the app screen". Three zai-vision audit rounds against real
+> screenshots (phone + desktop), final verdict SHIP. Fixes (9 commits, `781c9ec`→`fcafe65`):
+> desktop Modal escape → `AppModal` (SheetOverlay inside the 480px column on web); blank recovery
+> beat → full-bleed ink moment; Settings LEARN above ABOUT; receive coach at entry; home
+> TripStrip readiness row (retires at TRIP READY); humanized passport labels (BACKED UP / SAW THE
+> FLOW / FUNDS LOADED / FIRST PAYMENT) + archive dates + ink capstone; postage-mark stage tags +
+> always-on campaign strip; row-major 3-col seed grid (fold never hides words 9–12); one-page
+> rehearsal (3 badge rows, mounting awards flowUnderstood); Đ (U+0110) demo-dollar glyph replaces
+> fallback-font ∂ everywhere amounts render (wordmark/Logo SVG stay ∂ by design). jest 987/987,
+> e2e 89/89, light+dark visual baselines reseeded, typecheck clean. Details: spec status block.
 
 **Done (all committed, all gates green at each step):**
 - **`1ad750c`** — first-run walkthrough (J1): new `app/lib/journey.ts` (stamp store `dpay.journey.v1`, idempotent awards), `app/config/education.ts` (SINGLE copy source for walkthrough/rehearsal/coaching + `CAMPAIGN_LINE`), `app/hooks/useReducedMotion.ts`, `app/components/Walkthrough.tsx` (3 scenes: pay-without-signal / key-stays-on-device / exact-asset; skippable, replayable from Settings); Onboarding gates on `walkthroughDone`; e2e flows 88–89. Gates: typecheck, jest 898/898, e2e 84/84, visual baselines 40/84 reseeded, FLOWS.md regen.

@@ -12,6 +12,17 @@
 > - Related fund-first funnel: **Trust Wallet fund button** → `43b1f09`
 > - Related prod fix found during the arc: **ckBTC `get_btc_address` update-call** → `4c8ccfd`
 >
+> **UX-hardening pass (2026-08-23, founder review "hard to find / shows up outside the app
+> screen"):** three audit rounds against real screenshots (phone 390×844 + desktop 1280×900),
+> verdict SHIP. Commit map: `781c9ec` (web-contained AppModal + full-bleed ink recovery beat +
+> LEARN above ABOUT), `8dbd003` (home TripStrip readiness row), `9493876` (humanized passport
+> labels + archive dates + ink capstone), `aef6afb` (receive coach at entry), `2f29858`
+> (postage-mark stage tags + always-on campaign strip), `8275d0e` (row-major 3-col seed grid —
+> the fold never hides words), `2262426` (one-page rehearsal — no pager), `e99698e`+`fcafe65`
+> (Đ demo-dollar glyph — in-font, stable at small sizes). Rehearsal copy stayed verbatim
+> (education.ts pins); flow 90/94 + jest rewritten for one-page semantics; light AND dark visual
+> baselines reseeded.
+>
 > The remainder of this document is the original approved plan, kept verbatim for reference.
 >
 > Founder directive: make dpay more fun to use through a quick first-time walkthrough,
