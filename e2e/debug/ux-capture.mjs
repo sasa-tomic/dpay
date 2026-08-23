@@ -55,11 +55,8 @@ async function run() {
     await shoot(driver, 'A06-phone-recovery-beat');
     await driver.findByTestID('rehearsal', { timeoutMs: 15_000 });
     await sleep(1200);
-    await shoot(driver, 'A07-phone-rehearsal-beat1');
-    await driver.click('btn-rehearsal-next'); await sleep(1000);
-    await shoot(driver, 'A08-phone-rehearsal-beat2');
-    await driver.click('btn-rehearsal-next'); await sleep(1000);
-    await shoot(driver, 'A09-phone-rehearsal-beat3');
+    // One-page rehearsal: a single shot carries all 3 steps + punchline + CTA.
+    await shoot(driver, 'A07-phone-rehearsal-page');
     await driver.click('btn-rehearsal-next'); // "Try with demo funds"
     await driver.findByTestID('balance', { timeoutMs: 15_000 });
     await driver.waitForText('Đ100.00', { timeoutMs: 15_000 });
