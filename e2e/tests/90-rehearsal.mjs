@@ -28,7 +28,7 @@ export const meta = {
   verifies: [
     'the backup gate stays MANDATORY (ritual sentence reframes, never weakens: checkbox + disabled Continue)',
     'RECOVERY SAVED stamp beat plays after the faucet and auto-advances (no extra tap)',
-    'the rehearsal walks all 3 beats with verbatim education copy + the offline punchline',
+    'the ONE-page rehearsal shows all 3 steps together with verbatim education copy + the offline punchline (mounting awards flowUnderstood)',
     'Try with demo funds lands on the funded Pay surface',
     'recoverySaved + flowUnderstood persist in dpay.journey.v1',
   ],
