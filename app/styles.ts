@@ -512,6 +512,15 @@ function buildStyles(p: Palette) {
   // aesthetic; the tilt itself is animated, this is the resting angle).
   stampChip: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 999, borderWidth: 1.5, borderColor: p.brand, backgroundColor: 'transparent', transform: [{rotate: '-3deg'}]},
   stampChipText: {color: p.brand, fontFamily: FONT.mono, fontSize: 12, fontWeight: '600', letterSpacing: 2.4, textTransform: 'uppercase'},
+  // The RECOVERY SAVED beat, re-skinned (UX hardening 2026-08-23): a full-bleed INK moment —
+  // the one deliberate dark beat of onboarding (was: a tiny chip on ~96% blank porcelain, which
+  // read as a crash flash). Dark-theme-safe: uses `ink`/`bg` semantics so it inverts to
+  // porcelain-on-ink there (never #000 — the palette discipline holds).
+  inkBeat: {flex: 1, backgroundColor: p.ink, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 36},
+  inkStamp: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 22, paddingVertical: 12, borderRadius: 999, borderWidth: 2, borderColor: p.brand},
+  inkStampText: {color: p.bg, fontFamily: FONT.mono, fontSize: 14, fontWeight: '600', letterSpacing: 3, textTransform: 'uppercase'},
+  inkBeatLine: {color: p.bg, fontSize: 16, fontWeight: '600', textAlign: 'center', marginTop: 34, lineHeight: 22, fontFamily: FONT.sansMedium},
+  inkBeatSub: {color: p.brand, fontSize: 13, textAlign: 'center', marginTop: 8, fontFamily: FONT.mono, letterSpacing: 0.4},
   // Rehearsal additions: the auto-advance hairline (a 2px progress rail above the dots — the
   // affordance that the beat advances itself) + the offline punchline (same strip grammar as the
   // walkthrough campaign line, so the two documents feel like one family).

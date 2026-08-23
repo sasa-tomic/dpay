@@ -208,18 +208,19 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
           onSkip={() => { if (pendingId) onCreated(pendingId); }}
         />
       ) : beat === 'recoverySaved' ? (
-        /* Trip Ready J2 — the RECOVERY SAVED beat: a passport-stamp chip lands (slight
-           overshoot, resting -3° tilt), holds a moment, auto-advances to the rehearsal.
-           Zero extra mandatory taps. */
-        /* flex:1 (centerAll alone wraps content height) — the stamp lands mid-page like a
-           passport stamp on a visa page, not pinned under the status bar. */
-        <View style={[S.centerAll, {flex: 1}]}>
-          {/* The inline transform REPLACES stampChip's (style arrays override whole keys, not
-              merge) — so the resting -3deg tilt rides WITH the spring scale. */}
-          <Animated.View testID="recovery-saved-stamp" style={[S.stampChip, {opacity: stampOp, transform: [{scale: stampSc}, {rotate: '-3deg'}]}]}>
-            <IconCheck size={13} color={C.brand} />
-            <Text style={S.stampChipText}>Recovery saved</Text>
+        /* Trip Ready J2 — the RECOVERY SAVED beat (UX hardening 2026-08-23: was a tiny chip on
+           ~96% blank porcelain — read as a crash flash; now a full-bleed INK moment, the ONE
+           deliberate dark beat of onboarding). A porcelain passport stamp lands (overshoot,
+           resting -6° tilt) under the line that makes the words matter, holds a beat, then
+           auto-advances to the rehearsal. Zero extra mandatory taps. */
+        <View testID="recovery-saved-stamp" style={S.inkBeat}>
+          <Animated.View
+            style={[S.inkStamp, {opacity: stampOp, transform: [{scale: stampSc}, {rotate: '-6deg'}]}]}>
+            <IconCheck size={15} color={C.brand} />
+            <Text style={S.inkStampText}>Recovery saved</Text>
           </Animated.View>
+          <Text style={S.inkBeatLine}>Only these words can bring your wallet back.</Text>
+          <Text style={S.inkBeatSub}>You have them. Nobody else does.</Text>
         </View>
       ) : (
       <KeyboardAvoidingView

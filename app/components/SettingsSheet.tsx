@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useState} from 'react';
-import {Linking, Modal, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, Text, TextInput, View} from 'react-native';
+import {Linking, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, Text, TextInput, View} from 'react-native';
 import {C} from '../config/palette';
 import {PRIVACY_URL} from '../config/constants';
 import {JourneyHowItWorksTitle} from '../config/education';
@@ -11,6 +11,7 @@ import {DpayCore} from '../services/native';
 import {useHotkeys} from '../hooks/useHotkeys';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {SheetOverlay} from './SheetOverlay';
+import {AppModal} from './AppModal';
 import {SeedWords} from './SeedWords';
 import {IconAuto, IconChevronDown, IconClose, IconExternalLink, IconInfo, IconMoon, IconSun} from './icons';
 import {Walkthrough} from './Walkthrough';
@@ -359,6 +360,46 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
             )}
           </View>
 
+          {/* Trip Ready J1 + J5b — LEARN (UX hardening 2026-08-23: moved ABOVE About — at 390×844
+              both rows sat below the fold, which is exactly how the new surfaces went "missing").
+              "How dpay works" replays the walkthrough — educational ONLY, it never awards or
+              changes journey stamps (replay mode passes just onClose; no Skip, a top-left close
+              affordance instead). The MODEL story lives here; the About section keeps the custody
+              statement — no duplication. */}
+          <View style={S.settingsSection}>
+            <Text style={S.inputLabel}>Learn</Text>
+            <Pressable
+              testID="btn-how-it-works"
+              style={S.linkBtn}
+              onPress={() => setHowItWorks(true)}
+              accessibilityRole="button"
+              accessibilityLabel={JourneyHowItWorksTitle}
+              accessibilityHint="Replays the three-scene walkthrough of how dpay pays"
+              accessibilityState={{disabled: false}}>
+              <View style={S.linkRow}>
+                <IconInfo size={16} color={C.sub} />
+                <Text style={S.linkText}>{JourneyHowItWorksTitle}</Text>
+              </View>
+            </Pressable>
+            {/* Trip Ready J5b — the passport archive: the permanent read-only home of the
+                Trip Readiness page (after the Balances card collapses on completion, this is
+                where it lives; before completion it shows the same view — what's left). The
+                ring glyph echoes the passport's stamp slots. Private + local, like the journey. */}
+            <Pressable
+              testID="btn-trip-readiness"
+              style={S.linkBtn}
+              onPress={() => setTripReadyOpen(true)}
+              accessibilityRole="button"
+              accessibilityLabel={PASSPORT_TITLE}
+              accessibilityHint="Shows your trip readiness passport — the four capability stamps"
+              accessibilityState={{disabled: false}}>
+              <View style={S.linkRow}>
+                <View style={{width: 14, height: 14, borderRadius: 7, borderWidth: 1.5, borderColor: C.brand}} />
+                <Text style={S.linkText}>{PASSPORT_TITLE}</Text>
+              </View>
+            </Pressable>
+          </View>
+
           <View style={S.settingsSection}>
             <Text style={S.inputLabel}>About</Text>
             {/* Non-custodial statement (2026-08-22): plain words for the custody model — dpay
@@ -407,44 +448,6 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
                 );
               })}
             </View>
-          </View>
-
-          {/* Trip Ready J1 — "How dpay works": the walkthrough replay. Educational ONLY — it
-              never awards or changes journey stamps (replay mode passes just onClose; no Skip,
-              a top-left close affordance instead). The MODEL story lives here; the About section
-              above keeps the custody statement — no duplication. */}
-          <View style={S.settingsSection}>
-            <Text style={S.inputLabel}>Learn</Text>
-            <Pressable
-              testID="btn-how-it-works"
-              style={S.linkBtn}
-              onPress={() => setHowItWorks(true)}
-              accessibilityRole="button"
-              accessibilityLabel={JourneyHowItWorksTitle}
-              accessibilityHint="Replays the three-scene walkthrough of how dpay pays"
-              accessibilityState={{disabled: false}}>
-              <View style={S.linkRow}>
-                <IconInfo size={16} color={C.sub} />
-                <Text style={S.linkText}>{JourneyHowItWorksTitle}</Text>
-              </View>
-            </Pressable>
-            {/* Trip Ready J5b — the passport archive: the permanent read-only home of the
-                Trip Readiness page (after the Balances card collapses on completion, this is
-                where it lives; before completion it shows the same view — what's left). The
-                ring glyph echoes the passport's stamp slots. Private + local, like the journey. */}
-            <Pressable
-              testID="btn-trip-readiness"
-              style={S.linkBtn}
-              onPress={() => setTripReadyOpen(true)}
-              accessibilityRole="button"
-              accessibilityLabel={PASSPORT_TITLE}
-              accessibilityHint="Shows your trip readiness passport — the four capability stamps"
-              accessibilityState={{disabled: false}}>
-              <View style={S.linkRow}>
-                <View style={{width: 14, height: 14, borderRadius: 7, borderWidth: 1.5, borderColor: C.brand}} />
-                <Text style={S.linkText}>{PASSPORT_TITLE}</Text>
-              </View>
-            </Pressable>
           </View>
 
           {/* Advanced: Server (the relay URL) — disclosure COLLAPSES by default so a curious
@@ -502,28 +505,30 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
         </ScrollView>
       </SafeAreaView>
 
-      {/* The replay — a full-screen Modal rendering the SAME Walkthrough the first-run gate
-          shows, in replay mode: onClose only (btn-walkthrough-close top-left, no Skip). "Get
-          started" on the final scene ALSO closes (onDone wired to the same exit). Like the
-          AssetPicker, the WHOLE Modal subtree is conditionally mounted/unmounted (never
-          visible=false + animate-out — RN-web keeps the hidden children in the DOM when the
-          animationend never fires, e.g. under the e2e harness's animation-freeze CSS). */}
+      {/* The replay — the SAME Walkthrough the first-run gate shows, in replay mode: onClose only
+          (btn-walkthrough-close top-left, no Skip). "Get started" on the final scene ALSO closes
+          (onDone wired to the same exit). Hosted by AppModal: on web a SheetOverlay INSIDE the app
+          column (a RN <Modal> portals to the document root and escapes the 480px frame on wide
+          viewports — the "outside the app screen" bug); on native the platform Modal. Full
+          mount/unmount discipline is unchanged (never visible=false + animate-out — RN-web keeps
+          the hidden children in the DOM when the animationend never fires, e.g. under the e2e
+          harness's animation-freeze CSS). */}
       {howItWorks ? (
-        <Modal visible animationType="slide" onRequestClose={() => setHowItWorks(false)}>
+        <AppModal onRequestClose={() => setHowItWorks(false)}>
           <Walkthrough
             onClose={() => setHowItWorks(false)}
             onDone={() => setHowItWorks(false)}
           />
-        </Modal>
+        </AppModal>
       ) : null}
 
-      {/* Trip Ready J5b — the passport archive: same full-mount/unmount Modal discipline as
-          the walkthrough replay above. Renders the SAME TripPassport component in read-only
+      {/* Trip Ready J5b — the passport archive: same AppModal host + full-mount/unmount discipline
+          as the walkthrough replay above. Renders the SAME TripPassport component in read-only
           archive mode (no capstone, no Done — complete shows the TRIP READY mark statically). */}
       {tripReadyOpen ? (
-        <Modal visible animationType="slide" onRequestClose={() => setTripReadyOpen(false)}>
+        <AppModal onRequestClose={() => setTripReadyOpen(false)}>
           <PassportArchive onClose={() => setTripReadyOpen(false)} />
-        </Modal>
+        </AppModal>
       ) : null}
     </SheetOverlay>
   );
