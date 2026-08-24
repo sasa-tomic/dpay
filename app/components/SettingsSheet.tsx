@@ -432,30 +432,11 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
             </Pressable>
           </View>
 
-          <View style={S.settingsSection}>
-            <Text style={S.inputLabel}>About</Text>
-            {/* Non-custodial statement (2026-08-22): plain words for the custody model — dpay
-                cannot move, freeze, or recover funds, and there is no dpay account. Settings is
-                the on-demand surface: nobody has to read this unless they go looking. */}
-            <Text style={S.dim2} testID="about-custody">dpay is non-custodial. Your money is controlled only by the key on this device. There is no dpay account, and dpay cannot move, freeze, or recover your funds. Your 24 backup words are the only recovery.</Text>
-            <Pressable
-              testID="privacy-policy"
-              style={S.linkBtn}
-              onPress={() => Linking.openURL(PRIVACY_URL)}
-              accessibilityRole="link"
-              accessibilityLabel="Privacy policy">
-              {/* P4 — external-link glyph signals the link opens outside the app (IconExternalLink
-                  renders no textContent, so the census/asserted label is untouched). */}
-              <View style={S.linkRow}>
-                <IconExternalLink size={12} color={C.sub2} />
-                <Text style={S.linkTextMuted}>Privacy policy</Text>
-              </View>
-            </Pressable>
-          </View>
-
           {/* Wave 8 — Theme: the full three-way choice as a segmented control (the header keeps
               the quick Light↔Dark flip; Auto here returns control to the OS/browser scheme —
-              the explicit way back after any pinned choice, on web AND native). */}
+              the explicit way back after any pinned choice, on web AND native).
+              ABOVE About (founder rule 2026-08-24): the theme choice is a frequent preference,
+              About is the on-demand custody statement. */}
           <View style={S.settingsSection}>
             <Text style={S.inputLabel}>Theme</Text>
             <View style={S.railRow} role="radiogroup" accessibilityLabel="Theme">
@@ -485,7 +466,9 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
           {/* Advanced: Server (the relay URL) — disclosure COLLAPSES by default so a curious
               consumer doesn't see the relay URL input + a one-paste-away brick on first open.
               The header is the toggle; testID `btn-advanced-toggle` is the expansion step the e2e
-              flows add before reading `settings-relay`. Expanding is one tap — keep it cheap. */}
+              flows add before reading `settings-relay`. Expanding is one tap — keep it cheap.
+              RIGHT BELOW Theme (founder rule 2026-08-24) — the two settings blocks stay together,
+              About (the on-demand custody statement) closes the page. */}
           <View style={S.settingsSection}>
             <Pressable
               testID="btn-advanced-toggle"
@@ -531,6 +514,27 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
                 </Pressable>
               </View>
             ) : null}
+          </View>
+
+          <View style={S.settingsSection}>
+            <Text style={S.inputLabel}>About</Text>
+            {/* Non-custodial statement (2026-08-22): plain words for the custody model — dpay
+                cannot move, freeze, or recover funds, and there is no dpay account. Settings is
+                the on-demand surface: nobody has to read this unless they go looking. */}
+            <Text style={S.dim2} testID="about-custody">dpay is non-custodial. Your money is controlled only by the key on this device. There is no dpay account, and dpay cannot move, freeze, or recover your funds. Your 24 backup words are the only recovery.</Text>
+            <Pressable
+              testID="privacy-policy"
+              style={S.linkBtn}
+              onPress={() => Linking.openURL(PRIVACY_URL)}
+              accessibilityRole="link"
+              accessibilityLabel="Privacy policy">
+              {/* P4 — external-link glyph signals the link opens outside the app (IconExternalLink
+                  renders no textContent, so the census/asserted label is untouched). */}
+              <View style={S.linkRow}>
+                <IconExternalLink size={12} color={C.sub2} />
+                <Text style={S.linkTextMuted}>Privacy policy</Text>
+              </View>
+            </Pressable>
           </View>
 
           {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
