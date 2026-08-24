@@ -288,6 +288,11 @@ check_screen() {
   sleep 2
   tap_rid "$rid"
   sleep 2
+  # Pay-intent gate (2026-08-23): the scan surface starts disarmed — camera and NFC mount only
+  # after "Pay Now". Press the gate BEFORE resolving the camera box; RN testID surfaces as
+  # resource-id (same mechanism as the scan-cam-box anchor below).
+  tap_rid "$([ "$which" = sol ] && echo btn-sol-start-scan || echo btn-start-scan)"
+  sleep 2
   local best="0 0 0" region="" attempt_png=""
   for i in 1 2 3 4; do
     dump_ui || { echo "FAIL nav: uiautomator dump failed"; exit 2; }

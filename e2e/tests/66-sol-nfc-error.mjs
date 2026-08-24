@@ -1,10 +1,13 @@
 // Flow 66 — SOL v2 NFC tap ERROR + DECLINED + PENDING phases (the failure modes flow 47 doesn't cover).
 //
-// Flow 47 proves the SOL v2 NFC happy path (linking → exchanging → receipt → Paid ✓).
+// Flow 47 proves the SOL v2 NFC happy path (linking → auto-sign → receipt → Paid ✓).
 // This flow covers THREE failure surfaces + a merchant-side reader case:
-//   - `declined` (payer side): the autoSign callback refuses to sign. The v2 trigger is
-//     `isSolReqV2Expired(req)` — an expired solreq (exp in the past) is a stale-replay vector.
-//     autoSign calls `DpaySolNfc.declineSolCard()` → "Declined" + the "expired" reason.
+//   - `expired auto-decline` (payer side): an expired solreq (exp in the past) is re-checked
+//     authoritatively INSIDE the sign — the one-press rule (founder directive 2026-08-24) removed
+//     the review card, so isSolReqV2Expired fires declineSolCard itself → "Declined" +
+//     "This payment request has expired". No sign, no solpay URI.
+//     (The reader's fast 0x6985 decline — SW_DECLINED from handleGet(TAG_PAYMENT) — is the
+//     Kotlin transport hop, a device gate.)
 //   - `error` (transport glitch): a `{type:'error', reason}` seam event (mid-tap radio loss) maps
 //     to "Tap failed" + reason.
 //   - `pending` (committed, late error ignored): once `settling` fired (committed=true), a late
@@ -18,14 +21,14 @@
 //
 // Selector contract: `sol-nfc-status`, `asset-sol-select`, `sol-pay-scan`, `tab-receive`,
 // `sol-req-amount-input`, `btn-sol-req-make`, `sol-req-qr`.
-import {setup, assert, onboardWallet} from '../harness/lib.mjs';
+import {setup, assert, onboardWallet, armNfcCard} from '../harness/lib.mjs';
 
 export const meta = {
   id: '66',
   name: 'sol-nfc-error',
   journey: 'nfc',
-  covers: ['sol-nfc-decline', 'sol-nfc-error', 'sol-nfc-receipt-unreachable', 'sol-nfc-phases', 'sol-nfc-reader-decline', 'no-fake-paid', 'terminal-escape'],
-  verifies: 'SOL v2 NFC tap failure modes: expired solreq → Declined + expired; transport error → Tap failed; late error after settling ignored; merchant reader sees the decline.',
+  covers: ['sol-nfc-decline', 'sol-nfc-error', 'sol-nfc-receipt-unreachable', 'sol-nfc-phases', 'sol-nfc-reader-decline', 'no-fake-paid', 'terminal-escape', 'fail-closed'],
+  verifies: 'SOL v2 NFC failure modes: expired solreq auto-declines at sign (honest reason, no sign); transport error → Tap failed; late error after settling ignored; merchant reader sees the decline.',
   timeoutMs: 30000,
 };
 
@@ -86,7 +89,7 @@ export async function run() {
     await driver.findByTestID('sol-pay-scan', {timeoutMs: 5_000});
     console.log('[66-sol-nfc-error] ✓ SOL selected, card armed (no setup)');
 
-    const dispatch = (event) => driver.eval((e) => window.__DPAY_TEST_SOL_NFC_SESSION(e), event);
+    const dispatch = async (event) => { await armNfcCard(driver, 'sol'); return driver.eval((e) => window.__DPAY_TEST_SOL_NFC_SESSION(e), event); };
 
     const clickNfcButton = () => driver.eval(() => {
       for (const label of ['Done', 'Cancel']) {
@@ -96,18 +99,27 @@ export async function run() {
       return null;
     });
 
-    // --- 1. EXPIRED-REQUEST DECLINE (v2: isSolReqV2Expired triggers declineSolCard). ------------
-    console.log('[66-sol-nfc-error] case 1: expired solreq decline (v2 isSolReqV2Expired)…');
+    // --- 1. EXPIRED REQUEST → AUTO-DECLINE AT SIGN (the expiry gate is authoritative there). ---
+    // One-press rule: no review card exists, so isSolReqV2Expired is re-checked INSIDE the sign —
+    // the request declines itself (declineSolCard → terminal "Declined" + the honest reason),
+    // nothing ever signs. (The reader's FAST 0x6985 decline — handleGet(TAG_PAYMENT) returns
+    // SW_DECLINED the moment the card phase is DECLINED — is the Kotlin transport hop, a device
+    // gate; case 4 covers the reader-side decline plumbing via the seam.)
+    console.log('[66-sol-nfc-error] case 1: expired solreq → auto-decline at sign…');
     await dispatch({type: 'phase', role: 'card', phase: 'linking'});
     await driver.findByTestID('sol-nfc-status', {timeoutMs: 4_000});
     await dispatch({type: 'request', role: 'card', solreqUri: buildSolReq({expired: true})});
     assert(await driver.waitForText('Declined', {timeoutMs: 5_000}),
-      'an expired solreq should surface the honest "Declined" status');
+      'an expired solreq should auto-decline at sign time (the honest "Declined" terminal)');
     const expiredBody = await driver.bodyText();
     assert(!/\bPaid\b/.test(expiredBody), 'a declined SOL tap must NEVER show "Paid ✓"');
-    assert(/expir/.test(expiredBody),
-      `the SOL "expired" reason should render. body excerpt:\n${expiredBody.slice(0, 400)}`);
-    console.log('[66-sol-nfc-error] ✓ expired solreq → "Declined" + "expired", no fake Paid');
+    assert(expiredBody.includes('This payment request has expired'),
+      `the sign-time expiry reason should render. body excerpt:\n${expiredBody.slice(0, 400)}`);
+    {
+      const solpay = await driver.eval(() => window.__DPAY_SOL_NFC_LAST);
+      assert(solpay == null, 'no solpay URI may exist for an expired request (nothing signed)');
+    }
+    console.log('[66-sol-nfc-error] ✓ expired solreq → auto-decline "This payment request has expired", no sign, no fake Paid');
     assert((await clickNfcButton()) === 'Done', 'the Done button should be reachable after a decline');
     await driver.waitGone('sol-nfc-status', {timeoutMs: 5_000});
 

@@ -113,3 +113,22 @@ describe('computeTapStatus — terminal error/declined/pending surface the reaso
     expect(r.sub).toBe('The payment was declined');
   });
 });
+
+// One-press rule: the review park is gone (a payable request auto-signs — the "Pay Now" gate was
+// the press). awaitingApproval is reader-only now and keeps its role-aware copy even with an amount.
+describe('computeTapStatus — role-aware awaitingApproval (reader-only)', () => {
+  it('awaitingApproval (reader) shows "Waiting for the payer…" / "They’re signing the payment"', () => {
+    const s = computeTapStatus('awaitingApproval', null, 'reader', '0.001 SOL', null);
+    expect(s.title).toBe('Waiting for the payer…');
+    expect(s.sub).toBe('They’re signing the payment');
+    expect(s.terminal).toBe(false);
+  });
+
+  it('the retired "Authorizing…" copy is gone from every phase', () => {
+    for (const p of ['listening', 'linking', 'exchanging', 'awaitingApproval', 'settling'] as const) {
+      const s = computeTapStatus(p, null, 'card', null, null);
+      expect(s.title).not.toContain('Authorizing');
+      expect(s.sub).not.toContain('Signing on the payer');
+    }
+  });
+});

@@ -1,14 +1,14 @@
-// Flow 17 — QR scanner listener cleanup (NIT 1a-ii).
+// Flow 17 — QR scanner listener cleanup (NIT 1a-ii) + pay-intent gate.
 //
 // The web `useCodeScanner` shim registers a listener on every <QrScanner> mount. The cleanup
 // contract: when the scanner unmounts (the user switches Pay → Receive), its listener MUST be
 // removed — otherwise every mount leaks one listener (and the closure it holds) for the whole
-// session. This flow mounts the scanner (Pay tab), confirms exactly one listener is registered,
-// then switches to Receive (which renders NO scanner until the merchant starts a signed-QR scan)
-// and asserts the listener count returns to its pre-mount baseline.
+// session. With the pay-intent gate (2026-08-23) the Pay tab starts IDLE (scanner deliberately
+// unmounted until "Pay Now"), so this flow also pins the gate itself: idle → 0 listeners,
+// armed → exactly 1, Receive → 0, back to Pay → idle again (gate) → armed → 1.
 //
-// Selector contract: `btn-settings` (waits for wallet), `tab-pay`, `tab-receive`.
-import { setup, assert, assertEq, onboardWallet } from '../harness/lib.mjs';
+// Selector contract: `btn-settings` (waits for wallet), `tab-pay`, `tab-receive`, `btn-start-scan`.
+import { setup, assert, assertEq, onboardWallet, armPayScan } from '../harness/lib.mjs';
 
 async function scanCount(driver) {
   const n = await driver.eval(() => (window.__DPAY_TEST_SCAN_COUNT?.() ?? -1));
@@ -22,8 +22,8 @@ export const meta = {
   id: '17',
   name: 'scan-cleanup',
   journey: 'system',
-  covers: ['qr-scanner', 'teardown', 'unmount', 'listener-leak'],
-  verifies: 'Switch Pay→Receive→Pay: QrScanner listeners tear down cleanly (no leak across unmount/remount).',
+  covers: ['qr-scanner', 'teardown', 'unmount', 'listener-leak', 'pay-intent-gate'],
+  verifies: 'Pay tab starts gated (0 listeners until "Pay Now"); armed → 1; Pay→Receive→Pay tears down cleanly (no leak; re-mount re-gates then re-arms).',
   timeoutMs: 15000,
 };
 
@@ -37,16 +37,15 @@ export async function run() {
     console.log('[17-scan-cleanup] onboarding…');
     await onboardWallet(driver, 'e2e-scan-cleanup');
 
-    // Baseline the listener count with the Pay tab mounted (PayMode always renders a <QrScanner>).
-    // Give the mount effect a tick to register.
+    // The Pay tab mounts IDLE under the pay-intent gate: no scanner (0 listeners) until the
+    // payer's explicit "Pay Now" tap. Pin the idle state first, then arm.
     await driver.findByTestID('tab-pay', { timeoutMs: 4_000 });
-    let count = await scanCount(driver);
-    for (let i = 0; i < 20 && count < 1; i++) {
-      await new Promise((r) => setTimeout(r, 50));
-      count = await scanCount(driver);
-    }
-    assertEq(count, 1, 'Pay tab mounts exactly one scan listener');
-    console.log(`[17-scan-cleanup] ✓ Pay tab → ${count} scan listener registered`);
+    await driver.findByTestID('btn-start-scan', { timeoutMs: 4_000 });
+    assertEq(await scanCount(driver), 0, 'Pay tab starts gated — no scan listener until "Pay Now"');
+    console.log('[17-scan-cleanup] ✓ Pay tab idle → 0 listeners (pay-intent gate holds)');
+    await armPayScan(driver);
+    assertEq(await scanCount(driver), 1, 'arming the gate mounts exactly one scan listener');
+    console.log('[17-scan-cleanup] ✓ armed → 1 scan listener registered');
 
     // Switch to Receive: PayMode unmounts (its <QrScanner> must tear down). ReceiveMode's initial
     // state is the amount form (no scanner) — it only mounts a scanner when the merchant taps
@@ -62,16 +61,14 @@ export async function run() {
     assertEq(after, 0, 'unmounting the scanner must remove its listener (no leak)');
     console.log(`[17-scan-cleanup] ✓ Receive tab → ${after} listeners (cleanup ran, no leak)`);
 
-    // Switch back to Pay: a fresh mount registers exactly one listener again (re-mount works).
-    console.log('[17-scan-cleanup] switching Receive → Pay (re-mount)…');
+    // Switch back to Pay: a FRESH mount re-gates (idle, 0 listeners) — then re-arms to exactly one.
+    console.log('[17-scan-cleanup] switching Receive → Pay (re-mount re-gates)…');
     await driver.click('tab-pay', { timeoutMs: 4_000 });
-    let remount = await scanCount(driver);
-    for (let i = 0; i < 20 && remount < 1; i++) {
-      await new Promise((r) => setTimeout(r, 50));
-      remount = await scanCount(driver);
-    }
-    assertEq(remount, 1, 're-mounting the scanner registers its listener again');
-    console.log(`[17-scan-cleanup] ✓ Pay tab again → ${remount} listener (re-mount works)`);
+    await driver.findByTestID('btn-start-scan', { timeoutMs: 4_000 });
+    assertEq(await scanCount(driver), 0, 're-mounting re-gates the scanner (fresh intent required)');
+    await armPayScan(driver);
+    assertEq(await scanCount(driver), 1, 're-arming the gate registers its listener again');
+    console.log('[17-scan-cleanup] ✓ Pay tab again → gated 0, then armed → 1 (re-mount works)');
 
     await driver.screenshot('17-scan-cleanup');
 

@@ -6,12 +6,14 @@
 // drives the REAL offline hand-off (flow 20's gateway-live/relay-dead pattern), reconciles to
 // Paid, and asserts the peak + its settled remnant; then a SECOND offline payment (quiet), and
 // finally the plain ONLINE paid path (flow 03-style) shows no peak ever + the calm paid stamp.
+// (The 118px 'dpay' circle stamp inside the peak was dropped by founder directive 2026-08-24 —
+// the campaign copy carries the moment alone; the pinned testIDs are unchanged.)
 //
 // testID contract: `offline-peak` (mounted-but-settled for the card's lifetime — deterministic
 // to catch after the ~2s moment), `first-offline-stamp` (the settled remnant mark), and
 // `paid-stamp` (the compact calm stamp on every confirmed paid card). The honesty core: the
 // pending "Sent" hand-off view (btn-paid) must carry NEITHER the peak NOR the stamp.
-import {setup, assert, assertIncludes, getBalance, faucetAccount, onboardWallet, accountOf, goOffline, setRelay} from '../harness/lib.mjs';
+import {setup, assert, assertIncludes, getBalance, faucetAccount, onboardWallet, accountOf, goOffline, setRelay, armPayScan} from '../harness/lib.mjs';
 import {generateKeypair, buildRequestQR, randNonceHex} from '../harness/wire.mjs';
 
 export const meta = {
@@ -69,11 +71,12 @@ export async function run() {
     let nonce = randNonceHex();
     let expiry = Math.floor(Date.now() / 1000) + 600;
     let requestQR = buildRequestQR(bob.publicHex, PAY_CENTS, nonce, expiry, 0, 'bob');
+    await armPayScan(driver); // pay-intent gate (btn-new/reset disarmed)
     await driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), requestQR);
-    assert(await driver.waitForText('Pay ∂25.00', {timeoutMs: 6_000}), 'A should reach the Pay ∂25.00 review');
-
-    await driver.click('btn-approve', {timeoutMs: 4_000});
-    assert(await driver.waitForText('signed on this device ✓', {timeoutMs: 8_000}), 'offline approval should show the envelope QR');
+    // One-press rule (2026-08-24): the scan AUTO-SIGNS while offline — the envelope hand-off QR
+    // mounts with no Approve press (the read-only "Pay ∂25.00" status flashes by between decode
+    // and prepare, so the envelope QR is the stable landing surface).
+    assert(await driver.waitForText('signed on this device ✓', {timeoutMs: 10_000}), 'offline auto-sign should show the envelope QR');
     const payload = await driver.eval(() => window.__DPAY_QR_LAST);
 
     // HONESTY: the hand-off moment (before confirmation) must carry NO peak, NO stamp — the
@@ -122,10 +125,9 @@ export async function run() {
     nonce = randNonceHex();
     expiry = Math.floor(Date.now() / 1000) + 600;
     requestQR = buildRequestQR(bob.publicHex, PAY_CENTS, nonce, expiry, 0, 'bob');
+    await armPayScan(driver); // pay-intent gate (btn-new/reset disarmed)
     await driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), requestQR);
-    assert(await driver.waitForText('Pay ∂25.00', {timeoutMs: 6_000}), 'second payment review');
-    await driver.click('btn-approve', {timeoutMs: 4_000});
-    assert(await driver.waitForText('signed on this device ✓', {timeoutMs: 8_000}), 'second offline approval shows the envelope QR');
+    assert(await driver.waitForText('signed on this device ✓', {timeoutMs: 10_000}), 'second offline auto-sign shows the envelope QR');
     const payload2 = await driver.eval(() => window.__DPAY_QR_LAST);
     const submitted2 = await fetch(`${env.relayBaseURL}/api/v2/canister/${ledger}/call`, {
       method: 'POST', headers: {'Content-Type': 'application/cbor'}, body: b64urlToBytes(payload2),
@@ -148,10 +150,10 @@ export async function run() {
     nonce = randNonceHex();
     expiry = Math.floor(Date.now() / 1000) + 600;
     requestQR = buildRequestQR(bob.publicHex, PAY_CENTS, nonce, expiry, 0, 'bob');
+    await armPayScan(driver); // pay-intent gate (btn-new/reset disarmed)
     await driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), requestQR);
-    assert(await driver.waitForText('Pay ∂25.00', {timeoutMs: 6_000}), 'online payment review');
-    await driver.click('btn-approve', {timeoutMs: 4_000});
-    assert(await driver.waitForText('Paid ✓', {timeoutMs: 12_000}), 'online payment settles to Paid ✓ (flow 03-style)');
+    // Online auto-sign: decode → sign → submitTransfer → settled → Paid ✓ (no Approve press).
+    assert(await driver.waitForText('Paid ✓', {timeoutMs: 12_000}), 'online auto-sign settles to Paid ✓ (flow 03-style)');
     await absent(driver, 'offline-peak');
     assert(!(await driver.bodyText()).includes('Roaming off'), 'the ONLINE paid path must NEVER peak');
     await waitFadedIn(driver, 'paid-stamp');

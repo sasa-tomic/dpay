@@ -20,7 +20,7 @@
  * gates its own Esc handler while this surface is open (one Esc closes one thing).
  */
 import React from 'react';
-import {Modal, Platform} from 'react-native';
+import {Modal, Platform, StatusBar, View} from 'react-native';
 import {SheetOverlay} from './SheetOverlay';
 
 export function AppModal({onRequestClose, children}: {
@@ -34,7 +34,13 @@ export function AppModal({onRequestClose, children}: {
   }
   return (
     <Modal visible animationType="slide" onRequestClose={onRequestClose}>
-      {children}
+      {/* The Modal is its own Android window and does NOT inherit the root window's system-bar
+          insets (edge-to-edge targetSdk): without this pad the hosted surface starts at y=0 —
+          the close X sits UNDER the status bar / punch-hole cutout ("outside the app area").
+          StatusBar.currentHeight is the exact top inset in dp; 0 on the (never-hit) failure. */}
+      <View style={{flex: 1, paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0}}>
+        {children}
+      </View>
     </Modal>
   );
 }

@@ -25,7 +25,9 @@
  *
  * testID contract (e2e flow 94): page `passport-archive`, slots `passport-slot-<key>` +
  * `passport-slot-<key>-filled`, progress `passport-count`, hint `passport-hint`, capstone
- * `trip-ready-capstone`, Done `btn-passport-done`, close `btn-passport-close`.
+ * `trip-ready-capstone`, Done `btn-passport-done`, close `btn-passport-close`. Deep-link
+ * (founder ask 2026-08-24): unfilled-slot buttons `passport-slot-btn-<key>` — present ONLY
+ * when onStep is provided and the slot is UNFILLED (filled stamps stay inert).
  *
  * Reduced motion: the capstone renders at rest (no animated values) on the same auto-Done
  * timer — same information, none of the motion. The static page never animates on first
@@ -36,9 +38,9 @@ import {Animated, Easing, Pressable, SafeAreaView, StatusBar, Text, View} from '
 import {C} from '../config/palette';
 import {S, isDark} from '../styles';
 import {JOURNEY_STAMPS, hasStamp, markSeen, useJourney} from '../lib/journey';
-import {PASSPORT_STAMPS, PASSPORT_TITLE, PASSPORT_COLLAPSED_KEY, computeReadiness} from '../lib/readiness';
+import {PASSPORT_STAMPS, PASSPORT_TITLE, PASSPORT_COLLAPSED_KEY, computeReadiness, type ReadinessKey} from '../lib/readiness';
 import {useReducedMotion} from '../hooks/useReducedMotion';
-import {IconClose} from './icons';
+import {IconArrowUpRight, IconClose} from './icons';
 
 const EASE_OUT = Easing.out(Easing.cubic);
 const EASE_PLATE = Easing.bezier(0.22, 1, 0.36, 1);
@@ -55,7 +57,14 @@ function stampDate(at: number): string {
   return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
 }
 
-export function PassportArchive({onClose}: {onClose: () => void}) {
+export function PassportArchive({onClose, onNext, onStep}: {
+  onClose: () => void;
+  onNext?: () => void;
+  /** Deep-link routing (founder ask 2026-08-24): tapping an UNFILLED stamp goes straight to
+   *  the surface where that step is completed; the NEXT row routes through the same seam with
+   *  the first-missing key. Filled stamps never fire it (nothing left to complete). */
+  onStep?: (key: ReadinessKey) => void;
+}) {
   const reduced = useReducedMotion();
   const {journey, award, loaded} = useJourney();
   const readiness = computeReadiness(journey);
@@ -154,9 +163,8 @@ export function PassportArchive({onClose}: {onClose: () => void}) {
               {PASSPORT_STAMPS.map((s, i) => {
                 const filled = readiness.filled.includes(s.key);
                 const tilt = {transform: [{rotate: `${SLOT_TILT[i % SLOT_TILT.length]}deg`}]};
-                return (
+                const slot = (
                   <View
-                    key={s.key}
                     testID={`passport-slot-${s.key}${filled ? '-filled' : ''}`}
                     style={filled ? S.passportSlotFilled : S.passportSlot}>
                     <Text style={filled ? [S.passportSlotTextFilled, tilt] : S.passportSlotText}>
@@ -166,6 +174,23 @@ export function PassportArchive({onClose}: {onClose: () => void}) {
                       <Text style={[S.passportSlotDate, tilt]}>{stampDate(journey.at[s.key])}</Text>
                     ) : null}
                   </View>
+                );
+                // Unfilled + routing available: the whole slot is tappable (the deep-link — tap
+                // the missing capability, land where it happens). Filled slots stay inert and
+                // the no-onStep fallback renders the bare slot exactly as before (back-compat;
+                // slots are fixed 88×88 so the unstyled Pressable cannot shift the grid).
+                if (filled || !onStep) return <View key={s.key}>{slot}</View>;
+                return (
+                  <Pressable
+                    key={s.key}
+                    testID={`passport-slot-btn-${s.key}`}
+                    onPress={() => onStep(s.key)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Go: ${s.hint}`}
+                    accessibilityHint="Open the surface where this step happens"
+                    accessibilityState={{disabled: false}}>
+                    {slot}
+                  </Pressable>
                 );
               })}
             </View>
@@ -179,6 +204,25 @@ export function PassportArchive({onClose}: {onClose: () => void}) {
                 </View>
                 <Text style={S.passportReadyLine}>You can pay even when your phone has no signal.</Text>
               </View>
+            ) : onNext || onStep ? (
+              <Pressable
+                testID="btn-passport-next"
+                style={[S.ghostBtn, S.passportHint]}
+                onPress={() => {
+                  // NEXT = "go to the next step's surface": route through the step map when
+                  // available; plain onNext otherwise (back-compat). `next` always exists in
+                  // this branch (the row renders only while incomplete).
+                  if (onStep && readiness.next) onStep(readiness.next.key);
+                  else onNext?.();
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={`Next: ${readiness.next?.hint ?? ''}`}
+                accessibilityHint="Go to the surface where this step happens"
+                accessibilityState={{disabled: false}}>
+                <Text style={S.passportHintTag}>Next</Text>
+                <Text testID="passport-hint" style={S.passportHintText}>{readiness.next?.hint}</Text>
+                <View style={S.passportHintArrow}><IconArrowUpRight size={14} color={C.sub2} /></View>
+              </Pressable>
             ) : (
               <View style={S.passportHint}>
                 <Text style={S.passportHintTag}>Next</Text>

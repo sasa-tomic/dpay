@@ -578,7 +578,7 @@ async fn landing_page_embeds_app_screenshots() {
     let html = String::from_utf8(bytes).unwrap();
     for shot in [
         "/shots/request.png",
-        "/shots/approve.png",
+        "/shots/paying.png",
         "/shots/paid.png",
     ] {
         assert!(html.contains(shot), "landing page must reference {shot}");
@@ -593,7 +593,7 @@ async fn screenshots_served_as_png_and_unknown_is_404() {
 
     let names = [
         "request.png",
-        "approve.png",
+        "paying.png",
         "paid.png",
         "nfc-listen.png",
         "nfc-exchange.png",
@@ -723,14 +723,14 @@ async fn landing_page_states_non_custodial_honestly() {
 }
 
 /// Trip Ready Wave 2E (2026-08-22 spec): the landing tells the offline-payment story. The
-/// campaign line is byte-identical to the app's single source (app/config/education.ts
-/// CAMPAIGN_LINE — the hero carries the pointer comment, mirroring the palette/fonts
-/// 3-homes pattern), the hero states the asymmetry plainly (payer offline, merchant online,
-/// the shop's connection settles it), and the eight-second proof strip renders the four
-/// beats: airplane mode → tap → the split → settled. Honesty pins: the banned-claims sweep —
-/// no "conversion" family, no "anywhere", no "works with any currency", no "nobody needs
-/// internet" (the merchant DOES need its connection) — and proof motion must keep the
-/// reduced-motion kill switch.
+/// hero carries the single-source pointer comment to the app's campaign line
+/// (app/config/education.ts CAMPAIGN_LINE — the literal line lives only there since the
+/// founder's 2026-08-24 wording pass 27a258e; the pointer keeps the two homes honest), the
+/// hero states the asymmetry plainly (payer offline, merchant online, the shop's connection
+/// settles it), and the "Paying offline" rail renders the four beats: pay → show your code →
+/// shop scans → settled. Honesty pins: the banned-claims sweep — no "conversion" family, no
+/// "anywhere", no "works with any currency", no "nobody needs internet" — and proof motion
+/// must keep the reduced-motion kill switch.
 #[tokio::test]
 async fn landing_page_tells_the_offline_payment_story() {
     let (state, _led) = state_from(ledger());
@@ -738,12 +738,10 @@ async fn landing_page_tells_the_offline_payment_story() {
     let (status, _headers, bytes) = call_raw(&state, get_req("/")).await;
     assert_eq!(status, StatusCode::OK);
     let html = String::from_utf8(bytes).unwrap();
-    // The campaign line — byte-identical to the app's single source — plus the pointer
-    // comment that keeps the two homes honest.
-    assert!(
-        html.contains("Roaming off. Payment on."),
-        "the campaign line must appear byte-identical to app/config/education.ts"
-    );
+    // The campaign-line single-source pointer comment (the literal line lives only in
+    // app/config/education.ts CAMPAIGN_LINE; the founder's 2026-08-24 wording pass 27a258e
+    // removed the byte-identical copy from this page — the pointer comment keeps the two
+    // homes honest).
     assert!(
         html.contains("<!-- single source: app/config/education.ts CAMPAIGN_LINE -->"),
         "the hero must carry the single-source pointer comment"
@@ -751,10 +749,11 @@ async fn landing_page_tells_the_offline_payment_story() {
     // The asymmetry, said plainly: the payer may be offline, the shop is online, and the
     // shop's connection settles it. (2026-08-23: the founder's wording pass c899c9a replaced
     // the old four-beat `id="proof"` strip with the "Paying offline" rail — the test follows
-    // the founder's copy; these pins are its stable markers.)
+    // the founder's copy; these pins are its stable markers. 2026-08-24: one-press flow —
+    // "Approve as always" became "Pay as always".)
     for required in [
         "Paying offline",
-        "Approve as always",
+        "Pay as always",
         "The shop scans it with <b>their</b> phone",
         "The shop sends it for you",
         "The shop has internet. So you don't need any.",

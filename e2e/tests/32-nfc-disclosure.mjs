@@ -1,23 +1,23 @@
-// Flow 32 — NFC asset disclosure (MC8 U1). Drives the REAL NfcTap state machine through the
+// Flow 32 — NFC asset disclosure IN THE EXCHANGING STATUS (MC8 U1 + auto-sign one-press rule,
+// founder directive 2026-08-24). Drives the REAL NfcTap state machine through the
 // __DPAY_TEST_NFC_SESSION seam with a `request` event carrying currency 1 (ckBTC) + amount 50000
-// sats, and asserts the NFC status view discloses the honest asset name + network + asset-correct
-// amount ("BTC" + "Bitcoin" + "0.00050000 BTC") DURING the exchanging window — BEFORE any success
-// dispatch.
+// sats, and asserts the sign-status/exchanging surface discloses the honest asset name +
+// asset-correct amount ("Paying 0.00050000 BTC on Bitcoin") + hold-to-send copy. The "Pay Now"
+// gate that armed the card was the single deliberate press — the request AUTO-SIGNS on arrival,
+// so the wire exists immediately (no Approve click, no review card).
 //
-// The blind-tap bug this pins: NfcTap.autoSign previously set the amount disclosure AFTER
-// `await signAuthorization`, so during signing the payer saw a generic "Communicating…" with NO
-// asset name / amount / network, and the post-sign line rendered the DEMO `usd()` formatter even
-// for ckBTC → a misleading "∂0.00050000". The fix resolves the disclosure SYNCHRONOUSLY before the
-// first await. This flow dispatches a real `request` event (which triggers autoSign → real
-// signAuthorization in the e2e shim), then reads back the live status text to prove the honest
-// asset/network/amount are visible while the tap is mid-flight.
+// The blind-tap bug this pinned historically: the amount disclosure used to land AFTER signing
+// began (generic "Communicating…", no asset/amount) and the post-sign line rendered the DEMO `usd()`
+// formatter for ckBTC ("∂0.00050000"). The disclosure contract survives the one-press rework:
+// honest asset/amount sit in front of the payer WHILE the money moves, never a generic spinner
+// hiding what's being spent.
 //
 // The radio hop itself stays a physical-device gate; only the JS event plumbing is faked (same seam
-// as flow 11). No real signing of a settled payment fires (no `done`/`success` result dispatch is
-// required to prove the disclosure; a terminal `declined` is dispatched at the end to clean up).
+// as flow 11). No settled payment fires (no `done`/`success` result dispatch; a terminal `declined`
+// cleans up after the auto-sign exchanging window).
 //
-// Selector contract: `nfc-status` (the NfcTap view once active).
-import { setup, assert, onboardWallet } from '../harness/lib.mjs';
+// Selector contract: `nfc-status`, `__DPAY_TEST_NFC_APPROVED_WIRE` (the web shim's signed-wire stash).
+import { setup, assert, onboardWallet , armNfcCard} from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -26,8 +26,8 @@ export const meta = {
   id: '32',
   name: 'nfc-disclosure',
   journey: 'nfc',
-  covers: ['nfc-disclosure', 'consent', 'asset-name', 'network'],
-  verifies: 'NFC asset disclosure: mid-tap the status shows honest asset name + network + \'0.00050000 BTC\' BEFORE success.',
+  covers: ['nfc-disclosure', 'consent', 'asset-name', 'auto-sign'],
+  verifies: 'NFC auto-sign exchanging status discloses honest asset + amount ("Paying 0.00050000 BTC on Bitcoin") + hold-to-send; the wire exists on arrival (one-press rule).',
   timeoutMs: 15000,
 };
 
@@ -49,12 +49,14 @@ export async function run() {
     await driver.findByTestID('pay-scan', { timeoutMs: 5_000 });
 
     // Helper: dispatch one NFC event through the seam (role='card' = the payer being tapped).
-    const dispatch = (event) => driver.eval((e) => window.__DPAY_TEST_NFC_SESSION(e), event);
+    const dispatch = async (event) => { await armNfcCard(driver, 'ic'); return driver.eval((e) => window.__DPAY_TEST_NFC_SESSION(e), event); };
 
-    // Dispatch a `request` event carrying currency 1 (ckBTC) + 50000 sats. The app's listener calls
-    // autoSign, which resolves the disclosure SYNCHRONOUSLY (before `await signAuthorization`) and
-    // sets the NFC status to exchanging. The 32-byte toHex + 16-byte nonceHex are well-formed so the
-    // e2e shim's real signAuthorization produces a valid wire (no error finalize).
+    // Dispatch a `request` event carrying currency 1 (ckBTC) + 50000 sats. One-press rule: the
+    // "Pay Now" gate already armed the card, so the request AUTO-SIGNS — validation → sign →
+    // exchanging with NO intermediate review. The 32-byte toHex + 16-byte nonceHex are well-formed
+    // so the sign-time real signAuthorization (in the e2e shim) produces a valid wire.
+    // `toName`/`memo` ride the same event the Kotlin module forwards (uniffi PaymentRequestData
+    // toName/memo).
     const nowSecs = Math.floor(Date.now() / 1000);
     await dispatch({
       type: 'request', role: 'card',
@@ -63,25 +65,35 @@ export async function run() {
       nonceHex: 'ab'.repeat(16),  // 16-byte single-use nonce
       expiry: nowSecs + 300,      // 5 min from now
       currency: 1,                // ckBTC
+      toName: 'merchant',         // merchant display name (plumbed through NfcEvent.toName)
+      memo: 'two coffees',        // merchant memo (plumbed through NfcEvent.memo)
     });
 
-    // The NfcTap view mounts (nfc-status) and the exchanging phase renders the honest disclosure.
-    await driver.findByTestID('nfc-status', { timeoutMs: 5_000 });
-    assert(await driver.waitForText('Communicating', { timeoutMs: 5_000 }), 'exchanging should show "Communicating…"');
+    // The NfcTap view mounts (nfc-status); the request goes STRAIGHT to exchanging (auto-sign).
+    await driver.findByTestID('nfc-status', {timeoutMs: 5_000});
+    assert(await driver.waitForText('Communicating', {timeoutMs: 6_000}), 'a payable request should auto-sign → exchanging, no review park');
 
-    // CORE ASSERTION — the honest asset disclosure is visible DURING the exchanging window, BEFORE
-    // any success/result dispatch. The sub-line must read "Paying 0.00050000 BTC on Bitcoin".
+    // CORE ASSERTION — the honest asset disclosure rides the exchanging status WHILE the money
+    // moves (the read-only amount + network from the resolved disclosure), and the wire already
+    // exists (the sign happened on arrival — the tap is the channel, not the consent).
     {
       const body = await driver.bodyText();
-      assert(body.includes('BTC'), 'NFC status should disclose the asset name "BTC"');
-      assert(body.includes('Bitcoin'), 'NFC status should disclose the network "Bitcoin"');
-      assert(body.includes('0.00050000'), 'NFC status should disclose the asset-correct amount "0.00050000"');
+      assert(body.includes('BTC'), 'the exchanging status should disclose the asset name "BTC"');
+      assert(body.includes('0.00050000'), 'the exchanging status should disclose the asset-correct amount "0.00050000"');
       // The blind-tap bug rendered the DEMO ∂ formatter for ckBTC — assert it is NOT present.
-      assert(!/∂0\.00050000/.test(body), 'NFC status must NOT render the DEMO ∂ formatter for a ckBTC amount');
-      console.log('[32-nfc-disclosure] ✓ disclosure visible: BTC + Bitcoin + "0.00050000 BTC" (no ∂ formatter)');
+      assert(!/∂0\.00050000/.test(body), 'the exchanging status must NOT render the DEMO ∂ formatter for a ckBTC amount');
+      assert(body.includes('Paying 0.00050000 BTC on Bitcoin'), 'the read-only amount line should read "Paying 0.00050000 BTC on Bitcoin"');
+      assert(body.includes('Hold the phones together to send'), 'the exchanging card-role hint should render');
+      // One-press honesty: the review affordances are gone — no card, no buttons, no countdown.
+      assert(!(await driver.isPresent('nfc-pay-amount')), 'no review-card amount node (nfc-pay-amount) may exist');
+      assert(!(await driver.isPresent('btn-nfc-approve')), 'no Approve button exists (one press already spent at "Pay Now")');
+      const wire = await driver.eval(() => window.__DPAY_TEST_NFC_APPROVED_WIRE);
+      assert(wire != null && typeof wire.envelopeHex === 'string' && wire.envelopeHex.length > 128,
+        'the signed wire should exist right after arrival (auto-sign) — no Approve click ever happened');
+      console.log('[32-nfc-disclosure] ✓ auto-sign: Paying 0.00050000 BTC on Bitcoin + hold-to-send, wire stashed, no ∂ formatter');
     }
 
-    await driver.screenshot('32-nfc-disclosure');
+    await driver.screenshot('32-nfc-disclosure-sign');
 
     // Clean up: dispatch a terminal phase so NfcTap finalizes (no hanging mid-tap state).
     await dispatch({ type: 'phase', role: 'card', phase: 'declined' });

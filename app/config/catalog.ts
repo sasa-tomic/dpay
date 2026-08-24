@@ -26,7 +26,7 @@ export type CurrencyDescriptor = {
   mintable: boolean;         // true for the demo currency the facade mints/burns
   minter: string | null;     // ramp (ck minter) principal as text, or null (no deposit/withdraw path)
   minter_family: MinterFamily | null;
-  symbol: string | null;     // display symbol ("$", "₿", "Ξ", "ckUSDC")
+  symbol: string | null;     // display symbol ("$", "₿", "ETH", "ckUSDC" — never a glyph the bundled fonts lack)
   decimals: number | null;   // smallest-unit decimal count (USD=2, BTC=8, USDC=6)
   // MC1 unit 5 — authoritative per-currency metadata:
   wrapper_name: string | null;     // IC wrapper token name ("ckBTC"/"ckUSDC")
@@ -71,7 +71,7 @@ export const BUNDLED_CATALOG: CurrencyDescriptor[] = [
   {currency: 2, ledger: 'xevnm-gaaaa-aaaar-qafnq-cai', mintable: false, minter: 'sv3dd-oaaaa-aaaar-qacoa-cai', minter_family: 'CkEthErc20', symbol: 'ckUSDC', decimals: 6,
     wrapper_name: 'ckUSDC', backing_symbol: 'USDC', network: 'Ethereum', display_decimals: 6, fee: '10000', cap: null,
     chain_id: 1, token_contract: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', gas_ledger: 'ss2fx-dyaaa-aaaar-qacoq-cai', onramp: 'Direct', offramp: 'Direct'},
-  {currency: 6, ledger: 'ss2fx-dyaaa-aaaar-qacoq-cai', mintable: false, minter: 'sv3dd-oaaaa-aaaar-qacoa-cai', minter_family: 'CkEthErc20', symbol: 'Ξ', decimals: 18,
+  {currency: 6, ledger: 'ss2fx-dyaaa-aaaar-qacoq-cai', mintable: false, minter: 'sv3dd-oaaaa-aaaar-qacoa-cai', minter_family: 'CkEthErc20', symbol: 'ETH', decimals: 18,
     wrapper_name: 'ckETH', backing_symbol: 'ETH', network: 'Ethereum', display_decimals: 6, fee: '2000000000000', cap: null,
     chain_id: 1, token_contract: null, gas_ledger: null, onramp: 'Direct', offramp: 'Direct'},
 ];

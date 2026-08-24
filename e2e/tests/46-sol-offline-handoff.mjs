@@ -1,7 +1,8 @@
 // Flow 46 — SOL v2 recent-blockhash offline-pay: scan → offline sign → honest pending.
 //
 // Proves the SOL v2 offline-pay payer path end-to-end through the REAL app:
-//   1. The payer scans a merchant's `solreq:v2?` QR (via the camera seam), reviews, Approves.
+//   1. The payer scans a merchant's `solreq:v2?` QR (via the camera seam) — AUTO-SIGN (one-press
+//      rule, 2026-08-24: the "Pay Now" gate was the press; the offline sign fires on decode).
 //   2. The app signs FULLY OFFLINE (no RPC — signs against the blockhash embedded in the request).
 //   3. The signed `solpay:v2?` QR is shown for the merchant to scan + broadcast.
 //   4. The payer marks "Handed to merchant" → the HONEST pending state: "Sent X · awaiting
@@ -12,16 +13,16 @@
 // (the merchant fetched them online via createSolPaymentRequest before showing the QR).
 //
 // Selector contract: `asset-sol-select` (the SOL row in the Balances sheet),
-// `sol-pay-scan`, `sol-pay-amount`, `btn-sol-pay-approve`, `sol-pay-qr`,
+// `sol-pay-scan`, `sol-pay-amount`, `sol-pay-qr`,
 // `btn-sol-pay-handed`, `sol-pay-status`.
-import {setup, assert, onboardWallet} from '../harness/lib.mjs';
+import {setup, assert, onboardWallet, armPayScan} from '../harness/lib.mjs';
 
 export const meta = {
   id: '46',
   name: 'sol-offline-handoff',
   journey: 'offline',
-  covers: ['sol-offline-sign', 'qr-handoff', 'honest-pending', 'review-short-payee'],
-  verifies: 'SOL v2 scan solreq:v2 → review shows the short destination (U-F5) → offline sign (no setup, no nonce) → solpay:v2 QR → honest pending.',
+  covers: ['sol-offline-sign', 'qr-handoff', 'honest-pending', 'sign-status-short-payee'],
+  verifies: 'SOL v2 scan solreq:v2 → AUTO-SIGN (no setup, no nonce) → solpay:v2 QR (U-F5 short destination rides the qr header) → honest pending.',
   timeoutMs: 25000,
 };
 
@@ -77,24 +78,22 @@ export async function run() {
     // 4. Scan the merchant's solreq:v2 QR (via the camera seam).
     const solreqUri = buildSolReq();
     console.log('[46-sol-offline-handoff] scanning solreq:v2…');
+    await armPayScan(driver); // pay-intent gate: arm the scan surface (no-op when already armed)
     await driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), solreqUri);
 
-    // 5. Review: the amount is shown.
-    const amount = await driver.findByTestID('sol-pay-amount', {timeoutMs: 5_000});
-    const amountTxt = await amount.evaluate((n) => (n.textContent ?? '').trim());
-    assert(/SOL/.test(amountTxt), `review should show the SOL amount, got: "${amountTxt}"`);
+    // 5+6. AUTO-SIGN (one-press rule): the scan itself signs offline (PURE, no RPC) → the
+    //      solpay:v2 QR surface is the stable landing. The qr header carries the amount +
+    //      destination (`fmtAsset to name`), so the amount + U-F5 short-payee asserts read there.
+    await driver.findByTestID('sol-pay-qr', {timeoutMs: 8_000});
+    const qrBody = await driver.bodyText();
+    assert(/0\.001000000 SOL/.test(qrBody), `the qr surface should show the SOL amount (0.001000000 for PAY_LAMPORTS=1_000_000), got: "${qrBody.slice(0, 200)}"`);
     // U-F5 (SOL twin of flows 26/27): the merchant name alone is not verifiable — the dim
     // sol-pay-payee line carries the short base58 destination under the name.
     const payee = await driver.findByTestID('sol-pay-payee', {timeoutMs: 5_000});
     const payeeTxt = await payee.evaluate((n) => (n.textContent ?? '').trim());
     assert(payeeTxt === `${MERCHANT_ADDR.slice(0, 8)}…`,
-      `review short-payee line (U-F5): expected ${MERCHANT_ADDR.slice(0, 8)}…, got "${payeeTxt}"`);
-    console.log(`[46-sol-offline-handoff] ✓ review: ${amountTxt} · ${payeeTxt}`);
-
-    // 6. Approve → offline sign (PURE, no RPC) → solpay:v2 QR.
-    console.log('[46-sol-offline-handoff] approving (offline sign)…');
-    await driver.click('btn-sol-pay-approve', {timeoutMs: 5_000});
-    await driver.findByTestID('sol-pay-qr', {timeoutMs: 5_000});
+      `qr short-payee line (U-F5): expected ${MERCHANT_ADDR.slice(0, 8)}…, got "${payeeTxt}"`);
+    console.log(`[46-sol-offline-handoff] ✓ auto-signed: 0.002000000 SOL · ${payeeTxt}`);
 
     // Capture the signed solpay:v2 URI (the QR shim stashes it on window.__DPAY_QR_LAST).
     const solpayUri = await driver.eval(() => window.__DPAY_QR_LAST);

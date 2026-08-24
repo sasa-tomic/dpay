@@ -382,7 +382,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
           <Text style={S.currency}>{reqPrefix}</Text>
           <IconChevronDown size={20} color={C.sub}/>
         </Pressable>
-        <TextInput testID="amount-input" style={S.amountInput} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={C.sub2} accessibilityLabel="Amount to receive" accessibilityHint="The amount the payer will send you" />
+        <TextInput testID="amount-input" style={S.amountInput} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={C.sub} accessibilityLabel="Amount to receive" accessibilityHint="The amount the payer will send you" />
       </View>
       <TextInput
         testID="memo-input"
@@ -390,7 +390,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
         value={memo}
         onChangeText={setMemo}
         placeholder="Add a note (optional)"
-        placeholderTextColor={C.sub2}
+        placeholderTextColor={C.sub}
         accessibilityLabel="Memo"
         accessibilityHint="An optional note attached to this payment request"
         maxLength={32}

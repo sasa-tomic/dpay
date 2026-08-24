@@ -1,5 +1,5 @@
 /**
- * AssetGlyph — per-family asset monogram chips ($ ₿ Ξ ◎ ∂).
+ * AssetGlyph — per-family asset monogram chips ($ ₿ ◊ ◎ ∂).
  * Design (2026-08-16 visual overhaul): every asset row/picker/balance surface shows a rounded
  * chip tinted with the family hue + the family's NATIVE SYMBOL as text. Symbols are currency
  * language (never icons — see icons.tsx), so they render as Text for exact font metrics.
@@ -38,8 +38,10 @@ const FAMILIES: Record<string, Record<'light' | 'dark', FamilyGlyph>> = {
     dark: {glyph: '₿', color: '#E8A33D', bg: 'rgba(232,163,61,0.14)'},
   },
   eth: {
-    light: {glyph: 'Ξ', color: '#4338CA', bg: 'rgba(79,70,229,0.08)'},
-    dark: {glyph: 'Ξ', color: '#8B93F8', bg: 'rgba(139,147,248,0.14)'},
+    // ◊ lozenge (U+25CA): the ONLY diamond-family glyph present in EVERY bundled font (Ξ U+039E
+    // is in none — MIUI fallback drew three disconnected "hamburger" bars on device, 2026-08-23).
+    light: {glyph: '◊', color: '#4338CA', bg: 'rgba(79,70,229,0.08)'},
+    dark: {glyph: '◊', color: '#8B93F8', bg: 'rgba(139,147,248,0.14)'},
   },
   usdc: {
     light: {glyph: '$', color: '#1D4ED8', bg: 'rgba(29,78,216,0.08)'},
@@ -60,6 +62,9 @@ function familyKey(asset: SelectableAsset): keyof typeof FAMILIES | 'fallback' {
   const s = asset.symbol.toUpperCase();
   if (s.includes('BTC')) return 'btc';
   if (s.includes('ETH')) return 'eth';
+  // Stale-cache guard: a relay-served live catalog (AsyncStorage-cached) may still carry the
+  // retired 'Ξ' symbol — it must still map home instead of falling to the brand fallback.
+  if (s.includes('Ξ')) return 'eth';
   if (s.includes('USDC') || s.includes('USD')) return 'usdc';
   return 'fallback';
 }

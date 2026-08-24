@@ -8,7 +8,7 @@
 // Rail semantics: the offline branch never POSTs (nothing to dedup on A's side); the envelope QR
 // IS the payment; reconciliation is by request_id via read_state — the same terminal state the
 // online path reaches, just submitted by the counterparty.
-import {setup, assert, assertIncludes, getBalance, faucetAccount, onboardWallet, accountOf, goOffline, setRelay} from '../harness/lib.mjs';
+import {setup, assert, assertIncludes, getBalance, faucetAccount, onboardWallet, accountOf, goOffline, setRelay, armPayScan} from '../harness/lib.mjs';
 import {generateKeypair, decodeRequest, buildRequestQR, randNonceHex} from '../harness/wire.mjs';
 
 export const meta = {
@@ -47,12 +47,15 @@ export async function run() {
     const nonce = randNonceHex();
     const expiry = Math.floor(Date.now() / 1000) + 600;
     const requestQR = buildRequestQR(bob.publicHex, PAY_CENTS, nonce, expiry, 0, 'bob');
+    await armPayScan(env.driver); // pay-intent gate: arm the scan surface (no-op when already armed)
     await env.driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), requestQR);
-    const reviewShown = await env.driver.waitForText('Pay ∂25.00', {timeoutMs: 6_000});
-    assert(reviewShown, 'A should reach the Pay ∂25.00 review after scanning the request QR');
+    // One-press rule (2026-08-24): the scan AUTO-SIGNS while offline. The gateway is ALIVE here
+    // (keepGateway), so the sign lands straight in the envelope hand-off QR — the transient sign
+    // status may flash by unread on a fast host, so the QR surface is the assert (no Approve press
+    // exists; the ∂25.00 amount rides the QR surface's amountBig line).
+    await env.driver.waitForText('signed on this device ✓', {timeoutMs: 8_000});
 
-    // --- Approve while OFFLINE → the hand-off QR (the envelope, base64url). --------------------
-    await env.driver.click('btn-approve', {timeoutMs: 4_000});
+    // --- Offline auto-sign → the hand-off QR (the envelope, base64url). ------------------------
     const qrShown = await env.driver.waitForText('signed on this device ✓', {timeoutMs: 8_000});
     assert(qrShown, 'A offline approval should show the envelope hand-off QR');
     const payload = await env.driver.eval(() => window.__DPAY_QR_LAST);

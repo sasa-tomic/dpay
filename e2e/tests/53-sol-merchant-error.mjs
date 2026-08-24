@@ -16,7 +16,7 @@
 //   - sol-req-status ("Received") does NOT render (no false success).
 //
 // Selector contract: same as flow 51.
-import {setup, assert, onboardWallet} from '../harness/lib.mjs';
+import {setup, assert, onboardWallet, armNfcCard} from '../harness/lib.mjs';
 
 export const meta = {
   id: '53',
@@ -92,20 +92,21 @@ export async function run() {
     assert(typeof solreqUri === 'string' && solreqUri.startsWith('solreq:v2?'),
       `the solreq:v2 QR must be captured, got: ${JSON.stringify(solreqUri)?.slice(0, 80)}`);
 
-    // 2. Produce a REAL signed solpay via NFC autoSign (same approach as flow 51).
-    console.log('[53-sol-merchant-error] switching to Pay tab + NFC autoSign…');
+    // 2. Produce a REAL signed solpay via the NFC auto-sign (one-press rule — same approach as
+    //    flow 51: the request signs on arrival, no review/Approve).
+    console.log('[53-sol-merchant-error] switching to Pay tab + NFC request (auto-sign)…');
     await driver.click('tab-pay', {timeoutMs: 5_000});
     await driver.findByTestID('sol-pay-scan', {timeoutMs: 5_000});
 
-    const dispatch = (event) => driver.eval((e) => window.__DPAY_TEST_SOL_NFC_SESSION(e), event);
+    const dispatch = async (event) => { await armNfcCard(driver, 'sol'); return driver.eval((e) => window.__DPAY_TEST_SOL_NFC_SESSION(e), event); };
     await dispatch({type: 'phase', role: 'card', phase: 'linking'});
     await driver.findByTestID('sol-nfc-status', {timeoutMs: 4_000});
     await dispatch({type: 'request', role: 'card', solreqUri});
-    await driver.waitForText('Communicating', {timeoutMs: 5_000});
+    await driver.waitForText('Communicating', {timeoutMs: 6_000});
 
     const solpayUri = await driver.eval(() => window.__DPAY_SOL_NFC_LAST);
     assert(typeof solpayUri === 'string' && solpayUri.startsWith('solpay:v2?'),
-      `autoSign should produce a solpay:v2 URI, got: ${JSON.stringify(solpayUri)?.slice(0, 80)}`);
+      `the arrival auto-sign should produce a solpay:v2 URI, got: ${JSON.stringify(solpayUri)?.slice(0, 80)}`);
 
     // Dismiss the NFC overlay.
     await driver.eval(() => {

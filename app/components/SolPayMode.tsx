@@ -1,4 +1,4 @@
-import {useState} from 'react';
+import {useEffect, useState} from 'react';
 import {View, Text, Pressable} from 'react-native';
 import {QrCode} from './QrCode';
 import {FundFirstPanel} from './FundFirstPanel';
@@ -51,6 +51,11 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
   // A tap arriving on the always-armed card takes over the scan screen; nfcKey re-arms after each.
   const [nfcActive, setNfcActive] = useState(false);
   const [nfcKey, setNfcKey] = useState(0);
+  // Pay-intent gate (founder rule 2026-08-23, same as IC PayMode): the camera and the HCE card
+  // start ONLY after the payer's explicit "Pay Now" tap. Disarmed by reset() and by
+  // leaving the scan sub-mode; rail/tab switches unmount this component.
+  const [scanArmed, setScanArmed] = useState(false);
+  useEffect(() => { if (subMode !== 'scan') setScanArmed(false); }, [subMode]);
 
   // U-F1 — visible confirmation after the share resolves (the DepositSheet copy pattern). Dismissed
   // sheets leave the label honest.
@@ -125,9 +130,11 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
     );
   }
 
-  // Scan the merchant's solreq:v2: QR → decode → review. Enforce `exp` CLIENT-SIDE (the SOL rail
-  // has no server to reject a stale request — unlike the IC canister — so a stale/replayed solreq is
-  // fully signable unless we refuse it here, before signing).
+  // Scan the merchant's solreq:v2: QR → decode → auto-sign (one-press rule: the "Pay Now" gate
+  // was the deliberate press — the SOL rail has no deeplink entry, so no review screen exists on
+  // this path). Enforce `exp` CLIENT-SIDE (the SOL rail has no server to reject a stale request —
+  // unlike the IC canister — so a stale/replayed solreq is fully signable unless we refuse it
+  // here, before signing).
   function onScan(raw: string) {
     try {
       const r = decodeSolReq(raw);
@@ -139,6 +146,7 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
       setReq(r);
       setErr(null);
       setPhase('review');
+      approve(r);
     } catch (e: unknown) {
       // Same honest-contract split as PayMode's decode failure: the user gets friendly copy (never
       // the raw codec error), the dev cause goes to the console.
@@ -147,14 +155,14 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
     }
   }
 
-  // Approve → offline sign (PURE, no RPC) → show the signed solpay:v2: QR.
-  function approve() {
-    if (!req) return;
+  // Offline sign (PURE, no RPC) → show the signed solpay:v2: QR. Auto-fired by onScan; a sign
+  // throw stays on the 'review' surface with the error + Cancel (the honest terminal).
+  function approve(r: SolReqV2) {
     setBusy(true);
     try {
-      const solpay = req.cur === 'SOL'
-        ? signSolPayment(identity.secretHex, req)
-        : signSplPayment(identity.secretHex, req);
+      const solpay = r.cur === 'SOL'
+        ? signSolPayment(identity.secretHex, r)
+        : signSplPayment(identity.secretHex, r);
       setSolpayUri(encodeSolPay(solpay));
       setPhase('qr');
     } catch (e: unknown) {
@@ -164,7 +172,7 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
     }
   }
 
-  function reset() { setReq(null); setSolpayUri(null); setErr(null); setPhase('scan'); }
+  function reset() { setReq(null); setSolpayUri(null); setErr(null); setScanArmed(false); setPhase('scan'); }
 
   // NFC card outcome: success/pending → paid (awaiting merchant confirmation); declined → back to scan.
   function onNfcOutcome(outcome: 'success' | 'pending' | 'declined') {
@@ -228,9 +236,11 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
     return (
       <View style={S.center}>
         {toggle}
-        {/* NFC card runs in the background (if ready) while the QR scanner is live at the same
-            time — the payer taps the merchant's phone OR scans its QR. No setup needed in v2. */}
-        {nfcReady && DpaySolNfc ? (
+        {/* Pay-intent gate (same rule as IC PayMode): IDLE keeps the sol-pay-scan container + hint
+            and a single primary CTA; the camera and the NFC card start ONLY on that tap. ARMED is
+            exactly the pre-gate scan surface — card in the background (if ready), QR live at the
+            same time; the payer taps the merchant's phone OR scans its QR. No setup needed in v2. */}
+        {scanArmed && nfcReady && DpaySolNfc ? (
           <SolNfcTap
             key={nfcKey} role="card" identity={identity}
             onOutcome={onNfcOutcome}
@@ -246,7 +256,23 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
                 <IconScan size={18} color={C.sub}/>
                 <Text style={[S.dim2, {marginTop: 0}]}>Scan the merchant's payment code to pay offline.</Text>
               </View>
-              <QrScanner onScan={onScan} />
+              {scanArmed ? (
+                <QrScanner onScan={onScan} />
+              ) : (
+                <>
+                  <Text style={S.dim2}>The camera and tap-to-pay start when you press the button — nothing scans before you ask.</Text>
+                  <Pressable
+                    style={S.primary}
+                    onPress={() => setScanArmed(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Pay now"
+                    accessibilityHint="Turn on the camera and tap-to-pay so you can pay a merchant"
+                    testID="btn-sol-start-scan"
+                  >
+                    <Text style={S.primaryText}>Pay Now</Text>
+                  </Pressable>
+                </>
+              )}
             </View>
             {err ? <Text testID="sol-pay-err" style={S.err}>{err}</Text> : null}
           </>
@@ -256,10 +282,13 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
   }
 
   if (phase === 'review' && req) {
+    // One-press rule (founder directive 2026-08-24): the camera path already signed — the "Pay
+    // Now" gate was the press. This surface is the read-only sign status + the honest terminal
+    // for a sign error (reason + Cancel back to the gated scan). NO sign button ever renders.
     return (
       <View style={S.center}>
         {toggle}
-        <Text style={S.label}>Review payment</Text>
+        <Text style={S.label}>Paying</Text>
         <Text testID="sol-pay-amount" style={S.reviewAmount}>{`Pay ${fmtAsset(req.amt, decimals, unit)}`}</Text>
         <Text style={S.reviewTo}>{`to ${req.name || req.to}`}</Text>
         {/* U-F5 twin of PayMode's review-payee: a merchant name alone is not verifiable — show the
@@ -267,27 +296,15 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
             base58 address (more precise than a short form), so no duplicate line. */}
         {req.name ? <Text testID="sol-pay-payee" style={S.dim2}>{short(req.to)}</Text> : null}
         {req.memo ? <Text testID="sol-pay-memo" style={S.dim2}>{req.memo}</Text> : null}
-        {/* Trip Ready J4 — same payReview truth as the IC rail (the copy is rail-agnostic: exact
-            asset + amount, your key). Reading-zone mount (under the amount/payee block it
-            explains). Same seen-key: one dismissal covers both rails. */}
-        <CoachTip tipKey="payReview" />
-        <Text style={S.badgeOk}>signed on this device ✓</Text>
         <Text style={S.dim2}>This signs offline — the merchant settles when they submit it.</Text>
         {err ? <Text testID="sol-pay-err" style={S.err}>{err}</Text> : null}
-        <Pressable
-          testID="btn-sol-pay-approve"
-          style={[S.primaryWide, busy && S.disabledFlat]}
-          disabled={busy}
-          onPress={approve}
-          accessibilityRole="button"
-          accessibilityLabel="Approve offline payment"
-          accessibilityHint="Sign the payment offline with your key"
-          accessibilityState={{disabled: busy}}>
-          <Text style={S.primaryText}>{busy ? 'Signing…' : 'Approve'}</Text>
-        </Pressable>
-        <Pressable testID="btn-sol-pay-cancel" style={S.secondaryBtn} onPress={reset} accessibilityRole="button" accessibilityLabel="Cancel" accessibilityState={{disabled: false}}>
-          <Text style={S.secondaryBtnText}>Cancel</Text>
-        </Pressable>
+        {busy ? (
+          <Text style={S.dim2}>Signing…</Text>
+        ) : (
+          <Pressable testID="btn-sol-pay-cancel" style={S.secondaryBtn} onPress={reset} accessibilityRole="button" accessibilityLabel="Cancel" accessibilityState={{disabled: false}}>
+            <Text style={S.secondaryBtnText}>Cancel</Text>
+          </Pressable>
+        )}
       </View>
     );
   }
@@ -299,6 +316,9 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
         <Text style={S.label}>Show this to the merchant</Text>
         <View testID="sol-pay-qr" style={S.qrCard}><QrCode value={solpayUri} size={QR_SIZE} ecl="L" /></View>
         <Text style={S.amountBig}>{`${fmtAsset(req!.amt, decimals, unit)} to ${req!.name || req!.to}`}</Text>
+        {/* U-F5: the sync auto-sign batch-skips the sign-status surface (straight to qr), so the
+            short destination must live HERE — a merchant name alone is not verifiable. */}
+        {req!.name ? <Text testID="sol-pay-payee" style={S.dim2}>{short(req!.to)}</Text> : null}
         <Text style={S.badgeOk}>signed offline ✓</Text>
         <Text style={S.qrHint}>Offline — the merchant settles this when they submit it. You'll see it on your balance once it's confirmed.</Text>
         {/* Trip Ready J4 — the SOL QR hand-off is ALWAYS offline-pending (no online branch), and

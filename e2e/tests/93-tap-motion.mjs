@@ -2,21 +2,23 @@
 //
 // Walks the NFC phases through the real event seams (IC: __DPAY_TEST_NFC_SESSION flow-11
 // pattern; SOL: __DPAY_TEST_SOL_NFC_SESSION flow-47 pattern) and asserts EVERY phase keeps its
-// textContent contract (the strings are e2e-pinned) while the new motion beats mount exactly
-// when they should: listening breath, per-phase itinerary segments, the awaitingApproval key
-// beat, the success passport stamp — and the HONESTY rule: pending shows NO stamp mark and NO
-// campaign line anywhere.
+// textContent contract (the strings are e2e-pinned) while the motion beats mount exactly when
+// they should: listening breath, per-phase itinerary segments — and the HONESTY rule: pending
+// shows NO settled mark and NO campaign line anywhere. (The dpay passport-stamp ring was dropped
+// by founder directive 2026-08-24 — success is carried by the badge + title alone; the review
+// key beat is READER-only now: the one-press auto-sign removed the card-side review park, so a
+// card awaitingApproval maps straight to exchanging.)
 //
 // No real signing fires on the IC side (pure UI-phase proof, exactly flow 11); the SOL side
 // stops before the request event (the reader halves of both rails are flow 86/87's job).
-import {setup, assert, onboardWallet} from '../harness/lib.mjs';
+import {setup, assert, onboardWallet, armNfcCard} from '../harness/lib.mjs';
 
 export const meta = {
   id: '93',
   name: 'tap-motion',
   journey: 'nfc',
-  covers: ['nfc-phases', 'event-bus', 'delight-motion', 'honesty-guard'],
-  verifies: 'every NFC phase renders its pinned textContent + its own motion beat (breath/segments/key/stamp/ellipsis/shake); pending carries no stamp mark and no campaign line (honesty)',
+  covers: ['nfc-phases', 'event-bus', 'delight-motion', 'honesty-guard', 'auto-sign'],
+  verifies: 'every NFC phase renders its pinned textContent + its own motion beat (breath/segments/ellipsis/shake); card awaitingApproval maps straight to exchanging (auto-sign); pending carries no settled mark and no campaign line (honesty); no dpay stamp ring exists anywhere',
   timeoutMs: 30_000,
 };
 
@@ -33,7 +35,7 @@ export async function run() {
     await driver.eval(() => { window.__DPAY_TEST_NFC_STATUS = 'ready'; });
     await onboardWallet(driver, 'e2e-nfc');
     await driver.findByTestID('pay-scan', {timeoutMs: 5_000});
-    const icDispatch = (event) => driver.eval((e) => window.__DPAY_TEST_NFC_SESSION(e), event);
+    const icDispatch = async (event) => { await armNfcCard(driver, 'ic'); return driver.eval((e) => window.__DPAY_TEST_NFC_SESSION(e), event); };
 
     // listening → the breathing ring mounts with the pinned copy (flow 11's "not-a-dpay-phone"
     // surface stays: NfcTap takes over ONLY on linking).
@@ -43,7 +45,7 @@ export async function run() {
     assert(await has(driver, 'tap-progress'), 'linking mounts the itinerary line');
     assert(await has(driver, 'tap-progress-seg-1'), 'linking lights segment 1');
     assert(!await has(driver, 'tap-progress-seg-2'), 'linking must not light segment 2');
-    assert(!await has(driver, 'tap-success-stamp'), 'no success stamp while linking');
+    assert(!await has(driver, 'tap-success-stamp'), 'HONESTY: no dpay stamp ring exists anywhere (dropped 2026-08-24)');
     await driver.screenshot('93-tap-motion-linking');
 
     await icDispatch({type: 'phase', role: 'card', phase: 'exchanging'});
@@ -51,23 +53,24 @@ export async function run() {
     assert(await has(driver, 'tap-progress-seg-2'), 'exchanging lights segment 2');
     assert(!await has(driver, 'tap-progress-seg-3'), 'exchanging must not light segment 3');
 
-    // awaitingApproval → the quiet key beat (no spinner); line holds at 2.
+    // awaitingApproval (card) maps STRAIGHT to exchanging (one-press auto-sign: the request
+    // signs on arrival — no review park exists on the card side; the key beat is reader-only).
     await icDispatch({type: 'phase', role: 'card', phase: 'awaitingApproval'});
-    assert(await driver.waitForText('Authorizing', {timeoutMs: 4_000}), 'awaitingApproval shows "Authorizing…"');
-    assert(await has(driver, 'tap-key-beat'), 'awaitingApproval mounts the key beat');
-    assert(!await has(driver, 'tap-progress-seg-3'), 'awaitingApproval holds at 2 segments');
-    await driver.screenshot('93-tap-motion-key');
+    assert(await driver.waitForText('Communicating', {timeoutMs: 4_000}), 'card awaitingApproval maps to exchanging (auto-sign, "Review payment" is retired)');
+    assert(await has(driver, 'tap-progress-seg-2'), 'awaitingApproval rides the exchanging segment');
+    assert(!(await driver.bodyText()).includes('Review payment'), 'no review card exists on the card side');
 
     await icDispatch({type: 'phase', role: 'card', phase: 'settling'});
     assert(await driver.waitForText('Confirming', {timeoutMs: 4_000}), 'settling shows "Confirming…"');
     assert(await has(driver, 'tap-progress-seg-3'), 'settling lights segment 3');
 
-    // success → the passport stamp mounts. No request ever fired, so formattedAmt is null and
+    // success → the badge + title carry it (the dpay stamp ring is GONE by founder directive
+    // 2026-08-24 — nothing else mounts). No request ever fired, so formattedAmt is null and
     // computeTapStatus titles the card success 'Paid ✓' (the pinned contract; 'Done ✓' is only
     // the unused TAP_PHASES fallback). NO peak (this session is ONLINE — goOffline never ran).
     await icDispatch({type: 'phase', role: 'card', phase: 'success'});
     assert(await driver.waitForText('Paid ✓', {timeoutMs: 4_000}), 'success shows "Paid ✓"');
-    assert(await has(driver, 'tap-success-stamp'), 'success mounts the passport stamp');
+    assert(!await has(driver, 'tap-success-stamp'), 'success must NOT mount a dpay stamp ring (dropped 2026-08-24)');
     assert(!await has(driver, 'offline-peak'), 'no offline peak on an online session');
     assert(!await has(driver, 'tap-progress'), 'success clears the itinerary line');
     await driver.screenshot('93-tap-motion-success-ic');
@@ -83,7 +86,7 @@ export async function run() {
     await icDispatch({type: 'phase', role: 'card', phase: 'pending'});
     assert(await driver.waitForText('Not confirmed', {timeoutMs: 4_000}), 'pending shows "Not confirmed"');
     assert(await has(driver, 'tap-ellipsis'), 'pending mounts the stillness ellipsis');
-    assert(!await has(driver, 'tap-success-stamp'), 'HONESTY: pending must not carry the stamp mark');
+    assert(!await has(driver, 'tap-success-stamp'), 'HONESTY: pending must not carry a settled mark (stamp ring is gone everywhere)');
     assert(!await has(driver, 'paid-stamp'), 'HONESTY: pending must not carry the paid stamp');
     assert(!await has(driver, 'offline-peak'), 'HONESTY: pending must not carry the peak');
     assert(!(await driver.bodyText()).includes('Roaming off'), 'HONESTY: no campaign line on pending');
@@ -95,7 +98,7 @@ export async function run() {
     await icDispatch({type: 'phase', role: 'card', phase: 'declined'});
     assert(await driver.waitForText('Declined', {timeoutMs: 4_000}), 'declined shows "Declined"');
     assert(await has(driver, 'tap-shake'), 'declined mounts the restrained shake-settle');
-    assert(!await has(driver, 'tap-success-stamp'), 'HONESTY: declined must not carry the stamp mark');
+    assert(!await has(driver, 'tap-success-stamp'), 'HONESTY: declined must not carry a settled mark (stamp ring is gone everywhere)');
     assert(!(await driver.bodyText()).includes('Roaming off'), 'HONESTY: no campaign line on declined');
     await driver.screenshot('93-tap-motion-declined');
     console.log(`[${meta.name}] ✓ IC rail: all phases + honesty guards`);
@@ -112,18 +115,18 @@ export async function run() {
     await driver.findByTestID('asset-sol-select', {timeoutMs: 5_000});
     await driver.click('asset-sol-select', {timeoutMs: 5_000});
     await driver.findByTestID('sol-pay-scan', {timeoutMs: 5_000});
-    const solDispatch = (event) => driver.eval((e) => window.__DPAY_TEST_SOL_NFC_SESSION(e), event);
+    const solDispatch = async (event) => { await armNfcCard(driver, 'sol'); return driver.eval((e) => window.__DPAY_TEST_SOL_NFC_SESSION(e), event); };
 
     await solDispatch({type: 'phase', role: 'card', phase: 'linking'});
     await driver.findByTestID('sol-nfc-status', {timeoutMs: 4_000});
     assert(await driver.waitForText('Connecting', {timeoutMs: 4_000}), 'SOL linking shows "Connecting…"');
     assert(await has(driver, 'tap-progress-seg-1'), 'SOL rail shares the itinerary line');
     await solDispatch({type: 'phase', role: 'card', phase: 'awaitingApproval'});
-    assert(await driver.waitForText('Authorizing', {timeoutMs: 4_000}), 'SOL awaitingApproval shows "Authorizing…"');
-    assert(await has(driver, 'tap-key-beat'), 'SOL rail shares the key beat');
+    assert(await driver.waitForText('Communicating', {timeoutMs: 4_000}), 'SOL awaitingApproval maps straight to exchanging (auto-sign parity with IC)');
+    assert(await has(driver, 'tap-progress-seg-2'), 'SOL awaitingApproval rides the exchanging segment');
     await solDispatch({type: 'phase', role: 'card', phase: 'success'});
     assert(await driver.waitForText('Paid ✓', {timeoutMs: 4_000}), 'SOL success shows "Paid ✓"');
-    assert(await has(driver, 'tap-success-stamp'), 'SOL success mounts the same passport stamp (parity)');
+    assert(!await has(driver, 'tap-success-stamp'), 'SOL success carries NO dpay stamp ring either (dropped everywhere)');
     assert(!await has(driver, 'offline-peak'), 'no peak on the SOL rail (SOL excluded — honest)');
     await driver.screenshot('93-tap-motion-success-sol');
     console.log(`[${meta.name}] ✓ SOL rail: motion parity + no peak`);

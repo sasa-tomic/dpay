@@ -1,13 +1,13 @@
 // Flow 87 — offline payer signs with no IC call, then accepts the merchant-returned result.
-import {setup, assert, getBalance, onboardWallet, accountOf} from '../harness/lib.mjs';
+import {setup, assert, getBalance, onboardWallet, accountOf, armNfcCard} from '../harness/lib.mjs';
 import {generateKeypair, randNonceHex} from '../harness/wire.mjs';
 
 export const meta = {
   id: '87',
   name: 'nfc-payer-settle',
   journey: 'nfc',
-  covers: ['nfc', 'payer', 'offline', 'returned-result', 'exact-once'],
-  verifies: 'Offline card prepares update+read_state, never submits, and only a nonce/rid-bound merchant result resolves Paid.',
+  covers: ['nfc', 'payer', 'offline', 'returned-result', 'exact-once', 'approve-before-pay'],
+  verifies: 'Offline card review-parks, Approve prepares update+read_state (never submits), and only a nonce/rid-bound merchant result resolves Paid.',
   timeoutMs: 30000,
 };
 
@@ -22,13 +22,16 @@ export async function run() {
     const payerBefore = BigInt(await getBalance(relayBaseURL, payer.publicHex, 0));
     const merchantBefore = BigInt(await getBalance(relayBaseURL, merchant.publicHex, 0));
 
-    const dispatch = event => driver.eval(e => window.__DPAY_TEST_NFC_SESSION(e), event);
+    const dispatch = async (event) => { await armNfcCard(driver, 'ic'); return driver.eval((e) => window.__DPAY_TEST_NFC_SESSION(e), event); };
     const nonceHex = randNonceHex();
     await dispatch({
       type: 'request', role: 'card', toHex: merchant.publicHex, amount: '1000',
       nonceHex, expiry: Math.floor(Date.now() / 1000) + 240, currency: 0,
     });
     await driver.findByTestID('nfc-status', {timeoutMs: 5000});
+    // One-press rule (2026-08-24): the "Pay Now" gate that armed the card was the deliberate
+    // press — the request AUTO-SIGNS on arrival (offline prepare+provideWire fires immediately;
+    // no review park, no Approve click). The wire poll below proves the sign happened.
 
     let approved = null;
     for (let i = 0; i < 50 && !approved; i += 1) {

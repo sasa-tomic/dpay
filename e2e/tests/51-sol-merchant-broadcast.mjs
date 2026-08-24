@@ -22,7 +22,7 @@
 //
 // Selector contract: `asset-sol-select`, `tab-receive`, `tab-pay`, `sol-req-amount-input`,
 // `btn-sol-req-make`, `sol-req-qr`, `sol-req-status`, `sol-req-sig`, `sol-pay-scan`.
-import {setup, assert, onboardWallet} from '../harness/lib.mjs';
+import {setup, assert, onboardWallet, armNfcCard} from '../harness/lib.mjs';
 
 export const meta = {
   id: '51',
@@ -106,21 +106,23 @@ export async function run() {
       `the solreq:v2 QR must be captured, got: ${JSON.stringify(solreqUri)?.slice(0, 80)}`);
     console.log('[51-sol-merchant-broadcast] ✓ solreq:v2 QR created');
 
-    // 3. Switch to Pay tab → dispatch NFC request → autoSign produces a REAL signed solpay:v2.
-    console.log('[51-sol-merchant-broadcast] switching to Pay tab + NFC autoSign…');
+    // 3. Switch to Pay tab → dispatch NFC request → the request AUTO-SIGNS on arrival (one-press
+    //    rule, founder directive 2026-08-24: the "Pay Now" gate was the deliberate press) → a REAL
+    //    signed solpay:v2 exists with no intermediate review/Approve.
+    console.log('[51-sol-merchant-broadcast] switching to Pay tab + NFC request (auto-sign)…');
     await driver.click('tab-pay', {timeoutMs: 5_000});
     await driver.findByTestID('sol-pay-scan', {timeoutMs: 5_000});
 
-    const dispatch = (event) => driver.eval((e) => window.__DPAY_TEST_SOL_NFC_SESSION(e), event);
+    const dispatch = async (event) => { await armNfcCard(driver, 'sol'); return driver.eval((e) => window.__DPAY_TEST_SOL_NFC_SESSION(e), event); };
     await dispatch({type: 'phase', role: 'card', phase: 'linking'});
     await driver.findByTestID('sol-nfc-status', {timeoutMs: 4_000});
     await dispatch({type: 'request', role: 'card', solreqUri});
-    await driver.waitForText('Communicating', {timeoutMs: 5_000});
+    await driver.waitForText('Communicating', {timeoutMs: 6_000});
 
     const solpayUri = await driver.eval(() => window.__DPAY_SOL_NFC_LAST);
     assert(typeof solpayUri === 'string' && solpayUri.startsWith('solpay:v2?'),
-      `autoSign should produce a solpay:v2 URI, got: ${JSON.stringify(solpayUri)?.slice(0, 80)}`);
-    console.log('[51-sol-merchant-broadcast] ✓ autoSign produced a real signed solpay:v2');
+      `the arrival auto-sign should produce a solpay:v2 URI, got: ${JSON.stringify(solpayUri)?.slice(0, 80)}`);
+    console.log('[51-sol-merchant-broadcast] ✓ auto-sign produced a real signed solpay:v2');
 
     // 4. Extract the sig + stash it so the stub's sendTransaction echoes it back (the v2 strict
     //    verify requires sendTransaction to return the SAME sig the local verify computed).

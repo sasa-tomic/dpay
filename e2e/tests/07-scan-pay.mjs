@@ -1,21 +1,22 @@
-// Flow 07 — Scan → review → pay (two wallets, REAL signing + REAL settlement).
+// Flow 07 — Scan → auto-sign → pay (two wallets, REAL signing + REAL settlement).
 //
 // Two wallets in one test: wallet A is the onboarded payer (in the browser); wallet B is a fresh
 // keypair generated IN-TEST (Node side, @noble/ed25519 — no second browser needed). B builds a
 // request QR (the flow-06 logic); A's app scans it via the camera seam `window.__DPAY_TEST_SCAN`,
-// reviews "Pay $X to merchant", Approves → the app signs with A's on-device key (the @noble shim,
-// byte-exact vs Rust per test 00) + POSTs /api/v1/pay → the FakeLedger VERIFIES the ed25519 sig +
-// settles (debits A, credits B). Asserts:
-//   - A's review shows the exact amount + merchant name.
-//   - A reaches "Paid ✓ ∂25.00".
+// and the decode AUTO-SIGNS (one-press rule, founder directive 2026-08-24: the "Pay Now" gate
+// press that armed the scanner IS the single deliberate press — no review/Approve exists on the
+// camera path) → the app signs with A's on-device key (the @noble shim, byte-exact vs Rust per
+// test 00) + POSTs /api/v1/pay → the FakeLedger VERIFIES the ed25519 sig + settles (debits A,
+// credits B). Asserts:
+//   - A reaches "Paid ✓ ∂25.00" straight from the scan (no intermediate button).
 //   - A's `$` balance decreased by the amount (currency 0 = DEMO_USD, the wallet asset).
 //   - B's balance (direct relay query, currency 0) increased by the amount — recipient credited.
 //   - A's Recent history lists the outgoing payment to B.
 // Every money step runs through the REAL relay + REAL FakeLedger settlement (sig verified, nonce
 // spent, atomic debit/credit). B needs no browser: its balance is read straight off the ledger.
 //
-// Selector contract: `tab-pay` (default), `pay-amount`, `btn-approve`, `btn-new`, `balance`.
-import { setup, assert, assertIncludes, getBalance, onboardWallet, railPrincipalText } from '../harness/lib.mjs';
+// Selector contract: `tab-pay` (default), `btn-new`, `balance`.
+import { setup, assert, assertIncludes, getBalance, onboardWallet, railPrincipalText , armPayScan} from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
 const PAY_CENTS = 2500; // ∂25.00 (DEMO_USD = currency 0, the wallet asset)
@@ -29,7 +30,7 @@ export const meta = {
   name: 'scan-pay',
   journey: 'pay',
   covers: ['scan', 'sign', 'settle', 'receipt', 'history', 'recipient-name'],
-  verifies: 'Payer scans → reviews → approves: two-wallet real ed25519 sign + relay settle → \'Paid ✓\', balances correct.',
+  verifies: 'Payer scans (auto-sign, one press): two-wallet real ed25519 sign + relay settle → \'Paid ✓\', balances correct.',
   timeoutMs: 20000,
 };
 
@@ -57,29 +58,21 @@ export async function run() {
     const requestQR = buildRequestQR(bob.publicHex, PAY_CENTS, nonce, expiry, 0, MERCHANT_NAME);
 
     // --- A scans B's request via the camera seam. PayMode is on the scan screen by default; the
-    //     seam fires the app's onCodeScanned → onRequestString → review screen. ----------------
-    console.log('[07-scan-pay] injecting B’s request QR via the camera seam…');
+    //     seam fires the app's onCodeScanned → onRequestString → AUTO-SIGN (the review/Approve
+    //     hop is gone — the "Pay Now" gate was the press). -------------------------------------
+    console.log('[07-scan-pay] injecting B’s request QR via the camera seam (auto-sign)…');
+    await armPayScan(driver); // pay-intent gate: arm the scan surface (no-op when already armed)
     await driver.eval((qr) => { if (typeof window.__DPAY_TEST_SCAN === 'function') window.__DPAY_TEST_SCAN(qr); }, requestQR);
 
-    // --- Review screen: exact amount + merchant name. -----------------------------------------
-    await driver.findByTestID('pay-amount', { timeoutMs: 5_000 });
-    const payAmt = await driver.readText('pay-amount');
-    assert(payAmt.includes('∂25.00'), `review should show "Pay ∂25.00", got "${payAmt}"`);
-    const reviewBody = await driver.bodyText();
-    assertIncludes(reviewBody, MERCHANT_NAME, 'review should name the merchant');
-    console.log(`[07-scan-pay] ✓ review: ${payAmt} to ${MERCHANT_NAME}`);
-
-    // --- Approve → the app signs offline + submits to the REAL relay → FakeLedger settles. ----
-    console.log('[07-scan-pay] clicking btn-approve (sign + pay)…');
-    await driver.click('btn-approve', { timeoutMs: 5_000 });
+    // --- Auto-sign → the app signs offline + submits to the REAL relay → FakeLedger settles. --
     const paid = await driver.waitForText('Paid', { timeoutMs: 10_000 });
-    assert(paid, 'payer should reach the Paid screen after the relay settles');
+    assert(paid, 'payer should reach the Paid screen straight from the scan (auto-sign, no Approve)');
     // L6: the Paid ✓ confirmation must show the ACTUAL recipient name (to_name from the request
     // bytes), not a generic "merchant" label.
     const paidBody = await driver.bodyText();
     assertIncludes(paidBody, 'Bob', 'Paid ✓ confirmation should name the recipient (L6)');
     assert(!/\bmerchant\b/i.test(paidBody), 'Paid ✓ confirmation must not use the generic "merchant" label (L6)');
-    console.log('[07-scan-pay] ✓ A reached "Paid ✓" to Bob (L6: real recipient name, not "merchant")');
+    console.log('[07-scan-pay] ✓ A reached "Paid ✓" to Bob straight from the scan (L6: real recipient name)');
 
     // --- A's `$` balance decreased by the amount (the 2.5s poll reconciles). ------------------
     const aliceDown = await driver.waitForText('∂75.00', { timeoutMs: 10_000 });

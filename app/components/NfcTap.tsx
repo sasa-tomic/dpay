@@ -40,6 +40,14 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
   onConfirmed?: () => void;
 }) {
   const [disclosure, setDisclosure] = useState<NfcDisclosure | null>(null);
+  // One-press rule (founder directive 2026-08-24): the "Pay Now" gate was the deliberate press,
+  // so a validated request signs IMMEDIATELY — no parked review, no Approve click. `signingRef`
+  // latches at sign start (a duplicate request event must not double-sign; the hook drops
+  // post-sign duplicates, this guards the async window before `advance` fires).
+  const signingRef = useRef(false);
+  // The auto-sign entry, reachable from the hook's request dispatch (which runs before `advance`
+  // exists as a binding). Assigned right after the hook call below.
+  const approveRef = useRef<(req: Extract<NfcEvent, {type: 'request'}>, ctx: TapCtx) => Promise<void>>(async () => {});
   const preparedRef = useRef<(RailPrepared & {readStateEnvelopeHex: string}) | null>(null);
   const readerOutcomeRef = useRef<RailOutcome | null>(null);
   const recordedRef = useRef(false);
@@ -123,33 +131,32 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
     }
   }, [record]);
 
-  const signRequest = useCallback(async (req: {
-    toHex: string; amount: string; nonceHex: string; expiry: number; currency: number;
-  }, ctx: TapCtx) => {
+  // Request arrival: validate → AUTO-SIGN (the tap is the CHANNEL, not the consent — the "Pay
+  // Now" gate already was). The two fail-closed legs (unknown asset / unresolvable disclosure)
+  // auto-decline without signing: they are not consent decisions, they are "there is nothing
+  // payable here" (QR review-unsupported parity). A payable request signs immediately.
+  const validateRequest = useCallback(async (req: Extract<NfcEvent, {type: 'request'}>, ctx: TapCtx) => {
+    const failClosed = async (why: string) => {
+      try { await DpayNfc.declineCard(req.nonceHex); } catch (e: unknown) { console.warn('NfcTap declineCard failed (fail-closed)', e); }
+      ctx.finalize('declined', why);
+    };
     try {
       if (!isPayableAsset(catalog, req.currency)) {
-        await DpayNfc.declineCard(req.nonceHex);
-        ctx.finalize('declined', `Unsupported asset (currency ${req.currency})`);
+        await failClosed(`Unsupported asset (currency ${req.currency})`);
         return;
       }
       const disc = resolveNfcDisclosure(catalog, {currency: req.currency, amount: req.amount});
       if (!disc) {
-        await DpayNfc.declineCard(req.nonceHex);
-        ctx.finalize('declined', `Cannot confirm the asset (currency ${req.currency})`);
+        await failClosed(`Cannot confirm the asset (currency ${req.currency})`);
         return;
       }
-      setDisclosure(disc);
-      const prepared = await prepareNfcTransfer(identity.secretHex, {currencies: catalog}, req);
-      if (!ctx.isCurrent()) return;
-      preparedRef.current = prepared;
-      await DpayNfc.approveCard(prepared.envelopeHex, prepared.readStateEnvelopeHex, req.nonceHex);
+      setDisclosure(disc); // drives the read-only "Paying <amt> on <network>" status line
+      await approveRef.current(req, ctx);
     } catch (e: unknown) {
-      console.warn('NfcTap authorization failed:', e instanceof Error ? e.message : String(e));
-      if (!ctx.isCurrent()) return;
-      try { await DpayNfc.declineCard(req.nonceHex); } catch {/* best-effort */}
-      ctx.finalize('error', 'Couldn’t authorize payment — try again');
+      console.warn('NfcTap request validation failed:', e instanceof Error ? e.message : String(e));
+      await failClosed('Couldn’t read the payment request');
     }
-  }, [catalog, identity.secretHex]);
+  }, [catalog]);
 
   const onSettling = useCallback(() => {
     const prepared = preparedRef.current;
@@ -174,7 +181,7 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
     }
   }, [onConfirmed, onOfflinePaid, record]);
 
-  const {phase, reason, activeRef} = useNfcTapState<NfcEvent>({
+  const {phase, reason, activeRef, advance} = useNfcTapState<NfcEvent>({
     role,
     readerPayload: requestHex,
     onActive,
@@ -189,7 +196,7 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
     waitsForReceipt: false,
     onSettling,
     onRequest: (e, ctx) => {
-      if (e.type === 'request') void signRequest(e, ctx);
+      if (e.type === 'request') void validateRequest(e, ctx);
     },
     onSubmit: (e, ctx) => {
       if (e.type !== 'done') return;
@@ -203,6 +210,33 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
       if (e.type === 'confirmed' && e.role === 'reader') finishReader(ctx);
     },
   });
+
+  // The auto-sign: authoritative sign-time expiry gate (there is no advisory countdown anymore —
+  // this check is the whole gate, QR C1 parity), then the offline sign + provideWire. approveCard's
+  // native nonce guard binds the wire to this request's nonce. (Lives AFTER the hook call: it
+  // closes over `advance`; validateRequest reaches it through `approveRef`.)
+  const approve = useCallback(async (req: Extract<NfcEvent, {type: 'request'}>, ctx: TapCtx) => {
+    if (signingRef.current) return;
+    signingRef.current = true;
+    if (req.expiry * 1000 <= Date.now()) {
+      try { await DpayNfc.declineCard(req.nonceHex); } catch (e: unknown) { console.warn('NfcTap declineCard failed (expired)', e); }
+      ctx.finalize('declined', 'This request expired — ask for a fresh request');
+      return;
+    }
+    advance('exchanging');
+    try {
+      const prepared = await prepareNfcTransfer(identity.secretHex, {currencies: catalog}, req);
+      if (!ctx.isCurrent()) return;
+      preparedRef.current = prepared;
+      await DpayNfc.approveCard(prepared.envelopeHex, prepared.readStateEnvelopeHex, req.nonceHex);
+    } catch (e: unknown) {
+      console.warn('NfcTap authorization failed:', e instanceof Error ? e.message : String(e));
+      if (!ctx.isCurrent()) return;
+      try { await DpayNfc.declineCard(req.nonceHex); } catch {/* best-effort */}
+      ctx.finalize('error', 'Couldn’t authorize payment — try again');
+    }
+  }, [advance, catalog, identity.secretHex]);
+  approveRef.current = approve;
 
   if (phase === 'listening' && !activeRef.current) return null;
 

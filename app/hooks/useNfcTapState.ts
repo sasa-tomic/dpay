@@ -3,8 +3,11 @@ import {NativeEventEmitter} from 'react-native';
 import {SOL_RECEIPT_WAIT_MS} from '../config/constants';
 
 // The terminal + transitional phases both NFC tap components track. Structurally identical to
-// NfcPhaseName / SolNfcPhaseName (plus 'error') — the IC and SOL transports share the same
-// 9-phase status UI, which is precisely why the two components can share this hook.
+// NfcPhaseName / SolNfcPhaseName (plus 'error') — the IC and SOL transports share the
+// same status UI, which is precisely why the two components can share this hook. The one-press
+// rule (founder directive 2026-08-24) removed the review park: a decoded payable request
+// auto-signs, so the card-side 'awaitingApproval' maps to 'exchanging' (the merchant READER
+// keeps 'awaitingApproval': its own "Waiting for the payer…" copy).
 export type NfcTapPhase =
   | 'listening' | 'linking' | 'exchanging' | 'awaitingApproval' | 'settling'
   | 'success' | 'declined' | 'pending' | 'error';
@@ -63,6 +66,9 @@ export function useNfcTapState<E>(args: {
   phase: NfcTapPhase;
   reason: string | null;
   activeRef: React.MutableRefObject<boolean>;
+  /** Adapter-driven FORWARD phase move (auto-sign → exchanging). Not terminal, so
+   * `finalize` stays armed for the real outcome; guards mirror it (no-op after terminal/teardown). */
+  advance: (p: NfcTapPhase) => void;
 } {
   const {
     role, readerPayload, onActive,
@@ -86,8 +92,16 @@ export function useNfcTapState<E>(args: {
   const finalized = useRef(false);
   const activeRef = useRef(false);
   const committed = useRef(false);
+  // True once the adapter has fired the auto-sign (advance → exchanging). The SOL transport
+  // re-pushes the solreq on every re-tap (no requestSent latch), so a duplicate 'request' event
+  // can arrive AFTER the payment is already signed — the signed payment owns the UI from there;
+  // a late request must not re-trigger validation/sign.
+  const signed = useRef(false);
   const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const generationRef = useRef(0);
+  // Mirror of `phase` readable inside the long-lived subscription effect (its closure would
+  // otherwise see the mount-time 'listening' forever). Drives the review-sticky rule below.
+  const phaseRef = useRef<NfcTapPhase>('listening');
   // False once the tap view is torn down (user hit Cancel/Done). An in-flight submit/sign promise
   // that resolves after that must not touch state — it would warn and, worse, could flip a screen
   // the user already left.
@@ -105,13 +119,26 @@ export function useNfcTapState<E>(args: {
     if (settleTimer.current) { clearTimeout(settleTimer.current); settleTimer.current = null; }
   }, []);
 
+  const setPhaseTracked = useCallback((p: NfcTapPhase) => {
+    phaseRef.current = p;
+    setPhase(p);
+  }, []);
+
   const finalize = useCallback((p: NfcTapPhase, r?: string) => {
     if (finalized.current || !aliveRef.current) return; // first terminal wins; ignore after teardown
     finalized.current = true;
     clearSettleTimer();
     setReason(r ?? null);
-    setPhase(p);
-  }, [clearSettleTimer]);
+    setPhaseTracked(p);
+  }, [clearSettleTimer, setPhaseTracked]);
+
+  /** Adapter-driven FORWARD phase move (auto-sign → exchanging). Not terminal, so
+   * `finalize` stays armed for the real outcome; guards mirror it (no-op after terminal/teardown). */
+  const advance = useCallback((p: NfcTapPhase) => {
+    if (finalized.current || !aliveRef.current) return;
+    signed.current = true;
+    setPhaseTracked(p);
+  }, [setPhaseTracked]);
 
   useEffect(() => {
     // Re-set on every effect re-run (readerPayload change / remount): the cleanup below sets
@@ -151,10 +178,25 @@ export function useNfcTapState<E>(args: {
             }, receiptWaitMs);
           }
         }
-        setPhase(e.phase);
+        // Native transports report "request held, awaiting payer decision" as 'awaitingApproval'
+        // (IC uiPhase; SOL cardPhaseName) — with auto-sign the card has no decision park, so it
+        // maps straight to 'exchanging' (the sign is already running by the time the transport
+        // reports it). The READER keeps it (its role-aware "Waiting for the payer…" copy).
+        const mapped: NfcTapPhase = e.phase === 'awaitingApproval' && role === 'card' ? 'exchanging' : e.phase;
+        // Transport re-tap chatter must not drag the payer backwards: a re-coupled reader
+        // re-emits 'linking' (SELECT) — once the auto-sign has fired it's physics interrupting
+        // the sign/send. Only 'settling' and terminal phases (reachable once the wire actually
+        // flows) pass through that window.
+        const chatter = mapped === 'linking' || mapped === 'exchanging';
+        if (chatter && signed.current && phaseRef.current !== 'listening') return;
+        setPhaseTracked(mapped);
       } else if (e.type === 'request') {
+        // Duplicate requests (SOL re-tap re-push) after the sign fired are dropped at the hook:
+        // the signed payment owns the UI. A fresh request reaches the adapter, which validates
+        // (fail-closed auto-decline for unsupported/expired) and fires the auto-sign — there is
+        // no parked-decision state anymore.
+        if (signed.current) return;
         markActive();
-        setPhase('exchanging');
         adapterRef.current.onRequest(e as E, ctx);
       } else if (e.type === 'done' || e.type === 'payment') {
         markActive();
@@ -184,5 +226,5 @@ export function useNfcTapState<E>(args: {
     role, readerPayload, eventName, nativeModule, waitsForReceipt, receiptWaitMs, finalize, markActive, clearSettleTimer,
   ]);
 
-  return {phase, reason, activeRef};
+  return {phase, reason, activeRef, advance};
 }

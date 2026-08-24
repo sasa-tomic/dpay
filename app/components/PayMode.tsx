@@ -38,6 +38,11 @@ const NFC_REASON: Record<Exclude<NfcStatus, 'ready'>, string> = {
 
 export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assetBalances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillRequest, onPrefillConsumed, onShowDepositAddress, onRefreshBalances, refreshBusy = false, onLockChange}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assetBalances: Record<number, string>; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillRequest?: string | null; onPrefillConsumed?: () => void; onShowDepositAddress: () => void; onRefreshBalances?: () => void; refreshBusy?: boolean; onLockChange?: (locked: boolean) => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid'>('scan');
+  // How the current request arrived. 'scan' = the camera path — the "Pay Now" gate already WAS the
+  // one deliberate press, so a payable request auto-signs and 'review' renders only the transient
+  // signing status / honest blocked / error surfaces. 'deeplink' = a dpay:pay link from another app
+  // (a ZERO-PRESS entry) — it keeps today's full review card with its single Approve press.
+  const [entry, setEntry] = useState<'scan' | 'deeplink'>('scan');
   // The within-tab sub-mode is OWNED by Wallet. "scan" = the existing scan-to-pay flow; "send" = the
   // on-chain send-to-address flow (the WithdrawSheet body, lifted inline). The toggle renders only
   // when withdrawFamily is non-null (an on-chain offramp family); DEMO hides it.
@@ -64,6 +69,13 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   // A tap arriving on the always-armed card takes over the scan screen; nfcKey re-arms after each.
   const [nfcActive, setNfcActive] = useState(false);
   const [nfcKey, setNfcKey] = useState(0);
+  // Pay-intent gate (founder rule 2026-08-23): the camera and the HCE card start ONLY after the
+  // payer's explicit "Pay Now" tap — nothing scans before the user asks. Disarmed by
+  // reset() (a concluded attempt needs a fresh intent) and by leaving the scan sub-mode; tab
+  // switches unmount this component (no disarm needed there). Deeplink prefill bypasses it —
+  // a prefilled request never needs the camera.
+  const [scanArmed, setScanArmed] = useState(false);
+  useEffect(() => { if (subMode !== 'scan') setScanArmed(false); }, [subMode]);
   // NFC is usable only when the adapter probe reports 'ready' (on + present). Everything else falls
   // through to the QR-only scan surface, with a per-reason explanation in the info popup below.
   const nfcReady = nfcStatus === 'ready';
@@ -94,30 +106,41 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   const locked = phase !== 'scan';
   useReportLock(onLockChange, locked);
 
-  async function onRequestString(raw: string) {
+  async function onRequestString(raw: string, fromDeeplink: boolean) {
     try {
       // The request QR is plain base64url now (the payee's `to_name` + `memo` live inside the 132-byte
       // request — wire-format v2; the `|name` suffix is gone). parseRequestQR trims + strips a stray
       // suffix defensively; decodeRequest extracts to_name + memo from the bytes.
       const reqB64 = parseRequestQR(raw);
       const r = await DpayCore.decodeRequest(reqB64);
-      setReq(r); setErr(null); setPhase('review');
+      setReq(r); setErr(null); setEntry(fromDeeplink ? 'deeplink' : 'scan'); setPhase('review');
+      // One-press rule (founder directive 2026-08-24): on the CAMERA path the "Pay Now" gate was
+      // the single deliberate press — a decoded, payable request signs immediately, no confirm
+      // screen. Blocked legs (unsupported asset / online+insufficient) never sign: they render
+      // their honest screens below. Deeplink prefill NEVER auto-signs (see the effect comment).
+      if (!fromDeeplink) {
+        const payable = isPayableAsset(catalog, r.currency);
+        const reqBalance = r.currency === 0 ? shownBalance : (assetBalances[r.currency] ?? null);
+        const insufficient = reqBalance != null && cmpRaw(r.amount, reqBalance) > 0;
+        if (payable && !(online && insufficient)) void approve(r);
+      }
     } catch (e: unknown) { console.warn('decode request QR failed:', e instanceof Error ? e.message : String(e)); setErr('This isn\'t a dpay payment code'); }
   }
 
   // Deeplink prefill (item 6): a `dpay:req/<blob>` (or the web `?req=<blob>` mirror) hands the EXACT
   // base64url blob the merchant's QR carries straight to this effect, which reuses the camera-scan
   // decode path (onRequestString → parseRequestQR → decodeRequest → review). NO duplicate decode —
-  // the deeplink blob goes through the same single source of truth. SECURITY INVARIANT: this ONLY
-  // pre-fills the review screen; it NEVER calls approve() or signs anything — the payer taps Approve.
-  // Guarded on phase==='scan' so it can't clobber an in-flight review/qr/paid. The prefill is cleared
-  // (onPrefillConsumed) BEFORE the async decode resolves so the effect can't re-fire mid-flight.
+  // the deeplink blob goes through the same single source of truth. SECURITY INVARIANT: a deeplink
+  // is a ZERO-PRESS entry (no Pay Now gate was ever passed on this device), so it NEVER auto-signs —
+  // the payer taps Approve on the kept review screen. Guarded on phase==='scan' so it can't clobber
+  // an in-flight review/qr/paid. The prefill is cleared (onPrefillConsumed) BEFORE the async decode
+  // resolves so the effect can't re-fire mid-flight.
   useEffect(() => {
     if (prefillRequest == null) return;
     if (phase !== 'scan') return;
     const blob = prefillRequest;
     onPrefillConsumed?.();
-    onRequestString(blob);
+    onRequestString(blob, true);
     // onRequestString/onPrefillConsumed are inline closures; the [prefillRequest, phase] guard +
     // immediate clear make their identity irrelevant (exhaustive-deps would force a re-run on every
     // render's new closure for no behavioral change).
@@ -165,21 +188,22 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
      return () => { alive = false; clearInterval(id); };
   }, [phase, prepared, qr, err, onSettled, identity]);
 
-  async function approve() {
-    if (!req) return;
+  // The sign path (parameterized: the camera path auto-signs the FRESHLY decoded request before
+  // the `req` state has flushed; the deeplink review's Approve passes the parked req).
+  async function approve(r: Req) {
     // The IC rail has no server-side dpay-request expiry — the payer's app IS the gate. A stale
     // request QR must die here, before any envelope is built (memo/nonce reconciliation only ever
-    // sees fresh transfers), with copy that explains the expiry and disables Approve (C1).
-    if (req.expiry * 1000 <= Date.now()) {
+    // sees fresh transfers), with copy that explains the expiry (C1).
+    if (r.expiry * 1000 <= Date.now()) {
       setErr('This request expired — ask the merchant for a fresh QR');
       return;
     }
     // Item 4: this request's envelope was already submitted and its outcome stayed unknown —
-    // re-display THAT QR (the req.expiry gate above already ran, so it's unexpired). NEVER
+    // re-display THAT QR (the r.expiry gate above already ran, so it's unexpired). NEVER
     // re-sign a submitted envelope: a fresh signature = fresh request_id = a second payment.
-    if (submittedEnv && submittedEnv.nonce === req.nonceHex) {
+    if (submittedEnv && submittedEnv.nonce === r.nonceHex) {
       setPrepared(submittedEnv.prepared);
-      setQr({code: envelopeToQrPayload(submittedEnv.prepared.envelopeHex), amount: req.amount, currency: req.currency, who: submittedEnv.who});
+      setQr({code: envelopeToQrPayload(submittedEnv.prepared.envelopeHex), amount: r.amount, currency: r.currency, who: submittedEnv.who});
       setHandedOffline(online === false);
       setPhase('qr');
       return;
@@ -189,8 +213,8 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
       // IC user-principal rail: build + sign the icrc1_transfer envelope LOCALLY (payee principal
       // derived from the request's `to` pubkey; memo = the request nonce = reconciliation key).
       // prepareTransfer refuses to sign on unreachable/skewed IC clock — surfaced as the error.
-      const p = await prepareTransfer(identity.secretHex, {currencies: catalog}, req);
-      const who = req.toName || short(req.toHex);
+      const p = await prepareTransfer(identity.secretHex, {currencies: catalog}, r);
+      const who = r.toName || short(r.toHex);
       setPrepared(p);
       if (online) {
         const out = await submitTransfer(p, identity.secretHex, {attempts: 12, intervalMs: 500});
@@ -198,13 +222,13 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
           onSettled();
           // Interim settlement proof (honest W3 receipt): ledger + block index + request id —
           // certified read_state, not BLS-verified on-device (W6 upgrades).
-          setPaid({amount: req.amount, currency: req.currency, who, already: false, receipt: {ledger: p.ledger, block_index: out.blockIndex, request_id: p.requestIdHex}}); setPhase('paid');
+          setPaid({amount: r.amount, currency: r.currency, who, already: false, receipt: {ledger: p.ledger, block_index: out.blockIndex, request_id: p.requestIdHex}}); setPhase('paid');
           awardPaymentTested(journeyRef.current); return;
         }
         if (out.kind === 'rejected') {
           // Structured-tag branch (not human-message matching): Duplicate = this payee already
           // landed this exact memo'd transfer — the request is PAID, show the already-paid state.
-          if (out.variant === 'Duplicate') { setPaid({amount: req.amount, currency: req.currency, who, already: true}); setPhase('paid'); awardPaymentTested(journeyRef.current); return; }
+          if (out.variant === 'Duplicate') { setPaid({amount: r.amount, currency: r.currency, who, already: true}); setPhase('paid'); awardPaymentTested(journeyRef.current); return; }
           setErr(out.reason); return;
         }
         // unknown: not terminal within budget — fall through to the offline QR hand-off. The
@@ -214,14 +238,14 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
       // Item 4: this envelope is now SUBMITTED-or-handed-off (online unknown, or the offline QR
       // the merchant may settle themselves). RETAIN it: a later re-approve of this request must
       // re-display these exact bytes — a fresh signature = fresh request_id = a second payment.
-      setSubmittedEnv({prepared: p, nonce: req.nonceHex, who});
-      setQr({code: envelopeToQrPayload(p.envelopeHex), amount: req.amount, currency: req.currency, who});
+      setSubmittedEnv({prepared: p, nonce: r.nonceHex, who});
+      setQr({code: envelopeToQrPayload(p.envelopeHex), amount: r.amount, currency: r.currency, who});
       setHandedOffline(online === false);
       setPhase('qr');
     } catch (e: unknown) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   }
 
-  function reset() { setReq(null); setPrepared(null); setQr(null); setPaid(null); setErr(null); setPeakShown(false); setHandedOffline(false); setPhase('scan'); }
+  function reset() { setReq(null); setPrepared(null); setQr(null); setPaid(null); setErr(null); setPeakShown(false); setHandedOffline(false); setScanArmed(false); setPhase('scan'); }
 
   if (phase === 'paid' && paid) {
     const warn = paid.already || paid.pending;
@@ -341,57 +365,92 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     // lexicographic string compare (which would wrongly rank "9" > "10").
     const insufficient = reqBalance != null && cmpRaw(req.amount, reqBalance) > 0;
     const blockApprove = online && insufficient;
-    // C1: any shown error (expired / insufficient relay-reject / verify-fail) also disables the
+    // Deeplink entry (zero-press): today's full review card — the single Approve press IS the
+    // consent. C1: any shown error (expired / insufficient relay-reject / verify-fail) disables the
     // button so a doomed payment can't be re-tapped.
-    const approveDisabled = busy || !!err || blockApprove;
+    if (entry === 'deeplink') {
+      const approveDisabled = busy || !!err || blockApprove;
+      return (
+        <View style={S.center}>
+          <Text style={S.label}>Review payment</Text>
+          <Text testID="pay-amount" style={S.reviewAmount}>{`Pay ${fmtCurrencyAmount(catalog, req.currency, req.amount)}`}</Text>
+          <Text style={S.reviewTo}>{`to ${req.toName || short(req.toHex)}`}</Text>
+          {/* U-F5 — the payee's short pubkey as a subdued second line when a display name is shown,
+              so the payer can verify the destination beyond a claimed name (phishing surface). The
+              no-name fallback already renders the short key as the primary "to" line. */}
+          {req.toName ? <Text testID="review-payee" style={S.dim2}>{short(req.toHex)}</Text> : null}
+          {/* The merchant-set memo (if any) — shown as a small subtitle so the payer sees the note
+              attached to this request before approving. Empty memo renders nothing. */}
+          {req.memo ? <Text testID="review-memo" style={S.dim2}>{req.memo}</Text> : null}
+          {/* Trip Ready J4 — one-time first-use coaching, mounted in the reading zone (right under
+              the amount/payee block it explains) so it is seen without scrolling; inline, never
+              covers the buttons. Shows until dismissed; dismissal persists via journey seen-markers. */}
+          <CoachTip tipKey="payReview" />
+          {/* C1/C2 + L5: the warning + any error render ABOVE the button (not below) so they're seen
+              first; the raw request nonce is no longer surfaced (internal protocol data). */}
+          {insufficient ? (
+            <Text testID="review-lowbal" style={S.warnNote}>{blockApprove
+              ? 'Not enough balance to cover this payment.'
+              : 'Your local balance may not cover this — the merchant will verify.'}</Text>
+          ) : null}
+          {err ? <Text testID="review-err" style={S.err}>{err}</Text> : null}
+          <Pressable
+            testID="btn-approve"
+            style={[S.primary, approveDisabled && S.disabledFlat]}
+            disabled={approveDisabled}
+            accessibilityRole="button"
+            accessibilityLabel="Approve payment"
+            accessibilityHint="Sign the displayed amount with your key and send it"
+            accessibilityState={{disabled: approveDisabled}}
+            onPress={() => void approve(req)}>
+            <Text style={S.primaryText}>{busy ? 'Signing…' : 'Approve'}</Text>
+          </Pressable>
+          {/* Audit P2: Cancel-as-secondary-button parity — a bordered secondary button of the same
+              width as Approve so the tap targets are equivalent and the user makes a deliberate choice
+              (a reflex Approve tap was the asymmetry risk). Matches the Cancel style used by the
+              offline confirm row + the unsupported-asset cancel below. */}
+          <Pressable
+            testID="btn-review-cancel"
+            style={S.secondaryBtn}
+            onPress={reset}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel"
+            accessibilityState={{disabled: false}}>
+            <Text style={S.secondaryBtnText}>Cancel</Text>
+          </Pressable>
+        </View>
+      );
+    }
+    // Camera entry: the "Pay Now" gate was the one deliberate press, so the payable sign already
+    // fired (onRequestString). This surface is read-only while it runs — amount + payee +
+    // "Signing…", NO buttons — and the honest terminal for every refused leg: blocked (online +
+    // insufficient: no sign action exists at all) and sign-time errors (expired / relay reject)
+    // each show their reason + Cancel back to the gated scan state.
     return (
       <View style={S.center}>
-        <Text style={S.label}>Review payment</Text>
+        <Text style={S.label}>Paying</Text>
         <Text testID="pay-amount" style={S.reviewAmount}>{`Pay ${fmtCurrencyAmount(catalog, req.currency, req.amount)}`}</Text>
         <Text style={S.reviewTo}>{`to ${req.toName || short(req.toHex)}`}</Text>
-        {/* U-F5 — the payee's short pubkey as a subdued second line when a display name is shown,
-            so the payer can verify the destination beyond a claimed name (phishing surface). The
-            no-name fallback already renders the short key as the primary "to" line. */}
         {req.toName ? <Text testID="review-payee" style={S.dim2}>{short(req.toHex)}</Text> : null}
-        {/* The merchant-set memo (if any) — shown as a small subtitle so the payer sees the note
-            attached to this request before approving. Empty memo renders nothing. */}
-        {req.memo ? <Text testID="review-memo" style={S.dim2}>{req.memo}</Text> : null}
-        {/* Trip Ready J4 — one-time first-use coaching, mounted in the reading zone (right under
-            the amount/payee block it explains) so it is seen without scrolling; inline, never
-            covers the buttons. Shows until dismissed; dismissal persists via journey seen-markers. */}
-        <CoachTip tipKey="payReview" />
-        {/* C1/C2 + L5: the warning + any error render ABOVE the button (not below) so they're seen
-            first; the raw request nonce is no longer surfaced (internal protocol data). */}
         {insufficient ? (
           <Text testID="review-lowbal" style={S.warnNote}>{blockApprove
             ? 'Not enough balance to cover this payment.'
             : 'Your local balance may not cover this — the merchant will verify.'}</Text>
         ) : null}
         {err ? <Text testID="review-err" style={S.err}>{err}</Text> : null}
-        <Pressable
-          testID="btn-approve"
-          style={[S.primary, approveDisabled && S.disabledFlat]}
-          disabled={approveDisabled}
-          accessibilityRole="button"
-          accessibilityLabel="Approve payment"
-          accessibilityHint="Sign the displayed amount with your key and send it"
-          accessibilityState={{disabled: approveDisabled}}
-          onPress={approve}>
-          <Text style={S.primaryText}>{busy ? 'Signing…' : 'Approve'}</Text>
-        </Pressable>
-        {/* Audit P2: Cancel-as-secondary-button parity — a bordered secondary button of the same
-            width as Approve so the tap targets are equivalent and the user makes a deliberate choice
-            (a reflex Approve tap was the asymmetry risk). Matches the Cancel style used by the
-            offline confirm row + the unsupported-asset cancel below. */}
-        <Pressable
-          testID="btn-review-cancel"
-          style={S.secondaryBtn}
-          onPress={reset}
-          accessibilityRole="button"
-          accessibilityLabel="Cancel"
-          accessibilityState={{disabled: false}}>
-          <Text style={S.secondaryBtnText}>Cancel</Text>
-        </Pressable>
+        {busy ? (
+          <Text style={S.dim2}>Signing…</Text>
+        ) : (
+          <Pressable
+            testID="btn-review-cancel"
+            style={S.secondaryBtn}
+            onPress={reset}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel"
+            accessibilityState={{disabled: false}}>
+            <Text style={S.secondaryBtnText}>Cancel</Text>
+          </Pressable>
+        )}
       </View>
     );
   }
@@ -457,9 +516,10 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     );
   }
 
-  // Scan screen: the card is armed in the background (if NFC is ready) AND the QR scanner is live at
-  // the same time — the payer taps the merchant's phone OR scans its QR, with no button in between.
-  // A leading NFC status row tells the payer whether tap-to-pay is available; QR always works.
+  // Scan screen. IDLE (scanArmed false): the NFC status row stays (it explains what's available)
+  // and a single primary CTA arms BOTH rails — until that tap, no camera stream and no HCE card.
+  // ARMED: the card arms in the background (if NFC is ready) AND the QR scanner goes live at the
+  // same time — the payer taps the merchant's phone OR scans its QR, exactly as before the gate.
   const nfcInfo: Exclude<NfcStatus, 'ready'> = (nfcStatus === 'ready' ? 'unknown' : nfcStatus);
   return (
     <View style={S.center}>
@@ -474,7 +534,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
       ) : null}
       {fundPanel ?? (
         <>
-      {nfcReady && DpayNfc ? (
+      {scanArmed && nfcReady && DpayNfc ? (
         <NfcTap
           key={nfcKey} role="card" identity={identity}
           catalog={catalog}
@@ -504,7 +564,23 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
             <Text style={[S.nfcStatusLabel, {paddingTop: 16}]} testID="pay-scan">Scan to pay</Text>
           )}
           {Platform.OS !== 'web' && !nfcReady ? <Text style={S.dim2}>Scan the QR code to pay.</Text> : null}
-          <QrScanner onScan={onRequestString} />
+          {scanArmed ? (
+            <QrScanner onScan={raw => onRequestString(raw, false)} />
+          ) : (
+            <>
+              <Text style={S.dim2}>The camera and tap-to-pay start when you press the button — nothing scans before you ask.</Text>
+              <Pressable
+                style={S.primary}
+                onPress={() => setScanArmed(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Pay now"
+                accessibilityHint="Turn on the camera and tap-to-pay so you can pay a merchant"
+                testID="btn-start-scan"
+              >
+                <Text style={S.primaryText}>Pay Now</Text>
+              </Pressable>
+            </>
+          )}
           {err ? <Text style={S.err}>{err}</Text> : null}
         </>
       ) : null}

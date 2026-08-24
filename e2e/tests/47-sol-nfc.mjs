@@ -10,18 +10,23 @@
 //
 // Card-side phases asserted (single-driver simulation — the reader/broadcast path is flow 51's job):
 //   - linking   : "Connecting…"  (the tap started; SolNfcTap takes over the screen)
-//   - exchanging: "Communicating…" + autoSign fires (decode solreq:v2 → offline sign → approveSolCard)
+//   - request   : AUTO-SIGN (one-press rule, founder directive 2026-08-24): the "Pay Now" gate that
+//                 armed the card was the single deliberate press, so the solreq:v2 decodes + signs
+//                 IMMEDIATELY → exchanging. No review card, no Approve click — the SOL
+//                 offline-settlement note rides the read-only status while the sign fires.
+//   - exchanging: "Communicating…" + "Hold the phones together to send" (decode solreq:v2 →
+//                 offline sign → approveSolCard, all on arrival)
 //   - receipt   : "Paid ✓"  (status=0 SETTLED, rid match, sig match → decideSolPayerReceiptV2 → success)
 //
-// Selector contract: `asset-sol-select`, `sol-pay-scan`, `sol-nfc-status`.
-import {setup, assert, onboardWallet} from '../harness/lib.mjs';
+// Selector contract: `asset-sol-select`, `sol-pay-scan`, `sol-nfc-status`, `__DPAY_SOL_NFC_LAST`.
+import {setup, assert, onboardWallet, armNfcCard} from '../harness/lib.mjs';
 
 export const meta = {
   id: '47',
   name: 'sol-nfc',
   journey: 'nfc',
-  covers: ['sol-nfc', 'sol-v2-receipt', 'event-bus'],
-  verifies: 'SOL v2 NFC tap: arm card → auto-sign → receipt (rid+sig match) → Paid ✓',
+  covers: ['sol-nfc', 'sol-v2-receipt', 'event-bus', 'auto-sign'],
+  verifies: 'SOL v2 NFC tap: arm card → request AUTO-SIGNS (one-press rule → offline sign) → receipt (rid+sig match) → Paid ✓',
   timeoutMs: 25000,
 };
 
@@ -86,7 +91,7 @@ export async function run() {
     await driver.findByTestID('sol-pay-scan', {timeoutMs: 5_000});
     console.log('[47-sol-nfc] ✓ SolPayMode mounted in scan (no setup needed — card armed)');
 
-    const dispatch = (event) => driver.eval((e) => window.__DPAY_TEST_SOL_NFC_SESSION(e), event);
+    const dispatch = async (event) => { await armNfcCard(driver, 'sol'); return driver.eval((e) => window.__DPAY_TEST_SOL_NFC_SESSION(e), event); };
 
     // linking → "Connecting…".
     console.log('[47-sol-nfc] dispatching phase=linking…');
@@ -95,17 +100,25 @@ export async function run() {
     assert(await driver.waitForText('Connecting', {timeoutMs: 4_000}), 'linking should show "Connecting…"');
     console.log('[47-sol-nfc] ✓ linking → "Connecting…"');
 
-    // request → exchanging + autoSign (decode solreq:v2 → offline sign → approveSolCard).
-    console.log('[47-sol-nfc] dispatching request (autoSign)…');
+    // request → AUTO-SIGN (one-press rule: the request's arrival IS the payment — decode →
+    // offline sign → approveSolCard, straight to exchanging; no review park, no Approve click).
+    console.log('[47-sol-nfc] dispatching request (auto-signs on arrival)…');
     await dispatch({type: 'request', role: 'card', solreqUri: buildSolReq()});
-    assert(await driver.waitForText('Communicating', {timeoutMs: 5_000}), 'request should show "Communicating…"');
-    console.log('[47-sol-nfc] ✓ request → "Communicating…" (exchanging + autoSign)');
+    assert(await driver.waitForText('Communicating', {timeoutMs: 6_000}), 'request should auto-sign → "Communicating…" (no review park)');
+    {
+      const body = await driver.bodyText();
+      assert(body.includes('Hold the phones together to send'),
+        'the exchanging card-role hint should ask the payer to hold the phones together');
+      assert(body.includes('Paying 0.001000000 SOL'), 'the read-only amount should ride the status line');
+      assert(!(await driver.isPresent('btn-nfc-approve')), 'no Approve button exists (one press already spent at "Pay Now")');
+    }
+    console.log('[47-sol-nfc] ✓ request → auto-sign → "Communicating…" (sign + approveSolCard fired)');
 
-    // Verify autoSign produced a valid solpay:v2 URI.
+    // Verify the arrival sign produced a valid solpay:v2 URI.
     const solpayUri = await driver.eval(() => window.__DPAY_SOL_NFC_LAST);
     assert(typeof solpayUri === 'string' && solpayUri.startsWith('solpay:v2?'),
-      `autoSign should produce a solpay:v2 URI, got: ${JSON.stringify(solpayUri)?.slice(0, 80)}`);
-    console.log('[47-sol-nfc] ✓ autoSign produced a solpay:v2 URI (offline-signed)');
+      `the auto-sign should produce a solpay:v2 URI, got: ${JSON.stringify(solpayUri)?.slice(0, 80)}`);
+    console.log('[47-sol-nfc] ✓ auto-sign produced a solpay:v2 URI (offline-signed)');
 
     // Extract the sig from the solpay to build a matching receipt (rid + sig must match exactly).
     const sig = extractSig(solpayUri);

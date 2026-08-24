@@ -35,9 +35,11 @@ import {SolReceiveMode} from './SolReceiveMode';
 import {SettingsSheet} from './SettingsSheet';
 import {BalancesSheet} from './BalancesSheet';
 import {PassportArchive} from './TripPassport';
+import {Walkthrough} from './Walkthrough';
 import {AppModal} from './AppModal';
 import {IconArrowDownLeft, IconChevronDown, IconClock, IconMoon, IconQr, IconSettings, IconSun} from './icons';
 import {nextTheme, themeLabel, type ThemeOverride} from '../config/theme';
+import type {ReadinessKey} from '../lib/readiness';
 
 export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, resolvedTheme, themeChoice, onSetTheme}: {identity: Identity; relayUrl: string; setRelayUrl: (s: string) => void; onReset: () => void; onRestore: (id: Identity) => Promise<void>; resolvedTheme: ThemeOverride; themeChoice: ThemeOverride | null; onSetTheme: (t: ThemeOverride | null) => void}) {
   const [mode, setMode] = useState<'pay' | 'receive' | 'ledger'>('pay');
@@ -97,6 +99,14 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
   const [topUpBusy, setTopUpBusy] = useState(false);
   const [topUpErr, setTopUpErr] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+  // Passport deep-link (founder ask 2026-08-24): opening Settings FROM an unfilled
+  // "BACKED UP" stamp also auto-reveals the backup (the step's own surface) once. Cleared on
+  // Settings close so a later manual gear-open never re-reveals the seed.
+  const [settingsOpenBackup, setSettingsOpenBackup] = useState<boolean>(false);
+  // Passport deep-link: an unfilled "SAW THE FLOW" stamp opens the walkthrough replay here —
+  // the SAME replay Settings hosts (AppModal + Walkthrough onClose/onDone, mirror of
+  // SettingsSheet's usage; the replay never awards stamps).
+  const [howItWorksOpen, setHowItWorksOpen] = useState<boolean>(false);
   // Whether testnet currencies (network "Bitcoin Testnet"/"Sepolia") are revealed in the Balances
   // sheet. Hidden by default (founder decision); persisted so the choice survives a restart. Mirrors
   // the identity/relay AsyncStorage pattern (best-effort load; a read failure falls back to hidden).
@@ -483,7 +493,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
   // P=Pay, R=Receive, T=Top-up (demo money), A=Balances (the asset hub), L=Ledger (transactions). Active ONLY on the wallet
   // main view with no text input focused and no sheet/overlay open (Esc is handled per-sheet by
   // useEscapeToClose). Native (no physical keyboard) is a no-op; the on-UI hints are web-only too.
-  const anySheetOpen = balancesOpen || settingsOpen || passportOpen;
+  const anySheetOpen = balancesOpen || settingsOpen || passportOpen || howItWorksOpen;
   // Phase 5 (concern B) — the Balances header button is disabled only while a PAY engine holds the
   // lock (review/QR/paid = money-critical mid-transaction; opening the sheet over a review is a
   // distraction and tapping a row would be a no-op anyway). During a RECEIVE lock (request QR shown /
@@ -574,6 +584,29 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
     setMode('pay');
     setBalancesOpen(false);
   }, [depositReturnTo]);
+
+  // Passport deep-links (founder ask 2026-08-24): tapping an unfilled stamp (or NEXT, which
+  // routes with the first-missing key) goes straight to the surface where that step completes.
+  // The passport closes FIRST in every branch — one surface at a time. SettingsSheet reuses
+  // this same map (its onOpenStep prop) for the steps that live outside Settings.
+  const goToPassportStep = useCallback((key: ReadinessKey) => {
+    setPassportOpen(false);
+    switch (key) {
+      case 'recoverySaved':
+        setSettingsOpenBackup(true);
+        setSettingsOpen(true);
+        break;
+      case 'flowUnderstood':
+        setHowItWorksOpen(true);
+        break;
+      case 'fundsReady':
+        setBalancesOpen(true);
+        break;
+      case 'paymentTested':
+        setMode('pay');
+        break;
+    }
+  }, []);
 
   return (
     <SafeAreaView style={S.root}>
@@ -764,18 +797,28 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
         <SettingsSheet
           relayUrl={relayUrl}
           setRelayUrl={setRelayUrl}
-          onClose={() => setSettingsOpen(false)}
+          onClose={() => { setSettingsOpen(false); setSettingsOpenBackup(false); }}
           onReset={onReset}
           onRestore={onRestore}
            secretHex={identity.secretHex}
            username={identity.username}
             themeChoice={themeChoice}
             onSetTheme={onSetTheme}
+            openBackup={settingsOpenBackup}
+            onOpenStep={goToPassportStep}
          />
       ) : null}
       {passportOpen ? (
         <AppModal onRequestClose={() => setPassportOpen(false)}>
-          <PassportArchive onClose={() => setPassportOpen(false)} />
+          <PassportArchive onClose={() => setPassportOpen(false)} onStep={goToPassportStep} />
+        </AppModal>
+      ) : null}
+      {howItWorksOpen ? (
+        <AppModal onRequestClose={() => setHowItWorksOpen(false)}>
+          <Walkthrough
+            onClose={() => setHowItWorksOpen(false)}
+            onDone={() => setHowItWorksOpen(false)}
+          />
         </AppModal>
       ) : null}
     </SafeAreaView>

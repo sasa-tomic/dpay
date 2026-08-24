@@ -72,6 +72,7 @@ export function CoachTip({tipKey, reducedMotion}: {tipKey: CoachTipKey; reducedM
         <Pressable
           testID={`btn-coach-${tipKey}-dismiss`}
           style={S.coachDismiss}
+          hitSlop={{top: 8, bottom: 8, left: 8, right: 4}}
           onPress={() => { setShow(false); void markSeen(tipKey); }}
           accessibilityRole="button"
           accessibilityLabel={`Dismiss tip: ${tip.title}`}

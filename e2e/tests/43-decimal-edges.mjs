@@ -1,5 +1,5 @@
 // Flow 43 — Decimal-edges: 8-dec (ckBTC) + 6-dec (ckUSDC) + 18-dec (ckDAI) amounts render with
-// EXACT decimals on the payment review screen — no rounding, no scientific notation, no trailing-zero
+// EXACT decimals on the payment sign surface — no rounding, no scientific notation, no trailing-zero
 // drift, no float artifact. Covers the browser-reachable slice of the MC1 units-2-4 decimal matrix
 // (the format path `fmtCurrencyAmount` → `fmtAsset`), including the 18-dec precision extreme that
 // would lose low digits under a Number/parseFloat path (OPEN_ISSUES #3).
@@ -42,22 +42,27 @@
 //     - pad: 1000000000000000000 raw  → '1.000000000000000000 DAI' (trailing-zero integrity)
 //
 // Approach: build a request QR per case via buildRequestQR (encoding the raw amount + currency),
-// inject it via the camera seam (`window.__DPAY_TEST_SCAN`), then read the review screen's pay-amount
+// inject it via the camera seam (`window.__DPAY_TEST_SCAN`), then read the sign surface's pay-amount
 // testID + assert it contains the EXACT expected decimal string. Cancel between cases via the
-// review screen's aria-label="Cancel" link — no reload needed (a reload would require re-threading
+// sign surface's aria-label="Cancel" link — no reload needed (a reload would require re-threading
 // the ?relay= param), and each case re-enters via a fresh scan. No balance seeding needed — the
-// review screen formats the amount from the request bytes alone, before any balance check (we only
-// assert the format, not the settle).
+// sign surface formats the amount from the request bytes alone (we only assert the format, not
+// the settle).
 //
-// Selector contract: `pay-amount` (PayMode's review header). Camera seam: window.__DPAY_TEST_SCAN.
-import { setup, assert, assertIncludes, onboardWallet } from '../harness/lib.mjs';
+// One-press rule (2026-08-24): the scan AUTO-SIGNS. The wallet holds no currency-1/2/4 funds, so
+// each sign lands on the honest terminal (gateway rejection "insufficient funds" → the read-only
+// surface keeps pay-amount + the err + Cancel), and the format assert runs against that stable
+// surface — no race with the transient "Signing…" dwell.
+//
+// Selector contract: `pay-amount` (PayMode's sign-status header). Camera seam: window.__DPAY_TEST_SCAN.
+import { setup, assert, assertIncludes, onboardWallet , armPayScan} from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
 const CKBTC_CURRENCY = 1;
 const CKUSDC_CURRENCY = 2;
 const CKDAI_CURRENCY = 4;
 
-// Each case: { label, currency, raw, expected }. `expected` is the exact substring the review's
+// Each case: { label, currency, raw, expected }. `expected` is the exact substring the sign status's
 // `pay-amount` should contain (PayMode renders `Pay ${fmtCurrencyAmount(...)}`, so the assertion is
 // a substring check on the formatted amount + unit, NOT the whole review body — guards against a
 // future UI change adding unrelated numbers).
@@ -86,7 +91,7 @@ export const meta = {
   name: 'decimal-edges',
   journey: 'pay',
   covers: ['decimal', 'format', 'ckbtc', 'ckerc20', '18-decimal'],
-  verifies: '8-dec (ckBTC) + 6-dec (ckUSDC) + 18-dec (ckDAI) amounts render with exact decimals on review (no rounding, no sci-notation, no trailing-zero drift).',
+  verifies: '8-dec (ckBTC) + 6-dec (ckUSDC) + 18-dec (ckDAI) amounts render with exact decimals on the sign surface (no rounding, no sci-notation, no trailing-zero drift).',
   timeoutMs: 35000, // 9 scan/cancel cycles + onboard — wider than the 20s default
 };
 
@@ -118,22 +123,24 @@ export async function run() {
 
       console.log(`[43-decimal-edges] case ${i + 1}/${CASES.length}: ${c.label} (raw=${c.raw}) → expect "${c.expected}"`);
       // Inject via the camera seam — the same path flow 07 uses. The app's onRequestString decodes
-      // the QR + transitions to the review screen with the formatted amount.
+      // the QR + AUTO-SIGNS; the unfunded currency leaves the read-only sign surface standing with
+      // the formatted amount (the gateway's rejection note rides alongside — we only assert format).
+      await armPayScan(driver); // pay-intent gate: arm the scan surface (no-op when already armed)
       await driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), requestQR);
-      // Wait for the review screen to mount + render the formatted amount.
-      await driver.findByTestID('pay-amount', { timeoutMs: 5_000 });
+      // Wait for the sign surface to mount + render the formatted amount.
+      await driver.findByTestID('pay-amount', { timeoutMs: 8_000 });
       const payAmt = await driver.readText('pay-amount');
       // EXACT substring match — catches rounding (0.12345679), truncation (0.123), sci-notation
       // (1.23e-7), trim (1 BTC for 100000000 sats), and padStart (0.0000001 BTC for 1 sat).
-      assertIncludes(payAmt, c.expected, `case "${c.label}" review pay-amount should include exact decimal string`);
+      assertIncludes(payAmt, c.expected, `case "${c.label}" sign-status pay-amount should include exact decimal string`);
       // Anti-pattern spot checks (the float-math failure modes): no scientific notation, no rounded
       // trailing digit. The `expected` substring match already catches these, but the explicit
       // asserts make the failure mode readable in the RED report.
       assert(!/\de[+-]\d/i.test(payAmt), `case "${c.label}": pay-amount must NOT use scientific notation, got "${payAmt}"`);
       console.log(`[43-decimal-edges] ✓ ${c.label}: "${payAmt}" includes "${c.expected}"`);
 
-      // Reset PayMode for the next case via the review screen's Cancel link (aria-label="Cancel"
-      // — avoids a reload + the ?relay= re-thread; a fresh scan re-enters review cleanly). Skip on
+      // Reset PayMode for the next case via the sign surface's Cancel link (aria-label="Cancel"
+      // — avoids a reload + the ?relay= re-thread; a fresh scan re-enters cleanly). Skip on
       // the last case (no next iteration to reset for).
       if (i < CASES.length - 1) {
         const canceled = await driver.eval(() => {
@@ -141,7 +148,7 @@ export async function run() {
           if (btn) { btn.click(); return true; }
           return false;
         });
-        assert(canceled === true, `case "${c.label}": review Cancel link should be reachable via aria-label`);
+        assert(canceled === true, `case "${c.label}": sign-surface Cancel link should be reachable via aria-label`);
         await driver.waitGone('pay-amount', { timeoutMs: 4_000 });
       }
     }

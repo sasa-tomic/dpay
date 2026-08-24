@@ -225,3 +225,109 @@ describe('useNfcTapState — session survives re-renders (fcd2afd regression)', 
     act(() => tree.unmount());
   });
 });
+
+// One-press rule (founder directive 2026-08-24): the review park is GONE — a request reaches
+// onRequest immediately (the adapter validates + auto-signs), card-side native awaitingApproval
+// maps to exchanging (reader keeps the role-aware copy), re-tap linking/exchanging chatter is
+// held once the sign has fired, and duplicate requests after advance() are dropped. Mirrors the
+// SOL reality: re-tap re-pushes the solreq (no native requestSent latch) → dedup lives here.
+describe('useNfcTapState — auto-sign request dispatch, awaitingApproval mapping, chatter stickiness', () => {
+  let seen: {phase: string; advance: (p: never) => void};
+
+  function PhaseHarness(props: {tick: number}) {
+    const state = useNfcTapState<Ev>({
+      role: 'card',
+      waitsForReceipt: false,
+      onActive: adapter.onActive,
+      eventName: adapter.eventName,
+      nativeModule: adapter.nativeModule,
+      armCard: () => adapter.armCard(),
+      disarmCard: () => adapter.disarmCard(),
+      startReader: p => adapter.startReader(p),
+      stopReader: () => adapter.stopReader(),
+      onSettling: () => adapter.onSettling(),
+      onRequest: (e, ctx) => adapter.onRequest(e, ctx),
+      onSubmit: (e, ctx) => adapter.onSubmit(e, ctx),
+      onReceipt: (e, ctx) => adapter.onReceipt(e, ctx),
+      onConfirmed: (e, ctx) => adapter.onConfirmed(e, ctx),
+    });
+    seen = {phase: state.phase, advance: state.advance as unknown as (p: never) => void};
+    void props.tick;
+    return null;
+  }
+
+  function mountCard() {
+    let tree!: renderer.ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(<PhaseHarness tick={0} />);
+    });
+    return {tree, rerender: (t: number) => act(() => tree.update(<PhaseHarness tick={t} />))};
+  }
+
+  beforeEach(() => {
+    adapter = makeAdapter();
+    emitters().length = 0;
+    seen = {phase: 'listening', advance: () => {}};
+  });
+
+  test('a request reaches onRequest once; the phase stays listening (the ADAPTER owns the advance)', () => {
+    const {tree} = mountCard();
+    emit({role: 'card', type: 'request', wire: 'deadbeef'});
+    expect(adapter.onRequest).toHaveBeenCalledTimes(1);
+    expect(seen.phase).toBe('listening'); // no review park — advance('exchanging') is the adapter's call
+    act(() => tree.unmount());
+  });
+
+  test('card-side native awaitingApproval maps to exchanging; reader keeps awaitingApproval', () => {
+    const {tree} = mountCard();
+    emit({role: 'card', type: 'phase', phase: 'awaitingApproval'});
+    expect(seen.phase).toBe('exchanging');
+    emit({role: 'reader', type: 'phase', phase: 'awaitingApproval'});
+    expect(seen.phase).toBe('exchanging'); // other-role event ignored, phase unchanged
+    act(() => tree.unmount());
+  });
+
+  test('re-tap chatter (linking/exchanging) never drags the payer back once the sign has fired', () => {
+    const {tree} = mountCard();
+    emit({role: 'card', type: 'request', wire: 'deadbeef'});
+    act(() => seen.advance('exchanging' as never)); // the adapter's auto-sign
+    emit({role: 'card', type: 'phase', phase: 'linking'});   // re-tap SELECT
+    expect(seen.phase).toBe('exchanging');
+    emit({role: 'card', type: 'phase', phase: 'exchanging'}); // premature SOL-style phase emit
+    expect(seen.phase).toBe('exchanging');
+    // settling still passes through the window (it is a forward move)
+    emit({role: 'card', type: 'phase', phase: 'settling'});
+    expect(seen.phase).toBe('settling');
+    act(() => tree.unmount());
+  });
+
+  test('advance() arms the duplicate-request drop (the signed payment owns the UI)', () => {
+    const {tree} = mountCard();
+    emit({role: 'card', type: 'request', wire: 'deadbeef'});
+    act(() => seen.advance('exchanging' as never));
+    expect(seen.phase).toBe('exchanging');
+    // SOL re-tap re-pushes the request AFTER the sign — dropped, no re-dispatch
+    emit({role: 'card', type: 'request', wire: 'deadbeef'});
+    expect(seen.phase).toBe('exchanging');
+    expect(adapter.onRequest).toHaveBeenCalledTimes(1);
+    act(() => tree.unmount());
+  });
+
+  test('finalize via ctx is terminal: late events ignored; re-arm is a NEW session', () => {
+    // The adapter's fail-closed/expiry legs capture ctx at request time and call
+    // ctx.finalize('declined', …). First-terminal-wins then owns the session — a late native
+    // phase event or a SOL-style re-tap request must not resurrect anything. Re-arm happens
+    // by remount (Done → onClose), which resets every ref here.
+    let ctx: {finalize: (p: never, r?: string) => void} | undefined;
+    adapter.onRequest.mockImplementation((_e, c) => { ctx = c as typeof ctx; });
+    const {tree} = mountCard();
+    emit({role: 'card', type: 'request', wire: 'deadbeef'});
+    act(() => ctx!.finalize('declined' as never, 'This request expired — ask for a fresh request'));
+    expect(seen.phase).toBe('declined');
+    emit({role: 'card', type: 'phase', phase: 'linking'});
+    emit({role: 'card', type: 'request', wire: '0badc0de'});
+    expect(seen.phase).toBe('declined');
+    expect(adapter.onRequest).toHaveBeenCalledTimes(1);
+    act(() => tree.unmount());
+  });
+});

@@ -388,7 +388,7 @@ function ExactAssetVisual({reduced}: {reduced: boolean}) {
             <Text style={[S.walkAssetAmt, {color: C.sub, fontWeight: '600', fontFamily: 'space_grotesk_600'}]}>0.0421</Text>
           </View>
           <View style={[S.walkAssetRow, {marginTop: 0, marginBottom: 2}]}>
-            <View style={[S.walkAssetChip, {backgroundColor: 'transparent'}]}><Text style={[S.walkAssetChipText, {color: C.sub}]}>Ξ</Text></View>
+            <View style={[S.walkAssetChip, {backgroundColor: 'transparent'}]}><Text style={[S.walkAssetChipText, {color: C.sub}]}>◊</Text></View>
             <View style={{flex: 1}}>
               <Text style={[S.walkAssetName, {color: C.sub, fontWeight: '600', fontFamily: 'space_grotesk_600'}]}>Ethereum</Text>
             </View>
@@ -505,7 +505,7 @@ export function Walkthrough({onDone, onSkip, onClose, reducedMotion}: Walkthroug
           {i > 0 ? (
             <Pressable
               testID="btn-walkthrough-back"
-              style={{position: 'absolute', left: 0}}
+              style={{position: 'absolute', left: 0, minHeight: 44, paddingHorizontal: 4, justifyContent: 'center'}}
               onPress={back}
               accessibilityRole="button"
               accessibilityLabel="Previous scene"

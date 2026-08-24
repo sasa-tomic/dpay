@@ -416,7 +416,7 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
           onChangeText={setAmount}
           keyboardType="decimal-pad"
           placeholder="0.025"
-          placeholderTextColor={C.sub2}
+          placeholderTextColor={C.sub}
           accessibilityLabel="Amount to receive"
         />
       </View>
@@ -426,7 +426,7 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
         value={memo}
         onChangeText={setMemo}
         placeholder="Add a note (optional)"
-        placeholderTextColor={C.sub2}
+        placeholderTextColor={C.sub}
         accessibilityLabel="Memo"
         maxLength={32}
       />

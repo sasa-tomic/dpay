@@ -719,12 +719,12 @@ async fn dpay_core_wasm() -> Response {
 }
 
 /// `GET /shots/{name}` — the real app screenshots the landing page shows (offline; no CDN). The
-/// flow rails now step through real phone screens, so the NFC tap states and the post-scan review
-/// view are served alongside the original QR/Pay/Paid trio. Anything else is a clean `404`.
+/// flow rails now step through real phone screens, so the NFC tap states and the one-press
+/// sign-status view are served alongside the original QR/Pay/Paid trio. Anything else is a clean `404`.
 async fn screenshot(Path(name): Path<String>) -> Response {
     let bytes: &'static [u8] = match name.as_str() {
         "request.png" => include_bytes!("../assets/shot-request.png"),
-        "approve.png" => include_bytes!("../assets/shot-approve.png"),
+        "paying.png" => include_bytes!("../assets/shot-paying.png"),
         "paid.png" => include_bytes!("../assets/shot-paid.png"),
         "nfc-listen.png" => include_bytes!("../assets/shot-nfc-listen.png"),
         "nfc-exchange.png" => include_bytes!("../assets/shot-nfc-exchange.png"),

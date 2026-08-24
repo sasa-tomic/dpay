@@ -16,7 +16,7 @@ export type DpayNfcApi = {
 
 export type NfcEvent =
   | {type: 'phase'; role: 'card' | 'reader'; phase: NfcPhaseName}
-  | {type: 'request'; role: 'card'; toHex: string; amount: string; nonceHex: string; expiry: number; currency: number}
+  | {type: 'request'; role: 'card'; toHex: string; amount: string; nonceHex: string; expiry: number; currency: number; toName?: string; memo?: string}
   | {type: 'done'; role: 'reader'; envelopeHex: string; readStateEnvelopeHex: string; requestIdHex: string}
   | {type: 'done'; role: 'card'}
   | {type: 'result'; role: 'card'; status: number; nonceHex: string; requestIdHex: string}

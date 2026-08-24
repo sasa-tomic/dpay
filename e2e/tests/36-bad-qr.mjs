@@ -6,7 +6,7 @@
 // `DpayCore.decodeRequest` throws on the malformed bytes → PayMode catches and surfaces a friendly
 // "This isn't a dpay payment code" error on the scan screen. The honest contract:
 //   - the error text names the problem in plain language, never a silent swallow or a fake success;
-//   - the review screen NEVER mounts (no `pay-amount`, no Approve of a nonsensical request);
+//   - the sign screen NEVER mounts (no `pay-amount` — nothing auto-signs a nonsensical request);
 //   - the scan surface stays alive — a second garbage payload lands a second error (re-arms), proving
 //     the failure is transient and non-fatal (the user can scan again).
 //
@@ -15,8 +15,8 @@
 // same honest error path.
 //
 // Selector contract: the scan-screen error renders via `<Text style={S.err}>{err}</Text>` (no testID
-// — matched by body text). The review screen's `pay-amount` is the "did we wrongly advance?" canary.
-import { setup, assert, onboardWallet } from '../harness/lib.mjs';
+// — matched by body text). The sign status's `pay-amount` is the "did we wrongly advance?" canary.
+import { setup, assert, onboardWallet , armPayScan} from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -49,6 +49,7 @@ export async function run() {
     for (let i = 0; i < GARBAGE_PAYLOADS.length; i++) {
       const payload = GARBAGE_PAYLOADS[i];
       console.log(`[36-bad-qr] injecting garbage #${i + 1} (${JSON.stringify(payload.slice(0, 24))}${payload.length > 24 ? '…' : ''}) via the camera seam…`);
+      await armPayScan(driver); // pay-intent gate: arm the scan surface (no-op when already armed)
       await driver.eval(
         (qr) => { if (typeof window.__DPAY_TEST_SCAN === 'function') window.__DPAY_TEST_SCAN(qr); },
         payload,
@@ -65,7 +66,7 @@ export async function run() {
 
       // The review screen MUST NOT have mounted — a nonsensical request can never reach Approve.
       const reviewMounted = await driver.isPresent('pay-amount');
-      assert(!reviewMounted, 'the review screen must NOT mount for a malformed request (no pay-amount)');
+      assert(!reviewMounted, 'the sign screen must NOT mount for a malformed request (no pay-amount)');
       console.log(`[36-bad-qr] ✓ garbage #${i + 1} → friendly error, no review mount`);
     }
 

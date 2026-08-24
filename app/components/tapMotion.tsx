@@ -16,12 +16,12 @@
  *     inside a static-geometry canvas, only opacity/transform animate).
  *   - Reduced motion: every element renders at its REST values — static, no loops; finite
  *     beats collapse to a simple fade or instant.
- *   - Honest-money rule: NOTHING here can read as success. The success stamp mounts ONLY in
- *     the success phase; pending renders stillness (the visual opposite).
+ *   - Honest-money rule: NOTHING here can read as success. Pending renders stillness (the
+ *     visual opposite); the success phase is carried by the badge + title alone (the dpay
+ *     stamp ring was dropped by founder directive 2026-08-24).
  *
  * testID contract (e2e flows 93): `tap-breath` (listening), `tap-progress` + `tap-progress-seg-N`
- * (active phases), `tap-key-beat` (awaitingApproval), `tap-success-stamp` (success — the honesty
- * guard asserts its ABSENCE in pending/declined/error), `tap-ellipsis` (pending).
+ * (active phases), `tap-key-beat` (awaitingApproval), `tap-ellipsis` (pending).
  */
 import React, {useEffect, useRef} from 'react';
 import {Animated, Easing, Text, View} from 'react-native';
@@ -150,44 +150,6 @@ export function TapKeyBeat({size, tone}: {size: number; tone: string}) {
   return (
     <Animated.View testID="tap-key-beat" style={{opacity: op}} pointerEvents="none">
       <IconKey size={size} color={tone} />
-    </Animated.View>
-  );
-}
-
-/**
- * success — THE PASSPORT-STAMP BEAT: quick descend + press + slight tilt of a tangerine stamp
- * ring BEHIND the badge (~800ms, once, then calm). Additive: the badge/check/title text stays
- * byte-identical. Reduced → a simple fade to the pressed state.
- */
-export function TapSuccessStamp() {
-  const reduced = useReducedMotion();
-  const op = useRef(new Animated.Value(reduced ? 1 : 0)).current;
-  const scale = useRef(new Animated.Value(reduced ? 1 : 1.5)).current;
-  const rotate = useRef(new Animated.Value(reduced ? 1 : 0)).current; // 0→1 maps −2.5°→−7° tilt
-  useEffect(() => {
-    if (reduced) return;
-    const a = Animated.parallel([
-      Animated.timing(op, {toValue: 1, duration: 160, easing: EASE_OUT, useNativeDriver: false}),
-      Animated.spring(scale, {toValue: 1, friction: 5, tension: 64, delay: 60, useNativeDriver: false}),
-      Animated.timing(rotate, {toValue: 1, duration: 420, delay: 120, easing: EASE_PLATE, useNativeDriver: false}),
-    ]);
-    a.start();
-    return () => { a.stop(); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  return (
-    <Animated.View
-      testID="tap-success-stamp"
-      pointerEvents="none"
-      style={[S.nfcStamp, {
-        opacity: op,
-        transform: [
-          {scale},
-          {rotate: rotate.interpolate({inputRange: [0, 1], outputRange: ['-2.5deg', '-7deg']})},
-        ],
-      }]}
-    >
-      <Text style={S.peakStampText}>dpay</Text>
     </Animated.View>
   );
 }

@@ -21,14 +21,14 @@
 //   - After funding, A's app shows `0.00060000 BTC` (assetBalances[1] populated through the poll).
 //   - The review's pay-amount reads "Pay 0.00050000 BTC" (locked-asset display, no `$`).
 //   - The review names the merchant "Bob" (from the request bytes).
-//   - btn-approve is NOT disabled (the per-asset balance gate passes), clicking it lands on Paid.
+//   - the per-asset balance gate (60_000 ≥ 50_000 sats) lets the AUTO-SIGN through → Paid.
 //   - B's ckBTC balance (currency 1) grew by 50000 sats (correct ledger settlement at the principal).
 //   - The payer's Ledger row renders the EXACT ckBTC units ("0.00050000 BTC", no `$`).
 //
 // Selector contract: `balance` (header → Balances), `asset-ckbtc` (the BTC row in Balances),
-// `btn-balances-close`, `pay-amount`, `btn-approve`. Camera seam: `window.__DPAY_TEST_SCAN(qr)`.
+// `btn-balances-close`, `pay-amount` (transient sign status). Camera seam: `window.__DPAY_TEST_SCAN(qr)`.
 // Value seam: POST /api/v1/faucet {account, currency: 1, amount}.
-import { setup, assert, assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf, openBalances } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf, openBalances , armPayScan} from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
 const CKBTC_CURRENCY = 1;
@@ -88,33 +88,24 @@ export async function run() {
 
     // --- A scans B's ckBTC request via the camera seam. -----------------------------------------
     console.log('[27-asset-pay] injecting B’s ckBTC request via the camera seam…');
+    await armPayScan(driver); // pay-intent gate: arm the scan surface (no-op when already armed)
     await driver.eval((qr) => { if (typeof window.__DPAY_TEST_SCAN === 'function') window.__DPAY_TEST_SCAN(qr); }, requestQR);
 
-    // --- Review screen: locked-asset display (BTC units, NOT $) + merchant name. -----------------
-    await driver.findByTestID('pay-amount', { timeoutMs: 5_000 });
-    const payAmt = await driver.readText('pay-amount');
-    assertIncludes(payAmt, '0.00050000 BTC', `review should show "Pay 0.00050000 BTC" (locked-asset display), got "${payAmt}"`);
-    assert(!payAmt.includes('$'), `review must NOT show a dollar amount for a ckBTC request, got "${payAmt}"`);
-    const reviewBody = await driver.bodyText();
-    assertIncludes(reviewBody, 'Bob', 'review should name the merchant (from the request bytes)');
-    // U-F5 (asset rail twin of flow 26): the dim short-payee line under the merchant name.
-    await driver.findByTestID('review-payee', { timeoutMs: 5_000 });
-    const reviewPayee = await driver.readText('review-payee');
-    if (reviewPayee !== `${bob.publicHex.slice(0, 8)}…`) {
-      throw new Error(`[assert] review short-payee line (U-F5): expected ${bob.publicHex.slice(0, 8)}…, got ${JSON.stringify(reviewPayee)}`);
-    }
-    console.log(`[27-asset-pay] ✓ review: ${payAmt} (no $) · names Bob · ${reviewPayee}`);
+    // --- AUTO-SIGN → settle: the locked-asset display asserts ride the STABLE Paid surface. --
+    // (The local settle is fast — the read-only sign status flashes between decode and `paid`;
+    // the paid headline uses the same fmtCurrencyAmount, so "0.00050000 BTC" / no-`$` still
+    // prove the 8-decimal locked-asset display contract. U-F5 short-payee: flow 49's deeplink
+    // review owns that pin now.)
 
-    // --- Approve is NOT disabled: the per-asset balance check (60000 sats >= 50000 sats) passes,
-    //     even though the DEMO balance (10000 cents) would have FAILED the old cross-asset gate. The
-    //     click landing on Paid is the proof; a disabled button would time out. A's app signs the
-    //     icrc1_transfer envelope itself (payee = B's principal, memo = the request nonce) and
-    //     submits it to the fake-IC gateway — the real app-driven rail path.
-    console.log('[27-asset-pay] clicking btn-approve (sign + settle on currency 1)…');
-    await driver.click('btn-approve', { timeoutMs: 5_000 });
+    // --- The per-asset balance check (60000 sats >= 50000 sats) let the auto-sign through, even
+    //     though the DEMO balance (10000 cents) would have FAILED the old cross-asset gate —
+    //     reaching Paid straight from the scan is the proof; a blocked sign would park the
+    //     insufficient note instead. A's app signs the icrc1_transfer envelope itself (payee =
+    //     B's principal, memo = the request nonce) and submits it to the fake-IC gateway — the
+    //     real app-driven rail path.
     const paid = await driver.waitForText('Paid', { timeoutMs: 10_000 });
     assert(paid, 'payer should reach Paid after settling the ckBTC payment');
-    console.log('[27-asset-pay] ✓ Paid reached (per-asset balance gate let the ckBTC payment through)');
+    console.log('[27-asset-pay] ✓ Paid reached straight from the scan (per-asset gate let the sign through)');
 
     // --- B was credited on currency 1 at her principal (the request's exact asset — no
     //     substitution). ckBTC carries no fee on the fake catalog → the full 50000 lands.

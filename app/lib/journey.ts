@@ -130,17 +130,33 @@ function subscribe(fn: Sub): () => void {
 }
 
 /**
+ * Write serialization (2026-08-23): awardStamp/markSeen are each a load→merge→persist
+ * read-modify-write over AsyncStorage. Two in-flight writes (e.g. a confirmed payment
+ * awarding paymentTested + flowUnderstood back-to-back) could interleave loads and lose a
+ * stamp to last-write-wins. Every store write now chains on one module-level queue —
+ * callers keep the same fire-and-forget ergonomics, the store just never races itself.
+ */
+let writeQueue: Promise<unknown> = Promise.resolve();
+function enqueueWrite<T>(op: () => Promise<T>): Promise<T> {
+  const next = writeQueue.then(op, op);
+  writeQueue = next.catch(() => {});
+  return next;
+}
+
+/**
  * Award a stamp: idempotent (an already-held stamp is a no-op that returns the
  * current journey unchanged, without a redundant write), persists, and returns the
  * updated journey so callers can both act on the result and keep their state fresh.
  */
-export async function awardStamp(key: StampKey): Promise<Journey> {
-  const stamp = JOURNEY_STAMPS[key];
-  const current = await loadJourney();
-  if (current.stamps.includes(stamp)) return current;
-  const updated: Journey = {stamps: [...current.stamps, stamp], at: {...current.at, [stamp]: Date.now()}, seen: current.seen};
-  await persistJourney(updated);
-  return updated;
+export function awardStamp(key: StampKey): Promise<Journey> {
+  return enqueueWrite(async () => {
+    const stamp = JOURNEY_STAMPS[key];
+    const current = await loadJourney();
+    if (current.stamps.includes(stamp)) return current;
+    const updated: Journey = {stamps: [...current.stamps, stamp], at: {...current.at, [stamp]: Date.now()}, seen: current.seen};
+    await persistJourney(updated);
+    return updated;
+  });
 }
 
 /**
@@ -149,12 +165,14 @@ export async function awardStamp(key: StampKey): Promise<Journey> {
  * returns the updated journey. The seen-list rides along on every stamp write and
  * vice-versa — neither dimension ever clobbers the other.
  */
-export async function markSeen(key: string): Promise<Journey> {
-  const current = await loadJourney();
-  if (current.seen.includes(key)) return current;
-  const updated: Journey = {...current, seen: [...current.seen, key]};
-  await persistJourney(updated);
-  return updated;
+export function markSeen(key: string): Promise<Journey> {
+  return enqueueWrite(async () => {
+    const current = await loadJourney();
+    if (current.seen.includes(key)) return current;
+    const updated: Journey = {...current, seen: [...current.seen, key]};
+    await persistJourney(updated);
+    return updated;
+  });
 }
 
 /**

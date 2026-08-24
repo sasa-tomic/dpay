@@ -21,7 +21,8 @@ import {describe, expect, test, jest, beforeEach, afterEach} from '@jest/globals
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {JOURNEY_STORAGE_KEY} from '../config/constants';
 import {PassportArchive} from '../components/TripPassport';
-import {READINESS_STAMPS} from '../lib/readiness';
+import {SettingsSheet} from '../components/SettingsSheet';
+import {READINESS_STAMPS, type ReadinessKey} from '../lib/readiness';
 import {useReducedMotion} from '../hooks/useReducedMotion';
 
 // The reduced-motion seam, mocked suite-wide (default OFF; the one reduced test flips it).
@@ -42,9 +43,9 @@ function hasTestID(tree: Tree, id: string): boolean {
   return tree.root.findAll(node => node.props && node.props.testID === id).length > 0;
 }
 
-async function render(): Promise<Tree> {
+async function render(props: {onStep?: (key: ReadinessKey) => void} = {}): Promise<Tree> {
   let tree!: Tree;
-  await act(async () => { tree = renderer.create(<PassportArchive onClose={() => {}} />); });
+  await act(async () => { tree = renderer.create(<PassportArchive onClose={() => {}} {...props} />); });
   // Let the mount-time journey load resolve into state.
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
   return tree;
@@ -78,7 +79,7 @@ describe('PassportArchive (the one full-page surface)', () => {
     expect(hasTestID(tree, 'passport-slot-flowUnderstood')).toBe(true);
     expect(hasTestID(tree, 'passport-slot-paymentTested')).toBe(true);
     // The ONE contextual next step names the first missing capability.
-    expect(findByTestID(tree, 'passport-hint').props.children).toBe('Watch the 3-step rehearsal when creating a wallet');
+    expect(findByTestID(tree, 'passport-hint').props.children).toBe('Watch the rehearsal when creating a wallet — or make any payment');
     // Incomplete NEVER retires — no Done button exists.
     expect(hasTestID(tree, 'btn-passport-done')).toBe(false);
   });
@@ -87,7 +88,7 @@ describe('PassportArchive (the one full-page surface)', () => {
     await seedJourney([]);
     const tree = await render();
     expect(findByTestID(tree, 'passport-count').props.children.join('')).toBe('0 OF 4');
-    expect(findByTestID(tree, 'passport-hint').props.children).toBe('Back up your wallet in Settings');
+    expect(findByTestID(tree, 'passport-hint').props.children).toBe('Copy your backup words in Settings');
   });
 
   test('complete but NOT yet tripReady (first observation after the 4th stamp): capstone plays, then Done retires the strip', async () => {
@@ -154,5 +155,114 @@ describe('PassportArchive (the one full-page surface)', () => {
     } finally {
       reducedMock.mockReturnValue(false);
     }
+  });
+});
+
+describe('PassportArchive deep-link (unfilled-stamp routing — founder ask 2026-08-24)', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    AsyncStorage.clear();
+  });
+  afterEach(() => {
+    AsyncStorage.clear();
+    jest.useRealTimers();
+  });
+
+  test('onStep: unfilled slots are pressable and fire their key; filled slots stay inert', async () => {
+    await seedJourney(['recoverySaved', 'fundsReady']);
+    const steps: string[] = [];
+    const tree = await render({onStep: key => steps.push(key)});
+    // Filled → the inked slot exists but has NO button wrapper (nothing left to complete).
+    expect(hasTestID(tree, 'passport-slot-recoverySaved-filled')).toBe(true);
+    expect(hasTestID(tree, 'passport-slot-btn-recoverySaved')).toBe(false);
+    expect(hasTestID(tree, 'passport-slot-btn-fundsReady')).toBe(false);
+    // Unfilled → the button wrapper exists and fires onStep with its exact key.
+    expect(hasTestID(tree, 'passport-slot-btn-flowUnderstood')).toBe(true);
+    expect(hasTestID(tree, 'passport-slot-btn-paymentTested')).toBe(true);
+    await act(async () => { findByTestID(tree, 'passport-slot-btn-flowUnderstood').props.onPress(); });
+    await act(async () => { findByTestID(tree, 'passport-slot-btn-paymentTested').props.onPress(); });
+    expect(steps).toEqual(['flowUnderstood', 'paymentTested']);
+  });
+
+  test('no onStep: NO slot is pressable (back-compat — the plain archive)', async () => {
+    await seedJourney([]);
+    const tree = await render();
+    const slotBtns = tree.root.findAll(n => typeof n.props?.testID === 'string' && n.props.testID.startsWith('passport-slot-btn-'));
+    expect(slotBtns.length).toBe(0);
+    // The bare slots still render with their pinned contract testIDs.
+    for (const key of READINESS_STAMPS) expect(hasTestID(tree, `passport-slot-${key}`)).toBe(true);
+  });
+
+  test('onStep: btn-passport-next routes through onStep with the first-missing key', async () => {
+    await seedJourney(['recoverySaved']);
+    const steps: string[] = [];
+    const tree = await render({onStep: key => steps.push(key)});
+    expect(hasTestID(tree, 'btn-passport-next')).toBe(true);
+    await act(async () => { findByTestID(tree, 'btn-passport-next').props.onPress(); });
+    expect(steps).toEqual(['flowUnderstood']);
+  });
+});
+
+describe('Passport deep-link wiring (the SettingsSheet host)', () => {
+  const SHEET_DEFAULTS = {
+    relayUrl: 'http://127.0.0.1:4391',
+    setRelayUrl: () => {},
+    onClose: () => {},
+    onReset: () => {},
+    onRestore: async () => {},
+    secretHex: 'ab'.repeat(32),
+    username: 'Alice',
+    themeChoice: null,
+    onSetTheme: () => {},
+  };
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    AsyncStorage.clear();
+  });
+  afterEach(() => {
+    AsyncStorage.clear();
+    jest.useRealTimers();
+  });
+
+  async function mountSheet(extra: Partial<React.ComponentProps<typeof SettingsSheet>> = {}): Promise<Tree> {
+    let tree!: Tree;
+    await act(async () => { tree = renderer.create(<SettingsSheet {...SHEET_DEFAULTS} {...extra} />); });
+    return tree;
+  }
+
+  /** Open the sheet's archive (Learn → Trip readiness) and let the journey load resolve. */
+  async function openArchive(tree: Tree): Promise<void> {
+    await act(async () => { findByTestID(tree, 'btn-trip-readiness').props.onPress(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  test('openBackup: the backup reveal opens on mount (the BACKED UP stamp destination)', async () => {
+    const tree = await mountSheet({openBackup: true});
+    expect(hasTestID(tree, 'mnemonic-words')).toBe(true);
+    expect(hasTestID(tree, 'btn-backup')).toBe(false); // past the entry + confirm gate
+  });
+
+  test('archive onStep: recoverySaved reveals the backup LOCALLY (Settings stays open); fundsReady closes + hands the key up', async () => {
+    await seedJourney([]); // all four unfilled
+    const closed: string[] = [];
+    const steps: string[] = [];
+    const tree = await mountSheet({onClose: () => closed.push('settings'), onOpenStep: key => steps.push(key)});
+
+    await openArchive(tree);
+    expect(hasTestID(tree, 'passport-archive')).toBe(true);
+
+    // recoverySaved → LOCAL reveal: the archive closes, the seed shows, Settings does NOT.
+    await act(async () => { findByTestID(tree, 'passport-slot-btn-recoverySaved').props.onPress(); });
+    expect(hasTestID(tree, 'passport-archive')).toBe(false);
+    expect(hasTestID(tree, 'mnemonic-words')).toBe(true);
+    expect(hasTestID(tree, 'btn-settings-close')).toBe(true);
+    expect(closed).toEqual([]);
+
+    // fundsReady → wallet-home step: Settings closes itself + the key goes up to Wallet's map.
+    await openArchive(tree);
+    await act(async () => { findByTestID(tree, 'passport-slot-btn-fundsReady').props.onPress(); });
+    expect(steps).toEqual(['fundsReady']);
+    expect(closed).toEqual(['settings']);
   });
 });

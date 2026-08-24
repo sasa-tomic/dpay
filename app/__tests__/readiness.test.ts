@@ -133,6 +133,13 @@ describe('awardPaymentTested', () => {
     expect(hasStamp(await importJourney(), 'paymentTested')).toBe(true);
   });
 
+  test('a confirmed payment ALSO awards flowUnderstood (a real payment IS the flow; the rehearsal is unreachable for pre-arc wallets)', async () => {
+    awardPaymentTested(EMPTY_JOURNEY);
+    await actAsync();
+    const j = await importJourney();
+    expect(hasStamp(j, 'flowUnderstood')).toBe(true);
+  });
+
   test('no-op when already stamped (idempotent — call sites stay tiny and fire freely)', async () => {
     const first = await awardStamp('paymentTested');
     awardPaymentTested(first);
@@ -147,8 +154,11 @@ describe('awardPaymentTested', () => {
   });
 });
 
-/** awardStamp is fire-and-forget async; give the microtask queue a tick. */
+/** awardStamp is fire-and-forget async; give the write queue + microtask queue a tick. */
 async function actAsync(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await new Promise((r) => setTimeout(r, 0));
   await Promise.resolve();
   await Promise.resolve();
 }

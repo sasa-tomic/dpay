@@ -23,12 +23,13 @@ function solUnit(cur: 'SOL' | 'USDC'): {decimals: number; unit: string} {
 /**
  * SOL NFC tap adapter (v2 recent-blockhash). Drives one tap through the native glue (DpaySolNfc —
  * pure Kotlin transport, no Rust core). SolPay mode arms the HCE card (payer is tapped); SolReceive
- * mode runs the reader. The **tap itself is the consent** — when a `solreq:v2:` arrives the payer
- * signs fully offline (against the recent blockhash embedded in the request) and serves the
- * `solpay:v2:` immediately. The merchant broadcasts online and hands a receipt `{status, rid, sig}`
- * back; the payer matches rid+sig and transitions (or ignores a cross-tap receipt). The shared
- * lifecycle lives in `useNfcTapState`; this adapter fills ONLY the SOL protocol:
- * signSolPayment/signSplPayment + RPC broadcast + rid/sig receipt matching.
+ * mode runs the reader. When a `solreq:v2:` arrives the payer AUTO-SIGNS (one-press rule: the "Pay
+ * Now" gate armed the tap — the request's arrival is the payment, no review park). The payer signs
+ * fully offline (against the recent blockhash embedded in the request) and serves the
+ * `solpay:v2:`. The merchant broadcasts online and hands a receipt `{status, rid, sig}` back; the
+ * payer matches rid+sig and transitions (or ignores a cross-tap receipt). The shared lifecycle
+ * lives in `useNfcTapState`; this adapter fills ONLY the SOL protocol: signSolPayment/
+ * signSplPayment + RPC broadcast + rid/sig receipt matching.
  */
 export function SolNfcTap({role, identity, req, reqUri, onOutcome, onResult, onActive, onClose}: {
   role: 'card' | 'reader';
@@ -40,44 +41,47 @@ export function SolNfcTap({role, identity, req, reqUri, onOutcome, onResult, onA
   onActive?: () => void;
   onClose: () => void;
 }) {
-  // The asset-correct amount string resolved SYNCHRONOUSLY in autoSign (card) / submitPayment
-  // (reader) BEFORE the first await, so React renders the honest amount during the in-flight window.
+  // The asset-correct amount string resolved SYNCHRONOUSLY in validateRequest (card) /
+  // submitPayment (reader) BEFORE the first await, so React renders the honest amount during the
+  // in-flight window.
   const [amtText, setAmtText] = useState<string | null>(null);
+  // One-press rule: a validated request signs IMMEDIATELY (no parked review). `signingRef` latches
+  // at sign start so the transport's re-tap re-push of the same rid can't double-sign; the hook
+  // drops post-sign request duplicates, this guards the async window before `advance` fires.
+  const signingRef = useRef(false);
+  // The rid of the request we've signed (or are signing): re-tap duplicates with the SAME rid are
+  // ignored; a different rid after a completed sign is dropped too (the signed payment owns the
+  // UI — the merchant must re-arm for a fresh payment).
+  const signedRidRef = useRef<string | null>(null);
+  // The auto-sign entry, reachable from the hook's request dispatch (which runs before `advance`
+  // exists as a binding). Assigned right after the hook call below.
+  const approveRef = useRef<(decoded: SolReqV2, ctx: TapCtx) => Promise<void>>(async () => {});
   // The v2 receipt bindings captured at sign time: expectedRid (the request's 32-hex rid) +
   // expectedSig (the first tx signature, base58). The receipt must match BOTH or it's ignored
   // (defense against a cross-tap receipt for a different payment).
   const expectedRidRef = useRef<string>('');
   const expectedSigRef = useRef<string>('');
 
-  // Payer (card): the tap is the consent — decode the incoming solreq:v2, check it's not expired,
-  // sign fully offline against the recent blockhash, and serve the solpay:v2 immediately.
-  const autoSign = useCallback(async (solreqUri: string, ctx: TapCtx) => {
+  // Payer (card): decode the incoming solreq:v2 and AUTO-SIGN. The SOL transport re-emits
+  // `request` on every re-tap (no requestSent latch): a duplicate with the SAME rid is ignored
+  // (the sign already fired); a different rid before any sign replaces it (last-writer-wins, e.g.
+  // the merchant pushed a fresh request within the validate window). Expiry is re-checked
+  // authoritatively INSIDE the sign (isSolReqV2Expired) — an expired request declines honestly.
+  const validateRequest = useCallback(async (solreqUri: string, ctx: TapCtx) => {
     try {
       const decoded = decodeSolReq(solreqUri);
-      if (isSolReqV2Expired(decoded)) {
-        try { await DpaySolNfc.declineSolCard(); } catch (e: unknown) { console.warn('DpaySolNfc.declineSolCard failed (expired req)', e); }
-        ctx.finalize('declined', 'This payment request has expired');
-        return;
-      }
+      if (signedRidRef.current === decoded.rid) return; // re-tap duplicate — sign already fired
+      signedRidRef.current = decoded.rid;
       const {decimals, unit} = solUnit(decoded.cur);
       setAmtText(fmtAsset(decoded.amt, decimals, unit));
-      const solpay: SolPayV2 = decoded.cur === 'SOL'
-        ? signSolPayment(identity.secretHex, decoded)
-        : signSplPayment(identity.secretHex, decoded);
-      // Capture the rid + first signature for receipt binding (BEFORE the tap delivers the receipt).
-      expectedRidRef.current = decoded.rid;
-      const parts = extractSignedTxParts(solpay.tx);
-      expectedSigRef.current = parts ? bs58.encode(parts.signature) : '';
-      const solpayUri = encodeSolPay(solpay);
-      await DpaySolNfc.approveSolCard(solpayUri);
+      await approveRef.current(decoded, ctx);
     } catch (e: unknown) {
-      // A2: map via friendlySolTapError (never the raw string — the status view renders it
-      // verbatim); the raw message is warn'd so the dev loop stays fail-loud.
       const raw = e instanceof Error ? e.message : String(e);
-      console.warn('SolNfcTap autoSign failed:', raw);
+      console.warn('SolNfcTap request validation failed:', raw);
+      try { await DpaySolNfc.declineSolCard(); } catch (e2: unknown) { console.warn('DpaySolNfc.declineSolCard failed (bad req)', e2); }
       ctx.finalize('error', friendlySolTapError(raw));
     }
-  }, [identity]);
+  }, []);
 
   // Merchant (reader): decode the payer's solpay:v2, broadcast online (strict verify + freshness +
   // confirm inside broadcastSolPayment), then hand the receipt {status, rid, sig} back to the payer
@@ -122,14 +126,14 @@ export function SolNfcTap({role, identity, req, reqUri, onOutcome, onResult, onA
     }
   }, [req, reqUri, onResult]);
 
-  const {phase, reason, activeRef} = useNfcTapState<SolNfcEvent>({
+  const {phase, reason, activeRef, advance} = useNfcTapState<SolNfcEvent>({
     role, readerPayload: reqUri, onActive,
     eventName: 'DpaySolNfcEvent', nativeModule: DpaySolNfc,
     armCard: () => DpaySolNfc.armCard(),
     disarmCard: () => DpaySolNfc.disarmCard(),
     startReader: (p) => DpaySolNfc.startSolReader(p),
     stopReader: () => DpaySolNfc.stopSolReader(),
-    onRequest: (e, ctx) => { if (e.type === 'request') autoSign(e.solreqUri, ctx); },
+    onRequest: (e, ctx) => { if (e.type === 'request') void validateRequest(e.solreqUri, ctx); },
     onSubmit: (e, ctx) => { if (e.type === 'payment') submitPayment(e.solpayUri, ctx); },
     onReceipt: (e, ctx) => {
       if (e.type !== 'receipt') return;
@@ -153,6 +157,40 @@ export function SolNfcTap({role, identity, req, reqUri, onOutcome, onResult, onA
       }
     },
   });
+
+  // The auto-sign: authoritative expiry re-check at sign time (isSolReqV2Expired — the request's
+  // frozen blockhash also goes stale, so an old request is refused here, not by a chip), then the
+  // fully-offline sign against the frozen blockhash + provideWire (cached; served on this tap or
+  // the next re-tap). (Lives AFTER the hook call: it closes over `advance`; validateRequest
+  // reaches it through `approveRef`.)
+  const approve = useCallback(async (decoded: SolReqV2, ctx: TapCtx) => {
+    if (signingRef.current) return;
+    signingRef.current = true;
+    if (isSolReqV2Expired(decoded)) {
+      try { await DpaySolNfc.declineSolCard(); } catch (e: unknown) { console.warn('DpaySolNfc.declineSolCard failed (expired)', e); }
+      ctx.finalize('declined', 'This payment request has expired');
+      return;
+    }
+    advance('exchanging');
+    try {
+      const solpay: SolPayV2 = decoded.cur === 'SOL'
+        ? signSolPayment(identity.secretHex, decoded)
+        : signSplPayment(identity.secretHex, decoded);
+      // Capture the rid + first signature for receipt binding (BEFORE the tap delivers the receipt).
+      expectedRidRef.current = decoded.rid;
+      const parts = extractSignedTxParts(solpay.tx);
+      expectedSigRef.current = parts ? bs58.encode(parts.signature) : '';
+      const solpayUri = encodeSolPay(solpay);
+      await DpaySolNfc.approveSolCard(solpayUri);
+    } catch (e: unknown) {
+      // A2: map via friendlySolTapError (never the raw string — the status view renders it
+      // verbatim); the raw message is warn'd so the dev loop stays fail-loud.
+      const raw = e instanceof Error ? e.message : String(e);
+      console.warn('SolNfcTap approve failed:', raw);
+      ctx.finalize('error', friendlySolTapError(raw));
+    }
+  }, [advance, identity.secretHex]);
+  approveRef.current = approve;
 
   // While merely armed/listening (no tap yet) render nothing, so the parent's QR shows and the phone
   // can be tapped OR scanned with no mode switch.

@@ -253,6 +253,12 @@ object DpayNfc {
             m.putString("nonceHex", hex(r.nonce))
             m.putDouble("expiry", r.expiry.toDouble())
             m.putInt("currency", r.currency.toInt())
+            // Approve-before-pay review card (QR parity): the payee's display name + memo ride the
+            // wire's 32-byte name field / memo field (NUL-trimmed by the core decode). The TS
+            // NfcEvent types them optional; the review shows "to <name>" + short key, or the short
+            // key alone when no name was set (a name is never shown without the key).
+            m.putString("toName", r.toName)
+            m.putString("memo", r.memo)
             emit(m)
         } catch (e: Throwable) {
             errorEvent("card", "Received a malformed request")

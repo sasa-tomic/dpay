@@ -425,32 +425,100 @@ export async function openPaySend(driver, opts = {}) {
   await driver.click('btn-pay-send', { timeoutMs: opts.timeoutMs ?? 5_000 });
 }
 
+// --- pay-intent scan gate -----------------------------------------------------------------------
+//
+// Founder rule 2026-08-23: the payer-side scan surfaces (PayMode IC + SolPayMode SOL) keep the
+// camera (QrScanner) AND the NFC card (NfcTap/SolNfcTap) UNMOUNTED until the explicit "Start
+// scanning" tap (btn-start-scan / btn-sol-start-scan). Every e2e path that injects a scan payload
+// (`__DPAY_TEST_SCAN`) or dispatches a payer NFC event (`__DPAY_TEST_NFC_SESSION` /
+// `__DPAY_TEST_SOL_NFC_SESSION`) must first funnel through these arming helpers — the CHOKE POINTS.
+// They are idempotent and surface-aware: an already-armed session (or an ungated receive-side
+// scanner) has listeners > 0 and is left untouched, and the gate button unmounts once armed, so a
+// stray double-press cannot happen. Within an armed session the card re-arms itself (nfcKey), so
+// only reset()/subMode-flip/tab-switch (fresh mount → idle) re-expose the gate — which these
+// helpers then press again.
+
+/** Query the camera shim's listener count (mounted <QrScanner> instances). */
+async function scanCount(driver) {
+  return driver.eval(() => (typeof window.__DPAY_TEST_SCAN_COUNT === 'function' ? window.__DPAY_TEST_SCAN_COUNT() : -1));
+}
+
+/** Press whichever pay-intent gate button is on screen, if any. Returns true when a press was
+ *  issued. Safe to call repeatedly: the button unmounts once armed, and a mid-navigation race
+ *  (button gone between probe and click) just returns false for the next poll to retry. */
+async function pressScanGate(driver) {
+  const gate = await driver.eval(() => {
+    for (const t of ['btn-start-scan', 'btn-sol-start-scan']) {
+      if (document.querySelector(`[data-testid="${t}"]`)) return t;
+    }
+    return null;
+  });
+  if (!gate) return false;
+  try {
+    await driver.click(gate, { timeoutMs: 2_000 });
+    return true;
+  } catch {
+    return false; // unmounted mid-click (tab switch / re-render) — the caller's poll retries
+  }
+}
+
 /**
- * Assert that a <QrScanner> is mounted and listening for scans. Catches the class of bug where the
- * scanner fails to render (a conditional/overlay prevents it) — the camera shim would SILENTLY lose
- * the injected scan payload, the flow hangs, and the failure is an opaque timeout instead of an
- * actionable error. Call this BEFORE injecting a scan via `__DPAY_TEST_SCAN`.
+ * Ensure the payer scan surface is ARMED (camera listening). THE choke point for every
+ * `__DPAY_TEST_SCAN` injection against the Pay tab: presses the gate when the surface is idle,
+ * no-ops when already armed, and fails loudly when neither a scanner nor a gate ever appears.
+ */
+export async function armPayScan(driver, opts = {}) {
+  const timeoutMs = opts.timeoutMs ?? 5_000;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if ((await scanCount(driver)) > 0) return;
+    await pressScanGate(driver); // no-op when no gate is on screen (ungated surface / mid-nav)
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  assert(false, `pay scan surface never armed within ${timeoutMs}ms (listeners=0 throughout, no gate button pressed)`);
+}
+
+/**
+ * Ensure the payer-side NFC CARD is armed (NfcTap/SolNfcTap mounted + listening). THE choke point
+ * for every payer `__DPAY_TEST_NFC_SESSION` (rail 'ic') / `__DPAY_TEST_SOL_NFC_SESSION`
+ * (rail 'sol') dispatch. The same "Pay Now" tap arms card + camera together, so this
+ * shares pressScanGate; only the listener wait is seam-specific (NFC counts, not camera counts).
+ */
+export async function armNfcCard(driver, rail, opts = {}) {
+  const seam = { ic: '__DPAY_TEST_NFC_COUNT', sol: '__DPAY_TEST_SOL_NFC_COUNT' }[rail];
+  assert(seam, `armNfcCard: unknown rail ${JSON.stringify(rail)} (expected 'ic' | 'sol')`);
+  const timeoutMs = opts.timeoutMs ?? 5_000;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const n = await driver.eval((g) => (typeof window[g] === 'function' ? window[g]() : -1), seam);
+    if (n > 0) return;
+    await pressScanGate(driver);
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  assert(false, `${rail} NFC card never mounted within ${timeoutMs}ms (listeners=0 throughout; the pay-intent gate never armed it)`);
+}
+
+/**
+ * Assert that a <QrScanner> is mounted and listening for scans (arming the pay-intent gate first
+ * if needed). Catches the class of bug where the scanner fails to render (a conditional/overlay
+ * prevents it) — the camera shim would SILENTLY lose the injected scan payload, the flow hangs,
+ * and the failure is an opaque timeout instead of an actionable error.
  */
 export async function assertScannerMounted(driver, label = 'scan screen') {
-  const count = await driver.eval(() => (typeof window.__DPAY_TEST_SCAN_COUNT === 'function' ? window.__DPAY_TEST_SCAN_COUNT() : -1));
+  await armPayScan(driver);
+  const count = await scanCount(driver);
   assert(count > 0, `QrScanner must be mounted on ${label} (listeners=${count}); the scanner component failed to render — check for a conditional/overlay that prevents <QrScanner> from mounting.`);
 }
 
 /**
- * Poll until a <QrScanner> is mounted (listener count > 0). Use after re-entering a scan phase
- * (the scanner unmounts during review/qr phases and needs a tick to re-mount). The camera shim's
- * fail-loud `__DPAY_TEST_SCAN` catches a missing scanner at injection time, but this helper gives
- * a cleaner failure + avoids the race for flows that re-scan.
+ * Poll until a <QrScanner> is mounted (listener count > 0), arming the pay-intent gate on the
+ * way (an idle payer surface starts with listeners=0 by design). Use after re-entering a scan
+ * phase — reset()/subMode-flip disarm, and the scanner also needs a tick to re-mount after the
+ * review/qr phases. The camera shim's fail-loud `__DPAY_TEST_SCAN` catches a missing scanner at
+ * injection time, but this helper gives a cleaner failure + avoids the race for flows that re-scan.
  */
 export async function waitForScanner(driver, opts = {}) {
-  const timeoutMs = opts.timeoutMs ?? 5_000;
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const count = await driver.eval(() => (typeof window.__DPAY_TEST_SCAN_COUNT === 'function' ? window.__DPAY_TEST_SCAN_COUNT() : -1));
-    if (count > 0) return;
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  assert(false, `QrScanner did not mount within ${timeoutMs}ms (listeners=0 throughout)`);
+  await armPayScan(driver, opts);
 }
 
 // --- relay-retarget / offline helpers -----------------------------------------------------------

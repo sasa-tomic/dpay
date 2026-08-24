@@ -16,7 +16,8 @@ import {SeedWords} from './SeedWords';
 import {IconAuto, IconCheck, IconChevronDown, IconClose, IconExternalLink, IconInfo, IconMoon, IconSun} from './icons';
 import {Walkthrough} from './Walkthrough';
 import {PassportArchive} from './TripPassport';
-import {PASSPORT_TITLE} from '../lib/readiness';
+import {PASSPORT_TITLE, computeReadiness, type ReadinessKey} from '../lib/readiness';
+import {JOURNEY_STAMPS, awardStamp, useJourney} from '../lib/journey';
 import {choiceLabel, type ThemeOverride} from '../config/theme';
 
 /**
@@ -40,7 +41,7 @@ import {choiceLabel, type ThemeOverride} from '../config/theme';
  *    the action opens a confirmation dialog (the destructive gate stays in place). Visually distinct
  *    from the "Privacy policy" link above it (which previously shared the same link chrome).
  */
-export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestore, secretHex, username, themeChoice, onSetTheme}: {
+export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestore, secretHex, username, themeChoice, onSetTheme, openBackup, onOpenStep}: {
   relayUrl: string;
   setRelayUrl: (s: string) => void;
   onClose: () => void;
@@ -61,6 +62,14 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
   // three-way choice (Light / Dark / Auto). App.tsx owns the state + AsyncStorage persistence.
   themeChoice: ThemeOverride | null;
   onSetTheme: (t: ThemeOverride | null) => void;
+  // Passport deep-link (founder ask 2026-08-24): auto-open the backup reveal ONCE on mount —
+  // the unfilled "BACKED UP" stamp's destination (Wallet sets it when routing from the
+  // passport). A manual gear-open (absent/false) keeps the normal two-step confirm gate.
+  openBackup?: boolean;
+  // Passport deep-link: hand a wallet-home step key (fundsReady → Balances, paymentTested →
+  // Pay) up to Wallet's routing map after this sheet closes itself. Optional — Settings-hosted
+  // archive instances without it fall back to closing both surfaces.
+  onOpenStep?: (key: ReadinessKey) => void;
 }) {
   // Esc closes the sheet — EXCEPT while the "How dpay works" replay Modal is open, when the
   // Modal's own Walkthrough escape handler owns the key (otherwise one Esc would close both).
@@ -69,6 +78,9 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
   // Balances card collapses). Joins the howItWorks escape gate: while open, the Modal's own
   // escape owns the key (one Esc closes one thing).
   const [tripReadyOpen, setTripReadyOpen] = useState(false);
+  // Live n/4 for the Trip readiness row (same source as the strip + archive — no second truth).
+  const {journey} = useJourney();
+  const tripReadiness = useMemo(() => computeReadiness(journey), [journey]);
   useHotkeys({escape: onClose}, {enabled: !howItWorks && !tripReadyOpen});
   const [confirmReset, setConfirmReset] = useState(false);
   // Backup reveal is a TWO-step gate (mirrors the reset confirm idiom): `confirmBackup` opens the
@@ -102,13 +114,19 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
   const [lastApplied, setLastApplied] = useState(relayUrl);
   useEffect(() => { setDraftRelay(relayUrl); setLastApplied(relayUrl); }, [relayUrl]);
 
+  // Passport deep-link: fires the same state btn-backup-confirm sets (the reveal itself — a
+  // deliberate stamp tap is not the accidental shoulder-surf the two-step gate guards against).
+  useEffect(() => { if (openBackup) setBackupRevealed(true); }, [openBackup]);
+
   const relayClean = draftRelay.trim();
   const relayDirty = relayClean.length > 0 && relayClean !== lastApplied.trim();
   const applyRelay = () => { if (relayDirty) { setRelayUrl(draftRelay); setLastApplied(draftRelay.trim()); } };
 
   // Copy the seed via the shared clipboard-feedback hook (real clipboard on web, Share on native;
-  // surfaces the "Copied ✓"/"Shared ✓" confirmation for 1500ms).
-  const copySeed = () => { void doCopy(secretHex); };
+  // surfaces the "Copied ✓"/"Shared ✓" confirmation for 1500ms). BOTH copy actions award
+  // `recoverySaved` (founder rule 2026-08-23: trip-prep checks auto-detect — copying the backup
+  // IS backing up, whether it happens here or in Onboarding; the journey store is idempotent).
+  const copySeed = () => { void doCopy(secretHex); void awardStamp(JOURNEY_STAMPS.recoverySaved); };
 
   // The 24 BIP-39 words for the mnemonic backup view. The 32-byte seed never changes for a given
   // identity, so this memoizes on `secretHex` (a prop) — one synchronous SHA-256 per identity, not
@@ -116,7 +134,7 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
   // `copied`/format-toggle re-render.
   const mnemonicWords = useMemo(() => hexToWords(secretHex), [secretHex]);
   const mnemonicString = useMemo(() => wordsToString(mnemonicWords), [mnemonicWords]);
-  const copyMnemonic = () => { void doCopy(mnemonicString); };
+  const copyMnemonic = () => { void doCopy(mnemonicString); void awardStamp(JOURNEY_STAMPS.recoverySaved); };
 
   // Validate + derive + replace the identity from a pasted seed — 24 BIP-39 words (the default
   // Backup form) or 64-hex (the "Show as hex" form), auto-detected by shape. Mirrors
@@ -161,6 +179,19 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
       setRestoreBusy(false);
     }
   }
+
+  // Passport deep-links (founder ask 2026-08-24): an unfilled stamp tap routes to the surface
+  // where that step completes. Steps that LIVE in Settings route locally (backup reveal,
+  // walkthrough replay); the wallet-home steps (funds, first payment) close this sheet and
+  // hand the key to Wallet's map via onOpenStep (or just close if no callback was threaded).
+  // The archive always closes first.
+  const goToPassportStep = (key: ReadinessKey) => {
+    setTripReadyOpen(false);
+    if (key === 'recoverySaved') { setBackupRevealed(true); return; }
+    if (key === 'flowUnderstood') { setHowItWorks(true); return; }
+    onClose();
+    if (onOpenStep) onOpenStep(key);
+  };
 
   return (
     <SheetOverlay>
@@ -368,23 +399,10 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
               statement — no duplication. */}
           <View style={S.settingsSection}>
             <Text style={S.inputLabel}>Learn</Text>
-            <Pressable
-              testID="btn-how-it-works"
-              style={S.linkBtn}
-              onPress={() => setHowItWorks(true)}
-              accessibilityRole="button"
-              accessibilityLabel={JourneyHowItWorksTitle}
-              accessibilityHint="Replays the three-scene walkthrough of how dpay pays"
-              accessibilityState={{disabled: false}}>
-              <View style={S.linkRow}>
-                <IconInfo size={16} color={C.sub} />
-                <Text style={S.linkText}>{JourneyHowItWorksTitle}</Text>
-              </View>
-            </Pressable>
-            {/* Trip Ready J5b — the passport archive: the permanent read-only home of the
-                Trip Readiness page (after the Balances card collapses on completion, this is
-                where it lives; before completion it shows the same view — what's left). The
-                ring glyph echoes the passport's stamp slots. Private + local, like the journey. */}
+            {/* Trip readiness FIRST inside LEARN (UX 2026-08-23): the passport is the persistent
+                object; the walkthrough replay is secondary. The live n/4 counter turns a dead
+                label into a status row — the answer to "what is this / where am I" without
+                opening it (computeReadiness is the single source, same as the strip/archive). */}
             <Pressable
               testID="btn-trip-readiness"
               style={S.linkBtn}
@@ -396,6 +414,20 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
               <View style={S.linkRow}>
                 <IconCheck size={16} color={C.sub} />
                 <Text style={S.linkText}>{PASSPORT_TITLE}</Text>
+                <Text testID="trip-readiness-count" style={[S.passportHintTag, {marginLeft: 'auto'}]}>{`${tripReadiness.filled.length}/4`}</Text>
+              </View>
+            </Pressable>
+            <Pressable
+              testID="btn-how-it-works"
+              style={S.linkBtn}
+              onPress={() => setHowItWorks(true)}
+              accessibilityRole="button"
+              accessibilityLabel={JourneyHowItWorksTitle}
+              accessibilityHint="Replays the three-scene walkthrough of how dpay pays"
+              accessibilityState={{disabled: false}}>
+              <View style={S.linkRow}>
+                <IconInfo size={16} color={C.sub} />
+                <Text style={S.linkText}>{JourneyHowItWorksTitle}</Text>
               </View>
             </Pressable>
           </View>
@@ -527,7 +559,7 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
           archive mode (no capstone, no Done — complete shows the TRIP READY mark statically). */}
       {tripReadyOpen ? (
         <AppModal onRequestClose={() => setTripReadyOpen(false)}>
-          <PassportArchive onClose={() => setTripReadyOpen(false)} />
+          <PassportArchive onClose={() => setTripReadyOpen(false)} onStep={goToPassportStep} />
         </AppModal>
       ) : null}
     </SheetOverlay>

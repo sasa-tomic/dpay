@@ -14,8 +14,8 @@
 //   - Bob's ledger history (direct relay query) shows the incoming row with from_name="Alice" +
 //     memo="coffee" — the PAYEE sees the PAYER's name (N6/H3 core fix).
 //
-// Selector contract: `pay-amount`, `review-memo`, `btn-approve`, `balance`.
-import { setup, assert, assertIncludes, getBalance, onboardWallet, railPrincipalText } from '../harness/lib.mjs';
+// Selector contract: `balance`, `tab-transactions` (stable surfaces — the sign status is transient).
+import { setup, assert, assertIncludes, getBalance, onboardWallet, railPrincipalText , armPayScan} from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
 const PAY_CENTS = 2500; // ∂25.00 (DEMO_USD = currency 0, the wallet asset)
@@ -61,28 +61,21 @@ export async function run() {
 
     // --- A scans B's request via the camera seam. --------------------------------------------
     console.log('[26-names-memo] injecting B’s request QR (to_name="Bob", memo="coffee") via the camera seam…');
+    await armPayScan(driver); // pay-intent gate: arm the scan surface (no-op when already armed)
     await driver.eval((qr) => { if (typeof window.__DPAY_TEST_SCAN === 'function') window.__DPAY_TEST_SCAN(qr); }, requestQR);
 
-    // --- Review screen: exact amount + the payee NAME + the memo. ----------------------------
-    await driver.findByTestID('pay-amount', { timeoutMs: 5_000 });
-    const payAmt = await driver.readText('pay-amount');
-    assert(payAmt.includes('∂25.00'), `review should show "Pay ∂25.00", got "${payAmt}"`);
-    const reviewBody = await driver.bodyText();
-    assertIncludes(reviewBody, PAYEE_NAME, 'review should name the payee by display name (from the request bytes)');
-  // The memo the merchant attached is shown as a subtitle on the review screen.
-  await driver.findByTestID('review-memo', { timeoutMs: 5_000 });
-  const reviewMemo = await driver.readText('review-memo');
-  assert(reviewMemo === MEMO, `review memo should be "${MEMO}", got "${reviewMemo}"`);
-  // U-F5: a name alone is not verifiable — the dim review-payee line carries the short pubkey
-  // (first 8 hex chars + '…') so the payer can eyeball it against the merchant's displayed one.
-  await driver.findByTestID('review-payee', { timeoutMs: 5_000 });
-  const reviewPayee = await driver.readText('review-payee');
-  assertEq(reviewPayee, `${bob.publicHex.slice(0, 8)}…`, 'review short-payee line (U-F5)');
-  console.log(`[26-names-memo] ✓ review: ${payAmt} to ${PAYEE_NAME} · ${reviewPayee} · memo "${reviewMemo}"`);
+    // --- AUTO-SIGN → settle (one-press rule 2026-08-24): no review stop, no Approve click. ---
+    // The local settle is FAST — the read-only sign status flashes between decode and `paid`, so
+    // the exact-amount + payee-name asserts live on the STABLE Paid surface (same formatter, so
+    // the precision contract still holds). The U-F5 short-payee pin lives on flow 49's deeplink
+    // review — the one surface that still parks. (The camera entry drops the memo display line;
+    // the memo itself still rides the request bytes and is asserted on the ledger rows below.)
+    const paidEarly = await driver.waitForText('Paid', { timeoutMs: 10_000 });
+    assert(paidEarly, 'the scan should auto-sign and settle straight to Paid');
+    assertIncludes(await driver.bodyText(), '∂25.00', 'the paid headline should carry the exact ∂25.00 amount');
+    console.log('[26-names-memo] ✓ auto-signed: Paid ∂25.00 (sign status flashed → stable Paid)');
 
-    // --- Approve → the app signs (from_name="Alice", to_name="Bob", memo="coffee") + settles. -
-    console.log('[26-names-memo] clicking btn-approve (sign + pay)…');
-    await driver.click('btn-approve', { timeoutMs: 5_000 });
+    // --- Auto-sign → the app signs (from_name="Alice", to_name="Bob", memo="coffee") + settles.
     const paid = await driver.waitForText('Paid', { timeoutMs: 10_000 });
     assert(paid, 'payer should reach the Paid screen after the relay settles');
     const paidBody = await driver.bodyText();

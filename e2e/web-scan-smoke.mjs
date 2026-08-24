@@ -4,8 +4,8 @@
 //   relay (real dpay-relay, FakeLedger)  +  sirv serving e2e/dist-prod (the exact embedded bytes)
 //   →  headless chrome with a FAKE CAMERA (--use-fake-device-for-media-stream
 //     --use-file-for-fake-video-capture=qr.y4m) drives the REAL app at /wallet:
-//     1. onboard (faucet-funded), land on Pay (scan screen)
-//     2. click "Allow camera scan" (the founder gesture rule — camera only opens on explicit click)
+//     1. onboard (faucet-funded), land on Pay (gated: no camera, no NFC until armed)
+//     2. click "Pay Now" (the pay-intent gate — camera+NFC start only on that press)
 //     3. a REAL getUserMedia stream flows from the fake device; camera-real.tsx's rAF
 //        video→canvas→jsQR loop must decode the dpay request QR IN THE VIDEO FRAMES
 //     4. the app reacts: PayMode leaves the scan phase and mounts the review (btn-approve)
@@ -122,13 +122,22 @@ try {
   const winJsQR = await page.evaluate(() => typeof window.jsQR);
   winJsQR === 'undefined' ? ok('window.jsQR undefined (vendored UMD resolved via CJS interop, not a window leak)') : bad(`window.jsQR is ${winJsQR} — the UMD ran as ESM and attached to the global; the default import may be undefined (rename vendor to .cjs)`);
 
-  // 3. Pay tab → scan screen → the founder-gesture camera open. NOTE: Pay is the DEFAULT tab, the
-  //    fake-UI flag auto-grants camera permission, and the decode can land during/right after
-  //    onboarding — so this is a RACE: wait directly for the OUTCOME (review = btn-approve), not
-  //    the intermediate scan box. If the review isn't up yet, nudge to Pay (idempotent) and re-wait.
+  // 3. Pay tab → the pay-intent gate → the founder-gesture camera open. Pay is the DEFAULT tab,
+  //    but since 2026-08-23 the scan surface starts GATED (camera+NFC only after "Start
+  //    scanning"), so the scanner never mounts — and the decode can never fire — until that
+  //    button is pressed. The puppeteer click is a REAL gesture: QrScanner mounts right after it
+  //    and its mount-effect permission call lands inside the gesture window, opening the
+  //    (fake-UI-granted) camera. Then wait for the OUTCOME (review = btn-approve); if the review
+  //    isn't up yet, nudge to Pay (idempotent) + re-open the gate and re-wait.
+  const openGate = async () => {
+    await page.click('[aria-label="Pay"]').catch(() => {});
+    const gate = await page.waitForSelector('[data-testid="btn-start-scan"]', { timeout: 4000 }).catch(() => null);
+    if (gate) await gate.click();
+  };
+  await openGate();
   let approveBtn = await page.waitForSelector('[data-testid="btn-approve"]', { timeout: 6000 }).catch(() => null);
   if (!approveBtn) {
-    await page.click('[aria-label="Pay"]').catch(() => {});
+    await openGate();
     approveBtn = await page.waitForSelector('[data-testid="btn-approve"]', { timeout: 8000 }).catch(() => null);
   }
   approveBtn ? ok('camera scan landed on review (jsQR decoded the request QR from video frames)') : bad('camera scan never landed on review — jsQR decode did not fire (decoder broken in the shipped bytes)');

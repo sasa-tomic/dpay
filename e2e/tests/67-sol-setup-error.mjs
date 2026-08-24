@@ -3,17 +3,17 @@
 // v2 eliminated the durable-nonce setup lifecycle entirely — there's no createNonceAccount, no
 // stale-nonce resync, no setup-error surface. This flow covers what replaces it:
 //   (A) **No-setup scan** — proves SolPayMode mounts directly in 'scan' with zero prior setup.
-//       The payer scans a valid v2 solreq, reviews, approves, and produces a solpay:v2 QR. This
-//       is the v2 equivalent of flow 46 but asserts the ABSENCE of any setup UI (no setup button,
-//       no nonce state gate).
+//       The payer scans a valid v2 solreq and it AUTO-SIGNS (one-press rule, 2026-08-24: the
+//       "Pay Now" gate was the press) → solpay:v2 QR. This is the v2 equivalent of flow 46 but
+//       asserts the ABSENCE of any setup UI (no setup button, no nonce state gate).
 //   (B) **Expired-request decline** — covers the v2 freshness gate. The payer scans a solreq whose
 //       exp is already past → isSolReqV2Expired returns true → SolPayMode shows a friendly error
 //       ("expired") and does NOT produce a solpay QR. This replaces the old setup-error's role as
 //       the SOL error-surface coverage flow.
 //
 // Selector contract: `asset-sol-select`, `sol-pay-scan` (immediately, no setup gate),
-// `btn-sol-pay-approve`, `sol-pay-qr` (valid case), `sol-pay-err` (expired case).
-import {setup, assert, onboardWallet} from '../harness/lib.mjs';
+// `sol-pay-qr` (valid case), `sol-pay-err` (expired case).
+import {setup, assert, onboardWallet, armPayScan} from '../harness/lib.mjs';
 
 export const meta = {
   id: '67',
@@ -68,26 +68,22 @@ export async function run() {
     await driver.findByTestID('asset-sol-select', {timeoutMs: 5_000});
     await driver.click('asset-sol-select', {timeoutMs: 5_000});
 
-    // -------- Part A: no-setup scan → review → approve → solpay:v2. -----------------------
+    // -------- Part A: no-setup scan → AUTO-SIGN → solpay:v2. ------------------------------
     //
     // SolPayMode mounts DIRECTLY in 'scan' (no setup button, no nonce gate).
     await driver.findByTestID('sol-pay-scan', {timeoutMs: 5_000});
     console.log('[67-sol-no-setup] ✓ SolPayMode mounted in scan with no setup (v2)');
 
-    // Scan a valid (fresh) v2 solreq.
+    // Scan a valid (fresh) v2 solreq — AUTO-SIGN fires on decode (no review, no Approve).
     const validUri = buildSolReq();
-    console.log('[67-sol-no-setup] scanning a valid (fresh) solreq:v2…');
+    console.log('[67-sol-no-setup] scanning a valid (fresh) solreq:v2 (auto-sign)…');
+    await armPayScan(driver); // pay-intent gate: arm the scan surface (no-op when already armed)
     await driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), validUri);
-    await driver.findByTestID('sol-pay-amount', {timeoutMs: 5_000});
-    console.log('[67-sol-no-setup] ✓ valid req reached review');
-
-    // Approve → solpay:v2 QR.
-    await driver.click('btn-sol-pay-approve', {timeoutMs: 5_000});
-    await driver.findByTestID('sol-pay-qr', {timeoutMs: 5_000});
+    await driver.findByTestID('sol-pay-qr', {timeoutMs: 8_000});
     const solpayUri = await driver.eval(() => window.__DPAY_QR_LAST);
     assert(typeof solpayUri === 'string' && solpayUri.startsWith('solpay:v2?'),
       `signed solpay:v2 should be produced from a valid req, got: ${JSON.stringify(solpayUri)?.slice(0, 80)}`);
-    console.log('[67-sol-no-setup] ✓ valid req signed → solpay:v2 QR rendered');
+    console.log('[67-sol-no-setup] ✓ valid req auto-signed → solpay:v2 QR rendered');
 
     // Reset to scan (discard the signed payment).
     await driver.click('btn-sol-pay-discard', {timeoutMs: 5_000});
@@ -101,6 +97,7 @@ export async function run() {
     const now2 = Math.floor(Date.now() / 1000);
     const expiredUri = buildSolReq({iat: now2 - 85, exp: now2 - 5});
     console.log('[67-sol-no-setup] scanning an EXPIRED solreq:v2 (exp in the past)…');
+    await armPayScan(driver); // pay-intent gate: arm the scan surface (no-op when already armed)
     await driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), expiredUri);
 
     // The error surface should appear (sol-pay-err with "expired" text).

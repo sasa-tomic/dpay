@@ -31,8 +31,8 @@ export type PassportStamp = {key: ReadinessKey; label: string; hint: string; sho
  *  earned, not system states the app tracked ("FLOW UNDERSTOOD" was system-speak). Two-line
  *  caps (explicit \n) so every stamp reads like inked lines in a real passport. */
 export const PASSPORT_STAMPS: readonly PassportStamp[] = [
-  {key: 'recoverySaved', label: 'BACKED\nUP', hint: 'Back up your wallet in Settings', short: 'back up to go'},
-  {key: 'flowUnderstood', label: 'SAW THE\nFLOW', hint: 'Watch the 3-step rehearsal when creating a wallet', short: 'see how it works to go'},
+  {key: 'recoverySaved', label: 'BACKED\nUP', hint: 'Copy your backup words in Settings', short: 'back up to go'},
+  {key: 'flowUnderstood', label: 'SAW THE\nFLOW', hint: 'Watch the rehearsal when creating a wallet — or make any payment', short: 'see how it works to go'},
   {key: 'fundsReady', label: 'FUNDS\nLOADED', hint: 'Add any funds — demo funds count', short: 'add funds to go'},
   {key: 'paymentTested', label: 'FIRST\nPAYMENT', hint: 'Complete a payment — pay or receive', short: 'one payment to go'},
 ];
@@ -83,9 +83,15 @@ export function decideFundsReady(balances: Record<string, BalanceView>): boolean
 }
 
 /** Award `paymentTested` — call at every CONFIRMED payment success (either direction, either
-  * rail). No-op when already stamped (the check reads the passed journey, and awardStamp itself
-  * is idempotent). NEVER call on pending/unknown outcomes — confirmed only. */
+ * rail). No-op when already stamped (the check reads the passed journey, and awardStamp itself
+ * is idempotent). NEVER call on pending/unknown outcomes — confirmed only.
+ *
+ * A confirmed real payment ALSO awards `flowUnderstood`: a payment the user just made IS the
+ * flow, demonstrated live (founder rule 2026-08-23: every trip-prep check auto-detects — the
+ * first-run rehearsal is unreachable for wallets created before it existed, so without this
+ * co-award SAW THE FLOW would be a permanent dead end for them). */
 export function awardPaymentTested(journey: Journey): void {
   if (hasStamp(journey, JOURNEY_STAMPS.paymentTested)) return;
   void awardStamp(JOURNEY_STAMPS.paymentTested);
+  if (!hasStamp(journey, JOURNEY_STAMPS.flowUnderstood)) void awardStamp(JOURNEY_STAMPS.flowUnderstood);
 }

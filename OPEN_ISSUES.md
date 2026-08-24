@@ -10,6 +10,16 @@
 
 ## NEXT SESSION — work order
 
+### DOCUMENTED (2026-08-23, device-truth UX pass): SOL glyph ◎ relies on system font fallback
+
+`◎` (U+25CE, the SOL asset glyph in `AssetGlyph.tsx`) is — like the retired `Ξ` — absent from
+every bundled font (`space_grotesk_*`, `plex_mono_500`; fontTools cmap-verified). Unlike `Ξ`
+(which MIUI rendered as hamburger bars and was replaced by the in-font `◊` diamond for ETH), `◎`
+currently renders acceptably on MIUI/Android via system fallback. If a device ever shows a
+fallback artifact for SOL, replace it with an in-font covered glyph (fontTools census: of the
+candidate circles only `○`/`●`-family basics are covered; `Δ Ω` are grotesk-only). Low priority
+— visual-only, no money path.
+
 > **THE switch: IC rail → user-principal (set 2026-08-18, founder-ordered).** W1–W7 ARE
 > COMMITTED (2026-08-19/20, on top of PoC `288c14d`): `74d3587` W1 rail client, `04bb2b4` W2
 > payer flows, `80a2415` W3 merchant flows, `6bc026e` W4 deposits, `70c72ca` fake-IC gateway +
@@ -441,6 +451,78 @@ if a native-ETH withdrawal ever fails on prod with a minter reject mentioning
 > ZERO tests on this physical MIUI device — Play Protect + MIUI `AdbInstallActivity` dialogs
 > silently block the UTP test-APK install (gradle reports SUCCESS with `tests=0`); that gate stays
 > emulator-only in practice. The REAL radio-hop validation is the founder two-phone live tap.
+
+## Session summary (2026-08-23, round 3): ONE-PRESS payment (auto-sign after Pay Now) + dpay-circle drop — COMPLETE (uncommitted)
+
+> **Founder directive:** "too many confirmation buttons… Pay now stays, Confirm payment to <name>
+> drops, Paid (Done) stays; drop the orange DPAY circle." Implemented: the Pay Now gate is the
+> single deliberate press; scan/tap auto-signs (QR: read-only Signing status + honest no-sign
+> blocks; NFC: awaitingApproval→exchanging auto-sign, fail-closed decline stays). Deeplink entry
+> keeps its one review+Approve (zero-press entries never auto-sign). TapSuccessStamp +
+> OfflinePeak's 118px circle deleted (campaign line + settled remnant kept). jest 58 suites
+> **1010/1010** · e2e **89/89** (baselines 40/84 reseeded) · typecheck/check PASS ·
+> `ANDROID_SERIAL=emulator-5554 just app` both self-checks PASS · Pay tab device-verified showing
+> the single "Pay Now" gate. Also this round: AppModal pads StatusBar.currentHeight on Android
+> (Modal windows don't inherit root insets — the passport/walkthrough close X sat under the
+> status bar). Physical Poco still offline; device proof = emulator + e2e.
+
+## Session summary (2026-08-23, round 2): trip-prep AUTO-DETECTION + retire-on-complete + "Pay Now" — COMPLETE (uncommitted)
+
+> **Founder rule implemented:** every trip-prep check auto-detects the user DOING the thing, and
+> the home strip disappears the moment readiness completes. (a) Copying the backup words/seed in
+> Settings now awards `recoverySaved` (`copySeed`/`copyMnemonic` in `SettingsSheet.tsx`) — the
+> copy IS the backup. (b) `awardPaymentTested` co-awards `flowUnderstood` (a confirmed payment IS
+> the flow demonstrated; rehearsal was a dead end for pre-arc wallets). (c) `TripStrip` retires on
+> `readiness.complete` alone (no manual Done-press gate; `PASSPORT_COLLAPSED_KEY` still governs
+> the archive page's Done display). (d) Scan-gate CTA renamed **"Pay Now"** (testIDs
+> `btn-start-scan`/`btn-sol-start-scan` unchanged). (e) Fixed a REAL race this exposed:
+> `journey.ts` writes now serialize through a module-level `writeQueue` (`enqueueWrite`) —
+> back-to-back `awardStamp`s used to load-merge-persist off the same stale state and erase each
+> other. Hints updated ("Copy your backup words in Settings"; flowUnderstood "…or make any
+> payment"); PASSPORT_STAMPS pin updates in tests; e2e 94 rerouted (strip vanishes on the 4th
+> stamp → `waitGone('trip-strip')`, archive reached via Settings).
+>
+> **Gates:** `just typecheck` PASS · jest 58 suites **1017/1017** · `just e2e` **89/89 GREEN**
+> (baselines 40/84 reseeded for the "Pay Now" CTA) · `ANDROID_SERIAL=emulator-5554 just app`
+> DPAY_SELFCHECK PASS. **Device-verified:** Copy words → strip dot fills live + text advances
+> ("BACK UP TO GO" → "SEE HOW IT WORKS TO GO") + passport "2 OF 4" with BACKED UP/AUG 23 stamped;
+> Pay tab shows "Pay Now" with no camera before the press. NOTE: the physical Poco (9cdf67b8)
+> dropped off USB mid-round — this round's device proof is the emulator; re-verify on the Poco
+> when it reconnects (copy→stamp, strip retirement at 4/4 needs a counterparty payment — covered
+> by e2e 94 on the fake-IC rail).
+
+## Session summary (2026-08-23): device-truth UX pass — NFC one-click Approve, scan intent gate, ◊ glyph, affordance fixes — COMPLETE (uncommitted)
+
+> **Context:** founder flagged that prior sessions confirmed "UI is perfect" from BROWSER
+> screenshots while the ANDROID app was the actual surface; a physical-device audit (Poco X3
+> `9cdf67b8`, uiautomator bounds + screencap pixel analysis + adversarial zai-vision rounds) is
+> ground truth. Work was done in three sub-swarms (UX-expert review, NFC approval spec,
+> implementation) on top of HEAD `363522a`, all uncommitted at close.
+>
+> **One-button-before-pay now holds on BOTH rails:** NFC gained an explicit review step
+> (`useNfcTapState` `'review'` phase) — the parked request renders amount/payee/memo/countdown
+> with equal-width Approve/Decline before `approveCard`/`approveSolCard` signs; QR already had
+> `btn-approve`. Scan itself is intent-gated: Pay/SolPay render `btn-start-scan` /
+> `btn-sol-start-scan` ("nothing scans before you ask") — camera + NFC arm only after the press.
+> SOL reader PAYMENT_WAIT 8→30 s; SOL decline now honest SW 0x6985; `toName`/`memo` threaded
+> through the FFI event; fail-closed unsupported-asset auto-decline preserved.
+>
+> **Device-verified visual fixes:** Ξ→◊ ETH diamond glyph (U+039E in no bundled font — MIUI drew
+> hamburger bars; verified via ASCII-pixel discrimination on-device); TripStrip solid brand dots +
+> ink text + trailing arrow; passport NEXT is a real bordered ghost button that opens Settings at
+> the next step; Settings LEARN live `n/4` counter with Trip-readiness first; dark-mode amount
+> placeholders C.sub2→C.sub; CoachTip dismiss hitSlop; Walkthrough Back 44dp; `amountBig` 26→30
+> on all four QR-phase amount lines. ◎ (SOL) documented above as fallback-reliant (open, low).
+>
+> **Gates at close:** `just typecheck` PASS · jest 58 suites **1016/1016** · `just check` PASS
+> (aid-parity 4/4, wasm parity 131 checks) · `just e2e` **89/89 GREEN** (92 flaked once, green on
+> rerun + full suite ×2; visual baselines reseeded for the intentional CTA/amount/glyph changes)
+> · `ANDROID_SERIAL=9cdf67b8 just app` DPAY_SELFCHECK + DPAY_SOL_SELFCHECK PASS · `just
+> ondevice` 10/10 (emulator) · `just campreview` GREEN both rails (demo 79.3/200.1, sol
+> 80.5/195.1; scan-gate press wired into the script). Prod still BEHIND this work — founder
+> ships (`just deploy-ic && just apk && just up`); the NFC approve + scan-gate changes touch
+> `app/android/**` + `app/services/**` trigger paths, so the device gates above were run, not
+> skipped.
 
 ## Session summary (2026-08-22/23): Trip Ready delight arc — onboarding, coaching, motion, passport — COMPLETE
 

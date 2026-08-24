@@ -31,8 +31,12 @@ object DpaySolNfc {
     // Variable-length URI chunking. A solpay: URI can run ~600 bytes (base64url tx); the protocol
     // streams it in MAX_CHUNK frames with a continuation bit, reassembled on the other side.
     private const val MAX_CHUNK = 240
-    // How long the reader holds the field waiting for JS to broadcast + confirm the payer's solpay.
-    private const val PAYMENT_WAIT_SECS = 8L
+    // How long the reader holds the field waiting for the payer's APPROVE click + the JS offline
+    // sign (approve-before-pay: the request parks on a review card until the payer clicks; the
+    // card answers SW_WRONG_STATE while they decide). 30s still fits INSIDE the request's frozen
+    // 90s blockhash window (SOL_PAYMENT_MAX_WINDOW_SECONDS — sign against an older-valid window
+    // and the tx is unlandable), with headroom for one re-tap.
+    private const val PAYMENT_WAIT_SECS = 30L
     // How long the reader holds the field waiting for JS to stamp + offer the receipt back.
     private const val RECEIPT_CONFIRM_WAIT_SECS = 12L
     // How long the SOL reader holds the field and retries while the tapped dpay card isn't answering
@@ -57,6 +61,10 @@ object DpaySolNfc {
     private val SW_NOT_READY = byteArrayOf(0x62, 0x10)
     private val SW_WRONG_STATE = byteArrayOf(0x69, 0x86.toByte())
     private val SW_WRONG_LENGTH = byteArrayOf(0x67, 0x00)
+    // Terminal decline (same status word the IC rail uses): the payer pressed Decline on the
+    // review card. Distinct from SW_WRONG_STATE ("still deciding") so the reader can stop polling
+    // immediately instead of burning its whole wait window.
+    private val SW_DECLINED = byteArrayOf(0x69, 0x85.toByte())
     private val SELECT_HEADER = byteArrayOf(0x00, 0xA4.toByte(), 0x04, 0x00)
 
     private enum class CardPhase { IDLE, LINKING, AWAITING_PAYMENT, EXCHANGING, SETTLING, SUCCESS, DECLINED, PENDING }
@@ -238,7 +246,9 @@ object DpaySolNfc {
                     requestBuffer.setLength(0)
                     cardPhase = CardPhase.AWAITING_PAYMENT
                     emitRequest(uri)
-                    phaseEvent("card", "exchanging")
+                    // The truthful card state while the payer reviews (JS parks the tap in
+                    // 'review'; the old "exchanging" described auto-signing, which is gone).
+                    phaseEvent("card", "awaitingApproval")
                 }
             }
             TAG_RECEIPT -> {
@@ -273,6 +283,10 @@ object DpaySolNfc {
 
     private fun handleGet(tag: Byte): ByteArray {
         if (tag != TAG_PAYMENT) return SW_WRONG_STATE
+        // The payer DECLINED on the review card — answer with the terminal status word so the
+        // reader stops polling NOW instead of burning its whole PAYMENT_WAIT_SECS window and then
+        // misreporting a generic failure.
+        if (cardPhase == CardPhase.DECLINED) return SW_DECLINED
         // No signed solpay ready yet — peek for a fast JS sign that raced ahead, else the reader
         // backs off and retries (SW_WRONG_STATE). Once JS offers the URI it is cached in solpayUri.
         if (solpayUri == null) {
@@ -462,6 +476,11 @@ object DpaySolNfc {
             chunkPut(isoDep, TAG_RECEIPT, receipt)
             emitConfirmed()
             phaseEvent("reader", "success")
+        } catch (e: DeclinedByPayer) {
+            // The payer pressed Decline on the review card — the terminal, fast decline (the card
+            // answered 0x6985; no window burned).
+            android.util.Log.i("dpay", "sol onTag: payer declined")
+            phaseEvent("reader", "declined")
         } catch (e: TagLostException) {
             // The field broke — expected during a physical approach. Before the payment is in hand
             // this is pure physics: back to listening (reader mode stays enabled; the next coupling
@@ -524,12 +543,16 @@ object DpaySolNfc {
             val resp = isoDep.transceive(byteArrayOf(0x00, INS_GET, tag, 0x00))
             if (resp.size < 1) throw TagLostException("empty get response")
             if (resp.size == 2) {
-                // A bare status word — SW_WRONG_STATE = the payer is still signing; retry.
+                // A bare status word — SW_WRONG_STATE = the payer is still reviewing/signing; retry.
                 if (resp[0] == SW_WRONG_STATE[0] && resp[1] == SW_WRONG_STATE[1]) {
                     if (++attempts > maxAttempts) return null // the payer didn't sign in time
                     Thread.sleep(120)
                     continue
                 }
+                // SW_DECLINED = the payer pressed Decline on the review card — terminal. Surfaced
+                // as an immediate reader decline (a phase, not a burned-window error) via the
+                // sentinel below; IC-rail parity (ReaderStep.Declined on 0x6985).
+                if (resp[0] == SW_DECLINED[0] && resp[1] == SW_DECLINED[1]) throw DeclinedByPayer()
                 throw TagLostException("get failed")
             }
             val more = resp[0].toInt() and 0xff
@@ -538,4 +561,8 @@ object DpaySolNfc {
             if (more == 0) return sb.toString()
         }
     }
+
+    /** Sentinel: the card answered SW_DECLINED (the payer pressed Decline). Not an error — the
+     *  reader's terminal decline path. */
+    private class DeclinedByPayer : Exception()
 }

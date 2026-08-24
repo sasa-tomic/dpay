@@ -92,10 +92,7 @@ function buildStyles(p: Palette) {
   // the title; static SVG geometry, only opacities animate.
   nfcLineRow: {flexDirection: 'row', alignItems: 'center', marginTop: 20, marginBottom: 4, height: 34},
   nfcLineTrack: {flex: 1, height: 2, borderRadius: 1, backgroundColor: p.line},
-  // The success stamp mark — a tangerine passport-stamp ring pressed behind the badge. The
-  // stampChip grammar (border brand, tilt −3°) scaled up to the badge's footprint.
-  nfcStamp: {position: 'absolute', width: 148, height: 148, borderRadius: 74, borderWidth: 2.5, borderColor: p.brand, alignItems: 'center', justifyContent: 'center'},
-  // The pending stillness: an unhurried ellipsis pulse (the OPPOSITE of the success stamp —
+  // The pending stillness: an unhurried ellipsis pulse (the OPPOSITE of a success mark —
   // warn tone, no rotation, no scale press, deliberately slow).
   nfcEllipsis: {flexDirection: 'row', gap: 7, marginTop: 20, alignItems: 'center'},
   nfcEllipsisDot: {width: 6, height: 6, borderRadius: 3, backgroundColor: p.warn},
@@ -104,12 +101,10 @@ function buildStyles(p: Palette) {
   paidStamp: {marginTop: 18, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 999, borderWidth: 1.5, borderColor: p.brand, backgroundColor: 'transparent'},
   paidStampText: {color: p.brand, fontFamily: FONT.mono, fontSize: 12, fontWeight: '600', letterSpacing: 2.4, textTransform: 'uppercase'},
   // ── The one-shot offline peak (J5) ───────────────────────────────────────────────────────
-  // Full-width moment ABOVE the paid card: the campaign line as a strong editorial line, the
-  // stamp press, and the "no signal the whole time" microcopy. Settles INTO the card (~2s).
+  // Full-width moment ABOVE the paid card: the campaign line as a strong editorial line and
+  // the "no signal the whole time" microcopy. Settles INTO the card (~2s).
   peakWrap: {alignSelf: 'stretch', alignItems: 'center', marginBottom: 18},
   peakCampaign: {fontSize: 24, fontWeight: '700', color: p.ink, textAlign: 'center', fontFamily: FONT.sansBold, letterSpacing: -0.3, marginBottom: 12},
-  peakStamp: {width: 118, height: 118, borderRadius: 59, borderWidth: 2.5, borderColor: p.brand, alignItems: 'center', justifyContent: 'center'},
-  peakStampText: {color: p.brand, fontFamily: FONT.mono, fontSize: 13, fontWeight: '600', letterSpacing: 2.2, textTransform: 'uppercase'},
   peakMicro: {fontSize: 14, color: p.sub, marginTop: 12, textAlign: 'center', fontFamily: FONT.sans},
   // The settled remnant: the quiet mono line that stays on the paid card after the peak
   // settles — the durable "this was the first offline one" mark (e2e testID `first-offline-stamp`).
@@ -127,18 +122,21 @@ function buildStyles(p: Palette) {
   passportGrid: {flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginTop: 18, rowGap: 14},
   passportSlot: {width: 88, height: 88, borderRadius: 44, borderWidth: 1.5, borderColor: p.line2, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5},
   passportSlotFilled: {width: 88, height: 88, borderRadius: 44, borderWidth: 2, borderColor: p.brand, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5},
-  passportSlotText: {color: p.sub2, fontFamily: FONT.mono, fontSize: 9, fontWeight: '600', letterSpacing: 0.8, textTransform: 'uppercase', textAlign: 'center', lineHeight: 12},
+  passportSlotText: {color: p.sub, fontFamily: FONT.mono, fontSize: 9, fontWeight: '600', letterSpacing: 0.8, textTransform: 'uppercase', textAlign: 'center', lineHeight: 12},
   passportSlotTextFilled: {color: p.brand, fontFamily: FONT.mono, fontSize: 9, fontWeight: '600', letterSpacing: 0.8, textTransform: 'uppercase', textAlign: 'center', lineHeight: 12},
-  // The ONE contextual next-step line (incomplete only): a quiet "NEXT" tag + active-voice
-  // sans hint. Non-interactive by design — the passport never invents navigation.
-  passportHint: {marginTop: 18, flexDirection: 'row', alignItems: 'baseline', gap: 8},
-  passportHintTag: {color: p.sub2, fontFamily: FONT.mono, fontSize: 10, fontWeight: '600', letterSpacing: 1.6, textTransform: 'uppercase'},
-  passportHintText: {flexShrink: 1, fontSize: 13, color: p.sub, fontFamily: FONT.sans},
+  // The ONE contextual next-step row (incomplete only): a quiet "NEXT" tag + active-voice
+  // sans hint + an up-right arrow, wrapped as a full-width ghost button (UX 2026-08-23: the
+  // plain-text row read as dead text — it now takes you to the step's home instead of
+  // describing where to go). Brand tag = the stamp-tag language; remains quiet chrome.
+  passportHint: {flexDirection: 'row', alignItems: 'center', gap: 10, alignSelf: 'stretch', justifyContent: 'flex-start'},
+  passportHintTag: {color: p.brand, fontFamily: FONT.mono, fontSize: 10, fontWeight: '600', letterSpacing: 1.6, textTransform: 'uppercase'},
+  passportHintText: {flexShrink: 1, fontSize: 13, color: p.sub, fontFamily: FONT.sans, textAlign: 'left'},
+  passportHintArrow: {marginLeft: 'auto', flexShrink: 0},
   // The completed card's durable mark: the stampChip grammar ("TRIP READY") + the promise
   // line. Quiet ink, no counters — the capstone moment above is the ONLY loud beat.
   passportReadyWrap: {marginTop: 16, alignItems: 'center'},
   passportReadyLine: {fontSize: 13, color: p.sub, textAlign: 'center', marginTop: 10, fontFamily: FONT.sans},
-  // The capstone overlay: the full-card TRIP READY stamp press (~1s) — the peakStamp grammar
+  // The capstone overlay: the full-card TRIP READY stamp press (~1s) — the stamp-ring grammar
   // (118 ring, spring + tilt) pressed across the finished page, then it lifts to reveal the
   // static completed card + Done. UX hardening 2026-08-23 (M3): the overlay INVERTS to ink —
   // the one full-bleed dark beat of the wallet (matches the RECOVERY SAVED ink beat) — with
@@ -147,7 +145,7 @@ function buildStyles(p: Palette) {
   passportCapstoneInk: {position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 18, backgroundColor: p.ink, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18},
   passportCapStamps: {alignItems: 'center', gap: 4, marginBottom: 18},
   passportCapStampText: {color: p.bg, fontFamily: FONT.mono, fontSize: 10, fontWeight: '600', letterSpacing: 1.6, textTransform: 'uppercase', textAlign: 'center', lineHeight: 13},
-  passportSlotDate: {color: p.sub, fontFamily: FONT.mono, fontSize: 8, letterSpacing: 1, marginTop: 3, textTransform: 'uppercase', textAlign: 'center'},
+  passportSlotDate: {color: p.sub, fontFamily: FONT.mono, fontSize: 9, letterSpacing: 1, marginTop: 3, textTransform: 'uppercase', textAlign: 'center'},
   passportCapstoneText: {color: p.brand, fontFamily: FONT.mono, fontSize: 15, fontWeight: '600', letterSpacing: 2.2, textTransform: 'uppercase', textAlign: 'center', lineHeight: 20},
   passportCapstoneMicro: {fontSize: 13, color: p.bg, marginTop: 14, textAlign: 'center', fontFamily: FONT.sans, opacity: 0.85},
   balBox: {alignItems: 'flex-end'},
@@ -174,8 +172,9 @@ function buildStyles(p: Palette) {
   tripStrip: {flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 12, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, backgroundColor: p.panel2, borderWidth: 1, borderColor: p.line},
   tripStripDots: {flexDirection: 'row', gap: 6, alignItems: 'center'},
   tripStripDot: {width: 10, height: 10, borderRadius: 5, borderWidth: 1.5, borderColor: p.line2},
-  tripStripDotFilled: {borderColor: p.brand, backgroundColor: 'transparent'},
-  tripStripText: {fontFamily: FONT.mono, fontSize: 11, fontWeight: '600', letterSpacing: 1.2, textTransform: 'uppercase', color: p.sub, flexShrink: 1},
+  tripStripDotFilled: {borderColor: p.brand, backgroundColor: p.brand},
+  tripStripText: {fontFamily: FONT.mono, fontSize: 11, fontWeight: '600', letterSpacing: 1.2, textTransform: 'uppercase', color: p.ink, flexShrink: 1},
+  tripStripArrow: {marginLeft: 'auto', flexShrink: 0},
   tab: {flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 999, backgroundColor: p.card, minHeight: 44, borderWidth: 1, borderColor: p.line2},
   tabActive: {backgroundColor: p.brand, borderColor: p.brand, ...LIFT},
   tabText: {color: p.sub, fontWeight: '600', fontFamily: FONT.sansMedium},
@@ -234,7 +233,7 @@ function buildStyles(p: Palette) {
   primaryWide: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: p.brand, borderRadius: 16, height: 56, alignSelf: 'stretch', marginTop: 14, shadowColor: p.brand2, shadowOpacity: 0.28, shadowRadius: 14, shadowOffset: {width: 0, height: 6}, elevation: 4},
   primaryText: {color: p.brandInk, fontSize: 18, fontWeight: '700', fontFamily: FONT.sansBold},
   qrCard: {backgroundColor: '#ffffff', padding: 20, borderRadius: 20, borderWidth: 1, borderColor: p.line2, marginBottom: 14, ...LIFT},
-  amountBig: {fontSize: 26, fontWeight: '700', color: p.ink, textAlign: 'center', fontFamily: FONT.sansBold, letterSpacing: -0.4},
+  amountBig: {fontSize: 30, fontWeight: '700', color: p.ink, textAlign: 'center', fontFamily: FONT.sansBold, letterSpacing: -0.5},
   badgeOk: {marginTop: 10, fontSize: 13, fontWeight: '600', color: p.ok, backgroundColor: 'rgba(14,159,110,0.10)', paddingVertical: 6, paddingHorizontal: 14, borderRadius: 999, overflow: 'hidden', fontFamily: FONT.sansMedium},
   qrHint: {marginTop: 12, fontSize: 13, color: p.sub, textAlign: 'center', fontFamily: FONT.sans},
   // Request-QR validity countdown (the signed request expires after EXPIRY_WINDOW; a stale QR scans
@@ -437,6 +436,10 @@ function buildStyles(p: Palette) {
   // when tap-to-pay is ready, red with a tappable "NFC not available" link + reason popup otherwise.
   nfcStatusRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 14},
   nfcStatusLabel: {fontSize: 18, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold},
+  // NFC review countdown chip (approve-before-pay, 2026-08-23): advisory only — the payer's
+  // clock is offline/untrusted, so it never promises validity; sign-time gates are authoritative.
+  nfcCountdownChip: {flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'center', marginTop: 10, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, borderWidth: 1, borderColor: p.line2, backgroundColor: p.panel2},
+  nfcCountdownText: {fontFamily: FONT.mono, fontSize: 11, fontWeight: '600', letterSpacing: 1, color: p.sub, textTransform: 'uppercase'},
   // Receive QR hint — a small NFC mark leading the "or let them tap" label when the reader is armed.
   nfcHintRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 10},
   nfcHintLabel: {fontSize: 15, color: p.sub, textAlign: 'center', fontFamily: FONT.sans},

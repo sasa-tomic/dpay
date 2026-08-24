@@ -7,7 +7,9 @@
 //                  `finalize('error', reason)` — but ONLY if no outcome is committed yet (a transport
 //                  error after the wire left the phone says nothing about whether the ledger settled;
 //                  the hook deliberately does NOT overwrite a decided outcome with a false failure).
-//   - `declined` : the payer (card side) declined the tap.
+//   - `declined` : a fail-closed leg auto-declined the tap (one-press rule, founder directive
+//                  2026-08-24: no review card exists anymore — an UNSUPPORTED asset or an EXPIRED
+//                  request declines itself at validation/sign time, before any envelope builds).
 //
 // This flow drives the REAL NfcTap state machine (via the same `__DPAY_TEST_NFC_SESSION` seam flow
 // 11 uses) through `error` and `declined`, asserting for each:
@@ -23,14 +25,14 @@
 //
 // Selector contract: `nfc-status` (the NfcTapView surface), `balance` (unchanged), the Done link
 // (aria-label="Done" — terminal-phase Cancel flips its label).
-import {setup, assert, onboardWallet} from '../harness/lib.mjs';
+import {setup, assert, onboardWallet, armNfcCard} from '../harness/lib.mjs';
 
 export const meta = {
   id: '60',
   name: 'nfc-error',
   journey: 'nfc',
-  covers: ['nfc-error', 'nfc-declined', 'nfc-phases', 'error-handling', 'no-fake-paid', 'terminal-escape'],
-  verifies: 'NFC tap failure modes: a mid-tap transport error surfaces honest "Tap failed" (not Paid ✓); a decline surfaces "Declined"; a late error after settling is ignored (no false failure over a decided outcome).',
+  covers: ['nfc-error', 'nfc-declined', 'nfc-phases', 'error-handling', 'no-fake-paid', 'terminal-escape', 'fail-closed'],
+  verifies: 'NFC tap failure modes: a mid-tap transport error surfaces honest "Tap failed" (not Paid ✓); an unsupported-asset request auto-declines "Declined" + honest reason (fail-closed, no sign); a late error after settling is ignored (no false failure over a decided outcome).',
   timeoutMs: 20000,
 };
 
@@ -50,7 +52,7 @@ export async function run() {
     await driver.findByTestID('pay-scan', {timeoutMs: 5_000});
 
     // Helper: dispatch one NFC event through the seam (role='card' = the payer being tapped).
-    const dispatch = (event) => driver.eval((e) => window.__DPAY_TEST_NFC_SESSION(e), event);
+    const dispatch = async (event) => { await armNfcCard(driver, 'ic'); return driver.eval((e) => window.__DPAY_TEST_NFC_SESSION(e), event); };
     // Escape a terminal/non-terminal NfcTapView: the button flips its label to "Done" on a terminal
     // phase (success/declined/error/pending) and stays "Cancel" mid-flow (settling). Try both.
     const clickNfcButton = () => driver.eval(() => {
@@ -80,18 +82,27 @@ export async function run() {
     assert((await clickNfcButton()) === 'Done', 'the Done button should be reachable after a terminal error');
     await driver.waitGone('nfc-status', {timeoutMs: 5_000});
 
-    // --- 2. DECLINED (the payer declined the tap): honest "Declined", no fake Paid. -------------
-    console.log('[60-nfc-error] case 2: declined tap (linking → declined)…');
+    // --- 2. FAIL-CLOSED AUTO-DECLINE (unsupported asset — no review card to decline from). ------
+    // A request carrying currency 99 (not in the catalog) auto-declines at validation: declineCard
+    // fires + terminal "Declined" + "Unsupported asset (currency 99)". No sign ever fires (no wire).
+    console.log('[60-nfc-error] case 2: unsupported-asset request auto-declines (fail-closed)…');
     await dispatch({type: 'phase', role: 'card', phase: 'linking'});
     await driver.findByTestID('nfc-status', {timeoutMs: 4_000});
-    await dispatch({type: 'phase', role: 'card', phase: 'declined'});
+    await dispatch({
+      type: 'request', role: 'card',
+      toHex: '11'.repeat(32), amount: '5000', nonceHex: 'cd'.repeat(16),
+      expiry: Math.floor(Date.now() / 1000) + 240, currency: 99,
+    });
     const declTitle = await driver.waitForText('Declined', {timeoutMs: 5_000});
-    assert(declTitle, 'a declined tap should surface the honest "Declined" status');
+    assert(declTitle, 'an unsupported-asset request should auto-decline to the honest "Declined" status');
     const declBody = await driver.bodyText();
+    assert(declBody.includes('Unsupported asset (currency 99)'), `the fail-closed reason should render. body excerpt:\n${declBody.slice(0, 400)}`);
     assert(!/\bPaid\b/.test(declBody), 'a declined tap must NEVER show "Paid ✓"');
+    const wire = await driver.eval(() => window.__DPAY_TEST_NFC_APPROVED_WIRE);
+    assert(wire == null, 'no wire may exist for a fail-closed decline (nothing signed)');
     const balAfterDecl = await driver.readText('balance');
     assert(balAfterDecl.includes('∂100.00'), `balance must be unchanged after a declined tap, got "${balAfterDecl}"`);
-    console.log('[60-nfc-error] ✓ declined → "Declined", no debit, no fake Paid');
+    console.log('[60-nfc-error] ✓ auto-decline → "Declined" + "Unsupported asset (currency 99)", no wire, no debit, no fake Paid');
     assert((await clickNfcButton()) === 'Done', 'the Done button should be reachable after a decline');
     await driver.waitGone('nfc-status', {timeoutMs: 5_000});
 

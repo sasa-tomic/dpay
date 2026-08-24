@@ -17,8 +17,8 @@
 // the URI scheme a merchant opens via flow 50's verify path. The sharedAction flip also drives the
 // in-DOM 'Link copied ✓' feedback label (asserted below).
 //
-// Selector contract: `pay-amount`, `btn-approve`, `btn-share-receipt`.
-import { setup, assert, onboardWallet } from '../harness/lib.mjs';
+// Selector contract: `pay-amount` (transient sign status), `btn-share-receipt`.
+import { setup, assert, onboardWallet , armPayScan} from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
 const PAY_CENTS = 2500; // ∂25.00 (DEMO_USD = currency 0, the wallet asset)
@@ -56,20 +56,16 @@ export async function run() {
     const expiry = Math.floor(Date.now() / 1000) + 600;
     const requestQR = buildRequestQR(bob.publicHex, PAY_CENTS, nonce, expiry, 0, MERCHANT_NAME);
 
-    // --- A scans B's request via the camera seam → review screen. ---------------------------
-    console.log('[59-share-receipt] injecting B’s request QR via the camera seam…');
+    // --- A scans B's request via the camera seam → AUTO-SIGN (one-press rule, 2026-08-24). ----
+    console.log('[59-share-receipt] injecting B’s request QR via the camera seam (auto-sign)…');
+    await armPayScan(driver); // pay-intent gate: arm the scan surface (no-op when already armed)
     await driver.eval((qr) => { if (typeof window.__DPAY_TEST_SCAN === 'function') window.__DPAY_TEST_SCAN(qr); }, requestQR);
-    await driver.findByTestID('pay-amount', { timeoutMs: 5_000 });
-    const payAmt = await driver.readText('pay-amount');
-    assert(payAmt.includes('∂25.00'), `review should show "Pay ∂25.00", got "${payAmt}"`);
 
-    // --- Approve → online settle (relay reachable) → "Paid" with a fresh receipt. ------------
+    // --- Auto-sign → online settle (relay reachable) → "Paid" with a fresh receipt. ----------
     // The online path sets paid.receipt (only on a fresh, non-replayed settle), which gates the
     // btn-share-receipt render. A button NOT rendering here would mean the receipt capture broke.
-    console.log('[59-share-receipt] clicking btn-approve (sign + pay)…');
-    await driver.click('btn-approve', { timeoutMs: 5_000 });
     const paid = await driver.waitForText('Paid', { timeoutMs: 10_000 });
-    assert(paid, 'payer should reach the Paid screen after the relay settles');
+    assert(paid, 'payer should reach the Paid screen straight from the scan (auto-sign → relay settle)');
 
     // --- btn-share-receipt renders ONLY because paid.receipt was captured on the online settle. -
     await driver.findByTestID('btn-share-receipt', { timeoutMs: 5_000 });

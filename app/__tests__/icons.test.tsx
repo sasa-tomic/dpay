@@ -70,9 +70,9 @@ describe('glyphFor', () => {
   test('DEMO maps to the brand-tangerine ∂ chip', () => {
     expect(glyphFor(ASSETS[0])).toEqual({glyph: '∂', color: '#D8450D', bg: 'rgba(255,90,31,0.10)'});
   });
-  test('ckBTC → ₿ amber, ckETH → Ξ indigo, ckUSDC → $ blue', () => {
+  test('ckBTC → ₿ amber, ckETH → ◊ indigo, ckUSDC → $ blue', () => {
     expect(glyphFor(ASSETS[1]).glyph).toBe('₿');
-    expect(glyphFor(ASSETS[2]).glyph).toBe('Ξ');
+    expect(glyphFor(ASSETS[2]).glyph).toBe('◊');
     expect(glyphFor(ASSETS[3]).glyph).toBe('$');
   });
   test('SOL → ◎ purple, SOL-USDC → $ blue (token drives the family, not protocol alone)', () => {

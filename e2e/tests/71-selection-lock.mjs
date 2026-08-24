@@ -6,7 +6,9 @@
 // selection changes for the duration of the in-flight op: the header Balances button goes disabled
 // (testID `balance` carries accessibilityState.disabled + Pressable.disabled), and handleSelect bails.
 //
-// This flow enters a PayMode review via the camera scan seam (`__DPAY_TEST_SCAN`), then asserts the
+// This flow enters the PayMode sign-blocked surface (an ONLINE insufficient request — the
+// auto-sign refuses to fire, so the read-only review stands) via the camera scan seam
+// (`__DPAY_TEST_SCAN`), then asserts the
 // lock from both angles:
 //   1. assertDisabled('balance') — the button reports a disabled state.
 //   2. tapping it anyway is a no-op — the Balances sheet (btn-balances-close) does NOT open and the
@@ -14,11 +16,13 @@
 // Canceling the review (btn-review-cancel) returns to scan, releases the lock, and the Balances
 // button is re-enabled + opens normally. The decoded request is immutable either way (this is a
 // UX/state-preservation + NFC-arming lock, not a money-correctness fix — the plan is explicit).
+// (One-press rule 2026-08-24: a PAYABLE scan would auto-sign straight through review→qr/paid, so
+// this flow pins the lock on the blocked-insufficient leg — a stable review surface.)
 //
 // Selector contract: `pay-scan` (scan surface present before the seam fires), `pay-amount` (review),
 // `balance` (header → Balances, disabled while locked), `btn-balances-close` (sheet-open gate),
 // `btn-review-cancel` (review → scan, releases the lock).
-import { setup, assert, assertIncludes, assertDisabled, waitForEnabled, openBalances, onboardWallet } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, assertDisabled, waitForEnabled, openBalances, onboardWallet , armPayScan} from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout) and
@@ -33,7 +37,9 @@ export const meta = {
   timeoutMs: 20000,
 };
 
-const PAY_CENTS = 2500; // ∂25.00 DEMO (currency 0).
+const PAY_CENTS = 20000; // ∂200.00 DEMO — OVER the ∂100 balance: online+insufficient blocks the
+// auto-sign (C2), parking the read-only review this flow needs (a payable ∂25 would settle
+// straight to `paid` before the lock asserts could run).
 
 export async function run() {
   const start = Date.now();
@@ -48,16 +54,18 @@ export async function run() {
     await driver.click('tab-pay', { timeoutMs: 5_000 });
     await driver.findByTestID('pay-scan', { timeoutMs: 5_000 });
 
-    // 2. Build a merchant request for ∂25.00 DEMO (currency 0) and deliver it via the camera scan
-    //    seam — the same path flow 27 uses. onRequestString decodes → setReq + setPhase('review').
+    // 2. Build a merchant request for ∂200.00 DEMO (currency 0) and deliver it via the camera scan
+    //    seam — the same path flow 27 uses. onRequestString decodes → setReq + setPhase('review')
+    //    and the auto-sign is BLOCKED (insufficient online balance → no sign, review stands).
     const bob = await generateKeypair();
     const reqQr = buildRequestQR(bob.publicHex, PAY_CENTS, randNonceHex(), Math.floor(Date.now() / 1000) + 600, 0, 'Bob');
+    await armPayScan(driver); // pay-intent gate: arm the scan surface (no-op when already armed)
     await driver.eval((qr) => { if (typeof window.__DPAY_TEST_SCAN === 'function') window.__DPAY_TEST_SCAN(qr); }, reqQr);
 
     // 3. Review is showing — pay-amount renders the locked amount; the selection is now LOCKED.
     await driver.findByTestID('pay-amount', { timeoutMs: 5_000 });
-    assertIncludes(await driver.readText('pay-amount'), '∂25.00', 'review shows the scanned amount (immutable snapshot)');
-    console.log('[71-selection-lock] ✓ entered PayMode review (∂25.00)');
+    assertIncludes(await driver.readText('pay-amount'), '∂200.00', 'review shows the scanned amount (immutable snapshot)');
+    console.log('[71-selection-lock] ✓ entered the blocked-insufficient PayMode review (∂200.00)');
 
     // 4. LOCKED (assertion 1): the header Balances button reports a disabled state.
     await assertDisabled(driver, 'balance', 'Balances button disabled while PayMode review is in flight');

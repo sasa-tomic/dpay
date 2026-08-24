@@ -12,7 +12,7 @@
 //         "50000.0" or a 2-decimal "500" mis-encoded at DEMO's precision). This is the MC1 exact-
 //         amount discipline applied at 6 decimals — and it distinguishes from DEMO's 2-dec space
 //         (a 2-dec path would render 50000 raw as ∂500.00, NOT 0.050000 USDC).
-//       * btn-approve is NOT disabled (the per-asset balance gate: 60_000 ≥ 50_000) → click lands
+//       * the per-asset balance gate (60_000 ≥ 50_000) lets the AUTO-SIGN through → Paid
 //         on Paid. A's app signs the icrc1_transfer with the catalog fee (10_000 raw) + submits it
 //         to the fake-IC gateway.
 //       * B's ckUSDC balance (currency 2) grew by exactly 50_000 raw units (correct ledger
@@ -28,9 +28,9 @@
 // 6-decimal precision.
 //
 // Selector contract: `balance` (header → Balances), `asset-ckusdc` (the USDC row),
-// `btn-balances-close`, `pay-amount`, `btn-approve`. Camera seam: `window.__DPAY_TEST_SCAN(qr)`.
+// `btn-balances-close`, `pay-amount` (transient sign status). Camera seam: `window.__DPAY_TEST_SCAN(qr)`.
 // Value seam: POST /api/v1/faucet {account, currency: 2, amount}.
-import { setup, assert, assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf, openBalances } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf, openBalances , armPayScan} from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR, decodeRequest } from '../harness/wire.mjs';
 
 const CKUSDC_CURRENCY = 2;
@@ -103,31 +103,20 @@ export async function run() {
 
     // --- A scans B's ckUSDC request via the camera seam. -----------------------------------------
     console.log('[31-ckusdc-pay] injecting B’s ckUSDC request via the camera seam…');
+    await armPayScan(driver); // pay-intent gate: arm the scan surface (no-op when already armed)
     await driver.eval((qr) => { if (typeof window.__DPAY_TEST_SCAN === 'function') window.__DPAY_TEST_SCAN(qr); }, requestQR);
 
-    // --- Review screen: locked-asset display (USDC units at 6 decimals) + merchant name. ----------
-    // The display is "Pay 0.050000 USDC" — driven by fmtCurrencyAmount(catalog, 2, "50000"):
-    //   decimals = display_decimals=6 from the descriptor; unit = backing_symbol="USDC".
-    //   fmtAsset("50000", 6, "USDC") = "0.050000 USDC" (zero-padded to 6 fractional places).
-    // NOT "$0.05" — fmtCurrencyAmount uses backing_symbol as the unit suffix, not currencySymbol's
-    // glyph. A 2-decimal (DEMO) mis-encode would render 50000 raw as ∂500.00 — the 6-dec display is
-    // the precision contract proof.
-    await driver.findByTestID('pay-amount', { timeoutMs: 5_000 });
-    const payAmt = await driver.readText('pay-amount');
-    assertIncludes(payAmt, EXPECTED_DISPLAY, `review should show "Pay ${EXPECTED_DISPLAY}" (locked-asset display at 6 decimals), got "${payAmt}"`);
-    assert(!/\$0\.05/.test(payAmt), `review must NOT show a "$0.05" amount for a ckUSDC request (fmtCurrencyAmount uses backing_symbol as the unit suffix), got "${payAmt}"`);
-    const reviewBody = await driver.bodyText();
-    assertIncludes(reviewBody, 'Bob', 'review should name the merchant (from the request bytes)');
-    console.log(`[31-ckusdc-pay] ✓ review: ${payAmt} (6-decimal USDC, no $0.05) · names Bob`);
+    // --- AUTO-SIGN → settle: the 6-decimal locked-asset display asserts ride the STABLE Paid
+    //     surface (the sign status flashes on a fast local settle; the paid headline uses the
+    //     same fmtCurrencyAmount, so "0.050000 USDC" / no-$0.05 still prove the precision
+    //     contract below).
 
-    // --- Approve is NOT disabled: the per-asset balance check (60_000 raw >= 50_000 raw) passes.
-    //     The click landing on Paid is the proof; a disabled button would time out. This is the
-    //     isPayableAsset gate (ITEM 2) passing for a known asset — currency 2 is CkEthErc20, a
-    //     payable family, so the review renders the sign button (not the fail-closed branch).
-    //     A's app signs the icrc1_transfer with the catalog fee (10_000 raw) — the gateway's fee
-    //     check passes and 50_000 lands at B's principal (the fee is charged to the sender).
-    console.log('[31-ckusdc-pay] clicking btn-approve (sign + settle on currency 2)…');
-    await driver.click('btn-approve', { timeoutMs: 5_000 });
+    // --- The per-asset balance check (60_000 raw >= 50_000 raw) let the auto-sign through —
+    //     reaching Paid straight from the scan is the proof. This is the isPayableAsset gate
+    //     (ITEM 2) passing for a known asset — currency 2 is CkEthErc20, a payable family, so the
+    //     sign fires (not the fail-closed branch). A's app signs the icrc1_transfer with the
+    //     catalog fee (10_000 raw) — the gateway's fee check passes and 50_000 lands at B's
+    //     principal (the fee is charged to the sender).
     const paid = await driver.waitForText('Paid', { timeoutMs: 10_000 });
     assert(paid, 'payer should reach Paid after settling the ckUSDC payment');
     // Paid text shows the exact ckUSDC amount + asset unit (the locked-asset display continues).

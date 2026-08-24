@@ -49,18 +49,18 @@ wire (1) · onboard (13) · pay (18) · offline (8) · deposit (8) · withdraw (
 | 89 | walkthrough-skip-replay | Skip dismisses the walkthrough instantly and reveals the create form,Skip also persists walkthroughDone,a pre-seeded walkthroughDone stamp suppresses the walkthrough on the next boot,Settings → How dpay works replays the walkthrough with a close affordance and no Skip,the replay leaves the journey store unchanged | walkthrough, education, settings-replay, journey-stamps, skip-path |
 | 90 | rehearsal | the backup gate stays MANDATORY (ritual sentence reframes, never weakens: checkbox + disabled Continue),RECOVERY SAVED stamp beat plays after the faucet and auto-advances (no extra tap),the ONE-page rehearsal shows all 3 steps together with verbatim education copy + the offline punchline (mounting awards flowUnderstood),Try with demo funds lands on the funded Pay surface,recoverySaved + flowUnderstood persist in dpay.journey.v1 | recovery-ritual-sentence, mnemonic-backup-checkbox, btn-mnemonic-continue, recovery-saved-stamp, rehearsal, rehearsal-step-{1..3}, rehearsal-body-{1..3}, rehearsal-punchline, btn-rehearsal-next, btn-rehearsal-skip, flowUnderstood-stamp, recoverySaved-stamp, pay-tab-default-landing |
 | 91 | coach-tips | each coaching tip mounts on its surface exactly once per identity: presence, dismiss, re-entry → absent; pendingOutcome never appears on a confirmed Paid screen; the offline hand-off still settles (counterparty submit + reconcile) | coach-payReview, coach-receiveRequest, coach-offlineQr, coach-pendingOutcome, btn-coach-*-dismiss, journey-seen-markers, one-time-coaching |
-| 94 | trip-passport | Trip readiness passport: 3/4 after onboarding → confirmed payment fills the 4th → TRIP READY capstone → Done collapses the card → Settings archive keeps it forever. | readiness, funds-ready, payment-tested, capstone, collapse, archive, persistence |
+| 94 | trip-passport | Trip readiness: home TripStrip 3/4 after onboarding → confirmed payment fills the 4th → archive TRIP READY capstone → Done retires the strip → Settings archive keeps it forever. | readiness, funds-ready, payment-tested, capstone, collapse, archive, persistence, trip-strip |
 
 ### Payments (the core offline-pay flow)
 
 | # | Flow | Verifies | Covers |
 |---|------|----------|--------|
 | 06 | request-qr | Merchant enters amount → request QR renders AND decodes to a valid 132-byte request (to_name + memo). | request-qr, encode, merchant, to-name, memo |
-| 07 | scan-pay | Payer scans → reviews → approves: two-wallet real ed25519 sign + relay settle → 'Paid ✓', balances correct. | scan, sign, settle, receipt, history, recipient-name |
+| 07 | scan-pay | Payer scans (auto-sign, one press): two-wallet real ed25519 sign + relay settle → 'Paid ✓', balances correct. | scan, sign, settle, receipt, history, recipient-name |
 | 08 | merchant-settle | Merchant scans the payer's signed icrc1_transfer envelope, submits it to the IC gateway → recipient 'Received' confirmation. | receive, settle, confirmation |
 | 09 | double-spend | identical-byte envelope resubmit is idempotent on the IC gateway (request_id dedup): both POSTs 202, transfer executed once, payee credited once — and re-signing is a NEW request (the never-retry-by-resigning hazard) | pay, replay-safety, confirmation |
-| 10 | expired | Payer scans an already-expired request → refused, Approve disabled, no leaked nonce. | expiry, disabled-approve |
-| 19 | low-balance | Insufficient funds: offline review-lowbal warning; online Approve disabled, 'Not enough balance'. | low-balance, insufficient, disabled-approve |
+| 10 | expired | Payer scans an already-expired request → auto-sign refused client-side, honest error, no leaked nonce. | expiry, honest-error, no-sign |
+| 19 | low-balance | Insufficient funds: offline still signs (merchant verifies) with a warn note; online blocks the sign entirely. | low-balance, insufficient, no-sign-gate |
 | 25 | asset-request | ckBTC chip + BTC amount → request QR encodes RUNTIME currency 1 + 50000 sats; readout '0.00050000 BTC' (no $). | asset-request, ckbtc, currency-id, encode, btc-units |
 | 26 | names-memo | Alice pays Bob with memo 'coffee' → review shows the name + short pubkey + memo (U-F5), both histories show friendly names + memo (wire-format v2, no raw hex). | names, memo, history, wire-v2, friendly-counterparties, review-short-payee |
 | 27 | asset-pay | ckBTC pay (faucet-funded at principal): review '0.00050000 BTC' (no $) + short pubkey (U-F5); per-asset balance gate (60000≥50000 sats) → app-signed icrc1_transfer settles on currency 1; Ledger row shows the exact ckBTC units. | asset-pay, ckbtc, per-asset-balance, locked-asset-display, ledger-units, review-short-payee |
@@ -68,7 +68,7 @@ wire (1) · onboard (13) · pay (18) · offline (8) · deposit (8) · withdraw (
 | 29 | exact-amount | Raw amount > 2^53 round-trips byte-exact through faucet/request-wire/signed-envelope/ledger-settle on the IC rail (BigInt codec, uleb128 + u128 ledger, decimal strings). | exact-amount, decimal-transport, u64, bigint-codec |
 | 31 | ckusdc-pay | ckUSDC (currency 2, 6-decimal) pay end-to-end (faucet-funded at principal): review '0.050000 USDC', byte-exact raw, app-signed icrc1_transfer settles on currency 2. | ckusdc-pay, multi-currency, 6-decimal, byte-exact |
 | 36 | bad-qr | Scanning/pasting garbage (non-base64 + wrong-length) surfaces a friendly 'This isn't't a dpay payment code' error; review never mounts; scan surface re-arms. | bad-qr, malformed, error-handling, input-validation |
-| 43 | decimal-edges | 8-dec (ckBTC) + 6-dec (ckUSDC) + 18-dec (ckDAI) amounts render with exact decimals on review (no rounding, no sci-notation, no trailing-zero drift). | decimal, format, ckbtc, ckerc20, 18-decimal |
+| 43 | decimal-edges | 8-dec (ckBTC) + 6-dec (ckUSDC) + 18-dec (ckDAI) amounts render with exact decimals on the sign surface (no rounding, no sci-notation, no trailing-zero drift). | decimal, format, ckbtc, ckerc20, 18-decimal |
 | 49 | deeplink-request | dpay:req deeplink opens the pay review screen pre-filled with the merchant request (no auto-approve). | deeplink, request-link, prefill, pay-review |
 | 50 | deeplink-receipt | merchant treats dpay:pay as a trigger; a forged proof before settlement never flips Received — only the exact nonce-bound ledger row does; never routes to Pay. | deeplink, receipt-link, rail-proof, receive, handback, forgery |
 | 59 | share-receipt | After an online settle, btn-share-receipt hands an openable /wallet?pay= receipt URL to Share and flips to "Link copied ✓". | share-receipt, receipt-link, handback, online-settle, deeplink |
@@ -80,7 +80,7 @@ wire (1) · onboard (13) · pay (18) · offline (8) · deposit (8) · withdraw (
 |---|------|----------|--------|
 | 20 | offline-handoff | offline payer signs an icrc1_transfer envelope QR (base64url, memo = request nonce); counterparty submits it to the IC gateway; payer reconnects and reconciles to Paid by request_id (read_state); payee balance grows | offline-pay, hand-off, reconcile |
 | 21 | receive-scan | merchant scans a base64url icrc1_transfer envelope (memo = request nonce) via the camera seam → app submits it to the IC gateway → read_state poll flips "Received"; balance + history follow from the ledger | receive-scan, offline-settle |
-| 46 | sol-offline-handoff | SOL v2 scan solreq:v2 → review shows the short destination (U-F5) → offline sign (no setup, no nonce) → solpay:v2 QR → honest pending. | sol-offline-sign, qr-handoff, honest-pending, review-short-payee |
+| 46 | sol-offline-handoff | SOL v2 scan solreq:v2 → AUTO-SIGN (no setup, no nonce) → solpay:v2 QR (U-F5 short destination rides the qr header) → honest pending. | sol-offline-sign, qr-handoff, honest-pending, sign-status-short-payee |
 | 51 | sol-merchant-broadcast | SOL v2 merchant: createSolPaymentRequest (ONLINE) → scan real signed solpay → broadcast → Received. | sol-merchant, sol-broadcast, sol-v2-strict-verify, qr-scan |
 | 53 | sol-merchant-error | SOL v2 merchant broadcast error surfaces a friendly message (not raw RPC, not false Received). | sol-merchant, sol-error, sol-v2-rejected, friendly-error |
 | 67 | sol-setup-error | SOL v2: SolPayMode mounts in scan with no setup; valid req signs offline; expired req is rejected with a friendly error. | sol-no-setup, sol-expired-request, sol-v2-freshness |
@@ -116,14 +116,14 @@ wire (1) · onboard (13) · pay (18) · offline (8) · deposit (8) · withdraw (
 
 | # | Flow | Verifies | Covers |
 |---|------|----------|--------|
-| 11 | nfc | NFC transport phases (Idle→Linking→Exchanging→Settling) render via the RNW event bus. | nfc-phases, event-bus |
-| 32 | nfc-disclosure | NFC asset disclosure: mid-tap the status shows honest asset name + network + '0.00050000 BTC' BEFORE success. | nfc-disclosure, consent, asset-name, network |
-| 47 | sol-nfc | SOL v2 NFC tap: arm card → auto-sign → receipt (rid+sig match) → Paid ✓ | sol-nfc, sol-v2-receipt, event-bus |
-| 60 | nfc-error | NFC tap failure modes: a mid-tap transport error surfaces honest "Tap failed" (not Paid ✓); a decline surfaces "Declined"; a late error after settling is ignored (no false failure over a decided outcome). | nfc-error, nfc-declined, nfc-phases, error-handling, no-fake-paid, terminal-escape |
-| 66 | sol-nfc-error | SOL v2 NFC tap failure modes: expired solreq → Declined + expired; transport error → Tap failed; late error after settling ignored; merchant reader sees the decline. | sol-nfc-decline, sol-nfc-error, sol-nfc-receipt-unreachable, sol-nfc-phases, sol-nfc-reader-decline, no-fake-paid, terminal-escape |
+| 11 | nfc | NFC transport phases render via the RNW event bus; a request AUTO-SIGNS on arrival (one-press rule) — the wire exists with no Approve click. | nfc-phases, event-bus, auto-sign |
+| 32 | nfc-disclosure | NFC auto-sign exchanging status discloses honest asset + amount ("Paying 0.00050000 BTC on Bitcoin") + hold-to-send; the wire exists on arrival (one-press rule). | nfc-disclosure, consent, asset-name, auto-sign |
+| 47 | sol-nfc | SOL v2 NFC tap: arm card → request AUTO-SIGNS (one-press rule → offline sign) → receipt (rid+sig match) → Paid ✓ | sol-nfc, sol-v2-receipt, event-bus, auto-sign |
+| 60 | nfc-error | NFC tap failure modes: a mid-tap transport error surfaces honest "Tap failed" (not Paid ✓); an unsupported-asset request auto-declines "Declined" + honest reason (fail-closed, no sign); a late error after settling is ignored (no false failure over a decided outcome). | nfc-error, nfc-declined, nfc-phases, error-handling, no-fake-paid, terminal-escape, fail-closed |
+| 66 | sol-nfc-error | SOL v2 NFC failure modes: expired solreq auto-declines at sign (honest reason, no sign); transport error → Tap failed; late error after settling ignored; merchant reader sees the decline. | sol-nfc-decline, sol-nfc-error, sol-nfc-receipt-unreachable, sol-nfc-phases, sol-nfc-reader-decline, no-fake-paid, terminal-escape, fail-closed |
 | 86 | nfc-unknown-reconcile | Offline payer supplies update + signed read_state; receiver alone settles, exact-history binds success, and queues the returned result. | nfc, settle, history, reconcile |
-| 87 | nfc-payer-settle | Offline card prepares update+read_state, never submits, and only a nonce/rid-bound merchant result resolves Paid. | nfc, payer, offline, returned-result, exact-once |
-| 93 | tap-motion | every NFC phase renders its pinned textContent + its own motion beat (breath/segments/key/stamp/ellipsis/shake); pending carries no stamp mark and no campaign line (honesty) | nfc-phases, event-bus, delight-motion, honesty-guard |
+| 87 | nfc-payer-settle | Offline card review-parks, Approve prepares update+read_state (never submits), and only a nonce/rid-bound merchant result resolves Paid. | nfc, payer, offline, returned-result, exact-once, approve-before-pay |
+| 93 | tap-motion | every NFC phase renders its pinned textContent + its own motion beat (breath/segments/ellipsis/shake); card awaitingApproval maps straight to exchanging (auto-sign); pending carries no settled mark and no campaign line (honesty); no dpay stamp ring exists anywhere | nfc-phases, event-bus, delight-motion, honesty-guard, auto-sign |
 
 ### Settings & system
 
@@ -132,7 +132,7 @@ wire (1) · onboard (13) · pay (18) · offline (8) · deposit (8) · withdraw (
 | 12 | settings | Settings: privacy policy is reachable, the non-custodial statement is present, relay URL persists, and reset wallet wipes identity. | settings, relay-config, privacy-policy, non-custodial, reset, persist |
 | 13 | offline | Relay down → faucet top-up surfaces honest 'Offline' (ECONNREFUSED, not unsafe-port), no crash; retry path. | offline, econnrefused, graceful, retry, right-reason |
 | 14 | keyboard | Single-key shortcuts (P/R/T/A/L/Esc) switch tabs / top-up / add-money / ledger / close sheet; input + sheet guards work; keyboard focus paints the brand :focus-visible ring (U-F4). | keyboard-shortcuts, tabs, sheet-guard, input-guard, focus-visible |
-| 17 | scan-cleanup | Switch Pay→Receive→Pay: QrScanner listeners tear down cleanly (no leak across unmount/remount). | qr-scanner, teardown, unmount, listener-leak |
+| 17 | scan-cleanup | Pay tab starts gated (0 listeners until "Pay Now"); armed → 1; Pay→Receive→Pay tears down cleanly (no leak; re-mount re-gates then re-arms). | qr-scanner, teardown, unmount, listener-leak, pay-intent-gate |
 | 24 | wallet-cleanup | Funded non-dollar balances/history (rail faucet + icrc1_transfer on currency 1) render as asset cards/rows with known symbols and short principal-text counterparties. | asset-cards, labels, symbols |
 | 38 | relay-retarget | Settings relay-switch retargets the LIVE balance poll: header changes from A's ∂100.00 to B's faucet-funded ∂500.00 (B's fresh per-process gateway). | relay-retarget, settings-relay-switch, live-poll |
 | 41 | a11y-census | Every interactive element (btn-*/tab-*/inputs/picker rows) carries a non-empty aria-label + role on every primary surface. | a11y, accessibility, aria |

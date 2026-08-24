@@ -77,6 +77,11 @@ export async function run() {
     assert(payAmt.includes('∂25.00'), `review should show "Pay ∂25.00", got "${payAmt}"`);
     const reviewBody = await driver.bodyText();
     assertIncludes(reviewBody, MERCHANT_NAME, 'review should name the merchant from the deeplink');
+    // U-F5 (relocated from the scan flows 26/27 — the camera sign status is transient now, this
+    // stable review is the one surface that still parks): the short pubkey under the name.
+    const reviewPayee = await driver.readText('review-payee');
+    assert(reviewPayee === `${bob.publicHex.slice(0, 8)}…`,
+      `review short-payee line (U-F5): expected ${bob.publicHex.slice(0, 8)}…, got "${reviewPayee}"`);
     // SECURITY INVARIANT: the deeplink prefilled review only — it must NOT have reached Paid.
     assert(!/\bPaid\b/.test(reviewBody), 'deeplink must NOT auto-pay — review screen only (no "Paid")');
     await driver.findByTestID('btn-approve', { timeoutMs: 4_000 });

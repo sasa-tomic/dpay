@@ -22,7 +22,7 @@
 // Selector contract: `trip-strip`, `trip-strip-dot-<key>[-filled]`, `passport-archive`,
 // `passport-slot-<key>[-filled]`, `passport-count`, `passport-hint`, `trip-ready-capstone`,
 // `btn-passport-done`, `btn-trip-readiness`, `btn-trip-strip`, `btn-passport-close`.
-import {setup, assert, assertIncludes, skipWalkthroughIfPresent, getBalance} from '../harness/lib.mjs';
+import {setup, assert, assertIncludes, skipWalkthroughIfPresent, getBalance, armPayScan} from '../harness/lib.mjs';
 import {generateKeypair, randNonceHex, buildRequestQR} from '../harness/wire.mjs';
 
 export const meta = {
@@ -98,14 +98,14 @@ export async function run() {
     await driver.click('btn-passport-close', { timeoutMs: 4_000 });
 
     // --- 3. ONE confirmed payment (flow-07 seam: real sign + real settle). -------------------
-    console.log('[94-trip-passport] driving one confirmed payment (scan → approve → settled)…');
+    console.log('[94-trip-passport] driving one confirmed payment (scan → auto-sign → settled)…');
     const bob = await generateKeypair();
     const bobBefore = await getBalance(relayBaseURL, bob.publicHex, 0);
     assert(bobBefore === '0', 'payee must start at 0');
     const requestQR = buildRequestQR(bob.publicHex, 2500, randNonceHex(), Math.floor(Date.now() / 1000) + 600, 0, 'Bob');
+    await armPayScan(driver); // pay-intent gate: arm the scan surface (no-op when already armed)
     await driver.eval((qr) => { if (typeof window.__DPAY_TEST_SCAN === 'function') window.__DPAY_TEST_SCAN(qr); }, requestQR);
-    await driver.findByTestID('pay-amount', { timeoutMs: 5_000 });
-    await driver.click('btn-approve', { timeoutMs: 5_000 });
+    // One-press rule (2026-08-24): the scan AUTO-SIGNS — no review, no Approve click.
     const paid = await driver.waitForText('Paid', { timeoutMs: 10_000 });
     assert(paid, 'payment must reach the confirmed Paid screen');
     const bobAfter = await getBalance(relayBaseURL, bob.publicHex, 0);
@@ -115,11 +115,16 @@ export async function run() {
     // Leave the Paid screen (New payment resets PayMode to the scanner) before opening the strip.
     await driver.click('btn-new', { timeoutMs: 6_000 });
 
-    // --- 4. Re-open the archive via the strip: 4th stamp + TRIP READY capstone → Done. --------
-    console.log('[94-trip-passport] strip → archive: 4th stamp + capstone…');
-    // The live journey seam pushes the award: the strip flips to TRIP READY without a remount.
-    await driver.waitForText('TRIP READY', { timeoutMs: 5_000 });
-    await driver.click('btn-trip-strip', { timeoutMs: 4_000 });
+    // --- 4. The strip is GONE the moment readiness completes (founder rule 2026-08-23: "when
+    //        fully done, the bar disappears"); the archive is reached via Settings → Trip
+    //        readiness: 4th stamp + TRIP READY capstone → Done. --------------------------------
+    console.log('[94-trip-passport] Settings → archive: 4th stamp + capstone…');
+    // The live journey seam pushed the award; the strip must have retired IMMEDIATELY
+    // (not held open until the capstone was seen — the old collapse-marker rule is gone).
+    await driver.waitGone('trip-strip', { timeoutMs: 5_000 });
+    assert(!(await driver.isPresent('btn-trip-strip')), 'complete journey must retire the home strip with no Done press');
+    await driver.click('btn-settings', { timeoutMs: 5_000 });
+    await driver.click('btn-trip-readiness', { timeoutMs: 4_000 });
     await driver.findByTestID('passport-slot-paymentTested-filled', { timeoutMs: 5_000 });
     // The capstone plays on first observation of the complete page (the one-shot beat).
     await driver.findByTestID('trip-ready-capstone', { timeoutMs: 5_000 });
@@ -127,12 +132,13 @@ export async function run() {
     assertIncludes(capstoneText.toUpperCase(), 'TRIP READY', 'capstone overlay must show TRIP READY');
     console.log('[94-trip-passport] ✓ 4th slot filled + TRIP READY capstone playing');
 
-    // The press lifts (~2.2s) → Done appears → retires the home strip forever.
+    // The press lifts (~2.2s) → Done appears → closes the archive.
     await driver.findByTestID('btn-passport-done', { timeoutMs: 10_000 });
     await driver.click('btn-passport-done', { timeoutMs: 4_000 });
     await driver.waitGone('passport-archive', { timeoutMs: 5_000 }); // Done closes the archive
-    await driver.waitGone('trip-strip', { timeoutMs: 5_000 }); // …and the strip never comes back
-    console.log('[94-trip-passport] ✓ Done retired the home strip');
+    await driver.waitGone('trip-strip', { timeoutMs: 5_000 }); // …and the strip stays gone
+    console.log('[94-trip-passport] ✓ Done closed the archive; strip stays retired');
+    await driver.click('btn-settings-close', { timeoutMs: 4_000 });
 
     // --- 5. Persistence: the strip never comes back; the archive (Settings) keeps the record. -
     await driver.waitForText('∂100.00', { timeoutMs: 5_000 });

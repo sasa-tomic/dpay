@@ -1,8 +1,9 @@
 /**
  * 91-coach-tips — Trip Ready J4: first-use coaching is anchored, dismissible, and remembered.
  *
- *   payReview       → mounts on the IC pay review; dismiss → re-enter review (same identity):
- *                     gone (journey seen-marker).
+ *   payReview       → mounts ONLY on the DEEPLINK review (the one surface that still reviews —
+ *                     the camera path auto-signs now, one-press rule 2026-08-24); dismiss →
+ *                     re-enter review (same identity): gone (journey seen-marker).
  *   receiveRequest  → mounts on the Receive request-QR phase; dismiss → new request: gone.
  *   offlineQr       → mounts on the OFFLINE hand-off QR (relay dead, value path alive).
  *   pendingOutcome  → mounts on the pending "Sent — awaiting the merchant's confirmation" view,
@@ -61,42 +62,38 @@ export async function run() {
     console.log(`[${meta.name}] ✓ receiveRequest: shown once, dismissed, remembered`);
     await env.driver.click('tab-pay', {timeoutMs: 4_000});
 
-    // --- payReview: mounts on the review, dismiss, re-enter review → gone. ---------------------
-    await waitForScanner(env.driver);
+    // --- payReview: mounts ONLY on the DEEPLINK review (the one remaining review surface —
+    //     the camera scan AUTO-SIGNS now, so a scan-then-sign never shows this tip). Arrive via
+    //     the ?req= web mirror of the dpay:pay deeplink (flow 49's reload pattern).
     const req1 = buildRequestQR(bob.publicHex, PAY_CENTS, randNonceHex(), Math.floor(Date.now() / 1000) + 600, 0, 'bob');
-    await env.driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), req1);
-    await env.driver.waitForText('Pay ∂25.00', {timeoutMs: 6_000});
+    await env.driver.navigate(env.webBaseURL, `/?relay=${encodeURIComponent(env.relayBaseURL)}&req=${encodeURIComponent(req1)}`, {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
+    await env.driver.waitReady({timeoutMs: 10_000});
     await env.driver.findByTestID('coach-payReview', {timeoutMs: 6_000});
-    // The tip must never block the primary action.
-    const approveEnabled = await env.driver.eval(() => {
-      const n = document.querySelector('[data-testid="btn-approve"]');
-      return !!n && n.disabled !== true && n.getAttribute('aria-disabled') !== 'true';
-    });
-    assert(approveEnabled, 'btn-approve stays enabled while the payReview tip is showing');
+    assert(await env.driver.isPresent('btn-approve'), 'the deeplink review carries its single Approve (zero-press entry)');
     await settle(); // let the tip's 480ms rise+fade entrance finish before the shot
     await env.driver.screenshot('91-coach-review');
     await env.driver.click('btn-coach-payReview-dismiss', {timeoutMs: 4_000});
     await env.driver.waitGone('coach-payReview', {timeoutMs: 6_000});
     await env.driver.click('btn-review-cancel', {timeoutMs: 4_000});
-    // Same identity, fresh review (new nonce) → absent.
+    // Same identity, fresh deeplink review (new nonce) → absent.
     const req2 = buildRequestQR(bob.publicHex, PAY_CENTS, randNonceHex(), Math.floor(Date.now() / 1000) + 600, 0, 'bob');
-    await waitForScanner(env.driver);
-    await env.driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), req2);
+    await env.driver.navigate(env.webBaseURL, `/?relay=${encodeURIComponent(env.relayBaseURL)}&req=${encodeURIComponent(req2)}`, {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
+    await env.driver.waitReady({timeoutMs: 10_000});
     await env.driver.waitForText('Pay ∂25.00', {timeoutMs: 6_000});
     assert(!(await env.driver.isPresent('coach-payReview')), 'payReview tip must not re-show after dismissal');
     await env.driver.click('btn-review-cancel', {timeoutMs: 4_000});
-    console.log(`[${meta.name}] ✓ payReview: shown once, never blocks approve, remembered`);
+    console.log(`[${meta.name}] ✓ payReview (deeplink review): shown once, never blocks Approve, remembered`);
 
     // --- offlineQr + pendingOutcome: the flow-20 offline hand-off, coached exactly once. -------
+    //     (The camera scan AUTO-SIGNS while offline — no review, no btn-approve, no payReview tip;
+    //     the seen-marker from the deeplink legs above stays set regardless.)
     await goOffline(env.driver, {keepGateway: true});
     await env.driver.waitForText('approx.', {timeoutMs: 8_000});
     const req3 = buildRequestQR(bob.publicHex, PAY_CENTS, randNonceHex(), Math.floor(Date.now() / 1000) + 600, 0, 'bob');
     await waitForScanner(env.driver);
     await env.driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), req3);
-    await env.driver.waitForText('Pay ∂25.00', {timeoutMs: 6_000});
-    assert(!(await env.driver.isPresent('coach-payReview')), 'payReview stays dismissed even offline');
-    await env.driver.click('btn-approve', {timeoutMs: 4_000});
-    await env.driver.waitForText('signed on this device ✓', {timeoutMs: 8_000});
+    await env.driver.waitForText('signed on this device ✓', {timeoutMs: 10_000});
+    assert(!(await env.driver.isPresent('coach-payReview')), 'payReview stays dismissed on the offline auto-sign path (no review exists)');
     await env.driver.findByTestID('coach-offlineQr', {timeoutMs: 6_000});
     await settle(); // entrance finish before the shot
     await env.driver.screenshot('91-coach-offlineqr');

@@ -1,18 +1,23 @@
 /**
- * PayMode — the payer-side review + share affordances (U-F1/U-F5, 2026-08-16 UX findings).
+ * PayMode — auto-sign + share affordances (U-F1/U-F5, 2026-08-16 UX findings; one-press rule
+ * founder directive 2026-08-24).
  *
- *   - U-F5: the review screen shows the payee's SHORT pubkey (first 8 hex + '…') as a subdued
- *     secondary line under the display name, so the payer can verify the destination beyond a
- *     claimed name (phishing surface). Only when a name is shown — the no-name fallback already
- *     renders the short key as the primary "to" line.
+ *   - One-press rule: the camera-scan path AUTO-SIGNS on decode (the "Pay Now" gate press that
+ *     armed the scanner IS the single deliberate press) — scan lands directly in the sign
+ *     handoff/paid surfaces, never a review with an Approve button. The DEEPLINK entry is a
+ *     zero-press arrival and keeps today's review card with its single Approve.
+ *   - U-F5: the sign/paid surfaces show the payee's SHORT pubkey (first 8 hex + '…') as a
+ *     subdued secondary line under the display name, so the payer can verify the destination
+ *     beyond a claimed name (phishing surface). Only when a name is shown — the no-name
+ *     fallback already renders the short key as the primary "to" line.
  *   - U-F1: the two share buttons (receipt link on the paid screen, auth code on the offline QR
  *     screen) flip to a visible 'Link copied ✓' / 'Copied ✓' confirmation after Share resolves
  *     with sharedAction. A dismissal resolves dismissedAction and leaves the label honest.
  *     Mirrors the DepositSheet useCopyFeedback pattern; testIDs stay untouched (e2e contract).
  *
  * Uses react-test-renderer (the project's only renderer). The native/relay/receipt services are
- * mocked at their module boundaries; QrScanner is stubbed so its onScan prop can be driven
- * directly (the camera never opens under jest).
+ * mocked at their module boundaries; QrScanner + NfcTap are stubbed so the camera/HCE rails never
+ * open under jest while their MOUNT presence stays assertable (the pay-intent gate tests below).
  */
 import {describe, test, expect, jest, beforeEach, afterEach} from '@jest/globals';
 import React from 'react';
@@ -23,7 +28,7 @@ jest.mock('../services/native', () => ({
   DpayCore: {
     decodeRequest: jest.fn(),
   },
-  DpayNfc: undefined,
+  DpayNfc: {},
 }));
 jest.mock('../services/rail', () => ({
   prepareTransfer: jest.fn(),
@@ -33,6 +38,9 @@ jest.mock('../services/rail', () => ({
 }));
 jest.mock('../components/QrScanner', () => ({
   QrScanner: (_props: {onScan: (raw: string) => void}) => null,
+}));
+jest.mock('../components/NfcTap', () => ({
+  NfcTap: (_props: {role: string}) => null,
 }));
 
 import {DpayCore} from '../services/native';
@@ -66,41 +74,59 @@ const shareSpy = jest.spyOn(Share, 'share');
 
 type PayModeProps = Parameters<typeof PayMode>[0];
 
+function payElement(props: Partial<PayModeProps> = {}) {
+  return (
+    <PayMode
+      identity={IDENTITY}
+      online={false}
+      nfcStatus="unknown"
+      onSettled={() => {}}
+      onOfflinePaid={() => {}}
+      shownBalance="10000"
+      catalog={[]}
+      assetBalances={{}}
+      withdrawCurrency={0}
+      withdrawDisplay={null}
+      withdrawFamily={null}
+      withdrawTokenContract={null}
+      withdrawBalance="10000"
+      subMode="scan"
+      onSubModeChange={() => {}}
+      onShowDepositAddress={() => {}}
+      {...props}
+    />
+  );
+}
+
 function mountPay(props: Partial<PayModeProps> = {}) {
   let tree!: renderer.ReactTestRenderer;
   act(() => {
-    tree = renderer.create(
-      <PayMode
-        identity={IDENTITY}
-        online={false}
-        nfcStatus="unknown"
-        onSettled={() => {}}
-        onOfflinePaid={() => {}}
-        shownBalance="10000"
-        catalog={[]}
-        assetBalances={{}}
-        withdrawCurrency={0}
-        withdrawDisplay={null}
-        withdrawFamily={null}
-        withdrawTokenContract={null}
-        withdrawBalance="10000"
-        subMode="scan"
-        onSubModeChange={() => {}}
-        onShowDepositAddress={() => {}}
-        {...props}
-      />,
-    );
+    tree = renderer.create(payElement(props));
   });
   return tree;
 }
 
-/** Drive the camera-scan decode path (the same path a deeplink prefill reuses). */
-async function scanToReview(tree: renderer.ReactTestRenderer, req: Req) {
+/** Drive the camera-scan decode path — the AUTO-SIGN entry (the "Pay Now" gate press armed it,
+ *  so a payable request signs immediately; no Approve press exists on this path). Arms the
+ *  pay-intent gate first — the scanner stub is not mounted until "Pay Now" is pressed. */
+async function scanToSign(tree: renderer.ReactTestRenderer, req: Req) {
   jest.mocked(DpayCore.decodeRequest).mockResolvedValue(req);
+  pressByTestID(tree, 'btn-start-scan');
   const scanner = tree.root.find(node => typeof node.props.onScan === 'function');
   await act(async () => {
     scanner.props.onScan('abcdef123456');
   });
+  await act(async () => {}); // flush the auto-sign's prepare/submit promises
+}
+
+/** Mounted camera rail — the QrScanner stub carries onScan; presence = armed camera. */
+function scannerNodes(tree: renderer.ReactTestRenderer) {
+  return tree.root.findAll(node => node.props && typeof node.props.onScan === 'function');
+}
+
+/** Mounted HCE rail — the NfcTap stub carries role="card"; presence = armed card. */
+function cardNodes(tree: renderer.ReactTestRenderer) {
+  return tree.root.findAll(node => node.props && node.props.role === 'card');
 }
 
 /** Depth-first text of a props.children tree — strings, numbers, arrays, nested elements. */
@@ -168,21 +194,31 @@ function asWeb() {
   (Platform as {OS: string}).OS = 'web';
 }
 
-describe('PayMode — review short pubkey (U-F5)', () => {
+describe('PayMode — sign-status short pubkey (U-F5)', () => {
+  // The camera path auto-signs; the payee lines live on the READ-ONLY signing status while the
+  // envelope builds. Hang prepareTransfer so the surface stays put for the assertions.
+  function hangPrepare() {
+    jest.mocked(prepareTransfer).mockReset().mockImplementation(() => new Promise<RailPrepared>(() => {}));
+  }
+
   test('a named payee shows the short pubkey as a subdued second line under "to <name>"', async () => {
+    hangPrepare();
     const tree = mountPay();
-    await scanToReview(tree, REQ);
+    await scanToSign(tree, REQ);
     expect(texts(tree)).toContain('to Cafe');
+    expect(texts(tree)).toContain('Signing…');
     expect(hasTestID(tree, 'review-payee')).toBe(true);
     expect(textByTestID(tree, 'review-payee')).toBe('a1b2c3d4…');
+    expect(hasTestID(tree, 'btn-approve')).toBe(false); // one-press rule: no sign button exists
     act(() => {
       tree.unmount();
     });
   });
 
   test('an unnamed payee keeps the short key as the primary "to" line — no duplicate second line', async () => {
+    hangPrepare();
     const tree = mountPay();
-    await scanToReview(tree, {...REQ, toName: ''});
+    await scanToSign(tree, {...REQ, toName: ''});
     expect(texts(tree)).toContain(`to ${PAYEE_HEX.slice(0, 8)}…`);
     expect(hasTestID(tree, 'review-payee')).toBe(false);
     act(() => {
@@ -195,9 +231,7 @@ describe('PayMode — share feedback (U-F1)', () => {
   test('offline QR screen (web): "Share auth code" flips to "Copied ✓" after the share resolves', async () => {
     asWeb();
     const tree = mountPay({online: false});
-    await scanToReview(tree, REQ);
-    pressByTestID(tree, 'btn-approve');
-    await act(async () => {}); // flush prepareTransfer → the qr phase (submit unknown by default)
+    await scanToSign(tree, REQ); // auto-sign → prepareTransfer → the qr phase (submit unknown by default)
     expect(texts(tree)).toContain('Share auth code');
     await pressByLabel(tree, 'Share auth code');
     expect(shareSpy).toHaveBeenCalledWith({message: `QR:${'ee'.repeat(4)}`});
@@ -212,9 +246,7 @@ describe('PayMode — share feedback (U-F1)', () => {
     asWeb();
     jest.mocked(submitTransfer).mockResolvedValue({kind: 'settled', blockIndex: '42'});
     const tree = mountPay({online: true});
-    await scanToReview(tree, REQ);
-    pressByTestID(tree, 'btn-approve');
-    await act(async () => {}); // flush submit → settled → the paid phase
+    await scanToSign(tree, REQ); // auto-sign → submit settled → the paid phase
     expect(hasTestID(tree, 'btn-share-receipt')).toBe(true);
     pressByTestID(tree, 'btn-share-receipt');
     await act(async () => {});
@@ -227,9 +259,7 @@ describe('PayMode — share feedback (U-F1)', () => {
 
   test('native: a completed Share sheet flips to "Shared ✓" — never "Copied ✓" (nothing was copied)', async () => {
     const tree = mountPay({online: false});
-    await scanToReview(tree, REQ);
-    pressByTestID(tree, 'btn-approve');
-    await act(async () => {});
+    await scanToSign(tree, REQ);
     await pressByLabel(tree, 'Share auth code');
     expect(texts(tree)).toContain('Shared ✓');
     expect(texts(tree)).not.toContain('Copied ✓');
@@ -241,9 +271,7 @@ describe('PayMode — share feedback (U-F1)', () => {
   test('a dismissed share sheet leaves the label honest (dismissedAction does not flip)', async () => {
     shareSpy.mockResolvedValue({action: 'dismissedAction' as const});
     const tree = mountPay({online: false});
-    await scanToReview(tree, REQ);
-    pressByTestID(tree, 'btn-approve');
-    await act(async () => {});
+    await scanToSign(tree, REQ);
     await pressByLabel(tree, 'Share auth code');
     expect(texts(tree)).toContain('Share auth code');
     expect(texts(tree)).not.toContain('Copied ✓');
@@ -265,12 +293,10 @@ describe('PayMode — share feedback (U-F1)', () => {
 // scanned the first QR, both could settle. Fix: retain the submitted envelope; a re-approve of the
 // SAME request (nonce match) re-displays THAT envelope's QR — prepareTransfer never runs again.
 describe('PayMode — offline-QR reconcile + re-approve guards', () => {
-  async function approveToQr(tree: renderer.ReactTestRenderer, req: Req) {
-    await scanToReview(tree, req);
-    await act(async () => {
-      pressByTestID(tree, 'btn-approve');
-    });
-    // one macrotask drain: submitTransfer + the first reconcile poll fire on approve
+  // scanToSign already signs + flushes; one more macrotask drain so submitTransfer + the first
+  // reconcile poll fire (the poll effect keys on the qr phase).
+  async function scanToQr(tree: renderer.ReactTestRenderer, req: Req) {
+    await scanToSign(tree, req);
     await act(async () => {
       jest.advanceTimersByTime(0);
     });
@@ -279,7 +305,7 @@ describe('PayMode — offline-QR reconcile + re-approve guards', () => {
   test('a TERMINAL rejection in the QR reconcile poll surfaces the reason and STOPS polling', async () => {
     jest.mocked(pollTransfer).mockReset().mockResolvedValue({kind: 'rejected', reason: 'Not enough balance'});
     const tree = mountPay({online: false});
-    await approveToQr(tree, REQ);
+    await scanToQr(tree, REQ);
     expect(hasTestID(tree, 'qr-err')).toBe(true);
     expect(textByTestID(tree, 'qr-err')).toBe('Not enough balance');
     const calls = jest.mocked(pollTransfer).mock.calls.length;
@@ -295,7 +321,7 @@ describe('PayMode — offline-QR reconcile + re-approve guards', () => {
   test("'unknown' in the reconcile poll stays honest-pending — no qr-err, polling continues", async () => {
     jest.mocked(pollTransfer).mockReset().mockResolvedValue({kind: 'unknown'});
     const tree = mountPay({online: false});
-    await approveToQr(tree, REQ);
+    await scanToQr(tree, REQ);
     expect(hasTestID(tree, 'qr-err')).toBe(false);
     jest.advanceTimersByTime(POLL.receiptPay * 2);
     await act(async () => {});
@@ -308,7 +334,7 @@ describe('PayMode — offline-QR reconcile + re-approve guards', () => {
   test('re-approve after an online UNKNOWN re-displays the SAME envelope — prepareTransfer never re-signs', async () => {
     // online submit ends unknown → the envelope falls to the QR hand-off and is retained.
     const tree = mountPay({online: true});
-    await approveToQr(tree, REQ);
+    await scanToQr(tree, REQ);
     expect(jest.mocked(prepareTransfer).mock.calls.length).toBe(1);
     expect(texts(tree)).toContain('Waiting for Cafe to scan…'); // online waiting copy, no Cancel
     // The payer can only back out once the connection drops (the offline variant shows Cancel).
@@ -334,14 +360,10 @@ describe('PayMode — offline-QR reconcile + re-approve guards', () => {
         />,
       );
     });
-    // reset via Cancel — then re-scan the SAME request + re-approve → the SAME envelope's QR,
+    // reset via Cancel — then re-scan the SAME request (auto-sign) → the SAME envelope's QR,
     // no fresh signature (the merchant may already have scanned the first QR).
     pressByTestID(tree, 'btn-notpaid');
-    await scanToReview(tree, REQ);
-    await act(async () => {
-      pressByTestID(tree, 'btn-approve');
-    });
-    await act(async () => {});
+    await scanToSign(tree, REQ);
     expect(jest.mocked(prepareTransfer).mock.calls.length).toBe(1); // NEVER re-signed
     expect(jest.mocked(submitTransfer).mock.calls.length).toBe(1); // not re-submitted either
     expect(jest.mocked(envelopeToQrPayload).mock.calls.length).toBe(2);
@@ -354,14 +376,10 @@ describe('PayMode — offline-QR reconcile + re-approve guards', () => {
 
   test('an offline QR hand-off is retained too — Cancel + re-approve re-displays the same bytes', async () => {
     const tree = mountPay({online: false});
-    await approveToQr(tree, REQ);
+    await scanToQr(tree, REQ);
     expect(jest.mocked(prepareTransfer).mock.calls.length).toBe(1);
     pressByTestID(tree, 'btn-notpaid'); // Cancel after the merchant may have scanned
-    await scanToReview(tree, REQ);
-    await act(async () => {
-      pressByTestID(tree, 'btn-approve');
-    });
-    await act(async () => {});
+    await scanToSign(tree, REQ); // re-scan auto-signs → nonce match re-displays the retained envelope
     expect(jest.mocked(prepareTransfer).mock.calls.length).toBe(1); // NEVER re-signed
     expect(jest.mocked(envelopeToQrPayload).mock.calls[1][0]).toBe(PREPARED.envelopeHex);
     act(() => {
@@ -371,16 +389,78 @@ describe('PayMode — offline-QR reconcile + re-approve guards', () => {
 
   test('a FRESH request after reset prepares a fresh envelope (retention is nonce-scoped, not global)', async () => {
     const tree = mountPay({online: false});
-    await approveToQr(tree, REQ);
+    await scanToQr(tree, REQ);
     expect(jest.mocked(prepareTransfer).mock.calls.length).toBe(1);
     pressByTestID(tree, 'btn-notpaid');
     const FRESH: Req = {...REQ, nonceHex: 'cd'.repeat(16)};
-    await scanToReview(tree, FRESH);
-    await act(async () => {
-      pressByTestID(tree, 'btn-approve');
-    });
-    await act(async () => {});
+    await scanToSign(tree, FRESH);
     expect(jest.mocked(prepareTransfer).mock.calls.length).toBe(2); // fresh signature allowed
+    act(() => {
+      tree.unmount();
+    });
+  });
+});
+
+// Pay-intent scan gate (founder rule 2026-08-23): the camera (QrScanner) and the HCE card (NfcTap)
+// mount ONLY after the payer's explicit "Pay Now" tap — nothing scans before the user asks.
+// reset() (a concluded attempt needs a fresh intent) and leaving the scan sub-mode disarm; the idle
+// surface keeps the NFC status row (pay-scan) + the CTA. Deeplink prefill is unaffected by design.
+describe('PayMode — pay-intent scan gate', () => {
+  test('idle: NEITHER rail mounts (no camera, no card); the status row + CTA render; one tap arms BOTH rails', () => {
+    const tree = mountPay({nfcStatus: 'ready'});
+    expect(hasTestID(tree, 'pay-scan')).toBe(true); // idle keeps the explainer row
+    expect(hasTestID(tree, 'btn-start-scan')).toBe(true);
+    expect(scannerNodes(tree)).toHaveLength(0); // camera rail off
+    expect(cardNodes(tree)).toHaveLength(0); // HCE rail off (nfcReady, but gated)
+    pressByTestID(tree, 'btn-start-scan');
+    expect(scannerNodes(tree)).toHaveLength(1);
+    expect(cardNodes(tree)).toHaveLength(1);
+    expect(hasTestID(tree, 'btn-start-scan')).toBe(false);
+    act(() => {
+      tree.unmount();
+    });
+  });
+
+  test("reset() (the qr-phase Cancel) disarms — the next attempt needs a fresh intent", async () => {
+    const tree = mountPay();
+    await scanToSign(tree, REQ); // auto-sign → qr phase (submit unknown by default)
+    expect(hasTestID(tree, 'btn-notpaid')).toBe(true); // the offline qr-phase Cancel
+    pressByTestID(tree, 'btn-notpaid');
+    expect(hasTestID(tree, 'btn-start-scan')).toBe(true); // idle CTA back
+    expect(scannerNodes(tree)).toHaveLength(0);
+    act(() => {
+      tree.unmount();
+    });
+  });
+
+  test('leaving the scan sub-mode disarms; flipping back shows the idle CTA again', () => {
+    const tree = mountPay();
+    pressByTestID(tree, 'btn-start-scan');
+    expect(scannerNodes(tree)).toHaveLength(1);
+    // Wallet owns subMode; a scan↔send flip must disarm even though this DEMO-shaped tree (null
+    // family) keeps rendering the scan branch — the disarm is state, not branch-dependent.
+    act(() => {
+      tree.update(payElement({subMode: 'send'}));
+    });
+    expect(scannerNodes(tree)).toHaveLength(0);
+    act(() => {
+      tree.update(payElement({subMode: 'scan'}));
+    });
+    expect(hasTestID(tree, 'btn-start-scan')).toBe(true);
+    expect(scannerNodes(tree)).toHaveLength(0);
+    act(() => {
+      tree.unmount();
+    });
+  });
+
+  test('deeplink prefill reviews from IDLE — no arming, no camera, and NO auto-sign (zero-press entry)', async () => {
+    jest.mocked(DpayCore.decodeRequest).mockResolvedValue(REQ);
+    const tree = mountPay({prefillRequest: 'abcdef123456', onPrefillConsumed: () => {}});
+    await act(async () => {});
+    expect(texts(tree)).toContain('to Cafe'); // review reached without btn-start-scan
+    expect(hasTestID(tree, 'btn-start-scan')).toBe(false);
+    expect(hasTestID(tree, 'btn-approve')).toBe(true); // the kept deeplink review: ONE deliberate press
+    expect(jest.mocked(prepareTransfer).mock.calls.length).toBe(0); // nothing signed before that press
     act(() => {
       tree.unmount();
     });

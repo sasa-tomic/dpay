@@ -1,10 +1,11 @@
 /**
  * NfcTapView — phase render smoke for the J5 motion system (fake timers, Walkthrough.test.tsx
  * pattern). Pins the ONE-beat-per-phase mount contract (each phase renders exactly its own
- * motion element and never another phase's) and the honest-money rule: the success stamp and
- * the campaign language appear ONLY on success — pending/declined/error must stay calm and
- * free of any settled mark. Phase title/sub textContent stays byte-stable (e2e contracts are
- * pinned by nfc-tap-view.test.ts; this suite renders the component itself).
+ * motion element and never another phase's) and the honest-money rule: the campaign language
+ * appears ONLY on the gated offline-peak success — pending/declined/error must stay calm and
+ * free of any settled mark (the dpay stamp ring was dropped by founder directive 2026-08-24).
+ * Phase title/sub textContent stays byte-stable (e2e contracts are pinned by
+ * nfc-tap-view.test.ts; this suite renders the component itself).
  */
 import React from 'react';
 import {describe, expect, test, jest, beforeEach, afterEach} from '@jest/globals';
@@ -35,20 +36,18 @@ describe('NfcTapView J5 motion — one beat per phase', () => {
     await mount('listening');
     expect(find('tap-breath')).toHaveLength(1);
     expect(find('tap-progress')).toHaveLength(0);
-    expect(find('tap-success-stamp')).toHaveLength(0);
     expect(find('tap-key-beat')).toHaveLength(0);
     expect(find('tap-ellipsis')).toHaveLength(0);
     expect(find('nfc-status').length).toBeGreaterThan(0);
   });
 
-  test('linking/exchanging/settling: itinerary line at 1/2/3 lit segments, no stamp/breath', async () => {
+  test('linking/exchanging/settling: itinerary line at 1/2/3 lit segments, no breath', async () => {
     await mount('linking');
     expect(find('tap-progress')).toHaveLength(1);
     expect(find('tap-progress-seg-1')).toHaveLength(1);
     expect(find('tap-progress-seg-2')).toHaveLength(0);
     expect(find('tap-progress-seg-3')).toHaveLength(0);
     expect(find('tap-breath')).toHaveLength(0);
-    expect(find('tap-success-stamp')).toHaveLength(0);
 
     await act(async () => { tree.update(<NfcTapView phase="exchanging" reason={null} role="card" testID="nfc-status" formattedAmt="∂25.00" networkLabel="IC" onClose={() => {}} />); });
     expect(find('tap-progress')).toHaveLength(1);
@@ -60,20 +59,24 @@ describe('NfcTapView J5 motion — one beat per phase', () => {
     expect(find('tap-progress-seg-1')).toHaveLength(1);
     expect(find('tap-progress-seg-2')).toHaveLength(1);
     expect(find('tap-progress-seg-3')).toHaveLength(1);
-    expect(find('tap-success-stamp')).toHaveLength(0);
   });
 
-  test('awaitingApproval: the key beat replaces the spinner line (held at 2 segments)', async () => {
+  test('awaitingApproval (reader): the key beat replaces the spinner line (held at 2 segments)', async () => {
     await mount('awaitingApproval');
     expect(find('tap-key-beat')).toHaveLength(1);
     expect(find('tap-progress')).toHaveLength(1);
     expect(find('tap-progress-seg-3')).toHaveLength(0);
-    expect(find('tap-success-stamp')).toHaveLength(0);
   });
 
-  test('success: the passport-stamp beat mounts once; no breath/progress/ellipsis', async () => {
+  test('exchanging (card): the read-only send hint rides the status, not a button', async () => {
+    await mount('exchanging');
+    const text = tree.root.findAllByType(Text).map(t => String(t.props.children)).join(' ');
+    expect(text).toContain('Hold the phones together to send');
+    expect(text).toContain('Paying ∂25.00 on IC');
+  });
+
+  test('success: no breath/progress/ellipsis — the badge + title carry it', async () => {
     await mount('success');
-    expect(find('tap-success-stamp')).toHaveLength(1);
     expect(find('tap-breath')).toHaveLength(0);
     expect(find('tap-progress')).toHaveLength(0);
     expect(find('tap-ellipsis')).toHaveLength(0);
@@ -82,12 +85,12 @@ describe('NfcTapView J5 motion — one beat per phase', () => {
     expect(title).toContain('Paid ✓ ∂25.00');
   });
 
-  test('HONESTY: pending/declined/error carry NO stamp mark and NO campaign line — ever', async () => {
+  test('HONESTY: pending/declined/error carry NO campaign line and NO settled mark — ever', async () => {
     await mount('pending');
     for (const phase of ['pending', 'declined', 'error'] as NfcTapPhase[]) {
       await act(async () => { tree.update(<NfcTapView phase={phase} reason={null} role="card" testID="nfc-status" formattedAmt="∂25.00" networkLabel="IC" onClose={() => {}} />); });
-      expect(find('tap-success-stamp')).toHaveLength(0);
       expect(find('offline-peak')).toHaveLength(0);
+      expect(find('paid-stamp')).toHaveLength(0);
       const text = tree.root.findAllByType(Text).map(t => String(t.props.children)).join(' ');
       expect(text).not.toContain('Roaming off');
       expect(text).not.toContain('settled');
