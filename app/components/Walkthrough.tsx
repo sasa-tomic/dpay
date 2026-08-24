@@ -498,8 +498,10 @@ export function Walkthrough({onDone, onSkip, onClose, reducedMotion}: Walkthroug
       </View>
 
       {/* Only the ACTIVE scene is mounted — advancing re-mounts the next scene so its entrance
-          choreography replays (and the e2e net can assert scene-by-scene presence). */}
-      <View style={{flex: 1}}>
+          choreography replays (and the e2e net can assert scene-by-scene presence).
+          S.walkBody = the same 28dp side margins Rehearsal/TripPassport use — without it the
+          title/body/stage plate render flush to the screen edges (founder report 2026-08-24). */}
+      <View style={[S.walkBody, {flex: 1}]}>
         {WALKTHROUGH_SCENES.map((_scene, k) => (k === i ? <Scene key={k} index={k} reduced={reduced} /> : null))}
       </View>
 
