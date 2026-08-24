@@ -568,7 +568,6 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
             <QrScanner onScan={raw => onRequestString(raw, false)} />
           ) : (
             <>
-              <Text style={S.dim2}>The camera and tap-to-pay start when you press the button — nothing scans before you ask.</Text>
               <Pressable
                 style={S.primary}
                 onPress={() => setScanArmed(true)}
