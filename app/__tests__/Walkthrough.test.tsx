@@ -15,6 +15,8 @@ import renderer, {act} from 'react-test-renderer';
 import {describe, expect, test, jest, beforeEach, afterEach} from '@jest/globals';
 import {Walkthrough} from '../components/Walkthrough';
 import {WALKTHROUGH_SCENES} from '../config/education';
+import {JOURNEY_STAMPS, hasStamp, loadJourney} from '../lib/journey';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type Tree = renderer.ReactTestRenderer;
 
@@ -120,5 +122,18 @@ describe('Walkthrough', () => {
     await tap(tree, 'btn-walkthrough-next');
     expect(() => findByTestID(tree, 'walkthrough-scene-3')).not.toThrow();
     act(() => { tree.unmount(); });
+  });
+
+  // Trip-prep auto-detection (founder rule 2026-08-24): VIEWING the intro IS "saw the flow" —
+  // mounting the walkthrough (first-run OR replay) must award flowUnderstood.
+  test('mounting the walkthrough awards flowUnderstood (intro = saw the flow)', async () => {
+    const onDone = jest.fn();
+    const tree = await render({onDone, onSkip: jest.fn()});
+    await act(async () => { jest.advanceTimersByTime(0); });
+    await act(async () => {});
+    const j = await loadJourney();
+    expect(hasStamp(j, JOURNEY_STAMPS.flowUnderstood)).toBe(true);
+    act(() => { tree.unmount(); });
+    await AsyncStorage.clear();
   });
 });

@@ -34,6 +34,8 @@ import {DpayNfc, DpaySolNfc} from '../services/native';
 import {prepareNfcTransfer} from '../services/rail';
 import {signSolPayment} from '../solana';
 import {nowSecs} from '../lib/format';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import {JOURNEY_STAMPS, hasStamp, loadJourney} from '../lib/journey';
 
 jest.mock('../services/native', () => ({
   DpayNfc: {
@@ -76,8 +78,10 @@ jest.mock('../services/rail', () => ({
 
 jest.mock('../solana', () => {
   // Hand-crafted signed-tx bytes: compact-u16 sigCount=1 ‖ 64 sig bytes ‖ message — shaped for the
-  // REAL extractSignedTxParts (imported by the adapter from ../solana/tx, not mocked).
-  const tx = new Uint8Array([1, ...new Array(64).fill(7), 0x6d, 0x73, 0x67]);
+  // REAL extractSignedTxParts (imported by the adapter from ../solana/tx, not mocked): the message
+  // needs a 3-byte header + compact-u16 account count + ≥32 bytes of keys, or the parser returns
+  // null and the adapter's receipt binding (expectedSig) stays empty.
+  const tx = new Uint8Array([1, ...new Array(64).fill(7), 0, 0, 0, 1, ...new Array(32).fill(9)]);
   return {
     signSolPayment: jest.fn(() => ({v: 2, rid: 'c'.repeat(32), tx})),
     signSplPayment: jest.fn(() => ({v: 2, rid: 'c'.repeat(32), tx})),
@@ -101,9 +105,10 @@ const IDENTITY = {secretHex: '9f'.repeat(32), publicHex: '11'.repeat(32), userna
 const MERCHANT_HEX = '22'.repeat(32);
 
 let tree: Renderer.ReactTestRenderer | null = null;
-afterEach(() => {
+afterEach(async () => {
   if (tree) { tree.unmount(); tree = null; }
   jest.clearAllMocks();
+  await AsyncStorage.clear();
 });
 
 /** Exact rendered-text finder (title/sub/memo/offline-note lines carry no testID). */
@@ -248,5 +253,62 @@ describe('SolNfcTap (SOL) auto-sign (one-press rule)', () => {
     expect(DpaySolNfc.approveSolCard).not.toHaveBeenCalled();
     expect(DpaySolNfc.declineSolCard).toHaveBeenCalled();
     expect(hasText('This payment request has expired')).toBe(true);
+  });
+});
+
+describe('NFC settle awards the trip-prep stamps (founder rule 2026-08-24)', () => {
+  /** Wait out the journey store's serialized write queue (load→merge→persist per award). */
+  const settleStore = async () => {
+    await act(async () => {});
+    await new Promise(r => setTimeout(r, 0));
+    await act(async () => {});
+  };
+
+  it('IC payer: a settled result ticks FIRST PAYMENT (+ flowUnderstood co-award)', async () => {
+    await mountIc();
+    await emitIc(icRequest());
+    // The signed payment's binding (from the prepareNfcTransfer mock): nonce 'ab'×16, rid 'ff'×32.
+    await emitIc({type: 'result', role: 'card', status: 0, nonceHex: 'ab'.repeat(16), requestIdHex: 'ff'.repeat(32)});
+    await settleStore();
+    const j = await loadJourney();
+    expect(hasStamp(j, JOURNEY_STAMPS.paymentTested)).toBe(true);
+    expect(hasStamp(j, JOURNEY_STAMPS.flowUnderstood)).toBe(true);
+  });
+
+  it('IC payer: a REJECTED result ticks nothing (only confirmed settlement celebrates)', async () => {
+    await mountIc();
+    await emitIc(icRequest());
+    await emitIc({type: 'result', role: 'card', status: 1, nonceHex: 'ab'.repeat(16), requestIdHex: 'ff'.repeat(32)});
+    await settleStore();
+    const j = await loadJourney();
+    expect(hasStamp(j, JOURNEY_STAMPS.paymentTested)).toBe(false);
+    expect(hasStamp(j, JOURNEY_STAMPS.flowUnderstood)).toBe(false);
+  });
+
+  it('SOL payer: a bound settled receipt ticks FIRST PAYMENT (+ flowUnderstood co-award)', async () => {
+    await mountSol();
+    await emitSol({type: 'request', role: 'card', solreqUri: solreqUri()});
+    // Binding from the signSolPayment mock: rid 'c'×32; sig computed EXACTLY as the adapter
+    // does at sign time (extractSignedTxParts over the crafted tx → base58 of the signature).
+    const bs58 = (await import('bs58')).default;
+    const {extractSignedTxParts} = await import('../solana/tx');
+    const tx = new Uint8Array([1, ...new Array(64).fill(7), 0, 0, 0, 1, ...new Array(32).fill(9)]);
+    const parts = extractSignedTxParts(tx); // same crafted tx the sign mock returned
+    expect(parts).not.toBeNull();
+    const sig = bs58.encode(parts!.signature);
+    await emitSol({type: 'receipt', role: 'card', status: 0, rid: 'c'.repeat(32), sig});
+    await settleStore();
+    const j = await loadJourney();
+    expect(hasStamp(j, JOURNEY_STAMPS.paymentTested)).toBe(true);
+    expect(hasStamp(j, JOURNEY_STAMPS.flowUnderstood)).toBe(true);
+  });
+
+  it('SOL payer: an UNBOUND receipt (wrong rid) is ignored — no award', async () => {
+    await mountSol();
+    await emitSol({type: 'request', role: 'card', solreqUri: solreqUri()});
+    await emitSol({type: 'receipt', role: 'card', status: 0, rid: 'd'.repeat(32), sig: 'x'});
+    await settleStore();
+    const j = await loadJourney();
+    expect(hasStamp(j, JOURNEY_STAMPS.paymentTested)).toBe(false);
   });
 });

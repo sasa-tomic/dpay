@@ -1,4 +1,6 @@
 import {useCallback, useRef, useState} from 'react';
+import {useJourney} from '../lib/journey';
+import {awardPaymentTested} from '../lib/readiness';
 import {type CurrencyDescriptor, type NfcDisclosure, isPayableAsset, resolveNfcDisclosure, fmtCurrencyAmount} from '../config/catalog';
 import type {NfcEvent, Identity} from '../lib/types';
 import {
@@ -40,6 +42,12 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
   onConfirmed?: () => void;
 }) {
   const [disclosure, setDisclosure] = useState<NfcDisclosure | null>(null);
+  // Trip-prep auto-detection (founder rule 2026-08-24): an NFC-settled payment must tick
+  // FIRST PAYMENT (+ the flowUnderstood co-award) exactly like the QR rails. journeyRef keeps a
+  // fresh snapshot for the idempotent award call inside async callbacks.
+  const {journey} = useJourney();
+  const journeyRef = useRef(journey);
+  journeyRef.current = journey;
   // One-press rule (founder directive 2026-08-24): the "Pay Now" gate was the deliberate press,
   // so a validated request signs IMMEDIATELY — no parked review, no Approve click. `signingRef`
   // latches at sign start (a duplicate request event must not double-sign; the hook drops
@@ -123,6 +131,7 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
     if (!outcome) return;
     if (outcome.kind === 'settled') {
       record();
+      awardPaymentTested(journeyRef.current); // receiving a confirmed NFC payment counts ("pay or receive")
       ctx.finalize('success');
     } else if (outcome.kind === 'rejected') {
       ctx.finalize('declined', outcome.reason);
@@ -171,6 +180,7 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
     if (!prepared || event.nonceHex !== prepared.memoHex || event.requestIdHex !== prepared.requestIdHex) return;
     if (event.status === RESULT_SETTLED) {
       record();
+      awardPaymentTested(journeyRef.current);
       onConfirmed?.();
       ctx.finalize('success');
     } else if (event.status === RESULT_REJECTED) {

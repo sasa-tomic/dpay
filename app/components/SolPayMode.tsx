@@ -259,9 +259,8 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
               {scanArmed ? (
                 <QrScanner onScan={onScan} />
               ) : (
-                <>
-                  <Text style={S.dim2}>The camera and tap-to-pay start when you press the button — nothing scans before you ask.</Text>
-                  <Pressable
+            <>
+              <Pressable
                     style={S.primary}
                     onPress={() => setScanArmed(true)}
                     accessibilityRole="button"

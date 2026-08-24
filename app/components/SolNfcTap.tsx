@@ -1,4 +1,6 @@
 import {useCallback, useRef, useState} from 'react';
+import {useJourney} from '../lib/journey';
+import {awardPaymentTested} from '../lib/readiness';
 import bs58 from 'bs58';
 import {SOL_BROADCAST_TIMEOUT_MS} from '../config/constants';
 import {fmtAsset} from '../lib/format';
@@ -45,6 +47,12 @@ export function SolNfcTap({role, identity, req, reqUri, onOutcome, onResult, onA
   // submitPayment (reader) BEFORE the first await, so React renders the honest amount during the
   // in-flight window.
   const [amtText, setAmtText] = useState<string | null>(null);
+  // Trip-prep auto-detection (founder rule 2026-08-24): a settled SOL tap must tick FIRST PAYMENT
+  // (+ flowUnderstood co-award) on BOTH sides — the payer (onReceipt success) and the merchant
+  // reader (submitPayment broadcast-settles). journeyRef = fresh snapshot for async callbacks.
+  const {journey} = useJourney();
+  const journeyRef = useRef(journey);
+  journeyRef.current = journey;
   // One-press rule: a validated request signs IMMEDIATELY (no parked review). `signingRef` latches
   // at sign start so the transport's re-tap re-push of the same rid can't double-sign; the hook
   // drops post-sign request duplicates, this guards the async window before `advance` fires.
@@ -103,6 +111,7 @@ export function SolNfcTap({role, identity, req, reqUri, onOutcome, onResult, onA
       if (receipt.status === RECEIPT_SETTLED) {
         try { await DpaySolNfc.confirmSolReceipt(RECEIPT_SETTLED, receipt.rid, receipt.sig); } catch (e: unknown) { console.warn('DpaySolNfc.confirmSolReceipt failed (settled)', e); }
         onResult?.({amount: req.amt, cur: req.cur, sig: receipt.sig});
+        awardPaymentTested(journeyRef.current); // merchant reader: broadcast-settled tap counts
         ctx.finalize('success');
       } else if (receipt.status === RECEIPT_REJECTED) {
         try { await DpaySolNfc.confirmSolReceipt(RECEIPT_REJECTED, receipt.rid, receipt.sig); } catch (e: unknown) { console.warn('DpaySolNfc.confirmSolReceipt failed (rejected)', e); }
@@ -147,6 +156,7 @@ export function SolNfcTap({role, identity, req, reqUri, onOutcome, onResult, onA
       if (outcome.outcome === 'ignore') return; // a receipt for a different payment (cross-tap)
       if (outcome.outcome === 'success') {
         onOutcome?.('success');
+        awardPaymentTested(journeyRef.current); // payer: tap-settled payment counts
         ctx.finalize('success');
       } else if (outcome.outcome === 'declined') {
         onOutcome?.('declined');

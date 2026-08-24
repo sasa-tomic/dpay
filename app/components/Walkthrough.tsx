@@ -19,7 +19,10 @@
  *   - first-run (Onboarding): `onSkip` shows the top-right Skip; `onDone` fires on the final
  *     "Get started" (Onboarding awards walkthroughDone on either exit).
  *   - replay (Settings Modal): `onClose` shows the top-left close affordance instead of Skip;
- *     "Get started" then also exits via onDone. The replay NEVER awards stamps.
+ *     "Get started" then also exits via onDone.
+ *
+ * Trip-prep auto-detection (founder rule 2026-08-24): MOUNTING the walkthrough awards
+ * `flowUnderstood` (idempotent) — viewing the intro IS seeing the flow, first-run or replay.
  *
  * testID contract (e2e flows 88/89 + the skip helper): root `walkthrough`; per-scene
  * `walkthrough-scene-1|2|3` (ONLY the active scene is mounted); `btn-walkthrough-next`,
@@ -33,6 +36,7 @@ import {S, isDark} from '../styles';
 import {CAMPAIGN_LINE, WALKTHROUGH_SCENES, type WalkthroughVisual} from '../config/education';
 import {useReducedMotion} from '../hooks/useReducedMotion';
 import {useEscapeToClose} from '../hooks/useHotkeys';
+import {JOURNEY_STAMPS, awardStamp} from '../lib/journey';
 import {IconCheck, IconClose} from './icons';
 
 // The shared illustration frame — every scene draws inside the SAME 292×218 frame centered on
@@ -445,6 +449,9 @@ export function Walkthrough({onDone, onSkip, onClose, reducedMotion}: Walkthroug
   const [i, setI] = useState(0);
   const last = i === WALKTHROUGH_SCENES.length - 1;
   useEscapeToClose(() => { if (onSkip) onSkip(); else onClose?.(); });
+
+  // Trip-prep auto-detection: viewing the walkthrough (either variant) IS "saw the flow".
+  useEffect(() => { void awardStamp(JOURNEY_STAMPS.flowUnderstood); }, []);
 
   const next = () => { if (last) onDone(); else setI(i + 1); };
   const back = () => { if (i > 0) setI(i - 1); };
