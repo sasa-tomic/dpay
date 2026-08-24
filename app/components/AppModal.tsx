@@ -35,10 +35,12 @@ export function AppModal({onRequestClose, children}: {
   return (
     <Modal visible animationType="slide" onRequestClose={onRequestClose}>
       {/* The Modal is its own Android window and does NOT inherit the root window's system-bar
-          insets (edge-to-edge targetSdk): without this pad the hosted surface starts at y=0 —
-          the close X sits UNDER the status bar / punch-hole cutout ("outside the app area").
-          StatusBar.currentHeight is the exact top inset in dp; 0 on the (never-hit) failure. */}
-      <View style={{flex: 1, paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0}}>
+          insets. SAME RULE as MainActivity's insets reservation (the main screen's sizing):
+          API >= 35 enforces edge-to-edge, so the modal window starts at y=0 and needs the exact
+          status-bar pad; on API <= 34 the legacy window model already reserves the bar space in
+          the modal's own window — padding there double-counts and shows a white band (founder
+          report, Poco X3 / API 31). Platform.Version is the device API level on Android. */}
+      <View style={{flex: 1, paddingTop: Platform.OS === 'android' && Platform.Version >= 35 ? (StatusBar.currentHeight ?? 0) : 0}}>
         {children}
       </View>
     </Modal>
