@@ -545,63 +545,178 @@
   .band .ghost{background:transparent;box-shadow:none;color:var(--bg);border-color:rgba(244,241,232,.4)}
   .band .ghost:hover{border-color:var(--bg)}
 
-  /* ————— the eight-second proof: airplane mode → tap → the split → settled (Trip Ready J6) ————— */
-  .proof-beats{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;margin-top:56px}
-  .beat{
-    position:relative;display:flex;flex-direction:column;align-items:center;text-align:center;gap:13px;
-    padding:32px 20px 28px;border-radius:22px;
-    background:var(--card);border:1px solid var(--line);box-shadow:var(--sh-sm);
-    transition:transform .22s ease,box-shadow .22s ease,border-color .22s ease;
+  /* ————— the proof: one sealed slip, two couriers —————
+     Two CSS state machines driven by a single attribute each (data-route on the
+     courier card, data-tamper on the slip card), so the script at the end of <body>
+     only flips an attribute — every visual state lives here. The argument the
+     section makes is the invariance: the courier swaps, the sealed slip does not. */
+  .proofwrap{margin-top:52px;display:flex;flex-direction:column;gap:20px}
+  .pcard{
+    padding:34px 34px 30px;border-radius:26px;
+    background:var(--card);border:1px solid var(--line);box-shadow:var(--sh-md);
   }
-  .beat:hover{transform:translateY(-3px);box-shadow:var(--sh-md);border-color:var(--sub2)}
-  .beat .n{
-    position:absolute;top:-11px;left:50%;transform:translateX(-50%);white-space:nowrap;
-    font-family:var(--mono);font-size:.6rem;font-weight:600;letter-spacing:.18em;text-transform:uppercase;
-    color:var(--bg);background:var(--ink);padding:5px 13px;border-radius:999px;
+  .pcard h3{margin:0;font-size:1.22rem;font-weight:700;letter-spacing:-.025em}
+  .pcard .hint{margin:9px 0 0;color:var(--sub);font-size:.94rem;line-height:1.62;max-width:52ch}
+  .p-head{display:flex;align-items:flex-start;gap:22px;flex-wrap:wrap}
+  .p2{display:grid;grid-template-columns:.92fr 1.08fr;gap:20px}
+
+  /* — the route switch: the one control on the page that changes a diagram — */
+  .rswitch{margin-left:auto;display:inline-flex;align-items:center;gap:13px;flex:none}
+  .rswitch .lab{
+    display:inline-flex;align-items:center;gap:7px;
+    font-family:var(--mono);font-size:.64rem;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--sub2);transition:color .2s ease;
   }
-  .beat .frame{width:100%;display:flex;align-items:center;justify-content:center;min-height:118px}
-  .beat .frame svg{width:100%;max-width:200px;height:auto;display:block}
-  .beat .t{font-size:1.02rem;font-weight:700;letter-spacing:-.018em;color:var(--ink)}
-  .beat .d{font-size:.87rem;color:var(--sub);line-height:1.5;max-width:24ch}
-  /* beat 3 — the split card: who is offline, who is online */
-  .pv-split{display:flex;flex-direction:column;gap:8px;width:100%;max-width:200px}
-  .pv-row{
-    display:inline-flex;align-items:center;justify-content:center;gap:9px;
-    border:1px solid var(--line2);background:var(--panel2);border-radius:12px;padding:11px 12px;
-    font-family:var(--mono);font-size:.66rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+  .rswitch .lab::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--line);transition:background .2s ease}
+  .rtrack{
+    position:relative;width:64px;height:34px;flex:none;padding:0;cursor:pointer;
+    border-radius:999px;background:var(--panel2);border:1px solid var(--line);
+    transition:border-color .18s ease;
   }
-  .pv-row::before{content:"";width:7px;height:7px;border-radius:50%;flex:none}
-  .pv-row.off{color:var(--warn)} .pv-row.off::before{background:var(--warn);animation:pvblink 2.6s ease infinite}
-  .pv-row.on{color:#0B7A55;border-color:rgba(14,159,110,.28);background:rgba(14,159,110,.05)}
-  .pv-row.on::before{background:var(--ok);animation:pvblink 2.6s ease infinite .4s}
-  @keyframes pvblink{0%,100%{opacity:1}50%{opacity:.35}}
-  /* beat 4 — the settled stamp */
-  .pv-stamp{
-    display:inline-flex;align-items:center;justify-content:center;text-align:center;
-    border:2.5px solid var(--brand);color:var(--brand);border-radius:12px;
-    font-size:1.04rem;font-weight:700;letter-spacing:-.01em;line-height:1.2;
-    padding:16px 18px;transform:rotate(-6deg);
-    box-shadow:inset 0 0 0 2px var(--card), inset 0 0 0 3.5px var(--brand);
-    animation:pvpress 3.8s cubic-bezier(.2,.7,.2,1) infinite;
+  .rtrack:hover{border-color:var(--sub2)}
+  .rtrack .knob{
+    position:absolute;top:3px;left:3px;width:26px;height:26px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;color:#fff;background:var(--brand);
+    box-shadow:0 6px 14px -7px rgba(255,90,31,.8);
+    transition:transform .3s cubic-bezier(.3,1.5,.4,1);
   }
-  @keyframes pvpress{0%,16%,100%{transform:rotate(-6deg) scale(1)}8%{transform:rotate(-6deg) scale(.93)}}
+  .rtrack .knob svg{width:14px;height:14px}
+  .rtrack .k-off{display:none}
+  [data-route="off"] .rtrack .knob{transform:translateX(30px)}
+  [data-route="off"] .rtrack .k-on{display:none}
+  [data-route="off"] .rtrack .k-off{display:block}
+  [data-route="on"] .rswitch .lab.i-on{color:var(--ink)}
+  [data-route="on"] .rswitch .lab.i-on::before{background:var(--ok)}
+  [data-route="off"] .rswitch .lab.i-off{color:var(--warn)}
+  [data-route="off"] .rswitch .lab.i-off::before{background:var(--warn)}
+
+  /* — the three-node route; only the middle node's copy swaps — */
+  .route3{display:flex;align-items:stretch;margin-top:30px}
+  .rnode{
+    flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+    padding:20px 14px;border-radius:18px;text-align:center;
+    border:1px solid var(--line2);background:var(--panel2);
+  }
+  .rnode .cap{font-family:var(--mono);font-size:.57rem;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--sub2)}
+  .rnode b{font-size:1.02rem;font-weight:700;letter-spacing:-.015em;line-height:1.25;color:var(--ink)}
+  .rnode .sm{font-size:.82rem;color:var(--sub);line-height:1.45;max-width:21ch}
+  .rnode.signer{border-color:rgba(255,90,31,.32);background:rgba(255,90,31,.05)}
+  .rnode.settles{border-color:rgba(14,159,110,.28);background:rgba(14,159,110,.05)}
+  .rleg{position:relative;flex:none;width:92px;height:34px;align-self:center}
+  .rleg::before{content:"";position:absolute;left:2px;right:2px;top:50%;border-top:2px dotted var(--line)}
+  .rleg i{
+    position:absolute;top:50%;margin-top:-4.5px;width:9px;height:9px;border-radius:50%;background:var(--brand);
+    animation:signal 3.4s cubic-bezier(.5,0,.5,1) infinite;
+  }
+  .rleg.b i{animation-delay:.55s}
+  .r-on,.r-off{display:none}
+  [data-route="on"] .r-on{display:block}
+  [data-route="off"] .r-off{display:block}
+
+  .sliprow{
+    margin:26px 0 0;display:flex;align-items:center;justify-content:center;gap:11px;flex-wrap:wrap;
+    padding:14px 18px;border-radius:14px;background:var(--panel2);border:1px solid var(--line2);
+    font-family:var(--mono);font-size:.66rem;font-weight:600;letter-spacing:.13em;text-transform:uppercase;color:var(--sub);
+  }
+  .sliprow b{color:var(--ink);font-weight:600;letter-spacing:.06em}
+  .sliprow svg{width:15px;height:15px;color:var(--brand);flex:none}
+  .notpath{
+    margin:14px auto 0;width:max-content;max-width:100%;
+    display:flex;align-items:center;gap:11px;padding:11px 16px;border-radius:13px;
+    border:1px dashed var(--line);background:transparent;
+    font-family:var(--mono);font-size:.63rem;font-weight:600;letter-spacing:.13em;text-transform:uppercase;color:var(--sub);
+  }
+  .notpath svg{width:15px;height:15px;color:var(--sub2);flex:none}
+  .notpath s{color:var(--sub2);text-decoration-color:var(--warn);text-decoration-thickness:2px}
+
+  /* — the tamper toy: edit the sealed slip, watch the seal stop matching — */
+  .slip{
+    margin-top:24px;border-radius:16px;
+    border:1px solid var(--line2);background:var(--panel2);
+    transition:border-color .2s ease;
+  }
+  .srow{display:flex;align-items:baseline;justify-content:space-between;gap:14px;padding:11px 18px;font-family:var(--mono);font-size:.76rem}
+  .srow .k{font-size:.59rem;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--sub2);flex:none}
+  .srow .v{font-weight:600;color:var(--ink);text-align:right;min-width:0;overflow-wrap:break-word}
+  .srow.seal{border-top:1px dashed var(--line);padding:15px 18px}
+  .now{display:none}
+  [data-tamper="amount"] .f-amount .was,[data-tamper="payee"] .f-payee .was{display:none}
+  [data-tamper="amount"] .f-amount .now,[data-tamper="payee"] .f-payee .now{display:inline;color:var(--warn)}
+  [data-tamper="amount"] .f-seal,[data-tamper="payee"] .f-seal{color:var(--warn)}
+  /* The verdict is its own reserved row rather than a stamp floated over the slip: at 350px the
+     floated version sat on top of the seal and made both unreadable. Always-present row → the
+     stamp can never cover a value, and flipping states shifts nothing. */
+  .srow.verdict{border-top:1px dashed var(--line);padding:13px 18px 15px;align-items:center}
+  .stamp{
+    --st:#0B7A55;
+    border:2.5px solid var(--st);color:var(--st);border-radius:11px;padding:8px 12px;
+    transform:rotate(-7deg);
+    font-family:var(--mono);font-size:.62rem;font-weight:600;letter-spacing:.15em;text-transform:uppercase;
+    box-shadow:inset 0 0 0 2px var(--panel2), inset 0 0 0 3.5px var(--st);
+  }
+  html.dark .stamp{--st:#34C48E}
+  .stamp .s-bad{display:none}
+  [data-tamper="amount"] .stamp,[data-tamper="payee"] .stamp{
+    --st:var(--warn);animation:slam .32s cubic-bezier(.2,1.7,.35,1) both;
+  }
+  [data-tamper="amount"] .stamp .s-ok,[data-tamper="payee"] .stamp .s-ok{display:none}
+  [data-tamper="amount"] .stamp .s-bad,[data-tamper="payee"] .stamp .s-bad{display:inline}
+  @keyframes slam{from{opacity:0;transform:rotate(-7deg) scale(1.55)}to{opacity:1;transform:rotate(-7deg) scale(1)}}
+  [data-tamper="amount"] .slip,[data-tamper="payee"] .slip{border-color:var(--warn);animation:shake .38s ease}
+  [data-tamper="amount"] .stamp,[data-tamper="payee"] .stamp{display:block}
+  @keyframes shake{10%,90%{transform:translateX(-2px)}30%,70%{transform:translateX(3px)}50%{transform:translateX(-3px)}}
+  .tbtns{display:flex;gap:10px;margin-top:18px;flex-wrap:wrap}
+  .tbtn{
+    flex:1;min-width:132px;padding:11px 14px;border-radius:12px;cursor:pointer;
+    background:var(--card);border:1px solid var(--line);color:var(--ink);
+    font-family:var(--sans);font-size:.88rem;font-weight:600;letter-spacing:-.01em;
+    transition:border-color .16s ease,transform .16s ease;
+  }
+  .tbtn:hover:not(:disabled){border-color:var(--sub2);transform:translateY(-1px)}
+  .tbtn:disabled{background:var(--panel2);color:var(--sub2);cursor:default}
+
+  /* — the foldables: a receipt strip of the questions people actually ask — */
+  .folds{margin-top:22px}
+  .fold{border-bottom:1px solid var(--line2)}
+  .fold:first-child{border-top:1px solid var(--line2)}
+  .fold summary{
+    cursor:pointer;list-style:none;display:flex;align-items:center;gap:13px;
+    padding:17px 2px;font-size:1rem;font-weight:600;letter-spacing:-.015em;color:var(--ink);
+  }
+  .fold summary::-webkit-details-marker{display:none}
+  .fold summary::after{
+    content:"";margin-left:auto;flex:none;width:8px;height:8px;
+    border:solid var(--brand);border-width:0 1.6px 1.6px 0;transform:rotate(45deg);
+    transition:transform .2s ease;
+  }
+  .fold[open] summary::after{transform:rotate(-135deg)}
+  .fold .q{font-family:var(--mono);font-size:.62rem;font-weight:600;letter-spacing:.14em;color:var(--sub2);flex:none}
+  .fold p{margin:0 0 18px;padding-left:35px;color:var(--sub);font-size:.94rem;line-height:1.7;max-width:58ch}
+  .fold p b{color:var(--ink);font-weight:600}
+
   .proof-note{
     margin:36px auto 0;max-width:640px;text-align:center;
     font-family:var(--mono);font-size:.78rem;font-weight:500;letter-spacing:.02em;color:var(--sub);line-height:1.8;
   }
   .proof-note b{color:var(--ink);font-weight:600}
-  html.dark .pv-row.on{color:#34C48E}
+
   @media (max-width:920px){
-    .proof-beats{grid-template-columns:1fr 1fr;gap:16px;margin-top:48px}
-    .beat{padding:30px 16px 24px}
+    .proofwrap{margin-top:48px}
+    .pcard{padding:26px 24px 24px}
+    .p2{grid-template-columns:1fr}
+    .route3{flex-direction:column;gap:12px}
+    .rnode .sm{max-width:none}
+    .rleg{width:100%;height:24px}
+    .rleg::before{left:50%;right:auto;top:2px;bottom:2px;border-top:0;border-left:2px dotted var(--line)}
+    .rleg i{display:none}
   }
   @media (max-width:560px){
-    .proof-beats{grid-template-columns:1fr}
-    .beat{flex-direction:row;text-align:left;gap:18px;padding:20px 18px}
-    .beat .frame{flex:none;width:118px;min-height:0}
-    .beat .frame svg{max-width:118px}
-    .beat .t,.beat .d{max-width:none}
-    .pv-stamp{font-size:.92rem;padding:12px 13px}
+    .p-head{flex-direction:column;gap:16px}
+    .rswitch{margin-left:0}
+    .srow{padding:10px 14px;font-size:.72rem}
+    .stamp{font-size:.56rem;padding:7px 9px;letter-spacing:.12em}
+    .tbtn{min-width:0;flex:1 1 100%}
+    .fold p{padding-left:0}
   }
 
   /* ————— how it works: storyboard + the two starting rails ————— */
@@ -1001,6 +1116,119 @@
     </div>
   </section>
 
+  <!-- ————— the proof: one sealed slip, two couriers —————
+       The #proof nav link's destination. Two toys carry the whole argument: the
+       switch shows that the courier is interchangeable, the slip shows that editing
+       it breaks it. Everything below the toys is plain-language detail, folded away. -->
+  <section id="proof" class="wrap">
+    <span class="kicker rv">The proof</span>
+    <h2 class="rv">Your phone signs it. Everyone else just carries it<i class="dot">.</i></h2>
+    <p class="sec-sub rv">A payment is a slip your phone <b>seals with a key only it holds</b>. Whoever carries that slip — your connection or the shop's — can't open it, can't edit it, and can't write a new one. Flip the switch: the courier changes, the slip doesn't.</p>
+
+    <div class="proofwrap">
+
+      <div class="pcard rv" id="routecard" data-route="on">
+        <div class="p-head">
+          <div>
+            <h3>Who carries it</h3>
+            <p class="hint">Once your phone has sealed the slip, one job is left: get it to the network. Anyone can do that job, which is why it doesn't have to be you.</p>
+          </div>
+          <span class="rswitch">
+            <span class="lab i-on">Online</span>
+            <button type="button" class="rtrack" id="routeswitch" role="switch" aria-checked="false" aria-label="Your phone is online. Activate to see the offline route.">
+              <span class="knob" aria-hidden="true">
+                <svg class="k-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.8a16 16 0 0 1 20 0"/><path d="M5.5 12.4a11 11 0 0 1 13 0"/><path d="M9 16a6 6 0 0 1 6 0"/><circle cx="12" cy="19.5" r="1"/></svg>
+                <svg class="k-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.8a16 16 0 0 1 20 0"/><path d="M5.5 12.4a11 11 0 0 1 13 0"/><path d="M9 16a6 6 0 0 1 6 0"/><circle cx="12" cy="19.5" r="1"/><path d="M3 3 21 21"/></svg>
+              </span>
+            </button>
+            <span class="lab i-off">Offline</span>
+          </span>
+        </div>
+
+        <div class="route3">
+          <div class="rnode signer">
+            <span class="cap">Signs</span>
+            <b>Your phone</b>
+            <span class="sm">Holds the key. Seals the slip.</span>
+          </div>
+          <span class="rleg" aria-hidden="true"><i></i></span>
+          <div class="rnode">
+            <span class="cap">Carries</span>
+            <b><span class="r-on">Your connection</span><span class="r-off">The shop's phone</span></b>
+            <span class="sm"><span class="r-on">Your phone hands the sealed slip straight to the network.</span><span class="r-off">It takes the sealed slip and spends its own internet on it.</span></span>
+          </div>
+          <span class="rleg b" aria-hidden="true"><i></i></span>
+          <div class="rnode settles">
+            <span class="cap">Settles</span>
+            <b>The network</b>
+            <span class="sm">Checks the seal, moves the money, in seconds.</span>
+          </div>
+        </div>
+
+        <p class="sliprow">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="5"/><path d="M8.5 13.4 7 21l5-2.3L17 21l-1.5-7.6"/></svg>
+          Same slip either way <b>3a9f…c210</b> byte for byte
+        </p>
+        <p class="notpath">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>
+          <s>∂pay's server</s> — not on this path, online or off
+        </p>
+      </div>
+
+      <div class="p2">
+
+        <div class="pcard rv" id="tampercard" data-tamper="none">
+          <h3>Try to change it</h3>
+          <p class="hint">This is the slip your phone sealed. Edit it the way a dishonest shop or server would want to.</p>
+          <div class="slip">
+            <div class="srow"><span class="k">To</span><span class="v f-payee"><span class="was">Café Demo</span><span class="now">Someone else</span></span></div>
+            <div class="srow"><span class="k">Amount</span><span class="v f-amount"><span class="was">$5.00</span><span class="now">$500.00</span></span></div>
+            <div class="srow"><span class="k">Asset</span><span class="v">USDC</span></div>
+            <div class="srow"><span class="k">Once only</span><span class="v">#a41f-9b02</span></div>
+            <div class="srow seal"><span class="k">Seal</span><span class="v f-seal">3a9f…c210</span></div>
+            <div class="srow verdict" aria-live="polite"><span class="k">Verdict</span><span class="stamp"><span class="s-ok">Seal holds</span><span class="s-bad">Seal broken</span></span></div>
+          </div>
+          <div class="tbtns">
+            <button type="button" class="tbtn" data-t="amount">Raise the amount</button>
+            <button type="button" class="tbtn" data-t="payee">Redirect it</button>
+            <button type="button" class="tbtn" data-t="none" disabled>Put it back</button>
+          </div>
+          <p class="hint">An illustration of a check that really runs, on every payment, on the network — not a promise we make.</p>
+        </div>
+
+        <div class="pcard rv" style="--d:.08s">
+          <h3>The details, if you want them</h3>
+          <p class="hint">No jargon. Open whichever one you were about to ask.</p>
+          <div class="folds">
+            <details class="fold">
+              <summary><span class="q">01</span>Where does my key live?</summary>
+              <p>Your phone makes it when you set up the wallet, out of your 24 recovery words, and keeps it in the app's own storage on that phone. It is never uploaded — not to us, not to the shop, not to the network. <b>Nobody else has a copy.</b> That cuts both ways: lose the phone and the words, and the money is gone for us too.</p>
+            </details>
+            <details class="fold">
+              <summary><span class="q">02</span>What exactly does my phone sign?</summary>
+              <p>Who gets paid, how much, which asset, a one-time number for this payment, and a deadline. All of it is crushed into a single short fingerprint, and your key signs <b>that fingerprint</b>. Change a single character of the slip and the fingerprint changes with it, so the signature stops matching. There is no way to edit just one part.</p>
+            </details>
+            <details class="fold">
+              <summary><span class="q">03</span>If the shop carries it, can the shop change it?</summary>
+              <p>No. The shop's phone is holding sealed bytes it cannot rewrite. It has exactly two options: pass the slip on, or don't. <b>If it doesn't, no money moves</b> — you simply haven't paid, and you'll see that. What it can't do is raise the amount, point the payment somewhere else, or charge you again later.</p>
+            </details>
+            <details class="fold">
+              <summary><span class="q">04</span>What can ∂pay's server actually do?</summary>
+              <p>Less than you'd expect. It hands you this website and the app, and it reads public information back to you — your balances, your history, which assets exist. <b>Payments don't go through it at all</b>; your phone, or the shop's, talks to the network directly. And if we ever did stand in the middle, it would change nothing: we'd be holding the same sealed bytes as everyone else.</p>
+            </details>
+            <details class="fold">
+              <summary><span class="q">05</span>Can one payment be charged twice?</summary>
+              <p>No. Every slip carries a one-time number. Send it once or a hundred times and <b>the network settles it exactly once</b>, ignoring the rest. Each slip also carries a deadline a few minutes out — after that it's dead paper, and nothing moves.</p>
+            </details>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <p class="proof-note rv">Your key never leaves your phone. Every payment is settled by <b>arithmetic, not by trust</b> — not ours, not the shop's.</p>
+  </section>
+
   <!-- ————— merchants: the web wallet is the terminal ————— -->
   <section id="merchants" class="wrap">
     <div class="m-grid">
@@ -1194,6 +1422,34 @@
   } else {
     els.forEach(function (el) { el.classList.add('in'); });
   }
+})();
+
+/* The #proof toys. Both cards are CSS state machines, so this only flips one
+   attribute each; every visual consequence lives in the stylesheet. */
+(function () {
+  var route = document.getElementById('routecard');
+  var sw = document.getElementById('routeswitch');
+  sw.addEventListener('click', function () {
+    var off = route.getAttribute('data-route') === 'on';
+    route.setAttribute('data-route', off ? 'off' : 'on');
+    sw.setAttribute('aria-checked', off ? 'true' : 'false');
+    sw.setAttribute('aria-label', off
+      ? 'Your phone is offline. Activate to see the online route.'
+      : 'Your phone is online. Activate to see the offline route.');
+  });
+
+  // Tampering disables the other tamper button, so the card always returns through
+  // 'none' before it can be tampered again — which is also what re-arms the shake
+  // and the stamp (a CSS animation only restarts when the rule starts applying).
+  var card = document.getElementById('tampercard');
+  var btns = card.querySelectorAll('.tbtn');
+  btns.forEach(function (b) {
+    b.addEventListener('click', function () {
+      var t = b.getAttribute('data-t');
+      card.setAttribute('data-tamper', t);
+      btns.forEach(function (o) { o.disabled = (o.getAttribute('data-t') === 'none') === (t === 'none'); });
+    });
+  });
 })();
 </script>
 
