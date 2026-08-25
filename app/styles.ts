@@ -484,16 +484,15 @@ function buildStyles(p: Palette) {
   // with progress dots + the primary Next. Tangerine stays reserved for Next, the active dot, and
   // the in-scene stamp accents (brand discipline is unchanged).
   walkRoot: {flex: 1, backgroundColor: p.bg},
-  // Top bar: [close (replay only)] · campaign-corner spacer · [Skip (first-run only)]. Both
-  // affordances are 44pt targets.
-  walkTop: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 6, minHeight: 52},
-  walkSkipBtn: {minHeight: 44, paddingHorizontal: 14, justifyContent: 'center'},
-  walkSkipText: {color: p.sub, fontSize: 15, fontWeight: '600', fontFamily: FONT.sansMedium},
+  // Chrome (founder ask 2026-08-24): the education surfaces share the app's standard sheet
+  // header — S.sheetHead + S.sheetTitle + the 44pt boxed S.sheetClose top-right — exactly the
+  // SettingsSheet grammar, instead of a bespoke wordmark/Skip bar. The boxed affordance is
+  // close in the Walkthrough replay and skip/explore on first-run + Rehearsal.
   walkBackBtn: {minHeight: 44, paddingHorizontal: 12, justifyContent: 'center'},
   walkBackText: {color: p.sub, fontSize: 15, fontWeight: '600', fontFamily: FONT.sansMedium},
   // Text block — LEFT-aligned (the editorial reading; centered stacks read as generic onboarding,
-  // which the spec bans). Title is one size down from wordmarkBig so the wordmark stays loudest.
-  walkBody: {paddingHorizontal: 28, paddingTop: 6},
+  // which the spec bans). 22dp side margins = the sheet rhythm (sheetHead/sheetCenter use 22).
+  walkBody: {paddingHorizontal: 22, paddingTop: 6},
   walkEyebrow: {fontSize: 11, fontWeight: '600', color: p.sub2, letterSpacing: 1.8, textTransform: 'uppercase', fontFamily: FONT.mono},
   walkTitle: {fontSize: 29, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.7, lineHeight: 33, marginTop: 12},
   walkText: {fontSize: 16, color: p.sub, lineHeight: 23, marginTop: 12, fontFamily: FONT.sans},
@@ -502,7 +501,7 @@ function buildStyles(p: Palette) {
   walkStage: {alignSelf: 'stretch', backgroundColor: p.panel, borderRadius: 22, borderWidth: 1, borderColor: p.line2, overflow: 'hidden', marginTop: 26, aspectRatio: 1.32, ...LIFT_SM},
   // Corner marker on the plate — the travel-document detail ("01 — SIGNAL"): mono, top-right.
   walkStageTag: {position: 'absolute', top: 12, right: 16, fontSize: 10, fontWeight: '600', color: p.brand, letterSpacing: 1.4, fontFamily: FONT.mono, borderWidth: 1, borderColor: p.line2, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3, transform: [{rotate: '3deg'}], opacity: 0.9},
-  walkFooter: {paddingHorizontal: 24, paddingBottom: 14, paddingTop: 18},
+  walkFooter: {paddingHorizontal: 22, paddingBottom: 14, paddingTop: 18},
   // Dots row: relative so the Back link can sit absolutely at the left while the dots center.
   walkNavRow: {position: 'relative', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 12, minHeight: 34},
   walkDot: {height: 6, borderRadius: 3, backgroundColor: p.line},

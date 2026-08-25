@@ -24,8 +24,8 @@
  * phrased once, here, rendered verbatim, pinned by __tests__/education.test.ts.
  */
 
-/** The campaign line — the promise in five words. Rendered as the walkthrough send-off. */
-export const CAMPAIGN_LINE = 'Roaming off. Payment on.';
+/** The campaign line — the promise in four words. Rendered as the walkthrough send-off. */
+export const CAMPAIGN_LINE = "Signal? Don't need it.";
 
 /** Illustration keys the Walkthrough maps to its animated scenes (no emoji, no stock art). */
 export type WalkthroughVisual = 'offlineHandoff' | 'keyOnDevice' | 'exactlyOneAsset';

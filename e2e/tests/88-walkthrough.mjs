@@ -73,7 +73,7 @@ export async function run() {
     const scene3Text = await driver.bodyText();
     // The send-off strip renders the campaign line in mono uppercase — match case-insensitively.
     assertIncludes(
-      scene3Text.toLowerCase(), 'roaming off. payment on.',
+      scene3Text.toLowerCase(), "signal? don't need it.",
       'campaign line on the final scene');
     console.log('[88-walkthrough] ✓ scene 3 exact-asset copy + campaign line pinned');
 

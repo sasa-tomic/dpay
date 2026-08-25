@@ -92,7 +92,7 @@ describe('NfcTapView J5 motion — one beat per phase', () => {
       expect(find('offline-peak')).toHaveLength(0);
       expect(find('paid-stamp')).toHaveLength(0);
       const text = tree.root.findAllByType(Text).map(t => String(t.props.children)).join(' ');
-      expect(text).not.toContain('Roaming off');
+      expect(text).not.toContain("Don't need it");
       expect(text).not.toContain('settled');
     }
   });
@@ -117,7 +117,7 @@ describe('NfcTapView J5 motion — one beat per phase', () => {
     expect(find('offline-peak')).toHaveLength(1);
     // During the moment: the campaign line is present (byte-exact, single-sourced constant).
     const during = tree.root.findAllByType(Text).map(t => String(t.props.children)).join(' ');
-    expect(during).toContain('Roaming off. Payment on.');
+    expect(during).toContain("Signal? Don't need it.");
     // Auto-settles into the remnant on the same timer (deterministic e2e catch): the wrapper
     // testID PERSISTS (mounted-but-settled) and the remnant mark appears.
     await act(async () => { jest.advanceTimersByTime(2500); });
@@ -130,6 +130,6 @@ describe('NfcTapView J5 motion — one beat per phase', () => {
     await act(async () => { jest.advanceTimersByTime(2500); });
     const text = tree.root.findAllByType(Text).map(t => String(t.props.children)).join(' ');
     expect(text).toContain('paid with no signal');
-    expect(text).not.toContain('Roaming off. Payment on.');
+    expect(text).not.toContain("Signal? Don't need it.");
   });
 });

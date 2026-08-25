@@ -16,10 +16,10 @@
  * `reducedMotion` override) collapses every animation to instant final state.
  *
  * Variants:
- *   - first-run (Onboarding): `onSkip` shows the top-right Skip; `onDone` fires on the final
- *     "Get started" (Onboarding awards walkthroughDone on either exit).
- *   - replay (Settings Modal): `onClose` shows the top-left close affordance instead of Skip;
- *     "Get started" then also exits via onDone.
+ *   - first-run (Onboarding): `onSkip` shows the boxed top-right affordance as Skip; `onDone`
+ *     fires on the final "Get started" (Onboarding awards walkthroughDone on either exit).
+ *   - replay (Settings Modal): `onClose` shows the same boxed affordance as a close instead
+ *     of skip; "Get started" then also exits via onDone.
  *
  * Trip-prep auto-detection (founder rule 2026-08-24): MOUNTING the walkthrough awards
  * `flowUnderstood` (idempotent) — viewing the intro IS seeing the flow, first-run or replay.
@@ -29,11 +29,11 @@
  * `btn-walkthrough-skip`, `btn-walkthrough-close`, `btn-walkthrough-back`, `walkthrough-dots`.
  */
 import React, {useEffect, useRef, useState} from 'react';
-import {Animated, Easing, Pressable, SafeAreaView, StatusBar, Text, View} from 'react-native';
+import {Animated, Easing, Pressable, SafeAreaView, ScrollView, StatusBar, Text, View} from 'react-native';
 import Svg, {Circle, G, Line, Path, Rect} from 'react-native-svg';
 import {C} from '../config/palette';
 import {S, isDark} from '../styles';
-import {CAMPAIGN_LINE, WALKTHROUGH_SCENES, type WalkthroughVisual} from '../config/education';
+import {CAMPAIGN_LINE, JourneyHowItWorksTitle, WALKTHROUGH_SCENES, type WalkthroughVisual} from '../config/education';
 import {useReducedMotion} from '../hooks/useReducedMotion';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {JOURNEY_STAMPS, awardStamp} from '../lib/journey';
@@ -466,8 +466,10 @@ export function Walkthrough({onDone, onSkip, onClose, reducedMotion}: Walkthroug
     <SafeAreaView style={S.walkRoot} testID="walkthrough">
       <StatusBar barStyle={isDark() ? 'light-content' : 'dark-content'} backgroundColor={C.bg} translucent={false} />
 
-      {/* Top bar: [close (replay) | wordmark (first-run)] · [Skip (first-run)] */}
-      <View style={S.walkTop}>
+      {/* Header — the app's standard sheet chrome (SettingsSheet grammar): title left, the
+          44pt boxed affordance top-right (replay: close · first-run: skip). */}
+      <View style={S.sheetHead}>
+        <Text style={S.sheetTitle}>{JourneyHowItWorksTitle}</Text>
         {onClose ? (
           <Pressable
             testID="btn-walkthrough-close"
@@ -478,32 +480,28 @@ export function Walkthrough({onDone, onSkip, onClose, reducedMotion}: Walkthroug
             accessibilityState={{disabled: false}}>
             <IconClose size={18} color={C.sub} />
           </Pressable>
-        ) : (
-          <View style={{flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 6}}>
-            <Text style={[S.wordmark, {fontSize: 20}]}>∂<Text style={S.wordmarkPay}>pay</Text></Text>
-          </View>
-        )}
+        ) : null}
         {onSkip ? (
           <Pressable
             testID="btn-walkthrough-skip"
-            style={S.walkSkipBtn}
+            style={S.sheetClose}
             onPress={onSkip}
             accessibilityRole="button"
             accessibilityLabel="Skip walkthrough"
             accessibilityHint="Go straight to creating your wallet"
             accessibilityState={{disabled: false}}>
-            <Text style={S.walkSkipText}>Skip</Text>
+            <IconClose size={18} color={C.sub} />
           </Pressable>
         ) : null}
       </View>
 
       {/* Only the ACTIVE scene is mounted — advancing re-mounts the next scene so its entrance
-          choreography replays (and the e2e net can assert scene-by-scene presence).
-          S.walkBody = the same 28dp side margins Rehearsal/TripPassport use — without it the
-          title/body/stage plate render flush to the screen edges (founder report 2026-08-24). */}
-      <View style={[S.walkBody, {flex: 1}]}>
+          choreography replays (and the e2e net can assert scene-by-scene presence). The body
+          scrolls (short screens / display-zoom fonts must never clip the stage plate);
+          S.walkBody carries the same 22dp side margins as the sheet header above it. */}
+      <ScrollView style={{flex: 1}} contentContainerStyle={S.walkBody}>
         {WALKTHROUGH_SCENES.map((_scene, k) => (k === i ? <Scene key={k} index={k} reduced={reduced} /> : null))}
-      </View>
+      </ScrollView>
 
       {/* Footer: the campaign line runs under EVERY scene (UX hardening 2026-08-23: was
           final-scene-only — the message the whole walkthrough exists for wasn't visible until
@@ -552,7 +550,7 @@ function useDotWidth(active: boolean): Animated.Value {
   return w;
 }
 
-/** "— ROAMING OFF. PAYMENT ON. —" — the campaign send-off on the final scene. */
+/** "— SIGNAL? DON'T NEED IT. —" — the campaign send-off on the final scene. */
 function CampaignStrip({reduced}: {reduced: boolean}) {
   const op = useRef(new Animated.Value(reduced ? 1 : 0)).current;
   const sx = useRef(new Animated.Value(reduced ? 1 : 0)).current;

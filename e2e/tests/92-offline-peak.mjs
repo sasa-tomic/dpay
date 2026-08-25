@@ -1,7 +1,7 @@
 // Flow 92 — the one-shot offline peak (Trip Ready J5).
 //
-// The FIRST truly-offline CONFIRMED payment earns the campaign moment ("Roaming off. Payment
-// on."), which auto-settles into a quiet remnant; every later payment — online OR offline —
+// The FIRST truly-offline CONFIRMED payment earns the campaign moment ("Signal? Don't need
+// it."), which auto-settles into a quiet remnant; every later payment — online OR offline —
 // shows nothing (the journey stamp firstOfflinePayment is the one-shot, persisted). This flow
 // drives the REAL offline hand-off (flow 20's gateway-live/relay-dead pattern), reconciles to
 // Paid, and asserts the peak + its settled remnant; then a SECOND offline payment (quiet), and
@@ -82,7 +82,7 @@ export async function run() {
     // HONESTY: the hand-off moment (before confirmation) must carry NO peak, NO stamp — the
     // payment is signed, not settled. The "Handed to bob" pending view stays quiet too.
     const qrBody = await driver.bodyText();
-    assert(!qrBody.includes('Roaming off'), 'the un-confirmed hand-off QR view must NOT show the campaign line');
+    assert(!qrBody.includes("Don't need it"), 'the un-confirmed hand-off QR view must NOT show the campaign line');
     await absent(driver, 'offline-peak');
     await absent(driver, 'paid-stamp');
     console.log(`[${meta.name}] ✓ hand-off moment honest: no peak, no stamp`);
@@ -96,15 +96,17 @@ export async function run() {
     });
     assert(submitted.status === 202, `counterparty submit must be 202, got ${submitted.status}`);
 
-    await setRelay(driver, env.relayBaseURL);
-    assert(await driver.waitForText('Paid ✓', {timeoutMs: 12_000}), 'A back online should reconcile to Paid ✓');
-
     // --- THE PEAK: campaign moment on the first offline confirmed payment. ---------------------
-    // (Race-hardened 2026-08-23: the peak auto-settles in ~2s and the old find-then-read pair
-    // burned 3 CDP roundtrips after Paid ✓ — under full-pool load that gap exceeded the window
-    // and the line had settled away. The campaign text mounts in the SAME render as Paid, so a
-    // single waitForText started now catches it within one poll of mount, well inside 2s.)
-    assert(await driver.waitForText('Roaming off. Payment on.', {timeoutMs: 6_000}), 'the peak must carry the single-sourced campaign line');
+    // (Race-hardened 2026-08-24, round 2: the reconcile poll rides the IC GATEWAY — which
+    // goOffline({keepGateway:true}) deliberately keeps ALIVE — not the relay. Paid ✓ and the
+    // peak therefore mount WHILE THE RELAY IS STILL DEAD, and the peak auto-settles in ~2s.
+    // Round 1 (2026-08-23) only removed CDP roundtrips AFTER Paid ✓; the setRelay "come back
+    // online" dance (a 5-click UI roundtrip through Settings) sat BETWEEN the counterparty
+    // submit and the first wait — under pool load it alone burned the whole 2s window. The fix:
+    // wait for Paid + the moment + the settled remnant with the relay still dead (none of them
+    // need the relay), and only THEN setRelay — the dance can no longer race the moment.)
+    assert(await driver.waitForText('Paid ✓', {timeoutMs: 12_000}), 'the gateway reconcile should flip the hand-off to Paid ✓ (relay still dead)');
+    assert(await driver.waitForText("Signal? Don't need it.", {timeoutMs: 6_000}), 'the peak must carry the single-sourced campaign line');
     await driver.findByTestID('offline-peak', {timeoutMs: 3_000});
     await driver.screenshot('92-offline-peak-moment');
     console.log(`[${meta.name}] ✓ PEAK visible: campaign line + stamp moment`);
@@ -116,6 +118,11 @@ export async function run() {
     assert(!(await driver.bodyText()).includes('No signal the whole time'), 'the moment microcopy must settle away');
     await driver.screenshot('92-offline-peak-settled');
     console.log(`[${meta.name}] ✓ peak settled into the quiet remnant (first-offline-stamp)`);
+
+    // NOW come back online (deferred past the whole peak moment — see the race note above). The
+    // remaining legs of this flow (second payment's balance display, the online ∂50.00 check)
+    // need the live relay; the peak moment never did.
+    await setRelay(driver, env.relayBaseURL);
 
     // --- Second offline payment: NOTHING (one-shot, persisted via the journey stamp). -----------
     // New nonce + fresh request from bob; A stays on the paid card → New payment → offline again.
@@ -140,7 +147,7 @@ export async function run() {
     // stamp still shows (it is not the one-shot — only the peak is) — faded-in, not just mounted.
     await absent(driver, 'offline-peak');
     await absent(driver, 'first-offline-stamp');
-    assert(!(await driver.bodyText()).includes('Roaming off'), 'second offline paid must NOT re-run the peak');
+    assert(!(await driver.bodyText()).includes("Don't need it"), 'second offline paid must NOT re-run the peak');
     await waitFadedIn(driver, 'paid-stamp');
     console.log(`[${meta.name}] ✓ second offline payment: quiet (no peak), calm stamp only`);
 
@@ -155,7 +162,7 @@ export async function run() {
     // Online auto-sign: decode → sign → submitTransfer → settled → Paid ✓ (no Approve press).
     assert(await driver.waitForText('Paid ✓', {timeoutMs: 12_000}), 'online auto-sign settles to Paid ✓ (flow 03-style)');
     await absent(driver, 'offline-peak');
-    assert(!(await driver.bodyText()).includes('Roaming off'), 'the ONLINE paid path must NEVER peak');
+    assert(!(await driver.bodyText()).includes("Don't need it"), 'the ONLINE paid path must NEVER peak');
     await waitFadedIn(driver, 'paid-stamp');
     console.log(`[${meta.name}] ✓ online paid: no peak ever, calm stamp only`);
 

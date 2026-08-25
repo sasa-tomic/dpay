@@ -28,6 +28,7 @@ import {REHEARSAL_STEPS, REHEARSAL_PUNCHLINE, REHEARSAL_TITLE} from '../config/e
 import {JOURNEY_STAMPS, awardStamp} from '../lib/journey';
 import {useReducedMotion} from '../hooks/useReducedMotion';
 import {useEscapeToClose} from '../hooks/useHotkeys';
+import {IconClose} from './icons';
 
 const EASE_OUT = Easing.out(Easing.cubic);
 const STAGE_TAGS = ['01 — REQUEST', '02 — APPROVE', '03 — SETTLE'] as const;
@@ -63,21 +64,23 @@ export function Rehearsal({onTry, onSkip, reducedMotion}: {onTry: () => void; on
   return (
     <SafeAreaView testID="rehearsal" style={S.walkRoot}>
       <StatusBar barStyle={isDark() ? 'light-content' : 'dark-content'} backgroundColor={C.bg} translucent={false} />
-      <View style={S.walkTop}>
-        <Text style={S.wordmarkPay}>∂pay</Text>
+      {/* Header — the app's standard sheet chrome (SettingsSheet grammar): title left, the
+          44pt boxed affordance top-right ("Explore wallet" — skip to the funded wallet). */}
+      <View style={S.sheetHead}>
+        <Text style={S.sheetTitle}>Rehearsal</Text>
         <Pressable
           testID="btn-rehearsal-skip"
-          style={S.walkSkipBtn}
+          style={S.sheetClose}
           onPress={onSkip}
           accessibilityRole="button"
           accessibilityLabel="Explore wallet"
-          accessibilityHint="Skip the rehearsal and open your wallet">
-          <Text style={S.walkSkipText}>Explore wallet</Text>
+          accessibilityHint="Skip the rehearsal and open your wallet"
+          accessibilityState={{disabled: false}}>
+          <IconClose size={18} color={C.sub} />
         </Pressable>
       </View>
       <ScrollView style={S.walkScroll} contentContainerStyle={S.walkBody}>
-        <RiseText style={S.walkEyebrow} delay={0} reduced={reduced}>{'THE REHEARSAL'}</RiseText>
-        <RiseText style={S.walkTitle} delay={70} reduced={reduced}>{REHEARSAL_TITLE}</RiseText>
+        <RiseText style={S.walkTitle} delay={0} reduced={reduced}>{REHEARSAL_TITLE}</RiseText>
         {REHEARSAL_STEPS.map((step, i) => (
           <View key={step.id} testID={`rehearsal-step-${i + 1}`} style={S.rehStep}>
             <View style={S.rehBadge}><Text style={S.rehBadgeText}>{STAGE_TAGS[i]}</Text></View>

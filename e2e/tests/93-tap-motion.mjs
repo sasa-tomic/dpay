@@ -89,7 +89,7 @@ export async function run() {
     assert(!await has(driver, 'tap-success-stamp'), 'HONESTY: pending must not carry a settled mark (stamp ring is gone everywhere)');
     assert(!await has(driver, 'paid-stamp'), 'HONESTY: pending must not carry the paid stamp');
     assert(!await has(driver, 'offline-peak'), 'HONESTY: pending must not carry the peak');
-    assert(!(await driver.bodyText()).includes('Roaming off'), 'HONESTY: no campaign line on pending');
+    assert(!(await driver.bodyText()).includes("Don't need it"), 'HONESTY: no campaign line on pending');
     await driver.screenshot('93-tap-motion-pending');
 
     // declined → restrained shake-settle; still no stamp/campaign.
@@ -99,7 +99,7 @@ export async function run() {
     assert(await driver.waitForText('Declined', {timeoutMs: 4_000}), 'declined shows "Declined"');
     assert(await has(driver, 'tap-shake'), 'declined mounts the restrained shake-settle');
     assert(!await has(driver, 'tap-success-stamp'), 'HONESTY: declined must not carry a settled mark (stamp ring is gone everywhere)');
-    assert(!(await driver.bodyText()).includes('Roaming off'), 'HONESTY: no campaign line on declined');
+    assert(!(await driver.bodyText()).includes("Don't need it"), 'HONESTY: no campaign line on declined');
     await driver.screenshot('93-tap-motion-declined');
     console.log(`[${meta.name}] ✓ IC rail: all phases + honesty guards`);
 

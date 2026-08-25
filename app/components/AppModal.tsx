@@ -21,6 +21,7 @@
  */
 import React from 'react';
 import {Modal, Platform, StatusBar, View} from 'react-native';
+import {initialWindowMetrics} from 'react-native-safe-area-context';
 import {SheetOverlay} from './SheetOverlay';
 
 export function AppModal({onRequestClose, children}: {
@@ -32,15 +33,19 @@ export function AppModal({onRequestClose, children}: {
     // Contained: absolute inset WITHIN the app column — can never escape the 480px frame.
     return <SheetOverlay>{children}</SheetOverlay>;
   }
+  // SAME RULE as MainActivity's insets reservation (the main screen's sizing): API >= 35
+  // enforces edge-to-edge, so the modal window spans the full display and needs BOTH system
+  // bars reserved — status bar (top) and navigation bar (bottom). On API <= 34 the legacy
+  // window model already reserves both bars in the modal's own window — padding there
+  // double-counts and shows a band (founder report, Poco X3 / API 31). Platform.Version is
+  // the device API level on Android. Bottom inset: founder report HyperOS 3 / API 35 — the
+  // walkthrough's pinned Next button ran under the nav buttons (initialWindowMetrics is the
+  // raw window-inset constant from the already-linked safe-area-context native module; on
+  // web/jest it resolves to null and this branch is native-only anyway).
+  const bars = Platform.OS === 'android' && Platform.Version >= 35;
   return (
     <Modal visible animationType="slide" onRequestClose={onRequestClose}>
-      {/* The Modal is its own Android window and does NOT inherit the root window's system-bar
-          insets. SAME RULE as MainActivity's insets reservation (the main screen's sizing):
-          API >= 35 enforces edge-to-edge, so the modal window starts at y=0 and needs the exact
-          status-bar pad; on API <= 34 the legacy window model already reserves the bar space in
-          the modal's own window — padding there double-counts and shows a white band (founder
-          report, Poco X3 / API 31). Platform.Version is the device API level on Android. */}
-      <View style={{flex: 1, paddingTop: Platform.OS === 'android' && Platform.Version >= 35 ? (StatusBar.currentHeight ?? 0) : 0}}>
+      <View style={{flex: 1, paddingTop: bars ? (StatusBar.currentHeight ?? 0) : 0, paddingBottom: bars ? (initialWindowMetrics?.insets.bottom ?? 0) : 0}}>
         {children}
       </View>
     </Modal>

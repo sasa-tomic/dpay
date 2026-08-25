@@ -3,7 +3,7 @@
  *
  * A PRIVATE capability credential rendered as a travel document page: four finite stamp
  * positions (backed up / saw the flow / funds loaded / first payment) on a porcelain
- * card with a fine rule and a mono eyebrow ("TRIP READINESS · n OF 4"). Empty positions
+ * card with a fine rule and a mono count ("n OF 4"). Empty positions
  * are debossed dashes — a place not yet stamped; filled positions are inked rings with
  * the two-line caps label + the award date ('AUG 23'), each at its own slight rotation
  * so the set reads hand-stamped. There is NO checklist ✓, no counters beyond n/4, no
@@ -34,7 +34,7 @@
  * render (visual baselines capture immediately on open).
  */
 import React, {useEffect, useRef, useState} from 'react';
-import {Animated, Easing, Pressable, SafeAreaView, StatusBar, Text, View} from 'react-native';
+import {Animated, Easing, Pressable, SafeAreaView, ScrollView, StatusBar, Text, View} from 'react-native';
 import {C} from '../config/palette';
 import {S, isDark} from '../styles';
 import {JOURNEY_STAMPS, hasStamp, markSeen, useJourney} from '../lib/journey';
@@ -135,7 +135,10 @@ export function PassportArchive({onClose, onNext, onStep}: {
   return (
     <SafeAreaView style={S.walkRoot}>
       <StatusBar barStyle={isDark() ? 'light-content' : 'dark-content'} backgroundColor={C.bg} translucent={false} />
-      <View style={S.walkTop}>
+      {/* Header — the app's standard sheet chrome (SettingsSheet grammar): title left, the
+          44pt boxed close affordance top-right. */}
+      <View style={S.sheetHead}>
+        <Text style={S.sheetTitle}>{PASSPORT_TITLE}</Text>
         <Pressable
           testID="btn-passport-close"
           style={S.sheetClose}
@@ -146,13 +149,15 @@ export function PassportArchive({onClose, onNext, onStep}: {
           <IconClose size={18} color={C.sub} />
         </Pressable>
       </View>
-      <View style={S.walkBody}>
+      {/* The document scrolls (short screens must never clip the 2×2 grid / Done row);
+          S.walkBody carries the same 22dp side margins as the sheet header above it. */}
+      <ScrollView style={{flex: 1}} contentContainerStyle={S.walkBody}>
         {/* Hold render until the journey loads (no empty→filled flash mid-frame). */}
         {loaded ? (
           <View testID="passport-archive" style={S.passportCard}>
-            {/* Eyebrow row: the document title + the n-of-4 count (mono caps, the only number). */}
+            {/* Document head: the n-of-4 count (mono caps, the only number) over the fine
+                rule — the page title itself lives in the standard sheet header above. */}
             <View style={S.passportHead}>
-              <Text style={S.walkEyebrow}>{PASSPORT_TITLE.toUpperCase()}</Text>
               <Text testID="passport-count" style={S.walkEyebrow}>{count} OF 4</Text>
             </View>
             <View style={S.passportRule} />
@@ -279,7 +284,7 @@ export function PassportArchive({onClose, onNext, onStep}: {
         ) : (
           <View style={S.passportCard} />
         )}
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }

@@ -2,7 +2,7 @@
  * OfflinePeak.tsx — the one-shot offline peak moment (Trip Ready J5, 2026-08-22).
  *
  * The FIRST truly-offline confirmed payment earns the campaign moment: the editorial campaign
- * line ("Roaming off. Payment on." — the single-sourced CAMPAIGN_LINE constant) and the
+ * line ("Signal? Don't need it." — the single-sourced CAMPAIGN_LINE constant) and the
  * "no signal the whole time" microcopy. ~2s, then it settles INTO the paid card as a quiet
  * mono remnant — it never blocks Done/actions, auto-settles, and is shown exactly once ever
  * (the gating + stamp award live in the caller; see lib/peak.ts). (The 118px "dpay" circle

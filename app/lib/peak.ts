@@ -1,8 +1,8 @@
 /**
  * peak.ts — the pure gate for the one-shot offline peak moment (Trip Ready J5, 2026-08-22).
  *
- * The FIRST truly-offline confirmed payment earns the campaign moment ("Roaming off. Payment
- * on."). This module owns ONLY the decision — presentation lives in OfflinePeak.tsx, awarding
+ * The FIRST truly-offline confirmed payment earns the campaign moment ("Signal? Don't need
+ * it."). This module owns ONLY the decision — presentation lives in OfflinePeak.tsx, awarding
  * lives in the paid surfaces (via journey.awardStamp, idempotent). Keeping the gate pure makes
  * the honesty contract jest-pinnable:
  *

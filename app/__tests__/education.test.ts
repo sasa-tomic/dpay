@@ -45,7 +45,7 @@ describe('education copy (the comprehension contract)', () => {
   });
 
   test('campaign line + settings entry strings', () => {
-    expect(CAMPAIGN_LINE).toBe('Roaming off. Payment on.');
+    expect(CAMPAIGN_LINE).toBe("Signal? Don't need it.");
     expect(JourneyHowItWorksTitle).toBe('How dpay works');
   });
 });
