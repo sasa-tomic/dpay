@@ -1,10 +1,21 @@
 /**
  * education.ts — the STRUCTURE of the education surfaces: scene/step ids, illustration keys, and
  * display ORDER. The words themselves live in the message catalog (`M.education`, defined in
- * i18n/domains/wallet.ts) — this module composes them into the shapes every consumer already
- * imports, so `WALKTHROUGH_SCENES`/`REHEARSAL_STEPS`/`COACHING_TIPS`/`CAMPAIGN_LINE` keep working
- * unchanged (jest pins in `__tests__/education.test.ts`, e2e flow 90, and
- * `crates/dpay-relay/assets/landing.html`, which single-sources CAMPAIGN_LINE).
+ * i18n/domains/en/wallet.ts) — this module composes them into the shapes their surfaces render
+ * (jest pins in `__tests__/education.test.ts`, e2e flow 90, and `crates/dpay-relay/assets/
+ * landing.html`, which single-sources the campaign line from the catalog).
+ *
+ * Every export here is a FUNCTION, and deliberately so. A module-level constant would evaluate
+ * `M.education.…` once, at import time; a runtime locale switch replaces `M`'s nested objects
+ * wholesale (`Object.assign(M, catalog)` — the same in-place trick `applyPalette` uses for S/C),
+ * so a captured composition would render the old language forever after a switch. Composing per
+ * call puts these reads on exactly the same footing as the inline `M.some.key` reads in every
+ * component: read during render, always current.
+ *
+ * Single-key copy is NOT wrapped here. A named alias for one catalog key is indirection without
+ * value — call sites read `M.education.campaignLine` / `.howItWorksTitle` / `.rehearsal.title` /
+ * `.rehearsal.punchline` / `.coachTips[key]` directly. Only genuine COMPOSITION (structure the
+ * catalog does not own, merged with copy) earns a function below.
  *
  * The comprehension CONTRACT is unchanged and still enforced by `__tests__/education.test.ts` —
  * the three product truths are phrased once, in the catalog, and never paraphrased elsewhere:
@@ -22,9 +33,6 @@
  */
 import {M} from '../i18n/index.ts';
 
-/** The campaign line — the promise in four words. Rendered as the walkthrough send-off. */
-export const CAMPAIGN_LINE = M.education.campaignLine;
-
 /** Illustration keys the Walkthrough maps to its animated scenes (no emoji, no stock art). */
 export type WalkthroughVisual = 'offlineHandoff' | 'keyOnDevice' | 'exactlyOneAsset';
 
@@ -39,15 +47,18 @@ export type WalkthroughScene = {
   visual: WalkthroughVisual;
 };
 
-/** Exactly three scenes — the whole model in one minute (spec Journey 1). */
-export const WALKTHROUGH_SCENES: readonly WalkthroughScene[] = [
-  {id: 'offline', visual: 'offlineHandoff', ...M.education.walkthrough.scenes.offline},
-  {id: 'key', visual: 'keyOnDevice', ...M.education.walkthrough.scenes.key},
-  {id: 'exact', visual: 'exactlyOneAsset', ...M.education.walkthrough.scenes.exact},
-];
-
-/** Settings replay entry (SettingsSheet → "How dpay works") + the replay Modal's title. */
-export const JourneyHowItWorksTitle = M.education.howItWorksTitle;
+/** Exactly three scenes — the whole model in one minute (spec Journey 1).
+ *  The id/visual/order table and the copy stay merged in one literal rather than split into a
+ *  locale-independent table plus a merge step: at three rows the table IS the readable artifact
+ *  (each scene is one line, structure and words side by side), and the split would cost two
+ *  tables and a zip to say the same thing. */
+export function walkthroughScenes(): readonly WalkthroughScene[] {
+  return [
+    {id: 'offline', visual: 'offlineHandoff', ...M.education.walkthrough.scenes.offline},
+    {id: 'key', visual: 'keyOnDevice', ...M.education.walkthrough.scenes.key},
+    {id: 'exact', visual: 'exactlyOneAsset', ...M.education.walkthrough.scenes.exact},
+  ];
+}
 
 /**
  * Trip Ready J3 — the payment REHEARSAL: a 3-beat storyboard of one honest payment
@@ -57,30 +68,25 @@ export const JourneyHowItWorksTitle = M.education.howItWorksTitle;
  * connection settles — the payer's phone never needs signal for steps 2 and 3.
  */
 export type RehearsalVisual = 'shopRequest' | 'payerReview' | 'shopSettles';
-/** The one-page rehearsal's title line (mounting the page IS seeing the flow). */
-export const REHEARSAL_TITLE = M.education.rehearsal.title;
 /** The three beat ids — the catalog keys its step copy by these. */
 export type RehearsalStepId = 'request' | 'approve' | 'settle';
 export type RehearsalStep = {id: RehearsalStepId; title: string; body: string; visual: RehearsalVisual};
-export const REHEARSAL_STEPS: readonly RehearsalStep[] = [
-  {id: 'request', visual: 'shopRequest', ...M.education.rehearsal.steps.request},
-  {id: 'approve', visual: 'payerReview', ...M.education.rehearsal.steps.approve},
-  {id: 'settle', visual: 'shopSettles', ...M.education.rehearsal.steps.settle},
-];
-/** The rehearsal's closing line — the comprehension pin: approval + handoff need no signal. */
-export const REHEARSAL_PUNCHLINE = M.education.rehearsal.punchline;
+/** The three beats in display order (same one-literal reasoning as `walkthroughScenes`). */
+export function rehearsalSteps(): readonly RehearsalStep[] {
+  return [
+    {id: 'request', visual: 'shopRequest', ...M.education.rehearsal.steps.request},
+    {id: 'approve', visual: 'payerReview', ...M.education.rehearsal.steps.approve},
+    {id: 'settle', visual: 'shopSettles', ...M.education.rehearsal.steps.settle},
+  ];
+}
 
 /**
  * Trip Ready J4 — contextual first-use coaching. One small dismissible tip, anchored to
  * the surface where its truth applies, shown only until dismissed (journey `seen`
  * markers). Copy rules: ≤2 sentences, plain, and each tip names its one right truth —
  * never a generic "tip", never a celebration.
+ *
+ * Only the KEY set lives here (it is the surface id CoachTip.tsx maps to a glyph, and the
+ * `seen` marker journey.ts stores); the words are read straight from `M.education.coachTips`.
  */
 export type CoachTipKey = 'payReview' | 'receiveRequest' | 'offlineQr' | 'pendingOutcome';
-export type CoachTip = {key: CoachTipKey; title: string; body: string};
-export const COACHING_TIPS: Record<CoachTipKey, CoachTip> = {
-  payReview: {key: 'payReview', ...M.education.coachTips.payReview},
-  receiveRequest: {key: 'receiveRequest', ...M.education.coachTips.receiveRequest},
-  offlineQr: {key: 'offlineQr', ...M.education.coachTips.offlineQr},
-  pendingOutcome: {key: 'pendingOutcome', ...M.education.coachTips.pendingOutcome},
-};

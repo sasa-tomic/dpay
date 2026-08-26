@@ -8,7 +8,7 @@ import {describe, expect, test, beforeEach, jest} from '@jest/globals';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {awardStamp, hasStamp, EMPTY_JOURNEY, type Journey} from '../lib/journey';
 import {
-  PASSPORT_STAMPS, READINESS_STAMPS, PASSPORT_COLLAPSED_KEY,
+  passportStamps, READINESS_STAMPS, PASSPORT_COLLAPSED_KEY,
   computeReadiness, decideFundsReady, awardPaymentTested,
 } from '../lib/readiness';
 import type {BalanceView} from '../lib/assetBalances';
@@ -21,14 +21,14 @@ function view(displayText: string, status: BalanceView['status']): BalanceView {
   return {displayText, status};
 }
 
-describe('READINESS_STAMPS / PASSPORT_STAMPS', () => {
-  test('the four readiness keys in display order, matching PASSPORT_STAMPS', () => {
+describe('READINESS_STAMPS / passportStamps()', () => {
+  test('the four readiness keys in display order, matching passportStamps()', () => {
     expect(READINESS_STAMPS).toEqual(['recoverySaved', 'flowUnderstood', 'fundsReady', 'paymentTested']);
-    expect(PASSPORT_STAMPS.map(s => s.key)).toEqual(READINESS_STAMPS);
+    expect(passportStamps().map(s => s.key)).toEqual(READINESS_STAMPS);
   });
 
   test('every stamp carries non-empty two-line label + hint (the card never renders blanks)', () => {
-    for (const s of PASSPORT_STAMPS) {
+    for (const s of passportStamps()) {
       expect(s.label.length).toBeGreaterThan(0);
       expect(s.label.includes('\n')).toBe(true);
       expect(s.hint.length).toBeGreaterThan(0);
@@ -43,7 +43,7 @@ describe('computeReadiness', () => {
     expect(r.missing).toEqual(READINESS_STAMPS);
     expect(r.complete).toBe(false);
     expect(r.next?.key).toBe('recoverySaved');
-    expect(r.next?.hint).toBe(PASSPORT_STAMPS[0].hint);
+    expect(r.next?.hint).toBe(passportStamps()[0].hint);
   });
 
   test('filled/missing stay in DISPLAY order regardless of award order', () => {

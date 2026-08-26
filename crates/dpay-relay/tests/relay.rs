@@ -724,13 +724,13 @@ async fn landing_page_states_non_custodial_honestly() {
 
 /// Trip Ready Wave 2E (2026-08-22 spec): the landing tells the offline-payment story. The
 /// hero carries the single-source pointer comment to the app's campaign line
-/// (app/config/education.ts CAMPAIGN_LINE — the literal line lives only there since the
-/// founder's 2026-08-24 wording pass 27a258e; the pointer keeps the two homes honest), the
-/// hero states the asymmetry plainly (payer offline, merchant online, the shop's connection
-/// settles it), and the "Paying offline" rail renders the four beats: pay → show your code →
-/// shop scans → settled. Honesty pins: the banned-claims sweep — no "conversion" family, no
-/// "anywhere", no "works with any currency", no "nobody needs internet" — and proof motion
-/// must keep the reduced-motion kill switch.
+/// (app/i18n/domains/en/wallet.ts `M.education.campaignLine` — the literal line lives only
+/// there since the founder's 2026-08-24 wording pass 27a258e; the pointer keeps the two
+/// homes honest), the hero states the asymmetry plainly (payer offline, merchant online,
+/// the shop's connection settles it), and the "Paying offline" rail renders the four beats:
+/// pay → show your code → shop scans → settled. Honesty pins: the banned-claims sweep — no
+/// "conversion" family, no "anywhere", no "works with any currency", no "nobody needs
+/// internet" — and proof motion must keep the reduced-motion kill switch.
 #[tokio::test]
 async fn landing_page_tells_the_offline_payment_story() {
     let (state, _led) = state_from(ledger());
@@ -739,11 +739,11 @@ async fn landing_page_tells_the_offline_payment_story() {
     assert_eq!(status, StatusCode::OK);
     let html = String::from_utf8(bytes).unwrap();
     // The campaign-line single-source pointer comment (the literal line lives only in
-    // app/config/education.ts CAMPAIGN_LINE; the founder's 2026-08-24 wording pass 27a258e
-    // removed the byte-identical copy from this page — the pointer comment keeps the two
-    // homes honest).
+    // app/i18n/domains/en/wallet.ts `M.education.campaignLine`; the founder's 2026-08-24
+    // wording pass 27a258e removed the byte-identical copy from this page — the pointer
+    // comment keeps the two homes honest).
     assert!(
-        html.contains("<!-- single source: app/config/education.ts CAMPAIGN_LINE -->"),
+        html.contains("<!-- single source: app/i18n/domains/en/wallet.ts M.education.campaignLine -->"),
         "the hero must carry the single-source pointer comment"
     );
     // The asymmetry, said plainly: the payer may be offline, the shop is online, and the

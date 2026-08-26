@@ -2,7 +2,6 @@ import {useEffect, useMemo, useState} from 'react';
 import {Linking, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, Text, TextInput, View} from 'react-native';
 import {C} from '../config/palette';
 import {PRIVACY_URL} from '../config/constants';
-import {JourneyHowItWorksTitle} from '../config/education';
 import {S, isDark} from '../styles';
 import {validateSeed} from '../lib/format';
 import {hexToWords, stringToWords, wordsToHex, wordsToString, validateMnemonic} from '../lib/bip39';
@@ -16,7 +15,7 @@ import {SeedWords} from './SeedWords';
 import {IconAuto, IconCheck, IconChevronDown, IconClose, IconExternalLink, IconInfo, IconMoon, IconSun} from './icons';
 import {Walkthrough} from './Walkthrough';
 import {PassportArchive} from './TripPassport';
-import {PASSPORT_TITLE, computeReadiness, type ReadinessKey} from '../lib/readiness';
+import {computeReadiness, type ReadinessKey} from '../lib/readiness';
 import {JOURNEY_STAMPS, awardStamp, useJourney} from '../lib/journey';
 import {choiceLabel, type ThemeOverride} from '../config/theme';
 import {M} from '../i18n';
@@ -409,12 +408,12 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
               style={S.linkBtn}
               onPress={() => setTripReadyOpen(true)}
               accessibilityRole="button"
-              accessibilityLabel={PASSPORT_TITLE}
+              accessibilityLabel={M.education.passport.title}
               accessibilityHint={M.settings.learn.passportHint}
               accessibilityState={{disabled: false}}>
               <View style={S.linkRow}>
                 <IconCheck size={16} color={C.sub} />
-                <Text style={S.linkText}>{PASSPORT_TITLE}</Text>
+                <Text style={S.linkText}>{M.education.passport.title}</Text>
                 <Text testID="trip-readiness-count" style={[S.passportHintTag, {marginLeft: 'auto'}]}>{M.settings.learn.passportCount(tripReadiness.filled.length)}</Text>
               </View>
             </Pressable>
@@ -423,12 +422,12 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
               style={S.linkBtn}
               onPress={() => setHowItWorks(true)}
               accessibilityRole="button"
-              accessibilityLabel={JourneyHowItWorksTitle}
+              accessibilityLabel={M.education.howItWorksTitle}
               accessibilityHint={M.settings.learn.howItWorksHint}
               accessibilityState={{disabled: false}}>
               <View style={S.linkRow}>
                 <IconInfo size={16} color={C.sub} />
-                <Text style={S.linkText}>{JourneyHowItWorksTitle}</Text>
+                <Text style={S.linkText}>{M.education.howItWorksTitle}</Text>
               </View>
             </Pressable>
           </View>

@@ -2,7 +2,7 @@
  * OfflinePeak.tsx — the one-shot offline peak moment (Trip Ready J5, 2026-08-22).
  *
  * The FIRST truly-offline confirmed payment earns the campaign moment: the editorial campaign
- * line ("Signal? Don't need it." — the single-sourced CAMPAIGN_LINE constant) and the
+ * line (`M.education.campaignLine` — the catalog is its single source) and the
  * "no signal the whole time" microcopy. ~2s, then it settles INTO the paid card as a quiet
  * mono remnant — it never blocks Done/actions, auto-settles, and is shown exactly once ever
  * (the gating + stamp award live in the caller; see lib/peak.ts). (The 118px "dpay" circle
@@ -20,7 +20,6 @@ import {Animated, Easing, Text, View} from 'react-native';
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {M} from '../i18n';
-import {CAMPAIGN_LINE} from '../config/education';
 import {useReducedMotion} from '../hooks/useReducedMotion';
 import {IconWifiOff} from './icons';
 
@@ -66,7 +65,7 @@ export function OfflinePeak() {
   return (
     <View testID="offline-peak" style={S.peakWrap} pointerEvents="none">
       <Animated.Text style={[S.peakCampaign, {opacity: lineOp, transform: [{translateY: lineTy}]}]}>
-        {CAMPAIGN_LINE}
+        {M.education.campaignLine}
       </Animated.Text>
       <Animated.Text style={[S.peakMicro, {opacity: microOp}]}>
         {M.education.peak.micro}

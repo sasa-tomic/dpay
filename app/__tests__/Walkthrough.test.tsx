@@ -14,7 +14,7 @@ import React from 'react';
 import renderer, {act} from 'react-test-renderer';
 import {describe, expect, test, jest, beforeEach, afterEach} from '@jest/globals';
 import {Walkthrough} from '../components/Walkthrough';
-import {WALKTHROUGH_SCENES} from '../config/education';
+import {walkthroughScenes} from '../config/education';
 import {JOURNEY_STAMPS, hasStamp, loadJourney} from '../lib/journey';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -77,9 +77,9 @@ describe('Walkthrough', () => {
 
   test('scene bodies render the education copy verbatim (the comprehension contract)', async () => {
     const tree = await render({onDone: () => {}, onSkip: () => {}});
-    expect(findByTestID(tree, 'walkthrough-body-1').props.children).toBe(WALKTHROUGH_SCENES[0].body);
+    expect(findByTestID(tree, 'walkthrough-body-1').props.children).toBe(walkthroughScenes()[0].body);
     await tap(tree, 'btn-walkthrough-next');
-    expect(findByTestID(tree, 'walkthrough-body-2').props.children).toBe(WALKTHROUGH_SCENES[1].body);
+    expect(findByTestID(tree, 'walkthrough-body-2').props.children).toBe(walkthroughScenes()[1].body);
     act(() => { tree.unmount(); });
   });
 

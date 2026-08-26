@@ -13,7 +13,8 @@
  * onboarding flow skips past via skipRehearsalIfPresent (harness).
  */
 import { setup, assert, assertEq, assertIncludes, waitForEnabled, skipWalkthroughIfPresent } from '../harness/lib.mjs';
-import { REHEARSAL_STEPS, REHEARSAL_PUNCHLINE } from '../../app/config/education.ts';
+import { rehearsalSteps } from '../../app/config/education.ts';
+import { M } from '../../app/i18n/index.ts';
 
 export const meta = {
   id: 90,
@@ -79,16 +80,16 @@ export async function run() {
     await driver.findByTestID('rehearsal-step-1', { timeoutMs: 8_000 });
     await driver.findByTestID('rehearsal-step-2', { timeoutMs: 4_000 });
     await driver.findByTestID('rehearsal-step-3', { timeoutMs: 4_000 });
-    assertEq(await driver.readText('rehearsal-body-1'), REHEARSAL_STEPS[0].body, 'step 1 body verbatim');
-    assertEq(await driver.readText('rehearsal-body-2'), REHEARSAL_STEPS[1].body, 'step 2 body verbatim');
-    assertEq(await driver.readText('rehearsal-body-3'), REHEARSAL_STEPS[2].body, 'step 3 body verbatim');
+    assertEq(await driver.readText('rehearsal-body-1'), rehearsalSteps()[0].body, 'step 1 body verbatim');
+    assertEq(await driver.readText('rehearsal-body-2'), rehearsalSteps()[1].body, 'step 2 body verbatim');
+    assertEq(await driver.readText('rehearsal-body-3'), rehearsalSteps()[2].body, 'step 3 body verbatim');
     await new Promise(r => setTimeout(r, 900)); // entrance rise finish
     await driver.screenshot('90-rehearsal-page');
     // Explore wallet is available on the page.
     await driver.findByTestID('btn-rehearsal-skip', { timeoutMs: 4_000 });
     const punch = await driver.readText('rehearsal-punchline');
     assertIncludes(punch, 'offline', 'the punchline names the offline truth');
-    assertEq(punch, REHEARSAL_PUNCHLINE, 'punchline verbatim');
+    assertEq(punch, M.education.rehearsal.punchline, 'punchline verbatim');
     console.log('[90-rehearsal] ✓ one page: 3 steps + offline punchline pinned');
 
     // 5. Page-mount award: flowUnderstood persists (idempotent, once).

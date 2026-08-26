@@ -7,9 +7,9 @@
  *
  * ONE page tells ONE honest payment (request → approve → settle): three badge+line rows — the
  * same postage-mark grammar as the walkthrough's stage tags — with copy verbatim from
- * config/education.ts REHEARSAL_STEPS; the closing line REHEARSAL_PUNCHLINE is the
- * comprehension pin (approval + handoff need no signal). Nothing here fabricates a transaction —
- * it is explicitly a rehearsal, and the exit line says so.
+ * config/education.ts `rehearsalSteps()`; the closing line (`M.education.rehearsal.punchline`)
+ * is the comprehension pin (approval + handoff need no signal). Nothing here fabricates a
+ * transaction — it is explicitly a rehearsal, and the exit line says so.
  *
  * (Was a 3-beat auto-advancing pager — 18s of passive paging doing one screen's job; the round-2
  * UX audit collapsed it to this single scannable page. The whole flow, settle truth included, is
@@ -25,14 +25,13 @@ import {Animated, Easing, Pressable, SafeAreaView, ScrollView, StatusBar, Text, 
 import {C} from '../config/palette';
 import {S, isDark} from '../styles';
 import {M} from '../i18n';
-import {REHEARSAL_STEPS, REHEARSAL_PUNCHLINE, REHEARSAL_TITLE} from '../config/education';
+import {rehearsalSteps} from '../config/education';
 import {JOURNEY_STAMPS, awardStamp} from '../lib/journey';
 import {useReducedMotion} from '../hooks/useReducedMotion';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {IconClose} from './icons';
 
 const EASE_OUT = Easing.out(Easing.cubic);
-const STAGE_TAGS = M.education.rehearsal.stageTags;
 
 /** Rise-in text (Walkthrough grammar): 8px rise + fade, one delay slot per element. */
 function RiseText({children, style, delay, reduced, testID}: {
@@ -81,10 +80,10 @@ export function Rehearsal({onTry, onSkip, reducedMotion}: {onTry: () => void; on
         </Pressable>
       </View>
       <ScrollView style={S.walkScroll} contentContainerStyle={S.walkBody}>
-        <RiseText style={S.walkTitle} delay={0} reduced={reduced}>{REHEARSAL_TITLE}</RiseText>
-        {REHEARSAL_STEPS.map((step, i) => (
+        <RiseText style={S.walkTitle} delay={0} reduced={reduced}>{M.education.rehearsal.title}</RiseText>
+        {rehearsalSteps().map((step, i) => (
           <View key={step.id} testID={`rehearsal-step-${i + 1}`} style={S.rehStep}>
-            <View style={S.rehBadge}><Text style={S.rehBadgeText}>{STAGE_TAGS[i]}</Text></View>
+            <View style={S.rehBadge}><Text style={S.rehBadgeText}>{M.education.rehearsal.stageTags[i]}</Text></View>
             <RiseText style={S.rehStepTitle} delay={120 + i * 90} reduced={reduced}>{step.title}</RiseText>
             <RiseText style={S.rehStepBody} delay={160 + i * 90} reduced={reduced} testID={`rehearsal-body-${i + 1}`}>{step.body}</RiseText>
           </View>
@@ -95,7 +94,7 @@ export function Rehearsal({onTry, onSkip, reducedMotion}: {onTry: () => void; on
           style={[S.walkCampaignText, {textAlign: 'center', textTransform: 'none', letterSpacing: 0.4, fontSize: 12.5, lineHeight: 18, flex: 0}]}
           delay={240}
           reduced={reduced}
-          testID="rehearsal-punchline">{REHEARSAL_PUNCHLINE}</RiseText>
+          testID="rehearsal-punchline">{M.education.rehearsal.punchline}</RiseText>
         <Pressable
           testID="btn-rehearsal-next"
           style={S.primary}

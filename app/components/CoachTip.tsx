@@ -7,8 +7,8 @@
  * surface simply takes it along (no state to clean; re-entering before dismissing shows it
  * again — the memory is the DISMISSAL, not the visit).
  *
- * Copy lives in config/education.ts (COACHING_TIPS — the pinned contract, never paraphrased
- * here). Entrance is a single subtle 6px rise + fade; reduced motion renders it at rest.
+ * Copy lives in the message catalog (`M.education.coachTips` — the pinned contract, never
+ * paraphrased here). Entrance is a single subtle 6px rise + fade; reduced motion renders it at rest.
  *
  * testID contract (e2e flow 91): card `coach-<key>`, dismiss `btn-coach-<key>-dismiss`.
  */
@@ -17,7 +17,7 @@ import {Animated, Easing, Pressable, Text, View} from 'react-native';
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {M} from '../i18n';
-import {COACHING_TIPS, type CoachTipKey} from '../config/education';
+import {type CoachTipKey} from '../config/education';
 import {hasSeen, loadJourney, markSeen} from '../lib/journey';
 import {useReducedMotion} from '../hooks/useReducedMotion';
 import {IconArrowUpRight, IconClock, IconClose, IconQr, IconWifiOff} from './icons';
@@ -34,7 +34,7 @@ const TIP_ICONS: Record<CoachTipKey, {icon: React.FC<{size?: number; color?: str
 export function CoachTip({tipKey, reducedMotion}: {tipKey: CoachTipKey; reducedMotion?: boolean}) {
   const hookReduced = useReducedMotion();
   const reduced = reducedMotion ?? hookReduced;
-  const tip = COACHING_TIPS[tipKey];
+  const tip = M.education.coachTips[tipKey];
 
   // Tri-state: 'checking' → the journey hasn't loaded (render nothing — the surface must never
   // shift under the user while storage resolves); true → show; false → already seen.

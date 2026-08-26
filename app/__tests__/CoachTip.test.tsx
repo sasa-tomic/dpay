@@ -13,7 +13,8 @@ import renderer, {act} from 'react-test-renderer';
 import {describe, expect, test, jest, beforeEach, afterEach} from '@jest/globals';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {CoachTip} from '../components/CoachTip';
-import {COACHING_TIPS} from '../config/education';
+import {type CoachTipKey} from '../config/education';
+import {M} from '../i18n';
 import {JOURNEY_STORAGE_KEY} from '../config/constants';
 
 type Tree = renderer.ReactTestRenderer;
@@ -52,12 +53,12 @@ describe('CoachTip', () => {
   afterEach(() => { jest.useRealTimers(); });
 
   test('renders every spec tip with icon, title, body, and dismiss affordance', async () => {
-    for (const key of Object.keys(COACHING_TIPS)) {
+    for (const key of Object.keys(M.education.coachTips)) {
       let tree!: Tree;
-      await act(async () => { tree = renderer.create(<CoachTip tipKey={key as keyof typeof COACHING_TIPS} />); });
+      await act(async () => { tree = renderer.create(<CoachTip tipKey={key as CoachTipKey} />); });
       await act(async () => { jest.advanceTimersByTime(100); });
       const card = findByTestID(tree, `coach-${key}`);
-      const tip = COACHING_TIPS[key as keyof typeof COACHING_TIPS];
+      const tip = M.education.coachTips[key as CoachTipKey];
       // The card itself is passive; the dismiss affordance carries the a11y contract.
       expect(findByTestID(tree, `btn-coach-${key}-dismiss`).props.accessibilityLabel).toBe(`Dismiss tip: ${tip.title}`);
       // The body renders the education copy verbatim somewhere beneath the card.

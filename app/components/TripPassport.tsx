@@ -39,7 +39,7 @@ import {C} from '../config/palette';
 import {S, isDark} from '../styles';
 import {M} from '../i18n';
 import {JOURNEY_STAMPS, hasStamp, markSeen, useJourney} from '../lib/journey';
-import {PASSPORT_STAMPS, PASSPORT_TITLE, PASSPORT_COLLAPSED_KEY, computeReadiness, type ReadinessKey} from '../lib/readiness';
+import {passportStamps, PASSPORT_COLLAPSED_KEY, computeReadiness, type ReadinessKey} from '../lib/readiness';
 import {useReducedMotion} from '../hooks/useReducedMotion';
 import {IconArrowUpRight, IconClose} from './icons';
 
@@ -69,6 +69,11 @@ export function PassportArchive({onClose, onNext, onStep}: {
   const reduced = useReducedMotion();
   const {journey, award, loaded} = useJourney();
   const readiness = computeReadiness(journey);
+  // Copy read per render (never module-level): a locale switch replaces `M.education` wholesale.
+  // `title` is read ONCE and fed to both the header and `close(title)` — the close label quotes
+  // the page's own title, so they must be the same string, not two that match in English.
+  const stamps = passportStamps();
+  const title = M.education.passport.title;
 
   // Retired (home strip gone) once the tripReady stamp is held AND the user pressed Done
   // here once. Until then the strip keeps inviting — Done is the reliable close of the loop.
@@ -139,13 +144,13 @@ export function PassportArchive({onClose, onNext, onStep}: {
       {/* Header — the app's standard sheet chrome (SettingsSheet grammar): title left, the
           44pt boxed close affordance top-right. */}
       <View style={S.sheetHead}>
-        <Text style={S.sheetTitle}>{PASSPORT_TITLE}</Text>
+        <Text style={S.sheetTitle}>{title}</Text>
         <Pressable
           testID="btn-passport-close"
           style={S.sheetClose}
           onPress={onClose}
           accessibilityRole="button"
-          accessibilityLabel={M.education.passport.close(PASSPORT_TITLE)}
+          accessibilityLabel={M.education.passport.close(title)}
           accessibilityState={{disabled: false}}>
           <IconClose size={18} color={C.sub} />
         </Pressable>
@@ -166,9 +171,9 @@ export function PassportArchive({onClose, onNext, onStep}: {
             {/* The stamp page: 2×2. Filled = inked ring + label + award date at its own tilt;
                 empty = debossed dashed slot + sub2 label (a place not yet stamped). */}
             <View style={S.passportGrid}>
-              {PASSPORT_STAMPS.map((s, i) => {
+              {stamps.map((s, i) => {
                 const filled = readiness.filled.includes(s.key);
-                const tilt = {transform: [{rotate: `${SLOT_TILT[i % SLOT_TILT.length]}deg`}]};
+                const tilt ={transform: [{rotate: `${SLOT_TILT[i % SLOT_TILT.length]}deg`}]};
                 const slot = (
                   <View
                     testID={`passport-slot-${s.key}${filled ? '-filled' : ''}`}
@@ -266,7 +271,7 @@ export function PassportArchive({onClose, onNext, onStep}: {
                 }]}
                 pointerEvents="none">
                 <View style={S.passportCapStamps}>
-                  {PASSPORT_STAMPS.map((s, i) => {
+                  {stamps.map((s, i) => {
                     // Slice i of 4 on the 0→1 capSeq timeline: each stamp lands ~300ms after the last.
                     const start = i * 0.22;
                     const op = capSeq.interpolate({inputRange: [start, Math.min(start + 0.16, 1)], outputRange: [0, 1], extrapolate: 'clamp'});

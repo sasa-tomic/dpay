@@ -1,6 +1,6 @@
 /**
  * Walkthrough — the first-run 3-scene pager (Trip Ready J1, 2026-08-22) and its Settings replay
- * ("How dpay works"). THE education surface: it renders WALKTHROUGH_SCENES verbatim from
+ * ("How dpay works"). THE education surface: it renders `walkthroughScenes()` verbatim from
  * config/education.ts (the comprehension contract — never paraphrase here).
  *
  * Design voice — "Traveler Paper" travel document:
@@ -34,7 +34,7 @@ import Svg, {Circle, G, Line, Path, Rect} from 'react-native-svg';
 import {C} from '../config/palette';
 import {S, isDark} from '../styles';
 import {M} from '../i18n';
-import {CAMPAIGN_LINE, JourneyHowItWorksTitle, WALKTHROUGH_SCENES, type WalkthroughVisual} from '../config/education';
+import {walkthroughScenes, type WalkthroughVisual} from '../config/education';
 import {useReducedMotion} from '../hooks/useReducedMotion';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {JOURNEY_STAMPS, awardStamp} from '../lib/journey';
@@ -411,12 +411,10 @@ const VISUALS: Record<WalkthroughVisual, React.FC<{reduced: boolean}>> = {
   exactlyOneAsset: ExactAssetVisual,
 };
 
-// The travel-document corner tag per scene (mono, on the plate).
-const STAGE_TAGS = M.education.walkthrough.stageTags;
-
-/** One scene: staggered header entrance (eyebrow → title → body), then the stage + its beat. */
+/** One scene: staggered header entrance (eyebrow → title → body), then the stage + its beat.
+ *  The scene (and its travel-document corner tag) is read per render, so a locale switch lands. */
 function Scene({index, reduced}: {index: number; reduced: boolean}) {
-  const scene = WALKTHROUGH_SCENES[index];
+  const scene = walkthroughScenes()[index];
   const entrance = useStageEntrance(reduced);
   const Visual = VISUALS[scene.visual];
   return (
@@ -424,7 +422,7 @@ function Scene({index, reduced}: {index: number; reduced: boolean}) {
       <RiseText style={S.walkEyebrow} delay={0} reduced={reduced}>{scene.eyebrow}</RiseText>
       <RiseText style={S.walkTitle} delay={70} reduced={reduced}>{scene.title}</RiseText>
       <RiseText style={S.walkText} delay={140} reduced={reduced} testID={`walkthrough-body-${index + 1}`}>{scene.body}</RiseText>
-      <Stage entrance={entrance} tag={STAGE_TAGS[index]}>
+      <Stage entrance={entrance} tag={M.education.walkthrough.stageTags[index]}>
         <Visual reduced={reduced} />
       </Stage>
     </View>
@@ -448,7 +446,8 @@ export function Walkthrough({onDone, onSkip, onClose, reducedMotion}: Walkthroug
   const hookReduced = useReducedMotion();
   const reduced = reducedMotion ?? hookReduced;
   const [i, setI] = useState(0);
-  const last = i === WALKTHROUGH_SCENES.length - 1;
+  const scenes = walkthroughScenes();
+  const last = i === scenes.length - 1;
   useEscapeToClose(() => { if (onSkip) onSkip(); else onClose?.(); });
 
   // Trip-prep auto-detection: viewing the walkthrough (either variant) IS "saw the flow".
@@ -458,7 +457,7 @@ export function Walkthrough({onDone, onSkip, onClose, reducedMotion}: Walkthroug
   const back = () => { if (i > 0) setI(i - 1); };
 
   // Active dot: a pill that widens on switch (width 6→18), never linear-feeling.
-  const dotW = WALKTHROUGH_SCENES.map((_, k) => {
+  const dotW = scenes.map((_, k) => {
     // eslint-disable-next-line react-hooks/rules-of-hooks
     return useDotWidth(k === i);
   });
@@ -470,7 +469,7 @@ export function Walkthrough({onDone, onSkip, onClose, reducedMotion}: Walkthroug
       {/* Header — the app's standard sheet chrome (SettingsSheet grammar): title left, the
           44pt boxed affordance top-right (replay: close · first-run: skip). */}
       <View style={S.sheetHead}>
-        <Text style={S.sheetTitle}>{JourneyHowItWorksTitle}</Text>
+        <Text style={S.sheetTitle}>{M.education.howItWorksTitle}</Text>
         {onClose ? (
           <Pressable
             testID="btn-walkthrough-close"
@@ -501,7 +500,7 @@ export function Walkthrough({onDone, onSkip, onClose, reducedMotion}: Walkthroug
           scrolls (short screens / display-zoom fonts must never clip the stage plate);
           S.walkBody carries the same 22dp side margins as the sheet header above it. */}
       <ScrollView style={{flex: 1}} contentContainerStyle={S.walkBody}>
-        {WALKTHROUGH_SCENES.map((_scene, k) => (k === i ? <Scene key={k} index={k} reduced={reduced} /> : null))}
+        {scenes.map((_scene, k) => (k === i ? <Scene key={k} index={k} reduced={reduced} /> : null))}
       </ScrollView>
 
       {/* Footer: the campaign line runs under EVERY scene (UX hardening 2026-08-23: was
@@ -568,7 +567,7 @@ function CampaignStrip({reduced}: {reduced: boolean}) {
   return (
     <View style={S.walkCampaign}>
       <Animated.View style={[S.walkCampaignRule, {transform: [{scaleX: sx}]}]} />
-      <Animated.Text style={[S.walkCampaignText, {opacity: op}]}>{CAMPAIGN_LINE.toUpperCase()}</Animated.Text>
+      <Animated.Text style={[S.walkCampaignText, {opacity: op}]}>{M.education.campaignLine.toUpperCase()}</Animated.Text>
       <Animated.View style={[S.walkCampaignRule, {transform: [{scaleX: sx}]}]} />
     </View>
   );

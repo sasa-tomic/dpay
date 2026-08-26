@@ -7,16 +7,16 @@
 // RETIRES itself the moment readiness completes (founder rule 2026-08-23: "when fully done, the
 // bar disappears" — the passport archive in Settings remains the permanent home).
 //
-// DRY: it renders NO stamp definitions of its own — PASSPORT_STAMPS/computeReadiness
+// DRY: it renders NO stamp definitions of its own — passportStamps()/computeReadiness
 // (lib/readiness) are the single source.
 // Reads journey via useJourney (fail-soft, checking = render nothing until loaded).
-import React, {useEffect, useMemo, useRef} from 'react';
+import React, {useEffect, useRef} from 'react';
 import {Animated, Pressable, Text, View} from 'react-native';
 import {S} from '../styles';
 import {M} from '../i18n';
 import {C} from '../config/palette';
 import {useJourney} from '../lib/journey';
-import {PASSPORT_STAMPS, computeReadiness} from '../lib/readiness';
+import {passportStamps, computeReadiness} from '../lib/readiness';
 import {useReducedMotion} from '../hooks/useReducedMotion';
 import {IconArrowUpRight} from './icons';
 
@@ -31,7 +31,10 @@ export function TripStrip({onOpen}: {onOpen: () => void}) {
     Animated.timing(op, {toValue: 1, duration: 260, useNativeDriver: false}).start();
   }, [loaded, reducedMotion, op]);
 
-  const readiness = useMemo(() => computeReadiness(journey), [journey]);
+  // NOT memoized on `journey`: `computeReadiness` returns the next step's WORDS, and a language
+  // switch does not change the journey — a memo keyed on it would keep rendering the old language
+  // until the next stamp. It walks four keys; there is nothing here worth caching.
+  const readiness = computeReadiness(journey);
   // Retire the moment readiness is complete (founder rule 2026-08-23: "when fully done, the
   // bar disappears") — the passport capstone + Done already archive it in Settings; keeping the
   // strip alive until that marker was read just made the finished row linger.
@@ -50,7 +53,7 @@ export function TripStrip({onOpen}: {onOpen: () => void}) {
         accessibilityHint={next ? next.hint : M.education.passport.ready}
         accessibilityState={{disabled: false}}>
         <View style={S.tripStripDots}>
-          {PASSPORT_STAMPS.map((s, i) => {
+          {passportStamps().map((s, i) => {
             const filled = readiness.filled.includes(s.key);
             return (
               <View

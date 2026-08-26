@@ -14,7 +14,8 @@ import renderer, {act} from 'react-test-renderer';
 import {describe, expect, test, jest, beforeEach, afterEach} from '@jest/globals';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {Rehearsal} from '../components/Rehearsal';
-import {REHEARSAL_STEPS, REHEARSAL_PUNCHLINE} from '../config/education';
+import {rehearsalSteps} from '../config/education';
+import {M} from '../i18n';
 import {JOURNEY_STORAGE_KEY} from '../config/constants';
 
 type Tree = renderer.ReactTestRenderer;
@@ -61,10 +62,10 @@ describe('Rehearsal (one page)', () => {
 
   test('bodies render the education copy verbatim + the punchline is pinned (comprehension contract)', async () => {
     const tree = await render({onTry: () => {}, onSkip: () => {}});
-    expect(findByTestID(tree, 'rehearsal-body-1').props.children).toBe(REHEARSAL_STEPS[0].body);
-    expect(findByTestID(tree, 'rehearsal-body-2').props.children).toBe(REHEARSAL_STEPS[1].body);
-    expect(findByTestID(tree, 'rehearsal-body-3').props.children).toBe(REHEARSAL_STEPS[2].body);
-    expect(findByTestID(tree, 'rehearsal-punchline').props.children).toBe(REHEARSAL_PUNCHLINE);
+    expect(findByTestID(tree, 'rehearsal-body-1').props.children).toBe(rehearsalSteps()[0].body);
+    expect(findByTestID(tree, 'rehearsal-body-2').props.children).toBe(rehearsalSteps()[1].body);
+    expect(findByTestID(tree, 'rehearsal-body-3').props.children).toBe(rehearsalSteps()[2].body);
+    expect(findByTestID(tree, 'rehearsal-punchline').props.children).toBe(M.education.rehearsal.punchline);
     act(() => { tree.unmount(); });
   });
 

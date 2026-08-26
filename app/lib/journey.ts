@@ -49,7 +49,7 @@ export type Journey = {
   /**
    * One-time coaching "seen" markers (Trip Ready J2B, 2026-08-22). NOT achievement stamps —
    * a seen marker only records that a first-use explanation was shown+dismissed, so the
-   * mature product stays quiet. Keys are free-form surface ids (`COACHING_TIPS` keys).
+   * mature product stays quiet. Keys are free-form surface ids (`CoachTipKey` values).
    * Absent in pre-2B payloads → parsed as [].
    */
   seen: string[];

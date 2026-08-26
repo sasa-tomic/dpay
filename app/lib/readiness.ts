@@ -26,22 +26,25 @@ export type ReadinessKey =
   * (the M2 fix: "FLOW UNDERSTOOD" is system-speak; the strip speaks people-speak). */
 export type PassportStamp = {key: ReadinessKey; label: string; hint: string; short: string};
 
-/** The passport's stamps + copy. Order = display order AND "next step" order (first missing wins).
+/** The four readiness keys in display order — which is ALSO the "next step" order (first missing
+ *  wins). Pure structure, so it stays a module constant: order is locale-independent, and this is
+ *  the single source both the stamps and computeReadiness iterate. */
+export const READINESS_STAMPS: readonly ReadinessKey[] = [
+  'recoverySaved', 'flowUnderstood', 'fundsReady', 'paymentTested',
+];
+
+/** The passport's stamps + copy, composed PER CALL — never a module constant: a runtime locale
+ *  switch replaces `M.education` wholesale, so a captured array (or even a captured sub-object)
+ *  would keep rendering the old language forever. Call it during render, like any `M.…` read.
  *  Labels are HUMAN (UX hardening 2026-08-23): the stamps read as capabilities a traveler
  *  earned, not system states the app tracked ("FLOW UNDERSTOOD" was system-speak). Two-line
  *  caps (explicit \n) so every stamp reads like inked lines in a real passport. */
-export const PASSPORT_STAMPS: readonly PassportStamp[] = (
-  ['recoverySaved', 'flowUnderstood', 'fundsReady', 'paymentTested'] as const
-).map(key => ({key, ...M.education.passport.stamps[key]}));
-
-/** Ordered readiness keys (derived — PASSPORT_STAMPS is the single source of order). */
-export const READINESS_STAMPS: readonly ReadinessKey[] = PASSPORT_STAMPS.map(s => s.key);
+export function passportStamps(): readonly PassportStamp[] {
+  return READINESS_STAMPS.map(key => ({key, ...M.education.passport.stamps[key]}));
+}
 
 /** The Balances card's collapse marker (journey.seen) — after Done, the card never returns. */
 export const PASSPORT_COLLAPSED_KEY = 'passportCollapsed';
-
-/** The Settings row/modal title (same copy in both places). */
-export const PASSPORT_TITLE = 'Trip readiness';
 
 export type Readiness = {
   /** Filled stamps in display order. */
@@ -62,12 +65,11 @@ export function computeReadiness(journey: Journey): Readiness {
     (hasStamp(journey, key) ? filled : missing).push(key);
   }
   const nextKey = missing[0];
-  return {
-    filled,
-    missing,
-    complete: missing.length === 0,
-    next: nextKey ? PASSPORT_STAMPS.find(s => s.key === nextKey)! : undefined,
-  };
+  if (!nextKey) return {filled, missing, complete: true};
+  // The next step's WORDS are read HERE, per call — never captured at module load, for the same
+  // reason `passportStamps()` is a function.
+  const {hint, short} = M.education.passport.stamps[nextKey];
+  return {filled, missing, complete: false, next: {key: nextKey, hint, short}};
 }
 
 /** True iff ANY asset shows a spendable balance: status 'ok' AND a real display value.
