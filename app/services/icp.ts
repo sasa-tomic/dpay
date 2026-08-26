@@ -23,6 +23,7 @@ import {DpayCore} from './native';
 import {fetchWithTimeout} from './relay';
 import {hexToBytes, bytesToHex} from '../lib/format';
 import type {IcpStateRead} from '../lib/types';
+import {M} from '../i18n';
 
 export const IC_GATEWAY_DEFAULT = 'https://icp-api.io';
 // Test/harness override seam (same pattern as SOLANA_RPC_URL): the e2e fake-IC gateway and the
@@ -269,10 +270,10 @@ export async function icStampExpiry(
   signal?: AbortSignal,
 ): Promise<string> {
   const icNs = await icNowNs(secretHex, signal);
-  if (icNs == null) throw new Error('IC clock unreachable');
+  if (icNs == null) throw new Error(M.errors.ic.clockUnreachable);
   const deviceNs = BigInt(Date.now()) * 1_000_000n;
   const skew = icNs > deviceNs ? icNs - deviceNs : deviceNs - icNs;
-  if (skew > MAX_CLOCK_SKEW_NS) throw new Error('IC clock skew too large');
+  if (skew > MAX_CLOCK_SKEW_NS) throw new Error(M.errors.ic.clockSkew);
   return DpayCore.icpIngressExpiry(icNs.toString(), aheadS);
 }
 

@@ -11,6 +11,7 @@
 // `∂25.00`, never `∂25`). Never `Math.floor`/`parseFloat` (lossy above 2^53). The DEMO display stays
 // fixed-width, so this is a separate UI concern (per amount.ts's module doc).
 import {parseDecimalToUnits} from './amount';
+import {M} from '../i18n';
 export const usd = (c: string) => {
   const n = BigInt(c);
   return `∂${(n / 100n).toString()}.${(n % 100n).toString().padStart(2, '0')}`;
@@ -87,7 +88,7 @@ export const base = (u: string) => u.replace(/\/$/, '');
 // "the seed is 64 chars from [0-9a-f]".
 export function validateSeed(s: string): string | null {
   const t = s.trim().toLowerCase();
-  if (!/^[0-9a-f]{64}$/.test(t)) return 'Recovery seed must be 64 hex characters (0-9, a-f).';
+  if (!/^[0-9a-f]{64}$/.test(t)) return M.errors.seedFormat;
   return null;
 }
 

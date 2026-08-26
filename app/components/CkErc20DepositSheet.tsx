@@ -16,6 +16,8 @@ import {DpayCore} from '../services/native';
 import {withTimeout} from '../lib/timeout';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {IconCheck} from './icons';
+import {InstrLine} from './InstrLine';
+import {M} from '../i18n';
 
 // ckERC20 (ckUSDC) / native ckETH direct onramp — a wallet-connect flow. The user connects their OWN
 // Ethereum wallet (MetaMask/Rabby; window.ethereum on web), dpay BUILDS the transaction(s), and the
@@ -150,7 +152,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
         // Log the real cause (HTTP status / body / network error / abort) so a 5xx, a CORS issue, or
         // a relay config gap is debuggable; the user still sees the friendly fallback message.
         console.warn('ckerc20OnrampParams failed:', e instanceof Error ? e.message : String(e));
-        if (alive) setErr("Couldn't reach the server for onramp details.");
+        if (alive) setErr(M.deposit.erc20.onrampParamsErr);
       } finally { if (alive) cancel(); }
     })();
     return () => { alive = false; };
@@ -166,7 +168,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
       (p) => { if (alive) setSelfPrincipal(p); },
       (e) => {
         console.warn('icpSelfPrincipal failed:', e instanceof Error ? e.message : String(e));
-        if (alive) setErr("Couldn't derive your deposit address — try reopening the sheet.");
+        if (alive) setErr(M.deposit.erc20.deriveErr);
       },
     );
     return () => { alive = false; };
@@ -185,9 +187,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
     // default 1 preserves the pre-testnet mainnet behavior.
     const provider = await resolveOnrampProvider(chainId ?? 1);
     if (!provider) {
-      setErr(Platform.OS === 'web'
-        ? 'No Ethereum wallet found. Install MetaMask or Rabby in this browser.'
-        : 'No wallet connected. Pair a wallet via WalletConnect.');
+      setErr(Platform.OS === 'web' ? M.deposit.erc20.noWalletWeb : M.deposit.erc20.noWalletNative);
       return;
     }
     // MC8 U6 capstone — pair via WalletConnect BEFORE eth_requestAccounts. On web this is a no-op
@@ -201,7 +201,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
     } catch (e: unknown) {
       setWcUri(null);
       const msg = e instanceof Error ? e.message : String(e);
-      setErr(/reject|denied|user/i.test(msg) ? 'Pairing not approved.' : (msg || 'Could not pair with your wallet.'));
+      setErr(/reject|denied|user/i.test(msg) ? M.deposit.erc20.pairRejected : (msg || M.deposit.erc20.pairFailed));
       return; // stay in 'connect' — the WC session is not established.
     }
     try {
@@ -213,7 +213,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
       if (chainId != null) {
         const actual = await getChainId(provider);
         if (actual !== chainId) {
-          setErr(`Wrong network: connect to ${display.networkLabel} (chain ${chainId}). Your wallet is on chain ${actual}.`);
+          setErr(M.deposit.erc20.wrongNetwork(display.networkLabel, chainId, actual));
           return; // stay in 'connect' phase — do NOT enter 'enter'
         }
       }
@@ -231,7 +231,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
       }
       setPhase('enter');
     } catch (e: unknown) {
-      setErr((e instanceof Error ? e.message : String(e)) || 'Could not connect to your wallet.');
+      setErr((e instanceof Error ? e.message : String(e)) || M.deposit.erc20.connectFailed);
     }
   }, [relayUrl, currency, ledger, identity.secretHex, identity.publicHex, chainId, display.networkLabel]);
 
@@ -241,7 +241,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
   const openInWallet = useCallback(async () => {
     if (!wcUri) return;
     const opened = await openWalletApp(wcUri);
-    if (!opened) setErr('No wallet app found. Scan the QR with a wallet on another device instead.');
+    if (!opened) setErr(M.deposit.erc20.noWalletApp);
   }, [wcUri]);
 
   const submit = useCallback(async () => {
@@ -249,16 +249,16 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
     // The deposit `principal` arg MUST be the user's own IC principal. If derivation somehow failed
     // (selfPrincipal null), fail honestly — a deposit to any other principal would mint funds the
     // wallet can never see. Never send.
-    if (!selfPrincipal) { setErr("Couldn't derive your deposit address — try reopening the sheet."); return; }
+    if (!selfPrincipal) { setErr(M.deposit.erc20.deriveErr); return; }
     // MC8 U6.3 — same web-first resolver as connect(). On submit the provider was non-null at connect
     // time; if it has since vanished (the EIP-1193 session dropped), this surfaces an honest error
     // rather than sending calldata into the void.
     const provider = await resolveOnrampProvider(chainId ?? 1);
-    if (!provider) { setErr('Wallet disconnected.'); return; }
+    if (!provider) { setErr(M.deposit.erc20.walletDisconnected); return; }
     // Parse the human amount into the smallest units (USDC = 6 decimals). MC1 units 2-4: use the
     // exact BigInt parser — `parseFloat`/`Math.pow` are lossy above 2^53.
     const parsed = parseDecimalToUnits(amount, decimals);
-    if (!parsed.ok || parsed.raw === '0') { setErr('Enter an amount greater than zero.'); return; }
+    if (!parsed.ok || parsed.raw === '0') { setErr(M.deposit.erc20.amountRequired); return; }
     const unitBig = BigInt(parsed.raw);
     // The deposit lands at the USER's own IC principal with the subaccount OMITTED (all-zeros =
     // ICRC-1 default subaccount) — the same Account{owner: user, subaccount: None} every signed
@@ -284,7 +284,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
       } else {
         // ERC-20 — TWO txs: approve(helper, amount) on the ERC-20 contract, then depositErc20(...).
         const erc20Address = params.erc20_address;
-        if (!erc20Address) { setErr('Onramp details missing the ERC-20 address.'); setPhase('enter'); return; }
+        if (!erc20Address) { setErr(M.deposit.erc20.missingErc20Address); setPhase('enter'); return; }
         // 1. approve(helper, amount) on the USDC ERC-20 contract.
         const approveData = encodeApprove(params.helper_address, unitBig);
         const approveHash = await sendTransaction(provider, account, {to: erc20Address, data: approveData});
@@ -307,18 +307,18 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
       if (e instanceof ReceiptReverted) {
         // Hard fail: the tx was mined but reverted — it will NEVER credit. Stay in 'enter' so the
         // user can see the error and retry; do NOT transition to a false "watching".
-        setErr('Transaction reverted on chain.');
+        setErr(M.deposit.erc20.txReverted);
         setPhase('enter');
       } else if (e instanceof ReceiptTimeout) {
         // SOFT (Fork-2 resolution): the tx was broadcast but not mined within the timeout. Transition
         // to watching anyway — the watching poll will catch the eventual mint, or the user can retry.
         setTxHashes(hashes);
         setResumed(false);
-        setErr('Transaction sent but not yet confirmed — still watching for the mint.');
+        setErr(M.deposit.erc20.txUnconfirmed);
         setPhase('watching');
       } else {
         const msg = e instanceof Error ? e.message : String(e);
-        setErr(/reject|denied|user/i.test(msg) ? 'Transaction not signed.' : (msg || 'Transaction failed.'));
+        setErr(/reject|denied|user/i.test(msg) ? M.deposit.erc20.txNotSigned : (msg || M.deposit.erc20.txFailed));
         setPhase('enter');
       }
     }
@@ -377,22 +377,13 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
     <>
       {/* Wrong-network warning — unmissable, above the flow. */}
       <View testID="ckerc20-deposit" style={S.instrCard}>
-        <Text style={S.instrLine}>
-          Send only <Text style={S.instrAsset}>{display.nativeAsset}</Text> on{' '}
-          <Text style={S.instrAsset}>{display.networkLabel}</Text>. Other assets or chains sent
-          this way won't credit and may be lost.
-        </Text>
-        <Text style={S.instrCustody}>
-          dpay never holds your keys — your wallet signs, and the chain-key asset mints 1:1 to your
-          wallet on confirmation (~20 min).
-        </Text>
+        <InstrLine runs={M.deposit.erc20.sendOnly(display.nativeAsset, display.networkLabel)} />
+        <Text style={S.instrCustody}>{M.deposit.erc20.custody}</Text>
         {/* Gas warning. ERC-20: the onramp needs Ethereum transactions the user must hold ETH to
             pay gas for (separate from the deposited token). Native ETH: the deposit tx itself
             carries ETH, so the network fee comes out of the sent amount — send a little extra. */}
         <Text style={[S.instrCustody, {color: C.warn}]}>
-          {nativeEth
-            ? 'The network fee is paid in ETH — send a little more than you want to deposit.'
-            : "You'll need a small amount of ETH for Ethereum network gas fees."}
+          {nativeEth ? M.deposit.erc20.gasNative : M.deposit.erc20.gasErc20}
         </Text>
       </View>
 
@@ -405,13 +396,13 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
         wcUri ? (
           <View style={S.centerAll}>
             <View testID="wc-pair-qr" style={S.qrCard}><QrCode value={wcUri} size={QR_SIZE} ecl="M" /></View>
-            <Text style={S.paidSub}>Scan with your wallet to pair</Text>
+            <Text style={S.paidSub}>{M.deposit.erc20.scanToPair}</Text>
             {Platform.OS !== 'web' ? (
-              <Pressable testID="btn-open-wallet" accessibilityRole="button" accessibilityHint="Open an installed wallet app on this device" style={[S.primaryWide, {marginTop: 12}]} onPress={openInWallet}>
-                <Text style={S.primaryText}>Open wallet on this device</Text>
+              <Pressable testID="btn-open-wallet" accessibilityRole="button" accessibilityHint={M.deposit.erc20.openWalletHint} style={[S.primaryWide, {marginTop: 12}]} onPress={openInWallet}>
+                <Text style={S.primaryText}>{M.deposit.erc20.openWallet}</Text>
               </Pressable>
             ) : null}
-            <Text style={S.dim2}>MetaMask · Trust · Rabby · any WalletConnect wallet</Text>
+            <Text style={S.dim2}>{M.deposit.erc20.walletListPair}</Text>
           </View>
         ) : (
           <View style={S.centerAll}>
@@ -420,38 +411,36 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
                 depositEth with the amount as ETH value). Unlike Bitcoin (UTXO, send-to-address),
                 there is no "deposit address" here; the deposit must be initiated from the wallet
                 that holds the asset (+ ETH for gas, for ERC-20). */}
-            <Text style={S.dim2}>{nativeEth
-              ? 'Send ETH directly to the deposit contract — one transaction your wallet signs, with your deposit amount as the ETH value.'
-              : `${display.nativeAsset} is an Ethereum token — depositing it needs two transactions your wallet signs, not a send-to-address like Bitcoin.`}</Text>
-            <Pressable testID="btn-connect-wallet" accessibilityRole="button" accessibilityLabel="Connect Ethereum wallet" style={S.primaryWide} onPress={connect}>
-              <Text style={S.primaryText}>Connect wallet</Text>
+            <Text style={S.dim2}>{nativeEth ? M.deposit.erc20.explainNative : M.deposit.erc20.explainErc20(display.nativeAsset)}</Text>
+            <Pressable testID="btn-connect-wallet" accessibilityRole="button" accessibilityLabel={M.deposit.erc20.connectLabel} style={S.primaryWide} onPress={connect}>
+              <Text style={S.primaryText}>{M.deposit.erc20.connect}</Text>
             </Pressable>
-            <Text style={S.dim2}>MetaMask · Trust · Rabby · any WalletConnect-compatible wallet</Text>
+            <Text style={S.dim2}>{M.deposit.erc20.walletList}</Text>
           </View>
         )
       ) : phase === 'enter' || phase === 'sending' ? (
         <>
-          <Text style={S.inputLabel}>{`Amount (${display.nativeAsset})`}</Text>
+          <Text style={S.inputLabel}>{M.deposit.amountLabel(display.nativeAsset)}</Text>
           <TextInput
             testID="ckerc20-amount"
             style={S.amountInput}
             keyboardType="decimal-pad"
-            placeholder={`0.00`}
+            placeholder={M.deposit.erc20.amountPlaceholder}
             value={amount}
             onChangeText={setAmount}
             editable={phase === 'enter'}
             onSubmitEditing={phase === 'enter' ? submit : undefined}
           />
-          {account ? <Text style={S.dim2}>{`From ${account.slice(0, 6)}…${account.slice(-4)}`}</Text> : null}
+          {account ? <Text style={S.dim2}>{M.deposit.erc20.fromAccount(`${account.slice(0, 6)}…${account.slice(-4)}`)}</Text> : null}
           <Pressable
             testID="btn-approve"
             accessibilityRole="button"
-            accessibilityLabel={phase === 'sending' ? 'Confirming in your wallet' : (nativeEth ? 'Deposit' : 'Approve and deposit')}
+            accessibilityLabel={phase === 'sending' ? M.deposit.erc20.confirmingLabel : (nativeEth ? M.deposit.erc20.deposit : M.deposit.erc20.approveDepositLabel)}
             accessibilityState={{disabled: phase === 'sending'}}
             style={[S.primaryWide, phase === 'sending' && {opacity: 0.6}]}
             onPress={submit}
             disabled={phase === 'sending'}>
-            <Text style={S.primaryText}>{phase === 'sending' ? 'Confirm in your wallet…' : (nativeEth ? 'Deposit' : 'Approve & deposit')}</Text>
+            <Text style={S.primaryText}>{phase === 'sending' ? M.deposit.erc20.confirming : (nativeEth ? M.deposit.erc20.deposit : M.deposit.erc20.approveDeposit)}</Text>
           </Pressable>
         </>
       ) : phase === 'watching' ? (
@@ -460,14 +449,12 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
           {/* MC8 U5 — surface the in-flight amount so a resumed watching state shows WHAT is
               pending (the user may have forgotten the exact amount across a restart). */}
           {amount ? (
-            <Text style={S.paidSub}>{`Depositing ${amount} ${display.nativeAsset}`}</Text>
+            <Text style={S.paidSub}>{M.deposit.erc20.depositingAmount(amount, display.nativeAsset)}</Text>
           ) : null}
           {/* M9: one clear line — no "scrapes" jargon, no duplicate ~20min (confirmation + credit).
               MC8 U5 — the RESUMED variant is honest that the wallet isn't connected but the watch
               continues (relay-bound, not Ethereum-bound). */}
-          <Text testID="ckerc20-status" style={S.paidSub}>{resumed
-            ? 'Deposit pending (~20 min) — your wallet isn\u2019t connected, but we\u2019re still watching for the mint.'
-            : 'Waiting for confirmation — your deposit will appear in about 20 minutes.'}</Text>
+          <Text testID="ckerc20-status" style={S.paidSub}>{resumed ? M.deposit.erc20.watchingResumed : M.deposit.erc20.watchingFresh}</Text>
           {/* MC8 U5 — escape from a resumed watching state. A deposit that never mints would
               otherwise wedge the sheet in watching on every restart; this clears the key + returns
               to 'connect' so the user can start fresh. Only rendered in the resumed state (a
@@ -476,23 +463,23 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
             <Pressable
               testID="btn-ckerc20-new"
               accessibilityRole="button"
-              accessibilityLabel="Start a new deposit"
+              accessibilityLabel={M.deposit.erc20.startNew}
               style={[S.primaryWide, {marginTop: 16}]}
               onPress={startNew}>
-              <Text style={S.primaryText}>Start a new deposit</Text>
+              <Text style={S.primaryText}>{M.deposit.erc20.startNew}</Text>
             </Pressable>
           ) : null}
         </View>
       ) : (
         <View style={S.centerAll}>
           <View style={S.check}><IconCheck size={44} color={C.brandInk}/></View>
-          <Text style={S.paidText}>Deposited ✓</Text>
-          <Text style={S.paidSub}>{`${display.nativeAsset} minted to your wallet.`}</Text>
-          <Text style={S.dim2}>Your balance updates automatically.</Text>
-          <Pressable testID="btn-ckerc20-deposit-done" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={onClose} accessibilityRole="button" accessibilityLabel="Done" accessibilityState={{disabled: false}}><Text style={S.ghostBtnText}>Done</Text></Pressable>
+          <Text style={S.paidText}>{M.deposit.deposited}</Text>
+          <Text style={S.paidSub}>{M.deposit.erc20.mintedToWallet(display.nativeAsset)}</Text>
+          <Text style={S.dim2}>{M.deposit.balanceAuto}</Text>
+          <Pressable testID="btn-ckerc20-deposit-done" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={onClose} accessibilityRole="button" accessibilityLabel={M.common.done} accessibilityState={{disabled: false}}><Text style={S.ghostBtnText}>{M.common.done}</Text></Pressable>
         </View>
       )}
-      {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
+      {Platform.OS === 'web' ? <Text style={S.dim2}>{M.deposit.pressEsc}</Text> : null}
     </>
   );
 

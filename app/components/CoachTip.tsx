@@ -16,6 +16,7 @@ import React, {useEffect, useRef, useState} from 'react';
 import {Animated, Easing, Pressable, Text, View} from 'react-native';
 import {C} from '../config/palette';
 import {S} from '../styles';
+import {M} from '../i18n';
 import {COACHING_TIPS, type CoachTipKey} from '../config/education';
 import {hasSeen, loadJourney, markSeen} from '../lib/journey';
 import {useReducedMotion} from '../hooks/useReducedMotion';
@@ -75,8 +76,8 @@ export function CoachTip({tipKey, reducedMotion}: {tipKey: CoachTipKey; reducedM
           hitSlop={{top: 8, bottom: 8, left: 8, right: 4}}
           onPress={() => { setShow(false); void markSeen(tipKey); }}
           accessibilityRole="button"
-          accessibilityLabel={`Dismiss tip: ${tip.title}`}
-          accessibilityHint="Hide this tip; it won't show again"
+          accessibilityLabel={M.education.coachDismiss(tip.title)}
+          accessibilityHint={M.education.coachDismissHint}
           accessibilityState={{disabled: false}}>
           <IconClose size={14} color={C.sub2} />
         </Pressable>

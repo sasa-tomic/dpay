@@ -48,7 +48,7 @@ export async function prepareTransfer(
   req: {toHex: string; amount: string; currency: number; nonceHex: string},
 ): Promise<RailPrepared> {
   const desc = catalog.currencies.find(c => c.currency === req.currency);
-  if (!desc || !desc.ledger) throw new Error('Unsupported asset — no ledger for this currency');
+  if (!desc || !desc.ledger) throw new Error(M.errors.ic.noLedgerForCurrency);
   const toPrincipal = await DpayCore.icpPrincipalFromPubkey(req.toHex);
   const argHex = await DpayCore.icpTransferArg(toPrincipal, '', '', req.amount, desc.fee ?? '', req.nonceHex);
   // Clock-gated: refuses to sign when the IC clock is unreachable or skewed vs the device.
@@ -66,7 +66,7 @@ export async function prepareNfcTransfer(
   req: {toHex: string; amount: string; currency: number; nonceHex: string; expiry: number},
 ): Promise<RailPrepared & {readStateEnvelopeHex: string}> {
   const desc = catalog.currencies.find(c => c.currency === req.currency);
-  if (!desc || !desc.ledger) throw new Error('Unsupported asset — no ledger for this currency');
+  if (!desc || !desc.ledger) throw new Error(M.errors.ic.noLedgerForCurrency);
   const toPrincipal = await DpayCore.icpPrincipalFromPubkey(req.toHex);
   const argHex = await DpayCore.icpTransferArg(toPrincipal, '', '', req.amount, desc.fee ?? '', req.nonceHex);
   const updateExpiryNs = (BigInt(req.expiry) * 1_000_000_000n).toString();
@@ -144,7 +144,7 @@ async function decodeTransferStatus(
     return {kind: 'rejected', reason: transferRejectionMessage(tr.errVariant ?? '', tr.errDetail ?? ''), variant: tr.errVariant || undefined};
   }
   if (st.state === 'rejected') {
-    return {kind: 'rejected', reason: st.rejectMessage || 'The ledger declined the payment'};
+    return {kind: 'rejected', reason: st.rejectMessage || M.rail.declined('')};
   }
   if (st.state === 'done') return {kind: 'unknown'}; // terminal-but-opaque: honest pending
   return {kind: 'unknown'};
@@ -278,7 +278,7 @@ const EMPTY_DIDL_ARG_HEX = '4449444c0000';
  * field is display metadata; the ledger is authoritative. */
 async function fetchApproveFee(secretHex: string, ledger: string): Promise<string> {
   const reply = await icQuery(secretHex, ledger, 'icrc1_fee', EMPTY_DIDL_ARG_HEX);
-  if (reply == null) throw new Error("Couldn't fetch the ledger fee — check your connection");
+  if (reply == null) throw new Error(M.errors.ic.feeUnavailable);
   return await DpayCore.icpDecodeInt(reply);
 }
 

@@ -24,6 +24,7 @@ import {useEscapeToClose} from '../hooks/useHotkeys';
 import {type SelectableAsset} from '../config/assets';
 import {type BalanceView} from '../lib/assetBalances';
 import type {AssetId} from '../lib/types';
+import {M} from '../i18n';
 
 export type AssetPickerProps = {
   open: boolean;
@@ -43,7 +44,7 @@ export type AssetPickerProps = {
  * the selection (re-derives + re-mounts the right Receive form), and the Modal closes. NO local
  * selection state; NO SOL special-case branch.
  */
-export function AssetPicker({open, assets, selectedId, balances, onSelect, onClose, title = 'Receive in', showAmount = false, variant = 'plain'}: AssetPickerProps) {
+export function AssetPicker({open, assets, selectedId, balances, onSelect, onClose, title = M.receive.receiveInTitle, showAmount = false, variant = 'plain'}: AssetPickerProps) {
   // Esc closes the Modal (the same affordance every sheet uses). The backdrop Pressable below
   // handles a tap-outside-to-close; Esc covers the web keyboard path.
   useEscapeToClose(onClose);
@@ -70,8 +71,8 @@ export function AssetPicker({open, assets, selectedId, balances, onSelect, onClo
                   active={asset.id === selectedId}
                   zero={view ? view.status !== 'ok' : undefined}
                   onPress={() => { onSelect(asset.id); onClose(); }}
-                  accessibilityLabel={`Receive in ${asset.symbol}`}
-                  accessibilityHint={asset.protocol === 'solana' ? `Switch to the ${asset.symbol} rail` : `Receive in ${asset.networkLabel}`}
+                  accessibilityLabel={M.receive.receiveIn(asset.symbol)}
+                  accessibilityHint={asset.protocol === 'solana' ? M.receive.switchToRail(asset.symbol) : M.receive.receiveIn(asset.networkLabel)}
                   variant={variant}
                 />
               );

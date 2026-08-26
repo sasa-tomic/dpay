@@ -28,6 +28,7 @@ import {IS_SOLANA_DEVNET, SOLANA_RPC_URL} from './constants';
 import {USDC_DECIMALS, USDC_MINT_ADDRESS} from '../solana/spl';
 import {SOL_DECIMALS} from '../solana/identity';
 import {type AssetId} from '../lib/types';
+import {M} from '../i18n';
 
 // Per-asset funding / cash-out capability. Mirrors the catalog's `RampCapability` shape so a
 // consumer renders IC and Solana rows through the SAME capability logic — no rail special case at
@@ -125,8 +126,8 @@ function icAsset(desc: CurrencyDescriptor): SelectableAsset {
     ? null
     : (desc.network ?? familyDisplay([desc], desc.currency)?.networkLabel ?? null);
   const networkLabel = isPrimary
-    ? 'play money for testing'
-    : `${name} · ${network ?? 'IC'}`;
+    ? M.wallet.asset.demoSubtitle
+    : M.wallet.asset.networkLabel(name, network ?? 'IC');
   return {
     id: `ic:${desc.currency}` as const,
     protocol: 'ic',
@@ -147,7 +148,7 @@ function solanaSolAsset(): SelectableAsset {
     protocol: 'solana',
     token: 'SOL',
     symbol: 'SOL',
-    networkLabel: 'SOL · Solana',
+    networkLabel: M.wallet.asset.networkLabel('SOL', 'Solana'),
     decimals: SOL_DECIMALS,
     visible: true,
     capabilities: {onramp: 'Direct', offramp: 'Direct'},
@@ -163,7 +164,7 @@ function solanaUsdcAsset(): SelectableAsset {
     protocol: 'solana',
     token: 'USDC',
     symbol: 'USDC',
-    networkLabel: 'USDC · Solana',
+    networkLabel: M.wallet.asset.networkLabel('USDC', 'Solana'),
     decimals: USDC_DECIMALS,
     visible: true,
     capabilities: {onramp: 'Direct', offramp: 'Direct'},

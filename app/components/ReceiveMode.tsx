@@ -26,6 +26,7 @@ import {useJourney} from '../lib/journey';
 import {awardPaymentTested} from '../lib/readiness';
 import {CoachTip} from './CoachTip';
 import {IconCheck, IconChevronDown, IconClock, IconQr, IconShare, IconWifiOff} from './icons';
+import {M} from '../i18n';
 
 // The optional merchant memo input — a real secondary field (not a bare text link), mirroring the
 // paste-button affordance pattern (44pt-min touch target + a visible border). Inline (Group E owns
@@ -92,7 +93,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
   }, [reqQr, result]);
   // Stable across renders (NfcTap's effect depends on it) — only changes when the request does.
   const readerReqInfo = useMemo(
-    () => (reqQr ? {amount: reqQr.rawAmount, nonce: reqQr.nonce, who: 'payer', currency: reqQr.currency} : undefined),
+    () => (reqQr ? {amount: reqQr.rawAmount, nonce: reqQr.nonce, who: M.receive.payer, currency: reqQr.currency} : undefined),
     [reqQr],
   );
 
@@ -151,7 +152,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
         const proof = decodeReceiptDeeplink(text) ?? (text.includes('{')
           ? (JSON.parse(text.slice(text.indexOf('{'))) as {request_id?: unknown; block_index?: unknown})
           : null);
-        if (!proof) { if (alive) setErr('This receipt link is malformed.'); return; }
+        if (!proof) { if (alive) setErr(M.receive.receiptMalformed); return; }
         if (!reqQr) {
           // No open request to bind against (cold launch): the proof is unverifiable HERE — there
           // is no request whose settlement this screen could confirm, and no honest amount to
@@ -161,7 +162,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
           return;
         }
         const parsed = parseRailProof(proof);
-        if (!parsed) { if (alive) setErr("This receipt doesn't match your open request."); return; }
+        if (!parsed) { if (alive) setErr(M.receive.receiptMismatch); return; }
         const settled = await confirmIncomingTransfer({
           relayUrl,
           receiverPublicHex: identity.publicHex,
@@ -171,14 +172,14 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
         }, {attempts: PROOF_POLL_BUDGET, intervalMs: POLL.receiptRcv});
         if (!alive) return;
         if (settled) {
-          setResult({amount: reqQr.rawAmount, currency: reqQr.currency, from: 'payer'});
+          setResult({amount: reqQr.rawAmount, currency: reqQr.currency, from: M.receive.payer});
           onReceived();
           awardPaymentTested(journeyRef.current);
         } else {
-          setErr('Couldn’t confirm this payment yet — if the payer paid, it lands with the next balance refresh.');
+          setErr(M.receive.couldNotConfirmYet);
         }
       } catch (e) {
-        if (alive) setErr("Couldn't read this receipt link.");
+        if (alive) setErr(M.receive.receiptUnreadable);
         console.warn('receipt deeplink hand-back failed:', e instanceof Error ? e.message : String(e));
       }
     })();
@@ -193,9 +194,9 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
       // The payer's signed QR IS the /call envelope (base64url). Submit the immutable bytes, then
       // prove this exact request from the receiver's durable ledger history.
       const envelopeHex = qrPayloadToEnvelopeHex(raw);
-      if (!envelopeHex) { setErr("This isn't a dpay payment code"); return; }
+      if (!envelopeHex) { setErr(M.pay.notAPaymentCode); return; }
       const ledger = catalog.find(c => c.currency === reqQr?.currency)?.ledger ?? '';
-      if (!ledger || !reqQr) { setErr('Unknown ledger for this asset — couldn’t submit'); return; }
+      if (!ledger || !reqQr) { setErr(M.receive.unknownLedger); return; }
       const settled = await submitAndConfirmIncomingTransfer(ledger, envelopeHex, {
         relayUrl,
         receiverPublicHex: identity.publicHex,
@@ -204,13 +205,13 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
         memoHex: reqQr.nonce,
       }, {attempts: PROOF_POLL_BUDGET, intervalMs: POLL.receiptRcv});
       if (settled) {
-        setResult({amount: reqQr.rawAmount, currency: reqQr.currency, from: 'payer'});
+        setResult({amount: reqQr.rawAmount, currency: reqQr.currency, from: M.receive.payer});
         onReceived();
         awardPaymentTested(journeyRef.current);
       } else {
-        setErr('Couldn’t confirm this payment yet — if the payer paid, it lands with the next balance refresh.');
+        setErr(M.receive.couldNotConfirmYet);
       }
-    } catch (e) { console.warn('envelope submit failed:', e instanceof Error ? e.message : String(e)); setErr("Couldn't submit the payment — check the connection"); }
+    } catch (e) { console.warn('envelope submit failed:', e instanceof Error ? e.message : String(e)); setErr(M.receive.couldNotSubmit); }
   }
 
   function reset() { setReqQr(null); setResult(null); setScanning(false); setErr(null); setMemo(''); setNfcActive(false); setNfcKey(k => k + 1); }
@@ -221,9 +222,9 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
     return (
       <View style={S.center}>
         <View style={S.check}><IconCheck size={44} color={C.brandInk}/></View>
-        <Text style={S.paidText}>{`Received ${fmtCurrencyAmount(catalog, result.currency, result.amount)}`}</Text>
-        <Text style={S.paidSub}>{`from ${result.from}`}</Text>
-        <Pressable style={[S.ghostBtn, S.ghostBtnMuted]} onPress={reset} accessibilityRole="button" accessibilityLabel="New request" accessibilityState={{disabled: false}}><Text style={S.ghostBtnText}>New request</Text></Pressable>
+        <Text style={S.paidText}>{M.receive.receivedAmount(fmtCurrencyAmount(catalog, result.currency, result.amount))}</Text>
+        <Text style={S.paidSub}>{M.receive.fromWho(result.from)}</Text>
+        <Pressable style={[S.ghostBtn, S.ghostBtnMuted]} onPress={reset} accessibilityRole="button" accessibilityLabel={M.receive.newRequest} accessibilityState={{disabled: false}}><Text style={S.ghostBtnText}>{M.receive.newRequest}</Text></Pressable>
       </View>
     );
   }
@@ -249,13 +250,13 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
           <>
             <View style={S.nfcHintRow}>
               {nfcUsable ? <NfcIcon color={C.brand} size={18} /> : null}
-              <Text style={S.nfcHintLabel}>Show this to the payer{nfcUsable ? ' · or let them tap' : reqQr.nfcHex ? ' · NFC tap expired' : ''}</Text>
+              <Text style={S.nfcHintLabel}>{M.receive.showToPayer(nfcUsable ? 'tap' : reqQr.nfcHex ? 'expired' : 'none')}</Text>
             </View>
             <View testID="request-qr" style={S.qrCard}><QrCode value={reqQr.value} size={QR_SIZE} ecl="M" /></View>
         <Text style={S.amountBig}>{fmtCurrencyAmount(catalog, reqQr.currency, reqQr.rawAmount)}</Text>
         {(() => {
           const remaining = reqQr.expiry - now;
-          if (remaining <= 0) return <Text style={S.qrExpired}>Expired — make a new request</Text>;
+          if (remaining <= 0) return <Text style={S.qrExpired}>{M.receive.expiredMakeNew}</Text>;
           const m = Math.floor(remaining / 60);
           const s = remaining % 60;
           // While there's a minute+ of headroom, show the calm "~N min" form; under a minute, count
@@ -265,19 +266,19 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
           if (m >= 1) return (
             <View style={{flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6}}>
               <IconClock size={14} color={C.sub}/>
-              <Text style={[S.qrExpiry, {marginTop: 0}]}>Valid for ~{m} min</Text>
+              <Text style={[S.qrExpiry, {marginTop: 0}]}>{M.receive.validForMin(m)}</Text>
             </View>
           );
-          return <Text style={S.qrExpiryWarn}>Expires in 0:{s.toString().padStart(2, '0')}</Text>;
+          return <Text style={S.qrExpiryWarn}>{M.receive.expiresIn(s.toString().padStart(2, '0'))}</Text>;
         })()}
-        <Text style={S.qrHint}>Waiting for payment{online ? '…' : ' — reconnect to submit…'}</Text>
+        <Text style={S.qrHint}>{M.receive.waitingForPayment(online)}</Text>
         {/* Offline honesty (IC rail): the merchant cannot submit a handed envelope or check ledger
             history while offline. Payer-online payments still land directly and reconcile on the
             next balance refresh — but envelope handoffs need connectivity. */}
         {!online ? (
           <View style={S.qrOfflinePill}>
             <IconWifiOff size={14} color={C.bad}/>
-            <Text style={S.qrOfflinePillText}>Offline — can’t submit payments until reconnected</Text>
+            <Text style={S.qrOfflinePillText}>{M.receive.offlineCantSubmit}</Text>
           </View>
         ) : null}
             {/* Trip Ready J4 — the request-QR first-use tip: what this code is and who settles it.
@@ -295,22 +296,22 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
                 share(shareHandoff('req', reqQr.value));
               }}
               accessibilityRole="button"
-              accessibilityLabel="Share request link"
-              accessibilityHint="Share this request as a link the payer can open to pay"
+              accessibilityLabel={M.receive.shareRequestLink}
+              accessibilityHint={M.receive.shareRequestHint}
               accessibilityState={{disabled: false}}>
               <IconShare size={16} color={C.sub}/>
-              <Text style={S.ghostBtnText}>{shared ? shareConfirmLabel('Link copied ✓') : 'Share request link'}</Text>
+              <Text style={S.ghostBtnText}>{shared ? shareConfirmLabel(M.pay.linkCopied) : M.receive.shareRequestLink}</Text>
             </Pressable>
             {scanning ? (
-              <><QrScanner onScan={onSignedQr} /><Text style={S.dim2}>Scan the payer's signed QR</Text></>
+              <><QrScanner onScan={onSignedQr} /><Text style={S.dim2}>{M.receive.scanPayerSignedQrPrompt}</Text></>
             ) : (
               <>
-                <Pressable style={S.ghostBtn} onPress={() => setScanning(true)} accessibilityRole="button" accessibilityLabel="Scan payer's signed QR" accessibilityHint="Scan the payer's signed QR to submit their offline payment" accessibilityState={{disabled: false}}><IconQr size={16} color={C.sub}/><Text style={S.ghostBtnText}>Scan payer's signed QR</Text></Pressable>
-                <Text style={S.dim2}>If the payer paid without scanning your code, tap here to confirm with their phone.</Text>
+                <Pressable style={S.ghostBtn} onPress={() => setScanning(true)} accessibilityRole="button" accessibilityLabel={M.receive.scanPayerSignedQr} accessibilityHint={M.receive.scanPayerSignedQrHint} accessibilityState={{disabled: false}}><IconQr size={16} color={C.sub}/><Text style={S.ghostBtnText}>{M.receive.scanPayerSignedQr}</Text></Pressable>
+                <Text style={S.dim2}>{M.receive.confirmWithTheirPhone}</Text>
               </>
             )}
             {err ? <Text style={S.err}>{err}</Text> : null}
-            <Pressable style={[S.ghostBtn, S.ghostBtnMuted]} onPress={reset} accessibilityRole="button" accessibilityLabel="New request" accessibilityState={{disabled: false}}><Text style={S.ghostBtnText}>New request</Text></Pressable>
+            <Pressable style={[S.ghostBtn, S.ghostBtnMuted]} onPress={reset} accessibilityRole="button" accessibilityLabel={M.receive.newRequest} accessibilityState={{disabled: false}}><Text style={S.ghostBtnText}>{M.receive.newRequest}</Text></Pressable>
           </>
         ) : null}
       </View>
@@ -329,8 +330,8 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
           testID="receive-mode-toggle"
           value={subMode}
           onChange={(v) => onSubModeChange(v as 'request' | 'address')}
-          left={{label: 'Request payment', value: 'request', testID: 'btn-receive-request'}}
-          right={{label: 'My address', value: 'address', testID: 'btn-receive-address'}}
+          left={{label: M.receive.requestPayment, value: 'request', testID: 'btn-receive-request'}}
+          right={{label: M.receive.myAddress, value: 'address', testID: 'btn-receive-address'}}
         />
         {depositFamily === 'CkEthErc20' ? (
           <CkErc20DepositSheet
@@ -365,37 +366,37 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
           testID="receive-mode-toggle"
           value={subMode}
           onChange={(v) => onSubModeChange(v as 'request' | 'address')}
-          left={{label: 'Request payment', value: 'request', testID: 'btn-receive-request'}}
-          right={{label: 'My address', value: 'address', testID: 'btn-receive-address'}}
+          left={{label: M.receive.requestPayment, value: 'request', testID: 'btn-receive-request'}}
+          right={{label: M.receive.myAddress, value: 'address', testID: 'btn-receive-address'}}
         />
       ) : null}
       {/* Trip Ready J4 (UX hardening 2026-08-23) — the coach card ALSO mounts at the ENTRY form
           (was: only after pressing Request, so first-time receivers never saw it). Same one-time
           seen marker — whichever surface shows it first wins; the card never returns after. */}
       <CoachTip tipKey="receiveRequest" />
-      <Text style={S.label}>Amount to receive</Text>
+      <Text style={S.label}>{M.receive.amountToReceive}</Text>
       <View style={S.amountRow}>
         {/* MC5: the merchant selects the EXACT settlement asset by tapping the amount prefix (glyph +
             ▾), which opens the compact currency picker below. The amount is cleared on switch so a
             stale '25.00' is never reinterpreted as 25 BTC (8-decimal) on the new asset. */}
-        <Pressable testID="req-prefix" style={S.prefixBtn} onPress={() => setPickOpen(true)} accessibilityRole="button" accessibilityLabel="Choose settlement currency" accessibilityHint="Pick which asset the payer will send you" accessibilityState={{disabled: false}}>
+        <Pressable testID="req-prefix" style={S.prefixBtn} onPress={() => setPickOpen(true)} accessibilityRole="button" accessibilityLabel={M.receive.chooseCurrency} accessibilityHint={M.receive.chooseCurrencyHint} accessibilityState={{disabled: false}}>
           <Text style={S.currency}>{reqPrefix}</Text>
           <IconChevronDown size={20} color={C.sub}/>
         </Pressable>
-        <TextInput testID="amount-input" style={S.amountInput} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={C.sub} accessibilityLabel="Amount to receive" accessibilityHint="The amount the payer will send you" />
+        <TextInput testID="amount-input" style={S.amountInput} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder={M.receive.amountPlaceholder} placeholderTextColor={C.sub} accessibilityLabel={M.receive.amountToReceive} accessibilityHint={M.receive.amountHint} />
       </View>
       <TextInput
         testID="memo-input"
         style={memoInputStyle}
         value={memo}
         onChangeText={setMemo}
-        placeholder="Add a note (optional)"
+        placeholder={M.receive.memoPlaceholder}
         placeholderTextColor={C.sub}
-        accessibilityLabel="Memo"
-        accessibilityHint="An optional note attached to this payment request"
+        accessibilityLabel={M.receive.memo}
+        accessibilityHint={M.receive.memoHint}
         maxLength={32}
       />
-      <Pressable testID="btn-request" style={S.primaryWide} onPress={makeRequest} accessibilityRole="button" accessibilityLabel="Request" accessibilityHint="Show your QR code so the payer can scan it to pay you" accessibilityState={{disabled: false}}><Text style={S.primaryText}>Request</Text></Pressable>
+      <Pressable testID="btn-request" style={S.primaryWide} onPress={makeRequest} accessibilityRole="button" accessibilityLabel={M.receive.request} accessibilityHint={M.receive.requestHint} accessibilityState={{disabled: false}}><Text style={S.primaryText}>{M.receive.request}</Text></Pressable>
       {err ? <Text style={S.err}>{err}</Text> : null}
       <AssetPicker
         open={pickOpen}

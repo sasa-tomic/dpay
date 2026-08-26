@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {base, fmtAsset, usd} from '../lib/format';
+import {M} from '../i18n';
 import {BALANCE_TIMEOUT_MS} from './constants';
 import {fetchWithTimeout} from '../services/relay';
 
@@ -226,11 +227,11 @@ export function resolveNfcDisclosure(
   const a = catalog.find(c => c.currency === currency);
   if (!a) return null; // unknown currency id
   const name = displayName(a);
-  if (name === 'Unsupported') return null; // no honest name → decline
+  if (name === M.wallet.asset.unsupported) return null; // no honest name → decline
   const network = a.network ?? familyDisplay(catalog, currency)?.networkLabel ?? null;
   if (!network) return null; // no honest network → decline
   const formatted = fmtCurrencyAmount(catalog, currency, amount);
-  if (formatted === 'Unsupported') return null; // no honest amount → decline
+  if (formatted === M.wallet.asset.unsupported) return null; // no honest amount → decline
   return {assetName: name, networkLabel: network, formattedAmount: formatted};
 }
 
@@ -292,10 +293,10 @@ export function isTestnetCurrency(a: CurrencyDescriptor): boolean {
 // when backing_symbol is absent, so a malformed descriptor still reads honestly.
 export function testnetDisplayName(a: CurrencyDescriptor): string {
   const backing = a.backing_symbol;
-  if (backing && backing.length > 0) return `${backing} testnet`;
+  if (backing && backing.length > 0) return M.wallet.asset.testnetName(backing);
   const wrap = a.wrapper_name;
-  if (wrap && wrap.length > 0) return `${wrap} testnet`;
-  return 'Testnet';
+  if (wrap && wrap.length > 0) return M.wallet.asset.testnetName(wrap);
+  return M.wallet.asset.testnet;
 }
 // Validate a native-chain destination address against its minter family's format. Catches the most
 // common user error — pasting a wrong-chain address (e.g. an ETH 0x… into the BTC cash-out) — before
@@ -331,7 +332,7 @@ export function displayName(a: CurrencyDescriptor): string {
   // MC1 unit 6: NEVER fall back to the BTC native-asset unit for an unknown family.
   const sym = a.symbol;
   if (sym && sym.length >= 2) return sym;
-  return 'Unsupported';
+  return M.wallet.asset.unsupported;
 }
 
 // The amount-prefix glyph for a currency (shown before a typed amount in Receive + as the prefix of
@@ -375,9 +376,9 @@ export function fmtCurrencyAmount(catalog: CurrencyDescriptor[], currency: numbe
   // The display unit is the per-currency backing symbol (authoritative); fall back to the family's
   // cosmetic label only for a legacy descriptor without backing_symbol. An unknown family fail-closes.
   const unit = a?.backing_symbol ?? familyDisplay(catalog, currency)?.networkLabel;
-  if (!unit) return 'Unsupported';
+  if (!unit) return M.wallet.asset.unsupported;
   const decimals = a?.decimals ?? null;
-  if (decimals == null) return 'Unsupported';
+  if (decimals == null) return M.wallet.asset.unsupported;
   const displayDecimals = a?.display_decimals ?? decimals;
   return fmtAsset(raw, decimals, unit, displayDecimals);
 }

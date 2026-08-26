@@ -11,6 +11,7 @@ import type {Identity} from '../lib/types';
 import {DpayCore} from '../services/native';
 import {fetchWithTimeout} from '../services/relay';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
+import {M} from '../i18n';
 import {useReducedMotion} from '../hooks/useReducedMotion';
 import {Logo, WordmarkLink} from './Logo';
 import {SeedWords} from './SeedWords';
@@ -92,7 +93,7 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
       } else {
         const words = stringToWords(own);
         if (!validateMnemonic(words)) {
-          setErr("That seed doesn't look right. Paste your 24 recovery words or the 64-hex seed exactly as you wrote it down.");
+          setErr(M.onboarding.errOwnSeed);
           return;
         }
         hex = wordsToHex(words);
@@ -169,7 +170,7 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
     if (restoreMode === 'mnemonic') {
       const words = stringToWords(mnemonicText);
       if (!validateMnemonic(words)) {
-        setErr('Some words are wrong or missing. Check you have all 24 words spelled correctly.');
+        setErr(M.onboarding.errWords);
         return;
       }
       hex = wordsToHex(words);
@@ -217,10 +218,10 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
           <Animated.View
             style={[S.inkStamp, {opacity: stampOp, transform: [{scale: stampSc}, {rotate: '-6deg'}]}]}>
             <IconCheck size={15} color={C.brand} />
-            <Text style={S.inkStampText}>Recovery saved</Text>
+            <Text style={S.inkStampText}>{M.onboarding.recoverySaved.stamp}</Text>
           </Animated.View>
-          <Text style={S.inkBeatLine}>Only these words can bring your wallet back.</Text>
-          <Text style={S.inkBeatSub}>You have them. Nobody else does.</Text>
+          <Text style={S.inkBeatLine}>{M.onboarding.recoverySaved.line}</Text>
+          <Text style={S.inkBeatSub}>{M.onboarding.recoverySaved.sub}</Text>
         </View>
       ) : (
       <KeyboardAvoidingView
@@ -230,99 +231,99 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
         <ScrollView style={{flex: 1}} contentContainerStyle={S.onboard} keyboardShouldPersistTaps="handled">
           <Logo size={104} />
           <WordmarkLink style={S.wordmarkBig} />
-          <Text style={S.onboardSub}>Tap or scan to pay — online or offline.</Text>
-          <Text style={S.dim2}>No account. Your key never leaves this phone. Not even dpay can move your money.</Text>
+          <Text style={S.onboardSub}>{M.onboarding.tagline}</Text>
+          <Text style={S.dim2}>{M.onboarding.custody}</Text>
           {backupMnemonic ? (
             <>
-              <Text style={S.wordmarkBig}>Back up your wallet</Text>
+              <Text style={S.wordmarkBig}>{M.onboarding.backup.title}</Text>
               {/* Trip Ready J2 — the ownership ritual line. ABOVE the warning, in ink: the moment
                   reads as ownership first, risk second. The gate below stays EXACTLY as strong. */}
-              <Text style={S.backupRitualNote}>This is the moment your wallet becomes truly yours — only these words can bring your money back.</Text>
-              <Text style={S.warnNote}>Write down these 24 words and store them safely. They're the ONLY way to recover your wallet if you lose this device. There is no dpay account to sign back into. Lose these words and this phone, and your money is gone. Not even we can recover it.</Text>
+              <Text style={S.backupRitualNote}>{M.onboarding.backup.ritual}</Text>
+              <Text style={S.warnNote}>{M.onboarding.backup.warning}</Text>
               <SeedWords words={backupMnemonic} testID="mnemonic-backup" />
               <Pressable testID="btn-mnemonic-copy" style={S.linkBtn} onPress={() => { if (backupMnemonic) void doCopy(wordsToString(backupMnemonic)); }}
                 accessibilityRole="button"
-                accessibilityLabel={copied === 'clipboard' ? 'Words copied' : copied === 'shared' ? 'Words shared' : 'Copy words'}
-                accessibilityHint="Copies all 24 recovery words to the clipboard, without the position numbers"
+                accessibilityLabel={copied === 'clipboard' ? M.onboarding.backup.wordsCopied : copied === 'shared' ? M.onboarding.backup.wordsShared : M.onboarding.backup.copyWords}
+                accessibilityHint={M.onboarding.backup.copyWordsHint}
                 accessibilityState={{disabled: false}}>
-                <Text style={S.linkText}>{copied === 'clipboard' ? 'Copied ✓' : copied === 'shared' ? 'Shared ✓' : 'Copy words'}</Text>
+                <Text style={S.linkText}>{copied === 'clipboard' ? M.onboarding.backup.copiedCheck : copied === 'shared' ? M.onboarding.backup.sharedCheck : M.onboarding.backup.copyWords}</Text>
               </Pressable>
               <Pressable testID="mnemonic-backup-checkbox" style={{flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch', marginTop: 4, marginBottom: 10, minHeight: 44}} onPress={() => setBackupChecked(!backupChecked)}
-                accessibilityRole="checkbox" accessibilityLabel="I've written down all 24 words" accessibilityState={{checked: backupChecked}}>
+                accessibilityRole="checkbox" accessibilityLabel={M.onboarding.backup.ack} accessibilityState={{checked: backupChecked}}>
                 <View style={{width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: backupChecked ? C.brand : C.sub2, backgroundColor: backupChecked ? C.brand : 'transparent', alignItems: 'center', justifyContent: 'center', marginRight: 10}}>
                   {/* P4 — the '✓' glyph Text became IconCheck (the box's checked state is also
                       conveyed by accessibilityState on the checkbox Pressable). */}
                   {backupChecked ? <IconCheck size={14} color={C.brandInk} /> : null}
                 </View>
-                <Text style={{color: C.sub, fontSize: 15, flex: 1}}>I've written down all 24 words</Text>
+                <Text style={{color: C.sub, fontSize: 15, flex: 1}}>{M.onboarding.backup.ack}</Text>
               </Pressable>
               <Pressable testID="btn-mnemonic-continue" style={[S.primary, !backupChecked && S.disabledFlat]} disabled={!backupChecked} onPress={finishCreate}
-                accessibilityRole="button" accessibilityLabel="Continue" accessibilityState={{disabled: !backupChecked}}>
-                <Text style={S.primaryText}>Continue</Text>
+                accessibilityRole="button" accessibilityLabel={M.onboarding.continue} accessibilityState={{disabled: !backupChecked}}>
+                <Text style={S.primaryText}>{M.onboarding.continue}</Text>
               </Pressable>
             </>
           ) : pendingId ? (
             <>
-              <Text testID="onboard-faucet-failed" style={S.warnNote}>Wallet created, but starter funds couldn't be added. The server may be offline — you can add funds later from Balances.</Text>
+              <Text testID="onboard-faucet-failed" style={S.warnNote}>{M.onboarding.faucetFailed}</Text>
               <Pressable testID="btn-onboard-continue" style={S.primary} onPress={() => onCreated(pendingId!)}
-                accessibilityRole="button" accessibilityLabel="Continue" accessibilityState={{disabled: false}}>
-                <Text style={S.primaryText}>Continue</Text>
+                accessibilityRole="button" accessibilityLabel={M.onboarding.continue} accessibilityState={{disabled: false}}>
+                <Text style={S.primaryText}>{M.onboarding.continue}</Text>
               </Pressable>
             </>
           ) : mode === 'restore' ? (
             <>
               {restoreMode === 'mnemonic' ? (
                 <>
-                  <Text style={S.label}>Recovery phrase</Text>
-                  <TextInput testID="restore-mnemonic-input" style={S.seedInput} value={mnemonicText} onChangeText={setMnemonicText} placeholder="Enter your 24 recovery words" placeholderTextColor={C.sub2} autoCapitalize="none" autoCorrect={false} multiline accessibilityLabel="Recovery phrase" accessibilityHint="The 24 recovery words from your backup" />
-                  <Text style={S.dim2}>Enter the 24 words from your backup. One seed recovers both your IC and Solana funds.</Text>
+                  <Text style={S.label}>{M.onboarding.restore.phraseLabel}</Text>
+                  <TextInput testID="restore-mnemonic-input" style={S.seedInput} value={mnemonicText} onChangeText={setMnemonicText} placeholder={M.onboarding.restore.phrasePlaceholder} placeholderTextColor={C.sub2} autoCapitalize="none" autoCorrect={false} multiline accessibilityLabel={M.onboarding.restore.phraseLabel} accessibilityHint={M.onboarding.restore.phraseHint} />
+                  <Text style={S.dim2}>{M.onboarding.restore.phraseNote}</Text>
                 </>
               ) : (
                 <>
-                  <Text style={S.label}>Recovery seed</Text>
-                  <TextInput testID="restore-seed-input" style={S.seedInput} value={seed} onChangeText={setSeed} placeholder="64 hex characters" placeholderTextColor={C.sub2} autoCapitalize="none" autoCorrect={false} multiline accessibilityLabel="Recovery seed" accessibilityHint="The 64-hex seed shown by Backup that recovers your wallet" />
-                  <Text style={S.dim2}>One seed recovers both your IC and Solana funds.</Text>
+                  <Text style={S.label}>{M.onboarding.restore.seedLabel}</Text>
+                  <TextInput testID="restore-seed-input" style={S.seedInput} value={seed} onChangeText={setSeed} placeholder={M.onboarding.restore.seedPlaceholder} placeholderTextColor={C.sub2} autoCapitalize="none" autoCorrect={false} multiline accessibilityLabel={M.onboarding.restore.seedLabel} accessibilityHint={M.onboarding.restore.seedHint} />
+                  <Text style={S.dim2}>{M.onboarding.restore.seedNote}</Text>
                 </>
               )}
               <Pressable testID="btn-restore-mode-toggle" style={S.linkBtn} onPress={() => { setRestoreMode(restoreMode === 'mnemonic' ? 'hex' : 'mnemonic'); setErr(null); }}
-                accessibilityRole="button" accessibilityLabel={restoreMode === 'mnemonic' ? 'Enter hex instead' : 'Enter words instead'}>
-                <Text style={S.linkText}>{restoreMode === 'mnemonic' ? 'Enter hex instead' : 'Enter words instead'}</Text>
+                accessibilityRole="button" accessibilityLabel={restoreMode === 'mnemonic' ? M.onboarding.restore.enterHex : M.onboarding.restore.enterWords}>
+                <Text style={S.linkText}>{restoreMode === 'mnemonic' ? M.onboarding.restore.enterHex : M.onboarding.restore.enterWords}</Text>
               </Pressable>
-              <Text style={S.label}>Choose a username</Text>
-              <TextInput testID="username-input" style={S.usernameInput} value={username} onChangeText={setUsername} placeholder="e.g. Alice" placeholderTextColor={C.sub2} autoCapitalize="words" autoCorrect={false} accessibilityLabel="Username" accessibilityHint="The name others see when you request or receive a payment" />
+              <Text style={S.label}>{M.onboarding.usernameLabel}</Text>
+              <TextInput testID="username-input" style={S.usernameInput} value={username} onChangeText={setUsername} placeholder={M.onboarding.usernamePlaceholder} placeholderTextColor={C.sub2} autoCapitalize="words" autoCorrect={false} accessibilityLabel={M.onboarding.usernameA11y} accessibilityHint={M.onboarding.usernameHint} />
               {err ? <Text style={S.err}>{err}</Text> : null}
                   <Pressable testID="btn-restore-confirm" style={[S.primary, (busy || (restoreMode === 'mnemonic' ? mnemonicText : seed).trim() === '') && S.disabledFlat]} disabled={busy || (restoreMode === 'mnemonic' ? mnemonicText : seed).trim() === ''} onPress={restore}
-                accessibilityRole="button" accessibilityLabel="Restore wallet" accessibilityHint={restoreMode === 'mnemonic' ? 'Recover your wallet from your 24 recovery words' : 'Recover your wallet from the recovery seed'} accessibilityState={{disabled: busy || (restoreMode === 'mnemonic' ? mnemonicText : seed).trim() === ''}}>
-                <Text style={S.primaryText}>{busy ? 'Restoring…' : 'Restore wallet'}</Text>
+                accessibilityRole="button" accessibilityLabel={M.onboarding.restore.action} accessibilityHint={restoreMode === 'mnemonic' ? M.onboarding.restore.hintMnemonic : M.onboarding.restore.hintHex} accessibilityState={{disabled: busy || (restoreMode === 'mnemonic' ? mnemonicText : seed).trim() === ''}}>
+                <Text style={S.primaryText}>{busy ? M.onboarding.restore.busy : M.onboarding.restore.action}</Text>
               </Pressable>
               <Pressable testID="btn-restore-cancel" style={S.linkBtn} onPress={() => { setMode('create'); setSeed(''); setMnemonicText(''); setRestoreMode('mnemonic'); setErr(null); }}
-                accessibilityRole="button" accessibilityLabel="Cancel restore" accessibilityHint="Go back to creating a new wallet">
-                <Text style={S.linkTextMuted}>Cancel</Text>
+                accessibilityRole="button" accessibilityLabel={M.onboarding.restore.cancelA11y} accessibilityHint={M.onboarding.restore.cancelHint}>
+                <Text style={S.linkTextMuted}>{M.common.cancel}</Text>
               </Pressable>
             </>
           ) : (
             <>
-              <Text style={S.label}>Choose a username</Text>
-              <TextInput testID="username-input" style={S.usernameInput} value={username} onChangeText={setUsername} placeholder="e.g. Alice" placeholderTextColor={C.sub2} autoCapitalize="words" autoCorrect={false} onSubmitEditing={busy ? undefined : create} accessibilityLabel="Username" accessibilityHint="The name others see when you request or receive a payment" />
+              <Text style={S.label}>{M.onboarding.usernameLabel}</Text>
+              <TextInput testID="username-input" style={S.usernameInput} value={username} onChangeText={setUsername} placeholder={M.onboarding.usernamePlaceholder} placeholderTextColor={C.sub2} autoCapitalize="words" autoCorrect={false} onSubmitEditing={busy ? undefined : create} accessibilityLabel={M.onboarding.usernameA11y} accessibilityHint={M.onboarding.usernameHint} />
               {/* Own-seed alternative (2026-08-18): create from an EXISTING seed instead of the
                   generated random one. Collapsed by default so first-time users see the plain
                   create form; the link reveals the input. Same faucet + backup gate downstream. */}
               <Pressable testID="btn-own-seed-toggle" style={S.linkBtn} onPress={() => { setOwnSeedOpen(!ownSeedOpen); setErr(null); }}
                 accessibilityRole="button"
-                accessibilityLabel={ownSeedOpen ? 'Generate a random seed instead' : 'Use my own seed instead'}
-                accessibilityHint="Show a field to paste the 24 recovery words or 64-hex seed of an existing wallet, instead of generating a fresh one">
-                <Text style={S.linkText}>{ownSeedOpen ? 'Generate a random seed instead' : 'Use my own seed instead'}</Text>
+                accessibilityLabel={ownSeedOpen ? M.onboarding.ownSeed.useRandom : M.onboarding.ownSeed.useOwn}
+                accessibilityHint={M.onboarding.ownSeed.toggleHint}>
+                <Text style={S.linkText}>{ownSeedOpen ? M.onboarding.ownSeed.useRandom : M.onboarding.ownSeed.useOwn}</Text>
               </Pressable>
               {ownSeedOpen ? (
                 <>
-                  <TextInput testID="own-seed-input" style={S.seedInput} value={ownSeedText} onChangeText={setOwnSeedText} placeholder="Your 24 words or 64-hex seed" placeholderTextColor={C.sub2} autoCapitalize="none" autoCorrect={false} multiline accessibilityLabel="Own seed" accessibilityHint="Optional: the 24 recovery words or 64-hex seed to build this wallet from, instead of a new random one" />
-                  <Text style={S.dim2}>Leave empty to generate a fresh random seed.</Text>
+                  <TextInput testID="own-seed-input" style={S.seedInput} value={ownSeedText} onChangeText={setOwnSeedText} placeholder={M.onboarding.ownSeed.placeholder} placeholderTextColor={C.sub2} autoCapitalize="none" autoCorrect={false} multiline accessibilityLabel={M.onboarding.ownSeed.a11y} accessibilityHint={M.onboarding.ownSeed.hint} />
+                  <Text style={S.dim2}>{M.onboarding.ownSeed.note}</Text>
                 </>
               ) : null}
               {err ? <Text style={S.err}>{err}</Text> : null}
               <Pressable testID="btn-create" style={[S.primary, busy && S.disabledFlat]} disabled={busy} onPress={create}
-                accessibilityRole="button" accessibilityLabel="Create wallet" accessibilityHint="Generate your on-device key and add demo funds" accessibilityState={{disabled: busy}}>
-                <Text style={S.primaryText}>{busy ? 'Creating…' : 'Create wallet'}</Text>
+                accessibilityRole="button" accessibilityLabel={M.onboarding.create.action} accessibilityHint={M.onboarding.create.hint} accessibilityState={{disabled: busy}}>
+                <Text style={S.primaryText}>{busy ? M.onboarding.create.busy : M.onboarding.create.action}</Text>
               </Pressable>
               {/* Restore entry — promoted (UX fix 2026-08-10) from a muted bottom link (S.linkBtn /
                   S.linkTextMuted) to S.secondaryBtn / S.secondaryBtnText, and repositioned to sit
@@ -332,11 +333,11 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
                   ALL restore-mode testIDs (btn-restore, restore-seed-input, btn-restore-confirm,
                   btn-restore-cancel) are unchanged; only the entry button's style + position change. */}
               <Pressable testID="btn-restore" style={S.secondaryBtn} onPress={() => { setMode('restore'); setErr(null); }}
-                accessibilityRole="button" accessibilityLabel="Restore wallet" accessibilityHint="Recover a wallet from your 24-word recovery phrase">
-                <Text style={S.secondaryBtnText}>Restore wallet</Text>
+                accessibilityRole="button" accessibilityLabel={M.onboarding.restore.action} accessibilityHint={M.onboarding.restore.entryHint}>
+                <Text style={S.secondaryBtnText}>{M.onboarding.restore.action}</Text>
               </Pressable>
-              <Text style={S.dim2}>Creates your wallet and adds ∂100 in demo funds to get started.</Text>
-              <Text style={S.dpayGlyphNote}><Text style={S.dpayGlyph}>∂</Text> is the demo-dollar symbol — play money, ∂1 = $1.</Text>
+              <Text style={S.dim2}>{M.onboarding.demoNote}</Text>
+              <Text style={S.dpayGlyphNote}><Text style={S.dpayGlyph}>∂</Text>{M.onboarding.demoGlyphNote}</Text>
             </>
           )}
         </ScrollView>

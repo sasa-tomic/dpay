@@ -24,6 +24,7 @@ import React, {useEffect, useRef} from 'react';
 import {Animated, Easing, Pressable, SafeAreaView, ScrollView, StatusBar, Text, View} from 'react-native';
 import {C} from '../config/palette';
 import {S, isDark} from '../styles';
+import {M} from '../i18n';
 import {REHEARSAL_STEPS, REHEARSAL_PUNCHLINE, REHEARSAL_TITLE} from '../config/education';
 import {JOURNEY_STAMPS, awardStamp} from '../lib/journey';
 import {useReducedMotion} from '../hooks/useReducedMotion';
@@ -31,7 +32,7 @@ import {useEscapeToClose} from '../hooks/useHotkeys';
 import {IconClose} from './icons';
 
 const EASE_OUT = Easing.out(Easing.cubic);
-const STAGE_TAGS = ['01 — REQUEST', '02 — APPROVE', '03 — SETTLE'] as const;
+const STAGE_TAGS = M.education.rehearsal.stageTags;
 
 /** Rise-in text (Walkthrough grammar): 8px rise + fade, one delay slot per element. */
 function RiseText({children, style, delay, reduced, testID}: {
@@ -67,14 +68,14 @@ export function Rehearsal({onTry, onSkip, reducedMotion}: {onTry: () => void; on
       {/* Header — the app's standard sheet chrome (SettingsSheet grammar): title left, the
           44pt boxed affordance top-right ("Explore wallet" — skip to the funded wallet). */}
       <View style={S.sheetHead}>
-        <Text style={S.sheetTitle}>Rehearsal</Text>
+        <Text style={S.sheetTitle}>{M.education.rehearsal.sheetTitle}</Text>
         <Pressable
           testID="btn-rehearsal-skip"
           style={S.sheetClose}
           onPress={onSkip}
           accessibilityRole="button"
-          accessibilityLabel="Explore wallet"
-          accessibilityHint="Skip the rehearsal and open your wallet"
+          accessibilityLabel={M.education.rehearsal.skip}
+          accessibilityHint={M.education.rehearsal.skipHint}
           accessibilityState={{disabled: false}}>
           <IconClose size={18} color={C.sub} />
         </Pressable>
@@ -100,9 +101,9 @@ export function Rehearsal({onTry, onSkip, reducedMotion}: {onTry: () => void; on
           style={S.primary}
           onPress={onTry}
           accessibilityRole="button"
-          accessibilityLabel="Try with demo funds"
+          accessibilityLabel={M.education.rehearsal.try}
           accessibilityState={{disabled: false}}>
-          <Text style={S.primaryText}>Try with demo funds</Text>
+          <Text style={S.primaryText}>{M.education.rehearsal.try}</Text>
         </Pressable>
       </View>
     </SafeAreaView>

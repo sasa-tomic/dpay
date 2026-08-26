@@ -1,6 +1,7 @@
 import {useState} from 'react';
 import {View, Text, Pressable} from 'react-native';
 import {S} from '../styles';
+import {M} from '../i18n';
 import {C} from '../config/palette';
 import {assetTestKey, displayName, fmtCurrencyAmount, type CurrencyDescriptor} from '../config/catalog';
 import {IconArrowDownLeft, IconArrowUpRight} from './icons';
@@ -23,8 +24,8 @@ export function Ledger({history, catalog}: {history: Txn[]; catalog: CurrencyDes
   if (history.length === 0) {
     return (
       <View testID="ledger-view">
-        <Text style={S.ledgerEmpty}>No payments yet.</Text>
-        <Text style={S.dim2}>Tap Receive to create a payment request, or Pay to scan one.</Text>
+        <Text style={S.ledgerEmpty}>{M.wallet.ledger.empty}</Text>
+        <Text style={S.dim2}>{M.wallet.ledger.emptyHint}</Text>
       </View>
     );
   }
@@ -35,7 +36,7 @@ export function Ledger({history, catalog}: {history: Txn[]; catalog: CurrencyDes
   const rows = filter == null ? history : history.filter(t => t.currency === filter);
   return (
     <View style={S.ledgerWrap} testID="ledger-view">
-      <Text style={S.histTitle}>Recent</Text>
+      <Text style={S.histTitle}>{M.wallet.ledger.recent}</Text>
       {showFilter ? (
         <View style={S.filterRow}>
           <Pressable
@@ -43,9 +44,9 @@ export function Ledger({history, catalog}: {history: Txn[]; catalog: CurrencyDes
             style={[S.filterChip, filter == null && S.filterChipActive]}
             onPress={() => setFilter(null)}
             accessibilityRole="button"
-            accessibilityLabel="All assets"
+            accessibilityLabel={M.wallet.ledger.allAssets}
           >
-            <Text style={[S.filterChipText, filter == null && S.filterChipTextActive]}>All</Text>
+            <Text style={[S.filterChipText, filter == null && S.filterChipTextActive]}>{M.wallet.ledger.all}</Text>
           </Pressable>
           {presentCurrencies.map(currency => {
             const desc = catalog.find(c => c.currency === currency);
@@ -59,7 +60,7 @@ export function Ledger({history, catalog}: {history: Txn[]; catalog: CurrencyDes
                 style={[S.filterChip, active && S.filterChipActive]}
                 onPress={() => setFilter(currency)}
                 accessibilityRole="button"
-                accessibilityLabel={`Filter ${label}`}
+                accessibilityLabel={M.wallet.ledger.filter(label)}
               >
                 <Text style={[S.filterChipText, active && S.filterChipTextActive]}>{label}</Text>
               </Pressable>
@@ -87,7 +88,7 @@ export function Ledger({history, catalog}: {history: Txn[]; catalog: CurrencyDes
               {t.dir === 'out' ? <IconArrowUpRight size={16} color={C.sub} /> : <IconArrowDownLeft size={16} color={C.ok} />}
             </View>
             <View style={S.histWhoCol}>
-              <Text style={S.histWho}>{t.dir === 'out' ? `to ${t.who || '—'}` : `from ${t.who || '—'}`}</Text>
+              <Text style={S.histWho}>{t.dir === 'out' ? M.wallet.ledger.to(t.who || '—') : M.wallet.ledger.from(t.who || '—')}</Text>
               {t.memo ? <Text style={S.histMemo} testID={`hist-memo-${i}`}>{t.memo}</Text> : null}
             </View>
             <Text style={[S.histAmt, {color: t.dir === 'out' ? C.ink : C.ok}]}>{`${t.dir === 'out' ? '−' : '+'}${amtTxt}`}</Text>

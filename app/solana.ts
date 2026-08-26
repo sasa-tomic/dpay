@@ -25,6 +25,7 @@ import {encodeSolReq, generateRid} from './solana/qr';
 import type {SolReqV2, SolPayV2, SolReceiptV2, SolReqInput, SolPayInput} from './solana/qr';
 import type {SolanaSignatureStatus} from './solana/rpc';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from './solana/payments';
+import {M} from './i18n';
 
 export {deriveSolanaAddress};
 
@@ -42,7 +43,7 @@ export async function getSolanaBalance(address: string, signal?: AbortSignal): P
  *  Signs LOCALLY with the device-derived key (no relay, no DpayCore — non-custodial). Throws if SOL
  *  is offline, on a network/RPC error, or if the transaction fails on-chain. Returns the signature. */
 export async function sendSol(secretHex: string, toAddress: string, lamports: bigint, signal?: AbortSignal): Promise<string> {
-  if (!SOLANA_RPC_URL) throw new Error('Solana is offline (no RPC endpoint configured)');
+  if (!SOLANA_RPC_URL) throw new Error(M.errors.solana.offline);
   const {seed, publicKey} = deriveSolanaKeypair(secretHex);
   const {getLatestBlockhash, sendTransaction, confirmTransaction} = await import('./solana/rpc');
   const {blockhash} = await getLatestBlockhash(SOLANA_RPC_URL, {signal});
@@ -71,7 +72,7 @@ export async function sendSol(secretHex: string, toAddress: string, lamports: bi
  *  on-chain tx fails. Returns the signature. Reuses the byte-exact `buildSplTransferInstruction` +
  *  `buildCreateAtaIdempotentInstruction` (proven in solana-spl.test.ts). */
 export async function sendSpl(secretHex: string, destAddress: string, amount: bigint, signal?: AbortSignal): Promise<string> {
-  if (!SOLANA_RPC_URL) throw new Error('Solana is offline (no RPC endpoint configured)');
+  if (!SOLANA_RPC_URL) throw new Error(M.errors.solana.offline);
   const {seed, publicKey} = deriveSolanaKeypair(secretHex);
   const senderAddress = bs58.encode(publicKey);
   const senderAta = deriveAta(senderAddress, USDC_MINT_ADDRESS);
@@ -80,7 +81,7 @@ export async function sendSpl(secretHex: string, destAddress: string, amount: bi
 
   // Sender ATA first — the device must hold a USDC account to debit from (fail-closed).
   if (!(await accountExists(SOLANA_RPC_URL, bs58.encode(senderAta), {signal}))) {
-    throw new Error("Your wallet doesn't have a USDC account yet");
+    throw new Error(M.errors.solana.senderNoUsdcAccount);
   }
   // Recipient ATA — if missing, create it in the same tx (sender pays the one-time rent, disclosed
   // upstream on the review screen; idempotent so a race with another creator is harmless).
@@ -90,7 +91,7 @@ export async function sendSpl(secretHex: string, destAddress: string, amount: bi
     // broadcast with a raw "custom program error: 0x1" that no friendlySolError pattern matches.
     const lamports = await getBalance(SOLANA_RPC_URL, senderAddress, {signal});
     if (BigInt(lamports) < SOL_ATA_SETUP_MIN_LAMPORTS) {
-      throw new Error(`They don't have a USDC account yet — creating it needs about ${fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT)} of SOL in this wallet (one-time rent + fee, paid by you) — send a little SOL here first`);
+      throw new Error(M.errors.solana.recipientNoUsdcAccount(fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT)));
     }
     ixs.push(buildCreateAtaIdempotentInstruction(publicKey, recipientAta, base58Decode32(destAddress), base58Decode32(USDC_MINT_ADDRESS)));
   }
@@ -115,7 +116,7 @@ export async function sendSpl(secretHex: string, destAddress: string, amount: bi
  *  is offline, when the rail is incoherent (mainnet mint on a non-mainnet RPC), on insufficient
  *  SOL, or on any RPC/on-chain failure. Returns the transaction signature. */
 export async function createUsdcAta(secretHex: string, signal?: AbortSignal): Promise<string> {
-  if (!SOLANA_RPC_URL || !solanaUsdcAvailable()) throw new Error('Solana USDC is not available (no RPC endpoint configured)');
+  if (!SOLANA_RPC_URL || !solanaUsdcAvailable()) throw new Error(M.errors.solana.usdcUnavailable);
   const {seed, publicKey} = deriveSolanaKeypair(secretHex);
   const ownerAddress = bs58.encode(publicKey);
   const ata = deriveAta(ownerAddress, USDC_MINT_ADDRESS);
@@ -123,7 +124,7 @@ export async function createUsdcAta(secretHex: string, signal?: AbortSignal): Pr
 
   const lamports = await getBalance(SOLANA_RPC_URL, ownerAddress, {signal});
   if (BigInt(lamports) < SOL_ATA_SETUP_MIN_LAMPORTS) {
-    throw new Error(`Creating your USDC account needs about ${fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT)} in this wallet (one-time account rent + fee) — send a little SOL here first`);
+    throw new Error(M.errors.solana.ownUsdcAccountRent(fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT)));
   }
 
   const ix = buildCreateAtaIdempotentInstruction(publicKey, ata, publicKey, base58Decode32(USDC_MINT_ADDRESS));
@@ -225,7 +226,7 @@ export async function createSolPaymentRequest(
   },
   signal: AbortSignal,
 ): Promise<{request: SolReqV2; uri: string}> {
-  if (!isSolanaRpcAvailable()) throw new Error('Solana is offline (no RPC endpoint configured)');
+  if (!isSolanaRpcAvailable()) throw new Error(M.errors.solana.offline);
   const rpc = await import('./solana/rpc');
 
   // Cluster identity check — fail-closed on a non-mainnet endpoint (genesis hash is immutable).
@@ -358,7 +359,7 @@ export async function broadcastSolPayment(
   //    the same signed bytes can be rebroadcast idempotently). Used for all downstream receipt codes.
   const sig = verifyResult.signature;
 
-  if (!isSolanaRpcAvailable()) throw new Error('Solana is offline (no RPC endpoint configured)');
+  if (!isSolanaRpcAvailable()) throw new Error(M.errors.solana.offline);
   const rpc = await import('./solana/rpc');
 
   // 6. Freshness pre-broadcast (invariant #4). The request's `slot` is `minContextSlot` so reorg-aware

@@ -19,6 +19,7 @@ import {PassportArchive} from './TripPassport';
 import {PASSPORT_TITLE, computeReadiness, type ReadinessKey} from '../lib/readiness';
 import {JOURNEY_STAMPS, awardStamp, useJourney} from '../lib/journey';
 import {choiceLabel, type ThemeOverride} from '../config/theme';
+import {M} from '../i18n';
 
 /**
  * Settings sheet — server config + reset (app configuration only). Moved off the main wallet screen
@@ -148,7 +149,7 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
   // busy/error state stays co-located with the input (same idiom as Onboarding restore).
   function parseRestoreSeed(text: string): {hex: string} | {err: string} {
     const trimmed = text.trim();
-    if (trimmed === '') return {err: 'Enter your 24 recovery words or 64-hex seed.'};
+    if (trimmed === '') return {err: M.settings.restore.errEmpty};
     // Hex shape: 64 chars, all hex digits. Everything else is treated as a word phrase.
     if (/^[0-9a-fA-F]{64}$/.test(trimmed.replace(/\s+/g, ''))) {
       const e = validateSeed(trimmed);
@@ -157,7 +158,7 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
     }
     const words = stringToWords(trimmed);
     if (!validateMnemonic(words)) {
-      return {err: 'Some words are wrong or missing. Check you have all 24 words spelled correctly — or paste the 64-hex seed instead.'};
+      return {err: M.settings.restore.errWords};
     }
     return {hex: wordsToHex(words)};
   }
@@ -198,8 +199,8 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
       <SafeAreaView style={S.sheet}>
         <StatusBar barStyle={isDark() ? 'light-content' : 'dark-content'} backgroundColor={C.bg} />
         <View style={S.sheetHead}>
-          <Text style={S.sheetTitle}>Settings</Text>
-          <Pressable testID="btn-settings-close" style={S.sheetClose} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close settings" accessibilityState={{disabled: false}}><IconClose size={18} color={C.sub} /></Pressable>
+          <Text style={S.sheetTitle}>{M.settings.title}</Text>
+          <Pressable testID="btn-settings-close" style={S.sheetClose} onPress={onClose} accessibilityRole="button" accessibilityLabel={M.settings.close} accessibilityState={{disabled: false}}><IconClose size={18} color={C.sub} /></Pressable>
         </View>
 
         <ScrollView contentContainerStyle={S.sheetCenter} keyboardShouldPersistTaps="handled">
@@ -207,10 +208,10 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
               gate. Pure display + copy; the seed already lives in AsyncStorage. The warning names the
               BOTH-rails consequence so the user stores it before any shoulder-surf risk. */}
           <View style={S.settingsSection}>
-            <Text style={S.inputLabel}>Backup</Text>
+            <Text style={S.inputLabel}>{M.settings.backup.label}</Text>
             {backupRevealed ? (
               <View style={S.backupConfirmBox}>
-                <Text style={S.warnNote}>This seed recovers BOTH your IC and Solana funds. Store it safely. Never share it.</Text>
+                <Text style={S.warnNote}>{M.settings.backup.warning}</Text>
                 {seedFormat === 'mnemonic' ? (
                   <>
                     <SeedWords words={mnemonicWords} testID="mnemonic-words" />
@@ -219,20 +220,20 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
                       style={[S.primaryWide, {marginTop: 16}]}
                       onPress={copyMnemonic}
                       accessibilityRole="button"
-                      accessibilityLabel={copied === 'clipboard' ? 'Words copied' : copied === 'shared' ? 'Words shared' : 'Copy words'}
-                      accessibilityHint="Copies your 24 recovery words to the clipboard"
+                      accessibilityLabel={copied === 'clipboard' ? M.settings.backup.wordsCopied : copied === 'shared' ? M.settings.backup.wordsShared : M.settings.backup.copyWords}
+                      accessibilityHint={M.settings.backup.copyWordsHint}
                       accessibilityState={{disabled: false}}>
-                      <Text style={S.primaryText}>{copied === 'clipboard' ? 'Copied ✓' : copied === 'shared' ? 'Shared ✓' : 'Copy words'}</Text>
+                      <Text style={S.primaryText}>{copied === 'clipboard' ? M.settings.backup.copiedCheck : copied === 'shared' ? M.settings.backup.sharedCheck : M.settings.backup.copyWords}</Text>
                     </Pressable>
                     <Pressable
                       testID="btn-backup-show-hex"
                       style={S.linkBtn}
                       onPress={() => setSeedFormat('hex')}
                       accessibilityRole="button"
-                      accessibilityLabel="Show seed as hex"
-                      accessibilityHint="Switches to the raw 64-hex recovery seed view"
+                      accessibilityLabel={M.settings.backup.showAsHexA11y}
+                      accessibilityHint={M.settings.backup.showAsHexHint}
                       accessibilityState={{disabled: false}}>
-                      <Text style={S.linkTextMuted}>Show as hex</Text>
+                      <Text style={S.linkTextMuted}>{M.settings.backup.showAsHex}</Text>
                     </Pressable>
                   </>
                 ) : (
@@ -245,20 +246,20 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
                       style={[S.primaryWide, {marginTop: 16}]}
                       onPress={copySeed}
                       accessibilityRole="button"
-                      accessibilityLabel={copied === 'clipboard' ? 'Seed copied' : copied === 'shared' ? 'Seed shared' : 'Copy seed'}
-                      accessibilityHint="Copies your recovery seed to the clipboard"
+                      accessibilityLabel={copied === 'clipboard' ? M.settings.backup.seedCopied : copied === 'shared' ? M.settings.backup.seedShared : M.settings.backup.copySeed}
+                      accessibilityHint={M.settings.backup.copySeedHint}
                       accessibilityState={{disabled: false}}>
-                      <Text style={S.primaryText}>{copied === 'clipboard' ? 'Copied ✓' : copied === 'shared' ? 'Shared ✓' : 'Copy seed'}</Text>
+                      <Text style={S.primaryText}>{copied === 'clipboard' ? M.settings.backup.copiedCheck : copied === 'shared' ? M.settings.backup.sharedCheck : M.settings.backup.copySeed}</Text>
                     </Pressable>
                     <Pressable
                       testID="btn-backup-show-hex"
                       style={S.linkBtn}
                       onPress={() => setSeedFormat('mnemonic')}
                       accessibilityRole="button"
-                      accessibilityLabel="Show seed as words"
-                      accessibilityHint="Switches to the 24-word recovery phrase view"
+                      accessibilityLabel={M.settings.backup.showAsWordsA11y}
+                      accessibilityHint={M.settings.backup.showAsWordsHint}
                       accessibilityState={{disabled: false}}>
-                      <Text style={S.linkTextMuted}>Show as words</Text>
+                      <Text style={S.linkTextMuted}>{M.settings.backup.showAsWords}</Text>
                     </Pressable>
                   </>
                 )}
@@ -267,32 +268,32 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
                   style={S.linkBtn}
                   onPress={() => { setBackupRevealed(false); setConfirmBackup(false); setSeedFormat('mnemonic'); clearCopied(); }}
                   accessibilityRole="button"
-                  accessibilityLabel="Hide seed"
+                  accessibilityLabel={M.settings.backup.hideA11y}
                   accessibilityState={{disabled: false}}>
-                  <Text style={S.linkTextMuted}>Hide</Text>
+                  <Text style={S.linkTextMuted}>{M.settings.backup.hide}</Text>
                 </Pressable>
               </View>
             ) : confirmBackup ? (
               <View style={S.backupConfirmBox}>
-                <Text style={S.warnNote}>This seed recovers BOTH your IC and Solana funds. Store it safely. Never share it.</Text>
+                <Text style={S.warnNote}>{M.settings.backup.warning}</Text>
                 <Pressable
                   testID="btn-backup-confirm"
                   style={[S.primaryWide, {marginTop: 16}]}
                   onPress={() => setBackupRevealed(true)}
                   accessibilityRole="button"
-                  accessibilityLabel="Reveal recovery seed"
-                  accessibilityHint="Shows your seed on screen — anyone viewing your screen can copy it"
+                  accessibilityLabel={M.settings.backup.revealA11y}
+                  accessibilityHint={M.settings.backup.revealHint}
                   accessibilityState={{disabled: false}}>
-                  <Text style={S.primaryText}>Reveal seed</Text>
+                  <Text style={S.primaryText}>{M.settings.backup.reveal}</Text>
                 </Pressable>
                 <Pressable
                   testID="btn-backup-cancel"
                   style={S.linkBtn}
                   onPress={() => setConfirmBackup(false)}
                   accessibilityRole="button"
-                  accessibilityLabel="Cancel backup"
+                  accessibilityLabel={M.settings.backup.cancelA11y}
                   accessibilityState={{disabled: false}}>
-                  <Text style={S.linkTextMuted}>Cancel</Text>
+                  <Text style={S.linkTextMuted}>{M.common.cancel}</Text>
                 </Pressable>
               </View>
             ) : (
@@ -301,10 +302,10 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
                 style={S.backupEntryBtn}
                 onPress={() => setConfirmBackup(true)}
                 accessibilityRole="button"
-                accessibilityLabel="Back up wallet"
-                accessibilityHint="Reveals your recovery seed — backs up both your IC and Solana funds"
+                accessibilityLabel={M.settings.backup.action}
+                accessibilityHint={M.settings.backup.entryHint}
                 accessibilityState={{disabled: false}}>
-                <Text style={S.backupEntryText}>Back up wallet…</Text>
+                <Text style={S.backupEntryText}>{M.settings.backup.entry}</Text>
               </Pressable>
             )}
           </View>
@@ -317,22 +318,22 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
               wallet stays recoverable via its own seed. Entry button uses `secondaryBtn` (neutral
               bordered — reads as "import", not destructive-red like Reset, not brand-green like Backup). */}
           <View style={S.settingsSection}>
-            <Text style={S.inputLabel}>Restore</Text>
+            <Text style={S.inputLabel}>{M.settings.restore.label}</Text>
             {confirmRestore ? (
               <View style={S.backupConfirmBox}>
-                <Text style={S.warnNote}>This replaces your current wallet with the one recovered from this seed. Back up your current wallet first if you haven't — its funds are only reachable via its own seed.</Text>
+                <Text style={S.warnNote}>{M.settings.restore.warning}</Text>
                 <TextInput
                   testID="settings-restore-seed-input"
                   style={S.seedInput}
                   value={restoreSeed}
                   onChangeText={setRestoreSeed}
-                  placeholder="24 recovery words or 64 hex characters"
+                  placeholder={M.settings.restore.seedPlaceholder}
                   placeholderTextColor={C.sub2}
                   autoCapitalize="none"
                   autoCorrect={false}
                   multiline
-                  accessibilityLabel="Recovery seed"
-                  accessibilityHint="Your 24 recovery words (or the 64-hex seed from Backup) that recover your wallet"
+                  accessibilityLabel={M.settings.restore.seedA11y}
+                  accessibilityHint={M.settings.restore.seedHint}
                 />
                 {restoreErr ? <Text style={S.err}>{restoreErr}</Text> : null}
                 <Pressable
@@ -341,19 +342,19 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
                   disabled={restoreBusy || restoreSeed.trim() === ''}
                   onPress={doRestore}
                   accessibilityRole="button"
-                  accessibilityLabel="Restore wallet"
-                  accessibilityHint="Replaces your current wallet with the one recovered from this seed"
+                  accessibilityLabel={M.settings.restore.action}
+                  accessibilityHint={M.settings.restore.actionHint}
                   accessibilityState={{disabled: restoreBusy || restoreSeed.trim() === ''}}>
-                  <Text style={S.primaryText}>{restoreBusy ? 'Restoring…' : 'Restore wallet'}</Text>
+                  <Text style={S.primaryText}>{restoreBusy ? M.settings.restore.busy : M.settings.restore.action}</Text>
                 </Pressable>
                 <Pressable
                   testID="btn-settings-restore-cancel"
                   style={S.linkBtn}
                   onPress={() => { setConfirmRestore(false); setRestoreSeed(''); setRestoreErr(null); }}
                   accessibilityRole="button"
-                  accessibilityLabel="Cancel restore"
+                  accessibilityLabel={M.settings.restore.cancelA11y}
                   accessibilityState={{disabled: false}}>
-                  <Text style={S.linkTextMuted}>Cancel</Text>
+                  <Text style={S.linkTextMuted}>{M.common.cancel}</Text>
                 </Pressable>
               </View>
             ) : (
@@ -362,10 +363,10 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
                 style={S.secondaryBtn}
                 onPress={() => { setConfirmRestore(true); setRestoreErr(null); }}
                 accessibilityRole="button"
-                accessibilityLabel="Restore wallet"
-                accessibilityHint="Import a wallet from your 64-hex recovery seed — replaces your current wallet"
+                accessibilityLabel={M.settings.restore.action}
+                accessibilityHint={M.settings.restore.entryHint}
                 accessibilityState={{disabled: false}}>
-                <Text style={S.secondaryBtnText}>Restore wallet…</Text>
+                <Text style={S.secondaryBtnText}>{M.settings.restore.entry}</Text>
               </Pressable>
             )}
           </View>
@@ -373,20 +374,20 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
           {/* Reset — the destructive action goes LAST in the wallet-management group (Backup → Restore
               → Reset), so a user scanning top-down encounters the protective actions first. */}
           <View style={S.settingsSection}>
-            <Text style={S.inputLabel}>Reset</Text>
+            <Text style={S.inputLabel}>{M.settings.reset.label}</Text>
             {confirmReset ? (
               <View style={S.resetConfirmBox}>
-                <Text style={S.warnNote}>This erases your wallet identity from this device. Funds at this address become irrecoverable. This cannot be undone.</Text>
-                <Pressable testID="btn-reset-confirm" style={[S.primaryWide, {backgroundColor: C.bad, marginTop: 16}]} onPress={onReset} accessibilityRole="button" accessibilityLabel="Yes, reset everything" accessibilityHint="Permanently erase your wallet from this device — funds become irrecoverable" accessibilityState={{disabled: false}}>
-                  <Text style={S.primaryText}>Yes, reset everything</Text>
+                <Text style={S.warnNote}>{M.settings.reset.warning}</Text>
+                <Pressable testID="btn-reset-confirm" style={[S.primaryWide, {backgroundColor: C.bad, marginTop: 16}]} onPress={onReset} accessibilityRole="button" accessibilityLabel={M.settings.reset.confirm} accessibilityHint={M.settings.reset.confirmHint} accessibilityState={{disabled: false}}>
+                  <Text style={S.primaryText}>{M.settings.reset.confirm}</Text>
                 </Pressable>
-                <Pressable testID="btn-reset-cancel" style={S.linkBtn} onPress={() => setConfirmReset(false)} accessibilityRole="button" accessibilityLabel="Cancel reset" accessibilityState={{disabled: false}}>
-                  <Text style={S.linkTextMuted}>Cancel</Text>
+                <Pressable testID="btn-reset-cancel" style={S.linkBtn} onPress={() => setConfirmReset(false)} accessibilityRole="button" accessibilityLabel={M.settings.reset.cancelA11y} accessibilityState={{disabled: false}}>
+                  <Text style={S.linkTextMuted}>{M.common.cancel}</Text>
                 </Pressable>
               </View>
             ) : (
-              <Pressable testID="btn-reset" style={S.resetEntryBtn} onPress={() => setConfirmReset(true)} accessibilityRole="button" accessibilityLabel="Reset wallet" accessibilityHint="Opens a confirmation dialog — permanently erases your wallet from this device" accessibilityState={{disabled: false}}>
-                <Text style={S.resetEntryText}>Reset wallet…</Text>
+              <Pressable testID="btn-reset" style={S.resetEntryBtn} onPress={() => setConfirmReset(true)} accessibilityRole="button" accessibilityLabel={M.settings.reset.action} accessibilityHint={M.settings.reset.entryHint} accessibilityState={{disabled: false}}>
+                <Text style={S.resetEntryText}>{M.settings.reset.entry}</Text>
               </Pressable>
             )}
           </View>
@@ -398,7 +399,7 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
               affordance instead). The MODEL story lives here; the About section keeps the custody
               statement — no duplication. */}
           <View style={S.settingsSection}>
-            <Text style={S.inputLabel}>Learn</Text>
+            <Text style={S.inputLabel}>{M.settings.learn.label}</Text>
             {/* Trip readiness FIRST inside LEARN (UX 2026-08-23): the passport is the persistent
                 object; the walkthrough replay is secondary. The live n/4 counter turns a dead
                 label into a status row — the answer to "what is this / where am I" without
@@ -409,12 +410,12 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
               onPress={() => setTripReadyOpen(true)}
               accessibilityRole="button"
               accessibilityLabel={PASSPORT_TITLE}
-              accessibilityHint="Shows your trip readiness passport — the four capability stamps"
+              accessibilityHint={M.settings.learn.passportHint}
               accessibilityState={{disabled: false}}>
               <View style={S.linkRow}>
                 <IconCheck size={16} color={C.sub} />
                 <Text style={S.linkText}>{PASSPORT_TITLE}</Text>
-                <Text testID="trip-readiness-count" style={[S.passportHintTag, {marginLeft: 'auto'}]}>{`${tripReadiness.filled.length}/4`}</Text>
+                <Text testID="trip-readiness-count" style={[S.passportHintTag, {marginLeft: 'auto'}]}>{M.settings.learn.passportCount(tripReadiness.filled.length)}</Text>
               </View>
             </Pressable>
             <Pressable
@@ -423,7 +424,7 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
               onPress={() => setHowItWorks(true)}
               accessibilityRole="button"
               accessibilityLabel={JourneyHowItWorksTitle}
-              accessibilityHint="Replays the three-scene walkthrough of how dpay pays"
+              accessibilityHint={M.settings.learn.howItWorksHint}
               accessibilityState={{disabled: false}}>
               <View style={S.linkRow}>
                 <IconInfo size={16} color={C.sub} />
@@ -438,8 +439,8 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
               ABOVE About (founder rule 2026-08-24): the theme choice is a frequent preference,
               About is the on-demand custody statement. */}
           <View style={S.settingsSection}>
-            <Text style={S.inputLabel}>Theme</Text>
-            <View style={S.railRow} role="radiogroup" accessibilityLabel="Theme">
+            <Text style={S.inputLabel}>{M.settings.theme.label}</Text>
+            <View style={S.railRow} role="radiogroup" accessibilityLabel={M.settings.theme.label}>
               {([null, 'light', 'dark'] as const).map((choice) => {
                 const active = themeChoice === choice;
                 const label = choiceLabel(choice);
@@ -450,7 +451,7 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
                     style={[S.railPill, active && S.railPillActive]}
                     onPress={() => onSetTheme(choice)}
                     accessibilityRole="radio"
-                    accessibilityLabel={`Theme: ${label}`}
+                    accessibilityLabel={M.settings.theme.choice(label)}
                     accessibilityState={{checked: active, disabled: false}}
                   >
                     <View style={S.linkRow}>
@@ -475,10 +476,10 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
               style={S.advancedToggle}
               onPress={() => setAdvancedOpen(o => !o)}
               accessibilityRole="button"
-              accessibilityLabel={advancedOpen ? 'Hide advanced settings' : 'Show advanced settings'}
-              accessibilityHint="Server configuration for the wallet's relay"
+              accessibilityLabel={advancedOpen ? M.settings.advanced.hide : M.settings.advanced.show}
+              accessibilityHint={M.settings.advanced.hint}
               accessibilityState={{disabled: false, expanded: advancedOpen}}>
-              <Text style={S.advancedLabel}>Advanced</Text>
+              <Text style={S.advancedLabel}>{M.settings.advanced.label}</Text>
               {/* P4 — the '▾'/'▸' caret glyph became IconChevronDown; collapsed applies the −90°
                   rotation so it points right (the toggle's accessibilityState carries expansion). */}
               <View style={advancedOpen ? undefined : S.advancedCaretClosed}>
@@ -487,8 +488,8 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
             </Pressable>
             {advancedOpen ? (
               <View>
-                <Text style={S.dim2}>The server your wallet talks to. Changes apply when you tap Apply.</Text>
-                <Text style={S.inputLabel}>Server</Text>
+                <Text style={S.dim2}>{M.settings.advanced.serverNote}</Text>
+                <Text style={S.inputLabel}>{M.settings.advanced.serverLabel}</Text>
                 <TextInput
                   testID="settings-relay"
                   style={S.relayInput}
@@ -496,10 +497,10 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
                   onChangeText={setDraftRelay}
                   autoCapitalize="none"
                   autoCorrect={false}
-                  placeholder="http://<ip>:8787"
+                  placeholder={M.settings.advanced.serverPlaceholder}
                   placeholderTextColor={C.sub2}
-                  accessibilityLabel="Server"
-                  accessibilityHint="The server your wallet talks to"
+                  accessibilityLabel={M.settings.advanced.serverLabel}
+                  accessibilityHint={M.settings.advanced.serverHint}
                 />
                 <Pressable
                   testID="btn-relay-apply"
@@ -507,37 +508,37 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
                   disabled={!relayDirty}
                   onPress={applyRelay}
                   accessibilityRole="button"
-                  accessibilityLabel="Apply server URL"
-                  accessibilityHint="Switch your wallet to the entered server URL"
+                  accessibilityLabel={M.settings.advanced.applyA11y}
+                  accessibilityHint={M.settings.advanced.applyHint}
                   accessibilityState={{disabled: !relayDirty}}>
-                  <Text style={S.applyBtnText}>Apply</Text>
+                  <Text style={S.applyBtnText}>{M.settings.advanced.apply}</Text>
                 </Pressable>
               </View>
             ) : null}
           </View>
 
           <View style={S.settingsSection}>
-            <Text style={S.inputLabel}>About</Text>
+            <Text style={S.inputLabel}>{M.settings.about.label}</Text>
             {/* Non-custodial statement (2026-08-22): plain words for the custody model — dpay
                 cannot move, freeze, or recover funds, and there is no dpay account. Settings is
                 the on-demand surface: nobody has to read this unless they go looking. */}
-            <Text style={S.dim2} testID="about-custody">dpay is non-custodial. Your money is controlled only by the key on this device. There is no dpay account, and dpay cannot move, freeze, or recover your funds. Your 24 backup words are the only recovery.</Text>
+            <Text style={S.dim2} testID="about-custody">{M.settings.about.custody}</Text>
             <Pressable
               testID="privacy-policy"
               style={S.linkBtn}
               onPress={() => Linking.openURL(PRIVACY_URL)}
               accessibilityRole="link"
-              accessibilityLabel="Privacy policy">
+              accessibilityLabel={M.settings.about.privacy}>
               {/* P4 — external-link glyph signals the link opens outside the app (IconExternalLink
                   renders no textContent, so the census/asserted label is untouched). */}
               <View style={S.linkRow}>
                 <IconExternalLink size={12} color={C.sub2} />
-                <Text style={S.linkTextMuted}>Privacy policy</Text>
+                <Text style={S.linkTextMuted}>{M.settings.about.privacy}</Text>
               </View>
             </Pressable>
           </View>
 
-          {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
+          {Platform.OS === 'web' ? <Text style={S.dim2}>{M.settings.escToClose}</Text> : null}
         </ScrollView>
       </SafeAreaView>
 

@@ -4,12 +4,14 @@ import {C} from '../config/palette';
 import {S} from '../styles';
 import {HotkeyHint} from './HotkeyHint';
 
-export function Tab({label, active, onPress, hotkey, icon}: {label: string; active: boolean; onPress: () => void; hotkey?: string; icon?: (color: string) => ReactNode}) {
+// `testId` is an explicit ASCII selector, NEVER derived from `label`: the label is translated copy
+// and a derived testID would silently rename every e2e selector the moment a locale lands.
+export function Tab({testId, label, active, onPress, hotkey, icon}: {testId: string; label: string; active: boolean; onPress: () => void; hotkey?: string; icon?: (color: string) => ReactNode}) {
   return (
     <Pressable
       onPress={onPress}
       style={[S.tab, active && S.tabActive]}
-      testID={`tab-${label.toLowerCase()}`}
+      testID={testId}
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{disabled: false}}>

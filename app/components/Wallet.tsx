@@ -3,6 +3,7 @@ import {AppState, BackHandler, Linking, Platform, Pressable, SafeAreaView, Scrol
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {C} from '../config/palette';
 import {S, isDark} from '../styles';
+import {M} from '../i18n';
 import {TOP_UP_CENTS, FAUCET_TIMEOUT_MS, SHOW_TESTNET_STORAGE_KEY, SOL_BROADCAST_TIMEOUT_MS} from '../config/constants';
 import {familyDisplay, isTestnetCurrency} from '../config/catalog';
 import {base} from '../lib/format';
@@ -459,7 +460,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
   const topUp = useCallback(async () => {
     if (topUpBusy) return;
     if (!faucetAvailable) {
-      setTopUpErr('Demo top-up isn’t available on this relay');
+      setTopUpErr(M.wallet.faucet.unavailableOnRelay);
       return;
     }
     setTopUpBusy(true); setTopUpErr(null);
@@ -479,11 +480,11 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
         // rather than a generic "Faucet unavailable". The canister returns the retry time; showing it
         // tells the user WHEN to retry instead of leaving them guessing.
         const reason = typeof j?.error === 'string' && j.error.length > 0 ? j.error : null;
-        setTopUpErr(reason ?? (r.ok ? 'Top-up failed' : 'Faucet unavailable'));
+        setTopUpErr(reason ?? (r.ok ? M.wallet.faucet.failed : M.wallet.faucet.unavailable));
       }
     } catch (e) {
       console.warn('topUp failed:', e instanceof Error ? e.message : String(e));
-      setTopUpErr('Offline — try again when connected');
+      setTopUpErr(M.wallet.faucet.offline);
     } finally {
       setTopUpBusy(false);
     }
@@ -620,8 +621,8 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
             style={S.headerSettingsBtn}
             onPress={() => setSettingsOpen(true)}
             accessibilityRole="button"
-            accessibilityLabel="Settings"
-            accessibilityHint="Open relay, reset, and advanced settings"
+            accessibilityLabel={M.wallet.header.settings}
+            accessibilityHint={M.wallet.header.settingsHint}
           >
             <IconSettings size={20} color={C.sub} />
           </Pressable>
@@ -633,8 +634,8 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
             style={S.headerSettingsBtn}
             onPress={cycleTheme}
             accessibilityRole="button"
-            accessibilityLabel={`Switch theme to ${themeLabel(nextTheme(resolvedTheme))}`}
-            accessibilityHint="Toggles the theme between Light and Dark; set Auto in Settings"
+            accessibilityLabel={M.wallet.header.themeSwitch(themeLabel(nextTheme(resolvedTheme)))}
+            accessibilityHint={M.wallet.header.themeSwitchHint}
           >
             {nextTheme(resolvedTheme) === 'dark' ? <IconMoon size={20} color={C.sub} /> : <IconSun size={20} color={C.sub} />}
           </Pressable>
@@ -646,7 +647,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
                 header. A small "ACCOUNT" eyebrow above the username separates the wordmark from the
                 user identity so the pair no longer reads as a single currency label (a fresh-eyes
                 vision misread). The `header-who` element still holds ONLY the username (e2e contract). */}
-            <Text style={S.whoLabel} accessibilityLabel="Account">ACCOUNT</Text>
+            <Text style={S.whoLabel} accessibilityLabel={M.wallet.header.accountLabel}>{M.wallet.header.account}</Text>
             <Text style={S.who} testID="header-who">{identity.username}</Text>
           </View>
         </View>
@@ -656,8 +657,8 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
           disabled={balancesDisabled}
           onPress={() => setBalancesOpen(true)}
           accessibilityRole="button"
-          accessibilityLabel="Balances — switch currency or receive"
-          accessibilityHint={balancesDisabled ? 'Finish or cancel the current payment first' : 'Open the full asset list, switch the displayed currency, or receive'}
+          accessibilityLabel={M.wallet.balance.label}
+          accessibilityHint={balancesDisabled ? M.wallet.balance.lockedHint : M.wallet.balance.hint}
           accessibilityState={{disabled: balancesDisabled}}
         >
           <View style={S.balHeaderRow}>
@@ -667,7 +668,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
                 {/* D3: the header label names the active asset in BOTH branches — online reads "X balance",
                     offline reads "~ X approx.". `activeAssetName` is the single source of truth for the
                     symbol; e2e asserts the active rail via this label (testID active-asset-label). */}
-                <Text testID="active-asset-label" style={S.balLabel}>{online ? `${activeAssetName} balance` : `~ ${activeAssetName} approx.`}</Text>
+                <Text testID="active-asset-label" style={S.balLabel}>{online ? M.wallet.balance.of(activeAssetName) : M.wallet.balance.approx(activeAssetName)}</Text>
               </View>
               <View style={S.balAmtRow}>
                 {/* The header reads the selected asset's pre-formatted displayText from the ONE balance
@@ -685,7 +686,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
             <HotkeyHint k="A" />
           </View>
           {backHint ? (
-            <Text testID="back-exit-hint" style={S.balBackHint}>Press back again to exit</Text>
+            <Text testID="back-exit-hint" style={S.balBackHint}>{M.wallet.balance.backAgainToExit}</Text>
           ) : null}
         </Pressable>
       </View>
@@ -698,9 +699,9 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
       <TripStrip onOpen={() => setPassportOpen(true)} />
 
       <View style={S.tabs}>
-        <Tab label="Pay" active={mode === 'pay'} onPress={() => setMode('pay')} hotkey="P" icon={c => <IconQr size={16} color={c} />} />
-        <Tab label="Receive" active={mode === 'receive'} onPress={() => setMode('receive')} hotkey="R" icon={c => <IconArrowDownLeft size={16} color={c} />} />
-        <Tab label="Transactions" active={mode === 'ledger'} onPress={() => setMode('ledger')} hotkey="L" icon={c => <IconClock size={16} color={c} />} />
+        <Tab testId="tab-pay" label={M.wallet.tab.pay} active={mode === 'pay'} onPress={() => setMode('pay')} hotkey="P" icon={c => <IconQr size={16} color={c} />} />
+        <Tab testId="tab-receive" label={M.wallet.tab.receive} active={mode === 'receive'} onPress={() => setMode('receive')} hotkey="R" icon={c => <IconArrowDownLeft size={16} color={c} />} />
+        <Tab testId="tab-transactions" label={M.wallet.tab.transactions} active={mode === 'ledger'} onPress={() => setMode('ledger')} hotkey="L" icon={c => <IconClock size={16} color={c} />} />
       </View>
 
       <ScrollView style={S.scroll} contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
@@ -745,7 +746,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
                     // Resume link fires ONLY when the deposit actually landed (known positive
                     // balance on the watched asset) — never on loading/error/unconfirmed state.
                     selectedAsset?.id === 'solana:SOL' && solState.status === 'ok' && solBalance != null && solBalance !== '0' && depositReturnTo
-                      ? `Back to paying ${depositReturnTo.id === 'solana:USDC' ? 'USDC' : 'SOL'}`
+                      ? M.wallet.backToPaying(depositReturnTo.id === 'solana:USDC' ? 'USDC' : 'SOL')
                       : null}
                   onReturnFromDeposit={returnFromDeposit}
                   onLockChange={setSelectionLocked}

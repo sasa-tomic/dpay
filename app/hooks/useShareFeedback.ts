@@ -1,5 +1,6 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {Platform, Share} from 'react-native';
+import {M} from '../i18n';
 
 export type ShareState = 'shared' | null;
 
@@ -55,5 +56,5 @@ export function useShareFeedback(): {shared: ShareState; share: (message: string
  * agreement (mirrors how useCopyFeedback's 'clipboard'/'shared' return drives the copy labels).
  */
 export function shareConfirmLabel(webLabel: string): string {
-  return Platform.OS === 'web' ? webLabel : 'Shared ✓';
+  return Platform.OS === 'web' ? webLabel : M.wallet.share.shared;
 }

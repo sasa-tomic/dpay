@@ -13,6 +13,7 @@
 import React, {useEffect, useMemo, useRef} from 'react';
 import {Animated, Pressable, Text, View} from 'react-native';
 import {S} from '../styles';
+import {M} from '../i18n';
 import {C} from '../config/palette';
 import {useJourney} from '../lib/journey';
 import {PASSPORT_STAMPS, computeReadiness} from '../lib/readiness';
@@ -45,8 +46,8 @@ export function TripStrip({onOpen}: {onOpen: () => void}) {
         style={S.tripStrip}
         onPress={onOpen}
         accessibilityRole="button"
-        accessibilityLabel={`Trip readiness ${readiness.filled.length} of 4`}
-        accessibilityHint={next ? next.hint : 'Trip ready'}
+        accessibilityLabel={M.education.passport.stripLabel(readiness.filled.length)}
+        accessibilityHint={next ? next.hint : M.education.passport.ready}
         accessibilityState={{disabled: false}}>
         <View style={S.tripStripDots}>
           {PASSPORT_STAMPS.map((s, i) => {

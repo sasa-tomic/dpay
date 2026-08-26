@@ -17,6 +17,7 @@ import {DpaySolNfc} from '../services/native';
 import {withTimeout} from '../lib/timeout';
 import {useNfcTapState, type TapCtx} from '../hooks/useNfcTapState';
 import {NfcTapView} from './NfcTapView';
+import {M} from '../i18n';
 
 function solUnit(cur: 'SOL' | 'USDC'): {decimals: number; unit: string} {
   return cur === 'USDC' ? {decimals: USDC_DECIMALS, unit: 'USDC'} : {decimals: SOL_DECIMALS, unit: SOL_UNIT};
@@ -101,7 +102,7 @@ export function SolNfcTap({role, identity, req, reqUri, onOutcome, onResult, onA
       const solpay = decodeSolPay(solpayUri);
       if (!req || !reqUri) {
         try { await DpaySolNfc.confirmSolReceipt(RECEIPT_REJECTED, '', ''); } catch (e: unknown) { console.warn('DpaySolNfc.confirmSolReceipt failed (no req)', e); }
-        ctx.finalize('declined', 'No open request');
+        ctx.finalize('declined', M.errors.tap.noOpenRequest);
         return;
       }
       // The amount/cur are known from the merchant's own request (the v2 SolPay carries only rid+tx).
@@ -115,10 +116,10 @@ export function SolNfcTap({role, identity, req, reqUri, onOutcome, onResult, onA
         ctx.finalize('success');
       } else if (receipt.status === RECEIPT_REJECTED) {
         try { await DpaySolNfc.confirmSolReceipt(RECEIPT_REJECTED, receipt.rid, receipt.sig); } catch (e: unknown) { console.warn('DpaySolNfc.confirmSolReceipt failed (rejected)', e); }
-        ctx.finalize('declined', 'Payment rejected');
+        ctx.finalize('declined', M.errors.tap.paymentRejected);
       } else {
         try { await DpaySolNfc.confirmSolReceipt(RECEIPT_UNREACHABLE, receipt.rid, receipt.sig); } catch (e: unknown) { console.warn('DpaySolNfc.confirmSolReceipt failed (unreachable)', e); }
-        ctx.finalize('pending', 'Couldn\u2019t confirm');
+        ctx.finalize('pending', M.errors.tap.couldntConfirm);
       }
     } catch (e: unknown) {
       // A network/RPC throw is genuinely unknown — hand UNREACHABLE so the payer falls back to
@@ -129,7 +130,7 @@ export function SolNfcTap({role, identity, req, reqUri, onOutcome, onResult, onA
       const raw = e instanceof Error ? e.message : String(e);
       console.warn('SolNfcTap submitPayment failed:', raw);
       try { await DpaySolNfc.confirmSolReceipt(RECEIPT_UNREACHABLE, '', ''); } catch (e2: unknown) { console.warn('DpaySolNfc.confirmSolReceipt failed (catch-all)', e2); }
-      ctx.finalize('pending', friendlySolTapError(raw, 'Couldn’t confirm the payment — check your balance'));
+      ctx.finalize('pending', friendlySolTapError(raw, M.errors.tap.couldntConfirmCheckBalance));
     } finally {
       cancel();
     }
@@ -160,10 +161,10 @@ export function SolNfcTap({role, identity, req, reqUri, onOutcome, onResult, onA
         ctx.finalize('success');
       } else if (outcome.outcome === 'declined') {
         onOutcome?.('declined');
-        ctx.finalize('declined', 'Payment rejected');
+        ctx.finalize('declined', M.errors.tap.paymentRejected);
       } else {
         onOutcome?.('pending');
-        ctx.finalize('pending', 'Couldn\u2019t confirm');
+        ctx.finalize('pending', M.errors.tap.couldntConfirm);
       }
     },
   });
@@ -178,7 +179,7 @@ export function SolNfcTap({role, identity, req, reqUri, onOutcome, onResult, onA
     signingRef.current = true;
     if (isSolReqV2Expired(decoded)) {
       try { await DpaySolNfc.declineSolCard(); } catch (e: unknown) { console.warn('DpaySolNfc.declineSolCard failed (expired)', e); }
-      ctx.finalize('declined', 'This payment request has expired');
+      ctx.finalize('declined', M.errors.tap.paymentRequestExpired);
       return;
     }
     advance('exchanging');

@@ -5,9 +5,9 @@
 // payment tested. All four ⇒ TRIP READY, then the card collapses into Settings (archived, never
 // a dashboard). No counters beyond n/4, no amounts, no streaks, nothing public.
 //
-// Copy-source decision: PASSPORT_STAMPS lives HERE, colocated with the logic — these are
-// capability/state labels + next-step hints, not the model-education copy
-// (walkthrough/rehearsal) that education.ts owns. ONE source either way; never duplicated.
+// Copy-source decision: the stamp ORDER lives HERE, colocated with the logic (it is also the
+// "next step" order); the WORDS live in the message catalog (`M.education.passport.stamps`).
+import {M} from '../i18n';
 import {JOURNEY_STAMPS, awardStamp, hasStamp} from './journey';
 import type {Journey} from './journey';
 import type {BalanceView} from './assetBalances';
@@ -30,12 +30,9 @@ export type PassportStamp = {key: ReadinessKey; label: string; hint: string; sho
  *  Labels are HUMAN (UX hardening 2026-08-23): the stamps read as capabilities a traveler
  *  earned, not system states the app tracked ("FLOW UNDERSTOOD" was system-speak). Two-line
  *  caps (explicit \n) so every stamp reads like inked lines in a real passport. */
-export const PASSPORT_STAMPS: readonly PassportStamp[] = [
-  {key: 'recoverySaved', label: 'BACKED\nUP', hint: 'Copy your backup words in Settings', short: 'back up to go'},
-  {key: 'flowUnderstood', label: 'SAW THE\nFLOW', hint: 'Watch the rehearsal when creating a wallet — or make any payment', short: 'see how it works to go'},
-  {key: 'fundsReady', label: 'FUNDS\nLOADED', hint: 'Add any funds — demo funds count', short: 'add funds to go'},
-  {key: 'paymentTested', label: 'FIRST\nPAYMENT', hint: 'Complete a payment — pay or receive', short: 'one payment to go'},
-];
+export const PASSPORT_STAMPS: readonly PassportStamp[] = (
+  ['recoverySaved', 'flowUnderstood', 'fundsReady', 'paymentTested'] as const
+).map(key => ({key, ...M.education.passport.stamps[key]}));
 
 /** Ordered readiness keys (derived — PASSPORT_STAMPS is the single source of order). */
 export const READINESS_STAMPS: readonly ReadinessKey[] = PASSPORT_STAMPS.map(s => s.key);

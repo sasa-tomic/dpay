@@ -1,6 +1,7 @@
 import {View, Text, Pressable, ActivityIndicator} from 'react-native';
 import {C} from '../config/palette';
 import {S} from '../styles';
+import {M} from '../i18n';
 
 /**
  * FundFirstPanel — the shared "add funds before you pay/send" surface (2026-08-16 zero-funds UX).
@@ -68,9 +69,9 @@ export function FundFirstPanel({
           onPress={onRecheck}
           disabled={recheckBusy}
           accessibilityRole="button"
-          accessibilityLabel={recheckBusy ? 'Checking…' : 'Check again'}
+          accessibilityLabel={recheckBusy ? M.wallet.fund.checking : M.wallet.fund.checkAgain}
           accessibilityState={{disabled: recheckBusy}}>
-          <Text style={S.linkText}>{recheckBusy ? 'Checking…' : 'Check again'}</Text>
+          <Text style={S.linkText}>{recheckBusy ? M.wallet.fund.checking : M.wallet.fund.checkAgain}</Text>
         </Pressable>
       ) : null}
       {recheckBusy ? <ActivityIndicator color={C.brand} /> : null}

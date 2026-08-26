@@ -23,6 +23,7 @@
 
 import {Platform} from 'react-native';
 import {WALLETCONNECT_PROJECT_ID} from './config/constants';
+import {M} from './i18n';
 
 /** The minimal EIP-1193 provider surface this module uses (a subset of the real injected wallet). */
 export type Eip1193Provider = {
@@ -151,14 +152,14 @@ export async function getChainId(p: Eip1193Provider): Promise<number> {
 export class ReceiptReverted extends Error {
   override readonly name = 'ReceiptReverted';
   constructor(public readonly hash: string) {
-    super(`transaction ${hash} reverted on chain`);
+    super(M.errors.ethWallet.receiptReverted(hash));
   }
 }
 /** The transaction was not mined within the timeout — it may still land. Soft (keep watching). */
 export class ReceiptTimeout extends Error {
   override readonly name = 'ReceiptTimeout';
   constructor(public readonly hash: string) {
-    super(`transaction ${hash} was not mined within the timeout`);
+    super(M.errors.ethWallet.receiptTimeout(hash));
   }
 }
 

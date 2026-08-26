@@ -13,6 +13,7 @@ import {
 import {DpayNfc} from '../services/native';
 import {useNfcTapState, type TapCtx} from '../hooks/useNfcTapState';
 import {NfcTapView} from './NfcTapView';
+import {M} from '../i18n';
 
 const SETTLEMENT_POLL = {attempts: 24, intervalMs: 500};
 const HISTORY_POLL = {attempts: 8, intervalMs: 500};
@@ -82,7 +83,7 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
     const ledger = catalog.find(c => c.currency === reqInfo?.currency)?.ledger ?? '';
     if (!ledger || !relayUrl || !reqInfo) {
       try { await returnResult(RESULT_UNKNOWN, event.requestIdHex); } catch {/* best-effort */}
-      ctx.finalize('pending', 'Couldn’t verify this request');
+      ctx.finalize('pending', M.errors.tap.couldntVerifyRequest);
       return;
     }
     let outcome: RailOutcome = {kind: 'unknown'};
@@ -121,7 +122,7 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
     } catch (e: unknown) {
       readerOutcomeRef.current = null;
       console.warn('NfcTap result return failed:', e instanceof Error ? e.message : String(e));
-      ctx.finalize('pending', 'Couldn’t return the payment result — keep the phones together and try again');
+      ctx.finalize('pending', M.errors.tap.couldntReturnResult);
       return;
     }
   }, [catalog, identity.publicHex, record, relayUrl, reqInfo, returnResult]);
@@ -136,7 +137,7 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
     } else if (outcome.kind === 'rejected') {
       ctx.finalize('declined', outcome.reason);
     } else {
-      ctx.finalize('pending', 'Still confirming — check the balance shortly');
+      ctx.finalize('pending', M.errors.tap.stillConfirming);
     }
   }, [record]);
 
@@ -151,19 +152,19 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
     };
     try {
       if (!isPayableAsset(catalog, req.currency)) {
-        await failClosed(`Unsupported asset (currency ${req.currency})`);
+        await failClosed(M.errors.tap.unsupportedAsset(req.currency));
         return;
       }
       const disc = resolveNfcDisclosure(catalog, {currency: req.currency, amount: req.amount});
       if (!disc) {
-        await failClosed(`Cannot confirm the asset (currency ${req.currency})`);
+        await failClosed(M.errors.tap.cannotConfirmAsset(req.currency));
         return;
       }
       setDisclosure(disc); // drives the read-only "Paying <amt> on <network>" status line
       await approveRef.current(req, ctx);
     } catch (e: unknown) {
       console.warn('NfcTap request validation failed:', e instanceof Error ? e.message : String(e));
-      await failClosed('Couldn’t read the payment request');
+      await failClosed(M.errors.tap.couldntReadRequest);
     }
   }, [catalog]);
 
@@ -185,9 +186,9 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
       ctx.finalize('success');
     } else if (event.status === RESULT_REJECTED) {
       if (deductedRef.current) onOfflinePaid?.(`-${prepared.amount}`, prepared.currency);
-      ctx.finalize('declined', 'The ledger declined the payment');
+      ctx.finalize('declined', M.rail.declined(''));
     } else {
-      ctx.finalize('pending', 'Couldn’t confirm — check your balance when back online');
+      ctx.finalize('pending', M.errors.tap.couldntConfirmOffline);
     }
   }, [onConfirmed, onOfflinePaid, record]);
 
@@ -230,7 +231,7 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
     signingRef.current = true;
     if (req.expiry * 1000 <= Date.now()) {
       try { await DpayNfc.declineCard(req.nonceHex); } catch (e: unknown) { console.warn('NfcTap declineCard failed (expired)', e); }
-      ctx.finalize('declined', 'This request expired — ask for a fresh request');
+      ctx.finalize('declined', M.errors.tap.requestExpired);
       return;
     }
     advance('exchanging');
@@ -243,7 +244,7 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
       console.warn('NfcTap authorization failed:', e instanceof Error ? e.message : String(e));
       if (!ctx.isCurrent()) return;
       try { await DpayNfc.declineCard(req.nonceHex); } catch {/* best-effort */}
-      ctx.finalize('error', 'Couldn’t authorize payment — try again');
+      ctx.finalize('error', M.errors.tap.couldntAuthorize);
     }
   }, [advance, catalog, identity.secretHex]);
   approveRef.current = approve;

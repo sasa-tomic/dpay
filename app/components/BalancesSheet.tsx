@@ -1,6 +1,7 @@
 import {ActivityIndicator, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, Text, View} from 'react-native';
 import {C} from '../config/palette';
 import {S, isDark} from '../styles';
+import {M} from '../i18n';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {SheetOverlay} from './SheetOverlay';
 import {CurrencyRow} from './CurrencyRow';
@@ -53,13 +54,13 @@ export function BalancesSheet({assets, balances, selectedId, onSelect, hasTestne
       <SafeAreaView style={S.sheet}>
         <StatusBar barStyle={isDark() ? 'light-content' : 'dark-content'} backgroundColor={C.bg} />
         <View style={S.sheetHead}>
-          <Text style={S.sheetTitle}>Balances</Text>
+          <Text style={S.sheetTitle}>{M.wallet.balances.title}</Text>
           <Pressable
             testID="btn-balances-close"
             style={S.sheetClose}
             onPress={onClose}
             accessibilityRole="button"
-            accessibilityLabel="Close balances"
+            accessibilityLabel={M.wallet.balances.close}
           >
             <IconClose size={18} color={C.sub} />
           </Pressable>
@@ -71,7 +72,7 @@ export function BalancesSheet({assets, balances, selectedId, onSelect, hasTestne
               purpose") and it pushed the asset list (this sheet's ONE job) below the fold.
               Readiness now lives in exactly two surfaces: the home TripStrip (live entry,
               taps into the archive) and the Settings/strip archive (the permanent record). */}
-          <Text style={S.dim2}>Tap a currency to show it on your home screen. Receive or send it from the Receive and Pay tabs.</Text>
+          <Text style={S.dim2}>{M.wallet.balances.intro}</Text>
           {assets.map(asset => {
             // The pre-resolved balance view for this row. The displayText is the fully-formatted
             // amount; `status !== 'ok'` is the unified dim rule (zero/absent/unavailable/error/
@@ -89,13 +90,13 @@ export function BalancesSheet({assets, balances, selectedId, onSelect, hasTestne
                 disabled={topUpBusy}
                 onPress={onTopUp}
                 accessibilityRole="button"
-                accessibilityLabel={`Get demo funds`}
-                accessibilityHint="Add ∂100 of demo money to this wallet"
+                accessibilityLabel={M.wallet.balances.demoFundsLabel}
+                accessibilityHint={M.wallet.balances.demoFundsHint}
                 accessibilityState={{disabled: topUpBusy}}
               >
                 {topUpBusy
                   ? <ActivityIndicator size="small" color={C.brand} />
-                  : <><IconPlus size={16} color={C.brand} /><Text style={S.assetActionText}>Demo funds</Text><HotkeyHint k="T" /></>}
+                  : <><IconPlus size={16} color={C.brand} /><Text style={S.assetActionText}>{M.wallet.balances.demoFunds}</Text><HotkeyHint k="T" /></>}
               </Pressable>
             ) : null;
             // The DEMO row's topUpErr line — rendered below the subtitle via `children`.
@@ -107,7 +108,7 @@ export function BalancesSheet({assets, balances, selectedId, onSelect, hasTestne
             // surface then offers the one-tap account create. Known-absent only: loading/error/
             // unavailable never claim setup is needed (offline-first honesty rule).
             const setupBadge = view?.status === 'absent'
-              ? <Text testID="asset-sol-usdc-badge" style={S.assetBadge}>Needs setup</Text>
+              ? <Text testID="asset-sol-usdc-badge" style={S.assetBadge}>{M.wallet.balances.needsSetup}</Text>
               : null;
             return (
               <CurrencyRow
@@ -118,10 +119,10 @@ export function BalancesSheet({assets, balances, selectedId, onSelect, hasTestne
                 active={asset.id === selectedId}
                 zero={view ? view.status !== 'ok' : true}
                 onPress={() => onSelect(asset.id)}
-                accessibilityLabel={`Select ${asset.symbol}`}
+                accessibilityLabel={M.wallet.balances.select(asset.symbol)}
                 accessibilityHint={asset.protocol === 'solana'
-                  ? `Show ${asset.symbol} on your home screen and use the Solana rail for Pay/Receive`
-                  : 'Show this asset\'s balance on your home screen'}
+                  ? M.wallet.balances.selectSolanaHint(asset.symbol)
+                  : M.wallet.balances.selectHint}
                 variant="card"
                 actions={faucet}
               >
@@ -136,13 +137,13 @@ export function BalancesSheet({assets, balances, selectedId, onSelect, hasTestne
               style={S.testnetToggle}
               onPress={onToggleTestnet}
               accessibilityRole="button"
-              accessibilityLabel={showTestnet ? 'Hide testnet assets' : 'Show testnet assets'}
-              accessibilityHint={showTestnet ? 'Hide testnet currencies from this list' : 'Reveal testnet currencies in this list'}
+              accessibilityLabel={showTestnet ? M.wallet.balances.hideTestnet : M.wallet.balances.showTestnet}
+              accessibilityHint={showTestnet ? M.wallet.balances.hideTestnetHint : M.wallet.balances.showTestnetHint}
               accessibilityState={{disabled: false}}>
-              <Text style={S.testnetToggleText}>{showTestnet ? 'Hide testnet assets' : 'Show testnet assets'}</Text>
+              <Text style={S.testnetToggleText}>{showTestnet ? M.wallet.balances.hideTestnet : M.wallet.balances.showTestnet}</Text>
             </Pressable>
           ) : null}
-          {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
+          {Platform.OS === 'web' ? <Text style={S.dim2}>{M.wallet.balances.escToClose}</Text> : null}
         </ScrollView>
       </SafeAreaView>
     </SheetOverlay>

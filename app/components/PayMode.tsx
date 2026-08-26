@@ -117,7 +117,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
         const insufficient = reqBalance != null && cmpRaw(r.amount, reqBalance) > 0;
         if (payable && !(online && insufficient)) void approve(r);
       }
-    } catch (e: unknown) { console.warn('decode request QR failed:', e instanceof Error ? e.message : String(e)); setErr('This isn\'t a dpay payment code'); }
+    } catch (e: unknown) { console.warn('decode request QR failed:', e instanceof Error ? e.message : String(e)); setErr(M.pay.notAPaymentCode); }
   }
 
   // Deeplink prefill (item 6): a `dpay:req/<blob>` (or the web `?req=<blob>` mirror) hands the EXACT
@@ -188,7 +188,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     // request QR must die here, before any envelope is built (memo/nonce reconciliation only ever
     // sees fresh transfers), with copy that explains the expiry (C1).
     if (r.expiry * 1000 <= Date.now()) {
-      setErr('This request expired — ask the merchant for a fresh QR');
+      setErr(M.pay.requestExpired);
       return;
     }
     // Item 4: this request's envelope was already submitted and its outcome stayed unknown —
@@ -247,10 +247,10 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     // clock (awaiting the merchant's confirmation). Headline/sub labels are unchanged text.
     const mark = paid.pending ? <IconClock size={44} color={C.brandInk}/> : <IconCheck size={44} color={C.brandInk}/>;
     const amt = fmtCurrencyAmount(catalog, paid.currency, paid.amount);
-    const headline = paid.pending ? `Sent ${amt}` : paid.already ? 'Already paid' : `Paid ✓ ${amt}`;
-    const sub = paid.pending ? `to ${paid.who} · awaiting the merchant’s confirmation`
-      : paid.already ? `${amt} to ${paid.who} · not charged again`
-      : `to ${paid.who}`;
+    const headline = paid.pending ? M.pay.sent(amt) : paid.already ? M.pay.alreadyPaid : M.nfc.paidAmount(amt);
+    const sub = paid.pending ? M.pay.toWhoAwaiting(paid.who)
+      : paid.already ? M.pay.alreadyNotCharged(amt, paid.who)
+      : M.pay.toWho(paid.who);
     return (
       <View style={S.center}>
         {/* Trip Ready J5 — the one-shot offline peak (first OFFLINE confirmed payment only).
@@ -285,14 +285,14 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
               share(shareHandoff('pay', receiptShareBlob(paid.receipt!)));
             }}
             accessibilityRole="button"
-            accessibilityLabel="Share receipt"
-            accessibilityHint="Share the payment proof as a link the merchant can open to confirm"
+            accessibilityLabel={M.pay.shareReceipt}
+            accessibilityHint={M.pay.shareReceiptHint}
             accessibilityState={{disabled: false}}>
             <IconShare size={16} color={C.sub}/>
-            <Text style={S.ghostBtnText}>{shared ? shareConfirmLabel('Link copied ✓') : 'Share receipt'}</Text>
+            <Text style={S.ghostBtnText}>{shared ? shareConfirmLabel(M.pay.linkCopied) : M.pay.shareReceipt}</Text>
           </Pressable>
         ) : null}
-        <Pressable testID="btn-new" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={reset} accessibilityRole="button" accessibilityLabel="New payment" accessibilityState={{disabled: false}}><Text style={S.ghostBtnText}>New payment</Text></Pressable>
+        <Pressable testID="btn-new" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={reset} accessibilityRole="button" accessibilityLabel={M.pay.newPayment} accessibilityState={{disabled: false}}><Text style={S.ghostBtnText}>{M.pay.newPayment}</Text></Pressable>
       </View>
     );
   }
@@ -300,17 +300,17 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   if (phase === 'qr' && qr) {
     return (
       <View style={S.center}>
-        <Text style={S.label}>Show this to {qr.who}</Text>
+        <Text style={S.label}>{M.pay.showThisTo(qr.who)}</Text>
         <View style={S.qrCard}><QrCode value={qr.code} size={QR_SIZE} ecl="L" /></View>
-        <Text style={S.amountBig}>{`${fmtCurrencyAmount(catalog, qr.currency, qr.amount)} to ${qr.who}`}</Text>
-        <Text style={S.badgeOk}>signed on this device ✓</Text>
+        <Text style={S.amountBig}>{M.pay.amountToWho(fmtCurrencyAmount(catalog, qr.currency, qr.amount), qr.who)}</Text>
+        <Text style={S.badgeOk}>{M.pay.signedOnThisDevice}</Text>
         {/* The reconcile poll surfaced a TERMINAL ledger rejection of this envelope (item 3): the
             QR is dead — the merchant's submission was refused. Show why + stop polling; the payer
             can Cancel and start over. Not shown for still-pending (unknown) — that stays honest. */}
         {err ? <Text testID="qr-err" style={S.err}>{err}</Text> : null}
-        {online ? <Text style={S.qrHint}>Waiting for {qr.who} to scan…</Text> : (
+        {online ? <Text style={S.qrHint}>{M.pay.waitingToScan(qr.who)}</Text> : (
           <>
-            <Text style={S.qrHint}>Offline — {qr.who} settles this when they submit it. You’ll see it on your balance once you’re back online.</Text>
+            <Text style={S.qrHint}>{M.pay.offlineSettles(qr.who)}</Text>
             {/* Trip Ready J4 — the offline hand-off first-use tip (offline branch only: the online
                 branch's QR is scanned within seconds, nothing to teach). Mounted right under the
                 status line it explains, above the confirm row; inline, never blocks. */}
@@ -321,12 +321,12 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
                   reconciles on the next online poll. It does NOT fabricate a settled history entry.
                   MC5: pass the request's currency so the deduction lands on THIS asset's entry, not
                   the DEMO counter (currency-keyed offline deduction). */}
-              <Pressable testID="btn-paid" style={S.paidBtn} onPress={() => { onOfflinePaid(qr.amount, qr.currency); setPaid({amount: qr.amount, currency: qr.currency, who: qr.who, already: false, pending: true}); setPhase('paid'); }} accessibilityRole="button" accessibilityLabel={`Handed to ${qr.who}`} accessibilityHint="Mark the signed payment as handed off; your balance updates when the merchant settles" accessibilityState={{disabled: false}}><Text style={S.paidBtnText}>Handed to {qr.who}</Text></Pressable>
-              <Pressable testID="btn-notpaid" style={S.notPaidBtn} onPress={reset} accessibilityRole="button" accessibilityLabel="Cancel" accessibilityState={{disabled: false}}><Text style={S.notPaidText}>Cancel</Text></Pressable>
+              <Pressable testID="btn-paid" style={S.paidBtn} onPress={() => { onOfflinePaid(qr.amount, qr.currency); setPaid({amount: qr.amount, currency: qr.currency, who: qr.who, already: false, pending: true}); setPhase('paid'); }} accessibilityRole="button" accessibilityLabel={M.pay.handedTo(qr.who)} accessibilityHint={M.pay.handedOffHint} accessibilityState={{disabled: false}}><Text style={S.paidBtnText}>{M.pay.handedTo(qr.who)}</Text></Pressable>
+              <Pressable testID="btn-notpaid" style={S.notPaidBtn} onPress={reset} accessibilityRole="button" accessibilityLabel={M.common.cancel} accessibilityState={{disabled: false}}><Text style={S.notPaidText}>{M.common.cancel}</Text></Pressable>
             </View>
           </>
         )}
-        <Pressable style={S.ghostBtn} onPress={() => share(qr.code)} accessibilityRole="button" accessibilityLabel="Share auth code" accessibilityState={{disabled: false}}><IconShare size={16} color={C.sub}/><Text style={S.ghostBtnText}>{shared ? shareConfirmLabel('Copied ✓') : 'Share auth code'}</Text></Pressable>
+        <Pressable style={S.ghostBtn} onPress={() => share(qr.code)} accessibilityRole="button" accessibilityLabel={M.pay.shareAuthCode} accessibilityState={{disabled: false}}><IconShare size={16} color={C.sub}/><Text style={S.ghostBtnText}>{shared ? shareConfirmLabel(M.pay.copied) : M.pay.shareAuthCode}</Text></Pressable>
       </View>
     );
   }
@@ -341,9 +341,9 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     if (!isPayableAsset(catalog, req.currency)) {
       return (
         <View style={S.center}>
-          <Text style={S.label}>Unsupported asset</Text>
-          <Text testID="review-unsupported" style={S.warnNote}>This payment requests an asset this wallet can’t pay (currency {req.currency}). dpay never swaps, so there’s no fallback. Ask the merchant to request a supported asset.</Text>
-          <Pressable style={[S.ghostBtn, S.ghostBtnMuted]} onPress={reset} accessibilityRole="button" accessibilityLabel="Cancel" accessibilityState={{disabled: false}}><Text style={S.ghostBtnText}>Cancel</Text></Pressable>
+          <Text style={S.label}>{M.pay.unsupportedAsset}</Text>
+          <Text testID="review-unsupported" style={S.warnNote}>{M.pay.unsupportedAssetBody(req.currency)}</Text>
+          <Pressable style={[S.ghostBtn, S.ghostBtnMuted]} onPress={reset} accessibilityRole="button" accessibilityLabel={M.common.cancel} accessibilityState={{disabled: false}}><Text style={S.ghostBtnText}>{M.common.cancel}</Text></Pressable>
         </View>
       );
     }
@@ -365,9 +365,9 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
       const approveDisabled = busy || !!err || blockApprove;
       return (
         <View style={S.center}>
-          <Text style={S.label}>Review payment</Text>
-          <Text testID="pay-amount" style={S.reviewAmount}>{`Pay ${fmtCurrencyAmount(catalog, req.currency, req.amount)}`}</Text>
-          <Text style={S.reviewTo}>{`to ${req.toName || short(req.toHex)}`}</Text>
+          <Text style={S.label}>{M.pay.reviewPayment}</Text>
+          <Text testID="pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtCurrencyAmount(catalog, req.currency, req.amount))}</Text>
+          <Text style={S.reviewTo}>{M.pay.toWho(req.toName || short(req.toHex))}</Text>
           {/* U-F5 — the payee's short pubkey as a subdued second line when a display name is shown,
               so the payer can verify the destination beyond a claimed name (phishing surface). The
               no-name fallback already renders the short key as the primary "to" line. */}
@@ -383,8 +383,8 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
               first; the raw request nonce is no longer surfaced (internal protocol data). */}
           {insufficient ? (
             <Text testID="review-lowbal" style={S.warnNote}>{blockApprove
-              ? 'Not enough balance to cover this payment.'
-              : 'Your local balance may not cover this — the merchant will verify.'}</Text>
+              ? M.pay.notEnoughBalance
+              : M.pay.localBalanceMayNotCover}</Text>
           ) : null}
           {err ? <Text testID="review-err" style={S.err}>{err}</Text> : null}
           <Pressable
@@ -392,11 +392,11 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
             style={[S.primary, approveDisabled && S.disabledFlat]}
             disabled={approveDisabled}
             accessibilityRole="button"
-            accessibilityLabel="Approve payment"
-            accessibilityHint="Sign the displayed amount with your key and send it"
+            accessibilityLabel={M.pay.approveA11y}
+            accessibilityHint={M.pay.approveHint}
             accessibilityState={{disabled: approveDisabled}}
             onPress={() => void approve(req)}>
-            <Text style={S.primaryText}>{busy ? 'Signing…' : 'Approve'}</Text>
+            <Text style={S.primaryText}>{busy ? M.pay.signing : M.pay.approve}</Text>
           </Pressable>
           {/* Audit P2: Cancel-as-secondary-button parity — a bordered secondary button of the same
               width as Approve so the tap targets are equivalent and the user makes a deliberate choice
@@ -407,9 +407,9 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
             style={S.secondaryBtn}
             onPress={reset}
             accessibilityRole="button"
-            accessibilityLabel="Cancel"
+            accessibilityLabel={M.common.cancel}
             accessibilityState={{disabled: false}}>
-            <Text style={S.secondaryBtnText}>Cancel</Text>
+            <Text style={S.secondaryBtnText}>{M.common.cancel}</Text>
           </Pressable>
         </View>
       );
@@ -421,27 +421,27 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     // each show their reason + Cancel back to the gated scan state.
     return (
       <View style={S.center}>
-        <Text style={S.label}>Paying</Text>
-        <Text testID="pay-amount" style={S.reviewAmount}>{`Pay ${fmtCurrencyAmount(catalog, req.currency, req.amount)}`}</Text>
-        <Text style={S.reviewTo}>{`to ${req.toName || short(req.toHex)}`}</Text>
+        <Text style={S.label}>{M.pay.paying}</Text>
+        <Text testID="pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtCurrencyAmount(catalog, req.currency, req.amount))}</Text>
+        <Text style={S.reviewTo}>{M.pay.toWho(req.toName || short(req.toHex))}</Text>
         {req.toName ? <Text testID="review-payee" style={S.dim2}>{short(req.toHex)}</Text> : null}
         {insufficient ? (
           <Text testID="review-lowbal" style={S.warnNote}>{blockApprove
-            ? 'Not enough balance to cover this payment.'
-            : 'Your local balance may not cover this — the merchant will verify.'}</Text>
+            ? M.pay.notEnoughBalance
+            : M.pay.localBalanceMayNotCover}</Text>
         ) : null}
         {err ? <Text testID="review-err" style={S.err}>{err}</Text> : null}
         {busy ? (
-          <Text style={S.dim2}>Signing…</Text>
+          <Text style={S.dim2}>{M.pay.signing}</Text>
         ) : (
           <Pressable
             testID="btn-review-cancel"
             style={S.secondaryBtn}
             onPress={reset}
             accessibilityRole="button"
-            accessibilityLabel="Cancel"
+            accessibilityLabel={M.common.cancel}
             accessibilityState={{disabled: false}}>
-            <Text style={S.secondaryBtnText}>Cancel</Text>
+            <Text style={S.secondaryBtnText}>{M.common.cancel}</Text>
           </Pressable>
         )}
       </View>
@@ -458,18 +458,18 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   //     review-level lowbal backstop still catches a doomed payment at Approve).
   //   - A no-onramp asset keeps the panel but omits the primary and says so honestly.
   const gateDesc = catalog.find(c => c.currency === withdrawCurrency) ?? null;
-  const gateSymbol = gateDesc ? (isTestnetCurrency(gateDesc) ? testnetDisplayName(gateDesc) : displayName(gateDesc)) : 'funds';
+  const gateSymbol = gateDesc ? (isTestnetCurrency(gateDesc) ? testnetDisplayName(gateDesc) : displayName(gateDesc)) : M.pay.fundsSymbol;
   const gateDepositable = !!gateDesc && !gateDesc.mintable && gateDesc.onramp !== 'Unavailable' && gateDesc.minter != null;
   const gateBalance = withdrawCurrency === 0 ? shownBalance : (assetBalances[withdrawCurrency] ?? null);
   const fundGate = online && gateBalance != null && cmpRaw(gateBalance, '0') === 0 && gateDesc != null && !gateDesc.mintable;
   const fundPanel = fundGate ? (
     <FundFirstPanel
       testID="pay-fund"
-      title={`Add ${gateSymbol} to ${subMode === 'send' ? 'send' : 'pay'}`}
+      title={M.pay.fundTitle(gateSymbol, subMode === 'send' ? 'send' : 'pay')}
       body={gateDepositable
-        ? `This wallet has no ${gateSymbol} yet. Send ${gateSymbol} to your address and you can ${subMode === 'send' ? 'send' : 'pay'} right away.`
-        : `This wallet has no ${gateSymbol} yet — and ${gateSymbol} isn't available for deposits yet. Fund another asset, or check back soon.`}
-      primaryLabel={gateDepositable ? `Show my ${gateSymbol} address` : undefined}
+        ? M.pay.fundBody(gateSymbol, subMode === 'send' ? 'send' : 'pay')
+        : M.pay.fundBodyNoDeposits(gateSymbol)}
+      primaryLabel={gateDepositable ? M.pay.showMyAddress(gateSymbol) : undefined}
       onPrimary={gateDepositable ? onShowDepositAddress : undefined}
       onRecheck={onRefreshBalances}
         recheckBusy={refreshBusy}
@@ -488,8 +488,8 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
           testID="pay-mode-toggle"
           value={subMode}
           onChange={(v) => onSubModeChange(v as 'scan' | 'send')}
-          left={{label: 'Scan to pay', value: 'scan', testID: 'btn-pay-scan'}}
-          right={{label: 'Send to address', value: 'send', testID: 'btn-pay-send'}}
+          left={{label: M.pay.scanToPay, value: 'scan', testID: 'btn-pay-scan'}}
+          right={{label: M.pay.sendToAddress, value: 'send', testID: 'btn-pay-send'}}
         />
         {fundPanel ?? (
           <WithdrawSheet
@@ -521,8 +521,8 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
           testID="pay-mode-toggle"
           value={subMode}
           onChange={(v) => onSubModeChange(v as 'scan' | 'send')}
-          left={{label: 'Scan to pay', value: 'scan', testID: 'btn-pay-scan'}}
-          right={{label: 'Send to address', value: 'send', testID: 'btn-pay-send'}}
+          left={{label: M.pay.scanToPay, value: 'scan', testID: 'btn-pay-scan'}}
+          right={{label: M.pay.sendToAddress, value: 'send', testID: 'btn-pay-send'}}
         />
       ) : null}
       {fundPanel ?? (
@@ -543,20 +543,20 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
           {Platform.OS !== 'web' && nfcReady ? (
             <View style={S.nfcStatusRow} testID="pay-scan">
               <NfcIcon color={C.brand} size={34} />
-              <Text style={S.nfcStatusLabel}>Tap or scan to pay</Text>
+              <Text style={S.nfcStatusLabel}>{M.pay.tapOrScanToPay}</Text>
             </View>
           ) : Platform.OS !== 'web' ? (
             <View style={S.nfcStatusRow} testID="pay-scan">
               <NfcIcon color={C.bad} size={34} off />
-              <Pressable style={S.nfcInfoLink} onPress={() => setNfcInfoOpen(true)} accessibilityRole="button" accessibilityLabel="Why NFC is unavailable" accessibilityState={{disabled: false}}>
-                <Text style={S.nfcInfoLinkText}>NFC not available</Text>
+              <Pressable style={S.nfcInfoLink} onPress={() => setNfcInfoOpen(true)} accessibilityRole="button" accessibilityLabel={M.pay.whyNfcUnavailable} accessibilityState={{disabled: false}}>
+                <Text style={S.nfcInfoLinkText}>{M.pay.nfcNotAvailable}</Text>
                 <IconInfo size={15} color={C.sub2}/>
               </Pressable>
             </View>
           ) : (
-            <Text style={[S.nfcStatusLabel, {paddingTop: 16}]} testID="pay-scan">Scan to pay</Text>
+            <Text style={[S.nfcStatusLabel, {paddingTop: 16}]} testID="pay-scan">{M.pay.scanToPay}</Text>
           )}
-          {Platform.OS !== 'web' && !nfcReady ? <Text style={S.dim2}>Scan the QR code to pay.</Text> : null}
+          {Platform.OS !== 'web' && !nfcReady ? <Text style={S.dim2}>{M.pay.scanQrToPay}</Text> : null}
           {scanArmed ? (
             <QrScanner onScan={raw => onRequestString(raw, false)} />
           ) : (
@@ -565,11 +565,11 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
                 style={S.primary}
                 onPress={() => setScanArmed(true)}
                 accessibilityRole="button"
-                accessibilityLabel="Pay now"
-                accessibilityHint="Turn on the camera and tap-to-pay so you can pay a merchant"
+                accessibilityLabel={M.pay.payNowA11y}
+                accessibilityHint={M.pay.payNowHint}
                 testID="btn-start-scan"
               >
-                <Text style={S.primaryText}>Pay Now</Text>
+                <Text style={S.primaryText}>{M.pay.payNow}</Text>
               </Pressable>
             </>
           )}
@@ -581,10 +581,10 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
       <Modal visible={nfcInfoOpen} transparent animationType="fade" onRequestClose={() => setNfcInfoOpen(false)}>
         <Pressable style={S.pickBackdrop} onPress={() => setNfcInfoOpen(false)}>
           <View style={S.pickCard} onStartShouldSetResponder={() => true}>
-            <Text style={S.pickTitle}>NFC unavailable</Text>
+            <Text style={S.pickTitle}>{M.pay.nfcUnavailableTitle}</Text>
             <Text style={S.nfcInfoBody}>{M.nfc.reason[nfcInfo]}</Text>
-            <Pressable style={S.nfcInfoClose} onPress={() => setNfcInfoOpen(false)} accessibilityRole="button" accessibilityLabel="Close" accessibilityState={{disabled: false}}>
-              <Text style={S.nfcInfoCloseText}>Close</Text>
+            <Pressable style={S.nfcInfoClose} onPress={() => setNfcInfoOpen(false)} accessibilityRole="button" accessibilityLabel={M.pay.close} accessibilityState={{disabled: false}}>
+              <Text style={S.nfcInfoCloseText}>{M.pay.close}</Text>
             </Pressable>
           </View>
         </Pressable>

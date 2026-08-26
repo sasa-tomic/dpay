@@ -37,6 +37,7 @@ import React, {useEffect, useRef, useState} from 'react';
 import {Animated, Easing, Pressable, SafeAreaView, ScrollView, StatusBar, Text, View} from 'react-native';
 import {C} from '../config/palette';
 import {S, isDark} from '../styles';
+import {M} from '../i18n';
 import {JOURNEY_STAMPS, hasStamp, markSeen, useJourney} from '../lib/journey';
 import {PASSPORT_STAMPS, PASSPORT_TITLE, PASSPORT_COLLAPSED_KEY, computeReadiness, type ReadinessKey} from '../lib/readiness';
 import {useReducedMotion} from '../hooks/useReducedMotion';
@@ -49,12 +50,12 @@ const CAPSTONE_MS = 2200;
 /** Fixed per-slot rotations (deterministic — a stamped set never re-shuffles on re-render). */
 const SLOT_TILT = [-4, 3, -2, 5] as const;
 
-/** The archive's stamp date ('AUG 23') from the journey's wall-clock award time. Local, tiny,
- *  single-use — a real passport page shows WHEN each stamp landed. */
-const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+/** The archive's stamp date ('AUG 23') from the journey's wall-clock award time — a real passport
+ *  page shows WHEN each stamp landed. The month names and the order live in the catalog, which is
+ *  why this takes the parts rather than formatting them here. */
 function stampDate(at: number): string {
   const d = new Date(at);
-  return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
+  return M.education.passport.stampDate(d.getMonth(), d.getDate());
 }
 
 export function PassportArchive({onClose, onNext, onStep}: {
@@ -144,7 +145,7 @@ export function PassportArchive({onClose, onNext, onStep}: {
           style={S.sheetClose}
           onPress={onClose}
           accessibilityRole="button"
-          accessibilityLabel={`Close ${PASSPORT_TITLE}`}
+          accessibilityLabel={M.education.passport.close(PASSPORT_TITLE)}
           accessibilityState={{disabled: false}}>
           <IconClose size={18} color={C.sub} />
         </Pressable>
@@ -158,7 +159,7 @@ export function PassportArchive({onClose, onNext, onStep}: {
             {/* Document head: the n-of-4 count (mono caps, the only number) over the fine
                 rule — the page title itself lives in the standard sheet header above. */}
             <View style={S.passportHead}>
-              <Text testID="passport-count" style={S.walkEyebrow}>{count} OF 4</Text>
+              <Text testID="passport-count" style={S.walkEyebrow}>{M.education.passport.count(count)}</Text>
             </View>
             <View style={S.passportRule} />
 
@@ -191,8 +192,8 @@ export function PassportArchive({onClose, onNext, onStep}: {
                     testID={`passport-slot-btn-${s.key}`}
                     onPress={() => onStep(s.key)}
                     accessibilityRole="button"
-                    accessibilityLabel={`Go: ${s.hint}`}
-                    accessibilityHint="Open the surface where this step happens"
+                    accessibilityLabel={M.education.passport.goToStep(s.hint)}
+                    accessibilityHint={M.education.passport.goToStepHint}
                     accessibilityState={{disabled: false}}>
                     {slot}
                   </Pressable>
@@ -205,9 +206,9 @@ export function PassportArchive({onClose, onNext, onStep}: {
             {readiness.complete ? (
               <View style={S.passportReadyWrap}>
                 <View style={[S.stampChip, {marginTop: 2}]}>
-                  <Text style={S.stampChipText}>Trip ready</Text>
+                  <Text style={S.stampChipText}>{M.education.passport.ready}</Text>
                 </View>
-                <Text style={S.passportReadyLine}>You can pay even when your phone has no signal.</Text>
+                <Text style={S.passportReadyLine}>{M.education.passport.readyLine}</Text>
               </View>
             ) : onNext || onStep ? (
               <Pressable
@@ -221,16 +222,16 @@ export function PassportArchive({onClose, onNext, onStep}: {
                   else onNext?.();
                 }}
                 accessibilityRole="button"
-                accessibilityLabel={`Next: ${readiness.next?.hint ?? ''}`}
-                accessibilityHint="Go to the surface where this step happens"
+                accessibilityLabel={M.education.passport.nextLabel(readiness.next?.hint ?? '')}
+                accessibilityHint={M.education.passport.nextHint}
                 accessibilityState={{disabled: false}}>
-                <Text style={S.passportHintTag}>Next</Text>
+                <Text style={S.passportHintTag}>{M.education.passport.nextTag}</Text>
                 <Text testID="passport-hint" style={S.passportHintText}>{readiness.next?.hint}</Text>
                 <View style={S.passportHintArrow}><IconArrowUpRight size={14} color={C.sub2} /></View>
               </Pressable>
             ) : (
               <View style={S.passportHint}>
-                <Text style={S.passportHintTag}>Next</Text>
+                <Text style={S.passportHintTag}>{M.education.passport.nextTag}</Text>
                 <Text testID="passport-hint" style={S.passportHintText}>{readiness.next?.hint}</Text>
               </View>
             )}
@@ -243,10 +244,10 @@ export function PassportArchive({onClose, onNext, onStep}: {
                 style={[S.ghostBtn, S.ghostBtnMuted]}
                 onPress={onDone}
                 accessibilityRole="button"
-                accessibilityLabel="Done"
-                accessibilityHint="Retire the trip readiness strip"
+                accessibilityLabel={M.common.done}
+                accessibilityHint={M.education.passport.doneHint}
                 accessibilityState={{disabled: false}}>
-                <Text style={S.ghostBtnText}>Done</Text>
+                <Text style={S.ghostBtnText}>{M.common.done}</Text>
               </Pressable>
             ) : null}
 
@@ -276,8 +277,8 @@ export function PassportArchive({onClose, onNext, onStep}: {
                     );
                   })}
                 </View>
-                <Text style={S.passportCapstoneText}>Trip{'\n'}Ready</Text>
-                <Text style={S.passportCapstoneMicro}>Nothing left to set up. Go have the trip.</Text>
+                <Text style={S.passportCapstoneText}>{M.education.passport.capstone}</Text>
+                <Text style={S.passportCapstoneMicro}>{M.education.passport.capstoneMicro}</Text>
               </Animated.View>
             ) : null}
           </View>

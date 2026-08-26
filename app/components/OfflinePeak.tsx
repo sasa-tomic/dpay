@@ -19,6 +19,7 @@ import React, {useEffect, useRef, useState} from 'react';
 import {Animated, Easing, Text, View} from 'react-native';
 import {C} from '../config/palette';
 import {S} from '../styles';
+import {M} from '../i18n';
 import {CAMPAIGN_LINE} from '../config/education';
 import {useReducedMotion} from '../hooks/useReducedMotion';
 import {IconWifiOff} from './icons';
@@ -57,7 +58,7 @@ export function OfflinePeak() {
       <View testID="offline-peak" style={S.peakWrap} pointerEvents="none">
         <View testID="first-offline-stamp" style={S.peakSettled}>
           <IconWifiOff size={13} color={C.sub2} />
-          <Text style={S.peakSettledText}>paid with no signal</Text>
+          <Text style={S.peakSettledText}>{M.education.peak.settled}</Text>
         </View>
       </View>
     );
@@ -68,7 +69,7 @@ export function OfflinePeak() {
         {CAMPAIGN_LINE}
       </Animated.Text>
       <Animated.Text style={[S.peakMicro, {opacity: microOp}]}>
-        No signal the whole time.
+        {M.education.peak.micro}
       </Animated.Text>
     </View>
   );

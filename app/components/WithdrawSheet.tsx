@@ -15,6 +15,7 @@ import {loadSavedWithdrawAddr, saveWithdrawAddr} from '../services/withdraw';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {IconCheck, IconCopy} from './icons';
+import {M} from '../i18n';
 
 /**
  * Withdraw a chain-key asset to a native address (ckBTC → BTC, native ckETH → ETH, ckERC20 tokens like
@@ -48,6 +49,8 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
   // null ⇒ the next Confirm PREPARES fresh envelopes; non-null ⇒ Confirm RESUMES the SAME bytes.
   const [retained, setRetained] = useState<RetainedOfframp | null>(null);
   const {copied, copy: doCopy} = useCopyFeedback();
+  // Every amount on this sheet is the same asset at the same precision — one formatter, one place.
+  const fmt = (rawAmount: string) => fmtAsset(rawAmount, decimals, display.nativeAsset, display.amountDecimals);
 
   useEscapeToClose(onClose);
 
@@ -68,7 +71,7 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
       if (!alive || !rec) return;
       setRetained({steps: rec.steps, nextIdx: rec.nextIdx, destination: rec.destination, amountRaw: rec.amountRaw});
       setAddress(rec.destination);
-      setErr('A withdrawal was in progress when the app closed. Retry re-sends the same envelopes — it cannot double-spend.');
+      setErr(M.withdraw.ic.resumed);
     });
     return () => { alive = false; };
   }, [identity.publicHex, currency]);
@@ -111,9 +114,7 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
         continue;
       }
       if (out.kind === 'rejected') throw new Error(out.reason);
-      throw new Error(i === 0 && steps.length > 1
-        ? "Couldn't confirm the approval — check your balance when back online"
-        : "Couldn't confirm the withdrawal — it may still land; check your balance soon");
+      throw new Error(i === 0 && steps.length > 1 ? M.withdraw.ic.approvalUnknown : M.withdraw.ic.withdrawalUnknown);
     }
     await clearOfframp(identity.publicHex, currency);
     setRetained(null);
@@ -147,14 +148,14 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
       const minter = desc?.minter ?? '';
       const ledger = desc?.ledger ?? '';
       const gasLedger = desc?.gas_ledger ?? '';
-      if (!ledger || !minter) throw new Error('This asset has no withdrawal rail configured');
+      if (!ledger || !minter) throw new Error(M.withdraw.ic.noRail);
       let steps: OfframpStep[];
       if (family === 'CkBtcUtxo') {
         steps = await prepareBtcWithdrawal(identity.secretHex, ledger, minter, dest, raw);
       } else if (family === 'CkEthErc20' && tokenContract != null) {
-        if (!gasLedger) throw new Error('This asset has no withdrawal rail configured');
+        if (!gasLedger) throw new Error(M.withdraw.ic.noRail);
         const gas = await fetchGasFeeWei(identity.secretHex, minter, ledger);
-        if (gas == null) throw new Error("Couldn't fetch the live gas fee — check your connection");
+        if (gas == null) throw new Error(M.withdraw.ic.gasFeeErr);
         steps = await prepareErc20Withdrawal(identity.secretHex, ledger, gasLedger, minter, dest, raw, gas);
       } else {
         // Native ETH: passes the ckETH AMOUNT ledger as the eip_1559_transaction_price arg.
@@ -164,7 +165,7 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
         // mainnet_cketh_minter_eip1559_price_args probe. No observable difference; revisit only if
         // the minter ever starts rejecting it.
         const gas = await fetchGasFeeWei(identity.secretHex, minter, ledger);
-        if (gas == null) throw new Error("Couldn't fetch the live gas fee — check your connection");
+        if (gas == null) throw new Error(M.withdraw.ic.gasFeeErr);
         steps = await prepareEthWithdrawal(identity.secretHex, ledger, minter, dest, raw, gas);
       }
       // Retain the prepared steps BEFORE the first submission so every subsequent retry (or an app
@@ -193,31 +194,31 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
       {phase === 'done' && receipt ? (
         <View style={S.centerAll}>
           <View style={S.check}><IconCheck size={44} color={C.brandInk}/></View>
-          <Text testID="withdraw-status" style={S.paidText}>Withdrawn ✓</Text>
-          <Text style={S.paidSub}>{fmtAsset(receipt.amount, decimals, display.nativeAsset, display.amountDecimals)}</Text>
-          <Text style={S.dim2}>sent to</Text>
+          <Text testID="withdraw-status" style={S.paidText}>{M.withdraw.ic.withdrawn}</Text>
+          <Text style={S.paidSub}>{fmt(receipt.amount)}</Text>
+          <Text style={S.dim2}>{M.withdraw.ic.sentTo}</Text>
           <Text testID="withdraw-destination" selectable={true} style={S.sheetAddr}>{receipt.btcAddress}</Text>
-          <Pressable testID="btn-copy-destination" style={S.primaryWide} onPress={copyDest} accessibilityRole="button" accessibilityLabel="Copy destination address" accessibilityState={{disabled: false}}>
+          <Pressable testID="btn-copy-destination" style={S.primaryWide} onPress={copyDest} accessibilityRole="button" accessibilityLabel={M.withdraw.ic.copyDestinationLabel} accessibilityState={{disabled: false}}>
             <IconCopy size={18} color={C.brandInk}/>
-            <Text style={S.primaryText}>{copied === 'clipboard' ? 'Copied ✓' : copied === 'shared' ? 'Shared ✓' : 'Copy address'}</Text>
+            <Text style={S.primaryText}>{copied === 'clipboard' ? M.withdraw.copied : copied === 'shared' ? M.withdraw.shared : M.withdraw.copyAddress}</Text>
           </Pressable>
-          <Text style={S.dim2}>Your balance updates automatically.</Text>
-          <Pressable testID="btn-withdraw-done" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={onClose} accessibilityRole="button" accessibilityLabel="Done" accessibilityState={{disabled: false}}><Text style={S.ghostBtnText}>Done</Text></Pressable>
+          <Text style={S.dim2}>{M.withdraw.balanceAuto}</Text>
+          <Pressable testID="btn-withdraw-done" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={onClose} accessibilityRole="button" accessibilityLabel={M.common.done} accessibilityState={{disabled: false}}><Text style={S.ghostBtnText}>{M.common.done}</Text></Pressable>
         </View>
       ) : phase === 'submitting' ? (
         <View style={S.centerAll}>
           <ActivityIndicator color={C.brand} />
-          <Text style={S.dim2}>{`Withdrawing ${fmtAsset(raw, decimals, display.nativeAsset, display.amountDecimals)}…`}</Text>
+          <Text style={S.dim2}>{M.withdraw.ic.withdrawing(fmt(raw))}</Text>
         </View>
       ) : (
         <>
-          <Text style={S.label}>{`Send your ${display.networkLabel} to a native ${display.nativeAsset} address`}</Text>
-          <Text style={S.dim2}>{`Available: ${fmtAsset(balance, decimals, display.nativeAsset, display.amountDecimals)} · min ${fmtAsset(String(display.withdrawMinRaw), decimals, display.nativeAsset, display.amountDecimals)}`}</Text>
+          <Text style={S.label}>{M.withdraw.ic.sendToNative(display.networkLabel, display.nativeAsset)}</Text>
+          <Text style={S.dim2}>{M.withdraw.ic.availableMin(fmt(balance), fmt(String(display.withdrawMinRaw)))}</Text>
 
-          <Text style={S.inputLabel}>{`${display.nativeAsset} address`}</Text>
+          <Text style={S.inputLabel}>{M.withdraw.ic.addressLabel(display.nativeAsset)}</Text>
           {savedAddr && address.trim().length === 0 ? (
-            <Pressable testID="btn-withdraw-saved" style={S.savedAddrChip} onPress={() => editAddress(savedAddr)} accessibilityRole="button" accessibilityLabel="Use last saved address" accessibilityState={{disabled: false}}>
-              <Text style={S.savedAddrText}>{`Use last: ${savedAddr.length > 28 ? savedAddr.slice(0, 14) + '…' + savedAddr.slice(-12) : savedAddr}`}</Text>
+            <Pressable testID="btn-withdraw-saved" style={S.savedAddrChip} onPress={() => editAddress(savedAddr)} accessibilityRole="button" accessibilityLabel={M.withdraw.ic.useLastLabel} accessibilityState={{disabled: false}}>
+              <Text style={S.savedAddrText}>{M.withdraw.ic.useLast(savedAddr.length > 28 ? savedAddr.slice(0, 14) + '…' + savedAddr.slice(-12) : savedAddr)}</Text>
             </Pressable>
           ) : null}
           <TextInput
@@ -231,23 +232,23 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
             autoCorrect={false}
           />
 
-          <Text style={S.inputLabel}>{`Amount (${display.nativeAsset})`}</Text>
+          <Text style={S.inputLabel}>{M.withdraw.amountLabel(display.nativeAsset)}</Text>
           <TextInput
             testID="withdraw-amount-input"
             style={S.withdrawAmtInput}
             value={amountStr}
             onChangeText={editAmount}
             keyboardType="decimal-pad"
-            placeholder="0.00050000"
+            placeholder={M.withdraw.ic.amountPlaceholder}
             placeholderTextColor={C.sub2}
           />
 
-          {belowMin ? <Text style={S.warnNote}>{`Below the ${fmtAsset(String(display.withdrawMinRaw), decimals, display.nativeAsset, display.amountDecimals)} minimum withdrawal.`}</Text> : null}
-          {overBalance ? <Text style={S.warnNote}>{`More than your available ${fmtAsset(balance, decimals, display.nativeAsset, display.amountDecimals)}.`}</Text> : null}
-          {badAddr ? <Text testID="withdraw-bad-addr" style={S.warnNote}>{`That doesn't look like a valid ${display.nativeAsset} address.`}</Text> : null}
+          {belowMin ? <Text style={S.warnNote}>{M.withdraw.ic.belowMin(fmt(String(display.withdrawMinRaw)))}</Text> : null}
+          {overBalance ? <Text style={S.warnNote}>{M.withdraw.overBalance(fmt(balance))}</Text> : null}
+          {badAddr ? <Text testID="withdraw-bad-addr" style={S.warnNote}>{M.withdraw.badAddress(display.nativeAsset)}</Text> : null}
 
           {isErc20 ? (
-            <Text testID="withdraw-gas-note" style={S.warnNote}>You need ckETH for gas. Add ckETH first if you don't have any.</Text>
+            <Text testID="withdraw-gas-note" style={S.warnNote}>{M.withdraw.ic.gasNote}</Text>
           ) : null}
 
           {retained ? (
@@ -255,16 +256,16 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
             // restart): show WHAT is in flight instead of the form-derived review — the envelopes
             // are already signed for this destination/amount.
             <View testID="withdraw-resume" style={S.reviewCard}>
-              <Text style={S.reviewLabel}>Withdrawal in progress</Text>
-              <Text testID="withdraw-resume-amount" style={S.reviewAmount}>{`Withdraw ${fmtAsset(retained.amountRaw, decimals, display.nativeAsset, display.amountDecimals)}`}</Text>
-              <Text style={S.reviewTo}>{`to ${retained.destination}`}</Text>
-              <Text style={S.dim2}>Already signed — Retry re-sends the same envelopes (it cannot double-spend). Editing the form starts a fresh withdrawal instead.</Text>
+              <Text style={S.reviewLabel}>{M.withdraw.ic.inProgress}</Text>
+              <Text testID="withdraw-resume-amount" style={S.reviewAmount}>{M.withdraw.ic.withdrawAmount(fmt(retained.amountRaw))}</Text>
+              <Text style={S.reviewTo}>{M.withdraw.toDestination(retained.destination)}</Text>
+              <Text style={S.dim2}>{M.withdraw.ic.resumeNote}</Text>
             </View>
           ) : (phase === 'form' || phase === 'error') && raw !== '0' ? (
             <View testID="withdraw-review" style={S.reviewCard}>
-              <Text style={S.reviewLabel}>Review withdrawal</Text>
-              <Text testID="withdraw-review-amount" style={S.reviewAmount}>{`Withdraw ${fmtAsset(raw, decimals, display.nativeAsset, display.amountDecimals)}`}</Text>
-              <Text style={S.reviewTo}>{`to ${address.trim() || '—'}`}</Text>
+              <Text style={S.reviewLabel}>{M.withdraw.ic.reviewTitle}</Text>
+              <Text testID="withdraw-review-amount" style={S.reviewAmount}>{M.withdraw.ic.withdrawAmount(fmt(raw))}</Text>
+              <Text style={S.reviewTo}>{M.withdraw.toDestination(address.trim() || '—')}</Text>
             </View>
           ) : null}
 
@@ -276,12 +277,12 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
             disabled={!canReview && !retained}
             onPress={confirm}
             accessibilityRole="button"
-            accessibilityLabel="Confirm withdrawal"
+            accessibilityLabel={M.withdraw.ic.confirmLabel}
             accessibilityState={{disabled: !canReview && !retained}}>
-            <Text style={S.primaryText}>{retained ? 'Retry withdrawal' : raw !== '0' ? `Withdraw ${fmtAsset(raw, decimals, display.nativeAsset, display.amountDecimals)}` : 'Enter an amount'}</Text>
+            <Text style={S.primaryText}>{retained ? M.withdraw.ic.retry : raw !== '0' ? M.withdraw.ic.withdrawAmount(fmt(raw)) : M.withdraw.enterAmount}</Text>
           </Pressable>
 
-          {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
+          {Platform.OS === 'web' ? <Text style={S.dim2}>{M.withdraw.pressEsc}</Text> : null}
         </>
       )}
     </>

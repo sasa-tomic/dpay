@@ -6,6 +6,7 @@ import {fmtAsset} from '../lib/format';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
 import {IconAlert} from './icons';
+import {M} from '../i18n';
 
 /**
  * The one-tap USDC-account (ATA) setup card — the SHARED surface for every place the device's
@@ -53,18 +54,14 @@ export function SolanaAtaSetupCard({
   return (
     <>
       <View testID={instrTestID} style={S.instrCard}>
-        <Text style={S.instrLine}>You don't have a USDC account on this device yet.</Text>
-        <Text style={S.instrCustody}>
-          Solana keeps your USDC in a one-time token account tied to this wallet. Creating it costs {setupCost} (account rent + fee) from your SOL balance — it stays your account, on your keys. dpay never holds them.
-        </Text>
+        <Text style={S.instrLine}>{M.deposit.ata.absent}</Text>
+        <Text style={S.instrCustody}>{M.deposit.ata.cost(setupCost)}</Text>
         {!hasSol ? (
           <>
             {checkingSol ? (
-              <Text testID="sol-ata-checking-sol" style={S.dim2}>Checking your SOL balance…</Text>
+              <Text testID="sol-ata-checking-sol" style={S.dim2}>{M.deposit.ata.checkingSol}</Text>
             ) : (
-              <Text testID="sol-ata-insufficient" style={S.warnNote}>
-                You need about {setupCost} in this wallet first — receive SOL at your address, then create the account.
-              </Text>
+              <Text testID="sol-ata-insufficient" style={S.warnNote}>{M.deposit.ata.needSol(setupCost)}</Text>
             )}
             {onShowSolAddress ? (
               <Pressable
@@ -72,8 +69,8 @@ export function SolanaAtaSetupCard({
                 style={S.linkBtn}
                 onPress={onShowSolAddress}
                 accessibilityRole="button"
-                accessibilityLabel="Show my SOL address">
-                <Text style={S.linkText}>Show my SOL address</Text>
+                accessibilityLabel={M.deposit.ata.showSolAddress}>
+                <Text style={S.linkText}>{M.deposit.ata.showSolAddress}</Text>
               </Pressable>
             ) : null}
           </>
@@ -83,14 +80,14 @@ export function SolanaAtaSetupCard({
           // sizing in row form). No e2e/jest asserts this text; the testID moves to the wrapper.
           <View testID="sol-devnet-warning" style={S.warnRow}>
             <IconAlert size={14} color={C.warn} />
-            <Text style={S.warnRowText}>Connected to Solana devnet. Do NOT send mainnet USDC here — it will not appear. Use devnet USDC only.</Text>
+            <Text style={S.warnRowText}>{M.deposit.sol.devnetWarn('USDC')}</Text>
           </View>
         ) : null}
       </View>
       {busy ? (
         <>
           <ActivityIndicator color={C.brand} />
-          <Text testID="sol-ata-busy" style={S.dim2}>Creating your USDC account — confirming on Solana…</Text>
+          <Text testID="sol-ata-busy" style={S.dim2}>{M.deposit.ata.creating}</Text>
         </>
       ) : (
         <Pressable
@@ -100,7 +97,7 @@ export function SolanaAtaSetupCard({
           onPress={onCreateAta}
           accessibilityRole="button"
           accessibilityLabel={buttonLabel}
-          accessibilityHint={`Create your one-time USDC account for ${setupCost} from your SOL balance`}
+          accessibilityHint={M.deposit.ata.createHint(setupCost)}
           accessibilityState={{disabled: !canCreate}}>
           <Text style={S.primaryText}>{buttonLabel}</Text>
         </Pressable>

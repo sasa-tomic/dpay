@@ -11,6 +11,8 @@ import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
 import {TrustWalletFundButton} from './TrustWalletFundButton';
 import {IconCopy, IconRefresh} from './icons';
+import {InstrLine} from './InstrLine';
+import {M} from '../i18n';
 
 /**
  * Receive SOL or Solana-USDC — the device's native deposit address, rendered inline in the Receive
@@ -22,10 +24,10 @@ import {IconCopy, IconRefresh} from './icons';
  *   - 'ready'      → the address + QR (the ATA exists on-chain; USDC sent here can land).
  *   - 'absent'     → the one-tap setup card (SolanaAtaSetupCard) INSTEAD of the QR — the user is
  *                    not misled into sharing an address the Token program would reject.
- *   - 'checking'   → an honest "Checking your USDC account…" state (first poll; never claims
- *                    absence).
- *   - 'unverified' → "Couldn't check" + Retry (RPC down/error) — fail-closed, no QR, but NO
- *                    false "you don't have one" claim either.
+ *   - 'checking'   → an honest in-progress state (M.deposit.sol.checkingAta) on the first poll;
+ *                    never claims absence.
+ *   - 'unverified' → M.deposit.sol.ataUnverified + Retry (RPC down/error) — fail-closed, no QR, but
+ *                    NO false "you don't have one" claim either.
  *
  * Native SOL (`token === 'SOL'`, the default) never gates — the device key IS the account; it
  * always renders 'ready'. There is no relay/minter round-trip for either token: the address is
@@ -66,6 +68,8 @@ export function SolanaReceiveSheet({
 
   const copy = useCallback(async () => { await doCopy(address); }, [address, doCopy]);
   const isUsdc = token === 'USDC';
+  // The asset NAME, not copy — it names the token the sentences are about (never a ledger id).
+  const assetLabel = isUsdc ? 'USDC' : 'SOL';
   const status = isUsdc ? ataStatus : 'ready';
   const hasSol = solBalance != null && BigInt(solBalance) >= SOL_ATA_SETUP_MIN_LAMPORTS;
   // SOL balance unconfirmed (loading/unavailable): the setup card says "checking", never claims
@@ -80,7 +84,7 @@ export function SolanaReceiveSheet({
           <SolanaAtaSetupCard
             instrTestID="sol-receive-instructions"
             btnTestID="btn-sol-ata-create"
-            buttonLabel="Create USDC account"
+            buttonLabel={M.deposit.sol.createAtaLabel}
             hasSol={hasSol}
             checkingSol={checkingSol}
             busy={ataSetupBusy}
@@ -91,14 +95,12 @@ export function SolanaReceiveSheet({
         ) : status === 'checking' ? (
           <>
             <ActivityIndicator style={{marginTop: 24}} color={C.brand} />
-            <Text testID="sol-ata-checking" style={S.dim2}>Checking your USDC account…</Text>
+            <Text testID="sol-ata-checking" style={S.dim2}>{M.deposit.sol.checkingAta}</Text>
           </>
         ) : (
           <View testID="sol-ata-unverified" style={S.instrCard}>
-            <Text style={S.instrLine}>Couldn't check your USDC account.</Text>
-            <Text style={S.instrCustody}>
-              Your address is fine — we just can't reach Solana right now to confirm your USDC account on-chain. Check your connection and try again.
-            </Text>
+            <Text style={S.instrLine}>{M.deposit.sol.ataUnverified}</Text>
+            <Text style={S.instrCustody}>{M.deposit.sol.ataUnverifiedDetail}</Text>
           </View>
         )}
         {status === 'unverified' && onRetryAta ? (
@@ -107,20 +109,20 @@ export function SolanaReceiveSheet({
             style={S.primaryWide}
             onPress={onRetryAta}
             accessibilityRole="button"
-            accessibilityLabel="Retry checking USDC account"
-            accessibilityHint="Re-check whether your USDC account exists on-chain">
-            <Text style={S.primaryText}>Check again</Text>
+            accessibilityLabel={M.deposit.sol.retryAtaLabel}
+            accessibilityHint={M.deposit.sol.retryAtaHint}>
+            <Text style={S.primaryText}>{M.deposit.sol.checkAgain}</Text>
           </Pressable>
         ) : null}
         <Pressable
           testID="btn-sol-receive-copy"
           accessibilityRole="button"
-          accessibilityLabel="Back to request"
+          accessibilityLabel={M.deposit.sol.backToRequest}
           style={[S.primaryWide, S.depositCopy]}
           onPress={onClose}>
-          <Text style={S.primaryText}>Back to request</Text>
+          <Text style={S.primaryText}>{M.deposit.sol.backToRequest}</Text>
         </Pressable>
-        {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
+        {Platform.OS === 'web' ? <Text style={S.dim2}>{M.deposit.pressEsc}</Text> : null}
       </View>
     );
   }
@@ -128,18 +130,14 @@ export function SolanaReceiveSheet({
   return (
     <View style={S.sheetBody}>
       <View testID="sol-receive-instructions" style={S.instrCard}>
-        <Text style={S.instrLine}>
-          Send <Text style={S.instrAsset}>{isUsdc ? 'USDC' : 'SOL'}</Text> to your {isUsdc ? 'Solana USDC' : 'Solana'} address below.
-        </Text>
-        <Text style={S.instrCustody}>
-          dpay never holds your keys — {isUsdc ? 'USDC' : 'SOL'} lands directly in your wallet on confirmation.
-        </Text>
+        <InstrLine runs={M.deposit.sol.sendToAddress(assetLabel, isUsdc ? 'Solana USDC' : 'Solana')} />
+        <Text style={S.instrCustody}>{M.deposit.sol.custody(assetLabel)}</Text>
         {IS_SOLANA_DEVNET ? (
           // P4 pattern — '⚠' text glyph is a leading IconAlert (mirrors SolanaAtaSetupCard's
           // converted twin; testID on the wrapper).
           <View testID="sol-devnet-warning" style={S.warnRow}>
             <IconAlert size={14} color={C.warn} />
-            <Text style={S.warnRowText}>Connected to Solana devnet. Do NOT send mainnet {isUsdc ? 'USDC' : 'SOL'} here — it will not appear. Use devnet {isUsdc ? 'USDC' : 'SOL'} only.</Text>
+            <Text style={S.warnRowText}>{M.deposit.sol.devnetWarn(assetLabel)}</Text>
           </View>
         ) : null}
       </View>
@@ -155,32 +153,32 @@ export function SolanaReceiveSheet({
           line (never claim "waiting" on an unconfirmed state). */}
       {tokenZero ? (
         <>
-          <Text testID="sol-receive-waiting" style={S.dim2}>Waiting for your deposit · checks every few seconds</Text>
+          <Text testID="sol-receive-waiting" style={S.dim2}>{M.deposit.sol.waitingDeposit}</Text>
           {onRetryAta ? (
             <Pressable
               testID="btn-sol-receive-check"
               style={S.ghostBtn}
               onPress={onRetryAta}
               accessibilityRole="button"
-              accessibilityLabel="Check now"
-              accessibilityHint="Re-check your balance right now">
+              accessibilityLabel={M.deposit.checkNow}
+              accessibilityHint={M.deposit.sol.checkNowHint}>
               <IconRefresh size={16} color={C.sub}/>
-              <Text style={S.ghostBtnText}>Check now</Text>
+              <Text style={S.ghostBtnText}>{M.deposit.checkNow}</Text>
             </Pressable>
           ) : null}
         </>
       ) : (
-        <Text style={S.dim2}>Your balance updates automatically once the send confirms.</Text>
+        <Text style={S.dim2}>{M.deposit.sol.balanceAutoOnConfirm}</Text>
       )}
 
       <Pressable
         testID="btn-sol-receive-copy"
         accessibilityRole="button"
-        accessibilityLabel={copied === 'clipboard' ? 'Address copied' : copied === 'shared' ? 'Address shared' : `Copy ${isUsdc ? 'USDC' : 'SOL'} address`}
+        accessibilityLabel={copied === 'clipboard' ? M.deposit.addressCopied : copied === 'shared' ? M.deposit.addressShared : M.deposit.sol.copyAssetAddress(assetLabel)}
         style={[S.primaryWide, S.depositCopy]}
         onPress={copy}>
         <IconCopy size={18} color={C.brandInk}/>
-        <Text style={S.primaryText}>{copied === 'clipboard' ? 'Copied ✓' : copied === 'shared' ? 'Shared ✓' : 'Copy address'}</Text>
+        <Text style={S.primaryText}>{copied === 'clipboard' ? M.deposit.copied : copied === 'shared' ? M.deposit.shared : M.deposit.copyAddress}</Text>
       </Pressable>
 
       {/* Trust Wallet send deep link (2026-08-17 plan): mainnet only — devnet has no Trust
@@ -202,12 +200,12 @@ export function SolanaReceiveSheet({
           onPress={onReturn}
           accessibilityRole="button"
           accessibilityLabel={returnLabel}
-          accessibilityHint="Go back to the Pay tab with this asset selected">
+          accessibilityHint={M.deposit.sol.returnHint}>
           <Text style={S.ghostBtnText}>{returnLabel}</Text>
         </Pressable>
       ) : null}
 
-      {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
+      {Platform.OS === 'web' ? <Text style={S.dim2}>{M.deposit.pressEsc}</Text> : null}
     </View>
   );
 }

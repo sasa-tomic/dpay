@@ -15,6 +15,7 @@ import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {withTimeout} from '../lib/timeout';
 import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
 import {IconCheck, IconCopy} from './icons';
+import {M} from '../i18n';
 
 /**
  * Send SOL or USDC to a native Solana address (Phase 6 — asset-aware direct send). Mirrors
@@ -50,6 +51,8 @@ export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, so
   const decimals = token === 'SOL' ? SOL_DECIMALS : USDC_DECIMALS;
   const unit = token === 'SOL' ? SOL_UNIT : 'USDC';
   const isUsdc = token === 'USDC';
+  // Every amount on this sheet is the same token at the same precision — one formatter, one place.
+  const fmt = (rawAmount: string) => fmtAsset(rawAmount, decimals, unit);
 
   // Convert the entered amount to base units at the selected token's decimals. `cmpRaw` (BigInt) for
   // presence — never `>` on strings (lexicographic trap).
@@ -102,7 +105,7 @@ export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, so
         <SolanaAtaSetupCard
           instrTestID="sol-send-instructions"
           btnTestID="btn-sol-send-ata-create"
-          buttonLabel="Create my USDC account"
+          buttonLabel={M.withdraw.sol.createAtaLabel}
           hasSol={hasSol}
           checkingSol={checkingSol}
           busy={ataSetupBusy}
@@ -110,7 +113,7 @@ export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, so
           onCreateAta={onCreateAta}
           onShowSolAddress={onShowSolAddress}
         />
-        <Pressable testID="btn-sol-send-done" style={[S.primaryWide, S.depositCopy]} onPress={onClose} accessibilityRole="button" accessibilityLabel="Back to scan"><Text style={S.primaryText}>Back to scan</Text></Pressable>
+        <Pressable testID="btn-sol-send-done" style={[S.primaryWide, S.depositCopy]} onPress={onClose} accessibilityRole="button" accessibilityLabel={M.withdraw.sol.backToScan}><Text style={S.primaryText}>{M.withdraw.sol.backToScan}</Text></Pressable>
       </View>
     );
   }
@@ -120,66 +123,66 @@ export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, so
       {phase === 'done' && signature ? (
         <View style={S.centerAll}>
           <View style={S.check}><IconCheck size={44} color={C.brandInk}/></View>
-          <Text testID="sol-send-status" style={S.paidText}>Sent ✓</Text>
-          <Text style={S.paidSub}>{fmtAsset(raw, decimals, unit)}</Text>
-          <Text style={S.dim2}>transaction signature</Text>
+          <Text testID="sol-send-status" style={S.paidText}>{M.withdraw.sol.sent}</Text>
+          <Text style={S.paidSub}>{fmt(raw)}</Text>
+          <Text style={S.dim2}>{M.withdraw.sol.txSignature}</Text>
           <Text testID="sol-send-signature" selectable={true} style={S.sheetAddr}>{signature}</Text>
-          <Pressable testID="btn-sol-send-copy" style={S.primaryWide} onPress={copySig} accessibilityRole="button" accessibilityLabel="Copy transaction signature">
+          <Pressable testID="btn-sol-send-copy" style={S.primaryWide} onPress={copySig} accessibilityRole="button" accessibilityLabel={M.withdraw.sol.copySignatureLabel}>
             <IconCopy size={18} color={C.brandInk}/>
-            <Text style={S.primaryText}>{copied === 'clipboard' ? 'Copied ✓' : copied === 'shared' ? 'Shared ✓' : 'Copy signature'}</Text>
+            <Text style={S.primaryText}>{copied === 'clipboard' ? M.withdraw.copied : copied === 'shared' ? M.withdraw.shared : M.withdraw.sol.copySignature}</Text>
           </Pressable>
-          <Text style={S.dim2}>Your balance updates automatically.</Text>
-          <Pressable testID="btn-sol-send-done" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={onClose} accessibilityRole="button" accessibilityLabel="Done"><Text style={S.ghostBtnText}>Done</Text></Pressable>
+          <Text style={S.dim2}>{M.withdraw.balanceAuto}</Text>
+          <Pressable testID="btn-sol-send-done" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={onClose} accessibilityRole="button" accessibilityLabel={M.common.done}><Text style={S.ghostBtnText}>{M.common.done}</Text></Pressable>
         </View>
       ) : phase === 'submitting' ? (
         <View style={S.centerAll}>
           <ActivityIndicator color={C.brand} />
-          <Text style={S.dim2}>{`Sending ${fmtAsset(raw, decimals, unit)}…`}</Text>
-          <Text style={S.dim2}>Confirming on Solana — this can take up to a minute.</Text>
+          <Text style={S.dim2}>{M.withdraw.sol.sending(fmt(raw))}</Text>
+          <Text style={S.dim2}>{M.withdraw.sol.confirmingOnSolana}</Text>
         </View>
       ) : (
         <>
-          <Text style={S.label}>{`Send your ${unit} to a Solana address`}</Text>
-          <Text style={S.dim2}>{`Available: ${fmtAsset(balance, decimals, unit)}`}</Text>
+          <Text style={S.label}>{M.withdraw.sol.sendToSolana(unit)}</Text>
+          <Text style={S.dim2}>{M.withdraw.sol.available(fmt(balance))}</Text>
 
-          <Text style={S.inputLabel}>Solana address</Text>
+          <Text style={S.inputLabel}>{M.withdraw.sol.addressLabel}</Text>
           <TextInput
             testID="sol-send-address-input"
             style={S.withdrawAddrInput}
             value={address}
             onChangeText={setAddress}
-            placeholder="Receiver base58 address"
+            placeholder={M.withdraw.sol.addressPlaceholder}
             placeholderTextColor={C.sub2}
             autoCapitalize="none"
             autoCorrect={false}
           />
 
-          <Text style={S.inputLabel}>{`Amount (${unit})`}</Text>
+          <Text style={S.inputLabel}>{M.withdraw.amountLabel(unit)}</Text>
           <TextInput
             testID="sol-send-amount-input"
             style={S.withdrawAmtInput}
             value={amountStr}
             onChangeText={setAmountStr}
             keyboardType="decimal-pad"
-            placeholder={isUsdc ? '1.5' : '0.025'}
+            placeholder={isUsdc ? M.withdraw.sol.usdcAmountPlaceholder : M.withdraw.sol.solAmountPlaceholder}
             placeholderTextColor={C.sub2}
           />
 
-          {overBalance ? <Text style={S.warnNote}>{`More than your available ${fmtAsset(balance, decimals, unit)}.`}</Text> : null}
-          {badAddr ? <Text testID="sol-send-bad-addr" style={S.warnNote}>That doesn't look like a valid Solana address.</Text> : null}
+          {overBalance ? <Text style={S.warnNote}>{M.withdraw.overBalance(fmt(balance))}</Text> : null}
+          {badAddr ? <Text testID="sol-send-bad-addr" style={S.warnNote}>{M.withdraw.badAddress('Solana')}</Text> : null}
           {/* Known-zero SOL while sending USDC (2026-08-16 UX review finding 13): fees + a possible
               recipient-ATA creation are paid in SOL — say so BEFORE the user types an amount, so
               a funded-USDC/zero-SOL wallet learns the real constraint up front (honest, no block). */}
-          {isUsdc && !solChecking && solBalance === '0' ? <Text testID="sol-send-needs-sol" style={S.warnNote}>Sending USDC needs a little SOL in the wallet for network fees — add some first.</Text> : null}
+          {isUsdc && !solChecking && solBalance === '0' ? <Text testID="sol-send-needs-sol" style={S.warnNote}>{M.withdraw.sol.needsSol}</Text> : null}
 
           {(phase === 'form' || phase === 'error') && raw !== '0' ? (
             <View testID="sol-send-review" style={S.reviewCard}>
-              <Text style={S.reviewLabel}>Review send</Text>
-              <Text testID="sol-send-review-amount" style={S.reviewAmount}>{`Send ${fmtAsset(raw, decimals, unit)}`}</Text>
-              <Text style={S.reviewTo}>{`to ${address.trim() || '—'}`}</Text>
+              <Text style={S.reviewLabel}>{M.withdraw.sol.reviewTitle}</Text>
+              <Text testID="sol-send-review-amount" style={S.reviewAmount}>{M.withdraw.sol.sendAmount(fmt(raw))}</Text>
+              <Text style={S.reviewTo}>{M.withdraw.toDestination(address.trim() || '—')}</Text>
               {isUsdc ? (
                 <Text testID="sol-send-ata-note" style={S.dim2}>
-                  If they don't have a USDC account yet, this creates it for them (one-time ≈{fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT)} paid by you).
+                  {M.withdraw.sol.recipientAtaNote(fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT))}
                 </Text>
               ) : null}
             </View>
@@ -193,12 +196,12 @@ export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, so
             disabled={!canReview}
             onPress={confirm}
             accessibilityRole="button"
-            accessibilityLabel={`Confirm ${unit} send`}
+            accessibilityLabel={M.withdraw.sol.confirmLabel(unit)}
             accessibilityState={{disabled: !canReview}}>
-            <Text style={S.primaryText}>{raw !== '0' ? `Send ${fmtAsset(raw, decimals, unit)}` : 'Enter an amount'}</Text>
+            <Text style={S.primaryText}>{raw !== '0' ? M.withdraw.sol.sendAmount(fmt(raw)) : M.withdraw.enterAmount}</Text>
           </Pressable>
 
-          {Platform.OS === 'web' ? <Text style={S.dim2}>Press Esc to close</Text> : null}
+          {Platform.OS === 'web' ? <Text style={S.dim2}>{M.withdraw.pressEsc}</Text> : null}
         </>
       )}
     </>

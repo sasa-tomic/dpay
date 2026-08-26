@@ -7,6 +7,16 @@
     // `esnext` already, so this override is now a no-op (kept as defensive documentation — it only
     // relaxes which import syntax tsc accepts; Metro + Vite do their own transforming and do not
     // read this field). Pairs correctly with the base's `moduleResolution: "bundler"`.
-    "module": "esnext"
+    "module": "esnext",
+
+    // The i18n catalog chain (config/education.ts -> i18n/index.ts -> i18n/en.ts -> i18n/domains/*)
+    // carries explicit `.ts` extensions on its RUNTIME imports, because `e2e/tests/90-rehearsal.mjs`
+    // imports `app/config/education.ts` directly under plain Node (type-stripping, not Metro/Vite) to
+    // assert the rendered copy against its source. Node's ESM resolver does no extension guessing and
+    // no directory resolution, so `from '../i18n'` fails there with ERR_UNSUPPORTED_DIR_IMPORT while
+    // Metro and Vite resolve it happily — a break that only ever shows up in that one flow. Metro,
+    // Vite and jest all resolve the explicit form too, so it costs nothing. `--noEmit` is required
+    // for this flag and is exactly how `npm run typecheck` invokes tsc.
+    "allowImportingTsExtensions": true
   }
 }

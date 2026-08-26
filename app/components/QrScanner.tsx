@@ -2,6 +2,7 @@ import {useEffect, useRef, useState} from 'react';
 import {View, Text, Pressable, StyleSheet, AppState} from 'react-native';
 import {Camera, useCameraDevice, useCameraPermission, useCodeScanner} from 'react-native-vision-camera';
 import {S} from '../styles';
+import {M} from '../i18n';
 
 /** Reusable camera scanner (permission + focus-aware). Fires onScan once per mount. */
 export function QrScanner({onScan}: {onScan: (v: string) => void}) {
@@ -33,7 +34,7 @@ export function QrScanner({onScan}: {onScan: (v: string) => void}) {
         <Camera key={epoch} style={StyleSheet.absoluteFill} device={device} isActive={appActive} codeScanner={codeScanner} />
       ) : hasPermission ? (
         <View style={S.camPlaceholder}>
-          <Text style={S.dim2}>No camera found on this device.</Text>
+          <Text style={S.dim2}>{M.pay.noCameraFound}</Text>
         </View>
       ) : (
         // The WHOLE camera box is the tap target while permission is absent (defer-to-intent:
@@ -45,9 +46,9 @@ export function QrScanner({onScan}: {onScan: (v: string) => void}) {
         // deepest touchable (the button) wins. S.camPlaceholder keeps flex:1 so the box layout
         // is unchanged.
         <Pressable style={S.camPlaceholder} onPress={requestPermission}>
-          <Text style={S.reviewTo}>Point your camera at a payment code to pay</Text>
-          <Text style={S.dim2}>dpay uses your camera only to scan codes — never records or uploads.</Text>
-          <Pressable style={S.smallBtn} onPress={requestPermission} accessibilityRole="button" accessibilityLabel="Allow camera scan" accessibilityHint="Permission to use your camera so you can scan payment codes" accessibilityState={{disabled: false}}><Text style={S.smallBtnText}>Allow camera scan</Text></Pressable>
+          <Text style={S.reviewTo}>{M.pay.pointCamera}</Text>
+          <Text style={S.dim2}>{M.pay.cameraPrivacy}</Text>
+          <Pressable style={S.smallBtn} onPress={requestPermission} accessibilityRole="button" accessibilityLabel={M.pay.allowCameraScan} accessibilityHint={M.pay.allowCameraScanHint} accessibilityState={{disabled: false}}><Text style={S.smallBtnText}>{M.pay.allowCameraScan}</Text></Pressable>
         </Pressable>
       )}
     </View>

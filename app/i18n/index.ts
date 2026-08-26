@@ -13,7 +13,7 @@
  * interop. Call sites do not change when that happens.
  */
 import type {Messages} from './keys';
-import {en} from './en';
+import {en} from './en.ts';
 
 export type {Messages, NfcPhaseCopy, NfcPhaseKey} from './keys';
 

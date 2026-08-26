@@ -33,6 +33,7 @@ import {Animated, Easing, Pressable, SafeAreaView, ScrollView, StatusBar, Text, 
 import Svg, {Circle, G, Line, Path, Rect} from 'react-native-svg';
 import {C} from '../config/palette';
 import {S, isDark} from '../styles';
+import {M} from '../i18n';
 import {CAMPAIGN_LINE, JourneyHowItWorksTitle, WALKTHROUGH_SCENES, type WalkthroughVisual} from '../config/education';
 import {useReducedMotion} from '../hooks/useReducedMotion';
 import {useEscapeToClose} from '../hooks/useHotkeys';
@@ -357,7 +358,7 @@ function ExactAssetVisual({reduced}: {reduced: boolean}) {
     <View style={{flex: 1, justifyContent: 'center'}}>
       <View style={S.walkReqCard}>
         <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'}}>
-          <Text style={S.walkReqEyebrow}>Shop requests</Text>
+          <Text style={S.walkReqEyebrow}>{M.education.walkthrough.shopRequests}</Text>
           <Text style={[S.walkReqEyebrow, {letterSpacing: 0.5}]}>#0042</Text>
         </View>
 
@@ -411,7 +412,7 @@ const VISUALS: Record<WalkthroughVisual, React.FC<{reduced: boolean}>> = {
 };
 
 // The travel-document corner tag per scene (mono, on the plate).
-const STAGE_TAGS = ['01 — SIGNAL', '02 — KEY', '03 — ASSET'] as const;
+const STAGE_TAGS = M.education.walkthrough.stageTags;
 
 /** One scene: staggered header entrance (eyebrow → title → body), then the stage + its beat. */
 function Scene({index, reduced}: {index: number; reduced: boolean}) {
@@ -476,7 +477,7 @@ export function Walkthrough({onDone, onSkip, onClose, reducedMotion}: Walkthroug
             style={S.sheetClose}
             onPress={onClose}
             accessibilityRole="button"
-            accessibilityLabel="Close how dpay works"
+            accessibilityLabel={M.education.walkthrough.close}
             accessibilityState={{disabled: false}}>
             <IconClose size={18} color={C.sub} />
           </Pressable>
@@ -487,8 +488,8 @@ export function Walkthrough({onDone, onSkip, onClose, reducedMotion}: Walkthroug
             style={S.sheetClose}
             onPress={onSkip}
             accessibilityRole="button"
-            accessibilityLabel="Skip walkthrough"
-            accessibilityHint="Go straight to creating your wallet"
+            accessibilityLabel={M.education.walkthrough.skip}
+            accessibilityHint={M.education.walkthrough.skipHint}
             accessibilityState={{disabled: false}}>
             <IconClose size={18} color={C.sub} />
           </Pressable>
@@ -515,9 +516,9 @@ export function Walkthrough({onDone, onSkip, onClose, reducedMotion}: Walkthroug
               style={{position: 'absolute', left: 0, minHeight: 44, paddingHorizontal: 4, justifyContent: 'center'}}
               onPress={back}
               accessibilityRole="button"
-              accessibilityLabel="Previous scene"
+              accessibilityLabel={M.education.walkthrough.backLabel}
               accessibilityState={{disabled: false}}>
-              <Text style={S.walkBackText}>Back</Text>
+              <Text style={S.walkBackText}>{M.education.walkthrough.back}</Text>
             </Pressable>
           ) : null}
           <View testID="walkthrough-dots" style={{flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 34, justifyContent: 'center'}}>
@@ -531,10 +532,10 @@ export function Walkthrough({onDone, onSkip, onClose, reducedMotion}: Walkthroug
           style={S.primary}
           onPress={next}
           accessibilityRole="button"
-          accessibilityLabel={last ? 'Get started' : 'Next scene'}
-          accessibilityHint={last ? 'Continue to creating your wallet' : 'Show the next scene'}
+          accessibilityLabel={last ? M.education.walkthrough.getStarted : M.education.walkthrough.nextLabel}
+          accessibilityHint={last ? M.education.walkthrough.getStartedHint : M.education.walkthrough.nextHint}
           accessibilityState={{disabled: false}}>
-          <Text style={S.primaryText}>{last ? 'Get started' : 'Next'}</Text>
+          <Text style={S.primaryText}>{last ? M.education.walkthrough.getStarted : M.education.walkthrough.next}</Text>
         </Pressable>
       </View>
     </SafeAreaView>

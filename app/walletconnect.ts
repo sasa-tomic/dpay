@@ -35,6 +35,7 @@ import {EthereumProvider} from '@walletconnect/ethereum-provider';
 import '@walletconnect/react-native-compat'; // side-effect: RN polyfills for the WC SDK
 import {WALLETCONNECT_PROJECT_ID} from './config/constants';
 import type {Eip1193Provider} from './wallet';
+import {M} from './i18n';
 
 // The real EthereumProvider instance type (the package root exports a `const` value; the instance
 // type is derived via InstanceType — see walletconnect-fake.ts for the detailed rationale).
@@ -166,7 +167,7 @@ export async function pairWalletConnect(
     // (→ onUri(null)) when the session settles. No opts needed (the chains were set at init).
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(
-        () => reject(new Error('pairing timed out — no wallet scanned within 5 min')),
+        () => reject(new Error(M.errors.ethWallet.pairingTimedOut)),
         PAIR_TIMEOUT_MS,
       );
     });
@@ -174,7 +175,7 @@ export async function pairWalletConnect(
   } catch (e) {
     // Translate to a clear, typed pair-failure error so the sheet can surface friendly copy.
     throw new Error(
-      `WalletConnect pairing failed: ${e instanceof Error ? e.message : String(e)}`,
+      M.errors.ethWallet.pairingFailed(e instanceof Error ? e.message : String(e)),
     );
   } finally {
     // Always clean up listeners + the timeout timer (success OR failure) so a re-pair doesn't stack

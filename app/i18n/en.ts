@@ -11,12 +11,29 @@
  *   • Never surface raw ledger/token identifiers; money uses the backing native symbol.
  */
 import type {Messages} from './keys';
+import {depositEn, withdrawEn} from './domains/deposit.ts';
+import {errorsEn} from './domains/errors.ts';
+import {payEn, receiveEn} from './domains/pay.ts';
+import {onboardingEn, settingsEn} from './domains/settings.ts';
+import {educationEn, walletEn} from './domains/wallet.ts';
 
 export const en: Messages = {
   common: {
     done: 'Done',
     cancel: 'Cancel',
   },
+
+  settings: settingsEn,
+  onboarding: onboardingEn,
+
+  wallet: walletEn,
+  education: educationEn,
+
+  pay: payEn,
+  receive: receiveEn,
+
+  deposit: depositEn,
+  withdraw: withdrawEn,
 
   nfc: {
     reason: {
@@ -64,4 +81,6 @@ export const en: Messages = {
     blockhash: 'The network was too busy. Try again.',
     tapFailed: "Payment didn't complete — try again",
   },
+
+  errors: errorsEn,
 };

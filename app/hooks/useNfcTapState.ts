@@ -1,6 +1,7 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {NativeEventEmitter} from 'react-native';
 import {SOL_RECEIPT_WAIT_MS} from '../config/constants';
+import {M} from '../i18n';
 
 // The terminal + transitional phases both NFC tap components track. Structurally identical to
 // NfcPhaseName / SolNfcPhaseName (plus 'error') — the IC and SOL transports share the
@@ -174,7 +175,7 @@ export function useNfcTapState<E>(args: {
           adapterRef.current.onSettling?.();
           if (waitsForReceipt && !settleTimer.current) {
             settleTimer.current = setTimeout(() => {
-              finalize('pending', 'Couldn’t confirm — check your balance when back online');
+              finalize('pending', M.errors.tap.couldntConfirmOffline);
             }, receiptWaitMs);
           }
         }

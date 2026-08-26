@@ -24,6 +24,7 @@ import {SolanaWithdrawSheet} from './SolanaWithdrawSheet';
 import {useReportLock} from '../hooks/useReportLock';
 import {useShareFeedback, shareConfirmLabel} from '../hooks/useShareFeedback';
 import {CoachTip} from './CoachTip';
+import {M} from '../i18n';
 
 /**
  * SolPayMode — the payer-side offline-pay component for the v2 recent-blockhash SOL rail.
@@ -71,8 +72,8 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
       testID="pay-mode-toggle"
       value={subMode}
       onChange={(v) => onSubModeChange(v as 'scan' | 'send')}
-      left={{label: 'Scan to pay', value: 'scan', testID: 'btn-pay-scan'}}
-      right={{label: 'Send to address', value: 'send', testID: 'btn-pay-send'}}
+      left={{label: M.pay.scanToPay, value: 'scan', testID: 'btn-pay-scan'}}
+      right={{label: M.pay.sendToAddress, value: 'send', testID: 'btn-pay-send'}}
     />
   );
 
@@ -94,13 +95,13 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
           {toggle}
           <FundFirstPanel
             testID="sol-send-fund"
-            title={isSol ? 'Add SOL to send' : 'Add USDC to send'}
+            title={M.pay.fundTitle(isSol ? 'SOL' : 'USDC', 'send')}
             body={isSol
-              ? 'This wallet has no SOL yet. Send SOL to your address and you can send right away.'
-              : 'Send USDC (Solana) to your USDC address. Keep a little SOL in the wallet for network fees.'}
-            primaryLabel={isSol ? 'Show my SOL address' : 'Show my USDC address'}
+              ? M.pay.fundBody('SOL', 'send')
+              : M.pay.fundBodyUsdc}
+            primaryLabel={M.pay.showMyAddress(isSol ? 'SOL' : 'USDC')}
             onPrimary={isSol ? onShowSolAddress : onShowUsdcAddress}
-            secondaryLabel={!isSol && solZero ? 'Show my SOL address' : undefined}
+            secondaryLabel={!isSol && solZero ? M.pay.showMyAddress('SOL') : undefined}
             onSecondary={!isSol && solZero ? onShowSolAddress : undefined}
             onRecheck={onRecheckBalances}
             recheckBusy={recheckBusy}
@@ -140,7 +141,7 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
       const r = decodeSolReq(raw);
       if (isSolReqV2Expired(r)) {
         setReq(null);
-        setErr('This payment request has expired. Ask the merchant for a fresh QR.');
+        setErr(M.pay.solRequestExpired);
         return;
       }
       setReq(r);
@@ -151,7 +152,7 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
       // Same honest-contract split as PayMode's decode failure: the user gets friendly copy (never
       // the raw codec error), the dev cause goes to the console.
       console.warn('solpay decode failed:', e);
-      setErr('This isn\'t a dpay payment code');
+      setErr(M.pay.notAPaymentCode);
     }
   }
 
@@ -196,13 +197,13 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
           {toggle}
           <FundFirstPanel
             testID="sol-pay-fund"
-            title={isSol ? 'Add SOL to pay' : 'Add USDC to pay'}
+            title={M.pay.fundTitle(isSol ? 'SOL' : 'USDC', 'pay')}
             body={isSol
-              ? 'This wallet has no SOL yet. Send SOL to your address and you can pay right away.'
-              : 'Send USDC (Solana) to your USDC address. Keep a little SOL in the wallet for network fees.'}
-            primaryLabel={isSol ? 'Show my SOL address' : 'Show my USDC address'}
+              ? M.pay.fundBody('SOL', 'pay')
+              : M.pay.fundBodyUsdc}
+            primaryLabel={M.pay.showMyAddress(isSol ? 'SOL' : 'USDC')}
             onPrimary={isSol ? onShowSolAddress : onShowUsdcAddress}
-            secondaryLabel={!isSol && solZero ? 'Show my SOL address' : undefined}
+            secondaryLabel={!isSol && solZero ? M.pay.showMyAddress('SOL') : undefined}
             onSecondary={!isSol && solZero ? onShowSolAddress : undefined}
             onRecheck={onRecheckBalances}
             recheckBusy={recheckBusy}
@@ -221,7 +222,7 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
           <SolanaAtaSetupCard
             instrTestID="sol-pay-ata-instructions"
             btnTestID="btn-sol-pay-ata-create"
-            buttonLabel="Create my USDC account"
+            buttonLabel={M.pay.createUsdcAccount}
             hasSol={hasSol}
             checkingSol={solChecking}
             busy={ataSetupBusy}
@@ -254,7 +255,7 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
                   UNTOUCHED (the 0×0 camBox collapse class is gated by `just campreview`). */}
               <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 8}}>
                 <IconScan size={18} color={C.sub}/>
-                <Text style={[S.dim2, {marginTop: 0}]}>Scan the merchant's payment code to pay offline.</Text>
+                <Text style={[S.dim2, {marginTop: 0}]}>{M.pay.solScanHint}</Text>
               </View>
               {scanArmed ? (
                 <QrScanner onScan={onScan} />
@@ -264,11 +265,11 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
                     style={S.primary}
                     onPress={() => setScanArmed(true)}
                     accessibilityRole="button"
-                    accessibilityLabel="Pay now"
-                    accessibilityHint="Turn on the camera and tap-to-pay so you can pay a merchant"
+                    accessibilityLabel={M.pay.payNowA11y}
+                    accessibilityHint={M.pay.payNowHint}
                     testID="btn-sol-start-scan"
                   >
-                    <Text style={S.primaryText}>Pay Now</Text>
+                    <Text style={S.primaryText}>{M.pay.payNow}</Text>
                   </Pressable>
                 </>
               )}
@@ -287,21 +288,21 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
     return (
       <View style={S.center}>
         {toggle}
-        <Text style={S.label}>Paying</Text>
-        <Text testID="sol-pay-amount" style={S.reviewAmount}>{`Pay ${fmtAsset(req.amt, decimals, unit)}`}</Text>
-        <Text style={S.reviewTo}>{`to ${req.name || req.to}`}</Text>
+        <Text style={S.label}>{M.pay.paying}</Text>
+        <Text testID="sol-pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtAsset(req.amt, decimals, unit))}</Text>
+        <Text style={S.reviewTo}>{M.pay.toWho(req.name || req.to)}</Text>
         {/* U-F5 twin of PayMode's review-payee: a merchant name alone is not verifiable — show the
             short destination under it. Without a name the primary line already carries the full
             base58 address (more precise than a short form), so no duplicate line. */}
         {req.name ? <Text testID="sol-pay-payee" style={S.dim2}>{short(req.to)}</Text> : null}
         {req.memo ? <Text testID="sol-pay-memo" style={S.dim2}>{req.memo}</Text> : null}
-        <Text style={S.dim2}>This signs offline — the merchant settles when they submit it.</Text>
+        <Text style={S.dim2}>{M.pay.signsOffline}</Text>
         {err ? <Text testID="sol-pay-err" style={S.err}>{err}</Text> : null}
         {busy ? (
-          <Text style={S.dim2}>Signing…</Text>
+          <Text style={S.dim2}>{M.pay.signing}</Text>
         ) : (
-          <Pressable testID="btn-sol-pay-cancel" style={S.secondaryBtn} onPress={reset} accessibilityRole="button" accessibilityLabel="Cancel" accessibilityState={{disabled: false}}>
-            <Text style={S.secondaryBtnText}>Cancel</Text>
+          <Pressable testID="btn-sol-pay-cancel" style={S.secondaryBtn} onPress={reset} accessibilityRole="button" accessibilityLabel={M.common.cancel} accessibilityState={{disabled: false}}>
+            <Text style={S.secondaryBtnText}>{M.common.cancel}</Text>
           </Pressable>
         )}
       </View>
@@ -312,14 +313,14 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
     return (
       <View style={S.center}>
         {toggle}
-        <Text style={S.label}>Show this to the merchant</Text>
+        <Text style={S.label}>{M.pay.showThisToMerchant}</Text>
         <View testID="sol-pay-qr" style={S.qrCard}><QrCode value={solpayUri} size={QR_SIZE} ecl="L" /></View>
-        <Text style={S.amountBig}>{`${fmtAsset(req!.amt, decimals, unit)} to ${req!.name || req!.to}`}</Text>
+        <Text style={S.amountBig}>{M.pay.amountToWho(fmtAsset(req!.amt, decimals, unit), req!.name || req!.to)}</Text>
         {/* U-F5: the sync auto-sign batch-skips the sign-status surface (straight to qr), so the
             short destination must live HERE — a merchant name alone is not verifiable. */}
         {req!.name ? <Text testID="sol-pay-payee" style={S.dim2}>{short(req!.to)}</Text> : null}
-        <Text style={S.badgeOk}>signed offline ✓</Text>
-        <Text style={S.qrHint}>Offline — the merchant settles this when they submit it. You'll see it on your balance once it's confirmed.</Text>
+        <Text style={S.badgeOk}>{M.pay.signedOffline}</Text>
+        <Text style={S.qrHint}>{M.pay.solOfflineSettles}</Text>
         {/* Trip Ready J4 — the SOL QR hand-off is ALWAYS offline-pending (no online branch), and
             the offlineQr truth ("the receiver's connection settles it") is exactly what this
             phase already says. Reading-zone mount (under the status line, above the confirm row).
@@ -331,18 +332,18 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
             style={S.paidBtn}
             onPress={() => { setPhase('paid'); }}
             accessibilityRole="button"
-            accessibilityLabel="Handed to merchant"
-            accessibilityHint="Mark the signed payment as handed off; your balance updates when the merchant settles"
+            accessibilityLabel={M.pay.handedToMerchant}
+            accessibilityHint={M.pay.handedOffHint}
             accessibilityState={{disabled: false}}>
-            <Text style={S.paidBtnText}>Handed to merchant</Text>
+            <Text style={S.paidBtnText}>{M.pay.handedToMerchant}</Text>
           </Pressable>
-          <Pressable testID="btn-sol-pay-discard" style={S.notPaidBtn} onPress={reset} accessibilityRole="button" accessibilityLabel="Cancel" accessibilityState={{disabled: false}}>
-            <Text style={S.notPaidText}>Cancel</Text>
+          <Pressable testID="btn-sol-pay-discard" style={S.notPaidBtn} onPress={reset} accessibilityRole="button" accessibilityLabel={M.common.cancel} accessibilityState={{disabled: false}}>
+            <Text style={S.notPaidText}>{M.common.cancel}</Text>
           </Pressable>
         </View>
-        <Pressable style={S.ghostBtn} onPress={() => share(solpayUri)} accessibilityRole="button" accessibilityLabel="Share signed payment" accessibilityState={{disabled: false}}>
+        <Pressable style={S.ghostBtn} onPress={() => share(solpayUri)} accessibilityRole="button" accessibilityLabel={M.pay.shareSignedPayment} accessibilityState={{disabled: false}}>
           <IconShare size={16} color={C.sub}/>
-          <Text style={S.ghostBtnText}>{shared ? shareConfirmLabel('Copied ✓') : 'Share signed code'}</Text>
+          <Text style={S.ghostBtnText}>{shared ? shareConfirmLabel(M.pay.copied) : M.pay.shareSignedCode}</Text>
         </Pressable>
       </View>
     );
@@ -350,23 +351,23 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
 
   // phase === 'paid'. `req` may be null if the payment was via NFC (the autoSign decoded the
   // request internally; SolPayMode's `req` state is only set on QR scan).
-  const paidAmt = req ? fmtAsset(req.amt, decimals, unit) : '';
-  const paidTo = req ? `to ${req.name || req.to} · ` : '';
+  const paidAmt = req ? fmtAsset(req.amt, decimals, unit) : null;
+  const paidTo = req ? req.name || req.to : null;
   return (
     <View style={S.center}>
       {toggle}
       {/* P3 — SVG mark (was a '⋯' text glyph): the SOL pay outcome is ALWAYS the honest pending
           hand-off, so the clock reads on the warn-tinted checkAlready circle. */}
       <View style={[S.check, S.checkAlready]}><IconClock size={44} color={C.brandInk}/></View>
-      <Text testID="sol-pay-status" style={[S.paidText, S.alreadyText]}>{paidAmt ? `Sent ${paidAmt}` : 'Sent'}</Text>
-      <Text style={S.paidSub}>{`${paidTo}awaiting the merchant's confirmation`}</Text>
+      <Text testID="sol-pay-status" style={[S.paidText, S.alreadyText]}>{M.pay.sent(paidAmt)}</Text>
+      <Text style={S.paidSub}>{M.pay.solAwaiting(paidTo)}</Text>
       {/* Trip Ready J4 — the SOL paid phase is ALWAYS the honest pending hand-off, so the
           pendingOutcome truth applies on every visit until dismissed. Reading-zone mount (under
           the headline it explains). Same seen-key as IC. */}
       <CoachTip tipKey="pendingOutcome" />
-      <Text style={S.dim2}>Your balance updates when the merchant settles this on-chain.</Text>
-      <Pressable testID="btn-sol-pay-done" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={reset} accessibilityRole="button" accessibilityLabel="New payment" accessibilityState={{disabled: false}}>
-        <Text style={S.ghostBtnText}>New payment</Text>
+      <Text style={S.dim2}>{M.pay.balanceUpdatesOnSettle}</Text>
+      <Pressable testID="btn-sol-pay-done" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={reset} accessibilityRole="button" accessibilityLabel={M.pay.newPayment} accessibilityState={{disabled: false}}>
+        <Text style={S.ghostBtnText}>{M.pay.newPayment}</Text>
       </Pressable>
     </View>
   );

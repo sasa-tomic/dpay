@@ -34,6 +34,7 @@ import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {useReportLock} from '../hooks/useReportLock';
 import {IconCheck, IconChevronDown, IconClock, IconCopy, IconQr} from './icons';
 import {CoachTip} from './CoachTip';
+import {M} from '../i18n';
 
 // Twin of ReceiveMode's memoInputStyle — Traveler Paper input idiom (white field, hairline border,
 // Space Grotesk), kept inline + identical so the IC and SOL Receive forms stay pixel-twins.
@@ -124,8 +125,8 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
       testID="receive-mode-toggle"
       value={subMode}
       onChange={(v) => onSubModeChange(v as 'request' | 'address')}
-      left={{label: 'Request payment', value: 'request', testID: 'btn-receive-request'}}
-      right={{label: 'My address', value: 'address', testID: 'btn-receive-address'}}
+      left={{label: M.receive.requestPayment, value: 'request', testID: 'btn-receive-request'}}
+      right={{label: M.receive.myAddress, value: 'address', testID: 'btn-receive-address'}}
     />
   );
 
@@ -197,7 +198,7 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
   // signature-verify internally (no separate pre-check needed).
   async function onSignedQr(raw: string) {
     setScanning(false);
-    if (!reqSnapshot || !reqUri) { setErr('No open request.'); return; }
+    if (!reqSnapshot || !reqUri) { setErr(M.receive.noOpenRequest); return; }
     setBusy(true);
     setErr(null);
     const {signal, cancel} = withTimeout(SOL_BROADCAST_TIMEOUT_MS);
@@ -218,12 +219,12 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
       } else if (receipt.status === RECEIPT_REJECTED) {
         await clearSolMerchantState(identity.publicHex);
         setReconcile(null);
-        setErr('Payment rejected — the payer may have insufficient balance or the blockhash expired.');
+        setErr(M.receive.paymentRejectedDetail);
       } else {
         // UNREACHABLE — the tx MAY still land. Keep the accepted tx for reconciliation (invariant #12).
         await saveSolMerchantState(identity.publicHex, {req: reqSnapshot, uri: reqUri, acceptedSignature: acceptedSig, acceptedTx: acceptedTxStr, outcome: 'unknown'});
         setReconcile({acceptedSig, acceptedTx: acceptedTxStr});
-        setErr("Couldn't confirm — the payment may still settle. Check your balance shortly or retry.");
+        setErr(M.receive.couldNotConfirmMaySettle);
       }
     } catch (e: unknown) {
       setErr(friendlySolError(e instanceof Error ? e.message : String(e)));
@@ -250,7 +251,7 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
     const {signal, cancel} = withTimeout(SOL_BROADCAST_TIMEOUT_MS);
     try {
       const txBytes = base64UrlToBytes(reconcile.acceptedTx);
-      if (!txBytes) { setErr('Saved payment data is corrupt.'); await clearSolMerchantState(identity.publicHex); setReconcile(null); reset(); return; }
+      if (!txBytes) { setErr(M.receive.savedDataCorrupt); await clearSolMerchantState(identity.publicHex); setReconcile(null); reset(); return; }
       const solpay: SolPayV2 = {v: 2, rid: reqSnapshot.rid, tx: txBytes};
       const receipt = await broadcastSolPayment(reqSnapshot, reqUri, solpay, signal);
       if (receipt.status === RECEIPT_SETTLED) {
@@ -262,9 +263,9 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
       } else if (receipt.status === RECEIPT_REJECTED) {
         await clearSolMerchantState(identity.publicHex);
         setReconcile(null);
-        setErr('Payment rejected.');
+        setErr(M.receive.paymentRejected);
       } else {
-        setErr("Still can't confirm — the payment may still settle. Try again later.");
+        setErr(M.receive.stillCannotConfirm);
       }
     } catch (e: unknown) {
       setErr(friendlySolError(e instanceof Error ? e.message : String(e)));
@@ -285,19 +286,19 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
       <View style={S.center}>
         {toggle}
         <View style={S.check}><IconCheck size={44} color={C.brandInk}/></View>
-        <Text testID="sol-req-status" style={S.paidText}>{`Received ${fmtAsset(result.amount, result.cur === 'USDC' ? USDC_DECIMALS : SOL_DECIMALS, result.cur === 'USDC' ? 'USDC' : SOL_UNIT)}`}</Text>
+        <Text testID="sol-req-status" style={S.paidText}>{M.receive.receivedAmount(fmtAsset(result.amount, result.cur === 'USDC' ? USDC_DECIMALS : SOL_DECIMALS, result.cur === 'USDC' ? 'USDC' : SOL_UNIT))}</Text>
         {result.sig ? (
           <>
-            <Text style={S.dim2}>transaction signature</Text>
+            <Text style={S.dim2}>{M.receive.transactionSignature}</Text>
             <Text testID="sol-req-sig" selectable={true} style={S.sheetAddr}>{result.sig}</Text>
-            <Pressable testID="btn-sol-req-copy" style={S.primaryWide} onPress={copySig} accessibilityRole="button" accessibilityLabel="Copy transaction signature">
+            <Pressable testID="btn-sol-req-copy" style={S.primaryWide} onPress={copySig} accessibilityRole="button" accessibilityLabel={M.receive.copySignatureA11y}>
               <IconCopy size={18} color={C.brandInk}/>
-              <Text style={S.primaryText}>{copied === 'clipboard' ? 'Copied ✓' : copied === 'shared' ? 'Shared ✓' : 'Copy signature'}</Text>
+              <Text style={S.primaryText}>{copied === 'clipboard' ? M.pay.copied : copied === 'shared' ? M.receive.sharedConfirm : M.receive.copySignature}</Text>
             </Pressable>
           </>
         ) : null}
-        <Pressable testID="btn-sol-req-done" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={reset} accessibilityRole="button" accessibilityLabel="New request" accessibilityState={{disabled: false}}>
-          <Text style={S.ghostBtnText}>New request</Text>
+        <Pressable testID="btn-sol-req-done" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={reset} accessibilityRole="button" accessibilityLabel={M.receive.newRequest} accessibilityState={{disabled: false}}>
+          <Text style={S.ghostBtnText}>{M.receive.newRequest}</Text>
         </Pressable>
       </View>
     );
@@ -320,14 +321,14 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
           <>
             {reconcile ? (
               <View testID="sol-req-reconcile" style={S.reviewCard}>
-                <Text style={S.reviewLabel}>A payment is being confirmed</Text>
-                <Text style={S.warnNote}>A broadcast was interrupted. The payment may have settled — retry to check.</Text>
+                <Text style={S.reviewLabel}>{M.receive.paymentBeingConfirmed}</Text>
+                <Text style={S.warnNote}>{M.receive.broadcastInterrupted}</Text>
                 {err ? <Text testID="sol-req-err" style={S.err}>{err}</Text> : null}
                 {busy ? (
                   <ActivityIndicator color={C.brand} />
                 ) : (
-                  <Pressable testID="btn-sol-req-retry" style={S.primaryWide} onPress={rebroadcast} accessibilityRole="button" accessibilityLabel="Retry broadcast">
-                    <Text style={S.primaryText}>Retry broadcast</Text>
+                  <Pressable testID="btn-sol-req-retry" style={S.primaryWide} onPress={rebroadcast} accessibilityRole="button" accessibilityLabel={M.receive.retryBroadcast}>
+                    <Text style={S.primaryText}>{M.receive.retryBroadcast}</Text>
                   </Pressable>
                 )}
               </View>
@@ -335,51 +336,51 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
             {!scanning && !busy ? (
               <>
                 <View style={S.nfcHintRow}>
-                  <Text style={S.nfcHintLabel}>Show this to the payer{nfcReady ? ' · or let them tap' : ''}</Text>
+                  <Text style={S.nfcHintLabel}>{M.receive.showToPayer(nfcReady ? 'tap' : 'none')}</Text>
                 </View>
                 <View testID="sol-req-qr" style={S.qrCard}><QrCode value={reqUri} size={QR_SIZE_SMALL} ecl="M" /></View>
                 <Text style={S.amountBig}>{fmtAsset(reqSnapshot!.amt, decimals, unit)}</Text>
                 {(() => {
                   const remaining = (reqSnapshot?.exp ?? 0) - now;
-                  if (remaining <= 0) return <Text style={S.qrExpired}>Expired — make a new request</Text>;
+                  if (remaining <= 0) return <Text style={S.qrExpired}>{M.receive.expiredMakeNew}</Text>;
                   const m = Math.floor(remaining / 60);
                   const s = remaining % 60;
                   // P3 — a small clock icon leads the calm validity line (QR-card polish).
                   if (m >= 1) return (
                     <View style={{flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6}}>
                       <IconClock size={14} color={C.sub}/>
-                      <Text style={[S.qrExpiry, {marginTop: 0}]}>Valid for ~{m} min</Text>
+                      <Text style={[S.qrExpiry, {marginTop: 0}]}>{M.receive.validForMin(m)}</Text>
                     </View>
                   );
-                  return <Text style={S.qrExpiryWarn}>Expires in 0:{s.toString().padStart(2, '0')}</Text>;
+                  return <Text style={S.qrExpiryWarn}>{M.receive.expiresIn(s.toString().padStart(2, '0'))}</Text>;
                 })()}
-                <Text style={S.qrHint}>Waiting for the payer to sign offline…</Text>
+                <Text style={S.qrHint}>{M.receive.waitingForSign}</Text>
                 {/* Trip Ready J4 — the same receiveRequest truth ("your connection confirms"):
                     the merchant's own connection scans + settles the payer's signed payment.
                     Reading-zone mount (after the status line, before the action cluster) — same
                     placement decision as the IC ReceiveMode. */}
                 <CoachTip tipKey="receiveRequest" />
-                <Pressable style={S.ghostBtn} onPress={() => setScanning(true)} accessibilityRole="button" accessibilityLabel="Scan the payer's signed code" accessibilityHint="Scan the payer's signed QR to submit their offline payment" accessibilityState={{disabled: false}}>
+                <Pressable style={S.ghostBtn} onPress={() => setScanning(true)} accessibilityRole="button" accessibilityLabel={M.receive.scanPayerSignedCode} accessibilityHint={M.receive.scanPayerSignedQrHint} accessibilityState={{disabled: false}}>
                   <IconQr size={16} color={C.sub}/>
-                  <Text style={S.ghostBtnText}>Scan the payer's signed code</Text>
+                  <Text style={S.ghostBtnText}>{M.receive.scanPayerSignedCode}</Text>
                 </Pressable>
                 {err && !reconcile ? <Text testID="sol-req-err" style={S.err}>{err}</Text> : null}
-                <Pressable style={[S.ghostBtn, S.ghostBtnMuted]} onPress={reset} accessibilityRole="button" accessibilityLabel="New request" accessibilityState={{disabled: false}}>
-                  <Text style={S.ghostBtnText}>New request</Text>
+                <Pressable style={[S.ghostBtn, S.ghostBtnMuted]} onPress={reset} accessibilityRole="button" accessibilityLabel={M.receive.newRequest} accessibilityState={{disabled: false}}>
+                  <Text style={S.ghostBtnText}>{M.receive.newRequest}</Text>
                 </Pressable>
               </>
             ) : busy ? (
               <>
                 <ActivityIndicator color={C.brand} />
-                <Text style={S.dim2}>Broadcasting on Solana — this can take up to a minute.</Text>
+                <Text style={S.dim2}>{M.receive.broadcasting}</Text>
               </>
             ) : (
               <>
                 <QrScanner onScan={onSignedQr} />
-                <Text style={S.dim2}>Scan the payer's signed code</Text>
+                <Text style={S.dim2}>{M.receive.scanPayerSignedCode}</Text>
                 {err ? <Text testID="sol-req-err" style={S.err}>{err}</Text> : null}
-                <Pressable style={[S.ghostBtn, S.ghostBtnMuted]} onPress={() => setScanning(false)} accessibilityRole="button" accessibilityLabel="Back" accessibilityState={{disabled: false}}>
-                  <Text style={S.ghostBtnText}>Back</Text>
+                <Pressable style={[S.ghostBtn, S.ghostBtnMuted]} onPress={() => setScanning(false)} accessibilityRole="button" accessibilityLabel={M.receive.back} accessibilityState={{disabled: false}}>
+                  <Text style={S.ghostBtnText}>{M.receive.back}</Text>
                 </Pressable>
               </>
             )}
@@ -396,15 +397,15 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
       {/* Trip Ready J4 (UX hardening 2026-08-23) — entry-form mount, same one-time marker as the
           IC ReceiveMode (was: only visible after pressing Request). */}
       <CoachTip tipKey="receiveRequest" />
-      <Text style={S.label}>Amount to receive</Text>
+      <Text style={S.label}>{M.receive.amountToReceive}</Text>
       <View style={S.amountRow}>
         <Pressable
           testID="sol-req-prefix"
           style={S.prefixBtn}
           onPress={() => setPickOpen(true)}
           accessibilityRole="button"
-          accessibilityLabel={`Receive in ${selectedToken}`}
-          accessibilityHint="Choose which asset the payer will send you"
+          accessibilityLabel={M.receive.receiveIn(selectedToken)}
+          accessibilityHint={M.receive.chooseAssetHint}
           accessibilityState={{disabled: false}}>
           <Text style={S.currency}>{selectedToken === 'SOL' ? '◎' : '$'}</Text>
           <IconChevronDown size={20} color={C.sub}/>
@@ -415,9 +416,9 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
           value={amount}
           onChangeText={setAmount}
           keyboardType="decimal-pad"
-          placeholder="0.025"
+          placeholder={M.receive.solAmountPlaceholder}
           placeholderTextColor={C.sub}
-          accessibilityLabel="Amount to receive"
+          accessibilityLabel={M.receive.amountToReceive}
         />
       </View>
       <TextInput
@@ -425,9 +426,9 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
         style={memoInputStyle}
         value={memo}
         onChangeText={setMemo}
-        placeholder="Add a note (optional)"
+        placeholder={M.receive.memoPlaceholder}
         placeholderTextColor={C.sub}
-        accessibilityLabel="Memo"
+        accessibilityLabel={M.receive.memo}
         maxLength={32}
       />
       {/* 2026-08-14 audit: a USDC request whose settlement is doomed must not be creatable. If the
@@ -439,7 +440,7 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
         <SolanaAtaSetupCard
           instrTestID="sol-req-ata"
           btnTestID="btn-sol-req-ata-create"
-          buttonLabel="Create my USDC account"
+          buttonLabel={M.pay.createUsdcAccount}
           hasSol={solBalance != null && BigInt(solBalance) >= SOL_ATA_SETUP_MIN_LAMPORTS}
           checkingSol={solBalance == null}
           busy={ataSetupBusy}
@@ -448,11 +449,11 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
           onShowSolAddress={onShowSolAddress}
         />
       ) : null}
-      {!solRpc ? <Text style={S.warnNote}>Solana is offline — go online to create a payment request.</Text> : null}
+      {!solRpc ? <Text style={S.warnNote}>{M.receive.solanaOffline}</Text> : null}
       {busy ? (
         <>
           <ActivityIndicator color={C.brand} />
-          <Text style={S.dim2}>Creating request…</Text>
+          <Text style={S.dim2}>{M.receive.creatingRequest}</Text>
         </>
       ) : null}
       {err ? <Text style={S.err}>{err}</Text> : null}
@@ -466,10 +467,10 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
             disabled={blocked}
             onPress={makeRequest}
             accessibilityRole="button"
-            accessibilityLabel="Request"
-            accessibilityHint="Show your QR code so the payer can scan it to pay you"
+            accessibilityLabel={M.receive.request}
+            accessibilityHint={M.receive.requestHint}
             accessibilityState={{disabled: blocked}}>
-            <Text style={S.primaryText}>{busy ? 'Creating…' : 'Request'}</Text>
+            <Text style={S.primaryText}>{busy ? M.receive.creating : M.receive.request}</Text>
           </Pressable>
         );
       })()}

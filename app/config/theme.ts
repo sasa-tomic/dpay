@@ -11,6 +11,7 @@
  * persistence + the applyPalette call.
  */
 import type {ColorSchemeName} from 'react-native';
+import {M} from '../i18n';
 
 export type ThemeOverride = 'light' | 'dark';
 
@@ -46,10 +47,10 @@ export function themePersistValue(t: ThemeOverride | null): string {
 
 /** Display label for the Settings segmented control (names the CHOICE, incl. Auto). */
 export function choiceLabel(c: ThemeOverride | null): string {
-  return c === 'light' ? 'Light' : c === 'dark' ? 'Dark' : 'Auto';
+  return c === 'light' ? M.settings.theme.light : c === 'dark' ? M.settings.theme.dark : M.settings.theme.auto;
 }
 
 /** Display label for a resolved mode (a11y labels). */
 export function themeLabel(t: ThemeOverride): string {
-  return t === 'light' ? 'Light' : 'Dark';
+  return t === 'light' ? M.settings.theme.light : M.settings.theme.dark;
 }

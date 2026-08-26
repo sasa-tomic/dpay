@@ -21,6 +21,12 @@
  * rules, what to say. Do not reach for a plural library.
  */
 
+import type {DepositMessages, WithdrawMessages} from './domains/deposit';
+import type {ErrorMessages} from './domains/errors';
+import type {PayMessages, ReceiveMessages} from './domains/pay';
+import type {OnboardingMessages, SettingsMessages} from './domains/settings';
+import type {EducationMessages, WalletMessages} from './domains/wallet';
+
 /** Title + sub-line for one NFC tap phase, as rendered by the shared tap status view. */
 export type NfcPhaseCopy = {title: string; sub: string};
 
@@ -35,6 +41,22 @@ export type Messages = {
     done: string;
     cancel: string;
   };
+
+  /** The Settings sheet, and the create/restore/backup onboarding flow. */
+  settings: SettingsMessages;
+  onboarding: OnboardingMessages;
+
+  /** The wallet shell + asset surfaces, and everything that teaches the dpay model. */
+  wallet: WalletMessages;
+  education: EducationMessages;
+
+  /** The two payment screens on both rails: scan/sign/hand off, and request/scan/confirm. */
+  pay: PayMessages;
+  receive: ReceiveMessages;
+
+  /** Money in and money out: the "My address" deposit sheets and the "Send to address" sheets. */
+  deposit: DepositMessages;
+  withdraw: WithdrawMessages;
 
   nfc: {
     /** Why tap-to-pay is unavailable. Each ends with the honest fallback that QR always works. */
@@ -73,4 +95,7 @@ export type Messages = {
     /** Generic tap fallback — the NFC status view never renders a raw exception (A2). */
     tapFailed: string;
   };
+
+  /** Copy that is THROWN and then rendered verbatim (`setErr(e.message)`, the tap status sub-line). */
+  errors: ErrorMessages;
 };

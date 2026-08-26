@@ -4,6 +4,7 @@ import {C} from '../config/palette';
 import {S} from '../styles';
 import {trustWalletSendUrl, type TrustWalletAsset} from '../trustwallet';
 import {IconExternalLink} from './icons';
+import {M} from '../i18n';
 
 /** The asset name spoken in the a11y hint (SOL-USDC is a USDC send on Solana). */
 const ASSET_LABEL: Record<TrustWalletAsset, string> = {BTC: 'BTC', SOL: 'SOL', 'SOL-USDC': 'USDC'};
@@ -38,13 +39,13 @@ export function TrustWalletFundButton({asset, address}: {asset: TrustWalletAsset
         style={S.ghostBtn}
         onPress={open}
         accessibilityRole="button"
-        accessibilityLabel="Fund from Trust Wallet"
-        accessibilityHint={`Opens Trust Wallet to send ${ASSET_LABEL[asset]} to your dpay address`}
+        accessibilityLabel={M.deposit.trust.fund}
+        accessibilityHint={M.deposit.trust.fundHint(ASSET_LABEL[asset])}
         accessibilityState={{disabled: false}}>
         <IconExternalLink size={16} color={C.sub} />
-        <Text style={S.ghostBtnText}>Fund from Trust Wallet</Text>
+        <Text style={S.ghostBtnText}>{M.deposit.trust.fund}</Text>
       </Pressable>
-      {failed ? <Text testID="trust-fund-err" style={S.err}>Couldn't open Trust Wallet. Try again.</Text> : null}
+      {failed ? <Text testID="trust-fund-err" style={S.err}>{M.deposit.trust.err}</Text> : null}
     </>
   );
 }
