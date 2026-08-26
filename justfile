@@ -221,6 +221,12 @@ faucet-verify *args:
 typecheck:
     cd app && npm run typecheck
 
+# app unit tests (jest) — 1000+ cases driving the real components, hooks, formatters and catalog.
+# Wired into `check` because it WASN'T: the suite ran only by hand, so a broken component or a
+# regressed formatter passed `just verify` green. Same shape as `typecheck` above.
+test-app:
+    cd app && npm test
+
 # bridge parity: assert every TS DpayCoreApi/DpayNfcApi method has a matching-arity Kotlin @ReactMethod
 # (and vice-versa). Sub-second, no device — the static net that makes wire/arity drift fail the build.
 bridge-parity:
@@ -245,7 +251,7 @@ aid-parity:
 # (merchant-wire is GONE 2026-08-16: the hand-rolled /merchant page was merged into /wallet — the
 #  real app builds requests through its own wasm core, so the hand-rolled-encoder drift class it
 #  guarded against no longer has a surface to live on.)
-check: test-core test-canister test-relay test-live test-icp typecheck bridge-parity aid-parity wasm-core
+check: test-core test-canister test-relay test-live test-icp typecheck test-app bridge-parity aid-parity wasm-core
     @echo "rust inner loop green"
 
 # Wasm-core parity: proves the COMMITTED crates/dpay-relay/assets/dpay-core.wasm (the bytes every
