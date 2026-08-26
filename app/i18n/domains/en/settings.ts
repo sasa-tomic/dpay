@@ -1,5 +1,5 @@
 /**
- * i18n/domains/settings.ts — the Settings sheet + the Onboarding (create/restore/backup) flow.
+ * i18n/domains/en/settings.ts — the Settings sheet + the Onboarding (create/restore/backup) flow.
  *
  * Two namespaces, one file: they are the app's two "wallet identity" surfaces and they share the
  * same recovery vocabulary (the 24 words, the 64-hex seed, the copy-feedback ladder), so keeping
@@ -121,6 +121,19 @@ export type SettingsMessages = {
     choice: (label: string) => string;
   };
 
+  /**
+   * The language picker. The language NAMES are deliberately NOT here: a picker shows every
+   * language in its own language ("Deutsch" stays "Deutsch" on an English phone), so the endonyms
+   * are data in i18n/locale.ts, not copy — translating them is what produces the "Tedesco/German/
+   * Allemand" mess that leaves a user unable to find their own language. Only the heading, the
+   * follow-the-device option, and the per-segment accessible name are translated.
+   */
+  language: {
+    label: string;
+    auto: string;
+    choice: (label: string) => string;
+  };
+
   /** The collapsed disclosure holding the relay ("Server") URL. */
   advanced: {
     label: string;
@@ -220,6 +233,12 @@ export const settingsEn: SettingsMessages = {
     dark: 'Dark',
     auto: 'Auto',
     choice: label => `Theme: ${label}`,
+  },
+
+  language: {
+    label: 'Language',
+    auto: 'Auto',
+    choice: label => `Language: ${label}`,
   },
 
   advanced: {

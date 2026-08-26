@@ -1,5 +1,5 @@
 /**
- * i18n/domains/wallet.ts — the `wallet` + `education` message domains (types + English, co-located).
+ * i18n/domains/en/wallet.ts — the `wallet` + `education` message domains (types + English, co-located).
  *
  * WALLET covers the wallet shell and its asset surfaces: the header (settings/theme/account/
  * balance), the tab bar, the Balances sheet, the Transactions ledger, the shared fund-first panel,
@@ -9,17 +9,18 @@
  * EDUCATION covers everything that teaches the dpay model: the campaign line, the 3-scene
  * walkthrough, the payment rehearsal, the contextual coaching tips, and the Trip Readiness
  * passport (stamps, archive page, capstone). `config/education.ts` and `lib/readiness.ts` compose
- * their long-standing export shapes (WALKTHROUGH_SCENES, REHEARSAL_STEPS, COACHING_TIPS,
- * PASSPORT_STAMPS, …) out of the copy below — the ids, visual keys and display ORDER stay with the
- * logic that owns them; only the words live here.
+ * their export shapes (`walkthroughScenes()`, `rehearsalSteps()`, `passportStamps()`) out of the
+ * copy below — the ids, visual keys and display ORDER stay with the logic that owns them; only the
+ * words live here. Those are FUNCTIONS, not constants, precisely because a locale switch replaces
+ * this object wholesale: anything captured at module load would keep rendering the old language.
  *
  * Conventions are the catalog's (see i18n/keys.ts): interpolation is a typed FUNCTION, never a
  * '{{placeholder}}'; no pluralization machinery; no fallbacks. Currency glyphs (∂ $ ₿ Ξ ◎), asset
  * symbols (DEMO/BTC/USDC/SOL) and network names (Bitcoin/Ethereum/Solana) are locale-invariant
  * product identity and are NOT in this catalog.
  */
-import type {CoachTipKey, RehearsalStepId, WalkthroughSceneId} from '../../config/education';
-import type {ReadinessKey} from '../../lib/readiness';
+import type {CoachTipKey, RehearsalStepId, WalkthroughSceneId} from '../../../config/education';
+import type {ReadinessKey} from '../../../lib/readiness';
 
 /** One walkthrough scene's words. The scene's id, illustration key and order live in education.ts. */
 export type WalkthroughSceneCopy = {eyebrow: string; title: string; body: string};
@@ -41,6 +42,9 @@ export type WalletMessages = {
     /** The eyebrow above the username, and its accessible name. */
     account: string;
     accountLabel: string;
+    /** The web wordmark's back-link to the marketing site (web build only). */
+    home: string;
+    homeHint: string;
   };
 
   /** The header balance pressable (opens the Balances sheet). */
@@ -52,6 +56,12 @@ export type WalletMessages = {
     /** Online: the polled balance is authoritative. Offline: the honest approximation. */
     of: (asset: string) => string;
     approx: (asset: string) => string;
+    /**
+     * The offline balance itself, marked as best-known rather than authoritative. Takes the
+     * already-formatted amount so the marker can lead, trail, or become a word — `~` is not the
+     * universal "approximately" mark.
+     */
+    approxAmount: (amount: string) => string;
     /** Android hardware-back double-press hint. */
     backAgainToExit: string;
   };
@@ -98,6 +108,13 @@ export type WalletMessages = {
     filter: (label: string) => string;
     to: (who: string) => string;
     from: (who: string) => string;
+    /**
+     * The counterparty on a gateway mint row, which carries no name of its own. Deliberately NOT
+     * `balances.demoFunds`: that one names the faucet BUTTON. These two collide in English only —
+     * a locale is free to render "who paid you" and "get test money" differently, and sharing the
+     * key would take that choice away.
+     */
+    mintCounterparty: string;
   };
 
   /** The shared "add funds before you pay" panel's recheck link (both rails). */
@@ -129,6 +146,8 @@ export const walletEn: WalletMessages = {
     themeSwitchHint: 'Toggles the theme between Light and Dark; set Auto in Settings',
     account: 'ACCOUNT',
     accountLabel: 'Account',
+    home: 'dpay home',
+    homeHint: 'Open the main dpay site',
   },
 
   balance: {
@@ -137,6 +156,7 @@ export const walletEn: WalletMessages = {
     lockedHint: 'Finish or cancel the current payment first',
     of: asset => `${asset} balance`,
     approx: asset => `~ ${asset} approx.`,
+    approxAmount: amount => `~${amount}`,
     backAgainToExit: 'Press back again to exit',
   },
 
@@ -178,6 +198,7 @@ export const walletEn: WalletMessages = {
     filter: label => `Filter ${label}`,
     to: who => `to ${who}`,
     from: who => `from ${who}`,
+    mintCounterparty: 'Demo funds',
   },
 
   fund: {checking: 'Checking…', checkAgain: 'Check again'},

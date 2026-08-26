@@ -1,6 +1,7 @@
 import {useCallback, useEffect, useMemo, useState} from 'react';
 import {type CurrencyDescriptor} from '../config/catalog';
 import {POLL, HISTORY_TIMEOUT_MS} from '../config/constants';
+import {M} from '../i18n';
 import {short, fmtTime, base} from '../lib/format';
 import {fetchWithTimeout} from '../services/relay';
 import {DpayCore} from '../services/native';
@@ -80,7 +81,7 @@ export function useTransactionHistory(args: Args): {history: Txn[]; refreshHisto
       // the row shows the counterparty's short PRINCIPAL text. A mint's empty `from` keeps the
       // friendly "Demo funds" label (the facade sentinel was 64 f's; the gateway uses "").
       const who = (dir === 'in' && !counterparty)
-        ? 'Demo funds'
+        ? M.wallet.ledger.mintCounterparty
         : (dir === 'out' ? (toName || short(rec.to)) : (fromName || short(rec.from)));
       return {nonce: rec.nonce, amount: rec.amount, who, memo, time: fmtTime(rec.timestamp), dir, currency: rec.currency};
     }));

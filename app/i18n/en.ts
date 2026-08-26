@@ -11,16 +11,21 @@
  *   • Never surface raw ledger/token identifiers; money uses the backing native symbol.
  */
 import type {Messages} from './keys';
-import {depositEn, withdrawEn} from './domains/deposit.ts';
-import {errorsEn} from './domains/errors.ts';
-import {payEn, receiveEn} from './domains/pay.ts';
-import {onboardingEn, settingsEn} from './domains/settings.ts';
-import {educationEn, walletEn} from './domains/wallet.ts';
+import {depositEn, withdrawEn} from './domains/en/deposit.ts';
+import {errorsEn} from './domains/en/errors.ts';
+import {payEn, receiveEn} from './domains/en/pay.ts';
+import {onboardingEn, settingsEn} from './domains/en/settings.ts';
+import {educationEn, walletEn} from './domains/en/wallet.ts';
 
 export const en: Messages = {
   common: {
     done: 'Done',
     cancel: 'Cancel',
+  },
+
+  time: {
+    today: time => `Today, ${time}`,
+    yesterday: time => `Yesterday, ${time}`,
   },
 
   settings: settingsEn,
@@ -55,6 +60,7 @@ export const en: Messages = {
     paidAmount: amount => `Paid ✓ ${amount}`.trim(),
     receivedAmount: amount => `Received ✓ ${amount}`.trim(),
     settled: 'The payment settled',
+    settledStamp: 'settled',
     paying: (amount, network) => (network ? `Paying ${amount} on ${network}` : `Paying ${amount}`),
     collecting: (amount, network) => (network ? `Collecting ${amount} on ${network}` : `Collecting ${amount}`),
     holdToSend: 'Hold the phones together to send',

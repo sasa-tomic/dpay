@@ -1,5 +1,5 @@
 /**
- * i18n/domains/deposit.ts — the copy for the two on-chain money-movement surfaces: DEPOSIT ("Add
+ * i18n/domains/en/deposit.ts — the copy for the two on-chain money-movement surfaces: DEPOSIT ("Add
  * money" — the Receive tab's *My address* sub-mode) and WITHDRAW ("Cash out" — the Pay tab's *Send
  * to address* sub-mode). Both the type and the English values live here, side by side, so a new key
  * is one edit in one file.

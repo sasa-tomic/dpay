@@ -1,6 +1,7 @@
 import {Platform, Pressable, Text} from 'react-native';
 import Svg, {Defs, LinearGradient, Stop, Rect, Path} from 'react-native-svg';
 import {C} from '../config/palette';
+import {M} from '../i18n';
 import {S} from '../styles';
 
 // The 2026-08-17 "∂ifferent Pay" mark: the same tangerine tile as the Traveler Paper identity,
@@ -55,8 +56,8 @@ export function WordmarkLink({style}: {style?: object}) {
       testID="link-home"
       onPress={goToSiteHome}
       accessibilityRole="link"
-      accessibilityLabel="dpay home"
-      accessibilityHint="Open the main dpay site">
+      accessibilityLabel={M.wallet.header.home}
+      accessibilityHint={M.wallet.header.homeHint}>
       <Wordmark style={style} />
     </Pressable>
   );

@@ -1,6 +1,6 @@
 import {Text} from 'react-native';
 import {S} from '../styles';
-import type {InstrRun} from '../i18n/domains/deposit';
+import type {InstrRun} from '../i18n/keys';
 
 /**
  * One deposit-instruction sentence built from catalog RUNS (M.deposit.*.sendToAddress / sendOnly).

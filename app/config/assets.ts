@@ -52,6 +52,7 @@ export type SelectableAsset =
       currency: number;
       symbol: string;          // display NAME (BTC/USDC/DEMO/BTC testnet) — never a raw ledger id
       networkLabel: string;    // subtitle ("<symbol> · <network>" for non-DEMO; "play money…" for DEMO)
+      network: string | null;  // the CHAIN's proper noun ('Bitcoin'/'Ethereum') — wire/constant, never translated; null for DEMO
       decimals: number;        // smallest-unit decimal count for amount formatting
       visible: boolean;        // true on every entry the builder returns (the builder IS the filter)
       capabilities: AssetCapabilities;
@@ -63,6 +64,7 @@ export type SelectableAsset =
       token: 'SOL' | 'USDC';
       symbol: string;          // 'SOL' | 'USDC'
       networkLabel: string;    // 'SOL · Solana' | 'USDC · Solana' — distinct from any IC USDC
+      network: 'Solana';       // the chain's proper noun — never translated
       decimals: number;        // SOL=9, USDC=6
       visible: boolean;        // always true (appended only when the rail is enabled)
       capabilities: AssetCapabilities; // Direct/Direct — device-key rail
@@ -134,6 +136,7 @@ function icAsset(desc: CurrencyDescriptor): SelectableAsset {
     currency: desc.currency,
     symbol: name,
     networkLabel,
+    network,
     decimals: desc.decimals ?? 0,
     visible: true,
     capabilities: {onramp: desc.onramp, offramp: desc.offramp},
@@ -149,6 +152,7 @@ function solanaSolAsset(): SelectableAsset {
     token: 'SOL',
     symbol: 'SOL',
     networkLabel: M.wallet.asset.networkLabel('SOL', 'Solana'),
+    network: 'Solana',
     decimals: SOL_DECIMALS,
     visible: true,
     capabilities: {onramp: 'Direct', offramp: 'Direct'},
@@ -165,6 +169,7 @@ function solanaUsdcAsset(): SelectableAsset {
     token: 'USDC',
     symbol: 'USDC',
     networkLabel: M.wallet.asset.networkLabel('USDC', 'Solana'),
+    network: 'Solana',
     decimals: USDC_DECIMALS,
     visible: true,
     capabilities: {onramp: 'Direct', offramp: 'Direct'},
@@ -260,10 +265,14 @@ export function solanaUsdcAvailable(): boolean {
 // (`USDC·Eth` / `USDC·Sol`) so a user reads the network at a glance. No collision (DEMO/BTC/ETH/SOL)
 // ⇒ the chip stays compact (YAGNI — qualifying every chip would just add noise).
 //
-// The short network tag is DERIVED FROM the existing `networkLabel` field (format "<symbol> ·
-// <network>" for non-DEMO; DEMO never collides — it's the only "play money" row): split off the
-// network segment, then abbreviate. The three known mainnet networks get clean tags; anything else
-// (a future/testnet network) falls back to a short prefix so it still disambiguates. Pure: no React,
+// The short network tag reads the asset's `network` field — the chain's PROPER NOUN, which arrives
+// from the descriptor's wire `network` or the FAMILY_DISPLAY constants and is never translated. It
+// used to be recovered by splitting `networkLabel` on its ` · ` joiner, but that joiner is produced
+// by the catalog (`M.wallet.asset.networkLabel`), so the first locale to punctuate the subtitle
+// differently would have silently emptied the tag and collapsed `USDC·Eth`/`USDC·Sol` back into two
+// identical chips. Same class of bug as Tab.tsx's label-derived testID: display copy must never be
+// re-parsed to recover data. The three known mainnet networks get clean tags; anything else (a
+// future/testnet network) falls back to a short prefix so it still disambiguates. Pure: no React,
 // no native deps; deterministic in (asset, all).
 const SHORT_NETWORK_TAG: Record<string, string> = {
   Ethereum: 'Eth',
@@ -271,8 +280,7 @@ const SHORT_NETWORK_TAG: Record<string, string> = {
   Bitcoin: 'Btc',
 };
 function shortNetworkTag(asset: SelectableAsset): string {
-  // ` · ` is U+00B7 (middle dot) flanked by spaces — the joiner `icAsset`/`solana*Asset` use.
-  const network = asset.networkLabel.split(' · ').pop() ?? '';
+  const network = asset.network ?? '';
   const mapped = SHORT_NETWORK_TAG[network];
   if (mapped) return mapped;
   // Fallback for an unmapped network: a short prefix (≤3 chars) keeps the chip compact while still

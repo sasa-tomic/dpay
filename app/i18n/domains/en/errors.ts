@@ -1,5 +1,5 @@
 /**
- * i18n/domains/errors.ts — copy that is THROWN (or mapped from a thrown value) and then rendered
+ * i18n/domains/en/errors.ts — copy that is THROWN (or mapped from a thrown value) and then rendered
  * to the user verbatim.
  *
  * WHY THIS IS USER COPY AND NOT DIAGNOSTICS: the app surfaces failures by binding `setErr(e.message)`

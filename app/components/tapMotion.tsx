@@ -27,6 +27,7 @@ import React, {useEffect, useRef} from 'react';
 import {Animated, Easing, Text, View} from 'react-native';
 import Svg, {Circle, Rect} from 'react-native-svg';
 import {C} from '../config/palette';
+import {M} from '../i18n';
 import {S} from '../styles';
 import {useReducedMotion} from '../hooks/useReducedMotion';
 import {IconKey} from './icons';
@@ -235,7 +236,7 @@ export function PaidStamp() {
       testID="paid-stamp"
       pointerEvents="none"
       style={[S.paidStamp, {opacity: op, transform: [{scale}, {rotate: '-3deg'}]}]}>
-      <Text style={S.paidStampText}>settled</Text>
+      <Text style={S.paidStampText}>{M.nfc.settledStamp}</Text>
     </Animated.View>
   );
 }

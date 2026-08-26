@@ -1,5 +1,5 @@
 /**
- * i18n/domains/pay.ts — the Pay + Receive screens: type AND English values, co-located.
+ * i18n/domains/en/pay.ts — the Pay + Receive screens: type AND English values, co-located.
  *
  * Covers PayMode, SolPayMode, ReceiveMode, SolReceiveMode, QrScanner and AssetPicker. The two
  * namespaces are composed into `Messages` / `en` by i18n/keys.ts + i18n/en.ts.

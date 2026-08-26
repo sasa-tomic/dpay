@@ -21,11 +21,29 @@
  * rules, what to say. Do not reach for a plural library.
  */
 
-import type {DepositMessages, WithdrawMessages} from './domains/deposit';
-import type {ErrorMessages} from './domains/errors';
-import type {PayMessages, ReceiveMessages} from './domains/pay';
-import type {OnboardingMessages, SettingsMessages} from './domains/settings';
-import type {EducationMessages, WalletMessages} from './domains/wallet';
+import type {DepositMessages, WithdrawMessages} from './domains/en/deposit';
+import type {ErrorMessages} from './domains/en/errors';
+import type {PayMessages, ReceiveMessages} from './domains/en/pay';
+import type {OnboardingMessages, SettingsMessages} from './domains/en/settings';
+import type {EducationMessages, WalletMessages} from './domains/en/wallet';
+
+/**
+ * The per-domain contracts, re-exported from the ONE module every locale already imports for
+ * `Messages`. A translated domain file writes `import type {PayMessages} from '../../keys'` — it
+ * never reaches into `domains/en/`, so no locale depends on another locale's module.
+ *
+ * The types are DECLARED next to the English values because English is the reference copy (see
+ * en.ts): a new key is written once, in the place it is authored, and `tsc` then reports every
+ * locale that lacks it.
+ */
+export type {DepositMessages, WithdrawMessages, InstrRun} from './domains/en/deposit';
+export type {ErrorMessages} from './domains/en/errors';
+export type {PayMessages, ReceiveMessages} from './domains/en/pay';
+export type {OnboardingMessages, SettingsMessages, CopyWordsCopy} from './domains/en/settings';
+export type {
+  EducationMessages, WalletMessages,
+  WalkthroughSceneCopy, RehearsalStepCopy, CoachTipCopy, PassportStampCopy,
+} from './domains/en/wallet';
 
 /** Title + sub-line for one NFC tap phase, as rendered by the shared tap status view. */
 export type NfcPhaseCopy = {title: string; sub: string};
@@ -40,6 +58,17 @@ export type Messages = {
   common: {
     done: string;
     cancel: string;
+  };
+
+  /**
+   * Relative-day prefixes wrapped around an already-formatted clock time. The TIME ITSELF is built
+   * by `Intl.DateTimeFormat` — 12h vs 24h, the separator, and the digits are all the locale's
+   * business, and none of them belong in a catalog. Only the word and WHERE IT SITS live here,
+   * which is why each takes the finished time rather than returning a bare "Today".
+   */
+  time: {
+    today: (time: string) => string;
+    yesterday: (time: string) => string;
   };
 
   /** The Settings sheet, and the create/restore/backup onboarding flow. */
@@ -66,6 +95,8 @@ export type Messages = {
     paidAmount: (amount: string) => string;
     receivedAmount: (amount: string) => string;
     settled: string;
+    /** The ink stamp pressed onto the success frame — a mark, not the sentence `settled` is. */
+    settledStamp: string;
     /** In-flight sub-line. `network` is null for DEMO (internal) and SOL — no "on …" suffix. */
     paying: (amount: string, network: string | null) => string;
     collecting: (amount: string, network: string | null) => string;
