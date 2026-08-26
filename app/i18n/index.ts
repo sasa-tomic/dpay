@@ -18,8 +18,8 @@ import {en} from './en.ts';
 import {de} from './de.ts';
 import {es} from './es.ts';
 import {fr} from './fr.ts';
-import {applyFormatLocale} from './intl';
-import {type LocaleChoice, type LocaleTag, formatLocale, resolveLocale} from './locale';
+import {applyFormatLocale} from './intl.ts';
+import {type LocaleChoice, type LocaleTag, formatLocale, resolveLocale} from './locale.ts';
 
 export type {Messages, NfcPhaseCopy, NfcPhaseKey} from './keys';
 
