@@ -81,6 +81,43 @@ function autoConcurrency() {
 }
 
 /**
+ * Per-context slowdown the run inflicts ON ITSELF by running `concurrency` flows at once.
+ *
+ * `hostLoadFactor` only sees load that ALREADY EXISTS (a 1-min trailing average, sampled before the
+ * first context launches). It therefore cannot see the run's own contention — and the two pull in
+ * opposite directions: an idle host yields the MAXIMUM concurrency (12) and simultaneously the
+ * MINIMUM timeout headroom (×1.00). That inversion is why the suite went red on a QUIET machine
+ * while every one of those flows passed in isolation.
+ *
+ * Slowdown tracks concurrency rather than spare cores because the contexts are not independent:
+ * all of them share ONE browser process (`launched (shared across tests; fresh context per test)`),
+ * so its main/IO threads serialize a fraction of every flow. Spare cores do not relieve that.
+ *
+ * CONTENTION_PER_CONTEXT is empirical, with deliberate margin: 12-settings runs ~9.9s alone and
+ * ~21.1s at concurrency 12 (≈2.1×), so 0.15 predicts ≈2.65× — ~25% above the worst case measured.
+ * Erring high is the correct bias: this timeout exists to catch a genuine HANG (which never
+ * finishes, so a looser bound still catches it), whereas a bound that is too tight produces false
+ * REDs on healthy code — the expensive failure, and the one that erodes trust in the gate.
+ */
+const CONTENTION_PER_CONTEXT = 0.15;
+function selfContentionFactor(concurrency) {
+  return 1 + Math.max(0, concurrency - 1) * CONTENTION_PER_CONTEXT;
+}
+
+/**
+ * The per-test timeout scale: the WORSE of ambient load and self-inflicted contention. The host may
+ * already be busy, and we are about to make it busier ourselves; either term alone under-predicts a
+ * flow's wall clock.
+ *
+ * This is the ONE definition on purpose. It previously lived in two places — `runTestsSubset`
+ * derived it from load, and the `just e2e` entry derived it again and passed it in as an explicit
+ * override — so fixing one silently left the other authoritative on the main path.
+ */
+function resolveTimeoutScale(load, concurrency) {
+  return Math.max(load.factor, selfContentionFactor(concurrency));
+}
+
+/**
  * Resolve run concurrency: an explicit `DPAY_E2E_CONCURRENCY` wins (the caller knows their host);
  * otherwise auto-pick from current headroom. Returns `{ concurrency, auto, load }` so the startup log
  * can report exactly which path was taken (debuggable — no silent magic).
@@ -254,7 +291,7 @@ export async function runTestsSubset(tests, opts = {}) {
   const resolved = explicitConcurrency
     ? { concurrency: explicitConcurrency, auto: false, load: hostLoadFactor() }
     : resolveConcurrency();
-  const timeoutScale = explicitScale ?? resolved.load.factor;
+  const timeoutScale = explicitScale ?? resolveTimeoutScale(resolved.load, resolved.concurrency);
 
   const { results, firstFailure } = await runPool(tests, resolved.concurrency, timeoutScale);
 
@@ -332,14 +369,14 @@ async function main() {
     process.exit(1);
   }
   const { concurrency, auto, load } = resolveConcurrency();
-  const timeoutScale = load.factor;
+  const timeoutScale = resolveTimeoutScale(load, concurrency);
   const filter = process.env.DPAY_E2E_FILTER ?? '';
   const filterNote = filter
     ? ` matching filter "${filter}" (by journey/id/name/filename/covers)`
     : '';
   const concurrencyNote = auto
-    ? `concurrency=${concurrency} (auto: load ${load.load1.toFixed(1)} on ${load.cpus} cores → headroom ${Math.max(0, load.cpus - load.load1).toFixed(1)}, timeout scale ×${timeoutScale.toFixed(2)})`
-    : `concurrency=${concurrency} (explicit; timeout scale ×${timeoutScale.toFixed(2)} from load ${load.load1.toFixed(1)} on ${load.cpus} cores)`;
+    ? `concurrency=${concurrency} (auto: load ${load.load1.toFixed(1)} on ${load.cpus} cores → headroom ${Math.max(0, load.cpus - load.load1).toFixed(1)}, timeout scale ×${timeoutScale.toFixed(2)} = max(load ×${load.factor.toFixed(2)}, contention ×${selfContentionFactor(concurrency).toFixed(2)}))`
+    : `concurrency=${concurrency} (explicit; timeout scale ×${timeoutScale.toFixed(2)} = max(load ×${load.factor.toFixed(2)} on ${load.cpus} cores, contention ×${selfContentionFactor(concurrency).toFixed(2)}))`;
   console.log(
     `[run] running ${tests.length} test(s)${filterNote} in ${process.env.DPAY_E2E_MODE ?? 'local'} mode` +
     ` (parallel, ${concurrencyNote})` +
