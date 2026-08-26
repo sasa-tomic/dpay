@@ -6,24 +6,30 @@ import {IconCheck, IconClose} from './icons';
 import {TapBreathRing, TapProgressLine, TapKeyBeat, TapPendingStill, TapShakeSettle} from './tapMotion';
 import {OfflinePeak} from './OfflinePeak';
 import type {NfcTapPhase} from '../hooks/useNfcTapState';
+import {M} from '../i18n';
 
-// Phase → status-view presentation (mirrors ui/src/NfcSession.jsx). `spin` renders a spinner; `icon`
-// renders the NFC contactless mark (the listening/"armed" state) or the P3 SVG outcome marks
-// (check = success, close = declined, key = awaitingApproval — the quiet YOUR-key beat, J5:
+// Phase → status-view PRESENTATION (mirrors ui/src/NfcSession.jsx). `spin` renders a spinner;
+// `icon` renders the NFC contactless mark (the listening/"armed" state) or the P3 SVG outcome
+// marks (check = success, close = declined, key = awaitingApproval — the quiet YOUR-key beat, J5:
 // no spinny anxiety) in place of a text glyph; `glyph` remains for the textual '?' (pending) and
 // '!' (error) marks.
-const TAP_PHASES: Record<string, {tone: string; glyph?: string; spin?: boolean; icon?: 'nfc' | 'check' | 'close' | 'key'; title: string; sub: string}> = {
-  listening: {tone: C.brand, icon: 'nfc', title: 'Hold near the other phone', sub: 'dpay is listening for a tap'},
-  linking: {tone: C.brand, spin: true, title: 'Connecting…', sub: 'Linking the two phones'},
-  exchanging: {tone: C.brand, spin: true, title: 'Communicating…', sub: 'Keep the phones together'},
+//
+// The matching TITLE + SUB live in the message catalog (`M.nfc.phase`) — presentation is
+// locale-invariant, copy is not. Typing this as a total Record over NfcTapPhase (it was
+// `Record<string, …>`) makes every phase provably present, so the old `?? TAP_PHASES.listening`
+// fallback is gone: an unknown phase is now a compile error rather than a silent wrong badge.
+const TAP_PHASES: Record<NfcTapPhase, {tone: string; glyph?: string; spin?: boolean; icon?: 'nfc' | 'check' | 'close' | 'key'}> = {
+  listening: {tone: C.brand, icon: 'nfc'},
+  linking: {tone: C.brand, spin: true},
+  exchanging: {tone: C.brand, spin: true},
   // The one-press rule removed the card-side review park (auto-sign fires on request arrival), so
   // 'awaitingApproval' is READER-ONLY now — role-aware: the merchant waits on the payer's sign.
-  awaitingApproval: {tone: C.brand, icon: 'key', title: 'Waiting for the payer…', sub: 'They’re signing the payment'},
-  settling: {tone: C.brand, spin: true, title: 'Confirming…', sub: 'Keep the phones together while the merchant settles'},
-  success: {tone: C.ok, icon: 'check', title: 'Done ✓', sub: ''},
-  declined: {tone: C.sub, icon: 'close', title: 'Declined', sub: 'The payment was declined'},
-  pending: {tone: C.warn, glyph: '?', title: 'Not confirmed', sub: 'Couldn’t reach the ledger'},
-  error: {tone: C.bad, glyph: '!', title: 'Tap failed', sub: 'Move the phones together and try again'},
+  awaitingApproval: {tone: C.brand, icon: 'key'},
+  settling: {tone: C.brand, spin: true},
+  success: {tone: C.ok, icon: 'check'},
+  declined: {tone: C.sub, icon: 'close'},
+  pending: {tone: C.warn, glyph: '?'},
+  error: {tone: C.bad, glyph: '!'},
 };
 
 // Trip Ready J5 — the itinerary-line progression: which segment the active phase has reached
@@ -39,20 +45,20 @@ export function computeTapStatus(
   formattedAmt: string | null,
   networkLabel?: string | null,
 ): {title: string; sub: string; terminal: boolean} {
-  const m = TAP_PHASES[phase] ?? TAP_PHASES.listening;
+  const c = M.nfc.phase[phase];
   const terminal = phase === 'success' || phase === 'declined' || phase === 'error' || phase === 'pending';
   // awaitingApproval (reader "waiting for the payer") shows its own copy even with an amount known.
   const active = phase === 'exchanging' || phase === 'settling';
   const title = phase === 'success'
-    ? `${role === 'card' ? 'Paid' : 'Received'} ✓ ${formattedAmt ?? ''}`.trim()
-    : m.title;
+    ? (role === 'card' ? M.nfc.paidAmount(formattedAmt ?? '') : M.nfc.receivedAmount(formattedAmt ?? ''))
+    : c.title;
   const sub = (phase === 'error' || phase === 'declined' || phase === 'pending') && reason ? reason
-    : phase === 'success' ? 'The payment settled'
+    : phase === 'success' ? M.nfc.settled
     : active && formattedAmt != null
       // Card side shows the honest asset + network ("Paying 0.00050000 BTC on Bitcoin"); the network
       // is null only for DEMO (internal) / SOL → no "on …" suffix. Reader side mirrors without it.
-      ? `${role === 'card' ? 'Paying' : 'Collecting'} ${formattedAmt}${networkLabel ? ` on ${networkLabel}` : ''}`
-    : m.sub;
+      ? (role === 'card' ? M.nfc.paying(formattedAmt, networkLabel ?? null) : M.nfc.collecting(formattedAmt, networkLabel ?? null))
+    : c.sub;
   return {title, sub, terminal};
 }
 
@@ -83,7 +89,7 @@ export function NfcTapView({phase, reason, role, testID, formattedAmt, networkLa
    *  gates this on the truthful merchant-settled-while-offline story + the journey one-shot). */
   offlinePeak?: boolean;
 }) {
-  const m = TAP_PHASES[phase] ?? TAP_PHASES.listening;
+  const m = TAP_PHASES[phase];
   const {title, sub, terminal} = computeTapStatus(phase, reason, role, formattedAmt, networkLabel);
   const lit = LINE_LIT[phase];
 
@@ -105,8 +111,8 @@ export function NfcTapView({phase, reason, role, testID, formattedAmt, networkLa
       <Text style={S.nfcTitle}>{title}</Text>
       {sub ? <Text style={S.nfcSub}>{sub}</Text> : null}
       {phase === 'pending' ? <TapPendingStill /> : null}
-      {phase === 'exchanging' && role === 'card' ? <Text style={S.dim2}>Hold the phones together to send</Text> : null}
-      <Pressable style={S.ghostBtn} accessibilityRole="button" accessibilityLabel={terminal ? 'Done' : 'Cancel'} accessibilityState={{disabled: false}} onPress={onClose}>{terminal ? <IconCheck size={16} color={C.sub}/> : <IconClose size={16} color={C.sub}/>}<Text style={S.ghostBtnText}>{terminal ? 'Done' : 'Cancel'}</Text></Pressable>
+      {phase === 'exchanging' && role === 'card' ? <Text style={S.dim2}>{M.nfc.holdToSend}</Text> : null}
+      <Pressable style={S.ghostBtn} accessibilityRole="button" accessibilityLabel={terminal ? M.common.done : M.common.cancel} accessibilityState={{disabled: false}} onPress={onClose}>{terminal ? <IconCheck size={16} color={C.sub}/> : <IconClose size={16} color={C.sub}/>}<Text style={S.ghostBtnText}>{terminal ? M.common.done : M.common.cancel}</Text></Pressable>
     </View>
   );
 }

@@ -27,14 +27,7 @@ import {CoachTip} from './CoachTip';
 import {OfflinePeak} from './OfflinePeak';
 import {PaidStamp} from './tapMotion';
 import {IconCheck, IconClock, IconInfo, IconShare} from './icons';
-
-// Plain-language per-reason text for the NFC-unavailable info popup. Each ends with the honest
-// fallback that QR always works, so the payer is never stuck.
-const NFC_REASON: Record<Exclude<NfcStatus, 'ready'>, string> = {
-  off: 'NFC is turned off in your device settings. Turn NFC on to pay by tap — or scan the QR code to pay now.',
-  unsupported: "This device doesn't have NFC hardware. Scan the QR code to pay.",
-  unknown: "Couldn't check NFC status. Scan the QR code to pay.",
-};
+import {M} from '../i18n';
 
 export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assetBalances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillRequest, onPrefillConsumed, onShowDepositAddress, onRefreshBalances, refreshBusy = false, onLockChange}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assetBalances: Record<number, string>; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillRequest?: string | null; onPrefillConsumed?: () => void; onShowDepositAddress: () => void; onRefreshBalances?: () => void; refreshBusy?: boolean; onLockChange?: (locked: boolean) => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid'>('scan');
@@ -589,7 +582,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
         <Pressable style={S.pickBackdrop} onPress={() => setNfcInfoOpen(false)}>
           <View style={S.pickCard} onStartShouldSetResponder={() => true}>
             <Text style={S.pickTitle}>NFC unavailable</Text>
-            <Text style={S.nfcInfoBody}>{NFC_REASON[nfcInfo]}</Text>
+            <Text style={S.nfcInfoBody}>{M.nfc.reason[nfcInfo]}</Text>
             <Pressable style={S.nfcInfoClose} onPress={() => setNfcInfoOpen(false)} accessibilityRole="button" accessibilityLabel="Close" accessibilityState={{disabled: false}}>
               <Text style={S.nfcInfoCloseText}>Close</Text>
             </Pressable>

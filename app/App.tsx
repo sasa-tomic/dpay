@@ -23,6 +23,7 @@ import {C, DARK, LIGHT} from './config/palette';
 import {STORAGE_KEY, RELAY_STORAGE_KEY, THEME_STORAGE_KEY} from './config/constants';
 import {parseTheme, resolveTheme, themePersistValue, type ThemeOverride} from './config/theme';
 import {runSolSelfCheck} from './solana/selfcheck';
+import {runIntlSelfCheck} from './i18n/selfcheck';
 import type {Identity} from './lib/types';
 import {DpayCore} from './services/native';
 import {S, applyPalette} from './styles';
@@ -119,6 +120,17 @@ export default function App() {
   useEffect(() => {
     const r = runSolSelfCheck();
     console.log(`DPAY_SOL_SELFCHECK ${r.ok ? 'PASS' : `FAIL ${r.reason}`}`);
+  }, []);
+
+  // On-device Intl self-check → logcat. Proves the JS engine that SHIPS carries the Intl surface
+  // the money formatter is built on (NumberFormat.formatToParts for separators, DateTimeFormat for
+  // the clock) with real per-locale ICU data. Hermes builds Intl optionally and the headless
+  // browser the e2e suite drives always has it, so this blind spot is only observable on a device.
+  // The device gate greps for `DPAY_INTL_SELFCHECK PASS`; see i18n/selfcheck.ts for what is
+  // deliberately NOT asserted (exact glyphs) and what is absent from Hermes (PluralRules, Locale).
+  useEffect(() => {
+    const r = runIntlSelfCheck();
+    console.log(`DPAY_INTL_SELFCHECK ${r.ok ? `PASS locale=${r.deviceLocale}` : `FAIL ${r.reason}`}`);
   }, []);
 
   const onReset = useCallback(async () => { await AsyncStorage.removeItem(STORAGE_KEY); setIdentity(null); }, []);

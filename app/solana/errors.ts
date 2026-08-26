@@ -8,6 +8,11 @@
 // blockchain error with no guidance. That "no record of a prior credit" class is the #1 error an
 // unfunded account produces (the source account does not exist on-chain). Unknown errors fall
 // through VERBATIM — never hide a novel failure, only reword the classes a user can act on.
+//
+// The copy itself lives in the message catalog; this module owns the CLASSIFICATION (which raw
+// error means what), which is locale-invariant. `M` is a pure data module — no react-native, no
+// globals — so this stays jest-safe on the fast inner loop.
+import {M} from '../i18n';
 
 /** Map a raw Solana error message (RPC body, AbortError, confirmation timeout) to human copy.
  *  Returns the original string unchanged when no known class matches — diagnosis stays possible. */
@@ -18,19 +23,19 @@ export function friendlySolError(msg: string): string {
   // be invisible to the simulating node and produce the SAME string transiently — so the copy covers
   // both the genuine unfunded case and the devnet-pool-lag case rather than asserting "no SOL".
   if (/no record of a prior credit|found no record/i.test(msg)) {
-    return "This account has no SOL, or the network hasn't synced your balance yet. If you just deposited, wait a moment and retry — otherwise deposit SOL to your address first.";
+    return M.sol.noRecordOfCredit;
   }
   if (/abort|timed out|timeout|confirmation timeout/i.test(msg)) {
-    return "Timed out. Check your connection and try again.";
+    return M.sol.timedOut;
   }
   if (/insufficient/i.test(msg)) {
-    return "Not enough SOL for this send plus the network fee.";
+    return M.sol.insufficient;
   }
   if (/rent\s*exempt|rent-exempt|not exempt/i.test(msg)) {
-    return "After this send, your account would fall below the minimum balance. Send a smaller amount.";
+    return M.sol.rentExempt;
   }
   if (/blockhash/i.test(msg)) {
-    return "The network was too busy. Try again.";
+    return M.sol.blockhash;
   }
   return msg;
 }
@@ -40,7 +45,7 @@ export function friendlySolError(msg: string): string {
  *  (A2 — no raw `e.message` from NFC paths in the UI); the caller console.warn's the raw message
  *  so the dev loop stays fail-loud. `fallback` lets outcome-unknown (pending) call sites use
  *  check-your-balance copy instead of a retry instruction. */
-export function friendlySolTapError(msg: string, fallback = "Payment didn't complete — try again"): string {
+export function friendlySolTapError(msg: string, fallback = M.sol.tapFailed): string {
   const mapped = friendlySolError(msg);
   return mapped !== msg ? mapped : fallback;
 }

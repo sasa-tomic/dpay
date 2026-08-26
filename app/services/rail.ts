@@ -18,6 +18,7 @@ import {bytesToBase64Url, base64UrlToBytes} from '../lib/base64url';
 import {fetchWithTimeout} from './relay';
 import {HISTORY_TIMEOUT_MS} from '../config/constants';
 import type {TransactionsRow} from '../lib/types';
+import {M} from '../i18n';
 
 export type RailPrepared = {
   ledger: string; // ledger principal text (submission target + read_state path)
@@ -152,14 +153,14 @@ async function decodeTransferStatus(
 /** Friendly text for a decoded ICRC TransferError (the structured `variant` — not a parsed message). */
 export function transferRejectionMessage(variant: string, detail: string): string {
   switch (variant) {
-    case 'InsufficientFunds': return 'Not enough balance';
-    case 'BadFee': return `Wrong fee${detail ? ` (${detail})` : ''} — try again`;
-    case 'BadBurn': return `Amount below the ledger minimum${detail ? ` (${detail})` : ''}`;
-    case 'TooOld': return 'The request expired';
-    case 'CreatedInFuture': return 'Clock skew — try again';
-    case 'TemporarilyUnavailable': return 'The ledger is busy — try again';
-    case 'Duplicate': return 'Already paid';
-    default: return detail ? `The ledger declined the payment (${detail})` : 'The ledger declined the payment';
+    case 'InsufficientFunds': return M.rail.insufficientFunds;
+    case 'BadFee': return M.rail.badFee(detail);
+    case 'BadBurn': return M.rail.badBurn(detail);
+    case 'TooOld': return M.rail.tooOld;
+    case 'CreatedInFuture': return M.rail.createdInFuture;
+    case 'TemporarilyUnavailable': return M.rail.temporarilyUnavailable;
+    case 'Duplicate': return M.rail.duplicate;
+    default: return M.rail.declined(detail);
   }
 }
 

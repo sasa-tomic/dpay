@@ -95,6 +95,20 @@ done
 echo "   $SOL_MARK"
 echo "$SOL_MARK" | grep -q 'DPAY_SOL_SELFCHECK PASS' || { echo "FAIL: SOL self-check did not pass"; adb logcat -d | grep -iE 'dpay|ReactNativeJS|AndroidRuntime' | tail -30; exit 1; }
 
+# Intl self-check: proves the SHIPPING engine carries the Intl surface the money formatter is built
+# on, with real per-locale ICU data. Hermes builds Intl optionally and the headless browser the e2e
+# suite drives always has it — so a missing-Intl regression is invisible everywhere except here.
+# The marker carries the resolved device locale (`PASS locale=de-DE`), which is also the live proof
+# that locale detection reads the real device setting rather than defaulting to en.
+INTL_MARK=""
+for _ in $(seq 1 30); do
+  INTL_MARK="$(adb logcat -d 2>/dev/null | grep -m1 'DPAY_INTL_SELFCHECK' || true)"
+  [ -n "$INTL_MARK" ] && break
+  sleep 1
+done
+echo "   $INTL_MARK"
+echo "$INTL_MARK" | grep -q 'DPAY_INTL_SELFCHECK PASS' || { echo "FAIL: Intl self-check did not pass"; adb logcat -d | grep -iE 'dpay|ReactNativeJS|AndroidRuntime' | tail -30; exit 1; }
+
 # Best-effort UI drive for screenshots (non-fatal): tap a node by its visible text via uiautomator.
 tap_text() {
   local needle="$1"

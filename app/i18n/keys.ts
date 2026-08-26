@@ -1,0 +1,76 @@
+/**
+ * i18n/keys.ts — the SHAPE of the message catalog. This type is the contract every locale must
+ * satisfy in full.
+ *
+ * WHY A TYPE AND NOT A RUNTIME LOOKUP: `const de: Messages = {…}` fails `tsc` if a single key is
+ * missing or misspelled, so a half-translated locale cannot be committed, let alone shipped. That
+ * makes a runtime fallback (`de.x ?? en.x`) unnecessary — and a fallback is precisely what lets a
+ * German screen silently render one English line forever. There is ONE path: the catalog is
+ * complete or the build fails. `just typecheck` (inside `just check`) already gates this for free.
+ *
+ * INTERPOLATION IS A FUNCTION, NEVER A '{{placeholder}}' STRING. A translator needs to move the
+ * value within the sentence — German pushes the verb last, Japanese marks the topic first, Arabic
+ * reads right-to-left. A typed function lets each locale write its own word order with the
+ * arguments applied wherever they belong, and `tsc` checks the arity and types at every call site.
+ * It also means no template parser, no format-string DSL, and no new dependency.
+ *
+ * NO PLURALIZATION MACHINERY. There is no variable-count copy in the app today (the only count is
+ * BIP-39's fixed "24 words"), and `Intl.PluralRules` is ABSENT from Hermes — code written against
+ * it would pass the headless browser suite and throw on the phone. If variable-count copy is ever
+ * introduced, add a per-locale function that takes the count and decides, in that locale's own
+ * rules, what to say. Do not reach for a plural library.
+ */
+
+/** Title + sub-line for one NFC tap phase, as rendered by the shared tap status view. */
+export type NfcPhaseCopy = {title: string; sub: string};
+
+/** The NFC phases that carry copy. Mirrors `NfcTapPhase` in hooks/useNfcTapState. */
+export type NfcPhaseKey =
+  | 'listening' | 'linking' | 'exchanging' | 'awaitingApproval'
+  | 'settling' | 'success' | 'declined' | 'pending' | 'error';
+
+export type Messages = {
+  /** Copy that appears on more than one screen. Keep this small — it is not a dumping ground. */
+  common: {
+    done: string;
+    cancel: string;
+  };
+
+  nfc: {
+    /** Why tap-to-pay is unavailable. Each ends with the honest fallback that QR always works. */
+    reason: {off: string; unsupported: string; unknown: string};
+    phase: Record<NfcPhaseKey, NfcPhaseCopy>;
+    /** Terminal success titles — the payer's phone says "Paid", the merchant's says "Received". */
+    paidAmount: (amount: string) => string;
+    receivedAmount: (amount: string) => string;
+    settled: string;
+    /** In-flight sub-line. `network` is null for DEMO (internal) and SOL — no "on …" suffix. */
+    paying: (amount: string, network: string | null) => string;
+    collecting: (amount: string, network: string | null) => string;
+    /** Payer-side nudge while the bundle is on the wire. */
+    holdToSend: string;
+  };
+
+  /** Decoded ICRC TransferError variants. These name what the LEDGER refused, in the user's terms. */
+  rail: {
+    insufficientFunds: string;
+    badFee: (detail: string) => string;
+    badBurn: (detail: string) => string;
+    tooOld: string;
+    createdInFuture: string;
+    temporarilyUnavailable: string;
+    duplicate: string;
+    declined: (detail: string) => string;
+  };
+
+  /** Solana RPC failure classes a user can actually act on. Unknown errors stay verbatim. */
+  sol: {
+    noRecordOfCredit: string;
+    timedOut: string;
+    insufficient: string;
+    rentExempt: string;
+    blockhash: string;
+    /** Generic tap fallback — the NFC status view never renders a raw exception (A2). */
+    tapFailed: string;
+  };
+};
