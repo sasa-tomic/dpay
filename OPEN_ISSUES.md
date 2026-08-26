@@ -81,7 +81,7 @@ candidate circles only `○`/`●`-family basics are covered; `Δ Ω` are grotes
 >    `fmtTime` non-finite guard → '—'. Names in history stay PRINCIPAL-prefix by design
 >    post-cutover (ledger memo is the frozen 16-byte nonce reconciliation key — extending it
 >    was considered and REJECTED; a signed name registry is a founder follow-up, NOT in-tree).
-> 4. **REOPENED physical NFC false-failure — rewritten, awaiting two-phone re-test.** A fresh APK containing fixes
+> 4. **RESOLVED — physical NFC false-failure, closed by the 2026-08-26 two-phone retest.** A fresh APK containing fixes
 >    1–3 still produced receiver "payment was declined" + payer "payment didn't complete" while
 >    the transfer settled. Receiver logcat proved the signed envelope arrived and the old 17-byte
 >    receipt write returned `9000`; its status was `UNREACHABLE`, so transport, receipt, and UI told
@@ -104,7 +104,10 @@ candidate circles only `○`/`●`-family basics are covered; `Δ Ω` are grotes
 > **31/31**, full `just verify` GREEN (**82/82 e2e**), receiver/payer NFC flows 86+87 GREEN,
 > Android instrumented **10/10**, and a release
 > APK built + installed on receiver `9cdf67b8` with `DPAY_SELFCHECK PASS` +
-> `DPAY_SOL_SELFCHECK PASS`. The physical airplane-mode two-phone retest is still required.
+> `DPAY_SOL_SELFCHECK PASS`. **The physical two-phone retest PASSED (2026-08-26, founder-run): the
+> IC-rail NFC tap completes with the payer in airplane mode, and the real-camera QR scan between two
+> phones works. The SOL rail's independent HCE transport (AID `F06470617902`) has not been tapped on
+> hardware — that is the only physical gate left.**
 > **Android post-payment chooser (2026-08-22, resolved):** live Poco X3 logs proved the IC exchange and C6
 > result completed, then `NfcStep.CONFIRMED` eagerly called `disableReaderMode` while the phones were
 > still coupled; Android immediately logged a second generic `Tag detected, notifying applications`
@@ -116,8 +119,6 @@ candidate circles only `○`/`●`-family basics are covered; `Δ Ω` are grotes
 > Settings, and that system Activity forced dpay's Activity-scoped reader mode off. A device-local
 > trace of two subsequent cable-free payments showed C6 confirmation, reader mode retained until tag
 > loss/UI teardown, `Skipping NDEF detection in reader mode`, and no resolver on either payment.
-> **Prod is BEHIND these fixes — founder ship: `just deploy-ic && just
-> apk && just up`** (also still carries the 2026-08-20 faucet-422 fix below).
 >
 > **Final integrated verification (2026-08-20 close-out, real runs):** `just verify` fully GREEN
 > — core 47 · canister 86 · icp 6 · relay 33 · live 34 · typecheck · bridge-parity 42 methods ·
@@ -126,8 +127,9 @@ candidate circles only `○`/`●`-family basics are covered; `Δ Ω` are grotes
 > flakes) · `just e2e-store` 1/1 · jest **819/819** (40 suites) · wasm hammer
 > `node e2e/debug/wasm-hammer.mjs` **PASS ×2** (320 calls, 0 fails each).
 >
-> **Prod at HEAD `d740379`** — shipped 2026-08-20 via `just deploy-ic && just apk && just up`
-> (evidence in the PROD SHIPPED block at the end of the 2026-08-20 session summary below).
+> **Prod has been redeployed several times since**; as of 2026-08-26 the relay's `/api/v1/version`
+> reports commit `45d8c91`. The 2026-08-20 `d740379` ship is recorded in the PROD SHIPPED block at
+> the end of that session summary below.
 >
 > **Prod faucet 422 — FIXED in-tree (2026-08-20 late session), needs one founder ship.** User hit
 > `Faucet top up fails: unauthorized: admin ops require the controller principal` on prod: the
@@ -840,8 +842,7 @@ tsc + jest + flow-40 rerun GREEN). Next session's sweep baseline: `451384e`.
 summary below).** The founder-reported "SOL/USDC-SOL QR scan — camera doesn't turn on" was a THIRD,
 distinct root cause: the unstyled `<View testID="sol-pay-scan">` wrapper collapsed `camBox`
 (`alignSelf:'stretch'` + `aspectRatio:1`) to 0×0 inside a content-sized parent — camera mounted +
-streaming (fps ticker live) but invisible. Fixed + gated by `just campreview`. The physical two-phone
-radio hop (real NFC tap, real QR-in-view scan) remains founder outer-loop as before.
+streaming (fps ticker live) but invisible. Fixed + gated by `just campreview`.
 
 ## Session summary (2026-08-14): QR-scanner emulator root cause + two new on-device gates — COMPLETE
 
