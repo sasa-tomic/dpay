@@ -276,6 +276,67 @@
   .pw-lead{margin:0 0 36px;color:var(--sub);font-size:1.04rem;line-height:1.66;max-width:64ch}
   .pw-lead b{color:var(--ink);font-weight:600}
 
+  /* The offline flow lives INSIDE the QR card, because the extra scan is a QR-only step: an NFC
+     tap already carries the signed bundle both ways in the one gesture. As a page-level section
+     it read as if it applied to both rails. */
+  .pw-offline{margin-top:40px;padding-top:34px;border-top:1px dashed var(--line)}
+  .pw-offline>summary{
+    list-style:none;cursor:pointer;display:flex;align-items:center;gap:22px;
+    border-radius:18px;padding:2px;
+  }
+  .pw-offline>summary::-webkit-details-marker{display:none}
+  .pw-offline>summary:focus-visible{outline:2px solid var(--brand);outline-offset:7px}
+  .of-txt{flex:1;min-width:0}
+  /* Subordinate to the card's own h3 (1.4rem) — it is a variant of this rail, not a rival to it. */
+  .pw-offline h4{margin:13px 0 0;font-size:1.2rem;font-weight:700;letter-spacing:-.025em;line-height:1.22}
+
+  /* The invitation. Folded by default hides the answer to "what if I have no signal", so the
+     summary has to advertise itself: a tangerine line that draws itself under the prompt, and a
+     chevron that pings and nudges. Both are pure decoration — the prompt TEXT carries the message
+     on its own, which is what a reduced-motion visitor (animations killed globally) is left with. */
+  .of-cue{
+    position:relative;display:inline-block;margin-top:13px;
+    font-family:var(--mono);font-size:.72rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--brand);
+  }
+  .of-scribble{
+    position:absolute;left:0;bottom:-10px;width:100%;height:10px;overflow:visible;
+    fill:none;stroke:var(--brand);stroke-width:2.2;stroke-linecap:round;
+    stroke-dasharray:200;animation:scribble 3.4s ease-in-out infinite;
+  }
+  @keyframes scribble{
+    0%{stroke-dashoffset:200;opacity:1}
+    30%{stroke-dashoffset:0;opacity:1}
+    78%{stroke-dashoffset:0;opacity:1}
+    93%{stroke-dashoffset:0;opacity:0}
+    100%{stroke-dashoffset:200;opacity:0}
+  }
+  .of-btn{
+    position:relative;flex:none;width:46px;height:46px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    color:var(--panel);background:var(--brand);box-shadow:var(--sh-sm);
+    animation:nudge 3.4s ease-in-out infinite;
+  }
+  .of-btn svg{width:22px;height:22px;transition:transform .3s ease}
+  .of-btn .ring{position:absolute;inset:-7px;border-radius:50%;border:2px solid var(--brand);animation:cue-ping 3.4s ease-out infinite}
+  @keyframes nudge{0%,62%,100%{transform:translateY(0)}72%{transform:translateY(5px)}84%{transform:translateY(0)}}
+  @keyframes cue-ping{0%{transform:scale(.85);opacity:.5}55%{transform:scale(1.3);opacity:0}100%{opacity:0}}
+
+  /* Open: the invitation has been accepted, so all of it stops competing for attention. */
+  .c-open{display:none}
+  .pw-offline[open] .c-shut{display:none}
+  .pw-offline[open] .c-open{display:inline}
+  .pw-offline[open] .of-cue{color:var(--sub2)}
+  .pw-offline[open] .of-scribble{display:none}
+  .pw-offline[open] .of-btn{animation:none;background:var(--panel2);color:var(--ink);box-shadow:none;border:1px solid var(--line)}
+  .pw-offline[open] .of-btn .ring{display:none}
+  .pw-offline[open] .of-btn svg{transform:rotate(180deg)}
+  /* The fold IS the reveal, so the body does not carry .rv — a scroll-reveal inside a closed
+     <details> has never intersected and would open to invisible content. */
+  .of-body{animation:foldin .42s ease both}
+  @keyframes foldin{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  .of-body .pw-lead{margin-top:26px}
+
   /* the rail: phone screens strung on a dashed metro line */
   .rail{position:relative;display:flex;align-items:flex-start;gap:10px;padding-top:10px}
   .rail-track{
@@ -331,11 +392,14 @@
   .band .step .t{color:var(--bg)}
   .band .step .d{color:var(--sub2)}
   .band .arrow{color:rgba(244,241,232,.4)}
-  .band-note{
-    margin:44px auto 0;max-width:640px;text-align:center;
-    font-family:var(--mono);font-size:.78rem;font-weight:500;letter-spacing:.02em;color:var(--sub2);line-height:1.8;
+  /* One closing-note rule for the whole page — the proof section and the QR card's offline flow
+     both end on one, and both sit on paper. (It replaced a duplicate .band-note/.proof-note pair
+     that differed only in surface colour.) */
+  .closing-note{
+    margin:36px auto 0;max-width:640px;text-align:center;
+    font-family:var(--mono);font-size:.78rem;font-weight:500;letter-spacing:.02em;color:var(--sub);line-height:1.8;
   }
-  .band-note b{color:var(--bg);font-weight:600}
+  .closing-note b{color:var(--ink);font-weight:600}
 
   /* ————— merchants ————— */
   .m-grid{display:grid;grid-template-columns:1.04fr .96fr;gap:60px;align-items:center}
@@ -701,11 +765,6 @@
   .fold p{margin:0 0 18px;padding-left:35px;color:var(--sub);font-size:.94rem;line-height:1.7;max-width:58ch}
   .fold p b{color:var(--ink);font-weight:600}
 
-  .proof-note{
-    margin:36px auto 0;max-width:640px;text-align:center;
-    font-family:var(--mono);font-size:.78rem;font-weight:500;letter-spacing:.02em;color:var(--sub);line-height:1.8;
-  }
-  .proof-note b{color:var(--ink);font-weight:600}
 
   @media (max-width:920px){
     .proofwrap{margin-top:48px}
@@ -832,7 +891,6 @@
        a cream-on-cream ticker. The floor overrides below keep the showcase rhythm readable. */
     html.dark .band h2,
     html.dark .band .step .t,
-    html.dark .band-note b,
     html.dark .band .sec-sub b,
     html.dark .mline{color:#F2EEE6}
     html.dark .ticker{background:#0E0D0B}
@@ -1073,54 +1131,70 @@
             <span class="body"><b class="t">Paid</b><span class="d">Settled instantly.</span></span>
           </div>
         </div>
+
+        <!-- offline variant of THIS rail only: the shop scans a second code off your screen.
+             Folded by default: having a signal is the common case, so this is the "what if I
+             don't?" answer — one obvious click away rather than always open. -->
+        <details class="pw-offline" aria-label="Paying offline">
+          <summary>
+            <span class="of-txt">
+              <span class="kicker">Works offline</span>
+              <h4>No internet? One extra scan<i class="dot">.</i></h4>
+              <span class="of-cue">
+                <span class="c-shut">See how you pay with no signal</span>
+                <span class="c-open">Hide the offline steps</span>
+                <svg class="of-scribble" viewBox="0 0 200 10" preserveAspectRatio="none" aria-hidden="true"><path d="M3 7.4C34 2.6 66 1.6 98 4.2c32 2.6 65 2.2 99-2.4"/></svg>
+              </span>
+            </span>
+            <span class="of-btn" aria-hidden="true">
+              <i class="ring"></i>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+            </span>
+          </summary>
+
+          <div class="of-body">
+          <p class="pw-lead">Pay as always. Your phone shows a QR code that confirms the payment. The shop scans it with <b>their</b> phone. Done. You just paid. While offline. Really.</p>
+
+          <div class="rail">
+            <div class="rail-track"><i></i></div>
+
+            <div class="step">
+              <span class="ph"><span class="idx">1</span>
+                <img src="/shots/paying.png" width="780" height="1180" alt="Different Pay: the payment signs on your phone, offline." />
+              </span>
+              <span class="body"><b class="t">Pay</b><span class="d">One press. Your phone signs it.</span></span>
+            </div>
+            <span class="arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+
+            <div class="step">
+              <span class="ph"><span class="idx">2</span>
+                <img src="/shots/request.png" width="780" height="1180" alt="Different Pay: your phone shows your signed approval as a QR code." />
+              </span>
+              <span class="body"><b class="t">Show your code</b><span class="d">Your phone shows a code.</span></span>
+            </div>
+            <span class="arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+
+            <div class="step">
+              <span class="ph"><span class="idx">3</span>
+                <img src="/shots/scanned.png" width="780" height="1180" alt="Different Pay: the shop reads the QR off your screen." />
+              </span>
+              <span class="body"><b class="t">Shop scans</b><span class="d">The shop scans your screen.</span></span>
+            </div>
+            <span class="arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+
+            <div class="step done">
+              <span class="ph"><span class="idx">4</span>
+                <img src="/shots/paid.png" width="780" height="1180" alt="Different Pay: paid, with no internet on your phone." />
+              </span>
+              <span class="body"><b class="t">Done</b><span class="d">The shop sends it for you. Paid.</span></span>
+            </div>
+          </div>
+
+          <p class="closing-note">You press pay. Your phone signs. <b>The shop has internet. So you don't need any.</b></p>
+          </div>
+        </details>
       </div>
 
-    </div>
-  </section>
-
-  <!-- ————— the offline story: two scans, zero internet ————— -->
-  <section class="band" aria-label="Paying offline">
-    <div class="wrap">
-      <span class="kicker rv">Works offline</span>
-      <h2 class="rv">No internet? One extra scan<i class="dot">.</i></h2>
-      <p class="sec-sub rv">Pay as always. Your phone shows a QR code that confirms the payment. The shop scans it with <b>their</b> phone. Done. You just paid. While offline. Really.</p>
-
-      <div class="rail" style="margin-top:52px">
-        <div class="rail-track"><i></i></div>
-
-        <div class="step rv" style="--d:0s">
-          <span class="ph"><span class="idx">1</span>
-            <img src="/shots/paying.png" width="780" height="1180" alt="Different Pay: the payment signs on your phone, offline." />
-          </span>
-          <span class="body"><b class="t">Pay</b><span class="d">One press. Your phone signs it.</span></span>
-        </div>
-        <span class="arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
-
-        <div class="step rv" style="--d:.08s">
-          <span class="ph"><span class="idx">2</span>
-            <img src="/shots/request.png" width="780" height="1180" alt="Different Pay: your phone shows your signed approval as a QR code." />
-          </span>
-          <span class="body"><b class="t">Show your code</b><span class="d">Your phone shows a code.</span></span>
-        </div>
-        <span class="arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
-
-        <div class="step rv" style="--d:.16s">
-          <span class="ph"><span class="idx">3</span>
-            <img src="/shots/scanned.png" width="780" height="1180" alt="Different Pay: the shop reads the QR off your screen." />
-          </span>
-          <span class="body"><b class="t">Shop scans</b><span class="d">The shop scans your screen.</span></span>
-        </div>
-        <span class="arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
-
-        <div class="step done rv" style="--d:.24s">
-          <span class="ph"><span class="idx">4</span>
-            <img src="/shots/paid.png" width="780" height="1180" alt="Different Pay: paid, with no internet on your phone." />
-          </span>
-          <span class="body"><b class="t">Done</b><span class="d">The shop sends it for you. Paid.</span></span>
-        </div>
-      </div>
-
-      <p class="band-note rv">You press pay. Your phone signs. <b>The shop has internet. So you don't need any.</b></p>
     </div>
   </section>
 
@@ -1233,7 +1307,7 @@
       </div>
     </div>
 
-    <p class="proof-note rv">Your key never leaves your phone. Every payment is settled by <b>hard cryptography</b>. Provably correct.</p>
+    <p class="closing-note rv">Your key never leaves your phone. Every payment is settled by <b>hard cryptography</b>. Provably correct.</p>
   </section>
 
   <!-- ————— merchants: the web wallet is the terminal ————— -->

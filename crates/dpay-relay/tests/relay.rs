@@ -777,10 +777,136 @@ async fn landing_page_tells_the_offline_payment_story() {
             "landing must not carry the banned claim {banned:?}"
         );
     }
+    // 2026-08-25: the offline flow lives inside the QR card (the extra scan is a QR-only step —
+    // an NFC tap carries the signed bundle in one gesture) and is FOLDED by default, since having
+    // a signal is the common case. A fold nobody opens is a fold nobody reads, so the summary
+    // must keep advertising itself in words — the animated cue is decoration that a
+    // reduced-motion visitor never sees.
+    assert!(
+        html.contains("<details class=\"pw-offline\" aria-label=\"Paying offline\">"),
+        "the offline flow must be a fold, named for assistive tech"
+    );
+    assert!(
+        !html.contains("<details class=\"pw-offline\" aria-label=\"Paying offline\" open"),
+        "the offline fold must start closed"
+    );
+    assert!(
+        html.contains("See how you pay with no signal"),
+        "the closed fold must say in TEXT what opening it gives you"
+    );
     // Proof-strip motion must have a reduced-motion answer (the global kill switch).
     assert!(
         html.contains("prefers-reduced-motion"),
         "proof motion must respect prefers-reduced-motion"
+    );
+}
+
+/// In-page navigation must not dangle: every `href="#…"` has to resolve to an element carrying
+/// that id. Regression guard for a silent class of rot — the 2026-08-23 wording pass (c899c9a)
+/// dropped the `id="proof"` strip but left `<a href="#proof">` in the nav, so "The proof" was a
+/// no-op link on the live site until 2026-08-25. A broken anchor throws nothing and logs nothing.
+#[tokio::test]
+async fn landing_page_in_page_links_all_resolve() {
+    let (state, _led) = state_from(ledger());
+
+    let (status, _headers, bytes) = call_raw(&state, get_req("/")).await;
+    assert_eq!(status, StatusCode::OK);
+    let html = String::from_utf8(bytes).unwrap();
+
+    let mut checked = 0usize;
+    for (at, _) in html.match_indices("href=\"#") {
+        let rest = &html[at + "href=\"#".len()..];
+        let end = rest.find('"').expect("unterminated href attribute");
+        let frag = &rest[..end];
+        assert!(!frag.is_empty(), "empty in-page link href=\"#\" is not a target");
+        assert!(
+            html.contains(&format!("id=\"{frag}\"")),
+            "in-page link #{frag} points at no element with that id"
+        );
+        checked += 1;
+    }
+    // The nav's four section links + the two brandmark #top links; a drop below that means the
+    // in-page navigation itself vanished, which the per-link assertions above cannot notice.
+    assert!(checked >= 6, "expected the page's in-page links, found {checked}");
+}
+
+/// The `#proof` section — the nav's "The proof" destination and the page's answer to "how does
+/// this actually work". Its two toys are pure CSS state machines: the route switch flips
+/// `data-route` between the two couriers, the slip card flips `data-tamper`. Both attributes and
+/// BOTH route variants must be in the markup or a toy renders permanently stuck in one state.
+///
+/// Honesty pins (verified 2026-08-25 against `app/services/icp.ts` `IC_GATEWAY_DEFAULT` and this
+/// crate's own router): the app posts signed IC envelopes straight to the boundary node, and the
+/// settlement surface left this relay entirely — so the page must say the server is off the
+/// payment path, and must not dress the tamper toy up as a live cryptographic check.
+#[tokio::test]
+async fn landing_page_proof_section_explains_the_signature() {
+    let (state, _led) = state_from(ledger());
+
+    let (status, _headers, bytes) = call_raw(&state, get_req("/")).await;
+    assert_eq!(status, StatusCode::OK);
+    let html = String::from_utf8(bytes).unwrap();
+
+    // Both toys, in their clean starting state, with the script's handles present.
+    for required in [
+        "id=\"proof\"",
+        "id=\"routecard\" data-route=\"on\"",
+        "id=\"routeswitch\"",
+        "role=\"switch\"",
+        "id=\"tampercard\" data-tamper=\"none\"",
+        "data-t=\"amount\"",
+        "data-t=\"payee\"",
+        "data-t=\"none\"",
+    ] {
+        assert!(html.contains(required), "the proof section must contain {required:?}");
+    }
+    // Both courier variants ship in the markup — the switch only changes which one displays.
+    assert!(
+        html.contains("class=\"r-on\">Your connection")
+            && html.contains("class=\"r-off\">The shop's phone"),
+        "both route variants must be present for the switch to have two states"
+    );
+    // The verdict stamp ships both faces too, in a row of its own that is always present — a
+    // stamp floated over the slip covered the seal value at phone widths. Announced politely so
+    // the state change reaches a screen reader, not just an eye.
+    assert!(
+        html.contains("class=\"srow verdict\" aria-live=\"polite\"")
+            && html.contains("class=\"s-ok\">Seal holds")
+            && html.contains("class=\"s-bad\">Seal broken"),
+        "the verdict row must be announced and carry both stamp faces"
+    );
+    // The two verdicts must not read as the same colour: holds is a green outline, broken is a
+    // solid red fill (differing in fill as well as hue, so it survives colour-blindness). The
+    // dark-mode green MUST stay scoped to the holds state — unscoped, `html.dark .stamp` is
+    // (0,2,1) and outranks the (0,2,0) tamper rule, which rendered a green border around the red
+    // fill in dark mode until 2026-08-25.
+    assert!(
+        html.contains("html.dark [data-tamper=\"none\"] .stamp{--st:#34C48E}"),
+        "the dark holds-green must stay state-scoped or it outranks the broken-red rule"
+    );
+    assert!(
+        html.contains("--st:var(--badDeep);background:var(--badDeep);color:#FCF7F2;"),
+        "the broken stamp must be a solid red fill, not just a recoloured outline"
+    );
+    // The claims the section exists to make.
+    for required in [
+        "not on the path",
+        "Payments don't go through it at all",
+        "It is never uploaded",
+        "the network settles it exactly once",
+    ] {
+        assert!(html.contains(required), "the proof section must claim {required:?}");
+    }
+    // The tamper card is a drawing of a real rule, and says so rather than implying a live check.
+    assert!(
+        html.contains("An illustration of a check that really runs"),
+        "the tamper toy must label itself an illustration"
+    );
+    // Five folded answers, each a native <details> so nothing is forced on a skimmer.
+    assert_eq!(
+        html.matches("<details class=\"fold\">").count(),
+        5,
+        "the proof section carries five folded answers"
     );
 }
 
