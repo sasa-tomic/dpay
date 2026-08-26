@@ -132,16 +132,9 @@ Out of scope for the PoC; recorded so no one designs around it wrong. The user a
 
 ## Monetization — direction
 
-**Full doc: `monetization.md`. Read it before touching anything fee-, handle-, or merchant-account-related.** Summary of what's decided:
+**`monetization.md`** — read it before touching anything fee-, badge-, or merchant-account-related. None of it is in the PoC.
 
-- **We monetize the payment rail we built; never movement of funds we don't control.** No cut on swaps, ever. The payer never pays.
-- **The free tier is a *mode*, not a dollar amount.** P2P free forever; **merchant mode ~0.5% from dollar one**. (The earlier "$200/mo received free" volume allowance is **superseded** — a mode-based tier deletes the sybil surface instead of tolerating it. A small seller taking payments as a *person* pays nothing; that's the growth engine, and it's fine.)
-- **Merchant features are chosen by one test: does the feature lose its value if the merchant splits into five accounts?** Only features that fail-on-split belong in merchant mode — that's what *replaces* sybil resistance. The four: durable merchant handle shown at approval (**never KYC** — claimed handle, not verified identity), multi-device staff terminals, refunds keyed to the original payment, consolidated settlement reports. We're selling *being a business on dpay*, not a feature checklist.
-- **Fee collection needs no protocol change.** Payer signs `{from, to, amount, nonce, expiry}` exactly as today; the canister credits merchant `amount - fee` and dpay `fee` per a public fee schedule in canister state. **Do not add a `fee` field to `Authorization`** — it would bind a value the offline payer can't know and wreck the offline path. The offline flow stays untouched.
-- **The canister controller is load-bearing.** Whoever can upgrade the canister can set `fee = 100%`, so the revenue model and "we can't touch your funds" are the *same* question: blackhole or SNS/NNS-govern the controller, and make the fee schedule a **governed parameter, not a hardcoded constant**.
-- **Open:** keep the relay bypassable/self-hostable (a chokepoint attracts MiCA's "transfer services on behalf of clients" test far more than a convenience does). Settle before the pilot.
-
-None of this is in the PoC.
+(The summary that used to sit here was deleted 2026-08-26: it had already drifted out of date against the source doc, which is exactly what the DRY rule predicts. Pointer only — do not re-summarize it here.)
 
 ## Local dev cache & offline (`third_party/`)
 
