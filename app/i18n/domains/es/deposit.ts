@@ -1,0 +1,211 @@
+/**
+ * i18n/domains/es/deposit.ts — Spanish values for the deposit + withdraw surfaces.
+ *
+ * Reference copy, types and rationale: domains/en/deposit.ts. Glossary: i18n/es.ts.
+ */
+import type {DepositMessages, WithdrawMessages} from '../../keys';
+
+/** Word-for-word identical on both sheets in Spanish too — one source, spread into both objects. */
+const bothSheets = {
+  pressEsc: 'Pulsa Esc para cerrar',
+  balanceAuto: 'Tu saldo se actualiza automáticamente.',
+  copied: 'Copiado ✓',
+  shared: 'Compartido ✓',
+  copyAddress: 'Copiar dirección',
+  amountLabel: (asset: string) => `Importe (${asset})`,
+};
+
+export const depositEs: DepositMessages = {
+  ...bothSheets,
+
+  deposited: 'Depositado ✓',
+  addressCopied: 'Dirección copiada',
+  addressShared: 'Dirección compartida',
+  checkNow: 'Revisar ahora',
+
+  ck: {
+    addressErr: 'No se pudo cargar tu dirección de depósito. Revisa tu conexión e inténtalo de nuevo.',
+    noMinter: 'Este activo aún no admite depósitos.',
+    fetchingAddress: 'Obteniendo tu dirección de depósito…',
+    noAddress: 'No hay ninguna dirección de depósito disponible.',
+    sendToAddress: (nativeAsset, networkLabel) => [
+      {t: 'Envía '},
+      {t: nativeAsset, em: true},
+      {t: ' a tu dirección de '},
+      {t: networkLabel, em: true},
+      {t: ' que aparece abajo.'},
+    ],
+    confirmationLine: (required, estMin) =>
+      `${required > 0 ? `~${required} ${required === 1 ? 'confirmación' : 'confirmaciones'}` : 'confirmaciones'}${estMin > 0 ? ` · normalmente ~${estMin} min` : ''}`,
+    feeMinLine: (fee, min) => `Comisión de red ${fee} · Depósito mín. ${min}`,
+    feeNone: 'ninguna',
+    minNone: 'sin mínimo',
+    custody: 'dpay nunca guarda tus claves: los fondos se emiten 1:1 en tu billetera al confirmarse.',
+    copyDepositAddress: 'Copiar dirección de depósito',
+    statusTitle: 'Estado',
+    watching: 'Esperando tu depósito',
+    checkingEvery: seconds => `se revisa cada ${seconds} s`,
+    checkNowLabel: 'Revisar ahora el estado del depósito',
+    mintedAmount: amount => `${amount} emitidos`,
+  },
+
+  erc20: {
+    onrampParamsErr: 'No se pudo contactar con el servidor para obtener los datos del depósito.',
+    deriveErr: 'No se pudo generar tu dirección de depósito. Cierra y vuelve a abrir esta pantalla.',
+    noWalletWeb: 'No se encontró ninguna billetera de Ethereum. Instala MetaMask o Rabby en este navegador.',
+    noWalletNative: 'No hay ninguna billetera conectada. Vincula una con WalletConnect.',
+    pairRejected: 'No se aprobó la vinculación.',
+    pairFailed: 'No se pudo vincular con tu billetera.',
+    wrongNetwork: (networkLabel, expected, actual) =>
+      `Red incorrecta: conéctate a ${networkLabel} (cadena ${expected}). Tu billetera está en la cadena ${actual}.`,
+    connectFailed: 'No se pudo conectar con tu billetera.',
+    noWalletApp: 'No se encontró ninguna app de billetera. Escanea el QR con una billetera en otro dispositivo.',
+    walletDisconnected: 'Billetera desconectada.',
+    amountRequired: 'Introduce un importe mayor que cero.',
+    missingErc20Address: 'Los datos del depósito no incluyen la dirección ERC-20.',
+    txReverted: 'La transacción se revirtió en la cadena.',
+    txUnconfirmed: 'Transacción enviada, aún sin confirmar. Seguimos esperando la emisión.',
+    txNotSigned: 'La transacción no se firmó.',
+    txFailed: 'La transacción falló.',
+    sendOnly: (nativeAsset, networkLabel) => [
+      {t: 'Envía solo '},
+      {t: nativeAsset, em: true},
+      {t: ' en '},
+      {t: networkLabel, em: true},
+      {t: '. Otros activos u otras cadenas enviados por aquí no se acreditarán y podrían perderse.'},
+    ],
+    custody:
+      'dpay nunca guarda tus claves: firma tu billetera y el activo se emite 1:1 en ella al confirmarse (~20 min).',
+    gasNative: 'La comisión de red se paga en ETH: envía un poco más de lo que quieras depositar.',
+    gasErc20: 'Necesitarás un poco de ETH para las comisiones de red de Ethereum.',
+    scanToPair: 'Escanea con tu billetera para vincular',
+    openWalletHint: 'Abre una app de billetera instalada en este dispositivo',
+    openWallet: 'Abrir billetera en este dispositivo',
+    walletListPair: 'MetaMask · Trust · Rabby · cualquier billetera WalletConnect',
+    walletList: 'MetaMask · Trust · Rabby · cualquier billetera compatible con WalletConnect',
+    explainNative:
+      'Envía ETH directamente al contrato de depósito: una sola transacción que firma tu billetera, con el importe del depósito como valor en ETH.',
+    explainErc20: nativeAsset =>
+      `${nativeAsset} es un token de Ethereum: depositarlo requiere dos transacciones que firma tu billetera, no un envío a una dirección como en Bitcoin.`,
+    connectLabel: 'Conectar billetera de Ethereum',
+    connect: 'Conectar billetera',
+    amountPlaceholder: '0.00',
+    fromAccount: shortAccount => `Desde ${shortAccount}`,
+    confirmingLabel: 'Confirmando en tu billetera',
+    deposit: 'Depositar',
+    approveDepositLabel: 'Aprobar y depositar',
+    approveDeposit: 'Aprobar y depositar',
+    confirming: 'Confirma en tu billetera…',
+    depositingAmount: (amount, asset) => `Depositando ${amount} ${asset}`,
+    watchingResumed:
+      'Depósito pendiente (~20 min): tu billetera no está conectada, pero seguimos esperando la emisión.',
+    watchingFresh: 'Esperando la confirmación: tu depósito aparecerá en unos 20 minutos.',
+    startNew: 'Empezar otro depósito',
+    mintedToWallet: asset => `${asset} emitido en tu billetera.`,
+  },
+
+  sol: {
+    createAtaLabel: 'Crear cuenta de USDC',
+    checkingAta: 'Revisando tu cuenta de USDC…',
+    ataUnverified: 'No se pudo revisar tu cuenta de USDC.',
+    ataUnverifiedDetail:
+      'Tu dirección está bien; lo que pasa es que ahora mismo no podemos contactar con Solana para confirmar tu cuenta de USDC en la cadena. Revisa tu conexión e inténtalo de nuevo.',
+    retryAtaLabel: 'Reintentar la revisión de la cuenta de USDC',
+    retryAtaHint: 'Vuelve a revisar si tu cuenta de USDC existe en la cadena',
+    checkAgain: 'Revisar de nuevo',
+    backToRequest: 'Volver a la solicitud',
+    sendToAddress: (asset, network) => [
+      {t: 'Envía '},
+      {t: asset, em: true},
+      {t: ' a tu dirección de '},
+      {t: network},
+      {t: ' que aparece abajo.'},
+    ],
+    custody: asset => `dpay nunca guarda tus claves: ${asset} llega directamente a tu billetera al confirmarse.`,
+    devnetWarn: asset =>
+      `Estás en la devnet de Solana. NO envíes ${asset} de mainnet aquí: no aparecerá. Usa solo ${asset} de devnet.`,
+    waitingDeposit: 'Esperando tu depósito · se revisa cada pocos segundos',
+    checkNowHint: 'Vuelve a revisar tu saldo ahora mismo',
+    balanceAutoOnConfirm: 'Tu saldo se actualiza automáticamente cuando se confirme el envío.',
+    copyAssetAddress: asset => `Copiar dirección de ${asset}`,
+    returnHint: 'Vuelve a la pestaña Pagar con este activo seleccionado',
+  },
+
+  ata: {
+    absent: 'Todavía no tienes una cuenta de USDC en este dispositivo.',
+    cost: setupCost =>
+      `Solana guarda tus USDC en una cuenta de token única, ligada a esta billetera. Crearla cuesta ${setupCost} (renta de la cuenta + comisión) de tu saldo de SOL. La cuenta es tuya y está bajo tus claves: dpay nunca las guarda.`,
+    checkingSol: 'Revisando tu saldo de SOL…',
+    needSol: setupCost =>
+      `Primero necesitas unos ${setupCost} en esta billetera: recibe SOL en tu dirección y luego crea la cuenta.`,
+    showSolAddress: 'Ver mi dirección de SOL',
+    creating: 'Creando tu cuenta de USDC. Confirmando en Solana…',
+    createHint: setupCost => `Crea tu cuenta única de USDC por ${setupCost} de tu saldo de SOL`,
+  },
+
+  trust: {
+    fund: 'Añadir desde Trust Wallet',
+    fundHint: asset => `Abre Trust Wallet para enviar ${asset} a tu dirección de dpay`,
+    err: 'No se pudo abrir Trust Wallet. Inténtalo de nuevo.',
+  },
+};
+
+export const withdrawEs: WithdrawMessages = {
+  ...bothSheets,
+
+  overBalance: available => `Supera tu saldo disponible de ${available}.`,
+  badAddress: asset => `Esto no parece una dirección de ${asset} válida.`,
+  toDestination: destination => `a ${destination}`,
+  enterAmount: 'Introduce un importe',
+
+  ic: {
+    resumed:
+      'Había un retiro en curso cuando se cerró la app. Reintentar vuelve a enviar los mismos sobres: no puede gastar dos veces.',
+    approvalUnknown: 'No se pudo confirmar la aprobación: revisa tu saldo cuando vuelvas a tener conexión',
+    withdrawalUnknown: 'No se pudo confirmar el retiro: puede que aún llegue; revisa tu saldo en breve',
+    noRail: 'Este activo no tiene configurada ninguna vía de retiro',
+    gasFeeErr: 'No se pudo obtener la comisión de gas actual: revisa tu conexión',
+    withdrawn: 'Retirado ✓',
+    sentTo: 'enviado a',
+    copyDestinationLabel: 'Copiar dirección de destino',
+    withdrawing: amount => `Retirando ${amount}…`,
+    sendToNative: (networkLabel, nativeAsset) => `Envía tu ${networkLabel} a una dirección nativa de ${nativeAsset}`,
+    availableMin: (available, min) => `Disponible: ${available} · mín. ${min}`,
+    addressLabel: asset => `Dirección de ${asset}`,
+    useLastLabel: 'Usar la última dirección guardada',
+    useLast: address => `Usar la última: ${address}`,
+    amountPlaceholder: '0.00050000',
+    belowMin: min => `Está por debajo del retiro mínimo de ${min}.`,
+    gasNote: 'Necesitas ckETH para el gas. Si no tienes, añade ckETH primero.',
+    inProgress: 'Retiro en curso',
+    withdrawAmount: amount => `Retirar ${amount}`,
+    resumeNote:
+      'Ya está firmado: Reintentar vuelve a enviar los mismos sobres (no puede gastar dos veces). Si editas el formulario, empezarás un retiro nuevo.',
+    reviewTitle: 'Revisa el retiro',
+    confirmLabel: 'Confirmar retiro',
+    retry: 'Reintentar retiro',
+  },
+
+  sol: {
+    createAtaLabel: 'Crear mi cuenta de USDC',
+    backToScan: 'Volver a escanear',
+    sent: 'Enviado ✓',
+    txSignature: 'firma de la transacción',
+    copySignatureLabel: 'Copiar la firma de la transacción',
+    copySignature: 'Copiar firma',
+    sending: amount => `Enviando ${amount}…`,
+    confirmingOnSolana: 'Confirmando en Solana: puede tardar hasta un minuto.',
+    sendToSolana: asset => `Envía tus ${asset} a una dirección de Solana`,
+    available: available => `Disponible: ${available}`,
+    addressLabel: 'Dirección de Solana',
+    addressPlaceholder: 'Dirección base58 del destinatario',
+    usdcAmountPlaceholder: '1.5',
+    solAmountPlaceholder: '0.025',
+    needsSol: 'Enviar USDC requiere un poco de SOL en la billetera para las comisiones de red: añade algo primero.',
+    reviewTitle: 'Revisa el envío',
+    sendAmount: amount => `Enviar ${amount}`,
+    recipientAtaNote: cost =>
+      `Si aún no tiene cuenta de USDC, se la crea (una sola vez, ≈${cost}, lo pagas tú).`,
+    confirmLabel: asset => `Confirmar envío de ${asset}`,
+  },
+};

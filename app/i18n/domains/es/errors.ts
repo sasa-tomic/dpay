@@ -1,0 +1,51 @@
+/**
+ * i18n/domains/es/errors.ts — Spanish values for the thrown-and-rendered failure copy.
+ *
+ * Reference copy, types and rationale: domains/en/errors.ts. Glossary: i18n/es.ts.
+ */
+import type {ErrorMessages} from '../../keys';
+
+export const errorsEs: ErrorMessages = {
+  seedFormat: 'La semilla de recuperación debe tener 64 caracteres hexadecimales (0-9, a-f).',
+
+  ic: {
+    clockUnreachable: 'No se pudo consultar el reloj de Internet Computer',
+    clockSkew: 'El desfase con el reloj de Internet Computer es demasiado grande',
+    noLedgerForCurrency: 'Activo no admitido: no hay red para esta moneda',
+    feeUnavailable: 'No se pudo obtener la comisión de la red: revisa tu conexión',
+  },
+
+  solana: {
+    offline: 'Solana está sin conexión (no hay endpoint RPC configurado)',
+    usdcUnavailable: 'El USDC de Solana no está disponible (no hay endpoint RPC configurado)',
+    senderNoUsdcAccount: 'Tu billetera aún no tiene una cuenta de USDC',
+    recipientNoUsdcAccount: solAmount =>
+      `Aún no tiene una cuenta de USDC: crearla requiere unos ${solAmount} de SOL en esta billetera (renta y comisión de una sola vez, las pagas tú); envía un poco de SOL aquí primero`,
+    ownUsdcAccountRent: solAmount =>
+      `Crear tu cuenta de USDC requiere unos ${solAmount} en esta billetera (renta de la cuenta y comisión, una sola vez); envía un poco de SOL aquí primero`,
+  },
+
+  ethWallet: {
+    receiptReverted: hash => `la transacción ${hash} se revirtió en la cadena`,
+    receiptTimeout: hash => `la transacción ${hash} no se minó dentro del tiempo de espera`,
+    pairingTimedOut: 'se agotó el tiempo de vinculación: ninguna billetera escaneó el código en 5 min',
+    pairingFailed: detail => `Falló la vinculación con WalletConnect: ${detail}`,
+  },
+
+  tap: {
+    couldntConfirmOffline: 'No se pudo confirmar: revisa tu saldo cuando vuelvas a tener conexión',
+    couldntVerifyRequest: 'No se pudo verificar esta solicitud',
+    couldntReturnResult: 'No se pudo devolver el resultado del pago: mantén los teléfonos juntos e inténtalo de nuevo',
+    stillConfirming: 'Aún se está confirmando: revisa el saldo en breve',
+    unsupportedAsset: currency => `Activo no admitido (moneda ${currency})`,
+    cannotConfirmAsset: currency => `No se puede confirmar el activo (moneda ${currency})`,
+    couldntReadRequest: 'No se pudo leer la solicitud de pago',
+    requestExpired: 'Esta solicitud caducó: pide una nueva',
+    couldntAuthorize: 'No se pudo autorizar el pago: inténtalo de nuevo',
+    noOpenRequest: 'No hay ninguna solicitud abierta',
+    paymentRejected: 'Pago rechazado',
+    couldntConfirm: 'No se pudo confirmar',
+    couldntConfirmCheckBalance: 'No se pudo confirmar el pago: revisa tu saldo',
+    paymentRequestExpired: 'Esta solicitud de pago ha caducado',
+  },
+};
