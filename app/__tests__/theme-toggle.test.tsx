@@ -27,6 +27,8 @@ import {THEME_STORAGE_KEY} from '../config/constants';
 const SET_SHEET_DEFAULTS = {
   relayUrl: 'http://127.0.0.1:4391',
   setRelayUrl: () => {},
+  localeChoice: null,
+  onSetLocale: () => {},
   onClose: () => {},
   onReset: () => {},
   onRestore: async () => {},

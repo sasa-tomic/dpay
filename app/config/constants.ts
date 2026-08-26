@@ -38,6 +38,10 @@ export const SHOW_TESTNET_STORAGE_KEY = 'dpay.showTestnet';
 // Wave 7 — manual theme choice ('light' | 'dark'; absent = follow the OS scheme) so the user can
 // pin light/dark regardless of the OS scheme. Same AsyncStorage pattern as identity/relay/showTestnet.
 export const THEME_STORAGE_KEY = 'dpay.theme.v1';
+// The manual language choice ('en' | 'de' | 'fr' | 'es'; absent = follow the device locale). Same
+// AsyncStorage pattern, and the same two-tier shape as the theme: the device decides until the user
+// says otherwise, and there is always an explicit way back to Auto.
+export const LOCALE_STORAGE_KEY = 'dpay.locale.v1';
 // Trip Ready J1 — the journey/stamp store (app/lib/journey.ts): which milestones the user has hit
 // (walkthroughDone, recoverySaved, …). Same AsyncStorage pattern as identity/relay/theme; persisted
 // so the first-run walkthrough shows exactly once and later waves' passport survives relaunch.

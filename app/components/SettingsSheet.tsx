@@ -18,6 +18,7 @@ import {PassportArchive} from './TripPassport';
 import {computeReadiness, type ReadinessKey} from '../lib/readiness';
 import {JOURNEY_STAMPS, awardStamp, useJourney} from '../lib/journey';
 import {choiceLabel, type ThemeOverride} from '../config/theme';
+import {LOCALES, LOCALE_ENDONYM, type LocaleChoice} from '../i18n/locale';
 import {M} from '../i18n';
 
 /**
@@ -41,7 +42,7 @@ import {M} from '../i18n';
  *    the action opens a confirmation dialog (the destructive gate stays in place). Visually distinct
  *    from the "Privacy policy" link above it (which previously shared the same link chrome).
  */
-export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestore, secretHex, username, themeChoice, onSetTheme, openBackup, onOpenStep}: {
+export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestore, secretHex, username, themeChoice, onSetTheme, localeChoice, onSetLocale, openBackup, onOpenStep}: {
   relayUrl: string;
   setRelayUrl: (s: string) => void;
   onClose: () => void;
@@ -62,6 +63,9 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
   // three-way choice (Light / Dark / Auto). App.tsx owns the state + AsyncStorage persistence.
   themeChoice: ThemeOverride | null;
   onSetTheme: (t: ThemeOverride | null) => void;
+  // The stored language CHOICE (null = Auto/follow the device locale) + its single mutator.
+  localeChoice: LocaleChoice;
+  onSetLocale: (l: LocaleChoice) => void;
   // Passport deep-link (founder ask 2026-08-24): auto-open the backup reveal ONCE on mount —
   // the unfilled "BACKED UP" stamp's destination (Wallet sets it when routing from the
   // passport). A manual gear-open (absent/false) keeps the normal two-step confirm gate.
@@ -457,6 +461,33 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
                       {choice === 'light' ? <IconSun size={14} color={C.sub} /> : choice === 'dark' ? <IconMoon size={14} color={C.sub} /> : <IconAuto size={14} color={C.sub} />}
                       <Text style={active ? S.railPillTextActive : S.railPillText}>{label}</Text>
                     </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+
+          {/* Language, directly under Theme — the other "how the app presents itself" preference.
+              Every option names itself in its OWN language: a user who cannot read the current UI
+              language must still be able to find their way out, which "German/French/Spanish"
+              rendered in Spanish would not allow. Auto follows the device and is the way back. */}
+          <View style={S.settingsSection}>
+            <Text style={S.inputLabel}>{M.settings.language.label}</Text>
+            <View style={S.railRow} role="radiogroup" accessibilityLabel={M.settings.language.label}>
+              {([null, ...LOCALES] as const).map((choice) => {
+                const active = localeChoice === choice;
+                const label = choice === null ? M.settings.language.auto : LOCALE_ENDONYM[choice];
+                return (
+                  <Pressable
+                    key={choice ?? 'auto'}
+                    testID={choice === null ? 'btn-lang-auto' : `btn-lang-${choice}`}
+                    style={[S.railPill, active && S.railPillActive]}
+                    onPress={() => onSetLocale(choice)}
+                    accessibilityRole="radio"
+                    accessibilityLabel={M.settings.language.choice(label)}
+                    accessibilityState={{checked: active, disabled: false}}
+                  >
+                    <Text style={active ? S.railPillTextActive : S.railPillText}>{label}</Text>
                   </Pressable>
                 );
               })}

@@ -131,7 +131,18 @@ export class Driver {
     const context = await browser.createBrowserContext();
     const page = await context.newPage();
     await page.setViewport({ ...VIEWPORT, width: o.width ?? VIEWPORT.width, height: o.height ?? VIEWPORT.height });
-    if (o.timezone !== undefined) await page.emulateTimezone(o.timezone);
+    // Pin the clock and the language, always. Both were previously inherited from whatever the host
+    // happened to be set to, which is a flake waiting for the first developer in a non-UTC,
+    // non-English environment: the app resolves its catalog from the device locale, so a German
+    // laptop would render the whole suite in German and fail 81 flows at the first assertion, and
+    // every ledger timestamp shifts with the host zone. A flow that WANTS another locale asks for
+    // it (`setup({locale: 'de-DE'})`); the default is the one the assertions are written against.
+    await page.emulateTimezone(o.timezone ?? 'UTC');
+    // `Emulation.setLocaleOverride` is what drives `Intl` — which is exactly where the app reads
+    // the device tag from (`i18n/locale.ts` deviceLocaleTag). Chrome's `--lang` flag would not do
+    // it: the browser is shared across the whole run, so a per-flow launch flag is not available.
+    const cdp = await page.createCDPSession();
+    await cdp.send('Emulation.setLocaleOverride', { locale: o.locale ?? 'en-US' });
     // Wave-4 dual theme: emulate an OS dark scheme (flows pass opts.dark). Applied at the PAGE
     // level so window.matchMedia('(prefers-color-scheme: dark)') — which RNW's Appearance/useColorScheme
     // and the hosts' CSS @media blocks key on — reports dark BEFORE any page script runs.

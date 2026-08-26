@@ -207,6 +207,8 @@ describe('Passport deep-link wiring (the SettingsSheet host)', () => {
   const SHEET_DEFAULTS = {
     relayUrl: 'http://127.0.0.1:4391',
     setRelayUrl: () => {},
+    localeChoice: null,
+    onSetLocale: () => {},
     onClose: () => {},
     onReset: () => {},
     onRestore: async () => {},

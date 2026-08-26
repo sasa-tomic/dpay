@@ -40,9 +40,10 @@ import {Walkthrough} from './Walkthrough';
 import {AppModal} from './AppModal';
 import {IconArrowDownLeft, IconChevronDown, IconClock, IconMoon, IconQr, IconSettings, IconSun} from './icons';
 import {nextTheme, themeLabel, type ThemeOverride} from '../config/theme';
+import type {LocaleChoice} from '../i18n/locale';
 import type {ReadinessKey} from '../lib/readiness';
 
-export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, resolvedTheme, themeChoice, onSetTheme}: {identity: Identity; relayUrl: string; setRelayUrl: (s: string) => void; onReset: () => void; onRestore: (id: Identity) => Promise<void>; resolvedTheme: ThemeOverride; themeChoice: ThemeOverride | null; onSetTheme: (t: ThemeOverride | null) => void}) {
+export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, resolvedTheme, themeChoice, onSetTheme, localeChoice, onSetLocale}: {identity: Identity; relayUrl: string; setRelayUrl: (s: string) => void; onReset: () => void; onRestore: (id: Identity) => Promise<void>; resolvedTheme: ThemeOverride; themeChoice: ThemeOverride | null; onSetTheme: (t: ThemeOverride | null) => void; localeChoice: LocaleChoice; onSetLocale: (l: LocaleChoice) => void}) {
   const [mode, setMode] = useState<'pay' | 'receive' | 'ledger'>('pay');
   // Deeplink prefill (item 6): a `dpay:req/<blob>` (or the web `?req=<blob>` mirror) sets the raw
   // base64url blob + flips mode to 'pay'; PayMode consumes it via its prefill effect (which reuses
@@ -805,6 +806,8 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
            username={identity.username}
             themeChoice={themeChoice}
             onSetTheme={onSetTheme}
+            localeChoice={localeChoice}
+            onSetLocale={onSetLocale}
             openBackup={settingsOpenBackup}
             onOpenStep={goToPassportStep}
          />

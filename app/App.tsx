@@ -15,15 +15,17 @@
  * palette, format helpers, constants, hooks, services, styles, and all presentational components —
  * lives under `./{config,lib,hooks,services,styles.ts,components}`. See `2026-07-31-app-split-plan.md`.
  */
-import {useCallback, useEffect, useState} from 'react';
+import {useCallback, useEffect, useMemo, useState} from 'react';
 import {SafeAreaView, ActivityIndicator, View, useColorScheme} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {RELAY_DEFAULT} from './relayConfig';
 import {C, DARK, LIGHT} from './config/palette';
-import {STORAGE_KEY, RELAY_STORAGE_KEY, THEME_STORAGE_KEY} from './config/constants';
+import {STORAGE_KEY, RELAY_STORAGE_KEY, THEME_STORAGE_KEY, LOCALE_STORAGE_KEY} from './config/constants';
 import {parseTheme, resolveTheme, themePersistValue, type ThemeOverride} from './config/theme';
 import {runSolSelfCheck} from './solana/selfcheck';
 import {runIntlSelfCheck} from './i18n/selfcheck';
+import {applyLocale} from './i18n';
+import {type LocaleChoice, deviceLocaleTag, localePersistValue, parseLocale} from './i18n/locale';
 import type {Identity} from './lib/types';
 import {DpayCore} from './services/native';
 import {S, applyPalette} from './styles';
@@ -38,6 +40,10 @@ export default function App() {
   // wins from then on. The header flip pins Light/Dark; Settings offers the full 3-way choice.
   const [themeChoice, setThemeChoice] = useState<ThemeOverride | null>(null);
 
+  // Language, on the same two-tier model as the theme: `null` = Auto (follow the device locale);
+  // an explicit choice pins the catalog and wins from then on.
+  const [localeChoice, setLocaleChoice] = useState<LocaleChoice>(null);
+
   // Wave-4 dual theme + Wave-7 manual override: resolve stored choice + OS scheme → the palette.
   // styles.ts already resolved the OS theme at module load (synchronous Appearance probe → first
   // paint is correct, no light-flash); this keeps the live palette in sync when the scheme CHANGES
@@ -51,6 +57,13 @@ export default function App() {
   const themeOverride = resolveTheme(themeChoice, scheme);
   applyPalette(themeOverride === 'dark' ? DARK : LIGHT);
 
+  // The same idiom, one layer over: resolve the catalog + number/date conventions and install them
+  // in the render body, so children read the right language on THIS render rather than the next.
+  // The device tag is read once — Android restarts the activity when the system language changes,
+  // so re-probing every render would buy nothing.
+  const deviceTag = useMemo(() => deviceLocaleTag(), []);
+  const activeLocale = applyLocale(localeChoice, deviceTag);
+
   // Load identity + the persisted relay URL + the persisted theme choice on mount. All live in
   // AsyncStorage; the relay URL defaults to `relayConfig`'s value (the ?relay= override in the
   // harness, or the codegen'd prod URL) and the theme to "follow the OS scheme" when no persisted
@@ -60,15 +73,17 @@ export default function App() {
       AsyncStorage.getItem(STORAGE_KEY),
       AsyncStorage.getItem(RELAY_STORAGE_KEY),
       AsyncStorage.getItem(THEME_STORAGE_KEY),
+      AsyncStorage.getItem(LOCALE_STORAGE_KEY),
     ])
-      .then(([idV, relayV, themeV]) => {
+      .then(([idV, relayV, themeV, localeV]) => {
         setIdentity(idV ? JSON.parse(idV) : null);
         if (typeof relayV === 'string' && relayV.length > 0) setRelayUrl(relayV);
         setThemeChoice(parseTheme(themeV)); // null (incl. legacy 'auto') → keep following the OS scheme
+        setLocaleChoice(parseLocale(localeV)); // null (incl. 'system' or a dropped locale) → follow the device
       })
       .catch((e: unknown) => {
         // No silent errors: log with context, then fall back to a safe empty identity.
-        console.log(`[dpay] failed to load identity/relay/theme: ${e instanceof Error ? e.message : String(e)}`);
+        console.log(`[dpay] failed to load identity/relay/theme/locale: ${e instanceof Error ? e.message : String(e)}`);
         setIdentity(null);
       });
   }, []);
@@ -89,6 +104,14 @@ export default function App() {
     setThemeChoice(t);
     AsyncStorage.setItem(THEME_STORAGE_KEY, themePersistValue(t)).catch((e: unknown) => {
       console.log(`[dpay] failed to persist theme override: ${e instanceof Error ? e.message : String(e)}`);
+    });
+  }, []);
+
+  // Set the language choice AND persist it — same best-effort pattern. Auto persists as 'system'.
+  const persistLocale = useCallback((l: LocaleChoice) => {
+    setLocaleChoice(l);
+    AsyncStorage.setItem(LOCALE_STORAGE_KEY, localePersistValue(l)).catch((e: unknown) => {
+      console.log(`[dpay] failed to persist language choice: ${e instanceof Error ? e.message : String(e)}`);
     });
   }, []);
 
@@ -130,8 +153,8 @@ export default function App() {
   // deliberately NOT asserted (exact glyphs) and what is absent from Hermes (PluralRules, Locale).
   useEffect(() => {
     const r = runIntlSelfCheck();
-    console.log(`DPAY_INTL_SELFCHECK ${r.ok ? `PASS locale=${r.deviceLocale}` : `FAIL ${r.reason}`}`);
-  }, []);
+    console.log(`DPAY_INTL_SELFCHECK ${r.ok ? `PASS locale=${r.deviceLocale} catalog=${activeLocale}` : `FAIL ${r.reason}`}`);
+  }, [activeLocale]);
 
   const onReset = useCallback(async () => { await AsyncStorage.removeItem(STORAGE_KEY); setIdentity(null); }, []);
 
@@ -153,5 +176,5 @@ export default function App() {
   if (identity === null) {
     return <View style={S.screenFrame}><Onboarding relayUrl={relayUrl} onCreated={setIdentity} /></View>;
   }
-  return <View style={S.screenFrame}><Wallet identity={identity} relayUrl={relayUrl} setRelayUrl={persistRelay} onReset={onReset} onRestore={onRestore} resolvedTheme={themeOverride} themeChoice={themeChoice} onSetTheme={persistTheme} /></View>;
+  return <View style={S.screenFrame}><Wallet identity={identity} relayUrl={relayUrl} setRelayUrl={persistRelay} onReset={onReset} onRestore={onRestore} resolvedTheme={themeOverride} themeChoice={themeChoice} onSetTheme={persistTheme} localeChoice={localeChoice} onSetLocale={persistLocale} /></View>;
 }
