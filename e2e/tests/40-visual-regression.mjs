@@ -75,6 +75,12 @@ export async function run() {
     // Determinism: the home TripStrip flips live when the fundsReady stamp's notify lands
     // (the journey live seam) — wait for the settled 3-of-4 state before pixel capture.
     await driver.findByTestID('trip-strip-dot-fundsReady-filled', { timeoutMs: 5_000 });
+    // …and let the strip's own 260ms entrance fade reach rest. The dot appearing only means the
+    // strip MOUNTED; capturing mid-fade samples a partial opacity, which is why this surface
+    // drifted between 0.2% and 0.55% run to run on identical code. Dark surfaces this first — a
+    // bright strip against black moves far more per-channel than the same strip on white.
+    // Same idiom as the coach-card settle below.
+    await new Promise((r) => setTimeout(r, 500));
 
     // 2. Capture wallet-Pay surface.
     await driver.screenshot(SURFACES[0].capture);
