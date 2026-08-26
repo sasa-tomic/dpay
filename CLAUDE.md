@@ -30,6 +30,16 @@ When in doubt about sequencing, **pick the work that gets a user real native BTC
 - **No NNS/SNS handoff.** Moving the canister(s) or the relay under NNS/SNS control is **not realistic until critical mass** — we will not ask the general ICP community to vote on our upgrades. Treat "hand the controller to an SNS/blackhole" as a **deferred end-state**, never a near-term plan item or a blocking gate.
 - **Highest architectural objective: safe WITHOUT governance handoff.** The system must be as safe as we can make it while the founder still holds the canister and relay keys. Concretely: least-authority in code (per-op exact-amount approvals, bounded mint, one-way catalog locks), small rotatable scoped keys (faucet controller seed ≠ root keys), cold-storage discipline for the deploy/controller keys, and public verifiability (pinned module hashes) so upgrades are at least *detectable*. Full strategy: `docs/GOVERNANCE.md`.
 
+## Non-negotiable: external claims are true, and vision is labelled as vision (set 2026-08-26)
+
+Applies to every outward-facing artifact — investor email, pitch, deck, landing page, app-store copy, video script, demo narration.
+
+- **Never invent the past.** No anecdote that did not happen, no user or merchant who does not exist, no traction that was not measured. A hypothetical, an illustration, or a sentence sitting in a draft is not evidence — never promote one to fact. Both failure modes are real and both happened while drafting the 2026-08-26 investor email: a fabricated "last week I paid for a coffee with it", and an example-of-a-lie ("I paid for a pizza with this") mistaken for a report of a real payment. When a claim about the past would strengthen an artifact, ask for the primary record; do not reconstruct it.
+- **Never overstate the present.** A capability is described in the present tense only when it is verified against a primary source or a live run — the shipped build, a live endpoint, a green gate. "Built" is not "shipped", "wired" is not "proven", and a passing test is not a working product.
+- **Vision is allowed, and is stated as vision.** "We don't have that yet, and here is where it goes" is honest and is what investors expect. The mechanism is tense: future/roadmap verbs for what is planned, present tense reserved for what is verified. Never blur the two inside one sentence.
+- **A roadmap claim must be checked for feasibility before it is made.** Does the architecture allow it, do the non-negotiables permit it, does the dependency actually exist? An infeasible promise is a lie with a delay. Where feasibility is genuinely unknown, say that it is being explored.
+- **Artifacts must not contradict each other.** Each one being individually true is not enough. When two disagree, find which is wrong and fix that one — never paper over it with a caveat.
+
 ## Non-negotiable: how Claude must be able to iterate
 
 These are hard requirements, **not preferences**. Do not accept a design that violates them — restructure the design instead.
