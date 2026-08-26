@@ -118,7 +118,7 @@ The signature binds the **exact amount + payee + request**, so consent is unambi
 Hard requirement, **not a preference**. Reject any design that violates it — restructure instead. This is what keeps dpay an *interface*, not a money transmitter / VASP / CASP, and it is why custody, KYC, and licensing stay out of scope.
 
 - **No custody.** The user's key lives on their device. dpay (the company, the relay, any operator) must never hold a user seed, an omnibus account, or funds it can move.
-- **No swaps.** dpay does not exchange one asset for another on a user's behalf, and does not quote, route, or take price risk. Ever.
+- **No swaps by dpay.** dpay does not exchange one asset for another on a user's behalf, and does not take price risk. Conversion by a licensed third party the user authorizes directly is already the plan, not an exception (`positioning.md`). Whether dpay may quote, route, or take a cut on that third party's conversion is **open, not decided** — see `monetization.md`.
 - **No exchange API keys.** dpay must never hold a user's CEX/DEX credentials and must never initiate a trade or withdrawal on a user's account. Holding withdrawal-capable credentials *is* control, and control *is* custody — same liability, plus a credential honeypot. If a third party must move funds, the **user** authorizes it directly with that third party.
 - **The canister cannot move funds without a user signature.** No admin transfer, no pause-and-seize, no privileged path. And the controller must not be a company key — blackhole it or hand it to an NNS/SNS-governed controller, or the "we can't touch your funds" claim is a promise rather than a property. Treat "who controls the canister" as a money-critical design question, not ops trivia.
 

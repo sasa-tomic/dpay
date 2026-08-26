@@ -6,11 +6,12 @@ This is the direction we intend to take on fees. Not in the PoC.
 
 **We monetize the payment rail we built. We never monetize movement of funds we don't control.**
 
-That sentence is the whole strategy. It is coherent to a regulator (we charge for software and a rail, not for transmitting value), coherent to an investor (a real take rate on a real product), and it is why the swap is free.
+That sentence is the whole strategy. It is coherent to a regulator (we charge for software and a rail, not for transmitting value), and coherent to an investor (a real take rate on a real product).
 
-Corollaries, all hard:
+Corollaries (each carries its own strength — read the bullet, don't assume):
 
-- **No cut on swaps. Ever.** Not a fee, not a spread, not client-side, not server-side. See the non-custodial non-negotiable in `CLAUDE.md`.
+- **dpay never swaps on its own book, and never takes price risk.** See the non-custodial non-negotiable in `CLAUDE.md`.
+- **A cut on a third party's swap is open, not decided.** Taking a fee or spread on a conversion a licensed partner performs was foreclosed here by prose (`0aa1bdf`), not by a decision. It is real revenue — MetaMask is the worked example, though verify their current fee and what it actually earns before relying on it. It is also **separable from routing**: we can take a cut without routing, or route without taking a cut. Routing is the clause with legal weight, because picking the provider or displaying a rate is what turns a wallet into a broker. Decide both deliberately; do not inherit either.
 - **The payer never pays.** Ever. Not in P2P, not at a merchant.
 - **Taking payments is free.** The recipient pays only when they opt into add-ons — whoever they are, whatever their size.
 
