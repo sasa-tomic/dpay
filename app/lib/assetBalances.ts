@@ -13,6 +13,7 @@
 // an IC asset reads `icBalances[currency]`, SOL reads `solState`, USDC reads `usdcState`. An IC
 // USDC row and the Solana USDC row are financially isolated (invariant #8).
 
+import {M} from '../i18n';
 import {type CurrencyDescriptor, fmtCurrencyAmount} from '../config/catalog';
 import {type SelectableAsset} from '../config/assets';
 import {usd, fmtAsset} from './format';
@@ -37,7 +38,7 @@ export type BalanceStatus = 'ok' | 'zero' | 'absent' | 'unavailable' | 'error' |
 
 // One asset's rendered amount + status. `displayText` is the fully-formatted amount string the UI
 // shows verbatim (e.g. "∂100.00", "0 BTC", "—", "1.50 USDC"). It already includes any offline
-// approximation prefix for DEMO ("~∂91.00") so the header and the sheet read byte-identical text.
+// approximation marker for DEMO ("~∂91.00") so the header and the sheet read byte-identical text.
 export type BalanceView = {displayText: string; status: BalanceStatus};
 
 // The SOL hook status union (mirrors `SolBalanceStatus` from hooks/useSolanaBalances.ts without a
@@ -80,12 +81,14 @@ export function buildAssetBalances(args: {
 }
 
 // DEMO (ic:0) — the primary play-money currency. NEVER marked 'zero' (it is always faucet-top-up-able,
-// so dimming it would mislead); null balance ⇒ '—'. The offline "~" approximation prefix is baked in
+// so dimming it would mislead); null balance ⇒ '—'. The offline approximation marker is baked in
 // so the header and the Balances row read the same text (the offline hand-off debits DEMO and the
-// poll resets on reconnect; "~" tells the user the number is their best-known, not authoritative).
+// poll resets on reconnect; the marker tells the user the number is their best-known, not
+// authoritative). The marker itself is catalog copy — "~" is not how every locale writes "about".
 function demoView(primaryBalance: string | null, online: boolean): BalanceView {
   if (primaryBalance == null) return {displayText: '—', status: 'ok'};
-  return {displayText: `${online ? '' : '~'}${usd(primaryBalance)}`, status: 'ok'};
+  const amount = usd(primaryBalance);
+  return {displayText: online ? amount : M.wallet.balance.approxAmount(amount), status: 'ok'};
 }
 
 // A non-DEMO IC catalog asset. A not-yet-polled asset defaults to '0' (the poll seeds '0'); funded ⇒

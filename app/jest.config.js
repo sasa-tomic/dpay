@@ -1,3 +1,9 @@
+// Pin the timezone before any test module constructs a `Date`. `fmtTime` renders every ledger row
+// through the device clock, so its Today/Yesterday boundary and its hour digits are functions of
+// the host TZ — unpinned, the same assertion passes in Zurich and fails in UTC. Config load is the
+// earliest hook jest offers, and Node caches the zone on first use.
+process.env.TZ = 'UTC';
+
 module.exports = {
   preset: '@react-native/jest-preset',
   setupFiles: ['<rootDir>/jest.setup.js'],

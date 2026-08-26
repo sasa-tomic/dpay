@@ -10,11 +10,17 @@
 // math PADDED to 2 fractional places (the currency-style fixed-width display the wallet asserts —
 // `∂25.00`, never `∂25`). Never `Math.floor`/`parseFloat` (lossy above 2^53). The DEMO display stays
 // fixed-width, so this is a separate UI concern (per amount.ts's module doc).
-import {parseDecimalToUnits} from './amount';
+import {parseDecimalToUnits, type AmountResult} from './amount';
 import {M} from '../i18n';
+import {
+  canonicalizeDecimal, decimalSep, formatClock, formatMonthDay, formatMonthDayYear, groupDigits,
+  placeCurrency,
+} from '../i18n/intl';
 export const usd = (c: string) => {
   const n = BigInt(c);
-  return `∂${(n / 100n).toString()}.${(n % 100n).toString().padStart(2, '0')}`;
+  const whole = groupDigits((n / 100n).toString());
+  const frac = (n % 100n).toString().padStart(2, '0');
+  return placeCurrency('∂', `${whole}${decimalSep()}${frac}`);
 };
 export const short = (h: string) => `${h.slice(0, 8)}…`;
 // The MINT_ACCOUNT sentinel — 32 bytes of 0xFF, hex-encoded as 64 `f`s. The canister records faucet
@@ -26,9 +32,19 @@ export const isMintSentinel = (h: string) => h.toLowerCase() === MINT_HEX;
 // "Yesterday, 1:19 PM" / "Aug 4" / "Aug 4, 2025" (older rows). The durable history rows are sourced
 // from the ledger (which settle on `ic time / 1e9`). The bare "13:19 GMT+2" form was a developer
 // affordance (audit P2): most consumer wallets render locale-relative time, and a raw GMT offset
-// means nothing to a non-technical user. No Intl API (trimmed on some RN builds) — the formatter
-// uses Date math only (same-day / yesterday / same-year / older), so it is Hermes-safe.
-const _MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// means nothing to a non-technical user.
+//
+// The clock, the month name and the day/month ORDER all come from `Intl` (see i18n/intl.ts). The
+// previous hand-rolled version pinned a 12-hour clock, English AM/PM, English month abbreviations
+// and US month-before-day order, on the stated grounds that `Intl` is "trimmed on some RN builds".
+// That belief was tested and is false for this app: the device gate (`DPAY_INTL_SELFCHECK`) proves
+// Hermes ships real per-locale ICU data, and it printed a German device tag doing it. What IS
+// absent from Hermes is `Intl.PluralRules`/`Intl.Locale`/`Intl.RelativeTimeFormat` — none of which
+// are used here.
+//
+// The `, ` between date and time is punctuation that reads correctly in all four shipping locales.
+// A locale that joins them differently (Japanese wants no comma) would need a catalog key; the
+// relative-day words already have one because "Today" moves position, which a joiner does not.
 const _isSameCalendarDay = (a: Date, b: Date) =>
   a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 export const fmtTime = (ts: number) => {
@@ -39,15 +55,12 @@ export const fmtTime = (ts: number) => {
   const d = new Date(ts * 1000);
   if (isNaN(d.getTime())) return '—';
   const now = new Date();
-  const hh12 = ((d.getHours() + 11) % 12) + 1; // 1..12
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  const ampm = d.getHours() < 12 ? 'AM' : 'PM';
-  const timeStr = `${hh12}:${mm} ${ampm}`;
-  if (_isSameCalendarDay(d, now)) return `Today, ${timeStr}`;
+  const timeStr = formatClock(d);
+  if (_isSameCalendarDay(d, now)) return M.time.today(timeStr);
   const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-  if (_isSameCalendarDay(d, yesterday)) return `Yesterday, ${timeStr}`;
-  if (d.getFullYear() === now.getFullYear()) return `${_MONTHS[d.getMonth()]} ${d.getDate()}, ${timeStr}`;
-  return `${_MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+  if (_isSameCalendarDay(d, yesterday)) return M.time.yesterday(timeStr);
+  if (d.getFullYear() === now.getFullYear()) return `${formatMonthDay(d)}, ${timeStr}`;
+  return formatMonthDayYear(d);
 };
 export const nowSecs = () => Math.floor(Date.now() / 1000);
 // 128-bit payment nonce as lowercase hex. Uses the cryptographic RNG (`crypto.getRandomValues`,
@@ -115,9 +128,13 @@ export function fmtAsset(raw: string, decimals: number, unit: string, displayDec
   for (let i = 0; i < decimals; i++) scale *= 10n;
   const wholePart = n / scale;
   const fracPart = n % scale;
-  if (dd === 0) return `${wholePart.toString()} ${unit}`;
+  // The ticker rides as a suffix in every locale — "0.0005 BTC" is how crypto is written
+  // everywhere, and it is a unit, not a currency symbol whose side the locale gets to choose.
+  // Only the separators inside the number are the locale's business.
+  const whole = groupDigits(wholePart.toString());
+  if (dd === 0) return `${whole} ${unit}`;
   const fracStr = fracPart.toString().padStart(decimals, '0').slice(0, dd).padEnd(dd, '0');
-  return `${wholePart.toString()}.${fracStr} ${unit}`;
+  return `${whole}${decimalSep()}${fracStr} ${unit}`;
 }
 // Parse a user-entered amount (decimal string) into integer smallest-units at the given decimal
 // count, as a decimal-digit STRING. Drives the merchant's currency-aware request encoder (ReceiveMode
@@ -125,6 +142,21 @@ export function fmtAsset(raw: string, decimals: number, unit: string, displayDec
 // withdrawal amount entry (WithdrawSheet/SolanaWithdrawSheet). MC1 units 2-4: delegates to the exact
 // BigInt parser — a rejection → '0'; the caller gates on a non-zero result.
 export function toUnits(s: string, decimals: number): string {
-  const r = parseDecimalToUnits(s, decimals);
+  const r = parseUserAmount(s, decimals);
   return r.ok && r.raw !== '0' ? r.raw : '0';
+}
+
+/**
+ * The ONE place a human-typed amount meets the parser: canonicalise what the keyboard produced,
+ * then hand it to the exact BigInt parser. Every amount field routes through here (directly, or
+ * via `toUnits` when the caller only wants the raw units), so the comma-decimal keyboards can
+ * never again be handled in one field and forgotten in another.
+ *
+ * `parseDecimalToUnits` itself stays untouched on purpose — it is byte-pinned against
+ * `dpay_core::parse_decimal_to_units` by the cross-validation flow, and its contract is a
+ * CANONICAL decimal string. Locale input handling belongs at the UI boundary, not inside a
+ * parity-checked parser.
+ */
+export function parseUserAmount(s: string, decimals: number): AmountResult {
+  return parseDecimalToUnits(canonicalizeDecimal(s), decimals);
 }

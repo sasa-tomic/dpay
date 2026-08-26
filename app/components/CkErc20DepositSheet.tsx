@@ -4,7 +4,8 @@ import {QrCode} from './QrCode';
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {POLL, DEPOSIT_TIMEOUT_MS, QR_SIZE} from '../config/constants';
-import {parseDecimalToUnits, cmpRaw} from '../lib/amount';
+import {cmpRaw} from '../lib/amount';
+import {parseUserAmount} from '../lib/format';
 import type {Identity} from '../lib/types';
 import type {FamilyDisplay} from '../config/catalog';
 import {type CkErc20OnrampParams, ckerc20OnrampParams} from '../services/relay';
@@ -257,7 +258,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
     if (!provider) { setErr(M.deposit.erc20.walletDisconnected); return; }
     // Parse the human amount into the smallest units (USDC = 6 decimals). MC1 units 2-4: use the
     // exact BigInt parser — `parseFloat`/`Math.pow` are lossy above 2^53.
-    const parsed = parseDecimalToUnits(amount, decimals);
+    const parsed = parseUserAmount(amount, decimals);
     if (!parsed.ok || parsed.raw === '0') { setErr(M.deposit.erc20.amountRequired); return; }
     const unitBig = BigInt(parsed.raw);
     // The deposit lands at the USER's own IC principal with the subaccount OMITTED (all-zeros =
