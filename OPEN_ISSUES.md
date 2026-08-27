@@ -217,10 +217,11 @@ candidate circles only `○`/`●`-family basics are covered; `Δ Ω` are grotes
 > both rails (on a FRESH `dpay_api36` emulator — the external `nurbly2` AVD has a broken camera
 > HAL; `campreview` `tap_rid` hardened with bounded retry vs onboarding anchor races), `just
 > ondevice` 11/11. R6 IMPORTANT-8 audit: privacy dark remnant + dead plex_mono_600 payload fixed.
-> PROD IS BEHIND HEAD: ship via `just deploy-ic && just apk && just up`.
-> NOTE: prod is now BEHIND HEAD by the overhaul commits (last prod ship = `df846f8`) — founder
-> may run `just deploy-ic && just apk && just up` to ship the new look; nothing in the overhaul
-> touches the canister, so `deploy-ic` is a no-op byte-refresh.
+> PROD STATE (checked, not asserted — see AGENTS.md "Prod state is CHECKED, never asserted"):
+> live `/api/v1/version` reported `4195e4c` on 2026-08-27, so the overhaul commits and everything
+> through the landing demo-video removal ARE SHIPPED (the old "last prod ship = `df846f8`" note
+> is superseded). Current drift: `just verify-relay` → BEHIND by the `commit_date` endpoint commit
+> (`237dd94`) awaiting the next `just deploy-ic && just apk && just up`.
 
 ### FOUNDER-OWNED (DO NOT NAG — one dashboard click / one token edit)
 
@@ -521,10 +522,10 @@ if a native-ETH withdrawal ever fails on prod with a minter reject mentioning
 > rerun + full suite ×2; visual baselines reseeded for the intentional CTA/amount/glyph changes)
 > · `ANDROID_SERIAL=9cdf67b8 just app` DPAY_SELFCHECK + DPAY_SOL_SELFCHECK PASS · `just
 > ondevice` 10/10 (emulator) · `just campreview` GREEN both rails (demo 79.3/200.1, sol
-> 80.5/195.1; scan-gate press wired into the script). Prod still BEHIND this work — founder
-> ships (`just deploy-ic && just apk && just up`); the NFC approve + scan-gate changes touch
-> `app/android/**` + `app/services/**` trigger paths, so the device gates above were run, not
-> skipped.
+> 80.5/195.1; scan-gate press wired into the script). PROD STATE (checked 2026-08-27): live
+> `/api/v1/version` = `4195e4c` — this NFC approve + scan-gate work IS SHIPPED (an ancestor of the
+> live commit). The NFC approve + scan-gate changes touched `app/android/**` + `app/services/**`
+> trigger paths, so the device gates above were run, not skipped.
 
 ## Session summary (2026-08-22/23): Trip Ready delight arc — onboarding, coaching, motion, passport — COMPLETE
 
@@ -558,7 +559,10 @@ if a native-ETH withdrawal ever fails on prod with a minter reject mentioning
 **Final gates at HEAD `4c8ccfd`:** `ANDROID_SERIAL=emulator-5554 just app` PASS (DPAY_SELFCHECK + DPAY_SOL_SELFCHECK), `just ondevice` PASSED, `just campreview` GREEN both rails (demo 78.76/195.5, sol 81.53/195.8). Full `just verify` + prod catalog curl re-run by the orchestrator at HEAD — green.
 
 **Residual documented (keep visible):**
-- **PROD IS BEHIND HEAD** — the whole arc (walkthrough → passport, landing, Trust Wallet button, get_btc_address fix) is committed but UNshipped; founder ships via `just deploy-ic && just apk && just up`.
+- **PROD STATE — checked, not asserted** (rule + floor live in AGENTS.md): `/api/v1/version`
+  reported `4195e4c` on 2026-08-27, so the whole arc here (walkthrough → passport, landing,
+  Trust Wallet button, get_btc_address fix) IS SHIPPED. Drift beyond the floor is exactly
+  `git log --oneline <live>..HEAD` — check before claiming anything about prod.
 - The campaign line is single-sourced in `app/config/education.ts`, but `landing.html` carries the literal — pinned byte-identical by relay test `landing_page_tells_the_offline_payment_story`; edit both together.
 - The deferred default-tab/first-impression item (below, 2026-08-10) is only partially addressed: the walkthrough now shapes the first run, but the post-onboarding landing on the Pay scanner remains the intended default (flow 90 pins `pay-tab-default-landing`) — still deferred as a deliberate choice, not an oversight.
 
