@@ -1,9 +1,11 @@
 //! Build-time baking for dpay-relay:
 //!
-//! 1. The current git commit (`DPAY_BUILD_COMMIT`) so the live `/api/v1/version` endpoint can
-//!    report EXACTLY which source the running image was built from. This is the deploy-fidelity
-//!    primitive: comparing the live commit to `git rev-parse HEAD` catches a stale image shipping
-//!    while `just check` is green (the bug class `verify-deploy.sh` closes for the canister).
+//! 1. The current git commit (`DPAY_BUILD_COMMIT`) + its committer date (`DPAY_BUILD_DATE`) so
+//!    the live `/api/v1/version` endpoint can report EXACTLY which source the running image was
+//!    built from and when that source was committed. This is the deploy-fidelity primitive:
+//!    comparing the live commit to `git rev-parse HEAD` catches a stale image shipping while
+//!    `just check` is green (the bug class `verify-deploy.sh` closes for the canister); the date
+//!    is its human-readable half ("when was prod last updated").
 //!
 //! 2. The prod web build of the REAL app (`e2e/dist-prod`, produced by `just web` /
 //!    `vite build --mode web-prod`) → a generated `$OUT_DIR/web_assets.rs` static table the
@@ -26,23 +28,29 @@ fn main() {
     embed_web_dist();
 }
 
-/// Bake the git commit (fallback `"unknown"` for release tarballs — the build never fails on git).
+/// Bake the git commit + its committer date (fallback `"unknown"` for release tarballs — the
+/// build never fails on git). The date is the commit's, not the build's: it stays deterministic
+/// across rebuilds of the same source, so it pairs 1:1 with the SHA above.
 fn bake_commit() {
     // Rerun when the ref moves (a commit advances HEAD). A missing .git/HEAD (release tarball) is
     // harmless — cargo simply never triggers the rerun on it, and the fallback below applies.
     println!("cargo:rerun-if-changed=.git/HEAD");
 
-    let commit = Command::new("git")
-        .args(["rev-parse", "HEAD"])
+    let out = Command::new("git")
+        .args(["show", "-s", "--format=%H%n%cI", "HEAD"])
         .output()
         .ok()
         .filter(|o| o.status.success())
         .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "unknown".to_string());
+        .unwrap_or_default();
+    let mut lines = out.lines();
+    let commit_raw = lines.next().unwrap_or("").trim();
+    let date_raw = lines.next().unwrap_or("").trim();
+    let commit = if commit_raw.is_empty() { "unknown" } else { commit_raw };
+    let date = if date_raw.is_empty() { "unknown" } else { date_raw };
 
     println!("cargo:rustc-env=DPAY_BUILD_COMMIT={commit}");
+    println!("cargo:rustc-env=DPAY_BUILD_DATE={date}");
 }
 
 /// Map a dist filename to its HTTP content type (the closed set vite emits for this app).

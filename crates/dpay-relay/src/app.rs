@@ -807,12 +807,14 @@ struct HealthBody {
 }
 
 /// `GET /api/v1/version` response — the running image's source identity. `commit` is the git SHA
-/// baked by `build.rs` (deploy-fidelity).
+/// and `commit_date` its committer date, both baked by `build.rs` (deploy-fidelity: the date is
+/// the human-readable "when was prod last updated" half of the pair).
 #[derive(Serialize)]
 struct VersionBody {
     name: &'static str,
     version: &'static str,
     commit: &'static str,
+    commit_date: &'static str,
 }
 
 /// Response of BOTH faucet builds (test-helpers fake credit + agent canister mint):
@@ -922,6 +924,7 @@ async fn version() -> Response {
         name: "dpay-relay",
         version: env!("CARGO_PKG_VERSION"),
         commit: env!("DPAY_BUILD_COMMIT"),
+        commit_date: env!("DPAY_BUILD_DATE"),
     }))
         .into_response()
 }

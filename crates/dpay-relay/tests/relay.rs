@@ -136,10 +136,11 @@ async fn health_ok() {
     assert_eq!(body["status"], "ok");
 }
 
-/// `GET /api/v1/version` reports the relay's name + pkg version + the git commit baked by `build.rs`.
-/// The commit is the deploy-fidelity primitive (verify-relay-version.sh compares it to HEAD); this
-/// test pins the route's shape + that the commit is present (non-empty), so a future change that
-/// drops the build.rs wiring surfaces here.
+/// `GET /api/v1/version` reports the relay's name + pkg version + the git commit and its
+/// committer date baked by `build.rs`. The commit is the deploy-fidelity primitive
+/// (verify-relay-version.sh compares it to HEAD); this test pins the route's shape + that both
+/// baked fields are present (non-empty), so a future change that drops the build.rs wiring
+/// surfaces here.
 #[tokio::test]
 async fn version_route_reports_baked_commit() {
     let (state, _led) = state_from(ledger());
@@ -159,6 +160,13 @@ async fn version_route_reports_baked_commit() {
     assert!(
         commit.len() == 40 && commit.chars().all(|c| c.is_ascii_hexdigit()),
         "commit must be a 40-char SHA when built in a git checkout, got {commit:?}"
+    );
+    // The date is the commit's ISO-8601 committer date (`git show -s --format=%cI`), e.g.
+    // "2026-08-27T09:41:00+02:00" — starts with the 4-digit year. "unknown" only outside git.
+    let date = body["commit_date"].as_str().expect("commit_date present");
+    assert!(
+        date.starts_with("20") || date == "unknown",
+        "commit_date must be an ISO date (git checkout) or \"unknown\", got {date:?}"
     );
 }
 
