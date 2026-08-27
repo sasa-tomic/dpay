@@ -15,7 +15,7 @@
 //      strings on BOTH sides (payee credit + payer debit).
 //
 // This is IMPOSSIBLE through `number`: `Number("9007199254740993") === 9007199254740992`.
-import { setup, assert, assertEq, getBalance, accountOf, onboardWallet, railTransfer } from '../harness/lib.mjs';
+import { setup, assert, assertEq, getBalance, icpCatalog, accountOf, onboardWallet, railTransfer } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, decodeRequest, buildRequestQR, icpPrincipalBytes, icpTransferArgBytes, icpSignUpdate } from '../harness/wire.mjs';
 
 // 2^53 + 1 — the canonical IEEE-754 loss probe. Number(9007199254740993) === 9007199254740992 (lossy);
@@ -66,7 +66,7 @@ export async function run() {
 
     // --- 3. SIGN on the rail: the icrc1_transfer arg carries the >2^53 amount as uleb128, and
     // the SIGNED ENVELOPE embeds those arg bytes verbatim (byte-exact containment proof). --------
-    const catalog = (await (await fetch(`${relayBaseURL}/api/v1/currencies`)).json()).currencies;
+    const catalog = await icpCatalog(relayBaseURL);
     const ledger = catalog.find((c) => c.currency === 0).ledger;
     const arg = icpTransferArgBytes(icpPrincipalBytes(bobHex), BigInt(BIG_RAW), {fee: null, memoHex: nonce});
     const argHex = Buffer.from(arg).toString('hex');

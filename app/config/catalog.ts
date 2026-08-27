@@ -3,20 +3,30 @@ import {base, fmtAsset, usd} from '../lib/format';
 import {M} from '../i18n';
 import {BALANCE_TIMEOUT_MS} from './constants';
 import {fetchWithTimeout} from '../services/relay';
+import {SOL_DECIMALS} from '../solana/identity';
+import {USDC_DECIMALS, USDC_MINT_ADDRESS} from '../solana/spl';
 
-// --- currency catalog (M0 + MC1 unit 5 authoritative per-currency metadata) ------------------
+// --- currency catalog (M0 + MC1 unit 5 + catalog v2 network-first) ---------------------------
 // The wallet's runtime source of truth for which assets exist + how to display/fund them. Fetched
-// from GET /api/v1/currencies (the canister's currencies() catalog), cached in AsyncStorage, with a
-// bundled default fallback so the UI renders on a cold/offline first load. Closes issue #7: the
+// from GET /api/v1/currencies (the relay's multi-network composition), cached in AsyncStorage, with
+// a bundled default fallback so the UI renders on a cold/offline first load. Closes issue #7: the
 // ckBTC currency id is RESOLVED from the catalog (the CkBtcUtxo entry) instead of the old hardcoded
 // `DEPOSIT_CURRENCY = 1`, so adding a currency is canister-config-only (no app redeploy).
 //
-// MC1 unit 5: every currency now carries AUTHORITATIVE per-currency metadata (backing symbol,
-// wrapper name, network, decimals, fee, cap, chain id, token contract, per-direction ramp
-// capability) — the canister is the single source of truth, the relay passes it through, the app
-// caches it. This replaces the family-level assumptions that made every CkEthErc20 display as USDC
-// and lets a future ckERC20 (e.g. ckUSDT) render as itself. The FROZEN wire format is untouched
-// (this is catalog metadata, not wire bytes).
+// MC1 unit 5: every currency carries AUTHORITATIVE per-currency metadata (backing symbol, wrapper
+// name, network, decimals, fee, cap, chain id, token contract, per-direction ramp capability) —
+// the canister is the single source of truth for ICRC facts, the relay composes, the app caches.
+//
+// Catalog v2 (2026-08-27): the response is NETWORK-FIRST —
+//   {"networks":[{protocol, name, environment, assets:[...]}, ...]}
+// with icp mainnet + icp testnet + solana mainnet sections. ONE shape everywhere: the parsed
+// response, the AsyncStorage cache, and the bundled fallback are all `NetworkSection[]`, and the
+// flat IC `CurrencyDescriptor[]` consumers expect is DERIVED (`icpCatalogOf`) — never a second
+// hand-maintained shape. Testnet-ness is SERVER-DECLARED: the relay partitions IC rows into
+// mainnet/testnet sections (an IC row is testnet iff `network.is_some() && network ∉
+// {Bitcoin, Ethereum}`; `network == null` DEMO is mainnet-side); the app stamps each row's
+// `testnet` field from its owning section's environment at parse time and NEVER re-infers. The
+// FROZEN payment wire format is untouched (this is catalog metadata, not wire bytes).
 export type MinterFamily = 'CkBtcUtxo' | 'CkEthErc20' | 'CkSol';
 // Per-direction ramp capability. Mirrors the canister's `RampCapability`. `Unavailable` ⇒ the UI
 // shows NO button for that direction (no-swap honesty; ckUSDC offramp is `Unavailable` per Fork-C).
@@ -41,79 +51,218 @@ export type CurrencyDescriptor = {
   gas_ledger: string | null;       // ckETH gas-ledger principal for ckERC20 cash-out (withdraw_erc20); null otherwise
   onramp: RampCapability;          // funding capability; Unavailable ⇒ no "Add money" button
   offramp: RampCapability;         // cash-out capability; Unavailable ⇒ no "Cash out" button
+  // Catalog v2 — SERVER-DECLARED environment: stamped at parse time from the owning icp section's
+  // `environment` (bundled fallback rows carry it too). The app NEVER re-infers this from the
+  // display `network` string — the mainnet/testnet partition rule lives only in the relay.
+  testnet: boolean;
 };
+
+// --- catalog v2: the network-first section shape ----------------------------------------------
+// One section per (protocol, environment). icp sections carry `CurrencyDescriptor` rows (the ICRC
+// facts the facade is the source of truth for — row shape UNCHANGED from the flat catalog era);
+// solana sections carry the device-key rail's display facts. Adding a future chain = a new
+// `protocol` arm + a new app rail module; the catalog/cache/picker plumbing keeps this shape.
+export type SolanaAsset = {
+  token: string;              // 'SOL' | 'USDC' — the SelectableAsset token literal
+  symbol: string;             // display symbol ('SOL' / 'USDC')
+  decimals: number;           // smallest-unit decimal count (SOL=9, USDC=6)
+  mint: string | null;        // SPL mint principal as text; null for native SOL
+  onramp: RampCapability;     // device-key rail: deposit = send to the device address
+  offramp: RampCapability;    // withdraw = sign a transfer from the device key
+};
+export type NetworkSection =
+  | {protocol: 'icp'; name: string; environment: 'mainnet' | 'testnet'; assets: CurrencyDescriptor[]}
+  | {protocol: 'solana'; name: string; environment: 'mainnet' | 'testnet'; assets: SolanaAsset[]};
+// --- the ONE parser (wire JSON → NetworkSection[]) ---------------------------------------------
+// PURE: validates the network-first envelope, maps icp rows field-for-field exactly as the flat
+// catalog era did (IC row shape UNCHANGED), stamps each row's `testnet` from its owning section's
+// `environment`, and validates solana rows to SolanaAsset. The SAME parser serves the live
+// response, the AsyncStorage cache read, and (structurally) the bundled fallback — one code path,
+// one shape. Returns null for anything else (missing/malformed `networks`, a legacy
+// `{currencies:[…]}` envelope, or a response whose every section parsed to zero assets) so callers
+// keep their prior catalog. Malformed SECTIONS/rows are skipped; a section whose `environment` is
+// neither 'mainnet' nor 'testnet' is skipped whole (classification is server-declared — the app
+// never infers it); a section with an unknown `protocol` (a future chain this app version has no
+// rail for) is skipped.
+export function parseNetworkCatalog(j: unknown): NetworkSection[] | null {
+  const networks = (j as {networks?: unknown} | null | undefined)?.networks;
+  if (!Array.isArray(networks)) return null;
+  const sections: NetworkSection[] = [];
+  let assetCount = 0;
+  for (const raw of networks) {
+    if (!raw || typeof raw !== 'object') continue;
+    const s = raw as Record<string, unknown>;
+    const environment: 'mainnet' | 'testnet' | null =
+      s.environment === 'mainnet' ? 'mainnet' : s.environment === 'testnet' ? 'testnet' : null;
+    if (!environment) continue;
+    const name = typeof s.name === 'string' ? s.name : '';
+    const list: unknown = s.assets;
+    if (!Array.isArray(list)) continue;
+    if (s.protocol === 'icp') {
+      const rows: CurrencyDescriptor[] = [];
+      for (const row of list) {
+        const parsed = parseIcpRow(row, environment === 'testnet');
+        if (parsed) rows.push(parsed);
+      }
+      assetCount += rows.length;
+      sections.push({protocol: 'icp', name, environment, assets: rows});
+    } else if (s.protocol === 'solana') {
+      const rows: SolanaAsset[] = [];
+      for (const row of list) {
+        const parsed = parseSolanaRow(row);
+        if (parsed) rows.push(parsed);
+      }
+      assetCount += rows.length;
+      sections.push({protocol: 'solana', name, environment, assets: rows});
+    }
+  }
+  return assetCount > 0 ? sections : null;
+}
+
+// Map one wire icp row → CurrencyDescriptor. Field-for-field the flat-catalog-era mapping (IC row
+// shape is UNCHANGED on the wire); `testnet` comes from the OWNING SECTION, never the row.
+function parseIcpRow(c: unknown, testnet: boolean): CurrencyDescriptor | null {
+  if (!c || typeof c !== 'object') return null;
+  const r = c as Record<string, unknown>;
+  if (typeof r.currency !== 'number') return null;
+  return {
+    currency: r.currency,
+    ledger: typeof r.ledger === 'string' ? r.ledger : '',
+    mintable: !!r.mintable,
+    minter: typeof r.minter === 'string' ? r.minter : null,
+    minter_family: (typeof r.minter_family === 'string' ? r.minter_family : null) as MinterFamily | null,
+    symbol: typeof r.symbol === 'string' ? r.symbol : null,
+    decimals: typeof r.decimals === 'number' ? r.decimals : null,
+    wrapper_name: typeof r.wrapper_name === 'string' ? r.wrapper_name : null,
+    backing_symbol: typeof r.backing_symbol === 'string' ? r.backing_symbol : null,
+    network: typeof r.network === 'string' ? r.network : null,
+    display_decimals: typeof r.display_decimals === 'number' ? r.display_decimals : null,
+    // fee/cap: accept number or string from the relay; carry as string (forward-compatible for
+    // u64 values that exceed Number.MAX_SAFE_INTEGER once MC2 governs them).
+    fee: r.fee == null ? null : String(r.fee),
+    cap: r.cap == null ? null : String(r.cap),
+    chain_id: typeof r.chain_id === 'number' ? r.chain_id : null,
+    token_contract: typeof r.token_contract === 'string' ? r.token_contract : null,
+    gas_ledger: typeof r.gas_ledger === 'string' ? r.gas_ledger : null,
+    onramp: parseRamp(r.onramp),
+    offramp: parseRamp(r.offramp),
+    testnet,
+  };
+}
+
+// Map one wire solana row → SolanaAsset. token/symbol/decimals are required (a row without them
+// renders nothing honestly); mint defaults to null (native SOL); ramps fail closed to Unavailable.
+function parseSolanaRow(a: unknown): SolanaAsset | null {
+  if (!a || typeof a !== 'object') return null;
+  const r = a as Record<string, unknown>;
+  if (typeof r.token !== 'string' || r.token.length === 0) return null;
+  if (typeof r.symbol !== 'string' || r.symbol.length === 0) return null;
+  if (typeof r.decimals !== 'number') return null;
+  return {
+    token: r.token,
+    symbol: r.symbol,
+    decimals: r.decimals,
+    mint: typeof r.mint === 'string' ? r.mint : null,
+    onramp: parseRamp(r.onramp),
+    offramp: parseRamp(r.offramp),
+  };
+}
+
+// Ramp vocabulary validation (Direct/Partner/Unavailable); anything else fails closed.
+function parseRamp(v: unknown): RampCapability {
+  return v === 'Direct' || v === 'Partner' || v === 'Unavailable' ? v : 'Unavailable';
+}
+
+// --- the ONE derivation: NetworkSection[] → the shapes consumers expect -------------------------
+// The flat IC catalog every existing consumer (Wallet filters, PayMode, familyDisplay,
+// isPayableAsset, fmtCurrencyAmount…) expects: icp section rows in section order (the relay emits
+// mainnet then testnet; concatenation preserves arrival order). The bundled fallback, the cache,
+// and the live response all derive their flat catalog through THIS function — one code path.
+export function icpCatalogOf(networks: NetworkSection[]): CurrencyDescriptor[] {
+  const out: CurrencyDescriptor[] = [];
+  for (const s of networks) {
+    if (s.protocol === 'icp') out.push(...s.assets);
+  }
+  return out;
+}
+
+// The Solana display facts (symbol/decimals/mint/ramps) from every solana section — what
+// `buildSelectableAssets` reads to render the device-key rail's rows catalog-driven.
+export function solanaAssetsOf(networks: NetworkSection[]): SolanaAsset[] {
+  const out: SolanaAsset[] = [];
+  for (const s of networks) {
+    if (s.protocol === 'solana') out.push(...s.assets);
+  }
+  return out;
+}
+
 // Relay-URL-scoped cache key (Phase 1 — 2026-08-12 unified asset selection rewrite). The cache is
 // keyed by the NORMALIZED relay URL (trailing slashes trimmed) so switching relays (Settings →
 // advanced) cannot reuse the prior relay's catalog (a relay that exposes a different asset set —
 // testnet, a different currency-id mapping — would otherwise render stale/wrong rows until the
-// next fetch landed). Version bumped v1 → v2 so a stale GLOBAL v1 entry does not bleed in.
+// next fetch landed). Catalog v2 (2026-08-27) bumps v2 → v3 with the SHAPE change (flat
+// CurrencyDescriptor[] → NetworkSection[]): a stale v2 flat entry can never be parsed as sections,
+// and the bump keeps it from even being tried.
 //
 // PURE: no AsyncStorage, no side effects — unit-testable directly. Consumers (`useCatalog`,
 // `fetchCurrencies`) call this with the active `relayUrl` to derive their read/write key.
-const CATALOG_CACHE_PREFIX = 'dpay.currencies.v2';
+const CATALOG_CACHE_PREFIX = 'dpay.currencies.v3';
 export function catalogCacheKey(relayUrl: string): string {
   const normalized = relayUrl.replace(/\/+$/, '');
   return `${CATALOG_CACHE_PREFIX}:${normalized}`;
 }
 // Bundled fallback so a cold/offline first load still renders. Overwritten by the live catalog on
-// the first successful fetch. Mirrors the canister's demo deployment (DEMO_USD + ckBTC + ckUSDC).
-// The ledger principals are empty here (the wallet reads currency/symbol/decimals/minter_family +
-// the MC1 unit 5 per-currency metadata for display; the relay resolves ledgers server-side from the
-// query's currency id). Ramp honesty (no-swap + Fork-C/O3): DEMO onramp=Direct(faucet)/offramp=Unavailable;
-// ckBTC onramp=Direct/offramp=Direct; ckUSDC onramp=Direct/offramp=Direct (dual-ledger withdraw_erc20
-// cash-out, gated on the user holding ckETH for gas — the gas_ledger carries the ckETH principal).
-export const BUNDLED_CATALOG: CurrencyDescriptor[] = [
-  {currency: 0, ledger: 'td2nx-oaaaa-aaaab-qhdnq-cai', mintable: true, minter: null, minter_family: null, symbol: '$', decimals: 2,
-    wrapper_name: null, backing_symbol: null, network: null, display_decimals: null, fee: null, cap: null,
-    chain_id: null, token_contract: null, gas_ledger: null, onramp: 'Direct', offramp: 'Unavailable'},
-  {currency: 1, ledger: 'mxzaz-hqaaa-aaaar-qaada-cai', mintable: false, minter: 'mqygn-kiaaa-aaaar-qaadq-cai', minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8,
-    wrapper_name: 'ckBTC', backing_symbol: 'BTC', network: 'Bitcoin', display_decimals: 8, fee: null, cap: null,
-    chain_id: null, token_contract: null, gas_ledger: null, onramp: 'Direct', offramp: 'Direct'},
-  {currency: 2, ledger: 'xevnm-gaaaa-aaaar-qafnq-cai', mintable: false, minter: 'sv3dd-oaaaa-aaaar-qacoa-cai', minter_family: 'CkEthErc20', symbol: 'ckUSDC', decimals: 6,
-    wrapper_name: 'ckUSDC', backing_symbol: 'USDC', network: 'Ethereum', display_decimals: 6, fee: '10000', cap: null,
-    chain_id: 1, token_contract: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', gas_ledger: 'ss2fx-dyaaa-aaaar-qacoq-cai', onramp: 'Direct', offramp: 'Direct'},
-  {currency: 6, ledger: 'ss2fx-dyaaa-aaaar-qacoq-cai', mintable: false, minter: 'sv3dd-oaaaa-aaaar-qacoa-cai', minter_family: 'CkEthErc20', symbol: 'ETH', decimals: 18,
-    wrapper_name: 'ckETH', backing_symbol: 'ETH', network: 'Ethereum', display_decimals: 6, fee: '2000000000000', cap: null,
-    chain_id: 1, token_contract: null, gas_ledger: null, onramp: 'Direct', offramp: 'Direct'},
+// the first successful fetch. ONE shape with the wire (NetworkSection[]): icp mainnet carries the
+// demo deployment's rows (DEMO_USD + ckBTC + ckUSDC + ckETH, all stamped testnet:false), icp
+// testnet is EMPTY (the relay still emits the section — clients shouldn't infer from absence), and
+// the solana section mirrors app/solana.ts's rail constants VERBATIM (decimals + the USDC mainnet
+// mint are imported from the rail modules — never re-typed here). Ramp honesty (no-swap +
+// Fork-C/O3): DEMO onramp=Direct(faucet)/offramp=Unavailable; ckBTC + ckUSDC + ckETH
+// onramp=Direct/offramp=Direct (ckUSDC's dual-ledger withdraw_erc20 cash-out is gated on the user
+// holding ckETH for gas — the gas_ledger carries the ckETH principal). SOL/USDC are Direct/Direct:
+// the device holds the key, so deposit = send to the device address, withdraw = sign from it.
+export const BUNDLED_NETWORKS: NetworkSection[] = [
+  {
+    protocol: 'icp', name: 'Internet Computer', environment: 'mainnet',
+    assets: [
+      {currency: 0, ledger: 'td2nx-oaaaa-aaaab-qhdnq-cai', mintable: true, minter: null, minter_family: null, symbol: '$', decimals: 2,
+        wrapper_name: null, backing_symbol: null, network: null, display_decimals: null, fee: null, cap: null,
+        chain_id: null, token_contract: null, gas_ledger: null, onramp: 'Direct', offramp: 'Unavailable', testnet: false},
+      {currency: 1, ledger: 'mxzaz-hqaaa-aaaar-qaada-cai', mintable: false, minter: 'mqygn-kiaaa-aaaar-qaadq-cai', minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8,
+        wrapper_name: 'ckBTC', backing_symbol: 'BTC', network: 'Bitcoin', display_decimals: 8, fee: null, cap: null,
+        chain_id: null, token_contract: null, gas_ledger: null, onramp: 'Direct', offramp: 'Direct', testnet: false},
+      {currency: 2, ledger: 'xevnm-gaaaa-aaaar-qafnq-cai', mintable: false, minter: 'sv3dd-oaaaa-aaaar-qacoa-cai', minter_family: 'CkEthErc20', symbol: 'ckUSDC', decimals: 6,
+        wrapper_name: 'ckUSDC', backing_symbol: 'USDC', network: 'Ethereum', display_decimals: 6, fee: '10000', cap: null,
+        chain_id: 1, token_contract: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', gas_ledger: 'ss2fx-dyaaa-aaaar-qacoq-cai', onramp: 'Direct', offramp: 'Direct', testnet: false},
+      {currency: 6, ledger: 'ss2fx-dyaaa-aaaar-qacoq-cai', mintable: false, minter: 'sv3dd-oaaaa-aaaar-qacoa-cai', minter_family: 'CkEthErc20', symbol: 'ETH', decimals: 18,
+        wrapper_name: 'ckETH', backing_symbol: 'ETH', network: 'Ethereum', display_decimals: 6, fee: '2000000000000', cap: null,
+        chain_id: 1, token_contract: null, gas_ledger: null, onramp: 'Direct', offramp: 'Direct', testnet: false},
+    ],
+  },
+  {protocol: 'icp', name: 'Internet Computer', environment: 'testnet', assets: []},
+  {
+    protocol: 'solana', name: 'Solana', environment: 'mainnet',
+    assets: [
+      {token: 'SOL', symbol: 'SOL', decimals: SOL_DECIMALS, mint: null, onramp: 'Direct', offramp: 'Direct'},
+      {token: 'USDC', symbol: 'USDC', decimals: USDC_DECIMALS, mint: USDC_MINT_ADDRESS, onramp: 'Direct', offramp: 'Direct'},
+    ],
+  },
 ];
 // Fetch the catalog from the relay, caching to AsyncStorage. Best-effort: on any failure (offline,
-// timeout, bad JSON) returns `prior` (the cache or bundled default) so the UI never blocks on it.
-// Timeout-bound like every other fetch. Reads the MC1 unit 5 per-currency metadata fields from the
-// relay JSON (forward-compatible: fee/cap carried as string for future exact-amount transport).
-export async function fetchCurrencies(relayUrl: string, prior: CurrencyDescriptor[]): Promise<CurrencyDescriptor[]> {
+// timeout, bad JSON, legacy/invalid envelope) returns `prior` (the cache or bundled default) so the
+// UI never blocks on it. Timeout-bound like every other fetch. The cache stores the WIRE ENVELOPE
+// (`{"networks":[…]}`) byte-for-byte as received-and-validated, so the cache read replays through
+// the SAME `parseNetworkCatalog` the live response does — one envelope shape on the wire and in the
+// cache, `NetworkSection[]` in memory.
+export async function fetchCurrencies(relayUrl: string, prior: NetworkSection[]): Promise<NetworkSection[]> {
   try {
     const r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/currencies`, undefined, BALANCE_TIMEOUT_MS);
     if (!r.ok) return prior;
     const j = await r.json();
-    const list: unknown = j?.currencies;
-    if (!Array.isArray(list) || list.length === 0) return prior;
-    const clean: CurrencyDescriptor[] = list
-      .filter((c: Record<string, unknown>): c is Record<string, unknown> => !!c && typeof c.currency === 'number')
-      .map((c: Record<string, unknown>) => ({
-        currency: c.currency as number,
-        ledger: typeof c.ledger === 'string' ? c.ledger : '',
-        mintable: !!c.mintable,
-        minter: typeof c.minter === 'string' ? c.minter : null,
-        minter_family: (typeof c.minter_family === 'string' ? c.minter_family : null) as MinterFamily | null,
-        symbol: typeof c.symbol === 'string' ? c.symbol : null,
-        decimals: typeof c.decimals === 'number' ? c.decimals : null,
-        wrapper_name: typeof c.wrapper_name === 'string' ? c.wrapper_name : null,
-        backing_symbol: typeof c.backing_symbol === 'string' ? c.backing_symbol : null,
-        network: typeof c.network === 'string' ? c.network : null,
-        display_decimals: typeof c.display_decimals === 'number' ? c.display_decimals : null,
-        // fee/cap: accept number or string from the relay; carry as string (forward-compatible for
-        // u64 values that exceed Number.MAX_SAFE_INTEGER once MC2 governs them).
-        fee: c.fee == null ? null : String(c.fee),
-        cap: c.cap == null ? null : String(c.cap),
-        chain_id: typeof c.chain_id === 'number' ? c.chain_id : null,
-        token_contract: typeof c.token_contract === 'string' ? c.token_contract : null,
-        gas_ledger: typeof c.gas_ledger === 'string' ? c.gas_ledger : null,
-        onramp: (typeof c.onramp === 'string' && (c.onramp === 'Direct' || c.onramp === 'Partner' || c.onramp === 'Unavailable') ? c.onramp : 'Unavailable') as RampCapability,
-        offramp: (typeof c.offramp === 'string' && (c.offramp === 'Direct' || c.offramp === 'Partner' || c.offramp === 'Unavailable') ? c.offramp : 'Unavailable') as RampCapability,
-      }));
-    if (clean.length === 0) return prior;
-    AsyncStorage.setItem(catalogCacheKey(relayUrl), JSON.stringify(clean)).catch((e: unknown) => { console.warn('catalog cache persist failed: ', e); });
-    return clean;
+    const networks = parseNetworkCatalog(j);
+    if (!networks) return prior;
+    AsyncStorage.setItem(catalogCacheKey(relayUrl), JSON.stringify({networks})).catch((e: unknown) => { console.warn('catalog cache persist failed: ', e); });
+    return networks;
   } catch { return prior; }
 }
 
@@ -280,12 +429,13 @@ export function assetTestKey(a: CurrencyDescriptor): string {
 // --- testnet detection + labelling (single source of truth) ----------------------------------
 // The production relay serves mainnet AND testnet chain-key currencies side-by-side: mainnet ckBTC
 // (network "Bitcoin") next to ckTESTBTC (network "Bitcoin Testnet"), mainnet ckUSDC (network
-// "Ethereum") next to ckSepoliaUSDC (network "Sepolia"). A currency is TESTNET iff it carries a
-// `network` that is NOT a known mainnet network. SOL is NOT in the catalog (a device-key rail), so
-// it is unaffected. DEMO (currency 0, network null) is NOT testnet (null network ⇒ not testnet).
-const MAINNET_NETWORKS = new Set(['Bitcoin', 'Ethereum']);
+// "Ethereum") next to ckSepoliaUSDC (network "Sepolia"). Catalog v2: classification is
+// SERVER-DECLARED — the relay partitions IC rows into mainnet/testnet sections and the app stamps
+// each descriptor's `testnet` field at parse time from its owning section's environment. The old
+// client-side `MAINNET_NETWORKS` string-set inference is DELETED (the `network` field stays
+// display-only); a field read is the whole check. Bundled fallback rows carry the field too.
 export function isTestnetCurrency(a: CurrencyDescriptor): boolean {
-  return a.network != null && !MAINNET_NETWORKS.has(a.network);
+  return a.testnet;
 }
 // The display NAME for a testnet currency: "<backing_symbol> testnet" → "BTC testnet" / "USDC
 // testnet" / "ETH testnet". This is the founder-chosen label (not "ckTESTBTC" / "ckBTC" — those are

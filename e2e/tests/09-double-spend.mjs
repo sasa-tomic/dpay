@@ -10,7 +10,7 @@
 //   2. POST the same bytes twice → both 202;
 //   3. ledger: payee credited the amount exactly once; payer debited once;
 //   4. the gateway's txn log carries ONE transfer row (no duplicate).
-import {setup, assert, getBalance, faucetAccount, onboardWallet, accountOf} from '../harness/lib.mjs';
+import {setup, assert, getBalance, faucetAccount, icpCatalog, onboardWallet, accountOf} from '../harness/lib.mjs';
 import {generateKeypair, decodeRequest, icpPrincipalBytes, icpTransferArgBytes, icpSignUpdate} from '../harness/wire.mjs';
 
 export const meta = {
@@ -40,7 +40,7 @@ export async function run() {
     const nonceHex = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
 
     // --- Sign ONE envelope (the payer would hand this to the rail exactly once). ---------------
-    const catalog = (await (await fetch(`${env.relayBaseURL}/api/v1/currencies`)).json()).currencies;
+    const catalog = await icpCatalog(env.relayBaseURL);
     const ledger = catalog.find((c) => c.currency === 0).ledger;
     const arg = icpTransferArgBytes(icpPrincipalBytes(bob.publicHex), BigInt(PAY_CENTS), {fee: null, memoHex: nonceHex});
     const expiryNs = BigInt(Date.now() + 300_000) * 1_000_000n;

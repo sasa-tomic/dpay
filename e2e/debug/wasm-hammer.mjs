@@ -13,7 +13,7 @@
 // Node-side interleaved repro of the same shape PASSES — browser-only.
 //
 // Run: node e2e/debug/wasm-hammer.mjs
-import { setup, onboardWallet, stopSession } from '../harness/lib.mjs';
+import { setup, onboardWallet, stopSession, icpCatalog } from '../harness/lib.mjs';
 import { generateKeypair, icpPrincipalBytes, icpTransferArgBytes, icpSignUpdate } from '../harness/wire.mjs';
 
 const env = await setup();
@@ -31,7 +31,7 @@ try {
   const alice = await generateKeypair();
   const arg = icpTransferArgBytes(icpPrincipalBytes(alice.publicHex), 2500n, { fee: null, memoHex: '22'.repeat(16) });
   const expiryNs = BigInt(Date.now() + 300_000) * 1_000_000n;
-  const catalog = (await (await fetch(`${relayBaseURL}/api/v1/currencies`)).json()).currencies;
+  const catalog = await icpCatalog(relayBaseURL);
   const ledger = catalog.find((c) => c.currency === 0).ledger;
   const signed = await icpSignUpdate(alice.secretHex, ledger, 'icrc1_transfer', arg, expiryNs);
 

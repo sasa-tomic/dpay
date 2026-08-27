@@ -676,23 +676,49 @@ export async function getBalance(relayBaseURL, accountHex, currency = 0, timeout
 }
 
 /**
+ * GET /api/v1/currencies → the v2 network-first catalog (`200 {"networks":[{protocol,name,
+ * environment,assets}]}` — three sections in order: icp mainnet, icp testnet, solana mainnet).
+ * Returns the IC assets as ONE flat list (icp mainnet ++ icp testnet), each section selected by
+ * `protocol === 'icp'` + `environment` — never by display name — mirroring the app's own parse
+ * seam (`icpCatalogOf` in app/config/catalog.ts). IC rows keep the exact `CurrencyDescriptor`
+ * field set, so callers keep doing `find((c) => c.currency === N)`; currency ids are unique
+ * across the two icp sections (fake: DEMO 0 … ckETH 5 in mainnet, ckTESTBTC 6 in testnet).
+ * Solana rows live in their own section and never appear here. Throws on non-200 or a non-v2
+ * body (no back-compat — there are no deployed clients).
+ */
+export async function icpCatalog(relayBaseURL, timeoutMs = 4000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  const url = `${relayBaseURL}/api/v1/currencies`;
+  try {
+    const r = await fetch(url, { signal: ctrl.signal });
+    if (!r.ok) throw new Error(`GET ${url} → HTTP ${r.status}`);
+    const j = await r.json();
+    if (!Array.isArray(j?.networks)) {
+      throw new Error(`GET ${url}: unexpected body (want v2 {networks:[…]}): ${JSON.stringify(j).slice(0, 300)}`);
+    }
+    const section = (environment) =>
+      j.networks.find((n) => n.protocol === 'icp' && n.environment === environment)?.assets ?? [];
+    return [...section('mainnet'), ...section('testnet')];
+  } catch (e) {
+    if (e instanceof Error && /^GET /.test(e.message)) throw e;
+    throw new Error(`GET ${url} failed: ${e instanceof Error ? e.message : e}`);
+  } finally { clearTimeout(t); }
+}
+
+/**
  * IC-rail transfer (2026-08-19 cutover): sign an icrc1_transfer update envelope as a HARNESS-side
- * payer (the stand-in for "the payer's own phone submitted it online") and POST it straight to the
- * fake-IC /api/v2 gateway the test relay mounts. Byte-identical to what the app's wasm core signs
- * (wire.mjs is the golden oracle). The request memo (nonce hex) is the reconciliation key.
+ * payer (the stand-in for "the payer's own phone submitted it online") and POST it straight to
+ * the fake-IC /api/v2 gateway the test relay mounts. Byte-identical to what the app's wasm core
+ * signs (wire.mjs is the golden oracle). The request memo (nonce hex) is the reconciliation key.
  *
- * `desc` (optional) is a catalog row; when omitted it is fetched from /api/v1/currencies.
- * Returns `{ok, status, requestIdHex, bodyText}` — a 202 means accepted (dedup keyed request_id;
- * identical-byte resubmit is free and settles once).
+ * `desc` (optional) is an IC catalog row (see `icpCatalog`); when omitted it is fetched from
+ * /api/v1/currencies. Returns `{ok, status, requestIdHex, bodyText}` — a 202 means accepted
+ * (dedup keyed request_id; identical-byte resubmit is free and settles once).
  */
 export async function railTransfer(relayBaseURL, payerSecretHex, payeePubHex, amountMinor, { currency = 0, memoHex = '', desc = null, timeoutMs = 8000 } = {}) {
   if (desc == null) {
-    const r = await fetch(`${relayBaseURL}/api/v1/currencies`);
-    if (!r.ok) throw new Error(`catalog fetch failed: HTTP ${r.status}`);
-    // The relay wraps the catalog array: 200 {"currencies":[…]}.
-    const j = await r.json();
-    const catalog = Array.isArray(j) ? j : j.currencies;
-    desc = catalog.find((c) => c.currency === currency);
+    desc = (await icpCatalog(relayBaseURL)).find((c) => c.currency === currency);
   }
   if (!desc?.ledger) throw new Error(`railTransfer: no ledger for currency ${currency}`);
   const { icpPrincipalBytes, icpTransferArgBytes, icpSignUpdate } = await import('./wire.mjs');

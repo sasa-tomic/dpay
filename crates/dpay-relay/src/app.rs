@@ -17,8 +17,10 @@
 //!   newest-first, read off the ICRC ledger's own transaction log at the user's principal.
 //! - `GET  /api/v1/deposit/info?currency=N` — static deposit instructions (min confirmations, fee,
 //!   min amount) so the "Add money" sheet can render them.
-//! - `GET  /api/v1/currencies` — the wallet's runtime asset catalog (closes issue #7): every
-//!   registered currency with its ledger/minter/display metadata; read once on wallet load.
+//! - `GET  /api/v1/currencies` — the wallet's runtime asset catalog (closes issue #7), served
+//!   network-first: `{networks:[{protocol,name,environment,assets}]}` — icp mainnet + icp testnet
+//!   partitioned from the facade's flat ICRC registry, plus the relay-constant solana mainnet
+//!   section. IC rows keep the exact `CurrencyDescriptor` shape; read once on wallet load.
 //! - `GET  /api/v1/balances/{hex}` — ALL currency balances in ONE response (a flat map
 //!   `{currency: minor-units}`), replacing the wallet's old N+1 per-poll fetch loop (1 primary +
 //!   1 per-asset, each a relay→IC round trip) with a single request.
@@ -53,7 +55,7 @@ mod web_dist {
     include!(concat!(env!("OUT_DIR"), "/web_assets.rs"));
 }
 
-use crate::ledger::{CurrencyDescriptor, Ledger, LedgerError, TxnRecord, U64String};
+use crate::ledger::{CurrencyDescriptor, Ledger, LedgerError, RampCapability, TxnRecord, U64String};
 
 /// Shared relay state. `Arc<dyn Ledger>` is the read seam (catalog, balances, history).
 #[derive(Clone)]
@@ -524,13 +526,83 @@ async fn deposit_info(State(state): State<AppState>, Query(qs): Query<BalanceQue
     }
 }
 
-/// `GET /api/v1/currencies` → `200 {"currencies": [...]}`. The wallet's runtime asset catalog
-/// (closes issue #7): read once on wallet load and cached. No query params; unauthenticated (catalog
-/// only — no balances). Mirrors the deposit routes' error mapping: any ledger error is `503` (there
-/// is no permanent-policy failure on this surface).
+/// The v2 environment partition rule (server-authoritative — the app reads the section's
+/// `environment` and never re-derives this): an IC row is testnet iff `network` is `Some` AND not
+/// one of the mainnet backing networks {"Bitcoin","Ethereum"}; `network == None` (DEMO $, the
+/// facade-native play asset, `mintable`) is mainnet-side.
+fn is_testnet_row(d: &CurrencyDescriptor) -> bool {
+    !matches!(d.network.as_deref(), None | Some("Bitcoin") | Some("Ethereum"))
+}
+
+/// The mainnet USDC mint — mirrors `USDC_MINT_ADDRESS` (app/solana/spl.ts) verbatim; the only
+/// on-chain address the solana section carries.
+const SOLANA_USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+
+/// The solana mainnet section — a relay-level constant provider (NOT a `Ledger` thing: the rail
+/// is device-key + direct RPC and never touches the IC facade, so it is absent from the trait and
+/// `fake.rs`). Values mirror app/solana.ts exactly: SOL 9 decimals (`SOL_DECIMALS`), USDC 6
+/// decimals + [`SOLANA_USDC_MINT`]. No RPC endpoints or API keys here — the Helius URL stays
+/// APK-side.
+fn solana_network_section() -> NetworkBody {
+    NetworkBody {
+        protocol: "solana",
+        name: "Solana",
+        environment: "mainnet",
+        assets: NetworkAssets::Solana(vec![
+            SolanaAsset {
+                token: "SOL",
+                symbol: "SOL",
+                decimals: 9, // SOL_DECIMALS (app/solana/identity.ts)
+                mint: None,  // native L1 asset — no SPL mint
+                onramp: RampCapability::Direct,
+                offramp: RampCapability::Direct,
+            },
+            SolanaAsset {
+                token: "USDC",
+                symbol: "USDC",
+                decimals: 6, // USDC_DECIMALS (app/solana/spl.ts)
+                mint: Some(SOLANA_USDC_MINT),
+                onramp: RampCapability::Direct,
+                offramp: RampCapability::Direct,
+            },
+        ]),
+    }
+}
+
+/// `GET /api/v1/currencies` → `200 {"networks":[...]}` — the network-first asset catalog (v2):
+/// exactly three sections in order (icp mainnet, icp testnet, solana mainnet). The relay is the
+/// multi-network composition layer: the facade stays IC-only and `ledger.currencies()` keeps
+/// returning its flat IC row list; THIS handler partitions it mainnet/testnet ([`is_testnet_row`])
+/// and appends the constant [`solana_network_section`]. The empty testnet section is still
+/// emitted — clients shouldn't infer from absence. IC rows serialize in the UNCHANGED
+/// `CurrencyDescriptor` shape. No query params; unauthenticated (catalog only — no balances).
+/// Mirrors the deposit routes' error mapping: any ledger error is `503` (there is no
+/// permanent-policy failure on this surface).
 async fn currencies(State(state): State<AppState>) -> Response {
     match state.ledger.currencies().await {
-        Ok(list) => (StatusCode::OK, Json(CurrenciesBody { currencies: list })).into_response(),
+        Ok(list) => {
+            // Partition preserves each side's catalog order; mainnet keeps DEMO (network None).
+            let (mainnet, testnet): (Vec<_>, Vec<_>) =
+                list.into_iter().partition(|d| !is_testnet_row(d));
+            let body = CurrenciesBody {
+                networks: vec![
+                    NetworkBody {
+                        protocol: "icp",
+                        name: "Internet Computer",
+                        environment: "mainnet",
+                        assets: NetworkAssets::Ic(mainnet),
+                    },
+                    NetworkBody {
+                        protocol: "icp",
+                        name: "Internet Computer",
+                        environment: "testnet",
+                        assets: NetworkAssets::Ic(testnet),
+                    },
+                    solana_network_section(),
+                ],
+            };
+            (StatusCode::OK, Json(body)).into_response()
+        }
         Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
     }
 }
@@ -840,10 +912,43 @@ struct DepositInfoBody {
     deposit_min_amount: Option<U64String>,
 }
 
-/// `GET /api/v1/currencies` response body — the wallet's runtime asset catalog (closes issue #7).
+/// `GET /api/v1/currencies` response body — the network-first asset catalog (v2). Exactly three
+/// sections in order: icp mainnet, icp testnet (possibly empty), solana mainnet.
 #[derive(Serialize)]
 struct CurrenciesBody {
-    currencies: Vec<CurrencyDescriptor>,
+    networks: Vec<NetworkBody>,
+}
+
+/// One `networks[]` section. `assets` is untagged so IC sections carry `CurrencyDescriptor` rows
+/// and the solana section carries [`SolanaAsset`] rows — both serialize as plain JSON arrays.
+#[derive(Serialize)]
+struct NetworkBody {
+    protocol: &'static str,
+    name: &'static str,
+    environment: &'static str,
+    assets: NetworkAssets,
+}
+
+/// The `assets` array of a network section — IC rows (`CurrencyDescriptor`, field set/casing
+/// UNCHANGED from the pre-v2 flat catalog) or the relay-constant Solana rows.
+#[derive(Serialize)]
+#[serde(untagged)]
+enum NetworkAssets {
+    Ic(Vec<CurrencyDescriptor>),
+    Solana(Vec<SolanaAsset>),
+}
+
+/// One Solana asset row — a relay-level constant (the device-key rail never touches the IC
+/// facade, so this is deliberately NOT a `CurrencyDescriptor`). `mint` is null for native SOL.
+/// Ramp vocabulary is shared with the IC rows (`Direct`/`Partner`/`Unavailable`).
+#[derive(Serialize)]
+struct SolanaAsset {
+    token: &'static str,
+    symbol: &'static str,
+    decimals: u8,
+    mint: Option<&'static str>,
+    onramp: RampCapability,
+    offramp: RampCapability,
 }
 
 /// `GET /api/v1/onramp/ckerc20` response body — the CkEthErc20-family onramp params the app needs to

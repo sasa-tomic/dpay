@@ -1,9 +1,14 @@
 import {describe, it, expect} from '@jest/globals';
 import {
   resolveNfcDisclosure,
-  BUNDLED_CATALOG,
+  BUNDLED_NETWORKS,
+  icpCatalogOf,
   type CurrencyDescriptor,
 } from '../config/catalog';
+
+// Catalog v2: the bundled fallback is network-first; derive the flat IC catalog through the same
+// `icpCatalogOf` the app uses (one shape, one derivation).
+const BUNDLED_CATALOG = icpCatalogOf(BUNDLED_NETWORKS);
 
 // --- MC8 U1 — NFC asset disclosure resolver ---------------------------------------------------
 // The blind-tap bug: NfcTap.autoSign fired `await signAuthorization` and only set the amount
@@ -21,7 +26,7 @@ const mk = (d: Partial<CurrencyDescriptor> & Pick<CurrencyDescriptor, 'currency'
   ledger: '', mintable: false, minter: null, symbol: null, decimals: null,
   wrapper_name: null, backing_symbol: null, network: null, display_decimals: null,
   fee: null, cap: null, chain_id: null, token_contract: null, gas_ledger: null,
-  onramp: 'Unavailable', offramp: 'Unavailable', ...d,
+  onramp: 'Unavailable', offramp: 'Unavailable', testnet: false, ...d,
 });
 const CKBTC_DESC: CurrencyDescriptor = mk({currency: 1, minter: 'm', minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8, wrapper_name: 'ckBTC', backing_symbol: 'BTC', network: 'Bitcoin', display_decimals: 8, onramp: 'Direct', offramp: 'Direct'});
 const CKUSDC_DESC: CurrencyDescriptor = mk({currency: 2, ledger: 'l', minter: 's', minter_family: 'CkEthErc20', symbol: 'ckUSDC', decimals: 6, wrapper_name: 'ckUSDC', backing_symbol: 'USDC', network: 'Ethereum', display_decimals: 6, fee: '10000', chain_id: 1, token_contract: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', onramp: 'Direct', offramp: 'Unavailable'});

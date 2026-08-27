@@ -1,15 +1,16 @@
 // Phase 1 — the pure, unified asset domain (2026-08-12 unified asset selection rewrite).
 //
 // The wallet's selectable-asset layer: a resolved view model (`SelectableAsset`) built from the
-// validated IC catalog PLUS explicit app-defined Solana assets, plus the ONE pure list builder
-// every Wallet selector consumes and the deterministic fallback policy for the idle selection.
+// validated IC catalog PLUS the catalog's solana section rows (catalog v2 — display facts from the
+// same `NetworkSection[]` the IC rows come from), plus the ONE pure list builder every Wallet
+// selector consumes and the deterministic fallback policy for the idle selection.
 //
 // CRITICAL INVARIANT — SOL never enters the ICRC catalog (CLAUDE.md non-negotiable). SOL is a
-// device-key rail: there is no ICRC ledger, no relay round trip, no facade entry, no IC wire
-// currency id. Solana assets live HERE, in the app's asset domain, appended after the IC entries.
-// Forcing SOL into a `CurrencyDescriptor` would contaminate every catalog helper (`familyDisplay`,
-// `displayName`, `fmtCurrencyAmount`, the NFC disclosure, the request QR codec) — so it is held
-// behind this boundary instead.
+// device-key rail: there is no ICRC ledger, no relay round trip for signing, no facade entry, no IC
+// wire currency id. Solana rows live in the catalog's SEPARATE `protocol:'solana'` sections (display
+// facts only) and are appended after the IC entries here. Forcing SOL into a `CurrencyDescriptor`
+// would contaminate every catalog helper (`familyDisplay`, `displayName`, `fmtCurrencyAmount`, the
+// NFC disclosure, the request QR codec) — so it is held behind this boundary instead.
 //
 // This module is PURE: no React, no AsyncStorage, no network. Its outputs are deterministic
 // functions of (catalog, options) and the Solana config constants; it is safe to unit-test
@@ -17,16 +18,19 @@
 
 import {
   type CurrencyDescriptor,
+  type NetworkSection,
   type RampCapability,
+  type SolanaAsset,
+  BUNDLED_NETWORKS,
   assetTestKey,
   displayName,
   familyDisplay,
   isTestnetCurrency,
+  solanaAssetsOf,
   testnetDisplayName,
 } from './catalog';
 import {IS_SOLANA_DEVNET, SOLANA_RPC_URL} from './constants';
-import {USDC_DECIMALS, USDC_MINT_ADDRESS} from '../solana/spl';
-import {SOL_DECIMALS} from '../solana/identity';
+import {USDC_MINT_ADDRESS} from '../solana/spl';
 import {type AssetId} from '../lib/types';
 import {M} from '../i18n';
 
@@ -73,11 +77,14 @@ export type SelectableAsset =
 
 // Options for the list builder. `solanaUsdc` is an explicit override used by tests; production
 // callers omit it and the builder resolves USDC availability from the live Solana config (the
-// `solanaUsdcAvailable()` helper below — pure over the config constants).
+// `solanaUsdcAvailable()` helper below — pure over the config constants). `networks` is the
+// network-first catalog (catalog v2): when omitted, the bundled sections (`BUNDLED_NETWORKS`)
+// supply the Solana display facts, so a cold/offline first load renders the identical rows.
 export type BuildSelectableAssetsOptions = {
   showTestnet: boolean;
   solanaEnabled: boolean;
   solanaUsdc?: boolean;
+  networks?: NetworkSection[];
 };
 
 // The ONE pure list builder. Returns the complete ordered list of selectable assets for the current
@@ -107,12 +114,19 @@ export function buildSelectableAssets(
     assets.push(icAsset(desc));
   }
   if (solanaEnabled) {
-    assets.push(solanaSolAsset());
+    // Catalog v2: the SOL/USDC display facts (symbol/decimals/ramps) are CATALOG-DRIVEN — read from
+    // the network sections (the parsed relay response, or the bundled fallback when omitted — same
+    // one code path, so cold/offline first-load rendering is identical). A missing SOL row simply
+    // omits the asset; ids/testKeys stay stable literals so testID derivation never shifts.
+    const solana = solanaAssetsOf(opts.networks ?? BUNDLED_NETWORKS);
+    const sol = solana.find(a => a.token === 'SOL');
+    if (sol) assets.push(solanaAssetRow(sol, 'SOL', 'sol'));
     // Solana USDC is fail-closed when the cluster is misconfigured (empty RPC, or mainnet mint on
     // a non-mainnet RPC — see `solanaUsdcAvailable`). An unfulfillable USDC row would silently
     // point at a non-existent token account; fail closed instead.
     const usdc = opts.solanaUsdc ?? solanaUsdcAvailable();
-    if (usdc) assets.push(solanaUsdcAsset());
+    const usdcRow = solana.find(a => a.token === 'USDC');
+    if (usdc && usdcRow) assets.push(solanaAssetRow(usdcRow, 'USDC', 'sol-usdc'));
   }
   return assets;
 }
@@ -144,36 +158,23 @@ function icAsset(desc: CurrencyDescriptor): SelectableAsset {
   };
 }
 
-// Build the SelectableAsset for native SOL.
-function solanaSolAsset(): SelectableAsset {
+// Build the SelectableAsset for one Solana catalog row. The display facts come from the row the
+// relay/bundled sections supplied (symbol/decimals/ramps); the id/testKey stay STABLE literals so
+// selection + testID derivation never shifts with catalog metadata. USDC's `networkLabel` is
+// distinct from any IC USDC so the two never read as the same balance (no-swap / no-confusion
+// invariant).
+function solanaAssetRow(row: SolanaAsset, token: 'SOL' | 'USDC', testKey: string): SelectableAsset {
   return {
-    id: 'solana:SOL',
+    id: token === 'SOL' ? 'solana:SOL' : 'solana:USDC',
     protocol: 'solana',
-    token: 'SOL',
-    symbol: 'SOL',
-    networkLabel: M.wallet.asset.networkLabel('SOL', 'Solana'),
+    token,
+    symbol: row.symbol,
+    networkLabel: M.wallet.asset.networkLabel(row.symbol, 'Solana'),
     network: 'Solana',
-    decimals: SOL_DECIMALS,
+    decimals: row.decimals,
     visible: true,
-    capabilities: {onramp: 'Direct', offramp: 'Direct'},
-    testKey: 'sol',
-  };
-}
-
-// Build the SelectableAsset for Solana USDC. Distinct `networkLabel` from any IC USDC so the two
-// never read as the same balance (no-swap / no-confusion invariant).
-function solanaUsdcAsset(): SelectableAsset {
-  return {
-    id: 'solana:USDC',
-    protocol: 'solana',
-    token: 'USDC',
-    symbol: 'USDC',
-    networkLabel: M.wallet.asset.networkLabel('USDC', 'Solana'),
-    network: 'Solana',
-    decimals: USDC_DECIMALS,
-    visible: true,
-    capabilities: {onramp: 'Direct', offramp: 'Direct'},
-    testKey: 'sol-usdc',
+    capabilities: {onramp: row.onramp, offramp: row.offramp},
+    testKey,
   };
 }
 

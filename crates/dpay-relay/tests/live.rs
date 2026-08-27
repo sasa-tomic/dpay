@@ -466,11 +466,29 @@ fn live_read_surface_at_user_principal() {
         assert_eq!(hb["status"], "ok");
 
         // ---- (2) currencies: the DUSD row with the REAL ledger's canonical principal text ----
+        // v2 network-first envelope: the DUSD row (network None → mainnet-side) lives in the icp
+        // MAINNET section's assets; the testnet section is still emitted, empty.
         let (cs, cb) = call(&state, get("/api/v1/currencies")).await;
         assert_eq!(cs, StatusCode::OK, "currencies body={cb}");
-        let rows = cb["currencies"]
+        let networks = cb["networks"]
             .as_array()
-            .unwrap_or_else(|| panic!("currencies must be an array: {cb}"));
+            .unwrap_or_else(|| panic!("networks must be an array: {cb}"));
+        assert_eq!(networks.len(), 3, "icp mainnet + icp testnet + solana mainnet: {cb}");
+        let mainnet = &networks[0];
+        assert_eq!(mainnet["protocol"], "icp");
+        assert_eq!(mainnet["environment"], "mainnet");
+        assert_eq!(
+            networks[1]["environment"], "testnet",
+            "the testnet section is emitted even when empty: {cb}"
+        );
+        assert_eq!(
+            networks[1]["assets"].as_array().map(Vec::len),
+            Some(0),
+            "the live catalog registers no testnet currencies: {cb}"
+        );
+        let rows = mainnet["assets"]
+            .as_array()
+            .unwrap_or_else(|| panic!("icp mainnet assets must be an array: {cb}"));
         let dusd = rows
             .iter()
             .find(|d| d["currency"].as_u64() == Some(u64::from(DEMO_USD)))

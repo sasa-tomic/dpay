@@ -9,7 +9,7 @@
 //
 // Prerequisites proven elsewhere: envelope signing parity (flow 00), the merchant submit+poll
 // happy path (flow 08), the reader-side NFC protocol phases (flow 11).
-import { setup, assert, assertIncludes, getBalance, faucetAccount, onboardWallet, accountOf } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, getBalance, faucetAccount, icpCatalog, onboardWallet, accountOf } from '../harness/lib.mjs';
 import { generateKeypair, decodeRequest, icpPrincipalBytes, icpTransferArgBytes, icpSignUpdate, icpSignReadState, b64urlEncode, randNonceHex } from '../harness/wire.mjs';
 
 const PAY_CENTS = 1000; // ∂10.00 — the exact amount of the 2026-08-21 field failure
@@ -57,7 +57,7 @@ export async function run() {
     assert(listeners >= 1, `reader NfcTap must mount a DpayNfcEvent listener, got ${listeners}`);
 
     // --- A signs a REAL icrc1_transfer envelope for B's request (memo = the request nonce). -----
-    const catalog = (await (await fetch(`${relayBaseURL}/api/v1/currencies`)).json()).currencies;
+    const catalog = await icpCatalog(relayBaseURL);
     const ledger = catalog.find(c => c.currency === 0)?.ledger;
     const arg = icpTransferArgBytes(icpPrincipalBytes(bobHex), BigInt(PAY_CENTS), {fee: null, memoHex: req.nonceHex});
     const expiryNs = BigInt(Date.now() + 240_000) * 1_000_000n;

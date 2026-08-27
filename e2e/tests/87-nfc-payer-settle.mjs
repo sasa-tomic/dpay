@@ -1,5 +1,5 @@
 // Flow 87 — offline payer signs with no IC call, then accepts the merchant-returned result.
-import {setup, assert, getBalance, onboardWallet, accountOf, armNfcCard} from '../harness/lib.mjs';
+import {setup, assert, getBalance, icpCatalog, onboardWallet, accountOf, armNfcCard} from '../harness/lib.mjs';
 import {generateKeypair, randNonceHex} from '../harness/wire.mjs';
 
 export const meta = {
@@ -46,7 +46,7 @@ export async function run() {
 
     // The merchant owns submission. Nothing moves when card-side `done` fires.
     assert(BigInt(await getBalance(relayBaseURL, payer.publicHex, 0)) === payerBefore, 'payer card must not submit its own NFC update');
-    const catalog = (await (await fetch(`${relayBaseURL}/api/v1/currencies`)).json()).currencies;
+    const catalog = await icpCatalog(relayBaseURL);
     const ledger = catalog.find(c => c.currency === 0)?.ledger;
     const submit = await fetch(`${relayBaseURL}/api/v2/canister/${ledger}/call`, {
       method: 'POST', headers: {'Content-Type': 'application/cbor'}, body: Buffer.from(approved.envelopeHex, 'hex'),

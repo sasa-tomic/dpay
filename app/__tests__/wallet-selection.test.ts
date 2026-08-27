@@ -26,12 +26,12 @@ const mk = (d: Partial<CurrencyDescriptor> & Pick<CurrencyDescriptor, 'currency'
   ledger: '', mintable: false, minter: null, symbol: null, decimals: null,
   wrapper_name: null, backing_symbol: null, network: null, display_decimals: null,
   fee: null, cap: null, chain_id: null, token_contract: null, gas_ledger: null,
-  onramp: 'Unavailable', offramp: 'Unavailable', ...d,
+  onramp: 'Unavailable', offramp: 'Unavailable', testnet: false, ...d,
 });
 const DEMO: CurrencyDescriptor = mk({currency: 0, mintable: true, minter_family: null, symbol: '$', decimals: 2, onramp: 'Direct', offramp: 'Unavailable'});
 const CKBTC: CurrencyDescriptor = mk({currency: 1, minter: 'm', minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8, wrapper_name: 'ckBTC', backing_symbol: 'BTC', network: 'Bitcoin', display_decimals: 8, onramp: 'Direct', offramp: 'Direct'});
 const CKUSDC: CurrencyDescriptor = mk({currency: 2, ledger: 'l', minter: 's', minter_family: 'CkEthErc20', symbol: 'ckUSDC', decimals: 6, wrapper_name: 'ckUSDC', backing_symbol: 'USDC', network: 'Ethereum', display_decimals: 6, chain_id: 1, token_contract: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', onramp: 'Direct', offramp: 'Direct'});
-const CKTESTBTC: CurrencyDescriptor = mk({currency: 3, minter: 'mt', minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8, wrapper_name: 'ckTESTBTC', backing_symbol: 'BTC', network: 'Bitcoin Testnet', display_decimals: 8, onramp: 'Direct', offramp: 'Direct'});
+const CKTESTBTC: CurrencyDescriptor = mk({currency: 3, minter: 'mt', minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8, wrapper_name: 'ckTESTBTC', backing_symbol: 'BTC', network: 'Bitcoin Testnet', display_decimals: 8, onramp: 'Direct', offramp: 'Direct', testnet: true});
 const CATALOG: CurrencyDescriptor[] = [DEMO, CKBTC, CKUSDC];
 
 // =============================================================================================

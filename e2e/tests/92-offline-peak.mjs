@@ -13,7 +13,7 @@
 // to catch after the ~2s moment), `first-offline-stamp` (the settled remnant mark), and
 // `paid-stamp` (the compact calm stamp on every confirmed paid card). The honesty core: the
 // pending "Sent" hand-off view (btn-paid) must carry NEITHER the peak NOR the stamp.
-import {setup, assert, assertIncludes, getBalance, faucetAccount, onboardWallet, accountOf, goOffline, setRelay, armPayScan} from '../harness/lib.mjs';
+import {setup, assert, assertIncludes, getBalance, faucetAccount, icpCatalog, onboardWallet, accountOf, goOffline, setRelay, armPayScan} from '../harness/lib.mjs';
 import {generateKeypair, buildRequestQR, randNonceHex} from '../harness/wire.mjs';
 
 export const meta = {
@@ -89,7 +89,7 @@ export async function run() {
 
     // Counterparty submits the envelope; A reconciles to Paid.
     const envelopeBytes = b64urlToBytes(payload);
-    const catalog = (await (await fetch(`${env.relayBaseURL}/api/v1/currencies`)).json()).currencies;
+    const catalog = await icpCatalog(env.relayBaseURL);
     const ledger = catalog.find((c) => c.currency === 0).ledger;
     const submitted = await fetch(`${env.relayBaseURL}/api/v2/canister/${ledger}/call`, {
       method: 'POST', headers: {'Content-Type': 'application/cbor'}, body: envelopeBytes,

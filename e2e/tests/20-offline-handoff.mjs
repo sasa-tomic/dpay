@@ -8,7 +8,7 @@
 // Rail semantics: the offline branch never POSTs (nothing to dedup on A's side); the envelope QR
 // IS the payment; reconciliation is by request_id via read_state — the same terminal state the
 // online path reaches, just submitted by the counterparty.
-import {setup, assert, assertIncludes, getBalance, faucetAccount, onboardWallet, accountOf, goOffline, setRelay, armPayScan} from '../harness/lib.mjs';
+import {setup, assert, assertIncludes, getBalance, faucetAccount, icpCatalog, onboardWallet, accountOf, goOffline, setRelay, armPayScan} from '../harness/lib.mjs';
 import {generateKeypair, decodeRequest, buildRequestQR, randNonceHex} from '../harness/wire.mjs';
 
 export const meta = {
@@ -65,7 +65,7 @@ export async function run() {
     // --- "bob's phone" submits the envelope to the IC gateway. --------------------------------
     // The payload is base64url(envelope bytes) — the exact bytes the merchant app would POST.
     const envelopeBytes = b64urlToBytes(payload);
-    const catalog = (await (await fetch(`${env.relayBaseURL}/api/v1/currencies`)).json()).currencies;
+    const catalog = await icpCatalog(env.relayBaseURL);
     const ledger = catalog.find((c) => c.currency === 0).ledger;
     const submitted = await fetch(`${env.relayBaseURL}/api/v2/canister/${ledger}/call`, {
       method: 'POST',

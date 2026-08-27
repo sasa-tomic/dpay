@@ -5,7 +5,7 @@ import {C} from '../config/palette';
 import {S, isDark} from '../styles';
 import {M} from '../i18n';
 import {TOP_UP_CENTS, FAUCET_TIMEOUT_MS, SHOW_TESTNET_STORAGE_KEY, SOL_BROADCAST_TIMEOUT_MS} from '../config/constants';
-import {familyDisplay, isTestnetCurrency} from '../config/catalog';
+import {familyDisplay, icpCatalogOf, isTestnetCurrency} from '../config/catalog';
 import {base} from '../lib/format';
 import {applyOffline} from '../lib/amount';
 import {withTimeout} from '../lib/timeout';
@@ -115,9 +115,12 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
   const [showTestnet, setShowTestnet] = useState(false);
   // Currency catalog — the runtime source of truth for which assets exist + how to display/fund
   // them. Loaded from AsyncStorage cache then refreshed from GET /currencies on mount; the bundled
-  // default covers a cold first load. The ckBTC currency id (and any future asset's) is RESOLVED
-  // from this, never hardcoded (issue #7).
-  const catalog = useCatalog(relayUrl);
+  // default covers a cold first load. Catalog v2: the hook returns the network-first sections (icp
+  // mainnet + testnet + solana — ONE shape); the flat IC catalog every consumer below expects is
+  // DERIVED from the icp sections, and the solana section feeds `buildSelectableAssets`' SOL rows.
+  // The ckBTC currency id (and any future asset's) is RESOLVED from this, never hardcoded (issue #7).
+  const networks = useCatalog(relayUrl);
+  const catalog = useMemo(() => icpCatalogOf(networks), [networks]);
 
   // ckBTC currency id, resolved from the catalog (find the CkBtcUtxo-family entry). Falls back to
   // 1 only before the catalog loads (the bundled default already carries currency 1 as CkBtcUtxo).
@@ -212,12 +215,13 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
 
   // --- Phase 3 selection layer --------------------------------------------------------------
   // The ONE complete visible asset list, rebuilt from the catalog + Solana config. Pure; rebuilt on
-  // every catalog/testnet/SOL-address change. SOL is appended only when the device key is derived;
+  // every catalog/testnet/SOL-address change. SOL is appended only when the device key is derived
+  // (its display facts read from the catalog's solana section — bundled fallback when offline);
   // Solana USDC only when the cluster is coherent (`solanaUsdcAvailable` — fail-closed on devnet +
   // mainnet mint or an empty RPC). This list IS the visibility filter (testnet omitted, not flagged).
   const assets = useMemo(
-    () => buildSelectableAssets(catalog, {showTestnet, solanaEnabled: !!solAddress, solanaUsdc: solanaUsdcAvailable()}),
-    [catalog, showTestnet, solAddress],
+    () => buildSelectableAssets(catalog, {showTestnet, solanaEnabled: !!solAddress, solanaUsdc: solanaUsdcAvailable(), networks}),
+    [catalog, showTestnet, solAddress, networks],
   );
   // Whether the FULL catalog carries any testnet currency (the assets list is already filtered, so
   // it cannot answer this — the Balances sheet's reveal-toggle needs the unfiltered truth).

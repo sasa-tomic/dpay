@@ -7,7 +7,7 @@
 // (submitted by B's own app), exactly the production confirm path.
 //
 // This is the envelope-twin of flow 08 (which drives the same settle from a fresh request).
-import {setup, assert, assertIncludes, getBalance, faucetAccount, onboardWallet, accountOf} from '../harness/lib.mjs';
+import {setup, assert, assertIncludes, getBalance, faucetAccount, icpCatalog, onboardWallet, accountOf} from '../harness/lib.mjs';
 import {generateKeypair, decodeRequest, icpPrincipalBytes, icpTransferArgBytes, icpSignUpdate, b64urlEncode} from '../harness/wire.mjs';
 import {railPrincipalText} from '../harness/lib.mjs';
 
@@ -45,7 +45,7 @@ export async function run() {
     assertEq(req.amount, '2500', 'request QR amount must be ∂25.00');
 
     // --- Payer signs an icrc1_transfer envelope bound to the request (memo = nonce). -----------
-    const catalog = (await (await fetch(`${env.relayBaseURL}/api/v1/currencies`)).json()).currencies;
+    const catalog = await icpCatalog(env.relayBaseURL);
     const ledger = catalog.find((c) => c.currency === 0).ledger;
     const arg = icpTransferArgBytes(icpPrincipalBytes(bobHex), PAY_CENTS, {fee: null, memoHex: req.nonceHex});
     const expiryNs = BigInt(Date.now() + 300_000) * 1_000_000n;

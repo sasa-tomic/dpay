@@ -1,6 +1,7 @@
-import {describe, it, expect} from '@jest/globals';
 import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
+import {describe, it, expect, afterEach, jest} from '@jest/globals';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   isValidDestinationAddress,
   familyDisplay,
@@ -12,19 +13,33 @@ import {
   isTestnetCurrency,
   testnetDisplayName,
   catalogCacheKey,
-  BUNDLED_CATALOG,
+  fetchCurrencies,
+  parseNetworkCatalog,
+  icpCatalogOf,
+  solanaAssetsOf,
+  BUNDLED_NETWORKS,
   type CurrencyDescriptor,
+  type NetworkSection,
 } from '../config/catalog';
+import {SOL_DECIMALS} from '../solana/identity';
+import {USDC_DECIMALS, USDC_MINT_ADDRESS} from '../solana/spl';
 import {MINT_HEX} from '../lib/format';
+
+// Catalog v2: the bundled fallback is the network-first `BUNDLED_NETWORKS`; the flat IC catalog the
+// metadata/drift-alarm describes below assert against is DERIVED through the same `icpCatalogOf`
+// every consumer uses (one shape, one derivation — never a second hand-maintained flat array).
+const BUNDLED_CATALOG: CurrencyDescriptor[] = icpCatalogOf(BUNDLED_NETWORKS);
 
 // --- shared fixtures --------------------------------------------------------------------------
 // MC1 unit 5: fixtures carry the full authoritative per-currency field set. `mk` fills the new
-// fields with null defaults so each test only spells out what it asserts.
+// fields with null defaults so each test only spells out what it asserts. Catalog v2: `testnet`
+// defaults to false (a MAINNET-side row) — testnet fixtures set it explicitly, mirroring the parse
+// time stamp from the owning icp section's environment.
 const mk = (d: Partial<CurrencyDescriptor> & Pick<CurrencyDescriptor, 'currency' | 'minter_family'>): CurrencyDescriptor => ({
   ledger: '', mintable: false, minter: null, symbol: null, decimals: null,
   wrapper_name: null, backing_symbol: null, network: null, display_decimals: null,
   fee: null, cap: null, chain_id: null, token_contract: null, gas_ledger: null,
-  onramp: 'Unavailable', offramp: 'Unavailable', ...d,
+  onramp: 'Unavailable', offramp: 'Unavailable', testnet: false, ...d,
 });
 const CKBTC_DESC: CurrencyDescriptor = mk({currency: 1, minter: 'm', minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8, wrapper_name: 'ckBTC', backing_symbol: 'BTC', network: 'Bitcoin', display_decimals: 8, onramp: 'Direct', offramp: 'Direct'});
 const CKUSDC_DESC: CurrencyDescriptor = mk({currency: 2, ledger: 'l', minter: 's', minter_family: 'CkEthErc20', symbol: 'ckUSDC', decimals: 6, wrapper_name: 'ckUSDC', backing_symbol: 'USDC', network: 'Ethereum', display_decimals: 6, fee: '10000', chain_id: 1, token_contract: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', gas_ledger: 'ss2fx-dyaaa-aaaar-qacoq-cai', onramp: 'Direct', offramp: 'Direct'});
@@ -206,34 +221,42 @@ describe('assetTestKey — no BTC fallback for unknown families', () => {
 // "Ethereum") next to ckSepoliaUSDC (network "Sepolia"). `displayName` returns the backing_symbol
 // first, so WITHOUT testnet-aware labelling the two BTC rows render as indistinguishable "BTC"
 // duplicates. These pin the three load-bearing invariants:
-//   1. isTestnetCurrency: a currency is testnet iff it has a network NOT in {Bitcoin, Ethereum}.
-//      DEMO (network null) + SOL (not in catalog) are unaffected.
+//   1. isTestnetCurrency: a FIELD READ on the server-declared `testnet` flag (stamped at parse
+//      time from the owning section's environment — the client-side MAINNET_NETWORKS inference is
+//      deleted; see parseNetworkCatalog tests below).
 //   2. testnetDisplayName: "<backing_symbol> testnet" → "BTC testnet" / "USDC testnet" / "ETH testnet".
 //   3. assetTestKey: a testnet currency's key gets a `-testnet` suffix so two rows sharing a backing
 //      symbol (ckBTC + ckTESTBTC) get DISTINCT testIDs (the e2e net matches testID literally). Mainnet
 //      keys are UNCHANGED (the e2e testID contract for currencies 0/1/2 is preserved).
-const CKTESTBTC_DESC: CurrencyDescriptor = mk({currency: 3, minter: 'mt', minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8, wrapper_name: 'ckTESTBTC', backing_symbol: 'BTC', network: 'Bitcoin Testnet', display_decimals: 8, onramp: 'Direct', offramp: 'Direct'});
-const CKSEPOLIA_USDC_DESC: CurrencyDescriptor = mk({currency: 4, minter: 'ms', minter_family: 'CkEthErc20', symbol: 'ckSepoliaUSDC', decimals: 6, wrapper_name: 'ckSepoliaUSDC', backing_symbol: 'USDC', network: 'Sepolia', display_decimals: 6, chain_id: 11155111, token_contract: '0x...', onramp: 'Direct', offramp: 'Direct'});
-const CKSEPOLIA_ETH_DESC: CurrencyDescriptor = mk({currency: 5, minter: 'me', minter_family: 'CkEthErc20', symbol: 'ckSepoliaETH', decimals: 18, wrapper_name: 'ckSepoliaETH', backing_symbol: 'ETH', network: 'Sepolia', display_decimals: 18, token_contract: null, onramp: 'Direct', offramp: 'Direct'});
+const CKTESTBTC_DESC: CurrencyDescriptor = mk({currency: 3, minter: 'mt', minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8, wrapper_name: 'ckTESTBTC', backing_symbol: 'BTC', network: 'Bitcoin Testnet', display_decimals: 8, onramp: 'Direct', offramp: 'Direct', testnet: true});
+const CKSEPOLIA_USDC_DESC: CurrencyDescriptor = mk({currency: 4, minter: 'ms', minter_family: 'CkEthErc20', symbol: 'ckSepoliaUSDC', decimals: 6, wrapper_name: 'ckSepoliaUSDC', backing_symbol: 'USDC', network: 'Sepolia', display_decimals: 6, chain_id: 11155111, token_contract: '0x...', onramp: 'Direct', offramp: 'Direct', testnet: true});
+const CKSEPOLIA_ETH_DESC: CurrencyDescriptor = mk({currency: 5, minter: 'me', minter_family: 'CkEthErc20', symbol: 'ckSepoliaETH', decimals: 18, wrapper_name: 'ckSepoliaETH', backing_symbol: 'ETH', network: 'Sepolia', display_decimals: 18, token_contract: null, onramp: 'Direct', offramp: 'Direct', testnet: true});
 
-describe('isTestnetCurrency — a network NOT in {Bitcoin, Ethereum} is testnet', () => {
-  it('mainnet ckBTC (network "Bitcoin") is NOT testnet', () => {
+describe('isTestnetCurrency — a field read on the server-declared flag (no client inference)', () => {
+  it('mainnet ckBTC (testnet=false) is NOT testnet', () => {
     expect(isTestnetCurrency(CKBTC_DESC)).toBe(false);
   });
-  it('mainnet ckUSDC (network "Ethereum") is NOT testnet', () => {
+  it('mainnet ckUSDC (testnet=false) is NOT testnet', () => {
     expect(isTestnetCurrency(CKUSDC_DESC)).toBe(false);
   });
-  it('DEMO (network null) is NOT testnet (null network ⇒ not testnet)', () => {
+  it('DEMO (testnet=false) is NOT testnet', () => {
     expect(isTestnetCurrency(DEMO_DESC)).toBe(false);
   });
-  it('ckTESTBTC (network "Bitcoin Testnet") IS testnet', () => {
+  it('ckTESTBTC (testnet=true) IS testnet', () => {
     expect(isTestnetCurrency(CKTESTBTC_DESC)).toBe(true);
   });
-  it('ckSepoliaUSDC (network "Sepolia") IS testnet', () => {
+  it('ckSepoliaUSDC (testnet=true) IS testnet', () => {
     expect(isTestnetCurrency(CKSEPOLIA_USDC_DESC)).toBe(true);
   });
-  it('ckSepoliaETH (network "Sepolia") IS testnet', () => {
+  it('ckSepoliaETH (testnet=true) IS testnet', () => {
     expect(isTestnetCurrency(CKSEPOLIA_ETH_DESC)).toBe(true);
+  });
+  it('the flag WINS over the display `network` string in BOTH directions (declaration beats inference)', () => {
+    // The deleted inference read `network`; the field read must not be nudged by it. A row the
+    // SERVER declared testnet stays testnet even when its display network is a mainnet string, and
+    // a mainnet-declared row stays mainnet even when its display network says "Sepolia".
+    expect(isTestnetCurrency({...CKBTC_DESC, network: 'Bitcoin Testnet', testnet: false})).toBe(false);
+    expect(isTestnetCurrency({...CKTESTBTC_DESC, network: 'Bitcoin', testnet: true})).toBe(true);
   });
 });
 
@@ -595,13 +618,14 @@ describe('wire_consts vs dfx/catalog_truth.json (M15 app-half drift alarm)', () 
 });
 
 // --- Phase 1: relay-scoped catalog cache (2026-08-12 unified asset selection rewrite) -------------
-// The cache key is now NAMESPACED BY RELAY URL (was a global 'dpay.currencies.v1'). The bug this
+// The cache key is NAMESPACED BY RELAY URL (was a global 'dpay.currencies.v1'). The bug this
 // closes: a user who switches relay URLs (Settings → advanced) would otherwise reuse the PRIOR
 // relay's cached catalog — a relay that exposes a different asset set (testnet, a different
 // currency id mapping) would render stale/wrong rows until the next fetch landed. The cache key
-// now embeds the normalized relay URL + bumps the version (v1 → v2) so stale global v1 entries
-// do not bleed into the scoped cache. `catalogCacheKey` is PURE (no AsyncStorage) so it is unit-
-// testable without mocking the storage layer.
+// embeds the normalized relay URL. Catalog v2 (2026-08-27) changes the CACHED SHAPE (flat
+// CurrencyDescriptor[] → NetworkSection[]) and bumps the version v2 → v3 so a stale flat v2 entry
+// can never bleed into the scoped cache. `catalogCacheKey` is PURE (no AsyncStorage) so it is
+// unit-testable without mocking the storage layer.
 describe('catalogCacheKey — relay-URL-scoped cache (Phase 1)', () => {
   it('produces DISTINCT keys for two distinct relay URLs (no cross-relay bleed)', () => {
     const a = catalogCacheKey('https://relay-a.example.com');
@@ -616,12 +640,13 @@ describe('catalogCacheKey — relay-URL-scoped cache (Phase 1)', () => {
     expect(catalogCacheKey('https://relay.example.com')).toBe(catalogCacheKey('https://relay.example.com///'));
   });
 
-  it('bumps the version to v2 (a stale global v1 entry must NOT bleed into the scoped cache)', () => {
-    // The pre-Phase-1 key was the global 'dpay.currencies.v1'. The new key is namespaced + version-
-    // bumped so a prior install's v1 cache entry is ignored (a schema drift between v1 and v2 would
-    // otherwise be parsed through the validator; cleaner to namespace-invalidate).
+  it('bumps the version to v3 with the network-first shape (a stale flat v2 entry must NOT bleed in)', () => {
+    // v1 was the global flat key; v2 was the relay-scoped FLAT-catalog key. Catalog v2 changes the
+    // cached shape to NetworkSection[] and bumps v2 → v3 so a prior install's flat entry can never
+    // be parsed as sections (namespace-invalidate on schema drift, same discipline as v1 → v2).
     const k = catalogCacheKey('https://relay.example.com');
-    expect(k.startsWith('dpay.currencies.v2:')).toBe(true);
+    expect(k.startsWith('dpay.currencies.v3:')).toBe(true);
+    expect(k).not.toBe('dpay.currencies.v2');
     expect(k).not.toBe('dpay.currencies.v1');
   });
 
@@ -639,5 +664,230 @@ describe('catalogCacheKey — relay-URL-scoped cache (Phase 1)', () => {
     expect(keyA).not.toBe(keyB);
     // And after switching BACK, the original key is recovered (stable per URL).
     expect(catalogCacheKey('https://relay-a.example.com')).toBe(keyA);
+  });
+});
+
+// --- catalog v2: the network-first envelope parser ----------------------------------------------
+// The wire contract (GET /api/v1/currencies): {"networks":[{protocol,name,environment,assets:[…]}]}
+// with icp mainnet + icp testnet + solana mainnet sections. These pin the parse-time invariants:
+// the testnet FLAG is stamped from the owning section's environment (never re-inferred from the
+// display network string), the flat IC catalog is the mainnet+testnet concatenation in section
+// order, malformed sections/rows are skipped (never fatal), and anything that is not the
+// network-first envelope — including the legacy flat {currencies:[…]} — parses to null so callers
+// keep their prior catalog.
+const wireIcpRow = (over: Record<string, unknown>): Record<string, unknown> => ({
+  currency: 1, ledger: 'mxzaz-hqaaa-aaaar-qaada-cai', mintable: false, minter: 'mqygn-kiaaa-aaaar-qaadq-cai',
+  minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8, wrapper_name: 'ckBTC', backing_symbol: 'BTC',
+  network: 'Bitcoin', display_decimals: 8, fee: null, cap: null, chain_id: null, token_contract: null,
+  gas_ledger: null, onramp: 'Direct', offramp: 'Direct', ...over,
+});
+const NETWORKS_JSON = {
+  networks: [
+    {protocol: 'icp', name: 'Internet Computer', environment: 'mainnet', assets: [
+      wireIcpRow({currency: 0, ledger: 'td2nx-oaaaa-aaaab-qhdnq-cai', mintable: true, minter: null, minter_family: null, symbol: '$', decimals: 2, wrapper_name: null, backing_symbol: null, network: null, display_decimals: null}),
+      wireIcpRow({currency: 2, ledger: 'xevnm-gaaaa-aaaar-qafnq-cai', minter: 'sv3dd-oaaaa-aaaar-qacoa-cai', minter_family: 'CkEthErc20', symbol: 'ckUSDC', decimals: 6, wrapper_name: 'ckUSDC', backing_symbol: 'USDC', network: 'Ethereum', display_decimals: 6, fee: 10000, chain_id: 1, token_contract: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', gas_ledger: 'ss2fx-dyaaa-aaaar-qacoq-cai'}),
+    ]},
+    {protocol: 'icp', name: 'Internet Computer', environment: 'testnet', assets: [
+      wireIcpRow({currency: 3, minter: 'mt', wrapper_name: 'ckTESTBTC', network: 'Bitcoin Testnet'}),
+    ]},
+    {protocol: 'solana', name: 'Solana', environment: 'mainnet', assets: [
+      {token: 'SOL', symbol: 'SOL', decimals: 9, mint: null, onramp: 'Direct', offramp: 'Direct'},
+      {token: 'USDC', symbol: 'USDC', decimals: 6, mint: USDC_MINT_ADDRESS, onramp: 'Direct', offramp: 'Direct'},
+    ]},
+  ],
+};
+
+describe('parseNetworkCatalog — network-first envelope (catalog v2)', () => {
+  it('parses the icp mainnet + icp testnet + solana mainnet sections in order', () => {
+    const sections = parseNetworkCatalog(NETWORKS_JSON)!;
+    expect(sections.map(s => `${s.protocol}:${s.environment}`)).toEqual(['icp:mainnet', 'icp:testnet', 'solana:mainnet']);
+  });
+
+  it('stamps each icp row\'s testnet flag from its OWNING section\'s environment', () => {
+    const flat = icpCatalogOf(parseNetworkCatalog(NETWORKS_JSON)!);
+    expect(flat.map(c => [c.currency, c.testnet])).toEqual([[0, false], [2, false], [3, true]]);
+  });
+
+  it('the section\'s declaration WINS over the row\'s display network string (no re-inference)', () => {
+    // A testnet-section row that carries a mainnet-style network string ("Bitcoin") is STILL
+    // testnet — the relay owns classification; the app never re-infers from display fields.
+    const j = {networks: [
+      {protocol: 'icp', name: 'ic', environment: 'testnet', assets: [wireIcpRow({currency: 9, network: 'Bitcoin'})]},
+    ]};
+    const flat = icpCatalogOf(parseNetworkCatalog(j)!);
+    expect(flat[0].testnet).toBe(true);
+  });
+
+  it('icpCatalogOf concatenates mainnet THEN testnet in section order (the flat catalog contract)', () => {
+    const flat = icpCatalogOf(parseNetworkCatalog(NETWORKS_JSON)!);
+    expect(flat.map(c => c.currency)).toEqual([0, 2, 3]);
+  });
+
+  it('maps icp rows field-for-field (IC row shape UNCHANGED; fee coerced number→string)', () => {
+    const flat = icpCatalogOf(parseNetworkCatalog(NETWORKS_JSON)!);
+    const usdc = flat.find(c => c.currency === 2)!;
+    expect(usdc.ledger).toBe('xevnm-gaaaa-aaaar-qafnq-cai');
+    expect(usdc.minter).toBe('sv3dd-oaaaa-aaaar-qacoa-cai');
+    expect(usdc.minter_family).toBe('CkEthErc20');
+    expect(usdc.decimals).toBe(6);
+    expect(usdc.display_decimals).toBe(6);
+    expect(usdc.fee).toBe('10000');
+    expect(usdc.chain_id).toBe(1);
+    expect(usdc.token_contract).toBe('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48');
+    expect(usdc.gas_ledger).toBe('ss2fx-dyaaa-aaaar-qacoq-cai');
+    expect(usdc.onramp).toBe('Direct');
+    expect(usdc.offramp).toBe('Direct');
+    expect(usdc.testnet).toBe(false);
+  });
+
+  it('an invalid ramp value fails closed to Unavailable', () => {
+    const j = {networks: [{protocol: 'icp', name: 'ic', environment: 'mainnet', assets: [wireIcpRow({onramp: 'Soon'})]}]};
+    const flat = icpCatalogOf(parseNetworkCatalog(j)!);
+    expect(flat[0].onramp).toBe('Unavailable');
+  });
+
+  it('solanaAssetsOf returns the solana section rows (symbol/decimals/mint/ramps)', () => {
+    const sol = solanaAssetsOf(parseNetworkCatalog(NETWORKS_JSON)!);
+    expect(sol).toEqual([
+      {token: 'SOL', symbol: 'SOL', decimals: 9, mint: null, onramp: 'Direct', offramp: 'Direct'},
+      {token: 'USDC', symbol: 'USDC', decimals: 6, mint: USDC_MINT_ADDRESS, onramp: 'Direct', offramp: 'Direct'},
+    ]);
+  });
+
+  it('keeps an EMPTY icp testnet section (clients must not infer from absence)', () => {
+    const j = {networks: [
+      {protocol: 'icp', name: 'ic', environment: 'mainnet', assets: [wireIcpRow({})]},
+      {protocol: 'icp', name: 'ic', environment: 'testnet', assets: []},
+    ]};
+    const sections = parseNetworkCatalog(j)!;
+    expect(sections).toHaveLength(2);
+    expect(sections[1].environment).toBe('testnet');
+    expect(sections[1].assets).toEqual([]);
+  });
+
+  it('returns NULL for the legacy flat envelope {currencies:[…]} (no legacy parsing path)', () => {
+    expect(parseNetworkCatalog({currencies: [wireIcpRow({})]})).toBeNull();
+  });
+
+  it('returns NULL for non-envelope payloads (null / {} / networks not an array)', () => {
+    expect(parseNetworkCatalog(null)).toBeNull();
+    expect(parseNetworkCatalog({})).toBeNull();
+    expect(parseNetworkCatalog({networks: 'nope'})).toBeNull();
+  });
+
+  it('returns NULL when no section carries a valid asset (mirrors the old empty-catalog guard)', () => {
+    expect(parseNetworkCatalog({networks: []})).toBeNull();
+    expect(parseNetworkCatalog({networks: [{protocol: 'icp', name: 'ic', environment: 'mainnet', assets: []}]})).toBeNull();
+  });
+
+  it('SKIPS a section whose environment is neither mainnet nor testnet (never infers)', () => {
+    const j = {networks: [
+      {protocol: 'icp', name: 'ic', environment: 'prod', assets: [wireIcpRow({})]},
+      {protocol: 'icp', name: 'ic', environment: 'mainnet', assets: [wireIcpRow({currency: 2})]},
+    ]};
+    const sections = parseNetworkCatalog(j)!;
+    expect(sections).toHaveLength(1);
+    expect(sections[0].environment).toBe('mainnet');
+  });
+
+  it('SKIPS a section with an unknown protocol (a future chain this app has no rail for)', () => {
+    const j = {networks: [
+      {protocol: 'polkadot', name: 'Polkadot', environment: 'mainnet', assets: [{token: 'DOT', symbol: 'DOT', decimals: 10, mint: null, onramp: 'Direct', offramp: 'Direct'}]},
+      {protocol: 'icp', name: 'ic', environment: 'mainnet', assets: [wireIcpRow({})]},
+    ]};
+    const sections = parseNetworkCatalog(j)!;
+    expect(sections.map(s => s.protocol)).toEqual(['icp']);
+  });
+
+  it('filters malformed icp rows (non-number currency) without dropping the section', () => {
+    const j = {networks: [{protocol: 'icp', name: 'ic', environment: 'mainnet', assets: [{currency: 'zero'}, null, wireIcpRow({currency: 2})]}]};
+    const flat = icpCatalogOf(parseNetworkCatalog(j)!);
+    expect(flat.map(c => c.currency)).toEqual([2]);
+  });
+
+  it('filters malformed solana rows (missing token/symbol/decimals)', () => {
+    const j = {networks: [{protocol: 'solana', name: 'Solana', environment: 'mainnet', assets: [
+      {symbol: 'SOL', decimals: 9},                     // no token
+      {token: 'SOL', decimals: 9},                      // no symbol
+      {token: 'SOL', symbol: 'SOL'},                    // no decimals
+      {token: 'USDC', symbol: 'USDC', decimals: 6},     // valid (mint omitted ⇒ null)
+    ]}]};
+    const sol = solanaAssetsOf(parseNetworkCatalog(j)!);
+    expect(sol).toEqual([{token: 'USDC', symbol: 'USDC', decimals: 6, mint: null, onramp: 'Unavailable', offramp: 'Unavailable'}]);
+  });
+
+  it('survives a JSON round-trip through the cached envelope (the cache read parses the SAME shape)', () => {
+    // fetchCurrencies caches `{"networks":[…]}` (the wire envelope) and useCatalog replays it
+    // through this same parser — the round-trip must be identity or a cache hit would be lost.
+    const once = parseNetworkCatalog(NETWORKS_JSON)!;
+    const cached = JSON.stringify({networks: once});            // what fetchCurrencies persists
+    const twice = parseNetworkCatalog(JSON.parse(cached))!;     // what useCatalog reads back
+    expect(twice).toEqual(once);
+  });
+});
+
+describe('fetchCurrencies — wire fetch + cache persist (catalog v2)', () => {
+  const realFetch = globalThis.fetch;
+  afterEach(async () => {
+    (globalThis as unknown as {fetch: typeof realFetch}).fetch = realFetch;
+    await AsyncStorage.clear();
+  });
+  const install = (body: unknown, ok = true, status = 200) => {
+    const mock = jest.fn(async () => ({ok, status, json: async () => body} as unknown as Response));
+    (globalThis as unknown as {fetch: typeof mock}).fetch = mock;
+  };
+
+  it('parses the network-first envelope, returns the sections, and PERSISTS THE ENVELOPE (not a bare array)', async () => {
+    // Regression pin: the cache must store `{"networks":[…]}` — useCatalog replays the cached blob
+    // through parseNetworkCatalog, so a bare-array persist would make every cache read a miss.
+    install(NETWORKS_JSON);
+    const prior: NetworkSection[] = [];
+    const out = await fetchCurrencies('https://relay.example.com', prior);
+    expect(out).not.toBe(prior);
+    expect(out.map(s => `${s.protocol}:${s.environment}`)).toEqual(['icp:mainnet', 'icp:testnet', 'solana:mainnet']);
+    const key = catalogCacheKey('https://relay.example.com');
+    const stored = await AsyncStorage.getItem(key);
+    expect(stored).toBeTruthy();
+    const reparsed = parseNetworkCatalog(JSON.parse(stored!));
+    expect(reparsed).toEqual(out);
+  });
+
+  it('a non-OK response keeps prior (offline/503 ⇒ no catalog change) and caches nothing', async () => {
+    install('unavailable', false, 503);
+    const prior: NetworkSection[] = parseNetworkCatalog(NETWORKS_JSON)!;
+    const out = await fetchCurrencies('https://relay.example.com', prior);
+    expect(out).toBe(prior);
+    expect(await AsyncStorage.getItem(catalogCacheKey('https://relay.example.com'))).toBeNull();
+  });
+
+  it('a legacy flat {currencies:[…]} body keeps prior and caches nothing', async () => {
+    install({currencies: [wireIcpRow({})]});
+    const prior: NetworkSection[] = [];
+    expect(await fetchCurrencies('https://relay.example.com', prior)).toBe(prior);
+    expect(await AsyncStorage.getItem(catalogCacheKey('https://relay.example.com'))).toBeNull();
+  });
+});
+
+describe('BUNDLED_NETWORKS — one shape with the wire (catalog v2)', () => {
+  it('carries the icp mainnet + icp testnet + solana mainnet sections in order', () => {
+    expect(BUNDLED_NETWORKS.map(s => `${s.protocol}:${s.environment}`)).toEqual(['icp:mainnet', 'icp:testnet', 'solana:mainnet']);
+  });
+
+  it('derives the flat IC catalog [0,1,2,6] with every row stamped testnet=false', () => {
+    const flat = icpCatalogOf(BUNDLED_NETWORKS);
+    expect(flat.map(c => c.currency)).toEqual([0, 1, 2, 6]);
+    expect(flat.every(c => !c.testnet)).toBe(true);
+  });
+
+  it('the icp testnet section is EMPTY (the section exists; the assets list does not)', () => {
+    const testnet = BUNDLED_NETWORKS.find(s => s.protocol === 'icp' && s.environment === 'testnet')!;
+    expect(testnet.assets).toEqual([]);
+  });
+
+  it('mirrors the solana rail constants VERBATIM (decimals + mint imported from the rail modules)', () => {
+    expect(solanaAssetsOf(BUNDLED_NETWORKS)).toEqual([
+      {token: 'SOL', symbol: 'SOL', decimals: SOL_DECIMALS, mint: null, onramp: 'Direct', offramp: 'Direct'},
+      {token: 'USDC', symbol: 'USDC', decimals: USDC_DECIMALS, mint: USDC_MINT_ADDRESS, onramp: 'Direct', offramp: 'Direct'},
+    ]);
   });
 });

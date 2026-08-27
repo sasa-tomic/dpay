@@ -12,7 +12,7 @@
  * Then the flow-20 close-out: the counterparty submits the captured envelope, the payer comes
  * back online and reconciles to Paid — proving the coaching never blocked the money path.
  */
-import {setup, assert, assertIncludes, getBalance, faucetAccount, onboardWallet, accountOf, goOffline, setRelay, waitForScanner} from '../harness/lib.mjs';
+import {setup, assert, assertIncludes, getBalance, faucetAccount, icpCatalog, onboardWallet, accountOf, goOffline, setRelay, waitForScanner} from '../harness/lib.mjs';
 import {generateKeypair, buildRequestQR, randNonceHex} from '../harness/wire.mjs';
 
 export const meta = {
@@ -115,7 +115,7 @@ export async function run() {
 
     // --- the money path never cared: counterparty submits, payer reconciles to Paid. -----------
     const envelopeBytes = b64urlToBytes(payload);
-    const catalog = (await (await fetch(`${env.relayBaseURL}/api/v1/currencies`)).json()).currencies;
+    const catalog = await icpCatalog(env.relayBaseURL);
     const ledger = catalog.find((c) => c.currency === 0).ledger;
     const submitted = await fetch(`${env.relayBaseURL}/api/v2/canister/${ledger}/call`, {
       method: 'POST',

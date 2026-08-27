@@ -15,7 +15,7 @@
 //     are name-less; memo is the reconciliation key).
 //
 // Selector contract: `tab-receive`, `amount-input`, `btn-request`, `request-qr`, `balance`.
-import { setup, assert, assertIncludes, getBalance, faucetAccount, railPrincipalText, onboardWallet, accountOf } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, getBalance, faucetAccount, icpCatalog, railPrincipalText, onboardWallet, accountOf } from '../harness/lib.mjs';
 import { generateKeypair, decodeRequest, icpPrincipalBytes, icpTransferArgBytes, icpSignUpdate, b64urlEncode } from '../harness/wire.mjs';
 
 const PAY_CENTS = 3000; // ∂30.00
@@ -69,7 +69,7 @@ export async function run() {
     // Byte-identical to the app's wasm signer (cross-validated in flow 00), so the fake-IC gateway
     // verifies A's signature and executes the transfer when B's app submits it.
     console.log('[08-merchant-settle] A signing the icrc1_transfer envelope…');
-    const catalog = (await (await fetch(`${relayBaseURL}/api/v1/currencies`)).json()).currencies;
+    const catalog = await icpCatalog(relayBaseURL);
     const ledger = catalog.find(c => c.currency === 0)?.ledger;
     assertEq(ledger, DEMO_LEDGER, 'catalog currency 0 ledger');
     const arg = icpTransferArgBytes(icpPrincipalBytes(bobHex), BigInt(PAY_CENTS), {fee: null, memoHex: req.nonceHex});

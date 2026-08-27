@@ -74,17 +74,21 @@ export async function run() {
     assert(identity && typeof identity.publicHex === 'string', 'onboard should persist an identity with publicHex');
     console.log(`[01-testnet-wiring] ✓ onboarded (pubkey ${identity.publicHex.slice(0, 8)}…)`);
 
-    // 2. Open Balances + assert the 3 testnet asset cards are present. The staging facade's catalog
-    //    (currencies()) carries ckBTC Testnet (CkBtcUtxo) + ckSepoliaUSDC + ckSepoliaETH (CkEthErc20).
-    //    testID = asset-<assetTestKey(descriptor)> (see app/config/catalog.ts:assetTestKey).
-    console.log('[01-testnet-wiring] opening Balances + asserting testnet asset cards…');
+    // 2. Open Balances + assert the 3 testnet asset cards are present. Catalog v2: the relay
+    //    partitions the staging facade's flat currencies() into network sections; ckBTC Testnet
+    //    (CkBtcUtxo) + ckSepoliaUSDC + ckSepoliaETH (CkEthErc20) land in the icp/testnet section,
+    //    so the app declares them testnet — the rows sit behind the Balances testnet toggle and
+    //    their testIDs carry the '-testnet' suffix (see app/config/catalog.ts:assetTestKey).
+    console.log('[01-testnet-wiring] opening Balances + revealing the testnet rows…');
     await openBalances(driver, { timeoutMs: 10_000 });
+    await driver.findByTestID('btn-toggle-testnet', { timeoutMs: 8_000 });
+    await driver.click('btn-toggle-testnet', { timeoutMs: 4_000 });
     const body = await driver.bodyText();
-    // ckBTC Testnet → assetTestKey returns 'ckbtc' (CkBtcUtxo family).
-    await driver.findByTestID('asset-ckbtc', { timeoutMs: 8_000 });
-    // ckSepoliaUSDC + ckSepoliaETH → assetTestKey returns the lowercased wrapper_name.
-    await driver.findByTestID('asset-cksepoliausdc', { timeoutMs: 4_000 });
-    await driver.findByTestID('asset-cksepoliaeth', { timeoutMs: 4_000 });
+    // ckBTC Testnet → assetTestKey returns 'ckbtc' (CkBtcUtxo family) + the '-testnet' suffix.
+    await driver.findByTestID('asset-ckbtc-testnet', { timeoutMs: 8_000 });
+    // ckSepoliaUSDC + ckSepoliaETH → assetTestKey returns the lowercased wrapper_name + suffix.
+    await driver.findByTestID('asset-cksepoliausdc-testnet', { timeoutMs: 4_000 });
+    await driver.findByTestID('asset-cksepoliaeth-testnet', { timeoutMs: 4_000 });
     assertIncludes(body, 'BTC', 'Balances should show the BTC asset name');
     console.log('[01-testnet-wiring] ✓ 3 testnet asset cards present (ckTESTBTC / ckSepoliaUSDC / ckSepoliaETH)');
 
@@ -105,13 +109,12 @@ export async function run() {
     //    THIS wallet (not the FakeLedger stub). The facade proxies to the real ckBTC Testnet minter
     //    (get_btc_address), which derives a per-principal Testnet4 address via threshold signatures.
     //
-    //    NOTE: this is a relay call (not a UI deposit-sheet drive) because the prod catalog now holds
-    //    BOTH mainnet ckBTC (cur 1) and ckBTC Testnet (cur 3), and `assetTestKey` returns 'ckbtc' for
-    //    the whole CkBtcUtxo family — so the UI has two indistinguishable `asset-add-ckbtc` buttons
-    //    and clicking the first opens the MAINNET sheet (bc1…). The collision is a catalog-pollution
-    //    consequence (testnet currencies registered on prod ssqti); it resolves when they're retired
-    //    pre-pilot or relocated to a staging facade. The relay call proves the address for the actual
-    //    onboarded wallet — a stronger wiring signal than driving the ambiguous UI.
+    //    NOTE: this is a relay call (not a UI deposit-sheet drive) because it proves the address
+    //    for the actual onboarded wallet — a stronger wiring signal than driving the UI. (Pre-v2
+    //    the UI path was ALSO ambiguous on PROD ssqti: mainnet ckBTC (cur 1) and ckBTC Testnet
+    //    (cur 3) both keyed `asset-add-ckbtc`, so clicking the first opened the MAINNET sheet
+    //    (bc1…). Catalog v2 resolves that collision — the testnet row renders as
+    //    `asset-add-ckbtc-testnet` behind the toggle — but the direct relay call is kept.)
     console.log('[01-testnet-wiring] relay GET /deposit/address (ckBTC Testnet → real Testnet4 address)…');
     try {
       const addrResp = await fetchRelay(

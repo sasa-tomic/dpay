@@ -262,7 +262,7 @@ describe('ReceiveMode — rail-proof deeplink is history-gated, never fabricated
     currency: 0, ledger: 'td2nx-oaaaa-aaaab-qhdnq-cai', mintable: true, minter: null,
     minter_family: null, symbol: null, decimals: 2, wrapper_name: null, backing_symbol: null,
     network: null, display_decimals: 2, fee: null, cap: null, chain_id: null, token_contract: null,
-    gas_ledger: null, onramp: 'Unavailable', offramp: 'Unavailable',
+    gas_ledger: null, onramp: 'Unavailable', offramp: 'Unavailable', testnet: false,
   }];
   const FORGED = receiptShareBlob({request_id: '00'.repeat(32), block_index: '7', ledger: 'x'});
 

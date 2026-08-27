@@ -14,7 +14,9 @@ via UniFFI; the RN layer is a thin presentational + orchestration shell.
 ```
 App.tsx              root — identity + relay load, self-check, route Onboarding | Wallet
 relayConfig.ts       relay url resolution (imported ONLY by App.tsx — the ?relay= e2e override anchor)
-config/              palette; constants (POLL, receipt pin, RPC urls); catalog + asset selection
+config/              palette; constants (POLL, receipt pin, RPC urls); catalog (network-first:
+                     GET /currencies {"networks":[…]} → NetworkSection[]; BUNDLED_NETWORKS
+                     cold/offline fallback; flat IC rows via icpCatalogOf) + asset selection
 lib/                 pure helpers: types, format/amount (BigInt exact), assetBalances, bip39
                      (mnemonic), deepLink, clipboard, timeouts, base64(+url)
 hooks/               useHotkeys, useCatalog, useBalancePoll, useSolanaBalances, useNfcTapState,

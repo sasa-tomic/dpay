@@ -2,8 +2,9 @@
  * Phase 1 — the pure asset domain (2026-08-12 unified asset selection rewrite).
  *
  * `buildSelectableAssets` is the ONE pure list builder every Wallet selector consumes. It produces
- * a resolved view model (`SelectableAsset`) from the validated IC catalog PLUS explicit app-defined
- * Solana assets. SOL never enters the relay/canister catalog; it is appended here as `solana:*` ids.
+ * a resolved view model (`SelectableAsset`) from the validated IC catalog PLUS the catalog's
+ * solana section rows (catalog v2 — display facts catalog-driven, bundled fallback when the relay
+ * is unreachable). SOL never enters the ICRC catalog; it is appended here as `solana:*` ids.
  *
  * These tests pin the load-bearing Phase-1 invariants:
  *   1. The complete visible list = every visible IC descriptor + solana:SOL (+ solana:USDC when
@@ -27,19 +28,19 @@ import {
   solanaUsdcCoherent,
   type SelectableAsset,
 } from '../config/assets';
-import type {CurrencyDescriptor} from '../config/catalog';
+import type {CurrencyDescriptor, NetworkSection, SolanaAsset} from '../config/catalog';
 
 // --- shared fixtures (mirror catalog.test.ts's `mk`) -----------------------------------------
 const mk = (d: Partial<CurrencyDescriptor> & Pick<CurrencyDescriptor, 'currency' | 'minter_family'>): CurrencyDescriptor => ({
   ledger: '', mintable: false, minter: null, symbol: null, decimals: null,
   wrapper_name: null, backing_symbol: null, network: null, display_decimals: null,
   fee: null, cap: null, chain_id: null, token_contract: null, gas_ledger: null,
-  onramp: 'Unavailable', offramp: 'Unavailable', ...d,
+  onramp: 'Unavailable', offramp: 'Unavailable', testnet: false, ...d,
 });
 const DEMO: CurrencyDescriptor = mk({currency: 0, mintable: true, minter_family: null, symbol: '$', decimals: 2, onramp: 'Direct', offramp: 'Unavailable'});
 const CKBTC: CurrencyDescriptor = mk({currency: 1, minter: 'm', minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8, wrapper_name: 'ckBTC', backing_symbol: 'BTC', network: 'Bitcoin', display_decimals: 8, onramp: 'Direct', offramp: 'Direct'});
 const CKUSDC: CurrencyDescriptor = mk({currency: 2, ledger: 'l', minter: 's', minter_family: 'CkEthErc20', symbol: 'ckUSDC', decimals: 6, wrapper_name: 'ckUSDC', backing_symbol: 'USDC', network: 'Ethereum', display_decimals: 6, chain_id: 1, token_contract: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', onramp: 'Direct', offramp: 'Direct'});
-const CKTESTBTC: CurrencyDescriptor = mk({currency: 3, minter: 'mt', minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8, wrapper_name: 'ckTESTBTC', backing_symbol: 'BTC', network: 'Bitcoin Testnet', display_decimals: 8, onramp: 'Direct', offramp: 'Direct'});
+const CKTESTBTC: CurrencyDescriptor = mk({currency: 3, minter: 'mt', minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8, wrapper_name: 'ckTESTBTC', backing_symbol: 'BTC', network: 'Bitcoin Testnet', display_decimals: 8, onramp: 'Direct', offramp: 'Direct', testnet: true});
 const BASE_CATALOG: CurrencyDescriptor[] = [DEMO, CKBTC, CKUSDC];
 
 const ids = (as: SelectableAsset[]): string[] => as.map(a => a.id);
@@ -90,6 +91,64 @@ describe('buildSelectableAssets — complete visible list', () => {
   it('handles an empty catalog (SOL still appended when enabled)', () => {
     expect(ids(buildSelectableAssets([], {showTestnet: false, solanaEnabled: false}))).toEqual([]);
     expect(ids(buildSelectableAssets([], {showTestnet: false, solanaEnabled: true}))).toEqual(['solana:SOL']);
+  });
+});
+
+// =============================================================================================
+// 1b. Catalog-driven Solana rows (catalog v2) — display facts read from the network sections
+// =============================================================================================
+describe('buildSelectableAssets — catalog-driven Solana rows (catalog v2)', () => {
+  const SOL_ROWS: SolanaAsset[] = [
+    {token: 'SOL', symbol: 'SOLANA', decimals: 4, mint: null, onramp: 'Direct', offramp: 'Partner'},
+    {token: 'USDC', symbol: 'USDC', decimals: 5, mint: 'Mint111111111111111111111111111111111111111', onramp: 'Direct', offramp: 'Direct'},
+  ];
+  const NETWORKS: NetworkSection[] = [
+    {protocol: 'icp', name: 'Internet Computer', environment: 'mainnet', assets: []},
+    {protocol: 'icp', name: 'Internet Computer', environment: 'testnet', assets: []},
+    {protocol: 'solana', name: 'Solana', environment: 'mainnet', assets: SOL_ROWS},
+  ];
+
+  it('omitted networks ⇒ the BUNDLED sections supply the SOL facts (cold/offline first load, identical rows)', () => {
+    const assets = buildSelectableAssets([], {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
+    const sol = assets.find(a => a.id === 'solana:SOL')!;
+    const usdc = assets.find(a => a.id === 'solana:USDC')!;
+    expect(sol.symbol).toBe('SOL');
+    expect(sol.decimals).toBe(9);
+    expect(sol.testKey).toBe('sol');
+    expect(usdc.symbol).toBe('USDC');
+    expect(usdc.decimals).toBe(6);
+    expect(usdc.testKey).toBe('sol-usdc');
+  });
+
+  it('reads symbol/decimals/ramps from the solana section rows when networks is supplied', () => {
+    const assets = buildSelectableAssets([], {showTestnet: false, solanaEnabled: true, solanaUsdc: true, networks: NETWORKS});
+    const sol = assets.find(a => a.id === 'solana:SOL')!;
+    expect(sol.symbol).toBe('SOLANA');
+    expect(sol.decimals).toBe(4);
+    expect(sol.capabilities).toEqual({onramp: 'Direct', offramp: 'Partner'});
+    const usdc = assets.find(a => a.id === 'solana:USDC')!;
+    expect(usdc.decimals).toBe(5);
+    expect(usdc.capabilities).toEqual({onramp: 'Direct', offramp: 'Direct'});
+  });
+
+  it('ids + testKeys stay the stable literals regardless of catalog metadata (testID contract)', () => {
+    // The section may rename symbols or shift decimals, but `solana:SOL`/'sol' and
+    // `solana:USDC`/'sol-usdc' are the e2e testID contract — never derived from metadata.
+    const assets = buildSelectableAssets([], {showTestnet: false, solanaEnabled: true, solanaUsdc: true, networks: NETWORKS});
+    expect(assets.map(a => [a.id, a.testKey])).toEqual([['solana:SOL', 'sol'], ['solana:USDC', 'sol-usdc']]);
+  });
+
+  it('the USDC availability gate still applies when networks is supplied', () => {
+    const assets = buildSelectableAssets([], {showTestnet: false, solanaEnabled: true, solanaUsdc: false, networks: NETWORKS});
+    expect(ids(assets)).toEqual(['solana:SOL']);
+  });
+
+  it('omits a row the section does not carry (no SOL in the section ⇒ no solana:SOL asset)', () => {
+    const usdcOnly: NetworkSection[] = [
+      {protocol: 'solana', name: 'Solana', environment: 'mainnet', assets: [SOL_ROWS[1]]},
+    ];
+    const assets = buildSelectableAssets([], {showTestnet: false, solanaEnabled: true, solanaUsdc: true, networks: usdcOnly});
+    expect(ids(assets)).toEqual(['solana:USDC']);
   });
 });
 

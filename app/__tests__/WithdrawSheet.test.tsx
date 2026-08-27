@@ -59,7 +59,7 @@ const DESC: CurrencyDescriptor = {
   symbol: 'ckETH', decimals: 18, wrapper_name: 'ckETH', backing_symbol: 'ETH',
   network: 'Ethereum', display_decimals: 6,
   fee: '20000000000000', cap: null, chain_id: 1, token_contract: null, gas_ledger: null,
-  onramp: 'Direct', offramp: 'Direct',
+  onramp: 'Direct', offramp: 'Direct', testnet: false,
 };
 const DISPLAY: FamilyDisplay = {
   networkLabel: 'Ethereum', nativeAsset: 'ETH',

@@ -20,8 +20,12 @@ import {Platform, Linking} from 'react-native';
 
 import {DepositSheet} from '../components/DepositSheet';
 import {SolanaReceiveSheet} from '../components/SolanaReceiveSheet';
-import {BUNDLED_CATALOG, familyDisplay} from '../config/catalog';
+import {BUNDLED_NETWORKS, familyDisplay, icpCatalogOf} from '../config/catalog';
 import type {Identity} from '../lib/types';
+
+// Catalog v2: the bundled fallback is network-first; derive the flat IC catalog through the same
+// `icpCatalogOf` the app uses.
+const BUNDLED_CATALOG = icpCatalogOf(BUNDLED_NETWORKS);
 
 jest.mock('../services/rail', () => ({
   railBtcDepositAddress: jest.fn(() => Promise.resolve('bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh')),
@@ -46,11 +50,12 @@ function pressByTestID(tree: renderer.ReactTestRenderer, testID: string): void {
   act(() => { node.props.onPress(); });
 }
 
-// Testnet ckBTC = the mainnet descriptor on a non-mainnet network (how the testnet toggle row
-// actually arrives). Currency id 3 matches the e2e testnet-toggle convention.
+// Testnet ckBTC = the mainnet descriptor flagged testnet (how the testnet toggle row arrives under
+// the network-first catalog: a testnet-section row with the same shape). Currency id 3 matches the
+// e2e testnet-toggle convention.
 const TESTNET_CATALOG = [
   ...BUNDLED_CATALOG,
-  {...BUNDLED_CATALOG.find(c => c.currency === 1)!, currency: 3, network: 'Bitcoin Testnet'},
+  {...BUNDLED_CATALOG.find(c => c.currency === 1)!, currency: 3, network: 'Bitcoin Testnet', testnet: true},
 ];
 
 let mockLinkingOpenURL: jest.Mock<(uri: string) => Promise<void>>;

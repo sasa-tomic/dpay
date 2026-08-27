@@ -18,7 +18,7 @@
 // in-DOM 'Link copied ✓' feedback label (asserted below).
 //
 // Selector contract: `pay-amount` (transient sign status), `btn-share-receipt`.
-import { setup, assert, onboardWallet , armPayScan} from '../harness/lib.mjs';
+import { setup, assert, icpCatalog, onboardWallet , armPayScan} from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
 const PAY_CENTS = 2500; // ∂25.00 (DEMO_USD = currency 0, the wallet asset)
@@ -105,7 +105,7 @@ export async function run() {
     const decoded = JSON.parse(Buffer.from(blob, 'base64url').toString('utf8'));
     assert(typeof decoded === 'object' && decoded !== null, 'the receipt blob must decode to a JSON object');
     assert(/^[0-9a-f]{64}$/.test(String(decoded.request_id)), `the receipt must carry a 32-byte hex request_id (the merchant binding key), got ${JSON.stringify(decoded)}`);
-    const catalog = (await (await fetch(`${relayBaseURL}/api/v1/currencies`)).json()).currencies;
+    const catalog = await icpCatalog(relayBaseURL);
     const ledger0 = catalog.find((c) => c.currency === 0).ledger;
     assert(String(decoded.ledger) === ledger0, `the receipt ledger must be this settle's target (currency-0 ledger ${ledger0}), got ${decoded.ledger}`);
     assert(/^\d+$/.test(String(decoded.block_index)), `block_index must be a u64 decimal string, got ${decoded.block_index}`);

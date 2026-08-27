@@ -39,7 +39,7 @@
 // Selector contract: `amount-input`, `btn-request`, `request-qr` (merchant's request), the
 // __DPAY_QR_LAST + __DPAY_TEST_DEEPLINK seams.
 import { randomBytes } from 'node:crypto';
-import { setup, assert, assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf, railTransfer, railPrincipalText } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, faucetAccount, getBalance, icpCatalog, onboardWallet, accountOf, railTransfer, railPrincipalText } from '../harness/lib.mjs';
 import { generateKeypair, decodeRequest, b64urlEncode } from '../harness/wire.mjs';
 
 const PAY_UNITS = 2500; // ∂25.00 (DEMO_USD = currency 0)
@@ -98,11 +98,9 @@ export async function run() {
     const bobBal = await getBalance(relayBaseURL, bob.publicHex, 0);
     assert(String(bobBal) === '10000', `payer B must be fauceted to 10000, got ${bobBal}`);
 
-    // Catalog: the DEMO ledger principal carried as a format-checked proof hint.
-    const catR = await fetch(`${relayBaseURL}/api/v1/currencies`);
-    assert(catR.ok, `catalog fetch should be 200, got ${catR.status}`);
-    const catJ = await catR.json();
-    const catalog = Array.isArray(catJ) ? catJ : catJ.currencies;
+    // Catalog: the DEMO ledger principal carried as a format-checked proof hint. (icpCatalog
+    // throws on non-200 / a non-v2 body — the fetch-ok assert lives there now.)
+    const catalog = await icpCatalog(relayBaseURL);
     const ledger = catalog.find((c) => c.currency === 0)?.ledger;
     assert(typeof ledger === 'string' && ledger.length > 0, 'catalog must carry the DEMO ledger id');
 

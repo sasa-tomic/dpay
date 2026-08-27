@@ -1012,17 +1012,23 @@ async fn apk_download_revalidates_with_304_on_if_none_match() {
     assert_eq!(bytes, apk);
 }
 
-// --- currency catalog (M0) ---------------------------------------------------
+// --- currency catalog (M0 + v2 network-first envelope) ------------------------
 //
-// Covers GET /api/v1/currencies — the wallet's runtime asset catalog (closes issue #7). The
-// FakeLedger reports a demo deployment: DEMO_USD (currency 0, $, mintable, no ramp) + a ckBTC-shaped
-// currency (1, ₿, CkBtcUtxo ramp) + ckUSDC (2, ckUSDC, CkEthErc20 onramp) + ckUSDT (3, a second
-// CkEthErc20 proving the onramp is per-token — MC8 U2) + ckDAI (4, an 18-dec CkEthErc20 — the
-// precision-extreme fixture for OPEN_ISSUES #3). The wallet reads this once on load instead of
-// hardcoding DEPOSIT_CURRENCY.
+// Covers GET /api/v1/currencies — the wallet's runtime asset catalog (closes issue #7), served
+// network-first (v2): {networks:[{protocol,name,environment,assets}]} with exactly 3 sections in
+// order — icp mainnet, icp testnet, solana mainnet. The FakeLedger reports a demo deployment:
+// DEMO_USD (currency 0, $, mintable, no ramp) + ckBTC (1, ₿, CkBtcUtxo ramp) + ckUSDC (2,
+// CkEthErc20 onramp) + ckUSDT (3, a second CkEthErc20 proving the onramp is per-token — MC8 U2) +
+// ckDAI (4, an 18-dec CkEthErc20 — the precision-extreme fixture for OPEN_ISSUES #3) + native
+// ckETH (5) on the mainnet side; ckTESTBTC (6, network "Bitcoin Testnet") on the testnet side.
+// The wallet reads this once on load instead of hardcoding DEPOSIT_CURRENCY.
 
-/// `GET /api/v1/currencies` returns `200 {"currencies": [...]}` with every registered currency's
-/// ledger/minter/display metadata. Mirrors how the wallet consumes the catalog on load.
+/// `GET /api/v1/currencies` returns `200 {"networks":[...]}` — the v2 network-first envelope with
+/// exactly 3 sections in order (icp mainnet, icp testnet, solana mainnet) and NO legacy top-level
+/// `currencies`/`testnet` arrays. IC mainnet rows carry every registered mainnet currency's
+/// ledger/minter/display metadata in the UNCHANGED row shape; the testnet section holds exactly
+/// the rows the relay's server-authoritative partition classifies as testnet; the solana section
+/// mirrors app/solana.ts constants verbatim.
 #[tokio::test]
 async fn currencies_route_returns_demo_catalog() {
     let (state, _led) = state_from(ledger());
@@ -1030,11 +1036,34 @@ async fn currencies_route_returns_demo_catalog() {
     let (status, body) = call(&state, get_req("/api/v1/currencies")).await;
     assert_eq!(status, StatusCode::OK, "{body}");
 
-    let rows = body["currencies"].as_array().expect("currencies array");
+    // The v2 envelope carries ONLY `networks` (no deployed APKs → no back-compat arrays).
+    let networks = body["networks"].as_array().expect("networks array");
+    assert_eq!(
+        body.as_object().expect("object body").len(),
+        1,
+        "envelope carries only `networks`: {body}"
+    );
+    assert_eq!(networks.len(), 3, "exactly icp mainnet + icp testnet + solana mainnet: {body}");
+
+    let mainnet = &networks[0];
+    assert_eq!(mainnet["protocol"], "icp");
+    assert_eq!(mainnet["name"], "Internet Computer");
+    assert_eq!(mainnet["environment"], "mainnet");
+    let testnet = &networks[1];
+    assert_eq!(testnet["protocol"], "icp");
+    assert_eq!(testnet["name"], "Internet Computer");
+    assert_eq!(testnet["environment"], "testnet");
+    let solana = &networks[2];
+    assert_eq!(solana["protocol"], "solana");
+    assert_eq!(solana["name"], "Solana");
+    assert_eq!(solana["environment"], "mainnet");
+
+    // IC mainnet section: the fake's mainnet rows (DEMO's network None is mainnet-side).
+    let rows = mainnet["assets"].as_array().expect("icp mainnet assets array");
     assert_eq!(
         rows.len(),
-        7,
-        "demo catalog = DEMO_USD + ckBTC + ckUSDC + ckUSDT + ckDAI + native-ETH + ckTESTBTC: {body}"
+        6,
+        "icp mainnet = DEMO_USD + ckBTC + ckUSDC + ckUSDT + ckDAI + native-ETH (ckTESTBTC is testnet-side): {body}"
     );
 
     // DEMO_USD (currency 0): the mintable $ faucet asset, no ramp.
@@ -1200,6 +1229,48 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(cketh["gas_ledger"], serde_json::Value::Null);
     assert_eq!(cketh["onramp"], "Direct"); // ckETH helper depositEth (single payable tx)
     assert_eq!(cketh["offramp"], "Direct"); // withdraw_eth — Cash-out button renders
+
+    // IC testnet section: exactly the rows the partition rule (network Some AND not in
+    // {"Bitcoin","Ethereum"}) classifies as testnet — here only the ckTESTBTC fixture.
+    let trows = testnet["assets"].as_array().expect("icp testnet assets array");
+    assert_eq!(
+        trows.len(),
+        1,
+        "exactly the ckTESTBTC fixture is testnet-side (the rest is mainnet or DEMO): {body}"
+    );
+    let cktestbtc = &trows[0];
+    assert_eq!(cktestbtc["currency"], 6);
+    assert_eq!(cktestbtc["wrapper_name"], "ckTESTBTC");
+    assert_eq!(cktestbtc["backing_symbol"], "BTC");
+    assert_eq!(cktestbtc["network"], "Bitcoin Testnet");
+    assert_eq!(cktestbtc["minter_family"], "CkBtcUtxo");
+    assert_eq!(cktestbtc["decimals"], 8);
+    assert_eq!(cktestbtc["onramp"], "Unavailable"); // display-only fixture — no ramps
+    assert_eq!(cktestbtc["offramp"], "Unavailable");
+
+    // Solana mainnet section — relay-level constants mirroring app/solana.ts EXACTLY: SOL 9
+    // decimals (SOL_DECIMALS, mint null — native), USDC 6 decimals (USDC_DECIMALS) + the mainnet
+    // USDC mint (USDC_MINT_ADDRESS). Direct ramps both ways, both assets; no RPC/keys served.
+    let srows = solana["assets"].as_array().expect("solana assets array");
+    assert_eq!(srows.len(), 2, "solana mainnet = SOL + USDC: {body}");
+    let sol = &srows[0];
+    assert_eq!(sol["token"], "SOL");
+    assert_eq!(sol["symbol"], "SOL");
+    assert_eq!(sol["decimals"], 9);
+    assert_eq!(sol["mint"], serde_json::Value::Null, "native SOL carries no SPL mint");
+    assert_eq!(sol["onramp"], "Direct");
+    assert_eq!(sol["offramp"], "Direct");
+    let usdc = &srows[1];
+    assert_eq!(usdc["token"], "USDC");
+    assert_eq!(usdc["symbol"], "USDC");
+    assert_eq!(usdc["decimals"], 6);
+    assert_eq!(
+        usdc["mint"],
+        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "the app's USDC_MINT_ADDRESS verbatim (app/solana/spl.ts)"
+    );
+    assert_eq!(usdc["onramp"], "Direct");
+    assert_eq!(usdc["offramp"], "Direct");
 }
 
 // --- batch balances (the N+1→1 poll fix) --------------------------------------
