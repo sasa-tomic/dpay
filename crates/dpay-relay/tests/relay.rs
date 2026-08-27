@@ -31,7 +31,6 @@ use dpay_icp::principal::{Account, Principal};
 use dpay_relay::{app, ic_gateway::FakeIc, AppState, FakeLedger};
 use ed25519_dalek::SigningKey;
 
-
 // --- helpers -------------------------------------------------------------
 
 fn keypair() -> SigningKey {
@@ -220,7 +219,11 @@ async fn faucet_enabled_mints() {
     assert_eq!(fake.balance_for(DEMO_USD, &merch_owner), 999);
 
     // The test-only read-back route agrees (same principal mapping), explicit currency included.
-    let (bs, bb) = call(&state, get_req(&format!("/api/v1/balance/{merch_hex}?currency=0"))).await;
+    let (bs, bb) = call(
+        &state,
+        get_req(&format!("/api/v1/balance/{merch_hex}?currency=0")),
+    )
+    .await;
     assert_eq!(bs, StatusCode::OK, "{bb}");
     assert_eq!(bb["balance"], "999", "{bb}");
 
@@ -283,7 +286,10 @@ async fn api_v2_gateway_mounting_pinned() {
     // Status: 200, CBOR, non-empty (the app's gateway pre-flight).
     let (status, headers, bytes) = call_raw(&state, get_req("/api/v2/status")).await;
     assert_eq!(status, StatusCode::OK, "/api/v2/status must serve");
-    assert_eq!(headers.get(header::CONTENT_TYPE).unwrap(), "application/cbor");
+    assert_eq!(
+        headers.get(header::CONTENT_TYPE).unwrap(),
+        "application/cbor"
+    );
     assert!(!bytes.is_empty(), "status carries a CBOR body");
 
     // A garbage envelope on call: 400 (verify_envelope fails) — never a 500, never executed.
@@ -371,13 +377,21 @@ async fn signed_transfer_through_api_v2_moves_funds_and_lands_in_history() {
     // Identical resubmit (same request_id): 202 again, but executed ONCE — no double credit.
     let (s2, _h2, _b2) = call_raw(&state, post()).await;
     assert_eq!(s2, StatusCode::ACCEPTED, "dedup resubmit is also 202");
-    assert_eq!(fake.balance_for(DEMO_USD, &merch_owner), 250, "credited once");
+    assert_eq!(
+        fake.balance_for(DEMO_USD, &merch_owner),
+        250,
+        "credited once"
+    );
 
     // History carries the transfer with the memo (hex of the signed arg's memo bytes) + the mint
     // that funded it, newest-first, on BOTH sides of the payment.
     let payer_hex = hex::encode(pubkey(&payer));
     let merch_hex = hex::encode(pubkey(&merchant));
-    let (ps, pb) = call(&state, get_req(&format!("/api/v1/transactions/{payer_hex}"))).await;
+    let (ps, pb) = call(
+        &state,
+        get_req(&format!("/api/v1/transactions/{payer_hex}")),
+    )
+    .await;
     assert_eq!(ps, StatusCode::OK, "{pb}");
     let rows = pb["transactions"].as_array().unwrap();
     assert_eq!(rows.len(), 2, "mint + transfer: {pb}");
@@ -385,17 +399,25 @@ async fn signed_transfer_through_api_v2_moves_funds_and_lands_in_history() {
     assert_eq!(rows[0]["amount"], "250", "{pb}");
     assert_eq!(rows[0]["from"], payer_owner.to_text(), "{pb}");
     assert_eq!(rows[0]["to"], merch_owner.to_text(), "{pb}");
-    assert_eq!(rows[0]["memo"], hex::encode(settlement_memo), "memo rides the signed arg: {pb}");
+    assert_eq!(
+        rows[0]["memo"],
+        hex::encode(settlement_memo),
+        "memo rides the signed arg: {pb}"
+    );
     assert_eq!(rows[0]["currency"], 0); // DEMO_USD
-    // Display names don't exist on the IC rail — the fields stay stable empty strings (never
-    // null, never leaked bytes).
+                                        // Display names don't exist on the IC rail — the fields stay stable empty strings (never
+                                        // null, never leaked bytes).
     assert_eq!(rows[0]["from_name"], "");
     assert_eq!(rows[0]["to_name"], "");
     assert_eq!(rows[1]["amount"], "10000", "the funding mint: {pb}");
     assert_eq!(rows[1]["from"], "", "mint rows carry no sender");
 
     // The payee sees the same transfer as incoming (from == the payer's principal).
-    let (ms, mb) = call(&state, get_req(&format!("/api/v1/transactions/{merch_hex}"))).await;
+    let (ms, mb) = call(
+        &state,
+        get_req(&format!("/api/v1/transactions/{merch_hex}")),
+    )
+    .await;
     assert_eq!(ms, StatusCode::OK, "{mb}");
     let m_rows = mb["transactions"].as_array().unwrap();
     assert_eq!(m_rows.len(), 1, "{mb}");
@@ -415,13 +437,19 @@ async fn signed_transfer_through_api_v2_moves_funds_and_lands_in_history() {
     .await;
     assert_eq!(recent_s, StatusCode::OK, "{recent_b}");
     assert!(
-        recent_b["transactions"].as_array().unwrap().iter().all(|r| r["memo"] != hex::encode(settlement_memo)),
+        recent_b["transactions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["memo"] != hex::encode(settlement_memo)),
         "target must genuinely be outside the newest-30 window: {recent_b}",
     );
     let memo_hex = hex::encode(settlement_memo);
     let (memo_s, memo_b) = call(
         &state,
-        get_req(&format!("/api/v1/transactions/{merch_hex}?limit=1&memo={memo_hex}")),
+        get_req(&format!(
+            "/api/v1/transactions/{merch_hex}?limit=1&memo={memo_hex}"
+        )),
     )
     .await;
     assert_eq!(memo_s, StatusCode::OK, "{memo_b}");
@@ -434,7 +462,11 @@ async fn signed_transfer_through_api_v2_moves_funds_and_lands_in_history() {
         get_req(&format!("/api/v1/transactions/{merch_hex}?memo=abcd")),
     )
     .await;
-    assert_eq!(bad_s, StatusCode::BAD_REQUEST, "short memo filters must fail closed");
+    assert_eq!(
+        bad_s,
+        StatusCode::BAD_REQUEST,
+        "short memo filters must fail closed"
+    );
 }
 
 // --- transaction history ------------------------------------------------------
@@ -584,11 +616,7 @@ async fn landing_page_embeds_app_screenshots() {
     let (status, _headers, bytes) = call_raw(&state, get_req("/")).await;
     assert_eq!(status, StatusCode::OK);
     let html = String::from_utf8(bytes).unwrap();
-    for shot in [
-        "/shots/request.png",
-        "/shots/paying.png",
-        "/shots/paid.png",
-    ] {
+    for shot in ["/shots/request.png", "/shots/paying.png", "/shots/paid.png"] {
         assert!(html.contains(shot), "landing page must reference {shot}");
     }
 }
@@ -623,7 +651,10 @@ async fn screenshots_served_as_png_and_unknown_is_404() {
             "public, max-age=300"
         );
         let etag = headers.get(header::ETAG).unwrap().to_str().unwrap();
-        assert!(etag.starts_with("\"shots-"), "etag must be versioned: {etag}");
+        assert!(
+            etag.starts_with("\"shots-"),
+            "etag must be versioned: {etag}"
+        );
     }
 
     let (status, _h, _b) = call_raw(&state, get_req("/shots/nope.png")).await;
@@ -751,20 +782,17 @@ async fn landing_page_tells_the_offline_payment_story() {
     // wording pass 27a258e removed the byte-identical copy from this page — the pointer
     // comment keeps the two homes honest).
     assert!(
-        html.contains("<!-- single source: app/i18n/domains/en/wallet.ts M.education.campaignLine -->"),
+        html.contains(
+            "<!-- single source: app/i18n/domains/en/wallet.ts M.education.campaignLine -->"
+        ),
         "the hero must carry the single-source pointer comment"
     );
-    // The asymmetry, said plainly: the payer may be offline, the shop is online, and the
-    // shop's connection settles it. (2026-08-23: the founder's wording pass c899c9a replaced
-    // the old four-beat `id="proof"` strip with the "Paying offline" rail — the test follows
-    // the founder's copy; these pins are its stable markers. 2026-08-24: one-press flow —
-    // "Approve as always" became "Pay as always".)
+    // The QR-only reverse scan keeps the payer offline while the shop submits online.
     for required in [
         "Paying offline",
-        "Pay as always",
-        "The shop scans it with <b>their</b> phone",
-        "The shop sends it for you",
-        "The shop has internet. So you don't need any.",
+        "One press. Your phone signs it.",
+        "The shop scans your screen.",
+        "The shop submits online. <b>You stay offline.</b>",
     ] {
         assert!(
             html.contains(required),
@@ -785,11 +813,7 @@ async fn landing_page_tells_the_offline_payment_story() {
             "landing must not carry the banned claim {banned:?}"
         );
     }
-    // 2026-08-25: the offline flow lives inside the QR card (the extra scan is a QR-only step —
-    // an NFC tap carries the signed bundle in one gesture) and is FOLDED by default, since having
-    // a signal is the common case. A fold nobody opens is a fold nobody reads, so the summary
-    // must keep advertising itself in words — the animated cue is decoration that a
-    // reduced-motion visitor never sees.
+    // The extra scan is a folded QR-only step; NFC carries the signed bundle in one tap.
     assert!(
         html.contains("<details class=\"pw-offline\" aria-label=\"Paying offline\">"),
         "the offline flow must be a fold, named for assistive tech"
@@ -799,8 +823,28 @@ async fn landing_page_tells_the_offline_payment_story() {
         "the offline fold must start closed"
     );
     assert!(
-        html.contains("See how you pay with no signal"),
+        html.contains("See how"),
         "the closed fold must say in TEXT what opening it gives you"
+    );
+    // The shared request → sign → settle rail is the canonical flow. NFC and QR explain only
+    // their handoff difference; the only other storyboard is the QR-only offline expansion.
+    for required in [
+        "Choose how the phones meet",
+        "Bring the phones together.",
+        "Point at the shop's code.",
+        "<b>Online</b> or <b>Offline</b> - it takes one tap",
+        "<b>Online</b> takes one scan",
+        "Offline requires one extra scan",
+    ] {
+        assert!(
+            html.contains(required),
+            "the compact transport comparison must contain {required:?}"
+        );
+    }
+    assert_eq!(
+        html.matches("class=\"rail\"").count(),
+        2,
+        "landing must have one shared flow plus the QR-only offline expansion"
     );
     // Proof-strip motion must have a reduced-motion answer (the global kill switch).
     assert!(
@@ -826,7 +870,10 @@ async fn landing_page_in_page_links_all_resolve() {
         let rest = &html[at + "href=\"#".len()..];
         let end = rest.find('"').expect("unterminated href attribute");
         let frag = &rest[..end];
-        assert!(!frag.is_empty(), "empty in-page link href=\"#\" is not a target");
+        assert!(
+            !frag.is_empty(),
+            "empty in-page link href=\"#\" is not a target"
+        );
         assert!(
             html.contains(&format!("id=\"{frag}\"")),
             "in-page link #{frag} points at no element with that id"
@@ -835,7 +882,10 @@ async fn landing_page_in_page_links_all_resolve() {
     }
     // The nav's four section links + the two brandmark #top links; a drop below that means the
     // in-page navigation itself vanished, which the per-link assertions above cannot notice.
-    assert!(checked >= 6, "expected the page's in-page links, found {checked}");
+    assert!(
+        checked >= 6,
+        "expected the page's in-page links, found {checked}"
+    );
 }
 
 /// The `#proof` section — the nav's "The proof" destination and the page's answer to "how does
@@ -866,7 +916,10 @@ async fn landing_page_proof_section_explains_the_signature() {
         "data-t=\"payee\"",
         "data-t=\"none\"",
     ] {
-        assert!(html.contains(required), "the proof section must contain {required:?}");
+        assert!(
+            html.contains(required),
+            "the proof section must contain {required:?}"
+        );
     }
     // Both courier variants ship in the markup — the switch only changes which one displays.
     assert!(
@@ -903,7 +956,10 @@ async fn landing_page_proof_section_explains_the_signature() {
         "It is never uploaded",
         "the network settles it exactly once",
     ] {
-        assert!(html.contains(required), "the proof section must claim {required:?}");
+        assert!(
+            html.contains(required),
+            "the proof section must claim {required:?}"
+        );
     }
     // The tamper card is a drawing of a real rule, and says so rather than implying a live check.
     assert!(
@@ -972,7 +1028,12 @@ async fn apk_download_revalidates_with_304_on_if_none_match() {
     let state = state.with_apk(Some(apk.clone()));
 
     let (_, headers, _) = call_raw(&state, get_req("/download/dpay.apk")).await;
-    let etag = headers.get(header::ETAG).unwrap().to_str().unwrap().to_owned();
+    let etag = headers
+        .get(header::ETAG)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned();
     assert!(
         etag.starts_with('"') && etag.ends_with('"'),
         "etag must be quoted (strong): {etag}"
@@ -1006,7 +1067,8 @@ async fn apk_download_revalidates_with_304_on_if_none_match() {
         .unwrap();
     let (status, _, bytes) = call_raw(&state, stale_req).await;
     assert_eq!(
-        status, StatusCode::OK,
+        status,
+        StatusCode::OK,
         "a non-matching etag returns the full body"
     );
     assert_eq!(bytes, apk);
@@ -1043,7 +1105,11 @@ async fn currencies_route_returns_demo_catalog() {
         1,
         "envelope carries only `networks`: {body}"
     );
-    assert_eq!(networks.len(), 3, "exactly icp mainnet + icp testnet + solana mainnet: {body}");
+    assert_eq!(
+        networks.len(),
+        3,
+        "exactly icp mainnet + icp testnet + solana mainnet: {body}"
+    );
 
     let mainnet = &networks[0];
     assert_eq!(mainnet["protocol"], "icp");
@@ -1059,7 +1125,9 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(solana["environment"], "mainnet");
 
     // IC mainnet section: the fake's mainnet rows (DEMO's network None is mainnet-side).
-    let rows = mainnet["assets"].as_array().expect("icp mainnet assets array");
+    let rows = mainnet["assets"]
+        .as_array()
+        .expect("icp mainnet assets array");
     assert_eq!(
         rows.len(),
         6,
@@ -1131,14 +1199,13 @@ async fn currencies_route_returns_demo_catalog() {
         "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
     );
     assert_eq!(ckusdc["onramp"], "Direct"); // ckETH helper-contract onramp (client-side)
-    // ckUSDC cash-out is now `Direct` (the dual-ledger `withdraw_erc20` path): the gas_ledger field
-    // carries the ckETH gas ledger so the facade can burn ckETH gas + the USDC amount. The app gates
-    // the Cash-out button on `offramp !== Unavailable` + a known CkEthErc20 family (no-swap honesty
-    // still holds — dpay never converts ckUSDC→ckETH; the user must hold ckETH for gas).
+                                            // ckUSDC cash-out is now `Direct` (the dual-ledger `withdraw_erc20` path): the gas_ledger field
+                                            // carries the ckETH gas ledger so the facade can burn ckETH gas + the USDC amount. The app gates
+                                            // the Cash-out button on `offramp !== Unavailable` + a known CkEthErc20 family (no-swap honesty
+                                            // still holds — dpay never converts ckUSDC→ckETH; the user must hold ckETH for gas).
     assert_eq!(ckusdc["offramp"], "Direct"); // dual-ledger withdraw_erc20 cash-out
     assert_eq!(
-        ckusdc["gas_ledger"],
-        "ss2fx-dyaaa-aaaar-qacoq-cai",
+        ckusdc["gas_ledger"], "ss2fx-dyaaa-aaaar-qacoq-cai",
         "ckUSDC carries the ckETH gas ledger principal (withdraw_erc20 dual-ledger path)"
     );
 
@@ -1165,8 +1232,7 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(ckusdt["onramp"], "Direct");
     assert_eq!(ckusdt["offramp"], "Unavailable"); // cash-out not yet wired (only ckUSDC) — Fork-C gate
     assert_eq!(
-        ckusdt["gas_ledger"],
-        "ss2fx-dyaaa-aaaar-qacoq-cai",
+        ckusdt["gas_ledger"], "ss2fx-dyaaa-aaaar-qacoq-cai",
         "ckUSDT carries the shared ckETH gas ledger (one gas ledger serves every ckERC20)"
     );
 
@@ -1195,8 +1261,7 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(ckdai["onramp"], "Direct");
     assert_eq!(ckdai["offramp"], "Unavailable"); // cash-out not yet wired (only ckUSDC) — Fork-C gate
     assert_eq!(
-        ckdai["gas_ledger"],
-        "ss2fx-dyaaa-aaaar-qacoq-cai",
+        ckdai["gas_ledger"], "ss2fx-dyaaa-aaaar-qacoq-cai",
         "ckDAI carries the shared ckETH gas ledger (one gas ledger serves every ckERC20)"
     );
 
@@ -1232,7 +1297,9 @@ async fn currencies_route_returns_demo_catalog() {
 
     // IC testnet section: exactly the rows the partition rule (network Some AND not in
     // {"Bitcoin","Ethereum"}) classifies as testnet — here only the ckTESTBTC fixture.
-    let trows = testnet["assets"].as_array().expect("icp testnet assets array");
+    let trows = testnet["assets"]
+        .as_array()
+        .expect("icp testnet assets array");
     assert_eq!(
         trows.len(),
         1,
@@ -1257,7 +1324,11 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(sol["token"], "SOL");
     assert_eq!(sol["symbol"], "SOL");
     assert_eq!(sol["decimals"], 9);
-    assert_eq!(sol["mint"], serde_json::Value::Null, "native SOL carries no SPL mint");
+    assert_eq!(
+        sol["mint"],
+        serde_json::Value::Null,
+        "native SOL carries no SPL mint"
+    );
     assert_eq!(sol["onramp"], "Direct");
     assert_eq!(sol["offramp"], "Direct");
     let usdc = &srows[1];
@@ -1265,8 +1336,7 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(usdc["symbol"], "USDC");
     assert_eq!(usdc["decimals"], 6);
     assert_eq!(
-        usdc["mint"],
-        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        usdc["mint"], "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
         "the app's USDC_MINT_ADDRESS verbatim (app/solana/spl.ts)"
     );
     assert_eq!(usdc["onramp"], "Direct");
@@ -1292,12 +1362,18 @@ async fn balances_route_returns_all_currencies_in_one_response() {
     let merchant = keypair();
     let (state, _led) = state_from(ledger());
 
-    let (status, body) =
-        call(&state, get_req(&format!("/api/v1/balances/{}", hex::encode(pubkey(&payer))))).await;
+    let (status, body) = call(
+        &state,
+        get_req(&format!("/api/v1/balances/{}", hex::encode(pubkey(&payer)))),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
 
     // A flat map (not wrapped under a key) — every catalog currency is a top-level entry.
-    assert!(body.is_object(), "balances response is a JSON object: {body}");
+    assert!(
+        body.is_object(),
+        "balances response is a JSON object: {body}"
+    );
     assert_eq!(
         body.as_object().unwrap().len(),
         7,
@@ -1308,7 +1384,8 @@ async fn balances_route_returns_all_currencies_in_one_response() {
     // FakeLedger anymore — balances live at user principals on the fake-IC gateway).
     for c in 0..=6u32 {
         assert_eq!(
-            body[c.to_string()], "0",
+            body[c.to_string()],
+            "0",
             "currency {c} present + unfunded (FakeLedger default 0): {body}"
         );
     }
@@ -1317,7 +1394,10 @@ async fn balances_route_returns_all_currencies_in_one_response() {
     // across the batch — proves the map is account-specific, not a constant.
     let (status_m, body_m) = call(
         &state,
-        get_req(&format!("/api/v1/balances/{}", hex::encode(pubkey(&merchant)))),
+        get_req(&format!(
+            "/api/v1/balances/{}",
+            hex::encode(pubkey(&merchant))
+        )),
     )
     .await;
     assert_eq!(status_m, StatusCode::OK, "{body_m}");
@@ -1518,9 +1598,7 @@ async fn ckerc20_onramp_native_eth_without_token_contract() {
         onramp: dpay_relay::RampCapability::Direct,
         offramp: dpay_relay::RampCapability::Direct,
     };
-    assert!(
-        dpay_relay::ckerc20_onramp_from_descriptor(Some(&ckbtc)).is_err()
-    );
+    assert!(dpay_relay::ckerc20_onramp_from_descriptor(Some(&ckbtc)).is_err());
     assert!(dpay_relay::ckerc20_onramp_from_descriptor(None).is_err());
 }
 
@@ -1565,7 +1643,10 @@ async fn ckerc20_onramp_helper_is_chain_scoped() {
         Some("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238".to_string()),
         "the per-token ERC-20 address is unchanged (read from the descriptor's token_contract)",
     );
-    assert_eq!(r_sep.kind, "erc20", "a token_contract=Some discriminates erc20");
+    assert_eq!(
+        r_sep.kind, "erc20",
+        "a token_contract=Some discriminates erc20"
+    );
 
     // Same family + token on MAINNET (chain_id 1) → mainnet helper.
     let mut mainnet = sepolia.clone();
@@ -1580,7 +1661,10 @@ async fn ckerc20_onramp_helper_is_chain_scoped() {
         r_main.erc20_address, r_sep.erc20_address,
         "the per-token ERC-20 address is identical across chains (same token_contract)",
     );
-    assert_eq!(r_main.kind, "erc20", "mainnet ERC-20 still discriminates erc20");
+    assert_eq!(
+        r_main.kind, "erc20",
+        "mainnet ERC-20 still discriminates erc20"
+    );
 
     // A CkEthErc20 with chain_id=None (a non-EVM-family metadata gap) → falls through to mainnet
     // (the safe default — the existing verified value, never a silent None/panic).
@@ -1621,7 +1705,10 @@ async fn wallet_page_serves_embedded_real_app_dist() {
         "/wallet HTML must be no-cache (it pins the hashed assets; a stale HTML is the APK-cache bug)"
     );
     let html = String::from_utf8(bytes).unwrap();
-    assert!(html.contains("id=\"root\""), "/wallet must carry the React root");
+    assert!(
+        html.contains("id=\"root\""),
+        "/wallet must carry the React root"
+    );
     assert!(
         html.contains("assets/wallet-"),
         "/wallet must reference the content-hashed entry bundle"
@@ -1632,7 +1719,10 @@ async fn wallet_page_serves_embedded_real_app_dist() {
     );
     // The hand-written page is gone — none of its markers may survive.
     for stale in ["wallet-wire-v2", "noble-hashes", "wordlist", "/ed25519.js"] {
-        assert!(!html.contains(stale), "/wallet must not contain stale marker {stale}");
+        assert!(
+            !html.contains(stale),
+            "/wallet must not contain stale marker {stale}"
+        );
     }
 
     // The referenced entry asset serves as JavaScript with the immutable cache policy. The src is
@@ -1647,7 +1737,9 @@ async fn wallet_page_serves_embedded_real_app_dist() {
         "text/javascript; charset=utf-8"
     );
     assert_eq!(
-        headers.get(header::CACHE_CONTROL).map(|v| v.to_str().unwrap()),
+        headers
+            .get(header::CACHE_CONTROL)
+            .map(|v| v.to_str().unwrap()),
         Some("public, max-age=31536000, immutable"),
         "hashed assets must be immutable (the hash IS the version)"
     );
@@ -1692,11 +1784,22 @@ async fn wasm_core_served_and_unknown_path_is_404() {
 
     let (status, headers, bytes) = call_raw(&state, get_req("/dpay-core.wasm")).await;
     assert_eq!(status, StatusCode::OK, "/dpay-core.wasm must serve");
-    assert_eq!(headers.get(header::CONTENT_TYPE).unwrap(), "application/wasm");
+    assert_eq!(
+        headers.get(header::CONTENT_TYPE).unwrap(),
+        "application/wasm"
+    );
     assert!(bytes.len() > 4, "the wasm body must not be empty");
-    assert_eq!(&bytes[..4], b"\0asm", "must start with the wasm magic bytes");
+    assert_eq!(
+        &bytes[..4],
+        b"\0asm",
+        "must start with the wasm magic bytes"
+    );
 
     // No catch-all: a near-miss asset path is a clean 404.
     let (status, _h, _b) = call_raw(&state, get_req("/dpay-core.wasi")).await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "unknown wasm-ish path must 404");
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "unknown wasm-ish path must 404"
+    );
 }
