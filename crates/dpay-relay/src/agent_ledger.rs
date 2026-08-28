@@ -24,6 +24,7 @@
 //! walk's doc below for the budget + archived-blocks semantics.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -99,6 +100,130 @@ const HISTORY_WALK_TIMEOUT_SECS: u64 = 4;
 /// nothing matches).
 const HISTORY_EMPTY_PAGE_STOP: usize = 2;
 /// TTL of the per-(ledger, account, currency) history cache. The wallet re-polls /transactions
+
+// ---- native ICP index history (the ONE legacy-ledger exception) --------------------------------
+//
+// The canonical native ICP ledger has NO icrc3 surface: `get_transactions` answers IC0536 and
+// `query_blocks` is a ~38M-block LEDGER-WIDE scan with no account keying (docs/specs/
+// 2026-08-28-vchf-icp-support-spec.md U4 + docs/VCHF_ICP_ANALYSIS.md gap 3). Its per-account
+// history lives in the OFFICIAL ICP INDEX, whose `get_account_transactions` query returns
+// newest-first pages keyed by transaction id. The (ledger → index) pair below is PINNED here —
+// the catalog carries no index_canister field, and the analysis doc live-verified the index's
+// `ledger_id()` maps back to exactly this ledger.
+
+/// The canonical native ICP ledger on the Internet Computer — the ONLY ledger whose history is
+/// served by the ICP index (every other ledger keeps the icrc3 walk below, byte-identical).
+pub const ICP_LEDGER: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai";
+/// The official ICP index canister serving `get_account_transactions` for [`ICP_LEDGER`].
+pub const ICP_INDEX: &str = "qhbym-qaaaa-aaaaa-aaafq-cai";
+/// Rows requested per `get_account_transactions` round trip. Kept modest so one reply stays a
+/// bounded message; depth comes from paging (bounded by HISTORY_MAX_ROUND_TRIPS).
+const ICP_INDEX_PAGE_SIZE: u64 = 100;
+
+/// History routing: `Some(index)` ONLY for the canonical ICP ledger principal, `None` for every
+/// other ledger (the icrc3 walk). Pure so the dispatch is unit-pinnable.
+pub fn icp_index_for_ledger(ledger: &Principal) -> Option<Principal> {
+    let canonical = Principal::from_text(ICP_LEDGER).expect("hardcoded canister id parses");
+    (ledger == &canonical).then(|| Principal::from_text(ICP_INDEX).expect("hardcoded canister id parses"))
+}
+
+// Locally mirrored index Candid surface — only the fields history reads (candid record
+// subtyping ignores extra wire fields, and the index's `kind` text tag is redundant with the
+// option tags). Operation from/to values are LEGACY ACCOUNT IDENTIFIER hex strings (the
+// 32-byte textual form the ICP ecosystem used before ICRC-1 accounts), NOT principal texts —
+// that asymmetry is why `map_icp_index_txn` needs the account-identifier shim below.
+//
+// `pub` (behind the `agent` feature) so the live PocketIC harness can construct golden replies
+// and the opt-in mainnet probe can reuse the arg type.
+
+/// `record { e8s: nat64 }` — the index's token amount (the full u64 range must survive intact).
+#[derive(CandidType, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IcpIndexTokens {
+    pub e8s: u64,
+}
+
+/// Query argument: `record { account; start: opt nat; max_results: nat }` — `start` is the
+/// exclusive cursor (return transactions OLDER than this id); `None` = newest page. The
+/// `account` field is the standard ICRC-1 `Account` (identical wire shape), default subaccount.
+#[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct IcpIndexGetAccountTransactionsArgs {
+    pub account: Account,
+    pub start: Option<Nat>,
+    pub max_results: Nat,
+}
+
+#[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct IcpIndexTransfer {
+    pub to: String,
+    pub fee: Option<IcpIndexTokens>,
+    pub from: String,
+    pub memo: Option<u64>,
+    pub icrc1_memo: Option<Vec<u8>>,
+    pub created_at_time: Option<u64>,
+    pub amount: IcpIndexTokens,
+}
+
+#[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct IcpIndexMint {
+    pub to: String,
+    pub memo: Option<u64>,
+    pub icrc1_memo: Option<Vec<u8>>,
+    pub created_at_time: Option<u64>,
+    pub amount: IcpIndexTokens,
+}
+
+#[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct IcpIndexBurn {
+    pub from: String,
+    pub memo: Option<u64>,
+    pub icrc1_memo: Option<Vec<u8>>,
+    pub created_at_time: Option<u64>,
+    pub amount: IcpIndexTokens,
+}
+
+/// Approve is decoded ONLY to be recognized and dropped (`map_icp_index_txn` → `None`) —
+/// approvals move no balance the wallet renders. Fields beyond `from` are never read.
+#[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct IcpIndexApprove {
+    pub from: String,
+}
+
+/// One index `Transaction`. `timestamp` is NANOSECONDS since epoch (the rows contract is unix
+/// seconds — divided in the mapper). At most one operation option is `Some` on the wire.
+#[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct IcpIndexTransaction {
+    pub burn: Option<IcpIndexBurn>,
+    pub mint: Option<IcpIndexMint>,
+    pub approve: Option<IcpIndexApprove>,
+    pub transfer: Option<IcpIndexTransfer>,
+    pub timestamp: u64,
+}
+
+#[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct IcpIndexTransactionWithId {
+    pub id: Nat,
+    pub transaction: IcpIndexTransaction,
+}
+
+/// Success reply: `transactions` is NEWEST-FIRST within the page; `oldest_tx_id` is the id of
+/// the oldest row in THIS reply when older transactions may exist, `None` when the account's
+/// history is exhausted.
+#[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct IcpIndexAccountTransactionsOk {
+    pub transactions: Vec<IcpIndexTransactionWithId>,
+    pub oldest_tx_id: Option<Nat>,
+}
+
+#[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub enum IcpIndexAccountTransactionsErr {
+    InvalidRequest,
+    Other,
+}
+
+/// The full reply variant: `variant { ok; err }` — mirrors the index's
+/// `GetAccountIdentifierTransactionsResult`.
+pub type IcpIndexAccountTransactionsResult =
+    Result<IcpIndexAccountTransactionsOk, IcpIndexAccountTransactionsErr>;
 
 /// Candid mirror of the facade's `DepositInfo` reply (static deposit metadata).
 #[derive(CandidType, Deserialize, Debug)]
@@ -403,13 +528,18 @@ impl Ledger for AgentLedger {
         // bounded — HISTORY_WALK_TIMEOUT_SECS overall deadline + the zero-match early-stop —
         // so serving every poll directly stays cheap even for no-history accounts.
         let deadline = std::time::Instant::now() + Duration::from_secs(HISTORY_WALK_TIMEOUT_SECS);
-        let rows = self
-            .transactions_walk(&ledger, &me, currency, limit, memo, deadline)
-            .await;
-        if let Ok(rows) = rows {
-            Ok(rows)
-        } else {
-            rows
+        // THE ONE LEGACY EXCEPTION: the canonical native ICP ledger has no icrc3 surface
+        // (IC0536; `query_blocks` is a ledger-wide scan) — its history comes from the official
+        // ICP index instead. Every other ledger keeps the icrc3 walk, byte-identical.
+        match icp_index_for_ledger(&ledger) {
+            Some(index) => {
+                self.icp_index_history(&index, &me, currency, limit, memo, deadline)
+                    .await
+            }
+            None => {
+                self.transactions_walk(&ledger, &me, currency, limit, memo, deadline)
+                    .await
+            }
         }
     }
 
@@ -692,6 +822,121 @@ impl AgentLedger {
         Ok(rows)
     }
 
+    /// Native-ICP history from the official ICP index: `get_account_transactions` QUERY pages
+    /// keyed by the last reply's `oldest_tx_id`, mapped newest-first into the same
+    /// [`TxnRecord`] contract the icrc3 walk serves. Budget contract mirrors the icrc3 walk:
+    /// [`HISTORY_WALK_TIMEOUT_SECS`] overall deadline (partial serve on expiry — the
+    /// recent-rows-first semantic), at most [`HISTORY_MAX_ROUND_TRIPS`] round trips, and any
+    /// error fails THIS currency's request only (`Transient` — the /transactions handler maps
+    /// it to a 503 for this one call; other currencies' requests are separate calls and
+    /// unaffected).
+    async fn icp_index_history(
+        &self,
+        index: &Principal,
+        me: &Account,
+        currency: Currency,
+        limit: usize,
+        memo: Option<&str>,
+        deadline: std::time::Instant,
+    ) -> Result<Vec<TxnRecord>, LedgerError> {
+        let index = *index;
+        let account = me.clone();
+        let agent = &self.agent;
+        let fetch = move |start: Option<Nat>| async move {
+            let arg = encode_args((IcpIndexGetAccountTransactionsArgs {
+                account: account.clone(),
+                start,
+                max_results: Nat::from(ICP_INDEX_PAGE_SIZE),
+            },))
+            .map_err(|e| {
+                LedgerError::Transient(format!("encode get_account_transactions arg: {e}"))
+            })?;
+            let reply = tokio::time::timeout(
+                Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
+                agent
+                    .query(&index, "get_account_transactions")
+                    .with_arg(arg)
+                    .call(),
+            )
+            .await
+            .map_err(|_| {
+                LedgerError::Transient(format!(
+                    "get_account_transactions timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
+                ))
+            })?
+            .map_err(|e| {
+                LedgerError::Transient(format!("get_account_transactions query: {e}"))
+            })?;
+            decode_one::<IcpIndexAccountTransactionsResult>(&reply)
+                .map_err(|e| {
+                    LedgerError::Transient(format!("decode get_account_transactions reply: {e}"))
+                })?
+                .map_err(|e| {
+                    LedgerError::Transient(format!(
+                        "icp index get_account_transactions error: {e:?}"
+                    ))
+                })
+        };
+        let my_account_id = icp_legacy_account_identifier(&me.owner);
+        Self::icp_index_walk(fetch, &me.owner, &my_account_id, currency, limit, memo, deadline).await
+    }
+
+    /// The index walk's control flow, generic over the page fetch so the unit tests can drive
+    /// it with synthetic pages (no replica needed) while the live path drives it with real
+    /// agent queries. Pure policy: page backward from `start = None` following each reply's
+    /// `oldest_tx_id`; stop as soon as `limit` MATCHING rows are collected (memo filter applies
+    /// BEFORE the limit, exactly like the icrc3 walk), on exhaustion (`oldest_tx_id = None`),
+    /// on an empty page, on a non-advancing cursor (defensive against a stuck index), on the
+    /// round-trip cap, or on the wall-clock deadline (serve what was collected).
+    async fn icp_index_walk<F, Fut>(
+        mut fetch: F,
+        me: &Principal,
+        my_account_id: &str,
+        currency: Currency,
+        limit: usize,
+        memo: Option<&str>,
+        deadline: std::time::Instant,
+    ) -> Result<Vec<TxnRecord>, LedgerError>
+    where
+        F: FnMut(Option<Nat>) -> Fut,
+        Fut: Future<Output = Result<IcpIndexAccountTransactionsOk, LedgerError>>,
+    {
+        let mut rows: Vec<TxnRecord> = Vec::new();
+        let mut start: Option<Nat> = None;
+        for _ in 0..HISTORY_MAX_ROUND_TRIPS {
+            // Wall-clock budget: serve what we have (recent-rows-first) instead of burning the
+            // full round-trip budget on a slow index — the same contract as the icrc3 walk.
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+            let page = fetch(start.clone()).await?;
+            for txn in page.transactions.iter() {
+                if let Some(record) =
+                    map_icp_index_txn(&txn.transaction, me, my_account_id, currency)
+                        .filter(|r| memo.is_none_or(|m| r.memo.eq_ignore_ascii_case(m)))
+                {
+                    rows.push(record);
+                }
+                if rows.len() >= limit {
+                    break; // enough NEWEST matching rows — older pages can't add anything
+                }
+            }
+            if rows.len() >= limit {
+                break;
+            }
+            // Termination: exhausted history / empty page / cursor that doesn't advance.
+            let Some(oldest) = page.oldest_tx_id.clone() else {
+                break;
+            };
+            if page.transactions.is_empty() || start.as_ref() == Some(&oldest) {
+                break;
+            }
+            start = Some(oldest);
+        }
+        rows.truncate(limit);
+        Ok(rows)
+    }
+
     /// Runtime CkDeposit-helper read: `get_minter_info()` on the ckETH-family minter, returning
     /// `Ok(Some(address))` when the minter configures
     /// `deposit_with_subaccount_helper_contract_address`. The live ckETH minter exposes it as a
@@ -841,4 +1086,629 @@ fn map_icrc_txn(txn: &Transaction, me: &Account, currency: Currency) -> Option<T
     }
     // Approve (and future kinds): never rendered — approvals move no user-visible balance.
     None
+}
+
+// ---- icp index history helpers ------------------------------------------------------------------
+
+/// The LEGACY ICP account identifier of `owner`'s DEFAULT subaccount — the 64-hex-char textual
+/// form the official ICP index's operations use for `from`/`to` (and what dfx/quill display as
+/// an "account id"). Construction: `crc32_be(sha224("\x0aaccount-id" || principal || 0^32))`
+/// followed by the 28-byte SHA-224 digest — the domain-separated hash of the principal blob and
+/// the all-zero subaccount, checksummed (CRC-32/IEEE, big-endian) in its FIRST 4 bytes.
+///
+/// HAND-ROLLED, DELIBERATELY: the canonical implementation lives in `ic-ledger-types`, which is
+/// NOT in the offline dependency graph (absent from Cargo.lock and the vendored crate cache —
+/// checked 2026-08-28), and the spec's preference for it applies only if it were already
+/// available offline. Correctness is pinned by a golden test against a pair derived
+/// independently by the OFFICIAL dfx toolchain (dfx 0.32.0, offline:
+/// `dfx identity get-principal` / `dfx ledger account-id` of the default identity) — see
+/// `icp_legacy_account_identifier_matches_an_independently_derived_golden`.
+pub fn icp_legacy_account_identifier(owner: &Principal) -> String {
+    use sha2::{Digest, Sha224};
+    let blob = owner.as_slice();
+    // candid principals are 1..=29 bytes — no leb128 length prefix exists in this construction
+    // (empirically confirmed against the dfx-derived golden; do not "fix" this to match the
+    // principal-TEXT checksum shape, which is a different encoding entirely).
+    debug_assert!((0..=29).contains(&blob.len()), "candid principals are ≤ 29 bytes (0 = the management canister's empty blob)");
+    let mut hasher = Sha224::new();
+    hasher.update(b"\x0aaccount-id");
+    hasher.update(blob);
+    hasher.update([0u8; 32]); // the default (all-zero) subaccount
+    let digest = hasher.finalize(); // 28 bytes
+    let mut account_id = [0u8; 32];
+    account_id[..4].copy_from_slice(&crc32_ieee(&digest).to_be_bytes());
+    account_id[4..].copy_from_slice(&digest);
+    hex::encode(account_id)
+}
+
+/// Bitwise CRC-32/IEEE (reflected poly 0xEDB8_8320, init/xorout 0xFFFFFFFF — the exact variant
+/// `crc32fast`/zlib implement, which the IC's identifier checksums use). Hand-rolled to avoid a
+/// new dependency; the digest is ≤ 28 bytes so the lack of a table is irrelevant.
+fn crc32_ieee(data: &[u8]) -> u32 {
+    let mut crc = 0xFFFF_FFFFu32;
+    for &byte in data {
+        crc ^= u32::from(byte);
+        for _ in 0..8 {
+            let mask = (crc & 1).wrapping_neg();
+            crc = (crc >> 1) ^ (0xEDB8_8320 & mask);
+        }
+    }
+    crc ^ 0xFFFF_FFFF
+}
+
+/// Map one index transaction to the relay's [`TxnRecord`] when it concerns `me`; `None`
+/// otherwise (stranger rows, Approve). The DIRECTION-COMPATIBILITY SHIM lives here: the index
+/// addresses operation sides as legacy textual ACCOUNT IDENTIFIERS while the app derives in/out
+/// by comparing `TxnRecord.from` with the user's PRINCIPAL — so any side equal to
+/// `my_account_id` (the queried principal's default-subaccount identifier) is rewritten to the
+/// PRINCIPAL TEXT, and counterparty identifiers pass through unchanged. Memo: ONLY `icrc1_memo`
+/// renders (byte-preserving hex); the legacy nat64 `memo` is dropped so it can NEVER satisfy a
+/// 16-byte dpay reconciliation exact-memo match. Amounts flow `e8s: u64` → [`U64String`]
+/// untouched (u64::MAX survives — no JS-number/f64 anywhere). Timestamp: the transaction's ns
+/// timestamp preferred, the operation's `created_at_time` fallback, ÷ 1e9 → unix seconds.
+fn map_icp_index_txn(
+    txn: &IcpIndexTransaction,
+    me: &Principal,
+    my_account_id: &str,
+    currency: Currency,
+) -> Option<TxnRecord> {
+    let side = |acct: &str| {
+        if acct.eq_ignore_ascii_case(my_account_id) {
+            me.to_text()
+        } else {
+            acct.to_owned()
+        }
+    };
+    let is_me = |acct: &str| acct.eq_ignore_ascii_case(my_account_id);
+    let ts_secs = |created_at_ns: Option<u64>| {
+        let ns = if txn.timestamp > 0 { txn.timestamp } else { created_at_ns.unwrap_or(0) };
+        ns / 1_000_000_000
+    };
+    let memo_hex = |m: &Option<Vec<u8>>| m.as_deref().map(hex::encode).unwrap_or_default();
+
+    if let Some(transfer) = txn.transfer.as_ref() {
+        if !is_me(&transfer.from) && !is_me(&transfer.to) {
+            return None; // not ours (the index should never serve these; defensive all the same)
+        }
+        return Some(TxnRecord {
+            from: side(&transfer.from),
+            to: side(&transfer.to),
+            amount: U64String(transfer.amount.e8s),
+            nonce: String::new(), // IC-rail rows carry no dpay nonce
+            currency: currency as u32,
+            timestamp: ts_secs(transfer.created_at_time),
+            from_name: String::new(),
+            to_name: String::new(),
+            memo: memo_hex(&transfer.icrc1_memo),
+        });
+    }
+    if let Some(mint) = txn.mint.as_ref() {
+        if !is_me(&mint.to) {
+            return None;
+        }
+        return Some(TxnRecord {
+            from: String::new(), // mint side renders as the app's mint sentinel
+            to: side(&mint.to),
+            amount: U64String(mint.amount.e8s),
+            nonce: String::new(),
+            currency: currency as u32,
+            timestamp: ts_secs(mint.created_at_time),
+            from_name: String::new(),
+            to_name: String::new(),
+            memo: memo_hex(&mint.icrc1_memo),
+        });
+    }
+    if let Some(burn) = txn.burn.as_ref() {
+        if !is_me(&burn.from) {
+            return None; // only the burner's side renders
+        }
+        return Some(TxnRecord {
+            from: side(&burn.from),
+            to: String::new(), // burn sink renders as the sentinel
+            amount: U64String(burn.amount.e8s),
+            nonce: String::new(),
+            currency: currency as u32,
+            timestamp: ts_secs(burn.created_at_time),
+            from_name: String::new(),
+            to_name: String::new(),
+            memo: memo_hex(&burn.icrc1_memo),
+        });
+    }
+    // Approve (and future kinds): never rendered — approvals move no user-visible balance.
+    None
+}
+
+// ---- icp index history unit tests ---------------------------------------------------------------
+// Focused + fast (no replica): the mapper, the dispatch, the account-identifier derivation and
+// the walk's pure control flow, driven through synthetic pages. The wire path (agent → PocketIC
+// → candid) is proven by tests/icp_index_live.rs; the mainnet pair by the opt-in probe.
+
+#[cfg(test)]
+mod icp_index_tests {
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+
+    use super::*;
+
+    /// Golden pair derived OFFLINE by the OFFICIAL dfx toolchain (dfx 0.32.0:
+    /// `dfx identity get-principal` + `dfx ledger account-id` of the machine's default
+    /// identity) — an implementation INDEPENDENT of this hand-rolled derivation. If the
+    /// construction above ever drifts (domain separator, digest, checksum placement), this pin
+    /// fails. The pair is public dfx-default-identity output on this dev machine, not a secret.
+    const GOLDEN_PRINCIPAL: &str = "hhwti-hb7f7-4ojco-uvazw-vcwr7-fqd6o-3oljb-aezpo-iheay-3gxmx-rqe";
+    const GOLDEN_ACCOUNT_ID: &str =
+        "7839b276bbf13961134746b623507d6baeef510873615f683ee93050c5de1a42";
+
+    /// A counterparty account identifier DISTINCT from every fixture side (arbitrary hex).
+    const COUNTER_ACCOUNT: &str =
+        "1111111111111111111111111111111111111111111111111111111111111111";
+
+    const TS_NS: u64 = 1_750_000_000_123_456_789; // a ns timestamp whose seconds are unambiguous
+
+    fn golden_principal() -> Principal {
+        Principal::from_text(GOLDEN_PRINCIPAL).unwrap()
+    }
+
+    fn rt() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+    }
+
+    fn deadline_ahead() -> std::time::Instant {
+        std::time::Instant::now() + Duration::from_secs(60)
+    }
+
+    fn transfer_txn(
+        from: &str,
+        to: &str,
+        e8s: u64,
+        icrc1_memo: Option<Vec<u8>>,
+        legacy_memo: Option<u64>,
+        ts_ns: u64,
+    ) -> IcpIndexTransaction {
+        IcpIndexTransaction {
+            burn: None,
+            mint: None,
+            approve: None,
+            transfer: Some(IcpIndexTransfer {
+                to: to.to_owned(),
+                fee: None,
+                from: from.to_owned(),
+                memo: legacy_memo,
+                icrc1_memo,
+                created_at_time: Some(1_600_000_000_000_000_000),
+                amount: IcpIndexTokens { e8s },
+            }),
+            timestamp: ts_ns,
+        }
+    }
+
+    fn mint_txn(to: &str, e8s: u64, ts_ns: u64) -> IcpIndexTransaction {
+        IcpIndexTransaction {
+            burn: None,
+            mint: Some(IcpIndexMint {
+                to: to.to_owned(),
+                memo: None,
+                icrc1_memo: None,
+                created_at_time: None,
+                amount: IcpIndexTokens { e8s },
+            }),
+            approve: None,
+            transfer: None,
+            timestamp: ts_ns,
+        }
+    }
+
+    fn burn_txn(from: &str, e8s: u64, ts_ns: u64) -> IcpIndexTransaction {
+        IcpIndexTransaction {
+            burn: Some(IcpIndexBurn {
+                from: from.to_owned(),
+                memo: None,
+                icrc1_memo: None,
+                created_at_time: None,
+                amount: IcpIndexTokens { e8s },
+            }),
+            mint: None,
+            approve: None,
+            transfer: None,
+            timestamp: ts_ns,
+        }
+    }
+
+    fn page(
+        rows: Vec<(u64, IcpIndexTransaction)>,
+        oldest: Option<u64>,
+    ) -> IcpIndexAccountTransactionsOk {
+        IcpIndexAccountTransactionsOk {
+            transactions: rows
+                .into_iter()
+                .map(|(id, transaction)| IcpIndexTransactionWithId {
+                    id: Nat::from(id),
+                    transaction,
+                })
+                .collect(),
+            oldest_tx_id: oldest.map(Nat::from),
+        }
+    }
+
+    fn nat_opt(n: &Option<Nat>) -> Option<u64> {
+        n.as_ref().map(|v| v.0.to_u64().expect("test ids fit u64"))
+    }
+
+    #[test]
+    fn icp_index_dispatch_selects_the_index_only_for_the_canonical_icp_ledger() {
+        let icp = Principal::from_text(ICP_LEDGER).unwrap();
+        let index = Principal::from_text(ICP_INDEX).unwrap();
+        assert_eq!(
+            icp_index_for_ledger(&icp),
+            Some(index),
+            "the canonical ICP ledger routes to the pinned index"
+        );
+        // Every other ledger keeps the icrc3 walker — our own mainnet DUSD ledger, ckBTC's,
+        // and the anonymous/system principals included.
+        for text in ["td2nx-oaaaa-aaaab-qhdnq-cai", "mxzaz-hqaaa-aaaar-qaada-cai"] {
+            let ledger = Principal::from_text(text).unwrap();
+            assert_eq!(
+                icp_index_for_ledger(&ledger),
+                None,
+                "{text} must keep the icrc3 walk"
+            );
+        }
+        assert_eq!(icp_index_for_ledger(&Principal::management_canister()), None);
+        assert_ne!(icp, index, "the pinned pair is two different canisters");
+    }
+
+    #[test]
+    fn icp_legacy_account_identifier_matches_an_independently_derived_golden() {
+        assert_eq!(
+            icp_legacy_account_identifier(&golden_principal()),
+            GOLDEN_ACCOUNT_ID,
+            "the hand-rolled derivation must match dfx 0.32.0's offline derivation"
+        );
+        // And it is account-SPECIFIC (a different principal yields a different identifier).
+        assert_ne!(
+            icp_legacy_account_identifier(&Principal::management_canister()),
+            GOLDEN_ACCOUNT_ID
+        );
+    }
+
+    #[test]
+    fn icp_index_map_transfers_mint_burn_direction_and_omits_approve() {
+        let me = golden_principal();
+        let me_id = icp_legacy_account_identifier(&me);
+        let cur: Currency = 7;
+
+        // Transfer IN: the index says to = MY account identifier → the app needs MY PRINCIPAL
+        // TEXT there; the counterparty identifier passes through UNCHANGED.
+        let tin = map_icp_index_txn(
+            &transfer_txn(COUNTER_ACCOUNT, &me_id, 100, Some(b"change".to_vec()), None, TS_NS),
+            &me,
+            &me_id,
+            cur,
+        )
+        .unwrap();
+        assert_eq!(tin.from, COUNTER_ACCOUNT);
+        assert_eq!(tin.to, me.to_text(), "my account-identifier side → my principal text");
+        assert_eq!(tin.amount.0, 100);
+        assert_eq!(tin.currency, cur);
+
+        // Transfer OUT: mirrored.
+        let tout = map_icp_index_txn(
+            &transfer_txn(&me_id, COUNTER_ACCOUNT, 250, Some(vec![0u8; 16]), None, TS_NS),
+            &me,
+            &me_id,
+            cur,
+        )
+        .unwrap();
+        assert_eq!(tout.from, me.to_text(), "my account-identifier side → my principal text");
+        assert_eq!(tout.to, COUNTER_ACCOUNT);
+
+        // Mint TO me: empty `from` (the app's mint sentinel), `to` = my principal text.
+        let m = map_icp_index_txn(&mint_txn(&me_id, 10_000, TS_NS), &me, &me_id, cur).unwrap();
+        assert_eq!(m.from, "");
+        assert_eq!(m.to, me.to_text());
+        assert_eq!(m.amount.0, 10_000);
+
+        // Burn BY me: `from` = my principal text, empty `to` (the burn-sink sentinel).
+        let b = map_icp_index_txn(&burn_txn(&me_id, 5, TS_NS), &me, &me_id, cur).unwrap();
+        assert_eq!(b.from, me.to_text());
+        assert_eq!(b.to, "");
+
+        // Approve: never rendered, even when it concerns me.
+        let approve = IcpIndexTransaction {
+            burn: None,
+            mint: None,
+            approve: Some(IcpIndexApprove { from: me_id.clone() }),
+            transfer: None,
+            timestamp: TS_NS,
+        };
+        assert!(map_icp_index_txn(&approve, &me, &me_id, cur).is_none());
+
+        // Rows that do not concern me: dropped (transfer, mint-to-other, burn-by-other).
+        let other = "2222222222222222222222222222222222222222222222222222222222222222";
+        assert!(map_icp_index_txn(
+            &transfer_txn(COUNTER_ACCOUNT, other, 1, None, None, TS_NS),
+            &me, &me_id, cur
+        )
+        .is_none());
+        assert!(map_icp_index_txn(&mint_txn(other, 1, TS_NS), &me, &me_id, cur).is_none());
+        assert!(map_icp_index_txn(&burn_txn(other, 1, TS_NS), &me, &me_id, cur).is_none());
+    }
+
+    #[test]
+    fn icp_index_map_memo_is_icrc1_bytes_only_and_timestamps_fall_back() {
+        let me = golden_principal();
+        let me_id = icp_legacy_account_identifier(&me);
+        let cur: Currency = 7;
+
+        // icrc1_memo bytes are preserved EXACTLY as hex (arbitrary bytes, byte-for-byte).
+        let bytes = vec![0x00, 0x01, 0xfe, 0xff, 0x7f, 0x80, 0xaa, 0x55];
+        let row = map_icp_index_txn(
+            &transfer_txn(COUNTER_ACCOUNT, &me_id, 1, Some(bytes.clone()), None, TS_NS),
+            &me, &me_id, cur,
+        )
+        .unwrap();
+        assert_eq!(row.memo, hex::encode(&bytes), "memo is the exact bytes, hex-encoded");
+
+        // A LEGACY nat64 memo alone renders EMPTY — it can never satisfy the 16-byte dpay
+        // reconciliation exact-memo match (the walk filter compares against row.memo).
+        let legacy = map_icp_index_txn(
+            &transfer_txn(COUNTER_ACCOUNT, &me_id, 1, None, Some(42), TS_NS),
+            &me, &me_id, cur,
+        )
+        .unwrap();
+        assert_eq!(legacy.memo, "", "legacy nat64 memo is dropped, not rendered");
+        let settlement_hex = hex::encode([7u8; 16]);
+        assert!(
+            !legacy.memo.eq_ignore_ascii_case(&settlement_hex),
+            "a dropped memo must not match any reconciliation hex"
+        );
+
+        // ns → unix seconds, transaction timestamp preferred…
+        assert_eq!(row.timestamp, 1_750_000_000);
+        // …created_at_time as the fallback when the transaction timestamp is 0/absent.
+        let fallback = map_icp_index_txn(
+            &transfer_txn(COUNTER_ACCOUNT, &me_id, 1, None, None, 0),
+            &me, &me_id, cur,
+        )
+        .unwrap();
+        assert_eq!(
+            fallback.timestamp, 1_600_000_000,
+            "created_at_time ns → seconds fallback"
+        );
+        // No timestamp anywhere (mint with ts 0 and created_at_time None): 0, no panic.
+        let nowhere = map_icp_index_txn(&mint_txn(&me_id, 1, 0), &me, &me_id, cur).unwrap();
+        assert_eq!(nowhere.timestamp, 0);
+    }
+
+    #[test]
+    fn icp_index_amounts_survive_u64_max_as_decimal_strings() {
+        let me = golden_principal();
+        let me_id = icp_legacy_account_identifier(&me);
+        let row = map_icp_index_txn(
+            &transfer_txn(COUNTER_ACCOUNT, &me_id, u64::MAX, None, None, TS_NS),
+            &me, &me_id, 7,
+        )
+        .unwrap();
+        assert_eq!(row.amount.0, u64::MAX, "u64::MAX e8s survives untouched (no f64)");
+        // And it crosses the JSON boundary as the exact DECIMAL STRING (the U64String contract).
+        let json = serde_json::to_value(&row).unwrap();
+        assert_eq!(
+            json["amount"].as_str(),
+            Some("18446744073709551615"),
+            "amount serializes as the raw decimal string"
+        );
+    }
+
+    #[test]
+    fn icp_index_walk_pages_backward_by_oldest_tx_id_newest_first() {
+        let me = golden_principal();
+        let me_id = icp_legacy_account_identifier(&me);
+        let p1 = page(
+            vec![
+                (1002, transfer_txn(COUNTER_ACCOUNT, &me_id, 100, Some(b"change".to_vec()), None, TS_NS)),
+                (1001, transfer_txn(&me_id, COUNTER_ACCOUNT, 250, Some([0u8; 16].to_vec()), None, TS_NS)),
+            ],
+            Some(1000),
+        );
+        let p2 = page(vec![(1000, mint_txn(&me_id, 10_000, TS_NS))], None);
+
+        let starts: Rc<RefCell<Vec<Option<u64>>>> = Rc::new(RefCell::new(Vec::new()));
+        let seen = starts.clone();
+        let fetch = move |start: Option<Nat>| {
+            let seen = seen.clone();
+            let p1 = p1.clone();
+            let p2 = p2.clone();
+            async move {
+                seen.borrow_mut().push(nat_opt(&start));
+                match seen.borrow().len() {
+                    1 => Ok(p1),
+                    _ => Ok(p2),
+                }
+            }
+        };
+
+        let rows = rt().block_on(AgentLedger::icp_index_walk(
+            fetch, &me, &me_id, 7, 30, None, deadline_ahead(),
+        ))
+        .unwrap();
+
+        assert_eq!(
+            rows.iter().map(|r| r.amount.0).collect::<Vec<_>>(),
+            vec![100, 250, 10_000],
+            "rows stay globally newest-first ACROSS pages"
+        );
+        assert_eq!(
+            *starts.borrow(),
+            vec![None, Some(1000)],
+            "page 2 is requested with start = page 1's oldest_tx_id"
+        );
+    }
+
+    #[test]
+    fn icp_index_walk_filters_memo_before_limit() {
+        let me = golden_principal();
+        let me_id = icp_legacy_account_identifier(&me);
+        // Newest row does NOT match; the older row carries the 16-byte settlement memo.
+        let settlement = [3u8; 16];
+        let p1 = page(
+            vec![
+                (1002, transfer_txn(COUNTER_ACCOUNT, &me_id, 5, Some(b"change".to_vec()), None, TS_NS)),
+                (1001, transfer_txn(&me_id, COUNTER_ACCOUNT, 250, Some(settlement.to_vec()), None, TS_NS)),
+            ],
+            Some(1000),
+        );
+        let calls = Rc::new(Cell::new(0usize));
+        let counter = calls.clone();
+        let fetch = move |_start: Option<Nat>| {
+            let calls = counter.clone();
+            let p1 = p1.clone();
+            async move {
+                calls.set(calls.get() + 1);
+                Ok(p1)
+            }
+        };
+
+        let rows = rt().block_on(AgentLedger::icp_index_walk(
+            fetch, &me, &me_id, 7, 1, Some(hex::encode(settlement).as_str()), deadline_ahead(),
+        ))
+        .unwrap();
+
+        assert_eq!(
+            rows.iter().map(|r| r.amount.0).collect::<Vec<_>>(),
+            vec![250],
+            "the memo filter applies BEFORE limit truncation — the older matching row survives limit=1"
+        );
+        assert_eq!(calls.get(), 1, "limit reached mid-page: no further round trips");
+    }
+
+    #[test]
+    fn icp_index_walk_terminates_bounded_when_nothing_matches() {
+        let me = golden_principal();
+        let me_id = icp_legacy_account_identifier(&me);
+        // A hostile index: always a full page of STRANGER rows with an advancing cursor — the
+        // walk must cap at HISTORY_MAX_ROUND_TRIPS and serve Ok(empty), never loop.
+        let calls = Rc::new(Cell::new(0usize));
+        let counter = calls.clone();
+        let fetch = move |start: Option<Nat>| {
+            let calls = counter.clone();
+            async move {
+                let n = calls.get();
+                calls.set(n + 1);
+                let id = 10_000u64 - 100 * n as u64; // strictly advancing oldest_tx_id
+                let _ = start;
+                Ok(page(
+                    vec![(id, transfer_txn(COUNTER_ACCOUNT, "3333333333333333333333333333333333333333333333333333333333333333", 1, None, None, TS_NS))],
+                    Some(id - 1),
+                ))
+            }
+        };
+        let rows = rt().block_on(AgentLedger::icp_index_walk(
+            fetch, &me, &me_id, 7, 30, None, deadline_ahead(),
+        ))
+        .unwrap();
+        assert!(rows.is_empty(), "no matching rows ever");
+        assert_eq!(
+            calls.get(),
+            HISTORY_MAX_ROUND_TRIPS,
+            "the round-trip cap bounds the walk at {} fetches",
+            HISTORY_MAX_ROUND_TRIPS
+        );
+    }
+
+    #[test]
+    fn icp_index_walk_stops_on_empty_page_and_non_advancing_cursor() {
+        let me = golden_principal();
+        let me_id = icp_legacy_account_identifier(&me);
+
+        // Empty page (even with a cursor): stop after one round trip.
+        let calls = Rc::new(Cell::new(0usize));
+        let counter = calls.clone();
+        let fetch = move |_start: Option<Nat>| {
+            let calls = counter.clone();
+            async move {
+                calls.set(calls.get() + 1);
+                Ok(page(vec![], Some(5)))
+            }
+        };
+        let rows = rt().block_on(AgentLedger::icp_index_walk(
+            fetch, &me, &me_id, 7, 30, None, deadline_ahead(),
+        ))
+        .unwrap();
+        assert!(rows.is_empty());
+        assert_eq!(calls.get(), 1, "empty page terminates immediately");
+
+        // Cursor that never advances (oldest == the start we sent): stop, don't spin.
+        let calls = Rc::new(Cell::new(0usize));
+        let counter = calls.clone();
+        let row_owner = me_id.clone();
+        let fetch = move |start: Option<Nat>| {
+            let calls = counter.clone();
+            let me_id = row_owner.clone();
+            async move {
+                calls.set(calls.get() + 1);
+                let cursor = start
+                    .as_ref()
+                    .and_then(|n| n.0.to_u64())
+                    .unwrap_or(7);
+                Ok(page(
+                    vec![(cursor, transfer_txn(COUNTER_ACCOUNT, &me_id, 1, None, None, TS_NS))],
+                    Some(7),
+                ))
+            }
+        };
+        let rows = rt().block_on(AgentLedger::icp_index_walk(
+            fetch, &me, &me_id, 7, 30, None, deadline_ahead(),
+        ))
+        .unwrap();
+        assert_eq!(rows.len(), 2, "the repeated page is absorbed exactly once before the non-advance is detected");
+        assert_eq!(calls.get(), 2, "a non-advancing cursor ends the walk on round trip 2");
+    }
+
+    #[test]
+    fn icp_index_walk_deadline_bounds_round_trips_and_errors_fail_only_this_call() {
+        let me = golden_principal();
+        let me_id = icp_legacy_account_identifier(&me);
+
+        // Deadline already expired: ZERO round trips, Ok(empty) — the partial-serve semantic
+        // (identical to the icrc3 walk's wall-clock budget).
+        let called = Rc::new(Cell::new(false));
+        let witness = called.clone();
+        let fetch = move |_start: Option<Nat>| {
+            let called = witness.clone();
+            async move {
+                called.set(true);
+                Ok(page(vec![], None))
+            }
+        };
+        let rows = rt().block_on(AgentLedger::icp_index_walk(
+            fetch, &me, &me_id, 7, 30, None, std::time::Instant::now(),
+        ))
+        .unwrap();
+        assert!(rows.is_empty());
+        assert!(!called.get(), "an expired deadline prevents ANY round trip");
+
+        // A fetch error propagates as THIS call's failure (Transient; the endpoint named) —
+        // the per-currency isolation mechanism: each /transactions call serves exactly one
+        // currency, so the Err fails only that currency's request, never the others.
+        let fetch = move |_start: Option<Nat>| async move {
+            Err::<IcpIndexAccountTransactionsOk, _>(LedgerError::Transient(
+                "get_account_transactions query: boom".into(),
+            ))
+        };
+        let err = rt()
+            .block_on(AgentLedger::icp_index_walk(
+                fetch, &me, &me_id, 7, 30, None, deadline_ahead(),
+            ))
+            .unwrap_err();
+        match err {
+            LedgerError::Transient(msg) => assert!(
+                msg.contains("get_account_transactions"),
+                "the error names the index endpoint: {msg}"
+            ),
+            other => panic!("expected Transient, got {other:?}"),
+        }
+    }
 }
