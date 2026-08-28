@@ -119,6 +119,9 @@ not treat them as build/install targets).
 | 2 ckUSDC | minter   | `sv3dd-oaaaa-aaaar-qacoa-cai` (the ckETH minter; ckERC20s share it) |
 | 6 ckETH  | ledger   | `ss2fx-dyaaa-aaaar-qacoq-cai` (native ETH mainnet; `token_contract=null`) |
 | 6 ckETH  | minter   | `sv3dd-oaaaa-aaaar-qacoa-cai` (same ckETH minter; single-ledger `withdraw_eth`) |
+| 7 VCHF   | ledger   | `ly36x-wiaaa-aaaai-aqj7q-cai` (external VNX ICRC ledger; no dpay minter, no ramps; registered by the pending founder deploy) |
+| 8 ICP    | ledger   | `ryjl3-tyaaa-aaaaa-aaaba-cai` (the canonical ICP ledger; no dpay minter, no ramps; registered by the pending founder deploy) |
+| 8 ICP    | index    | `qhbym-qaaaa-aaaaa-aaafq-cai` (official ICP index — a relay code pin for ICP history, not a catalog entry) |
 
 ## Notes
 
