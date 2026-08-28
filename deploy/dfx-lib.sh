@@ -78,6 +78,44 @@ probe_catalog() { CATALOG="$(dfx_i canister call "$CANISTER" currencies --networ
 # "no" on a missing/empty catalog (safe: register_currency rejects a duplicate idempotently).
 has_currency() { echo "$CATALOG" | grep -qE "currency = $1 : nat32" && echo yes || echo no; }
 
+# currency_field ID FIELD  — stdout: the raw candid value text of FIELD from the record whose
+# `currency = ID : nat32` in $CATALOG (the probe_catalog() reply); empty if ID or FIELD is absent.
+# Complements has_currency(): a presence check needs only the id, but an idempotence check that
+# skips ONLY on "same asset" (dfx-deploy-ic.sh currencies 7/8) must also compare the registered
+# ledger/symbol/decimals/network against the expected ones. Field-order independent — it buffers
+# each top-level `record { … };` block before extracting `FIELD = <value>;`, because dfx prints
+# record fields in candid wire order, not .did declaration order. Output is the value exactly as
+# dfx printed it:
+#   currency_field 6 ledger    -> principal "ss2fx-dyaaa-aaaar-qacoq-cai"
+#   currency_field 6 symbol    -> opt "ckETH"
+#   currency_field 6 decimals  -> opt (18 : nat8)
+#   currency_field 6 network   -> opt "Ethereum"
+# Caller MUST probe_catalog() first (empty catalog -> empty output). Assumes the descriptor record
+# contains no nested multi-line record/vec literals (true for the canister's CurrencyDescriptor:
+# scalar/opt/variant fields only — variant values print inline, so only the record's own `};`
+# closes a block).
+currency_field() { # $1=currency id  $2=field name
+  awk -v id="$1" -v field="$2" '
+    /^[[:space:]]*record[[:space:]]*\{/ { buf = ""; inrec = 1; next }
+    inrec { buf = buf $0 "\n" }
+    inrec && /^[[:space:]]*\};/ {
+      if (buf ~ "currency = " id " : nat32") {
+        n = split(buf, lines, "\n")
+        for (i = 1; i <= n; i++) {
+          if (lines[i] ~ ("^[[:space:]]*" field "[[:space:]]*=")) {
+            v = lines[i]
+            sub(/^[[:space:]]*[^=]*=[[:space:]]*/, "", v)
+            sub(/;[[:space:]]*$/, "", v)
+            print v
+            exit
+          }
+        }
+      }
+      inrec = 0
+    }
+  ' <<<"$CATALOG"
+}
+
 # _register ARG [expect_mismatch]  — call register_currency(ARG); expect Ok on a real network (the
 # target ledger validates decimals/fee/wrapper_name). On local rehearsal against the mock DUSD ledger,
 # a real-ledger call is EXPECTED to reject — the facade's cross-canister validation formats the error

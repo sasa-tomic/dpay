@@ -178,6 +178,14 @@ test-icp-replica:
 ic-mainnet-probe:
     bash scripts/icp-mainnet-probe.sh
 
+# OPT-IN mainnet read-only smoke for the native ICP index history adapter (NEEDS NETWORK,
+# never in check/verify): query calls only, no cycles, no state change, throwaway fixed-seed
+# key. Proves the pinned index (qhbym) still fronts the pinned canonical ICP ledger (ryjl3)
+# via ledger_id(), and runs one account-history query through the new adapter against the
+# REAL index (query shape accepted + Candid reply decodes into the TxnRecord contract).
+ic-index-probe:
+    bash scripts/icp-index-probe.sh
+
 # OPT-IN mainnet UPDATE probe (NEEDS NETWORK, never in check/verify): the state-changing twin of
 # ic-mainnet-probe — user-principal signed UPDATES (POST /api/v2/canister/<id>/call) with the full
 # read_state lifecycle, against OUR OWN canisters ONLY (facade ssqti + DUSD play-money ledger

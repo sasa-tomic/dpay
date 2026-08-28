@@ -4,7 +4,8 @@
 # it up. The mainnet sibling of scripts/dfx-deploy.sh (which stands up a throwaway LOCAL replica and
 # self-tests a settlement). This is the ONE mainnet deploy path: it builds, (re)deploys, reads back a
 # couple of *free* query calls, AND registers the DUSD ledger + currency metadata for DEMO/ckBTC/
-# ckUSDC (idempotent config — folds in the former separate icrc-deploy-mainnet setup). It deliberately
+# ckUSDC + the immutable register_currency identities for ckETH(6)/VCHF(7)/ICP(8) (all idempotent
+# config — folds in the former separate icrc-deploy-mainnet setup). It deliberately
 # does NOT push a state-changing payment to mainnet: the one-time settle smoke was run at initial
 # deploy and the settlement kernel is covered going forward by PocketIC canister tests + e2e +
 # `just verify-deploy` (wasm-hash fidelity).
@@ -266,6 +267,145 @@ if [ "$(has_currency 6)" = no ]; then
      })" "$([ "$NETWORK" = local ] && echo expect_mismatch)"
 else
   echo "== ckETH mainnet(6) already registered — skipping (idempotent) =="
+fi
+
+# --- register mainnet VCHF (currency 7) + native ICP (currency 8) — direct-pay, NO minter --------
+# Locked identities per docs/specs/2026-08-28-vchf-icp-support-spec.md ("Locked identities and
+# metadata"); values confirmed against the live ledgers at spec time. Both are COMPLETE no-minter
+# ICRC assets the app pays by user-signed icrc1_transfer: minter/minter_family = null (a real ledger
+# with no chain-key minter — a fake family must NOT be assigned just to pass a payability gate),
+# onramp/offramp = Unavailable (hides Add money / Cash out without hiding the asset or disabling
+# Pay/Receive), chain_id/token_contract/gas_ledger = null (pure IC assets). register_currency
+# STRICTLY live-validates decimals/fee/wrapper_name against the ledger itself (F3): VCHF ly36x-… →
+# 8 decimals / 10_000 fee / symbol "VCHF"; ICP ryjl3-… (the NNS ledger) → 8 / 10_000 / "ICP". Caps
+# are PER-ASSET raw e8s units — deliberately NOT the ${CAP} placeholder of currencies 0-2/6:
+# VCHF cap 1_000_000_000_000 (= 10'000 VCHF), ICP cap 100_000_000_000 (= 1'000 ICP).
+#
+# Idempotence here is STRICTER than for 0-2/6 above: probe currencies() before EACH registration;
+# an ABSENT id registers; a PRESENT id skips only when it is the SAME asset (ledger principal +
+# coherent symbol/decimals/network); anything else ABORTS the deploy — these ids are immutable
+# (register_currency rejects an existing id; retire_currency + a new id is the only replacement
+# path) and this script NEVER picks a new id automatically. A register_currency retired/duplicate/
+# mismatch reject aborts via _register; the banners + the assert's peer note below carry the OTHER
+# asset's state so an abort always leaves both visible to the operator.
+
+# candid_scalar VALUE — normalize a dfx-printed candid scalar to bare comparable text:
+# `principal "x"` → x, `opt "s"` → s, `opt (8 : nat8)` → 8, `null` stays null. Lets the same-asset
+# check below compare meaningfully across dfx pretty-print variants (opt wrappers / parens / type
+# annotations) without weakening the comparison.
+candid_scalar() {
+  sed -e 's/^[[:space:]]*opt[[:space:]]*//' \
+      -e 's/^[[:space:]]*principal[[:space:]]*//' \
+      -e 's/^[[:space:]]*([[:space:]]*//' -e 's/[[:space:]]*)[[:space:]]*$//' \
+      -e 's/[[:space:]]*:[[:space:]]*nat[0-9]*[[:space:]]*$//' \
+      -e 's/^"//' -e 's/"$//' <<<"$1"
+}
+
+# assert_same_asset ID NAME LEDGER SYMBOL DECIMALS NETWORK PEER_NOTE — the strict verify-and-skip
+# gate. Currency ID is already present in $CATALOG (probe_catalog must have just run): skip ONLY
+# when it is the SAME asset we would have registered (ledger principal AND coherent
+# symbol/decimals/network, compared as normalized scalars). ANY mismatch aborts (exit 1) —
+# re-routing an immutable id or auto-picking a new one is an operator decision, never a script one.
+# PEER_NOTE names the OTHER new asset's state so the abort leaves both visible (U6 rule 5).
+assert_same_asset() { # $1=id  $2=name  $3=ledger  $4=symbol  $5=decimals  $6=network  $7=peer note
+  local id="$1" name="$2" peer="$7" mismatches="" spec field want got
+  for spec in "ledger|$3" "symbol|$4" "decimals|$5" "network|$6"; do
+    field="${spec%%|*}" want="${spec#*|}"
+    got="$(currency_field "$id" "$field")"
+    if [ "$(candid_scalar "$got")" != "$want" ]; then
+      mismatches+="         $field: catalog='$got'  expected='$want'"$'\n'
+    fi
+  done
+  if [ -n "$mismatches" ]; then
+    {
+      echo "ABORT: currency $id ($name) is already registered as a DIFFERENT/incoherent asset —" >&2
+      echo "       refusing to re-register or to pick another id automatically:" >&2
+      printf '%s' "$mismatches" >&2
+      echo "       The id is immutable (register_currency rejects an existing id; retire_currency" >&2
+      echo "       + a new id is the only replacement; register_currency_meta can only complete" >&2
+      echo "       display-only gaps, never re-point the ledger). Resolve manually." >&2
+      echo "       Other new asset: $peer" >&2
+    }
+    exit 1
+  fi
+  echo "== $name($id) already registered with the expected identity (ledger+symbol+decimals+network) — skipping (idempotent) =="
+}
+
+probe_catalog
+if [ "$(has_currency 7)" = no ]; then
+  echo "== register_currency VCHF mainnet(7) → ly36x-wiaaa-aaaai-aqj7q-cai (ICP(8) not yet attempted) =="
+  _register "(record {
+       currency = 7 : nat32;
+       ledger = principal \"ly36x-wiaaa-aaaai-aqj7q-cai\";
+       mintable = false;
+       minter = null;
+       symbol = opt \"VCHF\";
+       decimals = 8 : nat8;
+       minter_family = null;
+       wrapper_name = \"VCHF\";
+       backing_symbol = opt \"VCHF\";
+       network = opt \"Internet Computer\";
+       display_decimals = opt (8 : nat8);
+       fee = 10_000 : nat64;
+       cap = opt (1_000_000_000_000 : nat64);
+       chain_id = null;
+       token_contract = null;
+       onramp = variant { Unavailable };
+       offramp = variant { Unavailable };
+       gas_ledger = null;
+     })" "$([ "$NETWORK" = local ] && echo expect_mismatch)"
+else
+  assert_same_asset 7 VCHF "ly36x-wiaaa-aaaai-aqj7q-cai" "VCHF" "8" "Internet Computer" \
+    "ICP(8) not yet attempted"
+fi
+
+probe_catalog
+if [ "$(has_currency 8)" = no ]; then
+  echo "== register_currency ICP mainnet(8) → ryjl3-tyaaa-aaaaa-aaaba-cai (VCHF(7) outcome above) =="
+  _register "(record {
+       currency = 8 : nat32;
+       ledger = principal \"ryjl3-tyaaa-aaaaa-aaaba-cai\";
+       mintable = false;
+       minter = null;
+       symbol = opt \"ICP\";
+       decimals = 8 : nat8;
+       minter_family = null;
+       wrapper_name = \"ICP\";
+       backing_symbol = opt \"ICP\";
+       network = opt \"Internet Computer\";
+       display_decimals = opt (8 : nat8);
+       fee = 10_000 : nat64;
+       cap = opt (100_000_000_000 : nat64);
+       chain_id = null;
+       token_contract = null;
+       onramp = variant { Unavailable };
+       offramp = variant { Unavailable };
+       gas_ledger = null;
+     })" "$([ "$NETWORK" = local ] && echo expect_mismatch)"
+else
+  assert_same_asset 8 ICP "ryjl3-tyaaa-aaaaa-aaaba-cai" "ICP" "8" "Internet Computer" \
+    "VCHF(7) — see its block above"
+fi
+
+# --- end-of-run registration summary — re-read the LIVE catalog (ground truth, free query) -------
+probe_catalog
+echo
+echo "== currency registration summary (currencies() on $NETWORK) =="
+if [ -z "$CATALOG" ]; then
+  echo "   catalog query empty/failed — registration states UNKNOWN (inspect the output above)" >&2
+else
+  for _row in "0|DEMO" "1|ckBTC" "2|ckUSDC" "6|ckETH" "7|VCHF" "8|ICP"; do
+    _id="${_row%%|*}" _name="${_row#*|}"
+    if [ "$(has_currency "$_id")" = yes ]; then
+      echo "   $_name($_id): registered — ledger $(currency_field "$_id" ledger)"
+    else
+      echo "   $_name($_id): ABSENT from the catalog"
+    fi
+  done
+  if [ "$NETWORK" = local ]; then
+    echo "   (local rehearsal: 6/7/8 register calls stop at the expected cross-ledger validation"
+    echo "    mismatch — nothing is committed; only DEMO(0) can fully register against the mock ledger)"
+  fi
 fi
 
 # --- connective tissue: hand the canister id to the relay's config -----------------------------
