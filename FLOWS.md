@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **90 flows**
-> (89 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **97 flows**
+> (96 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (13) · pay (18) · offline (8) · deposit (8) · withdraw (7) · nfc (8) · system (21) · tour (6)
+wire (1) · onboard (13) · pay (23) · offline (9) · deposit (8) · withdraw (7) · nfc (9) · system (21) · tour (6)
 
 ---
 
@@ -60,6 +60,7 @@ wire (1) · onboard (13) · pay (18) · offline (8) · deposit (8) · withdraw (
 | 08 | merchant-settle | Merchant scans the payer's signed icrc1_transfer envelope, submits it to the IC gateway → recipient 'Received' confirmation. | receive, settle, confirmation |
 | 09 | double-spend | identical-byte envelope resubmit is idempotent on the IC gateway (request_id dedup): both POSTs 202, transfer executed once, payee credited once — and re-signing is a NEW request (the never-retry-by-resigning hazard) | pay, replay-safety, confirmation |
 | 10 | expired | Payer scans an already-expired request → auto-sign refused client-side, honest error, no leaked nonce. | expiry, honest-error, no-sign |
+| 101 | native-asset-fail-closed | Insufficient VCHF and ICP requests park on review-lowbal with no approve/paid button and no signed envelope; an unknown-currency (99) request hits the unsupported-asset branch with no fallback; the payee receives nothing and the payer keeps exactly its seeded balances. | vchf, icp, icp-mainnet, insufficient, unknown-currency, unsupported-asset, fail-closed, no-swap |
 | 19 | low-balance | Insufficient funds: offline still signs (merchant verifies) with a warn note; online blocks the sign entirely. | low-balance, insufficient, no-sign-gate |
 | 25 | asset-request | ckBTC chip + BTC amount → request QR encodes RUNTIME currency 1 + 50000 sats; readout '0.00050000 BTC' (no $). | asset-request, ckbtc, currency-id, encode, btc-units |
 | 26 | names-memo | Alice pays Bob with memo 'coffee' → review shows the name + short pubkey + memo (U-F5), both histories show friendly names + memo (wire-format v2, no raw hex). | names, memo, history, wire-v2, friendly-counterparties, review-short-payee |
@@ -73,11 +74,16 @@ wire (1) · onboard (13) · pay (18) · offline (8) · deposit (8) · withdraw (
 | 50 | deeplink-receipt | merchant treats dpay:pay as a trigger; a forged proof before settlement never flips Received — only the exact nonce-bound ledger row does; never routes to Pay. | deeplink, receipt-link, rail-proof, receive, handback, forgery |
 | 59 | share-receipt | After an online settle, btn-share-receipt hands an openable /wallet?pay= receipt URL to Share and flips to "Link copied ✓". | share-receipt, receipt-link, handback, online-settle, deeplink |
 | 61 | merchant-received-name | IC-rail counterparty rendering: history shows the short PRINCIPAL TEXT (not full principal, not hex pubkey) and the memo (reconciliation key) is visible; friendly names died with the facade settlement. | receive, settle, confirmation, counterparty-rendering, memo-reconciliation |
+| 95 | vchf-pay | VCHF (currency 7, ledger ly36x…) appears in the shared selector with exact unit/network and no ramp actions; an unfunded selection parks on the no-deposit fund panel; a 1.00000001 VCHF deeplink request reviews with exact unit/amount and signs ONLY against the VCHF ledger; the transfer settles exactly (payee +amount, payer −amount−fee, no other currency moves); the payer Ledger shows −1.00000001 VCHF to the payee short key. | vchf, icp-mainnet, asset-selector, no-ramp, deeplink, explicit-approve, icrc1-transfer, ledger-target, settle, balance-refresh, sibling-isolation, ledger-row |
+| 96 | icp-pay | ICP (currency 8, ledger ryjl3…) appears in the shared selector with exact unit/network and no ramp actions; an unfunded selection parks on the no-deposit fund panel; a scanned 1.00000001 ICP request signs ONLY against the ICP ledger and settles exactly (payee +amount, payer −amount−fee, no other currency moves); the payer Ledger shows −1.00000001 ICP to the payee short key. | icp, icp-mainnet, asset-selector, no-ramp, camera-scan, auto-sign, icrc1-transfer, ledger-target, settle, balance-refresh, sibling-isolation, ledger-row |
+| 97 | vchf-merchant-reconcile | A merchant creates a 1.00000001 VCHF request in-app (exact raw units 100000001); a wrong-memo transfer to the VCHF ledger settles on the rail but does NOT flip the request to Received; the exact-memo transfer flips it. Sender pays the 10000 fee; no other currency moves; merchant Ledger shows +1.00000001 VCHF from the payer short key. | vchf, icp-mainnet, merchant-request, 8-decimals, signed-envelope, ledger-target, exact-memo, reconciliation, fail-closed-confirm, ledger-row |
+| 98 | icp-merchant-reconcile | A merchant creates a 1.00000001 ICP request in-app (exact raw units 100000001); a wrong-memo transfer to the ICP ledger settles on the rail but does NOT flip the request to Received; the exact-memo transfer flips it. Sender pays the 10000 fee; no other currency moves; merchant Ledger shows +1.00000001 ICP from the payer short key. | icp, icp-mainnet, merchant-request, 8-decimals, signed-envelope, ledger-target, exact-memo, reconciliation, fail-closed-confirm, ledger-row |
 
 ### Offline hand-off (the signature feature)
 
 | # | Flow | Verifies | Covers |
 |---|------|----------|--------|
+| 100 | offline-bundled-assets | A dead-relay cold start (no cached catalog) still renders both bundled native rows in the shared selector — "VCHF · Internet Computer" and "ICP · Internet Computer" — with no ramp actions. | offline, cold-start, bundled-catalog, vchf, icp, icp-mainnet, asset-selector, no-ramp |
 | 20 | offline-handoff | offline payer signs an icrc1_transfer envelope QR (base64url, memo = request nonce); counterparty submits it to the IC gateway; payer reconnects and reconciles to Paid by request_id (read_state); payee balance grows | offline-pay, hand-off, reconcile |
 | 21 | receive-scan | merchant scans a base64url icrc1_transfer envelope (memo = request nonce) via the camera seam → app submits it to the IC gateway → read_state poll flips "Received"; balance + history follow from the ledger | receive-scan, offline-settle |
 | 46 | sol-offline-handoff | SOL v2 scan solreq:v2 → AUTO-SIGN (no setup, no nonce) → solpay:v2 QR (U-F5 short destination rides the qr header) → honest pending. | sol-offline-sign, qr-handoff, honest-pending, sign-status-short-payee |
@@ -124,6 +130,7 @@ wire (1) · onboard (13) · pay (18) · offline (8) · deposit (8) · withdraw (
 | 86 | nfc-unknown-reconcile | Offline payer supplies update + signed read_state; receiver alone settles, exact-history binds success, and queues the returned result. | nfc, settle, history, reconcile |
 | 87 | nfc-payer-settle | Offline card review-parks, Approve prepares update+read_state (never submits), and only a nonce/rid-bound merchant result resolves Paid. | nfc, payer, offline, returned-result, exact-once, approve-before-pay |
 | 93 | tap-motion | every NFC phase renders its pinned textContent + its own motion beat (breath/segments/ellipsis/shake); card awaitingApproval maps straight to exchanging (auto-sign); pending carries no settled mark and no campaign line (honesty); no dpay stamp ring exists anywhere | nfc-phases, event-bus, delight-motion, honesty-guard, auto-sign |
+| 99 | nfc-native-assets | NFC tap-to-pay discloses "Paying 1.00000001 VCHF/ICP on Internet Computer" (exact units + network, no ∂ formatter leak) with NO amount input and NO approve button on the card surface, for both native assets, before the auto-signed wire is stashed. | nfc, vchf, icp, icp-mainnet, disclosure, read-only, one-press, 8-decimals |
 
 ### Settings & system
 
@@ -172,7 +179,7 @@ These flows are **not** covered and why:
 - **Non-dollar NFC consent over the radio** — `11-nfc` + `32-nfc-disclosure` inject JS phase/request events; they do not carry a real nonzero-currency request over the actual ISO-DEP radio (physical-device gate).
 - **Android React Native bridge parity** — instrumented tests mostly exercise UniFFI directly, not the full `NativeModules` argument/return surface.
 - **External-credit balance freshness** — deposit tests assert direct ledger/FakeLedger credit while missing stale facade `BAL_CACHE` behavior.
-- **NFC radio round trip** (two phones, HCE↔reader, full DPN2 + signed-result transit over ISO-DEP) — physical-device gate. Flows 86/87 prove the merchant and offline-payer ownership halves; `just ondevice` proves request→fragmented bundle→authenticated C6 result through the real core/UniFFI state machines. Antenna coupling and Android AID routing between two physical phones stay outside this suite by nature; hardware status is tracked in `OPEN_ISSUES.md`.
+- **NFC radio round trip** (two phones, HCE↔reader, full DPN2 + signed-result transit over ISO-DEP) — physical-device gate. Flows 86/87 prove the merchant and offline-payer ownership halves; `just ondevice` proves request→fragmented bundle→authenticated C6 result through the real core/UniFFI state machines. Only antenna coupling and Android AID routing between two physical phones remain.
 - **ckUSDC onramp final ETH hop** (wallet signs → tx mined → minter scrapes ~20min) — inherent outer-loop gate; offline e2e proves the calldata wiring + byte-exactness.
 - **ckBTC live deposit/withdrawal with real BTC** — requires real mainnet funds; offline path proven via FakeLedger seed (issues 1/8 in OPEN_ISSUES.md).
 

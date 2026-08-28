@@ -56,7 +56,7 @@ const FALLBACK_TIMEOUT_MS = 60_000; // generous default if a flow omits timeoutM
  */
 export async function loadTestsMeta() {
   const files = (await readdir(TESTS_DIR))
-    .filter((f) => /^\d{2}-.+\.mjs$/.test(f))
+    .filter((f) => /^\d{2,3}-.+\.mjs$/.test(f))
     .sort();
   const out = [];
   for (const f of files) {
@@ -71,11 +71,12 @@ export async function loadTestsMeta() {
     try {
       mod = await import(`file://${path}`);
     } catch (e) {
-      out.push({ file: f, id: f.slice(0, 2), name: basename(f, '.mjs').slice(3), path, broken: String(e?.message ?? e), meta: { id: f.slice(0, 2), name: basename(f, '.mjs').slice(3), journey: 'uncategorized', covers: [], timeoutMs: FALLBACK_TIMEOUT_MS } });
+      const fbId = f.slice(0, f.indexOf('-'));
+      out.push({ file: f, id: fbId, name: basename(f, '.mjs').slice(f.indexOf('-') + 1), path, broken: String(e?.message ?? e), meta: { id: fbId, name: basename(f, '.mjs').slice(f.indexOf('-') + 1), journey: 'uncategorized', covers: [], timeoutMs: FALLBACK_TIMEOUT_MS } });
       continue;
     }
-    const id = f.slice(0, 2);
-    const name = basename(f, '.mjs').slice(3);
+    const id = f.slice(0, f.indexOf('-'));
+    const name = basename(f, '.mjs').slice(f.indexOf('-') + 1);
     const meta = mod.meta
       ? { ...mod.meta }
       : { id, name, journey: 'uncategorized', covers: [], timeoutMs: FALLBACK_TIMEOUT_MS };
