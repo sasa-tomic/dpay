@@ -1,12 +1,15 @@
 {
-  "_doc": "Single source of truth for the drift-prone currency literals shared across the relay's fake_catalog() (crates/dpay-relay/src/ledger.rs) and the app's BUNDLED_NETWORKS icp-mainnet rows (app/config/catalog.ts; the flat BUNDLED_CATALOG view is DERIVED via icpCatalogOf since Catalog v2 2026-08-27 — there is exactly one bundled shape, the network-first one). Cross-checked by: (1) a Rust #[cfg(test)] drift-alarm in ledger.rs, (2) a jest drift-alarm in app/__tests__/catalog.test.ts. A drift in either direction goes RED. The relay's live /catalog response remains the RUNTIME source of truth; this file + the two fallbacks are COLD-START FALLBACKS only. Does NOT cover the staging deploy script (scripts/dfx-deploy-ic-staging.sh), whose testnet catalog uses genuinely different principals/contracts (Sepolia). The decimals.eth entry pins the 18-dec precision-extreme ckETH entry (currency id 6 in BUNDLED_CATALOG, id 5 in fake_catalog's test fixture). The cketh_ledger principal (the native-ckETH ICRC ledger) is the SAME principal as cketh_gas_ledger (the ckETH ledger also serves as the gas source for ckERC20 cash-out). The wire_consts object is the canister half (cross-checked by a Rust #[cfg(test)] drift-alarm in crates/dpay-canister/src/types.rs + a jest drift-alarm added by the app side): RETRIEVE_BTC_MIN_AMOUNT mirrors types.rs and the relay's ckBTC withdraw floor; MINT_ACCOUNT (32 bytes of 0xFF) mirrors types.rs and the relay's MINT sentinel / the app's MINT_HEX.",
+  "_doc": "Single source of truth for the drift-prone currency literals shared across the relay's fake_catalog() (crates/dpay-relay/src/ledger.rs) and the app's BUNDLED_NETWORKS icp-mainnet rows (app/config/catalog.ts; the flat BUNDLED_CATALOG view is DERIVED via icpCatalogOf since Catalog v2 2026-08-27 — there is exactly one bundled shape, the network-first one). Cross-checked by: (1) a Rust #[cfg(test)] drift-alarm in ledger.rs, (2) a jest drift-alarm in app/__tests__/catalog.test.ts. A drift in either direction goes RED. The relay's live /catalog response remains the RUNTIME source of truth; this file + the two fallbacks are COLD-START FALLBACKS only. Does NOT cover the staging deploy script (scripts/dfx-deploy-ic-staging.sh), whose testnet catalog uses genuinely different principals/contracts (Sepolia). The decimals.eth entry pins the 18-dec precision-extreme ckETH entry (currency id 6 in BUNDLED_CATALOG, id 5 in fake_catalog's test fixture). The cketh_ledger principal (the native-ckETH ICRC ledger) is the SAME principal as cketh_gas_ledger (the ckETH ledger also serves as the gas source for ckERC20 cash-out). The vchf_ledger/icp_ledger entries pin the two complete no-minter direct-ICRC assets (currency ids 7/8 in BOTH fallbacks, added 2026-08-28 — see docs/specs/2026-08-28-vchf-icp-support-spec.md); icp_index is the OFFICIAL ICP index canister pinned by the relay's agent_ledger.rs ICP history adapter (a code pin, deliberately NOT a catalog field — no generic index_canister abstraction until a second ledger needs one). The wire_consts object is the canister half (cross-checked by a Rust #[cfg(test)] drift-alarm in crates/dpay-canister/src/types.rs + a jest drift-alarm added by the app side): RETRIEVE_BTC_MIN_AMOUNT mirrors types.rs and the relay's ckBTC withdraw floor; MINT_ACCOUNT (32 bytes of 0xFF) mirrors types.rs and the relay's MINT sentinel / the app's MINT_HEX.",
   "version": 1,
   "principals": {
     "ckbtc_minter": "mqygn-kiaaa-aaaar-qaadq-cai",
     "cketh_minter": "sv3dd-oaaaa-aaaar-qacoa-cai",
     "ckusdc_ledger": "xevnm-gaaaa-aaaar-qafnq-cai",
     "cketh_gas_ledger": "ss2fx-dyaaa-aaaar-qacoq-cai",
-    "cketh_ledger": "ss2fx-dyaaa-aaaar-qacoq-cai"
+    "cketh_ledger": "ss2fx-dyaaa-aaaar-qacoq-cai",
+    "vchf_ledger": "ly36x-wiaaa-aaaai-aqj7q-cai",
+    "icp_ledger": "ryjl3-tyaaa-aaaaa-aaaba-cai",
+    "icp_index": "qhbym-qaaaa-aaaaa-aaafq-cai"
   },
   "erc20_contracts": {
     "ckusdc": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
@@ -15,7 +18,9 @@
     "demo": 2,
     "ckbtc": 8,
     "ckusdc": 6,
-    "eth": 18
+    "eth": 18,
+    "vchf": 8,
+    "icp": 8
   },
   "wire_consts": {
     "retrieve_btc_min_amount": 50000,

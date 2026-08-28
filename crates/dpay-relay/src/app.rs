@@ -528,10 +528,22 @@ async fn deposit_info(State(state): State<AppState>, Query(qs): Query<BalanceQue
 
 /// The v2 environment partition rule (server-authoritative — the app reads the section's
 /// `environment` and never re-derives this): an IC row is testnet iff `network` is `Some` AND not
-/// one of the mainnet backing networks {"Bitcoin","Ethereum"}; `network == None` (DEMO $, the
-/// facade-native play asset, `mintable`) is mainnet-side.
+/// one of the mainnet network labels {`None` (DEMO $, the facade-native play asset, `mintable`),
+/// "Bitcoin", "Ethereum", "Internet Computer"}. "Internet Computer" joined the mainnet set
+/// 2026-08-28 for the two complete no-minter direct-ICRC assets (VCHF currency 7, native ICP
+/// currency 8 — docs/specs/2026-08-28-vchf-icp-support-spec.md U3); before it, every
+/// `network = "Internet Computer"` row was mis-filed into the testnet section and hidden behind
+/// the wallet's testnet toggle.
+///
+/// SCHEMA DEBT: inferring the environment from the `network` DISPLAY string is temporary. The
+/// canister catalog should carry an explicit `environment` field and this allowlist should
+/// collapse to a pass-through; that migration is deliberately out of scope here (see
+/// docs/VCHF_ICP_ANALYSIS.md gap 2 — the smallest safe change is extending the explicit set).
 fn is_testnet_row(d: &CurrencyDescriptor) -> bool {
-    !matches!(d.network.as_deref(), None | Some("Bitcoin") | Some("Ethereum"))
+    !matches!(
+        d.network.as_deref(),
+        None | Some("Bitcoin") | Some("Ethereum") | Some("Internet Computer")
+    )
 }
 
 /// The mainnet USDC mint — mirrors `USDC_MINT_ADDRESS` (app/solana/spl.ts) verbatim; the only
@@ -1032,4 +1044,78 @@ async fn version() -> Response {
         commit_date: env!("DPAY_BUILD_DATE"),
     }))
         .into_response()
+}
+
+#[cfg(test)]
+mod environment_partition_tests {
+    //! U3 pins (docs/specs/2026-08-28-vchf-icp-support-spec.md): the Catalog v2 mainnet/testnet
+    //! classification is SERVER-authoritative (`is_testnet_row`), and the app must keep trusting
+    //! the section's `environment` field — no app-side inference duplication exists by design.
+    //! These unit tests pin the classification rule directly, incl. network labels the fake
+    //! catalog doesn't carry (Sepolia), so a regression here goes RED before any route test.
+
+    use super::*;
+
+    /// A minimal descriptor with the given `network` — the ONLY field [`is_testnet_row`] reads.
+    fn row_with_network(network: Option<&str>) -> CurrencyDescriptor {
+        CurrencyDescriptor {
+            currency: 99,
+            ledger: String::new(),
+            mintable: false,
+            minter: None,
+            minter_family: None,
+            symbol: None,
+            decimals: None,
+            wrapper_name: None,
+            backing_symbol: None,
+            network: network.map(Into::into),
+            display_decimals: None,
+            fee: None,
+            cap: None,
+            chain_id: None,
+            token_contract: None,
+            gas_ledger: None,
+            onramp: RampCapability::Unavailable,
+            offramp: RampCapability::Unavailable,
+        }
+    }
+
+    #[test]
+    fn internet_computer_rows_are_mainnet() {
+        // VCHF (currency 7) and native ICP (currency 8) carry network "Internet Computer" —
+        // the 2026-08-28 fix: before "Internet Computer" joined the mainnet set, both rows
+        // were mis-filed testnet-side and hidden behind the wallet's testnet toggle.
+        let vchf = CurrencyDescriptor { currency: 7, ..row_with_network(Some("Internet Computer")) };
+        let icp = CurrencyDescriptor { currency: 8, ..row_with_network(Some("Internet Computer")) };
+        assert!(!is_testnet_row(&vchf), "VCHF (network \"Internet Computer\") is ICP MAINNET");
+        assert!(!is_testnet_row(&icp), "ICP (network \"Internet Computer\") is ICP MAINNET");
+    }
+
+    #[test]
+    fn network_none_demo_is_mainnet() {
+        // DEMO $ (network = None, the facade-native play asset) stays mainnet-side.
+        assert!(!is_testnet_row(&row_with_network(None)));
+    }
+
+    #[test]
+    fn bitcoin_and_ethereum_rows_stay_mainnet() {
+        // The pre-existing mainnet backing networks must not regress.
+        assert!(!is_testnet_row(&row_with_network(Some("Bitcoin"))));
+        assert!(!is_testnet_row(&row_with_network(Some("Ethereum"))));
+    }
+
+    #[test]
+    fn bitcoin_testnet_and_sepolia_rows_stay_testnet() {
+        // True testnet labels stay testnet — the wallet hides these by default.
+        assert!(is_testnet_row(&row_with_network(Some("Bitcoin Testnet"))));
+        assert!(is_testnet_row(&row_with_network(Some("Sepolia"))));
+    }
+
+    #[test]
+    fn unknown_networks_fail_closed_testnet() {
+        // Any unrecognized network label is testnet (fail-closed: a typo'd/unknown label must
+        // never leak a row into the mainnet section).
+        assert!(is_testnet_row(&row_with_network(Some("Internet Computor"))));
+        assert!(is_testnet_row(&row_with_network(Some(""))));
+    }
 }

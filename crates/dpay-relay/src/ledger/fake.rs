@@ -20,6 +20,23 @@ use super::types::{
     U64String,
 };
 
+/// The VCHF LEDGER principal (mainnet) — `ly36x-wiaaa-aaaai-aqj7q-cai`, the live VNX Swiss Franc
+/// ICRC-1 ledger (8 decimals, fee 10_000 raw). Currency 7 in BOTH fallbacks (fake_catalog here +
+/// the app's BUNDLED_NETWORKS): the first complete NO-MINTER direct-ICRC asset — no ramp, no
+/// minter, payment is an app-signed `icrc1_transfer` straight to this ledger (spec
+/// docs/specs/2026-08-28-vchf-icp-support-spec.md U5). Single-sourced here so the fake_catalog
+/// row can't drift from the registered value; the same literal is cross-checked against
+/// `dfx/catalog_truth.json` (`principals.vchf_ledger`) by the `catalog_truth_tests` module below.
+pub(crate) const VCHF_LEDGER_PRINCIPAL: &str = "ly36x-wiaaa-aaaai-aqj7q-cai";
+
+/// The ICP LEDGER principal (mainnet) — `ryjl3-tyaaa-aaaaa-aaaba-cai`, the CANONICAL native ICP
+/// ledger (8 decimals, fee 10_000 raw). Currency 8 in BOTH fallbacks; like VCHF a complete
+/// no-minter direct-ICRC asset (no ramp capability in either direction). Note this is the LEDGER
+/// pin only — the official ICP index canister (`qhbym-qaaaa-aaaaa-aaafq-cai`, catalog_truth
+/// `principals.icp_index`) is a HISTORY-adapter pin in `agent_ledger.rs`, deliberately NOT a
+/// catalog field. Cross-checked against `dfx/catalog_truth.json` (`principals.icp_ledger`).
+pub(crate) const ICP_LEDGER_PRINCIPAL: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai";
+
 struct FakeState {
     /// Composite key `(pubkey, currency)` → balance in minor units. A single account may hold
     /// multiple currencies independently — they're different assets, not one pool.
@@ -259,6 +276,66 @@ fn fake_catalog() -> Vec<CurrencyDescriptor> {
             onramp: RampCapability::Unavailable,
             offramp: RampCapability::Unavailable,
         },
+        CurrencyDescriptor {
+            // VCHF — the first complete NO-MINTER direct-ICRC asset (currency 7, appended
+            // 2026-08-28 — docs/specs/2026-08-28-vchf-icp-support-spec.md U5). `minter`/
+            // `minter_family` are null by design: payment capability no longer depends on a ramp
+            // family (the app's isPayableAsset accepts a complete trusted descriptor), and
+            // inventing a fake family just to pass the old gate was explicitly rejected.
+            // Ramp honesty: BOTH ramps `Unavailable` — no Add money / Cash out actions, but the
+            // asset stays visible with Pay/Receive enabled. All values are the LOCKED spec row
+            // (8 decimals, fee 10_000 raw = 0.0001 VCHF, initial cap 10_000 VCHF raw); the
+            // ledger principal is single-sourced in [`VCHF_LEDGER_PRINCIPAL`] and cross-checked
+            // against dfx/catalog_truth.json. `backing_symbol` is intentionally VCHF, not CHF —
+            // the payment unit is the issuer token itself, never a claim on bank francs.
+            currency: 7, // VCHF (VNX Swiss Franc, direct ICRC-1 ledger)
+            ledger: VCHF_LEDGER_PRINCIPAL.to_string(),
+            mintable: false,
+            minter: None,
+            minter_family: None,
+            symbol: Some("VCHF".into()),
+            decimals: Some(8),
+            wrapper_name: Some("VCHF".into()),
+            backing_symbol: Some("VCHF".into()),
+            network: Some("Internet Computer".into()), // mainnet label — U3 classification
+            display_decimals: Some(8),
+            fee: Some(U64String(10_000)), // 0.0001 VCHF
+            cap: Some(U64String(1_000_000_000_000)), // initial payment-policy cap: 10,000 VCHF
+            chain_id: None,       // not EVM
+            token_contract: None, // not an ERC-20
+            gas_ledger: None,     // no gas ledger — direct ICRC transfer pays its own fee
+            onramp: RampCapability::Unavailable, // no compliant fiat rail yet — honest absence
+            offramp: RampCapability::Unavailable,
+        },
+        CurrencyDescriptor {
+            // ICP — native Internet Computer as a direct-ICRC asset (currency 8, appended
+            // 2026-08-28 — same spec U5). Same complete no-minter shape as VCHF: no minter, no
+            // ramp, payment is an app-signed `icrc1_transfer` to the canonical ledger. History
+            // for THIS ledger is served by the official ICP index adapter (agent_ledger.rs) —
+            // the ledger exposes no `get_transactions`; that dispatch is keyed on this exact
+            // principal, so a typo here would also break history routing. Values are the LOCKED
+            // spec row (8 decimals, fee 10_000 raw = 0.0001 ICP, initial cap 1_000 ICP raw);
+            // single-sourced in [`ICP_LEDGER_PRINCIPAL`], cross-checked against
+            // dfx/catalog_truth.json.
+            currency: 8, // native ICP (canonical ledger, direct ICRC-1)
+            ledger: ICP_LEDGER_PRINCIPAL.to_string(),
+            mintable: false,
+            minter: None,
+            minter_family: None,
+            symbol: Some("ICP".into()),
+            decimals: Some(8),
+            wrapper_name: Some("ICP".into()),
+            backing_symbol: Some("ICP".into()),
+            network: Some("Internet Computer".into()), // mainnet label — U3 classification
+            display_decimals: Some(8),
+            fee: Some(U64String(10_000)), // 0.0001 ICP
+            cap: Some(U64String(100_000_000_000)), // initial payment-policy cap: 1,000 ICP
+            chain_id: None,       // not EVM
+            token_contract: None, // not an ERC-20
+            gas_ledger: None,     // no gas ledger — direct ICRC transfer pays its own fee
+            onramp: RampCapability::Unavailable, // no compliant fiat rail yet — honest absence
+            offramp: RampCapability::Unavailable,
+        },
     ]
 }
 
@@ -380,6 +457,14 @@ mod catalog_truth_tests {
             CKUSDC_ERC20_ADDRESS,
             t["erc20_contracts"]["ckusdc"].as_str().unwrap()
         );
+        // VCHF/ICP (2026-08-28 spec U5): the two complete no-minter direct-ICRC ledger pins.
+        assert_eq!(VCHF_LEDGER_PRINCIPAL, p["vchf_ledger"].as_str().unwrap());
+        assert_eq!(ICP_LEDGER_PRINCIPAL, p["icp_ledger"].as_str().unwrap());
+        // The official ICP index is NOT a catalog field (no index_canister abstraction until a
+        // second ledger needs one) — the CODE pin lives in agent_ledger.rs's history adapter.
+        // This literal check keeps the JSON's icp_index entry honest against the spec-locked
+        // value so the agent-side pin can't be fed a typo'd principal from the truth file.
+        assert_eq!(p["icp_index"].as_str().unwrap(), "qhbym-qaaaa-aaaaa-aaafq-cai");
     }
 
     #[test]
@@ -443,5 +528,117 @@ mod catalog_truth_tests {
             cketh.decimals.unwrap(),
             t["decimals"]["eth"].as_u64().unwrap() as u8
         );
+    }
+
+    #[test]
+    fn fake_catalog_vchf_icp_rows_match_truth_and_locked_shape() {
+        // U5 drift alarm (2026-08-28 spec): the VCHF (7) and ICP (8) rows cannot diverge from
+        // dfx/catalog_truth.json (principal, decimals) nor from the LOCKED spec record (fee, cap,
+        // units, network, no-minter shape, no-ramp capabilities, order). These two rows are the
+        // first complete no-minter direct-ICRC assets — a drifted field here breaks either the
+        // cold-start fallback the wallet renders offline or the exact-ledger transfer target.
+        let t = truth();
+        let cat = fake_catalog();
+
+        // --- ORDER + currency ID: VCHF is id 7, ICP is id 8, appended after ckTESTBTC (6) and
+        // last, VCHF before ICP. The fake fixture's ids match the BUNDLED ids for this pair
+        // (unlike ckETH, which is 5 here / 6 bundled) — the spec locks 7/8 in BOTH fallbacks.
+        assert_eq!(cat.len(), 9, "7 pre-existing rows + VCHF + ICP");
+        assert_eq!(
+            cat.iter().map(|d| d.currency).collect::<Vec<_>>(),
+            vec![0, 1, 2, 3, 4, 5, 6, 7, 8],
+            "fixture ids stay contiguous 0..=8, VCHF=7 then ICP=8 at the tail"
+        );
+        assert_eq!(cat[7].symbol.as_deref(), Some("VCHF"), "id 7 IS the VCHF row");
+        assert_eq!(cat[8].symbol.as_deref(), Some("ICP"), "id 8 IS the ICP row");
+
+        // --- VCHF (currency 7): every locked facet.
+        let vchf = catalog_currency(&cat, 7);
+        assert_eq!(
+            vchf.ledger.as_str(),
+            t["principals"]["vchf_ledger"].as_str().unwrap(),
+            "VCHF ledger principal == catalog_truth vchf_ledger"
+        );
+        assert_eq!(vchf.ledger.as_str(), VCHF_LEDGER_PRINCIPAL);
+        assert_eq!(
+            vchf.decimals.unwrap(),
+            t["decimals"]["vchf"].as_u64().unwrap() as u8,
+            "VCHF decimals == catalog_truth decimals.vchf"
+        );
+        assert_eq!(
+            vchf.display_decimals.unwrap(),
+            t["decimals"]["vchf"].as_u64().unwrap() as u8
+        );
+        assert_eq!(vchf.fee, Some(U64String(10_000)), "locked: 0.0001 VCHF raw fee");
+        assert_eq!(
+            vchf.cap,
+            Some(U64String(1_000_000_000_000)),
+            "locked: 10,000 VCHF initial cap"
+        );
+        assert_eq!(vchf.wrapper_name.as_deref(), Some("VCHF"));
+        assert_eq!(
+            vchf.backing_symbol.as_deref(),
+            Some("VCHF"),
+            "payment unit is VCHF (the issuer token), deliberately NOT CHF"
+        );
+        assert_eq!(vchf.symbol.as_deref(), Some("VCHF"));
+        assert_eq!(
+            vchf.network.as_deref(),
+            Some("Internet Computer"),
+            "the U3 mainnet label — anything else mis-files the row testnet-side"
+        );
+        // No-minter shape (mintable=false, no minter, no family) — a fake family here would
+        // resurrect the rejected "invent a family to pass the payability gate" shortcut.
+        assert!(!vchf.mintable);
+        assert_eq!(vchf.minter, None);
+        assert_eq!(vchf.minter_family, None);
+        // No-ramp capabilities: honest absence — the asset renders, Pay/Receive work, no
+        // Add money / Cash out actions.
+        assert_eq!(vchf.onramp, RampCapability::Unavailable);
+        assert_eq!(vchf.offramp, RampCapability::Unavailable);
+        // Not an EVM asset: all three chain fields null.
+        assert_eq!(vchf.chain_id, None);
+        assert_eq!(vchf.token_contract, None);
+        assert_eq!(vchf.gas_ledger, None);
+
+        // --- ICP (currency 8): every locked facet.
+        let icp = catalog_currency(&cat, 8);
+        assert_eq!(
+            icp.ledger.as_str(),
+            t["principals"]["icp_ledger"].as_str().unwrap(),
+            "ICP ledger principal == catalog_truth icp_ledger"
+        );
+        assert_eq!(icp.ledger.as_str(), ICP_LEDGER_PRINCIPAL);
+        assert_eq!(
+            icp.decimals.unwrap(),
+            t["decimals"]["icp"].as_u64().unwrap() as u8,
+            "ICP decimals == catalog_truth decimals.icp"
+        );
+        assert_eq!(
+            icp.display_decimals.unwrap(),
+            t["decimals"]["icp"].as_u64().unwrap() as u8
+        );
+        assert_eq!(icp.fee, Some(U64String(10_000)), "locked: 0.0001 ICP raw fee");
+        assert_eq!(
+            icp.cap,
+            Some(U64String(100_000_000_000)),
+            "locked: 1,000 ICP initial cap"
+        );
+        assert_eq!(icp.wrapper_name.as_deref(), Some("ICP"));
+        assert_eq!(icp.backing_symbol.as_deref(), Some("ICP"));
+        assert_eq!(icp.symbol.as_deref(), Some("ICP"));
+        assert_eq!(
+            icp.network.as_deref(),
+            Some("Internet Computer"),
+            "the U3 mainnet label — anything else mis-files the row testnet-side"
+        );
+        assert!(!icp.mintable);
+        assert_eq!(icp.minter, None);
+        assert_eq!(icp.minter_family, None);
+        assert_eq!(icp.onramp, RampCapability::Unavailable);
+        assert_eq!(icp.offramp, RampCapability::Unavailable);
+        assert_eq!(icp.chain_id, None);
+        assert_eq!(icp.token_contract, None);
+        assert_eq!(icp.gas_ledger, None);
     }
 }

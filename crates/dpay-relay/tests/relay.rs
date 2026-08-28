@@ -1082,8 +1082,9 @@ async fn apk_download_revalidates_with_304_on_if_none_match() {
 // DEMO_USD (currency 0, $, mintable, no ramp) + ckBTC (1, ₿, CkBtcUtxo ramp) + ckUSDC (2,
 // CkEthErc20 onramp) + ckUSDT (3, a second CkEthErc20 proving the onramp is per-token — MC8 U2) +
 // ckDAI (4, an 18-dec CkEthErc20 — the precision-extreme fixture for OPEN_ISSUES #3) + native
-// ckETH (5) on the mainnet side; ckTESTBTC (6, network "Bitcoin Testnet") on the testnet side.
-// The wallet reads this once on load instead of hardcoding DEPOSIT_CURRENCY.
+// ckETH (5) + VCHF (7) + ICP (8) — the two complete no-minter direct-ICRC assets, network
+// "Internet Computer" — on the mainnet side; ckTESTBTC (6, network "Bitcoin Testnet") on the
+// testnet side. The wallet reads this once on load instead of hardcoding DEPOSIT_CURRENCY.
 
 /// `GET /api/v1/currencies` returns `200 {"networks":[...]}` — the v2 network-first envelope with
 /// exactly 3 sections in order (icp mainnet, icp testnet, solana mainnet) and NO legacy top-level
@@ -1124,14 +1125,16 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(solana["name"], "Solana");
     assert_eq!(solana["environment"], "mainnet");
 
-    // IC mainnet section: the fake's mainnet rows (DEMO's network None is mainnet-side).
+    // IC mainnet section: the fake's mainnet rows (DEMO's network None is mainnet-side). VCHF
+    // (currency 7) and ICP (currency 8) carry network "Internet Computer" — the U3 pin: the
+    // relay's server-authoritative partition must file them MAINNET-side, not testnet-side.
     let rows = mainnet["assets"]
         .as_array()
         .expect("icp mainnet assets array");
     assert_eq!(
         rows.len(),
-        6,
-        "icp mainnet = DEMO_USD + ckBTC + ckUSDC + ckUSDT + ckDAI + native-ETH (ckTESTBTC is testnet-side): {body}"
+        8,
+        "icp mainnet = DEMO_USD + ckBTC + ckUSDC + ckUSDT + ckDAI + native-ETH + VCHF + ICP (ckTESTBTC is testnet-side): {body}"
     );
 
     // DEMO_USD (currency 0): the mintable $ faucet asset, no ramp.
@@ -1295,15 +1298,74 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(cketh["onramp"], "Direct"); // ckETH helper depositEth (single payable tx)
     assert_eq!(cketh["offramp"], "Direct"); // withdraw_eth — Cash-out button renders
 
+    // VCHF (currency 7, 2026-08-28 spec U3+U5): the first complete NO-MINTER direct-ICRC asset.
+    // The whole point of this row on THIS route: network "Internet Computer" must land the row
+    // in the ICP MAINNET section (pre-U3 it was mis-filed testnet-side and hidden by default).
+    // No minter/family, no ramps (honest absence — no Add/Cash actions, but Pay/Receive work),
+    // exact locked ledger principal + 8 decimals + raw fee/cap as U64String decimal strings.
+    let vchf = rows
+        .iter()
+        .find(|r| r["currency"] == 7)
+        .expect("VCHF currency present");
+    assert_eq!(vchf["mintable"], false);
+    assert_eq!(vchf["symbol"], "VCHF");
+    assert_eq!(vchf["decimals"], 8);
+    assert_eq!(vchf["display_decimals"], 8);
+    assert_eq!(vchf["wrapper_name"], "VCHF");
+    assert_eq!(
+        vchf["backing_symbol"], "VCHF",
+        "payment unit is the issuer token VCHF, deliberately NOT CHF"
+    );
+    assert_eq!(vchf["network"], "Internet Computer"); // the U3 mainnet label
+    assert_eq!(vchf["ledger"], "ly36x-wiaaa-aaaai-aqj7q-cai"); // catalog_truth vchf_ledger
+    assert_eq!(vchf["fee"], "10000"); // 0.0001 VCHF raw
+    assert_eq!(vchf["cap"], "1000000000000"); // 10,000 VCHF initial cap
+    // No-minter shape: null minter + null family (no fake family to pass any gate).
+    assert_eq!(vchf["minter"], serde_json::Value::Null);
+    assert_eq!(vchf["minter_family"], serde_json::Value::Null);
+    // Not EVM: all three chain fields null.
+    assert_eq!(vchf["chain_id"], serde_json::Value::Null);
+    assert_eq!(vchf["token_contract"], serde_json::Value::Null);
+    assert_eq!(vchf["gas_ledger"], serde_json::Value::Null);
+    // Ramp honesty: both Unavailable — the row is visible/payable with NO ramp actions.
+    assert_eq!(vchf["onramp"], "Unavailable");
+    assert_eq!(vchf["offramp"], "Unavailable");
+
+    // ICP (currency 8): native ICP as a direct-ICRC asset — same complete no-minter shape, the
+    // CANONICAL ledger principal (the same pin agent_ledger.rs's index-history dispatch keys
+    // on), 8 decimals, 0.0001 ICP raw fee, 1,000 ICP initial cap.
+    let icp = rows
+        .iter()
+        .find(|r| r["currency"] == 8)
+        .expect("ICP currency present");
+    assert_eq!(icp["mintable"], false);
+    assert_eq!(icp["symbol"], "ICP");
+    assert_eq!(icp["decimals"], 8);
+    assert_eq!(icp["display_decimals"], 8);
+    assert_eq!(icp["wrapper_name"], "ICP");
+    assert_eq!(icp["backing_symbol"], "ICP");
+    assert_eq!(icp["network"], "Internet Computer"); // the U3 mainnet label
+    assert_eq!(icp["ledger"], "ryjl3-tyaaa-aaaaa-aaaba-cai"); // catalog_truth icp_ledger
+    assert_eq!(icp["fee"], "10000"); // 0.0001 ICP raw
+    assert_eq!(icp["cap"], "100000000000"); // 1,000 ICP initial cap
+    assert_eq!(icp["minter"], serde_json::Value::Null);
+    assert_eq!(icp["minter_family"], serde_json::Value::Null);
+    assert_eq!(icp["chain_id"], serde_json::Value::Null);
+    assert_eq!(icp["token_contract"], serde_json::Value::Null);
+    assert_eq!(icp["gas_ledger"], serde_json::Value::Null);
+    assert_eq!(icp["onramp"], "Unavailable");
+    assert_eq!(icp["offramp"], "Unavailable");
+
     // IC testnet section: exactly the rows the partition rule (network Some AND not in
-    // {"Bitcoin","Ethereum"}) classifies as testnet — here only the ckTESTBTC fixture.
+    // {"Bitcoin","Ethereum","Internet Computer"}) classifies as testnet — here only the
+    // ckTESTBTC fixture (VCHF/ICP's "Internet Computer" is mainnet-side since U3).
     let trows = testnet["assets"]
         .as_array()
         .expect("icp testnet assets array");
     assert_eq!(
         trows.len(),
         1,
-        "exactly the ckTESTBTC fixture is testnet-side (the rest is mainnet or DEMO): {body}"
+        "exactly the ckTESTBTC fixture is testnet-side (VCHF/ICP are mainnet; the rest is mainnet or DEMO): {body}"
     );
     let cktestbtc = &trows[0];
     assert_eq!(cktestbtc["currency"], 6);
@@ -1347,15 +1409,17 @@ async fn currencies_route_returns_demo_catalog() {
 //
 // Covers GET /api/v1/balances/{hex} (PLURAL) — the single-fetch batch endpoint that returns EVERY
 // currency's balance in one response, replacing the wallet's old N+1 per-poll loop (1 primary fetch
-// + 1 per-asset fetch, each a relay→IC round trip). With the 6-currency demo catalog this is 1 HTTP request
-// instead of 6. Response shape: a flat map `{<currency>: <minor-units-string>}`, currency index as a
-// decimal-string key, balance as a U64String (decimal string). Mirrors how the wallet consumes it.
+// + 1 per-asset fetch, each a relay→IC round trip). With the 9-currency demo catalog this is 1 HTTP
+// request instead of 9. Response shape: a flat map `{<currency>: <minor-units-string>}`, currency
+// index as a decimal-string key, balance as a U64String (decimal string). Mirrors how the wallet
+// consumes it.
 
 /// `GET /api/v1/balances/{hex}` returns `200` with a flat map of EVERY catalog currency's balance in
 /// ONE response. The payer is funded BAL_A in DEMO_USD (currency 0); every other catalog currency is
-/// unfunded → "0". Asserts: all 6 catalog currencies present, the funded primary reads BAL_A, the
-/// unfunded assets read "0", and the values are DECIMAL STRINGS (the MC1 units 2-4 shape — raw u64
-/// across the JSON boundary as a string, never a number).
+/// unfunded → "0". Asserts: all 9 catalog currencies present (incl. VCHF 7 + ICP 8 — zero-balance
+/// no-minter rows still enumerate), the funded primary reads BAL_A, the unfunded assets read "0",
+/// and the values are DECIMAL STRINGS (the MC1 units 2-4 shape — raw u64 across the JSON boundary as
+/// a string, never a number).
 #[tokio::test]
 async fn balances_route_returns_all_currencies_in_one_response() {
     let payer = keypair();
@@ -1376,13 +1440,13 @@ async fn balances_route_returns_all_currencies_in_one_response() {
     );
     assert_eq!(
         body.as_object().unwrap().len(),
-        7,
-        "demo catalog = 7 currencies, all present in one batch: {body}"
+        9,
+        "demo catalog = 9 currencies (7 pre-existing + VCHF + ICP), all present in one batch: {body}"
     );
 
     // Every catalog currency is present and unfunded → "0" (nothing pre-funds the
     // FakeLedger anymore — balances live at user principals on the fake-IC gateway).
-    for c in 0..=6u32 {
+    for c in 0..=8u32 {
         assert_eq!(
             body[c.to_string()],
             "0",
