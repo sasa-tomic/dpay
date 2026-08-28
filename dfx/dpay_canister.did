@@ -1,44 +1,4 @@
 type BalanceEntry = record { currency : nat32; amount : nat64 };
-type CurrencyDescriptor = record {
-  cap : opt nat64;
-  fee : opt nat64;
-  onramp : RampCapability;
-  gas_ledger : opt principal;
-  decimals : opt nat8;
-  wrapper_name : opt text;
-  backing_symbol : opt text;
-  minter_family : opt MinterFamily;
-  minter : opt principal;
-  network : opt text;
-  mintable : bool;
-  chain_id : opt nat32;
-  ledger : principal;
-  currency : nat32;
-  display_decimals : opt nat8;
-  offramp : RampCapability;
-  token_contract : opt text;
-  symbol : opt text;
-};
-type CurrencyRegistration = record {
-  cap : opt nat64;
-  fee : nat64;
-  onramp : RampCapability;
-  gas_ledger : opt principal;
-  decimals : nat8;
-  wrapper_name : text;
-  backing_symbol : opt text;
-  minter_family : opt MinterFamily;
-  minter : opt principal;
-  network : opt text;
-  mintable : bool;
-  chain_id : opt nat32;
-  ledger : principal;
-  currency : nat32;
-  display_decimals : opt nat8;
-  offramp : RampCapability;
-  token_contract : opt text;
-  symbol : opt text;
-};
 type DepositInfo = record {
   deposit_min_amount : opt nat64;
   min_confirmations : nat32;
@@ -52,16 +12,10 @@ type DepositRefresh = record {
 };
 type InitArg = record {
   controller : opt principal;
-  ledgers : vec LedgerConfig;
+  demo_ledger : principal;
   per_tx_cap : nat64;
 };
-type LedgerConfig = record {
-  "principal" : principal;
-  mintable : bool;
-  currency : nat32;
-};
 type MintedUtxo = record { block_index : nat; amount : nat64 };
-type MinterFamily = variant { CkEthErc20; CkBtcUtxo; CkSol };
 type PayReceipt = record {
   to : blob;
   block_index : nat64;
@@ -74,7 +28,6 @@ type PayReceipt = record {
   settle_ts : nat64;
 };
 type PendingUtxo = record { confirmations : nat64; value : nat64 };
-type RampCapability = variant { Partner; Unavailable; Direct };
 type ReceiptView = record {
   to : blob;
   block_index : nat64;
@@ -149,15 +102,6 @@ service : (InitArg) -> {
   // the ledger transfer's block index (unlike `mint`, which returns the new balance): `burn` is
   // facade-internal with no relay consumer, so no contract pins its return to a balance.
   burn : (blob, nat32, nat64) -> (Result);
-  // Catalog of every registered currency + its ledger/minter/display/ramp metadata — the wallet's
-  // runtime source of truth. The app fetches this once (cached) instead of hardcoding
-  // `DEPOSIT_CURRENCY` (issue #7) or family-level token facts (MC1 unit 5). Joins LEDGERS
-  // (id + principal + mintable) with MINTERS (ramp principal) and CURRENCY_META (family + display +
-  // ramp). A currency appears if it has a ledger; the rest are `None` when not registered. Ramp
-  // directions default to `Unavailable` when not registered (fail-closed — the wallet shows NO
-  // fund/cash-out button for an unknown ramp). RETIRED currency ids are SKIPPED (a retired id leaves
-  // the catalog forever). Unauthenticated (catalog only — no balances); sorted by currency id.
-  currencies : () -> (vec CurrencyDescriptor) query;
   // `(blob pubkey, nat32 currency) -> Result<text, text>`. Proxies the minter's `get_btc_address` —
   // the user's native deposit address for the currency. No auth: a deposit address is not secret
   // (revealing it only lets someone send *to* the user), and minter methods are permissionless. Bad
@@ -227,7 +171,7 @@ service : (InitArg) -> {
   reconcile : (nat32) -> (Result_6);
   // `(blob pubkey, vec nat32 currencies) -> Result<vec record { currency: nat32, amount: nat64 },
   // text>` — the UNIFIED authoritative on-demand balance refresh (single + batch via the SAME call;
-  // pass `[currency]` for one, every registered id for all). Reads the live ledger balance via
+  // pass `[currency]` for one, every resolvable id for all). Reads the live ledger balance via
   // `icrc1_balance_of` for `Account{owner: canister_self(), subaccount: pubkey}` for each REQUESTED
   // currency, writes each to `BAL_CACHE` (so the fast `balance_of` query reflects it on subsequent
   // reads), and returns the list of `BalanceEntry { currency, amount }`.
@@ -240,7 +184,7 @@ service : (InitArg) -> {
   // consensus round vs N × 2-5s rounds for the per-currency path.
   // 
   // Best-effort per currency, two layers:
-  // - An UNKNOWN or RETIRED id (one `ledger_for` fails to resolve to a live ledger) is SKIPPED
+  // - An UNKNOWN id (one `ledger_for` fails to resolve to a live ledger) is SKIPPED
   // (logged via `ic_cdk::print`, never silent) and the batch continues — the caller asked for it,
   // but it resolves to no live ledger; the returned entries cover only the currencies that resolved.
   // - A `ledger_balance_of` read failure on ONE currency keeps its last-known cached value
@@ -273,97 +217,8 @@ service : (InitArg) -> {
   // branches — the minter call FAILED there and the cache state is unknown, so we do not paper over
   // it with a speculative read.
   refresh_deposit : (blob, nat32) -> (Result_8);
-  // `(CurrencyRegistration) -> Result<(), text>` — the SINGLE ATOMIC currency-activation path (MC2
-  // unit 4). Activates a NEW currency id by inserting LEDGERS + (optionally) MINTERS + CURRENCY_META
-  // in ONE update message (all-or-nothing), AFTER strictly validating the identity metadata against
-  // the live ledger. Closes the MC2 "atomic validated activation" gap: the piecemeal
-  // `register_ledger`/`register_minter`/`register_currency_meta` path is three separate mutable writes
-  // with no validation, so an already-reviewed authorization/history could be reinterpreted under a
-  // re-targeted ledger or inconsistent metadata.
-  // 
-  // Steps (all in one update, so an `Err` at any step rolls back EVERY stable write in this message —
-  // nothing is partially inserted):
-  // (a) `require_admin` — controller-only in production (open only when `controller` is unset).
-  // (b) Immutability + retire guards (reuse U2/U3 intent, checked BEFORE any cross-canister call): a
-  // currency already in LEDGERS → Err (register_currency activates a NEW id; use retire + a new id
-  // to replace); a RETIRED id → Err ("id not reusable").
-  // (c) CROSS-CANISTER STRICT VALIDATION (F3 — no exemptions, including the DEMO currency): call the
-  // standard ICRC-1 nullary queries on `reg.ledger` and REJECT on any mismatch:
-  // - `icrc1_decimals() -> nat8` must equal `reg.decimals`
-  // - `icrc1_fee() -> nat` must equal `reg.fee`
-  // - `icrc1_symbol() -> text` must equal `reg.wrapper_name` (the DEMO currency's wrapper_name
-  // is the ledger's symbol, e.g. "DUSD")
-  // (d) ATOMIC INSERT: LEDGERS + (if `reg.minter` is `Some`) MINTERS + CURRENCY_META, all in the same
-  // update message.
-  // 
-  // The piecemeal `register_ledger`/`register_minter`/`register_currency_meta` methods REMAIN
-  // (deprecated for fresh activation, still useful for incremental display-meta corrections) and still
-  // enforce U2 immutability + U3 retire. Deploy scripts SHOULD use `register_currency` for the
-  // currencies they register (F5) — see `scripts/dfx-deploy*.sh`.
-  register_currency : (CurrencyRegistration) -> (Result_9);
-  // Register or replace display/family/authoritative metadata for a currency. Gated to the
-  // controller in production. Each `Option` field is registered independently — register only what
-  // you know; `None` fields keep the wallet in a best-effort fallback. `onramp`/`offramp` are
-  // required (`RampCapability`, non-optional) and stored verbatim — pass `Unavailable` to withdraw a
-  // ramp direction honestly. This is what `currencies()` joins in, so the wallet renders asset cards
-  // + ramp buttons from a single source of truth (no hardcoded currency ids/symbols, no
-  // family-level token assumptions — closes issue #7 + MC1 unit 5).
-  // 
-  // RETIRED is intentionally NOT re-checked here (unlike `register_ledger`/`register_minter`/`
-  // `register_currency`, which gate on it first): this surface only mutates display/policy metadata,
-  // which is INERT on a retired id — `currencies()` filters RETIRED ids out of the catalog, and no
-  // money-moving path (`pay`/`mint`/`withdraw`/`refresh_deposit`) ever reads `CURRENCY_META` without
-  // first resolving the currency through `ledger_for`/`minter_for`, both of which reject RETIRED. So
-  // editing meta on a retired id can change no value flow; it is a cosmetic edit only. (The other
-  // three registration paths must reject RETIRED because they rebind the ledger/minter identity a
-  // money-moving path dereferences — re-targeting a retired id WOULD reinterpret history.)
-  register_currency_meta : (
-      nat32,
-      opt text,
-      opt nat8,
-      opt MinterFamily,
-      opt text,
-      opt text,
-      opt text,
-      opt nat8,
-      opt nat64,
-      opt nat64,
-      opt nat32,
-      opt text,
-      RampCapability,
-      RampCapability,
-      opt principal,
-    ) -> (Result_9);
-  // Register the ledger for a currency at runtime (INSERT-ONLY, MC2 unit 2). Gated to the controller
-  // in production (open only when `controller` is unset, i.e. the demo). Once a currency key exists its
-  // ledger principal + `mintable` flag are IMMUTABLE — a re-register with the SAME value is a no-op
-  // `Ok` (keeps deploy scripts idempotent / re-runnable), but a DIFFERENT principal or `mintable` flag
-  // is REJECTED with a currency-named message. This prevents re-targeting an already-reviewed currency
-  // at a fake ledger (or silently flipping a real currency to mintable demo money) under an existing
-  // authorization/history. To repoint a currency, retire it and register a new id. Display metadata
-  // (`register_currency_meta`) is deliberately NOT frozen here — symbol/decimals/cap are policy/display,
-  // not identity, and remain updatable.
-  register_ledger : (nat32, principal, bool) -> (Result_9);
-  // Register the ck-minter principal for a currency at runtime (INSERT-ONLY, MC2 unit 2). Gated to the
-  // controller in production (open only when `controller` is unset, i.e. the demo). A currency need not
-  // have a minter (only ck currencies do); absence means the facade exposes no deposit path for it.
-  // Once set, the minter principal is IMMUTABLE — a re-register with the SAME principal is a no-op `Ok`
-  // (deploy scripts stay re-runnable), but a DIFFERENT principal is REJECTED with a currency-named
-  // message. To repoint a currency's minter, retire it and register a new id. (Mirrors `register_ledger`
-  // — both are identity, not display/policy.)
-  register_minter : (nat32, principal) -> (Result_9);
-  // `(nat32 currency) -> Result<(), text>` — IRREVERSIBLY retire a currency id (MC2 unit 3). Gated to
-  // the controller in production (open only when `controller` is unset, i.e. the demo). A retired id is
-  // dead FOREVER: it leaves the wallet catalog (`currencies()` skips it), is rejected by `ledger_for`/
-  // `minter_for` (so `pay`/`withdraw`/`mint`/`faucet` reject it), and can NEVER be reused or
-  // re-registered (`register_ledger`/`register_minter` reject a retired id before their insert-only
-  // logic). Its LEDGERS/MINTERS/CURRENCY_META/ACCOUNT_TXNS rows are NOT deleted — history is preserved
-  // for the audit trail (`transactions_of` still returns prior rows). There is NO un-retire method.
-  // "Retire + create a new id" is the only replacement — the strongest identity guarantee. Idempotent:
-  // retiring an already-retired currency is a no-op `Ok` (the RETIRED set is append-only).
-  retire_currency : (nat32) -> (Result_9);
   // Rotate (or, from open/demo mode, set the first) governance principal for `mint`/`burn`/
-  // `register_ledger`/`register_minter`/`reconcile`/`set_controller`. Governed by
+  // `reconcile`/`set_controller`. Governed by
   // [`require_controller_rotation`]: in open-demo mode (no controller set) any caller may set the
   // first controller — the one-time lockdown path; once a controller is set, only it can rotate
   // (two-step rotation). The PRODUCTION path is to seed a governed principal at `init`

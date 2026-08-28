@@ -5,8 +5,8 @@
 //!
 //! This is the last native-asset OUT path: getting native ERC-20 (USDC) out of the wallet. The facade
 //! reads the currency's `minter_family` (CkEthErc20) + `token_contract` (Some) + `gas_ledger` (the
-//! ckETH ledger) from `CURRENCY_META` and routes to `withdraw_erc20` (NOT `withdraw_eth`); the BTC
-//! floor (retrieve_btc_min_amount = 50_000 sats) does NOT apply to ckERC20.
+//! ckETH ledger) from the compile-time FIXED_ASSETS table and routes to `withdraw_erc20` (NOT
+//! `withdraw_eth`); the BTC floor (retrieve_btc_min_amount = 50_000 sats) does NOT apply to ckERC20.
 //!
 //! Builds three wasms (see `just test-canister`):
 //!   DPAY_CANISTER_WASM      = dpay-canister       (the facade: family-dispatches withdraw)
@@ -17,8 +17,7 @@
 //! dual-ledger debit — the SEPARATE ckETH gas ledger is debited by the gas fee, which only the ERC20
 //! branch does); the ckUSDC amount ledger is debited by `amount` and total supply drops (the burn);
 //! the ckETH gas ledger is debited by the gas fee; a same-nonce replay is rejected; a wrong sig + an
-//! expired auth are rejected; a ckERC20 currency with NO gas ledger registered fails closed (cannot
-//! fall through to native-eth); and a PARTIAL failure (gas burned, amount burn failed) SETTLES the
+//! expired auth are rejected; and a PARTIAL failure (gas burned, amount burn failed) SETTLES the
 //! nonce (terminal — funds moved) so the dead auth can never replay.
 
 use candid::{decode_one, encode_args, encode_one, CandidType, Nat, Principal};
@@ -32,8 +31,16 @@ const T0_SECS: u64 = 1_800_000_000;
 const T0_NANOS: u64 = T0_SECS * 1_000_000_000;
 const CAP: u64 = 100_000;
 
-/// The ckUSDC test currency id (DEMO=0, ckBTC=1, ckUSDC=2; 6 is a fresh id for this proof).
-const CKUSDC: Currency = 6;
+/// The ckUSDC test currency id — currency 2 is the REAL ckUSDC row in the facade's FIXED_ASSETS
+/// table (CkEthErc20 family, token_contract Some → dual-ledger dispatch, ledger xevnm…, minter
+/// sv3dd…, gas_ledger ss2fx…).
+const CKUSDC: Currency = 2;
+
+/// The facade FIXED_ASSETS ckUSDC / ckETH principals — post-registry (2026-08-28) currency 2
+/// resolves from the compile-time table, so this file's stand-ins must live at EXACTLY those ids.
+const CKUSDC_LEDGER: &str = "xevnm-gaaaa-aaaar-qafnq-cai";
+const CKETH_GAS_LEDGER: &str = "ss2fx-dyaaa-aaaar-qacoq-cai";
+const CKETH_MINTER: &str = "sv3dd-oaaaa-aaaar-qacoa-cai";
 
 /// 1 ckUSDC (6 decimals) = 1_000_000 raw. A comfortable test fund well above the gas fee in ckETH.
 const ONE_USDC: u64 = 1_000_000;
@@ -96,15 +103,9 @@ enum LedgerArg {
 }
 
 #[derive(CandidType, serde::Serialize)]
-struct LedgerConfig {
-    currency: Currency,
-    principal: Principal,
-    mintable: bool,
-}
-
-#[derive(CandidType, serde::Serialize)]
 struct DpayInitArg {
-    ledgers: Vec<LedgerConfig>,
+    /// Satisfies the required init arg; currency 0 is never exercised in this file.
+    demo_ledger: Principal,
     per_tx_cap: u64,
     controller: Option<Principal>,
 }
@@ -137,24 +138,6 @@ struct WithdrawReceipt {
     nonce: Vec<u8>,
     currency: Currency,
     block_index: u64,
-}
-
-/// Local mirror of the canister's `MinterFamily` (candid wire type) for `register_currency_meta`.
-#[allow(dead_code)] // mirror type; only some variants are constructed in this file
-#[derive(CandidType, serde::Serialize)]
-enum MinterFamily {
-    CkBtcUtxo,
-    CkEthErc20,
-    CkSol,
-}
-
-/// Local mirror of the canister's `RampCapability` (candid wire type).
-#[allow(dead_code)] // mirror type; only some variants are constructed in this file
-#[derive(CandidType, serde::Serialize)]
-enum RampCapability {
-    Direct,
-    Partner,
-    Unavailable,
 }
 
 /// A minimal `icrc1_transfer` argument shape for a direct credit (mint from the minting account).
@@ -217,6 +200,32 @@ fn install_ledger_with(
     symbol: &str,
 ) -> Principal {
     let ledger = pic.create_canister();
+    install_ledger_with_code(pic, ledger, minting_account, decimals, symbol);
+    ledger
+}
+
+/// [`install_ledger_with`] at an EXACT principal (the FIXED_ASSETS ckUSDC / ckETH ledger ids).
+fn install_ledger_with_at(
+    pic: &PocketIc,
+    ledger: Principal,
+    minting_account: Account,
+    decimals: u8,
+    symbol: &str,
+) {
+    pic.create_canister_with_id(Some(Principal::anonymous()), None, ledger)
+        .unwrap_or_else(|e| panic!("create_canister_with_id({ledger}): {e}"));
+    install_ledger_with_code(pic, ledger, minting_account, decimals, symbol);
+}
+
+/// Cycles + code install at an ALREADY-CREATED canister id (shared by the two entry points above —
+/// `create_canister_with_id` must never be handed a PocketIC-allocated id).
+fn install_ledger_with_code(
+    pic: &PocketIc,
+    ledger: Principal,
+    minting_account: Account,
+    decimals: u8,
+    symbol: &str,
+) {
     pic.add_cycles(ledger, 10_000_000_000_000);
     let init = LedgerArg::Init(LedgerInitArgs {
         minting_account,
@@ -242,7 +251,6 @@ fn install_ledger_with(
         index_principal: None,
     });
     pic.install_canister(ledger, ledger_wasm(), encode_one(&init).unwrap(), None);
-    ledger
 }
 
 fn ledger_balance(pic: &PocketIc, ledger: Principal, dpay: Principal, pk: [u8; 32]) -> u64 {
@@ -334,50 +342,13 @@ fn direct_credit(
         .expect("direct credit transfer should succeed (minting account debited)");
 }
 
-/// Register currency metadata for ckUSDC: `minter_family = CkEthErc20`, `token_contract = Some(...)`
-/// (the dispatch keys that route `withdraw` to `withdraw_erc20`), and `gas_ledger = Some(cketh)` (the
-/// ckETH ledger the dual-ledger path burns gas fees from). Called as the seeded controller.
-fn register_currency_meta_erc20(
-    pic: &PocketIc,
-    dpay: Principal,
-    caller: Principal,
-    currency: Currency,
-    gas_ledger: Option<Principal>,
-) {
-    let reply = pic
-        .update_call(
-            dpay,
-            caller,
-            "register_currency_meta",
-            encode_args((
-                currency,
-                None::<String>,                      // symbol
-                None::<u8>,                          // decimals
-                Some(MinterFamily::CkEthErc20),      // minter_family — THE dispatch key
-                None::<String>,                      // wrapper_name
-                None::<String>,                      // backing_symbol
-                None::<String>,                      // network
-                None::<u8>,                          // display_decimals
-                None::<u64>,                         // fee
-                None::<u64>,                         // cap (withdraw does not consult cap)
-                None::<u32>,                         // chain_id
-                Some("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".to_string()), // token_contract Some → ckERC20
-                RampCapability::Unavailable,         // onramp
-                RampCapability::Direct,              // offramp (cash-out is the direct ckERC20→ERC20 path)
-                gas_ledger,                          // the ckETH gas ledger for withdraw_erc20
-            ))
-            .unwrap(),
-        )
-        .expect("register_currency_meta update_call rejected");
-    decode_one::<Result<(), String>>(&reply)
-        .unwrap()
-        .expect("register_currency_meta should succeed for the controller");
-}
-
 /// Install the facade + a ckUSDC amount ledger (6-dec) + a ckETH gas ledger (18-dec, icrc2-enabled
-/// BOTH), + the mock minter (init'd with BOTH ledgers), and register the mock as ckUSDC's minter +
-/// the CkEthErc20/Some-token-contract/Some-gas-ledger family meta. Returns the handles a withdraw_
-/// erc20 test needs: (pic, cketh_gas_ledger, ckusdc_amount_ledger, dpay, mock, payer_sk, payer).
+/// BOTH) + the mock minter (init'd with BOTH ledgers), all wired through the FIXED_ASSETS const ids
+/// (post-registry there is no registration: currency 2 resolves ledger/minter/family/token_contract/
+/// gas_ledger from the compile-time table, so the stand-ins sit at the exact mainnet principals —
+/// including the SHARED ckETH minter sv3dd… serving ckUSDC, exactly as on mainnet). Returns the
+/// handles a withdraw_erc20 test needs: (pic, cketh_gas_ledger, ckusdc_amount_ledger, dpay, mock,
+/// payer_sk, payer).
 fn setup_erc20() -> (PocketIc, Principal, Principal, Principal, Principal, SigningKey, [u8; 32]) {
     let pic = PocketIc::new();
     pic.set_time(Time::from_nanos_since_unix_epoch(T0_NANOS));
@@ -387,12 +358,20 @@ fn setup_erc20() -> (PocketIc, Principal, Principal, Principal, Principal, Signi
 
     let dpay = pic.create_canister();
     pic.add_cycles(dpay, 2_000_000_000_000);
-    let mock = pic.create_canister();
+
+    let cketh = Principal::from_text(CKETH_GAS_LEDGER).unwrap();
+    let ckusdc = Principal::from_text(CKUSDC_LEDGER).unwrap();
+    let mock = Principal::from_text(CKETH_MINTER).unwrap();
+    // Reserve ONLY the mock here — the two `install_ledger_with_at` calls below do their own
+    // exact-id creation for the ledgers (a second `create_canister_with_id` on an already-created
+    // id is rejected).
+    pic.create_canister_with_id(Some(Principal::anonymous()), None, mock)
+        .unwrap_or_else(|e| panic!("reserve {mock}: {e}"));
     pic.add_cycles(mock, 2_000_000_000_000);
 
     // TWO ledgers, both icrc2-enabled, both owned by the mock (so the mock can mint + burn on each).
-    let cketh = install_ledger_with(&pic, Account { owner: mock, subaccount: None }, 18, "ckETH");
-    let ckusdc = install_ledger_with(&pic, Account { owner: mock, subaccount: None }, 6, "ckUSDC");
+    install_ledger_with_at(&pic, cketh, Account { owner: mock, subaccount: None }, 18, "ckETH");
+    install_ledger_with_at(&pic, ckusdc, Account { owner: mock, subaccount: None }, 6, "ckUSDC");
 
     // The mock is the ckETH minter for the dual-ledger withdraw_erc20: amount_ledger = ckUSDC,
     // gas_ledger = ckETH.
@@ -403,24 +382,12 @@ fn setup_erc20() -> (PocketIc, Principal, Principal, Principal, Principal, Signi
         None,
     );
 
-    // Seed a controller at init so `register_minter` + `register_currency_meta` (controller-only
-    // since R1) succeed. The stable management-canister principal stands in for the governed operator.
-    let admin = Principal::management_canister();
     let dpay_init = DpayInitArg {
-        ledgers: vec![LedgerConfig { currency: CKUSDC, principal: ckusdc, mintable: false }],
+        demo_ledger: Principal::anonymous(),
         per_tx_cap: CAP,
-        controller: Some(admin),
+        controller: None,
     };
     pic.install_canister(dpay, dpay_wasm(), encode_one(&dpay_init).unwrap(), None);
-
-    let reply = pic
-        .update_call(dpay, admin, "register_minter", encode_args((CKUSDC, mock)).unwrap())
-        .expect("register_minter update_call rejected");
-    decode_one::<Result<(), String>>(&reply)
-        .unwrap()
-        .expect("register_minter should succeed for the controller");
-
-    register_currency_meta_erc20(&pic, dpay, admin, CKUSDC, Some(cketh));
 
     (pic, cketh, ckusdc, dpay, mock, payer_sk, payer)
 }
@@ -620,44 +587,6 @@ fn withdraw_erc20_expired_rejected_no_funds_move() {
     assert_eq!(ledger_balance(&pic, ckusdc, dpay, payer), ONE_USDC, "no ckUSDC debit on expired");
     assert_eq!(ledger_balance(&pic, cketh, dpay, payer), ONE_ETH, "no ckETH debit on expired");
     println!("[withdraw_erc20] ✓ expired rejected ({err})");
-}
-
-/// A ckERC20 currency with NO gas ledger registered fails closed — the dual-ledger `withdraw_erc20`
-/// cannot run, and the facade MUST reject rather than fall through to the native-ETH `withdraw_eth`
-/// (which would mis-burn the ckUSDC amount as ckETH). Re-registering the meta with `gas_ledger = None`
-/// flips the registered gas ledger off; the withdraw then fails at the family-dispatch gate.
-#[test]
-fn withdraw_erc20_no_gas_ledger_registered_fail_closed() {
-    let (pic, cketh, ckusdc, dpay, mock, payer_sk, payer) = setup_erc20();
-    direct_credit(&pic, ckusdc, mock, dpay, payer, ONE_USDC);
-    direct_credit(&pic, cketh, mock, dpay, payer, ONE_ETH);
-
-    // Flip the registered gas ledger OFF (re-register meta with gas_ledger = None). The currency is
-    // still CkEthErc20 + token_contract Some, so it MUST take the ERC20 branch — but with no gas
-    // ledger it fails closed at the dispatch gate.
-    register_currency_meta_erc20(&pic, dpay, Principal::management_canister(), CKUSDC, None);
-
-    let req = withdraw_request(
-        &payer_sk,
-        payer,
-        "0xNoGasLedger",
-        500_000,
-        [6u8; 16],
-        T0_SECS + 120,
-        CKUSDC,
-    );
-    let res = withdraw(&pic, dpay, req);
-    assert!(res.is_err(), "a ckERC20 withdraw with no gas ledger must fail closed");
-    let err = res.unwrap_err();
-    assert!(
-        err.contains("gas ledger"),
-        "no-gas-ledger error must mention the gas ledger, got: {err}"
-    );
-
-    // No funds moved on EITHER ledger.
-    assert_eq!(ledger_balance(&pic, ckusdc, dpay, payer), ONE_USDC);
-    assert_eq!(ledger_balance(&pic, cketh, dpay, payer), ONE_ETH);
-    println!("[withdraw_erc20] ✓ no-gas-ledger fail-closed ({err})");
 }
 
 /// A PARTIAL failure (the gas burn SUCCEEDS but the amount burn FAILS → the minter schedules a gas

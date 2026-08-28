@@ -10,12 +10,14 @@
 //! + log-hygiene fix — but the family-blind methods are landmines.
 //!
 //! This file pins the gate that mirrors `withdraw`'s family dispatch: the BTC deposit path is only
-//! reachable when the resolved family is `CkBtcUtxo` (incl. the legacy "has minter, no family" default);
-//! any other family OR a currency with neither minter nor family fails closed with a clean typed Err.
+//! reachable when the resolved family is `CkBtcUtxo`; any other family OR a currency with no
+//! FIXED_ASSETS row fails closed with a clean typed Err. (Post-registry, 2026-08-28, the family is
+//! a compile-time property of the currency id — no runtime registration exists.)
 //!
-//! KEY PROOF: the second currency (CKETH=7) points at the SAME BTC-shaped mock minter as CKBTC. Against
-//! the UNFIXED code the mock happily responds to the BTC methods and the calls return Ok — so the
-//! `assert!(...is_err())` FAILS (RED). The gate must fire on FAMILY, not on minter behaviour.
+//! KEY PROOF: the second currency (CKETH=6 — `CkEthErc20` in the FIXED_ASSETS table) points at a
+//! BTC-shaped mock minter installed at the FIXED ckETH minter id. Against the UNFIXED code the mock
+//! happily responds to the BTC methods and the calls return Ok — so the `assert!(...is_err())`
+//! FAILS (RED). The gate must fire on FAMILY, not on minter behaviour.
 
 use candid::{decode_one, encode_args, encode_one, CandidType, Nat, Principal};
 use dpay_core::{generate_keypair, Currency};
@@ -29,9 +31,9 @@ const T0_NANOS: u64 = T0_SECS * 1_000_000_000;
 const CAP: u64 = 100_000;
 
 const CKBTC: Currency = 1;
-/// A second currency registered as `CkEthErc20` family but pointing at the SAME BTC-shaped mock
-/// minter as CKBTC. The family gate must short-circuit BEFORE any minter call.
-const CKETH: Currency = 7;
+/// A second currency whose FIXED_ASSETS family is `CkEthErc20` while a BTC-shaped mock minter sits
+/// at its fixed minter id. The family gate must short-circuit BEFORE any minter call.
+const CKETH: Currency = 6;
 
 #[allow(dead_code)]
 #[derive(CandidType, serde::Serialize)]
@@ -82,15 +84,9 @@ enum LedgerArg {
 }
 
 #[derive(CandidType, serde::Serialize)]
-struct LedgerConfig {
-    currency: Currency,
-    principal: Principal,
-    mintable: bool,
-}
-
-#[derive(CandidType, serde::Serialize)]
 struct DpayInitArg {
-    ledgers: Vec<LedgerConfig>,
+    /// Satisfies the required init arg; currency 0 is never exercised in this file.
+    demo_ledger: Principal,
     per_tx_cap: u64,
     controller: Option<Principal>,
 }
@@ -101,26 +97,13 @@ struct MockMinterInit {
     gas_ledger: Option<Principal>,
 }
 
-/// Local mirror of the canister's `MinterFamily` (candid wire type). Variant ORDER must match
-/// `types::MinterFamily` (CkBtcUtxo=0, CkEthErc20=1, CkSol=2) — candid encodes enum variants by
-/// index, so reordering here would silently re-target the family being registered.
-#[allow(dead_code)] // mirror type; only some variants are constructed in this file
-#[derive(CandidType, serde::Serialize)]
-enum MinterFamily {
-    CkBtcUtxo,
-    CkEthErc20,
-    CkSol,
-}
-
-/// Local mirror of the canister's `RampCapability` (candid wire type) — needed to encode
-/// `register_currency_meta`.
-#[allow(dead_code)] // mirror type; only some variants are constructed in this file
-#[derive(CandidType, serde::Serialize)]
-enum RampCapability {
-    Direct,
-    Partner,
-    Unavailable,
-}
+/// The facade FIXED_ASSETS principals this file installs stand-ins at (post-registry 2026-08-28,
+/// currency 1/6 resolve ledger+minter+family from the compile-time table):
+///   CKBTC=1 → ledger mxzaz…, minter mqygn… (family CkBtcUtxo)
+///   CKETH=6 → ledger ss2fx…, minter sv3dd… (family CkEthErc20)
+const CKBTC_LEDGER: &str = "mxzaz-hqaaa-aaaar-qaada-cai";
+const CKBTC_MINTER: &str = "mqygn-kiaaa-aaaar-qaadq-cai";
+const CKETH_MINTER: &str = "sv3dd-oaaaa-aaaar-qacoa-cai";
 
 #[derive(CandidType, Deserialize, Debug)]
 struct DepositInfo {
@@ -183,42 +166,6 @@ fn mock_minter_wasm() -> Vec<u8> {
         .unwrap_or_else(|e| panic!("cannot read mock-minter wasm at {}: {e}", path.display()))
 }
 
-fn install_ledger(
-    pic: &PocketIc,
-    minting_account: Account,
-    symbol: &str,
-    transfer_fee: u64,
-    initial_balances: Vec<(Account, Nat)>,
-) -> Principal {
-    let ledger = pic.create_canister();
-    pic.add_cycles(ledger, 10_000_000_000_000);
-    let init = LedgerArg::Init(LedgerInitArgs {
-        minting_account,
-        fee_collector_account: None,
-        transfer_fee: Nat::from(transfer_fee),
-        decimals: Some(2),
-        max_memo_length: None,
-        token_symbol: symbol.into(),
-        token_name: format!("Demo {symbol}"),
-        metadata: vec![],
-        initial_balances,
-        feature_flags: Some(FeatureFlags { icrc2: true, icrc152: false }),
-        archive_options: ArchiveOptions {
-            num_blocks_to_archive: 10_000,
-            max_transactions_per_response: None,
-            trigger_threshold: 10_000_000,
-            max_message_size_bytes: None,
-            cycles_for_archive_creation: None,
-            node_max_memory_size_bytes: None,
-            controller_id: minting_account.owner,
-            more_controller_ids: None,
-        },
-        index_principal: None,
-    });
-    pic.install_canister(ledger, ledger_wasm(), encode_one(&init).unwrap(), None);
-    ledger
-}
-
 // --- deposit proxies, parameterized by currency (the deposit.rs helpers are CKBTC-hardcoded) -----
 
 fn deposit_address(
@@ -267,51 +214,11 @@ fn refresh_deposit(
     decode_one::<Result<DepositRefresh, String>>(&reply).unwrap()
 }
 
-/// `register_currency_meta` for a currency WITH a minter family (the deposit.rs helper hardcodes
-/// `None`). Field ORDER must match the canister signature exactly (positional candid tuple).
-fn register_currency_meta_family(
-    pic: &PocketIc,
-    dpay: Principal,
-    caller: Principal,
-    currency: Currency,
-    family: MinterFamily,
-    cap: u64,
-) {
-    let reply = pic
-        .update_call(
-            dpay,
-            caller,
-            "register_currency_meta",
-            encode_args((
-                currency,
-                None::<String>,               // symbol
-                None::<u8>,                   // decimals
-                Some(family),                 // minter_family
-                None::<String>,               // wrapper_name
-                None::<String>,               // backing_symbol
-                None::<String>,               // network
-                None::<u8>,                   // display_decimals
-                None::<u64>,                  // fee
-                Some(cap),                    // cap
-                None::<u32>,                  // chain_id
-                None::<String>,               // token_contract
-                RampCapability::Unavailable,  // onramp
-                RampCapability::Unavailable,  // offramp
-                None::<Principal>,            // gas_ledger
-            ))
-            .unwrap(),
-        )
-        .expect("register_currency_meta update_call rejected");
-    decode_one::<Result<(), String>>(&reply)
-        .unwrap()
-        .expect("register_currency_meta should succeed for the controller");
-}
-
-/// Two-family setup: CKBTC=1 (no family meta → legacy `CkBtcUtxo` default) and CKETH=7
-/// (`CkEthErc20` family), BOTH pointing at the SAME BTC-shaped mock minter. The mock is initialized
-/// against the CKBTC ledger and responds to the BTC minter methods regardless of which currency the
-/// facade resolved — which is exactly the trap: against the unfixed code the ETH-family calls return
-/// Ok because the mock is BTC-shaped, proving the gate must fire on FAMILY, not minter behaviour.
+/// Two-family setup: CKBTC=1 (FIXED_ASSETS family CkBtcUtxo) and CKETH=6 (family CkEthErc20), both
+/// minters mocked as BTC-SHAPED. The CKBTC mock is initialized against the CKBTC ledger; the CKETH
+/// mock (at the FIXED ckETH minter id) is initialized against the same ledger — which is exactly
+/// the trap: against the unfixed code the ETH-family calls return Ok because the mock is
+/// BTC-shaped, proving the gate must fire on FAMILY, not minter behaviour.
 fn setup_two_families() -> (PocketIc, Principal, Principal, SigningKey, [u8; 32]) {
     let pic = PocketIc::new();
     pic.set_time(Time::from_nanos_since_unix_epoch(T0_NANOS));
@@ -321,94 +228,69 @@ fn setup_two_families() -> (PocketIc, Principal, Principal, SigningKey, [u8; 32]
 
     let dpay = pic.create_canister();
     pic.add_cycles(dpay, 2_000_000_000_000);
-    let mock = pic.create_canister();
-    pic.add_cycles(mock, 2_000_000_000_000);
 
-    // Two ledgers, both with the mock as the minting-account owner. The mock is wired to the CKBTC
-    // ledger only — it never gets called for CKETH once the gate fires, and even on the UNFIXED code
-    // the ETH-family calls hit the BTC-shaped minter methods (not the ledger) before any ledger work.
-    let ckbtc = install_ledger(
-        &pic,
-        Account { owner: mock, subaccount: None },
-        "ckBTC",
-        0,
-        vec![],
-    );
-    let cketh = install_ledger(
-        &pic,
-        Account { owner: mock, subaccount: None },
-        "ckETH",
-        0,
-        vec![],
-    );
+    // Install the stand-ins AT the FIXED_ASSETS principals (PocketIC accepts IC mainnet app-subnet
+    // ids; currency 1/6 resolve ledger+minter+family from the const table).
+    let ckbtc = Principal::from_text(CKBTC_LEDGER).unwrap();
+    let mock_btc = Principal::from_text(CKBTC_MINTER).unwrap();
+    let mock_eth = Principal::from_text(CKETH_MINTER).unwrap();
+    for id in [ckbtc, mock_btc, mock_eth] {
+        pic.create_canister_with_id(Some(Principal::anonymous()), None, id)
+            .unwrap_or_else(|e| panic!("reserve {id}: {e}"));
+    }
+    pic.add_cycles(ckbtc, 10_000_000_000_000);
+    pic.add_cycles(mock_btc, 2_000_000_000_000);
+    pic.add_cycles(mock_eth, 2_000_000_000_000);
 
+    // One ledger, minting account owned by the CKBTC mock. The mock(s) are wired to it and respond
+    // to the BTC minter methods regardless of which currency the facade resolved.
+    let init = LedgerArg::Init(LedgerInitArgs {
+        minting_account: Account { owner: mock_btc, subaccount: None },
+        fee_collector_account: None,
+        transfer_fee: Nat::from(0u64),
+        decimals: Some(2),
+        max_memo_length: None,
+        token_symbol: "ckBTC".into(),
+        token_name: "Demo ckBTC".into(),
+        metadata: vec![],
+        initial_balances: vec![],
+        feature_flags: Some(FeatureFlags { icrc2: true, icrc152: false }),
+        archive_options: ArchiveOptions {
+            num_blocks_to_archive: 10_000,
+            max_transactions_per_response: None,
+            trigger_threshold: 10_000_000,
+            max_message_size_bytes: None,
+            cycles_for_archive_creation: None,
+            node_max_memory_size_bytes: None,
+            controller_id: mock_btc,
+            more_controller_ids: None,
+        },
+        index_principal: None,
+    });
+    pic.install_canister(ckbtc, ledger_wasm(), encode_one(&init).unwrap(), None);
     pic.install_canister(
-        mock,
+        mock_btc,
+        mock_minter_wasm(),
+        encode_one(&MockMinterInit { amount_ledger: ckbtc, gas_ledger: None }).unwrap(),
+        None,
+    );
+    pic.install_canister(
+        mock_eth,
         mock_minter_wasm(),
         encode_one(&MockMinterInit { amount_ledger: ckbtc, gas_ledger: None }).unwrap(),
         None,
     );
 
-    // Seed a controller at init: `register_minter`/`register_currency_meta` are controller-only.
-    let admin = Principal::management_canister();
+    // No registration steps remain (registry removed 2026-08-28): the facade resolves currency 1
+    // and 6 — ledger, minter, family, cap — entirely from the compile-time FIXED_ASSETS table.
     let dpay_init = DpayInitArg {
-        ledgers: vec![
-            LedgerConfig { currency: CKBTC, principal: ckbtc, mintable: false },
-            LedgerConfig { currency: CKETH, principal: cketh, mintable: false },
-        ],
+        demo_ledger: Principal::anonymous(),
         per_tx_cap: CAP,
-        controller: Some(admin),
+        controller: None,
     };
     pic.install_canister(dpay, dpay_wasm(), encode_one(&dpay_init).unwrap(), None);
 
-    // Bind the SAME BTC-shaped mock minter to both currencies.
-    for cur in [CKBTC, CKETH] {
-        let reply = pic
-            .update_call(dpay, admin, "register_minter", encode_args((cur, mock)).unwrap())
-            .expect("register_minter update_call rejected");
-        decode_one::<Result<(), String>>(&reply)
-            .unwrap()
-            .expect("register_minter should succeed for the controller");
-    }
-
-    // CKBTC: cap only, NO family meta → resolves to the legacy `CkBtcUtxo` default (has minter).
-    // CKETH: cap + `CkEthErc20` family meta → the gate must reject it.
-    register_currency_meta_cap(&pic, dpay, admin, CKBTC, CAP);
-    register_currency_meta_family(&pic, dpay, admin, CKETH, MinterFamily::CkEthErc20, CAP);
-
-    (pic, dpay, mock, payer_sk, payer)
-}
-
-/// cap-only currency meta (mirrors `deposit.rs::register_currency_meta_cap` — no family registered).
-fn register_currency_meta_cap(pic: &PocketIc, dpay: Principal, caller: Principal, currency: Currency, cap: u64) {
-    let reply = pic
-        .update_call(
-            dpay,
-            caller,
-            "register_currency_meta",
-            encode_args((
-                currency,
-                None::<String>,               // symbol
-                None::<u8>,                   // decimals
-                None::<MinterFamily>,         // minter_family
-                None::<String>,               // wrapper_name
-                None::<String>,               // backing_symbol
-                None::<String>,               // network
-                None::<u8>,                   // display_decimals
-                None::<u64>,                  // fee
-                Some(cap),                    // cap
-                None::<u32>,                  // chain_id
-                None::<String>,               // token_contract
-                RampCapability::Unavailable,  // onramp
-                RampCapability::Unavailable,  // offramp
-                None::<Principal>,            // gas_ledger
-            ))
-            .unwrap(),
-        )
-        .expect("register_currency_meta update_call rejected");
-    decode_one::<Result<(), String>>(&reply)
-        .unwrap()
-        .expect("register_currency_meta should succeed for the controller");
+    (pic, dpay, mock_btc, payer_sk, payer)
 }
 
 /// PRIMARY GATE TEST — all three deposit proxies MUST reject a CkEthErc20-family currency with a
@@ -441,17 +323,17 @@ fn deposit_proxies_reject_cketherc20_family() {
     );
 }
 
-/// REGRESSION GUARD — the BTC path (CkBtcUtxo, incl. the legacy "has minter, no family meta"
-/// default) MUST still be served Ok by all three proxies after the gate lands. Pins that the gate
-/// does not over-reach and break the existing ckBTC deposit flow.
+/// REGRESSION GUARD — the BTC path (CkBtcUtxo, the FIXED_ASSETS family of currency 1) MUST still
+/// be served Ok by all three proxies after the gate lands. Pins that the gate does not over-reach
+/// and break the existing ckBTC deposit flow.
 #[test]
-fn deposit_proxies_still_serve_ckbtc_legacy_default_family() {
+fn deposit_proxies_still_serve_ckbtc() {
     let (pic, dpay, _mock, _sk, payer) = setup_two_families();
 
     deposit_address(&pic, dpay, payer, CKBTC)
-        .expect("deposit_address MUST stay Ok for CkBtcUtxo (legacy default family)");
+        .expect("deposit_address MUST stay Ok for CkBtcUtxo");
     deposit_info(&pic, dpay, CKBTC)
-        .expect("deposit_info MUST stay Ok for CkBtcUtxo (legacy default family)");
+        .expect("deposit_info MUST stay Ok for CkBtcUtxo");
     refresh_deposit(&pic, dpay, payer, CKBTC)
-        .expect("refresh_deposit MUST stay Ok for CkBtcUtxo (legacy default family)");
+        .expect("refresh_deposit MUST stay Ok for CkBtcUtxo");
 }

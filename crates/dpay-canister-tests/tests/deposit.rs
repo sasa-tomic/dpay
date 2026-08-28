@@ -81,15 +81,10 @@ enum LedgerArg {
 }
 
 #[derive(CandidType, serde::Serialize)]
-struct LedgerConfig {
-    currency: Currency,
-    principal: Principal,
-    mintable: bool,
-}
-
-#[derive(CandidType, serde::Serialize)]
 struct DpayInitArg {
-    ledgers: Vec<LedgerConfig>,
+    /// Satisfies the required init arg; currency 0 is never exercised in this file, so the DEMO row
+    /// deliberately points at a canister-less principal (any accidental use fails loudly).
+    demo_ledger: Principal,
     per_tx_cap: u64,
     controller: Option<Principal>,
 }
@@ -145,25 +140,11 @@ struct DepositRefresh {
     required_confirmations: u32,
 }
 
-/// Local mirror of the canister's `RampCapability` (candid wire type) — needed to encode
-/// `register_currency_meta` calls from this test.
-#[allow(dead_code)] // mirror type; only some variants are constructed in this file
-#[derive(CandidType, serde::Serialize)]
-enum RampCapability {
-    Direct,
-    Partner,
-    Unavailable,
-}
-
-/// Local mirror of the canister's `MinterFamily` (candid wire type) — the `None` variant is all the
-/// cap-only registration needs.
-#[allow(dead_code)] // mirror type; only some variants are constructed in this file
-#[derive(CandidType, serde::Serialize)]
-enum MinterFamily {
-    CkBtcUtxo,
-    CkEthErc20,
-    CkSol,
-}
+/// The facade FIXED_ASSETS ckBTC ledger + minter principals — post-registry (2026-08-28) currency 1
+/// resolves from the compile-time table, so this test's stand-ins must live at EXACTLY those ids
+/// (PocketIC's `create_canister_with_id` accepts IC mainnet app-subnet ids).
+const CKBTC_LEDGER: &str = "mxzaz-hqaaa-aaaar-qaada-cai";
+const CKBTC_MINTER: &str = "mqygn-kiaaa-aaaar-qaadq-cai";
 
 fn nat_to_u64(n: &Nat) -> u64 {
     num_traits::ToPrimitive::to_u64(&n.0).expect("nat fits in u64")
@@ -329,41 +310,6 @@ fn register_deposit(pic: &PocketIc, mock: Principal, facade: Principal, pk: [u8;
     .expect("register_deposit update_call rejected");
 }
 
-/// Register currency metadata with ONLY a per-tx `cap` (MC2 U1). `pay` is fail-closed on a cap-less
-/// currency, so the deposit→pay closed-loop test needs a registered cap on CKBTC to settle. Called
-/// as the seeded controller (the management-canister principal); `register_currency_meta` replaces
-/// the record in place.
-fn register_currency_meta_cap(pic: &PocketIc, dpay: Principal, caller: Principal, currency: Currency, cap: u64) {
-    let reply = pic
-        .update_call(
-            dpay,
-            caller,
-            "register_currency_meta",
-            encode_args((
-                currency,
-                None::<String>,               // symbol
-                None::<u8>,                   // decimals
-                None::<MinterFamily>,         // minter_family
-                None::<String>,               // wrapper_name
-                None::<String>,               // backing_symbol
-                None::<String>,               // network
-                None::<u8>,                   // display_decimals
-                None::<u64>,                  // fee
-                Some(cap),                    // cap
-                None::<u32>,                  // chain_id
-                None::<String>,               // token_contract
-                RampCapability::Unavailable,  // onramp
-                RampCapability::Unavailable,  // offramp
-                None::<Principal>,            // gas_ledger
-            ))
-            .unwrap(),
-        )
-        .expect("register_currency_meta update_call rejected");
-    decode_one::<Result<(), String>>(&reply)
-        .unwrap()
-        .expect("register_currency_meta should succeed for the controller");
-}
-
 fn setup_deposit() -> (PocketIc, Principal, Principal, Principal, SigningKey, [u8; 32]) {
     let pic = PocketIc::new();
     pic.set_time(Time::from_nanos_since_unix_epoch(T0_NANOS));
@@ -373,17 +319,45 @@ fn setup_deposit() -> (PocketIc, Principal, Principal, Principal, SigningKey, [u
 
     let dpay = pic.create_canister();
     pic.add_cycles(dpay, 2_000_000_000_000);
-    let mock = pic.create_canister();
+
+    // Install the stand-ins AT the facade's compile-time FIXED_ASSETS principals (the governed
+    // registry was removed 2026-08-28 — currency 1 resolves from the const table, so both the
+    // ledger and the mock minter must live at the exact mainnet ids):
+    //   ckbtc ledger  = mxzaz-hqaaa-aaaar-qaada-cai
+    //   ckBTC minter  = mqygn-kiaaa-aaaar-qaadq-cai  (the mock, owning the ledger's minting account)
+    let ckbtc = Principal::from_text(CKBTC_LEDGER).unwrap();
+    pic.create_canister_with_id(Some(Principal::anonymous()), None, ckbtc)
+        .expect("reserve ckbtc ledger id");
+    pic.add_cycles(ckbtc, 10_000_000_000_000);
+    let mock = Principal::from_text(CKBTC_MINTER).unwrap();
+    pic.create_canister_with_id(Some(Principal::anonymous()), None, mock)
+        .expect("reserve minter id");
     pic.add_cycles(mock, 2_000_000_000_000);
 
-    let ckbtc = install_ledger(
-        &pic,
-        Account { owner: mock, subaccount: None },
-        "ckBTC",
-        0,
-        vec![],
-    );
-
+    let init = LedgerArg::Init(LedgerInitArgs {
+        minting_account: Account { owner: mock, subaccount: None },
+        fee_collector_account: None,
+        transfer_fee: Nat::from(0u64),
+        decimals: Some(2),
+        max_memo_length: None,
+        token_symbol: "ckBTC".into(),
+        token_name: "Demo ckBTC".into(),
+        metadata: vec![],
+        initial_balances: vec![],
+        feature_flags: Some(FeatureFlags { icrc2: true, icrc152: false }),
+        archive_options: ArchiveOptions {
+            num_blocks_to_archive: 10_000,
+            max_transactions_per_response: None,
+            trigger_threshold: 10_000_000,
+            max_message_size_bytes: None,
+            cycles_for_archive_creation: None,
+            node_max_memory_size_bytes: None,
+            controller_id: mock,
+            more_controller_ids: None,
+        },
+        index_principal: None,
+    });
+    pic.install_canister(ckbtc, ledger_wasm(), encode_one(&init).unwrap(), None);
     pic.install_canister(
         mock,
         mock_minter_wasm(),
@@ -391,27 +365,15 @@ fn setup_deposit() -> (PocketIc, Principal, Principal, Principal, SigningKey, [u
         None,
     );
 
-    // Seed a controller at init: `register_minter` is a privileged admin op (controller-only since
-    // R1), so the facade must be locked with a controller for the test to register the mock minter.
-    // The stable management-canister principal stands in for the governed operator.
-    let admin = Principal::management_canister();
+    // No registration steps remain (the registry-era register_minter/register_currency_meta calls
+    // died with the governed registry): the facade resolves currency 1 to the consts above. The
+    // per-tx cap for CKBTC is likewise the FIXED_ASSETS const (100_000 = CAP).
     let dpay_init = DpayInitArg {
-        ledgers: vec![LedgerConfig { currency: CKBTC, principal: ckbtc, mintable: false }],
+        demo_ledger: Principal::anonymous(),
         per_tx_cap: CAP,
-        controller: Some(admin),
+        controller: None,
     };
     pic.install_canister(dpay, dpay_wasm(), encode_one(&dpay_init).unwrap(), None);
-
-    let reply = pic
-        .update_call(dpay, admin, "register_minter", encode_args((CKBTC, mock)).unwrap())
-        .expect("register_minter update_call rejected");
-    decode_one::<Result<(), String>>(&reply)
-        .unwrap()
-        .expect("register_minter should succeed for the controller");
-
-    // MC2 U1: `pay` reads the per-currency cap (fail-closed). Register a cap for CKBTC so the
-    // deposit→pay closed-loop test (deposited_funds_are_spendable_via_pay) can settle.
-    register_currency_meta_cap(&pic, dpay, admin, CKBTC, CAP);
 
     (pic, ckbtc, dpay, mock, payer_sk, payer)
 }
@@ -633,7 +595,7 @@ struct BalanceEntry {
 }
 
 /// The unified authoritative `refresh_balances` facade method (MC3 U1): pass `[currency]` for one,
-/// every registered id for all. Re-reads the ledger for each REQUESTED currency and refreshes
+/// every live-ledger id for all. Re-reads the ledger for each REQUESTED currency and refreshes
 /// `BAL_CACHE`. Returns the list of `BalanceEntry { currency, amount }` (only for the currencies
 /// that resolved to a live ledger).
 fn refresh_balances(
@@ -769,34 +731,16 @@ fn refresh_balances_reflects_a_cache_bypassing_credit() {
 // --- refresh_balances: ONE update call refreshes the REQUESTED currencies --------------------
 //
 // The unified method collapses the relay's N per-currency update calls (each its own 2-5s consensus
-// round) into ONE. Pass `[currency]` for one, every registered id for all. It must: (a) return an
+// round) into ONE. Pass `[currency]` for one, every live-ledger id for all. It must: (a) return an
 // entry per REQUESTED currency that resolved to a live ledger, with the authoritative balance,
 // (b) write each to BAL_CACHE so `balance_of` reflects it, and (c) surface a facade-bypassing
 // credit (direct ICRC transfer) the same way for one or many currencies.
 
-/// Minimal candid mirror to read just the `currency` id out of a `currencies()` reply (candid
-/// ignores the other record fields on decode). Returns every registered currency id ascending —
-/// the list a caller passes to `refresh_balances` to refresh ALL currencies.
-fn all_currency_ids(pic: &PocketIc, dpay: Principal) -> Vec<Currency> {
-    #[derive(CandidType, Deserialize)]
-    struct CurrencyIdOnly {
-        currency: Currency,
-    }
-    let reply = pic
-        .query_call(dpay, Principal::anonymous(), "currencies", encode_args(()).unwrap())
-        .expect("currencies query rejected");
-    let mut ids: Vec<Currency> = decode_one::<Vec<CurrencyIdOnly>>(&reply)
-        .expect("decode currencies")
-        .into_iter()
-        .map(|d| d.currency)
-        .collect();
-    ids.sort();
-    ids
-}
-
-/// When passed EVERY registered currency id, the unified refresh returns an entry for each and
+/// When passed every live-ledger currency id, the unified refresh returns an entry for each and
 /// writes each to `BAL_CACHE`, so a facade-bypassing credit (direct ICRC transfer) is surfaced for
-/// ALL currencies in ONE call.
+/// ALL currencies in ONE call. (The registry-era way to enumerate the ids — the `currencies()`
+/// catalog query — died with the governed registry, 2026-08-28; the id list is now caller-side
+/// knowledge. In this env CKBTC is the only currency with a live ledger.)
 #[test]
 fn refresh_balances_refreshes_every_currency_when_passed_all() {
     let (pic, ckbtc, dpay, mock, _sk, payer) = setup_deposit();
@@ -811,19 +755,18 @@ fn refresh_balances_refreshes_every_currency_when_passed_all() {
     // The facade cache is STALE before the refresh.
     assert_eq!(dpay_balance(&pic, dpay, payer, CKBTC), 0, "cache must be stale before the refresh");
 
-    // ONE unified refresh call with EVERY registered id → returns an entry for each.
-    let all_ids = all_currency_ids(&pic, dpay);
-    assert!(all_ids.contains(&CKBTC), "currencies() must list the registered CKBTC id");
+    // ONE unified refresh call with every live-ledger id → returns an entry for each.
+    let all_ids = vec![CKBTC];
     let entries = refresh_balances(&pic, dpay, payer, &all_ids).expect("refresh_balances ok");
     assert!(
         !entries.is_empty(),
-        "refresh_balances must return at least one entry (the registered currency)",
+        "refresh_balances must return at least one entry (the live-ledger currency)",
     );
-    // The registered currency (CKBTC) must be present with the authoritative credited amount.
+    // CKBTC must be present with the authoritative credited amount.
     let ckbtc_entry = entries
         .iter()
         .find(|e| e.currency == CKBTC)
-        .expect("refresh_balances result must include the registered CKBTC currency");
+        .expect("refresh_balances result must include the CKBTC currency");
     assert_eq!(
         ckbtc_entry.amount, CREDIT,
         "refresh_balances entry for CKBTC must carry the authoritative credited amount",

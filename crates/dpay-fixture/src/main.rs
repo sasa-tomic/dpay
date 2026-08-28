@@ -590,13 +590,18 @@ fn emit_dfx_args() {
     let out = Path::new("dfx/args");
     fs::create_dir_all(out).expect("mkdir dfx/args");
 
-    // Facade InitArg: no ledgers registered at init (the operator registers each ledger at runtime
-    // via `register_ledger`, since a ledger id is only known after it is created). cap + open
-    // controller (the demo default; production sets a governed controller). On an UPGRADE this arg is
-    // type-checked against the .did but ignored at runtime (no post_upgrade) — stable structures
-    // carry SPENT/ACCOUNT_TXNS/CAP across by MemoryId. Candid matches record fields by name.
+    // Facade InitArg: `demo_ledger` is the ONE environment-specific ledger (the DEMO/DUSD play
+    // currency) — the mainnet DUSD ICRC-3 ledger, aka canister_ids.json's `icrc_ledger.ic`. Every
+    // other asset the facade serves is a compile-time FIXED_ASSETS const; there is no runtime
+    // registration. cap + open controller (the demo default; production arms the internal
+    // controller cell post-deploy). On an UPGRADE this arg is type-checked against the .did but
+    // ignored at runtime (no post_upgrade) — stable structures carry SPENT/ACCOUNT_TXNS/CAP across
+    // by MemoryId. Candid matches record fields by name. scripts/dfx-deploy.sh (local replica) does
+    // NOT use this file: a fresh replica's ledger id only exists at deploy time, so it substitutes
+    // its own demo_ledger inline.
+    const DEMO_LEDGER_MAINNET: &str = "td2nx-oaaaa-aaaab-qhdnq-cai";
     let init = format!(
-        "(record {{ ledgers = vec {{}}; per_tx_cap = {CAP} : nat64; controller = null }})\n",
+        "(record {{ demo_ledger = principal \"{DEMO_LEDGER_MAINNET}\"; per_tx_cap = {CAP} : nat64; controller = null }})\n",
     );
     fs::write(out.join("init.arg"), init).unwrap();
     fs::write(out.join("pay.arg"), format!("({})\n", blob(&wire))).unwrap();
@@ -604,9 +609,11 @@ fn emit_dfx_args() {
     fs::write(out.join("payer.arg"), format!("({}, {DEMO_USD} : nat32)\n", blob(&payer_pk))).unwrap();
     fs::write(out.join("merchant.arg"), format!("({}, {DEMO_USD} : nat32)\n", blob(&merchant_pk))).unwrap();
 
-    // Post-conditions the deploy script asserts against (avoids recomputing money in bash).
+    // Post-conditions the deploy script asserts against (avoids recomputing money in bash). CAP is
+    // here too: scripts/dfx-deploy.sh builds its local init arg inline and takes the cap from this
+    // single source instead of hardcoding it.
     let expect = format!(
-        "AMOUNT={AMOUNT}\nPAYER_AFTER={}\nMERCHANT_AFTER={}\n",
+        "AMOUNT={AMOUNT}\nCAP={CAP}\nPAYER_AFTER={}\nMERCHANT_AFTER={}\n",
         BAL_A - AMOUNT,
         BAL_B + AMOUNT,
     );

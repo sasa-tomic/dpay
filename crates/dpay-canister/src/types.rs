@@ -30,9 +30,10 @@ impl Storable for Nonce {
     const BOUND: Bound = Bound::Bounded { max_size: NONCE_LEN as u32, is_fixed_size: true };
 }
 
-// --- per-currency ledger registry -------------------------------------------------------------
-// A currency resolves to the ICRC ledger that holds its balances, plus whether this canister is
-// allowed to mint/burn it (demo currency only).
+// --- DEMO-ledger registry ----------------------------------------------------------------------
+// With the governed registry removed (founder decision 2026-08-28), this map holds EXACTLY ONE
+// row: the DEMO currency (0) → its environment-specific ICRC ledger. Every other currency the
+// facade serves resolves from the compile-time `FIXED_ASSETS` table below.
 
 /// 1 mintable flag + up to 29 principal bytes.
 pub(crate) const LEDGER_ENTRY_MAX: usize = 1 + 29;
@@ -57,10 +58,9 @@ impl Storable for LedgerEntry {
     const BOUND: Bound = Bound::Bounded { max_size: LEDGER_ENTRY_MAX as u32, is_fixed_size: false };
 }
 
-/// Optional governance controller for admin ops (`mint`/`burn`/`register_ledger`/`set_controller`).
+/// Optional governance controller for admin ops (`mint`/`burn`/`reconcile`/`set_controller`).
 /// Encoded as a 1-byte present flag + up to 29 principal bytes. `None` = open (demo). Production MUST
-/// set a governed controller — an open admin surface lets anyone repoint a currency at a fake ledger
-/// or mint unbounded demo currency.
+/// set a governed controller — an open admin surface lets anyone mint unbounded demo currency.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ControllerStorable(pub(crate) Option<Principal>);
 impl Storable for ControllerStorable {
@@ -84,459 +84,84 @@ impl Storable for ControllerStorable {
     const BOUND: Bound = Bound::Bounded { max_size: 30, is_fixed_size: false };
 }
 
-/// A bare principal value: up to 29 principal bytes. Value type of `MINTERS` — a SEPARATE map from
-/// `LEDGERS`, so the existing `LedgerEntry` encoding (MemoryId 5) is untouched (no upgrade-layout
-/// churn). Mirrors `ControllerStorable`'s principal encoding but without a present-flag byte: the
-/// minter map's absence is expressed by map membership, not an in-row flag.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct PrincipalStorable(pub(crate) Principal);
-impl Storable for PrincipalStorable {
-    fn to_bytes(&self) -> Cow<'_, [u8]> {
-        Cow::Owned(self.0.as_slice().to_vec())
-    }
-    fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        PrincipalStorable(Principal::from_slice(&bytes))
-    }
-    const BOUND: Bound = Bound::Bounded { max_size: 29, is_fixed_size: false };
-}
+// --- fixed chain-key currency table ------------------------------------------------------------
+// Founder decision 2026-08-28: the public, mutable, governed currency registry is REMOVED from this
+// canister — the relay is the sole catalog authority. The fixed ck currencies the facade serves
+// (deposit/withdraw proxy + pay routing) resolve from this COMPILE-TIME table; the DEMO currency's
+// ledger stays an init arg because it is environment-specific (fresh canister locally, `td2nx-…`
+// on mainnet). The registry can be re-added at a future governance handoff if that ever changes.
 
-// --- currency catalog: family + display metadata ----------------------------------------------
-// The wallet's runtime source of truth for which assets exist and how to display/fund them. A
-// `currencies()` query joins LEDGERS + MINTERS + CURRENCY_META so the app never hardcodes a currency
-// id (closes issue #7). Because `#[query]` cannot make cross-canister calls, display metadata
-// (symbol/decimals) is STORED here (registered via `register_currency_meta`) rather than fetched
-// live from each ledger on every call.
-
-/// The proxy family a ck currency's minter belongs to — drives per-family ramp dispatch in the
-/// relay/app. Stored as a single byte in `CURRENCY_META`. `None` for non-ck currencies (DEMO_USD).
+/// The proxy family a fixed ck currency's minter belongs to — drives per-family ramp dispatch in
+/// `proxy.rs` (`withdraw`) and the deposit family gate. Internal-only since the registry removal:
+/// it keys the `FIXED_ASSETS` rows and never crosses the wire.
 #[derive(CandidType, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MinterFamily {
-    /// ckBTC/ckDOGE: `get_btc_address` + `update_balance` + `retrieve_btc_with_approval` (single-ledger).
-    CkBtcUtxo = 0,
-    /// ckETH/ckUSDC: helper-contract deposit (no IC mint trigger) + `withdraw_erc20` (dual-ledger, ckETH gas).
-    CkEthErc20 = 1,
-    /// ckSOL: `get_deposit_address` + `process_deposit` + threshold-Ed25519 `withdraw`.
-    CkSol = 2,
+    /// ckBTC: `get_btc_address` + `update_balance` + `retrieve_btc_with_approval` (single-ledger).
+    CkBtcUtxo,
+    /// ckETH/ckUSDC: helper-contract deposit (no IC mint trigger) + `withdraw_eth`/`withdraw_erc20`
+    /// (dual-ledger for ckERC20, ckETH gas).
+    CkEthErc20,
+    /// ckSOL: `get_deposit_address` + `process_deposit` + threshold-Ed25519 `withdraw`. No FIXED
+    /// row uses this family yet (the SOL rail is app-side) — kept so the table's vocabulary is
+    /// exhaustive over the minter call-mirrors `calls.rs` speaks.
+    CkSol,
 }
 
-impl MinterFamily {
-    pub(crate) fn from_byte(b: u8) -> Option<Self> {
-        match b {
-            0 => Some(MinterFamily::CkBtcUtxo),
-            1 => Some(MinterFamily::CkEthErc20),
-            2 => Some(MinterFamily::CkSol),
-            _ => None,
-        }
-    }
+/// One FIXED chain-key currency resolved by the canister. Principals are mainnet TEXT from
+/// `docs/CANISTERS.md`; `dfx/catalog_truth.json` cross-checks them (see the
+/// `fixed_assets_match_catalog_truth` drift alarm at the bottom of this file). Parsed at call time —
+/// the table is tiny, same pattern as `ADMIN_CALLERS` in lib.rs.
+#[derive(Clone, Copy)]
+pub(crate) struct FixedAsset {
+    pub(crate) currency: Currency,
+    /// The currency's ICRC ledger principal.
+    pub(crate) ledger: &'static str,
+    /// The chain-key minter principal.
+    pub(crate) minter: &'static str,
+    /// The minter proxy family (dispatch key for deposit/withdraw).
+    pub(crate) family: MinterFamily,
+    /// ERC-20 contract address for a ckERC20 (`Some`) — routes `withdraw` to the dual-ledger
+    /// `withdraw_erc20` path; `None` = native asset (ckBTC, ckETH).
+    pub(crate) token_contract: Option<&'static str>,
+    /// The ckETH gas-ledger principal a ckERC20's dual-ledger withdraw burns (ckUSDC only).
+    pub(crate) gas_ledger: Option<&'static str>,
+    /// Per-tx cap in raw smallest units. 100_000 mirrors the registry-era placeholder policy (cap
+    /// == per_tx_cap); tighten per currency when policy is set.
+    pub(crate) cap: u64,
 }
 
-/// Per-direction ramp capability for a currency (MC1 unit 5). Honesty contract: the wallet renders
-/// NO fund/cash-out button for a direction marked `Unavailable` (per CLAUDE.md dpay never swaps and
-/// never advertises a ramp it cannot honour — OPEN_ISSUES O3 keeps ckUSDC offramp `Unavailable`).
-/// `Direct` = a native chain-key path the facade/wallet drives directly (ckBTC Bitcoin ramp, the
-/// DEMO faucet, the ckETH helper-contract onramp); `Partner` = a licensed third-party handoff (dpay
-/// is a screen); `Unavailable` = not offered (the fail-closed default for any unregistered currency).
-#[derive(CandidType, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RampCapability {
-    /// A native chain-key path the facade/wallet drives directly (ckBTC Bitcoin ramp, DEMO faucet,
-    /// the ckETH helper-contract onramp already built client-side).
-    Direct = 0,
-    /// A licensed third-party handoff: dpay shows an address + status, the user authorizes the
-    /// third party directly (dpay never holds keys/creds — preserves no-swap/no-custody).
-    Partner = 1,
-    /// Not offered. The wallet MUST render no button for this direction.
-    Unavailable = 2,
-}
-
-impl RampCapability {
-    pub(crate) fn from_byte(b: u8) -> Option<Self> {
-        match b {
-            0 => Some(RampCapability::Direct),
-            1 => Some(RampCapability::Partner),
-            2 => Some(RampCapability::Unavailable),
-            _ => None,
-        }
-    }
-}
-
-/// One entry of the `currencies()` catalog. The wallet reads currency ids + authoritative
-/// per-currency metadata from here at runtime instead of hardcoding `DEPOSIT_CURRENCY` (issue #7)
-/// or family-level token assumptions (MC1 unit 5: every CkEthErc20 used to inherit USDC's facts). The
-/// metadata fields are the single source of truth the relay passes through and the app caches.
-///
-/// `onramp`/`offramp` are NON-optional (`RampCapability`): an unregistered currency defaults to
-/// `Unavailable` for both directions in `currencies()` — fail-closed, so the wallet never shows a
-/// fund/cash-out button for a ramp it cannot honour. All other new fields are `Option<...>` so a
-/// registration that predates MC1 unit 5 (or only sets what it knows) stays valid.
-
-#[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct CurrencyDescriptor {
-    pub currency: Currency,
-    pub ledger: Principal,
-    /// `true` for the demo currency whose ledger this canister mints/burns.
-    pub mintable: bool,
-    /// The ck-minter principal — `Some` only when a deposit/withdraw ramp exists for this currency.
-    pub minter: Option<Principal>,
-    /// The minter's proxy family — present when a family was registered (typically with the minter).
-    pub minter_family: Option<MinterFamily>,
-    /// Display symbol, e.g. "$"/"₿"/"Ξ". Registered via `register_currency_meta`; `None` = unknown.
-    pub symbol: Option<String>,
-    /// Smallest-unit decimal count (USD=2, BTC=8, ETH=18, USDC=6). `None` = app guesses.
-    pub decimals: Option<u8>,
-    /// The IC wrapper token NAME, e.g. "ckBTC"/"ckUSDC" — the chain-key token's own name (distinct
-    /// from the backing native chain asset `backing_symbol`). `None` = unknown wrapper.
-    pub wrapper_name: Option<String>,
-    /// The BACKING native-chain asset symbol, e.g. "BTC"/"USDC"/"ETH" — drives `displayName`/
-    /// `currencySymbol` instead of family-level assumptions so each ckERC20 renders as itself.
-    pub backing_symbol: Option<String>,
-    /// The native settlement network name for display, e.g. "Bitcoin"/"Ethereum". `None` = unknown.
-    pub network: Option<String>,
-    /// UI display precision; **default = `decimals`** (full precision) when unset. Must be ≤
-    /// `decimals` when set (a smaller display precision for readable balances).
-    pub display_decimals: Option<u8>,
-    /// ICRC ledger fee in RAW smallest units, registered statically (MC2 adds live validation).
-    pub fee: Option<u64>,
-    /// Per-currency transaction cap in RAW smallest units, registered (MC2 governs). Authoritative
-    /// per-currency replacement for the single global `per_tx_cap` for display/policy.
-    pub cap: Option<u64>,
-    /// EVM chain id for ckERC20 (1=Ethereum mainnet). `None` for non-EVM families.
-    pub chain_id: Option<u32>,
-    /// The ERC-20 contract address (0x…) for a ckERC20 token — PER-TOKEN, replacing the relay's old
-    /// hardcoded currency-2 params. `None` for non-ERC20 families.
-    pub token_contract: Option<String>,
-    /// Funding (on-ramp) capability. `Unavailable` ⇒ the wallet shows NO "Add money" button.
-    pub onramp: RampCapability,
-    /// Cash-out (off-ramp) capability. `Unavailable` ⇒ the wallet shows NO "Cash out" button
-    /// (ckUSDC offramp is `Unavailable` per Fork-C — OPEN_ISSUES O3).
-    pub offramp: RampCapability,
-    /// The ckETH gas-ledger principal for a ckERC20 currency (the `withdraw_erc20` dual-ledger path
-    /// burns ckETH gas fees from this ledger + the amount from `ledger`). `None` for non-ckERC20
-    /// families (BTC / native ETH / DEMO) and for a ckERC20 currency whose gas ledger is unregistered
-    /// (the facade fail-closes a ckERC20 withdraw with no gas ledger). Appended LAST for stable-
-    /// encoding backward compat (an older `CURRENCY_META` row decodes with this as `None`).
-    pub gas_ledger: Option<Principal>,
-}
-
-/// Atomic currency-activation argument for [`register_currency`] (MC2 unit 4). A single candid
-/// RECORD carrying the identity fields (`currency`/`ledger`/`mintable`/`minter`) AND the full display
-/// metadata field set (mirroring [`register_currency_meta`]'s arg list EXACTLY, so the meta inserted
-/// is identical). `decimals`/`fee`/`wrapper_name` are NON-optional: they are the strict cross-canister
-/// validation inputs checked against the live ledger's `icrc1_decimals`/`icrc1_fee`/`icrc1_symbol`
-/// (F3 — no exemptions, including the DEMO currency; its `wrapper_name` MUST be the ledger's symbol,
-/// e.g. "DUSD"). The remaining meta fields stay `Option`/`RampCapability` exactly as in
-/// `register_currency_meta`.
-#[derive(CandidType, Deserialize, Clone, Debug)]
-pub struct CurrencyRegistration {
-    pub currency: Currency,
-    pub ledger: Principal,
-    pub mintable: bool,
-    /// Optional ck-minter principal (only ck currencies have one). Inserted into MINTERS atomically.
-    pub minter: Option<Principal>,
-    pub symbol: Option<String>,
-    /// REQUIRED — strictly validated against the ledger's `icrc1_decimals`.
-    pub decimals: u8,
-    pub minter_family: Option<MinterFamily>,
-    /// REQUIRED — strictly validated against the ledger's `icrc1_symbol` (the wrapper token name).
-    pub wrapper_name: String,
-    pub backing_symbol: Option<String>,
-    pub network: Option<String>,
-    pub display_decimals: Option<u8>,
-    /// REQUIRED — strictly validated against the ledger's `icrc1_fee`.
-    pub fee: u64,
-    pub cap: Option<u64>,
-    pub chain_id: Option<u32>,
-    pub token_contract: Option<String>,
-    pub onramp: RampCapability,
-    pub offramp: RampCapability,
-    /// The ckETH gas-ledger principal for a ckERC20 currency (the dual-ledger `withdraw_erc20` path).
-    /// `None` for non-ckERC20 families. Stored verbatim into `CURRENCY_META.gas_ledger`.
-    pub gas_ledger: Option<Principal>,
-}
-
-/// Display + family + authoritative per-currency metadata, stored in `CURRENCY_META` (MemoryId 13).
-///
-/// Encoding (MC1 unit 5 — additive, fail-closed on truncation): a sequence of self-delimiting
-/// fields, each an `Option` encoded as a 1-byte present-flag (0=absent, 1=present) followed by its
-/// payload when present:
-///   1. symbol          : flag + [len(1) + ≤16 bytes]
-///   2. decimals        : flag + [byte(1)]
-///   3. minter_family   : flag + [byte(1)]
-///   4. wrapper_name    : flag + [len(1) + ≤32 bytes]
-///   5. backing_symbol  : flag + [len(1) + ≤16 bytes]
-///   6. network         : flag + [len(1) + ≤32 bytes]
-///   7. display_decimals: flag + [byte(1)]
-///   8. fee             : flag + [u64 LE 8]
-///   9. cap             : flag + [u64 LE 8]
-///  10. chain_id        : flag + [u32 LE 4]
-///  11. token_contract  : flag + [len(1) + ≤64 bytes]
-///   12. onramp          : flag + [byte(1)]   (Option<RampCapability>; None→Unavailable default)
-///  13. offramp         : flag + [byte(1)]   (Option<RampCapability>; None→Unavailable default)
-///  14. gas_ledger       : flag + [len(1) + ≤29 bytes]   (Option<Principal>; the ckETH gas ledger
-///      for a ckERC20 currency's `withdraw_erc20` dual-ledger path. Appended LAST so an older
-///      CURRENCY_META row — written before this field existed — decodes with gas_ledger = None.)
-///
-/// `from_bytes` reads each field in order and treats the record as truncated at the first missing
-/// byte (the remainder default to `None`) — so a record written by an older canister version (which
-/// ends earlier) decodes with the new fields as `None`, and `currencies()` surfaces `Unavailable`
-/// ramps for it. Compact; the only repeated registration surface is `register_currency_meta`.
-pub(crate) const CURRENCY_META_MAX: usize = (1 + (1 + 16)) + (1 + 1) + (1 + 1) + (1 + (1 + 32)) + (1 + (1 + 16))
-    + (1 + (1 + 32)) + (1 + 1) + (1 + 8) + (1 + 8) + (1 + 4) + (1 + (1 + 64)) + (1 + 1) + (1 + 1)
-    + (1 + (1 + 29));
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct CurrencyMetaStorable {
-    pub(crate) symbol: Option<String>,
-    pub(crate) decimals: Option<u8>,
-    pub(crate) minter_family: Option<MinterFamily>,
-    pub(crate) wrapper_name: Option<String>,
-    pub(crate) backing_symbol: Option<String>,
-    pub(crate) network: Option<String>,
-    pub(crate) display_decimals: Option<u8>,
-    pub(crate) fee: Option<u64>,
-    pub(crate) cap: Option<u64>,
-    pub(crate) chain_id: Option<u32>,
-    pub(crate) token_contract: Option<String>,
-    /// `None` in storage ⇒ `Unavailable` in the returned descriptor (fail-closed ramp default).
-    pub(crate) onramp: Option<RampCapability>,
-    /// `None` in storage ⇒ `Unavailable` in the returned descriptor (fail-closed ramp default).
-    pub(crate) offramp: Option<RampCapability>,
-    /// The ckETH gas-ledger principal for a ckERC20 currency's dual-ledger `withdraw_erc20` path.
-    /// `None` for non-ckERC20 families. `PrincipalStorable` semantics (raw ≤29 bytes); stored under a
-    /// present-flag + length-prefixed payload for forward-compat.
-    pub(crate) gas_ledger: Option<Principal>,
-}
-
-/// Push a present-flagged optional string, truncating to `max` bytes (lossy but bounded).
-pub(crate) fn push_opt_str(v: &mut Vec<u8>, s: &Option<String>, max: usize) {
-    match s {
-        Some(s) => {
-            let bytes = s.as_bytes();
-            let n = bytes.len().min(max) as u8;
-            v.push(1u8);
-            v.push(n);
-            v.extend_from_slice(&bytes[..n as usize]);
-        }
-        None => v.push(0u8),
-    }
-}
-
-/// Push a present-flagged optional single byte.
-pub(crate) fn push_opt_u8(v: &mut Vec<u8>, x: Option<u8>) {
-    match x {
-        Some(b) => {
-            v.push(1u8);
-            v.push(b);
-        }
-        None => v.push(0u8),
-    }
-}
-
-/// Push a present-flagged optional little-endian u64.
-pub(crate) fn push_opt_u64(v: &mut Vec<u8>, x: Option<u64>) {
-    match x {
-        Some(n) => {
-            v.push(1u8);
-            v.extend_from_slice(&n.to_le_bytes());
-        }
-        None => v.push(0u8),
-    }
-}
-
-/// Push a present-flagged optional little-endian u32.
-pub(crate) fn push_opt_u32(v: &mut Vec<u8>, x: Option<u32>) {
-    match x {
-        Some(n) => {
-            v.push(1u8);
-            v.extend_from_slice(&n.to_le_bytes());
-        }
-        None => v.push(0u8),
-    }
-}
-
-/// Read a present-flagged optional string of ≤`max` bytes from `b` at `pos`, returning the value and
-/// advancing `pos` past it. A flag byte of 0 (or running out of bytes) yields `None`.
-pub(crate) fn read_opt_str(b: &[u8], pos: &mut usize, max: usize) -> Option<String> {
-    if *pos >= b.len() {
-        return None;
-    }
-    if b[*pos] == 0 {
-        *pos += 1;
-        return None;
-    }
-    *pos += 1; // consume flag
-    let n = b.get(*pos).copied().unwrap_or(0) as usize;
-    *pos += 1;
-    let n = n.min(max).min(b.len().saturating_sub(*pos));
-    let s = String::from_utf8_lossy(&b[*pos..*pos + n]).to_string();
-    *pos += n;
-    Some(s)
-}
-
-/// Read a present-flagged optional single byte from `b` at `pos`.
-pub(crate) fn read_opt_u8(b: &[u8], pos: &mut usize) -> Option<u8> {
-    if *pos >= b.len() || b[*pos] == 0 {
-        *pos = (*pos + 1).min(b.len());
-        return None;
-    }
-    *pos += 1;
-    let v = b.get(*pos).copied();
-    *pos += 1;
-    v
-}
-
-/// Read a present-flagged optional little-endian u64 from `b` at `pos`.
-pub(crate) fn read_opt_u64(b: &[u8], pos: &mut usize) -> Option<u64> {
-    if *pos >= b.len() || b[*pos] == 0 {
-        *pos = (*pos + 1).min(b.len());
-        return None;
-    }
-    *pos += 1;
-    if *pos + 8 > b.len() {
-        *pos = b.len();
-        return None;
-    }
-    let mut buf = [0u8; 8];
-    buf.copy_from_slice(&b[*pos..*pos + 8]);
-    *pos += 8;
-    Some(u64::from_le_bytes(buf))
-}
-
-/// Read a present-flagged optional little-endian u32 from `b` at `pos`.
-pub(crate) fn read_opt_u32(b: &[u8], pos: &mut usize) -> Option<u32> {
-    if *pos >= b.len() || b[*pos] == 0 {
-        *pos = (*pos + 1).min(b.len());
-        return None;
-    }
-    *pos += 1;
-    if *pos + 4 > b.len() {
-        *pos = b.len();
-        return None;
-    }
-    let mut buf = [0u8; 4];
-    buf.copy_from_slice(&b[*pos..*pos + 4]);
-    *pos += 4;
-    Some(u32::from_le_bytes(buf))
-}
-
-/// Push a present-flagged optional principal, length-prefixed (≤29 bytes; mirrors `push_opt_str`).
-/// The length byte keeps the record forward-compat (a future field after gas_ledger can be read even
-/// when gas_ledger is present).
-pub(crate) fn push_opt_principal(v: &mut Vec<u8>, p: &Option<Principal>) {
-    match p {
-        Some(p) => {
-            let bytes = p.as_slice();
-            let n = bytes.len().min(29) as u8;
-            v.push(1u8);
-            v.push(n);
-            v.extend_from_slice(&bytes[..n as usize]);
-        }
-        None => v.push(0u8),
-    }
-}
-
-/// Read a present-flagged optional length-prefixed principal (≤29 bytes) from `b` at `pos`.
-pub(crate) fn read_opt_principal(b: &[u8], pos: &mut usize) -> Option<Principal> {
-    if *pos >= b.len() {
-        return None;
-    }
-    if b[*pos] == 0 {
-        *pos += 1;
-        return None;
-    }
-    *pos += 1; // consume flag
-    let n = b.get(*pos).copied().unwrap_or(0) as usize;
-    *pos += 1;
-    let n = n.min(29).min(b.len().saturating_sub(*pos));
-    let p = Principal::from_slice(&b[*pos..*pos + n]);
-    *pos += n;
-    Some(p)
-}
-
-impl Storable for CurrencyMetaStorable {
-    fn to_bytes(&self) -> Cow<'_, [u8]> {
-        let mut v = Vec::with_capacity(CURRENCY_META_MAX);
-        push_opt_str(&mut v, &self.symbol, 16);
-        push_opt_u8(&mut v, self.decimals);
-        match self.minter_family {
-            Some(f) => {
-                v.push(1u8);
-                v.push(f as u8);
-            }
-            None => v.push(0u8),
-        }
-        push_opt_str(&mut v, &self.wrapper_name, 32);
-        push_opt_str(&mut v, &self.backing_symbol, 16);
-        push_opt_str(&mut v, &self.network, 32);
-        push_opt_u8(&mut v, self.display_decimals);
-        push_opt_u64(&mut v, self.fee);
-        push_opt_u64(&mut v, self.cap);
-        push_opt_u32(&mut v, self.chain_id);
-        push_opt_str(&mut v, &self.token_contract, 64);
-        match self.onramp {
-            Some(r) => {
-                v.push(1u8);
-                v.push(r as u8);
-            }
-            None => v.push(0u8),
-        }
-        match self.offramp {
-            Some(r) => {
-                v.push(1u8);
-                v.push(r as u8);
-            }
-            None => v.push(0u8),
-        }
-        push_opt_principal(&mut v, &self.gas_ledger);
-        Cow::Owned(v)
-    }
-    fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        let b = bytes.as_ref();
-        let mut pos = 0usize;
-        let symbol = read_opt_str(b, &mut pos, 16);
-        let decimals = read_opt_u8(b, &mut pos);
-        let minter_family = match read_opt_u8(b, &mut pos) {
-            Some(x) => MinterFamily::from_byte(x),
-            None => None,
-        };
-        let wrapper_name = read_opt_str(b, &mut pos, 32);
-        let backing_symbol = read_opt_str(b, &mut pos, 16);
-        let network = read_opt_str(b, &mut pos, 32);
-        let display_decimals = read_opt_u8(b, &mut pos);
-        let fee = read_opt_u64(b, &mut pos);
-        let cap = read_opt_u64(b, &mut pos);
-        let chain_id = read_opt_u32(b, &mut pos);
-        let token_contract = read_opt_str(b, &mut pos, 64);
-        let onramp = match read_opt_u8(b, &mut pos) {
-            Some(x) => RampCapability::from_byte(x),
-            None => None,
-        };
-        let offramp = match read_opt_u8(b, &mut pos) {
-            Some(x) => RampCapability::from_byte(x),
-            None => None,
-        };
-        let gas_ledger = read_opt_principal(b, &mut pos);
-        CurrencyMetaStorable {
-            symbol,
-            decimals,
-            minter_family,
-            wrapper_name,
-            backing_symbol,
-            network,
-            display_decimals,
-            fee,
-            cap,
-            chain_id,
-            token_contract,
-            onramp,
-            offramp,
-            gas_ledger,
-        }
-    }
-    const BOUND: Bound = Bound::Bounded {
-        max_size: CURRENCY_META_MAX as u32,
-        is_fixed_size: false,
-    };
-}
+/// The ONLY currencies the facade resolves besides DEMO (0): ckBTC (1), ckUSDC (2), ckETH (6).
+/// VCHF (7) / ICP (8) are app-signed direct-ICRC assets with NO facade support — they must NOT
+/// appear here (or anywhere in this canister).
+pub(crate) const FIXED_ASSETS: &[FixedAsset] = &[
+    FixedAsset {
+        currency: 1, // ckBTC
+        ledger: "mxzaz-hqaaa-aaaar-qaada-cai",
+        minter: "mqygn-kiaaa-aaaar-qaadq-cai",
+        family: MinterFamily::CkBtcUtxo,
+        token_contract: None,
+        gas_ledger: None,
+        cap: 100_000,
+    },
+    FixedAsset {
+        currency: 2, // ckUSDC (ckERC20; ckETH minter serves all ckERC20s)
+        ledger: "xevnm-gaaaa-aaaar-qafnq-cai",
+        minter: "sv3dd-oaaaa-aaaar-qacoa-cai",
+        family: MinterFamily::CkEthErc20,
+        token_contract: Some("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
+        gas_ledger: Some("ss2fx-dyaaa-aaaar-qacoq-cai"), // ckETH ledger = the gas source
+        cap: 100_000,
+    },
+    FixedAsset {
+        currency: 6, // ckETH (native)
+        ledger: "ss2fx-dyaaa-aaaar-qacoq-cai",
+        minter: "sv3dd-oaaaa-aaaar-qacoa-cai",
+        family: MinterFamily::CkEthErc20,
+        token_contract: None,
+        gas_ledger: None,
+        cap: 100_000,
+    },
+];
 
 // --- canister-signed receipt key + stored signed receipts -------------------------------------
 // The canister materializes ONE Ed25519 keypair (secret in stable memory, public exposed via
@@ -781,21 +406,16 @@ impl Storable for TxnRecord {
     const BOUND: Bound = Bound::Bounded { max_size: TXN_RECORD_LEN as u32, is_fixed_size: true };
 }
 
-/// Configuration for one currency, supplied at init (and via `register_ledger`).
-#[derive(CandidType, Deserialize)]
-pub(crate) struct LedgerConfig {
-    pub(crate) currency: Currency,
-    pub(crate) principal: Principal,
-    /// `true` for the demo currency whose ledger `minting_account.owner` is this canister (so
-    /// `mint`/`burn` are allowed). `false` for real ck currencies — dpay only moves funds.
-    pub(crate) mintable: bool,
-}
-
 #[derive(CandidType, Deserialize)]
 pub(crate) struct InitArg {
-    pub(crate) ledgers: Vec<LedgerConfig>,
+    /// The DEMO/DUSD (currency 0) ICRC ledger principal — the ONE environment-specific ledger
+    /// (fresh canister on PocketIC/local, `td2nx-…` on mainnet). The only ledger registered at
+    /// init; every other currency resolves via the compile-time `FIXED_ASSETS` table.
+    pub(crate) demo_ledger: Principal,
+    /// Per-tx cap (raw smallest units) for the DEMO currency; also the legacy `per_tx_cap` readout
+    /// the deploy script checks.
     pub(crate) per_tx_cap: u64,
-    /// Governance principal permitted to call `mint`/`burn`/`register_ledger`/`set_controller`.
+    /// Governance principal permitted to call `mint`/`burn`/`reconcile`/`set_controller`.
     /// `null` = open (the demo default). Production MUST set a governed controller.
     pub(crate) controller: Option<Principal>,
 }
@@ -1233,5 +853,66 @@ mod catalog_truth_tests {
             "wire_consts.mint_account must decode to exactly PUBKEY_LEN bytes"
         );
         assert_eq!(want.as_slice(), MINT_ACCOUNT);
+    }
+
+    /// The FIXED_ASSETS const table replaced the governed registry (2026-08-28). The principals the
+    /// relay's catalog also pins live in catalog_truth.json `principals`/`erc20_contracts` — a drift
+    /// in either direction goes RED here, exactly like the wire_consts alarms above. The ckBTC
+    /// LEDGER principal is not in catalog_truth.json (the relay catalog has no reason to pin it), so
+    /// it is asserted against the docs/CANISTERS.md value directly.
+    #[test]
+    fn fixed_assets_match_catalog_truth() {
+        let t: Value =
+            serde_json::from_str(CATALOG_TRUTH).expect("dfx/catalog_truth.json must be valid JSON");
+        let principals = t
+            .get("principals")
+            .expect("dfx/catalog_truth.json must define a principals object");
+        let principal_str = |key: &str| {
+            principals[key]
+                .as_str()
+                .unwrap_or_else(|| panic!("catalog_truth principals.{key} must be a string"))
+        };
+        let find = |c: Currency| {
+            FIXED_ASSETS
+                .iter()
+                .find(|a| a.currency == c)
+                .unwrap_or_else(|| panic!("FIXED_ASSETS must contain currency {c}"))
+        };
+
+        let ckbtc = find(1);
+        assert_eq!(ckbtc.ledger, "mxzaz-hqaaa-aaaar-qaada-cai"); // docs/CANISTERS.md
+        assert_eq!(ckbtc.minter, principal_str("ckbtc_minter"));
+        assert_eq!(ckbtc.token_contract, None);
+        assert_eq!(ckbtc.gas_ledger, None);
+
+        let ckusdc = find(2);
+        assert_eq!(ckusdc.ledger, principal_str("ckusdc_ledger"));
+        assert_eq!(ckusdc.minter, principal_str("cketh_minter")); // ckETH minter serves all ckERC20s
+        assert_eq!(ckusdc.gas_ledger, Some(principal_str("cketh_gas_ledger")));
+        assert_eq!(
+            ckusdc.token_contract,
+            Some(t["erc20_contracts"]["ckusdc"].as_str().expect("erc20_contracts.ckusdc"))
+        );
+
+        let cketh = find(6);
+        assert_eq!(cketh.ledger, principal_str("cketh_ledger"));
+        assert_eq!(cketh.minter, principal_str("cketh_minter"));
+        assert_eq!(cketh.token_contract, None);
+        assert_eq!(cketh.gas_ledger, None);
+
+        // VCHF (7) / ICP (8) are app-signed direct-ICRC assets — NO facade row, ever.
+        assert!(
+            FIXED_ASSETS.iter().all(|a| a.currency != 7 && a.currency != 8),
+            "VCHF/ICP must not appear in FIXED_ASSETS (no facade support)"
+        );
+
+        // A typo'd const principal would otherwise trap at first use — prove the table parses.
+        for a in FIXED_ASSETS {
+            Principal::from_text(a.ledger).expect("FIXED_ASSETS ledger principal must parse");
+            Principal::from_text(a.minter).expect("FIXED_ASSETS minter principal must parse");
+            if let Some(g) = a.gas_ledger {
+                Principal::from_text(g).expect("FIXED_ASSETS gas_ledger principal must parse");
+            }
+        }
     }
 }

@@ -82,15 +82,10 @@ enum LedgerArg {
 }
 
 #[derive(CandidType, serde::Serialize)]
-struct LedgerConfig {
-    currency: Currency,
-    principal: Principal,
-    mintable: bool,
-}
-
-#[derive(CandidType, serde::Serialize)]
 struct DpayInitArg {
-    ledgers: Vec<LedgerConfig>,
+    /// The ONE environment-specific ledger (currency 0). In this file it is a canister-less
+    /// principal for most tests — the fail-closed test uses it as DEMO's ledger stand-in.
+    demo_ledger: Principal,
     per_tx_cap: u64,
     controller: Option<Principal>,
 }
@@ -167,8 +162,27 @@ fn mock_minter_wasm() -> Vec<u8> {
         .unwrap_or_else(|e| panic!("cannot read mock-minter wasm at {}: {e}", path.display()))
 }
 
+/// The facade FIXED_ASSETS ckBTC ledger + minter principals — post-registry (2026-08-28) currency 1
+/// resolves from the compile-time table, so this file's stand-ins must live at EXACTLY those ids.
+const CKBTC_LEDGER: &str = "mxzaz-hqaaa-aaaar-qaada-cai";
+const CKBTC_MINTER: &str = "mqygn-kiaaa-aaaar-qaadq-cai";
+
 fn install_ledger(pic: &PocketIc, minting_account: Account) -> Principal {
     let ledger = pic.create_canister();
+    install_ledger_code(pic, ledger, minting_account);
+    ledger
+}
+
+/// [`install_ledger`] at an EXACT principal (the FIXED_ASSETS ckBTC ledger id).
+fn install_ledger_at(pic: &PocketIc, ledger: Principal, minting_account: Account) {
+    pic.create_canister_with_id(Some(Principal::anonymous()), None, ledger)
+        .unwrap_or_else(|e| panic!("create_canister_with_id({ledger}): {e}"));
+    install_ledger_code(pic, ledger, minting_account);
+}
+
+/// Cycles + code install at an ALREADY-CREATED canister id (shared by the two entry points above —
+/// `create_canister_with_id` must never be handed a PocketIC-allocated id).
+fn install_ledger_code(pic: &PocketIc, ledger: Principal, minting_account: Account) {
     pic.add_cycles(ledger, 10_000_000_000_000);
     // icrc2 MUST be enabled: the withdrawal path uses `icrc2_approve` (facade) + `icrc2_transfer_from`
     // (mock minter consuming the allowance). The real ckBTC ledger has icrc2 on; mirror it.
@@ -196,7 +210,6 @@ fn install_ledger(pic: &PocketIc, minting_account: Account) -> Principal {
         index_principal: None,
     });
     pic.install_canister(ledger, ledger_wasm(), encode_one(&init).unwrap(), None);
-    ledger
 }
 
 fn ledger_balance(pic: &PocketIc, ledger: Principal, dpay: Principal, pk: [u8; 32]) -> u64 {
@@ -277,8 +290,10 @@ fn refresh_deposit(pic: &PocketIc, dpay: Principal, pk: [u8; 32]) -> Result<Depo
     decode_one::<Result<DepositRefresh, String>>(&reply).unwrap()
 }
 
-/// Install the facade + a ckBTC ledger (minting account owned by the mock) + the mock minter, and
-/// register the minter for ckBTC. Returns the handles a withdraw test needs.
+/// Install the facade + a ckBTC ledger + the mock minter, all wired through the FIXED_ASSETS const
+/// ids (post-registry there is no registration: currency 1 resolves ledger/minter/family from the
+/// compile-time table, so the stand-ins sit at the exact mainnet principals). Returns the handles a
+/// withdraw test needs.
 fn setup() -> (PocketIc, Principal, Principal, Principal, SigningKey, [u8; 32]) {
     let pic = PocketIc::new();
     pic.set_time(Time::from_nanos_since_unix_epoch(T0_NANOS));
@@ -288,11 +303,16 @@ fn setup() -> (PocketIc, Principal, Principal, Principal, SigningKey, [u8; 32]) 
 
     let dpay = pic.create_canister();
     pic.add_cycles(dpay, 2_000_000_000_000);
-    let mock = pic.create_canister();
+
+    let ckbtc = Principal::from_text(CKBTC_LEDGER).unwrap();
+    let mock = Principal::from_text(CKBTC_MINTER).unwrap();
+    // Reserve ONLY the mock here — `install_ledger_at` below does its own exact-id creation for the
+    // ledger (a second `create_canister_with_id` on an already-created id is rejected).
+    pic.create_canister_with_id(Some(Principal::anonymous()), None, mock)
+        .unwrap_or_else(|e| panic!("reserve {mock}: {e}"));
     pic.add_cycles(mock, 2_000_000_000_000);
 
-    let ckbtc = install_ledger(&pic, Account { owner: mock, subaccount: None });
-
+    install_ledger_at(&pic, ckbtc, Account { owner: mock, subaccount: None });
     pic.install_canister(
         mock,
         mock_minter_wasm(),
@@ -300,21 +320,12 @@ fn setup() -> (PocketIc, Principal, Principal, Principal, SigningKey, [u8; 32]) 
         None,
     );
 
-    // Seed a controller at init so `register_minter` (controller-only since R1) succeeds.
-    let admin = Principal::management_canister();
     let dpay_init = DpayInitArg {
-        ledgers: vec![LedgerConfig { currency: CKBTC, principal: ckbtc, mintable: false }],
+        demo_ledger: Principal::anonymous(),
         per_tx_cap: CAP,
-        controller: Some(admin),
+        controller: None,
     };
     pic.install_canister(dpay, dpay_wasm(), encode_one(&dpay_init).unwrap(), None);
-
-    let reply = pic
-        .update_call(dpay, admin, "register_minter", encode_args((CKBTC, mock)).unwrap())
-        .expect("register_minter update_call rejected");
-    decode_one::<Result<(), String>>(&reply)
-        .unwrap()
-        .expect("register_minter should succeed for the controller");
 
     (pic, ckbtc, dpay, mock, payer_sk, payer)
 }
@@ -566,10 +577,10 @@ fn mock_minter_retrieve_btc_with_approval_mirrors_real_minter_contract() {
     println!("[withdraw] ✓ mock minter's retrieve_btc_with_approval mirrors the real minter's error variants");
 }
 
-/// A currency with NEITHER minter NOR family meta MUST fail closed at the family dispatch gate —
-/// never silently default to the BTC retrieve path. DEMO play money (minter=null, family=null) is
-/// the production instance of this: an accidental withdraw attempt must reject before any cross-
-/// canister call.
+/// A currency with NO FIXED_ASSETS row (no minter, no family) MUST fail closed at the family
+/// dispatch gate — never silently default to the BTC retrieve path. DEMO play money (currency 0,
+/// the init `demo_ledger` row, no minter) is the production instance of this: an accidental
+/// withdraw attempt must reject before any cross-canister call.
 #[test]
 fn withdraw_failclosed_no_minter_no_family() {
     let pic = PocketIc::new();
@@ -580,13 +591,13 @@ fn withdraw_failclosed_no_minter_no_family() {
 
     let dpay = pic.create_canister();
     pic.add_cycles(dpay, 2_000_000_000_000);
-    // Install a ledger for CKBTC but register NO minter and NO family meta.
-    let ckbtc = install_ledger(&pic, Account { owner: dpay, subaccount: None });
-    let admin = Principal::management_canister();
+    // A DEMO ledger (currency 0) via the init arg; DEMO has NO minter and NO family — post-registry
+    // the no-row state is only reachable for currency 0 / unknown ids.
+    let demo_ledger = install_ledger(&pic, Account { owner: dpay, subaccount: None });
     let dpay_init = DpayInitArg {
-        ledgers: vec![LedgerConfig { currency: CKBTC, principal: ckbtc, mintable: false }],
+        demo_ledger,
         per_tx_cap: CAP,
-        controller: Some(admin),
+        controller: None,
     };
     pic.install_canister(dpay, dpay_wasm(), encode_one(&dpay_init).unwrap(), None);
 
@@ -598,7 +609,7 @@ fn withdraw_failclosed_no_minter_no_family() {
         50_000,
         nonce,
         T0_SECS + 3600,
-        CKBTC,
+        0, // DEMO_USD — no FIXED_ASSETS row, no minter
     );
     let result = withdraw(&pic, dpay, req);
     assert!(

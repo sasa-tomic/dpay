@@ -27,53 +27,48 @@ use dpay_core::{Currency, WithdrawAuth, MEMO_LEN, NAME_LEN, NONCE_LEN, SIG_LEN};
 use crate::calls::*;
 use crate::types::*;
 use crate::{
-    ledger_for, minter_for, record_txn, release_withdraw_nonce, reserve_withdraw_nonce,
-    settle_withdraw_nonce, write_cache,
+    fixed_asset, ledger_for, minter_for, record_txn, release_withdraw_nonce,
+    reserve_withdraw_nonce, settle_withdraw_nonce, write_cache,
 };
 
 // --- family-gate helpers (M6) ------------------------------------------------------------------
 // The deposit/withdraw proxy methods all share the same family-gate preamble: resolve the currency's
-// minter family (defaulting a minter-only registration to CkBtcUtxo for legacy backward compat, and
-// failing closed when NEITHER a minter NOR a family is registered). These three helpers are used by
-// EXACTLY the four entry points below and nothing else in the crate, so they live here next to their
-// callers (M7 seam).
+// minter family from the compile-time `FIXED_ASSETS` table (failing closed when the currency has no
+// row — the DEMO currency and any unknown id). These three helpers are used by EXACTLY the four
+// entry points below and nothing else in the crate, so they live here next to their callers (M7
+// seam). Registry-era note: before the 2026-08-28 registry removal these read `CURRENCY_META`; the
+// family now always travels WITH the minter in the same const row, so the minter-without-family
+// legacy default is structurally unreachable.
 
-/// The minter family registered for a currency (M0 ramp-dispatch key). Read from `CURRENCY_META`.
-/// `withdraw` reads this to dispatch to the family-specific minter method: `CkBtcUtxo` →
-/// `retrieve_btc_with_approval`; `CkEthErc20` + `token_contract = None` → `withdraw_eth` (native ETH);
-/// `CkEthErc20` + `token_contract = Some` → fail-closed (ckERC20 needs a separate ckETH-for-fees
-/// path). `None` (no family meta registered) defaults to `CkBtcUtxo` at the single call site in
-/// `withdraw` ONLY when a minter IS registered (legacy backward compat for pre-family-dispatch ckBTC
-/// deployments); when NEITHER minter NOR family is registered the call site fails closed.
+/// The minter family of a FIXED currency (M0 ramp-dispatch key). `withdraw` reads this to dispatch
+/// to the family-specific minter method: `CkBtcUtxo` → `retrieve_btc_with_approval`;
+/// `CkEthErc20` + `token_contract = None` → `withdraw_eth` (native ETH); `CkEthErc20` +
+/// `token_contract = Some` → the dual-ledger `withdraw_erc20` path. `None` for the DEMO currency
+/// and any id without a row (fail-closed at the call site).
 fn currency_family(currency: Currency) -> Option<MinterFamily> {
-    crate::CURRENCY_META.with(|m| m.borrow().get(&currency).and_then(|meta| meta.minter_family))
+    fixed_asset(currency).map(|a| a.family)
 }
 
-/// Resolve a currency's minter family with the shared family-gate semantics. A currency with a
-/// registered minter but no family meta defaults to `CkBtcUtxo` (legacy backward compat for
-/// pre-family-dispatch ckBTC deployments); a currency with NEITHER minter NOR family fails closed
-/// with `"currency {currency} has no minter family and no minter — {action}"`. `action` is the
-/// caller-supplied tail of that error (e.g. "cannot resolve deposit_address", "cannot withdraw") so
-/// the byte-identical per-call-site strings survive the dedup. Used by the deposit proxies and
-/// `withdraw` so the family-gate preamble lives in exactly one place.
+/// Resolve a currency's minter family with the shared family-gate semantics. A currency without a
+/// `FIXED_ASSETS` row (the DEMO currency, or an unknown id) fails closed with
+/// `"currency {currency} has no minter family and no minter — {action}"` — the registry-era string,
+/// byte-identical. `action` is the caller-supplied tail of that error (e.g. "cannot resolve
+/// deposit_address", "cannot withdraw") so the byte-identical per-call-site strings survive the
+/// dedup. Used by the deposit proxies and `withdraw` so the family-gate preamble lives in exactly
+/// one place.
 fn resolve_minter_family(currency: Currency, action: &str) -> Result<MinterFamily, String> {
-    let has_minter = minter_for(currency).is_ok();
-    match currency_family(currency) {
-        Some(f) => Ok(f),
-        None if has_minter => Ok(MinterFamily::CkBtcUtxo),
-        None => Err(format!(
-            "currency {currency} has no minter family and no minter — {action}"
-        )),
-    }
+    currency_family(currency).ok_or_else(|| {
+        format!("currency {currency} has no minter family and no minter — {action}")
+    })
 }
 
-/// The ckETH gas-ledger principal registered for a ckERC20 currency (the dual-ledger `withdraw_erc20`
-/// path burns ckETH gas fees from this ledger). Read from `CURRENCY_META`. `None` for non-ckERC20
-/// families (BTC / native ETH / DEMO) and for a ckERC20 currency whose gas ledger is unregistered —
-/// the facade fail-closes a ckERC20 withdraw with no gas ledger (cannot fall through to the native-
-/// ETH `withdraw_eth` path, which would mis-burn the amount as ckETH).
+/// The ckETH gas-ledger principal of a FIXED ckERC20 currency (the dual-ledger `withdraw_erc20`
+/// path burns ckETH gas fees from this ledger). `None` for non-ckERC20 rows (BTC / native ETH) and
+/// for the DEMO currency. With the const table, a ckERC20 row without a gas ledger is a table-edit
+/// bug, not a runtime state — the `withdraw` call site still fail-closes on `None` so a bad future
+/// edit cannot mis-burn the amount as ckETH via the native-ETH path.
 fn currency_gas_ledger(currency: Currency) -> Option<Principal> {
-    crate::CURRENCY_META.with(|m| m.borrow().get(&currency).and_then(|meta| meta.gas_ledger))
+    fixed_asset(currency).and_then(|a| a.gas_ledger)
 }
 
 // --- ck-minter deposit proxy (ckBTC model) ----------------------------------------------------
@@ -89,8 +84,7 @@ async fn deposit_address(pubkey: Vec<u8>, currency: Currency) -> Result<String, 
     // minters. A CkEthErc20 minter has NO `get_btc_address` method (ckETH/ckUSDC deposits use the
     // helper-contract onramp / ckerc20 endpoint, not an IC mint trigger), so calling it would trap
     // at the minter (prod: IC0536 "Canister has no update method 'get_btc_address'"). A currency
-    // with a registered minter but no family meta defaults to CkBtcUtxo (legacy backward compat);
-    // one with NEITHER minter NOR family fails closed here. Mirrors the family dispatch in `withdraw`.
+    // without a FIXED_ASSETS row fails closed here. Mirrors the family dispatch in `withdraw`.
     let family = resolve_minter_family(currency, "cannot resolve deposit_address")?;
     if family != MinterFamily::CkBtcUtxo {
         return Err(format!(
@@ -123,9 +117,8 @@ async fn refresh_deposit(pubkey: Vec<u8>, currency: Currency) -> Result<DepositR
     // FAMILY GATE: the BTC deposit proxy (`update_balance`) is a UTXO-confirmation model that only
     // applies to CkBtcUtxo-family minters. A CkEthErc20 minter has NO `update_balance` method
     // (ckETH/ckUSDC deposits are EVM-log-sourced by the minter's heartbeat, not pulled by the
-    // facade), so calling it would trap at the minter. A currency with a registered minter but no
-    // family meta defaults to CkBtcUtxo (legacy backward compat); one with NEITHER minter NOR family
-    // fails closed here. Mirrors the family dispatch in `withdraw`.
+    // facade), so calling it would trap at the minter. A currency without a FIXED_ASSETS row fails
+    // closed here. Mirrors the family dispatch in `withdraw`.
     let family = resolve_minter_family(currency, "cannot resolve refresh_deposit")?;
     if family != MinterFamily::CkBtcUtxo {
         return Err(format!(
@@ -213,9 +206,8 @@ async fn deposit_info(currency: Currency) -> Result<DepositInfo, String> {
     // FAMILY GATE: `get_minter_info` + `get_deposit_fee` decode against the BTC minter's `MinterInfo`
     // struct (min_confirmations / deposit_btc_min_amount). A CkEthErc20 minter returns a DIFFERENT
     // `MinterInfo` shape, so decoding would fail (prod: CandidDecodeFailed). ckETH/ckUSDC deposits
-    // use the helper-contract onramp / ckerc20 endpoint, not this BTC-shaped info. A currency with a
-    // registered minter but no family meta defaults to CkBtcUtxo (legacy backward compat); one with
-    // NEITHER minter NOR family fails closed here. Mirrors the family dispatch in `withdraw`.
+    // use the helper-contract onramp / ckerc20 endpoint, not this BTC-shaped info. A currency
+    // without a FIXED_ASSETS row fails closed here. Mirrors the family dispatch in `withdraw`.
     let family = resolve_minter_family(currency, "cannot resolve deposit_info")?;
     if family != MinterFamily::CkBtcUtxo {
         return Err(format!(
@@ -242,15 +234,14 @@ async fn deposit_info(currency: Currency) -> Result<DepositInfo, String> {
 // user's address. Non-custodial: the facade moves nothing without a verified Ed25519 signature over
 // the canonical [`WithdrawAuth`] bytes (single source of truth in `dpay-core`).
 //
-// FAMILY DISPATCH (M0): the currency's registered `minter_family` selects the minter method:
+// FAMILY DISPATCH (M0): the currency's FIXED_ASSETS `family` selects the minter method:
 //   - CkBtcUtxo → `retrieve_btc_with_approval` (approve EXACTLY `amount`; minter burns it single-use).
 //   - CkEthErc20 + token_contract None → `withdraw_eth` (approve `amount + max_transaction_fee`; the
 //     minter burns `amount` immediately and the gas fee in a SEPARATE later transfer_from — ICRC-2
 //     allowance is a running balance, so one approve covers both).
-//   - CkEthErc20 + token_contract Some → fail-closed (ckERC20 withdraw needs a separate
-//     ckETH-for-fees path; a USDC withdraw must NOT hit native-eth withdraw_eth).
-// A currency with a minter but no family meta defaults to CkBtcUtxo (legacy backward compat); one
-// with NEITHER minter NOR family fails closed (no withdraw ramp — e.g. DEMO play money).
+//   - CkEthErc20 + token_contract Some → dual-ledger `withdraw_erc20` (ckETH-for-fees; a USDC
+//     withdraw must NOT hit native-eth withdraw_eth).
+// A currency without a row (DEMO play money, unknown id) fails closed (no withdraw ramp).
 //
 // FRONT-RUNNING NOTE (documented residual risk, same as every retrieve_btc_with_approval /
 // withdraw_eth caller): the approve + retrieve/withdraw are two cross-canister calls with an `await`
@@ -316,14 +307,13 @@ async fn withdraw(req: WithdrawRequest) -> Result<WithdrawReceipt, String> {
     }
 
     // 3b. FAMILY DISPATCH: read the currency's minter family (+ token_contract / gas_ledger for
-    //     ckERC20) and apply family-specific cheap rejects BEFORE reserving the nonce. A currency
-    //     with a registered minter but no family meta defaults to CkBtcUtxo (legacy backward compat —
-    //     the pre-family-dispatch ckBTC path). A currency with NEITHER minter NOR family (e.g. DEMO
-    //     play money, offramp=Unavailable) has no withdraw ramp and MUST fail closed here — never
-    //     silently route an unconfigured currency to the BTC retrieve path. ckERC20 (CkEthErc20 +
-    //     token_contract Some) REQUIRES a registered ckETH gas ledger — without one the dual-ledger
-    //     `withdraw_erc20` path cannot run, and the facade MUST fail closed rather than fall through
-    //     to the native-ETH `withdraw_eth` (which would mis-burn the amount as ckETH).
+    //     ckERC20) from the FIXED_ASSETS const table and apply family-specific cheap rejects BEFORE
+    //     reserving the nonce. A currency without a row (e.g. DEMO play money) has no withdraw ramp
+    //     and MUST fail closed here — never silently route an unconfigured currency to the BTC
+    //     retrieve path. ckERC20 (CkEthErc20 + token_contract Some) REQUIRES the const row's ckETH
+    //     gas ledger — without one the dual-ledger `withdraw_erc20` path cannot run, and the facade
+    //     MUST fail closed rather than fall through to the native-ETH `withdraw_eth` (which would
+    //     mis-burn the amount as ckETH).
     enum WithdrawPath {
         Btc,
         NativeEth,
@@ -340,14 +330,13 @@ async fn withdraw(req: WithdrawRequest) -> Result<WithdrawReceipt, String> {
             WithdrawPath::Btc
         }
         MinterFamily::CkEthErc20 => {
-            let token_contract = crate::CURRENCY_META.with(|m| {
-                m.borrow().get(&req.currency).and_then(|meta| meta.token_contract.clone())
-            });
+            let token_contract =
+                fixed_asset(req.currency).and_then(|a| a.token_contract);
             if token_contract.is_some() {
-                // ckERC20 (e.g. ckUSDC): dual-ledger `withdraw_erc20` path. Requires a registered
-                // ckETH gas ledger (burned for Ethereum gas). No gas ledger → fail closed (the user
-                // must register one before this currency is withdrawable); cannot fall through to the
-                // native-ETH `withdraw_eth`.
+                // ckERC20 (e.g. ckUSDC): dual-ledger `withdraw_erc20` path. Requires the ckETH gas
+                // ledger (burned for Ethereum gas). No gas ledger → fail closed (unreachable with
+                // today's table — every token_contract row carries one — but a future table edit
+                // must not be able to fall through to the native-ETH `withdraw_eth`).
                 let gas_ledger = currency_gas_ledger(req.currency).ok_or_else(|| {
                     "withdraw_erc20 requires a ckETH gas ledger registered for this currency".to_string()
                 })?;

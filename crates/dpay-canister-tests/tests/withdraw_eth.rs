@@ -3,9 +3,9 @@
 //! NOT to the ckBTC minter's `retrieve_btc_with_approval` (offline, deterministic, seconds).
 //!
 //! This is the headline native-asset OUT feature: getting native ETH out of the wallet. The facade
-//! reads the currency's `minter_family` (CkEthErc20) + `token_contract` (None) from `CURRENCY_META`
-//! and routes to `withdraw_eth`; the BTC floor (retrieve_btc_min_amount = 50_000 sats) does NOT apply
-//! to ETH (the ckETH minter enforces its own Wei minimum).
+//! reads the currency's `minter_family` (CkEthErc20) + `token_contract` (None) from the compile-time
+//! FIXED_ASSETS table and routes to `withdraw_eth`; the BTC floor (retrieve_btc_min_amount = 50_000
+//! sats) does NOT apply to ETH (the ckETH minter enforces its own Wei minimum).
 //!
 //! Builds three wasms (see `just test-canister`):
 //!   DPAY_CANISTER_WASM      = dpay-canister       (the facade: family-dispatches withdraw)
@@ -28,8 +28,14 @@ const T0_SECS: u64 = 1_800_000_000;
 const T0_NANOS: u64 = T0_SECS * 1_000_000_000;
 const CAP: u64 = 100_000;
 
-/// The ckETH test currency id (DEMO=0, ckBTC=1, ckUSDC=2; 5 is a fresh id for this proof).
-const CKETH: Currency = 5;
+/// The ckETH test currency id — currency 6 is the REAL ckETH row in the facade's FIXED_ASSETS table
+/// (CkEthErc20 family, token_contract None → native-ETH dispatch, ledger ss2fx…, minter sv3dd…).
+const CKETH: Currency = 6;
+
+/// The facade FIXED_ASSETS ckETH ledger + minter principals — post-registry (2026-08-28) currency 6
+/// resolves from the compile-time table, so this file's stand-ins must live at EXACTLY those ids.
+const CKETH_LEDGER: &str = "ss2fx-dyaaa-aaaar-qacoq-cai";
+const CKETH_MINTER: &str = "sv3dd-oaaaa-aaaar-qacoa-cai";
 
 /// 1 ETH in Wei (18 decimals). A comfortable test fund well above every floor.
 const ONE_ETH: u64 = 1_000_000_000_000_000_000;
@@ -83,15 +89,9 @@ enum LedgerArg {
 }
 
 #[derive(CandidType, serde::Serialize)]
-struct LedgerConfig {
-    currency: Currency,
-    principal: Principal,
-    mintable: bool,
-}
-
-#[derive(CandidType, serde::Serialize)]
 struct DpayInitArg {
-    ledgers: Vec<LedgerConfig>,
+    /// Satisfies the required init arg; currency 0 is never exercised in this file.
+    demo_ledger: Principal,
     per_tx_cap: u64,
     controller: Option<Principal>,
 }
@@ -121,24 +121,6 @@ struct WithdrawReceipt {
     nonce: Vec<u8>,
     currency: Currency,
     block_index: u64,
-}
-
-/// Local mirror of the canister's `MinterFamily` (candid wire type) for `register_currency_meta`.
-#[allow(dead_code)] // mirror type; only some variants are constructed in this file
-#[derive(CandidType, serde::Serialize)]
-enum MinterFamily {
-    CkBtcUtxo,
-    CkEthErc20,
-    CkSol,
-}
-
-/// Local mirror of the canister's `RampCapability` (candid wire type).
-#[allow(dead_code)] // mirror type; only some variants are constructed in this file
-#[derive(CandidType, serde::Serialize)]
-enum RampCapability {
-    Direct,
-    Partner,
-    Unavailable,
 }
 
 /// A minimal `icrc1_transfer` argument shape for a direct credit (mint from the minting account).
@@ -194,6 +176,20 @@ fn mock_minter_wasm() -> Vec<u8> {
 /// `icrc2_transfer_from`). The mock owns the minting account.
 fn install_ledger(pic: &PocketIc, minting_account: Account) -> Principal {
     let ledger = pic.create_canister();
+    install_ledger_code(pic, ledger, minting_account);
+    ledger
+}
+
+/// [`install_ledger`] at an EXACT principal (the FIXED_ASSETS ckETH ledger id).
+fn install_ledger_at(pic: &PocketIc, ledger: Principal, minting_account: Account) {
+    pic.create_canister_with_id(Some(Principal::anonymous()), None, ledger)
+        .unwrap_or_else(|e| panic!("create_canister_with_id({ledger}): {e}"));
+    install_ledger_code(pic, ledger, minting_account);
+}
+
+/// Cycles + code install at an ALREADY-CREATED canister id (shared by the two entry points above —
+/// `create_canister_with_id` must never be handed a PocketIC-allocated id).
+fn install_ledger_code(pic: &PocketIc, ledger: Principal, minting_account: Account) {
     pic.add_cycles(ledger, 10_000_000_000_000);
     let init = LedgerArg::Init(LedgerInitArgs {
         minting_account,
@@ -219,7 +215,6 @@ fn install_ledger(pic: &PocketIc, minting_account: Account) -> Principal {
         index_principal: None,
     });
     pic.install_canister(ledger, ledger_wasm(), encode_one(&init).unwrap(), None);
-    ledger
 }
 
 fn ledger_balance(pic: &PocketIc, ledger: Principal, dpay: Principal, pk: [u8; 32]) -> u64 {
@@ -310,43 +305,10 @@ fn direct_credit(
         .expect("direct credit transfer should succeed (minting account debited)");
 }
 
-/// Register currency metadata for CKETH: `minter_family = CkEthErc20`, `token_contract = None`
-/// (native ETH — the dispatch key that routes `withdraw` to `withdraw_eth`). Called as the seeded
-/// controller (the management-canister principal).
-fn register_currency_meta_eth(pic: &PocketIc, dpay: Principal, caller: Principal, currency: Currency) {
-    let reply = pic
-        .update_call(
-            dpay,
-            caller,
-            "register_currency_meta",
-            encode_args((
-                currency,
-                None::<String>,                      // symbol
-                None::<u8>,                          // decimals
-                Some(MinterFamily::CkEthErc20),      // minter_family — THE dispatch key
-                None::<String>,                      // wrapper_name
-                None::<String>,                      // backing_symbol
-                None::<String>,                      // network
-                None::<u8>,                          // display_decimals
-                None::<u64>,                         // fee
-                None::<u64>,                         // cap (withdraw does not consult cap)
-                None::<u32>,                         // chain_id
-                None::<String>,                      // token_contract = None → native ETH
-                RampCapability::Unavailable,         // onramp
-                RampCapability::Direct,              // offramp (cash-out is the direct ckETH→ETH path)
-                None::<Principal>,                   // gas_ledger (native ETH has no separate gas ledger)
-            ))
-            .unwrap(),
-        )
-        .expect("register_currency_meta update_call rejected");
-    decode_one::<Result<(), String>>(&reply)
-        .unwrap()
-        .expect("register_currency_meta should succeed for the controller");
-}
-
-/// Install the facade + a ckETH ledger (minting account owned by the mock) + the mock minter, and
-/// register the mock as CKETH's minter + the CkEthErc20/no-token-contract family meta. Returns the
-/// handles a withdraw_eth test needs.
+/// Install the facade + a ckETH ledger + the mock minter, all wired through the FIXED_ASSETS const
+/// ids (post-registry there is no registration: currency 6 resolves ledger/minter/family/
+/// token_contract from the compile-time table, so the stand-ins sit at the exact mainnet
+/// principals). Returns the handles a withdraw_eth test needs.
 fn setup_eth() -> (PocketIc, Principal, Principal, Principal, SigningKey, [u8; 32]) {
     let pic = PocketIc::new();
     pic.set_time(Time::from_nanos_since_unix_epoch(T0_NANOS));
@@ -356,11 +318,16 @@ fn setup_eth() -> (PocketIc, Principal, Principal, Principal, SigningKey, [u8; 3
 
     let dpay = pic.create_canister();
     pic.add_cycles(dpay, 2_000_000_000_000);
-    let mock = pic.create_canister();
+
+    let cketh = Principal::from_text(CKETH_LEDGER).unwrap();
+    let mock = Principal::from_text(CKETH_MINTER).unwrap();
+    // Reserve ONLY the mock here — `install_ledger_at` below does its own exact-id creation for the
+    // ledger (a second `create_canister_with_id` on an already-created id is rejected).
+    pic.create_canister_with_id(Some(Principal::anonymous()), None, mock)
+        .unwrap_or_else(|e| panic!("reserve {mock}: {e}"));
     pic.add_cycles(mock, 2_000_000_000_000);
 
-    let cketh = install_ledger(&pic, Account { owner: mock, subaccount: None });
-
+    install_ledger_at(&pic, cketh, Account { owner: mock, subaccount: None });
     pic.install_canister(
         mock,
         mock_minter_wasm(),
@@ -368,24 +335,12 @@ fn setup_eth() -> (PocketIc, Principal, Principal, Principal, SigningKey, [u8; 3
         None,
     );
 
-    // Seed a controller at init so `register_minter` + `register_currency_meta` (controller-only
-    // since R1) succeed. The stable management-canister principal stands in for the governed operator.
-    let admin = Principal::management_canister();
     let dpay_init = DpayInitArg {
-        ledgers: vec![LedgerConfig { currency: CKETH, principal: cketh, mintable: false }],
+        demo_ledger: Principal::anonymous(),
         per_tx_cap: CAP,
-        controller: Some(admin),
+        controller: None,
     };
     pic.install_canister(dpay, dpay_wasm(), encode_one(&dpay_init).unwrap(), None);
-
-    let reply = pic
-        .update_call(dpay, admin, "register_minter", encode_args((CKETH, mock)).unwrap())
-        .expect("register_minter update_call rejected");
-    decode_one::<Result<(), String>>(&reply)
-        .unwrap()
-        .expect("register_minter should succeed for the controller");
-
-    register_currency_meta_eth(&pic, dpay, admin, CKETH);
 
     (pic, cketh, dpay, mock, payer_sk, payer)
 }

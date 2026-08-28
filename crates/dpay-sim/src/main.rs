@@ -32,7 +32,7 @@ fn red(s: &str) -> String { format!("\x1b[31m{s}\x1b[0m") }
 fn usd(cents: u64) -> String { format!("${}.{:02}", cents / 100, cents % 100) }
 fn rule() { println!("  {}", dim("────────────────────────────────────────────────")); }
 
-/// The governed controller used to gate the privileged `mint`/`register_currency_meta` calls. The
+/// The governed controller used to gate the privileged `mint`/`burn`/`reconcile` calls. The
 /// management-canister principal is a fixed, non-anonymous principal always available offline — the
 /// same stand-in the canister test suite uses (`icrc_settle.rs::pic_admin`).
 fn pic_admin() -> Principal { Principal::management_canister() }
@@ -84,24 +84,14 @@ struct LedgerInitArgs {
 #[derive(CandidType, serde::Serialize)]
 enum LedgerArg { Init(LedgerInitArgs) }
 
-// Local mirrors of the canister's candid-only enums (not exported from dpay-core). The `None`/
-// `Unavailable` variants are all the cap-only registration needs. Mirrors `icrc_settle.rs`.
-#[allow(dead_code)] // variants exist only so the candid enum type matches the canister's wire type
-#[derive(CandidType, serde::Serialize)]
-enum MinterFamily { CkBtcUtxo, CkEthErc20, CkSol }
-
-#[allow(dead_code)] // only `Unavailable` is constructed; the others exist for wire-type fidelity
-#[derive(CandidType, serde::Serialize)]
-enum RampCapability { Direct, Partner, Unavailable }
-
 // --- facade init payload -----------------------------------------------------------------------
 
 #[derive(CandidType, serde::Serialize)]
-struct LedgerConfig { currency: dpay_core::Currency, principal: Principal, mintable: bool }
-
-#[derive(CandidType, serde::Serialize)]
 struct DpayInitArg {
-    ledgers: Vec<LedgerConfig>,
+    /// The ONE environment-specific ledger: DEMO currency 0's DUSD ledger. Every other currency
+    /// the facade serves resolves from its compile-time FIXED_ASSETS table (registry removed,
+    /// founder decision 2026-08-28).
+    demo_ledger: Principal,
     per_tx_cap: u64,
     controller: Option<Principal>,
 }
@@ -173,48 +163,22 @@ fn install_ledger(
     ledger
 }
 
-/// Register currency metadata with ONLY a per-tx `cap`. MC2 U1 made `pay` fail-closed on a cap-less
-/// currency, so the demo's DEMO_USD pays need a registered cap to settle. Called as the seeded
-/// controller. Mirrors `icrc_settle.rs::register_currency_meta_cap`.
-fn register_currency_meta_cap(pic: &PocketIc, dpay: Principal, currency: dpay_core::Currency, cap: u64) {
-    let reply = pic
-        .update_call(
-            dpay,
-            pic_admin(),
-            "register_currency_meta",
-            encode_args((
-                currency,
-                None::<String>,              // symbol
-                None::<u8>,                  // decimals
-                None::<MinterFamily>,        // minter_family
-                None::<String>,              // wrapper_name
-                None::<String>,              // backing_symbol
-                None::<String>,              // network
-                None::<u8>,                  // display_decimals
-                None::<u64>,                 // fee
-                Some(cap),                   // cap
-                None::<u32>,                 // chain_id
-                None::<String>,              // token_contract
-                RampCapability::Unavailable, // onramp
-                RampCapability::Unavailable, // offramp
-                None::<Principal>,           // gas_ledger
-            ))
-            .unwrap(),
-        )
-        .expect("register_currency_meta update_call rejected");
-    decode_one::<Result<(), String>>(&reply)
-        .unwrap()
-        .expect("register_currency_meta should succeed for the controller");
-}
-
 /// Fund a user on a MINTABLE currency through the facade (transfers from the ledger's minting
 /// account, which the facade owns). Controller-only; called as the seeded controller. Mirrors
 /// `icrc_settle.rs::mint`.
-fn mint(pic: &PocketIc, dpay: Principal, to: [u8; 32], currency: dpay_core::Currency, amount: u64) {
+/// Fund a pubkey through the facade `faucet` — the self-service on-ramp that credits the
+/// facade-custody subaccount `pay` debits, in the fixed `FAUCET_AMOUNT` ($100.00 == `INIT_A`).
+///
+/// NOT the controller-gated `mint`: since the 2026-08-20 faucet re-target, `mint` credits the
+/// USER principal (`user_account_of`), which the custody-debiting `pay` path cannot see — funding
+/// via `mint` left the demo unable to settle (pre-existing at the 2026-08-28 registry removal;
+/// the faucet is the intended custody-credit path).
+fn faucet(pic: &PocketIc, dpay: Principal, to: [u8; 32], currency: dpay_core::Currency) {
     let reply = pic
-        .update_call(dpay, pic_admin(), "mint", encode_args((to.to_vec(), currency, amount)).unwrap())
-        .expect("mint update rejected");
-    decode_one::<Result<u64, String>>(&reply).unwrap().expect("mint ok");
+        .update_call(dpay, Principal::anonymous(), "faucet", encode_args((to.to_vec(), currency)).unwrap())
+        .expect("faucet update rejected");
+    let funded = decode_one::<Result<u64, String>>(&reply).unwrap().expect("faucet ok");
+    assert_eq!(funded, INIT_A, "faucet credits exactly $100.00 (== INIT_A)");
 }
 
 fn submit(pic: &PocketIc, can: Principal, wire: Vec<u8>) -> Result<PayReceipt, String> {
@@ -238,7 +202,7 @@ fn main() {
 
     // --- Ledger on ICP (PocketIC): real ic-icrc1-ledger + facade -----------------------------
     // The facade delegates `balance_of`/`pay` to the registered ICRC ledger. The DEMO_USD ledger is
-    // mintable (minting account owned by the facade), so the controller-gated `mint` funds the payer.
+    // mintable (minting account owned by the facade), so the self-service `faucet` funds the payer.
     // The merchant starts at $0.00. (Mirrors icrc_settle.rs::setup + offline_sign_settles_on_demo.)
     let pic = PocketIc::new();
     pic.set_time(Time::from_nanos_since_unix_epoch(T0_NANOS));
@@ -259,20 +223,21 @@ fn main() {
         vec![],
     );
 
-    // 3. Install the facade wired to the DUSD ledger (mintable), governed by a controller so the
-    //    privileged `mint`/`register_currency_meta` calls can fund the payer + set the per-tx cap.
+    // 3. Install the facade wired to the DUSD ledger (mintable; the ONE environment-specific
+    //    ledger, passed as the `demo_ledger` init arg — every other currency resolves from the
+    //    facade's compile-time FIXED_ASSETS table), governed by a controller (mint/burn/reconcile
+    //    admin gate, mirroring prod). `per_tx_cap` IS the DEMO currency's per-tx cap (MC2 U1) —
+    //    the registry-era post-install cap registration is gone with the registry.
     let init = DpayInitArg {
-        ledgers: vec![LedgerConfig { currency: DEMO_USD, principal: ledger_dusd, mintable: true }],
+        demo_ledger: ledger_dusd,
         per_tx_cap: CAP,
         controller: Some(pic_admin()),
     };
     pic.install_canister(can, wasm_bytes(), encode_one(&init).unwrap(), None);
 
-    // 4. MC2 U1: `pay` is fail-closed on a cap-less currency — register DEMO_USD's cap so pays settle.
-    register_currency_meta_cap(&pic, can, DEMO_USD, CAP);
-
-    // 5. Fund the payer $100.00 through the facade mint (controller-gated). Merchant stays at $0.00.
-    mint(&pic, can, payer, DEMO_USD, INIT_A);
+    // 4. Fund the payer $100.00 through the facade faucet (self-service custody credit — see
+    //    [`faucet`] for why not the controller-gated `mint`). Merchant stays at $0.00.
+    faucet(&pic, can, payer, DEMO_USD);
 
     println!(
         "  ledger live on a decentralized chain.  payer {}   merchant {}",
