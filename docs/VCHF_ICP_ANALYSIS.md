@@ -4,6 +4,12 @@
 > **Verified:** 2026-08-28 against IC mainnet and the current dpay tree.
 > **Execution spec:**
 > [`specs/2026-08-28-vchf-icp-support-spec.md`](specs/2026-08-28-vchf-icp-support-spec.md).
+> **Addendum (2026-08-28, later the same day):** superseded in part by the founder decision to
+> move catalog authority to the relay — the canister registry this analysis assumed is gone; the
+> relay's compiled catalog is the sole catalog authority, registration is superseded, and go-live
+> for VCHF/ICP is the relay deploy (`just up`). The body below stands as history (the
+> "facade remains the governed catalog of record" framing predates the removal). See the spec's
+> Status addendum for the current shape.
 
 ## Executive conclusion
 

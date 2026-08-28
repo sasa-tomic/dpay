@@ -12,11 +12,15 @@
    U1–U8 complete and fully verified: catalog ids 7/8 everywhere (bundled + fake + truth-file drift
    alarms), no-minter direct-ICRC payability, the relay's `Internet Computer` mainnet partition, an
    official-ICP-index history adapter (`just ic-index-probe` PASS vs mainnet), idempotent
-   registration rehearsed on a full local replica, 7 new e2e flows (95–101; `FLOWS.md` = 97),
+   registration rehearsed on a full local replica (registry-era — superseded same-day by the
+   2026-08-28 founder decision removing the canister registry; catalog authority is now the
+   relay's compiled catalog, see the spec addendum), 7 new e2e flows (95–101; `FLOWS.md` = 97),
    `just verify` EXIT=0 (96/96 e2e), jest 1160/1160, `just test-relay` 44/44, `just test-live`
    62/62, emulator device gates green, orchestrator-verifier state-matrix audit APPROVED. Two
-   founder tails remain open (moved to "Physical / outer-loop gates" below): prod deploy + funded
-   mainnet transfer proof. ICPSwap buy/sell stays a separate future phase; no automatic conversion.
+   founder tails remain open (moved to "Physical / outer-loop gates" below): the deploy (now
+   `just apk && just up` — the relay ships the catalog; the facade wasm upgrade is optional and
+   carries no registration) + funded mainnet transfer proof. ICPSwap buy/sell stays a separate
+   future phase; no automatic conversion.
 2. **Faucet 422 — OPEN-VERIFY, likely already shipped.** Fix landed in-tree 2026-08-20
    (`6465405`, + `scripts/faucet-verify.sh` + deploy-ic arming; local replica drill passed all
    legs incl. a live-relay 200 mint). The 2026-08-26/27 founder deploys almost certainly armed the
@@ -24,7 +28,9 @@
    once against prod, record the result here, close. (docs/GOVERNANCE.md still says "🔄 in
    flight (2026-08-20 session)" — update it when this closes.)
 3. **Governance P1/P2 pieces (agent-pickable; the stance itself is DO-NOT-NAG below):**
-   `lock_catalog` ratchet, module-hash pinning, reconcile runbook wiring (###3's menu).
+   module-hash pinning, reconcile runbook wiring (###3's menu). (`lock_catalog` struck
+   2026-08-28 — the registry it targeted was removed by founder decision; catalog authority =
+   relay code behind git review + drift alarms, re-addable at a future governance handoff.)
 4. **IC chain-key receipt migration** (###2 next step): move the receipt signature to
    `sign_with_schnorr`/`sign_with_ecdsa` before pilot so no exportable secret lives in canister
    state (the AGENTS.md-known "chain-key receipts" blocker).
@@ -39,14 +45,16 @@
 - **SOL HCE hardware tap — the only physical gate left** (AID `F06470617902`, `DpaySolNfc`).
   The IC-rail two-phone NFC tap (payer in airplane mode) + real-camera QR scan PASSED 2026-08-26
   (founder-run retest; commit `8940b1d`).
-- **VCHF/ICP prod registration — founder deploy** (`just deploy-ic && just apk && just up`): the
-  script's registration is idempotent (probe → skip-if-identical; abort-on-mismatch without touching
-  the peer asset; never reuses retired ids), verified offline via a full local-replica rehearsal
-  (exact-record variant{Ok} validation, skip branch, ledger-mismatch abort, retired-id abort).
-  Pre-deploy state confirmed 2026-08-28: live catalog has NO ids 7/8 (required pre-deploy state);
-  `just verify-relay` = live `81e39b4` ABOVE floor `28cc375`, BEHIND HEAD by exactly 1 commit
-  (`671caad`, ships with this deploy); live ledgers verified (`ly36x` VCHF / `ryjl3` ICP: symbol,
-  decimals 8, fee 10_000; index `qhbym` `ledger_id == ryjl3`).
+- **VCHF/ICP go-live — founder relay + APK deploy** (`just apk && just up`; the facade wasm
+  upgrade via `just deploy-ic` is optional — since the 2026-08-28 registry removal there is NO
+  registration step and no catalog on the canister): the relay's compiled catalog
+  (`crates/dpay-relay/src/catalog.rs`) ships ids 7/8 to online wallets with the next `just up`;
+  the APK carries the bundled offline rows. The relay change is built + fully gated in-tree but
+  NOT yet deployed. Pre-deploy state confirmed 2026-08-28: `just verify-relay` = live `81e39b4`
+  ABOVE floor `28cc375`, BEHIND HEAD by exactly 1 commit (`671caad`, ships with this deploy);
+  live ledgers verified (`ly36x` VCHF / `ryjl3` ICP: symbol, decimals 8, fee 10_000; index
+  `qhbym` `ledger_id == ryjl3`). Afterward re-check: `curl -s
+  https://dpay.kalaj.org/api/v1/currencies` shows the `Internet Computer` mainnet rows.
 - **VCHF/ICP funded mainnet payment proof** — low-value app-signed VCHF + ICP mainnet transfers +
   receiver exact-memo reconciliation. **BLOCKED on mainnet funds (hard external gate)**; production
   payment completeness is not claimed for these assets until recorded.

@@ -18,6 +18,15 @@ community to vote on our upgrades is unrealistic until critical mass. Therefore:
   (blackholing also remains a per-canister freeze option if a surface is ever feature-complete).
   They are explicitly **not** pre-pilot gates.
 
+> **Founder decision (2026-08-28): catalog authority moved to the relay.** ICP governance will not
+> own the facade canister in the foreseeable future, so the governed currency registry was pure
+> friction and was removed from the canister (`register_*`/`retire_currency`/`currencies()` are gone;
+> init arg is now `record { demo_ledger; per_tx_cap; controller }`). The sole catalog authority is
+> the relay's compiled catalog (`crates/dpay-relay/src/catalog.rs`): adding a currency is a relay
+> code change through git review, live with the next `just up`. The registry is easy to re-add if a
+> governance handoff ever becomes real and would add value then; the catalog-lock items below that
+> targeted the registry are superseded (annotated in place).
+
 ## Objectives (the plan's acceptance bars)
 
 - **O1 — Bounded blast radius.** Compromise of ANY single online component (relay box, faucet seed,
@@ -50,7 +59,7 @@ community to vote on our upgrades is unrealistic until critical mass. Therefore:
 |---|------|--------|
 | 6 | **Cold storage for the IC-level controller identity** (upgrade authority): PEM offline, imported only at deliberate deploys, never on the relay box | O1(c) |
 | 7 | **Module-hash pinning/publishing**: relay `/api/v1/health` (or a `/api/v1/integrity`) reports the live facade module hash (read_state); changelog per upgrade | O3 |
-| 8 | **`lock_catalog` one-way ratchet** (canister): after lock, `register_ledger`/`register_currency_meta` refuse changes (or require a timelocked path) — closes the ledger-repoint phishing vector from a leaked faucet key | O1 |
+| 8 | ~~**`lock_catalog` one-way ratchet** (canister): after lock, `register_ledger`/`register_currency_meta` refuse changes (or require a timelocked path) — closes the ledger-repoint phishing vector from a leaked faucet key~~ — **struck 2026-08-28: superseded by the founder decision above.** The registry (and with it the ledger-repoint vector) no longer exists on the canister; catalog authority is relay code behind git review + drift alarms | ~~O1~~ closed structurally |
 | 9 | Ops runbook: `reconcile` on a schedule + after any suspected trap; key-rotation runbook for each scoped key | O2 |
 
 ### P2 — Pre-real-money (when real value flows, still no NNS)
@@ -76,7 +85,9 @@ bridge; the SNS reference below is the end-state if critical mass ever makes it 
 2. **Scope and separate keys.** The relay's faucet key (`DPAY_CONTROLLER_SEED`, Ed25519) is a
    DEDICATED key that gates only play-money DUSD mint + config — it is not the deploy identity
    (dfx identities are secp256k1; the relay agent signs Ed25519) and not an IC-level controller. A
-   leaked seed's blast radius: unlimited demo-$ mint + catalog repoint — rotatable via
+   leaked seed's blast radius: unlimited demo-$ mint — no catalog repoint is possible from the
+   canister anymore (registry removed 2026-08-28; the catalog is relay code, changed only through
+   git review + deploy) — rotatable via
    `set_controller` + seed swap without touching the root keys.
 3. **Cold-storage discipline for the root keys.** The IC-level controller identity (upgrade
    authority — the one power that supersedes everything) lives offline; it is used only during
@@ -98,11 +109,13 @@ The dpay facade canister has **two independent layers** of control. Governing on
 the other.
 
 1. **In-canister governance controller** (`CONTROLLER`, stable MemoryId 6). Gates the privileged
-   *methods*: `mint` / `burn` / `register_ledger` / `register_minter` / `reconcile` / `set_controller`.
+   *methods*: `mint` / `burn` / `reconcile` / `set_controller` (the `register_*` family was removed
+   with the registry, 2026-08-28).
    - **Denied when `controller == null`** (the R1 flip): a deployment that forgets to seed a
-     controller cannot have its currency repointed or its demo currency printed by any caller. The
-     self-service `faucet` (fixed amount, rate-limited) is the only value-creating path open without a
-     controller.
+      controller cannot have its demo currency printed by any caller (currency repoint ceased to
+      exist with the registry). The
+      self-service `faucet` (fixed amount, rate-limited) is the only value-creating path open without a
+      controller.
    - `set_controller` keeps a one-time open-mode lockdown (callable when `null`) plus two-step
      rotation once locked (only the current controller rotates). The **production path is to seed a
      governed principal at `init`** so the canister never runs in open mode against an adversary.
@@ -123,7 +136,7 @@ The `init` argument carries the controller. The demo default is `null` (open, fo
 
 ```
 // dfx/args/init.arg  (demo default — DO NOT ship this to a governed deployment)
-(record { ledgers = vec {}; per_tx_cap = 100000 : nat64; controller = null })
+(record { demo_ledger = principal "td2nx-oaaaa-aaaab-qhdnq-cai"; per_tx_cap = 100000 : nat64; controller = null })
 ```
 
 To deploy **governed**, set `controller` to your governance principal (an SNS root, an NNS-governed
@@ -133,13 +146,13 @@ canister, or a governance-controlled principal):
 # Example: a governed controller principal (replace with your SNS root / governance principal).
 GOV=rrkah-fqaaa-aaaaa-aaaaq-cai
 cat > dfx/args/init.governed.arg <<EOF
-(record { ledgers = vec { record { currency = 0 : nat32; principal = principal "${LEDGER_DUSD}"; mintable = true } }; per_tx_cap = 100000 : nat64; controller = opt principal "${GOV}" })
+(record { demo_ledger = principal "${LEDGER_DUSD}"; per_tx_cap = 100000 : nat64; controller = opt principal "${GOV}" })
 EOF
 
 dfx deploy dpay_canister --network ic --mode install --argument-file dfx/args/init.governed.arg
 ```
 
-After this, `mint`/`burn`/`register_*`/`reconcile`/`set_controller` succeed **only** when called by
+After this, `mint`/`burn`/`reconcile`/`set_controller` succeed **only** when called by
 `$GOV`. Verify:
 
 ```sh
@@ -195,7 +208,8 @@ dfx canister status dpay_canister --network ic | grep controller
 - [ ] Layer 2: the IC-level code controller identity lives in **cold storage** (offline PEM, used
       only at deliberate deploys; never on the relay box).
 - [ ] Blast-radius review: no standing approvals (per-op exact-amount only), faucet fixed-amount +
-      cooldown, `register_ledger`-repoint residual documented (lock_catalog when built).
+      cooldown; catalog changes ride the relay-deploy path (git review + drift alarms — registry
+      repoint ceased to exist with the 2026-08-28 registry removal).
 - [ ] Module hash of the deployed facade is pinned/published (relay health surface) so upgrades are
       user-detectable; upgrades ship with a changelog.
 - [ ] `receipt_pubkey()` is fetched and the app verifies receipt signatures (R2) before "Paid ✓".

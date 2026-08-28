@@ -15,20 +15,27 @@
 
 ## Owned canisters (dfx-managed, in `dfx.json`)
 
-### `dpay_canister` — the facade (read-side residual; settlement kernel dormant)
+### `dpay_canister` — the facade (value-path dispatch residual + DEMO plumbing; settlement kernel dormant)
 - **Mainnet id:** `ssqti-wiaaa-aaaab-qhdia-cai`
-- **Role at HEAD — catalog + display read surface, consumed via the relay (`AgentLedger`, cargo
-  feature `agent`):**
-  - `currencies()` (query) — the multi-currency catalog of record → relay `GET /api/v1/currencies`.
+- **Registry removal (founder decision 2026-08-28):** the public, mutable currency registry
+  (`register_ledger`/`register_minter`/`register_currency`/`register_currency_meta`/
+  `retire_currency` + the `currencies()` catalog) is GONE from the canister — the relay's compiled
+  catalog (`crates/dpay-relay/src/catalog.rs`) is the sole catalog authority (see
+  `CODEBASE_ANALYSIS.md`). Currency resolution inside the canister is the `demo_ledger` init arg
+  (DEMO 0) + compile-time ck ledger/minter consts for ckBTC(1)/ckUSDC(2)/ckETH(6); the init arg is
+  `record { demo_ledger; per_tx_cap; controller }`.
+- **Role at HEAD — display read surface, consumed via the relay (`AgentLedger`, cargo feature
+  `agent`):**
   - `transactions_of(pubkey, currency, limit)` (query) — the durable per-account history index →
     relay `GET /api/v1/transactions/{hex}`. Facade-era rows only: user-principal rail transfers do
     **not** write this index (see `CODEBASE_ANALYSIS.md`).
   - `deposit_info(currency)` (update; proxies the minter's static instructions) → relay
     `GET /api/v1/deposit/info`.
-  - The ckERC20/ckETH onramp params (relay `GET /onramp/ckerc20`) resolve from that catalog; the
-    CkDeposit `helper_address` is read at RUNTIME from the currency's registered minter
-    (`get_minter_info`), falling back to the verified compile-time constants when the minter
-    leaves the field unset or the read fails. ~~`facade_principal` (this canister's id) is still
+  - The ckERC20/ckETH onramp params (relay `GET /onramp/ckerc20`) resolve from the relay's compiled
+    catalog; the CkDeposit `helper_address` is read at RUNTIME from the currency's minter
+    (`get_minter_info` — the minter principal is a compile-time const in the canister since the
+    registry removal), falling back to the verified compile-time constants when the minter leaves
+    the field unset or the read fails. ~~`facade_principal` (this canister's id) is still
     embedded in the helper-contract `depositErc20`/`depositEth` calldata…~~ — **struck 2026-08-20
     (commit 82377e4)**: the onramp calldata no longer carries any facade principal. The relay
     serves helper/chain constants only (pinned by `relay.rs` + `relay.test.ts`), and the app
@@ -52,12 +59,13 @@
   are user-signed `icrc2_approve` + minter calls. The relay routes that used to front these
   (`/pay`, `/withdraw`, `/receipt/{nonce}`, `/receipt_pubkey`, `/deposit/address`,
   `/deposit/refresh`) are deleted.
-- **Why `just deploy-ic` still ships it:** it remains the canonical currency registry (the deploy
-  script's `register_ledger`/`register_currency`/`register_currency_meta` calls are the only way
-  currencies are activated; idempotent re-runs), the history/deposit-info read surface, and the
-  staging provisioning vehicle (`provision_ledger_canister`). An evil upgrade can no longer *move*
-  user funds — but it can still misreport catalog/history/display info and mint DEMO, so the
-  governance hand-off below remains real.
+- **Why `just deploy-ic` still ships it:** the facade WASM install/upgrade (wasm only — since the
+  2026-08-28 registry removal there is NO registration step and no catalog on the canister), the
+  DEMO faucet target (the controller-gated `mint` on the DUSD ledger), the dormant settlement
+  kernel + receipts, the deposit-info read surface, and the staging provisioning vehicle
+  (`provision_ledger_canister`). An evil upgrade can no longer *move* user funds — but it can
+  still misreport history/display info and mint DEMO, so the governance hand-off below remains
+  real.
 - **Source:** `crates/dpay-canister` → `target/wasm32-unknown-unknown/release/dpay_canister.wasm`;
   candid `dfx/dpay_canister.did`.
 - **Control:** currently the deploy identity (founder). Admin methods are denied once
@@ -68,12 +76,15 @@
 - **Mainnet id:** provisioned on first deploy via `provision_ledger_canister` on `ssqti` (id lands in
   `canister_ids.json` under `dpay_canister_staging.ic` + `deploy/.env` as `DPAY_STAGING_CANISTER_ID`).
 - **Role:** a SEPARATE facade wired to IC's FREE testnet chain-key tokens (ckBTC Testnet on Bitcoin
-  Testnet4, ckSepoliaUSDC, ckSepoliaETH on Sepolia). Same wasm as the prod facade; differs only in
-  its registered currencies (DEMO + the 3 testnet chain-key currencies vs prod's DEMO + ckBTC +
-  ckUSDC + ckETH — the prod catalog also carries the same 3 testnet variants, hidden in-app behind
-  the testnet toggle). The e2e-live Tier 1 flow (`e2e-live/tests/01-testnet-wiring.mjs`,
-  `just e2e-live-testnet`) drives its read surface end-to-end (dormant until the staging path is
-  chosen; the deposit/withdraw entry points are post-cutover dormant like prod's).
+  Testnet4, ckSepoliaUSDC, ckSepoliaETH on Sepolia). ~~Same wasm as the prod facade; differs only
+  in its registered currencies~~ — **registry-era wording (struck 2026-08-28):** the facade
+  registry is removed, so the staging-specific `register_currency` wiring this section described
+  no longer exists; the testnet currencies surface via the relay's compiled catalog instead
+  (single display-only testnet fixture `ckTESTBTC`, hidden in-app behind the testnet toggle).
+  The staging path is dormant post-removal and would need rework before use. The e2e-live Tier 1
+  flow (`e2e-live/tests/01-testnet-wiring.mjs`, `just e2e-live-testnet`) drives its read surface
+  end-to-end (dormant until the staging path is chosen; the deposit/withdraw entry points are
+  post-cutover dormant like prod's).
 - **Provisioning:** `scripts/dfx-deploy-ic-staging.sh` provisions the facade (200 TC) + a staging DUSD
   ledger (20 TC) from `ssqti`'s cycle balance (the `dpay` identity is in `ADMIN_CALLERS`). The staging
   DUSD ledger is staging-owned (NOT prod `td2nx` — whose minting_account.owner is `ssqti`, so the
@@ -81,13 +92,17 @@
   mock DUSD ledger, no cycles).
 - **Control:** the `dpay` deploy identity (set_controller locks the facade-level controller after init).
 - **Currencies:** DEMO(0, staging DUSD), ckBTC Testnet(3, `mc6ru-…`/`ml52i-…`), ckSepoliaUSDC(4,
-  `yfumr-…`/`jzenf-…`), ckSepoliaETH(5, `apia6-…`/`jzenf-…`). Exact validated metadata in the deploy
-  script — do not edit.
+  `yfumr-…`/`jzenf-…`), ckSepoliaETH(5, `apia6-…`/`jzenf-…`). ~~Exact validated metadata in the
+  deploy script — do not edit.~~ Registry-era list (struck 2026-08-28): these staging registrations
+  cannot be replayed post-registry-removal; the deploy script's registration section is stale and
+  must be updated before any staging use.
 
 ### `icrc_ledger` — the DUSD ICRC-3 ledger
 - **Mainnet id:** `td2nx-oaaaa-aaaab-qhdnq-cai`
 - **Role at HEAD:** backs the **DEMO currency** (currency `0`, token symbol `DUSD`, 2 decimals) as
-  its catalog ledger. Post-cutover nothing in prod touches it on the value path: the prod relay
+  its DEMO ledger — the facade's `demo_ledger` init arg (since the 2026-08-28 registry removal) and
+  the compiled catalog's DEMO row. Post-cutover nothing in prod touches it on the value path: the
+  prod relay
   image's faucet (`POST /api/v1/faucet`, agent build — 2026-08-20) drives the FACADE's
   controller-gated `mint()` (with the relay-held `DPAY_CONTROLLER_SEED`), which in turn mints on
   this ledger via its `minting_account`; the cooldown lives relay-side. A DEMO payment — if anyone
@@ -108,7 +123,8 @@ upgrade or otherwise manage them.** Post-cutover these ledgers (not any dpay can
 user funds actually live: the app reads balances via signed `icrc1_balance_of` queries at the user
 principal, drives deposits via user-signed minter queries/calls, and offramps via user-signed
 `icrc2_approve` + `retrieve_btc_with_approval` / `withdraw_eth` / `withdraw_erc20`. They appear in
-the facade `currencies()` response but are deliberately absent from `canister_ids.json` (dfx must
+the relay's compiled catalog (served at `GET /api/v1/currencies` — the sole catalog authority since
+the 2026-08-28 registry removal) but are deliberately absent from `canister_ids.json` (dfx must
 not treat them as build/install targets).
 
 | Currency | Role     | Principal                  |
@@ -119,8 +135,8 @@ not treat them as build/install targets).
 | 2 ckUSDC | minter   | `sv3dd-oaaaa-aaaar-qacoa-cai` (the ckETH minter; ckERC20s share it) |
 | 6 ckETH  | ledger   | `ss2fx-dyaaa-aaaar-qacoq-cai` (native ETH mainnet; `token_contract=null`) |
 | 6 ckETH  | minter   | `sv3dd-oaaaa-aaaar-qacoa-cai` (same ckETH minter; single-ledger `withdraw_eth`) |
-| 7 VCHF   | ledger   | `ly36x-wiaaa-aaaai-aqj7q-cai` (external VNX ICRC ledger; no dpay minter, no ramps; registered by the pending founder deploy) |
-| 8 ICP    | ledger   | `ryjl3-tyaaa-aaaaa-aaaba-cai` (the canonical ICP ledger; no dpay minter, no ramps; registered by the pending founder deploy) |
+| 7 VCHF   | ledger   | `ly36x-wiaaa-aaaai-aqj7q-cai` (external VNX ICRC ledger; no dpay minter, no ramps; served by the relay's compiled catalog from the next `just up`) |
+| 8 ICP    | ledger   | `ryjl3-tyaaa-aaaaa-aaaba-cai` (the canonical ICP ledger; no dpay minter, no ramps; served by the relay's compiled catalog from the next `just up`) |
 | 8 ICP    | index    | `qhbym-qaaaa-aaaaa-aaafq-cai` (official ICP index — a relay code pin for ICP history, not a catalog entry) |
 
 ## Notes

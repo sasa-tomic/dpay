@@ -58,6 +58,16 @@ Evidence (compact):
    exact-memo reconciliation. BLOCKED on mainnet funds (hard external gate); production payment
    completeness is not claimed for these assets until this is recorded.
 
+> **Addendum (2026-08-28, later the same day — founder decision):** catalog authority moved to the
+> relay. The canister registry that U6's registration path targeted was REMOVED (ICP governance
+> will not own the facade in the foreseeable future; the governed registry was pure friction).
+> The relay's compiled catalog (`crates/dpay-relay/src/catalog.rs`) is now the sole catalog
+> authority, so U6/registration is superseded and go-live = the relay deploy (`just up`, plus
+> `just apk` for the bundled offline rows) — there is no facade registration step anymore and no
+> catalog on the canister at all. The body of this spec below (including the registration
+> rehearsal evidence and the deployment sequence) stands as history of the superseded path. The
+> relay change is built and fully gated in-tree but NOT yet deployed at the time of this addendum.
+
 ## Goal
 
 Ship VCHF and native ICP as complete first-class IC assets in the existing shared wallet surfaces:
