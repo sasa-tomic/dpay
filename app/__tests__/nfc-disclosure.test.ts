@@ -112,4 +112,46 @@ describe('resolveNfcDisclosure — BUNDLED_CATALOG real values', () => {
     const d = resolveNfcDisclosure(BUNDLED_CATALOG, {currency: 0, amount: '5000'});
     expect(d).toEqual({assetName: 'DEMO', networkLabel: null, formattedAmount: '∂50.00'});
   });
+  it('VCHF (7) in the bundled catalog resolves exactly', () => {
+    // The no-minter direct-ICRC row: honest VCHF name, "Internet Computer" network, 8-dec amount.
+    const d = resolveNfcDisclosure(BUNDLED_CATALOG, {currency: 7, amount: '50000'});
+    expect(d).toEqual({assetName: 'VCHF', networkLabel: 'Internet Computer', formattedAmount: '0.00050000 VCHF'});
+  });
+  it('ICP (8) in the bundled catalog resolves exactly', () => {
+    const d = resolveNfcDisclosure(BUNDLED_CATALOG, {currency: 8, amount: '10000'});
+    expect(d).toEqual({assetName: 'ICP', networkLabel: 'Internet Computer', formattedAmount: '0.00010000 ICP'});
+  });
+});
+
+// --- VCHF/ICP (2026-08-28): direct-ICRC disclosure honesty -------------------------------------
+// The payer's tap window must read the EXACT asset + network + asset-correct amount — never a DEMO
+// formatter, and never a Bitcoin/Ethereum network borrowed from a ck sibling. And a no-minter row
+// that cannot disclose honestly is DECLINED (null), exactly like the family rows above.
+describe('resolveNfcDisclosure — VCHF (7) / ICP (8) direct-ICRC honesty', () => {
+  it('NEVER returns a DEMO/∂/$ formatted amount for VCHF or ICP', () => {
+    for (const currency of [7, 8]) {
+      const d = resolveNfcDisclosure(BUNDLED_CATALOG, {currency, amount: '50000'})!;
+      expect(d.formattedAmount).not.toMatch(/^∂/);
+      expect(d.formattedAmount).not.toMatch(/^\$/);
+    }
+  });
+  it('the network label distinguishes the IC rows honestly (Internet Computer, not Bitcoin/Ethereum)', () => {
+    const vchf = resolveNfcDisclosure(BUNDLED_CATALOG, {currency: 7, amount: '50000'})!;
+    const btc = resolveNfcDisclosure(BUNDLED_CATALOG, {currency: 1, amount: '50000'})!;
+    const usdc = resolveNfcDisclosure(BUNDLED_CATALOG, {currency: 2, amount: '1000000'})!;
+    expect(vchf.networkLabel).toBe('Internet Computer');
+    expect(vchf.networkLabel).not.toBe(btc.networkLabel);   // ≠ Bitcoin
+    expect(vchf.networkLabel).not.toBe(usdc.networkLabel);  // ≠ Ethereum
+  });
+  it('returns null for an incomplete no-minter row whose amount cannot be formatted honestly', () => {
+    // Same VCHF identity but NO decimals: displayName + network resolve, but fmtCurrencyAmount
+    // yields 'Unsupported' → decline rather than blind-sign a garbage amount (defense-in-depth
+    // extends to the direct-ICRC rows — payable-ness alone never licenses a blind tap).
+    const noDecimals: CurrencyDescriptor = mk({
+      currency: 7, minter_family: null, ledger: 'ly36x-wiaaa-aaaai-aqj7q-cai', symbol: 'VCHF',
+      wrapper_name: 'VCHF', backing_symbol: 'VCHF', network: 'Internet Computer',
+      // decimals intentionally null ⇒ fmtCurrencyAmount yields 'Unsupported'
+    });
+    expect(resolveNfcDisclosure([noDecimals], {currency: 7, amount: '50000'})).toBeNull();
+  });
 });

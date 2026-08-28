@@ -196,6 +196,30 @@ describe('currencySymbol — no BTC glyph fallback for unknown families', () => 
     const sol: CurrencyDescriptor = {...CKSOL_DESC, symbol: '◎'};
     expect(currencySymbol([sol], 99)).toBe('◎');
   });
+  it('returns the exact unit text "VCHF"/"ICP" for the complete bundled direct-ICRC rows (not "?")', () => {
+    // U2 (2026-08-28): a complete trusted no-minter row renders its EXACT payment-unit text — the
+    // descriptor's backing_symbol — instead of the ambiguous '?'. No franc glyph, no token icon:
+    // the honest unit is the text the user pays.
+    expect(currencySymbol(BUNDLED_CATALOG, 7)).toBe('VCHF');
+    expect(currencySymbol(BUNDLED_CATALOG, 8)).toBe('ICP');
+  });
+  it('keeps "?" for an INCOMPLETE no-minter row (completeness gates the honest unit text)', () => {
+    // Same VCHF row but with the cap stripped: not a complete trusted descriptor → the ambiguous
+    // '?' fallback, never a half-honest unit prefix.
+    const incomplete: CurrencyDescriptor[] = [{
+      ...mk({
+        currency: 7, minter_family: null, ledger: 'ly36x-wiaaa-aaaai-aqj7q-cai', symbol: 'VCHF', decimals: 8,
+        wrapper_name: 'VCHF', backing_symbol: 'VCHF', network: 'Internet Computer',
+        display_decimals: 8, fee: '10000', cap: null,
+      }),
+    }];
+    expect(currencySymbol(incomplete, 7)).toBe('?');
+  });
+  it('DEMO/BTC/USD glyph behavior is preserved beside the new unit-text rows', () => {
+    expect(currencySymbol(BUNDLED_CATALOG, 0)).toBe('∂');
+    expect(currencySymbol(BUNDLED_CATALOG, 1)).toBe('₿');
+    expect(currencySymbol(BUNDLED_CATALOG, 2)).toBe('$');
+  });
 });
 
 describe('assetTestKey — no BTC fallback for unknown families', () => {
@@ -212,6 +236,16 @@ describe('assetTestKey — no BTC fallback for unknown families', () => {
   it('returns "asset" for an unknown family with no symbol (never "btc")', () => {
     const noSym: CurrencyDescriptor = {...CKSOL_DESC, symbol: null};
     expect(assetTestKey(noSym)).toBe('asset');
+  });
+  it('returns "vchf"/"icp" for the bundled direct-ICRC rows (stable, unsuffixed, mainnet)', () => {
+    // U5 (2026-08-28): the wrapper_name lowercased — the stable picker/Balances testID contract
+    // (`asset-vchf` / `asset-icp`). Mainnet rows carry NO -testnet suffix.
+    const vchf = BUNDLED_CATALOG.find(c => c.currency === 7)!;
+    const icp = BUNDLED_CATALOG.find(c => c.currency === 8)!;
+    expect(assetTestKey(vchf)).toBe('vchf');
+    expect(assetTestKey(icp)).toBe('icp');
+    expect(isTestnetCurrency(vchf)).toBe(false);
+    expect(isTestnetCurrency(icp)).toBe(false);
   });
 });
 
@@ -416,11 +450,15 @@ describe('familyDisplay sources per-currency facts from the descriptor (MC1 unit
 // garbage/unsupported currency. The canister also rejects retired/unknown currencies, but the app
 // should fail closed BEFORE the user signs.
 //
-// "Supported" ≠ "familyDisplay non-null": DEMO (currency 0) has minter_family null → familyDisplay
-// returns null, BUT DEMO IS payable (the faucet funds it). So the predicate is:
-//   currency === 0 || familyDisplay(catalog, currency) !== null.
-// Known families (CkBtcUtxo/CkEthErc20) ⇒ payable. Unknown family (CkSol) / missing-from-catalog
-// ⇒ NOT payable. Mirrors the fail-closed discipline of MC1 unit 6 (no Bitcoin fallback).
+// "Supported" ≠ "familyDisplay non-null": PAYMENT capability ≠ RAMP capability (2026-08-28,
+// VCHF/ICP). The predicate is the disjunction:
+//   currency === 0 (DEMO always payable)
+//   || familyDisplay(catalog, currency) !== null (a known ramp family vouches for the row)
+//   || isCompleteDirectIcrcRow(descriptor) (a COMPLETE no-minter direct-ICRC row carries every
+//      fact a plain icrc1_transfer needs).
+// Known families (CkBtcUtxo/CkEthErc20) ⇒ payable. A complete no-minter row (VCHF 7 / ICP 8) ⇒
+// payable WITHOUT a minter. Unknown family (CkSol) with incomplete facts / missing-from-catalog ⇒
+// NOT payable. Mirrors the fail-closed discipline of MC1 unit 6 (no Bitcoin fallback).
 describe('isPayableAsset — payable predicate (MC5 fail-closed before signing)', () => {
   it('DEMO (currency 0) is payable even though familyDisplay returns null', () => {
     // CRITICAL: familyDisplay(KNOWN_CATALOG, 0) === null but DEMO IS supported. The predicate MUST
@@ -438,12 +476,96 @@ describe('isPayableAsset — payable predicate (MC5 fail-closed before signing)'
     expect(isPayableAsset(KNOWN_CATALOG, 999)).toBe(false);
   });
   it('a CkSol-family currency is NOT payable (unknown family — fail closed)', () => {
-    // CkSol is in the catalog but familyDisplay returns null for it (no ramp config) → NOT payable.
+    // CkSol is in the catalog but familyDisplay returns null for it (no ramp config) AND its row is
+    // missing the direct-path facts (no ledger/fee/cap) → NOT payable either way.
     expect(isPayableAsset(UNKNOWN_CATALOG, 99)).toBe(false);
   });
   it('empty catalog: only currency 0 is payable (DEMO special case)', () => {
     expect(isPayableAsset([], 0)).toBe(true);
     expect(isPayableAsset([], 1)).toBe(false);
+  });
+
+  // --- VCHF/ICP (2026-08-28): direct payability decoupled from ramps ----------------------------
+  // A COMPLETE trusted no-minter ICRC descriptor is payable WITHOUT any minter: the rail signs a
+  // plain icrc1_transfer to the row's own ledger principal, so ramps (mintable/minter/
+  // minter_family/onramp/offramp) are deliberately NOT inspected. Any missing direct fact fails
+  // closed — the payer must never Approve a sign for a malformed asset.
+  const VCHF_COMPLETE: CurrencyDescriptor = mk({
+    currency: 7, minter_family: null, ledger: 'ly36x-wiaaa-aaaai-aqj7q-cai', symbol: 'VCHF', decimals: 8,
+    wrapper_name: 'VCHF', backing_symbol: 'VCHF', network: 'Internet Computer',
+    display_decimals: 8, fee: '10000', cap: '1000000000000',
+    // mk defaults onramp/offramp to 'Unavailable' — this fixture pays with NO ramps by construction.
+  });
+
+  it('the complete bundled VCHF (7) and ICP (8) no-minter rows are payable', () => {
+    // familyDisplay is null for both (no family — the ramp config is display/dispatch only), yet
+    // both are payable: payability no longer collapses onto familyDisplay.
+    expect(familyDisplay(BUNDLED_CATALOG, 7)).toBeNull();
+    expect(familyDisplay(BUNDLED_CATALOG, 8)).toBeNull();
+    expect(isPayableAsset(BUNDLED_CATALOG, 7)).toBe(true);
+    expect(isPayableAsset(BUNDLED_CATALOG, 8)).toBe(true);
+  });
+
+  it('Unavailable ramps do NOT disable payment (no onramp, no offramp, no minter — still pays)', () => {
+    const cat: CurrencyDescriptor[] = [VCHF_COMPLETE];
+    expect(cat[0].onramp).toBe('Unavailable');
+    expect(cat[0].offramp).toBe('Unavailable');
+    expect(isPayableAsset(cat, 7)).toBe(true);
+  });
+
+  it('missing ledger principal ⇒ NOT payable (fail closed)', () => {
+    expect(isPayableAsset([{...VCHF_COMPLETE, ledger: ''}], 7)).toBe(false);
+  });
+  it('missing / non-integer / out-of-range decimals ⇒ NOT payable', () => {
+    // Decimals must be an integer within the u64 amount contract (0..=MAX_DECIMALS=18), mirroring
+    // parseDecimalToUnits — a value the amount parser rejects can never back a payable asset.
+    expect(isPayableAsset([{...VCHF_COMPLETE, decimals: null}], 7)).toBe(false);
+    expect(isPayableAsset([{...VCHF_COMPLETE, decimals: 8.5}], 7)).toBe(false);
+    expect(isPayableAsset([{...VCHF_COMPLETE, decimals: 19}], 7)).toBe(false);
+    expect(isPayableAsset([{...VCHF_COMPLETE, decimals: -1}], 7)).toBe(false);
+  });
+  it('missing identity strings (wrapper_name / backing_symbol) ⇒ NOT payable', () => {
+    expect(isPayableAsset([{...VCHF_COMPLETE, wrapper_name: null}], 7)).toBe(false);
+    expect(isPayableAsset([{...VCHF_COMPLETE, wrapper_name: ''}], 7)).toBe(false);
+    expect(isPayableAsset([{...VCHF_COMPLETE, backing_symbol: null}], 7)).toBe(false);
+  });
+  it('missing network ⇒ NOT payable', () => {
+    expect(isPayableAsset([{...VCHF_COMPLETE, network: null}], 7)).toBe(false);
+  });
+  it('missing / unparseable raw fee ⇒ NOT payable', () => {
+    expect(isPayableAsset([{...VCHF_COMPLETE, fee: null}], 7)).toBe(false);
+    expect(isPayableAsset([{...VCHF_COMPLETE, fee: '-1'}], 7)).toBe(false);
+    expect(isPayableAsset([{...VCHF_COMPLETE, fee: '1.5'}], 7)).toBe(false);
+    expect(isPayableAsset([{...VCHF_COMPLETE, fee: 'ten thousand'}], 7)).toBe(false);
+  });
+  it('missing / zero / non-numeric raw cap ⇒ NOT payable (cap must be a positive unsigned integer)', () => {
+    expect(isPayableAsset([{...VCHF_COMPLETE, cap: null}], 7)).toBe(false);
+    expect(isPayableAsset([{...VCHF_COMPLETE, cap: '0'}], 7)).toBe(false);
+    expect(isPayableAsset([{...VCHF_COMPLETE, cap: '-5'}], 7)).toBe(false);
+    expect(isPayableAsset([{...VCHF_COMPLETE, cap: '1e12'}], 7)).toBe(false);
+  });
+  it('unknown currency ids fail closed even beside the complete rows (9 / 999)', () => {
+    expect(isPayableAsset(BUNDLED_CATALOG, 9)).toBe(false);
+    expect(isPayableAsset(BUNDLED_CATALOG, 999)).toBe(false);
+  });
+  it('a malformed/unsupported family cannot supply missing direct-payment facts via a Bitcoin or Ethereum fallback', () => {
+    // A CkSol row DRESSED as BTC (₿ symbol, BTC backing, Bitcoin network) is still not payable:
+    // familyDisplay returns null for CkSol and the direct path demands its OWN complete facts
+    // (this row has no ledger/fee/cap). The Bitcoin family's credibility must never be borrowed.
+    const fakeBtc: CurrencyDescriptor = mk({
+      currency: 10, minter: 'x', minter_family: 'CkSol', symbol: '₿', decimals: 8,
+      wrapper_name: 'ckBTC', backing_symbol: 'BTC', network: 'Bitcoin', display_decimals: 8,
+    });
+    expect(familyDisplay([fakeBtc], 10)).toBeNull();
+    expect(isPayableAsset([fakeBtc], 10)).toBe(false);
+
+    // An Ethereum-flavored no-minter row with every identity string set but NO ledger/fee/cap:
+    // the Ethereum LOOK must not stand in for the missing direct facts.
+    const fakeEth: CurrencyDescriptor = mk({
+      currency: 11, minter_family: null, symbol: 'ETH', decimals: 18,
+      wrapper_name: 'ETH', backing_symbol: 'ETH', network: 'Ethereum', chain_id: 1,
+    });
+    expect(isPayableAsset([fakeEth], 11)).toBe(false);
   });
 });
 
@@ -541,9 +663,9 @@ describe('MC8 U7 — ramp-honesty regression pins (no false cash-out / no CkSol 
 const TRUTH = JSON.parse(
   readFileSync(join(__dirname, '..', '..', 'dfx', 'catalog_truth.json'), 'utf8'),
 ) as {
-  principals: {ckbtc_minter: string; cketh_minter: string; ckusdc_ledger: string; cketh_gas_ledger: string; cketh_ledger: string};
+  principals: {ckbtc_minter: string; cketh_minter: string; ckusdc_ledger: string; cketh_gas_ledger: string; cketh_ledger: string; vchf_ledger: string; icp_ledger: string};
   erc20_contracts: {ckusdc: string};
-  decimals: {demo: number; ckbtc: number; ckusdc: number; eth: number};
+  decimals: {demo: number; ckbtc: number; ckusdc: number; eth: number; vchf: number; icp: number};
   wire_consts: {retrieve_btc_min_amount: number; mint_account: string};
 };
 
@@ -586,6 +708,74 @@ describe('BUNDLED_CATALOG vs dfx/catalog_truth.json (drift alarm)', () => {
     expect(a.decimals).toBe(TRUTH.decimals.eth);
     expect(a.ledger).toBe(TRUTH.principals.cketh_ledger);
     expect(a.minter).toBe(TRUTH.principals.cketh_minter);
+  });
+
+  // --- VCHF/ICP (2026-08-28): the two complete no-minter direct-ICRC rows -----------------------
+  // docs/specs/2026-08-28-vchf-icp-support-spec.md "Locked identities and metadata": the ledger
+  // principals + decimals are cross-checked against catalog_truth.json (vchf_ledger / icp_ledger);
+  // everything else in the locked table is pinned as literals below (the JSON deliberately carries
+  // no fee/cap/order fields — those live only in the spec + the two fallback catalogs).
+  it('VCHF (currency 7) ledger principal + decimals match the shared truth (vchf_ledger, 8)', () => {
+    const a = byId(7);
+    expect(a.ledger).toBe(TRUTH.principals.vchf_ledger);
+    expect(a.decimals).toBe(TRUTH.decimals.vchf);
+    expect(a.decimals).toBe(8);
+  });
+
+  it('ICP (currency 8) ledger principal + decimals match the shared truth (icp_ledger, 8)', () => {
+    const a = byId(8);
+    expect(a.ledger).toBe(TRUTH.principals.icp_ledger);
+    expect(a.decimals).toBe(TRUTH.decimals.icp);
+    expect(a.decimals).toBe(8);
+  });
+
+  it('VCHF/ICP rows pin the locked identity table: unit strings, fee, caps, no-minter shape, Unavailable ramps, order', () => {
+    // The full locked table (see the spec's "Locked identities and metadata"). Order: VCHF (7)
+    // comes immediately after currency 6, ICP (8) immediately after VCHF — in the icp MAINNET
+    // section (both rows stamped testnet:false). A change to ANY locked value turns this RED, so a
+    // catalog edit can never silently drift from the spec.
+    const mainnet = BUNDLED_NETWORKS.find(
+      (s): s is Extract<NetworkSection, {protocol: 'icp'}> => s.protocol === 'icp' && s.environment === 'mainnet',
+    )!;
+    expect(mainnet.assets.map(c => c.currency)).toEqual([0, 1, 2, 6, 7, 8]);
+    expect(mainnet.assets[4].currency).toBe(7); // VCHF directly after ckETH (6)
+    expect(mainnet.assets[5].currency).toBe(8); // ICP directly after VCHF (7)
+
+    const vchf = byId(7);
+    expect(vchf.symbol).toBe('VCHF');
+    expect(vchf.wrapper_name).toBe('VCHF');
+    expect(vchf.backing_symbol).toBe('VCHF');
+    expect(vchf.network).toBe('Internet Computer');
+    expect(vchf.display_decimals).toBe(8);
+    expect(vchf.fee).toBe('10000');                       // raw 10_000 e8-splits
+    expect(vchf.cap).toBe('1000000000000');               // raw 1_000_000_000_000 = 10,000 VCHF
+    expect(vchf.mintable).toBe(false);
+    expect(vchf.minter).toBeNull();                       // no-minter shape: direct icrc1_transfer
+    expect(vchf.minter_family).toBeNull();                // NEVER a fake family
+    expect(vchf.onramp).toBe('Unavailable');              // no Add money button
+    expect(vchf.offramp).toBe('Unavailable');             // no Cash out button
+    expect(vchf.chain_id).toBeNull();
+    expect(vchf.token_contract).toBeNull();
+    expect(vchf.gas_ledger).toBeNull();
+    expect(vchf.testnet).toBe(false);
+
+    const icp = byId(8);
+    expect(icp.symbol).toBe('ICP');
+    expect(icp.wrapper_name).toBe('ICP');
+    expect(icp.backing_symbol).toBe('ICP');
+    expect(icp.network).toBe('Internet Computer');
+    expect(icp.display_decimals).toBe(8);
+    expect(icp.fee).toBe('10000');
+    expect(icp.cap).toBe('100000000000');                 // raw 100_000_000_000 = 1,000 ICP
+    expect(icp.mintable).toBe(false);
+    expect(icp.minter).toBeNull();
+    expect(icp.minter_family).toBeNull();
+    expect(icp.onramp).toBe('Unavailable');
+    expect(icp.offramp).toBe('Unavailable');
+    expect(icp.chain_id).toBeNull();
+    expect(icp.token_contract).toBeNull();
+    expect(icp.gas_ledger).toBeNull();
+    expect(icp.testnet).toBe(false);
   });
 });
 
@@ -873,9 +1063,9 @@ describe('BUNDLED_NETWORKS — one shape with the wire (catalog v2)', () => {
     expect(BUNDLED_NETWORKS.map(s => `${s.protocol}:${s.environment}`)).toEqual(['icp:mainnet', 'icp:testnet', 'solana:mainnet']);
   });
 
-  it('derives the flat IC catalog [0,1,2,6] with every row stamped testnet=false', () => {
+  it('derives the flat IC catalog [0,1,2,6,7,8] with every row stamped testnet=false', () => {
     const flat = icpCatalogOf(BUNDLED_NETWORKS);
-    expect(flat.map(c => c.currency)).toEqual([0, 1, 2, 6]);
+    expect(flat.map(c => c.currency)).toEqual([0, 1, 2, 6, 7, 8]);
     expect(flat.every(c => !c.testnet)).toBe(true);
   });
 

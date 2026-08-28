@@ -44,6 +44,8 @@ import {confirmIncomingTransfer} from '../services/rail';
 import {ReceiveMode} from '../components/ReceiveMode';
 import {NfcTap} from '../components/NfcTap';
 import {receiptShareBlob} from '../lib/deepLink';
+import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
+import {S} from '../styles';
 import type {CurrencyDescriptor} from '../config/catalog';
 import type {AssetId} from '../lib/types';
 import type {BalanceView} from '../lib/assetBalances';
@@ -324,6 +326,72 @@ describe('ReceiveMode — rail-proof deeplink is history-gated, never fabricated
     expect(texts(tree).join(' ')).toContain("This receipt doesn't match your open request.");
     expect(texts(tree).join(' ')).not.toContain('Received');
     expect(confirmIncomingTransfer).not.toHaveBeenCalled();
+    act(() => { tree.unmount(); });
+  });
+});
+
+// --- U2 (2026-08-28): the Receive amount prefix renders the honest VCHF/ICP unit text ------------
+// currencySymbol now returns the exact payment-unit text for a COMPLETE trusted direct-ICRC row
+// ('VCHF'/'ICP' — not '?'). These pin the RENDERED prefix (the `req-prefix` pressable) + the layout
+// invariants that keep it visible at every width: the container is content-sized (no fixed width
+// can clip) and the widest honest unit fits the narrowest mobile viewport (320dp) under a
+// conservative glyph bound. This file is in the scan-screen layout tree, so the change is surgical:
+// ReceiveMode.tsx + styles.ts are UNTOUCHED — these tests pin why that is safe.
+describe('ReceiveMode — VCHF/ICP amount prefix (U2 honest textual units)', () => {
+  const BUNDLED = icpCatalogOf(BUNDLED_NETWORKS);
+
+  /** The unit text rendered inside the `req-prefix` pressable (before the chevron icon). */
+  const prefixText = (tree: renderer.ReactTestRenderer): string => {
+    const node = tree.root.findAll(n => n.props && n.props.testID === 'req-prefix')[0];
+    const unit = node.findAllByType(Text)[0];
+    return textOf(unit.props.children);
+  };
+
+  test('mounts with the exact unit text VCHF (currency 7) — not "?"', () => {
+    const tree = mountReceive({catalog: BUNDLED, selectedCurrency: 7});
+    expect(prefixText(tree)).toBe('VCHF');
+    act(() => { tree.unmount(); });
+  });
+
+  test('mounts with the exact unit text ICP (currency 8) — not "?"', () => {
+    const tree = mountReceive({catalog: BUNDLED, selectedCurrency: 8});
+    expect(prefixText(tree)).toBe('ICP');
+    act(() => { tree.unmount(); });
+  });
+
+  test('the prefix container is CONTENT-SIZED — no fixed width can clip the unit text', () => {
+    // S.prefixBtn must carry no width/minWidth/maxWidth: the flex:1 amount input yields space, so
+    // the widest honest unit never truncates. Read from S so a future style edit that pins a width
+    // fails HERE (deterministically, offline) instead of on a device.
+    const prefixBtn = S.prefixBtn as Record<string, unknown>;
+    expect(prefixBtn.width).toBeUndefined();
+    expect(prefixBtn.minWidth).toBeUndefined();
+    expect(prefixBtn.maxWidth).toBeUndefined();
+    expect((S.amountInput as Record<string, unknown>).flex).toBe(1);
+  });
+
+  test('the VCHF prefix fits the NARROWEST mobile width (320dp) under a conservative glyph bound', () => {
+    // Budget at 320dp (the smallest RN baseline viewport): viewport − body paddingHorizontal×2 −
+    // amountRow paddingHorizontal×2. Worst-case prefix: 4 chars × 0.75em (bold advance) × fontSize
+    // 34 + chevron 20 + prefixBtn paddingRight 12. Every number is read from S so a style change
+    // that shrinks the budget (or grows the prefix font) fails here, not on a device.
+    const NARROWEST_VIEWPORT = 320;
+    const budget =
+      NARROWEST_VIEWPORT -
+      2 * Number(S.body.paddingHorizontal) -
+      2 * Number(S.amountRow.paddingHorizontal);
+    const glyphPx = Number(S.currency.fontSize) * 0.75;
+    const worstCasePrefix =
+      'VCHF'.length * glyphPx + 20 /* IconChevronDown size */ + Number(S.prefixBtn.paddingRight);
+    expect(worstCasePrefix).toBeLessThanOrEqual(budget);
+    // Desktop/web is capped WIDER (root maxWidth 480 ≥ 320), so the mobile bound subsumes it.
+    expect(Number(S.root.maxWidth)).toBeGreaterThanOrEqual(NARROWEST_VIEWPORT);
+  });
+
+  test('(web) the same honest prefix at desktop width — the unit text is platform-independent', () => {
+    asWeb();
+    const tree = mountReceive({catalog: BUNDLED, selectedCurrency: 7});
+    expect(prefixText(tree)).toBe('VCHF');
     act(() => { tree.unmount(); });
   });
 });

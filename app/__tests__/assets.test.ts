@@ -28,7 +28,9 @@ import {
   solanaUsdcCoherent,
   type SelectableAsset,
 } from '../config/assets';
+import {BUNDLED_NETWORKS, icpCatalogOf, parseNetworkCatalog} from '../config/catalog';
 import type {CurrencyDescriptor, NetworkSection, SolanaAsset} from '../config/catalog';
+import {buildAssetBalances} from '../lib/assetBalances';
 
 // --- shared fixtures (mirror catalog.test.ts's `mk`) -----------------------------------------
 const mk = (d: Partial<CurrencyDescriptor> & Pick<CurrencyDescriptor, 'currency' | 'minter_family'>): CurrencyDescriptor => ({
@@ -379,5 +381,102 @@ describe('chipLabel — collision-driven network qualification', () => {
     const assets = buildSelectableAssets([DEMO, CKUSDC], {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
     const icUsdc = assets.find(a => a.id === 'ic:2')!;
     expect(chipLabel(icUsdc, assets)).toBe(chipLabel(icUsdc, assets));
+  });
+});
+
+// =============================================================================================
+// 9. VCHF/ICP (2026-08-28) — the bundled direct-ICRC rows: stable ids/keys, mainnet visibility,
+//    refresh-stable order, zero-balance visibility, and no-ramp action honesty.
+// =============================================================================================
+describe('buildSelectableAssets — bundled VCHF/ICP direct-ICRC rows (2026-08-28)', () => {
+  const BUNDLED: CurrencyDescriptor[] = icpCatalogOf(BUNDLED_NETWORKS);
+
+  it('derives stable ids ic:7/ic:8 with testKeys vchf/icp — MAINNET-visible under showTestnet=false', () => {
+    // No production special case: the builder maps the two no-minter rows like any IC descriptor.
+    // They are stamped testnet:false by the owning icp MAINNET section, so the default wallet view
+    // (showTestnet=false) shows them in catalog order after ckETH (ic:6).
+    const assets = buildSelectableAssets(BUNDLED, {showTestnet: false, solanaEnabled: false});
+    expect(ids(assets)).toEqual(['ic:0', 'ic:1', 'ic:2', 'ic:6', 'ic:7', 'ic:8']);
+    expect(assets.find(a => a.id === 'ic:7')!.testKey).toBe('vchf');
+    expect(assets.find(a => a.id === 'ic:8')!.testKey).toBe('icp');
+    expect(assets.find(a => a.id === 'ic:7')!.visible).toBe(true);
+    expect(assets.find(a => a.id === 'ic:8')!.visible).toBe(true);
+  });
+
+  it('network labels distinguish the IC rows honestly ("Internet Computer", never Bitcoin/Ethereum)', () => {
+    const assets = buildSelectableAssets(BUNDLED, {showTestnet: false, solanaEnabled: false});
+    const vchf = assets.find(a => a.id === 'ic:7')!;
+    const icp = assets.find(a => a.id === 'ic:8')!;
+    expect(vchf.network).toBe('Internet Computer');
+    expect(vchf.networkLabel).toContain('Internet Computer');
+    expect(icp.networkLabel).toContain('Internet Computer');
+    expect(vchf.networkLabel).not.toMatch(/Bitcoin|Ethereum/);
+    expect(icp.networkLabel).not.toMatch(/Bitcoin|Ethereum/);
+    expect(vchf.symbol).toBe('VCHF');
+    expect(icp.symbol).toBe('ICP');
+    expect(vchf.decimals).toBe(8);
+    expect(icp.decimals).toBe(8);
+  });
+
+  it('selector ids/testKeys/order SURVIVE a live catalog refresh (wire envelope → parse → rebuild)', () => {
+    // Simulate the refresh exactly as useCatalog delivers it: the LIVE response (a wire envelope
+    // carrying the same rows) REPLACES the bundled default; the flat catalog is re-derived through
+    // parseNetworkCatalog → icpCatalogOf and the asset list is rebuilt with NEW descriptor objects.
+    // ids, testKeys, and order must be IDENTICAL — the Wallet selection (keyed by AssetId) must
+    // survive the swap without resetting.
+    const wire = {
+      networks: [
+        {protocol: 'icp', name: 'Internet Computer', environment: 'mainnet', assets: BUNDLED.map(c => ({...c}))},
+        {protocol: 'icp', name: 'Internet Computer', environment: 'testnet', assets: []},
+        {protocol: 'solana', name: 'Solana', environment: 'mainnet', assets: []},
+      ],
+    };
+    const parsed = parseNetworkCatalog(wire)!;
+    expect(icpCatalogOf(parsed).map(c => c.currency)).toEqual([0, 1, 2, 6, 7, 8]);
+    const before = buildSelectableAssets(BUNDLED, {showTestnet: false, solanaEnabled: false});
+    const after = buildSelectableAssets(icpCatalogOf(parsed), {showTestnet: false, solanaEnabled: false});
+    expect(ids(after)).toEqual(ids(before));
+    expect(after.map(a => a.testKey)).toEqual(before.map(a => a.testKey));
+    // The CACHE replay (fetchCurrencies persists the envelope; the next load re-parses it through
+    // JSON) is order-stable too — a cache hit cannot reshuffle the picker.
+    const cached = icpCatalogOf(parseNetworkCatalog(JSON.parse(JSON.stringify({networks: parsed})))!);
+    expect(ids(buildSelectableAssets(cached, {showTestnet: false, solanaEnabled: false}))).toEqual(ids(before));
+  });
+
+  it('zero-balance VCHF/ICP rows remain visible with honest "0 VCHF"/"0 ICP" balance views', () => {
+    // The list builder never reads balances (visibility ≠ funded). buildAssetBalances defaults a
+    // never-polled IC asset to '0' → status 'zero' (dims) but the ROW + amount still render.
+    const assets = buildSelectableAssets(BUNDLED, {showTestnet: false, solanaEnabled: false});
+    const balances = buildAssetBalances({
+      catalog: BUNDLED,
+      assets,
+      icBalances: {},            // never polled ⇒ each IC asset reads '0'
+      primaryBalance: null,
+      online: true,
+      solState: {balance: null, status: 'unavailable'},
+      usdcState: {amount: null, decimals: null, status: 'unavailable'},
+    });
+    expect(balances['ic:7']).toEqual({displayText: '0 VCHF', status: 'zero'});
+    expect(balances['ic:8']).toEqual({displayText: '0 ICP', status: 'zero'});
+  });
+
+  it('NO Add money / Cash out actions for VCHF/ICP: ramps Unavailable, no minter, not mintable', () => {
+    // The catalog-level mirror of the UI action gates: PayMode's Add-money predicate
+    // (gateDepositable = !mintable && onramp !== 'Unavailable' && minter != null) and the
+    // BalancesSheet/WithdrawSheet cash-out family gate both read exactly these fields. VCHF/ICP
+    // fail every leg ⇒ no action button is ever emitted, while remaining selectable/payable.
+    const assets = buildSelectableAssets(BUNDLED, {showTestnet: false, solanaEnabled: false});
+    for (const [id, currency] of [['ic:7', 7], ['ic:8', 8]] as const) {
+      const a = assets.find(x => x.id === id)!;
+      expect(a.capabilities).toEqual({onramp: 'Unavailable', offramp: 'Unavailable'});
+      const d = BUNDLED.find(c => c.currency === currency)!;
+      expect(d.mintable).toBe(false);
+      expect(d.minter).toBeNull();
+      expect(d.minter_family).toBeNull();
+      // PayMode gateDepositable mirror — the Add-money predicate is FALSE for both rows.
+      expect(!d.mintable && d.onramp !== 'Unavailable' && d.minter != null).toBe(false);
+      // BalancesSheet/WithdrawSheet cash-out family gate mirror — FALSE for both rows.
+      expect(d.offramp !== 'Unavailable' && (d.minter_family === 'CkBtcUtxo' || d.minter_family === 'CkEthErc20')).toBe(false);
+    }
   });
 });

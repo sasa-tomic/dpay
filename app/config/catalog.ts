@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {base, fmtAsset, usd} from '../lib/format';
+import {MAX_DECIMALS} from '../lib/amount';
 import {M} from '../i18n';
 import {BALANCE_TIMEOUT_MS} from './constants';
 import {fetchWithTimeout} from '../services/relay';
@@ -213,7 +214,8 @@ export function catalogCacheKey(relayUrl: string): string {
 }
 // Bundled fallback so a cold/offline first load still renders. Overwritten by the live catalog on
 // the first successful fetch. ONE shape with the wire (NetworkSection[]): icp mainnet carries the
-// demo deployment's rows (DEMO_USD + ckBTC + ckUSDC + ckETH, all stamped testnet:false), icp
+// demo deployment's rows (DEMO_USD + ckBTC + ckUSDC + ckETH — all stamped testnet:false — plus the
+// VCHF + ICP complete no-minter direct-ICRC rows, payable without ramps; see isPayableAsset), icp
 // testnet is EMPTY (the relay still emits the section — clients shouldn't infer from absence), and
 // the solana section mirrors app/solana.ts's rail constants VERBATIM (decimals + the USDC mainnet
 // mint are imported from the rail modules — never re-typed here). Ramp honesty (no-swap +
@@ -237,6 +239,20 @@ export const BUNDLED_NETWORKS: NetworkSection[] = [
       {currency: 6, ledger: 'ss2fx-dyaaa-aaaar-qacoq-cai', mintable: false, minter: 'sv3dd-oaaaa-aaaar-qacoa-cai', minter_family: 'CkEthErc20', symbol: 'ETH', decimals: 18,
         wrapper_name: 'ckETH', backing_symbol: 'ETH', network: 'Ethereum', display_decimals: 6, fee: '2000000000000', cap: null,
         chain_id: 1, token_contract: null, gas_ledger: null, onramp: 'Direct', offramp: 'Direct', testnet: false},
+      // VCHF (currency 7) + ICP (currency 8) — complete NO-MINTER direct-ICRC mainnet assets
+      // (2026-08-28; docs/specs/2026-08-28-vchf-icp-support-spec.md). External IC ledgers, not
+      // dpay-owned canisters: payment is a plain icrc1_transfer to `ledger`. There is no minter and
+      // no minter_family (NEVER a fake family) and NO ramps: onramp/offramp Unavailable ⇒ the UI
+      // shows no Add money / Cash out buttons while Pay/Receive stay enabled (isPayableAsset does
+      // not inspect ramps). Caps are the initial payment-policy values (10,000 VCHF / 1,000 ICP),
+      // not ledger limits. Principals + decimals are drift-checked against dfx/catalog_truth.json
+      // (vchf_ledger / icp_ledger) by the jest suite.
+      {currency: 7, ledger: 'ly36x-wiaaa-aaaai-aqj7q-cai', mintable: false, minter: null, minter_family: null, symbol: 'VCHF', decimals: 8,
+        wrapper_name: 'VCHF', backing_symbol: 'VCHF', network: 'Internet Computer', display_decimals: 8, fee: '10000', cap: '1000000000000',
+        chain_id: null, token_contract: null, gas_ledger: null, onramp: 'Unavailable', offramp: 'Unavailable', testnet: false},
+      {currency: 8, ledger: 'ryjl3-tyaaa-aaaaa-aaaba-cai', mintable: false, minter: null, minter_family: null, symbol: 'ICP', decimals: 8,
+        wrapper_name: 'ICP', backing_symbol: 'ICP', network: 'Internet Computer', display_decimals: 8, fee: '10000', cap: '100000000000',
+        chain_id: null, token_contract: null, gas_ledger: null, onramp: 'Unavailable', offramp: 'Unavailable', testnet: false},
     ],
   },
   {protocol: 'icp', name: 'Internet Computer', environment: 'testnet', assets: []},
@@ -312,7 +328,9 @@ const FAMILY_DISPLAY: Partial<Record<MinterFamily, FamilyDisplay>> = {CkBtcUtxo:
 // (e.g. CkSol) or a no-minter ICRC currency returns `null` instead of silently falling back to the
 // ckBTC config. Per CLAUDE.md dpay never swaps, so a wrong-currency render (a SOL asset labelled
 // "BTC") is a non-custodial-trust violation, not a cosmetic glitch. Every caller MUST branch on
-// `null` → explicit "Unsupported" UI (the type system enforces this; no `!`/`any`).
+// `null` → explicit "Unsupported" UI (the type system enforces this; no `!`/`any`). NOTE: this is
+// RAMP-family display/dispatch config only — DIRECT payability of a complete no-minter row (VCHF/
+// ICP, 2026-08-28) is decided by `isPayableAsset`, never here.
 //
 // MC1 unit 5: the per-currency facts (networkLabel/nativeAsset/amountDecimals) are sourced FROM
 // THE DESCRIPTOR when present (authoritative single source of truth), with the family-default as a
@@ -384,21 +402,57 @@ export function resolveNfcDisclosure(
   return {assetName: name, networkLabel: network, formattedAmount: formatted};
 }
 
+// --- direct-ICRC payability (VCHF/ICP, 2026-08-28) ------------------------------------------------
+// A COMPLETE trusted ICRC descriptor is directly payable with NO minter: the payment rail signs an
+// `icrc1_transfer` to the row's exact `ledger` principal, so every fact DIRECT payment needs is on
+// the descriptor itself. "Complete" (ALL legs required — any missing leg fails closed):
+//   • non-empty ledger principal text (the transfer destination)
+//   • integer decimals within the u64 amount contract, 0..=MAX_DECIMALS (mirrors parseDecimalToUnits)
+//   • non-empty wrapper_name + backing_symbol + network (honest identity + settlement label)
+//   • raw fee parseable as an unsigned integer (the ledger's transfer fee, as a raw digit string)
+//   • raw cap parseable as a POSITIVE unsigned integer (the per-currency payment-policy cap)
+// Deliberately NOT inspected: mintable/minter/minter_family/onramp/offramp — ramps are FUNDING
+// capabilities, not payment capabilities. familyDisplay is NOT consulted here either: it stays the
+// ramp-family display/dispatch config and returns null for no-minter rows (never a fake
+// minter_family).
+const RAW_UINT_RE = /^\d+$/;
+function isCompleteDirectIcrcRow(a: CurrencyDescriptor): boolean {
+  if (a.ledger.length === 0) return false;
+  if (a.decimals == null || !Number.isInteger(a.decimals) || a.decimals < 0 || a.decimals > MAX_DECIMALS) return false;
+  if (!a.wrapper_name || a.wrapper_name.length === 0) return false;
+  if (!a.backing_symbol || a.backing_symbol.length === 0) return false;
+  if (!a.network || a.network.length === 0) return false;
+  if (a.fee == null || !RAW_UINT_RE.test(a.fee)) return false;
+  if (a.cap == null || !RAW_UINT_RE.test(a.cap) || BigInt(a.cap) <= 0n) return false;
+  return true;
+}
+
 // MC5 — the "is this currency a PAYABLE asset" predicate. Used as the defense-in-depth gate BEFORE
-// the payer signs: a request carrying an unknown/unsupported currency (a garbage/retired id, or a
-// CkSol-family currency with no ramp config) must NEVER reach the envelope signer (prepareTransfer).
-// The ledger also rejects retired/unknown currencies, but the app should fail closed FIRST — never
-// let the user Approve a sign for an unsupported asset.
+// the payer signs: a request carrying an unknown/unsupported currency (a garbage/retired id) must
+// NEVER reach the envelope signer (prepareTransfer). The ledger also rejects retired/unknown
+// currencies, but the app should fail closed FIRST — never let the user Approve a sign for an
+// unsupported asset.
 //
-// "Supported" ≠ "familyDisplay non-null": DEMO (currency 0) has minter_family null → familyDisplay
-// returns null, BUT DEMO IS payable (the faucet funds it; its display never depended on
-// familyDisplay's BTC fallback — see MC1 unit 6). So the predicate is the disjunction:
-//   currency === 0 (DEMO always payable) || familyDisplay(catalog, currency) !== null (known family).
-// CkBtcUtxo + CkEthErc20 ⇒ payable; CkSol / missing-from-catalog / no-minter ICRC ⇒ NOT payable.
-// Mirrors the fail-closed discipline of MC1 unit 6 (never a silent Bitcoin fallback).
+// "Supported" ≠ "familyDisplay non-null": PAYMENT capability and RAMP capability are DISTINCT
+// (2026-08-28, VCHF/ICP). A ramp family (CkBtcUtxo/CkEthErc20 — the ck assets) vouches for its rows:
+// the bundled fallback rows legitimately carry null fee/cap metadata while the minter — not a raw
+// descriptor fact — is the thing the app talks to. Symmetrically, a COMPLETE no-minter ICRC
+// descriptor (VCHF currency 7 / ICP currency 8) is payable WITHOUT any minter: the app signs a
+// plain icrc1_transfer against the row's own ledger. The predicate is the disjunction:
+//   currency === 0 (DEMO always payable — the faucet funds it; its display never depended on
+//                  familyDisplay, see MC1 unit 6)
+//   || familyDisplay(catalog, currency) !== null (a known ramp family)
+//   || isCompleteDirectIcrcRow(descriptor) (a complete trusted direct-ICRC row).
+// mintable/minter/minter_family/onramp/offramp are deliberately NOT inspected for DIRECT payability
+// (Unavailable ramps hide Add money / Cash out without hiding the asset or disabling Pay/Receive).
+// Unknown ids (missing from the catalog) and malformed/incomplete rows fail closed — mirrors the
+// fail-closed discipline of MC1 unit 6 (never a silent Bitcoin fallback).
 export function isPayableAsset(catalog: CurrencyDescriptor[], currency: number): boolean {
   if (currency === 0) return true; // DEMO is always payable (the faucet funds it).
-  return familyDisplay(catalog, currency) !== null; // known family ⇒ payable; else fail closed.
+  const a = catalog.find(c => c.currency === currency);
+  if (!a) return false; // unknown currency id ⇒ fail closed BEFORE signing.
+  if (familyDisplay(catalog, currency) !== null) return true; // known ramp family ⇒ payable.
+  return isCompleteDirectIcrcRow(a); // complete direct-ICRC row ⇒ payable; else fail closed.
 }
 // A stable ASCII key for an asset's testID (the catalog symbol may be a non-ASCII glyph like ₿).
 // ckBTC keeps 'ckbtc' to honour the existing e2e testID contract; other assets use their wrapper
@@ -488,7 +542,8 @@ export function displayName(a: CurrencyDescriptor): string {
 // The amount-prefix glyph for a currency (shown before a typed amount in Receive + as the prefix of
 // a DEMO amount string). MC1 unit 5: a `$`-style stablecoin glyph is NOT assumed by family — only
 // when the descriptor's backing_symbol/symbol indicates a USD-like asset. DEMO→'∂', BTC→'₿',
-// USDC→'$'. Distinct from displayName (the NAME) and from the raw-amount unit suffix.
+// USDC→'$'. VCHF/ICP (2026-08-28): a COMPLETE trusted direct-ICRC row renders its exact unit text
+// ('VCHF'/'ICP'). Distinct from displayName (the NAME) and from the raw-amount unit suffix.
 export function currencySymbol(catalog: CurrencyDescriptor[], currency: number): string {
   if (currency === 0) return '∂';
   const a = catalog.find(c => c.currency === currency);
@@ -503,6 +558,11 @@ export function currencySymbol(catalog: CurrencyDescriptor[], currency: number):
   }
   const sym = a?.symbol;
   if (sym && sym.length <= 2) return sym;
+  // VCHF/ICP (2026-08-28): a COMPLETE trusted direct-ICRC row renders its EXACT payment-unit text
+  // (the descriptor's backing_symbol — 'VCHF'/'ICP'), not the ambiguous '?'. The unit is honest
+  // catalog metadata (a short ASCII string the bundled fonts carry — never a franc glyph or a token
+  // icon). Incomplete no-minter rows and unknown ids keep the '?' fallback.
+  if (a && isCompleteDirectIcrcRow(a) && a.backing_symbol) return a.backing_symbol;
   // MC1 unit 6: unknown family → explicit "?" glyph, never the Bitcoin ₿ fallback.
   return '?';
 }
