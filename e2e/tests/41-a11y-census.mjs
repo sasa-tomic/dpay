@@ -46,17 +46,17 @@ const SURFACES = {
   // not a Pressable; the pay-scan DIV is informational).
   home: [],
   // Receive tab + currency picker (open via req-prefix). The picker rows are req-pick-<assetTestKey>;
-  // the wallet's IC-mainnet catalog ships DEMO/ckBTC/ckUSDC/ckUSDT/ckETH/VCHF/ICP, so all seven
-  // picker rows assert. req-pick-sol is the unified SOL entry (Issue #2) — picking it flips the
-  // rail to SolReceiveMode. (ckETH/VCHF/ICP added 2026-08-28 — the census lists follow the catalog.)
+  // the wallet's IC-mainnet catalog ships DEMO/ckBTC/ckUSDC/ckETH/VCHF/ICP (the REAL prod rows —
+  // six mainnet IC assets since the 2026-08-28 catalog transplant), so all six picker rows assert.
+  // req-pick-sol is the unified SOL entry (Issue #2) — picking it flips the rail to SolReceiveMode.
   receive: ['req-prefix', 'amount-input', 'memo-input', 'btn-request',
-            'req-pick-demo', 'req-pick-ckbtc', 'req-pick-ckusdc', 'req-pick-ckusdt', 'req-pick-cketh',
+            'req-pick-demo', 'req-pick-ckbtc', 'req-pick-ckusdc', 'req-pick-cketh',
             'req-pick-vchf', 'req-pick-icp', 'req-pick-sol'],
   // Balances hub (open via `balance` tap). btn-topup is the DEMO row's faucet button; `asset-*-select`
   // is each row's whole-row select Pressable. SOL is uniform with the IC rows now (whole-row select,
   // no per-row Receive/Send buttons — on-chain deposit/send lives in the Pay/Receive tab sub-modes).
   balances: ['btn-balances-close', 'btn-topup',
-             'asset-demo-select', 'asset-ckbtc-select', 'asset-ckusdc-select', 'asset-ckusdt-select',
+             'asset-demo-select', 'asset-ckbtc-select', 'asset-ckusdc-select',
              'asset-cketh-select', 'asset-vchf-select', 'asset-icp-select',
              'asset-sol-select'],
   // Settings sheet (open via `btn-settings`). btn-reset-* are revealed only after tapping btn-reset

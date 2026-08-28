@@ -39,7 +39,10 @@ export const meta = {
   journey: 'pay',
   covers: ['vchf', 'icp-mainnet', 'merchant-request', '8-decimals', 'signed-envelope', 'ledger-target', 'exact-memo', 'reconciliation', 'fail-closed-confirm', 'ledger-row'],
   verifies: 'A merchant creates a 1.00000001 VCHF request in-app (exact raw units 100000001); a wrong-memo transfer to the VCHF ledger settles on the rail but does NOT flip the request to Received; the exact-memo transfer flips it. Sender pays the 10000 fee; no other currency moves; merchant Ledger shows +1.00000001 VCHF from the payer short key.',
-  timeoutMs: 35000, // two confirm polls (wrong leg burns the ~4.5s proof budget before failing) + settle polls
+  timeoutMs: 60_000, // two confirm polls (wrong leg burns the ~4.5s proof budget before failing) + settle polls.
+  // 2026-08-28: raised 35s → 60s + widened the two reconcile waits to 20s — under full-suite
+  // contention on the shared host the ~4.5s poll exhaust + render outran the old 8s wait
+  // (failed in-suite 2× while passing standalone; same conditions, more patience).
 };
 
 export async function run() {
@@ -100,7 +103,7 @@ export async function run() {
 
     // The confirm poll must exhaust (~4.5s under e2e overrides) and surface its err — the request
     // stays open, NO Received.
-    const sawErr = await driver.waitForText('confirm this payment yet', { timeoutMs: 8_000 });
+    const sawErr = await driver.waitForText('confirm this payment yet', { timeoutMs: 20_000 });
     assert(sawErr, 'wrong-memo leg surfaces the could-not-confirm error');
     assert(!(await driver.bodyText()).includes('Received'), 'wrong-memo leg must NOT flip the request to Received');
     assert((await driver.findByTestID('request-qr', { timeoutMs: 2_000 })) != null, 'request QR stays open after the wrong-memo scan');
@@ -112,7 +115,7 @@ export async function run() {
     console.log('[97-vchf-merchant-reconcile] exact-memo transfer (must confirm)…');
     await openPayerScan(driver);
     await driver.eval((qr) => { if (typeof window.__DPAY_TEST_SCAN === 'function') window.__DPAY_TEST_SCAN(qr); }, await envelope(req.nonceHex));
-    await driver.waitForText('Received 1.00000001 VCHF', { timeoutMs: 12_000 });
+    await driver.waitForText('Received 1.00000001 VCHF', { timeoutMs: 20_000 });
     assertIncludes(await driver.bodyText(), '1.00000001 VCHF', 'received screen shows exact VCHF amount');
 
     // --- Balances: exact credits/debits, sibling isolation --------------------------------------

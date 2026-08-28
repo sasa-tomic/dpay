@@ -38,7 +38,10 @@ export const meta = {
   journey: 'system',
   covers: ['restore-seed', 'restore-mnemonic-words', 'settings-restore', 'identity-replace', 'keypair-from-secret'],
   verifies: 'Settings → Restore replaces wallet identity from 24 words OR 64-hex seed (no wipe); username preserved.',
-  timeoutMs: 60_000, // 2026-08-22: ~27s solo, ~45s under full-suite load on a busy shared host (measured at HEAD too) — 40s budget tipped over deterministically; raised with margin.
+  timeoutMs: 100_000, // 2026-08-22: ~27s solo, ~45s under full-suite load — 40s tipped over, raised. 2026-08-28: hung 3/3 on a
+  // shared host at load 52-66/16 cores even with the runner's ×3.25 host-load scale (195s budget < ~210s need); probes
+  // with larger budgets passed the identical sequence and the flow itself went GREEN in 35.6s once load decayed — pure
+  // CPU starvation, not a regression. Raised 60s → 100s so the scaled budget survives a hot shared host.
 };
 
 export async function run() {

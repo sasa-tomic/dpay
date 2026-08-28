@@ -1,28 +1,33 @@
-// Flow 43 — Decimal-edges: 8-dec (ckBTC) + 6-dec (ckUSDC) + 18-dec (ckDAI) amounts render with
-// EXACT decimals on the payment sign surface — no rounding, no scientific notation, no trailing-zero
-// drift, no float artifact. Covers the browser-reachable slice of the MC1 units-2-4 decimal matrix
-// (the format path `fmtCurrencyAmount` → `fmtAsset`), including the 18-dec precision extreme that
-// would lose low digits under a Number/parseFloat path (OPEN_ISSUES #3).
+// Flow 43 — Decimal-edges: 8-dec (ckBTC) + 6-dec (ckUSDC) + 18-dec (ckETH, display-truncated to
+// 6) amounts render with EXACT decimals on the payment sign surface — no rounding, no scientific
+// notation, no trailing-zero drift, no float artifact. Covers the browser-reachable slice of the
+// MC1 units-2-4 decimal matrix (the format path `fmtCurrencyAmount` → `fmtAsset`), including the
+// 18-dec precision extreme that would lose low digits under a Number/parseFloat path
+// (OPEN_ISSUES #3).
 //
-// The format primitive under test (`fmtAsset` in app/lib/format.ts):
+// The format primitive under test (`fmtAsset` in app/lib/format.ts) — all-BigInt math, no
+// `Number()`, no `parseFloat`, and a display-decimals TRUNCATION step (slice, never round):
 //     const n = BigInt(raw);
 //     if (n === 0n) return `0 ${unit}`;                       // zero special-case (no precision pad)
 //     const scale = 10n ** BigInt(decimals);
-//     return `${(n / scale).toString()}.${(n % scale).toString().padStart(decimals, '0')} ${unit}`;
+//     dd  = displayDecimals (when 0 <= dd <= decimals), else decimals
+//     frac = (n % scale).toString().padStart(decimals, '0').slice(0, dd).padEnd(dd, '0')   // TRUNCATE
 //
-// All-BigInt math — no `Number()`, no `parseFloat`. The risk class is the alternative (float math):
+// The risk class is the alternative (float math):
 //   - 12345678 sats → 0.12345678 BTC exactly via BigInt; via Number it's 0.12345678 (ok at 8 dec)
 //     but at 18 dec the low digits fall off Number's 2^53 mantissa.
 //   - The trailing-zero case (100000000 sats → 1.00000000 BTC) catches a trim bug (a formatter that
 //     drops trailing zeros would render "1 BTC" — wrong fixed-width display).
 //   - The low-digit case (1 sat → 0.00000001 BTC) catches a padStart bug.
 //
-// Plan scope note: the plan asked for 8-dec (ckBTC) + 18-dec (ckERC20). The catalog (FakeLedger's
-// `fake_catalog`) now ships a 18-dec ckERC20 — ckDAI (currency 4, DAI on Ethereum mainnet, 18 dec)
-// — added under OPEN_ISSUES #3 to close the decimal-edges gap. The 18-dec case is the precision
-// extreme: at 18 decimals a Number/parseFloat path drops low digits past 2^53 (e.g. 0.5 DAI =
-// 5e17 raw, well above 2^53 ≈ 9e15), so the BigInt-only `fmtAsset` is the only correct path. The
-// 6-dec case proves the formatter works at non-2,non-8 precision; the 8-dec case covers the
+// Plan scope note: the plan asked for 8-dec (ckBTC) + 18-dec (ckERC20). The 18-dec row in the REAL
+// catalog (since the 2026-08-28 transplant) is ckETH — currency 6, the mainnet native ckERC20 (18
+// dec, display_decimals 6, per the prod row). The 18-dec case stays the precision extreme, now in
+// TWO dimensions: (a) the raw wire amount is full 18-dec BigInt (past 2^53 — e.g. 0.5 ETH = 5e17
+// raw ≫ 2^53 ≈ 9e15), so a Number anywhere in the request-decode → format chain loses low digits
+// before `fmtAsset` ever runs; (b) fmtCurrencyAmount threads display_decimals=6 and fmtAsset
+// TRUNCATES to it — '1.234567' where a float `(raw/1e18).toFixed(6)` would ROUND to '1.234568'.
+// The 6-dec case proves the formatter works at non-2,non-8 precision; the 8-dec case covers the
 // Bitcoin-shaped family; the 18-dec case covers the precision extreme. Raw values >2^53 are
 // BigInt literals (the wire codec's `putU64Le` does `BigInt(val)`, so a Number literal would
 // already have lost precision before reaching the codec).
@@ -36,10 +41,10 @@
 //     - mid: 1234567 raw  → '1.234567 USDC'            (full-precision)
 //     - low: 1 raw        → '0.000001 USDC'           (padStart: 5 leading zeros)
 //     - pad: 1000000 raw  → '1.000000 USDC'            (trailing-zero integrity)
-//   ckDAI (18 dec):
-//     - mid: 1234567890123456789 raw → '1.234567890123456789 DAI' (full-precision past 2^53)
-//     - low: 1 raw                    → '0.000000000000000001 DAI' (padStart: 17 leading zeros)
-//     - pad: 1000000000000000000 raw  → '1.000000000000000000 DAI' (trailing-zero integrity)
+//   ckETH (18 dec, display 6 — TRUNCATED, never rounded):
+//     - mid: 1234567890123456789 wei → '1.234567 ETH'  (float would round to '1.234568')
+//     - low: 1 wei                    → '0.000000 ETH' (display pad to 6)
+//     - pad: 1000000000000000000 wei  → '1.000000 ETH' (trailing-zero integrity at display 6)
 //
 // Approach: build a request QR per case via buildRequestQR (encoding the raw amount + currency),
 // inject it via the camera seam (`window.__DPAY_TEST_SCAN`), then read the sign surface's pay-amount
@@ -49,7 +54,7 @@
 // sign surface formats the amount from the request bytes alone (we only assert the format, not
 // the settle).
 //
-// One-press rule (2026-08-24): the scan AUTO-SIGNS. The wallet holds no currency-1/2/4 funds, so
+// One-press rule (2026-08-24): the scan AUTO-SIGNS. The wallet holds no currency-1/2/6 funds, so
 // each sign lands on the honest terminal (gateway rejection "insufficient funds" → the read-only
 // surface keeps pay-amount + the err + Cancel), and the format assert runs against that stable
 // surface — no race with the transient "Signing…" dwell.
@@ -60,7 +65,7 @@ import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.m
 
 const CKBTC_CURRENCY = 1;
 const CKUSDC_CURRENCY = 2;
-const CKDAI_CURRENCY = 4;
+const CKETH_CURRENCY = 6;
 
 // Each case: { label, currency, raw, expected }. `expected` is the exact substring the sign status's
 // `pay-amount` should contain (PayMode renders `Pay ${fmtCurrencyAmount(...)}`, so the assertion is
@@ -75,12 +80,14 @@ const CASES = [
   { label: 'ckUSDC mid (1234567 raw)',   currency: CKUSDC_CURRENCY, raw: 1_234_567,   expected: '1.234567 USDC' },
   { label: 'ckUSDC low (1 raw)',         currency: CKUSDC_CURRENCY, raw: 1,           expected: '0.000001 USDC' },
   { label: 'ckUSDC pad (1000000 raw)',   currency: CKUSDC_CURRENCY, raw: 1_000_000,   expected: '1.000000 USDC' },
-  // ckDAI (18 dec) — full-precision past 2^53, low-digit, trailing-zero. BigInt literals are
-  // REQUIRED: the mid + pad raw values exceed 2^53, so a Number literal would lose low digits
-  // BEFORE the wire codec's `BigInt(val)` ever ran (the codec is exact, but Number parsing is not).
-  { label: 'ckDAI mid (1234567890123456789 raw)',  currency: CKDAI_CURRENCY, raw: 1_234_567_890_123_456_789n, expected: '1.234567890123456789 DAI' },
-  { label: 'ckDAI low (1 raw)',                     currency: CKDAI_CURRENCY, raw: 1n,                        expected: '0.000000000000000001 DAI' },
-  { label: 'ckDAI pad (1000000000000000000 raw)',   currency: CKDAI_CURRENCY, raw: 1_000_000_000_000_000_000n, expected: '1.000000000000000000 DAI' },
+  // ckETH (18 dec, display 6) — full-precision raw past 2^53, display-truncation (never rounding),
+  // low-digit, trailing-zero. BigInt literals are REQUIRED: the mid + pad raw values exceed 2^53,
+  // so a Number literal would lose low digits BEFORE the wire codec's `BigInt(val)` ever ran (the
+  // codec is exact, but Number parsing is not). The display strings are the TRUNCATED-to-6 forms —
+  // a float `(raw/1e18).toFixed(6)` path would render '1.234568' (rounded) and FAIL the mid case.
+  { label: 'ckETH mid (1234567890123456789 wei)', currency: CKETH_CURRENCY, raw: 1_234_567_890_123_456_789n, expected: '1.234567 ETH' },
+  { label: 'ckETH low (1 wei)',                     currency: CKETH_CURRENCY, raw: 1n,                        expected: '0.000000 ETH' },
+  { label: 'ckETH pad (1000000000000000000 wei)',   currency: CKETH_CURRENCY, raw: 1_000_000_000_000_000_000n, expected: '1.000000 ETH' },
 ];
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
@@ -90,8 +97,8 @@ export const meta = {
   id: '43',
   name: 'decimal-edges',
   journey: 'pay',
-  covers: ['decimal', 'format', 'ckbtc', 'ckerc20', '18-decimal'],
-  verifies: '8-dec (ckBTC) + 6-dec (ckUSDC) + 18-dec (ckDAI) amounts render with exact decimals on the sign surface (no rounding, no sci-notation, no trailing-zero drift).',
+  covers: ['decimal', 'format', 'ckbtc', 'ckerc20', '18-decimal', 'display-decimals'],
+  verifies: '8-dec (ckBTC) + 6-dec (ckUSDC) + 18-dec ckETH (display-TRUNCATED to 6, never rounded) amounts render with exact decimals on the sign surface (no rounding, no sci-notation, no trailing-zero drift).',
   timeoutMs: 35000, // 9 scan/cancel cycles + onboard — wider than the 20s default
 };
 

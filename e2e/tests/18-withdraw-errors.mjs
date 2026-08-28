@@ -11,16 +11,17 @@
 //      constructible case on this fake rail: withdraw the ENTIRE balance ("empty the wallet,
 //      forget the costs"). The app's over-balance guard compares amount vs balance only, so the
 //      full amount passes review — but the withdrawal also owes the icrc2_approve ledger fee
-//      (1e16 Wei on the fake ckETH ledger) before the minter's withdraw_eth burn, and the burn
+//      (2e12 Wei on the REAL ckETH ledger — the prod catalog row's icrc1_fee) before the
+//      minter's withdraw_eth burn, and the burn
 //      finds insufficient funds → the minter rejects (code 5, "insufficient funds: …") → the app
 //      surfaces the reject message verbatim. ICRC-2 semantics make this MONEY-HONEST, not
 //      money-neutral: the approve is a real ledger call and its fee is genuinely spent
-//      (balance 5e18 → 4.99e18); the WITHDRAWN amount itself never moves. The flow asserts
-//      BOTH the surfaced message and the exact fee-only debit.
+//      (balance 5e18 → 4.999998e18); the WITHDRAWN amount itself never moves. The flow
+//      asserts BOTH the surfaced message and the exact fee-only debit.
 //
-// Driven on FUNDED native ckETH (currency 5: CkEthErc20 + token_contract None — the withdraw_eth
-// path, no separate gas ledger on this fake). Balances are per-ledger on the fake gateway, so the
-// ckETH bucket reads back EXACTLY the faucet seed.
+// Driven on FUNDED native ckETH (currency 6: CkEthErc20 + token_contract None — the withdraw_eth
+// path, no separate gas ledger for the native row). Balances are per-ledger on the fake gateway,
+// so the ckETH bucket reads back EXACTLY the faucet seed.
 //
 // The gateway's own wire semantics (unknown canister, malformed args, envelope verification) are
 // covered relay-direct in crates/dpay-relay/tests/ — they need no browser.
@@ -31,11 +32,11 @@
 // `withdraw-err` (the surfaced rail rejection).
 import { setup, assert, assertEq, assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf, openBalances, selectCurrency, openPaySend, assertDisabled } from '../harness/lib.mjs';
 
-const ETH_CURRENCY = 5; // native ckETH — CkEthErc20 + token_contract None (the withdraw_eth path)
+const ETH_CURRENCY = 6; // native ckETH — CkEthErc20 + token_contract None (the withdraw_eth path)
 // 18-dec Wei. Plain JS numbers lose precision above 2^53 (~9e15), so the amount crosses the HTTP
 // boundary as a DECIMAL STRING (the relay's U64String parses it without precision loss).
 const SEED_WEI = 5_000_000_000_000_000_000n; // 5 ETH
-const APPROVE_FEE_WEI = 10_000_000_000_000_000n; // the fake ckETH ledger's icrc1_fee (1e16)
+const APPROVE_FEE_WEI = 2_000_000_000_000n; // the REAL ckETH ledger's icrc1_fee (2e12 Wei = 0.000002 ETH, from the prod catalog row)
 const DEST = '0x000000000000000000000000000000000000dead'; // valid 0x + 40 hex (the app's CkEthErc20 regex)
 const BTC_STYLE_ADDR = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh'; // wrong-chain (BTC format in the ETH cash-out)
 
@@ -111,8 +112,8 @@ export async function run() {
     //         the approve ledger fee — the minter's withdraw_eth burn finds insufficient funds
     //         and rejects (code 5, "insufficient funds: …"). The app MUST surface the reject
     //         message verbatim — never silently swallow it. Money-honest per ICRC-2: the approve
-    //         is a real ledger call, so its fee (1e16 Wei) is genuinely spent; the withdrawn
-    //         amount itself NEVER moves (5e18 − 1e16 remains — exactly fee-only). -----------------
+    //         is a real ledger call, so its fee (2e12 Wei) is genuinely spent; the withdrawn
+    //         amount itself NEVER moves (5e18 − 2e12 remains — exactly fee-only). -----------------
     console.log('[18-withdraw-errors] rail rejection (minter-refused full-balance withdraw)…');
     await driver.type('withdraw-address-input', DEST, { timeoutMs: 4_000 });
     await driver.type('withdraw-amount-input', '5', { timeoutMs: 4_000 }); // == the full balance

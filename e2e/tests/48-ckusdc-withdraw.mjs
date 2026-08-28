@@ -14,9 +14,9 @@
 // from the minter's home ledger — the browser-driven proof of the REAL dual-ledger flow.
 //
 // Funding: per-ledger buckets mean the wallet needs BOTH assets — ckUSDC (currency 2) for the
-// amount + its 10000-microunit approve fee, AND ckETH (currency 5) for the 78e12-Wei gas burn
-// + its 1e16-Wei approve fee. Honest post-withdraw expectations: ckUSDC 1e9 − 1e6 − 10000 =
-// 998990000 ('998.990000 USDC'); ckETH seed − 1e16 − 78e12.
+// amount + its 10000-microunit approve fee, AND ckETH (currency 6) for the 78e12-Wei gas burn
+// + its 2e12-Wei approve fee. Honest post-withdraw expectations: ckUSDC 1e9 − 1e6 − 10000 =
+// 998990000 ('998.990000 USDC'); ckETH seed − 2e12 − 78e12.
 //
 // Flow 15 (BTC) + flow 44 (native ETH) + flow 48 (ckERC20) cover ALL three family branches of
 // the withdraw surface.
@@ -25,12 +25,12 @@
 // (Pay → "Send to address"), `withdraw-address-input`, `withdraw-amount-input`,
 // `withdraw-gas-note` (the ckETH-gas-dependency note — renders ONLY for a ckERC20 token),
 // `btn-withdraw-confirm`, `withdraw-status`, `btn-pay-scan` (flip back to scan). Asset
-// segregation note: ckUSDC is currency 2 + ckETH currency 5, SEPARATE assets from the `$`
+// segregation note: ckUSDC is currency 2 + ckETH currency 6, SEPARATE assets from the `$`
 // DEMO_USD header (currency 0).
 import { setup, assert, assertEq, faucetAccount, getBalance, onboardWallet, accountOf, openBalances, selectCurrency, openPaySend } from '../harness/lib.mjs';
 
 const CKUSDC_CURRENCY = 2; // ckUSDC — CkEthErc20 + token_contract Some (dual-ledger withdraw_erc20)
-const CKETH_CURRENCY = 5; // native ckETH — the gas ledger (desc.gas_ledger)
+const CKETH_CURRENCY = 6; // native ckETH — the gas ledger (desc.gas_ledger)
 // 6-dec micro-units (ckUSDC side — well under 2^53, plain Numbers fine; STRING contract kept).
 const SEED_RAW = 1_000_000_000; // 1000 USDC @ 6 dec = 1e9 raw
 const APPROVE_FEE_RAW = 10_000; // the ckUSDC ledger's icrc1_fee (10000 microunits = 0.01 USDC)
@@ -38,7 +38,7 @@ const WITHDRAW_USDC = '1'; // user enters "1" (USDC) — the app converts to 1e6
 const WITHDRAW_RAW = 1_000_000; // 1 USDC @ 6 dec = 1e6 raw
 // ckETH side (18-dec Wei — BigInt; amounts cross HTTP as decimal STRINGS).
 const SEED_ETH_WEI = 100_000_000_000_000_000n; // 0.1 ETH — covers gas + its approve fee
-const CKETH_APPROVE_FEE_WEI = 10_000_000_000_000_000n; // the ckETH ledger's icrc1_fee (0.01 ETH)
+const CKETH_APPROVE_FEE_WEI = 2_000_000_000_000n; // the REAL ckETH ledger's icrc1_fee (2e12 Wei = 0.000002 ETH, from the prod catalog row)
 const GAS_FEE_WEI = 78_000_000_000_000n; // the minter's eip_1559 quote (fixed on this fake)
 // A valid Ethereum destination: 0x + 40 hex (the app's isValidDestinationAddress regex for CkEthErc20).
 const WITHDRAW_ADDR = '0x000000000000000000000000000000000000dead';
@@ -126,7 +126,7 @@ export async function run() {
 
     // 8. The dual-ledger debit proven directly on the fake-IC gateway. ckUSDC leg: the approve fee
     //    (10000 microunits, charged on the amount-approve) + the burned amount. ckETH leg: the
-    //    approve fee (1e16 Wei, charged on the gas-approve) + the 78e12-Wei gas burn the minter
+    //    approve fee (2e12 Wei, charged on the gas-approve) + the 78e12-Wei gas burn the minter
     //    takes from its home ledger. (The DEMO `$` header is currency 0, a separate bucket.)
     const afterUsdc = await getBalance(relayBaseURL, accountHex, CKUSDC_CURRENCY);
     assertEq(afterUsdc, String(SEED_RAW - APPROVE_FEE_RAW - WITHDRAW_RAW), 'post-withdraw ckUSDC balance (approve fee + minter burn)');

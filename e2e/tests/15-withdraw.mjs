@@ -12,27 +12,25 @@
 //
 // Balances are PER-LEDGER on the fake gateway (real ICRC semantics): funding a currency credits
 // ITS ledger at the wallet principal only — the onboarding ∂100 DEMO credit (currency 0) does not
-// touch it. This fake's ckTESTBTC has no ledger fee (fee None), so the debit is EXACTLY the
-// withdrawn amount.
+// touch it. The ckBTC catalog row carries fee None (the gateway's icrc1_fee answers 0), so the
+// debit is EXACTLY the withdrawn amount.
 //
-// WHY currency 6 (ckTESTBTC), not 1 (ckBTC): the fake catalog gives ckTESTBTC its OWN ledger but
-// the SAME CKBTC minter text — and the gateway's minter→home-ledger map is keyed by MINTER TEXT
-// (last catalog row wins), so minters[CKBTC] points at ckTESTBTC's ledger. A currency-1 approve
-// therefore lands on '2vxsx-fae' while the minter's burn looks under ckTESTBTC's ledger →
-// "insufficient allowance" on the FAKE only (a fake-fidelity gap, not an app bug). Currency 6
-// drives the byte-identical app path (CkBtcUtxo family, the SAME minter principal, approve +
-// retrieve_btc_with_approval, retrieve floor 50_000 sats) with the consistent fake wiring. When
-// the fake gives ckTESTBTC a distinct minter principal, flip BTC_CURRENCY to 1 + 'ckbtc'.
+// MAINNET ckBTC (currency 1) — the prod-shaped path, no testnet toggle. (History: the old fake
+// catalog gave ckTESTBTC the SAME CKBTC minter text as ckBTC, and the gateway's minter→home-ledger
+// map is keyed by MINTER TEXT (last row wins), which made a currency-1 approve land on the wrong
+// ledger — "insufficient allowance" on the FAKE only. Since the 2026-08-28 transplant to the REAL
+// prod rows, ckTESTBTC has its own minter principal (ml52i-…), so currency 1 is consistently
+// wired and this flow drives it directly.)
 //
-// Selector contract: `balance` (header → Balances), `btn-toggle-testnet` (reveal the testnet
-// row), `asset-ckbtc-testnet-select` (the row whole-row select), `btn-pay-send` (Pay →
-// "Send to address"), `withdraw-address-input`, `withdraw-amount-input`, `btn-withdraw-confirm`,
-// `withdraw-status`, `btn-copy-destination` (L3), `btn-withdraw-done` (success-screen Done),
+// Selector contract: `balance` (header → Balances), `asset-ckbtc-select` (the row whole-row
+// select), `btn-pay-send` (Pay → "Send to address"), `withdraw-address-input`,
+// `withdraw-amount-input`, `btn-withdraw-confirm`, `withdraw-status`,
+// `btn-copy-destination` (L3), `btn-withdraw-done` (success-screen Done),
 // `btn-pay-scan` (flip back to scan).
 import { setup, assert, assertEq, assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf, openBalances, selectCurrency, openPaySend } from '../harness/lib.mjs';
 
-const BTC_CURRENCY = 6; // ckTESTBTC — the CkBtcUtxo withdraw path (see the header note)
-const BTC_ASSET_KEY = 'ckbtc-testnet';
+const BTC_CURRENCY = 1; // ckBTC (mainnet) — the CkBtcUtxo withdraw path (see the header note)
+const BTC_ASSET_KEY = 'ckbtc';
 const SEED_SATS = 100_000;   // = 0.00100000 BTC
 const WITHDRAW_BTC = '0.00050000'; // 50_000 sats == retrieve_btc_min_amount
 const WITHDRAW_SATS = 50_000;
@@ -67,22 +65,22 @@ export async function run() {
     console.log(`[15-withdraw] wallet account: ${accountHex.slice(0, 16)}…`);
 
     // 2. Fund the ckBTC rail at the wallet's PRINCIPAL via the faucet (test-helpers). The ckBTC
-    //    ledger is fee-free on this fake, so the bucket reads back EXACTLY the seeded sats.
+    //    ledger row carries fee None (icrc1_fee answers 0), so the bucket reads back EXACTLY the
+    //    seeded sats.
     console.log(`[15-withdraw] faucet-funding ${SEED_SATS} sats (currency ${BTC_CURRENCY})…`);
     const fund = await faucetAccount(relayBaseURL, accountHex, SEED_SATS, { currency: BTC_CURRENCY });
     assert(fund.ok, `faucet funding must succeed, got HTTP ${fund.status}: ${JSON.stringify(fund.body)}`);
     const before = await getBalance(relayBaseURL, accountHex, BTC_CURRENCY);
     assertEq(before, String(SEED_SATS), 'pre-withdraw ckBTC balance at the principal (per-ledger bucket)');
 
-    // 3. Open the Balances sheet, reveal the testnet row, wait for it to appear FUNDED (the
-    //    balance poll picks up the faucet credit), then SELECT it (makes it the active asset).
-    console.log('[15-withdraw] opening Balances; revealing the funded testnet BTC row…');
+    // 3. Open the Balances sheet, wait for the ckBTC row to appear FUNDED (the balance poll picks
+    //    up the faucet credit), then SELECT it (makes it the active asset).
+    console.log('[15-withdraw] opening Balances; waiting for the funded BTC row…');
     await openBalances(driver);
-    await driver.click('btn-toggle-testnet', { timeoutMs: 4_000 });
     await driver.waitForText('0.00100000 BTC', { timeoutMs: 8_000 });
 
-    // 4. Select the testnet BTC asset → Pay → "Send to address" (the inline WithdrawSheet body).
-    console.log('[15-withdraw] selecting testnet BTC → Pay → Send to address…');
+    // 4. Select the BTC asset → Pay → "Send to address" (the inline WithdrawSheet body).
+    console.log('[15-withdraw] selecting BTC → Pay → Send to address…');
     await selectCurrency(driver, BTC_ASSET_KEY);
     await openPaySend(driver);
     await driver.findByTestID('withdraw-address-input', { timeoutMs: 5_000 });
@@ -108,7 +106,7 @@ export async function run() {
     assert(ok, `withdraw sheet should show "Withdrawn ✓". body excerpt:\n${body.slice(0, 600)}`);
 
     // 7. The debited path proven directly on the fake-IC gateway: the ckBTC balance dropped by
-    //    EXACTLY the withdrawn amount (approve == burn amount; no ledger fee on this fake).
+    //    EXACTLY the withdrawn amount (approve == burn amount; the row's fee is None → icrc1_fee 0).
     const after = await getBalance(relayBaseURL, accountHex, BTC_CURRENCY);
     assertEq(after, String(SEED_SATS - WITHDRAW_SATS), 'post-withdraw ckBTC balance (burned at the principal)');
     console.log(`[15-withdraw] ✓ ckBTC balance ${before} → ${after} sats (approve + retrieve_btc_with_approval through the REAL app+gateway)`);

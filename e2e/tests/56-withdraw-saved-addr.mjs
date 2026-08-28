@@ -10,22 +10,20 @@
 // The persistence is gated on a SUCCESSFUL settle: `saveWithdrawAddr` fires inside WithdrawSheet's
 // `confirm()` ONLY after every offramp envelope (icrc2_approve + minter call) settles via the
 // read_state poll and `setPhase('done')` runs. So this flow mirrors flow 15's funding setup
-// exactly — faucet-fund ckTESTBTC (currency 6; see flow 15's header for why the fake catalog's
-// shared CKBTC minter text makes currency 1 unusable on the fake) — then withdraw the minimum
-// (0.00050000 BTC = 50_000 sats) to a fixed bc1 address. The settle succeeds → the address is
-// saved. The sheet is then closed, REOPENED for the same currency, and the saved chip +
-// tap-to-fill is asserted.
+// exactly — faucet-fund ckBTC (currency 1, mainnet; the prod-shaped CkBtcUtxo path, see flow 15's
+// header) — then withdraw the minimum (0.00050000 BTC = 50_000 sats) to a fixed bc1 address. The
+// settle succeeds → the address is saved. The sheet is then closed, REOPENED for the same
+// currency, and the saved chip + tap-to-fill is asserted.
 //
-// Selector contract: `balance` (header → Balances), `btn-toggle-testnet` (reveal the testnet
-// row), `asset-ckbtc-testnet-select` (the row whole-row select), `btn-pay-send` (Pay →
-// "Send to address"), `withdraw-address-input`, `withdraw-amount-input`,
-// `btn-withdraw-confirm`, `btn-withdraw-done` (success-screen Done), `btn-pay-scan` (flip back
-// to scan), `btn-withdraw-saved` (the reload chip). Address + amount reused verbatim from flow
-// 15 so amount validation passes.
+// Selector contract: `balance` (header → Balances), `asset-ckbtc-select` (the row whole-row
+// select), `btn-pay-send` (Pay → "Send to address"), `withdraw-address-input`,
+// `withdraw-amount-input`, `btn-withdraw-confirm`, `btn-withdraw-done` (success-screen Done),
+// `btn-pay-scan` (flip back to scan), `btn-withdraw-saved` (the reload chip). Address + amount
+// reused verbatim from flow 15 so amount validation passes.
 import { setup, assert, assertEq, assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf, openBalances, selectCurrency, openPaySend } from '../harness/lib.mjs';
 
-const BTC_CURRENCY = 6; // ckTESTBTC — the CkBtcUtxo withdraw path (flow 15's header explains why)
-const BTC_ASSET_KEY = 'ckbtc-testnet';
+const BTC_CURRENCY = 1; // ckBTC (mainnet) — the CkBtcUtxo withdraw path (flow 15's header explains)
+const BTC_ASSET_KEY = 'ckbtc';
 const SEED_SATS = 100_000;   // 0.00100000 BTC
 const WITHDRAW_BTC = '0.00050000'; // 50_000 sats == retrieve_btc_min_amount (passes amount validation)
 const WITHDRAW_SATS = 50_000;
@@ -63,10 +61,9 @@ export async function run() {
     const before = await getBalance(relayBaseURL, accountHex, BTC_CURRENCY);
     assertEq(before, String(SEED_SATS), 'pre-withdraw balance at the principal (per-ledger bucket)');
 
-    // 2. Open the Balances hub; reveal + wait for the funded testnet BTC row, then SELECT it →
-    //    Pay → "Send to address" (the inline WithdrawSheet body).
+    // 2. Open the Balances hub; wait for the funded BTC row, then SELECT it → Pay →
+    //    "Send to address" (the inline WithdrawSheet body).
     await openBalances(driver);
-    await driver.click('btn-toggle-testnet', { timeoutMs: 4_000 });
     await driver.waitForText('0.00100000 BTC', { timeoutMs: 8_000 });
 
     // 3. Open the inline withdraw. On a FIRST cash-out there is NO saved address yet → the

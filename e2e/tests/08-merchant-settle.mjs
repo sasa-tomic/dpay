@@ -19,7 +19,7 @@ import { setup, assert, assertIncludes, getBalance, faucetAccount, icpCatalog, r
 import { generateKeypair, decodeRequest, icpPrincipalBytes, icpTransferArgBytes, icpSignUpdate, b64urlEncode } from '../harness/wire.mjs';
 
 const PAY_CENTS = 3000; // ∂30.00
-const DEMO_LEDGER = 'aaaaa-aa'; // fake-IC ledger for catalog currency 0 (asserted against the catalog below)
+const DEMO_LEDGER = 'td2nx-oaaaa-aaaab-qhdnq-cai'; // REAL DUSD ledger (catalog currency 0; the fake-IC gateway registers its ledger at this principal text — asserted against the catalog below)
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for

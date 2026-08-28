@@ -397,7 +397,7 @@ export async function openBalances(driver, opts = {}) {
  * waits for the wallet header to reflect the new active asset. The new Send/Receive IA moved the
  * on-chain deposit/withdraw entry out of Balances into the Pay/Receive tabs, so this is the SOLE way
  * to make a currency the active asset (the row is one big select Pressable). `key` is the
- * assetTestKey (e.g. 'ckbtc', 'ckusdc', 'ckusdt'); 'demo' for the DEMO row.
+ * assetTestKey (e.g. 'ckbtc', 'ckusdc', 'cketh'); 'demo' for the DEMO row.
  */
 export async function selectCurrency(driver, key, opts = {}) {
   await driver.click(`asset-${key}-select`, { timeoutMs: opts.timeoutMs ?? 5_000 });
@@ -682,7 +682,9 @@ export async function getBalance(relayBaseURL, accountHex, currency = 0, timeout
  * `protocol === 'icp'` + `environment` — never by display name — mirroring the app's own parse
  * seam (`icpCatalogOf` in app/config/catalog.ts). IC rows keep the exact `CurrencyDescriptor`
  * field set, so callers keep doing `find((c) => c.currency === N)`; currency ids are unique
- * across the two icp sections (fake: DEMO 0 … ckETH 5 in mainnet, ckTESTBTC 6 in testnet).
+ * across the two icp sections (the REAL prod rows since the 2026-08-28 catalog transplant:
+ * mainnet DEMO 0 / ckBTC 1 / ckUSDC 2 / ckETH 6 / VCHF 7 / ICP 8; testnet ckTESTBTC 3 /
+ * ckSepoliaUSDC 4 / ckSepoliaETH 5).
  * Solana rows live in their own section and never appear here. Throws on non-200 or a non-v2
  * body (no back-compat — there are no deployed clients).
  */
