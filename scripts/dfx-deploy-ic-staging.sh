@@ -1,28 +1,25 @@
 #!/usr/bin/env bash
 # Deploy (or redeploy) the dpay STAGING facade to ICP mainnet (the built-in `ic` network) as an
 # explicit named dfx identity. The staging facade is a SEPARATE canister provisioned from the prod
-# facade's (`ssqti`) cycle balance, wired to IC's FREE testnet chain-key tokens (ckBTC Testnet on
-# Bitcoin Testnet4 + ckSepoliaUSDC + ckSepoliaETH on Sepolia). This closes OPEN_ISSUES #1/#2/#8: a
-# live testnet path the e2e-live suite drives end-to-end WITHOUT real funds, alongside prod.
+# facade's (`ssqti`) cycle balance, wired to its OWN staging DUSD ledger via the init arg's
+# `demo_ledger` (the staging facade must own that ledger's minting account to run the demo faucet —
+# prod `td2nx`'s minting account is owned by prod `ssqti`). There is NO currency registration
+# anymore (the canister's registry was removed 2026-08-28): every non-DEMO asset the facade serves
+# is a compile-time FIXED_ASSETS const, and the catalog the app renders is compiled into whichever
+# relay it talks to — a staging canister changes NOTHING about the catalog.
 #
 # The sibling of scripts/dfx-deploy-ic.sh (prod facade) + scripts/dfx-deploy.sh (local replica). It
-# mirrors their structure (env vars, idempotency guards, jq merge into canister_ids.json) but:
+# mirrors their structure (env vars, module-hash mode resolution, jq merge into canister_ids.json):
 #   * PROVISIONS the staging facade + a staging DUSD ledger from prod `ssqti`'s cycles via
 #     `provision_ledger_canister` (the `dpay` identity is in ADMIN_CALLERS — authorized, no founder
 #     op). 200 TC for the facade + 20 TC for the DUSD ledger.
-#   * Registers the DEMO currency against a STAGING DUSD ledger (NOT prod `td2nx` — whose
-#     minting_account.owner is the PROD facade `ssqti`, so the staging facade cannot mint from it;
-#     a staging faucet needs a staging-owned DUSD ledger).
-#   * Registers 3 testnet chain-key currencies against their REAL testnet ledgers (free, mainnet-
-#     resident, DFINITY-operated): ckBTC Testnet, ckSepoliaUSDC, ckSepoliaETH. Exact validated
-#     metadata is pinned below (confirmed live by the planner — do not edit the values).
+#   * Deploys the facade wasm with `demo_ledger` = the staging DUSD ledger. Idempotent re-run:
+#     reuse the provisioned ids from deploy/.env and UPGRADE in place (state preserved; the init
+#     arg only takes effect on a fresh install — there is no post_upgrade).
 #
-# REHEARSAL FIRST: set DPAY_DFX_NETWORK=local to run the WHOLE script against `dfx start` (a local
-# replica) with a mock DUSD ledger. The local mode proves the script structure (init arg,
-# set_controller, the register_currency candid shape, the idempotency guard, the jq merge) BEFORE
-# any mainnet cycles are spent. The 3 testnet register_currency calls are proven well-formed by
-# asserting they reach the canister's cross-ledger VALIDATION (a mismatch reject, NOT a candid parse
-# error — a malformed argument would fail to decode long before validation runs).
+# REHEARSAL FIRST: set DPAY_DFX_NETWORK=local to run the WHOLE script against `dfx start` (a clean
+# local replica) with a mock DUSD ledger — no cycles spent, no mainnet canister created; proves the
+# provision→install→lock flow and the init-arg shape before any mainnet spend.
 #
 #   DPAY_DFX_IDENTITY   (required)  named dfx identity → becomes the staging facade controller
 #                                   (both the dfx-level canister controller AND the facade-level
@@ -33,10 +30,9 @@
 #   STAGING_CYCLES      (optional)  cycles to provision the staging facade with (mainnet only).
 #                                   Default 200_000_000_000_000 (200 TC).
 #
-# MONEY-CRITICAL: the MAINNET run creates a PERSISTENT canister + spends 220 TC. The script is
-# idempotent (re-running probes currencies() and skips already-registered ids), but the FIRST run is
-# not reversible. See OPEN_ISSUES #1/#2 + the PAUSE-FOR-COURTESY rule: do NOT run with
-# DPAY_DFX_NETWORK unset (→ mainnet) without founder greenlight.
+# MONEY-CRITICAL: the MAINNET run creates PERSISTENT canisters + spends 220 TC. The script is
+# idempotent (re-runs reuse the ids in deploy/.env and upgrade in place), but the FIRST run is not
+# reversible. Do NOT run with DPAY_DFX_NETWORK unset (→ mainnet) without founder greenlight.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -52,18 +48,6 @@ PROD_FACADE="ssqti-wiaaa-aaaab-qhdia-cai" # the prod facade (provision_ledger_ca
 STAGING_CYCLES_RAW="${STAGING_CYCLES:-200_000_000_000_000}" # 200 TC default for the staging facade
 DUSD_CYCLES_RAW="20_000_000_000_000"                        # 20 TC for the staging DUSD ledger
 LEDGER_WASM=third_party/ic-icrc1-ledger/ic-icrc1-ledger.wasm
-
-# Validated testnet chain-key metadata (confirmed live by the planner — OPEN_ISSUES #1/#2). DO NOT
-# edit these values — a wrong ledger principal / minter / decimals / fee / symbol makes the deposit
-# path silently target the wrong canister (non-custodial-trust violation). register_currency
-# STRICTLY validates decimals/fee/wrapper_name against the live ledger, so a mismatch rejects loudly
-# (the safety net); these are the values that PASS that validation on the real testnet ledgers.
-CKBTC_TESTNET_LEDGER="mc6ru-gyaaa-aaaar-qaaaq-cai"
-CKBTC_TESTNET_MINTER="ml52i-qqaaa-aaaar-qaaba-cai"
-CKSEPOLIA_USDC_LEDGER="yfumr-cyaaa-aaaar-qaela-cai"
-CKSEPOLIA_USDC_MINTER="jzenf-aiaaa-aaaar-qaa7q-cai"   # shared ckETH minter (handles all ckERC20 + ckETH)
-CKSEPOLIA_ETH_LEDGER="apia6-jaaaa-aaaar-qabma-cai"
-CKSEPOLIA_ETH_MINTER="jzenf-aiaaa-aaaar-qaa7q-cai"     # same minter
 
 # Strip the underscores dfx candid rejects in a bare `nat` literal (200_000_... → 200000...).
 strip_us() { printf '%s' "$1" | tr -d '_'; }
@@ -139,17 +123,31 @@ if [ "$NETWORK" != "local" ]; then
   merge_canister_id "$CANISTER" "$NETWORK" "$STAGING_CID"
 fi
 
-echo "== deploy facade wasm into $STAGING_CID (init: controller=null, ledgers=vec{}, cap=100000) =="
-# Open admin during setup (controller=null). set_controller below locks it to the dpay principal,
-# which enables register_currency (require_admin passes once msg_caller == controller).
-dfx_i deploy "$CANISTER" --network "$NETWORK" --mode install --yes --argument \
-  "(record { ledgers = vec {}; per_tx_cap = 100_000 : nat64; controller = null })"
+# --- deploy the facade wasm into $STAGING_CID ---------------------------------------------------
+# Mode from the canister's ACTUAL state: no code yet → install; code → upgrade (state preserved;
+# the init arg is type-checked against the .did but only takes effect on install — no post_upgrade).
+# demo_ledger = the staging DUSD ledger; controller=null (open) → set_controller below locks it.
+_ierr="$(mktemp)"
+if ! _info="$(dfx_i canister info "$STAGING_CID" --network "$NETWORK" 2>"$_ierr")"; then
+  echo "cannot read staging facade $STAGING_CID — dfx reported:" >&2
+  sed 's/^/    /' "$_ierr" >&2; rm -f "$_ierr"; exit 1
+fi
+rm -f "$_ierr"
+HASH="$(sed -n 's/^Module hash: //p' <<<"$_info")"
+if [ -z "$HASH" ] || [ "$HASH" = "None" ]; then
+  MODE=install
+  echo "== install facade wasm into $STAGING_CID (fresh; demo_ledger = staging DUSD $DUSD_LEDGER_CID) =="
+else
+  MODE=upgrade
+  echo "== upgrade facade wasm in $STAGING_CID (state preserved; init arg ignored on upgrade) =="
+fi
+dfx_i deploy "$CANISTER" --network "$NETWORK" --mode "$MODE" --yes --argument \
+  "(record { demo_ledger = principal \"$DUSD_LEDGER_CID\"; per_tx_cap = 100_000 : nat64; controller = null })"
 
 echo "== install the staging DUSD ICRC ledger (minting_account.owner = staging facade) =="
 # The staging facade MUST own the DUSD ledger's minting account (the faucet mints via icrc1_transfer
 # from it). Reusing prod `td2nx` would NOT work: its minting_account.owner = prod `ssqti`, so the
-# staging facade cannot mint from it. decimals=2, fee=0, symbol="DUSD" (validated by register_currency
-# below — wrapper_name MUST match the ledger's icrc1_symbol exactly).
+# staging facade cannot mint from it. decimals=2, fee=0, symbol="DUSD" (the DEMO play-money shape).
 _install_ledger() { # $1=decimals  $2=fee  $3=symbol  $4=token_name
   local dec="$1" fee="$2" sym="$3" name="$4"
   local init_arg="(variant { Init = record {
@@ -170,8 +168,8 @@ _install_ledger() { # $1=decimals  $2=fee  $3=symbol  $4=token_name
     } })"
   # A freshly-created canister has no code → --mode install (the first call). A re-run against an
   # already-installed ledger → --mode reinstall (replaces with a fresh init). Surface any real error
-  # (a swallowed install failure leaves the canister codeless → every register_currency validation
-  # rejects with "no Wasm module", which is confusing).
+  # (a swallowed install failure leaves the canister codeless → every DEMO ledger call rejects with
+  # "no Wasm module", which is confusing).
   local ierr
   ierr="$(mktemp)"
   if ! dfx_i canister install icrc_ledger --network "$NETWORK" --mode install \
@@ -187,123 +185,10 @@ _install_ledger() { # $1=decimals  $2=fee  $3=symbol  $4=token_name
 }
 _install_ledger 2 0 DUSD "dpay staging DUSD"
 
-echo "== lock the staging facade: set_controller(dpay principal) — enables register_currency =="
+echo "== lock the staging facade: set_controller(deploy identity) =="
 # set_controller is the ONE admin op callable in open mode (require_controller_rotation: None→any).
-# After this, msg_caller == controller → require_admin passes → register_currency works.
+# After this, mint/burn/reconcile on the staging facade are gated to this principal (the controller).
 dfx_i canister call "$CANISTER" set_controller "(opt principal \"$PRINCIPAL\")" --network "$NETWORK"
-
-# --- probe the catalog once; has_currency/_register are shared helpers (deploy/dfx-lib.sh) -------
-probe_catalog
-
-# (a) DEMO (currency 0) — staging DUSD ledger. onramp=Direct (faucet), offramp=Unavailable (play $).
-#     Full proof: validates against the real (staging) DUSD ledger on BOTH mainnet and local.
-if [ "$(has_currency 0)" = no ]; then
-  echo "== register_currency DEMO(0) → staging DUSD ledger $DUSD_LEDGER_CID =="
-  _register "(record {
-       currency = 0 : nat32;
-       ledger = principal \"$DUSD_LEDGER_CID\";
-       mintable = true;
-       minter = null;
-       symbol = opt \"\$\";
-       decimals = 2 : nat8;
-       minter_family = null;
-       wrapper_name = \"DUSD\";
-       backing_symbol = null;
-       network = null;
-       display_decimals = null;
-       fee = 0 : nat64;
-       cap = opt (100_000 : nat64);
-       chain_id = null;
-       token_contract = null;
-       onramp = variant { Direct };
-       offramp = variant { Unavailable };
-     })"
-else
-  echo "== DEMO(0) already registered — skipping (idempotent) =="
-fi
-
-# (b) ckBTC Testnet (currency 3) — REAL Bitcoin Testnet4 chain-key ledger (free, DFINITY-operated).
-#     onramp=Direct (Bitcoin Testnet deposit_address), offramp=Direct (retrieve_btc_with_approval).
-if [ "$(has_currency 3)" = no ]; then
-  echo "== register_currency ckBTC Testnet(3) → $CKBTC_TESTNET_LEDGER =="
-  _register "(record {
-       currency = 3 : nat32;
-       ledger = principal \"$CKBTC_TESTNET_LEDGER\";
-       mintable = false;
-       minter = opt principal \"$CKBTC_TESTNET_MINTER\";
-       symbol = opt \"₿\";
-       decimals = 8 : nat8;
-       minter_family = opt variant { CkBtcUtxo };
-       wrapper_name = \"ckTESTBTC\";
-       backing_symbol = opt \"BTC\";
-       network = opt \"Bitcoin Testnet\";
-       display_decimals = null;
-       fee = 10 : nat64;
-       cap = opt (100_000 : nat64);
-       chain_id = null;
-       token_contract = null;
-       onramp = variant { Direct };
-       offramp = variant { Direct };
-     })" "$([ "$NETWORK" = local ] && echo expect_mismatch)"
-else
-  echo "== ckBTC Testnet(3) already registered — skipping (idempotent) =="
-fi
-
-# (c) ckSepoliaUSDC (currency 4) — REAL Sepolia ckERC20 ledger (free). onramp=Direct (ckETH helper),
-#     offramp=Unavailable (no testnet cash-out). The ERC-20 contract is the real Sepolia USDC.
-if [ "$(has_currency 4)" = no ]; then
-  echo "== register_currency ckSepoliaUSDC(4) → $CKSEPOLIA_USDC_LEDGER =="
-  _register "(record {
-       currency = 4 : nat32;
-       ledger = principal \"$CKSEPOLIA_USDC_LEDGER\";
-       mintable = false;
-       minter = opt principal \"$CKSEPOLIA_USDC_MINTER\";
-       symbol = opt \"ckSepoliaUSDC\";
-       decimals = 6 : nat8;
-       minter_family = opt variant { CkEthErc20 };
-       wrapper_name = \"ckSepoliaUSDC\";
-       backing_symbol = opt \"USDC\";
-       network = opt \"Sepolia\";
-       display_decimals = null;
-       fee = 4000 : nat64;
-       cap = opt (100_000 : nat64);
-       chain_id = opt (11155111 : nat32);
-       token_contract = opt \"0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238\";
-       onramp = variant { Direct };
-       offramp = variant { Unavailable };
-     })" "$([ "$NETWORK" = local ] && echo expect_mismatch)"
-else
-  echo "== ckSepoliaUSDC(4) already registered — skipping (idempotent) =="
-fi
-
-# (d) ckSepoliaETH (currency 5) — REAL Sepolia ckETH ledger (free). CkEthErc20 family (shares the
-#     ckETH minter) but token_contract=null (native ETH, not an ERC20 — the ckerc20 onramp fails
-#     closed for it, which is correct; native ETH deposit uses a separate path not wired here).
-#     display_decimals=6 (ETH at 18 dec is unwieldy in the UI). onramp=Direct, offramp=Unavailable.
-if [ "$(has_currency 5)" = no ]; then
-  echo "== register_currency ckSepoliaETH(5) → $CKSEPOLIA_ETH_LEDGER =="
-  _register "(record {
-       currency = 5 : nat32;
-       ledger = principal \"$CKSEPOLIA_ETH_LEDGER\";
-       mintable = false;
-       minter = opt principal \"$CKSEPOLIA_ETH_MINTER\";
-       symbol = opt \"Ξ\";
-       decimals = 18 : nat8;
-       minter_family = opt variant { CkEthErc20 };
-       wrapper_name = \"ckSepoliaETH\";
-       backing_symbol = opt \"ETH\";
-       network = opt \"Sepolia\";
-       display_decimals = opt (6 : nat8);
-       fee = 10_000_000_000 : nat64;
-       cap = opt (100_000 : nat64);
-       chain_id = opt (11155111 : nat32);
-       token_contract = null;
-       onramp = variant { Direct };
-       offramp = variant { Unavailable };
-     })" "$([ "$NETWORK" = local ] && echo expect_mismatch)"
-else
-  echo "== ckSepoliaETH(5) already registered — skipping (idempotent) =="
-fi
 
 # --- record the staging ids in deploy/.env (mainnet only — local rehearsal leaves it untouched) -
 if [ "$NETWORK" != "local" ]; then
@@ -311,19 +196,13 @@ if [ "$NETWORK" != "local" ]; then
   env_set DPAY_STAGING_DUSD_LEDGER_ID "$DUSD_LEDGER_CID" deploy/.env
 fi
 
-# --- readback: the catalog now carries DEMO + the 3 testnet currencies (mainnet) ----------------
-CATALOG2="$(dfx_i canister call "$CANISTER" currencies --network "$NETWORK" --query 2>/dev/null || true)"
-NCUR="$(printf '%s' "$CATALOG2" | grep -cE 'currency = [0-9]+ : nat32' || true)"
-
 echo
 echo "== staging deploy complete =="
 echo "   network:         $NETWORK"
 echo "   staging facade:  $STAGING_CID"
 echo "   staging DUSD:    $DUSD_LEDGER_CID"
-echo "   catalog:         ${NCUR} currencies"
 if [ "$NETWORK" = local ]; then
-  echo "   (local rehearsal — DEMO registered fully; testnet calls proven well-formed via"
-  echo "    validation-mismatch rejects. No mainnet canister created, no cycles spent.)"
+  echo "   (local rehearsal — no mainnet canister created, no cycles spent.)"
   dfx stop >/dev/null 2>&1 || true
 else
   echo "   relay target:    set DPAY_CANISTER_ID=$STAGING_CID + DPAY_LEDGER=ic for a staging relay"

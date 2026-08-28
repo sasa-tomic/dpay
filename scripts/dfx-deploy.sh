@@ -37,7 +37,7 @@ refresh_candid "$CANISTER"
 echo "== generate deterministic candid args (offline-signed payment) =="
 cargo run -q -p dpay-fixture            # writes dfx/args/{init,pay,payer,merchant}.arg + expect.env
 # shellcheck source=/dev/null
-source dfx/args/expect.env              # AMOUNT, PAYER_AFTER, MERCHANT_AFTER
+source dfx/args/expect.env              # AMOUNT, CAP, PAYER_AFTER, MERCHANT_AFTER
 # Raw hex keys + wire from the fixture bin (the args files store escaped blobs, NOT raw hex, so they
 # can't be grep'd back into a blob — use the fixture's KEY=hex output directly).
 eval "$(cargo run -q -p dpay-canister-tests --bin fixture)"
@@ -78,50 +78,31 @@ dfx canister install icrc_ledger --argument "(variant { Init = record {
   index_principal = null;
 } })"
 
-echo "== install the facade (no ledgers at init; cap from dpay-fixture; open controller) =="
+echo "== install the facade (demo_ledger = this replica's DUSD ledger; cap from dpay-fixture; open controller) =="
 dfx build "$CANISTER" >/dev/null
-dfx canister install "$CANISTER" --argument-file dfx/args/init.arg
+# The tracked dfx/args/init.arg bakes the MAINNET DUSD ledger (td2nx); this replica's ledger id is
+# only known now, so the init arg is built inline. init merely STORES the principal (no cross-
+# canister validation), and the ledger above already has code. controller=null = open demo mode;
+# set_controller below locks the admin gate to the deploy identity.
+dfx canister install "$CANISTER" --argument \
+  "(record { demo_ledger = principal \"$LEDGER_ID\"; per_tx_cap = ${CAP} : nat64; controller = null })"
 
-echo "== set the deploy identity as controller (open→locked; enables register_ledger/mint) =="
+echo "== lock the admin gate: set_controller(deploy identity) (open→locked; enables controller-gated mint) =="
 # init.arg seeds controller=null (open-demo mode). set_controller is the ONE admin op callable in
-# open mode (require_controller_rotation: None→any caller). After this, register_ledger/mint work.
+# open mode (require_controller_rotation: None→any caller). After this, mint run as this identity
+# passes the controller gate (msg_caller == controller).
 MY_PID=$(dfx identity get-principal)
 dfx canister call "$CANISTER" set_controller "(opt principal \"$MY_PID\")"
 
-echo "== register the DUSD currency atomically (MC2 U4: register_currency validates + activates ledger+meta in one shot) =="
-# register_currency : (CurrencyRegistration) -> Result<(), text> — a single atomic update that
-# STRICTLY validates decimals/fee/wrapper_name against the live ledger (F3 — no exemptions, incl.
-# DEMO) and inserts LEDGERS + CURRENCY_META in one message. The DUSD ledger was installed with
-# decimals=2, transfer_fee=0, token_symbol="DUSD", so the registration MUST carry those EXACT values
-# (wrapper_name = the ledger's icrc1_symbol). The local replica is started --clean each run, so this
-# is always a first-time activation (no immutability conflict). MC2 U1: the explicit DEMO cap keeps
-# pays working (pay reads the per-currency cap, fail-closed). DEMO onramp=Direct (faucet),
-# offramp=Unavailable (play money, no cash-out).
-dfx canister call "$CANISTER" register_currency \
-  "(record {
-     currency = 0 : nat32;
-     ledger = principal \"$LEDGER_ID\";
-     mintable = true;
-     minter = null;
-     symbol = opt \"\\$\";
-     decimals = 2 : nat8;
-     minter_family = null;
-     wrapper_name = \"DUSD\";
-     backing_symbol = null;
-     network = null;
-     display_decimals = null;
-     fee = 0 : nat64;
-     cap = opt (100_000 : nat64);
-     chain_id = null;
-     token_contract = null;
-     onramp = variant { Direct };
-     offramp = variant { Unavailable };
-   })"
-
 acct() { echo "record { owner = principal \"$CID\"; subaccount = opt $1 }"; }
 
-echo "== fund the demo payer via facade mint ($INIT_A DUSD base units) =="
-dfx canister call "$CANISTER" mint "($PAYER_BLOB, 0 : nat32, $INIT_A : nat64)"
+echo "== fund the demo payer via the facade's self-service faucet ($INIT_A DUSD base units) =="
+# The faucet credits the FACADE-CUSTODY account {owner: canister, subaccount: pubkey} — the account
+# `pay` debits — with the FIXED FAUCET_AMOUNT ($100.00 = 10_000 base units). `mint` is NOT used
+# here: since the 2026-08-20 faucet re-target it credits the USER principal (which the custody-pay
+# path cannot spend). INIT_A = PAYER_AFTER + AMOUNT = 10_000 = FAUCET_AMOUNT by construction; the
+# ledger assertion below fails loudly if the canister's FAUCET_AMOUNT ever drifts from it.
+dfx canister call "$CANISTER" faucet "($PAYER_BLOB, 0 : nat32)"
 
 P0=$(dfx canister call icrc_ledger icrc1_balance_of "$(acct "$PAYER_BLOB")" | nat)
 echo "   ledger payer balance: $P0  (expect $INIT_A)"

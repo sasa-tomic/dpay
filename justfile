@@ -120,7 +120,7 @@ e2e-live:
 # 3 testnet asset cards, real Testnet4 deposit address, relay deposit/onramp endpoints with the real
 # testnet minter config + Sepolia ckERC20 helper. OPT-IN only — NEVER part of verify/check (hits
 # mainnet + needs a relay). No real funds (IC testnet tokens are free).
-# PROVEN route (prod ssqti, testnet currencies registered directly): run a LOCAL relay from HEAD —
+# PROVEN route (prod ssqti; the testnet catalog ships compiled into the relay): run a LOCAL relay from HEAD —
 #   DPAY_LEDGER=ic DPAY_CANISTER_ID=ssqti-wiaaa-aaaab-qhdia-cai DPAY_IC_URL=https://icp-api.io \
 #   DPAY_RELAY_ADDR=127.0.0.1:8788 cargo run -p dpay-relay --features agent
 # — then: DPAY_E2E_BASE=http://127.0.0.1:8788 just e2e-live-testnet
@@ -151,15 +151,17 @@ deploy:
     bash scripts/dfx-deploy.sh
 
 # deploy/upgrade the facade canister to ICP MAINNET as DPAY_DFX_IDENTITY (becomes controller); writes
-# DPAY_CANISTER_ID into deploy/.env AND registers the DUSD ledger + currency metadata for DEMO/ckBTC/
-# ckUSDC (idempotent config). The ONE mainnet deploy path (state-preserving upgrade by default).
-# Redeploy defaults to upgrade (state preserved). See deploy/README.md + docs/CANISTERS.md.
+# DPAY_CANISTER_ID into deploy/.env, arms the internal controller cell with the relay's dedicated
+# Ed25519 key, and runs free query readbacks. NO currency registration (registry removed 2026-08-28):
+# non-DEMO assets are compile-time FIXED_ASSETS consts, and the catalog the app renders is compiled
+# into the relay (adding a currency = relay code change + `just up`). The ONE mainnet deploy path
+# (state-preserving upgrade by default). See deploy/README.md + docs/CANISTERS.md.
 deploy-ic:
     bash scripts/dfx-deploy-ic.sh
 
 # REHEARSE the staging facade deploy OFFLINE against a local replica (mock DUSD ledger, no cycles).
-# Proves the register_currency call shapes are well-formed before any mainnet spend. Set
-# DPAY_DFX_NETWORK=ic (omitted) for the REAL mainnet staging deploy — REQUIRES founder greenlight.
+# Proves the provision→install→lock flow + the demo_ledger init-arg shape before any mainnet spend.
+# Set DPAY_DFX_NETWORK=ic (omitted) for the REAL mainnet staging deploy — REQUIRES founder greenlight.
 deploy-ic-staging:
     DPAY_DFX_NETWORK=local bash scripts/dfx-deploy-ic-staging.sh
 

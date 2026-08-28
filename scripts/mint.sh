@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Local operator hook: mint (credit) minor units of a currency to an account via the facade.
 #
-# The facade's `mint : (blob, nat32, nat64) -> Result<nat64, text>` settles on the registered ICRC
+# The facade's `mint : (blob, nat32, nat64) -> Result<nat64, text>` settles on the wired ICRC
 # ledger (transferring from the ledger's minting account, which the facade owns). It is gated by the
 # facade's governance controller: open when no controller is set (demo default), or restricted to the
-# controller principal otherwise. The currency MUST already be registered (register_ledger) and
-# mintable. This script runs as DPAY_DFX_IDENTITY purely to share the canister-id / network plumbing.
+# controller principal otherwise. The currency must be MINTABLE — the DEMO/DUSD play currency, whose
+# ledger the facade's `demo_ledger` init arg wired in (every other asset is a non-mintable
+# compile-time FIXED_ASSETS const). This script runs as DPAY_DFX_IDENTITY purely to share the
+# canister-id / network plumbing.
 #
 #   just mint <account-hex> <amount-minor-units> [currency]
 # <account-hex> = 64 hex chars (the 32-byte Ed25519 account pubkey); <amount> = minor units (cents);

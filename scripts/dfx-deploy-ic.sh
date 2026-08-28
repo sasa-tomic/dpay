@@ -2,13 +2,19 @@
 # Deploy (or redeploy) the dpay canister to ICP MAINNET (the built-in `ic` network) as an explicit
 # named dfx identity, then write the resulting canister id back into deploy/.env so the relay picks
 # it up. The mainnet sibling of scripts/dfx-deploy.sh (which stands up a throwaway LOCAL replica and
-# self-tests a settlement). This is the ONE mainnet deploy path: it builds, (re)deploys, reads back a
-# couple of *free* query calls, AND registers the DUSD ledger + currency metadata for DEMO/ckBTC/
-# ckUSDC + the immutable register_currency identities for ckETH(6)/VCHF(7)/ICP(8) (all idempotent
-# config — folds in the former separate icrc-deploy-mainnet setup). It deliberately
-# does NOT push a state-changing payment to mainnet: the one-time settle smoke was run at initial
-# deploy and the settlement kernel is covered going forward by PocketIC canister tests + e2e +
-# `just verify-deploy` (wasm-hash fidelity).
+# self-tests a settlement). This is the ONE mainnet deploy path: it builds the wasm, refreshes the
+# candid, (re)installs the facade with the init arg `record { demo_ledger; per_tx_cap; controller }`
+# (demo_ledger = the mainnet DUSD ledger, cross-checked below), arms the internal controller cell
+# with the relay's dedicated Ed25519 faucet key, reads back a couple of *free* query calls, and
+# writes DPAY_CANISTER_ID + DPAY_CONTROLLER_SEED to deploy/.env.
+#
+# There is NO currency registration anymore (founder decision 2026-08-28: the canister's registry
+# is gone). Every non-DEMO asset the facade serves is a compile-time FIXED_ASSETS const, and the
+# catalog the app renders is compiled into the RELAY serving /api/v1/currencies — adding a currency
+# is a relay code change + `just up`, never a canister step. This script also deliberately does NOT
+# push a state-changing payment to mainnet: the one-time settle smoke was run at initial deploy and
+# the settlement kernel is covered going forward by PocketIC canister tests + e2e + `just
+# verify-deploy` (wasm-hash fidelity).
 #
 # Identity (DPAY_DFX_IDENTITY) is REQUIRED and load-bearing: `dfx deploy --network ic` spends the
 # identity's cycles AND makes it the CANISTER CONTROLLER (upgrade authority). Create one with
@@ -17,8 +23,8 @@
 #
 #   DPAY_DFX_IDENTITY   (required)  named dfx identity to deploy as → becomes the controller
 #   DPAY_DEPLOY_MODE    (redeploy)  dfx install mode; defaults to `upgrade` when the canister already
-#                                   has code. `reinstall` = wipe + re-run init (re-fund the demo
-#                                   accounts). `install` = empty canister only. (Empty → install.)
+#                                   has code. `reinstall` = wipe + re-run init (balances reset to
+#                                   zero). `install` = empty canister only. (Empty → install.)
 #   DPAY_DFX_NETWORK    (optional)  dfx network; default `ic` (mainnet). Set `local` to rehearse the
 #                                   whole flow against a running local replica before spending cycles.
 #   DPAY_CANISTER_ID    (deploy/.env) if set, deploy TARGETS that existing canister (dfx installs into
@@ -27,10 +33,12 @@
 # Two money-critical caveats for this demo-phase canister:
 #   * UPGRADE PRESERVES STATE. Balances + spent nonces live in stable structures (StableBTreeMap /
 #     StableCell), so `--mode upgrade` (the redeploy default) carries them across automatically — no
-#     serialization hooks. `--mode reinstall` wipes and re-runs init (clean, re-funded demo accounts);
-#     `install` is for an empty canister. ONE-TIME MIGRATION: upgrading from the original
-#     pre-stable-memory build finds empty stable memory → starts with an EMPTY ledger; reinstall once
-#     to re-fund, after which upgrades preserve state.
+#     serialization hooks. The init arg is type-checked against the .did on every deploy but only
+#     TAKES EFFECT on a fresh install (there is no post_upgrade; init never re-runs). `--mode
+#     reinstall` wipes and re-runs init (clean, zero-balance ledger); `install` is for an empty
+#     canister. ONE-TIME MIGRATION: upgrading from the original pre-stable-memory build finds empty
+#     stable memory → starts with an EMPTY ledger; reinstall once to re-fund, after which upgrades
+#     preserve state.
 #   * DEMO-PHASE HARDENING LEVEL: `mint` is CONTROLLER-gated (require_admin; only the facade's
 #     internal CONTROLLER key can mint — normally the relay's DPAY_CONTROLLER_SEED identity), but
 #     the controller is your own key (not blackholed / not SNS-governed). Accepted only while
@@ -74,8 +82,28 @@ build_canister_wasm "$CRATE"
 echo "== refresh candid from the wasm =="
 refresh_candid "$CANISTER"
 
-echo "== generate deterministic candid init args (pre-funded demo accounts) =="
+echo "== generate deterministic candid args (init arg + offline-signed payment) =="
 cargo run -q -p dpay-fixture
+
+# --- init.arg sanity: the demo_ledger it bakes must be the tracked DUSD ledger ------------------
+# `demo_ledger` is FIXED AT INSTALL (init; upgrades ignore it) and the DEMO currency (0) settles on
+# it, so a stale/mismatched arg would silently wire a FRESH canister to the wrong ledger. On `ic`
+# the TRACKED canister_ids.json is the durable map of owned canisters (icrc_ledger -> td2nx);
+# abort on drift or on an unresolvable ledger. A local rehearsal skips this (td2nx does not exist
+# there; init only STORES the principal, so the rehearsal still proves the arg shape + flow).
+if [ "$NETWORK" != "local" ]; then
+  DEMO_LEDGER="$(dfx_i canister id icrc_ledger --network "$NETWORK")" \
+    || { echo "cannot resolve icrc_ledger on $NETWORK — canister_ids.json must track the DUSD ledger (docs/CANISTERS.md)" >&2; exit 1; }
+  ARG_LEDGER="$(sed -n 's/^.*demo_ledger = principal "\([^"]*\)".*$/\1/p' dfx/args/init.arg)"
+  [ -n "$ARG_LEDGER" ] || { echo "dfx/args/init.arg carries no demo_ledger — regenerate it (cargo run -p dpay-fixture)" >&2; exit 1; }
+  if [ "$ARG_LEDGER" != "$DEMO_LEDGER" ]; then
+    echo "ABORT: init.arg demo_ledger ($ARG_LEDGER) != tracked icrc_ledger ($DEMO_LEDGER)." >&2
+    echo "       A fresh install would wire the DEMO currency to the wrong ledger. Fix the fixture" >&2
+    echo "       (crates/dpay-fixture, DEMO_LEDGER_MAINNET) or canister_ids.json — never deploy past this." >&2
+    exit 1
+  fi
+  echo "   init.arg demo_ledger = $DEMO_LEDGER (matches the tracked icrc_ledger)"
+fi
 
 # --- resolve the deploy TARGET + MODE ----------------------------------------------------------
 # The operator's source of truth for "which canister" is DPAY_CANISTER_ID in deploy/.env. On a real
@@ -90,7 +118,7 @@ if [ "$NETWORK" != "local" ] && [ -n "$EXISTING_CID" ]; then
   merge_canister_id "$CANISTER" "$NETWORK" "$EXISTING_CID"
   echo "== target: existing canister $EXISTING_CID on $NETWORK (from deploy/.env) =="
   # Mode from the canister's ACTUAL state: no code yet → a safe first install (nothing to lose); code
-  # already installed → upgrade (default) preserves state via stable memory; reinstall re-funds.
+  # already installed → upgrade (default) preserves state via stable memory; reinstall wipes.
   _ierr="$(mktemp)"
   if ! _info="$(dfx_i canister info "$EXISTING_CID" --network "$NETWORK" 2>"$_ierr")"; then
     echo "cannot read canister $EXISTING_CID on $NETWORK — dfx reported:" >&2
@@ -116,7 +144,7 @@ else
   if dfx_i canister id "$CANISTER" --network "$NETWORK" >/dev/null 2>"$_probe"; then
     MODE="${DPAY_DEPLOY_MODE:-upgrade}"
     if [ "$MODE" = upgrade ]; then
-      echo "   mode=upgrade: balances + spent nonces are preserved via stable memory (reinstall re-funds)."
+      echo "   mode=upgrade: balances + spent nonces are preserved via stable memory (reinstall wipes)."
     fi
     echo "== REDEPLOY (mode=$MODE) =="
   elif grep -qiE 'cannot find|not been created|does not exist|no canister' "$_probe"; then
@@ -132,6 +160,8 @@ fi
 echo "== deploy to $NETWORK as '$IDENT' (it becomes/keeps the controller; spends cycles on ic) =="
 # --yes: `--mode reinstall` otherwise prompts to confirm the state reset, which aborts (exit 255)
 # when run non-interactively. Setting DPAY_DEPLOY_MODE=reinstall above IS that explicit confirmation.
+# The argument file feeds init on a FRESH install; on upgrade dfx type-checks it against the .did
+# and the canister ignores it (no post_upgrade — init never re-runs).
 dfx_i deploy "$CANISTER" --network "$NETWORK" --mode "$MODE" --yes --argument-file dfx/args/init.arg
 
 CID=$(dfx_i canister id "$CANISTER" --network "$NETWORK")
@@ -144,7 +174,7 @@ echo "   canister id: $CID"
 CAP="$(dfx_i canister call "$CANISTER" per_tx_cap --network "$NETWORK" --query | nat)" || { echo "readback failed: per_tx_cap query" >&2; exit 1; }
 PA0="$(dfx_i canister call "$CANISTER" balance_of --network "$NETWORK" --query --argument-file dfx/args/payer.arg | nat)" || { echo "readback failed: payer balance query" >&2; exit 1; }
 MB0="$(dfx_i canister call "$CANISTER" balance_of --network "$NETWORK" --query --argument-file dfx/args/merchant.arg | nat)" || { echo "readback failed: merchant balance query" >&2; exit 1; }
-echo "   cap: $CAP   opening balances: payer=$PA0  merchant=$MB0"
+echo "   cap: $CAP   cached balances: payer=$PA0  merchant=$MB0"
 
 # --- arm the admin gate with the relay's DEDICATED Ed25519 faucet key ---------------------------
 # `require_admin` reads the canister's INTERNAL CONTROLLER stable cell (NOT the dfx-level canister
@@ -153,9 +183,9 @@ echo "   cap: $CAP   opening balances: payer=$PA0  merchant=$MB0"
 # never be the identity's PEM material. Instead the relay owns a DEDICATED 32-byte Ed25519 key —
 # DPAY_CONTROLLER_SEED — and this step arms the cell with that key's derived principal
 # (self_authenticating over its verifying key). The dfx deploy identity keeps running admin ops via
-# the ADMIN_CALLERS operator allowlist (the register_* below, `just mint`) and stays the IC-level
-# controller (upgrade authority). Blast radius of the dedicated key: demo-$ mint + catalog config
-# only; rotation = set_controller + seed swap (docs/GOVERNANCE.md, govern-in-place pillar 2).
+# the ADMIN_CALLERS operator allowlist (`just mint`) and stays the IC-level controller (upgrade
+# authority). Blast radius of the dedicated key: demo-$ mint only; rotation = set_controller + seed
+# swap (docs/GOVERNANCE.md, govern-in-place pillar 2).
 # Idempotent by design: an existing DPAY_CONTROLLER_SEED in deploy/.env is REUSED (never regenerated
 # — regenerating would orphan the armed controller), and a cell already holding the derived
 # principal is left alone (free admin_controller readback instead of a set_controller tx).
@@ -187,11 +217,11 @@ else
   # Fresh canister (or one predating the admin_controller query): null cell → open-mode lockdown
   # lets ANY caller arm it once; an older locked cell surfaces as an honest set_controller failure.
   case "$(dfx_i canister call "$CANISTER" set_controller "(opt principal \"$RELAY_PRINCIPAL\")" --network "$NETWORK" 2>&1)" in
-    *Ok*) echo "   CONTROLLER = $RELAY_PRINCIPAL (admin gate armed; faucet + register_* enabled)" ;;
+    *Ok*) echo "   CONTROLLER = $RELAY_PRINCIPAL (admin gate armed; faucet/mint enabled)" ;;
     *) echo "WARN: set_controller did not return Ok — the internal controller is governed by ANOTHER" >&2
-       echo "      principal (readback was empty but the cell is locked). register_*/faucet mint as" >&2
-       echo "      '$IDENT' will be refused until that key rotates the cell. To fix: have the CURRENT" >&2
-       echo "      controller run" >&2
+       echo "      principal (readback was empty but the cell is locked). Admin ops (mint/burn/" >&2
+       echo "      reconcile) as '$IDENT' will be refused until the current controller rotates the" >&2
+       echo "      cell. To fix, have the CURRENT controller run" >&2
        echo "        dfx canister call $CANISTER set_controller '(opt principal \"$RELAY_PRINCIPAL\")' --network $NETWORK" >&2
        echo "      (the relay's key cannot sign dfx calls; DPAY_CONTROLLER_SEED below is the target)" >&2
        echo "      (Governed canister? See docs/GOVERNANCE.md.)" >&2 ;;
@@ -205,209 +235,6 @@ if [ "$NETWORK" != "local" ]; then
   echo "   wrote DPAY_CONTROLLER_SEED (relay's dedicated faucet key) to deploy/.env"
 fi
 
-# --- register the DUSD ledger + currency metadata (idempotent config; folds in the former
-# icrc-deploy-mainnet setup so ONE deploy leaves the canister correctly configured) ----------------
-# register_ledger(0) points DEMO at the DUSD ICRC-3 ledger (icrc_ledger); register_currency_meta sets
-# display + ramp capabilities + per-tx cap for DEMO(0)/ckBTC(1)/ckUSDC(2). All idempotent under MC2
-# (same-value re-register Ok; meta overwrites display fields). WITHOUT this, the app renders ckBTC/
-# ckUSDC "unsupported" (null wrapper/backing/ramps) and cap-less currencies reject every pay
-# (lib.rs currency_cap().unwrap_or(0)). cap mirrors the global per_tx_cap as a PLACEHOLDER — tighten
-# to a per-asset policy before pilot. Values mirror the relay FakeLedger fake_catalog() + app catalog.
-LEDGER_ID="$(dfx_i canister id icrc_ledger --network "$NETWORK" 2>/dev/null || true)"
-if [ -z "$LEDGER_ID" ]; then
-  echo "WARN: icrc_ledger unresolved on $NETWORK — skipping currency config (ensure canister_ids.json tracks it; see docs/CANISTERS.md)" >&2
-else
-  echo "== register DUSD ledger + currency metadata for DEMO(0)/ckBTC(1)/ckUSDC(2) =="
-  REG="$(dfx_i canister call "$CANISTER" register_ledger "(0 : nat32, principal \"${LEDGER_ID}\", true)" --network "$NETWORK")"
-  case "$REG" in *Ok*) echo "   register_ledger(0) -> $LEDGER_ID Ok";; *) echo "WARN: register_ledger: $REG" >&2;; esac
-  M0="$(dfx_i canister call "$CANISTER" register_currency_meta "(0 : nat32, opt \"\$\", opt (2 : nat8), null, null, null, null, null, null, opt (${CAP} : nat64), null, null, variant { Direct }, variant { Unavailable }, null)" --network "$NETWORK")"
-  M1="$(dfx_i canister call "$CANISTER" register_currency_meta "(1 : nat32, opt \"₿\", opt (8 : nat8), opt variant { CkBtcUtxo }, opt \"ckBTC\", opt \"BTC\", opt \"Bitcoin\", opt (8 : nat8), null, opt (${CAP} : nat64), null, null, variant { Direct }, variant { Direct }, null)" --network "$NETWORK")"
-  # ckUSDC(2): CkEthErc20 + token_contract + the ckETH gas ledger (sv3dd's ckETH ledger
-  # ss2fx-dyaaa-aaaar-qacoq-cai) for the dual-ledger withdraw_erc20 path. offramp flipped to Direct
-  # now that withdraw_erc20 is wired (was Unavailable while fail-closed).
-  M2="$(dfx_i canister call "$CANISTER" register_currency_meta "(2 : nat32, opt \"ckUSDC\", opt (6 : nat8), opt variant { CkEthErc20 }, opt \"ckUSDC\", opt \"USDC\", opt \"Ethereum\", opt (6 : nat8), opt (10_000 : nat64), opt (${CAP} : nat64), opt (1 : nat32), opt \"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48\", variant { Direct }, variant { Direct }, opt principal \"ss2fx-dyaaa-aaaar-qacoq-cai\")" --network "$NETWORK")"
-  for _m in "$M0" "$M1" "$M2"; do case "$_m" in *Ok*) :;; *) echo "WARN: register_currency_meta: $_m" >&2;; esac; done
-  echo "   metadata registered; cap=${CAP} raw (placeholder — tighten per-asset before pilot)"
-fi
-
-# --- register mainnet ckETH (currency 6) — native ETH on Ethereum mainnet ----------------------
-# The only MAINNET native-ETH currency: CkEthErc20 family + token_contract=null (the native-ETH
-# discriminator → the facade's withdraw_eth SINGLE-ledger path; the depositEth onramp). ckUSDC(2) is
-# mainnet Ethereum too but an ERC-20 token; this adds the native coin itself. Principals are DFINITY's
-# live mainnet ckETH canisters: ledger ss2fx-dyaaa… (currently registered as ckUSDC's gas_ledger) +
-# minter sv3dd-oaaaa… (the ckETH minter ckUSDC already uses). register_currency STRICTLY VALIDATES
-# decimals/fee/wrapper_name against the live ledger (F3), so these three are sourced from the ledger's
-# own icrc1_decimals(18)/icrc1_fee(2_000_000_000_000 Wei)/icrc1_symbol("ckETH") — queried 2026-08-08.
-# gas_ledger=null: native-ETH withdraw_eth burns only the amount ledger (single-ledger), UNLIKE the
-# ckERC20 withdraw_erc20 dual-ledger path which needs a separate gas ledger. NOTE: ${CAP} is a raw-unit
-# per-tx ceiling; at 18 decimals it is dust Wei — tighten to a Wei-appropriate value before ckETH
-# NFC-pay goes live (same placeholder discipline as currencies 0-2; deposit/withdraw are unaffected).
-probe_catalog
-if [ "$(has_currency 6)" = no ]; then
-  echo "== register_currency ckETH mainnet(6) → ss2fx-dyaaa-aaaar-qacoq-cai =="
-  _register "(record {
-       currency = 6 : nat32;
-       ledger = principal \"ss2fx-dyaaa-aaaar-qacoq-cai\";
-       mintable = false;
-       minter = opt principal \"sv3dd-oaaaa-aaaar-qacoa-cai\";
-       symbol = opt \"Ξ\";
-       decimals = 18 : nat8;
-       minter_family = opt variant { CkEthErc20 };
-       wrapper_name = \"ckETH\";
-       backing_symbol = opt \"ETH\";
-       network = opt \"Ethereum\";
-       display_decimals = opt (6 : nat8);
-       fee = 2_000_000_000_000 : nat64;
-       cap = opt (${CAP} : nat64);
-       chain_id = opt (1 : nat32);
-       token_contract = null;
-       onramp = variant { Direct };
-       offramp = variant { Direct };
-       gas_ledger = null;
-     })" "$([ "$NETWORK" = local ] && echo expect_mismatch)"
-else
-  echo "== ckETH mainnet(6) already registered — skipping (idempotent) =="
-fi
-
-# --- register mainnet VCHF (currency 7) + native ICP (currency 8) — direct-pay, NO minter --------
-# Locked identities per docs/specs/2026-08-28-vchf-icp-support-spec.md ("Locked identities and
-# metadata"); values confirmed against the live ledgers at spec time. Both are COMPLETE no-minter
-# ICRC assets the app pays by user-signed icrc1_transfer: minter/minter_family = null (a real ledger
-# with no chain-key minter — a fake family must NOT be assigned just to pass a payability gate),
-# onramp/offramp = Unavailable (hides Add money / Cash out without hiding the asset or disabling
-# Pay/Receive), chain_id/token_contract/gas_ledger = null (pure IC assets). register_currency
-# STRICTLY live-validates decimals/fee/wrapper_name against the ledger itself (F3): VCHF ly36x-… →
-# 8 decimals / 10_000 fee / symbol "VCHF"; ICP ryjl3-… (the NNS ledger) → 8 / 10_000 / "ICP". Caps
-# are PER-ASSET raw e8s units — deliberately NOT the ${CAP} placeholder of currencies 0-2/6:
-# VCHF cap 1_000_000_000_000 (= 10'000 VCHF), ICP cap 100_000_000_000 (= 1'000 ICP).
-#
-# Idempotence here is STRICTER than for 0-2/6 above: probe currencies() before EACH registration;
-# an ABSENT id registers; a PRESENT id skips only when it is the SAME asset (ledger principal +
-# coherent symbol/decimals/network); anything else ABORTS the deploy — these ids are immutable
-# (register_currency rejects an existing id; retire_currency + a new id is the only replacement
-# path) and this script NEVER picks a new id automatically. A register_currency retired/duplicate/
-# mismatch reject aborts via _register; the banners + the assert's peer note below carry the OTHER
-# asset's state so an abort always leaves both visible to the operator.
-
-# candid_scalar VALUE — normalize a dfx-printed candid scalar to bare comparable text:
-# `principal "x"` → x, `opt "s"` → s, `opt (8 : nat8)` → 8, `null` stays null. Lets the same-asset
-# check below compare meaningfully across dfx pretty-print variants (opt wrappers / parens / type
-# annotations) without weakening the comparison.
-candid_scalar() {
-  sed -e 's/^[[:space:]]*opt[[:space:]]*//' \
-      -e 's/^[[:space:]]*principal[[:space:]]*//' \
-      -e 's/^[[:space:]]*([[:space:]]*//' -e 's/[[:space:]]*)[[:space:]]*$//' \
-      -e 's/[[:space:]]*:[[:space:]]*nat[0-9]*[[:space:]]*$//' \
-      -e 's/^"//' -e 's/"$//' <<<"$1"
-}
-
-# assert_same_asset ID NAME LEDGER SYMBOL DECIMALS NETWORK PEER_NOTE — the strict verify-and-skip
-# gate. Currency ID is already present in $CATALOG (probe_catalog must have just run): skip ONLY
-# when it is the SAME asset we would have registered (ledger principal AND coherent
-# symbol/decimals/network, compared as normalized scalars). ANY mismatch aborts (exit 1) —
-# re-routing an immutable id or auto-picking a new one is an operator decision, never a script one.
-# PEER_NOTE names the OTHER new asset's state so the abort leaves both visible (U6 rule 5).
-assert_same_asset() { # $1=id  $2=name  $3=ledger  $4=symbol  $5=decimals  $6=network  $7=peer note
-  local id="$1" name="$2" peer="$7" mismatches="" spec field want got
-  for spec in "ledger|$3" "symbol|$4" "decimals|$5" "network|$6"; do
-    field="${spec%%|*}" want="${spec#*|}"
-    got="$(currency_field "$id" "$field")"
-    if [ "$(candid_scalar "$got")" != "$want" ]; then
-      mismatches+="         $field: catalog='$got'  expected='$want'"$'\n'
-    fi
-  done
-  if [ -n "$mismatches" ]; then
-    {
-      echo "ABORT: currency $id ($name) is already registered as a DIFFERENT/incoherent asset —" >&2
-      echo "       refusing to re-register or to pick another id automatically:" >&2
-      printf '%s' "$mismatches" >&2
-      echo "       The id is immutable (register_currency rejects an existing id; retire_currency" >&2
-      echo "       + a new id is the only replacement; register_currency_meta can only complete" >&2
-      echo "       display-only gaps, never re-point the ledger). Resolve manually." >&2
-      echo "       Other new asset: $peer" >&2
-    }
-    exit 1
-  fi
-  echo "== $name($id) already registered with the expected identity (ledger+symbol+decimals+network) — skipping (idempotent) =="
-}
-
-probe_catalog
-if [ "$(has_currency 7)" = no ]; then
-  echo "== register_currency VCHF mainnet(7) → ly36x-wiaaa-aaaai-aqj7q-cai (ICP(8) not yet attempted) =="
-  _register "(record {
-       currency = 7 : nat32;
-       ledger = principal \"ly36x-wiaaa-aaaai-aqj7q-cai\";
-       mintable = false;
-       minter = null;
-       symbol = opt \"VCHF\";
-       decimals = 8 : nat8;
-       minter_family = null;
-       wrapper_name = \"VCHF\";
-       backing_symbol = opt \"VCHF\";
-       network = opt \"Internet Computer\";
-       display_decimals = opt (8 : nat8);
-       fee = 10_000 : nat64;
-       cap = opt (1_000_000_000_000 : nat64);
-       chain_id = null;
-       token_contract = null;
-       onramp = variant { Unavailable };
-       offramp = variant { Unavailable };
-       gas_ledger = null;
-     })" "$([ "$NETWORK" = local ] && echo expect_mismatch)"
-else
-  assert_same_asset 7 VCHF "ly36x-wiaaa-aaaai-aqj7q-cai" "VCHF" "8" "Internet Computer" \
-    "ICP(8) not yet attempted"
-fi
-
-probe_catalog
-if [ "$(has_currency 8)" = no ]; then
-  echo "== register_currency ICP mainnet(8) → ryjl3-tyaaa-aaaaa-aaaba-cai (VCHF(7) outcome above) =="
-  _register "(record {
-       currency = 8 : nat32;
-       ledger = principal \"ryjl3-tyaaa-aaaaa-aaaba-cai\";
-       mintable = false;
-       minter = null;
-       symbol = opt \"ICP\";
-       decimals = 8 : nat8;
-       minter_family = null;
-       wrapper_name = \"ICP\";
-       backing_symbol = opt \"ICP\";
-       network = opt \"Internet Computer\";
-       display_decimals = opt (8 : nat8);
-       fee = 10_000 : nat64;
-       cap = opt (100_000_000_000 : nat64);
-       chain_id = null;
-       token_contract = null;
-       onramp = variant { Unavailable };
-       offramp = variant { Unavailable };
-       gas_ledger = null;
-     })" "$([ "$NETWORK" = local ] && echo expect_mismatch)"
-else
-  assert_same_asset 8 ICP "ryjl3-tyaaa-aaaaa-aaaba-cai" "ICP" "8" "Internet Computer" \
-    "VCHF(7) — see its block above"
-fi
-
-# --- end-of-run registration summary — re-read the LIVE catalog (ground truth, free query) -------
-probe_catalog
-echo
-echo "== currency registration summary (currencies() on $NETWORK) =="
-if [ -z "$CATALOG" ]; then
-  echo "   catalog query empty/failed — registration states UNKNOWN (inspect the output above)" >&2
-else
-  for _row in "0|DEMO" "1|ckBTC" "2|ckUSDC" "6|ckETH" "7|VCHF" "8|ICP"; do
-    _id="${_row%%|*}" _name="${_row#*|}"
-    if [ "$(has_currency "$_id")" = yes ]; then
-      echo "   $_name($_id): registered — ledger $(currency_field "$_id" ledger)"
-    else
-      echo "   $_name($_id): ABSENT from the catalog"
-    fi
-  done
-  if [ "$NETWORK" = local ]; then
-    echo "   (local rehearsal: 6/7/8 register calls stop at the expected cross-ledger validation"
-    echo "    mismatch — nothing is committed; only DEMO(0) can fully register against the mock ledger)"
-  fi
-fi
-
 # --- connective tissue: hand the canister id to the relay's config -----------------------------
 # Only for the real network: a local rehearsal must not overwrite the mainnet id in deploy/.env.
 if [ "$NETWORK" != "local" ]; then
@@ -418,6 +245,8 @@ else
 fi
 
 echo
+echo "done. The catalog the app renders is NOT set here — it is compiled into the relay"
+echo "      (crates/dpay-relay/src/catalog.rs); adding a currency = relay code change + 'just up'."
 echo "next: deploy/.env now carries the canister id (and, on ic, the controller seed). Confirm"
 echo "      DPAY_LEDGER=ic, DPAY_IC_URL=https://icp-api.io, and DPAY_IC_FETCH_ROOT_KEY=false"
 echo "      there, optionally run 'just faucet-verify' (asserts seed↔controller wiring — needs"
