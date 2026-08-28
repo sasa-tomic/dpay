@@ -10,16 +10,18 @@
 //! same container image) runs the offline demo and a real deployment — only env differs.
 //!
 //! Read backend (same `Ledger` trait either way), chosen by `DPAY_LEDGER`:
-//!   * `ic`     — the real facade catalog + ICRC ledgers via ic-agent (`--features agent`).
-//!                **Never silently degrades**: if the IC can't be reached, the relay exits
-//!                rather than come up on a pretend backend and serve zeros.
-//!   * `memory` — the in-memory `FakeLedger` catalog (balances read 0; value only exists on
-//!                the rail or the test-helpers fake-IC gateway). Offline, no replica.
+//!   * `ic`     — the real ICRC ledgers via ic-agent (`--features agent`). The currency catalog
+//!                is COMPILED IN (catalog.rs — sole authority since 2026-08-28); the canister is
+//!                only the faucet mint + deposit-info backend. **Never silently degrades**: if
+//!                the IC can't be reached, the relay exits rather than come up on a pretend
+//!                backend and serve zeros.
+//!   * `memory` — the in-memory `FakeLedger` (balances read 0; value only exists on the rail or
+//!                the test-helpers fake-IC gateway). Offline, no replica.
 //!
 //! Env:
 //!   DPAY_LEDGER             `ic` | `memory`  (default: `ic` if DPAY_CANISTER_ID is set, else `memory`)
 //!   DPAY_RELAY_ADDR         bind address (default 0.0.0.0:8787 — a phone/LAN/container can reach it)
-//!   DPAY_CANISTER_ID        (ic) facade canister principal (the catalog source) — required
+//!   DPAY_CANISTER_ID        (ic) facade canister principal (faucet mint + deposit info) — required
 //!   DPAY_IC_URL             (ic) replica / boundary-node URL (default http://127.0.0.1:4943)
 //!   DPAY_IC_FETCH_ROOT_KEY  (ic) fetch the replica's root key. Required for a local replica
 //!                           (each has its own key); MUST be false on mainnet, where it would mean
@@ -70,7 +72,7 @@ async fn main() {
     // this — the app talks straight to icp-api.io there.
     #[cfg(all(feature = "test-helpers", not(feature = "agent")))]
     let state = {
-        let fake = dpay_relay::ic_gateway::FakeIc::from_catalog(&*ledger).await;
+        let fake = dpay_relay::ic_gateway::FakeIc::from_catalog();
         println!("fake-IC /api/v2 gateway ENABLED (test-helpers) — envelopes settle in-memory at user principals");
         state.with_fake_ic(fake)
     };

@@ -43,7 +43,6 @@ use dpay_icp::icrc::{
 use dpay_icp::principal::{Account, Principal};
 use dpay_icp::reply::{cbor_encode, tree_to_cbor, Cbor, Tree};
 
-use crate::ledger::Ledger;
 use crate::AppState;
 use dpay_core::Currency;
 
@@ -136,24 +135,23 @@ fn acct_key(ledger: &str, a: &Account) -> (String, (String, [u8; 32])) {
 }
 
 impl FakeIc {
-    /// Build the gateway over the relay's catalog: every currency row with a non-empty
-    /// `ledger` becomes a fake ledger keyed by that principal text; rows with a `minter`
-    /// register the minter canister routed at the row's ledger.
-    pub async fn from_catalog(ledger: &dyn Ledger) -> Arc<Self> {
+    /// Build the gateway over the relay's COMPILED catalog ([`crate::catalog::ic_rows`] — the
+    /// sole authority since 2026-08-28): every currency row with a non-empty `ledger` becomes a
+    /// fake ledger keyed by that principal text; rows with a `minter` register the minter
+    /// canister routed at the row's ledger.
+    pub fn from_catalog() -> Arc<Self> {
         let mut st = FakeIcState::default();
-        if let Ok(catalog) = ledger.currencies().await {
-            for d in catalog {
-                if d.ledger.is_empty() {
-                    continue;
-                }
-                let fee = d.fee.as_ref().map(|f| u128::from(f.0));
-                st.ledgers.insert(
-                    d.ledger.clone(),
-                    FakeLedgerState { currency: d.currency, fee, decimals: d.decimals.unwrap_or(0) as u8 },
-                );
-                if let Some(m) = d.minter.clone() {
-                    st.minters.insert(m, d.ledger.clone());
-                }
+        for d in crate::catalog::ic_rows() {
+            if d.ledger.is_empty() {
+                continue;
+            }
+            let fee = d.fee.as_ref().map(|f| u128::from(f.0));
+            st.ledgers.insert(
+                d.ledger.clone(),
+                FakeLedgerState { currency: d.currency, fee, decimals: d.decimals.unwrap_or(0) as u8 },
+            );
+            if let Some(m) = d.minter.clone() {
+                st.minters.insert(m, d.ledger.clone());
             }
         }
         Arc::new(FakeIc {

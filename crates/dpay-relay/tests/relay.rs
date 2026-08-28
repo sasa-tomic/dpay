@@ -31,6 +31,12 @@ use dpay_icp::principal::{Account, Principal};
 use dpay_relay::{app, ic_gateway::FakeIc, AppState, FakeLedger};
 use ed25519_dalek::SigningKey;
 
+/// The compiled catalog's DEMO_USD ledger principal (currency 0 — `crate::catalog`'s
+/// `DEMO_LEDGER_PRINCIPAL`, `pub(crate)` so not importable from an integration test; the
+/// catalog_truth drift test pins the pair). The fake-IC gateway keys the DEMO fake ledger at
+/// this text, so signed DEMO transfers target it.
+const DEMO_LEDGER: &str = "td2nx-oaaaa-aaaab-qhdnq-cai";
+
 // --- helpers -------------------------------------------------------------
 
 fn keypair() -> SigningKey {
@@ -62,7 +68,7 @@ fn state_from(ledger: FakeLedger) -> (AppState, Arc<FakeLedger>) {
 /// the faucet/balance/transactions fixtures read the gateway's principal-keyed ledgers.
 async fn state_with_fake(ledger: FakeLedger) -> (AppState, Arc<FakeLedger>, Arc<FakeIc>) {
     let arc = Arc::new(ledger);
-    let fake = FakeIc::from_catalog(&*arc).await;
+    let fake = FakeIc::from_catalog();
     let state = AppState::new(arc.clone()).with_fake_ic(fake.clone());
     (state, arc, fake)
 }
@@ -295,7 +301,7 @@ async fn api_v2_gateway_mounting_pinned() {
     // A garbage envelope on call: 400 (verify_envelope fails) — never a 500, never executed.
     let garbage = Request::builder()
         .method("POST")
-        .uri("/api/v2/canister/aaaaa-aa/call")
+        .uri(format!("/api/v2/canister/{DEMO_LEDGER}/call"))
         .body(Body::from("definitely not a signed envelope"))
         .unwrap();
     let (status, _headers, _bytes) = call_raw(&state, garbage).await;
@@ -305,7 +311,7 @@ async fn api_v2_gateway_mounting_pinned() {
     let (bare_state, _led2) = state_from(ledger());
     let garbage_bare = Request::builder()
         .method("POST")
-        .uri("/api/v2/canister/aaaaa-aa/call")
+        .uri(format!("/api/v2/canister/{DEMO_LEDGER}/call"))
         .body(Body::from("definitely not a signed envelope"))
         .unwrap();
     let (status, _h, _b) = call_raw(&bare_state, garbage_bare).await;
@@ -350,7 +356,9 @@ async fn signed_transfer_through_api_v2_moves_funds_and_lands_in_history() {
         None,
     );
     let req = CallRequest {
-        canister: Principal::management_canister(), // the DEMO_USD catalog ledger ("aaaaa-aa")
+        // The DEMO_USD catalog ledger — the REAL DUSD principal (`td2nx-…`), where the fake-IC
+        // gateway's DEMO ledger (and prod's real one) lives.
+        canister: Principal::from_text(DEMO_LEDGER).expect("DEMO ledger principal parses"),
         method_name: "icrc1_transfer".to_string(),
         arg,
         ingress_expiry_ns: ingress_expiry(now_ns, 300),
@@ -360,7 +368,7 @@ async fn signed_transfer_through_api_v2_moves_funds_and_lands_in_history() {
     let post = || {
         Request::builder()
             .method("POST")
-            .uri("/api/v2/canister/aaaaa-aa/call")
+            .uri(format!("/api/v2/canister/{DEMO_LEDGER}/call"))
             .body(Body::from(envelope.clone()))
             .unwrap()
     };
@@ -1078,13 +1086,14 @@ async fn apk_download_revalidates_with_304_on_if_none_match() {
 //
 // Covers GET /api/v1/currencies — the wallet's runtime asset catalog (closes issue #7), served
 // network-first (v2): {networks:[{protocol,name,environment,assets}]} with exactly 3 sections in
-// order — icp mainnet, icp testnet, solana mainnet. The FakeLedger reports a demo deployment:
-// DEMO_USD (currency 0, $, mintable, no ramp) + ckBTC (1, ₿, CkBtcUtxo ramp) + ckUSDC (2,
-// CkEthErc20 onramp) + ckUSDT (3, a second CkEthErc20 proving the onramp is per-token — MC8 U2) +
-// ckDAI (4, an 18-dec CkEthErc20 — the precision-extreme fixture for OPEN_ISSUES #3) + native
-// ckETH (5) + VCHF (7) + ICP (8) — the two complete no-minter direct-ICRC assets, network
-// "Internet Computer" — on the mainnet side; ckTESTBTC (6, network "Bitcoin Testnet") on the
-// testnet side. The wallet reads this once on load instead of hardcoding DEPOSIT_CURRENCY.
+// order — icp mainnet, icp testnet, solana mainnet. The relay serves its compiled-in catalog
+// (crate::catalog — sole authority since 2026-08-28, founder decision; the facade registry is
+// gone, the route is infallible). Since the 2026-08-28 REAL-rows transplant the IC rows are the
+// VERBATIM live-prod rows: mainnet DEMO_USD (0, $, mintable, faucet) + ckBTC (1, ₿, CkBtcUtxo
+// ramp) + ckUSDC (2, CkEthErc20 onramp) + native ckETH (6, token_contract null) + VCHF (7) +
+// ICP (8) — the two complete no-minter direct-ICRC assets, network "Internet Computer";
+// testnet ckTESTBTC (3, "Bitcoin Testnet") + ckSepoliaUSDC (4) + ckSepoliaETH (5, "Sepolia").
+// The wallet reads this once on load instead of hardcoding DEPOSIT_CURRENCY.
 
 /// `GET /api/v1/currencies` returns `200 {"networks":[...]}` — the v2 network-first envelope with
 /// exactly 3 sections in order (icp mainnet, icp testnet, solana mainnet) and NO legacy top-level
@@ -1125,7 +1134,7 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(solana["name"], "Solana");
     assert_eq!(solana["environment"], "mainnet");
 
-    // IC mainnet section: the fake's mainnet rows (DEMO's network None is mainnet-side). VCHF
+    // IC mainnet section: the REAL prod rows (DEMO's network None is mainnet-side). VCHF
     // (currency 7) and ICP (currency 8) carry network "Internet Computer" — the U3 pin: the
     // relay's server-authoritative partition must file them MAINNET-side, not testnet-side.
     let rows = mainnet["assets"]
@@ -1133,11 +1142,14 @@ async fn currencies_route_returns_demo_catalog() {
         .expect("icp mainnet assets array");
     assert_eq!(
         rows.len(),
-        8,
-        "icp mainnet = DEMO_USD + ckBTC + ckUSDC + ckUSDT + ckDAI + native-ETH + VCHF + ICP (ckTESTBTC is testnet-side): {body}"
+        6,
+        "icp mainnet = DEMO_USD + ckBTC + ckUSDC + ckETH + VCHF + ICP (the three Sepolia/testnet-BTC rows are testnet-side): {body}"
     );
+    // Served order is the prod order: 0, 1, 2, 6, then the appended 7, 8.
+    let mainnet_ids: Vec<u64> = rows.iter().map(|r| r["currency"].as_u64().unwrap()).collect();
+    assert_eq!(mainnet_ids, vec![0, 1, 2, 6, 7, 8], "mainnet section order: {body}");
 
-    // DEMO_USD (currency 0): the mintable $ faucet asset, no ramp.
+    // DEMO_USD (currency 0): the mintable $ faucet asset at the REAL DUSD ledger, no ramp.
     let dusd = rows
         .iter()
         .find(|r| r["currency"] == 0)
@@ -1147,33 +1159,37 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(dusd["decimals"], 2);
     assert_eq!(dusd["minter"], serde_json::Value::Null);
     assert_eq!(dusd["minter_family"], serde_json::Value::Null);
-    assert!(
-        !dusd["ledger"].as_str().unwrap().is_empty(),
-        "ledger principal text present"
-    );
+    assert_eq!(dusd["ledger"], "td2nx-oaaaa-aaaab-qhdnq-cai"); // the REAL DUSD ledger (catalog_truth demo_ledger)
+    assert_eq!(dusd["wrapper_name"], serde_json::Value::Null);
+    assert_eq!(dusd["backing_symbol"], serde_json::Value::Null);
+    assert_eq!(dusd["network"], serde_json::Value::Null);
+    assert_eq!(dusd["display_decimals"], serde_json::Value::Null);
+    assert_eq!(dusd["fee"], serde_json::Value::Null);
+    assert_eq!(dusd["cap"], "100000"); // $1,000.00 per-tx cap
     // MC1 unit 5: DEMO ramp honesty — onramp=Direct (faucet), offramp=Unavailable (no cash-out).
     assert_eq!(dusd["onramp"], "Direct");
     assert_eq!(dusd["offramp"], "Unavailable");
 
-    // ckBTC-shaped (currency 1): the deposit/withdraw ramp asset — CkBtcUtxo family, ₿, 8 decimals.
+    // ckBTC (currency 1): the deposit/withdraw ramp asset — CkBtcUtxo family, ₿, 8 decimals, the
+    // REAL ckBTC ledger + minter principals.
     let ckbtc = rows
         .iter()
         .find(|r| r["currency"] == 1)
-        .expect("ckBTC-shaped currency present");
+        .expect("ckBTC currency present");
     assert_eq!(ckbtc["mintable"], false);
     assert_eq!(ckbtc["symbol"], "₿");
     assert_eq!(ckbtc["decimals"], 8);
     // The variant serializes as the plain PascalCase tag (matches the candid label + wallet contract).
     assert_eq!(ckbtc["minter_family"], "CkBtcUtxo");
-    assert!(
-        !ckbtc["minter"].as_str().unwrap().is_empty(),
-        "ramp minter principal text present"
-    );
+    assert_eq!(ckbtc["ledger"], "mxzaz-hqaaa-aaaar-qaada-cai"); // catalog_truth ckbtc_ledger
+    assert_eq!(ckbtc["minter"], "mqygn-kiaaa-aaaar-qaadq-cai"); // catalog_truth ckbtc_minter
     // MC1 unit 5: authoritative per-currency metadata (no family-level assumption).
     assert_eq!(ckbtc["wrapper_name"], "ckBTC");
     assert_eq!(ckbtc["backing_symbol"], "BTC");
     assert_eq!(ckbtc["network"], "Bitcoin");
     assert_eq!(ckbtc["display_decimals"], 8);
+    assert_eq!(ckbtc["fee"], serde_json::Value::Null); // read live at runtime
+    assert_eq!(ckbtc["cap"], "100000");
     assert_eq!(ckbtc["onramp"], "Direct"); // chain-key Bitcoin ramp
     assert_eq!(ckbtc["offramp"], "Direct"); // retrieve_btc_with_approval
 
@@ -1186,16 +1202,15 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(ckusdc["symbol"], "ckUSDC");
     assert_eq!(ckusdc["decimals"], 6);
     assert_eq!(ckusdc["minter_family"], "CkEthErc20");
-    assert!(
-        !ckusdc["minter"].as_str().unwrap().is_empty(),
-        "ramp minter principal text present"
-    );
+    assert_eq!(ckusdc["ledger"], "xevnm-gaaaa-aaaar-qafnq-cai"); // catalog_truth ckusdc_ledger
+    assert_eq!(ckusdc["minter"], "sv3dd-oaaaa-aaaar-qacoa-cai"); // catalog_truth cketh_minter
     // MC1 unit 5: per-token ckERC20 facts (O6) replace the old hardcoded currency-2 params.
     assert_eq!(ckusdc["wrapper_name"], "ckUSDC");
     assert_eq!(ckusdc["backing_symbol"], "USDC");
     assert_eq!(ckusdc["network"], "Ethereum");
     assert_eq!(ckusdc["display_decimals"], 6);
     assert_eq!(ckusdc["fee"], "10000"); // ckUSDC icrc1_fee (O6): 0.01 USDC = 10000 raw
+    assert_eq!(ckusdc["cap"], "100000");
     assert_eq!(ckusdc["chain_id"], 1); // Ethereum mainnet
     assert_eq!(
         ckusdc["token_contract"],
@@ -1212,82 +1227,29 @@ async fn currencies_route_returns_demo_catalog() {
         "ckUSDC carries the ckETH gas ledger principal (withdraw_erc20 dual-ledger path)"
     );
 
-    // MC8 U2 — ckUSDT (currency 3): a SECOND CkEthErc20 token proving the onramp is per-token.
-    // Carries its OWN ERC-20 contract (real mainnet USDT, NOT USDC's address); same minter family +
-    // chain. Ramp honesty mirrors ckUSDC: onramp=Direct, offramp=Unavailable (Fork-C — NO cash-out).
-    let ckusdt = rows
-        .iter()
-        .find(|r| r["currency"] == 3)
-        .expect("ckUSDT currency present");
-    assert_eq!(ckusdt["mintable"], false);
-    assert_eq!(ckusdt["symbol"], "ckUSDT");
-    assert_eq!(ckusdt["decimals"], 6);
-    assert_eq!(ckusdt["minter_family"], "CkEthErc20");
-    assert_eq!(ckusdt["wrapper_name"], "ckUSDT");
-    assert_eq!(ckusdt["backing_symbol"], "USDT");
-    assert_eq!(ckusdt["network"], "Ethereum");
-    assert_eq!(ckusdt["display_decimals"], 6);
-    assert_eq!(ckusdt["chain_id"], 1); // Ethereum mainnet
-    assert_eq!(
-        ckusdt["token_contract"],
-        "0xdAC17F958D2ee523a2206206994597C13D831ec7"
-    ); // real USDT
-    assert_eq!(ckusdt["onramp"], "Direct");
-    assert_eq!(ckusdt["offramp"], "Unavailable"); // cash-out not yet wired (only ckUSDC) — Fork-C gate
-    assert_eq!(
-        ckusdt["gas_ledger"], "ss2fx-dyaaa-aaaar-qacoq-cai",
-        "ckUSDT carries the shared ckETH gas ledger (one gas ledger serves every ckERC20)"
-    );
-
-    // OPEN_ISSUES #3 — ckDAI (currency 4): an 18-dec CkEthErc20, the precision-extreme fixture. Same
-    // minter family + chain as ckUSDC/ckUSDT; only `decimals`/`display_decimals`/`token_contract`/
-    // display metadata differ (18 dec mirrors native DAI). Ramp honesty mirrors the other ckERC20s:
-    // onramp=Direct, offramp=Unavailable (Fork-C — NO cash-out).
-    let ckdai = rows
-        .iter()
-        .find(|r| r["currency"] == 4)
-        .expect("ckDAI currency present");
-    assert_eq!(ckdai["mintable"], false);
-    assert_eq!(ckdai["symbol"], "ckDAI");
-    assert_eq!(ckdai["decimals"], 18);
-    assert_eq!(ckdai["display_decimals"], 18);
-    assert_eq!(ckdai["minter_family"], "CkEthErc20");
-    assert_eq!(ckdai["wrapper_name"], "ckDAI");
-    assert_eq!(ckdai["backing_symbol"], "DAI");
-    assert_eq!(ckdai["network"], "Ethereum");
-    assert_eq!(ckdai["chain_id"], 1); // Ethereum mainnet
-    assert_eq!(ckdai["fee"], "10000000000000000"); // 0.01 DAI at 18 dec = 1e16 raw
-    assert_eq!(
-        ckdai["token_contract"],
-        "0x6B175474E89094C44Da98b954EedeAC495271d0F"
-    ); // real DAI ERC-20
-    assert_eq!(ckdai["onramp"], "Direct");
-    assert_eq!(ckdai["offramp"], "Unavailable"); // cash-out not yet wired (only ckUSDC) — Fork-C gate
-    assert_eq!(
-        ckdai["gas_ledger"], "ss2fx-dyaaa-aaaar-qacoq-cai",
-        "ckDAI carries the shared ckETH gas ledger (one gas ledger serves every ckERC20)"
-    );
-
-    // Native ckETH (currency 5): a CkEthErc20-family currency with `token_contract == None`, the
+    // Native ckETH (currency 6): a CkEthErc20-family currency with `token_contract == None`, the
     // discriminator that selects the native-ETH deposit/withdraw path (depositEth / withdraw_eth)
     // instead of the ERC-20 path. This is the catalog entry the native-ETH withdraw e2e (flow 44)
-    // drives. Ramp honesty: onramp=Direct (single payable depositEth tx), offramp=Direct
-    // (withdraw_eth — the Cash-out button renders; the no-swap Unavailable gate stays closed for the
-    // ERC-20 tokens above). 18-dec Wei, same ckETH minter + chain as the ckERC20 entries.
+    // drives. The REAL mainnet row: the live ckETH ledger + minter principals, the live
+    // icrc1_fee (0.000002 ETH), display_decimals 6 ≠ decimals 18 (the truncation path).
+    // Ramp honesty: onramp=Direct (single payable depositEth tx), offramp=Direct (withdraw_eth —
+    // the Cash-out button renders).
     let cketh = rows
         .iter()
-        .find(|r| r["currency"] == 5)
+        .find(|r| r["currency"] == 6)
         .expect("native ckETH currency present");
     assert_eq!(cketh["mintable"], false);
     assert_eq!(cketh["symbol"], "Ξ");
     assert_eq!(cketh["decimals"], 18);
     assert_eq!(cketh["display_decimals"], 6); // matches prod ckETH (truncation path, commit c74988b)
     assert_eq!(cketh["minter_family"], "CkEthErc20");
+    assert_eq!(cketh["ledger"], "ss2fx-dyaaa-aaaar-qacoq-cai"); // catalog_truth cketh_ledger
+    assert_eq!(cketh["minter"], "sv3dd-oaaaa-aaaar-qacoa-cai"); // catalog_truth cketh_minter
     assert_eq!(cketh["wrapper_name"], "ckETH");
     assert_eq!(cketh["backing_symbol"], "ETH");
     assert_eq!(cketh["network"], "Ethereum");
     assert_eq!(cketh["chain_id"], 1); // Ethereum mainnet
-    assert_eq!(cketh["fee"], "10000000000000000"); // 0.01 ETH at 18 dec = 1e16 raw
+    assert_eq!(cketh["fee"], "2000000000000"); // the live ckETH ledger icrc1_fee (0.000002 ETH)
     assert_eq!(cketh["cap"], "100000");
     // THE KEY FIELD: token_contract must be null so the app treats this as native ETH (not ERC-20).
     assert_eq!(cketh["token_contract"], serde_json::Value::Null);
@@ -1357,25 +1319,87 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(icp["offramp"], "Unavailable");
 
     // IC testnet section: exactly the rows the partition rule (network Some AND not in
-    // {"Bitcoin","Ethereum","Internet Computer"}) classifies as testnet — here only the
-    // ckTESTBTC fixture (VCHF/ICP's "Internet Computer" is mainnet-side since U3).
+    // {"Bitcoin","Ethereum","Internet Computer"}) classifies as testnet — the REAL testnet trio
+    // (ckTESTBTC 3, ckSepoliaUSDC 4, ckSepoliaETH 5); VCHF/ICP's "Internet Computer" is
+    // mainnet-side since U3.
     let trows = testnet["assets"]
         .as_array()
         .expect("icp testnet assets array");
     assert_eq!(
         trows.len(),
-        1,
-        "exactly the ckTESTBTC fixture is testnet-side (VCHF/ICP are mainnet; the rest is mainnet or DEMO): {body}"
+        3,
+        "exactly the real testnet trio is testnet-side (ckTESTBTC/ckSepoliaUSDC/ckSepoliaETH; VCHF/ICP are mainnet): {body}"
     );
+    let testnet_ids: Vec<u64> = trows.iter().map(|r| r["currency"].as_u64().unwrap()).collect();
+    assert_eq!(testnet_ids, vec![3, 4, 5], "testnet section order: {body}");
+
+    // ckTESTBTC (currency 3): the REAL testnet chain-key Bitcoin row — its OWN testnet ledger +
+    // minter (distinct from the mainnet ones), CkBtcUtxo family, testnet ramps both Direct.
     let cktestbtc = &trows[0];
-    assert_eq!(cktestbtc["currency"], 6);
+    assert_eq!(cktestbtc["currency"], 3);
+    assert_eq!(cktestbtc["mintable"], false);
+    assert_eq!(cktestbtc["symbol"], "₿");
     assert_eq!(cktestbtc["wrapper_name"], "ckTESTBTC");
     assert_eq!(cktestbtc["backing_symbol"], "BTC");
     assert_eq!(cktestbtc["network"], "Bitcoin Testnet");
     assert_eq!(cktestbtc["minter_family"], "CkBtcUtxo");
+    assert_eq!(cktestbtc["ledger"], "mc6ru-gyaaa-aaaar-qaaaq-cai"); // catalog_truth testnet_ckbtc_ledger
+    assert_eq!(cktestbtc["minter"], "ml52i-qqaaa-aaaar-qaaba-cai"); // catalog_truth testnet_ckbtc_minter
     assert_eq!(cktestbtc["decimals"], 8);
-    assert_eq!(cktestbtc["onramp"], "Unavailable"); // display-only fixture — no ramps
-    assert_eq!(cktestbtc["offramp"], "Unavailable");
+    assert_eq!(cktestbtc["display_decimals"], serde_json::Value::Null);
+    assert_eq!(cktestbtc["fee"], "10");
+    assert_eq!(cktestbtc["cap"], "100000");
+    assert_eq!(cktestbtc["onramp"], "Direct"); // free testnet rail
+    assert_eq!(cktestbtc["offramp"], "Direct");
+
+    // ckSepoliaUSDC (currency 4): the REAL testnet ckERC20 — Sepolia chain_id (11155111) selects
+    // the Sepolia CkDeposit helper, its own testnet USDC contract, the Sepolia ckETH minter.
+    // Ramp honesty: cash-out not wired on testnet USDC — offramp=Unavailable.
+    let sep_usdc = &trows[1];
+    assert_eq!(sep_usdc["currency"], 4);
+    assert_eq!(sep_usdc["mintable"], false);
+    assert_eq!(sep_usdc["symbol"], "ckSepoliaUSDC");
+    assert_eq!(sep_usdc["wrapper_name"], "ckSepoliaUSDC");
+    assert_eq!(sep_usdc["backing_symbol"], "USDC");
+    assert_eq!(sep_usdc["network"], "Sepolia");
+    assert_eq!(sep_usdc["minter_family"], "CkEthErc20");
+    assert_eq!(sep_usdc["ledger"], "yfumr-cyaaa-aaaar-qaela-cai"); // catalog_truth testnet_ckusdc_ledger
+    assert_eq!(sep_usdc["minter"], "jzenf-aiaaa-aaaar-qaa7q-cai"); // catalog_truth testnet_cketh_minter
+    assert_eq!(sep_usdc["decimals"], 6);
+    assert_eq!(sep_usdc["display_decimals"], serde_json::Value::Null);
+    assert_eq!(sep_usdc["fee"], "4000");
+    assert_eq!(sep_usdc["cap"], "100000");
+    assert_eq!(sep_usdc["chain_id"], 11155111); // Sepolia
+    assert_eq!(
+        sep_usdc["token_contract"],
+        "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+        "the TESTNET USDC contract — NOT the mainnet address"
+    );
+    assert_eq!(sep_usdc["gas_ledger"], serde_json::Value::Null);
+    assert_eq!(sep_usdc["onramp"], "Direct");
+    assert_eq!(sep_usdc["offramp"], "Unavailable"); // testnet ckUSDC cash-out not wired
+
+    // ckSepoliaETH (currency 5): the REAL testnet native-ETH row — token_contract null (the same
+    // native discriminator as mainnet ckETH), 18 decimals, Sepolia chain_id, the Sepolia minter.
+    let sep_eth = &trows[2];
+    assert_eq!(sep_eth["currency"], 5);
+    assert_eq!(sep_eth["mintable"], false);
+    assert_eq!(sep_eth["symbol"], "Ξ");
+    assert_eq!(sep_eth["wrapper_name"], "ckSepoliaETH");
+    assert_eq!(sep_eth["backing_symbol"], "ETH");
+    assert_eq!(sep_eth["network"], "Sepolia");
+    assert_eq!(sep_eth["minter_family"], "CkEthErc20");
+    assert_eq!(sep_eth["ledger"], "apia6-jaaaa-aaaar-qabma-cai"); // catalog_truth testnet_cketh_ledger
+    assert_eq!(sep_eth["minter"], "jzenf-aiaaa-aaaar-qaa7q-cai"); // catalog_truth testnet_cketh_minter
+    assert_eq!(sep_eth["decimals"], 18);
+    assert_eq!(sep_eth["display_decimals"], 6);
+    assert_eq!(sep_eth["fee"], "10000000000");
+    assert_eq!(sep_eth["cap"], "100000");
+    assert_eq!(sep_eth["chain_id"], 11155111); // Sepolia
+    assert_eq!(sep_eth["token_contract"], serde_json::Value::Null); // None ⇒ native ETH
+    assert_eq!(sep_eth["gas_ledger"], serde_json::Value::Null);
+    assert_eq!(sep_eth["onramp"], "Direct");
+    assert_eq!(sep_eth["offramp"], "Direct");
 
     // Solana mainnet section — relay-level constants mirroring app/solana.ts EXACTLY: SOL 9
     // decimals (SOL_DECIMALS, mint null — native), USDC 6 decimals (USDC_DECIMALS) + the mainnet
@@ -1544,14 +1568,17 @@ async fn ckerc20_onramp_returns_params_for_ckusdc() {
 /// MC8 U2 — the ckERC-20 onramp is CATALOG/TOKEN-SPECIFIC, not hardcoded to currency 2 / USDC.
 ///
 /// Before U2 the impl was `if currency == 2 { erc20_address = CKUSDC_ERC20_ADDRESS } else { Err }` —
-/// every future ckERC20 (ckUSDT, ckETH, …) inherited ckUSDC's address or got a 503. U2 resolves the
-/// currency descriptor from the catalog and reads the per-token `token_contract` instead, so:
-///   - ckUSDC (currency 2) → the USDC ERC-20 address (NO regression).
-///   - ckUSDT (currency 3) → the USDT ERC-20 address (NOT USDC — proves token-specificity).
-///   - ckBTC (1) / DEMO (0) → 503 (not a CkEthErc20 family currency).
+/// every future ckERC20 (a second token, ckETH, …) inherited ckUSDC's address or got a 503. U2
+/// resolves the currency descriptor from the catalog and reads the per-token `token_contract`
+/// instead, so with the REAL catalog:
+///   - ckUSDC (currency 2) → the USDC ERC-20 address + the MAINNET CkDeposit helper (NO regression).
+///   - ckSepoliaUSDC (currency 4) → the Sepolia USDC address + the SEPOLIA helper (NOT USDC's
+///     address, NOT the mainnet helper — proves both token-specificity AND chain-scoping through
+///     the served route).
+///   - ckTESTBTC (3) / ckBTC (1) / DEMO (0) → 503 (not a CkEthErc20 family currency).
 ///
-/// The `helper_address` is minter-scoped (ONE verified mainnet constant for ALL ckERC20 tokens) and
-/// stays unchanged; only the `erc20_address` source moves to the catalog.
+/// The `helper_address` is chain-scoped (the mainnet/Sepolia CkDeposit constants) and comes from
+/// the same descriptor's `chain_id`; only the `erc20_address` source moved to the catalog.
 #[tokio::test]
 async fn ckerc20_onramp_is_token_specific() {
     let (state, _led) = state_from(ledger());
@@ -1568,26 +1595,46 @@ async fn ckerc20_onramp_is_token_specific() {
         "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
     );
 
-    // ckUSDT (currency 3) → 200 with the USDT ERC-20 address — NOT the USDC address. This is the
-    // token-specificity proof: a second ckERC20 reads ITS OWN `token_contract` from the catalog.
-    let (s_usdt, body_usdt) = call(&state, get_req("/api/v1/onramp/ckerc20?currency=3")).await;
-    assert_eq!(s_usdt, StatusCode::OK, "{body_usdt}");
+    // ckSepoliaUSDC (currency 4) → 200 with the SEPOLIA USDC address + the SEPOLIA helper — NOT
+    // the mainnet pair. This is the token-specificity proof through the served route: a second
+    // ckERC20 reads ITS OWN `token_contract` from the catalog, and its `chain_id` selects its own
+    // CkDeposit helper (the two txs must target contracts on the SAME chain).
+    let (s_sep, body_sep) = call(&state, get_req("/api/v1/onramp/ckerc20?currency=4")).await;
+    assert_eq!(s_sep, StatusCode::OK, "{body_sep}");
     assert_eq!(
-        body_usdt["helper_address"],
-        "0x18901044688D3756C35Ed2b36D93e6a5B8e00E68"
+        body_sep["helper_address"],
+        "0x2D39863d30716aaf2B7fFFd85Dd03Dda2BFC2E38",
+        "chain_id 11155111 selects the Sepolia CkDeposit helper"
     );
     assert_eq!(
-        body_usdt["erc20_address"],
-        "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+        body_sep["erc20_address"],
+        "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
     );
     assert_ne!(
-        body_usdt["erc20_address"], body_usdc["erc20_address"],
-        "ckUSDT must NOT inherit ckUSDC's ERC-20 address",
+        body_sep["erc20_address"], body_usdc["erc20_address"],
+        "ckSepoliaUSDC must NOT inherit ckUSDC's ERC-20 address",
+    );
+    assert_ne!(
+        body_sep["helper_address"], body_usdc["helper_address"],
+        "the Sepolia row must NOT surface the mainnet helper",
     );
 
     // ckBTC (currency 1) → 503: CkBtcUtxo family, not CkEthErc20 — no ckERC-20 onramp.
     let (s_btc, _body_btc) = call(&state, get_req("/api/v1/onramp/ckerc20?currency=1")).await;
     assert_eq!(s_btc, StatusCode::SERVICE_UNAVAILABLE);
+
+    // ckTESTBTC (currency 3) → 503: CkBtcUtxo family (testnet) — same fail-closed family gate.
+    let (s_tb, _body_tb) = call(&state, get_req("/api/v1/onramp/ckerc20?currency=3")).await;
+    assert_eq!(s_tb, StatusCode::SERVICE_UNAVAILABLE);
+
+    // Native ckETH (currency 6) → 200 with kind "native_eth": same CkEthErc20 family, but its
+    // `token_contract` is null — the resolver discriminates the one-tx `depositEth` shape
+    // (erc20_address null) instead of failing. Served-route companion to the unit test below.
+    let (s_eth, body_eth) = call(&state, get_req("/api/v1/onramp/ckerc20?currency=6")).await;
+    assert_eq!(s_eth, StatusCode::OK, "{body_eth}");
+    assert_eq!(body_eth["kind"], "native_eth");
+    assert!(body_eth["erc20_address"].is_null());
+    assert_eq!(body_eth["helper_address"], "0x18901044688D3756C35Ed2b36D93e6a5B8e00E68");
 
     // DEMO (currency 0) → 503: no minter family — no ckERC-20 onramp.
     let (s_demo, _body_demo) = call(&state, get_req("/api/v1/onramp/ckerc20?currency=0")).await;
@@ -1644,7 +1691,7 @@ async fn ckerc20_onramp_native_eth_without_token_contract() {
     // Also: a non-CkEthErc20 descriptor (e.g. CkBtcUtxo) and a missing descriptor both fail closed.
     let ckbtc = dpay_relay::CurrencyDescriptor {
         currency: 1,
-        ledger: "2vxsx-fae".to_string(),
+        ledger: "mxzaz-hqaaa-aaaar-qaada-cai".to_string(),
         mintable: false,
         minter: Some("mqygn-kiaaa-aaaar-qaadq-cai".to_string()),
         minter_family: Some(dpay_relay::MinterFamily::CkBtcUtxo),

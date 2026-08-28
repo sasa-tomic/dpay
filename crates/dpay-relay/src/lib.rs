@@ -3,9 +3,12 @@
 //! Since the 2026-08-19 user-principal IC-rail cutover, VALUE never touches this crate: the app
 //! signs `/api/v2` envelopes locally (dpay-icp) and submits them straight to boundary nodes.
 //! What the relay still owns:
-//! - [`ledger`] — the read-only [`Ledger`] trait: the currency catalog, balances and history at
-//!   the user's principal (real ICRC ledgers via `AgentLedger` under the `agent` feature), plus
-//!   the in-memory [`FakeLedger`] demo catalog.
+//! - [`catalog`] — the compiled-in currency catalog, the SOLE catalog authority (founder
+//!   decision 2026-08-28: relay code + git review + `just up` deploy; the facade canister's
+//!   registry was removed). Drift-alarmed against `dfx/catalog_truth.json`.
+//! - [`ledger`] — the read-only [`Ledger`] trait: balances and history at the user's principal
+//!   (real ICRC ledgers via `AgentLedger` under the `agent` feature), plus the in-memory
+//!   [`FakeLedger`] demo ledger.
 //! - [`app`] — the axum HTTP surface: `/api/v1` read routes (`balances`, `transactions`,
 //!   `deposit/info`, `currencies`, `onramp/ckerc20`, `health`, `version`), the ckERC-20 onramp
 //!   metadata, the production faucet (`POST /faucet` — test-helpers: fake-IC credit; agent:
@@ -17,6 +20,7 @@
 //! Money-critical logic is NOT here — it stays in `dpay-core` (shared with the canister & app).
 
 pub mod app;
+pub mod catalog;
 pub mod ledger;
 
 /// The agent-build faucet's relay-side cooldown — the resurrection of the old canister faucet's
@@ -27,8 +31,9 @@ pub mod ledger;
 #[cfg(feature = "agent")]
 pub mod faucet;
 
-/// The real ic-agent read path (talks to a live IC — the facade catalog + ICRC ledgers). Behind
-/// the `agent` feature so the fast in-memory inner loop stays offline; slots in behind the same
+/// The real ic-agent read path (talks to a live IC — the ICRC ledgers directly; the currency
+/// catalog is compiled into [`catalog`], not read from the canister). Behind the `agent`
+/// feature so the fast in-memory inner loop stays offline; slots in behind the same
 /// [`Ledger`] trait, so the axum app is unchanged.
 #[cfg(feature = "agent")]
 pub mod agent_ledger;

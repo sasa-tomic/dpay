@@ -21,9 +21,10 @@
 //! matching golden reply. Any unexpected argument traps the query (→ 503 → loud test
 //! failure), which doubles as drift detection on the wire contract.
 //!
-//! Asserted through the HTTP route (`GET /api/v1/transactions/{hex}?currency=N`):
-//!   1. DISPATCH: a catalog row whose ledger text IS the canonical ICP ledger is answered by
-//!      the index responder (the rows below only exist in its golden replies);
+//! Asserted through the HTTP route (`GET /api/v1/transactions/{hex}?currency=8`):
+//!   1. DISPATCH: the compiled catalog's ICP row names the canonical ICP ledger as its ledger
+//!      principal, so the request is answered by the index responder (the rows below only exist
+//!      in its golden replies);
 //!   2. DIRECTION MAPPING: sides equal to the user's LEGACY ACCOUNT IDENTIFIER (the hex form
 //!      the real index returns) are rewritten to the user's PRINCIPAL TEXT; the counterparty's
 //!      account-identifier string passes through UNCHANGED;
@@ -34,8 +35,8 @@
 //!   5. u64::MAX amounts survive as raw decimal strings end-to-end;
 //!   6. A stranger account gets an empty history.
 //!
-//! Prereqs: identical to `tests/live.rs` (the justfile `test-live` recipe) — the facade wasm
-//! must exist at `.dev/target-relay/.../dpay_canister.wasm` or via `DPAY_CANISTER_WASM`.
+//! Prereqs: none beyond the offline cargo graph — the responder wasm is hand-assembled below
+//! and the catalog is compiled into the relay, so no canister wasm fixture is read at all.
 
 #![cfg(feature = "agent")]
 
@@ -47,12 +48,12 @@ use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use tower::ServiceExt; // oneshot
 
-use candid::{decode_one, encode_args, encode_one, CandidType, Nat, Principal};
+use candid::{encode_args, encode_one, Nat, Principal};
 use pocket_ic::{PocketIc, PocketIcBuilder};
 
 use dpay_core::generate_keypair;
 use dpay_relay::agent_ledger::{
-    icp_legacy_account_identifier, ICP_INDEX, ICP_LEDGER,
+    icp_legacy_account_identifier, ICP_INDEX,
     IcpIndexAccountTransactionsOk, IcpIndexAccountTransactionsResult,
     IcpIndexApprove, IcpIndexBurn, IcpIndexGetAccountTransactionsArgs, IcpIndexMint,
     IcpIndexTokens, IcpIndexTransaction, IcpIndexTransactionWithId, IcpIndexTransfer,
@@ -60,9 +61,9 @@ use dpay_relay::agent_ledger::{
 use dpay_relay::{app, AgentLedger, AppState};
 use icrc_ledger_types::icrc1::account::Account;
 
-/// Catalog id for the ICP row in this test (any id the facade accepts; not DEMO_USD).
-const CURRENCY: u32 = 9;
-const CAP: u64 = 100_000;
+/// The compiled catalog's ICP row (`crate::catalog`, currency 8): its ledger principal IS the
+/// canonical ICP ledger — exactly the row the adapter dispatches to the pinned index below.
+const CURRENCY: u32 = 8;
 /// MUST equal `agent_ledger::ICP_INDEX_PAGE_SIZE` (a private const): the responder's expected
 /// args are built with this value, so drift traps every query instead of silently matching.
 const ADAPTER_PAGE_SIZE: u64 = 100;
@@ -75,92 +76,6 @@ const TS2_NS: u64 = 1_750_000_002_000_000_000;
 const TS1_NS: u64 = 1_750_000_001_000_000_000;
 const TS0_NS: u64 = 1_750_000_000_000_000_000;
 const SETTLEMENT_MEMO: [u8; 16] = [3u8; 16];
-
-// --- facade init payload (mirror of tests/live.rs) ----------------------------------------------
-
-#[derive(CandidType, serde::Serialize)]
-struct LedgerConfig {
-    currency: u32,
-    principal: Principal,
-    mintable: bool,
-}
-
-#[derive(CandidType, serde::Serialize)]
-struct DpayInitArg {
-    ledgers: Vec<LedgerConfig>,
-    per_tx_cap: u64,
-    controller: Option<Principal>,
-}
-
-#[allow(dead_code)]
-#[derive(CandidType, serde::Serialize)]
-enum TestMinterFamily {
-    CkBtcUtxo,
-    CkEthErc20,
-    CkSol,
-}
-
-#[allow(dead_code)]
-#[derive(CandidType, serde::Serialize)]
-enum TestRampCapability {
-    Direct,
-    Partner,
-    Unavailable,
-}
-
-fn register_currency_meta_cap(
-    pic: &PocketIc,
-    dpay: Principal,
-    controller: Principal,
-    currency: u32,
-    cap: u64,
-) {
-    let reply = pic
-        .update_call(
-            dpay,
-            controller,
-            "register_currency_meta",
-            encode_args((
-                currency,
-                None::<String>,                  // symbol
-                None::<u8>,                      // decimals
-                None::<TestMinterFamily>,        // minter_family
-                None::<String>,                  // wrapper_name
-                None::<String>,                  // backing_symbol
-                None::<String>,                  // network
-                None::<u8>,                      // display_decimals
-                None::<u64>,                     // fee
-                Some(cap),                       // cap
-                None::<u32>,                     // chain_id
-                None::<String>,                  // token_contract
-                TestRampCapability::Unavailable, // onramp
-                TestRampCapability::Unavailable, // offramp
-                None::<Principal>,               // gas_ledger
-            ))
-            .unwrap(),
-        )
-        .expect("register_currency_meta update_call rejected");
-    decode_one::<Result<(), String>>(&reply)
-        .unwrap()
-        .expect("register_currency_meta should succeed for the controller");
-}
-
-fn workspace_root() -> std::path::PathBuf {
-    // crates/dpay-relay -> workspace root
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
-}
-
-fn facade_wasm() -> Vec<u8> {
-    // `just test-live` passes DPAY_CANISTER_WASM as an absolute path; the fallback resolves
-    // against the WORKSPACE root (nextest's cwd is the package dir, where `.dev/...` misses).
-    let path = std::env::var("DPAY_CANISTER_WASM").unwrap_or_else(|_| {
-        workspace_root()
-            .join(".dev/target-relay/wasm32-unknown-unknown/release/dpay_canister.wasm")
-            .to_string_lossy()
-            .into_owned()
-    });
-    std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read facade wasm at {path}: {e}"))
-}
 
 fn get(uri: &str) -> Request<Body> {
     Request::builder().method("GET").uri(uri).body(Body::empty()).unwrap()
@@ -448,7 +363,7 @@ fn ok_reply(
 fn live_icp_index_history_dispatch_direction_memo_pagination_real_agent_path() {
     std::env::set_var("POCKET_IC_MUTE_SERVER", "1");
     // The pinned ICP_INDEX principal falls in PocketIC's NNS id range — the instance needs an
-    // NNS subnet to host it (the application subnet stays for the facade canister).
+    // NNS subnet to host it (the application subnet hosts the ordinary canisters).
     let mut pic = PocketIcBuilder::new()
         .with_application_subnet()
         .with_nns_subnet()
@@ -525,23 +440,13 @@ fn live_icp_index_history_dispatch_direction_memo_pagination_real_agent_path() {
     let wasm = build_index_responder_wasm(&routes);
     pic.0.install_canister(index, wasm, vec![], None);
 
-    // Facade with ONE catalog row: currency 9 whose ledger principal IS the canonical ICP
-    // ledger (no such ledger canister exists on this PocketIC — the adapter must never touch
-    // it; history dispatch goes straight to the index).
+    // The routes resolve the ICP row (currency 8) from the COMPILED catalog: its ledger
+    // principal IS the canonical ICP ledger (no such ledger canister exists on this PocketIC —
+    // the adapter must never touch it; history dispatch goes straight to the index). Nothing
+    // consults the facade for the catalog anymore, so an empty canister id is all
+    // `AgentLedger::connect` needs here.
     let dpay = pic.0.create_canister();
     pic.0.add_cycles(dpay, 2_000_000_000_000);
-    let admin = Principal::management_canister();
-    let dpay_init = DpayInitArg {
-        ledgers: vec![LedgerConfig {
-            currency: CURRENCY,
-            principal: Principal::from_text(ICP_LEDGER).expect("pinned ICP ledger id parses"),
-            mintable: false,
-        }],
-        per_tx_cap: CAP,
-        controller: Some(admin),
-    };
-    pic.0.install_canister(dpay, facade_wasm(), encode_one(&dpay_init).unwrap(), None);
-    register_currency_meta_cap(&pic.0, dpay, admin, CURRENCY, CAP);
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()

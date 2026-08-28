@@ -3,9 +3,12 @@
 //! 2026-08-19 IC user-principal-rail cutover: value movement LEFT the relay entirely — the app
 //! signs /api/v2 envelopes locally (dpay-icp) and POSTs them to boundary nodes. What the relay
 //! still owns in prod is the READ surface, and this test proves exactly that surface against a
-//! REAL local IC: PocketIC's HTTP gateway + the REAL DFINITY ic-icrc1-ledger + the dpay facade
-//! canister (which now only contributes the CATALOG — currencies/deposit metadata; it is no
-//! longer in the value path, so nothing here settles through it).
+//! REAL local IC: PocketIC's HTTP gateway + the REAL DFINITY ic-icrc1-ledger. The dpay facade
+//! canister still appears in the fixtures, but only for the roles it kept after its catalog
+//! registry was deleted (founder decision 2026-08-28): owning the ledger's minting account (the
+//! `mint_at_user_principal` rail shape) and, in the faucet/deposit tests, its controller-gated
+//! mint and deposit-info consensus reads. The CATALOG is compiled into the relay
+//! (`crate::catalog`) — no code path queries the facade for it anymore.
 //!
 //! The money-critical assertion is the ACCOUNT SHAPE: funds are minted directly on the ledger at
 //! `Account{owner: self_authenticating_ed25519(payer pubkey), subaccount: None}` — the exact
@@ -15,20 +18,28 @@
 //! balances would read 0 while funds sit "lost" at a different principal; this test is the live
 //! tripwire for exactly that regression class.
 //!
+//! The fixture ledger is installed AT the compiled catalog's VCHF principal
+//! (`ly36x-wiaaa-aaaai-aqj7q-cai`, currency 7): the routes resolve ledger principals from the
+//! compiled catalog now, so pinning the real wasm there is what makes the fan-out actually
+//! REACH it — the strongest live proof that catalog and rail agree.
+//!
 //! Asserts, all THROUGH THE HTTP ROUTES (oneshot on the real axum app + `AgentLedger` + ic-agent;
 //! no direct trait calls — the prod wire surface is the thing under test):
 //!   1. `GET /api/v1/health` → 200 `{"status":"ok"}` (real replica `status` round-trip);
-//!   2. `GET /api/v1/currencies` → 200, the DUSD row present (currency code + ledger principal
-//!      TEXT matching the real ledger canister's canonical id — proves the catalog fan-out target);
-//!   3. `GET /api/v1/balances/{hex}` → the minted amount as a decimal STRING for DUSD; a SECOND
-//!      user principal minted a different amount reads independently; an UNFUNDED principal reads
-//!      "0" (batch map = exactly the catalog's one entry);
-//!   4. `GET /api/v1/transactions/{hex}?currency=N` → 200 with a well-formed rows array (the
-//!      facade-history era is over; see `live_icrc3_history_walks_the_real_ledger_log` below for
-//!      the CONTENT assertions — this one only proves the shape for an account with no rows).
-//!   5. `GET /api/v1/onramp/ckerc20?currency=N` → the CkDeposit `helper_address` read at RUNTIME
-//!      from the currency's registered minter (`get_minter_info`), with the verified compile-time
-//!      constant served only on logged fallback (see
+//!   2. `GET /api/v1/currencies` → 200, the COMPILED catalog verbatim (v2 network-first envelope:
+//!      icp mainnet 6 rows incl. VCHF 7 naming the pinned fixture ledger, icp testnet trio
+//!      ckTESTBTC/ckSepoliaUSDC/ckSepoliaETH, solana mainnet);
+//!   3. `GET /api/v1/balances/{hex}` → the minted amount as a decimal STRING for VCHF (currency
+//!      7 — the pinned fixture ledger, the only catalog ledger that exists on this PocketIC; the
+//!      other 8 are absent and best-effort omitted); a SECOND user principal minted a different
+//!      amount reads independently; an UNFUNDED principal reads "0";
+//!   4. `GET /api/v1/transactions/{hex}?currency=7` → 200 with a well-formed rows array (see
+//!      `live_icrc3_history_walks_the_real_ledger_log` below for the CONTENT assertions — this
+//!      one only proves the shape for an account with no rows).
+//!   5. `GET /api/v1/onramp/ckerc20?currency=2` → the CkDeposit `helper_address` read at RUNTIME
+//!      from the currency's minter (`get_minter_info` — the fixture installs a mock AT the
+//!      catalog's pinned ckETH-minter principal), with the verified compile-time constant served
+//!      only on logged fallback (see
 //!      `live_ckerc20_onramp_helper_read_at_runtime_with_constant_fallback` below).
 //!
 //! Prereqs (the justfile's `test-live` recipe wires these):
@@ -53,10 +64,10 @@ use http_body_util::BodyExt;
 use serde_json::Value;
 use tower::ServiceExt; // oneshot
 
-use candid::{decode_one, encode_args, encode_one, CandidType, Nat, Principal};
+use candid::{decode_one, encode_one, CandidType, Nat, Principal};
 use pocket_ic::PocketIc;
 
-use dpay_core::{generate_keypair, DEMO_USD};
+use dpay_core::generate_keypair;
 use dpay_relay::{app, AgentLedger, AppState};
 use icrc_ledger_types::icrc1::account::Account;
 use icrc_ledger_types::icrc1::transfer::{TransferArg, TransferError};
@@ -67,18 +78,15 @@ const INIT_B: u64 = 3_333; // second user gets a DIFFERENT amount (balance-indep
 
 // --- facade init payload -----------------------------------------------------------------------
 
-#[derive(CandidType, serde::Serialize)]
-struct LedgerConfig {
-    currency: u32,
-    principal: Principal,
-    mintable: bool,
-}
-
+/// The post-registry-removal facade init payload (founder decision 2026-08-28): the governed
+/// `ledgers` registry is GONE from the canister — init now takes just the controller, the ONE
+/// environment-specific DEMO ledger, and the DEMO per-tx cap. Every other currency the facade
+/// serves resolves from its compile-time `FIXED_ASSETS` table.
 #[derive(CandidType, serde::Serialize)]
 struct DpayInitArg {
-    ledgers: Vec<LedgerConfig>,
-    per_tx_cap: u64,
     controller: Option<Principal>,
+    demo_ledger: Principal,
+    per_tx_cap: u64,
 }
 
 // --- real ic-icrc1-ledger init payload (mirrors third_party/ic-icrc1-ledger/ledger.did) --------
@@ -122,71 +130,15 @@ enum LedgerArg {
     Init(LedgerInitArgs),
 }
 
-/// Local candid mirrors of the canister's `MinterFamily` / `RampCapability` variants, for the
-/// `register_currency_meta` cap-registration args. Post-cutover this registration is catalog
-/// parity, not a pay gate (there is no pay): the prod register flow (`scripts/dfx-deploy-ic.sh`)
-/// seeds CURRENCY_META for every currency, so the live catalog proof mirrors prod by registering
-/// the DEMO cap too. Variant LABELS match the canister's `.did` exactly — candid serde hashes the
-/// label, so declaration order is irrelevant.
-// Complete candid mirrors of the canister's variants — every label must exist so the record
-// encodes against the real `.did`, but this test only ever constructs `Unavailable`, so the
-// unconstructed variants are `allow(dead_code)` by design (a partial mirror would silently
-// change the candid label hashing and corrupt the registration args).
-#[allow(dead_code)]
-#[derive(CandidType, serde::Serialize)]
-enum TestMinterFamily {
-    CkBtcUtxo,
-    CkEthErc20,
-    CkSol,
-}
+/// The compiled catalog's VCHF row (`crate::catalog`, currency 7). The read-surface fixtures
+/// install the real ic-icrc1-ledger wasm AT this row's pinned principal — the ledger the
+/// /balances and /transactions routes must resolve from the compiled catalog and actually reach.
+const CATALOG_VCHF: u32 = 7;
 
-#[allow(dead_code)]
-#[derive(CandidType, serde::Serialize)]
-enum TestRampCapability {
-    Direct,
-    Partner,
-    Unavailable,
-}
-
-/// Register a per-tx `cap` for `currency`. Mirrors the canister test's `register_currency_meta_cap`
-/// — all other fields `None`/`Unavailable`. Called as the controller (this live test seeds
-/// `management_canister` as the controller so this admin op is permitted).
-fn register_currency_meta_cap(
-    pic: &PocketIc,
-    dpay: Principal,
-    controller: Principal,
-    currency: u32,
-    cap: u64,
-) {
-    let reply = pic
-        .update_call(
-            dpay,
-            controller,
-            "register_currency_meta",
-            encode_args((
-                currency,
-                None::<String>,              // symbol
-                None::<u8>,                  // decimals
-                None::<TestMinterFamily>,    // minter_family
-                None::<String>,              // wrapper_name
-                None::<String>,              // backing_symbol
-                None::<String>,              // network
-                None::<u8>,                  // display_decimals
-                None::<u64>,                 // fee
-                Some(cap),                   // cap
-                None::<u32>,                 // chain_id
-                None::<String>,              // token_contract
-                TestRampCapability::Unavailable, // onramp
-                TestRampCapability::Unavailable, // offramp
-                None::<Principal>,               // gas_ledger
-            ))
-            .unwrap(),
-        )
-        .expect("register_currency_meta update_call rejected");
-    decode_one::<Result<(), String>>(&reply)
-        .unwrap()
-        .expect("register_currency_meta should succeed for the controller");
-}
+/// The compiled catalog's ckUSDC row (currency 2): CkEthErc20 family, mainnet chain_id, ERC-20
+/// token contract, minter `sv3dd-oaaaa-aaaar-qacoa-cai` — the onramp test installs its mock
+/// minter AT that principal so the runtime helper read has a live target.
+const CATALOG_CKUSDC: u32 = 2;
 
 fn workspace_root() -> std::path::PathBuf {
     // crates/dpay-relay -> workspace root
@@ -298,10 +250,11 @@ fn rail_transfer(
     }
 }
 
-/// Stand up the live IC + real ICRC ledger + facade catalog — the shared fixture of both tests
-/// below. Returns the RAII-guarded PocketIC (keep it alive for the test's duration), the ledger
-/// canister, and the facade canister. The ledger's minting account is owned by the FACADE, so
-/// `mint_at_user_principal` (sent as the facade) is the ICRC-1 mint path.
+/// Stand up the live IC + the real ICRC ledger pinned AT the compiled catalog's VCHF principal —
+/// the shared fixture of the read-surface tests below. Returns the RAII-guarded PocketIC (keep it
+/// alive for the test's duration), the pinned ledger canister, and the facade canister. The
+/// ledger's minting account is owned by the FACADE, so `mint_at_user_principal` (sent as the
+/// facade) is the ICRC-1 mint path.
 fn stand_up() -> (LivePocketIc, Principal, Principal, String) {
     // PocketIC's server child must not inherit this test binary's stdio pipes (see the teardown
     // comment at the bottom for the full why); the env var is read at server spawn, i.e. it MUST
@@ -316,16 +269,25 @@ fn stand_up() -> (LivePocketIc, Principal, Principal, String) {
     let dpay = pic.0.create_canister();
     pic.0.add_cycles(dpay, 2_000_000_000_000);
 
-    let ledger = pic.0.create_canister();
+    // The ledger sits AT the compiled catalog's VCHF principal (row 7): the routes resolve ledger
+    // principals from crate::catalog now, so pinning the real wasm at the row's principal is what
+    // makes /balances and /transactions actually reach THIS ledger. Literal kept in sync with
+    // `catalog::VCHF_LEDGER_PRINCIPAL` (pub(crate), not importable from an integration test);
+    // the catalog_truth drift test pins it against dfx/catalog_truth.json.
+    let ledger = Principal::from_text("ly36x-wiaaa-aaaai-aqj7q-cai")
+        .expect("the compiled catalog's VCHF ledger id parses");
+    pic.0
+        .create_canister_with_id(None, None, ledger)
+        .expect("reserve the pinned VCHF ledger principal on PocketIC");
     pic.0.add_cycles(ledger, 10_000_000_000_000);
     let ledger_init = LedgerArg::Init(LedgerInitArgs {
         minting_account: Account { owner: dpay, subaccount: None },
         fee_collector_account: None,
         transfer_fee: Nat::from(0u64),
-        decimals: Some(2),
+        decimals: Some(8),
         max_memo_length: None,
-        token_symbol: "DUSD".into(),
-        token_name: "dpay demo USD".into(),
+        token_symbol: "VCHF".into(),
+        token_name: "dpay live-test VCHF".into(),
         metadata: vec![],
         initial_balances: vec![],
         feature_flags: Some(FeatureFlags { icrc2: true, icrc152: false }),
@@ -343,21 +305,13 @@ fn stand_up() -> (LivePocketIc, Principal, Principal, String) {
     });
     pic.0.install_canister(ledger, ledger_wasm(), encode_one(&ledger_init).unwrap(), None);
 
-    // Install the facade wired to the ledger (DUSD, mintable, seeded controller). Post-cutover the
-    // facade's job here is the CATALOG: `currencies()` joins its LEDGERS registration with
-    // CURRENCY_META — that catalog row is what the balances batch fans out against, what the
-    // transactions handler resolves the ledger principal from, and what the wallet renders. It is
-    // deliberately NOT used to move value anywhere in these tests.
+    // The facade's remaining role in the READ tests: owning the ledger's minting account (the
+    // rail mint path above) — the read routes never consult it (the catalog is compiled into the
+    // relay). The pinned VCHF ledger doubles as the facade's `demo_ledger` (init shape only; the
+    // DEMO currency is never queried on this read-surface fixture).
     let admin = Principal::management_canister();
-    let dpay_init = DpayInitArg {
-        ledgers: vec![LedgerConfig { currency: DEMO_USD, principal: ledger, mintable: true }],
-        per_tx_cap: CAP,
-        controller: Some(admin),
-    };
+    let dpay_init = DpayInitArg { controller: Some(admin), demo_ledger: ledger, per_tx_cap: CAP };
     pic.0.install_canister(dpay, facade_wasm(), encode_one(&dpay_init).unwrap(), None);
-    // Prod register parity: seed the DEMO cap into CURRENCY_META exactly as dfx-deploy-ic does,
-    // so the catalog row these tests assert on mirrors the prod-registered shape.
-    register_currency_meta_cap(&pic.0, dpay, admin, DEMO_USD, CAP);
 
     (pic, ledger, dpay, gateway_url)
 }
@@ -418,15 +372,8 @@ fn stand_up_with_controller_seed()
     });
     pic.0.install_canister(ledger, ledger_wasm(), encode_one(&ledger_init).unwrap(), None);
 
-    let dpay_init = DpayInitArg {
-        ledgers: vec![LedgerConfig { currency: DEMO_USD, principal: ledger, mintable: true }],
-        per_tx_cap: CAP,
-        controller: Some(controller),
-    };
+    let dpay_init = DpayInitArg { controller: Some(controller), demo_ledger: ledger, per_tx_cap: CAP };
     pic.0.install_canister(dpay, facade_wasm(), encode_one(&dpay_init).unwrap(), None);
-    // Catalog row (DEMO cap) — registered BY the controller now, matching how the relay-authed
-    // admin path works in prod (dfx-deploy-ic registers as the same identity).
-    register_currency_meta_cap(&pic.0, dpay, controller, DEMO_USD, CAP);
 
     (pic, ledger, dpay, gateway_url, seed)
 }
@@ -458,16 +405,18 @@ fn live_read_surface_at_user_principal() {
             .await
             .expect("AgentLedger must connect to the live gateway");
         let state = AppState::new(Arc::new(agent));
-        let key = DEMO_USD.to_string(); // the batch map's JSON key: currency index as a string
+        let key = CATALOG_VCHF.to_string(); // the batch map's JSON key: currency index as a string
 
         // ---- (1) health: the real replica `status` round-trip ----
         let (hs, hb) = call(&state, get("/api/v1/health")).await;
         assert_eq!(hs, StatusCode::OK, "health body={hb}");
         assert_eq!(hb["status"], "ok");
 
-        // ---- (2) currencies: the DUSD row with the REAL ledger's canonical principal text ----
-        // v2 network-first envelope: the DUSD row (network None → mainnet-side) lives in the icp
-        // MAINNET section's assets; the testnet section is still emitted, empty.
+        // ---- (2) currencies: the COMPILED catalog, served without touching the facade ----
+        // v2 network-first envelope: icp mainnet (6 rows: DEMO 0, ckBTC 1, ckUSDC 2, ckETH 6,
+        // VCHF 7, ICP 8), icp testnet (the real trio ckTESTBTC 3 / ckSepoliaUSDC 4 /
+        // ckSepoliaETH 5), solana mainnet (SOL + USDC). The VCHF row must name THIS fixture's
+        // pinned principal — the fan-out target the balances/transactions routes resolve against.
         let (cs, cb) = call(&state, get("/api/v1/currencies")).await;
         assert_eq!(cs, StatusCode::OK, "currencies body={cb}");
         let networks = cb["networks"]
@@ -478,25 +427,31 @@ fn live_read_surface_at_user_principal() {
         assert_eq!(mainnet["protocol"], "icp");
         assert_eq!(mainnet["environment"], "mainnet");
         assert_eq!(
+            mainnet["assets"].as_array().map(Vec::len),
+            Some(6),
+            "the compiled mainnet section carries all 6 rows incl. VCHF 7 + ICP 8: {cb}"
+        );
+        assert_eq!(
             networks[1]["environment"], "testnet",
-            "the testnet section is emitted even when empty: {cb}"
+            "the testnet section holds the compiled testnet trio: {cb}"
         );
         assert_eq!(
             networks[1]["assets"].as_array().map(Vec::len),
-            Some(0),
-            "the live catalog registers no testnet currencies: {cb}"
+            Some(3),
+            "exactly ckTESTBTC (3) + ckSepoliaUSDC (4) + ckSepoliaETH (5) on the testnet side: {cb}"
         );
+        assert_eq!(networks[2]["protocol"], "solana", "the solana section is present: {cb}");
         let rows = mainnet["assets"]
             .as_array()
             .unwrap_or_else(|| panic!("icp mainnet assets must be an array: {cb}"));
-        let dusd = rows
+        let vchf = rows
             .iter()
-            .find(|d| d["currency"].as_u64() == Some(u64::from(DEMO_USD)))
-            .unwrap_or_else(|| panic!("catalog must contain the DUSD (currency {DEMO_USD}) row: {cb}"));
+            .find(|d| d["currency"].as_u64() == Some(u64::from(CATALOG_VCHF)))
+            .unwrap_or_else(|| panic!("compiled catalog must contain the VCHF (currency {CATALOG_VCHF}) row: {cb}"));
         assert_eq!(
-            dusd["ledger"].as_str(),
+            vchf["ledger"].as_str(),
             Some(ledger_text.as_str()),
-            "DUSD row must name the real ledger's canonical principal text (row={dusd})"
+            "VCHF row must name the pinned fixture ledger's canonical principal text (row={vchf})"
         );
 
         // ---- (3) balances: the USER-PRINCIPAL account shape against the real ledger ----
@@ -505,13 +460,15 @@ fn live_read_surface_at_user_principal() {
         // account-shape regression on either side reads 0 here — that is the tripwire.
         let (ps, pb) = call(&state, get(&format!("/api/v1/balances/{}", hex::encode(payer_pk)))).await;
         assert_eq!(ps, StatusCode::OK, "payer balances body={pb}");
-        assert_eq!(pb[key.as_str()], INIT_A.to_string(), "payer DUSD must read the minted amount (body={pb})");
-        // The catalog has exactly one currency (DUSD), so the fan-out map has exactly one entry —
-        // no phantom rows, no dropped rows.
+        assert_eq!(pb[key.as_str()], INIT_A.to_string(), "payer VCHF must read the minted amount (body={pb})");
+        // The compiled catalog carries 9 currencies, but only the PINNED fixture ledger exists on
+        // this PocketIC — every other fan-out target is an absent canister, and the batch omits
+        // those best-effort (exactly prod's behavior for unreachable ledgers). So the map is the
+        // one entry that answered: VCHF.
         assert_eq!(
             pb.as_object().map(|m| m.len()),
             Some(1),
-            "the batch map must carry exactly the catalog's one entry (body={pb})"
+            "only the fixture ledger answers; absent catalog ledgers are omitted (body={pb})"
         );
 
         // Second user: independent balance (different amount, different principal).
@@ -530,18 +487,19 @@ fn live_read_surface_at_user_principal() {
         assert_eq!(us, StatusCode::OK, "unfunded balances body={ub}");
         assert_eq!(ub[key.as_str()], "0", "an unfunded principal must read \"0\" (body={ub})");
 
-        // ---- (4) transactions: shape for an account with no DUSD rows ----
+        // ---- (4) transactions: shape for an account with no VCHF rows ----
         // The payer HAS history rows now (the mints above — see the icrc3 test below for the
-        // content assertions); this read uses a currency whose log exists but has no rows for
-        // this user… except DUSD is the only currency, and the mints DID touch the payer. So the
-        // honest shape-only read here is the UNFUNDED principal: rows exist on the ledger, just
-        // none concerning this account — the response must be 200 with an EMPTY array.
+        // content assertions); this read uses the currency whose log exists but has no rows for
+        // this user… except VCHF is the only live currency here, and the mints DID touch the
+        // payer. So the honest shape-only read here is the UNFUNDED principal: rows exist on the
+        // ledger, just none concerning this account — the response must be 200 with an EMPTY
+        // array.
         let (us, ub) = call(
             &state,
             get(&format!(
                 "/api/v1/transactions/{}?currency={}&limit=10",
                 hex::encode(unfunded_pk),
-                DEMO_USD
+                CATALOG_VCHF
             )),
         )
         .await;
@@ -611,7 +569,7 @@ fn live_icrc3_history_walks_the_real_ledger_log() {
             get(&format!(
                 "/api/v1/transactions/{}?currency={}&limit=30",
                 hex::encode(payer_pk),
-                DEMO_USD
+                CATALOG_VCHF
             )),
         )
         .await;
@@ -631,7 +589,7 @@ fn live_icrc3_history_walks_the_real_ledger_log() {
             Some(hex::encode("change").as_str()),
             "memo renders as hex bytes"
         );
-        assert_eq!(r0["currency"].as_u64(), Some(u64::from(DEMO_USD)));
+        assert_eq!(r0["currency"].as_u64(), Some(u64::from(CATALOG_VCHF)));
         // Magnitude pin, not just type: ICRC-3 blocks carry NANOSECOND timestamps and the rows
         // contract is unix SECONDS — a raw-ns leak here renders as "undefined NaN, NaN" in the
         // app's history rows (2026-08-21 field bug). Pin the seconds range so the ns→s division
@@ -661,7 +619,7 @@ fn live_icrc3_history_walks_the_real_ledger_log() {
             get(&format!(
                 "/api/v1/transactions/{}?currency={}&limit=1",
                 hex::encode(payer_pk),
-                DEMO_USD
+                CATALOG_VCHF
             )),
         )
         .await;
@@ -678,7 +636,7 @@ fn live_icrc3_history_walks_the_real_ledger_log() {
             get(&format!(
                 "/api/v1/transactions/{}?currency={}&limit=1&memo={memo_hex}",
                 hex::encode(payer_pk),
-                DEMO_USD
+                CATALOG_VCHF
             )),
         )
         .await;
@@ -695,7 +653,7 @@ fn live_icrc3_history_walks_the_real_ledger_log() {
             get(&format!(
                 "/api/v1/transactions/{}?currency={}&limit=30",
                 hex::encode(stranger_pk),
-                DEMO_USD
+                CATALOG_VCHF
             )),
         )
         .await;
@@ -724,7 +682,7 @@ fn live_icrc3_history_walks_the_real_ledger_log() {
             get(&format!(
                 "/api/v1/transactions/{}?currency={}&limit=30",
                 hex::encode(late_pk),
-                DEMO_USD
+                CATALOG_VCHF
             )),
         )
         .await;
@@ -742,7 +700,7 @@ fn live_icrc3_history_walks_the_real_ledger_log() {
             get(&format!(
                 "/api/v1/transactions/{}?currency={}&limit=30",
                 hex::encode(late_pk),
-                DEMO_USD
+                CATALOG_VCHF
             )),
         )
         .await;
@@ -762,7 +720,7 @@ fn live_icrc3_history_walks_the_real_ledger_log() {
             get(&format!(
                 "/api/v1/transactions/{}?currency={}&limit=30",
                 hex::encode(payer_pk),
-                DEMO_USD
+                CATALOG_VCHF
             )),
         )
         .await;
@@ -953,22 +911,24 @@ fn live_faucet_refuses_non_controller_identities_verbatim() {
 // The ckERC20/native-ETH onramp's CkDeposit `helper_address` is deploy state the ckETH-minter
 // operator can MOVE (a helper/minter upgrade deploys a new contract). Serving the compile-time
 // constants unconditionally would silently strand deposits after such an upgrade; the agent path
-// therefore reads the CURRENT address from the currency's registered minter at request time
+// therefore reads the CURRENT address from the currency's minter (the principal named by the
+// compiled catalog) at request time
 // (`get_minter_info.deposit_with_subaccount_helper_contract_address`, a query) and falls back to
 // the verified constants only when that read fails or the minter leaves the field unset (logged).
 // This test proves BOTH halves live through the HTTP route:
 //   - a minter configured with a sentinel address that exists nowhere in the relay's compiled
 //     constants must be surfaced VERBATIM (the runtime read wins, and a second call after the
 //     minter changes its address must reflect the change — not a cache);
-//   - a same-family currency whose minter leaves the field unset must serve the chain_id-scoped
-//     verified constant (the fallback path).
+//   - when the minter read FAILS (the fixture uninstalls the mock mid-test — the same degradation
+//     prod sees when a minter is down), the chain_id-scoped verified constant must be served (the
+//     logged fallback path).
 //
-// Fixture: TWO instances of the test-only mock-minter canister (`dpay-mock-minter`, never
-// shipped to mainnet). The mock's `MinterInfo` extends the real ckBTC shape with the ckETH
-// minter's `deposit_with_subaccount_helper_contract_address: opt text` field (candid record
-// subtyping keeps the facade's BTC-shaped decode working) plus a `set_deposit_helper_address`
-// test hook. Minter A gets the sentinel set (and later changed); minter B stays at the None
-// default.
+// Fixture: ONE instance of the test-only mock-minter canister (`dpay-mock-minter`, never shipped
+// to mainnet), installed AT the compiled catalog's pinned ckETH-minter principal — the onramp
+// resolves minter principals from `crate::catalog`, so pinning is what routes the runtime query
+// to the mock. The mock's `MinterInfo` extends the real ckBTC shape with the ckETH minter's
+// `deposit_with_subaccount_helper_contract_address: opt text` field plus a
+// `set_deposit_helper_address` test hook: the sentinel is set (and later changed) through it.
 
 /// The mock-minter canister's init payload (mirrors `dpay-mock-minter`'s `InitArg`).
 #[derive(CandidType, serde::Serialize)]
@@ -995,16 +955,13 @@ const RUNTIME_HELPER_SENTINEL_B: &str = "0x5E71B00000000000000000000000000000000
 /// `ledger::ckerc20::CKERC20_HELPER_ADDRESS_MAINNET`, `pub(crate)` so not importable).
 const EXPECTED_FALLBACK_HELPER_MAINNET: &str = "0x18901044688D3756C35Ed2b36D93e6a5B8e00E68";
 
-/// Currency ids used only by this test: `register_ledger`/`register_minter`/
-/// `register_currency_meta` are controller-gated with arbitrary ids allowed, and no value path
-/// touches these rows (the onramp route only reads catalog metadata + the minter query).
-const ONRAMP_SENTINEL_CURRENCY: u32 = 4; // CkEthErc20, mainnet chain_id, minter A (sentinel)
-const ONRAMP_FALLBACK_CURRENCY: u32 = 2; // CkEthErc20, mainnet chain_id, minter B (field unset)
-
 /// The ckETH-minter fixture proved live: the onramp's `helper_address` is the address the
-/// currency's registered MINTER serves (runtime `get_minter_info` read — minter B proves the
-/// logged-constant fallback), and a minter-side change is reflected on the very next request
-/// (no caching). Proves the whole WAVE-5 agent-path contract through the HTTP route.
+/// currency's minter serves — the compiled catalog names the minter principal
+/// (`sv3dd-oaaaa-aaaar-qacoa-cai` for the CkEthErc20 rows) and the runtime `get_minter_info`
+/// query reads the CURRENT address from the canister pinned there. A minter-side change is
+/// reflected on the very next request (no caching), and an unreachable (uninstalled) minter
+/// degrades to the logged chain-scoped constant fallback. Proves the whole WAVE-5 agent-path
+/// contract through the HTTP route.
 #[test]
 fn live_ckerc20_onramp_helper_read_at_runtime_with_constant_fallback() {
     std::env::set_var("POCKET_IC_MUTE_SERVER", "1");
@@ -1012,111 +969,33 @@ fn live_ckerc20_onramp_helper_read_at_runtime_with_constant_fallback() {
     let gateway_url = pic.make_live(None).to_string();
     let pic = LivePocketIc(pic);
 
-    // Controller + facade + a real ICRC ledger for the two descriptors. The ledger principal is
-    // catalog metadata here — no balances move — but registering the real wasm keeps the rows
-    // honest and reuses `stand_up`'s proven init shape.
-    let admin = Principal::management_canister();
+    // ONE mock minter, pinned AT the compiled catalog's ckETH-minter principal (row 2's minter
+    // — `pub(crate)` in the relay, so the literal is duplicated here exactly like the fallback
+    // constant above; the catalog_truth drift test pins it). The onramp route resolves the minter
+    // FROM the compiled catalog and queries THIS canister — the facade is never consulted on this
+    // path, so an empty canister id is all `AgentLedger::connect` needs.
     let dpay = pic.0.create_canister();
     pic.0.add_cycles(dpay, 2_000_000_000_000);
-    let ledger = pic.0.create_canister();
-    pic.0.add_cycles(ledger, 10_000_000_000_000);
-    let ledger_init = LedgerArg::Init(LedgerInitArgs {
-        minting_account: Account { owner: dpay, subaccount: None },
-        fee_collector_account: None,
-        transfer_fee: Nat::from(0u64),
-        decimals: Some(6),
-        max_memo_length: None,
-        token_symbol: "CKE".into(),
-        token_name: "ckE test".into(),
-        metadata: vec![],
-        initial_balances: vec![],
-        feature_flags: Some(FeatureFlags { icrc2: false, icrc152: false }),
-        archive_options: ArchiveOptions {
-            num_blocks_to_archive: 10_000,
-            max_transactions_per_response: None,
-            trigger_threshold: 10_000_000,
-            max_message_size_bytes: None,
-            cycles_for_archive_creation: None,
-            node_max_memory_size_bytes: None,
-            controller_id: dpay,
-            more_controller_ids: None,
-        },
-        index_principal: None,
-    });
-    pic.0.install_canister(ledger, ledger_wasm(), encode_one(&ledger_init).unwrap(), None);
-
-    let dpay_init = DpayInitArg {
-        ledgers: vec![
-            LedgerConfig { currency: ONRAMP_SENTINEL_CURRENCY, principal: ledger, mintable: false },
-            LedgerConfig { currency: ONRAMP_FALLBACK_CURRENCY, principal: ledger, mintable: false },
-        ],
-        per_tx_cap: CAP,
-        controller: Some(admin),
-    };
-    pic.0.install_canister(dpay, facade_wasm(), encode_one(&dpay_init).unwrap(), None);
-
-    // Minter A (sentinel set post-install, the way an upgraded minter carries its own
-    // configured helper) + minter B (field never set → `None` on the wire → fallback).
-    let install_minter = |pic: &LivePocketIc| -> Principal {
-        let m = pic.0.create_canister();
-        pic.0.add_cycles(m, 2_000_000_000_000);
-        pic.0.install_canister(
-            m,
-            mock_minter_wasm(),
-            encode_one(&MockMinterInit { amount_ledger: ledger, gas_ledger: None }).unwrap(),
-            None,
-        );
-        m
-    };
-    let minter_a = install_minter(&pic);
-    let minter_b = install_minter(&pic);
+    let cketh_minter = Principal::from_text("sv3dd-oaaaa-aaaar-qacoa-cai")
+        .expect("the compiled catalog's ckETH minter id parses");
+    pic.0
+        .create_canister_with_id(None, None, cketh_minter)
+        .expect("reserve the pinned ckETH-minter principal on PocketIC");
+    pic.0.add_cycles(cketh_minter, 2_000_000_000_000);
+    pic.0.install_canister(
+        cketh_minter,
+        mock_minter_wasm(),
+        encode_one(&MockMinterInit { amount_ledger: dpay, gas_ledger: None }).unwrap(),
+        None,
+    );
     pic.0
         .update_call(
-            minter_a,
+            cketh_minter,
             Principal::anonymous(),
             "set_deposit_helper_address",
             encode_one(RUNTIME_HELPER_SENTINEL_A).unwrap(),
         )
         .expect("set_deposit_helper_address update_call rejected");
-
-    // Wire the catalog: ledger + minter + CkEthErc20 metadata per currency. Both carry mainnet
-    // chain_id so the ONE differentiator is minter state (sentinel vs unset), not chain scoping
-    // (the chain-id gate is covered exhaustively by the unit tests on the pure resolver).
-    for (currency, minter) in [
-        (ONRAMP_SENTINEL_CURRENCY, minter_a),
-        (ONRAMP_FALLBACK_CURRENCY, minter_b),
-    ] {
-        let reg = |method: &str, args: Vec<u8>| {
-            let reply = pic.0.update_call(dpay, admin, method, args).unwrap_or_else(|e| {
-                panic!("{method} update_call rejected for currency {currency}: {e:?}")
-            });
-            decode_one::<Result<(), String>>(&reply)
-                .unwrap()
-                .unwrap_or_else(|e| panic!("{method} must succeed for the controller: {e}"));
-        };
-        reg("register_minter", encode_args((currency, minter)).unwrap());
-        reg(
-            "register_currency_meta",
-            encode_args((
-                currency,
-                None::<String>,                     // symbol
-                None::<u8>,                         // decimals
-                Some(TestMinterFamily::CkEthErc20), // minter_family
-                None::<String>,                     // wrapper_name
-                None::<String>,                     // backing_symbol
-                None::<String>,                     // network
-                None::<u8>,                         // display_decimals
-                None::<u64>,                        // fee
-                None::<u64>,                        // cap
-                Some(1u32),                         // chain_id (mainnet)
-                Some("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".to_string()), // token (USDC)
-                TestRampCapability::Direct,         // onramp
-                TestRampCapability::Direct,         // offramp
-                None::<Principal>,                  // gas_ledger
-            ))
-            .unwrap(),
-        );
-    }
 
     let canister_id = dpay;
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -1131,23 +1010,23 @@ fn live_ckerc20_onramp_helper_read_at_runtime_with_constant_fallback() {
         AppState::new(Arc::new(agent))
     });
 
-    // ---- (1) runtime read wins: minter A's sentinel (≠ every compiled constant) ----
+    // ---- (1) runtime read wins: the pinned minter's sentinel (≠ every compiled constant) ----
     let (s, b) = rt
         .block_on(call(
             &state,
-            get(&format!("/api/v1/onramp/ckerc20?currency={ONRAMP_SENTINEL_CURRENCY}")),
+            get(&format!("/api/v1/onramp/ckerc20?currency={CATALOG_CKUSDC}")),
         ));
     assert_eq!(s, StatusCode::OK, "onramp sentinel body={b}");
     assert_eq!(
         b["helper_address"].as_str(),
         Some(RUNTIME_HELPER_SENTINEL_A),
         "helper MUST be the minter's CURRENT address (runtime get_minter_info read), \
-         not any compiled constant (body={b})"
+          not any compiled constant (body={b})"
     );
     assert_eq!(
         b["erc20_address"].as_str(),
         Some("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
-        "ERC-20 address stays the descriptor's per-token contract (body={b})"
+        "ERC-20 address stays the compiled ckUSDC row's token contract (body={b})"
     );
     assert_eq!(
         b["kind"].as_str(),
@@ -1160,7 +1039,7 @@ fn live_ckerc20_onramp_helper_read_at_runtime_with_constant_fallback() {
     // pocket-ic's update_call internally block_ons and panics if nested inside our runtime)
     pic.0
         .update_call(
-            minter_a,
+            cketh_minter,
             Principal::anonymous(),
             "set_deposit_helper_address",
             encode_one(RUNTIME_HELPER_SENTINEL_B).unwrap(),
@@ -1169,34 +1048,41 @@ fn live_ckerc20_onramp_helper_read_at_runtime_with_constant_fallback() {
     let (s, b) = rt
         .block_on(call(
             &state,
-            get(&format!("/api/v1/onramp/ckerc20?currency={ONRAMP_SENTINEL_CURRENCY}")),
+            get(&format!("/api/v1/onramp/ckerc20?currency={CATALOG_CKUSDC}")),
         ));
     assert_eq!(s, StatusCode::OK, "onramp sentinel-B body={b}");
     assert_eq!(
         b["helper_address"].as_str(),
         Some(RUNTIME_HELPER_SENTINEL_B),
         "a helper address the minter changed BETWEEN requests must be surfaced on the very \
-         next request — the runtime read must not be cached (body={b})"
+          next request — the runtime read must not be cached (body={b})"
     );
 
-    // ---- (3) fallback: minter B leaves the field unset ⇒ verified mainnet constant ----
+    // ---- (3) fallback: the minter read FAILS (mock uninstalled) ⇒ verified mainnet constant ----
+    // (an uninstall failure would leave the sentinel live and fail the assert below loudly)
+    let _ = pic.0.uninstall_canister(cketh_minter, None);
     let (s, b) = rt
         .block_on(call(
             &state,
-            get(&format!("/api/v1/onramp/ckerc20?currency={ONRAMP_FALLBACK_CURRENCY}")),
+            get(&format!("/api/v1/onramp/ckerc20?currency={CATALOG_CKUSDC}")),
         ));
     assert_eq!(s, StatusCode::OK, "onramp fallback body={b}");
     assert_eq!(
         b["helper_address"].as_str(),
         Some(EXPECTED_FALLBACK_HELPER_MAINNET),
-        "minter with the field unset ⇒ logged fallback to the verified constant (body={b})"
+        "unreachable minter ⇒ logged fallback to the verified constant (body={b})"
     );
 }
 
-/// Currency id for the deposit_info cache test — registered with a minter but NO family meta,
-/// which the facade's family resolver defaults to CkBtcUtxo (legacy compat), the ONLY family
-/// `deposit_info` serves.
-const DEPOSIT_CACHE_CURRENCY: u32 = 5;
+/// Currency id for the deposit_info cache test — ckBTC (1), the ONLY CkBtcUtxo-family currency
+/// (the family gate `deposit_info` serves); the facade resolves its minter from its compile-time
+/// `FIXED_ASSETS` table, so the fixture pins the mock minter AT that principal.
+const DEPOSIT_CACHE_CURRENCY: u32 = 1;
+
+/// The ckBTC minter principal the facade's compile-time `FIXED_ASSETS` table names for currency 1
+/// (`crate::ledger::ckerc20::CKBTC_MINTER_PRINCIPAL` in the relay — `pub(crate)`, not importable
+/// from an integration test; the catalog-truth drift test pins the pair).
+const CKBTC_MINTER_PINNED: &str = "mqygn-kiaaa-aaaar-qaadq-cai";
 
 /// WAVE 5 item 2: `/api/v1/deposit/info` MUST stay a consensus UPDATE (the facade `await`s two
 /// inter-canister minter calls), so the relay serves it from a ~60s TTL cache instead of paying
@@ -1217,27 +1103,25 @@ fn live_deposit_info_is_ttl_cached_not_recalled_per_request() {
     let admin = Principal::management_canister();
     let dpay = pic.0.create_canister();
     pic.0.add_cycles(dpay, 2_000_000_000_000);
-    // Catalog ledger row only — `deposit_info` never touches the ledger (it calls the minter),
+    // `demo_ledger` shape only — `deposit_info` never touches the ledger (it calls the minter),
     // so an empty canister id suffices; installing the full ICRC wasm would prove nothing here.
     let ledger = pic.0.create_canister();
     pic.0.add_cycles(ledger, 1_000_000_000_000);
 
-    let dpay_init = DpayInitArg {
-        ledgers: vec![LedgerConfig {
-            currency: DEPOSIT_CACHE_CURRENCY,
-            principal: ledger,
-            mintable: false,
-        }],
-        per_tx_cap: CAP,
-        controller: Some(admin),
-    };
+    let dpay_init = DpayInitArg { controller: Some(admin), demo_ledger: ledger, per_tx_cap: CAP };
     pic.0.install_canister(dpay, facade_wasm(), encode_one(&dpay_init).unwrap(), None);
 
-    // The mock ckBTC-shaped minter — its `get_minter_info`/`get_deposit_fee` are what the facade
-    // update proxies. (This also proves the mock's WAVE-5 MinterInfo extension — the added
+    // The mock ckBTC-shaped minter, pinned AT the principal the facade's compile-time table names
+    // for currency 1 (the registry-era `register_minter` call is gone with the registry — pinning
+    // the mock where the facade already looks is the post-cutover wiring). Its
+    // `get_minter_info`/`get_deposit_fee` are what the facade update proxies. (This also proves
+    // the mock's WAVE-5 MinterInfo extension — the added
     // `deposit_with_subaccount_helper_contract_address` field — stays wire-compatible with the
     // facade's BTC-shaped decode via candid record subtyping.)
-    let minter = pic.0.create_canister();
+    let minter = Principal::from_text(CKBTC_MINTER_PINNED).expect("pinned ckBTC minter principal");
+    pic.0
+        .create_canister_with_id(None, None, minter)
+        .expect("reserve the pinned ckBTC minter id");
     pic.0.add_cycles(minter, 2_000_000_000_000);
     pic.0.install_canister(
         minter,
@@ -1245,13 +1129,6 @@ fn live_deposit_info_is_ttl_cached_not_recalled_per_request() {
         encode_one(&MockMinterInit { amount_ledger: ledger, gas_ledger: None }).unwrap(),
         None,
     );
-    let reply = pic
-        .0
-        .update_call(dpay, admin, "register_minter", encode_args((DEPOSIT_CACHE_CURRENCY, minter)).unwrap())
-        .expect("register_minter update_call rejected");
-    decode_one::<Result<(), String>>(&reply)
-        .unwrap()
-        .unwrap_or_else(|e| panic!("register_minter must succeed for the controller: {e}"));
 
     let canister_id = dpay;
     let rt = tokio::runtime::Builder::new_current_thread()

@@ -1,13 +1,13 @@
 //! The ledger read seam. Post-cutover (2026-08-19) the relay orchestrates nothing value-bearing:
 //! the app signs /api/v2 envelopes locally and submits them to boundary nodes. What lives behind
-//! this trait is the relay's READ surface — the currency catalog, balances/history at the user's
-//! principal, and static deposit/onramp metadata.
+//! this trait is the relay's READ surface — balances/history at the user's principal, and static
+//! deposit/onramp metadata. The currency CATALOG lives in [`crate::catalog`] (compiled in — the
+//! sole authority since the founder's 2026-08-28 decision), not behind this trait.
 //!
 //! Two impls:
-//! - [`FakeLedger`]: the in-memory demo catalog the offline inner loop runs against (balances
+//! - [`FakeLedger`]: the in-memory demo ledger the offline inner loop runs against (balances
 //!   read 0 — value only exists on the IC rail or the test-helpers fake-IC gateway).
-//! - `AgentLedger` (feature `agent`): the real ic-agent path against the facade catalog + the
-//!   ICRC ledgers directly.
+//! - `AgentLedger` (feature `agent`): the real ic-agent path against the ICRC ledgers directly.
 
 pub mod api;
 pub mod ckerc20;

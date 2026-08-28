@@ -19,8 +19,10 @@
 //!   min amount) so the "Add money" sheet can render them.
 //! - `GET  /api/v1/currencies` — the wallet's runtime asset catalog (closes issue #7), served
 //!   network-first: `{networks:[{protocol,name,environment,assets}]}` — icp mainnet + icp testnet
-//!   partitioned from the facade's flat ICRC registry, plus the relay-constant solana mainnet
-//!   section. IC rows keep the exact `CurrencyDescriptor` shape; read once on wallet load.
+//!   partitioned from the relay's compiled-in IC rows, plus the relay-constant solana mainnet
+//!   section. Compiled in [`crate::catalog`] — the SOLE catalog authority (founder decision
+//!   2026-08-28; the facade registry is gone) — so the route is infallible. IC rows keep the
+//!   exact `CurrencyDescriptor` shape; read once on wallet load.
 //! - `GET  /api/v1/balances/{hex}` — ALL currency balances in ONE response (a flat map
 //!   `{currency: minor-units}`), replacing the wallet's old N+1 per-poll fetch loop (1 primary +
 //!   1 per-asset, each a relay→IC round trip) with a single request.
@@ -55,9 +57,11 @@ mod web_dist {
     include!(concat!(env!("OUT_DIR"), "/web_assets.rs"));
 }
 
-use crate::ledger::{CurrencyDescriptor, Ledger, LedgerError, RampCapability, TxnRecord, U64String};
+use crate::catalog::{currencies_body, ic_rows};
+use crate::ledger::{Ledger, LedgerError, TxnRecord, U64String};
 
-/// Shared relay state. `Arc<dyn Ledger>` is the read seam (catalog, balances, history).
+/// Shared relay state. `Arc<dyn Ledger>` is the read seam (balances, history). The currency
+/// catalog is NOT behind the seam — it lives in [`crate::catalog`], compiled into every build.
 #[derive(Clone)]
 pub struct AppState {
     pub ledger: Arc<dyn Ledger>,
@@ -385,22 +389,19 @@ const BALANCE_BATCH_QUERY_TIMEOUT: Duration = Duration::from_secs(5);
 /// ledger for ONE currency can't stall the rest — best-effort per currency, matching the old
 /// per-asset poll's "a hiccup on one asset's ledger never flips the primary offline" guarantee. A
 /// currency whose query errors or times out is OMITTED from the map (the wallet keeps its prior
-/// value for that currency) and logged here (no silent errors). The catalog fetch itself is
-/// all-or-nothing: if it fails the route is `503` (the relay can't enumerate currencies without it).
-/// Each query is a free read DIRECTLY on the currency's ledger (no facade hop, no consensus, no
-/// cache), so the batch is always-live at near-zero cost.
+/// value for that currency) and logged here (no silent errors). The catalog itself is compiled
+/// into [`crate::catalog`] — there is no catalog fetch that could fail. Each query is a free read
+/// DIRECTLY on the currency's ledger (no facade hop, no consensus, no cache), so the batch is
+/// always-live at near-zero cost.
 ///
 /// Response shape (flat map, currency index string → minor-units decimal string): the JSON object
 /// keys are serde-serialized currency indices as decimal strings, e.g. `{"0":"5000","1":"0",...}`.
 async fn balances(State(state): State<AppState>, Path(hex_pk): Path<String>) -> Response {
     let pk = ok_or_bail!(parse_pubkey_hex(&hex_pk));
 
-    // Enumerate the catalog (the source of truth for which currencies exist). An unreachable ledger
-    // can't be enumerated → 503; there is no per-currency permanent-policy failure on this surface.
-    let catalog = match state.ledger.currencies().await {
-        Ok(c) => c,
-        Err(e) => return err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
-    };
+    // Enumerate the compiled catalog (the source of truth for which currencies exist) — no
+    // ledger round trip, no failure mode (the facade registry is gone; founder 2026-08-28).
+    let catalog = ic_rows();
 
     // IC-rail cutover (test-helpers): with the fake-IC gateway attached, balances live in the
     // gateway's PRINCIPAL-keyed ledgers — the app's pubkey maps to the same self_authenticating
@@ -490,12 +491,9 @@ async fn transactions(
         let rows = fake.transactions(&owner, currency, limit as usize, memo);
         return (StatusCode::OK, Json(TransactionsBody { transactions: rows })).into_response();
     }
-    // History needs the currency's LEDGER principal — resolve it from the catalog (the same
-    // source /balances fans out over), then walk that ledger's own transaction log.
-    let catalog = match state.ledger.currencies().await {
-        Ok(c) => c,
-        Err(e) => return err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
-    };
+    // History needs the currency's LEDGER principal — resolve it from the compiled catalog (the
+    // same source /balances fans out over), then walk that ledger's own transaction log.
+    let catalog = ic_rows();
     let Some(desc) = catalog.iter().find(|d| d.currency == currency) else {
         return err(StatusCode::BAD_REQUEST, format!("unknown currency {currency}"));
     };
@@ -526,97 +524,13 @@ async fn deposit_info(State(state): State<AppState>, Query(qs): Query<BalanceQue
     }
 }
 
-/// The v2 environment partition rule (server-authoritative — the app reads the section's
-/// `environment` and never re-derives this): an IC row is testnet iff `network` is `Some` AND not
-/// one of the mainnet network labels {`None` (DEMO $, the facade-native play asset, `mintable`),
-/// "Bitcoin", "Ethereum", "Internet Computer"}. "Internet Computer" joined the mainnet set
-/// 2026-08-28 for the two complete no-minter direct-ICRC assets (VCHF currency 7, native ICP
-/// currency 8 — docs/specs/2026-08-28-vchf-icp-support-spec.md U3); before it, every
-/// `network = "Internet Computer"` row was mis-filed into the testnet section and hidden behind
-/// the wallet's testnet toggle.
-///
-/// SCHEMA DEBT: inferring the environment from the `network` DISPLAY string is temporary. The
-/// canister catalog should carry an explicit `environment` field and this allowlist should
-/// collapse to a pass-through; that migration is deliberately out of scope here (see
-/// docs/VCHF_ICP_ANALYSIS.md gap 2 — the smallest safe change is extending the explicit set).
-fn is_testnet_row(d: &CurrencyDescriptor) -> bool {
-    !matches!(
-        d.network.as_deref(),
-        None | Some("Bitcoin") | Some("Ethereum") | Some("Internet Computer")
-    )
-}
-
-/// The mainnet USDC mint — mirrors `USDC_MINT_ADDRESS` (app/solana/spl.ts) verbatim; the only
-/// on-chain address the solana section carries.
-const SOLANA_USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-
-/// The solana mainnet section — a relay-level constant provider (NOT a `Ledger` thing: the rail
-/// is device-key + direct RPC and never touches the IC facade, so it is absent from the trait and
-/// `fake.rs`). Values mirror app/solana.ts exactly: SOL 9 decimals (`SOL_DECIMALS`), USDC 6
-/// decimals + [`SOLANA_USDC_MINT`]. No RPC endpoints or API keys here — the Helius URL stays
-/// APK-side.
-fn solana_network_section() -> NetworkBody {
-    NetworkBody {
-        protocol: "solana",
-        name: "Solana",
-        environment: "mainnet",
-        assets: NetworkAssets::Solana(vec![
-            SolanaAsset {
-                token: "SOL",
-                symbol: "SOL",
-                decimals: 9, // SOL_DECIMALS (app/solana/identity.ts)
-                mint: None,  // native L1 asset — no SPL mint
-                onramp: RampCapability::Direct,
-                offramp: RampCapability::Direct,
-            },
-            SolanaAsset {
-                token: "USDC",
-                symbol: "USDC",
-                decimals: 6, // USDC_DECIMALS (app/solana/spl.ts)
-                mint: Some(SOLANA_USDC_MINT),
-                onramp: RampCapability::Direct,
-                offramp: RampCapability::Direct,
-            },
-        ]),
-    }
-}
-
 /// `GET /api/v1/currencies` → `200 {"networks":[...]}` — the network-first asset catalog (v2):
-/// exactly three sections in order (icp mainnet, icp testnet, solana mainnet). The relay is the
-/// multi-network composition layer: the facade stays IC-only and `ledger.currencies()` keeps
-/// returning its flat IC row list; THIS handler partitions it mainnet/testnet ([`is_testnet_row`])
-/// and appends the constant [`solana_network_section`]. The empty testnet section is still
-/// emitted — clients shouldn't infer from absence. IC rows serialize in the UNCHANGED
-/// `CurrencyDescriptor` shape. No query params; unauthenticated (catalog only — no balances).
-/// Mirrors the deposit routes' error mapping: any ledger error is `503` (there is no
-/// permanent-policy failure on this surface).
-async fn currencies(State(state): State<AppState>) -> Response {
-    match state.ledger.currencies().await {
-        Ok(list) => {
-            // Partition preserves each side's catalog order; mainnet keeps DEMO (network None).
-            let (mainnet, testnet): (Vec<_>, Vec<_>) =
-                list.into_iter().partition(|d| !is_testnet_row(d));
-            let body = CurrenciesBody {
-                networks: vec![
-                    NetworkBody {
-                        protocol: "icp",
-                        name: "Internet Computer",
-                        environment: "mainnet",
-                        assets: NetworkAssets::Ic(mainnet),
-                    },
-                    NetworkBody {
-                        protocol: "icp",
-                        name: "Internet Computer",
-                        environment: "testnet",
-                        assets: NetworkAssets::Ic(testnet),
-                    },
-                    solana_network_section(),
-                ],
-            };
-            (StatusCode::OK, Json(body)).into_response()
-        }
-        Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
-    }
+/// exactly three sections in order (icp mainnet, icp testnet, solana mainnet). INFALLIBLE: the
+/// catalog is compiled into [`crate::catalog`] (the sole authority — founder decision 2026-08-28;
+/// the facade registry was removed), so this handler has no ledger call and no failure mode.
+/// No query params; unauthenticated (catalog only — no balances).
+async fn currencies() -> Response {
+    (StatusCode::OK, Json(currencies_body())).into_response()
 }
 
 /// `GET /api/v1/onramp/ckerc20?currency=N` → `200 {"helper_address","erc20_address","kind"}`.
@@ -924,45 +838,6 @@ struct DepositInfoBody {
     deposit_min_amount: Option<U64String>,
 }
 
-/// `GET /api/v1/currencies` response body — the network-first asset catalog (v2). Exactly three
-/// sections in order: icp mainnet, icp testnet (possibly empty), solana mainnet.
-#[derive(Serialize)]
-struct CurrenciesBody {
-    networks: Vec<NetworkBody>,
-}
-
-/// One `networks[]` section. `assets` is untagged so IC sections carry `CurrencyDescriptor` rows
-/// and the solana section carries [`SolanaAsset`] rows — both serialize as plain JSON arrays.
-#[derive(Serialize)]
-struct NetworkBody {
-    protocol: &'static str,
-    name: &'static str,
-    environment: &'static str,
-    assets: NetworkAssets,
-}
-
-/// The `assets` array of a network section — IC rows (`CurrencyDescriptor`, field set/casing
-/// UNCHANGED from the pre-v2 flat catalog) or the relay-constant Solana rows.
-#[derive(Serialize)]
-#[serde(untagged)]
-enum NetworkAssets {
-    Ic(Vec<CurrencyDescriptor>),
-    Solana(Vec<SolanaAsset>),
-}
-
-/// One Solana asset row — a relay-level constant (the device-key rail never touches the IC
-/// facade, so this is deliberately NOT a `CurrencyDescriptor`). `mint` is null for native SOL.
-/// Ramp vocabulary is shared with the IC rows (`Direct`/`Partner`/`Unavailable`).
-#[derive(Serialize)]
-struct SolanaAsset {
-    token: &'static str,
-    symbol: &'static str,
-    decimals: u8,
-    mint: Option<&'static str>,
-    onramp: RampCapability,
-    offramp: RampCapability,
-}
-
 /// `GET /api/v1/onramp/ckerc20` response body — the CkEthErc20-family onramp params the app needs to
 /// build the user's Ethereum transaction(s). The deposit `principal` arg is the user's own IC
 /// principal (derived in-app), so no principal field is served. `kind` discriminates the two deposit
@@ -1044,78 +919,4 @@ async fn version() -> Response {
         commit_date: env!("DPAY_BUILD_DATE"),
     }))
         .into_response()
-}
-
-#[cfg(test)]
-mod environment_partition_tests {
-    //! U3 pins (docs/specs/2026-08-28-vchf-icp-support-spec.md): the Catalog v2 mainnet/testnet
-    //! classification is SERVER-authoritative (`is_testnet_row`), and the app must keep trusting
-    //! the section's `environment` field — no app-side inference duplication exists by design.
-    //! These unit tests pin the classification rule directly, incl. network labels the fake
-    //! catalog doesn't carry (Sepolia), so a regression here goes RED before any route test.
-
-    use super::*;
-
-    /// A minimal descriptor with the given `network` — the ONLY field [`is_testnet_row`] reads.
-    fn row_with_network(network: Option<&str>) -> CurrencyDescriptor {
-        CurrencyDescriptor {
-            currency: 99,
-            ledger: String::new(),
-            mintable: false,
-            minter: None,
-            minter_family: None,
-            symbol: None,
-            decimals: None,
-            wrapper_name: None,
-            backing_symbol: None,
-            network: network.map(Into::into),
-            display_decimals: None,
-            fee: None,
-            cap: None,
-            chain_id: None,
-            token_contract: None,
-            gas_ledger: None,
-            onramp: RampCapability::Unavailable,
-            offramp: RampCapability::Unavailable,
-        }
-    }
-
-    #[test]
-    fn internet_computer_rows_are_mainnet() {
-        // VCHF (currency 7) and native ICP (currency 8) carry network "Internet Computer" —
-        // the 2026-08-28 fix: before "Internet Computer" joined the mainnet set, both rows
-        // were mis-filed testnet-side and hidden behind the wallet's testnet toggle.
-        let vchf = CurrencyDescriptor { currency: 7, ..row_with_network(Some("Internet Computer")) };
-        let icp = CurrencyDescriptor { currency: 8, ..row_with_network(Some("Internet Computer")) };
-        assert!(!is_testnet_row(&vchf), "VCHF (network \"Internet Computer\") is ICP MAINNET");
-        assert!(!is_testnet_row(&icp), "ICP (network \"Internet Computer\") is ICP MAINNET");
-    }
-
-    #[test]
-    fn network_none_demo_is_mainnet() {
-        // DEMO $ (network = None, the facade-native play asset) stays mainnet-side.
-        assert!(!is_testnet_row(&row_with_network(None)));
-    }
-
-    #[test]
-    fn bitcoin_and_ethereum_rows_stay_mainnet() {
-        // The pre-existing mainnet backing networks must not regress.
-        assert!(!is_testnet_row(&row_with_network(Some("Bitcoin"))));
-        assert!(!is_testnet_row(&row_with_network(Some("Ethereum"))));
-    }
-
-    #[test]
-    fn bitcoin_testnet_and_sepolia_rows_stay_testnet() {
-        // True testnet labels stay testnet — the wallet hides these by default.
-        assert!(is_testnet_row(&row_with_network(Some("Bitcoin Testnet"))));
-        assert!(is_testnet_row(&row_with_network(Some("Sepolia"))));
-    }
-
-    #[test]
-    fn unknown_networks_fail_closed_testnet() {
-        // Any unrecognized network label is testnet (fail-closed: a typo'd/unknown label must
-        // never leak a row into the mainnet section).
-        assert!(is_testnet_row(&row_with_network(Some("Internet Computor"))));
-        assert!(is_testnet_row(&row_with_network(Some(""))));
-    }
 }

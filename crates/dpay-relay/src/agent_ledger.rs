@@ -1,14 +1,15 @@
-//! The real read path: an [`AgentLedger`] that talks to the dpay facade canister + the ICRC
-//! ledgers on a live IC network via [`ic-agent`]. Same [`Ledger`] trait the relay serves, so
-//! the axum app is unchanged — only the seam is swapped.
+//! The real read path: an [`AgentLedger`] that talks to the ICRC ledgers (and, for the
+//! faucet/deposit metadata, the dpay facade canister) on a live IC network via [`ic-agent`].
+//! Same [`Ledger`] trait the relay serves, so the axum app is unchanged — only the seam is
+//! swapped.
 //!
 //! Behind the `agent` cargo feature (off by default) so the fast in-memory inner loop stays
 //! offline. What it drives:
-//!   - facade `currencies() -> vec CurrencyDescriptor` (query) — the asset catalog; every ledger
-//!     principal the relay needs is resolved from here.
 //!   - each ledger's own ICRC-1/ICRC-3 endpoints (free queries, no facade hop, no consensus):
 //!     `icrc1_balance_of` for balances and `get_transactions` for history, read at the USER's
-//!     principal (the 2026-08-19 IC-rail cutover shape).
+//!     principal (the 2026-08-19 IC-rail cutover shape). Ledger principals resolve from the
+//!     relay's COMPILED catalog ([`crate::catalog`], sole authority since 2026-08-28 — the
+//!     facade's registry is gone and no code path queries it for currencies anymore).
 //!   - facade `deposit_info(nat32)` (update, ~60s-TTL cached on the relay — see the method) —
 //!     static deposit metadata for the "Add money" sheet.
 //!   - the ckETH-family MINTER's `get_minter_info` (query) — the runtime source for the ckERC20
@@ -41,8 +42,8 @@ use serde::Deserialize;
 use dpay_core::{Currency, PUBKEY_LEN};
 
 use crate::ledger::{
-    CkErc20OnrampParams, CurrencyDescriptor, DepositInfo, Ledger, LedgerError, MinterFamily,
-    RampCapability, TxnRecord, U64String, ckerc20_onramp_from_descriptor,
+    CkErc20OnrampParams, DepositInfo, Ledger, LedgerError, TxnRecord, U64String,
+    ckerc20_onramp_from_descriptor,
 };
 
 /// Per-call I/O budget for every query this ledger makes (balance polls, catalog reads, each
@@ -113,7 +114,9 @@ const HISTORY_EMPTY_PAGE_STOP: usize = 2;
 
 /// The canonical native ICP ledger on the Internet Computer — the ONLY ledger whose history is
 /// served by the ICP index (every other ledger keeps the icrc3 walk below, byte-identical).
-pub const ICP_LEDGER: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai";
+/// Single-sourced from the compiled catalog's [`crate::catalog::ICP_LEDGER_PRINCIPAL`] pin
+/// (both cross-checked against `dfx/catalog_truth.json`).
+pub const ICP_LEDGER: &str = crate::catalog::ICP_LEDGER_PRINCIPAL;
 /// The official ICP index canister serving `get_account_transactions` for [`ICP_LEDGER`].
 pub const ICP_INDEX: &str = "qhbym-qaaaa-aaaaa-aaafq-cai";
 /// Rows requested per `get_account_transactions` round trip. Kept modest so one reply stays a
@@ -251,56 +254,6 @@ struct CkEthMinterInfoMirror {
 struct DepositInfoCacheEntry {
     fetched_at: std::time::Instant,
     info: DepositInfo,
-}
-
-
-
-
-/// Candid mirror of the canister's `MinterFamily` variant (M0 catalog). The variant labels match the
-/// relay's serde [`MinterFamily`] verbatim; the trait impl maps each candid variant to the relay's
-/// text-JSON enum.
-#[derive(CandidType, Deserialize, Debug)]
-enum MinterFamilyMirror {
-    CkBtcUtxo,
-    CkEthErc20,
-    CkSol,
-}
-
-/// Candid mirror of the canister's `RampCapability` variant (MC1 unit 5). Maps to the relay's
-/// serde [`RampCapability`].
-#[derive(CandidType, Deserialize, Debug)]
-enum RampCapabilityMirror {
-    Direct,
-    Partner,
-    Unavailable,
-}
-
-/// Candid mirror of the canister's `CurrencyDescriptor` (M0 catalog + MC1 unit 5 authoritative
-/// metadata). Principals decode as `candid::Principal`; the trait impl round-trips each through
-/// `.to_text()` into the relay's JSON-shaped [`CurrencyDescriptor`].
-#[derive(CandidType, Deserialize, Debug)]
-struct CurrencyDescriptorMirror {
-    currency: u32,
-    ledger: Principal,
-    mintable: bool,
-    minter: Option<Principal>,
-    minter_family: Option<MinterFamilyMirror>,
-    symbol: Option<String>,
-    decimals: Option<u8>,
-    wrapper_name: Option<String>,
-    backing_symbol: Option<String>,
-    network: Option<String>,
-    display_decimals: Option<u8>,
-    fee: Option<u64>,
-    cap: Option<u64>,
-    chain_id: Option<u32>,
-    token_contract: Option<String>,
-    onramp: RampCapabilityMirror,
-    offramp: RampCapabilityMirror,
-    /// The ckETH gas-ledger principal for a ckERC20 currency (the `withdraw_erc20` dual-ledger path).
-    /// `None` for non-ckERC20 families. Appended LAST in the canister's candid record for backward
-    /// compat (an older `currencies()` reply without it decodes with this as `None`).
-    gas_ledger: Option<Principal>,
 }
 
 /// A [`Ledger`] backed by a real IC replica. Owns an [`Agent`] pointed at the replica/gateway URL
@@ -617,66 +570,10 @@ impl Ledger for AgentLedger {
         Ok(info)
     }
 
-    async fn currencies(&self) -> Result<Vec<CurrencyDescriptor>, LedgerError> {
-        // facade `currencies() -> vec CurrencyDescriptor` (query). Translate candid mirrors -> the
-        // relay's text-principal serde structs. Errors are `Transient` (canister unreachable); there
-        // is no permanent-policy failure on the catalog surface.
-        let reply = tokio::time::timeout(
-            Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
-            self.agent
-                .query(&self.canister_id, "currencies")
-                .with_arg(encode_args(()).map_err(|e| LedgerError::Transient(format!("encode currencies: {e}")))?)
-                .call(),
-        )
-        .await
-        .map_err(|_| {
-            LedgerError::Transient(format!(
-                "currencies query timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
-            ))
-        })?
-        .map_err(|e| LedgerError::Transient(format!("currencies query: {e}")))?;
-        let list: Vec<CurrencyDescriptorMirror> =
-            decode_one(&reply).map_err(|e| LedgerError::Transient(format!("decode currencies: {e}")))?;
-        Ok(list
-            .into_iter()
-            .map(|d| CurrencyDescriptor {
-                currency: d.currency,
-                ledger: d.ledger.to_text(),
-                mintable: d.mintable,
-                minter: d.minter.map(|p| p.to_text()),
-                minter_family: d.minter_family.map(|f| match f {
-                    MinterFamilyMirror::CkBtcUtxo => MinterFamily::CkBtcUtxo,
-                    MinterFamilyMirror::CkEthErc20 => MinterFamily::CkEthErc20,
-                    MinterFamilyMirror::CkSol => MinterFamily::CkSol,
-                }),
-                symbol: d.symbol,
-                decimals: d.decimals,
-                wrapper_name: d.wrapper_name,
-                backing_symbol: d.backing_symbol,
-                network: d.network,
-                display_decimals: d.display_decimals,
-                fee: d.fee.map(U64String),
-                cap: d.cap.map(U64String),
-                chain_id: d.chain_id,
-                token_contract: d.token_contract,
-                gas_ledger: d.gas_ledger.map(|p| p.to_text()),
-                onramp: match d.onramp {
-                    RampCapabilityMirror::Direct => RampCapability::Direct,
-                    RampCapabilityMirror::Partner => RampCapability::Partner,
-                    RampCapabilityMirror::Unavailable => RampCapability::Unavailable,
-                },
-                offramp: match d.offramp {
-                    RampCapabilityMirror::Direct => RampCapability::Direct,
-                    RampCapabilityMirror::Partner => RampCapability::Partner,
-                    RampCapabilityMirror::Unavailable => RampCapability::Unavailable,
-                },
-            })
-            .collect())
-    }
-
     async fn ckerc20_onramp_params(&self, currency: Currency) -> Result<CkErc20OnrampParams, LedgerError> {
-        // MC8 U2: resolve the onramp from the CATALOG descriptor (the live `currencies()` query),
-        // not a hardcoded `currency == 2` guard. The descriptor's per-token `token_contract` is the
+        // MC8 U2: resolve the onramp from the CATALOG descriptor (the relay's compiled catalog,
+        // [`crate::catalog::ic_rows`] — sole authority since 2026-08-28), not a hardcoded
+        // `currency == 2` guard. The descriptor's per-token `token_contract` is the
         // authoritative ERC-20 address; the deposit `principal` arg is the USER's own IC principal
         // (derived in-app), so no principal is served here.
         //
@@ -686,7 +583,7 @@ impl Ledger for AgentLedger {
         // constants (via `ckerc20_onramp_from_descriptor`) are only the FALLBACK, served when the
         // runtime read fails or the minter doesn't configure the field. Fail-closed gate
         // (family, chain_id, token discrimination) stays single-sourced in the pure resolver.
-        let catalog = self.currencies().await?;
+        let catalog = crate::catalog::ic_rows();
         let desc = catalog.iter().find(|d| d.currency == currency);
         let mut params = ckerc20_onramp_from_descriptor(desc)?;
         if let Some(minter_text) = desc.and_then(|d| d.minter.as_deref()) {

@@ -92,20 +92,16 @@ pub struct DepositInfo {
 }
 
 // ---------------------------------------------------------------------------
-// Catalog surface (M0). The canister now exposes `currencies() -> vec
-// CurrencyDescriptor` (query) — the wallet's runtime source of truth for which
-// assets exist and how to display/fund them, closing the hardcoded-
-// `DEPOSIT_CURRENCY` coupling (issue #7). These serde structs are the relay's
-// JSON shape: principals are TEXT (the candid `principal` is round-tripped
-// through `.to_text()` by the agent impl so the HTTP layer stays plain JSON),
-// and `MinterFamily` is the plain PascalCase variant tag (matches the candid
-// variant label and the JSON string the wallet reads). The agent impl (feature
-// `agent`) translates between these and its candid mirrors.
+// Catalog surface (M0 → relay-owned 2026-08-28). These serde structs are the
+// JSON shape of [`crate::catalog`]'s rows — the relay's compiled-in catalog
+// (sole authority; the canister-era `currencies()` query is gone). The
+// byte-shape is FROZEN: the wallet + e2e depend on it (principals are TEXT,
+// and `MinterFamily` is the plain PascalCase variant tag the wallet reads).
 // ---------------------------------------------------------------------------
 
 /// The proxy family a ck currency's minter belongs to — drives per-family ramp dispatch in the
-/// wallet. Mirrors the canister's `MinterFamily` candid variant; serialized as the plain variant
-/// name (e.g. `"CkBtcUtxo"`), matching both the candid label and the wallet's JSON contract.
+/// wallet. Serialized as the plain variant name (e.g. `"CkBtcUtxo"`), matching the JSON string
+/// the wallet reads (the label the canister-era candid variant also used).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub enum MinterFamily {
     CkBtcUtxo,
@@ -113,10 +109,10 @@ pub enum MinterFamily {
     CkSol,
 }
 
-/// Per-direction ramp capability for a currency (MC1 unit 5). Mirrors the canister's
-/// `RampCapability` candid variant; serialized as the plain variant name (e.g. `"Direct"`),
-/// matching the candid label and the wallet's JSON contract. `Unavailable` ⇒ the wallet renders NO
-/// button for that direction (no-swap honesty; ckUSDC offramp is `Unavailable` per Fork-C/O3).
+/// Per-direction ramp capability for a currency (MC1 unit 5). Serialized as the plain variant
+/// name (e.g. `"Direct"`), matching the wallet's JSON contract (the label the canister-era
+/// candid variant also used). `Unavailable` ⇒ the wallet renders NO button for that direction
+/// (no-swap honesty; ckUSDC offramp is `Unavailable` per Fork-C/O3).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub enum RampCapability {
     Direct,
@@ -124,14 +120,14 @@ pub enum RampCapability {
     Unavailable,
 }
 
-/// One currency the wallet can hold/fund — the runtime catalog entry. Mirrors the canister's
-/// `CurrencyDescriptor`. `minter` is `Some` only for ck currencies with a registered ramp;
-/// `minter_family`/`symbol`/`decimals` are `None` when unregistered (the wallet falls back).
-/// `onramp`/`offramp` are NON-optional `RampCapability` (the canister defaults an unregistered
-/// currency to `Unavailable` for both — fail-closed). The new per-currency metadata fields
-/// (`wrapper_name`/`backing_symbol`/`network`/`display_decimals`/`fee`/`cap`/`chain_id`/
-/// `token_contract`/`gas_ledger`) are the authoritative single source of truth; the relay is a
-/// pass-through.
+/// One currency the wallet can hold/fund — the runtime catalog entry (canister-era wire shape,
+/// relay-owned since 2026-08-28 — see [`crate::catalog`]). `minter` is `Some` only for ck
+/// currencies with a registered ramp; `minter_family`/`symbol`/`decimals` are `None` when
+/// unregistered (the wallet falls back). `onramp`/`offramp` are NON-optional
+/// `RampCapability` (an unregistered currency fails closed to `Unavailable` for both). The
+/// per-currency metadata fields (`wrapper_name`/`backing_symbol`/`network`/`display_decimals`/
+/// `fee`/`cap`/`chain_id`/`token_contract`/`gas_ledger`) are the authoritative single source of
+/// truth; the relay is a pass-through.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct CurrencyDescriptor {
     pub currency: Currency,

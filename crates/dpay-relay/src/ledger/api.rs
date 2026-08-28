@@ -1,15 +1,17 @@
-//! The read-only catalog seam — the `Ledger` trait. USER-PRINCIPAL RAIL (2026-08-19 cutover):
+//! The read-only ledger seam — the `Ledger` trait. USER-PRINCIPAL RAIL (2026-08-19 cutover):
 //! value movement (pay/withdraw/receipts) left the relay entirely — the app signs /api/v2
 //! envelopes locally and submits them to boundary nodes. What remains behind this trait is the
-//! relay's READ surface: the currency catalog, per-ledger balances at the user principal,
-//! history, and static deposit/onramp info. `async_trait` keeps it dyn-compatible.
+//! relay's READ surface: per-ledger balances at the user principal, history, and static
+//! deposit/onramp info. The currency CATALOG is deliberately NOT here — since the founder's
+//! 2026-08-28 decision it is compiled into [`crate::catalog`] (the sole authority) and shared by
+//! every impl. `async_trait` keeps it dyn-compatible.
 
 use async_trait::async_trait;
 
 use dpay_core::{Currency, PUBKEY_LEN};
 
 use super::ckerc20::CkErc20OnrampParams;
-use super::types::{CurrencyDescriptor, DepositInfo, LedgerError, TxnRecord};
+use super::types::{DepositInfo, LedgerError, TxnRecord};
 
 /// The ledger read seam. `async_trait` keeps it dyn-compatible so `Arc<dyn Ledger>` works.
 #[async_trait]
@@ -44,12 +46,6 @@ pub trait Ledger: Send + Sync {
 
     /// Static deposit instructions for `currency` (min confirmations, fee, min amount).
     async fn deposit_info(&self, currency: Currency) -> Result<DepositInfo, LedgerError>;
-
-    /// The full currency catalog — the wallet's runtime source of truth for which assets exist and
-    /// how to display/fund them (closes the hardcoded-`DEPOSIT_CURRENCY` coupling). Joins the
-    /// canister's LEDGERS + MINTERS + CURRENCY_META. Unauthenticated (catalog only — no balances).
-    /// Impl errors are `Transient` (an unreachable canister); there is no permanent-policy failure.
-    async fn currencies(&self) -> Result<Vec<CurrencyDescriptor>, LedgerError>;
 
     /// ckERC-20 onramp parameters (helper contract, ERC-20 address) for the given currency — pure
     /// display/config metadata for the app's own two Ethereum transactions (the user deposits at

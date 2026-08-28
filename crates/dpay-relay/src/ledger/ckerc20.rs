@@ -38,33 +38,33 @@ pub(crate) const CKUSDC_ERC20_ADDRESS: &str =
 
 /// The ckETH LEDGER principal (mainnet) — the gas ledger a ckERC20 `withdraw_erc20` burns ckETH gas
 /// fees from (the amount comes from the ckERC20 amount ledger). Verified against the IC mainnet
-/// ckETH ledger `ss2fx-dyaaa-aaaar-qacoq-cai` (2026-08-06). Single-sourced here so the FakeLedger
-/// catalog's per-ckERC20 `gas_ledger` field can't drift from the real value the AgentLedger reads at
-/// runtime from the facade's `currencies()` query. `None` for non-ckERC20 families (BTC / native ETH /
-/// DEMO): native ckETH's gas ledger IS its own `ledger` (the `withdraw_eth` path), so it carries no
-/// separate `gas_ledger`.
+/// ckETH ledger `ss2fx-dyaaa-aaaar-qacoq-cai` (2026-08-06). Single-sourced here so the compiled
+/// catalog's ([`crate::catalog`]) per-ckERC20 `gas_ledger` field can't drift from the real value
+/// the runtime minter read resolves the helper against. `None` for non-ckERC20 families (BTC /
+/// native ETH / DEMO): native ckETH's gas ledger IS its own `ledger` (the `withdraw_eth` path),
+/// so it carries no separate `gas_ledger`.
 pub(crate) const CKETH_LEDGER_PRINCIPAL: &str = "ss2fx-dyaaa-aaaar-qacoq-cai";
 
 /// The ckBTC MINTER principal (mainnet) — `mqygn-kiaaa-aaaar-qaadq-cai`, the live chain-key Bitcoin
 /// minter whose `retrieve_btc_with_approval` burns ckBTC → sends native BTC, and whose
 /// `retrieve_btc_min_amount` (= 50_000) backs [`RETRIEVE_BTC_MIN_AMOUNT`] above. Single-sourced here
-/// so the FakeLedger catalog's ckBTC `minter` field can't drift from the verified value; the same
-/// literal is the drift-prone value cross-checked against `dfx/catalog_truth.json` (see the
-/// `catalog_truth_tests` module below). Verified 2026-08-06.
+/// so the compiled catalog's ([`crate::catalog`]) ckBTC `minter` field can't drift from the verified
+/// value; the same literal is the drift-prone value cross-checked against `dfx/catalog_truth.json`
+/// (see the `catalog_truth_tests` module there). Verified 2026-08-06.
 pub(crate) const CKBTC_MINTER_PRINCIPAL: &str = "mqygn-kiaaa-aaaar-qaadq-cai";
 
 /// The ckETH MINTER principal (mainnet) — `sv3dd-oaaaa-aaaar-qacoa-cai`, the live ckETH minter that
-/// handles native ETH (`withdraw_eth`) AND every ckERC20 token (`withdraw_erc20`). Shared by all
-/// ckERC20 catalog entries (ckUSDC/ckUSDT/ckDAI) + the native-ckETH entry, so it is referenced 5× in
-/// [`fake_catalog`] — single-sourced here so the copies can't drift. Cross-checked against
+/// handles native ETH (`withdraw_eth`) AND every mainnet ckERC20 token (`withdraw_erc20`).
+/// Referenced by the compiled catalog's mainnet ckERC20 entries (ckUSDC currency 2 + native ckETH
+/// currency 6 — the testnet rows 4/5 use the separate Sepolia minter const in `crate::catalog`),
+/// so it is single-sourced here so the copies can't drift. Cross-checked against
 /// `dfx/catalog_truth.json`. Verified 2026-08-06.
 pub(crate) const CKETH_MINTER_PRINCIPAL: &str = "sv3dd-oaaaa-aaaar-qacoa-cai";
 
 /// The ckUSDC LEDGER principal (mainnet) — `xevnm-gaaaa-aaaar-qafnq-cai`, the live ckUSDC ICRC-1
-/// ledger. Reused as the demo ledger stand-in for the OTHER ckERC20 catalog entries (ckUSDT/ckDAI/
-/// native-ckETH) since the offline FakeLedger has no per-token ledger — referenced 4× in
-/// [`fake_catalog`], single-sourced here so the copies can't drift. Cross-checked against
-/// `dfx/catalog_truth.json`. Verified 2026-08-06.
+/// ledger (the compiled catalog's currency-2 `ledger`). Single-sourced here so the catalog row
+/// can't drift from the verified value. Cross-checked against `dfx/catalog_truth.json`
+/// (`principals.ckusdc_ledger`). Verified 2026-08-06.
 pub(crate) const CKUSDC_LEDGER_PRINCIPAL: &str = "xevnm-gaaaa-aaaar-qafnq-cai";
 
 /// Onramp parameters for a CkEthErc20-family currency (ckUSDC etc. OR native ckETH). The app builds
@@ -166,7 +166,7 @@ mod ckerc20_onramp_chain_id_tests {
     fn cketh_descriptor(chain_id: Option<u32>) -> CurrencyDescriptor {
         CurrencyDescriptor {
             currency: 99,
-            ledger: "aaaaa-aa".to_string(),
+            ledger: CKETH_LEDGER_PRINCIPAL.to_string(),
             mintable: false,
             minter: None,
             minter_family: Some(MinterFamily::CkEthErc20),
