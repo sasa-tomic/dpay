@@ -62,6 +62,12 @@ export const depositFr: DepositMessages = {
     feeLine: fee => `Frais de réseau ${fee}`,
     custody: asset => `dpay ne détient jamais vos clés et ne convertit rien — les ${asset} arrivent directement dans votre portefeuille.`,
     receivedAmount: amount => `${amount} reçus`,
+    alsoTitle: 'Déjà sur Internet Computer ?',
+    alsoBody: symbol => [
+      {t: 'Envoyez des '},
+      {t: symbol, em: true},
+      {t: ' depuis n’importe quel portefeuille Internet Computer directement vers votre adresse IC ci-dessous — aucun memo nécessaire.'},
+    ],
   },
 
   erc20: {

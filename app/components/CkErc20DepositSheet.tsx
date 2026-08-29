@@ -18,6 +18,7 @@ import {withTimeout} from '../lib/timeout';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {IconCheck} from './icons';
 import {InstrLine} from './InstrLine';
+import {IcrcAccountSection} from './IcrcAccountSection';
 import {M} from '../i18n';
 
 // ckERC20 (ckUSDC) / native ckETH direct onramp — a wallet-connect flow. The user connects their OWN
@@ -32,7 +33,7 @@ import {M} from '../i18n';
 // by `nativeEth` (descriptor.token_contract == null):
 //  - ERC-20 (USDC/USDT/DAI): TWO txs — approve(helper, amount) on the ERC-20, then depositErc20(...).
 //  - native ETH: ONE payable tx — depositEth(principal) carrying the ETH `value` (Wei).
-export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, display, chainId, nativeEth, ledger, onClose}: {
+export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, display, chainId, nativeEth, ledger, icSymbol, onClose}: {
   identity: Identity;
   relayUrl: string;
   currency: number;
@@ -41,6 +42,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
   chainId: number | null; // MC8 U3: the catalog's per-currency EVM chain id (ckUSDC = 1 = Ethereum mainnet)
   nativeEth: boolean; // true ⇒ native-ETH single-tx deposit (depositEth); false ⇒ ERC-20 two-tx (approve + depositErc20)
   ledger: string; // the ICRC-1 ledger principal for this currency — the WATCH target (signed icrc1_balance_of at the user principal)
+  icSymbol: string; // the ICRC-1 ledger token symbol ('ckUSDC'/'ckETH') — names the asset in the "Already on the Internet Computer?" section
   onClose: () => void;
 }) {
   // phase: 'connect' (no wallet yet) → 'enter' (wallet connected, enter amount) → 'sending' (txs
@@ -417,6 +419,9 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
               <Text style={S.primaryText}>{M.deposit.erc20.connect}</Text>
             </Pressable>
             <Text style={S.dim2}>{M.deposit.erc20.walletList}</Text>
+            {/* Secondary route: plain ICRC-1 transfer for funds already on the IC (no Ethereum
+                txs, no gas) — the watching poll above detects it like any mint. */}
+            <IcrcAccountSection symbol={icSymbol} principal={selfPrincipal} />
           </View>
         )
       ) : phase === 'enter' || phase === 'sending' ? (

@@ -10,6 +10,8 @@ import type {Identity} from '../lib/types';
 import type {CurrencyDescriptor, FamilyDisplay} from '../config/catalog';
 import {type DepositInfo, depositInfo} from '../services/relay';
 import {railBtcDepositAddress, railBalanceOf} from '../services/rail';
+import {DpayCore} from '../services/native';
+import {IcrcAccountSection} from './IcrcAccountSection';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {withTimeout} from '../lib/timeout';
@@ -44,6 +46,18 @@ export function DepositSheet({identity, relayUrl, catalog, currency, display, on
   const [checkBusy, setCheckBusy] = useState(false);
 
   const desc = catalog.find(c => c.currency === currency) ?? null;
+
+  // Same-ledger receive route (founder 2026-08-29): anyone already holding ckBTC ON the IC can
+  // plain-transfer it to this user's principal — no Bitcoin hop, no minter wait. Best-effort
+  // local derivation; the section simply omits the address line if it fails.
+  const [icPrincipal, setIcPrincipal] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    DpayCore.icpSelfPrincipal(identity.secretHex)
+      .then(p => { if (alive) setIcPrincipal(p); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [identity.secretHex]);
 
   // Escape closes the sheet (seed of the keyboard-shortcuts surface — plan flow 14).
   useEscapeToClose(onClose);
@@ -201,6 +215,10 @@ export function DepositSheet({identity, relayUrl, catalog, currency, display, on
               ckERC20 assets keep the WalletConnect path — the link's data param is unusable
               for calldata). Rendered in the same slot on SolanaReceiveSheet (same-surfaces). */}
           {isTrustWalletFundableBtc(desc) ? <TrustWalletFundButton asset="BTC" address={address} /> : null}
+
+          {/* Secondary route: the ckBTC ICRC-1 account (the watch above detects a plain transfer
+              the same as a mint). Kept below the BTC address — the primary for external funds. */}
+          <IcrcAccountSection symbol={desc?.wrapper_name ?? desc?.symbol ?? ''} principal={icPrincipal} />
 
           {/* ONE single linear progress cue (no dual zero-state): the honest balance-watching
               message (the facade-subaccount per-UTXO progress died with custody — the minter's

@@ -511,3 +511,17 @@ sub-mode now carry the real instruction and surface:
 - Coverage: i18n `deposit.icrc` ×4 locales; e2e flows 95/96 tap `pay-fund-go` → the ICRC surface
   and pin the shown address == the wallet's own principal (`railPrincipalText`); jest
   `IcrcDepositSheet.test.tsx` (gate matrix) + `isDirectIcrcAsset` cases in `catalog.test.ts`.
+
+### Addendum 2 (2026-08-29, same day): the ck\* family sheets get the same ICRC-1 route
+
+The founder's follow-up: ckUSDC's "My address" showed ONLY the Ethereum two-tx/WalletConnect mint
+flow and ckBTC only the BTC address — no surface for funds ALREADY on the IC, even though every
+chain-key asset is itself an ICRC-1 ledger token receivable by plain transfer to the user's
+principal. Fix (same hard rule): a shared `IcrcAccountSection` ("Already on the Internet
+Computer?") on `DepositSheet` (ckBTC, below the BTC address) and `CkErc20DepositSheet`
+(ckETH/ckUSDC, on the connect view) — instruction + the wallet's principal + copy. The symbol is
+`wrapper_name` (ckBTC/ckUSDC/ckETH — the LEDGER token; `symbol` is the display glyph ₿/$/ETH and
+plain BTC/ETH cannot be sent to an IC principal). Each sheet's existing ledger watch detects such
+a transfer as a normal baseline delta. The native-chain route stays primary (it is the only way
+to onboard EXTERNAL funds); the ICRC-1 section is the zero-gas route for funds already on IC.
+Pinned by jest (trust-fund-sheets + CkErc20DepositSheet) and e2e flows 03 + 33.

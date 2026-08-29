@@ -341,6 +341,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
         chainId={depositChainId}
         nativeEth={depositNativeEth}
         ledger={catalog.find(c => c.currency === depositCurrency)?.ledger ?? ''}
+        icSymbol={catalog.find(c => c.currency === depositCurrency)?.wrapper_name ?? catalog.find(c => c.currency === depositCurrency)?.symbol ?? ''}
         onClose={() => onSubModeChange('request')}
       />
     ) : depositFamily === 'CkBtcUtxo' && depositDisplay ? (

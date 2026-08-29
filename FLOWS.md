@@ -97,7 +97,7 @@ wire (1) · onboard (13) · pay (23) · offline (9) · deposit (8) · withdraw (
 
 | # | Flow | Verifies | Covers |
 |---|------|----------|--------|
-| 03 | deposit-address | ckBTC deposit sheet: address + QR + instructions + fee/min; deep-link ?screen=deposit works. | deposit-address, qr, instructions, fee-min, deep-link |
+| 03 | deposit-address | ckBTC deposit sheet: address + QR + instructions + fee/min + the "Already on the Internet Computer?" ICRC-1 receive section (own principal); deep-link ?screen=deposit works. | deposit-address, qr, instructions, fee-min, deep-link |
 | 04 | deposit-copy | 'Copy address' writes the REAL address to the clipboard (not the Share noop). | deposit-address, clipboard |
 | 05 | deposit-credited | ckBTC deposit lands via faucet-at-principal → balance-recheck delta "Deposited ✓", relay balance grows, asset row appears. | deposit-credit, mint-delta, asset-card, balance-update |
 | 16 | ckusdc-onramp | ckUSDC onramp: connect wallet → enter USDC → approve+deposit (EIP-1193 seam, byte-exact calldata, ETH gas note). | ckusdc, onramp, eip-1193, calldata, eth-gas |

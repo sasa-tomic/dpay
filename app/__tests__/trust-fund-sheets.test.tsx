@@ -34,6 +34,9 @@ jest.mock('../services/rail', () => ({
 jest.mock('../services/relay', () => ({
   depositInfo: jest.fn(() => Promise.reject(new Error('offline test'))),
 }));
+jest.mock('../services/native', () => ({
+  DpayCore: {icpSelfPrincipal: jest.fn(async () => 'w7x7r-cok77-xa2jb-wa2jb-bc')},
+}));
 
 const IDENTITY: Identity = {secretHex: '11'.repeat(32), publicHex: '22'.repeat(32), username: 'test'};
 const BTC_ADDR = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
@@ -96,6 +99,29 @@ describe('DepositSheet — Trust gate (IC rail, mainnet CkBtcUtxo only)', () => 
     await act(async () => { await Promise.resolve(); });
     expect(has(tree, 'deposit-address')).toBe(true);   // the address + QR path is intact
     expect(has(tree, 'btn-trust-fund')).toBe(false);   // …just no Trust deep link
+    act(() => { tree.unmount(); });
+  });
+
+  // Founder 2026-08-29: ckBTC is ALSO receivable by plain ICRC-1 transfer on the IC — the sheet
+  // must surface that route (IC principal + copy), not just the Bitcoin address.
+  test('mainnet ckBTC → "Already on the Internet Computer?" section with the ICRC-1 account', async () => {
+    let tree!: renderer.ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(
+        <DepositSheet identity={IDENTITY} relayUrl="https://relay.test" catalog={BUNDLED_CATALOG}
+          currency={1} display={familyDisplay(BUNDLED_CATALOG, 1)!} onClose={() => {}} />,
+      );
+    });
+    await act(async () => { await Promise.resolve(); });
+    expect(has(tree, 'ic-also-section')).toBe(true);
+    // Names the LEDGER token (ckBTC — plain BTC cannot be sent to an IC principal).
+    const sectionText = tree.root.findByProps({testID: 'ic-also-section'})
+      .findAll(n => typeof n.props?.children === 'string')
+      .map(n => n.props.children).join(' ');
+    expect(sectionText).toContain('ckBTC');
+    const addr = tree.root.findByProps({testID: 'ic-also-address'}).props.children;
+    expect(addr).toBe('w7x7r-cok77-xa2jb-wa2jb-bc'); // the mocked self principal
+    expect(has(tree, 'btn-ic-also-copy')).toBe(true);
     act(() => { tree.unmount(); });
   });
 

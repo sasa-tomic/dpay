@@ -75,7 +75,7 @@ function mountSheet() {
     tree = renderer.create(
       <CkErc20DepositSheet
         identity={IDENTITY} relayUrl="http://relay.test" currency={2} decimals={6}
-        display={DISPLAY} chainId={null} nativeEth={false} ledger={LEDGER}
+        display={DISPLAY} chainId={null} nativeEth={false} ledger={LEDGER} icSymbol="ckUSDC"
         onClose={() => {}}
       />,
     );
@@ -104,6 +104,22 @@ beforeEach(async () => {
 });
 
 describe('CkErc20DepositSheet — null-baseline watch honesty (P2#5)', () => {
+  // Founder 2026-08-29: the connect view must ALSO surface the plain ICRC-1 receive route
+  // (ckUSDC already on the IC — no Ethereum txs, no gas) with the wallet's own principal.
+  test('connect view → "Already on the Internet Computer?" section with the ICRC-1 account', async () => {
+    const tree = mountSheet();
+    await act(async () => { await Promise.resolve(); }); // settle the principal derivation effect
+    const addr = tree.root.findByProps({testID: 'ic-also-address'}).props.children;
+    expect(addr).toBe('td2nx-oaaaa-aaaab-qhdnq-cai'); // the mocked DpayCore.icpSelfPrincipal
+    const sectionText = tree.root.findByProps({testID: 'ic-also-section'})
+      .findAll(n => typeof n.props?.children === 'string')
+      .map(n => n.props.children).join(' ');
+    expect(sectionText).toContain('ckUSDC');
+    expect(has(tree, 'btn-ic-also-copy')).toBe(true);
+    expect(has(tree, 'btn-connect-wallet')).toBe(true); // the primary Ethereum route is untouched
+    act(() => { tree.unmount(); });
+  });
+
   test('null baseline: the FIRST successful read SETS the baseline — never done, even with a pre-existing balance', async () => {
     // Snapshot fails at connect (null startBal); the wallet ALREADY holds 5 USDC. The first
     // watching read sees that balance — the old any-positive fallback would declare done here.

@@ -61,6 +61,12 @@ export const depositEs: DepositMessages = {
     feeLine: fee => `Comisión de red ${fee}`,
     custody: asset => `dpay nunca guarda tus claves ni convierte — ${asset} llega directamente a tu billetera.`,
     receivedAmount: amount => `${amount} recibidos`,
+    alsoTitle: '¿Ya está en Internet Computer?',
+    alsoBody: symbol => [
+      {t: 'Envía '},
+      {t: symbol, em: true},
+      {t: ' desde cualquier billetera de Internet Computer directamente a tu dirección IC de abajo — no hace falta memo.'},
+    ],
   },
 
   erc20: {

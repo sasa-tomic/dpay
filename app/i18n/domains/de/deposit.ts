@@ -60,6 +60,12 @@ export const depositDe: DepositMessages = {
     feeLine: fee => `Netzwerkgebühr ${fee}`,
     custody: asset => `dpay hält deine Schlüssel nie und wechselt nie — ${asset} landet direkt in deiner Wallet.`,
     receivedAmount: amount => `${amount} empfangen`,
+    alsoTitle: 'Schon auf dem Internet Computer?',
+    alsoBody: symbol => [
+      {t: 'Sende '},
+      {t: symbol, em: true},
+      {t: ' von jeder Internet-Computer-Wallet direkt an deine IC-Adresse unten — kein Memo nötig.'},
+    ],
   },
 
   erc20: {

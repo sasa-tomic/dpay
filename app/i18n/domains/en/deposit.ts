@@ -92,6 +92,9 @@ export type DepositMessages = {
     custody: (asset: string) => string;
     /** Honest receive detection: ledger balance strictly above the watched baseline. */
     receivedAmount: (amount: string) => string;
+    /** "Already on the IC?" section on the family deposit sheets (IcrcAccountSection). */
+    alsoTitle: string;
+    alsoBody: (symbol: string) => InstrRun[];
   };
 
   /** ckETH / ckERC20 rail (CkErc20DepositSheet): the user's OWN Ethereum wallet signs the deposit. */
@@ -233,6 +236,12 @@ export const depositEn: DepositMessages = {
     feeLine: fee => `Network fee ${fee}`,
     custody: asset => `dpay never holds your keys and never converts — ${asset} lands directly in your wallet.`,
     receivedAmount: amount => `${amount} received`,
+    alsoTitle: 'Already on the Internet Computer?',
+    alsoBody: symbol => [
+      {t: 'Send '},
+      {t: symbol, em: true},
+      {t: ' from any Internet Computer wallet directly to your IC address below — no memo needed.'},
+    ],
   },
 
   erc20: {

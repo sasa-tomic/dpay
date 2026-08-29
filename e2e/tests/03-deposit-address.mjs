@@ -12,7 +12,7 @@
 // (the instruction card), `deposit-status` (the single linear progress cue), `btn-deposit-check`
 // (manual refresh), `btn-deposit-copy` (copy). (The old `btn-deposit-close` is gone — the inline body
 // has no overlay close button; the "Done" button + the toggle handle the exit.)
-import { setup, assert, assertIncludes, onboardWallet } from '../harness/lib.mjs';
+import { setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, railPrincipalText } from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -22,7 +22,7 @@ export const meta = {
   name: 'deposit-address',
   journey: 'deposit',
   covers: ['deposit-address', 'qr', 'instructions', 'fee-min', 'deep-link'],
-  verifies: 'ckBTC deposit sheet: address + QR + instructions + fee/min; deep-link ?screen=deposit works.',
+  verifies: 'ckBTC deposit sheet: address + QR + instructions + fee/min + the "Already on the Internet Computer?" ICRC-1 receive section (own principal); deep-link ?screen=deposit works.',
   timeoutMs: 15000,
 };
 
@@ -86,6 +86,18 @@ export async function run() {
   // 5. The single linear progress cue is present (U2): "Watching for your deposit" — the honest
   //    balance-watching copy of the user-principal rail (the facade per-UTXO cue died with custody).
   assertIncludes(body, 'Watching for your deposit', 'progress cue shows the waiting state');
+
+  // 6. Founder 2026-08-29: ckBTC is ALSO receivable by plain ICRC-1 transfer — the sheet surfaces
+  //    the "Already on the Internet Computer?" section with the wallet's own ICRC-1 account.
+  //    (textContent, not bodyText: innerText drops line-clamped text.)
+  const icSec = await driver.findByTestID('ic-also-section', { timeoutMs: 5_000 });
+  const icTxt = (await icSec.evaluate(n => (n.textContent ?? '').trim()));
+  assertIncludes(icTxt, 'Already on the Internet Computer', 'IC-receive section is present');
+  assertIncludes(icTxt, 'ckBTC', 'IC-receive section names the LEDGER token (ckBTC, not BTC)');
+  const acct = await accountOf(driver);
+  assertEq((await driver.readText('ic-also-address')).trim(), await railPrincipalText(acct.publicHex),
+    'IC section shows the wallet\'s own ICRC-1 principal');
+  console.log('[03-deposit-address] ✓ ICRC-1 receive route visible (ckBTC directly on the IC)');
 
     await driver.screenshot('03-deposit-address');
 

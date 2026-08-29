@@ -70,6 +70,14 @@ export async function run() {
     await openReceiveAddress(driver);
     await driver.findByTestID('ckerc20-deposit', { timeoutMs: 8_000 });
 
+    // Founder 2026-08-29: the connect view must ALSO surface the plain ICRC-1 receive route —
+    // ckUSDC already on the IC transfers straight to the wallet's principal (no Ethereum txs).
+    // (textContent, not bodyText: innerText drops line-clamped text.)
+    const icSec = await driver.findByTestID('ic-also-section', { timeoutMs: 5_000 });
+    const icTxt = (await icSec.evaluate(n => (n.textContent ?? '').trim()));
+    assertIncludes(icTxt, 'Already on the Internet Computer', 'erc20 sheet shows the IC-receive section');
+    assertIncludes(icTxt, 'ckUSDC', 'IC-receive section names the LEDGER token (ckUSDC, not USDC-on-Ethereum)');
+
     // Connect + enter amount + approve → both txs mined (mock receipt 0x1) → watching.
     await driver.click('btn-connect-wallet', { timeoutMs: 5_000 });
     await driver.findByTestID('ckerc20-amount', { timeoutMs: 5_000 });
