@@ -161,6 +161,31 @@ Claude and all subagents treat `third_party/` as the canonical local source cach
 - **e2e/** — drives the real `app/App.tsx` in react-native-web against the offline in-process fake-IC gateway. It covers app-signed envelope submission/read_state, request-ID dedup, receiver-side nonce-bound history confirmation, deposits/offramps, both IC NFC v2 ownership halves (merchant-only settlement and offline-payer result completion), deeplinks, SOL, accessibility, and visual regression.
 - **VCHF + native ICP — complete first-class IC assets (spec `docs/specs/2026-08-28-vchf-icp-support-spec.md`, 2026-08-28; in-tree and fully verified, live in online wallets with the next relay deploy).** Catalog ids 7 (VCHF, ledger `ly36x-wiaaa-aaaai-aqj7q-cai`) / 8 (ICP, ledger `ryjl3-tyaaa-aaaaa-aaaba-cai`), 8-decimal raw units, mainnet `Internet Computer` rows in both the bundled app catalog and the relay's compiled catalog (sole authority since the 2026-08-28 registry removal — there is NO registration step anymore), drift alarms on both sides pinned to `dfx/catalog_truth.json`. Payment is an app-signed direct `icrc1_transfer` to the exact ledger (no minter, no facade value call); `isPayableAsset` is decoupled from ramps, and both rows are `onramp = offramp = Unavailable` so no Add money / Cash out actions render while Pay/Receive work — and since 2026-08-29 the zero-balance fund gate + Receive ▸ My address carry REAL top-up instructions (`IcrcDepositSheet`): the user's own ICRC-1 principal as QR + copy, send-from-any-IC-wallet, no memo needed, ledger fee shown — a plain `icrc1_transfer` in, no ramp required (founder hard rule 2026-08-29: useful practical instructions on every step; relay catalog rows stay `onramp=Unavailable` — that is fiat-ramp honesty, not a transfer-in blocker). The ck\* family sheets carry the same route (2026-08-29, founder follow-up): a shared `IcrcAccountSection` "Already on the Internet Computer?" on the ckBTC and ckETH/ckUSDC deposit surfaces shows the wallet's ICRC-1 principal too — funds already on the IC transfer straight in, no Ethereum/BTC round trip, and each sheet's existing ledger watch credits it as a normal delta; the section names the LEDGER token (`wrapper_name` — ckBTC/ckUSDC/ckETH), never the display glyph, since plain BTC/ETH cannot be sent to an IC principal. Native ICP history runs through the official ICP index `qhbym-qaaaa-aaaaa-aaafq-cai`, hard-pinned in the relay's `agent_ledger.rs` adapter (exact-principal dispatch; `icrc1_memo`-hex-only reconciliation). Verified: `just verify` EXIT=0 (96/96 e2e incl. 7 new flows 95–101), jest 1160/1160, `just test-relay` 44/44, `just test-live` 62/62, `just ic-index-probe` PASS vs mainnet, emulator device gates green (self-check + offline cold start renders both rows). Outstanding (founder): the prod relay deploy (`just apk && just up` — the relay's compiled catalog ships VCHF/ICP to online wallets; the facade wasm upgrade is optional and carries no registration) and low-value funded mainnet transfer proof (blocked on funds). ICPSwap buy/sell is NOT included — separate future spec, no automatic conversion.
 
+- **Payment links — the ONE shareable "pay me" URL (2026-08-29, founder decisions this session).**
+  `https://dpay.kalaj.org/wallet/pay/<recipient>?asset=…&network=…&amount=…[&label=&memo=&ref=]` —
+  readable and hand-authorable, the shape BIP-21 / Solana Pay established, mapped onto https so ONE
+  string is both an Android App Link (opens the app) and a plain web link (opens `/wallet`). It
+  REPLACED the opaque `dpay:req/<blob>` + `?req=` mirror (one URL format, not two); the 132-byte
+  binary wire stays for QR/NFC, and the `dpay:pay/` receipt hand-back is unchanged. `network` is
+  REQUIRED and names the SETTLEMENT chain (`internet-computer` | `solana`) — the founder's call, and
+  the thing that separates ckUSDC-on-IC from USDC-on-Solana from USDC-on-Ethereum; a right-token /
+  wrong-chain link is REFUSED, never redirected. Both rails, same grammar: IC → a pre-filled review
+  the payer must Approve (paying ANY ICRC-1 principal, not just dpay users — `prepareTransfer` now
+  takes the destination principal, derived from the pubkey on the wire path); SOL → the pre-filled
+  Send-to-address form. A link NEVER auto-signs, always shows the FULL destination account, marks
+  the sender-given label as claimed, and carries no expiry (the envelope's IC ingress expiry still
+  bounds signing). `ref` = the on-chain memo: present ⇒ a single invoice the ledger dedups and the
+  payee's request screen reconciles; absent ⇒ a reusable link. Every refusal names the asset/chain
+  and the payer's next action (founder rule). Authority for the grammar + trust model: the module
+  header of `app/lib/deepLink.ts`; asset/amount resolution: `resolvePayLink` in `app/config/assets.ts`.
+  New core export `icp_validate_principal` (FFI + wasm + Kotlin) CRC-validates a link's destination
+  before the payer sees it. Relay serves `/wallet/pay/{recipient}` + `/.well-known/assetlinks.json`
+  (all four project signing certs, incl. the upload key so sideloaded builds verify too). Verified:
+  `just verify` EXIT=0 (98/98 e2e incl. new flows 102/103), jest 1203/1203, `just test-relay` 47/47,
+  emulator device gate green + the link driven on-device (review + refusal screenshots). Outstanding
+  (founder): the prod deploy so Android can actually fetch assetlinks.json — see `OPEN_ISSUES.md`
+  "Physical / outer-loop gates".
+
 **Device gate — now built and runnable in-sandbox** (this environment has `/dev/kvm`, the Android SDK/NDK, an x86_64 emulator, and `dfx`; see [[sandbox-can-run-device-gate]]):
 - **real dfx deploy** (`just deploy`, `scripts/dfx-deploy.sh`) — a live local replica settles the *exact* offline-signed 292-byte wire via `dfx canister call` (built by `dpay-fixture` from the shared core); funds move, replay refused. `dfx.json` + extracted candid in `dfx/`.
 - **NDK build** (`just ndk`, `scripts/ndk-build-ffi.sh`) — `libdpay_ffi.so` for arm64-v8a + x86_64, **16 KB-page-aligned** (Android 15 / Play); auto-detects the newest installed NDK.

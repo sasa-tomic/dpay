@@ -42,6 +42,18 @@
 
 ## Physical / outer-loop gates (NOT autonomous)
 
+- **Android App Link verification — needs the prod relay deploy** (payment links, 2026-08-29).
+  Everything in the chain is proven in-sandbox EXCEPT the one step that requires the live domain:
+  the manifest's `autoVerify` filter is live (Android lists `dpay.kalaj.org` for `org.kalaj.dpay`),
+  the relay serves `/.well-known/assetlinks.json` with all four project certificates, and the
+  emulator's installed APK is signed by one of them (`1E:5C:F5:10:…`, the upload key). But the
+  verifier could not fetch the file — `pm get-app-links` shows no successful verification and a
+  tapped link opened Chrome, because prod does not serve assetlinks.json until the next `just up`.
+  **After deploying, run on a phone:** `adb shell pm verify-app-links --re-verify org.kalaj.dpay`
+  then `adb shell pm get-app-links org.kalaj.dpay` and expect `dpay.kalaj.org: verified`; tapping a
+  `https://dpay.kalaj.org/wallet/pay/…` link must then open the app, not a browser. Until that is
+  recorded, a shared link is web-only on real installs (it still opens the web wallet, which is the
+  designed fallback — no user-facing breakage, just no native hand-off).
 - **SOL HCE hardware tap — the only physical gate left** (AID `F06470617902`, `DpaySolNfc`).
   The IC-rail two-phone NFC tap (payer in airplane mode) + real-camera QR scan PASSED 2026-08-26
   (founder-run retest; commit `8940b1d`).

@@ -92,15 +92,19 @@ the e2e shim.
 - Build order: (a) URI codec pure helper + jest tests (RED-first), (b) App.tsx routing, (c)
   AndroidManifest intent-filter, (d) optionally receipt hand-back `dpay:pay:...`.
 
-**✅ DONE (2026-08-08).** (a) pure codec + 16 jest cases (`app/lib/deepLink.ts`); (b) routing in
-`Wallet.tsx` (native `Linking.getInitialURL`/`addEventListener('url')`, 2s-timeout-bounded) + the web
-`?req=` mirror (`readRequestDeeplink`) → `prefillRequest` state → `PayMode` prefill effect reusing the
-camera-scan decode path; ReceiveMode's "Share request link" (`btn-share-request`); (c) AndroidManifest
-`dpay`-scheme intent-filter on MainActivity; e2e flow 49 (reload to `?req=<blob>` — asserts review
-prefill + no auto-approve + full settle). **SECURITY: a deeplink ONLY prefills review — never signs.**
-(d) **DEFERRED** — `dpay:pay/<blob>` is codec-only (`decodeDeeplink` + `readPaymentDeeplink`); the
-merchant-side verify/reconcile wiring is a follow-up (spec the reconcile path first). Commits
-`1bf4045` → `811dbe6`. Device gate PASSED 2026-08-08 (`just app` + `just ondevice` 9/9 + adb deeplink dispatch). See OPEN_ISSUES item 6.
+**✅ DONE (2026-08-08).** (a) pure codec + jest cases (`app/lib/deepLink.ts`); (b) routing in
+`Wallet.tsx` (native `Linking.getInitialURL`/`addEventListener('url')`, 2s-timeout-bounded) →
+`PayMode` review; ReceiveMode's "Share request link" (`btn-share-request`); (c) AndroidManifest
+intent-filter on MainActivity; e2e flow 49. **SECURITY: an incoming link ONLY prefills review —
+never signs.** (d) **DEFERRED then DONE** — the `dpay:pay/<blob>` receipt hand-back's merchant-side
+verify/reconcile wiring landed later (e2e flows 50/59). Commits `1bf4045` → `811dbe6`. Device gate
+PASSED 2026-08-08 (`just app` + `just ondevice` 9/9 + adb deeplink dispatch). See OPEN_ISSUES item 6.
+
+**SUPERSEDED (2026-08-29).** The `dpay:req/<blob>` request link and its `?req=` web mirror described
+below are GONE, replaced by a readable https payment link that also works as an Android App Link.
+The authoritative grammar, security invariants and trust model live in the module header of
+`app/lib/deepLink.ts`; the asset/amount resolution rules live in `resolvePayLink`
+(`app/config/assets.ts`). Only the `dpay:pay/` receipt hand-back below is still current.
 
 ## Deeplink design (item 6)
 
@@ -112,9 +116,9 @@ signed payment receipt can be handed back over the same channel when NFC is unav
 
 ### URI shape (proposed)
 ```
-dpay:req/<base64url-request-blob>           # request for payment (merchant → payer)
 dpay:pay/<base64url-receipt-blob>           # signed payment receipt (payer → merchant, NFC-less hand-back)
 ```
+(The request half of this scheme was retired 2026-08-29 — see SUPERSEDED above.)
 - `base64url` (no padding) of the EXISTING binary blob the QR already carries — **no new codec, no
   new wire format.** This keeps the wire-layout single source of truth and lets the QR and the
   deeplink share one encode/decode path.
@@ -153,17 +157,12 @@ dpay:pay/<base64url-receipt-blob>           # signed payment receipt (payer → 
   not applicable). Tracked in OPEN_ISSUES as a follow-up.
 
 ### Test plan (TDD)
-- RED: jest test asserting `decodeRequest(encodeRequest(req)) deep-equal req` and that a tampered
-  byte round-trips to a decode error. Test the `App.tsx` routing with the e2e seam (`?dpay=...` on
-  web) — add an e2e flow that simulates opening `dpay:req/...` and asserts the pay sheet pre-fills.
+- The pure codec is jest-covered and the link path is driven end to end in the browser by the e2e
+  suite; both were rewritten with the 2026-08-29 payment link (see SUPERSEDED above) —
+  `app/__tests__/deeplink.test.ts` and `e2e/tests/49-deeplink-request.mjs` are the current versions.
 - The e2e flow goes in `e2e/tests/NN-name.mjs` with a `meta` export; regenerate `FLOWS.md`.
-- **STATUS: DONE (2026-08-08).** jest `app/__tests__/deeplink.test.ts` (16 cases: round-trip both
-  kinds, null for non-dpay/garbage/empty-blob/unknown-kind/missing-slash, base64url `-`/`_`
-  preserved, scheme case-sensitivity). e2e `e2e/tests/49-deeplink-request.mjs`: reloads the browser
-  to `?relay=&req=<blob>` (the REAL web `?req=` path — no test-only prod seam), asserts the review
-  screen pre-fills with the merchant request (no auto-approve) then the full Approve→settle. Chose
-  reload-over-seam: zero test-only prod code + flow 12 proves reload+remount is reliable. FLOWS.md
-  regenerated (50 flows).
+- Chose navigate-over-seam for the link entry: zero test-only prod code, and flow 12 proves
+  reload+remount is reliable.
 
 ### Confidence / safety
 - URI codec + parsing: confidence **9/10** (pure, testable, reuses existing wire). Safety **9/10**.

@@ -55,7 +55,7 @@ Concrete failures follow directly:
 - Selecting SOL swaps component trees; the Solana Receive control then offers only USDC.
 - Solana USDC is not a first-class selectable asset and has no independently represented balance.
 - IC and Solana USDC share a symbol but are not consistently disambiguated by network.
-- `dpay:req` / `dpay:pay` links can select Pay/Receive while the Solana component is mounted, so the
+- Incoming payment links / `dpay:pay` hand-backs can select Pay/Receive while the Solana component is mounted, so the
   IC component that consumes the link remains absent.
 - Catalog refresh or testnet hiding can leave a stale numeric selection.
 - `activeSol=true` with failed Solana address derivation can show a SOL header over an IC engine.
@@ -318,7 +318,7 @@ deprecated props, parallel state, or adapter shims “temporarily” after their
 - Opening Balances during review cannot substitute or unmount the requested asset.
 - IC USDC requests check IC USDC only; Solana USDC requests check Solana USDC only.
 - SOL requests check SOL only; online known insufficiency blocks approval.
-- Foreground `dpay:req` and `dpay:pay` work when either Solana asset was selected.
+- A foreground payment link and a `dpay:pay` hand-back work when either Solana asset was selected.
 - Malformed deeplinks do not change selection or approve anything.
 
 **Implementation**
@@ -329,7 +329,7 @@ deprecated props, parallel state, or adapter shims “temporarily” after their
 - IC unknown/retired currency IDs remain unsupported and never sign.
 - Add Solana asset-specific balance and source-ATA gates. Offline/stale balance knowledge may warn,
   but must never imply conversion or known sufficiency.
-- Route current `dpay:req` / `dpay:pay` formats explicitly to the IC engine regardless of idle
+- Route an incoming payment link / `dpay:pay` hand-back explicitly to its rail's engine regardless of idle
   selection. Do not add a Solana deeplink format in this rewrite.
 
 **Exit criteria**
@@ -400,7 +400,7 @@ deprecated props, parallel state, or adapter shims “temporarily” after their
   unavailable balances, and selection back-and-forth.
 - `just app`; assert `DPAY_SELFCHECK PASS` and `DPAY_SOL_SELFCHECK PASS`.
 - `just ondevice`; all current instrumented tests pass.
-- Exercise cold + warm Android `dpay:req` and `dpay:pay`, including a warm link while Solana USDC is
+- Exercise cold + warm Android payment links and `dpay:pay` hand-backs, including a warm link while Solana USDC is
   selected.
 - Exercise IC ↔ SOL ↔ Solana-USDC switching and confirm the correct NFC AID engine arms/disarms with
   no stale listener/session state.
