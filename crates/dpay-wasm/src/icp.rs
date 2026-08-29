@@ -20,11 +20,13 @@ use dpay_icp::envelope::{
 };
 use dpay_icp::icrc::{
     approve_arg as icrc_approve_arg, balance_of_arg as icrc_balance_of_arg,
+    decode_legacy_transfer_result as icrc_decode_legacy_transfer_result,
     decode_minter_ok as icrc_decode_minter_ok,
-    decode_transfer_result as icrc_decode_transfer_result, transfer_arg as icrc_transfer_arg,
-    TransferError, TransferResult,
+    decode_transfer_result as icrc_decode_transfer_result,
+    legacy_transfer_arg as icrc_legacy_transfer_arg, transfer_arg as icrc_transfer_arg,
+    LegacyTransferError, LegacyTransferResult, TransferError, TransferResult,
 };
-use dpay_icp::principal::{Account, Principal};
+use dpay_icp::principal::{Account, AccountIdentifier, Principal};
 use dpay_icp::reply::{
     decode_query_response, decode_read_state_tree, read_state_time, request_status,
     QueryOutcome, RequestStatus as RailStatus,
@@ -188,6 +190,71 @@ pub extern "C" fn w_icp_validate_principal(ptr: u32, len: u32, out_ptr: u32, cap
         Err(_) => return BAD_UTF8,
     };
     write_str_out(p.to_text().as_bytes(), out_ptr, cap)
+}
+
+/// `icp_validate_icrc_account`: parse an ICRC-1 textual ACCOUNT (bare principal, or
+/// `principal-checksum.subaccount`) and write `{"owner":…,"subaccountHex":…}` to `out_ptr`.
+/// `subaccountHex` is EMPTY for the default subaccount. Twin of the UniFFI
+/// `icp_validate_icrc_account` — the web wallet parses a scanned/pasted send destination through
+/// the SAME core parser the phone uses, so an address that is refused on one is refused on both.
+#[no_mangle]
+pub extern "C" fn w_icp_validate_icrc_account(ptr: u32, len: u32, out_ptr: u32, cap: u32) -> u32 {
+    let text = match text_at(ptr, len) {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
+    let a = match Account::from_text(&text) {
+        Ok(a) => a,
+        Err(_) => return BAD_UTF8,
+    };
+    let sub = if a.subaccount == [0u8; 32] { String::new() } else { hex_str(&a.subaccount) };
+    let mut json = String::with_capacity(128);
+    json.push_str("{\"owner\":");
+    push_json_str(&a.owner.to_text(), &mut json);
+    json.push_str(",\"subaccountHex\":");
+    push_json_str(&sub, &mut json);
+    json.push('}');
+    write_str_out(json.as_bytes(), out_ptr, cap)
+}
+
+/// `icp_validate_account_id`: CRC-checked parse of a LEGACY 64-hex ICP account identifier,
+/// writing the canonical lowercase text. Twin of the UniFFI `icp_validate_account_id`.
+#[no_mangle]
+pub extern "C" fn w_icp_validate_account_id(ptr: u32, len: u32, out_ptr: u32, cap: u32) -> u32 {
+    let text = match text_at(ptr, len) {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
+    let id = match AccountIdentifier::from_text(&text) {
+        Ok(i) => i,
+        Err(_) => return BAD_UTF8,
+    };
+    write_str_out(id.to_text().as_bytes(), out_ptr, cap)
+}
+
+/// `icp_account_id_from_principal`: derive the legacy account identifier for an owner+subaccount.
+/// Twin of the UniFFI export; used for the send screen's self-send guard.
+#[no_mangle]
+pub extern "C" fn w_icp_account_id_from_principal(
+    owner_ptr: u32, owner_len: u32, sub_ptr: u32, sub_len: u32, out_ptr: u32, cap: u32,
+) -> u32 {
+    let a = match account_at(owner_ptr, owner_len, sub_ptr, sub_len) {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    let id = AccountIdentifier::from_principal(&a.owner, &a.subaccount);
+    write_str_out(id.to_text().as_bytes(), out_ptr, cap)
+}
+
+/// Lowercase hex of a byte slice (the wasm crate has no hex encoder of its own).
+fn hex_str(b: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut s = String::with_capacity(b.len() * 2);
+    for byte in b {
+        s.push(HEX[(byte >> 4) as usize] as char);
+        s.push(HEX[(byte & 0xf) as usize] as char);
+    }
+    s
 }
 
 /// `icp_ingress_expiry`: `now_ns + ahead_s * 1e9` as a decimal string at `out_ptr`.
@@ -665,6 +732,88 @@ pub extern "C" fn w_icp_decode_read_state(
     json.push_str("]}");
     if json.len() > MAX_JSON as usize {
         return 0;
+    }
+    write_str_out(json.as_bytes(), out_ptr, cap)
+}
+
+/// `icp_legacy_transfer_arg`: DIDL args for the ICP ledger's LEGACY `transfer` — the only method
+/// that can pay a 64-hex account identifier. Amounts/fee/memo cross as decimal strings; the
+/// ledger's `Tokens` is a nat64, so an out-of-range value is REFUSED (BAD_LEN), never truncated.
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn w_icp_legacy_transfer_arg(
+    to_ptr: u32, to_len: u32,
+    from_sub_ptr: u32, from_sub_len: u32,
+    amount_ptr: u32, amount_len: u32,
+    fee_ptr: u32, fee_len: u32,
+    memo_ptr: u32, memo_len: u32,
+    out_ptr: u32, cap: u32,
+) -> u32 {
+    let to_text = match text_at(to_ptr, to_len) {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
+    let to = match AccountIdentifier::from_text(&to_text) {
+        Ok(i) => i,
+        Err(_) => return BAD_UTF8,
+    };
+    let from_sub = match hex_at(from_sub_ptr, from_sub_len) {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+    let from_subaccount: Option<[u8; 32]> = match from_sub.len() {
+        0 => None,
+        32 => Some(from_sub.as_slice().try_into().unwrap()),
+        _ => return BAD_LEN,
+    };
+    let amount = match u64_str_at(amount_ptr, amount_len) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let fee = match u64_str_at(fee_ptr, fee_len) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let memo = match u64_str_at(memo_ptr, memo_len) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let bytes = icrc_legacy_transfer_arg(to.as_bytes(), from_subaccount, amount, fee, memo, None);
+    write_str_out(&bytes, out_ptr, cap)
+}
+
+/// `icp_decode_legacy_transfer_result`: the legacy `transfer` reply as the same compact JSON
+/// `w_icp_decode_transfer_result` emits, but carrying the LEGACY variant tags (`TxDuplicate`,
+/// `TxTooOld`, `TxCreatedInFuture`) — never renamed to their ICRC-1 near-twins.
+#[no_mangle]
+pub extern "C" fn w_icp_decode_legacy_transfer_result(arg_ptr: u32, arg_len: u32, out_ptr: u32, cap: u32) -> u32 {
+    if !in_bounds(arg_ptr, arg_len) || arg_len > 512 {
+        return BAD_LEN;
+    }
+    let arg = unsafe { slice_at(arg_ptr, arg_len) };
+    let result = match icrc_decode_legacy_transfer_result(arg) {
+        Ok(r) => r,
+        Err(_) => return BAD_UTF8,
+    };
+    let mut json = String::with_capacity(96);
+    match result {
+        LegacyTransferResult::Ok(idx) => {
+            json.push_str(&format!("{{\"ok\":true,\"blockIndex\":\"{idx}\"}}"));
+        }
+        LegacyTransferResult::Err(e) => {
+            let (variant, detail) = match e {
+                LegacyTransferError::TxTooOld { allowed_window_nanos } => ("TxTooOld", format!("allowed window {allowed_window_nanos} ns")),
+                LegacyTransferError::BadFee { expected_fee } => ("BadFee", format!("expected fee {expected_fee}")),
+                LegacyTransferError::TxDuplicate { duplicate_of } => ("TxDuplicate", format!("duplicate of block {duplicate_of}")),
+                LegacyTransferError::TxCreatedInFuture => ("TxCreatedInFuture", "created ahead of ledger time".to_string()),
+                LegacyTransferError::InsufficientFunds { balance } => ("InsufficientFunds", format!("balance {balance}")),
+            };
+            json.push_str("{\"ok\":false,\"errVariant\":");
+            push_json_str(variant, &mut json);
+            json.push_str(",\"errDetail\":");
+            push_json_str(&detail, &mut json);
+            json.push('}');
+        }
     }
     write_str_out(json.as_bytes(), out_ptr, cap)
 }

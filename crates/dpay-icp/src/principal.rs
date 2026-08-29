@@ -131,6 +131,127 @@ impl Account {
     pub fn text(&self) -> String {
         format!("{self}")
     }
+
+    /// Parse the ICRC-1 textual account form — the exact inverse of `Display`, per
+    /// ICRC-1 `TextualEncoding.md` (status: Accepted).
+    ///
+    /// Accepts the two spec-legal shapes and nothing else:
+    ///   • `<principal>`                    → the DEFAULT (all-zero) subaccount
+    ///   • `<principal>-<checksum>.<hex>`   → `checksum` = 7-char lowercase RFC4648 base32 of
+    ///                                        `crc32(owner ‖ subaccount) BE`, `hex` = the
+    ///                                        subaccount with leading zeros stripped
+    ///
+    /// CANONICAL-ONLY, enforced the same way `Principal::from_text` does it — by re-rendering
+    /// through `Display` and comparing. That single round-trip rejects every non-canonical form
+    /// the spec calls an error (`…-6cc627i.01` leading zero, `…-q6bn32y.` spelled-out default,
+    /// `…-6ae.1` missing checksum, wrong checksum, non-canonical principal grouping) without a
+    /// second rule-set to drift out of sync. Deliberately STRICTER than `@dfinity/candid`'s
+    /// `decodeIcrcAccount`, which accepts `.01` and a trailing `.` and silently normalizes them;
+    /// the Motoko reference (`ICRC-1/ref/Account.mo`) rejects them as `#not_canonical` and so do we.
+    /// Input case is folded first, so an uppercased address (which the IC spec says parses
+    /// case-insensitively, and which the JS SDK wrongly rejects) is accepted and canonicalized.
+    pub fn from_text(s: &str) -> Result<Account, IcpError> {
+        let lower = s.trim().to_ascii_lowercase();
+        // No '.' ⇒ a bare principal ⇒ the default subaccount. `Principal::from_text` already
+        // enforces CRC + canonical grouping.
+        let Some((left, hex_sub)) = lower.split_once('.') else {
+            return Ok(Account::new(Principal::from_text(&lower)?));
+        };
+        // `left` is `<principal>-<checksum>`; the principal itself contains '-', so split at the LAST.
+        let Some((principal_text, checksum)) = left.rsplit_once('-') else {
+            return Err(IcpError::PrincipalText("account text has a subaccount but no checksum".into()));
+        };
+        if checksum.len() != CHECKSUM_LEN {
+            return Err(IcpError::PrincipalText("account checksum must be 7 base32 chars".into()));
+        }
+        if hex_sub.is_empty() || hex_sub.len() > 64 {
+            return Err(IcpError::PrincipalText("subaccount hex must be 1..=64 chars".into()));
+        }
+        let owner = Principal::from_text(principal_text)?;
+        // Left-pad to the full 32 bytes. A non-hex char fails here rather than silently truncating.
+        let padded = format!("{:0>64}", hex_sub);
+        let mut subaccount = [0u8; 32];
+        for (i, byte) in subaccount.iter_mut().enumerate() {
+            *byte = u8::from_str_radix(&padded[i * 2..i * 2 + 2], 16)
+                .map_err(|_| IcpError::PrincipalText("subaccount is not hex".into()))?;
+        }
+        let account = Account { owner, subaccount };
+        // The ONE canonicity gate (see the doc comment): re-render and compare. Also rejects the
+        // all-zero subaccount, whose canonical form is the bare principal with no `.` at all.
+        if account.text() != lower {
+            return Err(IcpError::PrincipalText("non-canonical account text".into()));
+        }
+        Ok(account)
+    }
+}
+
+/// The 7-char lowercase base32 CRC32 checksum in an ICRC-1 textual account with a subaccount.
+/// 32 bits / 5 bits-per-char = 7 chars, RFC4648 unpadded.
+const CHECKSUM_LEN: usize = 7;
+
+/// The ICP ledger's LEGACY account identifier: 32 bytes, `CRC32(h) BE ‖ h` where
+/// `h = SHA224("\x0Aaccount-id" ‖ owner ‖ subaccount)`.
+///
+/// This is a DIFFERENT address namespace from a principal / ICRC-1 account, and the two are
+/// distinguishable by shape alone (64 hex chars vs dash-grouped base32). It is the form
+/// exchanges hand out for ICP deposits, and the one the NNS dapp, Stoic, and Oisy's
+/// "ICP Account (for exchanges)" row display.
+///
+/// It is a ONE-WAY hash of the owner: an account identifier can be DERIVED from a principal but
+/// never inverted back to one. That is precisely why `icrc1_transfer` — whose `to` is an
+/// `Account { owner : principal; … }` — cannot address it, and why reaching it requires the ICP
+/// ledger's legacy `transfer` method, whose `to` is these 32 bytes verbatim
+/// (`ledger.did`: `transfer : (TransferArgs) -> (TransferResult)`, `to : AccountIdentifier`).
+/// Only the ICP ledger has this method; every ck* and ICRC-1 ledger is principal-addressed only.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct AccountIdentifier([u8; 32]);
+
+/// Domain-separation prefix for the account-identifier hash (length-prefixed `"account-id"`).
+const ACCOUNT_ID_DOMAIN: &[u8] = b"\x0Aaccount-id";
+
+impl AccountIdentifier {
+    /// Derive the account identifier for `owner` on `subaccount` (all-zero = the default account).
+    pub fn from_principal(owner: &Principal, subaccount: &[u8; 32]) -> AccountIdentifier {
+        let mut h = Sha224::new();
+        h.update(ACCOUNT_ID_DOMAIN);
+        h.update(owner.as_slice());
+        h.update(subaccount);
+        let hash = h.finalize();
+        let mut b = [0u8; 32];
+        b[..4].copy_from_slice(&crc32_ieee(&hash).to_be_bytes());
+        b[4..].copy_from_slice(&hash);
+        AccountIdentifier(b)
+    }
+
+    /// Parse the 64-hex textual form, verifying the embedded CRC32. Case-insensitive on input
+    /// (`checkAccountId` in the JS SDK accepts uppercase hex too); output is canonical lowercase.
+    /// The CRC is what makes a typo'd or truncated exchange address fail HERE rather than
+    /// silently sending funds into an unowned account.
+    pub fn from_text(s: &str) -> Result<AccountIdentifier, IcpError> {
+        let t = s.trim();
+        if t.len() != 64 {
+            return Err(IcpError::PrincipalText("account identifier must be 64 hex chars".into()));
+        }
+        let mut b = [0u8; 32];
+        for (i, byte) in b.iter_mut().enumerate() {
+            *byte = u8::from_str_radix(&t[i * 2..i * 2 + 2], 16)
+                .map_err(|_| IcpError::PrincipalText("account identifier is not hex".into()))?;
+        }
+        if crc32_ieee(&b[4..]).to_be_bytes() != b[..4] {
+            return Err(IcpError::PrincipalText("account identifier CRC32 mismatch".into()));
+        }
+        Ok(AccountIdentifier(b))
+    }
+
+    /// Canonical lowercase 64-hex text.
+    pub fn to_text(&self) -> String {
+        hex_encode(&self.0)
+    }
+
+    /// The raw 32 bytes — what the legacy `transfer` arg carries as `to`.
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
 }
 
 /// The subset of hex encoding needed for account text (no external hex crate).
@@ -323,5 +444,79 @@ mod tests {
         assert_eq!(a.text(), "k2t6j-2nvnp-4zjm3-25dtz-6xhaa-c7boj-5gayf-oj3xs-i43lp-teztq-6ae-6cc627i.1");
         a.subaccount = h("0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20").try_into().unwrap();
         assert_eq!(a.text(), "k2t6j-2nvnp-4zjm3-25dtz-6xhaa-c7boj-5gayf-oj3xs-i43lp-teztq-6ae-dfxgiyy.102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20");
+    }
+
+    /// The spec's own OK vectors, parsed back — `from_text` is the exact inverse of `Display`.
+    /// (`account_display_matches_icrc_ledger_types` covers the forward direction; this covers
+    /// the reverse, so neither test duplicates the other's assertions.)
+    #[test]
+    fn account_from_text_parses_the_spec_ok_vectors() {
+        const OWNER: &str = "k2t6j-2nvnp-4zjm3-25dtz-6xhaa-c7boj-5gayf-oj3xs-i43lp-teztq-6ae";
+        let owner = Principal::from_text(OWNER).unwrap();
+        // bare principal ⇒ default subaccount
+        let a = Account::from_text(OWNER).unwrap();
+        assert_eq!(a.owner, owner);
+        assert_eq!(a.subaccount, [0u8; 32]);
+        // subaccount = 1
+        let a = Account::from_text(&format!("{OWNER}-6cc627i.1")).unwrap();
+        assert_eq!(a.subaccount, h("0000000000000000000000000000000000000000000000000000000000000001").as_slice());
+        // the long subaccount vector
+        let long = format!("{OWNER}-dfxgiyy.102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20");
+        let a = Account::from_text(&long).unwrap();
+        assert_eq!(a.subaccount, h("0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20").as_slice());
+        // uppercase input is folded and accepted (IC spec: principals parse case-insensitively)
+        assert_eq!(Account::from_text(&long.to_uppercase()).unwrap(), a);
+        // whitespace from a copy/paste is trimmed
+        assert_eq!(Account::from_text(&format!("  {long}  ")).unwrap(), a);
+    }
+
+    /// Every vector the ICRC-1 TextualEncoding spec lists as an ERROR must be REFUSED. The JS
+    /// `decodeIcrcAccount` accepts the first two of these and silently normalizes them; we do not.
+    #[test]
+    fn account_from_text_refuses_the_spec_error_vectors() {
+        const OWNER: &str = "k2t6j-2nvnp-4zjm3-25dtz-6xhaa-c7boj-5gayf-oj3xs-i43lp-teztq-6ae";
+        // leading zero in the subaccount (non-canonical)
+        assert!(Account::from_text(&format!("{OWNER}-6cc627i.01")).is_err());
+        // the default subaccount spelled out instead of omitted
+        assert!(Account::from_text(&format!("{OWNER}-q6bn32y.")).is_err());
+        // an all-zero subaccount written out long-hand is still the default ⇒ non-canonical
+        assert!(Account::from_text(&format!("{OWNER}-q6bn32y.0")).is_err());
+        // missing checksum
+        assert!(Account::from_text(&format!("{OWNER}.1")).is_err());
+        // wrong checksum (one char flipped)
+        assert!(Account::from_text(&format!("{OWNER}-6cc627a.1")).is_err());
+        // checksum of the wrong length
+        assert!(Account::from_text(&format!("{OWNER}-6cc627.1")).is_err());
+        // non-hex subaccount
+        assert!(Account::from_text(&format!("{OWNER}-6cc627i.zz")).is_err());
+        // subaccount longer than 32 bytes
+        assert!(Account::from_text(&format!("{OWNER}-6cc627i.{}", "1".repeat(65))).is_err());
+        // a broken principal is still rejected in the account form
+        assert!(Account::from_text("k2t6j2nvnp4zjm3-25dtz6xhaac7boj5gayfoj3xs-i43lp-teztq-6ae-6cc627i.1").is_err());
+    }
+
+    /// The legacy 64-hex ICP account identifier: CRC-checked, case-folded, canonical lowercase out.
+    #[test]
+    fn account_identifier_text_is_crc_checked() {
+        let owner = Principal::from_text("k2t6j-2nvnp-4zjm3-25dtz-6xhaa-c7boj-5gayf-oj3xs-i43lp-teztq-6ae").unwrap();
+        let id = AccountIdentifier::from_principal(&owner, &[0u8; 32]);
+        let text = id.to_text();
+        assert_eq!(text.len(), 64);
+        assert_eq!(AccountIdentifier::from_text(&text).unwrap(), id);
+        // uppercase hex accepted, canonicalized to lowercase
+        assert_eq!(AccountIdentifier::from_text(&text.to_uppercase()).unwrap().to_text(), text);
+        // surrounding whitespace from a paste is trimmed
+        assert_eq!(AccountIdentifier::from_text(&format!(" {text}\n")).unwrap(), id);
+        // a single flipped nibble breaks the CRC — this is what catches a mistyped exchange address
+        let mut broken: Vec<char> = text.chars().collect();
+        broken[63] = if broken[63] == 'a' { 'b' } else { 'a' };
+        assert!(AccountIdentifier::from_text(&broken.into_iter().collect::<String>()).is_err());
+        // wrong length / non-hex / all-zero (CRC fails) are refused
+        assert!(AccountIdentifier::from_text(&text[..63]).is_err());
+        assert!(AccountIdentifier::from_text(&format!("{}zz", &text[..62])).is_err());
+        assert!(AccountIdentifier::from_text(&"0".repeat(64)).is_err());
+        assert!(AccountIdentifier::from_text("").is_err());
+        // a principal is NOT an account identifier (the two namespaces never collide)
+        assert!(AccountIdentifier::from_text(&owner.to_text()).is_err());
     }
 }

@@ -179,6 +179,75 @@ fn golden_u64_nonce_transfer_envelope() {
     assert_eq_hex(&env, G_U64_NONCE_ENVELOPE, "u64-nonce update envelope");
 }
 
+/// The account identifier of `to_principal()` (k2t6j-…-6ae) on the default subaccount.
+/// DERIVED INDEPENDENTLY (Python `hashlib.sha224` + `zlib.crc32`, and again via
+/// `@dfinity/candid`'s `AccountIdentifier.fromPrincipal`) before this crate could produce it —
+/// so `golden_account_identifier_from_principal` is a real cross-implementation check of the
+/// SHA224("\x0Aaccount-id" ‖ owner ‖ subaccount) derivation, not a self-fulfilling snapshot.
+const G_ACCOUNT_ID_TO_PRINCIPAL: &str = "051b05839339f89053454a4b9865ea0452a4bffe2b1cd41f4982bad10c1e637c";
+/// Legacy `transfer` args, generated from the ICP ledger's OWN published IDL (`ledger.idl.js`
+/// `TransferArgs`) through the production `@dfinity/candid` encoder — the same provenance rule
+/// as every other golden here: if these fail, fix the crate, never the golden.
+const G_LEGACY_TRANSFER_MINIMAL: &str = "4449444c066d7b6c01e0a9b302786e006c01d6f68e8001786e036c06fbca0100c6fcb60201ba89e5c20478a2de94eb060282f3f3910c04d8a38ca80d01010520051b05839339f89053454a4b9865ea0452a4bffe2b1cd41f4982bad10c1e637c10270000000000000000000000000000000000e1f50500000000";
+const G_LEGACY_TRANSFER_FULL: &str = "4449444c066d7b6c01e0a9b302786e006c01d6f68e8001786e036c06fbca0100c6fcb60201ba89e5c20478a2de94eb060282f3f3910c04d8a38ca80d01010520051b05839339f89053454a4b9865ea0452a4bffe2b1cd41f4982bad10c1e637c1027000000000000aaaaaaaaaaaaaaaa012007070707070707070707070707070707070707070707070707070707070707070100c0e9275959641700e1f50500000000";
+
+/// Legacy `transfer` replies, one per variant, from the ledger's own IDL via @dfinity/candid.
+const G_LEGACY_REPLY_OK: &str = "4449444c076c01a7a5f3cc0e786c01e0a9b302786c01bf9bb7f00d016c018bbdf29b01786c019cbab69c02016b05b79eb35d00a1c3ebfd0702c7c6b5f60a03cce5b6900f7feb9cdbd50f046b02bc8a0178c5fed20105010600e81f000000000000";
+const G_LEGACY_REPLY_BADFEE: &str = "4449444c076c01a7a5f3cc0e786c01e0a9b302786c01bf9bb7f00d016c018bbdf29b01786c019cbab69c02016b05b79eb35d00a1c3ebfd0702c7c6b5f60a03cce5b6900f7feb9cdbd50f046b02bc8a0178c5fed20105010601011027000000000000";
+const G_LEGACY_REPLY_INSUFFICIENT: &str = "4449444c076c01a7a5f3cc0e786c01e0a9b302786c01bf9bb7f00d016c018bbdf29b01786c019cbab69c02016b05b79eb35d00a1c3ebfd0702c7c6b5f60a03cce5b6900f7feb9cdbd50f046b02bc8a0178c5fed20105010601042a00000000000000";
+const G_LEGACY_REPLY_DUPLICATE: &str = "4449444c076c01a7a5f3cc0e786c01e0a9b302786c01bf9bb7f00d016c018bbdf29b01786c019cbab69c02016b05b79eb35d00a1c3ebfd0702c7c6b5f60a03cce5b6900f7feb9cdbd50f046b02bc8a0178c5fed2010501060102e81f000000000000";
+const G_LEGACY_REPLY_TOO_OLD: &str = "4449444c076c01a7a5f3cc0e786c01e0a9b302786c01bf9bb7f00d016c018bbdf29b01786c019cbab69c02016b05b79eb35d00a1c3ebfd0702c7c6b5f60a03cce5b6900f7feb9cdbd50f046b02bc8a0178c5fed201050106010000004f91944e0000";
+const G_LEGACY_REPLY_FUTURE: &str = "4449444c076c01a7a5f3cc0e786c01e0a9b302786c01bf9bb7f00d016c018bbdf29b01786c019cbab69c02016b05b79eb35d00a1c3ebfd0702c7c6b5f60a03cce5b6900f7feb9cdbd50f046b02bc8a0178c5fed2010501060103";
+
+#[test]
+fn golden_decode_legacy_transfer_results() {
+    use dpay_icp::icrc::{decode_legacy_transfer_result as dec, LegacyTransferError as E, LegacyTransferResult as R};
+    assert_eq!(dec(&unhex(G_LEGACY_REPLY_OK)).unwrap(), R::Ok(8168));
+    assert_eq!(dec(&unhex(G_LEGACY_REPLY_BADFEE)).unwrap(), R::Err(E::BadFee { expected_fee: 10_000 }));
+    assert_eq!(dec(&unhex(G_LEGACY_REPLY_INSUFFICIENT)).unwrap(), R::Err(E::InsufficientFunds { balance: 42 }));
+    assert_eq!(dec(&unhex(G_LEGACY_REPLY_DUPLICATE)).unwrap(), R::Err(E::TxDuplicate { duplicate_of: 8168 }));
+    assert_eq!(dec(&unhex(G_LEGACY_REPLY_TOO_OLD)).unwrap(), R::Err(E::TxTooOld { allowed_window_nanos: 86_400_000_000_000 }));
+    assert_eq!(dec(&unhex(G_LEGACY_REPLY_FUTURE)).unwrap(), R::Err(E::TxCreatedInFuture));
+    // truncated bytes must fail loudly, never decode to a wrong-but-plausible outcome
+    assert!(dec(&unhex(G_LEGACY_REPLY_OK)[..20]).is_err());
+    // an ICRC-1 transfer reply is NOT a legacy reply — the tag sets differ, so it must not decode
+    // (this is the guard against pointing the wrong decoder at a reply and reading a wrong outcome)
+    assert!(dec(&unhex(G_TR_BADFEE)).is_err());
+}
+
+#[test]
+fn golden_account_identifier_from_principal() {
+    let id = dpay_icp::AccountIdentifier::from_principal(&to_principal(), &[0u8; 32]);
+    assert_eq!(id.to_text(), G_ACCOUNT_ID_TO_PRINCIPAL, "legacy account-identifier derivation");
+    // Round-trips through the 64-hex text, CRC and all.
+    let parsed = dpay_icp::AccountIdentifier::from_text(G_ACCOUNT_ID_TO_PRINCIPAL).expect("parses");
+    assert_eq!(parsed, id, "account identifier text round-trip");
+    // A different subaccount is a DIFFERENT account identifier (the subaccount is hashed in).
+    let sub = dpay_icp::AccountIdentifier::from_principal(&to_principal(), &[7u8; 32]);
+    assert_ne!(sub, id, "subaccount must change the account identifier");
+}
+
+#[test]
+fn golden_legacy_transfer_arg_minimal() {
+    let to = dpay_icp::AccountIdentifier::from_text(G_ACCOUNT_ID_TO_PRINCIPAL).unwrap();
+    let b = icrc::legacy_transfer_arg(to.as_bytes(), None, 100_000_000, 10_000, 0, None);
+    assert_eq_hex(&b, G_LEGACY_TRANSFER_MINIMAL, "legacy transfer arg (minimal)");
+}
+
+#[test]
+fn golden_legacy_transfer_arg_full() {
+    let to = dpay_icp::AccountIdentifier::from_text(G_ACCOUNT_ID_TO_PRINCIPAL).unwrap();
+    let b = icrc::legacy_transfer_arg(
+        to.as_bytes(),
+        Some([7u8; 32]),
+        100_000_000,
+        10_000,
+        0xAAAA_AAAA_AAAA_AAAA,
+        Some(EXPIRY),
+    );
+    assert_eq_hex(&b, G_LEGACY_TRANSFER_FULL, "legacy transfer arg (all fields set)");
+}
+
 #[test]
 fn golden_transfer_arg_full() {
     let b = icrc::transfer_arg(&acct7(), None, 123_456_789, Some(10_000), Some(vec![0xAA; 8]), Some(EXPIRY));

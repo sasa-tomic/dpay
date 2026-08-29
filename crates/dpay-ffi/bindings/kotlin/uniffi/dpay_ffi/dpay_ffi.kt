@@ -820,6 +820,16 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
+
+
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is 
 // rather `InterfaceTooLargeException`, caused by too many methods 
@@ -843,6 +853,8 @@ fun uniffi_dpay_ffi_checksum_func_format_amount(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_generate_keypair(
 ): Short
+fun uniffi_dpay_ffi_checksum_func_icp_account_id_from_principal(
+): Short
 fun uniffi_dpay_ffi_checksum_func_icp_approve_arg(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_icp_balance_of_arg(
@@ -850,6 +862,8 @@ fun uniffi_dpay_ffi_checksum_func_icp_balance_of_arg(
 fun uniffi_dpay_ffi_checksum_func_icp_decode_eip1559_price(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_icp_decode_int(
+): Short
+fun uniffi_dpay_ffi_checksum_func_icp_decode_legacy_transfer_result(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_icp_decode_minter_ok(
 ): Short
@@ -867,6 +881,8 @@ fun uniffi_dpay_ffi_checksum_func_icp_envelope_request_id(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_icp_ingress_expiry(
 ): Short
+fun uniffi_dpay_ffi_checksum_func_icp_legacy_transfer_arg(
+): Short
 fun uniffi_dpay_ffi_checksum_func_icp_minter_account_arg(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_icp_principal_from_pubkey(
@@ -882,6 +898,10 @@ fun uniffi_dpay_ffi_checksum_func_icp_sign_read_state(
 fun uniffi_dpay_ffi_checksum_func_icp_sign_update(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_icp_transfer_arg(
+): Short
+fun uniffi_dpay_ffi_checksum_func_icp_validate_account_id(
+): Short
+fun uniffi_dpay_ffi_checksum_func_icp_validate_icrc_account(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_icp_validate_principal(
 ): Short
@@ -1038,6 +1058,8 @@ fun uniffi_dpay_ffi_fn_func_format_amount(`raw`: Long,`decimals`: Byte,uniffi_ou
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_generate_keypair(uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_account_id_from_principal(`ownerText`: RustBuffer.ByValue,`subaccountHex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_approve_arg(`spenderOwnerText`: RustBuffer.ByValue,`spenderSubaccountHex`: RustBuffer.ByValue,`fromSubaccountHex`: RustBuffer.ByValue,`amount`: RustBuffer.ByValue,`expectedAllowance`: RustBuffer.ByValue,`expiresAtNs`: RustBuffer.ByValue,`memoHex`: RustBuffer.ByValue,`fee`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_balance_of_arg(`ownerText`: RustBuffer.ByValue,`subaccountHex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1045,6 +1067,8 @@ fun uniffi_dpay_ffi_fn_func_icp_balance_of_arg(`ownerText`: RustBuffer.ByValue,`
 fun uniffi_dpay_ffi_fn_func_icp_decode_eip1559_price(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_decode_int(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_decode_legacy_transfer_result(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_decode_minter_ok(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1062,6 +1086,8 @@ fun uniffi_dpay_ffi_fn_func_icp_envelope_request_id(`envelope`: RustBuffer.ByVal
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_ingress_expiry(`nowNs`: RustBuffer.ByValue,`aheadS`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_legacy_transfer_arg(`toAccountIdHex`: RustBuffer.ByValue,`fromSubaccountHex`: RustBuffer.ByValue,`amountE8s`: RustBuffer.ByValue,`feeE8s`: RustBuffer.ByValue,`memo`: RustBuffer.ByValue,`createdAtTimeNs`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_minter_account_arg(`ownerText`: RustBuffer.ByValue,`subaccountHex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_principal_from_pubkey(`pubkey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1077,6 +1103,10 @@ fun uniffi_dpay_ffi_fn_func_icp_sign_read_state(`secret`: RustBuffer.ByValue,`re
 fun uniffi_dpay_ffi_fn_func_icp_sign_update(`secret`: RustBuffer.ByValue,`canisterText`: RustBuffer.ByValue,`methodName`: RustBuffer.ByValue,`arg`: RustBuffer.ByValue,`ingressExpiryNs`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_transfer_arg(`toOwnerText`: RustBuffer.ByValue,`toSubaccountHex`: RustBuffer.ByValue,`fromSubaccountHex`: RustBuffer.ByValue,`amount`: RustBuffer.ByValue,`fee`: RustBuffer.ByValue,`memoHex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_validate_account_id(`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_validate_icrc_account(`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_validate_principal(`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1238,7 +1268,10 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_dpay_ffi_checksum_func_generate_keypair() != 36207.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_dpay_ffi_checksum_func_icp_approve_arg() != 33903.toShort()) {
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_account_id_from_principal() != 40452.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_approve_arg() != 32600.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_icp_balance_of_arg() != 1118.toShort()) {
@@ -1248,6 +1281,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_icp_decode_int() != 39665.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_decode_legacy_transfer_result() != 19567.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_icp_decode_minter_ok() != 52523.toShort()) {
@@ -1274,6 +1310,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_dpay_ffi_checksum_func_icp_ingress_expiry() != 40958.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_legacy_transfer_arg() != 15723.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_dpay_ffi_checksum_func_icp_minter_account_arg() != 4862.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1296,6 +1335,12 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_icp_transfer_arg() != 12696.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_validate_account_id() != 47706.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_validate_icrc_account() != 12721.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_icp_validate_principal() != 38992.toShort()) {
@@ -2490,6 +2535,43 @@ public object FfiConverterTypeFfiReaderConductor: FfiConverter<FfiReaderConducto
 
 
 /**
+ * The two parts of a parsed ICRC-1 textual account. `subaccount_hex` is EMPTY for the default
+ * (all-zero) subaccount, so the common case round-trips straight into `icp_transfer_arg`'s
+ * `to_subaccount_hex` with no branching at the call site.
+ */
+data class IcpAccountParts (
+    var `owner`: kotlin.String, 
+    var `subaccountHex`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeIcpAccountParts: FfiConverterRustBuffer<IcpAccountParts> {
+    override fun read(buf: ByteBuffer): IcpAccountParts {
+        return IcpAccountParts(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: IcpAccountParts) = (
+            FfiConverterString.allocationSize(value.`owner`) +
+            FfiConverterString.allocationSize(value.`subaccountHex`)
+    )
+
+    override fun write(value: IcpAccountParts, buf: ByteBuffer) {
+            FfiConverterString.write(value.`owner`, buf)
+            FfiConverterString.write(value.`subaccountHex`, buf)
+    }
+}
+
+
+
+/**
  * Decoded `eip_1559_transaction_price` reply — Wei figures as decimal strings.
  */
 data class IcpEip1559Price (
@@ -3561,9 +3643,20 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
     
 
         /**
-         * `icrc2_approve` argument bytes: spender account, allowance amount (absent = revoke/0),
-         * optional expected_allowance/expires_at/memo/from_subaccount/fee.
+         * Derive the legacy account identifier owned by `owner_text` on `subaccount_hex`. The app uses it
+         * for the self-send guard: a user who pastes their OWN exchange-style address must be warned, and
+         * the only way to recognise it is to derive ours and compare (the hash cannot be inverted).
          */
+    @Throws(DpayException::class) fun `icpAccountIdFromPrincipal`(`ownerText`: kotlin.String, `subaccountHex`: kotlin.String?): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_account_id_from_principal(
+        FfiConverterString.lower(`ownerText`),FfiConverterOptionalString.lower(`subaccountHex`),_status)
+}
+    )
+    }
+    
+
     @Throws(DpayException::class) fun `icpApproveArg`(`spenderOwnerText`: kotlin.String, `spenderSubaccountHex`: kotlin.String?, `fromSubaccountHex`: kotlin.String?, `amount`: kotlin.String?, `expectedAllowance`: kotlin.String?, `expiresAtNs`: kotlin.String?, `memoHex`: kotlin.String?, `fee`: kotlin.String?): kotlin.ByteArray {
             return FfiConverterByteArray.lift(
     uniffiRustCallWithError(DpayException) { _status ->
@@ -3604,6 +3697,22 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
             return FfiConverterString.lift(
     uniffiRustCallWithError(DpayException) { _status ->
     UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_decode_int(
+        FfiConverterByteArray.lower(`arg`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Decode the ICP ledger's LEGACY `transfer` reply. Flattens to the SAME `IcpTransferOutcome` the
+         * ICRC-1 decoder produces, so the app's outcome handling is one code path — but the variant tags
+         * are the legacy ledger's own (`TxDuplicate`, `TxTooOld`, `TxCreatedInFuture`), never renamed to
+         * their ICRC-1 near-twins. Callers that branch on idempotent replay must accept BOTH spellings.
+         */
+    @Throws(DpayException::class) fun `icpDecodeLegacyTransferResult`(`arg`: kotlin.ByteArray): IcpTransferOutcome {
+            return FfiConverterTypeIcpTransferOutcome.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_decode_legacy_transfer_result(
         FfiConverterByteArray.lower(`arg`),_status)
 }
     )
@@ -3713,6 +3822,28 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
     
 
         /**
+         * `icrc2_approve` argument bytes: spender account, allowance amount (absent = revoke/0),
+         * optional expected_allowance/expires_at/memo/from_subaccount/fee.
+         * `transfer` argument bytes for the ICP ledger's LEGACY method — the ONLY way to pay a 64-hex
+         * account identifier (see `AccountIdentifier` in `dpay-icp`). ICP-ledger-only; every ck*/ICRC-1
+         * ledger is principal-addressed and has no such method.
+         *
+         * Amounts are decimal strings like every other builder here, but the ledger's `Tokens` is a
+         * `nat64`, so a value above u64::MAX is refused rather than silently truncated. `fee` is
+         * mandatory (the ledger requires exactly 10_000 e8s) and `memo` is a bare u64, NOT the 16-byte
+         * nonce blob the ICRC-1 rail reconciles on.
+         */
+    @Throws(DpayException::class) fun `icpLegacyTransferArg`(`toAccountIdHex`: kotlin.String, `fromSubaccountHex`: kotlin.String?, `amountE8s`: kotlin.String, `feeE8s`: kotlin.String, `memo`: kotlin.String, `createdAtTimeNs`: kotlin.String?): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_legacy_transfer_arg(
+        FfiConverterString.lower(`toAccountIdHex`),FfiConverterOptionalString.lower(`fromSubaccountHex`),FfiConverterString.lower(`amountE8s`),FfiConverterString.lower(`feeE8s`),FfiConverterString.lower(`memo`),FfiConverterOptionalString.lower(`createdAtTimeNs`),_status)
+}
+    )
+    }
+    
+
+        /**
          * ckBTC minter `get_btc_address(MinterAccount)` — ONE record arg (2-tuples trap IC0503).
          */
     @Throws(DpayException::class) fun `icpMinterAccountArg`(`ownerText`: kotlin.String, `subaccountHex`: kotlin.String?): kotlin.ByteArray {
@@ -3816,6 +3947,39 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
     uniffiRustCallWithError(DpayException) { _status ->
     UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_transfer_arg(
         FfiConverterString.lower(`toOwnerText`),FfiConverterOptionalString.lower(`toSubaccountHex`),FfiConverterOptionalString.lower(`fromSubaccountHex`),FfiConverterString.lower(`amount`),FfiConverterOptionalString.lower(`fee`),FfiConverterOptionalString.lower(`memoHex`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Validate a LEGACY 64-hex ICP account identifier and return it canonicalised (lowercase).
+         * A different address namespace from a principal — see `AccountIdentifier` in `dpay-icp` for why
+         * it is reachable only through the ICP ledger's legacy `transfer`. The embedded CRC32 is checked,
+         * so a truncated or mistyped exchange deposit address fails HERE, not on-chain.
+         */
+    @Throws(DpayException::class) fun `icpValidateAccountId`(`text`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_validate_account_id(
+        FfiConverterString.lower(`text`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Validate an ICRC-1 textual ACCOUNT — the bare principal `3nrdb-…-4qe` that every IC wallet's
+         * receive QR carries, or the `principal-checksum.subaccount` form for a non-default subaccount
+         * (ICRC-1 `TextualEncoding.md`, status Accepted). Strictly canonical: the spec's own error
+         * vectors are refused. This is the superset of `icp_validate_principal` that the send-to-address
+         * field parses a scanned or pasted destination with.
+         */
+    @Throws(DpayException::class) fun `icpValidateIcrcAccount`(`text`: kotlin.String): IcpAccountParts {
+            return FfiConverterTypeIcpAccountParts.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_validate_icrc_account(
+        FfiConverterString.lower(`text`),_status)
 }
     )
     }

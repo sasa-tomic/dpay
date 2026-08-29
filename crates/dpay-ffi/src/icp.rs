@@ -46,6 +46,16 @@ fn opt_hex(s: &Option<String>, what: &str) -> Result<Option<Vec<u8>>, DpayError>
     }
 }
 
+fn bytes_to_hex(b: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut s = String::with_capacity(b.len() * 2);
+    for byte in b {
+        s.push(HEX[(byte >> 4) as usize] as char);
+        s.push(HEX[(byte & 0xf) as usize] as char);
+    }
+    s
+}
+
 fn hex_to_bytes(s: &str) -> Result<Vec<u8>, String> {
     if s.len() % 2 != 0 {
         return Err("odd-length hex".into());
@@ -125,6 +135,53 @@ pub fn icp_validate_principal(text: String) -> Result<String, DpayError> {
     Ok(p.to_text())
 }
 
+/// The two parts of a parsed ICRC-1 textual account. `subaccount_hex` is EMPTY for the default
+/// (all-zero) subaccount, so the common case round-trips straight into `icp_transfer_arg`'s
+/// `to_subaccount_hex` with no branching at the call site.
+#[derive(uniffi::Record, Clone)]
+pub struct IcpAccountParts {
+    pub owner: String,
+    pub subaccount_hex: String,
+}
+
+/// Validate an ICRC-1 textual ACCOUNT — the bare principal `3nrdb-…-4qe` that every IC wallet's
+/// receive QR carries, or the `principal-checksum.subaccount` form for a non-default subaccount
+/// (ICRC-1 `TextualEncoding.md`, status Accepted). Strictly canonical: the spec's own error
+/// vectors are refused. This is the superset of `icp_validate_principal` that the send-to-address
+/// field parses a scanned or pasted destination with.
+#[uniffi::export]
+pub fn icp_validate_icrc_account(text: String) -> Result<IcpAccountParts, DpayError> {
+    let a = dpay_icp::Account::from_text(&text)
+        .map_err(|e| DpayError::BadInput(format!("invalid account: {e}")))?;
+    let sub = if a.subaccount == [0u8; 32] { String::new() } else { bytes_to_hex(&a.subaccount) };
+    Ok(IcpAccountParts { owner: a.owner.to_text(), subaccount_hex: sub })
+}
+
+/// Validate a LEGACY 64-hex ICP account identifier and return it canonicalised (lowercase).
+/// A different address namespace from a principal — see `AccountIdentifier` in `dpay-icp` for why
+/// it is reachable only through the ICP ledger's legacy `transfer`. The embedded CRC32 is checked,
+/// so a truncated or mistyped exchange deposit address fails HERE, not on-chain.
+#[uniffi::export]
+pub fn icp_validate_account_id(text: String) -> Result<String, DpayError> {
+    let id = dpay_icp::AccountIdentifier::from_text(&text)
+        .map_err(|e| DpayError::BadInput(format!("invalid account identifier: {e}")))?;
+    Ok(id.to_text())
+}
+
+/// Derive the legacy account identifier owned by `owner_text` on `subaccount_hex`. The app uses it
+/// for the self-send guard: a user who pastes their OWN exchange-style address must be warned, and
+/// the only way to recognise it is to derive ours and compare (the hash cannot be inverted).
+#[uniffi::export]
+pub fn icp_account_id_from_principal(
+    owner_text: String,
+    subaccount_hex: Option<String>,
+) -> Result<String, DpayError> {
+    let owner = Principal::from_text(&owner_text)
+        .map_err(|e| DpayError::BadInput(format!("invalid principal: {e}")))?;
+    let sub = opt_sub32(&subaccount_hex)?.unwrap_or([0u8; 32]);
+    Ok(dpay_icp::AccountIdentifier::from_principal(&owner, &sub).to_text())
+}
+
 /// Ingress expiry stamp: `now_ns + ahead_s * 1e9`, as a decimal-ns string (see module docs on why
 /// strings). The submission window is measured `[now, now+5:30]` on the IC — callers pick
 /// `ahead_s` in 240–300 s.
@@ -163,6 +220,37 @@ pub fn icp_transfer_arg(
 
 /// `icrc2_approve` argument bytes: spender account, allowance amount (absent = revoke/0),
 /// optional expected_allowance/expires_at/memo/from_subaccount/fee.
+/// `transfer` argument bytes for the ICP ledger's LEGACY method — the ONLY way to pay a 64-hex
+/// account identifier (see `AccountIdentifier` in `dpay-icp`). ICP-ledger-only; every ck*/ICRC-1
+/// ledger is principal-addressed and has no such method.
+///
+/// Amounts are decimal strings like every other builder here, but the ledger's `Tokens` is a
+/// `nat64`, so a value above u64::MAX is refused rather than silently truncated. `fee` is
+/// mandatory (the ledger requires exactly 10_000 e8s) and `memo` is a bare u64, NOT the 16-byte
+/// nonce blob the ICRC-1 rail reconciles on.
+#[uniffi::export]
+pub fn icp_legacy_transfer_arg(
+    to_account_id_hex: String,
+    from_subaccount_hex: Option<String>,
+    amount_e8s: String,
+    fee_e8s: String,
+    memo: String,
+    created_at_time_ns: Option<String>,
+) -> Result<Vec<u8>, DpayError> {
+    let to = dpay_icp::AccountIdentifier::from_text(&to_account_id_hex)
+        .map_err(|e| DpayError::BadInput(format!("invalid account identifier: {e}")))?;
+    let from_sub = opt_sub32(&from_subaccount_hex)?;
+    let amount = u64_str(&amount_e8s, "amount_e8s")?;
+    let fee = u64_str(&fee_e8s, "fee_e8s")?;
+    let memo = u64_str(&memo, "memo")?;
+    let created = match created_at_time_ns {
+        None => None,
+        Some(ref s) if s.is_empty() => None,
+        Some(ref s) => Some(u64_str(s, "created_at_time_ns")?),
+    };
+    Ok(dpay_icp::icrc::legacy_transfer_arg(to.as_bytes(), from_sub, amount, fee, memo, created))
+}
+
 #[uniffi::export]
 pub fn icp_approve_arg(
     spender_owner_text: String,
@@ -480,6 +568,33 @@ pub fn icp_decode_transfer_result(arg: Vec<u8>) -> Result<IcpTransferOutcome, Dp
     }
 }
 
+/// Decode the ICP ledger's LEGACY `transfer` reply. Flattens to the SAME `IcpTransferOutcome` the
+/// ICRC-1 decoder produces, so the app's outcome handling is one code path — but the variant tags
+/// are the legacy ledger's own (`TxDuplicate`, `TxTooOld`, `TxCreatedInFuture`), never renamed to
+/// their ICRC-1 near-twins. Callers that branch on idempotent replay must accept BOTH spellings.
+#[uniffi::export]
+pub fn icp_decode_legacy_transfer_result(arg: Vec<u8>) -> Result<IcpTransferOutcome, DpayError> {
+    use dpay_icp::icrc::{LegacyTransferError as E, LegacyTransferResult as R};
+    match dpay_icp::icrc::decode_legacy_transfer_result(&arg).map_err(bad)? {
+        R::Ok(idx) => Ok(IcpTransferOutcome {
+            ok: true,
+            block_index: Some(idx.to_string()),
+            err_variant: String::new(),
+            err_detail: String::new(),
+        }),
+        R::Err(e) => {
+            let (variant, detail) = match e {
+                E::TxTooOld { allowed_window_nanos } => ("TxTooOld", format!("allowed window {allowed_window_nanos} ns")),
+                E::BadFee { expected_fee } => ("BadFee", format!("expected fee {expected_fee}")),
+                E::TxDuplicate { duplicate_of } => ("TxDuplicate", format!("duplicate of block {duplicate_of}")),
+                E::TxCreatedInFuture => ("TxCreatedInFuture", "created ahead of ledger time".into()),
+                E::InsufficientFunds { balance } => ("InsufficientFunds", format!("balance {balance}")),
+            };
+            Ok(IcpTransferOutcome { ok: false, block_index: None, err_variant: variant.into(), err_detail: detail })
+        }
+    }
+}
+
 /// Decode the minter retrieve/withdraw Ok({block_index}) reply (single source `dpay-icp`
 /// `decode_minter_ok` — the same bytes the e2e fake-IC gateway emits via `encode_minter_ok`).
 /// Mirrors the wasm `w_icp_decode_minter_ok` export; the Err side reuses the transfer-error
@@ -639,6 +754,72 @@ mod tests {
         // Correct payload, non-canonical grouping (dashes moved) — refused, so one principal has
         // exactly one spelling.
         assert!(icp_validate_principal("ryjl3tyaaa-aaaaa-aaaba-cai".into()).is_err());
+    }
+
+    /// The send-to-address destination parser. `icp_validate_principal` covers the bare-principal
+    /// case; this covers what it CANNOT express — a subaccount — plus the empty-string contract
+    /// that lets the default case feed straight into `icp_transfer_arg`.
+    #[test]
+    fn validate_icrc_account_carries_the_subaccount() {
+        const OWNER: &str = "k2t6j-2nvnp-4zjm3-25dtz-6xhaa-c7boj-5gayf-oj3xs-i43lp-teztq-6ae";
+        // Default subaccount ⇒ EMPTY hex, so callers pass it through without branching.
+        let parts = icp_validate_icrc_account(OWNER.into()).unwrap();
+        assert_eq!(parts.owner, OWNER);
+        assert_eq!(parts.subaccount_hex, "");
+        // Non-default subaccount ⇒ the FULL 32-byte hex, left-padded from the compressed form.
+        let parts = icp_validate_icrc_account(format!("{OWNER}-6cc627i.1")).unwrap();
+        assert_eq!(parts.owner, OWNER);
+        assert_eq!(parts.subaccount_hex, "0000000000000000000000000000000000000000000000000000000000000001");
+        // A wrong checksum is refused — that is the whole point of the checksum.
+        assert!(icp_validate_icrc_account(format!("{OWNER}-6cc627a.1")).is_err());
+        // The founder's real Oisy VCHF address parses as a plain owner.
+        let oisy = "3nrdb-dxqqw-mc4gr-fbwxc-ynsdh-2e72e-urieh-mx52v-moiye-hff4l-4qe";
+        assert_eq!(icp_validate_icrc_account(oisy.into()).unwrap().owner, oisy);
+    }
+
+    /// The legacy 64-hex namespace: CRC-checked, and provably disjoint from the principal one.
+    #[test]
+    fn validate_account_id_and_derivation() {
+        let mine = icp_self_principal(SEED_A.to_vec()).unwrap();
+        let id = icp_account_id_from_principal(mine.clone(), None).unwrap();
+        assert_eq!(id.len(), 64);
+        assert_eq!(icp_validate_account_id(id.clone()).unwrap(), id);
+        assert_eq!(icp_validate_account_id(id.to_uppercase()).unwrap(), id, "case normalised");
+        // A subaccount yields a DIFFERENT identifier (it is hashed in, not appended).
+        let sub = icp_account_id_from_principal(mine.clone(), Some("01".repeat(32))).unwrap();
+        assert_ne!(sub, id);
+        // The two address namespaces never overlap: neither parses as the other.
+        assert!(icp_validate_account_id(mine.clone()).is_err());
+        assert!(icp_validate_principal(id.clone()).is_err());
+        // Truncation / a flipped nibble / junk all fail the CRC.
+        assert!(icp_validate_account_id(id[..63].to_string()).is_err());
+        assert!(icp_validate_account_id(format!("{}ff", &id[..62])).is_err());
+        assert!(icp_validate_account_id(String::new()).is_err());
+    }
+
+    /// The legacy `transfer` arg + reply pair, end to end across the bridge.
+    #[test]
+    fn legacy_transfer_arg_and_reply_round_trip() {
+        let mine = icp_self_principal(SEED_A.to_vec()).unwrap();
+        let to = icp_account_id_from_principal(mine, None).unwrap();
+        let arg = icp_legacy_transfer_arg(to.clone(), None, "100000000".into(), "10000".into(), "0".into(), None).unwrap();
+        // Decodes back through the shared dpay-icp encoder/decoder pair.
+        assert!(!arg.is_empty());
+        // A destination that is not a valid account identifier never produces bytes.
+        assert!(icp_legacy_transfer_arg("nope".into(), None, "1".into(), "10000".into(), "0".into(), None).is_err());
+        // Tokens is nat64: a value above u64::MAX is REFUSED, never silently truncated.
+        assert!(icp_legacy_transfer_arg(to.clone(), None, "18446744073709551616".into(), "10000".into(), "0".into(), None).is_err());
+        // Reply decoding keeps the LEGACY variant spelling (TxDuplicate, not Duplicate).
+        let dup = unhex("4449444c076c01a7a5f3cc0e786c01e0a9b302786c01bf9bb7f00d016c018bbdf29b01786c019cbab69c02016b05b79eb35d00a1c3ebfd0702c7c6b5f60a03cce5b6900f7feb9cdbd50f046b02bc8a0178c5fed2010501060102e81f000000000000");
+        let out = icp_decode_legacy_transfer_result(dup).unwrap();
+        assert!(!out.ok);
+        assert_eq!(out.err_variant, "TxDuplicate");
+        assert!(out.err_detail.contains("8168"));
+        // And the Ok side yields the block index.
+        let ok = unhex("4449444c076c01a7a5f3cc0e786c01e0a9b302786c01bf9bb7f00d016c018bbdf29b01786c019cbab69c02016b05b79eb35d00a1c3ebfd0702c7c6b5f60a03cce5b6900f7feb9cdbd50f046b02bc8a0178c5fed20105010600e81f000000000000");
+        let out = icp_decode_legacy_transfer_result(ok).unwrap();
+        assert!(out.ok);
+        assert_eq!(out.block_index.as_deref(), Some("8168"));
     }
 
     #[test]

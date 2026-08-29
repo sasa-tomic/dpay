@@ -17,7 +17,7 @@ pub mod reply;
 pub mod request_id;
 
 pub use envelope::{ingress_expiry, sign_query, sign_read_state, sign_update, CallRequest};
-pub use principal::{Account, Principal};
+pub use principal::{Account, AccountIdentifier, Principal};
 pub use request_id::{request_id, RidValue};
 
 /// Everything that can go wrong on this rail. Hand-rolled Display/Error (no thiserror —

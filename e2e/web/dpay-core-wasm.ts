@@ -91,6 +91,11 @@ type WasmExports = WebAssembly.Exports & {
   w_icp_self_principal(seedPtr: number, outPtr: number, cap: number): number;
   w_icp_principal_from_pubkey(ptr: number, len: number, outPtr: number, cap: number): number;
   w_icp_validate_principal(ptr: number, len: number, outPtr: number, cap: number): number;
+  w_icp_validate_icrc_account(ptr: number, len: number, outPtr: number, cap: number): number;
+  w_icp_validate_account_id(ptr: number, len: number, outPtr: number, cap: number): number;
+  w_icp_account_id_from_principal(ownerPtr: number, ownerLen: number, subPtr: number, subLen: number, outPtr: number, cap: number): number;
+  w_icp_legacy_transfer_arg(toPtr: number, toLen: number, fromSubPtr: number, fromSubLen: number, amountPtr: number, amountLen: number, feePtr: number, feeLen: number, memoPtr: number, memoLen: number, outPtr: number, cap: number): number;
+  w_icp_decode_legacy_transfer_result(argPtr: number, argLen: number, outPtr: number, cap: number): number;
   w_icp_ingress_expiry(nowPtr: number, nowLen: number, aheadS: number, outPtr: number, cap: number): number;
   w_icp_transfer_arg(toOwnerPtr: number, toOwnerLen: number, toSubPtr: number, toSubLen: number, fromSubPtr: number, fromSubLen: number, amountPtr: number, amountLen: number, feePtr: number, feeLen: number, memoPtr: number, memoLen: number, outPtr: number, cap: number): number;
   w_icp_approve_arg(spenderOwnerPtr: number, spenderOwnerLen: number, spenderSubPtr: number, spenderSubLen: number, fromSubPtr: number, fromSubLen: number, amountPtr: number, amountLen: number, expectedPtr: number, expectedLen: number, expiresPtr: number, expiresLen: number, memoPtr: number, memoLen: number, feePtr: number, feeLen: number, outPtr: number, cap: number): number;
@@ -407,6 +412,67 @@ async function icpValidatePrincipal(text: string): Promise<string> {
   return readStr(ex, out, len);
 }
 
+/** Parse a send-to-address destination as an ICRC-1 textual ACCOUNT — the bare principal every IC
+ *  wallet's receive QR carries, or `principal-checksum.subaccount`. `subaccountHex` is EMPTY for
+ *  the default subaccount, so it feeds straight into icpTransferArg. Throws on anything the core
+ *  refuses (bad CRC, bad checksum, non-canonical) — never a partial "address". */
+async function icpValidateIcrcAccount(text: string): Promise<{owner: string; subaccountHex: string}> {
+  const ex = await core();
+  const [p, len0] = putStr(ex, text);
+  const out = outBuf(ex, ICP_JSON_CAP, 'icp_validate_icrc_account');
+  const len = ex.w_icp_validate_icrc_account(p, len0, out, ICP_JSON_CAP);
+  return jsonOut(ex, len, out, 'icp_validate_icrc_account') as {owner: string; subaccountHex: string};
+}
+
+/** Validate a LEGACY 64-hex ICP account identifier (CRC-checked), returning canonical lowercase. */
+async function icpValidateAccountId(text: string): Promise<string> {
+  const ex = await core();
+  const [p, len0] = putStr(ex, text);
+  const out = outBuf(ex, 128, 'icp_validate_account_id');
+  const len = ex.w_icp_validate_account_id(p, len0, out, 128);
+  if (len <= 3) throw new Error('DpayCore wasm: icp_validate_account_id failed');
+  return readStr(ex, out, len);
+}
+
+/** Derive the legacy account identifier owned by `ownerText` on `subaccountHex` (the self-send guard). */
+async function icpAccountIdFromPrincipal(ownerText: string, subaccountHex: string): Promise<string> {
+  const ex = await core();
+  const owner = putStr(ex, ownerText);
+  const sub = putStr(ex, subaccountHex);
+  const out = outBuf(ex, 128, 'icp_account_id_from_principal');
+  const len = ex.w_icp_account_id_from_principal(owner[0], owner[1], sub[0], sub[1], out, 128);
+  if (len <= 3) throw new Error('DpayCore wasm: icp_account_id_from_principal failed');
+  return readStr(ex, out, len);
+}
+
+/** DIDL args for the ICP ledger's LEGACY `transfer` (the only method that reaches a 64-hex
+ *  account identifier). Amounts/fee/memo are decimal strings; `Tokens` is nat64, so out-of-range
+ *  is refused by the core rather than truncated. */
+async function icpLegacyTransferArg(
+  toAccountIdHex: string, fromSubaccountHex: string, amountE8s: string, feeE8s: string, memo: string,
+): Promise<string> {
+  const ex = await core();
+  const to = putStr(ex, toAccountIdHex);
+  const fromSub = putStr(ex, fromSubaccountHex);
+  const amount = putStr(ex, amountE8s);
+  const fee = putStr(ex, feeE8s);
+  const memoP = putStr(ex, memo);
+  const out = outBuf(ex, ICP_ENV_CAP, 'icp_legacy_transfer_arg');
+  const len = ex.w_icp_legacy_transfer_arg(to[0], to[1], fromSub[0], fromSub[1], amount[0], amount[1], fee[0], fee[1], memoP[0], memoP[1], out, ICP_ENV_CAP);
+  return binOutHex(ex, len, out, 'icp_legacy_transfer_arg');
+}
+
+/** The legacy `transfer` reply — same outcome shape as icpDecodeTransferResult, but carrying the
+ *  LEGACY variant tags (TxDuplicate / TxTooOld / TxCreatedInFuture). */
+async function icpDecodeLegacyTransferResult(argHex: string): Promise<IcpTransferOutcomeOut> {
+  const ex = await core();
+  const arg = hex(argHex);
+  const argP = put(ex, arg);
+  const out = outBuf(ex, ICP_JSON_CAP, 'icp_decode_legacy_transfer_result');
+  const len = ex.w_icp_decode_legacy_transfer_result(argP, arg.length, out, ICP_JSON_CAP);
+  return jsonOut(ex, len, out, 'icp_decode_legacy_transfer_result') as IcpTransferOutcomeOut;
+}
+
 async function icpIngressExpiry(nowNs: string, aheadS: number): Promise<string> {
   const ex = await core();
   const [nowP, nowLen] = putStr(ex, nowNs);
@@ -698,5 +764,10 @@ export const DpayCore = {
   icpDecodeTransferResult,
   icpDecodeMinterOk,
   icpDecodeInt,
+  icpValidateIcrcAccount,
+  icpValidateAccountId,
+  icpAccountIdFromPrincipal,
+  icpLegacyTransferArg,
+  icpDecodeLegacyTransferResult,
 };
 export type DpayCoreShim = typeof DpayCore;

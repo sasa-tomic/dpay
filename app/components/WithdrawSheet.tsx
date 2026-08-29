@@ -157,7 +157,7 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
         const gas = await fetchGasFeeWei(identity.secretHex, minter, ledger);
         if (gas == null) throw new Error(M.withdraw.ic.gasFeeErr);
         steps = await prepareErc20Withdrawal(identity.secretHex, ledger, gasLedger, minter, dest, raw, gas);
-      } else {
+      } else if (family === 'CkEthErc20') {
         // Native ETH: passes the ckETH AMOUNT ledger as the eip_1559_transaction_price arg.
         // Semantically the minter wants None here (facade-era kernel sent None), but MEASURED LIVE
         // 2026-08-20 the mainnet minter TOLERATES an unregistered ledger and returns the identical
@@ -167,6 +167,11 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
         const gas = await fetchGasFeeWei(identity.secretHex, minter, ledger);
         if (gas == null) throw new Error(M.withdraw.ic.gasFeeErr);
         steps = await prepareEthWithdrawal(identity.secretHex, ledger, minter, dest, raw, gas);
+      } else {
+        // FAIL CLOSED on an unrecognised family. This branch used to be the native-ETH `else`,
+        // which meant any future family reaching this sheet would have burned ckETH against an
+        // unrelated asset. A minter family this sheet does not implement gets no envelope at all.
+        throw new Error(M.withdraw.ic.noRail);
       }
       // Retain the prepared steps BEFORE the first submission so every subsequent retry (or an app
       // restart) resumes these exact bytes instead of re-signing.

@@ -336,6 +336,10 @@ for (const c of CASES) {
     'w_icp_sign_update', 'w_icp_sign_query', 'w_icp_sign_read_state',
     'w_icp_envelope_request_id', 'w_icp_decode_query', 'w_icp_decode_read_state',
     'w_icp_decode_transfer_result', 'w_icp_decode_minter_ok', 'w_icp_decode_int',
+    // Send-to-address destination parsing + the ICP-ledger-only legacy `transfer` path (the only
+    // way to pay a 64-hex account identifier — see AccountIdentifier in crates/dpay-icp).
+    'w_icp_validate_icrc_account', 'w_icp_validate_account_id', 'w_icp_account_id_from_principal',
+    'w_icp_legacy_transfer_arg', 'w_icp_decode_legacy_transfer_result',
   ];
   for (const name of PINNED_ICP_EXPORTS) {
     check(`icp export present: ${name}`, typeof ex[name] === 'function',

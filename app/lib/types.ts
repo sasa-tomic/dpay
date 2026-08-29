@@ -107,6 +107,18 @@ export type DpayCoreApi = {
   // mistyped/truncated principal (the failure mode of a payment link forwarded through chat)
   // before the payer is shown a destination.
   icpValidatePrincipal(text: string): Promise<string>;
+  // Send-to-address destination parsing. `icpValidateIcrcAccount` is the superset of
+  // `icpValidatePrincipal`: it also accepts the ICRC-1 `principal-checksum.subaccount` textual
+  // form (spec-canonical only), resolving `{owner, subaccountHex}` where subaccountHex is "" for
+  // the default subaccount — so the common case feeds straight into icpTransferArg.
+  icpValidateIcrcAccount(text: string): Promise<IcpAccountParts>;
+  // The LEGACY 64-hex ICP account-identifier namespace (what exchanges hand out). Disjoint from
+  // principals — a one-way hash of the owner, so it is reachable ONLY via the ICP ledger's legacy
+  // `transfer`, never via icrc1_transfer. CRC-checked; canonical lowercase out.
+  icpValidateAccountId(text: string): Promise<string>;
+  icpAccountIdFromPrincipal(ownerText: string, subaccountHex: string): Promise<string>;
+  icpLegacyTransferArg(toAccountIdHex: string, fromSubaccountHex: string, amountE8s: string, feeE8s: string, memo: string): Promise<string>;
+  icpDecodeLegacyTransferResult(argHex: string): Promise<IcpTransferOutcome>;
   icpIngressExpiry(nowNs: string, aheadS: number): Promise<string>;
   icpTransferArg(toOwnerText: string, toSubaccountHex: string, fromSubaccountHex: string, amount: string, fee: string, memoHex: string): Promise<string>;
   icpApproveArg(spenderOwnerText: string, spenderSubaccountHex: string, fromSubaccountHex: string, amount: string, expectedAllowance: string, expiresAtNs: string, memoHex: string, fee: string): Promise<string>;
@@ -158,6 +170,10 @@ export type IcpStateRead = { timeNs?: string; statuses: IcpRequestStatusOut[] };
 
 /** icpDecodeTransferResult outcome: ok carries the block index; err carries variant + detail. */
 export type IcpTransferOutcome = { ok: boolean; blockIndex?: string; errVariant?: string; errDetail?: string };
+
+/** A parsed ICRC-1 textual account. `subaccountHex` is "" for the default (all-zero) subaccount,
+ *  so it passes straight into `icpTransferArg`'s `toSubaccountHex` with no branching. */
+export type IcpAccountParts = { owner: string; subaccountHex: string };
 
 export type IcpEip1559PriceOut = {
   gasLimit: string;

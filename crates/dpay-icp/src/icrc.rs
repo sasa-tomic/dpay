@@ -29,6 +29,20 @@ const APPROVE_PREFIX: [u8; 78] = [
     0x6e, 0x78, 0x6c, 0x02, 0xb3, 0xb0, 0xda, 0xc3, 0x03, 0x68, 0xad, 0x86,
     0xca, 0x83, 0x05, 0x02, 0x01, 0x00,
 ];
+// ICP ledger LEGACY TransferArgs (method `transfer`, NOT `icrc1_transfer`):
+//   rec{to: vec nat8, fee: rec{e8s:nat64}, memo: nat64, from_subaccount: opt vec nat8,
+//       created_at_time: opt rec{timestamp_nanos:nat64}, amount: rec{e8s:nat64}}
+// Type table (6 entries): T0=vec nat8, T1=Tokens, T2=opt T0, T3=TimeStamp, T4=opt T3, T5=the record.
+// Golden-generated from the ICP ledger's OWN published IDL (`ledger.idl.js` TransferArgs) through
+// the production @dfinity/candid encoder; see tests/goldens.rs G_LEGACY_TRANSFER_*.
+const LEGACY_TRANSFER_PREFIX: [u8; 63] = [
+    0x44, 0x49, 0x44, 0x4c, 0x06, 0x6d, 0x7b, 0x6c, 0x01, 0xe0, 0xa9, 0xb3,
+    0x02, 0x78, 0x6e, 0x00, 0x6c, 0x01, 0xd6, 0xf6, 0x8e, 0x80, 0x01, 0x78,
+    0x6e, 0x03, 0x6c, 0x06, 0xfb, 0xca, 0x01, 0x00, 0xc6, 0xfc, 0xb6, 0x02,
+    0x01, 0xba, 0x89, 0xe5, 0xc2, 0x04, 0x78, 0xa2, 0xde, 0x94, 0xeb, 0x06,
+    0x02, 0x82, 0xf3, 0xf3, 0x91, 0x0c, 0x04, 0xd8, 0xa3, 0x8c, 0xa8, 0x0d,
+    0x01, 0x01, 0x05,
+];
 // Account: rec{owner:principal, subaccount:opt vec nat8}
 const ACCOUNT_PREFIX: [u8; 25] = [
     0x44, 0x49, 0x44, 0x4c, 0x03, 0x6c, 0x02, 0xb3, 0xb0, 0xda, 0xc3, 0x03,
@@ -86,6 +100,11 @@ fn put_opt_nat(out: &mut Vec<u8>, v: Option<u128>) {
     }
 }
 
+/// bare nat64: fixed 8-byte little-endian (candid's fixed-width encoding, not uleb).
+fn put_nat64(out: &mut Vec<u8>, v: u64) {
+    out.extend_from_slice(&v.to_le_bytes());
+}
+
 fn put_opt_nat64(out: &mut Vec<u8>, v: Option<u64>) {
     match v {
         None => out.push(0x00),
@@ -123,6 +142,42 @@ pub fn transfer_arg(
     put_opt_blob(&mut out, from_subaccount.as_ref().map(|s| &s[..])); // from_subaccount (0x6d652f22)
     put_opt_nat64(&mut out, created_at_time_ns); // created_at_time (0xc23cf982)
     put_uleb(&mut out, amount); // amount (0xd50311d8)
+    out
+}
+
+/// `transfer` argument bytes for the ICP ledger's LEGACY method (POST `call`, method `transfer`).
+///
+/// This is NOT `icrc1_transfer`. It exists only on the ICP ledger (`ryjl3-tyaaa-aaaaa-aaaba-cai`)
+/// and is the only way to pay a 64-hex ACCOUNT IDENTIFIER, which is a one-way hash of the owner
+/// and therefore cannot be expressed as the `Account { owner : principal; … }` that
+/// `icrc1_transfer` takes. Every other ledger we speak to (ck*, VCHF) is principal-addressed only
+/// and has no such method.
+///
+/// Shape differences from `transfer_arg` that callers must respect:
+///   • `to` is 32 RAW BYTES (the account identifier), not an Account record
+///   • amounts are `Tokens { e8s : nat64 }`, so u64 — not the unbounded `nat` of ICRC-1
+///   • `fee` is MANDATORY and the ledger requires exactly 10_000 e8s
+///   • `memo` is a bare `nat64`, NOT the 32-byte blob ICRC-1 carries. The rail's reconciliation
+///     key is a 16-byte nonce, which does not fit — see the caller for how an outgoing legacy
+///     transfer is reconciled instead.
+pub fn legacy_transfer_arg(
+    to_account_id: &[u8; 32],
+    from_subaccount: Option<[u8; 32]>,
+    amount_e8s: u64,
+    fee_e8s: u64,
+    memo: u64,
+    created_at_time_ns: Option<u64>,
+) -> Vec<u8> {
+    let mut out = LEGACY_TRANSFER_PREFIX.to_vec();
+    // Value order follows the type table (candid label-hash order), NOT the .did source order:
+    // to < fee < memo < from_subaccount < created_at_time < amount.
+    put_uleb(&mut out, to_account_id.len() as u128); // to (0x01cafb) — vec nat8
+    out.extend_from_slice(to_account_id);
+    put_nat64(&mut out, fee_e8s); // fee (0x02b6fcc6) — Tokens{e8s}
+    put_nat64(&mut out, memo); // memo (0x04c2e589ba) — bare nat64
+    put_opt_blob(&mut out, from_subaccount.as_ref().map(|s| &s[..])); // from_subaccount (0x06eb94dea2)
+    put_opt_nat64(&mut out, created_at_time_ns); // created_at_time (0x0c91f3f382) — opt TimeStamp{timestamp_nanos}
+    put_nat64(&mut out, amount_e8s); // amount (0x0da88ca3d8) — Tokens{e8s}
     out
 }
 
@@ -1199,6 +1254,84 @@ fn num_field(rd: &mut Rd, fs: &[(u32, Ty)], what: &str) -> Result<u128, IcpError
         Ty::Prim(-8) => Ok(u128::from(rd.nat64()?)),
         _ => Err(IcpError::DidlType(format!("unexpected {what} field type"))),
     }
+}
+
+/// The ICP ledger's LEGACY `transfer` error variant — a DIFFERENT set of tags from ICRC-1's
+/// `TransferError` (`TxTooOld`/`TxDuplicate`/`TxCreatedInFuture` vs `TooOld`/`Duplicate`/
+/// `CreatedInFuture`), and amounts are `Tokens{e8s}` u64 rather than unbounded `nat`. Kept as its
+/// own type rather than mapped onto `TransferError`: `TxCreatedInFuture` carries NO payload where
+/// the ICRC-1 twin carries a ledger time, so any mapping would have to invent a value.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum LegacyTransferError {
+    TxTooOld { allowed_window_nanos: u64 },
+    BadFee { expected_fee: u64 },
+    TxDuplicate { duplicate_of: u64 },
+    TxCreatedInFuture,
+    InsufficientFunds { balance: u64 },
+}
+
+/// `variant { Ok : nat64; Err : TransferError }` as replied by the ICP ledger's legacy `transfer`.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum LegacyTransferResult {
+    Ok(u64),
+    Err(LegacyTransferError),
+}
+
+/// Read a single-`nat64` payload record, checking the declared shape so a malformed reply fails
+/// loudly instead of silently mis-reading the next 8 bytes. `depth` is how many nested
+/// single-field records wrap the value (`Tokens{e8s}` inside `BadFee{expected_fee}` ⇒ 2).
+fn legacy_u64_payload(rd: &mut Rd, payload: &Ty, depth: usize, what: &str) -> Result<u64, IcpError> {
+    let mut ty = payload;
+    for _ in 0..depth {
+        let Ty::Rec(fs) = ty else {
+            return Err(IcpError::DidlType(format!("{what} payload must be a record")));
+        };
+        if fs.len() != 1 {
+            return Err(IcpError::DidlType(format!("{what} payload must have exactly one field")));
+        }
+        ty = &fs[0].1;
+    }
+    rd.nat64()
+}
+
+/// Decode the legacy `transfer` reply. Same reader as `decode_transfer_result`; the tags and the
+/// numeric widths are what differ.
+pub fn decode_legacy_transfer_result(bytes: &[u8]) -> Result<LegacyTransferResult, IcpError> {
+    let mut rd = Rd { b: bytes, i: 0 };
+    let (_, _, arg0) = rd.message()?;
+    let outer = bare_variant(&arg0)?;
+    let (label, payload) = rd.variant(outer)?;
+    let result = match label {
+        l if l == idl_hash("Ok") => LegacyTransferResult::Ok(rd.nat64()?),
+        l if l == idl_hash("Err") => {
+            let Ty::Var(inner) = payload else {
+                return Err(IcpError::DidlType("Err payload must be a variant".into()));
+            };
+            let (elabel, epayload) = rd.variant(&inner)?;
+            let e = match elabel {
+                // `TxCreatedInFuture` is a unit variant — null payload, no wire bytes.
+                l if l == idl_hash("TxCreatedInFuture") => LegacyTransferError::TxCreatedInFuture,
+                l if l == idl_hash("TxTooOld") => LegacyTransferError::TxTooOld {
+                    allowed_window_nanos: legacy_u64_payload(&mut rd, &epayload, 1, "TxTooOld")?,
+                },
+                l if l == idl_hash("TxDuplicate") => LegacyTransferError::TxDuplicate {
+                    duplicate_of: legacy_u64_payload(&mut rd, &epayload, 1, "TxDuplicate")?,
+                },
+                // These two wrap `Tokens { e8s : nat64 }`, so the value sits two records deep.
+                l if l == idl_hash("BadFee") => LegacyTransferError::BadFee {
+                    expected_fee: legacy_u64_payload(&mut rd, &epayload, 2, "BadFee")?,
+                },
+                l if l == idl_hash("InsufficientFunds") => LegacyTransferError::InsufficientFunds {
+                    balance: legacy_u64_payload(&mut rd, &epayload, 2, "InsufficientFunds")?,
+                },
+                l => return Err(IcpError::DidlType(format!("unknown legacy TransferError label {l:#x}"))),
+            };
+            LegacyTransferResult::Err(e)
+        }
+        l => return Err(IcpError::DidlType(format!("unknown legacy TransferResult label {l:#x}"))),
+    };
+    rd.finish()?;
+    Ok(result)
 }
 
 fn transfer_error(rd: &mut Rd, label: u32, payload: &Ty) -> Result<TransferError, IcpError> {

@@ -468,13 +468,17 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_generate_keypair() != 36207:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_dpay_ffi_checksum_func_icp_approve_arg() != 33903:
+    if lib.uniffi_dpay_ffi_checksum_func_icp_account_id_from_principal() != 40452:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_approve_arg() != 32600:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_balance_of_arg() != 1118:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_decode_eip1559_price() != 39786:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_decode_int() != 39665:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_decode_legacy_transfer_result() != 19567:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_decode_minter_ok() != 52523:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -492,6 +496,8 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_ingress_expiry() != 40958:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_legacy_transfer_arg() != 15723:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_minter_account_arg() != 4862:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_principal_from_pubkey() != 61592:
@@ -507,6 +513,10 @@ def _uniffi_check_api_checksums(lib):
     if lib.uniffi_dpay_ffi_checksum_func_icp_sign_update() != 3984:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_transfer_arg() != 12696:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_validate_account_id() != 47706:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_validate_icrc_account() != 12721:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_validate_principal() != 38992:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -806,6 +816,12 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_generate_keypair.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_generate_keypair.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_account_id_from_principal.argtypes = (
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_account_id_from_principal.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_approve_arg.argtypes = (
     _UniffiRustBuffer,
     _UniffiRustBuffer,
@@ -834,6 +850,11 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_int.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_int.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_legacy_transfer_result.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_legacy_transfer_result.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_minter_ok.argtypes = (
     _UniffiRustBuffer,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -876,6 +897,16 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_icp_ingress_expiry.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_ingress_expiry.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_legacy_transfer_arg.argtypes = (
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_legacy_transfer_arg.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_minter_account_arg.argtypes = (
     _UniffiRustBuffer,
     _UniffiRustBuffer,
@@ -935,6 +966,16 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_icp_transfer_arg.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_transfer_arg.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_validate_account_id.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_validate_account_id.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_validate_icrc_account.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_validate_icrc_account.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_validate_principal.argtypes = (
     _UniffiRustBuffer,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -1286,6 +1327,9 @@ _UniffiLib.uniffi_dpay_ffi_checksum_func_format_amount.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_generate_keypair.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_generate_keypair.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_account_id_from_principal.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_account_id_from_principal.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_approve_arg.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_approve_arg.restype = ctypes.c_uint16
@@ -1298,6 +1342,9 @@ _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_eip1559_price.restype = ctyp
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_int.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_int.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_legacy_transfer_result.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_legacy_transfer_result.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_minter_ok.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_minter_ok.restype = ctypes.c_uint16
@@ -1322,6 +1369,9 @@ _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_envelope_request_id.restype = ctype
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_ingress_expiry.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_ingress_expiry.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_legacy_transfer_arg.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_legacy_transfer_arg.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_minter_account_arg.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_minter_account_arg.restype = ctypes.c_uint16
@@ -1346,6 +1396,12 @@ _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_sign_update.restype = ctypes.c_uint
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_transfer_arg.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_transfer_arg.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_validate_account_id.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_validate_account_id.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_validate_icrc_account.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_validate_icrc_account.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_validate_principal.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_validate_principal.restype = ctypes.c_uint16
@@ -1555,6 +1611,48 @@ class _UniffiConverterBytes(_UniffiConverterRustBuffer):
 
 
 
+
+
+class IcpAccountParts:
+    """
+    The two parts of a parsed ICRC-1 textual account. `subaccount_hex` is EMPTY for the default
+    (all-zero) subaccount, so the common case round-trips straight into `icp_transfer_arg`'s
+    `to_subaccount_hex` with no branching at the call site.
+    """
+
+    owner: "str"
+    subaccount_hex: "str"
+    def __init__(self, *, owner: "str", subaccount_hex: "str"):
+        self.owner = owner
+        self.subaccount_hex = subaccount_hex
+
+    def __str__(self):
+        return "IcpAccountParts(owner={}, subaccount_hex={})".format(self.owner, self.subaccount_hex)
+
+    def __eq__(self, other):
+        if self.owner != other.owner:
+            return False
+        if self.subaccount_hex != other.subaccount_hex:
+            return False
+        return True
+
+class _UniffiConverterTypeIcpAccountParts(_UniffiConverterRustBuffer):
+    @staticmethod
+    def read(buf):
+        return IcpAccountParts(
+            owner=_UniffiConverterString.read(buf),
+            subaccount_hex=_UniffiConverterString.read(buf),
+        )
+
+    @staticmethod
+    def check_lower(value):
+        _UniffiConverterString.check_lower(value.owner)
+        _UniffiConverterString.check_lower(value.subaccount_hex)
+
+    @staticmethod
+    def write(value, buf):
+        _UniffiConverterString.write(value.owner, buf)
+        _UniffiConverterString.write(value.subaccount_hex, buf)
 
 
 class IcpEip1559Price:
@@ -3298,12 +3396,23 @@ def generate_keypair() -> "KeyPair":
     return _UniffiConverterTypeKeyPair.lift(_uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_func_generate_keypair,))
 
 
-def icp_approve_arg(spender_owner_text: "str",spender_subaccount_hex: "typing.Optional[str]",from_subaccount_hex: "typing.Optional[str]",amount: "typing.Optional[str]",expected_allowance: "typing.Optional[str]",expires_at_ns: "typing.Optional[str]",memo_hex: "typing.Optional[str]",fee: "typing.Optional[str]") -> "bytes":
+def icp_account_id_from_principal(owner_text: "str",subaccount_hex: "typing.Optional[str]") -> "str":
     """
-    `icrc2_approve` argument bytes: spender account, allowance amount (absent = revoke/0),
-    optional expected_allowance/expires_at/memo/from_subaccount/fee.
+    Derive the legacy account identifier owned by `owner_text` on `subaccount_hex`. The app uses it
+    for the self-send guard: a user who pastes their OWN exchange-style address must be warned, and
+    the only way to recognise it is to derive ours and compare (the hash cannot be inverted).
     """
 
+    _UniffiConverterString.check_lower(owner_text)
+    
+    _UniffiConverterOptionalString.check_lower(subaccount_hex)
+    
+    return _UniffiConverterString.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_account_id_from_principal,
+        _UniffiConverterString.lower(owner_text),
+        _UniffiConverterOptionalString.lower(subaccount_hex)))
+
+
+def icp_approve_arg(spender_owner_text: "str",spender_subaccount_hex: "typing.Optional[str]",from_subaccount_hex: "typing.Optional[str]",amount: "typing.Optional[str]",expected_allowance: "typing.Optional[str]",expires_at_ns: "typing.Optional[str]",memo_hex: "typing.Optional[str]",fee: "typing.Optional[str]") -> "bytes":
     _UniffiConverterString.check_lower(spender_owner_text)
     
     _UniffiConverterOptionalString.check_lower(spender_subaccount_hex)
@@ -3360,6 +3469,20 @@ def icp_decode_int(arg: "bytes") -> "str":
     _UniffiConverterBytes.check_lower(arg)
     
     return _UniffiConverterString.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_int,
+        _UniffiConverterBytes.lower(arg)))
+
+
+def icp_decode_legacy_transfer_result(arg: "bytes") -> "IcpTransferOutcome":
+    """
+    Decode the ICP ledger's LEGACY `transfer` reply. Flattens to the SAME `IcpTransferOutcome` the
+    ICRC-1 decoder produces, so the app's outcome handling is one code path — but the variant tags
+    are the legacy ledger's own (`TxDuplicate`, `TxTooOld`, `TxCreatedInFuture`), never renamed to
+    their ICRC-1 near-twins. Callers that branch on idempotent replay must accept BOTH spellings.
+    """
+
+    _UniffiConverterBytes.check_lower(arg)
+    
+    return _UniffiConverterTypeIcpTransferOutcome.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_legacy_transfer_result,
         _UniffiConverterBytes.lower(arg)))
 
 
@@ -3450,6 +3573,41 @@ def icp_ingress_expiry(now_ns: "str",ahead_s: "int") -> "str":
     return _UniffiConverterString.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_ingress_expiry,
         _UniffiConverterString.lower(now_ns),
         _UniffiConverterUInt64.lower(ahead_s)))
+
+
+def icp_legacy_transfer_arg(to_account_id_hex: "str",from_subaccount_hex: "typing.Optional[str]",amount_e8s: "str",fee_e8s: "str",memo: "str",created_at_time_ns: "typing.Optional[str]") -> "bytes":
+    """
+    `icrc2_approve` argument bytes: spender account, allowance amount (absent = revoke/0),
+    optional expected_allowance/expires_at/memo/from_subaccount/fee.
+    `transfer` argument bytes for the ICP ledger's LEGACY method — the ONLY way to pay a 64-hex
+    account identifier (see `AccountIdentifier` in `dpay-icp`). ICP-ledger-only; every ck*/ICRC-1
+    ledger is principal-addressed and has no such method.
+
+    Amounts are decimal strings like every other builder here, but the ledger's `Tokens` is a
+    `nat64`, so a value above u64::MAX is refused rather than silently truncated. `fee` is
+    mandatory (the ledger requires exactly 10_000 e8s) and `memo` is a bare u64, NOT the 16-byte
+    nonce blob the ICRC-1 rail reconciles on.
+    """
+
+    _UniffiConverterString.check_lower(to_account_id_hex)
+    
+    _UniffiConverterOptionalString.check_lower(from_subaccount_hex)
+    
+    _UniffiConverterString.check_lower(amount_e8s)
+    
+    _UniffiConverterString.check_lower(fee_e8s)
+    
+    _UniffiConverterString.check_lower(memo)
+    
+    _UniffiConverterOptionalString.check_lower(created_at_time_ns)
+    
+    return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_legacy_transfer_arg,
+        _UniffiConverterString.lower(to_account_id_hex),
+        _UniffiConverterOptionalString.lower(from_subaccount_hex),
+        _UniffiConverterString.lower(amount_e8s),
+        _UniffiConverterString.lower(fee_e8s),
+        _UniffiConverterString.lower(memo),
+        _UniffiConverterOptionalString.lower(created_at_time_ns)))
 
 
 def icp_minter_account_arg(owner_text: "str",subaccount_hex: "typing.Optional[str]") -> "bytes":
@@ -3599,6 +3757,35 @@ def icp_transfer_arg(to_owner_text: "str",to_subaccount_hex: "typing.Optional[st
         _UniffiConverterString.lower(amount),
         _UniffiConverterOptionalString.lower(fee),
         _UniffiConverterOptionalString.lower(memo_hex)))
+
+
+def icp_validate_account_id(text: "str") -> "str":
+    """
+    Validate a LEGACY 64-hex ICP account identifier and return it canonicalised (lowercase).
+    A different address namespace from a principal — see `AccountIdentifier` in `dpay-icp` for why
+    it is reachable only through the ICP ledger's legacy `transfer`. The embedded CRC32 is checked,
+    so a truncated or mistyped exchange deposit address fails HERE, not on-chain.
+    """
+
+    _UniffiConverterString.check_lower(text)
+    
+    return _UniffiConverterString.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_validate_account_id,
+        _UniffiConverterString.lower(text)))
+
+
+def icp_validate_icrc_account(text: "str") -> "IcpAccountParts":
+    """
+    Validate an ICRC-1 textual ACCOUNT — the bare principal `3nrdb-…-4qe` that every IC wallet's
+    receive QR carries, or the `principal-checksum.subaccount` form for a non-default subaccount
+    (ICRC-1 `TextualEncoding.md`, status Accepted). Strictly canonical: the spec's own error
+    vectors are refused. This is the superset of `icp_validate_principal` that the send-to-address
+    field parses a scanned or pasted destination with.
+    """
+
+    _UniffiConverterString.check_lower(text)
+    
+    return _UniffiConverterTypeIcpAccountParts.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_validate_icrc_account,
+        _UniffiConverterString.lower(text)))
 
 
 def icp_validate_principal(text: "str") -> "str":
@@ -3795,6 +3982,7 @@ __all__ = [
     "NfcPhase",
     "NfcResultStatus",
     "NfcStep",
+    "IcpAccountParts",
     "IcpEip1559Price",
     "IcpQueryReply",
     "IcpRequestStatus",
@@ -3809,10 +3997,12 @@ __all__ = [
     "encode_request",
     "format_amount",
     "generate_keypair",
+    "icp_account_id_from_principal",
     "icp_approve_arg",
     "icp_balance_of_arg",
     "icp_decode_eip1559_price",
     "icp_decode_int",
+    "icp_decode_legacy_transfer_result",
     "icp_decode_minter_ok",
     "icp_decode_query",
     "icp_decode_read_state",
@@ -3821,6 +4011,7 @@ __all__ = [
     "icp_eip1559_price_arg",
     "icp_envelope_request_id",
     "icp_ingress_expiry",
+    "icp_legacy_transfer_arg",
     "icp_minter_account_arg",
     "icp_principal_from_pubkey",
     "icp_retrieve_btc_arg",
@@ -3829,6 +4020,8 @@ __all__ = [
     "icp_sign_read_state",
     "icp_sign_update",
     "icp_transfer_arg",
+    "icp_validate_account_id",
+    "icp_validate_icrc_account",
     "icp_validate_principal",
     "icp_withdraw_erc20_arg",
     "icp_withdraw_eth_arg",

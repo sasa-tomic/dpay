@@ -43,6 +43,17 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
             ((Character.digit(s[it * 2], 16) shl 4) + Character.digit(s[it * 2 + 1], 16)).toByte()
         }
 
+    /** The ONE {ok, blockIndex?, errVariant?, errDetail?} marshal, shared by every reply decoder
+     *  that resolves an IcpTransferOutcome (ICRC-1 transfer, minter Ok, legacy ICP transfer) — the
+     *  JS side reads one shape, so it is built in one place. */
+    private fun transferOutcomeMap(r: uniffi.dpay_ffi.IcpTransferOutcome) =
+        Arguments.createMap().apply {
+            putBoolean("ok", r.ok)
+            if (r.blockIndex != null) putString("blockIndex", r.blockIndex)
+            if (r.errVariant != null) putString("errVariant", r.errVariant)
+            if (r.errDetail != null) putString("errDetail", r.errDetail)
+        }
+
     /** ReadableArray.getString is @Nullable in Kotlin — the JS bridge always passes hex
      *  strings, but fail loud (not NPE) if a slot is ever missing. */
     private fun ridsFrom(arr: com.facebook.react.bridge.ReadableArray): List<ByteArray> =
@@ -205,6 +216,74 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
     fun icpValidatePrincipal(text: String, promise: Promise) {
         try {
             promise.resolve(uniffi.dpay_ffi.icpValidatePrincipal(text))
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    /** Parse a send-to-address destination as an ICRC-1 textual ACCOUNT — a bare principal (what
+     *  every IC wallet's receive QR carries) or `principal-checksum.subaccount`. Resolves
+     *  `{owner, subaccountHex}`; subaccountHex is "" for the default subaccount. */
+    @ReactMethod
+    fun icpValidateIcrcAccount(text: String, promise: Promise) {
+        try {
+            val parts = uniffi.dpay_ffi.icpValidateIcrcAccount(text)
+            val map = Arguments.createMap()
+            map.putString("owner", parts.owner)
+            map.putString("subaccountHex", parts.subaccountHex)
+            promise.resolve(map)
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    /** Validate a LEGACY 64-hex ICP account identifier (the form exchanges hand out), CRC-checked,
+     *  returning canonical lowercase. A different address namespace from a principal. */
+    @ReactMethod
+    fun icpValidateAccountId(text: String, promise: Promise) {
+        try {
+            promise.resolve(uniffi.dpay_ffi.icpValidateAccountId(text))
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    /** Derive the legacy account identifier for an owner+subaccount — the send screen's self-send
+     *  guard (the hash cannot be inverted, so recognising our own address means deriving it). */
+    @ReactMethod
+    fun icpAccountIdFromPrincipal(ownerText: String, subaccountHex: String, promise: Promise) {
+        try {
+            promise.resolve(uniffi.dpay_ffi.icpAccountIdFromPrincipal(ownerText, subaccountHex))
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    /** DIDL args for the ICP ledger's LEGACY `transfer` — the only method that reaches a 64-hex
+     *  account identifier. Amounts/fee/memo cross as decimal strings. */
+    @ReactMethod
+    fun icpLegacyTransferArg(
+        toAccountIdHex: String,
+        fromSubaccountHex: String,
+        amountE8s: String,
+        feeE8s: String,
+        memo: String,
+        promise: Promise,
+    ) {
+        try {
+            promise.resolve(hex(uniffi.dpay_ffi.icpLegacyTransferArg(toAccountIdHex, fromSubaccountHex, amountE8s, feeE8s, memo, null)))
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    /** Decode the legacy `transfer` reply. Same outcome shape as icpDecodeTransferResult, carrying
+     *  the LEGACY variant tags (TxDuplicate / TxTooOld / TxCreatedInFuture). */
+    @ReactMethod
+    fun icpDecodeLegacyTransferResult(argHex: String, promise: Promise) {
+        try {
+            val out = uniffi.dpay_ffi.icpDecodeLegacyTransferResult(unhex(argHex))
+            promise.resolve(transferOutcomeMap(out))
         } catch (e: Throwable) {
             promise.reject("dpay_core", e)
         }
@@ -515,13 +594,7 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
     @ReactMethod
     fun icpDecodeTransferResult(argHex: String, promise: Promise) {
         try {
-            val r = uniffi.dpay_ffi.icpDecodeTransferResult(unhex(argHex))
-            val out = Arguments.createMap()
-            out.putBoolean("ok", r.ok)
-            if (r.blockIndex != null) out.putString("blockIndex", r.blockIndex)
-            if (r.errVariant != null) out.putString("errVariant", r.errVariant)
-            if (r.errDetail != null) out.putString("errDetail", r.errDetail)
-            promise.resolve(out)
+            promise.resolve(transferOutcomeMap(uniffi.dpay_ffi.icpDecodeTransferResult(unhex(argHex))))
         } catch (e: Throwable) {
             promise.reject("dpay_core", e)
         }
@@ -535,13 +608,7 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
     @ReactMethod
     fun icpDecodeMinterOk(argHex: String, promise: Promise) {
         try {
-            val r = uniffi.dpay_ffi.icpDecodeMinterOk(unhex(argHex))
-            val out = Arguments.createMap()
-            out.putBoolean("ok", r.ok)
-            if (r.blockIndex != null) out.putString("blockIndex", r.blockIndex)
-            if (r.errVariant != null) out.putString("errVariant", r.errVariant)
-            if (r.errDetail != null) out.putString("errDetail", r.errDetail)
-            promise.resolve(out)
+            promise.resolve(transferOutcomeMap(uniffi.dpay_ffi.icpDecodeMinterOk(unhex(argHex))))
         } catch (e: Throwable) {
             promise.reject("dpay_core", e)
         }
