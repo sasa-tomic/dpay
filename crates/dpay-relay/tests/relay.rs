@@ -24,10 +24,14 @@ use serde_json::Value;
 use sha2::Digest;
 use tower::ServiceExt; // oneshot
 
-use dpay_core::DEMO_USD;
-use dpay_icp::envelope::{ingress_expiry, sign_update, CallRequest};
-use dpay_icp::icrc::transfer_arg;
-use dpay_icp::principal::{Account, Principal};
+use dpay_core::{Currency, DEMO_USD};
+use dpay_icp::envelope::{ingress_expiry, sign_read_state, sign_update, verify_envelope, CallRequest};
+use dpay_icp::icrc::{
+    decode_legacy_transfer_result, legacy_transfer_arg, transfer_arg, LegacyTransferError,
+    LegacyTransferResult,
+};
+use dpay_icp::principal::{Account, AccountIdentifier, Principal};
+use dpay_icp::reply::{decode_read_state_tree, request_status, RequestStatus};
 use dpay_relay::{app, ic_gateway::FakeIc, AppState, FakeLedger};
 use ed25519_dalek::SigningKey;
 
@@ -36,6 +40,13 @@ use ed25519_dalek::SigningKey;
 /// catalog_truth drift test pins the pair). The fake-IC gateway keys the DEMO fake ledger at
 /// this text, so signed DEMO transfers target it.
 const DEMO_LEDGER: &str = "td2nx-oaaaa-aaaab-qhdnq-cai";
+
+/// The compiled catalog's native-ICP row (currency 8): the canonical mainnet ledger and its fee,
+/// both pinned by the catalog_truth drift test. This is the ONLY ledger with the legacy `transfer`
+/// method — the one that can pay a 64-hex account identifier.
+const ICP_LEDGER: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai";
+const ICP: Currency = 8;
+const ICP_FEE_E8S: u64 = 10_000;
 
 // --- helpers -------------------------------------------------------------
 
@@ -88,6 +99,13 @@ fn faucet_json(account_hex: &str, amount_json: Option<&str>) -> Request<Body> {
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(body))
         .unwrap()
+}
+
+fn now_ns() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos() as u64
 }
 
 async fn call(state: &AppState, req: Request<Body>) -> (StatusCode, Value) {
@@ -342,10 +360,7 @@ async fn signed_transfer_through_api_v2_moves_funds_and_lands_in_history() {
     // Fund the payer's principal (the faucet fixture credits exactly where the transfer spends).
     fake.faucet_credit(DEMO_USD, &payer_owner, 10_000);
 
-    let now_ns = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos() as u64;
+    let now_ns = now_ns();
     let settlement_memo = b"0123456789abcdef";
     let arg = transfer_arg(
         &Account::new(merch_owner.clone()),
@@ -475,6 +490,226 @@ async fn signed_transfer_through_api_v2_moves_funds_and_lands_in_history() {
         StatusCode::BAD_REQUEST,
         "short memo filters must fail closed"
     );
+}
+
+/// Sign + POST a legacy `transfer` (the ICP ledger's own method), then read the outcome back the
+/// way the app does — read_state → certificate → `request_status` — so the assertions below check
+/// the ledger's OWN reply bytes, not merely the balance side effects.
+async fn legacy_transfer_outcome(
+    state: &AppState,
+    sk: &SigningKey,
+    canister: &str,
+    arg: Vec<u8>,
+) -> RequestStatus {
+    let req = CallRequest {
+        canister: Principal::from_text(canister).expect("ledger principal parses"),
+        method_name: "transfer".to_string(),
+        arg,
+        ingress_expiry_ns: ingress_expiry(now_ns(), 300),
+        nonce: None,
+    };
+    let envelope = sign_update(sk, &req);
+    let rid = verify_envelope(&envelope)
+        .expect("our own envelope verifies")
+        .request_id;
+    let post = Request::builder()
+        .method("POST")
+        .uri(format!("/api/v2/canister/{canister}/call"))
+        .body(Body::from(envelope))
+        .unwrap();
+    let (status, _h, body) = call_raw(state, post).await;
+    assert_eq!(
+        status,
+        StatusCode::ACCEPTED,
+        "a signed call is 202; the outcome rides read_state"
+    );
+    assert!(body.is_empty(), "call replies with an empty 202 body");
+
+    let path: &[&[u8]] = &[b"request_status", &rid];
+    let read = sign_read_state(sk, &[path], ingress_expiry(now_ns(), 300));
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/v2/canister/{canister}/read_state"))
+        .body(Body::from(read))
+        .unwrap();
+    let (status, _h, body) = call_raw(state, req).await;
+    assert_eq!(status, StatusCode::OK, "read_state must serve a certificate");
+    let tree = decode_read_state_tree(&body).expect("certificate decodes");
+    request_status(&tree, &rid).expect("request_status decodes")
+}
+
+/// The legacy `TransferResult` carried by a replied outcome.
+fn legacy_result(outcome: RequestStatus) -> LegacyTransferResult {
+    match outcome {
+        RequestStatus::Replied(arg) => {
+            decode_legacy_transfer_result(&arg).expect("legacy transfer reply decodes")
+        }
+        other => panic!("expected a replied outcome, got {other:?}"),
+    }
+}
+
+/// The ICP ledger's LEGACY `transfer` through POST /api/v2/{ledger}/call — the ONLY method that can
+/// pay a 64-hex ACCOUNT IDENTIFIER (what an exchange hands out), which `icrc1_transfer` cannot
+/// address at all. Covers both payee cases: an identifier that derives back to an account the
+/// gateway knows (funds land on that principal) and one that does not (the funds leave the sender
+/// for an external account, and the sender's history says exactly that).
+#[tokio::test]
+async fn signed_legacy_transfer_pays_an_account_identifier() {
+    let payer = keypair();
+    let merchant = keypair();
+    let outsider = keypair();
+    let (state, _led, fake) = state_with_fake(ledger()).await;
+    let payer_owner = user_principal(&pubkey(&payer));
+    let merch_owner = user_principal(&pubkey(&merchant));
+    let outside_owner = user_principal(&pubkey(&outsider));
+
+    fake.faucet_credit(ICP, &payer_owner, 100_000_000);
+    // The payee already exists on the gateway — that is what makes its identifier RESOLVABLE (the
+    // hash is one-way, so the payee is matched by re-deriving known accounts' identifiers).
+    fake.faucet_credit(ICP, &merch_owner, 1);
+
+    let to = AccountIdentifier::from_principal(&merch_owner, &[0u8; 32]);
+    let outcome = legacy_transfer_outcome(
+        &state,
+        &payer,
+        ICP_LEDGER,
+        legacy_transfer_arg(to.as_bytes(), None, 250, ICP_FEE_E8S, 0, None),
+    )
+    .await;
+    // Block 0: the first call this gateway executes. The index rides the ledger's own Ok encoding.
+    assert_eq!(legacy_result(outcome), LegacyTransferResult::Ok(0));
+    assert_eq!(fake.balance_for(ICP, &merch_owner), 1 + 250, "payee credited");
+    assert_eq!(
+        fake.balance_for(ICP, &payer_owner),
+        100_000_000 - 250 - ICP_FEE_E8S,
+        "sender pays the amount AND the mandatory fee"
+    );
+
+    // An identifier the gateway cannot resolve (nobody has ever held a balance at that principal —
+    // the shape of a real exchange address): the money still leaves the sender.
+    let external = AccountIdentifier::from_principal(&outside_owner, &[0u8; 32]);
+    let outcome = legacy_transfer_outcome(
+        &state,
+        &payer,
+        ICP_LEDGER,
+        legacy_transfer_arg(external.as_bytes(), None, 400, ICP_FEE_E8S, 0xdeadbeef, None),
+    )
+    .await;
+    assert_eq!(legacy_result(outcome), LegacyTransferResult::Ok(1));
+    assert_eq!(
+        fake.balance_for(ICP, &payer_owner),
+        100_000_000 - 250 - 400 - 2 * ICP_FEE_E8S,
+    );
+    assert_eq!(
+        fake.balance_for(ICP, &outside_owner),
+        0,
+        "an unknown identifier is NOT credited to its (unknown) owner principal"
+    );
+
+    // History: both sends, newest first, on the sender's side — the unresolved payee shows as the
+    // external account identifier, and the legacy nat64 memo renders as 16 hex chars (never the
+    // 32-char settlement-memo shape the reconciliation filter matches).
+    let payer_hex = hex::encode(pubkey(&payer));
+    let (s, b) = call(
+        &state,
+        get_req(&format!("/api/v1/transactions/{payer_hex}?currency={ICP}")),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{b}");
+    let rows = b["transactions"].as_array().unwrap();
+    assert_eq!(rows.len(), 3, "mint + two sends: {b}");
+    assert_eq!(rows[0]["amount"], "400", "{b}");
+    assert_eq!(rows[0]["from"], payer_owner.to_text(), "{b}");
+    assert_eq!(
+        rows[0]["to"],
+        format!("icp-account-id:{}", external.to_text()),
+        "an unresolved payee is recorded as the external account identifier: {b}"
+    );
+    assert_eq!(rows[0]["memo"], "00000000deadbeef", "{b}");
+    assert_eq!(rows[0]["currency"], ICP, "{b}");
+    assert_eq!(rows[1]["amount"], "250", "{b}");
+    assert_eq!(rows[1]["to"], merch_owner.to_text(), "{b}");
+    assert_eq!(rows[1]["memo"], "", "memo 0 is the ledger's 'no memo': {b}");
+}
+
+/// Every legacy refusal is the ICP ledger's OWN encoding (or the replica's own reject), and NOTHING
+/// moves on any of them — the fee is exact-or-refuse, the balance check precedes the debit, the
+/// method does not exist on an ICRC-1-only ledger, and a malformed arg is rejected rather than
+/// guessed at.
+#[tokio::test]
+async fn legacy_transfer_refusals_move_no_funds() {
+    let payer = keypair();
+    let merchant = keypair();
+    let (state, _led, fake) = state_with_fake(ledger()).await;
+    let payer_owner = user_principal(&pubkey(&payer));
+    let merch_owner = user_principal(&pubkey(&merchant));
+    fake.faucet_credit(ICP, &payer_owner, 1_000);
+    fake.faucet_credit(DEMO_USD, &payer_owner, 1_000);
+    let to = AccountIdentifier::from_principal(&merch_owner, &[0u8; 32]);
+    let unchanged = |what: &str| {
+        assert_eq!(fake.balance_for(ICP, &payer_owner), 1_000, "{what}: sender untouched");
+        assert_eq!(fake.balance_for(ICP, &merch_owner), 0, "{what}: payee untouched");
+    };
+
+    // Fee below the ledger's exact fee → BadFee carrying the fee it wants.
+    let outcome = legacy_transfer_outcome(
+        &state,
+        &payer,
+        ICP_LEDGER,
+        legacy_transfer_arg(to.as_bytes(), None, 100, ICP_FEE_E8S - 1, 0, None),
+    )
+    .await;
+    assert_eq!(
+        legacy_result(outcome),
+        LegacyTransferResult::Err(LegacyTransferError::BadFee { expected_fee: ICP_FEE_E8S }),
+    );
+    unchanged("bad fee");
+
+    // Amount + fee over the balance → InsufficientFunds carrying the real balance.
+    let outcome = legacy_transfer_outcome(
+        &state,
+        &payer,
+        ICP_LEDGER,
+        legacy_transfer_arg(to.as_bytes(), None, 1_000, ICP_FEE_E8S, 0, None),
+    )
+    .await;
+    assert_eq!(
+        legacy_result(outcome),
+        LegacyTransferResult::Err(LegacyTransferError::InsufficientFunds { balance: 1_000 }),
+    );
+    unchanged("insufficient funds");
+
+    // A malformed arg is REJECTED, never decoded into a plausible-looking payment.
+    let outcome = legacy_transfer_outcome(&state, &payer, ICP_LEDGER, vec![0u8; 8]).await;
+    match outcome {
+        RequestStatus::Rejected { reject_code, reject_message, .. } => {
+            assert_eq!(reject_code, 5, "{reject_message}");
+            assert!(reject_message.contains("malformed transfer arg"), "{reject_message}");
+        }
+        other => panic!("expected a rejection, got {other:?}"),
+    }
+    unchanged("malformed arg");
+
+    // `transfer` exists ONLY on the ICP ledger: on an ICRC-1 ledger the replica rejects the method.
+    let outcome = legacy_transfer_outcome(
+        &state,
+        &payer,
+        DEMO_LEDGER,
+        legacy_transfer_arg(to.as_bytes(), None, 100, 0, 0, None),
+    )
+    .await;
+    match outcome {
+        RequestStatus::Rejected { reject_code, reject_message, .. } => {
+            assert_eq!(reject_code, 3, "{reject_message}");
+            assert!(
+                reject_message.contains("no update method 'transfer'"),
+                "{reject_message}"
+            );
+        }
+        other => panic!("expected a rejection, got {other:?}"),
+    }
+    assert_eq!(fake.balance_for(DEMO_USD, &payer_owner), 1_000, "DEMO untouched");
+    unchanged("wrong ledger");
 }
 
 // --- transaction history ------------------------------------------------------

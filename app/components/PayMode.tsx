@@ -17,6 +17,7 @@ import {QrScanner} from './QrScanner';
 import {FundFirstPanel} from './FundFirstPanel';
 import {ModeToggle} from './ModeToggle';
 import {WithdrawSheet} from './WithdrawSheet';
+import {SendSheet} from './SendSheet';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useReportLock} from '../hooks/useReportLock';
 import {useShareFeedback, shareConfirmLabel} from '../hooks/useShareFeedback';
@@ -32,8 +33,8 @@ import {M} from '../i18n';
 export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assetBalances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillIntent, onPrefillConsumed, onShowDepositAddress, onRefreshBalances, refreshBusy = false, onLockChange}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assetBalances: Record<number, string>; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillIntent?: PayIntent | null; onPrefillConsumed?: () => void; onShowDepositAddress: () => void; onRefreshBalances?: () => void; refreshBusy?: boolean; onLockChange?: (locked: boolean) => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid'>('scan');
   // The within-tab sub-mode is OWNED by Wallet. "scan" = the existing scan-to-pay flow; "send" = the
-  // on-chain send-to-address flow (the WithdrawSheet body, lifted inline). The toggle renders only
-  // when withdrawFamily is non-null (an on-chain offramp family); DEMO hides it.
+  // on-chain send-to-address flow, lifted inline. The toggle renders whenever the asset can leave
+  // the wallet at all — see `sendCapable` below; DEMO alone hides it.
   // The payment under review — the ONE shape for both entries (a scanned wire request and a shared
   // payment link; see PayIntent). `source` decides whether the camera's already-given consent
   // auto-signs, and how the destination renders.
@@ -472,6 +473,15 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   //     instructions on every step — a "check back soon" dead end is a bug). Only a genuinely
   //     undepositable malformed row keeps the honest no-primary copy.
   const gateDesc = catalog.find(c => c.currency === withdrawCurrency) ?? null;
+  // Can this asset leave the wallet to an external address at all? Either it has a chain-key minter
+  // family (burn → native chain) or it is a complete no-minter direct-ICRC row (a plain
+  // icrc1_transfer to any account). This is the SEND capability, deliberately distinct from
+  // `withdrawFamily` alone — gating on the family excluded VCHF/ICP entirely, which is exactly the
+  // asymmetry the Receive tab already fixed with `depositFamily || directIcrc`
+  // (ReceiveMode.tsx), and which CLAUDE.md's same-surfaces rule calls a bug rather than an
+  // exception. Ramp capability is NOT consulted: onramp/offramp describe FIAT ramps, and VCHF/ICP
+  // are `Unavailable` on both while being perfectly sendable on-chain.
+  const sendCapable = withdrawFamily != null || isDirectIcrcAsset(gateDesc);
   const gateSymbol = gateDesc ? (isTestnetCurrency(gateDesc) ? testnetDisplayName(gateDesc) : displayName(gateDesc)) : M.pay.fundsSymbol;
   const gateDepositable = !!gateDesc && !gateDesc.mintable && gateDesc.onramp !== 'Unavailable' && gateDesc.minter != null;
   const gateCanFund = gateDepositable || isDirectIcrcAsset(gateDesc);
@@ -491,33 +501,60 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     />
   ) : null;
 
-  // "Send to address" sub-mode: render the on-chain withdraw flow INLINE (the WithdrawSheet body) for
-  // the active asset's family. The toggle above lets the user flip back to "Scan to pay". The sheet is
-  // inline-only (no overlay chrome — the tab body provides the surface). Only reached when
-  // withdrawFamily is non-null (the toggle is gated). The fund-first gate applies HERE too (same
-  // surface as SOL's send branch — no amount entry against a known-zero balance).
-  if (subMode === 'send' && withdrawFamily && withdrawDisplay) {
+  // "Send to address" sub-mode: render the send flow INLINE for the active asset. The toggle above
+  // lets the user flip back to "Scan to pay". Inline-only (no overlay chrome — the tab body provides
+  // the surface). The fund-first gate applies HERE too (same surface as SOL's send branch — no
+  // amount entry against a known-zero balance).
+  //
+  // Which body depends on how the asset can leave the wallet:
+  //   • a chain-key family (ckBTC/ckETH/ckUSDC) → WithdrawSheet: burn, and the minter pays out on
+  //     the native chain. A multi-step approve→minter sequence with its own double-burn resume.
+  //   • a complete no-minter direct-ICRC row (VCHF/ICP) → SendSheet: ONE signed icrc1_transfer, or
+  //     the ICP ledger's legacy `transfer` for a 64-hex account identifier.
+  // DEMO reaches neither and shows no toggle at all — it has no on-chain identity, matching the
+  // Receive tab, where the "My address" toggle is likewise `depositFamily || directIcrc`.
+  if (subMode === 'send' && sendCapable) {
+    const sendToggle = (
+      <ModeToggle
+        testID="pay-mode-toggle"
+        value={subMode}
+        onChange={(v) => onSubModeChange(v as 'scan' | 'send')}
+        left={{label: M.pay.scanToPay, value: 'scan', testID: 'btn-pay-scan'}}
+        right={{label: M.pay.sendToAddress, value: 'send', testID: 'btn-pay-send'}}
+      />
+    );
+    if (withdrawFamily && withdrawDisplay) {
+      return (
+        <View style={S.center}>
+          {sendToggle}
+          {fundPanel ?? (
+            <WithdrawSheet
+              identity={identity}
+              catalog={catalog}
+              currency={withdrawCurrency}
+              decimals={catalog.find(c => c.currency === withdrawCurrency)?.decimals ?? withdrawDisplay.amountDecimals}
+              display={withdrawDisplay}
+              family={withdrawFamily}
+              tokenContract={withdrawTokenContract}
+              balance={withdrawBalance}
+              onClose={() => onSubModeChange('scan')}
+              onWithdrawn={onSettled}
+            />
+          )}
+        </View>
+      );
+    }
+    // Direct-ICRC (no minter). `sendCapable` guarantees gateDesc is a complete direct-ICRC row here.
     return (
       <View style={S.center}>
-        <ModeToggle
-          testID="pay-mode-toggle"
-          value={subMode}
-          onChange={(v) => onSubModeChange(v as 'scan' | 'send')}
-          left={{label: M.pay.scanToPay, value: 'scan', testID: 'btn-pay-scan'}}
-          right={{label: M.pay.sendToAddress, value: 'send', testID: 'btn-pay-send'}}
-        />
+        {sendToggle}
         {fundPanel ?? (
-          <WithdrawSheet
+          <SendSheet
             identity={identity}
-            catalog={catalog}
-            currency={withdrawCurrency}
-            decimals={catalog.find(c => c.currency === withdrawCurrency)?.decimals ?? withdrawDisplay.amountDecimals}
-            display={withdrawDisplay}
-            family={withdrawFamily}
-            tokenContract={withdrawTokenContract}
+            desc={gateDesc!}
             balance={withdrawBalance}
+            onSent={onSettled}
             onClose={() => onSubModeChange('scan')}
-            onWithdrawn={onSettled}
           />
         )}
       </View>
@@ -531,7 +568,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   const nfcInfo: Exclude<NfcStatus, 'ready'> = (nfcStatus === 'ready' ? 'unknown' : nfcStatus);
   return (
     <View style={S.center}>
-      {withdrawFamily ? (
+      {sendCapable ? (
         <ModeToggle
           testID="pay-mode-toggle"
           value={subMode}

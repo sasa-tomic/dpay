@@ -215,6 +215,66 @@ fn golden_decode_legacy_transfer_results() {
     assert!(dec(&unhex(G_TR_BADFEE)).is_err());
 }
 
+/// The legacy `transfer` arg DECODER — the fake-IC gateway's half of the ICP-ledger rail (the app
+/// encodes, the gateway reads back). Pinned against the same @dfinity/candid vectors the encoder is
+/// pinned to, so decoder drift surfaces as a golden failure instead of a mis-executed payment.
+#[test]
+fn golden_decode_legacy_transfer_arg() {
+    use dpay_icp::icrc::{decode_legacy_transfer_arg as dec, LegacyTransferArg};
+    let to = dpay_icp::AccountIdentifier::from_text(G_ACCOUNT_ID_TO_PRINCIPAL).unwrap();
+
+    let d = dec(&unhex(G_LEGACY_TRANSFER_MINIMAL)).expect("minimal golden decodes");
+    assert_eq!(
+        d,
+        LegacyTransferArg {
+            to: *to.as_bytes(),
+            from_subaccount: None,
+            amount_e8s: 100_000_000,
+            fee_e8s: 10_000,
+            memo: 0,
+            created_at_time_ns: None,
+        },
+    );
+
+    // every field set: subaccount, non-zero memo, created_at_time.
+    let d = dec(&unhex(G_LEGACY_TRANSFER_FULL)).expect("full golden decodes");
+    assert_eq!(
+        d,
+        LegacyTransferArg {
+            to: *to.as_bytes(),
+            from_subaccount: Some([7u8; 32]),
+            amount_e8s: 100_000_000,
+            fee_e8s: 10_000,
+            memo: 0xAAAA_AAAA_AAAA_AAAA,
+            created_at_time_ns: Some(EXPIRY),
+        },
+    );
+
+    // encoder → decoder at the u64 edges the goldens don't reach (a truncating cast would show here)
+    let arg = icrc::legacy_transfer_arg(to.as_bytes(), Some([1u8; 32]), u64::MAX, u64::MAX, u64::MAX, Some(u64::MAX));
+    assert_eq!(
+        dec(&arg).expect("edge-value arg round-trips"),
+        LegacyTransferArg {
+            to: *to.as_bytes(),
+            from_subaccount: Some([1u8; 32]),
+            amount_e8s: u64::MAX,
+            fee_e8s: u64::MAX,
+            memo: u64::MAX,
+            created_at_time_ns: Some(u64::MAX),
+        },
+    );
+
+    // Truncated / garbage bytes must fail LOUDLY — never a wrong-but-plausible payment.
+    assert!(dec(&unhex(G_LEGACY_TRANSFER_FULL)[..40]).is_err(), "truncated arg");
+    assert!(dec(&unhex(G_LEGACY_TRANSFER_MINIMAL)[..5]).is_err(), "type table cut short");
+    assert!(dec(&[]).is_err(), "empty");
+    assert!(dec(b"not a DIDL message").is_err(), "garbage");
+    // trailing bytes are refused: a padded arg is not the arg that was signed.
+    let mut padded = unhex(G_LEGACY_TRANSFER_MINIMAL);
+    padded.push(0);
+    assert!(dec(&padded).is_err(), "trailing byte after the value");
+}
+
 #[test]
 fn golden_account_identifier_from_principal() {
     let id = dpay_icp::AccountIdentifier::from_principal(&to_principal(), &[0u8; 32]);
@@ -225,6 +285,34 @@ fn golden_account_identifier_from_principal() {
     // A different subaccount is a DIFFERENT account identifier (the subaccount is hashed in).
     let sub = dpay_icp::AccountIdentifier::from_principal(&to_principal(), &[7u8; 32]);
     assert_ne!(sub, id, "subaccount must change the account identifier");
+}
+
+/// The legacy reply ENCODERS the fake-IC gateway answers with must be BYTE-IDENTICAL to the ICP
+/// ledger's own replies — the @dfinity/candid vectors above — and must decode back through the
+/// production decoder at values those vectors do not carry.
+#[test]
+fn golden_encode_legacy_transfer_replies() {
+    use dpay_icp::icrc::{
+        decode_legacy_transfer_result as dec, encode_legacy_transfer_bad_fee,
+        encode_legacy_transfer_insufficient_funds, encode_legacy_transfer_ok,
+        LegacyTransferError as E, LegacyTransferResult as R,
+    };
+    assert_eq_hex(&encode_legacy_transfer_ok(8168), G_LEGACY_REPLY_OK, "legacy reply Ok");
+    assert_eq_hex(&encode_legacy_transfer_bad_fee(10_000), G_LEGACY_REPLY_BADFEE, "legacy reply BadFee");
+    assert_eq_hex(
+        &encode_legacy_transfer_insufficient_funds(42),
+        G_LEGACY_REPLY_INSUFFICIENT,
+        "legacy reply InsufficientFunds",
+    );
+    assert_eq!(dec(&encode_legacy_transfer_ok(0)).unwrap(), R::Ok(0));
+    assert_eq!(
+        dec(&encode_legacy_transfer_bad_fee(u64::MAX)).unwrap(),
+        R::Err(E::BadFee { expected_fee: u64::MAX }),
+    );
+    assert_eq!(
+        dec(&encode_legacy_transfer_insufficient_funds(0)).unwrap(),
+        R::Err(E::InsufficientFunds { balance: 0 }),
+    );
 }
 
 #[test]

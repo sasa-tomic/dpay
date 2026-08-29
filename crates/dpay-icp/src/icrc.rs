@@ -629,17 +629,20 @@ impl<'a> Rd<'a> {
         }
     }
 
+    /// bare `vec nat8`: uleb length + that many bytes.
+    fn blob(&mut self) -> Result<Vec<u8>, IcpError> {
+        let n = self.uleb()? as usize;
+        if n > 1 << 16 {
+            return Err(Self::err("blob length out of range"));
+        }
+        Ok(self.take(n)?.to_vec())
+    }
+
     fn opt_blob(&mut self) -> Result<Option<Vec<u8>>, IcpError> {
         let tag = self.take(1)?[0];
         match tag {
             0x00 => Ok(None),
-            0x01 => {
-                let n = self.uleb()? as usize;
-                if n > 1 << 16 {
-                    return Err(Self::err("blob length out of range"));
-                }
-                Ok(Some(self.take(n)?.to_vec()))
-            }
+            0x01 => Ok(Some(self.blob()?)),
             _ => Err(Self::err("bad opt tag")),
         }
     }
@@ -677,23 +680,8 @@ impl<'a> Rd<'a> {
     /// Account value as put_account writes it: owner principal, then subaccount as
     /// opt blob (zero-subaccount canonicalized to `none`).
     fn account(&mut self) -> Result<Account, IcpError> {
-        let tag = self.take(1)?[0];
-        if tag != 0x01 {
-            return Err(Self::err("bad principal class byte"));
-        }
-        let n = self.uleb()? as usize;
-        if n > 29 {
-            return Err(Self::err("principal too long"));
-        }
-        let owner = crate::principal::Principal::from_bytes(self.take(n)?)?;
-        let sub = self.opt_blob()?;
-        let mut subaccount = [0u8; 32];
-        if let Some(b) = sub {
-            if b.len() != 32 {
-                return Err(Self::err("subaccount must be 32 bytes"));
-            }
-            subaccount.copy_from_slice(&b);
-        }
+        let owner = self.principal()?;
+        let subaccount = subaccount_32(self.opt_blob()?, "subaccount")?.unwrap_or([0u8; 32]);
         Ok(Account { owner, subaccount })
     }
 
@@ -725,6 +713,21 @@ impl<'a> Rd<'a> {
 // builds above, and re-encode replies byte-compatible with a real ledger. Production
 // surfaces (app/relay/canister) never call these; the real IC is the authority.
 
+/// A decoded `opt vec nat8` subaccount as the fixed `[u8; 32]` every ledger arg carries. `what`
+/// names the field so a wrong-length blob fails loudly and pinpoints which one. Shared by every
+/// decoder below (and `Rd::account`) — the same shape appears in all of them.
+fn subaccount_32(b: Option<Vec<u8>>, what: &str) -> Result<Option<[u8; 32]>, IcpError> {
+    match b {
+        None => Ok(None),
+        Some(v) => {
+            let a: [u8; 32] = v.as_slice().try_into().map_err(|_| {
+                IcpError::DidlDecode(format!("{what} must be 32 bytes, got {}", v.len()))
+            })?;
+            Ok(Some(a))
+        }
+    }
+}
+
 /// Decoded `icrc1_transfer` argument.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TransferArg {
@@ -744,22 +747,45 @@ pub fn decode_transfer_arg(arg: &[u8]) -> Result<TransferArg, IcpError> {
     let to = rd.account()?;
     let fee = rd.opt_nat()?;
     let memo = rd.opt_blob()?;
-    let from_sub = rd.opt_blob()?;
-    let from_subaccount = match from_sub {
-        None => None,
-        Some(b) => {
-            let mut sa = [0u8; 32];
-            if b.len() != 32 {
-                return Err(IcpError::DidlDecode("from_subaccount must be 32 bytes".into()));
-            }
-            sa.copy_from_slice(&b);
-            Some(sa)
-        }
-    };
+    let from_subaccount = subaccount_32(rd.opt_blob()?, "from_subaccount")?;
     let created_at_time_ns = rd.opt_nat64()?;
     let amount = rd.nat()?;
     rd.finish()?;
     Ok(TransferArg { to, from_subaccount, amount, fee, memo, created_at_time_ns })
+}
+
+/// Decoded LEGACY `transfer` argument (the ICP ledger's own method — see [`legacy_transfer_arg`]
+/// for how it differs from `icrc1_transfer`: raw 32-byte account identifier, `Tokens{e8s}` u64
+/// amounts, a mandatory fee, and a bare nat64 memo).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LegacyTransferArg {
+    pub to: [u8; 32],
+    pub from_subaccount: Option<[u8; 32]>,
+    pub amount_e8s: u64,
+    pub fee_e8s: u64,
+    pub memo: u64,
+    pub created_at_time_ns: Option<u64>,
+}
+
+/// Decode a legacy `transfer` argument built by [`legacy_transfer_arg`] (hash field order:
+/// to, fee, memo, from_subaccount, created_at_time, amount).
+pub fn decode_legacy_transfer_arg(arg: &[u8]) -> Result<LegacyTransferArg, IcpError> {
+    let mut rd = Rd { b: arg, i: 0 };
+    rd.message()?;
+    let to_bytes = rd.blob()?;
+    let to: [u8; 32] = to_bytes.as_slice().try_into().map_err(|_| {
+        IcpError::DidlDecode(format!(
+            "legacy transfer `to` must be a 32-byte account identifier, got {}",
+            to_bytes.len()
+        ))
+    })?;
+    let fee_e8s = rd.nat64()?;
+    let memo = rd.nat64()?;
+    let from_subaccount = subaccount_32(rd.opt_blob()?, "from_subaccount")?;
+    let created_at_time_ns = rd.opt_nat64()?;
+    let amount_e8s = rd.nat64()?;
+    rd.finish()?;
+    Ok(LegacyTransferArg { to, from_subaccount, amount_e8s, fee_e8s, memo, created_at_time_ns })
 }
 
 /// Decoded `icrc2_approve` argument.
@@ -783,18 +809,7 @@ pub fn decode_approve_arg(arg: &[u8]) -> Result<ApproveArg, IcpError> {
     rd.message()?;
     let fee = rd.opt_nat()?;
     let memo = rd.opt_blob()?;
-    let from_sub = rd.opt_blob()?;
-    let from_subaccount = match from_sub {
-        None => None,
-        Some(b) => {
-            let mut sa = [0u8; 32];
-            if b.len() != 32 {
-                return Err(IcpError::DidlDecode("from_subaccount must be 32 bytes".into()));
-            }
-            sa.copy_from_slice(&b);
-            Some(sa)
-        }
-    };
+    let from_subaccount = subaccount_32(rd.opt_blob()?, "from_subaccount")?;
     let created_at_time_ns = rd.opt_nat64()?;
     let amount = rd.nat()?;
     let expected_allowance = rd.opt_nat()?;
@@ -835,18 +850,7 @@ pub struct RetrieveBtcArg {
 pub fn decode_retrieve_btc_arg(arg: &[u8]) -> Result<RetrieveBtcArg, IcpError> {
     let mut rd = Rd { b: arg, i: 0 };
     rd.message()?;
-    let from_sub = rd.opt_blob()?;
-    let from_subaccount = match from_sub {
-        None => None,
-        Some(b) => {
-            let mut sa = [0u8; 32];
-            if b.len() != 32 {
-                return Err(IcpError::DidlDecode("from_subaccount must be 32 bytes".into()));
-            }
-            sa.copy_from_slice(&b);
-            Some(sa)
-        }
-    };
+    let from_subaccount = subaccount_32(rd.opt_blob()?, "from_subaccount")?;
     let address = rd.text()?;
     let amount = rd.nat64()?;
     rd.finish()?;
@@ -867,18 +871,7 @@ pub fn decode_withdraw_eth_arg(arg: &[u8]) -> Result<WithdrawEthArg, IcpError> {
     // Field-hash order matches the encoder + production-candid golden: recipient (text)
     // first, then from_subaccount (opt blob), then amount (nat).
     let recipient = rd.text()?;
-    let from_sub = rd.opt_blob()?;
-    let from_subaccount = match from_sub {
-        None => None,
-        Some(b) => {
-            let mut sa = [0u8; 32];
-            if b.len() != 32 {
-                return Err(IcpError::DidlDecode("from_subaccount must be 32 bytes".into()));
-            }
-            sa.copy_from_slice(&b);
-            Some(sa)
-        }
-    };
+    let from_subaccount = subaccount_32(rd.opt_blob()?, "from_subaccount")?;
     let amount = rd.nat()?;
     rd.finish()?;
     Ok(WithdrawEthArg { from_subaccount, recipient, amount })
@@ -896,23 +889,8 @@ pub struct MinterAccountArg {
 pub fn decode_minter_account_arg(arg: &[u8]) -> Result<MinterAccountArg, IcpError> {
     let mut rd = Rd { b: arg, i: 0 };
     rd.message()?;
-    let owner = match rd.opt_principal()? {
-        Some(p) => Some(p),
-        None => None,
-    };
-    let subaccount = match rd.opt_blob()? {
-        None => None,
-        Some(b) => {
-            if b.len() != 32 {
-                return Err(IcpError::DidlDecode(
-                    "minter_account subaccount must be 32 bytes".into(),
-                ));
-            }
-            let mut a = [0u8; 32];
-            a.copy_from_slice(&b);
-            Some(a)
-        }
-    };
+    let owner = rd.opt_principal()?;
+    let subaccount = subaccount_32(rd.opt_blob()?, "minter_account subaccount")?;
     rd.finish()?;
     Ok(MinterAccountArg { owner, subaccount })
 }
@@ -938,25 +916,12 @@ pub fn decode_withdraw_erc20_arg(arg: &[u8]) -> Result<WithdrawErc20ArgDecoded, 
     let erc_sub = rd.opt_blob()?;
     let amount = rd.nat()?;
     rd.finish()?;
-    let to_arr = |b: Option<Vec<u8>>, what: &str| -> Result<Option<[u8; 32]>, IcpError> {
-        match b {
-            None => Ok(None),
-            Some(v) => {
-                if v.len() != 32 {
-                    return Err(IcpError::DidlDecode(format!("{what} subaccount must be 32 bytes")));
-                }
-                let mut a = [0u8; 32];
-                a.copy_from_slice(&v);
-                Ok(Some(a))
-            }
-        }
-    };
     Ok(WithdrawErc20ArgDecoded {
         amount,
         ckerc20_ledger_id,
         recipient,
-        from_cketh_subaccount: to_arr(eth_sub, "withdraw_erc20 from_cketh_subaccount")?,
-        from_ckerc20_subaccount: to_arr(erc_sub, "withdraw_erc20 from_ckerc20_subaccount")?,
+        from_cketh_subaccount: subaccount_32(eth_sub, "withdraw_erc20 from_cketh_subaccount")?,
+        from_ckerc20_subaccount: subaccount_32(erc_sub, "withdraw_erc20 from_ckerc20_subaccount")?,
     })
 }
 
@@ -1068,6 +1033,59 @@ pub fn encode_transfer_duplicate(duplicate_of: u64) -> Vec<u8> {
     transfer_reply(Some((3, &payload)), 0)
 }
 
+
+/// The LEGACY `TransferResult` reply type table (7 types), shared by every legacy reply below.
+/// Golden-generated from the ICP ledger's OWN published IDL through the production
+/// @dfinity/candid encoder — the same source as [`LEGACY_TRANSFER_PREFIX`]; pinned byte-for-byte
+/// against the `G_LEGACY_REPLY_*` vectors in tests/goldens.rs, which
+/// [`decode_legacy_transfer_result`] also decodes.
+const LEGACY_TRANSFER_REPLY_TABLE: &[u8] = &[
+    0x44, 0x49, 0x44, 0x4c, 0x07, 0x6c, 0x01, 0xa7, 0xa5, 0xf3, 0xcc, 0x0e,
+    0x78, 0x6c, 0x01, 0xe0, 0xa9, 0xb3, 0x02, 0x78, 0x6c, 0x01, 0xbf, 0x9b,
+    0xb7, 0xf0, 0x0d, 0x01, 0x6c, 0x01, 0x8b, 0xbd, 0xf2, 0x9b, 0x01, 0x78,
+    0x6c, 0x01, 0x9c, 0xba, 0xb6, 0x9c, 0x02, 0x01, 0x6b, 0x05, 0xb7, 0x9e,
+    0xb3, 0x5d, 0x00, 0xa1, 0xc3, 0xeb, 0xfd, 0x07, 0x02, 0xc7, 0xc6, 0xb5,
+    0xf6, 0x0a, 0x03, 0xcc, 0xe5, 0xb6, 0x90, 0x0f, 0x7f, 0xeb, 0x9c, 0xdb,
+    0xd5, 0x0f, 0x04, 0x6b, 0x02, 0xbc, 0x8a, 0x01, 0x78, 0xc5, 0xfe, 0xd2,
+    0x01, 0x05,
+];
+
+/// Legacy reply bytes. Every value here is a nat64 (8-byte LE), never the uleb `nat` the ICRC-1
+/// twin carries. `err_variant` is the error's index in the hash-sorted variant — TxTooOld 0,
+/// BadFee 1, TxDuplicate 2, TxCreatedInFuture 3, InsufficientFunds 4 — with its `Tokens{e8s}` /
+/// nat64 payload.
+fn legacy_transfer_reply(err_variant: Option<(u8, u64)>, ok_block: u64) -> Vec<u8> {
+    let mut out = LEGACY_TRANSFER_REPLY_TABLE.to_vec();
+    out.push(0x01); // nargs
+    out.push(0x06); // arg ref -> type 6 (the Ok/Err variant)
+    match err_variant {
+        None => {
+            out.push(0x00); // Ok
+            put_nat64(&mut out, ok_block);
+        }
+        Some((idx, payload)) => {
+            out.push(0x01); // Err
+            out.push(idx);
+            put_nat64(&mut out, payload);
+        }
+    }
+    out
+}
+
+/// Legacy reply bytes for `Ok(block_index)`.
+pub fn encode_legacy_transfer_ok(block_index: u64) -> Vec<u8> {
+    legacy_transfer_reply(None, block_index)
+}
+
+/// Legacy reply bytes for `Err(BadFee { expected_fee = Tokens{e8s} })` (variant idx 1).
+pub fn encode_legacy_transfer_bad_fee(expected_fee_e8s: u64) -> Vec<u8> {
+    legacy_transfer_reply(Some((1, expected_fee_e8s)), 0)
+}
+
+/// Legacy reply bytes for `Err(InsufficientFunds { balance = Tokens{e8s} })` (variant idx 4).
+pub fn encode_legacy_transfer_insufficient_funds(balance_e8s: u64) -> Vec<u8> {
+    legacy_transfer_reply(Some((4, balance_e8s)), 0)
+}
 
 /// The ApproveResult reply type table (production-candid 0.10.22 golden prefix).
 const APPROVE_REPLY_TABLE: &[u8] = &[

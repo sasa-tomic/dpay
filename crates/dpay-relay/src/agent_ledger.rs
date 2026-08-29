@@ -993,44 +993,19 @@ fn map_icrc_txn(txn: &Transaction, me: &Account, currency: Currency) -> Option<T
 /// followed by the 28-byte SHA-224 digest — the domain-separated hash of the principal blob and
 /// the all-zero subaccount, checksummed (CRC-32/IEEE, big-endian) in its FIRST 4 bytes.
 ///
-/// HAND-ROLLED, DELIBERATELY: the canonical implementation lives in `ic-ledger-types`, which is
-/// NOT in the offline dependency graph (absent from Cargo.lock and the vendored crate cache —
-/// checked 2026-08-28), and the spec's preference for it applies only if it were already
-/// available offline. Correctness is pinned by a golden test against a pair derived
-/// independently by the OFFICIAL dfx toolchain (dfx 0.32.0, offline:
+/// The derivation itself lives in [`dpay_icp::principal::AccountIdentifier::from_principal`] —
+/// the ONE implementation in this repo (the fake-IC gateway resolves a legacy `transfer` payee
+/// with the same function). This wrapper only adapts the `candid::Principal` this module speaks to
+/// it and pins the DEFAULT subaccount. Correctness is pinned by a golden test against a pair
+/// derived independently by the OFFICIAL dfx toolchain (dfx 0.32.0, offline:
 /// `dfx identity get-principal` / `dfx ledger account-id` of the default identity) — see
 /// `icp_legacy_account_identifier_matches_an_independently_derived_golden`.
 pub fn icp_legacy_account_identifier(owner: &Principal) -> String {
-    use sha2::{Digest, Sha224};
-    let blob = owner.as_slice();
-    // candid principals are 1..=29 bytes — no leb128 length prefix exists in this construction
-    // (empirically confirmed against the dfx-derived golden; do not "fix" this to match the
-    // principal-TEXT checksum shape, which is a different encoding entirely).
-    debug_assert!((0..=29).contains(&blob.len()), "candid principals are ≤ 29 bytes (0 = the management canister's empty blob)");
-    let mut hasher = Sha224::new();
-    hasher.update(b"\x0aaccount-id");
-    hasher.update(blob);
-    hasher.update([0u8; 32]); // the default (all-zero) subaccount
-    let digest = hasher.finalize(); // 28 bytes
-    let mut account_id = [0u8; 32];
-    account_id[..4].copy_from_slice(&crc32_ieee(&digest).to_be_bytes());
-    account_id[4..].copy_from_slice(&digest);
-    hex::encode(account_id)
-}
-
-/// Bitwise CRC-32/IEEE (reflected poly 0xEDB8_8320, init/xorout 0xFFFFFFFF — the exact variant
-/// `crc32fast`/zlib implement, which the IC's identifier checksums use). Hand-rolled to avoid a
-/// new dependency; the digest is ≤ 28 bytes so the lack of a table is irrelevant.
-fn crc32_ieee(data: &[u8]) -> u32 {
-    let mut crc = 0xFFFF_FFFFu32;
-    for &byte in data {
-        crc ^= u32::from(byte);
-        for _ in 0..8 {
-            let mask = (crc & 1).wrapping_neg();
-            crc = (crc >> 1) ^ (0xEDB8_8320 & mask);
-        }
-    }
-    crc ^ 0xFFFF_FFFF
+    // `candid::Principal` cannot hold more than 29 bytes (fixed-capacity blob), which is the only
+    // way `from_bytes` rejects — so this is unreachable rather than a swallowed error.
+    let owner = dpay_icp::principal::Principal::from_bytes(owner.as_slice())
+        .expect("candid::Principal is always a valid ≤29-byte IC principal");
+    dpay_icp::principal::AccountIdentifier::from_principal(&owner, &[0u8; 32]).to_text()
 }
 
 /// Map one index transaction to the relay's [`TxnRecord`] when it concerns `me`; `None`
@@ -1262,7 +1237,7 @@ mod icp_index_tests {
         assert_eq!(
             icp_legacy_account_identifier(&golden_principal()),
             GOLDEN_ACCOUNT_ID,
-            "the hand-rolled derivation must match dfx 0.32.0's offline derivation"
+            "the shared core derivation must match dfx 0.32.0's offline derivation"
         );
         // And it is account-SPECIFIC (a different principal yields a different identifier).
         assert_ne!(

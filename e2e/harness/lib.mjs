@@ -407,8 +407,10 @@ export async function selectCurrency(driver, key, opts = {}) {
 /**
  * Switch to the Receive tab and open the "My address" sub-mode (the on-chain deposit flow, lifted
  * inline). Assumes the desired currency is already the active asset (select it in Balances first).
- * The "My address" toggle only renders for an on-chain asset (CkBtcUtxo/CkEthErc20), so the caller
- * must have selected one. Returns nothing; the deposit body (e.g. `deposit-address`) is the gate.
+ * The toggle renders for any asset with an on-chain identity — a chain-key family (CkBtcUtxo /
+ * CkEthErc20) OR a complete no-minter direct-ICRC row (VCHF / ICP), whose "address" is the wallet's
+ * own ICRC-1 principal. DEMO alone has none. Returns nothing; the deposit body (e.g.
+ * `deposit-address`) is the gate.
  */
 export async function openReceiveAddress(driver, opts = {}) {
   await driver.click('tab-receive', { timeoutMs: opts.timeoutMs ?? 5_000 });
@@ -416,9 +418,11 @@ export async function openReceiveAddress(driver, opts = {}) {
 }
 
 /**
- * Switch to the Pay tab and open the "Send to address" sub-mode (the on-chain withdraw flow, lifted
- * inline). Assumes the desired currency is already the active asset (select it in Balances first).
- * The "Send to address" toggle only renders for an on-chain asset (CkBtcUtxo/CkEthErc20).
+ * Switch to the Pay tab and open the "Send to address" sub-mode, lifted inline. Assumes the desired
+ * currency is already the active asset (select it in Balances first). The toggle renders for any
+ * asset that can LEAVE the wallet — a chain-key family (CkBtcUtxo / CkEthErc20 → the minter burn,
+ * WithdrawSheet) OR a complete no-minter direct-ICRC row (VCHF / ICP → a plain icrc1_transfer,
+ * SendSheet). DEMO alone has no send path and shows no toggle. Mirrors `openReceiveAddress`.
  */
 export async function openPaySend(driver, opts = {}) {
   await driver.click('tab-pay', { timeoutMs: opts.timeoutMs ?? 5_000 });

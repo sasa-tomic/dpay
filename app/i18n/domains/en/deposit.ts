@@ -393,6 +393,57 @@ export type WithdrawMessages = {
     retry: string;
   };
 
+  /**
+   * The unified send-to-address surface (SendSheet + AddressField): ONE destination field that
+   * accepts any address, routed by which namespace it belongs to. Distinct from `ic` above, which
+   * is the chain-key OFFRAMP copy (burn → native chain) — this section covers the destination
+   * field itself, the route disclosure, the refusals, and the direct-ICRC / legacy-ICP send.
+   */
+  send: {
+    destLabel: string;
+    destPlaceholder: string;
+    scanLabel: string;
+    scanTitle: string;
+    scanCancel: string;
+    /** Route disclosure — what WILL happen, shown before the user commits. */
+    routeIcrc: (network: string, fee: string) => string;
+    routeLegacy: (fee: string) => string;
+    routeNative: (chain: string, minutes: number, min: string) => string;
+    /**
+     * Refusals. Each names what the pasted address IS and what to do instead — never a bare
+     * "invalid address" (founder hard rule 2026-08-29: a dead end that only describes itself is
+     * a bug).
+     */
+    refuseWrongChain: (pastedChain: string, asset: string, assetChain: string) => string;
+    refuseLegacyNotIcp: (asset: string) => string;
+    refuseUnrecognised: (asset: string) => string;
+    refuseMistypedIc: string;
+    refuseMistypedLegacy: string;
+    /** Sending to yourself is legal and almost always a mistake — warn, never block. */
+    selfWarning: string;
+    /** Amount row. */
+    maxLabel: string;
+    feeLine: (fee: string) => string;
+    totalLine: (total: string) => string;
+    /** Saved destinations (the address book). */
+    savedTitle: string;
+    saveLabel: string;
+    saveNamePlaceholder: string;
+    saveConfirm: string;
+    forgetLabel: (address: string) => string;
+    unnamed: string;
+    /** The send itself. */
+    reviewTitle: string;
+    networkRow: string;
+    sendAmount: (amount: string) => string;
+    sending: (amount: string) => string;
+    sent: string;
+    sentUnknown: string;
+    sentUnknownBody: string;
+    blockIndex: (index: string) => string;
+    noLedger: string;
+  };
+
   /** Native Solana rail (SolanaWithdrawSheet): the device key signs and broadcasts directly. */
   sol: {
     createAtaLabel: string;
@@ -452,6 +503,54 @@ export const withdrawEn: WithdrawMessages = {
     reviewTitle: 'Review withdrawal',
     confirmLabel: 'Confirm withdrawal',
     retry: 'Retry withdrawal',
+  },
+
+  send: {
+    destLabel: 'Send to',
+    destPlaceholder: 'Paste an address, or scan',
+    scanLabel: 'Scan a destination QR code',
+    scanTitle: 'Scan the destination address',
+    scanCancel: 'Enter it by hand instead',
+
+    routeIcrc: (network, fee) => `${network} · arrives in seconds · fee ${fee}`,
+    routeLegacy: fee => `ICP account · arrives in seconds · fee ${fee}`,
+    routeNative: (chain, minutes, min) => `${chain} · about ${minutes} min · minimum ${min}`,
+
+    // No article immediately before an interpolated name: "a ${chain}" produces "a Ethereum".
+    // English cannot pick a/an without knowing the next word, and there is no pluralisation
+    // machinery here by design, so the sentence is shaped to avoid the problem entirely rather
+    // than patched with a vowel test. The other locales already avoid it — their articles agree
+    // with the noun ("eine ${chain}-Adresse", "una dirección de ${chain}"), not the variable.
+    refuseWrongChain: (pastedChain, asset, assetChain) =>
+      `${pastedChain} addresses can't receive ${asset} — it settles on ${assetChain}. Paste an address for that network instead.`,
+    refuseLegacyNotIcp: asset =>
+      `That's a legacy ICP account address (64 characters). Only ICP itself can be sent to one — for ${asset}, ask the recipient for their Internet Computer principal (the dashed form).`,
+    refuseUnrecognised: asset => `That doesn't look like an address ${asset} can be sent to.`,
+    refuseMistypedIc: 'This Internet Computer address is incomplete or mistyped — check you copied all of it.',
+    refuseMistypedLegacy: 'This ICP account address is incomplete or mistyped — check you copied all 64 characters.',
+    selfWarning: 'This is your own address. The funds come straight back and you still pay the fee.',
+
+    maxLabel: 'Max',
+    feeLine: fee => `Network fee ${fee}`,
+    totalLine: total => `Total ${total}`,
+
+    savedTitle: 'Saved addresses',
+    saveLabel: 'Save this address',
+    saveNamePlaceholder: 'Name it (optional)',
+    saveConfirm: 'Save',
+    forgetLabel: address => `Remove the saved address ${address}`,
+    unnamed: 'Unnamed',
+
+    reviewTitle: 'Review',
+    networkRow: 'Network',
+    sendAmount: amount => `Send ${amount}`,
+    sending: amount => `Sending ${amount}…`,
+    sent: 'Sent',
+    sentUnknown: 'Not confirmed yet',
+    sentUnknownBody:
+      "The transfer was submitted but hasn't been confirmed yet. It may still go through — check your balance in a moment rather than sending again.",
+    blockIndex: index => `Ledger block ${index}`,
+    noLedger: 'This asset has no ledger configured, so it cannot be sent.',
   },
 
   sol: {

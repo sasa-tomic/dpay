@@ -207,6 +207,49 @@ export const withdrawFr: WithdrawMessages = {
     retry: 'Réessayer le retrait',
   },
 
+  send: {
+    destLabel: 'Envoyer à',
+    destPlaceholder: 'Collez ou scannez une adresse',
+    scanLabel: 'Scanner le QR code de l’adresse de destination',
+    scanTitle: 'Scannez l’adresse de destination',
+    scanCancel: 'La saisir à la main',
+
+    routeIcrc: (network, fee) => `${network} · arrive en quelques secondes · frais ${fee}`,
+    routeLegacy: fee => `Compte ICP · arrive en quelques secondes · frais ${fee}`,
+    routeNative: (chain, minutes, min) => `${chain} · environ ${minutes} min · minimum ${min}`,
+
+    refuseWrongChain: (pastedChain, asset, assetChain) =>
+      `C’est une adresse ${pastedChain}. ${asset} ne circule que sur ${assetChain} et ne peut donc pas l’atteindre — collez plutôt une adresse ${assetChain}.`,
+    refuseLegacyNotIcp: asset =>
+      `C’est une ancienne adresse de compte ICP (64 caractères). Seul l’ICP peut y être envoyé — pour ${asset}, demandez au destinataire son principal Internet Computer (la forme avec des tirets).`,
+    refuseUnrecognised: asset => `Cela ne ressemble pas à une adresse vers laquelle ${asset} peut être envoyé.`,
+    refuseMistypedIc: 'Cette adresse Internet Computer est incomplète ou mal saisie — vérifiez que vous l’avez copiée en entier.',
+    refuseMistypedLegacy: 'Cette adresse de compte ICP est incomplète ou mal saisie — vérifiez que vous avez bien copié les 64 caractères.',
+    selfWarning: 'C’est votre propre adresse. Les fonds vous reviennent directement et les frais restent à votre charge.',
+
+    maxLabel: 'Max',
+    feeLine: fee => `Frais de réseau ${fee}`,
+    totalLine: total => `Total ${total}`,
+
+    savedTitle: 'Adresses enregistrées',
+    saveLabel: 'Enregistrer cette adresse',
+    saveNamePlaceholder: 'Donnez-lui un nom (facultatif)',
+    saveConfirm: 'Enregistrer',
+    forgetLabel: address => `Supprimer l’adresse enregistrée ${address}`,
+    unnamed: 'Sans nom',
+
+    reviewTitle: 'Vérifier',
+    networkRow: 'Réseau',
+    sendAmount: amount => `Envoyer ${amount}`,
+    sending: amount => `Envoi de ${amount}…`,
+    sent: 'Envoyé',
+    sentUnknown: 'Pas encore confirmé',
+    sentUnknownBody:
+      'Le transfert a été soumis mais n’est pas encore confirmé. Il peut encore aboutir — vérifiez votre solde dans un instant plutôt que de l’envoyer à nouveau.',
+    blockIndex: index => `Bloc ${index} du registre`,
+    noLedger: 'Aucun registre n’est configuré pour cet actif : il ne peut donc pas être envoyé.',
+  },
+
   sol: {
     createAtaLabel: 'Créer mon compte USDC',
     backToScan: 'Retour au scan',

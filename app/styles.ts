@@ -473,6 +473,28 @@ function buildStyles(p: Palette) {
   savedAddrChip: {alignSelf: 'flex-start', backgroundColor: p.panel2, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 8, minHeight: 44, justifyContent: 'center', borderWidth: 1, borderColor: p.line2},
   savedAddrText: {fontSize: 13, color: p.brand, fontFamily: FONT.mono},
   withdrawAmtInput: {alignSelf: 'stretch', backgroundColor: p.field, borderRadius: 14, height: 56, paddingHorizontal: 16, fontSize: 22, fontWeight: '700', color: p.ink, borderWidth: 1, borderColor: p.line2, fontFamily: FONT.sansBold},
+  // --- unified send-to-address field (AddressField + SendSheet) ---------------------------------
+  // The destination input is MULTILINE and wraps: an IC principal is 63 characters and an ICRC-1
+  // account with a subaccount is longer still, so a single 56pt line would hide the tail — and the
+  // tail is exactly what a user checks against the wallet they copied it from. minHeight keeps an
+  // empty field the same size as the amount field beside it.
+  addrRow: {alignSelf: 'stretch', flexDirection: 'row', alignItems: 'stretch', gap: 8},
+  addrInput: {flex: 1, backgroundColor: p.field, borderRadius: 14, minHeight: 56, paddingHorizontal: 16, paddingVertical: 14, fontSize: 14, lineHeight: 20, color: p.ink, fontFamily: FONT.mono, borderWidth: 1, borderColor: p.line2},
+  addrScanBtn: {width: 56, minHeight: 56, borderRadius: 14, backgroundColor: p.panel2, borderWidth: 1, borderColor: p.line2, alignItems: 'center', justifyContent: 'center'},
+  // The route disclosure line — neutral/informational, distinct from warnNote (amber) and err (red).
+  routeNote: {fontSize: 13, color: p.sub, alignSelf: 'flex-start', marginTop: 8, lineHeight: 18, fontFamily: FONT.sans},
+  savedList: {alignSelf: 'stretch', marginTop: 14},
+  savedRow: {flexDirection: 'row', alignItems: 'center', gap: 8},
+  savedAddrLabel: {fontSize: 13, fontWeight: '600', color: p.ink, fontFamily: FONT.sansMedium},
+  savedForget: {width: 44, height: 44, alignItems: 'center', justifyContent: 'center'},
+  // Amount row with the inline Max button.
+  amtRow: {alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', gap: 8},
+  maxBtn: {paddingHorizontal: 16, minHeight: 56, borderRadius: 14, backgroundColor: p.panel2, borderWidth: 1, borderColor: p.line2, alignItems: 'center', justifyContent: 'center'},
+  maxBtnText: {fontSize: 14, fontWeight: '700', color: p.brand, fontFamily: FONT.sansBold},
+  // Review card rows: label left, value right, so amount/fee/total align down the right edge.
+  reviewRow: {flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 6, gap: 12},
+  reviewRowLabel: {fontSize: 13, color: p.sub, fontFamily: FONT.sans},
+  reviewRowValue: {fontSize: 13, color: p.ink, fontFamily: FONT.mono, flexShrink: 1, textAlign: 'right'},
   reviewCard: {alignSelf: 'stretch', marginTop: 20, backgroundColor: p.card, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: p.line2, ...LIFT_SM},
   reviewLabel: {fontSize: 12, fontWeight: '600', color: p.sub2, textTransform: 'uppercase', letterSpacing: 1.4, marginBottom: 8, fontFamily: FONT.mono},
   // 'Needs setup' pill on the Balances USDC (Solana) row — a warn-tinted row annotation,

@@ -34,13 +34,15 @@ use axum::response::{IntoResponse, Response};
 use dpay_icp::envelope::verify_envelope;
 use dpay_icp::icrc::{
     ApproveArg,
-    decode_account_arg, decode_approve_arg, decode_minter_account_arg, decode_retrieve_btc_arg,
-    decode_transfer_arg, decode_withdraw_erc20_arg, decode_withdraw_eth_arg, encode_approve_ok,
-    encode_eip1559_price, encode_minter_ok, encode_nat8_reply, encode_nat_reply,
+    decode_account_arg, decode_approve_arg, decode_legacy_transfer_arg, decode_minter_account_arg,
+    decode_retrieve_btc_arg, decode_transfer_arg, decode_withdraw_erc20_arg,
+    decode_withdraw_eth_arg, encode_approve_ok, encode_eip1559_price,
+    encode_legacy_transfer_bad_fee, encode_legacy_transfer_insufficient_funds,
+    encode_legacy_transfer_ok, encode_minter_ok, encode_nat8_reply, encode_nat_reply,
     encode_text_reply, encode_transfer_bad_fee, encode_transfer_insufficient_funds,
     encode_transfer_ok, uleb_bytes, Eip1559Price, RetrieveBtcArg, WithdrawEthArg,
 };
-use dpay_icp::principal::{Account, Principal};
+use dpay_icp::principal::{Account, AccountIdentifier, Principal};
 use dpay_icp::reply::{cbor_encode, tree_to_cbor, Cbor, Tree};
 
 use crate::AppState;
@@ -273,6 +275,7 @@ impl FakeIc {
 
         match method.as_str() {
             "icrc1_transfer" => Self::icrc1_transfer(s, &canister, &from_key, &sender, arg, block),
+            "transfer" => Self::legacy_transfer(s, &canister, &from_key, &sender, arg, block),
             "icrc2_approve" => Self::icrc2_approve(s, &canister, &env.sender, arg, block),
             "retrieve_btc_with_approval" => {
                 Self::burn_via_minter(s, &canister, &env.sender, "retrieve_btc_with_approval", arg, block)
@@ -327,6 +330,83 @@ impl FakeIc {
             timestamp: ts,
         });
         RequestState::Replied(encode_transfer_ok(block))
+    }
+
+    /// The ICP ledger's LEGACY `transfer` — same sequence as [`Self::icrc1_transfer`] (fee check →
+    /// funds check → move → block index), in the legacy shapes: the payee is a raw 32-byte ACCOUNT
+    /// IDENTIFIER, amounts are `Tokens{e8s}` (u64), the fee is mandatory, and the memo is a bare
+    /// nat64.
+    ///
+    /// Mainnet-true gate: only the ICP ledger has this method (every ck*/ICRC-1 ledger is
+    /// principal-addressed and would reject the call), so a `transfer` aimed anywhere else is
+    /// rejected here exactly as the real replica would — the same reason the fake rejects the
+    /// `get_btc_address` QUERY form.
+    fn legacy_transfer(
+        s: &mut FakeIcState,
+        canister: &str,
+        from_key: &(String, (String, [u8; 32])),
+        sender: &(String, [u8; 32]),
+        arg: &[u8],
+        block: u64,
+    ) -> RequestState {
+        let Some(cfg) = s.ledgers.get(canister).cloned() else {
+            return RequestState::Rejected { code: 3, message: format!("canister {canister} not found") };
+        };
+        if canister != crate::catalog::ICP_LEDGER_PRINCIPAL {
+            return RequestState::Rejected {
+                code: 3,
+                message: format!("Canister {canister} has no update method 'transfer'"),
+            };
+        }
+        let Ok(arg) = decode_legacy_transfer_arg(arg) else {
+            return RequestState::Rejected { code: 5, message: "malformed transfer arg".into() };
+        };
+        if let Some(expected) = cfg.fee {
+            if u128::from(arg.fee_e8s) != expected {
+                let Ok(expected_e8s) = u64::try_from(expected) else {
+                    return RequestState::Rejected {
+                        code: 5,
+                        message: format!("ledger {canister} fee {expected} does not fit Tokens{{e8s}}"),
+                    };
+                };
+                return RequestState::Replied(encode_legacy_transfer_bad_fee(expected_e8s));
+            }
+        }
+        // The signed arg names which of the sender's accounts pays; absent = their default one
+        // (`from_key`, whose subaccount the caller already set to the default).
+        let from = match arg.from_subaccount {
+            None => from_key.clone(),
+            Some(sub) => (canister.to_string(), (sender.0.clone(), sub)),
+        };
+        let bal = *s.balances.get(&from).unwrap_or(&0);
+        let spend = u128::from(arg.amount_e8s) + u128::from(arg.fee_e8s);
+        if bal < spend {
+            let Ok(bal_e8s) = u64::try_from(bal) else {
+                return RequestState::Rejected {
+                    code: 5,
+                    message: format!("balance {bal} does not fit Tokens{{e8s}}"),
+                };
+            };
+            return RequestState::Replied(encode_legacy_transfer_insufficient_funds(bal_e8s));
+        }
+        let to = resolve_account_identifier(s, &arg.to);
+        *s.balances.entry(from).or_insert(0) -= spend;
+        *s.balances.entry((canister.to_string(), to.clone())).or_insert(0) += u128::from(arg.amount_e8s);
+        // The legacy memo is a bare nat64, rendered big-endian hex — 16 chars, so it can never be
+        // confused with (or matched against) a 16-BYTE dpay reconciliation memo, whose hex is 32
+        // chars and is what `/api/v1/transactions?memo=` requires. `0` is the ledger's "no memo"
+        // value (what dfx sends by default) and renders empty, like an absent icrc1 memo.
+        let memo_hex = if arg.memo == 0 { String::new() } else { hex::encode(arg.memo.to_be_bytes()) };
+        s.txns.push(FakeTxn {
+            kind: "transfer",
+            from: sender.0.clone(),
+            to: to.0,
+            amount: u128::from(arg.amount_e8s),
+            currency: cfg.currency,
+            memo_hex,
+            timestamp: now_secs(),
+        });
+        RequestState::Replied(encode_legacy_transfer_ok(block))
     }
 
     /// `icrc2_approve`: pay the (optional) fee, record the allowance for the named spender.
@@ -512,6 +592,46 @@ const GAS_FEE_WEI: u128 = 78_000_000_000_000;
 const EIP1559_GAS_LIMIT: u128 = 30_000;
 const EIP1559_MAX_FEE_PER_GAS: u128 = 2_500_000_000_000; // 2.5 kgwei
 const EIP1559_MAX_PRIORITY_FEE_PER_GAS: u128 = 100_000_000; // 0.1 gwei
+
+/// Balance-key owner prefix for a legacy account identifier that matched no account the gateway
+/// knows.
+/// Deliberately NOT valid principal text (`:` is outside base32), so a synthetic key can never
+/// collide with a real account, never parses back into one, and never surfaces in a user's
+/// balances or history.
+const EXTERNAL_ACCOUNT_ID_PREFIX: &str = "icp-account-id:";
+
+/// Resolve the 32-byte ACCOUNT IDENTIFIER a legacy `transfer` names into a balance-key account.
+///
+/// An account identifier is a ONE-WAY hash of (owner, subaccount) — see
+/// [`AccountIdentifier::from_principal`], the single derivation this repo has. It cannot be
+/// inverted, so the only way to recognize a payee is to DERIVE the identifier of every account the
+/// gateway already knows and compare. The search spans ALL ledgers because the identifier is a
+/// pure function of (owner, subaccount): which ledger an account was first seen on says nothing
+/// about who owns it. Limitation this inherits: an account the gateway has never seen at all
+/// cannot be recognized, even if it belongs to a dpay user.
+///
+/// No match ⇒ a SYNTHETIC external key, never a silent drop: the money leaves the sender, so it
+/// must land somewhere or the fake ledger would leak value and the sender-side assertions would be
+/// checking a broken book. That is also honest — paying a 64-hex address that belongs to an
+/// exchange is exactly a transfer OUT of every account this gateway knows.
+fn resolve_account_identifier(s: &FakeIcState, to: &[u8; 32]) -> (String, [u8; 32]) {
+    for (_ledger, account) in s.balances.keys() {
+        if account.0.starts_with(EXTERNAL_ACCOUNT_ID_PREFIX) {
+            continue;
+        }
+        let owner = match Principal::from_text(&account.0) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("dpay-relay: fake-IC: balance key {:?} is not principal text: {e}", account.0);
+                continue;
+            }
+        };
+        if AccountIdentifier::from_principal(&owner, &account.1).as_bytes() == to {
+            return account.clone();
+        }
+    }
+    (format!("{EXTERNAL_ACCOUNT_ID_PREFIX}{}", hex::encode(to)), [0u8; 32])
+}
 
 /// Burn `amount` of the user's pre-approved funds on `ledger_text`, spent by `spender_text`
 /// (the minter the icrc2_approve named). The allowance+balance keys are PER-LEDGER; the spender

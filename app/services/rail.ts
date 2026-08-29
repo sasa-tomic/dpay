@@ -56,6 +56,40 @@ export async function prepareTransfer(
   return {ledger: desc.ledger, envelopeHex: signed.envelopeHex, requestIdHex: signed.requestIdHex, amount: req.amount, currency: req.currency, memoHex: req.nonceHex};
 }
 
+/** Build + sign a send to a LEGACY 64-hex ICP account identifier, via the ICP ledger's legacy
+ *  `transfer`. Same envelope discipline as `prepareTransfer` (clock-gated, resubmit verbatim,
+ *  never re-sign) — only the method and arg shape differ.
+ *
+ *  Why a second path exists at all: an account identifier is a one-way hash of its owner, so it
+ *  cannot be expressed as `icrc1_transfer`'s `Account { owner : principal; … }`. The ICP ledger is
+ *  the only ledger we speak to that also exposes `transfer`, whose `to` is those 32 bytes verbatim.
+ *
+ *  The memo is a bare `nat64`, not the 16-byte blob the ICRC-1 rail reconciles on — so a legacy
+ *  send carries NO reconciliation nonce and is deliberately passed 0. This is a send to an address
+ *  the user chose, not a payment against a dpay request: there is no open request to reconcile
+ *  against, and the settled block index from `submitTransfer` is the receipt. */
+export async function prepareLegacyTransfer(
+  secretHex: string,
+  req: {ledger: string; toAccountId: string; amountE8s: string; feeE8s: string},
+): Promise<RailPrepared> {
+  const argHex = await DpayCore.icpLegacyTransferArg(req.toAccountId, '', req.amountE8s, req.feeE8s, '0');
+  const expiry = await icStampExpiry(secretHex);
+  const signed = await DpayCore.icpSignUpdate(secretHex, req.ledger, 'transfer', argHex, expiry);
+  return {
+    ledger: req.ledger,
+    envelopeHex: signed.envelopeHex,
+    requestIdHex: signed.requestIdHex,
+    amount: req.amountE8s,
+    // Currency is carried for the caller's own bookkeeping; the legacy path is ICP-ledger-only.
+    currency: 8,
+    memoHex: '',
+  };
+}
+
+/** The reply decoder for the legacy `transfer` — pass to `submitTransfer`/`pollTransfer` so a
+ *  legacy send decodes through the legacy tag set instead of the ICRC-1 one. */
+export const decodeLegacyReply = (replyArgHex: string) => DpayCore.icpDecodeLegacyTransferResult(replyArgHex);
+
 /** Turn a decoded 132-byte wire request into the payment intent the review + sign path consumes.
  *  The wire addresses the payee by raw Ed25519 PUBKEY; the ledger account owner is
  *  `self_authenticating(pubkey)` — that derivation is the ONE place the wire's addressing meets the
@@ -156,7 +190,12 @@ async function decodeTransferStatus(
     const decode = decodeReply ?? ((hex: string) => DpayCore.icpDecodeTransferResult(hex));
     const tr = await decode(st.replyArgHex);
     if (tr.ok) return {kind: 'settled', blockIndex: tr.blockIndex ?? ''};
-    if (tr.errVariant === 'Duplicate') {
+    // An idempotent replay is a SETTLED payment, not a decline: the ledger is telling us these
+    // exact arguments already executed. Both spellings are accepted because the ICP ledger's
+    // legacy `transfer` names it `TxDuplicate` where ICRC-1 names it `Duplicate` — the same fact
+    // under two tags, and rendering either as a failure would show a false decline for money that
+    // has already moved.
+    if (tr.errVariant === 'Duplicate' || tr.errVariant === 'TxDuplicate') {
       return {kind: 'settled', blockIndex: tr.errDetail?.match(/\d+$/)?.[0] ?? ''};
     }
     return {kind: 'rejected', reason: transferRejectionMessage(tr.errVariant ?? '', tr.errDetail ?? ''), variant: tr.errVariant || undefined};
@@ -178,6 +217,11 @@ export function transferRejectionMessage(variant: string, detail: string): strin
     case 'CreatedInFuture': return M.rail.createdInFuture;
     case 'TemporarilyUnavailable': return M.rail.temporarilyUnavailable;
     case 'Duplicate': return M.rail.duplicate;
+    // The ICP ledger's legacy `transfer` tags. Same meanings, different spellings — mapped to the
+    // SAME copy so the user never sees a rail's internal vocabulary leak into the message.
+    case 'TxDuplicate': return M.rail.duplicate;
+    case 'TxTooOld': return M.rail.tooOld;
+    case 'TxCreatedInFuture': return M.rail.createdInFuture;
     default: return M.rail.declined(detail);
   }
 }

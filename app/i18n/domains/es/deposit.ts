@@ -206,6 +206,49 @@ export const withdrawEs: WithdrawMessages = {
     retry: 'Reintentar retiro',
   },
 
+  send: {
+    destLabel: 'Enviar a',
+    destPlaceholder: 'Pega o escanea una dirección',
+    scanLabel: 'Escanear el QR de la dirección de destino',
+    scanTitle: 'Escanea la dirección de destino',
+    scanCancel: 'Escribirla a mano',
+
+    routeIcrc: (network, fee) => `${network} · llega en segundos · comisión ${fee}`,
+    routeLegacy: fee => `Cuenta ICP · llega en segundos · comisión ${fee}`,
+    routeNative: (chain, minutes, min) => `${chain} · aprox. ${minutes} min · mínimo ${min}`,
+
+    refuseWrongChain: (pastedChain, asset, assetChain) =>
+      `Esa es una dirección de ${pastedChain}. ${asset} se liquida en ${assetChain}, así que no puede llegar ahí: pega una dirección de ${assetChain}.`,
+    refuseLegacyNotIcp: asset =>
+      `Esa es una dirección de cuenta ICP antigua (64 caracteres). Solo se puede enviar ICP a una de ellas: para ${asset}, pídele al destinatario su principal de Internet Computer (el que lleva guiones).`,
+    refuseUnrecognised: asset => `Esto no parece una dirección a la que se pueda enviar ${asset}.`,
+    refuseMistypedIc: 'Esta dirección de Internet Computer está incompleta o mal escrita: comprueba que la has copiado entera.',
+    refuseMistypedLegacy: 'Esta dirección de cuenta ICP está incompleta o mal escrita: comprueba que has copiado los 64 caracteres.',
+    selfWarning: 'Esta es tu propia dirección. Los fondos vuelven directamente a ti y aun así pagas la comisión.',
+
+    maxLabel: 'Máx.',
+    feeLine: fee => `Comisión de red ${fee}`,
+    totalLine: total => `Total ${total}`,
+
+    savedTitle: 'Direcciones guardadas',
+    saveLabel: 'Guardar esta dirección',
+    saveNamePlaceholder: 'Ponle un nombre (opcional)',
+    saveConfirm: 'Guardar',
+    forgetLabel: address => `Eliminar la dirección guardada ${address}`,
+    unnamed: 'Sin nombre',
+
+    reviewTitle: 'Revisar',
+    networkRow: 'Red',
+    sendAmount: amount => `Enviar ${amount}`,
+    sending: amount => `Enviando ${amount}…`,
+    sent: 'Enviado',
+    sentUnknown: 'Aún sin confirmar',
+    sentUnknownBody:
+      'La transferencia se envió, pero aún no está confirmada. Puede que todavía se complete: revisa tu saldo en un momento en lugar de volver a enviarla.',
+    blockIndex: index => `Bloque ${index} del registro`,
+    noLedger: 'Este activo no tiene un registro configurado, así que no se puede enviar.',
+  },
+
   sol: {
     createAtaLabel: 'Crear mi cuenta de USDC',
     backToScan: 'Volver a escanear',

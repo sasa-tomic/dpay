@@ -206,6 +206,49 @@ export const withdrawDe: WithdrawMessages = {
     retry: 'Auszahlung erneut versuchen',
   },
 
+  send: {
+    destLabel: 'Senden an',
+    destPlaceholder: 'Adresse einfügen oder scannen',
+    scanLabel: 'QR-Code der Zieladresse scannen',
+    scanTitle: 'Zieladresse scannen',
+    scanCancel: 'Stattdessen von Hand eingeben',
+
+    routeIcrc: (network, fee) => `${network} · in Sekunden da · Gebühr ${fee}`,
+    routeLegacy: fee => `ICP-Konto · in Sekunden da · Gebühr ${fee}`,
+    routeNative: (chain, minutes, min) => `${chain} · etwa ${minutes} Min. · Minimum ${min}`,
+
+    refuseWrongChain: (pastedChain, asset, assetChain) =>
+      `Das ist eine ${pastedChain}-Adresse. ${asset} wird auf ${assetChain} abgewickelt und kann sie deshalb nicht erreichen — füge stattdessen eine ${assetChain}-Adresse ein.`,
+    refuseLegacyNotIcp: asset =>
+      `Das ist eine alte ICP-Kontoadresse (64 Zeichen). Nur ICP selbst kann dorthin gesendet werden — für ${asset} brauchst du den Internet-Computer-Principal des Empfängers (die Schreibweise mit Bindestrichen).`,
+    refuseUnrecognised: asset => `Das sieht nicht nach einer Adresse aus, an die ${asset} gesendet werden kann.`,
+    refuseMistypedIc: 'Diese Internet-Computer-Adresse ist unvollständig oder vertippt — prüfe, ob du sie ganz kopiert hast.',
+    refuseMistypedLegacy: 'Diese ICP-Kontoadresse ist unvollständig oder vertippt — prüfe, ob du alle 64 Zeichen kopiert hast.',
+    selfWarning: 'Das ist deine eigene Adresse. Das Geld kommt direkt zurück, und die Gebühr zahlst du trotzdem.',
+
+    maxLabel: 'Max',
+    feeLine: fee => `Netzwerkgebühr ${fee}`,
+    totalLine: total => `Gesamt ${total}`,
+
+    savedTitle: 'Gespeicherte Adressen',
+    saveLabel: 'Diese Adresse speichern',
+    saveNamePlaceholder: 'Name vergeben (optional)',
+    saveConfirm: 'Speichern',
+    forgetLabel: address => `Gespeicherte Adresse ${address} entfernen`,
+    unnamed: 'Ohne Namen',
+
+    reviewTitle: 'Prüfen',
+    networkRow: 'Netzwerk',
+    sendAmount: amount => `${amount} senden`,
+    sending: amount => `${amount} werden gesendet…`,
+    sent: 'Gesendet',
+    sentUnknown: 'Noch nicht bestätigt',
+    sentUnknownBody:
+      'Die Überweisung wurde übermittelt, ist aber noch nicht bestätigt. Sie kann trotzdem noch ankommen — prüfe gleich dein Guthaben, statt sie noch einmal zu senden.',
+    blockIndex: index => `Ledger-Block ${index}`,
+    noLedger: 'Für dieses Asset ist kein Ledger konfiguriert, deshalb kann es nicht gesendet werden.',
+  },
+
   sol: {
     createAtaLabel: 'Mein USDC-Konto erstellen',
     backToScan: 'Zurück zum Scannen',
