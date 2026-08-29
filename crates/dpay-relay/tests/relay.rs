@@ -1857,6 +1857,99 @@ async fn wallet_page_serves_embedded_real_app_dist() {
     assert!(!bytes.is_empty(), "the entry bundle must have a body");
 }
 
+/// A shared PAYMENT LINK (`/wallet/pay/<recipient>?asset=…&network=…&amount=…`) serves the SAME
+/// wallet page, byte-for-byte: the link's fields live in the URL and the app reads them off its own
+/// location. A nested path is NOT the route (404) — the recipient is one path segment, so a
+/// mangled link fails visibly at the door instead of rendering a wallet with a truncated address.
+#[tokio::test]
+async fn wallet_pay_link_serves_the_wallet_page() {
+    let (state, _led) = state_from(ledger());
+
+    let (plain_status, _h, plain) = call_raw(&state, get_req("/wallet")).await;
+    assert_eq!(plain_status, StatusCode::OK);
+
+    let link = "/wallet/pay/ryjl3-tyaaa-aaaaa-aaaba-cai?asset=VCHF&network=internet-computer&amount=12.50";
+    let (status, headers, bytes) = call_raw(&state, get_req(link)).await;
+    assert_eq!(status, StatusCode::OK, "a payment link must serve the wallet");
+    assert_eq!(
+        headers.get(header::CONTENT_TYPE).unwrap(),
+        "text/html; charset=utf-8"
+    );
+    assert_eq!(
+        headers.get(header::CACHE_CONTROL).map(|v| v.to_str().unwrap()),
+        Some("no-cache"),
+        "the payment-link page pins hashed assets exactly like /wallet — it must not be cached"
+    );
+    assert_eq!(
+        headers
+            .get(header::CONTENT_SECURITY_POLICY)
+            .map(|v| v.to_str().unwrap()),
+        Some("frame-ancestors 'none'"),
+        "a payment link must carry the same no-framing guarantee as /wallet (clickjacking a \
+         pre-filled payment review is the worst place to lose it)"
+    );
+    assert_eq!(
+        bytes, plain,
+        "the payment link must serve the identical page — the link is read client-side, never \
+         interpreted by the relay"
+    );
+
+    // The recipient is exactly one segment: anything deeper is not a payment link.
+    let (nested, _h, _b) = call_raw(
+        &state,
+        get_req("/wallet/pay/ryjl3-tyaaa-aaaaa-aaaba-cai/extra?asset=VCHF&network=internet-computer&amount=1"),
+    )
+    .await;
+    assert_eq!(nested, StatusCode::NOT_FOUND, "a nested pay path must 404");
+}
+
+/// `GET /.well-known/assetlinks.json` — the Android App Links association that makes a shared
+/// payment link open the installed app. It must be valid JSON, name the Play application id, and
+/// carry ALL FOUR project certificate fingerprints (the three Google-held Play App Signing keys +
+/// the founder-held upload key that signs sideloaded `just apk` builds). A missing fingerprint
+/// silently downgrades those installs to "link opens a browser tab", which no test would catch.
+#[tokio::test]
+async fn assetlinks_json_declares_every_signing_certificate() {
+    let (state, _led) = state_from(ledger());
+
+    let (status, headers, bytes) = call_raw(&state, get_req("/.well-known/assetlinks.json")).await;
+    assert_eq!(status, StatusCode::OK, "assetlinks.json must serve");
+    assert_eq!(headers.get(header::CONTENT_TYPE).unwrap(), "application/json");
+    assert_eq!(
+        headers.get(header::CACHE_CONTROL).map(|v| v.to_str().unwrap()),
+        Some("no-cache"),
+        "Android re-verifies on install/update — a cached copy would outlive a cert rotation"
+    );
+
+    let v: Value = serde_json::from_slice(&bytes).expect("assetlinks.json must be valid JSON");
+    let entry = v.get(0).expect("one statement");
+    assert_eq!(
+        entry["relation"][0], "delegate_permission/common.handle_all_urls",
+        "the statement must delegate URL handling"
+    );
+    assert_eq!(entry["target"]["namespace"], "android_app");
+    assert_eq!(
+        entry["target"]["package_name"], "org.kalaj.dpay",
+        "must name the Play application id (NOT the com.dpay source namespace)"
+    );
+    let fps = entry["target"]["sha256_cert_fingerprints"]
+        .as_array()
+        .expect("fingerprint array");
+    // The exact certificates documented in app/android/app/play-signing/README.md.
+    for fp in [
+        "1C:5E:E4:87:52:6D:63:FC:53:DD:FD:21:93:F5:3A:FC:AB:9C:0B:31:7C:43:1F:AC:D6:19:34:63:CC:D7:27:A8", // Play deployment
+        "97:FD:D0:85:8A:17:39:C4:70:4D:94:A3:AF:D8:48:AD:88:F4:15:52:D1:13:26:5E:51:D7:0D:EC:9B:80:EC:53", // hybrid classical
+        "9E:F9:18:3B:37:9B:C0:7E:E0:B1:5D:70:F5:60:C0:F2:1C:39:D2:44:0A:DE:56:A9:09:6A:63:43:66:C5:D1:BE", // hybrid PQC
+        "1E:5C:F5:10:04:51:87:9C:BD:08:1C:C0:A1:3A:15:63:43:18:AD:32:A0:E7:6A:E8:07:A9:91:18:0E:FC:89:D1", // upload (sideloaded APKs)
+    ] {
+        assert!(
+            fps.iter().any(|f| f == fp),
+            "missing signing certificate fingerprint {fp}"
+        );
+    }
+    assert_eq!(fps.len(), 4, "exactly the four project certificates");
+}
+
 /// Unknown asset names and the REMOVED legacy routes (the hand-written wallet's vendored scripts,
 /// and — since the 2026-08-16 merge — the hand-rolled merchant terminal's decoder/QR deps) are a
 /// clean 404 — never a 200 with an empty body.

@@ -7,6 +7,10 @@
 //!   the REAL app's Receive tab IS the merchant terminal now).
 //! - `GET /wallet` — the REAL app (`app/App.tsx`) built for the web (react-native-web, wasm
 //!   DpayCore), embedded at compile time from `e2e/dist-prod`. Same app the APK ships.
+//! - `GET /wallet/pay/{recipient}` — a shared payment link; serves the same wallet page, which
+//!   reads the link off its own location and pre-fills a payment review.
+//! - `GET /.well-known/assetlinks.json` — Android App Links, so a shared payment link opens the
+//!   installed app instead of a browser.
 //! - `GET /assets/{path}` — the wallet build's content-hashed assets (immutable caching).
 //! - `GET /privacy` — the public privacy policy for the app and website.
 //! - `GET /dpay-core.wasm` — the shared wire core (canonical same-origin URL for any web surface;
@@ -193,6 +197,12 @@ pub fn app(state: AppState) -> Router {
         // old URL permanently redirects so existing links/bookmarks land on the one web surface.
         .route("/merchant", get(merchant_redirect))
         .route("/wallet", get(wallet_page))
+        // A shared payment link is a real route, not a query on the app's home page: the recipient
+        // is the resource (the shape BIP-21 / Solana Pay use, mapped onto https). It serves the
+        // same wallet page — see wallet_pay_page.
+        .route("/wallet/pay/{recipient}", get(wallet_pay_page))
+        // Android App Links: lets a shared https payment link open the installed app.
+        .route("/.well-known/assetlinks.json", get(assetlinks))
         .route("/assets/{*path}", get(web_asset))
         .route("/privacy", get(privacy_page))
         .route("/dpay-core.wasm", get(dpay_core_wasm))
@@ -671,6 +681,41 @@ async fn wallet_page() -> Response {
         HeaderValue::from_static("frame-ancestors 'none'"),
     );
     resp
+}
+
+/// `GET /wallet/pay/{recipient}` — a shared PAYMENT LINK
+/// (`/wallet/pay/<recipient>?asset=…&network=…&amount=…`). It serves the SAME wallet page: the
+/// recipient/asset/amount live in the URL, and the app reads them off its own location and lands
+/// the user on a pre-filled payment review. Nothing about the link is interpreted here — the relay
+/// never sees a payment, and a link is not a request for one; only the payer's own wallet resolves
+/// and signs it. The path segment is captured (not a wildcard) so a nested path 404s rather than
+/// silently rendering the wallet with a recipient the app would then have to reject.
+async fn wallet_pay_page(Path(_recipient): Path<String>) -> Response {
+    wallet_page().await
+}
+
+/// `GET /.well-known/assetlinks.json` — Android App Links (Digital Asset Links). This is what lets
+/// `https://dpay.kalaj.org/wallet/pay/…` open the installed app instead of a browser tab: Android
+/// fetches this file for the `autoVerify` intent-filter in AndroidManifest.xml and checks the
+/// installed APK's signing certificate against the fingerprints below.
+///
+/// All FOUR of the project's certificates are listed, and each is here for a reason:
+///   • deployment / hybrid-classical / hybrid-PQC — the Google-held Play App Signing keys, i.e.
+///     every build a user installs from Play (see app/android/app/play-signing/README.md);
+///   • upload — the founder-held key `just apk` signs sideloaded builds with, so the on-device
+///     gate in this repo exercises the SAME App Link path a Play install takes rather than an
+///     untested approximation.
+/// Served `no-cache`: Android re-verifies on install/update, and a stale cached copy would silently
+/// break link handling for a freshly-rotated certificate.
+async fn assetlinks() -> Response {
+    (
+        [
+            (header::CONTENT_TYPE, HeaderValue::from_static("application/json")),
+            (header::CACHE_CONTROL, HeaderValue::from_static("no-cache")),
+        ],
+        include_str!("../assets/assetlinks.json"),
+    )
+        .into_response()
 }
 
 /// `GET /assets/{path}` — the wallet build's content-hashed assets (immutable, cache-forever:
